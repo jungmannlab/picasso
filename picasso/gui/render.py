@@ -27,7 +27,6 @@ from functools import partial
 from typing import Callable, Literal
 from PIL import Image
 
-from matplotlib import image
 import yaml
 import matplotlib
 import matplotlib.pyplot as plt
@@ -3557,13 +3556,16 @@ class InfoDialog(QtWidgets.QDialog):
         self.frc_result = {}
         self.change_fov = ChangeFOV(self.window)
 
-        main_layout = QtWidgets.QVBoxLayout(self)
-        scroll = QtWidgets.QScrollArea(self)
-        scroll.setWidgetResizable(True)
+        # Scroll area
+        self.scroll_area = QtWidgets.QScrollArea()
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setFrameShape(QtWidgets.QFrame.Shape.NoFrame)
         self.container = QtWidgets.QWidget()
-        scroll.setWidget(self.container)
         vbox = QtWidgets.QVBoxLayout(self.container)
-        main_layout.addWidget(scroll)
+        self.scroll_area.setWidget(self.container)
+        main_layout = QtWidgets.QVBoxLayout(self)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.addWidget(self.scroll_area)
 
         # Display
         display_groupbox = QtWidgets.QGroupBox("Display")
@@ -3844,7 +3846,7 @@ class InfoDialog(QtWidgets.QDialog):
 
         # adjust the size of the dialog to fit its contents
         hint = self.container.sizeHint()
-        lib.adjust_widget_size(self, hint, 70, 45)
+        lib.adjust_widget_size(self, hint)
 
     def calculate_frc_resolution(self) -> None:
         """Calculate FRC resolution in a given channel."""
@@ -4128,13 +4130,22 @@ class MaskSettingsDialog(QtWidgets.QDialog):
         self.index_locs = []
         self.index_locs_out = []
 
-        main_layout = QtWidgets.QVBoxLayout(self)
-        scroll = QtWidgets.QScrollArea(self)
-        scroll.setWidgetResizable(True)
+        # main_layout = QtWidgets.QVBoxLayout(self)
+        # scroll = QtWidgets.QScrollArea(self)
+        # scroll.setWidgetResizable(True)
+        # self.container = QtWidgets.QWidget()
+        # scroll.setWidget(self.container)
+        # vbox = QtWidgets.QVBoxLayout(self.container)
+        # main_layout.addWidget(scroll)
+        self.scroll_area = QtWidgets.QScrollArea()
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setFrameShape(QtWidgets.QFrame.Shape.NoFrame)
         self.container = QtWidgets.QWidget()
-        scroll.setWidget(self.container)
         vbox = QtWidgets.QVBoxLayout(self.container)
-        main_layout.addWidget(scroll)
+        self.scroll_area.setWidget(self.container)
+        main_layout = QtWidgets.QVBoxLayout(self)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.addWidget(self.scroll_area)
 
         settings_groupbox = QtWidgets.QGroupBox("Settings")
         vbox.addWidget(settings_groupbox)
@@ -4287,7 +4298,7 @@ class MaskSettingsDialog(QtWidgets.QDialog):
 
         # adjust the size of the dialog to fit its contents
         hint = self.container.sizeHint()
-        lib.adjust_widget_size(self, hint, 45, 45)
+        lib.adjust_widget_size(self, hint)
         self.show()
 
     def generate_image(self) -> None:
@@ -5186,16 +5197,18 @@ class DisplaySettingsDialog(QtWidgets.QDialog):
         super().__init__(window)
         self.window = window
         self.setWindowTitle("Display Settings")
-        self.resize(200, 0)
         self.setModal(False)
+        self._silent_disp_px_update = False
 
-        main_layout = QtWidgets.QVBoxLayout(self)
-        scroll = QtWidgets.QScrollArea(self)
-        scroll.setWidgetResizable(True)
+        self.scroll_area = QtWidgets.QScrollArea()
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setFrameShape(QtWidgets.QFrame.Shape.NoFrame)
         container = QtWidgets.QWidget()
-        scroll.setWidget(container)
         vbox = QtWidgets.QVBoxLayout(container)
-        main_layout.addWidget(scroll)
+        self.scroll_area.setWidget(container)
+        main_layout = QtWidgets.QVBoxLayout(self)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.addWidget(self.scroll_area)
 
         # General
         general_groupbox = QtWidgets.QGroupBox("General")
@@ -5376,7 +5389,15 @@ class DisplaySettingsDialog(QtWidgets.QDialog):
         self.scalebar_text.setToolTip("Display the length of the scale bar?")
         self.scalebar_text.stateChanged.connect(self.update_scene)
         scalebar_grid.addWidget(self.scalebar_text, 1, 0)
-        self._silent_disp_px_update = False
+        self.optimal_scalebar_check = QtWidgets.QCheckBox("Automatic length")
+        self.optimal_scalebar_check.setChecked(True)
+        self.optimal_scalebar_check.setToolTip(
+            "Change scale bar to roughly 1/8 of the window's width."
+        )
+        self.optimal_scalebar_check.stateChanged.connect(
+            self.window.view.set_optimal_scalebar
+        )
+        scalebar_grid.addWidget(self.optimal_scalebar_check, 1, 1)
 
         # Render
         self.render_groupbox = QtWidgets.QGroupBox(
@@ -5484,7 +5505,7 @@ class DisplaySettingsDialog(QtWidgets.QDialog):
 
         # adjust the size of the dialog to fit its contents
         hint = container.sizeHint()
-        lib.adjust_widget_size(self, hint, 45, 45)
+        lib.adjust_widget_size(self, hint)
 
     def on_cmap_changed(self) -> None:
         """Load custom colormap if requested."""
@@ -10754,25 +10775,29 @@ class View(QtWidgets.QLabel):
         current_zoom = self.display_pixels_per_viewport_pixels()
         self.zoom(current_zoom / zoom)
 
-    def set_optimal_scalebar(self) -> None:
+    def set_optimal_scalebar(self, force: bool = False) -> None:
         """Set scalebar to approx. 1/8 of the current viewport's
         width"""
-        pixelsize = self.window.display_settings_dlg.pixelsize.value()
-        width = self.viewport_width()
-        width_nm = width * pixelsize
-        optimal_scalebar = width_nm / 8
-        # approximate to the nearest thousands, hundreds, tens or ones
-        if optimal_scalebar > 10_000:
-            scalebar = 10_000
-        elif optimal_scalebar > 1_000:
-            scalebar = int(1_000 * round(optimal_scalebar / 1_000))
-        elif optimal_scalebar > 100:
-            scalebar = int(100 * round(optimal_scalebar / 100))
-        elif optimal_scalebar > 10:
-            scalebar = int(10 * round(optimal_scalebar / 10))
-        else:
-            scalebar = int(round(optimal_scalebar))
-        self.window.display_settings_dlg.scalebar.setValue(scalebar)
+        if (
+            force
+            or self.window.display_settings_dlg.optimal_scalebar_check.isChecked()
+        ):
+            pixelsize = self.window.display_settings_dlg.pixelsize.value()
+            width = self.viewport_width()
+            width_nm = width * pixelsize
+            optimal_scalebar = width_nm / 8
+            # approximate to the nearest thousands, hundreds, tens or ones
+            if optimal_scalebar > 10_000:
+                scalebar = 10_000
+            elif optimal_scalebar > 1_000:
+                scalebar = int(1_000 * round(optimal_scalebar / 1_000))
+            elif optimal_scalebar > 100:
+                scalebar = int(100 * round(optimal_scalebar / 100))
+            elif optimal_scalebar > 10:
+                scalebar = int(10 * round(optimal_scalebar / 10))
+            else:
+                scalebar = int(round(optimal_scalebar))
+            self.window.display_settings_dlg.scalebar.setValue(scalebar)
 
     def sizeHint(self) -> QtCore.QSize:
         """Return recommended window size."""
@@ -12066,7 +12091,9 @@ class Window(QtWidgets.QMainWindow):
         test_cluster_action.triggered.connect(self.test_clusterer_dialog.show)
 
         postprocess_menu.addSeparator()
-        nn_action = postprocess_menu.addAction("Nearest Neighbor Analysis")
+        nn_action = postprocess_menu.addAction(
+            "Calculate nearest neighbor distances"
+        )
         nn_action.triggered.connect(self.view.nearest_neighbor)
 
         postprocess_menu.addSeparator()
@@ -12171,6 +12198,7 @@ class Window(QtWidgets.QMainWindow):
                     return
             if not scalebar:
                 self.display_settings_dlg.scalebar_groupbox.setChecked(True)
+                self.view.set_optimal_scalebar(force=True)
                 qimage_scale = self.view.draw_scalebar(self.view.qimage)
                 new_path, ext = os.path.splitext(path)
                 new_path = new_path + "_scalebar" + ext

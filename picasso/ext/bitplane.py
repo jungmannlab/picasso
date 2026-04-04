@@ -11,7 +11,6 @@ import numpy as np
 import pandas as pd
 import datetime
 
-# 0.9.6 installer has had problems with PyImarisWriter, TODO: fix later
 try:
     # from PyImarisWriter.ImarisWriterCtypes import *
     from PyImarisWriter import PyImarisWriter as PW

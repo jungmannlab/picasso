@@ -673,13 +673,15 @@ class ParametersDialog(QtWidgets.QDialog):
         self.z_calibration = {}
         self.z_calibration_path = None
 
-        main_layout = QtWidgets.QVBoxLayout(self)
-        scroll = QtWidgets.QScrollArea(self)
-        scroll.setWidgetResizable(True)
+        self.scroll_area = QtWidgets.QScrollArea()
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setFrameShape(QtWidgets.QFrame.Shape.NoFrame)
         container = QtWidgets.QWidget()
-        scroll.setWidget(container)
         vbox = QtWidgets.QVBoxLayout(container)
-        main_layout.addWidget(scroll)
+        self.scroll_area.setWidget(container)
+        main_layout = QtWidgets.QVBoxLayout(self)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.addWidget(self.scroll_area)
 
         identification_groupbox = QtWidgets.QGroupBox("Identification")
         vbox.addWidget(identification_groupbox)
@@ -1134,14 +1136,7 @@ class ParametersDialog(QtWidgets.QDialog):
 
         # adjust the size of the dialog to fit its contents
         hint = container.sizeHint()
-        self.setMinimumWidth(hint.width() + 45)
-        # if room is available on the screen, adjust the height as well
-        screen = QtWidgets.QApplication.primaryScreen()
-        screen_height = 1000 if screen is None else screen.size().height()
-        if hint.height() + 45 < screen_height:
-            self.resize(self.width(), hint.height() + 45)
-        else:
-            self.resize(self.width(), screen_height - 100)
+        lib.adjust_widget_size(self, hint)
 
     def reset_quality_check(self) -> None:
         """Reset the quality check UI elements."""
