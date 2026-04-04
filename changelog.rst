@@ -1,7 +1,7 @@
 Changelog
 =========
 
-Last change: 01-APR-2026 CEST
+Last change: 04-APR-2026 CEST
 
 0.10.0
 ------
@@ -32,6 +32,7 @@ Last change: 01-APR-2026 CEST
 - Render GUI: changed the name "Nearest Neighbor Analysis" to "Calculate nearest neighbor distances" for better clarity
 - Render GUI: optimal scale bar is only set upon user's request, also in 3D
 - SPINNA allows user-defined threshold for the binary mask
+- Dialogs with scroll areas show no margins (e.g., Display settings dialog in Render)
 
 *Bug fixes:*
 ++++++++++++

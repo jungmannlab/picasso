@@ -3556,13 +3556,16 @@ class InfoDialog(QtWidgets.QDialog):
         self.frc_result = {}
         self.change_fov = ChangeFOV(self.window)
 
-        main_layout = QtWidgets.QVBoxLayout(self)
-        scroll = QtWidgets.QScrollArea(self)
-        scroll.setWidgetResizable(True)
+        # Scroll area
+        self.scroll_area = QtWidgets.QScrollArea()
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setFrameShape(QtWidgets.QFrame.Shape.NoFrame)
         self.container = QtWidgets.QWidget()
-        scroll.setWidget(self.container)
         vbox = QtWidgets.QVBoxLayout(self.container)
-        main_layout.addWidget(scroll)
+        self.scroll_area.setWidget(self.container)
+        main_layout = QtWidgets.QVBoxLayout(self)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.addWidget(self.scroll_area)
 
         # Display
         display_groupbox = QtWidgets.QGroupBox("Display")
@@ -3843,7 +3846,7 @@ class InfoDialog(QtWidgets.QDialog):
 
         # adjust the size of the dialog to fit its contents
         hint = self.container.sizeHint()
-        lib.adjust_widget_size(self, hint, 70, 45)
+        lib.adjust_widget_size(self, hint)
 
     def calculate_frc_resolution(self) -> None:
         """Calculate FRC resolution in a given channel."""
@@ -4127,13 +4130,22 @@ class MaskSettingsDialog(QtWidgets.QDialog):
         self.index_locs = []
         self.index_locs_out = []
 
-        main_layout = QtWidgets.QVBoxLayout(self)
-        scroll = QtWidgets.QScrollArea(self)
-        scroll.setWidgetResizable(True)
+        # main_layout = QtWidgets.QVBoxLayout(self)
+        # scroll = QtWidgets.QScrollArea(self)
+        # scroll.setWidgetResizable(True)
+        # self.container = QtWidgets.QWidget()
+        # scroll.setWidget(self.container)
+        # vbox = QtWidgets.QVBoxLayout(self.container)
+        # main_layout.addWidget(scroll)
+        self.scroll_area = QtWidgets.QScrollArea()
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setFrameShape(QtWidgets.QFrame.Shape.NoFrame)
         self.container = QtWidgets.QWidget()
-        scroll.setWidget(self.container)
         vbox = QtWidgets.QVBoxLayout(self.container)
-        main_layout.addWidget(scroll)
+        self.scroll_area.setWidget(self.container)
+        main_layout = QtWidgets.QVBoxLayout(self)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.addWidget(self.scroll_area)
 
         settings_groupbox = QtWidgets.QGroupBox("Settings")
         vbox.addWidget(settings_groupbox)
@@ -4286,7 +4298,7 @@ class MaskSettingsDialog(QtWidgets.QDialog):
 
         # adjust the size of the dialog to fit its contents
         hint = self.container.sizeHint()
-        lib.adjust_widget_size(self, hint, 45, 45)
+        lib.adjust_widget_size(self, hint)
         self.show()
 
     def generate_image(self) -> None:
@@ -5186,13 +5198,15 @@ class DisplaySettingsDialog(QtWidgets.QDialog):
         self.setModal(False)
         self._silent_disp_px_update = False
 
-        main_layout = QtWidgets.QVBoxLayout(self)
-        scroll = QtWidgets.QScrollArea(self)
-        scroll.setWidgetResizable(True)
+        self.scroll_area = QtWidgets.QScrollArea()
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setFrameShape(QtWidgets.QFrame.Shape.NoFrame)
         container = QtWidgets.QWidget()
-        scroll.setWidget(container)
         vbox = QtWidgets.QVBoxLayout(container)
-        main_layout.addWidget(scroll)
+        self.scroll_area.setWidget(container)
+        main_layout = QtWidgets.QVBoxLayout(self)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.addWidget(self.scroll_area)
 
         # General
         general_groupbox = QtWidgets.QGroupBox("General")
@@ -5487,7 +5501,7 @@ class DisplaySettingsDialog(QtWidgets.QDialog):
 
         # adjust the size of the dialog to fit its contents
         hint = container.sizeHint()
-        lib.adjust_widget_size(self, hint, 45, 45)
+        lib.adjust_widget_size(self, hint)
 
     def on_cmap_changed(self) -> None:
         """Load custom colormap if requested."""

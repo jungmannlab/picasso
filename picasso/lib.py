@@ -516,18 +516,15 @@ def adjust_widget_size(
         The offset to be added to the height of the size hint. Default
         is 0.
     """
-    widget.resize(
-        size_hint.width() + width_offset,
-        size_hint.height() + height_offset,
-    )
+    intended_width = size_hint.width() + width_offset
+    intended_height = size_hint.height() + height_offset
+    # adjust to the screen size if necessary
     screen = QtWidgets.QApplication.primaryScreen()
     screen_height = 1000 if screen is None else screen.size().height()
     screen_width = 1000 if screen is None else screen.size().width()
-    # adjust to the screen size if necessary
-    if widget.width() > screen_width:
-        widget.resize(screen_width - 100, widget.height())
-    if widget.height() > screen_height:
-        widget.resize(widget.width(), screen_height - 100)
+    intended_width = min(intended_width, screen_width - 200)
+    intended_height = min(intended_height, screen_height - 200)
+    widget.resize(intended_width, intended_height)
 
 
 def get_from_metadata(
