@@ -4196,6 +4196,145 @@ class FRCPlotWindow(QtWidgets.QTabWidget):
         self.canvas.draw()
 
 
+class ZoomableLabel(QtWidgets.QLabel):
+    """QLabel that supports zooming via mouse wheel and panning via
+    mouse drag. The widget size stays fixed; zooming reveals more
+    detail by cropping into the full-resolution source pixmap.
+
+    Labels can be linked so that zoom/pan manipulations on one are
+    applied to all linked labels simultaneously."""
+
+    def __init__(self, display_size: int = 300) -> None:
+        super().__init__()
+        self._display_size = display_size
+        self._source_pixmap = None
+        self._title = ""
+        self._interactive = True
+        self._zoom = 1.0
+        self._center_x = 0.5  # normalized 0..1
+        self._center_y = 0.5
+        self._drag_start = None
+        self._linked: list[ZoomableLabel] = []
+        self.setFixedSize(display_size, display_size)
+        self.setMouseTracking(False)
+
+    def link(self, other: "ZoomableLabel") -> None:
+        """Link two labels so they share zoom/pan state."""
+        if other not in self._linked:
+            self._linked.append(other)
+        if self not in other._linked:
+            other._linked.append(self)
+
+    def setPixmap(self, pixmap: QtGui.QPixmap, title: str = "") -> None:
+        self._source_pixmap = pixmap
+        self._title = title
+        # adopt current view from linked siblings if any are zoomed
+        for sibling in self._linked:
+            if sibling._source_pixmap is not None:
+                self._zoom = sibling._zoom
+                self._center_x = sibling._center_x
+                self._center_y = sibling._center_y
+                break
+        else:
+            self._zoom = 1.0
+            self._center_x = 0.5
+            self._center_y = 0.5
+        self._update_display()
+
+    def _sync_linked(self) -> None:
+        """Propagate current zoom/pan state to all linked labels."""
+        for sibling in self._linked:
+            if sibling._source_pixmap is not None:
+                sibling._zoom = self._zoom
+                sibling._center_x = self._center_x
+                sibling._center_y = self._center_y
+                sibling._update_display()
+
+    def _update_display(self) -> None:
+        if self._source_pixmap is None:
+            return
+        pw = self._source_pixmap.width()
+        ph = self._source_pixmap.height()
+        # visible fraction of the source
+        vw = pw / self._zoom
+        vh = ph / self._zoom
+        # top-left corner, clamped
+        x0 = self._center_x * pw - vw / 2
+        y0 = self._center_y * ph - vh / 2
+        x0 = max(0, min(x0, pw - vw))
+        y0 = max(0, min(y0, ph - vh))
+        crop = self._source_pixmap.copy(int(x0), int(y0), int(vw), int(vh))
+        scaled = crop.scaled(
+            self._display_size,
+            self._display_size,
+            QtCore.Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+            QtCore.Qt.TransformationMode.SmoothTransformation,
+        )
+        if self._title:
+            painter = QtGui.QPainter(scaled)
+            painter.setPen(QtGui.QPen(QtCore.Qt.GlobalColor.white))
+            painter.setFont(QtGui.QFont("Arial", 15))
+            painter.drawText(10, 20, self._title)
+            painter.end()
+        super().setPixmap(scaled)
+
+    def wheelEvent(self, event) -> None:
+        if self._source_pixmap is None or not self._interactive:
+            return
+        modifiers = QtWidgets.QApplication.keyboardModifiers()
+        if modifiers != QtCore.Qt.KeyboardModifier.ControlModifier:
+            return
+        delta = event.angleDelta().y()
+        factor = 1.15 if delta > 0 else 1 / 1.15
+        new_zoom = self._zoom * factor
+        new_zoom = max(1.0, min(new_zoom, 20.0))
+        # zoom towards cursor position
+        pos = event.position()
+        rel_x = pos.x() / self._display_size
+        rel_y = pos.y() / self._display_size
+        # shift center towards cursor
+        self._center_x += (rel_x - 0.5) * (1 / self._zoom - 1 / new_zoom)
+        self._center_y += (rel_y - 0.5) * (1 / self._zoom - 1 / new_zoom)
+        self._center_x = max(0.0, min(1.0, self._center_x))
+        self._center_y = max(0.0, min(1.0, self._center_y))
+        self._zoom = new_zoom
+        self._update_display()
+        self._sync_linked()
+
+    def mousePressEvent(self, event) -> None:
+        if not self._interactive:
+            return
+        if event.button() == QtCore.Qt.MouseButton.RightButton:
+            self._drag_start = event.position()
+
+    def mouseMoveEvent(self, event) -> None:
+        if self._drag_start is not None and self._source_pixmap is not None:
+            pos = event.position()
+            dx = (self._drag_start.x() - pos.x()) / self._display_size
+            dy = (self._drag_start.y() - pos.y()) / self._display_size
+            self._center_x += dx / self._zoom
+            self._center_y += dy / self._zoom
+            self._center_x = max(0.0, min(1.0, self._center_x))
+            self._center_y = max(0.0, min(1.0, self._center_y))
+            self._drag_start = pos
+            self._update_display()
+            self._sync_linked()
+
+    def mouseReleaseEvent(self, event) -> None:
+        if event.button() == QtCore.Qt.MouseButton.RightButton:
+            self._drag_start = None
+
+    def mouseDoubleClickEvent(self, event) -> None:
+        """Reset zoom on double click."""
+        if not self._interactive:
+            return
+        self._zoom = 1.0
+        self._center_x = 0.5
+        self._center_y = 0.5
+        self._update_display()
+        self._sync_linked()
+
+
 class MaskSettingsDialog(QtWidgets.QDialog):
     """Mask localizations based on local density.
 
@@ -4272,13 +4411,6 @@ class MaskSettingsDialog(QtWidgets.QDialog):
         self.index_locs = []
         self.index_locs_out = []
 
-        # main_layout = QtWidgets.QVBoxLayout(self)
-        # scroll = QtWidgets.QScrollArea(self)
-        # scroll.setWidgetResizable(True)
-        # self.container = QtWidgets.QWidget()
-        # scroll.setWidget(self.container)
-        # vbox = QtWidgets.QVBoxLayout(self.container)
-        # main_layout.addWidget(scroll)
         self.scroll_area = QtWidgets.QScrollArea()
         self.scroll_area.setWidgetResizable(True)
         self.scroll_area.setFrameShape(QtWidgets.QFrame.Shape.NoFrame)
@@ -4361,12 +4493,15 @@ class MaskSettingsDialog(QtWidgets.QDialog):
 
         display_groupbox = QtWidgets.QGroupBox("Display")
         vbox.addWidget(display_groupbox)
-        display_layout = QtWidgets.QGridLayout(display_groupbox)
-        self.plots = [QtWidgets.QLabel() for _ in range(4)]
-        display_layout.addWidget(self.plots[0], 0, 0)
-        display_layout.addWidget(self.plots[1], 0, 1)
-        display_layout.addWidget(self.plots[2], 1, 0)
-        display_layout.addWidget(self.plots[3], 1, 1)
+        self.display_layout = QtWidgets.QGridLayout(display_groupbox)
+        self.plots = [ZoomableLabel(300) for _ in range(3)]
+        self.display_layout.addWidget(self.plots[0], 0, 0)
+        self.display_layout.addWidget(self.plots[1], 0, 1)
+        self.display_layout.addWidget(self.plots[2], 1, 0)
+        # link all plots so zoom/pan is synchronized
+        self.plots[0].link(self.plots[1])
+        self.plots[0].link(self.plots[2])
+        self.plots[1].link(self.plots[2])
 
         mask_groupbox = QtWidgets.QGroupBox("Mask")
         vbox.addWidget(mask_groupbox)
@@ -4456,7 +4591,8 @@ class MaskSettingsDialog(QtWidgets.QDialog):
         )
         self.H = H / H.max()
         self.plots[0].setPixmap(
-            self.render_to_pixmap(self.H, title="Histogramed localizations")
+            self.render_to_pixmap(self.H),
+            title="Histogramed localizations",
         )
 
     def blur_image(self) -> None:
@@ -4467,7 +4603,8 @@ class MaskSettingsDialog(QtWidgets.QDialog):
         self.H_blur = H_blur
         self.save_blur_button.setEnabled(True)
         self.plots[1].setPixmap(
-            self.render_to_pixmap(self.H_blur, title="Blur")
+            self.render_to_pixmap(self.H_blur),
+            title="Blur",
         )
 
     def save_mask(self) -> None:
@@ -4481,7 +4618,7 @@ class MaskSettingsDialog(QtWidgets.QDialog):
         if path:
             np.save(path, self.mask)
             png_path = path.replace(".npy", ".png")
-            pixmap = self.plots[2].pixmap()
+            pixmap = self.plots[2]._source_pixmap
             if pixmap:
                 pixmap.save(png_path)
 
@@ -4494,7 +4631,7 @@ class MaskSettingsDialog(QtWidgets.QDialog):
             self, "Save blur to", name_blur, filter="*.png"
         )
         if path:
-            pixmap = self.plots[1].pixmap()
+            pixmap = self.plots[1]._source_pixmap
             if pixmap:
                 pixmap.save(path)
 
@@ -4507,7 +4644,8 @@ class MaskSettingsDialog(QtWidgets.QDialog):
         if path:
             self.mask = np.load(path)
             self.plots[2].setPixmap(
-                self.render_to_pixmap(self.mask, cmap="Greys_r", title="Mask"),
+                self.render_to_pixmap(self.mask, cmap="Greys_r"),
+                title="Mask",
             )
             self.save_button.setEnabled(True)
 
@@ -4531,7 +4669,8 @@ class MaskSettingsDialog(QtWidgets.QDialog):
         self.save_mask_button.setEnabled(True)
         self.save_button.setEnabled(True)
         self.plots[2].setPixmap(
-            self.render_to_pixmap(self.mask, cmap="Greys_r", title="Mask"),
+            self.render_to_pixmap(self.mask, cmap="Greys_r"),
+            title="Mask",
         )
 
     def update_plots(self) -> None:
@@ -4595,8 +4734,14 @@ class MaskSettingsDialog(QtWidgets.QDialog):
                 viewport=((0, 0), (self.y_max, self.x_max)),
                 blur_method=None,
             )
+            if len(self.plots) < 4:
+                self.plots.append(ZoomableLabel(300))
+                self.display_layout.addWidget(self.plots[3], 1, 1)
+                for p in self.plots[:3]:
+                    p.link(self.plots[3])
             self.plots[3].setPixmap(
-                self.render_to_pixmap(self.H_new, title="Masked")
+                self.render_to_pixmap(self.H_new),
+                title="Masked",
             )
 
     def save_locs(self) -> None:
@@ -4781,12 +4926,6 @@ class MaskSettingsDialog(QtWidgets.QDialog):
             QtCore.Qt.AspectRatioMode.KeepAspectRatioByExpanding,
         )
         pixmap = QtGui.QPixmap.fromImage(qimage)
-        if title:
-            painter = QtGui.QPainter(pixmap)
-            painter.setPen(QtGui.QPen(QtCore.Qt.GlobalColor.white))
-            painter.setFont(QtGui.QFont("Arial", 15))
-            painter.drawText(10, 20, title)
-            painter.end()
         return pixmap
 
 

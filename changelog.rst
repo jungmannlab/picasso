@@ -1,7 +1,7 @@
 Changelog
 =========
 
-Last change: 04-APR-2026 CEST
+Last change: 08-APR-2026 CEST
 
 0.10.0
 ------
@@ -34,6 +34,7 @@ Last change: 04-APR-2026 CEST
 - SPINNA allows user-defined threshold for the binary mask
 - Dialogs with scroll areas show no margins (e.g., Display settings dialog in Render)
 - Render GUI: test clustering supports G5M
+- Render GUI: Mask settings dialog allows for zooming and panning
 
 *Bug fixes:*
 ++++++++++++
