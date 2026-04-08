@@ -30,7 +30,7 @@ SHIFT = 0.1
 ZOOM = 9 / 7
 
 
-class DisplaySettingsRotationDialog(QtWidgets.QDialog):
+class DisplaySettingsRotationDialog(lib.Dialog):
     """Class to change display settings, e.g., display pixel size,
     contrast and blur.
 
@@ -282,7 +282,7 @@ class DisplaySettingsRotationDialog(QtWidgets.QDialog):
             self.window.view_rot.update_scene()
 
 
-class AnimationDialog(QtWidgets.QDialog):
+class AnimationDialog(lib.Dialog):
     """Dialog to prepare 3D animations.
 
     ...

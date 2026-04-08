@@ -2281,7 +2281,7 @@ class Window(QtWidgets.QMainWindow):
                     self.laserpowerEdit.setValue(laserpower)
 
 
-class CalibrationDialog(QtWidgets.QDialog):
+class CalibrationDialog(lib.Dialog):
     """Dialog for inputting calibration parameters and data (.tif files)
     for noise modeling.
 

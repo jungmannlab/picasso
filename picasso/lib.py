@@ -140,7 +140,7 @@ class ProgressDialog(QtWidgets.QProgressDialog):
         return range(start, end)
 
 
-class StatusDialog(QtWidgets.QDialog):
+class StatusDialog(Dialog):
     """StatusDialog displays the description string in a dialog."""
 
     def __init__(self, description, parent):
@@ -329,7 +329,7 @@ class AutoDict(collections.defaultdict):
         super().__init__(AutoDict, *args, **kwargs)
 
 
-class RemoveColumnsDialog(QtWidgets.QDialog):
+class RemoveColumnsDialog(Dialog):
     """Allow the user to select columns to be removed from the locs
     DataFrame."""
 
@@ -426,6 +426,16 @@ class HelpButton(QtWidgets.QToolButton):
 
     def _open_docs(self) -> None:
         QtGui.QDesktopServices.openUrl(QtCore.QUrl(self.help_url))
+
+
+class Dialog(QtWidgets.QDialog):
+    """Base class for dialogs without 'What's this?' help."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.setWindowFlag(
+            QtCore.Qt.WindowType.WindowContextHelpButtonHint, False
+        )
 
 
 def deprecation_warning(message: str) -> None:

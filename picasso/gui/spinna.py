@@ -420,7 +420,7 @@ class MaskPreview(QtWidgets.QLabel):
         return x_min, x_max, y_min, y_max
 
 
-class MaskGeneratorTab(QtWidgets.QDialog):
+class MaskGeneratorTab(lib.Dialog):
     """Tab for generating masks for heterogenous density simulations.
 
     ...
@@ -1401,7 +1401,7 @@ class StructurePreview(QtWidgets.QLabel):
         return colors
 
 
-class StructuresTab(QtWidgets.QDialog):
+class StructuresTab(lib.Dialog):
     """Tab for creating structures.
 
     ...
@@ -1882,7 +1882,7 @@ class StructuresTab(QtWidgets.QDialog):
             self.preview.qimage.save(path)
 
 
-class GenerateSearchSpaceDialog(QtWidgets.QDialog):
+class GenerateSearchSpaceDialog(lib.Dialog):
     """Input dialog to get the parameters for generating numbers of
     structures (stoichiometries) for SPINNA fitting.
 
@@ -1971,7 +1971,7 @@ class GenerateSearchSpaceDialog(QtWidgets.QDialog):
         ]
 
 
-class CompareModelsDialog(QtWidgets.QDialog):
+class CompareModelsDialog(lib.Dialog):
     """Dialog for comparing different models (lists of structures)
     and label uncertainties. Useful for fine-tuning and exploring the
     model structures.
@@ -2189,7 +2189,7 @@ class CompareModelsDialog(QtWidgets.QDialog):
         del self.model_buttons[index]
 
 
-class OptionalSettingsDialog(QtWidgets.QDialog):
+class OptionalSettingsDialog(lib.Dialog):
     """Dialog for setting optional parameters in the Simulations Tab.
 
     ...
@@ -2297,7 +2297,7 @@ class OptionalSettingsDialog(QtWidgets.QDialog):
                     spin.setEnabled(False)
 
 
-class NNDPlotSettingsDialog(QtWidgets.QDialog):
+class NNDPlotSettingsDialog(lib.Dialog):
     """Dialog for adjusting settings for plotting nearest neighbors
     distances.
 
@@ -2615,7 +2615,7 @@ class NNDPlotSettingsDialog(QtWidgets.QDialog):
         self.rehist_sim = True
 
 
-class SimulationsTab(QtWidgets.QDialog):
+class SimulationsTab(lib.Dialog):
     """Tab for running simulations and finding the proportions of
     structure in the experimental data.
 
