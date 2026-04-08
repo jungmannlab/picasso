@@ -380,7 +380,9 @@ Allows performing k-means clustering in picks. Users can specify the number of c
 
 Mask image
 ^^^^^^^^^^
-Opens a dialog that allows the user to specify a mask for filtering localizations within and outside it.
+Opens a dialog that allows the user to specify a mask for filtering localizations within and outside it. The user can adjust the histogram bin size, blur thereof and the threshold applied.
+
+The images can be zoomed in/out (Ctrl/Cmd + scrolling) and panned (mouse right click). Double clicking resets the zoom.
 
 Fast rendering
 ^^^^^^^^^^^^^^

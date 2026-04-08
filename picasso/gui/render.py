@@ -4402,6 +4402,10 @@ class MaskSettingsDialog(QtWidgets.QDialog):
         Height of the loaded localizations.
     """
 
+    DOCS_URL = (
+        "https://picassosr.readthedocs.io/en/latest/render.html#mask-image"
+    )
+
     def __init__(self, window: QtWidgets.QMainWindow) -> None:
         super().__init__(window)
         self.window = window
@@ -4483,18 +4487,32 @@ class MaskSettingsDialog(QtWidgets.QDialog):
         )
         self.thresh_method.activated.connect(self.update_plots)
         threshold_layout.addWidget(self.thresh_method)
+        corner_layout = QtWidgets.QHBoxLayout()
+        threshold_layout.addLayout(corner_layout)
         show_hist_button = QtWidgets.QPushButton("Show histogram")
         show_hist_button.setToolTip(
             "Show histogram of the pixel values in the blurred image"
         )
         show_hist_button.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
         show_hist_button.clicked.connect(self.show_hist)
-        threshold_layout.addWidget(show_hist_button)
+        corner_layout.addWidget(show_hist_button)
+        corner_layout.addWidget(lib.HelpButton(self.DOCS_URL))
 
         display_groupbox = QtWidgets.QGroupBox("Display")
+        display_groupbox.setToolTip(
+            "The images can be zoomed in/out (Ctrl/Cmd + scrolling)\n"
+            "and panned (mouse right click).\n"
+            "Double clicking resets the zoom."
+        )
         vbox.addWidget(display_groupbox)
         self.display_layout = QtWidgets.QGridLayout(display_groupbox)
         self.plots = [ZoomableLabel(300) for _ in range(3)]
+        for plot in self.plots:
+            plot.setToolTip(
+                "The images can be zoomed in/out (Ctrl/Cmd + scrolling)\n"
+                "and panned (mouse right click).\n"
+                "Double clicking resets the zoom."
+            )
         self.display_layout.addWidget(self.plots[0], 0, 0)
         self.display_layout.addWidget(self.plots[1], 0, 1)
         self.display_layout.addWidget(self.plots[2], 1, 0)
