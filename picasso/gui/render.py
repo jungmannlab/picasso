@@ -4517,16 +4517,14 @@ class MaskSettingsDialog(lib.Dialog):
         )
         self.thresh_method.activated.connect(self.update_plots)
         threshold_layout.addWidget(self.thresh_method)
-        corner_layout = QtWidgets.QHBoxLayout()
-        threshold_layout.addLayout(corner_layout)
         show_hist_button = QtWidgets.QPushButton("Show histogram")
         show_hist_button.setToolTip(
             "Show histogram of the pixel values in the blurred image"
         )
         show_hist_button.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
         show_hist_button.clicked.connect(self.show_hist)
-        corner_layout.addWidget(show_hist_button)
-        corner_layout.addWidget(lib.HelpButton(self.DOCS_URL))
+        threshold_layout.addWidget(show_hist_button)
+        threshold_layout.addWidget(lib.HelpButton(self.DOCS_URL))
 
         display_groupbox = QtWidgets.QGroupBox("Display")
         display_groupbox.setToolTip(

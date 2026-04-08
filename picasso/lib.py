@@ -49,6 +49,16 @@ SOUND_NOTIFICATION_DURATION = 60  # seconds
 REQUIRED_COLUMNS = ["frame", "x", "y", "z", "lpx", "lpy", "lpz"]
 
 
+class Dialog(QtWidgets.QDialog):
+    """Base class for dialogs without 'What's this?' help."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.setWindowFlag(
+            QtCore.Qt.WindowType.WindowContextHelpButtonHint, False
+        )
+
+
 class ProgressDialog(QtWidgets.QProgressDialog):
     """ProgressDialog displays a progress dialog with a progress bar."""
 
@@ -426,16 +436,6 @@ class HelpButton(QtWidgets.QToolButton):
 
     def _open_docs(self) -> None:
         QtGui.QDesktopServices.openUrl(QtCore.QUrl(self.help_url))
-
-
-class Dialog(QtWidgets.QDialog):
-    """Base class for dialogs without 'What's this?' help."""
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.setWindowFlag(
-            QtCore.Qt.WindowType.WindowContextHelpButtonHint, False
-        )
 
 
 def deprecation_warning(message: str) -> None:
