@@ -1734,6 +1734,8 @@ class Window(QtWidgets.QMainWindow):
 class MainWindow(QtWidgets.QWidget):
     """Main window for the Picasso application."""
 
+    DOCS_URL = "https://picassosr.readthedocs.io/en/latest/design.html"
+
     def __init__(self):
         super(MainWindow, self).__init__()
         self.setWindowTitle(f"Picasso v{__version__}: Design")
@@ -1777,6 +1779,7 @@ class MainWindow(QtWidgets.QWidget):
         foldbtn.clicked.connect(self.window.foldingScheme)
 
         hbox = QtWidgets.QHBoxLayout()
+        hbox.addWidget(lib.HelpButton(self.DOCS_URL))
         hbox.addWidget(loadbtn)
         hbox.addWidget(savebtn)
         hbox.addWidget(clearbtn)

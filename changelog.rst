@@ -1,7 +1,7 @@
 Changelog
 =========
 
-Last change: 04-APR-2026 CEST
+Last change: 08-APR-2026 CEST
 
 0.10.0
 ------
@@ -33,6 +33,7 @@ Last change: 04-APR-2026 CEST
 - Render GUI: optimal scale bar is only set upon user's request, also in 3D
 - SPINNA allows user-defined threshold for the binary mask
 - Dialogs with scroll areas show no margins (e.g., Display settings dialog in Render)
+- Added help buttons to some dialogs/menu bars across the modules that open the corresponding readthedocs pages (the documentation will be further improved in the future)
 
 *Bug fixes:*
 ++++++++++++

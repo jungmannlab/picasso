@@ -247,6 +247,8 @@ class Window(QtWidgets.QMainWindow):
         Label for the total acquisition time.
     """
 
+    DOCS_URL = "https://picassosr.readthedocs.io/en/latest/simulate.html"
+
     def __init__(self):
         super().__init__()
         self.setWindowTitle(f"Picasso v{__version__}: Simulate")
@@ -804,6 +806,7 @@ class Window(QtWidgets.QMainWindow):
 
         sgrid.addWidget(structureno, 1, 0)
         sgrid.addWidget(self.structurenoEdit, 1, 1)
+        sgrid.addWidget(lib.HelpButton(self.DOCS_URL), 1, 2)
         sgrid.addWidget(structureframe, 2, 0)
         sgrid.addWidget(self.structureframeEdit, 2, 1)
         sgrid.addWidget(QtWidgets.QLabel("Px"), 2, 2)

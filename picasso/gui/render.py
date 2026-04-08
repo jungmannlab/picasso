@@ -390,6 +390,8 @@ class ApplyDialog(QtWidgets.QDialog):
         Undo the last spiral action.
     """
 
+    DOCS_URL = "https://picassosr.readthedocs.io/en/latest/render.html#apply-expressions-to-localizations"
+
     def __init__(self, window: QtWidgets.QMainWindow) -> None:
         super().__init__(window)
         self.window = window
@@ -397,23 +399,24 @@ class ApplyDialog(QtWidgets.QDialog):
         vbox = QtWidgets.QVBoxLayout(self)
         layout = QtWidgets.QGridLayout()
         vbox.addLayout(layout)
+        layout.addWidget(lib.HelpButton(self.DOCS_URL), 0, 0)
         channel_label = QtWidgets.QLabel("Channel:")
         channel_label.setToolTip(
             "Select the channel to which an expression will be applied."
         )
-        layout.addWidget(channel_label, 0, 0)
+        layout.addWidget(channel_label, 0, 1)
         self.channel = QtWidgets.QComboBox()
         self.channel.addItems(self.window.view.locs_paths)
-        layout.addWidget(self.channel, 0, 1)
+        layout.addWidget(self.channel, 0, 2)
         self.channel.currentIndexChanged.connect(self.update_vars)
         vars_label = QtWidgets.QLabel("Variables:")
         vars_label.setToolTip(
             "List of columns that can be manipulated using expressions."
         )
-        layout.addWidget(vars_label, 1, 0)
+        layout.addWidget(vars_label, 1, 1)
         self.label = QtWidgets.QLabel()
         self.label.setWordWrap(True)
-        layout.addWidget(self.label, 1, 1)
+        layout.addWidget(self.label, 1, 2)
         self.update_vars(0)
         exp_label = QtWidgets.QLabel("Expression:")
         exp_label.setToolTip(
@@ -427,11 +430,9 @@ class ApplyDialog(QtWidgets.QDialog):
             "  with radius R pixels and N turns.\n"
             "- 'uspiral' to undo the last spiral action."
         )
-        layout.addWidget(exp_label, 2, 0)
+        layout.addWidget(exp_label, 2, 1)
         self.cmd = QtWidgets.QLineEdit()
-        layout.addWidget(self.cmd, 2, 1)
-        hbox = QtWidgets.QHBoxLayout()
-        vbox.addLayout(hbox)
+        layout.addWidget(self.cmd, 2, 2)
         # OK and Cancel buttons
         self.buttons = QtWidgets.QDialogButtonBox(
             QtWidgets.QDialogButtonBox.StandardButton.Ok
@@ -1726,46 +1727,51 @@ class AIMDialog(QtWidgets.QDialog):
         Contains the length of temporal segments in units of frames.
     """
 
+    DOCS_URL = "https://picassosr.readthedocs.io/en/latest/render.html#adaptive-intersection-maximization-aim-drift-correction"
+
     def __init__(self, window: QtWidgets.QMainWindow) -> None:
         super().__init__(window)
         self.window = window
         self.setWindowTitle("AIM undrifting")
         vbox = QtWidgets.QVBoxLayout(self)
         grid = QtWidgets.QGridLayout()
+        grid.addWidget(lib.HelpButton(self.DOCS_URL), 0, 0)
         seg_label = QtWidgets.QLabel("Segmentation:")
         seg_label.setToolTip("Length of temporal segments in frames.")
-        grid.addWidget(seg_label, 0, 0)
+        grid.addWidget(
+            seg_label, 0, 1, alignment=QtCore.Qt.AlignmentFlag.AlignRight
+        )
         self.segmentation = QtWidgets.QSpinBox()
         self.segmentation.setRange(1, int(1e5))
         self.segmentation.setValue(100)
-        grid.addWidget(self.segmentation, 0, 1)
+        grid.addWidget(self.segmentation, 0, 2)
         intersect_label = QtWidgets.QLabel("Intersection distance (nm):")
         intersect_label.setToolTip(
             "Distance between localizations in the consecutive segments "
             "to be considered as overlapping."
         )
-        grid.addWidget(intersect_label, 1, 0)
+        grid.addWidget(intersect_label, 1, 0, 1, 2)
         self.intersect_d = QtWidgets.QDoubleSpinBox()
         self.intersect_d.setRange(0.1, 1e6)
-        try:
+        try:  # TODO: this actually won't work because we initialize with the whole UI, just calculate nena when hte dialog is opened?
             default = 6 * float(window.info_dialog.fit_precision.text())
         except ValueError:  # if text is not a number
             default = 20.0
         self.intersect_d.setValue(default)
         self.intersect_d.setDecimals(1)
         self.intersect_d.setSingleStep(1)
-        grid.addWidget(self.intersect_d, 1, 1)
+        grid.addWidget(self.intersect_d, 1, 2)
         maxdrift_label = QtWidgets.QLabel("Max. drift in segment (nm):")
         maxdrift_label.setToolTip(
             "Maximum drift inspected between consecutive segments."
         )
-        grid.addWidget(maxdrift_label, 2, 0)
+        grid.addWidget(maxdrift_label, 2, 0, 1, 2)
         self.max_drift = QtWidgets.QDoubleSpinBox()
         self.max_drift.setRange(0.1, 1e6)
         self.max_drift.setValue(60.0)
         self.max_drift.setDecimals(1)
         self.max_drift.setSingleStep(1)
-        grid.addWidget(self.max_drift, 2, 1)
+        grid.addWidget(self.max_drift, 2, 2)
         vbox.addLayout(grid)
 
         # OK and Cancel buttons
@@ -2219,6 +2225,10 @@ class SMLMDialog(QtWidgets.QDialog):
         Controls whether basic frame analysis is performed.
     """
 
+    DOCS_URL = (
+        "https://picassosr.readthedocs.io/en/latest/render.html#smlm-clusterer"
+    )
+
     def __init__(
         self,
         window: QtWidgets.QMainWindow,
@@ -2229,6 +2239,7 @@ class SMLMDialog(QtWidgets.QDialog):
         self.setWindowTitle(f"Enter parameters ({'3D' if flag_3D else '2D'})")
         vbox = QtWidgets.QVBoxLayout(self)
         grid = QtWidgets.QGridLayout()
+        grid.addWidget(lib.HelpButton(self.DOCS_URL), 0, 0)
         # clustering radius
         if not flag_3D:
             local_radius = "Cluster radius (nm):"
@@ -2239,13 +2250,13 @@ class SMLMDialog(QtWidgets.QDialog):
             "Radius in which localizations are considered part of the\n"
             "same cluster."
         )
-        grid.addWidget(local_radius_label, grid.rowCount(), 0)
+        grid.addWidget(local_radius_label, grid.rowCount() - 1, 1)
         self.radius_xy = QtWidgets.QDoubleSpinBox()
         self.radius_xy.setRange(0.01, 1e6)
         self.radius_xy.setDecimals(2)
         self.radius_xy.setSingleStep(0.1)
         self.radius_xy.setValue(10)
-        grid.addWidget(self.radius_xy, grid.rowCount() - 1, 1)
+        grid.addWidget(self.radius_xy, grid.rowCount() - 1, 2)
         self.radius_z = QtWidgets.QDoubleSpinBox()
         self.radius_z.setRange(0.01, 1e6)
         self.radius_z.setDecimals(2)
@@ -2257,8 +2268,15 @@ class SMLMDialog(QtWidgets.QDialog):
                 "Radius in z direction in which localizations are\n"
                 "considered part of the same cluster."
             )
-            grid.addWidget(radius_z_label, grid.rowCount(), 0)
-            grid.addWidget(self.radius_z, grid.rowCount() - 1, 1)
+            grid.addWidget(
+                radius_z_label,
+                grid.rowCount(),
+                0,
+                1,
+                2,
+                alignment=QtCore.Qt.AlignmentFlag.AlignRight,
+            )
+            grid.addWidget(self.radius_z, grid.rowCount() - 1, 2)
 
         # min no. locs
         min_locs_label = QtWidgets.QLabel("Min. no. of locs:")
@@ -2266,11 +2284,18 @@ class SMLMDialog(QtWidgets.QDialog):
             "Minimum number of localizations required to consider a\n"
             "cluster valid."
         )
-        grid.addWidget(min_locs_label, grid.rowCount(), 0)
+        grid.addWidget(
+            min_locs_label,
+            grid.rowCount(),
+            0,
+            1,
+            2,
+            alignment=QtCore.Qt.AlignmentFlag.AlignRight,
+        )
         self.min_locs = QtWidgets.QSpinBox()
         self.min_locs.setRange(1, int(1e6))
         self.min_locs.setValue(10)
-        grid.addWidget(self.min_locs, grid.rowCount() - 1, 1)
+        grid.addWidget(self.min_locs, grid.rowCount() - 1, 2)
         # perform basic frame analysis
         self.frame_analysis = QtWidgets.QCheckBox(
             "Perform basic frame analysis"
@@ -2279,21 +2304,21 @@ class SMLMDialog(QtWidgets.QDialog):
             "Run a simple test to discard sticking events?"
         )
         self.frame_analysis.setChecked(True)
-        grid.addWidget(self.frame_analysis, grid.rowCount(), 0, 1, 2)
+        grid.addWidget(self.frame_analysis, grid.rowCount(), 0, 1, 3)
         # save cluster centers
         self.save_centers = QtWidgets.QCheckBox("Save cluster centers")
         self.save_centers.setToolTip(
             "Save an extra .hdf5 file containing the cluster centers?"
         )
         self.save_centers.setChecked(False)
-        grid.addWidget(self.save_centers, grid.rowCount(), 0, 1, 2)
+        grid.addWidget(self.save_centers, grid.rowCount(), 0, 1, 3)
         # save cluster areas
         self.save_areas = QtWidgets.QCheckBox("Save cluster areas (.csv)")
         self.save_areas.setToolTip(
             "Save an extra .csv file containing the cluster areas?"
         )
         self.save_areas.setChecked(False)
-        grid.addWidget(self.save_areas, grid.rowCount(), 0, 1, 2)
+        grid.addWidget(self.save_areas, grid.rowCount(), 0, 1, 3)
 
         vbox.addLayout(grid)
         hbox = QtWidgets.QHBoxLayout()
@@ -2338,6 +2363,8 @@ class G5MDialog(QtWidgets.QDialog):
     uncertainties, use multiprocessing, postprocess or save clustered
     localizations."""
 
+    DOCS_URL = "https://picassosr.readthedocs.io/en/latest/render.html#g5m"
+
     def __init__(self, window, channel):
         super().__init__(window)
         self.window = window
@@ -2348,20 +2375,23 @@ class G5MDialog(QtWidgets.QDialog):
 
         vbox = QtWidgets.QVBoxLayout(self)
         grid = QtWidgets.QGridLayout()
+        first_row = QtWidgets.QHBoxLayout()
+        grid.addLayout(first_row, 0, 0, 1, 2)
         self.calibration = None
 
+        first_row.addWidget(lib.HelpButton(self.DOCS_URL))
         # min locs per molecule
         minlocs_label = QtWidgets.QLabel("Min. locs:")
         minlocs_label.setToolTip(
             "Minimum number of localizations per molecule to be"
             " considered valid."
         )
-        grid.addWidget(minlocs_label, grid.rowCount(), 0)
+        first_row.addWidget(minlocs_label)
         self.min_locs = QtWidgets.QSpinBox()
         self.min_locs.setSingleStep(1)
         self.min_locs.setRange(2, 999)
         self.min_locs.setValue(MIN_LOCS_G5M)
-        grid.addWidget(self.min_locs, grid.rowCount() - 1, 1)
+        first_row.addWidget(self.min_locs)
 
         # loc precision handling - local values or absolute sigma bounds
         self.loc_prec_handling = QtWidgets.QComboBox()
@@ -4763,6 +4793,8 @@ class ToolsSettingsDialog(QtWidgets.QDialog):
         Tick to display circular picks as 3-pixels-wide points.
     """
 
+    DOCS_URL = "https://picassosr.readthedocs.io/en/latest/render.html#picking-of-regions-of-interest"
+
     def __init__(self, window: QtWidgets.QMainWindow) -> None:
         super().__init__(window)
         self.window = window
@@ -4774,12 +4806,15 @@ class ToolsSettingsDialog(QtWidgets.QDialog):
         self.vbox.addWidget(self.pick_groupbox)
         pick_grid = QtWidgets.QGridLayout(self.pick_groupbox)
 
+        first_row = QtWidgets.QHBoxLayout()
+        pick_grid.addLayout(first_row, 0, 0, 1, 2)
+        first_row.addWidget(lib.HelpButton(self.DOCS_URL))
         shape_label = QtWidgets.QLabel("Shape:")
         shape_label.setToolTip("Select the shape of the pick tool.")
-        pick_grid.addWidget(shape_label, 1, 0)
+        first_row.addWidget(shape_label)
         self.pick_shape = QtWidgets.QComboBox()
         self.pick_shape.addItems(["Circle", "Rectangle", "Polygon", "Square"])
-        pick_grid.addWidget(self.pick_shape, 1, 1)
+        first_row.addWidget(self.pick_shape)
         pick_stack = QtWidgets.QStackedWidget()
         pick_grid.addWidget(pick_stack, 2, 0, 1, 2)
         self.pick_shape.currentIndexChanged.connect(pick_stack.setCurrentIndex)
@@ -4875,6 +4910,8 @@ class RESIDialog(QtWidgets.QDialog):
         Instance of the main Picasso Render window.
     """
 
+    DOCS_URL = "https://picassosr.readthedocs.io/en/latest/render.html#resi"
+
     def __init__(self, window: QtWidgets.QMainWindow) -> None:
         super().__init__()
         self.setWindowTitle("RESI")
@@ -4896,19 +4933,15 @@ class RESIDialog(QtWidgets.QDialog):
         self.min_locs = []
 
         # layout #
-        vbox = QtWidgets.QVBoxLayout(self)
-
-        # clustering parameters - apply the same to all channels
-        params_box = QtWidgets.QGroupBox("")
-        vbox.addWidget(params_box)
-        params_grid = QtWidgets.QGridLayout(params_box)
+        params_grid = QtWidgets.QGridLayout(self)
+        params_grid.addWidget(lib.HelpButton(self.DOCS_URL), 0, 0)
 
         same_params = QtWidgets.QPushButton(
             "Apply the same clustering parameters to all channels"
         )
         same_params.setAutoDefault(False)
         same_params.clicked.connect(self.on_same_params_clicked)
-        params_grid.addWidget(same_params, 0, 0, 1, 4)
+        params_grid.addWidget(same_params, 0, 1, 1, 3)
 
         # clustering parameters - labels
         params_grid.addWidget(QtWidgets.QLabel("RESI channel"), 2, 0)
@@ -5214,17 +5247,18 @@ class DisplaySettingsDialog(QtWidgets.QDialog):
         general_groupbox = QtWidgets.QGroupBox("General")
         vbox.addWidget(general_groupbox)
         general_grid = QtWidgets.QGridLayout(general_groupbox)
+        general_grid.addWidget(lib.HelpButton(self.DOCS_URL), 0, 0)
         zoom_label = QtWidgets.QLabel("Zoom:")
         zoom_label.setToolTip("Zoom factor for display.")
-        general_grid.addWidget(zoom_label, 0, 0)
+        general_grid.addWidget(zoom_label, 0, 1)
         self.zoom = QtWidgets.QDoubleSpinBox()
         self.zoom.setKeyboardTracking(False)
         self.zoom.setRange(10 ** (-self.zoom.decimals()), 1e6)
         self.zoom.valueChanged.connect(self.on_zoom_changed)
-        general_grid.addWidget(self.zoom, 0, 1)
+        general_grid.addWidget(self.zoom, 0, 2)
         disp_px_label = QtWidgets.QLabel("Display pixel size (nm):")
         disp_px_label.setToolTip("Size of the pixels in the rendered image.")
-        general_grid.addWidget(disp_px_label, 1, 0)
+        general_grid.addWidget(disp_px_label, 1, 1)
         self._disp_px_size = 130 / DEFAULT_OVERSAMPLING
         self.disp_px_size = QtWidgets.QDoubleSpinBox()
         self.disp_px_size.setRange(0.00001, 100000)
@@ -5233,15 +5267,13 @@ class DisplaySettingsDialog(QtWidgets.QDialog):
         self.disp_px_size.setValue(self._disp_px_size)
         self.disp_px_size.setKeyboardTracking(False)
         self.disp_px_size.valueChanged.connect(self.on_disp_px_changed)
-        general_grid.addWidget(self.disp_px_size, 1, 1)
-        # squeeze in the help button
-        general_grid.addWidget(lib.HelpButton(self.DOCS_URL), 2, 0)
+        general_grid.addWidget(self.disp_px_size, 1, 2)
         self.dynamic_disp_px = QtWidgets.QCheckBox("dynamic")
         self.dynamic_disp_px.setChecked(True)
         self.dynamic_disp_px.toggled.connect(self.set_dynamic_disp_px)
-        general_grid.addWidget(self.dynamic_disp_px, 2, 1)
+        general_grid.addWidget(self.dynamic_disp_px, 2, 2)
         self.minimap = QtWidgets.QCheckBox("show minimap")
-        general_grid.addWidget(self.minimap, 3, 1)
+        general_grid.addWidget(self.minimap, 3, 2)
         self.minimap.stateChanged.connect(self.update_scene)
 
         # Contrast
@@ -11748,6 +11780,8 @@ class Window(QtWidgets.QMainWindow):
         y coordinates before the last spiral action in ``ApplyDialog``.
     """
 
+    DOCS_URL = "https://picassosr.readthedocs.io/en/latest/render.html#"
+
     def __init__(self, plugins_loaded: bool = False) -> None:
         super().__init__()
         self.initUI(plugins_loaded)
@@ -11880,6 +11914,11 @@ class Window(QtWidgets.QMainWindow):
             ["Ctrl+Shift+Backspace", "Ctrl+Shift+Delete"]
         )
         delete_action.triggered.connect(self.remove_locs)
+
+        help_action = file_menu.addAction("Help")
+        help_action.triggered.connect(
+            lambda: QtGui.QDesktopServices.openUrl(self.DOCS_URL)
+        )
 
         # menu bar - View
         view_menu = self.menu_bar.addMenu("View")

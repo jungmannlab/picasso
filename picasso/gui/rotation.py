@@ -2120,6 +2120,8 @@ class RotationWindow(QtWidgets.QMainWindow):
         parent).
     """
 
+    DOCS_URL = "https://picassosr.readthedocs.io/en/latest/render.html#d-rotation-window"
+
     def __init__(self, window: QtWidgets.QMainWindow) -> None:
         super().__init__()
         self.setWindowTitle(f"Picasso v{__version__}: Render 3D")
@@ -2150,6 +2152,10 @@ class RotationWindow(QtWidgets.QMainWindow):
         animation = file_menu.addAction("Build an animation")
         animation.setShortcut("Ctrl+Shift+E")
         animation.triggered.connect(self.animation_dialog.show)
+        help_action = file_menu.addAction("Help")
+        help_action.triggered.connect(
+            lambda: QtGui.QDesktopServices.openUrl(QtCore.QUrl(self.DOCS_URL))
+        )
 
         # menu bar - View
         view_menu = self.menu_bar.addMenu("View")
