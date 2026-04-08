@@ -263,7 +263,7 @@ class Worker(QtCore.QThread):
             )
 
 
-class ParametersDialog(QtWidgets.QDialog):
+class ParametersDialog(lib.Dialog):
     """Dialog for setting parameters - oversampling and iterations.
 
     ...
@@ -549,6 +549,8 @@ class Window(QtWidgets.QMainWindow):
         The dialog for adjusting processing parameters.
     """
 
+    DOCS_URL = "https://picassosr.readthedocs.io/en/latest/average.html"
+
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle(f"Picasso v{__version__}: Average")
@@ -570,6 +572,10 @@ class Window(QtWidgets.QMainWindow):
         save_action.setShortcut(QtGui.QKeySequence.StandardKey.Save)
         save_action.triggered.connect(self.save)
         file_menu.addAction(save_action)
+        help_action = file_menu.addAction("Help")
+        help_action.triggered.connect(
+            lambda: QtGui.QDesktopServices.openUrl(QtCore.QUrl(self.DOCS_URL))
+        )
         process_menu = menu_bar.addMenu("Process")
         parameters_action = process_menu.addAction("Parameters")
         parameters_action.setShortcut("Ctrl+P")

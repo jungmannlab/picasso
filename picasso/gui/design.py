@@ -302,7 +302,7 @@ def indextoStr(x: float, y: float) -> tuple[str, int]:
     return strIndex
 
 
-class PipettingDialog(QtWidgets.QDialog):
+class PipettingDialog(lib.Dialog):
     """Dialog for selecting the folder to create the .pdf file with
     displayed 96-well plated based on the .csv file with sequence
     information.
@@ -420,7 +420,7 @@ class PipettingDialog(QtWidgets.QDialog):
         return (fulllist, result == QtWidgets.QDialog.DialogCode.Accepted)
 
 
-class SeqDialog(QtWidgets.QDialog):
+class SeqDialog(lib.Dialog):
     """Dialog for setting extensions based on the UI selection.
 
     ...
@@ -581,7 +581,7 @@ class SeqDialog(QtWidgets.QDialog):
         return tablelong, tableshort
 
 
-class FoldingDialog(QtWidgets.QDialog):
+class FoldingDialog(lib.Dialog):
     """Dialog for calculating the volumes of reagents for preparing the
     given DNA origami.
 
@@ -732,7 +732,7 @@ class FoldingDialog(QtWidgets.QDialog):
         )
 
 
-class PlateDialog(QtWidgets.QDialog):
+class PlateDialog(lib.Dialog):
     """Dialog for selecting plate export options.
 
     The user can choose either to export only the sequences needed for
@@ -1734,6 +1734,8 @@ class Window(QtWidgets.QMainWindow):
 class MainWindow(QtWidgets.QWidget):
     """Main window for the Picasso application."""
 
+    DOCS_URL = "https://picassosr.readthedocs.io/en/latest/design.html"
+
     def __init__(self):
         super(MainWindow, self).__init__()
         self.setWindowTitle(f"Picasso v{__version__}: Design")
@@ -1777,6 +1779,7 @@ class MainWindow(QtWidgets.QWidget):
         foldbtn.clicked.connect(self.window.foldingScheme)
 
         hbox = QtWidgets.QHBoxLayout()
+        hbox.addWidget(lib.HelpButton(self.DOCS_URL))
         hbox.addWidget(loadbtn)
         hbox.addWidget(savebtn)
         hbox.addWidget(clearbtn)

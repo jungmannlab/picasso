@@ -92,7 +92,7 @@ def compute_xcorr(CF_image_avg, image):
     return xcorr
 
 
-class ParametersDialog(QtWidgets.QDialog):
+class ParametersDialog(lib.Dialog):
     def __init__(self, window):
         super().__init__(window)
         self.window = window
@@ -176,7 +176,7 @@ class View(QtWidgets.QLabel):
         self.set_image(image_avg)
 
 
-class DatasetDialog(QtWidgets.QDialog):
+class DatasetDialog(lib.Dialog):
     def __init__(self, window):
         super().__init__(window)
         self.window = window

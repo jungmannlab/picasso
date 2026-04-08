@@ -140,7 +140,7 @@ class ProgressDialog(QtWidgets.QProgressDialog):
         return range(start, end)
 
 
-class StatusDialog(QtWidgets.QDialog):
+class StatusDialog(Dialog):
     """StatusDialog displays the description string in a dialog."""
 
     def __init__(self, description, parent):
@@ -329,7 +329,7 @@ class AutoDict(collections.defaultdict):
         super().__init__(AutoDict, *args, **kwargs)
 
 
-class RemoveColumnsDialog(QtWidgets.QDialog):
+class RemoveColumnsDialog(Dialog):
     """Allow the user to select columns to be removed from the locs
     DataFrame."""
 
@@ -389,6 +389,53 @@ class RemoveColumnsDialog(QtWidgets.QDialog):
             if dialog.checks[col].isChecked():
                 to_remove.append(col)
         return to_remove, result == QtWidgets.QDialog.DialogCode.Accepted
+
+
+class HelpButton(QtWidgets.QToolButton):
+    """A reusable ? button that opens a URL."""
+
+    def __init__(
+        self, url: str, parent=None, size: int | tuple[int, int] = 22
+    ) -> None:
+        super().__init__(parent)
+        self.help_url = url
+        self.setText("?")
+        if isinstance(size, int):
+            size = (size, size)
+        self.setFixedSize(*size)
+        self.setToolTip("Open documentation")
+        self.setCursor(QtCore.Qt.CursorShape.PointingHandCursor)
+        self.setStyleSheet(
+            """
+            QToolButton {
+                border: 1px solid palette(mid);
+                border-radius: 11px;
+                font-weight: bold;
+                font-size: 12px;
+                color: palette(button-text);
+                background: palette(button);
+            }
+            QToolButton:hover {
+                background: palette(highlight);
+                color: palette(highlighted-text);
+                border-color: palette(highlight);
+            }
+        """
+        )
+        self.clicked.connect(self._open_docs)
+
+    def _open_docs(self) -> None:
+        QtGui.QDesktopServices.openUrl(QtCore.QUrl(self.help_url))
+
+
+class Dialog(QtWidgets.QDialog):
+    """Base class for dialogs without 'What's this?' help."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.setWindowFlag(
+            QtCore.Qt.WindowType.WindowContextHelpButtonHint, False
+        )
 
 
 def deprecation_warning(message: str) -> None:

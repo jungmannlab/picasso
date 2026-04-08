@@ -420,7 +420,7 @@ class MaskPreview(QtWidgets.QLabel):
         return x_min, x_max, y_min, y_max
 
 
-class MaskGeneratorTab(QtWidgets.QDialog):
+class MaskGeneratorTab(lib.Dialog):
     """Tab for generating masks for heterogenous density simulations.
 
     ...
@@ -469,6 +469,8 @@ class MaskGeneratorTab(QtWidgets.QDialog):
         probability cutoff.
     """
 
+    DOCS_URL = "https://picassosr.readthedocs.io/en/latest/spinna.html#mask-generation-tab"
+
     def __init__(self, window: QtWidgets.QMainWindow) -> None:
         super().__init__(window)
         self.setAutoFillBackground(True)
@@ -487,24 +489,25 @@ class MaskGeneratorTab(QtWidgets.QDialog):
         preview_box = QtWidgets.QGroupBox("Preview")
         layout.addWidget(preview_box, 0, 0, 3, 1)
         preview_grid = QtWidgets.QGridLayout(preview_box)
-        preview_grid.addWidget(self.preview, 0, 0, 1, 3)
+        preview_grid.addWidget(lib.HelpButton(self.DOCS_URL), 0, 0)
+        preview_grid.addWidget(self.preview, 1, 0, 1, 3)
 
         # scalebar
         self.scalebar_check = QtWidgets.QCheckBox("Show scale bar")
         self.scalebar_check.setChecked(False)
         self.scalebar_check.setEnabled(False)
         self.scalebar_check.stateChanged.connect(self.preview.render_image)
-        preview_grid.addWidget(self.scalebar_check, 1, 0)
+        preview_grid.addWidget(self.scalebar_check, 2, 0)
 
         label = QtWidgets.QLabel("Scale bar length (nm):")
         label.setAlignment(QtCore.Qt.AlignmentFlag.AlignRight)
-        preview_grid.addWidget(label, 1, 1)
+        preview_grid.addWidget(label, 2, 1)
         self.scalebar_length = ignoreArrowsSpinBox()
         self.scalebar_length.setEnabled(False)
         self.scalebar_length.setRange(1, 20_000)
         self.scalebar_length.setValue(1_000)
         self.scalebar_length.valueChanged.connect(self.preview.render_image)
-        preview_grid.addWidget(self.scalebar_length, 1, 2)
+        preview_grid.addWidget(self.scalebar_length, 2, 2)
 
         # MASK PARAMETERS AND LOADING
         mask_box = QtWidgets.QGroupBox("Parameters")
@@ -1398,7 +1401,7 @@ class StructurePreview(QtWidgets.QLabel):
         return colors
 
 
-class StructuresTab(QtWidgets.QDialog):
+class StructuresTab(lib.Dialog):
     """Tab for creating structures.
 
     ...
@@ -1423,6 +1426,10 @@ class StructuresTab(QtWidgets.QDialog):
         Checkbox for showing/hiding scalebar.
     """
 
+    DOCS_URL = (
+        "https://picassosr.readthedocs.io/en/latest/spinna.html#structures-tab"
+    )
+
     def __init__(self, window: QtWidgets.QMainWindow) -> None:
         super().__init__(window)
         self.setAutoFillBackground(True)
@@ -1438,42 +1445,43 @@ class StructuresTab(QtWidgets.QDialog):
         preview_box = QtWidgets.QGroupBox("Preview")
         layout.addWidget(preview_box, 0, 0, 2, 1)
         preview_layout = QtWidgets.QGridLayout(preview_box)
+        preview_layout.addWidget(lib.HelpButton(self.DOCS_URL), 0, 0)
         self.preview = StructurePreview(self)
-        preview_layout.addWidget(self.preview, 0, 0, 1, 4)
+        preview_layout.addWidget(self.preview, 1, 0, 1, 4)
 
         # show legend and scalebar
         self.show_legend_check = QtWidgets.QCheckBox("Show legend")
         self.show_legend_check.setToolTip("Show molecular targets' names?")
         self.show_legend_check.setChecked(True)
         self.show_legend_check.stateChanged.connect(self.update_preview)
-        preview_layout.addWidget(self.show_legend_check, 1, 0)
+        preview_layout.addWidget(self.show_legend_check, 2, 0)
 
         self.show_scalebar_check = QtWidgets.QCheckBox("Show scale bar")
         self.show_scalebar_check.setChecked(True)
         self.show_scalebar_check.stateChanged.connect(self.update_preview)
-        preview_layout.addWidget(self.show_scalebar_check, 1, 1)
+        preview_layout.addWidget(self.show_scalebar_check, 2, 1)
 
         length_label = QtWidgets.QLabel("Length (nm):")
         length_label.setToolTip("Scale bar length.")
         length_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignRight)
-        preview_layout.addWidget(length_label, 1, 2)
+        preview_layout.addWidget(length_label, 2, 2)
         self.scalebar_length = QtWidgets.QDoubleSpinBox()
         self.scalebar_length.setDecimals(1)
         self.scalebar_length.setValue(1.0)
         self.scalebar_length.setRange(0.1, 100)
         self.scalebar_length.setSingleStep(0.1)
         self.scalebar_length.valueChanged.connect(self.update_preview)
-        preview_layout.addWidget(self.scalebar_length, 1, 3)
+        preview_layout.addWidget(self.scalebar_length, 2, 3)
 
         reset_rot_button = QtWidgets.QPushButton("Reset rotation")
         reset_rot_button.setToolTip("Reset rotation angles to 0.")
         reset_rot_button.released.connect(partial(self.update_preview, True))
-        preview_layout.addWidget(reset_rot_button, 2, 0, 1, 2)
+        preview_layout.addWidget(reset_rot_button, 3, 0, 1, 2)
 
         save_view_button = QtWidgets.QPushButton("Save view")
         save_view_button.setToolTip("Save current view as an image.")
         save_view_button.released.connect(self.save_preview)
-        preview_layout.addWidget(save_view_button, 2, 2, 1, 2)
+        preview_layout.addWidget(save_view_button, 3, 2, 1, 2)
 
         # STRUCTURES SUMMARY
         self.structures_box = lib.ScrollableGroupBox("Structures summary")
@@ -1874,7 +1882,7 @@ class StructuresTab(QtWidgets.QDialog):
             self.preview.qimage.save(path)
 
 
-class GenerateSearchSpaceDialog(QtWidgets.QDialog):
+class GenerateSearchSpaceDialog(lib.Dialog):
     """Input dialog to get the parameters for generating numbers of
     structures (stoichiometries) for SPINNA fitting.
 
@@ -1963,7 +1971,7 @@ class GenerateSearchSpaceDialog(QtWidgets.QDialog):
         ]
 
 
-class CompareModelsDialog(QtWidgets.QDialog):
+class CompareModelsDialog(lib.Dialog):
     """Dialog for comparing different models (lists of structures)
     and label uncertainties. Useful for fine-tuning and exploring the
     model structures.
@@ -2181,7 +2189,7 @@ class CompareModelsDialog(QtWidgets.QDialog):
         del self.model_buttons[index]
 
 
-class OptionalSettingsDialog(QtWidgets.QDialog):
+class OptionalSettingsDialog(lib.Dialog):
     """Dialog for setting optional parameters in the Simulations Tab.
 
     ...
@@ -2289,7 +2297,7 @@ class OptionalSettingsDialog(QtWidgets.QDialog):
                     spin.setEnabled(False)
 
 
-class NNDPlotSettingsDialog(QtWidgets.QDialog):
+class NNDPlotSettingsDialog(lib.Dialog):
     """Dialog for adjusting settings for plotting nearest neighbors
     distances.
 
@@ -2607,7 +2615,7 @@ class NNDPlotSettingsDialog(QtWidgets.QDialog):
         self.rehist_sim = True
 
 
-class SimulationsTab(QtWidgets.QDialog):
+class SimulationsTab(lib.Dialog):
     """Tab for running simulations and finding the proportions of
     structure in the experimental data.
 
@@ -2739,6 +2747,10 @@ class SimulationsTab(QtWidgets.QDialog):
         Main window.
     """
 
+    DOCS_URL = (
+        "https://picassosr.readthedocs.io/en/latest/spinna.html#simulate-tab"
+    )
+
     def __init__(self, window: QtWidgets.QMainWindow) -> None:
         super().__init__(window)
         self.window = window
@@ -2781,18 +2793,21 @@ class SimulationsTab(QtWidgets.QDialog):
 
         # LOAD DATA
         load_data_box = QtWidgets.QGroupBox("Load data")
-        load_data_box.setFixedHeight(450)
+        load_data_box.setFixedHeight(470)
         left_column.addWidget(load_data_box, 0, 0)
         load_data_layout = QtWidgets.QGridLayout(load_data_box)
 
         basic_buttons_layout = QtWidgets.QVBoxLayout()
+        first_row = QtWidgets.QHBoxLayout()
+        basic_buttons_layout.addLayout(first_row)
+        first_row.addWidget(lib.HelpButton(self.DOCS_URL))
         load_data_layout.addLayout(basic_buttons_layout, 0, 0)
         self.load_structures_button = QtWidgets.QPushButton("Load structures")
         self.load_structures_button.setToolTip(
             "Load structure files from a .yaml file (see Structures)."
         )
         self.load_structures_button.released.connect(self.load_structures)
-        basic_buttons_layout.addWidget(self.load_structures_button)
+        first_row.addWidget(self.load_structures_button)
 
         self.dim_widget = QtWidgets.QComboBox()
         self.dim_widget.setToolTip("Choose between 2D and 3D simulations.")
@@ -2946,7 +2961,7 @@ class SimulationsTab(QtWidgets.QDialog):
 
         # FITTING
         fitting_box = QtWidgets.QGroupBox("Fitting")
-        fitting_box.setFixedHeight(250)
+        fitting_box.setFixedHeight(230)
         left_column.addWidget(fitting_box, 1, 0)
         fitting_layout = QtWidgets.QGridLayout(fitting_box)
 

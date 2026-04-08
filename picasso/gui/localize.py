@@ -458,7 +458,7 @@ class EmissionComboBoxDict(UserDict):
                 break
 
 
-class PromptInfoDialog(QtWidgets.QDialog):
+class PromptInfoDialog(lib.Dialog):
     """Enter movie metadata.
 
     ...
@@ -557,7 +557,7 @@ class PromptInfoDialog(QtWidgets.QDialog):
         return (info, save, result == QtWidgets.QDialog.DialogCode.Accepted)
 
 
-class PromptChannelDialog(QtWidgets.QDialog):
+class PromptChannelDialog(lib.Dialog):
     """Dialog for selecting a channel. Used for .IMS files."""
 
     def __init__(self, window: QtWidgets.QWidget) -> None:
@@ -598,7 +598,7 @@ class PromptChannelDialog(QtWidgets.QDialog):
         return (channel, result == QtWidgets.QDialog.DialogCode.Accepted)
 
 
-class ParametersDialog(QtWidgets.QDialog):
+class ParametersDialog(lib.Dialog):
     """Choose analysis parameters.
 
     ...
@@ -664,6 +664,9 @@ class ParametersDialog(QtWidgets.QDialog):
         The main window of the application.
     """
 
+    CALIB_URL = "https://picassosr.readthedocs.io/en/latest/localize.html#d-calibration"
+    IDENT_URL = "https://picassosr.readthedocs.io/en/latest/localize.html#identification-and-fitting-of-single-molecule-spots"
+
     def __init__(self, parent: QtWidgets.QMainWindow | None = None) -> None:
         super().__init__(parent)
         self.window = parent
@@ -688,19 +691,22 @@ class ParametersDialog(QtWidgets.QDialog):
         identification_grid = QtWidgets.QGridLayout(identification_groupbox)
 
         # Box Size
+        first_row = QtWidgets.QHBoxLayout()
+        identification_grid.addLayout(first_row, 0, 0, 1, 2)
+        first_row.addWidget(lib.HelpButton(self.IDENT_URL))
         boxsize_label = QtWidgets.QLabel("Box side length:")
         boxsize_label.setToolTip(
             "Box size in camera pixels for identification."
         )
-        identification_grid.addWidget(boxsize_label, 0, 0)
+        first_row.addWidget(boxsize_label)
         self.box_spinbox = OddSpinBox()
         self.box_spinbox.setKeyboardTracking(False)
         self.box_spinbox.setValue(DEFAULT_PARAMETERS["Box Size"])
         self.box_spinbox.valueChanged.connect(self.on_box_changed)
-        identification_grid.addWidget(self.box_spinbox, 0, 1)
+        first_row.addWidget(self.box_spinbox)
 
         # Min. Net Gradient
-        mng_label = QtWidgets.QLabel("Min.  Net Gradient:")
+        mng_label = QtWidgets.QLabel("Min. net gradient:")
         mng_label.setToolTip(
             "Threshold (related to brightness) for spot identification."
         )
@@ -803,7 +809,7 @@ class ParametersDialog(QtWidgets.QDialog):
         # Camera:
         if "Cameras" in CONFIG:
             # Experiment settings
-            exp_groupbox = QtWidgets.QGroupBox("Experiment settings")
+            exp_groupbox = QtWidgets.QGroupBox("Experiment Settings")
             vbox.addWidget(exp_groupbox)
             exp_grid = QtWidgets.QGridLayout(exp_groupbox)
             exp_grid.addWidget(QtWidgets.QLabel("Camera:"), 0, 0)
@@ -1028,6 +1034,7 @@ class ParametersDialog(QtWidgets.QDialog):
         load_z_calib.setAutoDefault(False)
         load_z_calib.clicked.connect(self.load_z_calib)
         z_grid.addWidget(load_z_calib, 0, 1)
+        z_grid.addWidget(lib.HelpButton(self.CALIB_URL), 2, 0)
         self.fit_z_checkbox = QtWidgets.QCheckBox("Fit Z")
         self.fit_z_checkbox.setEnabled(False)
         z_grid.addWidget(self.fit_z_checkbox, 2, 1)
@@ -1457,7 +1464,7 @@ class ParametersDialog(QtWidgets.QDialog):
                 self.sensitivity.setValue(sensitivity)
 
 
-class ContrastDialog(QtWidgets.QDialog):
+class ContrastDialog(lib.Dialog):
     """Choose display contrast."""
 
     def __init__(self, window: QtWidgets.QMainWindow) -> None:
@@ -1514,7 +1521,7 @@ class ContrastDialog(QtWidgets.QDialog):
             self.window.draw_frame()
 
 
-class LocColumnSelectionDialog(QtWidgets.QDialog):
+class LocColumnSelectionDialog(lib.Dialog):
     """Dialog for selecting which columns to save in the localization
     file."""
 
@@ -1599,6 +1606,8 @@ class Window(QtWidgets.QMainWindow):
     view : View
         The main view for displaying the image.
     """
+
+    DOCS_URL = "https://picassosr.readthedocs.io/en/latest/localize.html"
 
     def __init__(self) -> None:
         super().__init__()
@@ -1725,6 +1734,10 @@ class Window(QtWidgets.QMainWindow):
                 action.setChecked(True)
             sounds_menu.addAction(action)
         sounds_actiongroup.triggered.connect(lib.set_sound_notification)
+        help_action = file_menu.addAction("Help")
+        help_action.triggered.connect(
+            lambda: QtGui.QDesktopServices.openUrl(QtCore.QUrl(self.DOCS_URL))
+        )
 
         """ View """
         view_menu = menu_bar.addMenu("View")

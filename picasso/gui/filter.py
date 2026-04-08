@@ -374,7 +374,7 @@ class Hist2DWindow(PlotWindow):
         event.accept()
 
 
-class FilterNum(QtWidgets.QDialog):
+class FilterNum(lib.Dialog):
     """Dialog for filtering localizations by numeric values.
 
     ...
@@ -398,6 +398,8 @@ class FilterNum(QtWidgets.QDialog):
         Main window.
     """
 
+    DOCS_URL = "https://picassosr.readthedocs.io/en/latest/filter.html"
+
     def __init__(self, window: QtWidgets.QMainWindow) -> None:
         super().__init__(window)
         self.window = window
@@ -411,9 +413,10 @@ class FilterNum(QtWidgets.QDialog):
         self.setLayout(self.layout)
 
         # combox box with all atributes
+        self.layout.addWidget(lib.HelpButton(self.DOCS_URL), 0, 0)
         self.attributes = QtWidgets.QComboBox(self)
         self.attributes.setEditable(False)
-        self.layout.addWidget(self.attributes, 0, 0, 1, 2)
+        self.layout.addWidget(self.attributes, 0, 1)
 
         # lower value
         self.layout.addWidget(QtWidgets.QLabel("Min:"), 1, 0)
@@ -462,7 +465,7 @@ class FilterNum(QtWidgets.QDialog):
             self.attributes.addItem(name)
 
 
-class SubclusterNum(QtWidgets.QDialog):
+class SubclusterNum(lib.Dialog):
     """Input dialog for specifying the distances used for testing
     for subclustering.
 
@@ -596,6 +599,8 @@ class Window(QtWidgets.QMainWindow):
         Table view for displaying data.
     """
 
+    DOCS_URL = "https://picassosr.readthedocs.io/en/latest/filter.html"
+
     def __init__(self) -> None:
         super().__init__()
         # Init GUI
@@ -616,7 +621,10 @@ class Window(QtWidgets.QMainWindow):
         save_action = file_menu.addAction("Save")
         save_action.setShortcut(QtGui.QKeySequence.StandardKey.Save)
         save_action.triggered.connect(self.save_file_dialog)
-        file_menu.addAction(save_action)
+        help_action = file_menu.addAction("Help")
+        help_action.triggered.connect(
+            lambda: QtGui.QDesktopServices.openUrl(QtCore.QUrl(self.DOCS_URL))
+        )
         plot_menu = menu_bar.addMenu("Plot")
         histogram_action = plot_menu.addAction("Histogram")
         histogram_action.setShortcut("Ctrl+H")
