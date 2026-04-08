@@ -2359,7 +2359,7 @@ class G5MDialog(QtWidgets.QDialog):
         grid.addWidget(minlocs_label, grid.rowCount(), 0)
         self.min_locs = QtWidgets.QSpinBox()
         self.min_locs.setSingleStep(1)
-        self.min_locs.setRange(2, 999)
+        self.min_locs.setRange(2, 99999)
         self.min_locs.setValue(MIN_LOCS_G5M)
         grid.addWidget(self.min_locs, grid.rowCount() - 1, 1)
 
@@ -2542,7 +2542,7 @@ class G5MDialog(QtWidgets.QDialog):
 
     def load_calibration_(self, path: str) -> None:
         """Load calibration from the given path."""
-        # picasso.io takes in .hdf5 path
+        # picasso.io.load_info takes in .hdf5 path
         calib = io.load_info(path.replace(".yaml", ".hdf5"))
 
         if len(calib) != 1 or "X Coefficients" not in calib[0].keys():
@@ -2672,7 +2672,7 @@ class TestClustererDialog(QtWidgets.QDialog):
 
         # parameters - choose clusterer
         self.clusterer_name = QtWidgets.QComboBox()
-        for name in ["DBSCAN", "HDBSCAN", "SMLM"]:
+        for name in ["DBSCAN", "HDBSCAN", "SMLM", "G5M"]:
             self.clusterer_name.addItem(name)
         parameters_grid.addWidget(self.clusterer_name, 0, 0)
 
@@ -2688,6 +2688,8 @@ class TestClustererDialog(QtWidgets.QDialog):
         parameters_stack.addWidget(self.test_hdbscan_params)
         self.test_smlm_params = TestSMLMParams(self)
         parameters_stack.addWidget(self.test_smlm_params)
+        self.test_g5m_params = TestG5MParams(self)
+        parameters_stack.addWidget(self.test_g5m_params)
 
         # parameters - display modes
         self.one_pixel_blur = QtWidgets.QCheckBox("One pixel blur")
@@ -2814,6 +2816,15 @@ class TestClustererDialog(QtWidgets.QDialog):
             locs = clusterer.hdbscan(locs, **params)
         elif clusterer_name == "SMLM":
             locs = clusterer.cluster(locs, **params)
+        elif clusterer_name == "G5M":
+            params["DBSCAN"]["pixelsize"] = pixelsize
+            locs = clusterer.dbscan(locs, **params["DBSCAN"])
+            # in g5m, the info parameter is only for getting the pixel
+            # size
+            centers, locs, _ = g5m.g5m(
+                locs, [{"Pixelsize": pixelsize}], **params["G5M"]
+            )
+            centers["z"] /= pixelsize
 
         if len(locs):
             self.view.group_color = self.window.view.get_group_color(locs)
@@ -2821,7 +2832,14 @@ class TestClustererDialog(QtWidgets.QDialog):
         # scale z axis if applicable
         if "z" in locs.columns:
             locs.z /= pixelsize
-        return locs
+
+        # calculate cluster centers
+        if clusterer_name != "G5M":  # G5M found centers already
+            centers = clusterer.find_cluster_centers(
+                locs,
+                self.window.display_settings_dlg.pixelsize.value(),
+            )
+        return locs, centers
 
     def get_cluster_params(self) -> dict:
         """Extract clustering parameters for a given clustering method
@@ -2854,6 +2872,32 @@ class TestClustererDialog(QtWidgets.QDialog):
             )
             params["min_locs"] = self.test_smlm_params.min_locs.value()
             params["frame_analysis"] = self.test_smlm_params.fa.isChecked()
+        elif clusterer_name == "G5M":
+            params["DBSCAN"] = {}
+            params["DBSCAN"]["radius"] = (
+                self.test_g5m_params.dbscan_radius.value() / pixelsize
+            )
+            params["DBSCAN"][
+                "min_samples"
+            ] = self.test_g5m_params.dbscan_min_samples.value()
+            params["G5M"] = {}
+            params["G5M"]["min_locs"] = self.test_g5m_params.min_locs.value()
+            handle = self.test_g5m_params.loc_prec_handling.currentText()
+            if handle == "Local loc. precision":
+                params["G5M"]["loc_prec_handle"] = "local"
+            else:
+                params["G5M"]["loc_prec_handle"] = "abs"
+            params["G5M"]["sigma_bounds"] = (
+                self.test_g5m_params.min_sigma.value(),
+                self.test_g5m_params.max_sigma.value(),
+            )
+            params["G5M"][
+                "postprocess"
+            ] = self.test_g5m_params.postprocess_check.isChecked()
+            params["G5M"]["calibration"] = self.test_g5m_params.calibration
+            params["G5M"]["asynch"] = False
+            params["G5M"]["callback_parent"] = None
+
         return params
 
     def get_full_fov(self) -> np.ndarray:
@@ -2877,12 +2921,7 @@ class TestClustererDialog(QtWidgets.QDialog):
         self.channel = self.window.view.get_channel("Test clusterer")
         locs = self.window.view.picked_locs(self.channel)[0]
         # cluster picked locs
-        self.view.locs = self.cluster(locs, params)
-        # calculate cluster centers
-        self.view.centers = clusterer.find_cluster_centers(
-            self.view.locs,
-            self.window.display_settings_dlg.pixelsize.value(),
-        )
+        self.view.locs, self.view.centers = self.cluster(locs, params)
         # update viewport if pick has changed
         if self.pick_changed():
             self.view.viewport = self.view.get_full_fov()
@@ -3011,6 +3050,109 @@ class TestSMLMParams(QtWidgets.QWidget):
         self.fa.setChecked(True)
         grid.addWidget(self.fa, 3, 0, 1, 2)
         grid.setRowStretch(4, 1)
+
+
+class TestG5MParams(QtWidgets.QWidget):
+    """Choose parameters for G5M testing."""
+
+    def __init__(self, dialog):
+        super().__init__()
+        self.dialog = dialog
+        self.calibration = None
+        grid = QtWidgets.QGridLayout(self)
+        grid.addWidget(
+            QtWidgets.QLabel("DBSCAN radius (nm):"), grid.rowCount(), 0
+        )
+        self.dbscan_radius = QtWidgets.QDoubleSpinBox()
+        self.dbscan_radius.setRange(0.01, 1e6)
+        self.dbscan_radius.setValue(10)
+        self.dbscan_radius.setDecimals(2)
+        self.dbscan_radius.setSingleStep(0.1)
+        grid.addWidget(self.dbscan_radius, grid.rowCount() - 1, 1)
+
+        grid.addWidget(
+            QtWidgets.QLabel("DBSCAN min. samples:"), grid.rowCount(), 0
+        )
+        self.dbscan_min_samples = QtWidgets.QSpinBox()
+        self.dbscan_min_samples.setValue(4)
+        self.dbscan_min_samples.setRange(1, int(1e6))
+        self.dbscan_min_samples.setSingleStep(1)
+        grid.addWidget(self.dbscan_min_samples, grid.rowCount() - 1, 1)
+
+        grid.addWidget(QtWidgets.QLabel("Min. locs:"), grid.rowCount(), 0)
+        self.min_locs = QtWidgets.QSpinBox()
+        self.min_locs.setValue(MIN_LOCS_G5M)
+        self.min_locs.setRange(2, 99999)
+        self.min_locs.setSingleStep(1)
+        grid.addWidget(self.min_locs, grid.rowCount() - 1, 1)
+
+        self.loc_prec_handling = QtWidgets.QComboBox()
+        self.loc_prec_handling.addItems(
+            ["Local loc. precision", "Custom \u03c3 bounds"]
+        )
+        self.loc_prec_handling.setCurrentIndex(0)
+        grid.addWidget(self.loc_prec_handling, grid.rowCount(), 0, 1, 2)
+
+        min_sigma_label = QtWidgets.QLabel("Min. \u03c3 factor:")
+        min_sigma_label.setToolTip(
+            "Minimum \u03c3 factor relative to localization precision\n"
+            "values (local) or absolute min. \u03c3."
+        )
+        grid.addWidget(min_sigma_label, grid.rowCount(), 0)
+        self.min_sigma = QtWidgets.QDoubleSpinBox()
+        self.min_sigma.setDecimals(2)
+        self.min_sigma.setSingleStep(0.01)
+        self.min_sigma.setValue(MIN_SIGMA_FACTOR_G5M)
+        self.min_sigma.setRange(0.00, 100.00)
+        grid.addWidget(self.min_sigma, grid.rowCount() - 1, 1)
+
+        max_sigma_label = QtWidgets.QLabel("Max. \u03c3 factor:")
+        max_sigma_label.setToolTip(
+            "Maximum \u03c3 factor relative to localization precision\n"
+            "values (local) or absolute max. \u03c3."
+        )
+        grid.addWidget(max_sigma_label, grid.rowCount(), 0)
+        self.max_sigma = QtWidgets.QDoubleSpinBox()
+        self.max_sigma.setDecimals(2)
+        self.max_sigma.setSingleStep(0.01)
+        self.max_sigma.setValue(MAX_SIGMA_FACTOR_G5M)
+        self.max_sigma.setRange(0.00, 100.00)
+        grid.addWidget(self.max_sigma, grid.rowCount() - 1, 1)
+
+        self.postprocess_check = QtWidgets.QCheckBox(
+            "Filter invalid molecules\nand frame analysis"
+        )
+        self.postprocess_check.setToolTip(
+            "Perform postprocessing to filter out sticking events\n"
+            "and low-quality fits.\n"
+            "The applied filters are:\n"
+            "- std_frame: < 10% of the acquisition time\n"
+            "- n_events > 3\n"
+            "- p_val < 0.015"
+        )
+
+        load_calib_button = QtWidgets.QPushButton(
+            "Load 3D calibration (3D only)"
+        )
+        load_calib_button.clicked.connect(self.load_calibration)
+        grid.addWidget(load_calib_button, grid.rowCount(), 0, 1, 2)
+
+    def load_calibration(self) -> None:
+        """Load the 3D calibration .yaml file."""
+        path, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self, "Open 3D calibration file", "", filter="*.yaml"
+        )
+        if not path:
+            return
+        calib = io.load_info(path.replace(".yaml", ".hdf5"))
+        if len(calib) != 1 or "X Coefficients" not in calib[0].keys():
+            message = (
+                "Please load a 3D calibration .yaml file produced by"
+                " Picasso: Localize."
+            )
+            QtWidgets.QMessageBox.information(self.window, "Warning", message)
+            return
+        self.calibration = calib[0]
 
 
 class TestClustererView(QtWidgets.QLabel):
