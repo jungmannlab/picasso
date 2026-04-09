@@ -1,7 +1,7 @@
 Changelog
 =========
 
-Last change: 08-APR-2026 CEST
+Last change: 09-APR-2026 CEST
 
 0.10.0
 ------
@@ -37,6 +37,7 @@ Last change: 08-APR-2026 CEST
 - "What's this?" help button removed from all dialogs (Windows)
 - Render GUI: test clustering supports G5M
 - Render GUI: Mask settings dialog allows for zooming and panning
+- Trace shows number of photons in addition to x, y and frame; exports .csv files with three columns (frame, ON/OFF and photons)
 
 *Bug fixes:*
 ++++++++++++

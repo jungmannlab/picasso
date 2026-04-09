@@ -9050,16 +9050,20 @@ class View(QtWidgets.QLabel):
             xvec = np.arange(n_frames)
             yvec = xvec[:] * 0
             yvec[locs["frame"]] = 1
+            yvec_ph = xvec[:] * 0
+            yvec_ph[locs["frame"]] = locs["photons"]
             self.current_trace_x = xvec
             self.current_trace_y = yvec
+            self.current_trace_y_ph = yvec_ph
             self.channel = channel
 
             self.canvas = lib.GenericPlotWindow("Trace", "render")
+            self.canvas.resize(1000, 750)
 
             self.canvas.figure.clear()
 
             # Three subplots sharing x axes
-            ax1, ax2, ax3 = self.canvas.figure.subplots(3, sharex=True)
+            ax1, ax2, ax3, ax4 = self.canvas.figure.subplots(4, sharex=True)
 
             # frame vs x
             ax1.scatter(locs["frame"], locs["x"], s=2)
@@ -9081,6 +9085,12 @@ class View(QtWidgets.QLabel):
             ax3.set_yticks([0, 1])
             ax3.set_ylim([-0.1, 1.1])
 
+            ax4.plot(xvec, yvec_ph, linewidth=1)
+            ax4.set_title("Photons")
+            ax4.set_xlabel("Frames")
+            ax4.set_ylabel("Photons")
+            ax4.set_ylim([0, locs["photons"].max() * 1.1])
+
             self.export_trace_button = QtWidgets.QPushButton("Export (*.csv)")
             self.canvas.toolbar.addWidget(self.export_trace_button)
             self.export_trace_button.clicked.connect(self.export_trace)
@@ -9090,13 +9100,19 @@ class View(QtWidgets.QLabel):
 
     def export_trace(self) -> None:
         """Save time trace as a .csv."""
-        trace = np.array([self.current_trace_x, self.current_trace_y])
+        trace = np.array(
+            [
+                self.current_trace_x,
+                self.current_trace_y,
+                self.current_trace_y_ph,
+            ]
+        ).T
         base, ext = os.path.splitext(self.locs_paths[self.channel])
-        out_path = base + ".trace.txt"
+        out_path = base + ".trace.csv"
 
         # get the name for saving
         path, ext = lib.get_save_filename_ext_dialog(
-            self, "Save trace as txt", out_path, filter="*.trace.txt"
+            self, "Save trace as csv", out_path, filter="*.csv"
         )
         if path:
             np.savetxt(path, trace, fmt="%i", delimiter=",")
@@ -9185,8 +9201,8 @@ class View(QtWidgets.QLabel):
                 i = 0  # index of the currently shown pick
                 n_frames = self.infos[channel][0]["Frames"]
                 while i < len(self._picks):
-                    fig, (ax1, ax2, ax3) = plt.subplots(
-                        3, 1, figsize=(5, 5), constrained_layout=True
+                    fig, (ax1, ax2, ax3, ax4) = plt.subplots(
+                        4, 1, figsize=(6, 6), constrained_layout=True
                     )
                     fig.canvas.manager.set_window_title("Trace")
                     pick = self._picks[i]
@@ -9195,6 +9211,8 @@ class View(QtWidgets.QLabel):
                     xvec = np.arange(n_frames)
                     yvec = np.ones_like(xvec, dtype=float) * -1
                     yvec[locs["frame"]] = locs["x"]
+                    yvec_ph = np.zeros_like(xvec, dtype=int)
+                    yvec_ph[locs["frame"]] = locs["photons"]
                     ax1.set_title(
                         "Scatterplot of Pick "
                         + str(i + 1)
@@ -9232,6 +9250,11 @@ class View(QtWidgets.QLabel):
                     ax3.set_xlabel("Frames")
                     ax3.set_ylabel("ON")
                     ax3.set_yticks([0, 1])
+
+                    ax4.plot(xvec, yvec_ph)
+                    ax4.set_title("Photons")
+                    ax4.set_xlabel("Frames")
+                    ax4.set_ylabel("Photons")
 
                     fig.canvas.draw()
                     width, height = fig.canvas.get_width_height()
