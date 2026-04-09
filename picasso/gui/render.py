@@ -9038,7 +9038,7 @@ class View(QtWidgets.QLabel):
         """Plot x and y coordinates of picked localizations in time.
         Additionally, show the time trace without spatial
         coordinates."""
-        self.current_trace_x = 0  # used for exporing
+        self.current_trace_x = 0  # used for exporting
         self.current_trace_y = 0
 
         channel = self.get_channel("Show trace")
@@ -9986,6 +9986,91 @@ class View(QtWidgets.QLabel):
 
         self.window.tools_settings_dialog.pick_diameter.setValue(box)
         self.add_picks(picks)
+
+    def plot_profile(self) -> None:
+        """Plot the profile of the current rectangular pick."""
+        if self._pick_shape != "Rectangle" or len(self._picks) != 1:
+            message = "Please select one rectangular pick to plot the profile."
+            QtWidgets.QMessageBox.warning(self, "Warning", message)
+            return
+        channel = self.get_channel_all_seq("Plot profile")
+        if channel is None:
+            return
+        if channel is len(self.locs_paths):
+            channels = list(range(len(self.locs_paths)))
+        else:
+            channels = [channel]
+        self._plot_profile(channels)
+
+    def _plot_profile(self, channels: list[int]) -> None:
+        """Plot the profile of the current rectangular pick for the
+        specified channels. Assumes that only one rectangular pick is
+        selected."""
+        self.profiles = []
+        pixelsize = self.window.display_settings_dlg.pixelsize.value()
+        for channel in channels:
+            picked_locs = postprocess.picked_locs(
+                self.all_locs[channel],
+                self.infos[channel],
+                picks=self._picks,
+                pick_shape=self._pick_shape,
+                pick_size=self.window.tools_settings_dialog.pick_width.value()
+                / pixelsize,
+            )[0]
+            self.profiles.append(
+                picked_locs["y_pick_rot"].to_numpy() * pixelsize
+            )
+
+        # plot profiles
+        self.canvas = lib.GenericPlotWindow("Pick profile", "render")
+        self.canvas.resize(700, 500)
+        self.canvas.figure.clear()
+
+        ax = self.canvas.figure.add_subplot(111)
+        colors = [
+            _.palette().color(QtGui.QPalette.ColorRole.Window)
+            for _ in self.window.dataset_dialog.colordisp_all
+        ]
+        colors = [
+            [_.red() / 255, _.green() / 255, _.blue() / 255] for _ in colors
+        ]
+        bins = lib.calculate_optimal_bins(
+            np.concatenate(self.profiles), max_n_bins=1000
+        )
+
+        for i, channel in enumerate(channels):
+            ax.hist(
+                self.profiles[i],
+                bins=bins,
+                density=False,
+                facecolor=colors[channel],
+                alpha=0.5,
+            )
+        ax.set_xlabel("Position along pick (nm)")
+        ax.set_ylabel("Counts")
+
+        export_profile = QtWidgets.QPushButton("Export (*.csv)")
+        self.canvas.toolbar.addWidget(export_profile)
+        export_profile.clicked.connect(self.export_profile)
+        self.canvas.canvas.draw()
+        self.canvas.show()
+
+    def export_profile(self) -> None:
+        """Export the profile of the current rectangular pick as a .csv
+        file."""
+        if not hasattr(self, "profiles") or len(self.profiles) == 0:
+            message = "No profile to export."
+            QtWidgets.QMessageBox.warning(self, "Warning", message)
+            return
+        path, _ = lib.get_save_filename_ext_dialog(
+            self,
+            "Save profile(s)",
+            "pick_profile.csv",
+            filter="*.csv",
+        )
+        if path:
+            df = pd.concat(self.profiles, axis=1)
+            df.to_csv(path, index=False)
 
     @check_picks
     @check_circular_picks
@@ -12339,6 +12424,9 @@ class Window(QtWidgets.QMainWindow):
 
         pick_fiducials_action = tools_menu.addAction("Pick fiducials")
         pick_fiducials_action.triggered.connect(self.view.pick_fiducials)
+
+        profile_action = tools_menu.addAction("Plot pick profile")
+        profile_action.triggered.connect(self.view.plot_profile)
 
         tools_menu.addSeparator()
         show_trace_action = tools_menu.addAction("Show trace")

@@ -39,6 +39,7 @@ Last change: 09-APR-2026 CEST
 - Render GUI: test clustering supports G5M
 - Render GUI: Mask settings dialog allows for zooming and panning
 - Trace shows number of photons in addition to x, y and frame; exports .csv files with three columns (frame, ON/OFF and photons)
+- Render GUI: plot localization profile for rectangular pick
 
 *Bug fixes:*
 ++++++++++++
