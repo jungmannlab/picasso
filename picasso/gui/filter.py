@@ -612,6 +612,7 @@ class Window(QtWidgets.QMainWindow):
         self.setWindowIcon(icon)
         self.table_view = TableView(self, self)
         self.filter_num = FilterNum(self)
+        self.metadata_dialog = lib.MetadataDialog(self)
         menu_bar = self.menuBar()
         file_menu = menu_bar.addMenu("File")
         open_action = file_menu.addAction("Open")
@@ -621,6 +622,9 @@ class Window(QtWidgets.QMainWindow):
         save_action = file_menu.addAction("Save")
         save_action.setShortcut(QtGui.QKeySequence.StandardKey.Save)
         save_action.triggered.connect(self.save_file_dialog)
+        metadata_action = file_menu.addAction("Show metadata")
+        metadata_action.setShortcut("Ctrl+M")
+        metadata_action.triggered.connect(self.show_metadata)
         help_action = file_menu.addAction("Help")
         help_action.triggered.connect(
             lambda: QtGui.QDesktopServices.openUrl(QtCore.QUrl(self.DOCS_URL))
@@ -634,6 +638,7 @@ class Window(QtWidgets.QMainWindow):
         scatter_action.triggered.connect(self.plot_hist2d)
         test_subcluster_action = plot_menu.addAction("Test subclustering")
         test_subcluster_action.triggered.connect(self.plot_subclustering)
+
         filter_menu = menu_bar.addMenu("Filter")
         filter_action = filter_menu.addAction("Filter")
         filter_action.setShortcut("Ctrl+F")
@@ -667,6 +672,18 @@ class Window(QtWidgets.QMainWindow):
         self.pwd = pwd
 
         self.plugin_menu = menu_bar.addMenu("Plugins")  # do not delete
+
+    def show_metadata(self) -> None:
+        """Open the metadata dialog."""
+        if self.locs is None:
+            QtWidgets.QMessageBox.information(
+                self, "Metadata", "No file loaded."
+            )
+            return
+        label = os.path.basename(self.locs_path)
+        self.metadata_dialog.set_infos(self.info, labels=label)
+        self.metadata_dialog.show()
+        self.metadata_dialog.raise_()
 
     def open_file_dialog(self) -> None:
         if self.pwd == []:

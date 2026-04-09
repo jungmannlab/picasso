@@ -562,6 +562,7 @@ class Window(QtWidgets.QMainWindow):
         self.view = View(self)
         self.setCentralWidget(self.view)
         self.parameters_dialog = ParametersDialog(self)
+        self.metadata_dialog = lib.MetadataDialog(self)
         menu_bar = self.menuBar()
         file_menu = menu_bar.addMenu("File")
         open_action = file_menu.addAction("Open")
@@ -572,6 +573,9 @@ class Window(QtWidgets.QMainWindow):
         save_action.setShortcut(QtGui.QKeySequence.StandardKey.Save)
         save_action.triggered.connect(self.save)
         file_menu.addAction(save_action)
+        metadata_action = file_menu.addAction("Show metadata")
+        metadata_action.setShortcut("Ctrl+M")
+        metadata_action.triggered.connect(self.show_metadata)
         help_action = file_menu.addAction("Help")
         help_action.triggered.connect(
             lambda: QtGui.QDesktopServices.openUrl(QtCore.QUrl(self.DOCS_URL))
@@ -584,6 +588,18 @@ class Window(QtWidgets.QMainWindow):
         average_action.setShortcut("Ctrl+A")
         average_action.triggered.connect(self.view.average)
         self.plugin_menu = menu_bar.addMenu("Plugins")  # do not delete
+
+    def show_metadata(self) -> None:
+        """Open the metadata dialog."""
+        if not hasattr(self.view, "info"):
+            QtWidgets.QMessageBox.information(
+                self, "Metadata", "No file loaded."
+            )
+            return
+        label = os.path.basename(self.view.path)
+        self.metadata_dialog.set_infos(self.view.info, labels=label)
+        self.metadata_dialog.show()
+        self.metadata_dialog.raise_()
 
     def open(self) -> None:
         """Open the dialog for opening a file to load."""

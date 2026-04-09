@@ -12222,6 +12222,7 @@ class Window(QtWidgets.QMainWindow):
         self.mask_settings_dialog = MaskSettingsDialog(self)
         self.slicer_dialog = SlicerDialog(self)
         self.info_dialog = InfoDialog(self)
+        self.metadata_dialog = lib.MetadataDialog(self)
         self.dataset_dialog = DatasetDialog(self)
         self.fast_render_dialog = FastRenderDialog(self)
         self.window_rot = RotationWindow(self)
@@ -12232,6 +12233,7 @@ class Window(QtWidgets.QMainWindow):
             self.dataset_dialog,
             self.info_dialog,
             self.info_dialog.change_fov,
+            self.metadata_dialog,
             self.mask_settings_dialog,
             self.tools_settings_dialog,
             self.slicer_dialog,
@@ -12370,6 +12372,9 @@ class Window(QtWidgets.QMainWindow):
         info_action.setShortcut("Ctrl+I")
         info_action.triggered.connect(self.info_dialog.show)
         view_menu.addAction(info_action)
+        metadata_action = view_menu.addAction("Show metadata")
+        metadata_action.setShortcut("Ctrl+M")
+        metadata_action.triggered.connect(self.show_metadata)
         slicer_action = view_menu.addAction("Slice")
         slicer_action.triggered.connect(self.slicer_dialog.initialize)
         rot_win_action = view_menu.addAction("Update rotation window")
@@ -13568,6 +13573,18 @@ class Window(QtWidgets.QMainWindow):
         self.menu_bar.clear()  # otherwise the menu bar is doubled
         self.setWindowTitle(f"Picasso v{__version__}: Render")
         self.initUI(plugins_loaded=True)
+
+    def show_metadata(self) -> None:
+        """Open the metadata dialog with current infos."""
+        if not self.view.infos:
+            QtWidgets.QMessageBox.information(
+                self, "Metadata", "No files loaded."
+            )
+            return
+        labels = [os.path.basename(p) for p in self.view.locs_paths]
+        self.metadata_dialog.set_infos(self.view.infos, labels)
+        self.metadata_dialog.show()
+        self.metadata_dialog.raise_()
 
     def rot_win(self) -> None:
         """Open/update ``RotationWindow``."""
