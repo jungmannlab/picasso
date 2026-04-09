@@ -1746,6 +1746,13 @@ class MainWindow(QtWidgets.QWidget):
         self.resize(800, 600)
         self.initUI()
 
+        self.user_settings_dialog = _io.UserSettingsDialog(self)
+        file_menu = self.menu_bar.addMenu("File")
+        picasso_settings_action = file_menu.addAction("Picasso settings")
+        picasso_settings_action.triggered.connect(
+            self.user_settings_dialog.show
+        )
+
     def initUI(self):
 
         # create window with canvas

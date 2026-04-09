@@ -15,6 +15,7 @@ Last change: 09-APR-2026 CEST
 - One-click installer uses Python 3.14 (previously 3.10) and updated dependencies, which should improve the performance of some functions
 - Installing Picasso as a package has less stringent dependencies and Python requirements, the exact versions are specified for one-click-installers only
 - Render GUI: added support for reading .csv files from ThunderSTORM
+- Easy access to user settings via any Picasso module
 
 *Small improvements:*
 +++++++++++++++++++++

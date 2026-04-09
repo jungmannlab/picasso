@@ -12253,6 +12253,7 @@ class Window(QtWidgets.QMainWindow):
         self.fast_render_dialog = FastRenderDialog(self)
         self.window_rot = RotationWindow(self)
         self.test_clusterer_dialog = TestClustererDialog(self)
+        self.user_settings_dialog = io.UserSettingsDialog(self)
 
         self.dialogs = [
             self.display_settings_dlg,
@@ -12266,6 +12267,7 @@ class Window(QtWidgets.QMainWindow):
             self.window_rot,
             self.fast_render_dialog,
             self.test_clusterer_dialog,
+            self.user_settings_dialog,
         ]
 
         # menu bar
@@ -12348,6 +12350,10 @@ class Window(QtWidgets.QMainWindow):
         )
         delete_action.triggered.connect(self.remove_locs)
 
+        picasso_settings_action = file_menu.addAction("Picasso settings")
+        picasso_settings_action.triggered.connect(
+            self.user_settings_dialog.show
+        )
         help_action = file_menu.addAction("Help")
         help_action.triggered.connect(
             lambda: QtGui.QDesktopServices.openUrl(QtCore.QUrl(self.DOCS_URL))

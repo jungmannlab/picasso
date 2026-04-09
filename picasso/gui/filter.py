@@ -613,6 +613,7 @@ class Window(QtWidgets.QMainWindow):
         self.table_view = TableView(self, self)
         self.filter_num = FilterNum(self)
         self.metadata_dialog = lib.MetadataDialog(self)
+        self.user_settings_dialog = io.UserSettingsDialog(self)
         menu_bar = self.menuBar()
         file_menu = menu_bar.addMenu("File")
         open_action = file_menu.addAction("Open")
@@ -625,6 +626,10 @@ class Window(QtWidgets.QMainWindow):
         metadata_action = file_menu.addAction("Show metadata")
         metadata_action.setShortcut("Ctrl+M")
         metadata_action.triggered.connect(self.show_metadata)
+        picasso_settings_action = file_menu.addAction("Picasso settings")
+        picasso_settings_action.triggered.connect(
+            self.user_settings_dialog.show
+        )
         help_action = file_menu.addAction("Help")
         help_action.triggered.connect(
             lambda: QtGui.QDesktopServices.openUrl(QtCore.QUrl(self.DOCS_URL))

@@ -1622,6 +1622,7 @@ class Window(QtWidgets.QMainWindow):
         self.parameters_dialog = ParametersDialog(self)
         self.contrast_dialog = ContrastDialog(self)
         self.columns_dialog = LocColumnSelectionDialog(self)
+        self.user_settings_dialog = io.UserSettingsDialog(self)
         self.init_menu_bar()
         self.view = View(self)
         self.setCentralWidget(self.view)
@@ -1735,6 +1736,10 @@ class Window(QtWidgets.QMainWindow):
                 action.setChecked(True)
             sounds_menu.addAction(action)
         sounds_actiongroup.triggered.connect(lib.set_sound_notification)
+        picasso_settings_action = file_menu.addAction("Picasso settings")
+        picasso_settings_action.triggered.connect(
+            self.user_settings_dialog.show
+        )
         help_action = file_menu.addAction("Help")
         help_action.triggered.connect(
             lambda: QtGui.QDesktopServices.openUrl(QtCore.QUrl(self.DOCS_URL))

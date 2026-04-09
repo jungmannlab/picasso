@@ -555,6 +555,7 @@ class Window(QtWidgets.QMainWindow):
         super().__init__()
         self.setWindowTitle(f"Picasso v{__version__}: Average")
         self.resize(512, 512)
+        self.user_settings_dialog = io.UserSettingsDialog(self)
         this_directory = os.path.dirname(os.path.realpath(__file__))
         icon_path = os.path.join(this_directory, "icons", "average.ico")
         icon = QtGui.QIcon(icon_path)
@@ -576,6 +577,10 @@ class Window(QtWidgets.QMainWindow):
         metadata_action = file_menu.addAction("Show metadata")
         metadata_action.setShortcut("Ctrl+M")
         metadata_action.triggered.connect(self.show_metadata)
+        picasso_settings_action = file_menu.addAction("Picasso settings")
+        picasso_settings_action.triggered.connect(
+            self.user_settings_dialog.show
+        )
         help_action = file_menu.addAction("Help")
         help_action.triggered.connect(
             lambda: QtGui.QDesktopServices.openUrl(QtCore.QUrl(self.DOCS_URL))

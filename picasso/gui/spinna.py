@@ -4667,6 +4667,13 @@ class Window(QtWidgets.QMainWindow):
         settings = io.load_user_settings()
         spinna_settings = settings.get("SPINNA", {})
         self.pwd = spinna_settings.get("PWD", os.getcwd())
+        self.user_settings_dialog = io.UserSettingsDialog(self)
+
+        file_menu = self.menuBar().addMenu("File")
+        picasso_settings_action = file_menu.addAction("Picasso settings")
+        picasso_settings_action.triggered.connect(
+            self.user_settings_dialog.show
+        )
 
         # TABS
         self.tabs = QtWidgets.QTabWidget()

@@ -26,7 +26,7 @@ import h5py
 import nd2
 import numpy as np
 import pandas as pd
-from PyQt6.QtWidgets import QWidget, QMessageBox
+from PyQt6 import QtWidgets, QtCore, QtGui
 
 from . import lib, __version__
 
@@ -327,7 +327,7 @@ def load_movie(
 
 def load_info(
     path: str,
-    qt_parent: QWidget | None = None,
+    qt_parent: QtWidgets.QWidget | None = None,
 ) -> list[dict]:
     """Load metadata from a YAML file associated with the movie file.
 
@@ -353,7 +353,7 @@ def load_info(
     except FileNotFoundError as e:
         print(f"\nAn error occured. Could not find metadata file:\n{filename}")
         if qt_parent is not None:
-            QMessageBox.critical(
+            QtWidgets.QMessageBox.critical(
                 qt_parent,
                 "An error occured",
                 f"Could not find metadata file:\n{filename}",
@@ -364,7 +364,7 @@ def load_info(
 
 def load_mask(
     path: str,
-    qt_parent: QWidget | None = None,
+    qt_parent: QtWidgets.QWidget | None = None,
 ) -> tuple[np.ndarray, dict]:
     """Load a mask generated with ``spinna.MaskGenerator``.
 
@@ -1637,7 +1637,7 @@ def save_locs(path: str, locs: pd.DataFrame, info: list[dict]) -> None:
 
 
 def load_locs(
-    path: str, qt_parent: QWidget | None = None
+    path: str, qt_parent: QtWidgets.QWidget | None = None
 ) -> tuple[pd.DataFrame, list[dict]]:
     """Load localization data from an HDF5 file.
 
@@ -1664,7 +1664,7 @@ def load_locs(
             "'locs' dataset."
         )
         if qt_parent is not None:
-            QMessageBox.critical(
+            QtWidgets.QMessageBox.critical(
                 qt_parent,
                 "An error occured",
                 f"File: {path} does not contain a 'locs' dataset.",
@@ -1697,7 +1697,7 @@ def load_clusters(path: str) -> pd.DataFrame:
 
 def load_filter(
     path: str,
-    qt_parent: QWidget | None = None,
+    qt_parent: QtWidgets.QWidget | None = None,
 ) -> tuple[pd.DataFrame, list[dict]]:
     """Load localization data from an HDF5 file, checking for different
     possible keys for the localization data. This function is used to
@@ -2087,3 +2087,78 @@ def import_ts(path: str, pixelsize: float) -> tuple[pd.DataFrame, list[dict]]:
     out_path = base + "_locs.hdf5"
     save_locs(out_path, locs, [img_info])
     return locs, [img_info]
+
+
+class UserSettingsDialog(lib.Dialog):
+    """Dialog for inspecting and editing the user settings YAML file."""
+
+    def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("User Settings")
+        self.setModal(False)
+        self.resize(600, 500)
+
+        layout = QtWidgets.QVBoxLayout(self)
+
+        path_label = QtWidgets.QLabel(
+            f"Settings file: {_user_settings_filename()}"
+        )
+        path_label.setTextInteractionFlags(
+            QtCore.Qt.TextInteractionFlag.TextSelectableByMouse
+        )
+        layout.addWidget(path_label)
+
+        self.editor = QtWidgets.QPlainTextEdit()
+        self.editor.setFont(QtGui.QFont("Courier", 12))
+        layout.addWidget(self.editor)
+
+        button_layout = QtWidgets.QHBoxLayout()
+        reload_button = QtWidgets.QPushButton("Reload")
+        reload_button.clicked.connect(self.load_settings)
+        button_layout.addWidget(reload_button)
+        button_layout.addStretch()
+        save_button = QtWidgets.QPushButton("Save")
+        save_button.clicked.connect(self.save_settings)
+        button_layout.addWidget(save_button)
+        layout.addLayout(button_layout)
+
+    def showEvent(self, event: QtGui.QShowEvent) -> None:
+        super().showEvent(event)
+        self.load_settings()
+
+    def load_settings(self) -> None:
+        """Read the settings file and display its contents."""
+        filename = _user_settings_filename()
+        try:
+            with open(filename, "r") as f:
+                self.editor.setPlainText(f.read())
+        except FileNotFoundError:
+            self.editor.setPlainText(
+                "# No settings file found. Edit and save to create one."
+            )
+
+    def save_settings(self) -> None:
+        """Validate YAML and write back to the settings file."""
+        text = self.editor.toPlainText()
+        try:
+            parsed = yaml.safe_load(text)
+        except yaml.YAMLError as e:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Invalid YAML",
+                f"Cannot save — the YAML is invalid:\n\n{e}",
+            )
+            return
+        if parsed is None:
+            parsed = {}
+        if not isinstance(parsed, dict):
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Invalid settings",
+                "Settings must be a YAML mapping (key: value pairs).",
+            )
+            return
+        save_user_settings(parsed)
+        QtWidgets.QMessageBox.information(
+            self, "Saved", "User settings saved successfully."
+        )
