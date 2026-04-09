@@ -671,6 +671,8 @@ class ViewRotation(QtWidgets.QLabel):
         self.infos = []
         self.paths = []
         self.group_color = []
+        self.x_render_state = False
+        self.x_locs = []
         self._size_hint = (512, 512)
         self._mode = "Rotate"
         self._rotation = []
@@ -742,6 +744,18 @@ class ViewRotation(QtWidgets.QLabel):
             self.window.dataset_dialog = w.dataset_dialog
             self.paths = w.view.locs_paths
 
+            # copy render property state from the main window
+            self.x_render_state = w.view.x_render_state
+            if self.x_render_state:
+                ds = w.display_settings_dlg
+                self.x_property = ds.parameter.currentText()
+                self.x_n_colors = ds.color_step.value()
+                self.x_min_val = ds.minimum_render.value()
+                self.x_max_val = ds.maximum_render.value()
+                self.x_colormap = ds.colormap_prop.currentText()
+            else:
+                self.x_locs = []
+
         # load locs in the pick and their metadata
         n_channels = len(self.paths)
         self.locs = []
@@ -772,6 +786,26 @@ class ViewRotation(QtWidgets.QLabel):
             self.group_color = self.window.window.view.get_group_color(
                 self.locs[0]
             )
+
+        # index locs by property for render property mode
+        if self.x_render_state and len(self.locs) == 1:
+            parameter = self.x_property
+            if parameter in self.locs[0].columns:
+                n_colors = self.x_n_colors
+                min_val = self.x_min_val
+                max_val = self.x_max_val
+                x_step = (max_val - min_val) / n_colors
+                x_color = np.floor(
+                    (self.locs[0][parameter] - min_val) / x_step
+                )
+                x_color[x_color < 0] = 0
+                x_color[x_color > n_colors] = n_colors
+                self.x_locs = [
+                    self.locs[0][x_color == i] for i in range(n_colors + 1)
+                ]
+            else:
+                self.x_render_state = False
+                self.x_locs = []
 
     def render_scene(
         self,
@@ -876,7 +910,15 @@ class ViewRotation(QtWidgets.QLabel):
 
         # other parameters for rendering
         n_channels = len(locs)
-        colors = lib.get_colors(n_channels)  # automatic colors
+
+        # use property colors if render by property is active
+        if self.x_render_state:
+            cmap_name = getattr(self, "x_colormap", "gist_rainbow")
+            base = plt.get_cmap(cmap_name)(np.arange(256))[:, :3]
+            idx = np.linspace(0, 255, n_channels).astype(int)
+            colors = base[idx]
+        else:
+            colors = lib.get_colors(n_channels)  # automatic colors
 
         if use_cache:
             n_locs = self.n_locs
@@ -914,50 +956,59 @@ class ViewRotation(QtWidgets.QLabel):
         bgra = np.zeros((Y, X, 4), dtype=np.float32)
 
         # color each channel one by one
-        for i in range(len(self.locs)):
-            # change colors if not automatic coloring
-            if not self.window.dataset_dialog.auto_colors.isChecked():
-                # get color from Dataset Dialog
-                color = self.window.dataset_dialog.colorselection[i]
-                color = color.currentText()
-                # if default color
-                if color in self.window.dataset_dialog.default_colors:
-                    index = self.window.dataset_dialog.default_colors.index(
-                        color
-                    )
-                    colors[i] = tuple(self.window.dataset_dialog.rgb[index])
-                # if hexadecimal is given
-                elif lib.is_hexadecimal(color):
-                    colorstring = color.lstrip("#")
-                    rgbval = tuple(
-                        int(colorstring[i : i + 2], 16) / 255
-                        for i in (0, 2, 4)
-                    )
-                    colors[i] = rgbval
-                else:
-                    c = self.window.dataset_dialog.checks[i].text()
-                    warning = (
-                        f"The color selection not recognised in the channel"
-                        f" {c}.  Please choose one of the options provided or "
-                        " type the hexadecimal code for your color of choice, "
-                        "starting with '#', e.g.  '#ffcdff' for pink."
-                    )
-                    QtWidgets.QMessageBox.information(self, "Warning", warning)
-                    break
+        if not self.x_render_state:
+            for i in range(len(self.locs)):
+                # change colors if not automatic coloring
+                if not self.window.dataset_dialog.auto_colors.isChecked():
+                    # get color from Dataset Dialog
+                    color = self.window.dataset_dialog.colorselection[i]
+                    color = color.currentText()
+                    # if default color
+                    if color in self.window.dataset_dialog.default_colors:
+                        index = (
+                            self.window.dataset_dialog.default_colors.index(
+                                color
+                            )
+                        )
+                        colors[i] = tuple(
+                            self.window.dataset_dialog.rgb[index]
+                        )
+                    # if hexadecimal is given
+                    elif lib.is_hexadecimal(color):
+                        colorstring = color.lstrip("#")
+                        rgbval = tuple(
+                            int(colorstring[i : i + 2], 16) / 255
+                            for i in (0, 2, 4)
+                        )
+                        colors[i] = rgbval
+                    else:
+                        c = self.window.dataset_dialog.checks[i].text()
+                        warning = (
+                            f"The color selection not recognised in the channel"
+                            f" {c}.  Please choose one of the options provided or "
+                            " type the hexadecimal code for your color of choice, "
+                            "starting with '#', e.g.  '#ffcdff' for pink."
+                        )
+                        QtWidgets.QMessageBox.information(
+                            self, "Warning", warning
+                        )
+                        break
 
-            # reverse colors if white background
-            if self.window.dataset_dialog.wbackground.isChecked():
-                tempcolor = colors[i]
-                inverted = tuple([1 - _ for _ in tempcolor])
-                colors[i] = inverted
+                # reverse colors if white background
+                if self.window.dataset_dialog.wbackground.isChecked():
+                    tempcolor = colors[i]
+                    inverted = tuple([1 - _ for _ in tempcolor])
+                    colors[i] = inverted
 
-            # adjust for relative intensity from Dataset Dialog
-            iscale = self.window.dataset_dialog.intensitysettings[i].value()
-            image[i] = iscale * image[i]
+                # adjust for relative intensity from Dataset Dialog
+                iscale = self.window.dataset_dialog.intensitysettings[
+                    i
+                ].value()
+                image[i] = iscale * image[i]
 
-            # don't display if channel unchecked in Dataset Dialog
-            if not self.window.dataset_dialog.checks[i].isChecked():
-                image[i] = 0 * image[i]
+                # don't display if channel unchecked in Dataset Dialog
+                if not self.window.dataset_dialog.checks[i].isChecked():
+                    image[i] = 0 * image[i]
 
         # color rgb channels and store in bgra
         for color, image in zip(colors, image):
@@ -1004,6 +1055,18 @@ class ViewRotation(QtWidgets.QLabel):
             8 bit array with 4 channels (rgb and alpha).
         """
         locs = self.locs[0]
+
+        # if render by property
+        if self.x_render_state:
+            locs = self.x_locs
+            return self.render_multi_channel(
+                kwargs,
+                locs=locs,
+                ang=ang,
+                autoscale=autoscale,
+                use_cache=use_cache,
+                cache=cache,
+            )
 
         # if clustered or picked locs
         if "group" in locs.columns:
