@@ -1644,6 +1644,7 @@ class Window(QtWidgets.QMainWindow):
         self.frame_range = None  # analyze all frames by default
         self.info = []
         self.extra_info = []
+        self._active_worker = None
 
         self.load_user_settings()
 
@@ -1805,6 +1806,12 @@ class Window(QtWidgets.QMainWindow):
         localize_action.setShortcut("Ctrl+L")
         localize_action.triggered.connect(self.localize)
         analyze_menu.addAction(localize_action)
+        analyze_menu.addSeparator()
+        self.abort_action = analyze_menu.addAction("Abort")
+        self.abort_action.setShortcut("Ctrl+.")
+        self.abort_action.triggered.connect(self.abort)
+        self.abort_action.setEnabled(False)
+        analyze_menu.addAction(self.abort_action)
 
         """ 3D """
         threed_menu = menu_bar.addMenu("3D")
@@ -2327,6 +2334,18 @@ class Window(QtWidgets.QMainWindow):
         self.ready_for_fit = False
         self.draw_frame()
 
+    def abort(self) -> None:
+        """Abort the currently running async process."""
+        if self._active_worker is not None:
+            self._active_worker.requestInterruption()
+
+    def on_worker_aborted(self) -> None:
+        """Handle the abortion of any worker thread."""
+        self._active_worker = None
+        self.abort_action.setEnabled(False)
+        self.parameters_dialog.gpufit_checkbox.setDisabled(False)
+        self.status_bar.showMessage("Aborted.")
+
     def identify(
         self,
         fit_afterwards: bool = False,
@@ -2354,6 +2373,9 @@ class Window(QtWidgets.QMainWindow):
             self.identification_worker.finished.connect(
                 self.on_identify_finished
             )
+            self.identification_worker.aborted.connect(self.on_worker_aborted)
+            self._active_worker = self.identification_worker
+            self.abort_action.setEnabled(True)
             self.identification_worker.start()
 
     def on_identify_progress(
@@ -2383,6 +2405,8 @@ class Window(QtWidgets.QMainWindow):
     ) -> None:
         """Handle the completion of the identification process. Save
         the parameters used, and localize/calibrate if requested."""
+        self._active_worker = None
+        self.abort_action.setEnabled(False)
         if len(identifications):
             self.locs = None
             self.last_identification_info = parameters.copy()
@@ -2442,6 +2466,9 @@ class Window(QtWidgets.QMainWindow):
             )
             self.fit_worker.progressMade.connect(self.on_fit_progress)
             self.fit_worker.finished.connect(self.on_fit_finished)
+            self.fit_worker.aborted.connect(self.on_worker_aborted)
+            self._active_worker = self.fit_worker
+            self.abort_action.setEnabled(True)
             self.fit_worker.start()
 
     def fit_z(self) -> None:
@@ -2464,6 +2491,9 @@ class Window(QtWidgets.QMainWindow):
         )
         self.fit_z_worker.progressMade.connect(self.on_fit_z_progress)
         self.fit_z_worker.finished.connect(self.on_fit_z_finished)
+        self.fit_z_worker.aborted.connect(self.on_worker_aborted)
+        self._active_worker = self.fit_z_worker
+        self.abort_action.setEnabled(True)
         self.fit_z_worker.start()
 
     def on_fit_progress(self, curr: int, total: int) -> None:
@@ -2484,6 +2514,8 @@ class Window(QtWidgets.QMainWindow):
         """Handle the completion of the fitting process. Draw fit
         markers, fit/calibration z coordinates, if requested, save
         localizations."""
+        self._active_worker = None
+        self.abort_action.setEnabled(False)
         self.status_bar.showMessage(
             f"Fitted {len(locs):,} spots in {elapsed_time:.2f} seconds."
         )
@@ -2543,6 +2575,8 @@ class Window(QtWidgets.QMainWindow):
         elapsed_time: float,
     ) -> None:
         """Handle the completion of the z fitting process."""
+        self._active_worker = None
+        self.abort_action.setEnabled(False)
         self.status_bar.showMessage(
             f"Fitted {len(locs):,} z coordinates in {elapsed_time:.2f} "
             "seconds."
@@ -2816,6 +2850,7 @@ class IdentificationWorker(QtCore.QThread):
 
     progressMade = QtCore.pyqtSignal(int, dict)
     finished = QtCore.pyqtSignal(dict, object, float, pd.DataFrame, bool, bool)
+    aborted = QtCore.pyqtSignal()
 
     def __init__(
         self,
@@ -2843,6 +2878,11 @@ class IdentificationWorker(QtCore.QThread):
             frame_bounds=self.frame_range,
         )
         while curr[0] < N:
+            if self.isInterruptionRequested():
+                for f in futures:
+                    f.cancel()
+                self.aborted.emit()
+                return
             self.progressMade.emit(curr[0], self.parameters)
             time.sleep(0.2)
         self.progressMade.emit(curr[0], self.parameters)
@@ -2864,6 +2904,7 @@ class FitWorker(QtCore.QThread):
 
     progressMade = QtCore.pyqtSignal(int, int)
     finished = QtCore.pyqtSignal(pd.DataFrame, float, bool, bool)
+    aborted = QtCore.pyqtSignal()
 
     def __init__(
         self,
@@ -2908,6 +2949,11 @@ class FitWorker(QtCore.QThread):
                 fs = gausslq.fit_spots_parallel(spots, asynch=True)
                 n_tasks = len(fs)
                 while lib.n_futures_done(fs) < n_tasks:
+                    if self.isInterruptionRequested():
+                        for f in fs:
+                            f.cancel()
+                        self.aborted.emit()
+                        return
                     self.progressMade.emit(
                         round(N * lib.n_futures_done(fs) / n_tasks), N
                     )
@@ -2925,6 +2971,9 @@ class FitWorker(QtCore.QThread):
                 spots, self.eps, self.max_it, method="sigmaxy"
             )
             while curr[0] < N:
+                if self.isInterruptionRequested():
+                    self.aborted.emit()
+                    return
                 self.progressMade.emit(curr[0], N)
                 time.sleep(0.2)
             locs = gaussmle.locs_from_fits(
@@ -2940,6 +2989,11 @@ class FitWorker(QtCore.QThread):
             fs = avgroi.fit_spots_parallel(spots, asynch=True)
             n_tasks = len(fs)
             while lib.n_futures_done(fs) < n_tasks:
+                if self.isInterruptionRequested():
+                    for f in fs:
+                        f.cancel()
+                    self.aborted.emit()
+                    return
                 self.progressMade.emit(
                     round(N * lib.n_futures_done(fs) / n_tasks),
                     N,
@@ -2966,6 +3020,7 @@ class FitZWorker(QtCore.QThread):
 
     progressMade = QtCore.pyqtSignal(int, int)
     finished = QtCore.pyqtSignal(pd.DataFrame, float)
+    aborted = QtCore.pyqtSignal()
 
     def __init__(
         self,
@@ -2999,6 +3054,11 @@ class FitZWorker(QtCore.QThread):
         )
         n_tasks = len(fs)
         while lib.n_futures_done(fs) < n_tasks:
+            if self.isInterruptionRequested():
+                for f in fs:
+                    f.cancel()
+                self.aborted.emit()
+                return
             self.progressMade.emit(
                 round(N * lib.n_futures_done(fs) / n_tasks),
                 N,

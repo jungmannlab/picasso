@@ -42,6 +42,7 @@ Last change: 09-APR-2026 CEST
 - Render GUI: plot localization profile for rectangular pick
 - 3D rotation window supports rendering by property
 - Render, Average and Filter allow the user to inspect metadata in the app
+- Localize GUI: added abort button to stop asynchronous multiprocessing (for example, during identification)
 
 *Bug fixes:*
 ++++++++++++
