@@ -8249,7 +8249,7 @@ class View(QtWidgets.QLabel):
         paths = [_.toLocalFile() for _ in urls]
         extensions = [os.path.splitext(_)[1].lower() for _ in paths]
         if extensions == [".txt"]:  # just one txt dropped
-            self.load_fov_drop(paths[0])
+            self.load_single_txt(paths[0])
         if extensions == [".yaml"]:  # just one yaml dropped
             with open(paths[0], "r") as f:
                 file = yaml.full_load(f)
@@ -8607,23 +8607,54 @@ class View(QtWidgets.QLabel):
         }
         return kwargs
 
-    def load_fov_drop(self, path: str) -> None:
+    def load_single_txt(self, path: str) -> None:
+        """Tries to load a single .txt file that contains either FOV
+        coordinates or is a drift correction file."""
+        try:
+            data = np.loadtxt(path)
+        except ValueError:
+            return
+        if data.shape == (4,):  # try loading FOV
+            self.load_fov_drop(data)
+        elif data.ndim == 2 and data.shape[1] in [2, 3]:  # try loading drift
+            channel = self.get_channel("Select channel for drift correction")
+            if channel is None:
+                return
+            self.load_drift_drop(channel, data)
+
+    def load_fov_drop(self, fov: np.ndarray) -> None:
         """Check if path is a fov .txt file (4 coordinates) and load the
         FOV."""
-        try:
-            file = np.loadtxt(path)
-        except ValueError:  # not a np array
-            return
+        (x, y, w, h) = fov
+        if w > 0 and h > 0:
+            viewport = [(y, x), (y + h, x + w)]
+            self.update_scene(viewport=viewport)
+            self.window.info_dialog.xy_label.setText(f"{x:.2f} / {y:.2f} ")
+            self.window.info_dialog.wh_label.setText(
+                f"{w:.2f} / {h:.2f} pixels"
+            )
 
-        if file.shape == (4,):
-            (x, y, w, h) = file
-            if w > 0 and h > 0:
-                viewport = [(y, x), (y + h, x + w)]
-                self.update_scene(viewport=viewport)
-                self.window.info_dialog.xy_label.setText(f"{x:.2f} / {y:.2f} ")
-                self.window.info_dialog.wh_label.setText(
-                    f"{w:.2f} / {h:.2f} pixels"
-                )
+    def load_drift_drop(self, channel: int, drift: np.ndarray) -> None:
+        """Attempts to load a drift .txt file (2 or 3 columns) and apply
+        the drift to localizations. Assumes only one channel is
+        currently loaded."""
+        n_frames = lib.get_from_metadata(self.infos[channel], "Frames")
+        n_dim = 3 if hasattr(self.all_locs[channel], "z") else 2
+        if drift.shape[0] != n_frames or drift.shape[1] != n_dim:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Drift file mismatch",
+                (
+                    f"Drift file has {drift.shape[0]} frames and "
+                    f"{drift.shape[1]} dimensions, but the loaded data "
+                    f"has {n_frames} frames and {n_dim} dimensions. "
+                    "Please provide a drift file with the correct number"
+                    " of frames and dimensions."
+                ),
+            )
+            return
+        # apply drift
+        self._apply_drift(channel, drift)
 
     def load_picks(self, path: str) -> None:
         """Load picks from .yaml file.
@@ -11532,53 +11563,48 @@ class View(QtWidgets.QLabel):
             )
             if path:
                 drift = np.loadtxt(path, delimiter=" ")
-                all_frame = self.all_locs[channel]["frame"]
-                frame = self.locs[channel]["frame"]
-                if drift.shape[1] == 3:  # 3D drift
-                    drift = pd.DataFrame(
-                        {
-                            "x": drift[:, 0],
-                            "y": drift[:, 1],
-                            "z": drift[:, 2],
-                        }
-                    )
-                    self.all_locs[channel]["x"] -= (
-                        drift["x"].iloc[all_frame].to_numpy()
-                    )
-                    self.all_locs[channel]["y"] -= (
-                        drift["y"].iloc[all_frame].to_numpy()
-                    )
-                    self.all_locs[channel]["z"] -= (
-                        drift["z"].iloc[all_frame].to_numpy()
-                    )
-                    self.locs[channel]["x"] -= (
-                        drift["x"].iloc[frame].to_numpy()
-                    )
-                    self.locs[channel]["y"] -= (
-                        drift["y"].iloc[frame].to_numpy()
-                    )
-                    self.locs[channel]["z"] -= (
-                        drift["z"].iloc[frame].to_numpy()
-                    )
-                else:  # 2D drift
-                    drift = pd.DataFrame({"x": drift[:, 0], "y": drift[:, 1]})
-                    self.all_locs[channel]["x"] -= (
-                        drift["x"].iloc[all_frame].to_numpy()
-                    )
-                    self.all_locs[channel]["y"] -= (
-                        drift["y"].iloc[all_frame].to_numpy()
-                    )
-                    self.locs[channel]["x"] -= (
-                        drift["x"].iloc[frame].to_numpy()
-                    )
-                    self.locs[channel]["y"] -= (
-                        drift["y"].iloc[frame].to_numpy()
-                    )
-                self._drift[channel] = drift
+                self._apply_drift(channel, drift)
                 self._driftfiles[channel] = path
-                self.currentdrift[channel] = copy.copy(drift)
-                self.index_blocks[channel] = None
-                self.update_scene()
+
+    def _apply_drift(self, channel: int, drift: np.ndarray) -> None:
+        """Shift localizations in a given channel based on drift from a
+        .txt file."""
+        all_frame = self.all_locs[channel]["frame"]
+        frame = self.locs[channel]["frame"]
+        if drift.shape[1] == 3:  # 3D drift
+            drift = pd.DataFrame(
+                {
+                    "x": drift[:, 0],
+                    "y": drift[:, 1],
+                    "z": drift[:, 2],
+                }
+            )
+            self.all_locs[channel]["x"] -= (
+                drift["x"].iloc[all_frame].to_numpy()
+            )
+            self.all_locs[channel]["y"] -= (
+                drift["y"].iloc[all_frame].to_numpy()
+            )
+            self.all_locs[channel]["z"] -= (
+                drift["z"].iloc[all_frame].to_numpy()
+            )
+            self.locs[channel]["x"] -= drift["x"].iloc[frame].to_numpy()
+            self.locs[channel]["y"] -= drift["y"].iloc[frame].to_numpy()
+            self.locs[channel]["z"] -= drift["z"].iloc[frame].to_numpy()
+        else:  # 2D drift
+            drift = pd.DataFrame({"x": drift[:, 0], "y": drift[:, 1]})
+            self.all_locs[channel]["x"] -= (
+                drift["x"].iloc[all_frame].to_numpy()
+            )
+            self.all_locs[channel]["y"] -= (
+                drift["y"].iloc[all_frame].to_numpy()
+            )
+            self.locs[channel]["x"] -= drift["x"].iloc[frame].to_numpy()
+            self.locs[channel]["y"] -= drift["y"].iloc[frame].to_numpy()
+        self._drift[channel] = drift
+        self.currentdrift[channel] = copy.copy(drift)
+        self.index_blocks[channel] = None
+        self.update_scene()
 
     def unfold_groups_square(self) -> None:
         """Shifts grouped localizations onto a square grid with a chosen

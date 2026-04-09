@@ -43,6 +43,7 @@ Last change: 09-APR-2026 CEST
 - 3D rotation window supports rendering by property
 - Render, Average and Filter allow the user to inspect metadata in the app
 - Localize GUI: added abort button to stop asynchronous multiprocessing (for example, during identification)
+- Render GUI: apply drift from external file supports dropping the .txt file
 
 *Bug fixes:*
 ++++++++++++
