@@ -12237,7 +12237,7 @@ class Window(QtWidgets.QMainWindow):
 
         help_action = file_menu.addAction("Help")
         help_action.triggered.connect(
-            lambda: QtGui.QDesktopServices.openUrl(self.DOCS_URL)
+            lambda: QtGui.QDesktopServices.openUrl(QtCore.QUrl(self.DOCS_URL))
         )
 
         # menu bar - View

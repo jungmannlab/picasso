@@ -40,7 +40,7 @@ declare -a TOOLS=(
 echo ">>> Setting up conda environment and preparing package..."
 # Create conda environment (if not already created)
 echo "Creating conda environment 'installer'..."
-conda create -n installer python=3.10.19 -y
+conda create -n installer python=3.14.4 -y
 conda activate installer
 pip install build
 cd ../..

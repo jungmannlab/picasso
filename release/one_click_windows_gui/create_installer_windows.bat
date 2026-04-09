@@ -5,12 +5,12 @@ call RMDIR /Q/S dist
 
 call cd %~dp0\..\..
 
-call conda create -n picasso_installer python=3.10.19 -y
+call conda create -n picasso_installer python=3.14.4 -y
 call conda activate picasso_installer
 call pip install build
 call python -m build
 
-for /f %%i in ('python -c "from picasso.version import __version__; print(__version__)"') do set PICASSO_VERSION=%%i
+for /f %%i in ('python -c "exec(open('picasso/version.py').read()); print(__version__)"') do set PICASSO_VERSION=%%i
 call pip install "dist/picassosr-%PICASSO_VERSION%-py3-none-any.whl[installer]"
 call cd release/one_click_windows_gui
 
@@ -20,6 +20,7 @@ call pyinstaller "../pyinstaller/picasso_pyinstaller.py" ^
     --collect-all PyImarisWriter ^
     --collect-all streamlit ^
     --copy-metadata streamlit ^
+    --copy-metadata imageio ^
     --name picasso ^
     --icon "../logos/localize.ico" ^
     --noconfirm
@@ -30,6 +31,7 @@ call pyinstaller "../pyinstaller/picasso_pyinstaller.py" ^
     --collect-all PyImarisWriter ^
     --collect-all streamlit ^
     --copy-metadata streamlit ^
+    --copy-metadata imageio ^
     --name picassow ^
     --icon "../logos/localize.ico" ^
     --noconfirm
