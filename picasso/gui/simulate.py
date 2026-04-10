@@ -1237,7 +1237,7 @@ class Window(QtWidgets.QMainWindow):
             print("Handles will be displayed..")
 
     def keyPressEvent(self, e: QtGui.QKeyEvent) -> None:
-        if e.key() == QtCore.Qt.Key_Escape:
+        if e.key() == QtCore.Qt.Key.Key_Escape:
             self.close()
 
     def vectorToString(self, x: np.ndarray) -> str:
