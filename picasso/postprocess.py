@@ -2594,7 +2594,7 @@ def apply_drift(
             drift,
             columns=["x", "y"] + (["z"] if drift.shape[1] == 3 else []),
         )
-    _apply_drift(locs, drift)
+    return _apply_drift(locs, drift)
 
 
 def align(

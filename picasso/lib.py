@@ -60,6 +60,84 @@ class Dialog(QtWidgets.QDialog):
         )
 
 
+class UserSettingsDialog(Dialog):
+    """Dialog for inspecting and editing the user settings YAML file."""
+
+    def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("User Settings")
+        self.setModal(False)
+        self.resize(600, 500)
+
+        layout = QtWidgets.QVBoxLayout(self)
+
+        path_label = QtWidgets.QLabel(
+            f"Settings file: {io._user_settings_filename()}\n"
+            "Warning: editing this file can affect the behavior of Picasso.\n"
+            "Clearing the file will reset all settings to their default "
+            "values."
+        )
+        path_label.setTextInteractionFlags(
+            QtCore.Qt.TextInteractionFlag.TextSelectableByMouse
+        )
+        layout.addWidget(path_label)
+
+        self.editor = QtWidgets.QPlainTextEdit()
+        self.editor.setFont(QtGui.QFont("Helvetica", 12))
+        layout.addWidget(self.editor)
+
+        button_layout = QtWidgets.QHBoxLayout()
+        reload_button = QtWidgets.QPushButton("Reload")
+        reload_button.clicked.connect(self.load_settings)
+        button_layout.addWidget(reload_button)
+        button_layout.addStretch()
+        save_button = QtWidgets.QPushButton("Save")
+        save_button.clicked.connect(self.save_settings)
+        button_layout.addWidget(save_button)
+        layout.addLayout(button_layout)
+
+    def showEvent(self, event: QtGui.QShowEvent) -> None:
+        super().showEvent(event)
+        self.load_settings()
+
+    def load_settings(self) -> None:
+        """Read the settings file and display its contents."""
+        filename = io._user_settings_filename()
+        try:
+            with open(filename, "r") as f:
+                self.editor.setPlainText(f.read())
+        except FileNotFoundError:
+            self.editor.setPlainText(
+                "# No settings file found. Edit and save to create one."
+            )
+
+    def save_settings(self) -> None:
+        """Validate YAML and write back to the settings file."""
+        text = self.editor.toPlainText()
+        try:
+            parsed = yaml.safe_load(text)
+        except yaml.YAMLError as e:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Invalid YAML",
+                f"Cannot save — the YAML is invalid:\n\n{e}",
+            )
+            return
+        if parsed is None:
+            parsed = {}
+        if not isinstance(parsed, dict):
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Invalid settings",
+                "Settings must be a YAML mapping (key: value pairs).",
+            )
+            return
+        io.save_user_settings(parsed)
+        QtWidgets.QMessageBox.information(
+            self, "Saved", "User settings saved successfully."
+        )
+
+
 class MetadataDialog(Dialog):
     """Dialog for inspecting YAML metadata (list of lists of dicts).
 

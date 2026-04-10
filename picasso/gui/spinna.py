@@ -420,7 +420,7 @@ class MaskPreview(QtWidgets.QLabel):
         return x_min, x_max, y_min, y_max
 
 
-class MaskGeneratorTab(lib.Dialog):
+class MaskGeneratorTab(io.Dialog):
     """Tab for generating masks for heterogenous density simulations.
 
     ...
@@ -1401,7 +1401,7 @@ class StructurePreview(QtWidgets.QLabel):
         return colors
 
 
-class StructuresTab(lib.Dialog):
+class StructuresTab(io.Dialog):
     """Tab for creating structures.
 
     ...
@@ -1882,7 +1882,7 @@ class StructuresTab(lib.Dialog):
             self.preview.qimage.save(path)
 
 
-class GenerateSearchSpaceDialog(lib.Dialog):
+class GenerateSearchSpaceDialog(io.Dialog):
     """Input dialog to get the parameters for generating numbers of
     structures (stoichiometries) for SPINNA fitting.
 
@@ -1971,7 +1971,7 @@ class GenerateSearchSpaceDialog(lib.Dialog):
         ]
 
 
-class CompareModelsDialog(lib.Dialog):
+class CompareModelsDialog(io.Dialog):
     """Dialog for comparing different models (lists of structures)
     and label uncertainties. Useful for fine-tuning and exploring the
     model structures.
@@ -2189,7 +2189,7 @@ class CompareModelsDialog(lib.Dialog):
         del self.model_buttons[index]
 
 
-class OptionalSettingsDialog(lib.Dialog):
+class OptionalSettingsDialog(io.Dialog):
     """Dialog for setting optional parameters in the Simulations Tab.
 
     ...
@@ -2297,7 +2297,7 @@ class OptionalSettingsDialog(lib.Dialog):
                     spin.setEnabled(False)
 
 
-class NNDPlotSettingsDialog(lib.Dialog):
+class NNDPlotSettingsDialog(io.Dialog):
     """Dialog for adjusting settings for plotting nearest neighbors
     distances.
 
@@ -2615,7 +2615,7 @@ class NNDPlotSettingsDialog(lib.Dialog):
         self.rehist_sim = True
 
 
-class SimulationsTab(lib.Dialog):
+class SimulationsTab(io.Dialog):
     """Tab for running simulations and finding the proportions of
     structure in the experimental data.
 
@@ -4669,12 +4669,6 @@ class Window(QtWidgets.QMainWindow):
         self.pwd = spinna_settings.get("PWD", os.getcwd())
         self.user_settings_dialog = io.UserSettingsDialog(self)
 
-        file_menu = self.menuBar().addMenu("File")
-        picasso_settings_action = file_menu.addAction("Picasso settings")
-        picasso_settings_action.triggered.connect(
-            self.user_settings_dialog.show
-        )
-
         # TABS
         self.tabs = QtWidgets.QTabWidget()
         self.setCentralWidget(self.tabs)
@@ -4709,6 +4703,10 @@ class Window(QtWidgets.QMainWindow):
                 action.setChecked(True)
             sounds_menu.addAction(action)
         sounds_actiongroup.triggered.connect(lib.set_sound_notification)
+        picasso_settings_action = file_menu.addAction("Picasso settings")
+        picasso_settings_action.triggered.connect(
+            self.user_settings_dialog.show
+        )
 
         self.plugin_menu = self.menuBar().addMenu("Plugins")  # do not delete
 
