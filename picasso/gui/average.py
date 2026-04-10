@@ -555,7 +555,7 @@ class Window(QtWidgets.QMainWindow):
         super().__init__()
         self.setWindowTitle(f"Picasso v{__version__}: Average")
         self.resize(512, 512)
-        self.user_settings_dialog = io.UserSettingsDialog(self)
+        self.user_settings_dialog = lib.UserSettingsDialog(self)
         this_directory = os.path.dirname(os.path.realpath(__file__))
         icon_path = os.path.join(this_directory, "icons", "average.ico")
         icon = QtGui.QIcon(icon_path)

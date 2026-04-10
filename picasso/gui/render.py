@@ -12253,7 +12253,7 @@ class Window(QtWidgets.QMainWindow):
         self.fast_render_dialog = FastRenderDialog(self)
         self.window_rot = RotationWindow(self)
         self.test_clusterer_dialog = TestClustererDialog(self)
-        self.user_settings_dialog = io.UserSettingsDialog(self)
+        self.user_settings_dialog = lib.UserSettingsDialog(self)
 
         self.dialogs = [
             self.display_settings_dlg,

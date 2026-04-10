@@ -4667,13 +4667,7 @@ class Window(QtWidgets.QMainWindow):
         settings = io.load_user_settings()
         spinna_settings = settings.get("SPINNA", {})
         self.pwd = spinna_settings.get("PWD", os.getcwd())
-        self.user_settings_dialog = io.UserSettingsDialog(self)
-
-        file_menu = self.menuBar().addMenu("File")
-        picasso_settings_action = file_menu.addAction("Picasso settings")
-        picasso_settings_action.triggered.connect(
-            self.user_settings_dialog.show
-        )
+        self.user_settings_dialog = lib.UserSettingsDialog(self)
 
         # TABS
         self.tabs = QtWidgets.QTabWidget()
@@ -4709,6 +4703,10 @@ class Window(QtWidgets.QMainWindow):
                 action.setChecked(True)
             sounds_menu.addAction(action)
         sounds_actiongroup.triggered.connect(lib.set_sound_notification)
+        picasso_settings_action = file_menu.addAction("Picasso settings")
+        picasso_settings_action.triggered.connect(
+            self.user_settings_dialog.show
+        )
 
         self.plugin_menu = self.menuBar().addMenu("Plugins")  # do not delete
 

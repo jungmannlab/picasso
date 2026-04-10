@@ -1622,7 +1622,7 @@ class Window(QtWidgets.QMainWindow):
         self.parameters_dialog = ParametersDialog(self)
         self.contrast_dialog = ContrastDialog(self)
         self.columns_dialog = LocColumnSelectionDialog(self)
-        self.user_settings_dialog = io.UserSettingsDialog(self)
+        self.user_settings_dialog = lib.UserSettingsDialog(self)
         self.init_menu_bar()
         self.view = View(self)
         self.setCentralWidget(self.view)

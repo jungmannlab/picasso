@@ -613,7 +613,7 @@ class Window(QtWidgets.QMainWindow):
         self.table_view = TableView(self, self)
         self.filter_num = FilterNum(self)
         self.metadata_dialog = lib.MetadataDialog(self)
-        self.user_settings_dialog = io.UserSettingsDialog(self)
+        self.user_settings_dialog = lib.UserSettingsDialog(self)
         menu_bar = self.menuBar()
         file_menu = menu_bar.addMenu("File")
         open_action = file_menu.addAction("Open")
