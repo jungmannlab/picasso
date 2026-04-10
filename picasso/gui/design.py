@@ -302,7 +302,7 @@ def indextoStr(x: float, y: float) -> tuple[str, int]:
     return strIndex
 
 
-class PipettingDialog(_io.Dialog):
+class PipettingDialog(lib.Dialog):
     """Dialog for selecting the folder to create the .pdf file with
     displayed 96-well plated based on the .csv file with sequence
     information.
@@ -420,7 +420,7 @@ class PipettingDialog(_io.Dialog):
         return (fulllist, result == QtWidgets.QDialog.DialogCode.Accepted)
 
 
-class SeqDialog(_io.Dialog):
+class SeqDialog(lib.Dialog):
     """Dialog for setting extensions based on the UI selection.
 
     ...
@@ -581,7 +581,7 @@ class SeqDialog(_io.Dialog):
         return tablelong, tableshort
 
 
-class FoldingDialog(_io.Dialog):
+class FoldingDialog(lib.Dialog):
     """Dialog for calculating the volumes of reagents for preparing the
     given DNA origami.
 
@@ -732,7 +732,7 @@ class FoldingDialog(_io.Dialog):
         )
 
 
-class PlateDialog(_io.Dialog):
+class PlateDialog(lib.Dialog):
     """Dialog for selecting plate export options.
 
     The user can choose either to export only the sequences needed for
@@ -1354,6 +1354,12 @@ class Window(QtWidgets.QMainWindow):
         self.statusBar().showMessage(
             "Ready."
         )  # . . Sequences loaded from " + BaseSequencesFile + ".")
+        self.user_settings_dialog = lib.UserSettingsDialog(self)
+        file_menu = self.menuBar().addMenu("File")
+        picasso_settings_action = file_menu.addAction("Picasso settings")
+        picasso_settings_action.triggered.connect(
+            self.user_settings_dialog.show
+        )
 
     def openDialog(self) -> None:
         """Open a dialog to select a design file."""
@@ -1745,13 +1751,6 @@ class MainWindow(QtWidgets.QWidget):
         self.setWindowIcon(icon)
         self.resize(800, 600)
         self.initUI()
-
-        self.user_settings_dialog = _io.UserSettingsDialog(self)
-        file_menu = self.menuBar().addMenu("File")
-        picasso_settings_action = file_menu.addAction("Picasso settings")
-        picasso_settings_action.triggered.connect(
-            self.user_settings_dialog.show
-        )
 
     def initUI(self):
 

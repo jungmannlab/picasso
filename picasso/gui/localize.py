@@ -458,7 +458,7 @@ class EmissionComboBoxDict(UserDict):
                 break
 
 
-class PromptInfoDialog(io.Dialog):
+class PromptInfoDialog(lib.Dialog):
     """Enter movie metadata.
 
     ...
@@ -557,7 +557,7 @@ class PromptInfoDialog(io.Dialog):
         return (info, save, result == QtWidgets.QDialog.DialogCode.Accepted)
 
 
-class PromptChannelDialog(io.Dialog):
+class PromptChannelDialog(lib.Dialog):
     """Dialog for selecting a channel. Used for .IMS files."""
 
     def __init__(self, window: QtWidgets.QWidget) -> None:
@@ -598,7 +598,7 @@ class PromptChannelDialog(io.Dialog):
         return (channel, result == QtWidgets.QDialog.DialogCode.Accepted)
 
 
-class ParametersDialog(io.Dialog):
+class ParametersDialog(lib.Dialog):
     """Choose analysis parameters.
 
     ...
@@ -1464,7 +1464,7 @@ class ParametersDialog(io.Dialog):
                 self.sensitivity.setValue(sensitivity)
 
 
-class ContrastDialog(io.Dialog):
+class ContrastDialog(lib.Dialog):
     """Choose display contrast."""
 
     def __init__(self, window: QtWidgets.QMainWindow) -> None:
@@ -1521,7 +1521,7 @@ class ContrastDialog(io.Dialog):
             self.window.draw_frame()
 
 
-class LocColumnSelectionDialog(io.Dialog):
+class LocColumnSelectionDialog(lib.Dialog):
     """Dialog for selecting which columns to save in the localization
     file."""
 

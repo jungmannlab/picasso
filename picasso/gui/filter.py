@@ -374,7 +374,7 @@ class Hist2DWindow(PlotWindow):
         event.accept()
 
 
-class FilterNum(io.Dialog):
+class FilterNum(lib.Dialog):
     """Dialog for filtering localizations by numeric values.
 
     ...
@@ -465,7 +465,7 @@ class FilterNum(io.Dialog):
             self.attributes.addItem(name)
 
 
-class SubclusterNum(io.Dialog):
+class SubclusterNum(lib.Dialog):
     """Input dialog for specifying the distances used for testing
     for subclustering.
 

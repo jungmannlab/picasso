@@ -466,7 +466,7 @@ class Predictor(QtCore.QThread):
         self.prediction_finished.emit(self.locs)
 
 
-class train_dialog(io.Dialog):
+class train_dialog(lib.Dialog):
     """Dialog for choosing model training parameters."""
 
     def __init__(self, window):
