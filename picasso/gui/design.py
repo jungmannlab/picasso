@@ -302,7 +302,7 @@ def indextoStr(x: float, y: float) -> tuple[str, int]:
     return strIndex
 
 
-class PipettingDialog(lib.Dialog):
+class PipettingDialog(_io.Dialog):
     """Dialog for selecting the folder to create the .pdf file with
     displayed 96-well plated based on the .csv file with sequence
     information.
@@ -420,7 +420,7 @@ class PipettingDialog(lib.Dialog):
         return (fulllist, result == QtWidgets.QDialog.DialogCode.Accepted)
 
 
-class SeqDialog(lib.Dialog):
+class SeqDialog(_io.Dialog):
     """Dialog for setting extensions based on the UI selection.
 
     ...
@@ -581,7 +581,7 @@ class SeqDialog(lib.Dialog):
         return tablelong, tableshort
 
 
-class FoldingDialog(lib.Dialog):
+class FoldingDialog(_io.Dialog):
     """Dialog for calculating the volumes of reagents for preparing the
     given DNA origami.
 
@@ -732,7 +732,7 @@ class FoldingDialog(lib.Dialog):
         )
 
 
-class PlateDialog(lib.Dialog):
+class PlateDialog(_io.Dialog):
     """Dialog for selecting plate export options.
 
     The user can choose either to export only the sequences needed for
@@ -1746,7 +1746,7 @@ class MainWindow(QtWidgets.QWidget):
         self.resize(800, 600)
         self.initUI()
 
-        self.user_settings_dialog = lib.UserSettingsDialog(self)
+        self.user_settings_dialog = _io.UserSettingsDialog(self)
         file_menu = self.menuBar().addMenu("File")
         picasso_settings_action = file_menu.addAction("Picasso settings")
         picasso_settings_action.triggered.connect(

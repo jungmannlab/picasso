@@ -263,7 +263,7 @@ class Worker(QtCore.QThread):
             )
 
 
-class ParametersDialog(lib.Dialog):
+class ParametersDialog(io.Dialog):
     """Dialog for setting parameters - oversampling and iterations.
 
     ...

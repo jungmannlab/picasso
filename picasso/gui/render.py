@@ -359,7 +359,7 @@ class PickHistWindow(QtWidgets.QTabWidget):
         self.plotted = True
 
 
-class ApplyDialog(lib.Dialog):
+class ApplyDialog(io.Dialog):
     """Apply expressions to manipulate localizations display.
 
     ...
@@ -463,7 +463,7 @@ class ApplyDialog(lib.Dialog):
         self.label.setText(str(vars))
 
 
-class DatasetDialog(lib.Dialog):
+class DatasetDialog(io.Dialog):
     """Show legend, show white background, tick and untick, change title
     of, set color, set relative intensity and close each channel.
 
@@ -949,7 +949,7 @@ class DatasetDialog(lib.Dialog):
         return QtCore.QSize(600, 350)
 
 
-class PlotDialog(lib.Dialog):
+class PlotDialog(io.Dialog):
     """Plot a 3D scatter of picked localizations. Allows the user to
     keep the selected picks or remove them."""
 
@@ -1085,7 +1085,7 @@ class PlotDialog(lib.Dialog):
         return dialog.result
 
 
-class PlotDialogIso(lib.Dialog):
+class PlotDialogIso(io.Dialog):
     """Plot 4 scatter plots: XY, XZ and YZ projections and a 3D plot.
     Allows the user to keep the given picks of remove them.
     Everything but the getParams method is identical to PlotDialog.
@@ -1319,7 +1319,7 @@ class PlotDialogIso(lib.Dialog):
         return dialog.result
 
 
-class ClsDlg3D(lib.Dialog):
+class ClsDlg3D(io.Dialog):
     """Cluster picked locs with k-means in 3D."""
 
     def __init__(self, window: QtWidgets.QWidget | None) -> None:
@@ -1524,7 +1524,7 @@ class ClsDlg3D(lib.Dialog):
         )
 
 
-class ClsDlg2D(lib.Dialog):
+class ClsDlg2D(io.Dialog):
     """Same as ``ClsDlg3D`` but in 2D."""
 
     def __init__(self, window: QtWidgets.QWidget | None) -> None:
@@ -1712,7 +1712,7 @@ class ClsDlg2D(lib.Dialog):
         )
 
 
-class AIMDialog(lib.Dialog):
+class AIMDialog(io.Dialog):
     """Choose parameters for AIM undrifting.
 
     ...
@@ -1802,7 +1802,7 @@ class AIMDialog(lib.Dialog):
         return params, result == QtWidgets.QDialog.DialogCode.Accepted
 
 
-class DbscanDialog(lib.Dialog):
+class DbscanDialog(io.Dialog):
     """Choose parameters for DBSCAN. See scikit-learn for details.
 
     ...
@@ -1905,7 +1905,7 @@ class DbscanDialog(lib.Dialog):
         }, result == QtWidgets.QDialog.DialogCode.Accepted
 
 
-class ExportKwargsDialog(lib.Dialog):
+class ExportKwargsDialog(io.Dialog):
     """Choose parameters for exporting an image.
 
     ...
@@ -2025,7 +2025,7 @@ class ExportKwargsDialog(lib.Dialog):
         )
 
 
-class HdbscanDialog(lib.Dialog):
+class HdbscanDialog(io.Dialog):
     """Choose parameters for HDBSCAN. See scikit-learn for details.
 
     ...
@@ -2132,7 +2132,7 @@ class HdbscanDialog(lib.Dialog):
         )
 
 
-class LinkDialog(lib.Dialog):
+class LinkDialog(io.Dialog):
     """Choose parameters for linking localizations, i.e., merging
     localizations likely to occur from a single binding event.
 
@@ -2203,7 +2203,7 @@ class LinkDialog(lib.Dialog):
         )
 
 
-class SMLMDialog(lib.Dialog):
+class SMLMDialog(io.Dialog):
     """Choose inputs for SMLM clusterer.
 
     ...
@@ -2356,7 +2356,7 @@ class SMLMDialog(lib.Dialog):
         )
 
 
-class G5MDialog(lib.Dialog):
+class G5MDialog(io.Dialog):
     """Extract parameters for G5M: ``min_locs``, ``min_sigma``,
     ``max_sigma``. For 3D, calibration is requested. The user can also
     choose whether or not to use bootstrapping for finding
@@ -2636,7 +2636,7 @@ class G5MDialog(lib.Dialog):
         )
 
 
-class TestClustererDialog(lib.Dialog):
+class TestClustererDialog(io.Dialog):
     """Test clustering parameters on a region of interest, i.e., a
     single pick.
 
@@ -3516,7 +3516,7 @@ class DriftPlotWindow(QtWidgets.QTabWidget):
         self.canvas.draw()
 
 
-class ChangeFOV(lib.Dialog):
+class ChangeFOV(io.Dialog):
     """Manually change field of view.
 
     ...
@@ -3638,7 +3638,7 @@ class ChangeFOV(lib.Dialog):
         )
 
 
-class InfoDialog(lib.Dialog):
+class InfoDialog(io.Dialog):
     """Show information about the current display, fit precision, number
     of locs and picks and qPAINT data.
 
@@ -4365,7 +4365,7 @@ class ZoomableLabel(QtWidgets.QLabel):
         self._sync_linked()
 
 
-class MaskSettingsDialog(lib.Dialog):
+class MaskSettingsDialog(io.Dialog):
     """Mask localizations based on local density.
 
     ...
@@ -5069,7 +5069,7 @@ class PickToolSquareSettings(QtWidgets.QWidget):
         self.grid.setRowStretch(1, 1)
 
 
-class ToolsSettingsDialog(lib.Dialog):
+class ToolsSettingsDialog(io.Dialog):
     """Customize picks - shape and size, annotate, change std for
     picking similar.
 
@@ -5164,7 +5164,7 @@ class ToolsSettingsDialog(lib.Dialog):
         self.window.view.update_scene(use_cache=True)
 
 
-class RESIDialog(lib.Dialog):
+class RESIDialog(io.Dialog):
     """Choose RESI parameters.
 
     Allows for clustering multiple channels with user-defined
@@ -5467,7 +5467,7 @@ class RESIDialog(lib.Dialog):
             io.save_locs(resi_path, all_resi, resi_info)
 
 
-class DisplaySettingsDialog(lib.Dialog):
+class DisplaySettingsDialog(io.Dialog):
     """Change display settings, for example: zoom, display pixel size,
     contrast and blur.
 
@@ -5949,7 +5949,7 @@ class DisplaySettingsDialog(lib.Dialog):
         self.window.view.update_scene(use_cache=True)
 
 
-class FastRenderDialog(lib.Dialog):
+class FastRenderDialog(io.Dialog):
     """Randomly sample a given percentage of locs to increase the speed
     of rendering.
 
@@ -6097,7 +6097,7 @@ class FastRenderDialog(lib.Dialog):
         self.window.view.update_scene()
 
 
-class SlicerDialog(lib.Dialog):
+class SlicerDialog(io.Dialog):
     """Customize slicing 3D data in z axis.
 
     ...
