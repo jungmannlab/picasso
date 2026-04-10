@@ -13,12 +13,11 @@ Adapted from: Ma, H., et al. Science Advances. 2024.
 """
 
 from concurrent.futures import ThreadPoolExecutor
-from typing import Callable, Literal
+from typing import Literal
 
 import numpy as np
 import pandas as pd
 from scipy.interpolate import InterpolatedUnivariateSpline
-from tqdm import tqdm
 
 from . import lib, __version__
 

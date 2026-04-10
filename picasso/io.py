@@ -2101,7 +2101,10 @@ class UserSettingsDialog(lib.Dialog):
         layout = QtWidgets.QVBoxLayout(self)
 
         path_label = QtWidgets.QLabel(
-            f"Settings file: {_user_settings_filename()}"
+            f"Settings file: {_user_settings_filename()}\n"
+            "Warning: editing this file can affect the behavior of Picasso.\n"
+            "Clearing the file will reset all settings to their default "
+            "values."
         )
         path_label.setTextInteractionFlags(
             QtCore.Qt.TextInteractionFlag.TextSelectableByMouse
@@ -2109,7 +2112,7 @@ class UserSettingsDialog(lib.Dialog):
         layout.addWidget(path_label)
 
         self.editor = QtWidgets.QPlainTextEdit()
-        self.editor.setFont(QtGui.QFont("Courier", 12))
+        self.editor.setFont(QtGui.QFont("Helvetica", 12))
         layout.addWidget(self.editor)
 
         button_layout = QtWidgets.QHBoxLayout()

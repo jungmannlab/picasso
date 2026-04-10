@@ -45,7 +45,7 @@ Last change: 10-APR-2026 CEST
 - Render, Average and Filter allow the user to inspect metadata in the app
 - Localize GUI: added abort button to stop asynchronous multiprocessing (for example, during identification)
 - Render GUI: apply drift from external file supports dropping the .txt file
-- New function in the API ``picasso.postprocess.undrift_from_fiducials`` that can be used to undrift localizations based on picked fiducials with or without user-specified picks
+- New functions in the API ``picasso.postprocess.undrift_from_fiducials`` and ``picasso.postprocess.apply_drift`` that can be used to undrift localizations based on picked fiducials with or without user-specified picks and to apply the calculated drift to the localizations, respectively
 
 *Bug fixes:*
 ++++++++++++
