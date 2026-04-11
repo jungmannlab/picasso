@@ -1,7 +1,7 @@
 Changelog
 =========
 
-Last change: 10-APR-2026 CEST
+Last change: 11-APR-2026 CEST
 
 0.10.0
 ------
@@ -46,6 +46,7 @@ Last change: 10-APR-2026 CEST
 - Localize GUI: added abort button to stop asynchronous multiprocessing (for example, during identification)
 - Render GUI: apply drift from external file supports dropping the .txt file
 - New functions in the API ``picasso.postprocess.undrift_from_fiducials`` and ``picasso.postprocess.apply_drift`` that can be used to undrift localizations based on picked fiducials with or without user-specified picks and to apply the calculated drift to the localizations, respectively
+- Default Localize parameters dialog is less wide
 
 *Bug fixes:*
 ++++++++++++

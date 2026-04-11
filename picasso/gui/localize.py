@@ -827,6 +827,10 @@ class ParametersDialog(lib.Dialog):
             self.camera.currentIndexChanged.connect(self.on_camera_changed)
 
             self.cam_settings = QtWidgets.QStackedWidget()
+            self.cam_settings.setSizePolicy(
+                QtWidgets.QSizePolicy.Policy.Ignored,
+                QtWidgets.QSizePolicy.Policy.Preferred,
+            )
             exp_grid.addWidget(self.cam_settings, 1, 0, 1, 2)
             self.cam_combos = CamSettingComboBoxDict()
             self.emission_combos = EmissionComboBoxDict()
