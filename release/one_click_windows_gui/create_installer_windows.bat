@@ -19,6 +19,8 @@ call pyinstaller "../pyinstaller/picasso_pyinstaller.py" ^
     --collect-all picasso ^
     --collect-all PyImarisWriter ^
     --collect-all streamlit ^
+    --collect-all numba ^
+    --collect-all llvmlite ^
     --copy-metadata streamlit ^
     --copy-metadata imageio ^
     --name picasso ^
@@ -30,6 +32,8 @@ call pyinstaller "../pyinstaller/picasso_pyinstaller.py" ^
     --collect-all picasso ^
     --collect-all PyImarisWriter ^
     --collect-all streamlit ^
+    --collect-all numba ^
+    --collect-all llvmlite ^
     --copy-metadata streamlit ^
     --copy-metadata imageio ^
     --name picassow ^

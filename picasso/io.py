@@ -20,13 +20,12 @@ import threading
 import warnings
 from typing import Callable
 
-from tables import File
 import yaml
 import h5py
 import nd2
 import numpy as np
 import pandas as pd
-from PyQt6 import QtWidgets, QtCore, QtGui
+from PyQt6 import QtWidgets
 
 from . import lib, __version__
 
