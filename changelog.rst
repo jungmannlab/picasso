@@ -17,7 +17,7 @@ Last change: 13-APR-2026 CEST
 - Installing Picasso as a package has less stringent dependencies and Python requirements, the exact versions are specified for one-click-installers only
 - Render GUI: added support for reading .csv files from ThunderSTORM
 - Easy access to user settings via any Picasso module
-- SPINNA offers a new fitting method for fast fitting instead of the brute force search
+- SPINNA offers two new fitting methods for fast fitting instead of the brute force search, see `documentation <https://picassosr.readthedocs.io/en/latest/spinna.html#fitting>`_
 
 *Small improvements:*
 +++++++++++++++++++++
