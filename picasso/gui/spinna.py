@@ -2237,7 +2237,7 @@ class OptionalSettingsDialog(lib.Dialog):
         self.fitting_mode = QtWidgets.QComboBox()
         self.fitting_mode.setToolTip(
             "Choose the fitting mode.\n"
-            r"Coarse to fine: first test 15% of selected search space, then\n"
+            r"Coarse to fine: first test 10% of selected search space, then\n"
             " rerun SPINNA around the best fitting proportions from the first "
             "round.\n"
             "Brute force: test all possible combinations of proportions of "

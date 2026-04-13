@@ -2995,11 +2995,11 @@ class SPINNA:
             :meth:`~spinna.generate_N_structures`.
         fitting_mode : {"coarse-to-fine", "brute-force"}, optional
             If "coarse-to-fine", the fitting is done in two steps: first,
-            a coarse (15% random resampling) grid of structure
-            combinations is tested, and then a finer grid is tested
-            around the best combination from the coarse grid. If
-            "brute-force", all combinations of structures are tested
-            sequentially. Default is "coarse-to-fine".
+            a coarse grid of structure combinations is tested, (10% of
+            evenly distributed structure combinations) and then a finer
+            grid is tested around the best combination from the coarse
+            grid. If "brute-force", all combinations of structures are
+            tested sequentially. Default is "coarse-to-fine".
         save : str, optional
             Path to save numbers of structures tested and their
             corresponding scores as a .csv file. If '' is given, the
@@ -3226,7 +3226,7 @@ class SPINNA:
     def fit_coarse_to_fine(
         self,
         N_structures: np.ndarray | dict,
-        coarse_fraction: float = 0.15,
+        coarse_fraction: float = 0.1,
         radius: float = BOOTSTRAP_DISTANCE,
         save: str = "",
         asynch: bool = True,
@@ -3261,11 +3261,12 @@ class SPINNA:
                 N_structures
             )
 
-        # coarse fitting
+        # coarse fitting: select evenly spread candidates using
+        # farthest-point sampling in proportion space
         n_total = N_structures.shape[0]
         n_coarse = max(2, int(n_total * coarse_fraction))
-        coarse_idx = np.random.choice(n_total, size=n_coarse, replace=False)
-        coarse_idx.sort()
+        proportions = self.mixer.convert_counts_to_props(N_structures)
+        coarse_idx = self._farthest_point_sampling(proportions, n_coarse)
         N_coarse = N_structures[coarse_idx]
 
         # adjust the progress bar
@@ -3354,6 +3355,53 @@ class SPINNA:
             df = pd.concat([df_coarse, df_fine], ignore_index=True)
             df.to_csv(save, header=True, index=False)
         return spinna_results[:-1]
+
+    @staticmethod
+    def _farthest_point_sampling(
+        points: np.ndarray,
+        n_samples: int,
+    ) -> np.ndarray:
+        """Select a well-spread subset of points using farthest-point
+        (maximin) sampling.
+
+        Starts from the point closest to the centroid, then iteratively
+        adds the point that is farthest from all already-selected
+        points.
+
+        Parameters
+        ----------
+        points : np.ndarray
+            Array of shape (N, D) with N candidate points in D
+            dimensions.
+        n_samples : int
+            Number of points to select.
+
+        Returns
+        -------
+        indices : np.ndarray
+            Indices of the selected points in the original array.
+        """
+        n_total = points.shape[0]
+        n_samples = min(n_samples, n_total)
+
+        # start from the point closest to the centroid
+        centroid = points.mean(axis=0)
+        dists_to_centroid = np.linalg.norm(points - centroid, axis=1)
+        first_idx = np.argmin(dists_to_centroid)
+
+        selected = [first_idx]
+        # min distance from each point to any selected point so far
+        min_dists = np.linalg.norm(points - points[first_idx], axis=1)
+
+        for _ in range(n_samples - 1):
+            # pick the point with the largest minimum distance
+            next_idx = np.argmax(min_dists)
+            selected.append(next_idx)
+            # update minimum distances
+            new_dists = np.linalg.norm(points - points[next_idx], axis=1)
+            min_dists = np.minimum(min_dists, new_dists)
+
+        return np.array(selected)
 
     def NN_scorer(
         self,
