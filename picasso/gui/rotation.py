@@ -2404,7 +2404,7 @@ class RotationWindow(QtWidgets.QMainWindow):
                     self,
                     "Input Dialog",
                     "Enter suffix",
-                    QtWidgets.QLineEdit.Normal,
+                    QtWidgets.QLineEdit.EchoMode.Normal,
                     f"_arotated_{angx}_{angy}_{angz}",
                 )  # get the save file suffix
                 if ok:

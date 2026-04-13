@@ -4805,7 +4805,7 @@ class MaskSettingsDialog(lib.Dialog):
                 self,
                 "",
                 "Enter suffix for localizations inside the mask",
-                QtWidgets.QLineEdit.Normal,
+                QtWidgets.QLineEdit.EchoMode.Normal,
                 "_mask_in",
             )
             if ok1:
@@ -4813,7 +4813,7 @@ class MaskSettingsDialog(lib.Dialog):
                     self,
                     "",
                     "Enter suffix for localizations outside the mask",
-                    QtWidgets.QLineEdit.Normal,
+                    QtWidgets.QLineEdit.EchoMode.Normal,
                     "_mask_out",
                 )
                 if ok2:
@@ -5381,7 +5381,7 @@ class RESIDialog(lib.Dialog):
                     self,
                     "",
                     "Enter suffix for saving clustered localizations",
-                    QtWidgets.QLineEdit.Normal,
+                    QtWidgets.QLineEdit.EchoMode.Normal,
                     "_clustered",
                 )
             ok2 = False
@@ -5390,7 +5390,7 @@ class RESIDialog(lib.Dialog):
                     self,
                     "",
                     "Enter suffix for saving cluster centers",
-                    QtWidgets.QLineEdit.Normal,
+                    QtWidgets.QLineEdit.EchoMode.Normal,
                     "_cluster_centers",
                 )
 
@@ -6969,7 +6969,7 @@ class View(QtWidgets.QLabel):
                     self,
                     "Input Dialog",
                     "Enter suffix",
-                    QtWidgets.QLineEdit.Normal,
+                    QtWidgets.QLineEdit.EchoMode.Normal,
                     "_dbscan",
                 )
                 if ok:
@@ -7098,7 +7098,7 @@ class View(QtWidgets.QLabel):
                     self,
                     "Input Dialog",
                     "Enter suffix",
-                    QtWidgets.QLineEdit.Normal,
+                    QtWidgets.QLineEdit.EchoMode.Normal,
                     "_hdbscan",
                 )
                 if ok:
@@ -7240,7 +7240,7 @@ class View(QtWidgets.QLabel):
                     self,
                     "Input Dialog",
                     "Enter suffix",
-                    QtWidgets.QLineEdit.Normal,
+                    QtWidgets.QLineEdit.EchoMode.Normal,
                     "_clustered",
                 )
                 if ok:
@@ -7412,7 +7412,7 @@ class View(QtWidgets.QLabel):
                 self.window,
                 "Input Dialog",
                 "Enter suffix for saving molecules",
-                QtWidgets.QLineEdit.Normal,
+                QtWidgets.QLineEdit.EchoMode.Normal,
                 "_molmap",
             )
             if not ok:
@@ -7423,7 +7423,7 @@ class View(QtWidgets.QLabel):
                     self.window,
                     "Input Dialog",
                     "Enter suffix for saving clusters",
-                    QtWidgets.QLineEdit.Normal,
+                    QtWidgets.QLineEdit.EchoMode.Normal,
                     "_molmap_clustered",
                 )
                 if not ok:
@@ -12881,7 +12881,7 @@ class Window(QtWidgets.QMainWindow):
             self,
             "Save each channel in grayscale",
             "Enter suffix with extension (.png, .tif, .pdf or .svg)",
-            QtWidgets.QLineEdit.Normal,
+            QtWidgets.QLineEdit.EchoMode.Normal,
             "_grayscale.png",
         )
         if ok:
@@ -12933,7 +12933,7 @@ class Window(QtWidgets.QMainWindow):
                 self,
                 "Export all channels",
                 "Enter suffix",
-                QtWidgets.QLineEdit.Normal,
+                QtWidgets.QLineEdit.EchoMode.Normal,
                 f"_export{ext}",
             )
             if not ok or not suffix.endswith(ext):
@@ -13362,7 +13362,7 @@ class Window(QtWidgets.QMainWindow):
                     self,
                     "Input Dialog",
                     "Enter suffix",
-                    QtWidgets.QLineEdit.Normal,
+                    QtWidgets.QLineEdit.EchoMode.Normal,
                     "_properties",
                 )
                 if ok:
@@ -13422,7 +13422,7 @@ class Window(QtWidgets.QMainWindow):
                     self,
                     "Input Dialog",
                     "Enter suffix",
-                    QtWidgets.QLineEdit.Normal,
+                    QtWidgets.QLineEdit.EchoMode.Normal,
                     "_arender",
                 )
                 if ok:
@@ -13486,7 +13486,7 @@ class Window(QtWidgets.QMainWindow):
                     self,
                     "Input Dialog",
                     "Enter suffix",
-                    QtWidgets.QLineEdit.Normal,
+                    QtWidgets.QLineEdit.EchoMode.Normal,
                     "_apicked",
                 )
                 if ok:
@@ -13558,7 +13558,7 @@ class Window(QtWidgets.QMainWindow):
                     self,
                     "Input Dialog",
                     "Enter suffix",
-                    QtWidgets.QLineEdit.Normal,
+                    QtWidgets.QLineEdit.EchoMode.Normal,
                     "_pick",
                 )
                 if ok:
