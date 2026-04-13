@@ -2222,7 +2222,6 @@ class OptionalSettingsDialog(lib.Dialog):
         layout = QtWidgets.QVBoxLayout(self)
         self.nn_counts = {}
 
-        # OPTIONAL SETTINGS
         # rotations mode
         self.rot_dim_widget = QtWidgets.QComboBox()
         self.rot_dim_widget.setToolTip(
@@ -2233,6 +2232,20 @@ class OptionalSettingsDialog(lib.Dialog):
         )
         self.rot_dim_widget.setCurrentIndex(0)
         layout.addWidget(self.rot_dim_widget)
+
+        # brute-force vs coarse to fine fitting
+        self.fitting_mode = QtWidgets.QComboBox()
+        self.fitting_mode.setToolTip(
+            "Choose the fitting mode.\n"
+            r"Coarse to fine: first test 10% of selected search space, then\n"
+            " rerun SPINNA around the best fitting proportions from the first "
+            "round.\n"
+            "Brute force: test all possible combinations of proportions of "
+            "structures."
+        )
+        self.fitting_mode.addItems(["Coarse to fine", "Brute force"])
+        self.fitting_mode.setCurrentIndex(0)
+        layout.addWidget(self.fitting_mode)
 
         # use multiprocessing (parallel processing)
         self.asynch_check = QtWidgets.QCheckBox("Use multiprocessing")
@@ -3641,7 +3654,6 @@ class SimulationsTab(lib.Dialog):
             if not save:
                 return
             self.window.pwd = os.path.dirname(save)
-
         spinner = spinna.SPINNA(
             mixer=self.mixer,
             gt_coords=self.exp_data,
@@ -3654,8 +3666,13 @@ class SimulationsTab(lib.Dialog):
         )
         progress.set_value(0)
         progress.show()
-        self.opt_props, self.current_score = spinner.fit_stoichiometry(
+        fitting_mode = {
+            "Coarse to fine": "coarse-to-fine",
+            "Brute force": "brute-force",
+        }[self.settings_dialog.fitting_mode.currentText()]
+        self.opt_props, self.current_score = spinner.fit(
             self.N_structures_fit,
+            fitting_mode=fitting_mode,
             save=save,
             asynch=self.settings_dialog.asynch_check.isChecked(),
             bootstrap=self.bootstrap_check.isChecked(),
