@@ -2237,20 +2237,25 @@ class OptionalSettingsDialog(lib.Dialog):
         self.fitting_mode = QtWidgets.QComboBox()
         self.fitting_mode.setToolTip(
             "Choose the fitting mode.\n"
+            "Bayesian: use a Gaussian Process surrogate model to efficiently\n"
+            " search the space with minimal evaluations.\n"
             r"Coarse to fine: first test 10% of selected search space, then\n"
             " rerun SPINNA around the best fitting proportions from the first "
             "round.\n"
             "Brute force: test all possible combinations of proportions of "
             "structures."
         )
-        self.fitting_mode.addItems(["Coarse to fine", "Brute force"])
+        self.fitting_mode.addItems(
+            ["Bayesian", "Coarse to fine", "Brute force"]
+        )
         self.fitting_mode.setCurrentIndex(0)
         layout.addWidget(self.fitting_mode)
 
         # use multiprocessing (parallel processing)
         self.asynch_check = QtWidgets.QCheckBox("Use multiprocessing")
         self.asynch_check.setToolTip(
-            "Run simulations in parallel using multiple CPU cores?"
+            "Run simulations in parallel using multiple CPU cores?\n"
+            "Not used for Bayesian optimization (single-threaded only)."
         )
         self.asynch_check.setChecked(True)
         layout.addWidget(self.asynch_check)
@@ -3654,6 +3659,7 @@ class SimulationsTab(lib.Dialog):
             if not save:
                 return
             self.window.pwd = os.path.dirname(save)
+        t0 = time.time()
         spinner = spinna.SPINNA(
             mixer=self.mixer,
             gt_coords=self.exp_data,
@@ -3668,6 +3674,7 @@ class SimulationsTab(lib.Dialog):
         progress.show()
         fitting_mode = {
             "Coarse to fine": "coarse-to-fine",
+            "Bayesian": "bayesian",
             "Brute force": "brute-force",
         }[self.settings_dialog.fitting_mode.currentText()]
         self.opt_props, self.current_score = spinner.fit(
@@ -3680,6 +3687,8 @@ class SimulationsTab(lib.Dialog):
         )
         progress.close()
         self.best_score = self.current_score
+        dt = time.time() - t0
+        print(f"Fitting took {dt:.2f} seconds using {fitting_mode} mode.")
 
         # update widgets and plot the best fitting stoichiometry
         self.update_prop_str_input_spins(self.opt_props)

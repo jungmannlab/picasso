@@ -28,7 +28,9 @@ import matplotlib.pyplot as plt
 from scipy.ndimage import gaussian_filter
 from scipy.spatial.transform import Rotation
 from scipy.spatial import KDTree
-from scipy.stats import ks_2samp
+from scipy.stats import ks_2samp, norm
+from sklearn.gaussian_process import GaussianProcessRegressor
+from sklearn.gaussian_process.kernels import Matern
 from tqdm import tqdm
 
 from . import io, lib, masking, render, __version__
@@ -2962,7 +2964,7 @@ class SPINNA:
         N_structures: np.ndarray | dict,
         *,
         fitting_mode: Literal[
-            "coarse-to-fine", "brute-force"
+            "coarse-to-fine", "bayesian", "brute-force"
         ] = "coarse-to-fine",
         save: str = "",
         asynch: bool = True,
@@ -2993,12 +2995,14 @@ class SPINNA:
             values are lists of numbers of structures to be simulated.
             ``N_structures`` can be generated using
             :meth:`~spinna.generate_N_structures`.
-        fitting_mode : {"coarse-to-fine", "brute-force"}, optional
+        fitting_mode : {"coarse-to-fine", "bayesian", "brute-force"}, optional
             If "coarse-to-fine", the fitting is done in two steps: first,
             a coarse grid of structure combinations is tested, (10% of
             evenly distributed structure combinations) and then a finer
             grid is tested around the best combination from the coarse
-            grid. If "brute-force", all combinations of structures are
+            grid. If "bayesian", Bayesian optimization with a Gaussian
+            Process surrogate is used to efficiently search the space.
+            If "brute-force", all combinations of structures are
             tested sequentially. Default is "coarse-to-fine".
         save : str, optional
             Path to save numbers of structures tested and their
@@ -3045,7 +3049,7 @@ class SPINNA:
         N_structures: np.ndarray | dict,
         *,
         fitting_mode: Literal[
-            "coarse-to-fine", "brute-force"
+            "coarse-to-fine", "bayesian", "brute-force"
         ] = "coarse-to-fine",
         save: str = "",
         asynch: bool = True,
@@ -3066,8 +3070,9 @@ class SPINNA:
             callback = lib.MockProgress()
         assert fitting_mode in [
             "coarse-to-fine",
+            "bayesian",
             "brute-force",
-        ], "fitting_mode must be 'coarse-to-fine' or 'brute-force'."
+        ], "fitting_mode must be 'coarse-to-fine', 'bayesian', or 'brute-force'."
 
         # check and optionally convert N_structures
         if isinstance(N_structures, dict):
@@ -3085,6 +3090,13 @@ class SPINNA:
                 N_structures,
                 save=save,
                 asynch=asynch,
+                bootstrap=bootstrap,
+                callback=callback,
+            )
+        elif fitting_mode == "bayesian":
+            return self.fit_bayesian(
+                N_structures,
+                save=save,
                 bootstrap=bootstrap,
                 callback=callback,
             )
@@ -3355,6 +3367,242 @@ class SPINNA:
             df = pd.concat([df_coarse, df_fine], ignore_index=True)
             df.to_csv(save, header=True, index=False)
         return spinna_results[:-1]
+
+    def fit_bayesian(
+        self,
+        N_structures: np.ndarray | dict,
+        n_initial: int = 20,
+        n_iterations: int = 80,
+        save: str = "",
+        bootstrap: bool = False,
+        callback: lib.ProgressDialog | Literal["console"] | None = None,
+    ) -> (
+        tuple[np.ndarray, float]
+        | tuple[tuple[np.ndarray, ...], tuple[float, ...]]
+    ):
+        """Bayesian optimization over the N_structures grid using a
+        Gaussian Process surrogate model.
+
+        Phase 1: Evaluate ``n_initial`` well-spread initial points
+        (farthest-point sampling in proportion space).
+        Phase 2: For ``n_iterations`` rounds, fit a GP to evaluated
+        points, compute Expected Improvement on all unevaluated
+        candidates, and evaluate the best one.
+
+        Parameters
+        ----------
+        N_structures : np.2darray or dict
+            Full search space (same as in ``fit``).
+        n_initial : int, optional
+            Number of initial space-filling evaluations. Default is 20.
+        n_iterations : int, optional
+            Maximum number of GP-guided iterations. Default is 80.
+        save : str, optional
+            Path to save evaluated candidates and scores as .csv.
+            Default is ''.
+        bootstrap : bool, optional
+            If True, bootstrapping is used to estimate the fitting
+            error. Default is False.
+        callback : {lib.ProgressDialog, "console", None}, optional
+            Progress bar. Default is None.
+
+        Returns
+        -------
+        opt_proportions : np.ndarray or tuple of np.ndarrays
+            The stoichiometry of structures that gives the best fit.
+        score : float or tuple of floats
+            KS2 score of the best fit.
+        """
+
+        if isinstance(N_structures, dict):
+            N_structures = self.mixer.convert_N_structures_to_array(
+                N_structures
+            )
+
+        n_total = N_structures.shape[0]
+        proportions = self.mixer.convert_counts_to_props(N_structures)
+
+        # track evaluated candidates
+        evaluated = np.zeros(n_total, dtype=bool)
+        scores = np.full(n_total, np.inf)
+
+        # total budget
+        n_initial = min(n_initial, n_total)
+        n_iterations = min(n_iterations, n_total - n_initial)
+        total_evals = n_initial + n_iterations
+
+        # set up progress tracking
+        if isinstance(callback, lib.ProgressDialog):
+            callback.setMaximum(total_evals)
+            callback.setLabelText("Bayesian optimization")
+        if callback == "console":
+            progress_bar = tqdm(
+                total=total_evals, desc="Bayesian optimization"
+            )
+        eval_count = 0
+
+        # --- Phase 1: initial space-filling design ---
+        init_idx = self._farthest_point_sampling(proportions, n_initial)
+        for idx in init_idx:
+            scores[idx] = self._evaluate_single(N_structures[idx])
+            evaluated[idx] = True
+            eval_count += 1
+            if callback == "console":
+                progress_bar.update(1)
+            elif callback is not None and callback != "console":
+                callback.description_base = "Bayesian optimization (initial)"
+                callback.set_value(eval_count)
+
+        # --- Phase 2: GP-guided acquisition ---
+        # early stop if EI has not improved for this many iterations
+        patience = max(10, n_iterations // 5)
+        no_improvement_count = 0
+        best_score_so_far = scores[evaluated].min()
+
+        for iteration in range(n_iterations):
+            if evaluated.all():
+                break
+
+            # fit GP on evaluated points
+            X_train = proportions[evaluated]
+            y_train = scores[evaluated]
+            gp = GaussianProcessRegressor(
+                kernel=Matern(nu=2.5),
+                n_restarts_optimizer=5,
+                normalize_y=True,
+                alpha=1e-6,
+            )
+            gp.fit(X_train, y_train)
+
+            # predict on unevaluated candidates
+            unevaluated_mask = ~evaluated
+            X_candidates = proportions[unevaluated_mask]
+            mu, sigma = gp.predict(X_candidates, return_std=True)
+
+            # Expected Improvement acquisition function
+            best_y = y_train.min()
+            with np.errstate(divide="ignore", invalid="ignore"):
+                z = (best_y - mu) / sigma
+                ei = (best_y - mu) * norm.cdf(z) + sigma * norm.pdf(z)
+                ei[sigma == 0.0] = 0.0
+
+            # pick the candidate with highest EI
+            best_candidate_local = np.argmax(ei)
+            global_indices = np.where(unevaluated_mask)[0]
+            best_idx = global_indices[best_candidate_local]
+
+            # evaluate it
+            scores[best_idx] = self._evaluate_single(N_structures[best_idx])
+            evaluated[best_idx] = True
+            eval_count += 1
+
+            if callback == "console":
+                progress_bar.update(1)
+            elif callback is not None and callback != "console":
+                callback.description_base = "Bayesian optimization"
+                callback.set_value(eval_count)
+
+            # early stopping: check if the best score improved
+            current_best = scores[evaluated].min()
+            if current_best < best_score_so_far:
+                best_score_so_far = current_best
+                no_improvement_count = 0
+            else:
+                no_improvement_count += 1
+            if no_improvement_count >= patience:
+                break
+
+        if callback == "console":
+            progress_bar.close()
+        elif isinstance(callback, lib.ProgressDialog):
+            callback.set_value(total_evals)
+
+        # collect results for evaluated candidates only
+        eval_mask = evaluated
+        N_evaluated = N_structures[eval_mask]
+        scores_evaluated = scores[eval_mask]
+
+        if save:
+            props_eval = self.mixer.convert_counts_to_props(N_evaluated)
+            df = pd.DataFrame(
+                np.hstack(
+                    (N_evaluated, props_eval, scores_evaluated.reshape(-1, 1))
+                ),
+                columns=[
+                    f"N_{name}" for name in self.mixer.get_structure_names()
+                ]
+                + [f"Prop_{name}" for name in self.mixer.get_structure_names()]
+                + ["Kolmogorov-Smirnov statistic"],
+            )
+            df.to_csv(save, header=True, index=False)
+
+        # find best
+        index = np.argmin(scores_evaluated)
+        score = scores_evaluated[index]
+        opt_N_structures = N_evaluated[index]
+        opt_proportions = self.mixer.convert_counts_to_props(opt_N_structures)
+
+        if bootstrap:
+            exp_dists_gt = deepcopy(self.dists_gt)
+
+            N_structures_subset = self.get_subset_N_structures(
+                N_structures,
+                opt_N_structures,
+            )
+
+            if callback == "console":
+                pass
+            elif isinstance(callback, lib.ProgressDialog):
+                callback.setMaximum(len(N_structures_subset))
+            bootstrap_scores = []
+            boot_props = []
+            for i in range(N_BOOTSTRAPS):
+                self.progress_title = (
+                    f"Bootstrapping {i+1}/{N_BOOTSTRAPS}; spinning structures"
+                )
+                if isinstance(callback, lib.ProgressDialog):
+                    callback.t0_est = time.time()
+                gt_coords_boot = self.mixer.run_simulation(opt_N_structures)
+                self.dists_gt = get_NN_dist_experimental(
+                    gt_coords_boot, self.mixer
+                )
+                N_structures_boot, scores_boot = self.NN_scorer(
+                    N_structures_subset, callback=callback
+                )
+                index_boot = np.argmin(scores_boot)
+                score_boot = scores_boot[index_boot]
+                bootstrap_scores.append(score_boot)
+                boot_props.append(
+                    self.mixer.convert_counts_to_props(
+                        N_structures_boot[index_boot]
+                    )
+                )
+
+            self.dists_gt = exp_dists_gt
+            score_std = np.std(bootstrap_scores)
+            props_std = np.std(boot_props, axis=0)
+            return (opt_proportions, props_std), (score, score_std)
+        else:
+            return opt_proportions, score
+
+    def _evaluate_single(self, N_row: np.ndarray) -> float:
+        """Evaluate a single candidate: simulate and score.
+
+        Parameters
+        ----------
+        N_row : np.ndarray
+            1D array specifying the number of each structure to
+            simulate.
+
+        Returns
+        -------
+        score : float
+            KS2 score for this candidate.
+        """
+        dists_sim = get_NN_dist_simulated(
+            N_row, self.N_sim, self.mixer, duplicate=False
+        )
+        return NND_score(dists_sim, self.dists_gt)
 
     @staticmethod
     def _farthest_point_sampling(
