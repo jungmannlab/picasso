@@ -118,7 +118,7 @@ Committing & Pushing
     $ git commit -m "Fix rendering crash for large datasets (#123)"
     $ git push origin fix/broken-rendering
 
-5. Update the changelog (``changelog.rst``) with a brief summary of your changes under the appropriate section.
+5. Update the changelog (``changelog.md``) with a brief summary of your changes under the appropriate section.
 
 6. Submit a pull request through the GitHub website. See below for guidelines!
 

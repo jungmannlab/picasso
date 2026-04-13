@@ -48,6 +48,7 @@ Last change: 13-APR-2026 CEST
 - Render GUI: apply drift from external file supports dropping the .txt file
 - New functions in the API `picasso.postprocess.undrift_from_fiducials` and `picasso.postprocess.apply_drift` that can be used to undrift localizations based on picked fiducials with or without user-specified picks and to apply the calculated drift to the localizations, respectively
 - Default Localize parameters dialog is less wide
+- Changelog changed from .rst to markdown for GitHub display
 
 ### *Bug fixes:*
 

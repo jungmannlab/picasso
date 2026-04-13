@@ -35,11 +35,11 @@ A comprehensive documentation can be found here: `Read the Docs <https://picasso
 
 Picasso 0.10
 ------------
-In this version, a lot of new architectural (behind the scenes) changes were introduced to make Picasso more modular, maintainable and accessible to both developers and end-users. The adaptations include flexible dependencies and Python versions, etc. You are invited to explore these improvements `here <https://github.com/jungmannlab/picasso/blob/master/changelog.rst>`_.
+In this version, a lot of new architectural (behind the scenes) changes were introduced to make Picasso more modular, maintainable and accessible to both developers and end-users. The adaptations include flexible dependencies and Python versions, etc. You are invited to explore these improvements `here <https://github.com/jungmannlab/picasso/blob/master/changelog.md>`_.
 
 Changelog
 ---------
-To see all changes introduced across releases, see `here <https://github.com/jungmannlab/picasso/blob/master/changelog.rst>`_.
+To see all changes introduced across releases, see `here <https://github.com/jungmannlab/picasso/blob/master/changelog.md>`_.
 
 Installation
 ------------

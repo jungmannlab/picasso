@@ -86,7 +86,7 @@ installer = [
 [project.urls]
 Homepage = "https://github.com/jungmannlab/picasso"
 Documentation = "https://picassosr.readthedocs.io/en/latest/index.html"
-Changelog = "https://github.com/jungmannlab/picasso/blob/master/changelog.rst"
+Changelog = "https://github.com/jungmannlab/picasso/blob/master/changelog.md"
 Publications = "https://doi.org/10.1038/nprot.2017.024"
 
 [project.scripts]

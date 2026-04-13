@@ -26,7 +26,7 @@ Similarly, you can add Picasso plugins under the folder Contents/Frameworks/pica
 
 Changelog
 ---------
-To see all changes introduced across releases, see `here <https://github.com/jungmannlab/picasso/blob/master/changelog.rst>`_.
+To see all changes introduced across releases, see `here <https://github.com/jungmannlab/picasso/blob/master/changelog.md>`_.
 
 Contributions & Copyright
 -------------------------
