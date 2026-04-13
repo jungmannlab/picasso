@@ -367,7 +367,11 @@ def random_rotation_matrices(
     elif mode == "2D":
         # rotate only around z
         angles = np.random.uniform(0, 2 * np.pi, size=(num,))
-        rots = Rotation.from_euler("z", angles).as_matrix().astype(np.float32)
+        rots = (
+            Rotation.from_euler("z", angles.reshape(-1, 1))
+            .as_matrix()
+            .astype(np.float32)
+        )
     elif mode is None:
         rots = Rotation.identity(num=num).as_matrix().astype(np.float32)
     else:
@@ -3145,6 +3149,83 @@ class SPINNA:
                 )
             )
         return fs
+
+    def fit_coarse_to_fine(
+        self,
+        N_structures: np.ndarray | dict,
+        coarse_fraction: float = 0.1,
+        radius: float = 10.0,
+        save: str = "",
+        asynch: bool = True,
+        bootstrap: bool = False,
+        callback: lib.ProgressDialog | Literal["console"] | None = None,
+    ) -> (
+        tuple[np.ndarray, float]
+        | tuple[tuple[np.ndarray, ...], tuple[float, ...]]
+    ):
+        """Two-pass coarse-to-fine fitting.
+
+        Pass 1: evaluate a random subsample of N_structures.
+        Pass 2: evaluate the full-resolution neighborhood around
+                the coarse-pass winner.
+
+        Parameters
+        ----------
+        N_structures : np.2darray or dict
+            Full search space (same as in ``fit``).
+        coarse_fraction : float (default=0.1)
+            Fraction of N_structures to evaluate in the coarse pass
+            (0 < coarse_fraction < 1).
+        radius : float (default=10.0)
+            Radius (in %-proportion space) around the coarse winner
+            used to select candidates for the fine pass.
+        save, asynch, bootstrap, callback
+            Same as in ``fit``.
+        """
+        # --- convert dict → array (same as fit_stoichiometry) ---
+        if isinstance(N_structures, dict):
+            N = len(list(N_structures.values())[0])
+            N_structures_ = np.zeros(
+                (N, len(self.mixer.structures)),
+                dtype=np.int32,
+            )
+            for i, structure in enumerate(self.mixer.structures):
+                N_structures_[:, i] = N_structures[structure.title]
+            N_structures = N_structures_
+
+        # --- Pass 1: coarse ---
+        n_total = N_structures.shape[0]
+        n_coarse = max(2, int(n_total * coarse_fraction))
+        coarse_idx = np.random.choice(n_total, size=n_coarse, replace=False)
+        coarse_idx.sort()
+        N_coarse = N_structures[coarse_idx]
+
+        self.progress_title = "Coarse pass"
+        if asynch:
+            fs = self.fit_stoichiometry_parallel(N_coarse)
+            while self.n_futures_done(fs) < len(fs):
+                time.sleep(0.1)
+            N_coarse, scores_coarse = self.scores_from_futures(fs)
+        else:
+            N_coarse, scores_coarse = self.NN_scorer(N_coarse)
+
+        coarse_best = N_coarse[np.argmin(scores_coarse)]
+
+        # --- Pass 2: fine (neighborhood of coarse winner) ---
+        N_fine = self.get_subset_N_structures(
+            N_structures,
+            coarse_best,
+            radius=radius,
+        )
+
+        self.progress_title = "Fine pass"
+        return self.fit_stoichiometry(
+            N_fine,
+            save=save,
+            asynch=asynch,
+            bootstrap=bootstrap,
+            callback=callback,
+        )
 
     def NN_scorer(
         self,

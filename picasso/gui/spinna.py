@@ -3641,7 +3641,7 @@ class SimulationsTab(lib.Dialog):
             if not save:
                 return
             self.window.pwd = os.path.dirname(save)
-
+        t0 = time.time()
         spinner = spinna.SPINNA(
             mixer=self.mixer,
             gt_coords=self.exp_data,
@@ -3654,7 +3654,14 @@ class SimulationsTab(lib.Dialog):
         )
         progress.set_value(0)
         progress.show()
-        self.opt_props, self.current_score = spinner.fit_stoichiometry(
+        # self.opt_props, self.current_score = spinner.fit_stoichiometry(
+        #     self.N_structures_fit,
+        #     save=save,
+        #     asynch=self.settings_dialog.asynch_check.isChecked(),
+        #     bootstrap=self.bootstrap_check.isChecked(),
+        #     callback=progress,
+        # )
+        self.opt_props, self.current_score = spinner.fit_coarse_to_fine(
             self.N_structures_fit,
             save=save,
             asynch=self.settings_dialog.asynch_check.isChecked(),
@@ -3663,6 +3670,8 @@ class SimulationsTab(lib.Dialog):
         )
         progress.close()
         self.best_score = self.current_score
+        dt = time.time() - t0
+        print(f"Fitting completed in {dt:.2f} seconds.")
 
         # update widgets and plot the best fitting stoichiometry
         self.update_prop_str_input_spins(self.opt_props)

@@ -1,7 +1,7 @@
 Changelog
 =========
 
-Last change: 11-APR-2026 CEST
+Last change: 13-APR-2026 CEST
 
 0.10.0
 ------
@@ -16,6 +16,7 @@ Last change: 11-APR-2026 CEST
 - Installing Picasso as a package has less stringent dependencies and Python requirements, the exact versions are specified for one-click-installers only
 - Render GUI: added support for reading .csv files from ThunderSTORM
 - Easy access to user settings via any Picasso module
+- SPINNA offers a new fitting method for fast fitting instead of the brute force search
 
 *Small improvements:*
 +++++++++++++++++++++
