@@ -2733,14 +2733,9 @@ class StructureMixer:
         if isinstance(N_structures, list):
             N_structures = np.int32(N_structures)
         elif isinstance(N_structures, dict):
-            N = len(list(N_structures.values())[0])  # number of simulations
-            N_structures_ = np.zeros(
-                (N, len(self.mixer.structures)),
-                dtype=np.int32,
+            N_structures = self.mixer.convert_N_structures_to_array(
+                N_structures
             )
-            for i, structure in enumerate(self.mixer.structures):
-                N_structures_[:, i] = N_structures[structure.title]
-            N_structures = N_structures_
 
         if N_structures.ndim == 1:
             N_structures = N_structures.reshape(1, -1)
@@ -2849,6 +2844,43 @@ class StructureMixer:
 
         return N_structures
 
+    def convert_N_structures_to_array(self, N_structures: dict) -> np.ndarray:
+        """Convert numbers of structures given as a dictionary to a 2D
+        numpy array.
+
+        Parameters
+        ----------
+        N_structures : dict
+            Dictionary with structure names as keys and lists of numbers
+            of structures to be simulated as values. The structure names
+            given must be the same as in self.structures.
+
+        Returns
+        -------
+        N_structures_array : np.ndarray
+            2D array with shape (N, M), where N is the number of
+            simulations to be tested and M is the number of structures
+            in self.structures. Each row gives the numbers of structures
+            to be simulated for each structure in self.structures.
+        """
+        if not isinstance(N_structures, dict):
+            raise TypeError(
+                "Please input numbers of structures as a dictionary with"
+                " structure names as keys and lists of numbers of"
+                " structures to be simulated as values."
+            )
+        elif isinstance(N_structures, np.ndarray) and N_structures.ndim == 2:
+            return N_structures
+
+        N = len(list(N_structures.values())[0])  # number of simulations
+        N_structures_array = np.zeros(
+            (N, len(self.structures)),
+            dtype=np.int32,
+        )
+        for i, structure in enumerate(self.structures):
+            N_structures_array[:, i] = N_structures[structure.title]
+        return N_structures_array
+
     @property
     def roi_size(self) -> float:
         """Returns the size of the ROI in um^2 or um^3."""
@@ -2930,6 +2962,10 @@ class SPINNA:
     def fit(
         self,
         N_structures: np.ndarray | dict,
+        *,
+        fitting_mode: Literal[
+            "coarse-to-fine", "brute-force"
+        ] = "coarse-to-fine",
         save: str = "",
         asynch: bool = True,
         bootstrap: bool = False,
@@ -2954,6 +2990,13 @@ class SPINNA:
             values are lists of numbers of structures to be simulated.
             ``N_structures`` can be generated using
             :meth:`~spinna.generate_N_structures`.
+        fitting_mode : {"coarse-to-fine", "brute-force"}, optional
+            If "coarse-to-fine", the fitting is done in two steps: first,
+            a coarse (15% random resampling) grid of structure
+            combinations is tested, and then a finer grid is tested
+            around the best combination from the coarse grid. If
+            "brute-force", all combinations of structures are tested
+            sequentially. Default is "coarse-to-fine".
         save : str, optional
             Path to save numbers of structures tested and their
             corresponding scores as a .csv file. If '' is given, the
@@ -2980,6 +3023,7 @@ class SPINNA:
         """
         return self.fit_stoichiometry(
             N_structures,
+            fitting_mode=fitting_mode,
             save=save,
             asynch=asynch,
             bootstrap=bootstrap,
@@ -2989,6 +3033,10 @@ class SPINNA:
     def fit_stoichiometry(
         self,
         N_structures: np.ndarray | dict,
+        *,
+        fitting_mode: Literal[
+            "coarse-to-fine", "brute-force"
+        ] = "coarse-to-fine",
         save: str = "",
         asynch: bool = True,
         bootstrap: bool = False,
@@ -3005,22 +3053,30 @@ class SPINNA:
         ), ("callback must be a ProgressDialog," " 'console', or None.")
         if callback is None:
             callback = lib.MockProgress()
+        assert fitting_mode in [
+            "coarse-to-fine",
+            "brute-force",
+        ], "fitting_mode must be 'coarse-to-fine' or 'brute-force'."
 
         # check and optionally convert N_structures
         if isinstance(N_structures, dict):
-            N = len(list(N_structures.values())[0])  # number of simulations
-            N_structures_ = np.zeros(
-                (N, len(self.mixer.structures)),
-                dtype=np.int32,
+            N_structures = self.mixer.convert_N_structures_to_array(
+                N_structures
             )
-            for i, structure in enumerate(self.mixer.structures):
-                N_structures_[:, i] = N_structures[structure.title]
-            N_structures = N_structures_
         elif (
             not isinstance(N_structures, np.ndarray)
             or len(N_structures.shape) != 2
         ):
             raise TypeError("N_structures must be a 2D array or a dictionary.")
+
+        if fitting_mode == "coarse-to-fine":
+            self.fit_coarse_to_fine(
+                N_structures,
+                save=save,
+                asynch=asynch,
+                bootstrap=bootstrap,
+                callback=callback,
+            )
 
         if asynch:  # fit with multiprocessing
             fs = self.fit_stoichiometry_parallel(N_structures)
@@ -3153,8 +3209,8 @@ class SPINNA:
     def fit_coarse_to_fine(
         self,
         N_structures: np.ndarray | dict,
-        coarse_fraction: float = 0.1,
-        radius: float = 10.0,
+        coarse_fraction: float = 0.15,
+        radius: float = BOOTSTRAP_DISTANCE,
         save: str = "",
         asynch: bool = True,
         bootstrap: bool = False,
@@ -3173,27 +3229,22 @@ class SPINNA:
         ----------
         N_structures : np.2darray or dict
             Full search space (same as in ``fit``).
-        coarse_fraction : float (default=0.1)
+        coarse_fraction : float, optional
             Fraction of N_structures to evaluate in the coarse pass
-            (0 < coarse_fraction < 1).
-        radius : float (default=10.0)
+            (0 < coarse_fraction < 1). Default is 0.1.
+        radius : float, optional
             Radius (in %-proportion space) around the coarse winner
-            used to select candidates for the fine pass.
+            used to select candidates for the fine pass. Default is
+            BOOTSTRAP_DISTANCE.
         save, asynch, bootstrap, callback
             Same as in ``fit``.
         """
-        # --- convert dict → array (same as fit_stoichiometry) ---
         if isinstance(N_structures, dict):
-            N = len(list(N_structures.values())[0])
-            N_structures_ = np.zeros(
-                (N, len(self.mixer.structures)),
-                dtype=np.int32,
+            N_structures = self.mixer.convert_N_structures_to_array(
+                N_structures
             )
-            for i, structure in enumerate(self.mixer.structures):
-                N_structures_[:, i] = N_structures[structure.title]
-            N_structures = N_structures_
 
-        # --- Pass 1: coarse ---
+        # coarse fitting
         n_total = N_structures.shape[0]
         n_coarse = max(2, int(n_total * coarse_fraction))
         coarse_idx = np.random.choice(n_total, size=n_coarse, replace=False)
@@ -3211,7 +3262,7 @@ class SPINNA:
 
         coarse_best = N_coarse[np.argmin(scores_coarse)]
 
-        # --- Pass 2: fine (neighborhood of coarse winner) ---
+        # fine fitting around the coarse winner
         N_fine = self.get_subset_N_structures(
             N_structures,
             coarse_best,
@@ -3221,6 +3272,7 @@ class SPINNA:
         self.progress_title = "Fine pass"
         return self.fit_stoichiometry(
             N_fine,
+            fitting_mode="brute-force",
             save=save,
             asynch=asynch,
             bootstrap=bootstrap,
@@ -3311,14 +3363,9 @@ class SPINNA:
             center_proportions.
         """
         if isinstance(N_structures, dict):
-            N = len(list(N_structures.values())[0])  # number of simulations
-            N_structures_ = np.zeros(
-                (N, len(self.mixer.structures)),
-                dtype=np.int32,
+            N_structures = self.mixer.convert_N_structures_to_array(
+                N_structures
             )
-            for i, structure in enumerate(self.mixer.structures):
-                N_structures_[:, i] = N_structures[structure.title]
-            N_structures = N_structures_
 
         proportions = self.mixer.convert_counts_to_props(N_structures)
         center_proportions = self.mixer.convert_counts_to_props(
