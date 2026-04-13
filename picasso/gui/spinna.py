@@ -3670,7 +3670,7 @@ class SimulationsTab(lib.Dialog):
             "Coarse to fine": "coarse-to-fine",
             "Brute force": "brute-force",
         }[self.settings_dialog.fitting_mode.currentText()]
-        self.opt_props, self.current_score = spinner.fit_stoichiometry(
+        self.opt_props, self.current_score = spinner.fit(
             self.N_structures_fit,
             fitting_mode=fitting_mode,
             save=save,

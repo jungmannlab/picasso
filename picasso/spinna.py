@@ -307,8 +307,6 @@ def generate_N_structures(
         # find proportions first, just like in
         # StructureMixer.convert_counts_to_props
         props = np.zeros(N_structures.shape, dtype=np.float32)
-        print(f"{N_structures.shape=}")
-        print(f"{N_total=}")
         for i, structure in enumerate(structures):
             N_str_total = np.zeros(N_structures.shape[0], dtype=np.float32)
             N_per_target = structure.get_ind_target_count(targets)
@@ -2969,10 +2967,15 @@ class SPINNA:
         save: str = "",
         asynch: bool = True,
         bootstrap: bool = False,
+        return_scores: bool = False,
         callback: lib.ProgressDialog | Literal["console"] | None = None,
     ) -> (
         tuple[np.ndarray, float]
         | tuple[tuple[np.ndarray, ...], tuple[float, ...]]
+        | tuple[np.ndarray, float, np.ndarray]
+        | tuple[
+            tuple[np.ndarray, ...], tuple[float, ...], tuple[np.ndarray, ...]
+        ]
     ):
         """Find fitting error for every combination of ``N_structures``
         using NND comparison to ground truth. Applies multiprocessing
@@ -3008,6 +3011,9 @@ class SPINNA:
         bootstrap : bool, optional
             If True, bootstrapping is used to estimate the fitting
             error. Default is False.
+        return_scores : bool, optional
+            If True, scores for all combinations of structures are also
+            returned. Default is False.
         callback : {lib.ProgressDialog, "console", None}, optional
             Progress bar to track fitting progress. If "console", the
             progress bar is displayed in the console. If None, no
@@ -3020,6 +3026,9 @@ class SPINNA:
             ground truth.
         score : float or tuple of floats
             KS2 score of the best fit.
+        scores : np.ndarray or tuple of np.ndarrays, optional
+            KS2 scores for all combinations of structures tested. Only
+            returned if return_scores is True.
         """
         return self.fit_stoichiometry(
             N_structures,
@@ -3027,6 +3036,7 @@ class SPINNA:
             save=save,
             asynch=asynch,
             bootstrap=bootstrap,
+            return_scores=return_scores,
             callback=callback,
         )
 
@@ -3040,6 +3050,7 @@ class SPINNA:
         save: str = "",
         asynch: bool = True,
         bootstrap: bool = False,
+        return_scores: bool = False,
         callback: lib.ProgressDialog | Literal["console"] | None = None,
     ) -> (
         tuple[np.ndarray, float]
@@ -3070,7 +3081,7 @@ class SPINNA:
             raise TypeError("N_structures must be a 2D array or a dictionary.")
 
         if fitting_mode == "coarse-to-fine":
-            self.fit_coarse_to_fine(
+            return self.fit_coarse_to_fine(
                 N_structures,
                 save=save,
                 asynch=asynch,
@@ -3132,7 +3143,7 @@ class SPINNA:
             # initialize bootstrapping
             if callback != "console":
                 callback.setMaximum(len(N_structures_subset))
-            scores = []
+            bootstrap_scores = []
             boot_props = []
             for i in range(N_BOOTSTRAPS):
                 self.progress_title = (
@@ -3150,7 +3161,7 @@ class SPINNA:
                 )
                 index_boot = np.argmin(scores_boot)
                 score_boot = scores_boot[index_boot]
-                scores.append(score_boot)
+                bootstrap_scores.append(score_boot)
                 boot_props.append(
                     self.mixer.convert_counts_to_props(
                         N_structures_boot[index_boot]
@@ -3158,11 +3169,17 @@ class SPINNA:
                 )
 
             self.dists_gt = exp_dists_gt
-            score_std = np.std(scores)
+            score_std = np.std(bootstrap_scores)
             props_std = np.std(boot_props, axis=0)
-            return (opt_proportions, props_std), (score, score_std)
+            if return_scores:
+                return (opt_proportions, props_std), (score, score_std), scores
+            else:
+                return (opt_proportions, props_std), (score, score_std)
         else:
-            return opt_proportions, score
+            if return_scores:
+                return opt_proportions, score, scores
+            else:
+                return opt_proportions, score
 
     def fit_stoichiometry_parallel(self, N_structures: np.ndarray) -> list:
         """Apply multiprocessing to find best fitting combination of
@@ -3251,14 +3268,35 @@ class SPINNA:
         coarse_idx.sort()
         N_coarse = N_structures[coarse_idx]
 
-        self.progress_title = "Coarse pass"
+        # adjust the progress bar
+        if isinstance(callback, lib.ProgressDialog):
+            callback.setMaximum(n_coarse)
+            callback.setLabelText("Coarse pass")
+        if callback == "console":
+            progress_bar = tqdm(total=n_coarse, desc="Coarse pass")
+
         if asynch:
             fs = self.fit_stoichiometry_parallel(N_coarse)
+            N = len(fs)
             while self.n_futures_done(fs) < len(fs):
+                fd = self.n_futures_done(fs)
+                fd_ = int(fd * n_coarse / N)
+                if fd > 0 and callback != "console":
+                    callback.description_base = "Coarse pass"
+                    callback.set_value(fd_)
+                elif fd > 0 and callback == "console":
+                    progress_bar.update(fd_ - progress_bar.n)
                 time.sleep(0.1)
+            if callback != "console":
+                callback.set_value(n_coarse)
+            else:
+                progress_bar.update(fd_ - progress_bar.n)
+                progress_bar.close()
             N_coarse, scores_coarse = self.scores_from_futures(fs)
         else:
-            N_coarse, scores_coarse = self.NN_scorer(N_coarse)
+            N_coarse, scores_coarse = self.NN_scorer(
+                N_coarse, callback=callback
+            )
 
         coarse_best = N_coarse[np.argmin(scores_coarse)]
 
@@ -3269,15 +3307,53 @@ class SPINNA:
             radius=radius,
         )
 
-        self.progress_title = "Fine pass"
-        return self.fit_stoichiometry(
+        # adjust the progress bar again
+        if isinstance(callback, lib.ProgressDialog):
+            callback.setMaximum(len(N_fine))
+            callback.setValue(0)
+            callback.setLabelText("Fine pass")
+            self.progress_title = "Fine pass"
+        spinna_results = self.fit_stoichiometry(
             N_fine,
             fitting_mode="brute-force",
-            save=save,
             asynch=asynch,
             bootstrap=bootstrap,
+            return_scores=True,
             callback=callback,
         )
+        if save:
+            # save the results of both the coarse and fine pass
+            props_coarse = self.mixer.convert_counts_to_props(N_coarse)
+            props_fine = self.mixer.convert_counts_to_props(N_fine)
+            # get the fine scores ((non)bootstrapped results have
+            # different structure)
+            if bootstrap:
+                scores_fine = spinna_results[-1]
+            else:
+                scores_fine = spinna_results[-1]
+            df_coarse = pd.DataFrame(
+                np.hstack(
+                    (N_coarse, props_coarse, scores_coarse.reshape(-1, 1))
+                ),
+                columns=[
+                    f"N_{name}" for name in self.mixer.get_structure_names()
+                ]
+                + [f"Prop_{name}" for name in self.mixer.get_structure_names()]
+                + ["Kolmogorov-Smirnov statistic"],
+            )
+            df_fine = pd.DataFrame(
+                np.hstack((N_fine, props_fine, scores_fine.reshape(-1, 1))),
+                columns=[
+                    f"N_{name}" for name in self.mixer.get_structure_names()
+                ]
+                + [f"Prop_{name}" for name in self.mixer.get_structure_names()]
+                + ["Kolmogorov-Smirnov statistic"],
+            )
+            df_coarse["Pass"] = "Coarse"
+            df_fine["Pass"] = "Fine"
+            df = pd.concat([df_coarse, df_fine], ignore_index=True)
+            df.to_csv(save, header=True, index=False)
+        return spinna_results[:-1]
 
     def NN_scorer(
         self,
