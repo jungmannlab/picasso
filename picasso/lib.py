@@ -59,6 +59,14 @@ class Dialog(QtWidgets.QDialog):
             QtCore.Qt.WindowType.WindowContextHelpButtonHint, False
         )
 
+    def showEvent(self, event):
+        """Remove focus from any QPushButton when the dialog is shown,
+        so that pressing Enter does not trigger any button by default."""
+        super().showEvent(event)
+        for button in self.findChildren(QtWidgets.QPushButton):
+            button.setDefault(False)
+            button.setAutoDefault(False)
+
 
 class UserSettingsDialog(Dialog):
     """Dialog for inspecting and editing the user settings YAML file."""

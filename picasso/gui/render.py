@@ -4021,8 +4021,6 @@ class InfoDialog(lib.Dialog):
         self.nena_button = QtWidgets.QPushButton("Calculate NeNA")
         self.nena_button.setToolTip("Click to calculate NeNA precision.")
         self.nena_button.clicked.connect(self.calculate_nena_lp)
-        self.nena_button.setDefault(False)
-        self.nena_button.setAutoDefault(False)
         self.movie_grid.addWidget(self.nena_button, 2, 0)
         show_nena_plot_button = QtWidgets.QPushButton("Show NeNA plot")
         show_nena_plot_button.setToolTip("Display NeNA fit.")

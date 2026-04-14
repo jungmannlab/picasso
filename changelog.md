@@ -53,6 +53,7 @@ Last change: 14-APR-2026 CEST
 - Test clustering allows for applying the current parameters to the whole dataset
 - Test clustering tool tips
 - Filter supports .csv export (not only hdf5)
+- Removed focus on push buttons in dialogs
 
 ### *Bug fixes:*
 
