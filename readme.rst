@@ -24,6 +24,10 @@ Picasso
    :target: https://pypi.org/project/picassosr/
    :alt: PyPI version
 
+.. image:: https://img.shields.io/badge/Changelog-View-blue
+   :target: https://github.com/jungmannlab/picasso/blob/master/changelog.md
+   :alt: Changelog
+
 .. image:: https://raw.githubusercontent.com/jungmannlab/picasso/master/main_render.png
    :width: 750
    :height: 564
@@ -33,13 +37,11 @@ Collection of tools for painting super-resolution images. The Picasso software i
 
 A comprehensive documentation can be found here: `Read the Docs <https://picassosr.readthedocs.io/en/latest/?badge=latest>`__.
 
+To see all changes introduced across releases, see `the changelog <https://github.com/jungmannlab/picasso/blob/master/changelog.md>`_.
+
 Picasso 0.10
 ------------
-In this version, a lot of new architectural (behind the scenes) changes were introduced to make Picasso more modular, maintainable and accessible to both developers and end-users. The adaptations include flexible dependencies and Python versions, etc. You are invited to explore these improvements `here <https://github.com/jungmannlab/picasso/blob/master/changelog.md>`_.
-
-Changelog
----------
-To see all changes introduced across releases, see `here <https://github.com/jungmannlab/picasso/blob/master/changelog.md>`_.
+In this version, a lot of new architectural (behind the scenes) changes were introduced to make Picasso more modular, maintainable and accessible to both developers and end-users. The adaptations include flexible dependencies and Python versions, etc. You can explore these improvements `in the changelog <https://github.com/jungmannlab/picasso/blob/master/changelog.md>`_.
 
 Installation
 ------------
