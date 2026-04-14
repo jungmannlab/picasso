@@ -49,6 +49,8 @@ Last change: 13-APR-2026 CEST
 - New functions in the API `picasso.postprocess.undrift_from_fiducials` and `picasso.postprocess.apply_drift` that can be used to undrift localizations based on picked fiducials with or without user-specified picks and to apply the calculated drift to the localizations, respectively
 - Default Localize parameters dialog is less wide
 - Changelog changed from .rst to markdown for GitHub display
+- Test clustering saves the channel to which the algorithms are applied
+- Test clustering allows for applying the current parameters to the whole dataset
 
 ### *Bug fixes:*
 

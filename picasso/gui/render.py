@@ -851,6 +851,9 @@ class DatasetDialog(lib.Dialog):
             else:
                 disp_sett_dlg.render_groupbox.setEnabled(False)
 
+            # remove the channel from test clustering dialog
+            self.window.test_clusterer_dialog.channels.removeItem(i)
+
             # adjust the size of the dialog
             hint = self.scroll_area.sizeHint()
             lib.adjust_widget_size(self, hint, 45, 150)
@@ -2700,15 +2703,23 @@ class TestClustererDialog(lib.Dialog):
         layout.addWidget(parameters_box, 1, 0)
         parameters_grid = QtWidgets.QGridLayout(parameters_box)
 
+        # parameters - channel
+        self.channels = QtWidgets.QComboBox()
+        self.channels.setToolTip("Select the channel to test clustering on.")
+        parameters_grid.addWidget(self.channels, 0, 0, 1, 2)
+
         # parameters - choose clusterer
         self.clusterer_name = QtWidgets.QComboBox()
+        self.clusterer_name.setToolTip(
+            "Choose the clustering algorithm to test."
+        )
         for name in ["DBSCAN", "HDBSCAN", "SMLM", "G5M"]:
             self.clusterer_name.addItem(name)
-        parameters_grid.addWidget(self.clusterer_name, 0, 0)
+        parameters_grid.addWidget(self.clusterer_name, 1, 0)
 
         # parameters - clusterer parameters
         parameters_stack = QtWidgets.QStackedWidget()
-        parameters_grid.addWidget(parameters_stack, 1, 0, 1, 2)
+        parameters_grid.addWidget(parameters_stack, 2, 0, 1, 2)
         self.clusterer_name.currentIndexChanged.connect(
             parameters_stack.setCurrentIndex
         )
@@ -2725,43 +2736,51 @@ class TestClustererDialog(lib.Dialog):
         self.one_pixel_blur = QtWidgets.QCheckBox("One pixel blur")
         self.one_pixel_blur.setChecked(False)
         self.one_pixel_blur.stateChanged.connect(self.view.update_scene)
-        parameters_grid.addWidget(self.one_pixel_blur, 2, 0, 1, 2)
+        parameters_grid.addWidget(self.one_pixel_blur, 3, 0, 1, 2)
 
         self.display_all_locs = QtWidgets.QCheckBox(
             "Display non-clustered localizations"
         )
         self.display_all_locs.setChecked(False)
         self.display_all_locs.stateChanged.connect(self.view.update_scene)
-        parameters_grid.addWidget(self.display_all_locs, 3, 0, 1, 2)
+        parameters_grid.addWidget(self.display_all_locs, 4, 0, 1, 2)
 
         self.display_centers = QtWidgets.QCheckBox("Display cluster centers")
         self.display_centers.setChecked(False)
         self.display_centers.stateChanged.connect(self.view.update_scene)
-        parameters_grid.addWidget(self.display_centers, 4, 0, 1, 2)
+        parameters_grid.addWidget(self.display_centers, 5, 0, 1, 2)
 
-        # parameters - xy, xz, yz projections
-        xy_proj = QtWidgets.QPushButton("XY projection")
-        xy_proj.clicked.connect(self.on_xy_proj)
-        parameters_grid.addWidget(xy_proj, 5, 0, 1, 2)
-
-        xz_proj = QtWidgets.QPushButton("XZ projection")
-        xz_proj.clicked.connect(self.on_xz_proj)
-        parameters_grid.addWidget(xz_proj, 6, 0)
-
-        yz_proj = QtWidgets.QPushButton("YZ projection")
-        yz_proj.clicked.connect(self.on_yz_proj)
-        parameters_grid.addWidget(yz_proj, 6, 1)
-
-        # parameters - test
+        # test
         test_button = QtWidgets.QPushButton("Test")
         test_button.clicked.connect(self.test_clusterer)
         test_button.setDefault(True)
-        parameters_grid.addWidget(test_button, 7, 0)
+        parameters_grid.addWidget(test_button, 6, 0, 1, 2)
+
+        projections_layout = QtWidgets.QHBoxLayout()
+        parameters_grid.addLayout(projections_layout, 7, 0, 1, 2)
+
+        # display settings - xy, xz, yz projections
+        xy_proj = QtWidgets.QPushButton("XY projection")
+        xy_proj.clicked.connect(self.on_xy_proj)
+        projections_layout.addWidget(xy_proj)
+
+        xz_proj = QtWidgets.QPushButton("XZ projection")
+        xz_proj.clicked.connect(self.on_xz_proj)
+        projections_layout.addWidget(xz_proj)
+
+        yz_proj = QtWidgets.QPushButton("YZ projection")
+        yz_proj.clicked.connect(self.on_yz_proj)
+        projections_layout.addWidget(yz_proj)
 
         # display settings - return to full FOV
         full_fov = QtWidgets.QPushButton("Full FOV")
         full_fov.clicked.connect(self.get_full_fov)
-        parameters_grid.addWidget(full_fov, 7, 1)
+        parameters_grid.addWidget(full_fov, 8, 0)
+
+        # apply to all
+        apply_to_all_button = QtWidgets.QPushButton("Cluster entire dataset")
+        apply_to_all_button.clicked.connect(self.apply_to_all)
+        parameters_grid.addWidget(apply_to_all_button, 8, 1)
 
         # view
         view_box = QtWidgets.QGroupBox("View")
@@ -2847,7 +2866,6 @@ class TestClustererDialog(lib.Dialog):
         elif clusterer_name == "SMLM":
             locs = clusterer.cluster(locs, **params)
         elif clusterer_name == "G5M":
-            params["DBSCAN"]["pixelsize"] = pixelsize
             locs = clusterer.dbscan(locs, **params["DBSCAN"])
             # in g5m, the info parameter is only for getting the pixel
             # size
@@ -2910,6 +2928,7 @@ class TestClustererDialog(lib.Dialog):
             params["DBSCAN"][
                 "min_samples"
             ] = self.test_g5m_params.dbscan_min_samples.value()
+            params["DBSCAN"]["pixelsize"] = pixelsize
             params["G5M"] = {}
             params["G5M"]["min_locs"] = self.test_g5m_params.min_locs.value()
             handle = self.test_g5m_params.loc_prec_handling.currentText()
@@ -2948,7 +2967,7 @@ class TestClustererDialog(lib.Dialog):
         # get clustering parameters
         params = self.get_cluster_params()
         # extract picked locs
-        self.channel = self.window.view.get_channel("Test clusterer")
+        self.channel = self.channels.currentIndex()
         locs = self.window.view.picked_locs(self.channel)[0]
         # cluster picked locs
         self.view.locs, self.view.centers = self.cluster(locs, params)
@@ -2977,6 +2996,95 @@ class TestClustererDialog(lib.Dialog):
             return True
         else:
             return False
+
+    def apply_to_all(self) -> None:
+        """Uses the currently selected clusterer and parameters and
+        applies it to the entire dataset."""
+        channels = self.window.view.get_channel_all_seq()
+        if channels is None:
+            return
+
+        if channels == len(self.channels):
+            # get suffix to save files
+            suffix, ok = QtWidgets.QInputDialog.getText(
+                self,
+                "Save clustered localizations",
+                "Enter suffix for clustered localization files (e.g., 'DBSCAN_clustered'):",
+            )
+            if not ok or not suffix:
+                return
+            channels = list(range(channels))
+            paths = [
+                self.window.view.locs_paths[ch].replace(
+                    ".hdf5", f"_{suffix}.hdf5"
+                )
+                for ch in channels
+            ]
+        else:
+            channels = [channels]
+            # get path to save
+            path, ok = lib.get_save_filename_ext_dialog(
+                self,
+                "Save clustered localizations",
+                "",
+                filter="*.hdf5",
+                check_ext=[".yaml"],
+            )
+            if not ok:
+                return
+            paths = [path]
+
+        for channel, path in zip(channels, paths):
+            self._apply_to_all(channel, path)
+
+    def _apply_to_all(self, channel: int, path: str) -> None:
+        """Apply the currently selected clusterer and parameters to the
+        the entire dataset for a given channel."""
+        params = self.get_cluster_params()
+        locs = self.window.view.all_locs[channel]
+        info = self.window.view.infos[channel]
+        pixelsize = self.window.display_settings_dlg.pixelsize.value()
+        save_centers = self.display_centers.isChecked()
+        if self.clusterer_name.currentText() == "DBSCAN":
+            self.window.view._dbscan(
+                channel=channel,
+                path=path,
+                radius=params["radius"],
+                min_density=params["min_samples"],
+                min_locs=params["min_locs"],
+                save_centers=save_centers,
+            )
+        elif self.clusterer_name.currentText() == "HDBSCAN":
+            self.window.view._hdbscan(
+                channel=channel,
+                path=path,
+                min_cluster=params["min_cluster_size"],
+                min_samples=params["min_samples"],
+                cluster_eps=params["cluster_eps"],
+                save_centers=save_centers,
+            )
+        elif self.clusterer_name.currentText() == "SMLM":
+            self.window.view._smlm_clusterer(
+                channel=channel,
+                path=path,
+                radius_xy=params["radius_xy"],
+                radius_z=params["radius_z"],
+                min_locs=params["min_locs"],
+                frame_analysis=params["frame_analysis"],
+                save_centers=save_centers,
+            )
+        elif self.clusterer_name.currentText() == "G5M":
+            params["G5M"]["callback_parent"] = self.window
+            params["G5M"]["asynch"] = True
+            locs = clusterer.dbscan(locs, **params["DBSCAN"])
+            centers, clustered_locs, new_info = g5m.g5m(
+                locs, [{"Pixelsize": pixelsize}], **params["G5M"]
+            )
+            # save clustered locs and centers
+            io.save_locs(path, clustered_locs, info=new_info)
+            io.save_locs(
+                path.replace(".hdf5", "_centers.hdf5"), centers, info=new_info
+            )
 
 
 class TestDBSCANParams(QtWidgets.QWidget):
@@ -6660,6 +6768,11 @@ class View(QtWidgets.QLabel):
 
         # fast rendering add channel
         self.window.fast_render_dialog.on_file_added()
+
+        # add channel to test clustering dialog
+        self.window.test_clusterer_dialog.channels.addItem(
+            os.path.basename(path)
+        )
 
     def add_multiple(self, paths: list[str]) -> None:
         """Load several .hdf5 and .yaml files, see ``self.add``.
