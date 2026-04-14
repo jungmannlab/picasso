@@ -1626,6 +1626,7 @@ class Window(QtWidgets.QMainWindow):
         self.parameters_dialog = ParametersDialog(self)
         self.contrast_dialog = ContrastDialog(self)
         self.columns_dialog = LocColumnSelectionDialog(self)
+        self.metadata_dialog = lib.MetadataDialog(self)
         self.user_settings_dialog = lib.UserSettingsDialog(self)
         self.init_menu_bar()
         self.view = View(self)
@@ -1724,6 +1725,10 @@ class Window(QtWidgets.QMainWindow):
         export_current_action = file_menu.addAction("Export current view")
         export_current_action.setShortcut("Ctrl+E")
         export_current_action.triggered.connect(self.export_current)
+        metadata_action = file_menu.addAction("Metadata")
+        metadata_action.setShortcut("Ctrl+M")
+        metadata_action.triggered.connect(self.show_metadata)
+        file_menu.addAction(metadata_action)
 
         file_menu.addSeparator()
         sounds_menu = file_menu.addMenu("Sound notifications")
@@ -1844,6 +1849,21 @@ class Window(QtWidgets.QMainWindow):
         """Use the loaded movie to obtain z-calibration data for 3D
         fitting using astigmatism."""
         self.localize(calibrate_z=True)
+
+    def show_metadata(self) -> None:
+        """Open the metadata dialog."""
+        if self.movie is None:
+            QtWidgets.QMessageBox.information(
+                self, "Metadata", "No file loaded."
+            )
+            return
+        infos = self.extra_info if self.extra_info else self.info
+        label = (
+            os.path.basename(self.movie_path[0]) if self.movie_path else None
+        )
+        self.metadata_dialog.set_infos(infos, labels=label)
+        self.metadata_dialog.show()
+        self.metadata_dialog.raise_()
 
     def open_file_dialog(self) -> None:
         """Open a file dialog to select a movie file to load."""
