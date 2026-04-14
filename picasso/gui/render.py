@@ -2684,6 +2684,20 @@ class TestClustererDialog(lib.Dialog):
         self.pick_size = None
         self.window = window
         self.view = TestClustererView(self)
+        self.view.setToolTip(
+            "Rendering of the clustered localizations based on the"
+            " chosen parameters.\n"
+            "Check boxes impact the colors of channels:\n"
+            " - No check boxes: clusters are colored according to their\n"
+            "   cluster ID, unclustered localizations are not shown.\n"
+            " - Display non-clustered localizations only: white clusters,\n"
+            "   red unclustered localizations.\n"
+            " - Display cluster centers only: white cluster centers,\n"
+            "   red clustered localizations.\n"
+            " - Display non-clustered localizations and cluster centers:\n"
+            "   white cluster centers, yellow clustered localizations,\n"
+            "   red unclustered localizations."
+        )
         layout = QtWidgets.QGridLayout(self)
         self.setLayout(layout)
 
@@ -2734,6 +2748,7 @@ class TestClustererDialog(lib.Dialog):
 
         # parameters - display modes
         self.one_pixel_blur = QtWidgets.QCheckBox("One pixel blur")
+        self.one_pixel_blur.setToolTip("Render with one pixel blur?")
         self.one_pixel_blur.setChecked(False)
         self.one_pixel_blur.stateChanged.connect(self.view.update_scene)
         parameters_grid.addWidget(self.one_pixel_blur, 3, 0, 1, 2)
@@ -2741,17 +2756,26 @@ class TestClustererDialog(lib.Dialog):
         self.display_all_locs = QtWidgets.QCheckBox(
             "Display non-clustered localizations"
         )
+        self.display_all_locs.setToolTip(
+            "Display localizations that were not assigned to a cluster?"
+        )
         self.display_all_locs.setChecked(False)
         self.display_all_locs.stateChanged.connect(self.view.update_scene)
         parameters_grid.addWidget(self.display_all_locs, 4, 0, 1, 2)
 
         self.display_centers = QtWidgets.QCheckBox("Display cluster centers")
+        self.display_centers.setToolTip(
+            "Display the centers of mass of clusters?"
+        )
         self.display_centers.setChecked(False)
         self.display_centers.stateChanged.connect(self.view.update_scene)
         parameters_grid.addWidget(self.display_centers, 5, 0, 1, 2)
 
         # test
         test_button = QtWidgets.QPushButton("Test")
+        test_button.setToolTip(
+            "Apply the chosen parameters to the picked ROI."
+        )
         test_button.clicked.connect(self.test_clusterer)
         test_button.setDefault(True)
         parameters_grid.addWidget(test_button, 6, 0, 1, 2)
@@ -2761,24 +2785,31 @@ class TestClustererDialog(lib.Dialog):
 
         # display settings - xy, xz, yz projections
         xy_proj = QtWidgets.QPushButton("XY projection")
+        xy_proj.setToolTip("View the XY projection of the data.")
         xy_proj.clicked.connect(self.on_xy_proj)
         projections_layout.addWidget(xy_proj)
 
         xz_proj = QtWidgets.QPushButton("XZ projection")
+        xz_proj.setToolTip("View the XZ projection of the data.")
         xz_proj.clicked.connect(self.on_xz_proj)
         projections_layout.addWidget(xz_proj)
 
         yz_proj = QtWidgets.QPushButton("YZ projection")
+        yz_proj.setToolTip("View the YZ projection of the data.")
         yz_proj.clicked.connect(self.on_yz_proj)
         projections_layout.addWidget(yz_proj)
 
         # display settings - return to full FOV
         full_fov = QtWidgets.QPushButton("Full FOV")
+        full_fov.setToolTip("Reset to the full field of view.")
         full_fov.clicked.connect(self.get_full_fov)
         parameters_grid.addWidget(full_fov, 8, 0)
 
         # apply to all
         apply_to_all_button = QtWidgets.QPushButton("Cluster entire dataset")
+        apply_to_all_button.setToolTip(
+            "Apply the chosen parameters to all localizations."
+        )
         apply_to_all_button.clicked.connect(self.apply_to_all)
         parameters_grid.addWidget(apply_to_all_button, 8, 1)
 
@@ -3097,7 +3128,12 @@ class TestDBSCANParams(QtWidgets.QWidget):
         super().__init__()
         self.dialog = dialog
         grid = QtWidgets.QGridLayout(self)
-        grid.addWidget(QtWidgets.QLabel("Radius (nm):"), 0, 0)
+        radius_label = QtWidgets.QLabel("Radius (nm):")
+        radius_label.setToolTip(
+            "DBSCAN epsilon; max. distance between two samples for one to be\n"
+            "considered as in the same neighborhood."
+        )
+        grid.addWidget(radius_label, 0, 0)
         self.radius = QtWidgets.QDoubleSpinBox()
         self.radius.setRange(0.01, 1e6)
         self.radius.setValue(10)
@@ -3105,7 +3141,12 @@ class TestDBSCANParams(QtWidgets.QWidget):
         self.radius.setSingleStep(0.1)
         grid.addWidget(self.radius, 0, 1)
 
-        grid.addWidget(QtWidgets.QLabel("Min. samples:"), 1, 0)
+        min_samples_label = QtWidgets.QLabel("Min. samples:")
+        min_samples_label.setToolTip(
+            "Minimum number of samples in a neighborhood for a point to be\n"
+            "considered a core point."
+        )
+        grid.addWidget(min_samples_label, 1, 0)
         self.min_samples = QtWidgets.QSpinBox()
         self.min_samples.setValue(4)
         self.min_samples.setRange(1, int(1e6))
@@ -3113,7 +3154,12 @@ class TestDBSCANParams(QtWidgets.QWidget):
         grid.addWidget(self.min_samples, 1, 1)
         grid.setRowStretch(2, 1)
 
-        grid.addWidget(QtWidgets.QLabel("Min. no. of locs:"), 2, 0)
+        minlocs_label = QtWidgets.QLabel("Min. no. of locs:")
+        minlocs_label.setToolTip(
+            "Minimum number of localizations required to consider a\n"
+            "cluster valid."
+        )
+        grid.addWidget(minlocs_label, 2, 0)
         self.min_locs = QtWidgets.QSpinBox()
         self.min_locs.setValue(0)
         self.min_locs.setRange(0, int(1e6))
@@ -3129,25 +3175,37 @@ class TestHDBSCANParams(QtWidgets.QWidget):
         super().__init__()
         self.dialog = dialog
         grid = QtWidgets.QGridLayout(self)
-        grid.addWidget(QtWidgets.QLabel("Min. cluster size:"), 0, 0)
+
+        min_cluster_label = QtWidgets.QLabel("Min. cluster size:")
+        min_cluster_label.setToolTip(
+            "Minimum number of localizations required to consider a\n"
+            "cluster valid."
+        )
+        grid.addWidget(min_cluster_label, 0, 0)
         self.min_cluster_size = QtWidgets.QSpinBox()
         self.min_cluster_size.setValue(10)
         self.min_cluster_size.setRange(1, int(1e6))
         self.min_cluster_size.setSingleStep(1)
         grid.addWidget(self.min_cluster_size, 0, 1)
 
-        grid.addWidget(QtWidgets.QLabel("Min. samples"), 1, 0)
+        minsamples_label = QtWidgets.QLabel("Min. samples:")
+        minsamples_label.setToolTip(
+            "The number of samples in a neighborhood for a point to be\n"
+            "considered a core point."
+        )
+        grid.addWidget(minsamples_label, 1, 0)
         self.min_samples = QtWidgets.QSpinBox()
         self.min_samples.setValue(10)
         self.min_samples.setRange(1, int(1e6))
         self.min_samples.setSingleStep(1)
         grid.addWidget(self.min_samples, 1, 1)
 
-        grid.addWidget(
-            QtWidgets.QLabel("Intercluster max.\ndistance (camera pixels):"),
-            2,
-            0,
+        dist_label = QtWidgets.QLabel("Intercluster max. distance (nm):")
+        dist_label.setToolTip(
+            "The distance between clusters to be considered as separate\n"
+            "clusters."
         )
+        grid.addWidget(dist_label, 2, 0)
         self.cluster_eps = QtWidgets.QDoubleSpinBox()
         self.cluster_eps.setRange(0, 1e6)
         self.cluster_eps.setValue(0.0)
@@ -3164,7 +3222,12 @@ class TestSMLMParams(QtWidgets.QWidget):
         super().__init__()
         self.dialog = dialog
         grid = QtWidgets.QGridLayout(self)
-        grid.addWidget(QtWidgets.QLabel("Radius xy (nm):"), 0, 0)
+        radius_label = QtWidgets.QLabel("Radius xy (nm):")
+        radius_label.setToolTip(
+            "Radius in which localizations are considered part of the\n"
+            "same cluster. Applied in xy plane."
+        )
+        grid.addWidget(radius_label, 0, 0)
         self.radius_xy = QtWidgets.QDoubleSpinBox()
         self.radius_xy.setValue(10)
         self.radius_xy.setRange(0.01, 1e6)
@@ -3172,7 +3235,12 @@ class TestSMLMParams(QtWidgets.QWidget):
         self.radius_xy.setDecimals(2)
         grid.addWidget(self.radius_xy, 0, 1)
 
-        grid.addWidget(QtWidgets.QLabel("Radius z (3D only):"), 1, 0)
+        radius_z_label = QtWidgets.QLabel("Radius z (3D only):")
+        radius_z_label.setToolTip(
+            "Radius in which localizations are considered part of the\n"
+            "same cluster. Applied in z direction (3D only)."
+        )
+        grid.addWidget(radius_z_label, 1, 0)
         self.radius_z = QtWidgets.QDoubleSpinBox()
         self.radius_z.setValue(25)
         self.radius_z.setRange(0.01, 1e6)
@@ -3180,7 +3248,12 @@ class TestSMLMParams(QtWidgets.QWidget):
         self.radius_z.setDecimals(2)
         grid.addWidget(self.radius_z, 1, 1)
 
-        grid.addWidget(QtWidgets.QLabel("Min. no. of locs"), 2, 0)
+        min_locs_label = QtWidgets.QLabel("Min. no. of locs")
+        min_locs_label.setToolTip(
+            "Minimum number of localizations required to consider a\n"
+            "cluster valid."
+        )
+        grid.addWidget(min_locs_label, 2, 0)
         self.min_locs = QtWidgets.QSpinBox()
         self.min_locs.setValue(10)
         self.min_locs.setRange(1, int(1e6))
@@ -3188,6 +3261,7 @@ class TestSMLMParams(QtWidgets.QWidget):
         grid.addWidget(self.min_locs, 2, 1)
 
         self.fa = QtWidgets.QCheckBox("Frame analysis")
+        self.fa.setToolTip("Run a simple test to discard sticking events?")
         self.fa.setChecked(True)
         grid.addWidget(self.fa, 3, 0, 1, 2)
         grid.setRowStretch(4, 1)
@@ -3201,9 +3275,12 @@ class TestG5MParams(QtWidgets.QWidget):
         self.dialog = dialog
         self.calibration = None
         grid = QtWidgets.QGridLayout(self)
-        grid.addWidget(
-            QtWidgets.QLabel("DBSCAN radius (nm):"), grid.rowCount(), 0
+        dbscan_radius_label = QtWidgets.QLabel("DBSCAN radius (nm):")
+        dbscan_radius_label.setToolTip(
+            "DBSCAN epsilon; max. distance between two samples for one to be\n"
+            "considered as in the same neighborhood."
         )
+        grid.addWidget(dbscan_radius_label, grid.rowCount(), 0)
         self.dbscan_radius = QtWidgets.QDoubleSpinBox()
         self.dbscan_radius.setRange(0.01, 1e6)
         self.dbscan_radius.setValue(10)
@@ -3211,16 +3288,24 @@ class TestG5MParams(QtWidgets.QWidget):
         self.dbscan_radius.setSingleStep(0.1)
         grid.addWidget(self.dbscan_radius, grid.rowCount() - 1, 1)
 
-        grid.addWidget(
-            QtWidgets.QLabel("DBSCAN min. samples:"), grid.rowCount(), 0
+        dbscan_minsamples_label = QtWidgets.QLabel("DBSCAN min. samples:")
+        dbscan_minsamples_label.setToolTip(
+            "Minimum number of samples in a neighborhood for a point to be\n"
+            "considered a core point."
         )
+        grid.addWidget(dbscan_minsamples_label, grid.rowCount(), 0)
         self.dbscan_min_samples = QtWidgets.QSpinBox()
         self.dbscan_min_samples.setValue(4)
         self.dbscan_min_samples.setRange(1, int(1e6))
         self.dbscan_min_samples.setSingleStep(1)
         grid.addWidget(self.dbscan_min_samples, grid.rowCount() - 1, 1)
 
-        grid.addWidget(QtWidgets.QLabel("Min. locs:"), grid.rowCount(), 0)
+        min_locs_label = QtWidgets.QLabel("Min. locs:")
+        min_locs_label.setToolTip(
+            "Minimum number of localizations required to consider a\n"
+            "cluster valid."
+        )
+        grid.addWidget(min_locs_label, grid.rowCount(), 0)
         self.min_locs = QtWidgets.QSpinBox()
         self.min_locs.setValue(MIN_LOCS_G5M)
         self.min_locs.setRange(2, 99999)
@@ -3228,6 +3313,10 @@ class TestG5MParams(QtWidgets.QWidget):
         grid.addWidget(self.min_locs, grid.rowCount() - 1, 1)
 
         self.loc_prec_handling = QtWidgets.QComboBox()
+        self.loc_prec_handling.setToolTip(
+            "Choose whether to constrain Gaussian \u03c3 based on loc.\n"
+            "precision values (local) or to use absolute \u03c3 bounds."
+        )
         self.loc_prec_handling.addItems(
             ["Local loc. precision", "Custom \u03c3 bounds"]
         )

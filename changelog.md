@@ -51,6 +51,7 @@ Last change: 13-APR-2026 CEST
 - Changelog changed from .rst to markdown for GitHub display
 - Test clustering saves the channel to which the algorithms are applied
 - Test clustering allows for applying the current parameters to the whole dataset
+- Test clustering tool tips
 
 ### *Bug fixes:*
 
