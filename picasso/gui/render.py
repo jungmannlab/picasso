@@ -3054,7 +3054,7 @@ class TestClustererDialog(lib.Dialog):
         else:
             channels = [channels]
             # get path to save
-            path, ok = lib.get_save_filename_ext_dialog(
+            path, ext = lib.get_save_filename_ext_dialog(
                 self,
                 "Save clustered localizations",
                 self.window.view.locs_paths[channels[0]].replace(
@@ -3063,7 +3063,7 @@ class TestClustererDialog(lib.Dialog):
                 filter="*.hdf5",
                 check_ext=[".yaml"],
             )
-            if not ok:
+            if not path:
                 return
             paths = [path]
 

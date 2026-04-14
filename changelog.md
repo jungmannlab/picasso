@@ -1,6 +1,6 @@
 # Changelog
 
-Last change: 13-APR-2026 CEST
+Last change: 14-APR-2026 CEST
 
 ## 0.10.0
 
@@ -52,6 +52,7 @@ Last change: 13-APR-2026 CEST
 - Test clustering saves the channel to which the algorithms are applied
 - Test clustering allows for applying the current parameters to the whole dataset
 - Test clustering tool tips
+- Filter supports .csv export (not only hdf5)
 
 ### *Bug fixes:*
 

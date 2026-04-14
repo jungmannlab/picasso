@@ -623,6 +623,8 @@ class Window(QtWidgets.QMainWindow):
         save_action = file_menu.addAction("Save")
         save_action.setShortcut(QtGui.QKeySequence.StandardKey.Save)
         save_action.triggered.connect(self.save_file_dialog)
+        export_csv_action = file_menu.addAction("Export as CSV")
+        export_csv_action.triggered.connect(self.export_csv_dialog)
         metadata_action = file_menu.addAction("Show metadata")
         metadata_action.setShortcut("Ctrl+M")
         metadata_action.triggered.connect(self.show_metadata)
@@ -805,6 +807,20 @@ class Window(QtWidgets.QMainWindow):
             self.filter_log["Removed columns"].extend(to_remove)
         else:
             self.filter_log["Removed columns"] = to_remove
+
+    def export_csv_dialog(self) -> None:
+        if self.locs is None:
+            return
+        base, ext = os.path.splitext(self.locs_path)
+        out_path = base + ".csv"
+        path, exe = lib.get_save_filename_ext_dialog(
+            self,
+            "Export as CSV",
+            out_path,
+            filter="*.csv",
+        )
+        if path:
+            self.locs.to_csv(path, index=False)
 
     def save_file_dialog(self) -> None:
         if "x" in self.locs.columns:  # Saving only for locs
