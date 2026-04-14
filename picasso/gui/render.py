@@ -3801,6 +3801,8 @@ class ChangeFOV(lib.Dialog):
             out_path,
             filter="*.txt",
         )
+        if not path:
+            return
         fov = np.array(
             [
                 self.x_box.value(),
@@ -3816,6 +3818,8 @@ class ChangeFOV(lib.Dialog):
         path, ext = QtWidgets.QFileDialog.getOpenFileName(
             self, "Load FOV from", filter="*.txt"
         )
+        if not path:
+            return
         [x, y, w, h] = np.loadtxt(path)
         self.x_box.setValue(x)
         self.y_box.setValue(y)
@@ -3971,17 +3975,20 @@ class InfoDialog(lib.Dialog):
         self.wh_label = QtWidgets.QLabel()
         display_grid.addWidget(self.wh_label, 3, 1)
 
+        fov_buttons_layout = QtWidgets.QHBoxLayout()
+        display_grid.addLayout(fov_buttons_layout, 4, 0, 1, 2)
+
         self.change_display = QtWidgets.QPushButton("Change field of view")
         self.change_display.setToolTip(
             "Manually change the field of view by specifying\n"
             "the top-left corner coordinates and the width and height."
         )
-        display_grid.addWidget(self.change_display, 4, 0)
+        fov_buttons_layout.addWidget(self.change_display)
         self.change_display.clicked.connect(self.change_fov.show)
 
         self.save_fov_button = QtWidgets.QPushButton("Save FOV")
         self.save_fov_button.setToolTip("Save current FOV as a .txt file.")
-        display_grid.addWidget(self.save_fov_button, 5, 0)
+        fov_buttons_layout.addWidget(self.save_fov_button)
         self.save_fov_button.clicked.connect(self.change_fov.save_fov)
 
         self.load_fov_button = QtWidgets.QPushButton("Load FOV")
@@ -3989,7 +3996,7 @@ class InfoDialog(lib.Dialog):
             "Load FOV from a .txt file.\n"
             "Also available by dropping a .txt file on the main window."
         )
-        display_grid.addWidget(self.load_fov_button, 5, 1)
+        fov_buttons_layout.addWidget(self.load_fov_button)
         self.load_fov_button.clicked.connect(self.change_fov.load_fov)
 
         # Movie
