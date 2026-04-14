@@ -3026,7 +3026,9 @@ class TestClustererDialog(lib.Dialog):
             path, ok = lib.get_save_filename_ext_dialog(
                 self,
                 "Save clustered localizations",
-                "",
+                self.window.view.locs_paths[channels[0]].replace(
+                    ".hdf5", "_clustered.hdf5"
+                ),
                 filter="*.hdf5",
                 check_ext=[".yaml"],
             )
@@ -3049,7 +3051,7 @@ class TestClustererDialog(lib.Dialog):
             self.window.view._dbscan(
                 channel=channel,
                 path=path,
-                radius=params["radius"],
+                radius=params["radius"] * pixelsize,
                 min_density=params["min_samples"],
                 min_locs=params["min_locs"],
                 save_centers=save_centers,
@@ -3067,13 +3069,14 @@ class TestClustererDialog(lib.Dialog):
             self.window.view._smlm_clusterer(
                 channel=channel,
                 path=path,
-                radius_xy=params["radius_xy"],
-                radius_z=params["radius_z"],
+                radius_xy=params["radius_xy"] * pixelsize,
+                radius_z=params["radius_z"] * pixelsize,
                 min_locs=params["min_locs"],
                 frame_analysis=params["frame_analysis"],
                 save_centers=save_centers,
             )
         elif self.clusterer_name.currentText() == "G5M":
+            params["DBSCAN"]["radius"] *= pixelsize
             params["G5M"]["callback_parent"] = self.window
             params["G5M"]["asynch"] = True
             locs = clusterer.dbscan(locs, **params["DBSCAN"])
