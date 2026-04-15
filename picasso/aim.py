@@ -22,7 +22,9 @@ from scipy.interpolate import InterpolatedUnivariateSpline
 from . import lib, __version__
 
 
-def intersect1d(a: np.ndarray, b: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+def intersect1d(
+    a: lib.IntArray1D, b: lib.IntArray1D
+) -> tuple[lib.IntArray1D, lib.IntArray1D]:
     """Alias for _intersect1d which will be a private function in the
     future release. Kept for backward compatibility."""
     lib.deprecation_warning(
@@ -33,9 +35,9 @@ def intersect1d(a: np.ndarray, b: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
 
 
 def _intersect1d(
-    a: np.ndarray,
-    b: np.ndarray,
-) -> tuple[np.ndarray, np.ndarray]:
+    a: lib.IntArray1D,
+    b: lib.IntArray1D,
+) -> tuple[lib.IntArray1D, lib.IntArray1D]:
     """Find the indices of common elements in two 1D arrays (a and b).
     Both a and b are assumed to be sorted and contain only unique
     values.
@@ -45,16 +47,16 @@ def _intersect1d(
 
     Parameters
     ----------
-    a : np.ndarray
+    a : lib.IntArray1D
         1D array of integers.
-    b : np.ndarray
+    b : lib.IntArray1D
         1D array of integers.
 
     Returns
     -------
-    a_indices : np.ndarray
+    a_indices : lib.IntArray1D
         Indices of common elements in a.
-    b_indices : np.ndarray
+    b_indices : lib.IntArray1D
         Indices of common elements in b.
     """
     aux = np.concatenate((a, b))
@@ -70,10 +72,10 @@ def _intersect1d(
 
 
 def count_intersections(
-    l0_coords: np.ndarray,
-    l0_counts: np.ndarray,
-    l1_coords: np.ndarray,
-    l1_counts: np.ndarray,
+    l0_coords: lib.IntArray1D,
+    l0_counts: lib.IntArray1D,
+    l1_coords: lib.IntArray1D,
+    l1_counts: lib.IntArray1D,
 ) -> int:
     """Alias for _count_intersections which will be a private function in the
     future release. Kept for backward compatibility."""
@@ -85,10 +87,10 @@ def count_intersections(
 
 
 def _count_intersections(
-    l0_coords: np.ndarray,
-    l0_counts: np.ndarray,
-    l1_coords: np.ndarray,
-    l1_counts: np.ndarray,
+    l0_coords: lib.IntArray1D,
+    l0_counts: lib.IntArray1D,
+    l1_coords: lib.IntArray1D,
+    l1_counts: lib.IntArray1D,
 ) -> int:
     """Count the number of intersected localizations between the two
     datasets. We assume that the intersection distance is 1 and since
@@ -99,13 +101,13 @@ def _count_intersections(
 
     Parameters
     ----------
-    l0_coords : np.ndarray
+    l0_coords : lib.IntArray1D
         Unique coordinates of the reference localizations.
-    l0_counts : np.ndarray
+    l0_counts : lib.IntArray1D
         Counts of the unique values of reference localizations.
-    l1_coords : np.ndarray
+    l1_coords : lib.IntArray1D
         Unique coordinates of the target localizations.
-    l1_counts : np.ndarray
+    l1_counts : lib.IntArray1D
         Counts of the unique values of target localizations.
 
     Returns
@@ -125,13 +127,13 @@ def _count_intersections(
 
 
 def run_intersections(
-    l0_coords: np.ndarray,
-    l0_counts: np.ndarray,
-    l1_coords: np.ndarray,
-    l1_counts: np.ndarray,
-    shifts_xy: np.ndarray,
+    l0_coords: lib.IntArray1D,
+    l0_counts: lib.IntArray1D,
+    l1_coords: lib.IntArray1D,
+    l1_counts: lib.IntArray1D,
+    shifts_xy: lib.IntArray1D,
     box: int,
-) -> np.ndarray:
+) -> lib.IntArray2D:
     """Alias for _run_intersections which will be a private function in the
     future release. Kept for backward compatibility."""
     lib.deprecation_warning(
@@ -144,35 +146,35 @@ def run_intersections(
 
 
 def _run_intersections(
-    l0_coords: np.ndarray,
-    l0_counts: np.ndarray,
-    l1_coords: np.ndarray,
-    l1_counts: np.ndarray,
-    shifts_xy: np.ndarray,
+    l0_coords: lib.IntArray1D,
+    l0_counts: lib.IntArray1D,
+    l1_coords: lib.IntArray1D,
+    l1_counts: lib.IntArray1D,
+    shifts_xy: lib.IntArray1D,
     box: int,
-) -> np.ndarray:
+) -> lib.IntArray2D:
     """Run intersection counting across the local search region. Return
     the 2D array with number of intersections across the local search
     region.
 
     Parameters
     ----------
-    l0_coords : np.ndarray
+    l0_coords : lib.IntArray1D
         Unique coordinates of the reference localizations.
-    l0_counts : np.ndarray
+    l0_counts : lib.IntArray1D
         Counts of the reference localizations.
-    l1_coords : np.ndarray
+    l1_coords : lib.IntArray1D
         Unique coordinates of the target localizations.
-    l1_counts : np.ndarray
+    l1_counts : lib.IntArray1D
         Counts of the target localizations.
-    shifts_xy : np.ndarray
+    shifts_xy : lib.IntArray1D
         1D array with x and y shifts.
     box : int
         Side length of the local search region.
 
     Returns
     -------
-    roi_cc : np.ndarray
+    roi_cc : lib.IntArray2D
         2D array with number of intersections across the local search
         region.
     """
@@ -190,13 +192,13 @@ def _run_intersections(
 
 
 def run_intersections_multithread(
-    l0_coords: np.ndarray,
-    l0_counts: np.ndarray,
-    l1_coords: np.ndarray,
-    l1_counts: np.ndarray,
-    shifts_xy: np.ndarray,
+    l0_coords: lib.IntArray1D,
+    l0_counts: lib.IntArray1D,
+    l1_coords: lib.IntArray1D,
+    l1_counts: lib.IntArray1D,
+    shifts_xy: lib.IntArray1D,
     box: int,
-) -> np.ndarray:
+) -> lib.IntArray2D | lib.IntArray1D:
     """Alias for _run_intersections_multithread which will be a private function in the
     future release. Kept for backward compatibility."""
     lib.deprecation_warning(
@@ -209,37 +211,37 @@ def run_intersections_multithread(
 
 
 def _run_intersections_multithread(
-    l0_coords: np.ndarray,
-    l0_counts: np.ndarray,
-    l1_coords: np.ndarray,
-    l1_counts: np.ndarray,
-    shifts_xy: np.ndarray,
+    l0_coords: lib.IntArray1D,
+    l0_counts: lib.IntArray1D,
+    l1_coords: lib.IntArray1D,
+    l1_counts: lib.IntArray1D,
+    shifts_xy: lib.IntArray1D,
     box: int,
-) -> np.ndarray:
+) -> lib.IntArray2D | lib.IntArray1D:
     """Run intersection counting across the local search region. Return
     the 2D array with number of intersections across the local search
     region. Uses multithreading.
 
     Parameters
     ----------
-    l0_coords : np.ndarray
+    l0_coords : lib.IntArray1D
         Unique coordinates of the reference localizations.
-    l0_counts : np.ndarray
+    l0_counts : lib.IntArray1D
         Counts of the reference localizations.
-    l1_coords : np.ndarray
+    l1_coords : lib.IntArray1D
         Unique coordinates of the target localizations.
-    l1_counts : np.ndarray
+    l1_counts : lib.IntArray1D
         Counts of the target localizations.
-    shifts_xy : np.ndarray
+    shifts_xy : lib.IntArray1D
         1D array with x and y shifts.
     box : int
         Side length of the local search region.
 
     Returns
     -------
-    roi_cc : np.ndarray
+    roi_cc : lib.IntArray2D | lib.IntArray1D
         2D array with number of intersections across the local search
-        region.
+        region. 1D array for z intersections in 3D undrifting.
     """
     # shift target coordinates
     l1_coords_shifted = l1_coords[:, np.newaxis] + shifts_xy
@@ -265,15 +267,15 @@ def _run_intersections_multithread(
 
 
 def point_intersect_2d(
-    l0_coords: np.ndarray,
-    l0_counts: np.ndarray,
-    x1: pd.Series | np.ndarray,
-    y1: pd.Series | np.ndarray,
+    l0_coords: lib.IntArray1D,
+    l0_counts: lib.IntArray1D,
+    x1: lib.SeriesOrFloatArray1D,
+    y1: lib.SeriesOrFloatArray1D,
     intersect_d: float,
-    width_units: int,
-    shifts_xy: np.ndarray,
+    width_units: float,
+    shifts_xy: lib.IntArray1D,
     box: int,
-) -> np.ndarray:
+) -> lib.IntArray2D:
     """Alias for _point_intersect_2d which will be a private function in the
     future release. Kept for backward compatibility."""
     lib.deprecation_warning(
@@ -293,39 +295,39 @@ def point_intersect_2d(
 
 
 def _point_intersect_2d(
-    l0_coords: np.ndarray,
-    l0_counts: np.ndarray,
-    x1: pd.Series | np.ndarray,
-    y1: pd.Series | np.ndarray,
+    l0_coords: lib.IntArray1D,
+    l0_counts: lib.IntArray1D,
+    x1: lib.SeriesOrFloatArray1D,
+    y1: lib.SeriesOrFloatArray1D,
     intersect_d: float,
-    width_units: int,
-    shifts_xy: np.ndarray,
+    width_units: float,
+    shifts_xy: lib.IntArray1D,
     box: int,
-) -> np.ndarray:
+) -> lib.IntArray2D:
     """Convert target coordinates into a 1D array in units of
     ``intersect_d`` and count the number of intersections in the local
     search region.
 
     Parameters
     ----------
-    l0_coords : np.ndarray
+    l0_coords : lib.IntArray1D
         Unique values of the reference localizations.
-    l0_counts : np.ndarray
+    l0_counts : lib.IntArray1D
         Counts of the unique values of reference localizations.
-    x1, y1 : pd.Series or np.ndarray
+    x1, y1 : lib.SeriesOrFloatArray1D
         x and y coordinates of the target (currently undrifted) localizations.
     intersect_d : float
         Intersect distance in camera pixels.
-    width_units : int
+    width_units : float
         Width of the camera image in units of intersect_d.
-    shifts_xy : np.ndarray
+    shifts_xy : lib.IntArray1D
         1D array with x and y shifts.
     box : int
         Final side length of the local search region.
 
     Returns
     -------
-    roi_cc : np.ndarray
+    roi_cc : lib.IntArray2D
         2D array with numbers of intersections in the local search
         region.
     """
@@ -343,16 +345,16 @@ def _point_intersect_2d(
 
 
 def point_intersect_3d(
-    l0_coords: np.ndarray,
-    l0_counts: np.ndarray,
-    x1: pd.Series | np.ndarray,
-    y1: pd.Series | np.ndarray,
-    z1: pd.Series | np.ndarray,
+    l0_coords: lib.IntArray1D,
+    l0_counts: lib.IntArray1D,
+    x1: lib.SeriesOrFloatArray1D,
+    y1: lib.SeriesOrFloatArray1D,
+    z1: lib.SeriesOrFloatArray1D,
     intersect_d: float,
-    width_units: int,
-    height_units: int,
-    shifts_z: np.ndarray,
-) -> np.ndarray:
+    width_units: float,
+    height_units: float,
+    shifts_z: lib.IntArray1D,
+) -> lib.IntArray1D:
     """Alias for _point_intersect_3d which will be a private function in the
     future release. Kept for backward compatibility."""
     lib.deprecation_warning(
@@ -373,42 +375,42 @@ def point_intersect_3d(
 
 
 def _point_intersect_3d(
-    l0_coords: np.ndarray,
-    l0_counts: np.ndarray,
-    x1: pd.Series | np.ndarray,
-    y1: pd.Series | np.ndarray,
-    z1: pd.Series | np.ndarray,
+    l0_coords: lib.IntArray1D,
+    l0_counts: lib.IntArray1D,
+    x1: lib.SeriesOrFloatArray1D,
+    y1: lib.SeriesOrFloatArray1D,
+    z1: lib.SeriesOrFloatArray1D,
     intersect_d: float,
-    width_units: int,
-    height_units: int,
-    shifts_z: np.ndarray,
-):
+    width_units: float,
+    height_units: float,
+    shifts_z: lib.IntArray1D,
+) -> lib.IntArray1D:
     """Convert target coordinates into a 1D array in units of
     ``intersect_d`` and count the number of intersections in the local
     search region.
 
     Parameters
     ----------
-    l0_coords : np.ndarray
+    l0_coords : lib.IntArray1D
         Unique values of the reference localizations.
-    l0_counts : np.ndarray
+    l0_counts : lib.IntArray1D
         Counts of the unique values of reference localizations.
-    x1, y1, z1 : pd.Series or np.ndarray
+    x1, y1, z1 : lib.SeriesOrFloatArray1D
         x, y, and z coordinates of the target (currently undrifted)
         localizations.
     intersect_d : float
         Intersect distance in camera pixels.
-    width_units : int
+    width_units : float
         Width of the camera image in units of intersect_d.
-    height_units : int
+    height_units : float
         Height of the camera image in units of intersect_d.
-    shifts_z : np.ndarray
+    shifts_z : lib.IntArray1D
         1D array with z shifts.
 
     Returns
     -------
-    roi_cc : np.ndarray
-        2D array with numbers of intersections in the local search
+    roi_cc : lib.IntArray1D
+        1D array with numbers of intersections in the local search
         region.
     """
     # convert target coordinates to a 1D array in intersect_d units
@@ -429,7 +431,7 @@ def _point_intersect_3d(
     return roi_cc
 
 
-def get_fft_peak(roi_cc: np.ndarray, roi_size: int) -> tuple[float, float]:
+def get_fft_peak(roi_cc: lib.IntArray2D, roi_size: int) -> tuple[float, float]:
     """Alias for _get_fft_peak which will be a private function in the
     future release. Kept for backward compatibility."""
     lib.deprecation_warning(
@@ -439,23 +441,23 @@ def get_fft_peak(roi_cc: np.ndarray, roi_size: int) -> tuple[float, float]:
     return _get_fft_peak(roi_cc, roi_size)
 
 
-def _get_fft_peak(roi_cc: np.ndarray, roi_size: int) -> tuple[float, float]:
+def _get_fft_peak(
+    roi_cc: lib.IntArray2D, roi_size: int
+) -> tuple[float, float]:
     """Estimate the precise sub-pixel position of the peak of ``roi_cc``
     with FFT.
 
     Parameters
     ----------
-    roi_cc : np.ndarray
+    roi_cc : lib.IntArray2D
         2D array with numbers of intersections in the local search region.
     roi_size : int
         Size of the local search region.
 
     Returns
     -------
-    px : float
-        Estimated x-coordinate of the peak.
-    py : float
-        Estimated y-coordinate of the peak.
+    px, py : float
+        Estimated x and y coordinates of the peak.
     """
     fft_values = np.fft.fft2(roi_cc.T)
     ang_x = np.angle(fft_values[0, 1])
@@ -475,7 +477,7 @@ def _get_fft_peak(roi_cc: np.ndarray, roi_size: int) -> tuple[float, float]:
     return px, py
 
 
-def get_fft_peak_z(roi_cc: np.ndarray, roi_size: int) -> float:
+def get_fft_peak_z(roi_cc: lib.IntArray1D, roi_size: int) -> float:
     """Alias for _get_fft_peak_z which will be a private function in the
     future release. Kept for backward compatibility."""
     lib.deprecation_warning(
@@ -485,13 +487,13 @@ def get_fft_peak_z(roi_cc: np.ndarray, roi_size: int) -> float:
     return _get_fft_peak_z(roi_cc, roi_size)
 
 
-def _get_fft_peak_z(roi_cc: np.ndarray, roi_size: int) -> float:
+def _get_fft_peak_z(roi_cc: lib.IntArray1D, roi_size: int) -> float:
     """Estimate the precise sub-pixel position of the peak of 1D
     ``roi_cc``.
 
     Parameters
     ----------
-    roi_cc : np.ndarray
+    roi_cc : lib.IntArray1D
         1D array with numbers of intersections in the local search
         region.
     roi_size : int
@@ -513,31 +515,31 @@ def _get_fft_peak_z(roi_cc: np.ndarray, roi_size: int) -> float:
 
 
 def intersection_max(
-    x: pd.Series | np.ndarray,
-    y: pd.Series | np.ndarray,
-    ref_x: pd.Series | np.ndarray,
-    ref_y: pd.Series | np.ndarray,
-    frame: pd.Series | np.ndarray,
-    seg_bounds: np.ndarray,
+    x: lib.SeriesOrFloatArray1D,
+    y: lib.SeriesOrFloatArray1D,
+    ref_x: lib.SeriesOrFloatArray1D,
+    ref_y: lib.SeriesOrFloatArray1D,
+    frame: lib.SeriesOrIntArray1D,
+    seg_bounds: lib.IntArray1D,
     intersect_d: float,
     roi_r: float,
     width: int,
     aim_round: int = 1,
-    progress: (
-        lib.ProgressDialog | lib.TqdmProgress | lib.MockProgress | None
-    ) = None,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    progress: lib.ProgressType | None = None,
+) -> tuple[
+    lib.FloatArray1D, lib.FloatArray1D, lib.FloatArray1D, lib.FloatArray1D
+]:
     """Maximize intersection (undrift) for 2D localizations.
 
     Parameters
     ----------
-    x, y : pd.Series or np.ndarray
+    x, y : lib.SeriesOrFloatArray1D
         x and y coordinates of the localizations.
-    ref_x, ref_y : pd.Series or np.ndarray
+    ref_x, ref_y : lib.SeriesOrFloatArray1D
         x and y coordinates of the reference localizations.
-    frame : pd.Series or np.ndarray
+    frame : lib.SeriesOrIntArray1D
         Frame indices of localizations, starting at 1.
-    seg_bounds : np.ndarray
+    seg_bounds : lib.IntArray1D
         Frame indices of the segmentation bounds. Defines temporal
         intervals used to estimate drift.
     intersect_d : float
@@ -552,21 +554,16 @@ def intersection_max(
         as reference, the second round uses the entire dataset as
         reference. The impact is that in the second round, the first
         interval is also undrifted.
-    progress : lib.ProgressDialog | lib.TqdmProgress | lib.MockProgress \
-        | None, optional
+    progress : lib.ProgressType | None, optional
         Progress dialog. If TqdmProgress, progress is displayed with tqdm.
         If None or MockProgress, progress is not displayed. Default is None.
 
     Returns
     -------
-    x_pdc : np.ndarray
-        Undrifted x-coordinates.
-    y_pdc : np.ndarray
-        Undrifted y-coordinates.
-    drift_x : np.ndarray
-        Drift in x-direction.
-    drift_y : np.ndarray
-        Drift in y-direction.
+    x_pdc, y_pdc : lib.FloatArray1D
+        Undrifted x and y coordinates.
+    drift_x, drift_y : lib.FloatArray1D
+        Drift in x and y directions.
     """
     assert aim_round in [1, 2], "aim_round must be 1 or 2."
     if progress is None:
@@ -663,24 +660,22 @@ def intersection_max(
 
 
 def intersection_max_z(
-    x: pd.Series | np.ndarray,
-    y: pd.Series | np.ndarray,
-    z: pd.Series | np.ndarray,
-    ref_x: pd.Series | np.ndarray,
-    ref_y: pd.Series | np.ndarray,
-    ref_z: pd.Series | np.ndarray,
-    frame: pd.Series | np.ndarray,
-    seg_bounds: np.ndarray,
+    x: lib.SeriesOrFloatArray1D,
+    y: lib.SeriesOrFloatArray1D,
+    z: lib.SeriesOrFloatArray1D,
+    ref_x: lib.SeriesOrFloatArray1D,
+    ref_y: lib.SeriesOrFloatArray1D,
+    ref_z: lib.SeriesOrFloatArray1D,
+    frame: lib.SeriesOrIntArray1D,
+    seg_bounds: lib.IntArray1D,
     intersect_d: float,
     roi_r: float,
     width: int,
     height: int,
     pixelsize: float,
     aim_round: int = 1,
-    progress: (
-        lib.ProgressDialog | lib.TqdmProgress | lib.MockProgress | None
-    ) = None,
-) -> tuple[np.ndarray, np.ndarray]:
+    progress: lib.ProgressType | None = None,
+) -> tuple[lib.FloatArray1D, lib.FloatArray1D]:
     """Maximize intersection (undrift) for 3D localizations. Assumes
     that x and y coordinates were already undrifted. x and y are in
     units of camera pixels, z is in nm.

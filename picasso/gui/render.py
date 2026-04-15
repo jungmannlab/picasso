@@ -7007,11 +7007,10 @@ class View(QtWidgets.QLabel):
                 pick_shape=self._pick_shape,
                 pick_size=self._pick_size,
             )
-            self.locs = copy.copy(self.all_locs)
         else:  # align using whole images
             self.all_locs = postprocess.align_rcc(self.all_locs, self.infos)
-            self.locs = copy.copy(self.all_locs)
         status.close()
+        self.locs = copy.copy(self.all_locs)
         self.index_blocks = [None] * len(self.locs)
         self.update_scene()
 

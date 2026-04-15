@@ -16,7 +16,7 @@ import colorsys
 import os
 import time
 import warnings
-from typing import Any
+from typing import Any, TypeAlias
 from collections.abc import Callable
 from asyncio import Future
 
@@ -48,6 +48,16 @@ SOUND_NOTIFICATION_DURATION = 60  # seconds
 
 # Columns that are required for Picasso
 REQUIRED_COLUMNS = ["frame", "x", "y", "z", "lpx", "lpy", "lpz"]
+
+# Type alias
+IntArray1D: TypeAlias = np.ndarray[tuple[int], np.dtype[np.integer[Any]]]
+IntArray2D: TypeAlias = np.ndarray[tuple[int, int], np.dtype[np.integer[Any]]]
+FloatArray1D: TypeAlias = np.ndarray[tuple[int], np.dtype[np.floating[Any]]]
+FloatArray2D: TypeAlias = np.ndarray[
+    tuple[int, int], np.dtype[np.floating[Any]]
+]
+SeriesOrFloatArray1D: TypeAlias = pd.Series | FloatArray1D
+SeriesOrIntArray1D: TypeAlias = pd.Series | IntArray1D
 
 
 class Dialog(QtWidgets.QDialog):
@@ -480,6 +490,10 @@ class TqdmProgress:
         )
         self.iterator = iterator
         return iterator
+
+
+# type alias for the progress dialogs
+ProgressType: TypeAlias = ProgressDialog | MockProgress | TqdmProgress
 
 
 class ScrollableGroupBox(QtWidgets.QGroupBox):
