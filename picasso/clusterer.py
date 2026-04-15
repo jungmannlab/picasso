@@ -73,7 +73,9 @@ def _frame_analysis(frame: pd.SeriesGroupBy, n_frames: int) -> int:
     return passed
 
 
-def frame_analysis(labels: np.ndarray, frame: np.ndarray) -> np.ndarray:
+def frame_analysis(
+    labels: lib.IntArray1D, frame: lib.IntArray1D
+) -> lib.IntArray1D:
     """Perform basic frame analysis on clustered localizations. Reject
     clusters whose mean frame is outside of the [20, 80] % (max frame)
     range or any 1/20th of measurement's time contains more than 80 % of
@@ -83,14 +85,14 @@ def frame_analysis(labels: np.ndarray, frame: np.ndarray) -> np.ndarray:
 
     Parameters
     ----------
-    labels : np.ndarray
+    labels : lib.IntArray1D
         Cluster labels (-1 means no cluster assigned).
-    frame : np.ndarray
+    frame : lib.IntArray1D
         Frame number for each localization.
 
     Returns
     -------
-    labels : np.ndarray
+    labels : lib.IntArray1D
         Cluster labels for each localization (-1 means no cluster
         assigned).
     """
@@ -110,11 +112,11 @@ def frame_analysis(labels: np.ndarray, frame: np.ndarray) -> np.ndarray:
 
 
 def _cluster(
-    X: np.ndarray,
+    X: lib.FloatArray2D,
     radius: float,
     min_locs: int,
-    frame: np.ndarray | None = None,
-) -> np.ndarray:
+    frame: pd.Series | None = None,
+) -> lib.IntArray1D:
     """Cluster points given by X with a given clustering radius and
     minimum number of localizations within that radius using KDTree.
 
@@ -133,19 +135,19 @@ def _cluster(
 
     Parameters
     ----------
-    X : np.ndarray
+    X : lib.FloatArray2D
         Array of points of shape (n_points, n_dim) to be clustered.
     radius : float
         Clustering radius.
     min_locs : int
         Minimum number of localizations in a cluster.
-    frame : np.ndarray, optional
+    frame : pd.Series or None, optional
         Frame number of each localization. If None, no frame analysis
         is performed.
 
     Returns
     -------
-    labels : np.ndarray
+    labels : lib.IntArray1D
         Cluster labels for each localization (-1 means no cluster
         assigned).
     """
@@ -204,7 +206,7 @@ def cluster_2D(
     radius: float,
     min_locs: int,
     fa: bool,
-) -> np.ndarray:
+) -> lib.IntArray1D:
     """Prepare 2D input to be used by ``_cluster``.
 
     Parameters
@@ -220,7 +222,7 @@ def cluster_2D(
 
     Returns
     -------
-    labels : np.ndarray
+    labels : lib.IntArray1D
         Cluster labels for each localization (-1 means no cluster
         assigned).
     """
@@ -242,7 +244,7 @@ def cluster_3D(
     radius_z: float,
     min_locs: int,
     fa: bool,
-):
+) -> lib.IntArray1D:
     """Prepare 3D input to be used by ``_cluster``.
 
     Scales z coordinates by radius_xy / radius_z
@@ -264,7 +266,7 @@ def cluster_3D(
 
     Returns
     -------
-    labels : np.ndarray
+    labels : lib.IntArray1D
         Cluster labels for each localization (-1 means no cluster
         assigned).
     """
@@ -362,18 +364,18 @@ def cluster(
 
 
 def _dbscan(
-    X: np.ndarray,
+    X: lib.FloatArray2D,
     radius: float,
     min_density: int,
     min_locs: int = 0,
-) -> np.ndarray:
+) -> lib.IntArray1D:
     """Find DBSCAN cluster labels, given data points and parameters.
 
     See Ester, et al. Inkdd, 1996. (Vol. 96, No. 34, pp. 226-231).
 
     Parameters
     ----------
-    X : np.ndarray
+    X : lib.FloatArray2D
         Array of shape (N, D), with N being the number of data points
         and D the number of dimensions.
     radius : float
@@ -387,7 +389,7 @@ def _dbscan(
 
     Returns
     -------
-    labels : np.ndarray
+    labels : lib.IntArray1D
         Cluster labels for each point. Shape: (N,). -1 means no cluster
         assigned.
     """
@@ -404,7 +406,7 @@ def dbscan(
     radius: float,
     min_samples: int,
     min_locs: int = 10,
-    pixelsize: int | None = None,
+    pixelsize: float | None = None,
 ) -> pd.DataFrame:
     """Perform DBSCAN on localizations.
 
@@ -423,7 +425,7 @@ def dbscan(
     min_locs : int, optional
         Minimum number of localizations in a cluster. Clusters with
         fewer localizations will be removed. Default is 0.
-    pixelsize : int, optional
+    pixelsize : float, optional
         Camera pixel size in nm. Only needed for 3D.
 
     Returns
@@ -450,18 +452,18 @@ def dbscan(
 
 
 def _hdbscan(
-    X: np.ndarray,
+    X: lib.FloatArray2D,
     min_cluster_size: int,
     min_samples: int,
     cluster_eps: float = 0,
-) -> np.ndarray:
+) -> lib.IntArray1D:
     """Find HDBSCAN cluster labels, given data points and parameters.
 
     See Campello, et al. PAKDD, 2013 (DOI: 10.1007/978-3-642-37456-2_14).
 
     Parameters
     ----------
-    X : np.ndarray
+    X : lib.FloatArray2D
         Array of shape (N, D), with N being the number of data points
         and D the number of dimensions.
     min_cluster_size : int
@@ -474,7 +476,7 @@ def _hdbscan(
 
     Returns
     -------
-    labels : np.ndarray
+    labels : lib.IntArray1D
         Cluster labels for each point. Shape: (N,). -1 means no cluster
         assigned.
     """
@@ -490,7 +492,7 @@ def hdbscan(
     locs: pd.DataFrame,
     min_cluster_size: int,
     min_samples: int,
-    pixelsize: int | None = None,
+    pixelsize: float | None = None,
     cluster_eps: float = 0.0,
 ) -> pd.DataFrame:
     """Perform HDBSCAN on localizations.
@@ -506,7 +508,7 @@ def hdbscan(
     min_samples : int
         Number of localizations within radius to consider a given point
         a core sample.
-    pixelsize : int, optional
+    pixelsize : float, optional
         Camera pixel size in nm. Only needed for 3D.
     cluster_eps : float, optional
         Distance threshold. Clusters below this value will be merged.
@@ -538,7 +540,7 @@ def hdbscan(
 
 def extract_valid_labels(
     locs: pd.DataFrame,
-    labels: np.ndarray,
+    labels: lib.IntArray1D,
 ) -> pd.DataFrame:
     """Extract localizations based on clustering results. Localizations
     that were not clustered are excluded.
@@ -547,7 +549,7 @@ def extract_valid_labels(
     ----------
     locs : pd.DataFrame
         Localizations to be filtered.
-    labels : np.ndarray
+    labels : lib.IntArray1D
         Array of cluster labels for each localization. -1 means no
         cluster assignment.
 
@@ -598,7 +600,7 @@ def find_cluster_centers(
     ----------
     locs : pd.DataFrame
         Clustered localizations (contain group info)
-    pixelsize : int, optional
+    pixelsize : float, optional
         Camera pixel size (used for finding volume and 3D convex hull).
         Only required for 3D localizations.
 
@@ -699,7 +701,7 @@ def cluster_center(
     grouplocs: pd.SeriesGroupBy,
     pixelsize: float | None = None,
     separate_lp: bool = False,
-) -> pd.Series:
+) -> list:
     """Alias for _cluster_center which will be a private function in the
     future release. Kept for backward compatibility."""
     lib.deprecation_warning(
@@ -713,7 +715,7 @@ def _cluster_center(
     grouplocs: pd.SeriesGroupBy,
     pixelsize: float | None = None,
     separate_lp: bool = False,
-) -> pd.Series:
+) -> list:
     """Find cluster centers and their attributes, such as mean number
     of photons per localization, etc.
 
@@ -724,7 +726,7 @@ def _cluster_center(
     ----------
     grouplocs : pandas.SeriesGroupBy
         Localizations grouped by cluster ids.
-    pixelsize : int, optional
+    pixelsize : float, optional
         Camera pixel size (used for finding volume and 3D convex hull).
         Only required for 3D localizations.
     separate_lp : bool, optional
@@ -733,7 +735,7 @@ def _cluster_center(
 
     Returns
     -------
-    results : pd.Series
+    results : list
         Cluster center attributes. For each group, a list of values is
         returned: x, y, (z, optional), etc.
     """
@@ -858,13 +860,13 @@ def _cluster_center(
     return result
 
 
-def _cluster_area(X: np.ndarray, lp: float) -> float:
+def _cluster_area(X: lib.FloatArray2D, lp: float) -> float:
     """Calculate cluster area (2D) or volume (3D). Uses Otsu
     thresholding of the images of the clusters to find areas/volumes.
 
     Parameters
     ----------
-    X : np.ndarray
+    X : lib.FloatArray2D
         Array of points of shape (n_points, n_dim).
     lp : float
         Median localization precision in x and y of the dataset. Used to
@@ -918,9 +920,9 @@ def cluster_areas(
         Clustered localizations (contain group info).
     info : list of dict
         Localization metadata, see `picasso.io.load_locs`.
-    progress : picasso.lib.ProgressDialog, optional
-        Progress dialog. If None, progress is displayed with into the
-        console. Default is None.
+    progress : callable or None, optional
+        Callable accepting an int (progress count). If None, progress
+        is displayed in the console. Default is None.
 
     Returns
     -------
@@ -967,7 +969,7 @@ def test_subclustering(
     info: list[dict],
     clustering_dist: float = 25,
     sparse_dist: float = 80,
-) -> tuple[np.ndarray, np.ndarray]:
+) -> tuple[lib.IntArray1D, lib.IntArray1D]:
     """Extract number of events from molecular maps based on their
     numbers of binding events assigned.
 
@@ -997,9 +999,9 @@ def test_subclustering(
 
     Returns
     -------
-    clustered_nevents : np.ndarray
+    clustered_nevents : lib.IntArray1D
         Number of events for clustered molecules.
-    sparse_nevents : np.ndarray
+    sparse_nevents : lib.IntArray1D
         Number of events for sparse molecules.
     """
     assert (
