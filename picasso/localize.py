@@ -27,7 +27,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from sqlalchemy import create_engine
 
-from . import io, gaussmle, postprocess
+from . import io, gaussmle, postprocess, lib
 
 plt.style.use("ggplot")
 
@@ -67,12 +67,14 @@ SET_COLS = [
 
 
 @numba.jit(nopython=True, nogil=True, cache=False)
-def local_maxima(frame: np.ndarray, box: int) -> tuple[np.ndarray, np.ndarray]:
+def local_maxima(
+    frame: lib.IntArray2D, box: int
+) -> tuple[lib.IntArray1D, lib.IntArray1D]:
     """Find pixels with maximum value within a region of interest.
 
     Parameters
     ----------
-    frame : np.ndarray
+    frame : lib.IntArray2D
         An image frame, 2D array of shape (Y, X).
     box : int
         Size of the box to search for local maxima. Should be an odd
@@ -80,9 +82,9 @@ def local_maxima(frame: np.ndarray, box: int) -> tuple[np.ndarray, np.ndarray]:
 
     Returns
     -------
-    y : np.ndarray
+    y : lib.IntArray1D
         y-coordinates of the local maxima.
-    x : np.ndarray
+    x : lib.IntArray1D
         x-coordinates of the local maxima.
     """
     Y, X = frame.shape
@@ -106,7 +108,7 @@ def local_maxima(frame: np.ndarray, box: int) -> tuple[np.ndarray, np.ndarray]:
 
 @numba.jit(nopython=True, nogil=True, cache=False)
 def gradient_at(
-    frame: np.ndarray,
+    frame: lib.IntArray2D,
     y: int,
     x: int,
     i: int,
@@ -115,7 +117,7 @@ def gradient_at(
 
     Parameters
     ----------
-    frame : np.ndarray
+    frame : lib.IntArray2D
         An image frame, 2D array of shape (Y, X).
     y, x : int
         Coordinates of the pixel where the gradient is calculated.
@@ -137,31 +139,31 @@ def gradient_at(
 
 @numba.jit(nopython=True, nogil=True, cache=False)
 def net_gradient(
-    frame: np.ndarray,
-    y: np.ndarray,
-    x: np.ndarray,
+    frame: lib.IntArray2D,
+    y: lib.IntArray1D,
+    x: lib.IntArray1D,
     box: int,
-    uy: np.ndarray,
-    ux: np.ndarray,
-) -> np.ndarray:
+    uy: lib.FloatArray2D,
+    ux: lib.FloatArray2D,
+) -> lib.FloatArray1D:
     """Calculate the net gradient at the identified maxima in the
     frame.
 
     Parameters
     ----------
-    frame : np.ndarray
+    frame : lib.IntArray2D
         An image frame, 2D array of shape (Y, X).
-    y, x : np.ndarray
+    y, x : lib.IntArray1D
         Coordinates of the identified maxima in the frame.
     box : int
         Size of the box used for calculating the gradient.
-    uy, ux : np.ndarray
+    uy, ux : lib.FloatArray2D
         Arrays of shape (box, box) containing the y and x components
         of the gradient, respectively.
 
     Returns
     -------
-    ng : np.ndarray
+    ng : lib.FloatArray1D
         Net gradient values at the identified maxima. The shape is
         (len(y),).
     """
@@ -182,16 +184,16 @@ def net_gradient(
 
 @numba.jit(nopython=True, nogil=True, cache=False)
 def identify_in_image(
-    image: np.ndarray,
+    image: lib.IntArray2D,
     minimum_ng: float,
     box: int,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+) -> tuple[lib.IntArray1D, lib.IntArray1D, lib.FloatArray1D]:
     """Identify local maxima in the image and calculate the net gradient
     at those maxima.
 
     Parameters
     ----------
-    image : np.ndarray
+    image : lib.IntArray2D
         An image frame, 2D array of shape (Y, X).
     minimum_ng : float
         Minimum net gradient value to consider a maximum as valid.
@@ -201,11 +203,11 @@ def identify_in_image(
 
     Returns
     -------
-    y : np.ndarray
+    y : lib.IntArray1D
         y-coordinates of the identified maxima.
-    x : np.ndarray
+    x : lib.IntArray1D
         x-coordinates of the identified maxima.
-    ng : np.ndarray
+    ng : lib.FloatArray1D
         Net gradient values at the identified maxima. The shape is
         (len(y),).
     """
@@ -229,18 +231,18 @@ def identify_in_image(
 
 
 def identify_in_frame(
-    frame: np.ndarray,
+    frame: lib.IntArray2D,
     minimum_ng: float,
     box: int,
     roi: tuple[tuple[int, int], tuple[int, int]] | None = None,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+) -> tuple[lib.IntArray1D, lib.IntArray1D, lib.FloatArray1D]:
     """Identify local maxima in a single frame with an optionally
     specified subregion (ROI) and calculate the net gradient at those
     maxima.
 
     Parameters
     ----------
-    frame : np.ndarray
+    frame : lib.IntArray2D
         An image frame, 2D array of shape (Y, X).
     minimum_ng : float
         Minimum net gradient value to consider a maximum as valid.
@@ -255,11 +257,11 @@ def identify_in_frame(
 
     Returns
     -------
-    y : np.ndarray
+    y : lib.IntArray1D
         y-coordinates of the identified maxima.
-    x : np.ndarray
+    x : lib.IntArray1D
         x-coordinates of the identified maxima.
-    net_gradient : np.ndarray
+    net_gradient : lib.FloatArray1D
         Net gradient values at the identified maxima. The shape is
         (len(y),).
     """
@@ -274,7 +276,7 @@ def identify_in_frame(
 
 
 def identify_by_frame_number(
-    movie: np.ndarray,
+    movie: lib.IntArray3D,
     minimum_ng: float,
     box: int,
     frame_number: int,
@@ -289,7 +291,7 @@ def identify_by_frame_number(
 
     Parameters
     ----------
-    movie : np.ndarray
+    movie : lib.IntArray3D
         A 3D array representing the movie of shape (N, Y, X), where N is
         the number of frames, Y is the height, and X is the width.
     minimum_ng : float
@@ -358,7 +360,7 @@ def identify_by_frame_number(
 
 
 def _identify_worker(
-    movie: np.ndarray,
+    movie: lib.IntArray3D,
     current: list[int],
     minimum_ng: float,
     box: int,
@@ -416,7 +418,7 @@ def identifications_from_futures(
 
 
 def identify_async(
-    movie: np.ndarray,
+    movie: lib.IntArray3D,
     minimum_ng: float,
     box: int,
     *,
@@ -429,7 +431,7 @@ def identify_async(
 
     Parameters
     ----------
-    movie : np.ndarray
+    movie : lib.IntArray3D
         The input movie data as a 3D numpy array.
     minimum_ng : float
         The minimum net gradient for a spot to be considered.
@@ -495,7 +497,7 @@ def identify_async(
 
 
 def identify(
-    movie: np.ndarray,
+    movie: lib.IntArray3D,
     minimum_ng: float,
     box: int,
     *,
@@ -509,7 +511,7 @@ def identify(
 
     Parameters
     ----------
-    movie : np.ndarray
+    movie : lib.IntArray3D
         The input movie data as a 3D numpy array.
     minimum_ng : float
         The minimum net gradient for a spot to be considered.
@@ -556,12 +558,12 @@ def identify(
 
 @numba.jit(nopython=True, cache=False)
 def _cut_spots_numba(
-    movie: np.ndarray,
-    ids_frame: np.ndarray,
-    ids_x: np.ndarray,
-    ids_y: np.ndarray,
+    movie: lib.IntArray3D,
+    ids_frame: lib.IntArray1D,
+    ids_x: lib.IntArray1D,
+    ids_y: lib.IntArray1D,
     box: int,
-) -> np.ndarray:
+) -> lib.IntArray3D:
     """Extract the spots out of a movie using Numba for performance."""
     n_spots = len(ids_x)
     r = int(box / 2)
@@ -573,15 +575,15 @@ def _cut_spots_numba(
 
 @numba.jit(nopython=True, cache=False)
 def _cut_spots_frame(
-    frame: np.ndarray,
+    frame: lib.IntArray2D,
     frame_number: int,
-    ids_frame: np.ndarray,
-    ids_x: np.ndarray,
-    ids_y: np.ndarray,
+    ids_frame: lib.IntArray1D,
+    ids_x: lib.IntArray1D,
+    ids_y: lib.IntArray1D,
     r: int,
     start: int,
     N: int,
-    spots: np.ndarray,
+    spots: lib.IntArray3D,
 ) -> int:
     """Extract spots from a movie frame."""
     for j in range(start, N):
@@ -597,34 +599,34 @@ def _cut_spots_frame(
 
 @numba.jit(nopython=True, cache=False)
 def _cut_spots_daskmov(
-    movie: np.ndarray,
-    l_mov: np.ndarray,
-    ids_frame: np.ndarray,
-    ids_x: np.ndarray,
-    ids_y: np.ndarray,
+    movie: lib.IntArray3D,
+    l_mov: lib.IntArray1D,
+    ids_frame: lib.IntArray1D,
+    ids_x: lib.IntArray1D,
+    ids_y: lib.IntArray1D,
     box: int,
-    spots: np.ndarray,
+    spots: lib.IntArray3D,
 ):
     """Extract the spots out of a movie frame by frame.
 
     Parameters
     ----------
-    movie : np.ndarray
+    movie : lib.IntArray3D
         The input movie data as a 3D numpy array.
-    l_mov : np.ndarray
+    l_mov : lib.IntArray1D
         Length of the movie, a 1D array with a single element.
-    ids_frame, ids_x, ids_y : np.ndarray
+    ids_frame, ids_x, ids_y : lib.IntArray1D
         1D arrays containing spot positions in the image data.
     box : int
         Size of the box to cut out around each spot. Should be an odd
         integer.
-    spots : np.ndarray
+    spots : lib.IntArray3D
         3D array to store the cut spots, with shape (k, box, box),
         where k is the number of spots identified.
 
     Returns
     -------
-    spots : np.ndarray
+    spots : lib.IntArray3D
         3D array with extracted spots of shape (k, box, box), where k is
         the number of spots identified.
     """
@@ -648,31 +650,31 @@ def _cut_spots_daskmov(
 
 
 def _cut_spots_framebyframe(
-    movie: np.ndarray,
-    ids_frame: np.ndarray,
-    ids_x: np.ndarray,
-    ids_y: np.ndarray,
+    movie: lib.IntArray3D,
+    ids_frame: lib.IntArray1D,
+    ids_x: lib.IntArray1D,
+    ids_y: lib.IntArray1D,
     box: int,
-    spots: np.ndarray,
+    spots: lib.IntArray3D,
 ):
     """Extract the spots out of a movie frame by frame.
 
     Parameters
     ----------
-    movie : np.ndarray
+    movie : lib.IntArray3D
         The input movie data as a 3D numpy array.
-    ids_frame, ids_x, ids_y : np.ndarray
+    ids_frame, ids_x, ids_y : lib.IntArray1D
         1D arrays containing spot positions in the image data.
     box : int
         Size of the box to cut out around each spot. Should be an odd
         integer.
-    spots : np.ndarray
+    spots : lib.IntArray3D
         3D array to store the cut spots, with shape (k, box, box),
         where k is the number of spots identified.
 
     Returns
     -------
-    spots : np.ndarray
+    spots : lib.IntArray3D
         3D array with extracted spots of shape (k, box, box), where k is
         the number of spots identified.
     """
@@ -694,7 +696,9 @@ def _cut_spots_framebyframe(
     return spots
 
 
-def _cut_spots(movie: np.ndarray, ids: np.ndarray, box: int) -> np.ndarray:
+def _cut_spots(
+    movie: lib.IntArray3D, ids: pd.DataFrame, box: int
+) -> lib.IntArray3D:
     """Cut out spots from a movie based on the identified positions."""
     N = len(ids)
     if isinstance(movie, np.ndarray):
@@ -736,7 +740,9 @@ def _cut_spots(movie: np.ndarray, ids: np.ndarray, box: int) -> np.ndarray:
         return spots
 
 
-def _to_photons(spots: np.ndarray, camera_info: dict) -> np.ndarray:
+def _to_photons(
+    spots: lib.FloatArray3D, camera_info: dict
+) -> lib.FloatArray3D:
     """Convert the cut spots to photon counts based on camera
     information."""
     spots = np.float32(spots)
@@ -749,17 +755,17 @@ def _to_photons(spots: np.ndarray, camera_info: dict) -> np.ndarray:
 
 
 def get_spots(
-    movie: np.ndarray,
+    movie: lib.IntArray3D,
     identifications: pd.DataFrame,
     box: int,
     camera_info: dict,
-) -> np.ndarray:
+) -> lib.FloatArray3D:
     """Extract the spots from a movie based on the identified positions
     and convert camera signal to photon counts.
 
     Parameters
     ----------
-    movie : np.ndarray
+    movie : lib.IntArray3D
         The input movie data as a 3D numpy array.
     identifications : pd.DataFrame
         Data frame containing the identified spots. Contains fields
@@ -773,7 +779,7 @@ def get_spots(
 
     Returns
     -------
-    spots : np.ndarray
+    spots : lib.FloatArray3D
         A 3D numpy array containing the extracted spots, with shape
         (k, box, box), where k is the number of spots identified.
     """
@@ -782,7 +788,7 @@ def get_spots(
 
 
 def fit(
-    movie: np.ndarray,
+    movie: lib.IntArray3D,
     camera_info: dict,
     identifications: pd.DataFrame,
     box: int,
@@ -796,7 +802,7 @@ def fit(
 
     Parameters
     ----------
-    movie : np.ndarray
+    movie : lib.IntArray3D
         The input movie data as a 3D numpy array.
     camera_info : dict
         A dictionary containing camera information such as
@@ -840,14 +846,16 @@ def fit(
 
 
 def fit_async(
-    movie: np.ndarray,
+    movie: lib.IntArray3D,
     camera_info: dict,
     identifications: pd.DataFrame,
     box: int,
     eps: float = 0.001,
     max_it: int = 100,
     method: Literal["sigma", "sigmaxy"] = "sigmaxy",
-) -> tuple[int, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+) -> tuple[
+    int, lib.FloatArray2D, lib.FloatArray2D, lib.FloatArray1D, lib.FloatArray1D
+]:
     """Asynchronously fit Gaussians using Maximum Likelihood Estimation
     (MLE) to the identified spots in a movie to localize fluorescent
     molecules. This function is designed to run in a separate thread or
@@ -856,7 +864,7 @@ def fit_async(
 
     Parameters
     ----------
-    movie : np.ndarray
+    movie : lib.IntArray3D
         The input movie data as a 3D numpy array.
     camera_info : dict
         A dictionary containing camera information such as
@@ -881,15 +889,15 @@ def fit_async(
     -------
     current : int
         Index of the currently processed spot.
-    thetas : np.ndarray
+    thetas : lib.FloatArray2D
         The fitted Gaussian parameters for each spot (x, y positions,
         photon counts, background, single-emitter image size in x and
         y).
-    CRLBs : np.ndarray
+    CRLBs : lib.FloatArray2D
         The Cramer-Rao Lower Bounds for each fitted parameter.
-    likelihoods : np.ndarray
+    likelihoods : lib.FloatArray1D
         The log-likelihoods of the fitted models.
-    iterations : np.ndarray
+    iterations : lib.FloatArray1D
         The number of iterations taken to converge for each spot.
     """
     spots = get_spots(movie, identifications, box, camera_info)
@@ -898,10 +906,10 @@ def fit_async(
 
 def locs_from_fits(
     identifications: pd.DataFrame,
-    theta: np.ndarray,
-    CRLBs: np.ndarray,
-    likelihoods: np.ndarray,
-    iterations: np.ndarray,
+    theta: lib.FloatArray2D,
+    CRLBs: lib.FloatArray2D,
+    likelihoods: lib.FloatArray1D,
+    iterations: lib.FloatArray1D,
     box: int,
 ) -> pd.DataFrame:
     """Convert the resulting localizations from the list of Futures
@@ -912,15 +920,15 @@ def locs_from_fits(
     identifications : pd.DataFrame
         Data frame containing the identified spots. Contains fields
         `frame`, `x`, `y`, and `net_gradient`.
-    theta : np.ndarray
+    theta : lib.FloatArray2D
         The fitted Gaussian parameters for each spot (x, y positions,
         photon counts, background, single-emitter image size in x and
         y).
-    CRLBs : np.ndarray
+    CRLBs : lib.FloatArray2D
         The Cramer-Rao Lower Bounds for each fitted parameter.
-    likelihoods : np.ndarray
+    likelihoods : lib.FloatArray1D
         The log-likelihoods of the fitted models.
-    iterations : np.ndarray
+    iterations : lib.FloatArray1D
         The number of iterations taken to converge for each spot.
     box : int
         Size of the box used for fitting. Should be an odd integer.
@@ -960,7 +968,7 @@ def locs_from_fits(
 
 
 def localize(
-    movie: np.ndarray,
+    movie: lib.IntArray3D,
     camera_info: dict,
     parameters: dict,
     *,
@@ -971,7 +979,7 @@ def localize(
 
     Parameters
     ----------
-    movie : np.ndarray
+    movie : lib.IntArray3D
         The input movie data as a 3D numpy array.
     camera_info : dict
         A dictionary containing camera information such as

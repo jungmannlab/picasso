@@ -226,14 +226,14 @@ def save_config(CONFIG: dict) -> None:
         yaml.dump(CONFIG, config_file, width=1000)
 
 
-def save_raw(path: str, movie: np.ndarray, info: dict) -> None:
+def save_raw(path: str, movie: lib.IntArray3D, info: dict) -> None:
     """Save a raw movie file and its metadata.
 
     Parameters
     ----------
     path : str
         The path to the raw movie file.
-    movie : np.ndarray
+    movie : lib.IntArray3D
         The raw movie data to save.
     info : dict
         The metadata information to save.
@@ -364,7 +364,7 @@ def load_info(
 def load_mask(
     path: str,
     qt_parent: QtWidgets.QWidget | None = None,
-) -> tuple[np.ndarray, dict]:
+) -> tuple[lib.FloatArray2D, dict]:
     """Load a mask generated with ``spinna.MaskGenerator``.
 
     Parameters
@@ -377,7 +377,7 @@ def load_mask(
 
     Returns
     -------
-    mask : np.ndarray
+    mask : lib.FloatArray2D
         The loaded mask array.
     info : dict
         A dictionary containing metadata about the mask.
@@ -598,7 +598,7 @@ class AbstractPicassoMovie(abc.ABC):
         pass
 
     @abc.abstractmethod
-    def get_frame(self, index: int) -> np.ndarray:
+    def get_frame(self, index: int) -> lib.IntArray2D:
         pass
 
     @abc.abstractmethod
@@ -891,7 +891,7 @@ class ND2Movie(AbstractPicassoMovie):
     def __exit__(self, exc_type, exc_value, traceback):
         self.close()
 
-    def __getitem__(self, it: int) -> np.ndarray:
+    def __getitem__(self, it: int) -> lib.IntArray2D:
         return self.get_frame(it)
 
     def __iter__(self):
@@ -908,7 +908,7 @@ class ND2Movie(AbstractPicassoMovie):
     def close(self):
         self.nd2file.close()
 
-    def get_frame(self, index: int) -> np.ndarray:
+    def get_frame(self, index: int) -> lib.IntArray2D:
         """Load one frame of the movie
 
         Parameters
@@ -918,7 +918,7 @@ class ND2Movie(AbstractPicassoMovie):
 
         Returns
         -------
-        frame : np.ndarray
+        frame : lib.IntArray2D
             2D array representing the image data of the frame
         """
         return self.dask[index].compute()
@@ -1315,7 +1315,7 @@ class TiffMap:
         info["Micro-Manager Acquisition Comments"] = comments
         return info
 
-    def get_frame(self, index: int, array: None = None) -> np.ndarray:
+    def get_frame(self, index: int, array: None = None) -> lib.IntArray2D:
         """Load one frame of the TIFF movie."""
         self.file.seek(self.image_offsets[index])
         frame = np.reshape(
@@ -1457,7 +1457,7 @@ class TiffMultiMap(AbstractPicassoMovie):
     def dtype(self):
         return self._dtype
 
-    def get_frame(self, index: int) -> np.ndarray:
+    def get_frame(self, index: int) -> lib.IntArray2D:
         # TODO deal with negative numbers
         for i in range(self.n_maps):
             if self.cum_n_frames[i] <= index < self.cum_n_frames[i + 1]:

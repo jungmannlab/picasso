@@ -58,13 +58,13 @@ def get_index_blocks(
         Localizations in the specified blocks.
     size : float
         Size of the blocks in camera pixels.
-    x_index : np.ndarray
+    x_index : lib.IntArray1D
         x indices of the localizations in the blocks.
-    y_index : np.ndarray
+    y_index : lib.IntArray1D
         y indices of the localizations in the blocks.
-    block_starts : np.ndarray
+    block_starts : lib.IntArray2D
         Block start indices.
-    block_ends : np.ndarray
+    block_ends : lib.IntArray2D
         Block end indices.
     K : int
         Number of blocks in y direction.
@@ -118,7 +118,7 @@ def index_blocks_shape(info: list[dict], size: float) -> tuple[int, int]:
     return n
 
 
-def get_block_locs_at(x: float, y: float, index_blocks: tuple) -> np.ndarray:
+def get_block_locs_at(x: float, y: float, index_blocks: tuple) -> pd.DataFrame:
     """Return the localizations in the blocks around the given
     coordinates.
 
@@ -135,7 +135,7 @@ def get_block_locs_at(x: float, y: float, index_blocks: tuple) -> np.ndarray:
 
     Returns
     -------
-    locs : np.ndarray
+    locs : pd.DataFrame
         Localizations in the blocks around the given coordinates.
     """
     locs, size, _, _, block_starts, block_ends, K, L = index_blocks
@@ -155,10 +155,10 @@ def get_block_locs_at(x: float, y: float, index_blocks: tuple) -> np.ndarray:
 
 @numba.jit(nopython=True, nogil=True)
 def _fill_index_blocks(
-    block_starts: np.ndarray,
-    block_ends: np.ndarray,
-    x_index: np.ndarray,
-    y_index: np.ndarray,
+    block_starts: lib.IntArray2D,
+    block_ends: lib.IntArray2D,
+    x_index: lib.IntArray1D,
+    y_index: lib.IntArray1D,
 ) -> None:
     """Fill the block starts and ends arrays with the indices of
     localizations in the blocks.
@@ -177,11 +177,11 @@ def _fill_index_blocks(
 
 @numba.jit(nopython=True, nogil=True)
 def _fill_index_block(
-    block_starts: np.ndarray,
-    block_ends: np.ndarray,
+    block_starts: lib.IntArray2D,
+    block_ends: lib.IntArray2D,
     N: int,
-    x_index: np.ndarray,
-    y_index: np.ndarray,
+    x_index: lib.IntArray1D,
+    y_index: lib.IntArray1D,
     i: int,
     j: int,
     k: int,
@@ -507,26 +507,26 @@ def pick_similar(
 
 @numba.jit(nopython=True, nogil=True, cache=True)
 def _pick_similar(
-    x: np.ndarray,
-    y_shift: np.ndarray,
-    y_base: np.ndarray,
+    x: lib.FloatArray1D,
+    y_shift: lib.FloatArray1D,
+    y_base: lib.FloatArray1D,
     min_n_locs: int,
     max_n_locs: int,
     min_rmsd: float,
     max_rmsd: float,
-    x_r: np.ndarray,
-    y_r1: np.ndarray,
-    y_r2: np.ndarray,
-    locs_xy: np.ndarray,
-    block_starts: np.ndarray,
-    block_ends: np.ndarray,
+    x_r: lib.IntArray1D,
+    y_r1: lib.IntArray1D,
+    y_r2: lib.IntArray1D,
+    locs_xy: lib.FloatArray2D,
+    block_starts: lib.IntArray2D,
+    block_ends: lib.IntArray2D,
     K: int,
     L: int,
-    x_similar: np.ndarray,
-    y_similar: np.ndarray,
+    x_similar: lib.FloatArray1D,
+    y_similar: lib.FloatArray1D,
     r: float,
     d2: float,
-) -> tuple[np.ndarray, np.ndarray]:
+) -> tuple[lib.FloatArray1D, lib.FloatArray1D]:
     """Find similar picks based on the number of localizations and
     RMSD. Only implemented for circular picks.
 
@@ -545,27 +545,27 @@ def _pick_similar(
 
     Parameters
     ----------
-    x : np.ndarray
+    x : lib.FloatArray1D
         x coordinates of the picks.
-    y_shift : np.ndarray
+    y_shift : lib.FloatArray1D
         y coordinates of the picks, shifted for odd columns.
-    y_base : np.ndarray
+    y_base : lib.FloatArray1D
         y coordinates of the picks, not shifted.
     min_n_locs, max_n_locs : int
         Minimum and maximum number of localizations in the pick.
     min_rmsd, max_rmsd : float
         Minimum and maximum RMSD for the pick.
-    x_r, y_r1, y_r2 : np.ndarray
+    x_r, y_r1, y_r2 : lib.IntArray1D
         x and y ranges for the picks.
-    locs_xy : np.ndarray
+    locs_xy : lib.FloatArray2D
         Localizations in the blocks.
-    block_starts : np.ndarray
+    block_starts : lib.IntArray2D
         Block start indices.
-    block_ends : np.ndarray
+    block_ends : lib.IntArray2D
         Block end indices.
     K, L : int
         Number of blocks in y and x direction.
-    x_similar, y_similar : np.ndarray
+    x_similar, y_similar : lib.FloatArray1D
         Arrays to store the x and y coordinates of the similar picks.
     r : float
         Radius for the picks.
@@ -574,7 +574,7 @@ def _pick_similar(
 
     Returns
     -------
-    x_similar, y_similar : np.ndarray
+    x_similar, y_similar : lib.FloatArray1D
         Arrays with the x and y coordinates of the similar picks.
     """
     for i, x_grid in enumerate(x):
@@ -655,8 +655,8 @@ def n_block_locs_at(
     y_range: int,
     K: int,
     L: int,
-    block_starts: np.ndarray,
-    block_ends: np.ndarray,
+    block_starts: lib.IntArray2D,
+    block_ends: lib.IntArray2D,
 ) -> int:
     """Return the number of localizations in the blocks around the
     given coordinates.
@@ -684,11 +684,11 @@ def n_block_locs_at(
 def _get_block_locs_at_numba(
     x_index: int,
     y_index: int,
-    block_starts: np.ndarray,
-    block_ends: np.ndarray,
+    block_starts: lib.IntArray2D,
+    block_ends: lib.IntArray2D,
     K: int,
     L: int,
-) -> np.ndarray:
+) -> lib.IntArray1D:
     """Numba implementation of ``get_block_locs_at``. Return the indices
     of localizations in the blocks around the given coordinates.
 
@@ -728,12 +728,12 @@ def _get_block_locs_at_numba(
 def get_block_locs_at_numba(
     x_index: int,
     y_index: int,
-    locs_xy: np.ndarray,
-    block_starts: np.ndarray,
-    block_ends: np.ndarray,
+    locs_xy: lib.FloatArray2D,
+    block_starts: lib.IntArray2D,
+    block_ends: lib.IntArray2D,
     K: int,
     L: int,
-) -> np.ndarray:
+) -> lib.FloatArray2D:
     """Numba implementation of ``get_block_locs_at. Return the
     localizations in the blocks around the given coordinates.
 
@@ -754,9 +754,9 @@ def get_block_locs_at_numba(
 def _locs_at_numba(
     x: float,
     y: float,
-    locs_xy: np.ndarray,
+    locs_xy: lib.FloatArray2D,
     r: float,
-) -> np.ndarray:
+) -> lib.BoolArray1D:
     """Numba implementation of ``lib.locs_at``. Return the indices of
     localizations at the given coordinates within radius ``r``.
 
@@ -773,9 +773,9 @@ def _locs_at_numba(
 def locs_at_numba(
     x: float,
     y: float,
-    locs_xy: np.ndarray,
+    locs_xy: lib.FloatArray2D,
     r: float,
-) -> np.ndarray:
+) -> lib.FloatArray2D:
     """Numba implementation of ``lib.locs_at``. Return the localizations
     at the given coordinates within radius ``r``.
 
@@ -786,7 +786,7 @@ def locs_at_numba(
 
 
 @numba.jit(nopython=True, nogil=True)
-def rmsd_at_com(locs_xy: np.ndarray) -> float:
+def rmsd_at_com(locs_xy: lib.FloatArray2D) -> float:
     """Calculate the RMSD of the localizations at the center of mass
     (COM) of the localizations.
 
@@ -800,17 +800,17 @@ def rmsd_at_com(locs_xy: np.ndarray) -> float:
 
 @numba.jit(nopython=True, nogil=True)
 def _distance_histogram(
-    x: np.ndarray,
-    y: np.ndarray,
+    x: lib.FloatArray1D,
+    y: lib.FloatArray1D,
     bin_size: float,
     r_max: float,
-    x_index: np.ndarray,
-    y_index: np.ndarray,
-    block_starts: np.ndarray,
-    block_ends: np.ndarray,
+    x_index: lib.IntArray1D,
+    y_index: lib.IntArray1D,
+    block_starts: lib.IntArray2D,
+    block_ends: lib.IntArray2D,
     start: int,
     chunk: int,
-) -> np.ndarray:
+) -> lib.IntArray1D:
     """Calculate the distance histogram for a chunk of localizations."""
     dh_len = np.uint32(r_max / bin_size)
     dh = np.zeros(dh_len, dtype=np.uint32)
@@ -845,7 +845,7 @@ def distance_histogram(
     info: list[dict],
     bin_size: float,
     r_max: float,
-) -> np.ndarray:
+) -> lib.IntArray1D:
     """Calculate the distance histogram for the given localizations,
     i.e., the pairwise distances between localizations.
 
@@ -862,7 +862,7 @@ def distance_histogram(
 
     Returns
     -------
-    dh : np.ndarray
+    dh : lib.IntArray1D
         Distance histogram.
     """
     locs, size, x_index, y_index, b_starts, b_ends, K, L = get_index_blocks(
@@ -960,7 +960,7 @@ def nena(
 def next_frame_neighbor_distance_histogram(
     locs: pd.DataFrame,
     callback: Callable[[int], None] | None = None,
-) -> tuple[np.ndarray, np.ndarray]:
+) -> tuple[lib.FloatArray1D, lib.FloatArray1D]:
     """Calculate the next frame neighbor distance histogram (NFNDH).
 
     Parameters
@@ -972,9 +972,9 @@ def next_frame_neighbor_distance_histogram(
 
     Returns
     -------
-    bin_centers : np.ndarray
+    bin_centers : lib.FloatArray1D
         Centers of the bins for the histogram.
-    dnfl : np.ndarray
+    dnfl : lib.FloatArray1D
         Distance histogram of next frame neighbors.
     """
     locs.sort_values(kind="quicksort", by="frame", inplace=True)
@@ -991,14 +991,14 @@ def next_frame_neighbor_distance_histogram(
 
 
 def _nfndh(
-    frame: np.ndarray,
-    x: np.ndarray,
-    y: np.ndarray,
-    group: np.ndarray,
+    frame: lib.IntArray1D,
+    x: lib.FloatArray1D,
+    y: lib.FloatArray1D,
+    group: lib.IntArray1D,
     d_max: float,
     bin_size: float,
     callback: Callable[[int], None] | None = None,
-) -> tuple[np.ndarray, np.ndarray]:
+) -> tuple[lib.FloatArray1D, lib.FloatArray1D]:
     """Calculate the next frame neighbor distance histogram (NFNDH)."""
     N = len(frame)
     bins = np.arange(0, d_max, bin_size)
@@ -1017,13 +1017,13 @@ def _nfndh(
 @numba.jit(nopython=True)
 def _fill_dnfl(
     N: int,
-    frame: np.ndarray,
-    x: np.ndarray,
-    y: np.ndarray,
-    group: np.ndarray,
+    frame: lib.IntArray1D,
+    x: lib.FloatArray1D,
+    y: lib.FloatArray1D,
+    group: lib.IntArray1D,
     i: int,
     d_max: float,
-    dnfl: np.ndarray,
+    dnfl: lib.FloatArray1D,
     bin_size: float,
 ) -> None:
     """Fill the next frame neighbor distance histogram (NFNDH) for a
@@ -1138,11 +1138,11 @@ def _frc(
     lp: float,
     viewport: tuple[tuple[float, float], tuple[float, float]],
 ) -> tuple[
-    np.ndarray,
-    np.ndarray,
-    np.ndarray,
+    lib.FloatArray1D,
+    lib.FloatArray1D,
+    lib.FloatArray1D,
     float | None,
-    tuple[np.ndarray, np.ndarray],
+    tuple[lib.FloatArray2D, lib.FloatArray2D],
 ]:
     """Calculate the Fourier Ring Correlation (FRC) resolution once.
 
@@ -1169,16 +1169,16 @@ def _frc(
 
     Returns
     -------
-    frc_curve : np.ndarray
+    frc_curve : lib.FloatArray1D
         FRC curve.
-    frc_curve_smooth : np.ndarray
+    frc_curve_smooth : lib.FloatArray1D
         Smoothed FRC curve (LOESS).
-    frequencies : np.ndarray
+    frequencies : lib.FloatArray1D
         Spatial frequencies corresponding to the FRC curve (nm^-1).
     resolution : float or None
         Estimated resolution in nm, given the 1/7 threshold. None if
         resolution could not be determined.
-    images : tuple of 2 np.ndarrays
+    images : tuple of 2 lib.FloatArray2D
         2 grayscale images used for calculating FRC. Already masked.
     """
     # render images
@@ -1242,7 +1242,7 @@ def pair_correlation(
     info: list[dict],
     bin_size: float,
     r_max: float,
-) -> tuple[np.ndarray, np.ndarray]:
+) -> tuple[lib.FloatArray1D, lib.FloatArray1D]:
     """Calculate the pair correlation function for the given
     localizations.
 
@@ -1259,9 +1259,9 @@ def pair_correlation(
 
     Returns
     -------
-    bins_lower : np.ndarray
+    bins_lower : lib.FloatArray1D
         Lower bounds of the bins for the histogram.
-    pc : np.ndarray
+    pc : lib.FloatArray1D
         Pair correlation function.
     """
     dh = distance_histogram(locs, info, bin_size, r_max)
@@ -1277,16 +1277,16 @@ def pair_correlation(
 
 @numba.jit(nopython=True, nogil=True)
 def _local_density(
-    x: np.ndarray,
-    y: np.ndarray,
+    x: lib.FloatArray1D,
+    y: lib.FloatArray1D,
     radius: float,
-    x_index: np.ndarray,
-    y_index: np.ndarray,
-    block_starts: np.ndarray,
-    block_ends: np.ndarray,
+    x_index: lib.IntArray1D,
+    y_index: lib.IntArray1D,
+    block_starts: lib.IntArray2D,
+    block_ends: lib.IntArray2D,
     start: int,
     chunk: int,
-) -> np.ndarray:
+) -> lib.IntArray1D:
     """Calculate densities in blocks around each localization."""
     N = len(x)
     r2 = radius**2
@@ -1368,7 +1368,7 @@ def compute_local_density(
 
 def compute_dark_times(
     locs: pd.DataFrame,
-    group: np.ndarray | None = None,
+    group: lib.IntArray1D | None = None,
 ) -> pd.DataFrame:
     """Compute dark time for each binding event.
 
@@ -1376,7 +1376,7 @@ def compute_dark_times(
     ----------
     locs : pd.DataFrame
         Localizations that were linked, i.e., binding events.
-    group : np.ndarray, optional
+    group : lib.IntArray1D, optional
         Grouping array for binding events. If None, all binding events
         are considered to be in the same group.
 
@@ -1400,21 +1400,21 @@ def compute_dark_times(
 
 def dark_times(
     locs: pd.DataFrame,
-    group: np.ndarray | None = None,
-) -> np.ndarray:
+    group: lib.IntArray1D | None = None,
+) -> lib.IntArray1D:
     """Calculate dark times for each binding event.
 
     Parameters
     ----------
     locs : pd.DataFrame
         Localizations that were linked, i.e., binding events.
-    group : np.ndarray, optional
+    group : lib.IntArray1D, optional
         Grouping array for binding events. If None, all binding events
         are considered to be in the same group.
 
     Returns
     -------
-    dark : np.ndarray
+    dark : lib.IntArray1D
         Array of dark times for each binding event. If a binding event
         is not followed by another binding event in the same group, the
         dark time is set to -1.
@@ -1433,10 +1433,10 @@ def dark_times(
 
 @numba.jit(nopython=True)
 def _dark_times(
-    frame: np.ndarray,
-    group: np.ndarray,
-    last_frame: np.ndarray,
-) -> np.ndarray:
+    frame: lib.IntArray1D,
+    group: lib.IntArray1D,
+    last_frame: lib.IntArray1D,
+) -> lib.IntArray1D:
     """Calculate dark times for each binding event."""
     N = len(frame)
     max_frame = frame.max()
@@ -1806,34 +1806,34 @@ def cluster_combine_dist(
 
 @numba.jit(nopython=True)
 def get_link_groups(
-    frame: np.ndarray,
-    x: np.ndarray,
-    y: np.ndarray,
+    frame: lib.IntArray1D,
+    x: lib.FloatArray1D,
+    y: lib.FloatArray1D,
     d_max: float,
     max_dark_time: int,
-    group: np.ndarray,
-) -> np.ndarray:
+    group: lib.IntArray1D,
+) -> lib.IntArray1D:
     """Find the groups for linking localizations into binding events.
     Assumes that ``locs`` are sorted by frame.
 
     Parameters
     ----------
-    frame : np.ndarray
+    frame : lib.IntArray1D
         Frame numbers of localizations.
-    x, y : np.ndarray
+    x, y : lib.FloatArray1D
         Coordinates of localizations.
     d_max : float
         Maximum distance for linking localizations.
     max_dark_time : int
         Maximum number of frames between localizations to be considered
         as originating from the same binding event.
-    group : np.ndarray
+    group : lib.IntArray1D
         Grouping array for binding events. If None, all binding events
         are considered to be in the same group.
 
     Returns
     -------
-    link_group : np.ndarray
+    link_group : lib.IntArray1D
         Array of link groups for each localization. Each group is
         represented by a unique integer. Localizations that are not
         linked to any other localization are assigned -1.
@@ -1877,14 +1877,14 @@ def get_link_groups(
 @numba.jit(nopython=True)
 def _get_next_loc_index_in_link_group(
     current_index: int,
-    link_group: np.ndarray,
+    link_group: lib.IntArray1D,
     N: int,
-    frame: np.ndarray,
-    x: np.ndarray,
-    y: np.ndarray,
+    frame: lib.IntArray1D,
+    x: lib.FloatArray1D,
+    y: lib.FloatArray1D,
     d_max: float,
     max_dark_time: float,
-    group: np.ndarray,
+    group: lib.IntArray1D,
 ) -> int:
     """Find the next localization index in the link group for a given
     current localization index. The next localization is the one that
@@ -1920,10 +1920,10 @@ def _get_next_loc_index_in_link_group(
 
 @numba.jit(nopython=True)
 def _link_group_count(
-    link_group: np.ndarray,
+    link_group: lib.IntArray1D,
     n_locs: int,
     n_groups: int,
-) -> np.ndarray:
+) -> lib.IntArray1D:
     """Count the number of localizations in each link group."""
     result = np.zeros(n_groups, dtype=np.uint32)
     for i in range(n_locs):
@@ -1934,11 +1934,11 @@ def _link_group_count(
 
 @numba.jit(nopython=True)
 def _link_group_sum(
-    column: np.ndarray,
-    link_group: np.ndarray,
+    column: lib.IntArray1D | lib.FloatArray1D,
+    link_group: lib.IntArray1D,
     n_locs: int,
     n_groups: int,
-) -> np.ndarray:
+) -> lib.IntArray1D | lib.FloatArray1D:
     """Sum the values of a column for each link group."""
     result = np.zeros(n_groups, dtype=column.dtype)
     for i in range(n_locs):
@@ -1949,12 +1949,12 @@ def _link_group_sum(
 
 @numba.jit(nopython=True)
 def _link_group_mean(
-    column: np.ndarray,
-    link_group: np.ndarray,
+    column: lib.IntArray1D | lib.FloatArray1D,
+    link_group: lib.IntArray1D,
     n_locs: int,
     n_groups: int,
-    n_locs_per_group: np.ndarray,
-) -> np.ndarray:
+    n_locs_per_group: lib.IntArray1D,
+) -> lib.FloatArray1D:
     """Calculate the mean of a column for each link group."""
     group_sum = _link_group_sum(column, link_group, n_locs, n_groups)
     result = np.empty(
@@ -1966,13 +1966,13 @@ def _link_group_mean(
 
 @numba.jit(nopython=True)
 def _link_group_weighted_mean(
-    column: np.ndarray,
-    weights: np.ndarray,
-    link_group: np.ndarray,
+    column: lib.IntArray1D | lib.FloatArray1D,
+    weights: lib.FloatArray1D,
+    link_group: lib.IntArray1D,
     n_locs: int,
     n_groups: int,
-    n_locs_per_group: np.ndarray,
-) -> tuple[np.ndarray, np.ndarray]:
+    n_locs_per_group: lib.IntArray1D,
+) -> tuple[lib.FloatArray1D, lib.FloatArray1D]:
     """Calculate the mean of a column for each link group and the sum
     of the weights."""
     sum_weights = _link_group_sum(weights, link_group, n_locs, n_groups)
@@ -1990,11 +1990,13 @@ def _link_group_weighted_mean(
 
 @numba.jit(nopython=True)
 def _link_group_min_max(
-    column: np.ndarray,
-    link_group: np.ndarray,
+    column: lib.IntArray1D | lib.FloatArray1D,
+    link_group: lib.IntArray1D,
     n_locs: int,
     n_groups: int,
-) -> tuple[np.ndarray, np.ndarray]:
+) -> tuple[
+    lib.IntArray1D | lib.FloatArray1D, lib.IntArray1D | lib.FloatArray1D
+]:
     """Calculate the minimum and maximum of a column for each link
     group."""
     min_ = np.empty(n_groups, dtype=column.dtype)
@@ -2013,11 +2015,11 @@ def _link_group_min_max(
 
 @numba.jit(nopython=True)
 def _link_group_last(
-    column: np.ndarray,
-    link_group: np.ndarray,
+    column: lib.IntArray1D | lib.FloatArray1D,
+    link_group: lib.IntArray1D,
     n_locs: int,
     n_groups: int,
-) -> np.ndarray:
+) -> lib.IntArray1D | lib.FloatArray1D:
     """Return the last value of a column for each link group."""
     result = np.zeros(n_groups, dtype=column.dtype)
     for i in range(n_locs):
@@ -2029,7 +2031,7 @@ def _link_group_last(
 def link_loc_groups(
     locs: pd.DataFrame,
     info: list[dict],
-    link_group: np.ndarray,
+    link_group: lib.IntArray1D,
     remove_ambiguous_lengths: bool = True,
 ) -> pd.DataFrame:
     """Combine localizations into binding events based on the
@@ -2042,7 +2044,7 @@ def link_loc_groups(
         Localizations.
     info : list of dicts
         Metadata of the localization list.
-    link_group : np.ndarray
+    link_group : lib.IntArray1D
         Array that defines the link groups for the localizations.
     remove_ambiguous_lengths : bool, optional
         If True, removes linked localizations with ambiguous lengths,
@@ -2186,14 +2188,14 @@ def segment(
     segmentation: int,
     kwargs: dict = {},
     callback: Callable[[int], None] = None,
-) -> tuple[np.ndarray, np.ndarray]:
+) -> tuple[lib.IntArray1D, lib.FloatArray3D]:
     """Split localizations into temporal segments (number of segments
     is defined by the segmentation parameter) and render each segment
     into a 2D image.
 
     Parameters
     ----------
-    locs : np.ndarray
+    locs : pd.DataFrame
         Localization list.
     info : list of dicts
         Metadata of the localization list.
@@ -2209,10 +2211,10 @@ def segment(
 
     Returns
     -------
-    bounds : np.ndarray
+    bounds : lib.IntArray1D
         Array of bounds for each segment, where each bound is the
         starting frame of the segment.
-    segments : np.ndarray
+    segments : lib.FloatArray3D
         3D array of segments, where each segment is a 2D image of the
         localizations in that segment.
     """
@@ -2487,7 +2489,7 @@ def _undrift_from_picked_coordinate(
     picked_locs: list[pd.DataFrame],
     info: list[dict],
     coordinate: Literal["x", "y", "z"],
-) -> np.ndarray:
+) -> lib.FloatArray1D:
     """Calculate drift in a given coordinate from picked localizations.
     Uses the center of mass of each pick to find the drift in the
     specified coordinate across all frames. The drift is calculated as
@@ -2505,7 +2507,7 @@ def _undrift_from_picked_coordinate(
 
     Returns
     -------
-    drift_mean : np.ndarray
+    drift_mean : lib.FloatArray1D
         Average drift across picks for all frames
     """
     n_picks = len(picked_locs)
@@ -2560,7 +2562,7 @@ def apply_drift(
     locs: pd.DataFrame,
     info: list[dict],
     *,
-    drift: pd.DataFrame | np.ndarray,
+    drift: pd.DataFrame | lib.FloatArray2D,
 ):
     """Convenience function to apply drift to localizations. Runs checks
     to ensure correct formats.
@@ -2571,7 +2573,7 @@ def apply_drift(
         Localizations to apply drift to.
     info : list of dicts
         Metadata of the localization list.
-    drift : pd.DataFrame or np.ndarray
+    drift : pd.DataFrame or lib.FloatArray2D
         Drift to apply. If a DataFrame, it should have columns 'x' and
         'y', and optionally 'z'. If a numpy array, it should have shape
         (n_frames, 2) for x and y drift, or (n_frames, 3) for x, y, and
@@ -2854,7 +2856,7 @@ def _shifts_from_picked_coordinate(
 
     Returns
     -------
-    shifts : np.ndarray
+    shifts : lib.FloatArray2D
         Array of shape (n_channels, n_channels) with shifts between
         all channels.
     """
@@ -2991,15 +2993,15 @@ def calculate_fret(
 
 
 def nn_analysis(
-    X1: np.ndarray,
-    X2: np.ndarray,
+    X1: lib.FloatArray2D,
+    X2: lib.FloatArray2D,
     nn_count: int,
-) -> np.ndarray:
+) -> lib.FloatArray2D:
     """Find the nearest neighbors between two sets of localizations.
 
     Parameters
     ----------
-    X1, X2 : np.ndarray
+    X1, X2 : lib.FloatArray2D
         Arrays of shape (N, D) and (M, D) representing the coordinates
         of the two sets of localizations, where N and M are the number
         of localizations in each set, and D is the number of spatial
@@ -3010,7 +3012,7 @@ def nn_analysis(
 
     Returns
     -------
-    nnd : np.ndarray
+    nnd : lib.FloatArray2D
         Array of nearest neighbors distances, where each row corresponds
         to a localization in the first set and contains the distances to
         its nearest neighbors in the second set.

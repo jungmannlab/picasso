@@ -24,18 +24,20 @@ from . import lib, render, localize, postprocess
 plt.style.use("ggplot")
 
 
-def xcorr(imageA: np.ndarray, imageB: np.ndarray) -> np.ndarray:
+def xcorr(
+    imageA: lib.FloatArray2D, imageB: lib.FloatArray2D
+) -> lib.FloatArray2D:
     """Compute the cross-correlation of two images using FFT.
 
     Parameters
     ----------
-    imageA, imageB : np.ndarray
+    imageA, imageB : lib.FloatArray2D
         Input images to be cross-correlated. They should have the same
         shape.
 
     Returns
     -------
-    res : np.ndarray
+    res : lib.FloatArray2D
         The cross-correlation result, which is the inverse Fourier
         transform of the product of the Fourier transforms of the two
         images.
@@ -49,8 +51,8 @@ def xcorr(imageA: np.ndarray, imageB: np.ndarray) -> np.ndarray:
 
 
 def get_image_shift(
-    imageA: np.ndarray,
-    imageB: np.ndarray,
+    imageA: lib.FloatArray2D,
+    imageB: lib.FloatArray2D,
     box: int,
     roi: int | None = None,
     display: bool = False,
@@ -59,7 +61,7 @@ def get_image_shift(
 
     Parameters
     ----------
-    imageA, imageB : np.ndarray
+    imageA, imageB : lib.FloatArray2D
         Input images to be cross-correlated. They should have the same
         shape.
     box : int
@@ -156,17 +158,17 @@ def get_image_shift(
 
 
 def rcc(
-    segments: list[np.ndarray],
+    segments: list[lib.FloatArray2D],
     max_shift: float | None = None,
     callback: Callable[[int], None] | None = None,
-) -> tuple[np.ndarray, np.ndarray]:
+) -> tuple[lib.FloatArray2D, lib.FloatArray2D]:
     """Compute RCC, see Wang, Schnitzbauer, et al. Optics Express,
     2014. Return the shifts in x and y directions for each pair of
     segments.
 
     Parameters
     ----------
-    segments : list of np.ndarray
+    segments : list of lib.FloatArray2D
         List of image segments to be correlated. Each segment should be
         a 2D numpy array representing an image.
     max_shift : float, optional
@@ -180,7 +182,7 @@ def rcc(
 
     Returns
     -------
-    shifts_x, shifts_y : np.ndarray
+    shifts_x, shifts_y : lib.FloatArray2D
         2D numpy arrays containing the shifts in x and y directions for
         each pair of segments. The shape of the arrays is
         (n_segments, n_segments), where n_segments is the number of
@@ -278,7 +280,7 @@ def find_fiducials(
     return picks, box
 
 
-def radial_sum(image: np.ndarray) -> np.ndarray:
+def radial_sum(image: lib.FloatArray2D) -> lib.FloatArray1D:
     """Compute the radial projection of the sum of pixel values.
 
     If the radial distance of a pixel to center is r, then the sum of the
@@ -287,12 +289,12 @@ def radial_sum(image: np.ndarray) -> np.ndarray:
 
     Parameters
     ----------
-    image : np.ndarray
+    image : lib.FloatArray2D
         Input image array.
 
     Returns
     -------
-    radial_profile : np.ndarray
+    radial_profile : lib.FloatArray1D
         1D array containing the radial sum values.
 
     Raises

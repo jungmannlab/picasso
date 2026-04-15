@@ -25,7 +25,7 @@ from . import lib
 
 def mask_locs(
     locs: pd.DataFrame,
-    mask: np.ndarray,
+    mask: lib.BoolArray2D,
     width: float = None,
     height: float = None,
     info: list[dict] = None,
@@ -36,7 +36,7 @@ def mask_locs(
     ----------
     locs : pd.DataFrame
         Localizations to be masked.
-    mask : np.ndarray
+    mask : lib.BoolArray2D
         Binary mask where True indicates the area to keep.
     width : float
         Maximum x coordinate of the localizations. Deprecated, will be
@@ -76,16 +76,16 @@ def mask_locs(
 
 
 def binary_mask(
-    image: np.ndarray,
-    threshold: float | np.ndarray,
-) -> np.ndarray:
+    image: lib.FloatArray2D,
+    threshold: float | lib.FloatArray2D,
+) -> lib.BoolArray2D:
     """Create a binary mask from an image given a threshold.
 
     Parameters
     ----------
-    image : np.ndarray
+    image : lib.FloatArray2D
         Input image.
-    threshold : float or np.ndarray
+    threshold : float or lib.FloatArray2D
         Threshold value or array of threshold values. If a single float
         is provided, it is used as a global threshold. If an array is
         provided, it should have the same shape as the input image and
@@ -93,7 +93,7 @@ def binary_mask(
 
     Returns
     -------
-    mask : np.ndarray
+    mask : lib.BoolArray2D
         Binary mask where True indicates pixels above the threshold.
     """
     mask = np.zeros(image.shape, dtype=bool)
@@ -109,7 +109,7 @@ def binary_mask(
 
 
 def mask_image(
-    image: np.ndarray,
+    image: lib.FloatArray2D,
     method: (
         float
         | Literal[
@@ -125,13 +125,13 @@ def mask_image(
             "local_median",
         ]
     ) = "otsu",
-) -> tuple[np.ndarray, float] | tuple[np.ndarray, np.ndarray]:
+) -> tuple[lib.BoolArray2D, float] | tuple[lib.BoolArray2D, lib.FloatArray2D]:
     """Create a binary mask from a grayscale image using a specified
     thresholding method or threshold value.
 
     Parameters
     ----------
-    image : np.ndarray
+    image : lib.FloatArray2D
         Input image.
     method : float or {'isodata', 'li', 'mean', 'minimum', 'otsu',
             'triangle', 'yen', 'local_gaussian', 'local_mean',
@@ -142,9 +142,9 @@ def mask_image(
 
     Returns
     -------
-    mask : np.ndarray
+    mask : lib.BoolArray2D
         Binary mask where True indicates pixels above the threshold.
-    threshold : float or np.ndarray
+    threshold : float or lib.FloatArray2D
         Threshold value used to create the mask. Can be a single float
         for global thresholding or an array for pixel-wise thresholding.
     """
@@ -173,13 +173,13 @@ def mask_image(
     return mask, threshold
 
 
-def threshold_isodata(image: np.ndarray) -> float:
+def threshold_isodata(image: lib.FloatArray2D) -> float:
     """Return threshold value based on the isodata method for a
     grayscale image. Adapted from scikit-image.
 
     Parameters
     ----------
-    image : np.ndarray
+    image : lib.FloatArray2D
         Input image.
 
     Returns
@@ -225,13 +225,13 @@ def threshold_isodata(image: np.ndarray) -> float:
     return threshold
 
 
-def threshold_li(image: np.ndarray) -> float:
+def threshold_li(image: lib.FloatArray2D) -> float:
     """Return threshold value based on Li's minimum cross entropy method
     for a grayscale image. Adapted from scikit-image.
 
     Parameters
     ----------
-    image : np.ndarray
+    image : lib.FloatArray2D
         Input image.
 
     Returns
@@ -283,13 +283,13 @@ def threshold_li(image: np.ndarray) -> float:
     return threshold
 
 
-def threshold_mean(image: np.ndarray) -> float:
+def threshold_mean(image: lib.FloatArray2D) -> float:
     """Return threshold value based on the mean method for a grayscale
     image. Adapted from scikit-image.
 
     Parameters
     ----------
-    image : np.ndarray
+    image : lib.FloatArray2D
         The input grayscale image.
 
     Returns
@@ -308,7 +308,7 @@ def threshold_mean(image: np.ndarray) -> float:
     return threshold
 
 
-def threshold_minimum(image):
+def threshold_minimum(image: lib.FloatArray2D) -> float:
     """Return threshold value based on minimum method.
 
     The histogram of the input ``image`` is computed if not provided and
@@ -319,7 +319,7 @@ def threshold_minimum(image):
 
     Parameters
     ----------
-    image : np.ndarray
+    image : lib.FloatArray2D
         The input grayscale image.
 
     Returns
@@ -373,7 +373,7 @@ def threshold_minimum(image):
     return threshold
 
 
-def threshold_otsu(image: np.ndarray) -> float:
+def threshold_otsu(image: lib.FloatArray2D) -> float:
     """Return threshold value based on Otsu's method for a grayscale
     image. Adapted from scikit-image.
 
@@ -381,7 +381,7 @@ def threshold_otsu(image: np.ndarray) -> float:
 
     Parameters
     ----------
-    image : np.ndarray
+    image : lib.FloatArray2D
         The input grayscale image.
 
     Returns
@@ -414,13 +414,13 @@ def threshold_otsu(image: np.ndarray) -> float:
     return threshold
 
 
-def threshold_triangle(image: np.ndarray) -> float:
+def threshold_triangle(image: lib.FloatArray2D) -> float:
     """Return threshold value based on the triangle algorithm for a
     grayscale image. Adapted from scikit-image.
 
     Parameters
     ----------
-    image : np.ndarray
+    image : lib.FloatArray2D
         Input image.
 
     Returns
@@ -474,13 +474,13 @@ def threshold_triangle(image: np.ndarray) -> float:
     return threshold
 
 
-def threshold_yen(image: np.ndarray) -> float:
+def threshold_yen(image: lib.FloatArray2D) -> float:
     """Return threshold value based on Yen's method for a grayscale
     image. Adapted from scikit-image.
 
     Parameters
     ----------
-    image : np.ndarray
+    image : lib.FloatArray2D
         Input image.
 
     Returns
@@ -524,18 +524,18 @@ def threshold_yen(image: np.ndarray) -> float:
 
 
 # threshold methods that return pixel-wise thresholds
-def threshold_local_gaussian(image: np.ndarray) -> np.ndarray:
+def threshold_local_gaussian(image: lib.FloatArray2D) -> lib.BoolArray2D:
     """Return threshold value based on the Gaussian local method for a
     grayscale image. Adapted from scikit-image.
 
     Parameters
     ----------
-    image : np.ndarray
+    image : lib.FloatArray2D
         The input grayscale image.
 
     Returns
     -------
-    mask : np.ndarray
+    mask : lib.BoolArray2D
         Binary mask. Values of 1 indicate foreground pixels.
 
     References
@@ -558,18 +558,18 @@ def threshold_local_gaussian(image: np.ndarray) -> np.ndarray:
     return mask
 
 
-def threshold_local_mean(image: np.ndarray) -> np.ndarray:
+def threshold_local_mean(image: lib.FloatArray2D) -> lib.BoolArray2D:
     """Return threshold value based on the mean local method for a
     grayscale image. Adapted from scikit-image.
 
     Parameters
     ----------
-    image : np.ndarray
+    image : lib.FloatArray2D
         The input grayscale image.
 
     Returns
     -------
-    mask : np.ndarray
+    mask : lib.BoolArray2D
         Binary mask. Values of 1 indicate foreground pixels.
 
     References
@@ -586,18 +586,18 @@ def threshold_local_mean(image: np.ndarray) -> np.ndarray:
     return mask
 
 
-def threshold_local_median(image: np.ndarray) -> np.ndarray:
+def threshold_local_median(image: lib.FloatArray2D) -> lib.BoolArray2D:
     """Return threshold value based on the median local method for a
     grayscale image. Adapted from scikit-image.
 
     Parameters
     ----------
-    image : np.ndarray
+    image : lib.FloatArray2D
         The input grayscale image.
 
     Returns
     -------
-    mask : np.ndarray
+    mask : lib.BoolArray2D
         Binary mask. Values of 1 indicate foreground pixels.
 
     References
@@ -614,17 +614,17 @@ def threshold_local_median(image: np.ndarray) -> np.ndarray:
     return mask
 
 
-def threshold_tukey(image: np.ndarray) -> np.ndarray:
+def threshold_tukey(image: lib.FloatArray2D) -> lib.BoolArray2D:
     """Find the Tukey's mask, used to avoid FFT artifacts.
 
     Parameters
     ----------
-    image : np.ndarray
+    image : lib.FloatArray2D
         The input grayscale image.
 
     Returns
     -------
-    mask : np.ndarray
+    mask : lib.BoolArray2D
         Tukey's mask (binary).
     """
     assert image.shape[0] == image.shape[1], "Image must be square"
@@ -639,17 +639,17 @@ def threshold_tukey(image: np.ndarray) -> np.ndarray:
     return mask
 
 
-def loess_smooth(arr: np.ndarray, span: int = 5) -> np.ndarray:
+def loess_smooth(arr: lib.FloatArray1D, span: int = 5) -> lib.FloatArray1D:
     """Smooth an array using LOESS smoothing.
 
     Parameters
     ----------
-    arr : np.ndarray
+    arr : lib.FloatArray1D
         Input array to be smoothed (1D).
 
     Returns
     -------
-    smoothed_arr : np.ndarray
+    smoothed_arr : lib.FloatArray1D
         Smoothed array.
     """
     # smooth the frc curve

@@ -16,7 +16,7 @@ import colorsys
 import os
 import time
 import warnings
-from typing import Any, TypeAlias
+from typing import Any, TypeAlias, Literal
 from collections.abc import Callable
 from asyncio import Future
 
@@ -52,6 +52,9 @@ REQUIRED_COLUMNS = ["frame", "x", "y", "z", "lpx", "lpy", "lpz"]
 # Type alias
 IntArray1D: TypeAlias = np.ndarray[tuple[int], np.dtype[np.integer[Any]]]
 IntArray2D: TypeAlias = np.ndarray[tuple[int, int], np.dtype[np.integer[Any]]]
+IntArray3D: TypeAlias = np.ndarray[
+    tuple[int, int, int], np.dtype[np.integer[Any]]
+]
 FloatArray1D: TypeAlias = np.ndarray[tuple[int], np.dtype[np.floating[Any]]]
 FloatArray2D: TypeAlias = np.ndarray[
     tuple[int, int], np.dtype[np.floating[Any]]
@@ -61,6 +64,11 @@ FloatArray3D: TypeAlias = np.ndarray[
 ]
 SeriesOrFloatArray1D: TypeAlias = pd.Series | FloatArray1D
 SeriesOrIntArray1D: TypeAlias = pd.Series | IntArray1D
+BoolArray1D: TypeAlias = np.ndarray[tuple[int], np.dtype[np.bool_]]
+BoolArray2D: TypeAlias = np.ndarray[tuple[int, int], np.dtype[np.bool_]]
+Array3x3: TypeAlias = np.ndarray[
+    tuple[Literal[3], Literal[3]], np.dtype[np.floating[Any]]
+]
 
 
 class Dialog(QtWidgets.QDialog):
@@ -1021,17 +1029,17 @@ def get_save_filename_ext_dialog(
 
 
 @numba.njit
-def find_local_minima(arr: np.ndarray) -> np.ndarray:
+def find_local_minima(arr: FloatArray1D) -> IntArray1D:
     """Find positions of the local minima in a 1D numpy array.
 
     Parameters
     ----------
-    arr : np.ndarray
+    arr : FloatArray1D
         1D array.
 
     Returns
     -------
-    local_minima_indices : np.ndarray
+    local_minima_indices : IntArray1D
         Indices of the local minima in the array.
     """
     # Compare each element with its neighbors
@@ -1042,11 +1050,11 @@ def find_local_minima(arr: np.ndarray) -> np.ndarray:
 
 
 def cumulative_exponential(
-    x: np.ndarray,
+    x: FloatArray1D,
     a: float,
     t: float,
     c: float,
-) -> np.ndarray:
+) -> FloatArray1D:
     """Used for binding kinetics estimation."""
     return a * (1 - np.exp(-(x / t))) + c
 
@@ -1054,7 +1062,7 @@ def cumulative_exponential(
 def unpack_calibration(
     calibration: dict,
     pixelsize: float,
-) -> tuple[np.ndarray, np.ndarray, float]:
+) -> tuple[FloatArray2D, FloatArray1D, float]:
     """Extract calibration file for 3D G5M. Return spot widths and
     heights and the corresponding z values + magnification factor.
 
@@ -1071,10 +1079,10 @@ def unpack_calibration(
 
     Returns
     -------
-    spot_size : (2,) np.ndarray
+    spot_size : FloatArray2D
         Spot width and height from the 3D calibration for each z
         position.
-    z_range : np.ndarray
+    z_range : FloatArray1D
         Z values (in camera pixels) corresponding to the spot ratios.
     mag_factor : float
         Magnification factor for the 3D calibration.
@@ -1104,22 +1112,22 @@ def unpack_calibration(
 
 
 def calculate_optimal_bins(
-    data: np.ndarray,
+    data: FloatArray1D | IntArray1D,
     max_n_bins: int | None = None,
-) -> np.ndarray:
+) -> FloatArray1D:
     """Calculate the optimal bins for display, for example, in
     Picasso: Filter.
 
     Parameters
     ----------
-    data : np.ndarray
+    data : FloatArray1D | IntArray1D
         Data to be binned.
     max_n_bins : int | None, optional
         Maximum number of bins.
 
     Returns
     -------
-    bins : np.ndarray
+    bins : FloatArray1D
         Bins for display.
     """
     iqr = np.subtract(*np.percentile(data, [75, 25]))
@@ -1142,7 +1150,7 @@ def calculate_optimal_bins(
 
 def append_to_rec(
     rec_array: np.recarray,
-    data: np.ndarray,
+    data: FloatArray1D | IntArray1D,
     name: str,
 ) -> np.recarray:
     """Append a new column to the existing np.recarray.
@@ -1151,7 +1159,7 @@ def append_to_rec(
     ----------
     rec_array : np.recarray
         Recarray to which the new column is appended.
-    data : np.ndarray
+    data : FloatArray1D | IntArray1D
         1D data to be appended.
     name : str
         Name of the new column.
@@ -1313,7 +1321,7 @@ def ensure_sanity(locs: pd.DataFrame, info: list[dict]) -> pd.DataFrame:
     return locs
 
 
-def is_loc_at(x: float, y: float, locs: pd.DataFrame, r: float) -> np.ndarray:
+def is_loc_at(x: float, y: float, locs: pd.DataFrame, r: float) -> BoolArray1D:
     """Check which localizations are within radius ``r`` from position
     ``(x, y)``.
 
@@ -1328,7 +1336,7 @@ def is_loc_at(x: float, y: float, locs: pd.DataFrame, r: float) -> np.ndarray:
 
     Returns
     -------
-    is_picked : np.ndarray
+    is_picked : BoolArray1D
         Boolean array - True if a localization is within radius r
         of position (x, y).
     """
@@ -1364,25 +1372,25 @@ def locs_at(x: float, y: float, locs: pd.DataFrame, r: float) -> pd.DataFrame:
 
 @numba.jit(nopython=True)
 def check_if_in_polygon(
-    x: np.ndarray,
-    y: np.ndarray,
-    X: np.ndarray,
-    Y: np.ndarray,
-) -> np.ndarray:
+    x: FloatArray1D,
+    y: FloatArray1D,
+    X: FloatArray1D,
+    Y: FloatArray1D,
+) -> BoolArray1D:
     """Check if points ``(x, y)`` are within the polygon defined by
     corners ``(X, Y)``. Uses the ray casting algorithm, see
     ``check_if_in_rectangle`` for details.
 
     Parameters
     ----------
-    x, y : np.ndarray
+    x, y : FloatArray1D
         x and y coordinates of points.
-    X, Y : np.ndarray
+    X, Y : FloatArray1D
         x and y coordinates of polygon corners.
 
     Returns
     -------
-    is_in_polygon : np.ndarray
+    is_in_polygon : BoolArray1D
         Boolean array indicating which points are in the polygon.
     """
     n_locs = len(x)
@@ -1409,8 +1417,8 @@ def check_if_in_polygon(
 
 def locs_in_polygon(
     locs: pd.DataFrame,
-    X: np.ndarray,
-    Y: np.ndarray,
+    X: FloatArray1D,
+    Y: FloatArray1D,
 ) -> pd.DataFrame:
     """Return localizations within the polygon defined by corners
     ``(X, Y)``.
@@ -1419,7 +1427,7 @@ def locs_in_polygon(
     ----------
     locs : pd.DataFrame
         Localizations.
-    X, Y : list
+    X, Y : FloatArray1D
         x and y-coordinates of polygon corners.
 
     Returns
@@ -1435,11 +1443,11 @@ def locs_in_polygon(
 
 @numba.jit(nopython=True)
 def check_if_in_rectangle(
-    x: np.ndarray,
-    y: np.ndarray,
-    X: np.ndarray,
-    Y: np.ndarray,
-) -> np.ndarray:
+    x: FloatArray1D,
+    y: FloatArray1D,
+    X: FloatArray1D,
+    Y: FloatArray1D,
+) -> BoolArray1D:
     """Check if locs with coordinates (x, y) are in rectangle with
     corners (X, Y) by counting the number of rectangle sides which are
     hit by a ray originating from each loc to the right. If the number
@@ -1447,14 +1455,14 @@ def check_if_in_rectangle(
 
     Parameters
     ----------
-    x, y : np.ndarray
+    x, y : FloatArray1D
         x and y coordinates of points.
-    X, Y : np.ndarray
+    X, Y : FloatArray1D
         x and y coordinates of polygon corners.
 
     Returns
     -------
-    is_in_polygon : np.ndarray
+    is_in_polygon : BoolArray1D
         Boolean array indicating if point is in polygon.
     """
     n_locs = len(x)
@@ -1487,8 +1495,8 @@ def check_if_in_rectangle(
 
 def locs_in_rectangle(
     locs: pd.DataFrame,
-    X: np.ndarray,
-    Y: np.ndarray,
+    X: FloatArray1D,
+    Y: FloatArray1D,
 ) -> pd.DataFrame:
     """Return localizations within the rectangle defined by corners
     ``(X, Y)``.
@@ -1497,7 +1505,7 @@ def locs_in_rectangle(
     ----------
     locs : pd.DataFrame
         Localizations.
-    X, Y : list
+    X, Y : FloatArray1D
         x and y coordinates of rectangle corners.
 
     Returns
@@ -1513,26 +1521,26 @@ def locs_in_rectangle(
 
 
 def minimize_shifts(
-    shifts_x: np.ndarray,
-    shifts_y: np.ndarray,
-    shifts_z: np.ndarray | None = None,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray | None]:
+    shifts_x: FloatArray2D,
+    shifts_y: FloatArray2D,
+    shifts_z: FloatArray2D | None = None,
+) -> tuple[FloatArray1D, FloatArray1D, FloatArray1D | None]:
     """Minimize shifts in x, y, and z directions. Used for drift
     correction.
 
     Parameters
     ----------
-    shifts_x, shifts_y : np.ndarray
+    shifts_x, shifts_y : FloatArray2D
         Shifts in x and y directions, shape (n_channels, n_channels).
-    shifts_z : np.ndarray, optional
+    shifts_z : FloatArray2D, optional
         Shifts in z direction, shape (n_channels, n_channels). If None,
         only x and y shifts are minimized.
 
     Returns
     -------
-    shift_y, shift_x : np.ndarray
+    shift_y, shift_x : FloatArray1D
         Minimized shifts in y and x direction.
-    shift_z : np.ndarray, optional
+    shift_z : FloatArray1D, optional
         Minimized shifts in z direction if ``shifts_z`` is specified.
     """
     n_channels = shifts_x.shape[0]
@@ -1706,12 +1714,12 @@ def get_pick_rectangle_corners(
     return corners
 
 
-def polygon_area(X: np.ndarray, Y: np.ndarray) -> float:
+def polygon_area(X: FloatArray1D, Y: FloatArray1D) -> float:
     """Find the area of a polygon defined by corners X and Y.
 
     Parameters
     ----------
-    X, Y : np.ndarray
+    X, Y : FloatArray1D
         x-coordinates and y-coordinates of the polygon corners.
 
     Returns
@@ -1728,7 +1736,7 @@ def polygon_area(X: np.ndarray, Y: np.ndarray) -> float:
     return area
 
 
-def pick_areas_polygon(picks: list[list[tuple[float, float]]]) -> np.ndarray:
+def pick_areas_polygon(picks: list[list[tuple[float, float]]]) -> FloatArray1D:
     """Return pick areas for each polygonal pick in picks.
 
     Parameters
@@ -1739,7 +1747,7 @@ def pick_areas_polygon(picks: list[list[tuple[float, float]]]) -> np.ndarray:
 
     Returns
     -------
-    areas : np.ndarray
+    areas : FloatArray1D
         Pick areas.
     """
     areas = []
@@ -1756,7 +1764,7 @@ def pick_areas_polygon(picks: list[list[tuple[float, float]]]) -> np.ndarray:
 def pick_areas_rectangle(
     picks: list[list[tuple[float, float]]],
     w: float,
-) -> np.ndarray:
+) -> FloatArray1D:
     """Return pick areas for each pick in picks.
 
     Parameters
@@ -1769,7 +1777,7 @@ def pick_areas_rectangle(
 
     Returns
     -------
-    areas : np.ndarray
+    areas : FloatArray1D
         Pick areas, same units as ``w``.
     """
     areas = np.zeros(len(picks))
@@ -1780,14 +1788,14 @@ def pick_areas_rectangle(
 
 
 def permutation_test(
-    arr1: np.ndarray, arr2: np.ndarray, iterations: int = 1000
+    arr1: FloatArray1D, arr2: FloatArray1D, iterations: int = 1000
 ) -> tuple[float, float, float]:
     """Perform a permutation test to compare two arrays. The test
     statistic is the Kolmogorov-Smirnov statistic.
 
     Parameters
     ----------
-    arr1, arr2 : np.ndarray
+    arr1, arr2 : FloatArray1D
         Arrays to be compared.
     iterations : int, optional
         Number of permutations to perform. Default is 1000.
@@ -1819,8 +1827,8 @@ def permutation_test(
 
 
 def plot_subclustering_check(
-    clustered_n_events: np.ndarray,
-    sparse_n_events: np.ndarray,
+    clustered_n_events: IntArray1D,
+    sparse_n_events: IntArray1D,
     plot_path: str | list[str] = "",
     return_fig: bool = False,
     clustering_dist: float | None = None,
@@ -1831,9 +1839,9 @@ def plot_subclustering_check(
 
     Parameters
     ----------
-    clustered_n_events : np.ndarray
+    clustered_n_events : IntArray1D
         Number of events for clustered molecules.
-    sparse_n_eveents : np.ndarray
+    sparse_n_eveents : IntArray1D
         Number of events for sparse molecules.
     plot_path : str or list of strs, optional
         If provided, the plot is saved to this path. If a list of

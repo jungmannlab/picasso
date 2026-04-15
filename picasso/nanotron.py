@@ -19,16 +19,16 @@ from . import render, lib
 
 
 def prepare_img(
-    img: np.ndarray,
+    img: lib.FloatArray2D,
     img_shape: int,
     alpha: float = 1,
     bg: float = 0,
-) -> np.ndarray:
+) -> lib.FloatArray1D:
     """Prepare image for classification.
 
     Parameters
     ----------
-    img : np.ndarray
+    img : lib.FloatArray2D
         Input image to be prepared.
     img_shape : int
         Shape of the image (assumed to be square).
@@ -39,7 +39,7 @@ def prepare_img(
 
     Returns
     -------
-    img : np.ndarray
+    img : lib.FloatArray1D
         Prepared image.
     """
     img = alpha * img - bg
@@ -51,19 +51,19 @@ def prepare_img(
     return img
 
 
-def rotate_img(img: np.ndarray, angle: float) -> np.ndarray:
+def rotate_img(img: lib.FloatArray2D, angle: float) -> lib.FloatArray2D:
     """Rotate image by a given angle.
 
     Parameters
     ----------
-    img : np.ndarray
+    img : lib.FloatArray2D
         Input image to be rotated.
     angle : float
         Angle in degrees by which to rotate the image.
 
     Returns
     -------
-    rot_img : np.ndarray
+    rot_img : lib.FloatArray2D
         Rotated image.
     """
     rot_img = ndimage.rotate(img, angle, reshape=False)
@@ -77,7 +77,7 @@ def roi_to_img(
     radius: float,
     oversampling: float,
     picks: tuple[float, float] | None = None,
-) -> np.ndarray:
+) -> lib.FloatArray2D:
     """Convert a region of interest (ROI) defined by localizations to an
     image.
 
@@ -99,7 +99,7 @@ def roi_to_img(
 
     Returns
     -------
-    pick_img : np.ndarray
+    pick_img : lib.FloatArray2D
         Image of the picked localizations.
     """
     # Isolate locs from pick
@@ -153,7 +153,7 @@ def prepare_data(
     alpha: float = 10,
     bg: float = 1,
     export: bool = False,
-) -> tuple[list[np.ndarray], list[int]]:
+) -> tuple[list[lib.FloatArray1D], list[int]]:
     """Prepare data for classification by extracting images of
     localizations.
 
@@ -178,7 +178,7 @@ def prepare_data(
 
     Returns
     -------
-    data : list[np.ndarray]
+    data : list[lib.FloatArray1D]
         List of prepared images of the localizations.
     labels : list[int]
         List of labels corresponding to the images.
@@ -222,7 +222,7 @@ def predict_structure(
     pick_radius: float,
     oversampling: float,
     picks: tuple[float, float] | None = None,
-) -> tuple[int, np.ndarray]:
+) -> tuple[int, lib.FloatArray1D]:
     """Predict the structure of localizations using a trained MLP
     classifier.
 
@@ -245,7 +245,7 @@ def predict_structure(
     -------
     pred : int
         Predicted label for the image.
-    pred_proba : np.ndarray
+    pred_proba : lib.FloatArray1D
         Predicted probabilities for each class.
     """
     img_shape = int(2 * pick_radius * oversampling)

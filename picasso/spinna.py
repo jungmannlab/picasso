@@ -43,7 +43,7 @@ BOOTSTRAP_DISTANCE = 30.0
 BOOTSTRAP_DISTANCE_METRIC = 1.0
 
 
-def rref(M: np.ndarray) -> np.ndarray:
+def rref(M: lib.FloatArray2D | lib.IntArray2D) -> lib.FloatArray2D:
     """Convert a given matrix to its reduced row echelon form (RREF)
     using Gaussian elimination. Used for solving sets of linear
     equations.
@@ -53,12 +53,12 @@ def rref(M: np.ndarray) -> np.ndarray:
 
     Parameters
     ----------
-    M : np.ndarray
+    M : lib.FloatArray2D or lib.IntArray2D
         The matrix to be transformed.
 
     Returns
     -------
-    M : np.ndarray
+    M : lib.FloatArray2D
         The matrix in the reduced row echelon form.
     """
     M = M.copy()
@@ -93,7 +93,7 @@ def rref(M: np.ndarray) -> np.ndarray:
 def find_target_counts(
     targets: list[str],
     structures: list[Structure],
-) -> np.ndarray:
+) -> lib.FloatArray2D:
     """Find the number of each molecular target in structures.
 
     Parameters
@@ -105,7 +105,7 @@ def find_target_counts(
 
     Returns
     -------
-    t_counts : np.ndarray
+    t_counts : lib.FloatArray2D
         Array of shape (len(targets), len(structures)) specifying the
         number of each target in each structures.
     """
@@ -117,7 +117,7 @@ def find_target_counts(
     return t_counts
 
 
-def get_structures_permutation(t_counts: np.ndarray) -> np.ndarray:
+def get_structures_permutation(t_counts: lib.FloatArray2D) -> lib.IntArray1D:
     """Find a permutation that ensures that the numbers of structures
     can be found using ``generate_N_structures``.
 
@@ -128,7 +128,7 @@ def get_structures_permutation(t_counts: np.ndarray) -> np.ndarray:
 
     Parameters
     ----------
-    t_counts : np.ndarray
+    t_counts : lib.FloatArray2D
         Array specifying the counts of each molecular target in each
         structure, see ``generate_N_structures``. Shape (T, S), where
         T is the number of molecular targets and S is the number of
@@ -136,7 +136,7 @@ def get_structures_permutation(t_counts: np.ndarray) -> np.ndarray:
 
     Returns
     -------
-    perm : np.ndarray
+    perm : lib.IntArray1D
         The permutation array, shape (S,).
     """
     n_t, n_s = t_counts.shape
@@ -338,7 +338,7 @@ def generate_N_structures(
 def random_rotation_matrices(
     num: int,
     mode: Literal["3D", "2D"] | None = "2D",
-) -> np.ndarray:
+) -> lib.FloatArray3D:
     """Generate num-many random rotation matrices. By default, 2D
     rotations are generated, although 3D rotations around the z axis
     are supported too.
@@ -355,7 +355,7 @@ def random_rotation_matrices(
 
     Returns
     -------
-    rots : np.ndarray
+    rots : lib.FloatArray3D
         Array of shape (num, 3, 3) specifying num-many random rotation
         matrices.
     """
@@ -380,7 +380,7 @@ def random_rotation_matrices(
 
 
 def coords_to_locs(
-    coords: np.ndarray,
+    coords: lib.FloatArray2D,
     lp: float = 1.0,
     pixelsize: int = 130,
 ) -> pd.DataFrame:
@@ -389,7 +389,7 @@ def coords_to_locs(
 
     Parameters
     ----------
-    coords: np.ndarray
+    coords: lib.FloatArray2D
         Coordinates of localizations to be converted. All coordinates
         are in nm. Shape (N, 2) or (N, 3), where N is the number of
         localizations.
@@ -438,10 +438,10 @@ def coords_to_locs(
 
 
 def plot_NN(
-    data1: np.ndarray | None = None,
-    data2: np.ndarray | None = None,
+    data1: lib.FloatArray2D | None = None,
+    data2: lib.FloatArray2D | None = None,
     n_neighbors: int = 1,
-    dist: np.ndarray | None = None,
+    dist: lib.FloatArray2D | None = None,
     hist_data: dict | None = None,
     mode: Literal["hist", "plot"] = "hist",
     fig: plt.Figure | None = None,
@@ -469,11 +469,11 @@ def plot_NN(
 
     Parameters
     ----------
-    data1, data2 : np.ndarrays
+    data1, data2 : lib.FloatArray2D
         Coordinates of two datasets to be compared and whose NND
         (nearest neighbor distribution) is plotted. If None, dist must
         be provided.
-    dist : np.array
+    dist : lib.FloatArray2D
         Contains the NN distances (obtained with get_NN_dist). If None,
         the distances are calculated from data1 and data2. Otherwise,
         the NND calculation is skipped.
@@ -635,20 +635,20 @@ def plot_NN(
 
 
 def get_NN_dist(
-    data1: np.ndarray,
-    data2: np.ndarray,
+    data1: lib.FloatArray2D,
+    data2: lib.FloatArray2D,
     n_neighbors: int,
-) -> np.ndarray:
+) -> lib.FloatArray2D:
     """Find nearest neighbors distances between data1 and data2 for
     n_neighbors closest neighbors.
 
     Parameters
     ----------
-    data1 : np.ndarray
+    data1 : lib.FloatArray2D
         Array of points from which distances are measured. Should have
         shape (N, 2) or (N, 3) for 2D/3D case, respectively, where N
         is the number of points.
-    data2 : np.ndarray
+    data2 : lib.FloatArray2D
         Array of points to which distances are measured. May contain a
         different number of points but of the same dimensionality.
     n_neighbors : int
@@ -656,7 +656,7 @@ def get_NN_dist(
 
     Returns
     -------
-    dist : np.ndarray
+    dist : lib.FloatArray2D
         Array with distances of N-th neighbors for each point in data1.
         Shape: (N, n_neighbors)
     """
@@ -692,7 +692,7 @@ def get_NN_dist_experimental(
     coords: dict,
     mixer: StructureMixer,
     duplicate: bool = False,
-) -> list[np.ndarray]:
+) -> list[lib.FloatArray2D]:
     """Calculate nearest neighbor distances for experimental data.
 
     Parameters
@@ -709,7 +709,7 @@ def get_NN_dist_experimental(
 
     Returns
     -------
-    dists : list of np.2darrays
+    dists : list of lib.FloatArray2D
         Lists of arrays of shape (N, n_neighbors) where N is the
         number of distances measured and n_neighbors is the number of
         neighbors considered. The list has the same length as
@@ -731,18 +731,18 @@ def get_NN_dist_experimental(
 
 
 def get_NN_dist_simulated(
-    N_str: list[np.ndarray],
+    N_str: list[lib.IntArray1D],
     N_sim: int,
     mixer: StructureMixer,
     duplicate: bool = False,
-) -> list[np.ndarray]:
+) -> list[lib.FloatArray2D]:
     """Calculate nearest neighbor distances across many simulations
     with the same settings. Simulations are repeated ``N_sim`` times and
     the NN distances are calculated for each simulation.
 
     Parameters
     ----------
-    N_str : list or np.ndarray
+    N_str : list of lib.IntArray1D
         Numbers of structures to be simulated for each structure in
         ``mixer``.
     N_sim : int
@@ -756,7 +756,7 @@ def get_NN_dist_simulated(
 
     Returns
     -------
-    dists : list of np.2darrays
+    dists : list of lib.FloatArray2D
         Lists of arrays of shape (N, n_neighbors) where N is the
         number of distances measured and n_neighbors is the number of
         neighbors considered. The list has the same length as
@@ -784,13 +784,15 @@ def get_NN_dist_simulated(
     return dists
 
 
-def NND_score(dists1: list[np.ndarray], dists2: list[np.ndarray]) -> float:
+def NND_score(
+    dists1: list[lib.FloatArray2D], dists2: list[lib.FloatArray2D]
+) -> float:
     """Score the two datasets of nearest neighbor distances (NND)
     using the Kolmogorov-Smirnov test.
 
     Parameters
     ----------
-    dists1, dists2: list of np.ndarray
+    dists1, dists2: list of lib.FloatArray2D
         Lists of arrays of shape (N, n_neighbors) where N is the
         number of distances measured and n_neighbors is the number
         of neighbors considered. See get_NN_dist_simulated and
@@ -1043,7 +1045,7 @@ class MaskGenerator:
             )
         self.sigma = sigma
 
-    def render_locs(self) -> np.ndarray:
+    def render_locs(self) -> lib.FloatArray2D:
         """Render localizations histogram (2D or 3D), no blur.
 
         Uses ``picasso.render`` after preparing inputs."""
@@ -1433,7 +1435,7 @@ class StructureSimulator:
         labeling efficiency of each molecular target simulated. Must
         follow the order specified in self.structures.targets. Lies in the
         range [0, 1].
-    mask : np.ndarray
+    mask : lib.FloatArray2D or None
         Array specifying expected number of structures to be simulated
         in each mask pixel/voxel. If None, width, height and optionally
         depth must be provided to generate a rectangular ROI.
@@ -1480,7 +1482,7 @@ class StructureSimulator:
         Label uncertainty of each molecular target (nm). Must follow the
         order specified in self.structures.targets. Lies in the range
         (0, inf).
-    mask : np.ndarray or None, optional
+    mask : lib.FloatArray2D or None, optional
         Mask to specify the region of interest (ROI) for the simulation.
         Default is None.
     mask_info : dict or None, optional
@@ -1501,7 +1503,7 @@ class StructureSimulator:
         N_structures: int,
         le: float | list[float],
         label_unc: float | list[float],
-        mask: np.ndarray | None = None,
+        mask: lib.FloatArray2D | None = None,
         mask_info: dict | None = None,
         width: float | None = None,
         height: float | None = None,
@@ -1521,7 +1523,7 @@ class StructureSimulator:
 
     def read_mask_and_ROI(
         self,
-        mask: np.ndarray | None = None,
+        mask: lib.FloatArray2D | None = None,
         mask_info: dict | None = None,
         width: float | None = None,
         height: float | None = None,
@@ -1740,7 +1742,7 @@ class StructureSimulator:
         x: list[float],
         y: list[float],
         z: list[float],
-    ) -> np.ndarray:
+    ) -> lib.FloatArray3D:
         """Initialize coordinates of molecular targets as a 3D array.
 
         Parameters
@@ -1750,7 +1752,7 @@ class StructureSimulator:
 
         Returns
         -------
-        coords : np.array
+        coords : lib.FloatArray3D
             Array of shape (N, M, 2) for 2D or (N, M, 3) for 3D, where
             N is number of structures and M is the number of molecular
             targets in the structure.
@@ -1763,9 +1765,9 @@ class StructureSimulator:
 
     def rotate_structures(
         self,
-        coords: np.ndarray,
-        rotations: np.ndarray,
-    ) -> np.ndarray:
+        coords: lib.FloatArray3D,
+        rotations: lib.FloatArray3D,
+    ) -> lib.FloatArray3D:
         """Rotate coordinates of each molecular target with a defined
         rotation.
 
@@ -1796,7 +1798,9 @@ class StructureSimulator:
         coords_rot = coords_rot.reshape(N, M, 3)
         return coords_rot
 
-    def reshape_coordinates(self, coords: np.ndarray) -> np.ndarray:
+    def reshape_coordinates(
+        self, coords: lib.FloatArray3D
+    ) -> lib.FloatArray2D:
         """Reshape x,y,z coordinates to a 2D array for saving
         molecular targets' positions.
 
@@ -2322,14 +2326,14 @@ class StructureMixer:
 
     def run_simulation(
         self,
-        N_structures: list | np.ndarray,
+        N_structures: list | lib.IntArray1D,
         path: str = "",
     ) -> dict:
         """Run a simulation with the given numbers of structures.
 
         Parameters
         ----------
-        N_structures : list or 1D np.ndarray
+        N_structures : list or lib.IntArray1D
             Each element gives the number of structures to be simulated.
             Must have the same number of elements as self.structures as
             well as the same ordering.
@@ -2402,7 +2406,7 @@ class StructureMixer:
     def extract_mask(
         self,
         structure: Structure,
-    ) -> tuple[np.ndarray, dict] | tuple[None, None]:
+    ) -> tuple[lib.FloatArray2D, dict] | tuple[None, None]:
         """Extract masks and metadata for the given structure.
 
         If a heteromultimer is simulated, weighted average of masks is
@@ -2416,7 +2420,7 @@ class StructureMixer:
 
         Returns
         -------
-        mask : np.ndarray or None
+        mask : lib.FloatArray2D or None
             Mask for the given molecular targets.
         mask_info : dict or None
             Metadata for the mask.
@@ -2441,14 +2445,14 @@ class StructureMixer:
             mask_info = None
         return mask, mask_info
 
-    def convert_sim_results(self, sim_results: list[np.ndarray]) -> dict:
+    def convert_sim_results(self, sim_results: list[lib.FloatArray2D]) -> dict:
         """Convert sim_results calculated by multiple
         ``StructureSimulator``'s into a dictionary with molecules
         ordered by their molecular targets' names.
 
         Parameters
         ----------
-        sim_results : list of arrays
+        sim_results : list of lib.FloatArray2D
             Each element contains spatial coordinates of simulated
             molecules for each simulated structure.
 
@@ -2496,12 +2500,10 @@ class StructureMixer:
             file will be added the suffix _TARGETNAME.
         all_locs : dict
             Dictionary with molecular target names as keys and
-            np.ndarrays with spatial coordinates of the molecules to be
-            saved. Each of the arrays must have shape (N, 2) or (N, 3),
-            where N is the number of molecules of the given molecular
-            target species to be saved.
-        N_structures : list or np.ndarray
-            Numbers of structures that were simulated.
+            lib.FloatArray2D's with spatial coordinates of the molecules
+            to be saved. Each of the arrays must have shape (N, 2) or
+            (N, 3), where N is the number of molecules of the given
+            molecular target species to be saved.
         lp : float (default=1.0)
             Localization precision in nm to be assigned to saved
             molecules.
@@ -2670,16 +2672,16 @@ class StructureMixer:
 
     def convert_props_for_target(
         self,
-        props: np.ndarray,
+        props: lib.FloatArray1D,
         target: str,
         n_mols: dict,
-    ) -> np.ndarray:
+    ) -> lib.FloatArray1D:
         """Convert the given proportions of structures to the relative
         proportions of the given molecular target.
 
         Parameters
         ----------
-        props : np.ndarray
+        props : lib.FloatArray1D
             Relative proportions of structures (0 to 100). Can be 1D or
             2D.
         target : str
@@ -2692,7 +2694,7 @@ class StructureMixer:
 
         Returns
         -------
-        props_target : np.ndarray
+        props_target : lib.FloatArray1D
             Relative proportions of the given molecular target.
         """
         targets_per_str = [_.get_all_targets_count() for _ in self.structures]
@@ -2707,8 +2709,8 @@ class StructureMixer:
 
     def convert_counts_to_props(
         self,
-        N_structures: list | np.ndarray,
-    ) -> np.ndarray:
+        N_structures: list | lib.IntArray1D,
+    ) -> lib.FloatArray2D:
         """Convert numbers of structures to their relative
         proportions (%).
 
@@ -2718,7 +2720,7 @@ class StructureMixer:
 
         Parameters
         ----------
-        N_structures : list or np.ndarray
+        N_structures : list or lib.IntArray1D
             Each element (1D) or row (2D) gives the number of
             structures to be simulated. Must have the same number of
             elements (1D) or columns (2D) as self.structures as well as
@@ -2726,7 +2728,7 @@ class StructureMixer:
 
         Returns
         -------
-        props : np.ndarray
+        props : lib.FloatArray2D
             Resulting proportions (0 to 100).
         """
         N_structures = deepcopy(N_structures)
@@ -2787,9 +2789,9 @@ class StructureMixer:
 
     def convert_props_to_counts(
         self,
-        proportions: list | np.ndarray,
-        N_total: int | np.ndarray,
-    ) -> np.ndarray:
+        proportions: list | lib.FloatArray1D,
+        N_total: int | lib.IntArray1D,
+    ) -> lib.IntArray2D:
         """Convert relative proportions (%) of structures to their
         absolute counts.
 
@@ -2797,19 +2799,19 @@ class StructureMixer:
 
         Parameters
         ----------
-        proportions : list or np.ndarray
+        proportions : list or lib.FloatArray1D
             Each element (1D) or row (2D) gives the relative proportion
             of the given structure (0 to 100). Must have the same
             number of elements (1D) or columns (2D) as self.structures
             as well as the same ordering.
-        N_total : int or np.ndarray
+        N_total : int or lib.IntArray1D
             Total number of molecular targets (if different molecular
             species are present, they should be summed together in this
             value).
 
         Returns
         -------
-        N_structures : np.ndarray
+        N_structures : lib.IntArray2D
             Resulting numbers of structures.
         """
         proportions = deepcopy(proportions)
@@ -2844,7 +2846,9 @@ class StructureMixer:
 
         return N_structures
 
-    def convert_N_structures_to_array(self, N_structures: dict) -> np.ndarray:
+    def convert_N_structures_to_array(
+        self, N_structures: dict
+    ) -> lib.IntArray2D:
         """Convert numbers of structures given as a dictionary to a 2D
         numpy array.
 
@@ -2857,7 +2861,7 @@ class StructureMixer:
 
         Returns
         -------
-        N_structures_array : np.ndarray
+        N_structures_array : lib.IntArray2D
             2D array with shape (N, M), where N is the number of
             simulations to be tested and M is the number of structures
             in self.structures. Each row gives the numbers of structures
@@ -2961,7 +2965,7 @@ class SPINNA:
 
     def fit(
         self,
-        N_structures: np.ndarray | dict,
+        N_structures: lib.IntArray2D | dict,
         *,
         fitting_mode: Literal[
             "coarse-to-fine", "bayesian", "brute-force"
@@ -2972,11 +2976,13 @@ class SPINNA:
         return_scores: bool = False,
         callback: lib.ProgressDialog | Literal["console"] | None = None,
     ) -> (
-        tuple[np.ndarray, float]
-        | tuple[tuple[np.ndarray, ...], tuple[float, ...]]
-        | tuple[np.ndarray, float, np.ndarray]
+        tuple[lib.IntArray1D, float]
+        | tuple[tuple[lib.IntArray1D, ...], tuple[float, ...]]
+        | tuple[lib.IntArray1D, float, lib.FloatArray1D]
         | tuple[
-            tuple[np.ndarray, ...], tuple[float, ...], tuple[np.ndarray, ...]
+            tuple[lib.IntArray1D, ...],
+            tuple[float, ...],
+            tuple[lib.FloatArray1D, ...],
         ]
     ):
         """Find fitting error for every combination of ``N_structures``
@@ -2987,7 +2993,7 @@ class SPINNA:
 
         Parameters
         ----------
-        N_structures : np.2darray or dict
+        N_structures : lib.IntArray2D or dict
             Specifies what combinations of structures  are to be
             simulated for each iteration. Shape (N, M), where N is the
             number of simulations to be tested and M is the number of
@@ -3025,12 +3031,12 @@ class SPINNA:
 
         Returns
         -------
-        opt_proportions : np.ndarray or tuple of np.ndarrays
+        opt_proportions : lib.FloatArray1D or tuple of lib.FloatArray1D
             The stoichiometry of structures that gives the best fit to
             ground truth.
         score : float or tuple of floats
             KS2 score of the best fit.
-        scores : np.ndarray or tuple of np.ndarrays, optional
+        scores : lib.FloatArray1D or tuple of lib.FloatArray1D, optional
             KS2 scores for all combinations of structures tested. Only
             returned if return_scores is True.
         """
@@ -3046,7 +3052,7 @@ class SPINNA:
 
     def fit_stoichiometry(
         self,
-        N_structures: np.ndarray | dict,
+        N_structures: lib.IntArray2D | dict,
         *,
         fitting_mode: Literal[
             "coarse-to-fine", "bayesian", "brute-force"
@@ -3057,8 +3063,8 @@ class SPINNA:
         return_scores: bool = False,
         callback: lib.ProgressDialog | Literal["console"] | None = None,
     ) -> (
-        tuple[np.ndarray, float]
-        | tuple[tuple[np.ndarray, ...], tuple[float, ...]]
+        tuple[lib.IntArray1D, float]
+        | tuple[tuple[lib.IntArray1D, ...], tuple[float, ...]]
     ):
         """Alias for ``self.fit()``."""
         assert (
@@ -3193,7 +3199,7 @@ class SPINNA:
             else:
                 return opt_proportions, score
 
-    def fit_stoichiometry_parallel(self, N_structures: np.ndarray) -> list:
+    def fit_stoichiometry_parallel(self, N_structures: lib.IntArray2D) -> list:
         """Apply multiprocessing to find best fitting combination of
         structures.
 
@@ -3237,7 +3243,7 @@ class SPINNA:
 
     def fit_coarse_to_fine(
         self,
-        N_structures: np.ndarray | dict,
+        N_structures: lib.IntArray2D | dict,
         coarse_fraction: float = 0.1,
         radius: float = BOOTSTRAP_DISTANCE,
         save: str = "",
@@ -3245,8 +3251,8 @@ class SPINNA:
         bootstrap: bool = False,
         callback: lib.ProgressDialog | Literal["console"] | None = None,
     ) -> (
-        tuple[np.ndarray, float]
-        | tuple[tuple[np.ndarray, ...], tuple[float, ...]]
+        tuple[lib.IntArray1D, float]
+        | tuple[tuple[lib.IntArray1D, ...], tuple[float, ...]]
     ):
         """Two-pass coarse-to-fine fitting.
 
@@ -3256,7 +3262,7 @@ class SPINNA:
 
         Parameters
         ----------
-        N_structures : np.2darray or dict
+        N_structures : lib.IntArray2D or dict
             Full search space (same as in ``fit``).
         coarse_fraction : float, optional
             Fraction of N_structures to evaluate in the coarse pass
@@ -3370,15 +3376,15 @@ class SPINNA:
 
     def fit_bayesian(
         self,
-        N_structures: np.ndarray | dict,
+        N_structures: lib.IntArray2D | dict,
         n_initial: int = 20,
         n_iterations: int = 80,
         save: str = "",
         bootstrap: bool = False,
         callback: lib.ProgressDialog | Literal["console"] | None = None,
     ) -> (
-        tuple[np.ndarray, float]
-        | tuple[tuple[np.ndarray, ...], tuple[float, ...]]
+        tuple[lib.IntArray1D, float]
+        | tuple[tuple[lib.IntArray1D, ...], tuple[float, ...]]
     ):
         """Bayesian optimization over the N_structures grid using a
         Gaussian Process surrogate model.
@@ -3408,7 +3414,7 @@ class SPINNA:
 
         Returns
         -------
-        opt_proportions : np.ndarray or tuple of np.ndarrays
+        opt_proportions : lib.FloatArray1D or tuple of lib.FloatArray1D
             The stoichiometry of structures that gives the best fit.
         score : float or tuple of floats
             KS2 score of the best fit.
@@ -3585,12 +3591,12 @@ class SPINNA:
         else:
             return opt_proportions, score
 
-    def _evaluate_single(self, N_row: np.ndarray) -> float:
+    def _evaluate_single(self, N_row: lib.IntArray1D) -> float:
         """Evaluate a single candidate: simulate and score.
 
         Parameters
         ----------
-        N_row : np.ndarray
+        N_row : lib.IntArray1D
             1D array specifying the number of each structure to
             simulate.
 
@@ -3606,9 +3612,9 @@ class SPINNA:
 
     @staticmethod
     def _farthest_point_sampling(
-        points: np.ndarray,
+        points: lib.FloatArray2D,
         n_samples: int,
-    ) -> np.ndarray:
+    ) -> lib.IntArray1D:
         """Select a well-spread subset of points using farthest-point
         (maximin) sampling.
 
@@ -3618,7 +3624,7 @@ class SPINNA:
 
         Parameters
         ----------
-        points : np.ndarray
+        points : lib.FloatArray2D
             Array of shape (N, D) with N candidate points in D
             dimensions.
         n_samples : int
@@ -3626,7 +3632,7 @@ class SPINNA:
 
         Returns
         -------
-        indices : np.ndarray
+        indices : lib.IntArray1D
             Indices of the selected points in the original array.
         """
         n_total = points.shape[0]
@@ -3653,11 +3659,11 @@ class SPINNA:
 
     def NN_scorer(
         self,
-        N_structures: np.ndarray,
+        N_structures: lib.IntArray2D,
         callback: (
             lib.ProgressDialog | Literal["console"] | lib.MockProgress
         ) = lib.MockProgress(),
-    ) -> tuple[np.ndarray, np.ndarray]:
+    ) -> tuple[lib.IntArray2D, lib.FloatArray1D]:
         """Score the simulations similarity to the ground truth dataset
         based on their nearest neighbor distances distribution using
         Kolmogorov-Smirnov 2 sample test.
@@ -3667,7 +3673,7 @@ class SPINNA:
 
         Parameters
         ----------
-        N_structures : np.2darray
+        N_structures : lib.IntArray2D
             Specifies what combinations of structures  are to be
             simulated for each iteration. Shape (N, M), where N is the
             number of simulations to be tested and M is the number of
@@ -3679,9 +3685,9 @@ class SPINNA:
 
         Returns
         -------
-        N_structures : np.ndarray
+        N_structures : lib.IntArray2D
             Same as the input N_structures.
-        scores : np.ndarray
+        scores : lib.FloatArray1D
             1D array with fit scores for each combination of structures.
         """
         # Run simulations for each structure count and score them #
@@ -3708,19 +3714,19 @@ class SPINNA:
 
     def get_subset_N_structures(
         self,
-        N_structures: np.ndarray,
-        center_N_structures: np.ndarray,
+        N_structures: lib.IntArray2D,
+        center_N_structures: lib.IntArray1D,
         radius: float = BOOTSTRAP_DISTANCE,
         p: float = BOOTSTRAP_DISTANCE_METRIC,
-    ) -> np.ndarray:
+    ) -> lib.IntArray2D:
         """Find a subset of N_structures that are within a given radius
         from the center_proportions.
 
         Parameters
         ----------
-        N_structures : np.ndarray
+        N_structures : lib.IntArray2D
             Array where each row specifies each structures count tested.
-        center_N_structures : np.ndarray
+        center_N_structures : lib.IntArray1D
             Array with the numbers of the structures that are considered
             as the center of the subset (ground-truth).
         radius : float (default=30.0)
@@ -3730,7 +3736,7 @@ class SPINNA:
 
         Returns
         -------
-        N_structures_subset : np.ndarray
+        N_structures_subset : lib.IntArray2D
             Subset of N_structures that are within the radius from the
             center_proportions.
         """
@@ -3763,7 +3769,9 @@ class SPINNA:
         """
         return sum([_.done() for _ in fs])
 
-    def scores_from_futures(self, fs: list) -> tuple[np.ndarray, np.ndarray]:
+    def scores_from_futures(
+        self, fs: list
+    ) -> tuple[lib.IntArray2D, lib.FloatArray1D]:
         """Convert futures resulting from fitting N_structures with
         multiprocessing.
 
@@ -3774,9 +3782,9 @@ class SPINNA:
 
         Returns
         -------
-        N_structures : np.ndarray
+        N_structures : lib.IntArray2D
             Array where each row specifies each structures count tested.
-        scores : np.ndarray
+        scores : lib.FloatArray1D
             Array with the corresponding fitting scores.
         """
         res_list = [f.result() for f in fs]
@@ -3800,7 +3808,7 @@ def compare_models(
     asynch: bool = True,
     savedir: str = "",
     callback: lib.ProgressDialog | Literal["console"] | None = None,
-) -> tuple[float, int, dict, StructureMixer, np.ndarray]:
+) -> tuple[float, int, dict, StructureMixer, lib.FloatArray1D]:
     """Compare different models, i.e., ``StructureMixer``'s with label
     uncertainties given the experimental dataset and
     stoichiometries-search-space.
@@ -3866,7 +3874,7 @@ def compare_models(
         species.
     best_mixer : StructureMixer
         The best fitting StructureMixer.
-    best_props : np.ndarray
+    best_props : lib.FloatArray1D
         The stoichiometry of structures that gives the best fit to the
         data.
     """
@@ -3998,7 +4006,7 @@ def compare_models_given_label_unc(
     savedir: str = "",
     callback: lib.ProgressDialog | Literal["console"] | None = None,
     progress_title: str = "Spinning structures",
-) -> tuple[float, int, StructureMixer, np.ndarray]:
+) -> tuple[float, int, StructureMixer, lib.FloatArray1D]:
     """Compare different models, i.e., ``StructureMixer``'s given the
     experimental dataset, stoichiometries-search-space and label
     position uncertainty.
@@ -4070,7 +4078,7 @@ def compare_models_given_label_unc(
         Index of the best fitting model in the models list.
     best_mixer : StructureMixer
         The best fitting StructureMixer.
-    best_props : np.ndarray
+    best_props : lib.FloatArray1D
         The stoichiometry of structures that gives the best fit to the
         data.
     """
@@ -4189,7 +4197,7 @@ def check_structures_valid_for_fitting(structures: list[Structure]) -> bool:
 
 def get_le_from_props(
     structures: list[Structure],
-    opt_props: np.ndarray | tuple[np.ndarray, np.ndarray],
+    opt_props: lib.FloatArray1D | tuple[lib.FloatArray1D, lib.FloatArray1D],
 ) -> dict:
     """Based on the fitted proportions of structures, extract the
     LE values.
@@ -4198,7 +4206,7 @@ def get_le_from_props(
     ----------
     structures : list of Structure
         List of the structures used for fitting.
-    opt_props : np.ndarray or tuple
+    opt_props : lib.FloatArray1D or tuple
         Fitted proportions of the structures. If bootstraping was used,
         the tuple is accepted and only the mean value is used.
 

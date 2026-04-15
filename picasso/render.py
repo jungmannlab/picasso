@@ -8,7 +8,7 @@ Render single molecule localizations to a super-resolution image
 :copyright: Copyright (c) 2015 Jungmann Lab, MPI of Biochemistry
 """
 
-from typing import Literal
+from typing import Literal, Any
 
 import numba
 import numpy as np
@@ -16,6 +16,8 @@ import pandas as pd
 from scipy import signal
 from scipy.spatial.transform import Rotation
 from PyQt6 import QtGui, QtCore, QtSvg
+
+from . import lib
 
 
 _DRAW_MAX_SIGMA = 3  # max. sigma from mean to render (mu +/- 3 sigma)
@@ -31,7 +33,7 @@ def render(
     ) = None,
     min_blur_width: float = 0.0,
     ang: tuple | None = None,
-) -> tuple[int, np.ndarray]:
+) -> tuple[int, lib.FloatArray2D]:
     """Render localizations given FOV and blur method.
 
     Parameters
@@ -68,7 +70,7 @@ def render(
     -------
     n : int
         Number of localizations rendered.
-    image : np.ndarray
+    image : lib.FloatArray2D
         Rendered image.
     """
     if viewport is None:
@@ -142,20 +144,27 @@ def render(
 
 @numba.njit
 def _render_setup(
-    x: np.ndarray,
-    y: np.ndarray,
+    x: lib.FloatArray1D,
+    y: lib.FloatArray1D,
     oversampling: float,
     y_min: float,
     x_min: float,
     y_max: float,
     x_max: float,
-) -> tuple[np.ndarray, int, int, np.ndarray, np.ndarray, np.ndarray]:
+) -> tuple[
+    lib.FloatArray2D,
+    int,
+    int,
+    lib.FloatArray1D,
+    lib.FloatArray1D,
+    lib.BoolArray1D,
+]:
     """Find coordinates to be rendered and sets up an empty image
     array.
 
     Parameters
     ----------
-    x, y : np.ndarray
+    x, y : lib.FloatArray1D
         x and y coordinates of the localizations to be rendered (1D
         arrays).
     oversampling : float
@@ -167,17 +176,17 @@ def _render_setup(
 
     Returns
     -------
-    image : np.ndarray
+    image : lib.FloatArray2D
         Empty image array.
     n_pixel_y : int
         Number of pixels in y.
     n_pixel_x : int
         Number of pixels in x.
-    x : np.ndarray
+    x : lib.FloatArray1D
         x coordinates to be rendered.
-    y : np.ndarray
+    y : lib.FloatArray1D
         y coordinates to be rendered.
-    in_view : np.ndarray
+    in_view : lib.BoolArray1D
         Indeces of the localizations to be rendered.
     """
     n_pixel_y = int(np.ceil(oversampling * (y_max - y_min)))
@@ -193,21 +202,28 @@ def _render_setup(
 
 @numba.njit
 def _render_setup_anisotropic(
-    x: np.ndarray,
-    y: np.ndarray,
+    x: lib.FloatArray1D,
+    y: lib.FloatArray1D,
     oversampling_x: float,
     oversampling_y: float,
     y_min: float,
     x_min: float,
     y_max: float,
     x_max: float,
-) -> tuple[np.ndarray, int, int, np.ndarray, np.ndarray, np.ndarray]:
+) -> tuple[
+    lib.FloatArray2D,
+    int,
+    int,
+    lib.FloatArray1D,
+    lib.FloatArray1D,
+    lib.BoolArray1D,
+]:
     """Find coordinates to be rendered and sets up an empty image
     array. Allows for different pixel sizes in x and y (oversampling).
 
     Parameters
     ----------
-    x, y : np.ndarray
+    x, y : lib.FloatArray1D
         x and y coordinates of the localizations to be rendered (1D
         arrays).
     oversampling_x, oversampling_y : float
@@ -219,17 +235,17 @@ def _render_setup_anisotropic(
 
     Returns
     -------
-    image : np.ndarray
+    image : lib.FloatArray2D
         Empty image array.
     n_pixel_y : int
         Number of pixels in y.
     n_pixel_x : int
         Number of pixels in x.
-    x : np.ndarray
+    x : lib.FloatArray1D
         x coordinates to be rendered.
-    y : np.ndarray
+    y : lib.FloatArray1D
         y coordinates to be rendered.
-    in_view : np.ndarray
+    in_view : lib.BoolArray1D
         Indeces of the localizations to be rendered.
     """
     n_pixel_y = int(np.ceil(oversampling_y * (y_max - y_min)))
@@ -245,9 +261,9 @@ def _render_setup_anisotropic(
 
 @numba.njit
 def _render_setup3d(
-    x: np.ndarray,
-    y: np.ndarray,
-    z: np.ndarray,
+    x: lib.FloatArray1D,
+    y: lib.FloatArray1D,
+    z: lib.FloatArray1D,
     oversampling: float,
     y_min: float,
     x_min: float,
@@ -257,21 +273,21 @@ def _render_setup3d(
     z_max: float,
     pixelsize: float,
 ) -> tuple[
-    np.ndarray,
+    lib.FloatArray3D,
     int,
     int,
     int,
-    np.ndarray,
-    np.ndarray,
-    np.ndarray,
-    np.ndarray,
+    lib.FloatArray1D,
+    lib.FloatArray1D,
+    lib.FloatArray1D,
+    lib.BoolArray1D,
 ]:
     """Find coordinates to be rendered in 3D and sets up an empty image
     array.
 
     Parameters
     ----------
-    x, y, z : np.ndarray
+    x, y, z : lib.FloatArray1D
         x, y and z coordinates of the localizations to be rendered (1D
         arrays).
     oversampling : float
@@ -289,13 +305,13 @@ def _render_setup3d(
 
     Returns
     -------
-    image : np.ndarray
+    image : lib.FloatArray3D
         Empty image array.
     n_pixel_y, n_pixel_x, n_pixel_z : int
         Number of pixels in y, x, and z.
-    x, y, z : np.ndarray
+    x, y, z : lib.FloatArray1D
         x, y, z coordinates to be rendered.
-    in_view : np.ndarray
+    in_view : lib.BoolArray1D
         Indeces of the localizations to be rendered.
     """
     n_pixel_y = int(np.ceil(oversampling * (y_max - y_min)))
@@ -322,9 +338,9 @@ def _render_setup3d(
 
 @numba.njit
 def _render_setup3d_anisotropic(
-    x: np.ndarray,
-    y: np.ndarray,
-    z: np.ndarray,
+    x: lib.FloatArray1D,
+    y: lib.FloatArray1D,
+    z: lib.FloatArray1D,
     oversampling_x: float,
     oversampling_y: float,
     oversampling_z: float,
@@ -336,14 +352,14 @@ def _render_setup3d_anisotropic(
     z_max: float,
     pixelsize: float,
 ) -> tuple[
-    np.ndarray,
+    lib.FloatArray3D,
     int,
     int,
     int,
-    np.ndarray,
-    np.ndarray,
-    np.ndarray,
-    np.ndarray,
+    lib.FloatArray1D,
+    lib.FloatArray1D,
+    lib.FloatArray1D,
+    lib.BoolArray1D,
 ]:
     """Find coordinates to be rendered in 3D and sets up an empty image
     array. Allows for different pixel sizes in x, y and z
@@ -351,7 +367,7 @@ def _render_setup3d_anisotropic(
 
     Parameters
     ----------
-    x, y, z : np.ndarray
+    x, y, z : lib.FloatArray1D
         x, y and z coordinates of the localizations to be rendered (1D
         arrays).
     oversampling : float
@@ -369,13 +385,13 @@ def _render_setup3d_anisotropic(
 
     Returns
     -------
-    image : np.ndarray
+    image : lib.FloatArray3D
         Empty image array.
     n_pixel_y, n_pixel_x, n_pixel_z : int
         Number of pixels in y, x, and z.
-    x, y, z : np.ndarray
+    x, y, z : lib.FloatArray1D
         x, y, z coordinates to be rendered.
-    in_view : np.ndarray
+    in_view : lib.BoolArray1D
         Indeces of the localizations to be rendered.
     """
     n_pixel_y = int(np.ceil(oversampling_y * (y_max - y_min)))
@@ -401,14 +417,16 @@ def _render_setup3d_anisotropic(
 
 
 @numba.njit
-def _fill(image: np.ndarray, x: np.ndarray, y: np.ndarray) -> None:
+def _fill(
+    image: lib.FloatArray2D, x: lib.FloatArray1D, y: lib.FloatArray1D
+) -> None:
     """Fill image with x and y coordinates. Image is not blurred.
 
     Parameters
     ----------
-    image : np.ndarray
+    image : lib.FloatArray2D
         Empty image array.
-    x, y : np.ndarray
+    x, y : lib.FloatArray1D
         x and y coordinates to be rendered.
     """
     x = x.astype(np.int32)
@@ -419,15 +437,18 @@ def _fill(image: np.ndarray, x: np.ndarray, y: np.ndarray) -> None:
 
 @numba.njit
 def _fill3d(
-    image: np.ndarray, x: np.ndarray, y: np.ndarray, z: np.ndarray
+    image: lib.FloatArray3D,
+    x: lib.FloatArray1D,
+    y: lib.FloatArray1D,
+    z: lib.FloatArray1D,
 ) -> None:
     """Fill image with x, y and z coordinates. Image is not blurred.
 
     Parameters
     ----------
-    image : np.ndarray
+    image : lib.FloatArray3D
         Empty image array.
-    x, y, z : np.ndarray
+    x, y, z : lib.FloatArray1D
         x, y and z coordinates to be rendered.
     """
     x = x.astype(np.int32)
@@ -440,11 +461,11 @@ def _fill3d(
 
 @numba.njit
 def _fill_gaussian(
-    image: np.ndarray,
-    x: np.ndarray,
-    y: np.ndarray,
-    sx: np.ndarray,
-    sy: np.ndarray,
+    image: lib.FloatArray2D,
+    x: lib.FloatArray1D,
+    y: lib.FloatArray1D,
+    sx: lib.FloatArray1D,
+    sy: lib.FloatArray1D,
     n_pixel_x: int,
     n_pixel_y: int,
 ) -> None:
@@ -454,11 +475,11 @@ def _fill_gaussian(
 
     Parameters
     ----------
-    image : np.ndarray
+    image : lib.FloatArray2D
         Empty image array.
-    x, y : np.ndarray
+    x, y : lib.FloatArray1D
         x and y coordinates to be rendered.
-    sx, sy : np.ndarray
+    sx, sy : lib.FloatArray1D
         Localization precision in x and y for each localization.
     n_pixel_x, n_pixel_y : int
         Number of pixels in x and y.
@@ -495,13 +516,13 @@ def _fill_gaussian(
 
 @numba.njit
 def _fill_gaussian_rot(
-    image: np.ndarray,
-    x: np.ndarray,
-    y: np.ndarray,
-    z: np.ndarray,
-    sx: np.ndarray,
-    sy: np.ndarray,
-    sz: np.ndarray,
+    image: lib.FloatArray2D,
+    x: lib.FloatArray1D,
+    y: lib.FloatArray1D,
+    z: lib.FloatArray1D,
+    sx: lib.FloatArray1D,
+    sy: lib.FloatArray1D,
+    sz: lib.FloatArray1D,
     n_pixel_x: int,
     n_pixel_y: int,
     ang: tuple[float, float, float],
@@ -515,11 +536,11 @@ def _fill_gaussian_rot(
 
     Parameters
     ----------
-    image : np.ndarray
+    image : lib.FloatArray2D
         Empty image array.
-    x, y, z : np.ndarray
+    x, y, z : lib.FloatArray1D
         3D coordinates to be rendered.
-    sx, sy, sz : np.ndarray
+    sx, sy, sz : lib.FloatArray1D
         Localization precision in x, y and z for each localization.
     n_pixel_x, n_pixel_y : int
         Number of pixels in x and y.
@@ -616,18 +637,18 @@ def _fill_gaussian_rot(
 
 
 @numba.njit
-def inverse_3x3(a: np.ndarray) -> np.ndarray:
+def inverse_3x3(a: lib.Array3x3) -> lib.Array3x3:
     """Calculate inverse of a 3x3 matrix. This function is faster than
     ``np.linalg.inv``.
 
     Parameters
     ----------
-    a : np.ndarray
+    a : lib.Array3x3
         3x3 matrix.
 
     Returns
     -------
-    c : np.ndarray
+    c : lib.Array3x3
         Inverse of ``a``.
     """
     c = np.zeros((3, 3), dtype=np.float32)
@@ -649,18 +670,18 @@ def inverse_3x3(a: np.ndarray) -> np.ndarray:
 
 
 @numba.njit
-def determinant_3x3(a: np.ndarray) -> np.float32:
+def determinant_3x3(a: lib.Array3x3) -> np.float32:
     """Calculate determinant of a 3x3 matrix. This function is faster
     than ``np.linalg.det``.
 
     Parameters
     ----------
-    a : np.ndarray
+    a : lib.Array3x3
         3x3 matrix.
 
     Returns
     -------
-    det : float
+    det : np.float32
         Determinant of ``a``.
     """
     det = np.float32(
@@ -679,7 +700,7 @@ def render_hist(
     y_max: float,
     x_max: float,
     ang: tuple[float, float, float] | None = None,
-) -> tuple[int, np.ndarray]:
+) -> tuple[int, lib.FloatArray2D]:
     """Render localizations with no blur by assigning them to pixels.
 
     Parameters
@@ -700,7 +721,7 @@ def render_hist(
     -------
     n : int
         Number of localizations rendered.
-    image : np.ndarray
+    image : lib.FloatArray2D
         Rendered image.
     """
     image, n_pixel_y, n_pixel_x, x, y, in_view = _render_setup(
@@ -729,9 +750,9 @@ def render_hist(
 
 @numba.jit(nopython=True, nogil=True)
 def render_hist3d(
-    x: np.ndarray,
-    y: np.ndarray,
-    z: np.ndarray,
+    x: lib.FloatArray1D,
+    y: lib.FloatArray1D,
+    z: lib.FloatArray1D,
     oversampling: float,
     y_min: float,
     x_min: float,
@@ -740,7 +761,7 @@ def render_hist3d(
     z_min: float,
     z_max: float,
     pixelsize: float,
-) -> tuple[int, np.ndarray]:
+) -> tuple[int, lib.FloatArray3D]:
     """Render localizations in 3D with no blur by assigning them to
     pixels.
 
@@ -765,7 +786,7 @@ def render_hist3d(
     -------
     n : int
         Number of localizations rendered.
-    image : np.ndarray
+    image : lib.FloatArray3D
         Rendered 3D image.
     """
     z_min = z_min / pixelsize
@@ -792,9 +813,9 @@ def render_hist3d(
 
 @numba.jit(nopython=True, nogil=True)
 def render_hist3d_anisotropic(
-    x: np.ndarray,
-    y: np.ndarray,
-    z: np.ndarray,
+    x: lib.FloatArray1D,
+    y: lib.FloatArray1D,
+    z: lib.FloatArray1D,
     oversampling_x: float,
     oversampling_y: float,
     oversampling_z: float,
@@ -805,7 +826,7 @@ def render_hist3d_anisotropic(
     z_min: float,
     z_max: float,
     pixelsize: float,
-) -> tuple[int, np.ndarray]:
+) -> tuple[int, lib.FloatArray3D]:
     """Render localizations in 3D with no blur by assigning them to
     pixels. Allows for different pixel sizes in x, y and z
     (oversampling).
@@ -832,7 +853,7 @@ def render_hist3d_anisotropic(
     -------
     n : int
         Number of localizations rendered.
-    image : np.ndarray
+    image : lib.FloatArray3D
         Rendered 3D image.
     """
     z_min = z_min / pixelsize
@@ -870,7 +891,7 @@ def render_gaussian(
     x_max: float,
     min_blur_width: float,
     ang: tuple[float, float, float] | None = None,
-) -> tuple[int, np.ndarray]:
+) -> tuple[int, lib.FloatArray2D]:
     """Render localizations with with individual localization precision
     which differs in x and y.
 
@@ -894,7 +915,7 @@ def render_gaussian(
     -------
     n : int
         Number of localizations rendered.
-    image : np.ndarray
+    image : lib.FloatArray2D
         Rendered image.
     """
     image, n_pixel_y, n_pixel_x, x, y, in_view = _render_setup(
@@ -963,7 +984,7 @@ def render_gaussian_iso(
     x_max: float,
     min_blur_width: float,
     ang: tuple[float, float, float] | None = None,
-) -> tuple[int, np.ndarray]:
+) -> tuple[int, lib.FloatArray2D]:
     """Same as ``render_gaussian``, but uses the same localization
     precision in x and y."""
     image, n_pixel_y, n_pixel_x, x, y, in_view = _render_setup(
@@ -1031,7 +1052,7 @@ def render_convolve(
     x_max: float,
     min_blur_width: float,
     ang: tuple[float, float, float] | None = None,
-) -> tuple[int, np.ndarray]:
+) -> tuple[int, lib.FloatArray2D]:
     """Render localizations with with global localization precision,
     i.e. each localization is blurred by the median localization
     precision in x and y.
@@ -1056,7 +1077,7 @@ def render_convolve(
     -------
     n : int
         Number of localizations rendered.
-    image : np.ndarray
+    image : lib.FloatArray2D
         Rendered image.
     """
     image, n_pixel_y, n_pixel_x, x, y, in_view = _render_setup(
@@ -1101,7 +1122,7 @@ def render_smooth(
     y_max: float,
     x_max: float,
     ang: tuple[float, float, float] | None = None,
-) -> tuple[int, np.ndarray]:
+) -> tuple[int, lib.FloatArray2D]:
     """Render localizations with with blur of one display pixel (set by
     oversampling).
 
@@ -1123,7 +1144,7 @@ def render_smooth(
     -------
     n : int
         Number of localizations rendered.
-    image : np.array
+    image : lib.FloatArray2D
         Rendered image.
     """
     image, n_pixel_y, n_pixel_x, x, y, in_view = _render_setup(
@@ -1156,22 +1177,22 @@ def render_smooth(
 
 
 def _fftconvolve(
-    image: np.ndarray,
+    image: lib.FloatArray2D,
     blur_width: float,
     blur_height: float,
-) -> np.ndarray:
+) -> lib.FloatArray2D:
     """Blur (convolves) 2D image using fast fourier transform.
 
     Parameters
     ----------
-    image : np.ndarray
+    image : lib.FloatArray2D
         Image with rendered but not blurred localizations.
     blur_width, blur_height : float
         Blur width and height in pixels.
 
     Returns
     -------
-    image : np.ndarray
+    image : lib.FloatArray2D
         Blurred image.
     """
     kernel_width = 10 * int(np.round(blur_width)) + 1
@@ -1230,7 +1251,9 @@ def locs_rotation(
     y_min: float,
     y_max: float,
     ang: tuple[float, float, float],
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+) -> tuple[
+    lib.FloatArray1D, lib.FloatArray1D, lib.BoolArray1D, lib.FloatArray1D
+]:
     """Rotate localizations within a FOV.
 
     Parameters
@@ -1249,13 +1272,13 @@ def locs_rotation(
 
     Returns
     -------
-    x : np.ndarray
+    x : lib.FloatArray1D
         New (rotated) x coordinates
-    y : np.ndarray
+    y : lib.FloatArray1D
         New y coordinates
-    in_view : np.ndarray
+    in_view : lib.BoolArray1D
         Indeces of locs that are rendered
-    z : np.ndarray
+    z : lib.FloatArray1D
         New z coordinates
     """
     # z is translated to pixels

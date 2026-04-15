@@ -21,10 +21,12 @@ import numba
 import numpy as np
 import pandas as pd
 
+from picasso import lib
+
 
 @numba.jit(nopython=True, nogil=True)
 def _sum_and_center_of_mass(
-    spot: np.ndarray,
+    spot: lib.FloatArray2D,
     size: int,
 ) -> tuple[float, float, float]:
     """Calculate the sum and center of mass of a 2D spot."""
@@ -42,20 +44,20 @@ def _sum_and_center_of_mass(
 
 
 @numba.jit(nopython=True, nogil=True)
-def mean_filter(spot: np.ndarray, size: int) -> np.ndarray:
+def mean_filter(spot: lib.FloatArray2D, size: int) -> lib.FloatArray2D:
     """Apply a mean filter to the spot. This function computes the mean
     of each pixel in a 3x3 neighborhood.
 
     Parameters
     ----------
-    spot : np.ndarray
+    spot : lib.FloatArray2D
         The input image.
     size : int
         The size of the patch (assumed to be square).
 
     Returns
     -------
-    filtered_spot : np.ndarray
+    filtered_spot : lib.FloatArray2D
         The filtered image patch.
     """
     filtered_spot = np.zeros_like(spot)
@@ -76,7 +78,7 @@ def mean_filter(spot: np.ndarray, size: int) -> np.ndarray:
 
 @numba.jit(nopython=True, nogil=True)
 def _initial_sigmas(
-    spot: np.ndarray,
+    spot: lib.FloatArray2D,
     y: None,
     x: None,
     size: int,
@@ -109,7 +111,7 @@ def _initial_sigmas(
 
 @numba.jit(nopython=True, nogil=True)
 def _initial_parameters(
-    spot: np.ndarray,
+    spot: lib.FloatArray2D,
     size: int,
 ) -> tuple[float, float, float, float, float, float]:
     """Initialize the parameters for the Gaussian fit - x, y, photons,
@@ -123,7 +125,9 @@ def _initial_parameters(
 
 
 @numba.jit(nopython=True, nogil=True)
-def _initial_theta_sigma(spot: np.ndarray, size: int) -> np.ndarray:
+def _initial_theta_sigma(
+    spot: lib.FloatArray2D, size: int
+) -> lib.FloatArray1D:
     """Initialize the parameters for the Gaussian fit with a single
     sigma for both x and y dimensions - x, y, photons, background,
     sigma."""
@@ -136,7 +140,9 @@ def _initial_theta_sigma(spot: np.ndarray, size: int) -> np.ndarray:
 
 
 @numba.jit(nopython=True, nogil=True)
-def _initial_theta_sigmaxy(spot: np.ndarray, size: int) -> np.ndarray:
+def _initial_theta_sigmaxy(
+    spot: lib.FloatArray2D, size: int
+) -> lib.FloatArray1D:
     """Initialize the parameters for the Gaussian fit with separate
     sigmas for x and y dimensions - x, y, photons, background, sigma_x
     and sigma_y."""
@@ -386,17 +392,19 @@ def _worker(
 
 
 def gaussmle(
-    spots: np.ndarray,
+    spots: lib.FloatArray3D,
     eps: float,
     max_it: int,
     method: Literal["sigma", "sigmaxy"] = "sigmaxy",
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+) -> tuple[
+    lib.FloatArray2D, lib.FloatArray2D, lib.FloatArray1D, lib.IntArray1D
+]:
     """Fits Gaussians using Maximum Likelihood Estimation (MLE) to the
     extracted spots.
 
     Parameters
     ----------
-    spots : np.ndarray
+    spots : lib.FloatArray3D
         The input image patches containing the spots of shape
         (N, size, size), where N is the number of spots and size is the
         size of the square patch.
@@ -409,16 +417,16 @@ def gaussmle(
 
     Returns
     -------
-    thetas : np.ndarray
+    thetas : lib.FloatArray2D
         The fitted parameters for each spot, shape (N, 6) or (N, 5)
         depending on the method. The columns are x, y, photons,
         background and sigma (or sigmax, sigmay).
-    CRLBs : np.ndarray
+    CRLBs : lib.FloatArray2D
         The Cramer-Rao Lower Bounds for the fitted parameters, shape
         (N, 6) or (N, 5).
-    likelihoods : np.ndarray
+    likelihoods : lib.FloatArray1D
         The log-likelihoods for each fitted spot, shape (N,).
-    iterations : np.ndarray
+    iterations : lib.IntArray1D
         The number of iterations taken to converge for each spot,
         shape (N,).
     """
@@ -439,21 +447,23 @@ def gaussmle(
 
 
 def gaussmle_async(
-    spots: np.ndarray,
+    spots: lib.FloatArray3D,
     eps: float,
     max_it: int,
     method: Literal["sigma", "sigmaxy"] = "sigmaxy",
-) -> tuple[list, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+) -> tuple[
+    list, lib.FloatArray2D, lib.FloatArray2D, lib.FloatArray1D, lib.IntArray1D
+]:
     """Runs ``gaussmle`` asynchronously (multiprocessing) to fit
     Gaussians using Maximum Likelihood Estimation (MLE) to the
     extracted spots. See ``gaussmle`` for parameter details.
 
     Returns
     -------
-    current : np.ndarray
-        A single-element array containing the current index of the
+    current : list
+        A single-element list containing the current index of the
         spot being processed.
-    thetas, CRLBs, likelihoods, iterations : np.ndarrays
+    thetas, CRLBs, likelihoods, iterations
         The same as in ``gaussmle``.
     """
     N = len(spots)
@@ -493,12 +503,12 @@ def gaussmle_async(
 
 @numba.jit(nopython=True, nogil=True)
 def _mlefit_sigma(
-    spots: np.ndarray,
+    spots: lib.FloatArray3D,
     index: int,
-    thetas: np.ndarray,
-    CRLBs: np.ndarray,
-    likelihoods: np.ndarray,
-    iterations: np.ndarray,
+    thetas: lib.FloatArray2D,
+    CRLBs: lib.FloatArray2D,
+    likelihoods: lib.FloatArray1D,
+    iterations: lib.IntArray1D,
     eps: float,
     max_it: int,
 ) -> None:
@@ -674,12 +684,12 @@ def _mlefit_sigma(
 
 @numba.jit(nopython=True, nogil=True)
 def _mlefit_sigmaxy(
-    spots: np.ndarray,
+    spots: lib.FloatArray3D,
     index: int,
-    thetas: np.ndarray,
-    CRLBs: np.ndarray,
-    likelihoods: np.ndarray,
-    iterations: np.ndarray,
+    thetas: lib.FloatArray2D,
+    CRLBs: lib.FloatArray2D,
+    likelihoods: lib.FloatArray1D,
+    iterations: lib.IntArray1D,
     eps: float,
     max_it: int,
 ) -> None:
@@ -859,10 +869,10 @@ def _mlefit_sigmaxy(
 
 def locs_from_fits(
     identifications: pd.DataFrame,
-    theta: np.ndarray,
-    CRLBs: np.ndarray,
-    log_likelihoods: np.ndarray,
-    iterations: np.ndarray,
+    theta: lib.FloatArray2D,
+    CRLBs: lib.FloatArray2D,
+    log_likelihoods: lib.FloatArray1D,
+    iterations: lib.IntArray1D,
     box: int,
 ) -> pd.DataFrame:
     """Convert the results of Gaussian fits into a data frame array
@@ -874,15 +884,15 @@ def locs_from_fits(
         Data frame containing the identifications of the
         spots, which should include 'frame', 'x', 'y' and
         'net_gradient'.
-    theta : np.ndarray
+    theta : lib.FloatArray2D
         The fitted parameters for each spot, shape (N, 6) or (N, 5)
         depending on the method used.
-    CRLBs : np.ndarray
+    CRLBs : lib.FloatArray2D
         The Cramer-Rao Lower Bounds for the fitted parameters, shape
         (N, 6) or (N, 5).
-    likelihoods : np.ndarray
+    likelihoods : lib.FloatArray1D
         The log-likelihoods for each fitted spot, shape (N,).
-    iterations : np.ndarray
+    iterations : lib.IntArray1D
         The number of iterations taken to converge for each spot,
         shape (N,).
     box : int
@@ -941,11 +951,11 @@ def locs_from_fits(
 
 
 def sigma_uncertainty(
-    sigma: pd.Series | np.ndarray,
-    sigma_orth: pd.Series | np.ndarray,
-    photons: pd.Series | np.ndarray,
-    bg: pd.Series | np.ndarray,
-) -> np.ndarray:
+    sigma: lib.SeriesOrFloatArray1D,
+    sigma_orth: lib.SeriesOrFloatArray1D,
+    photons: lib.SeriesOrFloatArray1D,
+    bg: lib.SeriesOrFloatArray1D,
+) -> lib.FloatArray1D:
     """Calculate standard error of fitted sigma based on the MLE 2D
     Gaussian/Poisson noise model (picasso.gaussmle).
 
@@ -954,19 +964,19 @@ def sigma_uncertainty(
 
     Parameters
     ----------
-    sigma : pd.Series | np.ndarray
+    sigma : lib.SeriesOrFloatArray1D
         Fitted sigma values in camera pixels.
-    sigma_orth : pd.Series | np.ndarray
+    sigma_orth : lib.SeriesOrFloatArray1D
         Fitted sigma values in the orthogonal direction in camera
         pixels.
-    photons : pd.Series | np.ndarray
+    photons : lib.SeriesOrFloatArray1D
         Number of photons.
-    bg : pd.Series | np.ndarray
+    bg : lib.SeriesOrFloatArray1D
         Background photons per pixel.
 
     Returns
     -------
-    se_sigma : np.ndarray
+    se_sigma : lib.FloatArray1D
         Standard error of fitted sigma values in camera pixels.
     """
     sa2 = sigma**2 + 1 / 12

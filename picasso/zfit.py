@@ -29,12 +29,12 @@ from . import lib, gausslq, gaussmle
 plt.style.use("ggplot")
 
 
-def nan_index(y: np.ndarray) -> tuple[np.ndarray, callable]:
+def nan_index(y: lib.FloatArray1D) -> tuple[lib.BoolArray1D, callable]:
     """Find indices of NaN values in an array."""
     return np.isnan(y), lambda z: z.nonzero()[0]
 
 
-def interpolate_nan(data: np.ndarray) -> np.ndarray:
+def interpolate_nan(data: lib.FloatArray1D) -> lib.FloatArray1D:
     """Linear interpolattion of NaN values in an array ``data``."""
     nans, x = nan_index(data)
     data[nans] = np.interp(x(nans), x(~nans), data[~nans])
@@ -231,8 +231,8 @@ def _fit_z_target(
     z: float,
     sx: float,
     sy: float,
-    cx: np.ndarray,
-    cy: np.ndarray,
+    cx: lib.FloatArray1D,
+    cy: lib.FloatArray1D,
 ) -> float:
     """Target function that's to be minimized for fitting the z
     coordinates given the single-emitter image width and height as well
@@ -495,7 +495,7 @@ def axial_localization_precision(
     calibration: dict,
     fitting_method: Literal["gausslq", "gaussmle"] = "gausslq",
     modality: Literal["astigmatic"] = "astigmatic",
-) -> np.ndarray:
+) -> lib.FloatArray1D:
     """Calculate axial localization precision for given localizations
     based on calibration.
 
@@ -517,7 +517,7 @@ def axial_localization_precision(
 
     Returns
     -------
-    lpz: np.ndarray
+    lpz: lib.FloatArray1D
         Calculated lpz values for the given localizations in nm.
     """
     if modality != "astigmatic":
@@ -535,7 +535,7 @@ def axial_localization_precision_astig(
     info: list[dict],
     calibration: dict,
     fitting_method: Literal["gausslq", "gaussmle"] = "gausslq",
-) -> np.ndarray:
+) -> lib.FloatArray1D:
     """Calculate axial localization precision for astigmatic 3D imaging
     for given localizations based on calibration.
 
@@ -558,7 +558,7 @@ def axial_localization_precision_astig(
 
     Returns
     -------
-    lpz: np.ndarray
+    lpz: lib.FloatArray1D
         Calculated lpz values for the given localizations in nm.
     """
     assert fitting_method in [
@@ -587,12 +587,12 @@ def axial_localization_precision_astig(
 
 def _axial_localization_precision_astig(
     locs: pd.DataFrame,
-    cx: np.ndarray,
-    cy: np.ndarray,
+    cx: lib.FloatArray1D,
+    cy: lib.FloatArray1D,
     magnification_factor: float,
     pixelsize: float,
     fitting_method: Literal["gausslq", "gaussmle"] = "gausslq",
-) -> np.ndarray:
+) -> lib.FloatArray1D:
     """Calculate axial localization precision for astigmatic 3D imaging
     for given localizations based on calibration.
 
@@ -604,9 +604,9 @@ def _axial_localization_precision_astig(
     locs : pd.DataFrame
         Localizations. Must include columns 'photons', 'sx', 'sy', 'bg',
         and 'z', see https://picassosr.readthedocs.io/en/latest/files.html#localization-hdf5-files
-    cx : np.ndarray
+    cx : lib.FloatArray1D
         3D calibration coefficients for x.
-    cy : np.ndarray
+    cy : lib.FloatArray1D
         3D calibration coefficients for y.
     pixelsize : float
         Camera pixel size in nm.
@@ -616,7 +616,7 @@ def _axial_localization_precision_astig(
 
     Returns
     -------
-    lpz: np.ndarray
+    lpz: lib.FloatArray1D
         Calculated lpz values for the given localizations in nm.
     """
     if fitting_method == "gausslq":
@@ -672,7 +672,9 @@ def _axial_localization_precision_astig(
     return lpz * magnification_factor
 
 
-def get_calib_size(coeffs: np.ndarray, z: np.ndarray) -> np.ndarray:
+def get_calib_size(
+    coeffs: lib.FloatArray1D, z: lib.FloatArray1D
+) -> lib.FloatArray1D:
     """Calculate calibration spot size at the given z position given
     the calibration coefficients. Based on Huang et al., Science 2008."""
     size = (
@@ -687,7 +689,9 @@ def get_calib_size(coeffs: np.ndarray, z: np.ndarray) -> np.ndarray:
     return size
 
 
-def get_prime_calib_size(coeffs: np.ndarray, z: np.ndarray) -> np.ndarray:
+def get_prime_calib_size(
+    coeffs: lib.FloatArray1D, z: lib.FloatArray1D
+) -> lib.FloatArray1D:
     """Same as ``get_calib_size`` but for the derivative of the size
     function."""
     size_prime = (
