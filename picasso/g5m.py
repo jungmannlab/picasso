@@ -65,7 +65,9 @@ fastmath = True
 
 
 @njit(fastmath=fastmath)
-def max_along_axis1(X: np.ndarray, final_shape: tuple[int]) -> np.ndarray:
+def max_along_axis1(
+    X: lib.FloatArray2D, final_shape: tuple[int]
+) -> lib.FloatArray1D:
     output = np.zeros(final_shape, dtype=X.dtype)
     for i in range(X.shape[0]):
         output[i] = np.max(X[i])
@@ -73,7 +75,9 @@ def max_along_axis1(X: np.ndarray, final_shape: tuple[int]) -> np.ndarray:
 
 
 @njit(fastmath=fastmath)
-def sum_along_axis0(X: np.ndarray, final_shape: tuple[int]) -> np.ndarray:
+def sum_along_axis0(
+    X: lib.FloatArray2D, final_shape: tuple[int]
+) -> lib.FloatArray1D:
     output = np.zeros(final_shape, dtype=X.dtype)
     for i in range(X.shape[0]):
         output += X[i]
@@ -81,7 +85,9 @@ def sum_along_axis0(X: np.ndarray, final_shape: tuple[int]) -> np.ndarray:
 
 
 @njit(fastmath=fastmath)
-def sum_along_axis1(X: np.ndarray, final_shape: tuple[int]) -> np.ndarray:
+def sum_along_axis1(
+    X: lib.FloatArray2D, final_shape: tuple[int]
+) -> lib.FloatArray1D:
     output = np.zeros(final_shape, dtype=X.dtype)
     for i in range(X.shape[1]):
         output += X[:, i]
@@ -89,13 +95,17 @@ def sum_along_axis1(X: np.ndarray, final_shape: tuple[int]) -> np.ndarray:
 
 
 @njit(fastmath=fastmath)
-def mean_along_axis1(X: np.ndarray, final_shape: tuple[int]) -> np.ndarray:
+def mean_along_axis1(
+    X: lib.FloatArray2D, final_shape: tuple[int]
+) -> lib.FloatArray1D:
     output = sum_along_axis1(X, final_shape)
     return output / X.shape[1]
 
 
 @njit(fastmath=fastmath)
-def logsumexp_axis1(X: np.ndarray, final_shape: tuple[int]) -> np.ndarray:
+def logsumexp_axis1(
+    X: lib.FloatArray2D, final_shape: tuple[int]
+) -> lib.FloatArray1D:
     """njit implementation of ``scipy.special.logsumexp``. Note that we
     cannot use ``np.log(np.sum(np.exp(X), axis=1))`` because it will
     cause overflow for large numbers. Thus, we use the ``logsumexp``
@@ -109,7 +119,7 @@ def logsumexp_axis1(X: np.ndarray, final_shape: tuple[int]) -> np.ndarray:
 
 
 @njit(fastmath=fastmath)
-def matmul(a: np.ndarray, b: np.ndarray) -> np.ndarray:
+def matmul(a: lib.FloatArray2D, b: lib.FloatArray2D) -> lib.FloatArray2D:
     """Matrix multiplication, assuming that the shapes are
     compatible."""
     n, m = a.shape
@@ -123,7 +133,7 @@ def matmul(a: np.ndarray, b: np.ndarray) -> np.ndarray:
 
 
 @njit(fastmath=fastmath)
-def square_elements_1d(X: np.ndarray) -> np.ndarray:
+def square_elements_1d(X: lib.FloatArray1D) -> lib.FloatArray1D:
     output = np.zeros(X.shape, dtype=X.dtype)
     for i in range(X.shape[0]):
         output[i] = X[i] ** 2
@@ -131,7 +141,7 @@ def square_elements_1d(X: np.ndarray) -> np.ndarray:
 
 
 @njit(fastmath=fastmath)
-def square_elements_2d(X: np.ndarray) -> np.ndarray:
+def square_elements_2d(X: lib.FloatArray2D) -> lib.FloatArray2D:
     m, n = X.shape
     output = np.zeros((m, n), dtype=X.dtype)
     for i in range(m):
@@ -141,7 +151,7 @@ def square_elements_2d(X: np.ndarray) -> np.ndarray:
 
 
 @njit(fastmath=fastmath)
-def poly1d(coeffs, xs):
+def poly1d(coeffs: lib.FloatArray1D, xs: lib.FloatArray1D) -> lib.FloatArray1D:
     """Use Horner's method to evaluate a polynomial with coefficients
     `coeffs` at points `xs`. Coefficients are in the form [a_n, a_{n-1},
     ..., a_0] for the polynomial a_n*x^n + a_{n-1}*x^{n-1} + ... + a_0.
@@ -164,10 +174,10 @@ def poly1d(coeffs, xs):
 # thus the instability is avoided). Note: precision = 1/sigma**2
 @njit(fastmath=fastmath)
 def gauss_exponential_term_2D(
-    X: np.ndarray,  # shape (n_samples, 2)
-    means: np.ndarray,  # shape (n_components, 2)
-    precision: np.ndarray,  # shape (n_components,)
-) -> np.ndarray:
+    X: lib.FloatArray2D,  # shape (n_samples, 2)
+    means: lib.FloatArray2D,  # shape (n_components, 2)
+    precision: lib.FloatArray1D,  # shape (n_components,)
+) -> lib.FloatArray2D:
     n_samples = X.shape[0]
     n_components = means.shape[0]
     sq_diff = np.zeros((n_samples, n_components), dtype=X.dtype)
@@ -180,10 +190,10 @@ def gauss_exponential_term_2D(
 
 @njit(fastmath=fastmath)
 def gauss_exponential_term_3D(
-    X: np.ndarray,  # shape (n_samples, 3)
-    means: np.ndarray,  # shape (n_components, 3)
-    precision: np.ndarray,  # shape (n_components, 3)
-) -> np.ndarray:
+    X: lib.FloatArray2D,  # shape (n_samples, 3)
+    means: lib.FloatArray2D,  # shape (n_components, 3)
+    precision: lib.FloatArray2D,  # shape (n_components, 3)
+) -> lib.FloatArray2D:
     """Same as ``gauss_exponential_term_2D`` but precision has shape
     (K, 3), where K is the number of components."""
     n_samples = X.shape[0]
@@ -199,11 +209,11 @@ def gauss_exponential_term_3D(
 # kmeans++ init, adopted from sklearn, numba implementation #
 @njit
 def euclidean_distances(
-    X: np.ndarray,
-    Y: np.ndarray,
-    X_norm_squared: np.ndarray | None = None,
-    Y_norm_squared: np.ndarray | None = None,
-) -> np.ndarray:
+    X: lib.FloatArray2D,
+    Y: lib.FloatArray2D,
+    X_norm_squared: lib.FloatArray2D | None = None,
+    Y_norm_squared: lib.FloatArray2D | None = None,
+) -> lib.FloatArray2D:
     """njit implementation of
     ``sklearn.metrics.pairwise._euclidean_distances`` with
     ``squared=True``."""
@@ -239,10 +249,10 @@ def euclidean_distances(
 
 @njit
 def kmeans_plusplus(
-    X: np.ndarray,
+    X: lib.FloatArray2D,
     n_components: int,
     random_state: int,
-) -> np.ndarray:
+) -> lib.IntArray1D:
     """njit implementation of ``sklearn.cluster._kmeans_plusplus``. Used
     for initializing ``G5M``'s."""
     np.random.seed(random_state)
@@ -438,7 +448,7 @@ class G5M(metaclass=ABCMeta):
         # number of locs per component (applied after fitting)
         self.n_locs = np.zeros(n_components, dtype=int)
 
-    def bic(self, X: np.ndarray) -> float:
+    def bic(self, X: lib.FloatArray2D) -> float:
         """Bayesian Information Criterion (BIC) for the G5M."""
         # shift coordinates by their mean (numerical stability)
         bic = (
@@ -453,20 +463,22 @@ class G5M(metaclass=ABCMeta):
         return self.covariances_[self.valid_idx]
 
     @abstractmethod
-    def estimate_log_prob(self, X: np.ndarray) -> np.ndarray:
+    def estimate_log_prob(self, X: lib.FloatArray2D) -> lib.FloatArray2D:
         """Calculate the log probabilities of the data X under the G5M,
         without weights."""
         pass
 
-    def estimate_weighted_log_prob(self, X: np.ndarray) -> np.ndarray:
+    def estimate_weighted_log_prob(
+        self, X: lib.FloatArray2D
+    ) -> lib.FloatArray2D:
         """Calculate the log probabilities of the data X under the G5M,
         with weights."""
         return self.estimate_log_prob(X) + np.log(self.weights)
 
     def fit(
         self,
-        X: np.ndarray,
-        lp: np.ndarray,
+        X: lib.FloatArray2D,
+        lp: lib.FloatArray1D | lib.FloatArray2D,
         loc_prec_handle: Literal["local", "abs"] = "local",
     ) -> G5M | None:
         """Fit G5M to data X. Return None if fitting failed.
@@ -569,23 +581,25 @@ class G5M(metaclass=ABCMeta):
         """Valid precision."""
         return self.precisions_cholesky_[self.valid_idx]
 
-    def predict(self, X: np.ndarray) -> np.ndarray:
+    def predict(self, X: lib.FloatArray2D) -> lib.IntArray1D:
         """Predict the cluster labels for the data X."""
         return self.estimate_weighted_log_prob(X).argmax(axis=1)
 
     @abstractmethod
-    def sample(self, n_samples: int = 1) -> tuple[np.ndarray, np.ndarray]:
+    def sample(
+        self, n_samples: int = 1
+    ) -> tuple[lib.FloatArray2D, lib.IntArray1D]:
         """Sample data points from the G5M."""
         pass
 
     def set_parameters(
         self,
-        weights: np.ndarray,
-        means: np.ndarray,
-        covs: np.ndarray,
-        precisions_cholesky: np.ndarray,
+        weights: lib.FloatArray1D,
+        means: lib.FloatArray2D,
+        covs: lib.FloatArray1D | lib.FloatArray2D,
+        precisions_cholesky: lib.FloatArray1D | lib.FloatArray2D,
         converged: bool,
-        valid_idx: np.ndarray | None = None,
+        valid_idx: lib.IntArray1D | None = None,
     ) -> None:
         """Set the G5M parameters, used after fitting."""
         self.weights_ = weights / weights.sum()
@@ -598,7 +612,7 @@ class G5M(metaclass=ABCMeta):
         else:
             self.valid_idx = np.arange(len(weights))
 
-    def score_samples(self, X: np.ndarray) -> np.ndarray:
+    def score_samples(self, X: lib.FloatArray2D) -> lib.FloatArray1D:
         """Compute the log-likelihood of the data X under the G5M."""
         weighted_log_prob = self.estimate_weighted_log_prob(X)
         final_shape = (weighted_log_prob.shape[0],)
@@ -615,9 +629,9 @@ class G5M(metaclass=ABCMeta):
 # 2D G5M functions and classes #
 @njit
 def check_G5M_resolution_2D(
-    means: np.ndarray,
-    weights: np.ndarray,
-    precisions_chol: np.ndarray,
+    means: lib.FloatArray2D,
+    weights: lib.FloatArray1D,
+    precisions_chol: lib.FloatArray1D,
 ) -> bool:
     """Check if Sparrow limit is passed for all components of the
     ``G5M_2D``.
@@ -680,8 +694,8 @@ def check_G5M_resolution_2D(
 
 @njit
 def initialize_G5M_2D(
-    X: np.ndarray, n_init: int, n_components: int, random_state: int
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    X: lib.FloatArray2D, n_init: int, n_components: int, random_state: int
+) -> tuple[lib.FloatArray2D, lib.FloatArray3D, lib.FloatArray2D]:
     """Initialize the 2D G5M parameters using kmeans++."""
     n_samples = X.shape[0]
     init_weights = np.zeros((n_init, n_components), dtype=np.float64)
@@ -715,9 +729,9 @@ def initialize_G5M_2D(
 
 @njit
 def estimate_gaussian_parameters_2D(
-    X: np.ndarray,
-    resp: np.ndarray,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    X: lib.FloatArray2D,
+    resp: lib.FloatArray2D,
+) -> tuple[lib.FloatArray1D, lib.FloatArray2D, lib.FloatArray1D]:
     nk, means, covariances = estimate_gaussian_parameters_diag_cov(X, resp)
     covariances = mean_along_axis1(covariances, final_shape=(len(nk),))
     return (
@@ -729,8 +743,10 @@ def estimate_gaussian_parameters_2D(
 
 @njit
 def estimate_log_gaussian_prob_2D(
-    X: np.ndarray, means: np.ndarray, precisions_chol: np.ndarray
-) -> np.ndarray:
+    X: lib.FloatArray2D,
+    means: lib.FloatArray2D,
+    precisions_chol: lib.FloatArray1D,
+) -> lib.FloatArray2D:
     log_det = 2 * np.log(precisions_chol)
     precisions = square_elements_1d(precisions_chol)
     log_prob = gauss_exponential_term_2D(X, means, precisions)
@@ -739,11 +755,11 @@ def estimate_log_gaussian_prob_2D(
 
 @njit
 def e_step_2D(
-    X: np.ndarray,
-    weights: np.ndarray,
-    means: np.ndarray,
-    precisions_cholesky: np.ndarray,
-) -> tuple[float, np.ndarray]:
+    X: lib.FloatArray2D,
+    weights: lib.FloatArray1D,
+    means: lib.FloatArray2D,
+    precisions_cholesky: lib.FloatArray1D,
+) -> tuple[float, lib.FloatArray2D]:
     weighted_log_prob = estimate_log_gaussian_prob_2D(
         X, means, precisions_cholesky
     ) + np.log(weights)
@@ -754,19 +770,21 @@ def e_step_2D(
 
 @njit
 def m_step_2D(
-    X: np.ndarray,
-    log_resp: np.ndarray,
+    X: lib.FloatArray2D,
+    log_resp: lib.FloatArray2D,
     sigma_bounds: tuple[float, float],
-    lp: np.ndarray,
+    lp: lib.FloatArray1D,
     loc_prec_handle: Literal["local", "abs"],
     cx: dict | None = None,  # for 3D consistency
     cy: dict | None = None,  # for 3D consistency
     spot_size: (
-        np.ndarray | None
+        lib.FloatArray2D | None
     ) = None,  # deprecated since v0.10.0, use cx/cy instead
-    z_range: np.ndarray | None = None,
+    z_range: lib.FloatArray1D | None = None,
     mag_factor: float | None = None,  # NOTEL keep mag_factor!
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+) -> tuple[
+    lib.FloatArray1D, lib.FloatArray2D, lib.FloatArray1D, lib.FloatArray1D
+]:
     """2D m step. cx, cy, spot_size, z_range and mag_factor are not
     used and are here for compatibility with the 3D m step."""
     min_cov = sigma_bounds[0] ** 2
@@ -800,11 +818,11 @@ def m_step_2D(
 
 
 def find_optimal_G5M_2D(
-    X: np.ndarray,
+    X: lib.FloatArray2D,
     min_locs: int,
     sigma_bounds: tuple[float, float],
     *,
-    lp: np.ndarray,
+    lp: lib.FloatArray1D,
     loc_prec_handle: Literal["local", "abs"] = "local",
     max_rounds_without_best_bic: int = MAX_ROUNDS_WITHOUT_BEST_BIC,
 ) -> G5M_2D:
@@ -812,7 +830,7 @@ def find_optimal_G5M_2D(
 
     Parameters
     ----------
-    X : np.ndarray
+    X : lib.FloatArray2D
         2D array of localizations, shape (n_samples, 2).
     min_locs : int
         Minimum number of localizations per component.
@@ -821,7 +839,7 @@ def find_optimal_G5M_2D(
         components. If local loc. prec. is used, the bounds specify the
         margin of error in units of localization precision. Else,
         absolute bounds on sigma.
-    lp : np.ndarray
+    lp : lib.FloatArray1D
         Localization precision for each localization. Only used if
         loc_prec_handle is "local". Shape (n_samples,).
     loc_prec_handle : {"local", "abs"}, optional
@@ -986,7 +1004,7 @@ class G5M_2D(G5M):
         components. If local loc. prec. is used, the bounds specify the
         margin of error in units of localization precision. Else,
         absolute bounds on sigma.
-    means_init : np.ndarray or None, optional
+    means_init : lib.FloatArray2D | None, optional
         Initial means (mu) of the Gaussian components. If None, the
         means are initialized using kmeans++. Default is None.
     """
@@ -997,7 +1015,7 @@ class G5M_2D(G5M):
         min_locs: int,
         sigma_bounds: tuple[float, float],
         *,
-        means_init: np.ndarray | None = None,
+        means_init: lib.FloatArray2D | None = None,
     ) -> None:
         super().__init__(
             n_components=n_components,
@@ -1007,7 +1025,7 @@ class G5M_2D(G5M):
         )
         self.n_dimensions = 2
 
-    def estimate_log_prob(self, X: np.ndarray) -> np.ndarray:
+    def estimate_log_prob(self, X: lib.FloatArray2D) -> lib.FloatArray2D:
         """Calculate the log probabilities of the data X under the G5M,
         without weights."""
         return estimate_log_gaussian_prob_2D(
@@ -1024,7 +1042,9 @@ class G5M_2D(G5M):
         weight_params = n_valid - 1
         return int(cov_params + mean_params + weight_params)
 
-    def sample(self, n_samples: int = 1) -> tuple[np.ndarray, np.ndarray]:
+    def sample(
+        self, n_samples: int = 1
+    ) -> tuple[lib.FloatArray2D, lib.IntArray1D]:
         """Sample data points from the G5M."""
         rng = check_random_state(self.random_state)
         n_samples_comp = rng.multinomial(n_samples, self.weights)
@@ -1051,9 +1071,9 @@ class G5M_2D(G5M):
 # 3D G5M functions and classes #
 @njit
 def check_G5M_resolution_3D(
-    means: np.ndarray,
-    weights: np.ndarray,
-    precisions_chol: np.ndarray,
+    means: lib.FloatArray2D,
+    weights: lib.FloatArray1D,
+    precisions_chol: lib.FloatArray2D,
 ) -> bool:
     """Check if Sparrow limit is passed for all components of the
     ``G5M_3D``.
@@ -1119,8 +1139,8 @@ def check_G5M_resolution_3D(
 
 @njit
 def initialize_G5M_3D(
-    X: np.ndarray, n_init: int, n_components: int, random_state: int
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    X: lib.FloatArray2D, n_init: int, n_components: int, random_state: int
+) -> tuple[lib.FloatArray2D, lib.FloatArray3D, lib.FloatArray3D]:
     """Initialize the 3D G5M parameters using kmeans++."""
     n_samples = X.shape[0]
     init_weights = np.zeros((n_init, n_components), dtype=np.float64)
@@ -1154,18 +1174,18 @@ def initialize_G5M_3D(
 
 @njit
 def estimate_gaussian_parameters_3D(
-    X: np.ndarray,
-    resp: np.ndarray,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    X: lib.FloatArray2D,
+    resp: lib.FloatArray2D,
+) -> tuple[lib.FloatArray1D, lib.FloatArray2D, lib.FloatArray2D]:
     return estimate_gaussian_parameters_diag_cov(X, resp)
 
 
 @njit
 def estimate_log_gaussian_prob_3D(
-    X: np.ndarray,
-    means: np.ndarray,
-    precisions_chol: np.ndarray,
-) -> np.ndarray:
+    X: lib.FloatArray2D,
+    means: lib.FloatArray2D,
+    precisions_chol: lib.FloatArray2D,
+) -> lib.FloatArray2D:
     log_det = sum_along_axis1(
         np.log(precisions_chol),
         (precisions_chol.shape[0],),
@@ -1177,11 +1197,11 @@ def estimate_log_gaussian_prob_3D(
 
 @njit
 def e_step_3D(
-    X: np.ndarray,
-    weights: np.ndarray,
-    means: np.ndarray,
-    precisions_cholesky: np.ndarray,
-) -> tuple[float, np.ndarray]:
+    X: lib.FloatArray2D,
+    weights: lib.FloatArray1D,
+    means: lib.FloatArray2D,
+    precisions_cholesky: lib.FloatArray2D,
+) -> tuple[float, lib.FloatArray2D]:
     weighted_log_prob = estimate_log_gaussian_prob_3D(
         X, means, precisions_cholesky
     ) + np.log(weights)
@@ -1192,19 +1212,21 @@ def e_step_3D(
 
 @njit
 def m_step_3D(
-    X: np.ndarray,
-    log_resp: np.ndarray,
+    X: lib.FloatArray2D,
+    log_resp: lib.FloatArray2D,
     sigma_bounds: tuple[float, float],
-    lp: np.ndarray,
+    lp: lib.FloatArray2D,
     loc_prec_handle: Literal["local", "abs"],
-    cx: np.ndarray = np.array([]),
-    cy: np.ndarray = np.array([]),
-    spot_size: np.ndarray = np.array([]).reshape(
+    cx: lib.FloatArray1D = np.array([]),
+    cy: lib.FloatArray1D = np.array([]),
+    spot_size: lib.FloatArray2D = np.array([]).reshape(
         0, 0
     ),  # TODO: remove in v0.11.0, use cx/cy instead
-    z_range: np.ndarray = np.array([]),
+    z_range: lib.FloatArray1D = np.array([]),
     mag_factor: float = 0.79,  # NOTE: keep mag_factor!
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+) -> tuple[
+    lib.FloatArray1D, lib.FloatArray2D, lib.FloatArray2D, lib.FloatArray2D
+]:
     """Modified m-step to handle astigmatism in 3D G5M.
 
     The astigmatism modification handles the astigmatism effect in
@@ -1301,18 +1323,18 @@ def m_step_3D(
 
 
 def find_optimal_G5M_3D(
-    X: np.ndarray,
+    X: lib.FloatArray2D,
     min_locs: int,
     sigma_bounds: tuple[float, float],
     *,
-    lp: np.ndarray,
+    lp: lib.FloatArray2D,
     calibration: dict = {},  # TODO: make it not optional in v0.11.0
     loc_prec_handle: Literal["local", "abs"] = "local",
     max_rounds_without_best_bic: int = MAX_ROUNDS_WITHOUT_BEST_BIC,
-    spot_size: np.ndarray = np.array([]).reshape(
+    spot_size: lib.FloatArray2D = np.array([]).reshape(
         0, 0
     ),  # TODO: remove in v0.11.0, use calibration instead
-    z_range: np.ndarray = np.array(
+    z_range: lib.FloatArray1D = np.array(
         []
     ),  # TODO: remove in v0.11.0, use calibration instead
     mag_factor: float = 0.79,  # TODO: keep mag_factor in v0.11.0, remove spot_size and z_range in favor of calibration
@@ -1614,7 +1636,7 @@ class G5M_3D(G5M):
         self.mag_factor = mag_factor
         self.n_dimensions = 3
 
-    def estimate_log_prob(self, X: np.ndarray) -> np.ndarray:
+    def estimate_log_prob(self, X: lib.FloatArray2D) -> lib.FloatArray2D:
         """Calculate the log probabilities of the data X under the G5M,
         without weights."""
         return estimate_log_gaussian_prob_3D(
@@ -1633,7 +1655,9 @@ class G5M_3D(G5M):
         weight_params = n_valid - 1
         return int(cov_params + mean_params + weight_params)
 
-    def sample(self, n_samples: int = 1) -> tuple[np.ndarray, np.ndarray]:
+    def sample(
+        self, n_samples: int = 1
+    ) -> tuple[lib.FloatArray2D, lib.IntArray1D]:
         """Sample data points from the G5M."""
         rng = check_random_state(self.random_state)
         n_samples_comp = rng.multinomial(n_samples, self.weights)
@@ -1660,10 +1684,10 @@ class G5M_3D(G5M):
 # G5M (2D/3D) functions and classes #
 @njit
 def estimate_gaussian_parameters_diag_cov(
-    X: np.ndarray,
-    resp: np.ndarray,
+    X: lib.FloatArray2D,
+    resp: lib.FloatArray2D,
     reg_covar: float = 1e-6,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+) -> tuple[lib.FloatArray1D, lib.FloatArray2D, lib.FloatArray2D]:
     """Calculate the MLE parameters for a G5M. Assumes diagonal
     covariance matrices.
 
