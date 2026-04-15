@@ -17,11 +17,11 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm
 
-from . import gausslq
+from . import gausslq, lib
 
 
 @numba.jit(nopython=True, nogil=True)
-def _sum(spot: np.ndarray, size: int) -> float:
+def _sum(spot: lib.FloatArray2D, size: int) -> float:
     """Calculate the sum of all pixels in a spot."""
     _sum_ = 0.0
     for i in range(size):
@@ -31,7 +31,7 @@ def _sum(spot: np.ndarray, size: int) -> float:
     return _sum_
 
 
-def fit_spot(spot: np.ndarray) -> np.ndarray:
+def fit_spot(spot: lib.FloatArray2D) -> list[float]:
     """Fit a single spot and return fit parameters."""
     size = spot.shape[0]
     avg_roi = _sum(spot, size)
@@ -40,7 +40,7 @@ def fit_spot(spot: np.ndarray) -> np.ndarray:
     return result
 
 
-def fit_spots(spots: np.ndarray) -> np.ndarray:
+def fit_spots(spots: lib.FloatArray3D) -> lib.FloatArray2D:
     """Fit spots and return fit parameters."""
     theta = np.empty((len(spots), 6), dtype=np.float32)
     theta.fill(np.nan)
@@ -50,9 +50,9 @@ def fit_spots(spots: np.ndarray) -> np.ndarray:
 
 
 def fit_spots_parallel(
-    spots: np.ndarray,
+    spots: lib.FloatArray3D,
     asynch: bool = False,
-) -> np.ndarray | list[futures.Future]:
+) -> lib.FloatArray2D | list[futures.Future]:
     """Fit spots in parallel (if ``asynch`` is True)."""
     n_workers = min(
         60, max(1, int(0.75 * multiprocessing.cpu_count()))
@@ -80,7 +80,7 @@ def fit_spots_parallel(
     return fits_from_futures(fs)
 
 
-def fits_from_futures(futures: list[futures.Future]) -> np.ndarray:
+def fits_from_futures(futures: list[futures.Future]) -> lib.FloatArray2D:
     """Collect fit results from futures."""
     theta = [_.result() for _ in futures]
     return np.vstack(theta)
@@ -88,7 +88,7 @@ def fits_from_futures(futures: list[futures.Future]) -> np.ndarray:
 
 def locs_from_fits(
     identifications: pd.DataFrame,
-    theta: np.ndarray,
+    theta: lib.FloatArray2D,
     box: int,
     em: float,
 ) -> pd.DataFrame:

@@ -56,6 +56,9 @@ FloatArray1D: TypeAlias = np.ndarray[tuple[int], np.dtype[np.floating[Any]]]
 FloatArray2D: TypeAlias = np.ndarray[
     tuple[int, int], np.dtype[np.floating[Any]]
 ]
+FloatArray3D: TypeAlias = np.ndarray[
+    tuple[int, int, int], np.dtype[np.floating[Any]]
+]
 SeriesOrFloatArray1D: TypeAlias = pd.Series | FloatArray1D
 SeriesOrIntArray1D: TypeAlias = pd.Series | IntArray1D
 
