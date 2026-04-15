@@ -1,6 +1,6 @@
 # Changelog
 
-Last change: 14-APR-2026 CEST
+Last change: 15-APR-2026 CEST
 
 ## 0.10.0
 
@@ -54,6 +54,8 @@ Last change: 14-APR-2026 CEST
 - Test clustering tool tips
 - Filter supports .csv export (not only hdf5)
 - Removed focus on push buttons in dialogs
+- New API for alignement of locs, see ``picasso.postprocess``: ``align_rcc`` and ``align_from_picked``
+- New function ``picasso.io.load_picks``
 
 ### *Bug fixes:*
 

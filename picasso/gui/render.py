@@ -6643,6 +6643,11 @@ class View(QtWidgets.QLabel):
         x and y coordinates of panning's starting position.
     _picks : list
         Contains the coordinates of current picks.
+    _pick_shape : {"Circle", "Rectangle", "Polygon", "Square"}
+        Current shape of picks.
+    _pick_size : float or None
+        Size of picks in camera pixels; None for polygonal picks (size
+        not defined).
     _pixmap : QPixMap
         Pixmap currently displayed.
     _points : list
@@ -6993,97 +6998,22 @@ class View(QtWidgets.QLabel):
 
     def align(self) -> None:
         """Align channels by RCC or from picked localizations."""
+        status = lib.StatusDialog("Aligning channels..", self)
         if len(self._picks) > 0:  # shift from picked
-            # find shift between channels
-            shift = self.shift_from_picked()
-            sp = lib.ProgressDialog(
-                "Shifting channels", 0, len(self.locs), self
+            self.all_locs = postprocess.align_from_picked(
+                self.all_locs,
+                self.infos,
+                picks=self._picks,
+                pick_shape=self._pick_shape,
+                pick_size=self._pick_size,
             )
-            sp.set_value(0)
-
-            # align each channel
-            for i, locs_ in enumerate(self.locs):
-                locs_.y -= shift[0][i]
-                locs_.x -= shift[1][i]
-                if len(shift) == 3:
-                    locs_.z -= shift[2][i]
-                self.all_locs[i] = copy.copy(locs_)
-                # Cleanup
-                self.index_blocks[i] = None
-                sp.set_value(i + 1)
-            self.update_scene()
-
+            self.locs = copy.copy(self.all_locs)
         else:  # align using whole images
-            max_iterations = 5
-            iteration = 0
-            convergence = 0.001  # (camera pixels), around 0.1 nm
-            shift_x = []
-            shift_y = []
-            shift_z = []
-            display = False
-
-            progress = lib.ProgressDialog(
-                "Aligning images..", 0, max_iterations, self
-            )
-            progress.show()
-            progress.set_value(0)
-
-            for iteration in range(max_iterations):
-                completed = True
-                progress.set_value(iteration)
-
-                # find shift between channels
-                shift = self.shift_from_rcc()
-                sp = lib.ProgressDialog(
-                    "Shifting channels", 0, len(self.locs), self
-                )
-                sp.set_value(0)
-                temp_shift_x = []
-                temp_shift_y = []
-                temp_shift_z = []
-                for i, locs_ in enumerate(self.locs):
-                    if (
-                        np.absolute(shift[0][i]) + np.absolute(shift[1][i])
-                        > convergence
-                    ):
-                        completed = False
-
-                    # shift each channel
-                    locs_.y -= shift[0][i]
-                    locs_.x -= shift[1][i]
-
-                    temp_shift_x.append(shift[1][i])
-                    temp_shift_y.append(shift[0][i])
-
-                    if len(shift) == 3:
-                        locs_.z -= shift[2][i]
-                        temp_shift_z.append(shift[2][i])
-                    sp.set_value(i + 1)
-                self.all_locs = copy.copy(self.locs)
-                shift_x.append(np.mean(temp_shift_x))
-                shift_y.append(np.mean(temp_shift_y))
-                if len(shift) == 3:
-                    shift_z.append(np.mean(temp_shift_z))
-                iteration += 1
-                self.update_scene()
-
-                # Skip when converged:
-                if completed:
-                    break
-
-            progress.close()
-
-            # Plot shift
-            if display:
-                fig1 = plt.figure(figsize=(8, 8), constrained_layout=True)
-                plt.suptitle("Shift")
-                plt.subplot(1, 1, 1)
-                plt.plot(shift_x, "o-", label="x shift")
-                plt.plot(shift_y, "o-", label="y shift")
-                plt.xlabel("Iteration")
-                plt.ylabel("Mean Shift per Iteration (Px)")
-                plt.legend(loc="best")
-                fig1.show()
+            self.all_locs = postprocess.align_rcc(self.all_locs, self.infos)
+            self.locs = copy.copy(self.all_locs)
+        status.close()
+        self.index_blocks = [None] * len(self.locs)
+        self.update_scene()
 
     @check_pick
     def combine(self) -> None:
@@ -8874,51 +8804,65 @@ class View(QtWidgets.QLabel):
         ValueError
             If .yaml file is not recognized.
         """
-        # load the file
-        with open(path, "r") as f:
-            regions = yaml.full_load(f)
+        # # load the file
+        # with open(path, "r") as f:
+        #     regions = yaml.full_load(f)
 
-        # Backwards compatibility for old picked region files
-        if "Shape" in regions:
-            loaded_shape = regions["Shape"]
-        elif "Centers" in regions and "Diameter" in regions:
-            loaded_shape = "Circle"
-        else:
-            raise ValueError("Unrecognized picks file")
+        # # Backwards compatibility for old picked region files
+        # if "Shape" in regions:
+        #     loaded_shape = regions["Shape"]
+        # elif "Centers" in regions and "Diameter" in regions:
+        #     loaded_shape = "Circle"
+        # else:
+        #     raise ValueError("Unrecognized picks file")
 
-        # change pick shape in Tools Settings Dialog
-        shape_index = self.window.tools_settings_dialog.pick_shape.findText(
-            loaded_shape
-        )
-        self.window.tools_settings_dialog.pick_shape.setCurrentIndex(
-            shape_index
-        )
+        # # change pick shape in Tools Settings Dialog
+        # shape_index = self.window.tools_settings_dialog.pick_shape.findText(
+        #     loaded_shape
+        # )
+        # self.window.tools_settings_dialog.pick_shape.setCurrentIndex(
+        #     shape_index
+        # )
+        # pixelsize = self.window.display_settings_dlg.pixelsize.value()
+
+        # # assign loaded picks and pick size
+        # if loaded_shape == "Circle":
+        #     self._picks = regions["Centers"]
+        #     if "Diameter (nm)" in regions:
+        #         diameter = regions["Diameter (nm)"]
+        #     elif "Diameter" in regions:
+        #         diameter = regions["Diameter"] * pixelsize
+        #     self.window.tools_settings_dialog.pick_diameter.setValue(diameter)
+        # elif loaded_shape == "Rectangle":
+        #     self._picks = regions["Center-Axis-Points"]
+        #     if "Width (nm)" in regions:
+        #         width = regions["Width (nm)"]
+        #     elif "Width" in regions:
+        #         width = regions["Width"] * pixelsize
+        #     self.window.tools_settings_dialog.pick_width.setValue(width)
+        # elif loaded_shape == "Polygon":
+        #     self._picks = regions["Vertices"]
+        # elif loaded_shape == "Square":
+        #     self._picks = regions["Centers"]
+        #     # no backward compatibility here, always in nm
+        #     width = regions["Side Length (nm)"]
+        #     self.window.tools_settings_dialog.pick_side_length.setValue(width)
+        # else:
+        #     raise ValueError("Unrecognized pick shape")
         pixelsize = self.window.display_settings_dlg.pixelsize.value()
-
-        # assign loaded picks and pick size
-        if loaded_shape == "Circle":
-            self._picks = regions["Centers"]
-            if "Diameter (nm)" in regions:
-                diameter = regions["Diameter (nm)"]
-            elif "Diameter" in regions:
-                diameter = regions["Diameter"] * pixelsize
-            self.window.tools_settings_dialog.pick_diameter.setValue(diameter)
-        elif loaded_shape == "Rectangle":
-            self._picks = regions["Center-Axis-Points"]
-            if "Width (nm)" in regions:
-                width = regions["Width (nm)"]
-            elif "Width" in regions:
-                width = regions["Width"] * pixelsize
-            self.window.tools_settings_dialog.pick_width.setValue(width)
-        elif loaded_shape == "Polygon":
-            self._picks = regions["Vertices"]
-        elif loaded_shape == "Square":
-            self._picks = regions["Centers"]
-            # no backward compatibility here, always in nm
-            width = regions["Side Length (nm)"]
-            self.window.tools_settings_dialog.pick_side_length.setValue(width)
-        else:
-            raise ValueError("Unrecognized pick shape")
+        tools_dlg = self.window.tools_settings_dialog
+        self._picks = []
+        self._pick_shape = None
+        self._picks, self._pick_shape, size = io.load_picks(
+            path, pixelsize=pixelsize
+        )
+        tools_dlg.pick_shape.setCurrentText(self._pick_shape)
+        if self._pick_shape == "Circle":
+            tools_dlg.pick_diameter.setValue(size * pixelsize * 2)
+        elif self._pick_shape == "Rectangle":
+            tools_dlg.pick_width.setValue(size * pixelsize)
+        elif self._pick_shape == "Square":
+            tools_dlg.pick_side_length.setValue(size * pixelsize)
 
         # update Info Dialog
         self.update_pick_info_short()
@@ -9546,6 +9490,21 @@ class View(QtWidgets.QLabel):
 
         self.update_pick_info_short()
         self.update_scene()
+
+    @property
+    def _pick_size(self) -> float:
+        """Return the size of the pick in camera pixels."""
+        tools_dialog = self.window.tools_settings_dialog
+        pixelsize = self.window.display_settings_dlg.pixelsize.value()
+        if self._pick_shape == "Circle":
+            pick_size = tools_dialog.pick_diameter.value() / pixelsize / 2
+        elif self._pick_shape == "Square":
+            pick_size = tools_dialog.pick_side_length.value() / pixelsize
+        elif self._pick_shape == "Rectangle":
+            pick_size = tools_dialog.pick_width.value() / pixelsize
+        else:
+            pick_size = None
+        return pick_size
 
     @check_pick
     @check_circular_picks

@@ -14,6 +14,7 @@ import itertools
 import multiprocessing
 from collections import OrderedDict
 from collections.abc import Callable
+from copy import deepcopy
 from typing import Literal
 from concurrent.futures import ThreadPoolExecutor as _ThreadPoolExecutor
 from threading import Thread
@@ -29,7 +30,7 @@ from tqdm import tqdm, trange
 
 import yaml
 
-from . import lib, render, imageprocess, masking, __version__
+from . import io, lib, render, imageprocess, masking, __version__
 
 
 def get_index_blocks(
@@ -2380,7 +2381,9 @@ def undrift_from_fiducials(
         # auto-detect fiducials
         picks, box = imageprocess.find_fiducials(locs, info)
         pick_radius = box / 2
-    elif isinstance(picks, str) and picks.endswith(".yaml"):
+    elif isinstance(picks, str) and picks.endswith(
+        ".yaml"
+    ):  # TODO: use io.load_picks
         # load picks from .yaml file
         with open(picks, "r") as f:
             regions = yaml.safe_load(f)
@@ -2601,10 +2604,16 @@ def align(
     locs: list[pd.DataFrame],
     infos: list[dict],
     display: bool = False,
+    *,
+    apply_shifts: bool = True,
+    return_shifts: bool = False,
 ) -> pd.DataFrame:
     """Align localizations from multiple channels (one per each element
     in `locs`) by calculating the shifts between the rendered images
     using RCC.
+
+    TODO: v1.0: This should be the main function that uses align_rcc or
+        align_from_picked.
 
     Parameters
     ----------
@@ -2616,6 +2625,12 @@ def align(
         localization array in `locs`.
     display : bool, optional
         Not used.
+    apply_shifts: bool, optional
+        If True, applies the calculated shifts to the 'x' and 'y'
+        coordinates of the localizations. If False, returns the original
+        localizations without applying the shifts. Default is True.
+    return_shifts : bool, optional
+        If True, also returns the calculated shifts for each channel.
 
     Returns
     -------
@@ -2628,10 +2643,237 @@ def align(
         _, image = render.render(locs_, info_, blur_method="smooth")
         images.append(image)
     shift_y, shift_x = imageprocess.rcc(images)
-    for i, (locs_, dx, dy) in enumerate(zip(locs, shift_x, shift_y)):
-        locs_["y"] -= dy
-        locs_["x"] -= dx
-    return locs
+    if apply_shifts:
+        for i, (locs_, dx, dy) in enumerate(zip(locs, shift_x, shift_y)):
+            locs_["y"] -= dy
+            locs_["x"] -= dx
+    if return_shifts:
+        shifts = (shift_x, shift_y)
+        return locs, shifts
+    else:
+        return locs
+
+
+def align_rcc(
+    locs: list[pd.DataFrame],
+    infos: list[list[dict]],
+    display: bool = False,
+    return_shifts: bool = False,
+) -> pd.DataFrame:
+    """Align localizations from multiple channels (one per each element
+    in `locs`) by calculating the shifts between the rendered images
+    using RCC. This is a wrapper around `align` for backward compatibility.
+
+    Parameters
+    ----------
+    locs : list of pd.DataFrames
+        List of localization datasets which are to be aligned.
+    infos : list of list of dicts
+        List of metadata dictionaries corresponding to each
+        localization DataFrame in `locs`.
+    display : bool, optional
+        If True, displays the estimated shifts. Default is False.
+    return_shifts : bool, optional
+        If True, also returns the calculated shifts for each channel.
+        Default is False.
+
+    Returns
+    -------
+    locs : list of pd.DataFrames
+        Aligned localizations with the shifts applied to the 'x' and
+        'y' coordinates.
+    """
+    locs = deepcopy(locs)
+    max_iterations = 5
+    iteration = 0
+    convergence = 0.001  # (camera pixels), around 0.1 nm
+    shift_x = []
+    shift_y = []
+    shift_z = []
+    for iteration in range(max_iterations):
+        completed = True
+
+        # find shift between channels
+        shift = align(
+            locs, infos, display=False, apply_shifts=False, return_shifts=True
+        )[1]
+        temp_shift_x = []
+        temp_shift_y = []
+        temp_shift_z = []
+        for i, locs_ in enumerate(locs):
+            if (
+                np.absolute(shift[0][i]) + np.absolute(shift[1][i])
+                > convergence
+            ):
+                completed = False
+
+            # shift each channel
+            locs_["x"] -= shift[0][i]
+            locs_["y"] -= shift[1][i]
+
+            temp_shift_x.append(shift[0][i])
+            temp_shift_y.append(shift[1][i])
+
+            if len(shift) == 3:
+                locs_["z"] -= shift[2][i]
+                temp_shift_z.append(shift[2][i])
+        shift_x.append(np.mean(temp_shift_x))
+        shift_y.append(np.mean(temp_shift_y))
+        if len(shift) == 3:
+            shift_z.append(np.mean(temp_shift_z))
+        iteration += 1
+
+        # Skip when converged:
+        if completed:
+            break
+
+    # Plot shift
+    if display:
+        fig1 = plt.figure(figsize=(8, 8), constrained_layout=True)
+        plt.suptitle("Shift")
+        plt.subplot(1, 1, 1)
+        plt.plot(shift_x, "o-", label="x shift")
+        plt.plot(shift_y, "o-", label="y shift")
+        plt.xlabel("Iteration")
+        plt.ylabel("Mean Shift per Iteration (Px)")
+        plt.legend(loc="best")
+        fig1.show()
+
+    if return_shifts:
+        shifts = list(zip(shift_x, shift_y))
+        if len(shift) == 3:
+            shifts = list(zip(shift_x, shift_y, shift_z))
+        return locs, shifts
+    else:
+        return locs
+
+
+def align_from_picked(
+    all_locs: list[pd.DataFrame],
+    infos: list[list[dict]],
+    *,
+    picks: list[tuple] | str,
+    pick_shape: (
+        Literal["Circle", "Rectangle", "Polygon", "Square"] | None
+    ) = None,
+    pick_size: float | None = None,
+    return_shifts: bool = False,
+):
+    """Align picked localizations from multiple channels using picked
+    localizations.
+
+    Parameters
+    ----------
+    all_locs : list of pd.DataFrames
+        List of localization datasets.
+    infos : list of list of dicts
+        List of metadata dictionaries corresponding to each localization
+        dataset in `all_locs`.
+    picks : list of (2,) tuples or str
+        Coordinates of picked regions as (x, y) tuples, or a path to a
+        .yaml file containing circular picks (see
+        ``picasso.gui.render.View.load_picks``).
+    pick_shape : {"Circle", "Rectangle", "Polygon", "Square"}, optional
+        Shape of the picks. Required if `picks` is a list of coordinates.
+        Ignored if `picks` is a .yaml file (read from file). Default is
+        None.
+    pick_size : float or None, optional
+        Size of the picks. Required if `picks` is a list of coordinates.
+        Ignored if `picks` is a .yaml file (read from file). Default is
+        None.
+    return_shifts : bool, optional
+        If True, also returns the calculated shifts for each channel.
+        Default is False.
+
+    Returns
+    -------
+    aligned_locs: list of pd.DataFrames
+        List of aligned localization datasets, where the localizations
+        have been shifted according to the average shift calculated from
+        the picked localizations.
+    shifts: list of tuples
+        List of (dx, dy) shifts applied to each localization dataset in
+        `all_locs`, calculated as the average shift from the picked
+        localizations. Returned only if `return_shifts` is True.
+    """
+    if isinstance(picks, str):
+        picks, pick_shape, pick_size = io.load_picks(picks)
+    else:
+        assert (
+            pick_shape is not None
+        ), "pick_shape must be provided when picks is a list of coordinates"
+        if pick_shape != "Polygon":
+            assert (
+                pick_size is not None
+            ), "pick_size must be provided when picks is a list of coordinates"
+
+    pl = [
+        picked_locs(l, i, picks, pick_shape, pick_size)
+        for l, i in zip(all_locs, infos)
+    ]
+    dy = _shifts_from_picked_coordinate(pl, coordinate="y")
+    dx = _shifts_from_picked_coordinate(pl, coordinate="x")
+    if all(["z" in _[0].columns for _ in pl]):
+        dz = _shifts_from_picked_coordinate(pl, coordinate="z")
+    else:
+        dz = None
+    shift = lib.minimize_shifts(dx, dy, shifts_z=dz)
+
+    # align each channel
+    aligned_locs = []
+    for i, locs_ in enumerate(all_locs):
+        locs_.y -= shift[0][i]
+        locs_.x -= shift[1][i]
+        if len(shift) == 3:
+            locs_.z -= shift[2][i]
+        aligned_locs.append(locs_.copy())
+
+    if return_shifts:
+        return aligned_locs, shift
+    else:
+        return aligned_locs
+
+
+def _shifts_from_picked_coordinate(
+    locs: list[list[pd.DataFrame]],
+    infos: None = None,
+    *,
+    coordinate: Literal["x", "y", "z"] = "x",
+):
+    """Calculate shifts between channels along a given coordinate.
+
+    Parameters
+    ----------
+    locs : list of lists of pd.DataFrames
+        Each element stores picked localizations from a channel, pick
+        by pick, see `picked_locs`.
+    infos : None
+        Ignored, kept for compatibility.
+    coordinate : {'x', 'y', 'z'}
+        Specifies which coordinate should be used.
+
+    Returns
+    -------
+    shifts : np.ndarray
+        Array of shape (n_channels, n_channels) with shifts between
+        all channels.
+    """
+    n_channels = len(locs)
+    # Calculating center of mass for each channel and pick
+    coms = []
+    for channel_locs in locs:
+        coms.append([])
+        for group_locs in channel_locs:
+            group_com = getattr(group_locs, coordinate).mean()
+            coms[-1].append(group_com)
+    # Calculating image shifts
+    shifts = np.zeros((n_channels, n_channels))
+    for i in range(n_channels - 1):
+        for j in range(i + 1, n_channels):
+            shifts[i, j] = np.nanmean(
+                [cj - ci for ci, cj in zip(coms[i], coms[j])]
+            )
+    return shifts
 
 
 def groupprops(

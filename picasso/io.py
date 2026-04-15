@@ -18,7 +18,7 @@ import json
 import os
 import threading
 import warnings
-from typing import Callable
+from typing import Callable, Literal
 
 import yaml
 import h5py
@@ -392,6 +392,74 @@ def load_mask(
     if "SPINNA" not in value:
         raise TypeError("Please load a mask provided by Picasso SPINNA")
     return mask, info
+
+
+def load_picks(
+    path: str, pixelsize: float | None = None
+) -> tuple[list, Literal["Circle", "Rectangle", "Polygon", "Square"], float]:
+    """Load picks generated with the Picasso GUI.
+
+    Parameters
+    ----------
+    path : str
+        The path to the picks file.
+    pixelsize : float, optional
+        Camera pixel size in nm. Used to convert pick size from nm to
+        camera pixels (which are the units of localizations coordinates).
+        If None, the size will be returned in original units.
+
+    Returns
+    -------
+    picks : list
+        A list of picks.
+    shape : Literal["Circle", "Rectangle", "Polygon", "Square"]
+        The shape of the picks.
+    size : float
+        The size of the picks in camera pixels (if `pixelsize` is
+        provided, otherwise in original units). For circular picks, the
+        size is the radius; for rectangular picks, the size is the width;
+        for square picks, the size is the side length. None for
+        polygonal picks (size not defined).
+    """
+    assert path.endswith(".yaml"), "Picks should be stored in a .yaml file."
+
+    # load the file
+    with open(path, "r") as f:
+        regions = yaml.full_load(f)
+
+    # Backwards compatibility for old picked region files
+    if "Shape" in regions:
+        shape = regions["Shape"]
+    elif "Centers" in regions and "Diameter" in regions:
+        shape = "Circle"
+    else:
+        raise ValueError("Unrecognized picks file")
+
+    pixelsize = 1 if pixelsize is None else pixelsize
+
+    # assign loaded picks and pick size
+    if shape == "Circle":
+        picks = regions["Centers"]
+        if "Diameter (nm)" in regions:
+            size = regions["Diameter (nm)"] / pixelsize / 2
+        elif "Diameter" in regions:
+            size = regions["Diameter"] / 2
+    elif shape == "Rectangle":
+        picks = regions["Center-Axis-Points"]
+        if "Width (nm)" in regions:
+            size = regions["Width (nm)"] / pixelsize
+        elif "Width" in regions:
+            size = regions["Width"]
+    elif shape == "Polygon":
+        picks = regions["Vertices"]
+        size = None
+    elif shape == "Square":
+        picks = regions["Centers"]
+        # no backward compatibility here, always in nm
+        size = regions["Side Length (nm)"] / pixelsize
+    else:
+        raise ValueError("Unrecognized pick shape")
+    return picks, shape, size
 
 
 def load_user_settings() -> lib.AutoDict:
