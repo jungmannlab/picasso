@@ -63,7 +63,7 @@ class TableModel(QtCore.QAbstractTableModel):
     def __init__(
         self,
         locs: pd.DataFrame,
-        index: QtCore.QModelIndex,
+        index: int,
         parent: QtWidgets.QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -75,10 +75,10 @@ class TableModel(QtCore.QAbstractTableModel):
             self._column_count = 0
         self._row_count = self.locs.shape[0]
 
-    def columnCount(self, parent: None) -> int:
+    def columnCount(self, parent: QtCore.QModelIndex | None = None) -> int:
         return self._column_count
 
-    def rowCount(self, parent: None) -> int:
+    def rowCount(self, parent: QtCore.QModelIndex | None = None) -> int:
         return self._row_count
 
     def data(

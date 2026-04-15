@@ -184,7 +184,7 @@ class MaskPreview(QtWidgets.QLabel):
 
     Attributes
     ----------
-    image : np.ndarray
+    image : lib.FloatArray2D
         Currently shown image of the mask.
     mask_tab : MaskGeneratorTab
         Parent tab, used for generating masks.
@@ -198,7 +198,9 @@ class MaskPreview(QtWidgets.QLabel):
         super().__init__(mask_tab)
         self.mask_tab = mask_tab
         self.qimage = None  # currently shown image of the mask (QImage)
-        self.image = None  # currently shown image of the mask (np.ndarray)
+        self.image = (
+            None  # currently shown image of the mask (lib.FloatArray2D)
+        )
         self.viewport = None
         self.setFixedWidth(MASK_PREVIEW_SIZE)
         self.setFixedHeight(MASK_PREVIEW_SIZE)
@@ -234,7 +236,7 @@ class MaskPreview(QtWidgets.QLabel):
             self.image = self.mask_tab.mask.copy()[y_min:y_max, x_min:x_max]
         self.render_image()
 
-    def to_2D(self, image: np.ndarray) -> np.ndarray:
+    def to_2D(self, image: lib.FloatArray2D) -> lib.FloatArray2D:
         """Convert mask to 2D that can be displayed (viewed from +z)."""
         if image.ndim == 3:
             z_idx = (
@@ -251,11 +253,11 @@ class MaskPreview(QtWidgets.QLabel):
         image /= image.max()
         return image
 
-    def to_8bit(self, image: np.ndarray) -> np.ndarray:
-        """Convert image (np.ndarray) to 8bit."""
+    def to_8bit(self, image: lib.FloatArray2D) -> lib.IntArray2D:
+        """Convert image (lib.FloatArray2D) to 8bit."""
         return np.round(255 * image).astype("uint8")
 
-    def get_qimage(self, image: np.ndarray) -> QtGui.QImage:
+    def get_qimage(self, image: lib.IntArray2D) -> QtGui.QImage:
         """Apply magma cmap to the image and converts it to QImage."""
         Y, X = image.shape
         bgra = np.zeros((Y, X, 4), dtype=np.uint8, order="C")
@@ -274,7 +276,7 @@ class MaskPreview(QtWidgets.QLabel):
         )
         return qimage
 
-    def draw_scalebar(self, image: np.ndarray) -> np.ndarray | None:
+    def draw_scalebar(self, image: QtGui.QImage) -> QtGui.QImage | None:
         """Draw scalebar onto image."""
         if image is None or not self.mask_tab.scalebar_check.isChecked():
             return image
@@ -433,11 +435,11 @@ class MaskGeneratorTab(lib.Dialog):
         Displays the legend for the mask.
     load_locs_button : QtWidgets.QPushButton
         Button that loads the molecules.
-    locs : np.ndarray
+    locs : pd.DataFrame
         Localization list to be used for generating the mask.
     locs_path : str
         Path to the molecules.
-    mask : np.ndarray
+    mask : lib.FloatArray2D | lib.FloatArray3D
         Generated mask; pixel/voxel values give probability mass
         function for find a molecule in the pixel/voxel.
     mask_binsize_xy, mask_binsize_z : QtWidgets.QSpinBox
@@ -954,12 +956,14 @@ class MaskGeneratorTab(lib.Dialog):
                 blur.setValue(value)
                 blur.blockSignals(False)
 
-    def on_preview_updated(self, image: np.ndarray) -> None:
+    def on_preview_updated(
+        self, image: lib.FloatArray2D | lib.FloatArray3D
+    ) -> None:
         """Update the legend according to the current field of view.
 
         Parameters
         ----------
-        image : np.ndarray
+        image : lib.FloatArray2D | lib.FloatArray3D
             Currently shown image of the mask. Values give the
             probability mass function for finding a molecule in the
             pixel/voxel.
@@ -990,7 +994,7 @@ class StructurePreview(QtWidgets.QLabel):
     ----------
     angx, angy, angz : float
         Rotation angles in radians.
-    coords : list of np.2darrays
+    coords : list of lib.FloatArray2D
         Each element contains the coordinates (in pixels) of each
         molecular target species loaded.
     factor : float
@@ -1000,7 +1004,7 @@ class StructurePreview(QtWidgets.QLabel):
         Currently loaded structure.
     structure_tab : StructureTab
         Parent tab, used for loading structures.
-    ORIGIN : np.2darray
+    ORIGIN : lib.IntArray1D
         Origin of the coordinate system displaying the molecular
         targets.
     qimage : QtGui.QImage
@@ -1049,13 +1053,13 @@ class StructurePreview(QtWidgets.QLabel):
 
         self.render()
 
-    def extract_coordinates(self) -> np.ndarray:
+    def extract_coordinates(self) -> list[lib.FloatArray2D]:
         """Extract x, y and z coordinates of the loaded structure (no
         rotation). Also finds the scaling factor (from nm to pixels).
 
         Returns
         -------
-        coords : list of np.2darrays
+        coords : list of lib.FloatArray2D
             Each element contains the x,y,z coordinates of each
             molecular target species in self.structure.
         """
@@ -1078,37 +1082,37 @@ class StructurePreview(QtWidgets.QLabel):
         self.factor = factor
         return coords
 
-    def rotate(self, coords: list[np.ndarray]) -> list[np.ndarray]:
+    def rotate(self, coords: list[lib.FloatArray2D]) -> list[lib.FloatArray2D]:
         """Rotate coordinates of each molecular target species.
 
         Parameters
         ----------
-        coords : list of np.2darrays
+        coords : list of lib.FloatArray2D
             Each element contains the coordinates each molecular target
             species loaded.
 
         Returns
         -------
-        coords_rot : lists of np.2darrays
+        coords_rot : list of lib.FloatArray2D
             Rotated coordinates.
         """
         rot = Rotation.from_euler("zyx", (self.angz, self.angy, self.angx))
         coords_rot = [rot.apply(_) for _ in coords]
         return coords_rot
 
-    def scale(self, coords: list[np.ndarray]) -> list[np.ndarray]:
+    def scale(self, coords: list[lib.FloatArray2D]) -> list[lib.FloatArray2D]:
         """Scale molecular targets' coordinates from nm to display
         pixels.
 
         Parameters
         ----------
-        coords : list of np.2darrays
+        coords : list of lib.FloatArray2D
             Each element contains the x,y,z coordinates (in nm) of each
             molecular target species in self.structure.
 
         Returns
         -------
-        coords_scaled : list of np.2darrays
+        coords_scaled : list of lib.FloatArray2D
             Scaled coordinates (in pixels).
         """
         coords_scaled = []
@@ -1117,18 +1121,18 @@ class StructurePreview(QtWidgets.QLabel):
             coords_scaled.append(coord * self.factor)
         return coords_scaled
 
-    def shift(self, coords: list[np.ndarray]) -> list[np.ndarray]:
+    def shift(self, coords: list[lib.FloatArray2D]) -> list[lib.IntArray2D]:
         """Shift x and y coordinates towards self.ORIGIN.
 
         Parameters
         ----------
-        coords : lists of np.2darrays
+        coords : list of lib.FloatArray2D
             Each element contains the coordinates (in pixels) of each
             molecular target species loaded.
 
         Returns
         -------
-        coords_shifted : lists of lists
+        coords_shifted : list of lib.IntArray2D
             Shifted coordinates converted to integers.
         """
         coords_shifted = [_ + self.ORIGIN for _ in coords]
@@ -1151,7 +1155,7 @@ class StructurePreview(QtWidgets.QLabel):
         self.qimage = self.draw_rotation(qimage)
         self.setPixmap(QtGui.QPixmap.fromImage(self.qimage))
 
-    def generate_background(self) -> np.ndarray:
+    def generate_background(self) -> lib.IntArray3D:
         """Generate black background for display."""
         image = np.zeros(
             (STRUCTURE_PREVIEW_SIZE, STRUCTURE_PREVIEW_SIZE, 4), dtype=np.uint8
@@ -1159,7 +1163,7 @@ class StructurePreview(QtWidgets.QLabel):
         image[:, :, 3].fill(255)
         return image
 
-    def draw_molecular_targets(self, image: np.ndarray) -> np.ndarray:
+    def draw_molecular_targets(self, image: QtGui.QImage) -> QtGui.QImage:
         """Draw molecular targets (from self.coords) onto image."""
         if self.coords is None:
             return image
@@ -1181,7 +1185,7 @@ class StructurePreview(QtWidgets.QLabel):
         painter.end()
         return image
 
-    def draw_title(self, image: np.ndarray) -> np.ndarray:
+    def draw_title(self, image: QtGui.QImage) -> QtGui.QImage:
         """Draw title of the loaded structure onto image."""
         if self.structure is None:
             title = "Please load a structure."
@@ -1197,7 +1201,7 @@ class StructurePreview(QtWidgets.QLabel):
         painter.end()
         return image
 
-    def draw_legend(self, image: np.ndarray) -> np.ndarray:
+    def draw_legend(self, image: QtGui.QImage) -> QtGui.QImage:
         """Draw legend onto image."""
         # make sure that a non-empty structure is loaded
         if (
@@ -1222,7 +1226,7 @@ class StructurePreview(QtWidgets.QLabel):
         painter.end()
         return image
 
-    def draw_scalebar(self, image: np.ndarray) -> np.ndarray:
+    def draw_scalebar(self, image: QtGui.QImage) -> QtGui.QImage | None:
         """Draw scalebar onto image."""
         if (
             self.coords is None
@@ -1243,7 +1247,7 @@ class StructurePreview(QtWidgets.QLabel):
         painter.end()
         return image
 
-    def draw_rotation(self, image: np.ndarray) -> np.ndarray:
+    def draw_rotation(self, image: QtGui.QImage) -> QtGui.QImage:
         """Draw a small 3 axes icon that rotates with the molecular,
         targets displayed in the bottom left corner."""
         painter = QtGui.QPainter(image)
@@ -2110,7 +2114,7 @@ class CompareModelsDialog(lib.Dialog):
     def getParams(
         parent: QtWidgets.QWidget,
         targets: list[str],
-    ) -> tuple[list[dict], list[str], dict[str, np.ndarray], bool, bool]:
+    ) -> tuple[list[dict], list[str], dict[str, lib.FloatArray1D], bool, bool]:
         dialog = CompareModelsDialog(parent, targets)
         result = dialog.exec()
         label_unc = {}
@@ -3697,7 +3701,9 @@ class SimulationsTab(lib.Dialog):
         self.mixer = self.setup_mixer(mode="single_sim")
         self.sim_and_plot_NND()
 
-    def update_prop_str_input_spins(self, prop_str: np.ndarray) -> None:
+    def update_prop_str_input_spins(
+        self, prop_str: lib.FloatArray1D | lib.FloatArray2D
+    ) -> None:
         """Update the values of the input proportions of structures
         for a single simulation and adds a button to retrieve these
         results."""
@@ -3738,7 +3744,9 @@ class SimulationsTab(lib.Dialog):
             button, self.prop_str_input.content_layout.rowCount(), 0, 1, 2
         )
 
-    def display_proportions(self, prop_str: np.ndarray) -> None:
+    def display_proportions(
+        self, prop_str: lib.FloatArray1D | lib.FloatArray2D
+    ) -> None:
         """Display the proportions of the best fitting numbers of
         structures."""
         # different display if bootstrap results are to be displayed

@@ -31,12 +31,14 @@ from PyQt6 import QtCore, QtGui, QtWidgets
 from .. import io, lib, simulate, __version__
 
 
-def fitFuncBg(x: np.ndarray, a: float, b: float) -> float:
+def fitFuncBg(x: lib.FloatArray2D, a: float, b: float) -> lib.FloatArray1D:
     """Background fitting function."""
     return (a + b * x[0]) * x[1] * x[2]
 
 
-def fitFuncStd(x: np.ndarray, a: float, b: float, c: float) -> float:
+def fitFuncStd(
+    x: lib.FloatArray2D, a: float, b: float, c: float
+) -> lib.FloatArray1D:
     """Standard fitting function."""
     return a * x[0] * x[1] + b * x[2] + c
 
@@ -1240,7 +1242,7 @@ class Window(QtWidgets.QMainWindow):
         if e.key() == QtCore.Qt.Key.Key_Escape:
             self.close()
 
-    def vectorToString(self, x: np.ndarray) -> str:
+    def vectorToString(self, x: lib.FloatArray1D) -> str:
         """Convert a numpy array to a comma-separated string."""
         x_arrstr = np.char.mod("%f", x)
         x_str = ",".join(x_arrstr)
@@ -1741,7 +1743,7 @@ class Window(QtWidgets.QMainWindow):
         linetxt: str,
         type: Literal["float", "int"] = "float",
         textmode: bool = True,
-    ) -> np.ndarray:
+    ) -> list[float] | list[int]:
         """Convert line text to a numpy array."""
         if textmode:
             line = np.asarray((linetxt.text()).split(","))
@@ -1848,7 +1850,7 @@ class Window(QtWidgets.QMainWindow):
 
     def readStructure(
         self,
-    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    ) -> tuple[list[float], list[float], list[int], list[float]]:
         """Extract x,y,z coordinates and exchange round information from
         the GUI."""
         structurexx = self.readLine(self.structurexxEdit)
@@ -2138,7 +2140,9 @@ class Window(QtWidgets.QMainWindow):
 
         figure4.show()
 
-    def sigmafilter(self, data: np.ndarray, sigmas: float) -> np.ndarray:
+    def sigmafilter(
+        self, data: lib.FloatArray1D, sigmas: float
+    ) -> lib.FloatArray1D:
         """Filter data to be within +- sigma."""
         sigma = np.std(data)
         mean = np.mean(data)

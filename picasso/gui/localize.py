@@ -3054,7 +3054,7 @@ class FitZWorker(QtCore.QThread):
     def __init__(
         self,
         locs: pd.DataFrame,
-        info: dict,
+        info: list[dict],
         calibration: dict,
         magnification_factor: float,
         pixelsize: float,
@@ -3107,7 +3107,11 @@ class QualityWorker(QtCore.QThread):
     finished = QtCore.pyqtSignal(str)
 
     def __init__(
-        self, locs: pd.DataFrame, info: dict, path: str, pixelsize: float
+        self,
+        locs: pd.DataFrame,
+        info: list[dict],
+        path: str,
+        pixelsize: QtWidgets.QDoubleSpinBox,
     ) -> None:
         super().__init__()
         self.locs = locs

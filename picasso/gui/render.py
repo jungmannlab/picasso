@@ -52,6 +52,14 @@ from .. import (
     render,
     __version__,
 )
+from ..lib import (
+    FloatArray1D,
+    FloatArray2D,
+    FloatArray3D,
+    IntArray1D,
+    IntArray2D,
+    IntArray3D,
+)
 from .rotation import RotationWindow
 
 # PyImarisWrite works on windows only
@@ -113,13 +121,13 @@ def get_render_properties_colors(
     return colors
 
 
-def fit_cum_exp(data: np.ndarray) -> dict:
+def fit_cum_exp(data: FloatArray1D) -> dict:
     """Fit a cumulative exponential function to data. Used for binding
     kinetics estimation.
 
     Parameters
     ----------
-    data : np.ndarray
+    data : FloatArray1D
         Input data to fit, shape (N,).
 
     Returns
@@ -145,13 +153,13 @@ def fit_cum_exp(data: np.ndarray) -> dict:
     return result
 
 
-def estimate_kinetic_rate(data: np.ndarray) -> float:
+def estimate_kinetic_rate(data: FloatArray1D) -> float:
     """Find the mean dark/bright time by fitting to a cumulative
     exponential function.
 
     Parameters
     ----------
-    data : np.ndarray
+    data : FloatArray1D
         Input data to fit, shape (N,).
 
     Returns
@@ -2980,7 +2988,7 @@ class TestClustererDialog(lib.Dialog):
 
         return params
 
-    def get_full_fov(self) -> np.ndarray:
+    def get_full_fov(self) -> None:
         """Update viewport in self.view."""
         if self.view.locs is not None:
             self.view.viewport = self.view.get_full_fov()
@@ -3585,7 +3593,7 @@ class TestClustererView(QtWidgets.QLabel):
         width = self.viewport_width()
         return (self._size / min(height, width)) / 1.05
 
-    def scale_contrast(self, images: list[np.ndarray]) -> list[np.ndarray]:
+    def scale_contrast(self, images: list[FloatArray2D]) -> list[FloatArray2D]:
         """Find optimal contrast for images.
 
         Parameters
@@ -5130,7 +5138,7 @@ class MaskSettingsDialog(lib.Dialog):
 
     def render_to_pixmap(
         self,
-        image: np.ndarray,
+        image: FloatArray2D,
         cmap: str = None,
         title: str = "",
     ) -> QtGui.QPixmap:
@@ -5139,7 +5147,7 @@ class MaskSettingsDialog(lib.Dialog):
 
         Parameters
         ----------
-        image : np.ndarray
+        image : FloatArray2D
             2D array to be converted.
         cmap : str or None, optional
             Colormap to be used. If None, self.cmap is used. Default is
@@ -6719,7 +6727,7 @@ class View(QtWidgets.QLabel):
         self.x_render_cache = []
         self.x_render_state = False
 
-    def get_group_color(self, locs: pd.DataFrame) -> np.ndarray:
+    def get_group_color(self, locs: pd.DataFrame) -> IntArray1D:
         """Find group color for each localization in single channel data
         with group info.
 
@@ -6730,7 +6738,7 @@ class View(QtWidgets.QLabel):
 
         Returns
         -------
-        colors : np.ndarray
+        colors : IntArray1D
             Array with integer group color index for each localization.
         """
         colors = locs["group"].to_numpy().astype(int) % N_GROUP_COLORS
@@ -7717,7 +7725,7 @@ class View(QtWidgets.QLabel):
         self,
         locs: list[list[pd.DataFrame]],
         coordinate: Literal["x", "y", "z"],
-    ) -> np.ndarray:
+    ) -> FloatArray2D:
         """Calculate shifts between channels along a given coordinate.
 
         Parameters
@@ -7730,7 +7738,7 @@ class View(QtWidgets.QLabel):
 
         Returns
         -------
-        d : np.ndarray
+        d : lib.FloatArray2D
             Array of shape (n_channels, n_channels) with shifts between
             all channels.
         """
@@ -7754,8 +7762,8 @@ class View(QtWidgets.QLabel):
     def shift_from_picked(
         self,
     ) -> (
-        tuple[np.ndarray, np.ndarray]
-        | tuple[np.ndarray, np.ndarray, np.ndarray]
+        tuple[FloatArray1D, FloatArray1D]
+        | tuple[FloatArray1D, FloatArray1D, FloatArray1D]
     ):
         """Used by ``self.align``. For each pick, calculate the center
         of mass and RCC based on shifts.
@@ -7776,7 +7784,7 @@ class View(QtWidgets.QLabel):
             dz = None
         return lib.minimize_shifts(dx, dy, shifts_z=dz)
 
-    def shift_from_rcc(self) -> tuple[np.ndarray, np.ndarray]:
+    def shift_from_rcc(self) -> tuple[FloatArray1D, FloatArray1D]:
         """Used by ``self.align``. Estimate image shifts using RCC on
         whole images.
 
@@ -8761,7 +8769,7 @@ class View(QtWidgets.QLabel):
                 return
             self.load_drift_drop(channel, data)
 
-    def load_fov_drop(self, fov: np.ndarray) -> None:
+    def load_fov_drop(self, fov: FloatArray1D) -> None:
         """Check if path is a fov .txt file (4 coordinates) and load the
         FOV."""
         (x, y, w, h) = fov
@@ -8773,7 +8781,7 @@ class View(QtWidgets.QLabel):
                 f"{w:.2f} / {h:.2f} pixels"
             )
 
-    def load_drift_drop(self, channel: int, drift: np.ndarray) -> None:
+    def load_drift_drop(self, channel: int, drift: FloatArray2D) -> None:
         """Attempts to load a drift .txt file (2 or 3 columns) and apply
         the drift to localizations. Assumes only one channel is
         currently loaded."""
@@ -10132,12 +10140,12 @@ class View(QtWidgets.QLabel):
         return self.index_blocks[channel]
 
     @check_pick
-    def pick_areas(self) -> np.ndarray:
+    def pick_areas(self) -> FloatArray1D:
         """Find areas of all selected picks in um^2.
 
         Returns
         -------
-        areas : np.ndarray
+        areas : FloatArray1D
             Areas of all picks.
         """
         px = self.window.display_settings_dlg.pixelsize.value()
@@ -10640,7 +10648,7 @@ class View(QtWidgets.QLabel):
         autoscale: bool = False,
         use_cache: bool = False,
         cache: bool = True,
-    ) -> np.ndarray:
+    ) -> IntArray3D:
         """Render multichannel (color-coded) localizations.
 
         Also used when localizations have 'group' field is used, for
@@ -10662,7 +10670,7 @@ class View(QtWidgets.QLabel):
 
         Returns
         -------
-        _bgra : np.ndarray
+        _bgra : IntArray3D
             8 bit array with 4 channels (blue, green, red and alpha).
         """
         # get localizations for rendering
@@ -10745,7 +10753,7 @@ class View(QtWidgets.QLabel):
         autoscale: bool = False,
         use_cache: bool = False,
         cache: bool = True,
-    ) -> np.ndarray:
+    ) -> IntArray3D:
         """Render single channel localizations.
 
         Calls ``self.render_multi_channel`` in case of clustered, picked
@@ -10764,7 +10772,7 @@ class View(QtWidgets.QLabel):
 
         Returns
         -------
-        _bgra : np.ndarray
+        _bgra : IntArray3D
             8 bit array with 4 channels (blue, green, red and alpha).
         """
         # get localizations for rendering
@@ -11198,22 +11206,22 @@ class View(QtWidgets.QLabel):
 
     def scale_contrast(
         self,
-        image: np.ndarray,
+        image: FloatArray2D | FloatArray3D,
         autoscale: bool = False,
-    ) -> np.ndarray | list[np.ndarray]:
+    ) -> FloatArray2D | FloatArray3D:
         """Scale image based on contrast values from
         ``DisplaySettingsDialog``.
 
         Parameters
         ----------
-        image : np.ndarray or list of np.arrays
+        image : FloatArray2D | FloatArray3D
             Array with rendered localizations (grayscale).
         autoscale : bool, optional
             If True, finds optimal contrast. Default is False.
 
         Returns
         -------
-        image : np.array or list of np.arrays
+        image : FloatArray2D | FloatArray3D
             Scaled image(s).
         """
         if autoscale:  # find optimum contrast
@@ -11439,17 +11447,19 @@ class View(QtWidgets.QLabel):
         """Return recommended window size."""
         return QtCore.QSize(*self._size_hint)
 
-    def to_8bit(self, image: np.ndarray) -> np.ndarray:
+    def to_8bit(
+        self, image: FloatArray2D | FloatArray3D
+    ) -> IntArray2D | IntArray3D:
         """Converts image to 8 bit ready to convert to QImage.
 
         Parameters
         ----------
-        image : np.ndarray
+        image : FloatArray2D | FloatArray3D
             Image to be converted, with values between 0.0 and 1.0.
 
         Returns
         -------
-        image : np.ndarray
+        image : IntArray2D | IntArray3D
             Image converted to 8 bit.
         """
         image = np.round(255 * image).astype("uint8")
@@ -11734,7 +11744,7 @@ class View(QtWidgets.QLabel):
                 self._apply_drift(channel, drift)
                 self._driftfiles[channel] = path
 
-    def _apply_drift(self, channel: int, drift: np.ndarray) -> None:
+    def _apply_drift(self, channel: int, drift: FloatArray2D) -> None:
         """Shift localizations in a given channel based on drift from a
         .txt file."""
         all_frame = self.all_locs[channel]["frame"]

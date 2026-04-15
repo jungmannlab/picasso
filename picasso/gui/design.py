@@ -33,7 +33,7 @@ PAINT_SEQUENCES = design_sequences.paint_sequences
 
 def plotPlate(
     selection: list[str],
-    selectioncolors: list[float],
+    selectioncolors: list[list[float]],
     platename: str,
 ) -> plt.Figure:
     """Plot a 96-well plate with docking strands color-coded.
@@ -284,7 +284,7 @@ defaultcolor = allcolors[0]
 maxcolor = 8
 
 
-def indextoHex(y: float, x: float) -> tuple[float, float]:
+def indextoHex(y: int, x: int) -> tuple[float, float]:
     """Convert 2D index (row, col) to hexagonal coordinates."""
     hex_center_x = x * 1.5 * HEX_SIDE_HALF
     if _np.mod(x, 2) == 0:
@@ -294,7 +294,7 @@ def indextoHex(y: float, x: float) -> tuple[float, float]:
     return hex_center_x, hex_center_y
 
 
-def indextoStr(x: float, y: float) -> tuple[str, int]:
+def indextoStr(x: int, y: int) -> tuple[str, int]:
     """Convert 2D index (col, row) to string representation."""
     rowStr = rowIndex[y]
     colStr = columnIndex[x]
@@ -1155,13 +1155,13 @@ class Scene(QtWidgets.QGraphicsScene):
         )
         self.evaluateCanvas()
 
-    def vectorToString(self, x: _np.ndarray) -> str:
+    def vectorToString(self, x: lib.FloatArray1D) -> str:
         """Convert a numpy vector to a string representation."""
         x_arrstr = _np.char.mod("%f", x)
         x_str = ", ".join(x_arrstr)
         return x_str
 
-    def vectorToStringInt(self, x: _np.ndarray) -> str:
+    def vectorToStringInt(self, x: lib.IntArray1D) -> str:
         """Convert a numpy vector of integers to a string
         representation."""
         x_arrstr = _np.char.mod("%i", x)

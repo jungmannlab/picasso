@@ -20,9 +20,11 @@ import importlib
 import pkgutil
 from multiprocessing import sharedctypes
 
+import ctypes
 import matplotlib.pyplot as plt
 import numba
 import scipy
+import scipy.sparse
 import numpy as np
 import pandas as pd
 from PyQt6 import QtCore, QtGui, QtWidgets
@@ -32,12 +34,12 @@ from .. import io, lib, render, __version__
 
 @numba.jit(nopython=True, nogil=True)
 def render_hist(
-    x: np.ndarray,
-    y: np.ndarray,
+    x: lib.FloatArray1D,
+    y: lib.FloatArray1D,
     oversampling: float,
     t_min: float,
     t_max: float,
-) -> tuple[int, np.ndarray]:
+) -> tuple[int, lib.FloatArray2D]:
     """Calculate 2D histogram of xy coordinates.
 
     Parameters
@@ -66,7 +68,9 @@ def render_hist(
     return len(x), image
 
 
-def compute_xcorr(CF_image_avg: np.ndarray, image: np.ndarray) -> np.ndarray:
+def compute_xcorr(
+    CF_image_avg: np.ndarray, image: lib.FloatArray2D
+) -> lib.FloatArray2D:
     """Compute cross-correlation between two images.
 
     Parameters
@@ -87,7 +91,7 @@ def compute_xcorr(CF_image_avg: np.ndarray, image: np.ndarray) -> np.ndarray:
 
 
 def align_group(
-    angles: np.ndarray,
+    angles: lib.FloatArray1D,
     oversampling: float,
     t_min: float,
     t_max: float,
@@ -148,9 +152,9 @@ def align_group(
 
 
 def init_pool(
-    x_: np.ndarray,
-    y_: np.ndarray,
-    group_index_: np.ndarray,
+    x_: ctypes.Array[ctypes.c_float],
+    y_: ctypes.Array[ctypes.c_float],
+    group_index_: scipy.sparse.lil_matrix,
 ) -> None:
     """Initialize pool process variables."""
     global x, y, group_index
@@ -186,7 +190,7 @@ class Worker(QtCore.QThread):
         self,
         locs: pd.DataFrame,
         r: float,
-        group_index: np.ndarray,
+        group_index: scipy.sparse.lil_matrix,
         oversampling: float,
         iterations: int,
     ) -> None:
@@ -490,7 +494,7 @@ class View(QtWidgets.QLabel):
         io.save_locs(path, out_locs, info)
         self.window.statusBar().showMessage("File saved to {}.".format(path))
 
-    def set_image(self, image: np.ndarray) -> None:
+    def set_image(self, image: lib.FloatArray2D) -> None:
         """Sets the new image to be displayed.
 
         Parameters

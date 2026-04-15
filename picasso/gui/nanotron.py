@@ -113,9 +113,9 @@ class Generator(QtCore.QThread):
 
     def combine_data_sets(
         self,
-        X_files: list[list[np.ndarray]],
+        X_files: list[list[lib.FloatArray1D]],
         Y_files: list[list[int]],
-    ) -> tuple[list[np.ndarray], list[int]]:
+    ) -> tuple[list[lib.FloatArray1D], list[int]]:
         """Merges multiple datasets into one."""
         X = []
         Y = []
@@ -243,8 +243,8 @@ class Trainer(QtCore.QThread):
 
     def __init__(
         self,
-        X_train: np.ndarray,
-        Y_train: np.ndarray,
+        X_train: list[lib.FloatArray1D],
+        Y_train: list[int],
         parameter: dict,
         parent: QtWidgets.QWidget | None = None,
     ) -> None:
@@ -359,7 +359,7 @@ class Predictor(QtCore.QThread):
         self.prediction["group"] = np.unique(self.locs["group"])
         self.n_groups = len(np.unique(self.locs["group"]))
 
-    def checkConsecutive(self, ll: np.ndarray) -> bool:
+    def checkConsecutive(self, ll: lib.IntArray1D) -> bool:
         n = len(ll) - 1
         return sum(np.diff(sorted(ll)) == 1) >= n
 
@@ -367,14 +367,14 @@ class Predictor(QtCore.QThread):
         self,
         mlp: MLPClassifier,
         locs: pd.DataFrame,
-        picks: np.ndarray,
+        picks: lib.IntArray1D,
         pick_radius: float,
         oversampling: float,
         current: list[int],
         lock: threading.Lock,
         n_picks: int,
-        predictions: np.ndarray,
-        probabilities: np.ndarray,
+        predictions: lib.FloatArray1D,
+        probabilities: lib.FloatArray1D,
         finished: list[int],
     ) -> None:
         """Worker thread for making predictions allowing for parallel
@@ -404,10 +404,10 @@ class Predictor(QtCore.QThread):
         self,
         model: MLPClassifier,
         locs: pd.DataFrame,
-        picks: np.ndarray,
+        picks: lib.IntArray1D,
         pick_radius: float,
         oversampling: float,
-    ) -> None:
+    ) -> tuple[list[int], lib.FloatArray1D, lib.FloatArray1D, list[int]]:
         """Make predictions asynchronously, i.e., using
         multiprocessing."""
         n_picks = len(picks)

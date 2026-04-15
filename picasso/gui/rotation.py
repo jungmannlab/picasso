@@ -631,7 +631,7 @@ class ViewRotation(QtWidgets.QLabel):
         Current rotation angle around x, y, and z axes.
     block_x, block_y, block_z : bool
         True if rotate only around x, y, or z axis respectively.
-    group_color : np.array
+    group_color : lib.IntArray1D
         Important for single channel data with group info (picked or
         clustered locs); contains an integer index for each loc
         defining its color.
@@ -879,7 +879,7 @@ class ViewRotation(QtWidgets.QLabel):
         autoscale: bool = False,
         use_cache: bool = False,
         cache: bool = True,
-    ) -> np.ndarray:
+    ) -> lib.IntArray3D:
         """Render multichannel localizations. Also used for multi-color
         data (clustered or picked locs).
 
@@ -901,7 +901,7 @@ class ViewRotation(QtWidgets.QLabel):
 
         Returns
         -------
-        _bgra : np.ndarray
+        _bgra : lib.IntArray3D
             8 bit array with 4 channels (rgb and alpha).
         """
         # get locs to render
@@ -1029,7 +1029,7 @@ class ViewRotation(QtWidgets.QLabel):
         autoscale: bool = False,
         use_cache: bool = False,
         cache: bool = True,
-    ) -> np.ndarray:
+    ) -> lib.IntArray3D:
         """Render single channel localizations.
 
         Calls render_multi_channel in case of clustered or picked
@@ -1051,7 +1051,7 @@ class ViewRotation(QtWidgets.QLabel):
 
         Returns
         -------
-        _bgra : np.array
+        _bgra : lib.IntArray3D
             8 bit array with 4 channels (rgb and alpha).
         """
         locs = self.locs[0]
@@ -1192,7 +1192,7 @@ class ViewRotation(QtWidgets.QLabel):
         self.pixmap = QtGui.QPixmap.fromImage(self.qimage)
         self.setPixmap(self.pixmap)
 
-    def draw_scalebar(self, image: np.ndarray) -> np.ndarray:
+    def draw_scalebar(self, image: QtGui.QImage) -> QtGui.QImage:
         """Draw a scalebar.
 
         Parameters
@@ -1241,7 +1241,7 @@ class ViewRotation(QtWidgets.QLabel):
                 )
         return image
 
-    def draw_legend(self, image: np.ndarray) -> np.ndarray:
+    def draw_legend(self, image: QtGui.QImage) -> QtGui.QImage:
         """Draw a legend for multichannel data.
 
         Displayed in the top left corner, shows the color and the name
@@ -1278,7 +1278,7 @@ class ViewRotation(QtWidgets.QLabel):
                     y += dy
         return image
 
-    def draw_rotation(self, image: np.ndarray) -> np.ndarray:
+    def draw_rotation(self, image: QtGui.QImage) -> QtGui.QImage:
         """Draw a small 3 axes icon that rotates with locs.
 
         Displayed in the bottom left corner.
@@ -1347,7 +1347,7 @@ class ViewRotation(QtWidgets.QLabel):
             painter.drawLine(line_z)
         return image
 
-    def draw_rotation_angles(self, image: np.ndarray) -> np.ndarray:
+    def draw_rotation_angles(self, image: QtGui.QImage) -> QtGui.QImage:
         """Draw text displaying current rotation angles in degrees."""
         if self.window.angles_action.isChecked():
             [angx, angy, angz] = [
@@ -1367,7 +1367,7 @@ class ViewRotation(QtWidgets.QLabel):
             painter.drawText(QtCore.QPoint(x, y), text)
         return image
 
-    def draw_points(self, image: np.ndarray) -> np.ndarray:
+    def draw_points(self, image: QtGui.QImage) -> QtGui.QImage:
         """Draw points and lines and distances between them onto image.
 
         Parameters
@@ -2098,22 +2098,23 @@ class ViewRotation(QtWidgets.QLabel):
 
     def scale_contrast(
         self,
-        image: np.ndarray | list[np.ndarray],
+        image: lib.FloatArray2D | lib.FloatArray3D,
         autoscale: bool = False,
-    ) -> np.ndarray | list[np.ndarray]:
+    ) -> lib.FloatArray2D | lib.FloatArray3D:
         """Scale image based on contrast values from Display Settings
         Dialog.
 
         Parameters
         ----------
-        image : np.array or list of np.arrays
-            Array with rendered locs (grayscale).
+        image : lib.FloatArray2D | lib.FloatArray3D
+            Array with rendered locs (grayscale 2D, or stacked
+            n_channels x H x W 3D).
         autoscale : bool, optional
             If True, finds optimal contrast.
 
         Returns
         -------
-        image : np.array or list of np.arrays
+        image : lib.FloatArray2D | lib.FloatArray3D
             Scaled image(s).
         """
         if autoscale:  # find optimum contrast
@@ -2138,17 +2139,19 @@ class ViewRotation(QtWidgets.QLabel):
         image = np.maximum(image, 0.0)
         return image
 
-    def to_8bit(self, image: np.ndarray) -> np.ndarray:
+    def to_8bit(
+        self, image: lib.FloatArray2D | lib.FloatArray3D
+    ) -> lib.IntArray2D | lib.IntArray3D:
         """Convert image to 8 bit ready to convert to QImage.
 
         Parameters
         ----------
-        image : np.array
+        image : lib.FloatArray2D | lib.FloatArray3D
             Image to be converted, with values between 0.0 and 1.0.
 
         Returns
         -------
-        image : np.array
+        image : lib.IntArray2D | lib.IntArray3D
             Image converted to 8 bit.
         """
         image = np.round(255 * image).astype("uint8")
