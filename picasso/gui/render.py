@@ -7750,8 +7750,13 @@ class View(QtWidgets.QLabel):
                 " time and possibly crash the process.\n\n"
                 "Would you like to remove such clusters?"
             )
-            ret = qm.question(self.window, "Warning", message, qm.Yes | qm.No)
-            if ret == qm.Yes:
+            ret = qm.question(
+                self.window,
+                "Warning",
+                message,
+                qm.StandardButton.Yes | qm.StandardButton.No,
+            )
+            if ret == qm.StandardButton.Yes:
                 return max_locs
         else:
             return np.inf
