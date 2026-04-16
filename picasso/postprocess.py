@@ -2642,7 +2642,9 @@ def align(
     for i, (locs_, info_) in enumerate(zip(locs, infos)):
         _, image = render.render(locs_, info_, blur_method="smooth")
         images.append(image)
-    shift_y, shift_x = imageprocess.rcc(images)
+    shift_y, shift_x = imageprocess.rcc(
+        images, callback=lib.MockProgress().set_value
+    )
     if apply_shifts:
         for i, (locs_, dx, dy) in enumerate(zip(locs, shift_x, shift_y)):
             locs_["y"] -= dy

@@ -1,6 +1,6 @@
 # Changelog
 
-Last change: 15-APR-2026 CEST
+Last change: 16-APR-2026 CEST
 
 ## 0.10.0
 
