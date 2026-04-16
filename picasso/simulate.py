@@ -154,6 +154,43 @@ def check_type(movie: lib.IntArray3D) -> lib.IntArray3D:
     return movie
 
 
+def _sample_photon_rate(
+    photonrate: float, photonratestd: float, time: float
+) -> float:
+    """Return the number of photons to emit in one frame."""
+    if photonratestd == 0:
+        return max(0.0, np.round(photonrate * time))
+    return max(
+        0.0, np.round(np.random.normal(photonrate, photonratestd) * time)
+    )
+
+
+def _distribute_event_photons(
+    photonsinframe: lib.FloatArray1D,
+    tempFrame: int,
+    onFrames: int,
+    photons: float,
+    eventsum: lib.FloatArray1D,
+    i: int,
+    time: float,
+) -> None:
+    """Distribute photons for one bright event across onFrames frames.
+
+    The first and last frames receive a partial contribution (proportional
+    to the fraction of the frame during which the emitter is active);
+    all intermediate frames receive a full Poisson draw.
+    """
+    for j in range(onFrames):
+        idx = 1 + tempFrame + j
+        if j == 0:  # first frame (possibly partial)
+            frac = ((tempFrame + 1) * time - eventsum[i - 1]) / time
+        elif j == onFrames - 1:  # last frame (possibly partial)
+            frac = (eventsum[i] - (tempFrame + onFrames - 1) * time) / time
+        else:  # middle frames (full)
+            frac = 1.0
+        photonsinframe[idx] = int(np.random.poisson(frac * photons))
+
+
 def paintgen(
     meandark: int,
     meanbright: int,
@@ -203,99 +240,35 @@ def paintgen(
     dark_times = np.random.exponential(meandark, meanlocs)
     bright_times = np.random.exponential(meanbright, meanlocs)
 
-    events = np.vstack((dark_times, bright_times)).reshape(
-        (-1,), order="F"
-    )  # Interweave dark_times and bright_times [dt,bt,dt,bt..]
+    # Interweave dark_times and bright_times [dt, bt, dt, bt, ...]
+    events = np.vstack((dark_times, bright_times)).reshape((-1,), order="F")
     eventsum = np.cumsum(events)
-    maxloc = np.argmax(
-        eventsum > (frames * time)
-    )  # Find the first event that exceeds the total integration time
+    # Find the first event that exceeds the total integration time
+    maxloc = np.argmax(eventsum > (frames * time))
     simulatedmeandark = np.mean(events[:maxloc:2])
-
     simulatedmeanbright = np.mean(events[1:maxloc:2])
 
-    # check trace
     if np.mod(maxloc, 2):  # uneven -> ends with an OFF-event
         onevents = int(np.floor(maxloc / 2))
     else:  # even -> ends with bright event
         onevents = int(maxloc / 2)
 
-    photonsinframe = np.zeros(
-        int(frames + np.ceil(meanbright / time * 20))
-    )  # an on-event might be longer than the movie, so allocate more memory
+    # an on-event might be longer than the movie, so allocate more memory
+    photonsinframe = np.zeros(int(frames + np.ceil(meanbright / time * 20)))
 
-    # calculate photon numbers
     for i in range(1, maxloc, 2):
-        if photonratestd == 0:
-            photons = np.round(photonrate * time)
-        else:
-            photons = np.round(
-                np.random.normal(photonrate, photonratestd) * time
-            )  # Number of Photons that are emitted in one frame
+        photons = _sample_photon_rate(photonrate, photonratestd, time)
+        # First frame in which photon emission happens
+        tempFrame = int(np.floor(eventsum[i - 1] / time))
+        # Number of frames in which photon emission happens
+        onFrames = int(np.ceil((eventsum[i] - tempFrame * time) / time))
+        # Reduce on-frames if photon budget would be exceeded
+        if photons > 0 and photons * onFrames > photonbudget:
+            onFrames = int(np.ceil(photonbudget / photons))
 
-        if photons < 0:
-            photons = 0
-
-        tempFrame = int(
-            np.floor(eventsum[i - 1] / time)
-        )  # Get the first frame in which something happens in on-event
-        onFrames = int(
-            np.ceil((eventsum[i] - tempFrame * time) / time)
-        )  # Number of frames in which photon emission happens
-
-        if photons * onFrames > photonbudget:
-            onFrames = int(
-                np.ceil(photonbudget / (photons * onFrames) * onFrames)
-            )  # Reduce the number of on-frames if the photonbudget is reached
-
-        for j in range(0, (onFrames)):
-            if onFrames == 1:  # CASE 1: all photons are emitted in one frame
-                photonsinframe[1 + tempFrame] = int(
-                    np.random.poisson(
-                        ((tempFrame + 1) * time - eventsum[i - 1])
-                        / time
-                        * photons
-                    )
-                )
-            # CASE 2: all photons are emitted in two frames
-            elif onFrames == 2:
-                if j == 0:  # photons in first onframe
-                    photonsinframe[1 + tempFrame] = int(
-                        np.random.poisson(
-                            ((tempFrame + 1) * time - eventsum[i - 1])
-                            / time
-                            * photons
-                        )
-                    )
-                else:  # photons in second onframe
-                    photonsinframe[2 + tempFrame] = int(
-                        np.random.poisson(
-                            (eventsum[i] - (tempFrame + 1) * time)
-                            / time
-                            * photons
-                        )
-                    )
-            else:  # CASE 3: all photons are emitted in three or more frames
-                if j == 0:  # photons in first onframe (partial)
-                    photonsinframe[1 + tempFrame] = int(
-                        np.random.poisson(
-                            ((tempFrame + 1) * time - eventsum[i - 1])
-                            / time
-                            * photons
-                        )
-                    )
-                elif j == onFrames - 1:  # photons in last onframe (partial)
-                    photonsinframe[onFrames + tempFrame] = int(
-                        np.random.poisson(
-                            (eventsum[i] - (tempFrame + onFrames - 1) * time)
-                            / time
-                            * photons
-                        )
-                    )
-                else:  # photons in middle frames (full)
-                    photonsinframe[1 + tempFrame + j] = int(
-                        np.random.poisson(photons)
-                    )
+        _distribute_event_photons(
+            photonsinframe, tempFrame, onFrames, photons, eventsum, i, time
+        )
 
         totalphotons = np.sum(
             photonsinframe[1 + tempFrame : tempFrame + 1 + onFrames]

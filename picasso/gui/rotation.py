@@ -689,6 +689,25 @@ class ViewRotation(QtWidgets.QLabel):
     def resizeEvent(self, event: QtGui.QResizeEvent) -> None:
         self.update_scene()
 
+    def _get_pick_size(self) -> None:
+        w = self.window.window
+        if self.pick_shape == "Circle":
+            self.pick_size = (
+                w.tools_settings_dialog.pick_diameter.value()
+            ) / self.pixelsize
+        elif self.pick_shape == "Rectangle":
+            self.pick_size = (
+                w.tools_settings_dialog.pick_width.value()
+            ) / self.pixelsize
+        elif self.pick_shape == "Polygon":
+            self.pick_size = None
+        elif self.pick_shape == "Square":
+            self.pick_size = (
+                w.tools_settings_dialog.pick_side_length.value()
+            ) / self.pixelsize
+        else:
+            print("This should never happen.")
+
     def load_locs(self, update_window=False):
         """Load localizations from a pick in the main window.
 
@@ -721,22 +740,7 @@ class ViewRotation(QtWidgets.QLabel):
             # save the pick information
             self.pick = w.view._picks[0]
             self.pick_shape = w.view._pick_shape
-            if self.pick_shape == "Circle":
-                self.pick_size = (
-                    w.tools_settings_dialog.pick_diameter.value()
-                ) / self.pixelsize
-            elif self.pick_shape == "Rectangle":
-                self.pick_size = (
-                    w.tools_settings_dialog.pick_width.value()
-                ) / self.pixelsize
-            elif self.pick_shape == "Polygon":
-                self.pick_size = None
-            elif self.pick_shape == "Square":
-                self.pick_size = (
-                    w.tools_settings_dialog.pick_side_length.value()
-                ) / self.pixelsize
-            else:
-                print("This should never happen.")
+            self._get_pick_size()
 
             # update view, dataset_dialog for multichannel data and
             # paths
@@ -984,10 +988,11 @@ class ViewRotation(QtWidgets.QLabel):
                     else:
                         c = self.window.dataset_dialog.checks[i].text()
                         warning = (
-                            f"The color selection not recognised in the channel"
-                            f" {c}.  Please choose one of the options provided or "
-                            " type the hexadecimal code for your color of choice, "
-                            "starting with '#', e.g.  '#ffcdff' for pink."
+                            "The color selection not recognised in the channel"
+                            f" {c}.  Please choose one of the options provided"
+                            " or type the hexadecimal code for your color of "
+                            "choice, starting with '#', e.g.  '#ffcdff' for "
+                            "pink."
                         )
                         QtWidgets.QMessageBox.information(
                             self, "Warning", warning
@@ -1578,10 +1583,10 @@ class ViewRotation(QtWidgets.QLabel):
     def set_optimal_scalebar(self, force: bool = False) -> None:
         """Sets scalebar to approx. 1/8 of the current viewport's
         width."""
-        if (
-            force
-            or self.window.display_settings_dlg.optimal_scalebar_check.isChecked()
-        ):
+        optimal_scalebar = (
+            self.window.display_settings_dlg.optimal_scalebar_check
+        )
+        if force or optimal_scalebar.isChecked():
             width = self.viewport_width()
             width_nm = width * self.pixelsize
             optimal_scalebar = width_nm / 8
@@ -2186,7 +2191,7 @@ class RotationWindow(QtWidgets.QMainWindow):
         parent).
     """
 
-    DOCS_URL = "https://picassosr.readthedocs.io/en/latest/render.html#d-rotation-window"
+    DOCS_URL = "https://picassosr.readthedocs.io/en/latest/render.html#d-rotation-window"  # noqa: E501
 
     def __init__(self, window: QtWidgets.QMainWindow) -> None:
         super().__init__()

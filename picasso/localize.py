@@ -1176,30 +1176,17 @@ def get_file_summary(
         if col_ not in summary:
             summary[col_] = float("nan")
 
-    if nena is None:
-        summary["nena_px"] = check_nena(locs, info)
-    else:
-        summary["nena_px"] = nena
-
-    if len_mean is None:
-        len_mean = check_kinetics(locs, info)
-    else:
-        len_mean = len_mean
-
-    if drift is None:
-        drift_x, drift_y = check_drift(locs, info)
-    else:
-        drift_x, drift_y = drift
+    nena_px = check_nena(locs, info) if nena is None else nena
+    len_mean = check_kinetics(locs, info) if len_mean is None else len_mean
+    drift_x, drift_y = check_drift(locs, info) if drift is None else drift
 
     summary["len_mean"] = len_mean
     summary["n_locs"] = len(locs)
     summary["locs_frame"] = len(locs) / summary["frames"]
-
     summary["drift_x"] = drift_x
     summary["drift_y"] = drift_y
-
-    summary["nena_nm"] = summary["nena_px"] * summary["pixelsize"]
-
+    summary["nena_px"] = nena_px
+    summary["nena_nm"] = nena_px * summary["pixelsize"]
     summary["filename"] = os.path.normpath(file)
     summary["filename_hdf"] = file_hdf
     summary["file_created"] = datetime.fromtimestamp(os.path.getmtime(file))

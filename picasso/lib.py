@@ -1869,7 +1869,10 @@ def plot_subclustering_check(
     min_bin, max_bin = np.percentile(clustered_n_events, [2.5, 97.5])
     vals, counts = np.unique(clustered_n_events, return_counts=True)
     if clustering_dist is not None:
-        label = f"Clustered (d < {clustering_dist:.1f} nm) {m_clustered:.1f} +/- {s_clustered:.1f}"
+        label = (
+            f"Clustered (d < {clustering_dist:.1f} nm) "
+            f"{m_clustered:.1f} +/- {s_clustered:.1f}"
+        )
     else:
         label = f"Clustered {m_clustered:.1f} +/- {s_clustered:.1f}"
     ax1.bar(
@@ -1883,7 +1886,10 @@ def plot_subclustering_check(
     ax1.axvline(m_clustered, color="C0", linestyle="--")
     vals, counts = np.unique(sparse_n_events, return_counts=True)
     if sparse_dist is not None:
-        label = f"Sparse (d > {sparse_dist:.1f} nm) {m_sparse:.1f} +/- {s_sparse:.1f}"
+        label = (
+            f"Sparse (d > {sparse_dist:.1f} nm) "
+            f"{m_sparse:.1f} +/- {s_sparse:.1f}"
+        )
     else:
         label = f"Sparse {m_sparse:.1f} +/- {s_sparse:.1f}"
     ax1.bar(

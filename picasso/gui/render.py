@@ -398,7 +398,7 @@ class ApplyDialog(lib.Dialog):
         Undo the last spiral action.
     """
 
-    DOCS_URL = "https://picassosr.readthedocs.io/en/latest/render.html#apply-expressions-to-localizations"
+    DOCS_URL = "https://picassosr.readthedocs.io/en/latest/render.html#apply-expressions-to-localizations"  # noqa: E501
 
     def __init__(self, window: QtWidgets.QMainWindow) -> None:
         super().__init__(window)
@@ -775,6 +775,86 @@ class DatasetDialog(lib.Dialog):
                     )
                 break
 
+    def _close_one_channel(self, i: int, render=True) -> None:
+        """Close the channel with the given index and delete all
+        corresponding attributes."""
+        # remove widgets from the Dataset Dialog
+        self.scroll_area.removeWidget(self.checks[i])
+        self.scroll_area.removeWidget(self.title[i])
+        self.scroll_area.removeWidget(self.colorselection[i])
+        self.scroll_area.removeWidget(self.colordisp_all[i])
+        self.scroll_area.removeWidget(self.intensitysettings[i])
+        self.scroll_area.removeWidget(self.closebuttons[i])
+
+        # delete the widgets from the lists
+        del self.checks[i]
+        del self.title[i]
+        del self.colorselection[i]
+        del self.colordisp_all[i]
+        del self.intensitysettings[i]
+        del self.closebuttons[i]
+
+        # delete all the View attributes
+        del self.window.view.locs[i]
+        del self.window.view.locs_paths[i]
+        del self.window.view.infos[i]
+        del self.window.view.index_blocks[i]
+
+        # delete zcoord from slicer dialog
+        try:
+            self.window.slicer_dialog.zcoord[i]
+        except Exception:
+            pass
+
+        # delete attributes from the fast render dialog
+        del self.window.view.all_locs[i]
+        self.window.fast_render_dialog.on_file_closed(i)
+
+        # adjust group color if needed
+        if len(self.window.view.locs) == 1:
+            if "group" in self.window.view.locs[0].columns:
+                self.window.view.group_color = (
+                    self.window.view.get_group_color(self.window.view.locs[0])
+                )
+
+        # delete drift data if provided
+        try:
+            del self._drift[i]
+            del self._driftfiles[i]
+            del self.currentdrift[i]
+        except Exception:
+            pass
+
+        # update the window and adjust the size of the
+        # Dataset Dialog
+        if render:
+            self.update_viewport()
+
+        # update the window title
+        self.window.setWindowTitle(
+            f"Picasso v{__version__}: Render. File: "
+            f"{os.path.basename(self.window.view.locs_paths[-1])}"
+        )
+
+        # if only one channel left, allow render by property
+        disp_sett_dlg = self.window.display_settings_dlg
+        disp_sett_dlg.render_check.setChecked(False)
+        if len(self.checks) == 1:
+            disp_sett_dlg.render_groupbox.setEnabled(True)
+            disp_sett_dlg.parameter.clear()
+            disp_sett_dlg.parameter.addItems(
+                self.window.view.locs[0].columns.to_list()
+            )
+        else:
+            disp_sett_dlg.render_groupbox.setEnabled(False)
+
+        # remove the channel from test clustering dialog
+        self.window.test_clusterer_dialog.channels.removeItem(i)
+
+        # adjust the size of the dialog
+        hint = self.scroll_area.sizeHint()
+        lib.adjust_widget_size(self, hint, 45, 150)
+
     def close_file(self, i: int | str, render=True) -> None:
         """Close a given channel (defined by its index of name) and
         delete all corresponding attributes."""
@@ -787,84 +867,7 @@ class DatasetDialog(lib.Dialog):
         if len(self.closebuttons) == 1:
             self.window.remove_locs()
         else:
-            # remove widgets from the Dataset Dialog
-            self.scroll_area.removeWidget(self.checks[i])
-            self.scroll_area.removeWidget(self.title[i])
-            self.scroll_area.removeWidget(self.colorselection[i])
-            self.scroll_area.removeWidget(self.colordisp_all[i])
-            self.scroll_area.removeWidget(self.intensitysettings[i])
-            self.scroll_area.removeWidget(self.closebuttons[i])
-
-            # delete the widgets from the lists
-            del self.checks[i]
-            del self.title[i]
-            del self.colorselection[i]
-            del self.colordisp_all[i]
-            del self.intensitysettings[i]
-            del self.closebuttons[i]
-
-            # delete all the View attributes
-            del self.window.view.locs[i]
-            del self.window.view.locs_paths[i]
-            del self.window.view.infos[i]
-            del self.window.view.index_blocks[i]
-
-            # delete zcoord from slicer dialog
-            try:
-                self.window.slicer_dialog.zcoord[i]
-            except Exception:
-                pass
-
-            # delete attributes from the fast render dialog
-            del self.window.view.all_locs[i]
-            self.window.fast_render_dialog.on_file_closed(i)
-
-            # adjust group color if needed
-            if len(self.window.view.locs) == 1:
-                if "group" in self.window.view.locs[0].columns:
-                    self.window.view.group_color = (
-                        self.window.view.get_group_color(
-                            self.window.view.locs[0]
-                        )
-                    )
-
-            # delete drift data if provided
-            try:
-                del self._drift[i]
-                del self._driftfiles[i]
-                del self.currentdrift[i]
-            except Exception:
-                pass
-
-            # update the window and adjust the size of the
-            # Dataset Dialog
-            if render:
-                self.update_viewport()
-
-            # update the window title
-            self.window.setWindowTitle(
-                f"Picasso v{__version__}: Render. File: "
-                f"{os.path.basename(self.window.view.locs_paths[-1])}"
-            )
-
-            # if only one channel left, allow render by property
-            disp_sett_dlg = self.window.display_settings_dlg
-            disp_sett_dlg.render_check.setChecked(False)
-            if len(self.checks) == 1:
-                disp_sett_dlg.render_groupbox.setEnabled(True)
-                disp_sett_dlg.parameter.clear()
-                disp_sett_dlg.parameter.addItems(
-                    self.window.view.locs[0].columns.to_list()
-                )
-            else:
-                disp_sett_dlg.render_groupbox.setEnabled(False)
-
-            # remove the channel from test clustering dialog
-            self.window.test_clusterer_dialog.channels.removeItem(i)
-
-            # adjust the size of the dialog
-            hint = self.scroll_area.sizeHint()
-            lib.adjust_widget_size(self, hint, 45, 150)
+            self._close_one_channel(i, render)
 
     def update_viewport(self) -> None:
         """Update the scene in the main window."""
@@ -1738,7 +1741,7 @@ class AIMDialog(lib.Dialog):
         Contains the length of temporal segments in units of frames.
     """
 
-    DOCS_URL = "https://picassosr.readthedocs.io/en/latest/render.html#adaptive-intersection-maximization-aim-drift-correction"
+    DOCS_URL = "https://picassosr.readthedocs.io/en/latest/render.html#adaptive-intersection-maximization-aim-drift-correction"  # noqa: E501
 
     def __init__(self, window: QtWidgets.QMainWindow) -> None:
         super().__init__(window)
@@ -1764,11 +1767,7 @@ class AIMDialog(lib.Dialog):
         grid.addWidget(intersect_label, 1, 0, 1, 2)
         self.intersect_d = QtWidgets.QDoubleSpinBox()
         self.intersect_d.setRange(0.1, 1e6)
-        try:  # TODO: this actually won't work because we initialize with the whole UI, just calculate nena when hte dialog is opened?
-            default = 6 * float(window.info_dialog.fit_precision.text())
-        except ValueError:  # if text is not a number
-            default = 20.0
-        self.intersect_d.setValue(default)
+        self.intersect_d.setValue(20.0)
         self.intersect_d.setDecimals(1)
         self.intersect_d.setSingleStep(1)
         grid.addWidget(self.intersect_d, 1, 2)
@@ -2555,6 +2554,19 @@ class G5MDialog(lib.Dialog):
         if dialog.flag_3D:
             params["calibration"] = dialog.calibration
             params["pixelsize"] = px
+            if "Magnification factor" not in dialog.calibration.keys():
+                mag_factor, ok = QtWidgets.QInputDialog.getDouble(
+                    parent,
+                    "Input Dialog",
+                    "Enter magnification factor",
+                    0.79,
+                    0.1,
+                    10,
+                    2,
+                )
+                if not ok:
+                    return None, False
+                params["calibration"]["Magnification factor"] = mag_factor
         return (
             params,
             result == QtWidgets.QDialog.DialogCode.Accepted,
@@ -3048,7 +3060,10 @@ class TestClustererDialog(lib.Dialog):
             suffix, ok = QtWidgets.QInputDialog.getText(
                 self,
                 "Save clustered localizations",
-                "Enter suffix for clustered localization files (e.g., 'DBSCAN_clustered'):",
+                (
+                    "Enter suffix for clustered localization files (e.g., "
+                    "'DBSCAN_clustered'):"
+                ),
             )
             if not ok or not suffix:
                 return
@@ -3083,7 +3098,6 @@ class TestClustererDialog(lib.Dialog):
         the entire dataset for a given channel."""
         params = self.get_cluster_params()
         locs = self.window.view.all_locs[channel]
-        info = self.window.view.infos[channel]
         pixelsize = self.window.display_settings_dlg.pixelsize.value()
         save_centers = self.display_centers.isChecked()
         if self.clusterer_name.currentText() == "DBSCAN":
@@ -4983,10 +4997,11 @@ class MaskSettingsDialog(lib.Dialog):
         self.index_locs.append(locs_in)  # locs in the mask
         self.index_locs_out.append(locs_out)  # locs outside the mask
 
+        # update masked locs plot if the current channel is masked
         if (
             self.save_all.isChecked()
             and len(self.index_locs) == self.channel + 1
-        ) or not self.save_all.isChecked():  # update masked locs plot if the current channel is masked
+        ) or not self.save_all.isChecked():
             _, self.H_new = render.render(
                 self.index_locs[-1],
                 oversampling=self.pixelsize / self.disp_px_size.value(),
@@ -5087,7 +5102,7 @@ class MaskSettingsDialog(lib.Dialog):
         info : list of dicts
             Metadata for masked localizations.
         """
-        mask_in = "in" if locs_in else "out"
+        mask_in = "Mask in" if locs_in else "Mask out"
         mask_pixelsize = self.disp_px_size.value()
         area_in = float(np.sum(self.mask)) * (mask_pixelsize * 1e-3) ** 2
         picked_area = lib.get_from_metadata(self.infos[channel], "Area (um^2)")
@@ -5098,7 +5113,7 @@ class MaskSettingsDialog(lib.Dialog):
         area = area_in if locs_in else area_total - area_in
         info = self.infos[channel] + [
             {
-                "Generated by": f"Picasso v{__version__} Render : Mask {mask_in}",
+                "Generated by": f"Picasso v{__version__} Render : {mask_in}",
                 "Display pixel size (nm)": mask_pixelsize,
                 "Blur (nm)": self.mask_blur.value(),
                 "Threshold": self.mask_thresh.value(),
@@ -5303,7 +5318,7 @@ class ToolsSettingsDialog(lib.Dialog):
         Tick to display circular picks as 3-pixels-wide points.
     """
 
-    DOCS_URL = "https://picassosr.readthedocs.io/en/latest/render.html#picking-of-regions-of-interest"
+    DOCS_URL = "https://picassosr.readthedocs.io/en/latest/render.html#picking-of-regions-of-interest"  # noqa: E501
 
     def __init__(self, window: QtWidgets.QMainWindow) -> None:
         super().__init__(window)
@@ -5537,6 +5552,68 @@ class RESIDialog(lib.Dialog):
             r_z.setValue(self.radius_z[0].value())
             m.setValue(self.min_locs[0].value())
 
+    def _perform_resi_channel(
+        self,
+        locs: pd.DataFrame,
+        i: int,
+        r_xy: float,
+        r_z: float,
+        min_locs: int,
+        apply_fa: bool,
+        pixelsize: float,
+        ok1: bool = False,
+        ok2: bool = False,
+        suffix_locs: str = "",
+        suffix_centers: str = "",
+    ) -> None:
+        """Perform RESI analysis for a single channel."""
+        clustered_locs = clusterer.cluster(
+            locs,
+            radius_xy=r_xy,
+            min_locs=min_locs,
+            frame_analysis=apply_fa,
+            radius_z=r_z if self.ndim == 3 else None,
+            pixelsize=pixelsize,
+        )
+
+        # save clustered localizations if requested
+        if ok1:
+            new_info = {
+                "Clustering radius xy [cam. pixels]": r_xy,
+                "Min. number of locs": min_locs,
+                "Basic frame analysis": apply_fa,
+            }
+            if self.ndim == 3:
+                new_info["Clustering radius z [cam. pixels]"] = r_z
+            io.save_locs(
+                self.paths[i].replace(".hdf5", f"{suffix_locs}.hdf5"),
+                clustered_locs,
+                self.window.view.infos[i] + [new_info],
+            )
+
+        # extract cluster centers for each channel
+        centers = clusterer.find_cluster_centers(clustered_locs, pixelsize)
+        # save cluster centers if requested
+        if ok2:
+            new_info = {
+                "Clustering radius xy [cam. pixels]": r_xy,
+                "Min. number of locs": min_locs,
+                "Basic frame analysis": apply_fa,
+            }
+            if self.ndim == 3:
+                new_info["Clustering radius z [cam. pixels]"] = r_z
+            io.save_locs(
+                self.paths[i].replace(".hdf5", f"{suffix_centers}.hdf5"),
+                centers,
+                self.window.view.infos[i] + [new_info],
+            )
+        # append resi channel id
+        centers["resi_channel_id"] = i * np.ones(
+            len(centers),
+            dtype=np.int8,
+        )
+        return centers
+
     def perform_resi(self) -> None:
         """Perform RESI  on loaded localizations, using user-defined
         clustering parameters."""
@@ -5616,57 +5693,21 @@ class RESIDialog(lib.Dialog):
 
             resi_channels = []  # holds each channel's cluster centers
             for i, locs in enumerate(self.locs):
-                clustered_locs = clusterer.cluster(
+                centers = self._perform_resi_channel(
                     locs,
-                    radius_xy=r_xy[i],
-                    min_locs=min_locs[i],
-                    frame_analysis=apply_fa,
-                    radius_z=r_z[i] if self.ndim == 3 else None,
-                    pixelsize=pixelsize,
+                    i,
+                    r_xy,
+                    r_z,
+                    min_locs,
+                    apply_fa,
+                    pixelsize,
+                    ok1,
+                    ok2,
+                    suffix_locs,
+                    suffix_centers,
                 )
-
-                # save clustered localizations if requested
-                if ok1:
-                    new_info = {
-                        "Clustering radius xy [cam. pixels]": r_xy[i],
-                        "Min. number of locs": min_locs[i],
-                        "Basic frame analysis": apply_fa,
-                    }
-                    if self.ndim == 3:
-                        new_info["Clustering radius z [cam. pixels]"] = r_z[i]
-                    io.save_locs(
-                        self.paths[i].replace(".hdf5", f"{suffix_locs}.hdf5"),
-                        clustered_locs,
-                        self.window.view.infos[i] + [new_info],
-                    )
-
-                # extract cluster centers for each channel
-                centers = clusterer.find_cluster_centers(
-                    clustered_locs, pixelsize
-                )
-                # save cluster centers if requested
-                if ok2:
-                    new_info = {
-                        "Clustering radius xy [cam. pixels]": r_xy[i],
-                        "Min. number of locs": min_locs[i],
-                        "Basic frame analysis": apply_fa,
-                    }
-                    if self.ndim == 3:
-                        new_info["Clustering radius z [cam. pixels]"] = r_z[i]
-                    io.save_locs(
-                        self.paths[i].replace(
-                            ".hdf5", f"{suffix_centers}.hdf5"
-                        ),
-                        centers,
-                        self.window.view.infos[i] + [new_info],
-                    )
-                # append resi channel id
-                centers["resi_channel_id"] = i * np.ones(
-                    len(centers),
-                    dtype=np.int8,
-                )
-                resi_channels.append(centers)
                 progress.set_value(i)
+                resi_channels.append(centers)
             progress.close()
 
             # combine resi cluster centers from all channels
@@ -5734,7 +5775,7 @@ class DisplaySettingsDialog(lib.Dialog):
         Contains zoom's magnitude.
     """
 
-    DOCS_URL = "https://picassosr.readthedocs.io/en/latest/render.html#display-settings"
+    DOCS_URL = "https://picassosr.readthedocs.io/en/latest/render.html#display-settings"  # noqa: E501
 
     def __init__(self, window: QtWidgets.QMainWindow) -> None:
         super().__init__(window)
@@ -6499,6 +6540,65 @@ class SlicerDialog(lib.Dialog):
         self.slicermax = self.bins[position + 1]
         self.window.view.update_scene_slicer()
 
+    def _export_stack_individually(self, base: str) -> None:
+        # Uncheck all
+        for checks in self.window.dataset_dialog.checks:
+            checks.setChecked(False)
+
+        for j in range(len(self.window.view.locs)):
+            # load a single channel
+            self.window.dataset_dialog.checks[j].setChecked(True)
+            progress = lib.ProgressDialog(
+                "Exporting slices..", 0, self.sl.maximum(), self
+            )
+            progress.set_value(0)
+            progress.show()
+
+            # save each channel one by one
+            for i in range(self.sl.maximum() + 1):
+                self.sl.setValue(i)
+                out_path = f"{base}_Z{i:03d}_CH{j+1:03d}.tif"
+                if self.full_check.isChecked():  # full FOV
+                    movie_height, movie_width = self.window.view.movie_size()
+                    viewport = [(0, 0), (movie_height, movie_width)]
+                    qimage = self.window.view.render_scene(
+                        cache=False, viewport=viewport
+                    )
+                    gray = qimage.convertToFormat(
+                        QtGui.QImage.Format.Format_RGB16
+                    )
+                else:  # current FOV
+                    gray = self.window.view.qimage.convertToFormat(
+                        QtGui.QImage.Format.Format_RGB16
+                    )
+                gray.save(out_path)
+                progress.set_value(i)
+            progress.close()
+            self.window.dataset_dialog.checks[j].setChecked(False)
+        for checks in self.window.dataset_dialog.checks:
+            checks.setChecked(True)
+
+    def _export_stacks_together(self, base: str) -> None:
+        progress = lib.ProgressDialog(
+            "Exporting slices..", 0, self.sl.maximum(), self
+        )
+        progress.set_value(0)
+        progress.show()
+        for i in range(self.sl.maximum() + 1):
+            self.sl.setValue(i)
+            out_path = f"{base}_Z{i:03d}_CH001.tif"
+            if self.full_check.isChecked():  # full FOV
+                movie_height, movie_width = self.window.view.movie_size()
+                viewport = [(0, 0), (movie_height, movie_width)]
+                qimage = self.window.view.render_scene(
+                    cache=False, viewport=viewport
+                )
+                qimage.save(out_path)
+            else:  # current FOV
+                self.window.view.qimage.save(out_path)
+            progress.set_value(i)
+        progress.close()
+
     def export_stack(self) -> None:
         """Save all slices as .tif files."""
         # get filename for saving
@@ -6506,87 +6606,16 @@ class SlicerDialog(lib.Dialog):
             base, ext = os.path.splitext(self.window.view.locs_paths[0])
         except AttributeError:
             return
-        out_path = base + ".tif"
+        out_path = f"{base}.tif"
         path, ext = lib.get_save_filename_ext_dialog(
             self, "Save z slices", out_path, filter="*.tif"
         )
         if path:
             base, ext = os.path.splitext(path)
             if self.separate_check.isChecked():  # each channel individually
-                # Uncheck all
-                for checks in self.window.dataset_dialog.checks:
-                    checks.setChecked(False)
-
-                for j in range(len(self.window.view.locs)):
-                    # load a single channel
-                    self.window.dataset_dialog.checks[j].setChecked(True)
-                    progress = lib.ProgressDialog(
-                        "Exporting slices..", 0, self.sl.maximum(), self
-                    )
-                    progress.set_value(0)
-                    progress.show()
-
-                    # save each channel one by one
-                    for i in range(self.sl.maximum() + 1):
-                        self.sl.setValue(i)
-                        out_path = (
-                            base
-                            + "_Z"
-                            + "{num:03d}".format(num=i)
-                            + "_CH"
-                            + "{num:03d}".format(num=j + 1)
-                            + ".tif"
-                        )
-                        if self.full_check.isChecked():  # full FOV
-                            movie_height, movie_width = (
-                                self.window.view.movie_size()
-                            )
-                            viewport = [(0, 0), (movie_height, movie_width)]
-                            qimage = self.window.view.render_scene(
-                                cache=False, viewport=viewport
-                            )
-                            gray = qimage.convertToFormat(
-                                QtGui.QImage.Format.Format_RGB16
-                            )
-                        else:  # current FOV
-                            gray = self.window.view.qimage.convertToFormat(
-                                QtGui.QImage.Format.Format_RGB16
-                            )
-                        gray.save(out_path)
-                        progress.set_value(i)
-                    progress.close()
-                    self.window.dataset_dialog.checks[j].setChecked(False)
-                for checks in self.window.dataset_dialog.checks:
-                    checks.setChecked(True)
+                self._export_stack_individually(base)
             else:  # all channels at once
-                progress = lib.ProgressDialog(
-                    "Exporting slices..", 0, self.sl.maximum(), self
-                )
-                progress.set_value(0)
-                progress.show()
-
-                for i in range(self.sl.maximum() + 1):
-                    self.sl.setValue(i)
-                    out_path = (
-                        base
-                        + "_Z"
-                        + "{num:03d}".format(num=i)
-                        + "_CH001"
-                        + ".tif"
-                    )
-                    if self.full_check.isChecked():  # full FOV
-                        movie_height, movie_width = (
-                            self.window.view.movie_size()
-                        )
-                        viewport = [(0, 0), (movie_height, movie_width)]
-                        qimage = self.window.view.render_scene(
-                            cache=False, viewport=viewport
-                        )
-                        qimage.save(out_path)
-                    else:  # current FOV
-                        self.window.view.qimage.save(out_path)
-                    progress.set_value(i)
-                progress.close()
+                self._export_stacks_together(base)
 
     def closeEvent(self, event: QtCore.QCloseEvent):
         """Unslice data."""
@@ -6744,26 +6773,15 @@ class View(QtWidgets.QLabel):
         colors = locs["group"].to_numpy().astype(int) % N_GROUP_COLORS
         return colors
 
-    def add(self, path: str, render: bool = True) -> None:
-        """Load localizations from an .hdf5 file and the associated
-        .yaml metadata file.
-
-        New in v0.10.0: Can read a ThunderSTORM .csv file.
-
-        Parameters
-        ----------
-        path : str
-            String specifying the path to the .hdf5 file.
-        render : bool, optional
-            Specifies if the loaded files should be rendered
-            (default True).
-        """
+    def _load_locs(self, path: str) -> tuple[pd.DataFrame, list[dict]]:
+        """Load localizations and metadata from a given path, either
+        Picasso or ThunderSTORM format."""
         if path.endswith(".hdf5"):  # standard Picasso localization file
             # read .hdf5 and .yaml files
             try:
                 locs, info = io.load_locs(path, qt_parent=self)
             except (io.NoMetadataFileError, KeyError):
-                return
+                return None, None
         elif path.endswith(".csv"):  # ThunderSTORM localization file
             pixelsize, ok = QtWidgets.QInputDialog.getDouble(
                 self,
@@ -6775,29 +6793,15 @@ class View(QtWidgets.QLabel):
                 decimals=2,
             )
             if not ok:
-                return
+                return None, None
             locs, info = io.import_ts(path, pixelsize)
         else:
             raise ValueError(
                 "Unsupported file format. Please load a .hdf5 or .csv file."
             )
+        return locs, info
 
-        # update pixelsize (credits to Boyd Peters #602)
-        pixelsize = lib.get_from_metadata(
-            info,
-            "Pixelsize",
-            default=self.window.display_settings_dlg.pixelsize.value(),
-        )
-        self.window.display_settings_dlg.pixelsize.setValue(pixelsize)
-
-        # append loaded data
-        self.locs.append(locs)
-        self.all_locs.append(copy.copy(locs))  # for fast rendering
-        self.infos.append(info)
-        self.locs_paths.append(path)
-        self.index_blocks.append(None)
-
-        # try to load a drift .txt file:
+    def _load_drift(self, info: list[dict]) -> pd.DataFrame | None:
         drift = None
         if "Last driftfile" in info[-1]:
             driftpath = info[-1]["Last driftfile"]
@@ -6827,8 +6831,41 @@ class View(QtWidgets.QLabel):
                 except Exception:
                     # drift already initialized before
                     pass
+        return drift
 
-        # append drift info
+    def add(self, path: str, render: bool = True) -> None:
+        """Load localizations from an .hdf5 file and the associated
+        .yaml metadata file.
+
+        New in v0.10.0: Can read a ThunderSTORM .csv file.
+
+        Parameters
+        ----------
+        path : str
+            String specifying the path to the .hdf5 file.
+        render : bool, optional
+            Specifies if the loaded files should be rendered
+            (default True).
+        """
+        locs, info = self._load_locs(path)
+
+        # update pixelsize (credits to Boyd Peters #602)
+        pixelsize = lib.get_from_metadata(
+            info,
+            "Pixelsize",
+            default=self.window.display_settings_dlg.pixelsize.value(),
+        )
+        self.window.display_settings_dlg.pixelsize.setValue(pixelsize)
+
+        # append loaded data
+        self.locs.append(locs)
+        self.all_locs.append(copy.copy(locs))  # for fast rendering
+        self.infos.append(info)
+        self.locs_paths.append(path)
+        self.index_blocks.append(None)
+
+        # try to load a drift .txt file:
+        drift = self._load_drift(info[-1])
         self._drift.append(drift)
         self._driftfiles.append(None)
         self.currentdrift.append(None)
@@ -7514,7 +7551,31 @@ class View(QtWidgets.QLabel):
             areas.to_csv(path, index=False)
             progress.close()
 
-    def g5m(self) -> None:
+    def _g5m_get_suffixes(self, params) -> tuple[str, str, bool]:
+        """Get suffixes for G5M molecules and clustered locs when
+        applying G5M to all channels."""
+        suffix_molecules, ok1 = QtWidgets.QInputDialog.getText(
+            self.window,
+            "Input Dialog",
+            "Enter suffix for saving molecules",
+            QtWidgets.QLineEdit.EchoMode.Normal,
+            "_molmap",
+        )
+        if not ok1:
+            return "", "", False
+        if params["clustered_locs"]:
+            suffix_clusters, ok2 = QtWidgets.QInputDialog.getText(
+                self.window,
+                "Input Dialog",
+                "Enter suffix for saving clusters",
+                QtWidgets.QLineEdit.EchoMode.Normal,
+                "_molmap_clustered",
+            )
+            if not ok2:
+                return "", "", False
+        return suffix_molecules, suffix_clusters, True
+
+    def g5m(self) -> None:  # noqa: C901
         """Get the channel for G5M and ensures that the data has been
         clustered."""
         channel = self.window.view.get_channel_all_seq(
@@ -7528,23 +7589,9 @@ class View(QtWidgets.QLabel):
         if not ok:
             return
 
-        # ask the user to input n_frames, step_size and mag_factor of
-        # the calib file in the 3D case
-        if "calibration" in params.keys():
-            if "Magnification factor" not in params["calibration"].keys():
-                mag_factor, ok = QtWidgets.QInputDialog.getDouble(
-                    self.window,
-                    "Input Dialog",
-                    "Enter magnification factor",
-                    0.79,
-                    0.1,
-                    10,
-                    2,
-                )
-                if not ok:
-                    return
-                params["calibration"]["Magnification factor"] = mag_factor
-
+        print(
+            params["calibration"]["Magnification factor"]
+        )  # TODO: delete this after testing
         max_locs_per_channel = []
         for i in range(len(self.window.view.locs)):
             if not self.check_group(i):
@@ -7553,57 +7600,31 @@ class View(QtWidgets.QLabel):
         params["max_locs_per_cluster"] = max_locs_per_channel
 
         # for subcluster check plots
-        clustering_dist, sparse_dist = 25, 80  # nm
         if channel == len(self.window.view.locs):  # apply to all
-            suffix_molecules, ok = QtWidgets.QInputDialog.getText(
-                self.window,
-                "Input Dialog",
-                "Enter suffix for saving molecules",
-                QtWidgets.QLineEdit.EchoMode.Normal,
-                "_molmap",
+            suffix_molecules, suffix_clusters, ok = self._g5m_get_suffixes(
+                params
             )
             if not ok:
                 return
 
-            if params["clustered_locs"]:
-                suffix_clusters, ok = QtWidgets.QInputDialog.getText(
-                    self.window,
-                    "Input Dialog",
-                    "Enter suffix for saving clusters",
-                    QtWidgets.QLineEdit.EchoMode.Normal,
-                    "_molmap_clustered",
-                )
-                if not ok:
-                    return
-
             for i in range(len(self.window.view.locs)):
-                g5m_centers, clustered_locs, info = self._g5m(i, params)
-                path = self.window.view.locs_paths[i].replace(
+                path_mols = self.window.view.locs_paths[i].replace(
                     ".hdf5", f"{suffix_molecules}.hdf5"
-                )  # add the suffix to the current path
-                if g5m_centers is not None:
-                    io.save_locs(path, g5m_centers, info)
-                    # automatically save the subclustering check
-                    clust_events, sparse_events = clusterer.test_subclustering(
-                        g5m_centers,
-                        info,
-                        clustering_dist=clustering_dist,
-                        sparse_dist=sparse_dist,
-                    )
-                    lib.plot_subclustering_check(
-                        clust_events,
-                        sparse_events,
-                        path.replace(".hdf5", "_subcluster_check.png"),
-                        clustering_dist=clustering_dist,
-                        sparse_dist=sparse_dist,
-                    )
-                if params["clustered_locs"]:
-                    path = self.window.view.locs_paths[i].replace(
+                )
+                path_clusters = (
+                    self.window.view.locs_paths[i].replace(
                         ".hdf5", f"{suffix_clusters}.hdf5"
                     )
-                    if clustered_locs is not None:
-                        io.save_locs(path, clustered_locs, info)
-        else:
+                    if params["clustered_locs"]
+                    else ""
+                )
+                self._g5m_in_channel(
+                    i,
+                    params,
+                    path_mols,
+                    path_clusters,
+                )
+        else:  # single channel
             base, _ = os.path.splitext(self.window.view.locs_paths[channel])
             out_path = base + "_molmap.hdf5"
             path_molecules, _ = lib.get_save_filename_ext_dialog(
@@ -7627,33 +7648,47 @@ class View(QtWidgets.QLabel):
                 )
                 if not path_clusters:
                     return
+            else:
+                path_clusters = ""
+            self._g5m_in_channel(
+                channel, params, path_molecules, path_clusters
+            )
 
-            g5m_centers, clustered_locs, info = self._g5m(channel, params)
-            if g5m_centers is not None:
-                io.save_locs(path_molecules, g5m_centers, info)
-                # automatically save the subclustering check
-                clust_events, sparse_events = clusterer.test_subclustering(
-                    g5m_centers,
-                    info,
-                    clustering_dist=clustering_dist,
-                    sparse_dist=sparse_dist,
-                )
-                lib.plot_subclustering_check(
-                    clust_events,
-                    sparse_events,
-                    path_molecules.replace(".hdf5", "_subcluster_check.png"),
-                    clustering_dist=clustering_dist,
-                    sparse_dist=sparse_dist,
-                )
-                # automatically save rel_sigma plot
-                lib.plot_rel_sigma_check(
-                    g5m_centers,
-                    info,
-                    path_molecules.replace(".hdf5", "_relsigma_check.png"),
-                )
-                if params["clustered_locs"]:
-                    if clustered_locs is not None:
-                        io.save_locs(path_clusters, clustered_locs, info)
+    def _g5m_in_channel(
+        self,
+        channel: int,
+        params: dict,
+        path_molecules: str,
+        path_clusters: str,
+    ) -> None:
+        """Run G5M in a given channel and save the result."""
+        clustering_dist, sparse_dist = 25, 80  # nm
+        g5m_centers, clustered_locs, info = self._g5m(channel, params)
+        if g5m_centers is not None:
+            io.save_locs(path_molecules, g5m_centers, info)
+            # automatically save the subclustering check
+            clust_events, sparse_events = clusterer.test_subclustering(
+                g5m_centers,
+                info,
+                clustering_dist=clustering_dist,
+                sparse_dist=sparse_dist,
+            )
+            lib.plot_subclustering_check(
+                clust_events,
+                sparse_events,
+                path_molecules.replace(".hdf5", "_subcluster_check.png"),
+                clustering_dist=clustering_dist,
+                sparse_dist=sparse_dist,
+            )
+            # automatically save rel_sigma plot
+            lib.plot_rel_sigma_check(
+                g5m_centers,
+                info,
+                path_molecules.replace(".hdf5", "_relsigma_check.png"),
+            )
+            if params["clustered_locs"]:
+                if clustered_locs is not None:
+                    io.save_locs(path_clusters, clustered_locs, info)
 
     def _g5m(
         self,
@@ -7705,7 +7740,7 @@ class View(QtWidgets.QLabel):
         channel_name = self.window.dataset_dialog.checks[channel].text()
         n_frames = lib.get_from_metadata(info, "Frames", raise_error=True)
         max_locs = int(0.4 * n_frames)
-        cluster_ids, n_locs = np.unique(locs["group"], return_counts=True)
+        _, n_locs = np.unique(locs["group"], return_counts=True)
         if any(n_locs > max_locs):
             qm = QtWidgets.QMessageBox()
             message = (
@@ -7849,156 +7884,41 @@ class View(QtWidgets.QLabel):
             return p, (x_most_right, y_most_right)
         return p
 
-    def draw_picks(self, image: QtGui.QImage) -> QtGui.QImage:
-        """Draw all selected picks onto the image of rendered
-        localizations.
-
-        Parameters
-        ----------
-        image : QImage
-            Image containing rendered localizations.
-
-        Returns
-        -------
-        image : QImage
-            Image with the drawn picks.
-        """
-        image = image.copy()
+    def draw_picks_circle(self, image: QtGui.QImage) -> None:
+        """Draw circular picks onto the image of rendered localizations."""
         t_dialog = self.window.tools_settings_dialog
         pixelsize = self.window.display_settings_dlg.pixelsize.value()
 
-        # draw circular picks
-        if self._pick_shape == "Circle":
-
-            # draw circular picks as points
-            if t_dialog.point_picks.isChecked():
-                painter = QtGui.QPainter(image)
-                painter.setBrush(QtGui.QBrush(QtGui.QColor("yellow")))
-                painter.setPen(QtGui.QColor("yellow"))
-
-                # yellow is barely visible on white background
-                if self.window.dataset_dialog.wbackground.isChecked():
-                    painter.setBrush(QtGui.QBrush(QtGui.QColor("red")))
-                    painter.setPen(QtGui.QColor("red"))
-
-                for i, pick in enumerate(self._picks):
-
-                    # convert from camera units to display units
-                    cx, cy = self.map_to_view(*pick)
-                    painter.drawEllipse(QtCore.QPoint(cx, cy), 3, 3)
-
-                    # annotate picks
-                    if t_dialog.pick_annotation.isChecked():
-                        painter.drawText(cx + 20, cy + 20, str(i))
-                painter.end()
-
-            # draw circles
-            else:
-                d = t_dialog.pick_diameter.value() / pixelsize
-                d *= self.width() / self.viewport_width()
-                d = int(d)
-
-                painter = QtGui.QPainter(image)
-                painter.setPen(QtGui.QColor("yellow"))
-
-                # yellow is barely visible on white background
-                if self.window.dataset_dialog.wbackground.isChecked():
-                    painter.setPen(QtGui.QColor("red"))
-
-                for i, pick in enumerate(self._picks):
-                    # check that the pick is within the view
-                    if (
-                        pick[0] < self.viewport[0][1]
-                        or pick[0] > self.viewport[1][1]
-                        or pick[1] < self.viewport[0][0]
-                        or pick[1] > self.viewport[1][0]
-                    ):
-                        continue
-
-                    # convert from camera units to display units
-                    cx, cy = self.map_to_view(*pick)
-                    painter.drawEllipse(int(cx - d / 2), int(cy - d / 2), d, d)
-
-                    # annotate picks
-                    if t_dialog.pick_annotation.isChecked():
-                        painter.drawText(
-                            int(cx + d / 2), int(cy + d / 2), str(i)
-                        )
-                painter.end()
-
-        # draw rectangular picks
-        elif self._pick_shape == "Rectangle":
-            w = t_dialog.pick_width.value() / pixelsize
-            w *= self.width() / self.viewport_width()
-
+        # draw circular picks as points
+        if t_dialog.point_picks.isChecked():
             painter = QtGui.QPainter(image)
+            painter.setBrush(QtGui.QBrush(QtGui.QColor("yellow")))
             painter.setPen(QtGui.QColor("yellow"))
 
             # yellow is barely visible on white background
             if self.window.dataset_dialog.wbackground.isChecked():
+                painter.setBrush(QtGui.QBrush(QtGui.QColor("red")))
                 painter.setPen(QtGui.QColor("red"))
 
             for i, pick in enumerate(self._picks):
 
                 # convert from camera units to display units
-                start_x, start_y = self.map_to_view(*pick[0])
-                end_x, end_y = self.map_to_view(*pick[1])
-
-                # draw a straight line across the pick
-                painter.drawLine(start_x, start_y, end_x, end_y)
-
-                # draw a rectangle
-                polygon, most_right = self.get_pick_polygon(
-                    start_x, start_y, end_x, end_y, w, return_most_right=True
-                )
-                painter.drawPolygon(polygon)
+                cx, cy = self.map_to_view(*pick)
+                painter.drawEllipse(QtCore.QPoint(cx, cy), 3, 3)
 
                 # annotate picks
                 if t_dialog.pick_annotation.isChecked():
-                    painter.drawText(*most_right, str(i))
-            painter.end()
+                    painter.drawText(cx + 20, cy + 20, str(i))
 
-        # polygon - circles at the corners connected by lines
-        elif self._pick_shape == "Polygon":
+        # draw circles
+        else:
+            d = t_dialog.pick_diameter.value() / pixelsize
+            d *= self.width() / self.viewport_width()
+            d = int(d)
+
             painter = QtGui.QPainter(image)
             painter.setPen(QtGui.QColor("yellow"))
 
-            # yellow is barely visible on white background
-            if self.window.dataset_dialog.wbackground.isChecked():
-                painter.setPen(QtGui.QColor("red"))
-
-            # draw corners and lines
-            for i, pick in enumerate(self._picks):
-                oldpoint = []
-                for point in pick:
-                    cx, cy = self.map_to_view(*point)
-                    painter.drawEllipse(
-                        QtCore.QPoint(cx, cy),
-                        int(POLYGON_POINTER_SIZE / 2),
-                        int(POLYGON_POINTER_SIZE / 2),
-                    )
-                    if oldpoint != []:  # draw the line
-                        ox, oy = self.map_to_view(*oldpoint)
-                        painter.drawLine(cx, cy, ox, oy)
-                    oldpoint = point
-
-                # annotate picks
-                if len(pick):
-                    if t_dialog.pick_annotation.isChecked():
-                        painter.drawText(
-                            cx + int(POLYGON_POINTER_SIZE / 2) + 10,
-                            cy + int(POLYGON_POINTER_SIZE / 2) + 10,
-                            str(i),
-                        )
-            painter.end()
-
-        # square - like rectangle but without rotation
-        elif self._pick_shape == "Square":
-            w = t_dialog.pick_side_length.value() / pixelsize
-            w *= self.width() / self.viewport_width()
-            w = int(w)
-            painter = QtGui.QPainter(image)
-            painter.setPen(QtGui.QColor("yellow"))
             # yellow is barely visible on white background
             if self.window.dataset_dialog.wbackground.isChecked():
                 painter.setPen(QtGui.QColor("red"))
@@ -8015,15 +7935,139 @@ class View(QtWidgets.QLabel):
 
                 # convert from camera units to display units
                 cx, cy = self.map_to_view(*pick)
-                painter.drawRect(int(cx - w / 2), int(cy - w / 2), w, w)
+                painter.drawEllipse(int(cx - d / 2), int(cy - d / 2), d, d)
 
                 # annotate picks
                 if t_dialog.pick_annotation.isChecked():
+                    painter.drawText(int(cx + d / 2), int(cy + d / 2), str(i))
+        painter.end()
+
+    def draw_picks_rectangle(self, image: QtGui.QImage) -> None:
+        """Draw rectangular picks onto the image of rendered
+        localizations."""
+        pixelsize = self.window.display_settings_dlg.pixelsize.value()
+        w = self.window.tools_settings_dialog.pick_width.value() / pixelsize
+        w *= self.width() / self.viewport_width()
+
+        painter = QtGui.QPainter(image)
+        painter.setPen(QtGui.QColor("yellow"))
+
+        # yellow is barely visible on white background
+        if self.window.dataset_dialog.wbackground.isChecked():
+            painter.setPen(QtGui.QColor("red"))
+
+        for i, pick in enumerate(self._picks):
+
+            # convert from camera units to display units
+            start_x, start_y = self.map_to_view(*pick[0])
+            end_x, end_y = self.map_to_view(*pick[1])
+
+            # draw a straight line across the pick
+            painter.drawLine(start_x, start_y, end_x, end_y)
+
+            # draw a rectangle
+            polygon, most_right = self.get_pick_polygon(
+                start_x, start_y, end_x, end_y, w, return_most_right=True
+            )
+            painter.drawPolygon(polygon)
+
+            # annotate picks
+            if self.window.display_settings_dlg.pick_annotation.isChecked():
+                painter.drawText(*most_right, str(i))
+        painter.end()
+
+    def draw_picks_polygon(self, image: QtGui.QImage) -> None:
+        """Draw polygon picks onto the image of rendered localizations."""
+        t_dialog = self.window.tools_settings_dialog
+        painter = QtGui.QPainter(image)
+        painter.setPen(QtGui.QColor("yellow"))
+
+        # yellow is barely visible on white background
+        if self.window.dataset_dialog.wbackground.isChecked():
+            painter.setPen(QtGui.QColor("red"))
+
+        # draw corners and lines
+        for i, pick in enumerate(self._picks):
+            oldpoint = []
+            for point in pick:
+                cx, cy = self.map_to_view(*point)
+                painter.drawEllipse(
+                    QtCore.QPoint(cx, cy),
+                    int(POLYGON_POINTER_SIZE / 2),
+                    int(POLYGON_POINTER_SIZE / 2),
+                )
+                if oldpoint != []:  # draw the line
+                    ox, oy = self.map_to_view(*oldpoint)
+                    painter.drawLine(cx, cy, ox, oy)
+                oldpoint = point
+
+            # annotate picks
+            if len(pick):
+                if t_dialog.pick_annotation.isChecked():
                     painter.drawText(
-                        int(cx + w / 2) + 10, int(cy + w / 2) + 10, str(i)
+                        cx + int(POLYGON_POINTER_SIZE / 2) + 10,
+                        cy + int(POLYGON_POINTER_SIZE / 2) + 10,
+                        str(i),
                     )
-            painter.end()
-        return image
+        painter.end()
+
+    def draw_picks_square(self, image: QtGui.QImage) -> None:
+        """Draw square picks onto the image of rendered localizations."""
+        t_dialog = self.window.tools_settings_dialog
+        pixelsize = self.window.display_settings_dlg.pixelsize.value()
+        w = t_dialog.pick_side_length.value() / pixelsize
+        w *= self.width() / self.viewport_width()
+        w = int(w)
+        painter = QtGui.QPainter(image)
+        painter.setPen(QtGui.QColor("yellow"))
+        # yellow is barely visible on white background
+        if self.window.dataset_dialog.wbackground.isChecked():
+            painter.setPen(QtGui.QColor("red"))
+
+        for i, pick in enumerate(self._picks):
+            # check that the pick is within the view
+            if (
+                pick[0] < self.viewport[0][1]
+                or pick[0] > self.viewport[1][1]
+                or pick[1] < self.viewport[0][0]
+                or pick[1] > self.viewport[1][0]
+            ):
+                continue
+
+            # convert from camera units to display units
+            cx, cy = self.map_to_view(*pick)
+            painter.drawRect(int(cx - w / 2), int(cy - w / 2), w, w)
+
+            # annotate picks
+            if t_dialog.pick_annotation.isChecked():
+                painter.drawText(
+                    int(cx + w / 2) + 10, int(cy + w / 2) + 10, str(i)
+                )
+        painter.end()
+
+    def draw_picks(self, image: QtGui.QImage) -> QtGui.QImage:
+        """Draw all selected picks onto the image of rendered
+        localizations.
+
+        Parameters
+        ----------
+        image : QImage
+            Image containing rendered localizations.
+
+        Returns
+        -------
+        image : QImage
+            Image with the drawn picks.
+        """
+        image = image.copy()
+        if self._pick_shape == "Circle":
+            return self.draw_picks_circle(image)
+        elif self._pick_shape == "Rectangle":
+            return self.draw_picks_rectangle(image)
+        elif self._pick_shape == "Polygon":
+            return self.draw_picks_polygon(image)
+        elif self._pick_shape == "Square":
+            return self.draw_picks_square(image)
 
     def draw_rectangle_pick_ongoing(self, image: QtGui.QImage) -> QtGui.QImage:
         """Draw an ongoing rectangular pick onto image.
@@ -8443,12 +8487,9 @@ class View(QtWidgets.QLabel):
                 raise ValueError("Pick number provided too high")
             else:  # calculate new viewport
                 pixelsize = self.window.display_settings_dlg.pixelsize.value()
+                t_dialog = self.window.tools_settings_dialog
                 if self._pick_shape == "Circle":
-                    r = (
-                        self.window.tools_settings_dialog.pick_diameter.value()
-                        / 2
-                        / pixelsize
-                    )
+                    r = t_dialog.pick_diameter.value() / 2 / pixelsize
                     x, y = self._picks[pick_no]
                     x_min = x - 1.4 * r
                     x_max = x + 1.4 * r
@@ -8458,10 +8499,7 @@ class View(QtWidgets.QLabel):
                     (xs, ys), (xe, ye) = self._picks[pick_no]
                     xc = np.mean([xs, xe])
                     yc = np.mean([ys, ye])
-                    w = (
-                        self.window.tools_settings_dialog.pick_width.value()
-                        / pixelsize
-                    )
+                    w = t_dialog.pick_width.value() / pixelsize
                     X, Y = lib.get_pick_rectangle_corners(xs, ys, xe, ye, w)
                     x_min = min(X) - (0.2 * (xc - min(X)))
                     x_max = max(X) + (0.2 * (max(X) - xc))
@@ -8474,10 +8512,7 @@ class View(QtWidgets.QLabel):
                     y_min = min(Y) - 0.2 * (max(Y) - min(Y))
                     y_max = max(Y) + 0.2 * (max(Y) - min(Y))
                 elif self._pick_shape == "Square":
-                    w = (
-                        self.window.tools_settings_dialog.pick_side_length.value()
-                        / pixelsize
-                    )
+                    w = t_dialog.pick_side_length.value() / pixelsize
                     x, y = self._picks[pick_no]
                     x_min = x - 1.4 * (w / 2)
                     x_max = x + 1.4 * (w / 2)
@@ -8875,7 +8910,7 @@ class View(QtWidgets.QLabel):
         self.update_pick_info_short()
         self.update_scene(picks_only=True)
 
-    def load_screenshot(self, file: dict) -> None:
+    def load_screenshot(self, file: dict) -> None:  # noqa: C901
         """Load screenshot settings from a .yaml file."""
         disp_dlg = self.window.display_settings_dlg
         x, y, w, h = file["FOV (X, Y, Width, Height)"]
@@ -9043,6 +9078,90 @@ class View(QtWidgets.QLabel):
                     self.rectangle_pick_start_y = event.pos().y()
                     self.rectangle_pick_start = self.map_to_movie(event.pos())
 
+    def _mouse_release_zoom(self, event: QtCore.QEvent) -> None:
+        """Zooms in (left click) if the zoom-in rectangle is visible,
+        stops panning on right click."""
+        if (
+            event.button() == QtCore.Qt.MouseButton.LeftButton
+            and self.rubberband.isVisible()
+        ):  # zoom in if the zoom-in rectangle is visible
+            end = QtCore.QPoint(event.pos())
+            if end.x() > self.origin.x() and end.y() > self.origin.y():
+                x_min_rel = self.origin.x() / self.width()
+                x_max_rel = end.x() / self.width()
+                y_min_rel = self.origin.y() / self.height()
+                y_max_rel = end.y() / self.height()
+                viewport_height, viewport_width = self.viewport_size()
+                x_min = self.viewport[0][1] + x_min_rel * viewport_width
+                x_max = self.viewport[0][1] + x_max_rel * viewport_width
+                y_min = self.viewport[0][0] + y_min_rel * viewport_height
+                y_max = self.viewport[0][0] + y_max_rel * viewport_height
+                viewport = [(y_min, x_min), (y_max, x_max)]
+                self.update_scene(viewport)
+            self.rubberband.hide()
+        # stop panning
+        elif event.button() == QtCore.Qt.MouseButton.RightButton:
+            self._pan = False
+            self.setCursor(QtCore.Qt.CursorShape.ArrowCursor)
+            event.accept()
+            self.update_scene()
+        else:
+            event.ignore()
+
+    def _mouse_release_pick(self, event: QtCore.QEvent) -> None:
+        """Adds and removes picks on left and right click, respectively."""
+        if self._pick_shape in ["Circle", "Square"]:
+            # add pick
+            if event.button() == QtCore.Qt.MouseButton.LeftButton:
+                x, y = self.map_to_movie(event.pos())
+                self.add_pick((x, y))
+                event.accept()
+            # remove pick
+            elif event.button() == QtCore.Qt.MouseButton.RightButton:
+                x, y = self.map_to_movie(event.pos())
+                self.remove_picks((x, y))
+                event.accept()
+            else:
+                event.ignore()
+        elif self._pick_shape == "Rectangle":
+            if event.button() == QtCore.Qt.MouseButton.LeftButton:
+                # finish drawing rectangular pick and add it
+                rectangle_pick_end = self.map_to_movie(event.pos())
+                self._rectangle_pick_ongoing = False
+                self.add_pick((self.rectangle_pick_start, rectangle_pick_end))
+                event.accept()
+            elif event.button() == QtCore.Qt.MouseButton.RightButton:
+                # remove pick
+                x, y = self.map_to_movie(event.pos())
+                self.remove_picks((x, y))
+                event.accept()
+            else:
+                event.ignore()
+        elif self._pick_shape == "Polygon":
+            # add a point to the polygon
+            if event.button() == QtCore.Qt.MouseButton.LeftButton:
+                point_movie = self.map_to_movie(event.pos())
+                self.add_polygon_point(point_movie, event.pos())
+            # remove the last point from the polygon
+            elif event.button() == QtCore.Qt.MouseButton.RightButton:
+                self.remove_polygon_point()
+
+    def _mouse_release_measure(self, event: QtCore.QEvent) -> None:
+        """Adds a measure point on left click, removes the last one on
+        right click."""
+        if event.button() == QtCore.Qt.MouseButton.LeftButton:
+            # add measure point
+            x, y = self.map_to_movie(event.pos())
+            self.add_point((x, y))
+            event.accept()
+        elif event.button() == QtCore.Qt.MouseButton.RightButton:
+            # remove measure points
+            x, y = self.map_to_movie(event.pos())
+            self.remove_points()
+            event.accept()
+        else:
+            event.ignore()
+
     def mouseReleaseEvent(self, event: QtCore.QEvent) -> None:
         """Zoom in, stop panning, add and remove picks, add and remove
         measure points."""
@@ -9050,83 +9169,11 @@ class View(QtWidgets.QLabel):
             return
 
         if self._mode == "Zoom":
-            if (
-                event.button() == QtCore.Qt.MouseButton.LeftButton
-                and self.rubberband.isVisible()
-            ):  # zoom in if the zoom-in rectangle is visible
-                end = QtCore.QPoint(event.pos())
-                if end.x() > self.origin.x() and end.y() > self.origin.y():
-                    x_min_rel = self.origin.x() / self.width()
-                    x_max_rel = end.x() / self.width()
-                    y_min_rel = self.origin.y() / self.height()
-                    y_max_rel = end.y() / self.height()
-                    viewport_height, viewport_width = self.viewport_size()
-                    x_min = self.viewport[0][1] + x_min_rel * viewport_width
-                    x_max = self.viewport[0][1] + x_max_rel * viewport_width
-                    y_min = self.viewport[0][0] + y_min_rel * viewport_height
-                    y_max = self.viewport[0][0] + y_max_rel * viewport_height
-                    viewport = [(y_min, x_min), (y_max, x_max)]
-                    self.update_scene(viewport)
-                self.rubberband.hide()
-            # stop panning
-            elif event.button() == QtCore.Qt.MouseButton.RightButton:
-                self._pan = False
-                self.setCursor(QtCore.Qt.CursorShape.ArrowCursor)
-                event.accept()
-                self.update_scene()
-            else:
-                event.ignore()
+            self._mouse_release_zoom(event)
         elif self._mode == "Pick":
-            if self._pick_shape in ["Circle", "Square"]:
-                # add pick
-                if event.button() == QtCore.Qt.MouseButton.LeftButton:
-                    x, y = self.map_to_movie(event.pos())
-                    self.add_pick((x, y))
-                    event.accept()
-                # remove pick
-                elif event.button() == QtCore.Qt.MouseButton.RightButton:
-                    x, y = self.map_to_movie(event.pos())
-                    self.remove_picks((x, y))
-                    event.accept()
-                else:
-                    event.ignore()
-            elif self._pick_shape == "Rectangle":
-                if event.button() == QtCore.Qt.MouseButton.LeftButton:
-                    # finish drawing rectangular pick and add it
-                    rectangle_pick_end = self.map_to_movie(event.pos())
-                    self._rectangle_pick_ongoing = False
-                    self.add_pick(
-                        (self.rectangle_pick_start, rectangle_pick_end)
-                    )
-                    event.accept()
-                elif event.button() == QtCore.Qt.MouseButton.RightButton:
-                    # remove pick
-                    x, y = self.map_to_movie(event.pos())
-                    self.remove_picks((x, y))
-                    event.accept()
-                else:
-                    event.ignore()
-            elif self._pick_shape == "Polygon":
-                # add a point to the polygon
-                if event.button() == QtCore.Qt.MouseButton.LeftButton:
-                    point_movie = self.map_to_movie(event.pos())
-                    self.add_polygon_point(point_movie, event.pos())
-                # remove the last point from the polygon
-                elif event.button() == QtCore.Qt.MouseButton.RightButton:
-                    self.remove_polygon_point()
+            self._mouse_release_pick(event)
         elif self._mode == "Measure":
-            if event.button() == QtCore.Qt.MouseButton.LeftButton:
-                # add measure point
-                x, y = self.map_to_movie(event.pos())
-                self.add_point((x, y))
-                event.accept()
-            elif event.button() == QtCore.Qt.MouseButton.RightButton:
-                # remove measure points
-                x, y = self.map_to_movie(event.pos())
-                self.remove_points()
-                event.accept()
-            else:
-                event.ignore()
+            self._mouse_release_measure(event)
 
     def movie_size(self) -> tuple[int, int]:
         """Return tuple with movie height and width."""
@@ -9382,112 +9429,102 @@ class View(QtWidgets.QLabel):
     def select_traces(self) -> None:
         """Let the user select picks based on their time traces. Open
         ``self.pick_message_box`` to display information."""
-        removelist = []  # picks to be removed
         channel = self.get_channel("Select traces")
+        removelist = []  # picks to be removed
 
-        if channel is not None:
-            if self._picks:  # if there are picks present
-                params = {}  # stores info about selecting picks
-                params["t0"] = time.time()
-                all_picked_locs = self.picked_locs(channel)
-                i = 0  # index of the currently shown pick
-                n_frames = self.infos[channel][0]["Frames"]
-                while i < len(self._picks):
-                    fig, (ax1, ax2, ax3, ax4) = plt.subplots(
-                        4, 1, figsize=(6, 6), constrained_layout=True
-                    )
-                    fig.canvas.manager.set_window_title("Trace")
-                    pick = self._picks[i]
-                    locs = all_picked_locs[i]
+        if channel is not None and len(self._picks):
+            params = {}  # stores info about selecting picks
+            params["t0"] = time.time()
+            all_picked_locs = self.picked_locs(channel)
+            i = 0  # index of the currently shown pick
+            n_frames = self.infos[channel][0]["Frames"]
+            while i < len(self._picks):
+                fig, (ax1, ax2, ax3, ax4) = plt.subplots(
+                    4, 1, figsize=(6, 6), constrained_layout=True
+                )
+                fig.canvas.manager.set_window_title("Trace")
+                pick = self._picks[i]
+                locs = all_picked_locs[i]
 
-                    xvec = np.arange(n_frames)
-                    yvec = np.ones_like(xvec, dtype=float) * -1
-                    yvec[locs["frame"]] = locs["x"]
-                    yvec_ph = np.zeros_like(xvec, dtype=int)
-                    yvec_ph[locs["frame"]] = locs["photons"]
-                    ax1.set_title(
-                        "Scatterplot of Pick "
-                        + str(i + 1)
-                        + "  of: "
-                        + str(len(self._picks))
-                        + "."
-                    )
-                    ax1.set_title(
-                        "Scatterplot of Pick "
-                        + str(i + 1)
-                        + "  of: "
-                        + str(len(self._picks))
-                        + "."
-                    )
-                    ax1.scatter(xvec, yvec, s=2)
-                    ax1.set_ylabel("X-pos [Px]")
-                    ax1.set_title("X-pos vs frame")
-                    if locs.size:
-                        ax1.set_ylim(yvec[yvec > 0].min(), yvec.max())
-                    plt.setp(ax1.get_xticklabels(), visible=False)
+                xvec = np.arange(n_frames)
+                yvec = np.ones_like(xvec, dtype=float) * -1
+                yvec[locs["frame"]] = locs["x"]
+                yvec_ph = np.zeros_like(xvec, dtype=int)
+                yvec_ph[locs["frame"]] = locs["photons"]
+                ax1.set_title(
+                    "Scatterplot of Pick "
+                    + str(i + 1)
+                    + "  of: "
+                    + str(len(self._picks))
+                    + "."
+                )
+                ax1.set_title(
+                    "Scatterplot of Pick "
+                    + str(i + 1)
+                    + "  of: "
+                    + str(len(self._picks))
+                    + "."
+                )
+                ax1.scatter(xvec, yvec, s=2)
+                ax1.set_ylabel("X-pos [Px]")
+                ax1.set_title("X-pos vs frame")
+                if locs.size:
+                    ax1.set_ylim(yvec[yvec > 0].min(), yvec.max())
+                plt.setp(ax1.get_xticklabels(), visible=False)
 
-                    yvec = np.ones_like(xvec, dtype=float) * -1
-                    yvec[locs["frame"]] = locs["y"]
-                    ax2.scatter(xvec, yvec, s=2)
-                    ax2.set_title("Y-pos vs frame")
-                    ax2.set_ylabel("Y-pos [Px]")
-                    if locs.size:
-                        ax2.set_ylim(yvec[yvec > 0].min(), yvec.max())
-                    plt.setp(ax2.get_xticklabels(), visible=False)
+                yvec = np.ones_like(xvec, dtype=float) * -1
+                yvec[locs["frame"]] = locs["y"]
+                ax2.scatter(xvec, yvec, s=2)
+                ax2.set_title("Y-pos vs frame")
+                ax2.set_ylabel("Y-pos [Px]")
+                if locs.size:
+                    ax2.set_ylim(yvec[yvec > 0].min(), yvec.max())
+                plt.setp(ax2.get_xticklabels(), visible=False)
 
-                    yvec = xvec[:] * 0
-                    yvec[locs["frame"]] = 1
-                    ax3.plot(xvec, yvec)
-                    ax3.set_title("Localizations")
-                    ax3.set_xlabel("Frames")
-                    ax3.set_ylabel("ON")
-                    ax3.set_yticks([0, 1])
+                yvec = xvec[:] * 0
+                yvec[locs["frame"]] = 1
+                ax3.plot(xvec, yvec)
+                ax3.set_title("Localizations")
+                ax3.set_xlabel("Frames")
+                ax3.set_ylabel("ON")
+                ax3.set_yticks([0, 1])
 
-                    ax4.plot(xvec, yvec_ph)
-                    ax4.set_title("Photons")
-                    ax4.set_xlabel("Frames")
-                    ax4.set_ylabel("Photons")
+                ax4.plot(xvec, yvec_ph)
+                ax4.set_title("Photons")
+                ax4.set_xlabel("Frames")
+                ax4.set_ylabel("Photons")
 
-                    fig.canvas.draw()
-                    width, height = fig.canvas.get_width_height()
+                fig.canvas.draw()
+                width, height = fig.canvas.get_width_height()
 
-                    # View will display traces instead of rendered locs
-                    im = QtGui.QImage(
-                        fig.canvas.buffer_rgba(),
-                        width,
-                        height,
-                        QtGui.QImage.Format.Format_ARGB32,
-                    )
+                # View will display traces instead of rendered locs
+                im = QtGui.QImage(
+                    fig.canvas.buffer_rgba(),
+                    width,
+                    height,
+                    QtGui.QImage.Format.Format_ARGB32,
+                )
 
-                    self.setPixmap((QtGui.QPixmap(im)))
-                    self.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+                self.setPixmap((QtGui.QPixmap(im)))
+                self.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
 
-                    # update info
-                    params["n_removed"] = len(removelist)
-                    params["n_kept"] = i - params["n_removed"]
-                    params["n_total"] = len(self._picks)
-                    params["i"] = i
+                # update info
+                params["n_removed"] = len(removelist)
+                params["n_kept"] = i - params["n_removed"]
+                params["n_total"] = len(self._picks)
+                params["i"] = i
 
-                    # message box with buttons
-                    msgBox = self.pick_message_box(params)
-                    msgBox.exec()
-                    reply = msgBox.clickedButton().text()
-
-                    if reply == "Accept":
-                        if pick in removelist:
-                            removelist.remove(pick)
-                    elif reply == "Reject":
-                        removelist.append(pick)
-                    elif reply == "Back":
-                        if i >= 2:
-                            i -= 2
-                        else:
-                            i = -1
-                    else:  # cancel
-                        break
-
-                    i += 1
-                    plt.close()
+                # message box with buttons
+                msgBox = self.pick_message_box(params)
+                msgBox.exec()
+                reply = msgBox.clickedButton().text()
+                removelist, i = self._handle_pick_selection_reply(
+                    reply, pick, removelist, i
+                )
+                if i is None:  # cancel
+                    break
+                i += 1
+                plt.close()
 
         # remove picks
         for pick in removelist:
@@ -9497,6 +9534,22 @@ class View(QtWidgets.QLabel):
 
         self.update_pick_info_short()
         self.update_scene()
+
+    def _handle_pick_selection_reply(self, reply, pick, removelist, i):
+        """Handle the reply from the pick selection message box."""
+        if reply == "Accept":
+            if pick in removelist:
+                removelist.remove(pick)
+        elif reply == "Reject":
+            removelist.append(pick)
+        elif reply == "Back":
+            if i >= 2:
+                i -= 2
+            else:
+                i = -1
+        else:  # cancel
+            i = None
+        return removelist, i
 
     @property
     def _pick_size(self) -> float:
@@ -9513,184 +9566,124 @@ class View(QtWidgets.QLabel):
             pick_size = None
         return pick_size
 
+    def _draw_pick_scatter(
+        self,
+        ax,
+        all_picked_locs: list,
+        i: int,
+        colors: list,
+        channel: int,
+        is_multi: bool,
+    ) -> None:
+        """Plot scatter of localizations for a single pick onto ax."""
+        if is_multi:
+            for ll in range(len(self.locs_paths)):
+                locs = all_picked_locs[ll][i]
+                ax.scatter(locs["x"], locs["y"], c=colors[ll], s=2)
+        else:
+            locs = all_picked_locs[i]
+            ax.scatter(locs["x"], locs["y"], color=colors[channel], s=2)
+
     @check_pick
     @check_circular_picks
     def show_pick(self) -> None:
         """Let the user select picks based on their 2D scatter. Open
         ``self.pick_message_box`` to display information."""
         channel = self.get_channel3d("Select Channel")
-
         removelist = []  # picks to be removed
-
         if channel is not None:
             n_channels = len(self.locs_paths)
             colors = lib.get_colors(n_channels)
             tools_dialog = self.window.tools_settings_dialog
             pixelsize = self.window.display_settings_dlg.pixelsize.value()
             r = tools_dialog.pick_diameter.value() / 2 / pixelsize
-            if channel is (len(self.locs_paths)):
-                all_picked_locs = []
-                for k in range(len(self.locs_paths)):
-                    all_picked_locs.append(self.picked_locs(k))
-                if self._picks:
-                    params = {}  # info about selecting
-                    params["t0"] = time.time()
-                    i = 0
-                    while i < len(self._picks):
-                        fig = plt.figure(
-                            figsize=(5, 5), constrained_layout=True
-                        )
-                        fig.canvas.manager.set_window_title(
-                            "Scatterplot of Pick"
-                        )
-                        pick = self._picks[i]
-
-                        # plot scatter
-                        ax = fig.add_subplot(111)
-                        ax.set_title(
-                            "Scatterplot of Pick "
-                            + str(i + 1)
-                            + "  of: "
-                            + str(len(self._picks))
-                            + "."
-                        )
-                        for ll in range(len(self.locs_paths)):
-                            locs = all_picked_locs[ll][i]
-                            ax.scatter(locs["x"], locs["y"], c=colors[ll], s=2)
-
-                        # adjust x and y lim
-                        x_min = pick[0] - r
-                        x_max = pick[0] + r
-                        y_min = pick[1] - r
-                        y_max = pick[1] + r
-                        ax.set_xlabel("X [Px]")
-                        ax.set_ylabel("Y [Px]")
-                        ax.set_xlim([x_min, x_max])
-                        ax.set_ylim([y_min, y_max])
-                        plt.axis("equal")
-
-                        fig.canvas.draw()
-
-                        width, height = fig.canvas.get_width_height()
-
-                        # scatter will be displayed instead of
-                        # rendered locs
-                        im = QtGui.QImage(
-                            fig.canvas.buffer_rgba(),
-                            width,
-                            height,
-                            QtGui.QImage.Format.Format_ARGB32,
-                        )
-
-                        self.setPixmap((QtGui.QPixmap(im)))
-                        self.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
-
-                        # update selection info
-                        params["n_removed"] = len(removelist)
-                        params["n_kept"] = i - params["n_removed"]
-                        params["n_total"] = len(self._picks)
-                        params["i"] = i
-
-                        msgBox = self.pick_message_box(params)
-                        msgBox.exec()
-                        reply = msgBox.clickedButton().text()
-
-                        if reply == "Accept":
-                            if pick in removelist:
-                                removelist.remove(pick)
-                        elif reply == "Reject":
-                            removelist.append(pick)
-                        elif reply == "Back":
-                            if i >= 2:
-                                i -= 2
-                            else:
-                                i = -1
-                        else:  # cancel
-                            break
-
-                        i += 1
-                        plt.close()
+            is_multi = channel is len(self.locs_paths)
+            if is_multi:
+                all_picked_locs = [
+                    self.picked_locs(k) for k in range(len(self.locs_paths))
+                ]
             else:
                 all_picked_locs = self.picked_locs(channel)
-                if self._picks:
-                    params = {}
-                    params["t0"] = time.time()
-                    i = 0
-                    while i < len(self._picks):
-                        pick = self._picks[i]
-                        fig = plt.figure(
-                            figsize=(5, 5), constrained_layout=True
-                        )
-                        fig.canvas.manager.set_window_title(
-                            "Scatterplot of Pick"
-                        )
-                        ax = fig.add_subplot(111)
-                        ax.set_title(
-                            "Scatterplot of Pick "
-                            + str(i + 1)
-                            + "  of: "
-                            + str(len(self._picks))
-                            + "."
-                        )
-                        locs = all_picked_locs[i]
-                        x_min = pick[0] - r
-                        x_max = pick[0] + r
-                        y_min = pick[1] - r
-                        y_max = pick[1] + r
-                        ax.scatter(
-                            locs["x"], locs["y"], color=colors[channel], s=2
-                        )
-                        ax.set_xlabel("X [Px]")
-                        ax.set_ylabel("Y [Px]")
-                        ax.set_xlim([x_min, x_max])
-                        ax.set_ylim([y_min, y_max])
-                        plt.axis("equal")
-
-                        fig.canvas.draw()
-                        width, height = fig.canvas.get_width_height()
-
-                        im = QtGui.QImage(
-                            fig.canvas.buffer_rgba(),
-                            width,
-                            height,
-                            QtGui.QImage.Format.Format_ARGB32,
-                        )
-
-                        self.setPixmap((QtGui.QPixmap(im)))
-                        self.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
-
-                        params["n_removed"] = len(removelist)
-                        params["n_kept"] = i - params["n_removed"]
-                        params["n_total"] = len(self._picks)
-                        params["i"] = i
-
-                        msgBox = self.pick_message_box(params)
-                        msgBox.exec()
-                        reply = msgBox.clickedButton().text()
-
-                        if reply == "Accept":
-                            if pick in removelist:
-                                removelist.remove(pick)
-                        elif reply == "Reject":
-                            removelist.append(pick)
-                        elif reply == "Back":
-                            if i >= 2:
-                                i -= 2
-                            else:
-                                i = -1
-                        else:  # cancel
-                            break
-
-                        i += 1
-                        plt.close()
-
+            if self._picks:
+                params = {"t0": time.time()}
+                i = 0
+                while i < len(self._picks):
+                    pick = self._picks[i]
+                    fig = plt.figure(figsize=(5, 5), constrained_layout=True)
+                    fig.canvas.manager.set_window_title("Scatterplot of Pick")
+                    ax = fig.add_subplot(111)
+                    ax.set_title(
+                        "Scatterplot of Pick "
+                        + str(i + 1)
+                        + "  of: "
+                        + str(len(self._picks))
+                        + "."
+                    )
+                    self._draw_pick_scatter(
+                        ax, all_picked_locs, i, colors, channel, is_multi
+                    )
+                    x_min = pick[0] - r
+                    x_max = pick[0] + r
+                    y_min = pick[1] - r
+                    y_max = pick[1] + r
+                    ax.set_xlabel("X [Px]")
+                    ax.set_ylabel("Y [Px]")
+                    ax.set_xlim([x_min, x_max])
+                    ax.set_ylim([y_min, y_max])
+                    plt.axis("equal")
+                    fig.canvas.draw()
+                    width, height = fig.canvas.get_width_height()
+                    im = QtGui.QImage(
+                        fig.canvas.buffer_rgba(),
+                        width,
+                        height,
+                        QtGui.QImage.Format.Format_ARGB32,
+                    )
+                    self.setPixmap((QtGui.QPixmap(im)))
+                    self.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+                    params["n_removed"] = len(removelist)
+                    params["n_kept"] = i - params["n_removed"]
+                    params["n_total"] = len(self._picks)
+                    params["i"] = i
+                    msgBox = self.pick_message_box(params)
+                    msgBox.exec()
+                    reply = msgBox.clickedButton().text()
+                    removelist, i = self._handle_pick_selection_reply(
+                        reply, pick, removelist, i
+                    )
+                    if i is None:  # cancel
+                        break
+                    i += 1
+                    plt.close()
         for pick in removelist:
             self._picks.remove(pick)
-
         self.n_picks = len(self._picks)
-
         self.update_pick_info_short()
         self.update_scene()
+
+    def _iterate_plot_dialog_picks(
+        self,
+        all_picked_locs: list,
+        is_multi: bool,
+        colors: list,
+        DialogClass,
+    ) -> list:
+        """Iterate over picks, show DialogClass for each, return picks to
+        remove."""
+        removelist = []
+        flag = 0 if is_multi else 1
+        color_arg = colors if is_multi else 1
+        for i, pick in enumerate(self._picks):
+            reply = DialogClass.getParams(
+                all_picked_locs, i, len(self._picks), flag, color_arg
+            )
+            if reply == 1:
+                pass  # accepted
+            elif reply == 2:
+                break
+            else:
+                removelist.append(pick)
+        return removelist
 
     @check_pick
     def show_pick_3d(self) -> None:
@@ -9701,42 +9694,17 @@ class View(QtWidgets.QLabel):
         if channel is not None:
             n_channels = len(self.locs_paths)
             colors = lib.get_colors(n_channels)
-
-            if channel is (len(self.locs_paths)):
-                # Combined
-                all_picked_locs = []
-                for k in range(len(self.locs_paths)):
-                    all_picked_locs.append(self.picked_locs(k))
-
-                if self._picks:
-                    for i, pick in enumerate(self._picks):
-                        reply = PlotDialog.getParams(
-                            all_picked_locs, i, len(self._picks), 0, colors
-                        )
-                        if reply == 1:
-                            pass  # accepted
-                        elif reply == 2:
-                            break
-                        else:
-                            # discard
-                            removelist.append(pick)
+            is_multi = channel is len(self.locs_paths)
+            if is_multi:
+                all_picked_locs = [
+                    self.picked_locs(k) for k in range(len(self.locs_paths))
+                ]
             else:
                 all_picked_locs = self.picked_locs(channel)
-                if self._picks:
-
-                    for i, pick in enumerate(self._picks):
-
-                        reply = PlotDialog.getParams(
-                            all_picked_locs, i, len(self._picks), 1, 1
-                        )
-                        if reply == 1:
-                            pass  # accepted
-                        elif reply == 2:
-                            break
-                        else:
-                            # discard
-                            removelist.append(pick)
-
+            if self._picks:
+                removelist = self._iterate_plot_dialog_picks(
+                    all_picked_locs, is_multi, colors, PlotDialog
+                )
         for pick in removelist:
             self._picks.remove(pick)
         self.n_picks = len(self._picks)
@@ -9750,63 +9718,170 @@ class View(QtWidgets.QLabel):
         projections.
         Uses PlotDialogIso for displaying picks.
         """
-
         channel = self.get_channel3d("Show Pick 3D")
         removelist = []
         if channel is not None:
             n_channels = len(self.locs_paths)
             colors = lib.get_colors(n_channels)
-
-            if channel is (len(self.locs_paths)):
-                # combined
-                all_picked_locs = []
-                for k in range(len(self.locs_paths)):
-                    all_picked_locs.append(self.picked_locs(k))
-
-                if self._picks:
-                    for i, pick in enumerate(self._picks):
-                        reply = PlotDialogIso.getParams(
-                            all_picked_locs,
-                            i,
-                            len(self._picks),
-                            0,
-                            colors,
-                        )
-                        if reply == 1:
-                            pass  # accepted
-
-                        elif reply == 2:
-                            break
-                        else:
-                            # discard
-                            removelist.append(pick)
+            is_multi = channel is len(self.locs_paths)
+            if is_multi:
+                all_picked_locs = [
+                    self.picked_locs(k) for k in range(len(self.locs_paths))
+                ]
             else:
                 all_picked_locs = self.picked_locs(channel)
-                if self._picks:
-
-                    for i, pick in enumerate(self._picks):
-
-                        reply = PlotDialogIso.getParams(
-                            all_picked_locs,
-                            i,
-                            len(self._picks),
-                            1,
-                            1,
-                        )
-                        if reply == 1:
-                            pass
-                            # accepted
-                        elif reply == 2:
-                            break
-                        else:
-                            # discard
-                            removelist.append(pick)
-
+            if self._picks:
+                removelist = self._iterate_plot_dialog_picks(
+                    all_picked_locs, is_multi, colors, PlotDialogIso
+                )
         for pick in removelist:
             self._picks.remove(pick)
         self.n_picks = len(self._picks)
         self.update_pick_info_short()
         self.update_scene()
+
+    def _analyze_cluster_combined(
+        self,
+        all_picked_locs: list,
+        pixelsize: float,
+    ) -> list:
+        """Iterate over picks for combined-channel k-means clustering.
+        Return list of picks to remove."""
+        removelist = []
+        for i, pick in enumerate(self._picks):
+            if "z" in all_picked_locs[0].columns:
+                reply = ClsDlg3D.getParams(
+                    all_picked_locs, i, len(self._picks), 0, pixelsize
+                )
+            else:
+                reply = ClsDlg2D.getParams(
+                    all_picked_locs, i, len(self._picks), 0
+                )
+            if reply == 1:
+                pass  # accepted
+            elif reply == 2:
+                break  # canceled
+            else:
+                removelist.append(pick)  # discard
+        return removelist
+
+    def _analyze_cluster_single(
+        self,
+        all_picked_locs: list,
+        pixelsize: float,
+    ) -> tuple:
+        """Iterate over picks for single-channel k-means clustering.
+        Return (removelist, saved_locs, clustered_locs)."""
+        removelist = []
+        saved_locs = []
+        clustered_locs = []
+        n_clusters, ok = QtWidgets.QInputDialog.getInt(
+            self,
+            "Input Dialog",
+            "Enter inital number of clusters:",
+            10,
+        )
+        for i, pick in enumerate(self._picks):
+            reply = 3
+            while reply == 3:
+                if "z" in all_picked_locs[0].columns:
+                    reply, nc, l_locs, c_locs = ClsDlg3D.getParams(
+                        all_picked_locs,
+                        i,
+                        len(self._picks),
+                        n_clusters,
+                        pixelsize,
+                    )
+                else:
+                    reply, nc, l_locs, c_locs = ClsDlg2D.getParams(
+                        all_picked_locs,
+                        i,
+                        len(self._picks),
+                        n_clusters,
+                    )
+                n_clusters = nc
+            if reply == 1:
+                saved_locs.append(l_locs)
+                clustered_locs.extend(c_locs)
+            elif reply == 2:
+                break
+            else:
+                removelist.append(pick)
+        return removelist, saved_locs, clustered_locs
+
+    def _save_cluster_results(
+        self,
+        saved_locs: list,
+        clustered_locs: list,
+        channel: int,
+    ) -> None:
+        """Save accepted cluster localizations and their properties."""
+        base, ext = os.path.splitext(self.locs_paths[channel])
+        out_path = base + "_cluster.hdf5"
+        path, ext = lib.get_save_filename_ext_dialog(
+            self,
+            "Save picked localizations",
+            out_path,
+            filter="*.hdf5",
+            check_ext=".yaml",
+        )
+        if path:
+            saved_locs = pd.concat(saved_locs, ignore_index=True)
+            if saved_locs is not None:
+                d = self.window.tools_settings_dialog.pick_diameter.value()
+                pick_info = {
+                    "Generated by:": f"Picasso v{__version__} Render",
+                    "Pick Diameter (nm):": d,
+                }
+                io.save_locs(
+                    path, saved_locs, self.infos[channel] + [pick_info]
+                )
+        # save pick properties
+        base, ext = os.path.splitext(path)
+        out_path = base + "_properties.hdf5"
+        r_max = 2 * max(
+            self.infos[channel][0]["Height"],
+            self.infos[channel][0]["Width"],
+        )
+        max_dark, ok = QtWidgets.QInputDialog.getInt(
+            self, "Input Dialog", "Enter gap size:", 3
+        )
+        out_locs = []
+        progress = lib.ProgressDialog(
+            "Calculating kinetics", 0, len(clustered_locs), self
+        )
+        progress.set_value(0)
+        dark = np.empty(len(clustered_locs))
+        for i, pick_locs in enumerate(clustered_locs):
+            if "len" not in pick_locs.columns:
+                pick_locs = postprocess.link(
+                    pick_locs,
+                    self.infos[channel],
+                    r_max=r_max,
+                    max_dark_time=max_dark,
+                )
+            pick_locs = postprocess.compute_dark_times(pick_locs)
+            dark[i] = estimate_kinetic_rate(pick_locs["dark"].to_numpy())
+            out_locs.append(pick_locs)
+            progress.set_value(i + 1)
+        out_locs = pd.concat(out_locs, ignore_index=True)
+        n_groups = len(clustered_locs)
+        progress = lib.ProgressDialog(
+            "Calculating pick properties", 0, n_groups, self
+        )
+        pick_props = postprocess.groupprops(
+            out_locs, callback=progress.set_value
+        )
+        n_units = self.window.info_dialog.calculate_n_units(dark)
+        pick_props["n_units"] = n_units
+        influx = self.window.info_dialog.influx_rate.value()
+        info = self.infos[channel] + [
+            {
+                "Generated by": f"Picasso v{__version__}: Render",
+                "Influx rate": influx,
+            }
+        ]
+        io.save_datasets(out_path, info, groups=pick_props)
 
     @check_pick
     def analyze_cluster(self) -> None:
@@ -9816,167 +9891,87 @@ class View(QtWidgets.QLabel):
         saved_locs = []
         clustered_locs = []
         pixelsize = self.window.display_settings_dlg.pixelsize.value()
-
         if channel is not None:
-            # combined locs
-            if channel is (len(self.locs_paths)):
-                all_picked_locs = []
-                for k in range(len(self.locs_paths)):
-                    all_picked_locs.append(self.picked_locs(k))
-
+            if channel is len(self.locs_paths):
+                all_picked_locs = [
+                    self.picked_locs(k) for k in range(len(self.locs_paths))
+                ]
                 if self._picks:
-                    for i, pick in enumerate(self._picks):
-                        # 3D
-                        if "z" in all_picked_locs[0].columns:
-                            # k-means clustering
-                            reply = ClsDlg3D.getParams(
-                                all_picked_locs,
-                                i,
-                                len(self._picks),
-                                0,
-                                pixelsize,
-                            )
-                        # 2D
-                        else:
-                            # k-means clustering
-                            reply = ClsDlg2D.getParams(
-                                all_picked_locs,
-                                i,
-                                len(self._picks),
-                                0,
-                            )
-                        if reply == 1:
-                            # accepted
-                            pass
-                        elif reply == 2:
-                            # canceled
-                            break
-                        else:
-                            # discard
-                            removelist.append(pick)
-            # one channel
+                    removelist = self._analyze_cluster_combined(
+                        all_picked_locs, pixelsize
+                    )
             else:
                 all_picked_locs = self.picked_locs(channel)
                 if self._picks:
-                    n_clusters, ok = QtWidgets.QInputDialog.getInt(
-                        self,
-                        "Input Dialog",
-                        "Enter inital number of clusters:",
-                        10,
+                    removelist, saved_locs, clustered_locs = (
+                        self._analyze_cluster_single(
+                            all_picked_locs,
+                            pixelsize,
+                        )
                     )
-
-                    for i, pick in enumerate(self._picks):
-                        reply = 3
-                        while reply == 3:
-                            # 3D
-                            if "z" in all_picked_locs[0].columns:
-                                # k-means clustering
-                                reply, nc, l_locs, c_locs = ClsDlg3D.getParams(
-                                    all_picked_locs,
-                                    i,
-                                    len(self._picks),
-                                    n_clusters,
-                                    pixelsize,
-                                )
-                            # 2D
-                            else:
-                                # k-means clustering
-                                reply, nc, l_locs, c_locs = ClsDlg2D.getParams(
-                                    all_picked_locs,
-                                    i,
-                                    len(self._picks),
-                                    n_clusters,
-                                )
-                            n_clusters = nc
-
-                        if reply == 1:
-                            # accepted
-                            saved_locs.append(l_locs)
-                            clustered_locs.extend(c_locs)
-                        elif reply == 2:
-                            # canceled
-                            break
-                        else:
-                            # discarded
-                            removelist.append(pick)
-
-        # saved picked locs
-        if saved_locs != []:
-            base, ext = os.path.splitext(self.locs_paths[channel])
-            out_path = base + "_cluster.hdf5"
-            path, ext = lib.get_save_filename_ext_dialog(
-                self,
-                "Save picked localizations",
-                out_path,
-                filter="*.hdf5",
-                check_ext=".yaml",
-            )
-            if path:
-                saved_locs = pd.concat(saved_locs, ignore_index=True)
-                if saved_locs is not None:
-                    d = self.window.tools_settings_dialog.pick_diameter.value()
-                    pick_info = {
-                        "Generated by:": f"Picasso v{__version__} Render",
-                        "Pick Diameter (nm):": d,
-                    }
-                    io.save_locs(
-                        path, saved_locs, self.infos[channel] + [pick_info]
-                    )
-
-            # save pick properties
-            base, ext = os.path.splitext(path)
-            out_path = base + "_properties.hdf5"
-
-            r_max = 2 * max(
-                self.infos[channel][0]["Height"],
-                self.infos[channel][0]["Width"],
-            )
-            max_dark, ok = QtWidgets.QInputDialog.getInt(
-                self, "Input Dialog", "Enter gap size:", 3
-            )
-            out_locs = []
-            progress = lib.ProgressDialog(
-                "Calculating kinetics", 0, len(clustered_locs), self
-            )
-            progress.set_value(0)
-            dark = np.empty(len(clustered_locs))
-
-            for i, pick_locs in enumerate(clustered_locs):
-                if "len" not in pick_locs.columns:
-                    pick_locs = postprocess.link(
-                        pick_locs,
-                        self.infos[channel],
-                        r_max=r_max,
-                        max_dark_time=max_dark,
-                    )
-                pick_locs = postprocess.compute_dark_times(pick_locs)
-                dark[i] = estimate_kinetic_rate(pick_locs["dark"].to_numpy())
-                out_locs.append(pick_locs)
-                progress.set_value(i + 1)
-            out_locs = pd.concat(out_locs, ignore_index=True)
-            n_groups = len(clustered_locs)
-            progress = lib.ProgressDialog(
-                "Calculating pick properties", 0, n_groups, self
-            )
-            pick_props = postprocess.groupprops(
-                out_locs, callback=progress.set_value
-            )
-            n_units = self.window.info_dialog.calculate_n_units(dark)
-            pick_props["n_units"] = n_units
-            influx = self.window.info_dialog.influx_rate.value()
-            info = self.infos[channel] + [
-                {
-                    "Generated by": f"Picasso v{__version__}: Render",
-                    "Influx rate": influx,
-                }
-            ]
-            io.save_datasets(out_path, info, groups=pick_props)
-
+        if saved_locs:
+            self._save_cluster_results(saved_locs, clustered_locs, channel)
         for pick in removelist:
             self._picks.remove(pick)
         self.n_picks = len(self._picks)
         self.update_pick_info_short()
         self.update_scene()
+
+    def _display_pick_count_histogram(self, loccount, channels: list) -> None:
+        """Render and display a histogram of localization counts per pick."""
+        fig = plt.figure(constrained_layout=True)
+        fig.canvas.manager.set_window_title("Localizations in Picks")
+        ax = fig.add_subplot(111)
+        ax.set_title("Localizations in Picks ")
+        colors = [
+            _.palette().color(QtGui.QPalette.ColorRole.Window)
+            for _ in self.window.dataset_dialog.colordisp_all
+        ]
+        colors = [
+            [_.red() / 255, _.green() / 255, _.blue() / 255] for _ in colors
+        ]
+        bins = lib.calculate_optimal_bins(loccount.flatten(), max_n_bins=1000)
+        for i, channel in enumerate(channels):
+            ax.hist(
+                loccount[i],
+                bins=bins,
+                density=False,
+                facecolor=colors[channel],
+                alpha=0.5,
+            )
+        ax.set_xlabel("Number of localizations")
+        ax.set_ylabel("Counts")
+        fig.canvas.draw()
+        width, height = fig.canvas.get_width_height()
+        im = QtGui.QImage(
+            fig.canvas.buffer_rgba(),
+            width,
+            height,
+            QtGui.QImage.Format.Format_RGBA8888,
+        )
+        self.setPixmap((QtGui.QPixmap(im)))
+        self.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+
+    def _find_picks_outside_range(
+        self, loccount, channels: list, minlocs: int, maxlocs: int
+    ) -> list:
+        """Return picks whose localization count falls outside
+        [minlocs, maxlocs] in any channel."""
+        progress = lib.ProgressDialog(
+            "Removing picks..", 0, len(self._picks) - 1, self
+        )
+        progress.set_value(0)
+        progress.show()
+        removelist = []
+        for i, pick in enumerate(self._picks):
+            for channel_idx, channel in enumerate(channels):
+                n_locs = loccount[channel_idx, i]
+                if n_locs > maxlocs or n_locs < minlocs:
+                    removelist.append(pick)
+                    break
+            progress.set_value(i)
+        progress.close()
+        return removelist
 
     @check_picks
     @check_circular_picks
@@ -10001,47 +9996,8 @@ class View(QtWidgets.QLabel):
             loccount[i] = self._count_locs_in_picks(channel_, r)
         loccount = np.array(loccount)  # shape (n_channels, n_picks)
 
-        # plot histogram with n_locs in picks
-        fig = plt.figure(constrained_layout=True)
-        fig.canvas.manager.set_window_title("Localizations in Picks")
-        ax = fig.add_subplot(111)
-        ax.set_title("Localizations in Picks ")
+        self._display_pick_count_histogram(loccount, channels)
 
-        # get colors for each channel (from dataset dialog)
-        colors = [
-            _.palette().color(QtGui.QPalette.ColorRole.Window)
-            for _ in self.window.dataset_dialog.colordisp_all
-        ]
-        colors = [
-            [_.red() / 255, _.green() / 255, _.blue() / 255] for _ in colors
-        ]
-        bins = lib.calculate_optimal_bins(loccount.flatten(), max_n_bins=1000)
-
-        for i, channel in enumerate(channels):
-            ax.hist(
-                loccount[i],
-                bins=bins,
-                density=False,
-                facecolor=colors[channel],
-                alpha=0.5,
-            )
-        ax.set_xlabel("Number of localizations")
-        ax.set_ylabel("Counts")
-        fig.canvas.draw()
-
-        # display the histogram instead of the rendered locs
-        width, height = fig.canvas.get_width_height()
-        im = QtGui.QImage(
-            fig.canvas.buffer_rgba(),
-            width,
-            height,
-            QtGui.QImage.Format.Format_RGBA8888,
-        )
-        self.setPixmap((QtGui.QPixmap(im)))
-        self.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
-
-        # filter picks by n_locs
-        removelist = []
         minlocs, ok = QtWidgets.QInputDialog.getInt(
             self,
             "Input Dialog",
@@ -10060,27 +10016,13 @@ class View(QtWidgets.QLabel):
                 max=loccount.max(),
             )
             if ok2:
-                progress = lib.ProgressDialog(
-                    "Removing picks..", 0, len(self._picks) - 1, self
+                removelist = self._find_picks_outside_range(
+                    loccount, channels, minlocs, maxlocs
                 )
-                progress.set_value(0)
-                progress.show()
-                for i, pick in enumerate(self._picks):
-                    for channel_idx, channel in enumerate(channels):
-                        n_locs = loccount[channel_idx, i]
-                        if n_locs > maxlocs or n_locs < minlocs:
-                            removelist.append(pick)
-                            # if one channel does not satisfy the condition,
-                            # move on to the next pick
-                            break
-                    progress.set_value(i)
-
-                # adjust the attributes
                 for pick in removelist:
                     self._picks.remove(pick)
                 self.n_picks = len(self._picks)
                 self.update_pick_info_short()
-                progress.close()
         self.update_scene()
 
     def _count_locs_in_picks(self, channel: int, r: float) -> list[int]:
@@ -10389,6 +10331,47 @@ class View(QtWidgets.QLabel):
             )
             return picked_locs
 
+    def _filter_circle_picks(
+        self, x: float, y: float, pick_diameter_2: float
+    ) -> list:
+        """Return picks not overlapping position (x, y) for circular picks."""
+        return [
+            (x_, y_)
+            for x_, y_ in self._picks
+            if (x - x_) ** 2 + (y - y_) ** 2 > pick_diameter_2
+        ]
+
+    def _filter_rectangle_picks(
+        self, x: float, y: float, width: float
+    ) -> list:
+        """Return picks not overlapping position (x, y) for rectangular
+        picks."""
+        xarr = np.array([x])
+        yarr = np.array([y])
+        new_picks = []
+        for pick in self._picks:
+            (start_x, start_y), (end_x, end_y) = pick
+            X, Y = lib.get_pick_rectangle_corners(
+                start_x, start_y, end_x, end_y, width
+            )
+            if not Y[0] == Y[1]:
+                if not lib.check_if_in_rectangle(
+                    xarr, yarr, np.array(X), np.array(Y)
+                )[0]:
+                    new_picks.append(pick)
+        return new_picks
+
+    def _filter_square_picks(self, x: float, y: float, side: float) -> list:
+        """Return picks not overlapping position (x, y) for square picks."""
+        return [
+            (x_, y_)
+            for x_, y_ in self._picks
+            if not (
+                (x_ - side / 2 <= x <= x_ + side / 2)
+                and (y_ - side / 2 <= y <= y_ + side / 2)
+            )
+        ]
+
     def remove_picks(self, position: tuple[float, float]) -> None:
         """Delete picks found at a given position.
 
@@ -10397,40 +10380,19 @@ class View(QtWidgets.QLabel):
         position : tuple
             Specifies x and y coordinates.
         """
-
         x, y = position
-        new_picks = []  # picks to be kept
+        new_picks = []
         px = self.window.display_settings_dlg.pixelsize.value()
         tool_dlg = self.window.tools_settings_dialog
         if self._pick_shape == "Circle":
             pick_diameter_2 = (tool_dlg.pick_diameter.value() / px) ** 2
-            for x_, y_ in self._picks:
-                d2 = (x - x_) ** 2 + (y - y_) ** 2
-                if d2 > pick_diameter_2:
-                    new_picks.append((x_, y_))
+            new_picks = self._filter_circle_picks(x, y, pick_diameter_2)
         elif self._pick_shape == "Rectangle":
             width = tool_dlg.pick_width.value() / px
-            x = np.array([x])
-            y = np.array([y])
-            for pick in self._picks:
-                (start_x, start_y), (end_x, end_y) = pick
-                X, Y = lib.get_pick_rectangle_corners(
-                    start_x, start_y, end_x, end_y, width
-                )
-                # do not check if rectangle has no size
-                if not Y[0] == Y[1]:
-                    if not lib.check_if_in_rectangle(
-                        x, y, np.array(X), np.array(Y)
-                    )[0]:
-                        new_picks.append(pick)
+            new_picks = self._filter_rectangle_picks(x, y, width)
         elif self._pick_shape == "Square":
             side = tool_dlg.pick_side_length.value() / px
-            for x_, y_ in self._picks:
-                if not (
-                    (x_ - side / 2 <= x <= x_ + side / 2)
-                    and (y_ - side / 2 <= y <= y_ + side / 2)
-                ):
-                    new_picks.append((x_, y_))
+            new_picks = self._filter_square_picks(x, y, side)
 
         # delete picks and add new_picks
         self._picks = []
@@ -10641,6 +10603,45 @@ class View(QtWidgets.QLabel):
 
         return colors
 
+    def _prepare_locs_for_rendering(self, locs: list | None) -> list:
+        """Return locs list with slicer filtering applied.
+
+        If locs is None, copies self.locs (when slicer is active) or
+        uses self.locs directly. Then clips each channel to the current
+        z-slice if the slicer is enabled.
+        """
+        slicer = self.window.slicer_dialog.slicer_radio_button
+        if locs is None:
+            locs = copy.copy(self.locs) if slicer.isChecked() else self.locs
+        for i in range(len(locs)):
+            if "z" in locs[i].columns:
+                if slicer.isChecked():
+                    z_min = self.window.slicer_dialog.slicermin
+                    z_max = self.window.slicer_dialog.slicermax
+                    in_view = (locs[i]["z"] > z_min) & (locs[i]["z"] <= z_max)
+                    locs[i] = locs[i][in_view]
+        return locs
+
+    def _render_channels(self, locs: list, kwargs: dict) -> tuple:
+        """Render all channels and return (n_locs, image array)."""
+        (y_min, x_min), (y_max, x_max) = kwargs["viewport"]
+        X = int(np.ceil(kwargs["oversampling"] * (x_max - x_min)))
+        Y = int(np.ceil(kwargs["oversampling"] * (y_max - y_min)))
+        if len(self.locs) == 1:
+            renderings = [render.render(_, **kwargs) for _ in locs]
+        else:
+            renderings = [
+                (
+                    render.render(_, **kwargs)
+                    if self.window.dataset_dialog.checks[i].isChecked()
+                    else [0, np.zeros((Y, X))]
+                )
+                for i, _ in enumerate(locs)
+            ]
+        n_locs = sum([_[0] for _ in renderings])
+        image = np.array([_[1] for _ in renderings])
+        return n_locs, image
+
     def render_multi_channel(
         self,
         kwargs: dict,
@@ -10673,49 +10674,13 @@ class View(QtWidgets.QLabel):
         _bgra : IntArray3D
             8 bit array with 4 channels (blue, green, red and alpha).
         """
-        # get localizations for rendering
-        if locs is None:
-            # if slicing is used, locs are indexed and changing slices deletes
-            # all localizations
-            if self.window.slicer_dialog.slicer_radio_button.isChecked():
-                locs = copy.copy(self.locs)
-            else:
-                locs = self.locs
+        locs = self._prepare_locs_for_rendering(locs)
 
-        # if slicing, show only current slice from every channel
-        for i in range(len(locs)):
-            if "z" in locs[i].columns:
-                if self.window.slicer_dialog.slicer_radio_button.isChecked():
-                    z_min = self.window.slicer_dialog.slicermin
-                    z_max = self.window.slicer_dialog.slicermax
-                    in_view = (locs[i]["z"] > z_min) & (locs[i]["z"] <= z_max)
-                    locs[i] = locs[i][in_view]
-
-        if use_cache:  # used saved image
+        if use_cache:  # use saved image
             n_locs = self.n_locs
             image = self.image
-        else:  # render each channel one by one
-            # get image shape (to avoid rendering unchecked channels)
-            (y_min, x_min), (y_max, x_max) = kwargs["viewport"]
-            X, Y = (
-                int(np.ceil(kwargs["oversampling"] * (x_max - x_min))),
-                int(np.ceil(kwargs["oversampling"] * (y_max - y_min))),
-            )
-            # if single channel is rendered
-            if len(self.locs) == 1:
-                renderings = [render.render(_, **kwargs) for _ in locs]
-            else:
-                renderings = [
-                    (
-                        render.render(_, **kwargs)
-                        if self.window.dataset_dialog.checks[i].isChecked()
-                        else [0, np.zeros((Y, X))]
-                    )
-                    for i, _ in enumerate(locs)
-                ]  # renders only channels that are checked in dataset dialog
-            # renderings = [render.render(_, **kwargs) for _ in locs]
-            n_locs = sum([_[0] for _ in renderings])
-            image = np.array([_[1] for _ in renderings])
+        else:
+            n_locs, image = self._render_channels(locs, kwargs)
 
         if cache:  # store image
             self.n_locs = n_locs
@@ -10913,11 +10878,12 @@ class View(QtWidgets.QLabel):
                     "Pick Shape": self._pick_shape,
                     "Area (um^2)": float(area),
                 }
+                t_dialog = self.window.tools_settings_dialog
                 if self._pick_shape == "Circle":
-                    d = self.window.tools_settings_dialog.pick_diameter.value()
+                    d = t_dialog.pick_diameter.value()
                     pick_info["Pick Diameter (nm)"] = d
                 elif self._pick_shape == "Rectangle":
-                    w = self.window.tools_settings_dialog.pick_width.value()
+                    w = t_dialog.pick_width.value()
                     pick_info["Pick Width (nm)"] = w
                 # if polygon pick and the last not closed, ignore the last pick
                 elif (
@@ -10926,9 +10892,7 @@ class View(QtWidgets.QLabel):
                 ):
                     pick_info["Number of picks"] -= 1
                 elif self._pick_shape == "Square":
-                    a = (
-                        self.window.tools_settings_dialog.pick_side_length.value()
-                    )
+                    a = t_dialog.pick_side_length.value()
                     pick_info["Pick Side Length (nm)"] = a
                 io.save_locs(
                     path.replace(".hdf5", f"_{i}.hdf5"),
@@ -11017,11 +10981,12 @@ class View(QtWidgets.QLabel):
                     "Area (um^2)": float(area),
                     "Channels combined": self.locs_paths,
                 }
+                t_dialog = self.window.tools_settings_dialog
                 if self._pick_shape == "Circle":
-                    d = self.window.tools_settings_dialog.pick_diameter.value()
+                    d = t_dialog.pick_diameter.value()
                     pick_info["Pick Diameter (nm)"] = d
                 elif self._pick_shape == "Rectangle":
-                    w = self.window.tools_settings_dialog.pick_width.value()
+                    w = t_dialog.pick_width.value()
                     pick_info["Pick Width (nm)"] = w
                 # if polygon pick and the last not closed, ignore the last pick
                 elif (
@@ -11030,9 +10995,7 @@ class View(QtWidgets.QLabel):
                 ):
                     pick_info["Number of picks"] -= 1
                 elif self._pick_shape == "Square":
-                    a = (
-                        self.window.tools_settings_dialog.pick_side_length.value()
-                    )
+                    a = t_dialog.pick_side_length.value()
                     pick_info["Pick Side Length (nm)"] = a
                 io.save_locs(
                     path.replace(".hdf5", f"_{i}.hdf5"),
@@ -11040,44 +11003,16 @@ class View(QtWidgets.QLabel):
                     self.infos[channel] + [pick_info],
                 )
 
-    def save_pick_properties(self, path: str, channel: int) -> None:
-        """Save picks' (or groups) properties in a given channel to
-        path.
-
-        Properties include number of localizations, mean and std of all
-        localizations dtypes (x, y, photons, etc) and others.
-
-        Parameters
-        ----------
-        path : str
-            Path for saving picks' properties.
-        channel : int
-            Channel of locs to be saved.
-        """
-        warnings.simplefilter(
-            "ignore", category=(OptimizeWarning, RuntimeWarning)
-        )
+    def pick_kinetics(
+        self,
+        picked_locs: list[pd.DataFrame],
+        pick_diameter: float,
+        channel: int,
+    ) -> tuple[
+        lib.FloatArray1D, lib.FloatArray1D, lib.IntArray1D, pd.DataFrame
+    ]:
+        """Calculate kinetics and other simple properties in picks."""
         pixelsize = self.window.display_settings_dlg.pixelsize.value()
-        # allow running even if no picks are present but group info is
-        if len(self._picks) == 0:
-            locs = self.all_locs[channel]
-            if "group" not in locs.columns:
-                message = (
-                    "No picks found. Please create picks or assign group "
-                    "identity to localizations before calculating pick "
-                    "properties."
-                )
-                QtWidgets.QMessageBox.warning(self, "Warning", message)
-                return
-            picked_locs = [
-                locs[locs["group"] == i] for i in np.unique(locs["group"])
-            ]
-            pick_diameter = 200  # nm
-        else:
-            picked_locs = self.picked_locs(channel)
-            pick_diameter = (
-                self.window.tools_settings_dialog.pick_diameter.value()
-            )
         r_max = min(pick_diameter / pixelsize, 1)
         max_dark = self.window.info_dialog.max_dark_time.value()
         out_locs = []
@@ -11116,8 +11051,51 @@ class View(QtWidgets.QLabel):
         length = np.array(length)
         dark = np.array(dark)
         no_locs = np.array(no_locs)
-        n_groups = len(out_locs)
         out_locs = pd.concat(out_locs, ignore_index=True)
+        progress.close()
+        return length, dark, no_locs, out_locs
+
+    def save_pick_properties(self, path: str, channel: int) -> None:
+        """Save picks' (or groups) properties in a given channel to
+        path.
+
+        Properties include number of localizations, mean and std of all
+        localizations dtypes (x, y, photons, etc) and others.
+
+        Parameters
+        ----------
+        path : str
+            Path for saving picks' properties.
+        channel : int
+            Channel of locs to be saved.
+        """
+        warnings.simplefilter(
+            "ignore", category=(OptimizeWarning, RuntimeWarning)
+        )
+        # allow running even if no picks are present but group info is
+        if len(self._picks) == 0:
+            locs = self.all_locs[channel]
+            if "group" not in locs.columns:
+                message = (
+                    "No picks found. Please create picks or assign group "
+                    "identity to localizations before calculating pick "
+                    "properties."
+                )
+                QtWidgets.QMessageBox.warning(self, "Warning", message)
+                return
+            picked_locs = [
+                locs[locs["group"] == i] for i in np.unique(locs["group"])
+            ]
+            pick_diameter = 200  # nm
+        else:
+            picked_locs = self.picked_locs(channel)
+            pick_diameter = (
+                self.window.tools_settings_dialog.pick_diameter.value()
+            )
+        length, dark, no_locs, out_locs = self.pick_kinetics(
+            picked_locs, pick_diameter, channel
+        )
+        n_groups = len(out_locs)
 
         progress = lib.ProgressDialog(
             "Calculating pick properties", 0, n_groups, self
@@ -11148,9 +11126,10 @@ class View(QtWidgets.QLabel):
         pick_props["dark_cdf"] = dark
         pick_props["qpaint_idx_cdf"] = dark**-1
         influx = self.window.info_dialog.influx_rate.value()
+        s = "Render Pick Properties"
         info = self.infos[channel] + [
             {
-                "Generated by": f"Picasso v{__version__}: Render Pick Properties",
+                "Generated by": f"Picasso v{__version__}: {s}",
                 "Influx rate": influx,
             }
         ]
@@ -11422,10 +11401,10 @@ class View(QtWidgets.QLabel):
     def set_optimal_scalebar(self, force: bool = False) -> None:
         """Set scalebar to approx. 1/8 of the current viewport's
         width"""
-        if (
-            force
-            or self.window.display_settings_dlg.optimal_scalebar_check.isChecked()
-        ):
+        optimal_scalebar_checked = (
+            self.window.display_settings_dlg.optimal_scalebar_check.isChecked()
+        )
+        if force or optimal_scalebar_checked:
             pixelsize = self.window.display_settings_dlg.pixelsize.value()
             width = self.viewport_width()
             width_nm = width * pixelsize
@@ -11884,71 +11863,83 @@ class View(QtWidgets.QLabel):
         self.locs[0] = copy.copy(self.all_locs[0])
         self.fit_in_view()
 
+    def _update_cursor_circle(self) -> None:
+        """Set circular cursor according to the diameter defined in
+        ``ToolsSettingsDialog``."""
+        diameter = (
+            self.window.tools_settings_dialog.pick_diameter.value()
+        ) / self.window.display_settings_dlg.pixelsize.value()
+        diameter = int(self.width() * diameter / self.viewport_width())
+        # remote desktop crashes sometimes for high diameter
+        if diameter < 100:
+            pixmap_size = ceil(diameter) + 1
+            pixmap = QtGui.QPixmap(pixmap_size, pixmap_size)
+            pixmap.fill(QtCore.Qt.GlobalColor.transparent)
+            painter = QtGui.QPainter(pixmap)
+            painter.setPen(QtGui.QColor("white"))
+            if self.window.dataset_dialog.wbackground.isChecked():
+                painter.setPen(QtGui.QColor("black"))
+            offset = int((pixmap_size - diameter) / 2)
+            painter.drawEllipse(offset, offset, diameter, diameter)
+            painter.end()
+            cursor = QtGui.QCursor(pixmap)
+            self.setCursor(cursor)
+        else:
+            self.unsetCursor()
+
+    def _update_cursor_polygon(self) -> None:
+        """Set polygon cursor with a circle for selecting vertices."""
+        diameter = POLYGON_POINTER_SIZE
+        pixmap_size = ceil(diameter) + 1
+        pixmap = QtGui.QPixmap(pixmap_size, pixmap_size)
+        pixmap.fill(QtCore.Qt.GlobalColor.transparent)
+        painter = QtGui.QPainter(pixmap)
+        painter.setPen(QtGui.QColor("white"))
+        if self.window.dataset_dialog.wbackground.isChecked():
+            painter.setPen(QtGui.QColor("black"))
+        offset = int((pixmap_size - diameter) / 2)
+        painter.drawEllipse(offset, offset, diameter, diameter)
+        painter.end()
+        cursor = QtGui.QCursor(pixmap)
+        self.setCursor(cursor)
+
+    def _update_cursor_square(self) -> None:
+        """Set square cursor according to the side length defined in
+        ``ToolsSettingsDialog``."""
+        side_length = (
+            self.window.tools_settings_dialog.pick_side_length.value()
+            / self.window.display_settings_dlg.pixelsize.value()
+        )
+        side_length = int(self.width() * side_length / self.viewport_width())
+        if side_length < 100:
+            pixmap_size = ceil(side_length) + 1
+            pixmap = QtGui.QPixmap(pixmap_size, pixmap_size)
+            pixmap.fill(QtCore.Qt.GlobalColor.transparent)
+            painter = QtGui.QPainter(pixmap)
+            painter.setPen(QtGui.QColor("white"))
+            if self.window.dataset_dialog.wbackground.isChecked():
+                painter.setPen(QtGui.QColor("black"))
+            offset = int((pixmap_size - side_length) / 2)
+            painter.drawRect(offset, offset, side_length, side_length)
+            painter.end()
+            cursor = QtGui.QCursor(pixmap)
+            self.setCursor(cursor)
+        else:
+            self.unsetCursor()
+
     def update_cursor(self) -> None:
         """Change cursor according to self._mode."""
         if self._mode == "Zoom" or self._mode == "Measure":
             self.unsetCursor()  # normal cursor
         elif self._mode == "Pick":
             if self._pick_shape == "Circle":  # circle
-                diameter = (
-                    self.window.tools_settings_dialog.pick_diameter.value()
-                ) / self.window.display_settings_dlg.pixelsize.value()
-                diameter = int(self.width() * diameter / self.viewport_width())
-                # remote desktop crashes sometimes for high diameter
-                if diameter < 100:
-                    pixmap_size = ceil(diameter) + 1
-                    pixmap = QtGui.QPixmap(pixmap_size, pixmap_size)
-                    pixmap.fill(QtCore.Qt.GlobalColor.transparent)
-                    painter = QtGui.QPainter(pixmap)
-                    painter.setPen(QtGui.QColor("white"))
-                    if self.window.dataset_dialog.wbackground.isChecked():
-                        painter.setPen(QtGui.QColor("black"))
-                    offset = int((pixmap_size - diameter) / 2)
-                    painter.drawEllipse(offset, offset, diameter, diameter)
-                    painter.end()
-                    cursor = QtGui.QCursor(pixmap)
-                    self.setCursor(cursor)
-                else:
-                    self.unsetCursor()
+                self._update_cursor_circle()
             elif self._pick_shape == "Rectangle":
                 self.unsetCursor()
             elif self._pick_shape == "Polygon":
-                diameter = POLYGON_POINTER_SIZE
-                pixmap_size = ceil(diameter) + 1
-                pixmap = QtGui.QPixmap(pixmap_size, pixmap_size)
-                pixmap.fill(QtCore.Qt.GlobalColor.transparent)
-                painter = QtGui.QPainter(pixmap)
-                painter.setPen(QtGui.QColor("white"))
-                if self.window.dataset_dialog.wbackground.isChecked():
-                    painter.setPen(QtGui.QColor("black"))
-                offset = int((pixmap_size - diameter) / 2)
-                painter.drawEllipse(offset, offset, diameter, diameter)
-                painter.end()
-                cursor = QtGui.QCursor(pixmap)
-                self.setCursor(cursor)
+                self._update_cursor_polygon()
             elif self._pick_shape == "Square":
-                side_length = (
-                    self.window.tools_settings_dialog.pick_side_length.value()
-                    / self.window.display_settings_dlg.pixelsize.value()
-                )
-                side_length = int(
-                    self.width() * side_length / self.viewport_width()
-                )
-                if side_length < 100:
-                    pixmap_size = ceil(side_length) + 1
-                    pixmap = QtGui.QPixmap(pixmap_size, pixmap_size)
-                    pixmap.fill(QtCore.Qt.GlobalColor.transparent)
-                    painter = QtGui.QPainter(pixmap)
-                    painter.setPen(QtGui.QColor("white"))
-                    if self.window.dataset_dialog.wbackground.isChecked():
-                        painter.setPen(QtGui.QColor("black"))
-                    offset = int((pixmap_size - side_length) / 2)
-                    painter.drawRect(offset, offset, side_length, side_length)
-                    painter.end()
-                    cursor = QtGui.QCursor(pixmap)
-                    self.setCursor(cursor)
-                else:
-                    self.unsetCursor()
+                self._update_cursor_square()
             else:
                 self.unsetCursor()
 
@@ -12848,6 +12839,7 @@ class Window(QtWidgets.QMainWindow):
             check_ext=check_ext,
         )
         if path:
+            dpi = None
             if path.endswith(".pdf"):
                 dpi, ok = QtWidgets.QInputDialog.getInt(
                     self,
@@ -12871,14 +12863,22 @@ class Window(QtWidgets.QMainWindow):
                 else:
                     qimage_scale.save(new_path)
                 self.display_settings_dlg.scalebar_groupbox.setChecked(False)
-            if path.endswith(".pdf"):
-                render.export_qimage_to_pdf(self.view.qimage, path, dpi=dpi)
-            elif path.endswith(".svg"):
-                render.export_qimage_to_svg(self.view.qimage, path)
-            else:
-                self.view.qimage.save(path)
+            self.save_qimage_to_path(path, self.view.qimage, dpi=dpi)
             self.export_current_info(path)
         self.view.setMinimumSize(1, 1)
+
+    def save_qimage_to_path(
+        self,
+        path: str,
+        qimage: QtGui.QImage,
+        dpi: int | None = None,
+    ) -> None:
+        if path.endswith(".pdf"):
+            render.export_qimage_to_pdf(qimage, path, dpi=dpi)
+        elif path.endswith(".svg"):
+            render.export_qimage_to_svg(qimage, path)
+        else:
+            qimage.save(path)
 
     def export_current_info(
         self,
@@ -12978,6 +12978,7 @@ class Window(QtWidgets.QMainWindow):
             movie_height, movie_width = self.view.movie_size()
             viewport = [(0, 0), (movie_height, movie_width)]
             qimage = self.view.render_scene(cache=False, viewport=viewport)
+            dpi = None
             if path.endswith(".pdf"):
                 dpi, ok = QtWidgets.QInputDialog.getInt(
                     self,
@@ -12988,11 +12989,7 @@ class Window(QtWidgets.QMainWindow):
                 )
                 if not ok:
                     return
-                render.export_qimage_to_pdf(qimage, path, dpi=dpi)
-            elif path.endswith(".svg"):
-                render.export_qimage_to_svg(qimage, path)
-            else:
-                qimage.save(path)
+            self.save_qimage_to_path(path, qimage, dpi=dpi)
             self.export_current_info(path)
 
     def export_kwargs(self) -> None:
@@ -13030,6 +13027,7 @@ class Window(QtWidgets.QMainWindow):
         max_spin.setValue(new_max)
 
         qimage = self.view.render_scene(cache=False, **kwargs)
+        dpi = None
         if path.endswith(".pdf"):
             dpi, ok = QtWidgets.QInputDialog.getInt(
                 self,
@@ -13040,11 +13038,7 @@ class Window(QtWidgets.QMainWindow):
             )
             if not ok:
                 return
-            render.export_qimage_to_pdf(qimage, path, dpi=dpi)
-        elif path.endswith(".svg"):
-            render.export_qimage_to_svg(qimage, path)
-        else:
-            qimage.save(path)
+        self.save_qimage_to_path(path, qimage, dpi=dpi)
         self.export_current_info(path, **kwargs)
 
         # restore contrast
@@ -13146,7 +13140,7 @@ class Window(QtWidgets.QMainWindow):
         elif item == ".csv for ThunderSTORM":
             io.export_thunderstorm(path, locs, info)
 
-    def export_fov_ims(self) -> None:
+    def export_fov_ims(self) -> None:  # noqa: C901
         """Exports current FOV to .ims"""
         base, ext = os.path.splitext(self.view.locs_paths[0])
         out_path = base + ".ims"
@@ -13314,7 +13308,7 @@ class Window(QtWidgets.QMainWindow):
             warning = "No picks found. Please pick first."
             QtWidgets.QMessageBox.information(self, "Warning", warning)
 
-    def load_user_settings(self) -> None:
+    def load_user_settings(self) -> None:  # noqa: C901
         """Load user settings (colormap and current directory)."""
         settings = io.load_user_settings()
         colormap = settings["Render"]["Colormap"]
@@ -13611,10 +13605,12 @@ class Window(QtWidgets.QMainWindow):
                         out_path = base + suffix + ".hdf5"
                         info = self.view.infos[channel] + [
                             {
-                                "Generated by": f"Picasso v{__version__} Render",
-                                "Last driftfile": self.view._driftfiles[
-                                    channel
-                                ],
+                                "Generated by": (
+                                    f"Picasso v{__version__} Render"
+                                ),
+                                "Last driftfile": (
+                                    self.view._driftfiles[channel]
+                                ),
                             }
                         ]
                         io.save_locs(

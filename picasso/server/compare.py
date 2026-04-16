@@ -152,7 +152,7 @@ def hist_plot(hdf_dict: dict, locs: pd.DataFrame):
         st.warning(f"An error occured plotting field **{field}**.\n {e}")
 
 
-def compare():
+def compare():  # noqa: C901
     """Compare streamlit page."""
     st.write("# Compare")
 

@@ -1,6 +1,6 @@
 # Changelog
 
-Last change: 15-APR-2026 CEST
+Last change: 16-APR-2026 CEST
 
 ## 0.10.0
 
@@ -57,6 +57,7 @@ Last change: 15-APR-2026 CEST
 - New API for alignement of locs, see ``picasso.postprocess``: ``align_rcc`` and ``align_from_picked``
 - New function ``picasso.io.load_picks``
 - Improved data typing of np.arrays
+- Fixed flake8 warnings (code style only)
 
 ### *Bug fixes:*
 

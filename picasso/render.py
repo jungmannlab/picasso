@@ -8,7 +8,7 @@ Render single molecule localizations to a super-resolution image
 :copyright: Copyright (c) 2015 Jungmann Lab, MPI of Biochemistry
 """
 
-from typing import Literal, Any
+from typing import Literal
 
 import numba
 import numpy as np

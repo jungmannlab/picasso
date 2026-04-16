@@ -394,7 +394,7 @@ def load_mask(
     return mask, info
 
 
-def load_picks(
+def load_picks(  # noqa: C901
     path: str, pixelsize: float | None = None
 ) -> tuple[list, Literal["Circle", "Rectangle", "Polygon", "Square"], float]:
     """Load picks generated with the Picasso GUI.
@@ -926,7 +926,7 @@ class ND2Movie(AbstractPicassoMovie):
     def tofile(self, file_handle, byte_order=None):
         raise NotImplementedError("Cannot write .nd2 file.")
 
-    def camera_parameters(self, config):
+    def camera_parameters(self, config):  # noqa: C901
         """Get the camera specific parameters:
             * gain
             * quantum efficiency
@@ -1002,27 +1002,13 @@ class ND2Movie(AbstractPicassoMovie):
             raise NotImplementedError(
                 "Extracting Gain from nd2 files is not implemented yet."
             )
-            # gain_property_name = cam_config["Gain Property Name"]
-            # gain = pm_info['gain']
-            # if "EM Switch Property" in cam_config:
-            #     switch_property_name = cam_config[
-            #         "EM Switch Property"
-            #     ]["Name"]
-            #     switch_property_value = mm_info[
-            #         camera + "-" + switch_property_name
-            #     ]
-            #     if (
-            #         switch_property_value
-            #         == cam_config["EM Switch Property"][True]
-            #     ):
-            #         parameters['gain'] = int(gain)
         if "gain" not in parameters.keys():
             parameters["gain"] = [1]
 
         parameters["Sensitivity"] = {}
         if "Sensitivity Categories" in cam_config:
             categories = cam_config["Sensitivity Categories"]
-            for i, category in enumerate(categories):
+            for _, category in enumerate(categories):
                 parameters["Sensitivity"][category] = pm_info[category]
         if "Quantum Efficiency" in cam_config:
             if "Filter Wavelengths" in cam_config:
@@ -1075,7 +1061,7 @@ class TiffMap:
         "RATIONAL": 8,
     }
 
-    def __init__(self, path: str, verbose: bool = False):
+    def __init__(self, path: str, verbose: bool = False):  # noqa: C901
         """Initialize the TiffMap object by reading the TIFF file and
         extracting metadata such as width, height, and data type.
         Automatically detects classic TIFF (magic=42) and BigTIFF
@@ -1198,7 +1184,7 @@ class TiffMap:
     def __exit__(self, exc_type, exc_value, traceback):
         self.close()
 
-    def __getitem__(self, it):
+    def __getitem__(self, it):  # noqa: C901
         with self.lock:  # for reading frames from multiple threads
             if isinstance(it, tuple):
                 if isinstance(it, int) or np.issubdtype(it[0], np.integer):
@@ -1241,7 +1227,7 @@ class TiffMap:
     def __len__(self):
         return self.n_frames
 
-    def info(self) -> dict:
+    def info(self) -> dict:  # noqa: C901
         """Extract metadata from the TIFF file and returns it in a
         dictionary format. This includes byte order, file path, height,
         width, data type, number of frames, and Micro-Manager
@@ -1409,7 +1395,7 @@ class TiffMultiMap(AbstractPicassoMovie):
     def __exit__(self, exc_type, exc_value, traceback):
         self.close()
 
-    def __getitem__(self, it):
+    def __getitem__(self, it):  # noqa: C901
         if isinstance(it, tuple):
             if it[0] == Ellipsis:
                 stack = self[it[0]]
@@ -1472,7 +1458,7 @@ class TiffMultiMap(AbstractPicassoMovie):
         self.meta = info
         return info
 
-    def camera_parameters(self, config: dict) -> dict:
+    def camera_parameters(self, config: dict) -> dict:  # noqa: C901
         """Get the camera specific parameters:
             * gain
             * quantum efficiency
@@ -1924,7 +1910,8 @@ def export_xyz_chimera(
             )
     else:
         warnings.warn(
-            "No z coordinate found in localizations; cannot export to .xyz for CHIMERA."
+            "No z coordinate found in localizations; cannot export"
+            " to .xyz for CHIMERA."
         )
 
 
@@ -1955,7 +1942,8 @@ def export_3d_visp(path: str, locs: pd.DataFrame, info: list[dict]) -> None:
             )
     else:
         warnings.warn(
-            "No z coordinate found in localizations; cannot export to .3d for ViSP."
+            "No z coordinate found in localizations; cannot export "
+            "to .3d for ViSP."
         )
 
 

@@ -197,6 +197,167 @@ def _fill_index_block(
     return k
 
 
+def _picked_circular_locs(
+    locs: pd.DataFrame,
+    info: list[dict],
+    picks: list[tuple],
+    pick_size: float,
+    index_blocks: tuple | None,
+    add_group: bool,
+    callback: Callable[[int], None] | Literal["console"] | None,
+    progress: tqdm | None,
+) -> list[pd.DataFrame]:
+    """Helper function for picking localizations using circular picks.
+    See ``picked_locs`` for more details."""
+    picked_locs = []
+    if index_blocks is None:
+        index_blocks = get_index_blocks(locs, info, pick_size)
+    locs_xy = index_blocks[0][["x", "y"]].to_numpy().T
+    for i, pick in enumerate(picks):
+        x, y = pick
+        x_, y_ = int(x / pick_size), int(y / pick_size)
+        block_locs_idx = _get_block_locs_at_numba(
+            x_,
+            y_,
+            index_blocks[4],
+            index_blocks[5],
+            index_blocks[6],
+            index_blocks[7],
+        )
+        block_locs = index_blocks[0].iloc[block_locs_idx]
+        group_locs_idx = _locs_at_numba(
+            x, y, locs_xy[:, block_locs_idx], pick_size
+        )
+        group_locs = block_locs.iloc[group_locs_idx].copy()
+
+        if add_group:
+            group_locs["group"] = i
+        group_locs.sort_values(
+            by="frame",
+            kind="quicksort",
+            inplace=True,
+        )
+        picked_locs.append(group_locs)
+
+        if callback == "console":
+            progress.update(1)
+        elif callback is not None:
+            callback(i + 1)
+    return picked_locs
+
+
+def _picked_rectangular_locs(
+    locs: pd.DataFrame,
+    picks: list[tuple],
+    pick_size: float,
+    add_group: bool,
+    callback: Callable[[int], None] | Literal["console"] | None,
+    progress: tqdm | None,
+) -> list[pd.DataFrame]:
+    """Helper function for picking localizations using rectangular
+    picks. See ``picked_locs`` for more details."""
+    picked_locs = []
+    for i, pick in enumerate(picks):
+        (xs, ys), (xe, ye) = pick
+        X, Y = lib.get_pick_rectangle_corners(xs, ys, xe, ye, pick_size)
+        x_min = min(X)
+        x_max = max(X)
+        y_min = min(Y)
+        y_max = max(Y)
+        group_locs = locs[locs["x"] > x_min]
+        group_locs = group_locs[group_locs["x"] < x_max]
+        group_locs = group_locs[group_locs["y"] > y_min]
+        group_locs = group_locs[group_locs["y"] < y_max]
+        group_locs = lib.locs_in_rectangle(group_locs, X, Y)
+        # store rotated coordinates in x_rot and y_rot
+        angle = 0.5 * np.pi - np.arctan2((ye - ys), (xe - xs))
+        x_shifted = group_locs["x"] - xs
+        y_shifted = group_locs["y"] - ys
+        x_pick_rot = x_shifted * np.cos(angle) - y_shifted * np.sin(angle)
+        y_pick_rot = x_shifted * np.sin(angle) + y_shifted * np.cos(angle)
+        group_locs["x_pick_rot"] = x_pick_rot
+        group_locs["y_pick_rot"] = y_pick_rot
+        if add_group:
+            group_locs["group"] = i
+        group_locs.sort_values(by="frame", kind="quicksort", inplace=True)
+        picked_locs.append(group_locs)
+
+        if callback == "console":
+            progress.update(1)
+        elif callback is not None:
+            callback(i + 1)
+    return picked_locs
+
+
+def _picked_polygonal_locs(
+    locs: pd.DataFrame,
+    picks: list[tuple],
+    add_group: bool,
+    callback: Callable[[int], None] | Literal["console"] | None,
+    progress: tqdm | None,
+):
+    """Helper function for picking localizations using polygonal picks. See
+    ``picked_locs`` for more details."""
+    picked_locs = []
+    for i, pick in enumerate(picks):
+        X, Y = lib.get_pick_polygon_corners(pick)
+        if X is None:
+            if callback == "console":
+                progress.update(1)
+            elif callback is not None:
+                callback(i + 1)
+            continue
+        group_locs = locs[locs["x"] > min(X)]
+        group_locs = group_locs[group_locs["x"] < max(X)]
+        group_locs = group_locs[group_locs["y"] > min(Y)]
+        group_locs = group_locs[group_locs["y"] < max(Y)]
+        group_locs = lib.locs_in_polygon(group_locs, X, Y)
+        if add_group:
+            group_locs["group"] = i
+        group_locs.sort_values(by="frame", kind="quicksort", inplace=True)
+        picked_locs.append(group_locs)
+
+        if callback == "console":
+            progress.update(1)
+        elif callback is not None:
+            callback(i + 1)
+    return picked_locs
+
+
+def _picked_square_locs(
+    locs: pd.DataFrame,
+    picks: list[tuple],
+    pick_size: float,
+    add_group: bool,
+    callback: Callable[[int], None] | Literal["console"] | None,
+    progress: tqdm | None,
+) -> list[pd.DataFrame]:
+    """Helper function for picking localizations using square picks. See
+    ``picked_locs`` for more details."""
+    picked_locs = []
+    for i, pick in enumerate(picks):
+        x, y = pick
+        half_a = pick_size / 2
+        x_min = x - half_a
+        x_max = x + half_a
+        y_min = y - half_a
+        y_max = y + half_a
+        group_locs = locs[locs["x"] > x_min]
+        group_locs = group_locs[group_locs["x"] < x_max]
+        group_locs = group_locs[group_locs["y"] > y_min]
+        group_locs = group_locs[group_locs["y"] < y_max]
+        if add_group:
+            group_locs["group"] = i
+        group_locs.sort_values(by="frame", kind="quicksort", inplace=True)
+        picked_locs.append(group_locs)
+
+        if callback == "console":
+            progress.update(1)
+        elif callback is not None:
+            callback(i + 1)
+    return picked_locs
+
+
 def picked_locs(
     locs: pd.DataFrame,
     info: list[dict],
@@ -232,7 +393,7 @@ def picked_locs(
         Used only for circular picks. Precomputed index blocks for
         localizations, see  ``get_index_blocks``.If None, they will be
         calculated internally. Default is None.
-    callback : function or "console" or None, optional
+    callback : Callable[[int], None] | Literal["console"] | None, optional
         Function to display progress. If "console", tqdm is used to
         display the progress. If None, no progress is displayed. Default
         is None.
@@ -246,140 +407,57 @@ def picked_locs(
     assert (
         pick_shape in _valid_shapes
     ), f"Invalid pick shape: {pick_shape}. Choose one of {_valid_shapes}."
-    if len(picks):
-        picked_locs = []
-        if callback == "console":
-            progress = tqdm(
-                range(len(picks)),
-                desc="Picking locs",
-                unit="pick",
-            )
+    if len(picks) == 0:
+        return []
 
-        if pick_shape == "Circle":
-            if index_blocks is None:
-                index_blocks = get_index_blocks(locs, info, pick_size)
-            locs_xy = index_blocks[0][["x", "y"]].to_numpy().T
-            for i, pick in enumerate(picks):
-                x, y = pick
-                x_, y_ = int(x / pick_size), int(y / pick_size)
-                block_locs_idx = _get_block_locs_at_numba(
-                    x_,
-                    y_,
-                    index_blocks[4],
-                    index_blocks[5],
-                    index_blocks[6],
-                    index_blocks[7],
-                )
-                block_locs = index_blocks[0].iloc[block_locs_idx]
-                group_locs_idx = _locs_at_numba(
-                    x, y, locs_xy[:, block_locs_idx], pick_size
-                )
-                group_locs = block_locs.iloc[group_locs_idx].copy()
+    picked_locs = []
+    if callback == "console":
+        progress = tqdm(
+            range(len(picks)),
+            desc="Picking locs",
+            unit="pick",
+        )
+    else:
+        progress = None
 
-                if add_group:
-                    group_locs["group"] = i
-                group_locs.sort_values(
-                    by="frame",
-                    kind="quicksort",
-                    inplace=True,
-                )
-                picked_locs.append(group_locs)
-
-                if callback == "console":
-                    progress.update(1)
-                elif callback is not None:
-                    callback(i + 1)
-
-        elif pick_shape == "Rectangle":
-            for i, pick in enumerate(picks):
-                (xs, ys), (xe, ye) = pick
-                X, Y = lib.get_pick_rectangle_corners(
-                    xs, ys, xe, ye, pick_size
-                )
-                x_min = min(X)
-                x_max = max(X)
-                y_min = min(Y)
-                y_max = max(Y)
-                group_locs = locs[locs["x"] > x_min]
-                group_locs = group_locs[group_locs["x"] < x_max]
-                group_locs = group_locs[group_locs["y"] > y_min]
-                group_locs = group_locs[group_locs["y"] < y_max]
-                group_locs = lib.locs_in_rectangle(group_locs, X, Y)
-                # store rotated coordinates in x_rot and y_rot
-                angle = 0.5 * np.pi - np.arctan2((ye - ys), (xe - xs))
-                x_shifted = group_locs["x"] - xs
-                y_shifted = group_locs["y"] - ys
-                x_pick_rot = x_shifted * np.cos(angle) - y_shifted * np.sin(
-                    angle
-                )
-                y_pick_rot = x_shifted * np.sin(angle) + y_shifted * np.cos(
-                    angle
-                )
-                group_locs["x_pick_rot"] = x_pick_rot
-                group_locs["y_pick_rot"] = y_pick_rot
-                if add_group:
-                    group_locs["group"] = i
-                group_locs.sort_values(
-                    by="frame", kind="quicksort", inplace=True
-                )
-                picked_locs.append(group_locs)
-
-                if callback == "console":
-                    progress.update(1)
-                elif callback is not None:
-                    callback(i + 1)
-
-        elif pick_shape == "Polygon":
-            for i, pick in enumerate(picks):
-                X, Y = lib.get_pick_polygon_corners(pick)
-                if X is None:
-                    if callback == "console":
-                        progress.update(1)
-                    elif callback is not None:
-                        callback(i + 1)
-                    continue
-                group_locs = locs[locs["x"] > min(X)]
-                group_locs = group_locs[group_locs["x"] < max(X)]
-                group_locs = group_locs[group_locs["y"] > min(Y)]
-                group_locs = group_locs[group_locs["y"] < max(Y)]
-                group_locs = lib.locs_in_polygon(group_locs, X, Y)
-                if add_group:
-                    group_locs["group"] = i
-                group_locs.sort_values(
-                    by="frame", kind="quicksort", inplace=True
-                )
-                picked_locs.append(group_locs)
-
-                if callback == "console":
-                    progress.update(1)
-                elif callback is not None:
-                    callback(i + 1)
-
-        elif pick_shape == "Square":
-            for i, pick in enumerate(picks):
-                x, y = pick
-                half_a = pick_size / 2
-                x_min = x - half_a
-                x_max = x + half_a
-                y_min = y - half_a
-                y_max = y + half_a
-                group_locs = locs[locs["x"] > x_min]
-                group_locs = group_locs[group_locs["x"] < x_max]
-                group_locs = group_locs[group_locs["y"] > y_min]
-                group_locs = group_locs[group_locs["y"] < y_max]
-                if add_group:
-                    group_locs["group"] = i
-                group_locs.sort_values(
-                    by="frame", kind="quicksort", inplace=True
-                )
-                picked_locs.append(group_locs)
-
-                if callback == "console":
-                    progress.update(1)
-                elif callback is not None:
-                    callback(i + 1)
-
-        return picked_locs
+    if pick_shape == "Circle":
+        picked_locs = _picked_circular_locs(
+            locs=locs,
+            info=info,
+            picks=picks,
+            pick_size=pick_size,
+            index_blocks=index_blocks,
+            add_group=add_group,
+            callback=callback,
+            progress=progress,
+        )
+    elif pick_shape == "Rectangle":
+        picked_locs = _picked_rectangular_locs(
+            locs=locs,
+            picks=picks,
+            pick_size=pick_size,
+            add_group=add_group,
+            callback=callback,
+            progress=progress,
+        )
+    elif pick_shape == "Polygon":
+        picked_locs = _picked_polygonal_locs(
+            locs=locs,
+            picks=picks,
+            add_group=add_group,
+            callback=callback,
+            progress=progress,
+        )
+    elif pick_shape == "Square":
+        picked_locs = _picked_square_locs(
+            locs=locs,
+            picks=picks,
+            pick_size=pick_size,
+            add_group=add_group,
+            callback=callback,
+            progress=progress,
+        )
+    return picked_locs
 
 
 def pick_similar(
@@ -506,7 +584,7 @@ def pick_similar(
 
 
 @numba.jit(nopython=True, nogil=True, cache=True)
-def _pick_similar(
+def _pick_similar(  # noqa: C901
     x: lib.FloatArray1D,
     y_shift: lib.FloatArray1D,
     y_base: lib.FloatArray1D,
@@ -799,7 +877,7 @@ def rmsd_at_com(locs_xy: lib.FloatArray2D) -> float:
 
 
 @numba.jit(nopython=True, nogil=True)
-def _distance_histogram(
+def _distance_histogram(  # noqa: C901
     x: lib.FloatArray1D,
     y: lib.FloatArray1D,
     bin_size: float,
@@ -1875,7 +1953,7 @@ def get_link_groups(
 
 
 @numba.jit(nopython=True)
-def _get_next_loc_index_in_link_group(
+def _get_next_loc_index_in_link_group(  # noqa: C901
     current_index: int,
     link_group: lib.IntArray1D,
     N: int,
@@ -2028,7 +2106,7 @@ def _link_group_last(
     return result
 
 
-def link_loc_groups(
+def link_loc_groups(  # noqa: C901
     locs: pd.DataFrame,
     info: list[dict],
     link_group: lib.IntArray1D,
@@ -2292,7 +2370,7 @@ def undrift(
     drift_ = (drift_x_pol(t_inter), drift_y_pol(t_inter))
     drift = pd.DataFrame({"x": drift_[0], "y": drift_[1]})
     if display:
-        fig1 = plt.figure(figsize=(10, 6), constrained_layout=True)
+        plt.figure(figsize=(10, 6), constrained_layout=True)
         plt.suptitle("Estimated drift")
         plt.subplot(1, 2, 1)
         plt.plot(drift["x"], label="x interpolated")
@@ -2810,8 +2888,8 @@ def align_from_picked(
             ), "pick_size must be provided when picks is a list of coordinates"
 
     pl = [
-        picked_locs(l, i, picks, pick_shape, pick_size)
-        for l, i in zip(all_locs, infos)
+        picked_locs(locs, i, picks, pick_shape, pick_size)
+        for locs, i in zip(all_locs, infos)
     ]
     dy = _shifts_from_picked_coordinate(pl, coordinate="y")
     dx = _shifts_from_picked_coordinate(pl, coordinate="x")

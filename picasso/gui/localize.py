@@ -40,7 +40,7 @@ from PyQt6 import QtCore, QtGui, QtWidgets
 from playsound3 import playsound
 
 try:
-    from pygpufit import gpufit
+    from pygpufit import gpufit  # noqa: F401
 
     GPUFIT_INSTALLED = True
 except ImportError:
@@ -664,10 +664,12 @@ class ParametersDialog(lib.Dialog):
         The main window of the application.
     """
 
-    CALIB_URL = "https://picassosr.readthedocs.io/en/latest/localize.html#d-calibration"
-    IDENT_URL = "https://picassosr.readthedocs.io/en/latest/localize.html#identification-and-fitting-of-single-molecule-spots"
+    CALIB_URL = "https://picassosr.readthedocs.io/en/latest/localize.html#d-calibration"  # noqa: E501
+    IDENT_URL = "https://picassosr.readthedocs.io/en/latest/localize.html#identification-and-fitting-of-single-molecule-spots"  # noqa: E501
 
-    def __init__(self, parent: QtWidgets.QMainWindow | None = None) -> None:
+    def __init__(  # noqa: C901
+        self, parent: QtWidgets.QMainWindow | None = None
+    ) -> None:  # noqa: E501 C901
         super().__init__(parent)
         self.window = parent
         self.setWindowTitle("Parameters")
@@ -1384,72 +1386,82 @@ class ParametersDialog(lib.Dialog):
         """Handle changes to the GPU fitting option."""
         self.window.draw_frame()
 
-    def set_camera_parameters(self, info: dict) -> None:
-        """Set the camera parameters based on the provided camera
-        info."""
-        if "Cameras" in CONFIG and "Camera" in info:
+    def get_camera(self, info: dict) -> tuple[str, list[str]]:
+        """Get the camera name from the provided camera info."""
+        if "Camera" in info and "Cameras" in CONFIG:
             cameras = [
                 self.camera.itemText(_) for _ in range(self.camera.count())
             ]
             camera = info["Camera"]
             if camera in cameras:
-                index = cameras.index(camera)
-                self.camera.setCurrentIndex(index)
-                if "Micro-Manager Metadata" in info:
-                    mm_info = info["Micro-Manager Metadata"]
-                    cam_config = CONFIG["Cameras"][camera]
-                    if "Gain Property Name" in cam_config:
-                        gain_property_name = cam_config["Gain Property Name"]
-                        gain = mm_info[camera + "-" + gain_property_name]
-                        if "EM Switch Property" in cam_config:
-                            switch_property_name = cam_config[
-                                "EM Switch Property"
-                            ]["Name"]
-                            switch_property_value = mm_info[
-                                camera + "-" + switch_property_name
-                            ]
-                            if (
-                                switch_property_value
-                                == cam_config["EM Switch Property"][True]
-                            ):
-                                self.gain.setValue(int(gain))
-                            else:
-                                self.gain.setValue(1)
-                    if "Sensitivity Categories" in cam_config:
-                        cam_combos = self.cam_combos[camera]
-                        categories = cam_config["Sensitivity Categories"]
-                        for i, category in enumerate(categories):
-                            property_name = camera + "-" + category
-                            if property_name in mm_info:
-                                e_setting = mm_info[camera + "-" + category]
-                                cam_combo = cam_combos[i]
-                                for index in range(cam_combo.count()):
-                                    if cam_combo.itemText(index) == e_setting:
-                                        cam_combo.setCurrentIndex(index)
-                                        break
-                    if "Quantum Efficiency" in cam_config:
-                        if "Channel Device" in cam_config:
-                            channel_device_name = cam_config["Channel Device"][
-                                "Name"
-                            ]
-                            channel = mm_info[channel_device_name]
-                            channels = cam_config["Channel Device"][
-                                "Emission Wavelengths"
-                            ]
-                            if channel in channels:
-                                wavelength = str(channels[channel])
-                                em_combo = self.emission_combos[camera]
-                                for index in range(em_combo.count()):
-                                    if em_combo.itemText(index) == wavelength:
-                                        em_combo.setCurrentIndex(index)
-                                        break
-                                # else:
-                                #     raise ValueError(
-                                #         (
-                                #             "No quantum efficiency found"
-                                #             " for wavelength " + wavelength
-                                #         )
-                                #     )
+                return camera, cameras
+        return None, None
+
+    def set_gain(self, camera: str, mm_info: dict, cam_config: dict) -> None:
+        """Set EM gain if the relevant information is available in the
+        config and metadata."""
+        if "Gain Property Name" in cam_config:
+            gain_property_name = cam_config["Gain Property Name"]
+            gain = mm_info[camera + "-" + gain_property_name]
+            if "EM Switch Property" in cam_config:
+                switch_property_name = cam_config["EM Switch Property"]["Name"]
+                switch_property_value = mm_info[
+                    camera + "-" + switch_property_name
+                ]
+                if (
+                    switch_property_value
+                    == cam_config["EM Switch Property"][True]
+                ):
+                    self.gain.setValue(int(gain))
+                else:
+                    self.gain.setValue(1)
+
+    def set_sensitivity(
+        self, camera: str, mm_info: dict, cam_config: dict
+    ) -> None:
+        if "Sensitivity Categories" in cam_config:
+            cam_combos = self.cam_combos[camera]
+            categories = cam_config["Sensitivity Categories"]
+            for i, category in enumerate(categories):
+                property_name = camera + "-" + category
+                if property_name in mm_info:
+                    e_setting = mm_info[camera + "-" + category]
+                    cam_combo = cam_combos[i]
+                    for index in range(cam_combo.count()):
+                        if cam_combo.itemText(index) == e_setting:
+                            cam_combo.setCurrentIndex(index)
+                            break
+
+    def set_wavelength(
+        self, camera: str, mm_info: dict, cam_config: dict
+    ) -> None:
+        if "Channel Device" in cam_config:
+            channel_device_name = cam_config["Channel Device"]["Name"]
+            channel = mm_info[channel_device_name]
+            channels = cam_config["Channel Device"]["Emission Wavelengths"]
+            if channel in channels:
+                wavelength = str(channels[channel])
+                em_combo = self.emission_combos[camera]
+                for index in range(em_combo.count()):
+                    if em_combo.itemText(index) == wavelength:
+                        em_combo.setCurrentIndex(index)
+                        break
+
+    def set_camera_parameters(self, info: dict) -> None:
+        """Set the camera parameters based on the provided camera
+        info."""
+        camera, cameras = self.get_camera(info)
+        if camera is None:
+            return
+
+        index = cameras.index(camera)
+        self.camera.setCurrentIndex(index)
+        if "Micro-Manager Metadata" in info:
+            mm_info = info["Micro-Manager Metadata"]
+            cam_config = CONFIG["Cameras"][camera]
+            self.set_gain(camera, mm_info, cam_config)
+            self.set_sensitivity(camera, mm_info, cam_config)
+            self.set_wavelength(camera, mm_info, cam_config)
 
     def update_sensitivity(self) -> None:
         """Update the sensitivity settings for the current camera."""
@@ -1689,7 +1701,9 @@ class Window(QtWidgets.QMainWindow):
             ] = self.parameters_dialog.mng_slider.value()
         settings["Localize"]["Columns to save"] = {
             column: checkbox.isChecked()
-            for column, checkbox in self.columns_dialog.column_checkboxes.items()
+            for column, checkbox in (
+                self.columns_dialog.column_checkboxes.items()
+            )
         }
         io.save_user_settings(settings)
         QtWidgets.QApplication.instance().closeAllWindows()
@@ -2278,76 +2292,76 @@ class Window(QtWidgets.QMainWindow):
 
     def draw_scalebar(self) -> None:
         """Draw a scale bar if the option is checked."""
-        if self.scalebar_action.isChecked():
-            scene_pixelsize = self.parameters_dialog.pixelsize.value()
+        if not self.scalebar_action.isChecked():
+            return
 
-            # length (nm) - set optimal size (~1/8 of image width)
-            rect = self.view.viewport().rect()
-            visible_scene_rect = self.view.mapToScene(rect).boundingRect()
-            width = visible_scene_rect.width()
-            width_nm = width * scene_pixelsize
-            optimal_scalebar = width_nm / 8
+        scene_pixelsize = self.parameters_dialog.pixelsize.value()
 
-            # approximate to the nearest thousands, hundreds, tens or ones
-            if optimal_scalebar > 10_000:
-                scalebar = 10_000
-            elif optimal_scalebar > 1_000:
-                scalebar = int(1_000 * round(optimal_scalebar / 1_000))
-            elif optimal_scalebar > 100:
-                scalebar = int(100 * round(optimal_scalebar / 100))
-            elif optimal_scalebar > 10:
-                scalebar = int(10 * round(optimal_scalebar / 10))
-            else:
-                scalebar = int(round(optimal_scalebar))
+        # length (nm) - set optimal size (~1/8 of image width)
+        rect = self.view.viewport().rect()
+        visible_scene_rect = self.view.mapToScene(rect).boundingRect()
+        width = visible_scene_rect.width()
+        width_nm = width * scene_pixelsize
+        optimal_scalebar = width_nm / 8
 
-            length_displaypxl = int(
-                round(self.view.width() * (scalebar / scene_pixelsize) / width)
-            )
-            height_displaypxl = 10
+        # approximate to the nearest thousands, hundreds, tens or ones
+        if optimal_scalebar > 10_000:
+            scalebar = 10_000
+        elif optimal_scalebar > 1_000:
+            scalebar = int(1_000 * round(optimal_scalebar / 1_000))
+        elif optimal_scalebar > 100:
+            scalebar = int(100 * round(optimal_scalebar / 100))
+        elif optimal_scalebar > 10:
+            scalebar = int(10 * round(optimal_scalebar / 10))
+        else:
+            scalebar = int(round(optimal_scalebar))
 
-            # draw a rectangle
-            x = self.view.width() - length_displaypxl - 40
-            y = self.view.height() - height_displaypxl - 20
-            pen = QtGui.QPen(QtCore.Qt.PenStyle.NoPen)
-            brush = QtGui.QBrush(QtGui.QColor("white"))
-            polygon = self.view.mapToScene(
-                x,
-                y,
-                length_displaypxl,
-                height_displaypxl,
-            )
-            x_scene = polygon.boundingRect().x()
-            y_scene = polygon.boundingRect().y()
-            length_scene = polygon.boundingRect().width()
-            height_scene = polygon.boundingRect().height()
-            self.scene.addRect(
-                x_scene,
-                y_scene,
-                length_scene,
-                height_scene,
-                pen,
-                brush,
-            )
+        length_displaypxl = int(
+            round(self.view.width() * (scalebar / scene_pixelsize) / width)
+        )
+        height_displaypxl = 10
 
-            # add scale bar text
-            font = QtGui.QFont()
-            font.setPointSize(20)
-            text_item = self.scene.addText(f"{scalebar} nm", font)
-            text_item.setDefaultTextColor(QtGui.QColor("white"))
-            # position the text centered below the scale bar
-            text_rect = text_item.boundingRect()
-            text_width = text_rect.width() / (length_displaypxl / length_scene)
-            text_x = x_scene + (length_scene - text_width) / 2
-            text_y = (
-                y_scene
-                + height_scene
-                - 45 / (height_displaypxl / height_scene)
-            )
-            text_item.setPos(text_x, text_y)
-            text_item.setFlag(
-                QtWidgets.QGraphicsItem.GraphicsItemFlag.ItemIgnoresTransformations,
-                True,
-            )
+        # draw a rectangle
+        x = self.view.width() - length_displaypxl - 40
+        y = self.view.height() - height_displaypxl - 20
+        pen = QtGui.QPen(QtCore.Qt.PenStyle.NoPen)
+        brush = QtGui.QBrush(QtGui.QColor("white"))
+        polygon = self.view.mapToScene(
+            x,
+            y,
+            length_displaypxl,
+            height_displaypxl,
+        )
+        x_scene = polygon.boundingRect().x()
+        y_scene = polygon.boundingRect().y()
+        length_scene = polygon.boundingRect().width()
+        height_scene = polygon.boundingRect().height()
+        self.scene.addRect(
+            x_scene,
+            y_scene,
+            length_scene,
+            height_scene,
+            pen,
+            brush,
+        )
+
+        # add scale bar text
+        font = QtGui.QFont()
+        font.setPointSize(20)
+        text_item = self.scene.addText(f"{scalebar} nm", font)
+        text_item.setDefaultTextColor(QtGui.QColor("white"))
+        # position the text centered below the scale bar
+        text_rect = text_item.boundingRect()
+        text_width = text_rect.width() / (length_displaypxl / length_scene)
+        text_x = x_scene + (length_scene - text_width) / 2
+        text_y = (
+            y_scene + height_scene - 45 / (height_displaypxl / height_scene)
+        )
+        text_item.setPos(text_x, text_y)
+        text_item.setFlag(
+            QtWidgets.QGraphicsItem.GraphicsItemFlag.ItemIgnoresTransformations,  # noqa: E501
+            True,
+        )
 
     @property
     def parameters(self) -> dict:
@@ -2967,55 +2981,27 @@ class FitWorker(QtCore.QThread):
             self.movie, self.identifications, self.box, self.camera_info
         )
         if self.method == "lq":
-            if self.use_gpufit:
-                self.progressMade.emit(1, 1)
-                theta = gausslq.fit_spots_gpufit(spots)
-                em = self.camera_info["Gain"] > 1
-                locs = gausslq.locs_from_fits_gpufit(
-                    self.identifications, theta, self.box, em
-                )
-            else:
-                fs = gausslq.fit_spots_parallel(spots, asynch=True)
-                n_tasks = len(fs)
-                while lib.n_futures_done(fs) < n_tasks:
-                    if self.isInterruptionRequested():
-                        for f in fs:
-                            f.cancel()
-                        self.aborted.emit()
-                        return
-                    self.progressMade.emit(
-                        round(N * lib.n_futures_done(fs) / n_tasks), N
-                    )
-                    time.sleep(0.2)
-                theta = gausslq.fits_from_futures(fs)
-                em = self.camera_info["Gain"] > 1
-                locs = gausslq.locs_from_fits(
-                    self.identifications,
-                    theta,
-                    self.box,
-                    em,
-                )
+            locs = self.run_lq(spots, N)
         elif self.method == "mle":
-            curr, thetas, CRLBs, llhoods, iterations = gaussmle.gaussmle_async(
-                spots, self.eps, self.max_it, method="sigmaxy"
-            )
-            while curr[0] < N:
-                if self.isInterruptionRequested():
-                    self.aborted.emit()
-                    return
-                self.progressMade.emit(curr[0], N)
-                time.sleep(0.2)
-            locs = gaussmle.locs_from_fits(
-                self.identifications,
-                thetas,
-                CRLBs,
-                llhoods,
-                iterations,
-                self.box,
-            )
+            locs = self.run_mle(spots, N)
         elif self.method == "avg":
-            # just get out the average intensity
-            fs = avgroi.fit_spots_parallel(spots, asynch=True)
+            locs = self.run_avg(spots, N)
+        else:
+            raise ValueError(f"Unknown fitting method: {self.method}")
+        self.progressMade.emit(N + 1, N)
+        dt = time.time() - t0
+        self.finished.emit(locs, dt, self.fit_z, self.calibrate_z)
+
+    def run_lq(self, spots: np.ndarray, N: int) -> pd.DataFrame:
+        if self.use_gpufit:
+            self.progressMade.emit(1, 1)
+            theta = gausslq.fit_spots_gpufit(spots)
+            em = self.camera_info["Gain"] > 1
+            locs = gausslq.locs_from_fits_gpufit(
+                self.identifications, theta, self.box, em
+            )
+        else:
+            fs = gausslq.fit_spots_parallel(spots, asynch=True)
             n_tasks = len(fs)
             while lib.n_futures_done(fs) < n_tasks:
                 if self.isInterruptionRequested():
@@ -3024,23 +3010,63 @@ class FitWorker(QtCore.QThread):
                     self.aborted.emit()
                     return
                 self.progressMade.emit(
-                    round(N * lib.n_futures_done(fs) / n_tasks),
-                    N,
+                    round(N * lib.n_futures_done(fs) / n_tasks), N
                 )
                 time.sleep(0.2)
-            theta = avgroi.fits_from_futures(fs)
+            theta = gausslq.fits_from_futures(fs)
             em = self.camera_info["Gain"] > 1
-            locs = avgroi.locs_from_fits(
+            locs = gausslq.locs_from_fits(
                 self.identifications,
                 theta,
                 self.box,
                 em,
             )
-        else:
-            raise ValueError(f"Unknown fitting method: {self.method}")
-        self.progressMade.emit(N + 1, N)
-        dt = time.time() - t0
-        self.finished.emit(locs, dt, self.fit_z, self.calibrate_z)
+        return locs
+
+    def run_mle(self, spots: np.ndarray, N: int) -> pd.DataFrame:
+        curr, thetas, CRLBs, llhoods, iterations = gaussmle.gaussmle_async(
+            spots, self.eps, self.max_it, method="sigmaxy"
+        )
+        while curr[0] < N:
+            if self.isInterruptionRequested():
+                self.aborted.emit()
+                return
+            self.progressMade.emit(curr[0], N)
+            time.sleep(0.2)
+        locs = gaussmle.locs_from_fits(
+            self.identifications,
+            thetas,
+            CRLBs,
+            llhoods,
+            iterations,
+            self.box,
+        )
+        return locs
+
+    def run_avg(self, spots: np.ndarray, N: int) -> pd.DataFrame:
+        # just get out the average intensity
+        fs = avgroi.fit_spots_parallel(spots, asynch=True)
+        n_tasks = len(fs)
+        while lib.n_futures_done(fs) < n_tasks:
+            if self.isInterruptionRequested():
+                for f in fs:
+                    f.cancel()
+                self.aborted.emit()
+                return
+            self.progressMade.emit(
+                round(N * lib.n_futures_done(fs) / n_tasks),
+                N,
+            )
+            time.sleep(0.2)
+        theta = avgroi.fits_from_futures(fs)
+        em = self.camera_info["Gain"] > 1
+        locs = avgroi.locs_from_fits(
+            self.identifications,
+            theta,
+            self.box,
+            em,
+        )
+        return locs
 
 
 class FitZWorker(QtCore.QThread):

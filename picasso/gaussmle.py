@@ -550,8 +550,8 @@ def _mlefit_sigma(
         numerator[:] = 0.0
         denominator[:] = 0.0
 
-        # At each iteration (theta update) we sum across all pixels in the spot,
-        # see equation 13
+        # At each iteration (theta update) we sum across all pixels in the
+        # spot, see equation 13
         for ii in range(size):
             for jj in range(size):
                 # this is delta E_x
@@ -597,22 +597,7 @@ def _mlefit_sigma(
                     numerator[ll] += cf * dudt[ll]
                     denominator[ll] += cf * d2udt2[ll] - df * dudt[ll] ** 2
 
-        # The theta update
-        for ll in range(n_params):
-            if denominator[ll] == 0.0:
-                update = np.sign(numerator[ll] * max_step[ll])
-            else:
-                update = np.minimum(
-                    np.maximum(numerator[ll] / denominator[ll], -max_step[ll]),
-                    max_step[ll],
-                )
-            theta[ll] -= update
-
-        # Other constraints
-        theta[2] = np.maximum(theta[2], 1.0)
-        theta[3] = np.maximum(theta[3], 0.01)
-        theta[4] = np.maximum(theta[4], 0.01)
-        theta[4] = np.minimum(theta[4], size)
+        _update_theta_sigma(theta, numerator, denominator, max_step, size)
 
         # Check for convergence
         if (np.abs(old_x - theta[0]) < eps) and (
@@ -627,9 +612,51 @@ def _mlefit_sigma(
     thetas[index, 0:5] = theta
     thetas[index, 5] = theta[4]
     iterations[index] = kk
+    _mlefit_sigma_crlb(theta, spot, index, CRLBs, likelihoods)
 
+
+@numba.jit(nopython=True, nogil=True)
+def _update_theta_sigma(
+    theta: lib.FloatArray1D,
+    numerator: lib.FloatArray1D,
+    denominator: lib.FloatArray1D,
+    max_step: lib.FloatArray1D,
+    size: int,
+) -> None:
+    n_params = 5
+    for ll in range(n_params):
+        if denominator[ll] == 0.0:
+            update = np.sign(numerator[ll] * max_step[ll])
+        else:
+            update = np.minimum(
+                np.maximum(numerator[ll] / denominator[ll], -max_step[ll]),
+                max_step[ll],
+            )
+        theta[ll] -= update
+
+    # Other constraints
+    theta[2] = np.maximum(theta[2], 1.0)
+    theta[3] = np.maximum(theta[3], 0.01)
+    theta[4] = np.maximum(theta[4], 0.01)
+    theta[4] = np.minimum(theta[4], size)
+
+
+@numba.jit(nopython=True, nogil=True)
+def _mlefit_sigma_crlb(
+    theta: lib.FloatArray1D,
+    spot: lib.FloatArray2D,
+    index: int,
+    CRLBs: lib.FloatArray2D,
+    likelihoods: lib.FloatArray1D,
+) -> None:
+    """Calculate the Cramer-Rao Lower Bounds (CRLB) for a single spot
+    fitted with a Gaussian with a single sigma for both x and y
+    dimensions. See ``_mlefit_sigma`` for details on the parameters."""
     # Calculating the CRLB and log-likelihood
+    n_params = 5
     log_likelihood = 0.0
+    dudt = np.zeros(n_params, dtype=np.float32)
+    size, _ = spot.shape
     M = np.zeros((n_params, n_params), dtype=np.float32)  # Fisher matrix
     # Sum over all pixels
     for ii in range(size):
@@ -733,8 +760,8 @@ def _mlefit_sigmaxy(
         numerator[:] = 0.0
         denominator[:] = 0.0
 
-        # At each iteration (theta update) we sum across all pixels in the spot,
-        # see equation 13
+        # At each iteration (theta update) we sum across all pixels in the
+        # spot, see equation 13
         for ii in range(size):
             for jj in range(size):
                 # delta_Ex and delta_Ey
@@ -778,24 +805,7 @@ def _mlefit_sigmaxy(
                     numerator[ll] += cf * dudt[ll]
                     denominator[ll] += cf * d2udt2[ll] - df * dudt[ll] ** 2
 
-        # The theta update
-        for ll in range(n_params):
-            if denominator[ll] == 0.0:
-                # This is case is not handled in Lidke's code
-                # but it seems to be a problem here
-                # (maybe due to many iterations)
-                theta[ll] -= np.sign(numerator[ll]) * max_step[ll]
-            else:
-                theta[ll] -= np.minimum(
-                    np.maximum(numerator[ll] / denominator[ll], -max_step[ll]),
-                    max_step[ll],
-                )
-
-        # Other constraints
-        theta[2] = np.maximum(theta[2], 1.0)
-        theta[3] = np.maximum(theta[3], 0.01)
-        theta[4] = np.maximum(theta[4], 0.01)
-        theta[5] = np.maximum(theta[5], 0.01)
+        _update_theta_sigmaxy(theta, numerator, denominator, max_step)
 
         # Check for convergence
         if np.abs(old_x - theta[0]) < eps:
@@ -811,9 +821,52 @@ def _mlefit_sigmaxy(
     # Fitting is finished here, we save the results in the output arrays
     thetas[index] = theta
     iterations[index] = kk
+    _mlefit_sigmaxy_crlb(theta, spot, index, CRLBs, likelihoods)
 
+
+@numba.jit(nopython=True, nogil=True)
+def _update_theta_sigmaxy(
+    theta: lib.FloatArray1D,
+    numerator: lib.FloatArray1D,
+    denominator: lib.FloatArray1D,
+    max_step: lib.FloatArray1D,
+) -> None:
+    n_params = 6
+    for ll in range(n_params):
+        if denominator[ll] == 0.0:
+            # This is case is not handled in Lidke's code
+            # but it seems to be a problem here
+            # (maybe due to many iterations)
+            theta[ll] -= np.sign(numerator[ll]) * max_step[ll]
+        else:
+            theta[ll] -= np.minimum(
+                np.maximum(numerator[ll] / denominator[ll], -max_step[ll]),
+                max_step[ll],
+            )
+
+    # Other constraints
+    theta[2] = np.maximum(theta[2], 1.0)
+    theta[3] = np.maximum(theta[3], 0.01)
+    theta[4] = np.maximum(theta[4], 0.01)
+    theta[5] = np.maximum(theta[5], 0.01)
+
+
+@numba.jit(nopython=True, nogil=True)
+def _mlefit_sigmaxy_crlb(
+    theta: lib.FloatArray1D,
+    spot: lib.FloatArray2D,
+    index: int,
+    CRLBs: lib.FloatArray2D,
+    likelihoods: lib.FloatArray1D,
+) -> None:
+    """Calculate the Cramer-Rao Lower Bounds (CRLB) for a single spot
+    fitted with a Gaussian with separate sigmas for x and y dimensions.
+    See ``_mlefit_sigmaxy`` for details on the parameters."""
     # Calculating the CRLB and log-likelihood
+    n_params = 6
     log_likelihood = 0.0
+    dudt = np.zeros(n_params, dtype=np.float32)
+    size, _ = spot.shape
     M = np.zeros((n_params, n_params), dtype=np.float32)
     for ii in range(size):
         for jj in range(size):
@@ -822,16 +875,16 @@ def _mlefit_sigmaxy(
 
             # Calculating derivatives (only first order is needed for
             # CRLB)
-            dudt[0], d2udt2[0] = _derivative_gaussian_integral(
+            dudt[0], _ = _derivative_gaussian_integral(
                 ii, theta[0], theta[4], theta[2], PSFy
             )
-            dudt[1], d2udt2[1] = _derivative_gaussian_integral(
+            dudt[1], _ = _derivative_gaussian_integral(
                 jj, theta[1], theta[5], theta[2], PSFx
             )
-            dudt[4], d2udt2[4] = _derivative_gaussian_integral_sigma(
+            dudt[4], _ = _derivative_gaussian_integral_sigma(
                 ii, theta[0], theta[4], theta[2], PSFy
             )
-            dudt[5], d2udt2[5] = _derivative_gaussian_integral_sigma(
+            dudt[5], _ = _derivative_gaussian_integral_sigma(
                 jj, theta[1], theta[5], theta[2], PSFx
             )
             dudt[2] = PSFx * PSFy

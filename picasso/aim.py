@@ -199,11 +199,11 @@ def run_intersections_multithread(
     shifts_xy: lib.IntArray1D,
     box: int,
 ) -> lib.IntArray2D | lib.IntArray1D:
-    """Alias for _run_intersections_multithread which will be a private function in the
-    future release. Kept for backward compatibility."""
+    """Alias for _run_intersections_multithread which will be a private
+    function in the future release. Kept for backward compatibility."""
     lib.deprecation_warning(
-        "run_intersections_multithread is deprecated and will be removed in v0.11.0."
-        " Use _run_intersections_multithread instead."
+        "run_intersections_multithread is deprecated and will be removed"
+        " in v0.11.0. Use _run_intersections_multithread instead."
     )
     return _run_intersections_multithread(
         l0_coords, l0_counts, l1_coords, l1_counts, shifts_xy, box

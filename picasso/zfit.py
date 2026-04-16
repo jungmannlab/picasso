@@ -569,7 +569,10 @@ def axial_localization_precision_astig(
         "X Coefficients" in calibration
         and "Y Coefficients" in calibration
         and "Magnification factor" in calibration
-    ), "Calibration dictionary must contain 'X Coefficients', 'Y Coefficients', and 'Magnification factor'."
+    ), (
+        "Calibration dictionary must contain 'X Coefficients', "
+        "'Y Coefficients', and 'Magnification factor'."
+    )
 
     # get camera pixel size
     pixelsize = lib.get_from_metadata(info, "Pixelsize")
@@ -603,7 +606,7 @@ def _axial_localization_precision_astig(
     ----------
     locs : pd.DataFrame
         Localizations. Must include columns 'photons', 'sx', 'sy', 'bg',
-        and 'z', see https://picassosr.readthedocs.io/en/latest/files.html#localization-hdf5-files
+        and 'z', see https://picassosr.readthedocs.io/en/latest/files.html#localization-hdf5-files  # noqa: E501
     cx : lib.FloatArray1D
         3D calibration coefficients for x.
     cy : lib.FloatArray1D

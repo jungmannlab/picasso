@@ -19,7 +19,7 @@ try:
 except ModuleNotFoundError:
     IMSWRITER = False
 
-if IMSWRITER:
+if IMSWRITER:  # noqa: C901
 
     class MovieMapper:
         """

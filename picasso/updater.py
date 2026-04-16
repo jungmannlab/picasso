@@ -159,14 +159,12 @@ def cli_notify_update(latest_version):
         file=sys.stderr,
     )
     print(
-        f"   Would you like to silence update notifications?", file=sys.stderr
+        "   Would you like to silence update notifications?", file=sys.stderr
     )
-    print(f"   [1] Remind me in 7 days", file=sys.stderr)
-    print(f"   [2] Skip this version", file=sys.stderr)
-    print(f"   [9] Disable update checks", file=sys.stderr)
-    print(
-        f"   [Enter] Do nothing for now (remind tomorrow)\n", file=sys.stderr
-    )
+    print("   [1] Remind me in 7 days", file=sys.stderr)
+    print("   [2] Skip this version", file=sys.stderr)
+    print("   [9] Disable update checks", file=sys.stderr)
+    print("   [Enter] Do nothing for now (remind tomorrow)\n", file=sys.stderr)
 
     choice = input("   Choice: ").strip()
     if choice == "1":
@@ -177,7 +175,7 @@ def cli_notify_update(latest_version):
         disable_updates()
 
 
-def setup_gui_update_check(parent=None):
+def setup_gui_update_check(parent=None):  # noqa: C901
     """Schedule a background update check that shows a QMessageBox
     if an update is available.
 
@@ -224,9 +222,7 @@ def setup_gui_update_check(parent=None):
                 "Don't check for updates",
                 QtWidgets.QMessageBox.ButtonRole.ActionRole,
             )
-            close_btn = box.addButton(
-                QtWidgets.QMessageBox.StandardButton.Close
-            )
+            box.addButton(QtWidgets.QMessageBox.StandardButton.Close)
             box.exec()
             if box.clickedButton() == open_btn:
                 webbrowser.open(URL_LATEST_RELEASE)

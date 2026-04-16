@@ -1019,9 +1019,8 @@ def test_subclustering(
     else:
         coords = mols[["x", "y"]].to_numpy()
     tree = KDTree(coords)
-    distances, indices = tree.query(coords, k=2)
+    distances, _ = tree.query(coords, k=2)
     nnd1 = distances[:, 1]
-    idx1 = indices[:, 1]
 
     # split molecules into clustered and monomeric
     close_nnd_idx = np.where(nnd1 < clustering_dist / pixelsize)[0]

@@ -158,6 +158,16 @@ def get_structures_permutation(t_counts: lib.FloatArray2D) -> lib.IntArray1D:
     return perm
 
 
+def targets_from_structures(structures: list[Structure]) -> list[str]:
+    """Extract the unique names of molecular targets in structures."""
+    targets = []
+    for structure in structures:
+        for target in structure.targets:
+            if target not in targets:
+                targets.append(target)
+    return targets
+
+
 def generate_N_structures(
     structures: list[Structure],
     N_total: dict,
@@ -193,12 +203,7 @@ def generate_N_structures(
         iteration. Keys are the names of the structures and values
         are lists of integers.
     """
-    # extract the unique names of molecular targets in structures
-    targets = []
-    for structure in structures:
-        for target in structure.targets:
-            if target not in targets:
-                targets.append(target)
+    targets = targets_from_structures(structures)
 
     # number of molecular targets in each structure; each row gives one
     # target species and each column gives one structure
@@ -437,7 +442,7 @@ def coords_to_locs(
     return locs
 
 
-def plot_NN(
+def plot_NN(  # noqa: C901
     data1: lib.FloatArray2D | None = None,
     data2: lib.FloatArray2D | None = None,
     n_neighbors: int = 1,
@@ -576,11 +581,11 @@ def plot_NN(
         bins_ = hist_data["bins"][i]
         counts_ = hist_data["counts"][i]
         if i == 0:
-            label = f"1st NN"
+            label = "1st NN"
         elif i == 1:
-            label = f"2nd NN"
+            label = "2nd NN"
         elif i == 2:
-            label = f"3rd NN"
+            label = "3rd NN"
         else:
             label = f"{i+1}th NN"
         if mode == "hist":
@@ -1118,9 +1123,10 @@ class MaskGenerator:
         """
         assert all(_ > 0 for _ in self.binsize), "Binsize must be positive."
         assert all(_ >= 0 for _ in self.sigma), "Sigma must be non-negative."
-        assert (
-            len(self.binsize) == len(self.sigma) == self.ndim
-        ), "Binsize and sigma must have the same number of values as the dimensionality of the mask."
+        assert len(self.binsize) == len(self.sigma) == self.ndim, (
+            "Binsize and sigma must have the same number of values as "
+            "the dimensionality of the mask."
+        )
         if verbose:
             print(f"Generating a mask in {self.ndim}D.")
             print("Rendering localizations... (1/3)")
@@ -2732,12 +2738,7 @@ class StructureMixer:
             Resulting proportions (0 to 100).
         """
         N_structures = deepcopy(N_structures)
-        if isinstance(N_structures, list):
-            N_structures = np.int32(N_structures)
-        elif isinstance(N_structures, dict):
-            N_structures = self.mixer.convert_N_structures_to_array(
-                N_structures
-            )
+        N_structures = self.mixer.convert_N_structures_to_array(N_structures)
 
         if N_structures.ndim == 1:
             N_structures = N_structures.reshape(1, -1)
@@ -2847,14 +2848,14 @@ class StructureMixer:
         return N_structures
 
     def convert_N_structures_to_array(
-        self, N_structures: dict
+        self,
+        N_structures: dict | list | lib.IntArray1D,
     ) -> lib.IntArray2D:
-        """Convert numbers of structures given as a dictionary to a 2D
-        numpy array.
+        """Convert numbers of structures to a 2D numpy array.
 
         Parameters
         ----------
-        N_structures : dict
+        N_structures : dict or list or lib.IntArray1D
             Dictionary with structure names as keys and lists of numbers
             of structures to be simulated as values. The structure names
             given must be the same as in self.structures.
@@ -2867,23 +2868,34 @@ class StructureMixer:
             in self.structures. Each row gives the numbers of structures
             to be simulated for each structure in self.structures.
         """
-        if not isinstance(N_structures, dict):
+        if isinstance(N_structures, np.ndarray):
+            if N_structures.ndim == 2:
+                return N_structures
+            elif N_structures.ndim == 1:
+                return N_structures.reshape(1, -1)
+            else:
+                raise TypeError(
+                    "Please input numbers of structures as a list or 1D/2D"
+                    " array."
+                )
+        elif isinstance(N_structures, list):
+            return np.int32(N_structures)
+        elif isinstance(N_structures, dict):
+            N = len(list(N_structures.values())[0])  # number of simulations
+            N_structures_array = np.zeros(
+                (N, len(self.structures)),
+                dtype=np.int32,
+            )
+            for i, structure in enumerate(self.structures):
+                N_structures_array[:, i] = N_structures[structure.title]
+            return N_structures_array
+        else:
             raise TypeError(
                 "Please input numbers of structures as a dictionary with"
                 " structure names as keys and lists of numbers of"
-                " structures to be simulated as values."
+                " structures to be simulated as values, or as a list or"
+                " 2D array."
             )
-        elif isinstance(N_structures, np.ndarray) and N_structures.ndim == 2:
-            return N_structures
-
-        N = len(list(N_structures.values())[0])  # number of simulations
-        N_structures_array = np.zeros(
-            (N, len(self.structures)),
-            dtype=np.int32,
-        )
-        for i, structure in enumerate(self.structures):
-            N_structures_array[:, i] = N_structures[structure.title]
-        return N_structures_array
 
     @property
     def roi_size(self) -> float:
@@ -3078,18 +3090,13 @@ class SPINNA:
             "coarse-to-fine",
             "bayesian",
             "brute-force",
-        ], "fitting_mode must be 'coarse-to-fine', 'bayesian', or 'brute-force'."
+        ], (
+            "fitting_mode must be 'coarse-to-fine', 'bayesian', or"
+            " 'brute-force'."
+        )
 
         # check and optionally convert N_structures
-        if isinstance(N_structures, dict):
-            N_structures = self.mixer.convert_N_structures_to_array(
-                N_structures
-            )
-        elif (
-            not isinstance(N_structures, np.ndarray)
-            or len(N_structures.shape) != 2
-        ):
-            raise TypeError("N_structures must be a 2D array or a dictionary.")
+        N_structures = self.mixer.convert_N_structures_to_array(N_structures)
 
         if fitting_mode == "coarse-to-fine":
             return self.fit_coarse_to_fine(
@@ -3107,31 +3114,9 @@ class SPINNA:
                 callback=callback,
             )
 
-        if asynch:  # fit with multiprocessing
-            fs = self.fit_stoichiometry_parallel(N_structures)
-            N = len(fs)
-            N_ = N_structures.shape[0]
-            if callback == "console":
-                progress_bar = tqdm(range(N_), desc=self.progress_title)
-            while self.n_futures_done(fs) < N:  # display progress
-                fd = self.n_futures_done(fs)
-                fd_ = int(fd * N_ / N)
-                if fd > 0 and callback != "console":
-                    callback.description_base = self.progress_title
-                    callback.set_value(fd_)
-                elif fd > 0 and callback == "console":
-                    progress_bar.update(fd_ - progress_bar.n)
-                time.sleep(0.1)
-            if callback != "console":
-                callback.set_value(N_)
-            else:
-                progress_bar.update(fd_ - progress_bar.n)
-                progress_bar.close()
-            N_structures, scores = self.scores_from_futures(fs)
-        else:  # fit in a single thread
-            N_structures, scores = self.NN_scorer(
-                N_structures, callback=callback
-            )
+        N_structures, scores = self._run_brute_force(
+            N_structures, asynch, callback
+        )
 
         if save:
             props = self.mixer.convert_counts_to_props(N_structures)
@@ -3151,53 +3136,19 @@ class SPINNA:
         opt_proportions = self.mixer.convert_counts_to_props(opt_N_structures)
 
         if bootstrap:
-            exp_dists_gt = deepcopy(self.dists_gt)
-
-            N_structures_subset = self.get_subset_N_structures(
+            result = self._run_bootstrap(
                 N_structures,
                 opt_N_structures,
+                opt_proportions,
+                score,
+                callback,
             )
-
-            # initialize bootstrapping
-            if callback != "console":
-                callback.setMaximum(len(N_structures_subset))
-            bootstrap_scores = []
-            boot_props = []
-            for i in range(N_BOOTSTRAPS):
-                self.progress_title = (
-                    f"Bootstrapping {i+1}/{N_BOOTSTRAPS}; spinning structures"
-                )
-                if callback != "console":
-                    callback.t0_est = time.time()
-                # gt_coords_boot = self.mixer.run_simulation(opt_N_structures_)
-                gt_coords_boot = self.mixer.run_simulation(opt_N_structures)
-                self.dists_gt = get_NN_dist_experimental(
-                    gt_coords_boot, self.mixer
-                )
-                N_structures_boot, scores_boot = self.NN_scorer(
-                    N_structures_subset, callback=callback
-                )
-                index_boot = np.argmin(scores_boot)
-                score_boot = scores_boot[index_boot]
-                bootstrap_scores.append(score_boot)
-                boot_props.append(
-                    self.mixer.convert_counts_to_props(
-                        N_structures_boot[index_boot]
-                    )
-                )
-
-            self.dists_gt = exp_dists_gt
-            score_std = np.std(bootstrap_scores)
-            props_std = np.std(boot_props, axis=0)
             if return_scores:
-                return (opt_proportions, props_std), (score, score_std), scores
-            else:
-                return (opt_proportions, props_std), (score, score_std)
-        else:
-            if return_scores:
-                return opt_proportions, score, scores
-            else:
-                return opt_proportions, score
+                return result[0], result[1], scores
+            return result
+        if return_scores:
+            return opt_proportions, score, scores
+        return opt_proportions, score
 
     def fit_stoichiometry_parallel(self, N_structures: lib.IntArray2D) -> list:
         """Apply multiprocessing to find best fitting combination of
@@ -3291,31 +3242,10 @@ class SPINNA:
         if isinstance(callback, lib.ProgressDialog):
             callback.setMaximum(n_coarse)
             callback.setLabelText("Coarse pass")
-        if callback == "console":
-            progress_bar = tqdm(total=n_coarse, desc="Coarse pass")
-
-        if asynch:
-            fs = self.fit_stoichiometry_parallel(N_coarse)
-            N = len(fs)
-            while self.n_futures_done(fs) < len(fs):
-                fd = self.n_futures_done(fs)
-                fd_ = int(fd * n_coarse / N)
-                if fd > 0 and callback != "console":
-                    callback.description_base = "Coarse pass"
-                    callback.set_value(fd_)
-                elif fd > 0 and callback == "console":
-                    progress_bar.update(fd_ - progress_bar.n)
-                time.sleep(0.1)
-            if callback != "console":
-                callback.set_value(n_coarse)
-            else:
-                progress_bar.update(fd_ - progress_bar.n)
-                progress_bar.close()
-            N_coarse, scores_coarse = self.scores_from_futures(fs)
-        else:
-            N_coarse, scores_coarse = self.NN_scorer(
-                N_coarse, callback=callback
-            )
+        self.progress_title = "Coarse pass"
+        N_coarse, scores_coarse = self._run_brute_force(
+            N_coarse, asynch, callback
+        )
 
         coarse_best = N_coarse[np.argmin(scores_coarse)]
 
@@ -3460,63 +3390,16 @@ class SPINNA:
                 callback.set_value(eval_count)
 
         # --- Phase 2: GP-guided acquisition ---
-        # early stop if EI has not improved for this many iterations
-        patience = max(10, n_iterations // 5)
-        no_improvement_count = 0
-        best_score_so_far = scores[evaluated].min()
-
-        for iteration in range(n_iterations):
-            if evaluated.all():
-                break
-
-            # fit GP on evaluated points
-            X_train = proportions[evaluated]
-            y_train = scores[evaluated]
-            gp = GaussianProcessRegressor(
-                kernel=Matern(nu=2.5),
-                n_restarts_optimizer=5,
-                normalize_y=True,
-                alpha=1e-6,
-            )
-            gp.fit(X_train, y_train)
-
-            # predict on unevaluated candidates
-            unevaluated_mask = ~evaluated
-            X_candidates = proportions[unevaluated_mask]
-            mu, sigma = gp.predict(X_candidates, return_std=True)
-
-            # Expected Improvement acquisition function
-            best_y = y_train.min()
-            with np.errstate(divide="ignore", invalid="ignore"):
-                z = (best_y - mu) / sigma
-                ei = (best_y - mu) * norm.cdf(z) + sigma * norm.pdf(z)
-                ei[sigma == 0.0] = 0.0
-
-            # pick the candidate with highest EI
-            best_candidate_local = np.argmax(ei)
-            global_indices = np.where(unevaluated_mask)[0]
-            best_idx = global_indices[best_candidate_local]
-
-            # evaluate it
-            scores[best_idx] = self._evaluate_single(N_structures[best_idx])
-            evaluated[best_idx] = True
-            eval_count += 1
-
-            if callback == "console":
-                progress_bar.update(1)
-            elif callback is not None and callback != "console":
-                callback.description_base = "Bayesian optimization"
-                callback.set_value(eval_count)
-
-            # early stopping: check if the best score improved
-            current_best = scores[evaluated].min()
-            if current_best < best_score_so_far:
-                best_score_so_far = current_best
-                no_improvement_count = 0
-            else:
-                no_improvement_count += 1
-            if no_improvement_count >= patience:
-                break
+        evaluated, scores, eval_count = self._bayesian_gp_phase(
+            proportions=proportions,
+            N_structures=N_structures,
+            evaluated=evaluated,
+            scores=scores,
+            n_iterations=n_iterations,
+            callback=callback,
+            eval_count=eval_count,
+            progress_bar=progress_bar if callback == "console" else None,
+        )
 
         if callback == "console":
             progress_bar.close()
@@ -3549,47 +3432,220 @@ class SPINNA:
         opt_proportions = self.mixer.convert_counts_to_props(opt_N_structures)
 
         if bootstrap:
-            exp_dists_gt = deepcopy(self.dists_gt)
-
-            N_structures_subset = self.get_subset_N_structures(
+            return self._run_bootstrap(
                 N_structures,
                 opt_N_structures,
+                opt_proportions,
+                score,
+                callback,
             )
+        return opt_proportions, score
+
+    def _bayesian_gp_phase(
+        self,
+        proportions: lib.FloatArray2D,
+        N_structures: lib.IntArray2D,
+        evaluated: np.ndarray,
+        scores: np.ndarray,
+        n_iterations: int,
+        callback,
+        eval_count: int,
+        progress_bar=None,
+    ) -> tuple[np.ndarray, np.ndarray, int]:
+        """Run the GP-guided acquisition phase of Bayesian optimisation.
+
+        Iteratively fits a Gaussian Process on evaluated candidates,
+        computes Expected Improvement on the remaining ones, evaluates
+        the most promising candidate, and stops early when no improvement
+        is observed for ``patience`` rounds.
+
+        Parameters
+        ----------
+        proportions : lib.FloatArray2D
+            Proportion representation of every candidate in N_structures.
+        N_structures : lib.IntArray2D
+            Full candidate search space.
+        evaluated : np.ndarray of bool
+            Mask of already-evaluated candidates (modified in-place).
+        scores : np.ndarray of float
+            Scores array (modified in-place).
+        n_iterations : int
+            Maximum number of GP-guided iterations.
+        callback : lib.ProgressDialog, "console", or None
+            Progress tracker.
+        eval_count : int
+            Number of evaluations already completed (for progress display).
+        progress_bar : tqdm or None
+            Active tqdm bar when ``callback == "console"``.
+
+        Returns
+        -------
+        evaluated : np.ndarray of bool
+        scores : np.ndarray of float
+        eval_count : int
+        """
+        patience = max(10, n_iterations // 5)
+        no_improvement_count = 0
+        best_score_so_far = scores[evaluated].min()
+
+        for _ in range(n_iterations):
+            if evaluated.all():
+                break
+
+            # fit GP and compute Expected Improvement
+            X_train = proportions[evaluated]
+            y_train = scores[evaluated]
+            gp = GaussianProcessRegressor(
+                kernel=Matern(nu=2.5),
+                n_restarts_optimizer=5,
+                normalize_y=True,
+                alpha=1e-6,
+            )
+            gp.fit(X_train, y_train)
+            unevaluated_mask = ~evaluated
+            mu, sigma = gp.predict(
+                proportions[unevaluated_mask], return_std=True
+            )
+            best_y = y_train.min()
+            with np.errstate(divide="ignore", invalid="ignore"):
+                z = (best_y - mu) / sigma
+                ei = (best_y - mu) * norm.cdf(z) + sigma * norm.pdf(z)
+                ei[sigma == 0.0] = 0.0
+
+            best_idx = np.where(unevaluated_mask)[0][np.argmax(ei)]
+
+            # evaluate the most promising candidate
+            scores[best_idx] = self._evaluate_single(N_structures[best_idx])
+            evaluated[best_idx] = True
+            eval_count += 1
 
             if callback == "console":
-                pass
-            elif isinstance(callback, lib.ProgressDialog):
-                callback.setMaximum(len(N_structures_subset))
-            bootstrap_scores = []
-            boot_props = []
-            for i in range(N_BOOTSTRAPS):
-                self.progress_title = (
-                    f"Bootstrapping {i+1}/{N_BOOTSTRAPS}; spinning structures"
-                )
-                if isinstance(callback, lib.ProgressDialog):
-                    callback.t0_est = time.time()
-                gt_coords_boot = self.mixer.run_simulation(opt_N_structures)
-                self.dists_gt = get_NN_dist_experimental(
-                    gt_coords_boot, self.mixer
-                )
-                N_structures_boot, scores_boot = self.NN_scorer(
-                    N_structures_subset, callback=callback
-                )
-                index_boot = np.argmin(scores_boot)
-                score_boot = scores_boot[index_boot]
-                bootstrap_scores.append(score_boot)
-                boot_props.append(
-                    self.mixer.convert_counts_to_props(
-                        N_structures_boot[index_boot]
-                    )
-                )
+                progress_bar.update(1)
+            elif callback is not None:
+                callback.description_base = "Bayesian optimization"
+                callback.set_value(eval_count)
 
-            self.dists_gt = exp_dists_gt
-            score_std = np.std(bootstrap_scores)
-            props_std = np.std(boot_props, axis=0)
-            return (opt_proportions, props_std), (score, score_std)
+            # early stopping
+            current_best = scores[evaluated].min()
+            if current_best < best_score_so_far:
+                best_score_so_far = current_best
+                no_improvement_count = 0
+            else:
+                no_improvement_count += 1
+            if no_improvement_count >= patience:
+                break
+
+        return evaluated, scores, eval_count
+
+    def _run_brute_force(
+        self,
+        N_structures: lib.IntArray2D,
+        asynch: bool,
+        callback: lib.ProgressDialog | Literal["console"] | lib.MockProgress,
+    ) -> tuple[lib.IntArray2D, lib.FloatArray1D]:
+        """Score ``N_structures`` candidates, dispatching to parallel
+        or single-thread mode.
+
+        Parameters
+        ----------
+        N_structures : lib.IntArray2D
+            Candidates to evaluate.
+        asynch : bool
+            If True, multiprocessing is used.
+        callback : lib.ProgressDialog, "console", or lib.MockProgress
+            Progress tracker.
+
+        Returns
+        -------
+        N_structures : lib.IntArray2D
+        scores : lib.FloatArray1D
+        """
+        if not asynch:
+            return self.NN_scorer(N_structures, callback=callback)
+        fs = self.fit_stoichiometry_parallel(N_structures)
+        N = len(fs)
+        N_ = N_structures.shape[0]
+        if callback == "console":
+            progress_bar = tqdm(total=N_, desc=self.progress_title)
+        while self.n_futures_done(fs) < N:
+            fd = self.n_futures_done(fs)
+            fd_ = int(fd * N_ / N)
+            if fd > 0 and callback != "console":
+                callback.description_base = self.progress_title
+                callback.set_value(fd_)
+            elif fd > 0 and callback == "console":
+                progress_bar.update(fd_ - progress_bar.n)
+            time.sleep(0.1)
+        if callback != "console":
+            callback.set_value(N_)
         else:
-            return opt_proportions, score
+            progress_bar.update(fd_ - progress_bar.n)
+            progress_bar.close()
+        return self.scores_from_futures(fs)
+
+    def _run_bootstrap(
+        self,
+        N_structures: lib.IntArray2D,
+        opt_N_structures: lib.IntArray1D,
+        opt_proportions: lib.FloatArray1D,
+        score: float,
+        callback: lib.ProgressDialog | Literal["console"] | lib.MockProgress,
+    ) -> tuple[tuple, tuple]:
+        """Bootstrap the best-fit result to estimate uncertainty.
+
+        Repeatedly simulates from ``opt_N_structures``, re-runs
+        NN_scorer on a local neighbourhood, and collects statistics.
+
+        Parameters
+        ----------
+        N_structures : lib.IntArray2D
+            Full search space (used to derive the neighbourhood).
+        opt_N_structures : lib.IntArray1D
+            Best-fit structure counts.
+        opt_proportions : lib.FloatArray1D
+            Best-fit proportions.
+        score : float
+            Best-fit KS2 score.
+        callback : lib.ProgressDialog, "console", or lib.MockProgress
+            Progress tracker.
+
+        Returns
+        -------
+        (opt_proportions, props_std) : tuple
+        (score, score_std) : tuple
+        """
+        exp_dists_gt = deepcopy(self.dists_gt)
+        N_structures_subset = self.get_subset_N_structures(
+            N_structures, opt_N_structures
+        )
+        if isinstance(callback, lib.ProgressDialog):
+            callback.setMaximum(len(N_structures_subset))
+        bootstrap_scores = []
+        boot_props = []
+        for i in range(N_BOOTSTRAPS):
+            self.progress_title = (
+                f"Bootstrapping {i+1}/{N_BOOTSTRAPS}; spinning structures"
+            )
+            if isinstance(callback, lib.ProgressDialog):
+                callback.t0_est = time.time()
+            gt_coords_boot = self.mixer.run_simulation(opt_N_structures)
+            self.dists_gt = get_NN_dist_experimental(
+                gt_coords_boot, self.mixer
+            )
+            N_structures_boot, scores_boot = self.NN_scorer(
+                N_structures_subset, callback=callback
+            )
+            index_boot = np.argmin(scores_boot)
+            bootstrap_scores.append(scores_boot[index_boot])
+            boot_props.append(
+                self.mixer.convert_counts_to_props(
+                    N_structures_boot[index_boot]
+                )
+            )
+        self.dists_gt = exp_dists_gt
+        score_std = np.std(bootstrap_scores)
+        props_std = np.std(boot_props, axis=0)
+        return (opt_proportions, props_std), (score, score_std)
 
     def _evaluate_single(self, N_row: lib.IntArray1D) -> float:
         """Evaluate a single candidate: simulate and score.
@@ -3793,6 +3849,126 @@ class SPINNA:
         return N_structures, scores
 
 
+def _fit_label_unc_for_target(
+    target: str,
+    models: list[list[Structure]],
+    label_unc: dict,
+    label_unc_input_: dict,
+    nn_counts_keys: list,
+    exp_data: dict,
+    granularity: int,
+    le: dict,
+    mask_dict: dict | None,
+    width: float | None,
+    height: float | None,
+    depth: float | None,
+    random_rot_mode,
+    N_sim: int,
+    asynch: bool,
+    savedir: str,
+    callback,
+) -> float:
+    """Find the best-fit label-uncertainty value for a single target.
+
+    If only one candidate value is provided, it is returned immediately.
+    Otherwise each candidate is tested via ``compare_models_given_label_unc``
+    and the value yielding the lowest KS2 score is returned.
+
+    Parameters
+    ----------
+    target : str
+        Name of the molecular target.
+    models : list of lists of Structure
+        Full set of models; only monomers of ``target`` are used.
+    label_unc : dict
+        Current search space – a list of floats per target.
+    label_unc_input_ : dict
+        Starting-point values (first element of each list) for every target.
+    nn_counts_keys : list of str
+        Keys for the nn_counts dict (used to reset counts per trial).
+    ...remaining parameters forwarded to compare_models_given_label_unc.
+
+    Returns
+    -------
+    best_l_unc : float
+        The label-uncertainty value that produced the lowest KS2 score.
+    """
+    l_unc = label_unc[target]
+    if len(l_unc) == 1:
+        return l_unc[0]
+
+    # build models containing only the target's monomers
+    target_models = [
+        [s for s in model if [target] == s.targets] for model in models
+    ]
+
+    # only compare target-to-itself 1st-NN distances
+    nn_counts = {key: 0 for key in nn_counts_keys}
+    nn_counts[f"{target}-{target}"] = 1
+
+    best_score = np.inf
+    best_l_unc = 5.0
+    for l_unc_ in l_unc:
+        progress_title = (
+            f"Spinning with label uncertainty {l_unc_:.2f} nm for {target}"
+        )
+        label_unc_input = deepcopy(label_unc_input_)
+        label_unc_input[target] = l_unc_
+        score = compare_models_given_label_unc(
+            models=target_models,
+            exp_data=exp_data,
+            granularity=granularity,
+            label_unc=label_unc_input,
+            le=le,
+            mask_dict=mask_dict,
+            width=width,
+            height=height,
+            depth=depth,
+            random_rot_mode=random_rot_mode,
+            nn_counts=nn_counts,
+            N_sim=N_sim,
+            asynch=asynch,
+            savedir=savedir,
+            callback=callback,
+            progress_title=progress_title,
+        )[0]
+        if score < best_score:
+            best_score = score
+            best_l_unc = l_unc_
+    return best_l_unc
+
+
+def _compute_nn_counts(
+    targets: list[str],
+    models: list[list[Structure]],
+    nn_counts: dict,
+) -> dict:
+    """Update ``nn_counts`` to the maximum NN count seen across all
+    models and structures for every pair of targets.
+
+    Parameters
+    ----------
+    targets : list of str
+    models : list of lists of Structure
+    nn_counts : dict
+        Updated in-place and returned.
+
+    Returns
+    -------
+    nn_counts : dict
+    """
+    for ii, target1 in enumerate(targets):
+        for target2 in targets[ii:]:
+            key = f"{target1}-{target2}"
+            for model in models:
+                for structure in model:
+                    nn_counts[key] = max(
+                        nn_counts[key],
+                        structure.get_max_nn(target1, target2),
+                    )
+    return nn_counts
+
+
 def compare_models(
     models: list[list[Structure]],
     exp_data: dict,
@@ -3898,71 +4074,32 @@ def compare_models(
     # structures that contain the target. The fitting can be skipped if
     # label_unc is already provided without the search space.
     for target in targets:
-        best_score = np.inf
-        best_l_unc = 5.0
-        l_unc = label_unc[target]
-        if len(l_unc) == 1:  # no search space for label uncertainty
-            label_unc[target] = l_unc[0]
-            continue
-
-        # extract the models that contain the target only
-        target_models = []
-        for model in models:
-            target_structures = []
-            for structure in model:
-                if [target] == structure.targets:
-                    target_structures.append(structure)
-            target_models.append(target_structures)
-
-        # specify nn counts to be considered for fitting (only the
-        # target to itself, 1st NN, the rest is ignored)
-        nn_counts = {key: 0 for key in nn_counts.keys()}
-        nn_counts[f"{target}-{target}"] = 1
-
-        # test the range of label uncertainties for the target
-        for l_unc_ in l_unc:
-            progress_title = (
-                f"Spinning with label uncertainty {l_unc_:.2f} nm for {target}"
-            )
-            label_unc_input = deepcopy(label_unc_input_)
-            label_unc_input[target] = l_unc_
-            score = compare_models_given_label_unc(
-                models=target_models,
-                exp_data=exp_data,
-                granularity=granularity,
-                label_unc=label_unc_input,
-                le=le,
-                mask_dict=mask_dict,
-                width=width,
-                height=height,
-                depth=depth,
-                random_rot_mode=random_rot_mode,
-                nn_counts=nn_counts,
-                N_sim=N_sim,
-                asynch=asynch,
-                savedir=savedir,
-                callback=callback,
-                progress_title=progress_title,
-            )[0]
-            if score < best_score:
-                best_score = score
-                best_l_unc = l_unc_
-
-        # save the best fitting label uncertainty for the given target
-        label_unc[target] = best_l_unc
+        label_unc[target] = _fit_label_unc_for_target(
+            target=target,
+            models=models,
+            label_unc=label_unc,
+            label_unc_input_=label_unc_input_,
+            nn_counts_keys=list(nn_counts.keys()),
+            exp_data=exp_data,
+            granularity=granularity,
+            le=le,
+            mask_dict=mask_dict,
+            width=width,
+            height=height,
+            depth=depth,
+            random_rot_mode=random_rot_mode,
+            N_sim=N_sim,
+            asynch=asynch,
+            savedir=savedir,
+            callback=callback,
+        )
 
     # test the models with the best fitting label uncertainties; note
     # that here we'd like to pay the attention to the NNDs that are
     # present in all models, i.e., if a simpler model does not contain
     # a structure with a dimer of a certain species, it should still aim
     # to fit the "dimer" NNDs.
-    for ii, target1 in enumerate(targets):
-        for target2 in targets[ii:]:
-            key = f"{target1}-{target2}"
-            for model in models:
-                for structure in model:
-                    max_nn_count = structure.get_max_nn(target1, target2)
-                    nn_counts[key] = max(nn_counts[key], max_nn_count)
+    nn_counts = _compute_nn_counts(targets, models, nn_counts)
 
     # compare the models
     progress_title = f"Spinning with label uncertainties: {label_unc}"

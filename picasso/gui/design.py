@@ -1053,38 +1053,22 @@ class Scene(QtWidgets.QGraphicsScene):
                 paletteindex = lenitems - bindingitems
                 selectedcolor = allitems[paletteindex].brush().color()
 
-                if clicked_item == allitems[paletteindex]:  # DO NOTHING
-                    pass
-                elif clicked_item == allitems[paletteindex + 1]:
-                    allitems[paletteindex].setBrush(allcolors[1])
-                    selectedcolor = allcolors[1]
-                elif clicked_item == allitems[paletteindex + 2]:
-                    allitems[paletteindex].setBrush(allcolors[2])
-                    selectedcolor = allcolors[2]
-                elif clicked_item == allitems[paletteindex + 3]:
-                    allitems[paletteindex].setBrush(allcolors[3])
-                    selectedcolor = allcolors[3]
-                elif clicked_item == allitems[paletteindex + 4]:
-                    allitems[paletteindex].setBrush(allcolors[4])
-                    selectedcolor = allcolors[4]
-                elif clicked_item == allitems[paletteindex + 5]:
-                    selectedcolor = allcolors[5]
-                    allitems[paletteindex].setBrush(allcolors[5])
-                elif clicked_item == allitems[paletteindex + 6]:
-                    allitems[paletteindex].setBrush(allcolors[6])
-                    selectedcolor = allcolors[6]
-                elif clicked_item == allitems[paletteindex + 7]:
-                    allitems[paletteindex].setBrush(allcolors[7])
-                    selectedcolor = allcolors[7]
-                elif clicked_item == allitems[paletteindex + 8]:
-                    allitems[paletteindex].setBrush(QtGui.QBrush(defaultcolor))
-                    selectedcolor = defaultcolor
+                palette_map = {
+                    allitems[paletteindex + i]: allcolors[i]
+                    for i in range(1, maxcolor + 1)
+                }
+                # index 8 (last) resets to default grey
+                palette_map[allitems[paletteindex + maxcolor]] = defaultcolor
+
+                if clicked_item == allitems[paletteindex]:
+                    pass  # clicked the "current color" swatch — do nothing
+                elif clicked_item in palette_map:
+                    new_color = palette_map[clicked_item]
+                    allitems[paletteindex].setBrush(QtGui.QBrush(new_color))
                 else:
                     currentcolor = clicked_item.brush().color()
                     if currentcolor == selectedcolor:
-                        clicked_item.setBrush(
-                            defaultcolor
-                        )  # TURN WHITE AGAIN IF NOT USED
+                        clicked_item.setBrush(defaultcolor)
                     else:
                         clicked_item.setBrush(QtGui.QBrush(selectedcolor))
                 self.evaluateCanvas()
@@ -1330,6 +1314,72 @@ class Scene(QtWidgets.QGraphicsScene):
         return allplates
 
 
+def _match_pipett_sequences(
+    structureData: list,
+    fulllist: list,
+) -> tuple[list, list, list]:
+    """Match structure sequences against the reference plate list.
+
+    Returns
+    -------
+    tuple[list, list, list]
+        ``(fullpipettlist, pipettlist, platelist)``
+    """
+    fullpipettlist = [
+        ["PLATE NAME", "PLATE POSITION", "OLIGO NAME", "SEQUENCE", "COLOR"]
+    ]
+    pipettlist: list = []
+    platelist: list = []
+
+    for i in range(1, len(structureData)):
+        sequencerow = structureData[i]
+        sequence = sequencerow[3]
+        fullpipettlist.append(sequencerow)
+        fullpipettlist[i][0] = "NOT FOUND"
+        if fullpipettlist[i][2] == " ":
+            fullpipettlist[i][0] = "BIOTIN PLACEHOLDER"
+        if sequence != " ":
+            for fulllistrow in fulllist:
+                if sequence == fulllistrow[3]:
+                    pipettlist.append(
+                        [
+                            fulllistrow[0],
+                            fulllistrow[1],
+                            fulllistrow[2],
+                            fulllistrow[3],
+                            rgbcolors[sequencerow[4]],
+                        ]
+                    )
+                    platelist.append(fulllistrow[0])
+                    del fullpipettlist[-1]
+                    fullpipettlist.append(fulllistrow)
+                    break  # first found will be taken
+
+    return fullpipettlist, pipettlist, platelist
+
+
+def _build_plate_figures(
+    pipettlist: list,
+    platelist: list,
+) -> tuple[dict, list]:
+    """Build per-plate figures for the pipetting scheme.
+
+    Returns
+    -------
+    tuple[dict, list]
+        ``(allfig, platenames)``
+    """
+    platenames = sorted(set(platelist))
+    allfig: dict = {}
+
+    for x, platename in enumerate(platenames):
+        selection = [e[1] for e in pipettlist if e[0] == platename]
+        selectioncolors = [e[4] for e in pipettlist if e[0] == platename]
+        allfig[x] = plotPlate(selection, selectioncolors, platename)
+
+    return allfig, platenames
+
+
 class Window(QtWidgets.QMainWindow):
     """Main window displaying the origami and providing the interface.
 
@@ -1532,147 +1582,80 @@ class Window(QtWidgets.QMainWindow):
                             "Filename not specified. Plates not saved."
                         )
 
+    def _save_pipett_pdf(self, allfig: dict, platenames: list) -> None:
+        """Open a save dialog and export all plate figures to a PDF."""
+        if hasattr(self, "pwd"):
+            path, ext = lib.get_save_filename_ext_dialog(
+                self,
+                "Save pipetting schemes to.",
+                self.pwd,
+                filter="*.pdf",
+            )
+        else:
+            path, ext = lib.get_save_filename_ext_dialog(
+                self, "Save pipetting schemes to.", filter="*.pdf"
+            )
+        if path:
+            progress = lib.ProgressDialog(
+                "Exporting PDFs", 0, len(platenames), self
+            )
+            progress.set_value(0)
+            progress.show()
+            with PdfPages(path) as pdf:
+                for x in range(len(platenames)):
+                    progress.set_value(x)
+                    pdf.savefig(
+                        allfig[x],
+                        bbox_inches="tight",
+                        pad_inches=0.2,
+                        dpi=200,
+                    )
+            progress.close()
+            self.statusBar().showMessage("Pippetting scheme saved to: " + path)
+            self.pwd = os.path.dirname(path)
+
     def pipettingScheme(self) -> None:
         """Creates the pipetting scheme (i.e., the .pdf file showing
         which wells in the 96-well plates should be used)."""
         seqcheck = self.checkSeq()
-        if self.mainscene.tableshort == [
-            "None",
-            "None",
-            "None",
-            "None",
-            "None",
-            "None",
-            "None",
-        ]:
+        no_ext_set = all(s == "None" for s in self.mainscene.tableshort)
+        if no_ext_set:
             self.statusBar().showMessage(
                 "Error: No extensions have been set."
                 " Please set extensions first."
             )
-        elif seqcheck >= 1:
+            return
+        if seqcheck >= 1:
             self.statusBar().showMessage(
-                "Error: "
-                + str(seqcheck)
-                + " Color(s) do not have extensions. Please set first."
+                f"Error: {seqcheck} Color(s) do not have extensions."
+                " Please set first."
+            )
+            return
+
+        structureData = self.mainscene.readCanvas()[0]
+        pwd = getattr(self, "pwd", [])
+        fulllist, _ = PipettingDialog.getSchemes(pwd=pwd)
+        if not fulllist:
+            self.statusBar().showMessage("No *.csv found. Scheme not created.")
+            return
+
+        _, pipettlist, platelist = _match_pipett_sequences(
+            structureData, fulllist
+        )
+        noplates = len(set(platelist))
+        if (len(structureData) - 1 - 16) == len(pipettlist):
+            self.statusBar().showMessage(
+                f"All sequences found in {noplates} Plates."
+                " Pipetting scheme complete."
             )
         else:
-            structureData = self.mainscene.readCanvas()[0]
-            fullpipettlist = [
-                [
-                    "PLATE NAME",
-                    "PLATE POSITION",
-                    "OLIGO NAME",
-                    "SEQUENCE",
-                    "COLOR",
-                ]
-            ]
-            if hasattr(self, "pwd"):
-                pwd = self.pwd
-            else:
-                pwd = []
-            fulllist, ok = PipettingDialog.getSchemes(pwd=pwd)
-            if fulllist == []:
-                self.statusBar().showMessage(
-                    "No *.csv found. Scheme not created."
-                )
-            else:
-                pipettlist = []
-                platelist = []
-                for i in range(1, len(structureData)):
-                    sequencerow = structureData[i]
-                    sequence = sequencerow[3]
-                    fullpipettlist.append(sequencerow)
-                    fullpipettlist[i][0] = "NOT FOUND"
-                    if fullpipettlist[i][2] == " ":
-                        fullpipettlist[i][0] = "BIOTIN PLACEHOLDER"
-                    if sequence == " ":
-                        pass
-                    else:
-                        for j in range(0, len(fulllist)):
-                            fulllistrow = fulllist[j]
-                            fulllistseq = fulllistrow[3]
-                            if sequence == fulllistseq:
-                                pipettlist.append(
-                                    [
-                                        fulllist[j][0],
-                                        fulllist[j][1],
-                                        fulllist[j][2],
-                                        fulllist[j][3],
-                                        rgbcolors[sequencerow[4]],
-                                    ]
-                                )
-                                platelist.append(fulllist[j][0])
-                                del fullpipettlist[-1]
-                                fullpipettlist.append(fulllist[j])
-                                break  # first found will be taken
+            self.statusBar().showMessage(
+                "Error: Sequences sequences missing."
+                " Please check *.csv file.."
+            )
 
-                exportlist = dict()
-                exportlist[0] = fullpipettlist
-                noplates = len(set(platelist))
-                platenames = list(set(platelist))
-                platenames.sort()
-                if (len(structureData) - 1 - 16) == (len(pipettlist)):
-                    self.statusBar().showMessage(
-                        "All sequences found in "
-                        + str(noplates)
-                        + " Plates. Pipetting scheme complete."
-                    )
-                else:
-                    self.statusBar().showMessage(
-                        (
-                            "Error: Sequences sequences missing."
-                            " Please check *.csv file.."
-                        )
-                    )
-
-                allfig = dict()
-                for x in range(0, len(platenames)):
-                    platename = platenames[x]
-
-                    selection = []
-                    selectioncolors = []
-                    for y in range(0, len(platelist)):
-                        if pipettlist[y][0] == platename:
-                            selection.append(pipettlist[y][1])
-                            selectioncolors.append(pipettlist[y][4])
-
-                    allfig[x] = plotPlate(
-                        selection,
-                        selectioncolors,
-                        platename,
-                    )
-                if hasattr(self, "pwd"):
-                    path, ext = lib.get_save_filename_ext_dialog(
-                        self,
-                        "Save pipetting schemes to.",
-                        self.pwd,
-                        filter="*.pdf",
-                    )
-                else:
-                    path, ext = lib.get_save_filename_ext_dialog(
-                        self, "Save pipetting schemes to.", filter="*.pdf"
-                    )
-
-                if path:
-                    progress = lib.ProgressDialog(
-                        "Exporting PDFs", 0, len(platenames), self
-                    )
-                    progress.set_value(0)
-                    progress.show()
-                    with PdfPages(path) as pdf:
-                        for x in range(0, len(platenames)):
-                            progress.set_value(x)
-                            pdf.savefig(
-                                allfig[x],
-                                bbox_inches="tight",
-                                pad_inches=0.2,
-                                dpi=200,
-                            )
-                    progress.close()
-                    self.statusBar().showMessage(
-                        "Pippetting scheme saved to: " + path
-                    )
-                    self.pwd = os.path.dirname(path)
+        allfig, platenames = _build_plate_figures(pipettlist, platelist)
+        self._save_pipett_pdf(allfig, platenames)
 
     def foldingScheme(self) -> None:
         """Run the folding dialog to get volumes to mix."""

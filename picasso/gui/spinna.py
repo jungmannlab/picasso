@@ -471,7 +471,7 @@ class MaskGeneratorTab(lib.Dialog):
         probability cutoff.
     """
 
-    DOCS_URL = "https://picassosr.readthedocs.io/en/latest/spinna.html#mask-generation-tab"
+    DOCS_URL = "https://picassosr.readthedocs.io/en/latest/spinna.html#mask-generation-tab"  # noqa: E501
 
     def __init__(self, window: QtWidgets.QMainWindow) -> None:
         super().__init__(window)
@@ -2411,8 +2411,8 @@ class NNDPlotSettingsDialog(lib.Dialog):
         self.binsize_exp.valueChanged.connect(self.tick_rehist_exp)
         binsize_exp_label = QtWidgets.QLabel("Bin size exp (nm):")
         binsize_exp_label.setToolTip(
-            "Histogram bin size for plotting the experimental nearest neighbors"
-            "distances."
+            "Histogram bin size for plotting the experimental nearest"
+            " neighbors distances."
         )
         const_layout.addRow(binsize_exp_label, self.binsize_exp)
 
@@ -3586,23 +3586,6 @@ class SimulationsTab(lib.Dialog):
                     structure_name: np.int32(df[f"N_{structure_name}"])
                     for structure_name in titles
                 }
-                # # get granularity and n_sim_fit from the user
-                # n_sim_fit, ok = QtWidgets.QInputDialog.getInt(
-                #     self,
-                #     "",
-                #     "Number of simulations per tested combination",
-                #     value=10,
-                #     min=1,
-                #     max=1000,
-                #     step=1,
-                # )
-                # if not ok:
-                #     return
-                # granularity, ok = QtWidgets.QInputDialog.getInt(
-                #     self, "", "Granularity", value=21, min=1, max=1000, step=1
-                # )
-                # if not ok:
-                #     return
                 n_sim_fit, granularity, _, ok = (
                     GenerateSearchSpaceDialog.getParams(
                         self, loading_dialog=True
@@ -3784,6 +3767,69 @@ class SimulationsTab(lib.Dialog):
                 for key, value in metadata.items():
                     f.write(f"{key}: {value}\n")
 
+    def _extract_relative_props_for_target(self, metadata: dict) -> dict:
+        """Extract the relative proportions of structures for a given
+        target and format them in a string for display and saving in
+        the summary file."""
+        if len(self.targets) > 1:
+            for target in self.targets:
+                if isinstance(self.opt_props, tuple):
+                    rel_props = self.mixer.convert_props_for_target(
+                        self.opt_props[0],
+                        target,
+                        self.n_total,
+                    )
+                    rel_props_sd = self.mixer.convert_props_for_target(
+                        self.opt_props[1],
+                        target,
+                        self.n_total,
+                    )
+                else:
+                    rel_props = self.mixer.convert_props_for_target(
+                        self.opt_props,
+                        target,
+                        self.n_total,
+                    )
+                idx_valid = np.where(rel_props != np.inf)[0]
+                if isinstance(self.opt_props, tuple):
+                    value = ", ".join(
+                        [
+                            f"{self.structures[i].title}: {rel_props[i]:.2f}% "
+                            f"+/- {rel_props_sd[i]:.2f}%"
+                            for i in idx_valid
+                        ]
+                    )
+                else:
+                    value = ", ".join(
+                        [
+                            f"{self.structures[i].title}: {rel_props[i]:.2f}%"
+                            for i in idx_valid
+                        ]
+                    )
+                metadata[f"Relative proportions of {target} in"] = value
+        return metadata
+
+    def _nn_counts_summary(self, metadata: dict) -> dict:
+        """Extract number of neighbors considered at fitting."""
+        for i, t1 in enumerate(self.mixer.targets):
+            for t2 in self.mixer.targets[i:]:
+                key = f"{t1}-{t2}"
+                metadata[f"Number of neighbors considered ({key})"] = (
+                    self.mixer.get_neighbor_counts(t1, t2)
+                )
+        return metadata
+
+    def _le_fitting_summary(self, metadata: dict) -> dict:
+        """Adjust the summary of fit results and parameters if LE
+        fitting was performed."""
+        if self.le_fitting_check.isChecked():
+            for target in self.targets:
+                metadata.pop(f"Labeling efficiency (%) ({target})", None)
+            metadata["Best fitting labeling efficiencies (%)"] = (
+                self.fit_results_display.text()
+            )
+        return metadata
+
     def summarize_fit_results(self) -> None:
         """Summarize fit results and parameters in a dictionary.
 
@@ -3833,60 +3879,9 @@ class SimulationsTab(lib.Dialog):
         metadata[
             "Best fitting score (Kolmogorov-Smirnov 2 sample test statistic)"
         ] = self.best_score
-
-        # relative proportions of structures for each target
-        if len(self.targets) > 1:
-            for target in self.targets:
-                if isinstance(self.opt_props, tuple):
-                    rel_props = self.mixer.convert_props_for_target(
-                        self.opt_props[0],
-                        target,
-                        self.n_total,
-                    )
-                    rel_props_sd = self.mixer.convert_props_for_target(
-                        self.opt_props[1],
-                        target,
-                        self.n_total,
-                    )
-                else:
-                    rel_props = self.mixer.convert_props_for_target(
-                        self.opt_props,
-                        target,
-                        self.n_total,
-                    )
-                idx_valid = np.where(rel_props != np.inf)[0]
-                if isinstance(self.opt_props, tuple):
-                    value = ", ".join(
-                        [
-                            f"{self.structures[i].title}: {rel_props[i]:.2f}% +/-"
-                            f" {rel_props_sd[i]:.2f}%"
-                            for i in idx_valid
-                        ]
-                    )
-                else:
-                    value = ", ".join(
-                        [
-                            f"{self.structures[i].title}: {rel_props[i]:.2f}%"
-                            for i in idx_valid
-                        ]
-                    )
-                metadata[f"Relative proportions of {target} in"] = value
-
-        # number of neighbors considered at fitting
-        for i, t1 in enumerate(self.mixer.targets):
-            for t2 in self.mixer.targets[i:]:
-                key = f"{t1}-{t2}"
-                metadata[f"Number of neighbors considered ({key})"] = (
-                    self.mixer.get_neighbor_counts(t1, t2)
-                )
-
-        # labeling efficiency fitting
-        if self.le_fitting_check.isChecked():
-            for target in self.targets:
-                metadata.pop(f"Labeling efficiency (%) ({target})", None)
-            metadata["Best fitting labeling efficiencies (%)"] = (
-                self.fit_results_display.text()
-            )
+        metadata = self._extract_relative_props_for_target(metadata)
+        metadata = self._le_fitting_summary(metadata)
+        metadata = self._nn_counts_summary(metadata)
         return metadata
 
     @check_structures_loaded
@@ -4167,6 +4162,69 @@ class SimulationsTab(lib.Dialog):
             current_hist_data["counts"].append(counts)
         return current_hist_data
 
+    def _setup_rot_mode_and_nn_counts(
+        self, mode: Literal["fit", "single_sim"]
+    ) -> tuple[Literal["2D", "3D", None], dict | str]:
+        rot_mode = ["2D", "3D", None][
+            self.settings_dialog.rot_dim_widget.currentIndex()
+        ]
+        if mode == "fit":
+            if self.settings_dialog.auto_nn_check.isChecked():
+                nn_counts = "auto"
+            else:
+                nn_counts = {
+                    name: self.settings_dialog.nn_counts[name].value()
+                    for name in self.settings_dialog.nn_counts.keys()
+                }
+        elif mode == "single_sim":
+            nn_counts = {
+                name: self.nn_plot_settings_dialog.nn_counts[name].value()
+                for name in self.nn_plot_settings_dialog.nn_counts.keys()
+            }
+        return rot_mode, nn_counts
+
+    def _setup_label_unc_and_le(self) -> tuple[dict, dict]:
+        label_unc = {}
+        le = {}
+        for target, label_spin, le_spin in zip(
+            self.targets,
+            self.label_unc_spins,
+            self.le_spins,
+        ):
+            label_unc[target] = label_spin.value()
+            le[target] = le_spin.value() / 100
+        return label_unc, le
+
+    def _setup_roi(
+        self, mode: Literal["fit", "single_sim"]
+    ) -> tuple[float | None, float | None, float | None, dict | None]:
+        fail_return = (None, None, None, None)
+        if self.mask_den_stack.currentIndex() == 0:  # masks
+            width, height, depth = [None, None, None]
+            # check that all masks are loaded
+            ok = self.check_masks_loaded()
+            if ok:
+                mask_dict = {"mask": self.masks, "info": self.mask_infos}
+            else:
+                message = "Please load all masks."
+                QtWidgets.QMessageBox.information(self, "Warning", message)
+                return fail_return
+
+        elif self.mask_den_stack.currentIndex() == 1:  # densities
+            if self.dim_widget.currentIndex() == 1 and self.depth is None:
+                message = (
+                    "Please enter depth for the homogeneously distributed"
+                    " simulation. To do this, please click the"
+                    ' "Depth (nm)" button above.'
+                )
+                QtWidgets.QMessageBox.information(self, "Warning", message)
+                return fail_return
+            mask_dict = None
+            width, height, depth = self.find_roi(mode=mode)
+            if width is None:
+                return fail_return
+        return width, height, depth, mask_dict
+
     @check_structures_loaded
     def setup_mixer(
         self, mode: Literal["fit", "single_sim", "dummy"] = "fit"
@@ -4196,64 +4254,17 @@ class SimulationsTab(lib.Dialog):
                 depth=10,
             )
 
-        # extract label uncertainty and LE
-        label_unc = {}
-        le = {}
-        for target, label_spin, le_spin in zip(
-            self.targets,
-            self.label_unc_spins,
-            self.le_spins,
-        ):
-            label_unc[target] = label_spin.value()
-            le[target] = le_spin.value() / 100
-
-        # extract masks/roi
-        if self.mask_den_stack.currentIndex() == 0:  # masks
-            width, height, depth = [None, None, None]
-            # check that all masks are loaded
-            ok = self.check_masks_loaded()
-            if ok:
-                mask_dict = {"mask": self.masks, "info": self.mask_infos}
-            else:
-                message = "Please load all masks."
-                QtWidgets.QMessageBox.information(self, "Warning", message)
-                return
-
-        elif self.mask_den_stack.currentIndex() == 1:  # densities
-            if self.dim_widget.currentIndex() == 1 and self.depth is None:
-                message = (
-                    "Please enter depth for the homogeneously distributed"
-                    " simulation. To do this, please click the"
-                    ' "Depth (nm)" button above.'
-                )
-                QtWidgets.QMessageBox.information(self, "Warning", message)
-                return
-            mask_dict = None
-            width, height, depth = self.find_roi(mode=mode)
-            if width is None:
-                return
+        label_unc, le = self._setup_label_unc_and_le()
+        width, height, depth, mask_dict = self._setup_roi(mode=mode)
+        if width is None and mask_dict is None:
+            return
 
         # check dimensionalities, rotations, and optionally # of NNs
         ok, message = self.check_dimensionalities()
         if not ok:
             QtWidgets.QMessageBox.information(self, "Warning", message)
             return
-        rot_mode = ["2D", "3D", None][
-            self.settings_dialog.rot_dim_widget.currentIndex()
-        ]
-        if mode == "fit":
-            if self.settings_dialog.auto_nn_check.isChecked():
-                nn_counts = "auto"
-            else:
-                nn_counts = {
-                    name: self.settings_dialog.nn_counts[name].value()
-                    for name in self.settings_dialog.nn_counts.keys()
-                }
-        elif mode == "single_sim":
-            nn_counts = {
-                name: self.nn_plot_settings_dialog.nn_counts[name].value()
-                for name in self.nn_plot_settings_dialog.nn_counts.keys()
-            }
+        rot_mode, nn_counts = self._setup_rot_mode_and_nn_counts(mode=mode)
 
         mixer = spinna.StructureMixer(
             structures=self.structures,
@@ -4555,7 +4566,7 @@ class SimulationsTab(lib.Dialog):
         if not (len(self.nnd_hist_data_exp) or len(self.nnd_hist_data_sim)):
             return
 
-        out_path = self.structures_path.replace(".yaml", f"_NND")
+        out_path = self.structures_path.replace(".yaml", "_NND")
         path, ext = lib.get_save_filename_ext_dialog(
             self, "Save NND plots", out_path, filter="*.png;;*.svg"
         )
