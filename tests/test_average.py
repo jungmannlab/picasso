@@ -7,9 +7,8 @@
 import numpy as np
 import pandas as pd
 import pytest
-import scipy.sparse
 
-from picasso import average
+from picasso import average, render
 
 
 class TestRenderHist:
@@ -23,7 +22,7 @@ class TestRenderHist:
         t_min = 0.0
         t_max = 3.0
 
-        n, image = average.render_hist(x, y, oversampling, t_min, t_max)
+        n, image = render.render_hist_numba(x, y, oversampling, t_min, t_max)
 
         assert n == 3, "Should render 3 localizations"
         assert image.shape == (3, 3), "Image should be 3x3 pixels"
@@ -38,7 +37,7 @@ class TestRenderHist:
         t_min = 0.0
         t_max = 3.0
 
-        n, image = average.render_hist(x, y, oversampling, t_min, t_max)
+        n, image = render.render_hist_numba(x, y, oversampling, t_min, t_max)
 
         assert n == 1, "Should only render 1 in-bounds localization"
 
@@ -49,8 +48,8 @@ class TestRenderHist:
         t_min = 0.0
         t_max = 1.0
 
-        n1, image1 = average.render_hist(x, y, 1.0, t_min, t_max)
-        n2, image2 = average.render_hist(x, y, 2.0, t_min, t_max)
+        n1, image1 = render.render_hist_numba(x, y, 1.0, t_min, t_max)
+        n2, image2 = render.render_hist_numba(x, y, 2.0, t_min, t_max)
 
         assert image1.shape == (1, 1)
         assert image2.shape == (2, 2), "2x oversampling should give 2x2 image"
@@ -63,7 +62,7 @@ class TestRenderHist:
         t_min = 0.0
         t_max = 3.0
 
-        n, image = average.render_hist(x, y, oversampling, t_min, t_max)
+        n, image = render.render_hist_numba(x, y, oversampling, t_min, t_max)
 
         assert n == 0, "Should render 0 localizations"
         assert np.all(image == 0), "Image should be all zeros"
@@ -125,7 +124,9 @@ class TestAlignGroupCore:
         t_max = 2.0
 
         # Render average image for correlation
-        n, image_avg = average.render_hist(x, y, oversampling, t_min, t_max)
+        n, image_avg = render.render_hist_numba(
+            x, y, oversampling, t_min, t_max
+        )
         CF_image_avg = np.conj(np.fft.fft2(image_avg))
         image_half = image_avg.shape[0] / 2
 
@@ -157,7 +158,9 @@ class TestAlignGroupCore:
         t_min = -2.0
         t_max = 2.0
 
-        n, image_avg = average.render_hist(x, y, oversampling, t_min, t_max)
+        n, image_avg = render.render_hist_numba(
+            x, y, oversampling, t_min, t_max
+        )
         CF_image_avg = np.conj(np.fft.fft2(image_avg))
         image_half = image_avg.shape[0] / 2
 
@@ -202,27 +205,11 @@ class TestAverageParticles:
         """Create sample metadata."""
         return [{"Width": 256, "Height": 256}]
 
-    @pytest.fixture
-    def sample_group_index(self, sample_locs):
-        """Create sparse group index matrix."""
-        n_groups = sample_locs["group"].max() + 1
-        n_locs = len(sample_locs)
-        group_index = scipy.sparse.lil_matrix((n_groups, n_locs), dtype=bool)
-
-        for i, group in enumerate(sample_locs["group"].unique()):
-            index = np.where(sample_locs["group"] == group)[0]
-            group_index[i, index] = True
-
-        return group_index
-
-    def test_average_particles_basic(
-        self, sample_locs, sample_info, sample_group_index
-    ):
+    def test_average_particles_basic(self, sample_locs, sample_info):
         """Test basic averaging operation."""
         result = average.average(
             sample_locs,
             sample_info,
-            sample_group_index,
             oversampling=1.0,
             iterations=1,
         )
@@ -233,13 +220,12 @@ class TestAverageParticles:
         assert "y" in result.columns
 
     def test_average_particles_coordinates_centered(
-        self, sample_locs, sample_info, sample_group_index
+        self, sample_locs, sample_info
     ):
         """Test that averaged coordinates are centered."""
         result = average.average(
             sample_locs,
             sample_info,
-            sample_group_index,
             oversampling=1.0,
             iterations=1,
         )
@@ -249,20 +235,18 @@ class TestAverageParticles:
         assert np.abs(np.mean(result["y"])) < 0.1
 
     def test_average_particles_multiple_iterations(
-        self, sample_locs, sample_info, sample_group_index
+        self, sample_locs, sample_info
     ):
         """Test averaging with multiple iterations."""
         result1 = average.average(
             sample_locs.copy(),
             sample_info,
-            sample_group_index,
             oversampling=1.0,
             iterations=1,
         )
         result2 = average.average(
             sample_locs.copy(),
             sample_info,
-            sample_group_index,
             oversampling=1.0,
             iterations=2,
         )
@@ -271,9 +255,7 @@ class TestAverageParticles:
         # but both should have similar structure
         assert len(result1) == len(result2)
 
-    def test_average_particles_with_callback(
-        self, sample_locs, sample_info, sample_group_index
-    ):
+    def test_average_particles_with_callback(self, sample_locs, sample_info):
         """Test averaging with progress callback."""
         progress_calls = []
 
@@ -283,7 +265,6 @@ class TestAverageParticles:
         average.average(
             sample_locs,
             sample_info,
-            sample_group_index,
             oversampling=1.0,
             iterations=2,
             progress_callback=progress_callback,
@@ -293,13 +274,12 @@ class TestAverageParticles:
         assert len(progress_calls) >= 2
 
     def test_average_particles_preserves_group_column(
-        self, sample_locs, sample_info, sample_group_index
+        self, sample_locs, sample_info
     ):
         """Test that group column is preserved if it exists."""
         result = average.average(
             sample_locs,
             sample_info,
-            sample_group_index,
             oversampling=1.0,
             iterations=1,
         )

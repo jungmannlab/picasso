@@ -726,7 +726,7 @@ def render_hist_numba(
     x = oversampling * (x - t_min)
     y = oversampling * (y - t_min)
     image = np.zeros((n_pixel, n_pixel), dtype=np.float32)
-    render._fill(image, x, y)
+    _fill(image, x, y)
     return len(x), image
 
 
