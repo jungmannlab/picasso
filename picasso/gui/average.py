@@ -21,7 +21,7 @@ import numpy as np
 import pandas as pd
 from PyQt6 import QtCore, QtGui, QtWidgets
 
-from .. import io, lib, average, __version__
+from .. import io, lib, average, render, __version__
 
 
 class Worker(QtCore.QThread):
@@ -170,6 +170,7 @@ class View(QtWidgets.QLabel):
             self.running = True
             oversampling = self.window.parameters_dialog.oversampling
             iterations = self.window.parameters_dialog.iterations.value()
+            self.statusBar().showMessage("Preparing for averaging...")
             self.thread = Worker(
                 self.locs,
                 self.info,
@@ -299,7 +300,7 @@ class View(QtWidgets.QLabel):
         oversampling = self.window.parameters_dialog.oversampling
         t_min = -self.r
         t_max = self.r
-        N_avg, image_avg = average.render_hist(
+        N_avg, image_avg = render.render_hist_numba(
             self.locs["x"].to_numpy(),
             self.locs["y"].to_numpy(),
             oversampling,
