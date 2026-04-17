@@ -530,9 +530,7 @@ def _fill_gaussian_rot(
     """Fill image with rotated gaussian-blurred localizations.
 
     Localization precisions (sx, sy and sz) are treated as standard
-    deviations of the guassians to be rendered.
-
-    See https://cs229.stanford.edu/section/gaussians.pdf
+    deviations of the gaussians to be rendered.
 
     Parameters
     ----------
@@ -547,7 +545,7 @@ def _fill_gaussian_rot(
     ang : tuple
         Rotation angles of locs around x, y and z axes (radians).
     """
-    (angx, angy, angz) = ang  # rotation angles
+    (angx, angy, angz) = ang
 
     rot_mat_x = np.array(
         [
@@ -556,7 +554,7 @@ def _fill_gaussian_rot(
             [0.0, -np.sin(angx), np.cos(angx)],
         ],
         dtype=np.float32,
-    )  # rotation matrix around x axis
+    )
     rot_mat_y = np.array(
         [
             [np.cos(angy), 0.0, np.sin(angy)],
@@ -564,7 +562,7 @@ def _fill_gaussian_rot(
             [-np.sin(angy), 0.0, np.cos(angy)],
         ],
         dtype=np.float32,
-    )  # rotation matrix around y axis
+    )
     rot_mat_z = np.array(
         [
             [np.cos(angz), -np.sin(angz), 0.0],
@@ -572,68 +570,68 @@ def _fill_gaussian_rot(
             [0.0, 0.0, 1.0],
         ],
         dtype=np.float32,
-    )  # rotation matrix around z axis
-    rot_matrix = rot_mat_x @ rot_mat_y @ rot_mat_z  # rotation matrix
-    rot_matrixT = np.transpose(rot_matrix)  # ...and its transpose
+    )
+    rot_matrix = rot_mat_x @ rot_mat_y @ rot_mat_z
+    rot_matrixT = np.transpose(rot_matrix)
 
-    # draw each localization separately
     for x_, y_, z_, sx_, sy_, sz_ in zip(x, y, z, sx, sy, sz):
 
-        # get min and max indeces to draw the given localization
-        max_y = (_DRAW_MAX_SIGMA * 2.5) * sy_
-        i_min = int(y_ - max_y)
-        if i_min < 0:
-            i_min = 0
-        i_max = int(y_ + max_y + 1)
-        if i_max > n_pixel_y:
-            i_max = n_pixel_y
-        max_x = (_DRAW_MAX_SIGMA * 2.5) * sx_
+        # rotated 3D covariance
+        cov = np.array(
+            [
+                [sx_**2, 0.0, 0.0],
+                [0.0, sy_**2, 0.0],
+                [0.0, 0.0, sz_**2],
+            ],
+            dtype=np.float32,
+        )
+        cov_rot = rot_matrix @ cov @ rot_matrixT
+
+        # we only need the top-left 2x2 part for rendering
+        s00 = cov_rot[0, 0]  # var_x
+        s01 = cov_rot[0, 1]  # cov_xy
+        s10 = cov_rot[1, 0]  # cov_yx (= s01)
+        s11 = cov_rot[1, 1]  # var_y
+
+        # inverse of 2x2 matrix
+        det2d = s00 * s11 - s01 * s10
+        if det2d < 1e-10:
+            continue
+        inv00 = s11 / det2d
+        inv01 = -s01 / det2d
+        inv10 = -s10 / det2d
+        inv11 = s00 / det2d
+
+        norm = 1.0 / (2.0 * np.pi * np.sqrt(det2d))
+
+        # use the larger effective sigma for draw bounds
+        eff_sx = np.sqrt(s00)
+        eff_sy = np.sqrt(s11)
+        max_x = _DRAW_MAX_SIGMA * 2.5 * eff_sx
+        max_y = _DRAW_MAX_SIGMA * 2.5 * eff_sy
+
         j_min = int(x_ - max_x)
         if j_min < 0:
             j_min = 0
         j_max = int(x_ + max_x + 1)
         if j_max > n_pixel_x:
             j_max = n_pixel_x
-        max_z = (_DRAW_MAX_SIGMA * 2.5) * sz_
-        k_min = int(z_ - max_z)
-        k_max = int(z_ + max_z + 1)
+        i_min = int(y_ - max_y)
+        if i_min < 0:
+            i_min = 0
+        i_max = int(y_ + max_y + 1)
+        if i_max > n_pixel_y:
+            i_max = n_pixel_y
 
-        # rotate localization precisions in 3D
-        cov_matrix = np.array(
-            [
-                [sx_**2, 0, 0],
-                [0, sy_**2, 0],
-                [0, 0, sz_**2],
-            ],
-            dtype=np.float32,
-        )  # covariance matrix (CM)
-        cov_rot = rot_matrix @ cov_matrix @ rot_matrixT  # rotated CM
-        cri = inverse_3x3(cov_rot)  # inverse of rotated CM
-        dcr = determinant_3x3(cov_rot)  # determinant of rotated CM
-
-        # draw a localization in 2D - sum z coordinates;
-        # PDF of a rotated gaussian in 3D is calculated and
-        # image is summed over z axis
+        # 2D Gaussian (no z-loop!)
         for i in range(i_min, i_max):
             b = np.float32(i + 0.5 - y_)
             for j in range(j_min, j_max):
                 a = np.float32(j + 0.5 - x_)
-                for k in range(k_min, k_max):
-                    c = np.float32(k + 0.5 - z_)
-                    exponent = (
-                        a * a * cri[0, 0]
-                        + a * b * cri[0, 1]
-                        + a * c * cri[0, 2]
-                        + a * b * cri[1, 0]
-                        + b * b * cri[1, 1]
-                        + b * c * cri[1, 2]
-                        + a * c * cri[2, 0]
-                        + b * c * cri[2, 1]
-                        + c * c * cri[2, 2]
-                    )  # Mahalanobis distance
-                    image[i, j] += np.exp(-0.5 * exponent) / (
-                        ((2 * np.pi) ** 3 * dcr) ** 0.5
-                    )
+                exponent = (
+                    a * a * inv00 + a * b * (inv01 + inv10) + b * b * inv11
+                )
+                image[i, j] += norm * np.exp(-0.5 * exponent)
 
 
 @numba.njit
