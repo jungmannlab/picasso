@@ -148,7 +148,7 @@ class Worker(QtCore.QThread):
 
     progressMade = QtCore.pyqtSignal(int)
     finished = QtCore.pyqtSignal(int)
-    interrupted = QtCore.pyqtSignal(str)  # NEW: report errors to main thread
+    interrupted = QtCore.pyqtSignal(str)  # report errors to main thread
 
     def __init__(self, movie_groups):
         super().__init__()
