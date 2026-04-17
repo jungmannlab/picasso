@@ -15,49 +15,11 @@ import multiprocessing
 from multiprocessing import sharedctypes
 
 import ctypes
-import numba
 import numpy as np
 import pandas as pd
 import scipy.sparse
 
 from . import lib, render
-
-
-@numba.jit(nopython=True, nogil=True)
-def render_hist(
-    x: lib.FloatArray1D,
-    y: lib.FloatArray1D,
-    oversampling: float,
-    t_min: float,
-    t_max: float,
-) -> tuple[int, lib.FloatArray2D]:
-    """Calculate 2D histogram of xy coordinates.
-
-    Parameters
-    ----------
-    x, y : lib.FloatArray1D
-        1D arrays of xy coordinates.
-    oversampling : float
-        Number of histogram pixels per camera pixel.
-    t_min, t_max : float
-        Minimum and maximum bounds of the histogram.
-
-    Returns
-    -------
-    n : int
-        Number of localizations in the histogram.
-    image : lib.FloatArray2D
-        2D histogram of xy coordinates.
-    """
-    n_pixel = int(np.ceil(oversampling * (t_max - t_min)))
-    in_view = (x > t_min) & (y > t_min) & (x < t_max) & (y < t_max)
-    x = x[in_view]
-    y = y[in_view]
-    x = oversampling * (x - t_min)
-    y = oversampling * (y - t_min)
-    image = np.zeros((n_pixel, n_pixel), dtype=np.float32)
-    render._fill(image, x, y)
-    return len(x), image
 
 
 def compute_xcorr(
@@ -133,7 +95,9 @@ def align_group_core(
         x_rot = np.cos(angle) * x_original - np.sin(angle) * y_original
         y_rot = np.sin(angle) * x_original + np.cos(angle) * y_original
         # render group image
-        N, image = render_hist(x_rot, y_rot, oversampling, t_min, t_max)
+        N, image = render.render_hist_numba(
+            x_rot, y_rot, oversampling, t_min, t_max
+        )
         # calculate cross-correlation
         xcorr = compute_xcorr(CF_image_avg, image)
         # find the brightest pixel
@@ -263,6 +227,9 @@ def average(
     locs_averaged : pd.DataFrame
         Averaged localizations with coordinates centered around origin.
     """
+    assert (
+        "group" in locs.columns
+    ), "Localizations DataFrame must have a 'group' column."
     locs = locs.copy()
     n_groups = group_index.shape[0]
     r = 2 * np.sqrt((locs["x"] ** 2 + locs["y"] ** 2).mean())
@@ -297,7 +264,7 @@ def average(
             counter.value = 0
 
             # Render average image
-            N_avg, image_avg = render_hist(
+            N_avg, image_avg = render.render_hist_numba(
                 np.ctypeslib.as_array(x),
                 np.ctypeslib.as_array(y),
                 oversampling,
