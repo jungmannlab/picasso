@@ -26,10 +26,6 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from numpy.lib.recfunctions import append_fields, drop_fields
-from matplotlib.backends.backend_qt5agg import (
-    FigureCanvas,
-    NavigationToolbar2QT,
-)
 from scipy import stats
 from PyQt6 import QtCore, QtWidgets, QtGui
 from playsound3 import playsound
@@ -558,6 +554,11 @@ class GenericPlotWindow(QtWidgets.QTabWidget):
     window."""
 
     def __init__(self, window_title, app_name):
+        from matplotlib.backends.backend_qt5agg import (
+            FigureCanvas,
+            NavigationToolbar2QT,
+        )
+
         super().__init__()
         self.setWindowTitle(window_title)
         this_directory = os.path.dirname(os.path.realpath(__file__))

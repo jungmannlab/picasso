@@ -10,8 +10,6 @@ Average super-resolution images of particles by alignment and rotation.
 
 from __future__ import annotations
 
-from typing import Any
-
 import functools
 import multiprocessing
 from multiprocessing import sharedctypes
