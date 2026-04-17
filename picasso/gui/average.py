@@ -41,7 +41,7 @@ class Worker(QtCore.QThread):
         Number of display pixels per camera pixel.
     """
 
-    progressMade = QtCore.pyqtSignal(int, int, pd.DataFrame, bool)
+    progressMade = QtCore.pyqtSignal(int, int, pd.DataFrame, bool, int, int)
 
     def __init__(
         self,
@@ -57,11 +57,16 @@ class Worker(QtCore.QThread):
         self.iterations = iterations
 
     def on_progress(
-        self, it: int, total_it: int, locs_current: pd.DataFrame
+        self,
+        it: int,
+        total_it: int,
+        locs_current: pd.DataFrame,
+        group: int,
+        n_groups: int,
     ) -> None:
         """Callback for progress updates from averaging process."""
         self.locs = locs_current.copy()
-        self.progressMade.emit(it, total_it, self.locs, True)
+        self.progressMade.emit(it, total_it, self.locs, True, group, n_groups)
 
     def run(self) -> None:
         """Run averaging across a number of iterations."""
@@ -198,11 +203,15 @@ class View(QtWidgets.QLabel):
         total_it: int,
         locs: pd.DataFrame,
         update_image: bool,
+        group: int,
+        n_groups: int,
     ) -> None:
         self.locs = locs.copy()
         if update_image:
             self.update_image()
-        self.window.statusBar().showMessage(f"Iteration {it}/{total_it}")
+        self.window.statusBar().showMessage(
+            f"Iteration {it}/{total_it} — group {group}/{n_groups}"
+        )
 
     def open(self, path: str) -> None:
         """Load a localization file and preset the pool process.

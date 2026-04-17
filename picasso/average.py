@@ -13,11 +13,13 @@ from __future__ import annotations
 import functools
 import multiprocessing
 from multiprocessing import sharedctypes
+from typing import Literal
 
 import ctypes
 import numpy as np
 import pandas as pd
 import scipy.sparse
+from tqdm import tqdm
 
 from . import lib, render, __version__
 
@@ -281,7 +283,7 @@ def average(
     oversampling: float,
     iterations: int = 3,
     return_shifted_locs: bool = False,
-    progress_callback: callable | None = None,
+    progress_callback: callable | Literal["console"] | None = None,
 ) -> pd.DataFrame:
     """Average super-resolution images of particles by alignment and rotation.
 
@@ -304,9 +306,12 @@ def average(
         If True, return localizations shifted to positive coordinates
         and updated metadata. If False, only localizations are returned
         without shifts.
-    progress_callback : callable, optional
-        Callback function called with progress info after each iteration.
-        Signature: callback(iteration, total_iterations, locs).
+    progress_callback : callable or "console" or None, optional
+        Controls progress reporting. Pass a callable with signature
+        ``callback(iteration, total_iterations, locs)`` to receive
+        per-iteration updates. Pass ``"console"`` to display tqdm
+        progress bars in the terminal. Pass ``None`` (default) for no
+        progress reporting.
 
     Returns
     -------
@@ -346,9 +351,20 @@ def average(
         (x, y, group_index),
     )
 
+    use_tqdm = progress_callback == "console"
+    if use_tqdm:
+        iter_pbar = tqdm(total=iterations, desc="Averaging", unit="iter")
+        group_pbar = tqdm(total=n_groups, desc="Groups", unit="group")
+    else:
+        iter_pbar = None
+        group_pbar = None
+
     try:
         for it in range(iterations):
             counter.value = 0
+            if use_tqdm:
+                group_pbar.reset()
+                group_pbar.set_description(f"Iteration {it + 1}/{iterations}")
 
             # Render average image
             N_avg, image_avg = render.render_hist_numba(
@@ -377,12 +393,26 @@ def average(
             result = pool.map_async(fc, range(n_groups), groups_per_worker)
 
             # Wait for completion and report progress
-            while not result.ready():
-                if progress_callback:
-                    locs_current = locs.copy()
-                    locs_current["x"] = np.ctypeslib.as_array(x)
-                    locs_current["y"] = np.ctypeslib.as_array(y)
-                    progress_callback(it + 1, iterations, locs_current)
+            if use_tqdm:
+                last_count = 0
+                while not result.ready():
+                    current = int(counter.value)
+                    group_pbar.update(current - last_count)
+                    last_count = current
+                group_pbar.update(n_groups - last_count)
+            else:
+                while not result.ready():
+                    if callable(progress_callback):
+                        locs_current = locs.copy()
+                        locs_current["x"] = np.ctypeslib.as_array(x)
+                        locs_current["y"] = np.ctypeslib.as_array(y)
+                        progress_callback(
+                            it + 1,
+                            iterations,
+                            locs_current,
+                            int(counter.value),
+                            n_groups,
+                        )
 
             # Update localizations from shared arrays
             locs["x"] = np.ctypeslib.as_array(x)
@@ -390,10 +420,15 @@ def average(
             locs["x"] -= np.mean(locs["x"])
             locs["y"] -= np.mean(locs["y"])
 
-            if progress_callback:
-                progress_callback(it + 1, iterations, locs)
+            if use_tqdm:
+                iter_pbar.update(1)
+            if callable(progress_callback):
+                progress_callback(it + 1, iterations, locs, n_groups, n_groups)
 
     finally:
+        if use_tqdm:
+            group_pbar.close()
+            iter_pbar.close()
         pool.close()
         pool.join()
 
