@@ -37,8 +37,8 @@ class Worker(QtCore.QThread):
         Number of iterations to average over.
     locs : pd.DataFrame
         Localizations with group indices (``group`` column).
-    oversampling : float
-        Number of display pixels per camera pixel.
+    display_px_size : float
+        Display pixel size in nm used in averaging.
     """
 
     progressMade = QtCore.pyqtSignal(int, int, pd.DataFrame, bool, int, int)
@@ -47,13 +47,13 @@ class Worker(QtCore.QThread):
         self,
         locs: pd.DataFrame,
         info: list[dict],
-        oversampling: float,
+        display_px_size: float,
         iterations: int,
     ) -> None:
         super().__init__()
         self.locs = locs.copy()
         self.info = info
-        self.oversampling = oversampling
+        self.display_px_size = display_px_size
         self.iterations = iterations
 
     def on_progress(
@@ -73,14 +73,14 @@ class Worker(QtCore.QThread):
         self.locs = average.average(
             self.locs,
             self.info,
-            self.oversampling,
-            self.iterations,
+            display_pixel_size=self.display_px_size,
+            iterations=self.iterations,
             progress_callback=self.on_progress,
         )
 
 
 class ParametersDialog(lib.Dialog):
-    """Dialog for setting parameters - oversampling and iterations.
+    """Dialog for setting parameters - display pixel size and iterations.
 
     ...
 
@@ -90,9 +90,10 @@ class ParametersDialog(lib.Dialog):
         Spin box for setting the display pixel size in nm. Determines
         oversampling, see below.
     iterations : QtWidgets.QSpinBox
-        Spin box for setting the number of iterations.
+        Spin box for setting the number of averaging iterations.
     oversampling : float
-        Number of display pixels per camera pixel.
+        Number of display pixels per camera pixel, calculated from the
+        display pixel size and the camera pixel size from metadata.
     window : QtWidgets.QMainWindow
         Main window instance.
     """
@@ -168,13 +169,15 @@ class View(QtWidgets.QLabel):
     def average(self):
         if not self.running:
             self.running = True
-            oversampling = self.window.parameters_dialog.oversampling
+            display_px_size = (
+                self.window.parameters_dialog.disp_px_size.value()
+            )
             iterations = self.window.parameters_dialog.iterations.value()
-            self.statusBar().showMessage("Preparing for averaging...")
+            self.window.statusBar().showMessage("Preparing for averaging...")
             self.thread = Worker(
                 self.locs,
                 self.info,
-                oversampling,
+                display_px_size,
                 iterations,
             )
             self.thread.progressMade.connect(self.on_progress)

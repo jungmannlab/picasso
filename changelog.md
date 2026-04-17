@@ -1,6 +1,6 @@
 # Changelog
 
-Last change: 16-APR-2026 CEST
+Last change: 17-APR-2026 CEST
 
 ## 0.10.0
 
@@ -17,6 +17,7 @@ Last change: 16-APR-2026 CEST
 - Render GUI: added support for reading .csv files from ThunderSTORM
 - Easy access to user settings via any Picasso module
 - SPINNA offers two new fitting methods for fast fitting instead of the brute force search, see [documentation](https://picassosr.readthedocs.io/en/latest/spinna.html#fitting)
+- Cricical functions in Picasso: Average moved to API (``picasso.average.py``)
 
 ### *Small improvements:*
 

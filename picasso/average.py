@@ -280,7 +280,8 @@ def prepare_locs_for_save(
 def average(
     locs: pd.DataFrame,
     info: list[dict],
-    oversampling: float,
+    *,
+    display_pixel_size: float = 5.0,
     iterations: int = 3,
     return_shifted_locs: bool = False,
     progress_callback: callable | Literal["console"] | None = None,
@@ -298,8 +299,8 @@ def average(
         Localizations with a ``group`` column.
     info : list[dict]
         Metadata for localizations.
-    oversampling : float
-        Number of display pixels per camera pixel.
+    display_pixel_size : float, optional
+        Display pixel size in nm used in averaging (default=5.0).
     iterations : int, optional
         Number of averaging iterations (default=3).
     return_shifted_locs : bool, optional
@@ -329,6 +330,10 @@ def average(
     t_max = r
 
     # Calculate angle step for rotation search
+    camera_pixelsize = lib.get_from_metadata(
+        info, "Pixelsize", raise_error=True
+    )
+    oversampling = camera_pixelsize / display_pixel_size
     a_step = np.arcsin(1 / (oversampling * r))
     angles = np.arange(0, 2 * np.pi, a_step)
 
