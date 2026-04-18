@@ -243,6 +243,24 @@ def save_raw(path: str, movie: lib.IntArray3D, info: dict) -> None:
     save_info(info_path, info)
 
 
+def load_calibration(path: str) -> dict:
+    """Load 3D astigmatic calibration data from a YAML file.
+
+    Parameters
+    ----------
+    path : str
+        The path to the calibration YAML file.
+
+    Returns
+    -------
+    calibration : dict
+        A dictionary containing the 3D astigmatic calibration data.
+    """
+    with open(path, "r") as calibration_file:
+        calibration = yaml.full_load(calibration_file)
+    return calibration
+
+
 def load_tif(path: str, progress=None) -> tuple[np.memmap, list[dict]]:
     """Load a TIFF movie file and its metadata.
 

@@ -554,7 +554,7 @@ class PromptInfoDialog(lib.Dialog):
         info["Height"] = dialog.movie_height.value()
         info["Width"] = dialog.movie_width.value()
         save = dialog.save.isChecked()
-        return (info, save, result == QtWidgets.QDialog.DialogCode.Accepted)
+        return info, save, result == QtWidgets.QDialog.DialogCode.Accepted
 
 
 class PromptChannelDialog(lib.Dialog):
@@ -595,7 +595,7 @@ class PromptChannelDialog(lib.Dialog):
         dialog.byte_order.addItems(channels)
         result = dialog.exec()
         channel = dialog.byte_order.currentText()
-        return (channel, result == QtWidgets.QDialog.DialogCode.Accepted)
+        return channel, result == QtWidgets.QDialog.DialogCode.Accepted
 
 
 class ParametersDialog(lib.Dialog):
@@ -667,9 +667,9 @@ class ParametersDialog(lib.Dialog):
     CALIB_URL = "https://picassosr.readthedocs.io/en/latest/localize.html#d-calibration"  # noqa: E501
     IDENT_URL = "https://picassosr.readthedocs.io/en/latest/localize.html#identification-and-fitting-of-single-molecule-spots"  # noqa: E501
 
-    def __init__(  # noqa: C901
+    def __init__(
         self, parent: QtWidgets.QMainWindow | None = None
-    ) -> None:  # noqa: E501 C901
+    ) -> None:  # noqa: C901
         super().__init__(parent)
         self.window = parent
         self.setWindowTitle("Parameters")
@@ -1258,9 +1258,8 @@ class ParametersDialog(lib.Dialog):
         """Load the 3D calibration from a YAML file."""
         if path:
             if os.path.exists(path):
-                with open(path, "r") as f:
-                    self.z_calibration = yaml.full_load(f)
-                    self.z_calibration_path = path
+                self.z_calibration = io.load_calibration(path)
+                self.z_calibration_path = path
             else:
                 self.update_z_calib(None)
                 self.z_calib_label.setText("-- calibration path not found --")
@@ -1951,85 +1950,20 @@ class Window(QtWidgets.QMainWindow):
 
     def load_picks(self, path: str) -> None:
         """Load picks from a YAML file from Picasso: Render."""
-        try:
-            with open(path, "r") as f:
-                regions = yaml.full_load(f)
-            self._picks = regions["Centers"]
-            maxframes = int(self.info[0]["Frames"])
-            # ask for drift correction
-            driftpath, exe = QtWidgets.QFileDialog.getOpenFileName(
-                self,
-                "Open drift file",
-                directory=os.path.dirname(path),
-                filter="*.txt",
-            )
-            if driftpath:
-                drift = np.genfromtxt(driftpath)
-            data = []
-            n_id = 0
-
-            for element in self._picks:
-                # drifted:
-                xloc = np.ones((maxframes,), dtype=float) * element[0]
-                yloc = np.ones((maxframes,), dtype=float) * element[1]
-                if driftpath:
-                    xloc += drift[:, 1]
-                    yloc += drift[:, 0]
-                else:
-                    pass
-
-                frames = np.arange(maxframes)
-                gradient = np.ones(maxframes) + 100
-                n_id_all = np.ones(maxframes) + n_id
-                temp = np.array([frames, xloc, yloc, gradient, n_id_all])
-                data.append([tuple(temp[:, j]) for j in range(temp.shape[1])])
-                n_id += 1
-
-            data = [item for sublist in data for item in sublist]
-            self.identifications = pd.DataFrame(
-                {
-                    "frame": [item[0] for item in data],
-                    "x": [item[1] for item in data],
-                    "y": [item[2] for item in data],
-                    "net_gradient": [item[3] for item in data],
-                    "n_id": [item[4] for item in data],
-                }
-            )
-            self.identifications.sort_values(
-                by="frame",
-                inplace=True,
-                kind="quicksort",
-            )
-
-            # remove all identifications that are oob
-            box = self.parameters["Box Size"]
-            m_size = self.movie.shape
-            r = int(box / 2)
-
-            self.identifications = self.identifications[
-                (self.identifications.y - r > 0)
-                & (self.identifications.x - r > 0)
-                & (self.identifications.x + r < m_size[0])
-                & (self.identifications.y + r < m_size[1])
-            ]
-
-            self.locs = None
-
-            self.loaded_picks = True
-
-            self.last_identification_info = {
-                "Box Size": self.parameters_dialog.box_spinbox.value(),
-                "Min. Net Gradient": self.parameters_dialog.mng_slider.value(),
-            }
-            self.ready_for_fit = True
-            self.draw_frame()
-            self.status_bar.showMessage(
-                f"Created a total of {len(self.identifications):,} "
-                "identifications."
-            )
-
-        except io.NoMetadataFileError:
-            return
+        # ask for drift correction
+        driftpath, exe = QtWidgets.QFileDialog.getOpenFileName(
+            self,
+            "Open drift file",
+            directory=os.path.dirname(path),
+            filter="*.txt",
+        )
+        # convert
+        self.identifications = localize.picks_to_identifications(
+            path,
+            n_frames=lib.get_from_metadata(self.info, "Frames"),
+            drift_path=driftpath,
+        )
+        self._clean_up_external_ids()
 
     def open_locs(self) -> None:
         """Open localizations for refitting data. Provide spot
@@ -2048,92 +1982,49 @@ class Window(QtWidgets.QMainWindow):
         """Load localizations from a HDF5 file. Provide spot
         identifications."""
         try:
-            locs, info = io.load_locs(path)
-
-            max_frames = int(self.info[0]["Frames"])
+            locs, _ = io.load_locs(path)
             n_frames, ok = QtWidgets.QInputDialog.getInteger(
                 self,
                 "Input Dialog",
                 "Enter number of frames around localization event:",
                 100,
             )
-
-            # driftpath, exe = QtWidgets.QFileDialog.getOpenFileName(self,
-            # 'Open drift file', filter='*.txt')
-            # if driftpath:
-            #    drift = np.genfromtxt(driftpath)
-            data = []
-            n_id = 0
-            for element in locs:
-                currframe = element["frame"]
-                if currframe > n_frames and currframe < (
-                    max_frames - n_frames
-                ):
-                    xloc = (
-                        np.ones((2 * n_frames + 1,), dtype=float)
-                        * element["x"]
-                    )
-                    yloc = (
-                        np.ones((2 * n_frames + 1,), dtype=float)
-                        * element["y"]
-                    )
-                    frames = np.arange(
-                        currframe - n_frames,
-                        currframe + n_frames + 1,
-                    )
-                    gradient = np.ones(2 * n_frames + 1) + 100
-                    n_id_all = np.ones(2 * n_frames + 1) + n_id
-                    temp = np.array([frames, xloc, yloc, gradient, n_id_all])
-                    data.append(
-                        [tuple(temp[:, j]) for j in range(temp.shape[1])]
-                    )
-                n_id += 1
-
-            data = [item for sublist in data for item in sublist]
-            self.identifications = pd.DataFrame(
-                {
-                    "frame": [item[0] for item in data],
-                    "x": [item[1] for item in data],
-                    "y": [item[2] for item in data],
-                    "net_gradient": [item[3] for item in data],
-                    "n_id": [item[4] for item in data],
-                }
-            )
-            self.identifications.sort_values(
-                by="frame",
-                inplace=True,
-                kind="quicksort",
-            )
-
-            # remove all identifications that are oob
-            box = self.parameters["Box Size"]
-            m_size = self.movie.shape
-            r = int(box / 2)
-
-            self.identifications = self.identifications[
-                (self.identifications.y - r > 0)
-                & (self.identifications.x - r > 0)
-                & (self.identifications.x + r < m_size[0])
-                & (self.identifications.y + r < m_size[1])
-            ]
-
-            self.locs = None
-
-            self.loaded_picks = True
-
-            self.last_identification_info = {
-                "Box Size": self.parameters_dialog.box_spinbox.value(),
-                "Min. Net Gradient": self.parameters_dialog.mng_slider.value(),
-            }
-            self.ready_for_fit = True
-            self.draw_frame()
-            self.status_bar.showMessage(
-                f"Created a total of {len(self.identifications):,} "
-                "identifications."
-            )
-
+            if not ok:
+                return
         except io.NoMetadataFileError:
             return
+
+        self.identifications = localize.locs_to_identifications(
+            locs, self.info, n_frames
+        )
+        self._clean_up_external_ids()
+
+    def _clean_up_external_ids(self) -> None:
+        if not self.identifications:
+            return
+        # remove all identifications that are oob
+        box = self.parameters["Box Size"]
+        m_size = self.movie.shape
+        r = int(box / 2)
+        self.identifications = self.identifications[
+            (self.identifications.y - r > 0)
+            & (self.identifications.x - r > 0)
+            & (self.identifications.x + r < m_size[0])
+            & (self.identifications.y + r < m_size[1])
+        ]
+        # assign gui attributes
+        self.locs = None
+        self.loaded_picks = True
+        self.last_identification_info = {
+            "Box Size": self.parameters_dialog.box_spinbox.value(),
+            "Min. Net Gradient": self.parameters_dialog.mng_slider.value(),
+        }
+        self.ready_for_fit = True
+        self.draw_frame()
+        self.status_bar.showMessage(
+            f"Created a total of {len(self.identifications):,} "
+            "identifications."
+        )
 
     def prompt_info(self) -> tuple[dict, bool] | None:
         """Prompt for movie information."""
@@ -2818,7 +2709,7 @@ class Window(QtWidgets.QMainWindow):
                 self.scene.itemsBoundingRect().size().toSize(),
                 QtGui.QImage.Format.Format_ARGB32,
             )
-            qimage.fill(QtGui.QColor("transparent"))  # TODO: crop image
+            qimage.fill(QtGui.QColor("transparent"))
             painter = QtGui.QPainter(qimage)
             self.view.render(painter)
             painter.end()

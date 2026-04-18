@@ -556,6 +556,183 @@ def identify(
     return ids
 
 
+def picks_to_identifications(
+    picks: list[tuple] | str,
+    n_frames: int | None = None,
+    drift: lib.FloatArray2D | str = "",
+) -> pd.DataFrame:
+    """Convert circular picks (from Picasso: Render) to identifications.
+    Only circular picks are allowed.
+
+    Parameters
+    ----------
+    picks : list of tuples or str
+        Either the list of picks positions (centers) or a path to the
+        saved pick regions .yaml file.
+    n_frames : int, optional
+        Number of frames in the acquisition movie. If None is given,
+        it will be extracted from the drift file (if provided).
+        Otherwise, an error is raised.
+    drift : lib.FloatArray2D or str, optional
+        Either an array of shape (n_frames, 2) or (n_frames, 3) or a
+        path to the drift correction .txt file. Used to adjust the
+        positions of identifications throughout acquisition. Only
+        x and y drift is used.
+
+    Returns
+    -------
+    identifications : pd.DataFrame
+        Data frame containing the identified spots. Contains fields
+        `frame`, `x`, `y`, and `net_gradient`. Note that `net_gradient`
+        is a dummy value.
+
+    Raises
+    ------
+    NotImplementedError
+        If the loaded picks are not circular.
+    ValueError
+        If `n_frames` and `drift` are not provided.
+    """
+    if isinstance(picks, str):
+        picks, shape, _ = io.load_picks(picks)
+        if shape != "Circle":
+            raise NotImplementedError("Only circular picks are supported.")
+    else:
+        assert isinstance(
+            picks, (list, tuple)
+        ), "picks must be a list or a tuple."
+        assert all([len(_) == 2 for _ in picks]), (
+            "Each element in picks must contain two numbers (x, y "
+            "coordinates)"
+        )
+    if isinstance(drift, str):
+        assert drift.endswith(".txt"), (
+            "If drift is provided as a path, it must be a string ending"
+            " with '.txt'."
+        )
+        drift = np.genfromtxt(drift) if drift else None
+    if isinstance(drift, np.ndarray):
+        assert drift.ndim == 2, "The provided drift must be a 2D numpy array"
+    if n_frames is None:
+        if drift is None:
+            raise ValueError(
+                "n_frames must be given if no drift file is provided"
+            )
+        else:
+            n_frames = len(drift)
+    else:
+        assert isinstance(n_frames, int), "n_frames must be an integer."
+        if drift is not None:
+            assert n_frames == len(drift), (
+                f"{n_frames} frames were provided but the drift suggests"
+                f" {len(drift)} frames."
+            )
+    return _picks_to_identifications(picks, n_frames, drift)
+
+
+def _picks_to_identifications(
+    picks: list[tuple],
+    n_frames: int,
+    drift: lib.FloatArray2D | None,
+) -> pd.DataFrame:
+    """Convert circular picks to identifications, can be drift-corrected.
+    Assumes correct inputs. See ``picks_to_identifications`` for more
+    details."""
+    data = []
+    n_id = 0
+    for pick_x, pick_y in picks:
+        # drifted:
+        xloc = np.ones((n_frames,), dtype=float) * pick_x
+        yloc = np.ones((n_frames,), dtype=float) * pick_y
+        if drift is not None:
+            xloc += drift[:, 1]
+            yloc += drift[:, 0]
+
+        frames = np.arange(n_frames)
+        gradient = np.ones(n_frames) + 100
+        n_id_all = np.ones(n_frames) + n_id
+        temp = np.array([frames, xloc, yloc, gradient, n_id_all])
+        data.append([tuple(temp[:, j]) for j in range(temp.shape[1])])
+        n_id += 1
+
+    data = [item for sublist in data for item in sublist]
+    identifications = pd.DataFrame(
+        {
+            "frame": [item[0] for item in data],
+            "x": [item[1] for item in data],
+            "y": [item[2] for item in data],
+            "net_gradient": [item[3] for item in data],
+            "n_id": [item[4] for item in data],
+        }
+    )
+    identifications.sort_values(
+        by="frame",
+        inplace=True,
+        kind="quicksort",
+    )
+    return identifications
+
+
+def locs_to_identifications(
+    locs: pd.DataFrame,
+    info: list[dict],
+    n_frames: int,
+) -> pd.DataFrame:
+    """Convert localizations to identifications.
+
+    Parameters
+    ----------
+    locs : pd.DataFrame
+        Localizations.
+    info : list of dicts
+        Movie file metadata.
+    n_frames : int
+        Number of frames around localizations that are to be used for
+        extracting identifications.
+
+    Returns
+    -------
+    identifications : pd.DataFrame
+        Data frame containing the identified spots. Contains fields
+        `frame`, `x`, `y`, and `net_gradient`. Note that `net_gradient`
+        is a dummy value.
+    """
+    assert isinstance(
+        locs, pd.DataFrame
+    ), "Localizations must be a pandas data frame"
+    assert (
+        isinstance(n_frames, int) and n_frames >= 0
+    ), "n_frames must be a non-negative integer"
+    max_frames = lib.get_from_metadata(info, "Frames", raise_error=True)
+    data = []
+    n_id = 0
+    for element in locs:
+        currframe = element["frame"]
+        if currframe > n_frames and currframe < (max_frames - n_frames):
+            xloc = np.ones((2 * n_frames + 1,), dtype=float) * element["x"]
+            yloc = np.ones((2 * n_frames + 1,), dtype=float) * element["y"]
+            frames = np.arange(
+                currframe - n_frames,
+                currframe + n_frames + 1,
+            )
+            gradient = np.ones(2 * n_frames + 1) + 100
+            n_id_all = np.ones(2 * n_frames + 1) + n_id
+            temp = np.array([frames, xloc, yloc, gradient, n_id_all])
+            data.append([tuple(temp[:, j]) for j in range(temp.shape[1])])
+        n_id += 1
+    data = [item for sublist in data for item in sublist]
+    identifications = pd.DataFrame(
+        {
+            "frame": [item[0] for item in data],
+            "x": [item[1] for item in data],
+            "y": [item[2] for item in data],
+            "net_gradient": [item[3] for item in data],
+            "n_id": [item[4] for item in data],
+        }
+    )
+    return identifications
+
+
 @numba.jit(nopython=True, cache=False)
 def _cut_spots_numba(
     movie: lib.IntArray3D,
