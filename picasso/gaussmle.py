@@ -15,11 +15,12 @@ import math
 import multiprocessing
 import threading
 from concurrent import futures
-from typing import Literal
+from typing import Callable, Literal
 
 import numba
 import numpy as np
 import pandas as pd
+from tqdm import tqdm
 
 from picasso import lib
 
@@ -396,6 +397,9 @@ def gaussmle(
     eps: float,
     max_it: int,
     method: Literal["sigma", "sigmaxy"] = "sigmaxy",
+    progress_callback: (
+        Callable[[int], None] | Literal["console"] | None
+    ) = None,
 ) -> tuple[
     lib.FloatArray2D, lib.FloatArray2D, lib.FloatArray1D, lib.IntArray1D
 ]:
@@ -414,6 +418,10 @@ def gaussmle(
         The maximum number of iterations for the fitting algorithm.
     method : Literal["sigma", "sigmaxy"]
         The method to use for fitting the Gaussian.
+    progress_callback : callable or None
+        If a callable provided, it must accept one integer input (number
+        of localized spots). If "console", tqdm is used to display
+        progress. If None, progress is not tracked.
 
     Returns
     -------
@@ -441,8 +449,15 @@ def gaussmle(
         func = _mlefit_sigmaxy
     else:
         raise ValueError("Method not available.")
-    for i in range(N):
+    use_tqdm = progress_callback == "console"
+    if use_tqdm:
+        iter_range = tqdm(N, desc="Fitting...", unit="spot")
+    else:
+        iter_range = range(N)
+    for i in iter_range:
         func(spots, i, thetas, CRLBs, likelihoods, iterations, eps, max_it)
+        if callable(progress_callback):
+            progress_callback(i)
     return thetas, CRLBs, likelihoods, iterations
 
 

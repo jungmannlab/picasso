@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import multiprocessing
 from concurrent import futures
+from typing import Callable, Literal
 
 import numba
 import numpy as np
@@ -227,7 +228,12 @@ def fit_spot(spot: lib.FloatArray2D) -> lib.FloatArray1D:
     return result_
 
 
-def fit_spots(spots: lib.FloatArray3D) -> lib.FloatArray2D:
+def fit_spots(
+    spots: lib.FloatArray3D,
+    progress_callback: (
+        Callable[[int], None] | Literal["console"] | None
+    ) = None,
+) -> lib.FloatArray2D:
     """Fit multiple spots using least squares optimization. Each spot is
     a 2D array representing the pixel values of the spot image. The
     function returns a 2D array with the optimized parameters for each
@@ -241,6 +247,10 @@ def fit_spots(spots: lib.FloatArray3D) -> lib.FloatArray2D:
         number of spots and size is the length of one side of the square
         spot image. Each slice along the first axis represents a single
         spot image.
+    progress_callback : callable or None
+        If a callable provided, it must accept one integer input (number
+        of localized spots). If "console", tqdm is used to display
+        progress. If None, progress is not tracked.
 
     Returns
     -------
@@ -250,8 +260,16 @@ def fit_spots(spots: lib.FloatArray3D) -> lib.FloatArray2D:
     """
     theta = np.empty((len(spots), 6), dtype=np.float32)
     theta.fill(np.nan)
-    for i, spot in enumerate(spots):
+    use_tqdm = progress_callback == "console"
+    if use_tqdm:
+        iter_range = tqdm(len(spots), desc="Fitting...", unit="spot")
+    else:
+        iter_range = range(len(spots))
+    for i in iter_range:
+        spot = spots[i]
         theta[i] = fit_spot(spot)
+        if callable(progress_callback):
+            progress_callback(i)
     return theta
 
 

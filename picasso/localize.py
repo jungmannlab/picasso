@@ -14,7 +14,8 @@ from __future__ import annotations
 import os
 import multiprocessing
 import threading
-from concurrent.futures import ThreadPoolExecutor
+import time
+from concurrent.futures import ThreadPoolExecutor, Future
 from itertools import chain
 from typing import Literal
 from typing import Callable
@@ -25,9 +26,10 @@ import numpy as np
 import dask.array as da
 import pandas as pd
 import matplotlib.pyplot as plt
+from tqdm import tqdm
 from sqlalchemy import create_engine
 
-from . import io, gaussmle, postprocess, lib
+from . import io, gausslq, gaussmle, avgroi, postprocess, lib
 
 plt.style.use("ggplot")
 
@@ -1144,6 +1146,267 @@ def locs_from_fits(
     return locs
 
 
+def fit2D(
+    movie: lib.IntArray3D,
+    info: list[dict],
+    camera_info: dict,
+    identifications: pd.DataFrame,
+    box: int,
+    fitting_method: Literal[
+        "gausslq", "gausslq-gpu", "gaussmle", "avg"
+    ] = "gausslq",
+    multiprocess: bool = True,
+    progress_callback: (
+        Callable[[int], None] | Literal["console"] | None
+    ) = None,
+    eps: float = 0.001,
+    max_it: int = 100,
+    mle_method: Literal["sigma", "sigmaxy"] = "sigmaxy",
+) -> tuple[pd.DataFrame, list[dict]]:
+    """Fit 2D localizations to a movie, given positions of the detected
+    spots (identifications).
+
+    Parameters
+    ----------
+    movie : lib.IntArray3D
+        The input movie data as a 3D numpy array.
+    info : list of dicts
+        Movie metadata.
+    camera_info : dict
+        A dictionary containing camera information such as
+        `Baseline`, `Sensitivity`, and `Gain`.
+    identifications : pd.DataFrame
+        Data frame containing the identified spots. Contains fields
+        `frame`, `x`, `y`, and `net_gradient`.
+    box : int
+        Size of the box to cut out around each spot. Should be an odd
+        integer.
+    fitting_method : {"gausslq", "gausslq-gpu", "gaussmle" or "avg"}, \
+            optional
+        Which 2D fitting algorithm to use. "gausslq" for least-squares
+        fitting of a 2D Gaussian. "gausslq-gpu" for its GPU
+        implemntation (if available). "gaussmle" for MLE 2D Gaussian
+        fitting. "avg" for taking the average of each spot.
+    multiprocess: bool, optional
+        Whether or not to use multiprocessing. Ignored for GPU fitting.
+        Default is True.
+    progress_callback : callable or None
+        If a callable provided, it must accept one integer input (number
+        of localized spots). If "console", tqdm is used to display
+        progress. If None, progress is not tracked.
+    eps : float, optional
+        The convergence criterion for MLE fitting. Ignored for other
+        methods. Default is 0.001.
+    max_it : int, optional
+        The maximum number of iterations for MLE fitting. Ignored for
+        other methods. Default is 100.
+    mle_method : Literal["sigma", "sigmaxy"], optional
+        The method used for MLE fitting (impose same sigma in x and y or
+        not, respectively). Default is "sigmaxy".
+
+    Returns
+    -------
+    locs : pd.DataFrame
+        Data frame containing the localized spots. The fields include
+        `frame`, `x`, `y`, `photons`, `sx`, `sy`, `bg`, `lpx`, `lpy`,
+        `net_gradient`, `likelihood`, and `iterations`.
+    new_info : list of dicts
+        Updated metadata.
+    """
+    # TODO: add assertions!
+    N = len(identifications)
+    spots = get_spots(movie, identifications, box, camera_info)
+    em = camera_info["Gain"] > 1
+    if fitting_method == "gausslq":
+        locs = _fit2d_gausslq(
+            spots,
+            identifications,
+            box,
+            em,
+            multiprocess,
+            progress_callback,
+        )
+    elif fitting_method == "gausslq-gpu":
+        if callable(progress_callback):
+            progress_callback(1)
+        locs = _fit2d_gausslq_gpu(
+            spots,
+            identifications,
+            box,
+            em,
+        )
+    elif fitting_method == "gaussmle":
+        locs = _fit2d_gaussmle(
+            spots,
+            identifications,
+            box,
+            em,
+            eps,
+            max_it,
+            mle_method,
+            multiprocess,
+            progress_callback,
+        )
+    elif fitting_method == "avg":
+        locs = _fit2d_avg(
+            spots,
+            identifications,
+            box,
+            em,
+            multiprocess,
+            progress_callback,
+        )
+    new_info = info + [
+        {
+            # TODO: add fitting and camera info
+        }
+    ]
+    return locs, info
+
+
+def _fit2d_gausslq(
+    spots: lib.FloatArray3D,
+    identifications: pd.DataFrame,
+    box: int,
+    em: bool,
+    multiprocess: bool = True,
+    progress_callback: (
+        Callable[[int], None] | Literal["console"] | None
+    ) = None,
+) -> pd.DataFrame:
+    """Fit 2D Gaussians using least-squares fitting (CPU). See ``fit_2D``
+    for more details."""
+    N = len(identifications)
+    if multiprocess:
+        fs = gausslq.fit_spots_parallel(spots, asynch=True)
+        theta = _process_fitting_futures(fs, N, progress_callback)
+    else:
+        theta = gausslq.fit_spots(spots, progress_callback)
+    locs = gausslq.locs_from_fits(
+        identifications,
+        theta,
+        box,
+        em,
+    )
+    return locs
+
+
+def _fit2d_gausslq_gpu(
+    spots: lib.FloatArray3D,
+    identifications: pd.DataFrame,
+    box: int,
+    em: bool,
+) -> pd.DataFrame:
+    """Fit 2D Gaussians using least-squares fitting and GPU. See
+    ``fit_2D`` for more details."""
+    theta = gausslq.fit_spots_gpufit(spots)
+    locs = gausslq.locs_from_fits(identifications, theta, box, em)
+    return locs
+
+
+def _fit2d_gaussmle(
+    spots,
+    identifications: pd.DataFrame,
+    box: int,
+    eps: float = 0.001,
+    max_it: int = 100,
+    mle_method: Literal["sigma", "sigmaxy"] = "sigmaxy",
+    multiprocess: bool = True,
+    progress_callback: (
+        Callable[[int], None] | Literal["console"] | None
+    ) = None,
+) -> pd.DataFrame:
+    """Fit 2D Gaussians using MLE fitting. See ``fit_2D`` for more
+    details."""
+    N = len(identifications)
+    use_tqdm = progress_callback == "console"
+    if use_tqdm:
+        iter_range = tqdm(N, desc="Fitting...")
+    if multiprocess:
+        curr, thetas, CRLBs, llhoods, iterations = gaussmle.gaussmle_async(
+            spots, eps, max_it, method=mle_method
+        )
+        while curr[0] < N:
+            if self.isInterruptionRequested():
+                self.aborted.emit()
+                return
+            if use_tqdm:
+                iter_range.update(1)
+            elif callable(progress_callback):
+                progress_callback(curr[0])
+            time.sleep(0.2)
+    else:
+        thetas, CRLBs, llhoods, iterations = gaussmle.gaussmle(
+            spots, eps, max_it, mle_method, progress_callback
+        )
+    locs = gaussmle.locs_from_fits(
+        identifications,
+        thetas,
+        CRLBs,
+        llhoods,
+        iterations,
+        box,
+    )
+    return locs
+
+
+def _fit2d_avg(
+    spots: lib.FloatArray3D,
+    identifications: pd.DataFrame,
+    box: int,
+    em: bool,
+    multiprocess: bool = True,
+    progress_callback: (
+        Callable[[int], None] | Literal["console"] | None
+    ) = None,
+) -> pd.DataFrame:
+    """Take localizations at the average value of the spots, see
+    ``fit_2D`` for more details."""
+    N = len(identifications)
+    if multiprocess:
+        fs = avgroi.fit_spots_parallel(spots, asynch=True)
+        theta = _process_fitting_futures(fs, N, progress_callback)
+    else:
+        theta = avgroi.fit_spots(spots, progress_callback)
+    locs = avgroi.locs_from_fits(
+        identifications,
+        theta,
+        box,
+        em,
+    )
+    return locs
+
+
+def _process_fitting_futures(
+    fs: list[Future],
+    N: int,
+    progress_callback: (
+        Callable[[int], None] | Literal["console"] | None
+    ) = None,
+) -> lib.FloatArray2D:
+    """Convenience function for processing progress of fitting using
+    multiprocessing. See ``_fit2d_gausslq``, _fit2d_gaussmle,
+    ``_fit2d_avg``"""
+    n_tasks = len(fs)
+    use_tqdm = progress_callback == "console"
+    if use_tqdm:
+        iter_range = tqdm(n_tasks, desc="Fitting...")
+    while lib.n_futures_done(fs) < n_tasks:  # TODO: how to process abortion
+        if self.isInterruptionRequested():
+            for f in fs:
+                f.cancel()
+            self.aborted.emit()
+            return
+        n_finished = round(N * lib.n_futures_done(fs) / n_tasks)
+        if use_tqdm:
+            iter_range.update(n_finished - iter_range.n)
+        elif callable(progress_callback):
+            progress_callback(n_finished)
+        time.sleep(0.2)
+    theta = avgroi.fits_from_futures(fs)
+    return theta
+
+
 def localize(
     movie: lib.IntArray3D,
     camera_info: dict,
@@ -1183,6 +1446,7 @@ def localize(
         parameters["Box Size"],
         threaded=threaded,
     )
+    # TODO: allow different fitting methods and async processing
     locs = fit(movie, camera_info, identifications, parameters["Box Size"])
     return locs
 

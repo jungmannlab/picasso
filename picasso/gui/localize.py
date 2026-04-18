@@ -2855,31 +2855,39 @@ class FitWorker(QtCore.QThread):
     ) -> None:
         super().__init__()
         self.movie = movie
+        self.info = (info,)
         self.camera_info = camera_info
         self.identifications = identifications
         self.box = box
-        self.method = method
         self.eps = eps
         self.max_it = max_it
         self.fit_z = fit_z
         self.calibrate_z = calibrate_z
-        self.use_gpufit = use_gpufit
+        self.N = len(identifications)
+        method = {"lq": "gausslq", "mle": "gaussmle", "avg": "avg"}[method]
+        if use_gpufit and method == "gausslq":
+            method = "gausslq-gpu"
+        self.method = method
+
+    def on_progress(self, n_done: int) -> None:
+        self.progressMade.emit(n_done, self.N)
 
     def run(self) -> None:
-        N = len(self.identifications)
         t0 = time.time()
-        spots = localize.get_spots(
-            self.movie, self.identifications, self.box, self.camera_info
+        locs, info = localize.fit2D(
+            movie=self.movie,
+            info=self.info,
+            camera_info=self.camera_info,
+            identifications=self.identifications,
+            box=self.box,
+            fitting_method=self.method,
+            multiprocess=True,
+            progress_callback=self.on_progress,
+            eps=self.eps,
+            max_it=self.max_it,
+            method="sigmaxy",
         )
-        if self.method == "lq":
-            locs = self.run_lq(spots, N)
-        elif self.method == "mle":
-            locs = self.run_mle(spots, N)
-        elif self.method == "avg":
-            locs = self.run_avg(spots, N)
-        else:
-            raise ValueError(f"Unknown fitting method: {self.method}")
-        self.progressMade.emit(N + 1, N)
+        self.progressMade.emit(self.N + 1, self.N)
         dt = time.time() - t0
         self.finished.emit(locs, dt, self.fit_z, self.calibrate_z)
 

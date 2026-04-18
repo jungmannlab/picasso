@@ -11,6 +11,7 @@ interest (ROI).
 
 import multiprocessing
 from concurrent import futures
+from typing import Callable, Literal
 
 import numba
 import numpy as np
@@ -40,12 +41,25 @@ def fit_spot(spot: lib.FloatArray2D) -> list[float]:
     return result
 
 
-def fit_spots(spots: lib.FloatArray3D) -> lib.FloatArray2D:
+def fit_spots(
+    spots: lib.FloatArray3D,
+    progress_callback: (
+        Callable[[int], None] | Literal["console"] | None
+    ) = None,
+) -> lib.FloatArray2D:
     """Fit spots and return fit parameters."""
     theta = np.empty((len(spots), 6), dtype=np.float32)
     theta.fill(np.nan)
-    for i, spot in enumerate(spots):
+    use_tqdm = progress_callback == "console"
+    if use_tqdm:
+        iter_range = tqdm(len(spots), desc="Fitting...", unit="spot")
+    else:
+        iter_range = range(len(spots))
+    for i in iter_range:
+        spot = spots[i]
         theta[i] = fit_spot(spot)
+        if callable(progress_callback):
+            progress_callback(i)
     return theta
 
 
