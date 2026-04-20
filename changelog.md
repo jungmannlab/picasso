@@ -17,8 +17,8 @@ Last change: 20-APR-2026 CEST
 - Render GUI: added support for reading .csv files from ThunderSTORM
 - Easy access to user settings via any Picasso module
 - SPINNA offers two new fitting methods for fast fitting instead of the brute force search, see [documentation](https://picassosr.readthedocs.io/en/latest/spinna.html#fitting)
-- All the functions not related to GUI were moved to corresponding API scripts such that using Picasso as a Python package allows for easy analysis analogous to what GUI provides. For example, ``picasso.render.py`` does not only provide the function to generate a grayscale image of localizations only (like before) but can also be used to paint the same images as they're rendered (for example, with picks and scale bar)
-- New functions added in the API to simplify the more complicated analyses, for example, ``picasso.localize.fit_2D``
+- All the functions not related to GUI were moved to corresponding API scripts such that using Picasso as a Python package allows for easy analysis analogous to what GUI provides. For example, ``picasso.render.py`` does not only provide the function to generate a grayscale image of localizations only (like before) but can also be used to paint the same images as they are rendered (for example, with picks and scale bar)
+- New functions added in the API to simplify the more complicated analyses, for example, ``picasso.localize.fit2D``
 - Faster ind. loc. precision rendering in 3D
 
 ### *Small improvements:*
@@ -75,6 +75,7 @@ Last change: 20-APR-2026 CEST
 - `picasso.aim`: `intersect1d`, `count_intersections`, `run_intersections`, `run_intersections_multithread`, `get_fft_peak`, `get_fft_peak_z`, `point_intersect_2d` and `point_intersect_3d` (will become private functions in v0.11.0)
 - `picasso.masking.mask_locs` uses metadata rather than now deprecated `width` and `height` parameters
 - `picasso.spinna.MaskGenerator`: `run_checks` parameter (will be removed in v0.11.0)
+- `picasso.localize.identify` and `picasso.localize.localize` will return metadata by default in v0.11
 
 ## 0.9.10
 
