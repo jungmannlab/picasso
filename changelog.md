@@ -1,6 +1,6 @@
 # Changelog
 
-Last change: 17-APR-2026 CEST
+Last change: 20-APR-2026 CEST
 
 ## 0.10.0
 
@@ -17,7 +17,8 @@ Last change: 17-APR-2026 CEST
 - Render GUI: added support for reading .csv files from ThunderSTORM
 - Easy access to user settings via any Picasso module
 - SPINNA offers two new fitting methods for fast fitting instead of the brute force search, see [documentation](https://picassosr.readthedocs.io/en/latest/spinna.html#fitting)
-- Cricical functions in Picasso: Average moved to API (``picasso.average.py``)
+- All the functions not related to GUI were moved to corresponding API scripts such that using Picasso as a Python package allows for easy analysis analogous to what GUI provides. For example, ``picasso.render.py`` does not only provide the function to generate a grayscale image of localizations only (like before) but can also be used to paint the same images as they're rendered (for example, with picks and scale bar)
+- New functions added in the API to simplify the more complicated analyses, for example, ``picasso.localize.fit_2D``
 - Faster ind. loc. precision rendering in 3D
 
 ### *Small improvements:*

@@ -2378,8 +2378,8 @@ class Window(QtWidgets.QMainWindow):
             self.status_bar.showMessage("Preparing fit...")
             method = self.parameters_dialog.fit_method.currentText()
             method = {
-                "LQ, Gaussian": "lq",
-                "MLE, integrated Gaussian": "mle",
+                "LQ, Gaussian": "gausslq",
+                "MLE, integrated Gaussian": "gaussmle",
                 "Average of ROI": "avg",
             }[method]
             eps = self.parameters_dialog.convergence_criterion.value()
@@ -2388,6 +2388,7 @@ class Window(QtWidgets.QMainWindow):
             use_gpufit = self.parameters_dialog.gpufit_checkbox.isChecked()
             self.fit_worker = FitWorker(
                 self.movie,
+                self.info,
                 self.camera_info,
                 self.identifications,
                 self.parameters["Box Size"],
@@ -2413,7 +2414,7 @@ class Window(QtWidgets.QMainWindow):
         fitting_method = {
             "LQ, Gaussian": "gausslq",
             "MLE, integrated Gaussian": "gaussmle",
-            "Average of ROI": "gausslq",
+            "Average of ROI": "gausslq",  # fallback for compatibility
         }[self.parameters_dialog.fit_method.currentText()]
         self.fit_z_worker = FitZWorker(
             self.locs,
@@ -2843,10 +2844,11 @@ class FitWorker(QtCore.QThread):
     def __init__(
         self,
         movie: np.memmap,
+        movie_info: list[dict],
         camera_info: dict,
         identifications: pd.DataFrame,
         box: int,
-        method: Literal["lq", "mle", "avg"],
+        method: Literal["gausslq", "gaussmle", "avg"],
         eps: float,
         max_it: int,
         fit_z: bool,
@@ -2855,7 +2857,7 @@ class FitWorker(QtCore.QThread):
     ) -> None:
         super().__init__()
         self.movie = movie
-        self.info = (info,)
+        self.movie_info = movie_info
         self.camera_info = camera_info
         self.identifications = identifications
         self.box = box
@@ -2864,7 +2866,6 @@ class FitWorker(QtCore.QThread):
         self.fit_z = fit_z
         self.calibrate_z = calibrate_z
         self.N = len(identifications)
-        method = {"lq": "gausslq", "mle": "gaussmle", "avg": "avg"}[method]
         if use_gpufit and method == "gausslq":
             method = "gausslq-gpu"
         self.method = method
@@ -2874,98 +2875,28 @@ class FitWorker(QtCore.QThread):
 
     def run(self) -> None:
         t0 = time.time()
+        # we ignore info since we will merge the metadata from identification
+        # as well when saving localizations
         locs, info = localize.fit2D(
             movie=self.movie,
-            info=self.info,
+            info=self.movie_info,
             camera_info=self.camera_info,
             identifications=self.identifications,
             box=self.box,
             fitting_method=self.method,
-            multiprocess=True,
-            progress_callback=self.on_progress,
             eps=self.eps,
             max_it=self.max_it,
             method="sigmaxy",
+            multiprocess=True,
+            progress_callback=self.on_progress,
+            abort_callback=self.isInterruptionRequested,
         )
+        if locs is None:  # handle aborted process
+            self.aborted.emit()
+            return
         self.progressMade.emit(self.N + 1, self.N)
         dt = time.time() - t0
         self.finished.emit(locs, dt, self.fit_z, self.calibrate_z)
-
-    def run_lq(self, spots: np.ndarray, N: int) -> pd.DataFrame:
-        if self.use_gpufit:
-            self.progressMade.emit(1, 1)
-            theta = gausslq.fit_spots_gpufit(spots)
-            em = self.camera_info["Gain"] > 1
-            locs = gausslq.locs_from_fits_gpufit(
-                self.identifications, theta, self.box, em
-            )
-        else:
-            fs = gausslq.fit_spots_parallel(spots, asynch=True)
-            n_tasks = len(fs)
-            while lib.n_futures_done(fs) < n_tasks:
-                if self.isInterruptionRequested():
-                    for f in fs:
-                        f.cancel()
-                    self.aborted.emit()
-                    return
-                self.progressMade.emit(
-                    round(N * lib.n_futures_done(fs) / n_tasks), N
-                )
-                time.sleep(0.2)
-            theta = gausslq.fits_from_futures(fs)
-            em = self.camera_info["Gain"] > 1
-            locs = gausslq.locs_from_fits(
-                self.identifications,
-                theta,
-                self.box,
-                em,
-            )
-        return locs
-
-    def run_mle(self, spots: np.ndarray, N: int) -> pd.DataFrame:
-        curr, thetas, CRLBs, llhoods, iterations = gaussmle.gaussmle_async(
-            spots, self.eps, self.max_it, method="sigmaxy"
-        )
-        while curr[0] < N:
-            if self.isInterruptionRequested():
-                self.aborted.emit()
-                return
-            self.progressMade.emit(curr[0], N)
-            time.sleep(0.2)
-        locs = gaussmle.locs_from_fits(
-            self.identifications,
-            thetas,
-            CRLBs,
-            llhoods,
-            iterations,
-            self.box,
-        )
-        return locs
-
-    def run_avg(self, spots: np.ndarray, N: int) -> pd.DataFrame:
-        # just get out the average intensity
-        fs = avgroi.fit_spots_parallel(spots, asynch=True)
-        n_tasks = len(fs)
-        while lib.n_futures_done(fs) < n_tasks:
-            if self.isInterruptionRequested():
-                for f in fs:
-                    f.cancel()
-                self.aborted.emit()
-                return
-            self.progressMade.emit(
-                round(N * lib.n_futures_done(fs) / n_tasks),
-                N,
-            )
-            time.sleep(0.2)
-        theta = avgroi.fits_from_futures(fs)
-        em = self.camera_info["Gain"] > 1
-        locs = avgroi.locs_from_fits(
-            self.identifications,
-            theta,
-            self.box,
-            em,
-        )
-        return locs
 
 
 class FitZWorker(QtCore.QThread):
