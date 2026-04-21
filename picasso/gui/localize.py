@@ -24,11 +24,8 @@ import numpy as np
 import pandas as pd
 from .. import (
     aim,
-    avgroi,
     CONFIG,
     imageprocess,
-    gausslq,
-    gaussmle,
     io,
     localize,
     lib,
@@ -2419,7 +2416,7 @@ class Window(QtWidgets.QMainWindow):
         }[self.parameters_dialog.fit_method.currentText()]
         self.fit_z_worker = FitZWorker(
             self.locs,
-            self.info,
+            self.info + [self.camera_info],  # ensure pixel size in info
             self.parameters_dialog.z_calibration,
             self.parameters_dialog.magnification_factor.value(),
             self.parameters_dialog.pixelsize.value(),
@@ -2923,32 +2920,24 @@ class FitZWorker(QtCore.QThread):
         self.pixelsize = pixelsize
         self.fitting_method = fitting_method
 
+    def on_progress(self, n_done: int) -> None:
+        self.progressMade.emit(n_done, len(self.locs))
+
     def run(self) -> None:
         t0 = time.time()
-        N = len(self.locs)
-        fs = zfit.fit_z_parallel(
-            self.locs,
-            self.info,
-            self.calibration,
-            self.magnification_factor,
-            self.pixelsize,
+        # we ignore info since we will merge the metadata from 2D
+        # localization as well when saving localizations
+        locs, info = zfit.zfit(
+            locs=self.locs,
+            info=self.info,
+            calibration=self.calibration,
+            magnification_factor=self.magnification_factor,
+            pixelsize=self.pixelsize,
             fitting_method=self.fitting_method,
-            filter=0,
-            asynch=True,
+            multiprocess=True,
+            progress_callback=self.on_progress,
+            abort_callback=self.isInterruptionRequested,
         )
-        n_tasks = len(fs)
-        while lib.n_futures_done(fs) < n_tasks:
-            if self.isInterruptionRequested():
-                for f in fs:
-                    f.cancel()
-                self.aborted.emit()
-                return
-            self.progressMade.emit(
-                round(N * lib.n_futures_done(fs) / n_tasks),
-                N,
-            )
-            time.sleep(0.2)
-        locs = zfit.locs_from_futures(fs, filter=0)
         dt = time.time() - t0
         self.finished.emit(locs, dt)
 

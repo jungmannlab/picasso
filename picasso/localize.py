@@ -1614,6 +1614,21 @@ def localize(
         A list of dictionaries containing metadata about the movie and
         the fitting process. Only returned if `return_info` is True.
     """
+    if return_info is None:
+        return_info = False
+        # TODO: change the message in v0.11.0
+        lib.deprecation_warning(
+            "Deprecation warning: In Picasso v0.11.0, "
+            "picasso.localize.localize() will return both the "
+            "localizations and a metadata dictionary by default.\n"
+            "Before v0.12.0, when using picasso.localize.localize(), "
+            "please add the argument 'return_info' explicitly as True "
+            "or False.\n"
+            "In version 0.12, this argument will also be removed such "
+            "that picasso.localize.localize() will always return both "
+            "the localizations and the metadata dictionary."
+        )
+
     # Use empty list as default for movie_info
     if movie_info is None:
         movie_info = []
@@ -1629,7 +1644,6 @@ def localize(
         progress_callback=identification_progress_callback,
         return_info=True,
     )
-    # TODO: in v0.11.0, return identifications and info in identify
 
     # Fit spots
     locs, fit_info = fit2D(
