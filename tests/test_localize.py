@@ -67,7 +67,7 @@ def info(movie_data):
 @pytest.fixture
 def identifications(movie):
     """Provide identifications to test functions."""
-    ids = localize.identify(movie, MIN_NG, BOX)
+    ids = localize.identify(movie, MIN_NG, BOX)  # TODO: new tests!
     return ids
 
 
@@ -106,7 +106,7 @@ def test_identification_with_roi(movie, identifications):
         DataFrame containing identified spots with columns:
         'frame', 'x', 'y', 'net_gradient'
     """
-    # run identification with the defined parameters
+    # run identification with the defined parameters # TODO: new tests
     identifications_roi = localize.identify(movie, MIN_NG, BOX, roi=ROI)
 
     # basic validation tests
@@ -132,7 +132,7 @@ def test_identification_with_roi(movie, identifications):
 def test_identification_threaded_vs_non_threaded(movie, identifications):
     """Test that threaded and non-threaded identification give
     consistent results."""
-    # get results from both modes
+    # get results from both modes  # TODO: new tests
     ids_threaded = localize.identify(movie, MIN_NG, BOX, threaded=True)
 
     # compare results (should be identical or very similar)

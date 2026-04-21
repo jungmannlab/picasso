@@ -2588,18 +2588,13 @@ class Window(QtWidgets.QMainWindow):
                 f"Found {len(fiducial_picks)} fiducials. Applying drift "
                 "correction..."
             )
-            picked_fiducials = postprocess.picked_locs(
-                self.locs,
-                self.extra_info,
-                picks=fiducial_picks,
-                pick_shape="Circle",
-                pick_size=box / 2,
-                add_group=False,
-            )
-
-            # find drift from each picked fiducial
-            fiducials_drift = postprocess.undrift_from_picked(
-                picked_fiducials, self.extra_info
+            self.locs, self.extra_info, fiducials_drift = (
+                postprocess.undrift_from_fiducials(
+                    locs=self.locs,
+                    info=self.extra_info,
+                    picks=fiducial_picks,
+                    pick_size=box,
+                )
             )
             if drift is not None:
                 drift["x"] += fiducials_drift["x"]
@@ -2608,14 +2603,6 @@ class Window(QtWidgets.QMainWindow):
                     drift["z"] += fiducials_drift["z"]
             else:
                 drift = fiducials_drift
-
-            # apply drift
-            frames = self.locs["frame"]
-            self.locs["x"] -= fiducials_drift["x"].iloc[frames].to_numpy()
-            self.locs["y"] -= fiducials_drift["y"].iloc[frames].to_numpy()
-            # If z coordinate exists, also apply drift there
-            if "z" in self.locs.columns:
-                self.locs["z"] -= fiducials_drift["z"].iloc[frames].to_numpy()
             self.status_bar.showMessage(
                 "Fiducial-based drift correction finished."
             )
@@ -2798,26 +2785,24 @@ class IdentificationWorker(QtCore.QThread):
         self.fit_afterwards = fit_afterwards
         self.calibrate_z = calibrate_z
 
+    def on_progress(self, frame_number: int) -> None:
+        self.progressMade.emit(frame_number, self.parameters)
+
     def run(self) -> None:
-        N = len(self.movie)
         t0 = time.time()
-        curr, futures = localize.identify_async(
-            self.movie,
-            self.parameters["Min. Net Gradient"],
-            self.parameters["Box Size"],
+        # we ignore info since we will merge the metadata from identification
+        # as well when saving localizations
+        identifications, info = localize.identify(
+            movie=self.movie,
+            minimum_ng=self.parameters["Min. Net Gradient"],
+            box=self.parameters["Box Size"],
             roi=self.roi,
             frame_bounds=self.frame_range,
+            threaded=True,
+            progress_callback=self.on_progress,
+            abort_callback=self.isInterruptionRequested,
+            return_info=True,
         )
-        while curr[0] < N:
-            if self.isInterruptionRequested():
-                for f in futures:
-                    f.cancel()
-                self.aborted.emit()
-                return
-            self.progressMade.emit(curr[0], self.parameters)
-            time.sleep(0.2)
-        self.progressMade.emit(curr[0], self.parameters)
-        identifications = localize.identifications_from_futures(futures)
         elapsed_time = time.time() - t0
         self.finished.emit(
             self.parameters,

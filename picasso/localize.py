@@ -510,7 +510,8 @@ def identify(
     progress_callback: (
         Callable[[list[int]], None] | Literal["console"] | None
     ) = None,
-    return_info: bool = None,  # TODO: change the deprecation warning in 0.12.0
+    abort_callback: Callable[[], bool] | None = None,
+    return_info: bool = None,  # TODO: change the deprecation warning in 0.11.0
 ) -> pd.DataFrame | tuple[pd.DataFrame, dict]:
     """Identify local maxima in a movie and calculate the net
     gradient at those maxima. This function can run in a threaded or
@@ -543,6 +544,11 @@ def identify(
         A callback function to report the progress of the identification
         process. If "console", progress will be printed to the console.
         If None, no progress will be reported. Default is None.
+    abort_callback : callable, optional
+        A callable for aborting multiprocessing in the GUI. If a
+        callable provided, it must accept no input and return a boolean
+        indicating whether the fitting should be aborted. Default is
+        None.
     return_info : bool, optional
         Whether to return additional information about the
         identification process. Default is None, which is treated as
@@ -562,7 +568,7 @@ def identify(
         return_info = False
         # TODO: change the message in v0.11.0
         lib.deprecation_warning(
-            "Deprecation warning: In Picasso v0.11.0, "
+            "Warning: In Picasso v0.11.0, "
             "picasso.localize.identify() will return both the "
             "identifications and a metadata dictionary by default.\n"
             "Before v0.12.0, when using picasso.localize.identify(), "
@@ -583,6 +589,12 @@ def identify(
             movie, minimum_ng, box, roi=roi, frame_bounds=frame_bounds
         )
         while current[0] < N:
+            # abort if requested
+            if abort_callback is not None and abort_callback():
+                for f in futures:
+                    f.cancel()
+                return
+
             if use_tqdm:
                 iter_range.update(1)
             elif callable(progress_callback):
@@ -1268,7 +1280,8 @@ def fit2D(
     abort_callback : callable or None, optional
         A callable for aborting multiprocessing in the GUI. If a
         callable provided, it must accept no input and return a boolean
-        indicating whether the fitting should be aborted.
+        indicating whether the fitting should be aborted. Default is
+        None.
 
     Returns
     -------
@@ -1550,7 +1563,7 @@ def localize(
     fit_progress_callback: (
         Callable[[int], None] | Literal["console"] | None
     ) = None,
-    return_info: bool = None,
+    return_info: bool = None,  # TODO: change to bool in v0.11.0
 ) -> pd.DataFrame | tuple[pd.DataFrame, list[dict]]:
     """Localize (i.e., identify and fit) spots in a movie using
     the specified parameters.
@@ -1618,7 +1631,7 @@ def localize(
         return_info = False
         # TODO: change the message in v0.11.0
         lib.deprecation_warning(
-            "Deprecation warning: In Picasso v0.11.0, "
+            "Warning: In Picasso v0.11.0, "
             "picasso.localize.localize() will return both the "
             "localizations and a metadata dictionary by default.\n"
             "Before v0.12.0, when using picasso.localize.localize(), "
