@@ -30,7 +30,16 @@ import matplotlib.pyplot as plt
 from tqdm import tqdm
 from sqlalchemy import create_engine
 
-from . import io, lib, gausslq, gaussmle, avgroi, postprocess, __version__
+from . import (
+    io,
+    lib,
+    gausslq,
+    gaussmle,
+    avgroi,
+    postprocess,
+    zfit,
+    __version__,
+)
 
 plt.style.use("ggplot")
 
@@ -1565,10 +1574,10 @@ def localize(
     ) = None,
     return_info: bool = None,  # TODO: change to bool in v0.11.0
 ) -> pd.DataFrame | tuple[pd.DataFrame, list[dict]]:
-    """Localize (i.e., identify and fit) spots in a movie using
+    """Localize (i.e., identify and fit) spots in 2D in a movie using
     the specified parameters.
 
-    Since 0.10.0: support for frame bounds and ROI for identification +
+    Since v0.10.0: support for frame bounds and ROI for identification +
     all fitting methods.
 
     Parameters
@@ -1676,6 +1685,225 @@ def localize(
     if return_info:
         return locs, info
     return locs
+
+
+def localize_3D(
+    movie: lib.IntArray3D,
+    *,
+    movie_info: list[dict],
+    camera_info: dict,
+    box: int,
+    minimum_ng: float,
+    calibration_3d: dict,
+    roi: tuple[tuple[int, int], tuple[int, int]] | None = None,
+    frame_bounds: tuple[int, int] | None = None,
+    fitting_method: Literal[
+        "gausslq",
+        "gausslq-gpu",
+        "gaussmle",
+    ] = "gausslq",
+    eps: float = 0.001,
+    max_it: int = 100,
+    mle_method: Literal["sigma", "sigmaxy"] = "sigmaxy",
+    multiprocess: bool = True,
+    identification_progress_callback: (
+        Callable[[int], None] | Literal["console"] | None
+    ) = None,
+    fit_progress_callback: (
+        Callable[[int], None] | Literal["console"] | None
+    ) = None,
+    fit_z_progress_callback: (
+        Callable[[int], None] | Literal["console"] | None
+    ) = None,
+) -> tuple[pd.DataFrame, list[dict]]:
+    """Localize (i.e., identify and fit) spots in 3D in a movie using
+    the specified parameters. First runs 2D localizations, followed
+    by z position fitting assuming astigmatism, see Huang, et al.
+    Science, 2008.
+    
+    Parameters
+    ----------
+    movie : lib.IntArray3D
+        The input movie data as a 3D numpy array.
+    movie_info : list of dicts
+        Movie metadata.
+    camera_info : dict
+        A dictionary containing camera information: "Baseline",
+        "Sensitivity", "Gain" and "Pixelsize".
+    box : int
+        Size of the box to cut out around each spot. Should be an odd
+        integer.
+    minimum_ng : float
+        Minimum net gradient for spot identification.
+    calibration_3d : path or dict
+        Either a path to a YAML file containing the calibration data or
+        an already loaded calibration dictionary containing the
+        following keys:
+
+        - "X Coefficients": list of 7 floats, polynomial coefficients
+            for the x-axis calibration curve;
+        - "Y Coefficients": list of 7 floats, polynomial coefficients
+            for the y-axis calibration curve;
+        - "Magnification factor": float, magnification factor of the
+            microscope, i.e., the ratio between the actual z position of
+            the calibration sample and the estimated z position from the
+            localization data.
+    roi : tuple, optional
+        Region of interest (ROI) defined as a tuple of two tuples,
+        where the first tuple contains the start coordinates
+        (y_start, x_start) and the second tuple contains the end
+        coordinates (y_end, x_end). If None, the entire frame is used.
+        Default is None.
+    frame_bounds : tuple, optional
+        Minimum and maximum frame numbers to consider for the
+        identification. If None, all frames are used. If only min or max
+        is to be specified, the other is to be set to None, for example,
+        ``(5, None)`` sets minimum frame to 5 without maximum frame.
+        Default is None.
+    fitting_method : {"gausslq", "gausslq-gpu", "gaussmle" or "avg"}, \
+            optional
+        Which 2D fitting algorithm to use. "gausslq" for least-squares
+        fitting of a 2D Gaussian. "gausslq-gpu" for its GPU
+        implemntation (if available). "gaussmle" for MLE 2D Gaussian
+        fitting. "avg" for taking the average of each spot.
+    eps : float, optional
+        The convergence criterion for MLE fitting. Ignored for other
+        methods. Default is 0.001.
+    max_it : int, optional
+        The maximum number of iterations for MLE fitting. Ignored for
+        other methods. Default is 100.
+    mle_method : Literal["sigma", "sigmaxy"], optional
+        The method used for MLE fitting (impose same sigma in x and y or
+        not, respectively). Default is "sigmaxy".
+    multiprocess: bool, optional
+        Whether or not to use multiprocessing. Ignored for GPU fitting.
+        Default is True.
+    progress_callbacks : callable, "console" or None, optional
+        If a callable provided, it must accept one integer input (number
+        of movie frames, or spots for identifying and fitting callbacks,
+        respectively). If "console", tqdm is used to display
+        progress. If None, progress is not tracked.
+
+    Returns
+    -------
+    locs : pd.DataFrame
+        Data frame containing the localized spots in 3D.
+    info : list[dict]
+        A list of dictionaries containing metadata about the movie and
+        the fitting processes.
+    """
+    assert isinstance(
+        movie, (np.ndarray, io.ND2Movie)
+    ), "movie must be a numpy array or ND2Movie"
+    assert isinstance(movie_info, list), "movie_info must be a list"
+    assert isinstance(camera_info, dict), "camera_info must be a dict"
+    assert (
+        isinstance(box, int) and box > 0 and box % 2 == 1
+    ), "box must be a positive odd integer"
+    assert isinstance(minimum_ng, (int, float)), "minimum_ng must be a number"
+    assert isinstance(
+        calibration_3d, (dict, str)
+    ), "calibration_3d must be a dict or a path to a YAML file"
+    assert fitting_method in [
+        "gausslq",
+        "gausslq-gpu",
+        "gaussmle",
+    ], "fitting_method must be one of 'gausslq', 'gausslq-gpu', or 'gaussmle'"
+    assert (
+        isinstance(eps, (int, float)) and eps > 0
+    ), "eps must be a positive number"
+    assert (
+        isinstance(max_it, int) and max_it > 0
+    ), "max_it must be a positive integer"
+    assert mle_method in [
+        "sigma",
+        "sigmaxy",
+    ], "mle_method must be 'sigma' or 'sigmaxy'"
+    assert isinstance(multiprocess, bool), "multiprocess must be a boolean"
+    return _localize_3D(
+        movie=movie,
+        movie_info=movie_info,
+        camera_info=camera_info,
+        box=box,
+        minimum_ng=minimum_ng,
+        calibration_3d=calibration_3d,
+        roi=roi,
+        frame_bounds=frame_bounds,
+        fitting_method=fitting_method,
+        eps=eps,
+        max_it=max_it,
+        mle_method=mle_method,
+        multiprocess=multiprocess,
+        identification_progress_callback=identification_progress_callback,
+        fit_progress_callback=fit_progress_callback,
+        fit_z_progress_callback=fit_z_progress_callback,
+    )
+
+
+def _localize_3D(
+    movie: lib.IntArray3D,
+    *,
+    movie_info: list[dict],
+    camera_info: dict,
+    box: int,
+    minimum_ng: float,
+    calibration_3d: dict,
+    roi: tuple[tuple[int, int], tuple[int, int]] | None = None,
+    frame_bounds: tuple[int, int] | None = None,
+    fitting_method: Literal[
+        "gausslq",
+        "gausslq-gpu",
+        "gaussmle",
+    ] = "gausslq",
+    eps: float = 0.001,
+    max_it: int = 100,
+    mle_method: Literal["sigma", "sigmaxy"] = "sigmaxy",
+    multiprocess: bool = True,
+    identification_progress_callback: (
+        Callable[[int], None] | Literal["console"] | None
+    ) = None,
+    fit_progress_callback: (
+        Callable[[int], None] | Literal["console"] | None
+    ) = None,
+    fit_z_progress_callback: (
+        Callable[[int], None] | Literal["console"] | None
+    ) = None,
+) -> tuple[pd.DataFrame, list[dict]]:
+    """Internal function for `localize_3D`, assumes validated inputs."""
+    locs, info = localize(
+        movie=movie,
+        camera_info=camera_info,
+        parameters={
+            "Min. Net Gradient": minimum_ng,
+            "Box Size": box,
+        },
+        roi=roi,
+        frame_bounds=frame_bounds,
+        movie_info=movie_info,
+        fitting_method=fitting_method,
+        eps=eps,
+        max_it=max_it,
+        mle_method=mle_method,
+        threaded=multiprocess,
+        identification_progress_callback=identification_progress_callback,
+        fit_progress_callback=fit_progress_callback,
+        return_info=True,  # TODO: remove in v0.12.0
+    )
+    fitting_method_3d = (
+        "gausslq"
+        if fitting_method in ["gausslq", "gausslq-gpu"]
+        else "gaussmle"
+    )
+    locs, info = zfit.zfit(
+        locs=locs,
+        info=info,
+        calibration=calibration_3d,
+        fitting_method=fitting_method_3d,
+        filter=0,
+        multiprocess=multiprocess,
+        progress_callback=fit_z_progress_callback,
+    )
+    return locs, info
 
 
 def check_nena(

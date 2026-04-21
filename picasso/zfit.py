@@ -474,6 +474,7 @@ def zfit(
         Either a path to a YAML file containing the calibration data or
         an already loaded calibration dictionary containing the
         following keys:
+
         - "X Coefficients": list of 7 floats, polynomial coefficients
             for the x-axis calibration curve;
         - "Y Coefficients": list of 7 floats, polynomial coefficients
@@ -482,6 +483,7 @@ def zfit(
             microscope, i.e., the ratio between the actual z position of
             the calibration sample and the estimated z position from the
             localization data.
+
         If any of the above is not defined, the user can also provide
         them as separate arguments (see below). If both `calibration`
         and the separate arguments are provided, the separate arguments
@@ -556,10 +558,12 @@ def zfit(
     calibration["Magnification factor"] = magnification_factor_
     pixelsize_ = lib.get_from_metadata(info, "Pixelsize")
     if pixelsize_ is None:
-        raise ValueError(
-            "Camera pixel size (nm) is missing. Enter it either in the "
-            "info metadata, or as an argument."
-        )
+        pixelsize_ = pixelsize
+        if pixelsize_ is None:
+            raise ValueError(
+                "Camera pixel size (nm) is missing. Enter it either in the "
+                "info metadata, or as an argument."
+            )
     info.append([{"Pixelsize": pixelsize_}])
 
     return _zfit(
