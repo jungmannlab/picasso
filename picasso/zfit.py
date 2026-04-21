@@ -140,7 +140,7 @@ def calibrate_z(
             yaml.dump(calibration, f, default_flow_style=False)
 
     # pixelsize does not matter here anyway
-    locs = fit_z(locs, info, calibration, magnification_factor, pixelsize=130)
+    locs = _fit_z(locs, info, calibration, magnification_factor, pixelsize=130)
     locs["z"] /= magnification_factor
 
     plt.figure(figsize=(18, 10))
@@ -269,7 +269,7 @@ def _fit_z_target(
     return (sx**0.5 - wx**0.5) ** 2 + (sy**0.5 - wy**0.5) ** 2
 
 
-def fit_z(
+def fit_z(  # TODO: remove in v0.11.0
     locs: pd.DataFrame,
     info: list[dict],
     calibration: dict,
@@ -283,43 +283,39 @@ def fit_z(
 ) -> pd.DataFrame:
     """Fit z coordinates to the localizations based on the calibration
     curve coefficients and the single-emitter image width and height.
+    See `zfit` for more details.
 
-    Parameters
-    ----------
-    locs : pd.DataFrame
-        Localizations to fit the z-axis calibration curve to.
-    info : list of dicts
-        Information about the localizations, including the number of
-        frames.
-    calibration : dict
-        Calibration data containing the polynomial coefficients for
-        the x and y axes, number of frames, step size, and magnification
-        factor.
-    magnification_factor : float
-        Magnification factor of the microscope, i.e., the ratio between
-        the actual z position of the calibration sample and the
-        estimated z position from the localization data.
-    pixelsize : float
-        Camera pixel size in nm.
-    fitting_method : {"gausslq", "gaussmle"}, optional
-        Fitting method used to obtain 2D localization parameters (x, y,
-        sx, sy). Default is "gausslq".
-    filter : int, optional
-        Filter for the z fits. If set to 0, no filtering is applied.
-        If set to 2, the z fits are filtered based on the root mean
-        square deviation (RMSD) of the z calibration. Default is 2.
-    progress_callback : callable, "console", or None, optional
-        If a callable is provided, it will be called with the current
-        progress (number of localizations processed) as an argument. If
-        "console", a progress bar will be displayed in the console. If
-        None, no progress will be reported. Default is None.
+    Will be deprecated in v0.11.0 in favor of `zfit`."""
+    lib.deprecation_warning(
+        "Deprecation warning: `fit_z` will become a private function in "
+        "v0.11.0. Please use `zfit` instead."
+    )
+    return _fit_z(
+        locs,
+        info,
+        calibration,
+        magnification_factor,
+        pixelsize,
+        fitting_method,
+        filter,
+        progress_callback,
+    )
 
-    Returns
-    -------
-    locs : pd.DataFrame
-        Localizations with the fitted z coordinates, their residuals
-        (d_zcalib) and axial localization precision appended.
-    """
+
+def _fit_z(
+    locs: pd.DataFrame,
+    info: list[dict],
+    calibration: dict,
+    magnification_factor: float,
+    pixelsize: float,
+    fitting_method: Literal["gausslq", "gaussmle"] = "gausslq",
+    filter: int = 2,
+    progress_callback: (
+        Callable[[int], None] | Literal["console"] | None
+    ) = None,
+) -> pd.DataFrame:
+    """Internal function for fitting z coordinates to the localizations.
+    See `zfit` for details."""
     locs = locs.copy()
     cx = np.array(calibration["X Coefficients"])
     cy = np.array(calibration["Y Coefficients"])
@@ -364,7 +360,7 @@ def fit_z(
     return filter_z_fits(locs, filter)
 
 
-def fit_z_parallel(
+def fit_z_parallel(  # TODO: remove in v0.11.0
     locs: pd.DataFrame,
     info: list[dict],
     calibration: dict,
@@ -376,46 +372,37 @@ def fit_z_parallel(
 ) -> pd.DataFrame | list[futures.Future]:
     """Fit z coordinates to the localizations based on the calibration
     curve coefficients and the single-emitter image width and height,
-    optionally using multiprocessing.
+    optionally using multiprocessing. See `zfit` for more details.
 
-    Parameters
-    ----------
-    locs : pd.DataFrame
-        Localizations to fit the z-axis calibration curve to.
-    info : list of dicts
-        Information about the localizations, including the number of
-        frames.
-    calibration : dict
-        Calibration data containing the polynomial coefficients for
-        the x and y axes, number of frames, step size, and magnification
-        factor.
-    magnification_factor : float
-        Magnification factor of the microscope, i.e., the ratio between
-        the actual z position of the calibration sample and the
-        estimated z position from the localization data.
-    pixelsize : float
-        Camera pixel size in nm.
-    fitting_method : {"gausslq", "gaussmle"}, optional
-        Fitting method used to obtain 2D localization parameters (x, y,
-        sx, sy). Default is "gausslq".
-    filter : int, optional
-        Filter for the z fits. If set to 0, no filtering is applied.
-        If set to 2, the z fits are filtered based on the root mean
-        square deviation (RMSD) of the z calibration. Default is 2.
-    asynch : bool, optional
-        If True, use multiprocessing. Then, a list of futures that can
-        be used to retrieve the results asynchronously is returned. If
-        False, the function waits for all tasks to complete and returns
-        the combined results. Default is False.
+    Will be deprecated in v0.11.0 in favor of `zfit`."""
+    lib.deprecation_warning(
+        "Deprecation warning: `fit_z_parallel` will become a private "
+        "function in v0.11.0. Please use `zfit` instead."
+    )
+    return _fit_z_parallel(
+        locs,
+        info,
+        calibration,
+        magnification_factor,
+        pixelsize,
+        fitting_method,
+        filter,
+        asynch,
+    )
 
-    Returns
-    -------
-    locs : pd.DataFrame or list of futures.Future
-        If `asynch` is False, returns a DataFrame of localizations with
-        the fitted z coordinates and their residuals (d_zcalib).
-        If `asynch` is True, returns a list of futures that can be
-        used to retrieve the results asynchronously.
-    """
+
+def _fit_z_parallel(
+    locs: pd.DataFrame,
+    info: list[dict],
+    calibration: dict,
+    magnification_factor: float,
+    pixelsize: float,
+    fitting_method: Literal["gausslq", "gaussmle"] = "gausslq",
+    filter: int = 2,
+    asynch: bool = False,
+) -> pd.DataFrame | list[futures.Future]:
+    """Internal function for fitting z coordinates to the localizations
+    using multiprocessing. See `zfit` for details."""
     n_workers = min(
         60, max(1, int(0.75 * multiprocessing.cpu_count()))
     )  # Python crashes when using >64 cores
@@ -435,7 +422,7 @@ def fit_z_parallel(
     for i, n_locs_task in zip(start_indices, spots_per_task):
         fs.append(
             executor.submit(
-                fit_z,
+                _fit_z,
                 locs[i : i + n_locs_task],
                 info,
                 calibration,
@@ -472,7 +459,7 @@ def zfit(
 ) -> tuple[pd.DataFrame, list[dict]] | tuple[None, None]:
     """Main function for fitting z coordinates to the localizations.
 
-    Will replace `fit_z` (which will become a private function) and
+    Replaces `fit_z` (which will become a private function) and
     `fit_z_parallel` in v0.11.0.
 
     Parameters
@@ -606,7 +593,7 @@ def _zfit(
         if use_tqdm:
             iter_range = tqdm(range(N), desc="Fitting z...", unit="locs")
 
-        fs = fit_z_parallel(
+        fs = _fit_z_parallel(
             locs=locs,
             info=info,
             calibration=calibration,
@@ -632,7 +619,7 @@ def _zfit(
             time.sleep(0.2)
         locs = locs_from_futures(fs, filter=filter)
     else:
-        locs = fit_z(
+        locs = _fit_z(
             locs=locs,
             info=info,
             calibration=calibration,

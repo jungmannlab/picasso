@@ -1197,7 +1197,7 @@ def _localize_process_file(  # noqa: C901
         zpath, magnification_factor, z_calibration = z_params
         print("------------------------------------------")
         print("Fitting 3D...", end="")
-        fs = zfit.fit_z_parallel(
+        fs = zfit._fit_z_parallel(  # TODO: use zfit.zfit instead
             locs,
             info,
             z_calibration,

@@ -196,7 +196,7 @@ def test_localize_mle(identifications, spots):
 
 
 def test_localize_3d(info, locs_lq):
-    """Test 3D localization of identified spots."""
+    """Test 3D localization of identified spots."""  # TODO: update tests for new zfit interface
     locs_3d = zfit.fit_z(locs_lq, info, CALIB_3D, 0.79, 130)
     assert "z" in locs_3d.columns, "3D localization results missing 'z' column"
     assert len(locs_3d), "No 3D localized spots were returned"

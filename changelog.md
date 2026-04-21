@@ -1,6 +1,6 @@
 # Changelog
 
-Last change: 20-APR-2026 CEST
+Last change: 21-APR-2026 CEST
 
 ## 0.10.0
 
@@ -76,6 +76,7 @@ Last change: 20-APR-2026 CEST
 - `picasso.masking.mask_locs` uses metadata rather than now deprecated `width` and `height` parameters
 - `picasso.spinna.MaskGenerator`: `run_checks` parameter (will be removed in v0.11.0)
 - `picasso.localize.identify` and `picasso.localize.localize` will return metadata by default in v0.11
+- `fit_z` and `fit_z_parallel` in `picasso.zfit` will be deprecated in v0.11.0. `zfit.zfit` takes over as the main function in the script
 
 ## 0.9.10
 
