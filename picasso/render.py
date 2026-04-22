@@ -13,6 +13,7 @@ from typing import Literal
 import numba
 import numpy as np
 import pandas as pd
+import matplotlib.pyplot as plt
 from scipy import signal
 from scipy.spatial.transform import Rotation
 from PyQt6 import QtGui, QtCore, QtSvg
@@ -21,6 +22,7 @@ from . import lib
 
 
 _DRAW_MAX_SIGMA = 3  # max. sigma from mean to render (mu +/- 3 sigma)
+N_GROUP_COLORS = 8
 
 
 def render(
@@ -1382,3 +1384,292 @@ def export_qimage_to_svg(image: QtGui.QImage, path: str):
     painter = QtGui.QPainter(generator)
     painter.drawImage(0, 0, image)
     painter.end()
+
+
+def get_colors_from_colormap(
+    n_channels: int,
+    cmap: str = "gist_rainbow",
+) -> list[tuple[int, int, int]]:
+    """Create a list with rgb channels for each of the channels used in
+    rendering property using the gist_rainbow colormap, see:
+    https://matplotlib.org/stable/tutorials/colors/colormaps.html
+
+    Parameters
+    ----------
+    n_channels : int
+        Number of locs channels.
+    cmap : str, optional
+        Colormap name. Default is 'gist_rainbow'.
+
+    Returns
+    -------
+    colors : list of tuples
+        Contains tuples with rgb channels.
+    """
+    # array of shape (256, 3) with rbh channels with 256 colors
+    base = plt.get_cmap(cmap)(np.arange(256))[:, :3]
+    # indeces to draw from base
+    idx = np.linspace(0, 255, n_channels).astype(int)
+    # extract the colors of interest
+    colors = base[idx]
+    return colors
+
+
+def get_group_color(locs: pd.DataFrame) -> lib.IntArray1D:
+    """Find group color for each localization in single channel data
+    with group info.
+
+    Parameters
+    ----------
+    locs : pd.DataFrame
+        Localizations.
+
+    Returns
+    -------
+    colors : lib.IntArray1D
+        Array with integer group color index for each localization.
+    """
+    colors = locs["group"].to_numpy().astype(int) % N_GROUP_COLORS
+    return colors
+
+
+def viewport_height(
+    viewport: list[tuple[float, float], tuple[float, float]],
+) -> float:
+    """Calculate viewport height in camera pixels.
+
+    Parameters
+    ----------
+    viewport : list of tuples
+        Viewport coordinates in camera pixels, [[y_min, y_max], [x_min,
+        x_max]].
+
+    Returns
+    -------
+    height : float
+        Viewport height in camera pixels.
+    """
+    return viewport[1][0] - viewport[0][0]
+
+
+def viewport_width(
+    viewport: list[tuple[float, float], tuple[float, float]],
+) -> float:
+    """Calculate viewport width in camera pixels.
+
+    Parameters
+    ----------
+    viewport : list of tuples
+        Viewport coordinates in camera pixels, [[y_min, y_max], [x_min,
+        x_max]].
+
+    Returns
+    -------
+    width : float
+        Viewport width in camera pixels.
+    """
+    return viewport[1][1] - viewport[0][1]
+
+
+def viewport_size(
+    viewport: list[tuple[float, float], tuple[float, float]],
+) -> tuple[float, float]:
+    """Calculate viewport size in camera pixels.
+
+    Parameters
+    ----------
+    viewport : list of tuples
+        Viewport coordinates in camera pixels, [[y_min, y_max], [x_min,
+        x_max]].
+
+    Returns
+    -------
+    height, width : float
+        Viewport height and width in camera pixels.
+    """
+    height = viewport_height(viewport)
+    width = viewport_width(viewport)
+    return height, width
+
+
+def _draw_picks_circle(
+    image: QtGui.QImage,
+    picks: list[tuple],
+    pick_size: int,  # diameter in display pixels
+    pixelsize: float,
+    point_picks: bool = False,
+    annotate_picks: bool = False,
+    color: QtGui.QColor = QtGui.QColor("yellow"),
+) -> QtGui.QImage:
+    """Draw circular picks onto the image of rendered localizations.
+    See ``draw_picks`` for more details."""
+    if point_picks:  # draw circular picks as points
+        painter = QtGui.QPainter(image)
+        painter.setBrush(QtGui.QBrush(color))
+        painter.setPen(color)
+        for i, pick in enumerate(picks):
+            # convert from camera units to display units
+            cx, cy = self.map_to_view(*pick)
+            painter.drawEllipse(QtCore.QPoint(cx, cy), 3, 3)
+
+            if annotate_picks:
+                painter.drawText(cx + 20, cy + 20, str(i))
+
+    # draw circles
+    else:
+        d = t_dialog.pick_diameter.value() / pixelsize
+        d *= self.width() / self.viewport_width()
+        d = int(d)
+
+        painter = QtGui.QPainter(image)
+        painter.setPen(QtGui.QColor("yellow"))
+
+        # yellow is barely visible on white background
+        if self.window.dataset_dialog.wbackground.isChecked():
+            painter.setPen(QtGui.QColor("red"))
+
+        for i, pick in enumerate(self._picks):
+            # check that the pick is within the view
+            if (
+                pick[0] < self.viewport[0][1]
+                or pick[0] > self.viewport[1][1]
+                or pick[1] < self.viewport[0][0]
+                or pick[1] > self.viewport[1][0]
+            ):
+                continue
+
+            # convert from camera units to display units
+            cx, cy = self.map_to_view(*pick)
+            painter.drawEllipse(int(cx - d / 2), int(cy - d / 2), d, d)
+
+            # annotate picks
+            if t_dialog.pick_annotation.isChecked():
+                painter.drawText(int(cx + d / 2), int(cy + d / 2), str(i))
+    painter.end()
+
+    def draw_picks_rectangle(self, image: QtGui.QImage) -> None:
+        """Draw rectangular picks onto the image of rendered
+        localizations."""
+        pixelsize = self.window.display_settings_dlg.pixelsize.value()
+        w = self.window.tools_settings_dialog.pick_width.value() / pixelsize
+        w *= self.width() / self.viewport_width()
+
+        painter = QtGui.QPainter(image)
+        painter.setPen(QtGui.QColor("yellow"))
+
+        # yellow is barely visible on white background
+        if self.window.dataset_dialog.wbackground.isChecked():
+            painter.setPen(QtGui.QColor("red"))
+
+        for i, pick in enumerate(self._picks):
+
+            # convert from camera units to display units
+            start_x, start_y = self.map_to_view(*pick[0])
+            end_x, end_y = self.map_to_view(*pick[1])
+
+            # draw a straight line across the pick
+            painter.drawLine(start_x, start_y, end_x, end_y)
+
+            # draw a rectangle
+            polygon, most_right = self.get_pick_polygon(
+                start_x, start_y, end_x, end_y, w, return_most_right=True
+            )
+            painter.drawPolygon(polygon)
+
+            # annotate picks
+            if self.window.display_settings_dlg.pick_annotation.isChecked():
+                painter.drawText(*most_right, str(i))
+        painter.end()
+
+    def draw_picks_polygon(self, image: QtGui.QImage) -> None:
+        """Draw polygon picks onto the image of rendered localizations."""
+        t_dialog = self.window.tools_settings_dialog
+        painter = QtGui.QPainter(image)
+        painter.setPen(QtGui.QColor("yellow"))
+
+        # yellow is barely visible on white background
+        if self.window.dataset_dialog.wbackground.isChecked():
+            painter.setPen(QtGui.QColor("red"))
+
+        # draw corners and lines
+        for i, pick in enumerate(self._picks):
+            oldpoint = []
+            for point in pick:
+                cx, cy = self.map_to_view(*point)
+                painter.drawEllipse(
+                    QtCore.QPoint(cx, cy),
+                    int(POLYGON_POINTER_SIZE / 2),
+                    int(POLYGON_POINTER_SIZE / 2),
+                )
+                if oldpoint != []:  # draw the line
+                    ox, oy = self.map_to_view(*oldpoint)
+                    painter.drawLine(cx, cy, ox, oy)
+                oldpoint = point
+
+            # annotate picks
+            if len(pick):
+                if t_dialog.pick_annotation.isChecked():
+                    painter.drawText(
+                        cx + int(POLYGON_POINTER_SIZE / 2) + 10,
+                        cy + int(POLYGON_POINTER_SIZE / 2) + 10,
+                        str(i),
+                    )
+        painter.end()
+
+    def draw_picks_square(self, image: QtGui.QImage) -> None:
+        """Draw square picks onto the image of rendered localizations."""
+        t_dialog = self.window.tools_settings_dialog
+        pixelsize = self.window.display_settings_dlg.pixelsize.value()
+        w = t_dialog.pick_side_length.value() / pixelsize
+        w *= self.width() / self.viewport_width()
+        w = int(w)
+        painter = QtGui.QPainter(image)
+        painter.setPen(QtGui.QColor("yellow"))
+        # yellow is barely visible on white background
+        if self.window.dataset_dialog.wbackground.isChecked():
+            painter.setPen(QtGui.QColor("red"))
+
+        for i, pick in enumerate(self._picks):
+            # check that the pick is within the view
+            if (
+                pick[0] < self.viewport[0][1]
+                or pick[0] > self.viewport[1][1]
+                or pick[1] < self.viewport[0][0]
+                or pick[1] > self.viewport[1][0]
+            ):
+                continue
+
+            # convert from camera units to display units
+            cx, cy = self.map_to_view(*pick)
+            painter.drawRect(int(cx - w / 2), int(cy - w / 2), w, w)
+
+            # annotate picks
+            if t_dialog.pick_annotation.isChecked():
+                painter.drawText(
+                    int(cx + w / 2) + 10, int(cy + w / 2) + 10, str(i)
+                )
+        painter.end()
+
+    def draw_picks(self, image: QtGui.QImage) -> QtGui.QImage:
+        """Draw all selected picks onto the image of rendered
+        localizations.
+
+        Parameters
+        ----------
+        image : QImage
+            Image containing rendered localizations.
+
+        Returns
+        -------
+        image : QImage
+            Image with the drawn picks.
+        """
+        image = image.copy()
+        if self._pick_shape == "Circle":
+            return self.draw_picks_circle(image)
+        elif self._pick_shape == "Rectangle":
+            return self.draw_picks_rectangle(image)
+        elif self._pick_shape == "Polygon":
+            return self.draw_picks_polygon(image)
+        elif self._pick_shape == "Square":
+            return self.draw_picks_square(image)

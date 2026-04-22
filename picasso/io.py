@@ -480,6 +480,34 @@ def load_picks(  # noqa: C901
     return picks, shape, size
 
 
+def load_drift(path: str) -> pd.DataFrame | None:
+    """Load drift from a .txt file generated with the Picasso GUI.
+
+    Parameters
+    ----------
+    path : str
+        The path to the drift file. Must end in .txt.
+
+    Returns
+    -------
+    drift_df : pd.DataFrame or None
+        A DataFrame containing the drift information with columns 'frame',
+        'x', 'y', and optionally 'z'. Returns None if the file cannot be
+        loaded.
+    """
+    if not path.endswith(".txt"):
+        raise ValueError("Drift file must end with .txt")
+    drift = np.loadtxt(path, delimiter=" ")
+    assert drift.ndim == 2 and drift.shape[1] in [2, 3], (
+        "Drift must be a 2D array with 2 or 3 columns (x, y, (z)). "
+        f"Loaded array has shape {drift.shape}."
+    )
+    drift_df = pd.DataFrame(drift[:, :2], columns=["x", "y"])
+    if drift.shape[1] == 3:
+        drift_df["z"] = drift[:, 2]
+    return drift_df
+
+
 def load_user_settings() -> lib.AutoDict:
     """Load user settings from a YAML file containing information such
     as the default directory for loading/saving files, Render color map,
@@ -1726,7 +1754,22 @@ def load_locs(
     info : list[dict]
         Metadata information loaded from the file, typically a list of
         dictionaries containing various metadata fields.
+
+    Raises
+    ------
+    ValueError
+        If the file path ends with ".csv", indicating that it is a
+        ThunderSTORM .csv file, which should be loaded using
+        picasso.io.import_ts instead.
+    KeyError
+        If the "locs" dataset is not found in the HDF5 file, indicating
+        that the file does not contain the expected localization data.
     """
+    if path.endswith(".csv"):
+        raise ValueError(
+            "If you wish to load a ThunderSTORM .csv file, use "
+            "picasso.io.import_ts instead."
+        )
     try:
         locs = pd.read_hdf(path, key="locs")
     except KeyError as e:  # if "locs" key not found

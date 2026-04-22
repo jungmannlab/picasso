@@ -20,7 +20,6 @@ import time
 import os.path
 import importlib
 import pkgutil
-from copy import deepcopy
 from math import ceil
 from collections import Counter
 from functools import partial
@@ -35,7 +34,7 @@ import pandas as pd
 from matplotlib.backends.backend_qt5agg import FigureCanvas
 from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT
 from scipy.ndimage.filters import gaussian_filter
-from scipy.optimize import curve_fit, OptimizeWarning
+from scipy.optimize import OptimizeWarning
 from sklearn.metrics.pairwise import euclidean_distances
 from sklearn.cluster import KMeans
 from PyQt6 import QtCore, QtGui, QtWidgets
@@ -56,7 +55,6 @@ from ..lib import (
     FloatArray1D,
     FloatArray2D,
     FloatArray3D,
-    IntArray1D,
     IntArray2D,
     IntArray3D,
 )
@@ -90,92 +88,6 @@ MAX_ROUNDS_WITHOUT_BEST_BIC_G5M = 3
 MIN_SIGMA_FACTOR_G5M = 0.8
 MAX_SIGMA_FACTOR_G5M = 1.5
 N_COMPONENTS_MAX_G5M = 100
-
-
-def get_render_properties_colors(
-    n_channels: int,
-    cmap: str = "gist_rainbow",
-) -> list[tuple[int, int, int]]:
-    """Create a list with rgb channels for each of the channels used in
-    rendering property using the gist_rainbow colormap, see:
-    https://matplotlib.org/stable/tutorials/colors/colormaps.html
-
-    Parameters
-    ----------
-    n_channels : int
-        Number of locs channels.
-    cmap : str, optional
-        Colormap name. Default is 'gist_rainbow'.
-
-    Returns
-    -------
-    colors : list of tuples
-        Contains tuples with rgb channels.
-    """
-    # array of shape (256, 3) with rbh channels with 256 colors
-    base = plt.get_cmap(cmap)(np.arange(256))[:, :3]
-    # indeces to draw from base
-    idx = np.linspace(0, 255, n_channels).astype(int)
-    # extract the colors of interest
-    colors = base[idx]
-    return colors
-
-
-def fit_cum_exp(data: FloatArray1D) -> dict:
-    """Fit a cumulative exponential function to data. Used for binding
-    kinetics estimation.
-
-    Parameters
-    ----------
-    data : FloatArray1D
-        Input data to fit, shape (N,).
-
-    Returns
-    -------
-    result : dict
-        Contains the best fit parameters and the fitted data.
-    """
-    data.sort()
-    n = len(data)
-    y = np.arange(1, n + 1)
-    data_min = data.min()
-    data_max = data.max()
-    p0 = [n, np.mean(data), data_min]
-    bounds = ([0, data_min, 0], [np.inf, data_max, np.inf])
-    popt, _ = curve_fit(
-        lib.cumulative_exponential, data, y, p0=p0, bounds=bounds
-    )
-    result = {
-        "best_values": {"a": popt[0], "t": popt[1], "c": popt[2]},
-        "data": data,
-        "best_fit": lib.cumulative_exponential(data, *popt),
-    }
-    return result
-
-
-def estimate_kinetic_rate(data: FloatArray1D) -> float:
-    """Find the mean dark/bright time by fitting to a cumulative
-    exponential function.
-
-    Parameters
-    ----------
-    data : FloatArray1D
-        Input data to fit, shape (N,).
-
-    Returns
-    -------
-    rate : float
-        Mean dark/bright time from the fitted exponential function.
-    """
-    if len(data) > 2:
-        if data.max() - data.min() == 0:
-            rate = np.nanmean(data)
-        else:
-            result = fit_cum_exp(data)
-            rate = result["best_values"]["t"]
-    else:
-        rate = np.nanmean(data)
-    return rate
 
 
 def check_pick(f: Callable) -> Callable:
@@ -316,53 +228,37 @@ class PickHistWindow(QtWidgets.QTabWidget):
             Cumulative exponential fit results for dark times, see
             ``fit_cum_exp``.
         """
-        self.axes1.clear()
-        self.axes2.clear()
-        self.figure.suptitle("Binding kinetics per pick")
-
         # Bright
-        a = fit_result_len["best_values"]["a"]
-        t = fit_result_len["best_values"]["t"]
-        c = fit_result_len["best_values"]["c"]
-
+        self.figure = lib.plot_cumulative_exponential_fit(
+            pooled_locs["len"].copy(),
+            fit_result_len,
+            self.figure,
+            self.axes1,
+        )
         self.axes1.set_title(
-            "Bright time (cumulative) \n"
-            r"$Fit: {:.2f}\cdot(1-exp(-t/{:.2f}))+{:.2f}$".format(a, t, c)
+            "Bright times\n"
+            r"$Fit: {:.2f}\cdot(1-exp(-t/{:.2f}))+{:.2f}$".format(
+                fit_result_len["best_values"]["a"],
+                fit_result_len["best_values"]["t"],
+                fit_result_len["best_values"]["c"],
+            )
         )
-        data = pooled_locs["len"].copy()
-        data.sort_values(inplace=True)
-        y = np.arange(1, len(data) + 1)
-        self.axes1.semilogx(data, y, label="data")
-        self.axes1.semilogx(
-            data,
-            fit_result_len["best_fit"],
-            label=f"fit ($\\bar \\tau_B = {t:.2f}$)",
-        )
-        self.axes1.legend(loc="best")
-        self.axes1.set_xlabel("Duration (frames)")
-        self.axes1.set_ylabel("Counts")
-
         # Dark
-        a = fit_result_dark["best_values"]["a"]
-        t = fit_result_dark["best_values"]["t"]
-        c = fit_result_dark["best_values"]["c"]
-
+        self.figure = lib.plot_cumulative_exponential_fit(
+            pooled_locs["dark"].copy(),
+            fit_result_dark,
+            self.figure,
+            self.axes2,
+        )
         self.axes2.set_title(
-            "Dark time (cumulative) \n"
-            r"$Fit: {:.2f}\cdot(1-exp(-t/{:.2f}))+{:.2f}$".format(a, t, c)
+            "Dark times\n"
+            r"$Fit: {:.2f}\cdot(1-exp(-t/{:.2f}))+{:.2f}$".format(
+                fit_result_dark["best_values"]["a"],
+                fit_result_dark["best_values"]["t"],
+                fit_result_dark["best_values"]["c"],
+            )
         )
-        data = pooled_locs["dark"].copy()
-        data.sort_values(inplace=True)
-        y = np.arange(1, len(data) + 1)
-        self.axes2.semilogx(data, y, label="data")
-        self.axes2.semilogx(
-            data,
-            fit_result_dark["best_fit"],
-            label=f"fit ($\\bar \\tau_D = {t:.2f}$)",
-        )
-        self.axes2.legend(loc="best")
-        self.axes2.set_xlabel("Duration (frames)")
-        self.axes2.set_ylabel("Counts")
+        self.figure.suptitle("Binding kinetics per pick")
         self.canvas.draw()
         self.plotted = True
 
@@ -813,8 +709,8 @@ class DatasetDialog(lib.Dialog):
         # adjust group color if needed
         if len(self.window.view.locs) == 1:
             if "group" in self.window.view.locs[0].columns:
-                self.window.view.group_color = (
-                    self.window.view.get_group_color(self.window.view.locs[0])
+                self.window.view.group_color = render.get_group_color(
+                    self.window.view.locs[0]
                 )
 
         # delete drift data if provided
@@ -2926,7 +2822,7 @@ class TestClustererDialog(lib.Dialog):
             centers["z"] /= pixelsize
 
         if len(locs):
-            self.view.group_color = self.window.view.get_group_color(locs)
+            self.view.group_color = render.get_group_color(locs)
 
         # scale z axis if applicable
         if "z" in locs.columns:
@@ -3515,10 +3411,9 @@ class TestClustererView(QtWidgets.QLabel):
         locs = self.split_locs()
 
         # render kwargs
-        if self.dialog.one_pixel_blur.isChecked():
-            blur_method = "smooth"
-        else:
-            blur_method = "convolve"
+        blur_method = (
+            "smooth" if self.dialog.one_pixel_blur.isChecked() else "convolve"
+        )
         kwargs = {
             "oversampling": self.get_optimal_oversampling(),
             "viewport": self.viewport,
@@ -3678,32 +3573,8 @@ class DriftPlotWindow(QtWidgets.QTabWidget):
             Drift for each spatial coordinates. Contains 3 columns: x, y
             and z. x and y are in camera pixels and z in nm.
         """
-        self.figure.clear()
-
-        # get camera pixel size in nm
         pixelsize = self.parent.window.display_settings_dlg.pixelsize.value()
-
-        ax1 = self.figure.add_subplot(131)
-        ax1.plot(drift.x * pixelsize, label="x")
-        ax1.plot(drift.y * pixelsize, label="y")
-        ax1.legend(loc="best")
-        ax1.set_xlabel("Frame")
-        ax1.set_ylabel("Drift (nm)")
-        ax2 = self.figure.add_subplot(132)
-        ax2.plot(
-            drift.x * pixelsize,
-            drift.y * pixelsize,
-            color=list(plt.rcParams["axes.prop_cycle"])[2]["color"],
-        )
-
-        ax2.set_xlabel("x (nm)")
-        ax2.set_ylabel("y (nm)")
-        ax2.invert_yaxis()
-        ax3 = self.figure.add_subplot(133)
-        ax3.plot(drift.z, label="z")
-        ax3.legend(loc="best")
-        ax3.set_xlabel("Frame")
-        ax3.set_ylabel("Drift (nm)")
+        postprocess.plot_drift(drift, pixelsize, self.figure)
         self.canvas.draw()
 
     def plot_2d(self, drift: pd.DataFrame) -> None:
@@ -3715,26 +3586,8 @@ class DriftPlotWindow(QtWidgets.QTabWidget):
             Drift for each spatial coordinates. Contains 2 columns: x, y
             in camera pixels.
         """
-        self.figure.clear()
-
-        # get camera pixel size in nm
         pixelsize = self.parent.window.display_settings_dlg.pixelsize.value()
-
-        ax1 = self.figure.add_subplot(121)
-        ax1.plot(drift.x * pixelsize, label="x")
-        ax1.plot(drift.y * pixelsize, label="y")
-        ax1.legend(loc="best")
-        ax1.set_xlabel("Frame")
-        ax1.set_ylabel("Drift (nm)")
-        ax2 = self.figure.add_subplot(122)
-        ax2.plot(
-            drift.x * pixelsize,
-            drift.y * pixelsize,
-            color=list(plt.rcParams["axes.prop_cycle"])[2]["color"],
-        )
-        ax2.set_xlabel("x (nm)")
-        ax2.set_ylabel("y (nm)")
-        ax2.invert_yaxis()
+        postprocess.plot_drift(drift, pixelsize, self.figure)
         self.canvas.draw()
 
 
@@ -4395,19 +4248,7 @@ class NenaPlotWindow(QtWidgets.QTabWidget):
         vbox.addWidget((NavigationToolbar2QT(self.canvas, self)))
 
     def plot(self, nena_result: dict) -> None:
-        self.figure.clear()
-        d = deepcopy(nena_result["d"])
-        ax = self.figure.add_subplot(111)
-        d *= self.info_dialog.window.display_settings_dlg.pixelsize.value()
-        ax.set_title(
-            "Next frame neighbor distance histogram, "
-            f"\u03c3 = {self.info_dialog.lp:.2f} nm"
-        )
-        ax.plot(d, nena_result["data"], label="Data")
-        ax.plot(d, nena_result["best_fit"], label="Fit")
-        ax.set_xlabel("Distance (nm)")
-        ax.set_ylabel("Counts")
-        ax.legend(loc="best")
+        postprocess.plot_nena(nena_result, self.figure)
         self.canvas.draw()
 
 
@@ -4431,25 +4272,7 @@ class FRCPlotWindow(QtWidgets.QTabWidget):
         vbox.addWidget((NavigationToolbar2QT(self.canvas, self)))
 
     def plot(self, frc_result: dict) -> None:
-        self.figure.clear()
-        q = frc_result["frequencies"]
-        frc_curve = frc_result["frc_curve"]
-        frc_curve_smooth = frc_result["frc_curve_smooth"]
-        res = frc_result["resolution"]
-        ax = self.figure.add_subplot(111)
-        ax.plot(q, frc_curve, color="gray", alpha=0.5, label="FRC curve")
-        ax.plot(q, frc_curve_smooth, label="Smoothed")
-        ax.axhline(
-            1 / 7,
-            color="black",
-            linewidth=1.0,
-            linestyle="--",
-            label="1/7 threshold",
-        )
-        ax.set_xlabel("Spatial frequency (nm\u207b\u00b9)")
-        ax.set_ylabel("FRC")
-        ax.set_title(f"FIRE resolution: {res:.2f} nm")
-        ax.legend()
+        postprocess.plot_frc(frc_result, self.figure)
         self.canvas.draw()
 
 
@@ -4872,8 +4695,7 @@ class MaskSettingsDialog(lib.Dialog):
         """Blur localizations using a Gaussian filter."""
         blur_px = self.mask_blur.value() / self.disp_px_size.value()
         H_blur = gaussian_filter(self.H, sigma=blur_px)
-        H_blur = H_blur / np.max(H_blur)
-        self.H_blur = H_blur
+        self.H_blur = H_blur / np.max(H_blur)
         self.save_blur_button.setEnabled(True)
         self.plots[1].setPixmap(
             self.render_to_pixmap(self.H_blur),
@@ -5552,68 +5374,6 @@ class RESIDialog(lib.Dialog):
             r_z.setValue(self.radius_z[0].value())
             m.setValue(self.min_locs[0].value())
 
-    def _perform_resi_channel(
-        self,
-        locs: pd.DataFrame,
-        i: int,
-        r_xy: float,
-        r_z: float,
-        min_locs: int,
-        apply_fa: bool,
-        pixelsize: float,
-        ok1: bool = False,
-        ok2: bool = False,
-        suffix_locs: str = "",
-        suffix_centers: str = "",
-    ) -> None:
-        """Perform RESI analysis for a single channel."""
-        clustered_locs = clusterer.cluster(
-            locs,
-            radius_xy=r_xy,
-            min_locs=min_locs,
-            frame_analysis=apply_fa,
-            radius_z=r_z if self.ndim == 3 else None,
-            pixelsize=pixelsize,
-        )
-
-        # save clustered localizations if requested
-        if ok1:
-            new_info = {
-                "Clustering radius xy [cam. pixels]": r_xy,
-                "Min. number of locs": min_locs,
-                "Basic frame analysis": apply_fa,
-            }
-            if self.ndim == 3:
-                new_info["Clustering radius z [cam. pixels]"] = r_z
-            io.save_locs(
-                self.paths[i].replace(".hdf5", f"{suffix_locs}.hdf5"),
-                clustered_locs,
-                self.window.view.infos[i] + [new_info],
-            )
-
-        # extract cluster centers for each channel
-        centers = clusterer.find_cluster_centers(clustered_locs, pixelsize)
-        # save cluster centers if requested
-        if ok2:
-            new_info = {
-                "Clustering radius xy [cam. pixels]": r_xy,
-                "Min. number of locs": min_locs,
-                "Basic frame analysis": apply_fa,
-            }
-            if self.ndim == 3:
-                new_info["Clustering radius z [cam. pixels]"] = r_z
-            io.save_locs(
-                self.paths[i].replace(".hdf5", f"{suffix_centers}.hdf5"),
-                centers,
-                self.window.view.infos[i] + [new_info],
-            )
-        # append resi channel id
-        centers["resi_channel_id"] = i * np.ones(
-            len(centers),
-            dtype=np.int8,
-        )
-        return centers
-
     def perform_resi(self) -> None:
         """Perform RESI  on loaded localizations, using user-defined
         clustering parameters."""
@@ -5651,74 +5411,52 @@ class RESIDialog(lib.Dialog):
             filter="*.hdf5",
             check_ext=".yaml",
         )
-        info = self.window.view.infos[0]
-        new_info = {
-            "Paths to RESI channels": self.paths,
-            "Clustering radius xy [cam. pixels] for each channel": r_xy,
-            "Min. number of locs in a cluster for each channel": min_locs,
-            "Basic frame analysis": apply_fa,
-        }
-        if self.ndim == 3:
-            new_info["Clustering radius z [cam. pixels] for each channel"] = (
-                r_z
+        if not resi_path:
+            return
+
+        if self.save_clustered_locs.isChecked():
+            suffix_locs, ok1 = QtWidgets.QInputDialog.getText(
+                self,
+                "",
+                "Enter suffix for saving clustered localizations",
+                QtWidgets.QLineEdit.EchoMode.Normal,
+                "_clustered",
             )
-        resi_info = info + [new_info]
-
-        if resi_path:
-            ok1 = False
-            if self.save_clustered_locs.isChecked():
-                suffix_locs, ok1 = QtWidgets.QInputDialog.getText(
-                    self,
-                    "",
-                    "Enter suffix for saving clustered localizations",
-                    QtWidgets.QLineEdit.EchoMode.Normal,
-                    "_clustered",
-                )
-            ok2 = False
-            if self.save_cluster_centers.isChecked():
-                suffix_centers, ok2 = QtWidgets.QInputDialog.getText(
-                    self,
-                    "",
-                    "Enter suffix for saving cluster centers",
-                    QtWidgets.QLineEdit.EchoMode.Normal,
-                    "_cluster_centers",
-                )
-
-            # Perform RESI
-            progress = lib.ProgressDialog(
-                "Performing RESI analysis...", 0, self.n_channels, self.window
+            if not ok1:
+                return
+        if self.save_cluster_centers.isChecked():
+            suffix_centers, ok2 = QtWidgets.QInputDialog.getText(
+                self,
+                "",
+                "Enter suffix for saving cluster centers",
+                QtWidgets.QLineEdit.EchoMode.Normal,
+                "_cluster_centers",
             )
-            progress.set_value(0)
-            progress.show()
+            if not ok2:
+                return
 
-            resi_channels = []  # holds each channel's cluster centers
-            for i, locs in enumerate(self.locs):
-                centers = self._perform_resi_channel(
-                    locs,
-                    i,
-                    r_xy,
-                    r_z,
-                    min_locs,
-                    apply_fa,
-                    pixelsize,
-                    ok1,
-                    ok2,
-                    suffix_locs,
-                    suffix_centers,
-                )
-                progress.set_value(i)
-                resi_channels.append(centers)
-            progress.close()
+        # Perform RESI
+        progress = lib.ProgressDialog(
+            "Performing RESI analysis...", 0, self.n_channels, self.window
+        )
+        progress.set_value(0)
+        progress.show()
 
-            # combine resi cluster centers from all channels
-            all_resi = pd.concat(resi_channels, ignore_index=True)
-            # change the group name in all_resi
-            all_resi["cluster_id"] = all_resi["group"]
-            all_resi.drop(columns=["group"], inplace=True)
-            all_resi.sort_values(kind="quicksort", by="frame", inplace=True)
-
-            # save resi cluster centers
-            io.save_locs(resi_path, all_resi, resi_info)
+        all_resi, resi_info = postprocess.resi(
+            locs=self.locs,
+            infos=self.infos,
+            radius_xy=r_xy,
+            radius_z=r_z,
+            min_locs=min_locs,
+            apply_fa=apply_fa,
+            save_clustered_locs=self.save_clustered_locs.isChecked(),
+            save_cluster_centers=self.save_cluster_centers.isChecked(),
+            suffix_locs=suffix_locs,
+            suffix_centers=suffix_centers,
+            progress_callback=progress.set_value,
+        )
+        resi_info[-1]["Paths to RESI channels"] = self.paths
+        io.save_locs(resi_path, all_resi, resi_info)
 
 
 class DisplaySettingsDialog(lib.Dialog):
@@ -6103,13 +5841,11 @@ class DisplaySettingsDialog(lib.Dialog):
                         "Colormap must be of shape (256, 4)\n"
                         f"The loaded colormap has shape {cmap.shape}"
                     )
-                    self.colormap.setCurrentText("magma")
                 elif not np.all((cmap >= 0) & (cmap <= 1)):
                     raise ValueError(
                         "All elements of the colormap must be between\n"
                         "0 and 1"
                     )
-                    self.colormap.setCurrentText("magma")
                 else:
                     self.window.view.custom_cmap = cmap
             else:
@@ -6178,7 +5914,7 @@ class DisplaySettingsDialog(lib.Dialog):
             max_val += 1e-6  # avoid zero division
         data = data[(data >= min_val) & (data <= max_val)]
         n_colors = self.color_step.value()
-        colors = get_render_properties_colors(
+        colors = render.get_colors_from_colormap(
             n_colors, self.colormap_prop.currentText()
         )
 
@@ -6340,7 +6076,7 @@ class FastRenderDialog(lib.Dialog):
             len(self.fractions) == 2
             and "group" in self.window.view.locs[0].columns
         ):
-            self.window.view.group_color = self.window.view.get_group_color(
+            self.window.view.group_color = render.get_group_color(
                 self.window.view.locs[0]
             )
         self.index_blocks = [None] * len(self.window.view.locs)
@@ -6756,23 +6492,6 @@ class View(QtWidgets.QLabel):
         self.x_render_cache = []
         self.x_render_state = False
 
-    def get_group_color(self, locs: pd.DataFrame) -> IntArray1D:
-        """Find group color for each localization in single channel data
-        with group info.
-
-        Parameters
-        ----------
-        locs : pd.DataFrame
-            Localizations.
-
-        Returns
-        -------
-        colors : IntArray1D
-            Array with integer group color index for each localization.
-        """
-        colors = locs["group"].to_numpy().astype(int) % N_GROUP_COLORS
-        return colors
-
     def _load_locs(self, path: str) -> tuple[pd.DataFrame, list[dict]]:
         """Load localizations and metadata from a given path, either
         Picasso or ThunderSTORM format."""
@@ -6803,34 +6522,13 @@ class View(QtWidgets.QLabel):
 
     def _load_drift(self, info: list[dict]) -> pd.DataFrame | None:
         drift = None
-        if "Last driftfile" in info[-1]:
-            driftpath = info[-1]["Last driftfile"]
-            if driftpath is not None:
-                try:
-                    with open(driftpath, "r") as f:
-                        drifttxt = np.loadtxt(f)
-                    drift_x = drifttxt[:, 0]
-                    drift_y = drifttxt[:, 1]
-
-                    if drifttxt.shape[1] == 3:
-                        drift_z = drifttxt[:, 2]
-                        drift = pd.DataFrame(
-                            {
-                                "x": drift_x.astype(np.float32),
-                                "y": drift_y.astype(np.float32),
-                                "z": drift_z.astype(np.float32),
-                            }
-                        )
-                    else:
-                        drift = pd.DataFrame(
-                            {
-                                "x": drift_x.astype(np.float32),
-                                "y": drift_y.astype(np.float32),
-                            }
-                        )
-                except Exception:
-                    # drift already initialized before
-                    pass
+        driftpath = lib.get_from_metadata(info, "Last driftfile")
+        if driftpath is not None:
+            try:
+                drift = io.load_drift(driftpath)
+            except Exception:
+                # drift already initialized before
+                pass
         return drift
 
     def add(self, path: str, render: bool = True) -> None:
@@ -6882,7 +6580,7 @@ class View(QtWidgets.QLabel):
             )
             if "group" in locs.columns:
                 if len(self.group_color) == 0 and locs.group.size:
-                    self.group_color = self.get_group_color(self.locs[0])
+                    self.group_color = render.get_group_color(self.locs[0])
             disp_sett_dlg.parameter.clear()
             disp_sett_dlg.parameter.addItems(locs.columns.to_list())
             disp_sett_dlg.render_groupbox.setEnabled(True)
@@ -7019,8 +6717,7 @@ class View(QtWidgets.QLabel):
     ) -> tuple[tuple[float, float], tuple[float, float]]:
         """Add space to a desired viewport, such that it matches the
         window aspect ratio. Return the modified viewport."""
-        viewport_height = viewport[1][0] - viewport[0][0]
-        viewport_width = viewport[1][1] - viewport[0][1]
+        viewport_height, viewport_width = self.viewport_size(viewport)
         view_height = self.height()
         view_width = self.width()
         viewport_aspect = viewport_width / viewport_height
@@ -7068,33 +6765,17 @@ class View(QtWidgets.QLabel):
 
         See ``self.link`` for more info."""
         channel = self.get_channel()
-        picked_locs = self.picked_locs(channel, add_group=False)
-        out_locs = []
-
-        # use very large values for linking localizations
-        r_max = 2 * max(
-            self.infos[channel][0]["Height"], self.infos[channel][0]["Width"]
-        )
-        max_dark = self.infos[channel][0]["Frames"]
         progress = lib.ProgressDialog(
-            "Combining localizations in picks", 0, len(picked_locs), self
+            "Combining localizations in picks", 0, len(self._picks), self
         )
-
-        # link every localization in each pick
-        for i, pick_locs in enumerate(picked_locs):
-            pick_locs_out = postprocess.link(
-                pick_locs,
-                self.infos[channel],
-                r_max=r_max,
-                max_dark_time=max_dark,
-                remove_ambiguous_lengths=False,
-            )
-            if len(pick_locs_out) == 0:
-                print("no locs in pick - skipped")
-            else:
-                out_locs.append(pick_locs_out)
-            progress.set_value(i + 1)
-        self.all_locs[channel] = pd.concat(out_locs, ignore_index=True)
+        self.all_locs[channel] = postprocess.combine_locs_in_picks(
+            self.all_locs[channel],
+            self.infos[channel],
+            picks=self._picks,
+            pick_shape=self._pick_shape,
+            pick_size=self._pick_size,
+            progress_callback=progress.set_value,
+        )
         self.locs[channel] = copy.copy(self.all_locs[channel])
 
         if "group" in self.all_locs[channel].columns:
@@ -7115,7 +6796,7 @@ class View(QtWidgets.QLabel):
         channel = self.get_channel()
         if "len" in self.all_locs[channel].columns:
             QtWidgets.QMessageBox.information(
-                self, "Link", "Localizations are already linked. Aborting..."
+                self, "Link", "Localizations are already linked. Aborting."
             )
             return
         else:
@@ -7221,28 +6902,16 @@ class View(QtWidgets.QLabel):
             locs["group_input"] = self.all_locs[channel].group
         else:
             locs = self.all_locs[channel]
-
         pixelsize = self.window.display_settings_dlg.pixelsize.value()
 
-        # perform DBSCAN in a channel
-        n_raw = len(locs)
-        locs = clusterer.dbscan(
+        locs, dbscan_info = clusterer.dbscan(
             locs,
             radius / pixelsize,  # convert to camera pixels
             min_density,
             pixelsize=pixelsize,
             min_locs=min_locs,
+            return_info=True,
         )
-        n_clusters = len(locs)
-        rejected = 100 * (n_raw - n_clusters) / n_raw
-        dbscan_info = {
-            "Generated by": f"Picasso v{__version__} DBSCAN",
-            "Number of clusters": len(np.unique(locs.group)),
-            "Radius (nm)": radius,
-            "Minimum local density": min_density,
-            "Min. localizations per cluster": min_locs,
-            "Fraction of rejected locs (%)": rejected,
-        }
         io.save_locs(path, locs, self.infos[channel] + [dbscan_info])
         status.close()
         if save_centers:
@@ -7355,29 +7024,16 @@ class View(QtWidgets.QLabel):
             locs["group_input"] = self.all_locs[channel].group
         else:
             locs = self.all_locs[channel]
-
         pixelsize = self.window.display_settings_dlg.pixelsize.value()
 
-        # perform HDBSCAN for each channel
-        n_raw = len(locs)
-        locs = clusterer.hdbscan(
+        locs, hdbscan_info = clusterer.hdbscan(
             locs,
             min_cluster,
             min_samples,
             pixelsize=pixelsize,
             cluster_eps=cluster_eps,
+            return_info=True,
         )
-        n_clusters = len(locs)
-        rejected = 100 * (n_raw - n_clusters) / n_raw
-        hdbscan_info = {
-            "Generated by": f"Picasso v{__version__} HDBSCAN",
-            "Number of clusters": len(np.unique(locs.group)),
-            "Min. cluster": min_cluster,
-            "Min. samples": min_samples,
-            "Intercluster distance": cluster_eps,
-            "Fraction of rejected locs (%)": rejected,
-        }
-
         io.save_locs(path, locs, self.infos[channel] + [hdbscan_info])
         status.close()
         if save_centers:
@@ -7417,7 +7073,6 @@ class View(QtWidgets.QLabel):
         params["radius_z"] = params["radius_z"] / pixelsize
 
         if ok:
-
             if channel == len(self.locs_paths):  # apply to all
                 # get saving name suffix
                 suffix, ok = QtWidgets.QInputDialog.getText(
@@ -7498,33 +7153,16 @@ class View(QtWidgets.QLabel):
         else:
             locs = self.all_locs[channel]
 
-        # perform SMLM clustering
-        n_raw = len(locs)
-        clustered_locs = clusterer.cluster(
+        clustered_locs, new_info = clusterer.cluster(
             locs,
             radius_xy,
             min_locs,
             frame_analysis,
             radius_z=radius_z,
             pixelsize=pixelsize,
+            return_info=True,
         )
-        n_clusters = len(clustered_locs)
-        rejected = 100 * (n_raw - n_clusters) / n_raw
         status.close()
-
-        # saving
-        new_info = {
-            "Generated by": f"Picasso v{__version__} SMLM clusterer",
-            "Number of clusters": len(np.unique(clustered_locs.group)),
-            "Min. cluster size": min_locs,
-            "Performed basic frame analysis": frame_analysis,
-            "Fraction of rejected locs (%)": rejected,
-        }
-        if "z" in self.all_locs[channel].columns:
-            new_info["Clustering radius xy (nm)"] = radius_xy * pixelsize
-            new_info["Clustering radius z (nm)"] = radius_z * pixelsize
-        else:
-            new_info["Clustering radius (nm)"] = radius_xy * pixelsize
         info = self.infos[channel] + [new_info]
 
         # save locs
@@ -7760,91 +7398,6 @@ class View(QtWidgets.QLabel):
                 return max_locs
         else:
             return np.inf
-
-    def shifts_from_picked_coordinate(
-        self,
-        locs: list[list[pd.DataFrame]],
-        coordinate: Literal["x", "y", "z"],
-    ) -> FloatArray2D:
-        """Calculate shifts between channels along a given coordinate.
-
-        Parameters
-        ----------
-        locs : list of lists of pd.DataFrames
-            Each element stors picked localizations from a channel, pick
-            by pick.
-        coordinate : {'x', 'y', 'z'}
-            Specifies which coordinate should be used.
-
-        Returns
-        -------
-        d : lib.FloatArray2D
-            Array of shape (n_channels, n_channels) with shifts between
-            all channels.
-        """
-        n_channels = len(locs)
-        # Calculating center of mass for each channel and pick
-        coms = []
-        for channel_locs in locs:
-            coms.append([])
-            for group_locs in channel_locs:
-                group_com = getattr(group_locs, coordinate).mean()
-                coms[-1].append(group_com)
-        # Calculating image shifts
-        d = np.zeros((n_channels, n_channels))
-        for i in range(n_channels - 1):
-            for j in range(i + 1, n_channels):
-                d[i, j] = np.nanmean(
-                    [cj - ci for ci, cj in zip(coms[i], coms[j])]
-                )
-        return d
-
-    def shift_from_picked(
-        self,
-    ) -> (
-        tuple[FloatArray1D, FloatArray1D]
-        | tuple[FloatArray1D, FloatArray1D, FloatArray1D]
-    ):
-        """Used by ``self.align``. For each pick, calculate the center
-        of mass and RCC based on shifts.
-
-        Returns
-        -------
-        shifts : tuple
-            Shift for each spatial coordinate. Shape (2,) or (3,)
-            (if z coordinate present).
-        """
-        n_channels = len(self.locs)
-        locs = [self.picked_locs(_) for _ in range(n_channels)]
-        dy = self.shifts_from_picked_coordinate(locs, "y")
-        dx = self.shifts_from_picked_coordinate(locs, "x")
-        if all(["z" in _[0].columns for _ in locs]):
-            dz = self.shifts_from_picked_coordinate(locs, "z")
-        else:
-            dz = None
-        return lib.minimize_shifts(dx, dy, shifts_z=dz)
-
-    def shift_from_rcc(self) -> tuple[FloatArray1D, FloatArray1D]:
-        """Used by ``self.align``. Estimate image shifts using RCC on
-        whole images.
-
-        Returns
-        -------
-        shifts : tuple
-            Shift for x and y coordinates.
-        """
-        n_channels = len(self.locs)
-        rp = lib.ProgressDialog("Rendering images", 0, n_channels, self)
-        rp.set_value(0)
-        images = []
-        # render each channel and save it in images
-        for i, (locs_, info_) in enumerate(zip(self.locs, self.infos)):
-            _, image = render.render(locs_, info_, blur_method="smooth")
-            images.append(image)
-            rp.set_value(i + 1)
-        n_pairs = int(n_channels * (n_channels - 1) / 2)
-        rc = lib.ProgressDialog("Correlating image pairs", 0, n_pairs, self)
-        return imageprocess.rcc(images, callback=rc.set_value)
 
     @check_pick
     def clear_picks(self) -> None:
@@ -11728,9 +11281,15 @@ class View(QtWidgets.QLabel):
                 self._apply_drift(channel, drift)
                 self._driftfiles[channel] = path
 
-    def _apply_drift(self, channel: int, drift: FloatArray2D) -> None:
+    def _apply_drift(
+        self, channel: int, drift: pd.DataFrame | FloatArray2D
+    ) -> None:
         """Shift localizations in a given channel based on drift from a
         .txt file."""
+        if isinstance(drift, pd.DataFrame):
+            drift = (
+                drift.to_numpy()
+            )  # TODO: this is a mess, should jsut take a dataframe?
         all_frame = self.all_locs[channel]["frame"]
         frame = self.locs[channel]["frame"]
         if drift.shape[1] == 3:  # 3D drift

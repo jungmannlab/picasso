@@ -26,7 +26,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from numpy.lib.recfunctions import append_fields, drop_fields
-from scipy import stats
+from scipy import stats, optimize
 from PyQt6 import QtCore, QtWidgets, QtGui
 from playsound3 import playsound
 from tqdm import tqdm
@@ -1058,6 +1058,118 @@ def cumulative_exponential(
 ) -> FloatArray1D:
     """Used for binding kinetics estimation."""
     return a * (1 - np.exp(-(x / t))) + c
+
+
+def fit_cum_exp(data: FloatArray1D) -> dict:
+    """Fit a cumulative exponential function to data. Used for binding
+    kinetics estimation.
+
+    Parameters
+    ----------
+    data : FloatArray1D
+        Input data to fit, shape (N,).
+
+    Returns
+    -------
+    result : dict
+        Contains the best fit parameters and the fitted data.
+    """
+    data.sort()
+    n = len(data)
+    y = np.arange(1, n + 1)
+    data_min = data.min()
+    data_max = data.max()
+    p0 = [n, np.mean(data), data_min]
+    bounds = ([0, data_min, 0], [np.inf, data_max, np.inf])
+    popt, _ = optimize.curve_fit(
+        cumulative_exponential, data, y, p0=p0, bounds=bounds
+    )
+    result = {
+        "best_values": {"a": popt[0], "t": popt[1], "c": popt[2]},
+        "data": data,
+        "best_fit": cumulative_exponential(data, *popt),
+    }
+    return result
+
+
+def estimate_kinetic_rate(data: FloatArray1D) -> float:
+    """Find the mean dark/bright time by fitting to a cumulative
+    exponential function.
+
+    Parameters
+    ----------
+    data : FloatArray1D
+        Input data to fit, shape (N,).
+
+    Returns
+    -------
+    rate : float
+        Mean dark/bright time from the fitted exponential function.
+    """
+    if len(data) > 2:
+        if data.max() - data.min() == 0:
+            rate = np.nanmean(data)
+        else:
+            result = fit_cum_exp(data)
+            rate = result["best_values"]["t"]
+    else:
+        rate = np.nanmean(data)
+    return rate
+
+
+def plot_cumulative_exponential_fit(
+    data: SeriesOrFloatArray1D,
+    fit_result: dict,
+    fig: plt.Figure | None = None,
+    ax: plt.Axes | None = None,
+) -> plt.Figure:
+    """Plot a histogram for experimental data and the fitted cumulative
+    exponential function. Used for binding kinetics fit display.
+
+    Parameters
+    ----------
+    data : SeriesOrFloatArray1D
+        Input data to fit, shape (N,). For example, bright or dark
+        times.
+    fit_result : dict
+        Output of `fit_cum_exp` containing the best fit parameters and
+        the fitted data.
+    fig, ax : plt.Figure and plt.Axes, optional
+        If given, the plot will be drawn on the given figure and axes.
+        Otherwise, a new figure and axes will be created.
+
+    Returns
+    -------
+    fig : plt.Figure
+        The figure containing the plot.
+    """
+    if fig is None or ax is None:
+        fig, ax = plt.subplots()
+    else:
+        ax.clear()
+
+    # Bright
+    a = fit_result["best_values"]["a"]
+    t = fit_result["best_values"]["t"]
+    c = fit_result["best_values"]["c"]
+
+    ax.set_title(
+        "Cumulative exponential\n"
+        r"$Fit: {:.2f}\cdot(1-exp(-t/{:.2f}))+{:.2f}$".format(a, t, c)
+    )
+    data = data.copy()
+    data.sort_values(inplace=True)
+    y = np.arange(1, len(data) + 1)
+    ax.semilogx(data, y, label="data")
+    ax.semilogx(
+        data,
+        fit_result["best_fit"],
+        label=f"fit ($\\bar \\tau = {t:.2f}$)",
+    )
+    ax.legend(loc="best")
+    ax.set_xlabel("Duration (frames)")
+    ax.set_ylabel("Counts")
+    return fig
 
 
 def unpack_calibration(

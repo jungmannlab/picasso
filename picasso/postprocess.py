@@ -30,7 +30,7 @@ from tqdm import tqdm, trange
 
 import yaml
 
-from . import io, lib, render, imageprocess, masking, __version__
+from . import io, lib, clusterer, render, imageprocess, masking, __version__
 
 
 def get_index_blocks(
@@ -384,8 +384,9 @@ def picked_locs(
     pick_shape : {'Circle', 'Rectangle', 'Polygon', 'Square'}
         Shape of the pick.
     pick_size : float, optional
-        Size of the pick. Radius for the circles, width for the
-        rectangles, None for the polygons. Default is None.
+        Size of the pick in camera pixels. Radius for the circles, width
+        for the rectangles, None for the polygons, side length for
+        squares. Default is None.
     add_group : boolean, optional
         True if group id should be added to locs. Each pick will be
         assigned a different id. Default is True.
@@ -1000,7 +1001,7 @@ def nena(
         Data on the results, including the distances probed, best fit
         and fitted parameters.
     s : float
-        Estimated localization precision.
+        Estimated localization precision in camera pixels.
     """
     bin_centers, dnfl = next_frame_neighbor_distance_histogram(locs, callback)
 
@@ -1031,8 +1032,59 @@ def nena(
             "dc": popt[3],
             "sc": popt[4],
         },
+        "pixelsize": lib.get_from_metadata(info, "Pixelsize", default="N/A"),
     }
     return result, s
+
+
+def plot_nena(
+    nena_result: dict,
+    fig: plt.Figure = None,
+) -> plt.Figure:
+    """Plot the results of NeNA.
+
+    Parameters
+    ----------
+    nena_result : dict
+        Data on the results from function ``nena``, including the
+        distances probed, best fit and fitted parameters. If "pixelsize"
+        is included, the distances will be plotted in nm, otherwise in
+        camera pixels.
+    fig : plt.Figure
+        Figure to plot on. If None, a new figure and axes are
+        created.
+
+    Returns
+    -------
+    fig : plt.Figure
+        Figure containing the plot.
+    """
+    if fig is None:
+        fig = plt.Figure(constrained_layout=True)
+    else:
+        fig.clear()
+    d = deepcopy(nena_result["d"])
+    ax = fig.add_subplot(111)
+    pixelsize = (
+        nena_result["pixelsize"] if nena_result["pixelsize"] != "N/A" else 1
+    )
+    unit = "nm" if nena_result["pixelsize"] != "N/A" else "pixels"
+    d *= nena_result["pixelsize"]
+    ax.set_title(
+        "Next frame neighbor distance histogram, "
+        f"\u03c3 = {nena_result['best_values']['s'] * pixelsize:.2f} {unit}"
+    )
+    ax.plot(d, nena_result["data"], label="Data")
+    ax.plot(d, nena_result["best_fit"], label="Fit")
+    ax.set_xlabel(f"Distance ({unit})")
+    ax.set_ylabel("Counts")
+    ax.legend(loc="best")
+    ax.plot(nena_result["d"], nena_result["data"], label="Data")
+    ax.plot(nena_result["d"], nena_result["best_fit"], label="Best fit")
+    ax.set_xlabel(f"Distance ({unit})")
+    ax.set_ylabel("Number of neighbors")
+    ax.legend()
+    return fig
 
 
 def next_frame_neighbor_distance_histogram(
@@ -1129,6 +1181,51 @@ def _fill_dnfl(
                     if d <= d_max:
                         bin = int(d / bin_size)
                         dnfl[bin] += 1
+
+
+def plot_frc(
+    frc_result: dict,
+    fig: plt.Figure = None,
+) -> plt.Figure:
+    """Plot the results of the Fourier Ring Correlation (FRC) resolution
+    estimation.
+
+    Parameters
+    ----------
+    frc_result : dict
+        Dictionary result of ``frc``.
+    fig : plt.Figure
+        Figure to plot on. If None, a new figure and axes are
+        created.
+
+    Returns
+    -------
+    fig : plt.Figure
+        Figure containing the plot.
+    """
+    if fig is None:
+        fig = plt.Figure(constrained_layout=True)
+    else:
+        fig.clear()
+    q = frc_result["frequencies"]
+    frc_curve = frc_result["frc_curve"]
+    frc_curve_smooth = frc_result["frc_curve_smooth"]
+    res = frc_result["resolution"]
+    ax = fig.add_subplot(111)
+    ax.plot(q, frc_curve, color="gray", alpha=0.5, label="FRC curve")
+    ax.plot(q, frc_curve_smooth, label="Smoothed")
+    ax.axhline(
+        1 / 7,
+        color="black",
+        linewidth=1.0,
+        linestyle="--",
+        label="1/7 threshold",
+    )
+    ax.set_xlabel("Spatial frequency (nm\u207b\u00b9)")
+    ax.set_ylabel("FRC")
+    ax.set_title(f"FIRE resolution: {res:.2f} nm")
+    ax.legend()
+    return fig
 
 
 def frc(
@@ -1599,34 +1696,97 @@ def link(
     return linked_locs
 
 
-# def weighted_variance(locs):
-#     n = len(locs)
-#     w = locs.photons
-#     x = locs.x
-#     y = locs.y
-#     xWbarx = np.average(locs.x, weights=w)
-#     xWbary = np.average(locs.y, weights=w)
-#     wbarx = np.mean(locs.lpx)
-#     wbary = np.mean(locs.lpy)
-#     variance_x = (
-#         n
-#         / ((n - 1) * sum(w) ** 2)
-#         * (
-#             sum((w * x - wbarx * xWbarx) ** 2)
-#             - 2 * xWbarx * sum((w - wbarx) * (w * x - wbarx * xWbarx))
-#             + xWbarx**2 * sum((w - wbarx) ** 2)
-#         )
-#     )
-#     variance_y = (
-#         n
-#         / ((n - 1) * sum(w) ** 2)
-#         * (
-#             sum((w * y - wbary * xWbary) ** 2)
-#             - 2 * xWbary * sum((w - wbary) * (w * y - wbary * xWbary))
-#             + xWbary**2 * sum((w - wbary) ** 2)
-#         )
-#     )
-#     return variance_x, variance_y
+def combine_locs_in_picks(
+    locs: pd.DataFrame,
+    info: list[dict],
+    *,
+    picks: list[tuple] | str,
+    pick_shape: (
+        Literal["Circle", "Rectangle", "Polygon", "Square"] | None
+    ) = None,
+    pick_size: float | None = None,
+    progress_callback: (
+        Callable[[int], None] | Literal["console"] | None
+    ) = None,
+) -> pd.DataFrame:
+    """Combine localizations in picked regions.
+
+    Parameters
+    ----------
+    locs : pd.DataFrame
+        Localizations.
+    info : list of dicts
+        Metadata of the localizations.
+    picks : list of tuples or str
+        List of pick positions. If str, path to a YAML file containing
+        the pick positions. If the path is given, `pick_shape` and
+        `pick_size` are ignored and taken from the YAML file.
+    pick_shape : {'Circle', 'Rectangle', 'Polygon', 'Square'}, optional
+        Shape of the picks. Must be provided if `picks` is a list of
+        tuples. Ignored if `picks` is a path to a YAML file. Default is
+        None.
+    pick_size : float or None, optional
+        Size of the picks. For circular picks, the size is the radius;
+        for rectangular picks, the size is the width; for square picks,
+        the size is the side length. None for polygonal picks (size not
+        defined).
+    progress_callback : callable, 'console' or None, optional
+        Function to display progress (takes in an integer, maximum is
+        the number of picks). If 'console', progress is displayed in the
+        console. If None, no progress is displayed. Default is None.
+
+    Returns
+    -------
+    out_locs : pd.DataFrame
+        Localizations after combining localizations in the picked
+        regions.
+    """
+    if isinstance(picks, str):
+        pixelsize = lib.get_from_metadata(info, "Pixelsize", raise_error=True)
+        picks, pick_shape, pick_size = io.load_picks(picks, pixelsize)
+    assert pick_shape in {
+        "Circle",
+        "Rectangle",
+        "Polygon",
+        "Square",
+    }, "Invalid pick shape"
+    if pick_shape in {"Circle", "Rectangle", "Square"} and pick_size is None:
+        raise ValueError("Pick size must be provided for non-polygonal picks.")
+    pl = picked_locs(
+        locs=locs,
+        info=info,
+        picks=picks,
+        pick_shape=pick_shape,
+        pick_size=pick_size,
+    )
+    # use very large values for linking localizations
+    r_max = 2 * max(
+        lib.get_from_metadata(info, "Height"),
+        lib.get_from_metadata(info, "Width"),
+    )
+    max_dark = lib.get_from_metadata(info, "Frames", default=10_000)
+
+    # link every localization in each pick
+    if progress_callback == "console":
+        iter_range = tqdm(range(len(pl)), desc="Combining picks", unit="pick")
+    else:
+        iter_range = range(len(pl))
+    out_locs = []
+    for i in iter_range:
+        if callable(progress_callback):
+            progress_callback(i)
+        pick_locs = pl[i]
+        pick_locs_out = link(
+            pick_locs,
+            info,
+            r_max=r_max,
+            max_dark_time=max_dark,
+            remove_ambiguous_lengths=False,
+        )
+        if len(pick_locs_out):
+            out_locs.append(pick_locs_out)
+    out_locs = pd.concat(out_locs, ignore_index=True)
+    return out_locs
 
 
 # Combine localizations: calculate the properties of the group
@@ -2680,6 +2840,81 @@ def apply_drift(
     return _apply_drift(locs, drift)
 
 
+def plot_drift(
+    drift: pd.DataFrame,
+    pixelsize: int | float,
+    fig: plt.Figure | None = None,
+) -> plt.Figure:
+    """Convenience function to plot 2D or 3D drift from a DataFrame.
+
+    Parameters
+    ----------
+    drift : pd.DataFrame
+        DataFrame containing the drift to plot. Should have columns 'x'
+        and 'y', and optionally 'z'.
+    pixelsize : int or float
+        Pixel size in nm to convert drift from pixels to nm for
+        plotting.
+    fig : plt.Figure or None, optional
+        Matplotlib figure to plot on. If None (default), a new figure is
+        created.
+
+    Returns
+    -------
+    fig : plt.Figure
+        The figure containing the plot.
+    """
+    assert (
+        "x" in drift.columns and "y" in drift.columns
+    ), "Drift must have 'x' and 'y' columns"
+    if ax is not None:
+        print("Warning: ax parameter is not used an will be ignored.")
+    if fig is None:
+        fig = plt.Figure(figsize=(10, 6), constrained_layout=True)
+    else:
+        fig.clear()
+
+    if "z" in drift.columns:
+        ax1 = fig.add_subplot(131)
+        ax1.plot(drift["x"] * pixelsize, label="x")
+        ax1.plot(drift["y"] * pixelsize, label="y")
+        ax1.legend(loc="best")
+        ax1.set_xlabel("Frame")
+        ax1.set_ylabel("Drift (nm)")
+        ax2 = fig.add_subplot(132)
+        ax2.plot(
+            drift.x * pixelsize,
+            drift.y * pixelsize,
+            color=list(plt.rcParams["axes.prop_cycle"])[2]["color"],
+        )
+
+        ax2.set_xlabel("x (nm)")
+        ax2.set_ylabel("y (nm)")
+        ax2.invert_yaxis()
+        ax3 = fig.add_subplot(133)
+        ax3.plot(drift.z, label="z")
+        ax3.legend(loc="best")
+        ax3.set_xlabel("Frame")
+        ax3.set_ylabel("Drift (nm)")
+    else:
+        ax1 = fig.add_subplot(121)
+        ax1.plot(drift["x"] * pixelsize, label="x")
+        ax1.plot(drift["y"] * pixelsize, label="y")
+        ax1.legend(loc="best")
+        ax1.set_xlabel("Frame")
+        ax1.set_ylabel("Drift (nm)")
+        ax2 = fig.add_subplot(122)
+        ax2.plot(
+            drift.x * pixelsize,
+            drift.y * pixelsize,
+            color=list(plt.rcParams["axes.prop_cycle"])[2]["color"],
+        )
+        ax2.set_xlabel("x (nm)")
+        ax2.set_ylabel("y (nm)")
+        ax2.invert_yaxis()
+    return fig
+
+
 def align(
     locs: list[pd.DataFrame],
     infos: list[dict],
@@ -3108,3 +3343,258 @@ def nn_analysis(
         nn = distances
     nn.reshape(-1, nn_count)  # ensure the shape is (N, nn_count)
     return nn
+
+
+def resi(
+    locs: list[pd.DataFrame],
+    infos: list[list[dict]],
+    radius_xy: float | list[float],
+    radius_z: float | list[float] | None = None,
+    min_locs: int | list[int] = 10,
+    apply_fa: bool = True,
+    save_clustered_locs: bool = False,
+    save_cluster_centers: bool = False,
+    output_path: str | None = None,
+    suffix_locs: str = "_clustered",
+    suffix_centers: str = "_cluster_centers",
+    progress_callback: (
+        Callable[[int], None] | Literal["console"] | None
+    ) = None,
+) -> tuple[pd.DataFrame, list[dict]]:
+    """Perform RESI (REsolution by Sequential Imaging) analysis on
+    multiple channels.
+
+    Clusters localizations from each channel using the SMLM clusterer,
+    extracts cluster centers, and combines them into a single DataFrame
+    with channel IDs.
+
+    Parameters
+    ----------
+    locs : list of pd.DataFrames
+        List of localization datasets, one DataFrame per channel.
+    infos : list of list of dicts
+        List of metadata dictionaries for each channel.
+    radius_xy : float or list of float
+        Clustering radius in xy (camera pixels). If a single float is
+        provided, it is applied to all channels. If a list, must have
+        length equal to the number of channels.
+    radius_z : float, list of float, or None, optional
+        Clustering radius in z (camera pixels). Only used for 3D data.
+        If a float, applied to all channels. If a list, must have length
+        equal to the number of channels. Default is None.
+    min_locs : int or list of int, optional
+        Minimum number of localizations in a cluster. If an int, applied
+        to all channels. If a list, must have length equal to the number
+        of channels. Default is 10.
+    apply_fa : bool, optional
+        If True, apply basic frame analysis to clustered localizations.
+        Default is True.
+    save_clustered_locs : bool, optional
+        If True, save clustered localizations for each channel to a
+        file. Requires output_path to be provided. Default is False.
+    save_cluster_centers : bool, optional
+        If True, save cluster centers for each channel to a file.
+        Requires output_path to be provided. Default is False.
+    output_path : str or None, optional
+        Path to save combined RESI cluster centers. If None and
+        save_* parameters are True, clustered data will not be saved.
+        Default is None.
+    suffix_locs : str, optional
+        Suffix appended to output_path for saved clustered
+        localizations. Default is "_clustered".
+    suffix_centers : str, optional
+        Suffix appended to output_path for saved cluster centers from
+        individual channels. Default is "_cluster_centers".
+    progress_callback : Callable[[int], None] | Literal["console"] | None, optional
+        Callback function to report progress where the input integer is
+        the index of the channel currently processed. If "console", uses
+        a simple console print. If None, no progress is reported.
+        Default is None.
+
+    Returns
+    -------
+    resi_centers : pd.DataFrame
+        Combined cluster centers from all channels. Contains all columns
+        from the original localizations plus a 'resi_channel_id' column
+        indicating which channel each cluster belongs to. The 'group'
+        column is renamed to 'cluster_id'.
+    resi_info : list of dicts
+        Metadata for the RESI cluster centers, containing clustering
+        parameters for each channel.
+
+    Raises
+    ------
+    ValueError
+        If fewer than 2 channels are provided, or if list parameters
+        have incorrect lengths.
+
+    Notes
+    -----
+    RESI (REsolution by Sequential Imaging) relies on sequential imaging
+    to ensure sufficient sparsity of binding sites. Therefore, at least
+    2 channels are required.
+
+    If output_path is provided, the combined RESI cluster centers will
+    be saved with a new metadata entry containing clustering parameters
+    for each channel.
+    """
+    n_channels = len(locs)
+    if n_channels < 2:
+        raise ValueError(
+            f"RESI requires at least 2 channels, but got {n_channels}. "
+            "Consider using SMLM Clusterer for single-channel clustering."
+        )
+
+    # Ensure all parameters are lists for consistent handling
+    if isinstance(radius_xy, (int, float)):
+        radius_xy = [radius_xy] * n_channels
+    elif len(radius_xy) != n_channels:
+        raise ValueError(
+            f"radius_xy list length ({len(radius_xy)}) must match "
+            f"number of channels ({n_channels})"
+        )
+
+    if radius_z is not None:
+        if isinstance(radius_z, (int, float)):
+            radius_z = [radius_z] * n_channels
+        elif len(radius_z) != n_channels:
+            raise ValueError(
+                f"radius_z list length ({len(radius_z)}) must match "
+                f"number of channels ({n_channels})"
+            )
+    else:
+        radius_z = [None] * n_channels
+
+    if isinstance(min_locs, int):
+        min_locs = [min_locs] * n_channels
+    elif len(min_locs) != n_channels:
+        raise ValueError(
+            f"min_locs list length ({len(min_locs)}) must match "
+            f"number of channels ({n_channels})"
+        )
+    return _resi(
+        locs=locs,
+        infos=infos,
+        radius_xy=radius_xy,
+        radius_z=radius_z,
+        min_locs=min_locs,
+        apply_fa=apply_fa,
+        save_clustered_locs=save_clustered_locs,
+        save_cluster_centers=save_cluster_centers,
+        output_path=output_path,
+        suffix_locs=suffix_locs,
+        suffix_centers=suffix_centers,
+        progress_callback=progress_callback,
+    )
+
+
+def _resi(
+    locs: list[pd.DataFrame],
+    infos: list[list[dict]],
+    radius_xy: list[float],
+    radius_z: list[float] | None = None,
+    min_locs: list[int] = 10,
+    apply_fa: bool = True,
+    save_clustered_locs: bool = False,
+    save_cluster_centers: bool = False,
+    output_path: str | None = None,
+    suffix_locs: str = "_clustered",
+    suffix_centers: str = "_cluster_centers",
+    progress_callback: (
+        Callable[[int], None] | Literal["console"] | None
+    ) = None,
+) -> tuple[pd.DataFrame, list[dict]]:
+    """Internal function to perform RESI analysis, assumes all
+    parameters are in the correct format and that there are at least 2
+    chennels. See `resi` for details."""
+    ndim = 3 if all(["z" in locs_.columns for locs_ in locs]) else 2
+    pixelsize = lib.get_from_metadata(infos[0], "Pixelsize", raise_error=True)
+
+    # Process each channel
+    resi_channels = []
+    if progress_callback == "console":
+        iter_range = tqdm(
+            len(locs), desc="Processing channels", unit="Channels"
+        )
+    else:
+        iter_range = range(len(locs))
+    for i in iter_range:
+        if callable(progress_callback):
+            progress_callback(i)
+        locs_ = locs[i]
+        info_ = infos[i]
+        r_xy = radius_xy[i]
+        r_z = radius_z[i]
+        min_locs_ = min_locs[i]
+
+        # Cluster localizations for this channel
+        clustered_locs = clusterer.cluster(
+            locs_,
+            radius_xy=r_xy,
+            min_locs=min_locs_,
+            frame_analysis=apply_fa,
+            radius_z=r_z if ndim == 3 else None,
+            pixelsize=pixelsize,
+        )
+
+        # Save clustered localizations if requested
+        if save_clustered_locs and output_path is not None:
+            new_info = {
+                "Clustering radius xy (nm)": r_xy * pixelsize,
+                "Min. number of locs": min_locs_,
+                "Basic frame analysis": apply_fa,
+            }
+            if ndim == 3:
+                new_info["Clustering radius z (nm)"] = r_z * pixelsize
+
+            save_path = output_path.replace(".hdf5", f"{suffix_locs}.hdf5")
+            io.save_locs(save_path, clustered_locs, info_ + [new_info])
+
+        # Extract cluster centers from clustered localizations
+        centers = clusterer.find_cluster_centers(clustered_locs, pixelsize)
+
+        # Save cluster centers if requested
+        if save_cluster_centers and output_path is not None:
+            new_info = {
+                "Clustering radius xy (nm)": r_xy * pixelsize,
+                "Min. number of locs": min_locs_,
+                "Basic frame analysis": apply_fa,
+            }
+            if ndim == 3:
+                new_info["Clustering radius z (nm)"] = r_z * pixelsize
+
+            save_path = output_path.replace(".hdf5", f"{suffix_centers}.hdf5")
+            io.save_locs(save_path, centers, info_ + [new_info])
+
+        # Add RESI channel ID to identify which channel this cluster belongs to
+        centers["resi_channel_id"] = i * np.ones(
+            len(centers),
+            dtype=np.int8,
+        )
+        resi_channels.append(centers)
+
+    # Combine cluster centers from all channels
+    all_resi = pd.concat(resi_channels, ignore_index=True)
+
+    # Rename 'group' to 'cluster_id' for clarity
+    all_resi["cluster_id"] = all_resi["group"]
+    all_resi.drop(columns=["group"], inplace=True)
+    all_resi.sort_values(kind="quicksort", by="frame", inplace=True)
+
+    new_info = {
+        "Clustering radius xy (nm) for each channel": list(
+            np.array(radius_xy) * pixelsize
+        ),
+        "Min. number of locs in a cluster for each channel": list(min_locs),
+        "Basic frame analysis": apply_fa,
+    }
+    if ndim == 3:
+        new_info["Clustering radius z (nm) for each channel"] = list(
+            np.array(radius_z) * pixelsize
+        )
+    new_info = infos[0] + [new_info]
+    # Save combined RESI results if output path is provided
+    if output_path is not None:
+        io.save_locs(output_path, all_resi, new_info)
+
+    return all_resi, new_info
