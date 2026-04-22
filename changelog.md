@@ -1,6 +1,6 @@
 # Changelog
 
-Last change: 21-APR-2026 CEST
+Last change: 22-APR-2026 CEST
 
 ## 0.10.0
 
@@ -75,8 +75,10 @@ Last change: 21-APR-2026 CEST
 - `picasso.aim`: `intersect1d`, `count_intersections`, `run_intersections`, `run_intersections_multithread`, `get_fft_peak`, `get_fft_peak_z`, `point_intersect_2d` and `point_intersect_3d` (will become private functions in v0.11.0)
 - `picasso.masking.mask_locs` uses metadata rather than now deprecated `width` and `height` parameters
 - `picasso.spinna.MaskGenerator`: `run_checks` parameter (will be removed in v0.11.0)
-- `picasso.localize.identify` and `picasso.localize.localize` will return metadata by default in v0.11
+- `picasso.localize.identify` and `picasso.localize.localize` will return metadata by default in v0.11.0
 - `fit_z` and `fit_z_parallel` in `picasso.zfit` will be deprecated in v0.11.0. `zfit.zfit` takes over as the main function in the script
+- `picasso.render` takes in `disp_px_size` rather than `oversampling`, see the function; `oversampling` will be removed in v0.11.0
+- `picasso.render` functions: `render_hist`, `render_gaussian`, `render_gaussian_iso`, `render_smooth` and `render_convolve` will become private in v0.11.0
 
 ## 0.9.10
 

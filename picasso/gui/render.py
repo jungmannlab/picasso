@@ -26,6 +26,7 @@ from functools import partial
 from typing import Callable, Literal
 from PIL import Image
 
+from pre_commit import color
 import yaml
 import matplotlib
 import matplotlib.pyplot as plt
@@ -7412,197 +7413,6 @@ class View(QtWidgets.QLabel):
         else:
             event.ignore()
 
-    def get_pick_polygon(
-        self,
-        start_x: float,
-        start_y: float,
-        end_x: float,
-        end_y: float,
-        width: float,
-        return_most_right: bool = False,
-    ) -> QtGui.QPolygonF | tuple[float, float]:
-        """Find QtGui.QPolygonF object used for drawing a rectangular
-        pick.
-
-        Returns
-        -------
-        p : QtGui.QPolygonF
-            The polygon.
-        """
-        X, Y = lib.get_pick_rectangle_corners(
-            start_x, start_y, end_x, end_y, width
-        )
-        p = QtGui.QPolygonF()
-        for x, y in zip(X, Y):
-            p.append(QtCore.QPointF(x, y))
-        if return_most_right:
-            ix_most_right = np.argmax(X)
-            x_most_right = X[ix_most_right]
-            y_most_right = Y[ix_most_right]
-            return p, (x_most_right, y_most_right)
-        return p
-
-    def draw_picks_circle(self, image: QtGui.QImage) -> None:
-        """Draw circular picks onto the image of rendered localizations."""
-        t_dialog = self.window.tools_settings_dialog
-        pixelsize = self.window.display_settings_dlg.pixelsize.value()
-
-        # draw circular picks as points
-        if t_dialog.point_picks.isChecked():
-            painter = QtGui.QPainter(image)
-            painter.setBrush(QtGui.QBrush(QtGui.QColor("yellow")))
-            painter.setPen(QtGui.QColor("yellow"))
-
-            # yellow is barely visible on white background
-            if self.window.dataset_dialog.wbackground.isChecked():
-                painter.setBrush(QtGui.QBrush(QtGui.QColor("red")))
-                painter.setPen(QtGui.QColor("red"))
-
-            for i, pick in enumerate(self._picks):
-
-                # convert from camera units to display units
-                cx, cy = self.map_to_view(*pick)
-                painter.drawEllipse(QtCore.QPoint(cx, cy), 3, 3)
-
-                # annotate picks
-                if t_dialog.pick_annotation.isChecked():
-                    painter.drawText(cx + 20, cy + 20, str(i))
-
-        # draw circles
-        else:
-            d = t_dialog.pick_diameter.value() / pixelsize
-            d *= self.width() / self.viewport_width()
-            d = int(d)
-
-            painter = QtGui.QPainter(image)
-            painter.setPen(QtGui.QColor("yellow"))
-
-            # yellow is barely visible on white background
-            if self.window.dataset_dialog.wbackground.isChecked():
-                painter.setPen(QtGui.QColor("red"))
-
-            for i, pick in enumerate(self._picks):
-                # check that the pick is within the view
-                if (
-                    pick[0] < self.viewport[0][1]
-                    or pick[0] > self.viewport[1][1]
-                    or pick[1] < self.viewport[0][0]
-                    or pick[1] > self.viewport[1][0]
-                ):
-                    continue
-
-                # convert from camera units to display units
-                cx, cy = self.map_to_view(*pick)
-                painter.drawEllipse(int(cx - d / 2), int(cy - d / 2), d, d)
-
-                # annotate picks
-                if t_dialog.pick_annotation.isChecked():
-                    painter.drawText(int(cx + d / 2), int(cy + d / 2), str(i))
-        painter.end()
-
-    def draw_picks_rectangle(self, image: QtGui.QImage) -> None:
-        """Draw rectangular picks onto the image of rendered
-        localizations."""
-        pixelsize = self.window.display_settings_dlg.pixelsize.value()
-        w = self.window.tools_settings_dialog.pick_width.value() / pixelsize
-        w *= self.width() / self.viewport_width()
-
-        painter = QtGui.QPainter(image)
-        painter.setPen(QtGui.QColor("yellow"))
-
-        # yellow is barely visible on white background
-        if self.window.dataset_dialog.wbackground.isChecked():
-            painter.setPen(QtGui.QColor("red"))
-
-        for i, pick in enumerate(self._picks):
-
-            # convert from camera units to display units
-            start_x, start_y = self.map_to_view(*pick[0])
-            end_x, end_y = self.map_to_view(*pick[1])
-
-            # draw a straight line across the pick
-            painter.drawLine(start_x, start_y, end_x, end_y)
-
-            # draw a rectangle
-            polygon, most_right = self.get_pick_polygon(
-                start_x, start_y, end_x, end_y, w, return_most_right=True
-            )
-            painter.drawPolygon(polygon)
-
-            # annotate picks
-            if self.window.display_settings_dlg.pick_annotation.isChecked():
-                painter.drawText(*most_right, str(i))
-        painter.end()
-
-    def draw_picks_polygon(self, image: QtGui.QImage) -> None:
-        """Draw polygon picks onto the image of rendered localizations."""
-        t_dialog = self.window.tools_settings_dialog
-        painter = QtGui.QPainter(image)
-        painter.setPen(QtGui.QColor("yellow"))
-
-        # yellow is barely visible on white background
-        if self.window.dataset_dialog.wbackground.isChecked():
-            painter.setPen(QtGui.QColor("red"))
-
-        # draw corners and lines
-        for i, pick in enumerate(self._picks):
-            oldpoint = []
-            for point in pick:
-                cx, cy = self.map_to_view(*point)
-                painter.drawEllipse(
-                    QtCore.QPoint(cx, cy),
-                    int(POLYGON_POINTER_SIZE / 2),
-                    int(POLYGON_POINTER_SIZE / 2),
-                )
-                if oldpoint != []:  # draw the line
-                    ox, oy = self.map_to_view(*oldpoint)
-                    painter.drawLine(cx, cy, ox, oy)
-                oldpoint = point
-
-            # annotate picks
-            if len(pick):
-                if t_dialog.pick_annotation.isChecked():
-                    painter.drawText(
-                        cx + int(POLYGON_POINTER_SIZE / 2) + 10,
-                        cy + int(POLYGON_POINTER_SIZE / 2) + 10,
-                        str(i),
-                    )
-        painter.end()
-
-    def draw_picks_square(self, image: QtGui.QImage) -> None:
-        """Draw square picks onto the image of rendered localizations."""
-        t_dialog = self.window.tools_settings_dialog
-        pixelsize = self.window.display_settings_dlg.pixelsize.value()
-        w = t_dialog.pick_side_length.value() / pixelsize
-        w *= self.width() / self.viewport_width()
-        w = int(w)
-        painter = QtGui.QPainter(image)
-        painter.setPen(QtGui.QColor("yellow"))
-        # yellow is barely visible on white background
-        if self.window.dataset_dialog.wbackground.isChecked():
-            painter.setPen(QtGui.QColor("red"))
-
-        for i, pick in enumerate(self._picks):
-            # check that the pick is within the view
-            if (
-                pick[0] < self.viewport[0][1]
-                or pick[0] > self.viewport[1][1]
-                or pick[1] < self.viewport[0][0]
-                or pick[1] > self.viewport[1][0]
-            ):
-                continue
-
-            # convert from camera units to display units
-            cx, cy = self.map_to_view(*pick)
-            painter.drawRect(int(cx - w / 2), int(cy - w / 2), w, w)
-
-            # annotate picks
-            if t_dialog.pick_annotation.isChecked():
-                painter.drawText(
-                    int(cx + w / 2) + 10, int(cy + w / 2) + 10, str(i)
-                )
-        painter.end()
-
     def draw_picks(self, image: QtGui.QImage) -> QtGui.QImage:
         """Draw all selected picks onto the image of rendered
         localizations.
@@ -7617,15 +7427,22 @@ class View(QtWidgets.QLabel):
         image : QImage
             Image with the drawn picks.
         """
-        image = image.copy()
-        if self._pick_shape == "Circle":
-            return self.draw_picks_circle(image)
-        elif self._pick_shape == "Rectangle":
-            return self.draw_picks_rectangle(image)
-        elif self._pick_shape == "Polygon":
-            return self.draw_picks_polygon(image)
-        elif self._pick_shape == "Square":
-            return self.draw_picks_square(image)
+        t_dialog = self.window.tools_settings_dialog
+        color = (
+            QtGui.QColor("yellow")
+            if not self.window.dataset_dialog.wbackground.isChecked()
+            else QtGui.QColor("red")
+        )
+        return render.draw_picks(
+            image=image,
+            viewport=self.viewport,
+            picks=self._picks,
+            pick_shape=self._pick_shape,
+            pick_size=self._pick_size,
+            point_picks=t_dialog.point_picks.isChecked(),
+            annotate_picks=t_dialog.pick_annotation.isChecked(),
+            color=color,
+        )
 
     def draw_rectangle_pick_ongoing(self, image: QtGui.QImage) -> QtGui.QImage:
         """Draw an ongoing rectangular pick onto image.
@@ -7657,7 +7474,7 @@ class View(QtWidgets.QLabel):
         # convert from camera units to display units
         w *= self.width() / self.viewport_width()
 
-        polygon = self.get_pick_polygon(
+        polygon = render.get_rectangle_pick_polygon(
             self.rectangle_pick_start_x,
             self.rectangle_pick_start_y,
             self.rectangle_pick_current_x,
@@ -7671,7 +7488,7 @@ class View(QtWidgets.QLabel):
         return image
 
     def draw_points(self, image: QtGui.QImage) -> QtGui.QImage:
-        """Draw points and lines and distances between them onto image.
+        """Draw points, lines and distances between them onto image.
 
         Parameters
         ----------
@@ -7683,63 +7500,18 @@ class View(QtWidgets.QLabel):
         image : QImage
             Image with the drawn points.
         """
-        d = 20  # width of the drawn crosses (window pixels)
-        painter = QtGui.QPainter(image)
-        painter.setPen(QtGui.QColor("yellow"))
-
-        # yellow is barely visible on white background
-        if self.window.dataset_dialog.wbackground.isChecked():
-            painter.setPen(QtGui.QColor("red"))
-
-        cx = []
-        cy = []
-        ox = []  # together with oldpoint used for drawing
-        oy = []  # lines between points
-        oldpoint = []
-        pixelsize = self.window.display_settings_dlg.pixelsize.value()
-        for point in self._points:
-            if oldpoint != []:
-                ox, oy = self.map_to_view(*oldpoint)  # turn to display units
-            cx, cy = self.map_to_view(*point)  # turn to display units
-
-            # draw a cross
-            painter.drawPoint(cx, cy)
-            painter.drawLine(cx, cy, int(cx + d / 2), cy)
-            painter.drawLine(cx, cy, cx, int(cy + d / 2))
-            painter.drawLine(cx, cy, int(cx - d / 2), cy)
-            painter.drawLine(cx, cy, cx, int(cy - d / 2))
-
-            # draw a line between points and show distance
-            if oldpoint != []:
-                painter.drawLine(cx, cy, ox, oy)
-                font = painter.font()
-                font.setPixelSize(20)
-                painter.setFont(font)
-
-                # get distance with 2 decimal places
-                distance = (
-                    float(
-                        int(
-                            np.sqrt(
-                                (
-                                    (oldpoint[0] - point[0]) ** 2
-                                    + (oldpoint[1] - point[1]) ** 2
-                                )
-                            )
-                            * pixelsize
-                            * 100
-                        )
-                    )
-                    / 100
-                )
-                painter.drawText(
-                    int((cx + ox) / 2 + d),
-                    int((cy + oy) / 2 + d),
-                    str(distance) + " nm",
-                )
-            oldpoint = point
-        painter.end()
-        return image
+        color = (
+            QtGui.QColor("yellow")
+            if not self.window.dataset_dialog.wbackground.isChecked()
+            else QtGui.QColor("red")
+        )
+        return render.draw_points(
+            image=image,
+            viewport=self.viewport,
+            points=self._points,
+            pixelsize=self.window.display_settings_dlg.pixelsize.value(),
+            color=color,
+        )
 
     def draw_scalebar(self, image: QtGui.QImage) -> QtGui.QImage:
         """Draw a scalebar.
@@ -7754,50 +7526,21 @@ class View(QtWidgets.QLabel):
         image : QImage
             Image with the drawn scalebar.
         """
-        if self.window.display_settings_dlg.scalebar_groupbox.isChecked():
-            pixelsize = self.window.display_settings_dlg.pixelsize.value()
-
-            # length (nm)
-            scalebar = self.window.display_settings_dlg.scalebar.value()
-            length_camerapxl = scalebar / pixelsize
-            length_displaypxl = int(
-                round(self.width() * length_camerapxl / self.viewport_width())
+        color = (
+            QtGui.QColor("white")
+            if not self.window.dataset_dialog.wbackground.isChecked()
+            else QtGui.QColor("black")
+        )
+        d_dialog = self.window.display_settings_dlg
+        if d_dialog.scalebar_groupbox.isChecked():
+            image = render.draw_scalebar(
+                image=image,
+                viewport=self.viewport,
+                scalebar_length_nm=d_dialog.scalebar.value(),
+                pixelsize=d_dialog.pixelsize.value(),
+                display_length=d_dialog.scalebar_text.isChecked(),
+                color=color,
             )
-            height = 10  # display pixels
-            painter = QtGui.QPainter(image)
-            painter.setPen(QtGui.QPen(QtCore.Qt.PenStyle.NoPen))
-            painter.setBrush(QtGui.QBrush(QtGui.QColor("white")))
-
-            # white scalebar not visible on white background
-            if self.window.dataset_dialog.wbackground.isChecked():
-                painter.setBrush(QtGui.QBrush(QtGui.QColor("black")))
-
-            # draw a rectangle
-            x = self.width() - length_displaypxl - 35
-            y = self.height() - height - 20
-            painter.drawRect(x, y, length_displaypxl + 0, height + 0)
-
-            # display scalebar's length
-            if self.window.display_settings_dlg.scalebar_text.isChecked():
-                font = painter.font()
-                font.setPixelSize(20)
-                painter.setFont(font)
-                painter.setPen(QtGui.QColor("white"))
-
-                # white scalebar not visible on white background
-                if self.window.dataset_dialog.wbackground.isChecked():
-                    painter.setPen(QtGui.QColor("black"))
-                text_spacer = 40
-                text_width = length_displaypxl + 2 * text_spacer
-                text_height = text_spacer
-                painter.drawText(
-                    x - text_spacer,
-                    y - 25,
-                    text_width,
-                    text_height,
-                    QtCore.Qt.AlignmentFlag.AlignHCenter,
-                    str(scalebar) + " nm",
-                )
         return image
 
     def draw_legend(self, image: QtGui.QImage) -> QtGui.QImage:
@@ -7814,40 +7557,27 @@ class View(QtWidgets.QLabel):
         image : QImage
             Image with the drawn legend.
         """
+        # extract colors that are to be displayed, keys are channel
+        # names and values are colors
+        channel_names = []
+        channel_colors = []
+        for i in range(len(self.locs_paths)):
+            if self.window.dataset_dialog.checks[i].isChecked():
+                channel_name = self.window.dataset_dialog.checks[i].text()
+                channel_names.append(channel_name)
+                colordisp = self.window.dataset_dialog.colordisp_all[i]
+                color = colordisp.palette().color(
+                    QtGui.QPalette.ColorRole.Window
+                )
+                # Convert QColor to RGB tuple (0-255 range)
+                color_rgb = (color.red(), color.green(), color.blue())
+                channel_colors.append(color_rgb)
         if self.window.dataset_dialog.legend.isChecked():
-            n_channels = len(self.locs_paths)
-            painter = QtGui.QPainter(image)
-            # initial positions
-            x = 12
-            y = 26
-            dy = 24  # space between names
-            padding = 4  # padding around text
-            font = painter.font()
-            font.setPixelSize(16)
-            painter.setFont(font)
-            fm = QtGui.QFontMetrics(font)
-            for i in range(n_channels):
-                if self.window.dataset_dialog.checks[i].isChecked():
-                    text = self.window.dataset_dialog.checks[i].text()
-                    # draw black background
-                    text_rect = fm.boundingRect(text)
-                    bg_rect = QtCore.QRect(
-                        x - padding,
-                        y - fm.ascent() - padding,
-                        text_rect.width() + 2 * padding,
-                        fm.height() + 2 * padding,
-                    )
-                    painter.setPen(QtGui.QPen(QtCore.Qt.PenStyle.NoPen))
-                    painter.setBrush(QtGui.QBrush(QtCore.Qt.GlobalColor.black))
-                    painter.drawRect(bg_rect)
-                    # draw colored text
-                    colordisp = self.window.dataset_dialog.colordisp_all[i]
-                    color = colordisp.palette().color(
-                        QtGui.QPalette.ColorRole.Window
-                    )
-                    painter.setPen(QtGui.QPen(color))
-                    painter.drawText(QtCore.QPoint(x, y), text)
-                    y += dy
+            image = render.draw_legend(
+                image=image,
+                channel_names=channel_names,
+                channel_colors=channel_colors,
+            )
         return image
 
     def draw_minimap(self, image: QtGui.QImage) -> QtGui.QImage:
@@ -7864,31 +7594,23 @@ class View(QtWidgets.QLabel):
             Image with the drawn minimap.
         """
         if self.window.display_settings_dlg.minimap.isChecked():
-            movie_height, movie_width = self.movie_size()
-            length_minimap = 100
-            height_minimap = int(movie_height / movie_width * 100)
-            # draw in the upper right corner, overview rectangle
-            x = self.width() - length_minimap - 20
-            y = 20
-            painter = QtGui.QPainter(image)
-            painter.setPen(QtGui.QColor("white"))
-            if self.window.dataset_dialog.wbackground.isChecked():
-                painter.setPen(QtGui.QColor("black"))
-            painter.drawRect(x, y, length_minimap + 0, height_minimap + 0)
-            painter.setPen(QtGui.QColor("yellow"))
-            if self.window.dataset_dialog.wbackground.isChecked():
-                painter.setPen(QtGui.QColor("red"))
-            length = max(
-                5,
-                int(self.viewport_width() / movie_width * length_minimap),
+            color_main = (
+                QtGui.QColor("yellow")
+                if not self.window.dataset_dialog.wbackground.isChecked()
+                else QtGui.QColor("red")
             )
-            height = max(
-                5,
-                int(self.viewport_height() / movie_height * height_minimap),
+            color_frame = (
+                QtGui.QColor("white")
+                if not self.window.dataset_dialog.wbackground.isChecked()
+                else QtGui.QColor("black")
             )
-            x_vp = int(self.viewport[0][1] / movie_width * length_minimap)
-            y_vp = int(self.viewport[0][0] / movie_height * length_minimap)
-            painter.drawRect(x + x_vp, y + y_vp, length + 0, height + 0)
+            image = render.draw_minimap(
+                image=image,
+                viewport=self.viewport,
+                max_viewport_size=self.movie_size(),
+                color_main=color_main,
+                color_frame=color_frame,
+            )
         return image
 
     def draw_scene(
@@ -8227,7 +7949,7 @@ class View(QtWidgets.QLabel):
             else:
                 return None
 
-    def get_channel3d(self, title: str = "Choose a channel") -> int | None:
+    def get_channel3d(self, title: str = "Select channel") -> int | None:
         """Similar to ``self.get_channel``, used in selecting 3D picks.
         Add an option to show all channels simultaneously."""
         n_channels = len(self.locs_paths)
@@ -8239,7 +7961,7 @@ class View(QtWidgets.QLabel):
             pathlist = list(self.locs_paths)
             pathlist.append("Show all channels")
             index, ok = QtWidgets.QInputDialog.getItem(
-                self, "Select channel", "Channel:", pathlist, editable=False
+                self, title, "Channel:", pathlist, editable=False
             )
             if ok:
                 return pathlist.index(index)
@@ -8303,31 +8025,21 @@ class View(QtWidgets.QLabel):
 
         # oversampling
         optimal_oversampling = self.display_pixels_per_viewport_pixels()
+        optimal_disp_px_size = pixelsize / optimal_oversampling
         if disp_px_size is None:
             if disp_dlg.dynamic_disp_px.isChecked():
-                oversampling = optimal_oversampling
-                disp_dlg.set_disp_px_silently(
-                    disp_dlg.pixelsize.value() / optimal_oversampling
-                )
+                disp_dlg.set_disp_px_silently(optimal_disp_px_size)
             else:
-                oversampling = float(
-                    disp_dlg.pixelsize.value() / disp_dlg.disp_px_size.value()
-                )
-                if oversampling > optimal_oversampling:
+                if disp_dlg.disp_px_size.value() < optimal_disp_px_size:
                     QtWidgets.QMessageBox.information(
                         self,
                         "Display pixel size too low",
                         (
-                            "Oversampling will be adjusted to"
+                            "Display pixel size will be adjusted to"
                             " match the display pixel density."
                         ),
                     )
-                    oversampling = optimal_oversampling
-                    disp_dlg.set_disp_px_silently(
-                        disp_dlg.pixelsize.value() / optimal_oversampling
-                    )
-        else:
-            oversampling = float(pixelsize / disp_px_size)
+                    disp_dlg.set_disp_px_silently(optimal_disp_px_size)
 
         # viewport and min blur
         viewport = self.viewport if viewport is None else viewport
@@ -8340,7 +8052,7 @@ class View(QtWidgets.QLabel):
         min_blur_width = float(min_blur_width / pixelsize)
 
         kwargs = {
-            "oversampling": oversampling,
+            "disp_px_size": disp_px_size,
             "viewport": viewport,
             "blur_method": blur_method,
             "min_blur_width": min_blur_width,
@@ -8404,51 +8116,6 @@ class View(QtWidgets.QLabel):
         ValueError
             If .yaml file is not recognized.
         """
-        # # load the file
-        # with open(path, "r") as f:
-        #     regions = yaml.full_load(f)
-
-        # # Backwards compatibility for old picked region files
-        # if "Shape" in regions:
-        #     loaded_shape = regions["Shape"]
-        # elif "Centers" in regions and "Diameter" in regions:
-        #     loaded_shape = "Circle"
-        # else:
-        #     raise ValueError("Unrecognized picks file")
-
-        # # change pick shape in Tools Settings Dialog
-        # shape_index = self.window.tools_settings_dialog.pick_shape.findText(
-        #     loaded_shape
-        # )
-        # self.window.tools_settings_dialog.pick_shape.setCurrentIndex(
-        #     shape_index
-        # )
-        # pixelsize = self.window.display_settings_dlg.pixelsize.value()
-
-        # # assign loaded picks and pick size
-        # if loaded_shape == "Circle":
-        #     self._picks = regions["Centers"]
-        #     if "Diameter (nm)" in regions:
-        #         diameter = regions["Diameter (nm)"]
-        #     elif "Diameter" in regions:
-        #         diameter = regions["Diameter"] * pixelsize
-        #     self.window.tools_settings_dialog.pick_diameter.setValue(diameter)
-        # elif loaded_shape == "Rectangle":
-        #     self._picks = regions["Center-Axis-Points"]
-        #     if "Width (nm)" in regions:
-        #         width = regions["Width (nm)"]
-        #     elif "Width" in regions:
-        #         width = regions["Width"] * pixelsize
-        #     self.window.tools_settings_dialog.pick_width.setValue(width)
-        # elif loaded_shape == "Polygon":
-        #     self._picks = regions["Vertices"]
-        # elif loaded_shape == "Square":
-        #     self._picks = regions["Centers"]
-        #     # no backward compatibility here, always in nm
-        #     width = regions["Side Length (nm)"]
-        #     self.window.tools_settings_dialog.pick_side_length.setValue(width)
-        # else:
-        #     raise ValueError("Unrecognized pick shape")
         pixelsize = self.window.display_settings_dlg.pixelsize.value()
         tools_dlg = self.window.tools_settings_dialog
         self._picks = []
@@ -8843,50 +8510,18 @@ class View(QtWidgets.QLabel):
             locs = self.picked_locs(channel)
             locs = pd.concat(locs, ignore_index=True)
 
-            n_frames = self.infos[channel][0]["Frames"]
-            xvec = np.arange(n_frames)
-            yvec = xvec[:] * 0
-            yvec[locs["frame"]] = 1
-            yvec_ph = xvec[:] * 0
-            yvec_ph[locs["frame"]] = locs["photons"]
+            self.canvas = lib.GenericPlotWindow("Trace", "render")
+            self.canvas.resize(1000, 750)
+            self.canvas.figure, (xvec, yvec, yvec_ph) = lib.plot_trace(
+                locs=locs,
+                info=self.infos[channel],
+                fig=self.canvas.figure,
+                return_trace=True,
+            )
             self.current_trace_x = xvec
             self.current_trace_y = yvec
             self.current_trace_y_ph = yvec_ph
             self.channel = channel
-
-            self.canvas = lib.GenericPlotWindow("Trace", "render")
-            self.canvas.resize(1000, 750)
-
-            self.canvas.figure.clear()
-
-            # Three subplots sharing x axes
-            ax1, ax2, ax3, ax4 = self.canvas.figure.subplots(4, sharex=True)
-
-            # frame vs x
-            ax1.scatter(locs["frame"], locs["x"], s=2)
-            ax1.set_title("X-pos vs frame")
-            ax1.set_xlim(0, n_frames)
-            ax1.set_ylabel("X-pos [Px]")
-
-            # frame vs y
-            ax2.scatter(locs["frame"], locs["y"], s=2)
-            ax2.set_title("Y-pos vs frame")
-            ax2.set_ylabel("Y-pos [Px]")
-
-            # locs in time
-            ax3.plot(xvec, yvec, linewidth=1)
-            ax3.fill_between(xvec, 0, yvec, facecolor="red")
-            ax3.set_title("Localizations")
-            ax3.set_xlabel("Frames")
-            ax3.set_ylabel("ON")
-            ax3.set_yticks([0, 1])
-            ax3.set_ylim([-0.1, 1.1])
-
-            ax4.plot(xvec, yvec_ph, linewidth=1)
-            ax4.set_title("Photons")
-            ax4.set_xlabel("Frames")
-            ax4.set_ylabel("Photons")
-            ax4.set_ylim([0, locs["photons"].max() * 1.1])
 
             self.export_trace_button = QtWidgets.QPushButton("Export (*.csv)")
             self.canvas.toolbar.addWidget(self.export_trace_button)
@@ -8997,60 +8632,27 @@ class View(QtWidgets.QLabel):
             i = 0  # index of the currently shown pick
             n_frames = self.infos[channel][0]["Frames"]
             while i < len(self._picks):
-                fig, (ax1, ax2, ax3, ax4) = plt.subplots(
-                    4, 1, figsize=(6, 6), constrained_layout=True
+                locs_ = all_picked_locs[i]
+                fig, (xvec, yvec, yvec_ph) = lib.plot_trace(
+                    locs=locs_,
+                    info=self.infos[channel],
+                    return_trace=True,
                 )
+                # modify the plot slighly
                 fig.canvas.manager.set_window_title("Trace")
                 pick = self._picks[i]
-                locs = all_picked_locs[i]
-
-                xvec = np.arange(n_frames)
-                yvec = np.ones_like(xvec, dtype=float) * -1
-                yvec[locs["frame"]] = locs["x"]
-                yvec_ph = np.zeros_like(xvec, dtype=int)
-                yvec_ph[locs["frame"]] = locs["photons"]
-                ax1.set_title(
+                fig.axes[0].set_title(
                     "Scatterplot of Pick "
                     + str(i + 1)
                     + "  of: "
                     + str(len(self._picks))
                     + "."
                 )
-                ax1.set_title(
-                    "Scatterplot of Pick "
-                    + str(i + 1)
-                    + "  of: "
-                    + str(len(self._picks))
-                    + "."
-                )
-                ax1.scatter(xvec, yvec, s=2)
-                ax1.set_ylabel("X-pos [Px]")
-                ax1.set_title("X-pos vs frame")
-                if locs.size:
-                    ax1.set_ylim(yvec[yvec > 0].min(), yvec.max())
-                plt.setp(ax1.get_xticklabels(), visible=False)
-
-                yvec = np.ones_like(xvec, dtype=float) * -1
-                yvec[locs["frame"]] = locs["y"]
-                ax2.scatter(xvec, yvec, s=2)
-                ax2.set_title("Y-pos vs frame")
-                ax2.set_ylabel("Y-pos [Px]")
-                if locs.size:
-                    ax2.set_ylim(yvec[yvec > 0].min(), yvec.max())
-                plt.setp(ax2.get_xticklabels(), visible=False)
-
-                yvec = xvec[:] * 0
-                yvec[locs["frame"]] = 1
-                ax3.plot(xvec, yvec)
-                ax3.set_title("Localizations")
-                ax3.set_xlabel("Frames")
-                ax3.set_ylabel("ON")
-                ax3.set_yticks([0, 1])
-
-                ax4.plot(xvec, yvec_ph)
-                ax4.set_title("Photons")
-                ax4.set_xlabel("Frames")
-                ax4.set_ylabel("Photons")
+                if locs_.size:
+                    fig.axes[0].set_ylim(yvec[yvec > 0].min(), yvec.max())
+                    fig.axes[1].set_ylim(yvec[yvec > 0].min(), yvec.max())
+                plt.setp(fig.axes[0].get_xticklabels(), visible=False)
+                plt.setp(fig.axes[1].get_xticklabels(), visible=False)
 
                 fig.canvas.draw()
                 width, height = fig.canvas.get_width_height()
@@ -9111,11 +8713,13 @@ class View(QtWidgets.QLabel):
 
     @property
     def _pick_size(self) -> float:
-        """Return the size of the pick in camera pixels."""
+        """Return the size of the pick in camera pixels. For circle this
+        is the diameter. For square this is the side length. For
+        rectangle this is the width. For polygon this is None."""
         tools_dialog = self.window.tools_settings_dialog
         pixelsize = self.window.display_settings_dlg.pixelsize.value()
         if self._pick_shape == "Circle":
-            pick_size = tools_dialog.pick_diameter.value() / pixelsize / 2
+            pick_size = tools_dialog.pick_diameter.value() / pixelsize
         elif self._pick_shape == "Square":
             pick_size = tools_dialog.pick_side_length.value() / pixelsize
         elif self._pick_shape == "Rectangle":
@@ -9419,7 +9023,7 @@ class View(QtWidgets.QLabel):
                     max_dark_time=max_dark,
                 )
             pick_locs = postprocess.compute_dark_times(pick_locs)
-            dark[i] = estimate_kinetic_rate(pick_locs["dark"].to_numpy())
+            dark[i] = lib.estimate_kinetic_rate(pick_locs["dark"].to_numpy())
             out_locs.append(pick_locs)
             progress.set_value(i + 1)
         out_locs = pd.concat(out_locs, ignore_index=True)
@@ -9621,8 +9225,7 @@ class View(QtWidgets.QLabel):
         else:
             locs = self.all_locs[channel]
         info = self.infos[channel]
-        d = self.window.tools_settings_dialog.pick_diameter.value()
-        size = d / 2 / self.window.display_settings_dlg.pixelsize.value()
+        size = self._pick_size
         status = lib.StatusDialog("Indexing localizations...", self.window)
         index_blocks = postprocess.get_index_blocks(locs, info, size)
         status.close()
@@ -9649,19 +9252,9 @@ class View(QtWidgets.QLabel):
             Areas of all picks.
         """
         px = self.window.display_settings_dlg.pixelsize.value()
-        if self._pick_shape == "Circle":
-            d = self.window.tools_settings_dialog.pick_diameter.value()
-            r = d / 2 / px
-            # no need for repeating, same area for all picks
-            areas = np.array([np.pi * r**2])  # list for consistency
-        elif self._pick_shape == "Rectangle":
-            w = self.window.tools_settings_dialog.pick_width.value() / px
-            areas = lib.pick_areas_rectangle(self._picks, w)
-        elif self._pick_shape == "Polygon":
-            areas = lib.pick_areas_polygon(self._picks)
-        elif self._pick_shape == "Square":
-            a = self.window.tools_settings_dialog.pick_side_length.value() / px
-            areas = np.array([a**2])
+        areas = lib.pick_areas(self._picks, self._pick_shape, self._pick_size)
+        if self._pick_shape in ["Circle", "Square"]:
+            areas = areas[0]  # same area for all picks
         areas *= (px * 1e-3) ** 2  # convert to um^2
         return areas
 
@@ -9721,8 +9314,7 @@ class View(QtWidgets.QLabel):
                 self.infos[channel],
                 picks=self._picks,
                 pick_shape=self._pick_shape,
-                pick_size=self.window.tools_settings_dialog.pick_width.value()
-                / pixelsize,
+                pick_size=self._pick_size,
             )[0]
             self.profiles.append(
                 picked_locs["y_pick_rot"].to_numpy() * pixelsize
@@ -9795,9 +9387,6 @@ class View(QtWidgets.QLabel):
         """
         channel = self.get_channel("Pick similar")
         if channel is not None:
-            d = (
-                self.window.tools_settings_dialog.pick_diameter.value()
-            ) / self.window.display_settings_dlg.pixelsize.value()
             std_range = (
                 self.window.tools_settings_dialog.pick_similar_range.value()
             )
@@ -9807,7 +9396,7 @@ class View(QtWidgets.QLabel):
                 locs=self.all_locs[channel],
                 info=self.infos[channel],
                 picks=self._picks,
-                d=d,
+                d=self._pick_size,
                 std_range=std_range,
                 index_blocks=index_blocks,
             )
@@ -9859,22 +9448,9 @@ class View(QtWidgets.QLabel):
             px = self.window.display_settings_dlg.pixelsize.value()
             index_blocks = None  # used for circular picks only
             if self._pick_shape == "Circle":
-                d = self.window.tools_settings_dialog.pick_diameter.value()
-                pick_size = d / 2 / px
-                index_blocks = self.get_index_blocks(
-                    channel, fast_render=fast_render
-                )
-            elif self._pick_shape == "Rectangle":
-                pick_size = (
-                    self.window.tools_settings_dialog.pick_width.value() / px
-                )
-            elif self._pick_shape == "Square":
-                pick_size = (
-                    self.window.tools_settings_dialog.pick_side_length.value()
-                    / px
-                )
+                pick_size = self._pick_size / 2
             else:
-                pick_size = None
+                pick_size = self._pick_size
 
             # pick localizations
             picked_locs = postprocess.picked_locs(
@@ -9982,10 +9558,14 @@ class View(QtWidgets.QLabel):
             Index of the channel were localizations are removed.
         """
         locs = self.all_locs[channel]
-        all_picked_locs = self.picked_locs(channel, add_group=False)
-        # store indices of picked locs
-        idx = np.concatenate([_.index for _ in all_picked_locs])
-        locs.drop(index=idx, inplace=True)
+        locs = postprocess.remove_locs_in_picks(
+            locs=locs,
+            info=self.infos[channel],
+            picks=self._picks,
+            pick_shape=self._pick_shape,
+            pick_size=self._pick_size,
+            index_blocks=self.get_index_blocks(channel),
+        )
         self.all_locs[channel] = locs
         self.locs[channel] = locs.copy()
 
@@ -10065,9 +9645,13 @@ class View(QtWidgets.QLabel):
             min_blur_width=min_blur_width,
             blur_method=blur_method,
         )
-
+        # return render.render_scene(
+        #     locs=self.locs,
+        #     info=self.infos,
+        #     return_qimage=True,
+        #     **kwargs,
+        # )
         n_channels = len(self.locs)
-        # render single or multi channel data
         if n_channels == 1:
             self.render_single_channel(
                 kwargs,
@@ -10154,7 +9738,7 @@ class View(QtWidgets.QLabel):
 
         # render properties
         if self.x_render_state:
-            colors = get_render_properties_colors(
+            colors = render.get_colors_from_colormap(
                 n_channels,
                 self.window.display_settings_dlg.colormap_prop.currentText(),
             )
@@ -10166,8 +9750,7 @@ class View(QtWidgets.QLabel):
 
         If locs is None, copies self.locs (when slicer is active) or
         uses self.locs directly. Then clips each channel to the current
-        z-slice if the slicer is enabled.
-        """
+        z-slice if the slicer is enabled."""
         slicer = self.window.slicer_dialog.slicer_radio_button
         if locs is None:
             locs = copy.copy(self.locs) if slicer.isChecked() else self.locs

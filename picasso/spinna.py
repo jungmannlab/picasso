@@ -1063,7 +1063,7 @@ class MaskGenerator:
 
         # 2D image
         if self.ndim == 2 or "z" not in self.locs.columns:
-            _, image = render.render_hist(
+            _, image = render._render_hist(
                 self.locs,
                 oversampling[0],
                 self.y_min,

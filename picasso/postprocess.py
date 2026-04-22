@@ -728,6 +728,71 @@ def _pick_similar(  # noqa: C901
     return x_similar, y_similar
 
 
+def remove_locs_in_picks(
+    locs: pd.DataFrame,
+    info: list[dict],
+    *,
+    picks: list[tuple] | str,
+    pick_shape: (
+        Literal["Circle", "Rectangle", "Polygon", "Square"] | None
+    ) = None,
+    pick_size: float | None = None,
+    index_blocks: tuple = None,
+) -> pd.DataFrame:
+    """Remove localizations in picks.
+
+    Parameters
+    ----------
+    locs : pd.DataFrame
+        Localizations.
+    info : list of dicts
+        Localization metadata.
+    picks : list of tuples or str
+        List of picks, each pick is a list of coordinates of the pick
+        corners. If a string is given, picks are loaded from a YAML
+        file. `pick_shape` and `pick_size` are then ignored.
+    pick_shape : {"Circle", "Rectangle", "Polygon", "Square"} or None
+        Shape of picks. Ignored if picks are loaded from a YAML file.
+    pick_size : float or None
+        Size of picks in camera pixels. For circles - diameters. For
+        rectangles - width. For squares - side length. For polygons -
+        ignored. Ignored if picks are loaded from a YAML file.
+    index_blocks : tuple, optional
+        Used only for circular picks. Precomputed index blocks for
+        localizations, see  ``get_index_blocks``. If None, they will be
+        calculated internally. Default is None.
+
+    Returns
+    -------
+    locs : pd.DataFrame
+        Localizations with localizations in picks removed.
+    """
+    if isinstance(picks, str):
+        picks, pick_shape, pick_size = io.load_picks(picks)
+    else:
+        assert pick_shape in ("Circle", "Rectangle", "Polygon", "Square"), (
+            "pick_shape must be one of 'Circle', 'Rectangle', 'Polygon', "
+            "or 'Square'."
+        )
+        if pick_shape != "Polygon":
+            assert isinstance(
+                pick_size, (int, float)
+            ), "pick_size must be a number."
+    all_picked_locs = picked_locs(
+        locs=locs,
+        info=info,
+        picks=picks,
+        pick_shape=pick_shape,
+        pick_size=pick_size,
+        add_group=False,
+        index_blocks=index_blocks,
+    )
+    # store indices of picked locs
+    idx = np.concatenate([_.index for _ in all_picked_locs])
+    locs.drop(index=idx, inplace=True)
+    return locs
+
+
 @numba.jit(nopython=True, nogil=True)
 def n_block_locs_at(
     x_range: int,

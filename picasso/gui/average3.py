@@ -170,7 +170,7 @@ class View(QtWidgets.QLabel):
         oversampling = self.window.parameters_dialog.oversampling.value()
         t_min = -self.r
         t_max = self.r
-        N_avg, image_avg = render.render_hist(
+        N_avg, image_avg = render._render_hist(
             self.locs, oversampling, t_min, t_min, t_max, t_max
         )
         self.set_image(image_avg)

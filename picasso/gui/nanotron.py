@@ -1059,7 +1059,7 @@ class View(QtWidgets.QLabel):
         oversampling = 1
         t_min = np.min([np.min(self.locs.x), np.min(self.locs.y)])
         t_max = np.max([np.max(self.locs.x), np.max(self.locs.y)])
-        N, image = render.render_hist(
+        N, image = render._render_hist(
             self.locs, oversampling, t_min, t_min, t_max, t_max
         )
         self.set_image(image)

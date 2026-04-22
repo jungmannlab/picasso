@@ -2,12 +2,16 @@
 picasso.render
 ~~~~~~~~~~~~~~
 
-Render single molecule localizations to a super-resolution image
+Render single molecule localizations to a super-resolution image.
+
+Provides functions for painting onto rendered images (QImage), such as
+scale bar and picks.
 
 :authors: Joerg Schnitzbauer 2015, Rafal Kowalewski 2023
 :copyright: Copyright (c) 2015 Jungmann Lab, MPI of Biochemistry
 """
 
+from email.mime import image
 from typing import Literal
 
 import numba
@@ -23,18 +27,20 @@ from . import lib
 
 _DRAW_MAX_SIGMA = 3  # max. sigma from mean to render (mu +/- 3 sigma)
 N_GROUP_COLORS = 8
+POLYGON_POINTER_SIZE = 16  # must be even
 
 
 def render(
     locs: pd.DataFrame,
     info: dict | None = None,
-    oversampling: float = 1,
+    oversampling: float = 1.0,
     viewport: tuple[tuple[float, float], tuple[float, float]] | None = None,
     blur_method: (
         Literal["gaussian", "gaussian_iso", "smooth", "convolve"] | None
     ) = None,
     min_blur_width: float = 0.0,
     ang: tuple | None = None,
+    disp_px_size: float | None = None,
 ) -> tuple[int, lib.FloatArray2D]:
     """Render localizations given FOV and blur method.
 
@@ -46,21 +52,30 @@ def render(
         Contains localizations metadata. Needed only if no viewport
         specified.
     oversampling : float, optional
-        Number of super-resolution pixels per camera pixel.
+        Number of super-resolution pixels per camera pixel. Default is
+        1. Deprecated, use disp_px_size instead. Will be removed in
+        v0.11.0. Ignored if disp_px_size is specified.
     viewport : tuple, optional
-        Field of view to be rendered. The input is
+        Field of view to be rendered (in camera pixels). The input is
         ``((y_min, x_min), (y_max, x_max))``. If None, all localizations
         are rendered.
     blur_method : {"gaussian", "gaussian_iso", "smooth", "convolve"} or None, \
             optional
         Defines localizations' blur. The string has to be one of
         'gaussian', 'gaussian_iso', 'smooth', 'convolve'. If None, no
-        blurring is applied.
+        blurring is applied. 'gaussian' uses localization precisions
+        of each localization to blur it (different in each dimension).
+        'gaussian_iso' is similar but averages x and y localization
+        precisions, so that blur is isotropic. 'smooth' applies a one
+        pixel blur. 'convolve' applies the same blur to all
+        localizations which is the median localization precision.
     min_blur_width : float, optional
         Minimum size of blur (camera pixels).
     ang : tuple, optional
         Rotation angles of locs around x, y and z axes in radians. If
         None, locs are not rotated.
+    disp_px_size : float, optional
+        Display pixel size in nm. Will replace oversampling in v0.11.0.
 
     Raises
     ------
@@ -75,6 +90,16 @@ def render(
     image : lib.FloatArray2D
         Rendered image.
     """
+    pixelsize = lib.get_from_metadata(info, "Pixelsize", raise_error=True)
+    if disp_px_size is None:
+        lib.deprecation_warning(
+            "Deprecation warning: the 'oversampling' parameter is "
+            "deprecated and will be removed in v0.11.0. Use "
+            "'disp_px_size' instead."
+        )
+        disp_px_size = pixelsize / oversampling
+    oversampling = pixelsize / disp_px_size
+
     if viewport is None:
         try:
             # all locs
@@ -84,7 +109,7 @@ def render(
     (y_min, x_min), (y_max, x_max) = viewport
     if blur_method is None:
         # no blur
-        return render_hist(
+        return _render_hist(
             locs,
             oversampling,
             y_min,
@@ -95,7 +120,7 @@ def render(
         )
     elif blur_method == "gaussian":
         # individual localization precision
-        return render_gaussian(
+        return _render_gaussian(
             locs,
             oversampling,
             y_min,
@@ -107,7 +132,7 @@ def render(
         )
     elif blur_method == "gaussian_iso":
         # individual localization precision (same for x and y)
-        return render_gaussian_iso(
+        return _render_gaussian_iso(
             locs,
             oversampling,
             y_min,
@@ -119,7 +144,7 @@ def render(
         )
     elif blur_method == "smooth":
         # one pixel blur
-        return render_smooth(
+        return _render_smooth(
             locs,
             oversampling,
             y_min,
@@ -130,7 +155,7 @@ def render(
         )
     elif blur_method == "convolve":
         # global localization precision
-        return render_convolve(
+        return _render_convolve(
             locs,
             oversampling,
             y_min,
@@ -203,7 +228,7 @@ def _render_setup(
 
 
 @numba.njit
-def _render_setup_anisotropic(
+def _render_setup_anisotropic(  # used in Average
     x: lib.FloatArray1D,
     y: lib.FloatArray1D,
     oversampling_x: float,
@@ -739,6 +764,28 @@ def render_hist(
     x_max: float,
     ang: tuple[float, float, float] | None = None,
 ) -> tuple[int, lib.FloatArray2D]:
+    """Alias for _render_hist which will be a private function in
+    v0.11.0. Kept for backward compatibility but will be removed in
+    v0.11.0. Use _render_hist instead if necessary."""
+    lib.deprecation_warning(
+        "Deprecation warning: the 'render_hist' function is deprecated "
+        "and will be removed in v0.11.0. Use _render_hist instead if "
+        "necessary."
+    )
+    return _render_hist(
+        locs, oversampling, y_min, x_min, y_max, x_max, ang=ang
+    )
+
+
+def _render_hist(
+    locs: pd.DataFrame,
+    oversampling: float,
+    y_min: float,
+    x_min: float,
+    y_max: float,
+    x_max: float,
+    ang: tuple[float, float, float] | None = None,
+) -> tuple[int, lib.FloatArray2D]:
     """Render localizations with no blur by assigning them to pixels.
 
     Parameters
@@ -930,6 +977,36 @@ def render_gaussian(
     min_blur_width: float,
     ang: tuple[float, float, float] | None = None,
 ) -> tuple[int, lib.FloatArray2D]:
+    """Alias for _render_gaussian which will be a private function in
+    v0.11.0. Kept for backward compatibility but will be removed in v0.11.0. Use
+    _render_gaussian instead if necessary."""
+    lib.deprecation_warning(
+        "Deprecation warning: the 'render_gaussian' function is deprecated "
+        "and will be removed in v0.11.0. Use _render_gaussian instead if "
+        "necessary."
+    )
+    return _render_gaussian(
+        locs,
+        oversampling,
+        y_min,
+        x_min,
+        y_max,
+        x_max,
+        min_blur_width,
+        ang=ang,
+    )
+
+
+def _render_gaussian(
+    locs: pd.DataFrame,
+    oversampling: float,
+    y_min: float,
+    x_min: float,
+    y_max: float,
+    x_max: float,
+    min_blur_width: float,
+    ang: tuple[float, float, float] | None = None,
+) -> tuple[int, lib.FloatArray2D]:
     """Render localizations with with individual localization precision
     which differs in x and y.
 
@@ -1023,7 +1100,37 @@ def render_gaussian_iso(
     min_blur_width: float,
     ang: tuple[float, float, float] | None = None,
 ) -> tuple[int, lib.FloatArray2D]:
-    """Same as ``render_gaussian``, but uses the same localization
+    """Alias for _render_gaussian_iso which will be a private function in
+    v0.11.0. Kept for backward compatibility but will be removed in v0.11.0. Use
+    _render_gaussian_iso instead if necessary."""
+    lib.deprecation_warning(
+        "Deprecation warning: the 'render_gaussian_iso' function is "
+        "deprecated and will be removed in v0.11.0. Use "
+        "_render_gaussian_iso instead if necessary."
+    )
+    return _render_gaussian_iso(
+        locs,
+        oversampling,
+        y_min,
+        x_min,
+        y_max,
+        x_max,
+        min_blur_width,
+        ang=ang,
+    )
+
+
+def _render_gaussian_iso(
+    locs: pd.DataFrame,
+    oversampling: float,
+    y_min: float,
+    x_min: float,
+    y_max: float,
+    x_max: float,
+    min_blur_width: float,
+    ang: tuple[float, float, float] | None = None,
+) -> tuple[int, lib.FloatArray2D]:
+    """Same as ``_render_gaussian``, but uses the same localization
     precision in x and y."""
     image, n_pixel_y, n_pixel_x, x, y, in_view = _render_setup(
         locs["x"].to_numpy(),
@@ -1082,6 +1189,36 @@ def render_gaussian_iso(
 
 
 def render_convolve(
+    locs: pd.DataFrame,
+    oversampling: float,
+    y_min: float,
+    x_min: float,
+    y_max: float,
+    x_max: float,
+    min_blur_width: float,
+    ang: tuple[float, float, float] | None = None,
+) -> tuple[int, lib.FloatArray2D]:
+    """Alias for _render_convolve which will be a private function in v0.11.0.
+    Kept for backward compatibility but will be removed in v0.11.0. Use
+    _render_convolve instead if necessary."""
+    lib.deprecation_warning(
+        "Deprecation warning: the 'render_convolve' function is "
+        "deprecated and will be removed in v0.11.0. Use "
+        "_render_convolve instead if necessary."
+    )
+    return _render_convolve(
+        locs,
+        oversampling,
+        y_min,
+        x_min,
+        y_max,
+        x_max,
+        min_blur_width,
+        ang=ang,
+    )
+
+
+def _render_convolve(
     locs: pd.DataFrame,
     oversampling: float,
     y_min: float,
@@ -1153,6 +1290,33 @@ def render_convolve(
 
 
 def render_smooth(
+    locs: pd.DataFrame,
+    oversampling: float,
+    y_min: float,
+    x_min: float,
+    y_max: float,
+    x_max: float,
+    ang: tuple[float, float, float] | None = None,
+) -> tuple[int, lib.FloatArray2D]:
+    """Alias for _render_smooth which will be a private function in v0.11.0. Kept for
+    backward compatibility but will be removed in v0.11.0. Use _render_smooth
+    instead if necessary."""
+    lib.deprecation_warning(
+        "Deprecation warning: the 'render_smooth' function is deprecated and "
+        "will be removed in v0.11.0. Use _render_smooth instead if necessary."
+    )
+    return _render_smooth(
+        locs,
+        oversampling,
+        y_min,
+        x_min,
+        y_max,
+        x_max,
+        ang=ang,
+    )
+
+
+def _render_smooth(
     locs: pd.DataFrame,
     oversampling: float,
     y_min: float,
@@ -1404,9 +1568,9 @@ def get_colors_from_colormap(
     Returns
     -------
     colors : list of tuples
-        Contains tuples with rgb channels.
+        Contains tuples with RGB channels ranging between 0 and 255.
     """
-    # array of shape (256, 3) with rbh channels with 256 colors
+    # array of shape (256, 3) with RGB channels with 256 colors
     base = plt.get_cmap(cmap)(np.arange(256))[:, :3]
     # indeces to draw from base
     idx = np.linspace(0, 255, n_channels).astype(int)
@@ -1492,11 +1656,121 @@ def viewport_size(
     return height, width
 
 
+def adjust_viewport_to_aspect_ratio(
+    image: QtGui.QImage,
+    viewport: list[tuple[float, float], tuple[float, float]],
+) -> list[tuple[float, float], tuple[float, float]]:
+    """Adjust viewport to match the aspect ratio of the image.
+
+    Parameters
+    ----------
+    image : QtGui.QImage
+        Image of rendered localizations.
+    viewport : list of tuples
+        Viewport coordinates in camera pixels, ((y_min, y_max), (x_min,
+        x_max)).
+
+    Returns
+    -------
+    viewport : list of tuples
+        Adjusted viewport coordinates in camera pixels, ((y_min, y_max),
+        (x_min, x_max)).
+    """
+    viewport_height, viewport_width = viewport_size(viewport)
+    view_height = image.height()
+    view_width = image.width()
+    viewport_aspect = viewport_width / viewport_height
+    view_aspect = view_width / view_height
+    if view_aspect >= viewport_aspect:
+        y_min = viewport[0][0]
+        y_max = viewport[1][0]
+        x_range = viewport_height * view_aspect
+        x_margin = (x_range - viewport_width) / 2
+        x_min = viewport[0][1] - x_margin
+        x_max = viewport[1][1] + x_margin
+    else:
+        x_min = viewport[0][1]
+        x_max = viewport[1][1]
+        y_range = viewport_width / view_aspect
+        y_margin = (y_range - viewport_height) / 2
+        y_min = viewport[0][0] - y_margin
+        y_max = viewport[1][0] + y_margin
+    return ((y_min, x_min), (y_max, x_max))
+
+
+def adjust_viewport_decorator(func):
+    """Decorator that adjusts viewport to match image aspect ratio before
+    calling the decorated function.
+
+    Parameters
+    ----------
+    func : callable
+        Function that takes `image` and `viewport` as arguments.
+
+    Returns
+    -------
+    wrapper : callable
+        Wrapped function with automatic viewport adjustment.
+    """
+
+    def wrapper(image, viewport, *args, **kwargs):
+        adjusted_viewport = adjust_viewport_to_aspect_ratio(image, viewport)
+        if adjusted_viewport != viewport:
+            print("Adjusted viewport to match image aspect ratio.")
+        return func(image, adjusted_viewport, *args, **kwargs)
+
+    return wrapper
+
+
+def map_to_view(
+    x: float,
+    y: float,
+    image_size: QtCore.QSize,
+    viewport: tuple[tuple[float, float], tuple[float, float]],
+) -> tuple[int, int]:
+    """Convert (x, y) from camera pixels to display pixels."""
+    image_width = image_size.width()
+    image_height = image_size.height()
+    cx = image_width * (x - viewport[0][1]) / viewport_width(viewport)
+    cy = image_height * (y - viewport[0][0]) / viewport_height(viewport)
+    return int(cx), int(cy)
+
+
+def get_rectangle_pick_polygon(
+    start_x: float,
+    start_y: float,
+    end_x: float,
+    end_y: float,
+    width: float,
+    return_most_right: bool = False,
+) -> QtGui.QPolygonF | tuple[float, float]:
+    """Find QtGui.QPolygonF object used for drawing a rectangular
+    pick.
+
+    Returns
+    -------
+    p : QtGui.QPolygonF
+        The polygon.
+    """
+    X, Y = lib.get_pick_rectangle_corners(
+        start_x, start_y, end_x, end_y, width
+    )
+    p = QtGui.QPolygonF()
+    for x, y in zip(X, Y):
+        p.append(QtCore.QPointF(x, y))
+    if return_most_right:
+        ix_most_right = np.argmax(X)
+        x_most_right = X[ix_most_right]
+        y_most_right = Y[ix_most_right]
+        return p, (x_most_right, y_most_right)
+    return p
+
+
 def _draw_picks_circle(
     image: QtGui.QImage,
-    picks: list[tuple],
-    pick_size: int,  # diameter in display pixels
-    pixelsize: float,
+    viewport: list[tuple[float, float], tuple[float, float]],  # cam. px
+    picks: list[tuple],  # pick coords in camera pixels
+    pick_size: float,  # diameter in camera pixels
     point_picks: bool = False,
     annotate_picks: bool = False,
     color: QtGui.QColor = QtGui.QColor("yellow"),
@@ -1509,167 +1783,595 @@ def _draw_picks_circle(
         painter.setPen(color)
         for i, pick in enumerate(picks):
             # convert from camera units to display units
-            cx, cy = self.map_to_view(*pick)
+            cx, cy = map_to_view(*pick, image.size(), viewport)
             painter.drawEllipse(QtCore.QPoint(cx, cy), 3, 3)
-
             if annotate_picks:
                 painter.drawText(cx + 20, cy + 20, str(i))
 
-    # draw circles
-    else:
-        d = t_dialog.pick_diameter.value() / pixelsize
-        d *= self.width() / self.viewport_width()
-        d = int(d)
-
+    else:  # draw circles
+        d = int(pick_size * image.width() / viewport_width(viewport))
         painter = QtGui.QPainter(image)
-        painter.setPen(QtGui.QColor("yellow"))
-
-        # yellow is barely visible on white background
-        if self.window.dataset_dialog.wbackground.isChecked():
-            painter.setPen(QtGui.QColor("red"))
-
-        for i, pick in enumerate(self._picks):
+        painter.setPen(color)
+        for i, pick in enumerate(picks):
             # check that the pick is within the view
             if (
-                pick[0] < self.viewport[0][1]
-                or pick[0] > self.viewport[1][1]
-                or pick[1] < self.viewport[0][0]
-                or pick[1] > self.viewport[1][0]
+                pick[0] < viewport[0][1]
+                or pick[0] > viewport[1][1]
+                or pick[1] < viewport[0][0]
+                or pick[1] > viewport[1][0]
             ):
                 continue
 
             # convert from camera units to display units
-            cx, cy = self.map_to_view(*pick)
+            cx, cy = map_to_view(*pick, image.size(), viewport)
             painter.drawEllipse(int(cx - d / 2), int(cy - d / 2), d, d)
-
-            # annotate picks
-            if t_dialog.pick_annotation.isChecked():
+            if annotate_picks:
                 painter.drawText(int(cx + d / 2), int(cy + d / 2), str(i))
     painter.end()
+    return image
 
-    def draw_picks_rectangle(self, image: QtGui.QImage) -> None:
-        """Draw rectangular picks onto the image of rendered
-        localizations."""
-        pixelsize = self.window.display_settings_dlg.pixelsize.value()
-        w = self.window.tools_settings_dialog.pick_width.value() / pixelsize
-        w *= self.width() / self.viewport_width()
 
-        painter = QtGui.QPainter(image)
-        painter.setPen(QtGui.QColor("yellow"))
+def _draw_picks_rectangle(
+    image: QtGui.QImage,
+    viewport: tuple[tuple[float, float], tuple[float, float]],  # cam. px
+    picks: list[tuple],  # picks in camera pixels
+    pick_size: float,  # width in camera pixels
+    annotate_picks: bool = False,
+    color: QtGui.QColor = QtGui.QColor("yellow"),
+) -> QtGui.QImage:
+    """Draw rectangular picks onto the image of rendered
+    localizations. See ``draw_picks`` for more details."""
+    w = pick_size * image.width() / viewport_width(viewport)
+    painter = QtGui.QPainter(image)
+    painter.setPen(color)
+    for i, pick in enumerate(picks):
+        # convert from camera units to display units
+        start_x, start_y = map_to_view(*pick[0], image.size(), viewport)
+        end_x, end_y = map_to_view(*pick[1], image.size(), viewport)
+        # draw a straight line across the pick
+        painter.drawLine(start_x, start_y, end_x, end_y)
+        # draw a rectangle
+        polygon, most_right = get_rectangle_pick_polygon(
+            start_x, start_y, end_x, end_y, w, return_most_right=True
+        )
+        painter.drawPolygon(polygon)
+        if annotate_picks:
+            painter.drawText(*most_right, str(i))
+    painter.end()
+    return image
 
-        # yellow is barely visible on white background
-        if self.window.dataset_dialog.wbackground.isChecked():
-            painter.setPen(QtGui.QColor("red"))
 
-        for i, pick in enumerate(self._picks):
-
-            # convert from camera units to display units
-            start_x, start_y = self.map_to_view(*pick[0])
-            end_x, end_y = self.map_to_view(*pick[1])
-
-            # draw a straight line across the pick
-            painter.drawLine(start_x, start_y, end_x, end_y)
-
-            # draw a rectangle
-            polygon, most_right = self.get_pick_polygon(
-                start_x, start_y, end_x, end_y, w, return_most_right=True
+def _draw_picks_polygon(
+    image: QtGui.QImage,
+    viewport: tuple[tuple[float, float], tuple[float, float]],  # cam. px
+    picks: list[tuple],  # picks in camera pixels
+    annotate_picks: bool = False,
+    color: QtGui.QColor = QtGui.QColor("yellow"),
+) -> QtGui.QImage:
+    """Draw polygon picks onto the image of rendered localizations. See
+    ``draw_picks`` for more details."""
+    painter = QtGui.QPainter(image)
+    painter.setPen(color)
+    for i, pick in enumerate(picks):
+        oldpoint = []
+        for point in pick:
+            cx, cy = map_to_view(*point, image.size(), viewport)
+            painter.drawEllipse(
+                QtCore.QPoint(cx, cy),
+                int(POLYGON_POINTER_SIZE / 2),
+                int(POLYGON_POINTER_SIZE / 2),
             )
-            painter.drawPolygon(polygon)
+            if oldpoint != []:  # draw the line
+                ox, oy = map_to_view(*oldpoint, image.size(), viewport)
+                painter.drawLine(cx, cy, ox, oy)
+            oldpoint = point
 
-            # annotate picks
-            if self.window.display_settings_dlg.pick_annotation.isChecked():
-                painter.drawText(*most_right, str(i))
-        painter.end()
+        # annotate picks
+        if len(pick) and annotate_picks:
+            painter.drawText(
+                cx + int(POLYGON_POINTER_SIZE / 2) + 10,
+                cy + int(POLYGON_POINTER_SIZE / 2) + 10,
+                str(i),
+            )
+    painter.end()
+    return image
 
-    def draw_picks_polygon(self, image: QtGui.QImage) -> None:
-        """Draw polygon picks onto the image of rendered localizations."""
-        t_dialog = self.window.tools_settings_dialog
-        painter = QtGui.QPainter(image)
-        painter.setPen(QtGui.QColor("yellow"))
 
-        # yellow is barely visible on white background
-        if self.window.dataset_dialog.wbackground.isChecked():
-            painter.setPen(QtGui.QColor("red"))
+def _draw_picks_square(
+    image: QtGui.QImage,
+    viewport: tuple[tuple[float, float], tuple[float, float]],  # cam. px
+    picks: list[tuple],  # picks in camera pixels
+    pick_size: float,  # side length in camera pixels
+    annotate_picks: bool = False,
+    color: QtGui.QColor = QtGui.QColor("yellow"),
+) -> QtGui.QImage:
+    """Draw square picks onto the image of rendered localizations."""
+    w = int(pick_size * image.width() / viewport_width(viewport))
+    painter = QtGui.QPainter(image)
+    painter.setPen(color)
+    for i, pick in enumerate(picks):
+        # check that the pick is within the view
+        if (
+            pick[0] < viewport[0][1]
+            or pick[0] > viewport[1][1]
+            or pick[1] < viewport[0][0]
+            or pick[1] > viewport[1][0]
+        ):
+            continue
 
-        # draw corners and lines
-        for i, pick in enumerate(self._picks):
-            oldpoint = []
-            for point in pick:
-                cx, cy = self.map_to_view(*point)
-                painter.drawEllipse(
-                    QtCore.QPoint(cx, cy),
-                    int(POLYGON_POINTER_SIZE / 2),
-                    int(POLYGON_POINTER_SIZE / 2),
-                )
-                if oldpoint != []:  # draw the line
-                    ox, oy = self.map_to_view(*oldpoint)
-                    painter.drawLine(cx, cy, ox, oy)
-                oldpoint = point
+        # convert from camera units to display units
+        cx, cy = map_to_view(*pick, image.size(), viewport)
+        painter.drawRect(int(cx - w / 2), int(cy - w / 2), w, w)
 
-            # annotate picks
-            if len(pick):
-                if t_dialog.pick_annotation.isChecked():
-                    painter.drawText(
-                        cx + int(POLYGON_POINTER_SIZE / 2) + 10,
-                        cy + int(POLYGON_POINTER_SIZE / 2) + 10,
-                        str(i),
+        # annotate picks
+        if annotate_picks:
+            painter.drawText(
+                int(cx + w / 2) + 10, int(cy + w / 2) + 10, str(i)
+            )
+    painter.end()
+    return image
+
+
+@adjust_viewport_decorator
+def draw_picks(
+    image: QtGui.QImage,
+    viewport: tuple[tuple[float, float], tuple[float, float]],  # cam. px
+    pick_shape: Literal["Circle", "Rectangle", "Polygon", "Square"],
+    picks: list[tuple],  # pick coords in camera pixels
+    pick_size: float | None,  # diameter in camera pixels
+    point_picks: bool = False,
+    annotate_picks: bool = False,
+    color: QtGui.QColor = QtGui.QColor("yellow"),
+) -> QtGui.QImage:
+    """Draw all selected picks onto the image (QImage) of rendered
+    localizations.
+
+    Parameters
+    ----------
+    image : QImage
+        Image containing rendered localizations.
+    viewport : tuple
+        Current field of view in camera pixels, ((y_min, y_max), (x_min,
+        x_max)).
+    pick_shape: {"Circle", "Rectangle", "Polygon", "Square"}
+        Shape of the picks to be drawn.
+    picks: list of tuples
+        List of picks, where each pick is a tuple specifying the pick
+        coordinates. Note: this must match the format of the given pick
+        shape.
+    pick_size : float or None
+        Size of the picks in camera pixels. For "Circle", this is the
+        diameter; for "Rectangle", this is the width; for "Square", this
+        is the side length. This parameter is ignored for "Polygon"
+        picks.
+    point_picks : bool, optional
+        If True and pick_shape is "Circle", draw picks as points instead
+        of circles. Default is False.
+    annotate_picks : bool, optional
+        If True, annotate each pick with its index in the picks list.
+        Default is False.
+    color : QtGui.QColor, optional
+        Color of the picks. Default is yellow.
+
+    Returns
+    -------
+    image : QImage
+        Image with the drawn picks.
+    """
+    image = image.copy()
+    if pick_shape == "Circle":
+        return _draw_picks_circle(
+            image,
+            viewport=viewport,
+            picks=picks,
+            pick_size=pick_size,
+            point_picks=point_picks,
+            annotate_picks=annotate_picks,
+            color=color,
+        )
+    elif pick_shape == "Rectangle":
+        return _draw_picks_rectangle(
+            image,
+            viewport=viewport,
+            picks=picks,
+            pick_size=pick_size,
+            annotate_picks=annotate_picks,
+            color=color,
+        )
+    elif pick_shape == "Polygon":
+        return _draw_picks_polygon(
+            image,
+            viewport=viewport,
+            picks=picks,
+            annotate_picks=annotate_picks,
+            color=color,
+        )
+    elif pick_shape == "Square":
+        return _draw_picks_square(
+            image,
+            viewport=viewport,
+            picks=picks,
+            pick_size=pick_size,
+            annotate_picks=annotate_picks,
+            color=color,
+        )
+
+
+@adjust_viewport_decorator
+def draw_points(
+    image: QtGui.QImage,
+    viewport: tuple[tuple[float, float], tuple[float, float]],  # cam. px
+    points: list[tuple],  # points in camera pixels,
+    pixelsize: int | float,  # camera pixel size in nm
+    color: QtGui.QColor = QtGui.QColor("yellow"),
+) -> QtGui.QImage:
+    """Draw points, lines and distances between them onto image.
+
+    Parameters
+    ----------
+    image : QImage
+        Image containing rendered localizations.
+    viewport : tuple
+        Current field of view in camera pixels, ((y_min, y_max), (x_min,
+        x_max)).
+    points : list of tuples
+        List of points, where each point is a tuple specifying the point
+        coordinates in camera pixels.
+    pixelsize : int or float
+        Camera pixel size in nm.
+    color : QtGui.QColor, optional
+        Color of the points, lines and text. Default is yellow.
+
+    Returns
+    -------
+    image : QImage
+        Image with the drawn points.
+    """
+    d = 20  # width of the drawn crosses (display pixels)
+    painter = QtGui.QPainter(image)
+    painter.setPen(color)
+
+    cx = []
+    cy = []
+    ox = []  # together with oldpoint used for drawing
+    oy = []  # lines between points
+    oldpoint = []
+    for point in points:
+        # convert to display units
+        if oldpoint != []:
+            ox, oy = map_to_view(*oldpoint, image.size(), viewport=viewport)
+        cx, cy = map_to_view(*point, image.size(), viewport=viewport)
+
+        # draw a cross
+        painter.drawPoint(cx, cy)
+        painter.drawLine(cx, cy, int(cx + d / 2), cy)
+        painter.drawLine(cx, cy, cx, int(cy + d / 2))
+        painter.drawLine(cx, cy, int(cx - d / 2), cy)
+        painter.drawLine(cx, cy, cx, int(cy - d / 2))
+
+        # draw a line between points and show distance
+        if oldpoint != []:
+            painter.drawLine(cx, cy, ox, oy)
+            font = painter.font()
+            font.setPixelSize(20)
+            painter.setFont(font)
+
+            # get distance with 2 decimal places
+            distance = (
+                float(
+                    int(
+                        np.sqrt(
+                            (
+                                (oldpoint[0] - point[0]) ** 2
+                                + (oldpoint[1] - point[1]) ** 2
+                            )
+                        )
+                        * pixelsize
+                        * 100
                     )
-        painter.end()
-
-    def draw_picks_square(self, image: QtGui.QImage) -> None:
-        """Draw square picks onto the image of rendered localizations."""
-        t_dialog = self.window.tools_settings_dialog
-        pixelsize = self.window.display_settings_dlg.pixelsize.value()
-        w = t_dialog.pick_side_length.value() / pixelsize
-        w *= self.width() / self.viewport_width()
-        w = int(w)
-        painter = QtGui.QPainter(image)
-        painter.setPen(QtGui.QColor("yellow"))
-        # yellow is barely visible on white background
-        if self.window.dataset_dialog.wbackground.isChecked():
-            painter.setPen(QtGui.QColor("red"))
-
-        for i, pick in enumerate(self._picks):
-            # check that the pick is within the view
-            if (
-                pick[0] < self.viewport[0][1]
-                or pick[0] > self.viewport[1][1]
-                or pick[1] < self.viewport[0][0]
-                or pick[1] > self.viewport[1][0]
-            ):
-                continue
-
-            # convert from camera units to display units
-            cx, cy = self.map_to_view(*pick)
-            painter.drawRect(int(cx - w / 2), int(cy - w / 2), w, w)
-
-            # annotate picks
-            if t_dialog.pick_annotation.isChecked():
-                painter.drawText(
-                    int(cx + w / 2) + 10, int(cy + w / 2) + 10, str(i)
                 )
-        painter.end()
+                / 100
+            )
+            painter.drawText(
+                int((cx + ox) / 2 + d),
+                int((cy + oy) / 2 + d),
+                str(distance) + " nm",
+            )
+        oldpoint = point
+    painter.end()
+    return image
 
-    def draw_picks(self, image: QtGui.QImage) -> QtGui.QImage:
-        """Draw all selected picks onto the image of rendered
-        localizations.
 
-        Parameters
-        ----------
-        image : QImage
-            Image containing rendered localizations.
+@adjust_viewport_decorator
+def draw_scalebar(
+    image: QtGui.QImage,
+    viewport: tuple[tuple[float, float], tuple[float, float]],  # cam. px
+    scalebar_length_nm: int | float,  # scalebar length in nm
+    pixelsize: int | float,  # camera pixel size in nm
+    display_length: bool = True,  # whether to display scalebar length in nm
+    color: QtGui.QColor = QtGui.QColor("white"),
+) -> QtGui.QImage:
+    """Draw a scalebar into rendered localizations (QImage).
 
-        Returns
-        -------
-        image : QImage
-            Image with the drawn picks.
-        """
-        image = image.copy()
-        if self._pick_shape == "Circle":
-            return self.draw_picks_circle(image)
-        elif self._pick_shape == "Rectangle":
-            return self.draw_picks_rectangle(image)
-        elif self._pick_shape == "Polygon":
-            return self.draw_picks_polygon(image)
-        elif self._pick_shape == "Square":
-            return self.draw_picks_square(image)
+    Parameters
+    ----------
+    image : QImage
+        Image containing rendered localizations.
+    viewport : tuple
+        Current field of view in camera pixels, ((y_min, y_max), (x_min,
+        x_max)).
+    scalebar_length_nm : int or float
+        Scale bar length in nm.
+    pixelsize : int or float
+        Camera pixel size in nm.
+
+    Returns
+    -------
+    image : QImage
+        Image with the drawn scalebar.
+    """
+    length_camerapxl = scalebar_length_nm / pixelsize
+    length_displaypxl = int(
+        round(image.width() * length_camerapxl / viewport_width(viewport))
+    )
+    height = 10  # display pixels
+    painter = QtGui.QPainter(image)
+    painter.setPen(QtGui.QPen(QtCore.Qt.PenStyle.NoPen))
+    painter.setBrush(QtGui.QBrush(color))
+
+    # draw a rectangle
+    x = image.width() - length_displaypxl - 35
+    y = image.height() - height - 20
+    painter.drawRect(x, y, length_displaypxl + 0, height + 0)
+
+    # display scalebar's length
+    if display_length:
+        font = painter.font()
+        font.setPixelSize(20)
+        painter.setFont(font)
+        painter.setPen(color)
+        text_spacer = 40
+        text_width = length_displaypxl + 2 * text_spacer
+        text_height = text_spacer
+        painter.drawText(
+            x - text_spacer,
+            y - 25,
+            text_width,
+            text_height,
+            QtCore.Qt.AlignmentFlag.AlignHCenter,
+            str(scalebar_length_nm) + " nm",
+        )
+    return image
+
+
+def draw_legend(
+    image: QtGui.QImage,
+    channel_names: list[str],
+    channel_colors: list[tuple[int, int, int]],
+) -> QtGui.QImage:
+    """Draw a legend for multichannel data in the top left corner over
+    rendered localizations (QImage).
+
+    Parameters
+    ----------
+    image : QImage
+        Image containing rendered localizations.
+    channel_names : list of str
+        List of channel names to be displayed in the legend.
+    channel_colors : list of tuples
+        List of RGB tuples corresponding to the colors of the channels.
+        Must range between 0 and 255.
+
+    Returns
+    -------
+    image : QImage
+        Image with the drawn legend.
+    """
+    assert len(channel_names) == len(channel_colors), (
+        "Length of channel_names must match number of channels in " "dataset."
+    )
+    n_channels = len(channel_names)
+    painter = QtGui.QPainter(image)
+    # initial positions
+    x = 12
+    y = 26
+    dy = 24  # space between names
+    padding = 4  # padding around text
+    font = painter.font()
+    font.setPixelSize(16)
+    painter.setFont(font)
+    fm = QtGui.QFontMetrics(font)
+    for i in range(n_channels):
+        text = channel_names[i]
+        # draw black background
+        text_rect = fm.boundingRect(text)
+        bg_rect = QtCore.QRect(
+            x - padding,
+            y - fm.ascent() - padding,
+            text_rect.width() + 2 * padding,
+            fm.height() + 2 * padding,
+        )
+        painter.setPen(QtGui.QPen(QtCore.Qt.PenStyle.NoPen))
+        painter.setBrush(QtGui.QBrush(QtCore.Qt.GlobalColor.black))
+        painter.drawRect(bg_rect)
+        # draw colored text
+        color_rgb = channel_colors[i]
+        color = QtGui.QColor(color_rgb[0], color_rgb[1], color_rgb[2])
+        painter.setPen(QtGui.QPen(color))
+        painter.drawText(QtCore.QPoint(x, y), text)
+        y += dy
+    return image
+
+
+@adjust_viewport_decorator
+def draw_minimap(
+    image: QtGui.QImage,
+    viewport: tuple[tuple[float, float], tuple[float, float]],  # cam. px
+    max_viewport_size: tuple[float, float],  # in camera pixels,
+    color_main: QtGui.QColor = QtGui.QColor("yellow"),
+    color_frame: QtGui.QColor = QtGui.QColor("white"),
+) -> QtGui.QImage:
+    """Draw a minimap showing the position of current viewport.
+
+    Parameters
+    ----------
+    image : QImage
+        Image containing rendered localizations.
+    viewport : tuple
+        Current field of view in camera pixels, ((y_min, y_max), (x_min,
+        x_max)).
+    max_viewport_size : tuple
+        Maximum viewport size in camera pixels, (max_height, max_width).
+    color_main, color_frame : QColor, optional
+        Colors of the viewport and the minimap frame. Default is yellow
+        and white, respectively.
+
+    Returns
+    -------
+    image : QImage
+        Image with the drawn minimap.
+    """
+    movie_height, movie_width = max_viewport_size
+    length_minimap = 100
+    height_minimap = int(movie_height / movie_width * 100)
+    # draw in the upper right corner, overview rectangle
+    x = image.width() - length_minimap - 20
+    y = 20
+    painter = QtGui.QPainter(image)
+    painter.setPen(color_frame)
+    painter.drawRect(x, y, length_minimap + 0, height_minimap + 0)
+    painter.setPen(color_main)
+    length = int(viewport_width(viewport) / movie_width * length_minimap)
+    length = max(5, length)
+    height = int(viewport_height(viewport) / movie_height * height_minimap)
+    height = max(5, height)
+    x_vp = int(viewport[0][1] / movie_width * length_minimap)
+    y_vp = int(viewport[0][0] / movie_height * length_minimap)
+    painter.drawRect(x + x_vp, y + y_vp, length + 0, height + 0)
+    return image
+
+
+def render_scene(
+    locs: pd.DataFrame | list[pd.DataFrame],
+    info: list[dict] | list[list[dict]],
+    *,
+    disp_px_size: float,
+    viewport: tuple[tuple[float, float], tuple[float, float]] | None = None,
+    blur_method: (
+        Literal["gaussian", "gaussian_iso", "smooth", "convolve"] | None
+    ) = None,
+    min_blur_width: float = 0.0,
+    ang: tuple | None = None,
+    autoscale: bool = False,
+    single_channel_colormap: str = "magma",
+    colors: list | None = None,
+    return_qimage: bool = False,
+) -> lib.IntArray3D | QtGui.QImage:
+    """Render localizations into a colored image (either QImage or a 
+    numpy array).
+    
+    Parameters
+    ----------
+    locs: pd.DataFrame or list of pd.DataFrame
+        Localizations to be rendered. Can be either one localization
+        file or a list thereof.
+    info: list of dict or list of list of dict
+        List of info dictionaries corresponding to the localization
+        file(s).
+    disp_px_size : float
+        Display pixel size in nm.
+    viewport : tuple, optional
+        Field of view to be rendered (in camera pixels). The input is
+        ``((y_min, x_min), (y_max, x_max))``. If None, all localizations
+        are rendered.
+    blur_method : {"gaussian", "gaussian_iso", "smooth", "convolve"} or None, \
+            optional
+        Defines localizations' blur. The string has to be one of
+        'gaussian', 'gaussian_iso', 'smooth', 'convolve'. If None, no
+        blurring is applied. 'gaussian' uses localization precisions
+        of each localization to blur it (different in each dimension).
+        'gaussian_iso' is similar but averages x and y localization
+        precisions, so that blur is isotropic. 'smooth' applies a one
+        pixel blur. 'convolve' applies the same blur to all
+        localizations which is the median localization precision.
+    min_blur_width : float, optional
+        Minimum size of blur (camera pixels).
+    ang : tuple, optional
+        Rotation angles of locs around x, y and z axes in radians. If
+        None, locs are not rotated.
+    autoscale : bool, optional
+        True if optimally adjust contrast. Default is False.
+    single_channel_colormap : str, optional
+        Colormap to use for single channel data. Default is 'magma'.
+    colors : list of tuples, optional
+        List of RGB tuples corresponding to the colors of the channels.
+        Only needs to be specified for multi-channel data. Must range
+        between 0 and 255. Default is None.  #TODO: see if this is true
+    return_qimage: bool, optional
+        If True, return a QImage. If False, return a numpy array.
+        Default is False.
+
+    Returns
+    -------
+    image : IntArray3D or QImage
+        RGB image of rendered localizations. Either a numpy array of
+        shape (height, width, 3) with integer values between 0 and 255
+        or a QImage (if return_qimage is True).
+    """
+    if isinstance(locs, pd.DataFrame):
+        image = _render_single_channel(
+            locs=locs,
+            info=info,
+            disp_px_size=disp_px_size,
+            viewport=viewport,
+            blur_method=blur_method,
+            min_blur_width=min_blur_width,
+            ang=ang,
+            autoscale=autoscale,
+            single_channel_colormap=single_channel_colormap,
+        )
+    elif (
+        isinstance(locs, list)
+        and len(locs) == 1
+        and "group" not in locs[0].columns
+    ):
+        image = _render_single_channel(
+            locs=locs[0],
+            info=info[0],
+            disp_px_size=disp_px_size,
+            viewport=viewport,
+            blur_method=blur_method,
+            min_blur_width=min_blur_width,
+            ang=ang,
+            autoscale=autoscale,
+            single_channel_colormap=single_channel_colormap,
+        )
+    else:
+        assert len(colors) == len(locs), (
+            f"Mismatch between {len(colors)} colors and {len(locs)} "
+            "localization files."
+        )
+        image = _render_multi_channel(  # TODO: render multi channel could call render_Singel_channel if one chanenl present without group column
+            locs=locs,
+            info=info,
+            disp_px_size=disp_px_size,
+            viewport=viewport,
+            blur_method=blur_method,
+            min_blur_width=min_blur_width,
+            ang=ang,
+            autoscale=autoscale,
+            colors=colors,
+        )
+    if return_qimage:
+        bgra = np.zeros((*image.shape[:2], 4), dtype=np.uint8)
+        bgra[:, :, 0] = image[:, :, 2]  # R -> B
+        bgra[:, :, 1] = image[:, :, 1]  # G -> G
+        bgra[:, :, 2] = image[:, :, 0]  # B -> R
+        bgra[:, :, 3] = 255  # A -> 255 (opaque)
+        Y, X = image.shape[:2]
+        qimage = QtGui.QImage(
+            bgra.data, X, Y, QtGui.QImage.Format.Format_RGB32
+        )
+        return qimage
+    else:
+        return image

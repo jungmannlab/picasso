@@ -1172,6 +1172,99 @@ def plot_cumulative_exponential_fit(
     return fig
 
 
+def plot_trace(
+    locs: pd.DataFrame,
+    info: list[dict],
+    *,
+    fig: plt.Figure | None = None,
+    include_photons: bool = True,
+    return_trace: bool = False,
+) -> (
+    plt.Figure
+    | tuple[
+        plt.Figure,
+        tuple[FloatArray1D, FloatArray1D, FloatArray1D]
+        | tuple[FloatArray1D, FloatArray1D],
+    ]
+):
+    """Plot the trace of a localization over time, showing the x and y
+    positions and the spot size.
+
+    Parameters
+    ----------
+    locs : pd.DataFrame
+        Localizations.
+    info : list[dict]
+        Additional information for each localization.
+    fig : plt.Figure, optional
+        If given, the plot will be drawn on the given figure. Otherwise,
+        a new figure will be created.
+    include_photons : bool, optional
+        If True, the photon count will also be plotted as well. Default
+        is True.
+    return_trace : bool, optional
+        If True, the trace data will be returned as well. Default is
+        False.
+
+    Returns
+    -------
+    fig : plt.Figure
+        The figure containing the plot.
+    trace_data : tuple of FloatArray1D, optional
+        If return_trace is True, a tuple containing the x vector
+        (frames), the y vector (localization ON/OFF) and the photon
+        count vector (if include_photons is True) will be returned.
+    """
+    if fig is None:
+        fig = plt.Figure(constrained_layout=True)
+    else:
+        fig.clear()
+    if include_photons:
+        ax1, ax2, ax3, ax4 = fig.subplots(4, sharex=True)
+    else:
+        ax1, ax2, ax3 = fig.subplots(3, sharex=True)
+
+    n_frames = get_from_metadata(info, "Frames", raise_error=True)
+    xvec = np.arange(n_frames)
+    yvec = xvec[:] * 0
+    yvec[locs["frame"]] = 1
+    yvec_ph = xvec[:] * 0
+    yvec_ph[locs["frame"]] = locs["photons"]
+    trace_data = (xvec, yvec, yvec_ph) if include_photons else (xvec, yvec)
+
+    # frame vs x
+    ax1.scatter(locs["frame"], locs["x"], s=2)
+    ax1.set_title("X-pos vs frame")
+    ax1.set_xlim(0, n_frames)
+    ax1.set_ylabel("X-pos [Px]")
+
+    # frame vs y
+    ax2.scatter(locs["frame"], locs["y"], s=2)
+    ax2.set_title("Y-pos vs frame")
+    ax2.set_ylabel("Y-pos [Px]")
+
+    # locs in time
+    ax3.plot(xvec, yvec, linewidth=1)
+    ax3.fill_between(xvec, 0, yvec, facecolor="red")
+    ax3.set_title("Localizations")
+    ax3.set_xlabel("Frames")
+    ax3.set_ylabel("ON")
+    ax3.set_yticks([0, 1])
+    ax3.set_ylim([-0.1, 1.1])
+
+    if include_photons:
+        ax4.plot(xvec, yvec_ph, linewidth=1)
+        ax4.set_title("Photons")
+        ax4.set_xlabel("Frames")
+        ax4.set_ylabel("Photons")
+        ax4.set_ylim([0, locs["photons"].max() * 1.1])
+
+    if return_trace:
+        return fig, trace_data
+    else:
+        return fig
+
+
 def unpack_calibration(
     calibration: dict,
     pixelsize: float,
@@ -1897,6 +1990,44 @@ def pick_areas_rectangle(
     for i, pick in enumerate(picks):
         (xs, ys), (xe, ye) = pick
         areas[i] = w * np.sqrt((xe - xs) ** 2 + (ye - ys) ** 2)
+    return areas
+
+
+def pick_areas(
+    picks: list[tuple],
+    pick_shape: Literal["Circle", "Rectangle", "Polygon", "Square"],
+    pick_size: float | None,
+) -> FloatArray1D:
+    """Get pick areas for each pick in picks.
+
+    Parameters
+    ----------
+    picks : list of tuples
+        Coordinates of picks in camera pixels.
+    pick_shape : {"Circle", "Rectangle", "Polygon", "Square"}
+        Shape of picks.
+    pick_size : float or None
+        Size of picks in camera pixels. For circles - diameters. For
+        rectangles - width. For squares - side length. For polygons -
+        ignored.
+
+    Returns
+    -------
+    areas : FloatArray1D
+        Pick areas in camera pixels squared.
+    """
+    if pick_shape == "Circle":
+        r = pick_size / 2
+        # no need for repeating, same area for all picks
+        areas = np.pi * r**2 * np.ones(len(picks))
+    elif pick_shape == "Rectangle":
+        areas = pick_areas_rectangle(picks, pick_size)
+    elif pick_shape == "Polygon":
+        areas = pick_areas_polygon(picks)
+    elif pick_shape == "Square":
+        areas = pick_size**2 * np.ones(len(picks))
+    else:
+        raise ValueError(f"Unknown pick shape: {pick_shape}")
     return areas
 
 
