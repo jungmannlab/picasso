@@ -480,6 +480,20 @@ def load_picks(  # noqa: C901
     return picks, shape, size
 
 
+def save_drift(path: str, drift: pd.DataFrame) -> None:
+    """Save drift to a .txt file in the format used by the Picasso.
+
+    Parameters
+    ----------
+    path : str
+        The path to the drift file. Must end in .txt.
+    drift : pd.DataFrame
+        A DataFrame with 'x' and 'y' columns and drift values for each
+        frame.
+    """
+    np.savetxt(path, drift, newline="\r\n")
+
+
 def load_drift(path: str) -> pd.DataFrame | None:
     """Load drift from a .txt file generated with the Picasso GUI.
 

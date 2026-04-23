@@ -16,6 +16,7 @@ import colorsys
 import os
 import time
 import warnings
+from copy import deepcopy
 from typing import Any, TypeAlias, Literal
 from collections.abc import Callable
 from asyncio import Future
@@ -864,6 +865,48 @@ def get_from_metadata(
         return default
     else:
         raise ValueError("info must be a dict or a list of dicts.")
+
+
+def overwrite_metadata(
+    info: list[dict] | dict, key: Any, value: Any
+) -> list[dict] | dict:
+    """Overwrite a value in the localization metadata (list of
+    dictionaries or a dictionary). If the key does not exist an error
+    is raised.
+
+    Parameters
+    ----------
+    info : list of dicts or dict
+        Localization metadata.
+    key : Any
+        Key to be overwritten or added in the metadata.
+    value : Any
+        Value to be set for the key.
+
+    Returns
+    -------
+    updated_info : list of dicts or dict
+        Metadata with the updated value.
+
+    Raises
+    ------
+    KeyError
+        If the key is not found in the metadata.
+    """
+    success = False
+    if isinstance(info, dict):
+        if key in info:
+            info[key] = value
+            success = True
+    elif isinstance(info, list):
+        for inf in info[::-1]:
+            if key in inf:
+                inf[key] = value
+                success = True
+                break
+    if not success:
+        raise KeyError(f"Key '{key}' not found in metadata.")
+    return info
 
 
 def get_colors(n_channels):
@@ -2212,3 +2255,99 @@ def plot_rel_sigma_check(
         ax.set_ylabel("Counts")
         fig.savefig(path, dpi=300)
         plt.close(fig)
+
+
+def unfold_localizations_square(
+    locs: pd.DataFrame,
+    info: list[dict],
+    *,
+    n_square: int = 10,
+    spacing: int | float = 1,
+):
+    """Shift localizations onto a square grid (tile) based on their
+    group indices. The localizations must contain a 'group' column.
+
+    Parameters
+    ----------
+    locs : pd.DataFrame
+        Localizations to be unfolded. Must contain a 'group' column.
+    info : list of dicts
+        Localization metadata.
+    n_square : int, optional
+        Number of groups per square side. Default is 10.
+    spacing : int or float, optional
+        Spacing between groups in camera pixels. Default is 1.
+
+    Returns
+    -------
+    shifted_locs : pd.DataFrame
+        Localizations shifted onto a square grid based on their group
+        indices.
+    updated_info : list of dicts
+        Updated metadata with new FOV dimensions after unfolding.
+    """
+    assert (
+        "group" in locs.columns
+    ), "Localizations must contain a 'group' column."
+    # ensure groups are consecutive integers starting from 0
+    locs = locs.copy()  # pandas SettingWithCopyWarning
+    updated_info = deepcopy(info)
+    unique_groups = np.unique(locs["group"])
+    group_mapping = {old: new for new, old in enumerate(unique_groups)}
+    locs["group"] = locs["group"].map(group_mapping)
+
+    # shift localizations to the middle of the FOV and by the COM
+    # of each group
+    cx = get_from_metadata(updated_info, "Width", raise_error=True) / 2
+    cy = get_from_metadata(updated_info, "Height", raise_error=True) / 2
+    for group_id in np.unique(locs["group"]):
+        mask = locs["group"] == group_id
+        mean_x = locs.loc[mask, "x"].mean()
+        mean_y = locs.loc[mask, "y"].mean()
+        locs.loc[mask, "x"] += cx - mean_x
+        locs.loc[mask, "y"] += cy - mean_y
+
+    # unfold onto grid
+    locs["x"] += np.mod(locs["group"], n_square) * spacing
+    locs["y"] += np.floor(locs["group"] / n_square) * spacing
+
+    locs["x"] -= locs["x"].mean()
+    locs["y"] -= locs["y"].mean()
+    locs["x"] += np.absolute(locs["x"].min())
+    locs["y"] += np.absolute(locs["y"].min())
+
+    # Update FOV and clean up
+    updated_info = overwrite_metadata(
+        updated_info, "Width", int(np.ceil(locs["x"].max()))
+    )
+    updated_info = overwrite_metadata(
+        updated_info, "Height", int(np.ceil(locs["y"].max()))
+    )
+    return locs, updated_info
+
+
+def sync_groups(locs: list[pd.DataFrame]) -> list[pd.DataFrame]:
+    """Sync group indices across multiple localization lists. Can be
+    used, for example, for removing clustered localizations after
+    the cluster centers were filtered.
+
+    Parameters
+    ----------
+    locs : list of pd.DataFrame
+        List of localization lists to be synced. Each must contain a
+        'group' column.
+
+    Returns
+    -------
+    synced_locs : list of pd.DataFrame
+        List of localization lists with synced group indices.
+    """
+    assert all(
+        "group" in loc.columns for loc in locs
+    ), "All localization lists must contain a 'group' column."
+    unique_groups = [np.unique(loc["group"]) for loc in locs]
+    common_groups = set(unique_groups[0]).intersection(*unique_groups)
+    for i in range(len(locs)):
+        mask = locs[i]["group"].isin(common_groups)
+        locs[i] = locs[i][mask].reset_index(drop=True)
+    return locs

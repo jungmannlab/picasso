@@ -3341,28 +3341,28 @@ class TestClustererView(QtWidgets.QLabel):
     def to_down(self) -> None:
         """Shift viewport downwards."""
         if self.viewport is not None:
-            h = self.viewport_height()
+            h = render.viewport_height(self.viewport)
             dy = 0.3 * h
             self.shift_viewport(0, dy)
 
     def to_left(self) -> None:
         """Shift viewport to the left."""
         if self.viewport is not None:
-            w = self.viewport_width()
+            w = render.viewport_width(self.viewport)
             dx = -0.3 * w
             self.shift_viewport(dx, 0)
 
     def to_right(self) -> None:
         """Shift viewport to the right."""
         if self.viewport is not None:
-            w = self.viewport_width()
+            w = render.viewport_width(self.viewport)
             dx = 0.3 * w
             self.shift_viewport(dx, 0)
 
     def to_up(self) -> None:
         """Shift viewport upwards."""
         if self.viewport is not None:
-            h = self.viewport_height()
+            h = render.viewport_height(self.viewport)
             dy = -0.3 * h
             self.shift_viewport(0, dy)
 
@@ -3376,22 +3376,15 @@ class TestClustererView(QtWidgets.QLabel):
 
     def zoom(self, factor: float) -> None:
         """Change size of viewport."""
-        height = self.viewport_height()
-        width = self.viewport_width()
+        height, width = render.viewport_size(self.viewport)
         new_height = height * factor
         new_width = width * factor
-        center_y, center_x = self.view.viewport_center(self.viewport)
+        center_y, center_x = render.viewport_center(self.view.viewport)
         self.viewport = [
             (center_y - new_height / 2, center_x - new_width / 2),
             (center_y + new_height / 2, center_x + new_width / 2),
         ]
         self.update_scene()
-
-    def viewport_width(self) -> int:
-        return self.viewport[1][1] - self.viewport[0][1]
-
-    def viewport_height(self) -> int:
-        return self.viewport[1][0] - self.viewport[0][0]
 
     def shift_viewport(self, dx: int, dy: int) -> None:
         """Move viewport by a specified amount."""
@@ -3499,8 +3492,7 @@ class TestClustererView(QtWidgets.QLabel):
         return locs
 
     def get_optimal_oversampling(self) -> float:
-        height = self.viewport_height()
-        width = self.viewport_width()
+        height, width = render.viewport_size(self.viewport)
         return (self._size / min(height, width)) / 1.05
 
     def scale_contrast(self, images: list[FloatArray2D]) -> list[FloatArray2D]:
@@ -3565,28 +3557,9 @@ class DriftPlotWindow(QtWidgets.QTabWidget):
         vbox.addWidget(self.canvas)
         vbox.addWidget((NavigationToolbar2QT(self.canvas, self)))
 
-    def plot_3d(self, drift: pd.DataFrame) -> None:
-        """Create 3 plots: frames vs x/y, x vs y in time, frames vs z.
-
-        Parameters
-        ----------
-        drift : pd.DataFrame
-            Drift for each spatial coordinates. Contains 3 columns: x, y
-            and z. x and y are in camera pixels and z in nm.
-        """
-        pixelsize = self.parent.window.display_settings_dlg.pixelsize.value()
-        postprocess.plot_drift(drift, pixelsize, self.figure)
-        self.canvas.draw()
-
-    def plot_2d(self, drift: pd.DataFrame) -> None:
-        """Create 2 plots: frames vs x/y, x vs y in time.
-
-        Parameters
-        ----------
-        drift : pd.DataFrame
-            Drift for each spatial coordinates. Contains 2 columns: x, y
-            in camera pixels.
-        """
+    def plot(self, drift: pd.DataFrame) -> None:
+        """Plot drift in 2D or 3D depending on the columns of the input
+        DataFrame."""
         pixelsize = self.parent.window.display_settings_dlg.pixelsize.value()
         postprocess.plot_drift(drift, pixelsize, self.figure)
         self.canvas.draw()
@@ -4111,7 +4084,7 @@ class InfoDialog(lib.Dialog):
             # make sure the viewport is not too large
             median_lp = self.window.view.median_lp
             max_size = 2000 * (median_lp / 2)
-            height, width = self.window.view.viewport_size()
+            height, width = render.viewport_size(self.window.view.viewport)
             if height > max_size and width > max_size:
                 text = (
                     "The current FOV is large and will likely lead to a long "
@@ -6448,9 +6421,6 @@ class View(QtWidgets.QLabel):
         Used for size adjustment.
     window : QMainWindow
         Instance of the main window.
-    x_color : np.array
-        Indexes each loc according to its parameter value;
-        see ``self.activate_render_property``.
     x_locs : list of pd.DataFrames
         Contains pd.DataFrames with locs to be rendered by property; one
         per color.
@@ -6718,7 +6688,7 @@ class View(QtWidgets.QLabel):
     ) -> tuple[tuple[float, float], tuple[float, float]]:
         """Add space to a desired viewport, such that it matches the
         window aspect ratio. Return the modified viewport."""
-        viewport_height, viewport_width = self.viewport_size(viewport)
+        viewport_height, viewport_width = render.viewport_size(viewport)
         view_height = self.height()
         view_width = self.width()
         viewport_aspect = viewport_width / viewport_height
@@ -7472,7 +7442,7 @@ class View(QtWidgets.QLabel):
         w = self.window.tools_settings_dialog.pick_width.value() / px
 
         # convert from camera units to display units
-        w *= self.width() / self.viewport_width()
+        w *= self.width() / render.viewport_width(self.viewport)
 
         polygon = render.get_rectangle_pick_polygon(
             self.rectangle_pick_start_x,
@@ -8218,16 +8188,18 @@ class View(QtWidgets.QLabel):
 
     def map_to_movie(self, position: QtCore.QPoint) -> QtCore.QPoint:
         """Convert coordinates from display units to camera units."""
+        v_height, v_width = render.viewport_size(self.viewport)
         x_rel = position.x() / self.width()
-        x_movie = x_rel * self.viewport_width() + self.viewport[0][1]
+        x_movie = x_rel * v_width + self.viewport[0][1]
         y_rel = position.y() / self.height()
-        y_movie = y_rel * self.viewport_height() + self.viewport[0][0]
+        y_movie = y_rel * v_height + self.viewport[0][0]
         return x_movie, y_movie
 
     def map_to_view(self, x: float, y: float) -> tuple[int, int]:
         """Convert coordinates from camera units to display units."""
-        cx = self.width() * (x - self.viewport[0][1]) / self.viewport_width()
-        cy = self.height() * (y - self.viewport[0][0]) / self.viewport_height()
+        v_height, v_width = render.viewport_size(self.viewport)
+        cx = self.width() * (x - self.viewport[0][1]) / v_width
+        cy = self.height() * (y - self.viewport[0][0]) / v_height
         return int(cx), int(cy)
 
     def max_movie_height(self) -> float:
@@ -8316,7 +8288,9 @@ class View(QtWidgets.QLabel):
                 x_max_rel = end.x() / self.width()
                 y_min_rel = self.origin.y() / self.height()
                 y_max_rel = end.y() / self.height()
-                viewport_height, viewport_width = self.viewport_size()
+                viewport_height, viewport_width = render.viewport_size(
+                    self.viewport
+                )
                 x_min = self.viewport[0][1] + x_min_rel * viewport_width
                 x_max = self.viewport[0][1] + x_max_rel * viewport_width
                 y_min = self.viewport[0][0] + y_min_rel * viewport_height
@@ -8474,8 +8448,9 @@ class View(QtWidgets.QLabel):
 
     def display_pixels_per_viewport_pixels(self) -> float:
         """Return optimal oversampling given viewport size."""
-        os_horizontal = self.width() / self.viewport_width()
-        os_vertical = self.height() / self.viewport_height()
+        v_height, v_width = render.viewport_size(self.viewport)
+        os_horizontal = self.width() / v_width
+        os_vertical = self.height() / v_height
         # The values are almost the same and we choose max
         return max(os_horizontal, os_vertical)
 
@@ -8487,7 +8462,7 @@ class View(QtWidgets.QLabel):
         dy, dx : float
             Relative displacement of the viewport in y/x axis.
         """
-        viewport_height, viewport_width = self.viewport_size()
+        viewport_height, viewport_width = render.viewport_size(self.viewport)
         x_move = dx * viewport_width
         y_move = dy * viewport_height
         x_min = self.viewport[0][1] - x_move
@@ -9645,34 +9620,34 @@ class View(QtWidgets.QLabel):
             min_blur_width=min_blur_width,
             blur_method=blur_method,
         )
-        # return render.render_scene(
-        #     locs=self.locs,
-        #     info=self.infos,
-        #     return_qimage=True,
-        #     **kwargs,
-        # )
-        n_channels = len(self.locs)
-        if n_channels == 1:
-            self.render_single_channel(
-                kwargs,
-                autoscale=autoscale,
-                use_cache=use_cache,
-                cache=cache,
-            )
-        else:
-            self.render_multi_channel(
-                kwargs,
-                autoscale=autoscale,
-                use_cache=use_cache,
-                cache=cache,
-            )
-        # add alpha channel (no transparency)
-        self._bgra[:, :, 3].fill(255)
-        # build QImage
-        Y, X = self._bgra.shape[:2]
-        qimage = QtGui.QImage(
-            self._bgra.data, X, Y, QtGui.QImage.Format.Format_RGB32
+        # apply z splicing if enabled + render property
+        locs, infos = self._prepare_locs_for_rendering()
+        # prepare other keywords for rendering
+        cmap = self.window.display_settings_dlg.colormap.currentText()
+        if cmap == "Custom":
+            cmap = np.uint8(np.round(255 * self.custom_cmap))
+        relative_intensities = [
+            self.window.dataset_dialog.intensitysettings[i].value()
+            for i in range(len(self.locs))
+        ]
+
+        # render
+        qimage, (vmin, vmax) = render.render_scene(
+            locs=locs,
+            info=infos,
+            return_qimage=False,
+            **kwargs,
+            autoscale=autoscale,
+            invert_colors=self.window.dataset_dialog.wbackground.isChecked(),
+            single_channel_colormap=cmap,
+            colors=self.read_colors(),
+            relative_intensities=relative_intensities,
+            return_qimage=True,
+            return_contrast_limits=True,
         )
+        self.window.display_settings_dlg.silent_minimum_update(vmin)
+        self.window.display_settings_dlg.silent_maximum_update(vmax)
+
         return qimage
 
     def read_colors(self, n_channels: int | None = None) -> list[list[float]]:
@@ -9745,15 +9720,26 @@ class View(QtWidgets.QLabel):
 
         return colors
 
-    def _prepare_locs_for_rendering(self, locs: list | None) -> list:
-        """Return locs list with slicer filtering applied.
+    def _prepare_locs_for_rendering(
+        self, locs: list | None = None
+    ) -> tuple[list[pd.DataFrame], list[list[dict]]]:
+        """Return locs list with slicer filtering applied and use
+        render-property-colored locs if requested.
 
         If locs is None, copies self.locs (when slicer is active) or
         uses self.locs directly. Then clips each channel to the current
         z-slice if the slicer is enabled."""
         slicer = self.window.slicer_dialog.slicer_radio_button
         if locs is None:
-            locs = copy.copy(self.locs) if slicer.isChecked() else self.locs
+            # render by property - use x_locs like multichannel rendering
+            if self.window.display_settings_dlg.render_check.isChecked():
+                # we assume one channel is loaded
+                locs = self.x_locs.copy()
+                infos = [self.infos[0]] * len(locs)
+            else:
+                locs = self.locs.copy() if slicer.isChecked() else self.locs
+
+        # clip to z-slice if slicer is enabled
         for i in range(len(locs)):
             if "z" in locs[i].columns:
                 if slicer.isChecked():
@@ -9761,186 +9747,77 @@ class View(QtWidgets.QLabel):
                     z_max = self.window.slicer_dialog.slicermax
                     in_view = (locs[i]["z"] > z_min) & (locs[i]["z"] <= z_max)
                     locs[i] = locs[i][in_view]
-        return locs
+        if not self.window.display_settings_dlg.render_check.isChecked():
+            infos = self.infos
 
-    def _render_channels(self, locs: list, kwargs: dict) -> tuple:
-        """Render all channels and return (n_locs, image array)."""
-        (y_min, x_min), (y_max, x_max) = kwargs["viewport"]
-        X = int(np.ceil(kwargs["oversampling"] * (x_max - x_min)))
-        Y = int(np.ceil(kwargs["oversampling"] * (y_max - y_min)))
-        if len(self.locs) == 1:
-            renderings = [render.render(_, **kwargs) for _ in locs]
-        else:
-            renderings = [
-                (
-                    render.render(_, **kwargs)
-                    if self.window.dataset_dialog.checks[i].isChecked()
-                    else [0, np.zeros((Y, X))]
-                )
-                for i, _ in enumerate(locs)
-            ]
-        n_locs = sum([_[0] for _ in renderings])
-        image = np.array([_[1] for _ in renderings])
-        return n_locs, image
-
-    def render_multi_channel(
-        self,
-        kwargs: dict,
-        locs: pd.DataFrame | None = None,
-        autoscale: bool = False,
-        use_cache: bool = False,
-        cache: bool = True,
-    ) -> IntArray3D:
-        """Render multichannel (color-coded) localizations.
-
-        Also used when localizations have 'group' field is used, for
-        example, clustered or picked.
-
-        Parameters
-        ----------
-        kwargs : dict
-            Contains blur method, etc. See ``self.get_render_kwargs``.
-        locs : pd.DataFrame, optional
-            Localizations to be rendered. If None, ``self.locs`` is
-            used. Default is None.
-        autoscale : bool, optional
-            True if optimally adjust contrast. Default is False.
-        use_cache : bool, optional
-            True if use stored image. Default is False.
-        cache : bool, optional
-            True if save image in cache. Default is True.
-
-        Returns
-        -------
-        _bgra : IntArray3D
-            8 bit array with 4 channels (blue, green, red and alpha).
-        """
-        locs = self._prepare_locs_for_rendering(locs)
-
-        if use_cache:  # use saved image
-            n_locs = self.n_locs
-            image = self.image
-        else:
-            n_locs, image = self._render_channels(locs, kwargs)
-
-        if cache:  # store image
-            self.n_locs = n_locs
-            self.image = image
-
-        # adjust contrast
-        image = self.scale_contrast(image, autoscale=autoscale)
-
-        Y, X = image.shape[1:]
-        # array with rgb and alpha channels
-        bgra = np.zeros((Y, X, 4), dtype=np.float32)
-
-        colors = self.read_colors(n_channels=len(locs))
-
-        # adjust for relative intensity from Dataset Dialog
-        for i in range(len(self.locs)):
-            iscale = self.window.dataset_dialog.intensitysettings[i].value()
-            image[i] = iscale * image[i]
-
-        # color rgb channels and store in bgra
-        for color, image in zip(colors, image):
-            bgra[:, :, 0] += color[2] * image
-            bgra[:, :, 1] += color[1] * image
-            bgra[:, :, 2] += color[0] * image
-
-        bgra = np.minimum(bgra, 1)  # minimum value of each pixel is 1
-        if self.window.dataset_dialog.wbackground.isChecked():
-            bgra = -(bgra - 1)
-        self._bgra = self.to_8bit(bgra)  # convert to 8 bit
-        return self._bgra
-
-    def render_single_channel(
-        self,
-        kwargs: dict,
-        autoscale: bool = False,
-        use_cache: bool = False,
-        cache: bool = True,
-    ) -> IntArray3D:
-        """Render single channel localizations.
-
-        Calls ``self.render_multi_channel`` in case of clustered, picked
-        localizations or when rendering by property).
-
-        Parameters
-        ----------
-        kwargs : dict
-            Contains blur method, etc. See ``self.get_render_kwargs``.
-        autoscale : bool, optional
-            True if optimally adjust contrast. Default is False.
-        use_cache : bool, optional
-            True if use stored image. Default is False.
-        cache : bool, optional
-            True if save image. Default is True.
-
-        Returns
-        -------
-        _bgra : IntArray3D
-            8 bit array with 4 channels (blue, green, red and alpha).
-        """
-        # get localizations for rendering
-        locs = self.locs[0]
-
-        # if render by property
-        if self.x_render_state:
-            locs = self.x_locs
-            return self.render_multi_channel(
-                kwargs, locs=locs, autoscale=autoscale, use_cache=use_cache
-            )
-
-        # if locs have group identity (e.g. clusters)
-        if "group" in locs.columns and locs.group.size:
-            locs = [locs[self.group_color == _] for _ in range(N_GROUP_COLORS)]
-            return self.render_multi_channel(
-                kwargs, locs=locs, autoscale=autoscale, use_cache=use_cache
-            )
-        # if slicing, show only the current slice
-        if "z" in locs.columns:
-            if self.window.slicer_dialog.slicer_radio_button.isChecked():
-                z_min = self.window.slicer_dialog.slicermin
-                z_max = self.window.slicer_dialog.slicermax
-                in_view = (locs.z > z_min) & (locs.z <= z_max)
-                locs = locs[in_view]
-
-        if use_cache:  # use saved image
-            n_locs = self.n_locs
-            image = self.image
-        else:  # render locs
-            n_locs, image = render.render(locs, **kwargs, info=self.infos[0])
-        if cache:  # store image
-            self.n_locs = n_locs
-            self.image = image
-
-        # adjust contrast and convert to 8 bits
-        image = self.scale_contrast(image, autoscale=autoscale)
-        image = self.to_8bit(image)
-
-        # paint locs using the colormap of choice (Display Settings
-        # Dialog)
-        cmap = self.window.display_settings_dlg.colormap.currentText()
-        if cmap == "Custom":
-            cmap = np.uint8(np.round(255 * self.custom_cmap))
-        else:
-            cmap = np.uint8(np.round(255 * plt.get_cmap(cmap)(np.arange(256))))
-
-        # return a 4 channel (rgb and alpha) array
-        Y, X = image.shape
-        self._bgra = np.zeros((Y, X, 4), dtype=np.uint8, order="C")
-        self._bgra[..., 0] = cmap[:, 2][image]
-        self._bgra[..., 1] = cmap[:, 1][image]
-        self._bgra[..., 2] = cmap[:, 0][image]
-
-        # invert colors if white background
-        if self.window.dataset_dialog.wbackground.isChecked():
-            self._bgra = -(self._bgra - 255)
-        return self._bgra
+        # if multiple channels are loaded, selected only the ones which
+        # are checked in the Dataset Dialog
+        if len(self.locs) > 1:
+            locs_ = []
+            info_ = []
+            for i in range(len(locs)):
+                if self.window.dataset_dialog.checks[i].isChecked():
+                    locs_.append(locs[i])
+                    info_.append(infos[i])
+            locs = locs_
+            infos = info_
+        return locs, infos
 
     def resizeEvent(self, event: QtGui.QResizeEvent) -> None:
         """Defines what happens when window is resized."""
         self.update_scene()
+
+    def _add_shape_specific_info(self, pick_info: dict) -> None:
+        """Add shape-specific information to pick_info dictionary.
+
+        Parameters
+        ----------
+        pick_info : dict
+            Dictionary to update with shape-specific info.
+        """
+        t_dialog = self.window.tools_settings_dialog
+        if self._pick_shape == "Circle":
+            d = t_dialog.pick_diameter.value()
+            pick_info["Pick Diameter (nm)"] = d
+        elif self._pick_shape == "Rectangle":
+            w = t_dialog.pick_width.value()
+            pick_info["Pick Width (nm)"] = w
+        elif self._pick_shape == "Square":
+            a = t_dialog.pick_side_length.value()
+            pick_info["Pick Side Length (nm)"] = a
+        # if polygon pick and the last not closed, ignore the last pick
+        if (
+            self._pick_shape == "Polygon"
+            and self._picks[-1][0] != self._picks[-1][-1]
+        ):
+            pick_info["Number of picks"] -= 1
+
+    def _build_base_pick_info(
+        self, channels_combined: list | None = None
+    ) -> dict:
+        """Build base pick_info dictionary with common fields.
+
+        Parameters
+        ----------
+        channels_combined : list, optional
+            If provided, adds this list to pick_info as "Channels combined".
+
+        Returns
+        -------
+        dict
+            Base pick_info dictionary.
+        """
+        areas = self.pick_areas()
+        pick_info = {
+            "Generated by": f"Picasso v{__version__} Render : Pick",
+            "Pick Shape": self._pick_shape,
+            "Pick Areas (um^2)": [float(_) for _ in areas],
+            "Area (um^2)": float(np.sum(areas)),
+            "Number of picks": len(self._picks),
+        }
+        if channels_combined is not None:
+            pick_info["Channels combined"] = channels_combined
+        return pick_info
 
     def save_picked_locs(self, path: str, channel: int) -> None:
         """Save picked localizations from a given channel to the path as
@@ -9959,36 +9836,13 @@ class View(QtWidgets.QLabel):
 
         # save picked locs with .yaml
         if locs is not None:
-            areas = self.pick_areas()
-            pick_info = {
-                "Generated by": f"Picasso v{__version__} Render : Pick",
-                "Pick Shape": self._pick_shape,
-                "Pick Areas (um^2)": [float(_) for _ in areas],
-                "Area (um^2)": float(np.sum(areas)),
-                "Number of picks": len(self._picks),
-            }
-            if self._pick_shape == "Circle":
-                d = self.window.tools_settings_dialog.pick_diameter.value()
-                pick_info["Pick Diameter (nm)"] = d
-                # correct for the total area
+            pick_info = self._build_base_pick_info()
+            # correct for the total area for certain shapes
+            if self._pick_shape in ["Circle", "Square"]:
                 pick_info["Area (um^2)"] = pick_info["Area (um^2)"] * len(
                     self._picks
                 )
-            elif self._pick_shape == "Rectangle":
-                w = self.window.tools_settings_dialog.pick_width.value()
-                pick_info["Pick Width (nm)"] = w
-            # if polygon pick and the last not closed, ignore the last pick
-            elif (
-                self._pick_shape == "Polygon"
-                and self._picks[-1][0] != self._picks[-1][-1]
-            ):
-                pick_info["Number of picks"] -= 1
-            elif self._pick_shape == "Square":
-                a = self.window.tools_settings_dialog.pick_side_length.value()
-                pick_info["Pick Side Length (nm)"] = a
-                pick_info["Area (um^2)"] = pick_info["Area (um^2)"] * len(
-                    self._picks
-                )
+            self._add_shape_specific_info(pick_info)
             io.save_locs(path, locs, self.infos[channel] + [pick_info])
 
     def save_picked_locs_sep(self, path: str, channel: int) -> None:
@@ -10019,22 +9873,7 @@ class View(QtWidgets.QLabel):
                     "Pick Shape": self._pick_shape,
                     "Area (um^2)": float(area),
                 }
-                t_dialog = self.window.tools_settings_dialog
-                if self._pick_shape == "Circle":
-                    d = t_dialog.pick_diameter.value()
-                    pick_info["Pick Diameter (nm)"] = d
-                elif self._pick_shape == "Rectangle":
-                    w = t_dialog.pick_width.value()
-                    pick_info["Pick Width (nm)"] = w
-                # if polygon pick and the last not closed, ignore the last pick
-                elif (
-                    self._pick_shape == "Polygon"
-                    and self._picks[-1][0] != self._picks[-1][-1]
-                ):
-                    pick_info["Number of picks"] -= 1
-                elif self._pick_shape == "Square":
-                    a = t_dialog.pick_side_length.value()
-                    pick_info["Pick Side Length (nm)"] = a
+                self._add_shape_specific_info(pick_info)
                 io.save_locs(
                     path.replace(".hdf5", f"_{i}.hdf5"),
                     pick_locs,
@@ -10050,41 +9889,20 @@ class View(QtWidgets.QLabel):
             Path for saving localizations.
         """
         # for each channel stack locs from all picks and combine them
+        locs = None
         for channel in range(len(self.locs_paths)):
-            if channel == 0:
-                locs = self.picked_locs(channel)
-                locs = pd.concat(locs, ignore_index=True)
-            else:
-                templocs = self.picked_locs(channel)
-                templocs = pd.concat(templocs, ignore_index=True)
-                locs = pd.concat([locs, templocs], ignore_index=True)
+            channel_locs = self.picked_locs(channel)
+            channel_locs = pd.concat(channel_locs, ignore_index=True)
+            locs = (
+                channel_locs
+                if locs is None
+                else pd.concat([locs, channel_locs], ignore_index=True)
+            )
 
         # save
         if locs is not None:
-            areas = self.pick_areas()
-            pick_info = {
-                "Generated by": f"Picasso v{__version__} Render : Pick",
-                "Pick Shape": self._pick_shape,
-                "Pick Areas (um^2)": [float(_) for _ in areas],
-                "Area (um^2)": float(np.sum(areas)),
-                "Number of picks": len(self._picks),
-                "Channels combined": self.locs_paths,
-            }
-            if self._pick_shape == "Circle":
-                d = self.window.tools_settings_dialog.pick_diameter.value()
-                pick_info["Pick Diameter (nm)"] = d
-            elif self._pick_shape == "Rectangle":
-                w = self.window.tools_settings_dialog.pick_width.value()
-                pick_info["Pick Width (nm)"] = w
-            # if polygon pick and the last not closed, ignore the last pick
-            elif (
-                self._pick_shape == "Polygon"
-                and self._picks[-1][0] != self._picks[-1][-1]
-            ):
-                pick_info["Number of picks"] -= 1
-            elif self._pick_shape == "Square":
-                a = self.window.tools_settings_dialog.pick_side_length.value()
-                pick_info["Pick Side Length (nm)"] = a
+            pick_info = self._build_base_pick_info(self.locs_paths)
+            self._add_shape_specific_info(pick_info)
             io.save_locs(path, locs, self.infos[0] + [pick_info])
 
     def save_picked_locs_multi_sep(self, path: str) -> None:
@@ -10096,13 +9914,15 @@ class View(QtWidgets.QLabel):
         path : str
             Path for saving localizations.
         """
+        # extract picked localizations from all channels
         locs = []
         for channel in range(len(self.locs_paths)):
-            # extract picked localizations
             locs.append(self.picked_locs(channel, add_group=False))
+
         # 'transpose' the list so that each element is a list of locs
         # from all channels within one pick
         locs = list(zip(*locs))
+
         # stack arrays from all channels in each pick
         for i in range(len(locs)):
             locs[i] = pd.concat(locs[i], ignore_index=True)
@@ -10110,7 +9930,8 @@ class View(QtWidgets.QLabel):
         if locs is not None:
             areas = self.pick_areas()
             for i, pick_locs in enumerate(locs):
-                # area is the same for all picks, if circle
+                # areas is of length 1 for circle and squares since all
+                # the picks are the same size
                 area = (
                     areas[i]
                     if self._pick_shape not in ["Circle", "Square"]
@@ -10122,79 +9943,12 @@ class View(QtWidgets.QLabel):
                     "Area (um^2)": float(area),
                     "Channels combined": self.locs_paths,
                 }
-                t_dialog = self.window.tools_settings_dialog
-                if self._pick_shape == "Circle":
-                    d = t_dialog.pick_diameter.value()
-                    pick_info["Pick Diameter (nm)"] = d
-                elif self._pick_shape == "Rectangle":
-                    w = t_dialog.pick_width.value()
-                    pick_info["Pick Width (nm)"] = w
-                # if polygon pick and the last not closed, ignore the last pick
-                elif (
-                    self._pick_shape == "Polygon"
-                    and self._picks[-1][0] != self._picks[-1][-1]
-                ):
-                    pick_info["Number of picks"] -= 1
-                elif self._pick_shape == "Square":
-                    a = t_dialog.pick_side_length.value()
-                    pick_info["Pick Side Length (nm)"] = a
+                self._add_shape_specific_info(pick_info)
                 io.save_locs(
                     path.replace(".hdf5", f"_{i}.hdf5"),
                     pick_locs,
                     self.infos[channel] + [pick_info],
                 )
-
-    def pick_kinetics(
-        self,
-        picked_locs: list[pd.DataFrame],
-        pick_diameter: float,
-        channel: int,
-    ) -> tuple[
-        lib.FloatArray1D, lib.FloatArray1D, lib.IntArray1D, pd.DataFrame
-    ]:
-        """Calculate kinetics and other simple properties in picks."""
-        pixelsize = self.window.display_settings_dlg.pixelsize.value()
-        r_max = min(pick_diameter / pixelsize, 1)
-        max_dark = self.window.info_dialog.max_dark_time.value()
-        out_locs = []
-        progress = lib.ProgressDialog(
-            "Calculating kinetics", 0, len(picked_locs), self
-        )
-        progress.set_value(0)
-        dark = []  # estimated mean dark time
-        length = []  # estimated mean bright time
-        no_locs = []  # number of locs
-        for i, pick_locs in enumerate(picked_locs):
-            progress.set_value(i + 1)
-            if not len(pick_locs):
-                continue
-            if "len" not in pick_locs.columns:
-                pick_locs = postprocess.link(
-                    pick_locs,
-                    self.infos[channel],
-                    r_max=r_max,
-                    max_dark_time=max_dark,
-                )
-            if not len(pick_locs):
-                continue
-            pick_locs = postprocess.compute_dark_times(pick_locs)
-            if not len(pick_locs):
-                continue
-            try:
-                length_ = estimate_kinetic_rate(pick_locs["len"].to_numpy())
-                dark_ = estimate_kinetic_rate(pick_locs["dark"].to_numpy())
-            except RuntimeError:
-                continue
-            length.append(length_)
-            dark.append(dark_)
-            no_locs.append(len(pick_locs))
-            out_locs.append(pick_locs)
-        length = np.array(length)
-        dark = np.array(dark)
-        no_locs = np.array(no_locs)
-        out_locs = pd.concat(out_locs, ignore_index=True)
-        progress.close()
-        return length, dark, no_locs, out_locs
 
     def save_pick_properties(self, path: str, channel: int) -> None:
         """Save picks' (or groups) properties in a given channel to
@@ -10227,15 +9981,19 @@ class View(QtWidgets.QLabel):
             picked_locs = [
                 locs[locs["group"] == i] for i in np.unique(locs["group"])
             ]
-            pick_diameter = 200  # nm
         else:
             picked_locs = self.picked_locs(channel)
-            pick_diameter = (
-                self.window.tools_settings_dialog.pick_diameter.value()
-            )
-        length, dark, no_locs, out_locs = self.pick_kinetics(
-            picked_locs, pick_diameter, channel
+
+        progress = lib.ProgressDialog(
+            "Calculating kinetics", 0, len(picked_locs), self
         )
+        length, dark, no_locs, out_locs = postprocess.pick_kinetics(
+            picked_locs=picked_locs,
+            info=self.infos[channel],
+            max_dark_time=self.window.info_dialog.max_dark_time.value(),
+            progress_callback=progress.set_value,
+        )
+        progress.close()
         n_groups = len(out_locs)
 
         progress = lib.ProgressDialog(
@@ -10249,10 +10007,8 @@ class View(QtWidgets.QLabel):
         # add the area of the picks to the properties (if available)
         if len(self._picks):
             areas = self.pick_areas()
-            if self._pick_shape in [
-                "Circle",
-                "Square",
-            ]:  # duplicate values for each pick
+            if self._pick_shape in ["Circle", "Square"]:
+                # if all picks are the same, repeat the area for each group
                 areas = np.repeat(areas, n_groups)
             pick_props["pick_area_um2"] = areas
         progress.close()
@@ -10375,32 +10131,21 @@ class View(QtWidgets.QLabel):
     def activate_render_property(self) -> None:
         """Assign localizations by color to render a chosen property."""
         self.deactivate_property_menu()  # blocks changing render parameters
-
         if self.window.display_settings_dlg.render_check.isChecked():
             self.x_render_state = True
             parameter = (
                 self.window.display_settings_dlg.parameter.currentText()
             )  # frame or x or y, etc
-            colors = self.window.display_settings_dlg.color_step.value()
+            n_colors = self.window.display_settings_dlg.color_step.value()
             min_val = self.window.display_settings_dlg.minimum_render.value()
             max_val = self.window.display_settings_dlg.maximum_render.value()
-
-            x_step = (max_val - min_val) / colors
-
-            # index each loc according to its parameter's value
-            self.x_color = np.floor(
-                (self.locs[0][parameter] - min_val) / x_step
-            )
-            # values above and below will be fixed:
-            self.x_color[self.x_color < 0] = 0
-            self.x_color[self.x_color > colors] = colors
 
             x_locs = []
 
             # attempt using cached data
             for cached_entry in self.x_render_cache:
                 if cached_entry["parameter"] == parameter:
-                    if cached_entry["colors"] == colors:
+                    if cached_entry["colors"] == n_colors:
                         if (cached_entry["min_val"] == min_val) & (
                             cached_entry["max_val"] == max_val
                         ):
@@ -10409,20 +10154,18 @@ class View(QtWidgets.QLabel):
 
             # if no cached data found
             if x_locs == []:
-                pb = lib.ProgressDialog(
-                    "Indexing " + parameter, 0, colors, self
+                x_locs = render.split_locs_by_property(
+                    locs=self.locs[0],
+                    property_name=parameter,
+                    n_colors=n_colors,
+                    min_value=min_val,
+                    max_value=max_val,
                 )
-                pb.set_value(0)
-                # assign locs by color
-                for i in range(colors + 1):
-                    x_locs.append(self.locs[0][self.x_color == i])
-                    pb.set_value(i + 1)
-                pb.close()
 
                 # cache
                 entry = {}
                 entry["parameter"] = parameter
-                entry["colors"] = colors
+                entry["colors"] = n_colors
                 entry["locs"] = x_locs
                 entry["min_val"] = min_val
                 entry["max_val"] = max_val
@@ -10547,43 +10290,13 @@ class View(QtWidgets.QLabel):
         )
         if force or optimal_scalebar_checked:
             pixelsize = self.window.display_settings_dlg.pixelsize.value()
-            width = self.viewport_width()
-            width_nm = width * pixelsize
-            optimal_scalebar = width_nm / 8
-            # approximate to the nearest thousands, hundreds, tens or ones
-            if optimal_scalebar > 10_000:
-                scalebar = 10_000
-            elif optimal_scalebar > 1_000:
-                scalebar = int(1_000 * round(optimal_scalebar / 1_000))
-            elif optimal_scalebar > 100:
-                scalebar = int(100 * round(optimal_scalebar / 100))
-            elif optimal_scalebar > 10:
-                scalebar = int(10 * round(optimal_scalebar / 10))
-            else:
-                scalebar = int(round(optimal_scalebar))
+            width = render.viewport_width(self.viewport)
+            scalebar = render.optimal_scalebar_length(pixelsize, width)
             self.window.display_settings_dlg.scalebar.setValue(scalebar)
 
     def sizeHint(self) -> QtCore.QSize:
         """Return recommended window size."""
         return QtCore.QSize(*self._size_hint)
-
-    def to_8bit(
-        self, image: FloatArray2D | FloatArray3D
-    ) -> IntArray2D | IntArray3D:
-        """Converts image to 8 bit ready to convert to QImage.
-
-        Parameters
-        ----------
-        image : FloatArray2D | FloatArray3D
-            Image to be converted, with values between 0.0 and 1.0.
-
-        Returns
-        -------
-        image : IntArray2D | IntArray3D
-            Image converted to 8 bit.
-        """
-        image = np.round(255 * image).astype("uint8")
-        return image
 
     def to_left(self) -> None:
         """Called on pressing left arrow; move FOV."""
@@ -10620,13 +10333,17 @@ class View(QtWidgets.QLabel):
                 )
             else:
                 self.plot_window = DriftPlotWindow(self)
-                if "z" in self._drift[channel].columns:
-                    self.plot_window.plot_3d(drift)
-
-                else:
-                    self.plot_window.plot_2d(drift)
-
+                self.plot_window.plot(drift)
                 self.plot_window.show()
+
+    def sync_groups(self) -> None:
+        """Remove localizations whose group field is not found in all
+        channels."""
+        if len(self.locs_paths) < 2:
+            return
+        self.all_locs = lib.sync_groups(self.all_locs)
+        self.locs = [_.copy() for _ in self.all_locs]
+        self.update_scene()
 
     def undrift_aim(self) -> None:
         """Undrift with Adaptive Intersection Maximization (AIM).
@@ -10643,7 +10360,9 @@ class View(QtWidgets.QLabel):
             params["intersect_d"] = params["intersect_d"] / pixelsize
             params["roi_r"] = params["roi_r"] / pixelsize
             if ok:
-                n_frames = lib.get_from_metadata(info, "Frames")
+                n_frames = lib.get_from_metadata(
+                    info, "Frames", raise_error=True
+                )
                 n_segments = int(np.ceil(n_frames / params["segmentation"]))
                 progress = lib.ProgressDialog(
                     "Undrifting by AIM (1/2)", 0, n_segments, self.window
@@ -10692,7 +10411,7 @@ class View(QtWidgets.QLabel):
                 )
                 try:
                     # find drift and apply it to locs
-                    drift, _ = postprocess.undrift(
+                    drift, undrifted_locs = postprocess.undrift(
                         locs,
                         info,
                         segmentation,
@@ -10701,11 +10420,12 @@ class View(QtWidgets.QLabel):
                         rcc_progress.set_value,
                     )
                     # sanity check and assign attributes
-                    locs = lib.ensure_sanity(locs, info)
+                    locs = lib.ensure_sanity(undrifted_locs, info)
                     self.all_locs[channel] = locs
                     self.locs[channel] = locs.copy()
                     self.index_blocks[channel] = None
                     self.add_drift(channel, drift)
+                    self._apply_drift(channel, drift)
                     self.update_scene()
                     self.show_drift()
 
@@ -10727,27 +10447,19 @@ class View(QtWidgets.QLabel):
         """Undrift based on picked localizations in a given channel."""
         channel = self.get_channel("Undrift from picked")
         if channel is not None:
-            picked_locs = self.picked_locs(channel)
+            # picked_locs = self.picked_locs(channel)
             status = lib.StatusDialog("Calculating drift...", self)
-
-            drift = postprocess.undrift_from_picked(
-                picked_locs, self.infos[channel]
-            )
-            frames = self.all_locs[channel]["frame"]
-            frames_ = self.locs[channel]["frame"]
-
-            # Apply drift
-            self.all_locs[channel]["x"] -= drift["x"].iloc[frames].to_numpy()
-            self.all_locs[channel]["y"] -= drift["y"].iloc[frames].to_numpy()
-            self.locs[channel]["x"] -= drift["x"].iloc[frames_].to_numpy()
-            self.locs[channel]["y"] -= drift["y"].iloc[frames_].to_numpy()
-            # If z coordinate exists, also apply drift there
-            if all(["z" in _.columns for _ in picked_locs]):
-                self.all_locs[channel]["z"] -= (
-                    drift["z"].iloc[frames].to_numpy()
+            undrifted_locs, new_info, drift = (
+                postprocess.undrift_from_fiducials(
+                    locs=self.all_locs[channel],
+                    info=self.infos[channel],
+                    picks=self._picks,
+                    pick_size=self._pick_size,
                 )
-                self.locs[channel]["z"] -= drift["z"].iloc[frames_].to_numpy()
-
+            )
+            self.all_locs[channel] = undrifted_locs
+            self.locs[channel] = copy.copy(undrifted_locs)
+            self.infos[channel] = new_info
             # Cleanup
             self.index_blocks[channel] = None
             self.add_drift(channel, drift)
@@ -10760,23 +10472,20 @@ class View(QtWidgets.QLabel):
         channel. Available when 3D data is loaded."""
         channel = self.get_channel("Undrift from picked")
         if channel is not None:
-            picked_locs = self.picked_locs(channel)
+            # picked_locs = self.picked_locs(channel)
             status = lib.StatusDialog("Calculating drift...", self)
-
-            drift = postprocess.undrift_from_picked(
-                picked_locs, self.infos[channel]
+            undrifted_locs, new_info, drift = (
+                postprocess.undrift_from_fiducials(
+                    locs=self.all_locs[channel],
+                    info=self.infos[channel],
+                    picks=self._picks,
+                    pick_size=self._pick_size,
+                    undrift_z=False,
+                )
             )
-
-            # Apply drift, ignore z coordinates
-            self.all_locs[channel].x -= drift["x"][
-                self.all_locs[channel].frame
-            ]
-            self.all_locs[channel].y -= drift["y"][
-                self.all_locs[channel].frame
-            ]
-            self.locs[channel].x -= drift["x"][self.locs[channel].frame]
-            self.locs[channel].y -= drift["y"][self.locs[channel].frame]
-
+            self.all_locs[channel] = undrifted_locs
+            self.locs[channel] = copy.copy(undrifted_locs)
+            self.infos[channel] = new_info
             # Cleanup
             self.index_blocks[channel] = None
             self.add_drift(channel, drift)
@@ -10800,20 +10509,13 @@ class View(QtWidgets.QLabel):
         drift = self.currentdrift[channel]
         drift["x"] = -drift["x"]
         drift["y"] = -drift["y"]
-
-        frames = self.all_locs[channel]["frame"]
-        frames_ = self.locs[channel]["frame"]
-
-        self.all_locs[channel]["x"] -= drift["x"].iloc[frames].to_numpy()
-        self.all_locs[channel]["y"] -= drift["y"].iloc[frames].to_numpy()
-        self.locs[channel]["x"] -= drift["x"].iloc[frames_].to_numpy()
-        self.locs[channel]["y"] -= drift["y"].iloc[frames_].to_numpy()
-
         if "z" in drift.columns:
             drift["z"] = -drift["z"]
-            self.all_locs[channel]["z"] -= drift["z"].iloc[frames].to_numpy()
-            self.locs[channel]["z"] -= drift["z"].iloc[frames_].to_numpy()
-
+        self.all_locs[channel] = postprocess.apply_drift(
+            self.all_locs[channel], self.infos[channel], drift
+        )
+        self.locs[channel] = copy.copy(self.all_locs[channel])
+        self.index_blocks[channel] = None
         self.add_drift(channel, drift)
         self.update_scene()
 
@@ -10845,11 +10547,7 @@ class View(QtWidgets.QLabel):
                     self._drift[channel]["z"] = drift["z"]
 
         self.currentdrift[channel] = copy.copy(drift)
-        np.savetxt(
-            driftfile,
-            self._drift[channel],
-            newline="\r\n",
-        )
+        io.save_drift(driftfile, self._drift[channel])
 
     def apply_drift(self) -> None:
         """Apply drift to localizations from a .txt file. Assign
@@ -10860,7 +10558,7 @@ class View(QtWidgets.QLabel):
                 self, "Load drift file", filter="*.txt", directory=None
             )
             if path:
-                drift = np.loadtxt(path, delimiter=" ")
+                drift = io.load_drift(path)
                 self._apply_drift(channel, drift)
                 self._driftfiles[channel] = path
 
@@ -10869,42 +10567,10 @@ class View(QtWidgets.QLabel):
     ) -> None:
         """Shift localizations in a given channel based on drift from a
         .txt file."""
-        if isinstance(drift, pd.DataFrame):
-            drift = (
-                drift.to_numpy()
-            )  # TODO: this is a mess, should jsut take a dataframe?
-        all_frame = self.all_locs[channel]["frame"]
-        frame = self.locs[channel]["frame"]
-        if drift.shape[1] == 3:  # 3D drift
-            drift = pd.DataFrame(
-                {
-                    "x": drift[:, 0],
-                    "y": drift[:, 1],
-                    "z": drift[:, 2],
-                }
-            )
-            self.all_locs[channel]["x"] -= (
-                drift["x"].iloc[all_frame].to_numpy()
-            )
-            self.all_locs[channel]["y"] -= (
-                drift["y"].iloc[all_frame].to_numpy()
-            )
-            self.all_locs[channel]["z"] -= (
-                drift["z"].iloc[all_frame].to_numpy()
-            )
-            self.locs[channel]["x"] -= drift["x"].iloc[frame].to_numpy()
-            self.locs[channel]["y"] -= drift["y"].iloc[frame].to_numpy()
-            self.locs[channel]["z"] -= drift["z"].iloc[frame].to_numpy()
-        else:  # 2D drift
-            drift = pd.DataFrame({"x": drift[:, 0], "y": drift[:, 1]})
-            self.all_locs[channel]["x"] -= (
-                drift["x"].iloc[all_frame].to_numpy()
-            )
-            self.all_locs[channel]["y"] -= (
-                drift["y"].iloc[all_frame].to_numpy()
-            )
-            self.locs[channel]["x"] -= drift["x"].iloc[frame].to_numpy()
-            self.locs[channel]["y"] -= drift["y"].iloc[frame].to_numpy()
+        self.all_locs[channel] = postprocess.apply_drift(
+            self.all_locs[channel], self.infos[channel], drift
+        )
+        self.locs[channel] = copy.copy(self.all_locs[channel])
         self._drift[channel] = drift
         self.currentdrift[channel] = copy.copy(drift)
         self.index_blocks[channel] = None
@@ -10970,40 +10636,12 @@ class View(QtWidgets.QLabel):
             return
         spacing /= self.window.display_settings_dlg.pixelsize.value()
 
-        # ensure groups are consecutive integers starting from 0
-        unique_groups = np.unique(self.all_locs[0]["group"])
-        group_mapping = {old: new for new, old in enumerate(unique_groups)}
-        self.all_locs[0]["group"] = self.all_locs[0]["group"].map(
-            group_mapping
+        self.all_locs[0], self.infos[0][0] = lib.unfold_localizations_square(
+            locs=self.all_locs[0],
+            info=self.infos[0][0],
+            n_square=n_square,
+            spacing=spacing,
         )
-
-        # shift localizations to the middle of the FOV and by the COM
-        # of each group
-        cx = self.infos[0][0]["Width"] / 2
-        cy = self.infos[0][0]["Height"] / 2
-        for group_id in np.unique(self.all_locs[0]["group"]):
-            mask = self.all_locs[0]["group"] == group_id
-            mean_x = self.all_locs[0].loc[mask, "x"].mean()
-            mean_y = self.all_locs[0].loc[mask, "y"].mean()
-            self.all_locs[0].loc[mask, "x"] += cx - mean_x
-            self.all_locs[0].loc[mask, "y"] += cy - mean_y
-
-        # unfold onto grid
-        self.all_locs[0]["x"] += (
-            np.mod(self.all_locs[0]["group"], n_square) * spacing
-        )
-        self.all_locs[0]["y"] += (
-            np.floor(self.all_locs[0]["group"] / n_square) * spacing
-        )
-
-        self.all_locs[0]["x"] -= self.all_locs[0]["x"].mean()
-        self.all_locs[0]["y"] -= self.all_locs[0]["y"].mean()
-        self.all_locs[0]["x"] += np.absolute(np.min(self.all_locs[0]["x"]))
-        self.all_locs[0]["y"] += np.absolute(np.min(self.all_locs[0]["y"]))
-
-        # Update FOV and clean up
-        self.infos[0][0]["Height"] = int(np.ceil(self.all_locs[0]["y"].max()))
-        self.infos[0][0]["Width"] = int(np.ceil(self.all_locs[0]["x"].max()))
         if remove_group:  # discard groups and reset picks
             self.all_locs[0].drop(columns="group", inplace=True)
             self._picks = []
@@ -11016,7 +10654,9 @@ class View(QtWidgets.QLabel):
         diameter = (
             self.window.tools_settings_dialog.pick_diameter.value()
         ) / self.window.display_settings_dlg.pixelsize.value()
-        diameter = int(self.width() * diameter / self.viewport_width())
+        diameter = int(
+            self.width() * diameter / render.viewport_width(self.viewport)
+        )
         # remote desktop crashes sometimes for high diameter
         if diameter < 100:
             pixmap_size = ceil(diameter) + 1
@@ -11057,7 +10697,9 @@ class View(QtWidgets.QLabel):
             self.window.tools_settings_dialog.pick_side_length.value()
             / self.window.display_settings_dlg.pixelsize.value()
         )
-        side_length = int(self.width() * side_length / self.viewport_width())
+        side_length = int(
+            self.width() * side_length / render.viewport_width(self.viewport)
+        )
         if side_length < 100:
             pixmap_size = ceil(side_length) + 1
             pixmap = QtGui.QPixmap(pixmap_size, pixmap_size)
@@ -11090,72 +10732,24 @@ class View(QtWidgets.QLabel):
             else:
                 self.unsetCursor()
 
+    @check_pick
+    @check_circular_picks
     def update_pick_info_long(self) -> None:
         """Evaluate pick statistics in ``InfoDialog``."""
-        if len(self._picks) == 0:
-            warning = "No picks found. Please pick first."
-            QtWidgets.QMessageBox.information(self, "Warning", warning)
-            return
-
-        if self._pick_shape != "Circle":
-            warning = "Supported for circular picks only."
-            QtWidgets.QMessageBox.information(self, "Warning", warning)
-            return
-
         channel = self.get_channel("Calculate pick info")
         if channel is not None:
-            pixelsize = self.window.display_settings_dlg.pixelsize.value()
-            d = self.window.tools_settings_dialog.pick_diameter.value()
-            d /= pixelsize
-            t = self.window.info_dialog.max_dark_time.value()
-            r_max = min(d, 1)
-            info = self.infos[channel]
-            picked_locs = self.picked_locs(channel)
-            n_picks = len(picked_locs)
-            N = np.empty(n_picks)  # number of locs per pick
-            n_events = np.empty(n_picks)  # number of events per pick
-            rmsd = np.empty(n_picks)  # rmsd in each pick
-            length = np.empty(n_picks)  # estimated mean bright time
-            dark = np.empty(n_picks)  # estimated mean dark time
-            has_z = "z" in picked_locs[0].columns
-            if has_z:
-                rmsd_z = np.empty(n_picks)
-            new_locs = []  # linked locs in each pick
             progress = lib.ProgressDialog(
-                "Calculating pick statistics", 0, len(picked_locs), self
+                "Calculating pick statistics", 0, len(self._picks), self
             )
-            progress.set_value(0)
-            warnings.simplefilter("ignore", category=RuntimeWarning)
-            for i, locs in enumerate(picked_locs):
-                if len(locs) > 0:
-                    N[i] = len(locs)
-                    com_x = np.mean(locs.x)
-                    com_y = np.mean(locs.y)
-                    rmsd[i] = (
-                        np.sqrt(
-                            np.mean(
-                                (locs.x - com_x) ** 2 + (locs.y - com_y) ** 2
-                            )
-                        )
-                        * pixelsize
-                    )
-                    if has_z:
-                        rmsd_z[i] = np.sqrt(
-                            np.mean((locs.z - np.mean(locs.z)) ** 2)
-                        )
-                    if "len" not in locs.columns:
-                        locs = postprocess.link(
-                            locs, info, r_max=r_max, max_dark_time=t
-                        )
-                    locs = postprocess.compute_dark_times(locs)
-                    n_events[i] = len(locs)  # linked locs are binding events
-                    length[i] = estimate_kinetic_rate(locs["len"].to_numpy())
-                    dark[i] = estimate_kinetic_rate(locs["dark"].to_numpy())
-                    new_locs.append(locs)
-                else:
-                    self.remove_picks(self._picks[i])
-                progress.set_value(i + 1)
-            warnings.simplefilter("default", category=RuntimeWarning)
+            N, n_events, rmsd, rmsd_z, length, dark, new_locs = (
+                postprocess.evaluate_picks(
+                    picked_locs=self.picked_locs(channel),
+                    info=self.infos[channel],
+                    max_dark_time=self.window.info_dialog.max_dark_time.value(),
+                    progress_callback=progress.set_value,
+                )
+            )
+            progress.close()
 
             # update labels in info dialog
             self.window.info_dialog.n_localizations_mean.setText(
@@ -11176,16 +10770,15 @@ class View(QtWidgets.QLabel):
             self.window.info_dialog.rmsd_std.setText(
                 "{:.2}".format(np.nanstd(rmsd))
             )  # std rmsd per pick
-            if has_z:
+            if "z" in self.all_locs[channel].columns:
                 self.window.info_dialog.rmsd_z_mean.setText(
                     "{:.2f}".format(np.nanmean(rmsd_z))
                 )  # mean rmsd in z per pick
                 self.window.info_dialog.rmsd_z_std.setText(
                     "{:.2f}".format(np.nanstd(rmsd_z))
                 )  # std rmsd in z per pick
-            pooled_locs = pd.concat(new_locs, ignore_index=True)
-            fit_result_len = fit_cum_exp(pooled_locs["len"].to_numpy())
-            fit_result_dark = fit_cum_exp(pooled_locs["dark"].to_numpy())
+            fit_result_len = lib.fit_cum_exp(new_locs["len"].to_numpy())
+            fit_result_dark = lib.fit_cum_exp(new_locs["dark"].to_numpy())
             self.window.info_dialog.length_mean.setText(
                 "{:.2f}".format(np.nanmean(length))
             )  # mean bright time
@@ -11199,15 +10792,15 @@ class View(QtWidgets.QLabel):
                 "{:.2f}".format(np.nanstd(dark))
             )  # std dark time
             self.window.info_dialog.pick_info = {
-                "pooled dark": estimate_kinetic_rate(
-                    pooled_locs["dark"].to_numpy()
+                "pooled dark": lib.estimate_kinetic_rate(
+                    new_locs["dark"].to_numpy()
                 ),
                 "length": length,
                 "dark": dark,
             }
             self.window.info_dialog.update_n_units()
             self.window.info_dialog.pick_hist_window.plot(
-                pooled_locs, fit_result_len, fit_result_dark
+                new_locs, fit_result_len, fit_result_dark
             )
 
     def update_pick_info_short(self) -> None:
@@ -11289,105 +10882,6 @@ class View(QtWidgets.QLabel):
             )
             self.update_cursor()
 
-    def viewport_center(
-        self,
-        viewport: (
-            tuple[tuple[float, float], tuple[float, float]] | None
-        ) = None,
-    ) -> tuple[float, float]:
-        """Find viewport's center (camera pixels).
-
-        Parameters
-        ----------
-        viewport: tuple, optional
-            Viewport to be evaluated ``((y_min, x_min), (y_max, x_max))``.
-            If None ``self.viewport`` is taken. Default is None.
-
-        Returns
-        -------
-        center : tuple
-            x and y coordinates of viewport's center (camera pixels).
-        """
-        if viewport is None:
-            viewport = self.viewport
-        center = (
-            ((viewport[1][0] + viewport[0][0]) / 2),
-            ((viewport[1][1] + viewport[0][1]) / 2),
-        )
-        return center
-
-    def viewport_height(
-        self,
-        viewport: (
-            tuple[tuple[float, float], tuple[float, float]] | None
-        ) = None,
-    ) -> float:
-        """Find viewport's height.
-
-        Parameters
-        ----------
-        viewport: tuple, optional
-            Viewport to be evaluated ``((y_min, x_min), (y_max, x_max))``.
-            If None ``self.viewport`` is taken. Default is None.
-
-        Returns
-        -------
-        height : float
-            Viewport's height (camera pixels).
-        """
-        if viewport is None:
-            viewport = self.viewport
-        height = viewport[1][0] - viewport[0][0]
-        return height
-
-    def viewport_size(
-        self,
-        viewport: (
-            tuple[tuple[float, float], tuple[float, float]] | None
-        ) = None,
-    ) -> tuple[float, float]:
-        """Find viewport's height and width.
-
-        Parameters
-        ----------
-        viewport: tuple, optional
-            Viewport to be evaluated ``((y_min, x_min), (y_max, x_max))``.
-            If None ``self.viewport`` is taken. Default is None.
-
-        Returns
-        -------
-        size : tuple
-            Viewport's height and width (camera pixels).
-        """
-        if viewport is None:
-            viewport = self.viewport
-        size = self.viewport_height(viewport), self.viewport_width(viewport)
-        return size
-
-    def viewport_width(
-        self,
-        viewport: (
-            tuple[tuple[float, float], tuple[float, float]] | None
-        ) = None,
-    ) -> float:
-        """Find viewport's width.
-
-        Parameters
-        ----------
-        viewport: tuple, optional
-            Viewport to be evaluated ``((y_min, x_min), (y_max, x_max))``.
-            If None ``self.viewport`` is taken. Default is None.
-
-        Returns
-        -------
-        width : float
-            Viewport's width (camera pixels).
-        """
-        if viewport is None:
-            viewport = self.viewport
-        width = viewport[1][1] - viewport[0][1]
-        return width
-
     def relative_position(
         self,
         viewport_center: tuple[float, float],
@@ -11409,12 +10903,9 @@ class View(QtWidgets.QLabel):
             Current cursor's position with respect to viewport's
             center.
         """
-        rel_pos_x = (
-            cursor_position[0] - viewport_center[1]
-        ) / self.viewport_width()
-        rel_pos_y = (
-            cursor_position[1] - viewport_center[0]
-        ) / self.viewport_height()
+        height, width = render.viewport_size(self.viewport)
+        rel_pos_x = (cursor_position[0] - viewport_center[1]) / width
+        rel_pos_y = (cursor_position[1] - viewport_center[0]) / height
         return rel_pos_x, rel_pos_y
 
     def zoom(
@@ -11433,12 +10924,12 @@ class View(QtWidgets.QLabel):
             Cursor's position on the screen. If None, zooming is
             centered around viewport's center. Default is None.
         """
-        viewport_height, viewport_width = self.viewport_size()
+        viewport_height, viewport_width = render.viewport_size(self.viewport)
         new_viewport_height = viewport_height * factor
         new_viewport_width = viewport_width * factor
 
         if cursor_position is not None:  # wheelEvent
-            old_viewport_center = self.viewport_center()
+            old_viewport_center = render.viewport_center(self.viewport)
             rel_pos_x, rel_pos_y = self.relative_position(
                 old_viewport_center, cursor_position
             )  # this stays constant before and after zooming
@@ -11450,7 +10941,7 @@ class View(QtWidgets.QLabel):
             )
         else:
             new_viewport_center_y, new_viewport_center_x = (
-                self.viewport_center()
+                render.viewport_center(self.viewport)
             )
 
         new_viewport = [
@@ -11854,7 +11345,7 @@ class Window(QtWidgets.QMainWindow):
         sync_group_action = postprocess_menu.addAction(
             "Synchronize groups across channels"
         )
-        sync_group_action.triggered.connect(self.sync_groups)
+        sync_group_action.triggered.connect(self.view.sync_groups)
         unfold_action_square = postprocess_menu.addAction(
             "Unfold groups/picks (square grid)"
         )
@@ -12657,21 +12148,6 @@ class Window(QtWidgets.QMainWindow):
             self.view.infos[channel] = info + [new_info]
             self.view.update_scene()
 
-    def sync_groups(self) -> None:
-        """Remove localizations whose group field is not found in all
-        channels."""
-        if len(self.view.locs_paths) < 2:
-            return
-
-        unique_groups = [np.unique(_["group"]) for _ in self.view.all_locs]
-        common_groups = set(unique_groups[0]).intersection(*unique_groups)
-        for channel in range(len(self.view.locs_paths)):
-            all_locs = self.view.all_locs[channel]
-            mask = all_locs["group"].isin(common_groups)
-            self.view.all_locs[channel] = all_locs[mask].reset_index(drop=True)
-            self.view.locs[channel] = self.view.all_locs[channel].copy()
-        self.view.update_scene()
-
     def save_pick_properties(self) -> None:
         """Save pick properties in a given channel (or channels)."""
         channel = self.view.get_channel_all_seq("Save pick properties")
@@ -12965,8 +12441,8 @@ class Window(QtWidgets.QMainWindow):
                 )
             )
             self.info_dialog.wh_label.setText(
-                f"{self.view.viewport_width():.2f} / "
-                f"{self.view.viewport_height():.2f} pixels"
+                f"{render.viewport_width(self.view.viewport):.2f} / "
+                f"{render.viewport_height(self.view.viewport):.2f} pixels"
             )
         except AttributeError:
             pass
@@ -12978,10 +12454,10 @@ class Window(QtWidgets.QMainWindow):
                 self.view.viewport[0][0]
             )
             self.info_dialog.change_fov.w_box.setValue(
-                self.view.viewport_width()
+                render.viewport_width(self.view.viewport)
             )
             self.info_dialog.change_fov.h_box.setValue(
-                self.view.viewport_height()
+                render.viewport_height(self.view.viewport)
             )
         except AttributeError:
             pass

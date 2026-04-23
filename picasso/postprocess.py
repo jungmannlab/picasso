@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import itertools
 import multiprocessing
+import warnings
 from collections import OrderedDict
 from collections.abc import Callable
 from copy import deepcopy
@@ -1606,6 +1607,214 @@ def compute_local_density(
     return locs
 
 
+def evaluate_picks(
+    picked_locs: list[pd.DataFrame],
+    info: list[dict],
+    *,
+    max_dark_time: int = 3,
+    progress_callback: (
+        Callable[[int], None] | Literal["console"] | None
+    ) = None,
+) -> tuple[
+    lib.FloatArray1D,
+    lib.FloatArray1D,
+    lib.FloatArray1D,
+    lib.FloatArray1D,
+    lib.FloatArray1D,
+    lib.FloatArray1D,
+    pd.DataFrame,
+]:
+    """Calculate pick statistics: number of localizations and binding
+    events, rmsd, bright and dark times.
+
+    Returned arrays may contain NaNs (``np.empty`` is used for
+    initialization and not all picks may be evaluated successfully).
+
+    Parameters
+    ----------
+    picked_locs : list of pd.DataFrame
+        List of dataframes, each containing the localizations in a
+        picked region.
+    info : list of dicts
+        Metadata of the localizations.
+    max_dark_time : int
+        Maximum dark time (in frames) between detected localizations to
+        consider them as part of the same binding event. Default is 3
+        frames.
+    progress_callback : function, "console" or None
+        Function to display progress (takes in an integer). If "console",
+        progress is printed to the console. If None, no progress is
+        displayed.
+
+    Returns
+    -------
+    N : lib.FloatArray1D
+        Array of number of localizations in each pick.
+    n_events : lib.FloatArray1D
+        Array of number of binding events in each pick.
+    rmsd : lib.FloatArray1D
+        Array of RMSD of localizations in each pick in nm.
+    rmsd_z : lib.FloatArray1D
+        Array of RMSD of localizations in z in each pick in nm.
+    length : lib.FloatArray1D
+        Array of estimated mean bright times in each pick in frames.
+    dark : lib.FloatArray1D
+        Array of estimated mean dark times in each pick in frames.
+    new_locs : pd.DataFrame
+        Dataframe containing the localizations in all picked regions
+        with added 'length' and 'dark' fields/columns.
+    """
+    use_tqdm = progress_callback == "console"
+    if use_tqdm:
+        iter_range = tqdm(
+            range(len(picked_locs)), desc="Evaluating picks", unit="pick"
+        )
+    else:
+        iter_range = range(len(picked_locs))
+
+    pixelsize = lib.get_from_metadata(info, "Pixelsize", default=1.0)
+    n_picks = len(picked_locs)
+    N = np.empty(n_picks)  # number of locs per pick
+    n_events = np.empty(n_picks)  # number of events per pick
+    rmsd = np.empty(n_picks)  # rmsd in each pick
+    length = np.empty(n_picks)  # estimated mean bright time
+    dark = np.empty(n_picks)  # estimated mean dark time
+    has_z = "z" in picked_locs[0].columns
+    rmsd_z = np.empty(n_picks)
+    new_locs = []  # linked locs in each pick
+    warnings.simplefilter("ignore", category=RuntimeWarning)
+    for i in iter_range:
+        if callable(progress_callback):
+            progress_callback(i)
+        pick_locs = picked_locs[i]
+        if not len(pick_locs):
+            continue
+
+        N[i] = len(pick_locs)
+        com_x = pick_locs["x"].mean()
+        com_y = pick_locs["y"].mean()
+        rmsd[i] = (
+            np.sqrt(
+                np.mean(
+                    (pick_locs["x"] - com_x) ** 2
+                    + (pick_locs["y"] - com_y) ** 2
+                )
+            )
+            * pixelsize
+        )
+        if has_z:
+            rmsd_z[i] = np.sqrt(
+                np.mean((pick_locs["z"] - pick_locs["z"].mean()) ** 2)
+            )
+        if "len" not in pick_locs.columns:
+            pick_locs = link(
+                pick_locs, info, r_max=999999, max_dark_time=max_dark_time
+            )
+        pick_locs = compute_dark_times(pick_locs)
+        n_events[i] = len(pick_locs)  # linked locs are binding events
+        length[i] = lib.estimate_kinetic_rate(pick_locs["len"].to_numpy())
+        dark[i] = lib.estimate_kinetic_rate(pick_locs["dark"].to_numpy())
+        new_locs.append(pick_locs)
+    warnings.simplefilter("default", category=RuntimeWarning)
+    if callable(progress_callback):
+        progress_callback(n_picks)
+    new_locs = pd.concat(new_locs, ignore_index=True)
+    return N, n_events, rmsd, rmsd_z, length, dark, new_locs
+
+
+def pick_kinetics(
+    picked_locs: list[pd.DataFrame],
+    info: list[dict],
+    *,
+    max_dark_time: int = 3,
+    progress_callback: (
+        Callable[[int], None] | Literal["console"] | None
+    ) = None,
+) -> tuple[lib.FloatArray1D, lib.FloatArray1D, lib.IntArray1D, pd.DataFrame]:
+    """Calculate kinetics per picked region. Assumes picked
+    localizations, see ``picked_locs``.
+
+    Parameters
+    ----------
+    picked_locs : list of pd.DataFrame
+        List of dataframes, each containing the localizations in a picked
+        region.
+    info : list of dicts
+        Metadata of the localizations.
+    max_dark_time : int
+        Maximum dark time (in frames) between detected localizations
+        to consider them as part of the same binding event. Default is 3
+        frames.
+    progress_callback : function, "console" or None
+        Function to display progress (takes in an integer). If "console",
+        progress is printed to the console. If None, no progress is
+        displayed.
+
+    Returns
+    -------
+    length : lib.FloatArray1D
+        Array of lengths of binding events in each picked region in
+        units of frames.
+    dark : lib.FloatArray1D
+        Array of dark times between binding events in each picked region
+        in units of frames.
+    no_locs : lib.IntArray1D
+        Array of number of localizations in each binding event in each
+        picked region.
+    out_locs : pd.DataFrame
+        Dataframe containing the localizations in all picked regions with
+        added 'length', 'dark' and 'n' fields/columns. Pick regions
+        where binding kinetics could not be estimated (e.g., because
+        of too little data or unsuccessful fitting) are removed.
+    """
+    use_tqdm = progress_callback == "console"
+    if use_tqdm:
+        iter_range = tqdm(
+            range(len(picked_locs)), desc="Calculating kinetics", unit="pick"
+        )
+    else:
+        iter_range = range(len(picked_locs))
+
+    out_locs = []
+    dark = []  # estimated mean dark time
+    length = []  # estimated mean bright time
+    no_locs = []  # number of locs
+    for i in iter_range:
+        if callable(progress_callback):
+            progress_callback(i)
+
+        pick_locs = picked_locs[i]
+        if not len(pick_locs):
+            continue
+        if "len" not in pick_locs.columns:
+            pick_locs = link(
+                pick_locs,
+                info,
+                r_max=999999,  # link all locs in the pick
+                max_dark_time=max_dark_time,
+            )
+        if not len(pick_locs):
+            continue
+        pick_locs = compute_dark_times(pick_locs)
+        if not len(pick_locs):
+            continue
+        try:
+            l_ = lib.estimate_kinetic_rate(pick_locs["len"].to_numpy())
+            d_ = lib.estimate_kinetic_rate(pick_locs["dark"].to_numpy())
+        except RuntimeError:
+            continue
+        length.append(l_)
+        dark.append(d_)
+        no_locs.append(len(pick_locs))
+        out_locs.append(pick_locs)
+    length = np.array(length)
+    dark = np.array(dark)
+    no_locs = np.array(no_locs)
+    out_locs = pd.concat(out_locs, ignore_index=True)
+    progress.close()
+    return length, dark, no_locs, out_locs
+
+
 def compute_dark_times(
     locs: pd.DataFrame,
     group: lib.IntArray1D | None = None,
@@ -2580,6 +2789,7 @@ def undrift(
         Undrifted localization list with the drift applied to the 'x'
         and 'y' coordinates.
     """
+    locs = locs.copy()
     bounds, segments = segment(
         locs,
         info,
@@ -2595,44 +2805,8 @@ def undrift(
     drift_ = (drift_x_pol(t_inter), drift_y_pol(t_inter))
     drift = pd.DataFrame({"x": drift_[0], "y": drift_[1]})
     if display:
-        plt.figure(figsize=(10, 6), constrained_layout=True)
-        plt.suptitle("Estimated drift")
-        plt.subplot(1, 2, 1)
-        plt.plot(drift["x"], label="x interpolated")
-        plt.plot(drift["y"], label="y interpolated")
-        t = (bounds[1:] + bounds[:-1]) / 2
-        plt.plot(
-            t,
-            shift_x,
-            "o",
-            color=list(plt.rcParams["axes.prop_cycle"])[0]["color"],
-            label="x",
-        )
-        plt.plot(
-            t,
-            shift_y,
-            "o",
-            color=list(plt.rcParams["axes.prop_cycle"])[1]["color"],
-            label="y",
-        )
-        plt.legend(loc="best")
-        plt.xlabel("Frame")
-        plt.ylabel("Drift (pixel)")
-        plt.subplot(1, 2, 2)
-        plt.plot(
-            drift["x"],
-            drift["y"],
-            color=list(plt.rcParams["axes.prop_cycle"])[2]["color"],
-        )
-        plt.plot(
-            shift_x,
-            shift_y,
-            "o",
-            color=list(plt.rcParams["axes.prop_cycle"])[2]["color"],
-        )
-        plt.axis("equal")
-        plt.xlabel("x")
-        plt.ylabel("y")
+        pixelsize = lib.get_from_metadata(info, "Pixelsize", 1.0)
+        plot_drift(drift, pixelsize)
         plt.show()
     locs = apply_drift(locs, info, drift=drift)
     return drift, locs
@@ -2643,6 +2817,7 @@ def undrift_from_fiducials(
     info: list[dict],
     picks: list[tuple] | str | None = None,
     pick_size: float | None = None,
+    undrift_z: bool = True,
 ) -> tuple[pd.DataFrame, list[dict], pd.DataFrame]:
     """Undrift localizations based on picked regions (fiducial markers).
 
@@ -2663,6 +2838,9 @@ def undrift_from_fiducials(
         of coordinates. Ignored when ``picks`` is None (determined by
         ``find_fiducials``) or when loaded from a .yaml file (read from
         file).
+    undrift_z : bool, optional
+        If True, also undrift the z coordinate if it exists in the
+        localizations. Default is True.
 
     Returns
     -------
@@ -2689,31 +2867,13 @@ def undrift_from_fiducials(
     elif isinstance(picks, str) and picks.endswith(
         ".yaml"
     ):  # TODO: use io.load_picks
-        # load picks from .yaml file
-        with open(picks, "r") as f:
-            regions = yaml.safe_load(f)
-
-        if "Shape" in regions:
-            loaded_shape = regions["Shape"]
-        elif "Centers" in regions and "Diameter" in regions:
-            loaded_shape = "Circle"
-        else:
-            raise ValueError("Unrecognized picks file")
-
+        picks, loaded_shape, pick_radius = io.load_picks(
+            picks, pixelsize=pixelsize
+        )
         if loaded_shape != "Circle":
             raise ValueError(
                 "Only circular picks are supported for undrifting. "
                 f"Got: {loaded_shape}"
-            )
-
-        picks = regions["Centers"]
-        if "Diameter (nm)" in regions:
-            pick_radius = regions["Diameter (nm)"] / 2 / pixelsize
-        elif "Diameter" in regions:
-            pick_radius = regions["Diameter"] / 2
-        else:
-            raise ValueError(
-                "Could not determine pick diameter from .yaml file."
             )
     else:
         # user-provided list of pick coordinates
@@ -2739,11 +2899,13 @@ def undrift_from_fiducials(
 
     # calculate drift
     drift = undrift_from_picked(pl, info)
+    if not undrift_z:
+        drift = drift.drop(columns="z", errors="ignore")
     locs = apply_drift(locs, info, drift=drift)
 
     new_info = info + [
         {
-            "Generated by": (f"Picasso v{__version__} Undrift from fiducials"),
+            "Generated by": (f"Picasso v{__version__} Undrift from picked"),
             "Number of picks": len(picks),
             "Pick radius (nm)": pick_radius * pixelsize,
         }
@@ -2849,7 +3011,7 @@ def _undrift_from_picked_coordinate(
     return drift_mean
 
 
-def _apply_drift(locs: pd.DataFrame, drift: pd.DataFrame):
+def _apply_drift(locs: pd.DataFrame, drift: pd.DataFrame) -> pd.DataFrame:
     """Apply drift to localizations. This is a helper function that assumes
     the drift is already in the correct format and that the number of
     frames matches."""
@@ -2881,6 +3043,12 @@ def apply_drift(
         'y', and optionally 'z'. If a numpy array, it should have shape
         (n_frames, 2) for x and y drift, or (n_frames, 3) for x, y, and
         z drift.
+
+    Returns
+    -------
+    locs : pd.DataFrame
+        Localizations with drift applied to the 'x' and 'y' coordinates
+        (and 'z' if it exists in the drift).
     """
     assert isinstance(
         drift, (pd.DataFrame, np.ndarray)
@@ -2932,8 +3100,6 @@ def plot_drift(
     assert (
         "x" in drift.columns and "y" in drift.columns
     ), "Drift must have 'x' and 'y' columns"
-    if ax is not None:
-        print("Warning: ax parameter is not used an will be ignored.")
     if fig is None:
         fig = plt.Figure(figsize=(10, 6), constrained_layout=True)
     else:
@@ -3019,7 +3185,7 @@ def align(
         'y' coordinates.
     """
     images = []
-    for i, (locs_, info_) in enumerate(zip(locs, infos)):
+    for locs_, info_ in zip(locs, infos):
         _, image = render.render(locs_, info_, blur_method="smooth")
         images.append(image)
     shift_y, shift_x = imageprocess.rcc(
@@ -3260,7 +3426,7 @@ def _shifts_from_picked_coordinate(
 
 def groupprops(
     locs: pd.DataFrame,
-    callback: Callable[[int], None] | None = None,
+    callback: Callable[[int], None] | Literal["console"] | None = None,
 ) -> pd.DataFrame:
     """Calculate group statistics for localizations, such as mean and
     standard deviation.
@@ -3269,10 +3435,11 @@ def groupprops(
     ----------
     locs : pd.DataFrame
         Localizations with a 'group' field that defines the groups.
-    callback : Callable[[int], None], optional
+    callback : callable, "console" or None, optional
         Callback function to report progress. It should accept an
-        integer argument representing the current group index.
-        Default is None, which means no callback is used.
+        integer argument representing the current group index. If
+        "console", uses tqdm to display progress in the console.
+        Default is None, which means no progress is reported.
 
     Returns
     -------
@@ -3289,22 +3456,29 @@ def groupprops(
         itertools.chain(*[(_ + "_mean", _ + "_std") for _ in locs.columns])
     )
     groups = pd.DataFrame(np.empty((n, len(names))), columns=names)
-    if callback is not None:
-        callback(0)
-        it = enumerate(group_ids)
-    else:
-        it = enumerate(
-            tqdm(group_ids, desc="Calculating group statistics", unit="Groups")
+
+    # progress reporting
+    use_tqdm = callback == "console"
+    if use_tqdm:
+        iter_range = tqdm(
+            len(group_ids), desc="Calculating group statistics", unit="Groups"
         )
-    for i, group_id in it:
+    else:
+        iter_range = range(len(group_ids))
+
+    for i in iter_range:
+        if callable(callback):
+            callback(i)
+        group_id = group_ids[i]
         group_locs = locs[locs["group"] == group_id]
         groups.loc[i, "group"] = group_id
         groups.loc[i, "n_events"] = len(group_locs)
         for name in locs.columns:
             groups.loc[i, name + "_mean"] = group_locs[name].mean()
             groups.loc[i, name + "_std"] = group_locs[name].std()
-        if callback is not None:
-            callback(i + 1)
+    if callable(callback):  # close the progress dialog
+        callback(len(group_ids))
+
     # set dtypes
     groups = groups.astype(
         {

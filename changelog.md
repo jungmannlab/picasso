@@ -1,6 +1,6 @@
 # Changelog
 
-Last change: 22-APR-2026 CEST
+Last change: 23-APR-2026 CEST
 
 ## 0.10.0
 
@@ -17,8 +17,8 @@ Last change: 22-APR-2026 CEST
 - Render GUI: added support for reading .csv files from ThunderSTORM
 - Easy access to user settings via any Picasso module
 - SPINNA offers two new fitting methods for fast fitting instead of the brute force search, see [documentation](https://picassosr.readthedocs.io/en/latest/spinna.html#fitting)
-- All the functions not related to GUI were moved to corresponding API scripts such that using Picasso as a Python package allows for easy analysis analogous to what GUI provides. For example, ``picasso.render.py`` does not only provide the function to generate a grayscale image of localizations only (like before) but can also be used to paint the same images as they are rendered (for example, with picks and scale bar)
-- New functions added in the API to simplify the more complicated analyses, for example, ``picasso.localize.fit2D``
+- Almost all the functions in the GUI scripts (for example, `picasso.gui.render.py`) not related to GUI were moved to corresponding API scripts such that using Picasso as a Python package allows for easy analysis analogous to what GUI provides. For example, ``picasso.render.py`` does not only provide the function to generate a grayscale image of localizations only (like before) but can also be used to paint the same images as they are rendered (for example, with picks and scale bar)
+- Numerous new functions added in the API to simplify the more complicated analyses, for example, ``picasso.localize.fit2D``
 - Faster ind. loc. precision rendering in 3D
 
 ### *Small improvements:*
@@ -61,6 +61,7 @@ Last change: 22-APR-2026 CEST
 - New function ``picasso.io.load_picks``
 - Improved data typing of np.arrays
 - Fixed flake8 warnings (code style only)
+- `picasso.postprocess.groupprops` shows no progress by default
 
 ### *Bug fixes:*
 
