@@ -9622,26 +9622,26 @@ class View(QtWidgets.QLabel):
         )
         # apply z splicing if enabled + render property
         locs, infos = self._prepare_locs_for_rendering()
+
         # prepare other keywords for rendering
         cmap = self.window.display_settings_dlg.colormap.currentText()
         if cmap == "Custom":
             cmap = np.uint8(np.round(255 * self.custom_cmap))
-        relative_intensities = [
-            self.window.dataset_dialog.intensitysettings[i].value()
-            for i in range(len(self.locs))
-        ]
 
-        # render
+        vmin = self.window.display_settings_dlg.minimum.value()
+        vmax = self.window.display_settings_dlg.maximum.value()
+        contrast = None if autoscale else (vmin, vmax)
+
         qimage, (vmin, vmax) = render.render_scene(
             locs=locs,
             info=infos,
             return_qimage=False,
             **kwargs,
-            autoscale=autoscale,
+            contrast=contrast,
             invert_colors=self.window.dataset_dialog.wbackground.isChecked(),
             single_channel_colormap=cmap,
             colors=self.read_colors(),
-            relative_intensities=relative_intensities,
+            relative_intensities=self.read_relative_intensities(),
             return_qimage=True,
             return_contrast_limits=True,
         )
@@ -9652,6 +9652,10 @@ class View(QtWidgets.QLabel):
 
     def read_colors(self, n_channels: int | None = None) -> list[list[float]]:
         """Find currently selected colors for multicolor rendering.
+
+        If multiple channels are loaded, ensure that only the ones which
+        are checked in the Dataset Dialog are rendered in their selected
+        colors.
 
         Parameters
         ----------
@@ -9711,6 +9715,14 @@ class View(QtWidgets.QLabel):
                 inverted = tuple([1 - _ for _ in tempcolor])
                 colors[i] = inverted
 
+        # use only the checked channels
+        if len(self.locs) > 1:
+            colors_ = []
+            for i in range(len(self.locs)):
+                if self.window.dataset_dialog.checks[i].isChecked():
+                    colors_.append(colors[i])
+            colors = colors_
+
         # render properties
         if self.x_render_state:
             colors = render.get_colors_from_colormap(
@@ -9719,6 +9731,31 @@ class View(QtWidgets.QLabel):
             )
 
         return colors
+
+    def read_relative_intensities(self) -> list[float]:
+        """Find currently selected relative intensities for multicolor
+        rendering.
+
+        If multiple channels are loaded, ensure that only the ones which
+        are checked in the Dataset Dialog are rendered with their selected
+        relative intensities.
+
+        If render by property is selected, the relative intensities are
+        set to 1 for all 'channels', i.e., colors.
+
+        Returns
+        -------
+        relative_intensities : list
+            List of relative intensities for each channel.
+        """
+        relative_intensities = [
+            self.window.dataset_dialog.intensitysettings[i].value()
+            for i in range(len(self.locs))
+            if self.window.dataset_dialog.checks[i].isChecked()
+        ]
+        if self.x_render_state:
+            relative_intensities = [1.0] * len(self.x_locs)
+        return relative_intensities
 
     def _prepare_locs_for_rendering(
         self, locs: list | None = None

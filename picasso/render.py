@@ -11,18 +11,21 @@ scale bar and picks.
 :copyright: Copyright (c) 2015 Jungmann Lab, MPI of Biochemistry
 """
 
-from email.mime import image
-from typing import Literal
+from __future__ import annotations
+
+from typing import Literal, Callable
 
 import numba
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+import imageio.v2 as imageio
 from scipy import signal
 from scipy.spatial.transform import Rotation
+from tqdm import tqdm
 from PyQt6 import QtGui, QtCore, QtSvg
 
-from . import lib
+from . import io, lib, __version__
 
 
 _DRAW_MAX_SIGMA = 3  # max. sigma from mean to render (mu +/- 3 sigma)
@@ -2274,6 +2277,114 @@ def draw_minimap(
     return image
 
 
+@adjust_viewport_decorator
+def draw_rotation(
+    image: QtGui.QImage,
+    ang: tuple[float, float, float],
+) -> QtGui.QImage:
+    """Draw rotation axes icon on the image.
+
+    Parameters
+    ----------
+    image : QImage
+        Image containing rendered localizations.
+    ang : tuple of float
+        Rotation angles around x, y, and z axes in radians.
+
+    Returns
+    -------
+    image : QImage
+        Image with the drawn rotation axes icon.
+    """
+    painter = QtGui.QPainter(image)
+    length = 30
+    x = 50
+    y = image.height() - 50
+    center = QtCore.QPoint(x, y)
+
+    # set the ends of the x line
+    xx = length
+    xy = 0
+    xz = 0
+
+    # set the ends of the y line
+    yx = 0
+    yy = length
+    yz = 0
+
+    # set the ends of the z line
+    zx = 0
+    zy = 0
+    zz = length
+
+    # rotate these points
+    coordinates = [[xx, xy, xz], [yx, yy, yz], [zx, zy, zz]]
+    R = render.rotation_matrix(*ang)
+    coordinates = R.apply(coordinates).astype(int)
+    (xx, xy, xz) = coordinates[0]
+    (yx, yy, yz) = coordinates[1]
+    (zx, zy, zz) = coordinates[2]
+
+    # translate the x and y coordinates of the end points towards
+    # bottom right edge of the window
+    xx += x
+    xy += y
+    yx += x
+    yy += y
+    zx += x
+    zy += y
+
+    # set the points at the ends of the lines
+    point_x = QtCore.QPoint(xx, xy)
+    point_y = QtCore.QPoint(yx, yy)
+    point_z = QtCore.QPoint(zx, zy)
+    line_x = QtCore.QLine(center, point_x)
+    line_y = QtCore.QLine(center, point_y)
+    line_z = QtCore.QLine(center, point_z)
+    painter.setPen(QtGui.QPen(QtGui.QColor.fromRgbF(1, 0, 0, 1)))
+    painter.drawLine(line_x)
+    painter.setPen(QtGui.QPen(QtGui.QColor.fromRgbF(0, 1, 1, 1)))
+    painter.drawLine(line_y)
+    painter.setPen(QtGui.QPen(QtGui.QColor.fromRgbF(0, 1, 0, 1)))
+    painter.drawLine(line_z)
+    return image
+
+
+@adjust_viewport_decorator
+def draw_rotation_angles(
+    image: QtGui.QImage,
+    ang: tuple[float, float, float],
+    color: QtGui.QColor = QtGui.QColor("white"),
+) -> QtGui.QImage:
+    """Draw rotation angles (numbers in degrees) on the image.
+
+    Parameters
+    ----------
+    image : QImage
+        Image containing rendered localizations.
+    ang : tuple of float
+        Rotation angles around x, y, and z axes in radians.
+    color : QColor, optional
+        Color of the text. Default is white.
+
+    Returns
+    -------
+    image : QImage
+        Image with the drawn rotation angles.
+    """
+    angx, angy, angz = [int(np.round(_ * 180 / np.pi, 0)) for _ in ang]
+    text = f"{angx} {angy} {angz}"
+    x = image.width() - len(text) * 8 - 10
+    y = image.height() - 20
+    painter = QtGui.QPainter(image)
+    font = painter.font()
+    font.setPixelSize(12)
+    painter.setFont(font)
+    painter.setPen(color)
+    painter.drawText(QtCore.QPoint(x, y), text)
+    return image
+
+
 def render_scene(
     locs: pd.DataFrame | list[pd.DataFrame],
     info: list[dict] | list[list[dict]],
@@ -2285,7 +2396,7 @@ def render_scene(
     ) = None,
     min_blur_width: float = 0.0,
     ang: tuple | None = None,
-    autoscale: bool = False,
+    contrast: tuple[float, float] | None = None,
     invert_colors: bool = False,
     single_channel_colormap: str | lib.FloatArray2D = "magma",
     colors: list | None = None,
@@ -2335,8 +2446,9 @@ def render_scene(
     ang : tuple, optional
         Rotation angles of locs around x, y and z axes in radians. If
         None, locs are not rotated.
-    autoscale : bool, optional
-        True if optimally adjust contrast. Default is False.
+    contrast : tuple of float, optional
+        Contrast limits for scaling. If None, contrast is automatically
+        determined.
     invert_colors : bool, optional
         If True, invert colors of the rendered image. Default is False.
     single_channel_colormap : str | lib.FloatArray2D, optional
@@ -2384,7 +2496,7 @@ def render_scene(
             blur_method=blur_method,
             min_blur_width=min_blur_width,
             ang=ang,
-            autoscale=autoscale,
+            contrast=contrast,
             invert_colors=invert_colors,
             single_channel_colormap=single_channel_colormap,
             return_contrast_limits=True,
@@ -2409,15 +2521,16 @@ def render_scene(
             blur_method=blur_method,
             min_blur_width=min_blur_width,
             ang=ang,
-            autoscale=autoscale,
+            contrast=contrast,
             relative_intensities=relative_intensities,
             invert_colors=invert_colors,
             return_contrast_limits=True,
         )
     if return_qimage:
+        qimage = convert_rgb_to_qimage(image)
         if return_contrast_limits:
-            return convert_rgb_to_qimage(image), contrast_limits
-        return convert_rgb_to_qimage(image)
+            return qimage, contrast_limits
+        return qimage
     else:
         if return_contrast_limits:
             return image, contrast_limits
@@ -2567,7 +2680,7 @@ def _render_multi_channel(
     ) = None,
     min_blur_width: float = 0.0,
     ang: tuple | None = None,
-    autoscale: bool = False,
+    contrast: tuple[float, float] | None = None,
     relative_intensities: list[float] | None = None,
     invert_colors: bool = False,
     return_contrast_limits: bool = False,
@@ -2589,8 +2702,10 @@ def _render_multi_channel(
     images = np.array(images)
 
     # scale contrast and intensities
+    vmin, vmax = contrast if contrast is not None else (None, None)
+    autoscale = True if contrast is None else False
     images, contrast_limits = scale_contrast(
-        images, autoscale=autoscale, return_contrast_limits=True
+        images, vmin, vmax, autoscale=autoscale, return_contrast_limits=True
     )
     images = scale_intensities(
         images, relative_intensities=relative_intensities
@@ -2623,7 +2738,7 @@ def _render_single_channel(
     ) = None,
     min_blur_width: float = 0.0,
     ang: tuple | None = None,
-    autoscale: bool = False,
+    contrast: tuple[float, float] | None = None,
     invert_colors: bool = False,
     single_channel_colormap: str = "magma",
     return_contrast_limits: bool = False,
@@ -2639,8 +2754,10 @@ def _render_single_channel(
         min_blur_width=min_blur_width,
         ang=ang,
     )[1]
+    vmin, vmax = contrast if contrast is not None else (None, None)
+    autoscale = True if contrast is None else False
     image, contrast_limits = scale_contrast(
-        image, autoscale=autoscale, return_contrast_limits=True
+        image, vmin, vmax, autoscale=autoscale, return_contrast_limits=True
     )
     image = to_8bit(image)
     if isinstance(single_channel_colormap, str):
@@ -2740,3 +2857,193 @@ def optimal_scalebar_length(pixelsize: int | float, width: int | float) -> int:
     else:
         scalebar = int(round(optimal_scalebar))
     return scalebar
+
+
+def _animation_sequence(
+    positions: list[list[float, float, float, tuple]],
+    durations: list[float],
+    fps: int,
+) -> tuple[list, list]:
+    """Calculate the sequence of angles and viewports for the animation.
+    See ``build_animation`` for more details."""
+    n_frames = [0]
+    for i in range(len(positions) - 1):
+        n_frames.append(int(fps * durations[i]))
+
+    # find rotation angles and viewport for each frame
+    angles = []
+    viewports = []
+    for i in range(len(positions) - 1):
+        # angles
+        x1, y1, z1 = positions[i][:3]
+        x2, y2, z2 = positions[i + 1][:3]
+        current_angles = np.linspace(
+            [x1, y1, z1], [x2, y2, z2], n_frames[i + 1]
+        )
+        angles.extend(current_angles)
+
+        # viewports
+        vp1 = positions[i][3]
+        vp2 = positions[i + 1][3]
+        ymin = np.linspace(vp1[0][0], vp2[0][0], n_frames[i + 1])
+        xmin = np.linspace(vp1[0][1], vp2[0][1], n_frames[i + 1])
+        ymax = np.linspace(vp1[1][0], vp2[1][0], n_frames[i + 1])
+        xmax = np.linspace(vp1[1][1], vp2[1][1], n_frames[i + 1])
+        current_viewports = [
+            ((ymin[j], xmin[j]), (ymax[j], xmax[j])) for j in range(len(ymin))
+        ]
+        viewports.extend(current_viewports)
+    return angles, viewports
+
+
+def build_animation(
+    path: str,
+    locs: pd.DataFrame | list[pd.DataFrame],
+    info: list[dict] | list[list[dict]],
+    *,
+    positions: list[
+        list[float, float, float, tuple]
+    ],  # TODO: add a nice docstring!
+    durations: list[float],  # TODO: add a nice docstring!
+    disp_px_size: int | float,  # nm
+    image_size: tuple[int, int],
+    blur_method: (
+        Literal["gaussian", "gaussian_iso", "smooth", "convolve"] | None
+    ) = None,
+    min_blur_width: float = 0.0,
+    contrast: tuple[float, float] | None = None,
+    invert_colors: bool = False,
+    single_channel_colormap: str | lib.FloatArray2D = "magma",
+    colors: list | None = None,
+    relative_intensities: list[float] | None = None,
+    fps: int = 30,
+    progress_callback: (
+        Callable[[int], None] | Literal["console"] | None
+    ) = None,
+) -> None:
+    """Build an animation of rendered localizations given the
+    checkpoints (angle, viewport, etc) and the time between them.
+    
+    Parameters
+    ----------
+    path : str
+        Path to the animation file to be created. Must end with .mp4.
+    locs : pd.DataFrame or list of pd.DataFrame
+        Localizations to be rendered. Can be either one localization
+        file or a list thereof.
+    info : list of dict or list of list of dict
+        List of info dictionaries corresponding to the localization
+        file(s).
+    disp_px_size : int or float
+        Display pixel size in nm.
+    image_size : tuple of int
+        Size of the rendered image in pixels, given as (width, height).
+    positions : list
+        Each element determines the checkpoint of the animation, which
+        is a list of 4 elements: [angle_x, angle_y, angle_z, viewport].
+        Angles are in radians. Viewport is given as ((y_min, x_min), 
+        (y_max, x_max)) in camera pixels.
+    durations : list
+        List of durations in seconds between the checkpoints. Must have
+        the same length as positions - 1.
+    blur_method : {"gaussian", "gaussian_iso", "smooth", "convolve"} or None, \
+            optional
+        Defines localizations' blur. The string has to be one of
+        'gaussian', 'gaussian_iso', 'smooth', 'convolve'. If None, no
+        blurring is applied. 'gaussian' uses localization precisions
+        of each localization to blur it (different in each dimension).
+        'gaussian_iso' is similar but averages x and y localization
+        precisions, so that blur is isotropic. 'smooth' applies a one
+        pixel blur. 'convolve' applies the same blur to all
+        localizations which is the median localization precision.
+    min_blur_width : float, optional
+        Minimum size of blur (camera pixels).
+    contrast : tuple of float, optional
+        Contrast limits for scaling. If None, contrast is automatically
+        determined.
+    invert_colors : bool, optional
+        If True, invert colors of the rendered image. Default is False.
+    single_channel_colormap : str | lib.FloatArray2D, optional
+        Colormap to use for single channel data. If a str, the
+        corresponding pyplot colormap is selected. If a 2D array, a
+        256x4  array is expected with values between 0 and 1. Default is
+        'magma'.
+    colors : list of tuples, optional
+        List of RGB tuples corresponding to the colors of the channels.
+        Only needs to be specified for multi-channel data. Must range
+        between 0 and 1. Default is None.
+    relative_intensities : list of float, optional
+        List of relative intensities for each channel. Only needs to be
+        specified for multi-channel data. Default is None, in which
+        case all channels are rendered with the same intensity.
+    fps : int, optional
+        Frames per second of the animation. Default is 30.
+    progress_callback : callable, "console", or None, optional
+        If a callable, it is called with the current frame number as an
+        argument after each frame is rendered. If "console", a progress
+        bar is printed to the console. If None, no progress is reported.
+        Default is None.
+    """
+    # TODO: asserts
+    # TODO: how to deal with zooming in and out? contrast needs ot be adjusted on the go!!!!
+    # TODO: same with disp px size?????
+    angles, viewports = _animation_sequence(positions, durations, fps)
+
+    # width and height for building the animation; must be even
+    # as many video players do not accept it otherwise
+    width, height = image_size
+    width += width % 2
+    height += height % 2
+
+    # render all frames and save in RAM
+    video_writer = imageio.get_writer(path, fps=fps)
+    use_tqdm = progress_callback == "console"
+    if use_tqdm:
+        iter_range = tqdm(
+            range(len(angles)), desc="Building animation", unit="frame"
+        )
+    else:
+        iter_range = range(len(angles))
+
+    for i in iter_range:
+        if callable(progress_callback):
+            progress_callback(i)
+
+        qimage = render_scene(
+            locs=locs,
+            info=info,
+            disp_px_size=disp_px_size,
+            viewport=viewports[i],
+            ang=angles[i],
+            blur_method=blur_method,
+            min_blur_width=min_blur_width,
+            contrast=contrast,
+            invert_colors=invert_colors,
+            single_channel_colormap=single_channel_colormap,
+            colors=colors,
+            relative_intensities=relative_intensities,
+            return_qimage=True,
+        )
+        qimage = qimage.scaled(width, height)
+
+        # convert to a np.array and append
+        ptr = qimage.bits()
+        ptr.setsize(height * width * 4)
+        frame = np.frombuffer(ptr, np.uint8).reshape((height, width, 4))
+        frame = frame[:, :, :3]
+        frame = frame[:, :, ::-1]  # invert RGB to BGR
+        video_writer.append_data(frame)
+
+    if callable(progress_callback):
+        progress_callback(len(angles))
+    video_writer.close()
+
+    # save a yaml with animation settings
+    anim_settings = {
+        "Generated by": f"Picasso v{__version__} Render 3D Animation",
+        "FPS": fps,
+        # "Rotation speed (deg/s)": self.rot_speed.value(),
+        # "Angles (x, y, z) (deg)": positions_,  # TODO: find a good way to save animation metadata
+        "Durations (s)": durations,
+    }
+    io.save_info(path.replace(".mp4", ".yaml"), [anim_settings])

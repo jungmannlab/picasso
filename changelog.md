@@ -1,6 +1,6 @@
 # Changelog
 
-Last change: 23-APR-2026 CEST
+Last change: 24-APR-2026 CEST
 
 ## 0.10.0
 
@@ -62,10 +62,12 @@ Last change: 23-APR-2026 CEST
 - Improved data typing of np.arrays
 - Fixed flake8 warnings (code style only)
 - `picasso.postprocess.groupprops` shows no progress by default
+- `picasso.io.TiffMultiMap` docstrings corrected
 
 ### *Bug fixes:*
 
 - Fixed 3D render screenshot metadata
+- Fixed 3D animation for non-square FOV
 - Fixed ToRaw
 - Fixed distances in NeNA plot (previously plotting multiple times kept increasing the values)
 
