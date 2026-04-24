@@ -261,7 +261,7 @@ def load_calibration(path: str) -> dict:
     return calibration
 
 
-def load_tif(path: str, progress=None) -> tuple[np.memmap, list[dict]]:
+def load_tif(path: str, progress=None) -> tuple[TiffMultiMap, list[dict]]:
     """Load a TIFF movie file and its metadata.
 
     Parameters
@@ -274,9 +274,9 @@ def load_tif(path: str, progress=None) -> tuple[np.memmap, list[dict]]:
 
     Returns
     -------
-    movie : np.memmap
-        A memory-mapped numpy array representing the movie, i.e., an
-        array that's only partially loaded into memory.
+    movie : TiffMultiMap
+        A movie object providing array-like access to TIFF frames.
+        Frames are loaded into memory on access.
     info : list[dict]
         A list containing a dictionary with metadata about the movie.
     """
@@ -1092,10 +1092,10 @@ class ND2Movie(AbstractPicassoMovie):
 
 
 class TiffMap:
-    """Read TIFF files and return a memory-mapped numpy array
-    representing the TIFF image data. This class is used for
-    single-frame TIFF files, not multi-page TIFFs. Both classic
-    TIFF (magic 42) and BigTIFF (magic 43) are supported."""
+    """Read TIFF files and provide array-like access to TIFF image data.
+    Frames are loaded into memory on access (not memory-mapped).
+    This class is used for single-frame TIFF files, not multi-page TIFFs.
+    Both classic TIFF (magic 42) and BigTIFF (magic 43) are supported."""
 
     TIFF_TYPES = {
         1: "B",
