@@ -36,7 +36,7 @@ from matplotlib.backends.backend_qt5agg import FigureCanvas
 from scipy.spatial.transform import Rotation
 from PyQt6 import QtCore, QtGui, QtWidgets
 
-from .. import io, lib, spinna, __version__
+from .. import io, lib, render, spinna, __version__
 
 matplotlib.use("agg")
 
@@ -210,9 +210,25 @@ class MaskPreview(QtWidgets.QLabel):
         self.mask_tab.on_preview_updated(self.image)
         img = self.image
         img = self.to_2D(img)
-        img = self.to_8bit(img)
-        self.qimage = self.get_qimage(img)
-        self.qimage = self.draw_scalebar(self.qimage)
+        img = render.to_8bit(img)
+        img = render.apply_colormap(img, cmap="magma")
+        self.qimage = render.convert_rgb_to_qimage(img)
+        binsize = self.mask_tab.mask_generator.binsize
+        if isinstance(binsize, (int, float)):
+            pixelsize = binsize
+        else:
+            pixelsize = binsize[0]
+        self.qimage = render.draw_scalebar(
+            self.qimage,
+            viewport=self.viewport,
+            scalebar_length_nm=self.mask_tab.scalebar_length.value(),
+            pixelsize=pixelsize,
+        )
+        self.qimage = self.qimage.scaled(
+            self.width(),
+            self.height(),
+            QtCore.Qt.AspectRatioMode.KeepAspectRatio,  # ByExpanding,
+        )
         self.setPixmap(QtGui.QPixmap.fromImage(self.qimage))
 
     def on_mask_generated(self, full_fov: bool = True) -> None:
@@ -253,52 +269,6 @@ class MaskPreview(QtWidgets.QLabel):
         image /= image.max()
         return image
 
-    def to_8bit(self, image: lib.FloatArray2D) -> lib.IntArray2D:
-        """Convert image (lib.FloatArray2D) to 8bit."""
-        return np.round(255 * image).astype("uint8")
-
-    def get_qimage(self, image: lib.IntArray2D) -> QtGui.QImage:
-        """Apply magma cmap to the image and converts it to QImage."""
-        Y, X = image.shape
-        bgra = np.zeros((Y, X, 4), dtype=np.uint8, order="C")
-        cmap = np.uint8(np.round(255 * plt.get_cmap("magma")(np.arange(256))))
-        bgra[..., 0] = cmap[:, 2][image]
-        bgra[..., 1] = cmap[:, 1][image]
-        bgra[..., 2] = cmap[:, 0][image]
-        bgra[..., 3].fill(255)
-
-        qimage = QtGui.QImage(
-            bgra.data, X, Y, QtGui.QImage.Format.Format_RGB32
-        ).scaled(
-            self.width(),
-            self.height(),
-            QtCore.Qt.AspectRatioMode.KeepAspectRatio,  # ByExpanding,
-        )
-        return qimage
-
-    def draw_scalebar(self, image: QtGui.QImage) -> QtGui.QImage | None:
-        """Draw scalebar onto image."""
-        if image is None or not self.mask_tab.scalebar_check.isChecked():
-            return image
-
-        painter = QtGui.QPainter(image)
-        painter.setPen(QtGui.QPen(QtCore.Qt.PenStyle.NoPen))
-        painter.setBrush(QtGui.QBrush(QtGui.QColor("white")))
-        length_nm = self.mask_tab.scalebar_length.value()
-        binsize = self.mask_tab.mask_generator.binsize
-        if isinstance(binsize, (int, float)):
-            pixelsize = binsize
-        else:
-            pixelsize = binsize[0]
-        length_display = int(
-            self.width() * length_nm / (pixelsize * self.image.shape[0])
-        )
-        x = self.width() - length_display - 35
-        y = self.height() - 35
-        painter.drawRect(x, y, length_display, 10)
-        painter.end()
-        return image
-
     def save_current_view(self) -> None:
         """Save self.image (QImage, the current view) as png or tif."""
         path, _ = lib.get_save_filename_ext_dialog(
@@ -311,21 +281,6 @@ class MaskPreview(QtWidgets.QLabel):
             self.mask_tab.window.pwd = os.path.dirname(path)
             self.qimage.save(path)
 
-    def viewport_size(self) -> tuple[int, int] | None:
-        """Get the size of the viewport."""
-        if self.viewport is not None:
-            width = self.viewport[1][1] - self.viewport[0][1]
-            height = self.viewport[1][0] - self.viewport[0][0]
-            return height, width
-
-    def viewport_center(self) -> tuple[float, float] | None:
-        """Get the center of the viewport."""
-        if self.viewport is not None:
-            (y_min, x_min), (y_max, x_max) = self.viewport
-            yc = (y_max + y_min) / 2
-            xc = (x_max + x_min) / 2
-            return (yc, xc)
-
     def zoom_in(self) -> None:
         """Zoom in the viewport."""
         self.zoom(1 / MASK_PREVIEW_ZOOM)
@@ -336,19 +291,9 @@ class MaskPreview(QtWidgets.QLabel):
 
     def zoom(self, factor) -> None:
         """Zoom the viewport by the given factor."""
-        vh, vw = self.viewport_size()  # viewport height and width
-        yc, xc = self.viewport_center()
-        # new viewport height and width
-        new_vh, new_vw = [_ * factor for _ in (vh, vw)]
-        # new viewport
-        y_min = int(yc - new_vh / 2)
-        x_min = int(xc - new_vw / 2)
-        y_max = int(yc + new_vh / 2)
-        x_max = int(xc + new_vw / 2)
-        x_min, x_max, y_min, y_max = self.verify_boundaries(
-            x_min, x_max, y_min, y_max
-        )
-        self.viewport = ((y_min, x_min), (y_max, x_max))
+        viewport = render.zoom_viewport(self.viewport, factor)
+        self.viewport = self.verify_boundaries(viewport)
+        (y_min, x_min), (y_max, x_max) = self.viewport
         self.image = self.mask_tab.mask.copy()[y_min:y_max, x_min:x_max]
         self.render_image()
 
@@ -370,39 +315,23 @@ class MaskPreview(QtWidgets.QLabel):
 
     def move_viewport(self, dy: float, dx: float) -> None:
         """Move viewport by proportions given by dy and dx."""
-        vh, vw = self.viewport_size()
-        x_move = self.get_viewport_shift(int(dx * vw))
-        y_move = self.get_viewport_shift(int(dy * vh))
-        x_min = self.viewport[0][1] + x_move
-        x_max = self.viewport[1][1] + x_move
-        y_min = self.viewport[0][0] + y_move
-        y_max = self.viewport[1][0] + y_move
-        x_min, x_max, y_min, y_max = self.verify_boundaries(
-            x_min, x_max, y_min, y_max
-        )
-        self.viewport = ((y_min, x_min), (y_max, x_max))
+        vh, vw = render.viewport_size(self.viewport)
+        dy *= vh
+        dx *= vw
+        viewport = render.shift_viewport(self.viewport, dy, dx)
+        self.viewport = self.verify_boundaries(viewport)
+        (y_min, x_min), (y_max, x_max) = self.viewport
         self.image = self.mask_tab.mask.copy()[y_min:y_max, x_min:x_max]
         self.render_image()
 
-    def get_viewport_shift(self, value: int) -> int:
-        """Return viewport shift that is at least 3 pixels."""
-        if value:  # if non-zero
-            if value < 0:
-                value = min(value, -3)
-            else:
-                value = max(value, 3)
-        return value
-
     def verify_boundaries(
         self,
-        x_min: int,
-        x_max: int,
-        y_min: int,
-        y_max: int,
-    ) -> tuple[int, int, int, int]:
+        viewport: tuple[tuple[int, int], tuple[int, int]],
+    ) -> tuple[tuple[int, int], tuple[int, int]]:
         """Check if the boundaries lie within the mask boundaries.
         Return the verified boundaries."""
-        vh, vw = self.viewport_size()
+        vh, vw = render.viewport_size(viewport)
+        ((y_min, x_min), (y_max, x_max)) = viewport
         vh = y_max - y_min
         vw = x_max - x_min
         if x_min < 0:
@@ -419,7 +348,8 @@ class MaskPreview(QtWidgets.QLabel):
             y_max = bounds_x_y[0]
             y_min = max(0, y_max - vh)
 
-        return x_min, x_max, y_min, y_max
+        viewport = ((y_min, x_min), (y_max, x_max))
+        return viewport
 
 
 class MaskGeneratorTab(lib.Dialog):
@@ -856,7 +786,7 @@ class MaskGeneratorTab(lib.Dialog):
                     question = "Save all z-slices of the mask?"
                     reply = QtWidgets.QMessageBox.question(
                         self,
-                        "Save all z-slices?",
+                        "Save images of all z-slices?",
                         question,
                         QtWidgets.QMessageBox.StandardButton.Yes
                         | QtWidgets.QMessageBox.StandardButton.No,
@@ -886,16 +816,12 @@ class MaskGeneratorTab(lib.Dialog):
             area_str = "Area (\u03bcm\u00b2):"
             area = "-"
         else:
-            if self.thresholding_check.isChecked():
-                count = (self.mask > 0).sum()
-            else:
-                count = (self.mask > self.mask_generator.thresh).sum()
             if self.mask.ndim == 2:
                 area_str = "Area (\u03bcm\u00b2):"
-                area = 1e-6 * np.prod(self.mask_generator.binsize[:2]) * count
+                area = self.mask_generator.area
             else:
                 area_str = "Volume (\u03bcm\u00b3):"
-                area = 1e-9 * np.prod(self.mask_generator.binsize) * count
+                area = self.mask_generator.volume
         return area_str, np.round(area, 2)
 
     def get_mask_dimensions(self) -> str:
@@ -1231,9 +1157,8 @@ class StructurePreview(QtWidgets.QLabel):
         if (
             self.coords is None
             or not self.structure_tab.show_scalebar_check.isChecked()
+            or self.structure.get_all_targets_count() <= 1
         ):
-            return image
-        elif self.structure.get_all_targets_count() <= 1:
             return image
 
         # draw scalebar
@@ -1250,59 +1175,7 @@ class StructurePreview(QtWidgets.QLabel):
     def draw_rotation(self, image: QtGui.QImage) -> QtGui.QImage:
         """Draw a small 3 axes icon that rotates with the molecular,
         targets displayed in the bottom left corner."""
-        painter = QtGui.QPainter(image)
-        length = 30
-        x = self.width() - 60
-        y = 50
-        center = QtCore.QPoint(x, y)
-
-        # set the ends of the x line
-        xx = length
-        xy = 0
-        xz = 0
-
-        # set the ends of the y line
-        yx = 0
-        yy = length
-        yz = 0
-
-        # set the ends of the z line
-        zx = 0
-        zy = 0
-        zz = length
-
-        # rotate these points
-        coordinates = [[xx, xy, xz], [yx, yy, yz], [zx, zy, zz]]
-        rot = Rotation.from_euler("zyx", (self.angz, self.angy, self.angx))
-        coordinates = rot.apply(coordinates).astype(int)
-        (xx, xy, xz) = coordinates[0]
-        (yx, yy, yz) = coordinates[1]
-        (zx, zy, zz) = coordinates[2]
-
-        # translate the x and y coordinates of the end points towards
-        # bottom right edge of the window
-        xx += x
-        xy += y
-        yx += x
-        yy += y
-        zx += x
-        zy += y
-
-        # set the points at the ends of the lines
-        point_x = QtCore.QPoint(xx, xy)
-        point_y = QtCore.QPoint(yx, yy)
-        point_z = QtCore.QPoint(zx, zy)
-        line_x = QtCore.QLine(center, point_x)
-        line_y = QtCore.QLine(center, point_y)
-        line_z = QtCore.QLine(center, point_z)
-        painter.setPen(QtGui.QPen(QtGui.QColor.fromRgbF(1, 0, 0, 1)))
-        painter.drawLine(line_x)
-        painter.setPen(QtGui.QPen(QtGui.QColor.fromRgbF(0, 1, 1, 1)))
-        painter.drawLine(line_y)
-        painter.setPen(QtGui.QPen(QtGui.QColor.fromRgbF(0, 1, 0, 1)))
-        painter.drawLine(line_z)
-        painter.end()
-        return image
+        return render.draw_rotation(image, (self.angx, self.angy, self.angz))
 
     def mousePressEvent(self, event: QtGui.QMouseEvent) -> None:
         """Define the action when mouse is clicked. If left button is
@@ -1565,7 +1438,7 @@ class StructuresTab(lib.Dialog):
             "",
             "Enter structure's title:",
             QtWidgets.QLineEdit.EchoMode.Normal,
-            f"structure_{len(self.structures)+1}",
+            f"structure_{len(self.structures) + 1}",
         )
         if ok:
             if any([structure_title == _.title for _ in self.structures]):
@@ -1672,15 +1545,7 @@ class StructuresTab(lib.Dialog):
             self.window.pwd = os.path.dirname(path)
             info = []
             for structure in self.structures:
-                m_info = {
-                    "Structure title": structure.title,
-                    "Molecular targets": structure.targets,
-                }
-                for target in structure.targets:
-                    m_info[f"{target}_x"] = structure.x[target]
-                    m_info[f"{target}_y"] = structure.y[target]
-                    m_info[f"{target}_z"] = structure.z[target]
-                info.append(m_info)
+                info.append(structure.get_info())
             io.save_info(path, info)
 
     def load_structures(self) -> None:
@@ -1813,7 +1678,6 @@ class StructuresTab(lib.Dialog):
     def update_mol_tar_box(self) -> None:
         """Delete widgets from the molecular targets box and load the
         widgets corresponding to the currently loaded structure."""
-
         if self.mol_tar_box.content_layout.count() > 5:
             self.mol_tar_box.remove_all_widgets(keep_labels=True)
             self.n_mol_tar = 0

@@ -1225,6 +1225,36 @@ class MaskGenerator:
         with open(outpath, "w") as file:
             yaml.dump(info, file)
 
+    @property
+    def area(self) -> float | None:
+        """Calculate the area of the mask (2D case) in um^2.
+
+        Returns
+        -------
+        area : float or None
+            Area of the mask in um^2. If the mask is not generated yet
+            or if it is 3D, None is returned.
+        """
+        if self.mask is None or self.mask.ndim != 2:
+            return None
+        area = 1e-6 * np.prod(self.binsize) * (self.mask > self.thresh).sum()
+        return area
+
+    @property
+    def volume(self) -> float | None:
+        """Calculate the volume of the mask (3D case) in um^3.
+
+        Returns
+        -------
+        volume : float or None
+            Volume of the mask in um^3. If the mask is not generated yet
+            or if it is 2D, None is returned.
+        """
+        if self.mask is None or self.mask.ndim != 3:
+            return None
+        volume = 1e-9 * np.prod(self.binsize) * (self.mask > self.thresh).sum()
+        return volume
+
 
 class Structure:
     """Specify a structure (hetero/homomultimer).
@@ -1389,6 +1419,25 @@ class Structure:
             n2 = len(self.x[target2])
             return min(n1, n2)
 
+    def get_info(self) -> dict:
+        """Get the structure information in a dictionary format.
+
+        Returns
+        -------
+        info : dict
+            Dictionary with the structure information, including title,
+            molecular targets and their coordinates.
+        """
+        info = {
+            "Structure title": self.title,
+            "Molecular targets": self.targets,
+        }
+        for target in self.targets:
+            info[f"{target}_x"] = self.x[target]
+            info[f"{target}_y"] = self.y[target]
+            info[f"{target}_z"] = self.z[target]
+        return info
+
     def restart(self) -> Structure:
         """Delete all molecular targets, reset the structure but keep
         its title."""
@@ -1397,6 +1446,19 @@ class Structure:
         self.y = {}
         self.z = {}
         return self
+
+    def save(self, path: str) -> None:
+        """Save the structure in a .yaml file.
+
+        Parameters
+        ----------
+        path : str
+            Path to save the structure. Must end with .yaml.
+        """
+        if not path.endswith(".yaml"):
+            raise ValueError("Path for saving structure must end with .yaml")
+        info = self.get_info()
+        io.save_info(path, [info])
 
 
 class StructureSimulator:
