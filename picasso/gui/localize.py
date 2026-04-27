@@ -1955,11 +1955,31 @@ class Window(QtWidgets.QMainWindow):
             directory=os.path.dirname(path),
             filter="*.txt",
         )
+        drift = None
+        if driftpath:
+            try:
+                drift = io.load_drift(driftpath)
+            except Exception as e:
+                QtWidgets.QMessageBox.warning(
+                    self,
+                    "Could not load drift file",
+                    f"Drift file could not be loaded, error: {e}. No drift "
+                    "correction will be applied.",
+                )
+                drift = None
+        picks, shape, _ = io.load_picks(path)
+        if shape != "Circle":
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Unsupported shape",
+                f"Only circle picks are supported, but got {shape}.",
+            )
+            return
         # convert
         self.identifications = localize.picks_to_identifications(
-            path,
+            picks,
             n_frames=lib.get_from_metadata(self.info, "Frames"),
-            drift_path=driftpath,
+            drift=drift,
         )
         self._clean_up_external_ids()
 

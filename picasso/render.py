@@ -1556,7 +1556,7 @@ def export_qimage_to_svg(image: QtGui.QImage, path: str):
 def get_colors_from_colormap(
     n_channels: int,
     cmap: str = "gist_rainbow",
-) -> list[tuple[int, int, int]]:
+) -> list[tuple[float, float, float]]:
     """Create a list with rgb channels for each of the channels used in
     rendering property using the gist_rainbow colormap, see:
     https://matplotlib.org/stable/tutorials/colors/colormaps.html
@@ -1571,7 +1571,7 @@ def get_colors_from_colormap(
     Returns
     -------
     colors : list of tuples
-        Contains tuples with RGB channels ranging between 0 and 255.
+        Contains tuples with RGB channels ranging between 0 and 1.
     """
     # array of shape (256, 3) with RGB channels with 256 colors
     base = plt.get_cmap(cmap)(np.arange(256))[:, :3]
@@ -1579,7 +1579,7 @@ def get_colors_from_colormap(
     idx = np.linspace(0, 255, n_channels).astype(int)
     # extract the colors of interest
     colors = base[idx]
-    return colors
+    return colors / 255  # value ranging between 0 and 1
 
 
 def get_group_color(locs: pd.DataFrame) -> lib.IntArray1D:
@@ -1680,6 +1680,88 @@ def viewport_center(
         ((viewport[1][1] + viewport[0][1]) / 2),
     )
     return center
+
+
+def shift_viewport(
+    viewport: tuple[tuple[float, float], tuple[float, float]],
+    dx: float,
+    dy: float,
+) -> tuple[tuple[float, float], tuple[float, float]]:
+    """Shift the viewport by the given shift vector.
+
+    Parameters
+    ----------
+    viewport : tuple
+        Current viewport in camera pixels ((ymin, xmin), (ymax, xmax)).
+    dx, dy : float
+        Shifts in camera pixels.
+
+    Returns
+    -------
+    new_viewport : tuple
+        New viewport in camera pixels ((ymin, xmin), (ymax, xmax)).
+    """
+    (ymin, xmin), (ymax, xmax) = viewport
+    new_viewport = ((ymin + dy, xmin + dx), (ymax + dy, xmax + dx))
+    return new_viewport
+
+
+def zoom_viewport(
+    viewport: tuple[tuple[float, float], tuple[float, float]],
+    factor: float,
+    cursor_position: tuple[float, float] | None = None,
+) -> tuple[tuple[float, float], tuple[float, float]]:
+    """Zoom the viewport by the given factor.
+
+    Parameters
+    ----------
+    viewport : tuple
+        Current viewport in camera pixels ((ymin, xmin), (ymax, xmax)).
+    factor : float
+        Zoom factor. Values > 1 will zoom in, values < 1 will zoom out.
+    cursor_position : tuple, optional
+        Cursor's position on the screen. If None, zooming is centered
+        around viewport's center. Default is None.
+
+    Returns
+    -------
+    new_viewport : tuple
+        New viewport in camera pixels ((ymin, xmin), (ymax, xmax)).
+    """
+    viewport_height, viewport_width = render.viewport_size(viewport)
+    new_viewport_height = viewport_height * factor
+    new_viewport_width = viewport_width * factor
+
+    if cursor_position is not None:  # wheelEvent
+        old_viewport_center = render.viewport_center(viewport)
+        rel_pos_x = (
+            cursor_position[0] - old_viewport_center[1]
+        ) / viewport_width
+        rel_pos_y = (
+            cursor_position[1] - old_viewport_center[0]
+        ) / viewport_height
+        new_viewport_center_x = (
+            cursor_position[0] - rel_pos_x * new_viewport_width
+        )
+        new_viewport_center_y = (
+            cursor_position[1] - rel_pos_y * new_viewport_height
+        )
+    else:
+        new_viewport_center_y, new_viewport_center_x = render.viewport_center(
+            viewport
+        )
+
+    new_viewport = [
+        (
+            new_viewport_center_y - new_viewport_height / 2,
+            new_viewport_center_x - new_viewport_width / 2,
+        ),
+        (
+            new_viewport_center_y + new_viewport_height / 2,
+            new_viewport_center_x + new_viewport_width / 2,
+        ),
+    ]
+    return new_viewport
 
 
 def adjust_viewport_to_aspect_ratio(
@@ -2404,9 +2486,10 @@ def render_scene(
     return_qimage: bool = False,
     return_contrast_limits: bool = False,
 ) -> (
-    lib.IntArray3D
-    | QtGui.QImage
-    | tuple[lib.IntArray3D | QtGui.QImage, tuple[float, float]]
+    tuple[int, lib.IntArray3D]
+    | tuple[int, QtGui.QImage]
+    | tuple[int, lib.IntArray3D, tuple[float, float]]
+    | tuple[int, QtGui.QImage, tuple[float, float]]
 ):
     """Render localizations into a colored image (either QImage or a 
     numpy array).
@@ -2470,6 +2553,8 @@ def render_scene(
 
     Returns
     -------
+    n_locs : int
+        Total number of localizations rendered.
     image : IntArray3D or QImage
         RGB image of rendered localizations. Either a numpy array of
         shape (height, width, 3) with integer values between 0 and 255
@@ -2488,7 +2573,7 @@ def render_scene(
             colors = lib.get_colors(len(locs))
 
     if isinstance(locs, pd.DataFrame):
-        image, contrast_limits = _render_single_channel(
+        n_locs, image, contrast_limits = _render_single_channel(
             locs=locs,
             info=info,
             disp_px_size=disp_px_size,
@@ -2512,7 +2597,7 @@ def render_scene(
                 f"Mismatch between {len(locs)} localization files and "
                 f"{len(info)} info dictionaries."
             )
-        image, contrast_limits = _render_multi_channel(
+        n_locs, image, contrast_limits = _render_multi_channel(
             locs=locs,
             info=info,
             disp_px_size=disp_px_size,
@@ -2529,12 +2614,11 @@ def render_scene(
     if return_qimage:
         qimage = convert_rgb_to_qimage(image)
         if return_contrast_limits:
-            return qimage, contrast_limits
-        return qimage
-    else:
-        if return_contrast_limits:
-            return image, contrast_limits
-        return image
+            return n_locs, qimage, contrast_limits
+        return n_locs, qimage
+    if return_contrast_limits:
+        return n_locs, image, contrast_limits
+    return n_locs, image
 
 
 def convert_rgb_to_qimage(
@@ -2665,6 +2749,8 @@ def to_8bit(
 ) -> lib.IntArray2D | lib.IntArray3D:
     """Convert a float image with values between 0 and 1 to an 8-bit image
     with values between 0 and 255."""
+    # normalize to max value of 1 and convert to 8-bit
+    image /= image.max() if image.max() > 0 else 1.0
     return np.round(image * 255).astype(np.uint8)
 
 
@@ -2684,10 +2770,13 @@ def _render_multi_channel(
     relative_intensities: list[float] | None = None,
     invert_colors: bool = False,
     return_contrast_limits: bool = False,
-) -> lib.IntArray3D:
+) -> (
+    tuple[int, lib.IntArray3D]
+    | tuple[int, lib.IntArray3D, tuple[float, float]]
+):
     """Render multi-channel localizations into an RGB 8bit image
     (numpy array). See ``render_scene`` for more details."""
-    images = [  # monochromatic images of localizations
+    renderings = [  # monochromatic images of localizations
         render(
             locs=locs[i],
             info=info[i],
@@ -2696,10 +2785,11 @@ def _render_multi_channel(
             blur_method=blur_method,
             min_blur_width=min_blur_width,
             ang=ang,
-        )[1]
+        )
         for i in range(len(locs))
     ]
-    images = np.array(images)
+    n_locs = sum([rendering[0] for rendering in renderings])
+    images = np.array([rendering[1] for rendering in renderings])
 
     # scale contrast and intensities
     vmin, vmax = contrast if contrast is not None else (None, None)
@@ -2718,13 +2808,14 @@ def _render_multi_channel(
         colors = lib.get_colors(len(locs))
     for color, image in zip(colors, images):
         for i in range(3):
-            rgb[:, :, i] += color[i] * image / 255
+            rgb[:, :, i] += color[i] * image
+    rgb /= rgb.max()  # normalize to max value of 1
     rgb = to_8bit(rgb)
     if invert_colors:
         rgb = 255 - rgb
     if return_contrast_limits:
-        return rgb, contrast_limits
-    return rgb
+        return n_locs, rgb, contrast_limits
+    return n_locs, rgb
 
 
 def _render_single_channel(
@@ -2742,10 +2833,13 @@ def _render_single_channel(
     invert_colors: bool = False,
     single_channel_colormap: str = "magma",
     return_contrast_limits: bool = False,
-) -> lib.IntArray3D:
+) -> (
+    tuple[int, lib.IntArray3D]
+    | tuple[int, lib.IntArray3D, tuple[float, float]]
+):
     """Render single-channel localizations into an RGB 8bit image (numpy
     array). See ``render_scene`` for more details."""
-    image = render(
+    n_locs, image = render(
         locs=locs,
         info=info,
         disp_px_size=disp_px_size,
@@ -2753,26 +2847,43 @@ def _render_single_channel(
         blur_method=blur_method,
         min_blur_width=min_blur_width,
         ang=ang,
-    )[1]
+    )
     vmin, vmax = contrast if contrast is not None else (None, None)
     autoscale = True if contrast is None else False
     image, contrast_limits = scale_contrast(
         image, vmin, vmax, autoscale=autoscale, return_contrast_limits=True
     )
     image = to_8bit(image)
-    if isinstance(single_channel_colormap, str):
-        cmap = np.uint8(
-            np.round(
-                255 * plt.get_cmap(single_channel_colormap)(np.arange(256))
-            )
-        )
-    else:
-        cmap = np.uint8(np.round(255 * single_channel_colormap))
-    image = cmap[image][:, :, :3]  # drop alpha channel if present
+    rgb = apply_colormap(image, single_channel_colormap)
     if invert_colors:
-        image = 255 - image
+        rgb = 255 - rgb
     if return_contrast_limits:
-        return image, contrast_limits
+        return n_locs, rgb, contrast_limits
+    return n_locs, rgb
+
+
+def apply_colormap(
+    image: lib.IntArray2D, colormap: str | lib.FloatArray2D
+) -> lib.IntArray3D:
+    """Apply a colormap to a single-channel image (2D array) and return an
+    RGB image (3D array).
+
+    Parameters
+    ----------
+    image : IntArray2D
+        Single-channel image as a 2D numpy array with integer values
+        between 0 and 255 (8bit).
+    colormap : str or FloatArray2D
+        If a str, the corresponding pyplot colormap is selected. If a 2D
+        array, a 256x4 or 256x3 array is expected with values between 0
+        and 1. Note: the alpha channel (if present) is ignored and the
+        colormap is applied as if all values were fully opaque.
+    """
+    if isinstance(colormap, str):
+        cmap = np.uint8(np.round(255 * plt.get_cmap(colormap)(np.arange(256))))
+    else:
+        cmap = np.uint8(np.round(255 * colormap))
+    image = cmap[image][:, :, :3]  # drop alpha channel if present
     return image
 
 
@@ -3009,7 +3120,7 @@ def build_animation(
         if callable(progress_callback):
             progress_callback(i)
 
-        qimage = render_scene(
+        _, qimage = render_scene(
             locs=locs,
             info=info,
             disp_px_size=disp_px_size,

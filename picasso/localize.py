@@ -641,26 +641,25 @@ def identify(
 
 
 def picks_to_identifications(
-    picks: list[tuple] | str,
+    picks: list[tuple],
     n_frames: int | None = None,
-    drift: lib.FloatArray2D | str = "",
+    drift: lib.FloatArray2D | None = None,
 ) -> pd.DataFrame:
     """Convert circular picks (from Picasso: Render) to identifications.
     Only circular picks are allowed.
 
     Parameters
     ----------
-    picks : list of tuples or str
-        Either the list of picks positions (centers) or a path to the
-        saved pick regions .yaml file.
+    picks : list of tuples
+        List of circular picks positions (centers). See
+        ``io.load_picks``.
     n_frames : int, optional
         Number of frames in the acquisition movie. If None is given,
         it will be extracted from the drift file (if provided).
         Otherwise, an error is raised.
-    drift : lib.FloatArray2D or str, optional
-        Either an array of shape (n_frames, 2) or (n_frames, 3) or a
-        path to the drift correction .txt file. Used to adjust the
-        positions of identifications throughout acquisition. Only
+    drift : lib.FloatArray2D or None, optional
+        An array of shape (n_frames, 2) or (n_frames, 3). Used to adjust
+        the positions of identifications throughout acquisition. Only
         x and y drift is used.
 
     Returns
@@ -672,29 +671,14 @@ def picks_to_identifications(
 
     Raises
     ------
-    NotImplementedError
-        If the loaded picks are not circular.
     ValueError
         If `n_frames` and `drift` are not provided.
     """
-    if isinstance(picks, str):
-        picks, shape, _ = io.load_picks(picks)
-        if shape != "Circle":
-            raise NotImplementedError("Only circular picks are supported.")
-    else:
-        assert isinstance(
-            picks, (list, tuple)
-        ), "picks must be a list or a tuple."
-        assert all([len(_) == 2 for _ in picks]), (
-            "Each element in picks must contain two numbers (x, y "
-            "coordinates)"
-        )
-    if isinstance(drift, str):
-        assert drift.endswith(".txt"), (
-            "If drift is provided as a path, it must be a string ending"
-            " with '.txt'."
-        )
-        drift = np.genfromtxt(drift) if drift else None
+    assert isinstance(picks, (list, tuple)), "picks must be a list or a tuple."
+    assert all([len(_) == 2 for _ in picks]), (
+        "Circular picks are required. Each element in 'picks' must "
+        "contain two numbers (x and y coordinates)."
+    )
     if isinstance(drift, np.ndarray):
         assert drift.ndim == 2, "The provided drift must be a 2D numpy array"
     if n_frames is None:

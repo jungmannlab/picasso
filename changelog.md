@@ -1,6 +1,6 @@
 # Changelog
 
-Last change: 24-APR-2026 CEST
+Last change: 27-APR-2026 CEST
 
 ## 0.10.0
 
@@ -68,6 +68,7 @@ Last change: 24-APR-2026 CEST
 
 - Fixed 3D render screenshot metadata
 - Fixed 3D animation for non-square FOV
+- Fixed zero-value in rendered images (previously RGB channels were capped between 1 and 255 instead of 0 and 255)
 - Fixed ToRaw
 - Fixed distances in NeNA plot (previously plotting multiple times kept increasing the values)
 

@@ -733,10 +733,8 @@ def remove_locs_in_picks(
     locs: pd.DataFrame,
     info: list[dict],
     *,
-    picks: list[tuple] | str,
-    pick_shape: (
-        Literal["Circle", "Rectangle", "Polygon", "Square"] | None
-    ) = None,
+    picks: list[tuple],
+    pick_shape: Literal["Circle", "Rectangle", "Polygon", "Square"],
     pick_size: float | None = None,
     index_blocks: tuple = None,
 ) -> pd.DataFrame:
@@ -748,12 +746,11 @@ def remove_locs_in_picks(
         Localizations.
     info : list of dicts
         Localization metadata.
-    picks : list of tuples or str
+    picks : list of tuples
         List of picks, each pick is a list of coordinates of the pick
-        corners. If a string is given, picks are loaded from a YAML
-        file. `pick_shape` and `pick_size` are then ignored.
-    pick_shape : {"Circle", "Rectangle", "Polygon", "Square"} or None
-        Shape of picks. Ignored if picks are loaded from a YAML file.
+        corners. See ``io.load_picks``.
+    pick_shape : {"Circle", "Rectangle", "Polygon", "Square"}
+        Shape of picks.
     pick_size : float or None
         Size of picks in camera pixels. For circles - diameters. For
         rectangles - width. For squares - side length. For polygons -
@@ -768,17 +765,14 @@ def remove_locs_in_picks(
     locs : pd.DataFrame
         Localizations with localizations in picks removed.
     """
-    if isinstance(picks, str):
-        picks, pick_shape, pick_size = io.load_picks(picks)
-    else:
-        assert pick_shape in ("Circle", "Rectangle", "Polygon", "Square"), (
-            "pick_shape must be one of 'Circle', 'Rectangle', 'Polygon', "
-            "or 'Square'."
-        )
-        if pick_shape != "Polygon":
-            assert isinstance(
-                pick_size, (int, float)
-            ), "pick_size must be a number."
+    assert pick_shape in ("Circle", "Rectangle", "Polygon", "Square"), (
+        "pick_shape must be one of 'Circle', 'Rectangle', 'Polygon', "
+        "or 'Square'."
+    )
+    if pick_shape != "Polygon":
+        assert isinstance(
+            pick_size, (int, float)
+        ), "pick_size must be a number."
     all_picked_locs = picked_locs(
         locs=locs,
         info=info,
@@ -1974,10 +1968,8 @@ def combine_locs_in_picks(
     locs: pd.DataFrame,
     info: list[dict],
     *,
-    picks: list[tuple] | str,
-    pick_shape: (
-        Literal["Circle", "Rectangle", "Polygon", "Square"] | None
-    ) = None,
+    picks: list[tuple],
+    pick_shape: Literal["Circle", "Rectangle", "Polygon", "Square"],
     pick_size: float | None = None,
     progress_callback: (
         Callable[[int], None] | Literal["console"] | None
@@ -1991,14 +1983,10 @@ def combine_locs_in_picks(
         Localizations.
     info : list of dicts
         Metadata of the localizations.
-    picks : list of tuples or str
-        List of pick positions. If str, path to a YAML file containing
-        the pick positions. If the path is given, `pick_shape` and
-        `pick_size` are ignored and taken from the YAML file.
-    pick_shape : {'Circle', 'Rectangle', 'Polygon', 'Square'}, optional
-        Shape of the picks. Must be provided if `picks` is a list of
-        tuples. Ignored if `picks` is a path to a YAML file. Default is
-        None.
+    picks : list of tuples
+        List of pick positions. See ``io.load_picks``.
+    pick_shape : {'Circle', 'Rectangle', 'Polygon', 'Square'}
+        Shape of the picks.
     pick_size : float or None, optional
         Size of the picks. For circular picks, the size is the radius;
         for rectangular picks, the size is the width; for square picks,
@@ -2015,9 +2003,6 @@ def combine_locs_in_picks(
         Localizations after combining localizations in the picked
         regions.
     """
-    if isinstance(picks, str):
-        pixelsize = lib.get_from_metadata(info, "Pixelsize", raise_error=True)
-        picks, pick_shape, pick_size = io.load_picks(picks, pixelsize)
     assert pick_shape in {
         "Circle",
         "Rectangle",
@@ -2815,7 +2800,7 @@ def undrift(
 def undrift_from_fiducials(
     locs: pd.DataFrame,
     info: list[dict],
-    picks: list[tuple] | str | None = None,
+    picks: list[tuple] | None = None,
     pick_size: float | None = None,
     undrift_z: bool = True,
 ) -> tuple[pd.DataFrame, list[dict], pd.DataFrame]:
@@ -2827,17 +2812,14 @@ def undrift_from_fiducials(
         Localizations to be undrifted.
     info : list of dicts
         Localizations' metadata.
-    picks : list of (2,) tuples, str, or None, optional
-        Coordinates of picked regions as (x, y) tuples, or a path to a
-        .yaml file containing circular picks (see
-        ``picasso.gui.render.View.load_picks``). If None (default),
-        fiducials are automatically detected using
+    picks : list of (2,) tuples or None, optional
+        Coordinates of picked regions as (x, y) tuples. If None
+        (default), fiducials are automatically detected using
         ``picasso.imageprocess.find_fiducials``.
     pick_size : float or None, optional
         Pick radius in camera pixels. Required when ``picks`` is a list
         of coordinates. Ignored when ``picks`` is None (determined by
-        ``find_fiducials``) or when loaded from a .yaml file (read from
-        file).
+        ``find_fiducials``).
     undrift_z : bool, optional
         If True, also undrift the z coordinate if it exists in the
         localizations. Default is True.
@@ -2854,8 +2836,7 @@ def undrift_from_fiducials(
     Raises
     ------
     ValueError
-        If ``picks`` is a .yaml path with non-circular picks, or if
-        ``pick_size`` is not provided when ``picks`` is a list.
+        If ``pick_size`` is not provided when ``picks`` is a list.
     """
     locs = locs.copy()
     pixelsize = lib.get_from_metadata(info, "Pixelsize", raise_error=True)
@@ -2864,17 +2845,6 @@ def undrift_from_fiducials(
         # auto-detect fiducials
         picks, box = imageprocess.find_fiducials(locs, info)
         pick_radius = box / 2
-    elif isinstance(picks, str) and picks.endswith(
-        ".yaml"
-    ):  # TODO: use io.load_picks
-        picks, loaded_shape, pick_radius = io.load_picks(
-            picks, pixelsize=pixelsize
-        )
-        if loaded_shape != "Circle":
-            raise ValueError(
-                "Only circular picks are supported for undrifting. "
-                f"Got: {loaded_shape}"
-            )
     else:
         # user-provided list of pick coordinates
         if pick_size is None:
@@ -2885,7 +2855,7 @@ def undrift_from_fiducials(
         pick_radius = pick_size
 
     if len(picks) == 0:
-        raise ValueError("No picks found for undrifting.")
+        raise ValueError("No picks found for drift correction.")
 
     # get picked localizations
     pl = picked_locs(
@@ -3300,10 +3270,8 @@ def align_from_picked(
     all_locs: list[pd.DataFrame],
     infos: list[list[dict]],
     *,
-    picks: list[tuple] | str,
-    pick_shape: (
-        Literal["Circle", "Rectangle", "Polygon", "Square"] | None
-    ) = None,
+    picks: list[tuple],
+    pick_shape: Literal["Circle", "Rectangle", "Polygon", "Square"],
     pick_size: float | None = None,
     return_shifts: bool = False,
 ):
@@ -3317,18 +3285,13 @@ def align_from_picked(
     infos : list of list of dicts
         List of metadata dictionaries corresponding to each localization
         dataset in `all_locs`.
-    picks : list of (2,) tuples or str
-        Coordinates of picked regions as (x, y) tuples, or a path to a
-        .yaml file containing circular picks (see
-        ``picasso.gui.render.View.load_picks``).
+    picks : list of (2,) tuples
+        Coordinates of picked regions as (x, y) tuples. See
+        ``io.load_picks``.
     pick_shape : {"Circle", "Rectangle", "Polygon", "Square"}, optional
-        Shape of the picks. Required if `picks` is a list of coordinates.
-        Ignored if `picks` is a .yaml file (read from file). Default is
-        None.
+        Shape of the picks.
     pick_size : float or None, optional
-        Size of the picks. Required if `picks` is a list of coordinates.
-        Ignored if `picks` is a .yaml file (read from file). Default is
-        None.
+        Size of the picks. Default is None.
     return_shifts : bool, optional
         If True, also returns the calculated shifts for each channel.
         Default is False.
@@ -3344,16 +3307,14 @@ def align_from_picked(
         `all_locs`, calculated as the average shift from the picked
         localizations. Returned only if `return_shifts` is True.
     """
-    if isinstance(picks, str):
-        picks, pick_shape, pick_size = io.load_picks(picks)
-    else:
+    assert pick_shape in {"Circle", "Rectangle", "Polygon", "Square"}, (
+        "pick_shape must be one of 'Circle', 'Rectangle', 'Polygon', or "
+        "'Square'"
+    )
+    if pick_shape != "Polygon":
         assert (
-            pick_shape is not None
-        ), "pick_shape must be provided when picks is a list of coordinates"
-        if pick_shape != "Polygon":
-            assert (
-                pick_size is not None
-            ), "pick_size must be provided when picks is a list of coordinates"
+            pick_size is not None
+        ), "pick_size must be provided when picks is a list of coordinates"
 
     pl = [
         picked_locs(locs, i, picks, pick_shape, pick_size)

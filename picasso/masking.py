@@ -20,7 +20,7 @@ import pandas as pd
 from scipy import ndimage as ndi
 from statsmodels.nonparametric.smoothers_lowess import lowess as loess
 
-from . import lib
+from . import lib, render
 
 
 def mask_locs(
@@ -57,9 +57,9 @@ def mask_locs(
     # deprecation of width and height (use info instead) TODO: remove in v0.11.0
     if width is not None or height is not None:
         lib.deprecation_warning(
-            "'width' and 'height' are deprecated parameters in "
-            "'mask_locs'. Please provide 'info' with 'Width' and "
-            "'Height' keys instead, see ``io.load_locs``.",
+            "Deprecation warning: 'width' and 'height' are deprecated "
+            "parameters in 'mask_locs'. Please provide 'info' see "
+            "``io.load_locs``.",
         )
     elif info is not None:
         width = lib.get_from_metadata(info, "Width")
@@ -73,6 +73,37 @@ def mask_locs(
     locs_in = locs.iloc[index].sort_values(by="frame", kind="quicksort")
     locs_out = locs.iloc[~index].sort_values(by="frame", kind="quicksort")
     return locs_in, locs_out
+
+
+def generate_image(
+    locs: pd.DataFrame, info: list[dict], disp_px_size: float, blur: float
+) -> lib.FloatArray2D:
+    """Generate a normalized (values from 0 to 1) image from
+    localizations used to make a mask.
+
+    Parameters
+    ----------
+    locs : pd.DataFrame
+        Localizations to be rendered into an image.
+    info : list of dict
+        Localization metadata.
+    disp_px_size : float
+        Display pixel size in nm, used to histogram localizations into
+        an image.
+    blur : float
+        Standard deviation of the Gaussian blur in nm applied to the
+        histogrammed image.
+    """
+    _, image = render.render(
+        locs=locs,
+        info=info,
+        disp_px_size=disp_px_size,
+        blur_method=None,
+    )
+    blur_px = blur / disp_px_size
+    image_blur = ndi.filter.gaussian_filter(image, blur_px)
+    image_blur /= image_blur.max()
+    return image_blur
 
 
 def binary_mask(

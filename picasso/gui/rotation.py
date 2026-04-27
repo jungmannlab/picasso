@@ -760,7 +760,7 @@ class ViewRotation(QtWidgets.QLabel):
         vmin = self.window.display_settings_dlg.minimum.value()
         vmax = self.window.display_settings_dlg.maximum.value()
         contrast = None if autoscale else (vmin, vmax)
-        qimage, (vmin, vmax) = render.render_scene(
+        _, qimage, (vmin, vmax) = render.render_scene(
             locs=locs,
             info=infos,
             return_qimage=False,
@@ -864,13 +864,13 @@ class ViewRotation(QtWidgets.QLabel):
         QImage
             Image with the drawn scalebar.
         """
-        color = (
-            QtGui.QColor("white")
-            if not self.window.dataset_dialog.wbackground.isChecked()
-            else QtGui.QColor("black")
-        )
-        d_dialog = self.window.display_settings_dlg
         if d_dialog.scalebar_groupbox.isChecked():
+            color = (
+                QtGui.QColor("white")
+                if not self.window.dataset_dialog.wbackground.isChecked()
+                else QtGui.QColor("black")
+            )
+            d_dialog = self.window.display_settings_dlg
             image = render.draw_scalebar(
                 image=image,
                 viewport=self.viewport,

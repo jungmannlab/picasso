@@ -23,10 +23,9 @@ import pkgutil
 from math import ceil
 from collections import Counter
 from functools import partial
-from typing import Callable, Literal
+from typing import Callable
 from PIL import Image
 
-from pre_commit import color
 import yaml
 import matplotlib
 import matplotlib.pyplot as plt
@@ -56,8 +55,6 @@ from ..lib import (
     FloatArray1D,
     FloatArray2D,
     FloatArray3D,
-    IntArray2D,
-    IntArray3D,
 )
 from .rotation import RotationWindow
 
@@ -3376,20 +3373,12 @@ class TestClustererView(QtWidgets.QLabel):
 
     def zoom(self, factor: float) -> None:
         """Change size of viewport."""
-        height, width = render.viewport_size(self.viewport)
-        new_height = height * factor
-        new_width = width * factor
-        center_y, center_x = render.viewport_center(self.view.viewport)
-        self.viewport = [
-            (center_y - new_height / 2, center_x - new_width / 2),
-            (center_y + new_height / 2, center_x + new_width / 2),
-        ]
+        self.viewport = render.zoom_viewport(self.viewport, factor)
         self.update_scene()
 
     def shift_viewport(self, dx: int, dy: int) -> None:
         """Move viewport by a specified amount."""
-        (y_min, x_min), (y_max, x_max) = self.viewport
-        self.viewport = [(y_min + dy, x_min + dx), (y_max + dy, x_max + dx)]
+        self.viewport = render.shift_viewport(self.viewport, dx, dy)
         self.update_scene()
 
     def update_scene(self) -> None:
@@ -3404,38 +3393,25 @@ class TestClustererView(QtWidgets.QLabel):
         # split locs according to their group colors
         locs = self.split_locs()
 
-        # render kwargs
+        # render
         blur_method = (
             "smooth" if self.dialog.one_pixel_blur.isChecked() else "convolve"
         )
-        kwargs = {
-            "oversampling": self.get_optimal_oversampling(),
-            "viewport": self.viewport,
-            "blur_method": blur_method,
-            "min_blur_width": 0.0,
-            "ang": self.ang,
-        }
-
-        # render images for all channels
-        images = [render.render(_, **kwargs)[1] for _ in locs]
-
-        # scale images
-        images = self.scale_contrast(images)
-
-        # create image to display
-        Y, X = images.shape[1:]
-        bgra = np.zeros((Y, X, 4), dtype=np.float32)
-        colors = lib.get_colors(images.shape[0])
-        for color, image in zip(colors, images):  # color each channel
-            bgra[:, :, 0] += color[2] * image
-            bgra[:, :, 1] += color[1] * image
-            bgra[:, :, 2] += color[0] * image
-        bgra = np.minimum(bgra, 1)
-        bgra = self.view.to_8bit(bgra)
-        bgra[:, :, 3].fill(255)  # black background
-        qimage = QtGui.QImage(
-            bgra.data, X, Y, QtGui.QImage.Format.Format_RGB32
-        ).scaled(
+        disp_px_size = (
+            self.dialog.window.display_settings_dlg.pixelsize.value()
+            / self.get_optimal_oversampling()
+        )
+        colors = lib.get_colors(len(locs))
+        _, qimage = render.render_scene(
+            locs=locs,
+            info=[self.view.infos[self.channels.currentIndex()]] * len(locs),
+            disp_px_size=disp_px_size,
+            viewport=self.viewport,
+            blur_method=blur_method,
+            ang=self.ang,
+            colors=colors,
+        )
+        qimage = qimage.scaled(
             self._size,
             self._size,
             QtCore.Qt.AspectRatioMode.KeepAspectRatioByExpanding,
@@ -3494,35 +3470,6 @@ class TestClustererView(QtWidgets.QLabel):
     def get_optimal_oversampling(self) -> float:
         height, width = render.viewport_size(self.viewport)
         return (self._size / min(height, width)) / 1.05
-
-    def scale_contrast(self, images: list[FloatArray2D]) -> list[FloatArray2D]:
-        """Find optimal contrast for images.
-
-        Parameters
-        ----------
-        images : list of np.arrays
-            Arrays with rendered localizations (grayscale).
-
-        Returns
-        -------
-        images : list of np.arrays
-            Scaled images.
-        """
-        upper = (
-            min(
-                [
-                    _.max()
-                    for _ in images  # if no locs were clustered
-                    if _.max() != 0  # the maximum value in image is 0.0
-                ]
-            )
-            / 4
-        )
-        images = images / upper
-        images[~np.isfinite(images)] = 0
-        images = np.minimum(images, 1.0)
-        images = np.maximum(images, 0.0)
-        return images
 
     def get_full_fov(self) -> list[tuple[float, float]] | None:
         """Get viewport that contains all localizations as defined
@@ -4651,11 +4598,10 @@ class MaskSettingsDialog(lib.Dialog):
     def generate_image(self) -> None:
         """Histogram loaded localizations from a given channel."""
         locs = self.locs[self.channel]
-        oversampling = self.pixelsize / self.disp_px_size.value()
         viewport = ((0, 0), (self.y_max, self.x_max))
         _, H = render.render(
             locs,
-            oversampling=oversampling,
+            disp_px_size=self.disp_px_size.value(),
             viewport=viewport,
             blur_method=None,
         )
@@ -4723,8 +4669,9 @@ class MaskSettingsDialog(lib.Dialog):
         method = self.thresh_method.currentText()
         if method == "Custom":
             self.mask_thresh.setEnabled(True)
-            mask = np.zeros(self.H_blur.shape, dtype=np.int8)
-            mask[self.H_blur > self.mask_thresh.value()] = 1
+            mask, thresh = masking.mask_image(
+                self.H_blur, self.mask_thresh.value()
+            )
         else:
             self.mask_thresh.setEnabled(False)
             method_mod = method.lower().replace(" ", "_")
@@ -4976,20 +4923,12 @@ class MaskSettingsDialog(lib.Dialog):
         # adjust contrast and convert to 8 bits
         image -= image.min()
         image /= image.max()
-        image = np.round(255 * image).astype("uint8")
+        image = render.to_8bit(image.astype(np.float32))
         # get colormap and paint the image
         cmap = self.cmap if cmap is None else cmap
-        cmap = np.uint8(np.round(255 * plt.get_cmap(cmap)(np.arange(256))))
+        image = render.apply_colormap(image, cmap)
         # create a 4 channel (rgb, alpha) array
-        Y, X = image.shape
-        bgra = np.zeros((Y, X, 4), dtype=np.uint8, order="C")
-        bgra[..., 0] = cmap[:, 2][image]
-        bgra[..., 1] = cmap[:, 1][image]
-        bgra[..., 2] = cmap[:, 0][image]
-        bgra[..., 3] = 255  # set alpha channel to fully opaque
-        qimage = QtGui.QImage(
-            bgra.data, X, Y, QtGui.QImage.Format.Format_RGB32
-        )
+        qimage = render.convert_rgb_to_qimage(image)
         qimage = qimage.scaled(
             300,
             300,
@@ -5891,6 +5830,7 @@ class DisplaySettingsDialog(lib.Dialog):
         colors = render.get_colors_from_colormap(
             n_colors, self.colormap_prop.currentText()
         )
+        # colors = render.to_8bit(colors)  # convert to 8-bit for matplotlib
 
         # plot
         bins = lib.calculate_optimal_bins(data, max_n_bins=1000)
@@ -6670,7 +6610,9 @@ class View(QtWidgets.QLabel):
             else:
                 # check the distance between the current point and the
                 # starting point of the currently drawn polygon
-                start_point = self.map_to_view(*self._picks[-1][0])
+                start_point = render.map_to_view(
+                    *self._picks[-1][0], self.size(), self.viewport
+                )
                 distance2 = (point_screen.x() - start_point[0]) ** 2 + (
                     point_screen.y() - start_point[1]
                 ) ** 2
@@ -7777,22 +7719,26 @@ class View(QtWidgets.QLabel):
         kwargs = self.get_render_kwargs()
         for i, locs in enumerate(self.all_locs):
             path = self.locs_paths[i].replace(".hdf5", suffix)
-            # render like in self.render_single_channel and
-            # self.render_scene
-            _, image = render.render(locs, **kwargs, info=self.infos[i])
-            image = self.scale_contrast(image)
-            image = self.to_8bit(image)
-            cmap = np.uint8(
-                np.round(255 * plt.get_cmap("gray")(np.arange(256)))
+            # render like in self.render_scene
+            vmin = self.window.display_settings_dlg.minimum.value()
+            vmax = self.window.display_settings_dlg.maximum.value()
+            locs_ = (
+                locs.remove_columns("group")
+                if "group" in locs.columns
+                else locs
             )
-            Y, X = image.shape
-            bgra = np.zeros((Y, X, 4), dtype=np.uint8, order="C")
-            bgra[:, :, 0] = cmap[:, 2][image]
-            bgra[:, :, 1] = cmap[:, 1][image]
-            bgra[:, :, 2] = cmap[:, 0][image]
-            bgra[:, :, 3] = 255
-            qimage = QtGui.QImage(
-                bgra.data, X, Y, QtGui.QImage.Format.Format_RGB32
+            _, qimage = render.render_scene(
+                locs_,
+                self.infos[i],
+                **kwargs,
+                viewport=self.viewport,
+                contrast=(vmin, vmax),
+                invert_colors=self.window.dataset_dialog.wbackground.isChecked(),
+                single_channel_colormap="gray",
+                relative_intensities=[
+                    self.window.dataset_dialog.intensitysettings[i].value()
+                ],
+                return_qimage=True,
             )
             # modify qimage like in self.draw_scene
             qimage = qimage.scaled(
@@ -7824,6 +7770,7 @@ class View(QtWidgets.QLabel):
             if not scalebar:
                 spath = path.replace(".png", "_scalebar.png")
                 scalebar_box.setChecked(True)
+                self.set_optimal_scalebar(force=True)
                 qimage_scale = self.draw_scalebar(qimage)
                 qimage_scale.save(spath)
                 scalebar_box.setChecked(False)
@@ -7969,8 +7916,8 @@ class View(QtWidgets.QLabel):
         Returns
         -------
         kwargs : dict
-            Contains blur method, oversampling, viewport and min blur
-            width.
+            Contains blur method, display pixel size, viewport and min
+            blur width.
         """
         # blur method
         disp_dlg = self.window.display_settings_dlg
@@ -8194,13 +8141,6 @@ class View(QtWidgets.QLabel):
         y_rel = position.y() / self.height()
         y_movie = y_rel * v_height + self.viewport[0][0]
         return x_movie, y_movie
-
-    def map_to_view(self, x: float, y: float) -> tuple[int, int]:
-        """Convert coordinates from camera units to display units."""
-        v_height, v_width = render.viewport_size(self.viewport)
-        cx = self.width() * (x - self.viewport[0][1]) / v_width
-        cy = self.height() * (y - self.viewport[0][0]) / v_height
-        return int(cx), int(cy)
 
     def max_movie_height(self) -> float:
         """Return maximum height of all loaded images."""
@@ -8465,11 +8405,7 @@ class View(QtWidgets.QLabel):
         viewport_height, viewport_width = render.viewport_size(self.viewport)
         x_move = dx * viewport_width
         y_move = dy * viewport_height
-        x_min = self.viewport[0][1] - x_move
-        x_max = self.viewport[1][1] - x_move
-        y_min = self.viewport[0][0] - y_move
-        y_max = self.viewport[1][0] - y_move
-        viewport = [(y_min, x_min), (y_max, x_max)]
+        viewport = render.shift_viewport(self.viewport, x_move, y_move)
         self.update_scene(viewport)
 
     @check_pick
@@ -9632,19 +9568,27 @@ class View(QtWidgets.QLabel):
         vmax = self.window.display_settings_dlg.maximum.value()
         contrast = None if autoscale else (vmin, vmax)
 
-        qimage, (vmin, vmax) = render.render_scene(
-            locs=locs,
-            info=infos,
-            return_qimage=False,
-            **kwargs,
-            contrast=contrast,
-            invert_colors=self.window.dataset_dialog.wbackground.isChecked(),
-            single_channel_colormap=cmap,
-            colors=self.read_colors(),
-            relative_intensities=self.read_relative_intensities(),
-            return_qimage=True,
-            return_contrast_limits=True,
-        )
+        if use_cache:
+            n_locs = self.n_locs
+            image = self.image
+        else:
+            n_locs, image, (vmin, vmax) = render.render_scene(
+                locs=locs,
+                info=infos,
+                return_qimage=False,
+                **kwargs,
+                contrast=contrast,
+                invert_colors=self.window.dataset_dialog.wbackground.isChecked(),
+                single_channel_colormap=cmap,
+                colors=self.read_colors(),
+                relative_intensities=self.read_relative_intensities(),
+                return_qimage=False,
+                return_contrast_limits=True,
+            )
+        if cache:
+            self.n_locs = n_locs
+            self.image = image
+        qimage = render.convert_rgb_to_qimage(image)
         self.window.display_settings_dlg.silent_minimum_update(vmin)
         self.window.display_settings_dlg.silent_maximum_update(vmax)
 
@@ -9699,21 +9643,20 @@ class View(QtWidgets.QLabel):
                     colors[i] = rgbval
                 else:
                     warning = (
-                        "The color selection not recognnised in the channel "
-                        " {}Please choose one of the options provided or "
-                        " type the hexadecimal code for your color of choice, "
-                        " starting with '#', e.g. '#ffcdff' for pink.".format(
-                            self.window.dataset_dialog.checks[i].text()
-                        )
+                        "The color selection not recognised in the channel "
+                        f"{self.window.dataset_dialog.checks[i].text()}. Please"
+                        " choose one of the options provided or type the "
+                        "hexadecimal code for your color of choice, "
+                        " starting with '#', e.g. '#ffcdff' for pink."
                     )
                     QtWidgets.QMessageBox.information(self, "Warning", warning)
                     break
 
-            # reverse colors if white background
-            if self.window.dataset_dialog.wbackground.isChecked():
-                tempcolor = colors[i]
-                inverted = tuple([1 - _ for _ in tempcolor])
-                colors[i] = inverted
+            # # reverse colors if white background
+            # if self.window.dataset_dialog.wbackground.isChecked():
+            #     tempcolor = colors[i]
+            #     inverted = tuple([1 - _ for _ in tempcolor])
+            #     colors[i] = inverted
 
         # use only the checked channels
         if len(self.locs) > 1:
@@ -10919,32 +10862,6 @@ class View(QtWidgets.QLabel):
             )
             self.update_cursor()
 
-    def relative_position(
-        self,
-        viewport_center: tuple[float, float],
-        cursor_position: tuple[float, float],
-    ) -> tuple[float, float]:
-        """Find the position of the cursor relative to the viewport's
-        center.
-
-        Parameters
-        ----------
-        viewport_center : tuple
-            Specifies the position of viewport's center.
-        cursor_position : tuple
-            Specifies the position of the cursor.
-
-        Returns
-        -------
-        rel_pos_x, rel_pos_y : float
-            Current cursor's position with respect to viewport's
-            center.
-        """
-        height, width = render.viewport_size(self.viewport)
-        rel_pos_x = (cursor_position[0] - viewport_center[1]) / width
-        rel_pos_y = (cursor_position[1] - viewport_center[0]) / height
-        return rel_pos_x, rel_pos_y
-
     def zoom(
         self,
         factor: float,
@@ -10961,36 +10878,9 @@ class View(QtWidgets.QLabel):
             Cursor's position on the screen. If None, zooming is
             centered around viewport's center. Default is None.
         """
-        viewport_height, viewport_width = render.viewport_size(self.viewport)
-        new_viewport_height = viewport_height * factor
-        new_viewport_width = viewport_width * factor
-
-        if cursor_position is not None:  # wheelEvent
-            old_viewport_center = render.viewport_center(self.viewport)
-            rel_pos_x, rel_pos_y = self.relative_position(
-                old_viewport_center, cursor_position
-            )  # this stays constant before and after zooming
-            new_viewport_center_x = (
-                cursor_position[0] - rel_pos_x * new_viewport_width
-            )
-            new_viewport_center_y = (
-                cursor_position[1] - rel_pos_y * new_viewport_height
-            )
-        else:
-            new_viewport_center_y, new_viewport_center_x = (
-                render.viewport_center(self.viewport)
-            )
-
-        new_viewport = [
-            (
-                new_viewport_center_y - new_viewport_height / 2,
-                new_viewport_center_x - new_viewport_width / 2,
-            ),
-            (
-                new_viewport_center_y + new_viewport_height / 2,
-                new_viewport_center_x + new_viewport_width / 2,
-            ),
-        ]
+        new_viewport = render.zoom_viewport(
+            self.viewport, factor, cursor_position
+        )
         self.update_scene(new_viewport)
 
     def zoom_in(self) -> None:
