@@ -63,6 +63,7 @@ Last change: 27-APR-2026 CEST
 - Fixed flake8 warnings (code style only)
 - `picasso.postprocess.groupprops` shows no progress by default
 - `picasso.io.TiffMultiMap` docstrings corrected
+- CLI function `nneighbor` uses KDTree for higher speed
 
 ### *Bug fixes:*
 

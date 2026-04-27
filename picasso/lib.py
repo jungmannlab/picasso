@@ -1515,9 +1515,11 @@ def _merge_locs(
     locs_list = locs_list.copy()
     for i, locs in enumerate(locs_list):
         locs["frame"] += increment_frames[i]
-        locs["group"] += increment_groups[i]
+        if "group" in locs.columns:
+            locs["group"] += increment_groups[i]
         locs_list[i] = locs
     locs = pd.concat(locs_list, ignore_index=True)
+    locs.sort_values(by="frame", inplace=True)
     return locs
 
 
