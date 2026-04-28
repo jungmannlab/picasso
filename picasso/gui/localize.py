@@ -19,7 +19,6 @@ import pkgutil
 from collections import UserDict
 from typing import Literal
 
-import yaml
 import numpy as np
 import pandas as pd
 from .. import (
@@ -3050,18 +3049,7 @@ def main():
 
     setup_gui_update_check(window)
 
-    def excepthook(type, value, tback):
-        lib.cancel_dialogs()
-        message = "".join(traceback.format_exception(type, value, tback))
-        errorbox = QtWidgets.QMessageBox.critical(
-            window,
-            "An error occured",
-            message,
-        )
-        errorbox.exec()
-        sys.__excepthook__(type, value, tback)
-
-    sys.excepthook = excepthook  # #excepthook
+    lib.install_excepthook(window)
 
     sys.exit(app.exec())
 

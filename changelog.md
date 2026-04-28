@@ -65,6 +65,7 @@ Last change: 28-APR-2026 CEST
 - `picasso.io.TiffMultiMap` docstrings corrected
 - CLI function `nneighbor` uses KDTree for higher speed
 - Simulate (multilabel) saves label names as in "Exchange rounds to be simulated" rather than 0, 1, 2, ...
+- Improved exception printing in GUI, robust against QThread-related issues, e.g., errors in Localize are now available to read
 
 ### *Bug fixes:*
 

@@ -709,6 +709,32 @@ def cancel_dialogs():
     QtCore.QCoreApplication.instance().processEvents()  # just in case...
 
 
+def install_excepthook(window) -> None:
+    """Install a thread-safe excepthook that shows uncaught exceptions in a
+    QMessageBox. Safe to call from QThread workers because the error signal is
+    queued to the main thread by Qt's event loop."""
+    import sys
+    import traceback
+
+    class _ErrorSignaler(QtCore.QObject):
+        error = QtCore.pyqtSignal(str)
+
+    signaler = _ErrorSignaler()
+
+    def _show_error(message: str) -> None:
+        cancel_dialogs()
+        QtWidgets.QMessageBox.critical(window, "An error occurred", message)
+
+    signaler.error.connect(_show_error)
+
+    def excepthook(type, value, tback):
+        sys.__excepthook__(type, value, tback)
+        message = "".join(traceback.format_exception(type, value, tback))
+        signaler.error.emit(message)
+
+    sys.excepthook = excepthook
+
+
 def get_sound_notification_path() -> str | None:
     """Return the path to the sound notification file from the user
     settings file. If the file is not found or not specified, return
