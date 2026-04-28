@@ -526,6 +526,7 @@ class AnimationDialog(lib.Dialog):
             progress = lib.ProgressDialog(
                 "Rendering frames", 0, n_frames, self.window
             )
+            adjust_display_pixel = disp_dlg.dynamic_disp_px.isChecked()
             render.build_animation(
                 path,
                 locs,
@@ -543,10 +544,11 @@ class AnimationDialog(lib.Dialog):
                 min_blur_width=disp_dlg.min_blur_width.value() / pixelsize,
                 contrast=(disp_dlg.minimum.value(), disp_dlg.maximum.value()),
                 invert_colors=data_dlg.wbackground.isChecked(),
-                single_channel_colormap=disp_dlg.colormap.currentText(),  # TODO: what if custom?
+                single_channel_colormap=disp_dlg.colormap.currentText(),
                 colors=self.window.view.read_colors(),
                 relative_intensities=self.window.view.read_relative_intensities(),
                 fps=self.fps.value(),
+                adjust_pixel_size=adjust_display_pixel,
                 progress_callback=progress.set_value,
             )
             progress.close()
@@ -759,6 +761,7 @@ class ViewRotation(QtWidgets.QLabel):
         locs, infos = self._prepare_locs_for_rendering()
         vmin = self.window.display_settings_dlg.minimum.value()
         vmax = self.window.display_settings_dlg.maximum.value()
+        cmap = self.window.display_settings_dlg.colormap.currentText()
         contrast = None if autoscale else (vmin, vmax)
         _, qimage, (vmin, vmax) = render.render_scene(
             locs=locs,
@@ -768,7 +771,7 @@ class ViewRotation(QtWidgets.QLabel):
             ang=(self.angx, self.angy, self.angz),
             contrast=contrast,
             invert_colors=self.window.dataset_dialog.wbackground.isChecked(),
-            single_channel_colormap=self.window.display_settings_dlg.colormap.currentText(),  # TODO: what if custom?
+            single_channel_colormap=cmap,
             colors=self.read_colors(),
             relative_intensities=self.read_relative_intensities(),
             return_qimage=True,

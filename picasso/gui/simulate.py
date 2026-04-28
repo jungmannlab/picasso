@@ -2234,7 +2234,6 @@ class Window(QtWidgets.QMainWindow):
                     photonsmu, photonsstd = norm.fit(photons)
                     ax1 = figure3.add_subplot(131)
                     ax1.cla()
-                    # ax1.hold(True) # TODO: Investigate again what this causes
                     ax1.hist(photons, bins=25, normed=True, alpha=0.6)
                     xmin, xmax = plt.xlim()
                     x = np.linspace(xmin, xmax, 100)

@@ -59,7 +59,8 @@ def mask_locs(
         lib.deprecation_warning(
             "Deprecation warning: 'width' and 'height' are deprecated "
             "parameters in 'mask_locs'. Please provide 'info' see "
-            "``io.load_locs``.",
+            "``io.load_locs``. The arguments 'width' and 'height' will "
+            "be removed in v0.11.0.",
         )
     elif info is not None:
         width = lib.get_from_metadata(info, "Width")

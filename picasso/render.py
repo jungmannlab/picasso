@@ -3012,10 +3012,8 @@ def build_animation(
     locs: pd.DataFrame | list[pd.DataFrame],
     info: list[dict] | list[list[dict]],
     *,
-    positions: list[
-        list[float, float, float, tuple]
-    ],  # TODO: add a nice docstring!
-    durations: list[float],  # TODO: add a nice docstring!
+    positions: list[tuple[float, float, float, tuple]],
+    durations: list[float],
     disp_px_size: int | float,  # nm
     image_size: tuple[int, int],
     blur_method: (
@@ -3028,6 +3026,7 @@ def build_animation(
     colors: list | None = None,
     relative_intensities: list[float] | None = None,
     fps: int = 30,
+    adjust_pixel_size: bool = True,
     progress_callback: (
         Callable[[int], None] | Literal["console"] | None
     ) = None,
@@ -3046,12 +3045,17 @@ def build_animation(
         List of info dictionaries corresponding to the localization
         file(s).
     disp_px_size : int or float
-        Display pixel size in nm.
+        Display pixel size in nm. If 'adjust_pixel_size' is True,
+        disp_px_size defines the pixel size in the last frame of the
+        animation and will be adjusted if the viewport is zoomed in or
+        out such that the number of display pixels remains the same.
+        If 'adjust_pixel_size' is False, disp_px_size remains the same
+        across the animation
     image_size : tuple of int
         Size of the rendered image in pixels, given as (width, height).
     positions : list
         Each element determines the checkpoint of the animation, which
-        is a list of 4 elements: [angle_x, angle_y, angle_z, viewport].
+        is a tuple of 4 elements: (angle_x, angle_y, angle_z, viewport).
         Angles are in radians. Viewport is given as ((y_min, x_min), 
         (y_max, x_max)) in camera pixels.
     durations : list
@@ -3071,7 +3075,9 @@ def build_animation(
         Minimum size of blur (camera pixels).
     contrast : tuple of float, optional
         Contrast limits for scaling. If None, contrast is automatically
-        determined.
+        determined. If given, only the last checkpoint is used to
+        determine the contrast limits and the limits will be adjusted
+        if the viewport is zoomed in or out.
     invert_colors : bool, optional
         If True, invert colors of the rendered image. Default is False.
     single_channel_colormap : str | lib.FloatArray2D, optional
@@ -3089,15 +3095,150 @@ def build_animation(
         case all channels are rendered with the same intensity.
     fps : int, optional
         Frames per second of the animation. Default is 30.
+    adjust_pixel_size : bool, optional
+        If True, adjust disp_px_size on the go such that the number of
+        display pixels remains the same if the viewport is zoomed in or
+        out. If False, disp_px_size remains the same across the
+        animation.
     progress_callback : callable, "console", or None, optional
         If a callable, it is called with the current frame number as an
         argument after each frame is rendered. If "console", a progress
         bar is printed to the console. If None, no progress is reported.
         Default is None.
     """
-    # TODO: asserts
-    # TODO: how to deal with zooming in and out? contrast needs ot be adjusted on the go!!!!
-    # TODO: same with disp px size?????
+    assert isinstance(path, str) and path.endswith(
+        ".mp4"
+    ), "path must be a string ending with '.mp4'."
+    assert isinstance(
+        locs, (pd.DataFrame, list)
+    ), "locs must be a pd.DataFrame or a list of pd.DataFrames."
+    if isinstance(locs, list):
+        assert all(
+            isinstance(l, pd.DataFrame) for l in locs
+        ), "All elements of locs must be pd.DataFrames."
+        assert len(locs) >= 1, "locs must contain at least one DataFrame."
+    assert (
+        isinstance(info, list) and len(info) >= 1
+    ), "info must be a non-empty list."
+    assert (
+        isinstance(positions, list) and len(positions) >= 2
+    ), "positions must be a list with at least 2 elements."
+    assert all(len(p) == 4 for p in positions), (
+        "Each position must be a tuple/list of 4 elements: "
+        "(angle_x, angle_y, angle_z, viewport)."
+    )
+    assert (
+        isinstance(durations, list) and len(durations) == len(positions) - 1
+    ), "durations must be a list of length len(positions) - 1."
+    assert all(d > 0 for d in durations), "All durations must be positive."
+    assert (
+        isinstance(disp_px_size, (int, float)) and disp_px_size > 0
+    ), "disp_px_size must be a positive number."
+    assert (
+        isinstance(image_size, (tuple, list))
+        and len(image_size) == 2
+        and all(isinstance(s, int) and s > 0 for s in image_size)
+    ), "image_size must be a tuple of two positive integers (width, height)."
+    assert blur_method in (
+        "gaussian",
+        "gaussian_iso",
+        "smooth",
+        "convolve",
+        None,
+    ), (
+        "blur_method must be one of 'gaussian', 'gaussian_iso', 'smooth', "
+        "'convolve', or None."
+    )
+    assert (
+        isinstance(min_blur_width, (int, float)) and min_blur_width >= 0
+    ), "min_blur_width must be a non-negative number."
+    if contrast is not None:
+        assert (
+            isinstance(contrast, (tuple, list))
+            and len(contrast) == 2
+            and contrast[0] < contrast[1]
+        ), "contrast must be a tuple (vmin, vmax) with vmin < vmax."
+    assert isinstance(invert_colors, bool), "invert_colors must be a bool."
+    if not isinstance(single_channel_colormap, str):
+        assert (
+            hasattr(single_channel_colormap, "shape")
+            and single_channel_colormap.ndim == 2
+            and single_channel_colormap.shape[0] == 256
+            and single_channel_colormap.shape[1] in (3, 4)
+        ), (
+            "single_channel_colormap must be a str or a 256x3 / 256x4 "
+            "float array with values between 0 and 1."
+        )
+    if colors is not None:
+        n_channels = len(locs) if isinstance(locs, list) else 1
+        assert (
+            len(colors) == n_channels
+        ), "colors must have one entry per channel."
+        assert all(
+            len(c) == 3 and all(0.0 <= v <= 1.0 for v in c) for c in colors
+        ), "Each color must be an RGB tuple with values between 0 and 1."
+    if relative_intensities is not None:
+        n_channels = len(locs) if isinstance(locs, list) else 1
+        assert (
+            len(relative_intensities) == n_channels
+        ), "relative_intensities must have one entry per channel."
+        assert all(
+            v >= 0 for v in relative_intensities
+        ), "All relative_intensities must be non-negative."
+    assert isinstance(fps, int) and fps > 0, "fps must be a positive integer."
+    assert isinstance(
+        adjust_pixel_size, bool
+    ), "adjust_pixel_size must be a bool."
+    assert (
+        progress_callback is None
+        or progress_callback == "console"
+        or callable(progress_callback)
+    ), "progress_callback must be None, 'console', or a callable."
+
+    _build_animation(
+        path=path,
+        locs=locs,
+        info=info,
+        positions=positions,
+        durations=durations,
+        disp_px_size=disp_px_size,
+        image_size=image_size,
+        blur_method=blur_method,
+        min_blur_width=min_blur_width,
+        contrast=contrast,
+        invert_colors=invert_colors,
+        single_channel_colormap=single_channel_colormap,
+        colors=colors,
+        relative_intensities=relative_intensities,
+        fps=fps,
+        adjust_pixel_size=adjust_pixel_size,
+        progress_callback=progress_callback,
+    )
+
+
+def _build_animation(
+    path: str,
+    locs: pd.DataFrame | list[pd.DataFrame],
+    info: list[dict] | list[list[dict]],
+    positions: list[tuple[float, float, float, tuple]],
+    durations: list[float],
+    disp_px_size: int | float,
+    image_size: tuple[int, int],
+    blur_method: (
+        Literal["gaussian", "gaussian_iso", "smooth", "convolve"] | None
+    ),
+    min_blur_width: float,
+    contrast: tuple[float, float] | None,
+    invert_colors: bool,
+    single_channel_colormap: str | lib.FloatArray2D,
+    colors: list | None,
+    relative_intensities: list[float] | None,
+    fps: int,
+    adjust_pixel_size: bool,
+    progress_callback: Callable[[int], None] | Literal["console"] | None,
+) -> None:
+    """Internal function to build an animation of rendered localizations
+    given the checkpoints. See ``build_animation`` for more details."""
     angles, viewports = _animation_sequence(positions, durations, fps)
 
     # width and height for building the animation; must be even
@@ -3120,15 +3261,21 @@ def build_animation(
         if callable(progress_callback):
             progress_callback(i)
 
+        disp_px_size_ = (
+            _adjust_disp_px_size(disp_px_size, viewports[-1], viewports[i])
+            if adjust_pixel_size
+            else disp_px_size
+        )
+        contrast_ = _adjust_contrast(contrast, viewports[-1], viewports[i])
         _, qimage = render_scene(
             locs=locs,
             info=info,
-            disp_px_size=disp_px_size,
+            disp_px_size=disp_px_size_,
             viewport=viewports[i],
             ang=angles[i],
             blur_method=blur_method,
             min_blur_width=min_blur_width,
-            contrast=contrast,
+            contrast=contrast_,
             invert_colors=invert_colors,
             single_channel_colormap=single_channel_colormap,
             colors=colors,
@@ -3149,12 +3296,61 @@ def build_animation(
         progress_callback(len(angles))
     video_writer.close()
 
-    # save a yaml with animation settings
+    # save a yaml with animation settings, note that yaml does not support
+    # numpy types and arrays
+    angles_yaml = [
+        (
+            float(np.degrees(p[0])),
+            float(np.degrees(p[1])),
+            float(np.degrees(p[2])),
+        )
+        for p in positions
+    ]
+    viewports_yaml = [
+        (
+            (float(p[3][0][0]), float(p[3][0][1])),
+            (float(p[3][1][0]), float(p[3][1][1])),
+        )
+        for p in positions
+    ]
     anim_settings = {
         "Generated by": f"Picasso v{__version__} Render 3D Animation",
         "FPS": fps,
-        # "Rotation speed (deg/s)": self.rot_speed.value(),
-        # "Angles (x, y, z) (deg)": positions_,  # TODO: find a good way to save animation metadata
+        "Angles at checkpoints (x, y, z) (deg)": angles_yaml,
+        "Viewports at checkpoints (camera pixels)": viewports_yaml,
         "Durations (s)": durations,
     }
     io.save_info(path.replace(".mp4", ".yaml"), [anim_settings])
+
+
+def _adjust_disp_px_size(
+    disp_px_size_ref: float,
+    viewport_ref: tuple[tuple[float, float], tuple[float, float]],
+    new_viewport: tuple[tuple[float, float], tuple[float, float]],
+) -> float:
+    """Adjust display pixel size based on the change in viewport to keep
+    the number of display pixels the same."""
+    ref_width = viewport_width(viewport_ref)
+    new_width = viewport_width(new_viewport)
+    # below could be ref_height / new_height, should be the same since
+    # we assume the shape of the viewport stays the same
+    zoom_factor = ref_width / new_width
+    return disp_px_size_ref * zoom_factor
+
+
+def _adjust_contrast(
+    contrast_ref: tuple[float, float] | None,
+    viewport_ref: tuple[tuple[float, float], tuple[float, float]],
+    new_viewport: tuple[tuple[float, float], tuple[float, float]],
+) -> tuple[float, float] | None:
+    """Adjust contrast limits based on the change in viewport to keep the
+    same contrast across zoom levels."""
+    if contrast_ref is None:
+        return None
+    ref_width = viewport_width(viewport_ref)
+    new_width = viewport_width(new_viewport)
+    zoom_factor = ref_width / new_width
+    vmin_ref, vmax_ref = contrast_ref
+    vmin_new = vmin_ref * zoom_factor**2
+    vmax_new = vmax_ref * zoom_factor**2
+    return vmin_new, vmax_new

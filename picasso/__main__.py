@@ -986,7 +986,7 @@ def _localize_load_3d_calibration(
         ``(zpath, magnification_factor, z_calibration)``
     """
     import os
-    import yaml
+    from .io import load_calibration
 
     print("------------------------------------------")
     print("Fitting 3D")
@@ -1006,8 +1006,7 @@ def _localize_load_3d_calibration(
         magnification_factor = args.mf
 
     try:
-        with open(zpath, "r") as f:
-            z_calibration = yaml.full_load(f)
+        z_calibration = load_calibration(zpath)
     except Exception as e:
         print(e)
         print("Error loading calibration file.")
@@ -1149,19 +1148,18 @@ def _localize_process_file(  # noqa: C901
         from . import zfit
 
         zpath, magnification_factor, z_calibration = z_params
+        z_calibration["Magnification Factor"] = magnification_factor
         print("------------------------------------------")
         print("Fitting 3D...", end="")
-        fs = zfit._fit_z_parallel(  # TODO: use zfit.zfit instead
+        locs, z_info = zfit.zfit(
             locs,
             info,
-            z_calibration,
-            magnification_factor,
-            px,
+            calibration=z_calibration,
             fitting_method="gausslq",
             filter=0,
-            asynch=True,
+            multiprocess=True,
+            progress_callback="console",
         )
-        locs = zfit.locs_from_futures(fs, filter=0)
         localize_info["Z Calibration Path"] = zpath
         localize_info["Z Calibration"] = z_calibration
         print("complete.")
