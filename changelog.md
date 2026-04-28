@@ -64,6 +64,7 @@ Last change: 28-APR-2026 CEST
 - `picasso.postprocess.groupprops` shows no progress by default
 - `picasso.io.TiffMultiMap` docstrings corrected
 - CLI function `nneighbor` uses KDTree for higher speed
+- Simulate (multilabel) saves label names as in "Exchange rounds to be simulated" rather than 0, 1, 2, ...
 
 ### *Bug fixes:*
 

@@ -149,10 +149,10 @@ class Window(QtWidgets.QMainWindow):
         Spin boxes for the coefficients of the background equation used
         for advanced noise modeling. See ``changeNoise`` for more
         details.
-    exchangeroundsEdit : QtWidgets.QSpinBox
-        Spin box for controlling the number of exchange rounds to be
+    exchangeroundsEdit : QtWidgets.QLineEdit
+        Line edit for controlling the number of exchange rounds to be
         simulated.
-    exportkinetics : QtWidgets.QCheckbox
+    exportkinetics : QtWidgets.QCheckBox
         Save binding kinetics information to a .yaml file.
     figure1, figure2 : plt.Figure
         Figures for displaying the simulated ROI and designed structure,
@@ -328,6 +328,7 @@ class Window(QtWidgets.QMainWindow):
         self.camerasizeEdit.valueChanged.connect(self.generatePositions)
 
         self.pixelsizeEdit.valueChanged.connect(self.changeStructDefinition)
+        self.pixelsizeEdit.valueChanged.connect(self.changePSF)
 
         cgrid.addWidget(camerasize, 1, 0)
         cgrid.addWidget(self.camerasizeEdit, 1, 1)
@@ -731,7 +732,7 @@ class Window(QtWidgets.QMainWindow):
         self.structure3 = QtWidgets.QLabel("Spacing X,Y")
         self.structure3Label = QtWidgets.QLabel("nm")
 
-        structurexx = QtWidgets.QLabel("Stucture X")
+        structurexx = QtWidgets.QLabel("Structure X")
         structurexx.setToolTip(
             "X positions of docking strands in the structure in nm."
         )
@@ -1568,7 +1569,7 @@ class Window(QtWidgets.QMainWindow):
         for i in range(noexchangecolors):
             if noexchangecolors > 1:
                 base, ext = os.path.splitext(fileNameOld)
-                fileName = f"{base}_{i}{ext}"
+                fileName = f"{base}_{exchangecolors[i]}{ext}"
                 partstruct = struct[:, struct[2, :] == exchangecolors[i]]
             elif self.concatExchangeEdit.isChecked():
                 fileName = fileNameOld
@@ -1677,8 +1678,8 @@ class Window(QtWidgets.QMainWindow):
             try:
                 self.structure3DEdit.setText(info[0]["Structure.Structure3D"])
                 self.mode3DEdit.setChecked(info[0]["Structure.3D"])
-                self.cx(info[0]["Structure.CX"])
-                self.cy(info[0]["Structure.CY"])
+                self.cx = info[0]["Structure.CX"]
+                self.cy = info[0]["Structure.CY"]
             except Exception as e:
                 print(e)
                 pass
@@ -1720,6 +1721,7 @@ class Window(QtWidgets.QMainWindow):
             self.photonslopeEdit.setValue(info[0]["Imager.Photonslope"])
             self.photonslopeStdEdit.setValue(info[0]["Imager.PhotonslopeStd"])
 
+            self.structurecombo.setCurrentIndex(2)
             self.camerasizeEdit.setValue(info[0]["Camera.Image Size"])
             self.integrationtimeEdit.setValue(
                 info[0]["Camera.Integration Time"]
@@ -1761,7 +1763,6 @@ class Window(QtWidgets.QMainWindow):
                 [handlexx, handleyy, handleex, handless, handle3d]
             )
 
-            self.structurecombo.setCurrentIndex(2)
             self.newstruct = structure
             self.plotPositions()
             self.statusBar().showMessage("Settings loaded from: " + path)

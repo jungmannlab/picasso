@@ -1405,11 +1405,6 @@ class Window(QtWidgets.QMainWindow):
             "Ready."
         )  # . . Sequences loaded from " + BaseSequencesFile + ".")
         self.user_settings_dialog = lib.UserSettingsDialog(self)
-        file_menu = self.menuBar().addMenu("File")
-        picasso_settings_action = file_menu.addAction("Picasso settings")
-        picasso_settings_action.triggered.connect(
-            self.user_settings_dialog.show
-        )
 
     def openDialog(self) -> None:
         """Open a dialog to select a design file."""
@@ -1792,6 +1787,11 @@ class MainWindow(QtWidgets.QWidget):
         self.setPalette(palette)
 
         menu_bar = QtWidgets.QMenuBar(self)
+        file_menu = menu_bar.addMenu("File")
+        picasso_settings_action = file_menu.addAction("Picasso settings")
+        picasso_settings_action.triggered.connect(
+            self.window.user_settings_dialog.show
+        )
         self.plugin_menu = menu_bar.addMenu("Plugins")  # do not delete
 
 
