@@ -445,8 +445,6 @@ def zfit(
     info: list[dict],
     *,
     calibration: dict,
-    cx: lib.FloatArray1D | None = None,
-    cy: lib.FloatArray1D | None = None,
     magnification_factor: float | None = None,
     pixelsize: int | float | None = None,
     fitting_method: Literal["gausslq", "gaussmle"] = "gausslq",
@@ -470,10 +468,8 @@ def zfit(
         Localizations metadata. Should include a "Pixelsize" key with
         the effective camera pixel size in nm. If not, must be provided
         as an argument (see below).
-    calibration : path or dict
-        Either a path to a YAML file containing the calibration data or
-        an already loaded calibration dictionary containing the
-        following keys:
+    calibration : dict
+        Calibration dictionary containing the following keys:
 
         - "X Coefficients": list of 7 floats, polynomial coefficients
             for the x-axis calibration curve;
@@ -484,24 +480,17 @@ def zfit(
             the calibration sample and the estimated z position from the
             localization data.
 
-        If any of the above is not defined, the user can also provide
-        them as separate arguments (see below). If both `calibration`
-        and the separate arguments are provided, the separate arguments
-        will take precedence over the values in the calibration
-        dictionary.
-    cx, cy : lib.FloatArray1D, optional
-        Calibration coefficients (6th order polynomial) for x and y
-        encoding the single-emitter image's width and height as a
-        function of the z position. If None, the values must be given
-        in `calibration`.
+        Note that "Magnification factor" can be overwritten by the
+        `magnification_factor` argument. See ``io.load_calibration``
+        on how to open a calibration YAML file.
     magnification_factor : float, optional
         Magnification factor of the microscope, i.e., the ratio between
         the actual z position of the calibration sample and the
         estimated z position from the localization data. If None, the
         value must be given in `calibration`.
     pixelsize : float, optional
-        Camera pixel size in nm. If None, the value must be given in
-        `info`.
+        Camera pixel size in nm. If given, the value in `info` will be
+        ignored. If None, the value must be given in `info`.
     fitting_method : {"gausslq", "gaussmle"}, optional
         Fitting method used to obtain 2D localization parameters. Used
         to determine axial localization precision. Default is "gausslq".
@@ -534,37 +523,29 @@ def zfit(
     assert fitting_method in ["gausslq", "gaussmle"], "Invalid fitting method."
     assert filter >= 0, "Filter must be non-negative."
     assert isinstance(
-        calibration, (dict, str)
-    ), "Calibration must be a dict or a path to a YAML file."
-    # load calibration if needed
-    if isinstance(calibration, str):
-        with open(calibration, "r") as f:
-            calibration = yaml.safe_load(f)
-    # build the calibration dictionary as needed and see if anything is
-    # missing
-    cx_ = calibration.get("X Coefficients", cx)
-    if cx_ is None:
-        raise ValueError("Calibration coefficients for x (cx) are missing.")
-    calibration["X Coefficients"] = cx_
-    cy_ = calibration.get("Y Coefficients", cy)
-    if cy_ is None:
-        raise ValueError("Calibration coefficients for y (cy) are missing.")
-    calibration["Y Coefficients"] = cy_
-    magnification_factor_ = calibration.get(
-        "Magnification factor", magnification_factor
-    )
-    if magnification_factor_ is None:
-        raise ValueError("Magnification factor is missing.")
-    calibration["Magnification factor"] = magnification_factor_
-    pixelsize_ = lib.get_from_metadata(info, "Pixelsize")
-    if pixelsize_ is None:
-        pixelsize_ = pixelsize
-        if pixelsize_ is None:
-            raise ValueError(
-                "Camera pixel size (nm) is missing. Enter it either in the "
-                "info metadata, or as an argument."
-            )
-    info.append([{"Pixelsize": pixelsize_}])
+        calibration,
+        dict,
+    ), "Calibration must be a dict, see ``io.load_calibration``."
+    if magnification_factor is not None:
+        assert isinstance(
+            magnification_factor, (int, float)
+        ), "Magnification factor must be a number."
+        calibration["Magnification factor"] = float(magnification_factor)
+    else:
+        assert (
+            "Magnification factor" in calibration
+        ), "Magnification factor is missing in calibration."
+    if pixelsize is not None:
+        assert isinstance(
+            pixelsize, (int, float)
+        ), "Pixelsize must be a number in nm."
+        pixelsize = float(pixelsize)
+        info.append({"Pixelsize": pixelsize})
+    else:
+        assert lib.get_from_metadata(info, "Pixelsize") is not None, (
+            "Camera pixel size (nm) is missing. Enter it either in the "
+            "info metadata, or as an argument."
+        )
 
     return _zfit(
         locs,

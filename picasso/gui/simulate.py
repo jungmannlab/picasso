@@ -2516,7 +2516,7 @@ class CalibrationDialog(lib.Dialog):
             "Select Directory",
         )
         if self.path:
-            self.tifCounter = len(_glob.glob1(self.path, "*.tif"))
+            self.tifCounter = len(_glob.glob(self.path, "*.tif"))
             self.tifFiles = _glob.glob(os.path.join(self.path, "*.tif"))
 
             self.table.setRowCount(int(self.tifCounter))

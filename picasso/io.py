@@ -1712,10 +1712,20 @@ def to_raw(path: str, verbose: bool = True) -> None:
 
 
 def save_datasets(path: str, info: dict, **kwargs) -> None:
-    """Save multiple datasets to an HDF5 file at the specified path."""
-    # for key, val in kwargs.items():
-    #     val.to_hdf(path, key=key, mode="a")
-    # cannot use to_hdf for backward compatibility with older Picasso
+    """Save multiple datasets to an HDF5 file at the specified path.
+
+    Parameters
+    ----------
+    path : str
+        The file path where the datasets will be saved.
+    info : dict
+        Metadata information to be saved alongside the datasets.
+    **kwargs
+        Arbitrary keyword arguments where each key is the name of a
+        dataset and each value is a pandas DataFrame containing the data
+        to be saved.
+    """
+    # cannot use df.to_hdf for backward compatibility with older Picasso
     with h5py.File(path, "w") as locs_file:
         for key, val in kwargs.items():
             rec_locs = val.to_records(index=False)

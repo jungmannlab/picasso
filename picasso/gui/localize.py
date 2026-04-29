@@ -13,7 +13,6 @@ from __future__ import annotations
 import os.path
 import sys
 import time
-import traceback
 import importlib
 import pkgutil
 from collections import UserDict
@@ -21,6 +20,7 @@ from typing import Literal
 
 import numpy as np
 import pandas as pd
+import imageio
 from .. import (
     aim,
     CONFIG,
@@ -1962,8 +1962,8 @@ class Window(QtWidgets.QMainWindow):
                 QtWidgets.QMessageBox.warning(
                     self,
                     "Could not load drift file",
-                    f"Drift file could not be loaded, error: {e}. No drift "
-                    "correction will be applied.",
+                    f"Drift file could not be loaded, error: {e}\n."
+                    "No drift correction will be applied.",
                 )
                 drift = None
         picks, shape, _ = io.load_picks(path)
@@ -2000,11 +2000,12 @@ class Window(QtWidgets.QMainWindow):
         identifications."""
         try:
             locs, _ = io.load_locs(path)
-            n_frames, ok = QtWidgets.QInputDialog.getInteger(
+            n_frames, ok = QtWidgets.QInputDialog.getInt(
                 self,
                 "Input Dialog",
                 "Enter number of frames around localization event:",
-                100,
+                10,
+                min=0,
             )
             if not ok:
                 return
@@ -2012,12 +2013,14 @@ class Window(QtWidgets.QMainWindow):
             return
 
         self.identifications = localize.locs_to_identifications(
-            locs, self.info, n_frames
+            locs=locs,
+            movie_info=self.info,
+            n_frames=n_frames,
         )
         self._clean_up_external_ids()
 
     def _clean_up_external_ids(self) -> None:
-        if not self.identifications:
+        if self.identifications is None:
             return
         # remove all identifications that are oob
         box = self.parameters["Box Size"]
@@ -2682,19 +2685,35 @@ class Window(QtWidgets.QMainWindow):
 
     def save_spots(self, path: str) -> None:
         """Save identified spots as an .hdf5 file."""
+        if self.identifications is None:
+            message = (
+                "No identifications to save. Please run identification first."
+            )
+            QtWidgets.QMessageBox.warning(self, "No identifications", message)
+            return
         box = self.parameters["Box Size"]
         spots = localize.get_spots(
             self.movie, self.identifications, box, self.camera_info
         )
-        io.save_datasets(path, self.info, spots=spots)
+        info = self.info + [self.last_identification_info | self.camera_info]
+        if path.endswith(".npy"):
+            np.save(path, spots)
+            io.save_info(path.replace(".npy", ".yaml"), info)
+        elif path.endswith(".tif"):
+            imageio.mimwrite(path, spots.astype("float32"))
+            io.save_info(path.replace(".tif", ".yaml"), info)
 
     def save_spots_dialog(self) -> None:
         """Get the path for saving identified spots."""
         if self.movie_path != []:
             base, ext = os.path.splitext(self.movie_path)
-            path = base + "_spots.hdf5"
+            path = base + "_spots.tif"
             path, exe = lib.get_save_filename_ext_dialog(
-                self, "Save spots", path, filter="*.hdf5", check_ext=".yaml"
+                self,
+                "Save spots",
+                path,
+                filter="*.tif;;*.npy",
+                check_ext=".yaml",
             )
             if path:
                 self.save_spots(path)
@@ -2879,14 +2898,14 @@ class FitWorker(QtCore.QThread):
         # as well when saving localizations
         locs, info = localize.fit2D(
             movie=self.movie,
-            info=self.movie_info,
+            movie_info=self.movie_info,
             camera_info=self.camera_info,
             identifications=self.identifications,
             box=self.box,
             fitting_method=self.method,
             eps=self.eps,
             max_it=self.max_it,
-            method="sigmaxy",
+            mle_method="sigmaxy",
             multiprocess=True,
             progress_callback=self.on_progress,
             abort_callback=self.isInterruptionRequested,

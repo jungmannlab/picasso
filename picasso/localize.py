@@ -642,8 +642,9 @@ def identify(
 
 def picks_to_identifications(
     picks: list[tuple],
+    *,
     n_frames: int | None = None,
-    drift: lib.FloatArray2D | None = None,
+    drift: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
     """Convert circular picks (from Picasso: Render) to identifications.
     Only circular picks are allowed.
@@ -657,10 +658,11 @@ def picks_to_identifications(
         Number of frames in the acquisition movie. If None is given,
         it will be extracted from the drift file (if provided).
         Otherwise, an error is raised.
-    drift : lib.FloatArray2D or None, optional
-        An array of shape (n_frames, 2) or (n_frames, 3). Used to adjust
-        the positions of identifications throughout acquisition. Only
-        x and y drift is used.
+    drift : pd.DataFrame or None, optional
+        A data frame of length n_frames and with columns 'x' and 'y'.
+        Used to adjust the positions of identifications throughout
+        acquisition. Only x and y drift is used; if 'z' is present, it
+        is ignored.
 
     Returns
     -------
@@ -679,8 +681,10 @@ def picks_to_identifications(
         "Circular picks are required. Each element in 'picks' must "
         "contain two numbers (x and y coordinates)."
     )
-    if isinstance(drift, np.ndarray):
-        assert drift.ndim == 2, "The provided drift must be a 2D numpy array"
+    if isinstance(drift, pd.DataFrame):
+        assert all(
+            col in drift.columns for col in ["x", "y"]
+        ), "Drift data frame must contain 'x' and 'y' columns."
     if n_frames is None:
         if drift is None:
             raise ValueError(
@@ -701,7 +705,7 @@ def picks_to_identifications(
 def _picks_to_identifications(
     picks: list[tuple],
     n_frames: int,
-    drift: lib.FloatArray2D | None,
+    drift: pd.DataFrame | None,
 ) -> pd.DataFrame:
     """Convert circular picks to identifications, can be drift-corrected.
     Assumes correct inputs. See ``picks_to_identifications`` for more
@@ -713,8 +717,8 @@ def _picks_to_identifications(
         xloc = np.ones((n_frames,), dtype=float) * pick_x
         yloc = np.ones((n_frames,), dtype=float) * pick_y
         if drift is not None:
-            xloc += drift[:, 1]
-            yloc += drift[:, 0]
+            xloc += drift["x"].to_numpy()
+            yloc += drift["y"].to_numpy()
 
         frames = np.arange(n_frames)
         gradient = np.ones(n_frames) + 100
@@ -743,7 +747,7 @@ def _picks_to_identifications(
 
 def locs_to_identifications(
     locs: pd.DataFrame,
-    info: list[dict],
+    movie_info: list[dict],
     n_frames: int,
 ) -> pd.DataFrame:
     """Convert localizations to identifications.
@@ -752,7 +756,7 @@ def locs_to_identifications(
     ----------
     locs : pd.DataFrame
         Localizations.
-    info : list of dicts
+    movie_info : list of dicts
         Movie file metadata.
     n_frames : int
         Number of frames around localizations that are to be used for
@@ -771,10 +775,10 @@ def locs_to_identifications(
     assert (
         isinstance(n_frames, int) and n_frames >= 0
     ), "n_frames must be a non-negative integer"
-    max_frames = lib.get_from_metadata(info, "Frames", raise_error=True)
+    max_frames = lib.get_from_metadata(movie_info, "Frames", raise_error=True)
     data = []
     n_id = 0
-    for element in locs:
+    for _, element in locs.iterrows():
         currframe = element["frame"]
         if currframe > n_frames and currframe < (max_frames - n_frames):
             xloc = np.ones((2 * n_frames + 1,), dtype=float) * element["x"]
@@ -1285,8 +1289,8 @@ def fit2D(
         New metadata.
     """
     assert isinstance(
-        movie, (np.ndarray, io.ND2Movie)
-    ), "movie must be a numpy array or ND2Movie"
+        movie, (io.AbstractPicassoMovie)
+    ), "movie must be a movie loaded by picasso.io.load_movie"
     assert isinstance(movie_info, list), "movie_info must be a list"
     assert isinstance(camera_info, dict), "camera_info must be a dict"
     assert isinstance(
@@ -1343,7 +1347,6 @@ def fit2D(
             spots,
             identifications,
             box,
-            em,
             eps,
             max_it,
             mle_method,

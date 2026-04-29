@@ -1,6 +1,6 @@
 # Changelog
 
-Last change: 28-APR-2026 CEST
+Last change: 29-APR-2026 CEST
 
 ## 0.10.0
 
@@ -66,6 +66,8 @@ Last change: 28-APR-2026 CEST
 - CLI function `nneighbor` uses KDTree for higher speed
 - Simulate (multilabel) saves label names as in "Exchange rounds to be simulated" rather than 0, 1, 2, ...
 - Improved exception printing in GUI, robust against QThread-related issues, e.g., errors in Localize are now available to read
+- Localize: documentation updated relating to the file menu features, such as loading picks as identifications
+- Localize: save spots as .tif, .npy, not .hdf5
 
 ### *Bug fixes:*
 
@@ -74,6 +76,7 @@ Last change: 28-APR-2026 CEST
 - Fixed zero-value in rendered images (previously RGB channels were capped between 1 and 255 instead of 0 and 255)
 - Fixed ToRaw
 - Fixed distances in NeNA plot (previously plotting multiple times kept increasing the values)
+- Fixed spot saving in Localize
 
 ### *Deprecation warnings:*
 
