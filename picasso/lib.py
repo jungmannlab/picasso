@@ -14,7 +14,9 @@ import glob
 import collections
 import colorsys
 import os
+import sys
 import time
+import traceback
 import warnings
 from copy import deepcopy
 from typing import Any, TypeAlias, Literal
@@ -713,8 +715,6 @@ def install_excepthook(window) -> None:
     """Install a thread-safe excepthook that shows uncaught exceptions in a
     QMessageBox. Safe to call from QThread workers because the error signal is
     queued to the main thread by Qt's event loop."""
-    import sys
-    import traceback
 
     class _ErrorSignaler(QtCore.QObject):
         error = QtCore.pyqtSignal(str)

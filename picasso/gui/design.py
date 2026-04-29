@@ -11,7 +11,6 @@ GUI for designing rectangular rothemund origami.
 import glob
 import os
 import sys
-import traceback
 import importlib
 import pkgutil
 from math import sqrt

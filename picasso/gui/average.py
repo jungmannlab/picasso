@@ -14,7 +14,6 @@ import importlib
 import os.path
 import pkgutil
 import sys
-import traceback
 
 import matplotlib.pyplot as plt
 import numpy as np
