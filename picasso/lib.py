@@ -549,7 +549,7 @@ class ScrollableGroupBox(QtWidgets.QGroupBox):
             if keep_labels and isinstance(widget, QtWidgets.QLabel):
                 continue
             widget.setParent(None)
-            del widget
+            widget.deleteLater()
 
 
 class GenericPlotWindow(QtWidgets.QTabWidget):

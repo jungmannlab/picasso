@@ -210,24 +210,14 @@ class MaskPreview(QtWidgets.QLabel):
         img = self.image
         img = self.to_2D(img)
         img = render.to_8bit(img)
-        img = render.apply_colormap(img, cmap="magma")
+        img = render.apply_colormap(img, "magma")
         self.qimage = render.convert_rgb_to_qimage(img)
-        binsize = self.mask_tab.mask_generator.binsize
-        if isinstance(binsize, (int, float)):
-            pixelsize = binsize
-        else:
-            pixelsize = binsize[0]
-        self.qimage = render.draw_scalebar(
-            self.qimage,
-            viewport=self.viewport,
-            scalebar_length_nm=self.mask_tab.scalebar_length.value(),
-            pixelsize=pixelsize,
-        )
         self.qimage = self.qimage.scaled(
             self.width(),
             self.height(),
             QtCore.Qt.AspectRatioMode.KeepAspectRatio,  # ByExpanding,
         )
+        self.qimage = self.draw_scalebar(self.qimage)
         self.setPixmap(QtGui.QPixmap.fromImage(self.qimage))
 
     def on_mask_generated(self, full_fov: bool = True) -> None:
@@ -250,6 +240,23 @@ class MaskPreview(QtWidgets.QLabel):
             (y_min, x_min), (y_max, x_max) = self.viewport
             self.image = self.mask_tab.mask.copy()[y_min:y_max, x_min:x_max]
         self.render_image()
+
+    def draw_scalebar(self, qimage: QtGui.QImage) -> QtGui.QImage:
+        if not self.mask_tab.scalebar_check.isChecked():
+            return qimage
+
+        binsize = self.mask_tab.mask_generator.binsize
+        if isinstance(binsize, (int, float)):
+            pixelsize = binsize
+        else:
+            pixelsize = binsize[0]
+        qimage = render.draw_scalebar(
+            qimage,
+            viewport=self.viewport,
+            scalebar_length_nm=self.mask_tab.scalebar_length.value(),
+            pixelsize=pixelsize,
+        )
+        return qimage
 
     def to_2D(self, image: lib.FloatArray2D) -> lib.FloatArray2D:
         """Convert mask to 2D that can be displayed (viewed from +z)."""
@@ -317,7 +324,7 @@ class MaskPreview(QtWidgets.QLabel):
         vh, vw = render.viewport_size(self.viewport)
         dy *= vh
         dx *= vw
-        viewport = render.shift_viewport(self.viewport, dy, dx)
+        viewport = render.shift_viewport(self.viewport, int(dx), int(dy))
         self.viewport = self.verify_boundaries(viewport)
         (y_min, x_min), (y_max, x_max) = self.viewport
         self.image = self.mask_tab.mask.copy()[y_min:y_max, x_min:x_max]
@@ -455,7 +462,9 @@ class MaskGeneratorTab(lib.Dialog):
         mask_layout.addWidget(self.load_locs_button, 0, 0, 1, 3)
 
         # isotropic mask
-        self.isotropic_mask_check = QtWidgets.QCheckBox("Isotropic mask")
+        self.isotropic_mask_check = QtWidgets.QCheckBox(
+            "Isotropic mask (3D only)"
+        )
         self.isotropic_mask_check.setToolTip(
             "Keep mask pixel/voxel size and blur isotropic?"
         )
@@ -474,7 +483,13 @@ class MaskGeneratorTab(lib.Dialog):
         mask_layout.addWidget(z_label, 1, 2)
 
         # mask pixel / voxel size
-        mask_layout.addWidget(QtWidgets.QLabel("Mask pixel/voxel (nm):"), 2, 0)
+        pixel_label = QtWidgets.QLabel("Mask pixel/voxel size (nm):")
+        pixel_label.setToolTip(
+            "Size of the mask pixel/voxel in nm.\n"
+            "Can be controlled in z axis separately for a 3D mask,\n"
+            "see the anisotropic mask option above."
+        )
+        mask_layout.addWidget(pixel_label, 2, 0)
         self.mask_binsize_xy = ignoreArrowsSpinBox()
         self.mask_binsize_xy.setRange(1, 10_000)
         self.mask_binsize_xy.setSingleStep(1)
@@ -489,7 +504,13 @@ class MaskGeneratorTab(lib.Dialog):
         mask_layout.addWidget(self.mask_binsize_z, 2, 2)
 
         # mask blur
-        mask_layout.addWidget(QtWidgets.QLabel("Gaussian blur (nm):"), 3, 0)
+        blur_label = QtWidgets.QLabel("Gaussian blur (nm):")
+        blur_label.setToolTip(
+            "Size of the Gaussian blur in nm.\n"
+            "Can be controlled in z axis separately for a 3D mask,\n"
+            "see the anisotropic mask option above."
+        )
+        mask_layout.addWidget(blur_label, 3, 0)
         self.mask_blur_xy = ignoreArrowsSpinBox()
         self.mask_blur_xy.setRange(0, 10_000)
         self.mask_blur_xy.setSingleStep(1)
@@ -504,7 +525,12 @@ class MaskGeneratorTab(lib.Dialog):
         mask_layout.addWidget(self.mask_blur_z, 3, 2)
 
         # ndimensions:
-        mask_layout.addWidget(QtWidgets.QLabel("Mask dimensionality:"), 4, 0)
+        ndim_label = QtWidgets.QLabel("Mask dimensionality:")
+        ndim_label.setToolTip(
+            "Choose between a 2D or 3D mask.\n"
+            "Only available if 3D data is loaded."
+        )
+        mask_layout.addWidget(ndim_label, 4, 0)
         self.mask_ndim = QtWidgets.QComboBox()
         self.mask_ndim.addItems(["2D", "3D"])
         self.mask_ndim.currentIndexChanged.connect(self.on_mask_ndim_changed)
@@ -1174,7 +1200,11 @@ class StructurePreview(QtWidgets.QLabel):
     def draw_rotation(self, image: QtGui.QImage) -> QtGui.QImage:
         """Draw a small 3 axes icon that rotates with the molecular,
         targets displayed in the bottom left corner."""
-        return render.draw_rotation(image, (self.angx, self.angy, self.angz))
+        return render.draw_rotation(
+            image=image,
+            ang=(self.angx, self.angy, self.angz),
+            axis_center=(-60, 50),
+        )
 
     def mousePressEvent(self, event: QtGui.QMouseEvent) -> None:
         """Define the action when mouse is clicked. If left button is
@@ -1768,9 +1798,7 @@ class GenerateSearchSpaceDialog(lib.Dialog):
         Checkbox for saving the results as a .csv file.
     """
 
-    def __init__(
-        self, sim_tab: QtWidgets.QWidget, loading_dialog: bool = False
-    ) -> None:
+    def __init__(self, sim_tab: QtWidgets.QWidget) -> None:
         super().__init__(sim_tab)
         self.setWindowTitle("Enter parameters")
         vbox = QtWidgets.QVBoxLayout(self)
@@ -1804,8 +1832,6 @@ class GenerateSearchSpaceDialog(lib.Dialog):
             "Save the resulting search space as a .csv file?"
         )
         self.save_check.setChecked(False)
-        if loading_dialog:
-            self.save_check.setVisible(False)
         layout.addRow(self.save_check, QtWidgets.QLabel(" "))
 
         self.buttons = QtWidgets.QDialogButtonBox(
@@ -1819,15 +1845,9 @@ class GenerateSearchSpaceDialog(lib.Dialog):
         self.buttons.rejected.connect(self.reject)
 
     @staticmethod
-    def getParams(
-        parent: QtWidgets.QWidget, loading_dialog: bool = False
-    ) -> list:
-        """Create the dialog and returns the numbers of molecular
-        targets per simulation, number of simulations, resolution
-        factor, check if the results are to be saved."""
-        dialog = GenerateSearchSpaceDialog(
-            parent, loading_dialog=loading_dialog
-        )
+    def getParams(parent: QtWidgets.QWidget) -> list:
+        """Create the dialog and returns the number of simulations,
+        granularity and check if the results are to be saved."""
         dialog = GenerateSearchSpaceDialog(parent)
         result = dialog.exec()
         return [
@@ -2106,9 +2126,9 @@ class OptionalSettingsDialog(lib.Dialog):
             "Choose the fitting mode.\n"
             "Bayesian: use a Gaussian Process surrogate model to efficiently\n"
             " search the space with minimal evaluations.\n"
-            r"Coarse to fine: first test 10% of selected search space, then\n"
-            " rerun SPINNA around the best fitting proportions from the first "
-            "round.\n"
+            r"Coarse to fine: first test 10% of selected search space, then"
+            "\n rerun SPINNA around the best fitting proportions from the first"
+            " round.\n"
             "Brute force: test all possible combinations of proportions of "
             "structures."
         )
@@ -3449,16 +3469,20 @@ class SimulationsTab(lib.Dialog):
                     structure_name: np.int32(df[f"N_{structure_name}"])
                     for structure_name in titles
                 }
-                n_sim_fit, granularity, _, ok = (
-                    GenerateSearchSpaceDialog.getParams(
-                        self, loading_dialog=True
-                    )
+                n_sim_fit, ok = QtWidgets.QInputDialog.getInt(
+                    self,
+                    "",
+                    "Input number of simulations",
+                    value=10,
+                    min=1,
+                    max=100000,
+                    step=1,
                 )
                 if not ok:
                     return
 
                 self.n_sim_fit = n_sim_fit
-                self.granularity = granularity
+                self.granularity = "loaded from file"
                 # update the generate n structures button
                 n = len(self.N_structures_fit[self.structures[0].title])
                 estimated_time = self.estimate_fit_time(n)
@@ -3509,7 +3533,6 @@ class SimulationsTab(lib.Dialog):
             if not save:
                 return
             self.window.pwd = os.path.dirname(save)
-        t0 = time.time()
         spinner = spinna.SPINNA(
             mixer=self.mixer,
             gt_coords=self.exp_data,
@@ -3537,8 +3560,6 @@ class SimulationsTab(lib.Dialog):
         )
         progress.close()
         self.best_score = self.current_score
-        dt = time.time() - t0
-        print(f"Fitting took {dt:.2f} seconds using {fitting_mode} mode.")
 
         # update widgets and plot the best fitting stoichiometry
         self.update_prop_str_input_spins(self.opt_props)
@@ -3753,6 +3774,13 @@ class SimulationsTab(lib.Dialog):
     def compare_models(self) -> None:
         """Open the dialog to compare the goodness of fit for
         different models of structures and runs the test."""
+        if not isinstance(self.granularity, int):
+            message = (
+                "Please generate the search space first.\n"
+                "Loading a search space is not allowed to compare models."
+            )
+            QtWidgets.QMessageBox.warning(self, "Warning", message)
+            return
         (models, model_names, label_unc, save_scores, ok) = (
             CompareModelsDialog.getParams(self, self.targets)
         )

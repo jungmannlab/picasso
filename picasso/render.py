@@ -1728,12 +1728,12 @@ def zoom_viewport(
     new_viewport : tuple
         New viewport in camera pixels ((ymin, xmin), (ymax, xmax)).
     """
-    viewport_height, viewport_width = render.viewport_size(viewport)
+    viewport_height, viewport_width = viewport_size(viewport)
     new_viewport_height = viewport_height * factor
     new_viewport_width = viewport_width * factor
 
     if cursor_position is not None:  # wheelEvent
-        old_viewport_center = render.viewport_center(viewport)
+        old_viewport_center = viewport_center(viewport)
         rel_pos_x = (
             cursor_position[0] - old_viewport_center[1]
         ) / viewport_width
@@ -1747,18 +1747,18 @@ def zoom_viewport(
             cursor_position[1] - rel_pos_y * new_viewport_height
         )
     else:
-        new_viewport_center_y, new_viewport_center_x = render.viewport_center(
+        new_viewport_center_y, new_viewport_center_x = viewport_center(
             viewport
         )
 
     new_viewport = [
         (
-            new_viewport_center_y - new_viewport_height / 2,
-            new_viewport_center_x - new_viewport_width / 2,
+            int(new_viewport_center_y - new_viewport_height / 2),
+            int(new_viewport_center_x - new_viewport_width / 2),
         ),
         (
-            new_viewport_center_y + new_viewport_height / 2,
-            new_viewport_center_x + new_viewport_width / 2,
+            int(new_viewport_center_y + new_viewport_height / 2),
+            int(new_viewport_center_x + new_viewport_width / 2),
         ),
     ]
     return new_viewport
@@ -1809,6 +1809,9 @@ def adjust_viewport_to_aspect_ratio(
 def adjust_viewport_decorator(func):
     """Decorator that adjusts viewport to match image aspect ratio before
     calling the decorated function.
+
+    Note that this assumes image and viewport to be the first two
+    arguments of the decorated function
 
     Parameters
     ----------
@@ -2112,6 +2115,7 @@ def draw_points(
     points: list[tuple],  # points in camera pixels,
     pixelsize: int | float,  # camera pixel size in nm
     color: QtGui.QColor = QtGui.QColor("yellow"),
+    mark_width: int = 20,  # width of the drawn crosses in display pixels
 ) -> QtGui.QImage:
     """Draw points, lines and distances between them onto image.
 
@@ -2129,13 +2133,14 @@ def draw_points(
         Camera pixel size in nm.
     color : QtGui.QColor, optional
         Color of the points, lines and text. Default is yellow.
+    mark_width : int, optional
+        Width of the drawn crosses in display pixels. Default is 20.
 
     Returns
     -------
     image : QImage
         Image with the drawn points.
     """
-    d = 20  # width of the drawn crosses (display pixels)
     painter = QtGui.QPainter(image)
     painter.setPen(color)
 
@@ -2152,10 +2157,10 @@ def draw_points(
 
         # draw a cross
         painter.drawPoint(cx, cy)
-        painter.drawLine(cx, cy, int(cx + d / 2), cy)
-        painter.drawLine(cx, cy, cx, int(cy + d / 2))
-        painter.drawLine(cx, cy, int(cx - d / 2), cy)
-        painter.drawLine(cx, cy, cx, int(cy - d / 2))
+        painter.drawLine(cx, cy, int(cx + mark_width / 2), cy)
+        painter.drawLine(cx, cy, cx, int(cy + mark_width / 2))
+        painter.drawLine(cx, cy, int(cx - mark_width / 2), cy)
+        painter.drawLine(cx, cy, cx, int(cy - mark_width / 2))
 
         # draw a line between points and show distance
         if oldpoint != []:
@@ -2181,8 +2186,8 @@ def draw_points(
                 / 100
             )
             painter.drawText(
-                int((cx + ox) / 2 + d),
-                int((cy + oy) / 2 + d),
+                int((cx + ox) / 2 + mark_width),
+                int((cy + oy) / 2 + mark_width),
                 str(distance) + " nm",
             )
         oldpoint = point
@@ -2193,11 +2198,15 @@ def draw_points(
 @adjust_viewport_decorator
 def draw_scalebar(
     image: QtGui.QImage,
-    viewport: tuple[tuple[float, float], tuple[float, float]],  # cam. px
-    scalebar_length_nm: int | float,  # scalebar length in nm
-    pixelsize: int | float,  # camera pixel size in nm
-    display_length: bool = True,  # whether to display scalebar length in nm
+    viewport: tuple[tuple[float, float], tuple[float, float]],
+    scalebar_length_nm: int | float,
+    pixelsize: int | float,
+    display_length: bool = True,
     color: QtGui.QColor = QtGui.QColor("white"),
+    display_height: int = 10,
+    margin: tuple[int, int] = (35, 20),
+    text_spacer: int = 40,
+    text_fontsize: int = 20,
 ) -> QtGui.QImage:
     """Draw a scalebar into rendered localizations (QImage).
 
@@ -2212,33 +2221,46 @@ def draw_scalebar(
         Scale bar length in nm.
     pixelsize : int or float
         Camera pixel size in nm.
+    color : QColor, optional
+        Color of the scalebar and text. Default is white.
+    display_length : bool, optional
+        Whether to display scalebar length in nm. Default is True.
+    margin : tuple of int, optional
+        Margins from the right and bottom edges in display pixels.
+        Default is (35, 20).
+    text_spacer : int, optional
+        Spacing between the scalebar and the displayed length text in
+        display pixels. Only used if display_length is True. Default is
+        40.
+    text_fontsize : int, optional
+        Font size of the displayed length text in display pixels. Only
+        used if display_length is True. Default is 20.
 
     Returns
     -------
     image : QImage
         Image with the drawn scalebar.
     """
-    length_camerapxl = scalebar_length_nm / pixelsize
-    length_displaypxl = int(
-        round(image.width() * length_camerapxl / viewport_width(viewport))
-    )
-    height = 10  # display pixels
     painter = QtGui.QPainter(image)
     painter.setPen(QtGui.QPen(QtCore.Qt.PenStyle.NoPen))
     painter.setBrush(QtGui.QBrush(color))
 
+    length_camerapxl = scalebar_length_nm / pixelsize
+    length_displaypxl = int(
+        round(image.width() * length_camerapxl / viewport_width(viewport))
+    )
+
     # draw a rectangle
-    x = image.width() - length_displaypxl - 35
-    y = image.height() - height - 20
-    painter.drawRect(x, y, length_displaypxl + 0, height + 0)
+    x = image.width() - length_displaypxl - margin[0]
+    y = image.height() - display_height - margin[1]
+    painter.drawRect(x, y, length_displaypxl, display_height)
 
     # display scalebar's length
     if display_length:
         font = painter.font()
-        font.setPixelSize(20)
+        font.setPixelSize(text_fontsize)
         painter.setFont(font)
         painter.setPen(color)
-        text_spacer = 40
         text_width = length_displaypxl + 2 * text_spacer
         text_height = text_spacer
         painter.drawText(
@@ -2247,7 +2269,7 @@ def draw_scalebar(
             text_width,
             text_height,
             QtCore.Qt.AlignmentFlag.AlignHCenter,
-            str(scalebar_length_nm) + " nm",
+            f"{str(scalebar_length_nm)} nm",
         )
     return image
 
@@ -2256,6 +2278,10 @@ def draw_legend(
     image: QtGui.QImage,
     channel_names: list[str],
     channel_colors: list[tuple[int, int, int]],
+    init_pos: tuple[int, int] = (12, 26),
+    dy: int = 24,
+    padding: int = 4,
+    text_fontsize: int = 16,
 ) -> QtGui.QImage:
     """Draw a legend for multichannel data in the top left corner over
     rendered localizations (QImage).
@@ -2269,6 +2295,15 @@ def draw_legend(
     channel_colors : list of tuples
         List of RGB tuples corresponding to the colors of the channels.
         Must range between 0 and 255.
+    init_pos : tuple of int, optional
+        Initial position (x, y) of the first channel name in display
+        pixels. Default is (12, 26).
+    dy : int, optional
+        Space between channel names in display pixels. Default is 24.
+    padding : int, optional
+        Padding around the text in display pixels. Default is 4.
+    text_fontsize : int, optional
+        Font size of the channel names in display pixels. Default is 16.
 
     Returns
     -------
@@ -2281,12 +2316,9 @@ def draw_legend(
     n_channels = len(channel_names)
     painter = QtGui.QPainter(image)
     # initial positions
-    x = 12
-    y = 26
-    dy = 24  # space between names
-    padding = 4  # padding around text
+    x, y = init_pos
     font = painter.font()
-    font.setPixelSize(16)
+    font.setPixelSize(text_fontsize)
     painter.setFont(font)
     fm = QtGui.QFontMetrics(font)
     for i in range(n_channels):
@@ -2318,6 +2350,8 @@ def draw_minimap(
     max_viewport_size: tuple[float, float],  # in camera pixels,
     color_main: QtGui.QColor = QtGui.QColor("yellow"),
     color_frame: QtGui.QColor = QtGui.QColor("white"),
+    length_minimap: int = 100,
+    margin: tuple[int, int] = (20, 20),
 ) -> QtGui.QImage:
     """Draw a minimap showing the position of current viewport.
 
@@ -2329,10 +2363,16 @@ def draw_minimap(
         Current field of view in camera pixels, ((y_min, y_max), (x_min,
         x_max)).
     max_viewport_size : tuple
-        Maximum viewport size in camera pixels, (max_height, max_width).
+        Maximum viewport size in camera pixels, i.e., the acquired
+        movie size (height, width).
     color_main, color_frame : QColor, optional
         Colors of the viewport and the minimap frame. Default is yellow
         and white, respectively.
+    length_minimap : int, optional
+        Length of the minimap in pixels. Default is 100.
+    margin : tuple of int, optional
+        Margins from the right and top edges in display pixels.
+        Default is (20, 20).
 
     Returns
     -------
@@ -2340,29 +2380,29 @@ def draw_minimap(
         Image with the drawn minimap.
     """
     movie_height, movie_width = max_viewport_size
-    length_minimap = 100
-    height_minimap = int(movie_height / movie_width * 100)
+    height_minimap = int(movie_height / movie_width * length_minimap)
     # draw in the upper right corner, overview rectangle
-    x = image.width() - length_minimap - 20
-    y = 20
+    x = image.width() - length_minimap - margin[0]
+    y = margin[1]
     painter = QtGui.QPainter(image)
     painter.setPen(color_frame)
-    painter.drawRect(x, y, length_minimap + 0, height_minimap + 0)
+    painter.drawRect(x, y, length_minimap, height_minimap)
     painter.setPen(color_main)
     length = int(viewport_width(viewport) / movie_width * length_minimap)
     length = max(5, length)
     height = int(viewport_height(viewport) / movie_height * height_minimap)
     height = max(5, height)
     x_vp = int(viewport[0][1] / movie_width * length_minimap)
-    y_vp = int(viewport[0][0] / movie_height * length_minimap)
-    painter.drawRect(x + x_vp, y + y_vp, length + 0, height + 0)
+    y_vp = int(viewport[0][0] / movie_height * height_minimap)
+    painter.drawRect(x + x_vp, y + y_vp, length, height)
     return image
 
 
-@adjust_viewport_decorator
 def draw_rotation(
     image: QtGui.QImage,
     ang: tuple[float, float, float],
+    axis_length: int = 30,
+    axis_center: tuple[int, int] = (50, -50),  # bottom left
 ) -> QtGui.QImage:
     """Draw rotation axes icon on the image.
 
@@ -2372,6 +2412,12 @@ def draw_rotation(
         Image containing rendered localizations.
     ang : tuple of float
         Rotation angles around x, y, and z axes in radians.
+    axis_length : int, optional
+        Length of the rotation axes in display pixels. Default is 30.
+    axis_center : tuple of int, optional
+        Position of the rotation axes icon in display pixels, with
+        origin in the top left corner. Negative values indicated
+        counting from the bottom right corner. Default is (50, -50).
 
     Returns
     -------
@@ -2379,29 +2425,36 @@ def draw_rotation(
         Image with the drawn rotation axes icon.
     """
     painter = QtGui.QPainter(image)
-    length = 30
-    x = 50
-    y = image.height() - 50
+    x = (
+        axis_center[0]
+        if axis_center[0] >= 0
+        else image.width() + axis_center[0]
+    )
+    y = (
+        axis_center[1]
+        if axis_center[1] >= 0
+        else image.height() + axis_center[1]
+    )
     center = QtCore.QPoint(x, y)
 
     # set the ends of the x line
-    xx = length
+    xx = axis_length
     xy = 0
     xz = 0
 
     # set the ends of the y line
     yx = 0
-    yy = length
+    yy = axis_length
     yz = 0
 
     # set the ends of the z line
     zx = 0
     zy = 0
-    zz = length
+    zz = axis_length
 
     # rotate these points
     coordinates = [[xx, xy, xz], [yx, yy, yz], [zx, zy, zz]]
-    R = render.rotation_matrix(*ang)
+    R = rotation_matrix(*ang)
     coordinates = R.apply(coordinates).astype(int)
     (xx, xy, xz) = coordinates[0]
     (yx, yy, yz) = coordinates[1]
@@ -2432,7 +2485,6 @@ def draw_rotation(
     return image
 
 
-@adjust_viewport_decorator
 def draw_rotation_angles(
     image: QtGui.QImage,
     ang: tuple[float, float, float],

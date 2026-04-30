@@ -2336,6 +2336,10 @@ class StructureMixer:
                 )
         else:
             self.roi = [None, None, None]
+            mask_shapes = [_.shape for _ in self.mask_dict["mask"].values()]
+            assert all(
+                [mask_shapes[0] == mask_shape for mask_shape in mask_shapes]
+            ), "All masks must have the same shape."
             self.mask = self.mask_dict["mask"]
             self.mask_info = self.mask_dict["info"]
 
@@ -2800,7 +2804,7 @@ class StructureMixer:
             Resulting proportions (0 to 100).
         """
         N_structures = deepcopy(N_structures)
-        N_structures = self.mixer.convert_N_structures_to_array(N_structures)
+        N_structures = self.convert_N_structures_to_array(N_structures)
 
         if N_structures.ndim == 1:
             N_structures = N_structures.reshape(1, -1)
