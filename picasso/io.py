@@ -435,8 +435,8 @@ def load_picks(  # noqa: C901
     size : float
         The size of the picks in camera pixels (if `pixelsize` is
         provided, otherwise in original units). For circular picks, the
-        size is the radius; for rectangular picks, the size is the width;
-        for square picks, the size is the side length. None for
+        size is the diameter; for rectangular picks, the size is the
+        width; for square picks, the size is the side length. None for
         polygonal picks (size not defined).
     """
     assert path.endswith(".yaml"), "Picks should be stored in a .yaml file."
@@ -459,9 +459,9 @@ def load_picks(  # noqa: C901
     if shape == "Circle":
         picks = regions["Centers"]
         if "Diameter (nm)" in regions:
-            size = regions["Diameter (nm)"] / pixelsize / 2
+            size = regions["Diameter (nm)"] / pixelsize
         elif "Diameter" in regions:
-            size = regions["Diameter"] / 2
+            size = regions["Diameter"]
     elif shape == "Rectangle":
         picks = regions["Center-Axis-Points"]
         if "Width (nm)" in regions:

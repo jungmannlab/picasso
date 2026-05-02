@@ -1579,7 +1579,7 @@ def get_colors_from_colormap(
     idx = np.linspace(0, 255, n_channels).astype(int)
     # extract the colors of interest
     colors = base[idx]
-    return colors / 255  # value ranging between 0 and 1
+    return colors  # value ranging between 0 and 1
 
 
 def get_group_color(locs: pd.DataFrame) -> lib.IntArray1D:
@@ -1687,7 +1687,8 @@ def shift_viewport(
     dx: float,
     dy: float,
 ) -> tuple[tuple[float, float], tuple[float, float]]:
-    """Shift the viewport by the given shift vector.
+    """Shift the viewport by the given shift vector (toward the bottom
+    right corner).
 
     Parameters
     ----------
@@ -1753,12 +1754,12 @@ def zoom_viewport(
 
     new_viewport = [
         (
-            int(new_viewport_center_y - new_viewport_height / 2),
-            int(new_viewport_center_x - new_viewport_width / 2),
+            new_viewport_center_y - new_viewport_height / 2,
+            new_viewport_center_x - new_viewport_width / 2,
         ),
         (
-            int(new_viewport_center_y + new_viewport_height / 2),
-            int(new_viewport_center_x + new_viewport_width / 2),
+            new_viewport_center_y + new_viewport_height / 2,
+            new_viewport_center_x + new_viewport_width / 2,
         ),
     ]
     return new_viewport
@@ -1826,8 +1827,6 @@ def adjust_viewport_decorator(func):
 
     def wrapper(image, viewport, *args, **kwargs):
         adjusted_viewport = adjust_viewport_to_aspect_ratio(image, viewport)
-        if adjusted_viewport != viewport:
-            print("Adjusted viewport to match image aspect ratio.")
         return func(image, adjusted_viewport, *args, **kwargs)
 
     return wrapper
@@ -2523,7 +2522,7 @@ def render_scene(
     locs: pd.DataFrame | list[pd.DataFrame],
     info: list[dict] | list[list[dict]],
     *,
-    disp_px_size: float,
+    disp_px_size: float = 100.0,
     viewport: tuple[tuple[float, float], tuple[float, float]] | None = None,
     blur_method: (
         Literal["gaussian", "gaussian_iso", "smooth", "convolve"] | None
@@ -2535,13 +2534,19 @@ def render_scene(
     single_channel_colormap: str | lib.FloatArray2D = "magma",
     colors: list | None = None,
     relative_intensities: list[float] | None = None,
-    return_qimage: bool = False,
+    raw_image_cache: lib.FloatArray2D | lib.FloatArray3D | None = None,
     return_contrast_limits: bool = False,
+    return_raw_image: bool = False,
 ) -> (
-    tuple[int, lib.IntArray3D]
-    | tuple[int, QtGui.QImage]
-    | tuple[int, lib.IntArray3D, tuple[float, float]]
-    | tuple[int, QtGui.QImage, tuple[float, float]]
+    tuple[QtGui.QImage, int]
+    | tuple[QtGui.QImage, int, tuple[float, float]]
+    | tuple[QtGui.QImage, int, lib.FloatArray2D | lib.FloatArray3D]
+    | tuple[
+        QtGui.QImage,
+        int,
+        tuple[float, float],
+        lib.FloatArray2D | lib.FloatArray3D,
+    ]
 ):
     """Render localizations into a colored image (either QImage or a 
     numpy array).
@@ -2551,6 +2556,17 @@ def render_scene(
     with group info, the colormap is determined by `get_group_color` and
     `lib.get_colors`. For multi-channel images, the colors are specified
     by `colors`.
+
+    If `raw_image_cache` is provided (the raw grayscale image of
+    localizations, i.e., obtained with ``render.render``; 2D array for
+    single-channel data, 3D array for multi-channel data), some of the
+    arguments are not used: `locs`, `info`, `disp_px_size`, `viewport`,
+    `blur_method`, `min_blur_width`, `ang`.
+
+    Optionally, the user can request the raw grayscale image of
+    localizations and/or the contrast limits used for scaling to be
+    returned together with the rendered QImage and number of
+    localizations rendered.
     
     Parameters
     ----------
@@ -2560,8 +2576,8 @@ def render_scene(
     info: list of dict or list of list of dict
         List of info dictionaries corresponding to the localization
         file(s).
-    disp_px_size : float
-        Display pixel size in nm.
+    disp_px_size : float, optional
+        Display pixel size in nm. Default is 100.0.
     viewport : tuple, optional
         Field of view to be rendered (in camera pixels). The input is
         ``((y_min, x_min), (y_max, x_max))``. If None, all localizations
@@ -2599,21 +2615,34 @@ def render_scene(
         List of relative intensities for each channel. Only needs to be
         specified for multi-channel data. Default is None, in which
         case all channels are rendered with the same intensity.
-    return_qimage: bool, optional
-        If True, return a QImage. If False, return a numpy array.
+    raw_image_cache: lib.FloatArray2D or lib.FloatArray3D, optional
+        If provided, this raw grayscale image of localizations, i.e.,
+        obtained with ``render.render`` (2D array for single-channel
+        data, 3D array for multi-channel data) is used instead of
+        recomputing it. Some of the arguments are not used if this is
+        provided: `locs`, `info`, `disp_px_size`, `viewport`,
+        `blur_method`, `min_blur_width`, `ang`.
+    return_contrast_limits : bool, optional
+        If True, return the contrast limits used for scaling. Default is
+        False.
+    return_raw_image : bool, optional
+        If True, return the raw grayscale image of localizations (2D
+        array for single-channel data, 3D array for multi-channel data).
         Default is False.
 
     Returns
     -------
+    qimage : QtGui.QImage
+        RGB image of rendered localizations as a QImage object.
     n_locs : int
         Total number of localizations rendered.
-    image : IntArray3D or QImage
-        RGB image of rendered localizations. Either a numpy array of
-        shape (height, width, 3) with integer values between 0 and 255
-        or a QImage (if return_qimage is True).
     contrast_limits : tuple of float, optional
         The contrast limits used for scaling. Only returned if
         return_contrast_limits is True.
+    raw_image : FloatArray2D or FloatArray3D, optional
+        Raw grayscale image of localizations (2D array for single-channel
+        data, 3D array for multi-channel data). Only returned if
+        return_raw_image is True.
     """
     if isinstance(locs, list) and len(locs) == 1:
         locs = locs[0]
@@ -2625,7 +2654,7 @@ def render_scene(
             colors = lib.get_colors(len(locs))
 
     if isinstance(locs, pd.DataFrame):
-        n_locs, image, contrast_limits = _render_single_channel(
+        n_locs, rgb, contrast_limits, raw_image = _render_single_channel(
             locs=locs,
             info=info,
             disp_px_size=disp_px_size,
@@ -2636,7 +2665,7 @@ def render_scene(
             contrast=contrast,
             invert_colors=invert_colors,
             single_channel_colormap=single_channel_colormap,
-            return_contrast_limits=True,
+            raw_image_cache=raw_image_cache,
         )
     else:
         if colors is not None:
@@ -2649,7 +2678,7 @@ def render_scene(
                 f"Mismatch between {len(locs)} localization files and "
                 f"{len(info)} info dictionaries."
             )
-        n_locs, image, contrast_limits = _render_multi_channel(
+        n_locs, rgb, contrast_limits, raw_image = _render_multi_channel(
             locs=locs,
             info=info,
             disp_px_size=disp_px_size,
@@ -2661,19 +2690,20 @@ def render_scene(
             contrast=contrast,
             relative_intensities=relative_intensities,
             invert_colors=invert_colors,
-            return_contrast_limits=True,
+            raw_image_cache=raw_image_cache,
         )
-    if return_qimage:
-        qimage = convert_rgb_to_qimage(image)
-        if return_contrast_limits:
-            return n_locs, qimage, contrast_limits
-        return n_locs, qimage
-    if return_contrast_limits:
-        return n_locs, image, contrast_limits
-    return n_locs, image
+    qimage = rgb_to_qimage(rgb)
+    if return_raw_image and return_contrast_limits:
+        return qimage, n_locs, contrast_limits, raw_image
+    elif return_raw_image:
+        return qimage, n_locs, raw_image
+    elif return_contrast_limits:
+        return qimage, n_locs, contrast_limits
+    else:
+        return qimage, n_locs
 
 
-def convert_rgb_to_qimage(
+def rgb_to_qimage(
     image: lib.IntArray3D, return_bgra: bool = False
 ) -> QtGui.QImage | tuple[QtGui.QImage, lib.IntArray3D]:
     """Convert a numpy array of shape (height, width, 3) with integer
@@ -2821,33 +2851,35 @@ def _render_multi_channel(
     contrast: tuple[float, float] | None = None,
     relative_intensities: list[float] | None = None,
     invert_colors: bool = False,
-    return_contrast_limits: bool = False,
-) -> (
-    tuple[int, lib.IntArray3D]
-    | tuple[int, lib.IntArray3D, tuple[float, float]]
-):
+    raw_image_cache: lib.FloatArray3D | None = None,
+) -> tuple[int, lib.IntArray3D, tuple[float, float], lib.FloatArray3D]:
     """Render multi-channel localizations into an RGB 8bit image
     (numpy array). See ``render_scene`` for more details."""
-    renderings = [  # monochromatic images of localizations
-        render(
-            locs=locs[i],
-            info=info[i],
-            disp_px_size=disp_px_size,
-            viewport=viewport,
-            blur_method=blur_method,
-            min_blur_width=min_blur_width,
-            ang=ang,
-        )
-        for i in range(len(locs))
-    ]
-    n_locs = sum([rendering[0] for rendering in renderings])
-    images = np.array([rendering[1] for rendering in renderings])
+    if raw_image_cache is not None:
+        assert raw_image_cache.ndim == 3, "raw_image_cache must be a 3D array."
+        raw_image = raw_image_cache
+        n_locs = 0
+    else:
+        renderings = [  # monochromatic images of localizations
+            render(
+                locs=locs[i],
+                info=info[i],
+                disp_px_size=disp_px_size,
+                viewport=viewport,
+                blur_method=blur_method,
+                min_blur_width=min_blur_width,
+                ang=ang,
+            )
+            for i in range(len(locs))
+        ]
+        n_locs = sum([rendering[0] for rendering in renderings])
+        raw_image = np.array([rendering[1] for rendering in renderings])
 
     # scale contrast and intensities
     vmin, vmax = contrast if contrast is not None else (None, None)
     autoscale = True if contrast is None else False
     images, contrast_limits = scale_contrast(
-        images, vmin, vmax, autoscale=autoscale, return_contrast_limits=True
+        raw_image, vmin, vmax, autoscale=autoscale, return_contrast_limits=True
     )
     images = scale_intensities(
         images, relative_intensities=relative_intensities
@@ -2857,7 +2889,7 @@ def _render_multi_channel(
     Y, X = images.shape[1:]
     rgb = np.zeros((Y, X, 3), dtype=np.float32)  # float for now
     if colors is None:  # fallback if the user did not specify colors
-        colors = lib.get_colors(len(locs))
+        colors = lib.get_colors(len(images))
     for color, image in zip(colors, images):
         for i in range(3):
             rgb[:, :, i] += color[i] * image
@@ -2865,9 +2897,7 @@ def _render_multi_channel(
     rgb = to_8bit(rgb)
     if invert_colors:
         rgb = 255 - rgb
-    if return_contrast_limits:
-        return n_locs, rgb, contrast_limits
-    return n_locs, rgb
+    return n_locs, rgb, contrast_limits, raw_image
 
 
 def _render_single_channel(
@@ -2884,34 +2914,34 @@ def _render_single_channel(
     contrast: tuple[float, float] | None = None,
     invert_colors: bool = False,
     single_channel_colormap: str = "magma",
-    return_contrast_limits: bool = False,
-) -> (
-    tuple[int, lib.IntArray3D]
-    | tuple[int, lib.IntArray3D, tuple[float, float]]
-):
+    raw_image_cache: lib.FloatArray2D | None = None,
+) -> tuple[int, lib.IntArray3D, tuple[float, float], lib.FloatArray2D]:
     """Render single-channel localizations into an RGB 8bit image (numpy
     array). See ``render_scene`` for more details."""
-    n_locs, image = render(
-        locs=locs,
-        info=info,
-        disp_px_size=disp_px_size,
-        viewport=viewport,
-        blur_method=blur_method,
-        min_blur_width=min_blur_width,
-        ang=ang,
-    )
+    if raw_image_cache is not None:
+        assert raw_image_cache.ndim == 2, "raw_image_cache must be a 2D array."
+        raw_image = raw_image_cache
+        n_locs = 0
+    else:
+        n_locs, raw_image = render(
+            locs=locs,
+            info=info,
+            disp_px_size=disp_px_size,
+            viewport=viewport,
+            blur_method=blur_method,
+            min_blur_width=min_blur_width,
+            ang=ang,
+        )
     vmin, vmax = contrast if contrast is not None else (None, None)
     autoscale = True if contrast is None else False
     image, contrast_limits = scale_contrast(
-        image, vmin, vmax, autoscale=autoscale, return_contrast_limits=True
+        raw_image, vmin, vmax, autoscale=autoscale, return_contrast_limits=True
     )
     image = to_8bit(image)
     rgb = apply_colormap(image, single_channel_colormap)
     if invert_colors:
         rgb = 255 - rgb
-    if return_contrast_limits:
-        return n_locs, rgb, contrast_limits
-    return n_locs, rgb
+    return n_locs, rgb, contrast_limits, raw_image
 
 
 def apply_colormap(
@@ -2974,18 +3004,18 @@ def split_locs_by_property(
     assert (
         property_name in locs.columns
     ), f"Property '{property_name}' not found in localizations."
-    values = locs[property_name].to_numpy()
+    values = locs[property_name]
     if min_value is None:
         min_value = values.min()
     if max_value is None:
         max_value = values.max()
 
     step = (max_value - min_value) / n_colors
-    color = np.floor((values - min_value) / step).astype(int)
-    color = np.clip(color, 0, n_colors)
+    color = np.floor((values - min_value) / step)
+    color = np.clip(color, 0, n_colors - 1)
 
     locs_groups = []
-    for i in range(n_colors + 1):
+    for i in range(n_colors):
         locs_groups.append(locs[color == i])
     return locs_groups
 

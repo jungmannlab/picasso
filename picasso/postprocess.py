@@ -773,6 +773,8 @@ def remove_locs_in_picks(
         assert isinstance(
             pick_size, (int, float)
         ), "pick_size must be a number."
+    if pick_shape == "Circle":
+        pick_size /= 2  # convert diameter to radius
     all_picked_locs = picked_locs(
         locs=locs,
         info=info,
@@ -1988,7 +1990,7 @@ def combine_locs_in_picks(
     pick_shape : {'Circle', 'Rectangle', 'Polygon', 'Square'}
         Shape of the picks.
     pick_size : float or None, optional
-        Size of the picks. For circular picks, the size is the radius;
+        Size of the picks. For circular picks, the size is the diameter;
         for rectangular picks, the size is the width; for square picks,
         the size is the side length. None for polygonal picks (size not
         defined).
@@ -2009,8 +2011,12 @@ def combine_locs_in_picks(
         "Polygon",
         "Square",
     }, "Invalid pick shape"
-    if pick_shape in {"Circle", "Rectangle", "Square"} and pick_size is None:
-        raise ValueError("Pick size must be provided for non-polygonal picks.")
+    if pick_shape in {"Circle", "Rectangle", "Square"}:
+        assert (
+            pick_size is not None
+        ), "Pick size must be provided for non-polygonal picks."
+    if pick_shape == "Circle":
+        pick_size /= 2  # convert diameter to radius
     pl = picked_locs(
         locs=locs,
         info=info,
@@ -3291,7 +3297,10 @@ def align_from_picked(
     pick_shape : {"Circle", "Rectangle", "Polygon", "Square"}, optional
         Shape of the picks.
     pick_size : float or None, optional
-        Size of the picks. Default is None.
+        Size of the picks. For circular picks, the size is the diameter.
+        For square picks, the size is the side length. For rectangular
+        picks, the size is the width. None for polygon picks. Default is
+        None.
     return_shifts : bool, optional
         If True, also returns the calculated shifts for each channel.
         Default is False.
@@ -3315,7 +3324,8 @@ def align_from_picked(
         assert (
             pick_size is not None
         ), "pick_size must be provided when picks is a list of coordinates"
-
+    if pick_shape == "Circle":
+        pick_size = pick_size / 2  # convert diameter to radius
     pl = [
         picked_locs(locs, i, picks, pick_shape, pick_size)
         for locs, i in zip(all_locs, infos)

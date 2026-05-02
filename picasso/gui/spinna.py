@@ -211,7 +211,7 @@ class MaskPreview(QtWidgets.QLabel):
         img = self.to_2D(img)
         img = render.to_8bit(img)
         img = render.apply_colormap(img, "magma")
-        self.qimage = render.convert_rgb_to_qimage(img)
+        self.qimage = render.rgb_to_qimage(img)
         self.qimage = self.qimage.scaled(
             self.width(),
             self.height(),
@@ -354,7 +354,7 @@ class MaskPreview(QtWidgets.QLabel):
             y_max = bounds_x_y[0]
             y_min = max(0, y_max - vh)
 
-        viewport = ((y_min, x_min), (y_max, x_max))
+        viewport = ((round(y_min), round(x_min)), (round(y_max), round(x_max)))
         return viewport
 
 

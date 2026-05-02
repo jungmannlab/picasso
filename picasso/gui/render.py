@@ -2925,15 +2925,7 @@ class TestClustererDialog(lib.Dialog):
         """Check if region of interest has changed since the last
         rendering."""
         pick = self.window.view._picks[0]
-        pixelsize = self.window.display_settings_dlg.pixelsize.value()
-        if self.window.tools_settings_dialog.pick_shape == "Circle":
-            pick_size = (
-                self.window.tools_settings_dialog.pick_diameter.value()
-            ) / pixelsize
-        else:
-            pick_size = (
-                self.window.tools_settings_dialog.pick_width.value()
-            ) / pixelsize
+        pick_size = self.window.view._pick_size
         if pick != self.pick or pick_size != self.pick_size:
             self.pick = pick
             self.pick_size = pick_size
@@ -3401,7 +3393,7 @@ class TestClustererView(QtWidgets.QLabel):
             / self.get_optimal_oversampling()
         )
         colors = lib.get_colors(len(locs))
-        _, qimage = render.render_scene(
+        qimage = render.render_scene(
             locs=locs,
             info=[self.view.infos[self.channels.currentIndex()]] * len(locs),
             disp_px_size=disp_px_size,
@@ -3409,7 +3401,7 @@ class TestClustererView(QtWidgets.QLabel):
             blur_method=blur_method,
             ang=self.ang,
             colors=colors,
-        )
+        )[0]
         qimage = qimage.scaled(
             self._size,
             self._size,
@@ -4927,7 +4919,7 @@ class MaskSettingsDialog(lib.Dialog):
         cmap = self.cmap if cmap is None else cmap
         image = render.apply_colormap(image, cmap)
         # create a 4 channel (rgb, alpha) array
-        qimage = render.convert_rgb_to_qimage(image)
+        qimage = render.rgb_to_qimage(image)
         qimage = qimage.scaled(
             300,
             300,
@@ -5829,14 +5821,13 @@ class DisplaySettingsDialog(lib.Dialog):
         colors = render.get_colors_from_colormap(
             n_colors, self.colormap_prop.currentText()
         )
-        # colors = render.to_8bit(colors)  # convert to 8-bit for matplotlib
 
         # plot
         bins = lib.calculate_optimal_bins(data, max_n_bins=1000)
         counts, bins, patches = self.ax_prop.hist(data, bins=bins)
         for patch, bin_left in zip(patches, bins):
             color_idx = int(
-                (n_colors - 1) * (bin_left - min_val) / (max_val - min_val)
+                n_colors * (bin_left - min_val) / (max_val - min_val)
             )
             color_idx = np.clip(color_idx, 0, n_colors - 1)
             patch.set_facecolor(colors[color_idx])
@@ -6333,7 +6324,8 @@ class View(QtWidgets.QLabel):
         Current shape of picks.
     _pick_size : float or None
         Size of picks in camera pixels; None for polygonal picks (size
-        not defined).
+        not defined). Diameter for circular picks, side length for
+        square picks and width for rectangular picks.
     _pixmap : QPixMap
         Pixmap currently displayed.
     _points : list
@@ -6441,7 +6433,7 @@ class View(QtWidgets.QLabel):
                 pass
         return drift
 
-    def add(self, path: str, render: bool = True) -> None:
+    def add(self, path: str, render_: bool = True) -> None:
         """Load localizations from an .hdf5 file and the associated
         .yaml metadata file.
 
@@ -6451,7 +6443,7 @@ class View(QtWidgets.QLabel):
         ----------
         path : str
             String specifying the path to the .hdf5 file.
-        render : bool, optional
+        render_ : bool, optional
             Specifies if the loaded files should be rendered
             (default True).
         """
@@ -6499,7 +6491,7 @@ class View(QtWidgets.QLabel):
             self.x_render_state = False
 
         # render the loaded file
-        if render:
+        if render_:
             self.fit_in_view(autoscale=True)
             self.update_scene()
 
@@ -6545,7 +6537,7 @@ class View(QtWidgets.QLabel):
             pd.setModal(False)
             for i, path in enumerate(paths):
                 try:
-                    self.add(path, render=False)
+                    self.add(path, render_=False)
                 except Exception as e:
                     QtWidgets.QMessageBox.warning(
                         self,
@@ -7379,11 +7371,12 @@ class View(QtWidgets.QLabel):
             self.rectangle_pick_current_y,
         )
 
-        px = self.window.display_settings_dlg.pixelsize.value()
-        w = self.window.tools_settings_dialog.pick_width.value() / px
-
         # convert from camera units to display units
-        w *= self.width() / render.viewport_width(self.viewport)
+        w = (
+            self._pick_size
+            * self.width()
+            / render.viewport_width(self.viewport)
+        )
 
         polygon = render.get_rectangle_pick_polygon(
             self.rectangle_pick_start_x,
@@ -7635,12 +7628,14 @@ class View(QtWidgets.QLabel):
         if extensions == [".yaml"]:  # just one yaml dropped
             with open(paths[0], "r") as f:
                 file = yaml.full_load(f)
+            if not isinstance(file, dict):
+                return
             # try loading a screenshot
             if "Max. density" in file:
                 self.load_screenshot(file)
             # load pick regions
-            if "Shape" in file:
-                loaded_shape = file["Shape"]
+            loaded_shape = file.get("Shape", None)
+            if loaded_shape is not None:
                 if loaded_shape in [
                     "Circle",
                     "Rectangle",
@@ -7677,10 +7672,8 @@ class View(QtWidgets.QLabel):
             if pick_no >= len(self._picks):
                 raise ValueError("Pick number provided too high")
             else:  # calculate new viewport
-                pixelsize = self.window.display_settings_dlg.pixelsize.value()
-                t_dialog = self.window.tools_settings_dialog
                 if self._pick_shape == "Circle":
-                    r = t_dialog.pick_diameter.value() / 2 / pixelsize
+                    r = self._pick_size / 2
                     x, y = self._picks[pick_no]
                     x_min = x - 1.4 * r
                     x_max = x + 1.4 * r
@@ -7690,7 +7683,7 @@ class View(QtWidgets.QLabel):
                     (xs, ys), (xe, ye) = self._picks[pick_no]
                     xc = np.mean([xs, xe])
                     yc = np.mean([ys, ye])
-                    w = t_dialog.pick_width.value() / pixelsize
+                    w = self._pick_size
                     X, Y = lib.get_pick_rectangle_corners(xs, ys, xe, ye, w)
                     x_min = min(X) - (0.2 * (xc - min(X)))
                     x_max = max(X) + (0.2 * (max(X) - xc))
@@ -7703,7 +7696,7 @@ class View(QtWidgets.QLabel):
                     y_min = min(Y) - 0.2 * (max(Y) - min(Y))
                     y_max = max(Y) + 0.2 * (max(Y) - min(Y))
                 elif self._pick_shape == "Square":
-                    w = t_dialog.pick_side_length.value() / pixelsize
+                    w = self._pick_size
                     x, y = self._picks[pick_no]
                     x_min = x - 1.4 * (w / 2)
                     x_max = x + 1.4 * (w / 2)
@@ -7726,7 +7719,7 @@ class View(QtWidgets.QLabel):
                 if "group" in locs.columns
                 else locs
             )
-            _, qimage = render.render_scene(
+            qimage = render.render_scene(
                 locs_,
                 self.infos[i],
                 **kwargs,
@@ -7738,7 +7731,7 @@ class View(QtWidgets.QLabel):
                     self.window.dataset_dialog.intensitysettings[i].value()
                 ],
                 return_qimage=True,
-            )
+            )[0]
             # modify qimage like in self.draw_scene
             qimage = qimage.scaled(
                 self.width(),
@@ -7945,6 +7938,7 @@ class View(QtWidgets.QLabel):
         if disp_px_size is None:
             if disp_dlg.dynamic_disp_px.isChecked():
                 disp_dlg.set_disp_px_silently(optimal_disp_px_size)
+                disp_px_size = optimal_disp_px_size
             else:
                 if disp_dlg.disp_px_size.value() < optimal_disp_px_size:
                     QtWidgets.QMessageBox.information(
@@ -7956,6 +7950,9 @@ class View(QtWidgets.QLabel):
                         ),
                     )
                     disp_dlg.set_disp_px_silently(optimal_disp_px_size)
+                    disp_px_size = optimal_disp_px_size
+                else:
+                    disp_px_size = disp_dlg.disp_px_size.value()
 
         # viewport and min blur
         viewport = self.viewport if viewport is None else viewport
@@ -8041,7 +8038,7 @@ class View(QtWidgets.QLabel):
         )
         tools_dlg.pick_shape.setCurrentText(self._pick_shape)
         if self._pick_shape == "Circle":
-            tools_dlg.pick_diameter.setValue(size * pixelsize * 2)
+            tools_dlg.pick_diameter.setValue(size * pixelsize)
         elif self._pick_shape == "Rectangle":
             tools_dlg.pick_width.setValue(size * pixelsize)
         elif self._pick_shape == "Square":
@@ -8404,7 +8401,7 @@ class View(QtWidgets.QLabel):
         viewport_height, viewport_width = render.viewport_size(self.viewport)
         x_move = dx * viewport_width
         y_move = dy * viewport_height
-        viewport = render.shift_viewport(self.viewport, x_move, y_move)
+        viewport = render.shift_viewport(self.viewport, -x_move, -y_move)
         self.update_scene(viewport)
 
     @check_pick
@@ -8625,7 +8622,8 @@ class View(QtWidgets.QLabel):
     def _pick_size(self) -> float:
         """Return the size of the pick in camera pixels. For circle this
         is the diameter. For square this is the side length. For
-        rectangle this is the width. For polygon this is None."""
+        rectangle this is the width (perpendicular to the drawing
+        direction). For polygon this is None (undefined)."""
         tools_dialog = self.window.tools_settings_dialog
         pixelsize = self.window.display_settings_dlg.pixelsize.value()
         if self._pick_shape == "Circle":
@@ -8666,9 +8664,7 @@ class View(QtWidgets.QLabel):
         if channel is not None:
             n_channels = len(self.locs_paths)
             colors = lib.get_colors(n_channels)
-            tools_dialog = self.window.tools_settings_dialog
-            pixelsize = self.window.display_settings_dlg.pixelsize.value()
-            r = tools_dialog.pick_diameter.value() / 2 / pixelsize
+            r = self._pick_size / 2
             is_multi = channel is len(self.locs_paths)
             if is_multi:
                 all_picked_locs = [
@@ -8900,7 +8896,7 @@ class View(QtWidgets.QLabel):
         if path:
             saved_locs = pd.concat(saved_locs, ignore_index=True)
             if saved_locs is not None:
-                d = self.window.tools_settings_dialog.pick_diameter.value()
+                d = self._pick_size
                 pick_info = {
                     "Generated by:": f"Picasso v{__version__} Render",
                     "Pick Diameter (nm):": d,
@@ -9056,8 +9052,7 @@ class View(QtWidgets.QLabel):
             return
 
         # assumes circular picks
-        d = self.window.tools_settings_dialog.pick_diameter.value()
-        r = d / 2 / self.window.display_settings_dlg.pixelsize.value()
+        r = self._pick_size / 2
         if channel is len(self.locs_paths):  # all channels
             channels = list(range(len(self.locs_paths)))
         else:
@@ -9135,7 +9130,11 @@ class View(QtWidgets.QLabel):
         else:
             locs = self.all_locs[channel]
         info = self.infos[channel]
-        size = self._pick_size
+        size = (
+            self._pick_size / 2
+            if self._pick_shape == "Circle"
+            else self._pick_size
+        )
         status = lib.StatusDialog("Indexing localizations...", self.window)
         index_blocks = postprocess.get_index_blocks(locs, info, size)
         status.close()
@@ -9218,13 +9217,18 @@ class View(QtWidgets.QLabel):
         selected."""
         self.profiles = []
         pixelsize = self.window.display_settings_dlg.pixelsize.value()
+        pick_size = (
+            self._pick_size / 2
+            if self._pick_shape == "Circle"
+            else self._pick_size
+        )
         for channel in channels:
             picked_locs = postprocess.picked_locs(
                 self.all_locs[channel],
                 self.infos[channel],
                 picks=self._picks,
                 pick_shape=self._pick_shape,
-                pick_size=self._pick_size,
+                pick_size=pick_size,
             )[0]
             self.profiles.append(
                 picked_locs["y_pick_rot"].to_numpy() * pixelsize
@@ -9354,11 +9358,13 @@ class View(QtWidgets.QLabel):
             else:
                 locs = self.all_locs[channel]
 
-            # find pick size (radius or width)
-            px = self.window.display_settings_dlg.pixelsize.value()
-            index_blocks = None  # used for circular picks only
+            # find pick size
+            index_blocks = None
             if self._pick_shape == "Circle":
                 pick_size = self._pick_size / 2
+                index_blocks = self.get_index_blocks(
+                    channel, fast_render=fast_render
+                )
             else:
                 pick_size = self._pick_size
 
@@ -9426,17 +9432,12 @@ class View(QtWidgets.QLabel):
         """
         x, y = position
         new_picks = []
-        px = self.window.display_settings_dlg.pixelsize.value()
-        tool_dlg = self.window.tools_settings_dialog
         if self._pick_shape == "Circle":
-            pick_diameter_2 = (tool_dlg.pick_diameter.value() / px) ** 2
-            new_picks = self._filter_circle_picks(x, y, pick_diameter_2)
+            new_picks = self._filter_circle_picks(x, y, self._pick_size**2)
         elif self._pick_shape == "Rectangle":
-            width = tool_dlg.pick_width.value() / px
-            new_picks = self._filter_rectangle_picks(x, y, width)
+            new_picks = self._filter_rectangle_picks(x, y, self._pick_size)
         elif self._pick_shape == "Square":
-            side = tool_dlg.pick_side_length.value() / px
-            new_picks = self._filter_square_picks(x, y, side)
+            new_picks = self._filter_square_picks(x, y, self._pick_size)
 
         # delete picks and add new_picks
         self._picks = []
@@ -9562,32 +9563,27 @@ class View(QtWidgets.QLabel):
         cmap = self.window.display_settings_dlg.colormap.currentText()
         if cmap == "Custom":
             cmap = np.uint8(np.round(255 * self.custom_cmap))
-
         vmin = self.window.display_settings_dlg.minimum.value()
         vmax = self.window.display_settings_dlg.maximum.value()
         contrast = None if autoscale else (vmin, vmax)
+        raw_image = self.image if use_cache else None
 
-        if use_cache:
-            n_locs = self.n_locs
-            image = self.image
-        else:
-            n_locs, image, (vmin, vmax) = render.render_scene(
-                locs=locs,
-                info=infos,
-                return_qimage=False,
-                **kwargs,
-                contrast=contrast,
-                invert_colors=self.window.dataset_dialog.wbackground.isChecked(),
-                single_channel_colormap=cmap,
-                colors=self.read_colors(),
-                relative_intensities=self.read_relative_intensities(),
-                return_qimage=False,
-                return_contrast_limits=True,
-            )
+        qimage, n_locs, (vmin, vmax), raw_image = render.render_scene(
+            locs=locs,
+            info=infos,
+            **kwargs,
+            contrast=contrast,
+            invert_colors=self.window.dataset_dialog.wbackground.isChecked(),
+            single_channel_colormap=cmap,
+            colors=self.read_colors(),
+            relative_intensities=self.read_relative_intensities(),
+            raw_image_cache=raw_image,
+            return_contrast_limits=True,
+            return_raw_image=True,
+        )
         if cache:
             self.n_locs = n_locs
-            self.image = image
-        qimage = render.convert_rgb_to_qimage(image)
+            self.image = raw_image
         self.window.display_settings_dlg.silent_minimum_update(vmin)
         self.window.display_settings_dlg.silent_maximum_update(vmax)
 
@@ -9668,7 +9664,7 @@ class View(QtWidgets.QLabel):
         # render properties
         if self.x_render_state:
             colors = render.get_colors_from_colormap(
-                n_channels,
+                len(self.x_locs),
                 self.window.display_settings_dlg.colormap_prop.currentText(),
             )
 
@@ -9754,16 +9750,18 @@ class View(QtWidgets.QLabel):
         pick_info : dict
             Dictionary to update with shape-specific info.
         """
-        t_dialog = self.window.tools_settings_dialog
+        pixelsize = self.window.display_settings_dlg.pixelsize.value()
+        picksize_nm = (
+            self._pick_size * pixelsize
+            if self._pick_size is not None
+            else None
+        )
         if self._pick_shape == "Circle":
-            d = t_dialog.pick_diameter.value()
-            pick_info["Pick Diameter (nm)"] = d
+            pick_info["Pick Diameter (nm)"] = picksize_nm
         elif self._pick_shape == "Rectangle":
-            w = t_dialog.pick_width.value()
-            pick_info["Pick Width (nm)"] = w
+            pick_info["Pick Width (nm)"] = picksize_nm
         elif self._pick_shape == "Square":
-            a = t_dialog.pick_side_length.value()
-            pick_info["Pick Side Length (nm)"] = a
+            pick_info["Pick Side Length (nm)"] = picksize_nm
         # if polygon pick and the last not closed, ignore the last pick
         if (
             self._pick_shape == "Polygon"
@@ -10022,14 +10020,15 @@ class View(QtWidgets.QLabel):
         if len(self._picks) == 0:
             return
         picks = {}
+        pixelsize = self.window.display_settings_dlg.pixelsize.value()
         if self._pick_shape == "Circle":
-            d = self.window.tools_settings_dialog.pick_diameter.value()
+            d = self._pick_size * pixelsize
             picks["Diameter (nm)"] = float(d)
             picks["Centers"] = [
                 [float(_[0]), float(_[1])] for _ in self._picks
             ]
         elif self._pick_shape == "Rectangle":
-            w = self.window.tools_settings_dialog.pick_width.value()
+            w = self._pick_size * pixelsize
             picks["Width (nm)"] = float(w)
             picks["Center-Axis-Points"] = [
                 [
@@ -10050,7 +10049,7 @@ class View(QtWidgets.QLabel):
                         )
             picks["Vertices"] = vertices
         elif self._pick_shape == "Square":
-            a = self.window.tools_settings_dialog.pick_side_length.value()
+            a = self._pick_size * pixelsize
             picks["Side Length (nm)"] = float(a)
             picks["Centers"] = [
                 [float(_[0]), float(_[1])] for _ in self._picks
@@ -10428,12 +10427,17 @@ class View(QtWidgets.QLabel):
         if channel is not None:
             # picked_locs = self.picked_locs(channel)
             status = lib.StatusDialog("Calculating drift...", self)
+            pick_size = (
+                self._pick_size / 2
+                if self._pick_shape == "Circle"
+                else self._pick_size
+            )
             undrifted_locs, new_info, drift = (
                 postprocess.undrift_from_fiducials(
                     locs=self.all_locs[channel],
                     info=self.infos[channel],
                     picks=self._picks,
-                    pick_size=self._pick_size,
+                    pick_size=pick_size,
                 )
             )
             self.all_locs[channel] = undrifted_locs
@@ -10453,12 +10457,17 @@ class View(QtWidgets.QLabel):
         if channel is not None:
             # picked_locs = self.picked_locs(channel)
             status = lib.StatusDialog("Calculating drift...", self)
+            pick_size = (
+                self._pick_size / 2
+                if self._pick_shape == "Circle"
+                else self._pick_size
+            )
             undrifted_locs, new_info, drift = (
                 postprocess.undrift_from_fiducials(
                     locs=self.all_locs[channel],
                     info=self.infos[channel],
                     picks=self._picks,
-                    pick_size=self._pick_size,
+                    pick_size=pick_size,
                     undrift_z=False,
                 )
             )
@@ -10630,11 +10639,10 @@ class View(QtWidgets.QLabel):
     def _update_cursor_circle(self) -> None:
         """Set circular cursor according to the diameter defined in
         ``ToolsSettingsDialog``."""
-        diameter = (
-            self.window.tools_settings_dialog.pick_diameter.value()
-        ) / self.window.display_settings_dlg.pixelsize.value()
         diameter = int(
-            self.width() * diameter / render.viewport_width(self.viewport)
+            self.width()
+            * self._pick_size
+            / render.viewport_width(self.viewport)
         )
         # remote desktop crashes sometimes for high diameter
         if diameter < 100:
@@ -10672,12 +10680,10 @@ class View(QtWidgets.QLabel):
     def _update_cursor_square(self) -> None:
         """Set square cursor according to the side length defined in
         ``ToolsSettingsDialog``."""
-        side_length = (
-            self.window.tools_settings_dialog.pick_side_length.value()
-            / self.window.display_settings_dlg.pixelsize.value()
-        )
         side_length = int(
-            self.width() * side_length / render.viewport_width(self.viewport)
+            self.width()
+            * self._pick_size
+            / render.viewport_width(self.viewport)
         )
         if side_length < 100:
             pixmap_size = ceil(side_length) + 1

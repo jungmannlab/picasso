@@ -763,10 +763,11 @@ class ViewRotation(QtWidgets.QLabel):
         vmax = self.window.display_settings_dlg.maximum.value()
         cmap = self.window.display_settings_dlg.colormap.currentText()
         contrast = None if autoscale else (vmin, vmax)
-        _, qimage, (vmin, vmax) = render.render_scene(
+        raw_image = self.image if use_cache else None
+
+        qimage, n_locs, (vmin, vmax), raw_image = render.render_scene(
             locs=locs,
             info=infos,
-            return_qimage=False,
             **kwargs,
             ang=(self.angx, self.angy, self.angz),
             contrast=contrast,
@@ -774,9 +775,13 @@ class ViewRotation(QtWidgets.QLabel):
             single_channel_colormap=cmap,
             colors=self.read_colors(),
             relative_intensities=self.read_relative_intensities(),
-            return_qimage=True,
+            raw_image_cache=raw_image,
             return_contrast_limits=True,
+            return_raw_image=True,
         )
+        if cache:
+            self.n_locs = n_locs
+            self.image = raw_image
         self.window.display_settings_dlg.silent_minimum_update(vmin)
         self.window.display_settings_dlg.silent_maximum_update(vmax)
         return qimage
