@@ -20,6 +20,7 @@ import threading
 import warnings
 from typing import Callable, Literal
 
+import tifffile
 import yaml
 import h5py
 import nd2
@@ -305,6 +306,27 @@ def load_nd2(path: str) -> tuple[ND2Movie, list[dict]]:
     return movie, [info]
 
 
+def load_stk(path: str) -> tuple[STKMovie, list[dict]]:
+    """Load a MetaMorph STK movie file and its metadata.
+
+    Parameters
+    ----------
+    path : str
+        The path to the STK movie file.
+
+    Returns
+    -------
+    movie : STKMovie
+        A movie object providing array-like access to STK frames.
+        Frames are loaded into memory on access.
+    info : list[dict]
+        A list containing a dictionary with metadata about the movie.
+    """
+    movie = STKMovie(path)
+    info = movie.info()
+    return movie, [info]
+
+
 def load_movie(
     path: str,
     prompt_info=None,
@@ -312,7 +334,7 @@ def load_movie(
 ) -> tuple[AbstractPicassoMovie, list[dict]]:
     """Load a movie file based on its extension and returns the movie
     object and its metadata. Accepted format are ``.raw``, ``ome.tif``,
-    ``.ims``, and ``.nd2``.
+    ``.ims``, ``.nd2``, and ``.stk``.
 
     Parameters
     ----------
@@ -340,6 +362,8 @@ def load_movie(
         return load_ims(path, prompt_info=prompt_info)
     elif ext == ".nd2":
         return load_nd2(path)
+    elif ext == ".stk":
+        return load_stk(path)
 
 
 def load_info(
@@ -1411,6 +1435,190 @@ class TiffMap:
             if do_byteswap:
                 image = image.byteswap()
             image.tofile(file_handle)
+
+
+class STKMovie(AbstractPicassoMovie):
+    """Read MetaMorph STK files and provide array-like access to frames.
+
+    STK files are TIFF-based with a single IFD; additional frames are
+    stored contiguously after the first frame's pixel data.  The total
+    frame count is encoded in the UIC2Tag (tag 33629).
+
+    ``tifffile`` is used once during ``__init__`` to extract metadata
+    and the binary offset of the first frame; subsequent frame reads
+    bypass tifffile and go directly to the file via offset arithmetic,
+    matching the pattern of ``TiffMap``.
+    """
+
+    def __init__(self, path: str):
+        super().__init__()
+        self.path = os.path.abspath(path)
+
+        # Use tifffile to extract metadata from the STK file.
+        with tifffile.TiffFile(self.path) as tif:
+            if not tif.is_stk:
+                raise ValueError(
+                    f"File does not appear to be a MetaMorph STK file: {path}"
+                )
+            meta = tif.stk_metadata
+            page = tif.pages[0]
+
+            self.n_frames = int(meta["NumberPlanes"])
+            self.height = int(page.shape[0])
+            self.width = int(page.shape[1])
+            bits = int(page.bitspersample)
+            byte_order = tif.byteorder  # '<' or '>'
+
+            # All data offsets for every plane (tifffile resolves these
+            # for STK files even though there is only one IFD).
+            offsets = page.dataoffsets
+            self._first_data_offset = int(offsets[0])
+            self._contiguous = len(offsets) == 1
+
+            # Store per-frame offsets (tifffile may already expand them
+            # for multi-strip or multi-frame cases).
+            # For standard STK files every frame is a single strip, so
+            # we compute offsets ourselves from the first one.
+            self._frame_bytes = self.height * self.width * (bits // 8)
+
+            self._stk_meta = meta
+            self._byte_order = byte_order
+
+        dtype_str = "u" + str(bits // 8)
+        self._dtype = np.dtype(dtype_str)  # always little-endian for Picasso
+        self._tif_dtype = np.dtype(self._byte_order + dtype_str)
+        self.frame_shape = (self.height, self.width)
+        self.shape = (self.n_frames, self.height, self.width)
+
+        # Open a persistent binary file handle for lazy frame reading.
+        self._file = open(self.path, "rb")
+        self._lock = threading.Lock()
+
+    # ------------------------------------------------------------------
+    # AbstractPicassoMovie interface
+    # ------------------------------------------------------------------
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        self.close()
+
+    def __getitem__(self, it):  # noqa: C901
+        with self._lock:
+            if isinstance(it, tuple):
+                if isinstance(it[0], int) or np.issubdtype(it[0], np.integer):
+                    return self[it[0]][it[1:]]
+                elif isinstance(it[0], slice):
+                    indices = range(*it[0].indices(self.n_frames))
+                    stack = np.array([self.get_frame(_) for _ in indices])
+                    if len(indices) == 0:
+                        return stack
+                    if len(it) == 2:
+                        return stack[:, it[1]]
+                    elif len(it) == 3:
+                        return stack[:, it[1], it[2]]
+                    else:
+                        raise IndexError
+                elif it[0] == Ellipsis:
+                    stack = self[it[0]]
+                    if len(it) == 2:
+                        return stack[:, it[1]]
+                    elif len(it) == 3:
+                        return stack[:, it[1], it[2]]
+                    else:
+                        raise IndexError
+            elif isinstance(it, slice):
+                indices = range(*it.indices(self.n_frames))
+                return np.array([self.get_frame(_) for _ in indices])
+            elif it == Ellipsis:
+                return np.array(
+                    [self.get_frame(_) for _ in range(self.n_frames)]
+                )
+            elif isinstance(it, int) or np.issubdtype(it, np.integer):
+                return self.get_frame(it)
+            raise TypeError
+
+    def __iter__(self):
+        for i in range(self.n_frames):
+            yield self[i]
+
+    def __len__(self) -> int:
+        return self.n_frames
+
+    def info(self) -> dict:
+        """Return Picasso-compatible metadata dictionary."""
+        info = {
+            "Byte Order": "<",
+            "File": self.path,
+            "Height": self.height,
+            "Width": self.width,
+            "Data Type": self._dtype.name,
+            "Frames": self.n_frames,
+        }
+        meta = self._stk_meta
+        if meta.get("SpatialCalibration"):
+            x_cal = meta.get("XCalibration")
+            units = meta.get("CalibrationUnits", "")
+            if x_cal is not None:
+                # x_cal is a float (tifffile already divides the rational)
+                cal_value = float(x_cal)
+                # Convert to nm
+                if isinstance(units, bytes):
+                    units = units.decode(errors="replace")
+                units_lower = units.strip().lower()
+                if units_lower in ("um", "µm", "\u00b5m"):
+                    cal_nm = cal_value * 1000.0
+                elif units_lower == "nm":
+                    cal_nm = cal_value
+                else:
+                    cal_nm = cal_value  # store as-is
+                info["Pixelsize"] = cal_nm
+        return info
+
+    def camera_parameters(self, config: dict) -> dict:
+        return {
+            "gain": [1],
+            "qe": [1],
+            "wavelength": [0],
+            "cam_index": 0,
+            "camera": "None",
+        }
+
+    def get_frame(self, index: int) -> lib.IntArray2D:
+        """Load one frame from the STK file by binary offset."""
+        if index < 0:
+            index = self.n_frames + index
+        if not (0 <= index < self.n_frames):
+            raise IndexError(
+                f"Frame index {index} out of range for movie with "
+                f"{self.n_frames} frames."
+            )
+        offset = self._first_data_offset + index * self._frame_bytes
+        with self._lock:
+            self._file.seek(offset)
+            frame = np.fromfile(
+                self._file,
+                dtype=self._tif_dtype,
+                count=self.height * self.width,
+            ).reshape(self.frame_shape)
+        if self._byte_order == ">":
+            frame = frame.byteswap().view(self._dtype)
+        return frame
+
+    def close(self) -> None:
+        self._file.close()
+
+    def tofile(self, file_handle, byte_order=None):
+        do_byteswap = byte_order != self._byte_order
+        for image in self:
+            if do_byteswap:
+                image = image.byteswap()
+            image.tofile(file_handle)
+
+    @property
+    def dtype(self):
+        return self._dtype
 
 
 class TiffMultiMap(AbstractPicassoMovie):

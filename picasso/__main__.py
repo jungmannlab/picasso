@@ -936,7 +936,12 @@ def _localize_collect_paths(files: str) -> list[str]:
     if isdir(files):
         print("Analyzing folder")
         tif_files = _check_consecutive_tif(files)
-        paths = tif_files + glob(files + "/*.raw") + glob(files + "/*.nd2")
+        paths = (
+            tif_files
+            + glob(files + "/*.raw")
+            + glob(files + "/*.nd2")
+            + glob(files + "/*.stk")
+        )
         print("A total of {} files detected".format(len(paths)))
     else:
         paths = glob(files)
