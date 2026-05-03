@@ -820,7 +820,7 @@ def _render_hist(
         y_max,
         x_max,
     )
-    if ang:
+    if ang is not None:
         x, y, _, _ = locs_rotation(
             locs,
             oversampling,
@@ -1045,7 +1045,7 @@ def _render_gaussian(
         x_max,
     )
 
-    if not ang:  # not rotated
+    if ang is None:  # not rotated
         blur_width = oversampling * np.maximum(
             locs["lpx"].to_numpy(), min_blur_width
         )
@@ -1144,7 +1144,7 @@ def _render_gaussian_iso(
         x_max,
     )
 
-    if not ang:  # not rotated
+    if ang is None:  # not rotated
         blur_width = oversampling * np.maximum(
             locs["lpx"].to_numpy(), min_blur_width
         )
@@ -1266,7 +1266,7 @@ def _render_convolve(
         y_max,
         x_max,
     )
-    if ang:  # rotate
+    if ang is not None:  # rotate
         x, y, in_view, _ = locs_rotation(
             locs,
             oversampling,
@@ -1361,7 +1361,7 @@ def _render_smooth(
         x_max,
     )
 
-    if ang:
+    if ang is not None:  # rotate
         x, y, _, _ = locs_rotation(
             locs,
             oversampling,
@@ -3361,11 +3361,11 @@ def _build_animation(
     given the checkpoints. See ``build_animation`` for more details."""
     angles, viewports = _animation_sequence(positions, durations, fps)
 
-    # width and height for building the animation; must be even
-    # as many video players do not accept it otherwise
+    # width and height for building the animation; must be divisible by 16
+    # as ffmpeg codecs require this for proper encoding
     width, height = image_size
-    width += width % 2
-    height += height % 2
+    width = ((width + 15) // 16) * 16
+    height = ((height + 15) // 16) * 16
 
     # render all frames and save in RAM
     video_writer = imageio.get_writer(path, fps=fps)
@@ -3387,7 +3387,7 @@ def _build_animation(
             else disp_px_size
         )
         contrast_ = _adjust_contrast(contrast, viewports[-1], viewports[i])
-        _, qimage = render_scene(
+        qimage = render_scene(
             locs=locs,
             info=info,
             disp_px_size=disp_px_size_,
@@ -3400,9 +3400,12 @@ def _build_animation(
             single_channel_colormap=single_channel_colormap,
             colors=colors,
             relative_intensities=relative_intensities,
-            return_qimage=True,
+        )[0]
+        qimage = qimage.scaled(
+            width,
+            height,
+            QtCore.Qt.AspectRatioMode.IgnoreAspectRatio,
         )
-        qimage = qimage.scaled(width, height)
 
         # convert to a np.array and append
         ptr = qimage.bits()
@@ -3455,7 +3458,7 @@ def _adjust_disp_px_size(
     # below could be ref_height / new_height, should be the same since
     # we assume the shape of the viewport stays the same
     zoom_factor = ref_width / new_width
-    return disp_px_size_ref * zoom_factor
+    return disp_px_size_ref / zoom_factor
 
 
 def _adjust_contrast(
@@ -3471,6 +3474,6 @@ def _adjust_contrast(
     new_width = viewport_width(new_viewport)
     zoom_factor = ref_width / new_width
     vmin_ref, vmax_ref = contrast_ref
-    vmin_new = vmin_ref * zoom_factor**2
-    vmax_new = vmax_ref * zoom_factor**2
+    vmin_new = vmin_ref / zoom_factor**2
+    vmax_new = vmax_ref / zoom_factor**2
     return vmin_new, vmax_new

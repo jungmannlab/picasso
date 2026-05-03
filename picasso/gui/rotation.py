@@ -106,7 +106,7 @@ class DisplaySettingsRotationDialog(lib.Dialog):
             " rendered."
         )
         contrast_grid.addWidget(minimum_label, 0, 0)
-        self.minimum = QtWidgets.QDoubleSpinBox()
+        self.minimum = lib.LogDoubleSpinBox()
         self.minimum.setRange(0, 999999)
         self.minimum.setSingleStep(5)
         self.minimum.setValue(0)
@@ -120,7 +120,7 @@ class DisplaySettingsRotationDialog(lib.Dialog):
             " rendered."
         )
         contrast_grid.addWidget(maximum_label, 1, 0)
-        self.maximum = QtWidgets.QDoubleSpinBox()
+        self.maximum = lib.LogDoubleSpinBox()
         self.maximum.setRange(0, 999999)
         self.maximum.setSingleStep(5)
         self.maximum.setValue(100)
@@ -231,6 +231,7 @@ class DisplaySettingsRotationDialog(lib.Dialog):
             "Set the scale bar length to approximately 1/8 of the current "
             "viewport width."
         )
+        self.optimal_scalebar_check.setChecked(True)
         self.optimal_scalebar_check.stateChanged.connect(
             self.window.view_rot.set_optimal_scalebar
         )
@@ -509,6 +510,16 @@ class AnimationDialog(lib.Dialog):
     def build_animation(self) -> None:
         """Create an animation as an .mp4 file using the positions from
         the animation sequence."""
+        if len(self.positions) < 2:
+            message = (
+                "At least two positions are required to build an "
+                "animation. You can add them by clicking 'Add this "
+                "position'."
+            )
+            QtWidgets.QMessageBox.warning(
+                self, "Not enough positions", message
+            )
+            return
 
         # get save file name
         out_path = self.window.view_rot.paths[0].replace(".hdf5", "_video.mp4")
@@ -516,9 +527,11 @@ class AnimationDialog(lib.Dialog):
             self, "Save animation", out_path, filter="*.mp4", check_ext=".yaml"
         )
         if path:
-            disp_dlg = self.window.window.display_settings_dlg
+            disp_dlg = self.window.display_settings_dlg
             data_dlg = self.window.window.dataset_dialog
-            pixelsize = disp_dlg.pixelsize.value()
+            pixelsize = (
+                self.window.window.display_settings_dlg.pixelsize.value()
+            )
             locs, infos = self.window.view_rot._prepare_locs_for_rendering()
             n_frames = int(
                 self.fps.value() * sum(d.value() for d in self.durations)
@@ -532,7 +545,10 @@ class AnimationDialog(lib.Dialog):
                 locs,
                 infos,
                 positions=self.positions,
-                durations=[d.value() for d in self.durations],
+                durations=[
+                    self.durations[i].value()
+                    for i in range(len(self.positions) - 1)
+                ],
                 disp_px_size=disp_dlg.disp_px_size.value(),
                 image_size=(
                     self.window.view_rot.width(),
@@ -545,8 +561,8 @@ class AnimationDialog(lib.Dialog):
                 contrast=(disp_dlg.minimum.value(), disp_dlg.maximum.value()),
                 invert_colors=data_dlg.wbackground.isChecked(),
                 single_channel_colormap=disp_dlg.colormap.currentText(),
-                colors=self.window.view.read_colors(),
-                relative_intensities=self.window.view.read_relative_intensities(),
+                colors=self.window.window.view.read_colors(),
+                relative_intensities=self.window.window.view.read_relative_intensities(),
                 fps=self.fps.value(),
                 adjust_pixel_size=adjust_display_pixel,
                 progress_callback=progress.set_value,
@@ -773,14 +789,13 @@ class ViewRotation(QtWidgets.QLabel):
             contrast=contrast,
             invert_colors=self.window.dataset_dialog.wbackground.isChecked(),
             single_channel_colormap=cmap,
-            colors=self.read_colors(),
-            relative_intensities=self.read_relative_intensities(),
+            colors=self.window.window.view.read_colors(),
+            relative_intensities=self.window.window.view.read_relative_intensities(),
             raw_image_cache=raw_image,
             return_contrast_limits=True,
             return_raw_image=True,
         )
         if cache:
-            self.n_locs = n_locs
             self.image = raw_image
         self.window.display_settings_dlg.silent_minimum_update(vmin)
         self.window.display_settings_dlg.silent_maximum_update(vmax)
@@ -808,8 +823,6 @@ class ViewRotation(QtWidgets.QLabel):
         if n_channels:
             viewport = viewport or self.viewport
             self.draw_scene(viewport, autoscale=autoscale, use_cache=use_cache)
-            if not use_cache:
-                self.set_optimal_scalebar()
 
         # update current position in the animation dialog
         angx = np.round(self.angx * 180 / np.pi, 1)
@@ -840,6 +853,8 @@ class ViewRotation(QtWidgets.QLabel):
         """
         # make sure viewport has the same shape as the main window
         self.viewport = self.adjust_viewport_to_view(viewport)
+        if not use_cache:
+            self.set_optimal_scalebar(silent=True)
         # render locs
         qimage = self.render_scene(autoscale=autoscale, use_cache=use_cache)
         # scale image's size to the window
@@ -872,6 +887,7 @@ class ViewRotation(QtWidgets.QLabel):
         QImage
             Image with the drawn scalebar.
         """
+        d_dialog = self.window.display_settings_dlg
         if d_dialog.scalebar_groupbox.isChecked():
             color = (
                 QtGui.QColor("white")
@@ -921,7 +937,6 @@ class ViewRotation(QtWidgets.QLabel):
                 # Convert QColor to RGB tuple (0-255 range)
                 color_rgb = (color.red(), color.green(), color.blue())
                 channel_colors.append(color_rgb)
-        if self.window.dataset_dialog.legend.isChecked():
             image = render.draw_legend(
                 image=image,
                 channel_names=channel_names,
@@ -1105,7 +1120,7 @@ class ViewRotation(QtWidgets.QLabel):
 
     def to_left_rot(self) -> None:
         """Shift pick in the main window."""
-        height, width = self.viewport_size()
+        width = render.viewport_width(self.viewport)
         dx = -SHIFT * width
         dx /= np.cos(self.angy)
         self.window.move_pick(dx, 0)
@@ -1113,7 +1128,7 @@ class ViewRotation(QtWidgets.QLabel):
 
     def to_right_rot(self) -> None:
         """Shift pick in the main window."""
-        height, width = self.viewport_size()
+        width = render.viewport_width(self.viewport)
         dx = SHIFT * width
         dx /= np.cos(self.angy)
         self.window.move_pick(dx, 0)
@@ -1121,7 +1136,7 @@ class ViewRotation(QtWidgets.QLabel):
 
     def to_up_rot(self) -> None:
         """Shift pick in the main window."""
-        height, width = self.viewport_size()
+        height = render.viewport_height(self.viewport)
         dy = -SHIFT * height
         dy /= np.cos(self.angx)
         self.window.move_pick(0, dy)
@@ -1129,13 +1144,15 @@ class ViewRotation(QtWidgets.QLabel):
 
     def to_down_rot(self) -> None:
         """Shift pick in the main window."""
-        height, width = self.viewport_size()
+        height = render.viewport_height(self.viewport)
         dy = SHIFT * height
         dy /= np.cos(self.angx)
         self.window.move_pick(0, dy)
         self.shift_viewport(0, dy)
 
-    def set_optimal_scalebar(self, force: bool = False) -> None:
+    def set_optimal_scalebar(
+        self, force: bool = False, silent: bool = False
+    ) -> None:
         """Sets scalebar to approx. 1/8 of the current viewport's
         width."""
         optimal_scalebar = (
@@ -1144,7 +1161,11 @@ class ViewRotation(QtWidgets.QLabel):
         if force or optimal_scalebar.isChecked():
             width = render.viewport_width(self.viewport)
             scalebar = render.optimal_scalebar_length(self.pixelsize, width)
+            if silent:
+                self.window.display_settings_dlg.scalebar.blockSignals(True)
             self.window.display_settings_dlg.scalebar.setValue(scalebar)
+            if silent:
+                self.window.display_settings_dlg.scalebar.blockSignals(False)
 
     def shift_viewport(self, dx: float, dy: float) -> None:
         """Move viewport by a given amount.
@@ -1211,7 +1232,7 @@ class ViewRotation(QtWidgets.QLabel):
                 self.pan_start_y = event.pos().y()
 
             else:  # rotating
-                height, width = self.viewport_size()
+                height, width = render.viewport_size(self.viewport)
                 pos = self.map_to_movie(event.pos())
 
                 self._rotation.append([pos[0], pos[1]])
@@ -1284,9 +1305,13 @@ class ViewRotation(QtWidgets.QLabel):
     def map_to_movie(self, position: QtCore.QPoint) -> tuple[float, float]:
         """Convert coordinates from Qt display units to camera units."""
         x_rel = position.x() / self.width()
-        x_movie = x_rel * self.viewport_width() + self.viewport[0][1]
+        x_movie = (
+            x_rel * render.viewport_width(self.viewport) + self.viewport[0][1]
+        )
         y_rel = position.y() / self.height()
-        y_movie = y_rel * self.viewport_height() + self.viewport[0][0]
+        y_movie = (
+            y_rel * render.viewport_height(self.viewport) + self.viewport[0][0]
+        )
         return x_movie, y_movie
 
     def pan_relative(self, dy: float, dx: float) -> None:
@@ -1297,7 +1322,7 @@ class ViewRotation(QtWidgets.QLabel):
         dy, dx : float
             Relative displacement of the viewport in y or x axis.
         """
-        viewport_height, viewport_width = self.viewport_size()
+        viewport_height, viewport_width = render.viewport_size(self.viewport)
         x_move = dx * viewport_width
         y_move = dy * viewport_height
         x_min = self.viewport[0][1] - x_move
@@ -1399,22 +1424,7 @@ class ViewRotation(QtWidgets.QLabel):
 
     def zoom(self, factor: float) -> None:
         """Change zoom relatively to factor by changing viewport."""
-        height, width = self.viewport_size()
-        new_height = height * factor
-        new_width = width * factor
-
-        new_center_y, new_center_x = self.viewport_center()
-
-        new_viewport = [
-            (
-                new_center_y - new_height / 2,
-                new_center_x - new_width / 2,
-            ),
-            (
-                new_center_y + new_height / 2,
-                new_center_x + new_width / 2,
-            ),
-        ]
+        new_viewport = render.zoom_viewport(self.viewport, factor)
         self.update_scene(new_viewport)
 
     def set_mode(self, action: QtGui.QAction) -> None:
@@ -1504,6 +1514,8 @@ class ViewRotation(QtWidgets.QLabel):
                 )
                 disp_px_size = opt_disp_px_size
                 disp_dlg.set_disp_px_silently(opt_disp_px_size)
+            else:
+                disp_px_size = disp_dlg.disp_px_size.value()
 
         # viewport
         if viewport is None:
@@ -1527,8 +1539,9 @@ class ViewRotation(QtWidgets.QLabel):
     ) -> float:
         """Return optimal oversampling, i.e., the number of display
         pixels per camera pixel."""
-        os_horizontal = self.width() / self.viewport_width(viewport)
-        os_vertical = self.height() / self.viewport_height(viewport)
+        viewport = viewport or self.viewport
+        os_horizontal = self.width() / render.viewport_width(viewport)
+        os_vertical = self.height() / render.viewport_height(viewport)
         # The values should be identical, but just in case,
         # we choose the maximum value:
         return max(os_horizontal, os_vertical)
@@ -1536,30 +1549,36 @@ class ViewRotation(QtWidgets.QLabel):
     def _prepare_locs_for_rendering(
         self,
     ) -> tuple[list[pd.DataFrame], list[list[dict]]]:
-        """Prepare localizations and metadata for rendering (property,
-        multichannel)."""
+        """Return locs list and use render-property-colored locs if
+        requested."""
+        # render by property - use x_locs like multichannel rendering
         if self.x_render_state:
             locs = self.x_locs.copy()
             infos = [self.infos[0]] * len(locs)
+        # if group column is present, split locs by group for rendering
         else:
             locs = self.locs
             infos = self.infos
             if "group" in locs[0].columns and len(locs) == 1:
-                locs = [
-                    locs[0][self.group_color == _]
-                    for _ in range(N_GROUP_COLORS)
-                ]
-                infos = [self.infos[0]] * N_GROUP_COLORS
+                locs = render.split_locs_by_group(
+                    locs[0], group_color=self.group_color
+                )
+                infos = [self.infos[0]] * len(locs)
 
+        # if multiple channels are loaded, selected only the ones which
+        # are checked in the Dataset Dialog
         if len(self.locs) > 1:
             locs_ = []
-            infos_ = []
+            info_ = []
             for i in range(len(locs)):
                 if self.window.dataset_dialog.checks[i].isChecked():
                     locs_.append(locs[i])
-                    infos_.append(infos[i])
+                    info_.append(infos[i])
             locs = locs_
-            infos = infos_
+            infos = info_
+        elif len(self.locs) == 1 and "group" not in self.locs[0].columns:
+            locs = locs[0]
+            infos = infos[0]
         return locs, infos
 
 

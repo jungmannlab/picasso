@@ -133,25 +133,6 @@ def check_circular_picks(f: Callable) -> Callable:
     return wrapper
 
 
-class LogDoubleSpinBox(QtWidgets.QDoubleSpinBox):
-    """QDoubleSpinBox with logarithmic step size."""
-
-    def __init__(
-        self, parent: QtWidgets.QWidget | None = None, factor: float = 1.2
-    ) -> None:
-        super().__init__(parent)
-        self._factor = factor  # multiply/divide by this on each step
-
-    def stepBy(self, steps: int) -> None:
-        if steps > 0:
-            if self.value() <= 10 ** (-self.decimals()):
-                self.setValue(2 * 10 ** (-self.decimals()))
-            else:
-                self.setValue(self.value() * (self._factor**steps))
-        elif steps < 0:
-            self.setValue(self.value() / (self._factor ** abs(steps)))
-
-
 class FloatEdit(QtWidgets.QLineEdit):
     """Class used for adjusting the influx rate in the info dialog.
 
@@ -5482,7 +5463,7 @@ class DisplaySettingsDialog(lib.Dialog):
             " rendered."
         )
         contrast_grid.addWidget(minimum_label, 0, 0)
-        self.minimum = LogDoubleSpinBox()
+        self.minimum = lib.LogDoubleSpinBox()
         self.minimum.setRange(0, 999999)
         self.minimum.setValue(0)
         self.minimum.setDecimals(6)
@@ -5495,7 +5476,7 @@ class DisplaySettingsDialog(lib.Dialog):
             " rendered."
         )
         contrast_grid.addWidget(maximum_label, 1, 0)
-        self.maximum = LogDoubleSpinBox()
+        self.maximum = lib.LogDoubleSpinBox()
         self.maximum.setRange(0, 999999)
         self.maximum.setValue(100)
         self.maximum.setDecimals(6)
@@ -7544,9 +7525,7 @@ class View(QtWidgets.QLabel):
             # make sure viewport has the same shape as the main window
             self.viewport = self.adjust_viewport_to_view(viewport)
             if not use_cache:
-                self.window.display_settings_dlg.scalebar.blockSignals(True)
-                self.set_optimal_scalebar()
-                self.window.display_settings_dlg.scalebar.blockSignals(False)
+                self.set_optimal_scalebar(silent=True)
             # render locs
             qimage = self.render_scene(
                 autoscale=autoscale, use_cache=use_cache
@@ -9703,12 +9682,14 @@ class View(QtWidgets.QLabel):
     def _prepare_locs_for_rendering(
         self,
     ) -> tuple[list[pd.DataFrame], list[list[dict]]]:
-        """Return locs list with slicer filtering applied and use
-        render-property-colored locs if requested.
+        """Prepare localizations and metadata for rendering with active
+        filters.
 
-        If locs is None, copies self.locs (when slicer is active) or
-        uses self.locs directly. Then clips each channel to the current
-        z-slice if the slicer is enabled."""
+        Applies the following filtering and preparation steps:
+        - Render-by-property coloring if enabled (splits into x_locs);
+        - Group-based splitting if group column exists;
+        - Z-slice clipping if slicer is enabled;
+        - Channel filtering to only include checked channels."""
         slicer = self.window.slicer_dialog.slicer_radio_button
         # render by property - use x_locs like multichannel rendering
         if self.window.display_settings_dlg.render_check.isChecked():
@@ -10212,7 +10193,9 @@ class View(QtWidgets.QLabel):
         current_zoom = self.display_pixels_per_viewport_pixels()
         self.zoom(current_zoom / zoom)
 
-    def set_optimal_scalebar(self, force: bool = False) -> None:
+    def set_optimal_scalebar(
+        self, force: bool = False, silent: bool = False
+    ) -> None:
         """Set scalebar to approx. 1/8 of the current viewport's
         width"""
         optimal_scalebar_checked = (
@@ -10222,7 +10205,11 @@ class View(QtWidgets.QLabel):
             pixelsize = self.window.display_settings_dlg.pixelsize.value()
             width = render.viewport_width(self.viewport)
             scalebar = render.optimal_scalebar_length(pixelsize, width)
+            if silent:
+                self.window.display_settings_dlg.scalebar.blockSignals(True)
             self.window.display_settings_dlg.scalebar.setValue(scalebar)
+            if silent:
+                self.window.display_settings_dlg.scalebar.blockSignals(False)
 
     def sizeHint(self) -> QtCore.QSize:
         """Return recommended window size."""

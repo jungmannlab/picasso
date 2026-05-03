@@ -552,6 +552,25 @@ class ScrollableGroupBox(QtWidgets.QGroupBox):
             widget.deleteLater()
 
 
+class LogDoubleSpinBox(QtWidgets.QDoubleSpinBox):
+    """QDoubleSpinBox with logarithmic step size."""
+
+    def __init__(
+        self, parent: QtWidgets.QWidget | None = None, factor: float = 1.2
+    ) -> None:
+        super().__init__(parent)
+        self._factor = factor  # multiply/divide by this on each step
+
+    def stepBy(self, steps: int) -> None:
+        if steps > 0:
+            if self.value() <= 10 ** (-self.decimals()):
+                self.setValue(2 * 10 ** (-self.decimals()))
+            else:
+                self.setValue(self.value() * (self._factor**steps))
+        elif steps < 0:
+            self.setValue(self.value() / (self._factor ** abs(steps)))
+
+
 class GenericPlotWindow(QtWidgets.QTabWidget):
     """Interface for displaying matplotlib plots in a separate
     window."""
