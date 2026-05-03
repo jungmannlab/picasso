@@ -1285,20 +1285,30 @@ def plot_trace(
         count vector (if include_photons is True) will be returned.
     """
     if fig is None:
-        fig = plt.Figure(constrained_layout=True)
+        if include_photons:
+            fig, (ax1, ax2, ax3, ax4) = plt.subplots(
+                4, 1, figsize=(5, 5), constrained_layout=True, sharex=True
+            )
+        else:
+            fig, (ax1, ax2, ax3) = plt.subplots(
+                3, 1, figsize=(5, 5), constrained_layout=True, sharex=True
+            )
     else:
         fig.clear()
-    if include_photons:
-        ax1, ax2, ax3, ax4 = fig.subplots(4, sharex=True)
-    else:
-        ax1, ax2, ax3 = fig.subplots(3, sharex=True)
+        if include_photons:
+            ax1, ax2, ax3, ax4 = fig.subplots(4, sharex=True)
+        else:
+            ax1, ax2, ax3 = fig.subplots(3, sharex=True)
 
     n_frames = get_from_metadata(info, "Frames", raise_error=True)
     xvec = np.arange(n_frames)
     yvec = xvec[:] * 0
     yvec[locs["frame"]] = 1
     yvec_ph = xvec[:] * 0
-    yvec_ph[locs["frame"]] = locs["photons"]
+    if "photons" in locs.columns:
+        yvec_ph[locs["frame"]] = locs["photons"]
+    else:
+        yvec_ph = np.zeros_like(xvec)
     trace_data = (xvec, yvec, yvec_ph) if include_photons else (xvec, yvec)
 
     # frame vs x
@@ -1326,7 +1336,7 @@ def plot_trace(
         ax4.set_title("Photons")
         ax4.set_xlabel("Frames")
         ax4.set_ylabel("Photons")
-        ax4.set_ylim([0, locs["photons"].max() * 1.1])
+        ax4.set_ylim([0, yvec_ph.max() * 1.1])
 
     if return_trace:
         return fig, trace_data
@@ -2013,7 +2023,9 @@ def polygon_area(X: FloatArray1D, Y: FloatArray1D) -> float:
     return area
 
 
-def pick_areas_polygon(picks: list[list[tuple[float, float]]]) -> FloatArray1D:
+def _pick_areas_polygon(
+    picks: list[list[tuple[float, float]]],
+) -> FloatArray1D:
     """Return pick areas for each polygonal pick in picks.
 
     Parameters
@@ -2038,7 +2050,7 @@ def pick_areas_polygon(picks: list[list[tuple[float, float]]]) -> FloatArray1D:
     return areas
 
 
-def pick_areas_rectangle(
+def _pick_areas_rectangle(
     picks: list[list[tuple[float, float]]],
     w: float,
 ) -> FloatArray1D:
@@ -2089,13 +2101,14 @@ def pick_areas(
     """
     if pick_shape == "Circle":
         r = pick_size / 2
-        # no need for repeating, same area for all picks
+        # same area for all picks
         areas = np.pi * r**2 * np.ones(len(picks))
     elif pick_shape == "Rectangle":
-        areas = pick_areas_rectangle(picks, pick_size)
+        areas = _pick_areas_rectangle(picks, pick_size)
     elif pick_shape == "Polygon":
-        areas = pick_areas_polygon(picks)
+        areas = _pick_areas_polygon(picks)
     elif pick_shape == "Square":
+        # same area for all picks
         areas = pick_size**2 * np.ones(len(picks))
     else:
         raise ValueError(f"Unknown pick shape: {pick_shape}")

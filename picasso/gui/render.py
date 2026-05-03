@@ -53,7 +53,6 @@ from .. import (
 from ..lib import (
     FloatArray1D,
     FloatArray2D,
-    FloatArray3D,
 )
 from .rotation import RotationWindow
 
@@ -74,8 +73,7 @@ matplotlib.rcParams.update({"axes.titlesize": "large"})
 DEFAULT_OVERSAMPLING = 1.0  # number of display pixels per camera pixel
 INITIAL_REL_MAXIMUM = 0.5
 ZOOM = 9 / 7
-N_GROUP_COLORS = 8
-N_Z_COLORS = 32
+N_GROUP_COLORS = render.N_GROUP_COLORS  # 8
 POLYGON_POINTER_SIZE = 16  # must be even
 
 
@@ -668,7 +666,7 @@ class DatasetDialog(lib.Dialog):
                     )
                 break
 
-    def _close_one_channel(self, i: int, render=True) -> None:
+    def _close_one_channel(self, i: int, render_=True) -> None:
         """Close the channel with the given index and delete all
         corresponding attributes."""
         # remove widgets from the Dataset Dialog
@@ -703,6 +701,9 @@ class DatasetDialog(lib.Dialog):
         del self.window.view.all_locs[i]
         self.window.fast_render_dialog.on_file_closed(i)
 
+        # remove z slicing attribute
+        self.window.slicer_dialog.zcoord.pop(i)
+
         # adjust group color if needed
         if len(self.window.view.locs) == 1:
             if "group" in self.window.view.locs[0].columns:
@@ -720,7 +721,7 @@ class DatasetDialog(lib.Dialog):
 
         # update the window and adjust the size of the
         # Dataset Dialog
-        if render:
+        if render_:
             self.update_viewport()
 
         # update the window title
@@ -2603,27 +2604,24 @@ class TestClustererDialog(lib.Dialog):
             "Check boxes impact the colors of channels:\n"
             " - No check boxes: clusters are colored according to their\n"
             "   cluster ID, unclustered localizations are not shown.\n"
-            " - Display non-clustered localizations only: white clusters,\n"
+            " - Display unclustered localizations only: white clusters,\n"
             "   red unclustered localizations.\n"
             " - Display cluster centers only: white cluster centers,\n"
             "   red clustered localizations.\n"
-            " - Display non-clustered localizations and cluster centers:\n"
-            "   white cluster centers, yellow clustered localizations,\n"
+            " - Display unclustered localizations and cluster centers:\n"
+            "   blue cluster centers, yellow clustered localizations,\n"
             "   red unclustered localizations."
         )
         layout = QtWidgets.QGridLayout(self)
         self.setLayout(layout)
 
         # explanation
-        layout.addWidget(
-            QtWidgets.QLabel(
-                "Pick a region of interest and test different clustering\n"
-                "algorithms and parameters.\n\n"
-                "Use shortcuts Alt + {W, A, S, D, -, =} to change FOV.\n"
-            ),
-            0,
-            0,
+        message = (
+            "Pick a region of interest and test different clustering\n"
+            "algorithms and parameters.\n\n"
+            "Use shortcuts Alt + {W, A, S, D, -, =} to change FOV.\n"
         )
+        layout.addWidget(QtWidgets.QLabel(message), 0, 0)
 
         # parameters
         parameters_box = QtWidgets.QGroupBox("Parameters")
@@ -3367,7 +3365,7 @@ class TestClustererView(QtWidgets.QLabel):
         self.viewport = render.zoom_viewport(self.viewport, factor)
         self.update_scene()
 
-    def shift_viewport(self, dx: int, dy: int) -> None:
+    def shift_viewport(self, dx: float, dy: float) -> None:
         """Move viewport by a specified amount."""
         self.viewport = render.shift_viewport(self.viewport, dx, dy)
         self.update_scene()
@@ -3395,7 +3393,8 @@ class TestClustererView(QtWidgets.QLabel):
         colors = lib.get_colors(len(locs))
         qimage = render.render_scene(
             locs=locs,
-            info=[self.view.infos[self.channels.currentIndex()]] * len(locs),
+            info=[self.view.infos[self.dialog.channels.currentIndex()]]
+            * len(locs),
             disp_px_size=disp_px_size,
             viewport=self.viewport,
             blur_method=blur_method,
@@ -4592,6 +4591,7 @@ class MaskSettingsDialog(lib.Dialog):
         viewport = ((0, 0), (self.y_max, self.x_max))
         _, H = render.render(
             locs,
+            {"Pixelsize": self.pixelsize},
             disp_px_size=self.disp_px_size.value(),
             viewport=viewport,
             blur_method=None,
@@ -4738,6 +4738,7 @@ class MaskSettingsDialog(lib.Dialog):
         ) or not self.save_all.isChecked():
             _, self.H_new = render.render(
                 self.index_locs[-1],
+                {"Pixelsize": self.pixelsize},
                 oversampling=self.pixelsize / self.disp_px_size.value(),
                 viewport=((0, 0), (self.y_max, self.x_max)),
                 blur_method=None,
@@ -5347,8 +5348,8 @@ class RESIDialog(lib.Dialog):
         progress.show()
 
         all_resi, resi_info = postprocess.resi(
-            locs=self.locs,
-            infos=self.infos,
+            locs=self.window.view.locs,
+            infos=self.window.view.infos,
             radius_xy=r_xy,
             radius_z=r_z,
             min_locs=min_locs,
@@ -5356,9 +5357,11 @@ class RESIDialog(lib.Dialog):
             save_clustered_locs=self.save_clustered_locs.isChecked(),
             save_cluster_centers=self.save_cluster_centers.isChecked(),
             suffix_locs=suffix_locs,
+            output_paths=self.paths,
             suffix_centers=suffix_centers,
             progress_callback=progress.set_value,
         )
+        progress.close()
         resi_info[-1]["Paths to RESI channels"] = self.paths
         io.save_locs(resi_path, all_resi, resi_info)
 
@@ -5874,22 +5877,15 @@ class FastRenderDialog(lib.Dialog):
         self.fractions = [100]
 
         # info explaining what is this dialog
-        self.layout.addWidget(
-            QtWidgets.QLabel(
-                (
-                    "Change percentage of locs displayed in each\n"
-                    "channel to increase the speed of rendering.\n\n"
-                    "NOTE: sampling locs may lead to unexpected behaviour\n"
-                    "when using some of Picasso : Render functions.\n"
-                    "Please set the percentage below to 100 to avoid\n"
-                    "such situations."
-                )
-            ),
-            0,
-            0,
-            1,
-            2,
+        explanation = (
+            "Change percentage of locs displayed in each\n"
+            "channel to increase the speed of rendering.\n\n"
+            "NOTE: sampling locs may lead to unexpected behaviour\n"
+            "when using some of Picasso : Render functions.\n"
+            "Please set the percentage below to 100 to avoid\n"
+            "such situations."
         )
+        self.layout.addWidget(QtWidgets.QLabel(explanation), 0, 0, 1, 2)
 
         # choose channel
         self.layout.addWidget(QtWidgets.QLabel("Channel: "), 1, 0)
@@ -6478,10 +6474,10 @@ class View(QtWidgets.QLabel):
         disp_sett_dlg.render_check.blockSignals(False)
         if len(self.locs) == 1:
             self.median_lp = np.mean(
-                [np.median(locs.lpx), np.median(locs.lpy)]
+                [np.median(locs["lpx"]), np.median(locs["lpy"])]
             )
             if "group" in locs.columns:
-                if len(self.group_color) == 0 and locs.group.size:
+                if len(self.group_color) == 0 and len(locs):
                     self.group_color = render.get_group_color(self.locs[0])
             disp_sett_dlg.parameter.clear()
             disp_sett_dlg.parameter.addItems(locs.columns.to_list())
@@ -6497,10 +6493,14 @@ class View(QtWidgets.QLabel):
 
         if "z" in locs.columns:
             # append z coordinates for slicing
-            self.window.slicer_dialog.zcoord.append(locs.z)
+            self.window.slicer_dialog.zcoord.append(locs["z"])
             # unlock 3D settings
             for action in self.window.actions_3d:
                 action.setVisible(True)
+        else:
+            self.window.slicer_dialog.zcoord.append(
+                []
+            )  # empty list for 2D data
 
         # allow using View, Tools and Postprocess menus
         for menu in self.window.menus:
@@ -6680,6 +6680,7 @@ class View(QtWidgets.QLabel):
             pick_size=self._pick_size,
             progress_callback=progress.set_value,
         )
+        progress.close()
         self.locs[channel] = copy.copy(self.all_locs[channel])
 
         if "group" in self.all_locs[channel].columns:
@@ -7131,9 +7132,6 @@ class View(QtWidgets.QLabel):
         if not ok:
             return
 
-        print(
-            params["calibration"]["Magnification factor"]
-        )  # TODO: delete this after testing
         max_locs_per_channel = []
         for i in range(len(self.window.view.locs)):
             if not self.check_group(i):
@@ -7545,6 +7543,10 @@ class View(QtWidgets.QLabel):
         if not picks_only:
             # make sure viewport has the same shape as the main window
             self.viewport = self.adjust_viewport_to_view(viewport)
+            if not use_cache:
+                self.window.display_settings_dlg.scalebar.blockSignals(True)
+                self.set_optimal_scalebar()
+                self.window.display_settings_dlg.scalebar.blockSignals(False)
             # render locs
             qimage = self.render_scene(
                 autoscale=autoscale, use_cache=use_cache
@@ -7559,7 +7561,7 @@ class View(QtWidgets.QLabel):
             self.qimage_no_picks = self.draw_scalebar(qimage)
             self.qimage_no_picks = self.draw_minimap(self.qimage_no_picks)
             self.qimage_no_picks = self.draw_legend(self.qimage_no_picks)
-            # adjust zoom in Display Setting sDialog
+            # adjust zoom in Display Settings Dialog
             dppvp = self.display_pixels_per_viewport_pixels()
             self.window.display_settings_dlg.set_zoom_silently(dppvp)
         # draw picks and points
@@ -7715,22 +7717,18 @@ class View(QtWidgets.QLabel):
             vmin = self.window.display_settings_dlg.minimum.value()
             vmax = self.window.display_settings_dlg.maximum.value()
             locs_ = (
-                locs.remove_columns("group")
-                if "group" in locs.columns
-                else locs
+                locs.drop(columns="group") if "group" in locs.columns else locs
             )
             qimage = render.render_scene(
                 locs_,
                 self.infos[i],
                 **kwargs,
-                viewport=self.viewport,
                 contrast=(vmin, vmax),
                 invert_colors=self.window.dataset_dialog.wbackground.isChecked(),
                 single_channel_colormap="gray",
                 relative_intensities=[
                     self.window.dataset_dialog.intensitysettings[i].value()
                 ],
-                return_qimage=True,
             )[0]
             # modify qimage like in self.draw_scene
             qimage = qimage.scaled(
@@ -8018,8 +8016,11 @@ class View(QtWidgets.QLabel):
                 ),
             )
             return
-        # apply drift
-        self._apply_drift(channel, drift)
+        # apply drift, convert to df first
+        drift_df = pd.DataFrame(drift[:, :2], columns=["x", "y"])
+        if drift.shape[1] == 3:
+            drift_df["z"] = drift[:, 2]
+        self._apply_drift(channel, drift_df)
 
     def load_picks(self, path: str) -> None:
         """Load picks from .yaml file.
@@ -8537,7 +8538,6 @@ class View(QtWidgets.QLabel):
             params["t0"] = time.time()
             all_picked_locs = self.picked_locs(channel)
             i = 0  # index of the currently shown pick
-            n_frames = self.infos[channel][0]["Frames"]
             while i < len(self._picks):
                 locs_ = all_picked_locs[i]
                 fig, (xvec, yvec, yvec_ph) = lib.plot_trace(
@@ -9158,12 +9158,11 @@ class View(QtWidgets.QLabel):
         Returns
         -------
         areas : FloatArray1D
-            Areas of all picks.
+            Areas of all picks. For circular and square picks all values
+            are the same.
         """
         px = self.window.display_settings_dlg.pixelsize.value()
         areas = lib.pick_areas(self._picks, self._pick_shape, self._pick_size)
-        if self._pick_shape in ["Circle", "Square"]:
-            areas = areas[0]  # same area for all picks
         areas *= (px * 1e-3) ** 2  # convert to um^2
         return areas
 
@@ -9183,17 +9182,20 @@ class View(QtWidgets.QLabel):
             QtWidgets.QMessageBox.warning(self, "Warning", message)
             return
 
+        status = lib.StatusDialog("Finding fiducials...", self.window)
         locs = self.all_locs[channel]
         info = self.infos[channel]
         picks, box = imageprocess.find_fiducials(locs, info)
-        box *= self.window.display_settings_dlg.pixelsize.value()
+        status.close()
 
         if len(picks) == 0:
             message = "No fiducials found, manual picking is required."
             QtWidgets.QMessageBox.warning(self, "Warning", message)
             return
 
-        self.window.tools_settings_dialog.pick_diameter.setValue(box)
+        self.window.tools_settings_dialog.pick_diameter.setValue(
+            box * self.window.display_settings_dlg.pixelsize.value()
+        )
         self.add_picks(picks)
 
     def plot_profile(self) -> None:
@@ -9581,9 +9583,12 @@ class View(QtWidgets.QLabel):
             return_contrast_limits=True,
             return_raw_image=True,
         )
+        if use_cache:
+            n_locs = self.n_locs
         if cache:
             self.n_locs = n_locs
             self.image = raw_image
+
         self.window.display_settings_dlg.silent_minimum_update(vmin)
         self.window.display_settings_dlg.silent_maximum_update(vmax)
 
@@ -9647,12 +9652,6 @@ class View(QtWidgets.QLabel):
                     QtWidgets.QMessageBox.information(self, "Warning", warning)
                     break
 
-            # # reverse colors if white background
-            # if self.window.dataset_dialog.wbackground.isChecked():
-            #     tempcolor = colors[i]
-            #     inverted = tuple([1 - _ for _ in tempcolor])
-            #     colors[i] = inverted
-
         # use only the checked channels
         if len(self.locs) > 1:
             colors_ = []
@@ -9660,6 +9659,10 @@ class View(QtWidgets.QLabel):
                 if self.window.dataset_dialog.checks[i].isChecked():
                     colors_.append(colors[i])
             colors = colors_
+        elif len(self.locs) == 1 and "group" in self.locs[0].columns:
+            colors = lib.get_colors(
+                N_GROUP_COLORS
+            )  # automatic colors for groups
 
         # render properties
         if self.x_render_state:
@@ -9693,10 +9696,12 @@ class View(QtWidgets.QLabel):
         ]
         if self.x_render_state:
             relative_intensities = [1.0] * len(self.x_locs)
+        elif len(self.locs) == 1 and "group" in self.locs[0].columns:
+            relative_intensities = [1.0] * N_GROUP_COLORS
         return relative_intensities
 
     def _prepare_locs_for_rendering(
-        self, locs: list | None = None
+        self,
     ) -> tuple[list[pd.DataFrame], list[list[dict]]]:
         """Return locs list with slicer filtering applied and use
         render-property-colored locs if requested.
@@ -9705,14 +9710,20 @@ class View(QtWidgets.QLabel):
         uses self.locs directly. Then clips each channel to the current
         z-slice if the slicer is enabled."""
         slicer = self.window.slicer_dialog.slicer_radio_button
-        if locs is None:
-            # render by property - use x_locs like multichannel rendering
-            if self.window.display_settings_dlg.render_check.isChecked():
-                # we assume one channel is loaded
-                locs = self.x_locs.copy()
+        # render by property - use x_locs like multichannel rendering
+        if self.window.display_settings_dlg.render_check.isChecked():
+            # we assume one channel is loaded
+            locs = self.x_locs.copy()
+            infos = [self.infos[0]] * len(locs)
+        # if group column is present, split locs by group for rendering
+        else:
+            locs = self.locs.copy() if slicer.isChecked() else self.locs
+            infos = self.infos
+            if "group" in locs[0].columns and len(locs) == 1:
+                locs = render.split_locs_by_group(
+                    locs[0], group_color=self.group_color
+                )
                 infos = [self.infos[0]] * len(locs)
-            else:
-                locs = self.locs.copy() if slicer.isChecked() else self.locs
 
         # clip to z-slice if slicer is enabled
         for i in range(len(locs)):
@@ -9722,8 +9733,6 @@ class View(QtWidgets.QLabel):
                     z_max = self.window.slicer_dialog.slicermax
                     in_view = (locs[i]["z"] > z_min) & (locs[i]["z"] <= z_max)
                     locs[i] = locs[i][in_view]
-        if not self.window.display_settings_dlg.render_check.isChecked():
-            infos = self.infos
 
         # if multiple channels are loaded, selected only the ones which
         # are checked in the Dataset Dialog
@@ -9736,6 +9745,9 @@ class View(QtWidgets.QLabel):
                     info_.append(infos[i])
             locs = locs_
             infos = info_
+        elif len(self.locs) == 1 and "group" not in self.locs[0].columns:
+            locs = locs[0]
+            infos = infos[0]
         return locs, infos
 
     def resizeEvent(self, event: QtGui.QResizeEvent) -> None:
@@ -9785,10 +9797,14 @@ class View(QtWidgets.QLabel):
             Base pick_info dictionary.
         """
         areas = self.pick_areas()
+        if self._pick_shape in ["Circle", "Square"]:
+            areas_ = [areas[0]]  # save only one value (repeated)
+        else:
+            areas_ = areas
         pick_info = {
             "Generated by": f"Picasso v{__version__} Render : Pick",
             "Pick Shape": self._pick_shape,
-            "Pick Areas (um^2)": [float(_) for _ in areas],
+            "Pick Areas (um^2)": [float(_) for _ in areas_],
             "Area (um^2)": float(np.sum(areas)),
             "Number of picks": len(self._picks),
         }
@@ -9840,15 +9856,10 @@ class View(QtWidgets.QLabel):
         if locs is not None:
             areas = self.pick_areas()
             for i, pick_locs in enumerate(locs):
-                area = (
-                    areas[i]
-                    if self._pick_shape not in ["Circle", "Square"]
-                    else areas[0]
-                )
                 pick_info = {
                     "Generated by": f"Picasso v{__version__} Render : Pick",
                     "Pick Shape": self._pick_shape,
-                    "Area (um^2)": float(area),
+                    "Area (um^2)": float(areas[i]),
                 }
                 self._add_shape_specific_info(pick_info)
                 io.save_locs(
@@ -9907,17 +9918,10 @@ class View(QtWidgets.QLabel):
         if locs is not None:
             areas = self.pick_areas()
             for i, pick_locs in enumerate(locs):
-                # areas is of length 1 for circle and squares since all
-                # the picks are the same size
-                area = (
-                    areas[i]
-                    if self._pick_shape not in ["Circle", "Square"]
-                    else areas[0]
-                )
                 pick_info = {
                     "Generated by": f"Picasso v{__version__} Render : Pick",
                     "Pick Shape": self._pick_shape,
-                    "Area (um^2)": float(area),
+                    "Area (um^2)": float(areas[i]),
                     "Channels combined": self.locs_paths,
                 }
                 self._add_shape_specific_info(pick_info)
@@ -9983,11 +9987,7 @@ class View(QtWidgets.QLabel):
         )
         # add the area of the picks to the properties (if available)
         if len(self._picks):
-            areas = self.pick_areas()
-            if self._pick_shape in ["Circle", "Square"]:
-                # if all picks are the same, repeat the area for each group
-                areas = np.repeat(areas, n_groups)
-            pick_props["pick_area_um2"] = areas
+            pick_props["pick_area_um2"] = self.pick_areas
         progress.close()
         warnings.simplefilter(
             "default", category=(OptimizeWarning, RuntimeWarning)
@@ -10057,54 +10057,6 @@ class View(QtWidgets.QLabel):
         picks["Shape"] = self._pick_shape
         with open(path, "w") as f:
             yaml.dump(picks, f)
-
-    def scale_contrast(
-        self,
-        image: FloatArray2D | FloatArray3D,
-        autoscale: bool = False,
-    ) -> FloatArray2D | FloatArray3D:
-        """Scale image based on contrast values from
-        ``DisplaySettingsDialog``.
-
-        Parameters
-        ----------
-        image : FloatArray2D | FloatArray3D
-            Array with rendered localizations (grayscale).
-        autoscale : bool, optional
-            If True, finds optimal contrast. Default is False.
-
-        Returns
-        -------
-        image : FloatArray2D | FloatArray3D
-            Scaled image(s).
-        """
-        if autoscale:  # find optimum contrast
-            if image.ndim == 2:
-                max_ = image.max()
-            else:
-                max_ = min(
-                    [
-                        _.max()
-                        for _ in image  # single channel locs with only
-                        if _.max() != 0  # one group have
-                    ]  # N_GROUP_COLORS - 1 images of
-                )  # only zeroes
-            upper = INITIAL_REL_MAXIMUM * max_
-            self.window.display_settings_dlg.silent_minimum_update(0)
-            self.window.display_settings_dlg.silent_maximum_update(upper)
-
-        upper = self.window.display_settings_dlg.maximum.value()
-        lower = self.window.display_settings_dlg.minimum.value()
-
-        if upper == lower:
-            upper = lower + 1 / (10**6)
-            self.window.display_settings_dlg.silent_maximum_update(upper)
-
-        image = (image - lower) / (upper - lower)
-        image[~np.isfinite(image)] = 0
-        image = np.minimum(image, 1.0)
-        image = np.maximum(image, 0.0)
-        return image
 
     def activate_render_property(self) -> None:
         """Assign localizations by color to render a chosen property."""
@@ -10297,17 +10249,15 @@ class View(QtWidgets.QLabel):
         channel = self.get_channel("Show drift")
         if channel is not None:
             drift = self._drift[channel]
-
             if drift is None:
+                message = (
+                    "No driftfile found."
+                    "  Nothing to display."
+                    "  Please perform drift correction first"
+                    " or load a .txt drift file."
+                )
                 QtWidgets.QMessageBox.information(
-                    self,
-                    "Driftfile error",
-                    (
-                        "No driftfile found."
-                        "  Nothing to display."
-                        "  Please perform drift correction first"
-                        " or load a .txt drift file."
-                    ),
+                    self, "Drift file error", message
                 )
             else:
                 self.plot_window = DriftPlotWindow(self)
@@ -10500,7 +10450,7 @@ class View(QtWidgets.QLabel):
         if "z" in drift.columns:
             drift["z"] = -drift["z"]
         self.all_locs[channel] = postprocess.apply_drift(
-            self.all_locs[channel], self.infos[channel], drift
+            self.all_locs[channel], self.infos[channel], drift=drift
         )
         self.locs[channel] = copy.copy(self.all_locs[channel])
         self.index_blocks[channel] = None
@@ -10543,20 +10493,21 @@ class View(QtWidgets.QLabel):
         channel = self.get_channel("Apply drift")
         if channel is not None:
             path, exe = QtWidgets.QFileDialog.getOpenFileName(
-                self, "Load drift file", filter="*.txt", directory=None
+                self,
+                "Load drift file",
+                filter="*.txt",
+                directory=self.window.pwd,
             )
             if path:
                 drift = io.load_drift(path)
                 self._apply_drift(channel, drift)
                 self._driftfiles[channel] = path
 
-    def _apply_drift(
-        self, channel: int, drift: pd.DataFrame | FloatArray2D
-    ) -> None:
+    def _apply_drift(self, channel: int, drift: pd.DataFrame) -> None:
         """Shift localizations in a given channel based on drift from a
         .txt file."""
         self.all_locs[channel] = postprocess.apply_drift(
-            self.all_locs[channel], self.infos[channel], drift
+            self.all_locs[channel], self.infos[channel], drift=drift
         )
         self.locs[channel] = copy.copy(self.all_locs[channel])
         self._drift[channel] = drift
@@ -10818,8 +10769,7 @@ class View(QtWidgets.QLabel):
         """
         # Clear slicer cache
         self.window.slicer_dialog.slicer_cache = {}
-        n_channels = len(self.locs)
-        if n_channels:
+        if len(self.locs):
             viewport = viewport or self.viewport
             self.draw_scene(
                 viewport,
@@ -10828,8 +10778,6 @@ class View(QtWidgets.QLabel):
                 picks_only=picks_only,
             )
             self.update_cursor()
-            if not use_cache:
-                self.set_optimal_scalebar()
 
     def update_scene_slicer(
         self,
@@ -11050,7 +10998,7 @@ class Window(QtWidgets.QMainWindow):
         export_complete_action = file_menu.addAction("Export complete image")
         export_complete_action.setShortcut("Ctrl+Shift+E")
         export_complete_action.triggered.connect(self.export_complete)
-        export_kwargs_action = file_menu.addAction("Export manually")
+        export_kwargs_action = file_menu.addAction("Export view manually")
         export_kwargs_action.triggered.connect(self.export_kwargs)
         export_grayscale_action = file_menu.addAction(
             "Export channels in grayscale"
@@ -11292,7 +11240,9 @@ class Window(QtWidgets.QMainWindow):
             "Align channels (RCC or from picked)"
         )
         align_action.triggered.connect(self.view.align)
-        combine_action = postprocess_menu.addAction("Combine locs in picks")
+        combine_action = postprocess_menu.addAction(
+            "Combine localizations in picks"
+        )
         combine_action.triggered.connect(self.view.combine)
 
         postprocess_menu.addSeparator()
@@ -11564,6 +11514,10 @@ class Window(QtWidgets.QMainWindow):
 
     def export_kwargs(self) -> None:
         """Exports a FOV given GUI-independent kwargs."""
+        kwargs, ok = ExportKwargsDialog.getParams(self)
+        if not ok:
+            return
+
         try:
             base, ext = os.path.splitext(self.view.locs_paths[0])
         except AttributeError:
@@ -11577,10 +11531,6 @@ class Window(QtWidgets.QMainWindow):
             check_ext=".yaml",
         )
         if not path:
-            return
-
-        kwargs, ok = ExportKwargsDialog.getParams(self)
-        if not ok:
             return
 
         # adjust constast temporarily
@@ -11610,6 +11560,18 @@ class Window(QtWidgets.QMainWindow):
                 return
         self.save_qimage_to_path(path, qimage, dpi=dpi)
         self.export_current_info(path, **kwargs)
+
+        # export an extra image with scalebar if necessary
+        if not self.display_settings_dlg.scalebar_groupbox.isChecked():
+            qimage_scale = render.draw_scalebar(
+                image=qimage,
+                viewport=kwargs["viewport"],
+                scalebar_length_nm=self.display_settings_dlg.scalebar.value(),
+                pixelsize=self.display_settings_dlg.pixelsize.value(),
+            )
+            new_path, ext = os.path.splitext(path)
+            new_path = new_path + "_scalebar" + ext
+            self.save_qimage_to_path(new_path, qimage_scale, dpi=dpi)
 
         # restore contrast
         min_spin.setValue(old_min)

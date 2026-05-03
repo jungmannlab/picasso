@@ -24,7 +24,7 @@ from .. import io, render, lib, __version__
 
 DEFAULT_OVERSAMPLING = 1.0
 INITIAL_REL_MAXIMUM = 0.5
-N_GROUP_COLORS = 8
+N_GROUP_COLORS = render.N_GROUP_COLORS  # 8
 SHIFT = 0.1
 ZOOM = 9 / 7
 
@@ -1539,16 +1539,22 @@ class ViewRotation(QtWidgets.QLabel):
         """Prepare localizations and metadata for rendering (property,
         multichannel)."""
         if self.x_render_state:
-            locs = self.x_lcos.copy()
+            locs = self.x_locs.copy()
             infos = [self.infos[0]] * len(locs)
         else:
             locs = self.locs
             infos = self.infos
+            if "group" in locs[0].columns and len(locs) == 1:
+                locs = [
+                    locs[0][self.group_color == _]
+                    for _ in range(N_GROUP_COLORS)
+                ]
+                infos = [self.infos[0]] * N_GROUP_COLORS
 
         if len(self.locs) > 1:
             locs_ = []
             infos_ = []
-            for i in range(locs):
+            for i in range(len(locs)):
                 if self.window.dataset_dialog.checks[i].isChecked():
                     locs_.append(locs[i])
                     infos_.append(infos[i])

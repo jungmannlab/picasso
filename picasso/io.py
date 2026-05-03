@@ -508,6 +508,14 @@ def load_drift(path: str) -> pd.DataFrame | None:
         A DataFrame containing the drift information with columns 'frame',
         'x', 'y', and optionally 'z'. Returns None if the file cannot be
         loaded.
+
+    Raises
+    ------
+    ValueError
+        If the path does not end with .txt.
+    AssertionError
+        If the loaded drift data does not have the expected format (2D
+        array with 2 or 3 columns).
     """
     if not path.endswith(".txt"):
         raise ValueError("Drift file must end with .txt")

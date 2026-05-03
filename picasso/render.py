@@ -35,7 +35,7 @@ POLYGON_POINTER_SIZE = 16  # must be even
 
 def render(
     locs: pd.DataFrame,
-    info: dict | None = None,
+    info: dict | None,
     oversampling: float = 1.0,
     viewport: tuple[tuple[float, float], tuple[float, float]] | None = None,
     blur_method: (
@@ -52,8 +52,7 @@ def render(
     locs : pd.DataFrame
         Localizations to be rendered.
     info : dict, optional
-        Contains localizations metadata. Needed only if no viewport
-        specified.
+        Contains localizations metadata.
     oversampling : float, optional
         Number of super-resolution pixels per camera pixel. Default is
         1. Deprecated, use disp_px_size instead. Will be removed in
@@ -2572,7 +2571,12 @@ def render_scene(
     ----------
     locs: pd.DataFrame or list of pd.DataFrame
         Localizations to be rendered. Can be either one localization
-        file or a list thereof.
+        file or a list thereof. If a single DataFrame is provided,
+        localizations will be rendered in a single channel, i.e., using
+        a color map specified by `single_channel_colormap`. If a list of
+        DataFrames is provided, localizations will be rendered in
+        multiple channels, and the color of each channel can be
+        specified by `colors`.
     info: list of dict or list of list of dict
         List of info dictionaries corresponding to the localization
         file(s).
@@ -2644,15 +2648,6 @@ def render_scene(
         data, 3D array for multi-channel data). Only returned if
         return_raw_image is True.
     """
-    if isinstance(locs, list) and len(locs) == 1:
-        locs = locs[0]
-        info = info[0]
-        if "group" in locs.columns:
-            group_color = get_group_color(locs)
-            locs = [locs[group_color == _] for _ in range(N_GROUP_COLORS)]
-            info = [info for _ in range(N_GROUP_COLORS)]
-            colors = lib.get_colors(len(locs))
-
     if isinstance(locs, pd.DataFrame):
         n_locs, rgb, contrast_limits, raw_image = _render_single_channel(
             locs=locs,
@@ -2667,6 +2662,11 @@ def render_scene(
             single_channel_colormap=single_channel_colormap,
             raw_image_cache=raw_image_cache,
         )
+    elif len(locs) == 0:
+        rgb = np.zeros((1, 1, 3), dtype=np.uint8)
+        n_locs = 0
+        contrast_limits = contrast if contrast is not None else (0.0, 1.0)
+        raw_image = np.zeros((1, 1), dtype=np.float32)
     else:
         if colors is not None:
             assert len(colors) == len(locs) == len(info), (
@@ -2703,6 +2703,116 @@ def render_scene(
         return qimage, n_locs
 
 
+def _render_multi_channel(
+    locs: list[pd.DataFrame],
+    info: list[list[dict]],
+    *,
+    disp_px_size: float,
+    colors: list[tuple[int, int, int]],
+    viewport: tuple[tuple[float, float], tuple[float, float]] | None = None,
+    blur_method: (
+        Literal["gaussian", "gaussian_iso", "smooth", "convolve"] | None
+    ) = None,
+    min_blur_width: float = 0.0,
+    ang: tuple | None = None,
+    contrast: tuple[float, float] | None = None,
+    relative_intensities: list[float] | None = None,
+    invert_colors: bool = False,
+    raw_image_cache: lib.FloatArray3D | None = None,
+) -> tuple[int, lib.IntArray3D, tuple[float, float], lib.FloatArray3D]:
+    """Render multi-channel localizations into an RGB 8bit image
+    (numpy array). See ``render_scene`` for more details."""
+    if raw_image_cache is not None:
+        assert raw_image_cache.ndim == 3, "raw_image_cache must be a 3D array."
+        raw_image = raw_image_cache
+        n_locs = 0
+    else:
+        renderings = [  # monochromatic images of localizations
+            render(
+                locs=locs[i],
+                info=info[i],
+                disp_px_size=disp_px_size,
+                viewport=viewport,
+                blur_method=blur_method,
+                min_blur_width=min_blur_width,
+                ang=ang,
+            )
+            for i in range(len(locs))
+        ]
+        n_locs = sum([rendering[0] for rendering in renderings])
+        raw_image = np.array([rendering[1] for rendering in renderings])
+
+    # scale contrast and intensities
+    vmin, vmax = contrast if contrast is not None else (None, None)
+    autoscale = True if contrast is None else False
+    images, contrast_limits = scale_contrast(
+        raw_image, vmin, vmax, autoscale=autoscale, return_contrast_limits=True
+    )
+    images = scale_intensities(
+        images, relative_intensities=relative_intensities
+    )
+
+    # color the images
+    Y, X = images.shape[1:]
+    rgb = np.zeros((Y, X, 3), dtype=np.float32)  # float for now
+    if colors is None:  # fallback if the user did not specify colors
+        colors = lib.get_colors(len(images))
+    for color, image in zip(colors, images):
+        for i in range(3):
+            rgb[:, :, i] += color[i] * image
+    rgb = np.minimum(
+        rgb, 1.0
+    )  # clip to max value of 1 (preserves relative brightness)
+    rgb = to_8bit(rgb)
+    if invert_colors:
+        rgb = 255 - rgb
+    return n_locs, rgb, contrast_limits, raw_image
+
+
+def _render_single_channel(
+    locs: pd.DataFrame,
+    info: list[dict],
+    *,
+    disp_px_size: float,
+    viewport: tuple[tuple[float, float], tuple[float, float]] | None = None,
+    blur_method: (
+        Literal["gaussian", "gaussian_iso", "smooth", "convolve"] | None
+    ) = None,
+    min_blur_width: float = 0.0,
+    ang: tuple | None = None,
+    contrast: tuple[float, float] | None = None,
+    invert_colors: bool = False,
+    single_channel_colormap: str = "magma",
+    raw_image_cache: lib.FloatArray2D | None = None,
+) -> tuple[int, lib.IntArray3D, tuple[float, float], lib.FloatArray2D]:
+    """Render single-channel localizations into an RGB 8bit image (numpy
+    array). See ``render_scene`` for more details."""
+    if raw_image_cache is not None:
+        assert raw_image_cache.ndim == 2, "raw_image_cache must be a 2D array."
+        raw_image = raw_image_cache
+        n_locs = 0
+    else:
+        n_locs, raw_image = render(
+            locs=locs,
+            info=info,
+            disp_px_size=disp_px_size,
+            viewport=viewport,
+            blur_method=blur_method,
+            min_blur_width=min_blur_width,
+            ang=ang,
+        )
+    vmin, vmax = contrast if contrast is not None else (None, None)
+    autoscale = True if contrast is None else False
+    image, contrast_limits = scale_contrast(
+        raw_image, vmin, vmax, autoscale=autoscale, return_contrast_limits=True
+    )
+    image = to_8bit(image)
+    rgb = apply_colormap(image, single_channel_colormap)
+    if invert_colors:
+        rgb = 255 - rgb
+    return n_locs, rgb, contrast_limits, raw_image
+
+
 def rgb_to_qimage(
     image: lib.IntArray3D, return_bgra: bool = False
 ) -> QtGui.QImage | tuple[QtGui.QImage, lib.IntArray3D]:
@@ -2732,6 +2842,7 @@ def rgb_to_qimage(
     bgra[:, :, 3] = 255  # A -> 255 (opaque)
     Y, X = image.shape[:2]
     qimage = QtGui.QImage(bgra.data, X, Y, QtGui.QImage.Format.Format_RGB32)
+    qimage = qimage.copy()  # make a deep copy to own the data DO NOT DELETE
     if return_bgra:
         return qimage, bgra
     return qimage
@@ -2836,114 +2947,6 @@ def to_8bit(
     return np.round(image * 255).astype(np.uint8)
 
 
-def _render_multi_channel(
-    locs: list[pd.DataFrame],
-    info: list[list[dict]],
-    *,
-    disp_px_size: float,
-    colors: list[tuple[int, int, int]],
-    viewport: tuple[tuple[float, float], tuple[float, float]] | None = None,
-    blur_method: (
-        Literal["gaussian", "gaussian_iso", "smooth", "convolve"] | None
-    ) = None,
-    min_blur_width: float = 0.0,
-    ang: tuple | None = None,
-    contrast: tuple[float, float] | None = None,
-    relative_intensities: list[float] | None = None,
-    invert_colors: bool = False,
-    raw_image_cache: lib.FloatArray3D | None = None,
-) -> tuple[int, lib.IntArray3D, tuple[float, float], lib.FloatArray3D]:
-    """Render multi-channel localizations into an RGB 8bit image
-    (numpy array). See ``render_scene`` for more details."""
-    if raw_image_cache is not None:
-        assert raw_image_cache.ndim == 3, "raw_image_cache must be a 3D array."
-        raw_image = raw_image_cache
-        n_locs = 0
-    else:
-        renderings = [  # monochromatic images of localizations
-            render(
-                locs=locs[i],
-                info=info[i],
-                disp_px_size=disp_px_size,
-                viewport=viewport,
-                blur_method=blur_method,
-                min_blur_width=min_blur_width,
-                ang=ang,
-            )
-            for i in range(len(locs))
-        ]
-        n_locs = sum([rendering[0] for rendering in renderings])
-        raw_image = np.array([rendering[1] for rendering in renderings])
-
-    # scale contrast and intensities
-    vmin, vmax = contrast if contrast is not None else (None, None)
-    autoscale = True if contrast is None else False
-    images, contrast_limits = scale_contrast(
-        raw_image, vmin, vmax, autoscale=autoscale, return_contrast_limits=True
-    )
-    images = scale_intensities(
-        images, relative_intensities=relative_intensities
-    )
-
-    # color the images
-    Y, X = images.shape[1:]
-    rgb = np.zeros((Y, X, 3), dtype=np.float32)  # float for now
-    if colors is None:  # fallback if the user did not specify colors
-        colors = lib.get_colors(len(images))
-    for color, image in zip(colors, images):
-        for i in range(3):
-            rgb[:, :, i] += color[i] * image
-    rgb /= rgb.max()  # normalize to max value of 1
-    rgb = to_8bit(rgb)
-    if invert_colors:
-        rgb = 255 - rgb
-    return n_locs, rgb, contrast_limits, raw_image
-
-
-def _render_single_channel(
-    locs: pd.DataFrame,
-    info: list[dict],
-    *,
-    disp_px_size: float,
-    viewport: tuple[tuple[float, float], tuple[float, float]] | None = None,
-    blur_method: (
-        Literal["gaussian", "gaussian_iso", "smooth", "convolve"] | None
-    ) = None,
-    min_blur_width: float = 0.0,
-    ang: tuple | None = None,
-    contrast: tuple[float, float] | None = None,
-    invert_colors: bool = False,
-    single_channel_colormap: str = "magma",
-    raw_image_cache: lib.FloatArray2D | None = None,
-) -> tuple[int, lib.IntArray3D, tuple[float, float], lib.FloatArray2D]:
-    """Render single-channel localizations into an RGB 8bit image (numpy
-    array). See ``render_scene`` for more details."""
-    if raw_image_cache is not None:
-        assert raw_image_cache.ndim == 2, "raw_image_cache must be a 2D array."
-        raw_image = raw_image_cache
-        n_locs = 0
-    else:
-        n_locs, raw_image = render(
-            locs=locs,
-            info=info,
-            disp_px_size=disp_px_size,
-            viewport=viewport,
-            blur_method=blur_method,
-            min_blur_width=min_blur_width,
-            ang=ang,
-        )
-    vmin, vmax = contrast if contrast is not None else (None, None)
-    autoscale = True if contrast is None else False
-    image, contrast_limits = scale_contrast(
-        raw_image, vmin, vmax, autoscale=autoscale, return_contrast_limits=True
-    )
-    image = to_8bit(image)
-    rgb = apply_colormap(image, single_channel_colormap)
-    if invert_colors:
-        rgb = 255 - rgb
-    return n_locs, rgb, contrast_limits, raw_image
-
-
 def apply_colormap(
     image: lib.IntArray2D, colormap: str | lib.FloatArray2D
 ) -> lib.IntArray3D:
@@ -3017,6 +3020,41 @@ def split_locs_by_property(
     locs_groups = []
     for i in range(n_colors):
         locs_groups.append(locs[color == i])
+    return locs_groups
+
+
+def split_locs_by_group(
+    locs: pd.DataFrame,
+    n_colors: int = N_GROUP_COLORS,
+    group_color: lib.IntArray1D | None = None,
+) -> list[pd.DataFrame]:
+    """Split localizations into groups based on the 'group' column and
+    return a list of DataFrames, one for each group.
+
+    If no 'group' column is present, all localizations are returned as
+    single-element list.
+
+    Parameters
+    ----------
+    locs : pd.DataFrame
+        Localizations.
+    n_colors : int, optional
+        Number of color groups to create if 'group' column is not present.
+        Default is 8.
+    group_color : IntArray1D or None, optional
+        If provided, specifies the group color ids (up to `n_colors`)
+        for each localization.
+    """
+    if group_color is not None:
+        assert len(group_color) == len(
+            locs
+        ), "Length of group_color must match number of localizations."
+        locs_groups = [locs[group_color == _] for _ in range(n_colors)]
+    elif "group" in locs.columns:
+        groups = locs["group"].unique()
+        locs_groups = [locs[locs["group"] == group] for group in groups]
+    else:
+        locs_groups = [locs]
     return locs_groups
 
 

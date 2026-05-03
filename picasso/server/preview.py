@@ -21,7 +21,9 @@ def load_file(path: str):
 
 
 @st.cache_data
-def picasso_render(locs: pd.DataFrame, viewport: tuple, oversampling: float):
+def picasso_render(
+    locs: pd.DataFrame, info: list[dict], viewport: tuple, oversampling: float
+):
     """Helper function to render a viewport. Cached.
 
     Args:
@@ -31,6 +33,7 @@ def picasso_render(locs: pd.DataFrame, viewport: tuple, oversampling: float):
     """
     len_x, image = render.render(
         locs,
+        info=info,
         viewport=viewport,
         oversampling=oversampling,
         blur_method="smooth",
@@ -97,7 +100,9 @@ def preview():
                             max_value=40.0,
                         )
 
-                        image = picasso_render(locs, viewport, oversampling)
+                        image = picasso_render(
+                            locs, info, viewport, oversampling
+                        )
 
                         vmin = c2.number_input(
                             "Min density", value=np.min(image.flatten())

@@ -1,6 +1,6 @@
 # Changelog
 
-Last change: 02-MAY-2026 CEST
+Last change: 03-MAY-2026 CEST
 
 ## 0.10.0
 
@@ -59,7 +59,7 @@ Last change: 02-MAY-2026 CEST
 - Removed focus on push buttons in dialogs
 - New API for alignement of locs, see ``picasso.postprocess``: ``align_rcc`` and ``align_from_picked``
 - New function ``picasso.io.load_picks``
-- Improved data typing of np.arrays
+- Improved data typing of numpy arrays
 - Fixed flake8 warnings (code style only)
 - `picasso.postprocess.groupprops` shows no progress by default
 - `picasso.io.TiffMultiMap` docstrings corrected

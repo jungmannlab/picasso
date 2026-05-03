@@ -1141,11 +1141,6 @@ def plot_nena(
     ax.set_xlabel(f"Distance ({unit})")
     ax.set_ylabel("Counts")
     ax.legend(loc="best")
-    ax.plot(nena_result["d"], nena_result["data"], label="Data")
-    ax.plot(nena_result["d"], nena_result["best_fit"], label="Best fit")
-    ax.set_xlabel(f"Distance ({unit})")
-    ax.set_ylabel("Number of neighbors")
-    ax.legend()
     return fig
 
 
@@ -1421,8 +1416,9 @@ def _frc(
     # render images
     binsize = lp / 2
     oversampling = 1 / binsize
-    im1 = render.render(locs1, None, oversampling, viewport, None)[1]
-    im2 = render.render(locs2, None, oversampling, viewport, None)[1]
+    dummy_info = {"Pixelsize": pixelsize}
+    im1 = render.render(locs1, dummy_info, oversampling, viewport, None)[1]
+    im2 = render.render(locs2, dummy_info, oversampling, viewport, None)[1]
 
     # ensure the images are odd-sized and mask them (tukey)
     if im1.shape[0] % 2 == 0:
@@ -2050,6 +2046,8 @@ def combine_locs_in_picks(
         )
         if len(pick_locs_out):
             out_locs.append(pick_locs_out)
+    if callable(progress_callback):
+        progress_callback(len(pl))
     out_locs = pd.concat(out_locs, ignore_index=True)
     return out_locs
 
@@ -3073,9 +3071,10 @@ def plot_drift(
     fig : plt.Figure
         The figure containing the plot.
     """
+    assert isinstance(drift, pd.DataFrame), "Drift must be a DataFrame."
     assert (
         "x" in drift.columns and "y" in drift.columns
-    ), "Drift must have 'x' and 'y' columns"
+    ), "Drift must have 'x' and 'y' columns."
     if fig is None:
         fig = plt.Figure(figsize=(10, 6), constrained_layout=True)
     else:
@@ -3564,7 +3563,8 @@ def resi(
     apply_fa: bool = True,
     save_clustered_locs: bool = False,
     save_cluster_centers: bool = False,
-    output_path: str | None = None,
+    resi_path: str | None = None,
+    output_paths: list[str] | None = None,
     suffix_locs: str = "_clustered",
     suffix_centers: str = "_cluster_centers",
     progress_callback: (
@@ -3601,19 +3601,23 @@ def resi(
         Default is True.
     save_clustered_locs : bool, optional
         If True, save clustered localizations for each channel to a
-        file. Requires output_path to be provided. Default is False.
+        file. Requires output_paths to be provided. Default is False.
     save_cluster_centers : bool, optional
         If True, save cluster centers for each channel to a file.
-        Requires output_path to be provided. Default is False.
-    output_path : str or None, optional
-        Path to save combined RESI cluster centers. If None and
-        save_* parameters are True, clustered data will not be saved.
-        Default is None.
+        Requires output_paths to be provided. Default is False.
+    resi_path : str or None, optional
+        Path to save the combined RESI cluster centers with metadata. If
+        None, the combined cluster centers will not be saved. Default is
+        None.
+    output_paths : list of str or None, optional
+        List of paths to save cluster centers for each channel. If None
+        and save_* parameters are True, clustered data will not be
+        saved. Default is None.
     suffix_locs : str, optional
-        Suffix appended to output_path for saved clustered
+        Suffix appended to output_paths for saved clustered
         localizations. Default is "_clustered".
     suffix_centers : str, optional
-        Suffix appended to output_path for saved cluster centers from
+        Suffix appended to output_paths for saved cluster centers from
         individual channels. Default is "_cluster_centers".
     progress_callback : Callable[[int], None] | Literal["console"] | None, optional
         Callback function to report progress where the input integer is
@@ -3644,7 +3648,7 @@ def resi(
     to ensure sufficient sparsity of binding sites. Therefore, at least
     2 channels are required.
 
-    If output_path is provided, the combined RESI cluster centers will
+    If output_paths are provided, the combined RESI cluster centers will
     be saved with a new metadata entry containing clustering parameters
     for each channel.
     """
@@ -3691,7 +3695,8 @@ def resi(
         apply_fa=apply_fa,
         save_clustered_locs=save_clustered_locs,
         save_cluster_centers=save_cluster_centers,
-        output_path=output_path,
+        resi_path=resi_path,
+        output_paths=output_paths,
         suffix_locs=suffix_locs,
         suffix_centers=suffix_centers,
         progress_callback=progress_callback,
@@ -3707,7 +3712,8 @@ def _resi(
     apply_fa: bool = True,
     save_clustered_locs: bool = False,
     save_cluster_centers: bool = False,
-    output_path: str | None = None,
+    resi_path: str | None = None,
+    output_paths: list[str] | None = None,
     suffix_locs: str = "_clustered",
     suffix_centers: str = "_cluster_centers",
     progress_callback: (
@@ -3748,7 +3754,7 @@ def _resi(
         )
 
         # Save clustered localizations if requested
-        if save_clustered_locs and output_path is not None:
+        if save_clustered_locs and output_paths is not None:
             new_info = {
                 "Clustering radius xy (nm)": r_xy * pixelsize,
                 "Min. number of locs": min_locs_,
@@ -3757,14 +3763,14 @@ def _resi(
             if ndim == 3:
                 new_info["Clustering radius z (nm)"] = r_z * pixelsize
 
-            save_path = output_path.replace(".hdf5", f"{suffix_locs}.hdf5")
+            save_path = output_paths[i].replace(".hdf5", f"{suffix_locs}.hdf5")
             io.save_locs(save_path, clustered_locs, info_ + [new_info])
 
         # Extract cluster centers from clustered localizations
         centers = clusterer.find_cluster_centers(clustered_locs, pixelsize)
 
         # Save cluster centers if requested
-        if save_cluster_centers and output_path is not None:
+        if save_cluster_centers and output_paths is not None:
             new_info = {
                 "Clustering radius xy (nm)": r_xy * pixelsize,
                 "Min. number of locs": min_locs_,
@@ -3773,7 +3779,9 @@ def _resi(
             if ndim == 3:
                 new_info["Clustering radius z (nm)"] = r_z * pixelsize
 
-            save_path = output_path.replace(".hdf5", f"{suffix_centers}.hdf5")
+            save_path = output_paths[i].replace(
+                ".hdf5", f"{suffix_centers}.hdf5"
+            )
             io.save_locs(save_path, centers, info_ + [new_info])
 
         # Add RESI channel ID to identify which channel this cluster belongs to
@@ -3782,6 +3790,8 @@ def _resi(
             dtype=np.int8,
         )
         resi_channels.append(centers)
+    if callable(progress_callback):  # close the progress dialog
+        progress_callback(len(locs))
 
     # Combine cluster centers from all channels
     all_resi = pd.concat(resi_channels, ignore_index=True)
@@ -3803,8 +3813,8 @@ def _resi(
             np.array(radius_z) * pixelsize
         )
     new_info = infos[0] + [new_info]
-    # Save combined RESI results if output path is provided
-    if output_path is not None:
-        io.save_locs(output_path, all_resi, new_info)
+    # Save combined RESI results if output paths are provided
+    if resi_path is not None:
+        io.save_locs(resi_path, all_resi, new_info)
 
     return all_resi, new_info

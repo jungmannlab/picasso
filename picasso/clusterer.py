@@ -553,6 +553,7 @@ def _hdbscan(
         min_samples=min_samples,
         min_cluster_size=min_cluster_size,
         cluster_selection_epsilon=cluster_eps,
+        copy=False,
     ).fit(X)
     return hdb.labels_.astype(np.int32)
 
