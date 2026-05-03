@@ -9,7 +9,7 @@ picasso.__init__.py
 
 import os.path
 import yaml
-from .version import __version__
+from .version import __version__  # noqa: F401
 
 _this_file = os.path.abspath(__file__)
 _this_dir = os.path.dirname(_this_file)

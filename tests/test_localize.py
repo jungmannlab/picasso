@@ -5,7 +5,8 @@ in picasso.gausslq, picasso.gaussmle, picasso.zfit
 :copyright: Copyright (c) 2025 Jungmann Lab, MPI of Biochemistry
 """
 
-# TODO: add identifying more data types? like .tif, .nd2? this can go to test_io.py though
+# TODO: add identifying more data types? like .tif, .nd2?
+# this can go to test_io.py though
 # TODO: add calibration tests
 
 import numpy as np
@@ -66,7 +67,7 @@ def info(movie_data):
 @pytest.fixture
 def identifications(movie):
     """Provide identifications to test functions."""
-    ids = localize.identify(movie, MIN_NG, BOX)
+    ids = localize.identify(movie, MIN_NG, BOX)  # TODO: new tests!
     return ids
 
 
@@ -105,7 +106,7 @@ def test_identification_with_roi(movie, identifications):
         DataFrame containing identified spots with columns:
         'frame', 'x', 'y', 'net_gradient'
     """
-    # run identification with the defined parameters
+    # run identification with the defined parameters # TODO: new tests
     identifications_roi = localize.identify(movie, MIN_NG, BOX, roi=ROI)
 
     # basic validation tests
@@ -131,7 +132,7 @@ def test_identification_with_roi(movie, identifications):
 def test_identification_threaded_vs_non_threaded(movie, identifications):
     """Test that threaded and non-threaded identification give
     consistent results."""
-    # get results from both modes
+    # get results from both modes  # TODO: new tests
     ids_threaded = localize.identify(movie, MIN_NG, BOX, threaded=True)
 
     # compare results (should be identical or very similar)
@@ -150,15 +151,18 @@ def test_localize_lq(identifications, spots, theta_lq):
 
     # test localization via least-squares fitting
     theta_lq_multi = gausslq.fit_spots_parallel(spots, asynch=False)
-    assert len(theta_lq) == len(
-        spots
-    ), "Number of localized spots (LQ) does not match number of extracted spots"
-    assert len(theta_lq_multi) == len(
-        spots
-    ), "Number of localized spots (LQ multi) does not match number of extracted spots"
-    assert np.allclose(
-        theta_lq, theta_lq_multi
-    ), "LQ fitting results differ between single-threaded and multi-threaded implementations"
+    assert len(theta_lq) == len(spots), (
+        "Number of localized spots (LQ) does not match number of "
+        "extracted spots"
+    )
+    assert len(theta_lq_multi) == len(spots), (
+        "Number of localized spots (LQ multi) does not match number of "
+        "extracted spots"
+    )
+    assert np.allclose(theta_lq, theta_lq_multi), (
+        "LQ fitting results differ between single-threaded and "
+        "multi-threaded implementations"
+    )
 
 
 def test_localize_mle(identifications, spots):
@@ -174,12 +178,17 @@ def test_localize_mle(identifications, spots):
     locs_mle = gaussmle.locs_from_fits(
         identifications, theta_mle_xy, CRLBs, lls, its, BOX
     )
-    assert len(theta_mle_xy) == len(
-        spots
-    ), "Number of localized spots (MLE sigmaxy) does not match number of extracted spots"
-    assert len(theta_mle) == len(
-        spots
-    ), "Number of localized spots (MLE sigma) does not match number of extracted spots"
+    assert len(theta_mle_xy) == len(spots), (
+        "Number of localized spots (MLE sigmaxy) does not match number"
+        " of extracted spots."
+    )
+    assert len(theta_mle) == len(spots), (
+        "Number of localized spots (MLE sigma) does not match number of "
+        "extracted spots."
+    )
+    assert len(
+        locs_mle
+    ), "No localized spots were returned from MLE fitting results."
 
     # TODO: the interface for mle fitting via parallel processing is a
     # little messy, needs to be made more analogous to the lq fitting,
@@ -187,16 +196,18 @@ def test_localize_mle(identifications, spots):
 
 
 def test_localize_3d(info, locs_lq):
-    """Test 3D localization of identified spots."""
+    """Test 3D localization of identified spots."""  # TODO: update tests for new zfit interface
     locs_3d = zfit.fit_z(locs_lq, info, CALIB_3D, 0.79, 130)
     assert "z" in locs_3d.columns, "3D localization results missing 'z' column"
     assert len(locs_3d), "No 3D localized spots were returned"
     locs_3d_multi = zfit.fit_z_parallel(
         locs_lq, info, CALIB_3D, 0.79, 130, asynch=False
     )
-    assert len(locs_3d) == len(
-        locs_lq
-    ), "Number of 3D localized spots does not match number of 2D localized spots"
-    assert len(locs_3d_multi) == len(
-        locs_lq
-    ), "Number of 3D localized spots (multi) does not match number of 2D localized spots"
+    assert len(locs_3d) == len(locs_lq), (
+        "Number of 3D localized spots does not match number of 2D"
+        " localized spots."
+    )
+    assert len(locs_3d_multi) == len(locs_lq), (
+        "Number of 3D localized spots (multi) does not match number of 2D"
+        " localized spots."
+    )

@@ -1,6 +1,6 @@
 # Changelog
 
-Last change: 17-APR-2026 CEST
+Last change: 03-MAY-2026 CEST
 
 ## 0.10.0
 
@@ -17,6 +17,8 @@ Last change: 17-APR-2026 CEST
 - Render GUI: added support for reading .csv files from ThunderSTORM
 - Easy access to user settings via any Picasso module
 - SPINNA offers two new fitting methods for fast fitting instead of the brute force search, see [documentation](https://picassosr.readthedocs.io/en/latest/spinna.html#fitting)
+- Almost all the functions in the GUI scripts (for example, `picasso.gui.render.py`) not related to GUI were moved to corresponding API scripts such that using Picasso as a Python package allows for easy analysis analogous to what GUI provides. For example, ``picasso.render.py`` does not only provide the function to generate a grayscale image of localizations only (like before) but can also be used to paint the same images as they are rendered (for example, with picks and scale bar)
+- Numerous new functions added in the API to simplify the more complicated analyses, for example, ``picasso.localize.fit2D``
 - Faster ind. loc. precision rendering in 3D
 
 ### *Small improvements:*
@@ -57,12 +59,24 @@ Last change: 17-APR-2026 CEST
 - Removed focus on push buttons in dialogs
 - New API for alignement of locs, see ``picasso.postprocess``: ``align_rcc`` and ``align_from_picked``
 - New function ``picasso.io.load_picks``
+- Improved data typing of numpy arrays
+- Fixed flake8 warnings (code style only)
+- `picasso.postprocess.groupprops` shows no progress by default
+- `picasso.io.TiffMultiMap` docstrings corrected
+- CLI function `nneighbor` uses KDTree for higher speed
+- Simulate (multilabel) saves label names as in "Exchange rounds to be simulated" rather than 0, 1, 2, ...
+- Improved exception printing in GUI, robust against QThread-related issues, e.g., errors in Localize are now available to read
+- Localize: documentation updated relating to the file menu features, such as loading picks as identifications
+- Localize: save spots as .tif, .npy, not .hdf5
 
 ### *Bug fixes:*
 
 - Fixed 3D render screenshot metadata
+- Fixed 3D animation for non-square FOV
+- Fixed zero-value in rendered images (previously RGB channels were capped between 1 and 255 instead of 0 and 255)
 - Fixed ToRaw
 - Fixed distances in NeNA plot (previously plotting multiple times kept increasing the values)
+- Fixed spot saving in Localize
 
 ### *Deprecation warnings:*
 
@@ -71,6 +85,10 @@ Last change: 17-APR-2026 CEST
 - `picasso.aim`: `intersect1d`, `count_intersections`, `run_intersections`, `run_intersections_multithread`, `get_fft_peak`, `get_fft_peak_z`, `point_intersect_2d` and `point_intersect_3d` (will become private functions in v0.11.0)
 - `picasso.masking.mask_locs` uses metadata rather than now deprecated `width` and `height` parameters
 - `picasso.spinna.MaskGenerator`: `run_checks` parameter (will be removed in v0.11.0)
+- `picasso.localize.identify` and `picasso.localize.localize` will return metadata by default in v0.11.0
+- `fit_z` and `fit_z_parallel` in `picasso.zfit` will be deprecated in v0.11.0. `zfit.zfit` takes over as the main function in the script
+- `picasso.render` takes in `disp_px_size` rather than `oversampling`, see the function; `oversampling` will be removed in v0.11.0
+- `picasso.render` functions: `render_hist`, `render_gaussian`, `render_gaussian_iso`, `render_smooth` and `render_convolve` will become private in v0.11.0
 
 ## 0.9.10
 

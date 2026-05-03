@@ -6,7 +6,7 @@ picasso.masking.
 """
 
 import pytest
-from picasso import io, lib, masking, render
+from picasso import io, masking, render
 
 # parameters for rendering and masking
 VIEWPORT = ((15, 15), (16, 16))

@@ -19,6 +19,10 @@
 
 # -- Project information -----------------------------------------------------
 
+import os
+import sys
+from picasso import __version__ as picasso_version
+
 project = "Picasso"
 copyright = "2019, Maximilian Thomas Strauss"
 author = "Maximilian T. Strauss"
@@ -26,12 +30,9 @@ author = "Maximilian T. Strauss"
 # The short X.Y version
 version = ""
 # The full version, including alpha/beta/rc tags
-import os, sys
-
 sys.path.insert(0, os.path.abspath("../.."))
-from picasso.version import __version__
 
-release = __version__
+release = picasso_version
 
 # -- General configuration ---------------------------------------------------
 

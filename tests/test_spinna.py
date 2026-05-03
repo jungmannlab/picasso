@@ -71,7 +71,10 @@ def test_spinna(mols):
             )
             assert isinstance(best_score, float) or isinstance(
                 best_score, tuple
-            ), f"Best score is not float or tuple for asynch={asynch} bootstrap={bootstrap}."
+            ), (
+                f"Best score is not float or tuple for asynch={asynch} "
+                f"bootstrap={bootstrap}."
+            )
 
 
 def test_spinna_masked(mols):
@@ -119,4 +122,7 @@ def test_spinna_masked(mols):
     )
     assert isinstance(
         best_score, float
-    ), f"Best score is not float for masked SPINNA."
+    ), "Best score is not float for masked SPINNA."
+    assert (
+        best_proportions is not None
+    ), "Best proportions is None for masked SPINNA."

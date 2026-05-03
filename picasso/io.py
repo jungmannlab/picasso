@@ -226,14 +226,14 @@ def save_config(CONFIG: dict) -> None:
         yaml.dump(CONFIG, config_file, width=1000)
 
 
-def save_raw(path: str, movie: np.ndarray, info: dict) -> None:
+def save_raw(path: str, movie: lib.IntArray3D, info: dict) -> None:
     """Save a raw movie file and its metadata.
 
     Parameters
     ----------
     path : str
         The path to the raw movie file.
-    movie : np.ndarray
+    movie : lib.IntArray3D
         The raw movie data to save.
     info : dict
         The metadata information to save.
@@ -243,7 +243,25 @@ def save_raw(path: str, movie: np.ndarray, info: dict) -> None:
     save_info(info_path, info)
 
 
-def load_tif(path: str, progress=None) -> tuple[np.memmap, list[dict]]:
+def load_calibration(path: str) -> dict:
+    """Load 3D astigmatic calibration data from a YAML file.
+
+    Parameters
+    ----------
+    path : str
+        The path to the calibration YAML file.
+
+    Returns
+    -------
+    calibration : dict
+        A dictionary containing the 3D astigmatic calibration data.
+    """
+    with open(path, "r") as calibration_file:
+        calibration = yaml.full_load(calibration_file)
+    return calibration
+
+
+def load_tif(path: str, progress=None) -> tuple[TiffMultiMap, list[dict]]:
     """Load a TIFF movie file and its metadata.
 
     Parameters
@@ -256,9 +274,9 @@ def load_tif(path: str, progress=None) -> tuple[np.memmap, list[dict]]:
 
     Returns
     -------
-    movie : np.memmap
-        A memory-mapped numpy array representing the movie, i.e., an
-        array that's only partially loaded into memory.
+    movie : TiffMultiMap
+        A movie object providing array-like access to TIFF frames.
+        Frames are loaded into memory on access.
     info : list[dict]
         A list containing a dictionary with metadata about the movie.
     """
@@ -364,7 +382,7 @@ def load_info(
 def load_mask(
     path: str,
     qt_parent: QtWidgets.QWidget | None = None,
-) -> tuple[np.ndarray, dict]:
+) -> tuple[lib.FloatArray2D, dict]:
     """Load a mask generated with ``spinna.MaskGenerator``.
 
     Parameters
@@ -377,7 +395,7 @@ def load_mask(
 
     Returns
     -------
-    mask : np.ndarray
+    mask : lib.FloatArray2D
         The loaded mask array.
     info : dict
         A dictionary containing metadata about the mask.
@@ -394,7 +412,7 @@ def load_mask(
     return mask, info
 
 
-def load_picks(
+def load_picks(  # noqa: C901
     path: str, pixelsize: float | None = None
 ) -> tuple[list, Literal["Circle", "Rectangle", "Polygon", "Square"], float]:
     """Load picks generated with the Picasso GUI.
@@ -417,8 +435,8 @@ def load_picks(
     size : float
         The size of the picks in camera pixels (if `pixelsize` is
         provided, otherwise in original units). For circular picks, the
-        size is the radius; for rectangular picks, the size is the width;
-        for square picks, the size is the side length. None for
+        size is the diameter; for rectangular picks, the size is the
+        width; for square picks, the size is the side length. None for
         polygonal picks (size not defined).
     """
     assert path.endswith(".yaml"), "Picks should be stored in a .yaml file."
@@ -441,9 +459,9 @@ def load_picks(
     if shape == "Circle":
         picks = regions["Centers"]
         if "Diameter (nm)" in regions:
-            size = regions["Diameter (nm)"] / pixelsize / 2
+            size = regions["Diameter (nm)"] / pixelsize
         elif "Diameter" in regions:
-            size = regions["Diameter"] / 2
+            size = regions["Diameter"]
     elif shape == "Rectangle":
         picks = regions["Center-Axis-Points"]
         if "Width (nm)" in regions:
@@ -460,6 +478,56 @@ def load_picks(
     else:
         raise ValueError("Unrecognized pick shape")
     return picks, shape, size
+
+
+def save_drift(path: str, drift: pd.DataFrame) -> None:
+    """Save drift to a .txt file in the format used by the Picasso.
+
+    Parameters
+    ----------
+    path : str
+        The path to the drift file. Must end in .txt.
+    drift : pd.DataFrame
+        A DataFrame with 'x' and 'y' columns and drift values for each
+        frame.
+    """
+    np.savetxt(path, drift, newline="\r\n")
+
+
+def load_drift(path: str) -> pd.DataFrame | None:
+    """Load drift from a .txt file generated with the Picasso GUI.
+
+    Parameters
+    ----------
+    path : str
+        The path to the drift file. Must end in .txt.
+
+    Returns
+    -------
+    drift_df : pd.DataFrame or None
+        A DataFrame containing the drift information with columns 'frame',
+        'x', 'y', and optionally 'z'. Returns None if the file cannot be
+        loaded.
+
+    Raises
+    ------
+    ValueError
+        If the path does not end with .txt.
+    AssertionError
+        If the loaded drift data does not have the expected format (2D
+        array with 2 or 3 columns).
+    """
+    if not path.endswith(".txt"):
+        raise ValueError("Drift file must end with .txt")
+    drift = np.loadtxt(path, delimiter=" ")
+    assert drift.ndim == 2 and drift.shape[1] in [2, 3], (
+        "Drift must be a 2D array with 2 or 3 columns (x, y, (z)). "
+        f"Loaded array has shape {drift.shape}."
+    )
+    drift_df = pd.DataFrame(drift[:, :2], columns=["x", "y"])
+    if drift.shape[1] == 3:
+        drift_df["z"] = drift[:, 2]
+    return drift_df
 
 
 def load_user_settings() -> lib.AutoDict:
@@ -598,7 +666,7 @@ class AbstractPicassoMovie(abc.ABC):
         pass
 
     @abc.abstractmethod
-    def get_frame(self, index: int) -> np.ndarray:
+    def get_frame(self, index: int) -> lib.IntArray2D:
         pass
 
     @abc.abstractmethod
@@ -891,7 +959,7 @@ class ND2Movie(AbstractPicassoMovie):
     def __exit__(self, exc_type, exc_value, traceback):
         self.close()
 
-    def __getitem__(self, it: int) -> np.ndarray:
+    def __getitem__(self, it: int) -> lib.IntArray2D:
         return self.get_frame(it)
 
     def __iter__(self):
@@ -908,7 +976,7 @@ class ND2Movie(AbstractPicassoMovie):
     def close(self):
         self.nd2file.close()
 
-    def get_frame(self, index: int) -> np.ndarray:
+    def get_frame(self, index: int) -> lib.IntArray2D:
         """Load one frame of the movie
 
         Parameters
@@ -918,7 +986,7 @@ class ND2Movie(AbstractPicassoMovie):
 
         Returns
         -------
-        frame : np.ndarray
+        frame : lib.IntArray2D
             2D array representing the image data of the frame
         """
         return self.dask[index].compute()
@@ -926,7 +994,7 @@ class ND2Movie(AbstractPicassoMovie):
     def tofile(self, file_handle, byte_order=None):
         raise NotImplementedError("Cannot write .nd2 file.")
 
-    def camera_parameters(self, config):
+    def camera_parameters(self, config):  # noqa: C901
         """Get the camera specific parameters:
             * gain
             * quantum efficiency
@@ -1002,27 +1070,13 @@ class ND2Movie(AbstractPicassoMovie):
             raise NotImplementedError(
                 "Extracting Gain from nd2 files is not implemented yet."
             )
-            # gain_property_name = cam_config["Gain Property Name"]
-            # gain = pm_info['gain']
-            # if "EM Switch Property" in cam_config:
-            #     switch_property_name = cam_config[
-            #         "EM Switch Property"
-            #     ]["Name"]
-            #     switch_property_value = mm_info[
-            #         camera + "-" + switch_property_name
-            #     ]
-            #     if (
-            #         switch_property_value
-            #         == cam_config["EM Switch Property"][True]
-            #     ):
-            #         parameters['gain'] = int(gain)
         if "gain" not in parameters.keys():
             parameters["gain"] = [1]
 
         parameters["Sensitivity"] = {}
         if "Sensitivity Categories" in cam_config:
             categories = cam_config["Sensitivity Categories"]
-            for i, category in enumerate(categories):
+            for _, category in enumerate(categories):
                 parameters["Sensitivity"][category] = pm_info[category]
         if "Quantum Efficiency" in cam_config:
             if "Filter Wavelengths" in cam_config:
@@ -1046,10 +1100,10 @@ class ND2Movie(AbstractPicassoMovie):
 
 
 class TiffMap:
-    """Read TIFF files and return a memory-mapped numpy array
-    representing the TIFF image data. This class is used for
-    single-frame TIFF files, not multi-page TIFFs. Both classic
-    TIFF (magic 42) and BigTIFF (magic 43) are supported."""
+    """Read TIFF files and provide array-like access to TIFF image data.
+    Frames are loaded into memory on access (not memory-mapped).
+    This class is used for single-frame TIFF files, not multi-page TIFFs.
+    Both classic TIFF (magic 42) and BigTIFF (magic 43) are supported."""
 
     TIFF_TYPES = {
         1: "B",
@@ -1075,7 +1129,7 @@ class TiffMap:
         "RATIONAL": 8,
     }
 
-    def __init__(self, path: str, verbose: bool = False):
+    def __init__(self, path: str, verbose: bool = False):  # noqa: C901
         """Initialize the TiffMap object by reading the TIFF file and
         extracting metadata such as width, height, and data type.
         Automatically detects classic TIFF (magic=42) and BigTIFF
@@ -1198,7 +1252,7 @@ class TiffMap:
     def __exit__(self, exc_type, exc_value, traceback):
         self.close()
 
-    def __getitem__(self, it):
+    def __getitem__(self, it):  # noqa: C901
         with self.lock:  # for reading frames from multiple threads
             if isinstance(it, tuple):
                 if isinstance(it, int) or np.issubdtype(it[0], np.integer):
@@ -1241,7 +1295,7 @@ class TiffMap:
     def __len__(self):
         return self.n_frames
 
-    def info(self) -> dict:
+    def info(self) -> dict:  # noqa: C901
         """Extract metadata from the TIFF file and returns it in a
         dictionary format. This includes byte order, file path, height,
         width, data type, number of frames, and Micro-Manager
@@ -1315,7 +1369,7 @@ class TiffMap:
         info["Micro-Manager Acquisition Comments"] = comments
         return info
 
-    def get_frame(self, index: int, array: None = None) -> np.ndarray:
+    def get_frame(self, index: int, array: None = None) -> lib.IntArray2D:
         """Load one frame of the TIFF movie."""
         self.file.seek(self.image_offsets[index])
         frame = np.reshape(
@@ -1409,7 +1463,7 @@ class TiffMultiMap(AbstractPicassoMovie):
     def __exit__(self, exc_type, exc_value, traceback):
         self.close()
 
-    def __getitem__(self, it):
+    def __getitem__(self, it):  # noqa: C901
         if isinstance(it, tuple):
             if it[0] == Ellipsis:
                 stack = self[it[0]]
@@ -1457,7 +1511,7 @@ class TiffMultiMap(AbstractPicassoMovie):
     def dtype(self):
         return self._dtype
 
-    def get_frame(self, index: int) -> np.ndarray:
+    def get_frame(self, index: int) -> lib.IntArray2D:
         # TODO deal with negative numbers
         for i in range(self.n_maps):
             if self.cum_n_frames[i] <= index < self.cum_n_frames[i + 1]:
@@ -1472,7 +1526,7 @@ class TiffMultiMap(AbstractPicassoMovie):
         self.meta = info
         return info
 
-    def camera_parameters(self, config: dict) -> dict:
+    def camera_parameters(self, config: dict) -> dict:  # noqa: C901
         """Get the camera specific parameters:
             * gain
             * quantum efficiency
@@ -1666,10 +1720,20 @@ def to_raw(path: str, verbose: bool = True) -> None:
 
 
 def save_datasets(path: str, info: dict, **kwargs) -> None:
-    """Save multiple datasets to an HDF5 file at the specified path."""
-    # for key, val in kwargs.items():
-    #     val.to_hdf(path, key=key, mode="a")
-    # cannot use to_hdf for backward compatibility with older Picasso
+    """Save multiple datasets to an HDF5 file at the specified path.
+
+    Parameters
+    ----------
+    path : str
+        The file path where the datasets will be saved.
+    info : dict
+        Metadata information to be saved alongside the datasets.
+    **kwargs
+        Arbitrary keyword arguments where each key is the name of a
+        dataset and each value is a pandas DataFrame containing the data
+        to be saved.
+    """
+    # cannot use df.to_hdf for backward compatibility with older Picasso
     with h5py.File(path, "w") as locs_file:
         for key, val in kwargs.items():
             rec_locs = val.to_records(index=False)
@@ -1722,7 +1786,22 @@ def load_locs(
     info : list[dict]
         Metadata information loaded from the file, typically a list of
         dictionaries containing various metadata fields.
+
+    Raises
+    ------
+    ValueError
+        If the file path ends with ".csv", indicating that it is a
+        ThunderSTORM .csv file, which should be loaded using
+        picasso.io.import_ts instead.
+    KeyError
+        If the "locs" dataset is not found in the HDF5 file, indicating
+        that the file does not contain the expected localization data.
     """
+    if path.endswith(".csv"):
+        raise ValueError(
+            "If you wish to load a ThunderSTORM .csv file, use "
+            "picasso.io.import_ts instead."
+        )
     try:
         locs = pd.read_hdf(path, key="locs")
     except KeyError as e:  # if "locs" key not found
@@ -1924,7 +2003,8 @@ def export_xyz_chimera(
             )
     else:
         warnings.warn(
-            "No z coordinate found in localizations; cannot export to .xyz for CHIMERA."
+            "No z coordinate found in localizations; cannot export"
+            " to .xyz for CHIMERA."
         )
 
 
@@ -1955,7 +2035,8 @@ def export_3d_visp(path: str, locs: pd.DataFrame, info: list[dict]) -> None:
             )
     else:
         warnings.warn(
-            "No z coordinate found in localizations; cannot export to .3d for ViSP."
+            "No z coordinate found in localizations; cannot export "
+            "to .3d for ViSP."
         )
 
 

@@ -14,9 +14,12 @@ import glob
 import collections
 import colorsys
 import os
+import sys
 import time
+import traceback
 import warnings
-from typing import Any
+from copy import deepcopy
+from typing import Any, TypeAlias, Literal
 from collections.abc import Callable
 from asyncio import Future
 
@@ -26,11 +29,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from numpy.lib.recfunctions import append_fields, drop_fields
-from matplotlib.backends.backend_qt5agg import (
-    FigureCanvas,
-    NavigationToolbar2QT,
-)
-from scipy import stats
+from scipy import stats, optimize
 from PyQt6 import QtCore, QtWidgets, QtGui
 from playsound3 import playsound
 from tqdm import tqdm
@@ -48,6 +47,27 @@ SOUND_NOTIFICATION_DURATION = 60  # seconds
 
 # Columns that are required for Picasso
 REQUIRED_COLUMNS = ["frame", "x", "y", "z", "lpx", "lpy", "lpz"]
+
+# Type alias
+IntArray1D: TypeAlias = np.ndarray[tuple[int], np.dtype[np.integer[Any]]]
+IntArray2D: TypeAlias = np.ndarray[tuple[int, int], np.dtype[np.integer[Any]]]
+IntArray3D: TypeAlias = np.ndarray[
+    tuple[int, int, int], np.dtype[np.integer[Any]]
+]
+FloatArray1D: TypeAlias = np.ndarray[tuple[int], np.dtype[np.floating[Any]]]
+FloatArray2D: TypeAlias = np.ndarray[
+    tuple[int, int], np.dtype[np.floating[Any]]
+]
+FloatArray3D: TypeAlias = np.ndarray[
+    tuple[int, int, int], np.dtype[np.floating[Any]]
+]
+SeriesOrFloatArray1D: TypeAlias = pd.Series | FloatArray1D
+SeriesOrIntArray1D: TypeAlias = pd.Series | IntArray1D
+BoolArray1D: TypeAlias = np.ndarray[tuple[int], np.dtype[np.bool_]]
+BoolArray2D: TypeAlias = np.ndarray[tuple[int, int], np.dtype[np.bool_]]
+Array3x3: TypeAlias = np.ndarray[
+    tuple[Literal[3], Literal[3]], np.dtype[np.floating[Any]]
+]
 
 
 class Dialog(QtWidgets.QDialog):
@@ -482,6 +502,10 @@ class TqdmProgress:
         return iterator
 
 
+# type alias for the progress dialogs
+ProgressType: TypeAlias = ProgressDialog | MockProgress | TqdmProgress
+
+
 class ScrollableGroupBox(QtWidgets.QGroupBox):
     """QGroupBox with QScrollArea as the top widget that enables
     scrolling."""
@@ -525,7 +549,26 @@ class ScrollableGroupBox(QtWidgets.QGroupBox):
             if keep_labels and isinstance(widget, QtWidgets.QLabel):
                 continue
             widget.setParent(None)
-            del widget
+            widget.deleteLater()
+
+
+class LogDoubleSpinBox(QtWidgets.QDoubleSpinBox):
+    """QDoubleSpinBox with logarithmic step size."""
+
+    def __init__(
+        self, parent: QtWidgets.QWidget | None = None, factor: float = 1.2
+    ) -> None:
+        super().__init__(parent)
+        self._factor = factor  # multiply/divide by this on each step
+
+    def stepBy(self, steps: int) -> None:
+        if steps > 0:
+            if self.value() <= 10 ** (-self.decimals()):
+                self.setValue(2 * 10 ** (-self.decimals()))
+            else:
+                self.setValue(self.value() * (self._factor**steps))
+        elif steps < 0:
+            self.setValue(self.value() / (self._factor ** abs(steps)))
 
 
 class GenericPlotWindow(QtWidgets.QTabWidget):
@@ -533,6 +576,11 @@ class GenericPlotWindow(QtWidgets.QTabWidget):
     window."""
 
     def __init__(self, window_title, app_name):
+        from matplotlib.backends.backend_qt5agg import (
+            FigureCanvas,
+            NavigationToolbar2QT,
+        )
+
         super().__init__()
         self.setWindowTitle(window_title)
         this_directory = os.path.dirname(os.path.realpath(__file__))
@@ -680,6 +728,30 @@ def cancel_dialogs():
         else:
             dialog.close()
     QtCore.QCoreApplication.instance().processEvents()  # just in case...
+
+
+def install_excepthook(window) -> None:
+    """Install a thread-safe excepthook that shows uncaught exceptions in a
+    QMessageBox. Safe to call from QThread workers because the error signal is
+    queued to the main thread by Qt's event loop."""
+
+    class _ErrorSignaler(QtCore.QObject):
+        error = QtCore.pyqtSignal(str)
+
+    signaler = _ErrorSignaler()
+
+    def _show_error(message: str) -> None:
+        cancel_dialogs()
+        QtWidgets.QMessageBox.critical(window, "An error occurred", message)
+
+    signaler.error.connect(_show_error)
+
+    def excepthook(type, value, tback):
+        sys.__excepthook__(type, value, tback)
+        message = "".join(traceback.format_exception(type, value, tback))
+        signaler.error.emit(message)
+
+    sys.excepthook = excepthook
 
 
 def get_sound_notification_path() -> str | None:
@@ -838,6 +910,48 @@ def get_from_metadata(
         return default
     else:
         raise ValueError("info must be a dict or a list of dicts.")
+
+
+def overwrite_metadata(
+    info: list[dict] | dict, key: Any, value: Any
+) -> list[dict] | dict:
+    """Overwrite a value in the localization metadata (list of
+    dictionaries or a dictionary). If the key does not exist an error
+    is raised.
+
+    Parameters
+    ----------
+    info : list of dicts or dict
+        Localization metadata.
+    key : Any
+        Key to be overwritten or added in the metadata.
+    value : Any
+        Value to be set for the key.
+
+    Returns
+    -------
+    updated_info : list of dicts or dict
+        Metadata with the updated value.
+
+    Raises
+    ------
+    KeyError
+        If the key is not found in the metadata.
+    """
+    success = False
+    if isinstance(info, dict):
+        if key in info:
+            info[key] = value
+            success = True
+    elif isinstance(info, list):
+        for inf in info[::-1]:
+            if key in inf:
+                inf[key] = value
+                success = True
+                break
+    if not success:
+        raise KeyError(f"Key '{key}' not found in metadata.")
+    return info
 
 
 def get_colors(n_channels):
@@ -1004,17 +1118,17 @@ def get_save_filename_ext_dialog(
 
 
 @numba.njit
-def find_local_minima(arr: np.ndarray) -> np.ndarray:
+def find_local_minima(arr: FloatArray1D) -> IntArray1D:
     """Find positions of the local minima in a 1D numpy array.
 
     Parameters
     ----------
-    arr : np.ndarray
+    arr : FloatArray1D
         1D array.
 
     Returns
     -------
-    local_minima_indices : np.ndarray
+    local_minima_indices : IntArray1D
         Indices of the local minima in the array.
     """
     # Compare each element with its neighbors
@@ -1025,19 +1139,234 @@ def find_local_minima(arr: np.ndarray) -> np.ndarray:
 
 
 def cumulative_exponential(
-    x: np.ndarray,
+    x: FloatArray1D,
     a: float,
     t: float,
     c: float,
-) -> np.ndarray:
+) -> FloatArray1D:
     """Used for binding kinetics estimation."""
     return a * (1 - np.exp(-(x / t))) + c
+
+
+def fit_cum_exp(data: FloatArray1D) -> dict:
+    """Fit a cumulative exponential function to data. Used for binding
+    kinetics estimation.
+
+    Parameters
+    ----------
+    data : FloatArray1D
+        Input data to fit, shape (N,).
+
+    Returns
+    -------
+    result : dict
+        Contains the best fit parameters and the fitted data.
+    """
+    data.sort()
+    n = len(data)
+    y = np.arange(1, n + 1)
+    data_min = data.min()
+    data_max = data.max()
+    p0 = [n, np.mean(data), data_min]
+    bounds = ([0, data_min, 0], [np.inf, data_max, np.inf])
+    popt, _ = optimize.curve_fit(
+        cumulative_exponential, data, y, p0=p0, bounds=bounds
+    )
+    result = {
+        "best_values": {"a": popt[0], "t": popt[1], "c": popt[2]},
+        "data": data,
+        "best_fit": cumulative_exponential(data, *popt),
+    }
+    return result
+
+
+def estimate_kinetic_rate(data: FloatArray1D) -> float:
+    """Find the mean dark/bright time by fitting to a cumulative
+    exponential function.
+
+    Parameters
+    ----------
+    data : FloatArray1D
+        Input data to fit, shape (N,).
+
+    Returns
+    -------
+    rate : float
+        Mean dark/bright time from the fitted exponential function.
+    """
+    if len(data) > 2:
+        if data.max() - data.min() == 0:
+            rate = np.nanmean(data)
+        else:
+            result = fit_cum_exp(data)
+            rate = result["best_values"]["t"]
+    else:
+        rate = np.nanmean(data)
+    return rate
+
+
+def plot_cumulative_exponential_fit(
+    data: SeriesOrFloatArray1D,
+    fit_result: dict,
+    fig: plt.Figure | None = None,
+    ax: plt.Axes | None = None,
+) -> plt.Figure:
+    """Plot a histogram for experimental data and the fitted cumulative
+    exponential function. Used for binding kinetics fit display.
+
+    Parameters
+    ----------
+    data : SeriesOrFloatArray1D
+        Input data to fit, shape (N,). For example, bright or dark
+        times.
+    fit_result : dict
+        Output of `fit_cum_exp` containing the best fit parameters and
+        the fitted data.
+    fig, ax : plt.Figure and plt.Axes, optional
+        If given, the plot will be drawn on the given figure and axes.
+        Otherwise, a new figure and axes will be created.
+
+    Returns
+    -------
+    fig : plt.Figure
+        The figure containing the plot.
+    """
+    if fig is None or ax is None:
+        fig, ax = plt.subplots()
+    else:
+        ax.clear()
+
+    # Bright
+    a = fit_result["best_values"]["a"]
+    t = fit_result["best_values"]["t"]
+    c = fit_result["best_values"]["c"]
+
+    ax.set_title(
+        "Cumulative exponential\n"
+        r"$Fit: {:.2f}\cdot(1-exp(-t/{:.2f}))+{:.2f}$".format(a, t, c)
+    )
+    data = data.copy()
+    data.sort_values(inplace=True)
+    y = np.arange(1, len(data) + 1)
+    ax.semilogx(data, y, label="data")
+    ax.semilogx(
+        data,
+        fit_result["best_fit"],
+        label=f"fit ($\\bar \\tau = {t:.2f}$)",
+    )
+    ax.legend(loc="best")
+    ax.set_xlabel("Duration (frames)")
+    ax.set_ylabel("Counts")
+    return fig
+
+
+def plot_trace(
+    locs: pd.DataFrame,
+    info: list[dict],
+    *,
+    fig: plt.Figure | None = None,
+    include_photons: bool = True,
+    return_trace: bool = False,
+) -> (
+    plt.Figure
+    | tuple[
+        plt.Figure,
+        tuple[FloatArray1D, FloatArray1D, FloatArray1D]
+        | tuple[FloatArray1D, FloatArray1D],
+    ]
+):
+    """Plot the trace of a localization over time, showing the x and y
+    positions and the spot size.
+
+    Parameters
+    ----------
+    locs : pd.DataFrame
+        Localizations.
+    info : list[dict]
+        Additional information for each localization.
+    fig : plt.Figure, optional
+        If given, the plot will be drawn on the given figure. Otherwise,
+        a new figure will be created.
+    include_photons : bool, optional
+        If True, the photon count will also be plotted as well. Default
+        is True.
+    return_trace : bool, optional
+        If True, the trace data will be returned as well. Default is
+        False.
+
+    Returns
+    -------
+    fig : plt.Figure
+        The figure containing the plot.
+    trace_data : tuple of FloatArray1D, optional
+        If return_trace is True, a tuple containing the x vector
+        (frames), the y vector (localization ON/OFF) and the photon
+        count vector (if include_photons is True) will be returned.
+    """
+    if fig is None:
+        if include_photons:
+            fig, (ax1, ax2, ax3, ax4) = plt.subplots(
+                4, 1, figsize=(5, 5), constrained_layout=True, sharex=True
+            )
+        else:
+            fig, (ax1, ax2, ax3) = plt.subplots(
+                3, 1, figsize=(5, 5), constrained_layout=True, sharex=True
+            )
+    else:
+        fig.clear()
+        if include_photons:
+            ax1, ax2, ax3, ax4 = fig.subplots(4, sharex=True)
+        else:
+            ax1, ax2, ax3 = fig.subplots(3, sharex=True)
+
+    n_frames = get_from_metadata(info, "Frames", raise_error=True)
+    xvec = np.arange(n_frames)
+    yvec = xvec[:] * 0
+    yvec[locs["frame"]] = 1
+    yvec_ph = xvec[:] * 0
+    if "photons" in locs.columns:
+        yvec_ph[locs["frame"]] = locs["photons"]
+    else:
+        yvec_ph = np.zeros_like(xvec)
+    trace_data = (xvec, yvec, yvec_ph) if include_photons else (xvec, yvec)
+
+    # frame vs x
+    ax1.scatter(locs["frame"], locs["x"], s=2)
+    ax1.set_title("X-pos vs frame")
+    ax1.set_xlim(0, n_frames)
+    ax1.set_ylabel("X-pos [Px]")
+
+    # frame vs y
+    ax2.scatter(locs["frame"], locs["y"], s=2)
+    ax2.set_title("Y-pos vs frame")
+    ax2.set_ylabel("Y-pos [Px]")
+
+    # locs in time
+    ax3.plot(xvec, yvec, linewidth=1)
+    ax3.fill_between(xvec, 0, yvec, facecolor="red")
+    ax3.set_title("Localizations")
+    ax3.set_xlabel("Frames")
+    ax3.set_ylabel("ON")
+    ax3.set_yticks([0, 1])
+    ax3.set_ylim([-0.1, 1.1])
+
+    if include_photons:
+        ax4.plot(xvec, yvec_ph, linewidth=1)
+        ax4.set_title("Photons")
+        ax4.set_xlabel("Frames")
+        ax4.set_ylabel("Photons")
+        ax4.set_ylim([0, yvec_ph.max() * 1.1])
+
+    if return_trace:
+        return fig, trace_data
+    else:
+        return fig
 
 
 def unpack_calibration(
     calibration: dict,
     pixelsize: float,
-) -> tuple[np.ndarray, np.ndarray, float]:
+) -> tuple[FloatArray2D, FloatArray1D, float]:
     """Extract calibration file for 3D G5M. Return spot widths and
     heights and the corresponding z values + magnification factor.
 
@@ -1054,10 +1383,10 @@ def unpack_calibration(
 
     Returns
     -------
-    spot_size : (2,) np.ndarray
+    spot_size : FloatArray2D
         Spot width and height from the 3D calibration for each z
         position.
-    z_range : np.ndarray
+    z_range : FloatArray1D
         Z values (in camera pixels) corresponding to the spot ratios.
     mag_factor : float
         Magnification factor for the 3D calibration.
@@ -1087,22 +1416,22 @@ def unpack_calibration(
 
 
 def calculate_optimal_bins(
-    data: np.ndarray,
+    data: FloatArray1D | IntArray1D,
     max_n_bins: int | None = None,
-) -> np.ndarray:
+) -> FloatArray1D:
     """Calculate the optimal bins for display, for example, in
     Picasso: Filter.
 
     Parameters
     ----------
-    data : np.ndarray
+    data : FloatArray1D | IntArray1D
         Data to be binned.
     max_n_bins : int | None, optional
         Maximum number of bins.
 
     Returns
     -------
-    bins : np.ndarray
+    bins : FloatArray1D
         Bins for display.
     """
     iqr = np.subtract(*np.percentile(data, [75, 25]))
@@ -1125,7 +1454,7 @@ def calculate_optimal_bins(
 
 def append_to_rec(
     rec_array: np.recarray,
-    data: np.ndarray,
+    data: FloatArray1D | IntArray1D,
     name: str,
 ) -> np.recarray:
     """Append a new column to the existing np.recarray.
@@ -1134,7 +1463,7 @@ def append_to_rec(
     ----------
     rec_array : np.recarray
         Recarray to which the new column is appended.
-    data : np.ndarray
+    data : FloatArray1D | IntArray1D
         1D data to be appended.
     name : str
         Name of the new column.
@@ -1241,9 +1570,11 @@ def _merge_locs(
     locs_list = locs_list.copy()
     for i, locs in enumerate(locs_list):
         locs["frame"] += increment_frames[i]
-        locs["group"] += increment_groups[i]
+        if "group" in locs.columns:
+            locs["group"] += increment_groups[i]
         locs_list[i] = locs
     locs = pd.concat(locs_list, ignore_index=True)
+    locs.sort_values(by="frame", inplace=True)
     return locs
 
 
@@ -1296,7 +1627,7 @@ def ensure_sanity(locs: pd.DataFrame, info: list[dict]) -> pd.DataFrame:
     return locs
 
 
-def is_loc_at(x: float, y: float, locs: pd.DataFrame, r: float) -> np.ndarray:
+def is_loc_at(x: float, y: float, locs: pd.DataFrame, r: float) -> BoolArray1D:
     """Check which localizations are within radius ``r`` from position
     ``(x, y)``.
 
@@ -1311,7 +1642,7 @@ def is_loc_at(x: float, y: float, locs: pd.DataFrame, r: float) -> np.ndarray:
 
     Returns
     -------
-    is_picked : np.ndarray
+    is_picked : BoolArray1D
         Boolean array - True if a localization is within radius r
         of position (x, y).
     """
@@ -1347,25 +1678,25 @@ def locs_at(x: float, y: float, locs: pd.DataFrame, r: float) -> pd.DataFrame:
 
 @numba.jit(nopython=True)
 def check_if_in_polygon(
-    x: np.ndarray,
-    y: np.ndarray,
-    X: np.ndarray,
-    Y: np.ndarray,
-) -> np.ndarray:
+    x: FloatArray1D,
+    y: FloatArray1D,
+    X: FloatArray1D,
+    Y: FloatArray1D,
+) -> BoolArray1D:
     """Check if points ``(x, y)`` are within the polygon defined by
     corners ``(X, Y)``. Uses the ray casting algorithm, see
     ``check_if_in_rectangle`` for details.
 
     Parameters
     ----------
-    x, y : np.ndarray
+    x, y : FloatArray1D
         x and y coordinates of points.
-    X, Y : np.ndarray
+    X, Y : FloatArray1D
         x and y coordinates of polygon corners.
 
     Returns
     -------
-    is_in_polygon : np.ndarray
+    is_in_polygon : BoolArray1D
         Boolean array indicating which points are in the polygon.
     """
     n_locs = len(x)
@@ -1392,8 +1723,8 @@ def check_if_in_polygon(
 
 def locs_in_polygon(
     locs: pd.DataFrame,
-    X: np.ndarray,
-    Y: np.ndarray,
+    X: FloatArray1D,
+    Y: FloatArray1D,
 ) -> pd.DataFrame:
     """Return localizations within the polygon defined by corners
     ``(X, Y)``.
@@ -1402,7 +1733,7 @@ def locs_in_polygon(
     ----------
     locs : pd.DataFrame
         Localizations.
-    X, Y : list
+    X, Y : FloatArray1D
         x and y-coordinates of polygon corners.
 
     Returns
@@ -1418,11 +1749,11 @@ def locs_in_polygon(
 
 @numba.jit(nopython=True)
 def check_if_in_rectangle(
-    x: np.ndarray,
-    y: np.ndarray,
-    X: np.ndarray,
-    Y: np.ndarray,
-) -> np.ndarray:
+    x: FloatArray1D,
+    y: FloatArray1D,
+    X: FloatArray1D,
+    Y: FloatArray1D,
+) -> BoolArray1D:
     """Check if locs with coordinates (x, y) are in rectangle with
     corners (X, Y) by counting the number of rectangle sides which are
     hit by a ray originating from each loc to the right. If the number
@@ -1430,14 +1761,14 @@ def check_if_in_rectangle(
 
     Parameters
     ----------
-    x, y : np.ndarray
+    x, y : FloatArray1D
         x and y coordinates of points.
-    X, Y : np.ndarray
+    X, Y : FloatArray1D
         x and y coordinates of polygon corners.
 
     Returns
     -------
-    is_in_polygon : np.ndarray
+    is_in_polygon : BoolArray1D
         Boolean array indicating if point is in polygon.
     """
     n_locs = len(x)
@@ -1470,8 +1801,8 @@ def check_if_in_rectangle(
 
 def locs_in_rectangle(
     locs: pd.DataFrame,
-    X: np.ndarray,
-    Y: np.ndarray,
+    X: FloatArray1D,
+    Y: FloatArray1D,
 ) -> pd.DataFrame:
     """Return localizations within the rectangle defined by corners
     ``(X, Y)``.
@@ -1480,7 +1811,7 @@ def locs_in_rectangle(
     ----------
     locs : pd.DataFrame
         Localizations.
-    X, Y : list
+    X, Y : FloatArray1D
         x and y coordinates of rectangle corners.
 
     Returns
@@ -1496,26 +1827,26 @@ def locs_in_rectangle(
 
 
 def minimize_shifts(
-    shifts_x: np.ndarray,
-    shifts_y: np.ndarray,
-    shifts_z: np.ndarray | None = None,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray | None]:
+    shifts_x: FloatArray2D,
+    shifts_y: FloatArray2D,
+    shifts_z: FloatArray2D | None = None,
+) -> tuple[FloatArray1D, FloatArray1D, FloatArray1D | None]:
     """Minimize shifts in x, y, and z directions. Used for drift
     correction.
 
     Parameters
     ----------
-    shifts_x, shifts_y : np.ndarray
+    shifts_x, shifts_y : FloatArray2D
         Shifts in x and y directions, shape (n_channels, n_channels).
-    shifts_z : np.ndarray, optional
+    shifts_z : FloatArray2D, optional
         Shifts in z direction, shape (n_channels, n_channels). If None,
         only x and y shifts are minimized.
 
     Returns
     -------
-    shift_y, shift_x : np.ndarray
+    shift_y, shift_x : FloatArray1D
         Minimized shifts in y and x direction.
-    shift_z : np.ndarray, optional
+    shift_z : FloatArray1D, optional
         Minimized shifts in z direction if ``shifts_z`` is specified.
     """
     n_channels = shifts_x.shape[0]
@@ -1689,12 +2020,12 @@ def get_pick_rectangle_corners(
     return corners
 
 
-def polygon_area(X: np.ndarray, Y: np.ndarray) -> float:
+def polygon_area(X: FloatArray1D, Y: FloatArray1D) -> float:
     """Find the area of a polygon defined by corners X and Y.
 
     Parameters
     ----------
-    X, Y : np.ndarray
+    X, Y : FloatArray1D
         x-coordinates and y-coordinates of the polygon corners.
 
     Returns
@@ -1711,7 +2042,9 @@ def polygon_area(X: np.ndarray, Y: np.ndarray) -> float:
     return area
 
 
-def pick_areas_polygon(picks: list[list[tuple[float, float]]]) -> np.ndarray:
+def _pick_areas_polygon(
+    picks: list[list[tuple[float, float]]],
+) -> FloatArray1D:
     """Return pick areas for each polygonal pick in picks.
 
     Parameters
@@ -1722,7 +2055,7 @@ def pick_areas_polygon(picks: list[list[tuple[float, float]]]) -> np.ndarray:
 
     Returns
     -------
-    areas : np.ndarray
+    areas : FloatArray1D
         Pick areas.
     """
     areas = []
@@ -1736,10 +2069,10 @@ def pick_areas_polygon(picks: list[list[tuple[float, float]]]) -> np.ndarray:
     return areas
 
 
-def pick_areas_rectangle(
+def _pick_areas_rectangle(
     picks: list[list[tuple[float, float]]],
     w: float,
-) -> np.ndarray:
+) -> FloatArray1D:
     """Return pick areas for each pick in picks.
 
     Parameters
@@ -1752,7 +2085,7 @@ def pick_areas_rectangle(
 
     Returns
     -------
-    areas : np.ndarray
+    areas : FloatArray1D
         Pick areas, same units as ``w``.
     """
     areas = np.zeros(len(picks))
@@ -1762,15 +2095,54 @@ def pick_areas_rectangle(
     return areas
 
 
+def pick_areas(
+    picks: list[tuple],
+    pick_shape: Literal["Circle", "Rectangle", "Polygon", "Square"],
+    pick_size: float | None,
+) -> FloatArray1D:
+    """Get pick areas for each pick in picks.
+
+    Parameters
+    ----------
+    picks : list of tuples
+        Coordinates of picks in camera pixels.
+    pick_shape : {"Circle", "Rectangle", "Polygon", "Square"}
+        Shape of picks.
+    pick_size : float or None
+        Size of picks in camera pixels. For circles - diameters. For
+        rectangles - width. For squares - side length. For polygons -
+        ignored.
+
+    Returns
+    -------
+    areas : FloatArray1D
+        Pick areas in camera pixels squared.
+    """
+    if pick_shape == "Circle":
+        r = pick_size / 2
+        # same area for all picks
+        areas = np.pi * r**2 * np.ones(len(picks))
+    elif pick_shape == "Rectangle":
+        areas = _pick_areas_rectangle(picks, pick_size)
+    elif pick_shape == "Polygon":
+        areas = _pick_areas_polygon(picks)
+    elif pick_shape == "Square":
+        # same area for all picks
+        areas = pick_size**2 * np.ones(len(picks))
+    else:
+        raise ValueError(f"Unknown pick shape: {pick_shape}")
+    return areas
+
+
 def permutation_test(
-    arr1: np.ndarray, arr2: np.ndarray, iterations: int = 1000
+    arr1: FloatArray1D, arr2: FloatArray1D, iterations: int = 1000
 ) -> tuple[float, float, float]:
     """Perform a permutation test to compare two arrays. The test
     statistic is the Kolmogorov-Smirnov statistic.
 
     Parameters
     ----------
-    arr1, arr2 : np.ndarray
+    arr1, arr2 : FloatArray1D
         Arrays to be compared.
     iterations : int, optional
         Number of permutations to perform. Default is 1000.
@@ -1802,8 +2174,8 @@ def permutation_test(
 
 
 def plot_subclustering_check(
-    clustered_n_events: np.ndarray,
-    sparse_n_events: np.ndarray,
+    clustered_n_events: IntArray1D,
+    sparse_n_events: IntArray1D,
     plot_path: str | list[str] = "",
     return_fig: bool = False,
     clustering_dist: float | None = None,
@@ -1814,9 +2186,9 @@ def plot_subclustering_check(
 
     Parameters
     ----------
-    clustered_n_events : np.ndarray
+    clustered_n_events : IntArray1D
         Number of events for clustered molecules.
-    sparse_n_eveents : np.ndarray
+    sparse_n_eveents : IntArray1D
         Number of events for sparse molecules.
     plot_path : str or list of strs, optional
         If provided, the plot is saved to this path. If a list of
@@ -1844,7 +2216,10 @@ def plot_subclustering_check(
     min_bin, max_bin = np.percentile(clustered_n_events, [2.5, 97.5])
     vals, counts = np.unique(clustered_n_events, return_counts=True)
     if clustering_dist is not None:
-        label = f"Clustered (d < {clustering_dist:.1f} nm) {m_clustered:.1f} +/- {s_clustered:.1f}"
+        label = (
+            f"Clustered (d < {clustering_dist:.1f} nm) "
+            f"{m_clustered:.1f} +/- {s_clustered:.1f}"
+        )
     else:
         label = f"Clustered {m_clustered:.1f} +/- {s_clustered:.1f}"
     ax1.bar(
@@ -1858,7 +2233,10 @@ def plot_subclustering_check(
     ax1.axvline(m_clustered, color="C0", linestyle="--")
     vals, counts = np.unique(sparse_n_events, return_counts=True)
     if sparse_dist is not None:
-        label = f"Sparse (d > {sparse_dist:.1f} nm) {m_sparse:.1f} +/- {s_sparse:.1f}"
+        label = (
+            f"Sparse (d > {sparse_dist:.1f} nm) "
+            f"{m_sparse:.1f} +/- {s_sparse:.1f}"
+        )
     else:
         label = f"Sparse {m_sparse:.1f} +/- {s_sparse:.1f}"
     ax1.bar(
@@ -1937,3 +2315,99 @@ def plot_rel_sigma_check(
         ax.set_ylabel("Counts")
         fig.savefig(path, dpi=300)
         plt.close(fig)
+
+
+def unfold_localizations_square(
+    locs: pd.DataFrame,
+    info: list[dict],
+    *,
+    n_square: int = 10,
+    spacing: int | float = 1,
+):
+    """Shift localizations onto a square grid (tile) based on their
+    group indices. The localizations must contain a 'group' column.
+
+    Parameters
+    ----------
+    locs : pd.DataFrame
+        Localizations to be unfolded. Must contain a 'group' column.
+    info : list of dicts
+        Localization metadata.
+    n_square : int, optional
+        Number of groups per square side. Default is 10.
+    spacing : int or float, optional
+        Spacing between groups in camera pixels. Default is 1.
+
+    Returns
+    -------
+    shifted_locs : pd.DataFrame
+        Localizations shifted onto a square grid based on their group
+        indices.
+    updated_info : list of dicts
+        Updated metadata with new FOV dimensions after unfolding.
+    """
+    assert (
+        "group" in locs.columns
+    ), "Localizations must contain a 'group' column."
+    # ensure groups are consecutive integers starting from 0
+    locs = locs.copy()  # pandas SettingWithCopyWarning
+    updated_info = deepcopy(info)
+    unique_groups = np.unique(locs["group"])
+    group_mapping = {old: new for new, old in enumerate(unique_groups)}
+    locs["group"] = locs["group"].map(group_mapping)
+
+    # shift localizations to the middle of the FOV and by the COM
+    # of each group
+    cx = get_from_metadata(updated_info, "Width", raise_error=True) / 2
+    cy = get_from_metadata(updated_info, "Height", raise_error=True) / 2
+    for group_id in np.unique(locs["group"]):
+        mask = locs["group"] == group_id
+        mean_x = locs.loc[mask, "x"].mean()
+        mean_y = locs.loc[mask, "y"].mean()
+        locs.loc[mask, "x"] += cx - mean_x
+        locs.loc[mask, "y"] += cy - mean_y
+
+    # unfold onto grid
+    locs["x"] += np.mod(locs["group"], n_square) * spacing
+    locs["y"] += np.floor(locs["group"] / n_square) * spacing
+
+    locs["x"] -= locs["x"].mean()
+    locs["y"] -= locs["y"].mean()
+    locs["x"] += np.absolute(locs["x"].min())
+    locs["y"] += np.absolute(locs["y"].min())
+
+    # Update FOV and clean up
+    updated_info = overwrite_metadata(
+        updated_info, "Width", int(np.ceil(locs["x"].max()))
+    )
+    updated_info = overwrite_metadata(
+        updated_info, "Height", int(np.ceil(locs["y"].max()))
+    )
+    return locs, updated_info
+
+
+def sync_groups(locs: list[pd.DataFrame]) -> list[pd.DataFrame]:
+    """Sync group indices across multiple localization lists. Can be
+    used, for example, for removing clustered localizations after
+    the cluster centers were filtered.
+
+    Parameters
+    ----------
+    locs : list of pd.DataFrame
+        List of localization lists to be synced. Each must contain a
+        'group' column.
+
+    Returns
+    -------
+    synced_locs : list of pd.DataFrame
+        List of localization lists with synced group indices.
+    """
+    assert all(
+        "group" in loc.columns for loc in locs
+    ), "All localization lists must contain a 'group' column."
+    unique_groups = [np.unique(loc["group"]) for loc in locs]
+    common_groups = set(unique_groups[0]).intersection(*unique_groups)
+    for i in range(len(locs)):
+        mask = locs[i]["group"].isin(common_groups)
+        locs[i] = locs[i][mask].reset_index(drop=True)
+    return locs

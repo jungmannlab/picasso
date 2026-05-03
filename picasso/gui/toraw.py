@@ -148,7 +148,7 @@ class Worker(QtCore.QThread):
 
     progressMade = QtCore.pyqtSignal(int)
     finished = QtCore.pyqtSignal(int)
-    interrupted = QtCore.pyqtSignal(str)  # NEW: report errors to main thread
+    interrupted = QtCore.pyqtSignal(str)  # report errors to main thread
 
     def __init__(self, movie_groups):
         super().__init__()
@@ -175,18 +175,7 @@ def main():
 
     setup_gui_update_check(window)
 
-    def excepthook(type, value, tback):
-        lib.cancel_dialogs()
-        QtCore.QCoreApplication.instance().processEvents()
-        message = "".join(traceback.format_exception(type, value, tback))
-        QtWidgets.QMessageBox.critical(
-            window,
-            "An error occured",
-            message,
-        )
-        sys.__excepthook__(type, value, tback)
-
-    sys.excepthook = excepthook
+    lib.install_excepthook(window)
 
     sys.exit(app.exec())
 

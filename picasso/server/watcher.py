@@ -149,7 +149,7 @@ def print_to_file(path, text):
         f.write("\n")
 
 
-def check_new_and_process(
+def check_new_and_process(  # noqa: C901
     settings_list: dict,
     path: str,
     command: str,
@@ -236,7 +236,7 @@ def check_new_and_process(
         time.sleep(update_time * 60)
 
 
-def watcher():
+def watcher():  # noqa: C901
     """
     Streamlit page to show the watcher page.
     """

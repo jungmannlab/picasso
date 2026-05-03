@@ -9,7 +9,7 @@ Simulate single molecule fluorescence data.
 """
 
 import numpy as np
-from . import io
+from . import io, lib
 from numba import njit
 
 magfac = 0.79
@@ -17,22 +17,22 @@ magfac = 0.79
 
 @njit
 def calculate_zpsf(
-    z: np.ndarray | float,
-    cx: np.ndarray,
-    cy: np.ndarray,
-) -> tuple[np.ndarray, np.ndarray] | tuple[float, float]:
+    z: lib.FloatArray1D | float,
+    cx: lib.FloatArray1D,
+    cy: lib.FloatArray1D,
+) -> tuple[lib.FloatArray1D, lib.FloatArray1D] | tuple[float, float]:
     """Calculate the astigmatic PSF size at a given z position.
 
     Parameters
     ----------
-    z : np.ndarray or number
+    z : lib.FloatArray1D or number
         The z position(s) at which to calculate the PSF.
-    cx, cy : np.ndarray
+    cx, cy : lib.FloatArray1D
         Coefficients for the x/y dimension of the PSF.
 
     Returns
     -------
-    wx, wy : np.ndarray
+    wx, wy : lib.FloatArray1D
         The calculated PSF sizes in the x and y dimensions.
     """
     z = z / magfac
@@ -62,7 +62,7 @@ def calculate_zpsf(
     return (wx, wy)
 
 
-def test_calculate_zpsf() -> np.ndarray:
+def test_calculate_zpsf() -> lib.FloatArray1D:
     """Test function for calculate_zpsf."""
     cx = np.array([1, 2, 3, 4, 5, 6, 7])
     cy = np.array([1, 2, 3, 4, 5, 6, 7])
@@ -88,12 +88,14 @@ def saveInfo(filename: str, info: dict) -> None:
     io.save_info(filename, [info], default_flow_style=True)
 
 
-def noisy(image: np.ndarray, mu: float, sigma: float) -> np.ndarray:
+def noisy(
+    image: lib.FloatArray2D, mu: float, sigma: float
+) -> lib.FloatArray2D:
     """Add gaussian noise to an image.
 
     Parameters
     ----------
-    image : np.ndarray
+    image : lib.FloatArray2D
         The input image to which noise will be added.
     mu : float
         The mean of the Gaussian noise.
@@ -102,7 +104,7 @@ def noisy(image: np.ndarray, mu: float, sigma: float) -> np.ndarray:
 
     Returns
     -------
-    noisy : np.ndarray
+    noisy : lib.FloatArray2D
         The noisy image with Gaussian noise added.
     """
     row, col = image.shape  # Variance for np.random is 1
@@ -113,19 +115,19 @@ def noisy(image: np.ndarray, mu: float, sigma: float) -> np.ndarray:
     return noisy
 
 
-def noisy_p(image: np.ndarray, mu: float) -> np.ndarray:
+def noisy_p(image: lib.FloatArray2D, mu: float) -> lib.FloatArray2D:
     """Add Poisson noise to an image or movie.
 
     Parameters
     ----------
-    image : np.ndarray
+    image : lib.FloatArray2D
         The input image to which Poisson noise will be added.
     mu : float
         The mean of the Poisson noise.
 
     Returns
     -------
-    noisy : np.ndarray
+    noisy : lib.FloatArray2D
         The noisy image with Poisson noise added.
     """
     poiss = np.random.poisson(mu, image.shape).astype(float)
@@ -133,23 +135,60 @@ def noisy_p(image: np.ndarray, mu: float) -> np.ndarray:
     return noisy
 
 
-def check_type(movie: np.ndarray) -> np.ndarray:
+def check_type(movie: lib.IntArray3D) -> lib.IntArray3D:
     """Check the type of the movie and convert it to a 16-bit unsigned
     integer, if necessary.
 
     Parameters
     ----------
-    movie : np.ndarray
+    movie : lib.IntArray3D
         The input movie to be checked and converted.
 
     Returns
     -------
-    movie : np.ndarray
+    movie : lib.IntArray3D
         The movie converted to a 16-bit unsigned integer type.
     """
     movie[movie >= (2**16) - 1] = (2**16) - 1
     movie = movie.astype("<u2")  # little-endian 16-bit unsigned int
     return movie
+
+
+def _sample_photon_rate(
+    photonrate: float, photonratestd: float, time: float
+) -> float:
+    """Return the number of photons to emit in one frame."""
+    if photonratestd == 0:
+        return max(0.0, np.round(photonrate * time))
+    return max(
+        0.0, np.round(np.random.normal(photonrate, photonratestd) * time)
+    )
+
+
+def _distribute_event_photons(
+    photonsinframe: lib.FloatArray1D,
+    tempFrame: int,
+    onFrames: int,
+    photons: float,
+    eventsum: lib.FloatArray1D,
+    i: int,
+    time: float,
+) -> None:
+    """Distribute photons for one bright event across onFrames frames.
+
+    The first and last frames receive a partial contribution (proportional
+    to the fraction of the frame during which the emitter is active);
+    all intermediate frames receive a full Poisson draw.
+    """
+    for j in range(onFrames):
+        idx = 1 + tempFrame + j
+        if j == 0:  # first frame (possibly partial)
+            frac = ((tempFrame + 1) * time - eventsum[i - 1]) / time
+        elif j == onFrames - 1:  # last frame (possibly partial)
+            frac = (eventsum[i] - (tempFrame + onFrames - 1) * time) / time
+        else:  # middle frames (full)
+            frac = 1.0
+        photonsinframe[idx] = int(np.random.poisson(frac * photons))
 
 
 def paintgen(
@@ -160,7 +199,7 @@ def paintgen(
     photonrate: float,
     photonratestd: float,
     photonbudget: float,
-) -> tuple[np.ndarray, np.ndarray, list]:
+) -> tuple[lib.FloatArray1D, lib.FloatArray1D, list]:
     """Paint-Generator: generate on and off-traces for given parameters
     and calculate the number of photons in each frame for a binding
     site.
@@ -184,9 +223,9 @@ def paintgen(
 
     Returns
     -------
-    photonsinframe : np.ndarray
+    photonsinframe : lib.FloatArray1D
         Array containing the number of photons emitted in each frame.
-    timetrace : np.ndarray
+    timetrace : lib.FloatArray1D
         Array containing the time trace of the binding events.
     spotkinetics : list
         List containing the number of on-events, total bright events,
@@ -201,99 +240,35 @@ def paintgen(
     dark_times = np.random.exponential(meandark, meanlocs)
     bright_times = np.random.exponential(meanbright, meanlocs)
 
-    events = np.vstack((dark_times, bright_times)).reshape(
-        (-1,), order="F"
-    )  # Interweave dark_times and bright_times [dt,bt,dt,bt..]
+    # Interweave dark_times and bright_times [dt, bt, dt, bt, ...]
+    events = np.vstack((dark_times, bright_times)).reshape((-1,), order="F")
     eventsum = np.cumsum(events)
-    maxloc = np.argmax(
-        eventsum > (frames * time)
-    )  # Find the first event that exceeds the total integration time
+    # Find the first event that exceeds the total integration time
+    maxloc = np.argmax(eventsum > (frames * time))
     simulatedmeandark = np.mean(events[:maxloc:2])
-
     simulatedmeanbright = np.mean(events[1:maxloc:2])
 
-    # check trace
     if np.mod(maxloc, 2):  # uneven -> ends with an OFF-event
         onevents = int(np.floor(maxloc / 2))
     else:  # even -> ends with bright event
         onevents = int(maxloc / 2)
 
-    photonsinframe = np.zeros(
-        int(frames + np.ceil(meanbright / time * 20))
-    )  # an on-event might be longer than the movie, so allocate more memory
+    # an on-event might be longer than the movie, so allocate more memory
+    photonsinframe = np.zeros(int(frames + np.ceil(meanbright / time * 20)))
 
-    # calculate photon numbers
     for i in range(1, maxloc, 2):
-        if photonratestd == 0:
-            photons = np.round(photonrate * time)
-        else:
-            photons = np.round(
-                np.random.normal(photonrate, photonratestd) * time
-            )  # Number of Photons that are emitted in one frame
+        photons = _sample_photon_rate(photonrate, photonratestd, time)
+        # First frame in which photon emission happens
+        tempFrame = int(np.floor(eventsum[i - 1] / time))
+        # Number of frames in which photon emission happens
+        onFrames = int(np.ceil((eventsum[i] - tempFrame * time) / time))
+        # Reduce on-frames if photon budget would be exceeded
+        if photons > 0 and photons * onFrames > photonbudget:
+            onFrames = int(np.ceil(photonbudget / photons))
 
-        if photons < 0:
-            photons = 0
-
-        tempFrame = int(
-            np.floor(eventsum[i - 1] / time)
-        )  # Get the first frame in which something happens in on-event
-        onFrames = int(
-            np.ceil((eventsum[i] - tempFrame * time) / time)
-        )  # Number of frames in which photon emission happens
-
-        if photons * onFrames > photonbudget:
-            onFrames = int(
-                np.ceil(photonbudget / (photons * onFrames) * onFrames)
-            )  # Reduce the number of on-frames if the photonbudget is reached
-
-        for j in range(0, (onFrames)):
-            if onFrames == 1:  # CASE 1: all photons are emitted in one frame
-                photonsinframe[1 + tempFrame] = int(
-                    np.random.poisson(
-                        ((tempFrame + 1) * time - eventsum[i - 1])
-                        / time
-                        * photons
-                    )
-                )
-            # CASE 2: all photons are emitted in two frames
-            elif onFrames == 2:
-                if j == 0:  # photons in first onframe
-                    photonsinframe[1 + tempFrame] = int(
-                        np.random.poisson(
-                            ((tempFrame + 1) * time - eventsum[i - 1])
-                            / time
-                            * photons
-                        )
-                    )
-                else:  # photons in second onframe
-                    photonsinframe[2 + tempFrame] = int(
-                        np.random.poisson(
-                            (eventsum[i] - (tempFrame + 1) * time)
-                            / time
-                            * photons
-                        )
-                    )
-            else:  # CASE 3: all photons are emitted in three or more frames
-                if j == 0:  # photons in first onframe (partial)
-                    photonsinframe[1 + tempFrame] = int(
-                        np.random.poisson(
-                            ((tempFrame + 1) * time - eventsum[i - 1])
-                            / time
-                            * photons
-                        )
-                    )
-                elif j == onFrames - 1:  # photons in last onframe (partial)
-                    photonsinframe[onFrames + tempFrame] = int(
-                        np.random.poisson(
-                            (eventsum[i] - (tempFrame + onFrames - 1) * time)
-                            / time
-                            * photons
-                        )
-                    )
-                else:  # photons in middle frames (full)
-                    photonsinframe[1 + tempFrame + j] = int(
-                        np.random.poisson(photons)
-                    )
+        _distribute_event_photons(
+            photonsinframe, tempFrame, onFrames, photons, eventsum, i, time
+        )
 
         totalphotons = np.sum(
             photonsinframe[1 + tempFrame : tempFrame + 1 + onFrames]
@@ -320,7 +295,7 @@ def paintgen(
 
 
 def distphotons(
-    structures: np.ndarray,
+    structures: lib.FloatArray2D,
     itime: float,
     frames: int,
     taud: float,
@@ -328,13 +303,13 @@ def distphotons(
     photonrate: float,
     photonratestd: float,
     photonbudget: float,
-) -> tuple[np.ndarray, np.ndarray, list]:
+) -> tuple[lib.FloatArray1D, lib.FloatArray1D, list]:
     """Distribute photons and binding kinetics for the given simulated
     structures.
 
     Parameters
     ----------
-    structures : np.ndarray
+    structures : lib.FloatArray2D
         Array containing the binding sites' coordinates and exchange
         information.
     itime : float
@@ -354,9 +329,9 @@ def distphotons(
 
     Returns
     -------
-    photonsinframe : np.ndarray
+    photonsinframe : lib.FloatArray1D
         Array containing the number of photons emitted in each frame.
-    timetrace : np.ndarray
+    timetrace : lib.FloatArray1D
         Array containing the time trace of the binding events.
     spotkinetics : list
         List containing the number of on-events, total bright events,
@@ -381,13 +356,13 @@ def distphotons(
 
 def distphotonsxy(
     runner: int,
-    photondist: np.ndarray,
-    structures: np.ndarray,
+    photondist: lib.FloatArray2D,
+    structures: lib.FloatArray2D,
     psf: float,
     mode3Dstate: bool,
     cx: list,
     cy: list,
-) -> np.ndarray:
+) -> lib.FloatArray2D:
     """Distribute photons in a PSF, with an option for astigmatic PSF
     in 3D.
 
@@ -395,10 +370,10 @@ def distphotonsxy(
     ----------
     runner : int
         The index of the current binding site.
-    photondist : np.ndarray
+    photondist : lib.FloatArray2D
         Array containing the number of photons emitted in each frame for
         each binding site.
-    structures : np.ndarray
+    structures : lib.FloatArray2D
         Array containing the binding sites' coordinates and exchange
         information.
     psf : float
@@ -412,7 +387,7 @@ def distphotonsxy(
 
     Returns
     -------
-    photonposframe : np.ndarray
+    photonposframe : lib.FloatArray2D
         Array containing the positions of the photons emitted in the
         current frame for the specified binding site.
     """
@@ -448,8 +423,8 @@ def distphotonsxy(
 
 def convertMovie(
     runner: int,
-    photondist: np.ndarray,
-    structures: np.ndarray,
+    photondist: lib.FloatArray2D,
+    structures: lib.FloatArray2D,
     imagesize: int,
     frames: int,
     psf: float,
@@ -466,10 +441,10 @@ def convertMovie(
     ----------
     runner : int
         The index of the current binding site.
-    photondist : np.ndarray
+    photondist : lib.FloatArray2D
         Array containing the number of photons emitted in each frame for
         each binding site.
-    structures : np.ndarray
+    structures : lib.FloatArray2D
         Array containing the binding sites' coordinates and exchange
         information.
     imagesize : int
@@ -494,7 +469,7 @@ def convertMovie(
 
     Returns
     -------
-    simframe : np.ndarray
+    simframe : lib.FloatArray2D
         The simulated movie frame with the photon distribution and noise
         added.
     """
@@ -515,7 +490,7 @@ def convertMovie(
     return simframe
 
 
-def saveMovie(filename: str, movie: np.ndarray, info: dict) -> None:
+def saveMovie(filename: str, movie: lib.IntArray3D, info: dict) -> None:
     """Save the simulated movie to a file."""
     io.save_raw(filename, movie, [info])
 
@@ -523,25 +498,25 @@ def saveMovie(filename: str, movie: np.ndarray, info: dict) -> None:
 # Function to store the coordinates of a structure in a container.
 # The coordinates wil be adjustet so that the center of mass is the origin
 def defineStructure(
-    structurexxpx: np.ndarray,
-    structureyypx: np.ndarray,
-    structureex: np.ndarray,
-    structure3d: np.ndarray,
+    structurexxpx: lib.FloatArray1D,
+    structureyypx: lib.FloatArray1D,
+    structureex: lib.FloatArray1D,
+    structure3d: lib.FloatArray1D,
     pixelsize: float,
     mean: bool = True,
-) -> np.ndarray:
+) -> lib.FloatArray2D:
     """Define a structure with given coordinates and exchange
     information.
 
     Parameters
     ----------
-    structurexxpx : np.ndarray
+    structurexxpx : lib.FloatArray1D
         Array containing the x-coordinates of the structure in pixels.
-    structureyypx : np.ndarray
+    structureyypx : lib.FloatArray1D
         Array containing the y-coordinates of the structure in pixels.
-    structureex : np.ndarray
+    structureex : lib.FloatArray1D
         Array containing the exchange information for the structure.
-    structure3d : np.ndarray
+    structure3d : lib.FloatArray1D
         Array containing the 3D coordinates of the structure.
     pixelsize : float
         The pixel size in nanometers.
@@ -551,7 +526,7 @@ def defineStructure(
 
     Returns
     -------
-    structure : np.ndarray
+    structure : lib.FloatArray2D
         Array containing the structure's x-positions, y-positions,
         exchange information, and 3D coordinates.
     """
@@ -578,7 +553,7 @@ def generatePositions(
     imagesize: int,
     frame: int,
     arrangement: int,
-) -> np.ndarray:
+) -> lib.FloatArray2D:
     """Generate a set of positions where structures will be placed.
 
     Parameters
@@ -596,7 +571,7 @@ def generatePositions(
 
     Returns
     -------
-    gridpos : np.ndarray
+    gridpos : lib.FloatArray2D
         Array containing the generated positions in the format
         [[x1, y1], [x2, y2], ...].
     """
@@ -616,18 +591,18 @@ def generatePositions(
     return gridpos
 
 
-def rotateStructure(structure: np.ndarray) -> np.ndarray:
+def rotateStructure(structure: lib.FloatArray2D) -> lib.FloatArray2D:
     """Rotate a structure randomly.
 
     Parameters
     ----------
-    structure : np.ndarray
+    structure : lib.FloatArray2D
         Array containing the structure's coordinates and exchange
         information.
 
     Returns
     -------
-    newstructure : np.ndarray
+    newstructure : lib.FloatArray2D
         Array containing the rotated structure's coordinates and
         exchange information.
     """
@@ -646,14 +621,14 @@ def rotateStructure(structure: np.ndarray) -> np.ndarray:
 
 
 def incorporateStructure(
-    structure: np.ndarray, incorporation: float
-) -> np.ndarray:
+    structure: lib.FloatArray2D, incorporation: float
+) -> lib.FloatArray2D:
     """Return a subset of the structure to reflect incorporation of
     staples.
 
     Parameters
     ----------
-    structure : np.ndarray
+    structure : lib.FloatArray2D
         Array containing the structure's coordinates and exchange
         information.
     incorporation : float
@@ -661,7 +636,7 @@ def incorporateStructure(
 
     Returns
     -------
-    newstructure : np.ndarray
+    newstructure : lib.FloatArray2D
         Array containing the subset of the structure after applying the
         incorporation probability.
     """
@@ -671,18 +646,18 @@ def incorporateStructure(
     return newstructure
 
 
-def randomExchange(pos: np.ndarray) -> np.ndarray:
+def randomExchange(pos: lib.FloatArray2D) -> lib.FloatArray2D:
     """Randomly shuffle exchange parameters for random labeling.
 
     Parameters
     ----------
-    pos : np.ndarray
+    pos : lib.FloatArray2D
         Array containing the positions and exchange information of the
         structures.
 
     Returns
     -------
-    newpos : np.ndarray
+    newpos : lib.FloatArray2D
         Array containing the positions with shuffled exchange
         parameters.
     """
@@ -693,22 +668,22 @@ def randomExchange(pos: np.ndarray) -> np.ndarray:
 
 
 def prepareStructures(
-    structure: np.ndarray,
-    gridpos: np.ndarray,
+    structure: lib.FloatArray2D,
+    gridpos: lib.FloatArray2D,
     orientation: int,
     number: int,
     incorporation: float,
     exchange: int,
-) -> np.ndarray:
+) -> lib.FloatArray2D:
     """Prepare input positions, the structure definition considering
     rotation etc.
 
     Parameters
     ----------
-    structure : np.ndarray
+    structure : lib.FloatArray2D
         Array containing the structure's coordinates and exchange
         information.
-    gridpos : np.ndarray
+    gridpos : lib.FloatArray2D
         Array containing the positions where structures will be placed.
     orientation : int
         Orientation of the structure:
@@ -724,7 +699,7 @@ def prepareStructures(
 
     Returns
     -------
-    newpos : np.ndarray
+    newpos : lib.FloatArray2D
         Array containing the new positions of the structures after
         applying the specified transformations.
     """
