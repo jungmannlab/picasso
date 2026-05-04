@@ -228,7 +228,7 @@ class TestRender:
 
 
 # ---------------------------------------------------------------------------
-# render_hist_numba (synthetic-input cases live in test_average.py)
+# render_hist_numba
 # ---------------------------------------------------------------------------
 
 
@@ -243,6 +243,51 @@ class TestRenderHistNumba:
         assert im.shape == (128, 128)
         assert im.dtype == np.float32
         assert im.sum() == n
+
+    def test_basic_synthetic(self):
+        """Three in-bounds points produce a 3x3 image with mass = 3."""
+        x = np.array([0.5, 1.5, 2.5], dtype=np.float32)
+        y = np.array([0.5, 1.5, 2.5], dtype=np.float32)
+
+        n, im = render.render_hist_numba(
+            x, y, oversampling=1.0, t_min=0.0, t_max=3.0
+        )
+
+        assert n == 3
+        assert im.shape == (3, 3)
+        assert im.dtype == np.float32
+        assert im.sum() == n
+
+    def test_excludes_out_of_bounds(self):
+        x = np.array([0.5, 5.5], dtype=np.float32)
+        y = np.array([0.5, 5.5], dtype=np.float32)
+
+        n, _ = render.render_hist_numba(
+            x, y, oversampling=1.0, t_min=0.0, t_max=3.0
+        )
+
+        assert n == 1
+
+    def test_oversampling_scales_image(self):
+        x = np.array([0.5], dtype=np.float32)
+        y = np.array([0.5], dtype=np.float32)
+
+        _, im1 = render.render_hist_numba(x, y, 1.0, 0.0, 1.0)
+        _, im2 = render.render_hist_numba(x, y, 2.0, 0.0, 1.0)
+
+        assert im1.shape == (1, 1)
+        assert im2.shape == (2, 2)
+
+    def test_empty_input(self):
+        x = np.array([], dtype=np.float32)
+        y = np.array([], dtype=np.float32)
+
+        n, im = render.render_hist_numba(
+            x, y, oversampling=1.0, t_min=0.0, t_max=3.0
+        )
+
+        assert n == 0
+        assert np.all(im == 0)
 
 
 # ---------------------------------------------------------------------------
