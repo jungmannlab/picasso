@@ -21,6 +21,7 @@ Last change: 04-MAY-2026 CEST
 - Numerous new functions added in the API to simplify the more complicated analyses, for example, ``picasso.localize.fit2D``
 - Faster ind. loc. precision rendering in 3D
 - Localize supports .stk file format from MetaMorph (*experimental!*)
+- Expanded test suite (CI)
 
 ### *Small improvements:*
 

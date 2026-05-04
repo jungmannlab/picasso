@@ -3147,7 +3147,7 @@ class SPINNA:
         """Alias for ``self.fit()``."""
         assert (
             callback is None
-            or isinstance(callback, lib.ProgressDialog)
+            or isinstance(callback, (lib.ProgressDialog, lib.MockProgress))
             or callback == "console"
         ), ("callback must be a ProgressDialog," " 'console', or None.")
         if callback is None:

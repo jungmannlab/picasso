@@ -109,6 +109,11 @@ picasso = [
     "config_template.yaml",
 ]
 
+[tool.pytest.ini_options]
+markers = [
+    "slow: long-running tests (multiprocessing, Bayesian fits, compare_models)",
+]
+
 [tool.black]
 line-length = 79
 include = "\\.pyi?$"
