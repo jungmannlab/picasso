@@ -2678,7 +2678,7 @@ def n_segments(info: list[dict], segmentation: int) -> int:
         Number of segments based on the total number of frames and the
         segmentation value.
     """
-    n_frames = info[0]["Frames"]
+    n_frames = lib.get_from_metadata(info, "Frames")
     n_segments = int(np.round(n_frames / segmentation))
     return n_segments
 
