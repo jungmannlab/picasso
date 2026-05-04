@@ -306,8 +306,12 @@ def load_nd2(path: str) -> tuple[ND2Movie, list[dict]]:
     return movie, [info]
 
 
-def load_stk(path: str) -> tuple[STKMovie, list[dict]]:
+def load_stk(path: str) -> tuple[STKMultiMovie, list[dict]]:
     """Load a MetaMorph STK movie file and its metadata.
+
+    If the filename contains a numeric suffix (e.g. ``name_003.stk``),
+    all files in the same directory with the same base name and an equal
+    or higher suffix are loaded as a single contiguous movie.
 
     Parameters
     ----------
@@ -316,13 +320,13 @@ def load_stk(path: str) -> tuple[STKMovie, list[dict]]:
 
     Returns
     -------
-    movie : STKMovie
+    movie : STKMultiMovie
         A movie object providing array-like access to STK frames.
         Frames are loaded into memory on access.
     info : list[dict]
         A list containing a dictionary with metadata about the movie.
     """
-    movie = STKMovie(path)
+    movie = STKMultiMovie(path)
     info = movie.info()
     return movie, [info]
 
@@ -1595,13 +1599,12 @@ class STKMovie(AbstractPicassoMovie):
                 f"{self.n_frames} frames."
             )
         offset = self._first_data_offset + index * self._frame_bytes
-        with self._lock:
-            self._file.seek(offset)
-            frame = np.fromfile(
-                self._file,
-                dtype=self._tif_dtype,
-                count=self.height * self.width,
-            ).reshape(self.frame_shape)
+        self._file.seek(offset)
+        frame = np.fromfile(
+            self._file,
+            dtype=self._tif_dtype,
+            count=self.height * self.width,
+        ).reshape(self.frame_shape)
         if self._byte_order == ">":
             frame = frame.byteswap().view(self._dtype)
         return frame
@@ -1619,6 +1622,135 @@ class STKMovie(AbstractPicassoMovie):
     @property
     def dtype(self):
         return self._dtype
+
+
+class STKMultiMovie(AbstractPicassoMovie):
+    """Read consecutive MetaMorph STK files as a single movie.
+
+    When an STK file with a numeric suffix is opened (e.g.
+    ``name_003.stk``), this class automatically discovers all files in
+    the same directory that share the same base name and have an equal
+    or higher numeric suffix, and presents them as one contiguous movie.
+    If the filename does not contain a numeric suffix, only the single
+    file is used.
+    """
+
+    def __init__(self, path: str):
+        super().__init__()
+        self.path = os.path.abspath(path)
+        self.dir = os.path.dirname(self.path)
+
+        # Detect trailing numeric suffix in the filename stem, e.g.
+        # "GluN1_ms_Pos-1_003.stk" → file_base="GluN1_ms_Pos-1", start_idx=3
+        stem = os.path.splitext(os.path.basename(self.path))[0]
+        m = re.match(r"^(.+)_(\d+)$", stem)
+        if m:
+            file_base = m.group(1)
+            start_idx = int(m.group(2))
+            escaped_base = re.escape(os.path.join(self.dir, file_base))
+            pattern = re.compile(escaped_base + r"_(\d+)\.stk$", re.IGNORECASE)
+            entries = [e.path for e in os.scandir(self.dir) if e.is_file()]
+            suffix_path_pairs = [
+                (int(pattern.match(e).group(1)), e)
+                for e in entries
+                if pattern.match(e)
+            ]
+            self.paths = [
+                p for idx, p in sorted(suffix_path_pairs) if idx >= start_idx
+            ]
+        else:
+            self.paths = [self.path]
+
+        self.maps = [STKMovie(p) for p in self.paths]
+        self.n_maps = len(self.maps)
+        self.n_frames_per_map = [_.n_frames for _ in self.maps]
+        self.n_frames = sum(self.n_frames_per_map)
+        self.cum_n_frames = np.insert(np.cumsum(self.n_frames_per_map), 0, 0)
+        self._dtype = self.maps[0]._dtype
+        self.height = self.maps[0].height
+        self.width = self.maps[0].width
+        self.shape = (self.n_frames, self.height, self.width)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        self.close()
+
+    def __getitem__(self, it):  # noqa: C901
+        if isinstance(it, tuple):
+            if it[0] == Ellipsis:
+                stack = self[it[0]]
+                if len(it) == 2:
+                    return stack[:, it[1]]
+                elif len(it) == 3:
+                    return stack[:, it[1], it[2]]
+                else:
+                    raise IndexError
+            elif isinstance(it[0], slice):
+                indices = range(*it[0].indices(self.n_frames))
+                stack = np.array([self.get_frame(_) for _ in indices])
+                if len(indices) == 0:
+                    return stack
+                else:
+                    if len(it) == 2:
+                        return stack[:, it[1]]
+                    elif len(it) == 3:
+                        return stack[:, it[1], it[2]]
+                    else:
+                        raise IndexError
+            if isinstance(it[0], int) or np.issubdtype(it[0], np.integer):
+                return self[it[0]][it[1:]]
+        elif isinstance(it, slice):
+            indices = range(*it.indices(self.n_frames))
+            return np.array([self.get_frame(_) for _ in indices])
+        elif it == Ellipsis:
+            return np.array([self.get_frame(_) for _ in range(self.n_frames)])
+        elif isinstance(it, int) or np.issubdtype(it, np.integer):
+            return self.get_frame(it)
+        raise TypeError
+
+    def __iter__(self):
+        for i in range(self.n_frames):
+            yield self[i]
+
+    def __len__(self):
+        return self.n_frames
+
+    def close(self):
+        for map_ in self.maps:
+            map_.close()
+
+    @property
+    def dtype(self):
+        return self._dtype
+
+    def get_frame(self, index: int) -> lib.IntArray2D:
+        for i in range(self.n_maps):
+            if self.cum_n_frames[i] <= index < self.cum_n_frames[i + 1]:
+                break
+        else:
+            raise IndexError
+        return self.maps[i][index - self.cum_n_frames[i]]
+
+    def info(self) -> dict:
+        info = self.maps[0].info()
+        info["Frames"] = self.n_frames
+        self.meta = info
+        return info
+
+    def camera_parameters(self, config: dict) -> dict:
+        return {
+            "gain": [1],
+            "qe": [1],
+            "wavelength": [0],
+            "cam_index": 0,
+            "camera": "None",
+        }
+
+    def tofile(self, file_handle, byte_order=None):
+        for map_ in self.maps:
+            map_.tofile(file_handle, byte_order)
 
 
 class TiffMultiMap(AbstractPicassoMovie):
