@@ -76,6 +76,7 @@ Last change: 05-MAY-2026 CEST
 
 - Fixed 3D render screenshot metadata
 - Fixed 3D animation for non-square FOV
+- Fixed pre-G5M group/max locs checks when applying to all channels
 - Fixed zero-value in rendered images (previously RGB channels were capped between 1 and 255 instead of 0 and 255)
 - Fixed ToRaw
 - Fixed distances in NeNA plot (previously plotting multiple times kept increasing the values)

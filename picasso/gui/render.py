@@ -7115,26 +7115,29 @@ class View(QtWidgets.QLabel):
             return
 
         max_locs_per_channel = []
-        for i in range(len(self.window.view.locs)):
+        channels = (
+            range(len(self.locs)) if channel == len(self.locs) else [channel]
+        )
+        for i in channels:
             if not self.check_group(i):
                 return
             max_locs_per_channel.append(self.check_max_locs(i))
         params["max_locs_per_cluster"] = max_locs_per_channel
 
         # for subcluster check plots
-        if channel == len(self.window.view.locs):  # apply to all
+        if channel == len(self.locs):  # apply to all
             suffix_molecules, suffix_clusters, ok = self._g5m_get_suffixes(
                 params
             )
             if not ok:
                 return
 
-            for i in range(len(self.window.view.locs)):
-                path_mols = self.window.view.locs_paths[i].replace(
+            for i in range(len(self.locs)):
+                path_mols = self.locs_paths[i].replace(
                     ".hdf5", f"{suffix_molecules}.hdf5"
                 )
                 path_clusters = (
-                    self.window.view.locs_paths[i].replace(
+                    self.locs_paths[i].replace(
                         ".hdf5", f"{suffix_clusters}.hdf5"
                     )
                     if params["clustered_locs"]
@@ -7147,7 +7150,7 @@ class View(QtWidgets.QLabel):
                     path_clusters,
                 )
         else:  # single channel
-            base, _ = os.path.splitext(self.window.view.locs_paths[channel])
+            base, _ = os.path.splitext(self.locs_paths[channel])
             out_path = base + "_molmap.hdf5"
             path_molecules, _ = lib.get_save_filename_ext_dialog(
                 self.window,
@@ -7241,7 +7244,7 @@ class View(QtWidgets.QLabel):
     def check_group(self, channel: int) -> bool:
         """Check whether the data has been grouped (clustered) in
         channel i."""
-        locs = self.window.view.locs[channel]
+        locs = self.view.locs[channel]
         if "group" in locs.columns:
             return True
         else:
