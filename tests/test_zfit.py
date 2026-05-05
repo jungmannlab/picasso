@@ -30,31 +30,7 @@ matplotlib.use("Agg")
 
 from picasso import zfit  # noqa: E402
 
-
-# Reusable astigmatism calibration (matches the one in test_postprocess.py).
-CALIB_3D = {
-    "X Coefficients": [
-        -1.6680708772714857e-18,
-        2.4038209829154137e-15,
-        2.1771067332017187e-12,
-        -3.0324788231238476e-09,
-        3.5433326085494675e-06,
-        0.0023039289366630425,
-        1.2026032603707493,
-    ],
-    "Y Coefficients": [
-        -1.7708672355491796e-18,
-        9.808249540501714e-16,
-        2.10653248543535e-12,
-        2.228026137415219e-11,
-        3.628007433361433e-06,
-        -0.001646865504353452,
-        1.2257249554338714,
-    ],
-    "Step size in nm": 5.0,
-    "Number of frames": 201,
-    "Magnification factor": 0.79,
-}
+from tests.conftest import CALIB_3D  # noqa: E402
 
 
 # ---------------------------------------------------------------------------

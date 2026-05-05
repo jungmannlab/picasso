@@ -20,8 +20,9 @@ import pytest
 
 from picasso import gausslq, gaussmle
 
+from tests.conftest import BOX
 
-BOX = 7
+
 BOX_HALF = BOX // 2
 EPS = 1e-3
 MAX_IT = 1000

@@ -17,12 +17,13 @@ import pytest  # noqa: E402
 
 from picasso import aim, io, lib, postprocess  # noqa: E402
 
+from tests.conftest import PIXELSIZE  # noqa: E402
+
 # undrifting parameters
 SEGMENTATION = 100
 
 # synthetic-data parameters
 N_FRAMES_SYNTH = 1000
-PIXELSIZE = 130
 SYNTH_FOV = 64
 RNG_SEED = 42
 SYNTH_PICKS = [

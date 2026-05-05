@@ -20,11 +20,12 @@ from picasso.spinna import (
     StructureSimulator,
 )
 
+from tests.conftest import PIXELSIZE
+
 # ---------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------
 
-PIXELSIZE = 130  # camera pixel size, nm
 LABEL_UNC = 6.0  # label position uncertainty, nm
 LE = 0.375  # labeling efficiency, 37.5%
 GRANULARITY = 5

@@ -194,9 +194,39 @@ def synthetic_spots_noisy():
 # ---------------------------------------------------------------------------
 
 
+# Shared constants — imported by individual test modules so a single change
+# here propagates everywhere. Keep this list narrow: only values used in 2+
+# test files belong here.
 CAMERA_INFO = {"Baseline": 0, "Sensitivity": 1, "Gain": 1}
-DEFAULT_BOX = 7
-DEFAULT_MIN_NG = 5000
+BOX = 7
+MIN_NG = 5000
+PIXELSIZE = 130  # camera pixel size, nm
+
+# Astigmatism 3D calibration shared by test_postprocess / test_zfit /
+# test_localize. Tests that mutate it should pass ``dict(CALIB_3D)``.
+CALIB_3D = {
+    "X Coefficients": [
+        -1.6680708772714857e-18,
+        2.4038209829154137e-15,
+        2.1771067332017187e-12,
+        -3.0324788231238476e-09,
+        3.5433326085494675e-06,
+        0.0023039289366630425,
+        1.2026032603707493,
+    ],
+    "Y Coefficients": [
+        -1.7708672355491796e-18,
+        9.808249540501714e-16,
+        2.10653248543535e-12,
+        2.228026137415219e-11,
+        3.628007433361433e-06,
+        -0.001646865504353452,
+        1.2257249554338714,
+    ],
+    "Step size in nm": 5.0,
+    "Number of frames": 201,
+    "Magnification factor": 0.79,
+}
 
 
 @pytest.fixture(scope="session")
@@ -204,9 +234,7 @@ def real_identifications(movie):
     """Identifications from the bundled .raw — shared across test files."""
     from picasso import localize
 
-    return localize.identify(
-        movie, DEFAULT_MIN_NG, DEFAULT_BOX, return_info=False
-    )
+    return localize.identify(movie, MIN_NG, BOX, return_info=False)
 
 
 @pytest.fixture(scope="session")
@@ -214,9 +242,7 @@ def real_spots(movie, real_identifications):
     """Extracted spots from the bundled .raw — shared across test files."""
     from picasso import localize
 
-    return localize.get_spots(
-        movie, real_identifications, DEFAULT_BOX, CAMERA_INFO
-    )
+    return localize.get_spots(movie, real_identifications, BOX, CAMERA_INFO)
 
 
 # ---------------------------------------------------------------------------

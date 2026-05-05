@@ -1921,7 +1921,7 @@ def check_nena(
     print("Calculating NeNA.. ", end="")
     locs = locs[0:MAX_LOCS]
     try:
-        result, nena_px = postprocess.nena(locs, None, callback=callback)
+        result, nena_px = postprocess.nena(locs, info, callback=callback)
     except Exception as e:
         print(e)
         nena_px = float("nan")

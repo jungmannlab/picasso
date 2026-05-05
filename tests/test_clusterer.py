@@ -9,14 +9,15 @@ import pandas as pd
 import pytest
 from picasso import io, clusterer
 
+from tests.conftest import PIXELSIZE
+
 # parameters for clustering
-CAMERA_PIXEL_SIZE = 130  # nm
-DBSCAN_EPS = 5 / CAMERA_PIXEL_SIZE  # in camera pixels, like localizations
+DBSCAN_EPS = 5 / PIXELSIZE  # in camera pixels, like localizations
 DBSCAN_MIN_SAMPLES = 2
 HDBSCAN_MIN_CLUSTER_SIZE = 5
 HDBSCAN_MIN_SAMPLES = 2
-HDBSCAN_CLUSTER_EPS = 10 / CAMERA_PIXEL_SIZE
-GA_RADIUS = 7 / CAMERA_PIXEL_SIZE
+HDBSCAN_CLUSTER_EPS = 10 / PIXELSIZE
+GA_RADIUS = 7 / PIXELSIZE
 GA_RADIUS_Z = GA_RADIUS * 2.5
 GA_MIN_LOCS = 5
 
@@ -107,7 +108,7 @@ def synth_locs_3d():
 
 @pytest.fixture
 def synth_info():
-    return [{"Pixelsize": CAMERA_PIXEL_SIZE, "Width": 100, "Height": 100}]
+    return [{"Pixelsize": PIXELSIZE, "Width": 100, "Height": 100}]
 
 
 # ---------------------------------------------------------------------
@@ -143,7 +144,7 @@ def _run_dbscan_3d(locs):
         DBSCAN_EPS,
         DBSCAN_MIN_SAMPLES,
         min_locs=0,
-        pixelsize=CAMERA_PIXEL_SIZE,
+        pixelsize=PIXELSIZE,
     )
 
 
@@ -153,7 +154,7 @@ def _run_hdbscan_3d(locs):
         min_cluster_size=HDBSCAN_MIN_CLUSTER_SIZE,
         min_samples=HDBSCAN_MIN_SAMPLES,
         cluster_eps=HDBSCAN_CLUSTER_EPS,
-        pixelsize=CAMERA_PIXEL_SIZE,
+        pixelsize=PIXELSIZE,
     )
 
 
@@ -164,7 +165,7 @@ def _run_smlm_3d(locs):
         min_locs=GA_MIN_LOCS,
         frame_analysis=False,
         radius_z=GA_RADIUS_Z,
-        pixelsize=CAMERA_PIXEL_SIZE,
+        pixelsize=PIXELSIZE,
     )
 
 
@@ -248,10 +249,8 @@ def test_recovers_known_clusters_3d(synth_locs_3d, run_clusterer):
     centers = out.groupby("group")[["x", "y", "z"]].mean().to_numpy()
     # z is in nm, others in px — scale z so the tolerance is meaningful.
     centers_scaled = centers.copy()
-    centers_scaled[:, 2] /= CAMERA_PIXEL_SIZE
-    truth_scaled = [
-        (c[0], c[1], c[2] / CAMERA_PIXEL_SIZE) for c in BLOB_CENTERS_3D
-    ]
+    centers_scaled[:, 2] /= PIXELSIZE
+    truth_scaled = [(c[0], c[1], c[2] / PIXELSIZE) for c in BLOB_CENTERS_3D]
     _match_truth_to_recovered(centers_scaled, truth_scaled, tol=0.5)
 
 
@@ -350,9 +349,7 @@ def test_find_cluster_centers_2d(synth_locs_2d):
 def test_find_cluster_centers_3d(synth_locs_3d):
     """3D centers expose volume / std_z / z columns."""
     db_locs = _run_dbscan_3d(synth_locs_3d)
-    centers = clusterer.find_cluster_centers(
-        db_locs, pixelsize=CAMERA_PIXEL_SIZE
-    )
+    centers = clusterer.find_cluster_centers(db_locs, pixelsize=PIXELSIZE)
 
     expected_cols = {"x", "y", "z", "volume", "std_z", "convexhull", "group"}
     assert expected_cols.issubset(centers.columns)

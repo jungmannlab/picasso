@@ -14,10 +14,11 @@ from PyQt6 import QtCore, QtGui
 
 from picasso import io, masking, render
 
+from tests.conftest import PIXELSIZE
+
 # parameters reused across tests
 VIEWPORT = ((15, 15), (16, 16))
 FULL_VIEWPORT = ((0, 0), (32, 32))
-PIXELSIZE = 130
 BLUR_METHODS = ["gaussian", "gaussian_iso", "smooth", "convolve"]
 LINEAR_BLUR_METHODS = ["smooth", "convolve"]  # preserve total mass
 MASKING_METHODS = [
