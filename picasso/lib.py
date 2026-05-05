@@ -75,15 +75,19 @@ class Dialog(QtWidgets.QDialog):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self._focus_buttons = ["OK"]
         self.setWindowFlag(
             QtCore.Qt.WindowType.WindowContextHelpButtonHint, False
         )
 
     def showEvent(self, event):
         """Remove focus from any QPushButton when the dialog is shown,
-        so that pressing Enter does not trigger any button by default."""
+        so that pressing Enter does not trigger any button by default
+        (unless it's called "OK")."""
         super().showEvent(event)
         for button in self.findChildren(QtWidgets.QPushButton):
+            if button.text() in self._focus_buttons:
+                continue
             button.setDefault(False)
             button.setAutoDefault(False)
 
