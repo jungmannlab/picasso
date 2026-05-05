@@ -774,6 +774,8 @@ def remove_locs_in_picks(
         ), "pick_size must be a number."
     if pick_shape == "Circle":
         pick_size /= 2  # convert diameter to radius
+    else:
+        index_blocks = None  # ignore index blocks, only used for circle picks
     all_picked_locs = picked_locs(
         locs=locs,
         info=info,

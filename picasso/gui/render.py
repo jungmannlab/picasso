@@ -7078,6 +7078,7 @@ class View(QtWidgets.QLabel):
     def _g5m_get_suffixes(self, params) -> tuple[str, str, bool]:
         """Get suffixes for G5M molecules and clustered locs when
         applying G5M to all channels."""
+        suffix_molecules, suffix_clusters = "", ""  # default
         suffix_molecules, ok1 = QtWidgets.QInputDialog.getText(
             self.window,
             "Input Dialog",
@@ -9104,6 +9105,8 @@ class View(QtWidgets.QLabel):
     def index_locs(self, channel: int, fast_render: bool = False) -> None:
         """Indexes localizations from a given channel in a grid with
         grid size equal to the pick radius."""
+        if self._pick_shape != "Circle":
+            return None
         if fast_render:
             locs = self.locs[channel]
         else:
