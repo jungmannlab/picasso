@@ -3431,20 +3431,20 @@ class SPINNA:
         # total budget
         n_initial = min(n_initial, n_total)
         n_iterations = min(n_iterations, n_total - n_initial)
-        total_evals = n_initial + n_iterations
-
-        # set up progress tracking
-        if isinstance(callback, lib.ProgressDialog):
-            callback.setMaximum(total_evals)
-            callback.setLabelText("Bayesian optimization")
-        if callback == "console":
-            progress_bar = tqdm(
-                total=total_evals, desc="Bayesian optimization"
-            )
-        eval_count = 0
 
         # --- Phase 1: initial space-filling design ---
+        if isinstance(callback, lib.ProgressDialog):
+            callback.zero_progress("Bayesian optimization (initial sampling)")
+            callback.setMaximum(n_initial)
+        progress_bar = None
+        if callback == "console":
+            progress_bar = tqdm(
+                total=n_initial,
+                desc="Bayesian optimization (initial sampling)",
+            )
+
         init_idx = self._farthest_point_sampling(proportions, n_initial)
+        eval_count = 0
         for idx in init_idx:
             scores[idx] = self._evaluate_single(N_structures[idx])
             evaluated[idx] = True
@@ -3452,25 +3452,36 @@ class SPINNA:
             if callback == "console":
                 progress_bar.update(1)
             elif callback is not None and callback != "console":
-                callback.description_base = "Bayesian optimization (initial)"
                 callback.set_value(eval_count)
 
+        if callback == "console":
+            progress_bar.close()
+
         # --- Phase 2: GP-guided acquisition ---
-        evaluated, scores, eval_count = self._bayesian_gp_phase(
+        if isinstance(callback, lib.ProgressDialog):
+            callback.zero_progress("Bayesian optimization (GP-guided)")
+            callback.setMaximum(n_iterations)
+        if callback == "console":
+            progress_bar = tqdm(
+                total=n_iterations,
+                desc="Bayesian optimization (GP-guided)",
+            )
+
+        evaluated, scores, _ = self._bayesian_gp_phase(
             proportions=proportions,
             N_structures=N_structures,
             evaluated=evaluated,
             scores=scores,
             n_iterations=n_iterations,
             callback=callback,
-            eval_count=eval_count,
+            eval_count=0,
             progress_bar=progress_bar if callback == "console" else None,
         )
 
-        if callback == "console":
+        if callback == "console" and progress_bar is not None:
             progress_bar.close()
         elif isinstance(callback, lib.ProgressDialog):
-            callback.set_value(total_evals)
+            callback.set_value(callback.maximum())
 
         # collect results for evaluated candidates only
         eval_mask = evaluated
@@ -3588,7 +3599,6 @@ class SPINNA:
             if callback == "console":
                 progress_bar.update(1)
             elif callback is not None:
-                callback.description_base = "Bayesian optimization"
                 callback.set_value(eval_count)
 
             # early stopping
@@ -3599,6 +3609,13 @@ class SPINNA:
             else:
                 no_improvement_count += 1
             if no_improvement_count >= patience:
+                # shrink the progress target so the bar reaches 100%
+                # naturally instead of jumping at the end
+                if isinstance(callback, lib.ProgressDialog):
+                    callback.setMaximum(eval_count)
+                elif callback == "console" and progress_bar is not None:
+                    progress_bar.total = eval_count
+                    progress_bar.refresh()
                 break
 
         return evaluated, scores, eval_count

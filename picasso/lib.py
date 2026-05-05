@@ -379,6 +379,10 @@ class ProgressDialog(QtWidgets.QProgressDialog):
         if description:
             self.setLabelText(description)
             self.description_base = description
+        if self.initalized:
+            # restart the time-estimate baseline so the next non-zero
+            # set_value re-arms the timer for the new phase
+            self.count_started = False
         self.set_value(0)
 
     def play_sound_notification(self):
