@@ -10335,11 +10335,10 @@ class View(QtWidgets.QLabel):
                         rcc_progress.set_value,
                     )
                     # sanity check and assign attributes
-                    locs = lib.ensure_sanity(undrifted_locs, info)
-                    self.all_locs[channel] = locs
-                    self.locs[channel] = locs.copy()
                     self.index_blocks[channel] = None
                     self.add_drift(channel, drift)
+                    # ignore undrift_locs since we use _apply_drift to
+                    # assign attributes
                     self._apply_drift(channel, drift)
                     self.update_scene()
                     self.show_drift()

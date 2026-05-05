@@ -1346,7 +1346,10 @@ def _render(args: argparse.Namespace) -> None:
     from .render import render
     from os.path import splitext
     from matplotlib.pyplot import imsave
-    from os import startfile
+    import sys
+
+    if sys.platform == "win32":
+        from os import startfile
     from os.path import isdir
     from .io import load_user_settings, save_user_settings
     from tqdm import tqdm
@@ -1387,7 +1390,7 @@ def _render(args: argparse.Namespace) -> None:
             )
         else:
             imsave(out_path, image, vmin=vmin, vmax=vmax, cmap=cmap)
-        if not silent:
+        if not silent and sys.platform == "win32":
             startfile(out_path)
 
     settings = load_user_settings()
@@ -1870,6 +1873,7 @@ def _spinna_process_row(
         N_sim=sim_repeats,
     ).fit_stoichiometry(
         N_structures,
+        fitting_mode="bayesian",
         save=f"{save_filename}_fit_scores.csv",
         asynch=asynch,
         bootstrap=bootstrap,
