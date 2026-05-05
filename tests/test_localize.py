@@ -55,6 +55,293 @@ CALIB_3D = {
 
 
 # ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _gradient_meshgrid(box: int) -> tuple[np.ndarray, np.ndarray]:
+    """Build the normalised (uy, ux) direction vectors that
+    ``identify_in_image`` constructs internally — needed to drive
+    ``net_gradient`` directly. The center pixel is unused by
+    ``net_gradient`` (it is skipped inside the loop) but its norm is 0,
+    so we patch it to 1.0 to avoid emitting a divide-by-zero warning."""
+    box_half = box // 2
+    ux = np.zeros((box, box), dtype=np.float32)
+    uy = np.zeros((box, box), dtype=np.float32)
+    for i in range(box):
+        val = box_half - i
+        ux[:, i] = uy[i, :] = val
+    unorm = np.sqrt(ux**2 + uy**2)
+    unorm[box_half, box_half] = 1.0
+    ux /= unorm
+    uy /= unorm
+    return uy, ux
+
+
+def _gaussian_frame(
+    shape: tuple[int, int],
+    center: tuple[int, int],
+    sigma: float = 1.2,
+    amplitude: float = 5000.0,
+    background: float = 100.0,
+) -> np.ndarray:
+    """Build a single-Gaussian-peak frame on a flat background. Returned
+    as float32 so it can be passed straight into the numba-jitted
+    helpers without numba complaining about the dtype."""
+    Y, X = shape
+    cy, cx = center
+    yy, xx = np.indices((Y, X), dtype=np.float32)
+    g = amplitude * np.exp(-((yy - cy) ** 2 + (xx - cx) ** 2) / (2 * sigma**2))
+    return (g + background).astype(np.float32)
+
+
+# ---------------------------------------------------------------------------
+# local_maxima
+# ---------------------------------------------------------------------------
+
+
+class TestLocalMaxima:
+    """Pure local-maxima search inside a sliding box."""
+
+    def test_single_peak_detected(self):
+        frame = np.zeros((20, 20), dtype=np.float32)
+        frame[10, 12] = 100.0
+        y, x = localize.local_maxima(frame, BOX)
+        assert list(zip(y.tolist(), x.tolist())) == [(10, 12)]
+
+    def test_multiple_peaks_far_apart_all_found(self):
+        frame = np.zeros((30, 30), dtype=np.float32)
+        peaks = [(8, 8), (8, 22), (22, 15)]
+        for py, px in peaks:
+            frame[py, px] = 50.0
+        y, x = localize.local_maxima(frame, BOX)
+        found = set(zip(y.tolist(), x.tolist()))
+        assert found == set(peaks)
+
+    def test_peaks_in_border_band_are_excluded(self):
+        """``local_maxima`` only scans i in [box_half, Y - box_half - 1)
+        — peaks placed inside the border band must not be returned."""
+        Y = X = 20
+        box_half = BOX // 2
+        frame = np.zeros((Y, X), dtype=np.float32)
+        frame[1, 1] = 100.0  # top-left border
+        frame[Y - 2, X - 2] = 100.0  # bottom-right border
+        y, x = localize.local_maxima(frame, BOX)
+        # All returned coordinates lie strictly inside the scan band
+        assert ((y >= box_half) & (y < Y - box_half - 1)).all()
+        assert ((x >= box_half) & (x < X - box_half - 1)).all()
+
+    def test_flat_frame_returns_no_maxima(self):
+        """A constant frame has no unique local max — the implementation's
+        ``argmax`` returns the top-left pixel (index 0), so no local
+        window has its max at the center."""
+        frame = np.full((20, 20), 42.0, dtype=np.float32)
+        y, x = localize.local_maxima(frame, BOX)
+        assert len(y) == 0 and len(x) == 0
+
+
+# ---------------------------------------------------------------------------
+# gradient_at
+# ---------------------------------------------------------------------------
+
+
+class TestGradientAt:
+    """Two-point centered finite difference at (y, x)."""
+
+    def test_horizontal_gradient(self):
+        # frame[y, x+1] - frame[y, x-1]  along increasing x
+        frame = np.tile(np.arange(10, dtype=np.float32), (10, 1))
+        gy, gx = localize.gradient_at(frame, 5, 5, 0)
+        assert gy == 0.0
+        assert gx == 2.0  # 6 - 4
+
+    def test_vertical_gradient(self):
+        # frame[y+1, x] - frame[y-1, x]  along increasing y
+        frame = np.tile(
+            np.arange(10, dtype=np.float32).reshape(-1, 1), (1, 10)
+        )
+        gy, gx = localize.gradient_at(frame, 5, 5, 0)
+        assert gy == 2.0  # 6 - 4
+        assert gx == 0.0
+
+    def test_zero_gradient_in_flat_region(self):
+        frame = np.full((10, 10), 7.0, dtype=np.float32)
+        gy, gx = localize.gradient_at(frame, 5, 5, 0)
+        assert gy == 0.0 and gx == 0.0
+
+    def test_i_argument_is_ignored(self):
+        """``i`` is documented as unused — different values must not
+        affect the returned gradient."""
+        frame = _gaussian_frame((15, 15), (7, 7))
+        a = localize.gradient_at(frame, 7, 8, 0)
+        b = localize.gradient_at(frame, 7, 8, 999)
+        assert a == b
+
+
+# ---------------------------------------------------------------------------
+# net_gradient
+# ---------------------------------------------------------------------------
+
+
+class TestNetGradient:
+    """Inner-product of the local gradient field with the radial
+    direction vectors — peaks point outward, so the dot product is large
+    and positive at a true peak."""
+
+    def test_gaussian_peak_has_positive_net_gradient(self):
+        frame = _gaussian_frame((15, 15), (7, 7))
+        uy, ux = _gradient_meshgrid(BOX)
+        y = np.array([7], dtype=np.int64)
+        x = np.array([7], dtype=np.int64)
+        ng = localize.net_gradient(frame, y, x, BOX, uy, ux)
+        assert ng.shape == (1,)
+        assert ng[0] > 0
+
+    def test_flat_frame_yields_zero(self):
+        frame = np.full((15, 15), 50.0, dtype=np.float32)
+        uy, ux = _gradient_meshgrid(BOX)
+        y = np.array([7], dtype=np.int64)
+        x = np.array([7], dtype=np.int64)
+        ng = localize.net_gradient(frame, y, x, BOX, uy, ux)
+        np.testing.assert_allclose(ng, [0.0], atol=1e-6)
+
+    def test_inverted_peak_yields_negative(self):
+        """A dip (gradients pointing inward) gives a negative net
+        gradient — the sign is the discriminator between peaks and
+        troughs."""
+        frame = -_gaussian_frame((15, 15), (7, 7), background=0.0)
+        uy, ux = _gradient_meshgrid(BOX)
+        y = np.array([7], dtype=np.int64)
+        x = np.array([7], dtype=np.int64)
+        ng = localize.net_gradient(frame, y, x, BOX, uy, ux)
+        assert ng[0] < 0
+
+    def test_output_length_matches_input(self):
+        frame = _gaussian_frame((30, 30), (10, 10))
+        uy, ux = _gradient_meshgrid(BOX)
+        y = np.array([10, 10, 10], dtype=np.int64)
+        x = np.array([8, 10, 12], dtype=np.int64)
+        ng = localize.net_gradient(frame, y, x, BOX, uy, ux)
+        assert ng.shape == (3,)
+
+
+# ---------------------------------------------------------------------------
+# identify_in_image
+# ---------------------------------------------------------------------------
+
+
+class TestIdentifyInImage:
+    """``local_maxima`` + net-gradient threshold, in one shot."""
+
+    def test_single_gaussian_is_identified(self):
+        frame = _gaussian_frame((20, 20), (10, 10), amplitude=5000.0)
+        y, x, ng = localize.identify_in_image(frame, 1.0, BOX)
+        # One detection at the seeded peak
+        assert len(y) == 1 == len(x) == len(ng)
+        assert y[0] == 10 and x[0] == 10
+        assert ng[0] > 1.0
+
+    def test_high_threshold_rejects_all(self):
+        frame = _gaussian_frame((20, 20), (10, 10), amplitude=5000.0)
+        y, x, ng = localize.identify_in_image(frame, 1e12, BOX)
+        assert len(y) == 0 and len(x) == 0 and len(ng) == 0
+
+    def test_arrays_have_consistent_length(self):
+        frame = _gaussian_frame((30, 30), (10, 10))
+        # Add a second well-separated peak
+        frame2 = _gaussian_frame((30, 30), (20, 22))
+        combined = np.maximum(frame, frame2)
+        y, x, ng = localize.identify_in_image(combined, 1.0, BOX)
+        assert len(y) == len(x) == len(ng)
+        assert len(y) >= 2
+
+    def test_flat_frame_returns_empty(self):
+        frame = np.full((20, 20), 100.0, dtype=np.float32)
+        y, x, ng = localize.identify_in_image(frame, 0.0, BOX)
+        assert len(y) == 0
+
+
+# ---------------------------------------------------------------------------
+# identify_in_frame
+# ---------------------------------------------------------------------------
+
+
+class TestIdentifyInFrame:
+    """Wrapper that casts to float32 and applies an ROI offset."""
+
+    def test_no_roi_matches_identify_in_image(self):
+        frame = _gaussian_frame((20, 20), (10, 10)).astype(np.int32)
+        y_a, x_a, ng_a = localize.identify_in_frame(frame, 1.0, BOX)
+        y_b, x_b, ng_b = localize.identify_in_image(
+            np.float32(frame), 1.0, BOX
+        )
+        np.testing.assert_array_equal(y_a, y_b)
+        np.testing.assert_array_equal(x_a, x_b)
+        np.testing.assert_allclose(ng_a, ng_b)
+
+    def test_roi_offsets_coordinates_back_to_global(self):
+        """When ROI = ((y0, x0), (y1, x1)) is supplied, returned (y, x)
+        are in the *original* frame's coordinate system, not the ROI's."""
+        # Peak at global (15, 17); ROI starts at (10, 12)
+        frame = _gaussian_frame((30, 30), (15, 17)).astype(np.int32)
+        roi = ((10, 12), (25, 28))
+        y, x, _ = localize.identify_in_frame(frame, 1.0, BOX, roi=roi)
+        assert len(y) == 1
+        assert (int(y[0]), int(x[0])) == (15, 17)
+
+    def test_roi_excludes_peaks_outside(self):
+        """A peak outside the ROI window is not seen at all."""
+        frame = _gaussian_frame((30, 30), (5, 5)).astype(np.int32)
+        roi = ((15, 15), (28, 28))
+        y, x, ng = localize.identify_in_frame(frame, 1.0, BOX, roi=roi)
+        assert len(y) == 0 and len(x) == 0 and len(ng) == 0
+
+
+# ---------------------------------------------------------------------------
+# _to_photons
+# ---------------------------------------------------------------------------
+
+
+class TestToPhotons:
+    """Camera-signal -> photon-count conversion: (s - baseline) * sens / gain."""
+
+    def test_identity_camera_returns_input(self):
+        spots = np.arange(2 * BOX * BOX, dtype=np.float32).reshape(2, BOX, BOX)
+        out = localize._to_photons(spots, CAMERA_INFO)
+        np.testing.assert_allclose(out, spots)
+
+    def test_baseline_subtracts(self):
+        spots = np.full((2, BOX, BOX), 500.0, dtype=np.float32)
+        cam = {"Baseline": 100, "Sensitivity": 1, "Gain": 1}
+        out = localize._to_photons(spots, cam)
+        np.testing.assert_allclose(out, 400.0)
+
+    def test_sensitivity_multiplies(self):
+        spots = np.full((2, BOX, BOX), 50.0, dtype=np.float32)
+        cam = {"Baseline": 0, "Sensitivity": 3, "Gain": 1}
+        out = localize._to_photons(spots, cam)
+        np.testing.assert_allclose(out, 150.0)
+
+    def test_gain_divides(self):
+        spots = np.full((2, BOX, BOX), 60.0, dtype=np.float32)
+        cam = {"Baseline": 0, "Sensitivity": 1, "Gain": 3}
+        out = localize._to_photons(spots, cam)
+        np.testing.assert_allclose(out, 20.0)
+
+    def test_combined_transform(self):
+        spots = np.full((1, BOX, BOX), 1000.0, dtype=np.float32)
+        cam = {"Baseline": 100, "Sensitivity": 2, "Gain": 4}
+        out = localize._to_photons(spots, cam)
+        # (1000 - 100) * 2 / 4 = 450
+        np.testing.assert_allclose(out, 450.0)
+
+    def test_output_is_float32(self):
+        spots = np.ones((1, BOX, BOX), dtype=np.uint16) * 100
+        out = localize._to_photons(spots, CAMERA_INFO)
+        assert out.dtype == np.float32
+
+
+# ---------------------------------------------------------------------------
 # identify
 # ---------------------------------------------------------------------------
 
@@ -365,18 +652,23 @@ class TestFit:
             BOX,
             method="sigmaxy",
         )
-        n = len(real_identifications)
-        current, thetas, _, _, _ = localize.fit_async(
+        current, thetas, _, _, iterations = localize.fit_async(
             movie,
             CAMERA_INFO,
             real_identifications,
             BOX,
             method="sigmaxy",
         )
+        # `current[0]` is incremented *before* the per-spot fit runs (see
+        # ``gaussmle._worker``), so polling it can let the loop exit while
+        # the last few worker writes are still in flight. ``iterations``
+        # is zero-initialised and only written when a fit completes —
+        # poll on that for a race-free completion signal.
         t0 = time.time()
-        while current[0] < n:
+        while (iterations == 0).any():
             assert time.time() - t0 < 30, "fit_async timed out"
             time.sleep(0.05)
+        del current  # only kept to document the returned tuple shape
         # The per-spot photon counts should match (with possibly different
         # row ordering across worker scheduling). Compare sorted lists.
         np.testing.assert_allclose(
