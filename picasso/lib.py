@@ -747,9 +747,9 @@ def install_excepthook(window) -> None:
     signaler.error.connect(_show_error)
 
     def excepthook(type, value, tback):
-        sys.__excepthook__(type, value, tback)
         message = "".join(traceback.format_exception(type, value, tback))
         signaler.error.emit(message)
+        sys.__excepthook__(type, value, tback)
 
     sys.excepthook = excepthook
 
