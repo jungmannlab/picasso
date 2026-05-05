@@ -16,8 +16,7 @@ import pytest
 
 from picasso import gausslq
 
-
-BOX = 7
+from tests.conftest import BOX
 
 
 # ---------------------------------------------------------------------------

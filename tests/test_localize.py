@@ -19,39 +19,10 @@ import pytest
 
 from picasso import localize
 
+from tests.conftest import BOX, CALIB_3D, CAMERA_INFO, MIN_NG, PIXELSIZE
 
-BOX = 7
-MIN_NG = 5000
-CAMERA_INFO = {"Baseline": 0, "Sensitivity": 1, "Gain": 1}
-CAMERA_INFO_WITH_PIXELSIZE = {
-    "Baseline": 0,
-    "Sensitivity": 1,
-    "Gain": 1,
-    "Pixelsize": 130,
-}
-CALIB_3D = {
-    "X Coefficients": [
-        -1.6680708772714857e-18,
-        2.4038209829154137e-15,
-        2.1771067332017187e-12,
-        -3.0324788231238476e-09,
-        3.5433326085494675e-06,
-        0.0023039289366630425,
-        1.2026032603707493,
-    ],
-    "Y Coefficients": [
-        -1.7708672355491796e-18,
-        9.808249540501714e-16,
-        2.10653248543535e-12,
-        2.228026137415219e-11,
-        3.628007433361433e-06,
-        -0.001646865504353452,
-        1.2257249554338714,
-    ],
-    "Magnification factor": 0.79,
-    "Number of frames": 201,
-    "Step size in nm": 5.0,
-}
+
+CAMERA_INFO_WITH_PIXELSIZE = {**CAMERA_INFO, "Pixelsize": PIXELSIZE}
 
 
 # ---------------------------------------------------------------------------
