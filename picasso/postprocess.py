@@ -29,8 +29,6 @@ from scipy.optimize import curve_fit
 from scipy.spatial import distance, KDTree
 from tqdm import tqdm, trange
 
-import yaml
-
 from . import io, lib, clusterer, render, imageprocess, masking, __version__
 
 
@@ -1803,7 +1801,6 @@ def pick_kinetics(
     dark = np.array(dark)
     no_locs = np.array(no_locs)
     out_locs = pd.concat(out_locs, ignore_index=True)
-    progress.close()
     return length, dark, no_locs, out_locs
 
 
@@ -2218,25 +2215,23 @@ def cluster_combine_dist(
                         cluster_locs["x"].to_numpy(),
                         cluster_locs["y"].to_numpy(),
                         cluster_locs["z"].to_numpy() / pixelsize,
-                    )
+                    ),
+                    axis=1,
                 )
                 all_points = np.stack(
                     (
                         group_locs["x"].to_numpy(),
                         group_locs["y"].to_numpy(),
                         group_locs["z"].to_numpy() / pixelsize,
-                    )
+                    ),
+                    axis=1,
                 )
-                distances = distance.cdist(
-                    ref_point.transpose(), all_points.transpose()
-                )
+                distances = distance.cdist(ref_point, all_points)
                 min_dist[i] = np.amin(distances)
                 # find nearest neighbor in xy
                 ref_point_xy = np.array(cluster_locs[["x", "y"]])
                 all_points_xy = np.array(group_locs[["x", "y"]])
-                distances_xy = distance.cdist(
-                    ref_point_xy.transpose(), all_points_xy.transpose()
-                )
+                distances_xy = distance.cdist(ref_point_xy, all_points_xy)
                 min_dist_xy[i] = np.amin(distances_xy)
 
             clusters = pd.DataFrame(
@@ -2280,9 +2275,7 @@ def cluster_combine_dist(
                 cluster_locs = temp[temp["cluster"] == clusterval]
                 ref_point_xy = np.array(cluster_locs[["x", "y"]])
                 all_points_xy = np.array(group_locs[["x", "y"]])
-                distances_xy = distance.cdist(
-                    ref_point_xy.transpose(), all_points_xy.transpose()
-                )
+                distances_xy = distance.cdist(ref_point_xy, all_points_xy)
                 min_dist[i] = np.amin(distances_xy)
 
             clusters = pd.DataFrame(
