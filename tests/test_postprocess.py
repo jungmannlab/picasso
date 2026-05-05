@@ -159,7 +159,7 @@ class TestPickedLocs:
             info,
             origami_picks,
             pick_shape="Circle",
-            pick_size=PICK_SIZE,
+            pick_size=PICK_SIZE / 2,
         )
         assert len(picked) == len(origami_picks)
         # Each pick has at least one loc (the test data has 9 origamis,
@@ -173,7 +173,7 @@ class TestPickedLocs:
             info,
             origami_picks,
             pick_shape="Circle",
-            pick_size=PICK_SIZE,
+            pick_size=PICK_SIZE / 2,
         )
         radius = PICK_SIZE / 2
         for (cx, cy), p in zip(origami_picks, picked):
@@ -186,7 +186,7 @@ class TestPickedLocs:
             info,
             origami_picks,
             pick_shape="Circle",
-            pick_size=PICK_SIZE,
+            pick_size=PICK_SIZE / 2,
         )
         for i, p in enumerate(picked):
             assert (p["group"] == i).all()
@@ -197,7 +197,7 @@ class TestPickedLocs:
             info,
             origami_picks,
             pick_shape="Circle",
-            pick_size=PICK_SIZE,
+            pick_size=PICK_SIZE / 2,
             add_group=False,
         )
         assert "group" not in picked[0].columns
@@ -208,7 +208,7 @@ class TestPickedLocs:
             info,
             origami_picks,
             pick_shape="Circle",
-            pick_size=PICK_SIZE,
+            pick_size=PICK_SIZE / 2,
         )
         for p in picked:
             f = p["frame"].to_numpy()
@@ -220,7 +220,7 @@ class TestPickedLocs:
             info,
             [],
             pick_shape="Circle",
-            pick_size=PICK_SIZE,
+            pick_size=PICK_SIZE / 2,
         )
         assert out == []
 
@@ -240,7 +240,7 @@ class TestPickedLocs:
         # ``_picked_circular_locs`` uses ``pick_size`` as the index-block
         # size, so the precomputed index_blocks must use the same size for
         # the two paths to be equivalent.
-        ib = postprocess.get_index_blocks(locs, info, PICK_SIZE)
+        ib = postprocess.get_index_blocks(locs, info, PICK_SIZE / 2)
         a = postprocess.picked_locs(
             locs,
             info,
@@ -253,7 +253,7 @@ class TestPickedLocs:
             info,
             origami_picks,
             pick_shape="Circle",
-            pick_size=PICK_SIZE,
+            pick_size=PICK_SIZE / 2,
             index_blocks=ib,
         )
         assert len(a) == len(b)
@@ -341,7 +341,7 @@ class TestRemoveLocsInPicks:
             info,
             picks,
             pick_shape="Circle",
-            pick_size=PICK_SIZE,
+            pick_size=PICK_SIZE / 2,
         )[0]
         n_inside = len(picked)
         out = postprocess.remove_locs_in_picks(
@@ -349,7 +349,7 @@ class TestRemoveLocsInPicks:
             info,
             picks=picks,
             pick_shape="Circle",
-            pick_size=PICK_SIZE,
+            pick_size=PICK_SIZE / 2,
         )
         assert len(out) == len(locs) - n_inside
         # No remaining loc lies inside the pick
@@ -534,7 +534,7 @@ class TestPairCorrelation:
 class TestLocalDensity:
     def test_density_column_added_with_proper_dtype(self, locs, info):
         out = postprocess.compute_local_density(
-            locs.copy(), info, radius=PICK_SIZE
+            locs.copy(), info, radius=PICK_SIZE / 2
         )
         assert "density" in out.columns
         assert out["density"].dtype in (np.uint32, np.uint64)
@@ -543,7 +543,7 @@ class TestLocalDensity:
 
     def test_dense_radius_picks_up_origami_clusters(self, locs, info):
         out = postprocess.compute_local_density(
-            locs.copy(), info, radius=PICK_SIZE
+            locs.copy(), info, radius=PICK_SIZE / 2
         )
         unique_densities, _ = np.unique(out["density"], return_counts=True)
         # Test data has ~9 origamis, so density should take few values
@@ -551,10 +551,10 @@ class TestLocalDensity:
 
     def test_density_increases_with_radius(self, locs, info):
         small = postprocess.compute_local_density(
-            locs.copy(), info, radius=PICK_SIZE / 2
+            locs.copy(), info, radius=PICK_SIZE / 4
         )
         large = postprocess.compute_local_density(
-            locs.copy(), info, radius=PICK_SIZE * 2
+            locs.copy(), info, radius=PICK_SIZE
         )
         # A larger radius can only see at least as many neighbors.
         assert large["density"].sum() >= small["density"].sum()
@@ -663,7 +663,7 @@ class TestEvaluatePicks:
             info,
             origami_picks,
             pick_shape="Circle",
-            pick_size=PICK_SIZE,
+            pick_size=PICK_SIZE / 2,
         )
         N, n_events, rmsd, rmsd_z, length, dark, new_locs = (
             postprocess.evaluate_picks(pl, info, max_dark_time=3)
@@ -691,7 +691,7 @@ class TestCombineLocsInPicks:
             info,
             picks=origami_picks,
             pick_shape="Circle",
-            pick_size=PICK_SIZE,
+            pick_size=PICK_SIZE / 2,
         )
         # Each origami collapses to a single linked event
         assert len(combined) == len(origami_picks)
@@ -702,7 +702,7 @@ class TestCombineLocsInPicks:
             info,
             origami_picks,
             pick_shape="Circle",
-            pick_size=PICK_SIZE,
+            pick_size=PICK_SIZE / 2,
         )
         assert combined["n"].sum() == sum(len(p) for p in picked)
 
@@ -714,7 +714,7 @@ class TestPickKinetics:
             info,
             origami_picks,
             pick_shape="Circle",
-            pick_size=PICK_SIZE,
+            pick_size=PICK_SIZE / 2,
         )
         length, dark, no_locs, out_locs = postprocess.pick_kinetics(
             pl, info, max_dark_time=3
@@ -788,7 +788,7 @@ class TestUndrift:
             info,
             origami_picks,
             pick_shape="Circle",
-            pick_size=PICK_SIZE,
+            pick_size=PICK_SIZE / 2,
             add_group=False,
         )
         drift = postprocess.undrift_from_picked(pl, info)
@@ -978,7 +978,7 @@ class TestGroupprops:
             info,
             origami_picks,
             pick_shape="Circle",
-            pick_size=PICK_SIZE,
+            pick_size=PICK_SIZE / 2,
         )
         merged = pd.concat(picked, ignore_index=True)
         merged = postprocess.link(merged, info)

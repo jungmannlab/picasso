@@ -49,7 +49,8 @@ def get_index_blocks(
     info : list of dicts
         Metadata of the localizations list.
     size : float
-        Size of the blocks in camera pixels.
+        Size of the blocks in camera pixels. For circular picks, this
+        is pick radius.
 
     Returns
     -------

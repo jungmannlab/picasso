@@ -531,6 +531,14 @@ class G5M(metaclass=ABCMeta):
         if self.means_init is not None:
             init_means = np.tile(self.means_init, (self.n_init, 1, 1))
 
+        if self.calibration is None:
+            cx = np.array([])
+            cy = np.array([])
+            mag_factor = self.mag_factor
+        else:
+            cx = self.calibration["X Coefficients"]
+            cy = self.calibration["Y Coefficients"]
+            mag_factor = self.calibration["Magnification factor"]
         (w, m, c, pc), converged, valid_idx = fit_G5M(
             X,
             min_locs=self.min_locs,
@@ -540,21 +548,9 @@ class G5M(metaclass=ABCMeta):
             sigma_bounds=self.sigma_bounds,
             lp=lp,
             loc_prec_handle=loc_prec_handle,
-            cx=(
-                self.calibration["X Coefficients"]
-                if self.calibration
-                else np.array([])
-            ),
-            cy=(
-                self.calibration["Y Coefficients"]
-                if self.calibration
-                else np.array([])
-            ),
-            mag_factor=(
-                self.calibration["Magnification factor"]
-                if self.calibration
-                else self.mag_factor
-            ),
+            cx=cx,
+            cy=cy,
+            mag_factor=mag_factor,
             spot_size=self.spot_size,  # TODO: deprecated since v0.10.0, use calibration instead  # noqa: E501
             z_range=self.z_range,
         )
