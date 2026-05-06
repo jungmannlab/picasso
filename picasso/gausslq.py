@@ -23,11 +23,11 @@ from tqdm import tqdm
 from picasso import lib
 
 try:
-    from picasso.ext.pygpufit import gpufit as gf
+    from picasso.ext.pygpufit import gpufit
 
-    gpufit_installed = True
-except (ImportError, OSError, RuntimeError):
-    gpufit_installed = False
+    GPUFIT_INSTALLED = bool(gpufit.cuda_available())
+except Exception:
+    GPUFIT_INSTALLED = False
 
 
 @numba.jit(nopython=True, nogil=True)
