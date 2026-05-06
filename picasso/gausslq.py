@@ -333,6 +333,11 @@ def fit_spots_gpufit(spots: lib.FloatArray3D) -> lib.FloatArray2D:
     spot, where each row corresponds to a spot and the columns are the
     parameters in the following order: [photons, x, y, sx, sy, bg].
 
+    Picasso vendors pyGPUfit under picasso/ext/pygpufit where the
+    License can be found too.
+
+    Only Windows with a CUDA-capable GPU is supported.
+
     Cite: Przybylski, et al. Scientific Reports, 2017.
     DOI: 10.1038/s41598-017-15313-9
 
@@ -350,6 +355,11 @@ def fit_spots_gpufit(spots: lib.FloatArray3D) -> lib.FloatArray2D:
         A 2D array with the optimized parameters for each spot. The
         columns correspond to [photons, x, y, sx, sy, bg].
     """
+    if not GPUFIT_INSTALLED:
+        raise ImportError(
+            "GPUfit could not be found, Windows with CUDA-capable GPU is"
+            " required."
+        )
     size = spots.shape[1]
     initial_parameters = initial_parameters_gpufit(spots, size)
     model_id = gf.ModelID.GAUSS_2D_ELLIPTIC
@@ -486,9 +496,9 @@ def locs_from_fits_gpufit(
     locs : pd.DataFrame
         Data frame containing the localized spots.
     """
-    # box_offset = int(box / 2)
-    x = theta[:, 1] + identifications["x"]  # - box_offset
-    y = theta[:, 2] + identifications["y"]  # - box_offset
+    box_offset = int(box / 2)
+    x = theta[:, 1] + identifications["x"] - box_offset
+    y = theta[:, 2] + identifications["y"] - box_offset
     lpx = localization_precision(
         theta[:, 0], theta[:, 3], theta[:, 4], theta[:, 5], em=em
     )

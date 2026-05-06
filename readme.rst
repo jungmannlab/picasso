@@ -41,7 +41,7 @@ To see all changes introduced across releases, see `the changelog <https://githu
 
 Picasso 0.10
 ------------
-In this version, a lot of new architectural (behind the scenes) changes were introduced to make Picasso more modular, maintainable and accessible to both developers and end-users. The adaptations include flexible dependencies and Python versions, etc. You can explore these improvements `in the changelog <https://github.com/jungmannlab/picasso/blob/master/changelog.md>`_.
+In this version, a lot of new architectural (behind the scenes) changes were introduced to make Picasso more modular, maintainable and accessible to both developers and end-users. The adaptations include flexible dependencies and Python versions, integration of GPUfit and many more. You can explore these improvements in the `changelog <https://github.com/jungmannlab/picasso/blob/master/changelog.md>`_.
 
 Installation
 ------------
@@ -73,14 +73,6 @@ If you wish to use your local version of Picasso with your own modifications:
 6. You can modify Picasso code in this directory.
 7. To create a *local* Picasso package to use it in other Python scripts, run ``pip install -e ".[dev]"``. When you change the code in the ``picasso`` directory, the changes will be reflected in the package.
 8. You can now run any Picasso module directly from the console/terminal by running: ``picasso render``, ``picasso localize``, etc, or import Picasso functions in your own Python scripts.
-
-Optional packages
-^^^^^^^^^^^^^^^^^
-
-Regardless of whether Picasso was installed via PyPI or by cloning the GitHub repository, some packages may be additionally installed to allow extra functionality:
-
-- *(Windows only)* ``pip install PyImarisWriter==0.7.0`` to enable .ims files in Localize and Render. Note that ``PyImarisWriter`` has been tested only on Windows.
-- *(Windows only)* GPU least-squares fitting in Localize is available out of the box on Windows: Picasso ships a vendored copy of `pyGpufit <https://github.com/gpufit/Gpufit>`__ (MIT, see ``picasso/ext/pygpufit/LICENSE.txt``) under ``picasso/ext/pygpufit/``. The GPUfit checkbox is automatically enabled when the LQ method is selected on a Windows machine with a CUDA-capable GPU; on Linux/macOS the checkbox is hidden.
 
 Updating
 ^^^^^^^^
@@ -142,6 +134,7 @@ If you use Picasso in your research, please cite our Nature Protocols publicatio
 - Theoretical lateral localization precision (Gauss LQ). DOI: `10.1038/nmeth.1447 <https://doi.org/10.1038/nmeth.1447>`__
 - Theoretical axial localization precision (Gauss LQ and MLE). DOI: `10.1038/s41467-026-70198-5 <https://doi.org/10.1038/s41467-026-70198-5>`__
 - MLE fitting. DOI: `10.1038/nmeth.1449 <https://doi.org/10.1038/nmeth.1449>`__
+- GPU fitting (LQ). DOI: `10.1038/s41598-017-15313-9 <https://doi.org/10.1038/s41598-017-15313-9>`__. License can be found `here <https://github.com/jungmannlab/picasso/tree/master/picasso/ext/pygpufit>`__/
 - RCC undrifting: DOI: `10.1364/OE.22.015982 <https://doi.org/10.1364/OE.22.015982>`__ 
 - AIM undrifting. DOI: `10.1126/sciadv.adm776 <https://www.science.org/doi/10.1126/sciadv.adm7765>`__
 - SMLM clusterer. DOIs: `10.1038/s41467-021-22606-1 <https://doi.org/10.1038/s41467-021-22606-1>`__ and `10.1038/s41586-023-05925-9 <https://doi.org/10.1038/s41586-023-05925-9>`__
