@@ -78,8 +78,21 @@ SET_COLS = [
 ]
 
 
-@numba.jit(nopython=True, nogil=True, cache=False)
 def local_maxima(
+    frame: lib.IntArray2D, box: int
+) -> tuple[lib.IntArray1D, lib.IntArray1D]:
+    """Alias to _local_maxima, deprecated
+
+    TODO: remove in v0.11.0"""
+    lib.deprecation_warning(
+        "Deprecation warning: This function will become private in "
+        "v0.11.0. Use _local_maxima instead."
+    )
+    return _local_maxima(frame, box)
+
+
+@numba.jit(nopython=True, nogil=True, cache=False)
+def _local_maxima(
     frame: lib.IntArray2D, box: int
 ) -> tuple[lib.IntArray1D, lib.IntArray1D]:
     """Find pixels with maximum value within a region of interest.
@@ -118,8 +131,24 @@ def local_maxima(
     return y, x
 
 
-@numba.jit(nopython=True, nogil=True, cache=False)
 def gradient_at(
+    frame: lib.IntArray2D,
+    y: int,
+    x: int,
+    i: int,
+) -> tuple[float, float]:
+    """Alias to _gradient_at, deprecated
+
+    TODO: remove in v0.11.0"""
+    lib.deprecation_warning(
+        "Deprecation warning: This function will become private in "
+        "v0.11.0. Use _gradient_at instead."
+    )
+    return _gradient_at(frame, y, x, i)
+
+
+@numba.jit(nopython=True, nogil=True, cache=False)
+def _gradient_at(
     frame: lib.IntArray2D,
     y: int,
     x: int,
@@ -149,8 +178,26 @@ def gradient_at(
     return gy, gx
 
 
-@numba.jit(nopython=True, nogil=True, cache=False)
 def net_gradient(
+    frame: lib.IntArray2D,
+    y: lib.IntArray1D,
+    x: lib.IntArray1D,
+    box: int,
+    uy: lib.FloatArray2D,
+    ux: lib.FloatArray2D,
+) -> lib.FloatArray1D:
+    """Alias to _net_gradient, deprecated
+
+    TODO: remove in v0.11.0"""
+    lib.deprecation_warning(
+        "Deprecation warning: This function will become private in "
+        "v0.11.0. Use _net_gradient instead."
+    )
+    return _net_gradient(frame, y, x, box, uy, ux)
+
+
+@numba.jit(nopython=True, nogil=True, cache=False)
+def _net_gradient(
     frame: lib.IntArray2D,
     y: lib.IntArray1D,
     x: lib.IntArray1D,
@@ -187,7 +234,7 @@ def net_gradient(
                 range(xi - box_half, xi + box_half + 1)
             ):
                 if not (k == yi and m == xi):
-                    gy, gx = gradient_at(frame, k, m, i)
+                    gy, gx = _gradient_at(frame, k, m, i)
                     ng[i] += (
                         gy * uy[k_index, l_index] + gx * ux[k_index, l_index]
                     )
@@ -223,7 +270,7 @@ def identify_in_image(
         Net gradient values at the identified maxima. The shape is
         (len(y),).
     """
-    y, x = local_maxima(image, box)
+    y, x = _local_maxima(image, box)
     box_half = int(box / 2)
     # Now comes basically a meshgrid
     ux = np.zeros((box, box), dtype=np.float32)
@@ -234,7 +281,7 @@ def identify_in_image(
     unorm = np.sqrt(ux**2 + uy**2)
     ux /= unorm
     uy /= unorm
-    ng = net_gradient(image, y, x, box, uy, ux)
+    ng = _net_gradient(image, y, x, box, uy, ux)
     positives = ng > minimum_ng
     y = y[positives]
     x = x[positives]
@@ -1049,6 +1096,10 @@ def fit(
     identified spots in a movie to localize fluorescent molecules. See
     Smith, et al. Nature Methods, 2010. DOI: 10.1038/nmeth.1449.
 
+    Deprecated: Use fit2D instead.
+
+    TODO: remove in v0.11.0.
+
     Parameters
     ----------
     movie : lib.IntArray3D
@@ -1079,6 +1130,10 @@ def fit(
         `frame`, `x`, `y`, `photons`, `sx`, `sy`, `bg`, `lpx`, `lpy`,
         `net_gradient`, `likelihood`, and `iterations`.
     """
+    lib.deprecation_warning(
+        "Deprecation warning: this function will be removed in v0.11.0."
+        " Use localize.fit2D instead."
+    )
     spots = get_spots(movie, identifications, box, camera_info)
     theta, CRLBs, likelihoods, iterations = gaussmle.gaussmle(
         spots, eps, max_it, method=method
@@ -1110,6 +1165,10 @@ def fit_async(
     molecules. This function is designed to run in a separate thread or
     process. See Smith, et al. Nature Methods, 2010.
     DOI: 10.1038/nmeth.1449.
+
+    Deprecated, use fit2D instead.
+
+    TODO: remove in v0.11.0.
 
     Parameters
     ----------
@@ -1149,6 +1208,10 @@ def fit_async(
     iterations : lib.FloatArray1D
         The number of iterations taken to converge for each spot.
     """
+    lib.deprecation_warning(
+        "Deprecation warning: this function will be removed in v0.11.0."
+        " Use localize.fit2D instead."
+    )
     spots = get_spots(movie, identifications, box, camera_info)
     return gaussmle.gaussmle_async(spots, eps, max_it, method=method)
 
@@ -2088,6 +2151,17 @@ def _db_filename() -> str:
 
 
 def save_file_summary(summary: dict) -> None:
+    """Alias to _save_file_summary, deprecated
+
+    TODO: remove in v0.11.0"""
+    lib.deprecation_warning(
+        "Deprecation warning: This function will become private in "
+        "v0.11.0. Use _save_file_summary instead."
+    )
+    return _save_file_summary(summary)
+
+
+def _save_file_summary(summary: dict) -> None:
     """Save the summary of a localization file to a SQLite database."""
     engine = create_engine("sqlite:///" + _db_filename(), echo=False)
     s = pd.Series(summary, index=summary.keys()).to_frame().T
@@ -2103,4 +2177,4 @@ def add_file_to_db(
 ) -> None:
     """Add a localization file summary to the SQLite database."""
     summary = get_file_summary(file, file_hdf, drift, len_mean, nena)
-    save_file_summary(summary)
+    _save_file_summary(summary)

@@ -95,6 +95,7 @@ Last change: 06-MAY-2026 CEST
 - `picasso.render` takes in `disp_px_size` rather than `oversampling`, see the function; `oversampling` will be removed in v0.11.0
 - `picasso.render` functions: `render_hist`, `render_gaussian`, `render_gaussian_iso`, `render_smooth` and `render_convolve` will become private in v0.11.0
 - `picasso.gausslq.initial_parameters_gpufit` and `picasso.gaussmle.mean_filter` will become private in v0.11.0
+- `picasso.localize` functions: `local_maxima`, `gradient_at`, `net_gradient` will become private in v0.11.0. Functions `fit` and `fit_async` will be removed entirely
 
 ## 0.9.10
 
