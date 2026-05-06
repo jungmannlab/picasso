@@ -18,10 +18,11 @@ Last change: 06-MAY-2026 CEST
 - Easy access to user settings via any Picasso module
 - SPINNA offers two new fitting methods for fast fitting instead of the brute force search, see [documentation](https://picassosr.readthedocs.io/en/latest/spinna.html#fitting)
 - Almost all the functions in the GUI scripts (for example, `picasso.gui.render.py`) not related to GUI were moved to corresponding API scripts such that using Picasso as a Python package allows for easy analysis analogous to what GUI provides. For example, ``picasso.render.py`` does not only provide the function to generate a grayscale image of localizations only (like before) but can also be used to paint the same images as they are rendered (for example, with picks and scale bar)
-- Numerous new functions added in the API to simplify the more complicated analyses, for example, ``picasso.localize.fit2D``
+- Numerous new functions added in the API to simplify the more complicated analyses, for example, `picasso.localize.fit2D`
 - Faster ind. loc. precision rendering in 3D
 - Localize supports .stk file format from MetaMorph (*experimental!*)
 - Expanded test suite (CI)
+- [GPUfit](https://github.com/gpufit/Gpufit) incorporated into picasso (`picasso.ext.pygpufit`)
 
 ### *Small improvements:*
 

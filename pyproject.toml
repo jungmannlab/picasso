@@ -109,6 +109,8 @@ picasso = [
     "gui/notification_sounds/*.mp3",
     "gui/notification_sounds/*.wav",
     "config_template.yaml",
+    "ext/pygpufit/Gpufit.dll",
+    "ext/pygpufit/LICENSE.txt",
 ]
 
 [tool.pytest.ini_options]

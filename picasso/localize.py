@@ -1417,7 +1417,7 @@ def _fit2d_gausslq_gpu(
     """Fit 2D Gaussians using least-squares fitting and GPU. See
     ``fit_2D`` for more details."""
     theta = gausslq.fit_spots_gpufit(spots)
-    locs = gausslq.locs_from_fits(identifications, theta, box, em)
+    locs = gausslq.locs_from_fits_gpufit(identifications, theta, box, em)
     return locs
 
 
