@@ -8,7 +8,7 @@ localize
 Localize allows performing super-resolution reconstruction of image stacks. For spot detection, a gradient-based approach is used. For Fitting, the following algorithms are implemented:
 
 - MLE, integrated Gaussian (based on `Smith et al., 2010 <https://www.ncbi.nlm.nih.gov/pmc/articles/PMC2862147/>`_.)
-- LQ, Gaussian (least squares)
+- LQ, Gaussian (least squares). On Windows with a CUDA-capable GPU, an accelerated variant is available via `Gpufit <https://github.com/gpufit/Gpufit>`_, which is vendored into Picasso (``picasso/ext/pygpufit/``) and works automatically — no extra install step.
 - Average of ROI (finds summed intensity of spots)
 
 **Please note:** Picasso Localize supports file formats:

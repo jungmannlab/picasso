@@ -23,12 +23,11 @@ from tqdm import tqdm
 from picasso import lib
 
 try:
-    from pygpufit import gpufit as gf
+    from picasso.ext.pygpufit import gpufit as gf
 
     gpufit_installed = True
-except ImportError:
+except (ImportError, OSError, RuntimeError):
     gpufit_installed = False
-    pass
 
 
 @numba.jit(nopython=True, nogil=True)
@@ -353,11 +352,10 @@ def fit_spots_gpufit(spots: lib.FloatArray3D) -> lib.FloatArray2D:
     """
     size = spots.shape[1]
     initial_parameters = initial_parameters_gpufit(spots, size)
-    spots.shape = (len(spots), (size * size))
     model_id = gf.ModelID.GAUSS_2D_ELLIPTIC
 
     parameters, states, chi_squares, number_iterations, exec_time = gf.fit(
-        spots,
+        spots.reshape((len(spots), (size * size))),
         None,
         model_id,
         initial_parameters,

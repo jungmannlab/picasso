@@ -80,7 +80,7 @@ Optional packages
 Regardless of whether Picasso was installed via PyPI or by cloning the GitHub repository, some packages may be additionally installed to allow extra functionality:
 
 - *(Windows only)* ``pip install PyImarisWriter==0.7.0`` to enable .ims files in Localize and Render. Note that ``PyImarisWriter`` has been tested only on Windows.
-- *(Windows only)* To enable GPU least-squares fitting in Localize, follow instructions on `Gpufit <https://github.com/gpufit/Gpufit>`__ to install the Gpufit python library in your conda environment. In practice, this means downloading the zipfile from the `release page <https://github.com/gpufit/Gpufit/releases>`__ (non-cublas version, i.e., the lighter file) and installing the Python wheel (see instructions in the zipfile). Picasso Localize will automatically import the library if present and enables a checkbox for GPU fitting when selecting the LQ-Method.
+- *(Windows only)* GPU least-squares fitting in Localize is available out of the box on Windows: Picasso ships a vendored copy of `pyGpufit <https://github.com/gpufit/Gpufit>`__ (MIT, see ``picasso/ext/pygpufit/LICENSE.txt``) under ``picasso/ext/pygpufit/``. The GPUfit checkbox is automatically enabled when the LQ method is selected on a Windows machine with a CUDA-capable GPU; on Linux/macOS the checkbox is hidden.
 
 Updating
 ^^^^^^^^
