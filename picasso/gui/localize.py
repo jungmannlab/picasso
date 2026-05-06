@@ -36,10 +36,10 @@ from PyQt6 import QtCore, QtGui, QtWidgets
 from playsound3 import playsound
 
 try:
-    from picasso.ext.pygpufit import gpufit  # noqa: F401
+    from picasso.ext.pygpufit import gpufit
 
-    GPUFIT_INSTALLED = True
-except (ImportError, OSError, RuntimeError):
+    GPUFIT_INSTALLED = bool(gpufit.cuda_available())
+except Exception:
     GPUFIT_INSTALLED = False
 CMAP_GRAYSCALE = [QtGui.qRgb(_, _, _) for _ in range(256)]
 DEFAULT_PARAMETERS = {"Box Size": 7, "Min. Net Gradient": 5000}
