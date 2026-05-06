@@ -1,6 +1,6 @@
 # Changelog
 
-Last change: 05-MAY-2026 CEST
+Last change: 06-MAY-2026 CEST
 
 ## 0.10.0
 
@@ -9,6 +9,7 @@ Last change: 05-MAY-2026 CEST
 - Moved from PyQt5 to PyQt6, PyQt5 support has been removed. If Picasso is installed via PyPI (`pip install picassosr`) or one-click-installer, no action needs to be taken. **Otherwise please install PyQt6 when updating Picasso to v0.10.0.**
 - New dependency ``tifffile`` added. No action required for PyPI and one-click-installer distributions.
 - `picasso.spinna.SPINNA.fit` accepts all inputs as keyword arguments (except for `N_structures`).
+- Names of nearly all functions in `picasso.g5m` have been changed (underscore added to prefix as private functions), except for the main `g5m.g5m` and `g5m.sum_G5Ms`.
 
 ### **Important updates:**
 
