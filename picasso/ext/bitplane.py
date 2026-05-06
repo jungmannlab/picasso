@@ -8,18 +8,19 @@ Utility functions to handle bitplane data.
 
 import os.path as _ospath
 import numpy as np
-import pandas as pd
+import h5py
 import datetime
 
 try:
     # from PyImarisWriter.ImarisWriterCtypes import *
     from PyImarisWriter import PyImarisWriter as PW
+    import hdf5plugin  # noqa: F401
 
     IMSWRITER = True
 except ModuleNotFoundError:
     IMSWRITER = False
 
-if IMSWRITER:  # noqa: C901
+if IMSWRITER:
 
     class MovieMapper:
         """
@@ -27,15 +28,7 @@ if IMSWRITER:  # noqa: C901
         """
 
         def __init__(
-            self,
-            file,
-            RL,
-            lookup_dict,
-            channel,
-            frames,
-            x,
-            y,
-            dtype,
+            self, file, RL, lookup_dict, channel, frames, x, y, dtype
         ):
             self.file = file
             self.RL = RL
@@ -53,6 +46,10 @@ if IMSWRITER:  # noqa: C901
 
         def __len__(self):
             return len(self.frames)
+
+        @property
+        def shape(self):
+            return (len(self.frames), self.y, self.x)
 
         def __iter__(self):
             for item in range(len(self.frames)):
@@ -81,6 +78,13 @@ if IMSWRITER:  # noqa: C901
         def __len__(self):
             return self.n_frames
 
+        @property
+        def shape(self):
+            data_shape = self.file["DataSet"][self.RL][self.frames[0]][
+                self.channel
+            ]["Data"].shape
+            return (self.n_frames, data_shape[1], data_shape[2])
+
         def __iter__(self):
             for item in range(self.n_frames):
                 yield self.file["DataSet"][self.RL][self.frames[0]][
@@ -106,7 +110,7 @@ if IMSWRITER:  # noqa: C901
             if verbose:
                 print("Reading info from {}".format(path))
             self.path = _ospath.abspath(path)
-            self.file = pd.read_hdf(self.path)
+            self.file = h5py.File(path, "r")
 
             self.frames = list(self.file["DataSet"][self.RL].keys())
             self.n_frames = len(self.frames)
@@ -121,16 +125,11 @@ if IMSWRITER:  # noqa: C901
 
         def set_channel(self, channel):
             self.channel = channel
-            self.img_size = np.array(
-                self.file["DataSet"][self.RL][self.frames[0]][self.channel][
-                    "Data"
-                ]
-            ).shape
-            self.dtype = np.array(
-                self.file["DataSet"][self.RL][self.frames[0]][self.channel][
-                    "Data"
-                ]
-            ).dtype
+            data = self.file["DataSet"][self.RL][self.frames[0]][self.channel][
+                "Data"
+            ]
+            self.img_size = data.shape
+            self.dtype = data.dtype
 
             try:
                 z = int(
@@ -244,11 +243,6 @@ if IMSWRITER:  # noqa: C901
             px_y = delta_y / self.y * 1000
 
             px_nm = (px_x + px_y) / 2
-
-            print(
-                f"Image dimensions X: {delta_x} um Y: {delta_y} um. "
-                f"Pixelsize x {px_x}, y {px_y}, p {px_nm}."
-            )
 
             self.pixelsize = px_nm
 
