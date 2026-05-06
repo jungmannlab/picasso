@@ -23,9 +23,9 @@ from tqdm import tqdm
 from picasso import lib
 
 try:
-    from picasso.ext.pygpufit import gpufit
+    from picasso.ext.pygpufit import gpufit as gf
 
-    GPUFIT_INSTALLED = bool(gpufit.cuda_available())
+    GPUFIT_INSTALLED = bool(gf.cuda_available())
 except Exception:
     GPUFIT_INSTALLED = False
 
