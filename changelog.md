@@ -94,6 +94,7 @@ Last change: 06-MAY-2026 CEST
 - `fit_z` and `fit_z_parallel` in `picasso.zfit` will be deprecated in v0.11.0. `zfit.zfit` takes over as the main function in the script
 - `picasso.render` takes in `disp_px_size` rather than `oversampling`, see the function; `oversampling` will be removed in v0.11.0
 - `picasso.render` functions: `render_hist`, `render_gaussian`, `render_gaussian_iso`, `render_smooth` and `render_convolve` will become private in v0.11.0
+- `picasso.gausslq.initial_parameters_gpufit` and `picasso.gaussmle.mean_filter` will become private in v0.11.0
 
 ## 0.9.10
 
