@@ -4,88 +4,88 @@ Last change: 07-MAY-2026 CEST
 
 ## 0.10.0
 
-### **Backward incompatible changes:**
+### **General updates:**
 
-- Several new depedencies have been added. If Picasso is installed via PyPI (`pip install picassosr`) or one-click-installer, no action needs to be taken. **Otherwise please install them when updating Picasso to v0.10.0.**. The dependencies are: `tifffile`, `hdf5plugin` (only for Windows to read .ims files). Additionally `PyQt5` was updated to `PyQt6`.
-- `picasso.spinna.SPINNA.fit` accepts all inputs as keyword arguments (except for `N_structures`).
-- Names of nearly all functions in `picasso.g5m` have been changed (underscore added to prefix as private functions), except for the main `g5m.g5m` and `g5m.sum_G5Ms`.
-- Functions in `picasso.zfit`: `get_calib_size` and `get_prime_calib_size`, `interpolate_nan` were privatized
-
-### **Important updates:**
-
-- Picasso automatically checks for updates when launched and notifies the user if a new version is available
-- One-click installer uses Python 3.14 (previously 3.10) and updated dependencies, which should improve the performance of some functions
-- Installing Picasso as a package has less stringent dependencies and Python requirements, the exact versions are specified for one-click-installers only
-- Render GUI: added support for reading .csv files from ThunderSTORM
-- Easy access to user settings via any Picasso module
-- SPINNA offers two new fitting methods for fast fitting instead of the brute force search, see [documentation](https://picassosr.readthedocs.io/en/latest/spinna.html#fitting)
-- Almost all the functions in the GUI scripts (for example, `picasso.gui.render.py`) not related to GUI were moved to corresponding API scripts such that using Picasso as a Python package allows for easy analysis analogous to what GUI provides. For example, ``picasso.render.py`` does not only provide the function to generate a grayscale image of localizations only (like before) but can also be used to paint the same images as they are rendered (for example, with picks and scale bar)
 - Numerous new functions added in the API to simplify the more complicated analyses, for example, `picasso.localize.fit2D`
-- Faster ind. loc. precision rendering in 3D
-- Localize supports .stk file format from MetaMorph (*experimental!*)
+- Installing Picasso as a package has less stringent dependencies and Python version requirements, the exact versions are specified for one-click-installers only
+- Almost all the functions in the GUI scripts (for example, `picasso.gui.render.py`) not related to GUI were moved to corresponding API scripts such that using Picasso as a Python package allows for easy analysis analogous to what GUI provides. For example, ``picasso.render.py`` does not only provide the function to generate a grayscale image of localizations only (like before) but can also be used to paint the same images as they are rendered (for example, with picks and scale bar)
+- One-click installer uses Python 3.14 (previously 3.10) and updated dependencies, which should improve the performance of some functions
+- Easy access to user settings via any Picasso module
 - Expanded test suite (CI)
-- [GPUfit](https://github.com/gpufit/Gpufit) incorporated into picasso (`picasso.ext.pygpufit`)
-
-### *Small improvements:*
-
-- G5M calculates more accurate sigma constraints in 3D
-- Adjusted default parameters in Average
-- Render GUI: show NeNA/FRC plot automatically calculates them if not done already
-- Adjusted installation instructions
-- Badges added to the GitHub repository (PyPI version and Python version)
-- `picasso.lib.merge_locs` allows for flexible `frame` and `group` incrementing when merging localizations lists
-- Only `picasso.version.py` determines software version globally, thus `bumpversion` is not needed anymore
-- Render GUI: more accessible saving/loading of FOVs as .txt files
-- Render GUI: keyboard combo for closing all localizations (Ctrl+Shift+Backspace or Ctrl+Shift+Delete)
-- Render GUI: legend is displayed on black background for better visibility
-- Render GUI: log-scaling of contrast
-- Render GUI: new image exporting with manually selected rendering options + support for .pdf and .svg formats
-- Render GUI: changed the name "Nearest Neighbor Analysis" to "Calculate nearest neighbor distances" for better clarity
-- Render GUI: optimal scale bar is only set upon user's request, also in 3D
-- SPINNA allows user-defined threshold for the binary mask
-- Dialogs with scroll areas show no margins (e.g., Display settings dialog in Render)
-- Added help buttons to some dialogs/menu bars across the modules that open the corresponding readthedocs pages (the documentation will be further improved in the future)
-- "What's this?" help button removed from all dialogs (Windows)
-- Render GUI: test clustering supports G5M
-- Render GUI: Mask settings dialog allows for zooming and panning
-- Trace shows number of photons in addition to x, y and frame; exports .csv files with three columns (frame, ON/OFF and photons)
-- Render GUI: plot localization profile for rectangular pick
-- 3D rotation window supports rendering by property
+- Picasso automatically checks for updates when launched and notifies the user if a new version is available
 - Render, Localize, Average and Filter allow the user to inspect metadata in the app
-- Localize GUI: added abort button to stop asynchronous multiprocessing (for example, during identification)
-- Render GUI: apply drift from external file supports dropping the .txt file
-- New functions in the API `picasso.postprocess.undrift_from_fiducials` and `picasso.postprocess.apply_drift` that can be used to undrift localizations based on picked fiducials with or without user-specified picks and to apply the calculated drift to the localizations, respectively
-- Default Localize parameters dialog is less wide
-- Changelog changed from .rst to markdown for GitHub display
+
+#### Localize
+- [GPUfit](https://github.com/gpufit/Gpufit) incorporated into Picasso (`picasso.ext.pygpufit`)
+- Localize supports .stk file format from MetaMorph (*experimental*)
+- Abort button to stop asynchronous multiprocessing (for example, during identification)
+- Fixed error box compatible with multiprocessed tasks
+- Save spots as .tif, .npy, not .hdf5
+- Documentation updated relating to the file menu features, such as loading picks as identifications
+- Fixed reading .ims movies
+- Fixed spot saving
+
+#### Render
+- Faster ind. loc. precision rendering in 3D
+- Test clustering supports G5M
 - Test clustering saves the channel to which the algorithms are applied
 - Test clustering allows for applying the current parameters to the whole dataset
 - Test clustering tool tips
-- Filter supports .csv export (not only hdf5)
-- Removed focus on push buttons in dialogs
+- G5M calculates more accurate sigma constraints in 3D
+- Plot localization profile for rectangular pick
+- Added support for reading .csv files from ThunderSTORM
+- Mask settings dialog allows for zooming and panning
+- More accessible saving/loading of FOVs as .txt files
+- Show NeNA/FRC plot buttons automatically calculate them if not done already
+- Keyboard combo for closing all localizations (Ctrl+Shift+Backspace or Ctrl+Shift+Delete)
+- Legend is displayed on black background for better visibility
+- Log-scaling of contrast
+- New image exporting with manually selected rendering options + support for .pdf and .svg formats
+- Optimal scale bar is only set upon user's request
+- Changed the name "Nearest Neighbor Analysis" to "Calculate nearest neighbor distances" for better clarity
+- Trace shows number of photons in addition to x, y and frame; exports .csv files with three columns (frame, ON/OFF and photons)
+- 3D rotation window supports rendering by property
+- Apply drift from external file supports dropping the .txt file onto the window
+- Fixed distances in NeNA plot (previously plotting multiple times kept increasing the values)
+- Fixed 3D screenshot metadata
+- Fixed 3D animation for non-square FOV
+- Fixed pre-G5M group/max locs checks when applying to all channels
+- Fixed zero-value in rendered images (previously RGB channels were capped between 1 and 255 instead of 0 and 255)
+
+#### SPINNA
+- Two new fitting methods for fast fitting instead of the brute force search, see [documentation](https://picassosr.readthedocs.io/en/latest/spinna.html#fitting)
+- User-defined threshold for the binary mask
+
+#### *Other improvements:*
+- Picasso: Filter supports .csv export (not only hdf5)
+- Only `picasso.version.py` determines software version globally, thus `bumpversion` is not needed anymore
+- `picasso.lib.merge_locs` allows for flexible `frame` and `group` incrementing when merging localizations lists
+- New functions in the API `picasso.postprocess.undrift_from_fiducials` and `picasso.postprocess.apply_drift` that can be used to undrift localizations based on picked fiducials with or without user-specified picks and to apply the calculated drift to the localizations, respectively
 - New API for alignement of locs, see ``picasso.postprocess``: ``align_rcc`` and ``align_from_picked``
 - New function ``picasso.io.load_picks``
+- Adjusted default parameters in Picasso: Average
+- Adjusted installation instructions in README
+- Badges added to the GitHub repository (PyPI version and Python version)
+- Dialogs with scroll areas show no margins (e.g., Display settings dialog in Render)
+- Added help buttons to some dialogs/menu bars across the modules that open the corresponding readthedocs pages (the documentation will be further improved in the future)
+- "What's this?" help button removed from all dialogs (Windows)
+- Changelog changed from .rst to markdown for GitHub display
+- Removed focus on push buttons in dialogs
 - Improved data typing of numpy arrays
 - Fixed flake8 warnings (code style only)
 - `picasso.postprocess.groupprops` shows no progress by default
 - `picasso.io.TiffMultiMap` docstrings corrected
 - CLI function `nneighbor` uses KDTree for higher speed
-- Simulate (multilabel) saves label names as in "Exchange rounds to be simulated" rather than 0, 1, 2, ...
-- Improved exception printing in GUI, robust against QThread-related issues, e.g., errors in Localize are now available to read
-- Localize: documentation updated relating to the file menu features, such as loading picks as identifications
-- Localize: save spots as .tif, .npy, not .hdf5
+- Picasso: Simulate (multilabel) saves label names as in "Exchange rounds to be simulated" rather than 0, 1, 2, ...
+- Fixed Picasso: ToRaw
 
-### *Bug fixes:*
+### **Backward incompatible changes:**
 
-- Fixed 3D render screenshot metadata
-- Fixed 3D animation for non-square FOV
-- Fixed pre-G5M group/max locs checks when applying to all channels
-- Fixed zero-value in rendered images (previously RGB channels were capped between 1 and 255 instead of 0 and 255)
-- Fixed ToRaw
-- Fixed distances in NeNA plot (previously plotting multiple times kept increasing the values)
-- Fixed spot saving in Localize
-- Fixed .ims reading in Localize
+- Several new depedencies have been added. If Picasso is installed via PyPI (`pip install picassosr`) or one-click-installer, no action needs to be taken. **Otherwise please install them when updating Picasso to v0.10.0**. The dependencies are: `tifffile`, `hdf5plugin` (only for Windows to read .ims files). Additionally `PyQt5` was updated to `PyQt6`.
+- `picasso.spinna.SPINNA.fit` accepts all inputs as keyword arguments (except for `N_structures`).
+- Names of nearly all functions in `picasso.g5m` and some in `picasso.zfit` have been changed (underscore added to prefix as private functions). The main functions in these scripts were left unchanged: `g5m.g5m`, `zfit.zfit`. Functions `zfit.fit_z` and `zfit.fit_z_parallel` are deprecated, see below.
 
-### *Deprecation warnings:*
+#### *Deprecation warnings:*
 
 - `picasso.lib.unpack_calibration` and the `spot_size`, `z_range` parameters in the G5M functions. `picasso.g5m.g5m` now uses calibration coefficients only for setting sigma constraints in 3D for more accurate results.
 - `picasso.clusterer.cluster_center` (will be renamed to `_cluster_center` and become a private function in v0.11.0)
