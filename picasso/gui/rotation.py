@@ -654,10 +654,10 @@ class ViewRotation(QtWidgets.QLabel):
             main window.
         """
         fast_render = False  # should locs be reindexed
+        w = self.window.window  # main window
         if update_window:
             fast_render = True
             # get pixelsize
-            w = self.window.window  # main window
             self.pixelsize = w.display_settings_dlg.pixelsize.value()
             # update blur and colormap
             b = w.display_settings_dlg.blur_buttongroup.checkedId()
@@ -699,7 +699,7 @@ class ViewRotation(QtWidgets.QLabel):
         self.infos = []
         for i in range(n_channels):
             # only one pick, take the first element
-            temp = self.window.window.view.picked_locs(
+            temp = w.view.picked_locs(
                 i, add_group=False, fast_render=fast_render
             )[0]
             temp["z"] /= self.pixelsize
@@ -707,7 +707,7 @@ class ViewRotation(QtWidgets.QLabel):
             if "lpz" in temp.columns:
                 temp["lpz"] /= self.pixelsize
             self.locs.append(temp)
-            self.infos.append(self.window.window.view.infos[i])
+            self.infos.append(w.view.infos[i])
 
         # shift z positions of locs so that the middle of the dataset is
         # at z = 0
@@ -723,20 +723,14 @@ class ViewRotation(QtWidgets.QLabel):
 
         # index locs by property for render property mode
         if self.x_render_state and len(self.locs) == 1:
-            parameter = self.x_property
-            if parameter in self.locs[0].columns:
-                n_colors = self.x_n_colors
-                min_val = self.x_min_val
-                max_val = self.x_max_val
-                x_step = (max_val - min_val) / n_colors
-                x_color = np.floor(
-                    (self.locs[0][parameter] - min_val) / x_step
+            if self.x_property in self.locs[0].columns:
+                self.x_locs = render.split_locs_by_property(
+                    self.locs[0],
+                    property_name=self.x_property,
+                    n_colors=self.x_n_colors,
+                    min_value=self.x_min_val,
+                    max_value=self.x_max_val,
                 )
-                x_color[x_color < 0] = 0
-                x_color[x_color > n_colors] = n_colors
-                self.x_locs = [
-                    self.locs[0][x_color == i] for i in range(n_colors + 1)
-                ]
             else:
                 self.x_render_state = False
                 self.x_locs = []
@@ -1576,7 +1570,11 @@ class ViewRotation(QtWidgets.QLabel):
                     info_.append(infos[i])
             locs = locs_
             infos = info_
-        elif len(self.locs) == 1 and "group" not in self.locs[0].columns:
+        elif (
+            len(self.locs) == 1
+            and "group" not in self.locs[0].columns
+            and not self.window.window.display_settings_dlg.render_check.isChecked()
+        ):
             locs = locs[0]
             infos = infos[0]
         return locs, infos

@@ -3014,7 +3014,7 @@ def split_locs_by_property(
         max_value = values.max()
 
     step = (max_value - min_value) / n_colors
-    color = np.floor((values - min_value) / step)
+    color = np.floor((values - min_value) / step).astype(int)
     color = np.clip(color, 0, n_colors - 1)
 
     locs_groups = []

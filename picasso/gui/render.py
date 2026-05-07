@@ -9732,7 +9732,11 @@ class View(QtWidgets.QLabel):
                     info_.append(infos[i])
             locs = locs_
             infos = info_
-        elif len(self.locs) == 1 and "group" not in self.locs[0].columns:
+        elif (
+            len(self.locs) == 1
+            and "group" not in self.locs[0].columns
+            and not self.window.display_settings_dlg.render_check.isChecked()
+        ):
             locs = locs[0]
             infos = infos[0]
         return locs, infos
