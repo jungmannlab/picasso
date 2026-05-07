@@ -30,6 +30,8 @@ import matplotlib.pyplot as plt
 from tqdm import tqdm
 from sqlalchemy import create_engine
 
+from .ext import bitplane
+
 from . import (
     io,
     lib,
@@ -1288,8 +1290,14 @@ def fit2D(
     new_info : dict
         New metadata.
     """
+    accepted_movie_types = (io.AbstractPicassoMovie,)
+    if bitplane.IMSWRITER:
+        accepted_movie_types += (
+            bitplane.MovieMapper,
+            bitplane.MovieMapperStack,
+        )
     assert isinstance(
-        movie, (io.AbstractPicassoMovie)
+        movie, accepted_movie_types
     ), "movie must be a movie loaded by picasso.io.load_movie"
     assert isinstance(movie_info, list), "movie_info must be a list"
     assert isinstance(camera_info, dict), "camera_info must be a dict"
