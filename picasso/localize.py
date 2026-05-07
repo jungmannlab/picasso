@@ -1353,7 +1353,7 @@ def fit2D(
     new_info : dict
         New metadata.
     """
-    accepted_movie_types = (io.AbstractPicassoMovie,)
+    accepted_movie_types = (io.AbstractPicassoMovie, np.memmap)
     if bitplane.IMSWRITER:
         accepted_movie_types += (
             bitplane.MovieMapper,
