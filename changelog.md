@@ -6,7 +6,7 @@ Last change: 06-MAY-2026 CEST
 
 ### **Backward incompatible changes:**
 
-- Several new depedencies have been added. If Picasso is installed via PyPI (`pip install picassosr`) or one-click-installer, no action needs to be taken. **Otherwise please install them when updating Picasso to v0.10.0.**. The dependencies are: `tifffile`, `hdf5plugin` (only for Windows to read .ims files). Additionally `PyQt5` was changed with `PyQt6`.
+- Several new depedencies have been added. If Picasso is installed via PyPI (`pip install picassosr`) or one-click-installer, no action needs to be taken. **Otherwise please install them when updating Picasso to v0.10.0.**. The dependencies are: `tifffile`, `hdf5plugin` (only for Windows to read .ims files). Additionally `PyQt5` was updated to `PyQt6`.
 - `picasso.spinna.SPINNA.fit` accepts all inputs as keyword arguments (except for `N_structures`).
 
 ### **Important updates:**

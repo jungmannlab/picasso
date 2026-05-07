@@ -16,7 +16,7 @@ Localize allows performing super-resolution reconstruction of image stacks. For 
 - ``.ome.tif``, including BigTiff (as of Picasso 0.9.10),
 - ``NDTiffStack`` with extension ``.tif``,
 - ``.raw``,
-- ``.ims``,
+- ``.ims`` (supported only on Windows),
 - ``.nd2``,
 - ``.stk`` (MetaMorph Stack, as of Picasso 0.10.0).
 

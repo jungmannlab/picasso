@@ -116,6 +116,8 @@ def load_ims(
     info : list of dicts
         A list containing a dictionary with metadata about the movie.
     """
+    if not bitplane.IMSWRITER:
+        raise ImportError(".ims files are only supported on Windows machines.")
     file = IMSFile(path)
 
     if len(file.channels) > 1:
