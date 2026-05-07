@@ -98,7 +98,7 @@ def load_raw(
 def load_ims(
     path: str,
     prompt_info: Callable[[list[str]], str] | None = None,
-) -> tuple[np.memmap, list[dict]]:
+) -> tuple[AbstractPicassoMovie, list[dict]]:
     """Load a Bitplane IMS movie file and its metadata.
 
     Parameters
@@ -110,9 +110,8 @@ def load_ims(
 
     Returns
     -------
-    movie : np.memmap
-        A memory-mapped numpy array representing the movie, i.e., an
-        array that's only partially loaded into memory.
+    movie : bitplane.MovieMapperStack or bitplane.MovieMapper
+        Custom wrapper around IMS file(s).
     info : list of dicts
         A list containing a dictionary with metadata about the movie.
     """

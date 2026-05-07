@@ -10,6 +10,7 @@ import os.path as _ospath
 import numpy as np
 import h5py
 import datetime
+from ..io import AbstractPicassoMovie
 
 try:
     # from PyImarisWriter.ImarisWriterCtypes import *
@@ -22,7 +23,7 @@ except ModuleNotFoundError:
 
 if IMSWRITER:
 
-    class MovieMapper:
+    class MovieMapper(AbstractPicassoMovie):
         """
         MovieMapper class to map ims files.
         """
@@ -57,12 +58,13 @@ if IMSWRITER:
                     self.channel
                 ]["Data"][0][: self.y, : self.x]
 
-    class MovieMapperStack:
+    class MovieMapperStack(AbstractPicassoMovie):
         """
         MovieMapperStack class to map ims files. This class is for z-stacks.
         """
 
         def __init__(self, file, RL, channel, frames, dtype, n_frames):
+            super().__init__()
             self.file = file
             self.RL = RL
             self.channel = channel
