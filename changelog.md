@@ -1,6 +1,6 @@
 # Changelog
 
-Last change: 06-MAY-2026 CEST
+Last change: 07-MAY-2026 CEST
 
 ## 0.10.0
 
@@ -96,6 +96,7 @@ Last change: 06-MAY-2026 CEST
 - `picasso.render` functions: `render_hist`, `render_gaussian`, `render_gaussian_iso`, `render_smooth` and `render_convolve` will become private in v0.11.0
 - `picasso.gausslq.initial_parameters_gpufit` and `picasso.gaussmle.mean_filter` will become private in v0.11.0
 - `picasso.localize` functions: `local_maxima`, `gradient_at`, `net_gradient` will become private in v0.11.0. Functions `fit` and `fit_async` will be removed entirely
+- `picasso.postprocess` functions: `index_blocks_shape`, `n_block_locs_at`, `next_frame_neighbor_distance_histogram`, `get_link_groups` and `link_loc_groups` will become private in v0.11.0
 
 ## 0.9.10
 
