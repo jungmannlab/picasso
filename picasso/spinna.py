@@ -94,6 +94,18 @@ def find_target_counts(
     targets: list[str],
     structures: list[Structure],
 ) -> lib.FloatArray2D:
+    """Deprecated, TODO: remove in v0.11.0."""
+    lib.deprecation_warning(
+        "Deprecation warning: This function will become private in "
+        "v0.11.0. Use _find_target_counts instead."
+    )
+    return _find_target_counts(targets, structures)
+
+
+def _find_target_counts(
+    targets: list[str],
+    structures: list[Structure],
+) -> lib.FloatArray2D:
     """Find the number of each molecular target in structures.
 
     Parameters
@@ -118,6 +130,15 @@ def find_target_counts(
 
 
 def get_structures_permutation(t_counts: lib.FloatArray2D) -> lib.IntArray1D:
+    """Deprecated, TODO: remove in v0.11.0."""
+    lib.deprecation_warning(
+        "Deprecation warning: This function will become private in "
+        "v0.11.0. Use _get_structures_permutation instead."
+    )
+    return _get_structures_permutation(t_counts)
+
+
+def _get_structures_permutation(t_counts: lib.FloatArray2D) -> lib.IntArray1D:
     """Find a permutation that ensures that the numbers of structures
     can be found using ``generate_N_structures``.
 
@@ -159,6 +180,15 @@ def get_structures_permutation(t_counts: lib.FloatArray2D) -> lib.IntArray1D:
 
 
 def targets_from_structures(structures: list[Structure]) -> list[str]:
+    """Deprecated, TODO: remove in v0.11.0."""
+    lib.deprecation_warning(
+        "Deprecation warning: This function will become private in "
+        "v0.11.0. Use _targets_from_structures instead."
+    )
+    return _targets_from_structures(structures)
+
+
+def _targets_from_structures(structures: list[Structure]) -> list[str]:
     """Extract the unique names of molecular targets in structures."""
     targets = []
     for structure in structures:
@@ -203,7 +233,7 @@ def generate_N_structures(
         iteration. Keys are the names of the structures and values
         are lists of integers.
     """
-    targets = targets_from_structures(structures)
+    targets = _targets_from_structures(structures)
 
     # number of molecular targets in each structure; each row gives one
     # target species and each column gives one structure
@@ -216,11 +246,11 @@ def generate_N_structures(
             " investigated. Otherwise, the numbers of structures to be"
             " simulated is constant."
         )
-    t_counts = find_target_counts(targets, structures)
+    t_counts = _find_target_counts(targets, structures)
 
     # ensure that the order of structures is correct, i.e., the free
     # paramters in the system of linear equations are on the right side
-    p = get_structures_permutation(t_counts.copy())
+    p = _get_structures_permutation(t_counts.copy())
     t_counts = t_counts[:, p]
     structures = [structures[_] for _ in p]
 
@@ -2770,7 +2800,7 @@ class StructureMixer:
             Relative proportions of the given molecular target.
         """
         targets_per_str = [_.get_all_targets_count() for _ in self.structures]
-        t_counts = find_target_counts([target], self.structures).reshape(-1)
+        t_counts = _find_target_counts([target], self.structures).reshape(-1)
         n_target = n_mols[target]
         n_total = sum(list(n_mols.values()))
         n_str = props * n_total / targets_per_str
