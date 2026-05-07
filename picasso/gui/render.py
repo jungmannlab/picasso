@@ -9978,8 +9978,7 @@ class View(QtWidgets.QLabel):
         )
         # add the area of the picks to the properties (if available)
         if len(self._picks):
-            pick_props["pick_area_um2"] = self.pick_areas
-        progress.close()
+            pick_props["pick_area_um2"] = self.pick_areas()
         warnings.simplefilter(
             "default", category=(OptimizeWarning, RuntimeWarning)
         )
@@ -9998,6 +9997,7 @@ class View(QtWidgets.QLabel):
                 "Influx rate": influx,
             }
         ]
+        progress.close()
         io.save_datasets(path, info, groups=pick_props)
 
     def save_picks(self, path: str) -> None:

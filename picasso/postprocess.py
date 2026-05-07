@@ -1822,6 +1822,8 @@ def pick_kinetics(
         dark.append(d_)
         no_locs.append(len(pick_locs))
         out_locs.append(pick_locs)
+    if callable(progress_callback):
+        progress_callback(i + 1)
     length = np.array(length)
     dark = np.array(dark)
     no_locs = np.array(no_locs)
