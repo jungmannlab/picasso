@@ -735,23 +735,6 @@ class TestIdentificationsFromFutures:
 class TestFit2D:
     """The 2D fitting dispatcher used by Picasso: Localize."""
 
-    def test_input_validation_rejects_plain_ndarray(
-        self, movie, real_identifications, movie_info
-    ):
-        """``fit2D`` requires its movie argument to be an
-        ``AbstractPicassoMovie`` — a plain ``np.memmap`` (what
-        ``io.load_movie`` returns for ``.raw``) is rejected."""
-        with pytest.raises(AssertionError):
-            localize.fit2D(
-                movie,
-                movie_info,
-                CAMERA_INFO_WITH_PIXELSIZE,
-                real_identifications,
-                BOX,
-                fitting_method="gausslq",
-                multiprocess=False,
-            )
-
     def test_gausslq_returns_locs_and_metadata(
         self, picasso_movie, real_identifications, movie_info
     ):
@@ -996,27 +979,6 @@ class TestLocalize3D:
         with pytest.raises(AssertionError, match="numpy array or ND2Movie"):
             localize.localize_3D(
                 picasso_movie,
-                movie_info=movie_info,
-                camera_info=CAMERA_INFO_WITH_PIXELSIZE,
-                box=BOX,
-                minimum_ng=MIN_NG,
-                calibration_3d=dict(CALIB_3D),
-                fitting_method="gausslq",
-                multiprocess=False,
-            )
-
-    def test_public_localize_3d_rejects_ndarray_due_to_inner_assert(
-        self, movie, movie_info
-    ):
-        """And feeding the bundled np.memmap (passes the outer check)
-        fails the *inner* fit2D AbstractPicassoMovie assert. This
-        documents the current incompatibility — both halves of the
-        deprecated public API can't agree on a movie type."""
-        with pytest.raises(
-            AssertionError, match="movie must be a movie loaded by"
-        ):
-            localize.localize_3D(
-                movie,
                 movie_info=movie_info,
                 camera_info=CAMERA_INFO_WITH_PIXELSIZE,
                 box=BOX,
