@@ -10,6 +10,7 @@ Last change: 07-MAY-2026 CEST
 - New dependency ``tifffile`` added. No action required for PyPI and one-click-installer distributions.
 - `picasso.spinna.SPINNA.fit` accepts all inputs as keyword arguments (except for `N_structures`).
 - Names of nearly all functions in `picasso.g5m` have been changed (underscore added to prefix as private functions), except for the main `g5m.g5m` and `g5m.sum_G5Ms`.
+- Functions in `picasso.zfit`: `get_calib_size` and `get_prime_calib_size`, `interpolate_nan` were privatized
 
 ### **Important updates:**
 
