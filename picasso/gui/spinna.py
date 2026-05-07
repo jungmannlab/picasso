@@ -4347,7 +4347,7 @@ class SimulationsTab(lib.Dialog):
             Number of molecules to be simulated.
         """
         # find targets counts per structure:
-        t_counts = spinna.find_target_counts(self.targets, self.structures)
+        t_counts = spinna._find_target_counts(self.targets, self.structures)
         # extract the row from t_counts that specifies number of the
         # target in question across structures
         idx = self.targets.index(target)

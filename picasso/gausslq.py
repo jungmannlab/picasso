@@ -111,6 +111,19 @@ def _initial_parameters(
 def initial_parameters_gpufit(
     spots: lib.FloatArray3D, size: int
 ) -> lib.FloatArray2D:
+    """Alias to _initial_parameters_gpufit, deprecated
+
+    TODO: remove in v0.11.0"""
+    lib.deprecation_warning(
+        "Deprecation warning: This function will become private in"
+        "v0.11.0. Use _initial_parameters_gpufit instead."
+    )
+    return _initial_parameters_gpufit(spots, size)
+
+
+def _initial_parameters_gpufit(
+    spots: lib.FloatArray3D, size: int
+) -> lib.FloatArray2D:
     """Initialize the parameters for the GPU fit - photons, x, y, sx,
     sy, bg."""
     center = (size / 2.0) - 0.5
@@ -361,7 +374,7 @@ def fit_spots_gpufit(spots: lib.FloatArray3D) -> lib.FloatArray2D:
             " required."
         )
     size = spots.shape[1]
-    initial_parameters = initial_parameters_gpufit(spots, size)
+    initial_parameters = _initial_parameters_gpufit(spots, size)
     model_id = gf.ModelID.GAUSS_2D_ELLIPTIC
 
     parameters, states, chi_squares, number_iterations, exec_time = gf.fit(

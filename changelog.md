@@ -8,6 +8,8 @@ Last change: 07-MAY-2026 CEST
 
 - Several new depedencies have been added. If Picasso is installed via PyPI (`pip install picassosr`) or one-click-installer, no action needs to be taken. **Otherwise please install them when updating Picasso to v0.10.0.**. The dependencies are: `tifffile`, `hdf5plugin` (only for Windows to read .ims files). Additionally `PyQt5` was updated to `PyQt6`.
 - `picasso.spinna.SPINNA.fit` accepts all inputs as keyword arguments (except for `N_structures`).
+- Names of nearly all functions in `picasso.g5m` have been changed (underscore added to prefix as private functions), except for the main `g5m.g5m` and `g5m.sum_G5Ms`.
+- Functions in `picasso.zfit`: `get_calib_size` and `get_prime_calib_size`, `interpolate_nan` were privatized
 
 ### **Important updates:**
 
@@ -94,6 +96,10 @@ Last change: 07-MAY-2026 CEST
 - `fit_z` and `fit_z_parallel` in `picasso.zfit` will be deprecated in v0.11.0. `zfit.zfit` takes over as the main function in the script
 - `picasso.render` takes in `disp_px_size` rather than `oversampling`, see the function; `oversampling` will be removed in v0.11.0
 - `picasso.render` functions: `render_hist`, `render_gaussian`, `render_gaussian_iso`, `render_smooth` and `render_convolve` will become private in v0.11.0
+- `picasso.gausslq.initial_parameters_gpufit` and `picasso.gaussmle.mean_filter` will become private in v0.11.0
+- `picasso.localize` functions: `local_maxima`, `gradient_at`, `net_gradient` will become private in v0.11.0. Functions `fit` and `fit_async` will be removed entirely
+- `picasso.postprocess` functions: `index_blocks_shape`, `n_block_locs_at`, `next_frame_neighbor_distance_histogram`, `get_link_groups` and `link_loc_groups` will become private in v0.11.0
+- `picasso.spinna` functions: `find_target_counts`, `get_structures_permutation`, `targets_from_structures`
 
 ## 0.9.10
 

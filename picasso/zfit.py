@@ -31,14 +31,14 @@ from . import lib, gausslq, gaussmle, __version__
 plt.style.use("ggplot")
 
 
-def nan_index(y: lib.FloatArray1D) -> tuple[lib.BoolArray1D, Callable]:
+def _nan_index(y: lib.FloatArray1D) -> tuple[lib.BoolArray1D, Callable]:
     """Find indices of NaN values in an array."""
     return np.isnan(y), lambda z: z.nonzero()[0]
 
 
-def interpolate_nan(data: lib.FloatArray1D) -> lib.FloatArray1D:
+def _interpolate_nan(data: lib.FloatArray1D) -> lib.FloatArray1D:
     """Linear interpolattion of NaN values in an array ``data``."""
-    nans, x = nan_index(data)
+    nans, x = _nan_index(data)
     data[nans] = np.interp(x(nans), x(~nans), data[~nans])
     return data
 
@@ -113,8 +113,8 @@ def calibrate_z(
     )
 
     # Fix nan
-    mean_sx = interpolate_nan(mean_sx)
-    mean_sy = interpolate_nan(mean_sy)
+    mean_sx = _interpolate_nan(mean_sx)
+    mean_sy = _interpolate_nan(mean_sy)
 
     cx = np.polyfit(z_range, mean_sx, 6, full=False)
     cy = np.polyfit(z_range, mean_sy, 6, full=False)
@@ -849,10 +849,10 @@ def _axial_localization_precision_astig(
 
     # to pinpoint what was the actual spot size during measurement
     z = locs["z"] / magnification_factor
-    wx_calib = get_calib_size(cx, z) * pixelsize
-    wy_calib = get_calib_size(cy, z) * pixelsize
-    wx_calib_prime = get_prime_calib_size(cx, z) * pixelsize
-    wy_calib_prime = get_prime_calib_size(cy, z) * pixelsize
+    wx_calib = _get_calib_size(cx, z) * pixelsize
+    wy_calib = _get_calib_size(cy, z) * pixelsize
+    wx_calib_prime = _get_prime_calib_size(cx, z) * pixelsize
+    wy_calib_prime = _get_prime_calib_size(cy, z) * pixelsize
     sqrt_wx_calib = np.sqrt(wx_calib)
     sqrt_wx_calib_prime = wx_calib_prime / (2 * sqrt_wx_calib)
     sqrt_wy_calib = np.sqrt(wy_calib)
@@ -867,7 +867,7 @@ def _axial_localization_precision_astig(
     return lpz * magnification_factor
 
 
-def get_calib_size(
+def _get_calib_size(
     coeffs: lib.FloatArray1D, z: lib.FloatArray1D
 ) -> lib.FloatArray1D:
     """Calculate calibration spot size at the given z position given
@@ -884,10 +884,10 @@ def get_calib_size(
     return size
 
 
-def get_prime_calib_size(
+def _get_prime_calib_size(
     coeffs: lib.FloatArray1D, z: lib.FloatArray1D
 ) -> lib.FloatArray1D:
-    """Same as ``get_calib_size`` but for the derivative of the size
+    """Same as ``_get_calib_size`` but for the derivative of the size
     function."""
     size_prime = (
         6 * coeffs[0] * z**5

@@ -65,7 +65,7 @@ fastmath = True
 
 
 @njit(fastmath=fastmath)
-def max_along_axis1(
+def _max_along_axis1(
     X: lib.FloatArray2D, final_shape: tuple[int]
 ) -> lib.FloatArray1D:
     output = np.zeros(final_shape, dtype=X.dtype)
@@ -75,7 +75,7 @@ def max_along_axis1(
 
 
 @njit(fastmath=fastmath)
-def sum_along_axis0(
+def _sum_along_axis0(
     X: lib.FloatArray2D, final_shape: tuple[int]
 ) -> lib.FloatArray1D:
     output = np.zeros(final_shape, dtype=X.dtype)
@@ -85,7 +85,7 @@ def sum_along_axis0(
 
 
 @njit(fastmath=fastmath)
-def sum_along_axis1(
+def _sum_along_axis1(
     X: lib.FloatArray2D, final_shape: tuple[int]
 ) -> lib.FloatArray1D:
     output = np.zeros(final_shape, dtype=X.dtype)
@@ -95,15 +95,15 @@ def sum_along_axis1(
 
 
 @njit(fastmath=fastmath)
-def mean_along_axis1(
+def _mean_along_axis1(
     X: lib.FloatArray2D, final_shape: tuple[int]
 ) -> lib.FloatArray1D:
-    output = sum_along_axis1(X, final_shape)
+    output = _sum_along_axis1(X, final_shape)
     return output / X.shape[1]
 
 
 @njit(fastmath=fastmath)
-def logsumexp_axis1(
+def _logsumexp_axis1(
     X: lib.FloatArray2D, final_shape: tuple[int]
 ) -> lib.FloatArray1D:
     """njit implementation of ``scipy.special.logsumexp``. Note that we
@@ -111,15 +111,15 @@ def logsumexp_axis1(
     cause overflow for large numbers. Thus, we use the ``logsumexp``
     formula: ``log(sum(exp(X))) = log(sum(exp(X - max(X))) + max(X)``
     where ``max(X)`` is subtracted from X to avoid overflow."""
-    max_val = max_along_axis1(X, final_shape)
+    max_val = _max_along_axis1(X, final_shape)
     exp_values = np.exp(X - max_val[:, np.newaxis])
-    exp_sum = sum_along_axis1(exp_values, final_shape)
+    exp_sum = _sum_along_axis1(exp_values, final_shape)
     output = np.log(exp_sum) + max_val
     return output
 
 
 @njit(fastmath=fastmath)
-def matmul(a: lib.FloatArray2D, b: lib.FloatArray2D) -> lib.FloatArray2D:
+def _matmul(a: lib.FloatArray2D, b: lib.FloatArray2D) -> lib.FloatArray2D:
     """Matrix multiplication, assuming that the shapes are
     compatible."""
     n, m = a.shape
@@ -133,7 +133,7 @@ def matmul(a: lib.FloatArray2D, b: lib.FloatArray2D) -> lib.FloatArray2D:
 
 
 @njit(fastmath=fastmath)
-def square_elements_1d(X: lib.FloatArray1D) -> lib.FloatArray1D:
+def _square_elements_1d(X: lib.FloatArray1D) -> lib.FloatArray1D:
     output = np.zeros(X.shape, dtype=X.dtype)
     for i in range(X.shape[0]):
         output[i] = X[i] ** 2
@@ -141,7 +141,7 @@ def square_elements_1d(X: lib.FloatArray1D) -> lib.FloatArray1D:
 
 
 @njit(fastmath=fastmath)
-def square_elements_2d(X: lib.FloatArray2D) -> lib.FloatArray2D:
+def _square_elements_2d(X: lib.FloatArray2D) -> lib.FloatArray2D:
     m, n = X.shape
     output = np.zeros((m, n), dtype=X.dtype)
     for i in range(m):
@@ -151,7 +151,9 @@ def square_elements_2d(X: lib.FloatArray2D) -> lib.FloatArray2D:
 
 
 @njit(fastmath=fastmath)
-def poly1d(coeffs: lib.FloatArray1D, xs: lib.FloatArray1D) -> lib.FloatArray1D:
+def _poly1d(
+    coeffs: lib.FloatArray1D, xs: lib.FloatArray1D
+) -> lib.FloatArray1D:
     """Use Horner's method to evaluate a polynomial with coefficients
     `coeffs` at points `xs`. Coefficients are in the form [a_n, a_{n-1},
     ..., a_0] for the polynomial a_n*x^n + a_{n-1}*x^{n-1} + ... + a_0.
@@ -173,7 +175,7 @@ def poly1d(coeffs: lib.FloatArray1D, xs: lib.FloatArray1D) -> lib.FloatArray1D:
 # calculate (x - mu) and then square it (x and mu values are similar,
 # thus the instability is avoided). Note: precision = 1/sigma**2
 @njit(fastmath=fastmath)
-def gauss_exponential_term_2D(
+def _gauss_exponential_term_2D(
     X: lib.FloatArray2D,  # shape (n_samples, 2)
     means: lib.FloatArray2D,  # shape (n_components, 2)
     precision: lib.FloatArray1D,  # shape (n_components,)
@@ -189,12 +191,12 @@ def gauss_exponential_term_2D(
 
 
 @njit(fastmath=fastmath)
-def gauss_exponential_term_3D(
+def _gauss_exponential_term_3D(
     X: lib.FloatArray2D,  # shape (n_samples, 3)
     means: lib.FloatArray2D,  # shape (n_components, 3)
     precision: lib.FloatArray2D,  # shape (n_components, 3)
 ) -> lib.FloatArray2D:
-    """Same as ``gauss_exponential_term_2D`` but precision has shape
+    """Same as ``_gauss_exponential_term_2D`` but precision has shape
     (K, 3), where K is the number of components."""
     n_samples = X.shape[0]
     n_components = means.shape[0]
@@ -208,7 +210,7 @@ def gauss_exponential_term_3D(
 
 # kmeans++ init, adopted from sklearn, numba implementation #
 @njit
-def euclidean_distances(
+def _euclidean_distances(
     X: lib.FloatArray2D,
     Y: lib.FloatArray2D,
     X_norm_squared: lib.FloatArray2D | None = None,
@@ -220,7 +222,7 @@ def euclidean_distances(
     if X_norm_squared is not None:
         XX = X_norm_squared.reshape(-1, 1)
     else:
-        XX = sum_along_axis1(square_elements_2d(X), (X.shape[0],))[
+        XX = _sum_along_axis1(_square_elements_2d(X), (X.shape[0],))[
             :, np.newaxis
         ]
 
@@ -230,11 +232,11 @@ def euclidean_distances(
         if Y_norm_squared is not None:
             YY = Y_norm_squared.reshape(1, -1)
         else:
-            YY = sum_along_axis1(square_elements_2d(Y), (Y.shape[0],))[
+            YY = _sum_along_axis1(_square_elements_2d(Y), (Y.shape[0],))[
                 :, np.newaxis
             ]
 
-    distances = -2 * matmul(X, Y.T)
+    distances = -2 * _matmul(X, Y.T)
     distances += XX
     distances += YY
     distances = np.maximum(distances, 0)
@@ -248,7 +250,7 @@ def euclidean_distances(
 
 
 @njit
-def kmeans_plusplus(
+def _kmeans_plusplus(
     X: lib.FloatArray2D,
     n_components: int,
     random_state: int,
@@ -260,7 +262,7 @@ def kmeans_plusplus(
     n_samples, n_dimensions = X.shape
     centers = np.empty((n_components, n_dimensions), dtype=X.dtype)
     n_local_trials = 2 + int(np.log(n_components))
-    x_squared_norms = sum_along_axis1(square_elements_2d(X), (X.shape[0],))
+    x_squared_norms = _sum_along_axis1(_square_elements_2d(X), (X.shape[0],))
 
     # Pick first center randomly and track index of point
     center_id = np.random.choice(n_samples)
@@ -269,7 +271,7 @@ def kmeans_plusplus(
     indices[0] = center_id
 
     # Initialize list of closest distances and calculate current potential
-    closest_dist_sq = euclidean_distances(
+    closest_dist_sq = _euclidean_distances(
         centers[0, np.newaxis], X, Y_norm_squared=x_squared_norms
     ).flatten()
     current_pot = np.sum(closest_dist_sq)
@@ -291,7 +293,7 @@ def kmeans_plusplus(
                 candidate_ids[i] = max_value
 
         # Compute distances to center candidates
-        distance_to_candidates = euclidean_distances(
+        distance_to_candidates = _euclidean_distances(
             X[candidate_ids], X, Y_norm_squared=x_squared_norms
         )
 
@@ -299,7 +301,7 @@ def kmeans_plusplus(
         distance_to_candidates = np.minimum(
             closest_dist_sq, distance_to_candidates
         )
-        candidates_pot = sum_along_axis1(
+        candidates_pot = _sum_along_axis1(
             distance_to_candidates, (distance_to_candidates.shape[0],)
         )
 
@@ -515,9 +517,9 @@ class G5M(metaclass=ABCMeta):
         self.loc_prec_handle = loc_prec_handle
 
         if self.n_dimensions == 2:
-            initialize_G5M = initialize_G5M_2D
+            initialize_G5M = _initialize_G5M_2D
         elif self.n_dimensions == 3:
-            initialize_G5M = initialize_G5M_3D
+            initialize_G5M = _initialize_G5M_3D
         else:
             raise ValueError("Only 2D and 3D data are supported.")
 
@@ -539,7 +541,7 @@ class G5M(metaclass=ABCMeta):
             cx = self.calibration["X Coefficients"]
             cy = self.calibration["Y Coefficients"]
             mag_factor = self.calibration["Magnification factor"]
-        (w, m, c, pc), converged, valid_idx = fit_G5M(
+        (w, m, c, pc), converged, valid_idx = _fit_G5M(
             X,
             min_locs=self.min_locs,
             init_weights=init_weights,
@@ -614,7 +616,7 @@ class G5M(metaclass=ABCMeta):
         """Compute the log-likelihood of the data X under the G5M."""
         weighted_log_prob = self.estimate_weighted_log_prob(X)
         final_shape = (weighted_log_prob.shape[0],)
-        return logsumexp_axis1(weighted_log_prob, final_shape)
+        return _logsumexp_axis1(weighted_log_prob, final_shape)
 
     @property
     def weights(self) -> np.ndarray:
@@ -626,7 +628,7 @@ class G5M(metaclass=ABCMeta):
 
 # 2D G5M functions and classes #
 @njit
-def check_G5M_resolution_2D(
+def _check_G5M_resolution_2D(
     means: lib.FloatArray2D,
     weights: lib.FloatArray1D,
     precisions_chol: lib.FloatArray1D,
@@ -676,10 +678,10 @@ def check_G5M_resolution_2D(
 
             # get the PDF of all components along the line
             X = np.stack((x, y)).T
-            ll = estimate_log_gaussian_prob_2D(X, means_, prec_chol_) + np.log(
-                weights_
-            )
-            pdf = sum_along_axis1(np.exp(ll), ll.shape[0])
+            ll = _estimate_log_gaussian_prob_2D(
+                X, means_, prec_chol_
+            ) + np.log(weights_)
+            pdf = _sum_along_axis1(np.exp(ll), ll.shape[0])
 
             # find if there is at least one local minimum (may be more
             # if components in between align)
@@ -691,7 +693,7 @@ def check_G5M_resolution_2D(
 
 
 @njit
-def initialize_G5M_2D(
+def _initialize_G5M_2D(
     X: lib.FloatArray2D, n_init: int, n_components: int, random_state: int
 ) -> tuple[lib.FloatArray2D, lib.FloatArray3D, lib.FloatArray2D]:
     """Initialize the 2D G5M parameters using kmeans++."""
@@ -704,13 +706,13 @@ def initialize_G5M_2D(
     for ii in range(n_init):
         # initialize responsibilities using kmeans++ (e-step-like)
         resp = np.zeros((n_samples, n_components), dtype=np.float64)
-        indices = kmeans_plusplus(X, n_components, random_state)  # kmeans++
+        indices = _kmeans_plusplus(X, n_components, random_state)  # kmeans++
 
         for i in range(n_components):
             resp[indices[i], i] = 1
 
         # initialize G5M parameters (m-step-like)
-        weights, means, covariances = estimate_gaussian_parameters_2D(X, resp)
+        weights, means, covariances = _estimate_gaussian_parameters_2D(X, resp)
         weights /= n_samples
         init_weights[ii] = weights
         init_means[ii] = means
@@ -726,12 +728,12 @@ def initialize_G5M_2D(
 
 
 @njit
-def estimate_gaussian_parameters_2D(
+def _estimate_gaussian_parameters_2D(
     X: lib.FloatArray2D,
     resp: lib.FloatArray2D,
 ) -> tuple[lib.FloatArray1D, lib.FloatArray2D, lib.FloatArray1D]:
-    nk, means, covariances = estimate_gaussian_parameters_diag_cov(X, resp)
-    covariances = mean_along_axis1(covariances, final_shape=(len(nk),))
+    nk, means, covariances = _estimate_gaussian_parameters_diag_cov(X, resp)
+    covariances = _mean_along_axis1(covariances, final_shape=(len(nk),))
     return (
         np.asarray(nk, dtype=np.float64),
         np.asarray(means, dtype=np.float64),
@@ -740,34 +742,34 @@ def estimate_gaussian_parameters_2D(
 
 
 @njit
-def estimate_log_gaussian_prob_2D(
+def _estimate_log_gaussian_prob_2D(
     X: lib.FloatArray2D,
     means: lib.FloatArray2D,
     precisions_chol: lib.FloatArray1D,
 ) -> lib.FloatArray2D:
     log_det = 2 * np.log(precisions_chol)
-    precisions = square_elements_1d(precisions_chol)
-    log_prob = gauss_exponential_term_2D(X, means, precisions)
+    precisions = _square_elements_1d(precisions_chol)
+    log_prob = _gauss_exponential_term_2D(X, means, precisions)
     return -0.5 * (2 * np.log(2 * np.pi) + log_prob) + log_det
 
 
 @njit
-def e_step_2D(
+def _e_step_2D(
     X: lib.FloatArray2D,
     weights: lib.FloatArray1D,
     means: lib.FloatArray2D,
     precisions_cholesky: lib.FloatArray1D,
 ) -> tuple[float, lib.FloatArray2D]:
-    weighted_log_prob = estimate_log_gaussian_prob_2D(
+    weighted_log_prob = _estimate_log_gaussian_prob_2D(
         X, means, precisions_cholesky
     ) + np.log(weights)
-    log_prob_norm = logsumexp_axis1(weighted_log_prob, (X.shape[0],))
+    log_prob_norm = _logsumexp_axis1(weighted_log_prob, (X.shape[0],))
     log_resp = weighted_log_prob - log_prob_norm[:, np.newaxis]
     return np.mean(log_prob_norm), log_resp.astype(np.float64)
 
 
 @njit
-def m_step_2D(
+def _m_step_2D(
     X: lib.FloatArray2D,
     log_resp: lib.FloatArray2D,
     sigma_bounds: tuple[float, float],
@@ -788,16 +790,16 @@ def m_step_2D(
     min_cov = sigma_bounds[0] ** 2
     max_cov = sigma_bounds[1] ** 2
     resp = np.exp(log_resp)
-    weights, means, covs = estimate_gaussian_parameters_2D(X, resp)
+    weights, means, covs = _estimate_gaussian_parameters_2D(X, resp)
     # clip covariances (numba does not support np.clip or multidim.
     # indexing)
     if loc_prec_handle == "local":  # local sigma bounds
         # take weighted (based on resp) avg. loc. prec. per component
         lp_ = np.reshape(lp, (-1, 1))
-        mean_lp_per_component = sum_along_axis0(
+        mean_lp_per_component = _sum_along_axis0(
             resp * lp_, (resp.shape[1])
-        ) / sum_along_axis0(resp, (resp.shape[1],))
-        mean_cov_per_component = square_elements_1d(mean_lp_per_component)
+        ) / _sum_along_axis0(resp, (resp.shape[1],))
+        mean_cov_per_component = _square_elements_1d(mean_lp_per_component)
         min_covs = min_cov * mean_cov_per_component
         max_covs = max_cov * mean_cov_per_component
     else:
@@ -815,7 +817,7 @@ def m_step_2D(
     return weights, means, covs, precisions_cholesky
 
 
-def find_optimal_G5M_2D(
+def _find_optimal_G5M_2D(
     X: lib.FloatArray2D,
     min_locs: int,
     sigma_bounds: tuple[float, float],
@@ -878,7 +880,7 @@ def find_optimal_G5M_2D(
             min_locs=min_locs,
             sigma_bounds=sigma_bounds,
         ).fit(X, lp=lp, loc_prec_handle=loc_prec_handle)
-        if g5m is None or not check_G5M_resolution_2D(
+        if g5m is None or not _check_G5M_resolution_2D(
             g5m.means, g5m.weights, g5m.precisions_cholesky
         ):
             current_bic = np.inf
@@ -900,7 +902,7 @@ def find_optimal_G5M_2D(
         return g5ms[best_bic_idx]
 
 
-def run_g5m_group_2D(
+def _run_g5m_group_2D(
     locs_group: pd.DataFrame,
     *,
     min_locs: int = MIN_LOCS,
@@ -974,7 +976,7 @@ def run_g5m_group_2D(
         lp = np.ones(len(locs_group))  # dummy
     X = locs_group[["x", "y"]].to_numpy().astype(np.float64)
 
-    g5m = find_optimal_G5M_2D(
+    g5m = _find_optimal_G5M_2D(
         X,
         min_locs=min_locs,
         sigma_bounds=sigma_bounds,
@@ -985,7 +987,7 @@ def run_g5m_group_2D(
     if g5m is None or len(g5m.valid_idx) == 0:
         return None, None
 
-    return convert_G5M_results(g5m, locs_group, pixelsize, bootstrap_check)
+    return _convert_G5M_results(g5m, locs_group, pixelsize, bootstrap_check)
 
 
 class G5M_2D(G5M):
@@ -1026,7 +1028,7 @@ class G5M_2D(G5M):
     def estimate_log_prob(self, X: lib.FloatArray2D) -> lib.FloatArray2D:
         """Calculate the log probabilities of the data X under the G5M,
         without weights."""
-        return estimate_log_gaussian_prob_2D(
+        return _estimate_log_gaussian_prob_2D(
             X,
             self.means,
             self.precisions_cholesky,
@@ -1068,7 +1070,7 @@ class G5M_2D(G5M):
 
 # 3D G5M functions and classes #
 @njit
-def check_G5M_resolution_3D(
+def _check_G5M_resolution_3D(
     means: lib.FloatArray2D,
     weights: lib.FloatArray1D,
     precisions_chol: lib.FloatArray2D,
@@ -1121,10 +1123,10 @@ def check_G5M_resolution_3D(
 
             # get the PDF of all components along the line
             X = np.stack((x, y, z)).T
-            ll = estimate_log_gaussian_prob_3D(X, means_, prec_chol_) + np.log(
-                weights_
-            )
-            pdf = sum_along_axis1(np.exp(ll), ll.shape[0])
+            ll = _estimate_log_gaussian_prob_3D(
+                X, means_, prec_chol_
+            ) + np.log(weights_)
+            pdf = _sum_along_axis1(np.exp(ll), ll.shape[0])
 
             # find if there is at least one local minimum (may be more
             # if components in between align)
@@ -1136,7 +1138,7 @@ def check_G5M_resolution_3D(
 
 
 @njit
-def initialize_G5M_3D(
+def _initialize_G5M_3D(
     X: lib.FloatArray2D, n_init: int, n_components: int, random_state: int
 ) -> tuple[lib.FloatArray2D, lib.FloatArray3D, lib.FloatArray3D]:
     """Initialize the 3D G5M parameters using kmeans++."""
@@ -1149,13 +1151,13 @@ def initialize_G5M_3D(
     for ii in range(n_init):
         # initialize responsibilities using kmeans++ (e-step-like)
         resp = np.zeros((n_samples, n_components), dtype=np.float64)
-        indices = kmeans_plusplus(X, n_components, random_state)  # kmeans++
+        indices = _kmeans_plusplus(X, n_components, random_state)  # kmeans++
 
         for i in range(n_components):
             resp[indices[i], i] = 1
 
         # initialize G5M parameters (m-step-like)
-        weights, means, covariances = estimate_gaussian_parameters_3D(X, resp)
+        weights, means, covariances = _estimate_gaussian_parameters_3D(X, resp)
         weights /= n_samples
         init_weights[ii] = weights
         init_means[ii] = means
@@ -1171,45 +1173,45 @@ def initialize_G5M_3D(
 
 
 @njit
-def estimate_gaussian_parameters_3D(
+def _estimate_gaussian_parameters_3D(
     X: lib.FloatArray2D,
     resp: lib.FloatArray2D,
 ) -> tuple[lib.FloatArray1D, lib.FloatArray2D, lib.FloatArray2D]:
-    return estimate_gaussian_parameters_diag_cov(X, resp)
+    return _estimate_gaussian_parameters_diag_cov(X, resp)
 
 
 @njit
-def estimate_log_gaussian_prob_3D(
+def _estimate_log_gaussian_prob_3D(
     X: lib.FloatArray2D,
     means: lib.FloatArray2D,
     precisions_chol: lib.FloatArray2D,
 ) -> lib.FloatArray2D:
-    log_det = sum_along_axis1(
+    log_det = _sum_along_axis1(
         np.log(precisions_chol),
         (precisions_chol.shape[0],),
     )
-    precisions = square_elements_2d(precisions_chol)
-    log_prob = gauss_exponential_term_3D(X, means, precisions)
+    precisions = _square_elements_2d(precisions_chol)
+    log_prob = _gauss_exponential_term_3D(X, means, precisions)
     return -0.5 * (3 * np.log(2 * np.pi) + log_prob) + log_det
 
 
 @njit
-def e_step_3D(
+def _e_step_3D(
     X: lib.FloatArray2D,
     weights: lib.FloatArray1D,
     means: lib.FloatArray2D,
     precisions_cholesky: lib.FloatArray2D,
 ) -> tuple[float, lib.FloatArray2D]:
-    weighted_log_prob = estimate_log_gaussian_prob_3D(
+    weighted_log_prob = _estimate_log_gaussian_prob_3D(
         X, means, precisions_cholesky
     ) + np.log(weights)
-    log_prob_norm = logsumexp_axis1(weighted_log_prob, (X.shape[0],))
+    log_prob_norm = _logsumexp_axis1(weighted_log_prob, (X.shape[0],))
     log_resp = weighted_log_prob - log_prob_norm[:, np.newaxis]
     return np.mean(log_prob_norm), log_resp.astype(np.float64)
 
 
 @njit
-def m_step_3D(
+def _m_step_3D(
     X: lib.FloatArray2D,
     log_resp: lib.FloatArray2D,
     sigma_bounds: tuple[float, float],
@@ -1230,13 +1232,13 @@ def m_step_3D(
     The astigmatism modification handles the astigmatism effect in
     3D DNA-PAINT data. As in sklearn's implementation, the weights,
     means and diagonal covariance matrices are estimated first, together
-    with the min/max constrainsts, like in ``m_step_2D``. In the
+    with the min/max constrainsts, like in ``_m_step_2D``. In the
     next step, sigma bound are imposed and then the ratio of the spot
     width and height is extracted from calibration, based on the z
     position, for each component and imposed on the covariances' x and
     y values."""
     resp = np.exp(log_resp)
-    weights, means, covs = estimate_gaussian_parameters_3D(X, resp)
+    weights, means, covs = _estimate_gaussian_parameters_3D(X, resp)
 
     # find the min. and max. covariances in each dimension
     if loc_prec_handle == "local":
@@ -1245,19 +1247,19 @@ def m_step_3D(
         lpy = np.ascontiguousarray(lp[:, 1]).reshape(-1, 1)
         lpz = np.ascontiguousarray(lp[:, 2]).reshape(-1, 1)
 
-        mean_lpx_per_component = sum_along_axis0(
+        mean_lpx_per_component = _sum_along_axis0(
             resp * lpx, (resp.shape[1])
-        ) / sum_along_axis0(resp, (resp.shape[1]))
-        mean_lpy_per_component = sum_along_axis0(
+        ) / _sum_along_axis0(resp, (resp.shape[1]))
+        mean_lpy_per_component = _sum_along_axis0(
             resp * lpy, (resp.shape[1])
-        ) / sum_along_axis0(resp, (resp.shape[1]))
-        mean_lpz_per_component = sum_along_axis0(
+        ) / _sum_along_axis0(resp, (resp.shape[1]))
+        mean_lpz_per_component = _sum_along_axis0(
             resp * lpz, (resp.shape[1])
-        ) / sum_along_axis0(resp, (resp.shape[1]))
+        ) / _sum_along_axis0(resp, (resp.shape[1]))
 
-        mean_covx_per_component = square_elements_1d(mean_lpx_per_component)
-        mean_covy_per_component = square_elements_1d(mean_lpy_per_component)
-        mean_covz_per_component = square_elements_1d(mean_lpz_per_component)
+        mean_covx_per_component = _square_elements_1d(mean_lpx_per_component)
+        mean_covy_per_component = _square_elements_1d(mean_lpy_per_component)
+        mean_covz_per_component = _square_elements_1d(mean_lpz_per_component)
 
         min_cov_x = sigma_bounds[0] ** 2 * mean_covx_per_component
         max_cov_x = sigma_bounds[1] ** 2 * mean_covx_per_component
@@ -1297,8 +1299,8 @@ def m_step_3D(
     # and height ratio
     if len(cx):
         z_position_calib = means[:, 2] / mag_factor
-        spot_width = poly1d(cx, z_position_calib)
-        spot_height = poly1d(cy, z_position_calib)
+        spot_width = _poly1d(cx, z_position_calib)
+        spot_height = _poly1d(cy, z_position_calib)
         ratio = spot_width / spot_height
     else:  # TODO: remove in v0.11.0
         # find the spot width and height for each component
@@ -1313,7 +1315,7 @@ def m_step_3D(
     covs_xy = np.empty((covs.shape[0], 2))
     covs_xy[:, 0] = covs[:, 0]
     covs_xy[:, 1] = covs[:, 1]
-    mean_xy_covs = mean_along_axis1(covs_xy, (covs_xy.shape[0],))
+    mean_xy_covs = _mean_along_axis1(covs_xy, (covs_xy.shape[0],))
     covs[:, 0] = mean_xy_covs * ratio
     covs[:, 1] = mean_xy_covs / ratio
     weights /= weights.sum()
@@ -1321,7 +1323,7 @@ def m_step_3D(
     return weights, means, covs, precisions_cholesky
 
 
-def find_optimal_G5M_3D(
+def _find_optimal_G5M_3D(
     X: lib.FloatArray2D,
     min_locs: int,
     sigma_bounds: tuple[float, float],
@@ -1423,7 +1425,7 @@ def find_optimal_G5M_3D(
             z_range=z_range,
             mag_factor=mag_factor,
         ).fit(X, lp=lp, loc_prec_handle=loc_prec_handle)
-        if g5m is None or not check_G5M_resolution_3D(
+        if g5m is None or not _check_G5M_resolution_3D(
             g5m.means, g5m.weights, g5m.precisions_cholesky
         ):
             current_bic = np.inf
@@ -1445,7 +1447,7 @@ def find_optimal_G5M_3D(
         return g5ms[best_bic_idx]
 
 
-def run_g5m_group_3D(
+def _run_g5m_group_3D(
     locs_group: pd.DataFrame,
     calibration: dict,
     *,
@@ -1532,7 +1534,7 @@ def run_g5m_group_3D(
     X[:, 2] /= pixelsize  # convert z to camera pixels
     lp[:, 2] /= pixelsize  # convert lpz to camera pixels
 
-    g5m = find_optimal_G5M_3D(
+    g5m = _find_optimal_G5M_3D(
         X,
         min_locs=min_locs,
         sigma_bounds=sigma_bounds,
@@ -1544,7 +1546,7 @@ def run_g5m_group_3D(
     if g5m is None or len(g5m.valid_idx) == 0:
         return None, None
 
-    return convert_G5M_results(g5m, locs_group, pixelsize, bootstrap_check)
+    return _convert_G5M_results(g5m, locs_group, pixelsize, bootstrap_check)
 
 
 class G5M_3D(G5M):
@@ -1631,7 +1633,7 @@ class G5M_3D(G5M):
     def estimate_log_prob(self, X: lib.FloatArray2D) -> lib.FloatArray2D:
         """Calculate the log probabilities of the data X under the G5M,
         without weights."""
-        return estimate_log_gaussian_prob_3D(
+        return _estimate_log_gaussian_prob_3D(
             X,
             self.means,
             self.precisions_cholesky,
@@ -1675,7 +1677,7 @@ class G5M_3D(G5M):
 
 # G5M (2D/3D) functions and classes #
 @njit
-def estimate_gaussian_parameters_diag_cov(
+def _estimate_gaussian_parameters_diag_cov(
     X: lib.FloatArray2D,
     resp: lib.FloatArray2D,
     reg_covar: float = 1e-6,
@@ -1700,10 +1702,10 @@ def estimate_gaussian_parameters_diag_cov(
         Number of localizations per component, means and covariances.
     """
     nk = (
-        sum_along_axis0(resp, (resp.shape[1],))
+        _sum_along_axis0(resp, (resp.shape[1],))
         + 10.0 * np.finfo(resp.dtype).eps
     )
-    means = matmul(resp.T, X) / nk[:, np.newaxis]
+    means = _matmul(resp.T, X) / nk[:, np.newaxis]
     covariances = np.zeros((resp.shape[1], X.shape[1]), dtype=np.float64)
     for i in range(resp.shape[1]):
         for j in range(X.shape[1]):
@@ -1718,7 +1720,7 @@ def estimate_gaussian_parameters_diag_cov(
     )
 
 
-def approximate_sem(g5m: G5M, locs: pd.DataFrame) -> np.ndarray:
+def _approximate_sem(g5m: G5M, locs: pd.DataFrame) -> np.ndarray:
     """Return the standard error of the means (SEM) in the G5M.
 
     Note: this is only an approximation since we treat each component
@@ -1749,7 +1751,7 @@ def approximate_sem(g5m: G5M, locs: pd.DataFrame) -> np.ndarray:
     return sem
 
 
-def bootstrap_sem(
+def _bootstrap_sem(
     g5m: G5M, locs: pd.DataFrame, n_bootstraps: int = 20
 ) -> np.ndarray:
     """Return the standard error of the means (SEM) for the G5M using
@@ -1804,7 +1806,7 @@ def bootstrap_sem(
     return sem
 
 
-def convert_G5M_results(
+def _convert_G5M_results(
     g5m: G5M,
     locs_group: pd.DataFrame,
     pixelsize: float = 130.0,
@@ -1845,12 +1847,12 @@ def convert_G5M_results(
     if "z" in locs_group.columns:
         X = locs_group[["x", "y", "z"]].to_numpy()
         X[:, 2] /= pixelsize  # convert z to camera pixels
-        e_step = e_step_3D
+        e_step = _e_step_3D
     else:
         X = locs_group[["x", "y"]].to_numpy()
-        e_step = e_step_2D
+        e_step = _e_step_2D
     log_prob = g5m.estimate_weighted_log_prob(X)
-    sample_scores = logsumexp_axis1(log_prob, (X.shape[0],))
+    sample_scores = _logsumexp_axis1(log_prob, (X.shape[0],))
     # average LL
     group_ll = np.ones(len(g5m.valid_idx)) * np.mean(sample_scores)
 
@@ -1894,9 +1896,9 @@ def convert_G5M_results(
 
     # standard errors of the means, saved as loc. prec.
     if bootstrap:
-        sem = bootstrap_sem(g5m, locs_group)
+        sem = _bootstrap_sem(g5m, locs_group)
     else:
-        sem = approximate_sem(g5m, locs_group)
+        sem = _approximate_sem(g5m, locs_group)
     lpx = sem[:, 0]
     lpy = sem[:, 1]
 
@@ -2102,7 +2104,7 @@ def sum_G5Ms(g5ms: list[G5M]) -> G5M:
 
 
 @njit
-def fit_G5M(
+def _fit_G5M(
     X: np.ndarray,
     min_locs: int,
     init_weights: np.ndarray,
@@ -2185,13 +2187,13 @@ def fit_G5M(
         Indices of the valid components (min_locs).
     """
     if init_precisions_cholesky.ndim == 2:  # 2D data
-        e_step = e_step_2D
-        m_step = m_step_2D
-        check_resolution = check_G5M_resolution_2D
+        e_step = _e_step_2D
+        m_step = _m_step_2D
+        check_resolution = _check_G5M_resolution_2D
     elif init_precisions_cholesky.ndim == 3:
-        e_step = e_step_3D
-        m_step = m_step_3D
-        check_resolution = check_G5M_resolution_3D
+        e_step = _e_step_3D
+        m_step = _m_step_3D
+        check_resolution = _check_G5M_resolution_3D
         if (not len(cx) or not len(cy)) and (
             not len(spot_size) or not len(z_range)
         ):
@@ -2276,7 +2278,7 @@ def fit_G5M(
     return best_params, converged, valid_idx
 
 
-def run_g5m_in_clusters(
+def _run_g5m_in_clusters(
     i: int,
     n_groups_task: int,
     locs: pd.DataFrame,
@@ -2312,7 +2314,7 @@ def run_g5m_in_clusters(
     clustered_locs = []
     for group in np.unique(locs.group)[i : i + n_groups_task]:
         if "z" in locs.columns:
-            centers_, clustered_locs_ = run_g5m_group_3D(
+            centers_, clustered_locs_ = _run_g5m_group_3D(
                 locs_group=locs[locs["group"] == group],
                 calibration=calibration,
                 min_locs=min_locs,
@@ -2324,7 +2326,7 @@ def run_g5m_in_clusters(
                 max_locs_per_cluster=max_locs_per_cluster,
             )
         else:
-            centers_, clustered_locs_ = run_g5m_group_2D(
+            centers_, clustered_locs_ = _run_g5m_group_2D(
                 locs_group=locs[locs["group"] == group],
                 min_locs=min_locs,
                 loc_prec_handle=loc_prec_handle,
@@ -2340,7 +2342,7 @@ def run_g5m_in_clusters(
     return centers, clustered_locs
 
 
-def run_g5m_parallel(
+def _run_g5m_parallel(
     locs: pd.DataFrame,
     *,
     min_locs: int = MIN_LOCS,
@@ -2378,7 +2380,7 @@ def run_g5m_parallel(
     for i, n_groups_task in zip(start_indices, groups_per_task):
         fs.append(
             executor.submit(
-                run_g5m_in_clusters,
+                _run_g5m_in_clusters,
                 i,
                 n_groups_task,
                 locs,
@@ -2414,7 +2416,7 @@ def _g5m(
     centers of the G5M components and localizations with assigned cluster
     labels. See ``g5m`` for parameters explanation."""
     if asynch:  # run G5M using multiprocessing
-        fs = run_g5m_parallel(
+        fs = _run_g5m_parallel(
             locs,
             min_locs=min_locs,
             loc_prec_handle=loc_prec_handle,
@@ -2446,7 +2448,7 @@ def _g5m(
         clustered_locs = []
         for i, group in enumerate(np.unique(locs["group"])):
             if "z" in locs.columns:
-                centers_, clustered_locs_ = run_g5m_group_3D(
+                centers_, clustered_locs_ = _run_g5m_group_3D(
                     locs[locs["group"] == group],
                     calibration=calibration,
                     min_locs=min_locs,
@@ -2458,7 +2460,7 @@ def _g5m(
                     max_locs_per_cluster=max_locs_per_cluster,
                 )
             else:
-                centers_, clustered_locs_ = run_g5m_group_2D(
+                centers_, clustered_locs_ = _run_g5m_group_2D(
                     locs[locs["group"] == group],
                     min_locs=min_locs,
                     loc_prec_handle=loc_prec_handle,

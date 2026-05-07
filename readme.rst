@@ -16,7 +16,7 @@ Picasso
    :target: https://pepy.tech/project/picassosr
    :alt: Downloads
 
- .. image:: https://img.shields.io/pypi/pyversions/picassosr
+.. image:: https://img.shields.io/pypi/pyversions/picassosr
    :target: https://pypi.org/project/picassosr/
    :alt: Python versions
 

@@ -2,8 +2,8 @@
 
 Covers the new (non-deprecated) API:
 
-- numerical helpers (``get_calib_size``, ``get_prime_calib_size``,
-  ``interpolate_nan``, ``filter_z_fits``);
+- numerical helpers (``__get_calib_size``, ``_get_prime_calib_size``,
+  ``_interpolate_nan``, ``filter_z_fits``);
 - the main ``zfit()`` pipeline (serial + multiprocess, with abort hooks
   and argument overrides);
 - ``axial_localization_precision`` and ``axial_localization_precision_astig``
@@ -42,22 +42,22 @@ class TestGetCalibSize:
     """Polynomial evaluation of the calibration curve."""
 
     def test_matches_numpy_polyval(self):
-        """``get_calib_size`` is a degree-6 polynomial; should equal
+        """``_get_calib_size`` is a degree-6 polynomial; should equal
         ``np.polyval`` of the same coefficients."""
         coeffs = np.array(CALIB_3D["X Coefficients"])
         z = np.linspace(-300, 300, 21)
-        result = zfit.get_calib_size(coeffs, z)
+        result = zfit._get_calib_size(coeffs, z)
         expected = np.polyval(coeffs, z)
         np.testing.assert_allclose(result, expected, rtol=1e-6)
 
     def test_at_zero_returns_constant_term(self):
         coeffs = np.array(CALIB_3D["X Coefficients"])
-        assert zfit.get_calib_size(coeffs, 0.0) == coeffs[6]
+        assert zfit._get_calib_size(coeffs, 0.0) == coeffs[6]
 
     def test_vectorized_input(self):
         coeffs = np.array(CALIB_3D["X Coefficients"])
         z = np.array([-100.0, 0.0, 100.0])
-        result = zfit.get_calib_size(coeffs, z)
+        result = zfit._get_calib_size(coeffs, z)
         assert result.shape == z.shape
 
 
@@ -65,11 +65,11 @@ class TestGetPrimeCalibSize:
     """Derivative of the calibration polynomial."""
 
     def test_matches_polyder(self):
-        """``get_prime_calib_size`` should equal ``np.polyder`` of the
+        """``_get_prime_calib_size`` should equal ``np.polyder`` of the
         same coefficients evaluated at the same z."""
         coeffs = np.array(CALIB_3D["X Coefficients"])
         z = np.linspace(-300, 300, 21)
-        result = zfit.get_prime_calib_size(coeffs, z)
+        result = zfit._get_prime_calib_size(coeffs, z)
         expected = np.polyval(np.polyder(coeffs), z)
         np.testing.assert_allclose(result, expected, rtol=1e-6)
 
@@ -77,20 +77,20 @@ class TestGetPrimeCalibSize:
         coeffs = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.5])
         z = np.linspace(-100, 100, 11)
         np.testing.assert_array_equal(
-            zfit.get_prime_calib_size(coeffs, z), np.zeros_like(z)
+            zfit._get_prime_calib_size(coeffs, z), np.zeros_like(z)
         )
 
     def test_finite_difference_consistency(self):
         """Derivative at z must match a centered finite-difference of
-        ``get_calib_size``."""
+        ``_get_calib_size``."""
         coeffs = np.array(CALIB_3D["X Coefficients"])
         z0 = 50.0
         h = 1e-3
         fd = (
-            zfit.get_calib_size(coeffs, z0 + h)
-            - zfit.get_calib_size(coeffs, z0 - h)
+            zfit._get_calib_size(coeffs, z0 + h)
+            - zfit._get_calib_size(coeffs, z0 - h)
         ) / (2 * h)
-        analytical = zfit.get_prime_calib_size(coeffs, z0)
+        analytical = zfit._get_prime_calib_size(coeffs, z0)
         np.testing.assert_allclose(analytical, fd, rtol=1e-4)
 
 
@@ -99,16 +99,16 @@ class TestInterpolateNan:
 
     def test_no_nans_identity(self):
         data = np.array([1.0, 2.0, 3.0, 4.0])
-        np.testing.assert_array_equal(zfit.interpolate_nan(data.copy()), data)
+        np.testing.assert_array_equal(zfit._interpolate_nan(data.copy()), data)
 
     def test_interior_nans_filled(self):
         data = np.array([1.0, np.nan, 3.0])
-        result = zfit.interpolate_nan(data.copy())
+        result = zfit._interpolate_nan(data.copy())
         np.testing.assert_allclose(result, [1.0, 2.0, 3.0])
 
     def test_multiple_nans_filled(self):
         data = np.array([0.0, np.nan, np.nan, 3.0])
-        result = zfit.interpolate_nan(data.copy())
+        result = zfit._interpolate_nan(data.copy())
         np.testing.assert_allclose(result, [0.0, 1.0, 2.0, 3.0])
 
 
@@ -473,8 +473,8 @@ class TestCalibrateZ:
         cy = np.array(calib["Y Coefficients"])
         # at z=0 (after recentering), sx and sy should both be near the
         # crossing point of the synthetic polynomials (~1.5)
-        assert zfit.get_calib_size(cx, 0.0) == pytest.approx(1.5, abs=0.1)
-        assert zfit.get_calib_size(cy, 0.0) == pytest.approx(1.5, abs=0.1)
+        assert zfit._get_calib_size(cx, 0.0) == pytest.approx(1.5, abs=0.1)
+        assert zfit._get_calib_size(cy, 0.0) == pytest.approx(1.5, abs=0.1)
 
     def test_writes_yaml_and_png_when_path_given(
         self, bead_stack, monkeypatch, tmp_path

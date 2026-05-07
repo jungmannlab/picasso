@@ -40,8 +40,6 @@ def get_index_blocks(
     """Split localizations into blocks of the given size. Used for fast
     localization indexing (e.g., for picking).
 
-    Note: this function will be moved to ``picasso.lib`` in Picasso v0.11.0
-
     Parameters
     ----------
     locs : pd.DataFrame
@@ -80,7 +78,7 @@ def get_index_blocks(
     x_index = x_index[sort_indices]
     y_index = y_index[sort_indices]
     # Allocate block info arrays
-    n_blocks_y, n_blocks_x = index_blocks_shape(info, size)
+    n_blocks_y, n_blocks_x = _index_blocks_shape(info, size)
     block_starts = np.zeros((n_blocks_y, n_blocks_x), dtype=np.uint32)
     block_ends = np.zeros((n_blocks_y, n_blocks_x), dtype=np.uint32)
     K, L = block_starts.shape
@@ -95,10 +93,19 @@ def get_index_blocks(
 
 
 def index_blocks_shape(info: list[dict], size: float) -> tuple[int, int]:
+    """Alias for _index_blocks_shape, deprecated.
+
+    TOOD: remove in v0.11.0."""
+    lib.deprecation_warning(
+        "Deprecation warning: This function will become private in"
+        "v0.11.0. Use _index_blocks_shape instead."
+    )
+    return _index_blocks_shape(info, size)
+
+
+def _index_blocks_shape(info: list[dict], size: float) -> tuple[int, int]:
     """Return the shape of the index grid, given the movie and grid
     sizes.
-
-    Note: this function will be moved to ``picasso.lib`` in Picasso v0.11.0
 
     Parameters
     ----------
@@ -110,10 +117,12 @@ def index_blocks_shape(info: list[dict], size: float) -> tuple[int, int]:
     Returns
     -------
     n : tuple
-        Number of blocks in y direction and x direction.
+        Number of blocks in y and x.
     """
-    n_blocks_x = int(np.ceil(info[0]["Width"] / size))
-    n_blocks_y = int(np.ceil(info[0]["Height"] / size))
+    width = lib.get_from_metadata(info, "Width", raise_error=True)
+    height = lib.get_from_metadata(info, "Height", raise_error=True)
+    n_blocks_x = int(np.ceil(width / size))
+    n_blocks_y = int(np.ceil(height / size))
     n = (n_blocks_y, n_blocks_x)
     return n
 
@@ -121,8 +130,6 @@ def index_blocks_shape(info: list[dict], size: float) -> tuple[int, int]:
 def get_block_locs_at(x: float, y: float, index_blocks: tuple) -> pd.DataFrame:
     """Return the localizations in the blocks around the given
     coordinates.
-
-    Note: this function will be moved to ``picasso.lib`` in Picasso v0.11.0
 
     Parameters
     ----------
@@ -138,6 +145,10 @@ def get_block_locs_at(x: float, y: float, index_blocks: tuple) -> pd.DataFrame:
     locs : pd.DataFrame
         Localizations in the blocks around the given coordinates.
     """
+    lib.deprecation_warning(
+        "Deprecation warning: This function will be removed in v0.11.0."
+        " Use get_block_locs_at_numba instead."
+    )
     locs, size, _, _, block_starts, block_ends, K, L = index_blocks
     x_index = np.uint32(x / size)
     y_index = np.uint32(y / size)
@@ -161,10 +172,7 @@ def _fill_index_blocks(
     y_index: lib.IntArray1D,
 ) -> None:
     """Fill the block starts and ends arrays with the indices of
-    localizations in the blocks.
-
-    Note: this function will be moved to ``picasso.lib`` in Picasso v0.11.0
-    """
+    localizations in the blocks."""
     Y, X = block_starts.shape
     N = len(x_index)
     k = 0
@@ -186,10 +194,7 @@ def _fill_index_block(
     j: int,
     k: int,
 ) -> int:
-    """Fill the block starts and ends arrays for a single block.
-
-    Note: this function will be moved to ``picasso.lib`` in Picasso v0.11.0
-    """
+    """Fill the block starts and ends arrays for a single block."""
     block_starts[i, j] = k
     while k < N and y_index[k] == i and x_index[k] == j:
         k += 1
@@ -371,8 +376,6 @@ def picked_locs(
     """Find picked localizations, i.e., localizations within the given
     regions of interest.
 
-    Note: this function will be moved to ``picasso.lib`` in Picasso v0.11.0
-
     Parameters
     ----------
     locs : pd.DataFrame
@@ -486,8 +489,6 @@ def pick_similar(
 
     This function calls ``_pick_similar`` which is implemented in numba
     for speed.
-
-    Note: this function will be moved to ``picasso.lib`` in Picasso v0.11.0
 
     Parameters
     ----------
@@ -620,8 +621,6 @@ def _pick_similar(  # noqa: C901
     ``pick_similar``. See that function for more user-friendly
     interface.
 
-    Note: this function will be moved to ``picasso.lib`` in Picasso v0.11.0
-
     Parameters
     ----------
     x : lib.FloatArray1D
@@ -667,7 +666,7 @@ def _pick_similar(  # noqa: C901
             y_r = y_r2
         for j, y_grid in enumerate(y):
             y_range = y_r[j]
-            n_block_locs = n_block_locs_at(
+            n_block_locs = _n_block_locs_at(
                 x_range,
                 y_range,
                 K,
@@ -791,7 +790,6 @@ def remove_locs_in_picks(
     return locs
 
 
-@numba.jit(nopython=True, nogil=True)
 def n_block_locs_at(
     x_range: int,
     y_range: int,
@@ -800,11 +798,27 @@ def n_block_locs_at(
     block_starts: lib.IntArray2D,
     block_ends: lib.IntArray2D,
 ) -> int:
-    """Return the number of localizations in the blocks around the
-    given coordinates.
+    """Alias to _n_block_locs_at, deprecated.
 
-    Note: this function will be moved to ``picasso.lib`` in Picasso v0.11.0
-    """
+    TODO: remove in v0.11.0."""
+    lib.deprecation_warning(
+        "Deprecation warning: This function will become private in "
+        "v0.11.0. Use _n_block_locs_at instead."
+    )
+    return _n_block_locs_at(x_range, y_range, K, L, block_starts, block_ends)
+
+
+@numba.jit(nopython=True, nogil=True)
+def _n_block_locs_at(
+    x_range: int,
+    y_range: int,
+    K: int,
+    L: int,
+    block_starts: lib.IntArray2D,
+    block_ends: lib.IntArray2D,
+) -> int:
+    """Return the number of localizations in the blocks around the
+    given coordinates."""
     step = 0
     for k in range(y_range - 1, y_range + 2):
         if 0 < k < K:
@@ -832,10 +846,7 @@ def _get_block_locs_at_numba(
     L: int,
 ) -> lib.IntArray1D:
     """Numba implementation of ``get_block_locs_at``. Return the indices
-    of localizations in the blocks around the given coordinates.
-
-    Note: this function will be moved to ``picasso.lib`` in Picasso v0.11.0
-    """
+    of localizations in the blocks around the given coordinates."""
     step = 0
     for k in range(y_index - 1, y_index + 2):
         if 0 <= k < K:
@@ -877,10 +888,7 @@ def get_block_locs_at_numba(
     L: int,
 ) -> lib.FloatArray2D:
     """Numba implementation of ``get_block_locs_at. Return the
-    localizations in the blocks around the given coordinates.
-
-    Note: this function will be moved to ``picasso.lib`` in Picasso v0.11.0
-    """
+    localizations in the blocks around the given coordinates."""
     indices = _get_block_locs_at_numba(
         x_index,
         y_index,
@@ -1066,7 +1074,7 @@ def nena(
     s : float
         Estimated localization precision in camera pixels.
     """
-    bin_centers, dnfl = next_frame_neighbor_distance_histogram(locs, callback)
+    bin_centers, dnfl = _next_frame_neighbor_distance_histogram(locs, callback)
 
     def func(d, delta_a, s, ac, dc, sc):
         a = ac + delta_a  # make sure a >= ac
@@ -1146,6 +1154,20 @@ def plot_nena(
 
 
 def next_frame_neighbor_distance_histogram(
+    locs: pd.DataFrame,
+    callback: Callable[[int], None] | None = None,
+) -> tuple[lib.FloatArray1D, lib.FloatArray1D]:
+    """Alias to _next_frame_neighbor_distance_histogram, deprecated.
+
+    TODO: remove in v0.11.0."""
+    lib.deprecation_warning(
+        "Deprecation warning: This function will become private in "
+        "v0.11.0. Use _next_frame_neighbor_distance_histogram instead."
+    )
+    return _next_frame_neighbor_distance_histogram(locs, callback)
+
+
+def _next_frame_neighbor_distance_histogram(
     locs: pd.DataFrame,
     callback: Callable[[int], None] | None = None,
 ) -> tuple[lib.FloatArray1D, lib.FloatArray1D]:
@@ -1947,9 +1969,9 @@ def link(
         frame = locs["frame"].to_numpy()
         x = locs["x"].to_numpy()
         y = locs["y"].to_numpy()
-        link_group = get_link_groups(frame, x, y, r_max, max_dark_time, group)
+        link_group = _get_link_groups(frame, x, y, r_max, max_dark_time, group)
         if combine_mode == "average":
-            linked_locs = link_loc_groups(
+            linked_locs = _link_loc_groups(
                 locs,
                 info,
                 link_group,
@@ -2301,8 +2323,26 @@ def cluster_combine_dist(
     return combined_locs
 
 
-@numba.jit(nopython=True)
 def get_link_groups(
+    frame: lib.IntArray1D,
+    x: lib.FloatArray1D,
+    y: lib.FloatArray1D,
+    d_max: float,
+    max_dark_time: int,
+    group: lib.IntArray1D,
+) -> lib.IntArray1D:
+    """Alias to _get_link_groups, deprecated.
+
+    TODO: remove in v0.11.0."""
+    lib.deprecation_warning(
+        "Deprecation warning: This function will become private in "
+        "v0.11.0. Use _get_link_groups instead."
+    )
+    return _get_link_groups(frame, x, y, d_max, max_dark_time, group)
+
+
+@numba.jit(nopython=True)
+def _get_link_groups(
     frame: lib.IntArray1D,
     x: lib.FloatArray1D,
     y: lib.FloatArray1D,
@@ -2525,7 +2565,23 @@ def _link_group_last(
     return result
 
 
-def link_loc_groups(  # noqa: C901
+def link_loc_groups(
+    locs: pd.DataFrame,
+    info: list[dict],
+    link_group: lib.IntArray1D,
+    remove_ambiguous_lengths: bool = True,
+) -> pd.DataFrame:
+    """Alias to _link_loc_groups, deprecated.
+
+    TODO: remove in v0.11.0."""
+    lib.deprecation_warning(
+        "Deprecation warning: This function will become private in "
+        "v0.11.0. Use _link_loc_groups instead."
+    )
+    return _link_loc_groups(locs, info, link_group, remove_ambiguous_lengths)
+
+
+def _link_loc_groups(  # noqa: C901
     locs: pd.DataFrame,
     info: list[dict],
     link_group: lib.IntArray1D,
