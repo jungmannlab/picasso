@@ -6,6 +6,7 @@ Last change: 08-MAY-2026 CEST
 
 - Localize: save and load identifications
 - Render: plot profile with adjustable bin width
+- Render GUI: added attribute 'pixelsize' in View for cleaner code
 
 ## 0.10.0
 

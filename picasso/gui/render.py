@@ -2407,7 +2407,7 @@ class G5MDialog(lib.Dialog):
         """Get the parameters for G5M."""
         dialog = G5MDialog(parent, channel)
         result = dialog.exec()
-        px = dialog.window.display_settings_dlg.pixelsize.value()
+        px = dialog.window.view.pixelsize
         if dialog.loc_prec_handling.currentIndex() == 0:  # local sigma
             loc_prec_handle = "local"
             sigma_bounds = (dialog.min_sigma.value(), dialog.max_sigma.value())
@@ -2779,7 +2779,7 @@ class TestClustererDialog(lib.Dialog):
             field.
         """
         # for converting z coordinates
-        pixelsize = self.window.display_settings_dlg.pixelsize.value()
+        pixelsize = self.window.view.pixelsize
         params["pixelsize"] = pixelsize
         clusterer_name = self.clusterer_name.currentText()
         if clusterer_name == "DBSCAN":
@@ -2808,7 +2808,7 @@ class TestClustererDialog(lib.Dialog):
         if clusterer_name != "G5M":  # G5M found centers already
             centers = clusterer.find_cluster_centers(
                 locs,
-                self.window.display_settings_dlg.pixelsize.value(),
+                self.window.view.pixelsize,
             )
         return locs, centers
 
@@ -2816,7 +2816,7 @@ class TestClustererDialog(lib.Dialog):
         """Extract clustering parameters for a given clustering method
         into a dictionary."""
         params = {}
-        pixelsize = self.window.display_settings_dlg.pixelsize.value()
+        pixelsize = self.window.view.pixelsize
         clusterer_name = self.clusterer_name.currentText()
         if clusterer_name == "DBSCAN":
             params["radius"] = (
@@ -2962,7 +2962,7 @@ class TestClustererDialog(lib.Dialog):
         the entire dataset for a given channel."""
         params = self.get_cluster_params()
         locs = self.window.view.all_locs[channel]
-        pixelsize = self.window.display_settings_dlg.pixelsize.value()
+        pixelsize = self.window.view.pixelsize
         save_centers = self.display_centers.isChecked()
         if self.clusterer_name.currentText() == "DBSCAN":
             self.window.view._dbscan(
@@ -3368,8 +3368,7 @@ class TestClustererView(QtWidgets.QLabel):
             "smooth" if self.dialog.one_pixel_blur.isChecked() else "convolve"
         )
         disp_px_size = (
-            self.dialog.window.display_settings_dlg.pixelsize.value()
-            / self.get_optimal_oversampling()
+            self.dialog.window.view.pixelsize / self.get_optimal_oversampling()
         )
         colors = lib.get_colors(len(locs))
         qimage = render.render_scene(
@@ -3401,9 +3400,7 @@ class TestClustererView(QtWidgets.QLabel):
             channel = self.dialog.channel
             all_locs = self.dialog.window.view.picked_locs(channel)[0]
             if "z" in all_locs.columns:
-                all_locs.z /= (
-                    self.dialog.window.display_settings_dlg.pixelsize.value()
-                )
+                all_locs.z /= self.dialog.window.view.pixelsize
             locs = [
                 all_locs,
                 self.locs,
@@ -3423,9 +3420,7 @@ class TestClustererView(QtWidgets.QLabel):
             channel = self.dialog.channel
             all_locs = self.dialog.window.view.picked_locs(channel)[0]
             if "z" in all_locs.columns:
-                all_locs.z /= (
-                    self.dialog.window.display_settings_dlg.pixelsize.value()
-                )
+                all_locs.z /= self.dialog.window.view.pixelsize
             locs = [
                 all_locs,
                 self.locs,
@@ -3478,7 +3473,7 @@ class DriftPlotWindow(QtWidgets.QTabWidget):
     def plot(self, drift: pd.DataFrame) -> None:
         """Plot drift in 2D or 3D depending on the columns of the input
         DataFrame."""
-        pixelsize = self.parent.window.display_settings_dlg.pixelsize.value()
+        pixelsize = self.parent.window.view.pixelsize
         postprocess.plot_drift(drift, pixelsize, self.figure)
         self.canvas.draw()
 
@@ -4066,7 +4061,7 @@ class InfoDialog(lib.Dialog):
             self.nena_result, self.lp = postprocess.nena(
                 locs, info, progress.set_value
             )
-            self.lp *= self.window.display_settings_dlg.pixelsize.value()
+            self.lp *= self.window.view.pixelsize
             self.nena_label.setText(f"{self.lp:.3} nm")
 
     def calibrate_influx(self) -> None:
@@ -4552,7 +4547,7 @@ class MaskSettingsDialog(lib.Dialog):
         self.locs = self.window.view.locs
         self.paths = self.window.view.locs_paths
         self.infos = self.window.view.infos
-        self.pixelsize = self.window.display_settings_dlg.pixelsize.value()
+        self.pixelsize = self.window.view.pixelsize
         # which channel to plot
         self.channel = self.window.view.get_channel("Mask image")
         self.cmap = self.window.display_settings_dlg.colormap.currentText()
@@ -5277,7 +5272,7 @@ class RESIDialog(lib.Dialog):
 
         # Prepare data
         # get camera pixel size
-        pixelsize = self.window.display_settings_dlg.pixelsize.value()
+        pixelsize = self.window.view.pixelsize
 
         # extract clustering parameters
         r_xy = [_.value() / pixelsize for _ in self.radius_xy]
@@ -6303,6 +6298,9 @@ class View(QtWidgets.QLabel):
         Size of picks in camera pixels; None for polygonal picks (size
         not defined). Diameter for circular picks, side length for
         square picks and width for rectangular picks.
+    pixelsize : float
+        (Property) Camera pixel size as defined in the display
+        settings dialog.
     _pixmap : QPixMap
         Pixmap currently displayed.
     _points : list
@@ -6430,7 +6428,7 @@ class View(QtWidgets.QLabel):
         pixelsize = lib.get_from_metadata(
             info,
             "Pixelsize",
-            default=self.window.display_settings_dlg.pixelsize.value(),
+            default=self.pixelsize,
         )
         self.window.display_settings_dlg.pixelsize.setValue(pixelsize)
 
@@ -6688,7 +6686,7 @@ class View(QtWidgets.QLabel):
         else:
             r_max, max_dark, ok = LinkDialog.getParams()
             # nm to pixels
-            r_max /= self.window.display_settings_dlg.pixelsize.value()
+            r_max /= self.pixelsize
             if ok:
                 status = lib.StatusDialog("Linking localizations...", self)
                 self.all_locs[channel] = postprocess.link(
@@ -6788,7 +6786,7 @@ class View(QtWidgets.QLabel):
             locs["group_input"] = self.all_locs[channel].group
         else:
             locs = self.all_locs[channel]
-        pixelsize = self.window.display_settings_dlg.pixelsize.value()
+        pixelsize = self.pixelsize
 
         locs, dbscan_info = clusterer.dbscan(
             locs,
@@ -6827,9 +6825,7 @@ class View(QtWidgets.QLabel):
 
         # get HDBSCAN parameters
         params, ok = HdbscanDialog.getParams()
-        params[
-            "cluster_eps"
-        ] /= self.window.display_settings_dlg.pixelsize.value()
+        params["cluster_eps"] /= self.pixelsize
         if ok:
             if channel == len(self.locs_paths):  # apply to all channels
                 # get saving name suffix
@@ -6910,7 +6906,7 @@ class View(QtWidgets.QLabel):
             locs["group_input"] = self.all_locs[channel].group
         else:
             locs = self.all_locs[channel]
-        pixelsize = self.window.display_settings_dlg.pixelsize.value()
+        pixelsize = self.pixelsize
 
         locs, hdbscan_info = clusterer.hdbscan(
             locs,
@@ -6948,7 +6944,7 @@ class View(QtWidgets.QLabel):
         channel = self.get_channel_all_seq("SMLM clusterer")
 
         # get clustering parameters
-        pixelsize = self.window.display_settings_dlg.pixelsize.value()
+        pixelsize = self.pixelsize
         if any(["z" in _.columns for _ in self.all_locs]):
             flag_3D = True
         else:
@@ -7029,7 +7025,7 @@ class View(QtWidgets.QLabel):
             If True, saves cluster areas. Default is False.
         """
         # for converting z coordinates
-        pixelsize = self.window.display_settings_dlg.pixelsize.value()
+        pixelsize = self.pixelsize
         status = lib.StatusDialog("Clustering localizations", self)
 
         # keep group info if already present
@@ -7396,7 +7392,7 @@ class View(QtWidgets.QLabel):
             image=image,
             viewport=self.viewport,
             points=self._points,
-            pixelsize=self.window.display_settings_dlg.pixelsize.value(),
+            pixelsize=self.pixelsize,
             color=color,
         )
 
@@ -7424,7 +7420,7 @@ class View(QtWidgets.QLabel):
                 image=image,
                 viewport=self.viewport,
                 scalebar_length_nm=d_dialog.scalebar.value(),
-                pixelsize=d_dialog.pixelsize.value(),
+                pixelsize=self.pixelsize,
                 display_length=d_dialog.scalebar_text.isChecked(),
                 color=color,
             )
@@ -7894,7 +7890,7 @@ class View(QtWidgets.QLabel):
         """
         # blur method
         disp_dlg = self.window.display_settings_dlg
-        pixelsize = disp_dlg.pixelsize.value()
+        pixelsize = self.pixelsize
         if self._pan:  # no blur when panning
             blur_method = None
         else:  # selected method
@@ -8013,7 +8009,7 @@ class View(QtWidgets.QLabel):
         ValueError
             If .yaml file is not recognized.
         """
-        pixelsize = self.window.display_settings_dlg.pixelsize.value()
+        pixelsize = self.pixelsize
         tools_dlg = self.window.tools_settings_dialog
         self._picks = []
         self._pick_shape = None
@@ -8051,7 +8047,7 @@ class View(QtWidgets.QLabel):
                     break
         if "Min. blur (cam. px)" in file:
             disp_dlg.min_blur_width.setValue(
-                file["Min. blur (cam. px)"] * disp_dlg.pixelsize.value()
+                file["Min. blur (cam. px)"] * self.pixelsize
             )
         elif "Min. blur (nm)" in file:
             disp_dlg.min_blur_width.setValue(file["Min. blur (nm)"])
@@ -8083,14 +8079,13 @@ class View(QtWidgets.QLabel):
             Non-circular picks have not been implemented yet.
         """
         oldpicks = self._picks.copy()
-        pixelsize = self.window.display_settings_dlg.pixelsize.value()
 
         # load .yaml
         with open(path, "r") as f:
             regions = yaml.full_load(f)
             self._picks = regions["Centers"]
             if "Diameter (nm)" in regions:
-                diameter = regions["Diameter (nm)"] / pixelsize  # camera pxl
+                diameter = regions["Diameter (nm)"] / self.pixelsize
             elif "Diameter" in regions:
                 diameter = regions["Diameter"]
 
@@ -8337,7 +8332,7 @@ class View(QtWidgets.QLabel):
         """Calculate and save distances of the nearest neighbors between
         localizations in channels 1 and 2. Save as localizations .hdf5
         file of channel 1."""
-        pixelsize = self.window.display_settings_dlg.pixelsize.value()
+        pixelsize = self.pixelsize
         # extract x, y and z from both channels
         if "z" in self.locs[channel1].columns:
             X1 = self.locs[channel1][["x", "y", "z"]].to_numpy()
@@ -8608,7 +8603,7 @@ class View(QtWidgets.QLabel):
         rectangle this is the width (perpendicular to the drawing
         direction). For polygon this is None (undefined)."""
         tools_dialog = self.window.tools_settings_dialog
-        pixelsize = self.window.display_settings_dlg.pixelsize.value()
+        pixelsize = self.pixelsize
         if self._pick_shape == "Circle":
             pick_size = tools_dialog.pick_diameter.value() / pixelsize
         elif self._pick_shape == "Square":
@@ -8941,7 +8936,7 @@ class View(QtWidgets.QLabel):
         removelist = []
         saved_locs = []
         clustered_locs = []
-        pixelsize = self.window.display_settings_dlg.pixelsize.value()
+        pixelsize = self.pixelsize
         if channel is not None:
             if channel is len(self.locs_paths):
                 all_picked_locs = [
@@ -9146,7 +9141,7 @@ class View(QtWidgets.QLabel):
             Areas of all picks. For circular and square picks all values
             are the same.
         """
-        px = self.window.display_settings_dlg.pixelsize.value()
+        px = self.pixelsize
         areas = lib.pick_areas(self._picks, self._pick_shape, self._pick_size)
         areas *= (px * 1e-3) ** 2  # convert to um^2
         return areas
@@ -9179,7 +9174,7 @@ class View(QtWidgets.QLabel):
             return
 
         self.window.tools_settings_dialog.pick_diameter.setValue(
-            box * self.window.display_settings_dlg.pixelsize.value()
+            box * self.pixelsize
         )
         self.add_picks(picks)
 
@@ -9203,7 +9198,6 @@ class View(QtWidgets.QLabel):
         specified channels. Assumes that only one rectangular pick is
         selected."""
         self.profiles = []
-        pixelsize = self.window.display_settings_dlg.pixelsize.value()
         pick_size = (
             self._pick_size / 2
             if self._pick_shape == "Circle"
@@ -9218,7 +9212,7 @@ class View(QtWidgets.QLabel):
                 pick_size=pick_size,
             )[0]
             self.profiles.append(
-                picked_locs["y_pick_rot"].to_numpy() * pixelsize
+                picked_locs["y_pick_rot"].to_numpy() * self.pixelsize
             )
 
         # plot profiles
@@ -9773,9 +9767,8 @@ class View(QtWidgets.QLabel):
         pick_info : dict
             Dictionary to update with shape-specific info.
         """
-        pixelsize = self.window.display_settings_dlg.pixelsize.value()
         picksize_nm = (
-            self._pick_size * pixelsize
+            self._pick_size * self.pixelsize
             if self._pick_size is not None
             else None
         )
@@ -10031,7 +10024,7 @@ class View(QtWidgets.QLabel):
         if len(self._picks) == 0:
             return
         picks = {}
-        pixelsize = self.window.display_settings_dlg.pixelsize.value()
+        pixelsize = self.pixelsize
         if self._pick_shape == "Circle":
             d = self._pick_size * pixelsize
             picks["Diameter (nm)"] = float(d)
@@ -10232,7 +10225,7 @@ class View(QtWidgets.QLabel):
             self.window.display_settings_dlg.optimal_scalebar_check.isChecked()
         )
         if force or optimal_scalebar_checked:
-            pixelsize = self.window.display_settings_dlg.pixelsize.value()
+            pixelsize = self.pixelsize
             width = render.viewport_width(self.viewport)
             scalebar = render.optimal_scalebar_length(pixelsize, width)
             if silent:
@@ -10298,7 +10291,7 @@ class View(QtWidgets.QLabel):
         if channel is not None:
             locs = self.all_locs[channel]
             info = self.infos[channel]
-            pixelsize = self.window.display_settings_dlg.pixelsize.value()
+            pixelsize = self.pixelsize
 
             # get parameters for AIM
             params, ok = AIMDialog.getParams(self.window)
@@ -10589,7 +10582,7 @@ class View(QtWidgets.QLabel):
             if remove_group:
                 self.all_locs[0].drop(columns="group", inplace=True)
             return
-        spacing /= self.window.display_settings_dlg.pixelsize.value()
+        spacing /= self.pixelsize
 
         self.all_locs[0], self.infos[0][0] = lib.unfold_localizations_square(
             locs=self.all_locs[0],
@@ -10870,6 +10863,13 @@ class View(QtWidgets.QLabel):
             scale = 1.008 ** (-event.angleDelta().y())
             position = self.map_to_movie(event.position())
             self.zoom(scale, cursor_position=position)
+
+    @property
+    def pixelsize(self) -> float:
+        if hasattr(self.window, "display_settings_dlg"):
+            return self.window.display_settings_dlg.pixelsize.value()
+        else:
+            return 100
 
 
 class Window(QtWidgets.QMainWindow):
@@ -11583,7 +11583,7 @@ class Window(QtWidgets.QMainWindow):
                 image=qimage,
                 viewport=kwargs["viewport"],
                 scalebar_length_nm=self.display_settings_dlg.scalebar.value(),
-                pixelsize=self.display_settings_dlg.pixelsize.value(),
+                pixelsize=self.view.pixelsize,
             )
             new_path, ext = os.path.splitext(path)
             new_path = new_path + "_scalebar" + ext
@@ -11708,12 +11708,12 @@ class Window(QtWidgets.QMainWindow):
             n_channels = len(self.view.locs_paths)
             viewport = self.view.viewport
             oversampling = (
-                self.display_settings_dlg.pixelsize.value()
+                self.view.pixelsize
                 / self.display_settings_dlg.disp_px_size.value()
             )
             maximum = self.display_settings_dlg.maximum.value()
 
-            pixelsize = self.display_settings_dlg.pixelsize.value()
+            pixelsize = self.view.pixelsize
 
             ims_fields = {
                 "ExtMin0": 0,
@@ -11900,7 +11900,7 @@ class Window(QtWidgets.QMainWindow):
                     if var_1 == "z":
                         var_2 = "z"
                         var_1 = input[2]
-                    pixelsize = self.display_settings_dlg.pixelsize.value()
+                    pixelsize = self.view.pixelsize
                     templocs = self.view.locs[channel][var_1].copy()
                     movie_height, movie_width = self.view.movie_size()
                     if var_1 == "x":
@@ -12372,10 +12372,7 @@ class Window(QtWidgets.QMainWindow):
         except AttributeError:
             pass
         try:
-            lp = (
-                self.view.median_lp
-                * self.display_settings_dlg.pixelsize.value()
-            )
+            lp = self.view.median_lp * self.view.pixelsize
             self.info_dialog.fit_precision.setText(f"{lp:.2f} nm")
         except AttributeError:
             pass

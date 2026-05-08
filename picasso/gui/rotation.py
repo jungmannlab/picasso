@@ -529,9 +529,7 @@ class AnimationDialog(lib.Dialog):
         if path:
             disp_dlg = self.window.display_settings_dlg
             data_dlg = self.window.window.dataset_dialog
-            pixelsize = (
-                self.window.window.display_settings_dlg.pixelsize.value()
-            )
+            pixelsize = self.window.window.view.pixelsize
             locs, infos = self.window.view_rot._prepare_locs_for_rendering()
             n_frames = int(
                 self.fps.value() * sum(d.value() for d in self.durations)
@@ -658,7 +656,7 @@ class ViewRotation(QtWidgets.QLabel):
         if update_window:
             fast_render = True
             # get pixelsize
-            self.pixelsize = w.display_settings_dlg.pixelsize.value()
+            self.pixelsize = w.view.pixelsize
             # update blur and colormap
             b = w.display_settings_dlg.blur_buttongroup.checkedId()
             color = w.display_settings_dlg.colormap.currentText()
@@ -893,7 +891,7 @@ class ViewRotation(QtWidgets.QLabel):
                 image=image,
                 viewport=self.viewport,
                 scalebar_length_nm=d_dialog.scalebar.value(),
-                pixelsize=self.window.window.display_settings_dlg.pixelsize.value(),
+                pixelsize=self.window.window.view.pixelsize,
                 display_length=d_dialog.scalebar_text.isChecked(),
                 color=color,
             )
@@ -994,7 +992,7 @@ class ViewRotation(QtWidgets.QLabel):
             image=image,
             viewport=self.viewport,
             points=self._points,
-            pixelsize=self.window.window.display_settings_dlg.pixelsize.value(),
+            pixelsize=self.window.window.view.pixelsize,
             color=color,
         )
 
@@ -1384,7 +1382,7 @@ class ViewRotation(QtWidgets.QLabel):
         colors = [
             _.currentText() for _ in self.window.dataset_dialog.colorselection
         ]
-        pixelsize = d.window.window.display_settings_dlg.pixelsize.value()
+        pixelsize = self.window.window.view.pixelsize
         rot_angles = [
             int(self.angx * 180 / np.pi),
             int(self.angy * 180 / np.pi),
@@ -1484,7 +1482,7 @@ class ViewRotation(QtWidgets.QLabel):
             width.
         """
         disp_dlg = self.window.display_settings_dlg
-        pixelsize = self.window.window.display_settings_dlg.pixelsize.value()
+        pixelsize = self.window.window.view.pixelsize
 
         # blur method
         blur_button = disp_dlg.blur_buttongroup.checkedButton()
@@ -1778,7 +1776,7 @@ class RotationWindow(QtWidgets.QMainWindow):
             angx = int(self.view_rot.angx * 180 / np.pi)
             angy = int(self.view_rot.angy * 180 / np.pi)
             angz = int(self.view_rot.angz * 180 / np.pi)
-            pixelsize = self.window.display_settings_dlg.pixelsize.value()
+            pixelsize = self.window.window.view.pixelsize
             if self.view_rot.pick_shape in ["Circle", "Square"]:
                 x, y = self.view_rot.pick
                 pick = [float(x), float(y)]
