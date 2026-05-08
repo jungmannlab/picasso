@@ -56,6 +56,7 @@ Last change: 08-MAY-2026 CEST
 #### SPINNA
 - Two new fitting methods for fast fitting instead of the brute force search, see [documentation](https://picassosr.readthedocs.io/en/latest/spinna.html#fitting)
 - User-defined threshold for the binary mask
+- Loading new structures in the Simulate tab without changing targets does not reset the window
 
 #### *Other improvements:*
 - Picasso: Filter supports .csv export (not only hdf5)
