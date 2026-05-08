@@ -9223,7 +9223,7 @@ class View(QtWidgets.QLabel):
 
         # plot profiles
         self.canvas = lib.GenericPlotWindow("Pick profile", "render")
-        self.canvas.resize(700, 500)
+        self.canvas.resize(800, 500)
         self.canvas.figure.clear()
 
         ax = self.canvas.figure.add_subplot(111)
@@ -9234,20 +9234,40 @@ class View(QtWidgets.QLabel):
         colors = [
             [_.red() / 255, _.green() / 255, _.blue() / 255] for _ in colors
         ]
-        bins = lib.calculate_optimal_bins(
-            np.concatenate(self.profiles), max_n_bins=1000
-        )
+        concat = np.concatenate(self.profiles)
+        bin_edges = lib.calculate_optimal_bins(concat, max_n_bins=1000)
+        initial_bin_width = float(bin_edges[1] - bin_edges[0])
+        data_lo, data_hi = float(concat.min()), float(concat.max())
 
-        for i, channel in enumerate(channels):
-            ax.hist(
-                self.profiles[i],
-                bins=bins,
-                density=False,
-                facecolor=colors[channel],
-                alpha=0.5,
-            )
-        ax.set_xlabel("Position along pick (nm)")
-        ax.set_ylabel("Counts")
+        def redraw(bin_width_nm: float) -> None:
+            edges = np.arange(data_lo, data_hi + bin_width_nm, bin_width_nm)
+            if edges.size < 2:
+                return
+            ax.clear()
+            for i, channel in enumerate(channels):
+                ax.hist(
+                    self.profiles[i],
+                    bins=edges,
+                    density=False,
+                    facecolor=colors[channel],
+                    alpha=0.5,
+                )
+            ax.set_xlabel("Position along pick (nm)")
+            ax.set_ylabel("Counts")
+            self.canvas.canvas.draw_idle()
+
+        redraw(initial_bin_width)
+
+        bin_spin = QtWidgets.QDoubleSpinBox()
+        bin_spin.setDecimals(2)
+        bin_spin.setRange(max(0.1, concat.min()), concat.max())
+        bin_spin.setSingleStep(1)
+        bin_spin.setValue(initial_bin_width)
+        bin_spin.setSuffix(" nm")
+        bin_spin.setKeyboardTracking(False)
+        self.canvas.toolbar.addWidget(QtWidgets.QLabel("Bin width:"))
+        self.canvas.toolbar.addWidget(bin_spin)
+        bin_spin.valueChanged.connect(redraw)
 
         export_profile = QtWidgets.QPushButton("Export (*.csv)")
         self.canvas.toolbar.addWidget(export_profile)

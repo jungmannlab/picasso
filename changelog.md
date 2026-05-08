@@ -5,6 +5,7 @@ Last change: 08-MAY-2026 CEST
 ## 0.10.1
 
 - Localize: save and load identifications
+- Render: plot profile with adjustable bin width
 
 ## 0.10.0
 
