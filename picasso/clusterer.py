@@ -871,7 +871,7 @@ def _cluster_center(
         # lpz = std_z
         volume = (
             np.power((std_x + std_y + std_z / pixelsize) / 3 * 2, 3) * 4.18879
-        )
+        )  # assume radius = 2 * std_xyz
         try:
             X = np.stack(
                 (grouplocs.x, grouplocs.y, grouplocs.z / pixelsize),
@@ -905,6 +905,7 @@ def _cluster_center(
             convexhull,
         ]
     else:
+        # assume radius = 2 * std_xyz
         area = np.power(std_x + std_y, 2) * np.pi
         try:
             X = np.stack((grouplocs.x, grouplocs.y), axis=0).T
