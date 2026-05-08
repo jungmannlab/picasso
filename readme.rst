@@ -111,12 +111,18 @@ Contributing
 
 If you have a feature request or a bug report, please post it as an issue on the GitHub issue tracker. If you want to contribute, put a PR for it. You can find more guidelines for contributing `here <https://github.com/jungmannlab/picasso/blob/master/CONTRIBUTING.rst>`__. We will gladly guide you through the codebase and credit you accordingly. Additionally, you can check out the ``Projects``-page on GitHub.  You can also contact us via picasso@jungmannlab.org.
 
+.. SYNC-START: contributions
+
 Contributions & Copyright
 -------------------------
 
 | Contributors: Joerg Schnitzbauer, Maximilian Strauss, Rafal Kowalewski, Adrian Przybylski, Andrey Aristov, Hiroshi Sasaki, Alexander Auer, Johanna Rahm
 | Copyright (c) 2015-2025 Jungmann Lab, Max Planck Institute of Biochemistry
 | Copyright (c) 2020-2021 Maximilian Strauss
+
+.. SYNC-END: contributions
+
+.. SYNC-START: citing
 
 Citing Picasso
 --------------
@@ -135,7 +141,7 @@ If you use Picasso in your research, please cite our Nature Protocols publicatio
 - Theoretical axial localization precision (Gauss LQ and MLE). DOI: `10.1038/s41467-026-70198-5 <https://doi.org/10.1038/s41467-026-70198-5>`__
 - MLE fitting. DOI: `10.1038/nmeth.1449 <https://doi.org/10.1038/nmeth.1449>`__
 - GPU fitting (LQ). DOI: `10.1038/s41598-017-15313-9 <https://doi.org/10.1038/s41598-017-15313-9>`__. License can be found `here <https://github.com/jungmannlab/picasso/tree/master/picasso/ext/pygpufit>`__/
-- RCC undrifting: DOI: `10.1364/OE.22.015982 <https://doi.org/10.1364/OE.22.015982>`__ 
+- RCC undrifting: DOI: `10.1364/OE.22.015982 <https://doi.org/10.1364/OE.22.015982>`__
 - AIM undrifting. DOI: `10.1126/sciadv.adm776 <https://www.science.org/doi/10.1126/sciadv.adm7765>`__
 - SMLM clusterer. DOIs: `10.1038/s41467-021-22606-1 <https://doi.org/10.1038/s41467-021-22606-1>`__ and `10.1038/s41586-023-05925-9 <https://doi.org/10.1038/s41586-023-05925-9>`__
 - DBSCAN: Ester, et al. Inkdd, 1996. (Vol. 96, No. 34, pp. 226-231).
@@ -146,6 +152,10 @@ If you use Picasso in your research, please cite our Nature Protocols publicatio
 - SPINNA. DOI: `10.1038/s41467-025-59500-z <https://doi.org/10.1038/s41467-025-59500-z>`__
 - SPINNA for LE fitting. DOI: `10.1038/s41592-024-02242-5 <https://doi.org/10.1038/s41592-024-02242-5>`__
 - G5M. DOI: `10.1038/s41467-026-70198-5 <https://doi.org/10.1038/s41467-026-70198-5>`__
+
+.. SYNC-END: citing
+
+.. SYNC-START: credits
 
 Credits
 -------
@@ -158,3 +168,5 @@ Credits
 -  Average icon based on “Layers" by Creative Stall from the Noun Project
 -  Server icon based on “Database" by Nimal Raj from the Noun Project
 -  SPINNA icon based on "Spinner" by Viktor Ostrovsky from the Noun Project
+
+.. SYNC-END: credits
