@@ -6625,12 +6625,19 @@ class View(QtWidgets.QLabel):
         """Align channels by RCC or from picked localizations."""
         status = lib.StatusDialog("Aligning channels..", self)
         if len(self._picks) > 0:  # shift from picked
+            if self._pick_shape == "Circle":
+                index_blocks = [
+                    self.get_index_blocks(c) for c in range(len(self.all_locs))
+                ]
+            else:
+                index_blocks = None
             self.all_locs = postprocess.align_from_picked(
                 self.all_locs,
                 self.infos,
                 picks=self._picks,
                 pick_shape=self._pick_shape,
                 pick_size=self._pick_size,
+                index_blocks=index_blocks,
             )
         else:  # align using whole images
             self.all_locs = postprocess.align_rcc(self.all_locs, self.infos)
@@ -6651,12 +6658,17 @@ class View(QtWidgets.QLabel):
         progress = lib.ProgressDialog(
             "Combining localizations in picks", 0, len(self._picks), self
         )
+        if self._pick_shape == "Circle":
+            index_blocks = self.get_index_blocks(channel)
+        else:
+            index_blocks = None
         self.all_locs[channel] = postprocess.combine_locs_in_picks(
             self.all_locs[channel],
             self.infos[channel],
             picks=self._picks,
             pick_shape=self._pick_shape,
             pick_size=self._pick_size,
+            index_blocks=index_blocks,
             progress_callback=progress.set_value,
         )
         progress.close()
@@ -10391,12 +10403,17 @@ class View(QtWidgets.QLabel):
                 if self._pick_shape == "Circle"
                 else self._pick_size
             )
+            if self._pick_shape == "Circle":
+                index_blocks = self.get_index_blocks(channel)
+            else:
+                index_blocks = None
             undrifted_locs, new_info, drift = (
                 postprocess.undrift_from_fiducials(
                     locs=self.all_locs[channel],
                     info=self.infos[channel],
                     picks=self._picks,
                     pick_size=pick_size,
+                    index_blocks=index_blocks,
                 )
             )
             self.all_locs[channel] = undrifted_locs
@@ -10421,6 +10438,10 @@ class View(QtWidgets.QLabel):
                 if self._pick_shape == "Circle"
                 else self._pick_size
             )
+            if self._pick_shape == "Circle":
+                index_blocks = self.get_index_blocks(channel)
+            else:
+                index_blocks = None
             undrifted_locs, new_info, drift = (
                 postprocess.undrift_from_fiducials(
                     locs=self.all_locs[channel],
@@ -10428,6 +10449,7 @@ class View(QtWidgets.QLabel):
                     picks=self._picks,
                     pick_size=pick_size,
                     undrift_z=False,
+                    index_blocks=index_blocks,
                 )
             )
             self.all_locs[channel] = undrifted_locs

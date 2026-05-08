@@ -1993,6 +1993,7 @@ def combine_locs_in_picks(
     picks: list[tuple],
     pick_shape: Literal["Circle", "Rectangle", "Polygon", "Square"],
     pick_size: float | None = None,
+    index_blocks: tuple | None = None,
     progress_callback: (
         Callable[[int], None] | Literal["console"] | None
     ) = None,
@@ -2014,6 +2015,12 @@ def combine_locs_in_picks(
         for rectangular picks, the size is the width; for square picks,
         the size is the side length. None for polygonal picks (size not
         defined).
+    index_blocks : tuple or None, optional
+        Precomputed spatial index over ``locs`` as returned by
+        ``get_index_blocks`` (built with block size equal to the pick
+        radius). When provided, used to skip re-indexing inside circular
+        ``picked_locs``. Ignored for non-circular pick shapes. Default
+        is None (index is computed on demand).
     progress_callback : callable, 'console' or None, optional
         Function to display progress (takes in an integer, maximum is
         the number of picks). If 'console', progress is displayed in the
@@ -2043,6 +2050,7 @@ def combine_locs_in_picks(
         picks=picks,
         pick_shape=pick_shape,
         pick_size=pick_size,
+        index_blocks=index_blocks,
     )
     # use very large values for linking localizations
     r_max = 2 * max(
@@ -2861,6 +2869,7 @@ def undrift_from_fiducials(
     picks: list[tuple] | None = None,
     pick_size: float | None = None,
     undrift_z: bool = True,
+    index_blocks: tuple | None = None,
 ) -> tuple[pd.DataFrame, list[dict], pd.DataFrame]:
     """Undrift localizations based on picked regions (fiducial markers).
 
@@ -2881,6 +2890,13 @@ def undrift_from_fiducials(
     undrift_z : bool, optional
         If True, also undrift the z coordinate if it exists in the
         localizations. Default is True.
+    index_blocks : tuple or None, optional
+        Precomputed spatial index over ``locs`` as returned by
+        ``get_index_blocks`` (built with block size equal to
+        ``pick_size``). When provided, used to skip re-indexing inside
+        circular ``picked_locs``. Ignored when ``picks`` is None
+        (auto-detected fiducials use a radius that may not match the
+        precomputed index). Default is None.
 
     Returns
     -------
@@ -2903,6 +2919,8 @@ def undrift_from_fiducials(
         # auto-detect fiducials
         picks, box = imageprocess.find_fiducials(locs, info)
         pick_radius = box / 2
+        # passed-in index_blocks was built for a different radius; drop
+        index_blocks = None
     else:
         # user-provided list of pick coordinates
         if pick_size is None:
@@ -2923,6 +2941,7 @@ def undrift_from_fiducials(
         "Circle",
         pick_size=pick_radius,
         add_group=False,
+        index_blocks=index_blocks,
     )
 
     # calculate drift
@@ -3333,6 +3352,7 @@ def align_from_picked(
     pick_shape: Literal["Circle", "Rectangle", "Polygon", "Square"],
     pick_size: float | None = None,
     return_shifts: bool = False,
+    index_blocks: list[tuple | None] | None = None,
 ):
     """Align picked localizations from multiple channels using picked
     localizations.
@@ -3357,6 +3377,13 @@ def align_from_picked(
     return_shifts : bool, optional
         If True, also returns the calculated shifts for each channel.
         Default is False.
+    index_blocks : list of tuple or None, optional
+        Per-channel precomputed spatial indices (one entry per dataset
+        in ``all_locs``, aligned by position) as returned by
+        ``get_index_blocks``. Each entry may be ``None`` to recompute
+        for that channel. Used to skip re-indexing inside circular
+        ``picked_locs``. Ignored for non-circular pick shapes. Default
+        is None (all channels recompute on demand).
 
     Returns
     -------
@@ -3379,9 +3406,12 @@ def align_from_picked(
         ), "pick_size must be provided when picks is a list of coordinates"
     if pick_shape == "Circle":
         pick_size = pick_size / 2  # convert diameter to radius
+    ib_list = (
+        index_blocks if index_blocks is not None else [None] * len(all_locs)
+    )
     pl = [
-        picked_locs(locs, i, picks, pick_shape, pick_size)
-        for locs, i in zip(all_locs, infos)
+        picked_locs(locs, i, picks, pick_shape, pick_size, index_blocks=ib)
+        for locs, i, ib in zip(all_locs, infos, ib_list)
     ]
     dy = _shifts_from_picked_coordinate(pl, coordinate="y")
     dx = _shifts_from_picked_coordinate(pl, coordinate="x")
