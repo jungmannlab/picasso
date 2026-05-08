@@ -10527,7 +10527,7 @@ class View(QtWidgets.QLabel):
                 self,
                 "Load drift file",
                 filter="*.txt",
-                directory=self.window.pwd,
+                directory=self.locs_paths[channel],
             )
             if path:
                 drift = io.load_drift(path)

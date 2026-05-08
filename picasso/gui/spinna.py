@@ -2992,30 +2992,34 @@ class SimulationsTab(lib.Dialog):
         )
         if path:
             self.window.pwd = os.path.dirname(path)
-            self.structures, self.targets = spinna.load_structures(path)
+            self.structures, targets = spinna.load_structures(path)
+            # reset exp data-related widgets if new/different targets
+            # are present
+            if set(targets) != set(self.targets):
+                self.targets = targets
+                self.exp_data = {}
+                self.exp_data_paths = {}
+                self.masks = {}
+                self.mask_infos = {}
+                self.mask_paths = {}
+                self.nnd_hist_data_exp = []
+                self.load_densities_widgets()
+                self.load_label_unc_widgets()
+                self.load_le_widgets()
+                self.load_exp_data_widgets()
+                self.load_masks_widgets()
+                self.nn_plot_settings_dialog.update_neighbors_widgets()
 
             self.structures_path = path
-            self.exp_data = {}
-            self.exp_data_paths = {}
-            self.masks = {}
-            self.mask_infos = {}
-            self.mask_paths = {}
             self.N_structures_fit = {}
             self.n_total = {}
-            self.nnd_hist_data_exp = []
             self.nnd_hist_data_sim = []
             self.granularity = None
             self.n_sim_fit = None
             self.mixer = None
 
-            self.load_densities_widgets()
-            self.load_label_unc_widgets()
-            self.load_le_widgets()
-            self.load_exp_data_widgets()
-            self.load_masks_widgets()
             self.load_single_sim_n_str_widgets()
             self.settings_dialog.update_neighbors_widgets()
-            self.nn_plot_settings_dialog.update_neighbors_widgets()
             self.load_structures_button.setStyleSheet(
                 "background-color : lightgreen"
             )
