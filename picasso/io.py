@@ -2162,6 +2162,73 @@ def load_locs(
     return locs, info
 
 
+def save_identifications(
+    path: str, identifications: pd.DataFrame, info: list[dict]
+) -> None:
+    """Save spot identifications to an HDF5 file.
+
+    Parameters
+    ----------
+    path : str
+        The path where the identifications will be saved.
+    identifications : pd.DataFrame
+        The identifications to be saved (typically with columns
+        ``frame``, ``x``, ``y``, ``net_gradient``, ``n_id``).
+    info : list of dict
+        Metadata information to be saved alongside the identifications.
+    """
+    # cannot use df.to_hdf for backward compatibility with older Picasso
+    rec_ids = identifications.to_records(index=False)
+    with h5py.File(path, "w") as ids_file:
+        ids_file.create_dataset("identifications", data=rec_ids)
+    base, ext = os.path.splitext(path)
+    info_path = base + ".yaml"
+    save_info(info_path, info)
+
+
+def load_identifications(
+    path: str, qt_parent: QtWidgets.QWidget | None = None
+) -> tuple[pd.DataFrame, list[dict]]:
+    """Load spot identifications from an HDF5 file.
+
+    Parameters
+    ----------
+    path : str
+        The path to the HDF5 file containing the identifications.
+    qt_parent : QWidget or None, optional
+        Parent widget for any Qt-related operations, default is None.
+
+    Returns
+    -------
+    identifications : pd.DataFrame
+        The identifications loaded from the file.
+    info : list[dict]
+        Metadata information loaded from the accompanying YAML file.
+
+    Raises
+    ------
+    KeyError
+        If the "identifications" dataset is not found in the HDF5 file.
+    """
+    try:
+        identifications = pd.read_hdf(path, key="identifications")
+    except KeyError as e:
+        print(
+            f"\nAn error occured. File: {path} does not contain an "
+            "'identifications' dataset."
+        )
+        if qt_parent is not None:
+            QtWidgets.QMessageBox.critical(
+                qt_parent,
+                "An error occured",
+                f"File: {path} does not contain an 'identifications' "
+                "dataset.",
+            )
+        raise KeyError(e)
+    info = load_info(path, qt_parent=qt_parent)
+    return identifications, info
+
+
 def load_clusters(path: str) -> pd.DataFrame:
     """Load cluster data from an HDF5 file.
 

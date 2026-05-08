@@ -1,6 +1,10 @@
 # Changelog
 
-Last change: 07-MAY-2026 CEST
+Last change: 08-MAY-2026 CEST
+
+## 0.10.1
+
+- Localize: save and load identifications
 
 ## 0.10.0
 
