@@ -1,6 +1,6 @@
 # Changelog
 
-Last change: 08-MAY-2026 CEST
+Last change: 09-MAY-2026 CEST
 
 ## 0.10.1
 
@@ -8,6 +8,7 @@ Last change: 08-MAY-2026 CEST
 - Render: plot profile with adjustable bin width
 - Render GUI: added attribute 'pixelsize' in View for cleaner code
 - Render GUI: use precomputed index blocks for faster circular picked locs calculation
+- Render: Animation dialog allows unlimited positions
 
 ## 0.10.0
 

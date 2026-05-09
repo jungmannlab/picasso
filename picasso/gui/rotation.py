@@ -285,7 +285,9 @@ class DisplaySettingsRotationDialog(lib.Dialog):
 class AnimationDialog(lib.Dialog):
     """Dialog to prepare 3D animations.
 
-    ...
+    Position rows live in a scrollable area so the sequence length is
+    unbounded. Each call to ``add_position`` instantiates a new row of
+    widgets; ``delete_position`` destroys the last one.
 
     Attributes
     ----------
@@ -293,32 +295,26 @@ class AnimationDialog(lib.Dialog):
         Click to add the current view to the animation sequence.
     build : QPushButton
         Click to create an animation.
-    count : int
-        Counts how many positions are currently saved.
     current_pos : QLabel
         Shows rotation angles around x, y and z axes in degrees.
     delete : QPushButton
         Click to delete the last saved position.
-    durations : list
-        Contains QDoubleSpinBoxes with durations (seconds) of each
-        step in the animation sequence.
     fps : QSpinBox
         Contains frames per second used in the animation.
-    layout : QGridLayout
-        Widget storing positions of other widgets in the Dialog.
     positions : list
         Contains all positions in the animation sequence; each includes
         3 rotations angles and viewport.
-    positions_labels : list
-        Displays rotation angles for each saved position in the
-        animation sequence.
-    show_positions : bool
-        Contains buttons to display a given position that has been
-        saved in the animation sequence.
+    rows : list of dict
+        One entry per saved position, holding the row's widgets:
+        ``p_label``, ``angle_label``, ``show_btn``, ``d_label``,
+        ``duration``. ``d_label`` and ``duration`` are ``None`` for
+        the first row (no transition into it).
+    rows_layout : QGridLayout
+        Layout inside the scroll area that holds the position rows.
     stay : QPushButton
         Click to copy the exact same position (so that locs do not
         move).
-    rot_speed : QDoublesSpinBox
+    rot_speed : QDoubleSpinBox
         Contains the default rotation speed calculated when adding a
         position with different angles.
     window : QMainWindow
@@ -336,70 +332,77 @@ class AnimationDialog(lib.Dialog):
         self.window = window
         self.setWindowTitle("Build an animation")
         self.setModal(False)
-        self.layout = QtWidgets.QGridLayout()
-        self.setLayout(self.layout)
+        self.resize(600, 500)
+
         self.positions = []
-        self.positions_labels = []
-        self.durations = []
-        self.show_positions = []
-        self.count = 0
+        self.rows = []
+
+        main_layout = QtWidgets.QVBoxLayout(self)
+
+        # Header: current position
+        header = QtWidgets.QHBoxLayout()
         cp_label = QtWidgets.QLabel("Current position:")
         cp_label.setToolTip("Current rotation angles in x, y, z (deg).")
-        self.layout.addWidget(cp_label, 0, 0)
+        header.addWidget(cp_label)
         angx = np.round(self.window.view_rot.angx * 180 / np.pi, 1)
         angy = np.round(self.window.view_rot.angy * 180 / np.pi, 1)
         angz = np.round(self.window.view_rot.angz * 180 / np.pi, 1)
         self.current_pos = QtWidgets.QLabel(
             "{}, {}, {}".format(angx, angy, angz)
         )
-        self.layout.addWidget(self.current_pos, 0, 1)
+        header.addWidget(self.current_pos)
+        header.addStretch(1)
+        main_layout.addLayout(header)
 
-        for i in range(1, 11):
-            p_label = QtWidgets.QLabel(f"- Position {i}: ")
-            p_label.setToolTip(
-                f"Rotation angles in x, y, z (deg) for position {i}."
-            )
-            self.layout.addWidget(p_label, i, 0)
+        # Scroll area holding the position rows
+        scroll_area = QtWidgets.QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setFrameShape(QtWidgets.QFrame.Shape.NoFrame)
+        rows_container = QtWidgets.QWidget()
+        self.rows_layout = QtWidgets.QGridLayout(rows_container)
+        self.rows_layout.setAlignment(QtCore.Qt.AlignmentFlag.AlignTop)
+        # Reserve the duration columns' widths up front so the "Show position"
+        # button keeps both its width and its horizontal position when those
+        # widgets first appear (with the second position). Slack from the
+        # dialog width is absorbed by the angle-label column instead of
+        # leaving an empty trailing column on the right.
+        template_d_label = QtWidgets.QLabel("Duration (s): ")
+        template_duration = QtWidgets.QDoubleSpinBox()
+        template_duration.setRange(0.01, 10)
+        template_duration.setDecimals(2)
+        self.rows_layout.setColumnMinimumWidth(
+            3, template_d_label.sizeHint().width()
+        )
+        self.rows_layout.setColumnMinimumWidth(
+            4, template_duration.sizeHint().width()
+        )
+        template_d_label.deleteLater()
+        template_duration.deleteLater()
+        self.rows_layout.setColumnStretch(1, 1)
+        scroll_area.setWidget(rows_container)
+        main_layout.addWidget(scroll_area, 1)
 
-            show_position = QtWidgets.QPushButton("Show position")
-            show_position.setToolTip("Move to this position.")
-            show_position.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
-            show_position.clicked.connect(
-                partial(self.retrieve_position, i - 1)
-            )
-            self.show_positions.append(show_position)
-            self.layout.addWidget(show_position, i, 2)
-            if i > 1:
-                d_label = QtWidgets.QLabel("Duration (s): ")
-                d_label.setToolTip(
-                    "Duration of the transition to this position."
-                )
-                self.layout.addWidget(d_label, i, 3)
-                duration = QtWidgets.QDoubleSpinBox()
-                duration.setRange(0.01, 10)
-                duration.setValue(1)
-                duration.setDecimals(2)
-                self.durations.append(duration)
-                self.layout.addWidget(duration, i, 4)
+        # Controls panel (fixed at the bottom)
+        controls = QtWidgets.QGridLayout()
 
         fps_label = QtWidgets.QLabel("FPS: ")
         fps_label.setToolTip("Frames per second used in the animation.")
-        self.layout.addWidget(fps_label, 11, 0)
+        controls.addWidget(fps_label, 0, 0)
         self.fps = QtWidgets.QSpinBox()
         self.fps.setValue(30)
         self.fps.setRange(1, 60)
-        self.layout.addWidget(self.fps, 12, 0)
+        controls.addWidget(self.fps, 1, 0)
 
         rs_label = QtWidgets.QLabel("Rotation speed (deg/s): ")
         rs_label.setToolTip(
             "Speed of rotation between positions in the animation."
         )
-        self.layout.addWidget(rs_label, 11, 1)
+        controls.addWidget(rs_label, 0, 1)
         self.rot_speed = QtWidgets.QDoubleSpinBox()
         self.rot_speed.setValue(90)
         self.rot_speed.setDecimals(1)
         self.rot_speed.setRange(0.1, 1000)
-        self.layout.addWidget(self.rot_speed, 12, 1)
+        controls.addWidget(self.rot_speed, 1, 1)
 
         self.add = QtWidgets.QPushButton("Add this position")
         self.add.setToolTip(
@@ -407,7 +410,7 @@ class AnimationDialog(lib.Dialog):
         )
         self.add.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
         self.add.clicked.connect(self.add_position)
-        self.layout.addWidget(self.add, 11, 2)
+        controls.addWidget(self.add, 0, 2)
 
         self.delete = QtWidgets.QPushButton("Remove last position")
         self.delete.setToolTip(
@@ -415,19 +418,21 @@ class AnimationDialog(lib.Dialog):
         )
         self.delete.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
         self.delete.clicked.connect(self.delete_position)
-        self.layout.addWidget(self.delete, 12, 2)
+        controls.addWidget(self.delete, 1, 2)
 
         self.build = QtWidgets.QPushButton("Build\nanimation")
         self.build.setToolTip("Create the animation as an .mp4 file.")
         self.build.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
         self.build.clicked.connect(self.build_animation)
-        self.layout.addWidget(self.build, 11, 3)
+        controls.addWidget(self.build, 0, 3)
 
         self.stay = QtWidgets.QPushButton("Stay in the\n position")
         self.stay.setToolTip("Add the current position again (no movement).")
         self.stay.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
         self.stay.clicked.connect(partial(self.add_position, True))
-        self.layout.addWidget(self.stay, 12, 3)
+        controls.addWidget(self.stay, 1, 3)
+
+        main_layout.addLayout(controls)
 
     def add_position(self, freeze: bool = False) -> None:
         """Add a new position to the animation sequence.
@@ -438,19 +443,15 @@ class AnimationDialog(lib.Dialog):
             True when the new position is the same as the last one,
             i.e., when self.stay is clicked.
         """
-        # more than 10 positions are not allowed
-        if self.count == 10:
-            raise ValueError("More positions are not supported")
-
         # check that the viewport or angle(s) have changed
-        if not freeze:
-            if self.count > 0:
-                cond1 = self.window.view_rot.angx == self.positions[-1][0]
-                cond2 = self.window.view_rot.angy == self.positions[-1][1]
-                cond3 = self.window.view_rot.angz == self.positions[-1][2]
-                cond4 = self.window.view_rot.viewport == self.positions[-1][3]
-                if all([cond1, cond2, cond3, cond4]):
-                    return
+        cond1 = cond2 = cond3 = False
+        if not freeze and self.positions:
+            cond1 = self.window.view_rot.angx == self.positions[-1][0]
+            cond2 = self.window.view_rot.angy == self.positions[-1][1]
+            cond3 = self.window.view_rot.angz == self.positions[-1][2]
+            cond4 = self.window.view_rot.viewport == self.positions[-1][3]
+            if all([cond1, cond2, cond3, cond4]):
+                return
 
         # add a new position to the attribute
         self.positions.append(
@@ -462,36 +463,76 @@ class AnimationDialog(lib.Dialog):
             ]
         )
 
-        # display the new position
+        index = len(self.positions) - 1
+        grid_row = index
+
+        # build the row's widgets
+        p_label = QtWidgets.QLabel(f"- Position {index + 1}: ")
+        p_label.setToolTip(
+            f"Rotation angles in x, y, z (deg) for position {index + 1}."
+        )
+        self.rows_layout.addWidget(p_label, grid_row, 0)
+
         angx = np.round(self.window.view_rot.angx * 180 / np.pi, 1)
         angy = np.round(self.window.view_rot.angy * 180 / np.pi, 1)
         angz = np.round(self.window.view_rot.angz * 180 / np.pi, 1)
-        self.positions_labels.append(
-            QtWidgets.QLabel("{}, {}, {}".format(angx, angy, angz))
+        angle_label = QtWidgets.QLabel("{}, {}, {}".format(angx, angy, angz))
+        self.rows_layout.addWidget(angle_label, grid_row, 1)
+
+        show_btn = QtWidgets.QPushButton("Show position")
+        show_btn.setToolTip("Move to this position.")
+        show_btn.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
+        show_btn.clicked.connect(partial(self.retrieve_position, index))
+        self.rows_layout.addWidget(show_btn, grid_row, 2)
+
+        d_label = None
+        duration = None
+        if index > 0:
+            d_label = QtWidgets.QLabel("Duration (s): ")
+            d_label.setToolTip("Duration of the transition to this position.")
+            self.rows_layout.addWidget(d_label, grid_row, 3)
+            duration = QtWidgets.QDoubleSpinBox()
+            duration.setRange(0.01, 10)
+            duration.setValue(1)
+            duration.setDecimals(2)
+            self.rows_layout.addWidget(duration, grid_row, 4)
+
+            # calculate recommended duration
+            if not freeze and not all([cond1, cond2, cond3]):
+                dx = self.positions[-1][0] - self.positions[-2][0]
+                dy = self.positions[-1][1] - self.positions[-2][1]
+                dz = self.positions[-1][2] - self.positions[-2][2]
+                dmax = np.max(np.abs([dx, dy, dz]))
+                rot_speed = self.rot_speed.value() * np.pi / 180
+                duration.setValue(dmax / rot_speed)
+
+        self.rows.append(
+            {
+                "p_label": p_label,
+                "angle_label": angle_label,
+                "show_btn": show_btn,
+                "d_label": d_label,
+                "duration": duration,
+            }
         )
-        self.layout.addWidget(self.positions_labels[-1], self.count + 1, 1)
-
-        # calculate recommended duration
-        if self.count > 0:  # only if it's at least the second position
-            if not freeze:
-                if not all([cond1, cond2, cond3]):
-                    dx = self.positions[-1][0] - self.positions[-2][0]
-                    dy = self.positions[-1][1] - self.positions[-2][1]
-                    dz = self.positions[-1][2] - self.positions[-2][2]
-                    dmax = np.max(np.abs([dx, dy, dz]))
-                    rot_speed = self.rot_speed.value() * np.pi / 180
-                    dur = dmax / rot_speed
-                    self.durations[self.count - 1].setValue(dur)
-
-        self.count += 1
 
     def delete_position(self) -> None:
         """Delete the last position from the animation sequence."""
-        if self.count > 0:
-            del self.positions[-1]
-            self.layout.removeWidget(self.positions_labels[-1])
-            del self.positions_labels[-1]
-            self.count -= 1
+        if not self.rows:
+            return
+        row = self.rows.pop()
+        for w in (
+            row["p_label"],
+            row["angle_label"],
+            row["show_btn"],
+            row["d_label"],
+            row["duration"],
+        ):
+            if w is not None:
+                self.rows_layout.removeWidget(w)
+                w.setParent(None)
+                w.deleteLater()
+        del self.positions[-1]
 
     def retrieve_position(self, i: int) -> None:
         """Move the view to the specified position.
@@ -521,6 +562,8 @@ class AnimationDialog(lib.Dialog):
             )
             return
 
+        durations = [row["duration"].value() for row in self.rows[1:]]
+
         # get save file name
         out_path = self.window.view_rot.paths[0].replace(".hdf5", "_video.mp4")
         path, ext = lib.get_save_filename_ext_dialog(
@@ -531,9 +574,7 @@ class AnimationDialog(lib.Dialog):
             data_dlg = self.window.window.dataset_dialog
             pixelsize = self.window.window.view.pixelsize
             locs, infos = self.window.view_rot._prepare_locs_for_rendering()
-            n_frames = int(
-                self.fps.value() * sum(d.value() for d in self.durations)
-            )
+            n_frames = int(self.fps.value() * sum(durations))
             progress = lib.ProgressDialog(
                 "Rendering frames", 0, n_frames, self.window
             )
@@ -543,10 +584,7 @@ class AnimationDialog(lib.Dialog):
                 locs,
                 infos,
                 positions=self.positions,
-                durations=[
-                    self.durations[i].value()
-                    for i in range(len(self.positions) - 1)
-                ],
+                durations=durations,
                 disp_px_size=disp_dlg.disp_px_size.value(),
                 image_size=(
                     self.window.view_rot.width(),
