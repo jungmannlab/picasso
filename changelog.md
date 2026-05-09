@@ -9,6 +9,7 @@ Last change: 09-MAY-2026 CEST
 - Render GUI: added attribute 'pixelsize' in View for cleaner code
 - Render GUI: use precomputed index blocks for faster circular picked locs calculation
 - Render: Animation dialog allows unlimited positions
+- Render: fixed panning in 3D
 
 ## 0.10.0
 

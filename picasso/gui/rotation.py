@@ -18,6 +18,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from PyQt6 import QtCore, QtGui, QtWidgets
+from scipy.spatial.transform import Rotation
 
 from .. import io, render, lib, __version__
 
@@ -616,7 +617,8 @@ class ViewRotation(QtWidgets.QLabel):
     Attributes
     ----------
     angx, angy, angz : float
-        Current rotation angle around x, y, and z axes.
+        Current rotation angle around x, y, and z axes (read/write
+        properties; backed by ``self._R``).
     block_x, block_y, block_z : bool
         True if rotate only around x, y, or z axis respectively.
     group_color : lib.IntArray1D
@@ -632,6 +634,10 @@ class ViewRotation(QtWidgets.QLabel):
         mouseEvents.
     _pan : bool
         Indicates if image is currently panned.
+    _pan_z : float
+        Z component of the current view target (camera pixels). The
+        viewport stores only the X/Y components; this completes it so
+        that screen-space panning works at any rotation.
     pan_start_x, pan_start_y : float
         X and Y coordinates of panning's starting position.
     pixmap : QPixmap
@@ -641,8 +647,11 @@ class ViewRotation(QtWidgets.QLabel):
         between them.
     qimage : QImage
         Current image of rendered locs, picks and other drawings.
-    _rotation : list
-        Contains mouse positions on the screen while rotating.
+    _R : scipy.spatial.transform.Rotation
+        Source of truth for the current rotation. ``angx/angy/angz``
+        are derived from this via ``_codebase_euler``.
+    _last_mouse_x, _last_mouse_y : int
+        Previous mouse position (Qt coords) during a trackball drag.
     viewport : tuple
         Defines current field of view.
     window : QMainWindow
@@ -652,9 +661,10 @@ class ViewRotation(QtWidgets.QLabel):
     def __init__(self, window: QtWidgets.QMainWindow) -> None:
         super().__init__(window)
         self.window = window
-        self.angx = 0
-        self.angy = 0
-        self.angz = 0
+        self._R = Rotation.identity()
+        self._pan_z = 0.0
+        self._last_mouse_x = 0
+        self._last_mouse_y = 0
         self.locs = []
         self.infos = []
         self.paths = []
@@ -663,13 +673,44 @@ class ViewRotation(QtWidgets.QLabel):
         self.x_locs = []
         self._size_hint = (512, 512)
         self._mode = "Rotate"
-        self._rotation = []
         self._points = []
         self._pan = False
         self.block_x = False
         self.block_y = False
         self.block_z = False
         self.setFocusPolicy(QtCore.Qt.FocusPolicy.ClickFocus)
+
+    # --- rotation angles --- #
+    def _codebase_euler(self) -> tuple[float, float, float]:
+        e = self._R.as_euler("XYZ")
+        return -float(e[0]), float(e[1]), float(e[2])
+
+    @property
+    def angx(self) -> float:
+        return self._codebase_euler()[0]
+
+    @angx.setter
+    def angx(self, value: float) -> None:
+        _, b, c = self._codebase_euler()
+        self._R = render.rotation_matrix(float(value), b, c)
+
+    @property
+    def angy(self) -> float:
+        return self._codebase_euler()[1]
+
+    @angy.setter
+    def angy(self, value: float) -> None:
+        a, _, c = self._codebase_euler()
+        self._R = render.rotation_matrix(a, float(value), c)
+
+    @property
+    def angz(self) -> float:
+        return self._codebase_euler()[2]
+
+    @angz.setter
+    def angz(self, value: float) -> None:
+        a, b, _ = self._codebase_euler()
+        self._R = render.rotation_matrix(a, b, float(value))
 
     def sizeHint(self) -> QtCore.QSize:
         return QtCore.QSize(*self._size_hint)
@@ -805,6 +846,8 @@ class ViewRotation(QtWidgets.QLabel):
         # get disp px size, blur method, etc
         kwargs = self.get_render_kwargs(viewport=viewport)
         locs, infos = self._prepare_locs_for_rendering()
+        if self._pan_z:
+            locs = self._apply_pan_z(locs)
         vmin = self.window.display_settings_dlg.minimum.value()
         vmax = self.window.display_settings_dlg.maximum.value()
         cmap = self.window.display_settings_dlg.colormap.currentText()
@@ -1064,21 +1107,12 @@ class ViewRotation(QtWidgets.QLabel):
                     self.angy += np.pi * angy / 180
                     self.angz += np.pi * angz / 180
 
-        # This is to avoid dividing by zero, cos(90) = 0
-        if self.angx == np.pi / 2:
-            self.angx += 0.00001
-        if self.angy == np.pi / 2:
-            self.angy += 0.00001
-        if self.angz == np.pi / 2:
-            self.angz += 0.00001
-
         self.update_scene()
 
     def delete_rotation(self) -> None:
-        """Reset rotation angles."""
-        self.angx = 0
-        self.angy = 0
-        self.angz = 0
+        """Reset rotation and any accumulated pan offset."""
+        self._R = Rotation.identity()
+        self._pan_z = 0.0
         self.update_scene()
 
     def fit_in_view_rotated(self, get_viewport: bool = False) -> None:
@@ -1148,37 +1182,38 @@ class ViewRotation(QtWidgets.QLabel):
         self.angz = 0
         self.update_scene()
 
+    def _arrow_pan(self, sx: float, sy: float) -> None:
+        """Arrow-key pan by (sx, sy) world units in the screen frame.
+
+        Mirrors the mouse pan: convert the screen-space shift to a world
+        delta via ``R^-1`` so the navigation works at any rotation. The
+        X/Y world components shift the pick + viewport (existing path);
+        the Z component accumulates into ``self._pan_z``.
+        """
+        screen_delta = np.array([sx, sy, 0.0], dtype=float)
+        world_delta = self._R.inv().apply(screen_delta)
+        dx_w = float(world_delta[0])
+        dy_w = float(world_delta[1])
+        dz_w = float(world_delta[2])
+        self.window.move_pick(dx_w, dy_w)
+        self._pan_z -= dz_w
+        self.shift_viewport(dx_w, dy_w)
+
     def to_left_rot(self) -> None:
         """Shift pick in the main window."""
-        width = render.viewport_width(self.viewport)
-        dx = -SHIFT * width
-        dx /= np.cos(self.angy)
-        self.window.move_pick(dx, 0)
-        self.shift_viewport(dx, 0)
+        self._arrow_pan(-SHIFT * render.viewport_width(self.viewport), 0.0)
 
     def to_right_rot(self) -> None:
         """Shift pick in the main window."""
-        width = render.viewport_width(self.viewport)
-        dx = SHIFT * width
-        dx /= np.cos(self.angy)
-        self.window.move_pick(dx, 0)
-        self.shift_viewport(dx, 0)
+        self._arrow_pan(SHIFT * render.viewport_width(self.viewport), 0.0)
 
     def to_up_rot(self) -> None:
         """Shift pick in the main window."""
-        height = render.viewport_height(self.viewport)
-        dy = -SHIFT * height
-        dy /= np.cos(self.angx)
-        self.window.move_pick(0, dy)
-        self.shift_viewport(0, dy)
+        self._arrow_pan(0.0, -SHIFT * render.viewport_height(self.viewport))
 
     def to_down_rot(self) -> None:
         """Shift pick in the main window."""
-        height = render.viewport_height(self.viewport)
-        dy = SHIFT * height
-        dy /= np.cos(self.angx)
-        self.window.move_pick(0, dy)
-        self.shift_viewport(0, dy)
+        self._arrow_pan(0.0, SHIFT * render.viewport_height(self.viewport))
 
     def set_optimal_scalebar(
         self, force: bool = False, silent: bool = False
@@ -1244,48 +1279,96 @@ class ViewRotation(QtWidgets.QLabel):
     def mouseMoveEvent(self, event: QtGui.QMouseEvent) -> None:
         """Define actions taken when moving mouse, for example, rotating
         locs, panning."""
-        if self._mode == "Rotate":
-            if self._pan:  # panning
-                rel_x_move = (
-                    event.pos().x() - self.pan_start_x
-                ) / self.width()
-                rel_y_move = (
-                    event.pos().y() - self.pan_start_y
-                ) / self.height()
+        if self._mode != "Rotate":
+            return
 
-                # this partially accounts for rotation of locs
-                rel_y_move /= np.cos(self.angx)
-                rel_x_move /= np.cos(self.angy)
+        if self._pan:
+            self._pan_drag(event)
+        else:
+            self._rotate_drag(event)
 
-                self.pan_relative(rel_y_move, rel_x_move)
-                self.pan_start_x = event.pos().x()
-                self.pan_start_y = event.pos().y()
+    def _rotate_drag(self, event: QtGui.QMouseEvent) -> None:
+        """Trackball-style rotation: incremental rotations are composed
+        in the screen frame, so the cursor and the visible data stay in
+        sync regardless of any prior rotation."""
+        dx_pix = event.pos().x() - self._last_mouse_x
+        dy_pix = event.pos().y() - self._last_mouse_y
+        self._last_mouse_x = event.pos().x()
+        self._last_mouse_y = event.pos().y()
+        if dx_pix == 0 and dy_pix == 0:
+            return
 
-            else:  # rotating
-                height, width = render.viewport_size(self.viewport)
-                pos = self.map_to_movie(event.pos())
+        # Screen-frame rotation vector. Vertical drag rotates around the
+        # screen X axis (tilt), horizontal drag around the screen Y axis
+        # (turn). With Ctrl, horizontal drag turns and vertical drag spins
+        # in the screen plane, matching the previous Ctrl semantics.
+        ax = 2 * np.pi * dy_pix / self.height()
+        ay = 2 * np.pi * dx_pix / self.width()
+        az = 0.0
+        modifiers = QtWidgets.QApplication.keyboardModifiers()
+        if modifiers == QtCore.Qt.KeyboardModifier.ControlModifier:
+            az = ax
+            ax = 0.0
 
-                self._rotation.append([pos[0], pos[1]])
+        # Axis locks: pressing X/Y/Z constrains rotation to the
+        # corresponding *world* axis. Project the screen-frame rotation
+        # vector into world frame, zero the components we don't want, and
+        # rotate it back.
+        if self.block_x or self.block_y or self.block_z:
+            v_screen = np.array([ax, ay, az], dtype=float)
+            v_world = self._R.inv().apply(v_screen)
+            keep = np.array(
+                [
+                    1.0 if self.block_x else 0.0,
+                    1.0 if self.block_y else 0.0,
+                    1.0 if self.block_z else 0.0,
+                ]
+            )
+            v_world = v_world * keep
+            v_screen = self._R.apply(v_world)
+            ax, ay, az = (
+                float(v_screen[0]),
+                float(v_screen[1]),
+                float(v_screen[2]),
+            )
 
-                # calculate the angle of rotation
-                rel_pos_x = self._rotation[-1][0] - self._rotation[-2][0]
-                rel_pos_y = self._rotation[-1][1] - self._rotation[-2][1]
+        # The codebase's render.rotation_matrix flips the sign of the X
+        # rotation relative to scipy's right-hand-rule convention; using
+        # it here keeps screen-aligned tilts feeling identical to the old
+        # Euler-update behaviour at R = I.
+        delta_R = render.rotation_matrix(ax, ay, az)
+        self._R = delta_R * self._R
+        self.update_scene()
 
-                # rotate around x and y or y and z axes, depending on
-                # whether Ctrl/Command is pressed
-                modifiers = QtWidgets.QApplication.keyboardModifiers()
-                if modifiers == QtCore.Qt.KeyboardModifier.ControlModifier:
-                    if not self.block_y:
-                        self.angz += float(2 * np.pi * rel_pos_y / height)
-                    if not self.block_z:
-                        self.angy += float(2 * np.pi * rel_pos_x / width)
-                else:
-                    if not self.block_x:
-                        self.angy += float(2 * np.pi * rel_pos_x / width)
-                    if not self.block_y:
-                        self.angx += float(2 * np.pi * rel_pos_y / height)
+    def _pan_drag(self, event: QtGui.QMouseEvent) -> None:
+        """Inverse-rotation panning: convert the screen-space mouse delta
+        into a world-space translation via ``R^-1``. The X/Y components
+        of the world delta shift the viewport (existing path); the Z
+        component accumulates into ``self._pan_z`` (applied to locs.z in
+        ``render_scene``). Works at any rotation, including ±90°."""
+        dx_pix = event.pos().x() - self.pan_start_x
+        dy_pix = event.pos().y() - self.pan_start_y
+        self.pan_start_x = event.pos().x()
+        self.pan_start_y = event.pos().y()
+        if dx_pix == 0 and dy_pix == 0:
+            return
 
-                self.update_scene()
+        vh, vw = render.viewport_size(self.viewport)
+        screen_delta = np.array(
+            [dx_pix / self.width() * vw, dy_pix / self.height() * vh, 0.0]
+        )
+        world_delta = self._R.inv().apply(screen_delta)
+        # The viewport stores X/Y of the view target; ``_pan_z`` stores Z.
+        # Same sign convention as the viewport (subtract on pan). Update
+        # ``_pan_z`` before ``pan_relative`` because ``pan_relative`` calls
+        # ``update_scene`` internally and we want both deltas in one frame.
+        self._pan_z -= float(world_delta[2])
+        # pan_relative takes (dy, dx) in *relative* viewport units and
+        # subtracts ``dx * vw`` from the viewport X (and similarly for Y),
+        # which is exactly ``viewport_center -= world_delta[:2]``.
+        self.pan_relative(
+            float(world_delta[1]) / vh, float(world_delta[0]) / vw
+        )
 
     def mousePressEvent(self, event: QtGui.QMouseEvent) -> None:
         """Define actions taken when pressing mouse buttons, for
@@ -1293,8 +1376,8 @@ class ViewRotation(QtWidgets.QLabel):
         if self._mode == "Rotate":
             # start rotation
             if event.button() == QtCore.Qt.MouseButton.LeftButton:
-                pos = self.map_to_movie(event.pos())
-                self._rotation.append([float(pos[0]), float(pos[1])])
+                self._last_mouse_x = event.pos().x()
+                self._last_mouse_y = event.pos().y()
                 event.accept()
 
             # start panning
@@ -1325,7 +1408,6 @@ class ViewRotation(QtWidgets.QLabel):
         elif self._mode == "Rotate":
             # stop rotation
             if event.button() == QtCore.Qt.MouseButton.LeftButton:
-                self._rotation = []
                 event.accept()
             # stop panning
             elif event.button() == QtCore.Qt.MouseButton.RightButton:
@@ -1575,6 +1657,20 @@ class ViewRotation(QtWidgets.QLabel):
         # The values should be identical, but just in case,
         # we choose the maximum value:
         return max(os_horizontal, os_vertical)
+
+    def _apply_pan_z(
+        self,
+        locs: pd.DataFrame | list[pd.DataFrame],
+    ) -> pd.DataFrame | list[pd.DataFrame]:
+        """Return ``locs`` with z translated by ``-self._pan_z``.
+
+        The render pipeline rotates locs around ``z = 0`` after centering
+        in X/Y; subtracting ``_pan_z`` from z shifts the rotation pivot in
+        Z without touching ``render.locs_rotation``.
+        """
+        if isinstance(locs, pd.DataFrame):
+            return locs.assign(z=locs["z"] - self._pan_z)
+        return [L.assign(z=L["z"] - self._pan_z) for L in locs]
 
     def _prepare_locs_for_rendering(
         self,
