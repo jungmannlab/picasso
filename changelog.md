@@ -10,6 +10,7 @@ Last change: 09-MAY-2026 CEST
 - Render GUI: use precomputed index blocks for faster circular picked locs calculation
 - Render: Animation dialog allows unlimited positions
 - Render: fixed panning in 3D
+- Render: manual setting of scale bar switches off automatic scale bar length
 
 ## 0.10.0
 

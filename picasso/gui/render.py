@@ -5588,6 +5588,7 @@ class DisplaySettingsDialog(lib.Dialog):
         self.scalebar.setValue(500)
         self.scalebar.setKeyboardTracking(False)
         self.scalebar.valueChanged.connect(self.update_scene)
+        self.scalebar.valueChanged.connect(self._uncheck_optimal_scalebar)
         scalebar_grid.addWidget(self.scalebar, 0, 1)
         self.scalebar_text = QtWidgets.QCheckBox("Print scale bar length")
         self.scalebar_text.setToolTip("Display the length of the scale bar?")
@@ -5734,6 +5735,14 @@ class DisplaySettingsDialog(lib.Dialog):
             else:
                 self.colormap.setCurrentText("magma")
         self.update_scene()
+
+    def _uncheck_optimal_scalebar(self, *args) -> None:
+        """Uncheck the automatic scale bar checkbox when the user
+        manually changes the scale bar length."""
+        if self.optimal_scalebar_check.isChecked():
+            self.optimal_scalebar_check.blockSignals(True)
+            self.optimal_scalebar_check.setChecked(False)
+            self.optimal_scalebar_check.blockSignals(False)
 
     def on_disp_px_changed(self, value: int) -> None:
         """Set new display pixel size, update contrast and update scene
@@ -10240,11 +10249,12 @@ class View(QtWidgets.QLabel):
             pixelsize = self.pixelsize
             width = render.viewport_width(self.viewport)
             scalebar = render.optimal_scalebar_length(pixelsize, width)
-            if silent:
-                self.window.display_settings_dlg.scalebar.blockSignals(True)
-            self.window.display_settings_dlg.scalebar.setValue(scalebar)
-            if silent:
-                self.window.display_settings_dlg.scalebar.blockSignals(False)
+            scalebar_spinbox = self.window.display_settings_dlg.scalebar
+            scalebar_spinbox.blockSignals(True)
+            scalebar_spinbox.setValue(scalebar)
+            scalebar_spinbox.blockSignals(False)
+            if not silent:
+                self.update_scene()
 
     def sizeHint(self) -> QtCore.QSize:
         """Return recommended window size."""
