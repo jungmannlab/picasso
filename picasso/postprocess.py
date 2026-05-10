@@ -269,11 +269,13 @@ def _picked_rectangular_locs(
         x_max = max(X)
         y_min = min(Y)
         y_max = max(Y)
-        group_locs = locs[locs["x"] > x_min]
-        group_locs = group_locs[group_locs["x"] < x_max]
-        group_locs = group_locs[group_locs["y"] > y_min]
-        group_locs = group_locs[group_locs["y"] < y_max]
-        group_locs = lib.locs_in_rectangle(group_locs, X, Y)
+        mask = (
+            (locs["x"] > x_min)
+            & (locs["x"] < x_max)
+            & (locs["y"] > y_min)
+            & (locs["y"] < y_max)
+        )
+        group_locs = lib.locs_in_rectangle(locs[mask], X, Y).copy()
         # store rotated coordinates in x_rot and y_rot
         angle = 0.5 * np.pi - np.arctan2((ye - ys), (xe - xs))
         x_shifted = group_locs["x"] - xs
@@ -312,11 +314,13 @@ def _picked_polygonal_locs(
             elif callback is not None:
                 callback(i + 1)
             continue
-        group_locs = locs[locs["x"] > min(X)]
-        group_locs = group_locs[group_locs["x"] < max(X)]
-        group_locs = group_locs[group_locs["y"] > min(Y)]
-        group_locs = group_locs[group_locs["y"] < max(Y)]
-        group_locs = lib.locs_in_polygon(group_locs, X, Y)
+        mask = (
+            (locs["x"] > min(X))
+            & (locs["x"] < max(X))
+            & (locs["y"] > min(Y))
+            & (locs["y"] < max(Y))
+        )
+        group_locs = lib.locs_in_polygon(locs[mask], X, Y).copy()
         if add_group:
             group_locs["group"] = i
         group_locs.sort_values(by="frame", kind="quicksort", inplace=True)
@@ -347,10 +351,13 @@ def _picked_square_locs(
         x_max = x + half_a
         y_min = y - half_a
         y_max = y + half_a
-        group_locs = locs[locs["x"] > x_min]
-        group_locs = group_locs[group_locs["x"] < x_max]
-        group_locs = group_locs[group_locs["y"] > y_min]
-        group_locs = group_locs[group_locs["y"] < y_max]
+        mask = (
+            (locs["x"] > x_min)
+            & (locs["x"] < x_max)
+            & (locs["y"] > y_min)
+            & (locs["y"] < y_max)
+        )
+        group_locs = locs[mask].copy()
         if add_group:
             group_locs["group"] = i
         group_locs.sort_values(by="frame", kind="quicksort", inplace=True)

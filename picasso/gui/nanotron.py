@@ -1472,7 +1472,9 @@ class Window(QtWidgets.QMainWindow):
     ):
         progress.set_value(count)
 
-        filtered_locs = export_locs[export_locs["prediction"] == prediction]
+        filtered_locs = export_locs[
+            export_locs["prediction"] == prediction
+        ].copy()
         n_groups = np.unique(filtered_locs["group"])
 
         if self.regroup_btn.isChecked():

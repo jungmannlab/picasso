@@ -1,6 +1,6 @@
 # Changelog
 
-Last change: 09-MAY-2026 CEST
+Last change: 10-MAY-2026 CEST
 
 ## 0.10.1
 
@@ -11,6 +11,7 @@ Last change: 09-MAY-2026 CEST
 - Render: Animation dialog allows unlimited positions
 - Render: fixed panning in 3D
 - Render: manual setting of scale bar switches off automatic scale bar length
+- Render: faster non-circle picking by smarter indexing
 
 ## 0.10.0
 
