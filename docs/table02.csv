@@ -13,7 +13,7 @@ n/n_locs,"Number of localizations assigned to the molecule.",unsigned long
 n_events,"Number of binding events assigned to the molecule.",unsigned long
 group,"Cluster ID assigned to the molecule.",unsigned long
 group_input,"(Optional) Previous group ID of the localizations around the molecule, if they had a 'group' column.",unsigned long
-area/volume,"(Only SMLM clusterer) Area (2D) or volume (3D) of the ellipse/ellipsoid defined by std_x/y/z.",float
+area/volume,"(Only SMLM clusterer) Area (2D) or volume (3D) of the ellipse/ellipsoid defined by the radius = 2 * std_x/y/z.",float
 convexhull,"(Only SMLM clusterer) Area (2D) or volume (3D) of the convex hull of the localizations assigned to the molecule.",float
 fitted_sigma,"(Only G5M, 2D) Fitted sigma of the Gaussian component representing the molecule (camera pixels).",float
 fitted_sigma_x/y/z,"(Only G5M, 3D) Fitted sigma of the Gaussian component representing the molecule in respective directions (camera pixels).",float
