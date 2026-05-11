@@ -2696,6 +2696,18 @@ class SimulationsTab(lib.Dialog):
         self.settings_dialog = OptionalSettingsDialog(self)
         self.nn_plot_settings_dialog = NNDPlotSettingsDialog(self)
 
+        # restore last used fitting method from user settings
+        last_fitting_mode = io.load_user_settings()["SPINNA"].get(
+            "Fitting mode"
+        )
+        if last_fitting_mode is not None:
+            idx = self.settings_dialog.fitting_mode.findText(last_fitting_mode)
+            if idx >= 0:
+                self.settings_dialog.fitting_mode.setCurrentIndex(idx)
+        self.settings_dialog.fitting_mode.currentTextChanged.connect(
+            self._save_fitting_mode
+        )
+
         # LOAD DATA
         load_data_box = QtWidgets.QGroupBox("Load data")
         load_data_box.setFixedHeight(470)
@@ -2981,6 +2993,12 @@ class SimulationsTab(lib.Dialog):
         )
         self.run_single_sim_button.released.connect(self.run_single_sim)
         single_sim_layout.addWidget(self.run_single_sim_button, 1, 2)
+
+    def _save_fitting_mode(self, mode: str) -> None:
+        """Persist the last used fitting method to user settings."""
+        settings = io.load_user_settings()
+        settings["SPINNA"]["Fitting mode"] = mode
+        io.save_user_settings(settings)
 
     def load_structures(self) -> None:
         """Load structures from .yaml file."""
