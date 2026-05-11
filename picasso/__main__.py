@@ -1222,7 +1222,7 @@ def _localize(args: argparse.Namespace) -> None:  # noqa: C901
 
     if args.fit_method == "mle":
         convergence = 0.001
-        max_iterations = 1000
+        max_iterations = 100
     else:
         convergence = 0
         max_iterations = 0

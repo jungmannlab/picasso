@@ -639,25 +639,32 @@ def identify(
     N = len(movie)
     use_tqdm = progress_callback == "console"
     if use_tqdm:
-        iter_range = tqdm(N, desc="Identifying spots", unit="frame")
+        iter_range = tqdm(total=N, desc="Identifying spots", unit="frame")
     else:
         iter_range = range(N)
     if threaded:
         current, futures = identify_async(
             movie, minimum_ng, box, roi=roi, frame_bounds=frame_bounds
         )
+        last = 0
         while current[0] < N:
             # abort if requested
             if abort_callback is not None and abort_callback():
                 for f in futures:
                     f.cancel()
+                if use_tqdm:
+                    iter_range.close()
                 return
 
             if use_tqdm:
-                iter_range.update(1)
+                iter_range.update(current[0] - last)
+                last = current[0]
             elif callable(progress_callback):
                 progress_callback(current[0])
             time.sleep(0.2)
+        if use_tqdm:
+            iter_range.update(N - last)
+            iter_range.close()
         ids = identifications_from_futures(futures)
     else:
         identifications = []
@@ -1396,34 +1403,34 @@ def fit2D(
     em = camera_info["Gain"] > 1
     if fitting_method == "gausslq":
         locs = _fit2d_gausslq(
-            spots,
-            identifications,
-            box,
-            em,
-            multiprocess,
-            progress_callback,
-            abort_callback,
+            spots=spots,
+            identifications=identifications,
+            box=box,
+            em=em,
+            multiprocess=multiprocess,
+            progress_callback=progress_callback,
+            abort_callback=abort_callback,
         )
     elif fitting_method == "gausslq-gpu":
         if callable(progress_callback):
             progress_callback(1)
         locs = _fit2d_gausslq_gpu(
-            spots,
-            identifications,
-            box,
-            em,
+            spots=spots,
+            identifications=identifications,
+            box=box,
+            em=em,
         )
     elif fitting_method == "gaussmle":
         locs = _fit2d_gaussmle(
-            spots,
-            identifications,
-            box,
-            eps,
-            max_it,
-            mle_method,
-            multiprocess,
-            progress_callback,
-            abort_callback,
+            spots=spots,
+            identifications=identifications,
+            box=box,
+            eps=eps,
+            max_it=max_it,
+            mle_method=mle_method,
+            multiprocess=multiprocess,
+            progress_callback=progress_callback,
+            abort_callback=abort_callback,
         )
     elif fitting_method == "avg":
         locs = _fit2d_avg(
@@ -1512,22 +1519,29 @@ def _fit2d_gaussmle(
     # _process_fitting_futures here
     use_tqdm = progress_callback == "console"
     if use_tqdm:
-        iter_range = tqdm(N, desc="Fitting...")
+        iter_range = tqdm(total=N, desc="Fitting", unit="spot")
     if multiprocess:
         curr, thetas, CRLBs, llhoods, iterations = gaussmle.gaussmle_async(
             spots, eps, max_it, method=mle_method
         )
+        last = 0
         while curr[0] < N:
             # abort check
-            if abort_callback is not None and abort_callback():
+            if callable(abort_callback) and abort_callback():
+                if use_tqdm:
+                    iter_range.close()
                 return
 
             # progress update
             if use_tqdm:
-                iter_range.update(1)
+                iter_range.update(curr[0] - last)
+                last = curr[0]
             elif callable(progress_callback):
                 progress_callback(curr[0])
             time.sleep(0.2)
+        if use_tqdm:
+            iter_range.update(N - last)
+            iter_range.close()
     else:
         thetas, CRLBs, llhoods, iterations = gaussmle.gaussmle(
             spots, eps, max_it, mle_method, progress_callback
@@ -1584,18 +1598,19 @@ def _process_fitting_futures(
     abort_callback: Callable[[], bool] | None = None,
 ) -> lib.FloatArray2D | None:
     """Convenience function for processing progress of fitting using
-    multiprocessing. See ``_fit2d_gausslq``, _fit2d_gaussmle,
-    ``_fit2d_avg``"""
+    multiprocessing. See ``_fit2d_gausslq``, ``_fit2d_avg``."""
     n_tasks = len(fs)
     use_tqdm = progress_callback == "console"
     if use_tqdm:
-        iter_range = tqdm(n_tasks, desc="Fitting...")
+        iter_range = tqdm(total=N, desc="Fitting", unit="spot")
 
     while lib.n_futures_done(fs) < n_tasks:
         # check for abort
-        if abort_callback is not None and abort_callback():
+        if callable(abort_callback) and abort_callback():
             for f in fs:
                 f.cancel()
+            if use_tqdm:
+                iter_range.close()
             return
 
         # update progress
@@ -1605,6 +1620,9 @@ def _process_fitting_futures(
         elif callable(progress_callback):
             progress_callback(n_finished)
         time.sleep(0.2)
+    if use_tqdm:
+        iter_range.update(N - iter_range.n)
+        iter_range.close()
     theta = avgroi.fits_from_futures(fs)
     return theta
 
