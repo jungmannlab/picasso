@@ -646,9 +646,15 @@ class Window(QtWidgets.QMainWindow):
         test_subcluster_action.triggered.connect(self.plot_subclustering)
 
         filter_menu = menu_bar.addMenu("Filter")
-        filter_action = filter_menu.addAction("Filter")
+        filter_action = filter_menu.addAction("Filter numerically")
         filter_action.setShortcut("Ctrl+F")
         filter_action.triggered.connect(self.filter_num.show)
+        apply_from_metadata_action = filter_menu.addAction(
+            "Apply filters from metadata"
+        )
+        apply_from_metadata_action.triggered.connect(
+            self.apply_filters_from_metadata
+        )
         remove_columns_action = filter_menu.addAction("Remove columns")
         remove_columns_action.triggered.connect(self.remove_columns)
         main_widget = QtWidgets.QWidget()
@@ -806,6 +812,86 @@ class Window(QtWidgets.QMainWindow):
             self.filter_log["Removed columns"].extend(to_remove)
         else:
             self.filter_log["Removed columns"] = to_remove
+
+    def apply_filters_from_metadata(self) -> None:
+        """Replay filter steps recorded in another file's .yaml metadata
+        onto the currently loaded localizations."""
+        if self.locs is None:
+            QtWidgets.QMessageBox.information(
+                self, "Apply filters from metadata", "No file loaded."
+            )
+            return
+
+        directory = self.pwd if self.pwd else ""
+        path, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self,
+            "Open metadata",
+            directory=directory,
+            filter="*.yaml",
+        )
+        if not path:
+            return
+
+        try:
+            info = io.load_info(path, qt_parent=self)
+        except io.NoMetadataFileError:
+            return
+
+        ranges, to_remove, missing = lib.extract_filter_steps(
+            info, self.locs.columns
+        )
+
+        if not ranges and not to_remove:
+            msg = "No applicable filter steps found in metadata."
+            if missing:
+                msg += (
+                    "\n\nReferenced columns not found in current data:\n  "
+                    + "\n  ".join(missing)
+                )
+            QtWidgets.QMessageBox.information(
+                self, "Apply filters from metadata", msg
+            )
+            return
+
+        lines = []
+        if ranges:
+            lines.append("Filters to apply:")
+            for field, (xmin, xmax) in ranges.items():
+                lines.append(f"  {field}: [{xmin}, {xmax}]")
+        if to_remove:
+            if lines:
+                lines.append("")
+            lines.append("Columns to remove:")
+            for c in to_remove:
+                lines.append(f"  {c}")
+        if missing:
+            if lines:
+                lines.append("")
+            lines.append("Not found in current data (will be skipped):")
+            for c in missing:
+                lines.append(f"  {c}")
+        lines.append("")
+        lines.append("Apply these steps?")
+
+        reply = QtWidgets.QMessageBox.question(
+            self,
+            "Apply filters from metadata",
+            "\n".join(lines),
+            QtWidgets.QMessageBox.StandardButton.Yes
+            | QtWidgets.QMessageBox.StandardButton.Cancel,
+        )
+        if reply != QtWidgets.QMessageBox.StandardButton.Yes:
+            return
+
+        locs, _, _, _ = lib.apply_filter_steps(self.locs, info)
+        for field, (xmin, xmax) in ranges.items():
+            self.log_filter(field, xmin, xmax)
+        if to_remove:
+            if "Removed columns" in self.filter_log:
+                self.filter_log["Removed columns"].extend(to_remove)
+            else:
+                self.filter_log["Removed columns"] = list(to_remove)
+        self.update_locs(locs)
 
     def export_csv_dialog(self) -> None:
         if self.locs is None:
