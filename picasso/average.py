@@ -13,7 +13,7 @@ from __future__ import annotations
 import functools
 import multiprocessing
 from multiprocessing import sharedctypes
-from typing import Literal
+from typing import Callable, Literal
 
 import ctypes
 import numpy as np
@@ -285,7 +285,8 @@ def average(
     iterations: int = 3,
     return_shifted_locs: bool = False,
     progress_callback: callable | Literal["console"] | None = None,
-) -> pd.DataFrame:
+    abort_callback: Callable[[], bool] | None = None,
+) -> pd.DataFrame | None:
     """Average super-resolution images of particles by alignment and rotation.
 
     Builds the group index and applies per-group center-of-mass alignment
@@ -313,11 +314,17 @@ def average(
         per-iteration updates. Pass ``"console"`` to display tqdm
         progress bars in the terminal. Pass ``None`` (default) for no
         progress reporting.
+    abort_callback : callable or None, optional
+        Callable with no arguments returning a bool. If it returns
+        True, averaging is aborted, the worker pool is terminated, and
+        ``None`` is returned. Default is None (no abort).
 
     Returns
     -------
-    locs_averaged : pd.DataFrame
+    locs_averaged : pd.DataFrame or None
         Averaged localizations with coordinates centered around origin.
+        Returns ``None`` if the process was aborted via
+        ``abort_callback``.
     """
     assert (
         "group" in locs.columns
@@ -364,8 +371,12 @@ def average(
         iter_pbar = None
         group_pbar = None
 
+    aborted = False
     try:
         for it in range(iterations):
+            if callable(abort_callback) and abort_callback():
+                aborted = True
+                break
             counter.value = 0
             if use_tqdm:
                 group_pbar.reset()
@@ -401,12 +412,20 @@ def average(
             if use_tqdm:
                 last_count = 0
                 while not result.ready():
+                    if callable(abort_callback) and abort_callback():
+                        aborted = True
+                        break
                     current = int(counter.value)
                     group_pbar.update(current - last_count)
                     last_count = current
+                if aborted:
+                    break
                 group_pbar.update(n_groups - last_count)
             else:
                 while not result.ready():
+                    if callable(abort_callback) and abort_callback():
+                        aborted = True
+                        break
                     if callable(progress_callback):
                         locs_current = locs.copy()
                         locs_current["x"] = np.ctypeslib.as_array(x)
@@ -418,6 +437,8 @@ def average(
                             int(counter.value),
                             n_groups,
                         )
+                if aborted:
+                    break
 
             # Update localizations from shared arrays
             locs["x"] = np.ctypeslib.as_array(x)
@@ -434,8 +455,14 @@ def average(
         if use_tqdm:
             group_pbar.close()
             iter_pbar.close()
-        pool.close()
+        if aborted:
+            pool.terminate()
+        else:
+            pool.close()
         pool.join()
+
+    if aborted:
+        return None
 
     if return_shifted_locs:
         locs, info = prepare_locs_for_save(locs, info)

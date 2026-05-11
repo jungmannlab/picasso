@@ -14,6 +14,7 @@ Last change: 11-MAY-2026 CEST
 - Render: manual setting of scale bar switches off automatic scale bar length
 - Render: faster non-circle picking by smarter indexing
 - Filter: apply filtering steps from metadata
+- Average: added abort
 
 ## 0.10.0
 

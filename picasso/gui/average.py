@@ -41,6 +41,7 @@ class Worker(QtCore.QThread):
     """
 
     progressMade = QtCore.pyqtSignal(int, int, pd.DataFrame, bool, int, int)
+    aborted = QtCore.pyqtSignal()
 
     def __init__(
         self,
@@ -54,6 +55,7 @@ class Worker(QtCore.QThread):
         self.info = info
         self.display_px_size = display_px_size
         self.iterations = iterations
+        self.was_aborted = False
 
     def on_progress(
         self,
@@ -69,13 +71,19 @@ class Worker(QtCore.QThread):
 
     def run(self) -> None:
         """Run averaging across a number of iterations."""
-        self.locs = average.average(
+        result = average.average(
             self.locs,
             self.info,
             display_pixel_size=self.display_px_size,
             iterations=self.iterations,
             progress_callback=self.on_progress,
+            abort_callback=self.isInterruptionRequested,
         )
+        if result is None:
+            self.was_aborted = True
+            self.aborted.emit()
+        else:
+            self.locs = result
 
 
 class ParametersDialog(lib.Dialog):
@@ -164,6 +172,7 @@ class View(QtWidgets.QLabel):
         self.setAcceptDrops(True)
         self._pixmap = None
         self.running = False
+        self.thread = None
 
     def average(self):
         if not self.running:
@@ -180,8 +189,17 @@ class View(QtWidgets.QLabel):
                 iterations,
             )
             self.thread.progressMade.connect(self.on_progress)
+            self.thread.aborted.connect(self.on_aborted)
             self.thread.finished.connect(self.on_finished)
+            self.window.abort_action.setEnabled(True)
             self.thread.start()
+
+    def abort(self) -> None:
+        """Request interruption of the running averaging thread."""
+        if self.running and self.thread is not None:
+            self.thread.requestInterruption()
+            self.window.statusBar().showMessage("Aborting...")
+            self.window.abort_action.setEnabled(False)
 
     def dragEnterEvent(self, event: QtGui.QDragEnterEvent) -> None:
         if event.mimeData().hasUrls():
@@ -197,8 +215,17 @@ class View(QtWidgets.QLabel):
             self.open(path)
 
     def on_finished(self) -> None:
-        self.window.statusBar().showMessage("Done!")
+        if self.thread is not None and self.thread.was_aborted:
+            self.window.statusBar().showMessage("Aborted.")
+        else:
+            self.window.statusBar().showMessage("Done!")
         self.running = False
+        self.window.abort_action.setEnabled(False)
+
+    def on_aborted(self) -> None:
+        """Handle abortion of the averaging thread."""
+        self.window.statusBar().showMessage("Aborted.")
+        self.window.abort_action.setEnabled(False)
 
     def on_progress(
         self,
@@ -368,6 +395,10 @@ class Window(QtWidgets.QMainWindow):
         average_action = process_menu.addAction("Average")
         average_action.setShortcut("Ctrl+A")
         average_action.triggered.connect(self.view.average)
+        self.abort_action = process_menu.addAction("Abort")
+        self.abort_action.setShortcut("Ctrl+.")
+        self.abort_action.triggered.connect(self.view.abort)
+        self.abort_action.setEnabled(False)
         self.plugin_menu = menu_bar.addMenu("Plugins")  # do not delete
 
     def show_metadata(self) -> None:
