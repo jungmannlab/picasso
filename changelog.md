@@ -46,6 +46,7 @@ Last change: 11-MAY-2026 CEST
 - Trace shows number of photons in addition to x, y and frame; exports .csv files with three columns (frame, ON/OFF and photons)
 - 3D rotation window supports rendering by property
 - Apply drift from external file supports dropping the .txt file onto the window
+- Show drift keeps x and y coords to scale (on the second plot)
 - Fixed distances in NeNA plot (previously plotting multiple times kept increasing the values)
 - Fixed 3D screenshot metadata
 - Fixed 3D animation for non-square FOV

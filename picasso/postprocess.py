@@ -3147,7 +3147,7 @@ def plot_drift(
             drift.y * pixelsize,
             color=list(plt.rcParams["axes.prop_cycle"])[2]["color"],
         )
-
+        ax2.set_aspect("equal")
         ax2.set_xlabel("x (nm)")
         ax2.set_ylabel("y (nm)")
         ax2.invert_yaxis()
@@ -3172,6 +3172,7 @@ def plot_drift(
         ax2.set_xlabel("x (nm)")
         ax2.set_ylabel("y (nm)")
         ax2.invert_yaxis()
+        ax2.set_aspect("equal")
     return fig
 
 
