@@ -1207,7 +1207,7 @@ class MaskGenerator:
         self.save_mask_info(path)
 
         if save_png:
-            outpath = path.replace(".npy", ".png")
+            outpath = os.path.splitext(path)[0] + ".png"
             if self.mask.ndim == 3:
                 mask_ = np.sum(self.mask, axis=2)
             mask_ /= mask_.max()  # normalize to save image
@@ -1251,7 +1251,7 @@ class MaskGenerator:
             )
 
         # save
-        outpath = path.replace(".npy", ".yaml")
+        outpath = os.path.splitext(path)[0] + ".yaml"
         with open(outpath, "w") as file:
             yaml.dump(info, file)
 
@@ -2641,7 +2641,7 @@ class StructureMixer:
             if len(coords):
                 locs = coords_to_locs(coords, lp=lp, pixelsize=pixelsize)
                 info = self.get_metadata(tname, width, height, pixelsize)
-                outpath = path.replace(".hdf5", f"_{tname}.hdf5")
+                outpath = os.path.splitext(path)[0] + f"_{tname}.hdf5"
                 io.save_locs(outpath, locs, info)
 
     def get_metadata(

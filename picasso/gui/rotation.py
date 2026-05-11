@@ -575,7 +575,9 @@ class AnimationDialog(lib.Dialog):
         durations = [row["duration"].value() for row in self.rows[1:]]
 
         # get save file name
-        out_path = self.window.view_rot.paths[0].replace(".hdf5", "_video.mp4")
+        out_path = (
+            os.path.splitext(self.window.view_rot.paths[0])[0] + "_video.mp4"
+        )
         path, ext = lib.get_save_filename_ext_dialog(
             self, "Save animation", out_path, filter="*.mp4", check_ext=".yaml"
         )
@@ -1499,7 +1501,7 @@ class ViewRotation(QtWidgets.QLabel):
                 self.set_optimal_scalebar(force=True)
                 scalebar_box.setChecked(True)
                 self.update_scene()
-                self.qimage.save(path.replace(".png", "_scalebar.png"))
+                self.qimage.save(os.path.splitext(path)[0] + "_scalebar.png")
                 scalebar_box.setChecked(False)
                 self.update_scene()
 
@@ -1986,8 +1988,9 @@ class RotationWindow(QtWidgets.QMainWindow):
                         )
             # save one channel only
             else:
-                out_path = self.view_rot.paths[channel].replace(
-                    ".hdf5", f"_rotated_{angx}_{angy}_{angz}.hdf5"
+                out_path = (
+                    os.path.splitext(self.view_rot.paths[channel])[0]
+                    + f"_rotated_{angx}_{angy}_{angz}.hdf5"
                 )
                 path, ext = lib.get_save_filename_ext_dialog(
                     self,

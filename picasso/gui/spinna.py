@@ -795,7 +795,7 @@ class MaskGeneratorTab(lib.Dialog):
             path, _ = lib.get_save_filename_ext_dialog(
                 self,
                 "Save mask",
-                self.locs_path.replace(".hdf5", "_mask.npy"),
+                os.path.splitext(self.locs_path)[0] + "_mask.npy",
                 filter="*.npy",
                 check_ext=".yaml",
             )
@@ -822,7 +822,7 @@ class MaskGeneratorTab(lib.Dialog):
                             image /= image.max()
                             Image.fromarray(
                                 np.round(255 * image).astype("uint8")
-                            ).save(path.replace(".npy", f"_z{z}.png"))
+                            ).save(os.path.splitext(path)[0] + f"_z{z}.png")
 
     def update_mask_info(self) -> None:
         """Update the mask info (area, dimensions, size)."""
@@ -3367,8 +3367,8 @@ class SimulationsTab(lib.Dialog):
         if not ok:
             return
         if save:  # get save path for saving search space
-            out_path = self.structures_path.replace(
-                ".yaml", "_search_space.csv"
+            out_path = (
+                os.path.splitext(self.structures_path)[0] + "_search_space.csv"
             )
             save, ext = lib.get_save_filename_ext_dialog(
                 self, "Save numbers of structures", out_path, filter="*.csv"
@@ -3530,7 +3530,9 @@ class SimulationsTab(lib.Dialog):
 
         save = ""
         if self.save_fit_results_check.isChecked():
-            out_path = self.structures_path.replace(".yaml", "_fit_scores.csv")
+            out_path = (
+                os.path.splitext(self.structures_path)[0] + "_fit_scores.csv"
+            )
             save, ext = lib.get_save_filename_ext_dialog(
                 self, "Save fitting scores", out_path, filter="*.csv"
             )
@@ -3645,7 +3647,9 @@ class SimulationsTab(lib.Dialog):
     def save_fit_results(self) -> None:
         """Save fit results in .txt with all parameters used."""
         metadata = self.summarize_fit_results()
-        out_path = self.structures_path.replace(".yaml", "_fit_summary.txt")
+        out_path = (
+            os.path.splitext(self.structures_path)[0] + "_fit_summary.txt"
+        )
         path, _ = lib.get_save_filename_ext_dialog(
             self, "Save fitting summary", out_path, filter="*.txt"
         )
@@ -3940,7 +3944,7 @@ class SimulationsTab(lib.Dialog):
 
         # check if the molecules are to be saved
         if self.save_sim_result_check.isChecked():
-            out_path = self.structures_path.replace(".yaml", "_sim.hdf5")
+            out_path = os.path.splitext(self.structures_path)[0] + "_sim.hdf5"
             path, _ = lib.get_save_filename_ext_dialog(
                 self,
                 "Save positions of simulated molecules",
@@ -4461,7 +4465,7 @@ class SimulationsTab(lib.Dialog):
         if not (len(self.nnd_hist_data_exp) or len(self.nnd_hist_data_sim)):
             return
 
-        out_path = self.structures_path.replace(".yaml", "_NND")
+        out_path = os.path.splitext(self.structures_path)[0] + "_NND"
         path, ext = lib.get_save_filename_ext_dialog(
             self, "Save NND plots", out_path, filter="*.png;;*.svg"
         )
@@ -4533,7 +4537,7 @@ class SimulationsTab(lib.Dialog):
         if not (len(self.nnd_hist_data_exp) or len(self.nnd_hist_data_sim)):
             return
 
-        out_path = self.structures_path.replace(".yaml", "_NND_values")
+        out_path = os.path.splitext(self.structures_path)[0] + "_NND_values"
         path, ext = lib.get_save_filename_ext_dialog(
             self,
             "Save NND values",
@@ -4568,7 +4572,7 @@ class SimulationsTab(lib.Dialog):
                         i
                     ]["counts"][nn]
                 # save simulation data
-                outpath_sim = path.replace(".csv", f"_{t1}_{t2}_sim.csv")
+                outpath_sim = os.path.splitext(path)[0] + f"_{t1}_{t2}_sim.csv"
                 df = pd.DataFrame(data_sim)
                 df.to_csv(outpath_sim, index=False)
 
@@ -4584,7 +4588,7 @@ class SimulationsTab(lib.Dialog):
                         i
                     ]["counts"][nn]
                 # save experimental data
-                outpath_exp = path.replace(".csv", f"_{t1}_{t2}_exp.csv")
+                outpath_exp = os.path.splitext(path)[0] + f"_{t1}_{t2}_exp.csv"
                 df = pd.DataFrame(data_exp)
                 df.to_csv(outpath_exp, index=False)
 

@@ -790,8 +790,8 @@ class DatasetDialog(lib.Dialog):
     def save_colors(self) -> None:
         """Save the list of colors as a .yaml file."""
         colornames = [_.currentText() for _ in self.colorselection]
-        out_path = self.window.view.locs_paths[0].replace(
-            ".hdf5", "_colors.txt"
+        out_path = (
+            os.path.splitext(self.window.view.locs_paths[0])[0] + "_colors.txt"
         )
         path, ext = lib.get_save_filename_ext_dialog(
             self, "Save colors to", out_path, filter="*.txt"
@@ -2471,9 +2471,10 @@ class G5MDialog(lib.Dialog):
     def load_calibration_(self, path: str) -> None:
         """Load calibration from the given path."""
         # picasso.io.load_info takes in .hdf5 path
-        calib = io.load_info(path.replace(".yaml", ".hdf5"))
+        info_path = os.path.splitext(path)[0] + ".hdf5"
+        calib = io.load_calibration(path)
 
-        if len(calib) != 1 or "X Coefficients" not in calib[0].keys():
+        if "X Coefficients" not in calib.keys():
             message = (
                 "Please load a 3D calibration .yaml file produced by"
                 " Picasso: Localize."
@@ -2481,7 +2482,7 @@ class G5MDialog(lib.Dialog):
             QtWidgets.QMessageBox.information(self.window, "Warning", message)
             return
 
-        self.calibration = calib[0]
+        self.calibration = calib
         self.buttons.buttons()[0].setEnabled(True)
         self.load_calib_button.setText("3D calibration loaded")
 
@@ -2933,9 +2934,8 @@ class TestClustererDialog(lib.Dialog):
                 return
             channels = list(range(channels))
             paths = [
-                self.window.view.locs_paths[ch].replace(
-                    ".hdf5", f"_{suffix}.hdf5"
-                )
+                os.path.splitext(self.window.view.locs_paths[ch])[0]
+                + f"_{suffix}.hdf5"
                 for ch in channels
             ]
         else:
@@ -2944,9 +2944,8 @@ class TestClustererDialog(lib.Dialog):
             path, ext = lib.get_save_filename_ext_dialog(
                 self,
                 "Save clustered localizations",
-                self.window.view.locs_paths[channels[0]].replace(
-                    ".hdf5", "_clustered.hdf5"
-                ),
+                os.path.splitext(self.window.view.locs_paths[channels[0]])[0]
+                + "_clustered.hdf5",
                 filter="*.hdf5",
                 check_ext=[".yaml"],
             )
@@ -3002,9 +3001,8 @@ class TestClustererDialog(lib.Dialog):
             )
             # save clustered locs and centers
             io.save_locs(path, clustered_locs, info=new_info)
-            io.save_locs(
-                path.replace(".hdf5", "_centers.hdf5"), centers, info=new_info
-            )
+            centers_path = os.path.splitext(path)[0] + "_centers.hdf5"
+            io.save_locs(centers_path, centers, info=new_info)
 
 
 class TestDBSCANParams(QtWidgets.QWidget):
@@ -3260,15 +3258,15 @@ class TestG5MParams(QtWidgets.QWidget):
         )
         if not path:
             return
-        calib = io.load_info(path.replace(".yaml", ".hdf5"))
-        if len(calib) != 1 or "X Coefficients" not in calib[0].keys():
+        calib = io.load_calibration(path)
+        if "X Coefficients" not in calib.keys():
             message = (
                 "Please load a 3D calibration .yaml file produced by"
                 " Picasso: Localize."
             )
             QtWidgets.QMessageBox.information(self.window, "Warning", message)
             return
-        self.calibration = calib[0]
+        self.calibration = calib
 
 
 class TestClustererView(QtWidgets.QLabel):
@@ -4023,9 +4021,8 @@ class InfoDialog(lib.Dialog):
                 path, ext = lib.get_save_filename_ext_dialog(
                     self,
                     "Save images",
-                    self.window.view.locs_paths[channel].replace(
-                        ".hdf5", "_frc_im.tif"
-                    ),
+                    os.path.splitext(self.window.view.locs_paths[channel])[0]
+                    + "_frc_im.tif",
                     filter="*.tif",
                     check_ext=["_1.tif", "_2.tif"],
                 )
@@ -4599,7 +4596,7 @@ class MaskSettingsDialog(lib.Dialog):
         )
         if path:
             np.save(path, self.mask)
-            png_path = path.replace(".npy", ".png")
+            png_path = os.path.splitext(path)[0] + ".png"
             pixmap = self.plots[2]._source_pixmap
             if pixmap:
                 pixmap.save(png_path)
@@ -4757,17 +4754,19 @@ class MaskSettingsDialog(lib.Dialog):
                 )
                 if ok2:
                     for channel in range(len(self.index_locs)):
-                        path_in = self.paths[channel].replace(
-                            ".hdf5", f"{suffix_in}.hdf5"
+                        path_in = (
+                            os.path.splitext(self.paths[channel])[0]
+                            + f"{suffix_in}.hdf5"
                         )
-                        path_out = self.paths[channel].replace(
-                            ".hdf5", f"{suffix_out}.hdf5"
+                        path_out = (
+                            os.path.splitext(self.paths[channel])[0]
+                            + f"{suffix_out}.hdf5"
                         )
                         self._save_locs(channel, path_in, path_out)
 
         else:  # save only the current channel
-            path_in = self.paths[self.channel].replace(
-                ".hdf5", "_mask_in.hdf5"
+            path_in = (
+                os.path.splitext(self.paths[self.channel])[0] + "_mask_in.hdf5"
             )
             path_in, ext = lib.get_save_filename_ext_dialog(
                 self,
@@ -4777,8 +4776,9 @@ class MaskSettingsDialog(lib.Dialog):
                 check_ext=".yaml",
             )
             if path_in:
-                path_out = self.paths[self.channel].replace(
-                    ".hdf5", "_mask_out.hdf5"
+                path_out = (
+                    os.path.splitext(self.paths[self.channel])[0]
+                    + "_mask_out.hdf5"
                 )
                 path_out, ext = lib.get_save_filename_ext_dialog(
                     self,
@@ -5288,7 +5288,7 @@ class RESIDialog(lib.Dialog):
         resi_path, ext = lib.get_save_filename_ext_dialog(
             self.window,
             "Save RESI cluster centers",
-            self.paths[0].replace(".hdf5", "_resi.hdf5"),
+            os.path.splitext(self.paths[0])[0] + "_resi.hdf5",
             filter="*.hdf5",
             check_ext=".yaml",
         )
@@ -6744,8 +6744,9 @@ class View(QtWidgets.QLabel):
                 )
                 if ok:
                     for channel in range(len(self.locs_paths)):
-                        path = self.locs_paths[channel].replace(
-                            ".hdf5", f"{suffix}.hdf5"
+                        path = (
+                            os.path.splitext(self.locs_paths[channel])[0]
+                            + f"{suffix}.hdf5"
                         )
                         self._dbscan(channel, path, **params)
             else:
@@ -6759,7 +6760,8 @@ class View(QtWidgets.QLabel):
                 path, ext = lib.get_save_filename_ext_dialog(
                     self,
                     "Save clustered locs",
-                    self.locs_paths[channel].replace(".hdf5", "_dbscan.hdf5"),
+                    os.path.splitext(self.locs_paths[channel])[0]
+                    + "_dbscan.hdf5",
                     filter="*.hdf5",
                     check_ext=check_ext,
                 )
@@ -6821,7 +6823,7 @@ class View(QtWidgets.QLabel):
         status.close()
         if save_centers:
             status = lib.StatusDialog("Calculating cluster centers", self)
-            path = path.replace(".hdf5", "_centers.hdf5")
+            path = os.path.splitext(path)[0] + "_centers.hdf5"
             centers = clusterer.find_cluster_centers(locs, pixelsize=pixelsize)
             io.save_locs(path, centers, self.infos[channel] + [dbscan_info])
             status.close()
@@ -6836,7 +6838,7 @@ class View(QtWidgets.QLabel):
             areas = clusterer.cluster_areas(
                 locs, self.infos[channel], progress.set_value
             )
-            path = path.replace(".hdf5", "_areas.csv")
+            path = os.path.splitext(path)[0] + "_areas.csv"
             areas.to_csv(path, index=False)
             progress.close()
 
@@ -6859,8 +6861,9 @@ class View(QtWidgets.QLabel):
                 )
                 if ok:
                     for channel in range(len(self.locs_paths)):
-                        path = self.locs_paths[channel].replace(
-                            ".hdf5", f"{suffix}.hdf5"
+                        path = (
+                            os.path.splitext(self.locs_paths[channel])[0]
+                            + f"{suffix}.hdf5"
                         )
                         self._hdbscan(channel, path, **params)
             else:
@@ -6874,10 +6877,8 @@ class View(QtWidgets.QLabel):
                 path, ext = lib.get_save_filename_ext_dialog(
                     self,
                     "Save clustered locs",
-                    self.locs_paths[channel].replace(
-                        ".hdf5",
-                        "_hdbscan.hdf5",
-                    ),
+                    os.path.splitext(self.locs_paths[channel])[0]
+                    + "_hdbscan.hdf5",
                     filter="*.hdf5",
                     check_ext=check_ext,
                 )
@@ -6941,7 +6942,7 @@ class View(QtWidgets.QLabel):
         status.close()
         if save_centers:
             status = lib.StatusDialog("Calculating cluster centers", self)
-            path = path.replace(".hdf5", "_centers.hdf5")
+            path = os.path.splitext(path)[0] + "_centers.hdf5"
             centers = clusterer.find_cluster_centers(locs, pixelsize=pixelsize)
             io.save_locs(path, centers, self.infos[channel] + [hdbscan_info])
             status.close()
@@ -6956,7 +6957,7 @@ class View(QtWidgets.QLabel):
             areas = clusterer.cluster_areas(
                 locs, self.infos[channel], progress.set_value
             )
-            path = path.replace(".hdf5", "_areas.csv")
+            path = os.path.splitext(path)[0] + "_areas.csv"
             areas.to_csv(path, index=False)
             progress.close()
 
@@ -6987,9 +6988,10 @@ class View(QtWidgets.QLabel):
                 )
                 if ok:
                     for channel in range(len(self.locs_paths)):
-                        path = self.locs_paths[channel].replace(
-                            ".hdf5", f"{suffix}.hdf5"
-                        )  # add the suffix to the current path
+                        path = (
+                            os.path.splitext(self.locs_paths[channel])[0]
+                            + f"{suffix}.hdf5"
+                        )
                         self._smlm_clusterer(channel, path, **params)
             else:
                 # get the path to save
@@ -7002,9 +7004,8 @@ class View(QtWidgets.QLabel):
                 path, ext = lib.get_save_filename_ext_dialog(
                     self,
                     "Save clustered locs",
-                    self.locs_paths[channel].replace(
-                        ".hdf5", "_clustered.hdf5"
-                    ),
+                    os.path.splitext(self.locs_paths[channel])[0]
+                    + "_clustered.hdf5",
                     filter="*.hdf5",
                     check_ext=check_ext,
                 )
@@ -7073,7 +7074,7 @@ class View(QtWidgets.QLabel):
         # save cluster centers
         if save_centers:
             status = lib.StatusDialog("Calculating cluster centers", self)
-            path = path.replace(".hdf5", "_centers.hdf5")
+            path = os.path.splitext(path)[0] + "_centers.hdf5"
             centers = clusterer.find_cluster_centers(clustered_locs, pixelsize)
             io.save_locs(path, centers, info)
             status.close()
@@ -7088,7 +7089,7 @@ class View(QtWidgets.QLabel):
             areas = clusterer.cluster_areas(
                 locs, self.infos[channel], progress.set_value
             )
-            path = path.replace(".hdf5", "_areas.csv")
+            path = os.path.splitext(path)[0] + "_areas.csv"
             areas.to_csv(path, index=False)
             progress.close()
 
@@ -7150,13 +7151,13 @@ class View(QtWidgets.QLabel):
                 return
 
             for i in range(len(self.locs)):
-                path_mols = self.locs_paths[i].replace(
-                    ".hdf5", f"{suffix_molecules}.hdf5"
+                path_mols = (
+                    os.path.splitext(self.locs_paths[i])[0]
+                    + f"{suffix_molecules}.hdf5"
                 )
                 path_clusters = (
-                    self.locs_paths[i].replace(
-                        ".hdf5", f"{suffix_clusters}.hdf5"
-                    )
+                    os.path.splitext(self.locs_paths[i])[0]
+                    + f"{suffix_clusters}.hdf5"
                     if params["clustered_locs"]
                     else ""
                 )
@@ -7218,7 +7219,7 @@ class View(QtWidgets.QLabel):
             lib.plot_subclustering_check(
                 clust_events,
                 sparse_events,
-                path_molecules.replace(".hdf5", "_subcluster_check.png"),
+                os.path.splitext(path_molecules)[0] + "_subcluster_check.png",
                 clustering_dist=clustering_dist,
                 sparse_dist=sparse_dist,
             )
@@ -7226,7 +7227,7 @@ class View(QtWidgets.QLabel):
             lib.plot_rel_sigma_check(
                 g5m_centers,
                 info,
-                path_molecules.replace(".hdf5", "_relsigma_check.png"),
+                os.path.splitext(path_molecules)[0] + "_relsigma_check.png",
             )
             if params["clustered_locs"]:
                 if clustered_locs is not None:
@@ -7712,7 +7713,7 @@ class View(QtWidgets.QLabel):
         channel separately."""
         kwargs = self.get_render_kwargs()
         for i, locs in enumerate(self.all_locs):
-            path = self.locs_paths[i].replace(".hdf5", suffix)
+            path = os.path.splitext(self.locs_paths[i])[0] + suffix
             # render like in self.render_scene
             vmin = self.window.display_settings_dlg.minimum.value()
             vmax = self.window.display_settings_dlg.maximum.value()
@@ -7752,13 +7753,13 @@ class View(QtWidgets.QLabel):
             # save metadata
             info = self.window.export_current_info(path=None)
             info["Colormap"] = "gray"
-            io.save_info(path.replace(".png", ".yaml"), [info])
+            io.save_info(os.path.splitext(path)[0] + ".yaml", [info])
 
             # save a copy with scale bar if not present
             scalebar_box = self.window.display_settings_dlg.scalebar_groupbox
             scalebar = scalebar_box.isChecked()
             if not scalebar:
-                spath = path.replace(".png", "_scalebar.png")
+                spath = os.path.splitext(path)[0] + "_scalebar.png"
                 scalebar_box.setChecked(True)
                 self.set_optimal_scalebar(force=True)
                 qimage_scale = self.draw_scalebar(qimage)
@@ -8335,7 +8336,7 @@ class View(QtWidgets.QLabel):
         path, ext = lib.get_save_filename_ext_dialog(
             self,
             "Save nearest neighbor distances",
-            self.locs_paths[channel1].replace(".hdf5", "_nn.hdf5"),
+            os.path.splitext(self.locs_paths[channel1])[0] + "_nn.hdf5",
             filter="*.hdf5",
             check_ext=".yaml",
         )
@@ -9888,7 +9889,7 @@ class View(QtWidgets.QLabel):
                 }
                 self._add_shape_specific_info(pick_info)
                 io.save_locs(
-                    path.replace(".hdf5", f"_{i}.hdf5"),
+                    os.path.splitext(path)[0] + f"_{i}.hdf5",
                     pick_locs,
                     self.infos[channel] + [pick_info],
                 )
@@ -9951,7 +9952,7 @@ class View(QtWidgets.QLabel):
                 }
                 self._add_shape_specific_info(pick_info)
                 io.save_locs(
-                    path.replace(".hdf5", f"_{i}.hdf5"),
+                    os.path.splitext(path)[0] + f"_{i}.hdf5",
                     pick_locs,
                     self.infos[channel] + [pick_info],
                 )

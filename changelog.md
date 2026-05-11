@@ -16,6 +16,7 @@ Last change: 11-MAY-2026 CEST
 - Filter: apply filtering steps from metadata
 - Average: added abort
 - Average: save better metadata
+- `path.replace()` is no longer use to change the extension of the path (safer approach)
 
 ## 0.10.0
 

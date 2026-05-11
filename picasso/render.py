@@ -13,6 +13,7 @@ scale bar and picks.
 
 from __future__ import annotations
 
+import os
 from typing import Literal, Callable
 
 import numba
@@ -3443,7 +3444,8 @@ def _build_animation(
         "Viewports at checkpoints (camera pixels)": viewports_yaml,
         "Durations (s)": durations,
     }
-    io.save_info(path.replace(".mp4", ".yaml"), [anim_settings])
+    info_path = os.path.splitext(path)[0] + ".yaml"
+    io.save_info(info_path, [anim_settings])
 
 
 def _adjust_disp_px_size(

@@ -2754,12 +2754,13 @@ class Window(QtWidgets.QMainWindow):
             self.movie, self.identifications, box, self.camera_info
         )
         info = self.info + [self.last_identification_info | self.camera_info]
+        info_path = os.path.splitext(path)[0] + ".yaml"
         if path.endswith(".npy"):
             np.save(path, spots)
-            io.save_info(path.replace(".npy", ".yaml"), info)
+            io.save_info(info_path, info)
         elif path.endswith(".tif"):
             imageio.mimwrite(path, spots.astype("float32"))
-            io.save_info(path.replace(".tif", ".yaml"), info)
+            io.save_info(info_path, info)
 
     def save_spots_dialog(self) -> None:
         """Get the path for saving identified spots."""

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import itertools
 import multiprocessing
+import os
 import warnings
 from collections import OrderedDict
 from collections.abc import Callable
@@ -3855,7 +3856,9 @@ def _resi(
 
         # Save clustered localizations if requested
         if save_clustered_locs and output_paths is not None:
-            save_path = output_paths[i].replace(".hdf5", f"{suffix_locs}.hdf5")
+            save_path = (
+                os.path.splitext(output_paths[i])[0] + f"{suffix_locs}.hdf5"
+            )
             io.save_locs(save_path, clustered_locs, info_ + [new_info])
 
         # Extract cluster centers from clustered localizations
@@ -3863,8 +3866,8 @@ def _resi(
 
         # Save cluster centers if requested
         if save_cluster_centers and output_paths is not None:
-            save_path = output_paths[i].replace(
-                ".hdf5", f"{suffix_centers}.hdf5"
+            save_path = (
+                os.path.splitext(output_paths[i])[0] + f"{suffix_centers}.hdf5"
             )
             io.save_locs(save_path, centers, info_ + [new_info])
 

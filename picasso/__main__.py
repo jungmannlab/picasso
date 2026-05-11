@@ -1464,7 +1464,8 @@ def _spinna_validate_parameters(
 
     parameters = pd.read_csv(parameters_filename)
 
-    result_dir = parameters_filename.replace(".csv", "_fitting_results")
+    path, ext = os.path.splitext(parameters_filename)
+    result_dir = path + "__fitting_results"
     if os.path.isdir(result_dir):
         i = 1
         while True:
@@ -1605,8 +1606,9 @@ def _spinna_build_mixer(
     z_range,
 ):
     """Build a ``StructureMixer`` from resolved ROI and target data."""
-    import numpy as np
+    import os
     import yaml
+    import numpy as np
 
     if apply_mask:
         masks: dict = {}
@@ -1614,8 +1616,9 @@ def _spinna_build_mixer(
         width = height = depth = None
         for target in targets:
             masks[target] = np.load(mask_paths[target])
+            mask_path = os.path.splitext(mask_paths[target])[0] + ".yaml"
             mask_info[target] = yaml.load(
-                open(mask_paths[target].replace(".npy", ".yaml"), "r"),
+                open(mask_path, "r"),
                 Loader=yaml.FullLoader,
             )
         mask_dict = {"mask": masks, "info": mask_info}
@@ -2045,7 +2048,7 @@ def _g5m(
     """G5M analysis of clustered localizations. See ``picasso.g5m.g5m``
     for details on the parameters."""
     from glob import glob
-    from os.path import isdir
+    from os.path import isdir, splitext
     import yaml
     from .io import load_locs, save_locs
     from .g5m import g5m
@@ -2082,7 +2085,8 @@ def _g5m(
             asynch=asynch,
             callback_parent="console",
         )
-        save_locs(path.replace(".hdf5", "_molmap.hdf5"), mols, g5m_info)
+        new_path = splitext(path)[0] + "_molmap.hdf5"
+        save_locs(new_path, mols, g5m_info)
 
 
 def main():  # noqa: C901
