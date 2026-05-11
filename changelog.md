@@ -25,6 +25,7 @@ Last change: 11-MAY-2026 CEST
 - Fixed reading .ims movies
 - Fixed spot saving
 - Localization markers (green crosses) in the GUI are not affected by drift correction (only visual improvement)
+- CLI `picasso localize <files>` allows for MLE fitting for 3D (z-fitting still as per Huang et al, 2008.)
 
 #### Render
 - Faster ind. loc. precision rendering in 3D

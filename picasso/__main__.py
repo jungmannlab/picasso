@@ -1026,6 +1026,7 @@ _FIT_METHOD_MAP = {
     "lq-gpu": "gausslq-gpu",
     "lq-gpu-3d": "gausslq-gpu",
     "mle": "gaussmle",
+    "mle-3d": "gaussmle",
     "avg": "avg",
 }
 
@@ -1093,11 +1094,12 @@ def _localize_process_file(
         z_calibration["Magnification Factor"] = magnification_factor
         print("------------------------------------------")
         print("Fitting 3D...")
+        method = "gausslq" if "mle" not in args.fit_method else "gaussmle"
         locs, info = zfit.zfit(
             locs=locs,
             info=info,
             calibration=z_calibration,
-            fitting_method="gausslq",
+            fitting_method=method,
             filter=0,
             multiprocess=True,
             progress_callback="console",
@@ -1226,7 +1228,7 @@ def _localize(args: argparse.Namespace) -> None:  # noqa: C901
         max_iterations = 0
 
     z_params = None
-    if args.fit_method in ("lq-3d", "lq-gpu-3d"):
+    if "-3d" in args.fit_method:
         z_params = _localize_load_3d_calibration(args)
 
     for i, path in enumerate(paths):
