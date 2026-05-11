@@ -2043,7 +2043,7 @@ def main():  # noqa: C901
     localize_parser.add_argument(
         "-a",
         "--fit-method",
-        choices=["mle", "lq", "lq-gpu", "lq-3d", "lq-gpu-3d", "avg"],
+        choices=["mle", "lq", "lq-gpu", "lq-3d", "lq-gpu-3d", "mle-3d", "avg"],
         default="mle",
     )
     localize_parser.add_argument(
