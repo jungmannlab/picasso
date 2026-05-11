@@ -5,6 +5,7 @@ Last change: 11-MAY-2026 CEST
 ## 0.10.1
 
 - Localize: save and load identifications
+- Localize: export current view is less pixelated
 - Render: plot profile with adjustable bin width
 - Render GUI: added attribute 'pixelsize' in View for cleaner code
 - Render GUI: use precomputed index blocks for faster circular picked locs calculation

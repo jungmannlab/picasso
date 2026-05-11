@@ -2787,13 +2787,27 @@ class Window(QtWidgets.QMainWindow):
             self, "Save image", out_path, filter="*.png;;*.tif"
         )
         if path:
-            qimage = QtGui.QImage(
-                self.scene.itemsBoundingRect().size().toSize(),
-                QtGui.QImage.Format.Format_ARGB32,
+            visible_scene_rect = self.view.mapToScene(
+                self.view.viewport().rect()
+            ).boundingRect()
+            scene_rect = visible_scene_rect.intersected(
+                self.scene.itemsBoundingRect()
             )
+            scale = self.view.transform().m11()
+            size = QtCore.QSize(
+                max(1, int(round(scene_rect.width() * scale))),
+                max(1, int(round(scene_rect.height() * scale))),
+            )
+            qimage = QtGui.QImage(size, QtGui.QImage.Format.Format_ARGB32)
             qimage.fill(QtGui.QColor("transparent"))
             painter = QtGui.QPainter(qimage)
-            self.view.render(painter)
+            painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
+            self.scene.render(
+                painter,
+                QtCore.QRectF(qimage.rect()),
+                scene_rect,
+                QtCore.Qt.AspectRatioMode.KeepAspectRatio,
+            )
             painter.end()
             qimage.save(path)
         self.view.setMinimumSize(1, 1)
