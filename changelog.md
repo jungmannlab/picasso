@@ -24,6 +24,7 @@ Last change: 11-MAY-2026 CEST
 - Documentation updated relating to the file menu features, such as loading picks as identifications
 - Fixed reading .ims movies
 - Fixed spot saving
+- Localization markers (green crosses) in the GUI are not affected by drift correction (only visual improvement)
 
 #### Render
 - Faster ind. loc. precision rendering in 3D
