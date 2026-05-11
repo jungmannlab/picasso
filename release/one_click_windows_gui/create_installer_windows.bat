@@ -40,8 +40,11 @@ call pyinstaller "../pyinstaller/picasso_pyinstaller.py" ^
     --icon "../logos/localize.ico" ^
     --noconfirm
 
+call DEL /F/Q picasso.spec
+call DEL /F/Q picassow.spec
+
 call conda deactivate
-call conda remove -n picasso_installer --all -y
+call conda env remove -n picasso_installer -y
 
 copy dist\picassow\picassow.exe dist\picasso\picassow.exe
 call "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DAPP_VERSION=%PICASSO_VERSION% picasso_innoinstaller.iss
