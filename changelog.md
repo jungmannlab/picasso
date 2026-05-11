@@ -57,6 +57,7 @@ Last change: 11-MAY-2026 CEST
 - Two new fitting methods for fast fitting instead of the brute force search, see [documentation](https://picassosr.readthedocs.io/en/latest/spinna.html#fitting)
 - User-defined threshold for the binary mask
 - Loading new structures in the Simulate tab without changing targets does not reset the window
+- Fixed .svg saving in the one-click-installer app
 
 #### *Other improvements:*
 - Picasso: Filter supports .csv export (not only hdf5)
