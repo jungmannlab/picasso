@@ -3396,26 +3396,28 @@ class SimulationsTab(lib.Dialog):
         estimated_time = self.estimate_fit_time(n)
         self.fit_button.setText(
             f"Find best fitting combination (# tested combinations: {n})"
-            f"\nEstimated time (hh:mm:ss): {estimated_time}"
+            f"\nEstimated time: {estimated_time}"
         )
 
     def estimate_fit_time(self, n: int) -> str:
-        """Estimate the time it takes to fit n combinations of numbers
-        of structures. Assumes that StructureMixer and other necessary
-        parameters are set.
+        """Estimate the time it takes to fit ``n`` combinations of
+        numbers of structures, accounting for the currently selected
+        fitting mode (brute-force / coarse-to-fine / Bayesian) and
+        multiprocessing setting. Assumes that StructureMixer and other
+        necessary parameters are set.
 
         Parameters
         ----------
         n : int
-            Number of combinations of numbers of structures to fit.
+            Size of the search space (number of combinations).
 
         Returns
         -------
         estimated_time : str
-            Estimated time in hours, minutes and seconds.
+            Human-readable estimate (e.g. ``"1h 23m 45s"``).
         """
         if n < 1:
-            return "--:--:--"
+            return "—"
 
         # prepare n structures for a single fit
         N_structures = np.zeros((1, len(self.structures)), dtype=np.int32)
@@ -3425,10 +3427,9 @@ class SimulationsTab(lib.Dialog):
         # set up the mixer
         mixer = self.setup_mixer(mode="fit")
         if mixer is None:
-            return "--:--:--"
+            return "—"
 
-        # fit a single combination of structures' counts and measure
-        # the time
+        # measure the time of a single evaluation
         t0 = time.time()
         spinner = spinna.SPINNA(
             mixer=mixer,
@@ -3436,20 +3437,49 @@ class SimulationsTab(lib.Dialog):
             N_sim=self.n_sim_fit,
         )
         _ = spinner.NN_scorer(N_structures)
-        dt = time.time() - t0
+        dt_single = time.time() - t0
 
-        # estimate the time for n combinations with a certain number of CPUs;
-        # 0.8 is a correction factor for delays in multiprocessing
-        # (rough approximation)
-        n_cpus = cpu_count()
-        dt *= n / (n_cpus * 0.8 * 0.8)
+        # number of evaluations and parallelism per fitting mode
+        mode = self.settings_dialog.fitting_mode.currentText()
+        use_async = self.settings_dialog.asynch_check.isChecked()
+        if mode == "Coarse to fine":
+            # coarse pass = 10% of the search space; the fine pass is
+            # data-dependent — approximate it with the same count as
+            # the coarse pass for a rough total
+            n_coarse = max(2, int(n * 0.1))
+            n_evals = 2 * n_coarse
+            parallel = use_async
+        elif mode == "Bayesian":
+            # 20 initial + up to 80 GP-guided iterations (capped by n),
+            # see spinna.SPINNA.fit_bayesian; single-threaded only
+            n_evals = min(20 + 80, n)
+            parallel = False
+        else:  # "Brute force" (and fallback)
+            n_evals = n
+            parallel = use_async
 
-        # convert the time to hours, minutes and seconds
-        hours = int(dt // 3600)
-        minutes = int((dt - hours * 3600) // 60)
-        seconds = int(dt - hours * 3600 - minutes * 60)
-        estimated_time = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
-        return estimated_time
+        # 0.8 is a rough correction for multiprocessing overhead
+        if parallel:
+            total_dt = dt_single * n_evals / (cpu_count() * 0.8 * 0.8)
+        else:
+            total_dt = dt_single * n_evals
+
+        return self._format_duration(total_dt)
+
+    @staticmethod
+    def _format_duration(seconds: float) -> str:
+        """Format ``seconds`` as a compact string (e.g. ``"1h 23m 45s"``,
+        ``"2m 15s"``, ``"45s"``)."""
+        if seconds < 1:
+            return "<1s"
+        total = int(round(seconds))
+        h, rem = divmod(total, 3600)
+        m, s = divmod(rem, 60)
+        if h:
+            return f"{h}h {m:02d}m {s:02d}s"
+        if m:
+            return f"{m}m {s:02d}s"
+        return f"{s}s"
 
     @check_structures_loaded
     def load_search_space(self) -> None:
@@ -3492,7 +3522,7 @@ class SimulationsTab(lib.Dialog):
                 estimated_time = self.estimate_fit_time(n)
                 self.fit_button.setText(
                     "Find best fitting combination (# tested combinations:"
-                    f" {n})\nEstimated time (hh:mm:ss): {estimated_time}"
+                    f" {n})\nEstimated time: {estimated_time}"
                 )
             else:  # display a warning
                 message = (
