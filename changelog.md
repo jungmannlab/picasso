@@ -15,6 +15,7 @@ Last change: 11-MAY-2026 CEST
 - Render: faster non-circle picking by smarter indexing
 - Filter: apply filtering steps from metadata
 - Average: added abort
+- Average: save better metadata
 
 ## 0.10.0
 

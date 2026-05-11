@@ -154,6 +154,9 @@ class View(QtWidgets.QLabel):
 
     Attributes
     ----------
+    avg_history : list of dicts
+        Stores the used display pixel size and iterations across
+        multiple rounds of averaging.
     _pixmap : QtGui.QPixmap
         Pixmap for displaying the averaged image.
     running : bool
@@ -173,6 +176,7 @@ class View(QtWidgets.QLabel):
         self._pixmap = None
         self.running = False
         self.thread = None
+        self.avg_history = []
 
     def average(self):
         if not self.running:
@@ -218,6 +222,13 @@ class View(QtWidgets.QLabel):
         if self.thread is not None and self.thread.was_aborted:
             self.window.statusBar().showMessage("Aborted.")
         else:
+            if self.thread is not None:
+                self.avg_history.append(
+                    {
+                        "disp_px_size": self.thread.display_px_size,
+                        "it": self.thread.iterations,
+                    }
+                )
             self.window.statusBar().showMessage("Done!")
         self.running = False
         self.window.abort_action.setEnabled(False)
@@ -256,6 +267,7 @@ class View(QtWidgets.QLabel):
             self.locs, self.info = io.load_locs(path, qt_parent=self)
         except io.NoMetadataFileError:
             return
+        self.avg_history = []
         if "group" not in self.locs.columns:
             message = (
                 "Loaded file contains no group information. Please load"
@@ -285,7 +297,20 @@ class View(QtWidgets.QLabel):
         path : str
             Path to save localizations.
         """
-        out_locs, info = average.prepare_locs_for_save(self.locs, self.info)
+        display_pixel_size = self.window.parameters_dialog.disp_px_size.value()
+        iterations = self.window.parameters_dialog.iterations.value()
+        params = {"disp_px_size": display_pixel_size, "it": iterations}
+        out_locs, info = average.prepare_locs_for_save(
+            self.locs, self.info, params
+        )
+        if self.avg_history:
+            info[-1]["Rounds"] = [
+                {
+                    "Display pixel size (nm)": r["disp_px_size"],
+                    "Iterations": r["it"],
+                }
+                for r in self.avg_history
+            ]
         io.save_locs(path, out_locs, info)
         self.window.statusBar().showMessage(f"File saved to {path}.")
 
