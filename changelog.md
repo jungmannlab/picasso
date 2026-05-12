@@ -40,6 +40,8 @@ Last change: 11-MAY-2026 CEST
 - Documentation updated relating to the file menu features, such as loading picks as identifications
 - Fixed reading .ims movies
 - Fixed spot saving
+- Localization markers (green crosses) in the GUI are not affected by drift correction (only visual improvement)
+- CLI `picasso localize <files>` allows for MLE fitting for 3D (z-fitting still as per Huang et al, 2008.)
 
 #### Render
 - Faster ind. loc. precision rendering in 3D
@@ -62,6 +64,7 @@ Last change: 11-MAY-2026 CEST
 - Trace shows number of photons in addition to x, y and frame; exports .csv files with three columns (frame, ON/OFF and photons)
 - 3D rotation window supports rendering by property
 - Apply drift from external file supports dropping the .txt file onto the window
+- Show drift keeps x and y coords to scale (on the second plot)
 - Fixed distances in NeNA plot (previously plotting multiple times kept increasing the values)
 - Fixed 3D screenshot metadata
 - Fixed 3D animation for non-square FOV
@@ -73,6 +76,7 @@ Last change: 11-MAY-2026 CEST
 - Two new fitting methods for fast fitting instead of the brute force search, see [documentation](https://picassosr.readthedocs.io/en/latest/spinna.html#fitting)
 - User-defined threshold for the binary mask
 - Loading new structures in the Simulate tab without changing targets does not reset the window
+- Fixed .svg saving in the one-click-installer app
 
 #### *Other improvements:*
 - Picasso: Filter supports .csv export (not only hdf5)
@@ -102,6 +106,7 @@ Last change: 11-MAY-2026 CEST
 - Several new depedencies have been added. If Picasso is installed via PyPI (`pip install picassosr`) or one-click-installer, no action needs to be taken. **Otherwise please install them when updating Picasso to v0.10.0**. The dependencies are: `tifffile`, `hdf5plugin` (only for Windows to read .ims files). Additionally `PyQt5` was updated to `PyQt6`.
 - `picasso.spinna.SPINNA.fit` accepts all inputs as keyword arguments (except for `N_structures`).
 - Names of nearly all functions in `picasso.g5m` and some in `picasso.zfit` have been changed (underscore added to prefix as private functions). The main functions in these scripts were left unchanged: `g5m.g5m`, `zfit.zfit`. Functions `zfit.fit_z` and `zfit.fit_z_parallel` are deprecated, see below.
+- Cluster centers (DBSCAN, HDBSCAN, SMLM clusterer) save number of localizations per cluster as `n_locs`, not `n`.
 
 #### *Deprecation warnings:*
 

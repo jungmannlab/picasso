@@ -21,6 +21,7 @@ call pyinstaller "../pyinstaller/picasso_pyinstaller.py" ^
     --collect-all streamlit ^
     --collect-all numba ^
     --collect-all llvmlite ^
+    --collect-submodules matplotlib.backends ^
     --copy-metadata streamlit ^
     --copy-metadata imageio ^
     --name picasso ^
@@ -34,6 +35,7 @@ call pyinstaller "../pyinstaller/picasso_pyinstaller.py" ^
     --collect-all streamlit ^
     --collect-all numba ^
     --collect-all llvmlite ^
+    --collect-submodules matplotlib.backends ^
     --copy-metadata streamlit ^
     --copy-metadata imageio ^
     --name picassow ^

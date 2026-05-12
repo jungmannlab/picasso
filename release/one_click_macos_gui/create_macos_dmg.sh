@@ -68,6 +68,7 @@ pyinstaller "$PYINSTALLER_FILE" \
     --collect-all picasso \
     --collect-all streamlit \
     --copy-metadata streamlit \
+    --collect-submodules matplotlib.backends \
     --name picasso \
     --icon ../logos/localize.icns \
     --distpath "$DIST_DIR" \

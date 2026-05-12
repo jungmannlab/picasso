@@ -1660,6 +1660,10 @@ class Window(QtWidgets.QMainWindow):
         self.identifications = None
         self.ready_for_fit = False
         self.locs = None
+        # Snapshot of ``self.locs`` used to draw the FitMarker overlay.
+        # Kept separate so drift correction can mutate ``self.locs``
+        # without moving the markers shown on screen.
+        self.locs_display = None
         self.movie_path = []
         self.frame_range = None  # analyze all frames by default
         self.info = []
@@ -1936,6 +1940,7 @@ class Window(QtWidgets.QMainWindow):
             self.movie_path = path
             self.identifications = None
             self.locs = None
+            self.locs_display = None
             self.ready_for_fit = False
             self.set_frame(0)
             self.fit_in_view()
@@ -2092,6 +2097,7 @@ class Window(QtWidgets.QMainWindow):
         ]
         # assign gui attributes
         self.locs = None
+        self.locs_display = None
         self.loaded_picks = True
         self.last_identification_info = {
             "Box Size": self.parameters_dialog.box_spinbox.value(),
@@ -2236,9 +2242,9 @@ class Window(QtWidgets.QMainWindow):
                     )
                 else:
                     self.status_bar.showMessage("")
-            if self.locs is not None:
-                locs_frame = self.locs[
-                    self.locs.frame == self.curr_frame_number
+            if self.locs_display is not None:
+                locs_frame = self.locs_display[
+                    self.locs_display.frame == self.curr_frame_number
                 ]
                 for _, loc in locs_frame.iterrows():
                     self.scene.addItem(
@@ -2343,6 +2349,7 @@ class Window(QtWidgets.QMainWindow):
     def on_parameters_changed(self) -> None:
         """Reset ``self.locs`` and draw frame."""
         self.locs = None
+        self.locs_display = None
         self.ready_for_fit = False
         self.draw_frame()
 
@@ -2421,6 +2428,7 @@ class Window(QtWidgets.QMainWindow):
         self.abort_action.setEnabled(False)
         if len(identifications):
             self.locs = None
+            self.locs_display = None
             self.last_identification_info = parameters.copy()
             self.last_identification_info["ROI"] = roi
             self.last_identification_info["Frame bounds"] = self.frame_range
@@ -2533,6 +2541,7 @@ class Window(QtWidgets.QMainWindow):
             f"Fitted {len(locs):,} spots in {elapsed_time:.2f} seconds."
         )
         self.locs = locs
+        self.locs_display = locs
         self.draw_frame()
         # sound notification
         if elapsed_time > lib.SOUND_NOTIFICATION_DURATION:
@@ -2595,6 +2604,7 @@ class Window(QtWidgets.QMainWindow):
             "seconds."
         )
         self.locs = locs
+        self.locs_display = locs
         self.save_locs_after_fit()
         # sound notification
         if elapsed_time > lib.SOUND_NOTIFICATION_DURATION:
@@ -2624,7 +2634,10 @@ class Window(QtWidgets.QMainWindow):
         self, aim_check: bool, aim_segmentation: int, fiducial_check: bool
     ) -> None:
         """Apply drift correction to the fitted localizations and save
-        the drift-corrected localizations and the .txt drift files."""
+        the drift-corrected localizations and the .txt drift files.
+
+        ``self.locs_display`` is left untouched so the on-screen
+        FitMarker overlays stay at their pre-drift positions."""
         drift = None
 
         if aim_check:
