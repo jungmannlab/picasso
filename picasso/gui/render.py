@@ -3471,7 +3471,7 @@ class DriftPlotWindow(QtWidgets.QTabWidget):
     def plot(self, drift: pd.DataFrame) -> None:
         """Plot drift in 2D or 3D depending on the columns of the input
         DataFrame."""
-        pixelsize = self.parent.window.view.pixelsize
+        pixelsize = self.parent.pixelsize
         postprocess.plot_drift(drift, pixelsize, self.figure)
         self.canvas.draw()
 
@@ -4712,7 +4712,7 @@ class MaskSettingsDialog(lib.Dialog):
             _, self.H_new = render.render(
                 self.index_locs[-1],
                 {"Pixelsize": self.pixelsize},
-                oversampling=self.pixelsize / self.disp_px_size.value(),
+                disp_px_size=self.disp_px_size.value(),
                 viewport=((0, 0), (self.y_max, self.x_max)),
                 blur_method=None,
             )
