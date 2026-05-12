@@ -2,29 +2,13 @@
 
 Last change: 12-MAY-2026 CEST
 
-## 0.10.1
-
-- Localize: save and load identifications
-- Localize: export current view is less pixelated
-- Render: plot profile with adjustable bin width
-- Render GUI: added attribute 'pixelsize' in View for cleaner code
-- Render GUI: use precomputed index blocks for faster circular picked locs calculation
-- Render: Animation dialog allows unlimited positions
-- Render: fixed panning in 3D
-- Render: manual setting of scale bar switches off automatic scale bar length
-- Render: faster non-circle picking by smarter indexing
-- Filter: apply filtering steps from metadata
-- Average: added abort
-- Average: save better metadata
-- `path.replace()` is no longer use to change the extension of the path (safer approach)
-
 ## 0.10.0
 
 ### **General updates:**
 
 - Numerous new functions added in the API to simplify the more complicated analyses, for example, `picasso.localize.fit2D`
 - Installing Picasso as a package has less stringent dependencies and Python version requirements, the exact versions are specified for one-click-installers only
-- Almost all the functions in the GUI scripts (for example, `picasso.gui.render.py`) not related to GUI were moved to corresponding API scripts such that using Picasso as a Python package allows for easy analysis analogous to what GUI provides. For example, ``picasso.render.py`` does not only provide the function to generate a grayscale image of localizations only (like before) but can also be used to paint the same images as they are rendered (for example, with picks and scale bar)
+- Almost all the functions in the GUI scripts (for example, `picasso.gui.render.py`) not related to GUI were moved to corresponding API scripts such that using Picasso as a Python package allows for easy analysis analogous to what GUI provides. For example, ``picasso.render.py`` does not only provide the function to generate a grayscale image of localizations only (like before) but can also be used to paint the same images with a color map as they are rendered (for example, with picks and scale bar)
 - One-click installer uses Python 3.14 (previously 3.10) and updated dependencies, which should improve the performance of some functions
 - Easy access to user settings via any Picasso module
 - Expanded test suite (CI)
@@ -35,13 +19,15 @@ Last change: 12-MAY-2026 CEST
 - [GPUfit](https://github.com/gpufit/Gpufit) incorporated into Picasso (`picasso.ext.pygpufit`)
 - Localize supports .stk file format from MetaMorph (*experimental*)
 - Abort button to stop asynchronous multiprocessing (for example, during identification)
-- Fixed error box compatible with multiprocessed tasks
+- Error box compatible with multiprocessed tasks (clear error message)
+- Save and load identifications
 - Save spots as .tif, .npy, not .hdf5
 - Documentation updated relating to the file menu features, such as loading picks as identifications
 - Fixed reading .ims movies
 - Fixed spot saving
+- Export current view is less pixelated
 - Localization markers (green crosses) in the GUI are not affected by drift correction (only visual improvement)
-- CLI `picasso localize <files>` allows for MLE fitting for 3D (z-fitting still as per Huang et al, 2008.)
+- CLI `picasso localize <files>` allows for MLE fitting in 3D (z-fitting still as per Huang et al, 2008.)
 
 #### Render
 - Faster ind. loc. precision rendering in 3D
@@ -50,27 +36,33 @@ Last change: 12-MAY-2026 CEST
 - Test clustering allows for applying the current parameters to the whole dataset
 - Test clustering tool tips
 - G5M calculates more accurate sigma constraints in 3D
-- Plot localization profile for rectangular pick
-- Added support for reading .csv files from ThunderSTORM
+- Plot localizations profile for rectangular pick
+- Reading .csv files from ThunderSTORM
 - Mask settings dialog allows for zooming and panning
 - More accessible saving/loading of FOVs as .txt files
 - Show NeNA/FRC plot buttons automatically calculate them if not done already
-- Keyboard combo for closing all localizations (Ctrl+Shift+Backspace or Ctrl+Shift+Delete)
+- Keyboard shortcut for closing all localizations (Ctrl+Shift+Backspace or Ctrl+Shift+Delete)
 - Legend is displayed on black background for better visibility
 - Log-scaling of contrast
 - New image exporting with manually selected rendering options + support for .pdf and .svg formats
 - Optimal scale bar is only set upon user's request
 - Changed the name "Nearest Neighbor Analysis" to "Calculate nearest neighbor distances" for better clarity
+- Faster non-circle picking by smarter indexing
 - Trace shows number of photons in addition to x, y and frame; exports .csv files with three columns (frame, ON/OFF and photons)
-- 3D rotation window supports rendering by property
+- Manual setting of scale bar switches off automatic scale bar length
 - Apply drift from external file supports dropping the .txt file onto the window
 - Show drift keeps x and y coords to scale (on the second plot)
-- Fixed distances in NeNA plot (previously plotting multiple times kept increasing the values)
-- Fixed 3D screenshot metadata
+- 3D rotation window supports rendering by property
+- More intuitive rotation in 3D instead of simple rotations around xyz axes
+- Animation dialog allows unlimited positions
 - Fixed 3D animation for non-square FOV
+- Fixed distances in NeNA plot (previously plotting multiple times kept increasing the values)
+- Fixed panning in 3D
+- Fixed 3D screenshot metadata
 - Fixed pre-G5M group/max locs checks when applying to all channels
 - Fixed zero-value in rendered images (previously RGB channels were capped between 1 and 255 instead of 0 and 255)
 - Fixed default directory for applying drift from external file
+- Added attribute `pixelsize` in View for cleaner code
 
 #### SPINNA
 - Two new fitting methods for fast fitting instead of the brute force search, see [documentation](https://picassosr.readthedocs.io/en/latest/spinna.html#fitting)
@@ -78,19 +70,26 @@ Last change: 12-MAY-2026 CEST
 - Loading new structures in the Simulate tab without changing targets does not reset the window
 - Fixed .svg saving in the one-click-installer app
 
+#### Filter
+- Support for .csv export (not only hdf5)
+- Apply filtering steps from metadata
+
+#### Average
+- Abort button
+- Improved saved metadata
+- Adjusted default parameters
+
 #### *Other improvements:*
-- Picasso: Filter supports .csv export (not only hdf5)
 - Only `picasso.version.py` determines software version globally, thus `bumpversion` is not needed anymore
 - `picasso.lib.merge_locs` allows for flexible `frame` and `group` incrementing when merging localizations lists
 - New functions in the API `picasso.postprocess.undrift_from_fiducials` and `picasso.postprocess.apply_drift` that can be used to undrift localizations based on picked fiducials with or without user-specified picks and to apply the calculated drift to the localizations, respectively
 - New API for alignement of locs, see ``picasso.postprocess``: ``align_rcc`` and ``align_from_picked``
 - New function ``picasso.io.load_picks``
-- Adjusted default parameters in Picasso: Average
 - Adjusted installation instructions in README
-- Badges added to the GitHub repository (PyPI version and Python version)
+- Badges added to the GitHub repository (PyPI and Python versions, changelog)
 - Dialogs with scroll areas show no margins (e.g., Display settings dialog in Render)
 - Added help buttons to some dialogs/menu bars across the modules that open the corresponding readthedocs pages (the documentation will be further improved in the future)
-- "What's this?" help button removed from all dialogs (Windows)
+- "What's this?" help button removed from all dialogs (Windows) as it previously crashed Picasso
 - Changelog changed from .rst to markdown for GitHub display
 - Removed focus on push buttons in dialogs
 - Improved data typing of numpy arrays
@@ -100,6 +99,7 @@ Last change: 12-MAY-2026 CEST
 - CLI function `nneighbor` uses KDTree for higher speed
 - Picasso: Simulate (multilabel) saves label names as in "Exchange rounds to be simulated" rather than 0, 1, 2, ...
 - Fixed Picasso: ToRaw
+- `path.replace()` is no longer used to change the extension of the path (safer approach)
 
 ### **Backward incompatible changes:**
 
