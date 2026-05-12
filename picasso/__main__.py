@@ -2049,6 +2049,7 @@ def main():  # noqa: C901
         "--fit-method",
         choices=["mle", "lq", "lq-gpu", "lq-3d", "lq-gpu-3d", "mle-3d", "avg"],
         default="mle",
+        help="fitting method",
     )
     localize_parser.add_argument(
         "-g", "--gradient", type=int, default=5000, help="minimum net gradient"
@@ -2096,7 +2097,7 @@ def main():  # noqa: C901
         "--mf",
         type=float,
         default=0,
-        help="Magnification factor (only 3d)",
+        help="magnification factor (3D only)",
     )
     localize_parser.add_argument(
         "-px", "--pixelsize", type=int, default=130, help="pixelsize in nm"
@@ -2106,7 +2107,7 @@ def main():  # noqa: C901
         "--zc",
         type=str,
         default="",
-        help="Path to 3d calibration file (only 3d)",
+        help="path to 3D calibration file (3D only)",
     )
 
     localize_parser.add_argument(
@@ -2114,14 +2115,14 @@ def main():  # noqa: C901
         "--suffix",
         type=str,
         default="",
-        help="Suffix to add to files",
+        help="suffix to add to output files",
     )
 
     localize_parser.add_argument(
         "-db",
         "--database",
         action="store_true",
-        help="do not add to database",
+        help="add the run to the local database",
     )
 
     subparsers.add_parser("filter", help="filter raw files based on SNR (GUI)")
@@ -2324,7 +2325,7 @@ def main():  # noqa: C901
         "--roiradius",
         type=float,
         default=60 / 130,
-        help=("max. drift (cam. pixels) between two consecutive" " segments"),
+        help="max. drift (cam. pixels) between two consecutive segments",
     )
 
     # undrift by fiducials parser
@@ -2428,7 +2429,7 @@ def main():  # noqa: C901
         "radius",
         type=float,
         help=(
-            "maximal distance between to localizations"
+            "maximal distance between two localizations"
             " to be considered local"
         ),
     )
@@ -2449,7 +2450,7 @@ def main():  # noqa: C901
         "radius",
         type=float,
         help=(
-            "maximal distance (camera pixels) between to localizations"
+            "maximal distance (camera pixels) between two localizations"
             " to be considered local"
         ),
     )
@@ -2593,7 +2594,7 @@ def main():  # noqa: C901
     g5m_parser.add_argument(
         "--bootstrap-sem",
         action="store_true",
-        help="bootstrap to get SEM of mol. positions; 0 to disable",
+        help="bootstrap to estimate SEM of molecule positions",
     )
     g5m_parser.add_argument(
         "-c",
@@ -2709,7 +2710,7 @@ def main():  # noqa: C901
         "files",
         help=(
             "one or multiple hdf5 localization files"
-            "specified by a unix style path pattern"
+            " specified by a unix style path pattern"
         ),
     )
 
