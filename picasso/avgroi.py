@@ -5,8 +5,8 @@ picasso.avgroi
 Fits spots, i.e., finds the average of the pixels in a region of
 interest (ROI).
 
-:author: Maximilian Thomas Strauss, 2016
-:copyright: Copyright (c) 2016 Jungmann Lab, MPI of Biochemistry
+:authors: Maximilian Thomas Strauss
+:copyright: Copyright (c) 2016-2026 Jungmann Lab, MPI of Biochemistry
 """
 
 import multiprocessing

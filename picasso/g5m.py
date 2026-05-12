@@ -4,15 +4,15 @@ picasso.g5m
 
 Gaussian Mixture Modeling with Modifications for Molecular Mapping
 (G5M). Published in: Kowalewski, Reinhardt, et al. Nature Comms, 2026.
-DOI: * https://doi.org/10.1038/s41467-026-70198-5.
+DOI: https://doi.org/10.1038/s41467-026-70198-5.
 
 G5M is based on the sklearn implementation of Gaussian Mixture Modeling
 (GMM) with numba optimizations for fitting, as well as for kmeans++
 initialization. Several modifications for molecular mapping in DNA-PAINT
 are added, for example, localization cloud shape modeling.
 
-:authors: Rafal Kowalewski, 2023-2025
-:copyright: Copyright (c) 2023-2025 Jungmann Lab, MPI Biochemistry
+:authors: Rafal Kowalewski
+:copyright: Copyright (c) 2023-2026 Jungmann Lab, MPI of Biochemistry
 """
 
 from __future__ import annotations

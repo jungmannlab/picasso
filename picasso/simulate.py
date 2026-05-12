@@ -4,8 +4,8 @@ picasso.simulate
 
 Simulate single molecule fluorescence data.
 
-:author: Maximilian Thomas Strauss, 2016-2018
-:copyright: Copyright (c) 2016-2018 Jungmann Lab, MPI of Biochemistry
+:authors: Maximilian Thomas Strauss
+:copyright: Copyright (c) 2016-2026 Jungmann Lab, MPI of Biochemistry
 """
 
 import numpy as np

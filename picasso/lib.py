@@ -4,8 +4,8 @@ picasso.lib
 
 Handy functions and classes.
 
-:author: Joerg Schnitzbauer, 2016
-:copyright: Copyright (c) 2016 Jungmann Lab, MPI of Biochemistry
+:authors: Joerg Schnitzbauer, Rafal Kowalewski
+:copyright: Copyright (c) 2016-2026 Jungmann Lab, MPI of Biochemistry
 """
 
 from __future__ import annotations

@@ -4,8 +4,8 @@ picasso.nanotron
 
 Deep learning library for classification of picked localizations.
 
-:author: Alexander Auer, Maximilian Strauss 2020
-:copyright: Copyright (c) 2020 Jungmann Lab, MPI of Biochemistry
+:authors: Alexander Auer, Maximilian Strauss
+:copyright: Copyright (c) 2020-2026 Jungmann Lab, MPI of Biochemistry
 """
 
 import numpy as np

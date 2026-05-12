@@ -4,9 +4,9 @@ picasso.gui.render
 
 Graphical user interface for rendering localization images.
 
-:author: Joerg Schnitzbauer, Maximilian Strauss, Rafal Kowalewski,
-    2017-2022
-:copyright: Copyright (c) 2017 Jungmann Lab, MPI of Biochemistry
+:authors: Joerg Schnitzbauer, Maximilian Thomas Strauss,
+    Rafal Kowalewski
+:copyright: Copyright (c) 2017-2026 Jungmann Lab, MPI of Biochemistry
 """
 
 from __future__ import annotations

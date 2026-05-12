@@ -8,8 +8,8 @@ thresholding of images, as well as curve smoothing.
 Thresholding functions are adapted from scikit-image. The package is
 not used directly to avoid extra dependencies.
 
-:author: Rafal Kowalewski 2025
-:copyright: Copyright (c) 2015-2025 Jungmann Lab, MPI Biochemistry
+:authors: Rafal Kowalewski
+:copyright: Copyright (c) 2016-2026 Jungmann Lab, MPI of Biochemistry
 """
 
 from __future__ import annotations

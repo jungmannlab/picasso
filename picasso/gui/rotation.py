@@ -7,8 +7,8 @@ Extension of Picasso: Render to visualize 3D data.
 Many functions are copied from gui.render.View to avoid circular
 import.
 
-:author: Rafal Kowalewski, 2021-2022
-:copyright: Copyright (c) 2021 Jungmann Lab, MPI of Biochemistry
+:authors: Rafal Kowalewski
+:copyright: Copyright (c) 2021-2026 Jungmann Lab, MPI of Biochemistry
 """
 
 import os

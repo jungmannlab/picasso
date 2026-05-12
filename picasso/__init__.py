@@ -3,7 +3,7 @@ picasso.__init__.py
 ~~~~~~~~~~~~~~~~~~~
 
 :authors: Joerg Schnitzbauer, Maximilian Thomas Strauss,
-    Rafal Kowalewski 2016-2026
+    Rafal Kowalewski
 :copyright: Copyright (c) 2016-2026 Jungmann Lab, MPI of Biochemistry
 """
 

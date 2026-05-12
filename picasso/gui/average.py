@@ -4,8 +4,8 @@ picasso.gui.average
 
 Graphical user interface for averaging particles.
 
-:author: Joerg Schnitzbauer, 2015
-:copyright: Copyright (c) 2016 Jungmann Lab, MPI of Biochemistry
+:authors: Joerg Schnitzbauer, Rafal Kowalewski
+:copyright: Copyright (c) 2016-2026 Jungmann Lab, MPI of Biochemistry
 """
 
 from __future__ import annotations

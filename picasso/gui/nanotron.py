@@ -4,8 +4,8 @@ picasso.gui.nanotron
 
 Graphical user interface for classification using deep learning
 
-:author: Alexander Auer, Maximilian Strauss 2020
-:copyright: Copyright (c) 2020 Jungmann Lab, MPI of Biochemistry
+:authors: Alexander Auer, Maximilian Strauss
+:copyright: Copyright (c) 2020-2026 Jungmann Lab, MPI of Biochemistry
 """
 
 from __future__ import annotations

@@ -5,8 +5,8 @@ picasso.spinna
 Single protein simulations in DNA-PAINT for recovery of
 stoichiometries of oligomerization states.
 
-:authors: Luciano A Masullo, Rafal Kowalewski, 2022-2025
-:copyright: Copyright (c) 2022-2025 Jungmann Lab, MPI of Biochemistry
+:authors: Luciano A Masullo, Rafal Kowalewski
+:copyright: Copyright (c) 2022-2026 Jungmann Lab, MPI of Biochemistry
 """
 
 from __future__ import annotations

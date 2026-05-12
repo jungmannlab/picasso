@@ -5,8 +5,8 @@ picasso.gui.spinna
 Graphical user interface for simulating single proteins in
 DNA-PAINT using SPINNA. DOI: 10.1038/s41467-025-59500-z
 
-:authors: Rafal Kowalewski, Luciano A Masullo, 2022-2025
-:copyright: Copyright (c) 2022-2025 Jungmann Lab, MPI of Biochemistry
+:authors: Rafal Kowalewski, Luciano A Masullo
+:copyright: Copyright (c) 2022-2026 Jungmann Lab, MPI of Biochemistry
 """
 
 from __future__ import annotations

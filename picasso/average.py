@@ -4,8 +4,8 @@ picasso.average
 
 Average super-resolution images of particles by alignment and rotation.
 
-:author: Joerg Schnitzbauer, 2015
-:copyright: Copyright (c) 2016 Jungmann Lab, MPI of Biochemistry
+:authors: Joerg Schnitzbauer
+:copyright: Copyright (c) 2016-2026 Jungmann Lab, MPI of Biochemistry
 """
 
 from __future__ import annotations

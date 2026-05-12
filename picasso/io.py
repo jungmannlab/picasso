@@ -4,8 +4,9 @@ picasso.io
 
 General purpose library for handling input and output of files.
 
-:author: Joerg Schnitzbauer, Maximilian Thomas Strauss, 2016-2018
-:copyright: Copyright (c) 2016-2018 Jungmann Lab, MPI of Biochemistry
+:authors: Joerg Schnitzbauer, Maximilian Thomas Strauss,
+    Rafal Kowalewski
+:copyright: Copyright (c) 2016-2026 Jungmann Lab, MPI of Biochemistry
 """
 
 from __future__ import annotations

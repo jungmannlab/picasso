@@ -7,8 +7,8 @@ groups. The module is planned to be removed in v1.0.0.
 
 Graphical user interface for three-dimensional averaging of particles
 
-:author: Maximilian Strauss, 2017-2018
-:copyright: Copyright (c) 2017-2018 Jungmann Lab, MPI of Biochemistry
+:authors: Maximilian Strauss
+:copyright: Copyright (c) 2017-2026 Jungmann Lab, MPI of Biochemistry
 """
 
 import os.path

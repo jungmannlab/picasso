@@ -4,8 +4,9 @@ __main__.py
 
 Picasso command line interface.
 
-:authors: Joerg Schnitzbauer, Maximilian Thomas Strauss
-:copyright: Copyright (c) 2016-2019 Jungmann Lab, MPI of Biochemistry
+:authors: Joerg Schnitzbauer, Maximilian Thomas Strauss,
+    Rafal Kowalewski
+:copyright: Copyright (c) 2016-2026 Jungmann Lab, MPI of Biochemistry
 """
 
 from __future__ import annotations

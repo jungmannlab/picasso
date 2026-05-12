@@ -5,8 +5,8 @@ picasso.gui.toraw
 
 Graphical user interface for converting movies to raw files.
 
-:author: Joerg Schnitzbauer, 2015
-:copyright: Copyright (c) 2015 Jungmann Lab, MPI of Biochemistry
+:authors: Joerg Schnitzbauer
+:copyright: Copyright (c) 2016-2026 Jungmann Lab, MPI of Biochemistry
 """
 
 import sys

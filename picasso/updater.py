@@ -4,7 +4,7 @@ picasso.updater.py
 
 Manage Picasso update notifications and checks.
 
-:author: Rafal Kowalewski 2026
+:authors: Rafal Kowalewski
 :copyright: Copyright (c) 2026 Jungmann Lab, MPI of Biochemistry
 """
 

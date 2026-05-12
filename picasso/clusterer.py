@@ -13,8 +13,8 @@ SMLM clusterer is based on:
   (DOI: 10.1038/s41586-023-05925-9)
 
 :authors: Rafal Kowalewski, Susanne Reinhardt,
-    Thomas Schlichthaerle, 2020-2025
-:copyright: Copyright (c) 2022-2025 Jungmann Lab, MPI of Biochemistry
+    Thomas Schlichthaerle
+:copyright: Copyright (c) 2022-2026 Jungmann Lab, MPI of Biochemistry
 """
 
 from __future__ import annotations

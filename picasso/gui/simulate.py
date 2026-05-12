@@ -4,8 +4,8 @@ picasso.gui.simulate
 
 GUI for simulating single molecule fluorescence data.
 
-:author: Maximilian Thomas Strauss, 2016
-:copyright: Copyright (c) 2016 Jungmann Lab, MPI of Biochemistry
+:authors: Maximilian Thomas Strauss
+:copyright: Copyright (c) 2016-2026 Jungmann Lab, MPI of Biochemistry
 """
 
 from __future__ import annotations

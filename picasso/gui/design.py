@@ -4,8 +4,8 @@ picasso.gui.design
 
 GUI for designing rectangular rothemund origami.
 
-:author: Maximilian Thomas Strauss, 2016
-:copyright: Copyright (c) 2016 Jungmann Lab, MPI of Biochemistry
+:authors: Maximilian Thomas Strauss
+:copyright: Copyright (c) 2016-2026 Jungmann Lab, MPI of Biochemistry
 """
 
 import glob

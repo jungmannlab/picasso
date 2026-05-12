@@ -7,8 +7,8 @@ Render single molecule localizations to a super-resolution image.
 Provides functions for painting onto rendered images (QImage), such as
 scale bar and picks.
 
-:authors: Joerg Schnitzbauer 2015, Rafal Kowalewski 2023
-:copyright: Copyright (c) 2015 Jungmann Lab, MPI of Biochemistry
+:authors: Joerg Schnitzbauer, Rafal Kowalewski
+:copyright: Copyright (c) 2015-2026 Jungmann Lab, MPI of Biochemistry
 """
 
 from __future__ import annotations

@@ -7,9 +7,9 @@ for fast undrifting in 2D and 3D.
 
 Adapted from: Ma, H., et al. Science Advances. 2024.
 
-:author: Hongqiang Ma, Maomao Chen, Phuong Nguyen, Yang Liu,
-    Rafal Kowalewski, 2024
-:copyright: Copyright (c) 2016-2024 Jungmann Lab, MPI of Biochemistry
+:authors: Hongqiang Ma, Maomao Chen, Phuong Nguyen, Yang Liu,
+    Rafal Kowalewski
+:copyright: Copyright (c) 2016-2026 Jungmann Lab, MPI of Biochemistry
 """
 
 from concurrent.futures import ThreadPoolExecutor

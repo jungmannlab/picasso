@@ -4,8 +4,9 @@ picasso.gui.filter
 
 Graphical user interface for filtering localization lists.
 
-:authors: Joerg Schnitzbauer Maximilian Thomas Strauss, 2015-2018
-:copyright: Copyright (c) 2015=2018 Jungmann Lab, MPI of Biochemistry
+:authors: Joerg Schnitzbauer, Maximilian Thomas Strauss,
+    Rafal Kowalewski
+:copyright: Copyright (c) 2015-2026 Jungmann Lab, MPI of Biochemistry
 """
 
 from __future__ import annotations
