@@ -9679,8 +9679,12 @@ class View(QtWidgets.QLabel):
             locs = [self._display_locs(i) for i in range(len(self.locs))]
             infos = self.infos
             if "group" in locs[0].columns and len(locs) == 1:
+                idx = self.fast_render_indices[0]
+                group_color = (
+                    self.group_color if idx is None else self.group_color[idx]
+                )
                 locs = render.split_locs_by_group(
-                    locs[0], group_color=self.group_color
+                    locs[0], group_color=group_color
                 )
                 infos = [self.infos[0]] * len(locs)
 
