@@ -1582,22 +1582,35 @@ def get_colors_from_colormap(
     return colors  # value ranging between 0 and 1
 
 
-def get_group_color(locs: pd.DataFrame) -> lib.IntArray1D:
+def get_group_color(
+    locs: pd.DataFrame,
+    shuffle: bool = False,
+) -> lib.IntArray1D:
     """Find group color for each localization in single channel data
     with group info.
 
     Parameters
     ----------
     locs : pd.DataFrame
-        Localizations.
+        Localizations. Must contain a ``group`` column.
+    shuffle : bool, optional
+        If True, build a lookup of ``np.arange(max(group) + 1)``,
+        randomly permute it, and take it mod ``N_GROUP_COLORS`` before
+        indexing by ``group``. This scatters adjacent group ids across
+        color slots. Default is False (plain ``group % N_GROUP_COLORS``).
 
     Returns
     -------
     colors : lib.IntArray1D
         Array with integer group color index for each localization.
     """
-    colors = locs["group"].to_numpy().astype(int) % N_GROUP_COLORS
-    return colors
+    groups = locs["group"].to_numpy().astype(int)
+    if shuffle:
+        lookup = np.arange(groups.max() + 1)
+        np.random.shuffle(lookup)
+        lookup %= N_GROUP_COLORS
+        return lookup[groups]
+    return groups % N_GROUP_COLORS
 
 
 def viewport_height(

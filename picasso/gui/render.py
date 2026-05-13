@@ -6632,12 +6632,9 @@ class View(QtWidgets.QLabel):
         progress.close()
 
         if "group" in self.locs[channel].columns:
-            groups = np.unique(self.locs[channel].group)
-            # In case a group is missing
-            groups = np.arange(np.max(groups) + 1)
-            np.random.shuffle(groups)
-            groups %= N_GROUP_COLORS
-            self.group_color = groups[self.locs[channel].group]
+            self.group_color = render.get_group_color(
+                self.locs[channel], shuffle=True
+            )
 
         self.update_scene(resample_locs=True)
 
@@ -6666,11 +6663,9 @@ class View(QtWidgets.QLabel):
                 )
                 status.close()
                 if "group" in self.locs[channel].columns:
-                    groups = np.unique(self.locs[channel].group)
-                    groups = np.arange(np.max(groups) + 1)
-                    np.random.shuffle(groups)
-                    groups %= N_GROUP_COLORS
-                    self.group_color = groups[self.locs[channel].group]
+                    self.group_color = render.get_group_color(
+                        self.locs[channel], shuffle=True
+                    )
                 self.update_scene(resample_locs=True)
 
     def dbscan(self) -> None:
