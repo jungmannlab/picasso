@@ -787,9 +787,16 @@ class ViewRotation(QtWidgets.QLabel):
         self.infos = []
         for i in range(n_channels):
             # only one pick, take the first element
-            temp = w.view.picked_locs(
-                i, add_group=False, fast_render=fast_render
-            )[0]
+            temp = w.view.picked_locs(i, add_group=False)[0]
+            # restrict to the exact rows the main view is currently
+            # displaying (intersection of the pick with the fast-render
+            # subsample) so the rotation window shows the same locs
+            if fast_render:
+                main_idx = w.view.fast_render_indices[i]
+                if main_idx is not None and len(temp) > 0:
+                    temp = temp.loc[temp.index.isin(main_idx)].reset_index(
+                        drop=True
+                    )
             temp["z"] /= self.pixelsize
             # same for lpz if present
             if "lpz" in temp.columns:
@@ -1957,7 +1964,7 @@ class RotationWindow(QtWidgets.QMainWindow):
                 if path:
                     # combine locs from all channels
                     all_locs = pd.concat(
-                        self.window.view.all_locs,
+                        self.window.view.locs,
                         ignore_index=True,
                     )
                     all_locs.sort_values(
@@ -1984,7 +1991,7 @@ class RotationWindow(QtWidgets.QMainWindow):
                         out_path = base + suffix + ".hdf5"
                         info = self.view_rot.infos[channel] + new_info
                         io.save_locs(
-                            out_path, self.window.view.all_locs[channel], info
+                            out_path, self.window.view.locs[channel], info
                         )
             # save one channel only
             else:
@@ -2000,7 +2007,7 @@ class RotationWindow(QtWidgets.QMainWindow):
                     check_ext=".yaml",
                 )
                 info = self.view_rot.infos[channel] + new_info
-                io.save_locs(path, self.window.view.all_locs[channel], info)
+                io.save_locs(path, self.window.view.locs[channel], info)
 
     def update_scene(self) -> None:
         """Update the scene in ViewRotation."""

@@ -679,7 +679,7 @@ class DatasetDialog(lib.Dialog):
             pass
 
         # delete attributes from the fast render dialog
-        del self.window.view.all_locs[i]
+        del self.window.view.fast_render_indices[i]
         self.window.fast_render_dialog.on_file_closed(i)
 
         # remove z slicing attribute
@@ -2960,7 +2960,7 @@ class TestClustererDialog(lib.Dialog):
         """Apply the currently selected clusterer and parameters to the
         the entire dataset for a given channel."""
         params = self.get_cluster_params()
-        locs = self.window.view.all_locs[channel]
+        locs = self.window.view.locs[channel]
         pixelsize = self.window.view.pixelsize
         save_centers = self.display_centers.isChecked()
         if self.clusterer_name.currentText() == "DBSCAN":
@@ -5863,12 +5863,8 @@ class FastRenderDialog(lib.Dialog):
 
         # info explaining what is this dialog
         explanation = (
-            "Change percentage of locs displayed in each\n"
-            "channel to increase the speed of rendering.\n\n"
-            "NOTE: sampling locs may lead to unexpected behaviour\n"
-            "when using some of Picasso : Render functions.\n"
-            "Please set the percentage below to 100 to avoid\n"
-            "such situations."
+            "Change percentage of localizations displayed in each\n"
+            "channel to increase the speed of rendering."
         )
         self.layout.addWidget(QtWidgets.QLabel(explanation), 0, 0, 1, 2)
 
@@ -5898,7 +5894,9 @@ class FastRenderDialog(lib.Dialog):
         self.sample_button = QtWidgets.QPushButton(
             "Randomly sample\nlocalizations"
         )
-        self.sample_button.clicked.connect(self.sample_locs)
+        self.sample_button.clicked.connect(
+            lambda: self.window.view.update_scene(resample_locs=True)
+        )
         self.layout.addWidget(self.sample_button, 3, 1)
 
     def on_channel_changed(self) -> None:
@@ -5922,54 +5920,6 @@ class FastRenderDialog(lib.Dialog):
         """Update self.fractions."""
         idx = self.channel.currentIndex()
         self.fractions[idx] = self.fraction.value()
-
-    def sample_locs(self) -> None:
-        """Draw a fraction of locs specified by self.fractions."""
-        idx = self.channel.currentIndex()
-        if idx == 0:  # all channels share the same fraction
-            for i in range(len(self.window.view.locs_paths)):
-                n_locs = len(self.window.view.all_locs[i])
-                old_disp_nlocs = len(self.window.view.locs[i])
-                rand_idx = np.random.choice(
-                    n_locs,
-                    size=int(n_locs * self.fractions[0] / 100),
-                    replace=False,
-                )  # random indeces to extract locs
-                self.window.view.locs[i] = self.window.view.all_locs[i].iloc[
-                    rand_idx
-                ]  # assign new localizations to be displayed
-                new_disp_nlocs = len(self.window.view.locs[i])
-                factor = new_disp_nlocs / old_disp_nlocs  # to adjust contrast
-        else:  # each channel individually
-            factors = []
-            for i in range(len(self.window.view.locs_paths)):
-                n_locs = len(self.window.view.all_locs[i])
-                old_disp_nlocs = len(self.window.view.locs[i])
-                rand_idx = np.random.choice(
-                    n_locs,
-                    size=int(n_locs * self.fractions[i + 1] / 100),
-                    replace=False,
-                )  # random indices to extract locs
-                self.window.view.locs[i] = self.window.view.all_locs[i].iloc[
-                    rand_idx
-                ]  # assign new localizations to be displayed
-                new_disp_nlocs = len(self.window.view.locs[i])
-                factors.append(new_disp_nlocs / old_disp_nlocs)
-            factor = np.mean(factors)  # to adjust contrast
-        #  update view.group_color if needed:
-        if (
-            len(self.fractions) == 2
-            and "group" in self.window.view.locs[0].columns
-        ):
-            self.window.view.group_color = render.get_group_color(
-                self.window.view.locs[0]
-            )
-        self.index_blocks = [None] * len(self.window.view.locs)
-        # adjust contrast
-        self.window.display_settings_dlg.silent_maximum_update(
-            factor * self.window.display_settings_dlg.maximum.value()
-        )
-        self.window.view.update_scene()
 
 
 class SlicerDialog(lib.Dialog):
@@ -6256,9 +6206,6 @@ class View(QtWidgets.QLabel):
 
     Attributes
     ----------
-    all_locs : list
-        Contains a pd.DataFrame with localizations for each channel;
-        important for fast rendering.
     currentdrift : list
         Contains the most up-to-date drift for each channel.
     custom_cmap : np.array
@@ -6279,9 +6226,13 @@ class View(QtWidgets.QLabel):
         None if not calculated yet.
     infos : list of dicts
         Contains a dictionary with metadata for each channel.
+    fast_render_indices : list
+        One entry per channel. ``None`` means no fast-render
+        subsampling; otherwise a ``np.uint32`` array of row positions
+        into ``self.locs[channel]`` selecting the rows to display. See
+        ``_display_locs`` and ``_resample_fast_render``.
     locs : list of pd.DataFrames
-        Contains a pd.DataFrame with localizations for each channel,
-        reduced in case of fast rendering.
+        Contains a pd.DataFrame with localizations for each channel.
     locs_paths : list
         Contains a str defining the path for each channel.
     median_lp : float
@@ -6359,8 +6310,8 @@ class View(QtWidgets.QLabel):
         self.rubberband.setStyleSheet("selection-background-color: white")
         self.window = window
         self._pixmap = None
-        self.all_locs = []  # for fast render
         self.locs = []
+        self.fast_render_indices = []
         self.infos = []
         self.locs_paths = []
         self.group_color = []
@@ -6443,7 +6394,7 @@ class View(QtWidgets.QLabel):
 
         # append loaded data
         self.locs.append(locs)
-        self.all_locs.append(copy.copy(locs))  # for fast rendering
+        self.fast_render_indices.append(None)
         self.infos.append(info)
         self.locs_paths.append(path)
         self.index_blocks.append(None)
@@ -6636,12 +6587,12 @@ class View(QtWidgets.QLabel):
         if len(self._picks) > 0:  # shift from picked
             if self._pick_shape == "Circle":
                 index_blocks = [
-                    self.get_index_blocks(c) for c in range(len(self.all_locs))
+                    self.get_index_blocks(c) for c in range(len(self.locs))
                 ]
             else:
                 index_blocks = None
-            self.all_locs = postprocess.align_from_picked(
-                self.all_locs,
+            self.locs = postprocess.align_from_picked(
+                self.locs,
                 self.infos,
                 picks=self._picks,
                 pick_shape=self._pick_shape,
@@ -6649,11 +6600,9 @@ class View(QtWidgets.QLabel):
                 index_blocks=index_blocks,
             )
         else:  # align using whole images
-            self.all_locs = postprocess.align_rcc(self.all_locs, self.infos)
+            self.locs = postprocess.align_rcc(self.locs, self.infos)
         status.close()
-        self.locs = copy.copy(self.all_locs)
-        self.index_blocks = [None] * len(self.locs)
-        self.update_scene()
+        self.update_scene(resample_locs=True)
 
     @check_pick
     def combine(self) -> None:
@@ -6671,8 +6620,8 @@ class View(QtWidgets.QLabel):
             index_blocks = self.get_index_blocks(channel)
         else:
             index_blocks = None
-        self.all_locs[channel] = postprocess.combine_locs_in_picks(
-            self.all_locs[channel],
+        self.locs[channel] = postprocess.combine_locs_in_picks(
+            self.locs[channel],
             self.infos[channel],
             picks=self._picks,
             pick_shape=self._pick_shape,
@@ -6681,17 +6630,16 @@ class View(QtWidgets.QLabel):
             progress_callback=progress.set_value,
         )
         progress.close()
-        self.locs[channel] = copy.copy(self.all_locs[channel])
 
-        if "group" in self.all_locs[channel].columns:
-            groups = np.unique(self.all_locs[channel].group)
+        if "group" in self.locs[channel].columns:
+            groups = np.unique(self.locs[channel].group)
             # In case a group is missing
             groups = np.arange(np.max(groups) + 1)
             np.random.shuffle(groups)
             groups %= N_GROUP_COLORS
-            self.group_color = groups[self.all_locs[channel].group]
+            self.group_color = groups[self.locs[channel].group]
 
-        self.update_scene()
+        self.update_scene(resample_locs=True)
 
     def link(self) -> None:
         """Link localizations, i.e., combine localizations likely
@@ -6699,7 +6647,7 @@ class View(QtWidgets.QLabel):
 
         See ``picasso.postprocess.link`` for more details."""
         channel = self.get_channel()
-        if "len" in self.all_locs[channel].columns:
+        if "len" in self.locs[channel].columns:
             QtWidgets.QMessageBox.information(
                 self, "Link", "Localizations are already linked. Aborting."
             )
@@ -6710,21 +6658,20 @@ class View(QtWidgets.QLabel):
             r_max /= self.pixelsize
             if ok:
                 status = lib.StatusDialog("Linking localizations...", self)
-                self.all_locs[channel] = postprocess.link(
-                    self.all_locs[channel],
+                self.locs[channel] = postprocess.link(
+                    self.locs[channel],
                     self.infos[channel],
                     r_max=r_max,
                     max_dark_time=max_dark,
                 )
                 status.close()
-                if "group" in self.all_locs[channel].columns:
-                    groups = np.unique(self.all_locs[channel].group)
+                if "group" in self.locs[channel].columns:
+                    groups = np.unique(self.locs[channel].group)
                     groups = np.arange(np.max(groups) + 1)
                     np.random.shuffle(groups)
                     groups %= N_GROUP_COLORS
-                    self.group_color = groups[self.all_locs[channel].group]
-                self.locs[channel] = copy.copy(self.all_locs[channel])
-                self.update_scene()
+                    self.group_color = groups[self.locs[channel].group]
+                self.update_scene(resample_locs=True)
 
     def dbscan(self) -> None:
         """Get a channel, parameters and path for DBSCAN."""
@@ -6804,11 +6751,11 @@ class View(QtWidgets.QLabel):
             "Applying DBSCAN. This may take a while.", self
         )
         # keep group info if already present
-        if "group" in self.all_locs[channel].columns:
-            locs = self.all_locs[channel].copy()
-            locs["group_input"] = self.all_locs[channel].group
+        if "group" in self.locs[channel].columns:
+            locs = self.locs[channel].copy()
+            locs["group_input"] = self.locs[channel].group
         else:
-            locs = self.all_locs[channel]
+            locs = self.locs[channel]
         pixelsize = self.pixelsize
 
         locs, dbscan_info = clusterer.dbscan(
@@ -6923,11 +6870,11 @@ class View(QtWidgets.QLabel):
             "Applying HDBSCAN. This may take a while.", self
         )
         # keep group info if already present
-        if "group" in self.all_locs[channel].columns:
-            locs = self.all_locs[channel].copy()
-            locs["group_input"] = self.all_locs[channel].group
+        if "group" in self.locs[channel].columns:
+            locs = self.locs[channel].copy()
+            locs["group_input"] = self.locs[channel].group
         else:
-            locs = self.all_locs[channel]
+            locs = self.locs[channel]
         pixelsize = self.pixelsize
 
         locs, hdbscan_info = clusterer.hdbscan(
@@ -6967,7 +6914,7 @@ class View(QtWidgets.QLabel):
 
         # get clustering parameters
         pixelsize = self.pixelsize
-        if any(["z" in _.columns for _ in self.all_locs]):
+        if any(["z" in _.columns for _ in self.locs]):
             flag_3D = True
         else:
             flag_3D = False
@@ -7051,11 +6998,11 @@ class View(QtWidgets.QLabel):
         status = lib.StatusDialog("Clustering localizations", self)
 
         # keep group info if already present
-        if "group" in self.all_locs[channel].columns:
-            locs = self.all_locs[channel].copy()
-            locs["group_input"] = self.all_locs[channel].group
+        if "group" in self.locs[channel].columns:
+            locs = self.locs[channel].copy()
+            locs["group_input"] = self.locs[channel].group
         else:
-            locs = self.all_locs[channel]
+            locs = self.locs[channel]
 
         clustered_locs, new_info = clusterer.cluster(
             locs,
@@ -7712,7 +7659,8 @@ class View(QtWidgets.QLabel):
         """Export grayscale rendering of the current viewport for each
         channel separately."""
         kwargs = self.get_render_kwargs()
-        for i, locs in enumerate(self.all_locs):
+        for i in range(len(self.locs)):
+            locs = self._display_locs(i)
             path = os.path.splitext(self.locs_paths[i])[0] + suffix
             # render like in self.render_scene
             vmin = self.window.display_settings_dlg.minimum.value()
@@ -8003,7 +7951,7 @@ class View(QtWidgets.QLabel):
         the drift to localizations. Assumes only one channel is
         currently loaded."""
         n_frames = lib.get_from_metadata(self.infos[channel], "Frames")
-        n_dim = 3 if hasattr(self.all_locs[channel], "z") else 2
+        n_dim = 3 if hasattr(self.locs[channel], "z") else 2
         if drift.shape[0] != n_frames or drift.shape[1] != n_dim:
             QtWidgets.QMessageBox.warning(
                 self,
@@ -9122,15 +9070,12 @@ class View(QtWidgets.QLabel):
         progress.close()
         return loccount
 
-    def index_locs(self, channel: int, fast_render: bool = False) -> None:
+    def index_locs(self, channel: int) -> None:
         """Indexes localizations from a given channel in a grid with
         grid size equal to the pick radius."""
         if self._pick_shape != "Circle":
             return None
-        if fast_render:
-            locs = self.locs[channel]
-        else:
-            locs = self.all_locs[channel]
+        locs = self.locs[channel]
         info = self.infos[channel]
         size = (
             self._pick_size / 2
@@ -9142,15 +9087,11 @@ class View(QtWidgets.QLabel):
         status.close()
         self.index_blocks[channel] = index_blocks
 
-    def get_index_blocks(
-        self,
-        channel: int,
-        fast_render: bool = False,
-    ) -> np.ndarray:
+    def get_index_blocks(self, channel: int) -> np.ndarray:
         """Call ``self.index_locs`` if not calculated earlier. Return
         indexed localizations from a given channel."""
-        if self.index_blocks[channel] is None or fast_render:
-            self.index_locs(channel, fast_render=fast_render)
+        if self.index_blocks[channel] is None:
+            self.index_locs(channel)
         return self.index_blocks[channel]
 
     @check_pick
@@ -9185,7 +9126,7 @@ class View(QtWidgets.QLabel):
             return
 
         status = lib.StatusDialog("Finding fiducials...", self.window)
-        locs = self.all_locs[channel]
+        locs = self.locs[channel]
         info = self.infos[channel]
         picks, box = imageprocess.find_fiducials(locs, info)
         status.close()
@@ -9227,7 +9168,7 @@ class View(QtWidgets.QLabel):
         )
         for channel in channels:
             picked_locs = postprocess.picked_locs(
-                self.all_locs[channel],
+                self.locs[channel],
                 self.infos[channel],
                 picks=self._picks,
                 pick_shape=self._pick_shape,
@@ -9330,7 +9271,7 @@ class View(QtWidgets.QLabel):
             index_blocks = self.get_index_blocks(channel)
             status = lib.StatusDialog("Picking similar...", self.window)
             new_picks = postprocess.pick_similar(
-                locs=self.all_locs[channel],
+                locs=self.locs[channel],
                 info=self.infos[channel],
                 picks=self._picks,
                 d=self._pick_size,
@@ -9342,11 +9283,20 @@ class View(QtWidgets.QLabel):
             self.add_picks(new_picks)
             status.close()
 
+    def _display_locs(self, channel: int) -> pd.DataFrame:
+        """Return the localizations currently selected for display in
+        ``channel``. When ``fast_render_indices[channel]`` is ``None``
+        the full set is returned; otherwise the rows selected by the
+        fast-render dialog. Always returns a ``pd.DataFrame``."""
+        idx = self.fast_render_indices[channel]
+        if idx is None:
+            return self.locs[channel]
+        return self.locs[channel].iloc[idx]
+
     def picked_locs(
         self,
         channel: int,
         add_group: bool = True,
-        fast_render: bool = False,
     ) -> list[pd.DataFrame]:
         """Get picked localizations in the specified channel.
 
@@ -9357,10 +9307,6 @@ class View(QtWidgets.QLabel):
         add_group : bool, optional
             True if group id should be added to locs. Each pick will be
             assigned a different id. Default is True.
-        fast_render : bool
-            If True, takes self.locs, i.e. after randomly sampling a
-            fraction of self.all_locs. If False, takes self.all_locs.
-            Default is False.
 
         Returns
         -------
@@ -9375,19 +9321,13 @@ class View(QtWidgets.QLabel):
             )
             progress.set_value(0)
 
-            # extract localizations to pick from
-            if fast_render:
-                locs = self.locs[channel]
-            else:
-                locs = self.all_locs[channel]
+            locs = self.locs[channel]
 
             # find pick size
             index_blocks = None
             if self._pick_shape == "Circle":
                 pick_size = self._pick_size / 2
-                index_blocks = self.get_index_blocks(
-                    channel, fast_render=fast_render
-                )
+                index_blocks = self.get_index_blocks(channel)
             else:
                 pick_size = self._pick_size
 
@@ -9491,7 +9431,7 @@ class View(QtWidgets.QLabel):
         channel : int
             Index of the channel were localizations are removed.
         """
-        locs = self.all_locs[channel]
+        locs = self.locs[channel]
         locs = postprocess.remove_locs_in_picks(
             locs=locs,
             info=self.infos[channel],
@@ -9500,11 +9440,8 @@ class View(QtWidgets.QLabel):
             pick_size=self._pick_size,
             index_blocks=self.get_index_blocks(channel),
         )
-        self.all_locs[channel] = locs
-        self.locs[channel] = locs.copy()
-
-        self.window.fast_render_dialog.sample_locs()
-        self.update_scene()
+        self.locs[channel] = locs
+        self.update_scene(resample_locs=True)
 
     def remove_polygon_point(self) -> None:
         """Remove the last point from the last polygon. If there is
@@ -9735,12 +9672,16 @@ class View(QtWidgets.QLabel):
         slicer = self.window.slicer_dialog.slicer_radio_button
         # render by property - use x_locs like multichannel rendering
         if self.window.display_settings_dlg.render_check.isChecked():
-            # we assume one channel is loaded
+            # we assume one channel is loaded; x_locs was built from the
+            # fast-render subset in activate_render_property so does
+            # not need to be rerun
             locs = self.x_locs.copy()
             infos = [self.infos[0]] * len(locs)
         # if group column is present, split locs by group for rendering
         else:
-            locs = self.locs.copy() if slicer.isChecked() else self.locs
+            # project fast-render subset (or full set when no
+            # subsampling)
+            locs = [self._display_locs(i) for i in range(len(self.locs))]
             infos = self.infos
             if "group" in locs[0].columns and len(locs) == 1:
                 locs = render.split_locs_by_group(
@@ -9976,7 +9917,7 @@ class View(QtWidgets.QLabel):
         )
         # allow running even if no picks are present but group info is
         if len(self._picks) == 0:
-            locs = self.all_locs[channel]
+            locs = self.locs[channel]
             if "group" not in locs.columns:
                 message = (
                     "No picks found. Please create picks or assign group "
@@ -10111,7 +10052,7 @@ class View(QtWidgets.QLabel):
             # if no cached data found
             if x_locs == []:
                 x_locs = render.split_locs_by_property(
-                    locs=self.locs[0],
+                    locs=self._display_locs(0),
                     property_name=parameter,
                     n_colors=n_colors,
                     min_value=min_val,
@@ -10302,9 +10243,8 @@ class View(QtWidgets.QLabel):
         channels."""
         if len(self.locs_paths) < 2:
             return
-        self.all_locs = lib.sync_groups(self.all_locs)
-        self.locs = [_.copy() for _ in self.all_locs]
-        self.update_scene()
+        self.locs = lib.sync_groups(self.locs)
+        self.update_scene(resample_locs=True)
 
     def undrift_aim(self) -> None:
         """Undrift with Adaptive Intersection Maximization (AIM).
@@ -10312,7 +10252,7 @@ class View(QtWidgets.QLabel):
         See Ma H., et al. Science Advances. 2024."""
         channel = self.get_channel("Undrift by AIM")
         if channel is not None:
-            locs = self.all_locs[channel]
+            locs = self.locs[channel]
             info = self.infos[channel]
             pixelsize = self.pixelsize
 
@@ -10333,12 +10273,11 @@ class View(QtWidgets.QLabel):
                 )
                 # sanity check and assign attributes
                 locs = lib.ensure_sanity(locs, info)
-                self.all_locs[channel] = locs
-                self.locs[channel] = copy.copy(locs)
+                self.locs[channel] = locs
                 self.infos[channel] = new_info
                 self.index_blocks[channel] = None
                 self.add_drift(channel, drift)
-                self.update_scene()
+                self.update_scene(resample_locs=True)
                 self.show_drift()
 
     def undrift_rcc(self) -> None:
@@ -10360,7 +10299,7 @@ class View(QtWidgets.QLabel):
             )
 
             if ok:
-                locs = self.all_locs[channel]
+                locs = self.locs[channel]
                 info = self.infos[channel]
                 n_segments = postprocess.n_segments(info, segmentation)
                 seg_progress = lib.ProgressDialog(
@@ -10386,7 +10325,6 @@ class View(QtWidgets.QLabel):
                     # ignore undrift_locs since we use _apply_drift to
                     # assign attributes
                     self._apply_drift(channel, drift)
-                    self.update_scene()
                     self.show_drift()
 
                 except Exception as e:
@@ -10407,7 +10345,6 @@ class View(QtWidgets.QLabel):
         """Undrift based on picked localizations in a given channel."""
         channel = self.get_channel("Undrift from picked")
         if channel is not None:
-            # picked_locs = self.picked_locs(channel)
             status = lib.StatusDialog("Calculating drift...", self)
             pick_size = (
                 self._pick_size / 2
@@ -10420,21 +10357,20 @@ class View(QtWidgets.QLabel):
                 index_blocks = None
             undrifted_locs, new_info, drift = (
                 postprocess.undrift_from_fiducials(
-                    locs=self.all_locs[channel],
+                    locs=self.locs[channel],
                     info=self.infos[channel],
                     picks=self._picks,
                     pick_size=pick_size,
                     index_blocks=index_blocks,
                 )
             )
-            self.all_locs[channel] = undrifted_locs
-            self.locs[channel] = copy.copy(undrifted_locs)
+            self.locs[channel] = undrifted_locs
             self.infos[channel] = new_info
             # Cleanup
             self.index_blocks[channel] = None
             self.add_drift(channel, drift)
             status.close()
-            self.update_scene()
+            self.update_scene(resample_locs=True)
 
     @check_picks
     def undrift_from_picked2d(self) -> None:
@@ -10442,7 +10378,6 @@ class View(QtWidgets.QLabel):
         channel. Available when 3D data is loaded."""
         channel = self.get_channel("Undrift from picked")
         if channel is not None:
-            # picked_locs = self.picked_locs(channel)
             status = lib.StatusDialog("Calculating drift...", self)
             pick_size = (
                 self._pick_size / 2
@@ -10455,7 +10390,7 @@ class View(QtWidgets.QLabel):
                 index_blocks = None
             undrifted_locs, new_info, drift = (
                 postprocess.undrift_from_fiducials(
-                    locs=self.all_locs[channel],
+                    locs=self.locs[channel],
                     info=self.infos[channel],
                     picks=self._picks,
                     pick_size=pick_size,
@@ -10463,14 +10398,13 @@ class View(QtWidgets.QLabel):
                     index_blocks=index_blocks,
                 )
             )
-            self.all_locs[channel] = undrifted_locs
-            self.locs[channel] = copy.copy(undrifted_locs)
+            self.locs[channel] = undrifted_locs
             self.infos[channel] = new_info
             # Cleanup
             self.index_blocks[channel] = None
             self.add_drift(channel, drift)
             status.close()
-            self.update_scene()
+            self.update_scene(resample_locs=True)
 
     def undo_drift(self) -> None:
         """Get a channel to undo drift."""
@@ -10491,13 +10425,12 @@ class View(QtWidgets.QLabel):
         drift["y"] = -drift["y"]
         if "z" in drift.columns:
             drift["z"] = -drift["z"]
-        self.all_locs[channel] = postprocess.apply_drift(
-            self.all_locs[channel], self.infos[channel], drift=drift
+        self.locs[channel] = postprocess.apply_drift(
+            self.locs[channel], self.infos[channel], drift=drift
         )
-        self.locs[channel] = copy.copy(self.all_locs[channel])
         self.index_blocks[channel] = None
         self.add_drift(channel, drift)
-        self.update_scene()
+        self.update_scene(resample_locs=True)
 
     def add_drift(self, channel: int, drift: pd.DataFrame) -> None:
         """Assign attributes and save .txt drift file.
@@ -10531,7 +10464,7 @@ class View(QtWidgets.QLabel):
 
     def apply_drift(self) -> None:
         """Apply drift to localizations from a .txt file. Assign
-        attributes and shift ``self.locs`` and ``self.all_locs``."""
+        attributes and shift ``self.locs``."""
         channel = self.get_channel("Apply drift")
         if channel is not None:
             path, exe = QtWidgets.QFileDialog.getOpenFileName(
@@ -10548,21 +10481,20 @@ class View(QtWidgets.QLabel):
     def _apply_drift(self, channel: int, drift: pd.DataFrame) -> None:
         """Shift localizations in a given channel based on drift from a
         .txt file."""
-        self.all_locs[channel] = postprocess.apply_drift(
-            self.all_locs[channel], self.infos[channel], drift=drift
+        self.locs[channel] = postprocess.apply_drift(
+            self.locs[channel], self.infos[channel], drift=drift
         )
-        self.locs[channel] = copy.copy(self.all_locs[channel])
         self._drift[channel] = drift
         self.currentdrift[channel] = copy.copy(drift)
         self.index_blocks[channel] = None
-        self.update_scene()
+        self.update_scene(resample_locs=True)
 
     def unfold_groups_square(self) -> None:
         """Shifts grouped localizations onto a square grid with a chosen
         number of columns and spacing. Localizations can be grouped, for
         example, by picking (saving picked localizations is not
         necessary) or clustering."""
-        if len(self.all_locs) > 1:
+        if len(self.locs) > 1:
             QtWidgets.QMessageBox.information(
                 self,
                 "Unfold error",
@@ -10572,15 +10504,15 @@ class View(QtWidgets.QLabel):
 
         # automatically assign the group if circular picks are present
         if (
-            "group" not in self.all_locs[0].columns
+            "group" not in self.locs[0].columns
             and len(self._picks)
             and self._pick_shape == "Circle"
         ):
             locs = self.picked_locs(0, add_group=True)
             locs = pd.concat(locs, ignore_index=True)
-            self.all_locs[0] = locs
+            self.locs[0] = locs
             remove_group = True
-        elif "group" in self.all_locs[0].columns:
+        elif "group" in self.locs[0].columns:
             remove_group = False
         else:
             QtWidgets.QMessageBox.information(
@@ -10598,12 +10530,12 @@ class View(QtWidgets.QLabel):
             self,
             "Input Dialog",
             "Set number of elements per column:",
-            int(np.ceil(np.sqrt(len(np.unique(self.all_locs[0]["group"]))))),
-            max=len(np.unique(self.all_locs[0]["group"])),
+            int(np.ceil(np.sqrt(len(np.unique(self.locs[0]["group"]))))),
+            max=len(np.unique(self.locs[0]["group"])),
         )
         if not ok:
             if remove_group:
-                self.all_locs[0].drop(columns="group", inplace=True)
+                self.locs[0].drop(columns="group", inplace=True)
             return
         spacing, ok = QtWidgets.QInputDialog.getInt(
             self,
@@ -10613,20 +10545,20 @@ class View(QtWidgets.QLabel):
         )
         if not ok:
             if remove_group:
-                self.all_locs[0].drop(columns="group", inplace=True)
+                self.locs[0].drop(columns="group", inplace=True)
             return
         spacing /= self.pixelsize
 
-        self.all_locs[0], self.infos[0][0] = lib.unfold_localizations_square(
-            locs=self.all_locs[0],
+        self.locs[0], self.infos[0][0] = lib.unfold_localizations_square(
+            locs=self.locs[0],
             info=self.infos[0][0],
             n_square=n_square,
             spacing=spacing,
         )
         if remove_group:  # discard groups and reset picks
-            self.all_locs[0].drop(columns="group", inplace=True)
+            self.locs[0].drop(columns="group", inplace=True)
             self._picks = []
-        self.locs[0] = copy.copy(self.all_locs[0])
+        self.update_scene(resample_locs=True)
         self.fit_in_view()
 
     def _update_cursor_circle(self) -> None:
@@ -10748,7 +10680,7 @@ class View(QtWidgets.QLabel):
             self.window.info_dialog.rmsd_std.setText(
                 "{:.2}".format(np.nanstd(rmsd))
             )  # std rmsd per pick
-            if "z" in self.all_locs[channel].columns:
+            if "z" in self.locs[channel].columns:
                 self.window.info_dialog.rmsd_z_mean.setText(
                     "{:.2f}".format(np.nanmean(rmsd_z))
                 )  # mean rmsd in z per pick
@@ -10785,6 +10717,51 @@ class View(QtWidgets.QLabel):
         """Updates number of picks in Info Dialog."""
         self.window.info_dialog.n_picks.setText(str(len(self._picks)))
 
+    def _resample_fast_render_channel(self, i: int, fraction: int) -> float:
+        """Refresh ``self.fast_render_indices[i]`` for one channel at the
+        given percentage. Stores ``None`` when no subsampling is needed.
+        Returns the contrast factor (new displayed count / old displayed
+        count) for ``silent_maximum_update``."""
+        n_locs = len(self.locs[i])
+        old_idx = self.fast_render_indices[i]
+        old_disp_nlocs = n_locs if old_idx is None else len(old_idx)
+        target = int(n_locs * fraction / 100)
+        if fraction == 100 or target >= n_locs:
+            self.fast_render_indices[i] = None
+            new_disp_nlocs = n_locs
+        else:
+            rand_idx = np.random.choice(
+                n_locs, size=target, replace=False
+            ).astype(np.uint32)
+            self.fast_render_indices[i] = rand_idx
+            new_disp_nlocs = rand_idx.size
+        return new_disp_nlocs / old_disp_nlocs
+
+    def _resample_fast_render(self) -> None:
+        """Refresh ``self.fast_render_indices`` from the fractions stored
+        on the fast-render dialog, refresh ``group_color`` if needed,
+        reset ``index_blocks``, and adjust contrast accordingly. Does not
+        redraw on its own — call ``update_scene`` for that."""
+        dlg = self.window.fast_render_dialog
+        idx = dlg.channel.currentIndex()
+        if idx == 0:  # all channels share the same fraction
+            for i in range(len(self.locs_paths)):
+                factor = self._resample_fast_render_channel(
+                    i, dlg.fractions[0]
+                )
+        else:  # each channel individually
+            factors = [
+                self._resample_fast_render_channel(i, dlg.fractions[i + 1])
+                for i in range(len(self.locs_paths))
+            ]
+            factor = np.mean(factors)  # to adjust contrast
+        if len(dlg.fractions) == 2 and "group" in self.locs[0].columns:
+            self.group_color = render.get_group_color(self.locs[0])
+        self.index_blocks = [None] * len(self.locs)
+        self.window.display_settings_dlg.silent_maximum_update(
+            factor * self.window.display_settings_dlg.maximum.value()
+        )
+
     def update_scene(
         self,
         viewport: (
@@ -10793,6 +10770,7 @@ class View(QtWidgets.QLabel):
         autoscale: bool = False,
         use_cache: bool = False,
         picks_only: bool = False,
+        resample_locs: bool = False,
     ) -> None:
         """Update the view of rendered localizations as well as cursor.
 
@@ -10808,10 +10786,16 @@ class View(QtWidgets.QLabel):
         picks_only : bool, optional
             True if only picks and points are to be rendered. Default is
             False.
+        resample_locs : bool, optional
+            True if the fast-render subsample should be refreshed before
+            redrawing. Use after operations that mutate ``self.locs``
+            (link, undrift, remove pick, etc.). Default is False.
         """
         # Clear slicer cache
         self.window.slicer_dialog.slicer_cache = {}
         if len(self.locs):
+            if resample_locs:
+                self._resample_fast_render()
             viewport = viewport or self.viewport
             self.draw_scene(
                 viewport,
@@ -11708,7 +11692,7 @@ class Window(QtWidgets.QMainWindow):
 
     def export_multi_channel(self, channel: int, item: str, path: str) -> None:
         """Export localizations for a single channel."""
-        locs = self.view.all_locs[channel]
+        locs = self.view.locs[channel]
         info = self.view.infos[channel]
         if item == ".txt for ImageJ":
             io.export_txt_imagej(path, locs, info)
@@ -11944,12 +11928,7 @@ class Window(QtWidgets.QMainWindow):
                     self.view.locs[channel][var_1] = (
                         self.view.locs[channel][var_2] / pixelsize + dist / 2
                     )  # exchange w. info
-                    self.view.all_locs[channel][var_1] = (
-                        self.view.all_locs[channel[var_2]] / pixelsize
-                        + dist / 2
-                    )
                     self.view.locs[channel][var_2] = templocs * pixelsize
-                    self.view.all_locs[channel][var_2] = templocs * pixelsize
                 else:
                     var_1 = input[1]
                     var_2 = input[2]
@@ -11957,11 +11936,7 @@ class Window(QtWidgets.QMainWindow):
                     self.view.locs[channel][var_1] = self.view.locs[channel][
                         var_2
                     ]
-                    self.view.all_locs[channel][var_1] = self.view.all_locs[
-                        channel
-                    ][var_2]
                     self.view.locs[channel][var_2] = templocs
-                    self.view.all_locs[channel][var_2] = templocs
 
             elif input[0] == "spiral" and len(input) == 3:
                 # spiral uses radius and turns
@@ -11980,22 +11955,15 @@ class Window(QtWidgets.QMainWindow):
                 self.view.locs[channel]["x"] = (
                     x * np.cos(x)
                 ) / scale_x * radius + self.view.locs[channel]["x"]
-                self.view.all_locs[channel]["x"] = (
-                    x * np.cos(x)
-                ) / scale_x * radius + self.view.all_locs[channel]["x"]
+
                 self.view.locs[channel]["y"] = (
                     x * np.sin(x)
                 ) / scale_x * radius + self.view.locs[channel]["y"]
-                self.view.all_locs[channel]["y"] = (
-                    x * np.sin(x)
-                ) / scale_x * radius + self.view.all_locs[channel]["y"]
 
             elif input[0] == "uspiral":
                 try:
                     self.view.locs[channel]["x"] = self.x_spiral
-                    self.view.all_locs[channel]["x"] = self.x_spiral
                     self.view.locs[channel]["y"] = self.y_spiral
-                    self.view.all_locs[channel]["y"] = self.y_spiral
                     self.display_settings_dlg.render_check.setChecked(False)
                 except Exception:
                     QtWidgets.QMessageBox.information(
@@ -12006,12 +11974,8 @@ class Window(QtWidgets.QMainWindow):
             else:
                 vars = self.view.locs[channel].columns.to_list()
                 exec(cmd, {k: self.view.locs[channel][k] for k in vars})
-                exec(cmd, {k: self.view.all_locs[channel][k] for k in vars})
             lib.ensure_sanity(
                 self.view.locs[channel], self.view.infos[channel]
-            )
-            lib.ensure_sanity(
-                self.view.all_locs[channel], self.view.infos[channel]
             )
             self.view.index_blocks[channel] = None
             self.view.update_scene()
@@ -12074,11 +12038,11 @@ class Window(QtWidgets.QMainWindow):
         """Remove user-selected columns from localizations."""
         channel = self.view.get_channel("Remove columns")
         if channel is not None:
-            columns = self.view.all_locs[channel].columns.to_list()
+            columns = self.view.locs[channel].columns.to_list()
             to_remove, ok = lib.RemoveColumnsDialog.getParams(self, columns)
             if not ok or len(to_remove) == 0:
                 return
-            locs = self.view.all_locs[channel].copy()
+            locs = self.view.locs[channel].copy()
             info = self.view.infos[channel]
             new_info = {
                 "Generated by": f"Picasso v{__version__} Remove columns",
@@ -12086,10 +12050,9 @@ class Window(QtWidgets.QMainWindow):
             }
             locs.drop(columns=to_remove, inplace=True)
 
-            self.view.all_locs[channel] = locs
-            self.view.locs[channel] = locs.copy()
+            self.view.locs[channel] = locs
             self.view.infos[channel] = info + [new_info]
-            self.view.update_scene()
+            self.view.update_scene(resample_locs=True)
 
     def save_pick_properties(self) -> None:
         """Save pick properties in a given channel (or channels)."""
@@ -12140,7 +12103,7 @@ class Window(QtWidgets.QMainWindow):
                 )
                 if path:
                     # combine locs from all channels
-                    all_locs = pd.concat(self.view.all_locs, ignore_index=True)
+                    all_locs = pd.concat(self.view.locs, ignore_index=True)
                     all_locs.sort_values(
                         kind="quicksort",
                         by="frame",
@@ -12179,9 +12142,7 @@ class Window(QtWidgets.QMainWindow):
                                 ),
                             }
                         ]
-                        io.save_locs(
-                            out_path, self.view.all_locs[channel], info
-                        )
+                        io.save_locs(out_path, self.view.locs[channel], info)
             # save one channel only
             else:
                 base, ext = os.path.splitext(self.view.locs_paths[channel])
@@ -12200,7 +12161,7 @@ class Window(QtWidgets.QMainWindow):
                             "Last driftfile": self.view._driftfiles[channel],
                         }
                     ]
-                    io.save_locs(path, self.view.all_locs[channel], info)
+                    io.save_locs(path, self.view.locs[channel], info)
 
     def save_picked_locs(self) -> None:
         """Save picked localizations in a given channel (or all

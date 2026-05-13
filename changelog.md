@@ -30,6 +30,7 @@ Last change: 12-MAY-2026 CEST
 - CLI `picasso localize <files>` allows for MLE fitting in 3D (z-fitting still as per Huang et al, 2008.)
 
 #### Render
+- Smarter fast rendering, lowering RAM usage almost two-fold
 - Faster ind. loc. precision rendering in 3D
 - Test clustering supports G5M
 - Test clustering saves the channel to which the algorithms are applied
