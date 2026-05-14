@@ -7183,8 +7183,8 @@ class View(QtWidgets.QLabel):
         tuple[pd.DataFrame, pd.DataFrame, list[dict]] | tuple[None, None, None]
     ):
         """Run G5M in channel given parameters."""
-        locs = self.window.view.locs[channel]
-        info = self.window.view.infos[channel]
+        locs = self.locs[channel]
+        info = self.infos[channel]
 
         centers, clustered_locs, info = g5m.g5m(
             locs=locs,
@@ -7204,7 +7204,7 @@ class View(QtWidgets.QLabel):
     def check_group(self, channel: int) -> bool:
         """Check whether the data has been grouped (clustered) in
         channel i."""
-        locs = self.view.locs[channel]
+        locs = self.locs[channel]
         if "group" in locs.columns:
             return True
         else:
@@ -7220,8 +7220,8 @@ class View(QtWidgets.QLabel):
     def check_max_locs(self, channel: int) -> int:
         """Check whether the data contains clusters with more localizations
         than the maximum allowed for G5M."""
-        locs = self.window.view.locs[channel]
-        info = self.window.view.infos[channel]
+        locs = self.locs[channel]
+        info = self.infos[channel]
         channel_name = self.window.dataset_dialog.checks[channel].text()
         n_frames = lib.get_from_metadata(info, "Frames", raise_error=True)
         max_locs = int(0.4 * n_frames)
