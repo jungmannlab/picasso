@@ -27,7 +27,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from scipy import interpolate
-from scipy.optimize import curve_fit
+from scipy.optimize import curve_fit, OptimizeWarning
 from scipy.spatial import distance, KDTree
 from tqdm import tqdm, trange
 
@@ -1838,6 +1838,71 @@ def pick_kinetics(
     no_locs = np.array(no_locs)
     out_locs = pd.concat(out_locs, ignore_index=True)
     return length, dark, no_locs, out_locs
+
+
+def pick_properties(
+    picked_locs: list[pd.DataFrame],
+    info: list[dict],
+    *,
+    max_dark_time: int = 3,
+    influx_rate: float = 0.03,
+    pick_areas: lib.FloatArray1D | None = None,
+    kinetics_progress: (
+        Callable[[int], None] | Literal["console"] | None
+    ) = None,
+    groupprops_progress: (
+        Callable[[int], None] | Literal["console"] | None
+    ) = None,
+) -> pd.DataFrame:
+    """Calculate pick properties and save them to ``path``.
+
+    Properties include number of localizations, mean and std of all
+    localizations dtypes (x, y, photons, etc), qPAINT number of binding
+    sites and the kinetics CDFs.
+
+    Parameters
+    ----------
+    picked_locs : list of pd.DataFrame
+        List of dataframes with localizations, one per picked region.
+    info : list of dicts
+        Metadata of the localizations.
+    max_dark_time : int
+        Maximum dark time (in frames) passed to ``pick_kinetics``.
+    influx_rate : float
+        Influx rate used to estimate the number of binding sites
+        (``n_units = 1 / (influx_rate * dark)``).
+    pick_areas : FloatArray1D or None
+        Optional per-pick area in um^2 to attach to the output.
+    kinetics_progress, groupprops_progress : callable, "console" or None
+        Progress callbacks forwarded to ``pick_kinetics`` and
+        ``groupprops``, respectively.
+
+    Returns
+    -------
+    pick_props : pd.DataFrame
+        Each row gives the properties per pick.
+    """
+    with warnings.catch_warnings():
+        warnings.simplefilter(
+            "ignore", category=(OptimizeWarning, RuntimeWarning)
+        )
+        length, dark, no_locs, out_locs = pick_kinetics(
+            picked_locs=picked_locs,
+            info=info,
+            max_dark_time=max_dark_time,
+            progress_callback=kinetics_progress,
+        )
+        pick_props = groupprops(out_locs, callback=groupprops_progress)
+        if pick_areas is not None:
+            pick_props["pick_area_um2"] = pick_areas
+
+    pick_props["n_units"] = 1 / (influx_rate * dark)
+    pick_props["locs"] = no_locs
+    pick_props["length_cdf"] = length
+    pick_props["dark_cdf"] = dark
+    pick_props["qpaint_idx_cdf"] = dark**-1
+
+    return pick_props
 
 
 def compute_dark_times(
