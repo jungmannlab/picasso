@@ -1728,7 +1728,6 @@ class StructuresTab(lib.Dialog):
                     objectName=f"target{self.n_mol_tar}"
                 )
                 name_widget.setText(target)
-                name_widget.editingFinished.connect(self.update_preview)
                 x_widget = QtWidgets.QDoubleSpinBox(
                     objectName=f"x{self.n_mol_tar}"
                 )
@@ -1743,11 +1742,14 @@ class StructuresTab(lib.Dialog):
                     spinbox.setDecimals(2)
                     spinbox.setSingleStep(0.1)
                     spinbox.setKeyboardTracking(True)
-                    spinbox.valueChanged.connect(self.update_preview)
-                # set value now when negative values are allowed
                 x_widget.setValue(x)
                 y_widget.setValue(y)
                 z_widget.setValue(z)
+                # connect AFTER setValue so spurious valueChanged during setup
+                # can't re-enter update_preview
+                for spinbox in (x_widget, y_widget, z_widget):
+                    spinbox.valueChanged.connect(self.update_preview)
+                name_widget.editingFinished.connect(self.update_preview)
                 delete_button = QtWidgets.QPushButton(
                     "x", objectName=f"del{self.n_mol_tar}"
                 )

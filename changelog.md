@@ -70,6 +70,7 @@ Last change: 15-MAY-2026 CEST
 - User-defined threshold for the binary mask
 - Loading new structures in the Simulate tab without changing targets does not reset the window
 - Fixed .svg saving in the one-click-installer app
+- Fixed issues caused by removing structures in the Structures Tab (Windows)
 
 #### Filter
 - Support for .csv export (not only hdf5)
