@@ -1511,10 +1511,8 @@ class StructuresTab(lib.Dialog):
         if not self.structures:
             return
 
-        structure = self.find_structure_by_title(self.current_structure)
-        structure.restart()
-
-        # iterate over all widgets with molecular targets info
+        # read widgets FIRST so we can decide whether there is anything
+        # to save before touching the structure
         widgets = [
             self.mol_tar_box.content_layout.itemAt(i).widget()
             for i in range(self.mol_tar_box.content_layout.count())
@@ -1536,6 +1534,16 @@ class StructuresTab(lib.Dialog):
             elif "z" in widget.objectName():
                 zs.append(widget.value())
 
+        # nothing to write — bail out without touching the structure.
+        # guards against premature calls during a widget rebuild, before
+        # mol_tar_box has been repopulated (Windows-only re-entrancy).
+        if not targets:
+            return
+
+        structure = self.find_structure_by_title(self.current_structure)
+        if structure is None:
+            return
+        structure.restart()
         for target, x, y, z in zip(targets, xs, ys, zs):
             structure.define_coordinates(target, [x], [y], [z])
 
