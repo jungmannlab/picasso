@@ -1346,6 +1346,10 @@ class StructuresTab(lib.Dialog):
         self.structures = []
         self.current_structure = None
         self.n_mol_tar = 0
+        # set while update_mol_tar_box is tearing down/building widgets,
+        # so signals fired by setValue/destruction can't re-enter
+        # update_current_structure and wipe the structure being built
+        self._rebuilding_mol_tar = False
 
         # PREVIEW
         preview_box = QtWidgets.QGroupBox("Preview")
@@ -1490,7 +1494,6 @@ class StructuresTab(lib.Dialog):
         """Remove all widgets from the structures' box and adds the
         currently loaded structures (from self.structures)."""
         self.structures_box.remove_all_widgets()
-
         for i in range(len(self.structures)):
             row_count = self.structures_box.content_layout.rowCount()
             title = self.structures[i].title
@@ -1508,11 +1511,13 @@ class StructuresTab(lib.Dialog):
 
     def update_current_structure(self) -> None:
         """Save info about the current structure."""
-        if not self.structures:
+        if not self.structures or self._rebuilding_mol_tar:
             return
 
-        # read widgets FIRST so we can decide whether there is anything
-        # to save before touching the structure
+        structure = self.find_structure_by_title(self.current_structure)
+        structure.restart()
+
+        # iterate over all widgets with molecular targets info
         widgets = [
             self.mol_tar_box.content_layout.itemAt(i).widget()
             for i in range(self.mol_tar_box.content_layout.count())
@@ -1534,16 +1539,6 @@ class StructuresTab(lib.Dialog):
             elif "z" in widget.objectName():
                 zs.append(widget.value())
 
-        # nothing to write — bail out without touching the structure.
-        # guards against premature calls during a widget rebuild, before
-        # mol_tar_box has been repopulated (Windows-only re-entrancy).
-        if not targets:
-            return
-
-        structure = self.find_structure_by_title(self.current_structure)
-        if structure is None:
-            return
-        structure.restart()
         for target, x, y, z in zip(targets, xs, ys, zs):
             structure.define_coordinates(target, [x], [y], [z])
 
@@ -1715,66 +1710,68 @@ class StructuresTab(lib.Dialog):
     def update_mol_tar_box(self) -> None:
         """Delete widgets from the molecular targets box and load the
         widgets corresponding to the currently loaded structure."""
-        if self.mol_tar_box.content_layout.count() > 5:
-            self.mol_tar_box.remove_all_widgets(keep_labels=True)
-            self.n_mol_tar = 0
+        self._rebuilding_mol_tar = True
+        try:
+            if self.mol_tar_box.content_layout.count() > 5:
+                self.mol_tar_box.remove_all_widgets(keep_labels=True)
+                self.n_mol_tar = 0
 
-        if not self.structures:
-            return
+            if not self.structures:
+                return
 
-        structure = deepcopy(
-            self.find_structure_by_title(self.current_structure)
-        )
-        for target in structure.targets:
-            for x, y, z in zip(
-                structure.x[target],
-                structure.y[target],
-                structure.z[target],
-            ):
-                row = self.mol_tar_box.content_layout.rowCount()
-                name_widget = QtWidgets.QLineEdit(
-                    objectName=f"target{self.n_mol_tar}"
-                )
-                name_widget.setText(target)
-                x_widget = QtWidgets.QDoubleSpinBox(
-                    objectName=f"x{self.n_mol_tar}"
-                )
-                y_widget = QtWidgets.QDoubleSpinBox(
-                    objectName=f"y{self.n_mol_tar}"
-                )
-                z_widget = QtWidgets.QDoubleSpinBox(
-                    objectName=f"z{self.n_mol_tar}"
-                )
-                for spinbox in (x_widget, y_widget, z_widget):
-                    spinbox.setRange(-1000, 1000)
-                    spinbox.setDecimals(2)
-                    spinbox.setSingleStep(0.1)
-                    spinbox.setKeyboardTracking(True)
-                x_widget.setValue(x)
-                y_widget.setValue(y)
-                z_widget.setValue(z)
-                # connect AFTER setValue so spurious valueChanged during setup
-                # can't re-enter update_preview
-                for spinbox in (x_widget, y_widget, z_widget):
-                    spinbox.valueChanged.connect(self.update_preview)
-                name_widget.editingFinished.connect(self.update_preview)
-                delete_button = QtWidgets.QPushButton(
-                    "x", objectName=f"del{self.n_mol_tar}"
-                )
-                delete_button.released.connect(
-                    partial(
-                        self.delete_molecular_target,
-                        delete_button.objectName(),
+            structure = deepcopy(
+                self.find_structure_by_title(self.current_structure)
+            )
+            for target in structure.targets:
+                for x, y, z in zip(
+                    structure.x[target],
+                    structure.y[target],
+                    structure.z[target],
+                ):
+                    row = self.mol_tar_box.content_layout.rowCount()
+                    name_widget = QtWidgets.QLineEdit(
+                        objectName=f"target{self.n_mol_tar}"
                     )
-                )
+                    name_widget.setText(target)
+                    name_widget.editingFinished.connect(self.update_preview)
+                    x_widget = QtWidgets.QDoubleSpinBox(
+                        objectName=f"x{self.n_mol_tar}"
+                    )
+                    y_widget = QtWidgets.QDoubleSpinBox(
+                        objectName=f"y{self.n_mol_tar}"
+                    )
+                    z_widget = QtWidgets.QDoubleSpinBox(
+                        objectName=f"z{self.n_mol_tar}"
+                    )
+                    for spinbox in (x_widget, y_widget, z_widget):
+                        spinbox.setRange(-1000, 1000)
+                        spinbox.setDecimals(2)
+                        spinbox.setSingleStep(0.1)
+                        spinbox.setKeyboardTracking(True)
+                        spinbox.valueChanged.connect(self.update_preview)
+                    # set value now when negative values are allowed
+                    x_widget.setValue(x)
+                    y_widget.setValue(y)
+                    z_widget.setValue(z)
+                    delete_button = QtWidgets.QPushButton(
+                        "x", objectName=f"del{self.n_mol_tar}"
+                    )
+                    delete_button.released.connect(
+                        partial(
+                            self.delete_molecular_target,
+                            delete_button.objectName(),
+                        )
+                    )
 
-                self.mol_tar_box.add_widget(name_widget, row, 0)
-                self.mol_tar_box.add_widget(x_widget, row, 1)
-                self.mol_tar_box.add_widget(y_widget, row, 2)
-                self.mol_tar_box.add_widget(z_widget, row, 3)
-                self.mol_tar_box.add_widget(delete_button, row, 4)
+                    self.mol_tar_box.add_widget(name_widget, row, 0)
+                    self.mol_tar_box.add_widget(x_widget, row, 1)
+                    self.mol_tar_box.add_widget(y_widget, row, 2)
+                    self.mol_tar_box.add_widget(z_widget, row, 3)
+                    self.mol_tar_box.add_widget(delete_button, row, 4)
 
-                self.n_mol_tar += 1
+                    self.n_mol_tar += 1
+        finally:
+            self._rebuilding_mol_tar = False
 
     def save_preview(self) -> None:
         """Save current preview."""
