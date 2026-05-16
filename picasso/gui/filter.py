@@ -402,6 +402,11 @@ class FilterNum(lib.Dialog):
 
     def __init__(self, window: QtWidgets.QMainWindow) -> None:
         super().__init__(window)
+        self.setToolTip(
+            "Choose the parameter to filter by.\n"
+            "The specified range is inclusive, i.e.,\n"
+            "the min/max values are kept."
+        )
         self.window = window
         self.setWindowTitle("Filter by numeric values")
         this_directory = os.path.dirname(os.path.realpath(__file__))
@@ -452,7 +457,7 @@ class FilterNum(lib.Dialog):
         if xmin < xmax:
             field = self.attributes.currentText()
             locs = self.window.locs
-            locs = locs[(locs[field] > xmin) & (locs[field] < xmax)]
+            locs = locs[(locs[field] >= xmin) & (locs[field] <= xmax)]
             self.window.update_locs(locs)
             self.window.log_filter(field, xmin, xmax)
 

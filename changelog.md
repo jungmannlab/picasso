@@ -1,6 +1,6 @@
 # Changelog
 
-Last change: 15-MAY-2026 CEST
+Last change: 16-MAY-2026 CEST
 
 ## 0.10.0
 
@@ -75,6 +75,7 @@ Last change: 15-MAY-2026 CEST
 #### Filter
 - Support for .csv export (not only hdf5)
 - Apply filtering steps from metadata
+- Filtering range for numerical filtering is inclusive
 
 #### Average
 - Abort button
