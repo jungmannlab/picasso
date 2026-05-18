@@ -239,14 +239,36 @@ def generate_N_structures(
     # target species and each column gives one structure
     n_t = len(targets)
     n_s = len(structures)
-    if n_s <= n_t:
+    if n_s < n_t:
         raise ValueError(
             "To generate the search space, the number of unique molecular"
-            " targets must be lower than the number of structures that are"
-            " investigated. Otherwise, the numbers of structures to be"
-            " simulated is constant."
+            " targets must not exceed the number of structures that are"
+            " investigated."
         )
     t_counts = _find_target_counts(targets, structures)
+
+    # special case: n_s == n_t — the linear system t_counts @ counts =
+    # N_total has zero degrees of freedom, so the structure counts are
+    # uniquely determined. Return a single-row search space without
+    # invoking the sampler.
+    if n_s == n_t:
+        N_total_arr = np.asarray(
+            [N_total[target] for target in targets], dtype=np.float64
+        )
+        try:
+            counts = np.linalg.solve(t_counts.astype(np.float64), N_total_arr)
+        except np.linalg.LinAlgError as err:
+            raise ValueError(
+                "Cannot generate a search space: t_counts is singular."
+            ) from err
+        counts = np.maximum(np.round(counts), 0).astype(np.int32)
+        structure_counts = {
+            s.title: np.array([counts[i]]) for i, s in enumerate(structures)
+        }
+        if save:
+            df = pd.DataFrame(structure_counts)
+            df.to_csv(save, index=False)
+        return structure_counts
 
     # ensure that the order of structures is correct, i.e., the free
     # paramters in the system of linear equations are on the right side
@@ -3194,6 +3216,13 @@ class SPINNA:
         # check and optionally convert N_structures
         N_structures = self.mixer.convert_N_structures_to_array(N_structures)
 
+        # short-circuit: with a single candidate there is nothing to
+        # search — the structure counts are already uniquely determined
+        # (e.g. when the number of structures equals the number of
+        # targets). Force brute-force on the lone entry to score it.
+        if N_structures.shape[0] == 1:
+            fitting_mode = "brute-force"
+
         if fitting_mode == "coarse-to-fine":
             return self.fit_coarse_to_fine(
                 N_structures,
@@ -3345,7 +3374,7 @@ class SPINNA:
         # adjust the progress bar
         if isinstance(callback, lib.ProgressDialog):
             callback.setMaximum(n_coarse)
-            callback.setLabelText(coarse_title)
+            callback.zero_progress(coarse_title)
         self.progress_title = coarse_title
         N_coarse, scores_coarse = self._run_brute_force(
             N_coarse, asynch, callback
@@ -3363,8 +3392,7 @@ class SPINNA:
         # adjust the progress bar again
         if isinstance(callback, lib.ProgressDialog):
             callback.setMaximum(len(N_fine))
-            callback.setValue(0)
-            callback.setLabelText(fine_title)
+            callback.zero_progress(fine_title)
         self.progress_title = fine_title
         spinna_results = self.fit_stoichiometry(
             N_fine,
@@ -4444,10 +4472,11 @@ def compare_models_given_label_unc(
             savepath = os.path.join(
                 savedir, f"fit_scores_model_{i+1}_label_unc_{suffix}.csv"
             )
-        # adjust the progress dialog
+        # adjust the progress dialog (zero_progress also resets the
+        # time-estimate baseline so the new phase gets a fresh ETA)
         if isinstance(callback, lib.ProgressDialog):
             callback.setMaximum(len(list(search_space.values())[0]))
-            callback.setLabelText(spinner_title)
+            callback.zero_progress(spinner_title)
         elif callback == "console":
             print(spinner_title)
         opt_props, score = spinner.fit_stoichiometry(
@@ -4463,6 +4492,130 @@ def compare_models_given_label_unc(
             best_idx = i
             best_props = opt_props
     return best_score, best_idx, best_mixer, best_props
+
+
+def fit_le(
+    target_a: str,
+    target_b: str,
+    exp_data: dict,
+    granularity: int,
+    label_unc: dict,
+    distances: list[float],
+    N_sim: int = 1,
+    mask_dict: dict | None = None,
+    width: float | None = None,
+    height: float | None = None,
+    depth: float | None = None,
+    random_rot_mode: Literal["2D", "3D"] | None = "2D",
+    asynch: bool = True,
+    savedir: str = "",
+    callback: lib.ProgressDialog | Literal["console"] | None = None,
+    fitting_mode: Literal[
+        "coarse-to-fine", "bayesian", "brute-force"
+    ] = "coarse-to-fine",
+) -> tuple[dict, dict, float, float, lib.FloatArray1D, StructureMixer]:
+    """Fit labeling efficiency (LE) for two molecular target species.
+
+    Builds the three required structures internally (monomer A, monomer B,
+    and a family of heterodimers AB at the requested distances), forces
+    LE to 100% during the fit, and delegates to ``compare_models`` which
+    fits label uncertainty and picks the best heterodimer distance. The
+    recovered structure proportions are reinterpreted as LE values via
+    ``get_le_from_props``.
+
+    Parameters
+    ----------
+    target_a, target_b : str
+        Names of the two molecular target species. Both must appear as
+        keys in ``exp_data``.
+    exp_data : dict
+        Dictionary with molecular target names as keys and spatial
+        coordinates of the observed molecules as values.
+    granularity : int
+        Granularity as in ``generate_N_structures``.
+    label_unc : dict
+        Per-target list of label-uncertainty candidates. When a list has
+        a single entry the fit of that target's label_unc is skipped.
+    distances : list of float
+        Heterodimer distances (nm) to test. When a single entry is
+        given the heterodimer distance is fixed.
+    N_sim, mask_dict, width, height, depth, random_rot_mode, asynch,
+    savedir, callback, fitting_mode
+        Forwarded to ``compare_models``.
+
+    Returns
+    -------
+    le_values : dict
+        Recovered LE values per target (percent).
+    fitted_label_unc : dict
+        Label uncertainty value chosen for each target.
+    best_distance : float
+        Heterodimer distance that produced the best fit.
+    best_score : float
+        KS2 score of the best fit.
+    best_props : lib.FloatArray1D
+        Structure proportions at the best fit (monomer A, monomer B,
+        heterodimer).
+    best_mixer : StructureMixer
+        Mixer corresponding to the best fit (its ``structures`` attribute
+        holds [monomer_a, monomer_b, heterodimer(best_distance)]).
+    """
+    # validate
+    if target_a not in exp_data or target_b not in exp_data:
+        raise ValueError(
+            "Both target_a and target_b must be present in exp_data."
+        )
+    if target_a == target_b:
+        raise ValueError("target_a and target_b must be distinct.")
+    if len(distances) == 0:
+        raise ValueError("distances must contain at least one value.")
+
+    # build monomers
+    monomer_a = Structure(title=f"Monomer_{target_a}")
+    monomer_a.define_coordinates(target_a, [0.0], [0.0], [0.0])
+    monomer_b = Structure(title=f"Monomer_{target_b}")
+    monomer_b.define_coordinates(target_b, [0.0], [0.0], [0.0])
+
+    # build one model per heterodimer distance
+    models = []
+    for d in distances:
+        het = Structure(title=f"Het_{target_a}_{target_b}_{float(d):.2f}nm")
+        het.define_coordinates(target_a, [-float(d) / 2], [0.0], [0.0])
+        het.define_coordinates(target_b, [float(d) / 2], [0.0], [0.0])
+        models.append([monomer_a, monomer_b, het])
+
+    # LE-fitting trick: simulate with LE = 100% so that the recovered
+    # proportions absorb the true LE (le is on the 0-1 scale internally)
+    le = {target_a: 1.0, target_b: 1.0}
+
+    best_score, idx, fitted_label_unc, best_mixer, best_props = compare_models(
+        models=models,
+        exp_data=exp_data,
+        granularity=granularity,
+        label_unc=label_unc,
+        le=le,
+        N_sim=N_sim,
+        mask_dict=mask_dict,
+        width=width,
+        height=height,
+        depth=depth,
+        random_rot_mode=random_rot_mode,
+        asynch=asynch,
+        savedir=savedir,
+        callback=callback,
+        fitting_mode=fitting_mode,
+    )
+
+    best_distance = float(distances[idx])
+    le_values = get_le_from_props(best_mixer.structures, best_props)
+    return (
+        le_values,
+        fitted_label_unc,
+        best_distance,
+        best_score,
+        best_props,
+        best_mixer,
+    )
 
 
 def check_structures_valid_for_fitting(structures: list[Structure]) -> bool:

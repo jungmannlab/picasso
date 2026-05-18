@@ -2083,6 +2083,234 @@ class CompareModelsDialog(lib.Dialog):
         del self.model_buttons[index]
 
 
+class FitLEDialog(lib.Dialog):
+    """Dialog to set up a labeling-efficiency (LE) fit.
+
+    Lets the user optionally fit the per-target label uncertainty and the
+    heterodimer distance. Both knobs default to a single fixed value (the
+    user's current spin-box value for label uncertainty, a manual entry
+    for distance); ticking the corresponding checkbox switches the input
+    to a From / To / Step grid.
+    """
+
+    def __init__(self, sim_tab: SimulationsTab) -> None:
+        super().__init__(sim_tab)
+        self.setWindowTitle("Fit labeling efficiency")
+        self.setModal(True)
+        self.sim_tab = sim_tab
+        self.targets = list(sim_tab.targets)
+        layout = QtWidgets.QVBoxLayout(self)
+        self.setLayout(layout)
+
+        # LABEL UNCERTAINTY
+        label_unc_layout = QtWidgets.QGridLayout()
+        layout.addLayout(label_unc_layout)
+        self.label_unc_checkbox = QtWidgets.QCheckBox("Fit label uncertainty")
+        self.label_unc_checkbox.setToolTip(
+            "Search for the best fitting label uncertainty per target?\n"
+            "When unchecked, the current values from the Simulations tab"
+            " are used."
+        )
+        self.label_unc_checkbox.setChecked(False)
+        self.label_unc_checkbox.toggled.connect(self.on_label_unc_toggled)
+        label_unc_layout.addWidget(self.label_unc_checkbox, 0, 0, 1, 4)
+        t_label = QtWidgets.QLabel("Target")
+        t_label.setToolTip("Name of the molecular target.")
+        label_unc_layout.addWidget(t_label, 1, 0)
+        f_label = QtWidgets.QLabel("From")
+        f_label.setToolTip("Lower bound of label uncertainty (nm).")
+        label_unc_layout.addWidget(f_label, 1, 1)
+        to_label = QtWidgets.QLabel("To")
+        to_label.setToolTip("Upper bound of label uncertainty (nm).")
+        label_unc_layout.addWidget(to_label, 1, 2)
+        s_label = QtWidgets.QLabel("Step")
+        s_label.setToolTip("Iteration step of label uncertainty (nm).")
+        label_unc_layout.addWidget(s_label, 1, 3)
+        self.label_unc_from_spins = {}
+        self.label_unc_to_spins = {}
+        self.label_unc_step_spins = {}
+        for i, target in enumerate(self.targets):
+            from_spin = QtWidgets.QDoubleSpinBox()
+            from_spin.setRange(0, 20)
+            from_spin.setDecimals(2)
+            from_spin.setSingleStep(0.1)
+            from_spin.setValue(3)
+            to_spin = QtWidgets.QDoubleSpinBox()
+            to_spin.setRange(0, 20)
+            to_spin.setDecimals(2)
+            to_spin.setSingleStep(0.1)
+            to_spin.setValue(8)
+            step_spin = QtWidgets.QDoubleSpinBox()
+            step_spin.setRange(0.1, 10)
+            step_spin.setDecimals(2)
+            step_spin.setSingleStep(0.1)
+            step_spin.setValue(1.0)
+            for spin in (from_spin, to_spin, step_spin):
+                spin.setEnabled(False)
+                spin.valueChanged.connect(self._update_rounds_preview)
+            self.label_unc_from_spins[target] = from_spin
+            self.label_unc_to_spins[target] = to_spin
+            self.label_unc_step_spins[target] = step_spin
+            label_unc_layout.addWidget(QtWidgets.QLabel(target), 2 + i, 0)
+            label_unc_layout.addWidget(from_spin, 2 + i, 1)
+            label_unc_layout.addWidget(to_spin, 2 + i, 2)
+            label_unc_layout.addWidget(step_spin, 2 + i, 3)
+
+        # HETERODIMER DISTANCE
+        distance_layout = QtWidgets.QGridLayout()
+        layout.addLayout(distance_layout)
+        self.distance_checkbox = QtWidgets.QCheckBox(
+            "Fit heterodimer distance"
+        )
+        self.distance_checkbox.setToolTip(
+            "Search for the best fitting heterodimer distance?\n"
+            "When unchecked, a single fixed distance is used."
+        )
+        self.distance_checkbox.setChecked(False)
+        self.distance_checkbox.toggled.connect(self.on_distance_toggled)
+        distance_layout.addWidget(self.distance_checkbox, 0, 0, 1, 4)
+
+        # single fixed-distance spin (active when checkbox is unchecked)
+        fixed_label = QtWidgets.QLabel("Distance (nm):")
+        fixed_label.setToolTip("Fixed heterodimer distance (nm).")
+        distance_layout.addWidget(fixed_label, 1, 0)
+        self.distance_fixed_spin = QtWidgets.QDoubleSpinBox()
+        self.distance_fixed_spin.setRange(0.1, 200)
+        self.distance_fixed_spin.setDecimals(2)
+        self.distance_fixed_spin.setSingleStep(0.5)
+        self.distance_fixed_spin.setValue(10.0)
+        distance_layout.addWidget(self.distance_fixed_spin, 1, 1, 1, 3)
+
+        # from / to / step (active when checkbox is checked)
+        distance_layout.addWidget(QtWidgets.QLabel("From"), 2, 1)
+        distance_layout.addWidget(QtWidgets.QLabel("To"), 2, 2)
+        distance_layout.addWidget(QtWidgets.QLabel("Step"), 2, 3)
+        distance_layout.addWidget(QtWidgets.QLabel("Range (nm):"), 3, 0)
+        self.distance_from_spin = QtWidgets.QDoubleSpinBox()
+        self.distance_from_spin.setRange(0.1, 200)
+        self.distance_from_spin.setDecimals(2)
+        self.distance_from_spin.setSingleStep(0.5)
+        self.distance_from_spin.setValue(5.0)
+        self.distance_to_spin = QtWidgets.QDoubleSpinBox()
+        self.distance_to_spin.setRange(0.1, 200)
+        self.distance_to_spin.setDecimals(2)
+        self.distance_to_spin.setSingleStep(0.5)
+        self.distance_to_spin.setValue(25.0)
+        self.distance_step_spin = QtWidgets.QDoubleSpinBox()
+        self.distance_step_spin.setRange(0.1, 50)
+        self.distance_step_spin.setDecimals(2)
+        self.distance_step_spin.setSingleStep(0.5)
+        self.distance_step_spin.setValue(5.0)
+        for spin in (
+            self.distance_from_spin,
+            self.distance_to_spin,
+            self.distance_step_spin,
+        ):
+            spin.setEnabled(False)
+            spin.valueChanged.connect(self._update_rounds_preview)
+        distance_layout.addWidget(self.distance_from_spin, 3, 1)
+        distance_layout.addWidget(self.distance_to_spin, 3, 2)
+        distance_layout.addWidget(self.distance_step_spin, 3, 3)
+
+        # SAVE FIT SCORES
+        self.save_fit_scores = QtWidgets.QCheckBox("Save fit scores")
+        self.save_fit_scores.setToolTip("Save the fit scores per model?")
+        self.save_fit_scores.setChecked(False)
+        layout.addWidget(self.save_fit_scores)
+
+        # ROUNDS PREVIEW
+        self.rounds_label = QtWidgets.QLabel()
+        self.rounds_label.setToolTip(
+            "Number of SPINNA fitting rounds that will be executed, "
+            "roughly one per label uncertainty/dimer distance."
+        )
+        layout.addWidget(self.rounds_label)
+        self._update_rounds_preview()
+
+        # OK / CANCEL
+        self.buttons = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.StandardButton.Ok
+            | QtWidgets.QDialogButtonBox.StandardButton.Cancel,
+            QtCore.Qt.Orientation.Horizontal,
+            self,
+        )
+        layout.addWidget(self.buttons)
+        self.buttons.accepted.connect(self.accept)
+        self.buttons.rejected.connect(self.reject)
+
+    def on_label_unc_toggled(self, state: bool) -> None:
+        for target in self.targets:
+            self.label_unc_from_spins[target].setEnabled(state)
+            self.label_unc_to_spins[target].setEnabled(state)
+            self.label_unc_step_spins[target].setEnabled(state)
+        self._update_rounds_preview()
+
+    def on_distance_toggled(self, state: bool) -> None:
+        self.distance_fixed_spin.setEnabled(not state)
+        self.distance_from_spin.setEnabled(state)
+        self.distance_to_spin.setEnabled(state)
+        self.distance_step_spin.setEnabled(state)
+        self._update_rounds_preview()
+
+    def _compute_distances(self) -> lib.FloatArray1D:
+        if self.distance_checkbox.isChecked():
+            return np.arange(
+                self.distance_from_spin.value(),
+                self.distance_to_spin.value() + 0.01,
+                self.distance_step_spin.value(),
+            )
+        return np.array([self.distance_fixed_spin.value()])
+
+    def _compute_label_unc(self) -> dict:
+        label_unc = {}
+        if self.label_unc_checkbox.isChecked():
+            for target in self.targets:
+                label_unc[target] = np.arange(
+                    self.label_unc_from_spins[target].value(),
+                    self.label_unc_to_spins[target].value() + 0.01,
+                    self.label_unc_step_spins[target].value(),
+                )
+        else:
+            for target, spin in zip(
+                self.targets, self.sim_tab.label_unc_spins
+            ):
+                label_unc[target] = [spin.value()]
+        return label_unc
+
+    def _update_rounds_preview(self) -> None:
+        try:
+            distances = self._compute_distances()
+            label_unc = self._compute_label_unc()
+        except Exception:
+            self.rounds_label.setText("Estimated SPINNA rounds: ?")
+            return
+        n_models = len(distances)
+        total = n_models  # final comparison
+        for target in self.targets:
+            if len(label_unc[target]) > 1:
+                total += len(label_unc[target]) * n_models
+        self.rounds_label.setText(f"Estimated SPINNA rounds: {total}")
+
+    @staticmethod
+    def getParams(
+        parent: QtWidgets.QWidget,
+        sim_tab: SimulationsTab,
+    ) -> tuple[lib.FloatArray1D, dict, str, bool]:
+        dialog = FitLEDialog(sim_tab)
+        result = dialog.exec()
+        accepted = result == QtWidgets.QDialog.DialogCode.Accepted
+        distances = dialog._compute_distances()
+        label_unc = dialog._compute_label_unc()
+        savedir = ""
+        if accepted and dialog.save_fit_scores.isChecked():
+            savedir = QtWidgets.QFileDialog.getExistingDirectory(
+                parent,
+                "Choose folder to save scores",
+                os.path.dirname(sim_tab.structures_path or ""),
+            )
+        return distances, label_unc, savedir, accepted
+
+
 class OptionalSettingsDialog(lib.Dialog):
     """Dialog for setting optional parameters in the Simulations Tab.
 
@@ -2563,6 +2791,9 @@ class SimulationsTab(lib.Dialog):
         Experimental data for each target.
     fit_button : QtWidgets.QPushButton
         Button for starting the fitting.
+    fit_le_button : QtWidgets.QPushButton
+        Button opening the dedicated Fit LE dialog. Visible only when
+        exactly two molecular targets are loaded.
     fit_results_display : QtWidgets.QLabel
         Label for displaying the results of fitting - the proportions
         of best-fit numbers of structures.
@@ -2573,8 +2804,6 @@ class SimulationsTab(lib.Dialog):
     le_box : ScrollableGroupBox
         Box with spin boxes for setting labeling efficiency (%) for
         each target.
-    le_fitting_check : QtWidgets.QCheckBox
-        Check box for enabling/disabling fitting of labeling efficiency.
     le_spins : list of QtWidgets.QDoubleSpinBox
         Spin boxes for setting labeling efficiency (%) for each target.
     load_exp_data_box : ScrollableGroupBox
@@ -2936,14 +3165,16 @@ class SimulationsTab(lib.Dialog):
         self.bootstrap_check.setChecked(False)
         fitting_layout.addWidget(self.bootstrap_check, 1, 1)
 
-        self.le_fitting_check = QtWidgets.QCheckBox("Fit labeling efficiency")
-        self.le_fitting_check.setToolTip(
-            "Use the loaded structures to fit their labeling efficiencies?"
+        self.fit_le_button = QtWidgets.QPushButton("Fit labeling efficiency")
+        self.fit_le_button.setToolTip(
+            "Open the Fit LE dialog. Visible only when exactly two"
+            " molecular targets are loaded.\n"
+            "Assumes experimental data was acquired as per Hellmeier, "
+            "Strauss, et al, Nature Methods, 2024."
         )
-        self.le_fitting_check.setChecked(False)
-        self.le_fitting_check.setVisible(False)
-        self.le_fitting_check.toggled.connect(self.on_le_fitting_toggled)
-        fitting_layout.addWidget(self.le_fitting_check, 1, 2)
+        self.fit_le_button.setVisible(False)
+        self.fit_le_button.released.connect(self.fit_le)
+        fitting_layout.addWidget(self.fit_le_button, 1, 2)
 
         self.fit_button = QtWidgets.QPushButton(
             "Find best fitting stoichiometry"
@@ -3049,11 +3280,7 @@ class SimulationsTab(lib.Dialog):
                 "background-color : lightgreen"
             )
             self.fit_results_display.setText("  ")
-            self.le_fitting_check.setChecked(False)
-            if spinna.check_structures_valid_for_fitting(self.structures):
-                self.le_fitting_check.setVisible(True)
-            else:
-                self.le_fitting_check.setVisible(False)
+            self.fit_le_button.setVisible(len(self.targets) == 2)
 
     def load_target_names(self) -> None:
         """Load all unique names of molecular targets in
@@ -3212,15 +3439,6 @@ class SimulationsTab(lib.Dialog):
                             * (old_depth / 1000)
                         )
                     self.densities_spins[idx].setValue(new_density)
-
-    def on_le_fitting_toggled(self, state: bool) -> None:
-        """If LE fitting box is checked, freeze LE values, else unfreeze
-        them."""
-
-        for le_box in self.le_spins:
-            if state:
-                le_box.setValue(100.0)
-            le_box.setEnabled(not state)
 
     def load_densities_widgets(self) -> None:
         """Load the widgets for inputting observed densities of each
@@ -3687,16 +3905,6 @@ class SimulationsTab(lib.Dialog):
             for structure, prop in zip(self.structures, prop_str):
                 text += f"{structure.title} - {prop:.2f}%, "
         text = text[:-2]  # remove last comma and space
-        if self.le_fitting_check.isChecked():
-            # extract the le values based on the recovered proportions
-            le_values = spinna.get_le_from_props(
-                self.structures,
-                self.opt_props,
-            )
-            text = (
-                f"LE {self.targets[0]}: {le_values[self.targets[0]]:.1f}%,"
-                f" LE {self.targets[1]}: {le_values[self.targets[1]]:.1f}%"
-            )  # only display the information about LE result
         self.fit_results_display.setText(text)
 
     def save_fit_results(self) -> None:
@@ -3766,17 +3974,6 @@ class SimulationsTab(lib.Dialog):
                 )
         return metadata
 
-    def _le_fitting_summary(self, metadata: dict) -> dict:
-        """Adjust the summary of fit results and parameters if LE
-        fitting was performed."""
-        if self.le_fitting_check.isChecked():
-            for target in self.targets:
-                metadata.pop(f"Labeling efficiency (%) ({target})", None)
-            metadata["Best fitting labeling efficiencies (%)"] = (
-                self.fit_results_display.text()
-            )
-        return metadata
-
     def summarize_fit_results(self) -> None:
         """Summarize fit results and parameters in a dictionary.
 
@@ -3827,7 +4024,6 @@ class SimulationsTab(lib.Dialog):
             "Best fitting score (Kolmogorov-Smirnov 2 sample test statistic)"
         ] = self.best_score
         metadata = self._extract_relative_props_for_target(metadata)
-        metadata = self._le_fitting_summary(metadata)
         metadata = self._nn_counts_summary(metadata)
         return metadata
 
@@ -3927,6 +4123,194 @@ class SimulationsTab(lib.Dialog):
         self.sim_and_plot_NND()
         text = f"Best fitting model: {model_names[idx]}, already loaded."
         self.fit_results_display.setText(text)
+
+    @check_structures_loaded
+    @check_exp_data_loaded
+    @check_search_space_loaded
+    def fit_le(self) -> None:
+        """Open the Fit LE dialog and run the LE fit."""
+        if len(self.targets) != 2:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Warning",
+                "Fit LE requires exactly two molecular targets.",
+            )
+            return
+        if not isinstance(self.granularity, int):
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Warning",
+                "Please generate the search space first.",
+            )
+            return
+
+        distances, label_unc, savedir, ok = FitLEDialog.getParams(self, self)
+        if not ok:
+            return
+        if len(distances) == 0:
+            QtWidgets.QMessageBox.warning(
+                self, "Warning", "No heterodimer distances specified."
+            )
+            return
+
+        # snapshot the search-space inputs — compare_models mutates the
+        # label_unc dict in place, so we keep a copy for the summary
+        label_unc_input = {t: list(v) for t, v in label_unc.items()}
+        distances_input = list(distances)
+
+        base_mixer = self.setup_mixer(mode="fit")
+        if base_mixer is None:
+            return
+
+        progress = lib.ProgressDialog("Fitting LE, please wait...", 0, 1, self)
+        progress.setAutoClose(False)
+        progress.setAutoReset(False)
+        fitting_mode = {
+            "Coarse to fine": "coarse-to-fine",
+            "Bayesian": "bayesian",
+            "Brute force": "brute-force",
+        }[self.settings_dialog.fitting_mode.currentText()]
+
+        le_values, best_lunc, best_d, score, props, best_mixer = spinna.fit_le(
+            target_a=self.targets[0],
+            target_b=self.targets[1],
+            exp_data=self.exp_data,
+            granularity=self.granularity,
+            label_unc=label_unc,
+            distances=distances,
+            N_sim=self.n_sim_fit,
+            mask_dict=base_mixer.mask_dict,
+            width=base_mixer.roi[0],
+            height=base_mixer.roi[1],
+            depth=base_mixer.roi[2],
+            random_rot_mode=base_mixer.random_rot_mode,
+            asynch=self.settings_dialog.asynch_check.isChecked(),
+            savedir=savedir,
+            callback=progress,
+            fitting_mode=fitting_mode,
+        )
+        progress.close()
+
+        # push fitted label_unc back into the simulations-tab spin boxes
+        for spin, l in zip(self.label_unc_spins, best_lunc.values()):
+            spin.setValue(l)
+
+        # adopt the best fitting structures so subsequent simulations
+        # use them (mirrors what compare_models does)
+        self.structures = best_mixer.structures
+        self.mixer = best_mixer
+        self.mixer.nn_counts = {
+            name: self.nn_plot_settings_dialog.nn_counts[name].value()
+            for name in self.nn_plot_settings_dialog.nn_counts.keys()
+        }
+        if self.mask_den_stack.currentIndex() == 1:  # homogeneous dist.
+            roi = self.mixer.roi
+            self.single_sim_mass = self.mixer.roi_size
+            if roi[2] is None:
+                self.roi_button.setText(
+                    f"Area: {self.single_sim_mass:.0f} μm²"
+                )
+            else:
+                self.roi_button.setText(
+                    f"Volume: {self.single_sim_mass:.0f} μm³"
+                )
+        self.load_single_sim_n_str_widgets()
+        self.settings_dialog.update_neighbors_widgets()
+        self.nn_plot_settings_dialog.update_neighbors_widgets()
+
+        # populate the results readout and the proportion spin boxes
+        self.opt_props = props
+        self.best_score = score
+        self.update_prop_str_input_spins(props)
+        lunc_text = ", ".join(
+            f"{t}={float(v):.2f} nm" for t, v in best_lunc.items()
+        )
+        text = (
+            f"LE {self.targets[0]}: {le_values[self.targets[0]]:.1f}%, "
+            f"LE {self.targets[1]}: {le_values[self.targets[1]]:.1f}%, "
+            f"distance: {best_d:.2f} nm, "
+            f"label_unc: {lunc_text}"
+        )
+        self.fit_results_display.setText(text)
+
+        # save a .txt summary of the fit
+        self._save_le_fit_summary(
+            le_values=le_values,
+            best_lunc=best_lunc,
+            best_d=best_d,
+            score=score,
+            props=props,
+            label_unc_input=label_unc_input,
+            distances_input=distances_input,
+        )
+
+        # run a single simulation and display the simulated/experimental NNDs
+        self.mixer = self.setup_mixer(mode="single_sim")
+        self.sim_and_plot_NND()
+
+    def _save_le_fit_summary(
+        self,
+        *,
+        le_values: dict,
+        best_lunc: dict,
+        best_d: float,
+        score: float,
+        props,
+        label_unc_input: dict,
+        distances_input,
+    ) -> None:
+        """Write a .txt summary of the Fit LE results, mirroring the
+        format produced by ``save_fit_results`` for the stoichiometry
+        fit."""
+        metadata = {
+            "Date": datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
+            "Molecular targets": ", ".join(self.targets),
+            "Number of simulations": self.n_sim_fit,
+            "Parameter search space granularity": self.granularity,
+            "Dimensionality": self.dim_widget.currentText(),
+            "Rotations mode": (
+                self.settings_dialog.rot_dim_widget.currentText()
+            ),
+            "Fitting mode": (self.settings_dialog.fitting_mode.currentText()),
+        }
+        for target in self.targets:
+            metadata[f"File location of experimental data ({target})"] = (
+                self.exp_data_paths[target]
+            )
+        for target in self.targets:
+            metadata[f"Label-uncertainty search space (nm) ({target})"] = (
+                ", ".join(f"{float(v):.2f}" for v in label_unc_input[target])
+            )
+            metadata[f"Fitted label uncertainty (nm) ({target})"] = (
+                f"{float(best_lunc[target]):.4f}"
+            )
+        metadata["Heterodimer distance search space (nm)"] = ", ".join(
+            f"{float(v):.2f}" for v in distances_input
+        )
+        metadata["Fitted heterodimer distance (nm)"] = f"{best_d:.4f}"
+        for target in self.targets:
+            metadata[f"Fitted labeling efficiency (%) ({target})"] = (
+                f"{float(le_values[target]):.2f}"
+            )
+        metadata["Best fitting structure proportions (%)"] = ", ".join(
+            f"{structure.title}: {float(p):.2f}"
+            for structure, p in zip(self.structures, props)
+        )
+        metadata[
+            "Best fitting score (Kolmogorov-Smirnov 2 sample test statistic)"
+        ] = score
+
+        suggested = os.path.join(
+            self.window.pwd or os.getcwd(), "fit_le_summary.txt"
+        )
+        path, _ = lib.get_save_filename_ext_dialog(
+            self, "Save Fit LE summary", suggested, filter="*.txt"
+        )
+        if path:
+            self.window.pwd = os.path.dirname(path)
+            with open(path, "w") as f:
+                for key, value in metadata.items():
+                    f.write(f"{key}: {value}\n")
 
     def on_roi_button_clicked(self) -> None:
         """Ask the user to input the area/volume to be simulated for a
