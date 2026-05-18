@@ -3870,6 +3870,14 @@ class SimulationsTab(lib.Dialog):
         progress = lib.ProgressDialog(
             "Comparing models, please wait...", 0, 1, self
         )
+        # keep a single dialog visible across all fitting phases
+        progress.setAutoClose(False)
+        progress.setAutoReset(False)
+        fitting_mode = {
+            "Coarse to fine": "coarse-to-fine",
+            "Bayesian": "bayesian",
+            "Brute force": "brute-force",
+        }[self.settings_dialog.fitting_mode.currentText()]
         _, idx, best_label_unc, best_mixer, opt_props = spinna.compare_models(
             models=models,
             exp_data=self.exp_data,
@@ -3885,6 +3893,7 @@ class SimulationsTab(lib.Dialog):
             asynch=self.settings_dialog.asynch_check.isChecked(),
             savedir=savedir,
             callback=progress,
+            fitting_mode=fitting_mode,
         )
         progress.close()
 

@@ -1,6 +1,10 @@
 # Changelog
 
-Last change: 16-MAY-2026 CEST
+Last change: 18-MAY-2026 CEST
+
+## 0.10.1
+
+- SPINNA: comparing models uses fitting modes and has cleaner progress dialog
 
 ## 0.10.0
 
