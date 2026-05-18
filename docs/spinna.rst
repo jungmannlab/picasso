@@ -50,7 +50,7 @@ Load data and parameters
 1. Click the *Load structures* button in the top left corner of the window. Upon loading, new widgets will appear in the GUI.  
 2. For each detected molecular target species, load the experimental data which must be saved in .hdf5 format that is compatible with localizations files in other Picasso modules, see `here <https://picassosr.readthedocs.io/en/latest/files.html#hdf5-files>`_.
 3. Furthermore, input label uncertainty and labeling efficiency and observed density in the *Load data* box. Alternatively, load the mask to simulate heterogeneous distribution by clicking on *Masks* in the bottom left corner of the box. For more information about the mask, see **Mask generation tab**.
-4. Moreover, in the *Load data* box, the user can change the dimensionality of the simulation. If 3D simulation is chosen without a mask, the user needs to input the range of z coordinates of molecular targets simulated by clicking *Z range*. In the "Optional settings" dialog, the user can change the mode of rotations (random rotations around z axis (2D), random rotations around 3 axes or no rotations). Additionally, the fitting mode can be adjusted - either "coarse to fine" or "brute force". For more information about the fitting modes, see **Fitting** below.
+4. Moreover, in the *Load data* box, the user can change the dimensionality of the simulation. If 3D simulation is chosen without a mask, the user needs to input the range of z coordinates of molecular targets simulated by clicking *Z range*. In the "Optional settings" dialog, the user can change the mode of rotations (random rotations around z axis (2D), random rotations around 3 axes or no rotations). Additionally, the fitting mode can be adjusted - one of "bayesian", "coarse to fine" or "brute force". The chosen fitting mode applies to all fitting workflows (*Find best fitting combination*, *Compare models* and *Fit LE*). For more information about the fitting modes, see **Fitting** below.
 
 Fitting
 ~~~~~~~
@@ -60,19 +60,27 @@ Within the *Fitting* box:
 1. To generate the search space, i.e., the set of stoichiometries tested in SPINNA, click the button *Generate parameter search space* and define the number of simulation repeats and granularity. For more information, see Supplementary Figure 2 in the `SPINNA publication <https://doi.org/10.1038/s41467-025-59500-z>`_.
 2. To save the fitting scores for each tested stoichiometry, tick *Save fitting scores*. The user will be asked to input the name of the resulting .csv file.
 3. To obtain the result’s uncertainty, check the *Bootstrap* box, which will resample from the best fitting model 20 times and rerun SPINNA on the resampled datasets. Note that this will increase the computation time.
-4. To test different SPINNA models, click *Compare models*. The dialog will open, asking the user to input the range of tested label uncertainties (the user can choose to fit label uncertainty or not) and the candidate SPINNA models. For example, the user may want to explore the models with different spacings between the structures or different shape. We recommend the choose lower granularity when comparing models since the fitting may take a long time. 
+4. To test different SPINNA models, click *Compare models*. The dialog will open, asking the user to input the range of tested label uncertainties (the user can choose to fit label uncertainty or not) and the candidate SPINNA models. For example, the user may want to explore the models with different spacings between the structures or different shape. We recommend the choose lower granularity when comparing models since the fitting may take a long time. A single progress dialog is displayed throughout the comparison; its title shows the current round number (``[Round X/Y]``) so the user knows how many SPINNA rounds remain. The fitting mode selected in *Optional settings* is honored.
 5. To run SPINNA, click *Find best fitting combination*. The progress dialog will be displayed.
 6. After the fitting is finished, specify the name for saving a fit summary file (.txt). This file includes all the information about the fitting, the parameters and the results. The user may also choose not to save the file by clicking *Cancel* in the dialog. Additionally, the fitted stoichiometry is displayed in the *Single simulation* box and the NND histograms are shown in the *Plotting* box, see image below.
 
-If labeling efficiency values are to be fitted, the user needs to load structures first which consists of:
+Fitting labeling efficiency
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-* Monomer of the reference protein
-* Monomer of the target protein
-* Heterodimer of the reference and target protein
+Since v0.10.1 the labeling efficiency (LE) fit has its own workflow. Whenever exactly two molecular targets are loaded, a *Fit labeling efficiencies* button is shown in the *Fitting* box. The user no longer needs to load the three "monomer A / monomer B / heterodimer AB" structures manually — SPINNA constructs them internally from the two target names alone.
 
-SPINNA will automatically detect if these conditions are met. If so, an extra check box will appear in the *Fitting* box, titled "Fit labeling efficiency". By checking it, LE used for simulations is kept at 100% and the reported fit result will only show the LE values of the reference and target proteins (in practice, which target is named reference or target does not matter and they can be interchanged). Additionally, the saved ``.txt`` file will contain the same information.
+Clicking *Fit labeling efficiencies* opens a small dialog with three sections:
 
-Since v0.10.0, in the "Optional settings", the user can choose between three fitting modes: "bayesian" "coarse to fine" and "brute force". In the "bayesian" mode, the search space is explored using Bayesian optimization with Gaussian process regression. This is a more efficient way to explore the search space, especially when it is large, and it is recommended as the default fitting mode. In the "coarse to fine" mode, a coarse grid of structure combinations is tested, which consists of 10% of evenly distributed structure combinations. Then, a finer grid is tested around the best combination from the coarse grid. In the "brute force" mode, all combinations of structures are tested sequentially. The "coarse to fine" mode is recommended for faster fitting, especially when the search space is large. Previously, only brute force mode was available.
+1. **Fit label uncertainty** (checkbox) — when checked, the dialog exposes a *From / To / Step* row per target so SPINNA can search for the best label uncertainty. When unchecked, the current value from the *Load data* box is used as a fixed input for that target.
+2. **Fit heterodimer distance** (checkbox) — when checked, the dialog exposes a *From / To / Step* row in nm. When unchecked, a single fixed distance is used (entered in the *Distance (nm)* field).
+3. **Save fit scores** (checkbox) — when checked, the user selects a folder where SPINNA saves the fit scores for every candidate.
+
+The dialog also displays a live "Estimated SPINNA rounds" preview that updates as the spin boxes change, so the user can gauge how long the fit will take before starting it.
+
+Fitting modes
+~~~~~~~~~~~~~
+
+Since v0.10.0, in the "Optional settings", the user can choose between three fitting modes: "bayesian", "coarse to fine" and "brute force". The chosen mode is honored by *Find best fitting combination*, *Compare models* and *Fit LE...*. In the "bayesian" mode, the search space is explored using Bayesian optimization with Gaussian process regression. This is a more efficient way to explore the search space, especially when it is large, and it is recommended as the default fitting mode. In the "coarse to fine" mode, a coarse grid of structure combinations is tested, which consists of 10% of evenly distributed structure combinations. Then, a finer grid is tested around the best combination from the coarse grid. In the "brute force" mode, all combinations of structures are tested sequentially. The "coarse to fine" mode is recommended for faster fitting, especially when the search space is large. Previously, only brute force mode was available.
 
 .. image:: ../docs/spinna_simulate_tab_after_fit.png
    :alt: simulate_tab_after_fit
