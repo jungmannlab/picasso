@@ -68,9 +68,11 @@ pyinstaller "$PYINSTALLER_FILE" \
     --collect-all picasso \
     --collect-all streamlit \
     --copy-metadata streamlit \
+    --copy-metadata imageio \
     --collect-submodules matplotlib.backends \
     --name picasso \
     --icon ../logos/localize.icns \
+    --osx-bundle-identifier org.jungmannlab.picasso \
     --distpath "$DIST_DIR" \
     --workpath "$BUILD_DIR" \
     --noconfirm
@@ -92,6 +94,22 @@ fi
 
 # Get the resources directory for icons
 MAIN_RESOURCES="$MAIN_APP_PATH/Contents/Resources"
+
+# ---------------------------------------------------------------------------
+# Step 1a: Drop a qt.conf into the bundle.
+# On macOS 26 (Tahoe), Qt's static initializers call CFBundleGetMainBundle()
+# during dlopen of QtCore. If that returns NULL (which happens when Python is
+# the launching process and the Info.plist identifier isn't a reverse-DNS
+# string), Qt passes NULL into CFBundleCopyBundleURL and the app crashes
+# instantly with SIGSEGV in __CFCheckCFInfoPACSignature. Shipping a qt.conf
+# short-circuits that lookup: Qt reads paths from the file instead of asking
+# CoreFoundation. Prefix = . pins Qt to the bundle's own Resources dir.
+# ---------------------------------------------------------------------------
+cat > "$MAIN_RESOURCES/qt.conf" <<'EOF'
+[Paths]
+Prefix = .
+EOF
+echo ">>> Wrote qt.conf to $MAIN_RESOURCES/qt.conf"
 
 # ---------------------------------------------------------------------------
 # Step 1b: Fix HDF5 library conflict (h5py 3.15.1 vs tables 3.10.1), which
@@ -117,6 +135,16 @@ if [ -d "$H5PY_DYLIBS" ]; then
         done
     fi
 fi
+
+# ---------------------------------------------------------------------------
+# Step 1c: Re-sign the main bundle (ad-hoc). PyInstaller signs the bundle
+# when it builds, but the HDF5 dylib swap above invalidates that signature.
+# An invalid signature on Apple Silicon triggers PAC/codesigning faults at
+# load time, including crashes inside CoreFoundation. --deep --force resigns
+# everything inside the bundle with an ad-hoc identity.
+# ---------------------------------------------------------------------------
+echo ">>> Re-signing $MAIN_APP_PATH (ad-hoc)..."
+codesign --force --deep --sign - "$MAIN_APP_PATH"
 
 # -----------------------------------------------------------------------------
 # Step 2: Create separate .app bundles for each tool

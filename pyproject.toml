@@ -48,7 +48,7 @@ dependencies = [
     "playsound3>=3.2.8,<4",
     "imageio>=2.37.0,<3",
     "imageio-ffmpeg>=0.6.0,<1",
-    "tifffile>=2023.1.1",
+    "tifffile>=2024.7.24,<2027",
     "PyImarisWriter==0.7.0; sys_platform=='win32'",
     "hdf5plugin; sys.platform=='win32'"
 ]

@@ -682,7 +682,11 @@ def _mlefit_sigma_crlb(
     log_likelihood = 0.0
     dudt = np.zeros(n_params, dtype=np.float32)
     size, _ = spot.shape
-    M = np.zeros((n_params, n_params), dtype=np.float32)  # Fisher matrix
+    # Fisher matrix in float64 — entries span many orders of magnitude
+    # (~photons² for position derivatives down to ~1 for bg), and a
+    # float32 pinv loses near-zero singular values inconsistently across
+    # LAPACK backends, occasionally producing zero/negative diagonals.
+    M = np.zeros((n_params, n_params), dtype=np.float64)
     # Sum over all pixels
     for ii in range(size):
         for jj in range(size):
@@ -892,7 +896,8 @@ def _mlefit_sigmaxy_crlb(
     log_likelihood = 0.0
     dudt = np.zeros(n_params, dtype=np.float32)
     size, _ = spot.shape
-    M = np.zeros((n_params, n_params), dtype=np.float32)
+    # Fisher matrix in float64 — see note in _mlefit_sigma_crlb.
+    M = np.zeros((n_params, n_params), dtype=np.float64)
     for ii in range(size):
         for jj in range(size):
             PSFx = _gaussian_integral(ii, theta[0], theta[4])
