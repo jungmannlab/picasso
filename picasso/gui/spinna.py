@@ -2178,7 +2178,7 @@ class FitLEDialog(lib.Dialog):
         self.distance_fixed_spin.setRange(0.1, 200)
         self.distance_fixed_spin.setDecimals(2)
         self.distance_fixed_spin.setSingleStep(0.5)
-        self.distance_fixed_spin.setValue(10.0)
+        self.distance_fixed_spin.setValue(sim_tab.get_heterodimer_distance())
         distance_layout.addWidget(self.distance_fixed_spin, 1, 1, 1, 3)
 
         # from / to / step (active when checkbox is checked)
@@ -3282,6 +3282,28 @@ class SimulationsTab(lib.Dialog):
             self.fit_results_display.setText("  ")
             self.fit_le_button.setVisible(len(self.targets) == 2)
 
+    def get_heterodimer_distance(self, default: float = 10.0) -> float:
+        """Return the molecule-to-molecule distance (nm) of the first
+        heterodimer found in ``self.structures``. A heterodimer is a
+        structure with exactly two distinct targets, one molecule each.
+        Returns ``default`` if none is found."""
+        if len(self.targets) != 2:
+            return default
+        target_a, target_b = self.targets[0], self.targets[1]
+        for s in self.structures:
+            if (
+                len(s.targets) == 2
+                and target_a in s.targets
+                and target_b in s.targets
+                and len(s.x[target_a]) == 1
+                and len(s.x[target_b]) == 1
+            ):
+                dx = s.x[target_a][0] - s.x[target_b][0]
+                dy = s.y[target_a][0] - s.y[target_b][0]
+                dz = s.z[target_a][0] - s.z[target_b][0]
+                return float(np.sqrt(dx * dx + dy * dy + dz * dz))
+        return default
+
     def load_target_names(self) -> None:
         """Load all unique names of molecular targets in
         self.structures to attribute self.targets."""
@@ -4196,7 +4218,10 @@ class SimulationsTab(lib.Dialog):
             spin.setValue(l)
 
         # adopt the best fitting structures so subsequent simulations
-        # use them (mirrors what compare_models does)
+        # use them (mirrors what compare_models does); preserve the
+        # original structure titles by matching role (monomer A,
+        # monomer B, heterodimer)
+        self._restore_le_structure_titles(best_mixer.structures)
         self.structures = best_mixer.structures
         self.mixer = best_mixer
         self.mixer.nn_counts = {
@@ -4245,8 +4270,31 @@ class SimulationsTab(lib.Dialog):
         )
 
         # run a single simulation and display the simulated/experimental NNDs
+        for spin in self.le_spins:
+            spin.setValue(100)
         self.mixer = self.setup_mixer(mode="single_sim")
         self.sim_and_plot_NND()
+
+    def _restore_le_structure_titles(self, new_structures: list) -> None:
+        """Rename ``new_structures`` in place so each one inherits the
+        title of the original Fit LE structure with the same role
+        (monomer A, monomer B, or heterodimer)."""
+        target_a, target_b = self.targets[0], self.targets[1]
+        original_titles = {}
+        for s in self.structures:
+            if len(s.targets) == 1 and s.targets[0] == target_a:
+                original_titles["A"] = s.title
+            elif len(s.targets) == 1 and s.targets[0] == target_b:
+                original_titles["B"] = s.title
+            elif len(s.targets) == 2:
+                original_titles["AB"] = s.title
+        for s in new_structures:
+            if len(s.targets) == 1 and s.targets[0] == target_a:
+                s.title = original_titles.get("A", s.title)
+            elif len(s.targets) == 1 and s.targets[0] == target_b:
+                s.title = original_titles.get("B", s.title)
+            elif len(s.targets) == 2:
+                s.title = original_titles.get("AB", s.title)
 
     def _save_le_fit_summary(
         self,
