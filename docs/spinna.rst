@@ -50,7 +50,7 @@ Load data and parameters
 1. Click the *Load structures* button in the top left corner of the window. Upon loading, new widgets will appear in the GUI.  
 2. For each detected molecular target species, load the experimental data which must be saved in .hdf5 format that is compatible with localizations files in other Picasso modules, see `here <https://picassosr.readthedocs.io/en/latest/files.html#hdf5-files>`_.
 3. Furthermore, input label uncertainty and labeling efficiency and observed density in the *Load data* box. Alternatively, load the mask to simulate heterogeneous distribution by clicking on *Masks* in the bottom left corner of the box. For more information about the mask, see **Mask generation tab**.
-4. Moreover, in the *Load data* box, the user can change the dimensionality of the simulation, change the mode of rotations (random rotations around z axis (2D), random rotations around 3 axes or no rotations). If 3D simulation is chosen without a mask, the user needs to input the range of z coordinates of molecular targets simulated by clicking *Z range*.
+4. Moreover, in the *Load data* box, the user can change the dimensionality of the simulation. If 3D simulation is chosen without a mask, the user needs to input the range of z coordinates of molecular targets simulated by clicking *Z range*. In the "Optional settings" dialog, the user can change the mode of rotations (random rotations around z axis (2D), random rotations around 3 axes or no rotations). Additionally, the fitting mode can be adjusted - either "coarse to fine" or "brute force". For more information about the fitting modes, see **Fitting** below.
 
 Fitting
 ~~~~~~~
@@ -71,6 +71,8 @@ If labeling efficiency values are to be fitted, the user needs to load structure
 * Heterodimer of the reference and target protein
 
 SPINNA will automatically detect if these conditions are met. If so, an extra check box will appear in the *Fitting* box, titled "Fit labeling efficiency". By checking it, LE used for simulations is kept at 100% and the reported fit result will only show the LE values of the reference and target proteins (in practice, which target is named reference or target does not matter and they can be interchanged). Additionally, the saved ``.txt`` file will contain the same information.
+
+Since v0.10.0, in the "Optional settings", the user can choose between three fitting modes: "bayesian" "coarse to fine" and "brute force". In the "bayesian" mode, the search space is explored using Bayesian optimization with Gaussian process regression. This is a more efficient way to explore the search space, especially when it is large, and it is recommended as the default fitting mode. In the "coarse to fine" mode, a coarse grid of structure combinations is tested, which consists of 10% of evenly distributed structure combinations. Then, a finer grid is tested around the best combination from the coarse grid. In the "brute force" mode, all combinations of structures are tested sequentially. The "coarse to fine" mode is recommended for faster fitting, especially when the search space is large. Previously, only brute force mode was available.
 
 .. image:: ../docs/spinna_simulate_tab_after_fit.png
    :alt: simulate_tab_after_fit
@@ -109,11 +111,11 @@ Mask generation tab
 This tab allows the user to create a density/binary mask capable of recovering the heterogeneous density distribution present in the experimental data. 
  
 1. Click *Load molecules* to open the .hdf5 file with molecules/localizations that will be used to generate the mask. 
-2. Adjust bin size and Gaussian blur to be applied to the mask.
+2. Adjust bin size and Gaussian blur to be applied to the mask. Since v0.9.6, the user can choose anisotropic bin size and Gaussian blur with one value in the xy plane and another value in the z direction.
 3. The mask can be generated in 3D and/or converted to a binary mask.
 4. Click *Generate mask*. This may take a while, especially for a 3D mask. The mask will be displayed automatically. The legend in the *Navigation* box displays the probability of finding a molecular target per pixel/voxel. 
 5. The density mask can be thresholded at any user-defined probability value. By default, the Otsu threshold is used (Otsu. *Automatica*, 1975). 
-6. To explore the mask, use the buttons in the *Navigation* box. Alternatively, arrow keys can be used too.
+6. To explore the mask, use the buttons in the *Navigation* box. Alternatively, arrow keys can be used too. For 3D masks, the user can slice through individual z planes using the slider.
 7. Once the mask is ready, click *Save mask*. This saves a numpy array in the .npy format.
 
 

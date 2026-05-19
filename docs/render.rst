@@ -76,7 +76,7 @@ RESI
    :alt: UML Render RESI
 
 
-In Picasso 0.6.0, a new RESI (Resolution Enhancement by Sequential Imaging) dialog was introduced. It allows for a substantial resolution boost by sequential imaging of a single target with multiple labels with Exchange-PAINT (*Reinhardt, et al., Nature, 2023.* DOI: 10.1038/s41586-023-05925-9).
+In Picasso 0.6.0, a new RESI (Resolution Enhancement by Sequential Imaging) dialog was introduced. It allows for a substantial resolution boost by sequential imaging of a single target with multiple labels with Exchange-PAINT (*Reinhardt, Masullo, Baudrexel, Steen, et al., Nature, 2023.* DOI: 10.1038/s41586-023-05925-9).
 
 To use RESI, prepare your individual RESI channels (localization, undrifting, filtering and **alignment**). Load such localization lists into Picasso Render and open ``Postprocess > RESI``. The dialog shown above will appear. Each channel will be clustered using the SMLM clusterer (other clustering algorithms could be applied as well although only the SMLM clusterer is implemented for RESI in Picasso). Clustering parameters can be defined for each RESI channel individually, although it is possible to apply the same parameters to all channels by clicking ``Apply the same clustering parameters to all channels``, which will copy the clustering parameters from the first row and paste it to all other channels.
 
@@ -380,7 +380,9 @@ Allows performing k-means clustering in picks. Users can specify the number of c
 
 Mask image
 ^^^^^^^^^^
-Opens a dialog that allows the user to specify a mask for filtering localizations within and outside it.
+Opens a dialog that allows the user to specify a mask for filtering localizations within and outside it. The user can adjust the histogram bin size, blur thereof and the threshold applied.
+
+The images can be zoomed in/out (Ctrl/Cmd + scrolling) and panned (mouse right click). Double clicking resets the zoom.
 
 Fast rendering
 ^^^^^^^^^^^^^^

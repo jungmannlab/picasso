@@ -4,15 +4,15 @@ picasso.gui.filter
 
 Graphical user interface for filtering localization lists.
 
-:authors: Joerg Schnitzbauer Maximilian Thomas Strauss, 2015-2018
-:copyright: Copyright (c) 2015=2018 Jungmann Lab, MPI of Biochemistry
+:authors: Joerg Schnitzbauer, Maximilian Thomas Strauss,
+    Rafal Kowalewski
+:copyright: Copyright (c) 2015-2026 Jungmann Lab, MPI of Biochemistry
 """
 
 from __future__ import annotations
 
 import os.path
 import sys
-import traceback
 import importlib
 import pkgutil
 
@@ -25,7 +25,7 @@ from matplotlib.backends.backend_qt5agg import (
 )
 from matplotlib.widgets import SpanSelector, RectangleSelector
 from matplotlib.colors import LogNorm
-from PyQt5 import QtCore, QtGui, QtWidgets
+from PyQt6 import QtCore, QtGui, QtWidgets
 
 from .. import io, lib, clusterer, __version__
 
@@ -63,7 +63,7 @@ class TableModel(QtCore.QAbstractTableModel):
     def __init__(
         self,
         locs: pd.DataFrame,
-        index: QtCore.QModelIndex,
+        index: int,
         parent: QtWidgets.QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -75,18 +75,18 @@ class TableModel(QtCore.QAbstractTableModel):
             self._column_count = 0
         self._row_count = self.locs.shape[0]
 
-    def columnCount(self, parent: None) -> int:
+    def columnCount(self, parent: QtCore.QModelIndex | None = None) -> int:
         return self._column_count
 
-    def rowCount(self, parent: None) -> int:
+    def rowCount(self, parent: QtCore.QModelIndex | None = None) -> int:
         return self._row_count
 
     def data(
         self,
         index: QtCore.QModelIndex,
-        role: int = QtCore.Qt.DisplayRole,
+        role: int = QtCore.Qt.ItemDataRole.DisplayRole,
     ) -> str | None:
-        if role == QtCore.Qt.DisplayRole:
+        if role == QtCore.Qt.ItemDataRole.DisplayRole:
             data = self.locs.iloc[index.row(), index.column()]
             return str(data)
         return None
@@ -97,10 +97,10 @@ class TableModel(QtCore.QAbstractTableModel):
         orientation: QtCore.Qt.Orientation,
         role: int,
     ) -> str | None:
-        if role == QtCore.Qt.DisplayRole:
-            if orientation == QtCore.Qt.Horizontal:
+        if role == QtCore.Qt.ItemDataRole.DisplayRole:
+            if orientation == QtCore.Qt.Orientation.Horizontal:
                 return self.locs.columns[section]
-            elif orientation == QtCore.Qt.Vertical:
+            elif orientation == QtCore.Qt.Orientation.Vertical:
                 return self.index + section
         return None
 
@@ -131,9 +131,13 @@ class TableView(QtWidgets.QTableView):
         super().__init__(parent)
         self.window = window
         self.setAcceptDrops(True)
-        self.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
+        self.setVerticalScrollBarPolicy(
+            QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
         vertical_header = self.verticalHeader()
-        vertical_header.sectionResizeMode(QtWidgets.QHeaderView.Fixed)
+        vertical_header.setSectionResizeMode(
+            QtWidgets.QHeaderView.ResizeMode.Fixed
+        )
         vertical_header.setDefaultSectionSize(ROW_HEIGHT)
         vertical_header.setFixedWidth(70)
 
@@ -370,7 +374,7 @@ class Hist2DWindow(PlotWindow):
         event.accept()
 
 
-class FilterNum(QtWidgets.QDialog):
+class FilterNum(lib.Dialog):
     """Dialog for filtering localizations by numeric values.
 
     ...
@@ -394,8 +398,15 @@ class FilterNum(QtWidgets.QDialog):
         Main window.
     """
 
+    DOCS_URL = "https://picassosr.readthedocs.io/en/latest/filter.html"
+
     def __init__(self, window: QtWidgets.QMainWindow) -> None:
         super().__init__(window)
+        self.setToolTip(
+            "Choose the parameter to filter by.\n"
+            "The specified range is inclusive, i.e.,\n"
+            "the min/max values are kept."
+        )
         self.window = window
         self.setWindowTitle("Filter by numeric values")
         this_directory = os.path.dirname(os.path.realpath(__file__))
@@ -407,9 +418,10 @@ class FilterNum(QtWidgets.QDialog):
         self.setLayout(self.layout)
 
         # combox box with all atributes
+        self.layout.addWidget(lib.HelpButton(self.DOCS_URL), 0, 0)
         self.attributes = QtWidgets.QComboBox(self)
         self.attributes.setEditable(False)
-        self.layout.addWidget(self.attributes, 0, 0, 1, 2)
+        self.layout.addWidget(self.attributes, 0, 1)
 
         # lower value
         self.layout.addWidget(QtWidgets.QLabel("Min:"), 1, 0)
@@ -433,7 +445,7 @@ class FilterNum(QtWidgets.QDialog):
 
         # filter button
         filter_button = QtWidgets.QPushButton("Filter")
-        filter_button.setFocusPolicy(QtCore.Qt.NoFocus)
+        filter_button.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
         filter_button.clicked.connect(self.filter)
         self.layout.addWidget(filter_button, 3, 0, 1, 2)
 
@@ -445,7 +457,7 @@ class FilterNum(QtWidgets.QDialog):
         if xmin < xmax:
             field = self.attributes.currentText()
             locs = self.window.locs
-            locs = locs[(locs[field] > xmin) & (locs[field] < xmax)]
+            locs = locs[(locs[field] >= xmin) & (locs[field] <= xmax)]
             self.window.update_locs(locs)
             self.window.log_filter(field, xmin, xmax)
 
@@ -458,7 +470,7 @@ class FilterNum(QtWidgets.QDialog):
             self.attributes.addItem(name)
 
 
-class SubclusterNum(QtWidgets.QDialog):
+class SubclusterNum(lib.Dialog):
     """Input dialog for specifying the distances used for testing
     for subclustering.
 
@@ -489,7 +501,7 @@ class SubclusterNum(QtWidgets.QDialog):
         self.setWindowIcon(icon)
 
         self.layout = QtWidgets.QFormLayout()
-        self.layout.setLabelAlignment(QtCore.Qt.AlignLeft)
+        self.layout.setLabelAlignment(QtCore.Qt.AlignmentFlag.AlignLeft)
         self.setLayout(self.layout)
 
         self.distance_clustered = QtWidgets.QDoubleSpinBox()
@@ -518,7 +530,7 @@ class SubclusterNum(QtWidgets.QDialog):
         self.save_vals.setChecked(False)
         self.layout.addRow(self.save_vals)
         test_button = QtWidgets.QPushButton("Test subclustering")
-        test_button.setFocusPolicy(QtCore.Qt.NoFocus)
+        test_button.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
         test_button.clicked.connect(self.plot)
         self.layout.addRow(test_button)
 
@@ -592,6 +604,8 @@ class Window(QtWidgets.QMainWindow):
         Table view for displaying data.
     """
 
+    DOCS_URL = "https://picassosr.readthedocs.io/en/latest/filter.html"
+
     def __init__(self) -> None:
         super().__init__()
         # Init GUI
@@ -603,16 +617,30 @@ class Window(QtWidgets.QMainWindow):
         self.setWindowIcon(icon)
         self.table_view = TableView(self, self)
         self.filter_num = FilterNum(self)
+        self.metadata_dialog = lib.MetadataDialog(self)
+        self.user_settings_dialog = lib.UserSettingsDialog(self)
         menu_bar = self.menuBar()
         file_menu = menu_bar.addMenu("File")
         open_action = file_menu.addAction("Open")
-        open_action.setShortcut(QtGui.QKeySequence.Open)
+        open_action.setShortcut(QtGui.QKeySequence.StandardKey.Open)
         open_action.triggered.connect(self.open_file_dialog)
         file_menu.addAction(open_action)
         save_action = file_menu.addAction("Save")
-        save_action.setShortcut(QtGui.QKeySequence.Save)
+        save_action.setShortcut(QtGui.QKeySequence.StandardKey.Save)
         save_action.triggered.connect(self.save_file_dialog)
-        file_menu.addAction(save_action)
+        export_csv_action = file_menu.addAction("Export as CSV")
+        export_csv_action.triggered.connect(self.export_csv_dialog)
+        metadata_action = file_menu.addAction("Show metadata")
+        metadata_action.setShortcut("Ctrl+M")
+        metadata_action.triggered.connect(self.show_metadata)
+        picasso_settings_action = file_menu.addAction("Picasso settings")
+        picasso_settings_action.triggered.connect(
+            self.user_settings_dialog.show
+        )
+        help_action = file_menu.addAction("Help")
+        help_action.triggered.connect(
+            lambda: QtGui.QDesktopServices.openUrl(QtCore.QUrl(self.DOCS_URL))
+        )
         plot_menu = menu_bar.addMenu("Plot")
         histogram_action = plot_menu.addAction("Histogram")
         histogram_action.setShortcut("Ctrl+H")
@@ -622,10 +650,17 @@ class Window(QtWidgets.QMainWindow):
         scatter_action.triggered.connect(self.plot_hist2d)
         test_subcluster_action = plot_menu.addAction("Test subclustering")
         test_subcluster_action.triggered.connect(self.plot_subclustering)
+
         filter_menu = menu_bar.addMenu("Filter")
-        filter_action = filter_menu.addAction("Filter")
+        filter_action = filter_menu.addAction("Filter numerically")
         filter_action.setShortcut("Ctrl+F")
         filter_action.triggered.connect(self.filter_num.show)
+        apply_from_metadata_action = filter_menu.addAction(
+            "Apply filters from metadata"
+        )
+        apply_from_metadata_action.triggered.connect(
+            self.apply_filters_from_metadata
+        )
         remove_columns_action = filter_menu.addAction("Remove columns")
         remove_columns_action.triggered.connect(self.remove_columns)
         main_widget = QtWidgets.QWidget()
@@ -655,6 +690,18 @@ class Window(QtWidgets.QMainWindow):
         self.pwd = pwd
 
         self.plugin_menu = menu_bar.addMenu("Plugins")  # do not delete
+
+    def show_metadata(self) -> None:
+        """Open the metadata dialog."""
+        if self.locs is None:
+            QtWidgets.QMessageBox.information(
+                self, "Metadata", "No file loaded."
+            )
+            return
+        label = os.path.basename(self.locs_path)
+        self.metadata_dialog.set_infos(self.info, labels=label)
+        self.metadata_dialog.show()
+        self.metadata_dialog.raise_()
 
     def open_file_dialog(self) -> None:
         if self.pwd == []:
@@ -772,6 +819,100 @@ class Window(QtWidgets.QMainWindow):
         else:
             self.filter_log["Removed columns"] = to_remove
 
+    def apply_filters_from_metadata(self) -> None:
+        """Replay filter steps recorded in another file's .yaml metadata
+        onto the currently loaded localizations."""
+        if self.locs is None:
+            QtWidgets.QMessageBox.information(
+                self, "Apply filters from metadata", "No file loaded."
+            )
+            return
+
+        directory = self.pwd if self.pwd else ""
+        path, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self,
+            "Open metadata",
+            directory=directory,
+            filter="*.yaml",
+        )
+        if not path:
+            return
+
+        try:
+            info = io.load_info(path, qt_parent=self)
+        except io.NoMetadataFileError:
+            return
+
+        ranges, to_remove, missing = lib.extract_filter_steps(
+            info, self.locs.columns
+        )
+
+        if not ranges and not to_remove:
+            msg = "No applicable filter steps found in metadata."
+            if missing:
+                msg += (
+                    "\n\nReferenced columns not found in current data:\n  "
+                    + "\n  ".join(missing)
+                )
+            QtWidgets.QMessageBox.information(
+                self, "Apply filters from metadata", msg
+            )
+            return
+
+        lines = []
+        if ranges:
+            lines.append("Filters to apply:")
+            for field, (xmin, xmax) in ranges.items():
+                lines.append(f"  {field}: [{xmin}, {xmax}]")
+        if to_remove:
+            if lines:
+                lines.append("")
+            lines.append("Columns to remove:")
+            for c in to_remove:
+                lines.append(f"  {c}")
+        if missing:
+            if lines:
+                lines.append("")
+            lines.append("Not found in current data (will be skipped):")
+            for c in missing:
+                lines.append(f"  {c}")
+        lines.append("")
+        lines.append("Apply these steps?")
+
+        reply = QtWidgets.QMessageBox.question(
+            self,
+            "Apply filters from metadata",
+            "\n".join(lines),
+            QtWidgets.QMessageBox.StandardButton.Yes
+            | QtWidgets.QMessageBox.StandardButton.Cancel,
+        )
+        if reply != QtWidgets.QMessageBox.StandardButton.Yes:
+            return
+
+        locs, _, _, _ = lib.apply_filter_steps(self.locs, info)
+        for field, (xmin, xmax) in ranges.items():
+            self.log_filter(field, xmin, xmax)
+        if to_remove:
+            if "Removed columns" in self.filter_log:
+                self.filter_log["Removed columns"].extend(to_remove)
+            else:
+                self.filter_log["Removed columns"] = list(to_remove)
+        self.update_locs(locs)
+
+    def export_csv_dialog(self) -> None:
+        if self.locs is None:
+            return
+        base, ext = os.path.splitext(self.locs_path)
+        out_path = base + ".csv"
+        path, exe = lib.get_save_filename_ext_dialog(
+            self,
+            "Export as CSV",
+            out_path,
+            filter="*.csv",
+        )
+        if path:
+            self.locs.to_csv(path, index=False)
+
     def save_file_dialog(self) -> None:
         if "x" in self.locs.columns:  # Saving only for locs
             base, ext = os.path.splitext(self.locs_path)
@@ -807,7 +948,7 @@ class Window(QtWidgets.QMainWindow):
         if self.locs is not None:
             settings["Filter"]["PWD"] = self.pwd
             io.save_user_settings(settings)
-        QtWidgets.qApp.closeAllWindows()
+        QtWidgets.QApplication.instance().closeAllWindows()
 
 
 def main():
@@ -831,20 +972,13 @@ def main():
 
     window.show()
 
-    def excepthook(type, value, tback):
-        lib.cancel_dialogs()
-        message = "".join(traceback.format_exception(type, value, tback))
-        errorbox = QtWidgets.QMessageBox.critical(
-            window,
-            "An error occured",
-            message,
-        )
-        errorbox.exec_()
-        sys.__excepthook__(type, value, tback)
+    from ..updater import setup_gui_update_check
 
-    sys.excepthook = excepthook
+    setup_gui_update_check(window)
 
-    sys.exit(app.exec_())
+    lib.install_excepthook(window)
+
+    sys.exit(app.exec())
 
 
 if __name__ == "__main__":

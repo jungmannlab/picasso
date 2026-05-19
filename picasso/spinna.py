@@ -5,8 +5,8 @@ picasso.spinna
 Single protein simulations in DNA-PAINT for recovery of
 stoichiometries of oligomerization states.
 
-:authors: Luciano A Masullo, Rafal Kowalewski, 2022-2025
-:copyright: Copyright (c) 2022-2025 Jungmann Lab, MPI of Biochemistry
+:authors: Luciano A Masullo, Rafal Kowalewski
+:copyright: Copyright (c) 2022-2026 Jungmann Lab, MPI of Biochemistry
 """
 
 from __future__ import annotations
@@ -28,7 +28,9 @@ import matplotlib.pyplot as plt
 from scipy.ndimage import gaussian_filter
 from scipy.spatial.transform import Rotation
 from scipy.spatial import KDTree
-from scipy.stats import ks_2samp
+from scipy.stats import ks_2samp, norm
+from sklearn.gaussian_process import GaussianProcessRegressor
+from sklearn.gaussian_process.kernels import Matern
 from tqdm import tqdm
 
 from . import io, lib, masking, render, __version__
@@ -41,7 +43,7 @@ BOOTSTRAP_DISTANCE = 30.0
 BOOTSTRAP_DISTANCE_METRIC = 1.0
 
 
-def rref(M: np.ndarray) -> np.ndarray:
+def rref(M: lib.FloatArray2D | lib.IntArray2D) -> lib.FloatArray2D:
     """Convert a given matrix to its reduced row echelon form (RREF)
     using Gaussian elimination. Used for solving sets of linear
     equations.
@@ -51,12 +53,12 @@ def rref(M: np.ndarray) -> np.ndarray:
 
     Parameters
     ----------
-    M : np.ndarray
+    M : lib.FloatArray2D or lib.IntArray2D
         The matrix to be transformed.
 
     Returns
     -------
-    M : np.ndarray
+    M : lib.FloatArray2D
         The matrix in the reduced row echelon form.
     """
     M = M.copy()
@@ -91,7 +93,19 @@ def rref(M: np.ndarray) -> np.ndarray:
 def find_target_counts(
     targets: list[str],
     structures: list[Structure],
-) -> np.ndarray:
+) -> lib.FloatArray2D:
+    """Deprecated, TODO: remove in v0.11.0."""
+    lib.deprecation_warning(
+        "Deprecation warning: This function will become private in "
+        "v0.11.0. Use _find_target_counts instead."
+    )
+    return _find_target_counts(targets, structures)
+
+
+def _find_target_counts(
+    targets: list[str],
+    structures: list[Structure],
+) -> lib.FloatArray2D:
     """Find the number of each molecular target in structures.
 
     Parameters
@@ -103,7 +117,7 @@ def find_target_counts(
 
     Returns
     -------
-    t_counts : np.ndarray
+    t_counts : lib.FloatArray2D
         Array of shape (len(targets), len(structures)) specifying the
         number of each target in each structures.
     """
@@ -115,7 +129,16 @@ def find_target_counts(
     return t_counts
 
 
-def get_structures_permutation(t_counts: np.ndarray) -> np.ndarray:
+def get_structures_permutation(t_counts: lib.FloatArray2D) -> lib.IntArray1D:
+    """Deprecated, TODO: remove in v0.11.0."""
+    lib.deprecation_warning(
+        "Deprecation warning: This function will become private in "
+        "v0.11.0. Use _get_structures_permutation instead."
+    )
+    return _get_structures_permutation(t_counts)
+
+
+def _get_structures_permutation(t_counts: lib.FloatArray2D) -> lib.IntArray1D:
     """Find a permutation that ensures that the numbers of structures
     can be found using ``generate_N_structures``.
 
@@ -126,7 +149,7 @@ def get_structures_permutation(t_counts: np.ndarray) -> np.ndarray:
 
     Parameters
     ----------
-    t_counts : np.ndarray
+    t_counts : lib.FloatArray2D
         Array specifying the counts of each molecular target in each
         structure, see ``generate_N_structures``. Shape (T, S), where
         T is the number of molecular targets and S is the number of
@@ -134,7 +157,7 @@ def get_structures_permutation(t_counts: np.ndarray) -> np.ndarray:
 
     Returns
     -------
-    perm : np.ndarray
+    perm : lib.IntArray1D
         The permutation array, shape (S,).
     """
     n_t, n_s = t_counts.shape
@@ -154,6 +177,25 @@ def get_structures_permutation(t_counts: np.ndarray) -> np.ndarray:
             perm[lpc] = i
             lpc += 1
     return perm
+
+
+def targets_from_structures(structures: list[Structure]) -> list[str]:
+    """Deprecated, TODO: remove in v0.11.0."""
+    lib.deprecation_warning(
+        "Deprecation warning: This function will become private in "
+        "v0.11.0. Use _targets_from_structures instead."
+    )
+    return _targets_from_structures(structures)
+
+
+def _targets_from_structures(structures: list[Structure]) -> list[str]:
+    """Extract the unique names of molecular targets in structures."""
+    targets = []
+    for structure in structures:
+        for target in structure.targets:
+            if target not in targets:
+                targets.append(target)
+    return targets
 
 
 def generate_N_structures(
@@ -191,12 +233,7 @@ def generate_N_structures(
         iteration. Keys are the names of the structures and values
         are lists of integers.
     """
-    # extract the unique names of molecular targets in structures
-    targets = []
-    for structure in structures:
-        for target in structure.targets:
-            if target not in targets:
-                targets.append(target)
+    targets = _targets_from_structures(structures)
 
     # number of molecular targets in each structure; each row gives one
     # target species and each column gives one structure
@@ -209,11 +246,11 @@ def generate_N_structures(
             " investigated. Otherwise, the numbers of structures to be"
             " simulated is constant."
         )
-    t_counts = find_target_counts(targets, structures)
+    t_counts = _find_target_counts(targets, structures)
 
     # ensure that the order of structures is correct, i.e., the free
     # paramters in the system of linear equations are on the right side
-    p = get_structures_permutation(t_counts.copy())
+    p = _get_structures_permutation(t_counts.copy())
     t_counts = t_counts[:, p]
     structures = [structures[_] for _ in p]
 
@@ -307,8 +344,6 @@ def generate_N_structures(
         # find proportions first, just like in
         # StructureMixer.convert_counts_to_props
         props = np.zeros(N_structures.shape, dtype=np.float32)
-        print(f"{N_structures.shape=}")
-        print(f"{N_total=}")
         for i, structure in enumerate(structures):
             N_str_total = np.zeros(N_structures.shape[0], dtype=np.float32)
             N_per_target = structure.get_ind_target_count(targets)
@@ -338,7 +373,7 @@ def generate_N_structures(
 def random_rotation_matrices(
     num: int,
     mode: Literal["3D", "2D"] | None = "2D",
-) -> np.ndarray:
+) -> lib.FloatArray3D:
     """Generate num-many random rotation matrices. By default, 2D
     rotations are generated, although 3D rotations around the z axis
     are supported too.
@@ -355,7 +390,7 @@ def random_rotation_matrices(
 
     Returns
     -------
-    rots : np.ndarray
+    rots : lib.FloatArray3D
         Array of shape (num, 3, 3) specifying num-many random rotation
         matrices.
     """
@@ -367,7 +402,11 @@ def random_rotation_matrices(
     elif mode == "2D":
         # rotate only around z
         angles = np.random.uniform(0, 2 * np.pi, size=(num,))
-        rots = Rotation.from_euler("z", angles).as_matrix().astype(np.float32)
+        rots = (
+            Rotation.from_euler("z", angles.reshape(-1, 1))
+            .as_matrix()
+            .astype(np.float32)
+        )
     elif mode is None:
         rots = Rotation.identity(num=num).as_matrix().astype(np.float32)
     else:
@@ -376,7 +415,7 @@ def random_rotation_matrices(
 
 
 def coords_to_locs(
-    coords: np.ndarray,
+    coords: lib.FloatArray2D,
     lp: float = 1.0,
     pixelsize: int = 130,
 ) -> pd.DataFrame:
@@ -385,7 +424,7 @@ def coords_to_locs(
 
     Parameters
     ----------
-    coords: np.ndarray
+    coords: lib.FloatArray2D
         Coordinates of localizations to be converted. All coordinates
         are in nm. Shape (N, 2) or (N, 3), where N is the number of
         localizations.
@@ -433,11 +472,11 @@ def coords_to_locs(
     return locs
 
 
-def plot_NN(
-    data1: np.ndarray | None = None,
-    data2: np.ndarray | None = None,
+def plot_NN(  # noqa: C901
+    data1: lib.FloatArray2D | None = None,
+    data2: lib.FloatArray2D | None = None,
     n_neighbors: int = 1,
-    dist: np.ndarray | None = None,
+    dist: lib.FloatArray2D | None = None,
     hist_data: dict | None = None,
     mode: Literal["hist", "plot"] = "hist",
     fig: plt.Figure | None = None,
@@ -465,11 +504,11 @@ def plot_NN(
 
     Parameters
     ----------
-    data1, data2 : np.ndarrays
+    data1, data2 : lib.FloatArray2D
         Coordinates of two datasets to be compared and whose NND
         (nearest neighbor distribution) is plotted. If None, dist must
         be provided.
-    dist : np.array
+    dist : lib.FloatArray2D
         Contains the NN distances (obtained with get_NN_dist). If None,
         the distances are calculated from data1 and data2. Otherwise,
         the NND calculation is skipped.
@@ -572,11 +611,11 @@ def plot_NN(
         bins_ = hist_data["bins"][i]
         counts_ = hist_data["counts"][i]
         if i == 0:
-            label = f"1st NN"
+            label = "1st NN"
         elif i == 1:
-            label = f"2nd NN"
+            label = "2nd NN"
         elif i == 2:
-            label = f"3rd NN"
+            label = "3rd NN"
         else:
             label = f"{i+1}th NN"
         if mode == "hist":
@@ -631,20 +670,20 @@ def plot_NN(
 
 
 def get_NN_dist(
-    data1: np.ndarray,
-    data2: np.ndarray,
+    data1: lib.FloatArray2D,
+    data2: lib.FloatArray2D,
     n_neighbors: int,
-) -> np.ndarray:
+) -> lib.FloatArray2D:
     """Find nearest neighbors distances between data1 and data2 for
     n_neighbors closest neighbors.
 
     Parameters
     ----------
-    data1 : np.ndarray
+    data1 : lib.FloatArray2D
         Array of points from which distances are measured. Should have
         shape (N, 2) or (N, 3) for 2D/3D case, respectively, where N
         is the number of points.
-    data2 : np.ndarray
+    data2 : lib.FloatArray2D
         Array of points to which distances are measured. May contain a
         different number of points but of the same dimensionality.
     n_neighbors : int
@@ -652,7 +691,7 @@ def get_NN_dist(
 
     Returns
     -------
-    dist : np.ndarray
+    dist : lib.FloatArray2D
         Array with distances of N-th neighbors for each point in data1.
         Shape: (N, n_neighbors)
     """
@@ -688,7 +727,7 @@ def get_NN_dist_experimental(
     coords: dict,
     mixer: StructureMixer,
     duplicate: bool = False,
-) -> list[np.ndarray]:
+) -> list[lib.FloatArray2D]:
     """Calculate nearest neighbor distances for experimental data.
 
     Parameters
@@ -705,7 +744,7 @@ def get_NN_dist_experimental(
 
     Returns
     -------
-    dists : list of np.2darrays
+    dists : list of lib.FloatArray2D
         Lists of arrays of shape (N, n_neighbors) where N is the
         number of distances measured and n_neighbors is the number of
         neighbors considered. The list has the same length as
@@ -727,18 +766,18 @@ def get_NN_dist_experimental(
 
 
 def get_NN_dist_simulated(
-    N_str: list[np.ndarray],
+    N_str: list[lib.IntArray1D],
     N_sim: int,
     mixer: StructureMixer,
     duplicate: bool = False,
-) -> list[np.ndarray]:
+) -> list[lib.FloatArray2D]:
     """Calculate nearest neighbor distances across many simulations
     with the same settings. Simulations are repeated ``N_sim`` times and
     the NN distances are calculated for each simulation.
 
     Parameters
     ----------
-    N_str : list or np.ndarray
+    N_str : list of lib.IntArray1D
         Numbers of structures to be simulated for each structure in
         ``mixer``.
     N_sim : int
@@ -752,7 +791,7 @@ def get_NN_dist_simulated(
 
     Returns
     -------
-    dists : list of np.2darrays
+    dists : list of lib.FloatArray2D
         Lists of arrays of shape (N, n_neighbors) where N is the
         number of distances measured and n_neighbors is the number of
         neighbors considered. The list has the same length as
@@ -780,13 +819,15 @@ def get_NN_dist_simulated(
     return dists
 
 
-def NND_score(dists1: list[np.ndarray], dists2: list[np.ndarray]) -> float:
+def NND_score(
+    dists1: list[lib.FloatArray2D], dists2: list[lib.FloatArray2D]
+) -> float:
     """Score the two datasets of nearest neighbor distances (NND)
     using the Kolmogorov-Smirnov test.
 
     Parameters
     ----------
-    dists1, dists2: list of np.ndarray
+    dists1, dists2: list of lib.FloatArray2D
         Lists of arrays of shape (N, n_neighbors) where N is the
         number of distances measured and n_neighbors is the number
         of neighbors considered. See get_NN_dist_simulated and
@@ -868,6 +909,9 @@ class MaskGenerator:
         Binsize used for histograming localizations (nm), one value
         for each dimension (x and y are always equal, z can be
         different).
+    image : np.array
+        Histogram of localizations used for creating the mask. The last
+        step before applying threshold/extracting a binary mask.
     locs : pd.DataFrame
         Localizations list used for creating the mask.
     locs_path : str
@@ -926,9 +970,6 @@ class MaskGenerator:
         Dimensionality of the mask (2 or 3). If None, the dimensionality
         is taken from the loaded localizations/molecules. Default is
         None.
-    run_checks : bool, optional
-        Not used since v0.9.6, kept for backward compatibility. Will
-        be removed in v0.10.0.
     """
 
     def __init__(
@@ -937,7 +978,7 @@ class MaskGenerator:
         binsize: int | tuple = 130,
         sigma: int | tuple = 500,
         ndim: int | None = None,
-        run_checks: bool = False,
+        run_checks=None,
     ) -> None:
         # open localizations
         locs, info = io.load_locs(locs_path)
@@ -974,6 +1015,12 @@ class MaskGenerator:
             info[0]["Width"] * self.pixelsize,
             info[0]["Height"] * self.pixelsize,
         ]
+
+        if run_checks is not None:
+            lib.deprecation_warning(
+                "The argument run_checks is not used since v0.9.6 and is"
+                " deprecated. It will be removed in v0.11.0."
+            )
 
     def set_binsize(self, binsize: int | tuple) -> None:
         """Convert the input binsize to a tuple of 2/3 values.
@@ -1033,7 +1080,7 @@ class MaskGenerator:
             )
         self.sigma = sigma
 
-    def render_locs(self) -> np.ndarray:
+    def render_locs(self) -> lib.FloatArray2D:
         """Render localizations histogram (2D or 3D), no blur.
 
         Uses ``picasso.render`` after preparing inputs."""
@@ -1046,7 +1093,7 @@ class MaskGenerator:
 
         # 2D image
         if self.ndim == 2 or "z" not in self.locs.columns:
-            _, image = render.render_hist(
+            _, image = render._render_hist(
                 self.locs,
                 oversampling[0],
                 self.y_min,
@@ -1079,6 +1126,7 @@ class MaskGenerator:
         self,
         apply_thresh: bool = False,
         mode: Literal["loc_den", "binary"] = "loc_den",
+        thresh: float | None = None,
         verbose: bool = False,
     ) -> MaskGenerator:
         """Generate a mask (available after class initialization). The
@@ -1087,14 +1135,17 @@ class MaskGenerator:
 
         Parameters
         ----------
-        apply_thresh : bool (default=False)
+        apply_thresh : bool, optional
             Whether or not apply Otsu thresholding to the density map
-            mask. Does not apply to binary mask.
-        mode : {'loc_den', 'binary'}
+            mask. Does not apply to binary mask. Default is False.
+        mode : {'loc_den', 'binary'}, optional
             If 'loc_den', mask giving probability mass function is
             created. If 'binary', a binary mask is created (i.e., each
             pixel/voxel specifies if a molecule can be found at the
-            given region or not)
+            given region or not). Default is 'loc_den'.
+        thresh : float, optional
+            Threshold value to apply. If None, Otsu thresholding is used.
+            Default is None.
 
         Returns
         -------
@@ -1102,10 +1153,10 @@ class MaskGenerator:
         """
         assert all(_ > 0 for _ in self.binsize), "Binsize must be positive."
         assert all(_ >= 0 for _ in self.sigma), "Sigma must be non-negative."
-        print(f"{self.ndim=}, {self.binsize=}, {self.sigma=}")
-        assert (
-            len(self.binsize) == len(self.sigma) == self.ndim
-        ), "Binsize and sigma must have the same number of values as the dimensionality of the mask."
+        assert len(self.binsize) == len(self.sigma) == self.ndim, (
+            "Binsize and sigma must have the same number of values as "
+            "the dimensionality of the mask."
+        )
         if verbose:
             print(f"Generating a mask in {self.ndim}D.")
             print("Rendering localizations... (1/3)")
@@ -1119,7 +1170,10 @@ class MaskGenerator:
         if verbose:
             print("Thresholding... (3/3)")
         image = np.float64(image / image.sum())
-        self.thresh = masking.threshold_otsu(image)
+        self.image = deepcopy(image)
+        self.thresh = (
+            masking.threshold_otsu(image) if thresh is None else thresh
+        )
 
         if mode == "loc_den":
             if apply_thresh:
@@ -1128,9 +1182,9 @@ class MaskGenerator:
         elif mode == "binary":
             self.mask = np.zeros_like(image, dtype=np.float64)
             self.mask[image > self.thresh] = 1
-            self.mask = self.mask / self.mask.sum()
         else:
             raise ValueError("mode must be either 'loc_den' or 'binary'.")
+        self.mask = self.mask / self.mask.sum()
         return self
 
     def save_mask(self, path: str, save_png: bool = False) -> None:
@@ -1139,9 +1193,9 @@ class MaskGenerator:
         If .npy is saved, it is accompanied by a metadata .yaml file
         used for reading the mask in StructureSimulator.
 
-        save_png : bool (default=False)
+        save_png : bool, optional
             Whether or not save the mask as .png (3D mask will be
-            summed along z axis).
+            summed along z axis). Default is False.
         """
         if self.mask is None:
             return
@@ -1153,7 +1207,7 @@ class MaskGenerator:
         self.save_mask_info(path)
 
         if save_png:
-            outpath = path.replace(".npy", ".png")
+            outpath = os.path.splitext(path)[0] + ".png"
             if self.mask.ndim == 3:
                 mask_ = np.sum(self.mask, axis=2)
             mask_ /= mask_.max()  # normalize to save image
@@ -1197,9 +1251,39 @@ class MaskGenerator:
             )
 
         # save
-        outpath = path.replace(".npy", ".yaml")
+        outpath = os.path.splitext(path)[0] + ".yaml"
         with open(outpath, "w") as file:
             yaml.dump(info, file)
+
+    @property
+    def area(self) -> float | None:
+        """Calculate the area of the mask (2D case) in um^2.
+
+        Returns
+        -------
+        area : float or None
+            Area of the mask in um^2. If the mask is not generated yet
+            or if it is 3D, None is returned.
+        """
+        if self.mask is None or self.mask.ndim != 2:
+            return None
+        area = 1e-6 * np.prod(self.binsize) * (self.mask > self.thresh).sum()
+        return area
+
+    @property
+    def volume(self) -> float | None:
+        """Calculate the volume of the mask (3D case) in um^3.
+
+        Returns
+        -------
+        volume : float or None
+            Volume of the mask in um^3. If the mask is not generated yet
+            or if it is 2D, None is returned.
+        """
+        if self.mask is None or self.mask.ndim != 3:
+            return None
+        volume = 1e-9 * np.prod(self.binsize) * (self.mask > self.thresh).sum()
+        return volume
 
 
 class Structure:
@@ -1365,6 +1449,25 @@ class Structure:
             n2 = len(self.x[target2])
             return min(n1, n2)
 
+    def get_info(self) -> dict:
+        """Get the structure information in a dictionary format.
+
+        Returns
+        -------
+        info : dict
+            Dictionary with the structure information, including title,
+            molecular targets and their coordinates.
+        """
+        info = {
+            "Structure title": self.title,
+            "Molecular targets": self.targets,
+        }
+        for target in self.targets:
+            info[f"{target}_x"] = self.x[target]
+            info[f"{target}_y"] = self.y[target]
+            info[f"{target}_z"] = self.z[target]
+        return info
+
     def restart(self) -> Structure:
         """Delete all molecular targets, reset the structure but keep
         its title."""
@@ -1373,6 +1476,19 @@ class Structure:
         self.y = {}
         self.z = {}
         return self
+
+    def save(self, path: str) -> None:
+        """Save the structure in a .yaml file.
+
+        Parameters
+        ----------
+        path : str
+            Path to save the structure. Must end with .yaml.
+        """
+        if not path.endswith(".yaml"):
+            raise ValueError("Path for saving structure must end with .yaml")
+        info = self.get_info()
+        io.save_info(path, [info])
 
 
 class StructureSimulator:
@@ -1417,7 +1533,7 @@ class StructureSimulator:
         labeling efficiency of each molecular target simulated. Must
         follow the order specified in self.structures.targets. Lies in the
         range [0, 1].
-    mask : np.ndarray
+    mask : lib.FloatArray2D or None
         Array specifying expected number of structures to be simulated
         in each mask pixel/voxel. If None, width, height and optionally
         depth must be provided to generate a rectangular ROI.
@@ -1464,7 +1580,7 @@ class StructureSimulator:
         Label uncertainty of each molecular target (nm). Must follow the
         order specified in self.structures.targets. Lies in the range
         (0, inf).
-    mask : np.ndarray or None, optional
+    mask : lib.FloatArray2D or None, optional
         Mask to specify the region of interest (ROI) for the simulation.
         Default is None.
     mask_info : dict or None, optional
@@ -1485,7 +1601,7 @@ class StructureSimulator:
         N_structures: int,
         le: float | list[float],
         label_unc: float | list[float],
-        mask: np.ndarray | None = None,
+        mask: lib.FloatArray2D | None = None,
         mask_info: dict | None = None,
         width: float | None = None,
         height: float | None = None,
@@ -1505,7 +1621,7 @@ class StructureSimulator:
 
     def read_mask_and_ROI(
         self,
-        mask: np.ndarray | None = None,
+        mask: lib.FloatArray2D | None = None,
         mask_info: dict | None = None,
         width: float | None = None,
         height: float | None = None,
@@ -1724,7 +1840,7 @@ class StructureSimulator:
         x: list[float],
         y: list[float],
         z: list[float],
-    ) -> np.ndarray:
+    ) -> lib.FloatArray3D:
         """Initialize coordinates of molecular targets as a 3D array.
 
         Parameters
@@ -1734,7 +1850,7 @@ class StructureSimulator:
 
         Returns
         -------
-        coords : np.array
+        coords : lib.FloatArray3D
             Array of shape (N, M, 2) for 2D or (N, M, 3) for 3D, where
             N is number of structures and M is the number of molecular
             targets in the structure.
@@ -1747,9 +1863,9 @@ class StructureSimulator:
 
     def rotate_structures(
         self,
-        coords: np.ndarray,
-        rotations: np.ndarray,
-    ) -> np.ndarray:
+        coords: lib.FloatArray3D,
+        rotations: lib.FloatArray3D,
+    ) -> lib.FloatArray3D:
         """Rotate coordinates of each molecular target with a defined
         rotation.
 
@@ -1780,7 +1896,9 @@ class StructureSimulator:
         coords_rot = coords_rot.reshape(N, M, 3)
         return coords_rot
 
-    def reshape_coordinates(self, coords: np.ndarray) -> np.ndarray:
+    def reshape_coordinates(
+        self, coords: lib.FloatArray3D
+    ) -> lib.FloatArray2D:
         """Reshape x,y,z coordinates to a 2D array for saving
         molecular targets' positions.
 
@@ -2248,6 +2366,10 @@ class StructureMixer:
                 )
         else:
             self.roi = [None, None, None]
+            mask_shapes = [_.shape for _ in self.mask_dict["mask"].values()]
+            assert all(
+                [mask_shapes[0] == mask_shape for mask_shape in mask_shapes]
+            ), "All masks must have the same shape."
             self.mask = self.mask_dict["mask"]
             self.mask_info = self.mask_dict["info"]
 
@@ -2306,14 +2428,14 @@ class StructureMixer:
 
     def run_simulation(
         self,
-        N_structures: list | np.ndarray,
+        N_structures: list | lib.IntArray1D,
         path: str = "",
     ) -> dict:
         """Run a simulation with the given numbers of structures.
 
         Parameters
         ----------
-        N_structures : list or 1D np.ndarray
+        N_structures : list or lib.IntArray1D
             Each element gives the number of structures to be simulated.
             Must have the same number of elements as self.structures as
             well as the same ordering.
@@ -2386,7 +2508,7 @@ class StructureMixer:
     def extract_mask(
         self,
         structure: Structure,
-    ) -> tuple[np.ndarray, dict] | tuple[None, None]:
+    ) -> tuple[lib.FloatArray2D, dict] | tuple[None, None]:
         """Extract masks and metadata for the given structure.
 
         If a heteromultimer is simulated, weighted average of masks is
@@ -2400,7 +2522,7 @@ class StructureMixer:
 
         Returns
         -------
-        mask : np.ndarray or None
+        mask : lib.FloatArray2D or None
             Mask for the given molecular targets.
         mask_info : dict or None
             Metadata for the mask.
@@ -2425,14 +2547,14 @@ class StructureMixer:
             mask_info = None
         return mask, mask_info
 
-    def convert_sim_results(self, sim_results: list[np.ndarray]) -> dict:
+    def convert_sim_results(self, sim_results: list[lib.FloatArray2D]) -> dict:
         """Convert sim_results calculated by multiple
         ``StructureSimulator``'s into a dictionary with molecules
         ordered by their molecular targets' names.
 
         Parameters
         ----------
-        sim_results : list of arrays
+        sim_results : list of lib.FloatArray2D
             Each element contains spatial coordinates of simulated
             molecules for each simulated structure.
 
@@ -2480,12 +2602,10 @@ class StructureMixer:
             file will be added the suffix _TARGETNAME.
         all_locs : dict
             Dictionary with molecular target names as keys and
-            np.ndarrays with spatial coordinates of the molecules to be
-            saved. Each of the arrays must have shape (N, 2) or (N, 3),
-            where N is the number of molecules of the given molecular
-            target species to be saved.
-        N_structures : list or np.ndarray
-            Numbers of structures that were simulated.
+            lib.FloatArray2D's with spatial coordinates of the molecules
+            to be saved. Each of the arrays must have shape (N, 2) or
+            (N, 3), where N is the number of molecules of the given
+            molecular target species to be saved.
         lp : float (default=1.0)
             Localization precision in nm to be assigned to saved
             molecules.
@@ -2521,7 +2641,7 @@ class StructureMixer:
             if len(coords):
                 locs = coords_to_locs(coords, lp=lp, pixelsize=pixelsize)
                 info = self.get_metadata(tname, width, height, pixelsize)
-                outpath = path.replace(".hdf5", f"_{tname}.hdf5")
+                outpath = os.path.splitext(path)[0] + f"_{tname}.hdf5"
                 io.save_locs(outpath, locs, info)
 
     def get_metadata(
@@ -2654,16 +2774,16 @@ class StructureMixer:
 
     def convert_props_for_target(
         self,
-        props: np.ndarray,
+        props: lib.FloatArray1D,
         target: str,
         n_mols: dict,
-    ) -> np.ndarray:
+    ) -> lib.FloatArray1D:
         """Convert the given proportions of structures to the relative
         proportions of the given molecular target.
 
         Parameters
         ----------
-        props : np.ndarray
+        props : lib.FloatArray1D
             Relative proportions of structures (0 to 100). Can be 1D or
             2D.
         target : str
@@ -2676,11 +2796,11 @@ class StructureMixer:
 
         Returns
         -------
-        props_target : np.ndarray
+        props_target : lib.FloatArray1D
             Relative proportions of the given molecular target.
         """
         targets_per_str = [_.get_all_targets_count() for _ in self.structures]
-        t_counts = find_target_counts([target], self.structures).reshape(-1)
+        t_counts = _find_target_counts([target], self.structures).reshape(-1)
         n_target = n_mols[target]
         n_total = sum(list(n_mols.values()))
         n_str = props * n_total / targets_per_str
@@ -2691,8 +2811,8 @@ class StructureMixer:
 
     def convert_counts_to_props(
         self,
-        N_structures: list | np.ndarray,
-    ) -> np.ndarray:
+        N_structures: list | lib.IntArray1D,
+    ) -> lib.FloatArray2D:
         """Convert numbers of structures to their relative
         proportions (%).
 
@@ -2702,7 +2822,7 @@ class StructureMixer:
 
         Parameters
         ----------
-        N_structures : list or np.ndarray
+        N_structures : list or lib.IntArray1D
             Each element (1D) or row (2D) gives the number of
             structures to be simulated. Must have the same number of
             elements (1D) or columns (2D) as self.structures as well as
@@ -2710,21 +2830,11 @@ class StructureMixer:
 
         Returns
         -------
-        props : np.ndarray
+        props : lib.FloatArray2D
             Resulting proportions (0 to 100).
         """
         N_structures = deepcopy(N_structures)
-        if isinstance(N_structures, list):
-            N_structures = np.int32(N_structures)
-        elif isinstance(N_structures, dict):
-            N = len(list(N_structures.values())[0])  # number of simulations
-            N_structures_ = np.zeros(
-                (N, len(self.mixer.structures)),
-                dtype=np.int32,
-            )
-            for i, structure in enumerate(self.mixer.structures):
-                N_structures_[:, i] = N_structures[structure.title]
-            N_structures = N_structures_
+        N_structures = self.convert_N_structures_to_array(N_structures)
 
         if N_structures.ndim == 1:
             N_structures = N_structures.reshape(1, -1)
@@ -2776,9 +2886,9 @@ class StructureMixer:
 
     def convert_props_to_counts(
         self,
-        proportions: list | np.ndarray,
-        N_total: int | np.ndarray,
-    ) -> np.ndarray:
+        proportions: list | lib.FloatArray1D,
+        N_total: int | lib.IntArray1D,
+    ) -> lib.IntArray2D:
         """Convert relative proportions (%) of structures to their
         absolute counts.
 
@@ -2786,19 +2896,19 @@ class StructureMixer:
 
         Parameters
         ----------
-        proportions : list or np.ndarray
+        proportions : list or lib.FloatArray1D
             Each element (1D) or row (2D) gives the relative proportion
             of the given structure (0 to 100). Must have the same
             number of elements (1D) or columns (2D) as self.structures
             as well as the same ordering.
-        N_total : int or np.ndarray
+        N_total : int or lib.IntArray1D
             Total number of molecular targets (if different molecular
             species are present, they should be summed together in this
             value).
 
         Returns
         -------
-        N_structures : np.ndarray
+        N_structures : lib.IntArray2D
             Resulting numbers of structures.
         """
         proportions = deepcopy(proportions)
@@ -2832,6 +2942,56 @@ class StructureMixer:
             N_structures = N_structures.reshape(-1)
 
         return N_structures
+
+    def convert_N_structures_to_array(
+        self,
+        N_structures: dict | list | lib.IntArray1D,
+    ) -> lib.IntArray2D:
+        """Convert numbers of structures to a 2D numpy array.
+
+        Parameters
+        ----------
+        N_structures : dict or list or lib.IntArray1D
+            Dictionary with structure names as keys and lists of numbers
+            of structures to be simulated as values. The structure names
+            given must be the same as in self.structures.
+
+        Returns
+        -------
+        N_structures_array : lib.IntArray2D
+            2D array with shape (N, M), where N is the number of
+            simulations to be tested and M is the number of structures
+            in self.structures. Each row gives the numbers of structures
+            to be simulated for each structure in self.structures.
+        """
+        if isinstance(N_structures, np.ndarray):
+            if N_structures.ndim == 2:
+                return N_structures
+            elif N_structures.ndim == 1:
+                return N_structures.reshape(1, -1)
+            else:
+                raise TypeError(
+                    "Please input numbers of structures as a list or 1D/2D"
+                    " array."
+                )
+        elif isinstance(N_structures, list):
+            return np.int32(N_structures)
+        elif isinstance(N_structures, dict):
+            N = len(list(N_structures.values())[0])  # number of simulations
+            N_structures_array = np.zeros(
+                (N, len(self.structures)),
+                dtype=np.int32,
+            )
+            for i, structure in enumerate(self.structures):
+                N_structures_array[:, i] = N_structures[structure.title]
+            return N_structures_array
+        else:
+            raise TypeError(
+                "Please input numbers of structures as a dictionary with"
+                " structure names as keys and lists of numbers of"
+                " structures to be simulated as values, or as a list or"
+                " 2D array."
+            )
 
     @property
     def roi_size(self) -> float:
@@ -2913,14 +3073,25 @@ class SPINNA:
 
     def fit(
         self,
-        N_structures: np.ndarray | dict,
+        N_structures: lib.IntArray2D | dict,
+        *,
+        fitting_mode: Literal[
+            "coarse-to-fine", "bayesian", "brute-force"
+        ] = "coarse-to-fine",
         save: str = "",
         asynch: bool = True,
         bootstrap: bool = False,
+        return_scores: bool = False,
         callback: lib.ProgressDialog | Literal["console"] | None = None,
     ) -> (
-        tuple[np.ndarray, float]
-        | tuple[tuple[np.ndarray, ...], tuple[float, ...]]
+        tuple[lib.IntArray1D, float]
+        | tuple[tuple[lib.IntArray1D, ...], tuple[float, ...]]
+        | tuple[lib.IntArray1D, float, lib.FloatArray1D]
+        | tuple[
+            tuple[lib.IntArray1D, ...],
+            tuple[float, ...],
+            tuple[lib.FloatArray1D, ...],
+        ]
     ):
         """Find fitting error for every combination of ``N_structures``
         using NND comparison to ground truth. Applies multiprocessing
@@ -2930,7 +3101,7 @@ class SPINNA:
 
         Parameters
         ----------
-        N_structures : np.2darray or dict
+        N_structures : lib.IntArray2D or dict
             Specifies what combinations of structures  are to be
             simulated for each iteration. Shape (N, M), where N is the
             number of simulations to be tested and M is the number of
@@ -2938,6 +3109,15 @@ class SPINNA:
             values are lists of numbers of structures to be simulated.
             ``N_structures`` can be generated using
             :meth:`~spinna.generate_N_structures`.
+        fitting_mode : {"coarse-to-fine", "bayesian", "brute-force"}, optional
+            If "coarse-to-fine", the fitting is done in two steps: first,
+            a coarse grid of structure combinations is tested, (10% of
+            evenly distributed structure combinations) and then a finer
+            grid is tested around the best combination from the coarse
+            grid. If "bayesian", Bayesian optimization with a Gaussian
+            Process surrogate is used to efficiently search the space.
+            If "brute-force", all combinations of structures are
+            tested sequentially. Default is "coarse-to-fine".
         save : str, optional
             Path to save numbers of structures tested and their
             corresponding scores as a .csv file. If '' is given, the
@@ -2949,6 +3129,9 @@ class SPINNA:
         bootstrap : bool, optional
             If True, bootstrapping is used to estimate the fitting
             error. Default is False.
+        return_scores : bool, optional
+            If True, scores for all combinations of structures are also
+            returned. Default is False.
         callback : {lib.ProgressDialog, "console", None}, optional
             Progress bar to track fitting progress. If "console", the
             progress bar is displayed in the console. If None, no
@@ -2956,81 +3139,80 @@ class SPINNA:
 
         Returns
         -------
-        opt_proportions : np.ndarray or tuple of np.ndarrays
+        opt_proportions : lib.FloatArray1D or tuple of lib.FloatArray1D
             The stoichiometry of structures that gives the best fit to
             ground truth.
         score : float or tuple of floats
             KS2 score of the best fit.
+        scores : lib.FloatArray1D or tuple of lib.FloatArray1D, optional
+            KS2 scores for all combinations of structures tested. Only
+            returned if return_scores is True.
         """
         return self.fit_stoichiometry(
             N_structures,
+            fitting_mode=fitting_mode,
             save=save,
             asynch=asynch,
             bootstrap=bootstrap,
+            return_scores=return_scores,
             callback=callback,
         )
 
     def fit_stoichiometry(
         self,
-        N_structures: np.ndarray | dict,
+        N_structures: lib.IntArray2D | dict,
+        *,
+        fitting_mode: Literal[
+            "coarse-to-fine", "bayesian", "brute-force"
+        ] = "coarse-to-fine",
         save: str = "",
         asynch: bool = True,
         bootstrap: bool = False,
+        return_scores: bool = False,
         callback: lib.ProgressDialog | Literal["console"] | None = None,
     ) -> (
-        tuple[np.ndarray, float]
-        | tuple[tuple[np.ndarray, ...], tuple[float, ...]]
+        tuple[lib.IntArray1D, float]
+        | tuple[tuple[lib.IntArray1D, ...], tuple[float, ...]]
     ):
         """Alias for ``self.fit()``."""
         assert (
             callback is None
-            or isinstance(callback, lib.ProgressDialog)
+            or isinstance(callback, (lib.ProgressDialog, lib.MockProgress))
             or callback == "console"
         ), ("callback must be a ProgressDialog," " 'console', or None.")
         if callback is None:
             callback = lib.MockProgress()
+        assert fitting_mode in [
+            "coarse-to-fine",
+            "bayesian",
+            "brute-force",
+        ], (
+            "fitting_mode must be 'coarse-to-fine', 'bayesian', or"
+            " 'brute-force'."
+        )
 
         # check and optionally convert N_structures
-        if isinstance(N_structures, dict):
-            N = len(list(N_structures.values())[0])  # number of simulations
-            N_structures_ = np.zeros(
-                (N, len(self.mixer.structures)),
-                dtype=np.int32,
-            )
-            for i, structure in enumerate(self.mixer.structures):
-                N_structures_[:, i] = N_structures[structure.title]
-            N_structures = N_structures_
-        elif (
-            not isinstance(N_structures, np.ndarray)
-            or len(N_structures.shape) != 2
-        ):
-            raise TypeError("N_structures must be a 2D array or a dictionary.")
+        N_structures = self.mixer.convert_N_structures_to_array(N_structures)
 
-        if asynch:  # fit with multiprocessing
-            fs = self.fit_stoichiometry_parallel(N_structures)
-            N = len(fs)
-            N_ = N_structures.shape[0]
-            if callback == "console":
-                progress_bar = tqdm(range(N_), desc=self.progress_title)
-            while self.n_futures_done(fs) < N:  # display progress
-                fd = self.n_futures_done(fs)
-                fd_ = int(fd * N_ / N)
-                if fd > 0 and callback != "console":
-                    callback.description_base = self.progress_title
-                    callback.set_value(fd_)
-                elif fd > 0 and callback == "console":
-                    progress_bar.update(fd_ - progress_bar.n)
-                time.sleep(0.1)
-            if callback != "console":
-                callback.set_value(N_)
-            else:
-                progress_bar.update(fd_ - progress_bar.n)
-                progress_bar.close()
-            N_structures, scores = self.scores_from_futures(fs)
-        else:  # fit in a single thread
-            N_structures, scores = self.NN_scorer(
-                N_structures, callback=callback
+        if fitting_mode == "coarse-to-fine":
+            return self.fit_coarse_to_fine(
+                N_structures,
+                save=save,
+                asynch=asynch,
+                bootstrap=bootstrap,
+                callback=callback,
             )
+        elif fitting_mode == "bayesian":
+            return self.fit_bayesian(
+                N_structures,
+                save=save,
+                bootstrap=bootstrap,
+                callback=callback,
+            )
+
+        N_structures, scores = self._run_brute_force(
+            N_structures, asynch, callback
+        )
 
         if save:
             props = self.mixer.convert_counts_to_props(N_structures)
@@ -3050,49 +3232,21 @@ class SPINNA:
         opt_proportions = self.mixer.convert_counts_to_props(opt_N_structures)
 
         if bootstrap:
-            exp_dists_gt = deepcopy(self.dists_gt)
-
-            N_structures_subset = self.get_subset_N_structures(
+            result = self._run_bootstrap(
                 N_structures,
                 opt_N_structures,
+                opt_proportions,
+                score,
+                callback,
             )
+            if return_scores:
+                return result[0], result[1], scores
+            return result
+        if return_scores:
+            return opt_proportions, score, scores
+        return opt_proportions, score
 
-            # initialize bootstrapping
-            if callback != "console":
-                callback.setMaximum(len(N_structures_subset))
-            scores = []
-            boot_props = []
-            for i in range(N_BOOTSTRAPS):
-                self.progress_title = (
-                    f"Bootstrapping {i+1}/{N_BOOTSTRAPS}; spinning structures"
-                )
-                if callback != "console":
-                    callback.t0_est = time.time()
-                # gt_coords_boot = self.mixer.run_simulation(opt_N_structures_)
-                gt_coords_boot = self.mixer.run_simulation(opt_N_structures)
-                self.dists_gt = get_NN_dist_experimental(
-                    gt_coords_boot, self.mixer
-                )
-                N_structures_boot, scores_boot = self.NN_scorer(
-                    N_structures_subset, callback=callback
-                )
-                index_boot = np.argmin(scores_boot)
-                score_boot = scores_boot[index_boot]
-                scores.append(score_boot)
-                boot_props.append(
-                    self.mixer.convert_counts_to_props(
-                        N_structures_boot[index_boot]
-                    )
-                )
-
-            self.dists_gt = exp_dists_gt
-            score_std = np.std(scores)
-            props_std = np.std(boot_props, axis=0)
-            return (opt_proportions, props_std), (score, score_std)
-        else:
-            return opt_proportions, score
-
-    def fit_stoichiometry_parallel(self, N_structures: np.ndarray) -> list:
+    def fit_stoichiometry_parallel(self, N_structures: lib.IntArray2D) -> list:
         """Apply multiprocessing to find best fitting combination of
         structures.
 
@@ -3134,13 +3288,551 @@ class SPINNA:
             )
         return fs
 
+    def fit_coarse_to_fine(
+        self,
+        N_structures: lib.IntArray2D | dict,
+        coarse_fraction: float = 0.1,
+        radius: float = BOOTSTRAP_DISTANCE,
+        save: str = "",
+        asynch: bool = True,
+        bootstrap: bool = False,
+        callback: lib.ProgressDialog | Literal["console"] | None = None,
+    ) -> (
+        tuple[lib.IntArray1D, float]
+        | tuple[tuple[lib.IntArray1D, ...], tuple[float, ...]]
+    ):
+        """Two-pass coarse-to-fine fitting.
+
+        Pass 1: evaluate a random subsample of N_structures.
+        Pass 2: evaluate the full-resolution neighborhood around
+                the coarse-pass winner.
+
+        Parameters
+        ----------
+        N_structures : lib.IntArray2D or dict
+            Full search space (same as in ``fit``).
+        coarse_fraction : float, optional
+            Fraction of N_structures to evaluate in the coarse pass
+            (0 < coarse_fraction < 1). Default is 0.1.
+        radius : float, optional
+            Radius (in %-proportion space) around the coarse winner
+            used to select candidates for the fine pass. Default is
+            BOOTSTRAP_DISTANCE.
+        save, asynch, bootstrap, callback
+            Same as in ``fit``.
+        """
+        if isinstance(N_structures, dict):
+            N_structures = self.mixer.convert_N_structures_to_array(
+                N_structures
+            )
+
+        # coarse fitting: select evenly spread candidates using
+        # farthest-point sampling in proportion space
+        n_total = N_structures.shape[0]
+        n_coarse = max(2, int(n_total * coarse_fraction))
+        proportions = self.mixer.convert_counts_to_props(N_structures)
+        coarse_idx = self._farthest_point_sampling(proportions, n_coarse)
+        N_coarse = N_structures[coarse_idx]
+
+        # adjust the progress bar
+        if isinstance(callback, lib.ProgressDialog):
+            callback.setMaximum(n_coarse)
+            callback.setLabelText("Coarse pass")
+        self.progress_title = "Coarse pass"
+        N_coarse, scores_coarse = self._run_brute_force(
+            N_coarse, asynch, callback
+        )
+
+        coarse_best = N_coarse[np.argmin(scores_coarse)]
+
+        # fine fitting around the coarse winner
+        N_fine = self.get_subset_N_structures(
+            N_structures,
+            coarse_best,
+            radius=radius,
+        )
+
+        # adjust the progress bar again
+        if isinstance(callback, lib.ProgressDialog):
+            callback.setMaximum(len(N_fine))
+            callback.setValue(0)
+            callback.setLabelText("Fine pass")
+            self.progress_title = "Fine pass"
+        spinna_results = self.fit_stoichiometry(
+            N_fine,
+            fitting_mode="brute-force",
+            asynch=asynch,
+            bootstrap=bootstrap,
+            return_scores=True,
+            callback=callback,
+        )
+        if save:
+            # save the results of both the coarse and fine pass
+            props_coarse = self.mixer.convert_counts_to_props(N_coarse)
+            props_fine = self.mixer.convert_counts_to_props(N_fine)
+            # get the fine scores ((non)bootstrapped results have
+            # different structure)
+            if bootstrap:
+                scores_fine = spinna_results[-1]
+            else:
+                scores_fine = spinna_results[-1]
+            df_coarse = pd.DataFrame(
+                np.hstack(
+                    (N_coarse, props_coarse, scores_coarse.reshape(-1, 1))
+                ),
+                columns=[
+                    f"N_{name}" for name in self.mixer.get_structure_names()
+                ]
+                + [f"Prop_{name}" for name in self.mixer.get_structure_names()]
+                + ["Kolmogorov-Smirnov statistic"],
+            )
+            df_fine = pd.DataFrame(
+                np.hstack((N_fine, props_fine, scores_fine.reshape(-1, 1))),
+                columns=[
+                    f"N_{name}" for name in self.mixer.get_structure_names()
+                ]
+                + [f"Prop_{name}" for name in self.mixer.get_structure_names()]
+                + ["Kolmogorov-Smirnov statistic"],
+            )
+            df_coarse["Pass"] = "Coarse"
+            df_fine["Pass"] = "Fine"
+            df = pd.concat([df_coarse, df_fine], ignore_index=True)
+            df.to_csv(save, header=True, index=False)
+        return spinna_results[:-1]
+
+    def fit_bayesian(
+        self,
+        N_structures: lib.IntArray2D | dict,
+        n_initial: int = 20,
+        n_iterations: int = 80,
+        save: str = "",
+        bootstrap: bool = False,
+        callback: lib.ProgressDialog | Literal["console"] | None = None,
+    ) -> (
+        tuple[lib.IntArray1D, float]
+        | tuple[tuple[lib.IntArray1D, ...], tuple[float, ...]]
+    ):
+        """Bayesian optimization over the N_structures grid using a
+        Gaussian Process surrogate model.
+
+        Phase 1: Evaluate ``n_initial`` well-spread initial points
+        (farthest-point sampling in proportion space).
+        Phase 2: For ``n_iterations`` rounds, fit a GP to evaluated
+        points, compute Expected Improvement on all unevaluated
+        candidates, and evaluate the best one.
+
+        Parameters
+        ----------
+        N_structures : np.2darray or dict
+            Full search space (same as in ``fit``).
+        n_initial : int, optional
+            Number of initial space-filling evaluations. Default is 20.
+        n_iterations : int, optional
+            Maximum number of GP-guided iterations. Default is 80.
+        save : str, optional
+            Path to save evaluated candidates and scores as .csv.
+            Default is ''.
+        bootstrap : bool, optional
+            If True, bootstrapping is used to estimate the fitting
+            error. Default is False.
+        callback : {lib.ProgressDialog, "console", None}, optional
+            Progress bar. Default is None.
+
+        Returns
+        -------
+        opt_proportions : lib.FloatArray1D or tuple of lib.FloatArray1D
+            The stoichiometry of structures that gives the best fit.
+        score : float or tuple of floats
+            KS2 score of the best fit.
+        """
+
+        if isinstance(N_structures, dict):
+            N_structures = self.mixer.convert_N_structures_to_array(
+                N_structures
+            )
+
+        n_total = N_structures.shape[0]
+        proportions = self.mixer.convert_counts_to_props(N_structures)
+
+        # track evaluated candidates
+        evaluated = np.zeros(n_total, dtype=bool)
+        scores = np.full(n_total, np.inf)
+
+        # total budget
+        n_initial = min(n_initial, n_total)
+        n_iterations = min(n_iterations, n_total - n_initial)
+
+        # --- Phase 1: initial space-filling design ---
+        if isinstance(callback, lib.ProgressDialog):
+            callback.zero_progress("Bayesian optimization (initial sampling)")
+            callback.setMaximum(n_initial)
+        progress_bar = None
+        if callback == "console":
+            progress_bar = tqdm(
+                total=n_initial,
+                desc="Bayesian optimization (initial sampling)",
+            )
+
+        init_idx = self._farthest_point_sampling(proportions, n_initial)
+        eval_count = 0
+        for idx in init_idx:
+            scores[idx] = self._evaluate_single(N_structures[idx])
+            evaluated[idx] = True
+            eval_count += 1
+            if callback == "console":
+                progress_bar.update(1)
+            elif callback is not None and callback != "console":
+                callback.set_value(eval_count)
+
+        if callback == "console":
+            progress_bar.close()
+
+        # --- Phase 2: GP-guided acquisition ---
+        if isinstance(callback, lib.ProgressDialog):
+            callback.zero_progress("Bayesian optimization (GP-guided)")
+            callback.setMaximum(n_iterations)
+        if callback == "console":
+            progress_bar = tqdm(
+                total=n_iterations,
+                desc="Bayesian optimization (GP-guided)",
+            )
+
+        evaluated, scores, _ = self._bayesian_gp_phase(
+            proportions=proportions,
+            N_structures=N_structures,
+            evaluated=evaluated,
+            scores=scores,
+            n_iterations=n_iterations,
+            callback=callback,
+            eval_count=0,
+            progress_bar=progress_bar if callback == "console" else None,
+        )
+
+        if callback == "console" and progress_bar is not None:
+            progress_bar.close()
+        elif isinstance(callback, lib.ProgressDialog):
+            callback.set_value(callback.maximum())
+
+        # collect results for evaluated candidates only
+        eval_mask = evaluated
+        N_evaluated = N_structures[eval_mask]
+        scores_evaluated = scores[eval_mask]
+
+        if save:
+            props_eval = self.mixer.convert_counts_to_props(N_evaluated)
+            df = pd.DataFrame(
+                np.hstack(
+                    (N_evaluated, props_eval, scores_evaluated.reshape(-1, 1))
+                ),
+                columns=[
+                    f"N_{name}" for name in self.mixer.get_structure_names()
+                ]
+                + [f"Prop_{name}" for name in self.mixer.get_structure_names()]
+                + ["Kolmogorov-Smirnov statistic"],
+            )
+            df.to_csv(save, header=True, index=False)
+
+        # find best
+        index = np.argmin(scores_evaluated)
+        score = scores_evaluated[index]
+        opt_N_structures = N_evaluated[index]
+        opt_proportions = self.mixer.convert_counts_to_props(opt_N_structures)
+
+        if bootstrap:
+            return self._run_bootstrap(
+                N_structures,
+                opt_N_structures,
+                opt_proportions,
+                score,
+                callback,
+            )
+        return opt_proportions, score
+
+    def _bayesian_gp_phase(
+        self,
+        proportions: lib.FloatArray2D,
+        N_structures: lib.IntArray2D,
+        evaluated: np.ndarray,
+        scores: np.ndarray,
+        n_iterations: int,
+        callback,
+        eval_count: int,
+        progress_bar=None,
+    ) -> tuple[np.ndarray, np.ndarray, int]:
+        """Run the GP-guided acquisition phase of Bayesian optimisation.
+
+        Iteratively fits a Gaussian Process on evaluated candidates,
+        computes Expected Improvement on the remaining ones, evaluates
+        the most promising candidate, and stops early when no improvement
+        is observed for ``patience`` rounds.
+
+        Parameters
+        ----------
+        proportions : lib.FloatArray2D
+            Proportion representation of every candidate in N_structures.
+        N_structures : lib.IntArray2D
+            Full candidate search space.
+        evaluated : np.ndarray of bool
+            Mask of already-evaluated candidates (modified in-place).
+        scores : np.ndarray of float
+            Scores array (modified in-place).
+        n_iterations : int
+            Maximum number of GP-guided iterations.
+        callback : lib.ProgressDialog, "console", or None
+            Progress tracker.
+        eval_count : int
+            Number of evaluations already completed (for progress display).
+        progress_bar : tqdm or None
+            Active tqdm bar when ``callback == "console"``.
+
+        Returns
+        -------
+        evaluated : np.ndarray of bool
+        scores : np.ndarray of float
+        eval_count : int
+        """
+        patience = max(10, n_iterations // 5)
+        no_improvement_count = 0
+        best_score_so_far = scores[evaluated].min()
+
+        for _ in range(n_iterations):
+            if evaluated.all():
+                break
+
+            # fit GP and compute Expected Improvement
+            X_train = proportions[evaluated]
+            y_train = scores[evaluated]
+            gp = GaussianProcessRegressor(
+                kernel=Matern(nu=2.5),
+                n_restarts_optimizer=5,
+                normalize_y=True,
+                alpha=1e-6,
+            )
+            gp.fit(X_train, y_train)
+            unevaluated_mask = ~evaluated
+            mu, sigma = gp.predict(
+                proportions[unevaluated_mask], return_std=True
+            )
+            best_y = y_train.min()
+            with np.errstate(divide="ignore", invalid="ignore"):
+                z = (best_y - mu) / sigma
+                ei = (best_y - mu) * norm.cdf(z) + sigma * norm.pdf(z)
+                ei[sigma == 0.0] = 0.0
+
+            best_idx = np.where(unevaluated_mask)[0][np.argmax(ei)]
+
+            # evaluate the most promising candidate
+            scores[best_idx] = self._evaluate_single(N_structures[best_idx])
+            evaluated[best_idx] = True
+            eval_count += 1
+
+            if callback == "console":
+                progress_bar.update(1)
+            elif callback is not None:
+                callback.set_value(eval_count)
+
+            # early stopping
+            current_best = scores[evaluated].min()
+            if current_best < best_score_so_far:
+                best_score_so_far = current_best
+                no_improvement_count = 0
+            else:
+                no_improvement_count += 1
+            if no_improvement_count >= patience:
+                # shrink the progress target so the bar reaches 100%
+                # naturally instead of jumping at the end
+                if isinstance(callback, lib.ProgressDialog):
+                    callback.setMaximum(eval_count)
+                elif callback == "console" and progress_bar is not None:
+                    progress_bar.total = eval_count
+                    progress_bar.refresh()
+                break
+
+        return evaluated, scores, eval_count
+
+    def _run_brute_force(
+        self,
+        N_structures: lib.IntArray2D,
+        asynch: bool,
+        callback: lib.ProgressDialog | Literal["console"] | lib.MockProgress,
+    ) -> tuple[lib.IntArray2D, lib.FloatArray1D]:
+        """Score ``N_structures`` candidates, dispatching to parallel
+        or single-thread mode.
+
+        Parameters
+        ----------
+        N_structures : lib.IntArray2D
+            Candidates to evaluate.
+        asynch : bool
+            If True, multiprocessing is used.
+        callback : lib.ProgressDialog, "console", or lib.MockProgress
+            Progress tracker.
+
+        Returns
+        -------
+        N_structures : lib.IntArray2D
+        scores : lib.FloatArray1D
+        """
+        if not asynch:
+            return self.NN_scorer(N_structures, callback=callback)
+        fs = self.fit_stoichiometry_parallel(N_structures)
+        N = len(fs)
+        N_ = N_structures.shape[0]
+        if callback == "console":
+            progress_bar = tqdm(total=N_, desc=self.progress_title)
+        while self.n_futures_done(fs) < N:
+            fd = self.n_futures_done(fs)
+            fd_ = int(fd * N_ / N)
+            if fd > 0 and callback != "console":
+                callback.description_base = self.progress_title
+                callback.set_value(fd_)
+            elif fd > 0 and callback == "console":
+                progress_bar.update(fd_ - progress_bar.n)
+            time.sleep(0.1)
+        if callback != "console":
+            callback.set_value(N_)
+        else:
+            progress_bar.update(fd_ - progress_bar.n)
+            progress_bar.close()
+        return self.scores_from_futures(fs)
+
+    def _run_bootstrap(
+        self,
+        N_structures: lib.IntArray2D,
+        opt_N_structures: lib.IntArray1D,
+        opt_proportions: lib.FloatArray1D,
+        score: float,
+        callback: lib.ProgressDialog | Literal["console"] | lib.MockProgress,
+    ) -> tuple[tuple, tuple]:
+        """Bootstrap the best-fit result to estimate uncertainty.
+
+        Repeatedly simulates from ``opt_N_structures``, re-runs
+        NN_scorer on a local neighbourhood, and collects statistics.
+
+        Parameters
+        ----------
+        N_structures : lib.IntArray2D
+            Full search space (used to derive the neighbourhood).
+        opt_N_structures : lib.IntArray1D
+            Best-fit structure counts.
+        opt_proportions : lib.FloatArray1D
+            Best-fit proportions.
+        score : float
+            Best-fit KS2 score.
+        callback : lib.ProgressDialog, "console", or lib.MockProgress
+            Progress tracker.
+
+        Returns
+        -------
+        (opt_proportions, props_std) : tuple
+        (score, score_std) : tuple
+        """
+        exp_dists_gt = deepcopy(self.dists_gt)
+        N_structures_subset = self.get_subset_N_structures(
+            N_structures, opt_N_structures
+        )
+        if isinstance(callback, lib.ProgressDialog):
+            callback.setMaximum(len(N_structures_subset))
+        bootstrap_scores = []
+        boot_props = []
+        for i in range(N_BOOTSTRAPS):
+            self.progress_title = (
+                f"Bootstrapping {i+1}/{N_BOOTSTRAPS}; spinning structures"
+            )
+            if isinstance(callback, lib.ProgressDialog):
+                callback.t0_est = time.time()
+            gt_coords_boot = self.mixer.run_simulation(opt_N_structures)
+            self.dists_gt = get_NN_dist_experimental(
+                gt_coords_boot, self.mixer
+            )
+            N_structures_boot, scores_boot = self.NN_scorer(
+                N_structures_subset, callback=callback
+            )
+            index_boot = np.argmin(scores_boot)
+            bootstrap_scores.append(scores_boot[index_boot])
+            boot_props.append(
+                self.mixer.convert_counts_to_props(
+                    N_structures_boot[index_boot]
+                )
+            )
+        self.dists_gt = exp_dists_gt
+        score_std = np.std(bootstrap_scores)
+        props_std = np.std(boot_props, axis=0)
+        return (opt_proportions, props_std), (score, score_std)
+
+    def _evaluate_single(self, N_row: lib.IntArray1D) -> float:
+        """Evaluate a single candidate: simulate and score.
+
+        Parameters
+        ----------
+        N_row : lib.IntArray1D
+            1D array specifying the number of each structure to
+            simulate.
+
+        Returns
+        -------
+        score : float
+            KS2 score for this candidate.
+        """
+        dists_sim = get_NN_dist_simulated(
+            N_row, self.N_sim, self.mixer, duplicate=False
+        )
+        return NND_score(dists_sim, self.dists_gt)
+
+    @staticmethod
+    def _farthest_point_sampling(
+        points: lib.FloatArray2D,
+        n_samples: int,
+    ) -> lib.IntArray1D:
+        """Select a well-spread subset of points using farthest-point
+        (maximin) sampling.
+
+        Starts from the point closest to the centroid, then iteratively
+        adds the point that is farthest from all already-selected
+        points.
+
+        Parameters
+        ----------
+        points : lib.FloatArray2D
+            Array of shape (N, D) with N candidate points in D
+            dimensions.
+        n_samples : int
+            Number of points to select.
+
+        Returns
+        -------
+        indices : lib.IntArray1D
+            Indices of the selected points in the original array.
+        """
+        n_total = points.shape[0]
+        n_samples = min(n_samples, n_total)
+
+        # start from the point closest to the centroid
+        centroid = points.mean(axis=0)
+        dists_to_centroid = np.linalg.norm(points - centroid, axis=1)
+        first_idx = np.argmin(dists_to_centroid)
+
+        selected = [first_idx]
+        # min distance from each point to any selected point so far
+        min_dists = np.linalg.norm(points - points[first_idx], axis=1)
+
+        for _ in range(n_samples - 1):
+            # pick the point with the largest minimum distance
+            next_idx = np.argmax(min_dists)
+            selected.append(next_idx)
+            # update minimum distances
+            new_dists = np.linalg.norm(points - points[next_idx], axis=1)
+            min_dists = np.minimum(min_dists, new_dists)
+
+        return np.array(selected)
+
     def NN_scorer(
         self,
-        N_structures: np.ndarray,
+        N_structures: lib.IntArray2D,
         callback: (
             lib.ProgressDialog | Literal["console"] | lib.MockProgress
         ) = lib.MockProgress(),
-    ) -> tuple[np.ndarray, np.ndarray]:
+    ) -> tuple[lib.IntArray2D, lib.FloatArray1D]:
         """Score the simulations similarity to the ground truth dataset
         based on their nearest neighbor distances distribution using
         Kolmogorov-Smirnov 2 sample test.
@@ -3150,7 +3842,7 @@ class SPINNA:
 
         Parameters
         ----------
-        N_structures : np.2darray
+        N_structures : lib.IntArray2D
             Specifies what combinations of structures  are to be
             simulated for each iteration. Shape (N, M), where N is the
             number of simulations to be tested and M is the number of
@@ -3162,9 +3854,9 @@ class SPINNA:
 
         Returns
         -------
-        N_structures : np.ndarray
+        N_structures : lib.IntArray2D
             Same as the input N_structures.
-        scores : np.ndarray
+        scores : lib.FloatArray1D
             1D array with fit scores for each combination of structures.
         """
         # Run simulations for each structure count and score them #
@@ -3191,19 +3883,19 @@ class SPINNA:
 
     def get_subset_N_structures(
         self,
-        N_structures: np.ndarray,
-        center_N_structures: np.ndarray,
+        N_structures: lib.IntArray2D,
+        center_N_structures: lib.IntArray1D,
         radius: float = BOOTSTRAP_DISTANCE,
         p: float = BOOTSTRAP_DISTANCE_METRIC,
-    ) -> np.ndarray:
+    ) -> lib.IntArray2D:
         """Find a subset of N_structures that are within a given radius
         from the center_proportions.
 
         Parameters
         ----------
-        N_structures : np.ndarray
+        N_structures : lib.IntArray2D
             Array where each row specifies each structures count tested.
-        center_N_structures : np.ndarray
+        center_N_structures : lib.IntArray1D
             Array with the numbers of the structures that are considered
             as the center of the subset (ground-truth).
         radius : float (default=30.0)
@@ -3213,19 +3905,14 @@ class SPINNA:
 
         Returns
         -------
-        N_structures_subset : np.ndarray
+        N_structures_subset : lib.IntArray2D
             Subset of N_structures that are within the radius from the
             center_proportions.
         """
         if isinstance(N_structures, dict):
-            N = len(list(N_structures.values())[0])  # number of simulations
-            N_structures_ = np.zeros(
-                (N, len(self.mixer.structures)),
-                dtype=np.int32,
+            N_structures = self.mixer.convert_N_structures_to_array(
+                N_structures
             )
-            for i, structure in enumerate(self.mixer.structures):
-                N_structures_[:, i] = N_structures[structure.title]
-            N_structures = N_structures_
 
         proportions = self.mixer.convert_counts_to_props(N_structures)
         center_proportions = self.mixer.convert_counts_to_props(
@@ -3251,7 +3938,9 @@ class SPINNA:
         """
         return sum([_.done() for _ in fs])
 
-    def scores_from_futures(self, fs: list) -> tuple[np.ndarray, np.ndarray]:
+    def scores_from_futures(
+        self, fs: list
+    ) -> tuple[lib.IntArray2D, lib.FloatArray1D]:
         """Convert futures resulting from fitting N_structures with
         multiprocessing.
 
@@ -3262,15 +3951,135 @@ class SPINNA:
 
         Returns
         -------
-        N_structures : np.ndarray
+        N_structures : lib.IntArray2D
             Array where each row specifies each structures count tested.
-        scores : np.ndarray
+        scores : lib.FloatArray1D
             Array with the corresponding fitting scores.
         """
         res_list = [f.result() for f in fs]
         N_structures = np.vstack([res[0] for res in res_list])
         scores = np.concatenate([res[1] for res in res_list])
         return N_structures, scores
+
+
+def _fit_label_unc_for_target(
+    target: str,
+    models: list[list[Structure]],
+    label_unc: dict,
+    label_unc_input_: dict,
+    nn_counts_keys: list,
+    exp_data: dict,
+    granularity: int,
+    le: dict,
+    mask_dict: dict | None,
+    width: float | None,
+    height: float | None,
+    depth: float | None,
+    random_rot_mode,
+    N_sim: int,
+    asynch: bool,
+    savedir: str,
+    callback,
+) -> float:
+    """Find the best-fit label-uncertainty value for a single target.
+
+    If only one candidate value is provided, it is returned immediately.
+    Otherwise each candidate is tested via ``compare_models_given_label_unc``
+    and the value yielding the lowest KS2 score is returned.
+
+    Parameters
+    ----------
+    target : str
+        Name of the molecular target.
+    models : list of lists of Structure
+        Full set of models; only monomers of ``target`` are used.
+    label_unc : dict
+        Current search space – a list of floats per target.
+    label_unc_input_ : dict
+        Starting-point values (first element of each list) for every target.
+    nn_counts_keys : list of str
+        Keys for the nn_counts dict (used to reset counts per trial).
+    ...remaining parameters forwarded to compare_models_given_label_unc.
+
+    Returns
+    -------
+    best_l_unc : float
+        The label-uncertainty value that produced the lowest KS2 score.
+    """
+    l_unc = label_unc[target]
+    if len(l_unc) == 1:
+        return l_unc[0]
+
+    # build models containing only the target's monomers
+    target_models = [
+        [s for s in model if [target] == s.targets] for model in models
+    ]
+
+    # only compare target-to-itself 1st-NN distances
+    nn_counts = {key: 0 for key in nn_counts_keys}
+    nn_counts[f"{target}-{target}"] = 1
+
+    best_score = np.inf
+    best_l_unc = 5.0
+    for l_unc_ in l_unc:
+        progress_title = (
+            f"Spinning with label uncertainty {l_unc_:.2f} nm for {target}"
+        )
+        label_unc_input = deepcopy(label_unc_input_)
+        label_unc_input[target] = l_unc_
+        score = compare_models_given_label_unc(
+            models=target_models,
+            exp_data=exp_data,
+            granularity=granularity,
+            label_unc=label_unc_input,
+            le=le,
+            mask_dict=mask_dict,
+            width=width,
+            height=height,
+            depth=depth,
+            random_rot_mode=random_rot_mode,
+            nn_counts=nn_counts,
+            N_sim=N_sim,
+            asynch=asynch,
+            savedir=savedir,
+            callback=callback,
+            progress_title=progress_title,
+        )[0]
+        if score < best_score:
+            best_score = score
+            best_l_unc = l_unc_
+    return best_l_unc
+
+
+def _compute_nn_counts(
+    targets: list[str],
+    models: list[list[Structure]],
+    nn_counts: dict,
+) -> dict:
+    """Update ``nn_counts`` to the maximum NN count seen across all
+    models and structures for every pair of targets.
+
+    Parameters
+    ----------
+    targets : list of str
+    models : list of lists of Structure
+    nn_counts : dict
+        Updated in-place and returned.
+
+    Returns
+    -------
+    nn_counts : dict
+    """
+    for ii, target1 in enumerate(targets):
+        for target2 in targets[ii:]:
+            key = f"{target1}-{target2}"
+            for model in models:
+                for structure in model:
+                    nn_counts[key] = max(
+                        nn_counts[key],
+                        structure.get_max_nn(target1, target2),
+                    )
+    return nn_counts
 
 
 def compare_models(
@@ -3288,7 +4097,7 @@ def compare_models(
     asynch: bool = True,
     savedir: str = "",
     callback: lib.ProgressDialog | Literal["console"] | None = None,
-) -> tuple[float, int, dict, StructureMixer, np.ndarray]:
+) -> tuple[float, int, dict, StructureMixer, lib.FloatArray1D]:
     """Compare different models, i.e., ``StructureMixer``'s with label
     uncertainties given the experimental dataset and
     stoichiometries-search-space.
@@ -3354,7 +4163,7 @@ def compare_models(
         species.
     best_mixer : StructureMixer
         The best fitting StructureMixer.
-    best_props : np.ndarray
+    best_props : lib.FloatArray1D
         The stoichiometry of structures that gives the best fit to the
         data.
     """
@@ -3378,71 +4187,32 @@ def compare_models(
     # structures that contain the target. The fitting can be skipped if
     # label_unc is already provided without the search space.
     for target in targets:
-        best_score = np.inf
-        best_l_unc = 5.0
-        l_unc = label_unc[target]
-        if len(l_unc) == 1:  # no search space for label uncertainty
-            label_unc[target] = l_unc[0]
-            continue
-
-        # extract the models that contain the target only
-        target_models = []
-        for model in models:
-            target_structures = []
-            for structure in model:
-                if [target] == structure.targets:
-                    target_structures.append(structure)
-            target_models.append(target_structures)
-
-        # specify nn counts to be considered for fitting (only the
-        # target to itself, 1st NN, the rest is ignored)
-        nn_counts = {key: 0 for key in nn_counts.keys()}
-        nn_counts[f"{target}-{target}"] = 1
-
-        # test the range of label uncertainties for the target
-        for l_unc_ in l_unc:
-            progress_title = (
-                f"Spinning with label uncertainty {l_unc_:.2f} nm for {target}"
-            )
-            label_unc_input = deepcopy(label_unc_input_)
-            label_unc_input[target] = l_unc_
-            score = compare_models_given_label_unc(
-                models=target_models,
-                exp_data=exp_data,
-                granularity=granularity,
-                label_unc=label_unc_input,
-                le=le,
-                mask_dict=mask_dict,
-                width=width,
-                height=height,
-                depth=depth,
-                random_rot_mode=random_rot_mode,
-                nn_counts=nn_counts,
-                N_sim=N_sim,
-                asynch=asynch,
-                savedir=savedir,
-                callback=callback,
-                progress_title=progress_title,
-            )[0]
-            if score < best_score:
-                best_score = score
-                best_l_unc = l_unc_
-
-        # save the best fitting label uncertainty for the given target
-        label_unc[target] = best_l_unc
+        label_unc[target] = _fit_label_unc_for_target(
+            target=target,
+            models=models,
+            label_unc=label_unc,
+            label_unc_input_=label_unc_input_,
+            nn_counts_keys=list(nn_counts.keys()),
+            exp_data=exp_data,
+            granularity=granularity,
+            le=le,
+            mask_dict=mask_dict,
+            width=width,
+            height=height,
+            depth=depth,
+            random_rot_mode=random_rot_mode,
+            N_sim=N_sim,
+            asynch=asynch,
+            savedir=savedir,
+            callback=callback,
+        )
 
     # test the models with the best fitting label uncertainties; note
     # that here we'd like to pay the attention to the NNDs that are
     # present in all models, i.e., if a simpler model does not contain
     # a structure with a dimer of a certain species, it should still aim
     # to fit the "dimer" NNDs.
-    for ii, target1 in enumerate(targets):
-        for target2 in targets[ii:]:
-            key = f"{target1}-{target2}"
-            for model in models:
-                for structure in model:
-                    max_nn_count = structure.get_max_nn(target1, target2)
-                    nn_counts[key] = max(nn_counts[key], max_nn_count)
+    nn_counts = _compute_nn_counts(targets, models, nn_counts)
 
     # compare the models
     progress_title = f"Spinning with label uncertainties: {label_unc}"
@@ -3486,7 +4256,7 @@ def compare_models_given_label_unc(
     savedir: str = "",
     callback: lib.ProgressDialog | Literal["console"] | None = None,
     progress_title: str = "Spinning structures",
-) -> tuple[float, int, StructureMixer, np.ndarray]:
+) -> tuple[float, int, StructureMixer, lib.FloatArray1D]:
     """Compare different models, i.e., ``StructureMixer``'s given the
     experimental dataset, stoichiometries-search-space and label
     position uncertainty.
@@ -3558,7 +4328,7 @@ def compare_models_given_label_unc(
         Index of the best fitting model in the models list.
     best_mixer : StructureMixer
         The best fitting StructureMixer.
-    best_props : np.ndarray
+    best_props : lib.FloatArray1D
         The stoichiometry of structures that gives the best fit to the
         data.
     """
@@ -3677,7 +4447,7 @@ def check_structures_valid_for_fitting(structures: list[Structure]) -> bool:
 
 def get_le_from_props(
     structures: list[Structure],
-    opt_props: np.ndarray | tuple[np.ndarray, np.ndarray],
+    opt_props: lib.FloatArray1D | tuple[lib.FloatArray1D, lib.FloatArray1D],
 ) -> dict:
     """Based on the fitted proportions of structures, extract the
     LE values.
@@ -3686,7 +4456,7 @@ def get_le_from_props(
     ----------
     structures : list of Structure
         List of the structures used for fitting.
-    opt_props : np.ndarray or tuple
+    opt_props : lib.FloatArray1D or tuple
         Fitted proportions of the structures. If bootstraping was used,
         the tuple is accepted and only the mean value is used.
 

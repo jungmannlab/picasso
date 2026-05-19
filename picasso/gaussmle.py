@@ -5,8 +5,8 @@ picasso.gaussmle
 Maximum likelihood fits for single particle localization. Based on
 Smith, et al. Nature Methods, 2010.
 
-:authors: Joerg Schnitzbauer, Maximilian Thomas Strauss, 2016-2018
-:copyright: Copyright (c) 2016-2018 Jungmann Lab, MPI of Biochemistry
+:authors: Joerg Schnitzbauer, Maximilian Thomas Strauss
+:copyright: Copyright (c) 2016-2026 Jungmann Lab, MPI of Biochemistry
 """
 
 from __future__ import annotations
@@ -15,16 +15,19 @@ import math
 import multiprocessing
 import threading
 from concurrent import futures
-from typing import Literal
+from typing import Callable, Literal
 
 import numba
 import numpy as np
 import pandas as pd
+from tqdm import tqdm
+
+from picasso import lib
 
 
 @numba.jit(nopython=True, nogil=True)
 def _sum_and_center_of_mass(
-    spot: np.ndarray,
+    spot: lib.FloatArray2D,
     size: int,
 ) -> tuple[float, float, float]:
     """Calculate the sum and center of mass of a 2D spot."""
@@ -42,20 +45,30 @@ def _sum_and_center_of_mass(
 
 
 @numba.jit(nopython=True, nogil=True)
-def mean_filter(spot: np.ndarray, size: int) -> np.ndarray:
+def mean_filter(spot: lib.FloatArray2D, size: int) -> lib.FloatArray2D:
+    """Alias to _mean_filter. Deprecated: TODO: v0.11.0"""
+    print(
+        "mean_filter is deprecated and will become a private function "
+        "in v0.11.0. Use _mean_filter instead."
+    )
+    return _mean_filter(spot, size)
+
+
+@numba.jit(nopython=True, nogil=True)
+def _mean_filter(spot: lib.FloatArray2D, size: int) -> lib.FloatArray2D:
     """Apply a mean filter to the spot. This function computes the mean
     of each pixel in a 3x3 neighborhood.
 
     Parameters
     ----------
-    spot : np.ndarray
+    spot : lib.FloatArray2D
         The input image.
     size : int
         The size of the patch (assumed to be square).
 
     Returns
     -------
-    filtered_spot : np.ndarray
+    filtered_spot : lib.FloatArray2D
         The filtered image patch.
     """
     filtered_spot = np.zeros_like(spot)
@@ -76,7 +89,7 @@ def mean_filter(spot: np.ndarray, size: int) -> np.ndarray:
 
 @numba.jit(nopython=True, nogil=True)
 def _initial_sigmas(
-    spot: np.ndarray,
+    spot: lib.FloatArray2D,
     y: None,
     x: None,
     size: int,
@@ -109,13 +122,13 @@ def _initial_sigmas(
 
 @numba.jit(nopython=True, nogil=True)
 def _initial_parameters(
-    spot: np.ndarray,
+    spot: lib.FloatArray2D,
     size: int,
 ) -> tuple[float, float, float, float, float, float]:
     """Initialize the parameters for the Gaussian fit - x, y, photons,
     background, sigma_x and sigma_y."""
     sum, y, x = _sum_and_center_of_mass(spot, size)
-    bg = np.min(mean_filter(spot, size))
+    bg = np.min(_mean_filter(spot, size))
     photons = sum - size * size * bg
     photons_sane = np.maximum(1.0, photons)
     sy, sx = _initial_sigmas(spot - bg, y, x, size)
@@ -123,7 +136,9 @@ def _initial_parameters(
 
 
 @numba.jit(nopython=True, nogil=True)
-def _initial_theta_sigma(spot: np.ndarray, size: int) -> np.ndarray:
+def _initial_theta_sigma(
+    spot: lib.FloatArray2D, size: int
+) -> lib.FloatArray1D:
     """Initialize the parameters for the Gaussian fit with a single
     sigma for both x and y dimensions - x, y, photons, background,
     sigma."""
@@ -136,7 +151,9 @@ def _initial_theta_sigma(spot: np.ndarray, size: int) -> np.ndarray:
 
 
 @numba.jit(nopython=True, nogil=True)
-def _initial_theta_sigmaxy(spot: np.ndarray, size: int) -> np.ndarray:
+def _initial_theta_sigmaxy(
+    spot: lib.FloatArray2D, size: int
+) -> lib.FloatArray1D:
     """Initialize the parameters for the Gaussian fit with separate
     sigmas for x and y dimensions - x, y, photons, background, sigma_x
     and sigma_y."""
@@ -386,17 +403,22 @@ def _worker(
 
 
 def gaussmle(
-    spots: np.ndarray,
+    spots: lib.FloatArray3D,
     eps: float,
     max_it: int,
     method: Literal["sigma", "sigmaxy"] = "sigmaxy",
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    progress_callback: (
+        Callable[[int], None] | Literal["console"] | None
+    ) = None,
+) -> tuple[
+    lib.FloatArray2D, lib.FloatArray2D, lib.FloatArray1D, lib.IntArray1D
+]:
     """Fits Gaussians using Maximum Likelihood Estimation (MLE) to the
     extracted spots.
 
     Parameters
     ----------
-    spots : np.ndarray
+    spots : lib.FloatArray3D
         The input image patches containing the spots of shape
         (N, size, size), where N is the number of spots and size is the
         size of the square patch.
@@ -406,19 +428,23 @@ def gaussmle(
         The maximum number of iterations for the fitting algorithm.
     method : Literal["sigma", "sigmaxy"]
         The method to use for fitting the Gaussian.
+    progress_callback : callable or None
+        If a callable provided, it must accept one integer input (number
+        of localized spots). If "console", tqdm is used to display
+        progress. If None, progress is not tracked.
 
     Returns
     -------
-    thetas : np.ndarray
+    thetas : lib.FloatArray2D
         The fitted parameters for each spot, shape (N, 6) or (N, 5)
         depending on the method. The columns are x, y, photons,
         background and sigma (or sigmax, sigmay).
-    CRLBs : np.ndarray
+    CRLBs : lib.FloatArray2D
         The Cramer-Rao Lower Bounds for the fitted parameters, shape
         (N, 6) or (N, 5).
-    likelihoods : np.ndarray
+    likelihoods : lib.FloatArray1D
         The log-likelihoods for each fitted spot, shape (N,).
-    iterations : np.ndarray
+    iterations : lib.IntArray1D
         The number of iterations taken to converge for each spot,
         shape (N,).
     """
@@ -433,27 +459,36 @@ def gaussmle(
         func = _mlefit_sigmaxy
     else:
         raise ValueError("Method not available.")
-    for i in range(N):
+    use_tqdm = progress_callback == "console"
+    if use_tqdm:
+        iter_range = tqdm(N, desc="Fitting...", unit="spot")
+    else:
+        iter_range = range(N)
+    for i in iter_range:
         func(spots, i, thetas, CRLBs, likelihoods, iterations, eps, max_it)
+        if callable(progress_callback):
+            progress_callback(i)
     return thetas, CRLBs, likelihoods, iterations
 
 
 def gaussmle_async(
-    spots: np.ndarray,
+    spots: lib.FloatArray3D,
     eps: float,
     max_it: int,
     method: Literal["sigma", "sigmaxy"] = "sigmaxy",
-) -> tuple[list, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+) -> tuple[
+    list, lib.FloatArray2D, lib.FloatArray2D, lib.FloatArray1D, lib.IntArray1D
+]:
     """Runs ``gaussmle`` asynchronously (multiprocessing) to fit
     Gaussians using Maximum Likelihood Estimation (MLE) to the
     extracted spots. See ``gaussmle`` for parameter details.
 
     Returns
     -------
-    current : np.ndarray
-        A single-element array containing the current index of the
+    current : list
+        A single-element list containing the current index of the
         spot being processed.
-    thetas, CRLBs, likelihoods, iterations : np.ndarrays
+    thetas, CRLBs, likelihoods, iterations
         The same as in ``gaussmle``.
     """
     N = len(spots)
@@ -493,12 +528,12 @@ def gaussmle_async(
 
 @numba.jit(nopython=True, nogil=True)
 def _mlefit_sigma(
-    spots: np.ndarray,
+    spots: lib.FloatArray3D,
     index: int,
-    thetas: np.ndarray,
-    CRLBs: np.ndarray,
-    likelihoods: np.ndarray,
-    iterations: np.ndarray,
+    thetas: lib.FloatArray2D,
+    CRLBs: lib.FloatArray2D,
+    likelihoods: lib.FloatArray1D,
+    iterations: lib.IntArray1D,
     eps: float,
     max_it: int,
 ) -> None:
@@ -540,8 +575,8 @@ def _mlefit_sigma(
         numerator[:] = 0.0
         denominator[:] = 0.0
 
-        # At each iteration (theta update) we sum across all pixels in the spot,
-        # see equation 13
+        # At each iteration (theta update) we sum across all pixels in the
+        # spot, see equation 13
         for ii in range(size):
             for jj in range(size):
                 # this is delta E_x
@@ -587,22 +622,7 @@ def _mlefit_sigma(
                     numerator[ll] += cf * dudt[ll]
                     denominator[ll] += cf * d2udt2[ll] - df * dudt[ll] ** 2
 
-        # The theta update
-        for ll in range(n_params):
-            if denominator[ll] == 0.0:
-                update = np.sign(numerator[ll] * max_step[ll])
-            else:
-                update = np.minimum(
-                    np.maximum(numerator[ll] / denominator[ll], -max_step[ll]),
-                    max_step[ll],
-                )
-            theta[ll] -= update
-
-        # Other constraints
-        theta[2] = np.maximum(theta[2], 1.0)
-        theta[3] = np.maximum(theta[3], 0.01)
-        theta[4] = np.maximum(theta[4], 0.01)
-        theta[4] = np.minimum(theta[4], size)
+        _update_theta_sigma(theta, numerator, denominator, max_step, size)
 
         # Check for convergence
         if (np.abs(old_x - theta[0]) < eps) and (
@@ -617,10 +637,56 @@ def _mlefit_sigma(
     thetas[index, 0:5] = theta
     thetas[index, 5] = theta[4]
     iterations[index] = kk
+    _mlefit_sigma_crlb(theta, spot, index, CRLBs, likelihoods)
 
+
+@numba.jit(nopython=True, nogil=True)
+def _update_theta_sigma(
+    theta: lib.FloatArray1D,
+    numerator: lib.FloatArray1D,
+    denominator: lib.FloatArray1D,
+    max_step: lib.FloatArray1D,
+    size: int,
+) -> None:
+    n_params = 5
+    for ll in range(n_params):
+        if denominator[ll] == 0.0:
+            update = np.sign(numerator[ll] * max_step[ll])
+        else:
+            update = np.minimum(
+                np.maximum(numerator[ll] / denominator[ll], -max_step[ll]),
+                max_step[ll],
+            )
+        theta[ll] -= update
+
+    # Other constraints
+    theta[2] = np.maximum(theta[2], 1.0)
+    theta[3] = np.maximum(theta[3], 0.01)
+    theta[4] = np.maximum(theta[4], 0.01)
+    theta[4] = np.minimum(theta[4], size)
+
+
+@numba.jit(nopython=True, nogil=True)
+def _mlefit_sigma_crlb(
+    theta: lib.FloatArray1D,
+    spot: lib.FloatArray2D,
+    index: int,
+    CRLBs: lib.FloatArray2D,
+    likelihoods: lib.FloatArray1D,
+) -> None:
+    """Calculate the Cramer-Rao Lower Bounds (CRLB) for a single spot
+    fitted with a Gaussian with a single sigma for both x and y
+    dimensions. See ``_mlefit_sigma`` for details on the parameters."""
     # Calculating the CRLB and log-likelihood
+    n_params = 5
     log_likelihood = 0.0
-    M = np.zeros((n_params, n_params), dtype=np.float32)  # Fisher matrix
+    dudt = np.zeros(n_params, dtype=np.float32)
+    size, _ = spot.shape
+    # Fisher matrix in float64 — entries span many orders of magnitude
+    # (~photons² for position derivatives down to ~1 for bg), and a
+    # float32 pinv loses near-zero singular values inconsistently across
+    # LAPACK backends, occasionally producing zero/negative diagonals.
+    M = np.zeros((n_params, n_params), dtype=np.float64)
     # Sum over all pixels
     for ii in range(size):
         for jj in range(size):
@@ -674,12 +740,12 @@ def _mlefit_sigma(
 
 @numba.jit(nopython=True, nogil=True)
 def _mlefit_sigmaxy(
-    spots: np.ndarray,
+    spots: lib.FloatArray3D,
     index: int,
-    thetas: np.ndarray,
-    CRLBs: np.ndarray,
-    likelihoods: np.ndarray,
-    iterations: np.ndarray,
+    thetas: lib.FloatArray2D,
+    CRLBs: lib.FloatArray2D,
+    likelihoods: lib.FloatArray1D,
+    iterations: lib.IntArray1D,
     eps: float,
     max_it: int,
 ) -> None:
@@ -723,8 +789,8 @@ def _mlefit_sigmaxy(
         numerator[:] = 0.0
         denominator[:] = 0.0
 
-        # At each iteration (theta update) we sum across all pixels in the spot,
-        # see equation 13
+        # At each iteration (theta update) we sum across all pixels in the
+        # spot, see equation 13
         for ii in range(size):
             for jj in range(size):
                 # delta_Ex and delta_Ey
@@ -768,24 +834,7 @@ def _mlefit_sigmaxy(
                     numerator[ll] += cf * dudt[ll]
                     denominator[ll] += cf * d2udt2[ll] - df * dudt[ll] ** 2
 
-        # The theta update
-        for ll in range(n_params):
-            if denominator[ll] == 0.0:
-                # This is case is not handled in Lidke's code
-                # but it seems to be a problem here
-                # (maybe due to many iterations)
-                theta[ll] -= np.sign(numerator[ll]) * max_step[ll]
-            else:
-                theta[ll] -= np.minimum(
-                    np.maximum(numerator[ll] / denominator[ll], -max_step[ll]),
-                    max_step[ll],
-                )
-
-        # Other constraints
-        theta[2] = np.maximum(theta[2], 1.0)
-        theta[3] = np.maximum(theta[3], 0.01)
-        theta[4] = np.maximum(theta[4], 0.01)
-        theta[5] = np.maximum(theta[5], 0.01)
+        _update_theta_sigmaxy(theta, numerator, denominator, max_step)
 
         # Check for convergence
         if np.abs(old_x - theta[0]) < eps:
@@ -801,10 +850,54 @@ def _mlefit_sigmaxy(
     # Fitting is finished here, we save the results in the output arrays
     thetas[index] = theta
     iterations[index] = kk
+    _mlefit_sigmaxy_crlb(theta, spot, index, CRLBs, likelihoods)
 
+
+@numba.jit(nopython=True, nogil=True)
+def _update_theta_sigmaxy(
+    theta: lib.FloatArray1D,
+    numerator: lib.FloatArray1D,
+    denominator: lib.FloatArray1D,
+    max_step: lib.FloatArray1D,
+) -> None:
+    n_params = 6
+    for ll in range(n_params):
+        if denominator[ll] == 0.0:
+            # This is case is not handled in Lidke's code
+            # but it seems to be a problem here
+            # (maybe due to many iterations)
+            theta[ll] -= np.sign(numerator[ll]) * max_step[ll]
+        else:
+            theta[ll] -= np.minimum(
+                np.maximum(numerator[ll] / denominator[ll], -max_step[ll]),
+                max_step[ll],
+            )
+
+    # Other constraints
+    theta[2] = np.maximum(theta[2], 1.0)
+    theta[3] = np.maximum(theta[3], 0.01)
+    theta[4] = np.maximum(theta[4], 0.01)
+    theta[5] = np.maximum(theta[5], 0.01)
+
+
+@numba.jit(nopython=True, nogil=True)
+def _mlefit_sigmaxy_crlb(
+    theta: lib.FloatArray1D,
+    spot: lib.FloatArray2D,
+    index: int,
+    CRLBs: lib.FloatArray2D,
+    likelihoods: lib.FloatArray1D,
+) -> None:
+    """Calculate the Cramer-Rao Lower Bounds (CRLB) for a single spot
+    fitted with a Gaussian with separate sigmas for x and y dimensions.
+    See ``_mlefit_sigmaxy`` for details on the parameters."""
     # Calculating the CRLB and log-likelihood
+    n_params = 6
     log_likelihood = 0.0
-    M = np.zeros((n_params, n_params), dtype=np.float32)
+    dudt = np.zeros(n_params, dtype=np.float32)
+    size, _ = spot.shape
+    # Fisher matrix in float64 — see note in _mlefit_sigma_crlb.
+    M = np.zeros((n_params, n_params), dtype=np.float64)
     for ii in range(size):
         for jj in range(size):
             PSFx = _gaussian_integral(ii, theta[0], theta[4])
@@ -812,16 +905,16 @@ def _mlefit_sigmaxy(
 
             # Calculating derivatives (only first order is needed for
             # CRLB)
-            dudt[0], d2udt2[0] = _derivative_gaussian_integral(
+            dudt[0], _ = _derivative_gaussian_integral(
                 ii, theta[0], theta[4], theta[2], PSFy
             )
-            dudt[1], d2udt2[1] = _derivative_gaussian_integral(
+            dudt[1], _ = _derivative_gaussian_integral(
                 jj, theta[1], theta[5], theta[2], PSFx
             )
-            dudt[4], d2udt2[4] = _derivative_gaussian_integral_sigma(
+            dudt[4], _ = _derivative_gaussian_integral_sigma(
                 ii, theta[0], theta[4], theta[2], PSFy
             )
-            dudt[5], d2udt2[5] = _derivative_gaussian_integral_sigma(
+            dudt[5], _ = _derivative_gaussian_integral_sigma(
                 jj, theta[1], theta[5], theta[2], PSFx
             )
             dudt[2] = PSFx * PSFy
@@ -859,10 +952,10 @@ def _mlefit_sigmaxy(
 
 def locs_from_fits(
     identifications: pd.DataFrame,
-    theta: np.ndarray,
-    CRLBs: np.ndarray,
-    log_likelihoods: np.ndarray,
-    iterations: np.ndarray,
+    theta: lib.FloatArray2D,
+    CRLBs: lib.FloatArray2D,
+    log_likelihoods: lib.FloatArray1D,
+    iterations: lib.IntArray1D,
     box: int,
 ) -> pd.DataFrame:
     """Convert the results of Gaussian fits into a data frame array
@@ -874,15 +967,15 @@ def locs_from_fits(
         Data frame containing the identifications of the
         spots, which should include 'frame', 'x', 'y' and
         'net_gradient'.
-    theta : np.ndarray
+    theta : lib.FloatArray2D
         The fitted parameters for each spot, shape (N, 6) or (N, 5)
         depending on the method used.
-    CRLBs : np.ndarray
+    CRLBs : lib.FloatArray2D
         The Cramer-Rao Lower Bounds for the fitted parameters, shape
         (N, 6) or (N, 5).
-    likelihoods : np.ndarray
+    likelihoods : lib.FloatArray1D
         The log-likelihoods for each fitted spot, shape (N,).
-    iterations : np.ndarray
+    iterations : lib.IntArray1D
         The number of iterations taken to converge for each spot,
         shape (N,).
     box : int
@@ -941,11 +1034,11 @@ def locs_from_fits(
 
 
 def sigma_uncertainty(
-    sigma: pd.Series | np.ndarray,
-    sigma_orth: pd.Series | np.ndarray,
-    photons: pd.Series | np.ndarray,
-    bg: pd.Series | np.ndarray,
-) -> np.ndarray:
+    sigma: lib.SeriesOrFloatArray1D,
+    sigma_orth: lib.SeriesOrFloatArray1D,
+    photons: lib.SeriesOrFloatArray1D,
+    bg: lib.SeriesOrFloatArray1D,
+) -> lib.FloatArray1D:
     """Calculate standard error of fitted sigma based on the MLE 2D
     Gaussian/Poisson noise model (picasso.gaussmle).
 
@@ -954,19 +1047,19 @@ def sigma_uncertainty(
 
     Parameters
     ----------
-    sigma : pd.Series | np.ndarray
+    sigma : lib.SeriesOrFloatArray1D
         Fitted sigma values in camera pixels.
-    sigma_orth : pd.Series | np.ndarray
+    sigma_orth : lib.SeriesOrFloatArray1D
         Fitted sigma values in the orthogonal direction in camera
         pixels.
-    photons : pd.Series | np.ndarray
+    photons : lib.SeriesOrFloatArray1D
         Number of photons.
-    bg : pd.Series | np.ndarray
+    bg : lib.SeriesOrFloatArray1D
         Background photons per pixel.
 
     Returns
     -------
-    se_sigma : np.ndarray
+    se_sigma : lib.FloatArray1D
         Standard error of fitted sigma values in camera pixels.
     """
     sa2 = sigma**2 + 1 / 12

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "picassosr"
-version = "0.9.10"
+dynamic = ["version"]
 authors = [
     {name = "Joerg Schnitzbauer", email = "joschnitzbauer@gmail.com"},
     {name = "Maximilian T. Strauss", email = "straussmaximilian@gmail.com"},
@@ -14,37 +14,43 @@ maintainers = [{name = "Rafal Kowalewski", email = "rafalkowalewski998@gmail.com
 keywords = ["super-resolution", "DNA-PAINT", "microscopy"]
 description = "Collection of tools for painting super-resolution images"
 readme = "readme.rst"
-requires-python = ">=3.10,<3.11"
+requires-python = ">=3.10,<3.15"
 license = "MIT"
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Science/Research",
     "Programming Language :: Python",
     "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Operating System :: OS Independent",
 ]
 dependencies = [
-    "PyQt5",
-    "numpy==2.2.6",
-    "matplotlib==3.10.7",
-    "h5py==3.15.1",
-    "numba==0.62.1",
-    "scipy==1.15.3",
-    "pandas==2.3.3",
-    "tables==3.10.1",
-    "pyyaml==6.0.3",
-    "scikit-learn==1.7.2",
-    "tqdm==4.67.1",
-    "streamlit==1.50.0",
-    "nd2==0.10.4",
-    "sqlalchemy==2.0.44",
-    "plotly-express==0.4.1",
-    "watchdog==6.0.0",
-    "psutil==7.1.1",
-    "playsound3==3.2.8",
-    "imageio==2.37.0",
-    "imageio-ffmpeg==0.6.0",
-    "PyImarisWriter==0.7.0; sys_platform=='win32'"
+    "PyQt6>=6.10.2,<7",  # prevent backward incompatible changes
+    "numpy>=2.2.6,<3",
+    "matplotlib>=3.10.7,<4",
+    "h5py>=3.15.1,<4",
+    "numba>=0.62.1,<1",
+    "scipy>=1.15.3,<2",
+    "pandas>=2.3.3,<3",
+    "tables>=3.10.1,<4",
+    "pyyaml>=6.0.3,<7",
+    "scikit-learn>=1.5.0,<1.8",  # HDBSCAN with cluster_selection_epsilon > 0
+    "tqdm>=4.67.1,<5",
+    "streamlit>=1.50.0,<2",
+    "nd2>=0.10.4,<1",
+    "sqlalchemy>=2.0.44,<3",
+    "plotly-express>=0.4.1,<1",
+    "watchdog>=6.0.0,<7",
+    "psutil>=7.1.1,<8",
+    "playsound3>=3.2.8,<4",
+    "imageio>=2.37.0,<3",
+    "imageio-ffmpeg>=0.6.0,<1",
+    "tifffile>=2024.7.24,<2027",
+    "PyImarisWriter==0.7.0; sys_platform=='win32'",
+    "hdf5plugin; sys.platform=='win32'"
 ]
 
 [project.optional-dependencies]
@@ -53,17 +59,45 @@ dev = [
     "black",
     "pre-commit",
     "twine",
-    "bumpversion"
+]
+installer = [
+    "PyQt6==6.11.0",
+    "numpy==2.4.4",
+    "matplotlib==3.10.8",
+    "h5py==3.16.0",
+    "numba==0.65.0",
+    "scipy==1.17.1",
+    "pandas==2.3.3",
+    "tables==3.11.1",
+    "pyyaml==6.0.3",
+    "scikit-learn==1.7.2",
+    "tqdm==4.67.3",
+    "streamlit==1.56.0",
+    "nd2==0.11.3",
+    "sqlalchemy==2.0.49",
+    "plotly-express==0.4.1",
+    "watchdog==6.0.0",
+    "psutil==7.2.2",
+    "playsound3==3.3.1",
+    "imageio==2.37.3",
+    "imageio-ffmpeg==0.6.0",
+    "tifffile==2026.4.11",
+    "pyinstaller==6.19.0",
+    "PyImarisWriter==0.7.0; sys_platform=='win32'",
+    "hdf5plugin==6.0.0; sys_platform=='win32'"
 ]
 
 [project.urls]
 Homepage = "https://github.com/jungmannlab/picasso"
 Documentation = "https://picassosr.readthedocs.io/en/latest/index.html"
-Changelog = "https://github.com/jungmannlab/picasso/blob/master/changelog.rst"
+Changelog = "https://github.com/jungmannlab/picasso/blob/master/changelog.md"
 Publications = "https://doi.org/10.1038/nprot.2017.024"
 
 [project.scripts]
 picasso = "picasso.__main__:main"
+
+[tool.setuptools.dynamic]
+version = {attr = "picasso.version.__version__"}
 
 [tool.setuptools.packages.find]
 include = ["picasso*"]
@@ -75,6 +109,13 @@ picasso = [
     "gui/notification_sounds/*.mp3",
     "gui/notification_sounds/*.wav",
     "config_template.yaml",
+    "ext/pygpufit/Gpufit.dll",
+    "ext/pygpufit/LICENSE.txt",
+]
+
+[tool.pytest.ini_options]
+markers = [
+    "slow: long-running tests (multiprocessing, Bayesian fits, compare_models)",
 ]
 
 [tool.black]
