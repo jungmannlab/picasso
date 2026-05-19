@@ -336,7 +336,15 @@ def test_find_cluster_centers_2d(synth_locs_2d):
     db_locs = _run_dbscan_2d(synth_locs_2d)
     centers = clusterer.find_cluster_centers(db_locs)
 
-    expected_cols = {"x", "y", "area", "convexhull", "n", "n_events", "group"}
+    expected_cols = {
+        "x",
+        "y",
+        "area",
+        "convexhull",
+        "n_locs",
+        "n_events",
+        "group",
+    }
     assert expected_cols.issubset(centers.columns)
     assert "z" not in centers.columns
     assert "volume" not in centers.columns
