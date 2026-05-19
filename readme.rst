@@ -41,7 +41,7 @@ To see all changes introduced across releases, see `the changelog <https://githu
 
 Picasso 0.10
 ------------
-In this version, a lot of new architectural (behind the scenes) changes were introduced to make Picasso more modular, maintainable and accessible to both developers and end-users. The adaptations include flexible dependencies and Python versions, integration of GPUfit and many more. You can explore these improvements in the `changelog <https://github.com/jungmannlab/picasso/blob/master/changelog.md>`_.
+In this version, a lot of new architectural (behind the scenes) changes were introduced to make Picasso more modular, maintainable and accessible to both developers and end-users. The adaptations include flexible dependencies and Python versions, integration of GPUfit, faster SPINNA and **many** more. You can explore these improvements in the `changelog <https://github.com/jungmannlab/picasso/blob/master/changelog.md>`_.
 
 Installation
 ------------
