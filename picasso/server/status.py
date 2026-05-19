@@ -26,7 +26,7 @@ def escape_markdown(text: str) -> str:
     return text
 
 
-def status():
+def status():  # noqa: C901
     """
     Streamlit page to show the status page.
     """

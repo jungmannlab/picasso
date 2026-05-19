@@ -10,12 +10,25 @@ Picasso
 
 .. image:: http://img.shields.io/badge/DOI-10.1038/nprot.2017.024-52c92e.svg
    :target: https://doi.org/10.1038/nprot.2017.024
-   :alt: CI
+   :alt: DOI
 
 .. image:: https://static.pepy.tech/personalized-badge/picassosr?period=total&units=international_system&left_color=black&right_color=brightgreen&left_text=Downloads
- :target: https://pepy.tech/project/picassosr
+   :target: https://pepy.tech/project/picassosr
+   :alt: Downloads
 
-.. image:: main_render.png
+.. image:: https://img.shields.io/pypi/pyversions/picassosr
+   :target: https://pypi.org/project/picassosr/
+   :alt: Python versions
+
+.. image:: https://img.shields.io/pypi/v/picassosr
+   :target: https://pypi.org/project/picassosr/
+   :alt: PyPI version
+
+.. image:: https://img.shields.io/badge/Changelog-View-blue
+   :target: https://github.com/jungmannlab/picasso/blob/master/changelog.md
+   :alt: Changelog
+
+.. image:: https://raw.githubusercontent.com/jungmannlab/picasso/master/main_render.png
    :width: 750
    :height: 564
    :alt: UML Render view
@@ -24,34 +37,25 @@ Collection of tools for painting super-resolution images. The Picasso software i
 
 A comprehensive documentation can be found here: `Read the Docs <https://picassosr.readthedocs.io/en/latest/?badge=latest>`__.
 
-Picasso 0.9.5
----------------
-In this version, a new algorithm for molecular mapping (G5M) was introduced. Additionally, axial localization precision for astigmatic 3D imaging is now calculated and saved when using Picasso Localize. DOI: `10.1038/s41467-026-70198-5 <https://doi.org/10.1038/s41467-026-70198-5>`__.
+To see all changes introduced across releases, see `the changelog <https://github.com/jungmannlab/picasso/blob/master/changelog.md>`_.
 
-Picasso 0.9
------------
-In this version, localizations (and other ``.hdf5`` files) are read using ``pandas.read_hdf`` rather than converting an ``h5py.File`` object to a numpy recarray. Thus, rather than ``numpy.recarray``, localizations are now ``pandas.DataFrame`` objects. **This change may cause backward compatibility issues if you are using Picasso as a package (downloaded from PyPI).**
-
-Changelog
----------
-To see all changes introduced across releases, see `here <https://github.com/jungmannlab/picasso/blob/master/changelog.rst>`_.
+Picasso 0.10
+------------
+In this version, a lot of new architectural (behind the scenes) changes were introduced to make Picasso more modular, maintainable and accessible to both developers and end-users. The adaptations include flexible dependencies and Python versions, integration of GPUfit, faster SPINNA and **many** more. You can explore these improvements in the `changelog <https://github.com/jungmannlab/picasso/blob/master/changelog.md>`_.
 
 Installation
 ------------
 
-Check out the `Picasso release page <https://github.com/jungmannlab/picasso/releases/>`__ to download and run the latest compiled one-click installer for Windows. Here you will also find the Nature Protocols legacy version. 
+Check out the `Picasso release page <https://github.com/jungmannlab/picasso/releases/>`__ to download and run the latest compiled one-click installer for Windows or MacOS (the latter is experimental and feedback is welcome). Here you will also find the Nature Protocols legacy version (v0.1.0).
 
-For the platform-independent usage of Picasso (e.g., with Linux and Mac Os X), please follow the advanced installation instructions below.
+Python is also distributed as a PyPI package that is platform-independent (``pip install picassosr``) which grants not only GUI but also access to Picasso’s internal routines in custom Python programs. For more details, see the "Via PyPI" section below. For examples of how to use Picasso in Python scripts, see the section "Example Usage" below.
 
-Other installation modes (Python 3.10)
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-As an alternative to the stand-alone program for end-users, Picasso can be installed as a Python package. This is the preferred option to use Picasso’s internal routines in custom Python programs. Those can be imported by running, for example, ``from picasso import io`` (see the "Example usage" tab below) to use input/output functions from Picasso. For windows, it is still possible to use Picasso as an end-user by creating the respective shortcuts. This allows Picasso to be used on the same system by both programmers and end-users.
+Note: Since v0.10.0 Picasso is more flexible in terms of dependencies and Python versions. Previously only Python 3.10 was supported, now newer versions are encouraged.
 
 Via PyPI
 ^^^^^^^^
 
-1. Open the console/terminal and create a new conda environment: ``conda create --name picasso python=3.10``
+1. Open the console/terminal and create a new conda environment: ``conda create --name picasso python=3.14``. Note you can use other Python versions as well.
 2. Activate the environment: ``conda activate picasso``.
 3. Install Picasso package using: ``pip install picassosr``.
 4. You can now run any Picasso function directly from the console/terminal by running: ``picasso render``, ``picasso localize``, etc, or import Picasso functions in your own Python scripts.
@@ -61,23 +65,14 @@ For Developers (local, editable installation)
 
 If you wish to use your local version of Picasso with your own modifications:
 
-1. Open the console/terminal and create a new conda environment: ``conda create --name picasso python=3.10``
+1. Open the console/terminal and create a new conda environment: ``conda create --name picasso python=3.14``. Note you can use other Python versions as well.
 2. Activate the environment: ``conda activate picasso``.
 3. Change to the directory of choice using ``cd``.
 4. Clone this GitHub repository by running ``git clone https://github.com/jungmannlab/picasso``. Alternatively, `download <https://github.com/jungmannlab/picasso/archive/master.zip>`__ the zip file and unzip it.
 5. Open the Picasso directory: ``cd picasso``.
 6. You can modify Picasso code in this directory.
 7. To create a *local* Picasso package to use it in other Python scripts, run ``pip install -e ".[dev]"``. When you change the code in the ``picasso`` directory, the changes will be reflected in the package.
-8. You can now run any Picasso function directly from the console/terminal by running: ``picasso render``, ``picasso localize``, etc, or import Picasso functions in your own Python scripts.
-
-Optional packages
-^^^^^^^^^^^^^^^^^
-
-Regardless of whether Picasso was installed via PyPI or by cloning the GitHub repository, some packages may be additionally installed to allow extra functionality:
-
-- ``pip install pyinstaller`` if you plan to additionally compile your own installer with `Pyinstaller <https://pyinstaller.org/en/stable/>`__.
-- *(Windows only)* ``pip install PyImarisWriter==0.7.0`` to enable .ims files in Localize and Render. Note that ``PyImarisWriter`` has been tested only on Windows.
-- *(Windows only)* To enable GPU least-squares fitting in Localize, follow instructions on `Gpufit <https://github.com/gpufit/Gpufit>`__ to install the Gpufit python library in your conda environment. In practice, this means downloading the zipfile from the `release page <https://github.com/gpufit/Gpufit/releases>`__ (non-cublas version, i.e., the lighter file) and installing the Python wheel (see instructions in the zipfile). Picasso Localize will automatically import the library if present and enables a checkbox for GPU fitting when selecting the LQ-Method.
+8. You can now run any Picasso module directly from the console/terminal by running: ``picasso render``, ``picasso localize``, etc, or import Picasso functions in your own Python scripts.
 
 Updating
 ^^^^^^^^
@@ -102,7 +97,7 @@ Besides using the GUI, you can use picasso like any other Python module. Conside
   path = 'testdata_locs.hdf5'
   locs, info = io.load_locs(path)
   
-  # Link localizations and calcualte dark times
+  # Link localizations and calculate dark times
   linked_locs = postprocess.link(picked_locs, info, r_max=0.05, max_dark_time=1)
   linked_locs_dark = postprocess.compute_dark_times(linked_locs)
 
@@ -116,12 +111,18 @@ Contributing
 
 If you have a feature request or a bug report, please post it as an issue on the GitHub issue tracker. If you want to contribute, put a PR for it. You can find more guidelines for contributing `here <https://github.com/jungmannlab/picasso/blob/master/CONTRIBUTING.rst>`__. We will gladly guide you through the codebase and credit you accordingly. Additionally, you can check out the ``Projects``-page on GitHub.  You can also contact us via picasso@jungmannlab.org.
 
+.. SYNC-START: contributions
+
 Contributions & Copyright
 -------------------------
 
 | Contributors: Joerg Schnitzbauer, Maximilian Strauss, Rafal Kowalewski, Adrian Przybylski, Andrey Aristov, Hiroshi Sasaki, Alexander Auer, Johanna Rahm
 | Copyright (c) 2015-2025 Jungmann Lab, Max Planck Institute of Biochemistry
 | Copyright (c) 2020-2021 Maximilian Strauss
+
+.. SYNC-END: contributions
+
+.. SYNC-START: citing
 
 Citing Picasso
 --------------
@@ -139,7 +140,8 @@ If you use Picasso in your research, please cite our Nature Protocols publicatio
 - Theoretical lateral localization precision (Gauss LQ). DOI: `10.1038/nmeth.1447 <https://doi.org/10.1038/nmeth.1447>`__
 - Theoretical axial localization precision (Gauss LQ and MLE). DOI: `10.1038/s41467-026-70198-5 <https://doi.org/10.1038/s41467-026-70198-5>`__
 - MLE fitting. DOI: `10.1038/nmeth.1449 <https://doi.org/10.1038/nmeth.1449>`__
-- RCC undrifting: DOI: `10.1364/OE.22.015982 <https://doi.org/10.1364/OE.22.015982>`__ 
+- GPU fitting (LQ). DOI: `10.1038/s41598-017-15313-9 <https://doi.org/10.1038/s41598-017-15313-9>`__. License can be found `here <https://github.com/jungmannlab/picasso/tree/master/picasso/ext/pygpufit>`__/
+- RCC undrifting: DOI: `10.1364/OE.22.015982 <https://doi.org/10.1364/OE.22.015982>`__
 - AIM undrifting. DOI: `10.1126/sciadv.adm776 <https://www.science.org/doi/10.1126/sciadv.adm7765>`__
 - SMLM clusterer. DOIs: `10.1038/s41467-021-22606-1 <https://doi.org/10.1038/s41467-021-22606-1>`__ and `10.1038/s41586-023-05925-9 <https://doi.org/10.1038/s41586-023-05925-9>`__
 - DBSCAN: Ester, et al. Inkdd, 1996. (Vol. 96, No. 34, pp. 226-231).
@@ -150,6 +152,10 @@ If you use Picasso in your research, please cite our Nature Protocols publicatio
 - SPINNA. DOI: `10.1038/s41467-025-59500-z <https://doi.org/10.1038/s41467-025-59500-z>`__
 - SPINNA for LE fitting. DOI: `10.1038/s41592-024-02242-5 <https://doi.org/10.1038/s41592-024-02242-5>`__
 - G5M. DOI: `10.1038/s41467-026-70198-5 <https://doi.org/10.1038/s41467-026-70198-5>`__
+
+.. SYNC-END: citing
+
+.. SYNC-START: credits
 
 Credits
 -------
@@ -162,3 +168,5 @@ Credits
 -  Average icon based on “Layers" by Creative Stall from the Noun Project
 -  Server icon based on “Database" by Nimal Raj from the Noun Project
 -  SPINNA icon based on "Spinner" by Viktor Ostrovsky from the Noun Project
+
+.. SYNC-END: credits
