@@ -21,7 +21,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import imageio.v2 as imageio
-from scipy import signal
+from scipy import signal, ndimage
 from scipy.spatial.transform import Rotation
 from tqdm import tqdm
 from PyQt6 import QtGui, QtCore, QtSvg
@@ -489,7 +489,88 @@ def _fill3d(
         image[j, i, k] += 1
 
 
-@numba.njit
+_PER_THREAD_BUFFER_BUDGET_BYTES = 256 * 1024 * 1024
+
+
+def _n_threads_for_buffers(
+    n_pixel_y: int, n_pixel_x: int, itemsize: int, n_locs: int
+) -> int:
+    """Decide how many threads to use for per-thread image accumulators.
+
+    Bounded by the available Numba threads, a memory budget on the
+    per-thread image stack, and the number of localizations."""
+    bytes_per_buffer = n_pixel_y * n_pixel_x * itemsize
+    if bytes_per_buffer <= 0:
+        return 1
+    max_by_budget = max(1, _PER_THREAD_BUFFER_BUDGET_BYTES // bytes_per_buffer)
+    return int(min(numba.get_num_threads(), max_by_budget, max(1, n_locs)))
+
+
+@numba.njit(parallel=True, cache=True)
+def _fill_gaussian_kernel(
+    buffers: lib.FloatArray3D,
+    x: lib.FloatArray1D,
+    y: lib.FloatArray1D,
+    sx: lib.FloatArray1D,
+    sy: lib.FloatArray1D,
+    n_pixel_x: int,
+    n_pixel_y: int,
+    n_threads: int,
+) -> None:
+    """Parallel separable-Gaussian accumulator. Each prange iteration
+    processes a contiguous slice of localizations into its own image
+    buffer ``buffers[t]`` (race-free)."""
+    n_locs = len(x)
+    chunk = (n_locs + n_threads - 1) // n_threads
+    for t in numba.prange(n_threads):
+        start = t * chunk
+        end = start + chunk
+        if end > n_locs:
+            end = n_locs
+        buf = buffers[t]
+        for k in range(start, end):
+            x_ = x[k]
+            y_ = y[k]
+            sx_ = sx[k]
+            sy_ = sy[k]
+            max_y_off = _DRAW_MAX_SIGMA * sy_
+            i_min = np.int32(y_ - max_y_off)
+            if i_min < 0:
+                i_min = 0
+            i_max = np.int32(y_ + max_y_off + 1)
+            if i_max > n_pixel_y:
+                i_max = n_pixel_y
+            max_x_off = _DRAW_MAX_SIGMA * sx_
+            j_min = np.int32(x_ - max_x_off)
+            if j_min < 0:
+                j_min = 0
+            j_max = np.int32(x_ + max_x_off) + 1
+            if j_max > n_pixel_x:
+                j_max = n_pixel_x
+            nx = j_max - j_min
+            ny = i_max - i_min
+            if nx <= 0 or ny <= 0:
+                continue
+            inv_2sx2 = 1.0 / (2.0 * sx_ * sx_)
+            inv_2sy2 = 1.0 / (2.0 * sy_ * sy_)
+            norm = 1.0 / (2.0 * np.pi * sx_ * sy_)
+            # Separable kernel: factor exp(-(dx^2/(2sx^2) + dy^2/(2sy^2)))
+            # into 1D gx * 1D gy. O(K) exp calls per loc instead of O(K^2).
+            gx = np.empty(nx, dtype=np.float32)
+            gy = np.empty(ny, dtype=np.float32)
+            for jj in range(nx):
+                dx = (j_min + jj) + 0.5 - x_
+                gx[jj] = np.exp(-dx * dx * inv_2sx2)
+            for ii in range(ny):
+                dy = (i_min + ii) + 0.5 - y_
+                gy[ii] = norm * np.exp(-dy * dy * inv_2sy2)
+            for ii in range(ny):
+                gy_i = gy[ii]
+                row = buf[i_min + ii]
+                for jj in range(nx):
+                    row[j_min + jj] += gy_i * gx[jj]
+
+
 def _fill_gaussian(
     image: lib.FloatArray2D,
     x: lib.FloatArray1D,
@@ -514,37 +595,107 @@ def _fill_gaussian(
     n_pixel_x, n_pixel_y : int
         Number of pixels in x and y.
     """
-    # render each localization separately
-    for x_, y_, sx_, sy_ in zip(x, y, sx, sy):
+    n_locs = len(x)
+    if n_locs == 0:
+        return
+    n_threads = _n_threads_for_buffers(
+        n_pixel_y, n_pixel_x, image.dtype.itemsize, n_locs
+    )
+    if n_threads <= 1:
+        # Single-thread path: write directly into image to skip the
+        # buffer-stack allocation and reduction.
+        _fill_gaussian_kernel(
+            image.reshape(1, n_pixel_y, n_pixel_x),
+            x,
+            y,
+            sx,
+            sy,
+            n_pixel_x,
+            n_pixel_y,
+            1,
+        )
+        return
+    buffers = np.zeros((n_threads, n_pixel_y, n_pixel_x), dtype=image.dtype)
+    _fill_gaussian_kernel(
+        buffers, x, y, sx, sy, n_pixel_x, n_pixel_y, n_threads
+    )
+    image += buffers.sum(axis=0)
 
-        # get min and max indeces to draw the given localization
-        max_y = _DRAW_MAX_SIGMA * sy_
-        i_min = np.int32(y_ - max_y)
-        if i_min < 0:
-            i_min = 0
-        i_max = np.int32(y_ + max_y + 1)
-        if i_max > n_pixel_y:
-            i_max = n_pixel_y
-        max_x = _DRAW_MAX_SIGMA * sx_
-        j_min = np.int32(x_ - max_x)
-        if j_min < 0:
-            j_min = 0
-        j_max = np.int32(x_ + max_x) + 1
-        if j_max > n_pixel_x:
-            j_max = n_pixel_x
 
-        # draw a localization as a 2D guassian PDF
-        for i in range(i_min, i_max):
-            for j in range(j_min, j_max):
-                image[i, j] += np.exp(
-                    -(
-                        (j - x_ + 0.5) ** 2 / (2 * sx_**2)
-                        + (i - y_ + 0.5) ** 2 / (2 * sy_**2)
+@numba.njit(parallel=True, cache=True)
+def _fill_gaussian_rot_kernel(
+    buffers: lib.FloatArray3D,
+    x: lib.FloatArray1D,
+    y: lib.FloatArray1D,
+    z: lib.FloatArray1D,
+    sx: lib.FloatArray1D,
+    sy: lib.FloatArray1D,
+    sz: lib.FloatArray1D,
+    n_pixel_x: int,
+    n_pixel_y: int,
+    rot_matrix: lib.Array3x3,
+    rot_matrixT: lib.Array3x3,
+    n_threads: int,
+) -> None:
+    """Parallel rotated-Gaussian accumulator. Per-thread image buffers
+    in ``buffers[t]`` are race-free across prange iterations."""
+    n_locs = len(x)
+    chunk = (n_locs + n_threads - 1) // n_threads
+    for t in numba.prange(n_threads):
+        start = t * chunk
+        end = start + chunk
+        if end > n_locs:
+            end = n_locs
+        buf = buffers[t]
+        for k in range(start, end):
+            x_ = x[k]
+            y_ = y[k]
+            sx_ = sx[k]
+            sy_ = sy[k]
+            sz_ = sz[k]
+            cov = np.zeros((3, 3), dtype=np.float32)
+            cov[0, 0] = sx_ * sx_
+            cov[1, 1] = sy_ * sy_
+            cov[2, 2] = sz_ * sz_
+            cov_rot = rot_matrix @ cov @ rot_matrixT
+            s00 = cov_rot[0, 0]
+            s01 = cov_rot[0, 1]
+            s10 = cov_rot[1, 0]
+            s11 = cov_rot[1, 1]
+            det2d = s00 * s11 - s01 * s10
+            if det2d < 1e-10:
+                continue
+            inv00 = s11 / det2d
+            inv01 = -s01 / det2d
+            inv10 = -s10 / det2d
+            inv11 = s00 / det2d
+            norm = 1.0 / (2.0 * np.pi * np.sqrt(det2d))
+            eff_sx = np.sqrt(s00)
+            eff_sy = np.sqrt(s11)
+            max_x_off = _DRAW_MAX_SIGMA * 2.5 * eff_sx
+            max_y_off = _DRAW_MAX_SIGMA * 2.5 * eff_sy
+            j_min = int(x_ - max_x_off)
+            if j_min < 0:
+                j_min = 0
+            j_max = int(x_ + max_x_off + 1)
+            if j_max > n_pixel_x:
+                j_max = n_pixel_x
+            i_min = int(y_ - max_y_off)
+            if i_min < 0:
+                i_min = 0
+            i_max = int(y_ + max_y_off + 1)
+            if i_max > n_pixel_y:
+                i_max = n_pixel_y
+            for i in range(i_min, i_max):
+                b = np.float32(i + 0.5 - y_)
+                for j in range(j_min, j_max):
+                    a = np.float32(j + 0.5 - x_)
+                    exponent = (
+                        a * a * inv00 + a * b * (inv01 + inv10) + b * b * inv11
                     )
-                ) / (2 * np.pi * sx_ * sy_)
+                    buf[i, j] += norm * np.exp(-0.5 * exponent)
 
 
-@numba.njit
 def _fill_gaussian_rot(
     image: lib.FloatArray2D,
     x: lib.FloatArray1D,
@@ -575,8 +726,10 @@ def _fill_gaussian_rot(
     ang : tuple
         Rotation angles of locs around x, y and z axes (radians).
     """
-    (angx, angy, angz) = ang
-
+    n_locs = len(x)
+    if n_locs == 0:
+        return
+    angx, angy, angz = ang
     rot_mat_x = np.array(
         [
             [1.0, 0.0, 0.0],
@@ -601,67 +754,44 @@ def _fill_gaussian_rot(
         ],
         dtype=np.float32,
     )
-    rot_matrix = rot_mat_x @ rot_mat_y @ rot_mat_z
-    rot_matrixT = np.transpose(rot_matrix)
+    rot_matrix = (rot_mat_x @ rot_mat_y @ rot_mat_z).astype(np.float32)
+    rot_matrixT = np.ascontiguousarray(rot_matrix.T)
 
-    for x_, y_, z_, sx_, sy_, sz_ in zip(x, y, z, sx, sy, sz):
-
-        # rotated 3D covariance
-        cov = np.array(
-            [
-                [sx_**2, 0.0, 0.0],
-                [0.0, sy_**2, 0.0],
-                [0.0, 0.0, sz_**2],
-            ],
-            dtype=np.float32,
+    n_threads = _n_threads_for_buffers(
+        n_pixel_y, n_pixel_x, image.dtype.itemsize, n_locs
+    )
+    if n_threads <= 1:
+        _fill_gaussian_rot_kernel(
+            image.reshape(1, n_pixel_y, n_pixel_x),
+            x,
+            y,
+            z,
+            sx,
+            sy,
+            sz,
+            n_pixel_x,
+            n_pixel_y,
+            rot_matrix,
+            rot_matrixT,
+            1,
         )
-        cov_rot = rot_matrix @ cov @ rot_matrixT
-
-        # we only need the top-left 2x2 part for rendering
-        s00 = cov_rot[0, 0]  # var_x
-        s01 = cov_rot[0, 1]  # cov_xy
-        s10 = cov_rot[1, 0]  # cov_yx (= s01)
-        s11 = cov_rot[1, 1]  # var_y
-
-        # inverse of 2x2 matrix
-        det2d = s00 * s11 - s01 * s10
-        if det2d < 1e-10:
-            continue
-        inv00 = s11 / det2d
-        inv01 = -s01 / det2d
-        inv10 = -s10 / det2d
-        inv11 = s00 / det2d
-
-        norm = 1.0 / (2.0 * np.pi * np.sqrt(det2d))
-
-        # use the larger effective sigma for draw bounds
-        eff_sx = np.sqrt(s00)
-        eff_sy = np.sqrt(s11)
-        max_x = _DRAW_MAX_SIGMA * 2.5 * eff_sx
-        max_y = _DRAW_MAX_SIGMA * 2.5 * eff_sy
-
-        j_min = int(x_ - max_x)
-        if j_min < 0:
-            j_min = 0
-        j_max = int(x_ + max_x + 1)
-        if j_max > n_pixel_x:
-            j_max = n_pixel_x
-        i_min = int(y_ - max_y)
-        if i_min < 0:
-            i_min = 0
-        i_max = int(y_ + max_y + 1)
-        if i_max > n_pixel_y:
-            i_max = n_pixel_y
-
-        # 2D Gaussian (no z-loop!)
-        for i in range(i_min, i_max):
-            b = np.float32(i + 0.5 - y_)
-            for j in range(j_min, j_max):
-                a = np.float32(j + 0.5 - x_)
-                exponent = (
-                    a * a * inv00 + a * b * (inv01 + inv10) + b * b * inv11
-                )
-                image[i, j] += norm * np.exp(-0.5 * exponent)
+        return
+    buffers = np.zeros((n_threads, n_pixel_y, n_pixel_x), dtype=image.dtype)
+    _fill_gaussian_rot_kernel(
+        buffers,
+        x,
+        y,
+        z,
+        sx,
+        sy,
+        sz,
+        n_pixel_x,
+        n_pixel_y,
+        rot_matrix,
+        rot_matrixT,
+        n_threads,
+    )
+    image += buffers.sum(axis=0)
 
 
 @numba.njit
@@ -1386,7 +1516,8 @@ def _fftconvolve(
     blur_width: float,
     blur_height: float,
 ) -> lib.FloatArray2D:
-    """Blur (convolves) 2D image using fast fourier transform.
+    """Blur (convolves) 2D image using fast fourier transform or with
+    Gaussian filter applied (faster for small kernels).
 
     Parameters
     ----------
@@ -1402,6 +1533,26 @@ def _fftconvolve(
     """
     kernel_width = 10 * int(np.round(blur_width)) + 1
     kernel_height = 10 * int(np.round(blur_height)) + 1
+    # Spatial separable convolution is faster than FFT for the small
+    # kernels typical of SMLM precisions (~1-3 px). Switch to FFT only
+    # when the kernel is large relative to the image.
+    n_y, n_x = image.shape
+    spatial = (
+        kernel_height < 0.05 * n_y
+        and kernel_width < 0.05 * n_x
+        and max(kernel_height, kernel_width) <= 101
+    )
+    if spatial:
+        out = np.empty_like(image, dtype=np.float32)
+        ndimage.gaussian_filter(
+            image,
+            sigma=(blur_height, blur_width),
+            output=out,
+            mode="constant",
+            cval=0.0,
+            truncate=5.0,
+        )
+        return out
     kernel_y = signal.windows.gaussian(kernel_height, blur_height)
     kernel_x = signal.windows.gaussian(kernel_width, blur_width)
     kernel = np.outer(kernel_y, kernel_x)
@@ -2767,16 +2918,13 @@ def _render_multi_channel(
     )
 
     # color the images
-    Y, X = images.shape[1:]
-    rgb = np.zeros((Y, X, 3), dtype=np.float32)  # float for now
     if colors is None:  # fallback if the user did not specify colors
         colors = lib.get_colors(len(images))
-    for color, image in zip(colors, images):
-        for i in range(3):
-            rgb[:, :, i] += color[i] * image
-    rgb = np.minimum(
-        rgb, 1.0
-    )  # clip to max value of 1 (preserves relative brightness)
+    colors_arr = np.asarray(colors, dtype=np.float32)
+    images_f32 = np.ascontiguousarray(images, dtype=np.float32)
+    rgb = np.tensordot(images_f32, colors_arr, axes=([0], [0]))
+    # clip to max value of 1 (preserves relative brightness)
+    np.minimum(rgb, 1.0, out=rgb)
     rgb = to_8bit(rgb)
     if invert_colors:
         rgb = 255 - rgb

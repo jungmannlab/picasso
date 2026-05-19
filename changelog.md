@@ -1,6 +1,9 @@
 # Changelog
 
-Last change: 19-MAY-2026 CEST
+Last change: 20-MAY-2026 CEST
+
+## 0.10.1
+- Faster rendering, especially in large FOV: ind. loc. precision blurring parallelized + smarter implementation for 2D rendering; some extra general improvements
 
 ## 0.10.0
 
