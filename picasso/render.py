@@ -727,8 +727,8 @@ def _fill_gaussian_rot_kernel(
             norm = 1.0 / (2.0 * np.pi * np.sqrt(det2d))
             eff_sx = np.sqrt(s00)
             eff_sy = np.sqrt(s11)
-            max_x_off = _DRAW_MAX_SIGMA * 2.5 * eff_sx
-            max_y_off = _DRAW_MAX_SIGMA * 2.5 * eff_sy
+            max_x_off = _DRAW_MAX_SIGMA * eff_sx
+            max_y_off = _DRAW_MAX_SIGMA * eff_sy
             j_min = int(x_ - max_x_off)
             if j_min < 0:
                 j_min = 0

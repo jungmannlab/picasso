@@ -7,6 +7,7 @@ picasso.masking.
 
 import sys
 
+import numba
 import numpy as np
 import pandas as pd
 import pytest
@@ -79,6 +80,14 @@ def locs_3d(locs):
 def image(locs, info):
     """Rendered image used by masking tests."""
     return render.render(locs, info, oversampling=13)[1]
+
+
+@pytest.fixture
+def reset_render_threads():
+    """Save and restore render's cached thread count around a test."""
+    saved = render._render_threads_cached
+    yield
+    render._render_threads_cached = saved
 
 
 @pytest.fixture(scope="module")
@@ -207,6 +216,34 @@ class TestRender:
         with pytest.raises(ValueError):
             render.render(locs, None, oversampling=5)
 
+    def test_empty_locs_gaussian(self, locs, info):
+        """Empty input must not crash the parallel _fill_gaussian path."""
+        empty = locs.iloc[:0]
+        n, im = render.render(
+            empty,
+            info,
+            oversampling=5,
+            viewport=FULL_VIEWPORT,
+            blur_method="gaussian",
+        )
+        assert n == 0
+        assert im.shape == (160, 160)
+        assert (im == 0).all()
+
+    def test_empty_locs_gaussian_rot(self, locs_3d, info):
+        """Empty input must not crash the parallel _fill_gaussian_rot path."""
+        empty = locs_3d.iloc[:0]
+        n, im = render.render(
+            empty,
+            info,
+            oversampling=5,
+            viewport=FULL_VIEWPORT,
+            blur_method="gaussian",
+            ang=(0.1, 0.2, 0.3),
+        )
+        assert n == 0
+        assert (im == 0).all()
+
     def test_3d_rotation_changes_image(self, locs_3d, info):
         """A non-zero rotation must produce a different image."""
         _, im_no_rot = render.render(
@@ -226,6 +263,89 @@ class TestRender:
             ang=(0.5, 0.3, 0.2),
         )
         assert not np.array_equal(im_no_rot, im_rot)
+
+
+# ---------------------------------------------------------------------------
+# Render threading
+# ---------------------------------------------------------------------------
+
+
+class TestRenderThreads:
+    """set_render_threads / _render_threads resolution and equivalence."""
+
+    def test_set_value_caches(self, reset_render_threads):
+        hw_max = max(1, numba.get_num_threads())
+        render.set_render_threads(2)
+        assert render._render_threads() == min(2, hw_max)
+
+    def test_clamps_above_hw_max(self, reset_render_threads):
+        hw_max = max(1, numba.get_num_threads())
+        render.set_render_threads(hw_max + 100)
+        assert render._render_threads() == hw_max
+
+    def test_clamps_below_one(self, reset_render_threads):
+        render.set_render_threads(0)
+        assert render._render_threads() == 1
+
+    def test_none_clears_cache(self, reset_render_threads):
+        render.set_render_threads(3)
+        render.set_render_threads(None)
+        assert render._render_threads_cached is None
+
+    @pytest.mark.parametrize("blur_method", ["gaussian", "gaussian_iso"])
+    def test_thread_count_does_not_change_result(
+        self, locs, info, reset_render_threads, blur_method
+    ):
+        """Serial and parallel render paths must produce numerically
+        equivalent images (only float32 sum order differs)."""
+        hw_max = max(1, numba.get_num_threads())
+        if hw_max < 2:
+            pytest.skip("requires >=2 numba threads")
+        render.set_render_threads(1)
+        _, im_serial = render.render(
+            locs,
+            info,
+            oversampling=5,
+            viewport=FULL_VIEWPORT,
+            blur_method=blur_method,
+        )
+        render.set_render_threads(min(8, hw_max))
+        _, im_parallel = render.render(
+            locs,
+            info,
+            oversampling=5,
+            viewport=FULL_VIEWPORT,
+            blur_method=blur_method,
+        )
+        assert im_serial.shape == im_parallel.shape
+        assert np.allclose(im_serial, im_parallel, rtol=1e-4, atol=1e-4)
+
+    def test_thread_count_does_not_change_result_gaussian_rot(
+        self, locs_3d, info, reset_render_threads
+    ):
+        """Same equivalence check for the rotated-Gaussian kernel."""
+        hw_max = max(1, numba.get_num_threads())
+        if hw_max < 2:
+            pytest.skip("requires >=2 numba threads")
+        render.set_render_threads(1)
+        _, im_serial = render.render(
+            locs_3d,
+            info,
+            oversampling=5,
+            viewport=FULL_VIEWPORT,
+            blur_method="gaussian",
+            ang=(0.1, 0.2, 0.3),
+        )
+        render.set_render_threads(min(8, hw_max))
+        _, im_parallel = render.render(
+            locs_3d,
+            info,
+            oversampling=5,
+            viewport=FULL_VIEWPORT,
+            blur_method="gaussian",
+            ang=(0.1, 0.2, 0.3),
+        )
+        assert np.allclose(im_serial, im_parallel, rtol=1e-4, atol=1e-4)
 
 
 # ---------------------------------------------------------------------------
@@ -546,6 +666,55 @@ class TestMathUtils:
 
 
 # ---------------------------------------------------------------------------
+# _fftconvolve (spatial / FFT branches)
+# ---------------------------------------------------------------------------
+
+
+class TestFftConvolve:
+    """The spatial vs FFT branch is chosen by kernel size relative to image.
+    Kernel formula: ``10 * round(blur) + 1``. Spatial branch is taken when
+    both kernel dims are < 0.05 * image dim and max(kernel) <= 101.
+    """
+
+    def test_spatial_branch_preserves_mass(self):
+        """Small kernel → ndimage.gaussian_filter spatial path."""
+        im = np.zeros((64, 64), dtype=np.float32)
+        im[32, 32] = 1.0
+        # blur=0.05 → kernel=1; 1 < 0.05*64=3.2 → spatial
+        out = render._fftconvolve(im, 0.05, 0.05)
+        assert out.shape == im.shape
+        assert out.dtype == np.float32
+        assert out.sum() == pytest.approx(1.0, abs=1e-5)
+
+    def test_fft_branch_preserves_mass(self):
+        """Kernel large relative to image → fftconvolve path."""
+        im = np.zeros((64, 64), dtype=np.float32)
+        im[32, 32] = 1.0
+        # blur=2.0 → kernel=21; 21 > 0.05*64=3.2 → FFT
+        out = render._fftconvolve(im, 2.0, 2.0)
+        assert out.shape == im.shape
+        assert out.dtype == np.float32
+        assert out.sum() == pytest.approx(1.0, abs=1e-3)
+
+    def test_branches_agree_on_intermediate_blur(self):
+        """Both branches should produce visually similar results for a
+        blur that happens to fall near the threshold."""
+        rng = np.random.default_rng(0)
+        im = rng.random((256, 256)).astype(np.float32)
+        # blur=1.0 → kernel=11. 11 < 0.05*256=12.8 → spatial.
+        out_spatial = render._fftconvolve(im, 1.0, 1.0)
+        # blur=1.0 with smaller image forces FFT: kernel=11 > 0.05*100=5
+        out_fft = render._fftconvolve(im[:100, :100], 1.0, 1.0)
+        # Both must be finite and preserve total mass approximately.
+        assert np.isfinite(out_spatial).all()
+        assert np.isfinite(out_fft).all()
+        # Mass approximately preserved; some loss near borders from
+        # zero-padding (more pronounced on the smaller crop).
+        assert out_spatial.sum() == pytest.approx(im.sum(), rel=1e-2)
+        assert out_fft.sum() == pytest.approx(im[:100, :100].sum(), rel=5e-2)
+
+
+# ---------------------------------------------------------------------------
 # Image processing
 # ---------------------------------------------------------------------------
 
@@ -785,6 +954,34 @@ class TestRenderScene:
         )
         assert isinstance(qimage, QtGui.QImage)
         assert n_locs == 2 * len(locs)
+
+    def test_multi_channel_color_isolation(self, locs, info):
+        """Pure-red channel must leave G and B at zero in the output."""
+        qimage, _ = render.render_scene(
+            [locs],
+            [info],
+            disp_px_size=PIXELSIZE,
+            viewport=FULL_VIEWPORT,
+            colors=[(1.0, 0.0, 0.0)],
+        )
+        bgra = _qimage_to_array(qimage)
+        assert (bgra[..., 0] == 0).all()  # B
+        assert (bgra[..., 1] == 0).all()  # G
+        assert bgra[..., 2].max() > 0  # R lights up
+
+    def test_multi_channel_green_isolation(self, locs, info):
+        """Pure-green channel must leave R and B at zero in the output."""
+        qimage, _ = render.render_scene(
+            [locs],
+            [info],
+            disp_px_size=PIXELSIZE,
+            viewport=FULL_VIEWPORT,
+            colors=[(0.0, 1.0, 0.0)],
+        )
+        bgra = _qimage_to_array(qimage)
+        assert (bgra[..., 0] == 0).all()  # B
+        assert (bgra[..., 2] == 0).all()  # R
+        assert bgra[..., 1].max() > 0  # G lights up
 
     def test_empty_locs_list(self, info):
         qimage, n_locs = render.render_scene(
