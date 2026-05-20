@@ -33,6 +33,61 @@ _DRAW_MAX_SIGMA = 3  # max. sigma from mean to render (mu +/- 3 sigma)
 N_GROUP_COLORS = 8
 POLYGON_POINTER_SIZE = 16  # must be even
 
+# Cap on Numba threads used by the parallel render kernels. Picasso is
+# often deployed on shared servers where dozens of users render
+# simultaneously, so we don't grab every core by default. Resolved
+# lazily from PICASSO_RENDER_THREADS, then ``settings["Render"]["CPU
+# Threads"]``, falling back to ``_DEFAULT_RENDER_THREADS``.
+_DEFAULT_RENDER_THREADS = 8
+_render_threads_cached: int | None = None
+
+
+def _render_threads() -> int:
+    """Return the max Numba thread count for parallel render kernels.
+
+    Resolution order (first wins):
+      1. env var ``PICASSO_RENDER_THREADS``
+      2. user setting ``Render -> CPU Threads`` (see io.load_user_settings)
+      3. ``min(_DEFAULT_RENDER_THREADS, numba.get_num_threads())``
+
+    The value is clamped to ``[1, numba.get_num_threads()]`` and cached.
+    Call ``set_render_threads(None)`` to invalidate the cache (e.g. after
+    editing the settings file at runtime).
+    """
+    global _render_threads_cached
+    if _render_threads_cached is not None:
+        return _render_threads_cached
+
+    hw_max = max(1, numba.get_num_threads())
+    n: int | None = None
+    try:
+        settings = io.load_user_settings()
+        raw = settings["Render"]["CPU Threads"]
+        if raw not in ("", None, {}):  # AutoDict returns {} on miss
+            n = int(raw)
+    except (KeyError, TypeError, ValueError):
+        n = None
+
+    if n is None:
+        n = min(_DEFAULT_RENDER_THREADS, hw_max)
+
+    _render_threads_cached = max(1, min(int(n), hw_max))
+    return _render_threads_cached
+
+
+def set_render_threads(n: int | None) -> None:
+    """Set the max thread count for parallel render kernels.
+
+    Pass ``None`` to clear the cache and force re-resolution from env
+    var / user settings on the next render.
+    """
+    global _render_threads_cached
+    if n is None:
+        _render_threads_cached = None
+        return
+    hw_max = max(1, numba.get_num_threads())
+    _render_threads_cached = max(1, min(int(n), hw_max))
+
 
 def render(
     locs: pd.DataFrame,
@@ -503,7 +558,7 @@ def _n_threads_for_buffers(
     if bytes_per_buffer <= 0:
         return 1
     max_by_budget = max(1, _PER_THREAD_BUFFER_BUDGET_BYTES // bytes_per_buffer)
-    return int(min(numba.get_num_threads(), max_by_budget, max(1, n_locs)))
+    return int(min(_render_threads(), max_by_budget, max(1, n_locs)))
 
 
 @numba.njit(parallel=True, cache=True)
