@@ -1,6 +1,10 @@
 # Changelog
 
-Last change: 19-MAY-2026 CEST
+Last change: 21-MAY-2026 CEST
+
+## 0.10.1
+
+- Fixed linking saving `lpz`
 
 ## 0.10.0
 

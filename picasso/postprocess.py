@@ -2764,13 +2764,25 @@ def _link_loc_groups(  # noqa: C901
             locs["iterations"].to_numpy(), link_group, n_locs, n_groups, n_
         )
     if "z" in locs.columns:
-        columns["z"] = _link_group_mean(
-            locs["z"].to_numpy(),
-            link_group,
-            n_locs,
-            n_groups,
-            n_,
-        )
+        if "lpz" in locs.columns:
+            weights_z = 1 / locs["lpz"].to_numpy() ** 2
+            columns["z"], sum_weights_z_ = _link_group_weighted_mean(
+                locs["z"].to_numpy(),
+                weights_z,
+                link_group,
+                n_locs,
+                n_groups,
+                n_,
+            )
+            columns["lpz"] = np.sqrt(1 / sum_weights_z_)
+        else:
+            columns["z"] = _link_group_mean(
+                locs["z"].to_numpy(),
+                link_group,
+                n_locs,
+                n_groups,
+                n_,
+            )
     if "d_zcalib" in locs.columns:
         columns["d_zcalib"] = _link_group_mean(
             locs["d_zcalib"].to_numpy(), link_group, n_locs, n_groups, n_
