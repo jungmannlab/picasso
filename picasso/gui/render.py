@@ -1697,7 +1697,10 @@ class DbscanDialog(lib.Dialog):
     min_locs : QSpinBox
         Contains the minimum number of locs in a cluster.
     radius : QDoubleSpinBox
-        Contains epsilon (camera pixels) for DBSCAN (see scikit-learn).
+        Contains epsilon (nm) for DBSCAN (see scikit-learn).
+    radius_z : QDoubleSpinBox
+        Contains epsilon in the z direction (nm) for anisotropic 3D
+        DBSCAN. Ignored for 2D data.
     save_areas : QCheckBox
         Whether to save cluster areas as .csv file.
     save_centers : QCheckBox
@@ -1722,26 +1725,41 @@ class DbscanDialog(lib.Dialog):
         self.radius.setDecimals(2)
         self.radius.setSingleStep(0.1)
         grid.addWidget(self.radius, 0, 1)
+        radius_z_label = QtWidgets.QLabel("Radius z (3D only, nm):")
+        radius_z_label.setToolTip(
+            "DBSCAN epsilon in the z direction. Only used for 3D data.\n"
+            "Scales z coordinates so the neighborhood is an ellipsoid\n"
+            "with semi-axes (radius, radius, radius z).\n"
+            "Anisotropic DBSCAN approach inspired by Lörzing, Schake,\n"
+            "and Schlierf, Journal of Phys Chem B, 2024."
+        )
+        grid.addWidget(radius_z_label, 1, 0)
+        self.radius_z = QtWidgets.QDoubleSpinBox()
+        self.radius_z.setRange(0.01, 1e6)
+        self.radius_z.setValue(25)
+        self.radius_z.setDecimals(2)
+        self.radius_z.setSingleStep(0.1)
+        grid.addWidget(self.radius_z, 1, 1)
         min_samples_label = QtWidgets.QLabel("Min. samples:")
         min_samples_label.setToolTip(
             "Minimum number of samples in a neighborhood for a point to be\n"
             "considered a core point."
         )
-        grid.addWidget(min_samples_label, 1, 0)
+        grid.addWidget(min_samples_label, 2, 0)
         self.density = QtWidgets.QSpinBox()
         self.density.setRange(1, int(1e6))
         self.density.setValue(4)
-        grid.addWidget(self.density, 1, 1)
+        grid.addWidget(self.density, 2, 1)
         minlocs_label = QtWidgets.QLabel("Min. no. of locs:")
         minlocs_label.setToolTip(
             "Minimum number of localizations required to consider a\n"
             "cluster valid."
         )
-        grid.addWidget(minlocs_label, 2, 0)
+        grid.addWidget(minlocs_label, 3, 0)
         self.min_locs = QtWidgets.QSpinBox()
         self.min_locs.setRange(0, int(1e6))
         self.min_locs.setValue(0)
-        grid.addWidget(self.min_locs, 2, 1)
+        grid.addWidget(self.min_locs, 3, 1)
         vbox.addLayout(grid)
         hbox = QtWidgets.QHBoxLayout()
         vbox.addLayout(hbox)
@@ -1751,14 +1769,14 @@ class DbscanDialog(lib.Dialog):
             "Save an extra .hdf5 file containing the cluster centers?"
         )
         self.save_centers.setChecked(False)
-        grid.addWidget(self.save_centers, 3, 0, 1, 2)
+        grid.addWidget(self.save_centers, 4, 0, 1, 2)
         # save cluster areas
         self.save_areas = QtWidgets.QCheckBox("Save cluster areas (.csv)")
         self.save_areas.setToolTip(
             "Save an extra .csv file containing the cluster areas?"
         )
         self.save_areas.setChecked(False)
-        grid.addWidget(self.save_areas, 4, 0, 1, 2)
+        grid.addWidget(self.save_areas, 5, 0, 1, 2)
 
         # OK and Cancel buttons
         self.buttons = QtWidgets.QDialogButtonBox(
@@ -1781,6 +1799,7 @@ class DbscanDialog(lib.Dialog):
         result = dialog.exec()
         return {
             "radius": dialog.radius.value(),
+            "radius_z": dialog.radius_z.value(),
             "min_density": dialog.density.value(),
             "min_locs": dialog.min_locs.value(),
             "save_centers": dialog.save_centers.isChecked(),
@@ -2821,6 +2840,9 @@ class TestClustererDialog(lib.Dialog):
             params["radius"] = (
                 self.test_dbscan_params.radius.value() / pixelsize
             )
+            params["radius_z"] = (
+                self.test_dbscan_params.radius_z.value() / pixelsize
+            )
             params["min_samples"] = self.test_dbscan_params.min_samples.value()
             params["min_locs"] = self.test_dbscan_params.min_locs.value()
         elif clusterer_name == "HDBSCAN":
@@ -2968,6 +2990,7 @@ class TestClustererDialog(lib.Dialog):
                 radius=params["radius"] * pixelsize,
                 min_density=params["min_samples"],
                 min_locs=params["min_locs"],
+                radius_z=params["radius_z"] * pixelsize,
                 save_centers=save_centers,
             )
         elif self.clusterer_name.currentText() == "HDBSCAN":
@@ -3010,7 +3033,7 @@ class TestDBSCANParams(QtWidgets.QWidget):
         super().__init__()
         self.dialog = dialog
         grid = QtWidgets.QGridLayout(self)
-        radius_label = QtWidgets.QLabel("Radius (nm):")
+        radius_label = QtWidgets.QLabel("Radius xy (nm):")
         radius_label.setToolTip(
             "DBSCAN epsilon; max. distance between two samples for one to be\n"
             "considered as in the same neighborhood."
@@ -3023,31 +3046,44 @@ class TestDBSCANParams(QtWidgets.QWidget):
         self.radius.setSingleStep(0.1)
         grid.addWidget(self.radius, 0, 1)
 
+        radius_z_label = QtWidgets.QLabel("Radius z (3D only, nm):")
+        radius_z_label.setToolTip(
+            "DBSCAN epsilon in the z direction. Only used for 3D data.\n"
+            "Scales z coordinates so the neighborhood is an ellipsoid\n"
+            "with semi-axes (radius xy, radius xy, radius z)."
+        )
+        grid.addWidget(radius_z_label, 1, 0)
+        self.radius_z = QtWidgets.QDoubleSpinBox()
+        self.radius_z.setRange(0.01, 1e6)
+        self.radius_z.setValue(25)
+        self.radius_z.setDecimals(2)
+        self.radius_z.setSingleStep(0.1)
+        grid.addWidget(self.radius_z, 1, 1)
+
         min_samples_label = QtWidgets.QLabel("Min. samples:")
         min_samples_label.setToolTip(
             "Minimum number of samples in a neighborhood for a point to be\n"
             "considered a core point."
         )
-        grid.addWidget(min_samples_label, 1, 0)
+        grid.addWidget(min_samples_label, 2, 0)
         self.min_samples = QtWidgets.QSpinBox()
         self.min_samples.setValue(4)
         self.min_samples.setRange(1, int(1e6))
         self.min_samples.setSingleStep(1)
-        grid.addWidget(self.min_samples, 1, 1)
-        grid.setRowStretch(2, 1)
+        grid.addWidget(self.min_samples, 2, 1)
 
         minlocs_label = QtWidgets.QLabel("Min. no. of locs:")
         minlocs_label.setToolTip(
             "Minimum number of localizations required to consider a\n"
             "cluster valid."
         )
-        grid.addWidget(minlocs_label, 2, 0)
+        grid.addWidget(minlocs_label, 3, 0)
         self.min_locs = QtWidgets.QSpinBox()
         self.min_locs.setValue(0)
         self.min_locs.setRange(0, int(1e6))
         self.min_locs.setSingleStep(1)
-        grid.addWidget(self.min_locs, 2, 1)
-        grid.setRowStretch(3, 1)
+        grid.addWidget(self.min_locs, 3, 1)
+        grid.setRowStretch(4, 1)
 
 
 class TestHDBSCANParams(QtWidgets.QWidget):
@@ -6715,6 +6751,7 @@ class View(QtWidgets.QLabel):
         radius: float,
         min_density: int,
         min_locs: int,
+        radius_z: float | None = None,
         save_centers: bool = False,
         save_areas: bool = False,
     ) -> None:
@@ -6733,6 +6770,9 @@ class View(QtWidgets.QLabel):
             Minimum local density for DBSCAN clustering.
         min_locs : int
             Minimum number of localizations in a cluster.
+        radius_z : float, optional
+            Radius in z for anisotropic 3D DBSCAN, in nm. Ignored for
+            2D data.
         save_centers : bool, optional
             Specifies if cluster centers should be saved. Default is
             False.
@@ -6751,12 +6791,18 @@ class View(QtWidgets.QLabel):
             locs = self.locs[channel]
         pixelsize = self.pixelsize
 
+        # Only pass radius_z for 3D data; convert nm -> camera pixels.
+        is_3d = "z" in locs.columns
+        radius_z_px = (
+            radius_z / pixelsize if (is_3d and radius_z is not None) else None
+        )
         locs, dbscan_info = clusterer.dbscan(
             locs,
             radius / pixelsize,  # convert to camera pixels
             min_density,
             pixelsize=pixelsize,
             min_locs=min_locs,
+            radius_z=radius_z_px,
             return_info=True,
         )
         io.save_locs(path, locs, self.infos[channel] + [dbscan_info])
