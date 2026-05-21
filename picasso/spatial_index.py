@@ -34,6 +34,13 @@ from . import lib
 # finest level cover small zoomed-in viewports.
 _TARGET_BLOCKS_PER_EDGE = 64
 
+# Viewport-to-FOV area ratio at/above which ``query_viewport`` bypasses
+# the pyramid and returns ``None``. The caller then renders the full
+# locs DataFrame and lets the renderer's vectorised ``in_view`` mask do
+# the filtering -- avoiding a pandas ``iloc`` copy of nearly all rows,
+# which dominates redraw cost at full-FOV (see ``query_viewport``).
+_BYPASS_COVERAGE_RATIO = 0.25
+
 
 @dataclass
 class RenderIndexPyramid:
@@ -258,14 +265,40 @@ def _gather_blocks(
 def query_viewport(
     pyramid: RenderIndexPyramid,
     viewport: tuple,
-) -> lib.IntArray1D:
+) -> lib.IntArray1D | None:
     """Indices into the original locs DataFrame for locs in the viewport.
 
     The returned set is a superset of the strictly-inside locs: a block
     at the viewport edge contributes all of its locs (the renderer's
     own ``in_view`` test inside ``_render_setup`` then prunes the
     overspill, on a tiny array).
+
+    Returns ``None`` when the viewport covers (most of) the FOV --
+    above ``_BYPASS_COVERAGE_RATIO`` of the FOV area, or fully
+    enclosing it. In that regime gathering ~N indices and copying the
+    DataFrame via ``iloc`` costs more than letting the renderer scan
+    the full locs with its vectorised ``in_view`` mask. The caller
+    treats ``None`` as "no pre-filter, use the full locs".
     """
+    (y_min, x_min), (y_max, x_max) = viewport
+    # Bypass for (near-)full-FOV viewports -- see module-level constant.
+    if (
+        x_min <= 0.0
+        and y_min <= 0.0
+        and x_max >= pyramid.width
+        and y_max >= pyramid.height
+    ):
+        return None
+    fov_area = pyramid.width * pyramid.height
+    if fov_area > 0.0:
+        cx0 = max(0.0, x_min)
+        cy0 = max(0.0, y_min)
+        cx1 = min(pyramid.width, x_max)
+        cy1 = min(pyramid.height, y_max)
+        clipped_area = max(0.0, cx1 - cx0) * max(0.0, cy1 - cy0)
+        if clipped_area / fov_area >= _BYPASS_COVERAGE_RATIO:
+            return None
+
     if pyramid.perm.shape[0] == 0:
         return np.empty(0, dtype=np.uint32)
 
@@ -275,7 +308,6 @@ def query_viewport(
     be = pyramid.block_ends[lvl]
     K, L = bs.shape
 
-    (y_min, x_min), (y_max, x_max) = viewport
     cx_min = int(np.floor(x_min / size))
     cy_min = int(np.floor(y_min / size))
     # x_max/y_max are exclusive in the existing renderer (strict ``<``),

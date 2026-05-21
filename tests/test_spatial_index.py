@@ -64,10 +64,9 @@ class TestBuild:
         pyr = spatial_index.build_render_index(locs, _info(512, 512))
         assert pyr is not None
         assert pyr.perm.shape == (0,)
-        # Querying anything should return empty.
-        assert spatial_index.query_viewport(
-            pyr, ((0, 0), (512, 512))
-        ).shape == (0,)
+        # Sub-threshold viewport hits the gather path and returns empty.
+        idx = spatial_index.query_viewport(pyr, ((0, 0), (10, 10)))
+        assert idx is not None and idx.shape == (0,)
 
     def test_missing_metadata_returns_none(self):
         locs = _make_locs(100, 512, 512)
@@ -113,9 +112,10 @@ class TestQuery:
         locs = _make_locs(20_000, W, H, seed=seed)
         pyr = spatial_index.build_render_index(locs, _info(W, H))
 
-        # Random viewport inside the FOV.
+        # Random viewport inside the FOV, kept well under the bypass
+        # coverage ratio so this test exercises the gather path.
         cx, cy = rng.uniform(50, W - 50), rng.uniform(50, H - 50)
-        half_w, half_h = rng.uniform(5, 200), rng.uniform(5, 200)
+        half_w, half_h = rng.uniform(5, 100), rng.uniform(5, 100)
         viewport = (
             (cy - half_h, cx - half_w),
             (cy + half_h, cx + half_w),
@@ -124,22 +124,86 @@ class TestQuery:
         idx = spatial_index.query_viewport(pyr, viewport)
         truth = _brute_force_in_view(locs, viewport)
         # Superset: every strictly-in-view loc must be returned.
+        assert idx is not None
         assert set(int(i) for i in truth).issubset(set(int(i) for i in idx))
 
-    def test_viewport_covering_full_fov_returns_all_locs(self):
+    def test_viewport_covering_full_fov_returns_none(self):
+        # Above the coverage bypass threshold the pyramid returns None
+        # so the caller renders the full locs DataFrame without an
+        # iloc copy -- this is what restores the pre-pyramid full-FOV
+        # render speed for large N.
         W, H = 512.0, 512.0
-        n = 5000
-        locs = _make_locs(n, W, H)
+        locs = _make_locs(5000, W, H)
         pyr = spatial_index.build_render_index(locs, _info(W, H))
-        idx = spatial_index.query_viewport(pyr, ((0, 0), (H, W)))
-        assert set(int(i) for i in idx) == set(range(n))
+        assert spatial_index.query_viewport(pyr, ((0, 0), (H, W))) is None
+
+    def test_viewport_above_bypass_threshold_returns_none(self):
+        # Half the FOV area in each dimension -> 25% coverage, below
+        # the default 0.5 threshold, so we still get an array. Doubling
+        # one dimension to span the full axis brings coverage to 50%
+        # and triggers the bypass.
+        W, H = 512.0, 512.0
+        locs = _make_locs(5000, W, H)
+        pyr = spatial_index.build_render_index(locs, _info(W, H))
+        sub = spatial_index.query_viewport(pyr, ((0, 0), (H / 2, W / 2)))
+        assert sub is not None and sub.shape[0] > 0
+        assert spatial_index.query_viewport(pyr, ((0, 0), (H, W / 2))) is None
+
+    def test_viewport_with_negative_bounds_enclosing_fov_returns_none(self):
+        # Zoomed/panned out so the viewport extends past every FOV edge
+        # (loc coords are always positive but the viewport isn't).
+        # All locs are in view -> bypass via the full-enclose check.
+        W, H = 512.0, 512.0
+        locs = _make_locs(5000, W, H)
+        pyr = spatial_index.build_render_index(locs, _info(W, H))
+        assert (
+            spatial_index.query_viewport(
+                pyr, ((-100.0, -200.0), (H + 50.0, W + 300.0))
+            )
+            is None
+        )
+
+    def test_viewport_overhanging_right_bottom_clips_correctly(self):
+        # Locs are bounded in (0, W) x (0, H) but viewports aren't --
+        # users can pan/zoom past the bottom-right. The clipped area
+        # must drive the bypass decision, not the raw viewport extent.
+        W, H = 512.0, 512.0
+        locs = _make_locs(5000, W, H)
+        pyr = spatial_index.build_render_index(locs, _info(W, H))
+        # ((100, 100), (700, 700)) overhangs by 188 on each side.
+        # Clipped intersection: 412x412 -> ~65% of FOV -> bypass.
+        assert (
+            spatial_index.query_viewport(pyr, ((100.0, 100.0), (700.0, 700.0)))
+            is None
+        )
+        # Thin overhanging strip: 412x50 -> ~7.9% of FOV -> gather.
+        idx = spatial_index.query_viewport(
+            pyr, ((100.0, 100.0), (150.0, 700.0))
+        )
+        assert idx is not None
+        truth = _brute_force_in_view(locs, ((100.0, 100.0), (150.0, 700.0)))
+        assert set(int(i) for i in truth).issubset(set(int(i) for i in idx))
+
+    def test_viewport_partially_negative_below_threshold_returns_array(self):
+        # Viewport overhangs the FOV on one side only; the FOV-clipped
+        # area is well under the bypass threshold, so the gather path
+        # still runs and returns a valid array.
+        W, H = 512.0, 512.0
+        locs = _make_locs(5000, W, H)
+        pyr = spatial_index.build_render_index(locs, _info(W, H))
+        idx = spatial_index.query_viewport(
+            pyr, ((-100.0, -100.0), (100.0, 100.0))
+        )
+        assert idx is not None
+        truth = _brute_force_in_view(locs, ((-100.0, -100.0), (100.0, 100.0)))
+        assert set(int(i) for i in truth).issubset(set(int(i) for i in idx))
 
     def test_viewport_outside_fov_returns_empty(self):
         locs = _make_locs(1000, 512, 512)
         pyr = spatial_index.build_render_index(locs, _info(512, 512))
         # Far outside the FOV in both directions.
         idx = spatial_index.query_viewport(pyr, ((2000, 2000), (3000, 3000)))
-        assert idx.shape == (0,)
+        assert idx is not None and idx.shape == (0,)
 
     def test_tiny_zoomed_viewport_returns_few_locs(self):
         W, H = 512.0, 512.0
