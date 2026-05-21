@@ -1,9 +1,10 @@
 # Changelog
 
-Last change: 20-MAY-2026 CEST
+Last change: 21-MAY-2026 CEST
 
 ## 0.10.1
 - Faster rendering, especially in large FOV: ind. loc. precision blurring parallelized ., see [documentation](https://picassosr.readthedocs.io/en/latest/render.html/CPU-usage-on-shared-servers) + smarter implementation for 2D rendering; improvements for one-pixel-blur and global loc. prec.
+- Multi-level spatial indexing for quick zoomed-in rendering
 
 ## 0.10.0
 
