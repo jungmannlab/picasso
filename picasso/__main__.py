@@ -1377,6 +1377,52 @@ def _render(args: argparse.Namespace) -> None:
         )
 
 
+def _parse_float_list(value) -> list:
+    """Parse a CSV cell into a list of floats. Accepts a numeric scalar
+    or a comma-separated string like ``"3,4,5"``."""
+    if isinstance(value, bool):
+        raise ValueError("Expected a number or comma-separated string.")
+    if isinstance(value, (int, float)):
+        return [float(value)]
+    return [float(x.strip()) for x in str(value).split(",") if x.strip()]
+
+
+def _spinna_targets_from_row(row) -> list:
+    """Derive target names from the ``exp_data_*`` columns of a CSV row.
+
+    LE fitting does not load a structures yaml, so targets come from
+    column names. The first non-empty ``exp_data_*`` column maps to
+    ``target_a`` in ``spinna.fit_le``.
+    """
+    import pandas as pd
+
+    prefix = "exp_data_"
+    targets = [
+        c[len(prefix) :]
+        for c in row.index
+        if c.startswith(prefix) and pd.notna(row[c])
+    ]
+    if len(targets) != 2:
+        raise ValueError(
+            "LE fitting requires exactly two targets (two non-empty "
+            f"exp_data_* columns); found: {targets}"
+        )
+    return targets
+
+
+def _spinna_parse_distances(row) -> list:
+    """Parse the ``distances`` column of an LE-fitting row into a list
+    of candidate heterodimer distances (nm)."""
+    import pandas as pd
+
+    if "distances" not in row.index or pd.isna(row["distances"]):
+        raise ValueError("Column 'distances' is required when le_fitting=1.")
+    distances = _parse_float_list(row["distances"])
+    if not distances:
+        raise ValueError("'distances' must contain at least one value.")
+    return distances
+
+
 def _spinna_validate_parameters(
     parameters_filename: str,
 ) -> tuple:
@@ -1413,7 +1459,6 @@ def _spinna_validate_parameters(
                 i += 1
 
     for column in [
-        "structures_filename",
         "granularity",
         "save_filename",
         "NND_bin",
@@ -1428,8 +1473,18 @@ def _spinna_validate_parameters(
     return parameters, result_dir
 
 
-def _spinna_load_target_data(row, targets: list, io) -> tuple:
+def _spinna_load_target_data(
+    row,
+    targets: list,
+    io,
+    le_fitting: bool = False,
+) -> tuple:
     """Load per-target experimental data and parameters from a CSV row.
+
+    When ``le_fitting`` is True, ``label_unc_TARGET`` is parsed as a
+    comma-separated list of candidates (single values are still accepted),
+    ``le_TARGET`` is not read (LE is what is being fit), and
+    ``n_simulated`` is the raw localisation count (no LE division).
 
     Returns
     -------
@@ -1438,10 +1493,10 @@ def _spinna_load_target_data(row, targets: list, io) -> tuple:
     """
     import numpy as np
 
-    label_unc = {}
-    le = {}
-    exp_data = {}
-    n_simulated = {}
+    label_unc: dict = {}
+    le: dict = {}
+    exp_data: dict = {}
+    n_simulated: dict = {}
     dim = 2
 
     for target in targets:
@@ -1450,15 +1505,21 @@ def _spinna_load_target_data(row, targets: list, io) -> tuple:
                 raise ValueError(
                     f"Column {col_name} not found in the parameters file."
                 )
-        if f"le_{target}" not in row.index and (
-            "le_fitting" in row.index and row["le_fitting"] == 0
-        ):
+        if not le_fitting and f"le_{target}" not in row.index:
             raise ValueError(
                 f"Column le_{target} not found in the parameters file."
             )
 
-        label_unc[target] = float(row[f"label_unc_{target}"])
-        le[target] = float(row[f"le_{target}"]) / 100
+        if le_fitting:
+            label_unc[target] = _parse_float_list(row[f"label_unc_{target}"])
+            if not label_unc[target]:
+                raise ValueError(
+                    f"label_unc_{target} must contain at least one value."
+                )
+            le[target] = 1.0
+        else:
+            label_unc[target] = float(row[f"label_unc_{target}"])
+            le[target] = float(row[f"le_{target}"]) / 100
 
         locs, info = io.load_locs(str(row[f"exp_data_{target}"]))
         pixelsize = 130
@@ -1482,7 +1543,10 @@ def _spinna_load_target_data(row, targets: list, io) -> tuple:
             ).T
             dim = 2
 
-        n_simulated[target] = int(len(locs) / le[target])
+        if le_fitting:
+            n_simulated[target] = len(locs)
+        else:
+            n_simulated[target] = int(len(locs) / le[target])
 
     return label_unc, le, exp_data, n_simulated, dim
 
@@ -1527,21 +1591,22 @@ def _spinna_resolve_roi(row, dim: int, targets: list) -> tuple:
     return apply_mask, mask_paths, area, volume, z_range
 
 
-def _spinna_build_mixer(
-    spinna,
-    structures: list,
+def _spinna_compute_roi(
     targets: list,
-    label_unc: dict,
-    le: dict,
-    random_rot_mode: str,
     apply_mask: bool,
     mask_paths: dict,
     dim: int,
     area,
     volume,
     z_range,
-):
-    """Build a ``StructureMixer`` from resolved ROI and target data."""
+) -> tuple:
+    """Resolve the simulation ROI for a row.
+
+    Returns
+    -------
+    tuple[dict | None, float | None, float | None, float | None]
+        ``(mask_dict, width, height, depth)``
+    """
     import os
     import yaml
     import numpy as np
@@ -1567,6 +1632,33 @@ def _spinna_build_mixer(
             depth = z_range
             width = height = np.sqrt(volume * 1e9 / depth)
 
+    return mask_dict, width, height, depth
+
+
+def _spinna_build_mixer(
+    spinna,
+    structures: list,
+    targets: list,
+    label_unc: dict,
+    le: dict,
+    random_rot_mode: str,
+    apply_mask: bool,
+    mask_paths: dict,
+    dim: int,
+    area,
+    volume,
+    z_range,
+):
+    """Build a ``StructureMixer`` from resolved ROI and target data."""
+    mask_dict, width, height, depth = _spinna_compute_roi(
+        targets,
+        apply_mask,
+        mask_paths,
+        dim,
+        area,
+        volume,
+        z_range,
+    )
     return spinna.StructureMixer(
         structures=structures,
         label_unc=label_unc,
@@ -1600,13 +1692,74 @@ def _spinna_collect_results(
     z_range,
     n_simulated: dict,
     spinna,
+    le_fitting: bool = False,
+    label_unc_search: dict | None = None,
+    distances_search: list | None = None,
+    best_distance: float | None = None,
+    le_values: dict | None = None,
 ) -> dict:
-    """Assemble the full results dict from fitting output."""
+    """Assemble the full results dict from fitting output.
+
+    When ``le_fitting`` is True, the dict reports the recovered LE
+    values, fitted label uncertainty and heterodimer distance (plus the
+    search spaces used), mirroring the GUI's Fit LE summary keys.
+    """
     import numpy as np
     from datetime import datetime
 
     results: dict = {}
     results["Date"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    if le_fitting:
+        results["Molecular targets"] = targets
+        results["File location of experimental data"] = [
+            str(row[f"exp_data_{target}"]) for target in targets
+        ]
+        results["Parameters search space granularity"] = granularity
+        results["Dimensionality"] = f"{dim}D"
+        results["Rotation mode"] = random_rot_mode
+        results["Number of simulation repeats"] = sim_repeats
+        if label_unc_search is not None:
+            for target in targets:
+                results[
+                    f"Label-uncertainty search space (nm) for {target}"
+                ] = ", ".join(
+                    f"{float(v):.2f}" for v in label_unc_search[target]
+                )
+        for target in targets:
+            results[f"Fitted label uncertainty (nm) for {target}"] = (
+                f"{float(label_unc[target]):.4f}"
+            )
+        if distances_search is not None:
+            results["Heterodimer distance search space (nm)"] = ", ".join(
+                f"{float(v):.2f}" for v in distances_search
+            )
+        if best_distance is not None:
+            results["Fitted heterodimer distance (nm)"] = (
+                f"{float(best_distance):.4f}"
+            )
+        if le_values is not None:
+            for target in targets:
+                results[f"Fitted labeling efficiency (%) for {target}"] = (
+                    f"{float(le_values[target]):.2f}"
+                )
+        results["Best fitting structure proportions (%)"] = ", ".join(
+            f"{s.title}: {float(p):.2f}" for s, p in zip(structures, opt_props)
+        )
+        results["Modified Kolmogorov-Smirnov score"] = score
+
+        if apply_mask:
+            results["File location of masks"] = [
+                row[f"mask_filename_{target}"] for target in targets
+            ]
+        else:
+            if dim == 2:
+                results["Area (um^2)"] = area
+            elif dim == 3:
+                results["Volume (um^3)"] = volume
+                results["Z range (nm)"] = z_range
+        return results
+
     results["File location of structures"] = row["structures_filename"]
     results["Molecular targets"] = targets
     results["File location of experimenal data"] = [
@@ -1662,13 +1815,6 @@ def _spinna_collect_results(
         elif dim == 3:
             results["Volume (um^3)"] = volume
             results["Z range (nm)"] = z_range
-
-    if "le_fitting" in row.index and row["le_fitting"] == 1:
-        le_values = spinna.get_le_from_props(structures, opt_props)
-        results["Labeling efficiency fitting"] = (
-            f"LE {targets[0]}: {le_values[targets[0]]:.1f}%,"
-            f" LE {targets[1]}: {le_values[targets[1]]:.1f}%"
-        )
 
     return results
 
@@ -1748,10 +1894,15 @@ def _spinna_process_row(
 ) -> dict:
     """Run a single SPINNA analysis row and return the results dict."""
     import os
+    import pandas as pd
 
     print(f"Running SPINNA on row {index+1} out of {len(parameters)}.")
-    structures_filename = row["structures_filename"]
-    structures, targets = spinna.load_structures(structures_filename)
+
+    le_fitting = (
+        "le_fitting" in row.index
+        and pd.notna(row["le_fitting"])
+        and int(row["le_fitting"]) == 1
+    )
 
     granularity = row["granularity"]
     NND_bin = row["NND_bin"]
@@ -1774,15 +1925,57 @@ def _spinna_process_row(
         else:
             nn_plotted = int(row["nn_plotted"])
 
+    if le_fitting:
+        targets = _spinna_targets_from_row(row)
+    else:
+        if "structures_filename" not in row.index or pd.isna(
+            row["structures_filename"]
+        ):
+            raise ValueError(
+                f"Row {index}: structures_filename is required when "
+                "le_fitting != 1."
+            )
+        structures, targets = spinna.load_structures(
+            row["structures_filename"]
+        )
+
     label_unc, le, exp_data, n_simulated, dim = _spinna_load_target_data(
-        row, targets, io
+        row,
+        targets,
+        io,
+        le_fitting=le_fitting,
     )
     apply_mask, mask_paths, area, volume, z_range = _spinna_resolve_roi(
         row, dim, targets
     )
 
-    if "le_fitting" in row.index and row["le_fitting"] == 1:
-        le = {target: 1.0 for target in targets}
+    if not os.path.isdir(result_dir):
+        os.mkdir(result_dir)
+
+    if le_fitting:
+        return _spinna_process_row_le(
+            row=row,
+            targets=targets,
+            label_unc=label_unc,
+            exp_data=exp_data,
+            n_simulated=n_simulated,
+            dim=dim,
+            granularity=granularity,
+            sim_repeats=sim_repeats,
+            NND_bin=NND_bin,
+            NND_maxdist=NND_maxdist,
+            nn_plotted=nn_plotted,
+            apply_mask=apply_mask,
+            mask_paths=mask_paths,
+            area=area,
+            volume=volume,
+            z_range=z_range,
+            random_rot_mode=random_rot_mode,
+            save_filename=save_filename,
+            asynch=asynch,
+            verbose=verbose,
+            spinna=spinna,
+        )
 
     N_structures = spinna.generate_N_structures(
         structures, n_simulated, granularity
@@ -1802,9 +1995,6 @@ def _spinna_process_row(
         volume,
         z_range,
     )
-
-    if not os.path.isdir(result_dir):
-        os.mkdir(result_dir)
 
     opt_props, score = spinna.SPINNA(
         mixer=mixer,
@@ -1864,6 +2054,128 @@ def _spinna_process_row(
     return results
 
 
+def _spinna_process_row_le(
+    *,
+    row,
+    targets: list,
+    label_unc: dict,
+    exp_data: dict,
+    n_simulated: dict,
+    dim: int,
+    granularity,
+    sim_repeats: int,
+    NND_bin: float,
+    NND_maxdist: float,
+    nn_plotted: int,
+    apply_mask: bool,
+    mask_paths: dict,
+    area,
+    volume,
+    z_range,
+    random_rot_mode: str,
+    save_filename: str,
+    asynch: bool,
+    verbose: bool,
+    spinna,
+) -> dict:
+    """LE-fitting branch of ``_spinna_process_row``: builds monomer/
+    heterodimer structures via ``spinna.fit_le`` and recovers per-target
+    LE from the fitted structure proportions."""
+    import os
+
+    distances = _spinna_parse_distances(row)
+    mask_dict, width, height, depth = _spinna_compute_roi(
+        targets,
+        apply_mask,
+        mask_paths,
+        dim,
+        area,
+        volume,
+        z_range,
+    )
+
+    # snapshot the search-space inputs before calling fit_le —
+    # compare_models mutates label_unc in place
+    label_unc_input = {t: list(v) for t, v in label_unc.items()}
+    distances_input = list(distances)
+
+    (
+        le_values,
+        fitted_label_unc,
+        best_distance,
+        score,
+        best_props,
+        best_mixer,
+    ) = spinna.fit_le(
+        target_a=targets[0],
+        target_b=targets[1],
+        exp_data=exp_data,
+        granularity=int(granularity),
+        label_unc=label_unc,
+        distances=distances,
+        N_sim=int(sim_repeats),
+        mask_dict=mask_dict,
+        width=width,
+        height=height,
+        depth=depth,
+        random_rot_mode=random_rot_mode,
+        asynch=asynch,
+        savedir=os.path.dirname(save_filename),
+        callback="console" if verbose else None,
+        fitting_mode="coarse-to-fine",
+    )
+
+    structures = best_mixer.structures
+    results = _spinna_collect_results(
+        row,
+        targets,
+        structures,
+        best_mixer,
+        best_props,
+        score,
+        fitted_label_unc,
+        {t: 1.0 for t in targets},
+        random_rot_mode,
+        dim,
+        granularity,
+        {s.title: None for s in structures},
+        sim_repeats,
+        apply_mask,
+        mask_paths,
+        area,
+        volume,
+        z_range,
+        n_simulated,
+        spinna,
+        le_fitting=True,
+        label_unc_search=label_unc_input,
+        distances_search=distances_input,
+        best_distance=best_distance,
+        le_values=le_values,
+    )
+
+    with open(f"{save_filename}_fit_summary.txt", "w") as f:
+        for key, value in results.items():
+            f.write(f"{key}: {value}\n")
+    print(f"Results saved to {save_filename}_fit_summary.txt")
+
+    _spinna_plot_nnd(
+        spinna,
+        best_mixer,
+        targets,
+        exp_data,
+        best_props,
+        n_simulated,
+        sim_repeats,
+        NND_bin,
+        NND_maxdist,
+        nn_plotted,
+        save_filename,
+    )
+
+    return results
+
+
 def _spinna_batch_analysis(
     parameters_filename: str,
     asynch: bool = True,
@@ -1877,16 +2189,20 @@ def _spinna_batch_analysis(
     run. The parameters (columns) are:
 
     - "structures_filename" : Name of the files with structures saved
-        (.yaml).
+        (.yaml). Required unless ``le_fitting=1``, in which case the
+        monomer/heterodimer structures are built internally and targets
+        are taken from the two ``exp_data_TARGET`` columns.
     - "exp_data_TARGET" : Name of the file with experimental data
         (.hdf5). Each target in the structures must have a
         corresponding column, for example, "exp_data_EGFR".
     - "le_TARGET" : Labeling efficiency (%) for each target. Each
         target in the structures must have a corresponding column,
-        for example, "le_EGFR".
+        for example, "le_EGFR". Ignored when ``le_fitting=1``.
     - "label_unc_TARGET" : Label uncertainty (nm) for each target. Each
         target in the structures must have a corresponding column,
-        for example: "label_unc_EGFR".
+        for example: "label_unc_EGFR". When ``le_fitting=1``, this may
+        be a comma-separated list of candidates (e.g. ``"3,4,5,6"``);
+        a single value disables the per-target search.
     - "granularity" : Granularity used in parameters search space
         generation. The higher the value the more combinations of
         structure counts will be tested.
@@ -1920,11 +2236,22 @@ def _spinna_batch_analysis(
     - "nn_plotted" : Number of nearest neighbors plotted in the NND.
         Only integer values are accepted. Default: 4.
     - "le_fitting" : 0 if standard SPINNA is ran, 1 if labeling
-        efficiency fitting is to be performed. Then, 100% LE is used in
-        the pipeline and different output file is saved. If the column
-        is not provided, standard SPINNA is ran. For more details about
-        the LE fitting, see Hellmeier, Strauss, et al. Nature Methods
-        2024.
+        efficiency fitting is to be performed. If the column is not
+        provided, standard SPINNA is ran. When set to 1, the batch
+        calls ``picasso.spinna.fit_le``: monomer A, monomer B and
+        heterodimer(d) structures are built internally for each
+        candidate ``distances`` value, label uncertainty is fit per
+        target from the comma-separated candidates in
+        ``label_unc_TARGET``, and the per-target LE is recovered from
+        the fitted structure proportions. Exactly two ``exp_data_*``
+        columns must be present; the first column maps to ``target_a``.
+        ``-b/--bootstrap`` is ignored on LE-fitting rows. For more
+        details about the LE fitting, see Hellmeier, Strauss, et al.
+        Nature Methods, 2024.
+    - "distances" : Comma-separated list of candidate heterodimer
+        distances in nm (e.g. ``"5,10,15,20"``). A single value fixes
+        the distance. Required when ``le_fitting=1``; ignored
+        otherwise.
 
     When saving, each analysis run index is used as the prefix for
     filename, for example, "analysis_run1_fit_summary.txt".

@@ -6,6 +6,7 @@ Last change: 19-MAY-2026 CEST
 
 - SPINNA: comparing models uses fitting modes and has cleaner progress dialog
 - SPINNA: convenient fitting of LE
+- Batch analysis in SPINNA for LE fitting
 
 ## 0.10.0
 
