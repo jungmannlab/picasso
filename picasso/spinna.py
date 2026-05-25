@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import os
 import time
+import warnings
 from typing import Literal
 from concurrent import futures
 from multiprocessing import cpu_count
@@ -31,6 +32,7 @@ from scipy.spatial import KDTree
 from scipy.stats import ks_2samp, norm
 from sklearn.gaussian_process import GaussianProcessRegressor
 from sklearn.gaussian_process.kernels import Matern
+from sklearn.exceptions import ConvergenceWarning
 from tqdm import tqdm
 
 from . import io, lib, masking, render, __version__
@@ -3658,7 +3660,9 @@ class SPINNA:
                 normalize_y=True,
                 alpha=1e-6,
             )
-            gp.fit(X_train, y_train)
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", ConvergenceWarning)
+                gp.fit(X_train, y_train)
             unevaluated_mask = ~evaluated
             mu, sigma = gp.predict(
                 proportions[unevaluated_mask], return_std=True
