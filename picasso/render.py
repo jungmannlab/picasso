@@ -1627,7 +1627,7 @@ def rotation_matrix(angx: float, angy: float, angz: float) -> Rotation:
     Returns
     -------
     scipy.spatial.transform.Rotation
-        Scipy class that can be applied to rotate an Nx3 np.ndarray
+        Scipy class that can be applied to rotate an Nx3 array.
     """
     rot_mat_x = np.array(
         [
@@ -1757,6 +1757,76 @@ def export_qimage_to_svg(image: QtGui.QImage, path: str):
     painter = QtGui.QPainter(generator)
     painter.drawImage(0, 0, image)
     painter.end()
+
+
+def solid_to_lut(rgb: tuple[float, float, float]) -> lib.FloatArray2D:
+    """Build a (256, 3) float32 LUT that linearly ramps from black to
+    the given RGB color.
+
+    The returned LUT is the input format expected by
+    :func:`_render_multi_channel` (and therefore :func:`render_scene`)
+    when colors are passed as per-channel lookup tables. A solid-color
+    channel rendered through this LUT is mathematically identical to
+    the legacy ``intensity * rgb`` blend.
+
+    Parameters
+    ----------
+    rgb : sequence of 3 floats
+        Target RGB color, each component in range [0, 1].
+
+    Returns
+    -------
+    lut : lib.FloatArray2D
+        LUT with generated colormap of shape (256, 3).
+
+    Examples
+    --------
+    >>> lut = solid_to_lut((1.0, 0.0, 0.0))   # black -> red
+    >>> render_scene(locs=..., info=..., colors=[lut, ...], ...)
+    """
+    rgb_arr = np.asarray(rgb, dtype=np.float32).reshape(3)
+    return np.linspace(
+        np.zeros(3, dtype=np.float32), rgb_arr, 256, dtype=np.float32
+    )
+
+
+def stops_to_lut(
+    stops: list[tuple[float, float, float, float]],
+) -> lib.FloatArray2D:
+    """Build a (256, 3) float32 LUT by linearly interpolating between
+    color stops.
+
+    Parameters
+    ----------
+    stops : sequence of (position, r, g, b) tuples
+        Each ``position`` must be in [0, 1], strictly increasing, with
+        the first stop at 0.0 and the last at 1.0. ``r``, ``g``, ``b``
+        are also in [0, 1].
+
+    Returns
+    -------
+    lut : lib.FloatArray2D
+        LUT with generated colormap of shape (256, 3).
+
+    Examples
+    --------
+    A 3-stop "fire" gradient (black -> red -> yellow):
+
+    >>> lut = stops_to_lut([
+    ...     (0.0, 0, 0, 0),
+    ...     (0.5, 1, 0, 0),
+    ...     (1.0, 1, 1, 0),
+    ... ])
+    >>> render_scene(locs=..., info=..., colors=[lut], ...)
+    """
+    arr = np.asarray(stops, dtype=np.float32)
+    positions = arr[:, 0]
+    rgb = arr[:, 1:4]
+    x = np.linspace(0.0, 1.0, 256, dtype=np.float32)
+    lut = np.empty((256, 3), dtype=np.float32)
+    for c in range(3):
+        lut[:, c] = np.interp(x, positions, rgb[:, c])
+    return lut
 
 
 def get_colors_from_colormap(
@@ -2928,7 +2998,7 @@ def _render_multi_channel(
     info: list[list[dict]],
     *,
     disp_px_size: float,
-    colors: list[tuple[int, int, int]],
+    colors: list[tuple[int, int, int]] | list[np.ndarray],
     viewport: tuple[tuple[float, float], tuple[float, float]] | None = None,
     blur_method: (
         Literal["gaussian", "gaussian_iso", "smooth", "convolve"] | None
@@ -2941,7 +3011,14 @@ def _render_multi_channel(
     raw_image_cache: lib.FloatArray3D | None = None,
 ) -> tuple[int, lib.IntArray3D, tuple[float, float], lib.FloatArray3D]:
     """Render multi-channel localizations into an RGB 8bit image
-    (numpy array). See ``render_scene`` for more details."""
+    (numpy array). See ``render_scene`` for more details.
+
+    ``colors`` may be either a list of ``(r, g, b)`` triplets (legacy
+    behaviour: each channel rendered as ``intensity × rgb``, additive
+    blend) or a list of ``(256, 3)`` LUTs (each channel indexed into
+    its LUT before additive blending — supports per-channel
+    matplotlib colormaps and user-defined colormaps from the GUI).
+    """
     if raw_image_cache is not None:
         assert raw_image_cache.ndim == 3, "raw_image_cache must be a 3D array."
         raw_image = raw_image_cache
@@ -2977,7 +3054,17 @@ def _render_multi_channel(
         colors = lib.get_colors(len(images))
     colors_arr = np.asarray(colors, dtype=np.float32)
     images_f32 = np.ascontiguousarray(images, dtype=np.float32)
-    rgb = np.tensordot(images_f32, colors_arr, axes=([0], [0]))
+    if colors_arr.ndim == 2:
+        # legacy path: each channel is a single (r, g, b)
+        rgb = np.tensordot(images_f32, colors_arr, axes=([0], [0]))
+    else:
+        # LUT path: each channel is a (256, 3) lookup table
+        idx = np.clip((images_f32 * 255.0).astype(np.int32), 0, 255)
+        rgb = np.zeros(
+            (images_f32.shape[1], images_f32.shape[2], 3), dtype=np.float32
+        )
+        for c in range(images_f32.shape[0]):
+            rgb += colors_arr[c][idx[c]]
     # clip to max value of 1 (preserves relative brightness)
     np.minimum(rgb, 1.0, out=rgb)
     rgb = to_8bit(rgb)

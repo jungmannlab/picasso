@@ -1021,18 +1021,14 @@ class ViewRotation(QtWidgets.QLabel):
             if self.window.dataset_dialog.checks[i].isChecked():
                 channel_name = self.window.dataset_dialog.checks[i].text()
                 channel_names.append(channel_name)
-                colordisp = self.window.dataset_dialog.colordisp_all[i]
-                color = colordisp.palette().color(
-                    QtGui.QPalette.ColorRole.Window
+                channel_colors.append(
+                    self.window.dataset_dialog.legend_color_8bit(i)
                 )
-                # Convert QColor to RGB tuple (0-255 range)
-                color_rgb = (color.red(), color.green(), color.blue())
-                channel_colors.append(color_rgb)
-            image = render.draw_legend(
-                image=image,
-                channel_names=channel_names,
-                channel_colors=channel_colors,
-            )
+        image = render.draw_legend(
+            image=image,
+            channel_names=channel_names,
+            channel_colors=channel_colors,
+        )
         return image
 
     def draw_rotation(self, image: QtGui.QImage) -> QtGui.QImage:
