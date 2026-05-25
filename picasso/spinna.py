@@ -4469,7 +4469,7 @@ def compare_models_given_label_unc(
         if savedir:
             suffix = ("_").join(
                 [
-                    f"{target}_{lunc:2f}_nm"
+                    f"{target}_{lunc:.2f}_nm"
                     for target, lunc in label_unc.items()
                 ]
             )

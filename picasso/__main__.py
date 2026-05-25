@@ -1909,7 +1909,7 @@ def _spinna_process_row(
     NND_maxdist = row["NND_maxdist"]
     sim_repeats = row["sim_repeats"]
     save_filename, _ = os.path.splitext(row["save_filename"])
-    save_filename = os.path.join(result_dir, save_filename)
+    save_filename = os.path.join(result_dir, os.path.basename(save_filename))
 
     random_rot_mode = "2D"
     if "rotation_mode" in row.index:
@@ -1948,9 +1948,6 @@ def _spinna_process_row(
     apply_mask, mask_paths, area, volume, z_range = _spinna_resolve_roi(
         row, dim, targets
     )
-
-    if not os.path.isdir(result_dir):
-        os.mkdir(result_dir)
 
     if le_fitting:
         return _spinna_process_row_le(
@@ -2272,6 +2269,7 @@ def _spinna_batch_analysis(
     from . import io, spinna
 
     parameters, result_dir = _spinna_validate_parameters(parameters_filename)
+    os.makedirs(result_dir, exist_ok=True)
 
     summary = []
     for index, row in parameters.iterrows():
