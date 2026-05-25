@@ -3,7 +3,8 @@
 Last change: 21-MAY-2026 CEST
 
 ## 0.10.1
-
+- Faster rendering, especially in large FOV: ind. loc. precision blurring parallelized ., see [documentation](https://picassosr.readthedocs.io/en/latest/render.html/CPU-usage-on-shared-servers) + smarter implementation for 2D rendering; improvements for one-pixel-blur and global loc. prec.
+- Multi-level spatial indexing for quick zoomed-in rendering
 - Fixed linking saving `lpz`
 - Anisotripic DBSCAN (faster implementation) [DOI: 10.1021/acs.jpcb.4c02030](https://doi.org/10.1021/acs.jpcb.4c02030)
 - Improved docstrings for 3D SMLM clusterer

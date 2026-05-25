@@ -46,6 +46,7 @@ from .. import (
     masking,
     postprocess,
     render,
+    spatial_index,
     __version__,
 )
 from ..lib import (
@@ -669,6 +670,7 @@ class DatasetDialog(lib.Dialog):
         del self.window.view.locs_paths[i]
         del self.window.view.infos[i]
         del self.window.view.index_blocks[i]
+        del self.window.view.render_index[i]
 
         # delete zcoord from slicer dialog
         try:
@@ -6315,6 +6317,10 @@ class View(QtWidgets.QLabel):
     rectangle_pick_start_x, rectangle_pick_start_y : float
         x and y coordinates of the starting edge of the drawn
         rectangular pick.
+    render_index : list of spatial_index.RenderIndexPyramids
+        For each loaded localization's channel, stores the z-order
+        (Morton code) indices of localizations for efficient indexing
+        of zoomed-in FOVs.
     rubberband : QRubberBand
         Draws a rectangle used in zooming in.
     _size_hint : tuple
@@ -6357,6 +6363,7 @@ class View(QtWidgets.QLabel):
         self._picks = []
         self._points = []
         self.index_blocks = []
+        self.render_index = []
         self._drift = []
         self._driftfiles = []
         self.currentdrift = []
@@ -6432,6 +6439,12 @@ class View(QtWidgets.QLabel):
         self.infos.append(info)
         self.locs_paths.append(path)
         self.index_blocks.append(None)
+        try:
+            self.render_index.append(
+                spatial_index.build_render_index(locs, info)
+            )
+        except Exception:
+            self.render_index.append(None)
 
         # try to load a drift .txt file:
         drift = self._load_drift(info[-1])
@@ -9322,15 +9335,89 @@ class View(QtWidgets.QLabel):
             self.add_picks(new_picks)
             status.close()
 
-    def _display_locs(self, channel: int) -> pd.DataFrame:
+    def _display_indices(
+        self,
+        channel: int,
+        viewport: (
+            tuple[tuple[float, float], tuple[float, float]] | None
+        ) = None,
+    ) -> np.ndarray | None:
+        """Positional indices into ``self.locs[channel]`` selected for
+        display, or ``None`` when the full set is used. Combines the
+        fast-render subset and the viewport pyramid filter.
+        """
+        if viewport is not None:
+            viewport_indices = self._viewport_indices(channel, viewport)
+        else:
+            viewport_indices = None
+        fast_idx = self.fast_render_indices[channel]
+        if viewport_indices is None and fast_idx is None:
+            return None
+        if fast_idx is None:
+            return viewport_indices
+        if viewport_indices is None:
+            return fast_idx
+        # Intersect via boolean mask -- viewport_indices is the larger
+        # set so testing membership against fast_idx is cheaper.
+        mask = np.zeros(len(self.locs[channel]), dtype=bool)
+        mask[fast_idx] = True
+        return viewport_indices[mask[viewport_indices]]
+
+    def _display_locs(
+        self,
+        channel: int,
+        viewport: (
+            tuple[tuple[float, float], tuple[float, float]] | None
+        ) = None,
+    ) -> pd.DataFrame:
         """Return the localizations currently selected for display in
         ``channel``. When ``fast_render_indices[channel]`` is ``None``
         the full set is returned; otherwise the rows selected by the
-        fast-render dialog. Always returns a ``pd.DataFrame``."""
-        idx = self.fast_render_indices[channel]
+        fast-render dialog. If ``viewport`` is given and a render-index
+        pyramid is available for the channel, the result is also
+        spatially restricted to that viewport. Always returns a
+        ``pd.DataFrame``."""
+        idx = self._display_indices(channel, viewport)
         if idx is None:
             return self.locs[channel]
         return self.locs[channel].iloc[idx]
+
+    def _viewport_indices(
+        self,
+        channel: int,
+        viewport: tuple[tuple[float, float], tuple[float, float]],
+    ) -> np.ndarray | None:
+        """Indices of locs in ``channel`` that fall inside ``viewport``.
+
+        Returns ``None`` if the pyramid is unavailable -- the caller
+        then falls back to the renderer's own brute-force in-view
+        filter, which is the previous behavior.
+        """
+        pyramid = self._ensure_render_index(channel)
+        if pyramid is None:
+            return None
+        return spatial_index.query_viewport(pyramid, viewport)
+
+    def _ensure_render_index(
+        self, channel: int
+    ) -> spatial_index.RenderIndexPyramid | None:
+        """Lazily (re)build the per-channel render-index pyramid.
+
+        Returns ``None`` if the pyramid cannot be built (e.g., missing
+        FOV metadata) -- the rendering path then falls back to the
+        original brute-force viewport scan.
+        """
+        pyramid = self.render_index[channel]
+        if pyramid is not None:
+            return pyramid
+        try:
+            pyramid = spatial_index.build_render_index(
+                self.locs[channel], self.infos[channel]
+            )
+        except Exception:
+            pyramid = None
+        self.render_index[channel] = pyramid
+        return pyramid
 
     def picked_locs(
         self,
@@ -9555,8 +9642,13 @@ class View(QtWidgets.QLabel):
             min_blur_width=min_blur_width,
             blur_method=blur_method,
         )
-        # apply z splicing if enabled + render property
-        locs, infos = self._prepare_locs_for_rendering()
+        # apply z splicing if enabled + render property; spatially
+        # restrict each channel to the active viewport via the
+        # render-index pyramid so the renderer doesn't have to do a
+        # full-N viewport scan on every redraw
+        locs, infos = self._prepare_locs_for_rendering(
+            viewport=kwargs["viewport"]
+        )
 
         # prepare other keywords for rendering
         cmap = self.window.display_settings_dlg.colormap.currentText()
@@ -9699,6 +9791,9 @@ class View(QtWidgets.QLabel):
 
     def _prepare_locs_for_rendering(
         self,
+        viewport: (
+            tuple[tuple[float, float], tuple[float, float]] | None
+        ) = None,
     ) -> tuple[list[pd.DataFrame], list[list[dict]]]:
         """Prepare localizations and metadata for rendering with active
         filters.
@@ -9707,7 +9802,12 @@ class View(QtWidgets.QLabel):
         - Render-by-property coloring if enabled (splits into x_locs);
         - Group-based splitting if group column exists;
         - Z-slice clipping if slicer is enabled;
-        - Channel filtering to only include checked channels."""
+        - Channel filtering to only include checked channels.
+
+        When ``viewport`` is provided, each per-channel locs DataFrame
+        is additionally restricted to the viewport via the render-index
+        pyramid for efficient rendering of zoomed-in FOVs.
+        """
         slicer = self.window.slicer_dialog.slicer_radio_button
         # render by property - use x_locs like multichannel rendering
         if self.window.display_settings_dlg.render_check.isChecked():
@@ -9716,14 +9816,22 @@ class View(QtWidgets.QLabel):
             # not need to be rerun
             locs = self.x_locs.copy()
             infos = [self.infos[0]] * len(locs)
+            # Render-by-property: x_locs is precomputed and shares an
+            # index that depends on the property binning. The renderer's
+            # own brute-force in-view filter handles this case; the
+            # pyramid pre-filter is only applied to the multichannel
+            # path, which is the common redraw cost driver.
         # if group column is present, split locs by group for rendering
         else:
             # project fast-render subset (or full set when no
-            # subsampling)
-            locs = [self._display_locs(i) for i in range(len(self.locs))]
+            # subsampling), restricted to the viewport if given
+            locs = [
+                self._display_locs(i, viewport=viewport)
+                for i in range(len(self.locs))
+            ]
             infos = self.infos
             if "group" in locs[0].columns and len(locs) == 1:
-                idx = self.fast_render_indices[0]
+                idx = self._display_indices(0, viewport)
                 group_color = (
                     self.group_color if idx is None else self.group_color[idx]
                 )
@@ -10303,6 +10411,7 @@ class View(QtWidgets.QLabel):
                 self.locs[channel] = locs
                 self.infos[channel] = new_info
                 self.index_blocks[channel] = None
+                self.render_index[channel] = None
                 self.add_drift(channel, drift)
                 self.update_scene(resample_locs=True)
                 self.show_drift()
@@ -10348,6 +10457,7 @@ class View(QtWidgets.QLabel):
                     )
                     # sanity check and assign attributes
                     self.index_blocks[channel] = None
+                    self.render_index[channel] = None
                     self.add_drift(channel, drift)
                     # ignore undrift_locs since we use _apply_drift to
                     # assign attributes
@@ -10395,6 +10505,7 @@ class View(QtWidgets.QLabel):
             self.infos[channel] = new_info
             # Cleanup
             self.index_blocks[channel] = None
+            self.render_index[channel] = None
             self.add_drift(channel, drift)
             status.close()
             self.update_scene(resample_locs=True)
@@ -10429,6 +10540,7 @@ class View(QtWidgets.QLabel):
             self.infos[channel] = new_info
             # Cleanup
             self.index_blocks[channel] = None
+            self.render_index[channel] = None
             self.add_drift(channel, drift)
             status.close()
             self.update_scene(resample_locs=True)
@@ -10456,6 +10568,7 @@ class View(QtWidgets.QLabel):
             self.locs[channel], self.infos[channel], drift=drift
         )
         self.index_blocks[channel] = None
+        self.render_index[channel] = None
         self.add_drift(channel, drift)
         self.update_scene(resample_locs=True)
 
@@ -10514,6 +10627,7 @@ class View(QtWidgets.QLabel):
         self._drift[channel] = drift
         self.currentdrift[channel] = copy.copy(drift)
         self.index_blocks[channel] = None
+        self.render_index[channel] = None
         self.update_scene(resample_locs=True)
 
     def unfold_groups_square(self) -> None:
@@ -10785,6 +10899,7 @@ class View(QtWidgets.QLabel):
         if len(dlg.fractions) == 2 and "group" in self.locs[0].columns:
             self.group_color = render.get_group_color(self.locs[0])
         self.index_blocks = [None] * len(self.locs)
+        self.render_index = [None] * len(self.locs)
         self.window.display_settings_dlg.silent_maximum_update(
             factor * self.window.display_settings_dlg.maximum.value()
         )
