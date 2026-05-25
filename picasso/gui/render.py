@@ -420,6 +420,8 @@ class DatasetDialog(lib.Dialog):
         Main window instance.
     """
 
+    DOCS_URL = "https://picassosr.readthedocs.io/en/latest/render.html#files-ctrl-f"  # noqa: E501
+
     def __init__(self, window: QtWidgets.QMainWindow) -> None:
         super().__init__(window)
         self.window = window
@@ -490,8 +492,13 @@ class DatasetDialog(lib.Dialog):
             "Custom colormaps appear in the per-channel selector."
         )
         layout.addWidget(edit_cmaps_button, 2, 2)
-        edit_cmaps_button.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
         edit_cmaps_button.clicked.connect(self.open_custom_cmap_editor)
+        layout.addWidget(
+            lib.HelpButton(self.DOCS_URL),
+            3,
+            2,
+            alignment=QtCore.Qt.AlignmentFlag.AlignRight,
+        )
 
         # add scrollable area which will display all channels, below
         # the non-scrollable elements
