@@ -522,7 +522,7 @@ def _undrift_fiducials(files: str) -> None:
     detected.
     """
     import glob
-    from . import io, postprocess, imageprocess
+    from . import io, postprocess
 
     segmentation = 2000
 
@@ -780,7 +780,6 @@ def _join(files: list[str], keep_index: bool = True) -> None:
     from .io import load_locs, save_locs
     from .lib import merge_locs
     from os.path import splitext
-    import pandas as pd
 
     all_locs = merge_locs(
         [load_locs(file)[0] for file in files],
@@ -1261,6 +1260,53 @@ def _localize(args: argparse.Namespace) -> None:  # noqa: C901
         )
 
 
+def _render_many(
+    locs,
+    info,
+    path,
+    oversampling,
+    blur_method,
+    min_blur_width,
+    vmin,
+    vmax,
+    scaling,
+    cmap,
+    silent,
+):
+    import sys
+    from os.path import splitext
+    from matplotlib.pyplot import imsave
+    from .render import render
+
+    if sys.platform == "win32":
+        from os import startfile
+
+    if blur_method == "none":
+        blur_method = None
+    N, image = render(
+        locs,
+        info,
+        oversampling,
+        blur_method=blur_method,
+        min_blur_width=min_blur_width,
+    )
+    base, ext = splitext(path)
+    out_path = base + ".png"
+    im_max = image.max() / 100
+    if scaling == "yes":
+        imsave(
+            out_path,
+            image,
+            vmin=vmin * im_max,
+            vmax=vmax * im_max,
+            cmap=cmap,
+        )
+    else:
+        imsave(out_path, image, vmin=vmin, vmax=vmax, cmap=cmap)
+    if not silent and sys.platform == "win32":
+        startfile(out_path)
+
+
 def _render(args: argparse.Namespace) -> None:
     """Render localization files to images.
 
@@ -1291,55 +1337,10 @@ def _render(args: argparse.Namespace) -> None:
         If True, the rendered images are not opened automatically.
     """
     from .lib import locs_glob_map
-    from .render import render
-    from os.path import splitext
-    from matplotlib.pyplot import imsave
-    import sys
-
-    if sys.platform == "win32":
-        from os import startfile
     from os.path import isdir
     from .io import load_user_settings, save_user_settings
     from tqdm import tqdm
     from glob import glob
-
-    def render_many(
-        locs,
-        info,
-        path,
-        oversampling,
-        blur_method,
-        min_blur_width,
-        vmin,
-        vmax,
-        scaling,
-        cmap,
-        silent,
-    ):
-        if blur_method == "none":
-            blur_method = None
-        N, image = render(
-            locs,
-            info,
-            oversampling,
-            blur_method=blur_method,
-            min_blur_width=min_blur_width,
-        )
-        base, ext = splitext(path)
-        out_path = base + ".png"
-        im_max = image.max() / 100
-        if scaling == "yes":
-            imsave(
-                out_path,
-                image,
-                vmin=vmin * im_max,
-                vmax=vmax * im_max,
-                cmap=cmap,
-            )
-        else:
-            imsave(out_path, image, vmin=vmin, vmax=vmax, cmap=cmap)
-        if not silent and sys.platform == "win32":
-            startfile(out_path)
 
     settings = load_user_settings()
     cmap = args.cmap
@@ -1358,7 +1359,7 @@ def _render(args: argparse.Namespace) -> None:
 
         for path in tqdm(paths):
             locs_glob_map(
-                render_many,
+                _render_many,
                 path,
                 args=(
                     args.oversampling,
@@ -1374,7 +1375,7 @@ def _render(args: argparse.Namespace) -> None:
 
     else:
         locs_glob_map(
-            render_many,
+            _render_many,
             args.files,
             args=(
                 args.oversampling,

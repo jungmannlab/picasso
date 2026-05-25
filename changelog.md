@@ -15,6 +15,7 @@ Last change: 25-MAY-2026 CEST
 - Batch analysis does not require area input (if found in metadata)
 - Batch analysis: clear instructions on what columns are required
 - SPINNA: area/volume button removed (deduced automatically from densities and number of molecules in the exp. data)
+- Flake8 clean-up
 
 ## 0.10.0
 

@@ -671,9 +671,9 @@ class ParametersDialog(lib.Dialog):
     CALIB_URL = "https://picassosr.readthedocs.io/en/latest/localize.html#d-calibration"  # noqa: E501
     IDENT_URL = "https://picassosr.readthedocs.io/en/latest/localize.html#identification-and-fitting-of-single-molecule-spots"  # noqa: E501
 
-    def __init__(
+    def __init__(  # noqa: C901
         self, parent: QtWidgets.QMainWindow | None = None
-    ) -> None:  # noqa: C901
+    ) -> None:
         super().__init__(parent)
         self.window = parent
         self.setWindowTitle("Parameters")

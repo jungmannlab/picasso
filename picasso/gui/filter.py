@@ -819,46 +819,7 @@ class Window(QtWidgets.QMainWindow):
         else:
             self.filter_log["Removed columns"] = to_remove
 
-    def apply_filters_from_metadata(self) -> None:
-        """Replay filter steps recorded in another file's .yaml metadata
-        onto the currently loaded localizations."""
-        if self.locs is None:
-            QtWidgets.QMessageBox.information(
-                self, "Apply filters from metadata", "No file loaded."
-            )
-            return
-
-        directory = self.pwd if self.pwd else ""
-        path, _ = QtWidgets.QFileDialog.getOpenFileName(
-            self,
-            "Open metadata",
-            directory=directory,
-            filter="*.yaml",
-        )
-        if not path:
-            return
-
-        try:
-            info = io.load_info(path, qt_parent=self)
-        except io.NoMetadataFileError:
-            return
-
-        ranges, to_remove, missing = lib.extract_filter_steps(
-            info, self.locs.columns
-        )
-
-        if not ranges and not to_remove:
-            msg = "No applicable filter steps found in metadata."
-            if missing:
-                msg += (
-                    "\n\nReferenced columns not found in current data:\n  "
-                    + "\n  ".join(missing)
-                )
-            QtWidgets.QMessageBox.information(
-                self, "Apply filters from metadata", msg
-            )
-            return
-
+    def _build_filter_summary(self, ranges, to_remove, missing) -> str:
         lines = []
         if ranges:
             lines.append("Filters to apply:")
@@ -878,11 +839,56 @@ class Window(QtWidgets.QMainWindow):
                 lines.append(f"  {c}")
         lines.append("")
         lines.append("Apply these steps?")
+        return "\n".join(lines)
+
+    def _load_filter_metadata(self):
+        directory = self.pwd if self.pwd else ""
+        path, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self,
+            "Open metadata",
+            directory=directory,
+            filter="*.yaml",
+        )
+        if not path:
+            return None
+        try:
+            return io.load_info(path, qt_parent=self)
+        except io.NoMetadataFileError:
+            return None
+
+    def apply_filters_from_metadata(self) -> None:
+        """Replay filter steps recorded in another file's .yaml metadata
+        onto the currently loaded localizations."""
+        if self.locs is None:
+            QtWidgets.QMessageBox.information(
+                self, "Apply filters from metadata", "No file loaded."
+            )
+            return
+
+        info = self._load_filter_metadata()
+        if info is None:
+            return
+
+        ranges, to_remove, missing = lib.extract_filter_steps(
+            info, self.locs.columns
+        )
+
+        if not ranges and not to_remove:
+            msg = "No applicable filter steps found in metadata."
+            if missing:
+                msg += (
+                    "\n\nReferenced columns not found in current data:\n  "
+                    + "\n  ".join(missing)
+                )
+            QtWidgets.QMessageBox.information(
+                self, "Apply filters from metadata", msg
+            )
+            return
 
         reply = QtWidgets.QMessageBox.question(
             self,
             "Apply filters from metadata",
-            "\n".join(lines),
+            self._build_filter_summary(ranges, to_remove, missing),
             QtWidgets.QMessageBox.StandardButton.Yes
             | QtWidgets.QMessageBox.StandardButton.Cancel,
         )

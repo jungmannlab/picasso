@@ -2362,8 +2362,8 @@ class OptionalSettingsDialog(lib.Dialog):
             "Bayesian: use a Gaussian Process surrogate model to efficiently\n"
             " search the space with minimal evaluations.\n"
             r"Coarse to fine: first test 10% of selected search space, then"
-            "\n rerun SPINNA around the best fitting proportions from the first"
-            " round.\n"
+            "\n rerun SPINNA around the best fitting proportions from the "
+            "first round.\n"
             "Brute force: test all possible combinations of proportions of "
             "structures."
         )

@@ -561,6 +561,55 @@ def _n_threads_for_buffers(
     return int(min(_render_threads(), max_by_budget, max(1, n_locs)))
 
 
+@numba.njit(cache=True)
+def _draw_gaussian_loc(
+    buf: lib.FloatArray2D,
+    x_: float,
+    y_: float,
+    sx_: float,
+    sy_: float,
+    n_pixel_x: int,
+    n_pixel_y: int,
+) -> None:
+    """Render a single separable 2D Gaussian into ``buf``."""
+    max_y_off = _DRAW_MAX_SIGMA * sy_
+    i_min = np.int32(y_ - max_y_off)
+    if i_min < 0:
+        i_min = 0
+    i_max = np.int32(y_ + max_y_off + 1)
+    if i_max > n_pixel_y:
+        i_max = n_pixel_y
+    max_x_off = _DRAW_MAX_SIGMA * sx_
+    j_min = np.int32(x_ - max_x_off)
+    if j_min < 0:
+        j_min = 0
+    j_max = np.int32(x_ + max_x_off) + 1
+    if j_max > n_pixel_x:
+        j_max = n_pixel_x
+    nx = j_max - j_min
+    ny = i_max - i_min
+    if nx <= 0 or ny <= 0:
+        return
+    inv_2sx2 = 1.0 / (2.0 * sx_ * sx_)
+    inv_2sy2 = 1.0 / (2.0 * sy_ * sy_)
+    norm = 1.0 / (2.0 * np.pi * sx_ * sy_)
+    # Separable kernel: factor exp(-(dx^2/(2sx^2) + dy^2/(2sy^2)))
+    # into 1D gx * 1D gy. O(K) exp calls per loc instead of O(K^2).
+    gx = np.empty(nx, dtype=np.float32)
+    gy = np.empty(ny, dtype=np.float32)
+    for jj in range(nx):
+        dx = (j_min + jj) + 0.5 - x_
+        gx[jj] = np.exp(-dx * dx * inv_2sx2)
+    for ii in range(ny):
+        dy = (i_min + ii) + 0.5 - y_
+        gy[ii] = norm * np.exp(-dy * dy * inv_2sy2)
+    for ii in range(ny):
+        gy_i = gy[ii]
+        row = buf[i_min + ii]
+        for jj in range(nx):
+            row[j_min + jj] += gy_i * gx[jj]
+
+
 @numba.njit(parallel=True, cache=True)
 def _fill_gaussian_kernel(
     buffers: lib.FloatArray3D,
@@ -584,46 +633,9 @@ def _fill_gaussian_kernel(
             end = n_locs
         buf = buffers[t]
         for k in range(start, end):
-            x_ = x[k]
-            y_ = y[k]
-            sx_ = sx[k]
-            sy_ = sy[k]
-            max_y_off = _DRAW_MAX_SIGMA * sy_
-            i_min = np.int32(y_ - max_y_off)
-            if i_min < 0:
-                i_min = 0
-            i_max = np.int32(y_ + max_y_off + 1)
-            if i_max > n_pixel_y:
-                i_max = n_pixel_y
-            max_x_off = _DRAW_MAX_SIGMA * sx_
-            j_min = np.int32(x_ - max_x_off)
-            if j_min < 0:
-                j_min = 0
-            j_max = np.int32(x_ + max_x_off) + 1
-            if j_max > n_pixel_x:
-                j_max = n_pixel_x
-            nx = j_max - j_min
-            ny = i_max - i_min
-            if nx <= 0 or ny <= 0:
-                continue
-            inv_2sx2 = 1.0 / (2.0 * sx_ * sx_)
-            inv_2sy2 = 1.0 / (2.0 * sy_ * sy_)
-            norm = 1.0 / (2.0 * np.pi * sx_ * sy_)
-            # Separable kernel: factor exp(-(dx^2/(2sx^2) + dy^2/(2sy^2)))
-            # into 1D gx * 1D gy. O(K) exp calls per loc instead of O(K^2).
-            gx = np.empty(nx, dtype=np.float32)
-            gy = np.empty(ny, dtype=np.float32)
-            for jj in range(nx):
-                dx = (j_min + jj) + 0.5 - x_
-                gx[jj] = np.exp(-dx * dx * inv_2sx2)
-            for ii in range(ny):
-                dy = (i_min + ii) + 0.5 - y_
-                gy[ii] = norm * np.exp(-dy * dy * inv_2sy2)
-            for ii in range(ny):
-                gy_i = gy[ii]
-                row = buf[i_min + ii]
-                for jj in range(nx):
-                    row[j_min + jj] += gy_i * gx[jj]
+            _draw_gaussian_loc(
+                buf, x[k], y[k], sx[k], sy[k], n_pixel_x, n_pixel_y
+            )
 
 
 def _fill_gaussian(
@@ -677,6 +689,60 @@ def _fill_gaussian(
     image += buffers.sum(axis=0)
 
 
+@numba.njit(cache=True)
+def _draw_gaussian_rot_loc(
+    buf: lib.FloatArray2D,
+    x_: float,
+    y_: float,
+    sx_: float,
+    sy_: float,
+    sz_: float,
+    n_pixel_x: int,
+    n_pixel_y: int,
+    rot_matrix: lib.Array3x3,
+    rot_matrixT: lib.Array3x3,
+) -> None:
+    """Render a single rotated 2D Gaussian (projected from 3D) into
+    ``buf``."""
+    cov = np.zeros((3, 3), dtype=np.float32)
+    cov[0, 0] = sx_ * sx_
+    cov[1, 1] = sy_ * sy_
+    cov[2, 2] = sz_ * sz_
+    cov_rot = rot_matrix @ cov @ rot_matrixT
+    s00 = cov_rot[0, 0]
+    s01 = cov_rot[0, 1]
+    s10 = cov_rot[1, 0]
+    s11 = cov_rot[1, 1]
+    det2d = s00 * s11 - s01 * s10
+    if det2d < 1e-10:
+        return
+    inv00 = s11 / det2d
+    inv01 = -s01 / det2d
+    inv10 = -s10 / det2d
+    inv11 = s00 / det2d
+    norm = 1.0 / (2.0 * np.pi * np.sqrt(det2d))
+    max_x_off = _DRAW_MAX_SIGMA * np.sqrt(s00)
+    max_y_off = _DRAW_MAX_SIGMA * np.sqrt(s11)
+    j_min = int(x_ - max_x_off)
+    if j_min < 0:
+        j_min = 0
+    j_max = int(x_ + max_x_off + 1)
+    if j_max > n_pixel_x:
+        j_max = n_pixel_x
+    i_min = int(y_ - max_y_off)
+    if i_min < 0:
+        i_min = 0
+    i_max = int(y_ + max_y_off + 1)
+    if i_max > n_pixel_y:
+        i_max = n_pixel_y
+    for i in range(i_min, i_max):
+        b = np.float32(i + 0.5 - y_)
+        for j in range(j_min, j_max):
+            a = np.float32(j + 0.5 - x_)
+            exponent = a * a * inv00 + a * b * (inv01 + inv10) + b * b * inv11
+            buf[i, j] += norm * np.exp(-0.5 * exponent)
+
+
 @numba.njit(parallel=True, cache=True)
 def _fill_gaussian_rot_kernel(
     buffers: lib.FloatArray3D,
@@ -703,52 +769,18 @@ def _fill_gaussian_rot_kernel(
             end = n_locs
         buf = buffers[t]
         for k in range(start, end):
-            x_ = x[k]
-            y_ = y[k]
-            sx_ = sx[k]
-            sy_ = sy[k]
-            sz_ = sz[k]
-            cov = np.zeros((3, 3), dtype=np.float32)
-            cov[0, 0] = sx_ * sx_
-            cov[1, 1] = sy_ * sy_
-            cov[2, 2] = sz_ * sz_
-            cov_rot = rot_matrix @ cov @ rot_matrixT
-            s00 = cov_rot[0, 0]
-            s01 = cov_rot[0, 1]
-            s10 = cov_rot[1, 0]
-            s11 = cov_rot[1, 1]
-            det2d = s00 * s11 - s01 * s10
-            if det2d < 1e-10:
-                continue
-            inv00 = s11 / det2d
-            inv01 = -s01 / det2d
-            inv10 = -s10 / det2d
-            inv11 = s00 / det2d
-            norm = 1.0 / (2.0 * np.pi * np.sqrt(det2d))
-            eff_sx = np.sqrt(s00)
-            eff_sy = np.sqrt(s11)
-            max_x_off = _DRAW_MAX_SIGMA * eff_sx
-            max_y_off = _DRAW_MAX_SIGMA * eff_sy
-            j_min = int(x_ - max_x_off)
-            if j_min < 0:
-                j_min = 0
-            j_max = int(x_ + max_x_off + 1)
-            if j_max > n_pixel_x:
-                j_max = n_pixel_x
-            i_min = int(y_ - max_y_off)
-            if i_min < 0:
-                i_min = 0
-            i_max = int(y_ + max_y_off + 1)
-            if i_max > n_pixel_y:
-                i_max = n_pixel_y
-            for i in range(i_min, i_max):
-                b = np.float32(i + 0.5 - y_)
-                for j in range(j_min, j_max):
-                    a = np.float32(j + 0.5 - x_)
-                    exponent = (
-                        a * a * inv00 + a * b * (inv01 + inv10) + b * b * inv11
-                    )
-                    buf[i, j] += norm * np.exp(-0.5 * exponent)
+            _draw_gaussian_rot_loc(
+                buf,
+                x[k],
+                y[k],
+                sx[k],
+                sy[k],
+                sz[k],
+                n_pixel_x,
+                n_pixel_y,
+                rot_matrix,
+                rot_matrixT,
+            )
 
 
 def _fill_gaussian_rot(
@@ -2856,7 +2888,7 @@ def render_scene(
     localizations and/or the contrast limits used for scaling to be
     returned together with the rendered QImage and number of
     localizations rendered.
-    
+
     Parameters
     ----------
     locs: pd.DataFrame or list of pd.DataFrame
@@ -3457,7 +3489,7 @@ def build_animation(
 ) -> None:
     """Build an animation of rendered localizations given the
     checkpoints (angle, viewport, etc) and the time between them.
-    
+
     Parameters
     ----------
     path : str
@@ -3480,7 +3512,7 @@ def build_animation(
     positions : list
         Each element determines the checkpoint of the animation, which
         is a tuple of 4 elements: (angle_x, angle_y, angle_z, viewport).
-        Angles are in radians. Viewport is given as ((y_min, x_min), 
+        Angles are in radians. Viewport is given as ((y_min, x_min),
         (y_max, x_max)) in camera pixels.
     durations : list
         List of durations in seconds between the checkpoints. Must have
@@ -3538,7 +3570,7 @@ def build_animation(
     ), "locs must be a pd.DataFrame or a list of pd.DataFrames."
     if isinstance(locs, list):
         assert all(
-            isinstance(l, pd.DataFrame) for l in locs
+            isinstance(locs_, pd.DataFrame) for locs_ in locs
         ), "All elements of locs must be pd.DataFrames."
         assert len(locs) >= 1, "locs must contain at least one DataFrame."
     assert (

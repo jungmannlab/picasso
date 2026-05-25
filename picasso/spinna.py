@@ -3515,40 +3515,20 @@ class SPINNA:
         )
 
         # --- Phase 1: initial space-filling design ---
-        if isinstance(callback, lib.ProgressDialog):
-            callback.zero_progress(init_title)
-            callback.setMaximum(n_initial)
-        progress_bar = None
-        if callback == "console":
-            progress_bar = tqdm(
-                total=n_initial,
-                desc=init_title,
-            )
-
-        init_idx = self._farthest_point_sampling(proportions, n_initial)
-        eval_count = 0
-        for idx in init_idx:
-            scores[idx] = self._evaluate_single(N_structures[idx])
-            evaluated[idx] = True
-            eval_count += 1
-            if callback == "console":
-                progress_bar.update(1)
-            elif callback is not None and callback != "console":
-                callback.set_value(eval_count)
-
-        if callback == "console":
-            progress_bar.close()
+        self._bayesian_initial_phase(
+            proportions=proportions,
+            N_structures=N_structures,
+            evaluated=evaluated,
+            scores=scores,
+            n_initial=n_initial,
+            callback=callback,
+            title=init_title,
+        )
 
         # --- Phase 2: GP-guided acquisition ---
-        if isinstance(callback, lib.ProgressDialog):
-            callback.zero_progress(gp_title)
-            callback.setMaximum(n_iterations)
-        if callback == "console":
-            progress_bar = tqdm(
-                total=n_iterations,
-                desc=gp_title,
-            )
-
+        progress_bar = self._init_gp_phase_progress(
+            n_iterations, callback, gp_title
+        )
         evaluated, scores, _ = self._bayesian_gp_phase(
             proportions=proportions,
             N_structures=N_structures,
@@ -3557,32 +3537,16 @@ class SPINNA:
             n_iterations=n_iterations,
             callback=callback,
             eval_count=0,
-            progress_bar=progress_bar if callback == "console" else None,
+            progress_bar=progress_bar,
         )
-
-        if callback == "console" and progress_bar is not None:
-            progress_bar.close()
-        elif isinstance(callback, lib.ProgressDialog):
-            callback.set_value(callback.maximum())
+        self._finalize_progress(callback, progress_bar)
 
         # collect results for evaluated candidates only
-        eval_mask = evaluated
-        N_evaluated = N_structures[eval_mask]
-        scores_evaluated = scores[eval_mask]
+        N_evaluated = N_structures[evaluated]
+        scores_evaluated = scores[evaluated]
 
         if save:
-            props_eval = self.mixer.convert_counts_to_props(N_evaluated)
-            df = pd.DataFrame(
-                np.hstack(
-                    (N_evaluated, props_eval, scores_evaluated.reshape(-1, 1))
-                ),
-                columns=[
-                    f"N_{name}" for name in self.mixer.get_structure_names()
-                ]
-                + [f"Prop_{name}" for name in self.mixer.get_structure_names()]
-                + ["Kolmogorov-Smirnov statistic"],
-            )
-            df.to_csv(save, header=True, index=False)
+            self._save_bayesian_csv(N_evaluated, scores_evaluated, save)
 
         # find best
         index = np.argmin(scores_evaluated)
@@ -3599,6 +3563,75 @@ class SPINNA:
                 callback,
             )
         return opt_proportions, score
+
+    def _bayesian_initial_phase(
+        self,
+        proportions: lib.FloatArray2D,
+        N_structures: lib.IntArray2D,
+        evaluated: np.ndarray,
+        scores: np.ndarray,
+        n_initial: int,
+        callback,
+        title: str,
+    ) -> None:
+        """Run Phase 1 of Bayesian optimisation: farthest-point sampling.
+
+        Modifies ``evaluated`` and ``scores`` in place.
+        """
+        if isinstance(callback, lib.ProgressDialog):
+            callback.zero_progress(title)
+            callback.setMaximum(n_initial)
+        progress_bar = None
+        if callback == "console":
+            progress_bar = tqdm(total=n_initial, desc=title)
+
+        init_idx = self._farthest_point_sampling(proportions, n_initial)
+        for eval_count, idx in enumerate(init_idx, start=1):
+            scores[idx] = self._evaluate_single(N_structures[idx])
+            evaluated[idx] = True
+            self._tick_progress(callback, progress_bar, eval_count)
+
+        if progress_bar is not None:
+            progress_bar.close()
+
+    def _init_gp_phase_progress(self, n_iterations, callback, title):
+        """Set up progress tracking for the GP-guided acquisition phase."""
+        if isinstance(callback, lib.ProgressDialog):
+            callback.zero_progress(title)
+            callback.setMaximum(n_iterations)
+        if callback == "console":
+            return tqdm(total=n_iterations, desc=title)
+        return None
+
+    @staticmethod
+    def _tick_progress(callback, progress_bar, eval_count):
+        """Advance whichever progress tracker is active."""
+        if progress_bar is not None:
+            progress_bar.update(1)
+        elif callback is not None:
+            callback.set_value(eval_count)
+
+    @staticmethod
+    def _finalize_progress(callback, progress_bar):
+        """Close the progress tracker once the GP phase finishes."""
+        if progress_bar is not None:
+            progress_bar.close()
+        elif isinstance(callback, lib.ProgressDialog):
+            callback.set_value(callback.maximum())
+
+    def _save_bayesian_csv(self, N_evaluated, scores_evaluated, path):
+        """Write evaluated candidates and their scores to ``path``."""
+        props_eval = self.mixer.convert_counts_to_props(N_evaluated)
+        names = self.mixer.get_structure_names()
+        df = pd.DataFrame(
+            np.hstack(
+                (N_evaluated, props_eval, scores_evaluated.reshape(-1, 1))
+            ),
+            columns=[f"N_{name}" for name in names]
+            + [f"Prop_{name}" for name in names]
+            + ["Kolmogorov-Smirnov statistic"],
+        )
+        df.to_csv(path, header=True, index=False)
 
     def _bayesian_gp_phase(
         self,

@@ -923,7 +923,7 @@ def get_from_metadata(
 def extract_filter_steps(
     info: list[dict],
     current_columns,
-) -> tuple[dict[str, list[float]], list[str], list[str]]:
+) -> tuple[dict[str, list[float]], list[str], list[str]]:  # noqa: C901
     """Parse filter steps out of a Picasso Filter metadata list.
 
     Iterates ``info`` oldest -> newest. A dict is treated as a filter

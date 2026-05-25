@@ -287,6 +287,70 @@ def prepare_locs_for_save(
     return locs, new_info
 
 
+def _make_pbars(use_tqdm, iterations, n_groups):
+    if use_tqdm:
+        return (
+            tqdm(total=iterations, desc="Averaging", unit="iter"),
+            tqdm(total=n_groups, desc="Groups", unit="group"),
+        )
+    return None, None
+
+
+def _finalize_average(
+    locs,
+    info,
+    aborted,
+    return_shifted_locs,
+    display_pixel_size,
+    iterations,
+):
+    if aborted:
+        return None
+    if return_shifted_locs:
+        params = {"disp_px_size": display_pixel_size, "it": iterations}
+        locs, info = prepare_locs_for_save(locs, info, params)
+        return locs, info
+    return locs
+
+
+def _wait_for_alignment(
+    result,
+    abort_callback,
+    counter,
+    n_groups,
+    use_tqdm,
+    group_pbar,
+    progress_callback,
+    it,
+    iterations,
+    locs,
+    x,
+    y,
+):
+    last_count = 0
+    while not result.ready():
+        if callable(abort_callback) and abort_callback():
+            return True
+        if use_tqdm:
+            current = int(counter.value)
+            group_pbar.update(current - last_count)
+            last_count = current
+        elif callable(progress_callback):
+            locs_current = locs.copy()
+            locs_current["x"] = np.ctypeslib.as_array(x)
+            locs_current["y"] = np.ctypeslib.as_array(y)
+            progress_callback(
+                it + 1,
+                iterations,
+                locs_current,
+                int(counter.value),
+                n_groups,
+            )
+    if use_tqdm:
+        group_pbar.update(n_groups - last_count)
+    return False
+
+
 def average(
     locs: pd.DataFrame,
     info: list[dict],
@@ -378,12 +442,7 @@ def average(
     )
 
     use_tqdm = progress_callback == "console"
-    if use_tqdm:
-        iter_pbar = tqdm(total=iterations, desc="Averaging", unit="iter")
-        group_pbar = tqdm(total=n_groups, desc="Groups", unit="group")
-    else:
-        iter_pbar = None
-        group_pbar = None
+    iter_pbar, group_pbar = _make_pbars(use_tqdm, iterations, n_groups)
 
     aborted = False
     try:
@@ -423,36 +482,22 @@ def average(
             result = pool.map_async(fc, range(n_groups), groups_per_worker)
 
             # Wait for completion and report progress
-            if use_tqdm:
-                last_count = 0
-                while not result.ready():
-                    if callable(abort_callback) and abort_callback():
-                        aborted = True
-                        break
-                    current = int(counter.value)
-                    group_pbar.update(current - last_count)
-                    last_count = current
-                if aborted:
-                    break
-                group_pbar.update(n_groups - last_count)
-            else:
-                while not result.ready():
-                    if callable(abort_callback) and abort_callback():
-                        aborted = True
-                        break
-                    if callable(progress_callback):
-                        locs_current = locs.copy()
-                        locs_current["x"] = np.ctypeslib.as_array(x)
-                        locs_current["y"] = np.ctypeslib.as_array(y)
-                        progress_callback(
-                            it + 1,
-                            iterations,
-                            locs_current,
-                            int(counter.value),
-                            n_groups,
-                        )
-                if aborted:
-                    break
+            aborted = _wait_for_alignment(
+                result,
+                abort_callback,
+                counter,
+                n_groups,
+                use_tqdm,
+                group_pbar,
+                progress_callback,
+                it,
+                iterations,
+                locs,
+                x,
+                y,
+            )
+            if aborted:
+                break
 
             # Update localizations from shared arrays
             locs["x"] = np.ctypeslib.as_array(x)
@@ -475,12 +520,11 @@ def average(
             pool.close()
         pool.join()
 
-    if aborted:
-        return None
-
-    if return_shifted_locs:
-        params = {"disp_px_size": display_pixel_size, "it": iterations}
-        locs, info = prepare_locs_for_save(locs, info, params)
-        return locs, info
-    else:
-        return locs
+    return _finalize_average(
+        locs,
+        info,
+        aborted,
+        return_shifted_locs,
+        display_pixel_size,
+        iterations,
+    )
