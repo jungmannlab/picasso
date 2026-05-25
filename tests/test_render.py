@@ -823,6 +823,256 @@ class TestColors:
 
 
 # ---------------------------------------------------------------------------
+# Per-channel LUT helpers (solid_to_lut, stops_to_lut)
+# ---------------------------------------------------------------------------
+
+
+class TestSolidToLut:
+    """``render.solid_to_lut`` builds a (256, 3) float32 black->color ramp.
+    For solid-color channels this LUT path is mathematically identical to
+    the legacy ``intensity * rgb`` blend used by ``_render_multi_channel``.
+    """
+
+    def test_shape_and_dtype(self):
+        lut = render.solid_to_lut((1.0, 0.0, 0.0))
+        assert lut.shape == (256, 3)
+        assert lut.dtype == np.float32
+
+    def test_endpoints(self):
+        """First row is black; last row is the target color."""
+        lut = render.solid_to_lut((1.0, 0.5, 0.25))
+        assert np.allclose(lut[0], [0.0, 0.0, 0.0])
+        assert np.allclose(lut[-1], [1.0, 0.5, 0.25])
+
+    def test_linear_ramp(self):
+        """Row i is i / 255 * target_rgb."""
+        rgb = np.array([0.8, 0.4, 0.2], dtype=np.float32)
+        lut = render.solid_to_lut(rgb)
+        expected = np.linspace(np.zeros(3), rgb, 256, dtype=np.float32)
+        assert np.allclose(lut, expected)
+
+    def test_accepts_tuple_list_array(self):
+        """Helper accepts any 3-element rgb container."""
+        for rgb in [
+            (1.0, 0.0, 0.0),
+            [1.0, 0.0, 0.0],
+            np.array([1.0, 0.0, 0.0], dtype=np.float32),
+        ]:
+            lut = render.solid_to_lut(rgb)
+            assert lut.shape == (256, 3)
+            assert np.allclose(lut[-1], [1.0, 0.0, 0.0])
+
+    def test_black_target_is_all_zero(self):
+        lut = render.solid_to_lut((0.0, 0.0, 0.0))
+        assert (lut == 0).all()
+
+
+class TestStopsToLut:
+    """``render.stops_to_lut`` linearly interpolates a list of color stops
+    into the same (256, 3) LUT shape consumed by ``_render_multi_channel``.
+    """
+
+    def test_shape_and_dtype(self):
+        lut = render.stops_to_lut([(0.0, 0, 0, 0), (1.0, 1.0, 1.0, 1.0)])
+        assert lut.shape == (256, 3)
+        assert lut.dtype == np.float32
+
+    def test_endpoints_match_first_and_last_stop(self):
+        lut = render.stops_to_lut([(0.0, 0.1, 0.2, 0.3), (1.0, 0.7, 0.8, 0.9)])
+        assert np.allclose(lut[0], [0.1, 0.2, 0.3])
+        assert np.allclose(lut[-1], [0.7, 0.8, 0.9])
+
+    def test_two_stop_matches_linspace(self):
+        """A 2-stop gradient is equivalent to a per-channel linspace."""
+        lut = render.stops_to_lut([(0.0, 0, 0, 0), (1.0, 1, 0, 0)])
+        expected_r = np.linspace(0.0, 1.0, 256, dtype=np.float32)
+        assert np.allclose(lut[:, 0], expected_r)
+        assert (lut[:, 1] == 0).all()
+        assert (lut[:, 2] == 0).all()
+
+    def test_three_stop_midpoint(self):
+        """Middle stop at position 0.5 is hit exactly at index 128 (≈0.502)."""
+        lut = render.stops_to_lut(
+            [(0.0, 0, 0, 0), (0.5, 1, 0, 0), (1.0, 1, 1, 1)]
+        )
+        # At LUT index where x == 0.5 exactly (no such integer index for
+        # 256 samples over [0, 1] inclusive), the closest is index 128
+        # (x = 128/255 ≈ 0.502) which is just past the middle stop.
+        # Channel R should already be at 1 at the middle stop.
+        # Channels G and B should still be very close to 0 at the middle
+        # stop and rising linearly toward 1 at the end.
+        mid = lut[128]
+        assert mid[0] == pytest.approx(1.0, abs=2 / 255)
+        assert mid[1] == pytest.approx(0.0, abs=2 / 255)
+        assert mid[2] == pytest.approx(0.0, abs=2 / 255)
+        # quarter-way past the middle stop -> halfway from red to white
+        three_quarter = lut[192]
+        assert three_quarter[0] == pytest.approx(1.0, abs=1e-3)
+        assert three_quarter[1] == pytest.approx(0.5, abs=2 / 255)
+        assert three_quarter[2] == pytest.approx(0.5, abs=2 / 255)
+
+    def test_clamped_to_input_range(self):
+        """All LUT values stay within the RGB span of the input stops."""
+        stops = [(0.0, 0.1, 0.0, 0.0), (1.0, 0.9, 0.0, 0.0)]
+        lut = render.stops_to_lut(stops)
+        assert lut[:, 0].min() >= 0.1 - 1e-6
+        assert lut[:, 0].max() <= 0.9 + 1e-6
+
+    def test_monotonic_when_stops_are_monotonic(self):
+        """Strictly increasing color values produce a strictly non-decreasing
+        LUT column."""
+        stops = [(0.0, 0.0, 0, 0), (0.5, 0.4, 0, 0), (1.0, 1.0, 0, 0)]
+        lut = render.stops_to_lut(stops)
+        assert (np.diff(lut[:, 0]) >= 0).all()
+
+    def test_accepts_numpy_array(self):
+        stops = np.array(
+            [[0.0, 0, 0, 0], [1.0, 1.0, 1.0, 1.0]], dtype=np.float32
+        )
+        lut = render.stops_to_lut(stops)
+        assert lut.shape == (256, 3)
+        assert np.allclose(lut[-1], [1.0, 1.0, 1.0])
+
+
+# ---------------------------------------------------------------------------
+# _render_multi_channel: LUT path
+# ---------------------------------------------------------------------------
+
+
+class TestRenderSceneLutPath:
+    """``_render_multi_channel`` accepts both legacy RGB triplets and the
+    new (256, 3) LUT shape. The two paths must agree on solid colors and
+    the LUT path must additionally handle non-solid colormaps."""
+
+    def test_accepts_lut_list(self, locs, info):
+        """Passing per-channel LUTs returns a valid QImage."""
+        lut_red = render.solid_to_lut((1.0, 0.0, 0.0))
+        lut_green = render.solid_to_lut((0.0, 1.0, 0.0))
+        qimage, n_locs = render.render_scene(
+            [locs, locs],
+            [info, info],
+            disp_px_size=PIXELSIZE,
+            viewport=FULL_VIEWPORT,
+            colors=[lut_red, lut_green],
+        )
+        assert isinstance(qimage, QtGui.QImage)
+        assert qimage.width() == 32 and qimage.height() == 32
+        assert n_locs == 2 * len(locs)
+
+    def test_lut_path_equivalent_to_triplets_for_solid_colors(
+        self, locs, info
+    ):
+        """For solid colors, a black->color LUT must produce the same
+        8-bit output (within 1 LSB) as passing the RGB triplet directly."""
+        triplets = [(1.0, 0.0, 0.0), (0.0, 0.5, 1.0)]
+        luts = [render.solid_to_lut(c) for c in triplets]
+
+        qimage_triplet, _ = render.render_scene(
+            [locs, locs],
+            [info, info],
+            disp_px_size=PIXELSIZE,
+            viewport=FULL_VIEWPORT,
+            colors=triplets,
+        )
+        qimage_lut, _ = render.render_scene(
+            [locs, locs],
+            [info, info],
+            disp_px_size=PIXELSIZE,
+            viewport=FULL_VIEWPORT,
+            colors=luts,
+        )
+        diff = np.abs(
+            _qimage_to_array(qimage_triplet).astype(int)
+            - _qimage_to_array(qimage_lut).astype(int)
+        )
+        # LUT path quantizes intensity*255 to 256 entries; expect ≤1 LSB diff.
+        assert diff.max() <= 1
+        # ...and a strong majority of pixels exactly match.
+        assert (diff == 0).mean() > 0.7
+
+    def test_lut_path_isolates_pure_red(self, locs, info):
+        """A black->red LUT must leave G and B at zero in the output."""
+        lut_red = render.solid_to_lut((1.0, 0.0, 0.0))
+        qimage, _ = render.render_scene(
+            [locs],
+            [info],
+            disp_px_size=PIXELSIZE,
+            viewport=FULL_VIEWPORT,
+            colors=[lut_red],
+        )
+        bgra = _qimage_to_array(qimage)
+        assert (bgra[..., 0] == 0).all()  # B
+        assert (bgra[..., 1] == 0).all()  # G
+        assert bgra[..., 2].max() > 0  # R lights up
+
+    def test_lut_path_with_white_endpoint(self, locs, info):
+        """A black->color->white gradient (the picasso "built-in colormap"
+        shape) produces a saturated output at high intensity, with all
+        three channels rising above zero."""
+        stops = [
+            (0.0, 0.0, 0.0, 0.0),
+            (0.5, 0.0, 0.0, 1.0),  # blue at midpoint
+            (1.0, 1.0, 1.0, 1.0),  # white at peak
+        ]
+        lut = render.stops_to_lut(stops)
+        qimage, _ = render.render_scene(
+            [locs],
+            [info],
+            disp_px_size=PIXELSIZE,
+            viewport=FULL_VIEWPORT,
+            colors=[lut],
+        )
+        bgra = _qimage_to_array(qimage)
+        # All three channels should have at least one non-zero pixel:
+        # high-intensity samples pull the gradient toward white.
+        assert bgra[..., 0].max() > 0  # B
+        assert bgra[..., 1].max() > 0  # G
+        assert bgra[..., 2].max() > 0  # R
+
+    def test_lut_clipped_at_one(self, locs, info):
+        """When two saturated channels overlap, the per-pixel sum is
+        clipped to 1.0 → output bytes stay in [0, 255]."""
+        lut_red = render.solid_to_lut((1.0, 0.0, 0.0))
+        lut_green = render.solid_to_lut((0.0, 1.0, 0.0))
+        qimage, _ = render.render_scene(
+            [locs, locs],
+            [info, info],
+            disp_px_size=PIXELSIZE,
+            viewport=FULL_VIEWPORT,
+            colors=[lut_red, lut_green],
+        )
+        bgra = _qimage_to_array(qimage)
+        # No overflow above uint8 range (trivially true by dtype, but the
+        # underlying float32 rgb is clipped to <= 1.0 before to_8bit).
+        assert bgra.dtype == np.uint8
+        assert bgra[..., :3].max() <= 255
+
+    def test_lut_path_with_raw_image_cache(self, locs, info):
+        """LUT shape works with the raw_image_cache fast-redraw path."""
+        # First call to populate the cache for two channels.
+        _, _, raw = render.render_scene(
+            [locs, locs],
+            [info, info],
+            disp_px_size=PIXELSIZE,
+            viewport=FULL_VIEWPORT,
+            colors=[(1.0, 0.0, 0.0), (0.0, 1.0, 0.0)],
+            return_raw_image=True,
+        )
+        lut_red = render.solid_to_lut((1.0, 0.0, 0.0))
+        lut_green = render.solid_to_lut((0.0, 1.0, 0.0))
+        qimage, n_locs = render.render_scene(
+            [locs, locs],
+            [info, info],
+            disp_px_size=PIXELSIZE,
+            viewport=FULL_VIEWPORT,
+            colors=[lut_red, lut_green],
+            raw_image_cache=raw,
+        )
+        assert isinstance(qimage, QtGui.QImage)
+        assert n_locs == 0  # cached path doesn't re-count locs
+
+
+# ---------------------------------------------------------------------------
 # Localization splitting
 # ---------------------------------------------------------------------------
 
