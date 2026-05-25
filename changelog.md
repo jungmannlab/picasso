@@ -3,6 +3,9 @@
 Last change: 25-MAY-2026 CEST
 
 ## 0.10.1
+
+This patch adds a number of new, useful features rather than simply fixing the bugs found in 0.10.0.
+
 - Faster rendering, especially in large FOV: ind. loc. precision blurring parallelized ., see [documentation](https://picassosr.readthedocs.io/en/latest/render.html/CPU-usage-on-shared-servers) + smarter implementation for 2D rendering; improvements for one-pixel-blur and global loc. prec.
 - Multi-level spatial indexing for quick zoomed-in rendering
 - Multichannel rendering supports colormaps, not only a single RGB color
@@ -16,6 +19,7 @@ Last change: 25-MAY-2026 CEST
 - Batch analysis: clear instructions on what columns are required
 - SPINNA: area/volume button removed (deduced automatically from densities and number of molecules in the exp. data)
 - Flake8 clean-up
+- Efficient Filter: much lower RAM usage + faster filtering by histogram selection (1D/2D), especially for very large datasets
 
 ## 0.10.0
 

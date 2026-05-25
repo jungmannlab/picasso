@@ -1540,6 +1540,7 @@ def unpack_calibration(
 def calculate_optimal_bins(
     data: FloatArray1D | IntArray1D,
     max_n_bins: int | None = None,
+    sample_size: int = 1_000_000,
 ) -> FloatArray1D:
     """Calculate the optimal bins for display, for example, in
     Picasso: Filter.
@@ -1550,28 +1551,109 @@ def calculate_optimal_bins(
         Data to be binned.
     max_n_bins : int | None, optional
         Maximum number of bins.
+    sample_size : int, optional
+        For large arrays, estimate the IQR from a random sample of this
+        size instead of sorting the full array. min/max are still taken
+        from the full data (cheap O(N) reductions). Set to a value >=
+        ``len(data)`` to disable sampling. Default 1_000_000.
 
     Returns
     -------
     bins : FloatArray1D
         Bins for display.
     """
-    iqr = np.subtract(*np.percentile(data, [75, 25]))
+    n = len(data)
+    if n == 0:
+        return np.array([0.0, 1.0])
+    if data.dtype.kind == "f":
+        data_min = np.nanmin(data)
+        data_max = np.nanmax(data)
+    else:
+        data_min = data.min()
+        data_max = data.max()
+    if n > sample_size:
+        rng = np.random.default_rng(0)
+        sample = data[rng.choice(n, sample_size, replace=False)]
+    else:
+        sample = data
+    if sample.dtype.kind == "f":
+        sample = sample[np.isfinite(sample)]
+    if len(sample) == 0:
+        return np.array([data_min - 1.0, data_max + 1.0])
+    iqr = np.subtract(*np.percentile(sample, [75, 25]))
     if iqr == 0:
         return np.array([data[0] - 1.0, data[0] + 1.0])
-    bin_size = 2 * iqr * len(data) ** (-1 / 3)
+    bin_size = 2 * iqr * n ** (-1 / 3)
     if data.dtype.kind in ("u", "i") and bin_size < 1:
         bin_size = 1
-    bin_min = data.min() - bin_size / 2
+    bin_min = data_min - bin_size / 2
     try:
-        n_bins = (data.max() - bin_min) / bin_size
+        n_bins = (data_max - bin_min) / bin_size
         n_bins = int(n_bins)
     except Exception:
         n_bins = 10
     if max_n_bins and n_bins > max_n_bins:
         n_bins = max_n_bins
-    bins = np.linspace(bin_min, data.max(), n_bins)
+    bins = np.linspace(bin_min, data_max, n_bins)
     return bins
+
+
+@numba.njit(parallel=True, nogil=True)
+def hist2d_numba(
+    x: FloatArray1D,
+    y: FloatArray1D,
+    x_min: float,
+    x_max: float,
+    y_min: float,
+    y_max: float,
+    nx: int,
+    ny: int,
+) -> np.ndarray:
+    """Fast 2D histogram with uniform bin edges.
+
+    Non-finite points are skipped. Edge values (== x_max / == y_max) are
+    folded into the last bin to match the inclusive-right behaviour of
+    ``np.histogram2d``.
+
+    Parameters
+    ----------
+    x, y : FloatArray1D
+        Sample coordinates.
+    x_min, x_max, y_min, y_max : float
+        Outer edges of the histogram.
+    nx, ny : int
+        Number of bins along each axis.
+
+    Returns
+    -------
+    counts : np.ndarray, shape (nx, ny), dtype int64
+        Bin counts, indexed as counts[ix, iy].
+    """
+    n_threads = numba.get_num_threads()
+    local = np.zeros((n_threads, nx, ny), dtype=np.int64)
+    dx = (x_max - x_min) / nx
+    dy = (y_max - y_min) / ny
+    n = x.shape[0]
+    chunk = (n + n_threads - 1) // n_threads
+    for t in numba.prange(n_threads):
+        start = t * chunk
+        end = start + chunk
+        if end > n:
+            end = n
+        for i in range(start, end):
+            xi = x[i]
+            yi = y[i]
+            if not (np.isfinite(xi) and np.isfinite(yi)):
+                continue
+            ix = int((xi - x_min) / dx)
+            iy = int((yi - y_min) / dy)
+            if ix == nx:
+                ix -= 1
+            if iy == ny:
+                iy -= 1
+            if 0 <= ix < nx and 0 <= iy < ny:
+                local[t, ix, iy] += 1
+    return local.sum(axis=0)
 
 
 def append_to_rec(
