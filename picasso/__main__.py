@@ -1488,8 +1488,8 @@ def _spinna_load_target_data(
 
     Returns
     -------
-    tuple[dict, dict, dict, dict, int]
-        ``(label_unc, le, exp_data, n_simulated, dim)``
+    tuple[dict, dict, dict, dict, int, dict]
+        ``(label_unc, le, exp_data, n_simulated, dim, infos)``
     """
     import numpy as np
 
@@ -1497,6 +1497,7 @@ def _spinna_load_target_data(
     le: dict = {}
     exp_data: dict = {}
     n_simulated: dict = {}
+    infos: dict = {}
     dim = 2
 
     for target in targets:
@@ -1522,6 +1523,7 @@ def _spinna_load_target_data(
             le[target] = float(row[f"le_{target}"]) / 100
 
         locs, info = io.load_locs(str(row[f"exp_data_{target}"]))
+        infos[target] = info
         pixelsize = 130
         for element in info:
             if (
@@ -1548,17 +1550,26 @@ def _spinna_load_target_data(
         else:
             n_simulated[target] = int(len(locs) / le[target])
 
-    return label_unc, le, exp_data, n_simulated, dim
+    return label_unc, le, exp_data, n_simulated, dim, infos
 
 
-def _spinna_resolve_roi(row, dim: int, targets: list) -> tuple:
+def _spinna_resolve_roi(
+    row, dim: int, targets: list, infos: dict | None = None
+) -> tuple:
     """Determine ROI parameters for a row: homogeneous or masked.
+
+    For 2D rows, if the ``area`` column is missing or empty, the area is
+    recovered from the experimental data metadata key ``"Area (um^2)"``
+    (taken from the first target's info).
 
     Returns
     -------
     tuple[bool, dict, float | None, float | None, float | None]
         ``(apply_mask, mask_paths, area, volume, z_range)``
     """
+    import pandas as pd
+    from . import lib
+
     apply_mask = True
     area = volume = z_range = None
     mask_paths = {}
@@ -1575,9 +1586,17 @@ def _spinna_resolve_roi(row, dim: int, targets: list) -> tuple:
                 )
             z_range = float(row["z_range"])
     elif dim == 2:
-        if "area" in row.index:
+        if "area" in row.index and pd.notna(row["area"]):
             area = float(row["area"])
             apply_mask = False
+        elif infos:
+            first_target = targets[0]
+            meta_area = lib.get_from_metadata(
+                infos[first_target], "Area (um^2)"
+            )
+            if meta_area is not None:
+                area = float(meta_area)
+                apply_mask = False
 
     if apply_mask:
         for target in targets:
@@ -1939,14 +1958,16 @@ def _spinna_process_row(
             row["structures_filename"]
         )
 
-    label_unc, le, exp_data, n_simulated, dim = _spinna_load_target_data(
-        row,
-        targets,
-        io,
-        le_fitting=le_fitting,
+    label_unc, le, exp_data, n_simulated, dim, infos = (
+        _spinna_load_target_data(
+            row,
+            targets,
+            io,
+            le_fitting=le_fitting,
+        )
     )
     apply_mask, mask_paths, area, volume, z_range = _spinna_resolve_roi(
-        row, dim, targets
+        row, dim, targets, infos
     )
 
     if le_fitting:
@@ -2217,7 +2238,10 @@ def _spinna_batch_analysis(
     * For homogeneous distribution:
 
     - "area" or "volume" : Area (2D simulation) or volume (3D
-        simulation) of the simulated ROI (um^2 or um^3).
+        simulation) of the simulated ROI (um^2 or um^3). For 2D rows,
+        "area" is optional: if omitted, the area is read from the
+        experimental data metadata key "Area (um^2)" (written by Picasso
+        when picks/areas are saved).
     - "z_range" : Applicable only when "volume" is provided. Defines
         the range of z coordinates (nm) of simulated molecular targets.
 

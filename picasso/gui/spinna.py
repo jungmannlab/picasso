@@ -2862,9 +2862,6 @@ class SimulationsTab(lib.Dialog):
     granularity : int
         Granularity used in generating the search space for
         fitting.
-    roi_button : QtWidgets.QPushButton
-        Buttons for loading area/volume of the ROI. Used for
-        homogenous distribution only.
     rot_dim_widget : QtWidgets.QComboBox
         Combo box for setting the dimension of the random rotations
         of simulated structures (2D/3D).
@@ -2879,9 +2876,6 @@ class SimulationsTab(lib.Dialog):
     settings_dialog : OptionalSettingsDialog
         Dialog for setting optional parameters (rotations, numbers of
         neighbors to consider at fitting).
-    single_sim_mass : float
-        Area/volume of a single simulation (um^2(or um^3)). Used for
-        homogenous distribution only.
     targets : list of str
         Names of all unique molecular targets in the loaded structures.
     window : QtWidgets.QMainWindow
@@ -2925,7 +2919,6 @@ class SimulationsTab(lib.Dialog):
         self.depth = None
         self.granularity = None
         self.n_sim_fit = None
-        self.single_sim_mass = None
         self.mixer = None
         self.current_score = 0.0
         self.structures_path = ""
@@ -3216,13 +3209,6 @@ class SimulationsTab(lib.Dialog):
         self.save_sim_result_check.setChecked(False)
         single_sim_layout.addWidget(self.save_sim_result_check, 1, 0)
 
-        self.roi_button = QtWidgets.QPushButton("Area (\u03bcm\u00b2)")
-        self.roi_button.setToolTip(
-            "Set the area (2D) or volume (3D) of the simulation."
-        )
-        self.roi_button.released.connect(self.on_roi_button_clicked)
-        single_sim_layout.addWidget(self.roi_button, 1, 1)
-
         self.run_single_sim_button = QtWidgets.QPushButton(
             "Run single simulation"
         )
@@ -3400,8 +3386,6 @@ class SimulationsTab(lib.Dialog):
                 "Observed densities (\u03bcm\u207b\u00b2)"
             )
             self.depth_stack.setCurrentIndex(0)
-            self.roi_button.setText("Area (\u03bcm\u00b2)")
-            self.single_sim_mass = None
             # adjust the observed densities if data is already available
             # and depth was specified previously
             if self.check_exp_loaded() and self.depth is not None:
@@ -3415,8 +3399,6 @@ class SimulationsTab(lib.Dialog):
             self.densities_box.setTitle(
                 "Observed densities (\u03bcm\u207b\u00b3)"
             )
-            self.roi_button.setText("Volume (\u03bcm\u00b3)")
-            self.single_sim_mass = None
             # adjust the observed densities if data is already available
             # and depth was specified previously
             if self.check_exp_loaded() and self.depth is not None:
@@ -3609,7 +3591,6 @@ class SimulationsTab(lib.Dialog):
             self.mask_button.setStyleSheet("background-color : lightgreen")
             self.rect_roi_button.setStyleSheet("background-color : gray")
             self.depth_stack.setCurrentIndex(0)
-            self.roi_button.setEnabled(False)
         else:
             self.mask_den_stack.setCurrentIndex(1)
             self.rect_roi_button.setStyleSheet("background-color : lightgreen")
@@ -3620,7 +3601,6 @@ class SimulationsTab(lib.Dialog):
                 self.depth_stack.setCurrentIndex(0)
             else:
                 self.depth_stack.setCurrentIndex(1)
-            self.roi_button.setEnabled(True)
 
     @check_structures_loaded
     @check_exp_data_loaded
@@ -3807,21 +3787,14 @@ class SimulationsTab(lib.Dialog):
         if self.mixer is None:
             return
 
-        # update area/volume in case of rectangluar ROI
+        # discard the z component if 3D data is loaded but 2D simulation
+        # is conducted
         if self.mask_den_stack.currentIndex() == 1:  # rect. ROI
-            roi_size = self.mixer.roi_size
             if self.dim_widget.currentIndex() == 0:  # 2D
-                self.roi_button.setText(f"Area: {roi_size:.0f} \u03bcm\u00b2")
-                # discard the z component if 3D data is loaded
                 self.exp_data = {
                     target: coords[:, :2]
                     for target, coords in self.exp_data.items()
                 }
-            else:  # 3D
-                self.roi_button.setText(
-                    f"Volume: {roi_size:.0f} (\u03bcm\u00b3)"
-                )
-            self.single_sim_mass = roi_size
 
         save = ""
         if self.save_fit_results_check.isChecked():
@@ -4125,17 +4098,6 @@ class SimulationsTab(lib.Dialog):
             name: self.nn_plot_settings_dialog.nn_counts[name].value()
             for name in self.nn_plot_settings_dialog.nn_counts.keys()
         }
-        if self.mask_den_stack.currentIndex() == 1:  # homogeneus dist.
-            roi = self.mixer.roi
-            self.single_sim_mass = self.mixer.roi_size
-            if roi[2] is None:
-                self.roi_button.setText(
-                    f"Area: {self.single_sim_mass:.0f} \u03bcm\u00b2"
-                )
-            else:
-                self.roi_button.setText(
-                    f"Volume: {self.single_sim_mass:.0f} \u03bcm\u00b3"
-                )
         self.load_single_sim_n_str_widgets()
         self.settings_dialog.update_neighbors_widgets()
         self.nn_plot_settings_dialog.update_neighbors_widgets()
@@ -4228,17 +4190,6 @@ class SimulationsTab(lib.Dialog):
             name: self.nn_plot_settings_dialog.nn_counts[name].value()
             for name in self.nn_plot_settings_dialog.nn_counts.keys()
         }
-        if self.mask_den_stack.currentIndex() == 1:  # homogeneous dist.
-            roi = self.mixer.roi
-            self.single_sim_mass = self.mixer.roi_size
-            if roi[2] is None:
-                self.roi_button.setText(
-                    f"Area: {self.single_sim_mass:.0f} μm²"
-                )
-            else:
-                self.roi_button.setText(
-                    f"Volume: {self.single_sim_mass:.0f} μm³"
-                )
         self.load_single_sim_n_str_widgets()
         self.settings_dialog.update_neighbors_widgets()
         self.nn_plot_settings_dialog.update_neighbors_widgets()
@@ -4360,38 +4311,6 @@ class SimulationsTab(lib.Dialog):
                 for key, value in metadata.items():
                     f.write(f"{key}: {value}\n")
 
-    def on_roi_button_clicked(self) -> None:
-        """Ask the user to input the area/volume to be simulated for a
-        single simulation."""
-        if self.mask_den_stack.currentIndex() == 1:  # rectangular ROI
-            # here mass refers to area/volume
-            if self.dim_widget.currentIndex() == 0:  # 2D
-                mass, ok = QtWidgets.QInputDialog.getInt(
-                    self,
-                    "",
-                    "Area (\u03bcm\u00b2):",
-                    100,
-                    0,
-                    1_000_000,
-                )
-                if ok:
-                    self.single_sim_mass = mass
-                    self.roi_button.setText(f"Area: {mass:.0f} \u03bcm\u00b2")
-            else:  # 3D
-                mass, ok = QtWidgets.QInputDialog.getInt(
-                    self,
-                    "",
-                    "Volume (\u03bcm\u00b3):",
-                    100,
-                    0,
-                    1_000_000,
-                )
-                if ok:
-                    self.single_sim_mass = mass
-                    self.roi_button.setText(
-                        f"Volume: {mass:.0f} \u03bcm\u00b3"
-                    )
-
     @check_structures_loaded
     def single_sim_n_total(self) -> int:
         """Find the total number of molecules for a single simulation.
@@ -4406,23 +4325,14 @@ class SimulationsTab(lib.Dialog):
         n_total : int
             Total number of molecules to simulate.
         """
-        if self.mask_den_stack.currentIndex() == 0:  # mask
-            n_total = int(
-                sum(
-                    [
-                        len(self.exp_data[t]) / self.le_spins[i].value() * 100
-                        for i, t in enumerate(self.targets)
-                    ]
-                )
+        n_total = int(
+            sum(
+                [
+                    len(self.exp_data[t]) / self.le_spins[i].value() * 100
+                    for i, t in enumerate(self.targets)
+                ]
             )
-        else:
-            tot_densities = [
-                self.densities_spins[i].value()
-                / self.le_spins[i].value()
-                * 100
-                for i in range(len(self.densities_spins))
-            ]
-            n_total = int(self.single_sim_mass * sum(tot_densities))
+        )
         return n_total
 
     @check_structures_loaded
@@ -4591,7 +4501,7 @@ class SimulationsTab(lib.Dialog):
         return label_unc, le
 
     def _setup_roi(
-        self, mode: Literal["fit", "single_sim"]
+        self,
     ) -> tuple[float | None, float | None, float | None, dict | None]:
         fail_return = (None, None, None, None)
         if self.mask_den_stack.currentIndex() == 0:  # masks
@@ -4615,7 +4525,7 @@ class SimulationsTab(lib.Dialog):
                 QtWidgets.QMessageBox.information(self, "Warning", message)
                 return fail_return
             mask_dict = None
-            width, height, depth = self.find_roi(mode=mode)
+            width, height, depth = self.find_roi()
             if width is None:
                 return fail_return
         return width, height, depth, mask_dict
@@ -4650,7 +4560,7 @@ class SimulationsTab(lib.Dialog):
             )
 
         label_unc, le = self._setup_label_unc_and_le()
-        width, height, depth, mask_dict = self._setup_roi(mode=mode)
+        width, height, depth, mask_dict = self._setup_roi()
         if width is None and mask_dict is None:
             return
 
@@ -4768,35 +4678,15 @@ class SimulationsTab(lib.Dialog):
             self.prop_str_input_spins[idx].value() - (sum_ - 100)
         )
 
-    def find_roi(
-        self,
-        mode: Literal["fit", "single_sim"] = "fit",
-    ) -> tuple[float, float, float]:
+    def find_roi(self) -> tuple[float, float, float]:
         """Find width, height, depth to conduct simulation(s) with
         homogeneous distribution.
-
-        Parameters
-        ----------
-        mode : {'fit' or 'single_sim'}
-            Specifies how to find the numbers of structures to be
-            considered.
 
         Returns
         -------
         result : tuple
             Width, height, depth (all nm).
         """
-        assert mode in ["fit", "single_sim"]
-
-        if mode == "fit":
-            return self.find_roi_fit()
-        elif mode == "single_sim":
-            return self.find_roi_single_sim()
-
-    def find_roi_fit(self) -> tuple[float, float, float]:
-        """Find width, height, depth to conduct simulation(s) with
-        homogeneous distribution for fitting, based on the input
-        densities and the exp. data."""
         target = self.targets[0]
         density = self.densities_spins[0].value()
         # convert density from um^-2 to nm^-2
@@ -4808,7 +4698,7 @@ class SimulationsTab(lib.Dialog):
         tot_density = density / le
         n_mol = self.find_n_mol_from_target(target)
 
-        # obtain depth (only 3D)
+        # get depth (only 3D)
         depth = None if self.dim_widget.currentIndex() == 0 else self.depth
 
         # find width and height - ROI is a square
@@ -4816,24 +4706,6 @@ class SimulationsTab(lib.Dialog):
             width = height = np.sqrt(n_mol / tot_density)
         else:
             width = height = np.sqrt(n_mol / tot_density / depth)
-        return width, height, depth
-
-    def find_roi_single_sim(self) -> tuple[float, float, float]:
-        """Find width, height, depth to conduct a single simulation with
-        homogeneous distribution, based on the user-selected
-        area/volume."""
-        if self.single_sim_mass is None:
-            message = "Please input the area/volume of the ROI first."
-            QtWidgets.QMessageBox.information(self, "Warning", message)
-            return [None, None, None]
-
-        if self.dim_widget.currentIndex() == 0:  # 2D:
-            depth = None
-            width = height = np.sqrt(self.single_sim_mass * 1e6)
-        else:  # 3D
-            depth = self.depth
-            width = height = np.sqrt(self.single_sim_mass * 1e9 / depth)
-
         return width, height, depth
 
     def find_n_mol_from_target(self, target: str) -> int:
