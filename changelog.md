@@ -1,6 +1,6 @@
 # Changelog
 
-Last change: 21-MAY-2026 CEST
+Last change: 25-MAY-2026 CEST
 
 ## 0.10.1
 - Faster rendering, especially in large FOV: ind. loc. precision blurring parallelized ., see [documentation](https://picassosr.readthedocs.io/en/latest/render.html/CPU-usage-on-shared-servers) + smarter implementation for 2D rendering; improvements for one-pixel-blur and global loc. prec.
@@ -8,6 +8,12 @@ Last change: 21-MAY-2026 CEST
 - Fixed linking saving `lpz`
 - Anisotripic DBSCAN (faster implementation) [DOI: 10.1021/acs.jpcb.4c02030](https://doi.org/10.1021/acs.jpcb.4c02030)
 - Improved docstrings for 3D SMLM clusterer
+- SPINNA: comparing models uses fitting modes and has cleaner progress dialog
+- SPINNA: convenient fitting of LE
+- Batch analysis in SPINNA for LE fitting
+- Batch analysis does not require area input (if found in metadata)
+- Batch analysis: clear instructions on what columns are required
+- SPINNA: area/volume button removed (deduced automatically from densities and number of molecules in the exp. data)
 
 ## 0.10.0
 

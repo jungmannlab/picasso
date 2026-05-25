@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import os
 import time
+import warnings
 from typing import Literal
 from concurrent import futures
 from multiprocessing import cpu_count
@@ -31,6 +32,7 @@ from scipy.spatial import KDTree
 from scipy.stats import ks_2samp, norm
 from sklearn.gaussian_process import GaussianProcessRegressor
 from sklearn.gaussian_process.kernels import Matern
+from sklearn.exceptions import ConvergenceWarning
 from tqdm import tqdm
 
 from . import io, lib, masking, render, __version__
@@ -239,14 +241,36 @@ def generate_N_structures(
     # target species and each column gives one structure
     n_t = len(targets)
     n_s = len(structures)
-    if n_s <= n_t:
+    if n_s < n_t:
         raise ValueError(
             "To generate the search space, the number of unique molecular"
-            " targets must be lower than the number of structures that are"
-            " investigated. Otherwise, the numbers of structures to be"
-            " simulated is constant."
+            " targets must not exceed the number of structures that are"
+            " investigated."
         )
     t_counts = _find_target_counts(targets, structures)
+
+    # special case: n_s == n_t — the linear system t_counts @ counts =
+    # N_total has zero degrees of freedom, so the structure counts are
+    # uniquely determined. Return a single-row search space without
+    # invoking the sampler.
+    if n_s == n_t:
+        N_total_arr = np.asarray(
+            [N_total[target] for target in targets], dtype=np.float64
+        )
+        try:
+            counts = np.linalg.solve(t_counts.astype(np.float64), N_total_arr)
+        except np.linalg.LinAlgError as err:
+            raise ValueError(
+                "Cannot generate a search space: t_counts is singular."
+            ) from err
+        counts = np.maximum(np.round(counts), 0).astype(np.int32)
+        structure_counts = {
+            s.title: np.array([counts[i]]) for i, s in enumerate(structures)
+        }
+        if save:
+            df = pd.DataFrame(structure_counts)
+            df.to_csv(save, index=False)
+        return structure_counts
 
     # ensure that the order of structures is correct, i.e., the free
     # paramters in the system of linear equations are on the right side
@@ -3194,6 +3218,13 @@ class SPINNA:
         # check and optionally convert N_structures
         N_structures = self.mixer.convert_N_structures_to_array(N_structures)
 
+        # short-circuit: with a single candidate there is nothing to
+        # search — the structure counts are already uniquely determined
+        # (e.g. when the number of structures equals the number of
+        # targets). Force brute-force on the lone entry to score it.
+        if N_structures.shape[0] == 1:
+            fitting_mode = "brute-force"
+
         if fitting_mode == "coarse-to-fine":
             return self.fit_coarse_to_fine(
                 N_structures,
@@ -3334,11 +3365,19 @@ class SPINNA:
         coarse_idx = self._farthest_point_sampling(proportions, n_coarse)
         N_coarse = N_structures[coarse_idx]
 
+        # keep the caller-supplied title as a prefix so that phase
+        # labels still carry round/model context
+        base_title = self.progress_title
+        coarse_title = (
+            f"{base_title} | Coarse pass" if base_title else "Coarse pass"
+        )
+        fine_title = f"{base_title} | Fine pass" if base_title else "Fine pass"
+
         # adjust the progress bar
         if isinstance(callback, lib.ProgressDialog):
             callback.setMaximum(n_coarse)
-            callback.setLabelText("Coarse pass")
-        self.progress_title = "Coarse pass"
+            callback.zero_progress(coarse_title)
+        self.progress_title = coarse_title
         N_coarse, scores_coarse = self._run_brute_force(
             N_coarse, asynch, callback
         )
@@ -3355,9 +3394,8 @@ class SPINNA:
         # adjust the progress bar again
         if isinstance(callback, lib.ProgressDialog):
             callback.setMaximum(len(N_fine))
-            callback.setValue(0)
-            callback.setLabelText("Fine pass")
-            self.progress_title = "Fine pass"
+            callback.zero_progress(fine_title)
+        self.progress_title = fine_title
         spinna_results = self.fit_stoichiometry(
             N_fine,
             fitting_mode="brute-force",
@@ -3462,15 +3500,29 @@ class SPINNA:
         n_initial = min(n_initial, n_total)
         n_iterations = min(n_iterations, n_total - n_initial)
 
+        # keep the caller-supplied title as a prefix so that phase
+        # labels still carry round/model context
+        base_title = self.progress_title
+        init_title = (
+            f"{base_title} | Bayesian (initial sampling)"
+            if base_title
+            else "Bayesian optimization (initial sampling)"
+        )
+        gp_title = (
+            f"{base_title} | Bayesian (GP-guided)"
+            if base_title
+            else "Bayesian optimization (GP-guided)"
+        )
+
         # --- Phase 1: initial space-filling design ---
         if isinstance(callback, lib.ProgressDialog):
-            callback.zero_progress("Bayesian optimization (initial sampling)")
+            callback.zero_progress(init_title)
             callback.setMaximum(n_initial)
         progress_bar = None
         if callback == "console":
             progress_bar = tqdm(
                 total=n_initial,
-                desc="Bayesian optimization (initial sampling)",
+                desc=init_title,
             )
 
         init_idx = self._farthest_point_sampling(proportions, n_initial)
@@ -3489,12 +3541,12 @@ class SPINNA:
 
         # --- Phase 2: GP-guided acquisition ---
         if isinstance(callback, lib.ProgressDialog):
-            callback.zero_progress("Bayesian optimization (GP-guided)")
+            callback.zero_progress(gp_title)
             callback.setMaximum(n_iterations)
         if callback == "console":
             progress_bar = tqdm(
                 total=n_iterations,
-                desc="Bayesian optimization (GP-guided)",
+                desc=gp_title,
             )
 
         evaluated, scores, _ = self._bayesian_gp_phase(
@@ -3608,7 +3660,9 @@ class SPINNA:
                 normalize_y=True,
                 alpha=1e-6,
             )
-            gp.fit(X_train, y_train)
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", ConvergenceWarning)
+                gp.fit(X_train, y_train)
             unevaluated_mask = ~evaluated
             mu, sigma = gp.predict(
                 proportions[unevaluated_mask], return_std=True
@@ -3980,6 +4034,11 @@ def _fit_label_unc_for_target(
     asynch: bool,
     savedir: str,
     callback,
+    fitting_mode: Literal[
+        "coarse-to-fine", "bayesian", "brute-force"
+    ] = "coarse-to-fine",
+    round_counter: list | None = None,
+    total_rounds: int | None = None,
 ) -> float:
     """Find the best-fit label-uncertainty value for a single target.
 
@@ -4021,9 +4080,10 @@ def _fit_label_unc_for_target(
 
     best_score = np.inf
     best_l_unc = 5.0
-    for l_unc_ in l_unc:
+    for k, l_unc_ in enumerate(l_unc):
         progress_title = (
-            f"Spinning with label uncertainty {l_unc_:.2f} nm for {target}"
+            f"Fitting label uncertainty for {target}: "
+            f"{l_unc_:.2f} nm ({k + 1}/{len(l_unc)})"
         )
         label_unc_input = deepcopy(label_unc_input_)
         label_unc_input[target] = l_unc_
@@ -4044,11 +4104,14 @@ def _fit_label_unc_for_target(
             savedir=savedir,
             callback=callback,
             progress_title=progress_title,
+            fitting_mode=fitting_mode,
+            round_counter=round_counter,
+            total_rounds=total_rounds,
         )[0]
         if score < best_score:
             best_score = score
             best_l_unc = l_unc_
-    return best_l_unc
+    return float(best_l_unc)
 
 
 def _compute_nn_counts(
@@ -4097,6 +4160,9 @@ def compare_models(
     asynch: bool = True,
     savedir: str = "",
     callback: lib.ProgressDialog | Literal["console"] | None = None,
+    fitting_mode: Literal[
+        "coarse-to-fine", "bayesian", "brute-force"
+    ] = "coarse-to-fine",
 ) -> tuple[float, int, dict, StructureMixer, lib.FloatArray1D]:
     """Compare different models, i.e., ``StructureMixer``'s with label
     uncertainties given the experimental dataset and
@@ -4151,6 +4217,15 @@ def compare_models(
         Progress bar to track fitting progress. If "console", the
         progress bar is displayed in the console. If None, no
         progress bar is displayed. Default is None.
+    fitting_mode : {"coarse-to-fine", "bayesian", "brute-force"}, optional
+        If "coarse-to-fine", the fitting is done in two steps: first,
+        a coarse grid of structure combinations is tested, (10% of
+        evenly distributed structure combinations) and then a finer
+        grid is tested around the best combination from the coarse
+        grid. If "bayesian", Bayesian optimization with a Gaussian
+        Process surrogate is used to efficiently search the space.
+        If "brute-force", all combinations of structures are
+        tested sequentially. Default is "coarse-to-fine".
 
     Returns
     -------
@@ -4181,7 +4256,18 @@ def compare_models(
 
     # used for the fitting of label uncertainties, each target must be
     # specified
-    label_unc_input_ = {target: lunc[0] for target, lunc in label_unc.items()}
+    label_unc_input_ = {
+        target: float(lunc[0]) for target, lunc in label_unc.items()
+    }
+
+    # count the total number of SPINNA rounds (one per fit_stoichiometry
+    # call) so the progress titles can show "Round X/Y"
+    n_models = len(models)
+    total_rounds = n_models  # final model comparison
+    for target in targets:
+        if len(label_unc[target]) > 1:
+            total_rounds += len(label_unc[target]) * n_models
+    round_counter = [0]
 
     # First we fit label_unc for each target, where we only focus on the
     # structures that contain the target. The fitting can be skipped if
@@ -4205,6 +4291,9 @@ def compare_models(
             asynch=asynch,
             savedir=savedir,
             callback=callback,
+            fitting_mode=fitting_mode,
+            round_counter=round_counter,
+            total_rounds=total_rounds,
         )
 
     # test the models with the best fitting label uncertainties; note
@@ -4215,7 +4304,7 @@ def compare_models(
     nn_counts = _compute_nn_counts(targets, models, nn_counts)
 
     # compare the models
-    progress_title = f"Spinning with label uncertainties: {label_unc}"
+    progress_title = f"Final comparison, label_unc={label_unc}"
     (best_score, best_idx, best_mixer, best_props) = (
         compare_models_given_label_unc(
             models=models,
@@ -4234,6 +4323,9 @@ def compare_models(
             savedir=savedir,
             callback=callback,
             progress_title=progress_title,
+            fitting_mode=fitting_mode,
+            round_counter=round_counter,
+            total_rounds=total_rounds,
         )
     )
     return best_score, best_idx, label_unc, best_mixer, best_props
@@ -4256,6 +4348,11 @@ def compare_models_given_label_unc(
     savedir: str = "",
     callback: lib.ProgressDialog | Literal["console"] | None = None,
     progress_title: str = "Spinning structures",
+    fitting_mode: Literal[
+        "coarse-to-fine", "bayesian", "brute-force"
+    ] = "coarse-to-fine",
+    round_counter: list | None = None,
+    total_rounds: int | None = None,
 ) -> tuple[float, int, StructureMixer, lib.FloatArray1D]:
     """Compare different models, i.e., ``StructureMixer``'s given the
     experimental dataset, stoichiometries-search-space and label
@@ -4342,6 +4439,14 @@ def compare_models_given_label_unc(
     }
 
     for i, model in enumerate(models):
+        if round_counter is not None and total_rounds is not None:
+            round_counter[0] += 1
+            round_prefix = f"[Round {round_counter[0]}/{total_rounds}] "
+        else:
+            round_prefix = ""
+        spinner_title = (
+            f"{round_prefix}{progress_title} | model {i + 1}/{len(models)}"
+        )
         search_space = generate_N_structures(model, N_total, granularity)
         mixer = StructureMixer(
             structures=model,
@@ -4358,28 +4463,29 @@ def compare_models_given_label_unc(
             mixer=mixer,
             gt_coords=exp_data,
             N_sim=N_sim,
-            progress_title=(
-                f"{progress_title} and model nr {i+1}/{len(models)}"
-            ),
+            progress_title=spinner_title,
         )
         savepath = ""
         if savedir:
             suffix = ("_").join(
                 [
-                    f"{target}_{lunc:2f}_nm"
+                    f"{target}_{lunc:.2f}_nm"
                     for target, lunc in label_unc.items()
                 ]
             )
             savepath = os.path.join(
                 savedir, f"fit_scores_model_{i+1}_label_unc_{suffix}.csv"
             )
-        # adjust the progress dialog
+        # adjust the progress dialog (zero_progress also resets the
+        # time-estimate baseline so the new phase gets a fresh ETA)
         if isinstance(callback, lib.ProgressDialog):
             callback.setMaximum(len(list(search_space.values())[0]))
+            callback.zero_progress(spinner_title)
         elif callback == "console":
-            print(f"Model {i+1}/{len(models)}")
+            print(spinner_title)
         opt_props, score = spinner.fit_stoichiometry(
             N_structures=search_space,
+            fitting_mode=fitting_mode,
             save=savepath,
             asynch=asynch,
             callback=callback,
@@ -4390,6 +4496,130 @@ def compare_models_given_label_unc(
             best_idx = i
             best_props = opt_props
     return best_score, best_idx, best_mixer, best_props
+
+
+def fit_le(
+    target_a: str,
+    target_b: str,
+    exp_data: dict,
+    granularity: int,
+    label_unc: dict,
+    distances: list[float],
+    N_sim: int = 1,
+    mask_dict: dict | None = None,
+    width: float | None = None,
+    height: float | None = None,
+    depth: float | None = None,
+    random_rot_mode: Literal["2D", "3D"] | None = "2D",
+    asynch: bool = True,
+    savedir: str = "",
+    callback: lib.ProgressDialog | Literal["console"] | None = None,
+    fitting_mode: Literal[
+        "coarse-to-fine", "bayesian", "brute-force"
+    ] = "coarse-to-fine",
+) -> tuple[dict, dict, float, float, lib.FloatArray1D, StructureMixer]:
+    """Fit labeling efficiency (LE) for two molecular target species.
+
+    Builds the three required structures internally (monomer A, monomer B,
+    and a family of heterodimers AB at the requested distances), forces
+    LE to 100% during the fit, and delegates to ``compare_models`` which
+    fits label uncertainty and picks the best heterodimer distance. The
+    recovered structure proportions are reinterpreted as LE values via
+    ``get_le_from_props``.
+
+    Parameters
+    ----------
+    target_a, target_b : str
+        Names of the two molecular target species. Both must appear as
+        keys in ``exp_data``.
+    exp_data : dict
+        Dictionary with molecular target names as keys and spatial
+        coordinates of the observed molecules as values.
+    granularity : int
+        Granularity as in ``generate_N_structures``.
+    label_unc : dict
+        Per-target list of label-uncertainty candidates. When a list has
+        a single entry the fit of that target's label_unc is skipped.
+    distances : list of float
+        Heterodimer distances (nm) to test. When a single entry is
+        given the heterodimer distance is fixed.
+    N_sim, mask_dict, width, height, depth, random_rot_mode, asynch,
+    savedir, callback, fitting_mode
+        Forwarded to ``compare_models``.
+
+    Returns
+    -------
+    le_values : dict
+        Recovered LE values per target (percent).
+    fitted_label_unc : dict
+        Label uncertainty value chosen for each target.
+    best_distance : float
+        Heterodimer distance that produced the best fit.
+    best_score : float
+        KS2 score of the best fit.
+    best_props : lib.FloatArray1D
+        Structure proportions at the best fit (monomer A, monomer B,
+        heterodimer).
+    best_mixer : StructureMixer
+        Mixer corresponding to the best fit (its ``structures`` attribute
+        holds [monomer_a, monomer_b, heterodimer(best_distance)]).
+    """
+    # validate
+    if target_a not in exp_data or target_b not in exp_data:
+        raise ValueError(
+            "Both target_a and target_b must be present in exp_data."
+        )
+    if target_a == target_b:
+        raise ValueError("target_a and target_b must be distinct.")
+    if len(distances) == 0:
+        raise ValueError("distances must contain at least one value.")
+
+    # build monomers
+    monomer_a = Structure(title=f"Monomer_{target_a}")
+    monomer_a.define_coordinates(target_a, [0.0], [0.0], [0.0])
+    monomer_b = Structure(title=f"Monomer_{target_b}")
+    monomer_b.define_coordinates(target_b, [0.0], [0.0], [0.0])
+
+    # build one model per heterodimer distance
+    models = []
+    for d in distances:
+        het = Structure(title=f"Het_{target_a}_{target_b}_{float(d):.2f}nm")
+        het.define_coordinates(target_a, [-float(d) / 2], [0.0], [0.0])
+        het.define_coordinates(target_b, [float(d) / 2], [0.0], [0.0])
+        models.append([monomer_a, monomer_b, het])
+
+    # LE-fitting trick: simulate with LE = 100% so that the recovered
+    # proportions absorb the true LE (le is on the 0-1 scale internally)
+    le = {target_a: 1.0, target_b: 1.0}
+
+    best_score, idx, fitted_label_unc, best_mixer, best_props = compare_models(
+        models=models,
+        exp_data=exp_data,
+        granularity=granularity,
+        label_unc=label_unc,
+        le=le,
+        N_sim=N_sim,
+        mask_dict=mask_dict,
+        width=width,
+        height=height,
+        depth=depth,
+        random_rot_mode=random_rot_mode,
+        asynch=asynch,
+        savedir=savedir,
+        callback=callback,
+        fitting_mode=fitting_mode,
+    )
+
+    best_distance = float(distances[idx])
+    le_values = get_le_from_props(best_mixer.structures, best_props)
+    return (
+        le_values,
+        fitted_label_unc,
+        best_distance,
+        best_score,
+        best_props,
+        best_mixer,
+    )
 
 
 def check_structures_valid_for_fitting(structures: list[Structure]) -> bool:
