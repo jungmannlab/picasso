@@ -137,10 +137,10 @@ SPINNA can be run directly from the command window to allow fast and efficient b
 
 Each row in the .csv file will specify parameters for which SPINNA is run. In the file, define the following column names (i.e., the values typed into the first row) as follows:
 
-- *structures_filename* : Path to the file with structures saved (.yaml), see **Structures tab** above.
-- *exp_data_TARGET* : Path to the file with experimental data (.hdf5) for each molecular target species. Each target in the structures must have a corresponding column, for example, *exp_data_EGFR".
-- *le_TARGET* : Labeling efficiency (%) for each molecular target species. 
-- *label_unc_TARGET* : Label uncertainty (nm) for each molecular target species. 
+- *structures_filename* : Path to the file with structures saved (.yaml), see **Structures tab** above. Required unless ``le_fitting=1``, in which case the monomer/heterodimer structures are built internally from the two ``exp_data_TARGET`` columns.
+- *exp_data_TARGET* : Path to the file with experimental data (.hdf5) for each molecular target species. Each target in the structures must have a corresponding column, for example, *exp_data_EGFR*.
+- *le_TARGET* : Labeling efficiency (%) for each molecular target species. Ignored when ``le_fitting=1``.
+- *label_unc_TARGET* : Label uncertainty (nm) for each molecular target species. When ``le_fitting=1``, this may be a comma-separated list of candidates (e.g. ``"3,4,5,6"``); a single value disables the per-target search.
 - *granularity* : Granularity used in parameters search space generation. The higher the value the more combinations of structure counts will be tested.
 - *save_filename* : Name of the .txt file where the results will be saved.
 - *NND_bin* : Bin size (nm) for plotting the NND histogram(s).
@@ -150,16 +150,19 @@ Each row in the .csv file will specify parameters for which SPINNA is run. In th
 Depending on whether a homo- or heterogeneous distribution is used, the following columns must be present:
 
 For a homogeneous distribution:
-- *area* or *volume* : Area (2D simulation) or volume (3D simulation) of the simulated ROI (um^2 or um^3).
+- *area* or *volume* : Area (2D simulation) or volume (3D simulation) of the simulated ROI (um^2 or um^3). For 2D rows, *area* is optional: if omitted, the area is read from the experimental data metadata key ``Area (um^2)`` (written by Picasso when picks/areas are saved).
 - *z_range* : Applicable only when *volume* is provided. Defines the range of z coordinates (nm) of simulated molecular targets.
 
 For a heterogeneous distribution:
 - *mask_filename_TARGET* : Name of the .npy file with the mask saved for each molecular target species.
 
 Optional columns are:
-- *rotation_mode* : Random rotations mode used in analysis. Values must be one of {*3D*, *2D*, *None*}. Default: *3D*.
+- *rotation_mode* : Random rotations mode used in analysis. Values must be one of {*3D*, *2D*, *None*}. Default: *2D*.
 - *nn_plotted* : Number of nearest neighbors plotted, default: 4.
-- *le_fitting* : 0 if standard SPINNA is ran, 1 if labeling efficiency fitting is to be performed. Then, 100% LE is used in the pipeline and different output file is saved. If the column is not provided, standard SPINNA is ran.
+- *le_fitting* : 0 if standard SPINNA is ran, 1 if labeling efficiency fitting is to be performed. When set to 1, monomer A, monomer B and heterodimer structures are built internally for each candidate ``distances`` value, label uncertainty is fit per target from the comma-separated candidates in ``label_unc_TARGET``, and the per-target LE is recovered from the fitted structure proportions. Exactly two ``exp_data_*`` columns must be present; the first maps to ``target_a``. ``-b/--bootstrap`` is ignored on LE-fitting rows. If the column is not provided, standard SPINNA is ran. For more details, see `Hellmeier, Strauss, et al. Nature Methods, 2024 <https://doi.org/10.1038/s41592-024-02242-5>`_.
+- *distances* : Comma-separated list of candidate heterodimer distances in nm (e.g. ``"5,10,15,20"``). A single value fixes the distance. Required when ``le_fitting=1``; ignored otherwise.
+
+The full column reference can also be printed from the command line via ``python -m picasso spinna --columns``.
 
 
 SPINNA in Python

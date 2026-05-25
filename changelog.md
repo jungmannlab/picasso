@@ -8,6 +8,7 @@ Last change: 25-MAY-2026 CEST
 - SPINNA: convenient fitting of LE
 - Batch analysis in SPINNA for LE fitting
 - Batch analysis does not require area input (if found in metadata)
+- Batch analysis: clear instructions on what columns are required
 - SPINNA: area/volume button removed (deduced automatically from densities and number of molecules in the exp. data)
 
 ## 0.10.0

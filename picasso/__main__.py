@@ -2555,21 +2555,31 @@ def main():  # noqa: C901
     )
 
     # spinna
+    _spinna_docs_url = (
+        "https://picassosr.readthedocs.io/en/latest/spinna.html"
+        "#command-window-batch-analysis"
+    )
     spinna_parser = subparsers.add_parser(
         "spinna",
         help=(
             "picasso single protein investigation via nearest neighbor "
             "analysis"
         ),
+        description=(
+            "Run SPINNA. Without -p, the GUI is launched. With -p, batch "
+            "analysis is run on the rows of the given .csv file. For the "
+            "full .csv column reference, run `picasso spinna --columns` "
+            f"or see {_spinna_docs_url}."
+        ),
+        epilog=f"Documentation: {_spinna_docs_url}",
     )
     spinna_parser.add_argument(
         "-p",
         "--parameters",
         type=str,
         help=(
-            ".csv file containing the parameters for spinna batch analysis;"
-            " see the documentation for details explaining the .csv file"
-            " structure."
+            ".csv file containing the parameters for spinna batch analysis."
+            " Run `picasso spinna --columns` for the column reference."
         ),
     )
     spinna_parser.add_argument(
@@ -2589,6 +2599,11 @@ def main():  # noqa: C901
         "--verbose",
         action="store_true",
         help="display progress bar for each row",
+    )
+    spinna_parser.add_argument(
+        "--columns",
+        action="store_true",
+        help=("print the .csv column reference for batch analysis and exit"),
     )
 
     # nanotron
@@ -3209,7 +3224,11 @@ def main():  # noqa: C901
         elif args.command == "server":
             _start_server()
         elif args.command == "spinna":
-            if args.parameters:
+            if args.columns:
+                import inspect
+
+                print(inspect.getdoc(_spinna_batch_analysis))
+            elif args.parameters:
                 _spinna_batch_analysis(
                     args.parameters,
                     args.asynch,
