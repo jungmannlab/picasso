@@ -1,6 +1,6 @@
 # Changelog
 
-Last change: 25-MAY-2026 CEST
+Last change: 26-MAY-2026 CEST
 
 ## 0.10.1
 
@@ -20,6 +20,7 @@ This patch adds a number of new, useful features rather than simply fixing the b
 - SPINNA: area/volume button removed (deduced automatically from densities and number of molecules in the exp. data)
 - Flake8 clean-up
 - Efficient Filter: much lower RAM usage + faster filtering by histogram selection (1D/2D), especially for very large datasets
+- Fixed Gauss-fitting error when spot's sum is zero (zero division error)
 
 ## 0.10.0
 
