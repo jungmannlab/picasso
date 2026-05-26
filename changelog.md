@@ -6,8 +6,7 @@ Last change: 26-MAY-2026 CEST
 
 This patch adds a number of new, useful features rather than simply fixing the bugs found in 0.10.0.
 
-- Faster rendering, especially in large FOV: ind. loc. precision blurring parallelized ., see [documentation](https://picassosr.readthedocs.io/en/latest/render.html/CPU-usage-on-shared-servers) + smarter implementation for 2D rendering; improvements for one-pixel-blur and global loc. prec.
-- Multi-level spatial indexing for quick zoomed-in rendering
+- Faster rendering through improvements for all blur methods and multi-level spatial indexing for quick zoomed-in rendering
 - Multichannel rendering supports colormaps, not only a single RGB color
 - Fixed linking saving `lpz`
 - Anisotripic DBSCAN (faster implementation) [DOI: 10.1021/acs.jpcb.4c02030](https://doi.org/10.1021/acs.jpcb.4c02030)

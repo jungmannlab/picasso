@@ -7,7 +7,6 @@ picasso.masking.
 
 import sys
 
-import numba
 import numpy as np
 import pandas as pd
 import pytest
@@ -80,14 +79,6 @@ def locs_3d(locs):
 def image(locs, info):
     """Rendered image used by masking tests."""
     return render.render(locs, info, oversampling=13)[1]
-
-
-@pytest.fixture
-def reset_render_threads():
-    """Save and restore render's cached thread count around a test."""
-    saved = render._render_threads_cached
-    yield
-    render._render_threads_cached = saved
 
 
 @pytest.fixture(scope="module")
@@ -263,89 +254,6 @@ class TestRender:
             ang=(0.5, 0.3, 0.2),
         )
         assert not np.array_equal(im_no_rot, im_rot)
-
-
-# ---------------------------------------------------------------------------
-# Render threading
-# ---------------------------------------------------------------------------
-
-
-class TestRenderThreads:
-    """set_render_threads / _render_threads resolution and equivalence."""
-
-    def test_set_value_caches(self, reset_render_threads):
-        hw_max = max(1, numba.get_num_threads())
-        render.set_render_threads(2)
-        assert render._render_threads() == min(2, hw_max)
-
-    def test_clamps_above_hw_max(self, reset_render_threads):
-        hw_max = max(1, numba.get_num_threads())
-        render.set_render_threads(hw_max + 100)
-        assert render._render_threads() == hw_max
-
-    def test_clamps_below_one(self, reset_render_threads):
-        render.set_render_threads(0)
-        assert render._render_threads() == 1
-
-    def test_none_clears_cache(self, reset_render_threads):
-        render.set_render_threads(3)
-        render.set_render_threads(None)
-        assert render._render_threads_cached is None
-
-    @pytest.mark.parametrize("blur_method", ["gaussian", "gaussian_iso"])
-    def test_thread_count_does_not_change_result(
-        self, locs, info, reset_render_threads, blur_method
-    ):
-        """Serial and parallel render paths must produce numerically
-        equivalent images (only float32 sum order differs)."""
-        hw_max = max(1, numba.get_num_threads())
-        if hw_max < 2:
-            pytest.skip("requires >=2 numba threads")
-        render.set_render_threads(1)
-        _, im_serial = render.render(
-            locs,
-            info,
-            oversampling=5,
-            viewport=FULL_VIEWPORT,
-            blur_method=blur_method,
-        )
-        render.set_render_threads(min(8, hw_max))
-        _, im_parallel = render.render(
-            locs,
-            info,
-            oversampling=5,
-            viewport=FULL_VIEWPORT,
-            blur_method=blur_method,
-        )
-        assert im_serial.shape == im_parallel.shape
-        assert np.allclose(im_serial, im_parallel, rtol=1e-4, atol=1e-4)
-
-    def test_thread_count_does_not_change_result_gaussian_rot(
-        self, locs_3d, info, reset_render_threads
-    ):
-        """Same equivalence check for the rotated-Gaussian kernel."""
-        hw_max = max(1, numba.get_num_threads())
-        if hw_max < 2:
-            pytest.skip("requires >=2 numba threads")
-        render.set_render_threads(1)
-        _, im_serial = render.render(
-            locs_3d,
-            info,
-            oversampling=5,
-            viewport=FULL_VIEWPORT,
-            blur_method="gaussian",
-            ang=(0.1, 0.2, 0.3),
-        )
-        render.set_render_threads(min(8, hw_max))
-        _, im_parallel = render.render(
-            locs_3d,
-            info,
-            oversampling=5,
-            viewport=FULL_VIEWPORT,
-            blur_method="gaussian",
-            ang=(0.1, 0.2, 0.3),
-        )
-        assert np.allclose(im_serial, im_parallel, rtol=1e-4, atol=1e-4)
 
 
 # ---------------------------------------------------------------------------

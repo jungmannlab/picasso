@@ -110,33 +110,6 @@ If the outcome of G5M seems unsatisfactory, please check the following:
 - Adjust min. locs;
 - Adjust DBSCAN (or other clustering algorithm) parameters. For example, if G5M takes too long to run, the DBSCAN clusters most likely contain too many molecules. In such a case, we recommend splitting such clusters further;
 
-CPU usage on shared servers
----------------------------
-
-Rendering with the ``gaussian`` and ``gaussian_iso`` blur methods (and the rotated variants used in the 3D rotation window) is parallelized across CPU cores. On a single workstation this is likely the desired behaviour, but on a shared compute server, most interactions with the canvas (zooming, rotation, changing display settings) would otherwise fan out to **all** available cores — so a handful of simultaneous users can saturate the machine and stall each other.
-
-To keep Picasso polite on shared hardware, the maximum number of threads used by the parallel render kernels is capped (default: 8). The cap is resolved on the first render call in this order; the first match wins:
-
-1. **User setting** ``Render -> CPU Threads`` in ``~/.picasso/settings.yaml``. Open ``View > User Settings`` in Picasso: Render to edit, or edit the YAML directly::
-
-    Render:
-      CPU Threads: 4
-
-2. **Default**: ``min(8, available cores)``.
-
-The resolved value is clamped to ``[1, available cores]`` and cached for the lifetime of the process. From a script you can override it programmatically::
-
-    from picasso import render
-    render.set_render_threads(2)   # cap at 2 threads
-    render.set_render_threads(None)  # clear cache, re-read env var / settings
-
-Recommended values:
-
-- **Personal workstation (4-16 cores):** leave the default, or set to the core count.
-- **Shared server with N concurrent users:** ``max(2, cores // N)`` is a reasonable starting point. For a 64-core box with ~25 simultaneous users, ``PICASSO_RENDER_THREADS=2`` keeps any single render from monopolizing the machine while still giving each user a 2x speedup over single-threaded rendering.
-
-Note: this only affects the parallel rendering kernels. Other Picasso modules (Localize, Average, postprocessing) use their own multiprocessing controls and are not influenced by this setting.
-
 Dialogs
 -------
 

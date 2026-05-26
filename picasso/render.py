@@ -33,61 +33,6 @@ _DRAW_MAX_SIGMA = 3  # max. sigma from mean to render (mu +/- 3 sigma)
 N_GROUP_COLORS = 8
 POLYGON_POINTER_SIZE = 16  # must be even
 
-# Cap on Numba threads used by the parallel render kernels. Picasso is
-# often deployed on shared servers where dozens of users render
-# simultaneously, so we don't grab every core by default. Resolved
-# lazily from PICASSO_RENDER_THREADS, then ``settings["Render"]["CPU
-# Threads"]``, falling back to ``_DEFAULT_RENDER_THREADS``.
-_DEFAULT_RENDER_THREADS = 8
-_render_threads_cached: int | None = None
-
-
-def _render_threads() -> int:
-    """Return the max Numba thread count for parallel render kernels.
-
-    Resolution order (first wins):
-      1. env var ``PICASSO_RENDER_THREADS``
-      2. user setting ``Render -> CPU Threads`` (see io.load_user_settings)
-      3. ``min(_DEFAULT_RENDER_THREADS, numba.get_num_threads())``
-
-    The value is clamped to ``[1, numba.get_num_threads()]`` and cached.
-    Call ``set_render_threads(None)`` to invalidate the cache (e.g. after
-    editing the settings file at runtime).
-    """
-    global _render_threads_cached
-    if _render_threads_cached is not None:
-        return _render_threads_cached
-
-    hw_max = max(1, numba.get_num_threads())
-    n: int | None = None
-    try:
-        settings = io.load_user_settings()
-        raw = settings["Render"]["CPU Threads"]
-        if raw not in ("", None, {}):  # AutoDict returns {} on miss
-            n = int(raw)
-    except (KeyError, TypeError, ValueError):
-        n = None
-
-    if n is None:
-        n = min(_DEFAULT_RENDER_THREADS, hw_max)
-
-    _render_threads_cached = max(1, min(int(n), hw_max))
-    return _render_threads_cached
-
-
-def set_render_threads(n: int | None) -> None:
-    """Set the max thread count for parallel render kernels.
-
-    Pass ``None`` to clear the cache and force re-resolution from env
-    var / user settings on the next render.
-    """
-    global _render_threads_cached
-    if n is None:
-        _render_threads_cached = None
-        return
-    hw_max = max(1, numba.get_num_threads())
-    _render_threads_cached = max(1, min(int(n), hw_max))
-
 
 def render(
     locs: pd.DataFrame,
@@ -544,26 +489,9 @@ def _fill3d(
         image[j, i, k] += 1
 
 
-_PER_THREAD_BUFFER_BUDGET_BYTES = 256 * 1024 * 1024
-
-
-def _n_threads_for_buffers(
-    n_pixel_y: int, n_pixel_x: int, itemsize: int, n_locs: int
-) -> int:
-    """Decide how many threads to use for per-thread image accumulators.
-
-    Bounded by the available Numba threads, a memory budget on the
-    per-thread image stack, and the number of localizations."""
-    bytes_per_buffer = n_pixel_y * n_pixel_x * itemsize
-    if bytes_per_buffer <= 0:
-        return 1
-    max_by_budget = max(1, _PER_THREAD_BUFFER_BUDGET_BYTES // bytes_per_buffer)
-    return int(min(_render_threads(), max_by_budget, max(1, n_locs)))
-
-
 @numba.njit(cache=True)
 def _draw_gaussian_loc(
-    buf: lib.FloatArray2D,
+    image: lib.FloatArray2D,
     x_: float,
     y_: float,
     sx_: float,
@@ -571,7 +499,7 @@ def _draw_gaussian_loc(
     n_pixel_x: int,
     n_pixel_y: int,
 ) -> None:
-    """Render a single separable 2D Gaussian into ``buf``."""
+    """Render a single separable 2D Gaussian into ``image``."""
     max_y_off = _DRAW_MAX_SIGMA * sy_
     i_min = np.int32(y_ - max_y_off)
     if i_min < 0:
@@ -605,39 +533,12 @@ def _draw_gaussian_loc(
         gy[ii] = norm * np.exp(-dy * dy * inv_2sy2)
     for ii in range(ny):
         gy_i = gy[ii]
-        row = buf[i_min + ii]
+        row = image[i_min + ii]
         for jj in range(nx):
             row[j_min + jj] += gy_i * gx[jj]
 
 
-@numba.njit(parallel=True, cache=True)
-def _fill_gaussian_kernel(
-    buffers: lib.FloatArray3D,
-    x: lib.FloatArray1D,
-    y: lib.FloatArray1D,
-    sx: lib.FloatArray1D,
-    sy: lib.FloatArray1D,
-    n_pixel_x: int,
-    n_pixel_y: int,
-    n_threads: int,
-) -> None:
-    """Parallel separable-Gaussian accumulator. Each prange iteration
-    processes a contiguous slice of localizations into its own image
-    buffer ``buffers[t]`` (race-free)."""
-    n_locs = len(x)
-    chunk = (n_locs + n_threads - 1) // n_threads
-    for t in numba.prange(n_threads):
-        start = t * chunk
-        end = start + chunk
-        if end > n_locs:
-            end = n_locs
-        buf = buffers[t]
-        for k in range(start, end):
-            _draw_gaussian_loc(
-                buf, x[k], y[k], sx[k], sy[k], n_pixel_x, n_pixel_y
-            )
-
-
+@numba.njit(cache=True)
 def _fill_gaussian(
     image: lib.FloatArray2D,
     x: lib.FloatArray1D,
@@ -665,33 +566,16 @@ def _fill_gaussian(
     n_locs = len(x)
     if n_locs == 0:
         return
-    n_threads = _n_threads_for_buffers(
-        n_pixel_y, n_pixel_x, image.dtype.itemsize, n_locs
-    )
-    if n_threads <= 1:
-        # Single-thread path: write directly into image to skip the
-        # buffer-stack allocation and reduction.
-        _fill_gaussian_kernel(
-            image.reshape(1, n_pixel_y, n_pixel_x),
-            x,
-            y,
-            sx,
-            sy,
-            n_pixel_x,
-            n_pixel_y,
-            1,
+
+    for i in range(n_locs):
+        _draw_gaussian_loc(
+            image, x[i], y[i], sx[i], sy[i], n_pixel_x, n_pixel_y
         )
-        return
-    buffers = np.zeros((n_threads, n_pixel_y, n_pixel_x), dtype=image.dtype)
-    _fill_gaussian_kernel(
-        buffers, x, y, sx, sy, n_pixel_x, n_pixel_y, n_threads
-    )
-    image += buffers.sum(axis=0)
 
 
 @numba.njit(cache=True)
 def _draw_gaussian_rot_loc(
-    buf: lib.FloatArray2D,
+    image: lib.FloatArray2D,
     x_: float,
     y_: float,
     sx_: float,
@@ -703,7 +587,7 @@ def _draw_gaussian_rot_loc(
     rot_matrixT: lib.Array3x3,
 ) -> None:
     """Render a single rotated 2D Gaussian (projected from 3D) into
-    ``buf``."""
+    ``image``."""
     cov = np.zeros((3, 3), dtype=np.float32)
     cov[0, 0] = sx_ * sx_
     cov[1, 1] = sy_ * sy_
@@ -740,54 +624,14 @@ def _draw_gaussian_rot_loc(
         for j in range(j_min, j_max):
             a = np.float32(j + 0.5 - x_)
             exponent = a * a * inv00 + a * b * (inv01 + inv10) + b * b * inv11
-            buf[i, j] += norm * np.exp(-0.5 * exponent)
+            image[i, j] += norm * np.exp(-0.5 * exponent)
 
 
-@numba.njit(parallel=True, cache=True)
-def _fill_gaussian_rot_kernel(
-    buffers: lib.FloatArray3D,
-    x: lib.FloatArray1D,
-    y: lib.FloatArray1D,
-    z: lib.FloatArray1D,
-    sx: lib.FloatArray1D,
-    sy: lib.FloatArray1D,
-    sz: lib.FloatArray1D,
-    n_pixel_x: int,
-    n_pixel_y: int,
-    rot_matrix: lib.Array3x3,
-    rot_matrixT: lib.Array3x3,
-    n_threads: int,
-) -> None:
-    """Parallel rotated-Gaussian accumulator. Per-thread image buffers
-    in ``buffers[t]`` are race-free across prange iterations."""
-    n_locs = len(x)
-    chunk = (n_locs + n_threads - 1) // n_threads
-    for t in numba.prange(n_threads):
-        start = t * chunk
-        end = start + chunk
-        if end > n_locs:
-            end = n_locs
-        buf = buffers[t]
-        for k in range(start, end):
-            _draw_gaussian_rot_loc(
-                buf,
-                x[k],
-                y[k],
-                sx[k],
-                sy[k],
-                sz[k],
-                n_pixel_x,
-                n_pixel_y,
-                rot_matrix,
-                rot_matrixT,
-            )
-
-
+@numba.njit(cache=True)
 def _fill_gaussian_rot(
     image: lib.FloatArray2D,
     x: lib.FloatArray1D,
     y: lib.FloatArray1D,
-    z: lib.FloatArray1D,
     sx: lib.FloatArray1D,
     sy: lib.FloatArray1D,
     sz: lib.FloatArray1D,
@@ -844,41 +688,19 @@ def _fill_gaussian_rot(
     rot_matrix = (rot_mat_x @ rot_mat_y @ rot_mat_z).astype(np.float32)
     rot_matrixT = np.ascontiguousarray(rot_matrix.T)
 
-    n_threads = _n_threads_for_buffers(
-        n_pixel_y, n_pixel_x, image.dtype.itemsize, n_locs
-    )
-    if n_threads <= 1:
-        _fill_gaussian_rot_kernel(
-            image.reshape(1, n_pixel_y, n_pixel_x),
-            x,
-            y,
-            z,
-            sx,
-            sy,
-            sz,
+    for i in range(n_locs):
+        _draw_gaussian_rot_loc(
+            image,
+            x[i],
+            y[i],
+            sx[i],
+            sy[i],
+            sz[i],
             n_pixel_x,
             n_pixel_y,
             rot_matrix,
             rot_matrixT,
-            1,
         )
-        return
-    buffers = np.zeros((n_threads, n_pixel_y, n_pixel_x), dtype=image.dtype)
-    _fill_gaussian_rot_kernel(
-        buffers,
-        x,
-        y,
-        z,
-        sx,
-        sy,
-        sz,
-        n_pixel_x,
-        n_pixel_y,
-        rot_matrix,
-        rot_matrixT,
-        n_threads,
-    )
-    image += buffers.sum(axis=0)
 
 
 @numba.njit
@@ -1302,9 +1124,7 @@ def _render_gaussian(
         sx = blur_width[in_view]
         sz = blur_depth[in_view]
 
-        _fill_gaussian_rot(
-            image, x, y, z, sx, sy, sz, n_pixel_x, n_pixel_y, ang
-        )
+        _fill_gaussian_rot(image, x, y, sx, sy, sz, n_pixel_x, n_pixel_y, ang)
 
     n = len(x)
     return n, image
@@ -1401,9 +1221,7 @@ def _render_gaussian_iso(
         sx = sy
         sz = blur_depth[in_view]
 
-        _fill_gaussian_rot(
-            image, x, y, z, sx, sy, sz, n_pixel_x, n_pixel_y, ang
-        )
+        _fill_gaussian_rot(image, x, y, sx, sy, sz, n_pixel_x, n_pixel_y, ang)
 
     return len(x), image
 
