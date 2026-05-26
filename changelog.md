@@ -20,6 +20,7 @@ This patch adds a number of new, useful features rather than simply fixing the b
 - Flake8 clean-up
 - Efficient Filter: much lower RAM usage + faster filtering by histogram selection (1D/2D), especially for very large datasets
 - Fixed Gauss-fitting error when spot's sum is zero (zero division error)
+- Fixed NND plot reindexing after fitting (#665)
 
 ## 0.10.0
 

@@ -4753,9 +4753,18 @@ class SimulationsTab(lib.Dialog):
             if self.mixer is None
             else self.mixer
         )
-        t1, t2, _ = mixer.get_neighbor_idx(duplicate=True)[
-            self.current_nnd_idx
-        ]
+        neighbor_idx = mixer.get_neighbor_idx(duplicate=True)
+        # clamp index — after a fit the mixer may have fewer pairs than
+        # the previously-shown index
+        N = min(
+            len(neighbor_idx),
+            max(len(self.nnd_hist_data_exp), len(self.nnd_hist_data_sim)),
+        )
+        if N == 0:
+            return
+        if self.current_nnd_idx >= N:
+            self.current_nnd_idx = 0
+        t1, t2, _ = neighbor_idx[self.current_nnd_idx]
 
         # set the title (with ks2 score if available)
         title = f"{plot_params['title']}{t1} \u2192 {t2}"
