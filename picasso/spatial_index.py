@@ -39,7 +39,7 @@ _TARGET_BLOCKS_PER_EDGE = 64
 # locs DataFrame and lets the renderer's vectorised ``in_view`` mask do
 # the filtering -- avoiding a pandas ``iloc`` copy of nearly all rows,
 # which dominates redraw cost at full-FOV (see ``query_viewport``).
-_BYPASS_COVERAGE_RATIO = 0.25
+_BYPASS_COVERAGE_RATIO = 0.1
 
 
 @dataclass
