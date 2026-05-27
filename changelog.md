@@ -27,6 +27,7 @@ This patch adds a number of new, useful features rather than simply fixing the b
 - Render: Load FOV keeps the aspect ratio of the input .txt file
 - Render: Files dialog resizing fixed
 - Render GUI: show 3D clustering widgets only when 3D data is loaded
+- SPINNA GUIL show 3D masking widgets only if 3D mask is selected
 
 ## 0.10.0
 

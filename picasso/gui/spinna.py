@@ -462,9 +462,7 @@ class MaskGeneratorTab(lib.Dialog):
         mask_layout.addWidget(self.load_locs_button, 0, 0, 1, 3)
 
         # isotropic mask
-        self.isotropic_mask_check = QtWidgets.QCheckBox(
-            "Isotropic mask (3D only)"
-        )
+        self.isotropic_mask_check = QtWidgets.QCheckBox("Isotropic mask")
         self.isotropic_mask_check.setToolTip(
             "Keep mask pixel/voxel size and blur isotropic?"
         )
@@ -475,12 +473,12 @@ class MaskGeneratorTab(lib.Dialog):
         mask_layout.addWidget(self.isotropic_mask_check, 1, 0)
 
         # anisotropic mask labels
-        xy_label = QtWidgets.QLabel("xy")
-        xy_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
-        mask_layout.addWidget(xy_label, 1, 1)
-        z_label = QtWidgets.QLabel("z (3D only)")
-        z_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
-        mask_layout.addWidget(z_label, 1, 2)
+        self.xy_label = QtWidgets.QLabel("xy")
+        self.xy_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+        mask_layout.addWidget(self.xy_label, 1, 1)
+        self.z_label = QtWidgets.QLabel("z")
+        self.z_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+        mask_layout.addWidget(self.z_label, 1, 2)
 
         # mask pixel / voxel size
         pixel_label = QtWidgets.QLabel("Mask pixel/voxel size (nm):")
@@ -523,6 +521,16 @@ class MaskGeneratorTab(lib.Dialog):
         self.mask_blur_z.setValue(500)
         self.mask_blur_z.valueChanged.connect(self.on_mask_blur_changed)
         mask_layout.addWidget(self.mask_blur_z, 3, 2)
+
+        # default to 2D: hide anisotropic widgets
+        for widget in (
+            self.isotropic_mask_check,
+            self.xy_label,
+            self.z_label,
+            self.mask_binsize_z,
+            self.mask_blur_z,
+        ):
+            widget.setVisible(False)
 
         # ndimensions:
         ndim_label = QtWidgets.QLabel("Mask dimensionality:")
@@ -873,15 +881,22 @@ class MaskGeneratorTab(lib.Dialog):
             self.mask_blur_z.blockSignals(False)
 
     def on_mask_ndim_changed(self, index: int) -> None:
-        """Show/hide the z-slicing options for 3D masks."""
-        if index == 0:  # 2D
-            self.zslice_check.setVisible(False)
+        """Show/hide the anisotropic mask and z-slicing widgets
+        depending on whether a 2D or 3D mask is selected."""
+        is_3d = index == 1
+        for widget in (
+            self.isotropic_mask_check,
+            self.xy_label,
+            self.z_label,
+            self.mask_binsize_z,
+            self.mask_blur_z,
+            self.zslice_check,
+            self.zslice_slider,
+        ):
+            widget.setVisible(is_3d)
+        if not is_3d:
             self.zslice_check.setChecked(False)
-            self.zslice_slider.setVisible(False)
             self.zslice_slider.setValue(0)
-        elif index == 1:  # 3D
-            self.zslice_check.setVisible(True)
-            self.zslice_slider.setVisible(True)
 
     def on_mask_binsize_changed(self, value: int) -> None:
         """If isotropic mask is checked, set the same value for all
