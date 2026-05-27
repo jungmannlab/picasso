@@ -25,6 +25,7 @@ This patch adds a number of new, useful features rather than simply fixing the b
 - Removed render property cache since it did not provide any significant speed improvement
 - Installers are distributed with readme.txt files (previously .rst)
 - Render: Load FOV keeps the aspect ratio of the input .txt file
+- Render: Files dialog resizing fixed
 
 ## 0.10.0
 

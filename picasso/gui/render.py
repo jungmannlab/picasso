@@ -443,7 +443,6 @@ class DatasetDialog(lib.Dialog):
         self.builtin_cmap_stops = {}
         layout = QtWidgets.QGridLayout()
         self.setLayout(layout)
-        self.setMaximumHeight(1000)
 
         # add non-scrollable elements - left side
         self.legend = QtWidgets.QCheckBox("Show legend")
@@ -502,13 +501,16 @@ class DatasetDialog(lib.Dialog):
 
         # add scrollable area which will display all channels, below
         # the non-scrollable elements
-        scroll = QtWidgets.QScrollArea(self)
-        scroll.setWidgetResizable(True)
+        self._scroll = QtWidgets.QScrollArea(self)
+        self._scroll.setWidgetResizable(True)
+        self._scroll.setHorizontalScrollBarPolicy(
+            QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
         self.container = QtWidgets.QWidget()
-        scroll.setWidget(self.container)
+        self._scroll.setWidget(self.container)
         self.scroll_area = QtWidgets.QGridLayout(self.container)
         self.scroll_area.setAlignment(QtCore.Qt.AlignmentFlag.AlignTop)
-        layout.addWidget(scroll, 4, 0, 1, 3)
+        layout.addWidget(self._scroll, 4, 0, 1, 3)
 
         self.checks = []
         self.title = []
@@ -677,9 +679,16 @@ class DatasetDialog(lib.Dialog):
         self.scroll_area.addWidget(intensity, currentline, 4)
         self.scroll_area.addWidget(p, currentline, 5)
 
-        # adjust the size of the dialog
-        hint = self.container.sizeHint()
-        lib.adjust_widget_size(self, hint, 45, 150)
+        self._fit_scroll_width()
+
+    def _fit_scroll_width(self) -> None:
+        """Ensure the dialog is wide enough that the scroll area's
+        contents fit horizontally without a scrollbar. Only ever grows
+        the minimum width; never shrinks the dialog."""
+        self.container.adjustSize()
+        needed = self.container.sizeHint().width()
+        frame = 2 * self._scroll.frameWidth()
+        self._scroll.setMinimumWidth(needed + frame)
 
     def update_colors(self) -> None:
         """Change colors in self.colordisp_all and updates the scene in
@@ -709,13 +718,11 @@ class DatasetDialog(lib.Dialog):
                     else:
                         self.checks[i].setText(new_title)
                     self.update_viewport()
-                    # change size of the dialog
-                    hint = self.scroll_area.sizeHint()
-                    lib.adjust_widget_size(self, hint, 45, 150)
                     # change name in the fast render dialog
                     self.window.fast_render_dialog.channel.setItemText(
                         i + 1, new_title
                     )
+                    self._fit_scroll_width()
                 break
 
     def _close_one_channel(self, i: int, render_=True) -> None:
@@ -799,9 +806,7 @@ class DatasetDialog(lib.Dialog):
         # remove the channel from test clustering dialog
         self.window.test_clusterer_dialog.channels.removeItem(i)
 
-        # adjust the size of the dialog
-        hint = self.scroll_area.sizeHint()
-        lib.adjust_widget_size(self, hint, 45, 150)
+        self._fit_scroll_width()
 
     def close_file(self, i: int | str, render=True) -> None:
         """Close a given channel (defined by its index of name) and
@@ -1000,7 +1005,7 @@ class DatasetDialog(lib.Dialog):
             self.update_colors()
 
     def sizeHint(self) -> QtCore.QSize:
-        return QtCore.QSize(600, 350)
+        return QtCore.QSize(700, 500)
 
 
 class CustomColormapDialog(lib.Dialog):
