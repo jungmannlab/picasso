@@ -2410,6 +2410,9 @@ def plot_subclustering_check(
         Figure and axes if ``return_fig`` is True, otherwise
         (None, None).
     """
+    has_clustered = len(clustered_n_events) > 0
+    has_sparse = len(sparse_n_events) > 0
+
     m_clustered = clustered_n_events.mean()
     m_sparse = sparse_n_events.mean()
     s_clustered = clustered_n_events.std()
@@ -2417,54 +2420,73 @@ def plot_subclustering_check(
 
     # create the plot
     fig, ax1 = plt.subplots(1, figsize=(6, 4), constrained_layout=True)
-    min_bin, max_bin = np.percentile(clustered_n_events, [2.5, 97.5])
-    vals, counts = np.unique(clustered_n_events, return_counts=True)
-    if clustering_dist is not None:
-        label = (
-            f"Clustered (d < {clustering_dist:.1f} nm) "
-            f"{m_clustered:.1f} +/- {s_clustered:.1f}"
+    if has_clustered or has_sparse:
+        all_events = np.concatenate((sparse_n_events, clustered_n_events))
+        min_bin, max_bin = np.percentile(all_events, [2.5, 97.5])
+
+    if has_clustered:
+        vals, counts = np.unique(clustered_n_events, return_counts=True)
+        if clustering_dist is not None:
+            label = (
+                f"Clustered (d < {clustering_dist:.1f} nm) "
+                f"{m_clustered:.1f} +/- {s_clustered:.1f}"
+            )
+        else:
+            label = f"Clustered {m_clustered:.1f} +/- {s_clustered:.1f}"
+        ax1.bar(
+            vals,
+            counts,
+            width=0.8,
+            alpha=0.5,
+            label=label,
+            color="C0",
+        )
+        ax1.axvline(m_clustered, color="C0", linestyle="--")
+
+    if has_sparse:
+        vals, counts = np.unique(sparse_n_events, return_counts=True)
+        if sparse_dist is not None:
+            label = (
+                f"Sparse (d > {sparse_dist:.1f} nm) "
+                f"{m_sparse:.1f} +/- {s_sparse:.1f}"
+            )
+        else:
+            label = f"Sparse {m_sparse:.1f} +/- {s_sparse:.1f}"
+        ax1.bar(
+            vals,
+            counts,
+            width=0.8,
+            alpha=0.5,
+            label=label,
+            color="C1",
+        )
+        ax1.axvline(m_sparse, color="C1", linestyle="--")
+
+    if has_clustered or has_sparse:
+        ax1.set_xlabel("Number of events")
+        ax1.set_ylabel("Counts")
+        ax1.set_xlim(min_bin - 1, max_bin + 1)
+        ax1.legend()
+
+    if has_clustered and has_sparse:
+        stat, p_perm, p = permutation_test(clustered_n_events, sparse_n_events)
+        p_value_str = r"$p_{value}$"
+        title = (
+            f"KS test: stat={stat:.4f}\n"
+            f"permutation {p_value_str}={p_perm:.4f}\n"
+            f"theoretical {p_value_str}={p:.4f}"
+        )
+    elif has_clustered or has_sparse:
+        title = (
+            "Only one population found, no statistical test performed; "
+            "adjust distance parameters."
         )
     else:
-        label = f"Clustered {m_clustered:.1f} +/- {s_clustered:.1f}"
-    ax1.bar(
-        vals,
-        counts,
-        width=0.8,
-        alpha=0.5,
-        label=label,
-        color="C0",
-    )
-    ax1.axvline(m_clustered, color="C0", linestyle="--")
-    vals, counts = np.unique(sparse_n_events, return_counts=True)
-    if sparse_dist is not None:
-        label = (
-            f"Sparse (d > {sparse_dist:.1f} nm) "
-            f"{m_sparse:.1f} +/- {s_sparse:.1f}"
+        title = (
+            "No molecules found in either population, adjust distance"
+            " parameters."
         )
-    else:
-        label = f"Sparse {m_sparse:.1f} +/- {s_sparse:.1f}"
-    ax1.bar(
-        vals,
-        counts,
-        width=0.8,
-        alpha=0.5,
-        label=label,
-        color="C1",
-    )
-    ax1.axvline(m_sparse, color="C1", linestyle="--")
-    ax1.set_xlabel("Number of events")
-    ax1.set_ylabel("Counts")
-    ax1.set_xlim(min_bin - 1, max_bin + 1)
-    # add stat. tests in the title:
-    stat, p_perm, p = permutation_test(clustered_n_events, sparse_n_events)
-    p_value_str = r"$p_{value}$"
-    title = (
-        f"KS test: stat={stat:.4f}\n"
-        f"permutation {p_value_str}={p_perm:.4f}\n"
-        f"theoretical {p_value_str}={p:.4f}"
-    )
     ax1.set_title(title, fontsize=10)
-    ax1.legend()
     if len(plot_path):
         if isinstance(plot_path, str):
             plot_path = [plot_path]
