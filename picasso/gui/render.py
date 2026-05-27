@@ -2320,17 +2320,21 @@ class DbscanDialog(lib.Dialog):
         Contains epsilon (nm) for DBSCAN (see scikit-learn).
     radius_z : QDoubleSpinBox
         Contains epsilon in the z direction (nm) for anisotropic 3D
-        DBSCAN. Ignored for 2D data.
+        DBSCAN. Shown only if 3D data is present.
     save_areas : QCheckBox
         Whether to save cluster areas as .csv file.
     save_centers : QCheckBox
         Whether to save cluster centers.
     """
 
-    def __init__(self, window: QtWidgets.QMainWindow) -> None:
+    def __init__(
+        self,
+        window: QtWidgets.QMainWindow,
+        flag_3D: bool = False,
+    ) -> None:
         super().__init__(window)
         self.window = window
-        self.setWindowTitle("Enter parameters")
+        self.setWindowTitle(f"Enter parameters ({'3D' if flag_3D else '2D'})")
         vbox = QtWidgets.QVBoxLayout(self)
         grid = QtWidgets.QGridLayout()
         radius_label = QtWidgets.QLabel("Radius (nm):")
@@ -2345,21 +2349,22 @@ class DbscanDialog(lib.Dialog):
         self.radius.setDecimals(2)
         self.radius.setSingleStep(0.1)
         grid.addWidget(self.radius, 0, 1)
-        radius_z_label = QtWidgets.QLabel("Radius z (3D only, nm):")
-        radius_z_label.setToolTip(
-            "DBSCAN epsilon in the z direction. Only used for 3D data.\n"
-            "Scales z coordinates so the neighborhood is an ellipsoid\n"
-            "with semi-axes (radius, radius, radius z).\n"
-            "Anisotropic DBSCAN approach inspired by Lörzing, Schake,\n"
-            "and Schlierf, Journal of Phys Chem B, 2024."
-        )
-        grid.addWidget(radius_z_label, 1, 0)
         self.radius_z = QtWidgets.QDoubleSpinBox()
         self.radius_z.setRange(0.01, 1e6)
         self.radius_z.setValue(25)
         self.radius_z.setDecimals(2)
         self.radius_z.setSingleStep(0.1)
-        grid.addWidget(self.radius_z, 1, 1)
+        if flag_3D:
+            radius_z_label = QtWidgets.QLabel("Radius z (nm):")
+            radius_z_label.setToolTip(
+                "DBSCAN epsilon in the z direction. Scales z coordinates\n"
+                "so the neighborhood is an ellipsoid with semi-axes\n"
+                "(radius, radius, radius z).\n"
+                "Anisotropic DBSCAN approach inspired by Lörzing, Schake,\n"
+                "and Schlierf, Journal of Phys Chem B, 2024."
+            )
+            grid.addWidget(radius_z_label, 1, 0)
+            grid.addWidget(self.radius_z, 1, 1)
         min_samples_label = QtWidgets.QLabel("Min. samples:")
         min_samples_label.setToolTip(
             "Minimum number of samples in a neighborhood for a point to be\n"
@@ -2412,10 +2417,11 @@ class DbscanDialog(lib.Dialog):
     @staticmethod
     def getParams(
         parent: QtWidgets.QMainWindow | None = None,
+        flag_3D: bool = False,
     ) -> tuple[dict, bool]:
         """Create the dialog and return the requested values for
         DBSCAN."""
-        dialog = DbscanDialog(parent)
+        dialog = DbscanDialog(parent, flag_3D=flag_3D)
         result = dialog.exec()
         return {
             "radius": dialog.radius.value(),
@@ -3249,6 +3255,7 @@ class TestClustererDialog(lib.Dialog):
         # parameters - channel
         self.channels = QtWidgets.QComboBox()
         self.channels.setToolTip("Select the channel to test clustering on.")
+        self.channels.currentIndexChanged.connect(self._update_3d_visibility)
         parameters_grid.addWidget(self.channels, 0, 0, 1, 2)
 
         # parameters - choose clusterer
@@ -3380,6 +3387,21 @@ class TestClustererDialog(lib.Dialog):
         zoomout_action.setShortcut("Alt+-")
         zoomout_action.triggered.connect(self.view.zoom_out)
         self.addAction(zoomout_action)
+
+    def _update_3d_visibility(self) -> None:
+        """Show or hide Z-specific widgets based on whether the selected
+        channel has a `z` column."""
+        idx = self.channels.currentIndex()
+        if idx < 0 or idx >= len(self.window.view.locs):
+            is_3d = False
+        else:
+            is_3d = "z" in self.window.view.locs[idx].columns
+        self.test_dbscan_params.set_3d(is_3d)
+        self.test_smlm_params.set_3d(is_3d)
+
+    def showEvent(self, event: QtGui.QShowEvent) -> None:
+        self._update_3d_visibility()
+        super().showEvent(event)
 
     def on_xy_proj(self) -> None:
         self.view.ang = None
@@ -3665,19 +3687,21 @@ class TestDBSCANParams(QtWidgets.QWidget):
         self.radius.setSingleStep(0.1)
         grid.addWidget(self.radius, 0, 1)
 
-        radius_z_label = QtWidgets.QLabel("Radius z (3D only, nm):")
-        radius_z_label.setToolTip(
-            "DBSCAN epsilon in the z direction. Only used for 3D data.\n"
-            "Scales z coordinates so the neighborhood is an ellipsoid\n"
-            "with semi-axes (radius xy, radius xy, radius z)."
+        self.radius_z_label = QtWidgets.QLabel("Radius z (nm):")
+        self.radius_z_label.setToolTip(
+            "DBSCAN epsilon in the z direction. Scales z coordinates so\n"
+            "the neighborhood is an ellipsoid with semi-axes\n"
+            "(radius xy, radius xy, radius z)."
         )
-        grid.addWidget(radius_z_label, 1, 0)
+        grid.addWidget(self.radius_z_label, 1, 0)
         self.radius_z = QtWidgets.QDoubleSpinBox()
         self.radius_z.setRange(0.01, 1e6)
         self.radius_z.setValue(25)
         self.radius_z.setDecimals(2)
         self.radius_z.setSingleStep(0.1)
         grid.addWidget(self.radius_z, 1, 1)
+        self.radius_z_label.setVisible(False)
+        self.radius_z.setVisible(False)
 
         min_samples_label = QtWidgets.QLabel("Min. samples:")
         min_samples_label.setToolTip(
@@ -3703,6 +3727,11 @@ class TestDBSCANParams(QtWidgets.QWidget):
         self.min_locs.setSingleStep(1)
         grid.addWidget(self.min_locs, 3, 1)
         grid.setRowStretch(4, 1)
+
+    def set_3d(self, is_3d: bool) -> None:
+        """Show or hide the Z radius widget."""
+        self.radius_z_label.setVisible(is_3d)
+        self.radius_z.setVisible(is_3d)
 
 
 class TestHDBSCANParams(QtWidgets.QWidget):
@@ -3772,18 +3801,20 @@ class TestSMLMParams(QtWidgets.QWidget):
         self.radius_xy.setDecimals(2)
         grid.addWidget(self.radius_xy, 0, 1)
 
-        radius_z_label = QtWidgets.QLabel("Radius z (3D only):")
-        radius_z_label.setToolTip(
+        self.radius_z_label = QtWidgets.QLabel("Radius z (nm):")
+        self.radius_z_label.setToolTip(
             "Radius in which localizations are considered part of the\n"
-            "same cluster. Applied in z direction (3D only)."
+            "same cluster. Applied in z direction."
         )
-        grid.addWidget(radius_z_label, 1, 0)
+        grid.addWidget(self.radius_z_label, 1, 0)
         self.radius_z = QtWidgets.QDoubleSpinBox()
         self.radius_z.setValue(25)
         self.radius_z.setRange(0.01, 1e6)
         self.radius_z.setSingleStep(0.1)
         self.radius_z.setDecimals(2)
         grid.addWidget(self.radius_z, 1, 1)
+        self.radius_z_label.setVisible(False)
+        self.radius_z.setVisible(False)
 
         min_locs_label = QtWidgets.QLabel("Min. no. of locs")
         min_locs_label.setToolTip(
@@ -3802,6 +3833,11 @@ class TestSMLMParams(QtWidgets.QWidget):
         self.fa.setChecked(True)
         grid.addWidget(self.fa, 3, 0, 1, 2)
         grid.setRowStretch(4, 1)
+
+    def set_3d(self, is_3d: bool) -> None:
+        """Show or hide the Z radius widget."""
+        self.radius_z_label.setVisible(is_3d)
+        self.radius_z.setVisible(is_3d)
 
 
 class TestG5MParams(QtWidgets.QWidget):
@@ -7331,7 +7367,12 @@ class View(QtWidgets.QLabel):
         channel = self.get_channel_all_seq("DBSCAN")
 
         # get DBSCAN parameters
-        params, ok = DbscanDialog.getParams()
+        if channel is None or channel == len(self.locs_paths):
+            # no channel selected or "apply to all"
+            flag_3D = any("z" in _.columns for _ in self.locs)
+        else:
+            flag_3D = "z" in self.locs[channel].columns
+        params, ok = DbscanDialog.getParams(flag_3D=flag_3D)
         if ok:
             if channel == len(self.locs_paths):  # apply to all channels
                 # get saving name suffix
@@ -7577,10 +7618,11 @@ class View(QtWidgets.QLabel):
 
         # get clustering parameters
         pixelsize = self.pixelsize
-        if any(["z" in _.columns for _ in self.locs]):
-            flag_3D = True
+        if channel is None or channel == len(self.locs_paths):
+            # no channel selected or "apply to all"
+            flag_3D = any("z" in _.columns for _ in self.locs)
         else:
-            flag_3D = False
+            flag_3D = "z" in self.locs[channel].columns
         params, ok = SMLMDialog.getParams(flag_3D=flag_3D)
         # convert to camera pixels
         params["radius_xy"] = params["radius_xy"] / pixelsize

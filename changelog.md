@@ -26,6 +26,7 @@ This patch adds a number of new, useful features rather than simply fixing the b
 - Installers are distributed with readme.txt files (previously .rst)
 - Render: Load FOV keeps the aspect ratio of the input .txt file
 - Render: Files dialog resizing fixed
+- Render GUI: show 3D clustering widgets only when 3D data is loaded
 
 ## 0.10.0
 
