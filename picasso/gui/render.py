@@ -5587,11 +5587,6 @@ class MaskSettingsDialog(lib.Dialog):
         image = render.apply_colormap(image, cmap)
         # create a 4 channel (rgb, alpha) array
         qimage = render.rgb_to_qimage(image)
-        qimage = qimage.scaled(
-            300,
-            300,
-            QtCore.Qt.AspectRatioMode.KeepAspectRatioByExpanding,
-        )
         pixmap = QtGui.QPixmap.fromImage(qimage)
         return pixmap
 
