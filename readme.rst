@@ -48,7 +48,7 @@ Installation
 
 Check out the `Picasso release page <https://github.com/jungmannlab/picasso/releases/>`__ to download and run the latest compiled one-click installer for Windows or MacOS (the latter is experimental and feedback is welcome). Here you will also find the Nature Protocols legacy version (v0.1.0).
 
-Python is also distributed as a PyPI package that is platform-independent (``pip install picassosr``) which grants not only GUI but also access to Picasso’s internal routines in custom Python programs. For more details, see the "Via PyPI" section below. For examples of how to use Picasso in Python scripts, see the section "Example Usage" below.
+Python is also distributed as a PyPI package that is platform-independent (``pip install picassosr``) which grants not only GUI but also access to Picasso’s internal routines in custom Python programs. For more details, see the `Via PyPI <https://github.com/jungmannlab/picasso#via-pypi>`__ section below. For examples of how to use Picasso in Python scripts, see the section `Example Usage <https://github.com/jungmannlab/picasso#example-usage>`__ below.
 
 Note: Since v0.10.0 Picasso is more flexible in terms of dependencies and Python versions. Previously only Python 3.10 was supported, now newer versions are encouraged.
 
@@ -59,6 +59,7 @@ Via PyPI
 2. Activate the environment: ``conda activate picasso``.
 3. Install Picasso package using: ``pip install picassosr``.
 4. You can now run any Picasso function directly from the console/terminal by running: ``picasso render``, ``picasso localize``, etc, or import Picasso functions in your own Python scripts.
+5. To update Picasso (you should get a notification about available updates since v0.10.0) run ``pip install --upgrade picassosr``.
 
 For Developers (local, editable installation)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -73,13 +74,6 @@ If you wish to use your local version of Picasso with your own modifications:
 6. You can modify Picasso code in this directory.
 7. To create a *local* Picasso package to use it in other Python scripts, run ``pip install -e ".[dev]"``. When you change the code in the ``picasso`` directory, the changes will be reflected in the package.
 8. You can now run any Picasso module directly from the console/terminal by running: ``picasso render``, ``picasso localize``, etc, or import Picasso functions in your own Python scripts.
-
-Updating
-^^^^^^^^
-
-If Picasso was installed from PyPI (not the developer version), run the following command:
-
-``pip install --upgrade picassosr``
 
 Creating shortcuts on Windows (*optional*)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -118,7 +112,6 @@ Contributions & Copyright
 
 | Contributors: Joerg Schnitzbauer, Maximilian Strauss, Rafal Kowalewski, Adrian Przybylski, Andrey Aristov, Hiroshi Sasaki, Alexander Auer, Johanna Rahm
 | Copyright (c) 2015-2025 Jungmann Lab, Max Planck Institute of Biochemistry
-| Copyright (c) 2020-2021 Maximilian Strauss
 
 .. SYNC-END: contributions
 

@@ -10302,9 +10302,8 @@ class View(QtWidgets.QLabel):
         rendering.
 
         Each returned entry is a ``(256, 3)`` float32 LUT. Solid colors
-        become black→color linear ramps (math-equivalent to the
-        original "intensity × rgb" multichannel blend). Matplotlib
-        colormaps and user-defined custom colormaps are also LUTs.
+        become black→color linear ramps. Matplotlib colormaps and
+        user-defined custom colormaps are also LUTs.
 
         If multiple channels are loaded, ensure that only the ones
         which are checked in the Dataset Dialog are rendered in their

@@ -42,7 +42,6 @@ Contributions & Copyright
 
 | Contributors: Joerg Schnitzbauer, Maximilian Strauss, Rafal Kowalewski, Adrian Przybylski, Andrey Aristov, Hiroshi Sasaki, Alexander Auer, Johanna Rahm
 | Copyright (c) 2015-2025 Jungmann Lab, Max Planck Institute of Biochemistry
-| Copyright (c) 2020-2021 Maximilian Strauss
 
 .. SYNC-END: contributions
 
