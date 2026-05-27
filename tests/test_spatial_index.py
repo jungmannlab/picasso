@@ -138,16 +138,21 @@ class TestQuery:
         assert spatial_index.query_viewport(pyr, ((0, 0), (H, W))) is None
 
     def test_viewport_above_bypass_threshold_returns_none(self):
-        # Half the FOV area in each dimension -> 25% coverage, below
-        # the default 0.5 threshold, so we still get an array. Doubling
-        # one dimension to span the full axis brings coverage to 50%
-        # and triggers the bypass.
+        # Coverage well below the bypass threshold still returns an
+        # array; coverage well above triggers the bypass. Sized off the
+        # module constant so the test tracks any future re-tuning.
         W, H = 512.0, 512.0
         locs = _make_locs(5000, W, H)
         pyr = spatial_index.build_render_index(locs, _info(W, H))
-        sub = spatial_index.query_viewport(pyr, ((0, 0), (H / 2, W / 2)))
+        ratio = spatial_index._BYPASS_COVERAGE_RATIO
+        below = float(np.sqrt(ratio * 0.5)) * W
+        sub = spatial_index.query_viewport(pyr, ((0.0, 0.0), (below, below)))
         assert sub is not None and sub.shape[0] > 0
-        assert spatial_index.query_viewport(pyr, ((0, 0), (H, W / 2))) is None
+        above = float(np.sqrt(min(1.0, ratio * 2.0))) * W
+        assert (
+            spatial_index.query_viewport(pyr, ((0.0, 0.0), (above, above)))
+            is None
+        )
 
     def test_viewport_with_negative_bounds_enclosing_fov_returns_none(self):
         # Zoomed/panned out so the viewport extends past every FOV edge
