@@ -22,6 +22,7 @@ This patch adds a number of new, useful features rather than simply fixing the b
 - Fixed Gauss-fitting error when spot's sum is zero (zero division error)
 - Fixed NND plot reindexing after fitting (#665)
 - Faster cluster centers calculation for SMLM clusterer, DBSCAN and HDBSCAN + `lpz` is saved if applicable
+- Removed render property cache since it did not provide any significant speed improvement
 
 ## 0.10.0
 

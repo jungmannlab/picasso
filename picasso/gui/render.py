@@ -6939,9 +6939,6 @@ class View(QtWidgets.QLabel):
     x_locs : list of pd.DataFrames
         Contains pd.DataFrames with locs to be rendered by property; one
         per color.
-    x_render_cache : list of dicts
-        Contains dictionaries with caches for storing info about locs
-        rendered by a property.
     x_render_state : bool
         Indicates if rendering by property is used.
     """
@@ -6976,7 +6973,6 @@ class View(QtWidgets.QLabel):
         self._drift = []
         self._driftfiles = []
         self.currentdrift = []
-        self.x_render_cache = []
         self.x_render_state = False
 
     def _load_locs(self, path: str) -> tuple[pd.DataFrame, list[dict]]:
@@ -10294,7 +10290,6 @@ class View(QtWidgets.QLabel):
         if cache:
             self.n_locs = n_locs
             self.image = raw_image
-
         self.window.display_settings_dlg.silent_minimum_update(vmin)
         self.window.display_settings_dlg.silent_maximum_update(vmax)
 
@@ -10787,45 +10782,13 @@ class View(QtWidgets.QLabel):
             n_colors = self.window.display_settings_dlg.color_step.value()
             min_val = self.window.display_settings_dlg.minimum_render.value()
             max_val = self.window.display_settings_dlg.maximum_render.value()
-
-            x_locs = []
-
-            # attempt using cached data
-            for cached_entry in self.x_render_cache:
-                if cached_entry["parameter"] == parameter:
-                    if cached_entry["colors"] == n_colors:
-                        if (cached_entry["min_val"] == min_val) & (
-                            cached_entry["max_val"] == max_val
-                        ):
-                            x_locs = cached_entry["locs"]
-                        break
-
-            # if no cached data found
-            if x_locs == []:
-                x_locs = render.split_locs_by_property(
-                    locs=self._display_locs(0),
-                    property_name=parameter,
-                    n_colors=n_colors,
-                    min_value=min_val,
-                    max_value=max_val,
-                )
-
-                # cache
-                entry = {}
-                entry["parameter"] = parameter
-                entry["colors"] = n_colors
-                entry["locs"] = x_locs
-                entry["min_val"] = min_val
-                entry["max_val"] = max_val
-
-                # Do not store too many datasets in cache
-                if len(self.x_render_cache) < 10:
-                    self.x_render_cache.append(entry)
-                else:
-                    self.x_render_cache.insert(0, entry)
-                    del self.x_render_cache[-1]
-
-            self.x_locs = x_locs
+            self.x_locs = render.split_locs_by_property(
+                locs=self._display_locs(0),
+                property_name=parameter,
+                n_colors=n_colors,
+                min_value=min_val,
+                max_value=max_val,
+            )
         else:
             self.x_render_state = False
         self.update_scene()
