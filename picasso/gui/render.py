@@ -4233,6 +4233,7 @@ class ChangeFOV(lib.Dialog):
         self.y_box.setValue(y)
         self.w_box.setValue(w)
         self.h_box.setValue(h)
+        self.window.resize_view_to_fov(w, h)
         self.update_scene()
 
     def update_scene(self) -> None:
@@ -8593,6 +8594,7 @@ class View(QtWidgets.QLabel):
         FOV."""
         (x, y, w, h) = fov
         if w > 0 and h > 0:
+            self.window.resize_view_to_fov(w, h)
             viewport = [(y, x), (y + h, x + w)]
             self.update_scene(viewport=viewport)
             self.window.info_dialog.xy_label.setText(f"{x:.2f} / {y:.2f} ")
@@ -12789,6 +12791,47 @@ class Window(QtWidgets.QMainWindow):
                 self.window_rot.view_rot.angy = self.view.infos[0][-1]["angy"]
                 self.window_rot.view_rot.angz = self.view.infos[0][-1]["angz"]
                 self.rot_win()
+
+    def resize_view_to_fov(self, w: float, h: float) -> None:
+        """Resize the main window so that ``view`` has aspect ratio w/h.
+
+        Only triggers a resize when the current view aspect differs from
+        the target. The longer of the current view dimensions is
+        preserved; the other is recomputed from the target aspect, then
+        both are clipped to the available screen geometry.
+        """
+        if w <= 0 or h <= 0:
+            return
+        view_w = self.view.width()
+        view_h = self.view.height()
+        if view_w <= 0 or view_h <= 0:
+            return
+        target_aspect = w / h
+        current_aspect = view_w / view_h
+        if abs(current_aspect - target_aspect) < 1e-3:
+            return
+
+        if target_aspect >= 1.0:
+            new_view_w = max(view_w, view_h)
+            new_view_h = new_view_w / target_aspect
+        else:
+            new_view_h = max(view_w, view_h)
+            new_view_w = new_view_h * target_aspect
+
+        screen = self.screen() or QtWidgets.QApplication.primaryScreen()
+        avail = screen.availableGeometry()
+        chrome_w = self.width() - view_w
+        chrome_h = self.height() - view_h
+        max_view_w = max(1, avail.width() - chrome_w)
+        max_view_h = max(1, avail.height() - chrome_h)
+        scale = min(1.0, max_view_w / new_view_w, max_view_h / new_view_h)
+        new_view_w *= scale
+        new_view_h *= scale
+
+        self.resize(
+            int(round(new_view_w + chrome_w)),
+            int(round(new_view_h + chrome_h)),
+        )
 
     def resizeEvent(self, even: QtGui.QResizeEvent) -> None:
         """Update window size."""
