@@ -296,7 +296,7 @@ def cluster(
     radius_z: float | None = None,
     pixelsize: float | None = None,
     return_info: bool = None,  # TODO: change to true in v0.11.0 and remove in v0.12.0
-) -> pd.DataFrame:
+) -> tuple[pd.DataFrame, dict] | pd.DataFrame:
     """Cluster localizations from single molecules (SMLM clusterer).
 
     The general workflow is as follows:
@@ -347,6 +347,9 @@ def cluster(
         Clusterered localizations, with column 'group' added, which
         specifies cluster label for each localization. Noise (label -1)
         is removed.
+    info : dict, optional
+        Dictionary containing clustering information, only returned if
+        return_info is True.
     """
     if return_info is None:
         return_info = False
@@ -586,7 +589,7 @@ def hdbscan(
     pixelsize: float | None = None,
     cluster_eps: float = 0.0,
     return_info: bool = None,  # TODO: change to true in v0.11.0 and remove in v0.12.0
-) -> pd.DataFrame:
+) -> tuple[pd.DataFrame, dict] | pd.DataFrame:
     """Perform HDBSCAN on localizations.
 
     See Campello, et al. PAKDD, 2013 (DOI: 10.1007/978-3-642-37456-2_14).
