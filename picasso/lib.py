@@ -923,7 +923,7 @@ def get_from_metadata(
 def extract_filter_steps(
     info: list[dict],
     current_columns,
-) -> tuple[dict[str, list[float]], list[str], list[str]]:
+) -> tuple[dict[str, list[float]], list[str], list[str]]:  # noqa: C901
     """Parse filter steps out of a Picasso Filter metadata list.
 
     Iterates ``info`` oldest -> newest. A dict is treated as a filter
@@ -1540,6 +1540,7 @@ def unpack_calibration(
 def calculate_optimal_bins(
     data: FloatArray1D | IntArray1D,
     max_n_bins: int | None = None,
+    sample_size: int = 1_000_000,
 ) -> FloatArray1D:
     """Calculate the optimal bins for display, for example, in
     Picasso: Filter.
@@ -1550,28 +1551,109 @@ def calculate_optimal_bins(
         Data to be binned.
     max_n_bins : int | None, optional
         Maximum number of bins.
+    sample_size : int, optional
+        For large arrays, estimate the IQR from a random sample of this
+        size instead of sorting the full array. min/max are still taken
+        from the full data (cheap O(N) reductions). Set to a value >=
+        ``len(data)`` to disable sampling. Default 1_000_000.
 
     Returns
     -------
     bins : FloatArray1D
         Bins for display.
     """
-    iqr = np.subtract(*np.percentile(data, [75, 25]))
+    n = len(data)
+    if n == 0:
+        return np.array([0.0, 1.0])
+    if data.dtype.kind == "f":
+        data_min = np.nanmin(data)
+        data_max = np.nanmax(data)
+    else:
+        data_min = data.min()
+        data_max = data.max()
+    if n > sample_size:
+        rng = np.random.default_rng(0)
+        sample = data[rng.choice(n, sample_size, replace=False)]
+    else:
+        sample = data
+    if sample.dtype.kind == "f":
+        sample = sample[np.isfinite(sample)]
+    if len(sample) == 0:
+        return np.array([data_min - 1.0, data_max + 1.0])
+    iqr = np.subtract(*np.percentile(sample, [75, 25]))
     if iqr == 0:
         return np.array([data[0] - 1.0, data[0] + 1.0])
-    bin_size = 2 * iqr * len(data) ** (-1 / 3)
+    bin_size = 2 * iqr * n ** (-1 / 3)
     if data.dtype.kind in ("u", "i") and bin_size < 1:
         bin_size = 1
-    bin_min = data.min() - bin_size / 2
+    bin_min = data_min - bin_size / 2
     try:
-        n_bins = (data.max() - bin_min) / bin_size
+        n_bins = (data_max - bin_min) / bin_size
         n_bins = int(n_bins)
     except Exception:
         n_bins = 10
     if max_n_bins and n_bins > max_n_bins:
         n_bins = max_n_bins
-    bins = np.linspace(bin_min, data.max(), n_bins)
+    bins = np.linspace(bin_min, data_max, n_bins)
     return bins
+
+
+@numba.njit(parallel=True, nogil=True)
+def hist2d_numba(
+    x: FloatArray1D,
+    y: FloatArray1D,
+    x_min: float,
+    x_max: float,
+    y_min: float,
+    y_max: float,
+    nx: int,
+    ny: int,
+) -> np.ndarray:
+    """Fast 2D histogram with uniform bin edges.
+
+    Non-finite points are skipped. Edge values (== x_max / == y_max) are
+    folded into the last bin to match the inclusive-right behaviour of
+    ``np.histogram2d``.
+
+    Parameters
+    ----------
+    x, y : FloatArray1D
+        Sample coordinates.
+    x_min, x_max, y_min, y_max : float
+        Outer edges of the histogram.
+    nx, ny : int
+        Number of bins along each axis.
+
+    Returns
+    -------
+    counts : np.ndarray, shape (nx, ny), dtype int64
+        Bin counts, indexed as counts[ix, iy].
+    """
+    n_threads = numba.get_num_threads()
+    local = np.zeros((n_threads, nx, ny), dtype=np.int64)
+    dx = (x_max - x_min) / nx
+    dy = (y_max - y_min) / ny
+    n = x.shape[0]
+    chunk = (n + n_threads - 1) // n_threads
+    for t in numba.prange(n_threads):
+        start = t * chunk
+        end = start + chunk
+        if end > n:
+            end = n
+        for i in range(start, end):
+            xi = x[i]
+            yi = y[i]
+            if not (np.isfinite(xi) and np.isfinite(yi)):
+                continue
+            ix = int((xi - x_min) / dx)
+            iy = int((yi - y_min) / dy)
+            if ix == nx:
+                ix -= 1
+            if iy == ny:
+                iy -= 1
+            if 0 <= ix < nx and 0 <= iy < ny:
+                local[t, ix, iy] += 1
+    return local.sum(axis=0)
 
 
 def append_to_rec(
@@ -2328,6 +2410,9 @@ def plot_subclustering_check(
         Figure and axes if ``return_fig`` is True, otherwise
         (None, None).
     """
+    has_clustered = len(clustered_n_events) > 0
+    has_sparse = len(sparse_n_events) > 0
+
     m_clustered = clustered_n_events.mean()
     m_sparse = sparse_n_events.mean()
     s_clustered = clustered_n_events.std()
@@ -2335,54 +2420,73 @@ def plot_subclustering_check(
 
     # create the plot
     fig, ax1 = plt.subplots(1, figsize=(6, 4), constrained_layout=True)
-    min_bin, max_bin = np.percentile(clustered_n_events, [2.5, 97.5])
-    vals, counts = np.unique(clustered_n_events, return_counts=True)
-    if clustering_dist is not None:
-        label = (
-            f"Clustered (d < {clustering_dist:.1f} nm) "
-            f"{m_clustered:.1f} +/- {s_clustered:.1f}"
+    if has_clustered or has_sparse:
+        all_events = np.concatenate((sparse_n_events, clustered_n_events))
+        min_bin, max_bin = np.percentile(all_events, [2.5, 97.5])
+
+    if has_clustered:
+        vals, counts = np.unique(clustered_n_events, return_counts=True)
+        if clustering_dist is not None:
+            label = (
+                f"Clustered (d < {clustering_dist:.1f} nm) "
+                f"{m_clustered:.1f} +/- {s_clustered:.1f}"
+            )
+        else:
+            label = f"Clustered {m_clustered:.1f} +/- {s_clustered:.1f}"
+        ax1.bar(
+            vals,
+            counts,
+            width=0.8,
+            alpha=0.5,
+            label=label,
+            color="C0",
+        )
+        ax1.axvline(m_clustered, color="C0", linestyle="--")
+
+    if has_sparse:
+        vals, counts = np.unique(sparse_n_events, return_counts=True)
+        if sparse_dist is not None:
+            label = (
+                f"Sparse (d > {sparse_dist:.1f} nm) "
+                f"{m_sparse:.1f} +/- {s_sparse:.1f}"
+            )
+        else:
+            label = f"Sparse {m_sparse:.1f} +/- {s_sparse:.1f}"
+        ax1.bar(
+            vals,
+            counts,
+            width=0.8,
+            alpha=0.5,
+            label=label,
+            color="C1",
+        )
+        ax1.axvline(m_sparse, color="C1", linestyle="--")
+
+    if has_clustered or has_sparse:
+        ax1.set_xlabel("Number of events")
+        ax1.set_ylabel("Counts")
+        ax1.set_xlim(min_bin - 1, max_bin + 1)
+        ax1.legend()
+
+    if has_clustered and has_sparse:
+        stat, p_perm, p = permutation_test(clustered_n_events, sparse_n_events)
+        p_value_str = r"$p_{value}$"
+        title = (
+            f"KS test: stat={stat:.4f}\n"
+            f"permutation {p_value_str}={p_perm:.4f}\n"
+            f"theoretical {p_value_str}={p:.4f}"
+        )
+    elif has_clustered or has_sparse:
+        title = (
+            "Only one population found, no statistical test performed; "
+            "adjust distance parameters."
         )
     else:
-        label = f"Clustered {m_clustered:.1f} +/- {s_clustered:.1f}"
-    ax1.bar(
-        vals,
-        counts,
-        width=0.8,
-        alpha=0.5,
-        label=label,
-        color="C0",
-    )
-    ax1.axvline(m_clustered, color="C0", linestyle="--")
-    vals, counts = np.unique(sparse_n_events, return_counts=True)
-    if sparse_dist is not None:
-        label = (
-            f"Sparse (d > {sparse_dist:.1f} nm) "
-            f"{m_sparse:.1f} +/- {s_sparse:.1f}"
+        title = (
+            "No molecules found in either population, adjust distance"
+            " parameters."
         )
-    else:
-        label = f"Sparse {m_sparse:.1f} +/- {s_sparse:.1f}"
-    ax1.bar(
-        vals,
-        counts,
-        width=0.8,
-        alpha=0.5,
-        label=label,
-        color="C1",
-    )
-    ax1.axvline(m_sparse, color="C1", linestyle="--")
-    ax1.set_xlabel("Number of events")
-    ax1.set_ylabel("Counts")
-    ax1.set_xlim(min_bin - 1, max_bin + 1)
-    # add stat. tests in the title:
-    stat, p_perm, p = permutation_test(clustered_n_events, sparse_n_events)
-    p_value_str = r"$p_{value}$"
-    title = (
-        f"KS test: stat={stat:.4f}\n"
-        f"permutation {p_value_str}={p_perm:.4f}\n"
-        f"theoretical {p_value_str}={p:.4f}"
-    )
     ax1.set_title(title, fontsize=10)
-    ax1.legend()
     if len(plot_path):
         if isinstance(plot_path, str):
             plot_path = [plot_path]

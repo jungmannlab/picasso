@@ -214,6 +214,61 @@ class TestCalculateOptimalBins:
         # zero-iqr branch returns the constant ±1 fallback
         assert bins.size == 2
 
+    def test_sampled_iqr_close_to_full(self):
+        rng = np.random.default_rng(42)
+        data = rng.normal(size=200_000)
+        full = lib.calculate_optimal_bins(
+            data, max_n_bins=1000, sample_size=len(data) + 1
+        )
+        sampled = lib.calculate_optimal_bins(
+            data, max_n_bins=1000, sample_size=20_000
+        )
+        # Same range, similar bin count (Freedman-Diaconis is stable
+        # under sub-sampling of an iid sample).
+        assert sampled[0] == pytest.approx(full[0], rel=0.05)
+        assert sampled[-1] == pytest.approx(full[-1], rel=0.05)
+        assert abs(sampled.size - full.size) <= max(2, full.size // 10)
+
+    def test_handles_nan_data(self):
+        data = np.concatenate([np.full(10, np.nan), np.linspace(0, 1, 1000)])
+        bins = lib.calculate_optimal_bins(data, max_n_bins=50)
+        # bin range is finite even though some values are NaN
+        assert np.isfinite(bins[0]) and np.isfinite(bins[-1])
+
+
+class TestHist2DNumba:
+    def test_matches_numpy_histogram2d(self):
+        rng = np.random.default_rng(7)
+        x = rng.normal(size=50_000)
+        y = rng.normal(size=50_000)
+        x_min, x_max = -3.0, 3.0
+        y_min, y_max = -3.0, 3.0
+        nx, ny = 40, 30
+        # restrict to points strictly inside [x_min, x_max] x [y_min, y_max]
+        # to side-step floating-point boundary differences between the two
+        # implementations
+        inside = (x > x_min) & (x < x_max) & (y > y_min) & (y < y_max)
+        x = x[inside]
+        y = y[inside]
+        counts = lib.hist2d_numba(x, y, x_min, x_max, y_min, y_max, nx, ny)
+        x_edges = np.linspace(x_min, x_max, nx + 1)
+        y_edges = np.linspace(y_min, y_max, ny + 1)
+        expected, _, _ = np.histogram2d(x, y, bins=[x_edges, y_edges])
+        assert counts.shape == (nx, ny)
+        assert counts.sum() == len(x)
+        # per-cell counts may differ by ~1 due to bin-edge rounding; total
+        # mismatch should be small relative to N
+        assert np.abs(counts - expected.astype(np.int64)).sum() < 0.001 * len(
+            x
+        )
+
+    def test_skips_non_finite(self):
+        x = np.array([0.0, 1.0, np.nan, 2.0, np.inf], dtype=np.float64)
+        y = np.array([0.0, 1.0, 1.0, np.nan, 2.0], dtype=np.float64)
+        counts = lib.hist2d_numba(x, y, 0.0, 3.0, 0.0, 3.0, 3, 3)
+        # only two points are fully finite and inside the range
+        assert counts.sum() == 2
+
 
 # ---------------------------------------------------------------------------
 # Recarray manipulation (deprecated path — explicit warnings expected)

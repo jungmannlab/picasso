@@ -6,8 +6,12 @@ Sections in the main ``readme.rst`` that are wrapped with::
     ...
     .. SYNC-END: <key>
 
-are copied verbatim into the matching sentinel pairs in each installer
-readme. Run from the repo root, or via the pre-commit hook.
+are copied into the matching sentinel pairs in each installer readme.
+The installer readmes are plain-text ``.txt`` files (shipped alongside
+the installers), so reStructuredText markup in the synced bodies is
+converted to a reader-friendly plain-text form before insertion.
+
+Run from the repo root, or via the pre-commit hook.
 
 Usage:
     python release/sync_installer_readmes.py          # rewrite if needed
@@ -23,8 +27,8 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SOURCE = REPO_ROOT / "readme.rst"
 TARGETS = [
-    REPO_ROOT / "release" / "one_click_macos_gui" / "readme.rst",
-    REPO_ROOT / "release" / "one_click_windows_gui" / "readme.rst",
+    REPO_ROOT / "release" / "one_click_macos_gui" / "readme.txt",
+    REPO_ROOT / "release" / "one_click_windows_gui" / "readme.txt",
 ]
 
 SECTION_RE = re.compile(
@@ -33,6 +37,24 @@ SECTION_RE = re.compile(
     r"(\n\.\. SYNC-END: (?P=key))",
     re.DOTALL,
 )
+
+# `label <url>`__  or  `label <url>`_   ->   label (url)
+RST_LINK_RE = re.compile(r"`([^`<]+?)\s*<([^`>]+)>`_{1,2}")
+# ``code`` -> code
+RST_CODE_RE = re.compile(r"``([^`]+)``")
+# leading "| " of an rst line block
+RST_LINE_BLOCK_RE = re.compile(r"^\| ?", re.MULTILINE)
+
+
+def rst_to_text(body: str) -> str:
+    body = RST_LINK_RE.sub(
+        lambda m: f"{m.group(1).strip()} ({m.group(2)})", body
+    )
+    body = RST_CODE_RE.sub(r"\1", body)
+    body = RST_LINE_BLOCK_RE.sub("", body)
+    # Drop bare "|" lines used as vertical spacers in rst line blocks.
+    body = re.sub(r"^\|\s*$", "", body, flags=re.MULTILINE)
+    return body
 
 
 def extract_sections(text: str, path: Path) -> dict[str, str]:
@@ -52,7 +74,7 @@ def replace_sections(text: str, sections: dict[str, str]) -> str:
             raise SystemExit(
                 f"key '{key}' present in target but missing from {SOURCE}"
             )
-        return match.group(1) + sections[key] + match.group(4)
+        return match.group(1) + rst_to_text(sections[key]) + match.group(4)
 
     return SECTION_RE.sub(_sub, text)
 

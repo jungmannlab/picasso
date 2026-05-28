@@ -591,6 +591,7 @@ class AnimationDialog(lib.Dialog):
                 "Rendering frames", 0, n_frames, self.window
             )
             adjust_display_pixel = disp_dlg.dynamic_disp_px.isChecked()
+            intensities = self.window.window.view.read_relative_intensities()
             render.build_animation(
                 path,
                 locs,
@@ -610,7 +611,7 @@ class AnimationDialog(lib.Dialog):
                 invert_colors=data_dlg.wbackground.isChecked(),
                 single_channel_colormap=disp_dlg.colormap.currentText(),
                 colors=self.window.window.view.read_colors(),
-                relative_intensities=self.window.window.view.read_relative_intensities(),
+                relative_intensities=intensities,
                 fps=self.fps.value(),
                 adjust_pixel_size=adjust_display_pixel,
                 progress_callback=progress.set_value,
@@ -729,59 +730,43 @@ class ViewRotation(QtWidgets.QLabel):
     def resizeEvent(self, event: QtGui.QResizeEvent) -> None:
         self.update_scene()
 
-    def load_locs(self, update_window=False):
-        """Load localizations from a pick in the main window.
+    def _sync_from_main_window(self, w):
+        # get pixelsize
+        self.pixelsize = w.view.pixelsize
+        # update blur and colormap
+        b = w.display_settings_dlg.blur_buttongroup.checkedId()
+        color = w.display_settings_dlg.colormap.currentText()
+        self.window.display_settings_dlg.blur_buttongroup.button(b).setChecked(
+            True
+        )
+        self.window.display_settings_dlg.colormap.setCurrentText(color)
 
-        Called when updating rotation window from there or when
-        shifting the pick from rotation window.
+        # remove measurement points
+        self._points = []
 
-        Parameters
-        ----------
-        update_window : bool, optional
-            If True, load attributes, such as blur method, from the
-            main window.
-        """
-        fast_render = False  # should locs be reindexed
-        w = self.window.window  # main window
-        if update_window:
-            fast_render = True
-            # get pixelsize
-            self.pixelsize = w.view.pixelsize
-            # update blur and colormap
-            b = w.display_settings_dlg.blur_buttongroup.checkedId()
-            color = w.display_settings_dlg.colormap.currentText()
-            self.window.display_settings_dlg.blur_buttongroup.button(
-                b
-            ).setChecked(True)
-            self.window.display_settings_dlg.colormap.setCurrentText(color)
+        # save the pick information
+        self.pick = w.view._picks[0]
+        self.pick_shape = w.view._pick_shape
+        self.pick_size = w.view._pick_size
 
-            # remove measurement points
-            self._points = []
+        # update view, dataset_dialog for multichannel data and paths
+        self.viewport = self.fit_in_view_rotated(get_viewport=True)
+        self.window.dataset_dialog = w.dataset_dialog
+        self.paths = w.view.locs_paths
 
-            # save the pick information
-            self.pick = w.view._picks[0]
-            self.pick_shape = w.view._pick_shape
-            self.pick_size = w.view._pick_size
+        # copy render property state from the main window
+        self.x_render_state = w.view.x_render_state
+        if self.x_render_state:
+            ds = w.display_settings_dlg
+            self.x_property = ds.parameter.currentText()
+            self.x_n_colors = ds.color_step.value()
+            self.x_min_val = ds.minimum_render.value()
+            self.x_max_val = ds.maximum_render.value()
+            self.x_colormap = ds.colormap_prop.currentText()
+        else:
+            self.x_locs = []
 
-            # update view, dataset_dialog for multichannel data and
-            # paths
-            self.viewport = self.fit_in_view_rotated(get_viewport=True)
-            self.window.dataset_dialog = w.dataset_dialog
-            self.paths = w.view.locs_paths
-
-            # copy render property state from the main window
-            self.x_render_state = w.view.x_render_state
-            if self.x_render_state:
-                ds = w.display_settings_dlg
-                self.x_property = ds.parameter.currentText()
-                self.x_n_colors = ds.color_step.value()
-                self.x_min_val = ds.minimum_render.value()
-                self.x_max_val = ds.maximum_render.value()
-                self.x_colormap = ds.colormap_prop.currentText()
-            else:
-                self.x_locs = []
-
-        # load locs in the pick and their metadata
+    def _collect_picked_locs(self, w, fast_render):
         n_channels = len(self.paths)
         self.locs = []
         self.infos = []
@@ -798,37 +783,57 @@ class ViewRotation(QtWidgets.QLabel):
                         drop=True
                     )
             temp["z"] /= self.pixelsize
-            # same for lpz if present
             if "lpz" in temp.columns:
                 temp["lpz"] /= self.pixelsize
             self.locs.append(temp)
             self.infos.append(w.view.infos[i])
 
+    def _apply_render_property_split(self):
+        if not (self.x_render_state and len(self.locs) == 1):
+            return
+        if self.x_property in self.locs[0].columns:
+            self.x_locs = render.split_locs_by_property(
+                self.locs[0],
+                property_name=self.x_property,
+                n_colors=self.x_n_colors,
+                min_value=self.x_min_val,
+                max_value=self.x_max_val,
+            )
+        else:
+            self.x_render_state = False
+            self.x_locs = []
+
+    def load_locs(self, update_window=False):
+        """Load localizations from a pick in the main window.
+
+        Called when updating rotation window from there or when
+        shifting the pick from rotation window.
+
+        Parameters
+        ----------
+        update_window : bool, optional
+            If True, load attributes, such as blur method, from the
+            main window.
+        """
+        w = self.window.window  # main window
+        fast_render = update_window
+        if update_window:
+            self._sync_from_main_window(w)
+
+        self._collect_picked_locs(w, fast_render)
+
         # shift z positions of locs so that the middle of the dataset is
         # at z = 0
         all_locs_z = np.concatenate([_["z"].to_numpy() for _ in self.locs])
         z_shift = all_locs_z.mean()
-        for i in range(n_channels):
+        for i in range(len(self.locs)):
             self.locs[i]["z"] -= z_shift
 
-        # assign self.group_color if single channel and group info
-        # present
+        # assign self.group_color if single channel and group info present
         if len(self.locs) == 1 and "group" in self.locs[0].columns:
             self.group_color = render.get_group_color(self.locs[0])
 
-        # index locs by property for render property mode
-        if self.x_render_state and len(self.locs) == 1:
-            if self.x_property in self.locs[0].columns:
-                self.x_locs = render.split_locs_by_property(
-                    self.locs[0],
-                    property_name=self.x_property,
-                    n_colors=self.x_n_colors,
-                    min_value=self.x_min_val,
-                    max_value=self.x_max_val,
-                )
-            else:
-                self.x_render_state = False
-                self.x_locs = []
+        self._apply_render_property_split()
 
     def render_scene(
         self,
@@ -871,6 +876,7 @@ class ViewRotation(QtWidgets.QLabel):
         cmap = self.window.display_settings_dlg.colormap.currentText()
         contrast = None if autoscale else (vmin, vmax)
         raw_image = self.image if use_cache else None
+        intensities = self.window.window.view.read_relative_intensities()
 
         qimage, n_locs, (vmin, vmax), raw_image = render.render_scene(
             locs=locs,
@@ -881,7 +887,7 @@ class ViewRotation(QtWidgets.QLabel):
             invert_colors=self.window.dataset_dialog.wbackground.isChecked(),
             single_channel_colormap=cmap,
             colors=self.window.window.view.read_colors(),
-            relative_intensities=self.window.window.view.read_relative_intensities(),
+            relative_intensities=intensities,
             raw_image_cache=raw_image,
             return_contrast_limits=True,
             return_raw_image=True,
@@ -1021,18 +1027,14 @@ class ViewRotation(QtWidgets.QLabel):
             if self.window.dataset_dialog.checks[i].isChecked():
                 channel_name = self.window.dataset_dialog.checks[i].text()
                 channel_names.append(channel_name)
-                colordisp = self.window.dataset_dialog.colordisp_all[i]
-                color = colordisp.palette().color(
-                    QtGui.QPalette.ColorRole.Window
+                channel_colors.append(
+                    self.window.dataset_dialog.legend_color_8bit(i)
                 )
-                # Convert QColor to RGB tuple (0-255 range)
-                color_rgb = (color.red(), color.green(), color.blue())
-                channel_colors.append(color_rgb)
-            image = render.draw_legend(
-                image=image,
-                channel_names=channel_names,
-                channel_colors=channel_colors,
-            )
+        image = render.draw_legend(
+            image=image,
+            channel_names=channel_names,
+            channel_colors=channel_colors,
+        )
         return image
 
     def draw_rotation(self, image: QtGui.QImage) -> QtGui.QImage:
@@ -1712,6 +1714,9 @@ class ViewRotation(QtWidgets.QLabel):
 
         # if multiple channels are loaded, selected only the ones which
         # are checked in the Dataset Dialog
+        render_check = (
+            self.window.window.display_settings_dlg.render_check.isChecked()
+        )
         if len(self.locs) > 1:
             locs_ = []
             info_ = []
@@ -1724,7 +1729,7 @@ class ViewRotation(QtWidgets.QLabel):
         elif (
             len(self.locs) == 1
             and "group" not in self.locs[0].columns
-            and not self.window.window.display_settings_dlg.render_check.isChecked()
+            and not render_check
         ):
             locs = locs[0]
             infos = infos[0]
