@@ -33,7 +33,7 @@ Last change: 28-MAY-2026 CEST
 - Efficient Filter: much lower RAM usage + faster filtering by histogram selection (1D/2D), especially for very large datasets
 
 #### Others
-- Expanded the scope of sample notebooks
+- Expanded the scope of the sample notebooks
 - Improved docstrings for 3D SMLM clusterer
 - Flake8 clean-up
 - Installers are distributed with readme.txt files (previously .rst)
