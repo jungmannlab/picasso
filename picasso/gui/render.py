@@ -40,7 +40,6 @@ from sklearn.cluster import KMeans
 from PyQt5 import QtCore, QtGui, QtWidgets
 from .. import (
     aim,
-    comet,
     clusterer,
     g5m,
     imageprocess,
@@ -53,8 +52,9 @@ from .. import (
 )
 from .rotation import RotationWindow
 
-# PyImarisWrite works on windows only
+# Optional modules with external/hardware dependencies live in ext/
 from ..ext.bitplane import IMSWRITER
+from ..ext import comet
 
 if IMSWRITER:
     from ..ext.bitplane import numpy_to_imaris
@@ -10685,11 +10685,23 @@ class View(QtWidgets.QLabel):
 
             params, ok = COMETDialog.getParams(self.window)
             if ok:
-                locs, new_info, drift = comet.comet(
-                    locs,
-                    info,
-                    **params,
-                )
+                try:
+                    locs, new_info, drift = comet.comet(
+                        locs,
+                        info,
+                        **params,
+                    )
+                except RuntimeError as e:
+                    QtWidgets.QMessageBox.warning(
+                        self.window,
+                        "COMET not available",
+                        (
+                            f"{e}\n\n"
+                            "Please use a different drift-correction method, "
+                            "such as Undrift by AIM or Undrift by RCC."
+                        ),
+                    )
+                    return
 
                 locs = lib.ensure_sanity(locs, info)
                 self.all_locs[channel] = locs
@@ -11855,10 +11867,10 @@ class Window(QtWidgets.QMainWindow):
         # menu bar - Postprocess
         postprocess_menu = self.menu_bar.addMenu("Postprocess")
         undrift_comet_action = postprocess_menu.addAction("Undrift by COMET")
-        undrift_comet_action.setShortcut("Ctrl+U")
         undrift_comet_action.triggered.connect(self.view.undrift_comet)
 
         undrift_aim_action = postprocess_menu.addAction("Undrift by AIM")
+        undrift_aim_action.setShortcut("Ctrl+U")
         undrift_aim_action.triggered.connect(self.view.undrift_aim)
         undrift_from_picked_action = postprocess_menu.addAction(
             "Undrift from picked"
