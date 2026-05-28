@@ -10,7 +10,7 @@ from scipy.ndimage import convolve
 from scipy.optimize import minimize
 from scipy.spatial import cKDTree
 
-from . import lib, __version__
+from .. import lib, __version__
 
 try:
     from numba import cuda as _cuda
