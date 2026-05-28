@@ -4,7 +4,7 @@ import os
 import os.path as op
 
 try:
-    import picasso
+    import picasso  # noqa: F401
 except ImportError:
     print(
         "This script must be run within an environment "
@@ -14,15 +14,29 @@ except ImportError:
     raise
 
 SUBCMD = (
-    "average", "design", "filter", "localize", "render", "simulate", "spinna",
+    "average",
+    "design",
+    "filter",
+    "localize",
+    "render",
+    "simulate",
+    "spinna",
 )
 SCRIPT_PATH_ROOT = (os.sep, "usr", "bin", "picasso")
 DESKTOP_PATH_ROOT = (
-    os.sep, "usr", "share", "applications", "picasso_{subcmd}.desktop",
+    os.sep,
+    "usr",
+    "share",
+    "applications",
+    "picasso_{subcmd}.desktop",
 )
 SCRIPT_PATH_USER = ("~", "bin", "picasso")
 DESKTOP_PATH_USER = (
-    "~", ".local", "share", "applications", "picasso_{subcmd}.desktop",
+    "~",
+    ".local",
+    "share",
+    "applications",
+    "picasso_{subcmd}.desktop",
 )
 
 DESKTOP_TEMPLATE = """[Desktop Entry]

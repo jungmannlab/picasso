@@ -249,15 +249,31 @@ def test_generate_N_structures_hetero_satisfies_balance(het_structures):
     assert (n_mA >= 0).all() and (n_mB >= 0).all() and (n_het >= 0).all()
 
 
-def test_generate_N_structures_n_struct_le_n_targets_raises(het_structures):
-    # 2 targets, 2 structures (only the heterodimer + one monomer) → invalid
-    structures = [het_structures[0], het_structures[2]]
+def test_generate_N_structures_n_struct_lt_n_targets_raises(het_structures):
+    # 2 targets, 1 structure (only the heterodimer) → invalid: more
+    # targets than structures, no solution.
+    structures = [het_structures[2]]
     with pytest.raises(ValueError):
         spinna.generate_N_structures(
             structures=structures,
             N_total={"A": 100, "B": 100},
             granularity=5,
         )
+
+
+def test_generate_N_structures_n_struct_eq_n_targets_returns_single_row(
+    het_structures,
+):
+    # 2 targets, 2 structures: structure counts are uniquely determined,
+    # so the search space has a single row.
+    structures = [het_structures[0], het_structures[2]]
+    out = spinna.generate_N_structures(
+        structures=structures,
+        N_total={"A": 100, "B": 100},
+        granularity=5,
+    )
+    for value in out.values():
+        assert len(value) == 1
 
 
 def test_generate_N_structures_save_csv(monomer_dimer_structures, tmp_path):
@@ -1564,3 +1580,32 @@ def test_compare_models_full_fits_label_unc(
     assert label_unc_out["target"] in (3.0, 6.0)
     assert isinstance(best_mixer, StructureMixer)
     assert len(best_props) == 2
+
+
+def test_fit_le_smoke(mols_real):
+    """End-to-end smoke test for spinna.fit_le on a small dataset."""
+    coords = mols_real[["x", "y"]].to_numpy()
+    exp_data = {"A": coords, "B": coords}
+    np.random.seed(0)
+    le_values, fitted_lunc, best_d, best_score, best_props, best_mixer = (
+        spinna.fit_le(
+            target_a="A",
+            target_b="B",
+            exp_data=exp_data,
+            granularity=3,
+            label_unc={"A": [3.0, 6.0], "B": [3.0, 6.0]},
+            distances=[10.0, 15.0],
+            N_sim=1,
+            width=ROI,
+            height=ROI,
+            asynch=False,
+        )
+    )
+    assert np.isfinite(best_score)
+    assert best_d in (10.0, 15.0)
+    assert fitted_lunc["A"] in (3.0, 6.0)
+    assert fitted_lunc["B"] in (3.0, 6.0)
+    assert set(le_values.keys()) == {"A", "B"}
+    assert len(best_props) == 3
+    assert isinstance(best_mixer, StructureMixer)
+    assert len(best_mixer.structures) == 3

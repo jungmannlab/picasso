@@ -1,6 +1,45 @@
 # Changelog
 
-Last change: 19-MAY-2026 CEST
+Last change: 28-MAY-2026 CEST
+
+## 0.10.1
+
+#### Localize
+- Fixed Gauss-fitting error when spot's sum is zero (zero division error)
+
+#### Render
+- Faster rendering through improvements for all blur methods and multi-level spatial indexing for quick zoomed-in rendering
+- Multichannel rendering supports colormaps, not only a single RGB color
+- Anisotripic DBSCAN (with faster implementation) [DOI: 10.1021/acs.jpcb.4c02030](https://doi.org/10.1021/acs.jpcb.4c02030)
+- Faster cluster centers calculation for SMLM clusterer, DBSCAN and HDBSCAN + `lpz` is saved if applicable
+- Load FOV keeps the aspect ratio of the input .txt file
+- Files dialog resizing fixed
+- Show 3D clustering widgets only when 3D data is loaded
+- Fixed linking saving `lpz`
+- Fixed high-resolution display of mask in Render (#666)
+- Removed render property cache since it did not provide any significant speed improvement
+
+#### SPINNA
+- Comparing models uses fitting modes (Bayesian, etc) and has a cleaner progress dialog
+- Convenient fitting of LE
+- Area/volume button removed (deduced automatically from densities and number of molecules in the exp. data)
+- Show 3D masking widgets only if 3D mask is selected
+- Batch analysis for LE fitting
+- Batch analysis does not require area input (if found in metadata)
+- Batch analysis has clear instructions on what columns are required via CLI and the docs update
+- Fixed NND plot reindexing after fitting (#665)
+
+#### Filter
+- Efficient Filter: much lower RAM usage + faster filtering by histogram selection (1D/2D), especially for very large datasets
+
+#### Others
+- Expanded the scope of the sample notebooks
+- Improved docstrings for 3D SMLM clusterer
+- Flake8 clean-up
+- Installers are distributed with readme.txt files (previously .rst)
+- Minor changes to documentation
+- Fixed subcluster check plot when one of the two populations is empty (#667)
+- Fixed 2D fitting with console printout and no multiprocessing
 
 ## 0.10.0
 

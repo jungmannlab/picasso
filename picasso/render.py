@@ -21,7 +21,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import imageio.v2 as imageio
-from scipy import signal
+from scipy import signal, ndimage
 from scipy.spatial.transform import Rotation
 from tqdm import tqdm
 from PyQt6 import QtGui, QtCore, QtSvg
@@ -489,7 +489,56 @@ def _fill3d(
         image[j, i, k] += 1
 
 
-@numba.njit
+@numba.njit(cache=True)
+def _draw_gaussian_loc(
+    image: lib.FloatArray2D,
+    x_: float,
+    y_: float,
+    sx_: float,
+    sy_: float,
+    n_pixel_x: int,
+    n_pixel_y: int,
+) -> None:
+    """Render a single separable 2D Gaussian into ``image``."""
+    max_y_off = _DRAW_MAX_SIGMA * sy_
+    i_min = np.int32(y_ - max_y_off)
+    if i_min < 0:
+        i_min = 0
+    i_max = np.int32(y_ + max_y_off + 1)
+    if i_max > n_pixel_y:
+        i_max = n_pixel_y
+    max_x_off = _DRAW_MAX_SIGMA * sx_
+    j_min = np.int32(x_ - max_x_off)
+    if j_min < 0:
+        j_min = 0
+    j_max = np.int32(x_ + max_x_off) + 1
+    if j_max > n_pixel_x:
+        j_max = n_pixel_x
+    nx = j_max - j_min
+    ny = i_max - i_min
+    if nx <= 0 or ny <= 0:
+        return
+    inv_2sx2 = 1.0 / (2.0 * sx_ * sx_)
+    inv_2sy2 = 1.0 / (2.0 * sy_ * sy_)
+    norm = 1.0 / (2.0 * np.pi * sx_ * sy_)
+    # Separable kernel: factor exp(-(dx^2/(2sx^2) + dy^2/(2sy^2)))
+    # into 1D gx * 1D gy. O(K) exp calls per loc instead of O(K^2).
+    gx = np.empty(nx, dtype=np.float32)
+    gy = np.empty(ny, dtype=np.float32)
+    for jj in range(nx):
+        dx = (j_min + jj) + 0.5 - x_
+        gx[jj] = np.exp(-dx * dx * inv_2sx2)
+    for ii in range(ny):
+        dy = (i_min + ii) + 0.5 - y_
+        gy[ii] = norm * np.exp(-dy * dy * inv_2sy2)
+    for ii in range(ny):
+        gy_i = gy[ii]
+        row = image[i_min + ii]
+        for jj in range(nx):
+            row[j_min + jj] += gy_i * gx[jj]
+
+
+@numba.njit(cache=True)
 def _fill_gaussian(
     image: lib.FloatArray2D,
     x: lib.FloatArray1D,
@@ -514,42 +563,75 @@ def _fill_gaussian(
     n_pixel_x, n_pixel_y : int
         Number of pixels in x and y.
     """
-    # render each localization separately
-    for x_, y_, sx_, sy_ in zip(x, y, sx, sy):
+    n_locs = len(x)
+    if n_locs == 0:
+        return
 
-        # get min and max indeces to draw the given localization
-        max_y = _DRAW_MAX_SIGMA * sy_
-        i_min = np.int32(y_ - max_y)
-        if i_min < 0:
-            i_min = 0
-        i_max = np.int32(y_ + max_y + 1)
-        if i_max > n_pixel_y:
-            i_max = n_pixel_y
-        max_x = _DRAW_MAX_SIGMA * sx_
-        j_min = np.int32(x_ - max_x)
-        if j_min < 0:
-            j_min = 0
-        j_max = np.int32(x_ + max_x) + 1
-        if j_max > n_pixel_x:
-            j_max = n_pixel_x
-
-        # draw a localization as a 2D guassian PDF
-        for i in range(i_min, i_max):
-            for j in range(j_min, j_max):
-                image[i, j] += np.exp(
-                    -(
-                        (j - x_ + 0.5) ** 2 / (2 * sx_**2)
-                        + (i - y_ + 0.5) ** 2 / (2 * sy_**2)
-                    )
-                ) / (2 * np.pi * sx_ * sy_)
+    for i in range(n_locs):
+        _draw_gaussian_loc(
+            image, x[i], y[i], sx[i], sy[i], n_pixel_x, n_pixel_y
+        )
 
 
-@numba.njit
+@numba.njit(cache=True)
+def _draw_gaussian_rot_loc(
+    image: lib.FloatArray2D,
+    x_: float,
+    y_: float,
+    sx_: float,
+    sy_: float,
+    sz_: float,
+    n_pixel_x: int,
+    n_pixel_y: int,
+    rot_matrix: lib.Array3x3,
+    rot_matrixT: lib.Array3x3,
+) -> None:
+    """Render a single rotated 2D Gaussian (projected from 3D) into
+    ``image``."""
+    cov = np.zeros((3, 3), dtype=np.float32)
+    cov[0, 0] = sx_ * sx_
+    cov[1, 1] = sy_ * sy_
+    cov[2, 2] = sz_ * sz_
+    cov_rot = rot_matrix @ cov @ rot_matrixT
+    s00 = cov_rot[0, 0]
+    s01 = cov_rot[0, 1]
+    s10 = cov_rot[1, 0]
+    s11 = cov_rot[1, 1]
+    det2d = s00 * s11 - s01 * s10
+    if det2d < 1e-10:
+        return
+    inv00 = s11 / det2d
+    inv01 = -s01 / det2d
+    inv10 = -s10 / det2d
+    inv11 = s00 / det2d
+    norm = 1.0 / (2.0 * np.pi * np.sqrt(det2d))
+    max_x_off = _DRAW_MAX_SIGMA * np.sqrt(s00)
+    max_y_off = _DRAW_MAX_SIGMA * np.sqrt(s11)
+    j_min = int(x_ - max_x_off)
+    if j_min < 0:
+        j_min = 0
+    j_max = int(x_ + max_x_off + 1)
+    if j_max > n_pixel_x:
+        j_max = n_pixel_x
+    i_min = int(y_ - max_y_off)
+    if i_min < 0:
+        i_min = 0
+    i_max = int(y_ + max_y_off + 1)
+    if i_max > n_pixel_y:
+        i_max = n_pixel_y
+    for i in range(i_min, i_max):
+        b = np.float32(i + 0.5 - y_)
+        for j in range(j_min, j_max):
+            a = np.float32(j + 0.5 - x_)
+            exponent = a * a * inv00 + a * b * (inv01 + inv10) + b * b * inv11
+            image[i, j] += norm * np.exp(-0.5 * exponent)
+
+
+@numba.njit(cache=True)
 def _fill_gaussian_rot(
     image: lib.FloatArray2D,
     x: lib.FloatArray1D,
     y: lib.FloatArray1D,
-    z: lib.FloatArray1D,
     sx: lib.FloatArray1D,
     sy: lib.FloatArray1D,
     sz: lib.FloatArray1D,
@@ -575,8 +657,10 @@ def _fill_gaussian_rot(
     ang : tuple
         Rotation angles of locs around x, y and z axes (radians).
     """
-    (angx, angy, angz) = ang
-
+    n_locs = len(x)
+    if n_locs == 0:
+        return
+    angx, angy, angz = ang
     rot_mat_x = np.array(
         [
             [1.0, 0.0, 0.0],
@@ -601,67 +685,22 @@ def _fill_gaussian_rot(
         ],
         dtype=np.float32,
     )
-    rot_matrix = rot_mat_x @ rot_mat_y @ rot_mat_z
-    rot_matrixT = np.transpose(rot_matrix)
+    rot_matrix = (rot_mat_x @ rot_mat_y @ rot_mat_z).astype(np.float32)
+    rot_matrixT = np.ascontiguousarray(rot_matrix.T)
 
-    for x_, y_, z_, sx_, sy_, sz_ in zip(x, y, z, sx, sy, sz):
-
-        # rotated 3D covariance
-        cov = np.array(
-            [
-                [sx_**2, 0.0, 0.0],
-                [0.0, sy_**2, 0.0],
-                [0.0, 0.0, sz_**2],
-            ],
-            dtype=np.float32,
+    for i in range(n_locs):
+        _draw_gaussian_rot_loc(
+            image,
+            x[i],
+            y[i],
+            sx[i],
+            sy[i],
+            sz[i],
+            n_pixel_x,
+            n_pixel_y,
+            rot_matrix,
+            rot_matrixT,
         )
-        cov_rot = rot_matrix @ cov @ rot_matrixT
-
-        # we only need the top-left 2x2 part for rendering
-        s00 = cov_rot[0, 0]  # var_x
-        s01 = cov_rot[0, 1]  # cov_xy
-        s10 = cov_rot[1, 0]  # cov_yx (= s01)
-        s11 = cov_rot[1, 1]  # var_y
-
-        # inverse of 2x2 matrix
-        det2d = s00 * s11 - s01 * s10
-        if det2d < 1e-10:
-            continue
-        inv00 = s11 / det2d
-        inv01 = -s01 / det2d
-        inv10 = -s10 / det2d
-        inv11 = s00 / det2d
-
-        norm = 1.0 / (2.0 * np.pi * np.sqrt(det2d))
-
-        # use the larger effective sigma for draw bounds
-        eff_sx = np.sqrt(s00)
-        eff_sy = np.sqrt(s11)
-        max_x = _DRAW_MAX_SIGMA * 2.5 * eff_sx
-        max_y = _DRAW_MAX_SIGMA * 2.5 * eff_sy
-
-        j_min = int(x_ - max_x)
-        if j_min < 0:
-            j_min = 0
-        j_max = int(x_ + max_x + 1)
-        if j_max > n_pixel_x:
-            j_max = n_pixel_x
-        i_min = int(y_ - max_y)
-        if i_min < 0:
-            i_min = 0
-        i_max = int(y_ + max_y + 1)
-        if i_max > n_pixel_y:
-            i_max = n_pixel_y
-
-        # 2D Gaussian (no z-loop!)
-        for i in range(i_min, i_max):
-            b = np.float32(i + 0.5 - y_)
-            for j in range(j_min, j_max):
-                a = np.float32(j + 0.5 - x_)
-                exponent = (
-                    a * a * inv00 + a * b * (inv01 + inv10) + b * b * inv11
-                )
-                image[i, j] += norm * np.exp(-0.5 * exponent)
 
 
 @numba.njit
@@ -1085,9 +1124,7 @@ def _render_gaussian(
         sx = blur_width[in_view]
         sz = blur_depth[in_view]
 
-        _fill_gaussian_rot(
-            image, x, y, z, sx, sy, sz, n_pixel_x, n_pixel_y, ang
-        )
+        _fill_gaussian_rot(image, x, y, sx, sy, sz, n_pixel_x, n_pixel_y, ang)
 
     n = len(x)
     return n, image
@@ -1184,9 +1221,7 @@ def _render_gaussian_iso(
         sx = sy
         sz = blur_depth[in_view]
 
-        _fill_gaussian_rot(
-            image, x, y, z, sx, sy, sz, n_pixel_x, n_pixel_y, ang
-        )
+        _fill_gaussian_rot(image, x, y, sx, sy, sz, n_pixel_x, n_pixel_y, ang)
 
     return len(x), image
 
@@ -1386,7 +1421,8 @@ def _fftconvolve(
     blur_width: float,
     blur_height: float,
 ) -> lib.FloatArray2D:
-    """Blur (convolves) 2D image using fast fourier transform.
+    """Blur (convolves) 2D image using fast fourier transform or with
+    Gaussian filter applied (faster for small kernels).
 
     Parameters
     ----------
@@ -1402,6 +1438,26 @@ def _fftconvolve(
     """
     kernel_width = 10 * int(np.round(blur_width)) + 1
     kernel_height = 10 * int(np.round(blur_height)) + 1
+    # Spatial separable convolution is faster than FFT for the small
+    # kernels typical of SMLM precisions (~1-3 px). Switch to FFT only
+    # when the kernel is large relative to the image.
+    n_y, n_x = image.shape
+    spatial = (
+        kernel_height < 0.05 * n_y
+        and kernel_width < 0.05 * n_x
+        and max(kernel_height, kernel_width) <= 101
+    )
+    if spatial:
+        out = np.empty_like(image, dtype=np.float32)
+        ndimage.gaussian_filter(
+            image,
+            sigma=(blur_height, blur_width),
+            output=out,
+            mode="constant",
+            cval=0.0,
+            truncate=5.0,
+        )
+        return out
     kernel_y = signal.windows.gaussian(kernel_height, blur_height)
     kernel_x = signal.windows.gaussian(kernel_width, blur_width)
     kernel = np.outer(kernel_y, kernel_x)
@@ -1421,7 +1477,7 @@ def rotation_matrix(angx: float, angy: float, angz: float) -> Rotation:
     Returns
     -------
     scipy.spatial.transform.Rotation
-        Scipy class that can be applied to rotate an Nx3 np.ndarray
+        Scipy class that can be applied to rotate an Nx3 array.
     """
     rot_mat_x = np.array(
         [
@@ -1551,6 +1607,76 @@ def export_qimage_to_svg(image: QtGui.QImage, path: str):
     painter = QtGui.QPainter(generator)
     painter.drawImage(0, 0, image)
     painter.end()
+
+
+def solid_to_lut(rgb: tuple[float, float, float]) -> lib.FloatArray2D:
+    """Build a (256, 3) float32 LUT that linearly ramps from black to
+    the given RGB color.
+
+    The returned LUT is the input format expected by
+    :func:`_render_multi_channel` (and therefore :func:`render_scene`)
+    when colors are passed as per-channel lookup tables. A solid-color
+    channel rendered through this LUT is mathematically identical to
+    the legacy ``intensity * rgb`` blend.
+
+    Parameters
+    ----------
+    rgb : sequence of 3 floats
+        Target RGB color, each component in range [0, 1].
+
+    Returns
+    -------
+    lut : lib.FloatArray2D
+        LUT with generated colormap of shape (256, 3).
+
+    Examples
+    --------
+    >>> lut = solid_to_lut((1.0, 0.0, 0.0))   # black -> red
+    >>> render_scene(locs=..., info=..., colors=[lut, ...], ...)
+    """
+    rgb_arr = np.asarray(rgb, dtype=np.float32).reshape(3)
+    return np.linspace(
+        np.zeros(3, dtype=np.float32), rgb_arr, 256, dtype=np.float32
+    )
+
+
+def stops_to_lut(
+    stops: list[tuple[float, float, float, float]],
+) -> lib.FloatArray2D:
+    """Build a (256, 3) float32 LUT by linearly interpolating between
+    color stops.
+
+    Parameters
+    ----------
+    stops : sequence of (position, r, g, b) tuples
+        Each ``position`` must be in [0, 1], strictly increasing, with
+        the first stop at 0.0 and the last at 1.0. ``r``, ``g``, ``b``
+        are also in [0, 1].
+
+    Returns
+    -------
+    lut : lib.FloatArray2D
+        LUT with generated colormap of shape (256, 3).
+
+    Examples
+    --------
+    A 3-stop "fire" gradient (black -> red -> yellow):
+
+    >>> lut = stops_to_lut([
+    ...     (0.0, 0, 0, 0),
+    ...     (0.5, 1, 0, 0),
+    ...     (1.0, 1, 1, 0),
+    ... ])
+    >>> render_scene(locs=..., info=..., colors=[lut], ...)
+    """
+    arr = np.asarray(stops, dtype=np.float32)
+    positions = arr[:, 0]
+    rgb = arr[:, 1:4]
+    x = np.linspace(0.0, 1.0, 256, dtype=np.float32)
+    lut = np.empty((256, 3), dtype=np.float32)
+    for c in range(3):
+        lut[:, c] = np.interp(x, positions, rgb[:, c])
+    return lut
 
 
 def get_colors_from_colormap(
@@ -2580,7 +2706,7 @@ def render_scene(
     localizations and/or the contrast limits used for scaling to be
     returned together with the rendered QImage and number of
     localizations rendered.
-    
+
     Parameters
     ----------
     locs: pd.DataFrame or list of pd.DataFrame
@@ -2722,7 +2848,7 @@ def _render_multi_channel(
     info: list[list[dict]],
     *,
     disp_px_size: float,
-    colors: list[tuple[int, int, int]],
+    colors: list[tuple[int, int, int]] | list[np.ndarray],
     viewport: tuple[tuple[float, float], tuple[float, float]] | None = None,
     blur_method: (
         Literal["gaussian", "gaussian_iso", "smooth", "convolve"] | None
@@ -2735,7 +2861,14 @@ def _render_multi_channel(
     raw_image_cache: lib.FloatArray3D | None = None,
 ) -> tuple[int, lib.IntArray3D, tuple[float, float], lib.FloatArray3D]:
     """Render multi-channel localizations into an RGB 8bit image
-    (numpy array). See ``render_scene`` for more details."""
+    (numpy array). See ``render_scene`` for more details.
+
+    ``colors`` may be either a list of ``(r, g, b)`` triplets (legacy
+    behaviour: each channel rendered as ``intensity × rgb``, additive
+    blend) or a list of ``(256, 3)`` LUTs (each channel indexed into
+    its LUT before additive blending — supports per-channel
+    matplotlib colormaps and user-defined colormaps from the GUI).
+    """
     if raw_image_cache is not None:
         assert raw_image_cache.ndim == 3, "raw_image_cache must be a 3D array."
         raw_image = raw_image_cache
@@ -2767,16 +2900,23 @@ def _render_multi_channel(
     )
 
     # color the images
-    Y, X = images.shape[1:]
-    rgb = np.zeros((Y, X, 3), dtype=np.float32)  # float for now
     if colors is None:  # fallback if the user did not specify colors
         colors = lib.get_colors(len(images))
-    for color, image in zip(colors, images):
-        for i in range(3):
-            rgb[:, :, i] += color[i] * image
-    rgb = np.minimum(
-        rgb, 1.0
-    )  # clip to max value of 1 (preserves relative brightness)
+    colors_arr = np.asarray(colors, dtype=np.float32)
+    images_f32 = np.ascontiguousarray(images, dtype=np.float32)
+    if colors_arr.ndim == 2:
+        # legacy path: each channel is a single (r, g, b)
+        rgb = np.tensordot(images_f32, colors_arr, axes=([0], [0]))
+    else:
+        # LUT path: each channel is a (256, 3) lookup table
+        idx = np.clip((images_f32 * 255.0).astype(np.int32), 0, 255)
+        rgb = np.zeros(
+            (images_f32.shape[1], images_f32.shape[2], 3), dtype=np.float32
+        )
+        for c in range(images_f32.shape[0]):
+            rgb += colors_arr[c][idx[c]]
+    # clip to max value of 1 (preserves relative brightness)
+    np.minimum(rgb, 1.0, out=rgb)
     rgb = to_8bit(rgb)
     if invert_colors:
         rgb = 255 - rgb
@@ -3167,7 +3307,7 @@ def build_animation(
 ) -> None:
     """Build an animation of rendered localizations given the
     checkpoints (angle, viewport, etc) and the time between them.
-    
+
     Parameters
     ----------
     path : str
@@ -3190,7 +3330,7 @@ def build_animation(
     positions : list
         Each element determines the checkpoint of the animation, which
         is a tuple of 4 elements: (angle_x, angle_y, angle_z, viewport).
-        Angles are in radians. Viewport is given as ((y_min, x_min), 
+        Angles are in radians. Viewport is given as ((y_min, x_min),
         (y_max, x_max)) in camera pixels.
     durations : list
         List of durations in seconds between the checkpoints. Must have
@@ -3248,7 +3388,7 @@ def build_animation(
     ), "locs must be a pd.DataFrame or a list of pd.DataFrames."
     if isinstance(locs, list):
         assert all(
-            isinstance(l, pd.DataFrame) for l in locs
+            isinstance(locs_, pd.DataFrame) for locs_ in locs
         ), "All elements of locs must be pd.DataFrames."
         assert len(locs) >= 1, "locs must contain at least one DataFrame."
     assert (

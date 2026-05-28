@@ -46,6 +46,7 @@ from .. import (
     masking,
     postprocess,
     render,
+    spatial_index,
     __version__,
 )
 from ..lib import (
@@ -80,7 +81,40 @@ MIN_LOCS_G5M = 10
 MAX_ROUNDS_WITHOUT_BEST_BIC_G5M = 3
 MIN_SIGMA_FACTOR_G5M = 0.8
 MAX_SIGMA_FACTOR_G5M = 1.5
-N_COMPONENTS_MAX_G5M = 100
+
+
+# Per-channel colormap support for multichannel rendering. Each channel
+# resolves to a (256, 3) float32 LUT, which the renderer indexes by the
+# scaled intensity. Solid colors become black->color ramps so that the
+# legacy "intensity * rgb" math is preserved bit-for-bit. Built-in
+# colormaps share the names of the 14 default solid colors with the
+# suffix BUILTIN_CMAP_SUFFIX, and are 3-stop black -> color -> white
+# gradients.
+BUILTIN_CMAP_SUFFIX = "_gradient"
+# Index into a 256-row LUT used to pick a representative RGB for legends,
+# histograms, and similar single-color UI elements. Avoids the near-white
+# peaks of gradients that pass through white at intensity 1.
+LEGEND_SAMPLE_IDX = 200
+
+
+def _gradient_pixmap(
+    lut: lib.FloatArray2D, width: int = 80, height: int = 14
+) -> QtGui.QPixmap:
+    """Build a horizontal gradient QPixmap that visualizes a (256, 3)
+    LUT. Used as the per-channel color preview."""
+    samples = np.linspace(0, 255, width).astype(np.int32)
+    row = (lut[samples] * 255).clip(0, 255).astype(np.uint8)
+    rgba = np.empty((height, width, 4), dtype=np.uint8)
+    rgba[..., :3] = row[None, :, :]
+    rgba[..., 3] = 255
+    image = QtGui.QImage(
+        rgba.data,
+        width,
+        height,
+        4 * width,
+        QtGui.QImage.Format.Format_RGBA8888,
+    )
+    return QtGui.QPixmap.fromImage(image.copy())
 
 
 def check_pick(f: Callable) -> Callable:
@@ -386,6 +420,8 @@ class DatasetDialog(lib.Dialog):
         Main window instance.
     """
 
+    DOCS_URL = "https://picassosr.readthedocs.io/en/latest/render.html#files-ctrl-f"  # noqa: E501
+
     def __init__(self, window: QtWidgets.QMainWindow) -> None:
         super().__init__(window)
         self.window = window
@@ -397,9 +433,16 @@ class DatasetDialog(lib.Dialog):
         self.colorselection = []
         self.colordisp_all = []
         self.intensitysettings = []
+        # Per-channel resolved LUTs (each shape (256, 3) float32) and
+        # caches for the built-in and user-defined cmap LUTs.
+        self._channel_luts = []
+        self._builtin_cmap_lut_cache = {}
+        self._user_cmap_lut_cache = {}
+        # Built-in colormap stops are filled in once default_colors /
+        # rgb are defined further below; see _init_builtin_cmaps.
+        self.builtin_cmap_stops = {}
         layout = QtWidgets.QGridLayout()
         self.setLayout(layout)
-        self.setMaximumHeight(1000)
 
         # add non-scrollable elements - left side
         self.legend = QtWidgets.QCheckBox("Show legend")
@@ -442,16 +485,32 @@ class DatasetDialog(lib.Dialog):
         layout.addWidget(load_button, 1, 2)
         load_button.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
         load_button.clicked.connect(self.load_colors)
+        edit_cmaps_button = QtWidgets.QPushButton("Edit custom colormaps")
+        edit_cmaps_button.setToolTip(
+            "Create, edit, rename or delete custom colormaps.\n"
+            "Custom colormaps appear in the per-channel selector."
+        )
+        layout.addWidget(edit_cmaps_button, 2, 2)
+        edit_cmaps_button.clicked.connect(self.open_custom_cmap_editor)
+        layout.addWidget(
+            lib.HelpButton(self.DOCS_URL),
+            3,
+            2,
+            alignment=QtCore.Qt.AlignmentFlag.AlignRight,
+        )
 
         # add scrollable area which will display all channels, below
         # the non-scrollable elements
-        scroll = QtWidgets.QScrollArea(self)
-        scroll.setWidgetResizable(True)
+        self._scroll = QtWidgets.QScrollArea(self)
+        self._scroll.setWidgetResizable(True)
+        self._scroll.setHorizontalScrollBarPolicy(
+            QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
         self.container = QtWidgets.QWidget()
-        scroll.setWidget(self.container)
+        self._scroll.setWidget(self.container)
         self.scroll_area = QtWidgets.QGridLayout(self.container)
         self.scroll_area.setAlignment(QtCore.Qt.AlignmentFlag.AlignTop)
-        layout.addWidget(scroll, 4, 0, 1, 3)
+        layout.addWidget(self._scroll, 4, 0, 1, 3)
 
         self.checks = []
         self.title = []
@@ -510,6 +569,16 @@ class DatasetDialog(lib.Dialog):
             [0, 0.5, 0.5],
             [0, 0.5, 1],
         ]
+        # Built-in colormaps: one 3-stop (black -> color -> white)
+        # gradient per default solid color, named "<color>_gradient".
+        self.builtin_cmap_stops = {
+            f"{name}{BUILTIN_CMAP_SUFFIX}": [
+                [0.0, 0.0, 0.0, 0.0],
+                [0.5, float(rgb[0]), float(rgb[1]), float(rgb[2])],
+                [1.0, 1.0, 1.0, 1.0],
+            ]
+            for name, rgb in zip(self.default_colors, self.rgb)
+        }
 
     def add_entry(self, path: str) -> None:
         """Add the new channel for the given path."""
@@ -552,13 +621,16 @@ class DatasetDialog(lib.Dialog):
         # create the self.colorselection widget
         colordrop = QtWidgets.QComboBox(self)
         colordrop.setToolTip(
-            "Choose the color for this dataset.\n"
-            "You can also enter a hexadecimal color code (e.g., #FF5733)."
+            "Choose the color or colormap for this dataset.\n"
+            "Solid colors are rendered as a black→color gradient.\n"
+            "Colormaps map intensity 0 (left of the preview) to\n"
+            "intensity 1 (right of the preview).\n"
+            "You can also enter a hexadecimal color code "
+            "(e.g., #FF5733)."
         )
         colordrop.setEditable(True)
-        colordrop.lineEdit().setMaxLength(12)
-        for color in self.default_colors:
-            colordrop.addItem(color)
+        colordrop.lineEdit().setMaxLength(40)
+        self._populate_color_combo(colordrop)
         index = np.min([len(self.checks) - 1, len(self.rgb) - 1])
         colordrop.setCurrentText(self.default_colors[index])
         colordrop.activated.connect(self.update_colors)
@@ -567,24 +639,27 @@ class DatasetDialog(lib.Dialog):
             partial(self.set_color, t.objectName())
         )
 
-        # create the label widget to show current color
-        colordisp = QtWidgets.QLabel("      ")
-        colordisp.setToolTip("Current color for this dataset.")
-        palette = colordisp.palette()
+        # resolve the initial LUT for this channel
         if self.auto_colors.isChecked():
             colors = lib.get_colors(len(self.checks) + 1)
-            r, g, b = colors[-1]
-            palette.setColor(
-                QtGui.QPalette.ColorRole.Window,
-                QtGui.QColor.fromRgbF(r, g, b, 1),
-            )
+            initial_lut = render.solid_to_lut(colors[-1])
         else:
-            palette.setColor(
-                QtGui.QPalette.ColorRole.Window,
-                QtGui.QColor.fromRgbF(*self.rgb[index], 1),
-            )
-        colordisp.setAutoFillBackground(True)
-        colordisp.setPalette(palette)
+            try:
+                initial_lut = self.resolve_color_identifier(
+                    self.default_colors[index]
+                )
+            except ValueError:
+                initial_lut = render.solid_to_lut(self.rgb[index])
+        self._channel_luts.append(initial_lut)
+
+        # create the gradient preview widget
+        colordisp = QtWidgets.QLabel()
+        colordisp.setToolTip(
+            "Gradient preview: intensity 0 (left) → intensity 1 (right)."
+        )
+        colordisp.setFixedSize(80, 14)
+        colordisp.setFrameShape(QtWidgets.QFrame.Shape.Box)
+        colordisp.setPixmap(_gradient_pixmap(initial_lut))
         self.colordisp_all.append(colordisp)
 
         # create the relative intensity widget
@@ -604,9 +679,16 @@ class DatasetDialog(lib.Dialog):
         self.scroll_area.addWidget(intensity, currentline, 4)
         self.scroll_area.addWidget(p, currentline, 5)
 
-        # adjust the size of the dialog
-        hint = self.container.sizeHint()
-        lib.adjust_widget_size(self, hint, 45, 150)
+        self._fit_scroll_width()
+
+    def _fit_scroll_width(self) -> None:
+        """Ensure the dialog is wide enough that the scroll area's
+        contents fit horizontally without a scrollbar. Only ever grows
+        the minimum width; never shrinks the dialog."""
+        self.container.adjustSize()
+        needed = self.container.sizeHint().width()
+        frame = 2 * self._scroll.frameWidth()
+        self._scroll.setMinimumWidth(needed + frame)
 
     def update_colors(self) -> None:
         """Change colors in self.colordisp_all and updates the scene in
@@ -636,13 +718,11 @@ class DatasetDialog(lib.Dialog):
                     else:
                         self.checks[i].setText(new_title)
                     self.update_viewport()
-                    # change size of the dialog
-                    hint = self.scroll_area.sizeHint()
-                    lib.adjust_widget_size(self, hint, 45, 150)
                     # change name in the fast render dialog
                     self.window.fast_render_dialog.channel.setItemText(
                         i + 1, new_title
                     )
+                    self._fit_scroll_width()
                 break
 
     def _close_one_channel(self, i: int, render_=True) -> None:
@@ -663,12 +743,14 @@ class DatasetDialog(lib.Dialog):
         del self.colordisp_all[i]
         del self.intensitysettings[i]
         del self.closebuttons[i]
+        del self._channel_luts[i]
 
         # delete all the View attributes
         del self.window.view.locs[i]
         del self.window.view.locs_paths[i]
         del self.window.view.infos[i]
         del self.window.view.index_blocks[i]
+        del self.window.view.render_index[i]
 
         # delete zcoord from slicer dialog
         try:
@@ -724,9 +806,7 @@ class DatasetDialog(lib.Dialog):
         # remove the channel from test clustering dialog
         self.window.test_clusterer_dialog.channels.removeItem(i)
 
-        # adjust the size of the dialog
-        hint = self.scroll_area.sizeHint()
-        lib.adjust_widget_size(self, hint, 45, 150)
+        self._fit_scroll_width()
 
     def close_file(self, i: int | str, render=True) -> None:
         """Close a given channel (defined by its index of name) and
@@ -749,41 +829,131 @@ class DatasetDialog(lib.Dialog):
                 self.window.view.update_scene()
 
     def set_color(self, n: int | str) -> None:
-        """Set colorsdisp_all and colorselection in the given channel,
-        defined by its index or name."""
+        """Resolve the current channel selection to a (256, 3) LUT,
+        cache it, and refresh the gradient preview."""
         if isinstance(n, str):
             for j in range(len(self.title)):
                 if n == self.title[j].objectName():
                     n = j
+        if n is None or n >= len(self.colordisp_all):
+            return  # widget already torn down (closing a channel)
 
-        palette = self.colordisp_all[n].palette()
-        color = self.colorselection[n].currentText()
         if self.auto_colors.isChecked():
             n_channels = len(self.checks)
-            r, g, b = lib.get_colors(n_channels)[n]
-            palette.setColor(
-                QtGui.QPalette.ColorRole.Window,
-                QtGui.QColor.fromRgbF(r, g, b, 1),
-            )
-        elif lib.is_hexadecimal(color):
-            color = color.lstrip("#")
-            r, g, b = tuple(int(color[i : i + 2], 16) / 255 for i in (0, 2, 4))
-            palette.setColor(
-                QtGui.QPalette.ColorRole.Window,
-                QtGui.QColor.fromRgbF(r, g, b, 1),
-            )
-        elif color in self.default_colors:
-            i = self.default_colors.index(color)
-            palette.setColor(
-                QtGui.QPalette.ColorRole.Window,
-                QtGui.QColor.fromRgbF(
-                    self.rgb[i][0],
-                    self.rgb[i][1],
-                    self.rgb[i][2],
-                    1,
-                ),
-            )
-        self.colordisp_all[n].setPalette(palette)
+            rgb = lib.get_colors(n_channels)[n]
+            lut = render.solid_to_lut(rgb)
+        else:
+            color = self.colorselection[n].currentText()
+            try:
+                lut = self.resolve_color_identifier(color)
+            except ValueError:
+                # Keep the previous LUT so the preview doesn't flicker;
+                # read_colors will raise the user-facing warning.
+                lut = self._channel_luts[n]
+        self._channel_luts[n] = lut
+        self.colordisp_all[n].setPixmap(_gradient_pixmap(lut))
+
+    def resolve_color_identifier(self, name: str) -> lib.FloatArray2D:
+        """Resolve a free-text identifier from a channel combobox into
+        a (256, 3) float32 LUT. Raises ``ValueError`` for unknown
+        identifiers.
+
+        Resolution order: default_colors → hex code → built-in
+        gradient colormap → user-defined custom colormap.
+        """
+        if name in self.default_colors:
+            rgb = self.rgb[self.default_colors.index(name)]
+            return render.solid_to_lut(rgb)
+        if lib.is_hexadecimal(name):
+            hexstr = name.lstrip("#")
+            rgb = tuple(int(hexstr[i : i + 2], 16) / 255 for i in (0, 2, 4))
+            return render.solid_to_lut(rgb)
+        if name in self.builtin_cmap_stops:
+            cached = self._builtin_cmap_lut_cache.get(name)
+            if cached is None:
+                cached = render.stops_to_lut(self.builtin_cmap_stops[name])
+                self._builtin_cmap_lut_cache[name] = cached
+            return cached
+        user_cmaps = getattr(self.window, "custom_colormaps_stops", {})
+        if name in user_cmaps:
+            cached = self._user_cmap_lut_cache.get(name)
+            if cached is None:
+                cached = render.stops_to_lut(user_cmaps[name])
+                self._user_cmap_lut_cache[name] = cached
+            return cached
+        raise ValueError(f"Unknown color identifier: '{name}'")
+
+    def _populate_color_combo(self, combobox: QtWidgets.QComboBox) -> None:
+        """Fill a per-channel combobox with solid colors, curated
+        matplotlib colormaps, and any user-defined custom colormaps."""
+        model = QtGui.QStandardItemModel(combobox)
+
+        def add_header(text: str) -> None:
+            item = QtGui.QStandardItem(text)
+            item.setFlags(QtCore.Qt.ItemFlag.NoItemFlags)
+            font = item.font()
+            font.setBold(True)
+            item.setFont(font)
+            model.appendRow(item)
+
+        def add_item(text: str) -> None:
+            model.appendRow(QtGui.QStandardItem(text))
+
+        add_header("— Solid colors —")
+        for c in self.default_colors:
+            add_item(c)
+        add_header("— Built-in colormaps —")
+        for c in self.builtin_cmap_stops:
+            add_item(c)
+        user_cmaps = getattr(self.window, "custom_colormaps_stops", {})
+        if user_cmaps:
+            add_header("— Custom —")
+            for c in sorted(user_cmaps.keys()):
+                add_item(c)
+        combobox.setModel(model)
+
+    def refresh_color_lists(self) -> None:
+        """Rebuild every channel combobox to reflect changes in the
+        custom-colormap registry. Preserves each channel's current
+        selection where possible."""
+        # invalidate any stale cached user-cmap LUTs first
+        user_cmaps = getattr(self.window, "custom_colormaps_stops", {})
+        self._user_cmap_lut_cache = {
+            k: v
+            for k, v in self._user_cmap_lut_cache.items()
+            if k in user_cmaps
+        }
+        for i, combo in enumerate(self.colorselection):
+            previous = combo.currentText()
+            combo.blockSignals(True)
+            self._populate_color_combo(combo)
+            try:
+                self.resolve_color_identifier(previous)
+                combo.setCurrentText(previous)
+            except ValueError:
+                fallback_idx = min(i, len(self.default_colors) - 1)
+                combo.setCurrentText(self.default_colors[fallback_idx])
+            combo.blockSignals(False)
+            self.set_color(i)
+
+    def open_custom_cmap_editor(self) -> None:
+        """Open the modal dialog for editing user-defined colormaps."""
+        dialog = CustomColormapDialog(self.window)
+        dialog.exec()
+
+    def legend_color(self, n: int) -> tuple[float, float, float]:
+        """Return a representative ``(r, g, b)`` in [0, 1] for channel
+        ``n``, sampled from its LUT at :data:`LEGEND_SAMPLE_IDX`.
+
+        Used by legend / histogram / profile drawing code that needs
+        a single color per channel.
+        """
+        lut = self._channel_luts[n]
+        return tuple(float(v) for v in lut[LEGEND_SAMPLE_IDX])
+
+    def legend_color_8bit(self, n: int) -> tuple[int, int, int]:
+        """8-bit variant of :meth:`legend_color` (each component 0–255)."""
+        return tuple(int(round(v * 255)) for v in self.legend_color(n))
 
     def save_colors(self) -> None:
         """Save the list of colors as a .yaml file."""
@@ -800,7 +970,8 @@ class DatasetDialog(lib.Dialog):
                     file.write(color + "\n")
 
     def load_colors(self) -> None:
-        """Load a list of colors from a .yaml file."""
+        """Load a list of colors / colormap identifiers from a .txt
+        file (one identifier per line)."""
         path, ext = QtWidgets.QFileDialog.getOpenFileName(
             self,
             "Load colors from .txt",
@@ -817,15 +988,16 @@ class DatasetDialog(lib.Dialog):
             if len(self.checks) > len(colornames):
                 raise ValueError("Txt file contains too few names")
 
-            # check that all the names are valid
+            # check that all the names resolve through the same lookup
+            # used by the renderer (default colors, hex codes, curated
+            # matplotlib cmaps, or known user-defined custom cmaps).
             for i, color in enumerate(colornames):
-                if (
-                    color not in self.default_colors
-                    and not lib.is_hexadecimal(color)
-                ):
+                try:
+                    self.resolve_color_identifier(color)
+                except ValueError as e:
                     raise ValueError(
                         f"'{color}' at position {i+1} is invalid."
-                    )
+                    ) from e
 
             # add the names to the 'Color' column (self.colorseletion)
             for i, color_ in enumerate(self.colorselection):
@@ -833,7 +1005,455 @@ class DatasetDialog(lib.Dialog):
             self.update_colors()
 
     def sizeHint(self) -> QtCore.QSize:
-        return QtCore.QSize(600, 350)
+        return QtCore.QSize(700, 500)
+
+
+class CustomColormapDialog(lib.Dialog):
+    """Modal editor for user-defined colormaps.
+
+    Each colormap is a named list of 2-5 color stops; each stop is
+    ``(position, R, G, B)`` with ``position`` in [0, 1], strictly
+    increasing, first stop at 0.0 and last at 1.0. Stops are linearly
+    interpolated into a (256, 3) LUT when applied.
+
+    Custom colormaps are stored on the main window as
+    ``custom_colormaps_stops`` and persisted in ``~/.picasso/settings.yaml``.
+
+    Every mutation (new / duplicate / rename / delete / stop edit) is
+    committed immediately to the window state and to settings.yaml —
+    there is no "save vs. cancel" working-copy.
+    """
+
+    _MAX_STOPS = 5
+    _MIN_STOPS = 2
+
+    def __init__(self, window: QtWidgets.QMainWindow) -> None:
+        super().__init__(window)
+        self.window = window
+        self.setWindowTitle("Custom colormaps")
+        self.setModal(True)
+        self.resize(640, 360)
+
+        # The source of truth is ``window.custom_colormaps_stops``; the
+        # dialog mutates it in place and persists on each change.
+        if not hasattr(window, "custom_colormaps_stops"):
+            window.custom_colormaps_stops = {}
+        self._current_name: str | None = None
+        self._suppress_signals = False
+
+        layout = QtWidgets.QHBoxLayout(self)
+
+        # ---- left pane: list + new/duplicate/rename/delete buttons
+        left = QtWidgets.QVBoxLayout()
+        self.name_list = QtWidgets.QListWidget()
+        self.name_list.currentItemChanged.connect(self._on_name_selected)
+        left.addWidget(self.name_list)
+
+        btn_row = QtWidgets.QHBoxLayout()
+        self.new_btn = QtWidgets.QPushButton("New")
+        self.new_btn.clicked.connect(self._on_new)
+        btn_row.addWidget(self.new_btn)
+        self.dup_btn = QtWidgets.QPushButton("Duplicate")
+        self.dup_btn.clicked.connect(self._on_duplicate)
+        btn_row.addWidget(self.dup_btn)
+        left.addLayout(btn_row)
+        btn_row2 = QtWidgets.QHBoxLayout()
+        self.rename_btn = QtWidgets.QPushButton("Rename")
+        self.rename_btn.clicked.connect(self._on_rename)
+        btn_row2.addWidget(self.rename_btn)
+        self.delete_btn = QtWidgets.QPushButton("Delete")
+        self.delete_btn.clicked.connect(self._on_delete)
+        btn_row2.addWidget(self.delete_btn)
+        left.addLayout(btn_row2)
+        layout.addLayout(left, 1)
+
+        # ---- right pane: editor for the currently-selected colormap
+        right = QtWidgets.QVBoxLayout()
+        right.addWidget(QtWidgets.QLabel("Stops (position 0 → 1):"))
+        self.stops_table = QtWidgets.QTableWidget(0, 4)
+        self.stops_table.setHorizontalHeaderLabels(["Position", "R", "G", "B"])
+        self.stops_table.horizontalHeader().setStretchLastSection(True)
+        self.stops_table.cellChanged.connect(self._on_cell_changed)
+        self.stops_table.cellDoubleClicked.connect(
+            self._on_cell_double_clicked
+        )
+        right.addWidget(self.stops_table)
+
+        stop_btn_row = QtWidgets.QHBoxLayout()
+        self.add_stop_btn = QtWidgets.QPushButton("Add stop")
+        self.add_stop_btn.clicked.connect(self._on_add_stop)
+        stop_btn_row.addWidget(self.add_stop_btn)
+        self.remove_stop_btn = QtWidgets.QPushButton("Remove stop")
+        self.remove_stop_btn.clicked.connect(self._on_remove_stop)
+        stop_btn_row.addWidget(self.remove_stop_btn)
+        right.addLayout(stop_btn_row)
+
+        right.addWidget(QtWidgets.QLabel("Preview:"))
+        self.preview_label = QtWidgets.QLabel()
+        self.preview_label.setFixedHeight(20)
+        self.preview_label.setFrameShape(QtWidgets.QFrame.Shape.Box)
+        right.addWidget(self.preview_label)
+        right.addStretch(1)
+
+        action_row = QtWidgets.QHBoxLayout()
+        self.close_btn = QtWidgets.QPushButton("Close")
+        self.close_btn.setDefault(True)
+        self.close_btn.clicked.connect(self.accept)
+        self._focus_buttons.append("Close")
+        action_row.addStretch(1)
+        action_row.addWidget(self.close_btn)
+        right.addLayout(action_row)
+
+        layout.addLayout(right, 2)
+
+        self._refresh_name_list()
+        if self.name_list.count():
+            self.name_list.setCurrentRow(0)
+        else:
+            self._set_editor_enabled(False)
+
+    @property
+    def _stops(self) -> dict[str, list[list[float]]]:
+        """Live reference to the window-level cmap registry. All
+        mutations to the registry should be written through this
+        property so that ``_commit`` picks them up."""
+        return self.window.custom_colormaps_stops
+
+    def _commit(self) -> None:
+        """Persist the current cmap registry to settings.yaml, drop
+        cached LUTs, and refresh every channel combobox. Called after
+        every mutation so the editor has no working-copy state."""
+        # invalidate any cached LUTs that no longer match current stops
+        cache = self.window.dataset_dialog._user_cmap_lut_cache
+        for name in list(cache.keys()):
+            if name not in self._stops:
+                del cache[name]
+            elif cache[name] is not None:
+                # stops may have changed for this name; force re-resolve
+                del cache[name]
+        # persist to ~/.picasso/settings.yaml
+        try:
+            settings = io.load_user_settings()
+            settings["Render"]["CustomColormaps"] = {
+                name: [list(stop) for stop in stops]
+                for name, stops in self._stops.items()
+            }
+            io.save_user_settings(settings)
+        except Exception as exc:
+            # Surface the failure rather than silently dropping it so
+            # the user knows their change didn't reach disk.
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Could not save settings",
+                f"Failed to persist custom colormaps to disk:\n{exc}",
+            )
+        self.window.dataset_dialog.refresh_color_lists()
+
+    # ---------------- list management ----------------
+
+    def _refresh_name_list(self) -> None:
+        self.name_list.blockSignals(True)
+        self.name_list.clear()
+        for name in sorted(self._stops.keys()):
+            self.name_list.addItem(name)
+        self.name_list.blockSignals(False)
+
+    def _on_name_selected(
+        self,
+        current: QtWidgets.QListWidgetItem | None,
+        _previous: QtWidgets.QListWidgetItem | None,
+    ) -> None:
+        if current is None:
+            self._current_name = None
+            self._set_editor_enabled(False)
+            self.stops_table.setRowCount(0)
+            self.preview_label.clear()
+            return
+        self._current_name = current.text()
+        self._set_editor_enabled(True)
+        self._load_stops_into_table(self._stops[self._current_name])
+
+    def _set_editor_enabled(self, enabled: bool) -> None:
+        for w in (
+            self.stops_table,
+            self.add_stop_btn,
+            self.remove_stop_btn,
+            self.rename_btn,
+            self.delete_btn,
+            self.dup_btn,
+        ):
+            w.setEnabled(enabled)
+
+    def _on_new(self) -> None:
+        name = self._prompt_new_name(default="Custom1")
+        if not name:
+            return
+        self._stops[name] = [
+            [0.0, 0.0, 0.0, 0.0],
+            [1.0, 1.0, 1.0, 1.0],
+        ]
+        self._commit()
+        self._refresh_name_list()
+        items = self.name_list.findItems(
+            name, QtCore.Qt.MatchFlag.MatchExactly
+        )
+        if items:
+            self.name_list.setCurrentItem(items[0])
+
+    def _on_duplicate(self) -> None:
+        if self._current_name is None:
+            return
+        name = self._prompt_new_name(default=f"{self._current_name}_copy")
+        if not name:
+            return
+        self._stops[name] = [
+            list(stop) for stop in self._stops[self._current_name]
+        ]
+        self._commit()
+        self._refresh_name_list()
+        items = self.name_list.findItems(
+            name, QtCore.Qt.MatchFlag.MatchExactly
+        )
+        if items:
+            self.name_list.setCurrentItem(items[0])
+
+    def _on_rename(self) -> None:
+        if self._current_name is None:
+            return
+        name = self._prompt_new_name(default=self._current_name)
+        if not name or name == self._current_name:
+            return
+        self._stops[name] = self._stops.pop(self._current_name)
+        self._current_name = name
+        self._commit()
+        self._refresh_name_list()
+        items = self.name_list.findItems(
+            name, QtCore.Qt.MatchFlag.MatchExactly
+        )
+        if items:
+            self.name_list.setCurrentItem(items[0])
+
+    def _on_delete(self) -> None:
+        if self._current_name is None:
+            return
+        confirm = QtWidgets.QMessageBox.question(
+            self,
+            "Delete colormap",
+            f"Delete custom colormap '{self._current_name}'?",
+        )
+        if confirm != QtWidgets.QMessageBox.StandardButton.Yes:
+            return
+        del self._stops[self._current_name]
+        self._current_name = None
+        self._commit()
+        self._refresh_name_list()
+        if self.name_list.count():
+            self.name_list.setCurrentRow(0)
+        else:
+            self._set_editor_enabled(False)
+            self.stops_table.setRowCount(0)
+            self.preview_label.clear()
+
+    def _prompt_new_name(self, default: str = "") -> str | None:
+        # ensure default is unique
+        candidate = default
+        i = 1
+        while candidate in self._stops:
+            i += 1
+            candidate = f"{default}_{i}"
+        while True:
+            name, ok = QtWidgets.QInputDialog.getText(
+                self,
+                "Colormap name",
+                "Enter a unique name for the colormap:",
+                text=candidate,
+            )
+            if not ok:
+                return None
+            name = name.strip()
+            error = self._validate_name(name)
+            if error is None:
+                return name
+            QtWidgets.QMessageBox.warning(self, "Invalid name", error)
+            candidate = name
+
+    def _validate_name(self, name: str) -> str | None:
+        if not name:
+            return "Name must not be empty."
+        dlg = self.window.dataset_dialog
+        if name in dlg.default_colors:
+            return f"'{name}' collides with a built-in solid color."
+        if name in dlg.builtin_cmap_stops:
+            return f"'{name}' collides with a built-in colormap."
+        if name in self._stops and name != self._current_name:
+            return f"A custom colormap named '{name}' already exists."
+        return None
+
+    # ---------------- stop editor ----------------
+
+    def _load_stops_into_table(self, stops: list[list[float]]) -> None:
+        self._suppress_signals = True
+        self.stops_table.setRowCount(len(stops))
+        for r, stop in enumerate(stops):
+            for c, value in enumerate(stop):
+                item = QtWidgets.QTableWidgetItem(f"{value:.3f}")
+                self.stops_table.setItem(r, c, item)
+            self._refresh_color_swatches(r)
+        self._suppress_signals = False
+        self._update_preview()
+
+    def _read_table(self) -> list[list[float]]:
+        rows = self.stops_table.rowCount()
+        stops: list[list[float]] = []
+        for r in range(rows):
+            stop: list[float] = []
+            for c in range(4):
+                item = self.stops_table.item(r, c)
+                stop.append(float(item.text()) if item else 0.0)
+            stops.append(stop)
+        return stops
+
+    def _refresh_color_swatches(self, row: int) -> None:
+        rgb: list[float] = []
+        for c in (1, 2, 3):
+            item = self.stops_table.item(row, c)
+            try:
+                rgb.append(max(0.0, min(1.0, float(item.text()))))
+            except (AttributeError, ValueError):
+                rgb.append(0.0)
+        color = QtGui.QColor.fromRgbF(*rgb, 1.0)
+        text_color = (
+            QtCore.Qt.GlobalColor.white
+            if sum(rgb) / 3 < 0.5
+            else QtCore.Qt.GlobalColor.black
+        )
+        for c in (1, 2, 3):
+            item = self.stops_table.item(row, c)
+            if item is None:
+                continue
+            item.setBackground(QtGui.QBrush(color))
+            item.setForeground(QtGui.QBrush(QtGui.QColor(text_color)))
+
+    def _on_cell_changed(self, row: int, col: int) -> None:
+        if self._suppress_signals or self._current_name is None:
+            return
+        item = self.stops_table.item(row, col)
+        try:
+            value = float(item.text())
+        except ValueError:
+            value = 0.0
+        value = max(0.0, min(1.0, value))
+        self._suppress_signals = True
+        item.setText(f"{value:.3f}")
+        self._suppress_signals = False
+        self._refresh_color_swatches(row)
+        self._stops[self._current_name] = self._read_table()
+        self._update_preview()
+        self._commit()
+
+    def _on_cell_double_clicked(self, row: int, col: int) -> None:
+        if col not in (1, 2, 3):
+            return
+        item = self.stops_table.item(row, 1)
+        r = float(item.text()) if item else 0.0
+        item = self.stops_table.item(row, 2)
+        g = float(item.text()) if item else 0.0
+        item = self.stops_table.item(row, 3)
+        b = float(item.text()) if item else 0.0
+        initial = QtGui.QColor.fromRgbF(
+            max(0.0, min(1.0, r)),
+            max(0.0, min(1.0, g)),
+            max(0.0, min(1.0, b)),
+            1.0,
+        )
+        chosen = QtWidgets.QColorDialog.getColor(
+            initial, self, "Pick stop color"
+        )
+        if not chosen.isValid():
+            return
+        self._suppress_signals = True
+        self.stops_table.item(row, 1).setText(f"{chosen.redF():.3f}")
+        self.stops_table.item(row, 2).setText(f"{chosen.greenF():.3f}")
+        self.stops_table.item(row, 3).setText(f"{chosen.blueF():.3f}")
+        self._suppress_signals = False
+        self._refresh_color_swatches(row)
+        if self._current_name is not None:
+            self._stops[self._current_name] = self._read_table()
+        self._update_preview()
+        self._commit()
+
+    def _on_add_stop(self) -> None:
+        if self._current_name is None:
+            return
+        if self.stops_table.rowCount() >= self._MAX_STOPS:
+            QtWidgets.QMessageBox.information(
+                self,
+                "Stop limit",
+                f"At most {self._MAX_STOPS} stops are supported.",
+            )
+            return
+        stops = self._read_table()
+        # insert before the last stop at the midpoint
+        last_pos = stops[-1][0]
+        prev_pos = stops[-2][0] if len(stops) >= 2 else 0.0
+        mid_pos = (last_pos + prev_pos) / 2
+        new_stop = [mid_pos, 0.5, 0.5, 0.5]
+        stops.insert(len(stops) - 1, new_stop)
+        self._stops[self._current_name] = stops
+        self._load_stops_into_table(stops)
+        self._commit()
+
+    def _on_remove_stop(self) -> None:
+        if self._current_name is None:
+            return
+        if self.stops_table.rowCount() <= self._MIN_STOPS:
+            QtWidgets.QMessageBox.information(
+                self,
+                "Stop limit",
+                f"At least {self._MIN_STOPS} stops are required.",
+            )
+            return
+        row = self.stops_table.currentRow()
+        if row in (-1, 0, self.stops_table.rowCount() - 1):
+            QtWidgets.QMessageBox.information(
+                self,
+                "Cannot remove",
+                "The first and last stops are required.",
+            )
+            return
+        stops = self._read_table()
+        del stops[row]
+        self._stops[self._current_name] = stops
+        self._load_stops_into_table(stops)
+        self._commit()
+
+    def _update_preview(self) -> None:
+        if self._current_name is None:
+            self.preview_label.clear()
+            return
+        try:
+            stops = self._stops[self._current_name]
+            self._sanity_check_stops(stops)
+            lut = render.stops_to_lut(stops)
+        except (ValueError, IndexError):
+            self.preview_label.clear()
+            return
+        width = max(40, self.preview_label.width())
+        self.preview_label.setPixmap(
+            _gradient_pixmap(lut, width=width, height=18)
+        )
+
+    def _sanity_check_stops(self, stops: list[list[float]]) -> None:
+        """Light-touch validation used by the preview. Full validation
+        is run again on save."""
+        if len(stops) < self._MIN_STOPS:
+            raise ValueError("not enough stops")
+        positions = [s[0] for s in stops]
+        if positions[0] != 0.0 or positions[-1] != 1.0:
+            raise ValueError("positions must start at 0 and end at 1")
+        for a, b in zip(positions, positions[1:]):
+            if b <= a:
+                raise ValueError("positions must be strictly increasing")
 
 
 class PlotDialog(lib.Dialog):
@@ -1697,17 +2317,24 @@ class DbscanDialog(lib.Dialog):
     min_locs : QSpinBox
         Contains the minimum number of locs in a cluster.
     radius : QDoubleSpinBox
-        Contains epsilon (camera pixels) for DBSCAN (see scikit-learn).
+        Contains epsilon (nm) for DBSCAN (see scikit-learn).
+    radius_z : QDoubleSpinBox
+        Contains epsilon in the z direction (nm) for anisotropic 3D
+        DBSCAN. Shown only if 3D data is present.
     save_areas : QCheckBox
         Whether to save cluster areas as .csv file.
     save_centers : QCheckBox
         Whether to save cluster centers.
     """
 
-    def __init__(self, window: QtWidgets.QMainWindow) -> None:
+    def __init__(
+        self,
+        window: QtWidgets.QMainWindow,
+        flag_3D: bool = False,
+    ) -> None:
         super().__init__(window)
         self.window = window
-        self.setWindowTitle("Enter parameters")
+        self.setWindowTitle(f"Enter parameters ({'3D' if flag_3D else '2D'})")
         vbox = QtWidgets.QVBoxLayout(self)
         grid = QtWidgets.QGridLayout()
         radius_label = QtWidgets.QLabel("Radius (nm):")
@@ -1722,26 +2349,42 @@ class DbscanDialog(lib.Dialog):
         self.radius.setDecimals(2)
         self.radius.setSingleStep(0.1)
         grid.addWidget(self.radius, 0, 1)
+        self.radius_z = QtWidgets.QDoubleSpinBox()
+        self.radius_z.setRange(0.01, 1e6)
+        self.radius_z.setValue(25)
+        self.radius_z.setDecimals(2)
+        self.radius_z.setSingleStep(0.1)
+        if flag_3D:
+            radius_z_label = QtWidgets.QLabel("Radius z (nm):")
+            radius_z_label.setToolTip(
+                "DBSCAN epsilon in the z direction. Scales z coordinates\n"
+                "so the neighborhood is an ellipsoid with semi-axes\n"
+                "(radius, radius, radius z).\n"
+                "Anisotropic DBSCAN approach inspired by Lörzing, Schake,\n"
+                "and Schlierf, Journal of Phys Chem B, 2024."
+            )
+            grid.addWidget(radius_z_label, 1, 0)
+            grid.addWidget(self.radius_z, 1, 1)
         min_samples_label = QtWidgets.QLabel("Min. samples:")
         min_samples_label.setToolTip(
             "Minimum number of samples in a neighborhood for a point to be\n"
             "considered a core point."
         )
-        grid.addWidget(min_samples_label, 1, 0)
+        grid.addWidget(min_samples_label, 2, 0)
         self.density = QtWidgets.QSpinBox()
         self.density.setRange(1, int(1e6))
         self.density.setValue(4)
-        grid.addWidget(self.density, 1, 1)
+        grid.addWidget(self.density, 2, 1)
         minlocs_label = QtWidgets.QLabel("Min. no. of locs:")
         minlocs_label.setToolTip(
             "Minimum number of localizations required to consider a\n"
             "cluster valid."
         )
-        grid.addWidget(minlocs_label, 2, 0)
+        grid.addWidget(minlocs_label, 3, 0)
         self.min_locs = QtWidgets.QSpinBox()
         self.min_locs.setRange(0, int(1e6))
         self.min_locs.setValue(0)
-        grid.addWidget(self.min_locs, 2, 1)
+        grid.addWidget(self.min_locs, 3, 1)
         vbox.addLayout(grid)
         hbox = QtWidgets.QHBoxLayout()
         vbox.addLayout(hbox)
@@ -1751,14 +2394,14 @@ class DbscanDialog(lib.Dialog):
             "Save an extra .hdf5 file containing the cluster centers?"
         )
         self.save_centers.setChecked(False)
-        grid.addWidget(self.save_centers, 3, 0, 1, 2)
+        grid.addWidget(self.save_centers, 4, 0, 1, 2)
         # save cluster areas
         self.save_areas = QtWidgets.QCheckBox("Save cluster areas (.csv)")
         self.save_areas.setToolTip(
             "Save an extra .csv file containing the cluster areas?"
         )
         self.save_areas.setChecked(False)
-        grid.addWidget(self.save_areas, 4, 0, 1, 2)
+        grid.addWidget(self.save_areas, 5, 0, 1, 2)
 
         # OK and Cancel buttons
         self.buttons = QtWidgets.QDialogButtonBox(
@@ -1774,13 +2417,15 @@ class DbscanDialog(lib.Dialog):
     @staticmethod
     def getParams(
         parent: QtWidgets.QMainWindow | None = None,
+        flag_3D: bool = False,
     ) -> tuple[dict, bool]:
         """Create the dialog and return the requested values for
         DBSCAN."""
-        dialog = DbscanDialog(parent)
+        dialog = DbscanDialog(parent, flag_3D=flag_3D)
         result = dialog.exec()
         return {
             "radius": dialog.radius.value(),
+            "radius_z": dialog.radius_z.value(),
             "min_density": dialog.density.value(),
             "min_locs": dialog.min_locs.value(),
             "save_centers": dialog.save_centers.isChecked(),
@@ -2469,7 +3114,6 @@ class G5MDialog(lib.Dialog):
     def load_calibration_(self, path: str) -> None:
         """Load calibration from the given path."""
         # picasso.io.load_info takes in .hdf5 path
-        info_path = os.path.splitext(path)[0] + ".hdf5"
         calib = io.load_calibration(path)
 
         if "X Coefficients" not in calib.keys():
@@ -2611,6 +3255,7 @@ class TestClustererDialog(lib.Dialog):
         # parameters - channel
         self.channels = QtWidgets.QComboBox()
         self.channels.setToolTip("Select the channel to test clustering on.")
+        self.channels.currentIndexChanged.connect(self._update_3d_visibility)
         parameters_grid.addWidget(self.channels, 0, 0, 1, 2)
 
         # parameters - choose clusterer
@@ -2743,6 +3388,21 @@ class TestClustererDialog(lib.Dialog):
         zoomout_action.triggered.connect(self.view.zoom_out)
         self.addAction(zoomout_action)
 
+    def _update_3d_visibility(self) -> None:
+        """Show or hide Z-specific widgets based on whether the selected
+        channel has a `z` column."""
+        idx = self.channels.currentIndex()
+        if idx < 0 or idx >= len(self.window.view.locs):
+            is_3d = False
+        else:
+            is_3d = "z" in self.window.view.locs[idx].columns
+        self.test_dbscan_params.set_3d(is_3d)
+        self.test_smlm_params.set_3d(is_3d)
+
+    def showEvent(self, event: QtGui.QShowEvent) -> None:
+        self._update_3d_visibility()
+        super().showEvent(event)
+
     def on_xy_proj(self) -> None:
         self.view.ang = None
         self.view.update_scene()
@@ -2820,6 +3480,9 @@ class TestClustererDialog(lib.Dialog):
         if clusterer_name == "DBSCAN":
             params["radius"] = (
                 self.test_dbscan_params.radius.value() / pixelsize
+            )
+            params["radius_z"] = (
+                self.test_dbscan_params.radius_z.value() / pixelsize
             )
             params["min_samples"] = self.test_dbscan_params.min_samples.value()
             params["min_locs"] = self.test_dbscan_params.min_locs.value()
@@ -2968,6 +3631,7 @@ class TestClustererDialog(lib.Dialog):
                 radius=params["radius"] * pixelsize,
                 min_density=params["min_samples"],
                 min_locs=params["min_locs"],
+                radius_z=params["radius_z"] * pixelsize,
                 save_centers=save_centers,
             )
         elif self.clusterer_name.currentText() == "HDBSCAN":
@@ -3010,7 +3674,7 @@ class TestDBSCANParams(QtWidgets.QWidget):
         super().__init__()
         self.dialog = dialog
         grid = QtWidgets.QGridLayout(self)
-        radius_label = QtWidgets.QLabel("Radius (nm):")
+        radius_label = QtWidgets.QLabel("Radius xy (nm):")
         radius_label.setToolTip(
             "DBSCAN epsilon; max. distance between two samples for one to be\n"
             "considered as in the same neighborhood."
@@ -3023,31 +3687,51 @@ class TestDBSCANParams(QtWidgets.QWidget):
         self.radius.setSingleStep(0.1)
         grid.addWidget(self.radius, 0, 1)
 
+        self.radius_z_label = QtWidgets.QLabel("Radius z (nm):")
+        self.radius_z_label.setToolTip(
+            "DBSCAN epsilon in the z direction. Scales z coordinates so\n"
+            "the neighborhood is an ellipsoid with semi-axes\n"
+            "(radius xy, radius xy, radius z)."
+        )
+        grid.addWidget(self.radius_z_label, 1, 0)
+        self.radius_z = QtWidgets.QDoubleSpinBox()
+        self.radius_z.setRange(0.01, 1e6)
+        self.radius_z.setValue(25)
+        self.radius_z.setDecimals(2)
+        self.radius_z.setSingleStep(0.1)
+        grid.addWidget(self.radius_z, 1, 1)
+        self.radius_z_label.setVisible(False)
+        self.radius_z.setVisible(False)
+
         min_samples_label = QtWidgets.QLabel("Min. samples:")
         min_samples_label.setToolTip(
             "Minimum number of samples in a neighborhood for a point to be\n"
             "considered a core point."
         )
-        grid.addWidget(min_samples_label, 1, 0)
+        grid.addWidget(min_samples_label, 2, 0)
         self.min_samples = QtWidgets.QSpinBox()
         self.min_samples.setValue(4)
         self.min_samples.setRange(1, int(1e6))
         self.min_samples.setSingleStep(1)
-        grid.addWidget(self.min_samples, 1, 1)
-        grid.setRowStretch(2, 1)
+        grid.addWidget(self.min_samples, 2, 1)
 
         minlocs_label = QtWidgets.QLabel("Min. no. of locs:")
         minlocs_label.setToolTip(
             "Minimum number of localizations required to consider a\n"
             "cluster valid."
         )
-        grid.addWidget(minlocs_label, 2, 0)
+        grid.addWidget(minlocs_label, 3, 0)
         self.min_locs = QtWidgets.QSpinBox()
         self.min_locs.setValue(0)
         self.min_locs.setRange(0, int(1e6))
         self.min_locs.setSingleStep(1)
-        grid.addWidget(self.min_locs, 2, 1)
-        grid.setRowStretch(3, 1)
+        grid.addWidget(self.min_locs, 3, 1)
+        grid.setRowStretch(4, 1)
+
+    def set_3d(self, is_3d: bool) -> None:
+        """Show or hide the Z radius widget."""
+        self.radius_z_label.setVisible(is_3d)
+        self.radius_z.setVisible(is_3d)
 
 
 class TestHDBSCANParams(QtWidgets.QWidget):
@@ -3117,18 +3801,20 @@ class TestSMLMParams(QtWidgets.QWidget):
         self.radius_xy.setDecimals(2)
         grid.addWidget(self.radius_xy, 0, 1)
 
-        radius_z_label = QtWidgets.QLabel("Radius z (3D only):")
-        radius_z_label.setToolTip(
+        self.radius_z_label = QtWidgets.QLabel("Radius z (nm):")
+        self.radius_z_label.setToolTip(
             "Radius in which localizations are considered part of the\n"
-            "same cluster. Applied in z direction (3D only)."
+            "same cluster. Applied in z direction."
         )
-        grid.addWidget(radius_z_label, 1, 0)
+        grid.addWidget(self.radius_z_label, 1, 0)
         self.radius_z = QtWidgets.QDoubleSpinBox()
         self.radius_z.setValue(25)
         self.radius_z.setRange(0.01, 1e6)
         self.radius_z.setSingleStep(0.1)
         self.radius_z.setDecimals(2)
         grid.addWidget(self.radius_z, 1, 1)
+        self.radius_z_label.setVisible(False)
+        self.radius_z.setVisible(False)
 
         min_locs_label = QtWidgets.QLabel("Min. no. of locs")
         min_locs_label.setToolTip(
@@ -3147,6 +3833,11 @@ class TestSMLMParams(QtWidgets.QWidget):
         self.fa.setChecked(True)
         grid.addWidget(self.fa, 3, 0, 1, 2)
         grid.setRowStretch(4, 1)
+
+    def set_3d(self, is_3d: bool) -> None:
+        """Show or hide the Z radius widget."""
+        self.radius_z_label.setVisible(is_3d)
+        self.radius_z.setVisible(is_3d)
 
 
 class TestG5MParams(QtWidgets.QWidget):
@@ -3583,6 +4274,7 @@ class ChangeFOV(lib.Dialog):
         self.y_box.setValue(y)
         self.w_box.setValue(w)
         self.h_box.setValue(h)
+        self.window.resize_view_to_fov(w, h)
         self.update_scene()
 
     def update_scene(self) -> None:
@@ -4895,11 +5587,6 @@ class MaskSettingsDialog(lib.Dialog):
         image = render.apply_colormap(image, cmap)
         # create a 4 channel (rgb, alpha) array
         qimage = render.rgb_to_qimage(image)
-        qimage = qimage.scaled(
-            300,
-            300,
-            QtCore.Qt.AspectRatioMode.KeepAspectRatioByExpanding,
-        )
         pixmap = QtGui.QPixmap.fromImage(qimage)
         return pixmap
 
@@ -6045,12 +6732,9 @@ class SlicerDialog(lib.Dialog):
         self.ax.clear()
 
         # get colors for each channel (from dataset dialog)
-        colors = [
-            _.palette().color(QtGui.QPalette.ColorRole.Window)
-            for _ in self.window.dataset_dialog.colordisp_all
-        ]
         self.colors = [
-            [_.red() / 255, _.green() / 255, _.blue() / 255] for _ in colors
+            list(self.window.dataset_dialog.legend_color(i))
+            for i in range(len(self.window.dataset_dialog.colordisp_all))
         ]
 
         # get bins, starting with minimum z and ending with max z
@@ -6279,6 +6963,10 @@ class View(QtWidgets.QLabel):
     rectangle_pick_start_x, rectangle_pick_start_y : float
         x and y coordinates of the starting edge of the drawn
         rectangular pick.
+    render_index : list of spatial_index.RenderIndexPyramids
+        For each loaded localization's channel, stores the z-order
+        (Morton code) indices of localizations for efficient indexing
+        of zoomed-in FOVs.
     rubberband : QRubberBand
         Draws a rectangle used in zooming in.
     _size_hint : tuple
@@ -6288,9 +6976,6 @@ class View(QtWidgets.QLabel):
     x_locs : list of pd.DataFrames
         Contains pd.DataFrames with locs to be rendered by property; one
         per color.
-    x_render_cache : list of dicts
-        Contains dictionaries with caches for storing info about locs
-        rendered by a property.
     x_render_state : bool
         Indicates if rendering by property is used.
     """
@@ -6321,10 +7006,10 @@ class View(QtWidgets.QLabel):
         self._picks = []
         self._points = []
         self.index_blocks = []
+        self.render_index = []
         self._drift = []
         self._driftfiles = []
         self.currentdrift = []
-        self.x_render_cache = []
         self.x_render_state = False
 
     def _load_locs(self, path: str) -> tuple[pd.DataFrame, list[dict]]:
@@ -6396,6 +7081,12 @@ class View(QtWidgets.QLabel):
         self.infos.append(info)
         self.locs_paths.append(path)
         self.index_blocks.append(None)
+        try:
+            self.render_index.append(
+                spatial_index.build_render_index(locs, info)
+            )
+        except Exception:
+            self.render_index.append(None)
 
         # try to load a drift .txt file:
         drift = self._load_drift(info[-1])
@@ -6671,7 +7362,12 @@ class View(QtWidgets.QLabel):
         channel = self.get_channel_all_seq("DBSCAN")
 
         # get DBSCAN parameters
-        params, ok = DbscanDialog.getParams()
+        if channel is None or channel == len(self.locs_paths):
+            # no channel selected or "apply to all"
+            flag_3D = any("z" in _.columns for _ in self.locs)
+        else:
+            flag_3D = "z" in self.locs[channel].columns
+        params, ok = DbscanDialog.getParams(flag_3D=flag_3D)
         if ok:
             if channel == len(self.locs_paths):  # apply to all channels
                 # get saving name suffix
@@ -6715,6 +7411,7 @@ class View(QtWidgets.QLabel):
         radius: float,
         min_density: int,
         min_locs: int,
+        radius_z: float | None = None,
         save_centers: bool = False,
         save_areas: bool = False,
     ) -> None:
@@ -6733,6 +7430,9 @@ class View(QtWidgets.QLabel):
             Minimum local density for DBSCAN clustering.
         min_locs : int
             Minimum number of localizations in a cluster.
+        radius_z : float, optional
+            Radius in z for anisotropic 3D DBSCAN, in nm. Ignored for
+            2D data.
         save_centers : bool, optional
             Specifies if cluster centers should be saved. Default is
             False.
@@ -6751,12 +7451,18 @@ class View(QtWidgets.QLabel):
             locs = self.locs[channel]
         pixelsize = self.pixelsize
 
+        # Only pass radius_z for 3D data; convert nm -> camera pixels.
+        is_3d = "z" in locs.columns
+        radius_z_px = (
+            radius_z / pixelsize if (is_3d and radius_z is not None) else None
+        )
         locs, dbscan_info = clusterer.dbscan(
             locs,
             radius / pixelsize,  # convert to camera pixels
             min_density,
             pixelsize=pixelsize,
             min_locs=min_locs,
+            radius_z=radius_z_px,
             return_info=True,
         )
         io.save_locs(path, locs, self.infos[channel] + [dbscan_info])
@@ -6907,10 +7613,11 @@ class View(QtWidgets.QLabel):
 
         # get clustering parameters
         pixelsize = self.pixelsize
-        if any(["z" in _.columns for _ in self.locs]):
-            flag_3D = True
+        if channel is None or channel == len(self.locs_paths):
+            # no channel selected or "apply to all"
+            flag_3D = any("z" in _.columns for _ in self.locs)
         else:
-            flag_3D = False
+            flag_3D = "z" in self.locs[channel].columns
         params, ok = SMLMDialog.getParams(flag_3D=flag_3D)
         # convert to camera pixels
         params["radius_xy"] = params["radius_xy"] / pixelsize
@@ -7410,13 +8117,9 @@ class View(QtWidgets.QLabel):
             if self.window.dataset_dialog.checks[i].isChecked():
                 channel_name = self.window.dataset_dialog.checks[i].text()
                 channel_names.append(channel_name)
-                colordisp = self.window.dataset_dialog.colordisp_all[i]
-                color = colordisp.palette().color(
-                    QtGui.QPalette.ColorRole.Window
+                channel_colors.append(
+                    self.window.dataset_dialog.legend_color_8bit(i)
                 )
-                # Convert QColor to RGB tuple (0-255 range)
-                color_rgb = (color.red(), color.green(), color.blue())
-                channel_colors.append(color_rgb)
         if self.window.dataset_dialog.legend.isChecked():
             image = render.draw_legend(
                 image=image,
@@ -7661,12 +8364,13 @@ class View(QtWidgets.QLabel):
             locs_ = (
                 locs.drop(columns="group") if "group" in locs.columns else locs
             )
+            invert_colors = self.window.dataset_dialog.wbackground.isChecked()
             qimage = render.render_scene(
                 locs_,
                 self.infos[i],
                 **kwargs,
                 contrast=(vmin, vmax),
-                invert_colors=self.window.dataset_dialog.wbackground.isChecked(),
+                invert_colors=invert_colors,
                 single_channel_colormap="gray",
                 relative_intensities=[
                     self.window.dataset_dialog.intensitysettings[i].value()
@@ -7932,6 +8636,7 @@ class View(QtWidgets.QLabel):
         FOV."""
         (x, y, w, h) = fov
         if w > 0 and h > 0:
+            self.window.resize_view_to_fov(w, h)
             viewport = [(y, x), (y + h, x + w)]
             self.update_scene(viewport=viewport)
             self.window.info_dialog.xy_label.setText(f"{x:.2f} / {y:.2f} ")
@@ -8015,9 +8720,26 @@ class View(QtWidgets.QLabel):
         elif "Min. blur (nm)" in file:
             disp_dlg.min_blur_width.setValue(file["Min. blur (nm)"])
         if "Colors" in file and len(file["Colors"]) == len(self.locs):
+            dataset_dialog = self.window.dataset_dialog
+            missing: list[str] = []
             for i, color in enumerate(file["Colors"]):
-                self.window.dataset_dialog.colorselection[i].setCurrentText(
-                    color
+                try:
+                    dataset_dialog.resolve_color_identifier(color)
+                except ValueError:
+                    missing.append(color)
+                    fallback = dataset_dialog.default_colors[
+                        min(i, len(dataset_dialog.default_colors) - 1)
+                    ]
+                    dataset_dialog.colorselection[i].setCurrentText(fallback)
+                    continue
+                dataset_dialog.colorselection[i].setCurrentText(color)
+            if missing:
+                QtWidgets.QMessageBox.information(
+                    self,
+                    "Unknown colors",
+                    "Some saved color identifiers were not found and "
+                    "have been replaced with defaults: "
+                    + ", ".join(sorted(set(missing))),
                 )
         if "Scalebar length (nm)" in file:
             disp_dlg.scalebar.setValue(file["Scalebar length (nm)"])
@@ -8933,11 +9655,8 @@ class View(QtWidgets.QLabel):
         ax = fig.add_subplot(111)
         ax.set_title("Localizations in Picks ")
         colors = [
-            _.palette().color(QtGui.QPalette.ColorRole.Window)
-            for _ in self.window.dataset_dialog.colordisp_all
-        ]
-        colors = [
-            [_.red() / 255, _.green() / 255, _.blue() / 255] for _ in colors
+            list(self.window.dataset_dialog.legend_color(i))
+            for i in range(len(self.window.dataset_dialog.colordisp_all))
         ]
         bins = lib.calculate_optimal_bins(loccount.flatten(), max_n_bins=1000)
         for i, channel in enumerate(channels):
@@ -9080,7 +9799,7 @@ class View(QtWidgets.QLabel):
         status.close()
         self.index_blocks[channel] = index_blocks
 
-    def get_index_blocks(self, channel: int) -> np.ndarray:
+    def get_index_blocks(self, channel: int) -> tuple:
         """Call ``self.index_locs`` if not calculated earlier. Return
         indexed localizations from a given channel."""
         if self.index_blocks[channel] is None:
@@ -9178,11 +9897,8 @@ class View(QtWidgets.QLabel):
 
         ax = self.canvas.figure.add_subplot(111)
         colors = [
-            _.palette().color(QtGui.QPalette.ColorRole.Window)
-            for _ in self.window.dataset_dialog.colordisp_all
-        ]
-        colors = [
-            [_.red() / 255, _.green() / 255, _.blue() / 255] for _ in colors
+            list(self.window.dataset_dialog.legend_color(i))
+            for i in range(len(self.window.dataset_dialog.colordisp_all))
         ]
         concat = np.concatenate(self.profiles)
         bin_edges = lib.calculate_optimal_bins(concat, max_n_bins=1000)
@@ -9276,15 +9992,89 @@ class View(QtWidgets.QLabel):
             self.add_picks(new_picks)
             status.close()
 
-    def _display_locs(self, channel: int) -> pd.DataFrame:
+    def _display_indices(
+        self,
+        channel: int,
+        viewport: (
+            tuple[tuple[float, float], tuple[float, float]] | None
+        ) = None,
+    ) -> lib.IntArray1D | None:
+        """Positional indices into ``self.locs[channel]`` selected for
+        display, or ``None`` when the full set is used. Combines the
+        fast-render subset and the viewport pyramid filter.
+        """
+        if viewport is not None:
+            viewport_indices = self._viewport_indices(channel, viewport)
+        else:
+            viewport_indices = None
+        fast_idx = self.fast_render_indices[channel]
+        if viewport_indices is None and fast_idx is None:
+            return None
+        if fast_idx is None:
+            return viewport_indices
+        if viewport_indices is None:
+            return fast_idx
+        # Intersect via boolean mask -- viewport_indices is the larger
+        # set so testing membership against fast_idx is cheaper.
+        mask = np.zeros(len(self.locs[channel]), dtype=bool)
+        mask[fast_idx] = True
+        return viewport_indices[mask[viewport_indices]]
+
+    def _display_locs(
+        self,
+        channel: int,
+        viewport: (
+            tuple[tuple[float, float], tuple[float, float]] | None
+        ) = None,
+    ) -> pd.DataFrame:
         """Return the localizations currently selected for display in
         ``channel``. When ``fast_render_indices[channel]`` is ``None``
         the full set is returned; otherwise the rows selected by the
-        fast-render dialog. Always returns a ``pd.DataFrame``."""
-        idx = self.fast_render_indices[channel]
+        fast-render dialog. If ``viewport`` is given and a render-index
+        pyramid is available for the channel, the result is also
+        spatially restricted to that viewport. Always returns a
+        ``pd.DataFrame``."""
+        idx = self._display_indices(channel, viewport)
         if idx is None:
             return self.locs[channel]
         return self.locs[channel].iloc[idx]
+
+    def _viewport_indices(
+        self,
+        channel: int,
+        viewport: tuple[tuple[float, float], tuple[float, float]],
+    ) -> lib.IntArray1D | None:
+        """Indices of locs in ``channel`` that fall inside ``viewport``.
+
+        Returns ``None`` if the pyramid is unavailable -- the caller
+        then falls back to the renderer's own brute-force in-view
+        filter, which is the previous behavior.
+        """
+        pyramid = self._ensure_render_index(channel)
+        if pyramid is None:
+            return None
+        return spatial_index.query_viewport(pyramid, viewport)
+
+    def _ensure_render_index(
+        self, channel: int
+    ) -> spatial_index.RenderIndexPyramid | None:
+        """Lazily (re)build the per-channel render-index pyramid.
+
+        Returns ``None`` if the pyramid cannot be built (e.g., missing
+        FOV metadata) -- the rendering path then falls back to the
+        original brute-force viewport scan.
+        """
+        pyramid = self.render_index[channel]
+        if pyramid is not None:
+            return pyramid
+        try:
+            pyramid = spatial_index.build_render_index(
+                self.locs[channel], self.infos[channel]
+            )
+        except Exception:
+            pyramid = None
+        self.render_index[channel] = pyramid
+        return pyramid
 
     def picked_locs(
         self,
@@ -9509,8 +10299,13 @@ class View(QtWidgets.QLabel):
             min_blur_width=min_blur_width,
             blur_method=blur_method,
         )
-        # apply z splicing if enabled + render property
-        locs, infos = self._prepare_locs_for_rendering()
+        # apply z splicing if enabled + render property; spatially
+        # restrict each channel to the active viewport via the
+        # render-index pyramid so the renderer doesn't have to do a
+        # full-N viewport scan on every redraw
+        locs, infos = self._prepare_locs_for_rendering(
+            viewport=kwargs["viewport"]
+        )
 
         # prepare other keywords for rendering
         cmap = self.window.display_settings_dlg.colormap.currentText()
@@ -9539,18 +10334,24 @@ class View(QtWidgets.QLabel):
         if cache:
             self.n_locs = n_locs
             self.image = raw_image
-
         self.window.display_settings_dlg.silent_minimum_update(vmin)
         self.window.display_settings_dlg.silent_maximum_update(vmax)
 
         return qimage
 
-    def read_colors(self, n_channels: int | None = None) -> list[list[float]]:
-        """Find currently selected colors for multicolor rendering.
+    def read_colors(
+        self, n_channels: int | None = None
+    ) -> list[lib.FloatArray2D]:
+        """Find currently selected colors/colormaps for multicolor
+        rendering.
 
-        If multiple channels are loaded, ensure that only the ones which
-        are checked in the Dataset Dialog are rendered in their selected
-        colors.
+        Each returned entry is a ``(256, 3)`` float32 LUT. Solid colors
+        become black→color linear ramps. Matplotlib colormaps and
+        user-defined custom colormaps are also LUTs.
+
+        If multiple channels are loaded, ensure that only the ones
+        which are checked in the Dataset Dialog are rendered in their
+        selected colors.
 
         Parameters
         ----------
@@ -9560,67 +10361,57 @@ class View(QtWidgets.QLabel):
 
         Returns
         -------
-        colors : list
-            List of lists with RGB values from 0 to 1 for each channel.
+        colors : list of 2D arrays
+            One ``(256, 3)`` float32 LUT per channel.
         """
         if n_channels is None:
             n_channels = len(self.locs)
-        colors = lib.get_colors(n_channels)  # automatic colors
+        dataset_dialog = self.window.dataset_dialog
+        # automatic colors: HSV-spaced solid colors → black→color LUTs
+        colors = [
+            render.solid_to_lut(rgb) for rgb in lib.get_colors(n_channels)
+        ]
         # color each channel one by one
         for i in range(len(self.locs)):
             # change colors if not automatic coloring
-            if not self.window.dataset_dialog.auto_colors.isChecked():
-                # get color from Dataset Dialog
-                color = self.window.dataset_dialog.colorselection[
-                    i
-                ].currentText()
-                # if default color
-                if color in self.window.dataset_dialog.default_colors:
-                    colors_array = np.array(
-                        self.window.dataset_dialog.default_colors,
-                        dtype=object,
+            if not dataset_dialog.auto_colors.isChecked():
+                color_name = dataset_dialog.colorselection[i].currentText()
+                try:
+                    colors[i] = dataset_dialog.resolve_color_identifier(
+                        color_name
                     )
-                    index = np.where(colors_array == color)[0][0]
-                    # assign color
-                    colors[i] = tuple(self.window.dataset_dialog.rgb[index])
-                # if hexadecimal is given
-                elif lib.is_hexadecimal(color):
-                    colorstring = color.lstrip("#")
-                    rgbval = tuple(
-                        int(colorstring[i : i + 2], 16) / 255
-                        for i in (0, 2, 4)
-                    )
-                    # assign color
-                    colors[i] = rgbval
-                else:
+                except ValueError:
                     warning = (
-                        "The color selection not recognised in the channel "
-                        f"{self.window.dataset_dialog.checks[i].text()}. Please"
-                        " choose one of the options provided or type the "
-                        "hexadecimal code for your color of choice, "
-                        " starting with '#', e.g. '#ffcdff' for pink."
+                        "The color selection not recognised in the "
+                        f"channel {dataset_dialog.checks[i].text()}. "
+                        "Please choose one of the options provided, "
+                        "type a hexadecimal code (e.g. '#ffcdff'), or "
+                        "define a custom colormap."
                     )
                     QtWidgets.QMessageBox.information(self, "Warning", warning)
                     break
 
         # use only the checked channels
         if len(self.locs) > 1:
-            colors_ = []
-            for i in range(len(self.locs)):
-                if self.window.dataset_dialog.checks[i].isChecked():
-                    colors_.append(colors[i])
-            colors = colors_
+            colors = [
+                colors[i]
+                for i in range(len(self.locs))
+                if dataset_dialog.checks[i].isChecked()
+            ]
         elif len(self.locs) == 1 and "group" in self.locs[0].columns:
-            colors = lib.get_colors(
-                N_GROUP_COLORS
-            )  # automatic colors for groups
+            # automatic colors for groups
+            colors = [
+                render.solid_to_lut(rgb)
+                for rgb in lib.get_colors(N_GROUP_COLORS)
+            ]
 
         # render properties
         if self.x_render_state:
-            colors = render.get_colors_from_colormap(
+            prop_rgbs = render.get_colors_from_colormap(
                 len(self.x_locs),
                 self.window.display_settings_dlg.colormap_prop.currentText(),
             )
+            colors = [render.solid_to_lut(rgb) for rgb in prop_rgbs]
 
         return colors
 
@@ -9653,6 +10444,9 @@ class View(QtWidgets.QLabel):
 
     def _prepare_locs_for_rendering(
         self,
+        viewport: (
+            tuple[tuple[float, float], tuple[float, float]] | None
+        ) = None,
     ) -> tuple[list[pd.DataFrame], list[list[dict]]]:
         """Prepare localizations and metadata for rendering with active
         filters.
@@ -9661,7 +10455,12 @@ class View(QtWidgets.QLabel):
         - Render-by-property coloring if enabled (splits into x_locs);
         - Group-based splitting if group column exists;
         - Z-slice clipping if slicer is enabled;
-        - Channel filtering to only include checked channels."""
+        - Channel filtering to only include checked channels.
+
+        When ``viewport`` is provided, each per-channel locs DataFrame
+        is additionally restricted to the viewport via the render-index
+        pyramid for efficient rendering of zoomed-in FOVs.
+        """
         slicer = self.window.slicer_dialog.slicer_radio_button
         # render by property - use x_locs like multichannel rendering
         if self.window.display_settings_dlg.render_check.isChecked():
@@ -9670,14 +10469,22 @@ class View(QtWidgets.QLabel):
             # not need to be rerun
             locs = self.x_locs.copy()
             infos = [self.infos[0]] * len(locs)
+            # Render-by-property: x_locs is precomputed and shares an
+            # index that depends on the property binning. The renderer's
+            # own brute-force in-view filter handles this case; the
+            # pyramid pre-filter is only applied to the multichannel
+            # path, which is the common redraw cost driver.
         # if group column is present, split locs by group for rendering
         else:
             # project fast-render subset (or full set when no
-            # subsampling)
-            locs = [self._display_locs(i) for i in range(len(self.locs))]
+            # subsampling), restricted to the viewport if given
+            locs = [
+                self._display_locs(i, viewport=viewport)
+                for i in range(len(self.locs))
+            ]
             infos = self.infos
             if "group" in locs[0].columns and len(locs) == 1:
-                idx = self.fast_render_indices[0]
+                idx = self._display_indices(0, viewport)
                 group_color = (
                     self.group_color if idx is None else self.group_color[idx]
                 )
@@ -9946,9 +10753,10 @@ class View(QtWidgets.QLabel):
                 kinetics_progress=kinetics_progress.set_value,
                 groupprops_progress=groupprops_progress.set_value,
             )
+            gen_by = f"Picasso v{__version__}: Render Pick Properties"
             info = self.infos[channel] + [
                 {
-                    "Generated by": f"Picasso v{__version__}: Render Pick Properties",
+                    "Generated by": gen_by,
                     "Influx rate": influx,
                 }
             ]
@@ -10017,45 +10825,13 @@ class View(QtWidgets.QLabel):
             n_colors = self.window.display_settings_dlg.color_step.value()
             min_val = self.window.display_settings_dlg.minimum_render.value()
             max_val = self.window.display_settings_dlg.maximum_render.value()
-
-            x_locs = []
-
-            # attempt using cached data
-            for cached_entry in self.x_render_cache:
-                if cached_entry["parameter"] == parameter:
-                    if cached_entry["colors"] == n_colors:
-                        if (cached_entry["min_val"] == min_val) & (
-                            cached_entry["max_val"] == max_val
-                        ):
-                            x_locs = cached_entry["locs"]
-                        break
-
-            # if no cached data found
-            if x_locs == []:
-                x_locs = render.split_locs_by_property(
-                    locs=self._display_locs(0),
-                    property_name=parameter,
-                    n_colors=n_colors,
-                    min_value=min_val,
-                    max_value=max_val,
-                )
-
-                # cache
-                entry = {}
-                entry["parameter"] = parameter
-                entry["colors"] = n_colors
-                entry["locs"] = x_locs
-                entry["min_val"] = min_val
-                entry["max_val"] = max_val
-
-                # Do not store too many datasets in cache
-                if len(self.x_render_cache) < 10:
-                    self.x_render_cache.append(entry)
-                else:
-                    self.x_render_cache.insert(0, entry)
-                    del self.x_render_cache[-1]
-
-            self.x_locs = x_locs
+            self.x_locs = render.split_locs_by_property(
+                locs=self._display_locs(0),
+                property_name=parameter,
+                n_colors=n_colors,
+                min_value=min_val,
+                max_value=max_val,
+            )
         else:
             self.x_render_state = False
         self.update_scene()
@@ -10257,6 +11033,7 @@ class View(QtWidgets.QLabel):
                 self.locs[channel] = locs
                 self.infos[channel] = new_info
                 self.index_blocks[channel] = None
+                self.render_index[channel] = None
                 self.add_drift(channel, drift)
                 self.update_scene(resample_locs=True)
                 self.show_drift()
@@ -10302,6 +11079,7 @@ class View(QtWidgets.QLabel):
                     )
                     # sanity check and assign attributes
                     self.index_blocks[channel] = None
+                    self.render_index[channel] = None
                     self.add_drift(channel, drift)
                     # ignore undrift_locs since we use _apply_drift to
                     # assign attributes
@@ -10349,6 +11127,7 @@ class View(QtWidgets.QLabel):
             self.infos[channel] = new_info
             # Cleanup
             self.index_blocks[channel] = None
+            self.render_index[channel] = None
             self.add_drift(channel, drift)
             status.close()
             self.update_scene(resample_locs=True)
@@ -10383,6 +11162,7 @@ class View(QtWidgets.QLabel):
             self.infos[channel] = new_info
             # Cleanup
             self.index_blocks[channel] = None
+            self.render_index[channel] = None
             self.add_drift(channel, drift)
             status.close()
             self.update_scene(resample_locs=True)
@@ -10410,6 +11190,7 @@ class View(QtWidgets.QLabel):
             self.locs[channel], self.infos[channel], drift=drift
         )
         self.index_blocks[channel] = None
+        self.render_index[channel] = None
         self.add_drift(channel, drift)
         self.update_scene(resample_locs=True)
 
@@ -10468,6 +11249,7 @@ class View(QtWidgets.QLabel):
         self._drift[channel] = drift
         self.currentdrift[channel] = copy.copy(drift)
         self.index_blocks[channel] = None
+        self.render_index[channel] = None
         self.update_scene(resample_locs=True)
 
     def unfold_groups_square(self) -> None:
@@ -10632,11 +11414,12 @@ class View(QtWidgets.QLabel):
             progress = lib.ProgressDialog(
                 "Calculating pick statistics", 0, len(self._picks), self
             )
+            max_dark_time = self.window.info_dialog.max_dark_time.value()
             N, n_events, rmsd, rmsd_z, length, dark, new_locs = (
                 postprocess.evaluate_picks(
                     picked_locs=self.picked_locs(channel),
                     info=self.infos[channel],
-                    max_dark_time=self.window.info_dialog.max_dark_time.value(),
+                    max_dark_time=max_dark_time,
                     progress_callback=progress.set_value,
                 )
             )
@@ -10739,6 +11522,7 @@ class View(QtWidgets.QLabel):
         if len(dlg.fractions) == 2 and "group" in self.locs[0].columns:
             self.group_color = render.get_group_color(self.locs[0])
         self.index_blocks = [None] * len(self.locs)
+        self.render_index = [None] * len(self.locs)
         self.window.display_settings_dlg.silent_maximum_update(
             factor * self.window.display_settings_dlg.maximum.value()
         )
@@ -10936,6 +11720,11 @@ class Window(QtWidgets.QMainWindow):
         self.view = View(self)  # displays rendered locs
         self.view.setMinimumSize(1, 1)
         self.setCentralWidget(self.view)
+
+        # User-defined colormaps, keyed by name, each a list of
+        # [position, R, G, B] stops in [0, 1]. Populated from
+        # ~/.picasso/settings.yaml in load_user_settings.
+        self.custom_colormaps_stops: dict[str, list[list[float]]] = {}
 
         # set up dialogs
         self.display_settings_dlg = DisplaySettingsDialog(self)
@@ -11346,6 +12135,10 @@ class Window(QtWidgets.QMainWindow):
             settings["Render"]["PWD"] = os.path.dirname(
                 self.view.locs_paths[0]
             )
+        settings["Render"]["CustomColormaps"] = {
+            name: [list(stop) for stop in stops]
+            for name, stops in self.custom_colormaps_stops.items()
+        }
         io.save_user_settings(settings)
         QtWidgets.QApplication.instance().closeAllWindows()
 
@@ -11817,8 +12610,15 @@ class Window(QtWidgets.QMainWindow):
 
             s_image = np.stack(all_img, axis=-1).T.copy()
 
+            # Imaris expects a single RGB per channel. Sample each
+            # channel's LUT at LEGEND_SAMPLE_IDX to get a representative
+            # color (this matches the legend/histogram convention and
+            # avoids near-white peaks of reversed single-hue cmaps).
             colors = self.view.read_colors()
-            colors_ims = [PW.Color(*list(colors[_]), 1) for _ in to_render]
+            colors_ims = [
+                PW.Color(*[float(v) for v in colors[_][LEGEND_SAMPLE_IDX]], 1)
+                for _ in to_render
+            ]
 
             numpy_to_imaris(
                 s_image,
@@ -11884,6 +12684,29 @@ class Window(QtWidgets.QMainWindow):
         if len(pwd) == 0:
             pwd = []
         self.pwd = pwd
+
+        # User-defined colormaps for per-channel rendering
+        try:
+            stored = settings["Render"]["CustomColormaps"]
+        except (KeyError, TypeError):
+            stored = {}
+        parsed: dict[str, list[list[float]]] = {}
+        for name, stops in (stored or {}).items():
+            try:
+                parsed[name] = [
+                    [
+                        float(stop[0]),
+                        float(stop[1]),
+                        float(stop[2]),
+                        float(stop[3]),
+                    ]
+                    for stop in stops
+                ]
+            except (TypeError, ValueError, IndexError):
+                continue
+        self.custom_colormaps_stops = parsed
+        if hasattr(self, "dataset_dialog"):
+            self.dataset_dialog.refresh_color_lists()
 
     def open_apply_dialog(self) -> None:
         """Load expression and apply it to locs."""
@@ -12010,6 +12833,47 @@ class Window(QtWidgets.QMainWindow):
                 self.window_rot.view_rot.angy = self.view.infos[0][-1]["angy"]
                 self.window_rot.view_rot.angz = self.view.infos[0][-1]["angz"]
                 self.rot_win()
+
+    def resize_view_to_fov(self, w: float, h: float) -> None:
+        """Resize the main window so that ``view`` has aspect ratio w/h.
+
+        Only triggers a resize when the current view aspect differs from
+        the target. The longer of the current view dimensions is
+        preserved; the other is recomputed from the target aspect, then
+        both are clipped to the available screen geometry.
+        """
+        if w <= 0 or h <= 0:
+            return
+        view_w = self.view.width()
+        view_h = self.view.height()
+        if view_w <= 0 or view_h <= 0:
+            return
+        target_aspect = w / h
+        current_aspect = view_w / view_h
+        if abs(current_aspect - target_aspect) < 1e-3:
+            return
+
+        if target_aspect >= 1.0:
+            new_view_w = max(view_w, view_h)
+            new_view_h = new_view_w / target_aspect
+        else:
+            new_view_h = max(view_w, view_h)
+            new_view_w = new_view_h * target_aspect
+
+        screen = self.screen() or QtWidgets.QApplication.primaryScreen()
+        avail = screen.availableGeometry()
+        chrome_w = self.width() - view_w
+        chrome_h = self.height() - view_h
+        max_view_w = max(1, avail.width() - chrome_w)
+        max_view_h = max(1, avail.height() - chrome_h)
+        scale = min(1.0, max_view_w / new_view_w, max_view_h / new_view_h)
+        new_view_w *= scale
+        new_view_h *= scale
+
+        self.resize(
+            int(round(new_view_w + chrome_w)),
+            int(round(new_view_h + chrome_h)),
+        )
 
     def resizeEvent(self, even: QtGui.QResizeEvent) -> None:
         """Update window size."""

@@ -1211,6 +1211,31 @@ def _e_step_3D(
 
 
 @njit
+def _clip_covs_3D(
+    covs,
+    min_cov_x,
+    max_cov_x,
+    min_cov_y,
+    max_cov_y,
+    min_cov_z,
+    max_cov_z,
+):
+    for i in range(len(covs)):
+        if covs[i, 0] < min_cov_x[i]:
+            covs[i, 0] = min_cov_x[i]
+        elif covs[i, 0] > max_cov_x[i]:
+            covs[i, 0] = max_cov_x[i]
+        if covs[i, 1] < min_cov_y[i]:
+            covs[i, 1] = min_cov_y[i]
+        elif covs[i, 1] > max_cov_y[i]:
+            covs[i, 1] = max_cov_y[i]
+        if covs[i, 2] < min_cov_z[i]:
+            covs[i, 2] = min_cov_z[i]
+        if covs[i, 2] > max_cov_z[i]:
+            covs[i, 2] = max_cov_z[i]
+
+
+@njit
 def _m_step_3D(
     X: lib.FloatArray2D,
     log_resp: lib.FloatArray2D,
@@ -1280,20 +1305,15 @@ def _m_step_3D(
         min_cov_z = np.full(covs.shape[0], sigma_bounds[0] ** 2 * 2.0**2)
         max_cov_z = np.full(covs.shape[0], sigma_bounds[1] ** 2 * 2.5**2)
 
-    # apply the bounds to xy covariances
-    for i in range(len(covs)):
-        if covs[i, 0] < min_cov_x[i]:
-            covs[i, 0] = min_cov_x[i]
-        elif covs[i, 0] > max_cov_x[i]:
-            covs[i, 0] = max_cov_x[i]
-        if covs[i, 1] < min_cov_y[i]:
-            covs[i, 1] = min_cov_y[i]
-        elif covs[i, 1] > max_cov_y[i]:
-            covs[i, 1] = max_cov_y[i]
-        if covs[i, 2] < min_cov_z[i]:
-            covs[i, 2] = min_cov_z[i]
-        if covs[i, 2] > max_cov_z[i]:
-            covs[i, 2] = max_cov_z[i]
+    _clip_covs_3D(
+        covs,
+        min_cov_x,
+        max_cov_x,
+        min_cov_y,
+        max_cov_y,
+        min_cov_z,
+        max_cov_z,
+    )
 
     # impose the ratio of x and y covariances based on the spot width
     # and height ratio

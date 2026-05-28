@@ -62,6 +62,10 @@ def _sum_and_center_of_mass(
             y += spot[i, j] * i
             x += spot[i, j] * j
             _sum_ += spot[i, j]
+    if _sum_ <= 0.0:
+        # Degenerate (flat) spot: fall back to geometric center so the
+        # caller can still produce sane initial parameters.
+        return 0.01, (size - 1) / 2.0, (size - 1) / 2.0
     y /= _sum_
     x /= _sum_
     return _sum_, y, x
@@ -274,7 +278,7 @@ def fit_spots(
     theta.fill(np.nan)
     use_tqdm = progress_callback == "console"
     if use_tqdm:
-        iter_range = tqdm(len(spots), desc="Fitting...", unit="spot")
+        iter_range = tqdm(range(len(spots)), desc="Fitting...", unit="spot")
     else:
         iter_range = range(len(spots))
     for i in iter_range:

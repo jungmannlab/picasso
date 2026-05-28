@@ -1746,6 +1746,35 @@ def evaluate_picks(
     return N, n_events, rmsd, rmsd_z, length, dark, new_locs
 
 
+def _pick_kinetics_single(
+    pick_locs: pd.DataFrame,
+    info: list[dict],
+    max_dark_time: int,
+) -> tuple[pd.DataFrame, float, float] | None:
+    """Compute kinetics for a single picked region. Returns None if the
+    region has no usable data or kinetic rate estimation fails."""
+    if not len(pick_locs):
+        return None
+    if "len" not in pick_locs.columns:
+        pick_locs = link(
+            pick_locs,
+            info,
+            r_max=999999,  # link all locs in the pick
+            max_dark_time=max_dark_time,
+        )
+    if not len(pick_locs):
+        return None
+    pick_locs = compute_dark_times(pick_locs)
+    if not len(pick_locs):
+        return None
+    try:
+        l_ = lib.estimate_kinetic_rate(pick_locs["len"].to_numpy())
+        d_ = lib.estimate_kinetic_rate(pick_locs["dark"].to_numpy())
+    except RuntimeError:
+        return None
+    return pick_locs, l_, d_
+
+
 def pick_kinetics(
     picked_locs: list[pd.DataFrame],
     info: list[dict],
@@ -1806,27 +1835,10 @@ def pick_kinetics(
     for i in iter_range:
         if callable(progress_callback):
             progress_callback(i)
-
-        pick_locs = picked_locs[i]
-        if not len(pick_locs):
+        result = _pick_kinetics_single(picked_locs[i], info, max_dark_time)
+        if result is None:
             continue
-        if "len" not in pick_locs.columns:
-            pick_locs = link(
-                pick_locs,
-                info,
-                r_max=999999,  # link all locs in the pick
-                max_dark_time=max_dark_time,
-            )
-        if not len(pick_locs):
-            continue
-        pick_locs = compute_dark_times(pick_locs)
-        if not len(pick_locs):
-            continue
-        try:
-            l_ = lib.estimate_kinetic_rate(pick_locs["len"].to_numpy())
-            d_ = lib.estimate_kinetic_rate(pick_locs["dark"].to_numpy())
-        except RuntimeError:
-            continue
+        pick_locs, l_, d_ = result
         length.append(l_)
         dark.append(d_)
         no_locs.append(len(pick_locs))
@@ -2764,13 +2776,25 @@ def _link_loc_groups(  # noqa: C901
             locs["iterations"].to_numpy(), link_group, n_locs, n_groups, n_
         )
     if "z" in locs.columns:
-        columns["z"] = _link_group_mean(
-            locs["z"].to_numpy(),
-            link_group,
-            n_locs,
-            n_groups,
-            n_,
-        )
+        if "lpz" in locs.columns:
+            weights_z = 1 / locs["lpz"].to_numpy() ** 2
+            columns["z"], sum_weights_z_ = _link_group_weighted_mean(
+                locs["z"].to_numpy(),
+                weights_z,
+                link_group,
+                n_locs,
+                n_groups,
+                n_,
+            )
+            columns["lpz"] = np.sqrt(1 / sum_weights_z_)
+        else:
+            columns["z"] = _link_group_mean(
+                locs["z"].to_numpy(),
+                link_group,
+                n_locs,
+                n_groups,
+                n_,
+            )
     if "d_zcalib" in locs.columns:
         columns["d_zcalib"] = _link_group_mean(
             locs["d_zcalib"].to_numpy(), link_group, n_locs, n_groups, n_
@@ -3590,7 +3614,9 @@ def groupprops(
     use_tqdm = callback == "console"
     if use_tqdm:
         iter_range = tqdm(
-            len(group_ids), desc="Calculating group statistics", unit="Groups"
+            total=len(group_ids),
+            desc="Calculating group statistics",
+            unit="Groups",
         )
     else:
         iter_range = range(len(group_ids))
@@ -3778,7 +3804,7 @@ def resi(
     suffix_centers : str, optional
         Suffix appended to output_paths for saved cluster centers from
         individual channels. Default is "_cluster_centers".
-    progress_callback : Callable[[int], None] | Literal["console"] | None, optional
+    progress_callback : {callable, "console", None}, optional
         Callback function to report progress where the input integer is
         the index of the channel currently processed. If "console", uses
         a simple console print. If None, no progress is reported.
@@ -3889,7 +3915,7 @@ def _resi(
     resi_channels = []
     if progress_callback == "console":
         iter_range = tqdm(
-            len(locs), desc="Processing channels", unit="Channels"
+            total=len(locs), desc="Processing channels", unit="Channels"
         )
     else:
         iter_range = range(len(locs))

@@ -61,6 +61,13 @@ BLOB_CENTERS_3D = [
     (50.0, 50.0, 200.0),
     (10.0, 50.0, -200.0),
 ]
+# Same relative geometry as BLOB_CENTERS_3D but translated far from z=0
+# to guard against any z-offset dependence in the anisotropic scaling.
+BLOB_CENTERS_3D_OFFSET = [
+    (10.0, 10.0, 10_000.0),
+    (50.0, 50.0, 10_200.0),
+    (10.0, 50.0, 9_800.0),
+]
 LOCS_PER_BLOB = 30
 SIGMA_XY_PX = 0.005  # ~0.65 nm
 SIGMA_Z_NM = 1.0
@@ -107,6 +114,11 @@ def synth_locs_3d():
 
 
 @pytest.fixture
+def synth_locs_3d_offset():
+    return _make_synthetic_locs(BLOB_CENTERS_3D_OFFSET)
+
+
+@pytest.fixture
 def synth_info():
     return [{"Pixelsize": PIXELSIZE, "Width": 100, "Height": 100}]
 
@@ -145,6 +157,7 @@ def _run_dbscan_3d(locs):
         DBSCAN_MIN_SAMPLES,
         min_locs=0,
         pixelsize=PIXELSIZE,
+        radius_z=DBSCAN_EPS * 2.5,
     )
 
 
@@ -251,6 +264,22 @@ def test_recovers_known_clusters_3d(synth_locs_3d, run_clusterer):
     centers_scaled = centers.copy()
     centers_scaled[:, 2] /= PIXELSIZE
     truth_scaled = [(c[0], c[1], c[2] / PIXELSIZE) for c in BLOB_CENTERS_3D]
+    _match_truth_to_recovered(centers_scaled, truth_scaled, tol=0.5)
+
+
+@pytest.mark.parametrize("run_clusterer", CLUSTERERS_3D)
+def test_recovers_known_clusters_3d_offset(
+    synth_locs_3d_offset, run_clusterer
+):
+    """Anisotropic clustering still works when z is far from zero."""
+    out = run_clusterer(synth_locs_3d_offset)
+    assert out["group"].nunique() == len(BLOB_CENTERS_3D_OFFSET)
+    centers = out.groupby("group")[["x", "y", "z"]].mean().to_numpy()
+    centers_scaled = centers.copy()
+    centers_scaled[:, 2] /= PIXELSIZE
+    truth_scaled = [
+        (c[0], c[1], c[2] / PIXELSIZE) for c in BLOB_CENTERS_3D_OFFSET
+    ]
     _match_truth_to_recovered(centers_scaled, truth_scaled, tol=0.5)
 
 
