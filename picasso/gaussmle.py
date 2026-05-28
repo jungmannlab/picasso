@@ -465,7 +465,7 @@ def gaussmle(
         raise ValueError("Method not available.")
     use_tqdm = progress_callback == "console"
     if use_tqdm:
-        iter_range = tqdm(N, desc="Fitting...", unit="spot")
+        iter_range = tqdm(range(N), desc="Fitting...", unit="spot")
     else:
         iter_range = range(N)
     for i in iter_range:

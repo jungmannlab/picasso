@@ -3614,7 +3614,9 @@ def groupprops(
     use_tqdm = callback == "console"
     if use_tqdm:
         iter_range = tqdm(
-            len(group_ids), desc="Calculating group statistics", unit="Groups"
+            total=len(group_ids),
+            desc="Calculating group statistics",
+            unit="Groups",
         )
     else:
         iter_range = range(len(group_ids))
@@ -3913,7 +3915,7 @@ def _resi(
     resi_channels = []
     if progress_callback == "console":
         iter_range = tqdm(
-            len(locs), desc="Processing channels", unit="Channels"
+            total=len(locs), desc="Processing channels", unit="Channels"
         )
     else:
         iter_range = range(len(locs))

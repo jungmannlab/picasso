@@ -278,7 +278,7 @@ def fit_spots(
     theta.fill(np.nan)
     use_tqdm = progress_callback == "console"
     if use_tqdm:
-        iter_range = tqdm(len(spots), desc="Fitting...", unit="spot")
+        iter_range = tqdm(range(len(spots)), desc="Fitting...", unit="spot")
     else:
         iter_range = range(len(spots))
     for i in iter_range:

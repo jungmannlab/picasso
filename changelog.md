@@ -30,6 +30,8 @@ This patch adds a number of new, useful features rather than simply fixing the b
 - SPINNA GUIL show 3D masking widgets only if 3D mask is selected
 - Fixed high-resolution display of mask in Render (#666)
 - Fixed subcluster check plot when one of the two populations is empty (#667)
+- Fixed 2D fitting with console printout and no multiprocessing
+- Expanded the scope of sample notebooks
 
 ## 0.10.0
 

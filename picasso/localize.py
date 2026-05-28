@@ -613,7 +613,7 @@ def _identify_serial(
     N = len(movie)
     use_tqdm = progress_callback == "console"
     iter_range = (
-        tqdm(total=N, desc="Identifying spots", unit="frame")
+        tqdm(range(N), desc="Identifying spots", unit="frame")
         if use_tqdm
         else range(N)
     )
