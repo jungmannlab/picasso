@@ -32,6 +32,7 @@ This patch adds a number of new, useful features rather than simply fixing the b
 - Fixed subcluster check plot when one of the two populations is empty (#667)
 - Fixed 2D fitting with console printout and no multiprocessing
 - Expanded the scope of sample notebooks
+- Minor changes to documentation
 
 ## 0.10.0
 
