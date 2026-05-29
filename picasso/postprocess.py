@@ -94,17 +94,6 @@ def get_index_blocks(
     return locs, size, x_index, y_index, block_starts, block_ends, K, L
 
 
-def index_blocks_shape(info: list[dict], size: float) -> tuple[int, int]:
-    """Alias for _index_blocks_shape, deprecated.
-
-    TOOD: remove in v0.11.0."""
-    lib.deprecation_warning(
-        "Deprecation warning: This function will become private in"
-        "v0.11.0. Use _index_blocks_shape instead."
-    )
-    return _index_blocks_shape(info, size)
-
-
 def _index_blocks_shape(info: list[dict], size: float) -> tuple[int, int]:
     """Return the shape of the index grid, given the movie and grid
     sizes.
@@ -127,43 +116,6 @@ def _index_blocks_shape(info: list[dict], size: float) -> tuple[int, int]:
     n_blocks_y = int(np.ceil(height / size))
     n = (n_blocks_y, n_blocks_x)
     return n
-
-
-def get_block_locs_at(x: float, y: float, index_blocks: tuple) -> pd.DataFrame:
-    """Return the localizations in the blocks around the given
-    coordinates.
-
-    Parameters
-    ----------
-    x : float
-        x coordinate.
-    y : float
-        y coordinate.
-    index_blocks : tuple
-        Index blocks information.
-
-    Returns
-    -------
-    locs : pd.DataFrame
-        Localizations in the blocks around the given coordinates.
-    """
-    lib.deprecation_warning(
-        "Deprecation warning: This function will be removed in v0.11.0."
-        " Use get_block_locs_at_numba instead."
-    )
-    locs, size, _, _, block_starts, block_ends, K, L = index_blocks
-    x_index = np.uint32(x / size)
-    y_index = np.uint32(y / size)
-    indices = []
-    for k in range(y_index - 1, y_index + 2):
-        if 0 <= k < K:
-            for ll in range(x_index - 1, x_index + 2):
-                if 0 <= ll < L:
-                    indices.append(
-                        list(range(block_starts[k, ll], block_ends[k, ll]))
-                    )
-    indices = list(itertools.chain(*indices))
-    return locs.iloc[indices]
 
 
 @numba.jit(nopython=True, nogil=True)
@@ -232,7 +184,7 @@ def _picked_circular_locs(
             index_blocks[7],
         )
         block_locs = index_blocks[0].iloc[block_locs_idx]
-        group_locs_idx = _locs_at_numba(
+        group_locs_idx = lib._locs_at_numba(
             x, y, locs_xy[:, block_locs_idx], pick_size
         )
         group_locs = block_locs.iloc[group_locs_idx].copy()
@@ -541,9 +493,9 @@ def pick_similar(
             index_blocks[6],
             index_blocks[7],
         )
-        pick_locs_xy = locs_at_numba(x, y, block_locs_xy, r)
+        pick_locs_xy = lib.locs_at_numba(x, y, block_locs_xy, r)
         n_locs.append(pick_locs_xy.shape[1])
-        rmsd.append(rmsd_at_com(pick_locs_xy))
+        rmsd.append(lib.rmsd_at_com(pick_locs_xy))
 
     # calculate min and max n_locs and rmsd for picking similar
     mean_n_locs = np.mean(n_locs)
@@ -693,7 +645,7 @@ def _pick_similar(  # noqa: C901
                     K,
                     L,
                 )
-                picked_locs_xy = locs_at_numba(
+                picked_locs_xy = lib.locs_at_numba(
                     x_grid, y_grid, block_locs_xy, r
                 )
                 if picked_locs_xy.shape[1] > 1:
@@ -713,7 +665,7 @@ def _pick_similar(  # noqa: C901
                             break
                         x_test_old = x_test
                         y_test_old = y_test
-                        picked_locs_xy = locs_at_numba(
+                        picked_locs_xy = lib.locs_at_numba(
                             x_test, y_test, block_locs_xy, r
                         )
                         if picked_locs_xy.shape[1] > 1:
@@ -728,7 +680,7 @@ def _pick_similar(  # noqa: C901
                         if min_n_locs <= picked_locs_xy.shape[1] <= max_n_locs:
                             if (
                                 min_rmsd
-                                <= rmsd_at_com(picked_locs_xy)
+                                <= lib.rmsd_at_com(picked_locs_xy)
                                 <= max_rmsd
                             ):
                                 x_similar = np.append(x_similar, x_test)
@@ -799,24 +751,6 @@ def remove_locs_in_picks(
     return locs
 
 
-def n_block_locs_at(
-    x_range: int,
-    y_range: int,
-    K: int,
-    L: int,
-    block_starts: lib.IntArray2D,
-    block_ends: lib.IntArray2D,
-) -> int:
-    """Alias to _n_block_locs_at, deprecated.
-
-    TODO: remove in v0.11.0."""
-    lib.deprecation_warning(
-        "Deprecation warning: This function will become private in "
-        "v0.11.0. Use _n_block_locs_at instead."
-    )
-    return _n_block_locs_at(x_range, y_range, K, L, block_starts, block_ends)
-
-
 @numba.jit(nopython=True, nogil=True)
 def _n_block_locs_at(
     x_range: int,
@@ -854,8 +788,8 @@ def _get_block_locs_at_numba(
     K: int,
     L: int,
 ) -> lib.IntArray1D:
-    """Numba implementation of ``get_block_locs_at``. Return the indices
-    of localizations in the blocks around the given coordinates."""
+    """Return the indices of localizations in the blocks around the
+    given coordinates."""
     step = 0
     for k in range(y_index - 1, y_index + 2):
         if 0 <= k < K:
@@ -896,8 +830,8 @@ def get_block_locs_at_numba(
     K: int,
     L: int,
 ) -> lib.FloatArray2D:
-    """Numba implementation of ``get_block_locs_at. Return the
-    localizations in the blocks around the given coordinates."""
+    """Return the localizations in the blocks around the given
+    coordinates."""
     indices = _get_block_locs_at_numba(
         x_index,
         y_index,
@@ -907,54 +841,6 @@ def get_block_locs_at_numba(
         L,
     )
     return locs_xy[:, indices]
-
-
-@numba.jit(nopython=True, nogil=True, cache=True)
-def _locs_at_numba(
-    x: float,
-    y: float,
-    locs_xy: lib.FloatArray2D,
-    r: float,
-) -> lib.BoolArray1D:
-    """Numba implementation of ``lib.locs_at``. Return the indices of
-    localizations at the given coordinates within radius ``r``.
-
-    Note: this function will be moved to ``picasso.lib`` in Picasso v0.11.0"""
-    dx = locs_xy[0] - x
-    dy = locs_xy[1] - y
-    r2 = r**2
-    # print(x, y, r, dx, dy, )
-    is_picked = dx**2 + dy**2 < r2
-    return is_picked
-
-
-@numba.jit(nopython=True, nogil=True, cache=True)
-def locs_at_numba(
-    x: float,
-    y: float,
-    locs_xy: lib.FloatArray2D,
-    r: float,
-) -> lib.FloatArray2D:
-    """Numba implementation of ``lib.locs_at``. Return the localizations
-    at the given coordinates within radius ``r``.
-
-    Note: this function will be moved to ``picasso.lib`` in Picasso v0.11.0
-    """
-    is_picked = _locs_at_numba(x, y, locs_xy, r)
-    return locs_xy[:, is_picked]
-
-
-@numba.jit(nopython=True, nogil=True)
-def rmsd_at_com(locs_xy: lib.FloatArray2D) -> float:
-    """Calculate the RMSD of the localizations at the center of mass
-    (COM) of the localizations.
-
-    Note: this function will be moved to ``picasso.lib`` in Picasso v0.11.0"""
-    com_x = np.mean(locs_xy[0])
-    com_y = np.mean(locs_xy[1])
-    return np.sqrt(
-        np.mean((locs_xy[0] - com_x) ** 2 + (locs_xy[1] - com_y) ** 2)
-    )
 
 
 @numba.jit(nopython=True, nogil=True)
@@ -1160,20 +1046,6 @@ def plot_nena(
     ax.set_ylabel("Counts")
     ax.legend(loc="best")
     return fig
-
-
-def next_frame_neighbor_distance_histogram(
-    locs: pd.DataFrame,
-    callback: Callable[[int], None] | None = None,
-) -> tuple[lib.FloatArray1D, lib.FloatArray1D]:
-    """Alias to _next_frame_neighbor_distance_histogram, deprecated.
-
-    TODO: remove in v0.11.0."""
-    lib.deprecation_warning(
-        "Deprecation warning: This function will become private in "
-        "v0.11.0. Use _next_frame_neighbor_distance_histogram instead."
-    )
-    return _next_frame_neighbor_distance_histogram(locs, callback)
 
 
 def _next_frame_neighbor_distance_histogram(
@@ -1447,10 +1319,22 @@ def _frc(
     """
     # render images
     binsize = lp / 2
-    oversampling = 1 / binsize
-    dummy_info = {"Pixelsize": pixelsize}
-    im1 = render.render(locs1, dummy_info, oversampling, viewport, None)[1]
-    im2 = render.render(locs2, dummy_info, oversampling, viewport, None)[1]
+    disp_px_size = pixelsize * binsize
+    info = {"Pixelsize": pixelsize}
+    im1 = render.render(
+        locs1,
+        info,
+        disp_px_size=disp_px_size,
+        viewport=viewport,
+        blur_method=None,
+    )[1]
+    im2 = render.render(
+        locs2,
+        info,
+        disp_px_size=disp_px_size,
+        viewport=viewport,
+        blur_method=None,
+    )[1]
 
     # ensure the images are odd-sized and mask them (tukey)
     if im1.shape[0] % 2 == 0:
@@ -2419,24 +2303,6 @@ def cluster_combine_dist(
     return combined_locs
 
 
-def get_link_groups(
-    frame: lib.IntArray1D,
-    x: lib.FloatArray1D,
-    y: lib.FloatArray1D,
-    d_max: float,
-    max_dark_time: int,
-    group: lib.IntArray1D,
-) -> lib.IntArray1D:
-    """Alias to _get_link_groups, deprecated.
-
-    TODO: remove in v0.11.0."""
-    lib.deprecation_warning(
-        "Deprecation warning: This function will become private in "
-        "v0.11.0. Use _get_link_groups instead."
-    )
-    return _get_link_groups(frame, x, y, d_max, max_dark_time, group)
-
-
 @numba.jit(nopython=True)
 def _get_link_groups(
     frame: lib.IntArray1D,
@@ -2659,22 +2525,6 @@ def _link_group_last(
         i_ = link_group[i]
         result[i_] = column[i]
     return result
-
-
-def link_loc_groups(
-    locs: pd.DataFrame,
-    info: list[dict],
-    link_group: lib.IntArray1D,
-    remove_ambiguous_lengths: bool = True,
-) -> pd.DataFrame:
-    """Alias to _link_loc_groups, deprecated.
-
-    TODO: remove in v0.11.0."""
-    lib.deprecation_warning(
-        "Deprecation warning: This function will become private in "
-        "v0.11.0. Use _link_loc_groups instead."
-    )
-    return _link_loc_groups(locs, info, link_group, remove_ambiguous_lengths)
 
 
 def _link_loc_groups(  # noqa: C901
@@ -3333,7 +3183,9 @@ def align(
     """
     images = []
     for locs_, info_ in zip(locs, infos):
-        _, image = render.render(locs_, info_, blur_method="smooth")
+        _, image = render.render(
+            locs_, info_, disp_px_size=100, blur_method="smooth"
+        )
         images.append(image)
     shift_y, shift_x = imageprocess.rcc(
         images, callback=lib.MockProgress().set_value

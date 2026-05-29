@@ -1264,7 +1264,7 @@ def _render_many(
     locs,
     info,
     path,
-    oversampling,
+    disp_px_size,
     blur_method,
     min_blur_width,
     vmin,
@@ -1286,7 +1286,7 @@ def _render_many(
     N, image = render(
         locs,
         info,
-        oversampling,
+        disp_px_size=disp_px_size,
         blur_method=blur_method,
         min_blur_width=min_blur_width,
     )
@@ -1315,8 +1315,8 @@ def _render(args: argparse.Namespace) -> None:
     files : str
         Path to the localization files or a directory containing
         HDF5 files.
-    oversampling : int
-        Number of super-resolution pixels per camera pixel.
+    disp_px_size : float
+        Size of the rendered pixel in nm.
     blur_method : str
         Defines localizations' blur. The string has to be one of
         'gaussian', 'gaussian_iso', 'smooth', 'convolve'. If None, no
@@ -1362,7 +1362,7 @@ def _render(args: argparse.Namespace) -> None:
                 _render_many,
                 path,
                 args=(
-                    args.oversampling,
+                    args.disp_px_size,
                     args.blur_method,
                     args.min_blur_width,
                     args.vmin,
@@ -1378,7 +1378,7 @@ def _render(args: argparse.Namespace) -> None:
             _render_many,
             args.files,
             args=(
-                args.oversampling,
+                args.disp_px_size,
                 args.blur_method,
                 args.min_blur_width,
                 args.vmin,
@@ -2503,11 +2503,11 @@ def main():  # noqa: C901
         ),
     )
     render_parser.add_argument(
-        "-o",
-        "--oversampling",
+        "-px",
+        "--disp-px-size",
         type=float,
-        default=1.0,
-        help="the number of super-resolution pixels per camera pixels",
+        default=10.0,
+        help="the size of the rendered pixel in nm",
     )
     render_parser.add_argument(
         "-b",

@@ -295,7 +295,7 @@ def cluster(
     frame_analysis: bool,
     radius_z: float | None = None,
     pixelsize: float | None = None,
-    return_info: bool = None,  # TODO: change to true in v0.11.0 and remove in v0.12.0
+    return_info: bool = True,  # TODO: remove in v0.12.0
 ) -> tuple[pd.DataFrame, dict] | pd.DataFrame:
     """Cluster localizations from single molecules (SMLM clusterer).
 
@@ -339,7 +339,8 @@ def cluster(
     return_info : bool, optional
         If True, returns a tuple of (locs, info), where locs is the
         clustered localizations and info is a dictionary containing
-        clustering information.
+        clustering information. Will be removed in v0.12.0 and both
+        locs and metadata will be returned.
 
     Returns
     -------
@@ -351,14 +352,10 @@ def cluster(
         Dictionary containing clustering information, only returned if
         return_info is True.
     """
-    if return_info is None:
-        return_info = False
+    if not return_info:
         lib.deprecation_warning(
-            "Deprecation warning: In v0.11.0, cluster will return both "
-            "locs and cluster info by default. You can change the "
-            "output already by setting return_info=True. In v0.12.0, "
-            "this will not be optional anymore and cluster will always "
-            "return both locs and cluster info."
+            "In v0.12.0, return_info will not be an argument and"
+            "cluster will always return both locs and cluster info."
         )
     locs = locs.copy()
     n_raw = len(locs)
@@ -452,7 +449,7 @@ def dbscan(
     min_locs: int = 10,
     pixelsize: float | None = None,
     radius_z: float | None = None,
-    return_info: bool = None,  # TODO: change to true in v0.11.0 and remove in v0.12.0
+    return_info: bool = True,  # TODO: remove in v0.12.0
 ) -> tuple[pd.DataFrame, dict] | pd.DataFrame:
     """Perform DBSCAN on localizations.
 
@@ -488,7 +485,8 @@ def dbscan(
     return_info : bool, optional
         If True, returns a tuple of (locs, info), where locs is the
         clustered localizations and info is a dictionary containing
-        clustering information.
+        clustering information. Will be removed in v0.12.0 and both
+        locs and metadata will be returned.
 
     Returns
     -------
@@ -500,14 +498,10 @@ def dbscan(
         Dictionary containing clustering information, only returned if
         return_info is True.
     """
-    if return_info is None:
-        return_info = False
+    if not return_info:
         lib.deprecation_warning(
-            "Deprecation warning: In v0.11.0, dbscan will return both "
-            "locs and cluster info by default. You can change the "
-            "output already by setting return_info=True. In v0.12.0, "
-            "this will not be optional anymore and dbscan will always "
-            "return both locs and cluster info."
+            "In v0.12.0, return_info will not be an argument and"
+            "dbscan will always return both locs and cluster info."
         )
     locs = locs.copy()
     n_raw = len(locs)
@@ -588,7 +582,7 @@ def hdbscan(
     min_samples: int,
     pixelsize: float | None = None,
     cluster_eps: float = 0.0,
-    return_info: bool = None,  # TODO: change to true in v0.11.0 and remove in v0.12.0
+    return_info: bool = True,  # TODO: remove in v0.12.0
 ) -> tuple[pd.DataFrame, dict] | pd.DataFrame:
     """Perform HDBSCAN on localizations.
 
@@ -610,7 +604,8 @@ def hdbscan(
     return_info : bool, optional
         If True, returns a tuple of (locs, info), where locs is the
         clustered localizations and info is a dictionary containing
-        clustering information.
+        clustering information. Will be removed in v0.12.0 and both
+        locs and metadata will be returned.
 
     Returns
     -------
@@ -622,14 +617,10 @@ def hdbscan(
         Dictionary containing clustering information, only returned if
         return_info is True.
     """
-    if return_info is None:
-        return_info = False
+    if not return_info:
         lib.deprecation_warning(
-            "Deprecation warning: In v0.11.0, hdbscan will return both "
-            "locs and cluster info by default. You can change the "
-            "output already by setting return_info=True. In v0.12.0, "
-            "this will not be optional anymore and hdbscan will always "
-            "return both locs and cluster info."
+            "In v0.12.0, return_info will not be an argument and"
+            "cluster will always return both locs and cluster info."
         )
     locs = locs.copy()
     n_raw = len(locs)
@@ -895,174 +886,6 @@ def find_cluster_centers(
         )
 
     return pd.DataFrame(columns)
-
-
-def cluster_center(
-    grouplocs: pd.SeriesGroupBy,
-    pixelsize: float | None = None,
-    separate_lp: bool = False,
-) -> list:
-    """Alias for _cluster_center which will be a private function in the
-    future release. Kept for backward compatibility."""
-    lib.deprecation_warning(
-        "cluster_center is deprecated and will be removed in v0.11.0."
-        " Use find_cluster_centers instead."
-    )
-    return _cluster_center(grouplocs, pixelsize, separate_lp)
-
-
-def _cluster_center(
-    grouplocs: pd.SeriesGroupBy,
-    pixelsize: float | None = None,
-    separate_lp: bool = False,
-) -> list:  # TODO: remove in v0.11.0
-    """Find cluster centers and their attributes, such as mean number
-    of photons per localization, etc.
-
-    Assumes locs to be a ``pandas.SeriesGroupBy`` object, grouped by
-    cluster ids.
-
-    Parameters
-    ----------
-    grouplocs : pandas.SeriesGroupBy
-        Localizations grouped by cluster ids.
-    pixelsize : float, optional
-        Camera pixel size (used for finding volume and 3D convex hull).
-        Only required for 3D localizations.
-    separate_lp : bool, optional
-        If True, localization precision in x and y will be calculated
-        separately. Otherwise, the mean of the two is taken.
-
-    Returns
-    -------
-    results : list
-        Cluster center attributes. For each group, a list of values is
-        returned: x, y, (z, optional), etc.
-    """
-    lib.deprecation_warning(
-        "_cluster_center is deprecated and will be removed in v0.11.0."
-        " Use find_cluster_centers instead."
-    )
-    # mean and std frame
-    frame = grouplocs.frame.mean()
-    std_frame = grouplocs.frame.std()
-    # average x and y, weighted by lpx, lpy
-    # x = np.average(grouplocs.x, weights=1/(grouplocs.lpx)**2)
-    # y = np.average(grouplocs.y, weights=1/(grouplocs.lpy)**2)
-    x = np.mean(grouplocs.x)
-    y = np.mean(grouplocs.y)
-    std_x = grouplocs.x.std()
-    std_y = grouplocs.y.std()
-    # mean values
-    photons = grouplocs.photons.mean()
-    sx = grouplocs.sx.mean()
-    sy = grouplocs.sy.mean()
-    bg = grouplocs.bg.mean()
-    # weighted mean loc precision
-    # lpx = np.sqrt(
-    #     error_sums_wtd(grouplocs.x, grouplocs.lpx)
-    #     / (len(grouplocs) - 1)
-    # )
-    # lpy = np.sqrt(
-    #     error_sums_wtd(grouplocs.y, grouplocs.lpy)
-    #     / (len(grouplocs) - 1)
-    # )
-    lpx = np.std(grouplocs.x) / len(grouplocs) ** 0.5
-    lpy = np.std(grouplocs.y) / len(grouplocs) ** 0.5
-    if not separate_lp:
-        lpx = (lpx + lpy) / 2
-        lpy = lpx
-    # other attributes
-    ellipticity = sx / sy
-    net_gradient = grouplocs.net_gradient.mean()
-    # n_locs in cluster
-    n = len(grouplocs)
-    # number of binding events
-    split_idx = np.where(np.diff(grouplocs.frame) > 3)[0] + 1  # split locs by
-    # consecutive frames
-    x_events = np.split(grouplocs.x.to_numpy(), split_idx)
-    n_events = len(x_events)  # number of binding events
-    if "z" in grouplocs.columns:
-        if pixelsize is None:
-            raise ValueError(
-                "Camera pixel size must be specified as an integer for 3D"
-                " cluster centers calculation."
-            )
-        z = np.average(
-            grouplocs.z,
-            weights=1 / ((grouplocs.lpx + grouplocs.lpy) ** 2),
-        )  # take lpz = 2 * mean(lpx, lpy)
-        std_z = grouplocs.z.std()
-        # lpz = std_z
-        volume = (
-            np.power((std_x + std_y + std_z / pixelsize) / 3 * 2, 3) * 4.18879
-        )  # assume radius = 2 * std_xyz
-        try:
-            X = np.stack(
-                (grouplocs.x, grouplocs.y, grouplocs.z / pixelsize),
-                axis=0,
-            ).T
-            hull = ConvexHull(X)
-            convexhull = hull.volume
-        except QhullError:
-            convexhull = 0
-        result = [
-            frame,
-            std_frame,
-            x,
-            y,
-            std_x,
-            std_y,
-            photons,
-            sx,
-            sy,
-            bg,
-            lpx,
-            lpy,
-            ellipticity,
-            net_gradient,
-            n,
-            n_events,
-            z,
-            std_z,
-            # lpz,
-            volume,
-            convexhull,
-        ]
-    else:
-        # assume radius = 2 * std_xyz
-        area = np.power(std_x + std_y, 2) * np.pi
-        try:
-            X = np.stack((grouplocs.x, grouplocs.y), axis=0).T
-            hull = ConvexHull(X)
-            convexhull = hull.volume
-        except QhullError:
-            convexhull = 0
-        result = [
-            frame,
-            std_frame,
-            x,
-            y,
-            std_x,
-            std_y,
-            photons,
-            sx,
-            sy,
-            bg,
-            lpx,
-            lpy,
-            ellipticity,
-            net_gradient,
-            n,
-            n_events,
-            area,
-            convexhull,
-        ]
-
-    if "group_input" in grouplocs.columns:
-        # assumes only one group input!
-        result.append(np.unique(grouplocs.group_input)[0])
-    return result
 
 
 def _cluster_area(X: lib.FloatArray2D, lp: float) -> float:

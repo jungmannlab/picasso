@@ -123,21 +123,13 @@ def roi_to_img(
 
     viewport = (y_min, x_min), (y_max, x_max)
 
-    # for debugging
-    if False:
-        print("mean x: {}".format(np.mean(pick_locs.x)))
-        print("length x: {}".format(x_max - x_min))
-        print("mean y: {}".format(np.mean(pick_locs.y)))
-        print("length y: {}".format(y_max - y_min))
-        print("radius: {}".format(radius))
-        print("viewport: {}".format(viewport))
-
     # Render locs with Picasso render function
     try:
         len_x, pick_img = render.render(
             pick_locs,
+            info,
+            disp_px_size=disp_px_size,
             viewport=viewport,
-            oversampling=oversampling,
             blur_method="smooth",
         )
     except Exception:

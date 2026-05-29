@@ -4,6 +4,22 @@ Last change: 28-MAY-2026 CEST
 
 ## 0.10.1
 
+### **General updates:**
+
+#### Localize
+
+#### Render
+
+#### *Other improvements:*
+
+### **Backward incompatible changes:**
+- All the functions deprecated in v0.10 were removed
+- `render.render` only keyword arguments except `locs` and `info`
+
+#### *Deprecation warnings:*
+
+## 0.10.1
+
 #### Localize
 - Fixed Gauss-fitting error when spot's sum is zero (zero division error)
 

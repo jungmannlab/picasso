@@ -9776,7 +9776,7 @@ class View(QtWidgets.QLabel):
                 index_blocks[6],
                 index_blocks[7],
             )
-            pick_locs_xy = postprocess.locs_at_numba(x, y, block_locs_xy, r)
+            pick_locs_xy = lib.locs_at_numba(x, y, block_locs_xy, r)
             loccount[i] = pick_locs_xy.shape[1]
             progress.set_value(i)
         progress.close()

@@ -1619,8 +1619,8 @@ class ViewRotation(QtWidgets.QLabel):
         Returns
         -------
         kwargs : dict
-            Contains blur method, oversampling, viewport and min blur
-            width.
+            Contains blur method, display pixel size, viewport and min
+            blur width.
         """
         disp_dlg = self.window.display_settings_dlg
         pixelsize = self.window.window.view.pixelsize

@@ -269,39 +269,6 @@ def _fit_z_target(
     return (sx**0.5 - wx**0.5) ** 2 + (sy**0.5 - wy**0.5) ** 2
 
 
-def fit_z(  # TODO: remove in v0.11.0
-    locs: pd.DataFrame,
-    info: list[dict],
-    calibration: dict,
-    magnification_factor: float,
-    pixelsize: float,
-    fitting_method: Literal["gausslq", "gaussmle"] = "gausslq",
-    filter: int = 2,
-    progress_callback: (
-        Callable[[int], None] | Literal["console"] | None
-    ) = None,
-) -> pd.DataFrame:
-    """Fit z coordinates to the localizations based on the calibration
-    curve coefficients and the single-emitter image width and height.
-    See `zfit` for more details.
-
-    Will be deprecated in v0.11.0 in favor of `zfit`."""
-    lib.deprecation_warning(
-        "Deprecation warning: `fit_z` will become a private function in "
-        "v0.11.0. Please use `zfit` instead."
-    )
-    return _fit_z(
-        locs,
-        info,
-        calibration,
-        magnification_factor,
-        pixelsize,
-        fitting_method,
-        filter,
-        progress_callback,
-    )
-
-
 def _fit_z(
     locs: pd.DataFrame,
     info: list[dict],
@@ -358,37 +325,6 @@ def _fit_z(
     locs["lpz"] = lpz
     locs = lib.ensure_sanity(locs, info)
     return filter_z_fits(locs, filter)
-
-
-def fit_z_parallel(  # TODO: remove in v0.11.0
-    locs: pd.DataFrame,
-    info: list[dict],
-    calibration: dict,
-    magnification_factor: float,
-    pixelsize: float,
-    fitting_method: Literal["gausslq", "gaussmle"] = "gausslq",
-    filter: int = 2,
-    asynch: bool = False,
-) -> pd.DataFrame | list[futures.Future]:
-    """Fit z coordinates to the localizations based on the calibration
-    curve coefficients and the single-emitter image width and height,
-    optionally using multiprocessing. See `zfit` for more details.
-
-    Will be deprecated in v0.11.0 in favor of `zfit`."""
-    lib.deprecation_warning(
-        "Deprecation warning: `fit_z_parallel` will become a private "
-        "function in v0.11.0. Please use `zfit` instead."
-    )
-    return _fit_z_parallel(
-        locs,
-        info,
-        calibration,
-        magnification_factor,
-        pixelsize,
-        fitting_method,
-        filter,
-        asynch,
-    )
 
 
 def _fit_z_parallel(
@@ -457,8 +393,8 @@ def zfit(
 ) -> tuple[pd.DataFrame, list[dict]] | tuple[None, None]:
     """Main function for fitting z coordinates to the localizations.
 
-    Replaces `fit_z` (which will become a private function) and
-    `fit_z_parallel` in v0.11.0.
+    Introduced in v0.10.0. Note that `fit_z` and `fit_z_parallel` were
+    completely replaced in v0.11.0.
 
     Parameters
     ----------

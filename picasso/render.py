@@ -36,15 +36,15 @@ POLYGON_POINTER_SIZE = 16  # must be even
 
 def render(
     locs: pd.DataFrame,
-    info: dict | None,
-    oversampling: float = 1.0,
+    info: dict,
+    *,
+    disp_px_size: float,
     viewport: tuple[tuple[float, float], tuple[float, float]] | None = None,
     blur_method: (
         Literal["gaussian", "gaussian_iso", "smooth", "convolve"] | None
     ) = None,
     min_blur_width: float = 0.0,
     ang: tuple | None = None,
-    disp_px_size: float | None = None,
 ) -> tuple[int, lib.FloatArray2D]:
     """Render localizations given FOV and blur method.
 
@@ -52,12 +52,10 @@ def render(
     ----------
     locs : pd.DataFrame
         Localizations to be rendered.
-    info : dict, optional
+    info : dict
         Contains localizations metadata.
-    oversampling : float, optional
-        Number of super-resolution pixels per camera pixel. Default is
-        1. Deprecated, use disp_px_size instead. Will be removed in
-        v0.11.0. Ignored if disp_px_size is specified.
+    disp_px_size : float
+        Display pixel size in nm.
     viewport : tuple, optional
         Field of view to be rendered (in camera pixels). The input is
         ``((y_min, x_min), (y_max, x_max))``. If None, all localizations
@@ -77,8 +75,6 @@ def render(
     ang : tuple, optional
         Rotation angles of locs around x, y and z axes in radians. If
         None, locs are not rotated.
-    disp_px_size : float, optional
-        Display pixel size in nm. Will replace oversampling in v0.11.0.
 
     Raises
     ------
@@ -94,13 +90,6 @@ def render(
         Rendered image.
     """
     pixelsize = lib.get_from_metadata(info, "Pixelsize", raise_error=True)
-    if disp_px_size is None:
-        lib.deprecation_warning(
-            "Deprecation warning: the 'oversampling' parameter is "
-            "deprecated and will be removed in v0.11.0. Use "
-            "'disp_px_size' instead."
-        )
-        disp_px_size = pixelsize / oversampling
     oversampling = pixelsize / disp_px_size
 
     if viewport is None:
@@ -797,28 +786,6 @@ def render_hist_numba(
     return len(x), image
 
 
-def render_hist(
-    locs: pd.DataFrame,
-    oversampling: float,
-    y_min: float,
-    x_min: float,
-    y_max: float,
-    x_max: float,
-    ang: tuple[float, float, float] | None = None,
-) -> tuple[int, lib.FloatArray2D]:
-    """Alias for _render_hist which will be a private function in
-    v0.11.0. Kept for backward compatibility but will be removed in
-    v0.11.0. Use _render_hist instead if necessary."""
-    lib.deprecation_warning(
-        "Deprecation warning: the 'render_hist' function is deprecated "
-        "and will be removed in v0.11.0. Use _render_hist instead if "
-        "necessary."
-    )
-    return _render_hist(
-        locs, oversampling, y_min, x_min, y_max, x_max, ang=ang
-    )
-
-
 def _render_hist(
     locs: pd.DataFrame,
     oversampling: float,
@@ -1009,36 +976,6 @@ def render_hist3d_anisotropic(
     return n, image
 
 
-def render_gaussian(
-    locs: pd.DataFrame,
-    oversampling: float,
-    y_min: float,
-    x_min: float,
-    y_max: float,
-    x_max: float,
-    min_blur_width: float,
-    ang: tuple[float, float, float] | None = None,
-) -> tuple[int, lib.FloatArray2D]:
-    """Alias for _render_gaussian which will be a private function in
-    v0.11.0. Kept for backward compatibility but will be removed in v0.11.0. Use
-    _render_gaussian instead if necessary."""
-    lib.deprecation_warning(
-        "Deprecation warning: the 'render_gaussian' function is deprecated "
-        "and will be removed in v0.11.0. Use _render_gaussian instead if "
-        "necessary."
-    )
-    return _render_gaussian(
-        locs,
-        oversampling,
-        y_min,
-        x_min,
-        y_max,
-        x_max,
-        min_blur_width,
-        ang=ang,
-    )
-
-
 def _render_gaussian(
     locs: pd.DataFrame,
     oversampling: float,
@@ -1130,36 +1067,6 @@ def _render_gaussian(
     return n, image
 
 
-def render_gaussian_iso(
-    locs: pd.DataFrame,
-    oversampling: float,
-    y_min: float,
-    x_min: float,
-    y_max: float,
-    x_max: float,
-    min_blur_width: float,
-    ang: tuple[float, float, float] | None = None,
-) -> tuple[int, lib.FloatArray2D]:
-    """Alias for _render_gaussian_iso which will be a private function in
-    v0.11.0. Kept for backward compatibility but will be removed in v0.11.0. Use
-    _render_gaussian_iso instead if necessary."""
-    lib.deprecation_warning(
-        "Deprecation warning: the 'render_gaussian_iso' function is "
-        "deprecated and will be removed in v0.11.0. Use "
-        "_render_gaussian_iso instead if necessary."
-    )
-    return _render_gaussian_iso(
-        locs,
-        oversampling,
-        y_min,
-        x_min,
-        y_max,
-        x_max,
-        min_blur_width,
-        ang=ang,
-    )
-
-
 def _render_gaussian_iso(
     locs: pd.DataFrame,
     oversampling: float,
@@ -1224,36 +1131,6 @@ def _render_gaussian_iso(
         _fill_gaussian_rot(image, x, y, sx, sy, sz, n_pixel_x, n_pixel_y, ang)
 
     return len(x), image
-
-
-def render_convolve(
-    locs: pd.DataFrame,
-    oversampling: float,
-    y_min: float,
-    x_min: float,
-    y_max: float,
-    x_max: float,
-    min_blur_width: float,
-    ang: tuple[float, float, float] | None = None,
-) -> tuple[int, lib.FloatArray2D]:
-    """Alias for _render_convolve which will be a private function in v0.11.0.
-    Kept for backward compatibility but will be removed in v0.11.0. Use
-    _render_convolve instead if necessary."""
-    lib.deprecation_warning(
-        "Deprecation warning: the 'render_convolve' function is "
-        "deprecated and will be removed in v0.11.0. Use "
-        "_render_convolve instead if necessary."
-    )
-    return _render_convolve(
-        locs,
-        oversampling,
-        y_min,
-        x_min,
-        y_max,
-        x_max,
-        min_blur_width,
-        ang=ang,
-    )
 
 
 def _render_convolve(
@@ -1325,33 +1202,6 @@ def _render_convolve(
             np.median(locs["lpy"].to_numpy()[in_view]), min_blur_width
         )
         return n, _fftconvolve(image, blur_width, blur_height)
-
-
-def render_smooth(
-    locs: pd.DataFrame,
-    oversampling: float,
-    y_min: float,
-    x_min: float,
-    y_max: float,
-    x_max: float,
-    ang: tuple[float, float, float] | None = None,
-) -> tuple[int, lib.FloatArray2D]:
-    """Alias for _render_smooth which will be a private function in v0.11.0. Kept for
-    backward compatibility but will be removed in v0.11.0. Use _render_smooth
-    instead if necessary."""
-    lib.deprecation_warning(
-        "Deprecation warning: the 'render_smooth' function is deprecated and "
-        "will be removed in v0.11.0. Use _render_smooth instead if necessary."
-    )
-    return _render_smooth(
-        locs,
-        oversampling,
-        y_min,
-        x_min,
-        y_max,
-        x_max,
-        ang=ang,
-    )
 
 
 def _render_smooth(

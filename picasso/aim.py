@@ -22,18 +22,6 @@ from scipy.interpolate import InterpolatedUnivariateSpline
 from . import lib, __version__
 
 
-def intersect1d(
-    a: lib.IntArray1D, b: lib.IntArray1D
-) -> tuple[lib.IntArray1D, lib.IntArray1D]:
-    """Alias for _intersect1d which will be a private function in the
-    future release. Kept for backward compatibility."""
-    lib.deprecation_warning(
-        "intersect1d is deprecated and will be removed in v0.11.0."
-        " Use _intersect1d instead."
-    )
-    return _intersect1d(a, b)
-
-
 def _intersect1d(
     a: lib.IntArray1D,
     b: lib.IntArray1D,
@@ -69,21 +57,6 @@ def _intersect1d(
     b_indices = aux_sort_indices[1:][mask] - a.size
 
     return a_indices, b_indices
-
-
-def count_intersections(
-    l0_coords: lib.IntArray1D,
-    l0_counts: lib.IntArray1D,
-    l1_coords: lib.IntArray1D,
-    l1_counts: lib.IntArray1D,
-) -> int:
-    """Alias for _count_intersections which will be a private function in the
-    future release. Kept for backward compatibility."""
-    lib.deprecation_warning(
-        "count_intersections is deprecated and will be removed in v0.11.0."
-        " Use _count_intersections instead."
-    )
-    return _count_intersections(l0_coords, l0_counts, l1_coords, l1_counts)
 
 
 def _count_intersections(
@@ -124,25 +97,6 @@ def _count_intersections(
     # and l1, sum up across all overlapping coordinates
     n_intersections = np.sum(np.minimum(l0_counts_subset, l1_counts_subset))
     return n_intersections
-
-
-def run_intersections(
-    l0_coords: lib.IntArray1D,
-    l0_counts: lib.IntArray1D,
-    l1_coords: lib.IntArray1D,
-    l1_counts: lib.IntArray1D,
-    shifts_xy: lib.IntArray1D,
-    box: int,
-) -> lib.IntArray2D:
-    """Alias for _run_intersections which will be a private function in the
-    future release. Kept for backward compatibility."""
-    lib.deprecation_warning(
-        "run_intersections is deprecated and will be removed in v0.11.0."
-        " Use _run_intersections instead."
-    )
-    return _run_intersections(
-        l0_coords, l0_counts, l1_coords, l1_counts, shifts_xy, box
-    )
 
 
 def _run_intersections(
@@ -189,25 +143,6 @@ def _run_intersections(
         )
         roi_cc[i] = n_intersections
     return roi_cc.reshape(box, box)
-
-
-def run_intersections_multithread(
-    l0_coords: lib.IntArray1D,
-    l0_counts: lib.IntArray1D,
-    l1_coords: lib.IntArray1D,
-    l1_counts: lib.IntArray1D,
-    shifts_xy: lib.IntArray1D,
-    box: int,
-) -> lib.IntArray2D | lib.IntArray1D:
-    """Alias for _run_intersections_multithread which will be a private
-    function in the future release. Kept for backward compatibility."""
-    lib.deprecation_warning(
-        "run_intersections_multithread is deprecated and will be removed"
-        " in v0.11.0. Use _run_intersections_multithread instead."
-    )
-    return _run_intersections_multithread(
-        l0_coords, l0_counts, l1_coords, l1_counts, shifts_xy, box
-    )
 
 
 def _run_intersections_multithread(
@@ -266,34 +201,6 @@ def _run_intersections_multithread(
     return roi_cc
 
 
-def point_intersect_2d(
-    l0_coords: lib.IntArray1D,
-    l0_counts: lib.IntArray1D,
-    x1: lib.SeriesOrFloatArray1D,
-    y1: lib.SeriesOrFloatArray1D,
-    intersect_d: float,
-    width_units: float,
-    shifts_xy: lib.IntArray1D,
-    box: int,
-) -> lib.IntArray2D:
-    """Alias for _point_intersect_2d which will be a private function in the
-    future release. Kept for backward compatibility."""
-    lib.deprecation_warning(
-        "point_intersect_2d is deprecated and will be removed in v0.11.0."
-        " Use _point_intersect_2d instead."
-    )
-    return _point_intersect_2d(
-        l0_coords,
-        l0_counts,
-        x1,
-        y1,
-        intersect_d,
-        width_units,
-        shifts_xy,
-        box,
-    )
-
-
 def _point_intersect_2d(
     l0_coords: lib.IntArray1D,
     l0_counts: lib.IntArray1D,
@@ -342,36 +249,6 @@ def _point_intersect_2d(
         l0_coords, l0_counts, l1_coords, l1_counts, shifts_xy, box
     )
     return roi_cc
-
-
-def point_intersect_3d(
-    l0_coords: lib.IntArray1D,
-    l0_counts: lib.IntArray1D,
-    x1: lib.SeriesOrFloatArray1D,
-    y1: lib.SeriesOrFloatArray1D,
-    z1: lib.SeriesOrFloatArray1D,
-    intersect_d: float,
-    width_units: float,
-    height_units: float,
-    shifts_z: lib.IntArray1D,
-) -> lib.IntArray1D:
-    """Alias for _point_intersect_3d which will be a private function in the
-    future release. Kept for backward compatibility."""
-    lib.deprecation_warning(
-        "point_intersect_3d is deprecated and will be removed in v0.11.0."
-        " Use _point_intersect_3d instead."
-    )
-    return _point_intersect_3d(
-        l0_coords,
-        l0_counts,
-        x1,
-        y1,
-        z1,
-        intersect_d,
-        width_units,
-        height_units,
-        shifts_z,
-    )
 
 
 def _point_intersect_3d(
@@ -431,16 +308,6 @@ def _point_intersect_3d(
     return roi_cc
 
 
-def get_fft_peak(roi_cc: lib.IntArray2D, roi_size: int) -> tuple[float, float]:
-    """Alias for _get_fft_peak which will be a private function in the
-    future release. Kept for backward compatibility."""
-    lib.deprecation_warning(
-        "get_fft_peak is deprecated and will be removed in v0.11.0."
-        " Use _get_fft_peak instead."
-    )
-    return _get_fft_peak(roi_cc, roi_size)
-
-
 def _get_fft_peak(
     roi_cc: lib.IntArray2D, roi_size: int
 ) -> tuple[float, float]:
@@ -475,16 +342,6 @@ def _get_fft_peak(
     )  # peak in y
     py *= roi_size / roi_cc.shape[1]  # convert to intersect_d units
     return px, py
-
-
-def get_fft_peak_z(roi_cc: lib.IntArray1D, roi_size: int) -> float:
-    """Alias for _get_fft_peak_z which will be a private function in the
-    future release. Kept for backward compatibility."""
-    lib.deprecation_warning(
-        "get_fft_peak_z is deprecated and will be removed in v0.11.0."
-        " Use _get_fft_peak_z instead."
-    )
-    return _get_fft_peak_z(roi_cc, roi_size)
 
 
 def _get_fft_peak_z(roi_cc: lib.IntArray1D, roi_size: int) -> float:

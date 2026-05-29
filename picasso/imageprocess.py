@@ -247,7 +247,7 @@ def find_fiducials(
     image = render.render(
         locs=locs,
         info=info,
-        oversampling=1,
+        disp_px_size=100,
         viewport=None,
         blur_method="smooth",
     )[1]

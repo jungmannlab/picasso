@@ -9,7 +9,7 @@ render
 Opening Files
 -------------
 1. Rendering of the super-resolution image: In ``Picasso: Render``, open a movie file by dragging a localization file (ending with '.hdf5') into the window or by selecting ``File > Open``. The super-resolution image will be rendered automatically. A region of choice can be zoomed into by a rectangular selection using the left mouse button. The 'View' menu contains more options for zooming and panning.
-2. (Optional) Adjust rendering options by selecting ``View > Display Settings``. The field 'Oversampling' defines the number of super-resolution pixels per camera pixel. The contrast settings ``Min. Density`` and ``Max. Density`` define at which number of localizations per super-resolution pixel the minimum and maximum color of the colormap should be applied.
+2. (Optional) Adjust rendering options by selecting ``View > Display Settings``. The field 'Display pixel size (nm)' defines the size of the rendered pixels of the super-resolution image. The contrast settings ``Min. Density`` and ``Max. Density`` define at which number of localizations per super-resolution pixel the minimum and maximum color of the colormap should be applied.
 3. (Optional) For multiplexed image acquisition, open HDF5 localization files from other channels subsequently. Alternatively, drag and drop all HDF5 files to be displayed simultaneously.
 
 Drift Correction
@@ -125,9 +125,9 @@ Zoom
 +++++
 Set the magnification factor.
 
-Oversampling
-++++++++++++
-Set the oversampling. Choose ``dynamic`` to automatically adjust to current window size when zooming.
+Display pixel size (nm)
++++++++++++++++++++++++
+Set the size of the pixel in the rendered image. Choose ``dynamic`` to automatically adjust to current window size when zooming.
 
 Minimap
 +++++++
@@ -221,7 +221,7 @@ Resets the current picked regions and loads regions from a .yaml file that conta
 Export ROI for Imaris
 ^^^^^^^^^^^^^^^^^^^^^
 This function allows to export the current ROI for Imaris. Note that this is currently only implemented for Windows.
-Click on File / Export ROI for imaris and enter a filename for export. Picasso will export the current region of interest with the current oversampling settings. If multiple channels are loaded it will export the channels with the same colors as set in Picasso (Shortcut CTRL+F or View / Files to change.)
+Click on File / Export ROI for imaris and enter a filename for export. Picasso will export the current region of interest with the current display pixel size settings. If multiple channels are loaded it will export the channels with the same colors as set in Picasso (Shortcut CTRL+F or View / Files to change.)
 Depending on the size of the ROI, the export will take a couple of seconds. Once exporting is finished, the file will be saved at the set location.
 The resulting file can be opened e.g. with ImarisViewer or Imaris. Note that the orientation is the same as in Picasso.
 

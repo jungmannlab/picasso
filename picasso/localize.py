@@ -81,19 +81,6 @@ SET_COLS = [
 ]
 
 
-def local_maxima(
-    frame: lib.IntArray2D, box: int
-) -> tuple[lib.IntArray1D, lib.IntArray1D]:
-    """Alias to _local_maxima, deprecated
-
-    TODO: remove in v0.11.0"""
-    lib.deprecation_warning(
-        "Deprecation warning: This function will become private in "
-        "v0.11.0. Use _local_maxima instead."
-    )
-    return _local_maxima(frame, box)
-
-
 @numba.jit(nopython=True, nogil=True, cache=False)
 def _local_maxima(
     frame: lib.IntArray2D, box: int
@@ -134,22 +121,6 @@ def _local_maxima(
     return y, x
 
 
-def gradient_at(
-    frame: lib.IntArray2D,
-    y: int,
-    x: int,
-    i: int,
-) -> tuple[float, float]:
-    """Alias to _gradient_at, deprecated
-
-    TODO: remove in v0.11.0"""
-    lib.deprecation_warning(
-        "Deprecation warning: This function will become private in "
-        "v0.11.0. Use _gradient_at instead."
-    )
-    return _gradient_at(frame, y, x, i)
-
-
 @numba.jit(nopython=True, nogil=True, cache=False)
 def _gradient_at(
     frame: lib.IntArray2D,
@@ -179,24 +150,6 @@ def _gradient_at(
     gy = frame[y + 1, x] - frame[y - 1, x]
     gx = frame[y, x + 1] - frame[y, x - 1]
     return gy, gx
-
-
-def net_gradient(
-    frame: lib.IntArray2D,
-    y: lib.IntArray1D,
-    x: lib.IntArray1D,
-    box: int,
-    uy: lib.FloatArray2D,
-    ux: lib.FloatArray2D,
-) -> lib.FloatArray1D:
-    """Alias to _net_gradient, deprecated
-
-    TODO: remove in v0.11.0"""
-    lib.deprecation_warning(
-        "Deprecation warning: This function will become private in "
-        "v0.11.0. Use _net_gradient instead."
-    )
-    return _net_gradient(frame, y, x, box, uy, ux)
 
 
 @numba.jit(nopython=True, nogil=True, cache=False)
@@ -648,7 +601,7 @@ def identify(
         Callable[[list[int]], None] | Literal["console"] | None
     ) = None,
     abort_callback: Callable[[], bool] | None = None,
-    return_info: bool = None,  # TODO: change the deprecation warning in 0.11.0
+    return_info: bool = True,  # TODO: remove in v0.12.0
 ) -> pd.DataFrame | tuple[pd.DataFrame, dict]:
     """Identify local maxima in a movie and calculate the net
     gradient at those maxima. This function can run in a threaded or
@@ -687,9 +640,10 @@ def identify(
         indicating whether the fitting should be aborted. Default is
         None.
     return_info : bool, optional
-        Whether to return additional information about the
-        identification process. Default is None, which is treated as
-        False. If True, a tuple of (identifications, info) is returned.
+        Whether to return additional information about the fitting
+        process. Default is True. If True, a tuple of (locs, info) is
+        returned. In v0.12.0 return_info will be removed and the
+        function will always return info.
 
     Returns
     -------
@@ -701,19 +655,12 @@ def identify(
         the time taken for identification. Only returned if `return_info`
         is True.
     """
-    if return_info is None:
-        return_info = False
-        # TODO: change the message in v0.11.0
+    if not return_info:
+        # TODO: remove in v0.12.0
         lib.deprecation_warning(
-            "Warning: In Picasso v0.11.0, "
-            "picasso.localize.identify() will return both the "
-            "identifications and a metadata dictionary by default.\n"
-            "Before v0.12.0, when using picasso.localize.identify(), "
-            "please add the argument 'return_info' explicitly as True "
-            "or False.\n"
-            "In version 0.12, this argument will also be removed such "
-            "that picasso.localize.identify() will always return both "
-            "the identifications and the metadata dictionary."
+            "In version 0.12, return_info argument will be removed such "
+            "that picasso.localize.localize() will always return both "
+            "the localizations and the metadata dictionary."
         )
     if threaded:
         ids = _identify_threaded(
@@ -1145,139 +1092,6 @@ def get_spots(
     return _to_photons(spots, camera_info)
 
 
-def fit(
-    movie: lib.IntArray3D,
-    camera_info: dict,
-    identifications: pd.DataFrame,
-    box: int,
-    eps: float = 0.001,
-    max_it: int = 100,
-    method: Literal["sigma", "sigmaxy"] = "sigmaxy",
-) -> pd.DataFrame:
-    """Fit Gaussians using Maximum Likelihood Estimation (MLE) to the
-    identified spots in a movie to localize fluorescent molecules. See
-    Smith, et al. Nature Methods, 2010. DOI: 10.1038/nmeth.1449.
-
-    Deprecated: Use fit2D instead.
-
-    TODO: remove in v0.11.0.
-
-    Parameters
-    ----------
-    movie : lib.IntArray3D
-        The input movie data as a 3D numpy array.
-    camera_info : dict
-        A dictionary containing camera information such as
-        `Baseline`, `Sensitivity`, and `Gain`.
-    identifications : pd.DataFrame
-        Data frame containing the identified spots. Contains fields
-        `frame`, `x`, `y`, and `net_gradient`.
-    box : int
-        Size of the box to cut out around each spot. Should be an odd
-        integer.
-    eps : float, optional
-        The convergence criterion for the fitting algorithm. Default is
-        0.001.
-    max_it : int, optional
-        The maximum number of iterations for the fitting algorithm.
-        Default is 100.
-    method : Literal["sigma", "sigmaxy"], optional
-        The method used for fitting (impose same sigma in x and y or
-        not, respectively). Default is "sigma".
-
-    Returns
-    -------
-    locs : pd.DataFrame
-        Data frame containing the localized spots. The fields include
-        `frame`, `x`, `y`, `photons`, `sx`, `sy`, `bg`, `lpx`, `lpy`,
-        `net_gradient`, `likelihood`, and `iterations`.
-    """
-    lib.deprecation_warning(
-        "Deprecation warning: this function will be removed in v0.11.0."
-        " Use localize.fit2D instead."
-    )
-    spots = get_spots(movie, identifications, box, camera_info)
-    theta, CRLBs, likelihoods, iterations = gaussmle.gaussmle(
-        spots, eps, max_it, method=method
-    )
-    locs = locs_from_fits(
-        identifications,
-        theta,
-        CRLBs,
-        likelihoods,
-        iterations,
-        box,
-    )
-    return locs
-
-
-def fit_async(
-    movie: lib.IntArray3D,
-    camera_info: dict,
-    identifications: pd.DataFrame,
-    box: int,
-    eps: float = 0.001,
-    max_it: int = 100,
-    method: Literal["sigma", "sigmaxy"] = "sigmaxy",
-) -> tuple[
-    int, lib.FloatArray2D, lib.FloatArray2D, lib.FloatArray1D, lib.FloatArray1D
-]:
-    """Asynchronously fit Gaussians using Maximum Likelihood Estimation
-    (MLE) to the identified spots in a movie to localize fluorescent
-    molecules. This function is designed to run in a separate thread or
-    process. See Smith, et al. Nature Methods, 2010.
-    DOI: 10.1038/nmeth.1449.
-
-    Deprecated, use fit2D instead.
-
-    TODO: remove in v0.11.0.
-
-    Parameters
-    ----------
-    movie : lib.IntArray3D
-        The input movie data as a 3D numpy array.
-    camera_info : dict
-        A dictionary containing camera information such as
-        `Baseline`, `Sensitivity`, and `Gain`.
-    identifications : pd.DataFrame
-        Data frame containing the identified spots. Contains fields
-        `frame`, `x`, `y`, and `net_gradient`.
-    box : int
-        Size of the box to cut out around each spot. Should be an odd
-        integer.
-    eps : float, optional
-        The convergence criterion for the fitting algorithm. Default is
-        0.001.
-    max_it : int, optional
-        The maximum number of iterations for the fitting algorithm.
-        Default is 100.
-    method : Literal["sigma", "sigmaxy"], optional
-        The method used for fitting (impose same sigma in x and y or
-        not, respectively). Default is "sigmaxy".
-
-    Returns
-    -------
-    current : int
-        Index of the currently processed spot.
-    thetas : lib.FloatArray2D
-        The fitted Gaussian parameters for each spot (x, y positions,
-        photon counts, background, single-emitter image size in x and
-        y).
-    CRLBs : lib.FloatArray2D
-        The Cramer-Rao Lower Bounds for each fitted parameter.
-    likelihoods : lib.FloatArray1D
-        The log-likelihoods of the fitted models.
-    iterations : lib.FloatArray1D
-        The number of iterations taken to converge for each spot.
-    """
-    lib.deprecation_warning(
-        "Deprecation warning: this function will be removed in v0.11.0."
-        " Use localize.fit2D instead."
-    )
-    spots = get_spots(movie, identifications, box, camera_info)
-    return gaussmle.gaussmle_async(spots, eps, max_it, method=method)
-
-
 def locs_from_fits(
     identifications: pd.DataFrame,
     theta: lib.FloatArray2D,
@@ -1700,7 +1514,7 @@ def localize(
     fit_progress_callback: (
         Callable[[int], None] | Literal["console"] | None
     ) = None,
-    return_info: bool = None,  # TODO: change to bool in v0.11.0
+    return_info: bool = True,  # TODO: remove in v0.12.0
 ) -> pd.DataFrame | tuple[pd.DataFrame, list[dict]]:
     """Localize (i.e., identify and fit) spots in 2D in a movie using
     the specified parameters.
@@ -1753,8 +1567,9 @@ def localize(
         not reported. Default is None.
     return_info : bool, optional
         Whether to return additional information about the fitting
-        process. Default is None, which is treated as False. If True,
-        a tuple of (locs, info) is returned.
+        process. Default is True. If True, a tuple of (locs, info) is
+        returned. In v0.12.0 return_info will be removed and the
+        function will always return info.
 
     Returns
     -------
@@ -1764,17 +1579,10 @@ def localize(
         A list of dictionaries containing metadata about the movie and
         the fitting process. Only returned if `return_info` is True.
     """
-    if return_info is None:
-        return_info = False
-        # TODO: change the message in v0.11.0
+    if not return_info:
+        # TODO: remove in v0.12.0
         lib.deprecation_warning(
-            "Warning: In Picasso v0.11.0, "
-            "picasso.localize.localize() will return both the "
-            "localizations and a metadata dictionary by default.\n"
-            "Before v0.12.0, when using picasso.localize.localize(), "
-            "please add the argument 'return_info' explicitly as True "
-            "or False.\n"
-            "In version 0.12, this argument will also be removed such "
+            "In version 0.12, return_info argument will be removed such "
             "that picasso.localize.localize() will always return both "
             "the localizations and the metadata dictionary."
         )
@@ -2226,17 +2034,6 @@ def _db_filename() -> str:
     picasso_dir = os.path.join(home, ".picasso")
     os.makedirs(picasso_dir, exist_ok=True)
     return os.path.abspath(os.path.join(picasso_dir, "app_0410.db"))
-
-
-def save_file_summary(summary: dict) -> None:
-    """Alias to _save_file_summary, deprecated
-
-    TODO: remove in v0.11.0"""
-    lib.deprecation_warning(
-        "Deprecation warning: This function will become private in "
-        "v0.11.0. Use _save_file_summary instead."
-    )
-    return _save_file_summary(summary)
 
 
 def _save_file_summary(summary: dict) -> None:
