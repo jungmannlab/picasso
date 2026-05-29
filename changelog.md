@@ -1,6 +1,8 @@
 # Changelog
 
-Last change: 28-MAY-2026 CEST
+Last change: 29-MAY-2026 CEST
+
+- COMET ([DOI: 10.64898/2026.03.27.714864](https://doi.org/10.64898/2026.03.27.714864)) integrated (#671), big thanks to @LREIN663
 
 ## 0.10.1
 

@@ -55,8 +55,8 @@ from ..lib import (
 )
 from .rotation import RotationWindow
 
-# Optional modules with external/hardware dependencies live in ext/
-from ..ext.bitplane import IMSWRITER
+# Optional modules with external/hardware dependencies live in ext
+from ..ext.bitplane import IMSWRITER  # PyImarisWrite works on Windows only
 from ..ext import comet
 
 if IMSWRITER:
@@ -2218,6 +2218,7 @@ class ClsDlg2D(lib.Dialog):
             l_locs,
             clustered_locs,
         )
+
 
 class COMETDialog(QtWidgets.QDialog):
     """Dialog to choose parameters for COMET undrifting.
@@ -11078,10 +11079,9 @@ class View(QtWidgets.QLabel):
                 self.plot_window.show()
 
     def undrift_comet(self) -> None:
-        """Undrift with COMET.
-
-        See https://comet.smlm.tools
-        """
+        """Undrift with COMET. See https://comet.smlm.tools and
+        Reinkensmeier L., Aufmkolk S., Farabella I., Egner A., and
+        Bates M. biorxiv, 2026."""
         channel = self.get_channel("Undrift by COMET")
         if channel is not None:
             locs = self.all_locs[channel]
@@ -11108,12 +11108,12 @@ class View(QtWidgets.QLabel):
                     return
 
                 locs = lib.ensure_sanity(locs, info)
-                self.all_locs[channel] = locs
-                self.locs[channel] = copy.copy(locs)
+                self.locs[channel] = locs
                 self.infos[channel] = new_info
                 self.index_blocks[channel] = None
+                self.render_index[channel] = None
                 self.add_drift(channel, drift)
-                self.update_scene()
+                self.update_scene(resample_locs=True)
                 self.show_drift()
 
     def undrift_aim(self) -> None:
@@ -11364,7 +11364,7 @@ class View(QtWidgets.QLabel):
         self.index_blocks[channel] = None
         self.render_index[channel] = None
         self.update_scene(resample_locs=True)
-       
+
     def sync_groups(self) -> None:
         """Remove localizations whose group field is not found in all
         channels."""
@@ -12116,8 +12116,6 @@ class Window(QtWidgets.QMainWindow):
 
         # menu bar - Postprocess
         postprocess_menu = self.menu_bar.addMenu("Postprocess")
-        undrift_comet_action = postprocess_menu.addAction("Undrift by COMET")
-        undrift_comet_action.triggered.connect(self.view.undrift_comet)
 
         undrift_aim_action = postprocess_menu.addAction("Undrift by AIM")
         undrift_aim_action.setShortcut("Ctrl+U")
@@ -12135,6 +12133,11 @@ class Window(QtWidgets.QMainWindow):
         undrift_from_picked2d_action.triggered.connect(
             self.view.undrift_from_picked2d
         )
+        undrift_comet_action = postprocess_menu.addAction("Undrift by COMET")
+        undrift_comet_action.triggered.connect(self.view.undrift_comet)
+        if not comet._CUDA_AVAILABLE:
+            undrift_comet_action.setVisible(False)
+
         undrift_action = postprocess_menu.addAction("Undrift by RCC")
         undrift_action.triggered.connect(self.view.undrift_rcc)
         drift_action = postprocess_menu.addAction("Undo drift")
