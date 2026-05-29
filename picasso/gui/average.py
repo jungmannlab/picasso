@@ -4,159 +4,23 @@ picasso.gui.average
 
 Graphical user interface for averaging particles.
 
-:author: Joerg Schnitzbauer, 2015
-:copyright: Copyright (c) 2016 Jungmann Lab, MPI of Biochemistry
+:authors: Joerg Schnitzbauer, Rafal Kowalewski
+:copyright: Copyright (c) 2016-2026 Jungmann Lab, MPI of Biochemistry
 """
 
 from __future__ import annotations
 
-import functools
-import multiprocessing
-import os.path
-import sys
-import time
-import traceback
 import importlib
+import os.path
 import pkgutil
-from multiprocessing import sharedctypes
+import sys
 
 import matplotlib.pyplot as plt
-import numba
-import scipy
 import numpy as np
 import pandas as pd
-from PyQt5 import QtCore, QtGui, QtWidgets
+from PyQt6 import QtCore, QtGui, QtWidgets
 
-from .. import io, lib, render, __version__
-
-
-@numba.jit(nopython=True, nogil=True)
-def render_hist(
-    x: np.ndarray,
-    y: np.ndarray,
-    oversampling: float,
-    t_min: float,
-    t_max: float,
-) -> tuple[int, np.ndarray]:
-    """Calculate 2D histogram of xy coordinates.
-
-    Parameters
-    ----------
-    x, y : np.ndarray
-        1D arrays of xy coordinates.
-    oversampling : float
-        Number of histogram pixels per camera pixel.
-    t_min, t_max : float
-        Minimum and maximum bounds of the histogram.
-
-    Returns
-    n : int
-        Number of localizations in the histogram.
-    image : np.ndarray
-        2D histogram of xy coordinates.
-    """
-    n_pixel = int(np.ceil(oversampling * (t_max - t_min)))
-    in_view = (x > t_min) & (y > t_min) & (x < t_max) & (y < t_max)
-    x = x[in_view]
-    y = y[in_view]
-    x = oversampling * (x - t_min)
-    y = oversampling * (y - t_min)
-    image = np.zeros((n_pixel, n_pixel), dtype=np.float32)
-    render._fill(image, x, y)
-    return len(x), image
-
-
-def compute_xcorr(CF_image_avg: np.ndarray, image: np.ndarray) -> np.ndarray:
-    """Compute cross-correlation between two images.
-
-    Parameters
-    ----------
-    CF_image_avg : np.ndarray
-        Conjugate Fourier transform of the average image.
-    image : np.ndarray
-        Image to correlate with the average image.
-
-    Returns
-    -------
-    xcorr : np.ndarray
-        Cross-correlation of the two images.
-    """
-    F_image = np.fft.fft2(image)
-    xcorr = np.fft.fftshift(np.real(np.fft.ifft2((F_image * CF_image_avg))))
-    return xcorr
-
-
-def align_group(
-    angles: np.ndarray,
-    oversampling: float,
-    t_min: float,
-    t_max: float,
-    CF_image_avg: np.ndarray,
-    image_half: float,
-    counter: None,
-    lock: None,
-    group: int,
-) -> None:
-    """Align (shift and rotate) images.
-
-    Parameters
-    ----------
-    angles : np.ndarray
-        Array of rotation angles.
-    oversampling : float
-        Number of display pixels per camera pixel.
-    t_min, t_max : float
-        Minimum and maximum bounds for the histogram.
-    CF_image_avg : np.ndarray
-        Conjugate Fourier transform of the average image.
-    image_half : float
-        Half the size of the rendered image.
-    counter : multiprocessing.Manager.Value
-        Counter for the number of processed groups.
-    lock : multiprocessing.Manager.Lock
-        Lock for synchronizing access to shared resources.
-    group : int
-        Index of the group to align.
-    """
-    with lock:
-        counter.value += 1
-    index = group_index[group].nonzero()[1]
-    x_rot = x[index]
-    y_rot = y[index]
-    x_original = x_rot.copy()
-    y_original = y_rot.copy()
-    xcorr_max = 0.0
-    for angle in angles:
-        # rotate locs
-        x_rot = np.cos(angle) * x_original - np.sin(angle) * y_original
-        y_rot = np.sin(angle) * x_original + np.cos(angle) * y_original
-        # render group image
-        N, image = render_hist(x_rot, y_rot, oversampling, t_min, t_max)
-        # calculate cross-correlation
-        xcorr = compute_xcorr(CF_image_avg, image)
-        # find the brightest pixel
-        y_max, x_max = np.unravel_index(xcorr.argmax(), xcorr.shape)
-        # store the transformation if the correlation is larger than before
-        if xcorr[y_max, x_max] > xcorr_max:
-            xcorr_max = xcorr[y_max, x_max]
-            rot = angle
-            dy = np.ceil(y_max - image_half) / oversampling
-            dx = np.ceil(x_max - image_half) / oversampling
-    # rotate and shift image group locs
-    x[index] = np.cos(rot) * x_original - np.sin(rot) * y_original - dx
-    y[index] = np.sin(rot) * x_original + np.cos(rot) * y_original - dy
-
-
-def init_pool(
-    x_: np.ndarray,
-    y_: np.ndarray,
-    group_index_: np.ndarray,
-) -> None:
-    """Initialize pool process variables."""
-    global x, y, group_index
-    x = np.ctypeslib.as_array(x_)
-    y = np.ctypeslib.as_array(y_)
-    group_index = group_index_
+from .. import io, lib, average, render, __version__
 
 
 class Worker(QtCore.QThread):
@@ -166,105 +30,64 @@ class Worker(QtCore.QThread):
 
     Attributes
     ----------
-    group_index : np.ndarray
-        Indexes of the groups.
+    info : list[dict]
+        Metadata for localizations.
     iterations : int
         Number of iterations to average over.
     locs : pd.DataFrame
         Localizations with group indices (``group`` column).
-    oversampling : float
-        Number of display pixels per camera pixel.
-    r : float
-        Radius for rendering. See View.open() for details.
-    t_min, t_max : float
-        Minimum and maximum bounds for the histogram. Set to -r and r.
+    display_px_size : float
+        Display pixel size in nm used in averaging.
     """
 
-    progressMade = QtCore.pyqtSignal(int, int, int, int, pd.DataFrame, bool)
+    progressMade = QtCore.pyqtSignal(int, int, pd.DataFrame, bool, int, int)
+    aborted = QtCore.pyqtSignal()
 
     def __init__(
         self,
         locs: pd.DataFrame,
-        r: float,
-        group_index: np.ndarray,
-        oversampling: float,
+        info: list[dict],
+        display_px_size: float,
         iterations: int,
     ) -> None:
         super().__init__()
         self.locs = locs.copy()
-        self.r = r
-        self.t_min = -r
-        self.t_max = r
-        self.group_index = group_index
-        self.oversampling = oversampling
+        self.info = info
+        self.display_px_size = display_px_size
         self.iterations = iterations
+        self.was_aborted = False
+
+    def on_progress(
+        self,
+        it: int,
+        total_it: int,
+        locs_current: pd.DataFrame,
+        group: int,
+        n_groups: int,
+    ) -> None:
+        """Callback for progress updates from averaging process."""
+        self.locs = locs_current.copy()
+        self.progressMade.emit(it, total_it, self.locs, True, group, n_groups)
 
     def run(self) -> None:
-        """Run averaging across a number of iterations given the average
-        image."""
-        n_groups = self.group_index.shape[0]
-        a_step = np.arcsin(1 / (self.oversampling * self.r))
-        angles = np.arange(0, 2 * np.pi, a_step)
-        n_workers = min(
-            60, max(1, int(0.75 * multiprocessing.cpu_count()))
-        )  # Python crashes when using >64 cores
-        manager = multiprocessing.Manager()
-        counter = manager.Value("d", 0)
-        lock = manager.Lock()
-        groups_per_worker = max(1, int(n_groups / n_workers))
-        for it in range(self.iterations):
-            counter.value = 0
-            # render average image
-            N_avg, image_avg = render.render_hist(
-                self.locs,
-                self.oversampling,
-                self.t_min,
-                self.t_min,
-                self.t_max,
-                self.t_max,
-            )
-            n_pixel, _ = image_avg.shape
-            image_half = n_pixel / 2
-            CF_image_avg = np.conj(np.fft.fft2(image_avg))
-            # TODO: blur average
-            fc = functools.partial(
-                align_group,
-                angles,
-                self.oversampling,
-                self.t_min,
-                self.t_max,
-                CF_image_avg,
-                image_half,
-                counter,
-                lock,
-            )
-            result = pool.map_async(fc, range(n_groups), groups_per_worker)
-            while not result.ready():
-                self.progressMade.emit(
-                    it + 1,
-                    self.iterations,
-                    counter.value,
-                    n_groups,
-                    self.locs,
-                    False,
-                )
-                time.sleep(0.5)
-            self.locs["x"] = np.ctypeslib.as_array(x)
-            self.locs["y"] = np.ctypeslib.as_array(y)
-            self.locs["x"] -= np.mean(self.locs["x"])
-            self.locs["y"] -= np.mean(self.locs["y"])
-            self.progressMade.emit(
-                it + 1,
-                self.iterations,
-                counter.value,
-                n_groups,
-                self.locs,
-                True,
-            )
+        """Run averaging across a number of iterations."""
+        result = average.average(
+            self.locs,
+            self.info,
+            display_pixel_size=self.display_px_size,
+            iterations=self.iterations,
+            progress_callback=self.on_progress,
+            abort_callback=self.isInterruptionRequested,
+        )
+        if result is None:
+            self.was_aborted = True
+            self.aborted.emit()
+        else:
+            self.locs = result
 
 
-class ParametersDialog(QtWidgets.QDialog):
-    """Dialog for setting parameters - oversampling and iterations.
+class ParametersDialog(lib.Dialog):
+    """Dialog for setting parameters - display pixel size and iterations.
 
     ...
 
@@ -274,9 +97,10 @@ class ParametersDialog(QtWidgets.QDialog):
         Spin box for setting the display pixel size in nm. Determines
         oversampling, see below.
     iterations : QtWidgets.QSpinBox
-        Spin box for setting the number of iterations.
+        Spin box for setting the number of averaging iterations.
     oversampling : float
-        Number of display pixels per camera pixel.
+        Number of display pixels per camera pixel, calculated from the
+        display pixel size and the camera pixel size from metadata.
     window : QtWidgets.QMainWindow
         Main window instance.
     """
@@ -307,8 +131,8 @@ class ParametersDialog(QtWidgets.QDialog):
         iter_label.setToolTip("Number of averaging iterations.")
         grid.addWidget(iter_label, 1, 0)
         self.iterations = QtWidgets.QSpinBox()
-        self.iterations.setRange(0, int(1e7))
-        self.iterations.setValue(10)
+        self.iterations.setRange(1, int(1e7))
+        self.iterations.setValue(3)
         grid.addWidget(self.iterations, 1, 1)
 
     def on_disp_px_size_changed(self) -> None:
@@ -330,6 +154,9 @@ class View(QtWidgets.QLabel):
 
     Attributes
     ----------
+    avg_history : list of dicts
+        Stores the used display pixel size and iterations across
+        multiple rounds of averaging.
     _pixmap : QtGui.QPixmap
         Pixmap for displaying the averaged image.
     running : bool
@@ -344,22 +171,39 @@ class View(QtWidgets.QLabel):
         super().__init__()
         self.window = window
         self.setMinimumSize(1, 1)
-        self.setAlignment(QtCore.Qt.AlignCenter)
+        self.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
         self.setAcceptDrops(True)
         self._pixmap = None
         self.running = False
+        self.thread = None
+        self.avg_history = []
 
     def average(self):
         if not self.running:
             self.running = True
-            oversampling = self.window.parameters_dialog.oversampling
+            display_px_size = (
+                self.window.parameters_dialog.disp_px_size.value()
+            )
             iterations = self.window.parameters_dialog.iterations.value()
+            self.window.statusBar().showMessage("Preparing for averaging...")
             self.thread = Worker(
-                self.locs, self.r, self.group_index, oversampling, iterations
+                self.locs,
+                self.info,
+                display_px_size,
+                iterations,
             )
             self.thread.progressMade.connect(self.on_progress)
+            self.thread.aborted.connect(self.on_aborted)
             self.thread.finished.connect(self.on_finished)
+            self.window.abort_action.setEnabled(True)
             self.thread.start()
+
+    def abort(self) -> None:
+        """Request interruption of the running averaging thread."""
+        if self.running and self.thread is not None:
+            self.thread.requestInterruption()
+            self.window.statusBar().showMessage("Aborting...")
+            self.window.abort_action.setEnabled(False)
 
     def dragEnterEvent(self, event: QtGui.QDragEnterEvent) -> None:
         if event.mimeData().hasUrls():
@@ -375,23 +219,39 @@ class View(QtWidgets.QLabel):
             self.open(path)
 
     def on_finished(self) -> None:
-        self.window.statusBar().showMessage("Done!")
+        if self.thread is not None and self.thread.was_aborted:
+            self.window.statusBar().showMessage("Aborted.")
+        else:
+            if self.thread is not None:
+                self.avg_history.append(
+                    {
+                        "disp_px_size": self.thread.display_px_size,
+                        "it": self.thread.iterations,
+                    }
+                )
+            self.window.statusBar().showMessage("Done!")
         self.running = False
+        self.window.abort_action.setEnabled(False)
+
+    def on_aborted(self) -> None:
+        """Handle abortion of the averaging thread."""
+        self.window.statusBar().showMessage("Aborted.")
+        self.window.abort_action.setEnabled(False)
 
     def on_progress(
         self,
         it: int,
         total_it: int,
-        g: int,
-        n_groups: int,
         locs: pd.DataFrame,
         update_image: bool,
+        group: int,
+        n_groups: int,
     ) -> None:
         self.locs = locs.copy()
         if update_image:
             self.update_image()
         self.window.statusBar().showMessage(
-            f"Iteration {it}/{total_it}, Group {g}/{n_groups}"
+            f"Iteration {it}/{total_it} — group {group}/{n_groups}"
         )
 
     def open(self, path: str) -> None:
@@ -407,6 +267,7 @@ class View(QtWidgets.QLabel):
             self.locs, self.info = io.load_locs(path, qt_parent=self)
         except io.NoMetadataFileError:
             return
+        self.avg_history = []
         if "group" not in self.locs.columns:
             message = (
                 "Loaded file contains no group information. Please load"
@@ -414,58 +275,15 @@ class View(QtWidgets.QLabel):
             )
             QtWidgets.QMessageBox.warning(self, "Warning", message)
             return
-        groups = np.unique(self.locs.group)
-        n_groups = len(groups)
-        n_locs = len(self.locs)
-        self.group_index = scipy.sparse.lil_matrix(
-            (n_groups, n_locs),
-            dtype=bool,
-        )
-        progress = lib.ProgressDialog(
-            "Creating group index",
-            0,
-            len(groups),
-            self,
-        )
-        progress.set_value(0)
-        for i, group in enumerate(groups):
-            index = np.where(self.locs.group == group)[0]
-            self.group_index[i, index] = True
-            progress.set_value(i + 1)
-        progress = lib.ProgressDialog(
-            "Aligning by center of mass", 0, len(groups), self
-        )
-        progress.set_value(0)
-        for i in range(n_groups):
-            index = self.group_index[i, :].nonzero()[1]
-            self.locs.loc[index, "x"] -= np.mean(self.locs.loc[index, "x"])
-            self.locs.loc[index, "y"] -= np.mean(self.locs.loc[index, "y"])
-            progress.set_value(i + 1)
+        group_index = average.build_group_index(self.locs)
+        self.locs = average.com_align(self.locs, group_index)
         self.r = 2 * np.sqrt(
             (self.locs["x"] ** 2 + self.locs["y"] ** 2).mean()
         )
-        # set oversampling and update image
         self.window.parameters_dialog.on_disp_px_size_changed()
         self.update_image()
 
-        status = lib.StatusDialog("Starting parallel pool...", self.window)
-        global pool, x, y
-        try:
-            pool.close()
-        except NameError:
-            pass
-        x = sharedctypes.RawArray("f", self.locs["x"].to_numpy())
-        y = sharedctypes.RawArray("f", self.locs["y"].to_numpy())
-        n_workers = min(
-            60, max(1, int(0.75 * multiprocessing.cpu_count()))
-        )  # Python crashes when using >64 cores
-        pool = multiprocessing.Pool(
-            n_workers,
-            init_pool,
-            (x, y, self.group_index),
-        )
         self.window.statusBar().showMessage("Ready for processing!")
-        status.close()
 
     def resizeEvent(self, event: QtGui.QResizeEvent) -> None:
         if self._pixmap is not None:
@@ -479,18 +297,24 @@ class View(QtWidgets.QLabel):
         path : str
             Path to save localizations.
         """
-        cx = self.info[0]["Width"] / 2
-        cy = self.info[0]["Height"] / 2
-        self.locs["x"] += cx
-        self.locs["y"] += cy
-        info = self.info + [
-            {"Generated by": f"Picasso v{__version__} Average"}
-        ]
-        out_locs = self.locs
+        display_pixel_size = self.window.parameters_dialog.disp_px_size.value()
+        iterations = self.window.parameters_dialog.iterations.value()
+        params = {"disp_px_size": display_pixel_size, "it": iterations}
+        out_locs, info = average.prepare_locs_for_save(
+            self.locs, self.info, params
+        )
+        if self.avg_history:
+            info[-1]["Rounds"] = [
+                {
+                    "Display pixel size (nm)": r["disp_px_size"],
+                    "Iterations": r["it"],
+                }
+                for r in self.avg_history
+            ]
         io.save_locs(path, out_locs, info)
-        self.window.statusBar().showMessage("File saved to {}.".format(path))
+        self.window.statusBar().showMessage(f"File saved to {path}.")
 
-    def set_image(self, image: np.ndarray) -> None:
+    def set_image(self, image: lib.FloatArray2D) -> None:
         """Sets the new image to be displayed.
 
         Parameters
@@ -508,7 +332,9 @@ class View(QtWidgets.QLabel):
         self._bgra[..., 1] = cmap[:, 1][image]
         self._bgra[..., 2] = cmap[:, 0][image]
         self._bgra[..., 3] = 255
-        qimage = QtGui.QImage(self._bgra.data, X, Y, QtGui.QImage.Format_RGB32)
+        qimage = QtGui.QImage(
+            self._bgra.data, X, Y, QtGui.QImage.Format.Format_RGB32
+        )
         self._pixmap = QtGui.QPixmap.fromImage(qimage)
         self.set_pixmap(self._pixmap)
 
@@ -517,8 +343,8 @@ class View(QtWidgets.QLabel):
             pixmap.scaled(
                 self.width(),
                 self.height(),
-                QtCore.Qt.KeepAspectRatio,
-                QtCore.Qt.FastTransformation,
+                QtCore.Qt.AspectRatioMode.KeepAspectRatio,
+                QtCore.Qt.TransformationMode.FastTransformation,
             )
         )
 
@@ -528,8 +354,12 @@ class View(QtWidgets.QLabel):
         oversampling = self.window.parameters_dialog.oversampling
         t_min = -self.r
         t_max = self.r
-        N_avg, image_avg = render.render_hist(
-            self.locs, oversampling, t_min, t_min, t_max, t_max
+        N_avg, image_avg = render.render_hist_numba(
+            self.locs["x"].to_numpy(),
+            self.locs["y"].to_numpy(),
+            oversampling,
+            t_min,
+            t_max,
         )
         self.set_image(image_avg)
 
@@ -547,10 +377,13 @@ class Window(QtWidgets.QMainWindow):
         The dialog for adjusting processing parameters.
     """
 
+    DOCS_URL = "https://picassosr.readthedocs.io/en/latest/average.html"
+
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle(f"Picasso v{__version__}: Average")
         self.resize(512, 512)
+        self.user_settings_dialog = lib.UserSettingsDialog(self)
         this_directory = os.path.dirname(os.path.realpath(__file__))
         icon_path = os.path.join(this_directory, "icons", "average.ico")
         icon = QtGui.QIcon(icon_path)
@@ -558,16 +391,28 @@ class Window(QtWidgets.QMainWindow):
         self.view = View(self)
         self.setCentralWidget(self.view)
         self.parameters_dialog = ParametersDialog(self)
+        self.metadata_dialog = lib.MetadataDialog(self)
         menu_bar = self.menuBar()
         file_menu = menu_bar.addMenu("File")
         open_action = file_menu.addAction("Open")
-        open_action.setShortcut(QtGui.QKeySequence.Open)
+        open_action.setShortcut(QtGui.QKeySequence.StandardKey.Open)
         open_action.triggered.connect(self.open)
         file_menu.addAction(open_action)
         save_action = file_menu.addAction("Save")
-        save_action.setShortcut(QtGui.QKeySequence.Save)
+        save_action.setShortcut(QtGui.QKeySequence.StandardKey.Save)
         save_action.triggered.connect(self.save)
         file_menu.addAction(save_action)
+        metadata_action = file_menu.addAction("Show metadata")
+        metadata_action.setShortcut("Ctrl+M")
+        metadata_action.triggered.connect(self.show_metadata)
+        picasso_settings_action = file_menu.addAction("Picasso settings")
+        picasso_settings_action.triggered.connect(
+            self.user_settings_dialog.show
+        )
+        help_action = file_menu.addAction("Help")
+        help_action.triggered.connect(
+            lambda: QtGui.QDesktopServices.openUrl(QtCore.QUrl(self.DOCS_URL))
+        )
         process_menu = menu_bar.addMenu("Process")
         parameters_action = process_menu.addAction("Parameters")
         parameters_action.setShortcut("Ctrl+P")
@@ -575,7 +420,23 @@ class Window(QtWidgets.QMainWindow):
         average_action = process_menu.addAction("Average")
         average_action.setShortcut("Ctrl+A")
         average_action.triggered.connect(self.view.average)
+        self.abort_action = process_menu.addAction("Abort")
+        self.abort_action.setShortcut("Ctrl+.")
+        self.abort_action.triggered.connect(self.view.abort)
+        self.abort_action.setEnabled(False)
         self.plugin_menu = menu_bar.addMenu("Plugins")  # do not delete
+
+    def show_metadata(self) -> None:
+        """Open the metadata dialog."""
+        if not hasattr(self.view, "info"):
+            QtWidgets.QMessageBox.information(
+                self, "Metadata", "No file loaded."
+            )
+            return
+        label = os.path.basename(self.view.path)
+        self.metadata_dialog.set_infos(self.view.info, labels=label)
+        self.metadata_dialog.show()
+        self.metadata_dialog.raise_()
 
     def open(self) -> None:
         """Open the dialog for opening a file to load."""
@@ -621,20 +482,13 @@ def main() -> None:
 
     window.show()
 
-    def excepthook(type, value, tback):
-        lib.cancel_dialogs()
-        message = "".join(traceback.format_exception(type, value, tback))
-        errorbox = QtWidgets.QMessageBox.critical(
-            window,
-            "An error occured",
-            message,
-        )
-        errorbox.exec_()
-        sys.__excepthook__(type, value, tback)
+    from ..updater import setup_gui_update_check
 
-    sys.excepthook = excepthook
+    setup_gui_update_check(window)
 
-    sys.exit(app.exec_())
+    lib.install_excepthook(window)
+
+    sys.exit(app.exec())
 
 
 if __name__ == "__main__":

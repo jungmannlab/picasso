@@ -1,20 +1,20 @@
 ﻿Column Name,Description,C Data Type
-frame,"Mean frame of the localizations around the molecule.",float
+frame,"Mean frame of the localizations around the molecule/cluster center.",float
 std_frame,"St. dev. of frames of the localizations around the molecule.",float
-x/y/z,"Spatial coordinates of the molecule (camera pixels).",float
-std_x/std_y/std_z,"St. dev. of the localizations around the molecule in respective directions (camera pixels).",float
-photons,"Mean number of photons per localization around the molecule.",float
-sx,"Mean Point Spread Function width/height of localizations around the molecule (camera pixels).",float
-bg,"Mean background photons per pixel per localization around the molecule.",float
-lpx/lpy/lpz,"Molecule's position uncertainty in respective directions (camera pixels).",float
-ellipticity,"Mean ellipticity of localizations around the molecule.",float
-net_gradient,"Mean net gradient of localizations around the molecule.",float
-n/n_locs,"Number of localizations assigned to the molecule.",unsigned long
-n_events,"Number of binding events assigned to the molecule.",unsigned long
-group,"Cluster ID assigned to the molecule.",unsigned long
-group_input,"(Optional) Previous group ID of the localizations around the molecule, if they had a 'group' column.",unsigned long
-area/volume,"(Only SMLM clusterer) Area (2D) or volume (3D) of the ellipse/ellipsoid defined by std_x/y/z.",float
-convexhull,"(Only SMLM clusterer) Area (2D) or volume (3D) of the convex hull of the localizations assigned to the molecule.",float
+x/y/z,"Spatial coordinates of the molecule/cluster center (camera pixels).",float
+std_x/std_y/std_z,"St. dev. of the localizations around the molecule/cluster center in respective directions (camera pixels).",float
+photons,"Mean number of photons per localization around the molecule/cluster center.",float
+sx,"Mean Point Spread Function width/height of localizations around the molecule/cluster center (camera pixels).",float
+bg,"Mean background photons per pixel per localization around the molecule/cluster center.",float
+lpx/lpy/lpz,"Molecule's/cluster center's position uncertainty in respective directions (camera pixels).",float
+ellipticity,"Mean ellipticity of localizations around the molecule/cluster center.",float
+net_gradient,"Mean net gradient of localizations around the molecule/cluster center.",float
+n/n_locs,"Number of localizations assigned to the molecule/cluster center. ""n"" is the old convention for DBSCAN, HDBSCAN and SMLM clusterer.",unsigned long
+n_events,"Number of binding events assigned to the molecule/cluster center.",unsigned long
+group,"Cluster ID assigned to the molecule/cluster center.",unsigned long
+group_input,"(Optional) Previous group ID of the localizations around the molecule/cluster center, if they had a 'group' column.",unsigned long
+area/volume,"(Non-G5M) Area (2D) or volume (3D) of the ellipse/ellipsoid defined by the radius = 2 * std_x/y/z.",float
+convexhull,"(Non-G5M) Area (2D) or volume (3D) of the convex hull of the localizations assigned to the molecule/cluster center.",float
 fitted_sigma,"(Only G5M, 2D) Fitted sigma of the Gaussian component representing the molecule (camera pixels).",float
 fitted_sigma_x/y/z,"(Only G5M, 3D) Fitted sigma of the Gaussian component representing the molecule in respective directions (camera pixels).",float
 rel_sigma,"(Only G5M, 2D) 'fitted_sigma' divided by the average localization precision around the molecule.",float

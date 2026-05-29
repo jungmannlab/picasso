@@ -19,14 +19,26 @@
 
 # -- Project information -----------------------------------------------------
 
+import os
+import sys
+
 project = "Picasso"
-copyright = "2019, Maximilian Thomas Strauss"
+copyright = "2019-2026, Jungmann Lab"
 author = "Maximilian T. Strauss"
 
 # The short X.Y version
 version = ""
 # The full version, including alpha/beta/rc tags
-release = "0.9.10"
+sys.path.insert(0, os.path.abspath("../.."))
+
+# Read version directly from picasso/version.py to avoid importing the
+# full package (which would require all runtime dependencies on RTD).
+_version_globals = {}
+with open(
+    os.path.join(os.path.dirname(__file__), "..", "picasso", "version.py")
+) as _vf:
+    exec(_vf.read(), _version_globals)
+release = _version_globals["__version__"]
 
 # -- General configuration ---------------------------------------------------
 

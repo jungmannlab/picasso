@@ -4,15 +4,15 @@ picasso.gui.filter
 
 Graphical user interface for filtering localization lists.
 
-:authors: Joerg Schnitzbauer Maximilian Thomas Strauss, 2015-2018
-:copyright: Copyright (c) 2015=2018 Jungmann Lab, MPI of Biochemistry
+:authors: Joerg Schnitzbauer, Maximilian Thomas Strauss,
+    Rafal Kowalewski
+:copyright: Copyright (c) 2015-2026 Jungmann Lab, MPI of Biochemistry
 """
 
 from __future__ import annotations
 
 import os.path
 import sys
-import traceback
 import importlib
 import pkgutil
 
@@ -25,7 +25,7 @@ from matplotlib.backends.backend_qt5agg import (
 )
 from matplotlib.widgets import SpanSelector, RectangleSelector
 from matplotlib.colors import LogNorm
-from PyQt5 import QtCore, QtGui, QtWidgets
+from PyQt6 import QtCore, QtGui, QtWidgets
 
 from .. import io, lib, clusterer, __version__
 
@@ -35,58 +35,49 @@ ROW_HEIGHT = 30
 
 
 class TableModel(QtCore.QAbstractTableModel):
-    """Class for handling the localization data.
+    """Qt model for the localization table view.
 
-    ...
-
-    Attributes
-    ----------
-    _column_count : int
-        Number of columns.
-    index : QtCore.QModelIndex
-        Row/column.
-    locs : pd.DataFrame
-        Localizations.
-    _row_count : int
-        Number of rows.
+    A single instance is reused for the lifetime of the main window —
+    the ``set_data`` method swaps in the small slice of rows currently
+    visible.
 
     Parameters
     ----------
-    locs : pd.DataFrame
-        Localizations.
-    index : QtCore.QModelIndex
-        Row/column.
     parent : QtWidgets.QWidget, optional
-        Parent widget. Can be set to None.
+        Parent widget.
     """
 
     def __init__(
         self,
-        locs: pd.DataFrame,
-        index: QtCore.QModelIndex,
         parent: QtWidgets.QWidget | None = None,
     ) -> None:
         super().__init__(parent)
+        self.locs = pd.DataFrame()
+        self.index = 0
+        self._column_count = 0
+        self._row_count = 0
+
+    def set_data(self, locs: pd.DataFrame, index: int) -> None:
+        """Replace the visible slice. Called on every scroll/refresh."""
+        self.beginResetModel()
         self.locs = locs
         self.index = index
-        try:
-            self._column_count = len(locs.columns)
-        except IndexError:
-            self._column_count = 0
-        self._row_count = self.locs.shape[0]
+        self._column_count = len(locs.columns)
+        self._row_count = locs.shape[0]
+        self.endResetModel()
 
-    def columnCount(self, parent: None) -> int:
+    def columnCount(self, parent: QtCore.QModelIndex | None = None) -> int:
         return self._column_count
 
-    def rowCount(self, parent: None) -> int:
+    def rowCount(self, parent: QtCore.QModelIndex | None = None) -> int:
         return self._row_count
 
     def data(
         self,
         index: QtCore.QModelIndex,
-        role: int = QtCore.Qt.DisplayRole,
+        role: int = QtCore.Qt.ItemDataRole.DisplayRole,
     ) -> str | None:
-        if role == QtCore.Qt.DisplayRole:
+        if role == QtCore.Qt.ItemDataRole.DisplayRole:
             data = self.locs.iloc[index.row(), index.column()]
             return str(data)
         return None
@@ -97,10 +88,10 @@ class TableModel(QtCore.QAbstractTableModel):
         orientation: QtCore.Qt.Orientation,
         role: int,
     ) -> str | None:
-        if role == QtCore.Qt.DisplayRole:
-            if orientation == QtCore.Qt.Horizontal:
+        if role == QtCore.Qt.ItemDataRole.DisplayRole:
+            if orientation == QtCore.Qt.Orientation.Horizontal:
                 return self.locs.columns[section]
-            elif orientation == QtCore.Qt.Vertical:
+            elif orientation == QtCore.Qt.Orientation.Vertical:
                 return self.index + section
         return None
 
@@ -131,9 +122,13 @@ class TableView(QtWidgets.QTableView):
         super().__init__(parent)
         self.window = window
         self.setAcceptDrops(True)
-        self.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
+        self.setVerticalScrollBarPolicy(
+            QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
         vertical_header = self.verticalHeader()
-        vertical_header.sectionResizeMode(QtWidgets.QHeaderView.Fixed)
+        vertical_header.setSectionResizeMode(
+            QtWidgets.QHeaderView.ResizeMode.Fixed
+        )
         vertical_header.setDefaultSectionSize(ROW_HEIGHT)
         vertical_header.setFixedWidth(70)
 
@@ -157,14 +152,14 @@ class TableView(QtWidgets.QTableView):
 class PlotWindow(QtWidgets.QWidget):
     """Window for displaying 1D/2D histograms.
 
-    ...
+    Holds only a reference to the main window and the field name(s) it
+    plots. The localization data is pulled from the main window on
+    demand to avoid retaining per-window copies (as before v0.10.1).
 
     Attributes
     ----------
     main_window : QtWidgets.QMainWindow
         Main window.
-    locs : pd.DataFrame
-        Localization data.
     figure : plt.Figure
         Matplotlib figure.
 
@@ -172,18 +167,11 @@ class PlotWindow(QtWidgets.QWidget):
     ----------
     main_window : QtWidgets.QMainWindow
         Main window.
-    locs : pd.DataFrame
-        Localization data.
     """
 
-    def __init__(
-        self,
-        main_window: QtWidgets.QMainWindow,
-        locs: pd.DataFrame,
-    ) -> None:
+    def __init__(self, main_window: QtWidgets.QMainWindow) -> None:
         super().__init__()
         self.main_window = main_window
-        self.locs = locs
         self.figure = plt.Figure(constrained_layout=True)
         self.canvas = FigureCanvasQTAgg(self.figure)
         self.plot()
@@ -198,8 +186,7 @@ class PlotWindow(QtWidgets.QWidget):
         icon = QtGui.QIcon(icon_path)
         self.setWindowIcon(icon)
 
-    def update_locs(self, locs: pd.DataFrame) -> None:
-        self.locs = locs
+    def refresh(self) -> None:
         self.plot()
         self.update()
 
@@ -209,8 +196,6 @@ class PlotWindow(QtWidgets.QWidget):
 
 class HistWindow(PlotWindow):
     """Window for displaying 1D histograms.
-
-    ...
 
     Attributes
     ----------
@@ -223,32 +208,32 @@ class HistWindow(PlotWindow):
         Field name for the histogram.
     main_window : QtWidgets.QMainWindow
         Main window.
-    locs : pd.DataFrame
-        Localization data.
     """
 
     def __init__(
         self,
         main_window: QtWidgets.QMainWindow,
-        locs: pd.DataFrame,
         field: str,
     ) -> None:
         self.field = field
-        super().__init__(main_window, locs)
+        super().__init__(main_window)
 
     def plot(self) -> None:
-        # Prepare the data
-        data = self.locs[self.field]
-        data = data[np.isfinite(data)]
-        bins = lib.calculate_optimal_bins(data, 1000)
-        # Prepare the figure
+        data = self.main_window.get_column(self.field)
+        if data.dtype.kind == "f":
+            data = data[np.isfinite(data)]
         self.figure.clear()
         self.figure.suptitle(self.field)
         axes = self.figure.add_subplot(111)
+        if len(data) == 0:
+            self.canvas.draw()
+            return
+        bins = lib.calculate_optimal_bins(data, 1000)
         axes.hist(data, bins, rwidth=1, linewidth=0)
-        data_range = data.max() - data.min()
+        data_max = data.max()
+        data_range = data_max - data.min()
         axes.set_xlim(
-            [bins[0] - 0.05 * data_range, data.max() + 0.05 * data_range]
+            [bins[0] - 0.05 * data_range, data_max + 0.05 * data_range]
         )
         self.span = SpanSelector(
             axes,
@@ -260,14 +245,8 @@ class HistWindow(PlotWindow):
         self.canvas.draw()
 
     def on_span_select(self, xmin: float, xmax: float) -> None:
-        """Update the localization data based on the selected in the
-        histogram plot."""
-        x = self.locs[self.field]
-        valid_idx = np.isfinite(x) & (x > xmin) & (x < xmax)
-        self.locs = self.locs[valid_idx]
-        self.main_window.update_locs(self.locs)
-        self.main_window.log_filter(self.field, xmin.item(), xmax.item())
-        self.plot()
+        """Apply the selected range as a filter on the main window."""
+        self.main_window.apply_range(self.field, float(xmin), float(xmax))
 
     def closeEvent(self, event: QtGui.QCloseEvent) -> None:
         self.main_window.hist_windows[self.field] = None
@@ -276,8 +255,6 @@ class HistWindow(PlotWindow):
 
 class Hist2DWindow(PlotWindow):
     """Window for displaying 2D histograms.
-
-    ...
 
     Attributes
     ----------
@@ -288,8 +265,6 @@ class Hist2DWindow(PlotWindow):
     ----------
     main_window : QtWidgets.QMainWindow
         Main window.
-    locs : pd.DataFrame
-        Localization data.
     field_x : str
         Field name for the x-axis.
     field_y : str
@@ -299,35 +274,61 @@ class Hist2DWindow(PlotWindow):
     def __init__(
         self,
         main_window: QtWidgets.QMainWindow,
-        locs: pd.DataFrame,
         field_x: str,
         field_y: str,
     ) -> None:
         self.field_x = field_x
         self.field_y = field_y
-        super().__init__(main_window, locs)
+        super().__init__(main_window)
         self.resize(1000, 800)
 
     def plot(self) -> None:
-        # Prepare the data
-        x = self.locs[self.field_x]
-        y = self.locs[self.field_y]
-        valid = np.isfinite(x) & np.isfinite(y)
-        x = x[valid]
-        y = y[valid]
-        # Prepare the figure
+        x, y = self.main_window.get_columns([self.field_x, self.field_y])
         self.figure.clear()
         axes = self.figure.add_subplot(111)
-        # Start hist2 version
+        if len(x) == 0:
+            axes.get_xaxis().set_label_text(self.field_x)
+            axes.get_yaxis().set_label_text(self.field_y)
+            self.canvas.draw()
+            return
         bins_x = lib.calculate_optimal_bins(x, 1000)
         bins_y = lib.calculate_optimal_bins(y, 1000)
-        counts, x_edges, y_edges, image = axes.hist2d(
-            x, y, bins=[bins_x, bins_y], norm=LogNorm()
+        nx = len(bins_x) - 1
+        ny = len(bins_y) - 1
+        x_min, x_max = float(bins_x[0]), float(bins_x[-1])
+        y_min, y_max = float(bins_y[0]), float(bins_y[-1])
+        counts = lib.hist2d_numba(
+            np.ascontiguousarray(x),
+            np.ascontiguousarray(y),
+            x_min,
+            x_max,
+            y_min,
+            y_max,
+            nx,
+            ny,
         )
-        x_range = x.max() - x.min()
-        axes.set_xlim([bins_x[0] - 0.05 * x_range, x.max() + 0.05 * x_range])
-        y_range = y.max() - y.min()
-        axes.set_ylim([bins_y[0] - 0.05 * y_range, y.max() + 0.05 * y_range])
+        masked = np.ma.masked_equal(counts.T, 0)
+        image = axes.pcolormesh(
+            bins_x, bins_y, masked, norm=LogNorm(), shading="flat"
+        )
+        if x.dtype.kind == "f":
+            x_data_max = float(np.nanmax(x))
+            x_data_min = float(np.nanmin(x))
+            y_data_max = float(np.nanmax(y))
+            y_data_min = float(np.nanmin(y))
+        else:
+            x_data_max = float(x.max())
+            x_data_min = float(x.min())
+            y_data_max = float(y.max())
+            y_data_min = float(y.min())
+        x_range = x_data_max - x_data_min
+        y_range = y_data_max - y_data_min
+        axes.set_xlim(
+            [bins_x[0] - 0.05 * x_range, x_data_max + 0.05 * x_range]
+        )
+        axes.set_ylim(
+            [bins_y[0] - 0.05 * y_range, y_data_max + 0.05 * y_range]
+        )
         self.figure.colorbar(image, ax=axes)
         axes.grid(False)
         axes.get_xaxis().set_label_text(self.field_x)
@@ -335,7 +336,7 @@ class Hist2DWindow(PlotWindow):
         self.selector = RectangleSelector(
             axes,
             self.on_rect_select,
-            useblit=False,
+            useblit=True,
             props=dict(facecolor="green", alpha=0.2, fill=True),
         )
         self.canvas.draw()
@@ -345,32 +346,24 @@ class Hist2DWindow(PlotWindow):
         press_event: QtGui.QMouseEvent,
         release_event: QtGui.QMouseEvent,
     ) -> None:
-        """Handle rectangle selection over the 2D histogram. Update
-        localizations."""
+        """Apply the rectangular selection as a 2D filter on the main
+        window."""
         x1, y1 = press_event.xdata, press_event.ydata
         x2, y2 = release_event.xdata, release_event.ydata
-        xmin = min(x1, x2)
-        xmax = max(x1, x2)
-        ymin = min(y1, y2)
-        ymax = max(y1, y2)
-        x = self.locs[self.field_x]
-        y = self.locs[self.field_y]
-        finite_idx = np.isfinite(x) & np.isfinite(y)
-        valid_idx = (
-            (x > xmin) & (x < xmax) & (y > ymin) & (y < ymax) & finite_idx
+        xmin = float(min(x1, x2))
+        xmax = float(max(x1, x2))
+        ymin = float(min(y1, y2))
+        ymax = float(max(y1, y2))
+        self.main_window.apply_range2d(
+            self.field_x, xmin, xmax, self.field_y, ymin, ymax
         )
-        self.locs = self.locs[valid_idx]
-        self.main_window.update_locs(self.locs)
-        self.main_window.log_filter(self.field_x, xmin.item(), xmax.item())
-        self.main_window.log_filter(self.field_y, ymin.item(), ymax.item())
-        self.plot()
 
     def closeEvent(self, event: QtGui.QCloseEvent) -> None:
         self.main_window.hist2d_windows[self.field_x][self.field_y] = None
         event.accept()
 
 
-class FilterNum(QtWidgets.QDialog):
+class FilterNum(lib.Dialog):
     """Dialog for filtering localizations by numeric values.
 
     ...
@@ -394,8 +387,15 @@ class FilterNum(QtWidgets.QDialog):
         Main window.
     """
 
+    DOCS_URL = "https://picassosr.readthedocs.io/en/latest/filter.html"
+
     def __init__(self, window: QtWidgets.QMainWindow) -> None:
         super().__init__(window)
+        self.setToolTip(
+            "Choose the parameter to filter by.\n"
+            "The specified range is inclusive, i.e.,\n"
+            "the min/max values are kept."
+        )
         self.window = window
         self.setWindowTitle("Filter by numeric values")
         this_directory = os.path.dirname(os.path.realpath(__file__))
@@ -407,9 +407,10 @@ class FilterNum(QtWidgets.QDialog):
         self.setLayout(self.layout)
 
         # combox box with all atributes
+        self.layout.addWidget(lib.HelpButton(self.DOCS_URL), 0, 0)
         self.attributes = QtWidgets.QComboBox(self)
         self.attributes.setEditable(False)
-        self.layout.addWidget(self.attributes, 0, 0, 1, 2)
+        self.layout.addWidget(self.attributes, 0, 1)
 
         # lower value
         self.layout.addWidget(QtWidgets.QLabel("Min:"), 1, 0)
@@ -433,32 +434,28 @@ class FilterNum(QtWidgets.QDialog):
 
         # filter button
         filter_button = QtWidgets.QPushButton("Filter")
-        filter_button.setFocusPolicy(QtCore.Qt.NoFocus)
+        filter_button.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
         filter_button.clicked.connect(self.filter)
         self.layout.addWidget(filter_button, 3, 0, 1, 2)
 
     def filter(self) -> None:
         """Filters locs given the range values."""
-        # check that min value < max value
         xmin = self.min.value()
         xmax = self.max.value()
         if xmin < xmax:
             field = self.attributes.currentText()
-            locs = self.window.locs
-            locs = locs[(locs[field] > xmin) & (locs[field] < xmax)]
-            self.window.update_locs(locs)
-            self.window.log_filter(field, xmin, xmax)
+            self.window.apply_range(field, xmin, xmax, inclusive=True)
 
     def on_locs_loaded(self) -> None:
         """Changes attributes in the dialog according to locs.dtypes."""
         while self.attributes.count():
             self.attributes.removeItem(0)
-        names = self.window.locs.columns
+        names = self.window.locs_full.columns
         for name in names:
             self.attributes.addItem(name)
 
 
-class SubclusterNum(QtWidgets.QDialog):
+class SubclusterNum(lib.Dialog):
     """Input dialog for specifying the distances used for testing
     for subclustering.
 
@@ -489,7 +486,7 @@ class SubclusterNum(QtWidgets.QDialog):
         self.setWindowIcon(icon)
 
         self.layout = QtWidgets.QFormLayout()
-        self.layout.setLabelAlignment(QtCore.Qt.AlignLeft)
+        self.layout.setLabelAlignment(QtCore.Qt.AlignmentFlag.AlignLeft)
         self.setLayout(self.layout)
 
         self.distance_clustered = QtWidgets.QDoubleSpinBox()
@@ -518,14 +515,14 @@ class SubclusterNum(QtWidgets.QDialog):
         self.save_vals.setChecked(False)
         self.layout.addRow(self.save_vals)
         test_button = QtWidgets.QPushButton("Test subclustering")
-        test_button.setFocusPolicy(QtCore.Qt.NoFocus)
+        test_button.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
         test_button.clicked.connect(self.plot)
         self.layout.addRow(test_button)
 
     def plot(self) -> None:
         """Plot the subclustering test histogram. Optionally can save
         the histogram values to a .csv file."""
-        if "n_events" not in self.window.locs.columns:
+        if "n_events" not in self.window.locs_full.columns:
             raise ValueError("Data must have the 'n_events' attribute.")
         if self.save_vals.isChecked():
             base, ext = os.path.splitext(self.window.locs_path)
@@ -543,7 +540,7 @@ class SubclusterNum(QtWidgets.QDialog):
 
         dist_clustered = self.distance_clustered.value()
         dist_sparse = self.distance_sparse.value()
-        mols = self.window.locs
+        mols = self.window.materialize_filtered()
         clustered_nevents, sparse_nevents = clusterer.test_subclustering(
             mols, self.window.info, dist_clustered, dist_sparse
         )
@@ -570,27 +567,36 @@ class SubclusterNum(QtWidgets.QDialog):
 class Window(QtWidgets.QMainWindow):
     """Main window for the application.
 
-    ...
+    The localization data is stored once in ``locs_full`` and never
+    copied. The currently-visible subset is tracked by ``filtered_idx``,
+    an integer index array into ``locs_full``. All filters re-index
+    this array, so memory cost is O(N) once (the master) plus O(M)
+    for the index (M = current filtered count), independent of how
+    many filter steps have been applied.
 
     Attributes
     ----------
     filter_log : dict
         Dictionary of filter logs, i.e., data on what attribute/field
-        of ``self.locs`` was filtered and the corresponding min/max
-        values.
+        was filtered and the corresponding min/max values.
     filter_num : FilterNum
         Filter dialog for numeric values.
     hist_windows : dict
         Dictionary of histogram windows.
     hist2d_windows : dict
         Dictionary of 2D histogram windows.
-    locs : pd.DataFrame
-        Localizations loaded.
+    locs_full : pd.DataFrame
+        Master localizations table, set on load.
+    filtered_idx : np.ndarray
+        Integer indices into ``locs_full`` of the currently-visible
+        rows.
     pwd : str
         Current working directory.
     table_view : TableView
         Table view for displaying data.
     """
+
+    DOCS_URL = "https://picassosr.readthedocs.io/en/latest/filter.html"
 
     def __init__(self) -> None:
         super().__init__()
@@ -602,17 +608,33 @@ class Window(QtWidgets.QMainWindow):
         icon = QtGui.QIcon(icon_path)
         self.setWindowIcon(icon)
         self.table_view = TableView(self, self)
+        self.table_model = TableModel(self)
+        self.table_view.setModel(self.table_model)
         self.filter_num = FilterNum(self)
+        self.metadata_dialog = lib.MetadataDialog(self)
+        self.user_settings_dialog = lib.UserSettingsDialog(self)
         menu_bar = self.menuBar()
         file_menu = menu_bar.addMenu("File")
         open_action = file_menu.addAction("Open")
-        open_action.setShortcut(QtGui.QKeySequence.Open)
+        open_action.setShortcut(QtGui.QKeySequence.StandardKey.Open)
         open_action.triggered.connect(self.open_file_dialog)
         file_menu.addAction(open_action)
         save_action = file_menu.addAction("Save")
-        save_action.setShortcut(QtGui.QKeySequence.Save)
+        save_action.setShortcut(QtGui.QKeySequence.StandardKey.Save)
         save_action.triggered.connect(self.save_file_dialog)
-        file_menu.addAction(save_action)
+        export_csv_action = file_menu.addAction("Export as CSV")
+        export_csv_action.triggered.connect(self.export_csv_dialog)
+        metadata_action = file_menu.addAction("Show metadata")
+        metadata_action.setShortcut("Ctrl+M")
+        metadata_action.triggered.connect(self.show_metadata)
+        picasso_settings_action = file_menu.addAction("Picasso settings")
+        picasso_settings_action.triggered.connect(
+            self.user_settings_dialog.show
+        )
+        help_action = file_menu.addAction("Help")
+        help_action.triggered.connect(
+            lambda: QtGui.QDesktopServices.openUrl(QtCore.QUrl(self.DOCS_URL))
+        )
         plot_menu = menu_bar.addMenu("Plot")
         histogram_action = plot_menu.addAction("Histogram")
         histogram_action.setShortcut("Ctrl+H")
@@ -622,10 +644,17 @@ class Window(QtWidgets.QMainWindow):
         scatter_action.triggered.connect(self.plot_hist2d)
         test_subcluster_action = plot_menu.addAction("Test subclustering")
         test_subcluster_action.triggered.connect(self.plot_subclustering)
+
         filter_menu = menu_bar.addMenu("Filter")
-        filter_action = filter_menu.addAction("Filter")
+        filter_action = filter_menu.addAction("Filter numerically")
         filter_action.setShortcut("Ctrl+F")
         filter_action.triggered.connect(self.filter_num.show)
+        apply_from_metadata_action = filter_menu.addAction(
+            "Apply filters from metadata"
+        )
+        apply_from_metadata_action.triggered.connect(
+            self.apply_filters_from_metadata
+        )
         remove_columns_action = filter_menu.addAction("Remove columns")
         remove_columns_action.triggered.connect(self.remove_columns)
         main_widget = QtWidgets.QWidget()
@@ -640,7 +669,8 @@ class Window(QtWidgets.QMainWindow):
         self.hist_windows = {}
         self.hist2d_windows = {}
         self.filter_log = {}
-        self.locs = None
+        self.locs_full = None
+        self.filtered_idx = None
 
         # load user settings (working directory)
         settings = io.load_user_settings()
@@ -655,6 +685,135 @@ class Window(QtWidgets.QMainWindow):
         self.pwd = pwd
 
         self.plugin_menu = menu_bar.addMenu("Plugins")  # do not delete
+
+    @property
+    def locs(self) -> pd.DataFrame:
+        """Materialise the currently-filtered localizations.
+
+        Provided for backward compatibility (e.g. plugins). This
+        allocates a fresh DataFrame on every access — prefer
+        ``get_column``, ``get_columns`` or ``materialize_filtered``.
+        """
+        return self.materialize_filtered()
+
+    @property
+    def n_filtered(self) -> int:
+        """Number of currently-visible rows."""
+        if self.locs_full is None:
+            return 0
+        if self.filtered_idx is None:
+            return len(self.locs_full)
+        return len(self.filtered_idx)
+
+    def get_column(self, field: str) -> np.ndarray:
+        """Return the currently-filtered values of one column as a
+        numpy array. When no filter is applied this is a view into the
+        master DataFrame (no copy).
+        """
+        vals = self.locs_full[field].values
+        return vals if self.filtered_idx is None else vals[self.filtered_idx]
+
+    def get_columns(
+        self, fields: tuple[str]
+    ) -> tuple[lib.FloatArray1D | lib.IntArray1D]:
+        """Return the currently-filtered values of several columns as
+        numpy arrays."""
+        if self.filtered_idx is None:
+            return tuple(self.locs_full[f].values for f in fields)
+        return tuple(
+            self.locs_full[f].values[self.filtered_idx] for f in fields
+        )
+
+    def materialize_filtered(self) -> pd.DataFrame:
+        """Build a DataFrame of the currently-filtered localizations."""
+        if self.filtered_idx is None:
+            return self.locs_full.reset_index(drop=True)
+        return self.locs_full.iloc[self.filtered_idx].reset_index(drop=True)
+
+    def _idx_dtype(self, n: int):
+        return np.uint32 if n <= np.iinfo(np.uint32).max else np.int64
+
+    def apply_range(
+        self,
+        field: str,
+        xmin: float,
+        xmax: float,
+        *,
+        inclusive: bool = False,
+    ) -> None:
+        """Filter the active index to rows with ``field`` in the given
+        range. Non-finite values are always dropped.
+
+        ``inclusive=False`` matches the histogram-selection semantics
+        (strict ``>`` / ``<``); ``inclusive=True`` matches the numeric
+        filter dialog (``>=`` / ``<=``).
+        """
+        col = self.get_column(field)
+        if inclusive:
+            keep = (col >= xmin) & (col <= xmax)
+        else:
+            keep = (col > xmin) & (col < xmax)
+        if col.dtype.kind == "f":
+            keep &= np.isfinite(col)
+        if self.filtered_idx is None:
+            self.filtered_idx = np.flatnonzero(keep).astype(
+                self._idx_dtype(len(self.locs_full)), copy=False
+            )
+        else:
+            self.filtered_idx = self.filtered_idx[keep]
+        self.log_filter(field, xmin, xmax)
+        self.refresh()
+
+    def apply_range2d(
+        self,
+        field_x: str,
+        xmin: float,
+        xmax: float,
+        field_y: str,
+        ymin: float,
+        ymax: float,
+    ) -> None:
+        """Apply a 2D rectangular filter in one pass."""
+        cx, cy = self.get_columns([field_x, field_y])
+        keep = (cx > xmin) & (cx < xmax) & (cy > ymin) & (cy < ymax)
+        if cx.dtype.kind == "f":
+            keep &= np.isfinite(cx)
+        if cy.dtype.kind == "f":
+            keep &= np.isfinite(cy)
+        if self.filtered_idx is None:
+            self.filtered_idx = np.flatnonzero(keep).astype(
+                self._idx_dtype(len(self.locs_full)), copy=False
+            )
+        else:
+            self.filtered_idx = self.filtered_idx[keep]
+        self.log_filter(field_x, xmin, xmax)
+        self.log_filter(field_y, ymin, ymax)
+        self.refresh()
+
+    def refresh(self) -> None:
+        """Refresh the table view and any open histogram windows."""
+        n = self.n_filtered
+        self.vertical_scrollbar.setMaximum(max(0, n - 1))
+        self.display_locs(self.vertical_scrollbar.value())
+        for w in self.hist_windows.values():
+            if w:
+                w.refresh()
+        for d in self.hist2d_windows.values():
+            for w in d.values():
+                if w:
+                    w.refresh()
+
+    def show_metadata(self) -> None:
+        """Open the metadata dialog."""
+        if self.locs_full is None:
+            QtWidgets.QMessageBox.information(
+                self, "Metadata", "No file loaded."
+            )
+            return
+        label = os.path.basename(self.locs_path)
+        self.metadata_dialog.set_infos(self.info, labels=label)
+        self.metadata_dialog.show()
+        self.metadata_dialog.raise_()
 
     def open_file_dialog(self) -> None:
         if self.pwd == []:
@@ -674,22 +833,29 @@ class Window(QtWidgets.QMainWindow):
             locs, self.info = io.load_filter(path, qt_parent=self)
         except io.NoMetadataFileError:
             return
-        if self.locs is not None:
-            for column in self.locs.columns:
-                if self.hist_windows[column]:
+        if self.locs_full is not None:
+            for column in self.locs_full.columns:
+                if self.hist_windows.get(column):
                     self.hist_windows[column].close()
-                for column_y in self.locs.columns:
-                    if self.hist2d_windows[column][column_y]:
-                        self.hist_windows[column][column_y].close()
+                for column_y in self.locs_full.columns:
+                    if self.hist2d_windows.get(column, {}).get(column_y):
+                        self.hist2d_windows[column][column_y].close()
         self.locs_path = path
-        self.update_locs(locs)
-        for column in self.locs.columns:
+        self.locs_full = locs
+        # No filter applied yet — filtered_idx stays None so that we
+        # avoid allocating a 1:1 index of every row.
+        self.filtered_idx = None
+        self.filter_log = {}
+        self.hist_windows = {}
+        self.hist2d_windows = {}
+        for column in self.locs_full.columns:
             self.hist_windows[column] = None
             self.hist2d_windows[column] = {}
-            for column_y in self.locs.columns:
+            for column_y in self.locs_full.columns:
                 self.hist2d_windows[column][column_y] = None
             self.filter_log[column] = None
         self.filter_num.on_locs_loaded()
+        self.refresh()
 
         self.setWindowTitle(
             f"Picasso v{__version__}: Filter. File: {os.path.basename(path)}"
@@ -702,13 +868,9 @@ class Window(QtWidgets.QMainWindow):
         if len(indices) > 0:
             for index in indices:
                 index = index.column()
-                field = self.locs.columns[index]
+                field = self.locs_full.columns[index]
                 if not self.hist_windows[field]:
-                    self.hist_windows[field] = HistWindow(
-                        self,
-                        self.locs,
-                        field,
-                    )
+                    self.hist_windows[field] = HistWindow(self, field)
                 self.hist_windows[field].show()
 
     def plot_hist2d(self) -> None:
@@ -716,10 +878,12 @@ class Window(QtWidgets.QMainWindow):
         indices = selection_model.selectedColumns()
         if len(indices) == 2:
             indices = [index.column() for index in indices]
-            field_x, field_y = [self.locs.columns[index] for index in indices]
+            field_x, field_y = [
+                self.locs_full.columns[index] for index in indices
+            ]
             if not self.hist2d_windows[field_x][field_y]:
                 self.hist2d_windows[field_x][field_y] = Hist2DWindow(
-                    self, self.locs, field_x, field_y
+                    self, field_x, field_y
                 )
             self.hist2d_windows[field_x][field_y].show()
 
@@ -727,28 +891,20 @@ class Window(QtWidgets.QMainWindow):
         self.subcluster_num = SubclusterNum(self)
         self.subcluster_num.show()
 
-    def update_locs(self, locs: pd.DataFrame) -> None:
-        self.locs = locs
-        self.vertical_scrollbar.setMaximum(len(locs) - 1)
-        self.display_locs(self.vertical_scrollbar.value())
-        for field, hist_window in self.hist_windows.items():
-            if hist_window:
-                hist_window.update_locs(locs)
-        for field_x, hist2d_windows in self.hist2d_windows.items():
-            for field_y, hist2d_window in hist2d_windows.items():
-                if hist2d_window:
-                    hist2d_window.update_locs(locs)
-
     def display_locs(self, index: int) -> None:
-        if self.locs is not None:
-            view_height = self.table_view.viewport().height()
-            n_rows = int(view_height / ROW_HEIGHT) + 2
-            table_model = TableModel(
-                self.locs[index : index + n_rows],
-                index,
-                self,
-            )
-            self.table_view.setModel(table_model)
+        if self.locs_full is None:
+            return
+        view_height = self.table_view.viewport().height()
+        n_rows = int(view_height / ROW_HEIGHT) + 2
+        end = min(index + n_rows, self.n_filtered)
+        if end <= index:
+            visible = self.locs_full.iloc[0:0]
+        elif self.filtered_idx is None:
+            visible = self.locs_full.iloc[index:end]
+        else:
+            rows_idx = self.filtered_idx[index:end]
+            visible = self.locs_full.iloc[rows_idx]
+        self.table_model.set_data(visible, index)
 
     def log_filter(self, field: str, xmin: float, xmax: float) -> None:
         if self.filter_log[field]:
@@ -759,21 +915,123 @@ class Window(QtWidgets.QMainWindow):
 
     def remove_columns(self) -> None:
         """Remove columns from the loaded dataset."""
-        if self.locs is None:
+        if self.locs_full is None:
             return
-        columns = self.locs.columns.to_list()
+        columns = self.locs_full.columns.to_list()
         to_remove, ok = lib.RemoveColumnsDialog.getParams(self, columns)
         if not ok or len(to_remove) == 0:
             return
-        self.locs.drop(columns=to_remove, inplace=True)
-        self.update_locs(self.locs)
+        self.locs_full.drop(columns=to_remove, inplace=True)
+        self.refresh()
         if "Removed columns" in self.filter_log:
             self.filter_log["Removed columns"].extend(to_remove)
         else:
             self.filter_log["Removed columns"] = to_remove
 
+    def _build_filter_summary(self, ranges, to_remove, missing) -> str:
+        lines = []
+        if ranges:
+            lines.append("Filters to apply:")
+            for field, (xmin, xmax) in ranges.items():
+                lines.append(f"  {field}: [{xmin}, {xmax}]")
+        if to_remove:
+            if lines:
+                lines.append("")
+            lines.append("Columns to remove:")
+            for c in to_remove:
+                lines.append(f"  {c}")
+        if missing:
+            if lines:
+                lines.append("")
+            lines.append("Not found in current data (will be skipped):")
+            for c in missing:
+                lines.append(f"  {c}")
+        lines.append("")
+        lines.append("Apply these steps?")
+        return "\n".join(lines)
+
+    def _load_filter_metadata(self):
+        directory = self.pwd if self.pwd else ""
+        path, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self,
+            "Open metadata",
+            directory=directory,
+            filter="*.yaml",
+        )
+        if not path:
+            return None
+        try:
+            return io.load_info(path, qt_parent=self)
+        except io.NoMetadataFileError:
+            return None
+
+    def apply_filters_from_metadata(self) -> None:
+        """Replay filter steps recorded in another file's .yaml metadata
+        onto the currently loaded localizations."""
+        if self.locs_full is None:
+            QtWidgets.QMessageBox.information(
+                self, "Apply filters from metadata", "No file loaded."
+            )
+            return
+
+        info = self._load_filter_metadata()
+        if info is None:
+            return
+
+        ranges, to_remove, missing = lib.extract_filter_steps(
+            info, self.locs_full.columns
+        )
+
+        if not ranges and not to_remove:
+            msg = "No applicable filter steps found in metadata."
+            if missing:
+                msg += (
+                    "\n\nReferenced columns not found in current data:\n  "
+                    + "\n  ".join(missing)
+                )
+            QtWidgets.QMessageBox.information(
+                self, "Apply filters from metadata", msg
+            )
+            return
+
+        reply = QtWidgets.QMessageBox.question(
+            self,
+            "Apply filters from metadata",
+            self._build_filter_summary(ranges, to_remove, missing),
+            QtWidgets.QMessageBox.StandardButton.Yes
+            | QtWidgets.QMessageBox.StandardButton.Cancel,
+        )
+        if reply != QtWidgets.QMessageBox.StandardButton.Yes:
+            return
+
+        for field, (xmin, xmax) in ranges.items():
+            self.apply_range(field, xmin, xmax)
+        if to_remove:
+            self.locs_full.drop(columns=list(to_remove), inplace=True)
+            if "Removed columns" in self.filter_log:
+                self.filter_log["Removed columns"].extend(to_remove)
+            else:
+                self.filter_log["Removed columns"] = list(to_remove)
+            self.refresh()
+
+    def export_csv_dialog(self) -> None:
+        if self.locs_full is None:
+            return
+        base, ext = os.path.splitext(self.locs_path)
+        out_path = base + ".csv"
+        path, exe = lib.get_save_filename_ext_dialog(
+            self,
+            "Export as CSV",
+            out_path,
+            filter="*.csv",
+        )
+        if path:
+            self.materialize_filtered().to_csv(path, index=False)
+
     def save_file_dialog(self) -> None:
-        if "x" in self.locs.columns:  # Saving only for locs
+        if self.locs_full is None:
+            return
+        if "x" in self.locs_full.columns:  # Saving only for locs
             base, ext = os.path.splitext(self.locs_path)
             out_path = base + "_filter.hdf5"
             path, exe = lib.get_save_filename_ext_dialog(
@@ -789,7 +1047,7 @@ class Window(QtWidgets.QMainWindow):
                     {"Generated by": f"Picasso v{__version__} Filter"}
                 )
                 info = self.info + [filter_info]
-                io.save_locs(path, self.locs, info)
+                io.save_locs(path, self.materialize_filtered(), info)
         else:
             raise NotImplementedError("Saving only implemented for locs.")
 
@@ -804,10 +1062,10 @@ class Window(QtWidgets.QMainWindow):
 
     def closeEvent(self, event: QtGui.QCloseEvent) -> None:
         settings = io.load_user_settings()
-        if self.locs is not None:
+        if self.locs_full is not None:
             settings["Filter"]["PWD"] = self.pwd
             io.save_user_settings(settings)
-        QtWidgets.qApp.closeAllWindows()
+        QtWidgets.QApplication.instance().closeAllWindows()
 
 
 def main():
@@ -831,20 +1089,13 @@ def main():
 
     window.show()
 
-    def excepthook(type, value, tback):
-        lib.cancel_dialogs()
-        message = "".join(traceback.format_exception(type, value, tback))
-        errorbox = QtWidgets.QMessageBox.critical(
-            window,
-            "An error occured",
-            message,
-        )
-        errorbox.exec_()
-        sys.__excepthook__(type, value, tback)
+    from ..updater import setup_gui_update_check
 
-    sys.excepthook = excepthook
+    setup_gui_update_check(window)
 
-    sys.exit(app.exec_())
+    lib.install_excepthook(window)
+
+    sys.exit(app.exec())
 
 
 if __name__ == "__main__":

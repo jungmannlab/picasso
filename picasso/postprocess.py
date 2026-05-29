@@ -4,16 +4,20 @@ picasso.postprocess
 
 Data analysis of localization lists.
 
-:authors: Joerg Schnitzbauer, Maximilian Thomas Strauss, 2015-2018
-:copyright: Copyright (c) 2015-2018 Jungmann Lab, MPI Biochemistry
+:authors: Joerg Schnitzbauer, Maximilian Thomas Strauss,
+    Rafal Kowalewski
+:copyright: Copyright (c) 2015-2026 Jungmann Lab, MPI of Biochemistry
 """
 
 from __future__ import annotations
 
 import itertools
 import multiprocessing
+import os
+import warnings
 from collections import OrderedDict
 from collections.abc import Callable
+from copy import deepcopy
 from typing import Literal
 from concurrent.futures import ThreadPoolExecutor as _ThreadPoolExecutor
 from threading import Thread
@@ -23,11 +27,11 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from scipy import interpolate
-from scipy.optimize import curve_fit
+from scipy.optimize import curve_fit, OptimizeWarning
 from scipy.spatial import distance, KDTree
 from tqdm import tqdm, trange
 
-from . import lib, render, imageprocess, masking
+from . import io, lib, clusterer, render, imageprocess, masking, __version__
 
 
 def get_index_blocks(
@@ -38,8 +42,6 @@ def get_index_blocks(
     """Split localizations into blocks of the given size. Used for fast
     localization indexing (e.g., for picking).
 
-    Note: this function will be moved to ``picasso.lib`` in Picasso v0.11.0
-
     Parameters
     ----------
     locs : pd.DataFrame
@@ -47,7 +49,8 @@ def get_index_blocks(
     info : list of dicts
         Metadata of the localizations list.
     size : float
-        Size of the blocks in camera pixels.
+        Size of the blocks in camera pixels. For circular picks, this
+        is pick radius.
 
     Returns
     -------
@@ -55,13 +58,13 @@ def get_index_blocks(
         Localizations in the specified blocks.
     size : float
         Size of the blocks in camera pixels.
-    x_index : np.ndarray
+    x_index : lib.IntArray1D
         x indices of the localizations in the blocks.
-    y_index : np.ndarray
+    y_index : lib.IntArray1D
         y indices of the localizations in the blocks.
-    block_starts : np.ndarray
+    block_starts : lib.IntArray2D
         Block start indices.
-    block_ends : np.ndarray
+    block_ends : lib.IntArray2D
         Block end indices.
     K : int
         Number of blocks in y direction.
@@ -77,7 +80,7 @@ def get_index_blocks(
     x_index = x_index[sort_indices]
     y_index = y_index[sort_indices]
     # Allocate block info arrays
-    n_blocks_y, n_blocks_x = index_blocks_shape(info, size)
+    n_blocks_y, n_blocks_x = _index_blocks_shape(info, size)
     block_starts = np.zeros((n_blocks_y, n_blocks_x), dtype=np.uint32)
     block_ends = np.zeros((n_blocks_y, n_blocks_x), dtype=np.uint32)
     K, L = block_starts.shape
@@ -92,10 +95,19 @@ def get_index_blocks(
 
 
 def index_blocks_shape(info: list[dict], size: float) -> tuple[int, int]:
+    """Alias for _index_blocks_shape, deprecated.
+
+    TOOD: remove in v0.11.0."""
+    lib.deprecation_warning(
+        "Deprecation warning: This function will become private in"
+        "v0.11.0. Use _index_blocks_shape instead."
+    )
+    return _index_blocks_shape(info, size)
+
+
+def _index_blocks_shape(info: list[dict], size: float) -> tuple[int, int]:
     """Return the shape of the index grid, given the movie and grid
     sizes.
-
-    Note: this function will be moved to ``picasso.lib`` in Picasso v0.11.0
 
     Parameters
     ----------
@@ -107,19 +119,19 @@ def index_blocks_shape(info: list[dict], size: float) -> tuple[int, int]:
     Returns
     -------
     n : tuple
-        Number of blocks in y direction and x direction.
+        Number of blocks in y and x.
     """
-    n_blocks_x = int(np.ceil(info[0]["Width"] / size))
-    n_blocks_y = int(np.ceil(info[0]["Height"] / size))
+    width = lib.get_from_metadata(info, "Width", raise_error=True)
+    height = lib.get_from_metadata(info, "Height", raise_error=True)
+    n_blocks_x = int(np.ceil(width / size))
+    n_blocks_y = int(np.ceil(height / size))
     n = (n_blocks_y, n_blocks_x)
     return n
 
 
-def get_block_locs_at(x: float, y: float, index_blocks: tuple) -> np.ndarray:
+def get_block_locs_at(x: float, y: float, index_blocks: tuple) -> pd.DataFrame:
     """Return the localizations in the blocks around the given
     coordinates.
-
-    Note: this function will be moved to ``picasso.lib`` in Picasso v0.11.0
 
     Parameters
     ----------
@@ -132,9 +144,13 @@ def get_block_locs_at(x: float, y: float, index_blocks: tuple) -> np.ndarray:
 
     Returns
     -------
-    locs : np.ndarray
+    locs : pd.DataFrame
         Localizations in the blocks around the given coordinates.
     """
+    lib.deprecation_warning(
+        "Deprecation warning: This function will be removed in v0.11.0."
+        " Use get_block_locs_at_numba instead."
+    )
     locs, size, _, _, block_starts, block_ends, K, L = index_blocks
     x_index = np.uint32(x / size)
     y_index = np.uint32(y / size)
@@ -152,16 +168,13 @@ def get_block_locs_at(x: float, y: float, index_blocks: tuple) -> np.ndarray:
 
 @numba.jit(nopython=True, nogil=True)
 def _fill_index_blocks(
-    block_starts: np.ndarray,
-    block_ends: np.ndarray,
-    x_index: np.ndarray,
-    y_index: np.ndarray,
+    block_starts: lib.IntArray2D,
+    block_ends: lib.IntArray2D,
+    x_index: lib.IntArray1D,
+    y_index: lib.IntArray1D,
 ) -> None:
     """Fill the block starts and ends arrays with the indices of
-    localizations in the blocks.
-
-    Note: this function will be moved to ``picasso.lib`` in Picasso v0.11.0
-    """
+    localizations in the blocks."""
     Y, X = block_starts.shape
     N = len(x_index)
     k = 0
@@ -174,24 +187,189 @@ def _fill_index_blocks(
 
 @numba.jit(nopython=True, nogil=True)
 def _fill_index_block(
-    block_starts: np.ndarray,
-    block_ends: np.ndarray,
+    block_starts: lib.IntArray2D,
+    block_ends: lib.IntArray2D,
     N: int,
-    x_index: np.ndarray,
-    y_index: np.ndarray,
+    x_index: lib.IntArray1D,
+    y_index: lib.IntArray1D,
     i: int,
     j: int,
     k: int,
 ) -> int:
-    """Fill the block starts and ends arrays for a single block.
-
-    Note: this function will be moved to ``picasso.lib`` in Picasso v0.11.0
-    """
+    """Fill the block starts and ends arrays for a single block."""
     block_starts[i, j] = k
     while k < N and y_index[k] == i and x_index[k] == j:
         k += 1
     block_ends[i, j] = k
     return k
+
+
+def _picked_circular_locs(
+    locs: pd.DataFrame,
+    info: list[dict],
+    picks: list[tuple],
+    pick_size: float,
+    index_blocks: tuple | None,
+    add_group: bool,
+    callback: Callable[[int], None] | Literal["console"] | None,
+    progress: tqdm | None,
+) -> list[pd.DataFrame]:
+    """Helper function for picking localizations using circular picks.
+    See ``picked_locs`` for more details."""
+    picked_locs = []
+    if index_blocks is None:
+        index_blocks = get_index_blocks(locs, info, pick_size)
+    locs_xy = index_blocks[0][["x", "y"]].to_numpy().T
+    for i, pick in enumerate(picks):
+        x, y = pick
+        x_, y_ = int(x / pick_size), int(y / pick_size)
+        block_locs_idx = _get_block_locs_at_numba(
+            x_,
+            y_,
+            index_blocks[4],
+            index_blocks[5],
+            index_blocks[6],
+            index_blocks[7],
+        )
+        block_locs = index_blocks[0].iloc[block_locs_idx]
+        group_locs_idx = _locs_at_numba(
+            x, y, locs_xy[:, block_locs_idx], pick_size
+        )
+        group_locs = block_locs.iloc[group_locs_idx].copy()
+
+        if add_group:
+            group_locs["group"] = i
+        group_locs.sort_values(
+            by="frame",
+            kind="quicksort",
+            inplace=True,
+        )
+        picked_locs.append(group_locs)
+
+        if callback == "console":
+            progress.update(1)
+        elif callback is not None:
+            callback(i + 1)
+    return picked_locs
+
+
+def _picked_rectangular_locs(
+    locs: pd.DataFrame,
+    picks: list[tuple],
+    pick_size: float,
+    add_group: bool,
+    callback: Callable[[int], None] | Literal["console"] | None,
+    progress: tqdm | None,
+) -> list[pd.DataFrame]:
+    """Helper function for picking localizations using rectangular
+    picks. See ``picked_locs`` for more details."""
+    picked_locs = []
+    for i, pick in enumerate(picks):
+        (xs, ys), (xe, ye) = pick
+        X, Y = lib.get_pick_rectangle_corners(xs, ys, xe, ye, pick_size)
+        x_min = min(X)
+        x_max = max(X)
+        y_min = min(Y)
+        y_max = max(Y)
+        mask = (
+            (locs["x"] > x_min)
+            & (locs["x"] < x_max)
+            & (locs["y"] > y_min)
+            & (locs["y"] < y_max)
+        )
+        group_locs = lib.locs_in_rectangle(locs[mask], X, Y).copy()
+        # store rotated coordinates in x_rot and y_rot
+        angle = 0.5 * np.pi - np.arctan2((ye - ys), (xe - xs))
+        x_shifted = group_locs["x"] - xs
+        y_shifted = group_locs["y"] - ys
+        x_pick_rot = x_shifted * np.cos(angle) - y_shifted * np.sin(angle)
+        y_pick_rot = x_shifted * np.sin(angle) + y_shifted * np.cos(angle)
+        group_locs["x_pick_rot"] = x_pick_rot
+        group_locs["y_pick_rot"] = y_pick_rot
+        if add_group:
+            group_locs["group"] = i
+        group_locs.sort_values(by="frame", kind="quicksort", inplace=True)
+        picked_locs.append(group_locs)
+
+        if callback == "console":
+            progress.update(1)
+        elif callback is not None:
+            callback(i + 1)
+    return picked_locs
+
+
+def _picked_polygonal_locs(
+    locs: pd.DataFrame,
+    picks: list[tuple],
+    add_group: bool,
+    callback: Callable[[int], None] | Literal["console"] | None,
+    progress: tqdm | None,
+):
+    """Helper function for picking localizations using polygonal picks. See
+    ``picked_locs`` for more details."""
+    picked_locs = []
+    for i, pick in enumerate(picks):
+        X, Y = lib.get_pick_polygon_corners(pick)
+        if X is None:
+            if callback == "console":
+                progress.update(1)
+            elif callback is not None:
+                callback(i + 1)
+            continue
+        mask = (
+            (locs["x"] > min(X))
+            & (locs["x"] < max(X))
+            & (locs["y"] > min(Y))
+            & (locs["y"] < max(Y))
+        )
+        group_locs = lib.locs_in_polygon(locs[mask], X, Y).copy()
+        if add_group:
+            group_locs["group"] = i
+        group_locs.sort_values(by="frame", kind="quicksort", inplace=True)
+        picked_locs.append(group_locs)
+
+        if callback == "console":
+            progress.update(1)
+        elif callback is not None:
+            callback(i + 1)
+    return picked_locs
+
+
+def _picked_square_locs(
+    locs: pd.DataFrame,
+    picks: list[tuple],
+    pick_size: float,
+    add_group: bool,
+    callback: Callable[[int], None] | Literal["console"] | None,
+    progress: tqdm | None,
+) -> list[pd.DataFrame]:
+    """Helper function for picking localizations using square picks. See
+    ``picked_locs`` for more details."""
+    picked_locs = []
+    for i, pick in enumerate(picks):
+        x, y = pick
+        half_a = pick_size / 2
+        x_min = x - half_a
+        x_max = x + half_a
+        y_min = y - half_a
+        y_max = y + half_a
+        mask = (
+            (locs["x"] > x_min)
+            & (locs["x"] < x_max)
+            & (locs["y"] > y_min)
+            & (locs["y"] < y_max)
+        )
+        group_locs = locs[mask].copy()
+        if add_group:
+            group_locs["group"] = i
+        group_locs.sort_values(by="frame", kind="quicksort", inplace=True)
+        picked_locs.append(group_locs)
+
+        if callback == "console":
+            progress.update(1)
+        elif callback is not None:
+            callback(i + 1)
+    return picked_locs
 
 
 def picked_locs(
@@ -207,8 +385,6 @@ def picked_locs(
     """Find picked localizations, i.e., localizations within the given
     regions of interest.
 
-    Note: this function will be moved to ``picasso.lib`` in Picasso v0.11.0
-
     Parameters
     ----------
     locs : pd.DataFrame
@@ -220,8 +396,9 @@ def picked_locs(
     pick_shape : {'Circle', 'Rectangle', 'Polygon', 'Square'}
         Shape of the pick.
     pick_size : float, optional
-        Size of the pick. Radius for the circles, width for the
-        rectangles, None for the polygons. Default is None.
+        Size of the pick in camera pixels. Radius for the circles, width
+        for the rectangles, None for the polygons, side length for
+        squares. Default is None.
     add_group : boolean, optional
         True if group id should be added to locs. Each pick will be
         assigned a different id. Default is True.
@@ -229,7 +406,7 @@ def picked_locs(
         Used only for circular picks. Precomputed index blocks for
         localizations, see  ``get_index_blocks``.If None, they will be
         calculated internally. Default is None.
-    callback : function or "console" or None, optional
+    callback : Callable[[int], None] | Literal["console"] | None, optional
         Function to display progress. If "console", tqdm is used to
         display the progress. If None, no progress is displayed. Default
         is None.
@@ -243,140 +420,57 @@ def picked_locs(
     assert (
         pick_shape in _valid_shapes
     ), f"Invalid pick shape: {pick_shape}. Choose one of {_valid_shapes}."
-    if len(picks):
-        picked_locs = []
-        if callback == "console":
-            progress = tqdm(
-                range(len(picks)),
-                desc="Picking locs",
-                unit="pick",
-            )
+    if len(picks) == 0:
+        return []
 
-        if pick_shape == "Circle":
-            if index_blocks is None:
-                index_blocks = get_index_blocks(locs, info, pick_size)
-            locs_xy = index_blocks[0][["x", "y"]].to_numpy().T
-            for i, pick in enumerate(picks):
-                x, y = pick
-                x_, y_ = int(x / pick_size), int(y / pick_size)
-                block_locs_idx = _get_block_locs_at_numba(
-                    x_,
-                    y_,
-                    index_blocks[4],
-                    index_blocks[5],
-                    index_blocks[6],
-                    index_blocks[7],
-                )
-                block_locs = index_blocks[0].iloc[block_locs_idx]
-                group_locs_idx = _locs_at_numba(
-                    x, y, locs_xy[:, block_locs_idx], pick_size
-                )
-                group_locs = block_locs.iloc[group_locs_idx].copy()
+    picked_locs = []
+    if callback == "console":
+        progress = tqdm(
+            range(len(picks)),
+            desc="Picking locs",
+            unit="pick",
+        )
+    else:
+        progress = None
 
-                if add_group:
-                    group_locs["group"] = i
-                group_locs.sort_values(
-                    by="frame",
-                    kind="quicksort",
-                    inplace=True,
-                )
-                picked_locs.append(group_locs)
-
-                if callback == "console":
-                    progress.update(1)
-                elif callback is not None:
-                    callback(i + 1)
-
-        elif pick_shape == "Rectangle":
-            for i, pick in enumerate(picks):
-                (xs, ys), (xe, ye) = pick
-                X, Y = lib.get_pick_rectangle_corners(
-                    xs, ys, xe, ye, pick_size
-                )
-                x_min = min(X)
-                x_max = max(X)
-                y_min = min(Y)
-                y_max = max(Y)
-                group_locs = locs[locs["x"] > x_min]
-                group_locs = group_locs[group_locs["x"] < x_max]
-                group_locs = group_locs[group_locs["y"] > y_min]
-                group_locs = group_locs[group_locs["y"] < y_max]
-                group_locs = lib.locs_in_rectangle(group_locs, X, Y)
-                # store rotated coordinates in x_rot and y_rot
-                angle = 0.5 * np.pi - np.arctan2((ye - ys), (xe - xs))
-                x_shifted = group_locs["x"] - xs
-                y_shifted = group_locs["y"] - ys
-                x_pick_rot = x_shifted * np.cos(angle) - y_shifted * np.sin(
-                    angle
-                )
-                y_pick_rot = x_shifted * np.sin(angle) + y_shifted * np.cos(
-                    angle
-                )
-                group_locs["x_pick_rot"] = x_pick_rot
-                group_locs["y_pick_rot"] = y_pick_rot
-                if add_group:
-                    group_locs["group"] = i
-                group_locs.sort_values(
-                    by="frame", kind="quicksort", inplace=True
-                )
-                picked_locs.append(group_locs)
-
-                if callback == "console":
-                    progress.update(1)
-                elif callback is not None:
-                    callback(i + 1)
-
-        elif pick_shape == "Polygon":
-            for i, pick in enumerate(picks):
-                X, Y = lib.get_pick_polygon_corners(pick)
-                if X is None:
-                    if callback == "console":
-                        progress.update(1)
-                    elif callback is not None:
-                        callback(i + 1)
-                    continue
-                group_locs = locs[locs["x"] > min(X)]
-                group_locs = group_locs[group_locs["x"] < max(X)]
-                group_locs = group_locs[group_locs["y"] > min(Y)]
-                group_locs = group_locs[group_locs["y"] < max(Y)]
-                group_locs = lib.locs_in_polygon(group_locs, X, Y)
-                if add_group:
-                    group_locs["group"] = i
-                group_locs.sort_values(
-                    by="frame", kind="quicksort", inplace=True
-                )
-                picked_locs.append(group_locs)
-
-                if callback == "console":
-                    progress.update(1)
-                elif callback is not None:
-                    callback(i + 1)
-
-        elif pick_shape == "Square":
-            for i, pick in enumerate(picks):
-                x, y = pick
-                half_a = pick_size / 2
-                x_min = x - half_a
-                x_max = x + half_a
-                y_min = y - half_a
-                y_max = y + half_a
-                group_locs = locs[locs["x"] > x_min]
-                group_locs = group_locs[group_locs["x"] < x_max]
-                group_locs = group_locs[group_locs["y"] > y_min]
-                group_locs = group_locs[group_locs["y"] < y_max]
-                if add_group:
-                    group_locs["group"] = i
-                group_locs.sort_values(
-                    by="frame", kind="quicksort", inplace=True
-                )
-                picked_locs.append(group_locs)
-
-                if callback == "console":
-                    progress.update(1)
-                elif callback is not None:
-                    callback(i + 1)
-
-        return picked_locs
+    if pick_shape == "Circle":
+        picked_locs = _picked_circular_locs(
+            locs=locs,
+            info=info,
+            picks=picks,
+            pick_size=pick_size,
+            index_blocks=index_blocks,
+            add_group=add_group,
+            callback=callback,
+            progress=progress,
+        )
+    elif pick_shape == "Rectangle":
+        picked_locs = _picked_rectangular_locs(
+            locs=locs,
+            picks=picks,
+            pick_size=pick_size,
+            add_group=add_group,
+            callback=callback,
+            progress=progress,
+        )
+    elif pick_shape == "Polygon":
+        picked_locs = _picked_polygonal_locs(
+            locs=locs,
+            picks=picks,
+            add_group=add_group,
+            callback=callback,
+            progress=progress,
+        )
+    elif pick_shape == "Square":
+        picked_locs = _picked_square_locs(
+            locs=locs,
+            picks=picks,
+            pick_size=pick_size,
+            add_group=add_group,
+            callback=callback,
+            progress=progress,
+        )
+    return picked_locs
 
 
 def pick_similar(
@@ -404,8 +498,6 @@ def pick_similar(
 
     This function calls ``_pick_similar`` which is implemented in numba
     for speed.
-
-    Note: this function will be moved to ``picasso.lib`` in Picasso v0.11.0
 
     Parameters
     ----------
@@ -503,27 +595,27 @@ def pick_similar(
 
 
 @numba.jit(nopython=True, nogil=True, cache=True)
-def _pick_similar(
-    x: np.ndarray,
-    y_shift: np.ndarray,
-    y_base: np.ndarray,
+def _pick_similar(  # noqa: C901
+    x: lib.FloatArray1D,
+    y_shift: lib.FloatArray1D,
+    y_base: lib.FloatArray1D,
     min_n_locs: int,
     max_n_locs: int,
     min_rmsd: float,
     max_rmsd: float,
-    x_r: np.ndarray,
-    y_r1: np.ndarray,
-    y_r2: np.ndarray,
-    locs_xy: np.ndarray,
-    block_starts: np.ndarray,
-    block_ends: np.ndarray,
+    x_r: lib.IntArray1D,
+    y_r1: lib.IntArray1D,
+    y_r2: lib.IntArray1D,
+    locs_xy: lib.FloatArray2D,
+    block_starts: lib.IntArray2D,
+    block_ends: lib.IntArray2D,
     K: int,
     L: int,
-    x_similar: np.ndarray,
-    y_similar: np.ndarray,
+    x_similar: lib.FloatArray1D,
+    y_similar: lib.FloatArray1D,
     r: float,
     d2: float,
-) -> tuple[np.ndarray, np.ndarray]:
+) -> tuple[lib.FloatArray1D, lib.FloatArray1D]:
     """Find similar picks based on the number of localizations and
     RMSD. Only implemented for circular picks.
 
@@ -538,31 +630,29 @@ def _pick_similar(
     ``pick_similar``. See that function for more user-friendly
     interface.
 
-    Note: this function will be moved to ``picasso.lib`` in Picasso v0.11.0
-
     Parameters
     ----------
-    x : np.ndarray
+    x : lib.FloatArray1D
         x coordinates of the picks.
-    y_shift : np.ndarray
+    y_shift : lib.FloatArray1D
         y coordinates of the picks, shifted for odd columns.
-    y_base : np.ndarray
+    y_base : lib.FloatArray1D
         y coordinates of the picks, not shifted.
     min_n_locs, max_n_locs : int
         Minimum and maximum number of localizations in the pick.
     min_rmsd, max_rmsd : float
         Minimum and maximum RMSD for the pick.
-    x_r, y_r1, y_r2 : np.ndarray
+    x_r, y_r1, y_r2 : lib.IntArray1D
         x and y ranges for the picks.
-    locs_xy : np.ndarray
+    locs_xy : lib.FloatArray2D
         Localizations in the blocks.
-    block_starts : np.ndarray
+    block_starts : lib.IntArray2D
         Block start indices.
-    block_ends : np.ndarray
+    block_ends : lib.IntArray2D
         Block end indices.
     K, L : int
         Number of blocks in y and x direction.
-    x_similar, y_similar : np.ndarray
+    x_similar, y_similar : lib.FloatArray1D
         Arrays to store the x and y coordinates of the similar picks.
     r : float
         Radius for the picks.
@@ -571,7 +661,7 @@ def _pick_similar(
 
     Returns
     -------
-    x_similar, y_similar : np.ndarray
+    x_similar, y_similar : lib.FloatArray1D
         Arrays with the x and y coordinates of the similar picks.
     """
     for i, x_grid in enumerate(x):
@@ -585,7 +675,7 @@ def _pick_similar(
             y_r = y_r2
         for j, y_grid in enumerate(y):
             y_range = y_r[j]
-            n_block_locs = n_block_locs_at(
+            n_block_locs = _n_block_locs_at(
                 x_range,
                 y_range,
                 K,
@@ -646,20 +736,98 @@ def _pick_similar(
     return x_similar, y_similar
 
 
-@numba.jit(nopython=True, nogil=True)
+def remove_locs_in_picks(
+    locs: pd.DataFrame,
+    info: list[dict],
+    *,
+    picks: list[tuple],
+    pick_shape: Literal["Circle", "Rectangle", "Polygon", "Square"],
+    pick_size: float | None = None,
+    index_blocks: tuple = None,
+) -> pd.DataFrame:
+    """Remove localizations in picks.
+
+    Parameters
+    ----------
+    locs : pd.DataFrame
+        Localizations.
+    info : list of dicts
+        Localization metadata.
+    picks : list of tuples
+        List of picks, each pick is a list of coordinates of the pick
+        corners. See ``io.load_picks``.
+    pick_shape : {"Circle", "Rectangle", "Polygon", "Square"}
+        Shape of picks.
+    pick_size : float or None
+        Size of picks in camera pixels. For circles - diameters. For
+        rectangles - width. For squares - side length. For polygons -
+        ignored. Ignored if picks are loaded from a YAML file.
+    index_blocks : tuple, optional
+        Used only for circular picks. Precomputed index blocks for
+        localizations, see  ``get_index_blocks``. If None, they will be
+        calculated internally. Default is None.
+
+    Returns
+    -------
+    locs : pd.DataFrame
+        Localizations with localizations in picks removed.
+    """
+    assert pick_shape in ("Circle", "Rectangle", "Polygon", "Square"), (
+        "pick_shape must be one of 'Circle', 'Rectangle', 'Polygon', "
+        "or 'Square'."
+    )
+    if pick_shape != "Polygon":
+        assert isinstance(
+            pick_size, (int, float)
+        ), "pick_size must be a number."
+    if pick_shape == "Circle":
+        pick_size /= 2  # convert diameter to radius
+    else:
+        index_blocks = None  # ignore index blocks, only used for circle picks
+    all_picked_locs = picked_locs(
+        locs=locs,
+        info=info,
+        picks=picks,
+        pick_shape=pick_shape,
+        pick_size=pick_size,
+        add_group=False,
+        index_blocks=index_blocks,
+    )
+    # store indices of picked locs
+    idx = np.concatenate([_.index for _ in all_picked_locs])
+    locs.drop(index=idx, inplace=True)
+    return locs
+
+
 def n_block_locs_at(
     x_range: int,
     y_range: int,
     K: int,
     L: int,
-    block_starts: np.ndarray,
-    block_ends: np.ndarray,
+    block_starts: lib.IntArray2D,
+    block_ends: lib.IntArray2D,
+) -> int:
+    """Alias to _n_block_locs_at, deprecated.
+
+    TODO: remove in v0.11.0."""
+    lib.deprecation_warning(
+        "Deprecation warning: This function will become private in "
+        "v0.11.0. Use _n_block_locs_at instead."
+    )
+    return _n_block_locs_at(x_range, y_range, K, L, block_starts, block_ends)
+
+
+@numba.jit(nopython=True, nogil=True)
+def _n_block_locs_at(
+    x_range: int,
+    y_range: int,
+    K: int,
+    L: int,
+    block_starts: lib.IntArray2D,
+    block_ends: lib.IntArray2D,
 ) -> int:
     """Return the number of localizations in the blocks around the
-    given coordinates.
-
-    Note: this function will be moved to ``picasso.lib`` in Picasso v0.11.0
-    """
+    given coordinates."""
     step = 0
     for k in range(y_range - 1, y_range + 2):
         if 0 < k < K:
@@ -681,16 +849,13 @@ def n_block_locs_at(
 def _get_block_locs_at_numba(
     x_index: int,
     y_index: int,
-    block_starts: np.ndarray,
-    block_ends: np.ndarray,
+    block_starts: lib.IntArray2D,
+    block_ends: lib.IntArray2D,
     K: int,
     L: int,
-) -> np.ndarray:
+) -> lib.IntArray1D:
     """Numba implementation of ``get_block_locs_at``. Return the indices
-    of localizations in the blocks around the given coordinates.
-
-    Note: this function will be moved to ``picasso.lib`` in Picasso v0.11.0
-    """
+    of localizations in the blocks around the given coordinates."""
     step = 0
     for k in range(y_index - 1, y_index + 2):
         if 0 <= k < K:
@@ -725,17 +890,14 @@ def _get_block_locs_at_numba(
 def get_block_locs_at_numba(
     x_index: int,
     y_index: int,
-    locs_xy: np.ndarray,
-    block_starts: np.ndarray,
-    block_ends: np.ndarray,
+    locs_xy: lib.FloatArray2D,
+    block_starts: lib.IntArray2D,
+    block_ends: lib.IntArray2D,
     K: int,
     L: int,
-) -> np.ndarray:
+) -> lib.FloatArray2D:
     """Numba implementation of ``get_block_locs_at. Return the
-    localizations in the blocks around the given coordinates.
-
-    Note: this function will be moved to ``picasso.lib`` in Picasso v0.11.0
-    """
+    localizations in the blocks around the given coordinates."""
     indices = _get_block_locs_at_numba(
         x_index,
         y_index,
@@ -751,9 +913,9 @@ def get_block_locs_at_numba(
 def _locs_at_numba(
     x: float,
     y: float,
-    locs_xy: np.ndarray,
+    locs_xy: lib.FloatArray2D,
     r: float,
-) -> np.ndarray:
+) -> lib.BoolArray1D:
     """Numba implementation of ``lib.locs_at``. Return the indices of
     localizations at the given coordinates within radius ``r``.
 
@@ -770,9 +932,9 @@ def _locs_at_numba(
 def locs_at_numba(
     x: float,
     y: float,
-    locs_xy: np.ndarray,
+    locs_xy: lib.FloatArray2D,
     r: float,
-) -> np.ndarray:
+) -> lib.FloatArray2D:
     """Numba implementation of ``lib.locs_at``. Return the localizations
     at the given coordinates within radius ``r``.
 
@@ -783,7 +945,7 @@ def locs_at_numba(
 
 
 @numba.jit(nopython=True, nogil=True)
-def rmsd_at_com(locs_xy: np.ndarray) -> float:
+def rmsd_at_com(locs_xy: lib.FloatArray2D) -> float:
     """Calculate the RMSD of the localizations at the center of mass
     (COM) of the localizations.
 
@@ -796,18 +958,18 @@ def rmsd_at_com(locs_xy: np.ndarray) -> float:
 
 
 @numba.jit(nopython=True, nogil=True)
-def _distance_histogram(
-    x: np.ndarray,
-    y: np.ndarray,
+def _distance_histogram(  # noqa: C901
+    x: lib.FloatArray1D,
+    y: lib.FloatArray1D,
     bin_size: float,
     r_max: float,
-    x_index: np.ndarray,
-    y_index: np.ndarray,
-    block_starts: np.ndarray,
-    block_ends: np.ndarray,
+    x_index: lib.IntArray1D,
+    y_index: lib.IntArray1D,
+    block_starts: lib.IntArray2D,
+    block_ends: lib.IntArray2D,
     start: int,
     chunk: int,
-) -> np.ndarray:
+) -> lib.IntArray1D:
     """Calculate the distance histogram for a chunk of localizations."""
     dh_len = np.uint32(r_max / bin_size)
     dh = np.zeros(dh_len, dtype=np.uint32)
@@ -842,7 +1004,7 @@ def distance_histogram(
     info: list[dict],
     bin_size: float,
     r_max: float,
-) -> np.ndarray:
+) -> lib.IntArray1D:
     """Calculate the distance histogram for the given localizations,
     i.e., the pairwise distances between localizations.
 
@@ -859,7 +1021,7 @@ def distance_histogram(
 
     Returns
     -------
-    dh : np.ndarray
+    dh : lib.IntArray1D
         Distance histogram.
     """
     locs, size, x_index, y_index, b_starts, b_ends, K, L = get_index_blocks(
@@ -919,9 +1081,9 @@ def nena(
         Data on the results, including the distances probed, best fit
         and fitted parameters.
     s : float
-        Estimated localization precision.
+        Estimated localization precision in camera pixels.
     """
-    bin_centers, dnfl = next_frame_neighbor_distance_histogram(locs, callback)
+    bin_centers, dnfl = _next_frame_neighbor_distance_histogram(locs, callback)
 
     def func(d, delta_a, s, ac, dc, sc):
         a = ac + delta_a  # make sure a >= ac
@@ -950,14 +1112,74 @@ def nena(
             "dc": popt[3],
             "sc": popt[4],
         },
+        "pixelsize": lib.get_from_metadata(info, "Pixelsize", default="N/A"),
     }
     return result, s
+
+
+def plot_nena(
+    nena_result: dict,
+    fig: plt.Figure = None,
+) -> plt.Figure:
+    """Plot the results of NeNA.
+
+    Parameters
+    ----------
+    nena_result : dict
+        Data on the results from function ``nena``, including the
+        distances probed, best fit and fitted parameters. If "pixelsize"
+        is included, the distances will be plotted in nm, otherwise in
+        camera pixels.
+    fig : plt.Figure
+        Figure to plot on. If None, a new figure and axes are
+        created.
+
+    Returns
+    -------
+    fig : plt.Figure
+        Figure containing the plot.
+    """
+    if fig is None:
+        fig = plt.Figure(constrained_layout=True)
+    else:
+        fig.clear()
+    d = deepcopy(nena_result["d"])
+    ax = fig.add_subplot(111)
+    pixelsize = (
+        nena_result["pixelsize"] if nena_result["pixelsize"] != "N/A" else 1
+    )
+    unit = "nm" if nena_result["pixelsize"] != "N/A" else "pixels"
+    d *= nena_result["pixelsize"]
+    ax.set_title(
+        "Next frame neighbor distance histogram, "
+        f"\u03c3 = {nena_result['best_values']['s'] * pixelsize:.2f} {unit}"
+    )
+    ax.plot(d, nena_result["data"], label="Data")
+    ax.plot(d, nena_result["best_fit"], label="Fit")
+    ax.set_xlabel(f"Distance ({unit})")
+    ax.set_ylabel("Counts")
+    ax.legend(loc="best")
+    return fig
 
 
 def next_frame_neighbor_distance_histogram(
     locs: pd.DataFrame,
     callback: Callable[[int], None] | None = None,
-) -> tuple[np.ndarray, np.ndarray]:
+) -> tuple[lib.FloatArray1D, lib.FloatArray1D]:
+    """Alias to _next_frame_neighbor_distance_histogram, deprecated.
+
+    TODO: remove in v0.11.0."""
+    lib.deprecation_warning(
+        "Deprecation warning: This function will become private in "
+        "v0.11.0. Use _next_frame_neighbor_distance_histogram instead."
+    )
+    return _next_frame_neighbor_distance_histogram(locs, callback)
+
+
+def _next_frame_neighbor_distance_histogram(
+    locs: pd.DataFrame,
+    callback: Callable[[int], None] | None = None,
+) -> tuple[lib.FloatArray1D, lib.FloatArray1D]:
     """Calculate the next frame neighbor distance histogram (NFNDH).
 
     Parameters
@@ -969,9 +1191,9 @@ def next_frame_neighbor_distance_histogram(
 
     Returns
     -------
-    bin_centers : np.ndarray
+    bin_centers : lib.FloatArray1D
         Centers of the bins for the histogram.
-    dnfl : np.ndarray
+    dnfl : lib.FloatArray1D
         Distance histogram of next frame neighbors.
     """
     locs.sort_values(kind="quicksort", by="frame", inplace=True)
@@ -988,14 +1210,14 @@ def next_frame_neighbor_distance_histogram(
 
 
 def _nfndh(
-    frame: np.ndarray,
-    x: np.ndarray,
-    y: np.ndarray,
-    group: np.ndarray,
+    frame: lib.IntArray1D,
+    x: lib.FloatArray1D,
+    y: lib.FloatArray1D,
+    group: lib.IntArray1D,
     d_max: float,
     bin_size: float,
     callback: Callable[[int], None] | None = None,
-) -> tuple[np.ndarray, np.ndarray]:
+) -> tuple[lib.FloatArray1D, lib.FloatArray1D]:
     """Calculate the next frame neighbor distance histogram (NFNDH)."""
     N = len(frame)
     bins = np.arange(0, d_max, bin_size)
@@ -1014,13 +1236,13 @@ def _nfndh(
 @numba.jit(nopython=True)
 def _fill_dnfl(
     N: int,
-    frame: np.ndarray,
-    x: np.ndarray,
-    y: np.ndarray,
-    group: np.ndarray,
+    frame: lib.IntArray1D,
+    x: lib.FloatArray1D,
+    y: lib.FloatArray1D,
+    group: lib.IntArray1D,
     i: int,
     d_max: float,
-    dnfl: np.ndarray,
+    dnfl: lib.FloatArray1D,
     bin_size: float,
 ) -> None:
     """Fill the next frame neighbor distance histogram (NFNDH) for a
@@ -1048,6 +1270,51 @@ def _fill_dnfl(
                     if d <= d_max:
                         bin = int(d / bin_size)
                         dnfl[bin] += 1
+
+
+def plot_frc(
+    frc_result: dict,
+    fig: plt.Figure = None,
+) -> plt.Figure:
+    """Plot the results of the Fourier Ring Correlation (FRC) resolution
+    estimation.
+
+    Parameters
+    ----------
+    frc_result : dict
+        Dictionary result of ``frc``.
+    fig : plt.Figure
+        Figure to plot on. If None, a new figure and axes are
+        created.
+
+    Returns
+    -------
+    fig : plt.Figure
+        Figure containing the plot.
+    """
+    if fig is None:
+        fig = plt.Figure(constrained_layout=True)
+    else:
+        fig.clear()
+    q = frc_result["frequencies"]
+    frc_curve = frc_result["frc_curve"]
+    frc_curve_smooth = frc_result["frc_curve_smooth"]
+    res = frc_result["resolution"]
+    ax = fig.add_subplot(111)
+    ax.plot(q, frc_curve, color="gray", alpha=0.5, label="FRC curve")
+    ax.plot(q, frc_curve_smooth, label="Smoothed")
+    ax.axhline(
+        1 / 7,
+        color="black",
+        linewidth=1.0,
+        linestyle="--",
+        label="1/7 threshold",
+    )
+    ax.set_xlabel("Spatial frequency (nm\u207b\u00b9)")
+    ax.set_ylabel("FRC")
+    ax.set_title(f"FIRE resolution: {res:.2f} nm")
+    ax.legend()
+    return fig
 
 
 def frc(
@@ -1135,11 +1402,11 @@ def _frc(
     lp: float,
     viewport: tuple[tuple[float, float], tuple[float, float]],
 ) -> tuple[
-    np.ndarray,
-    np.ndarray,
-    np.ndarray,
+    lib.FloatArray1D,
+    lib.FloatArray1D,
+    lib.FloatArray1D,
     float | None,
-    tuple[np.ndarray, np.ndarray],
+    tuple[lib.FloatArray2D, lib.FloatArray2D],
 ]:
     """Calculate the Fourier Ring Correlation (FRC) resolution once.
 
@@ -1166,23 +1433,24 @@ def _frc(
 
     Returns
     -------
-    frc_curve : np.ndarray
+    frc_curve : lib.FloatArray1D
         FRC curve.
-    frc_curve_smooth : np.ndarray
+    frc_curve_smooth : lib.FloatArray1D
         Smoothed FRC curve (LOESS).
-    frequencies : np.ndarray
+    frequencies : lib.FloatArray1D
         Spatial frequencies corresponding to the FRC curve (nm^-1).
     resolution : float or None
         Estimated resolution in nm, given the 1/7 threshold. None if
         resolution could not be determined.
-    images : tuple of 2 np.ndarrays
+    images : tuple of 2 lib.FloatArray2D
         2 grayscale images used for calculating FRC. Already masked.
     """
     # render images
     binsize = lp / 2
     oversampling = 1 / binsize
-    im1 = render.render(locs1, None, oversampling, viewport, None)[1]
-    im2 = render.render(locs2, None, oversampling, viewport, None)[1]
+    dummy_info = {"Pixelsize": pixelsize}
+    im1 = render.render(locs1, dummy_info, oversampling, viewport, None)[1]
+    im2 = render.render(locs2, dummy_info, oversampling, viewport, None)[1]
 
     # ensure the images are odd-sized and mask them (tukey)
     if im1.shape[0] % 2 == 0:
@@ -1239,7 +1507,7 @@ def pair_correlation(
     info: list[dict],
     bin_size: float,
     r_max: float,
-) -> tuple[np.ndarray, np.ndarray]:
+) -> tuple[lib.FloatArray1D, lib.FloatArray1D]:
     """Calculate the pair correlation function for the given
     localizations.
 
@@ -1256,9 +1524,9 @@ def pair_correlation(
 
     Returns
     -------
-    bins_lower : np.ndarray
+    bins_lower : lib.FloatArray1D
         Lower bounds of the bins for the histogram.
-    pc : np.ndarray
+    pc : lib.FloatArray1D
         Pair correlation function.
     """
     dh = distance_histogram(locs, info, bin_size, r_max)
@@ -1274,16 +1542,16 @@ def pair_correlation(
 
 @numba.jit(nopython=True, nogil=True)
 def _local_density(
-    x: np.ndarray,
-    y: np.ndarray,
+    x: lib.FloatArray1D,
+    y: lib.FloatArray1D,
     radius: float,
-    x_index: np.ndarray,
-    y_index: np.ndarray,
-    block_starts: np.ndarray,
-    block_ends: np.ndarray,
+    x_index: lib.IntArray1D,
+    y_index: lib.IntArray1D,
+    block_starts: lib.IntArray2D,
+    block_ends: lib.IntArray2D,
     start: int,
     chunk: int,
-) -> np.ndarray:
+) -> lib.IntArray1D:
     """Calculate densities in blocks around each localization."""
     N = len(x)
     r2 = radius**2
@@ -1363,9 +1631,295 @@ def compute_local_density(
     return locs
 
 
+def evaluate_picks(
+    picked_locs: list[pd.DataFrame],
+    info: list[dict],
+    *,
+    max_dark_time: int = 3,
+    progress_callback: (
+        Callable[[int], None] | Literal["console"] | None
+    ) = None,
+) -> tuple[
+    lib.FloatArray1D,
+    lib.FloatArray1D,
+    lib.FloatArray1D,
+    lib.FloatArray1D,
+    lib.FloatArray1D,
+    lib.FloatArray1D,
+    pd.DataFrame,
+]:
+    """Calculate pick statistics: number of localizations and binding
+    events, rmsd, bright and dark times.
+
+    Returned arrays may contain NaNs (``np.empty`` is used for
+    initialization and not all picks may be evaluated successfully).
+
+    Parameters
+    ----------
+    picked_locs : list of pd.DataFrame
+        List of dataframes, each containing the localizations in a
+        picked region.
+    info : list of dicts
+        Metadata of the localizations.
+    max_dark_time : int
+        Maximum dark time (in frames) between detected localizations to
+        consider them as part of the same binding event. Default is 3
+        frames.
+    progress_callback : function, "console" or None
+        Function to display progress (takes in an integer). If "console",
+        progress is printed to the console. If None, no progress is
+        displayed.
+
+    Returns
+    -------
+    N : lib.FloatArray1D
+        Array of number of localizations in each pick.
+    n_events : lib.FloatArray1D
+        Array of number of binding events in each pick.
+    rmsd : lib.FloatArray1D
+        Array of RMSD of localizations in each pick in nm.
+    rmsd_z : lib.FloatArray1D
+        Array of RMSD of localizations in z in each pick in nm.
+    length : lib.FloatArray1D
+        Array of estimated mean bright times in each pick in frames.
+    dark : lib.FloatArray1D
+        Array of estimated mean dark times in each pick in frames.
+    new_locs : pd.DataFrame
+        Dataframe containing the localizations in all picked regions
+        with added 'length' and 'dark' fields/columns.
+    """
+    use_tqdm = progress_callback == "console"
+    if use_tqdm:
+        iter_range = tqdm(
+            range(len(picked_locs)), desc="Evaluating picks", unit="pick"
+        )
+    else:
+        iter_range = range(len(picked_locs))
+
+    pixelsize = lib.get_from_metadata(info, "Pixelsize", default=1.0)
+    n_picks = len(picked_locs)
+    N = np.empty(n_picks)  # number of locs per pick
+    n_events = np.empty(n_picks)  # number of events per pick
+    rmsd = np.empty(n_picks)  # rmsd in each pick
+    length = np.empty(n_picks)  # estimated mean bright time
+    dark = np.empty(n_picks)  # estimated mean dark time
+    has_z = "z" in picked_locs[0].columns
+    rmsd_z = np.empty(n_picks)
+    new_locs = []  # linked locs in each pick
+    warnings.simplefilter("ignore", category=RuntimeWarning)
+    for i in iter_range:
+        if callable(progress_callback):
+            progress_callback(i)
+        pick_locs = picked_locs[i]
+        if not len(pick_locs):
+            continue
+
+        N[i] = len(pick_locs)
+        com_x = pick_locs["x"].mean()
+        com_y = pick_locs["y"].mean()
+        rmsd[i] = (
+            np.sqrt(
+                np.mean(
+                    (pick_locs["x"] - com_x) ** 2
+                    + (pick_locs["y"] - com_y) ** 2
+                )
+            )
+            * pixelsize
+        )
+        if has_z:
+            rmsd_z[i] = np.sqrt(
+                np.mean((pick_locs["z"] - pick_locs["z"].mean()) ** 2)
+            )
+        if "len" not in pick_locs.columns:
+            pick_locs = link(
+                pick_locs, info, r_max=999999, max_dark_time=max_dark_time
+            )
+        pick_locs = compute_dark_times(pick_locs)
+        n_events[i] = len(pick_locs)  # linked locs are binding events
+        length[i] = lib.estimate_kinetic_rate(pick_locs["len"].to_numpy())
+        dark[i] = lib.estimate_kinetic_rate(pick_locs["dark"].to_numpy())
+        new_locs.append(pick_locs)
+    warnings.simplefilter("default", category=RuntimeWarning)
+    if callable(progress_callback):
+        progress_callback(n_picks)
+    new_locs = pd.concat(new_locs, ignore_index=True)
+    return N, n_events, rmsd, rmsd_z, length, dark, new_locs
+
+
+def _pick_kinetics_single(
+    pick_locs: pd.DataFrame,
+    info: list[dict],
+    max_dark_time: int,
+) -> tuple[pd.DataFrame, float, float] | None:
+    """Compute kinetics for a single picked region. Returns None if the
+    region has no usable data or kinetic rate estimation fails."""
+    if not len(pick_locs):
+        return None
+    if "len" not in pick_locs.columns:
+        pick_locs = link(
+            pick_locs,
+            info,
+            r_max=999999,  # link all locs in the pick
+            max_dark_time=max_dark_time,
+        )
+    if not len(pick_locs):
+        return None
+    pick_locs = compute_dark_times(pick_locs)
+    if not len(pick_locs):
+        return None
+    try:
+        l_ = lib.estimate_kinetic_rate(pick_locs["len"].to_numpy())
+        d_ = lib.estimate_kinetic_rate(pick_locs["dark"].to_numpy())
+    except RuntimeError:
+        return None
+    return pick_locs, l_, d_
+
+
+def pick_kinetics(
+    picked_locs: list[pd.DataFrame],
+    info: list[dict],
+    *,
+    max_dark_time: int = 3,
+    progress_callback: (
+        Callable[[int], None] | Literal["console"] | None
+    ) = None,
+) -> tuple[lib.FloatArray1D, lib.FloatArray1D, lib.IntArray1D, pd.DataFrame]:
+    """Calculate kinetics per picked region. Assumes picked
+    localizations, see ``picked_locs``.
+
+    Parameters
+    ----------
+    picked_locs : list of pd.DataFrame
+        List of dataframes, each containing the localizations in a picked
+        region.
+    info : list of dicts
+        Metadata of the localizations.
+    max_dark_time : int
+        Maximum dark time (in frames) between detected localizations
+        to consider them as part of the same binding event. Default is 3
+        frames.
+    progress_callback : function, "console" or None
+        Function to display progress (takes in an integer). If "console",
+        progress is printed to the console. If None, no progress is
+        displayed.
+
+    Returns
+    -------
+    length : lib.FloatArray1D
+        Array of lengths of binding events in each picked region in
+        units of frames.
+    dark : lib.FloatArray1D
+        Array of dark times between binding events in each picked region
+        in units of frames.
+    no_locs : lib.IntArray1D
+        Array of number of localizations in each binding event in each
+        picked region.
+    out_locs : pd.DataFrame
+        Dataframe containing the localizations in all picked regions with
+        added 'length', 'dark' and 'n' fields/columns. Pick regions
+        where binding kinetics could not be estimated (e.g., because
+        of too little data or unsuccessful fitting) are removed.
+    """
+    use_tqdm = progress_callback == "console"
+    if use_tqdm:
+        iter_range = tqdm(
+            range(len(picked_locs)), desc="Calculating kinetics", unit="pick"
+        )
+    else:
+        iter_range = range(len(picked_locs))
+
+    out_locs = []
+    dark = []  # estimated mean dark time
+    length = []  # estimated mean bright time
+    no_locs = []  # number of locs
+    for i in iter_range:
+        if callable(progress_callback):
+            progress_callback(i)
+        result = _pick_kinetics_single(picked_locs[i], info, max_dark_time)
+        if result is None:
+            continue
+        pick_locs, l_, d_ = result
+        length.append(l_)
+        dark.append(d_)
+        no_locs.append(len(pick_locs))
+        out_locs.append(pick_locs)
+    if callable(progress_callback):
+        progress_callback(i + 1)
+    length = np.array(length)
+    dark = np.array(dark)
+    no_locs = np.array(no_locs)
+    out_locs = pd.concat(out_locs, ignore_index=True)
+    return length, dark, no_locs, out_locs
+
+
+def pick_properties(
+    picked_locs: list[pd.DataFrame],
+    info: list[dict],
+    *,
+    max_dark_time: int = 3,
+    influx_rate: float = 0.03,
+    pick_areas: lib.FloatArray1D | None = None,
+    kinetics_progress: (
+        Callable[[int], None] | Literal["console"] | None
+    ) = None,
+    groupprops_progress: (
+        Callable[[int], None] | Literal["console"] | None
+    ) = None,
+) -> pd.DataFrame:
+    """Calculate pick properties and save them to ``path``.
+
+    Properties include number of localizations, mean and std of all
+    localizations dtypes (x, y, photons, etc), qPAINT number of binding
+    sites and the kinetics CDFs.
+
+    Parameters
+    ----------
+    picked_locs : list of pd.DataFrame
+        List of dataframes with localizations, one per picked region.
+    info : list of dicts
+        Metadata of the localizations.
+    max_dark_time : int
+        Maximum dark time (in frames) passed to ``pick_kinetics``.
+    influx_rate : float
+        Influx rate used to estimate the number of binding sites
+        (``n_units = 1 / (influx_rate * dark)``).
+    pick_areas : FloatArray1D or None
+        Optional per-pick area in um^2 to attach to the output.
+    kinetics_progress, groupprops_progress : callable, "console" or None
+        Progress callbacks forwarded to ``pick_kinetics`` and
+        ``groupprops``, respectively.
+
+    Returns
+    -------
+    pick_props : pd.DataFrame
+        Each row gives the properties per pick.
+    """
+    with warnings.catch_warnings():
+        warnings.simplefilter(
+            "ignore", category=(OptimizeWarning, RuntimeWarning)
+        )
+        length, dark, no_locs, out_locs = pick_kinetics(
+            picked_locs=picked_locs,
+            info=info,
+            max_dark_time=max_dark_time,
+            progress_callback=kinetics_progress,
+        )
+        pick_props = groupprops(out_locs, callback=groupprops_progress)
+        if pick_areas is not None:
+            pick_props["pick_area_um2"] = pick_areas
+
+    pick_props["n_units"] = 1 / (influx_rate * dark)
+    pick_props["locs"] = no_locs
+    pick_props["length_cdf"] = length
+    pick_props["dark_cdf"] = dark
+    pick_props["qpaint_idx_cdf"] = dark**-1
+
+    return pick_props
+
+
 def compute_dark_times(
     locs: pd.DataFrame,
-    group: np.ndarray | None = None,
+    group: lib.IntArray1D | None = None,
 ) -> pd.DataFrame:
     """Compute dark time for each binding event.
 
@@ -1373,7 +1927,7 @@ def compute_dark_times(
     ----------
     locs : pd.DataFrame
         Localizations that were linked, i.e., binding events.
-    group : np.ndarray, optional
+    group : lib.IntArray1D, optional
         Grouping array for binding events. If None, all binding events
         are considered to be in the same group.
 
@@ -1397,21 +1951,21 @@ def compute_dark_times(
 
 def dark_times(
     locs: pd.DataFrame,
-    group: np.ndarray | None = None,
-) -> np.ndarray:
+    group: lib.IntArray1D | None = None,
+) -> lib.IntArray1D:
     """Calculate dark times for each binding event.
 
     Parameters
     ----------
     locs : pd.DataFrame
         Localizations that were linked, i.e., binding events.
-    group : np.ndarray, optional
+    group : lib.IntArray1D, optional
         Grouping array for binding events. If None, all binding events
         are considered to be in the same group.
 
     Returns
     -------
-    dark : np.ndarray
+    dark : lib.IntArray1D
         Array of dark times for each binding event. If a binding event
         is not followed by another binding event in the same group, the
         dark time is set to -1.
@@ -1430,10 +1984,10 @@ def dark_times(
 
 @numba.jit(nopython=True)
 def _dark_times(
-    frame: np.ndarray,
-    group: np.ndarray,
-    last_frame: np.ndarray,
-) -> np.ndarray:
+    frame: lib.IntArray1D,
+    group: lib.IntArray1D,
+    last_frame: lib.IntArray1D,
+) -> lib.IntArray1D:
     """Calculate dark times for each binding event."""
     N = len(frame)
     max_frame = frame.max()
@@ -1503,9 +2057,9 @@ def link(
         frame = locs["frame"].to_numpy()
         x = locs["x"].to_numpy()
         y = locs["y"].to_numpy()
-        link_group = get_link_groups(frame, x, y, r_max, max_dark_time, group)
+        link_group = _get_link_groups(frame, x, y, r_max, max_dark_time, group)
         if combine_mode == "average":
-            linked_locs = link_loc_groups(
+            linked_locs = _link_loc_groups(
                 locs,
                 info,
                 link_group,
@@ -1518,34 +2072,102 @@ def link(
     return linked_locs
 
 
-# def weighted_variance(locs):
-#     n = len(locs)
-#     w = locs.photons
-#     x = locs.x
-#     y = locs.y
-#     xWbarx = np.average(locs.x, weights=w)
-#     xWbary = np.average(locs.y, weights=w)
-#     wbarx = np.mean(locs.lpx)
-#     wbary = np.mean(locs.lpy)
-#     variance_x = (
-#         n
-#         / ((n - 1) * sum(w) ** 2)
-#         * (
-#             sum((w * x - wbarx * xWbarx) ** 2)
-#             - 2 * xWbarx * sum((w - wbarx) * (w * x - wbarx * xWbarx))
-#             + xWbarx**2 * sum((w - wbarx) ** 2)
-#         )
-#     )
-#     variance_y = (
-#         n
-#         / ((n - 1) * sum(w) ** 2)
-#         * (
-#             sum((w * y - wbary * xWbary) ** 2)
-#             - 2 * xWbary * sum((w - wbary) * (w * y - wbary * xWbary))
-#             + xWbary**2 * sum((w - wbary) ** 2)
-#         )
-#     )
-#     return variance_x, variance_y
+def combine_locs_in_picks(
+    locs: pd.DataFrame,
+    info: list[dict],
+    *,
+    picks: list[tuple],
+    pick_shape: Literal["Circle", "Rectangle", "Polygon", "Square"],
+    pick_size: float | None = None,
+    index_blocks: tuple | None = None,
+    progress_callback: (
+        Callable[[int], None] | Literal["console"] | None
+    ) = None,
+) -> pd.DataFrame:
+    """Combine localizations in picked regions.
+
+    Parameters
+    ----------
+    locs : pd.DataFrame
+        Localizations.
+    info : list of dicts
+        Metadata of the localizations.
+    picks : list of tuples
+        List of pick positions. See ``io.load_picks``.
+    pick_shape : {'Circle', 'Rectangle', 'Polygon', 'Square'}
+        Shape of the picks.
+    pick_size : float or None, optional
+        Size of the picks. For circular picks, the size is the diameter;
+        for rectangular picks, the size is the width; for square picks,
+        the size is the side length. None for polygonal picks (size not
+        defined).
+    index_blocks : tuple or None, optional
+        Precomputed spatial index over ``locs`` as returned by
+        ``get_index_blocks`` (built with block size equal to the pick
+        radius). When provided, used to skip re-indexing inside circular
+        ``picked_locs``. Ignored for non-circular pick shapes. Default
+        is None (index is computed on demand).
+    progress_callback : callable, 'console' or None, optional
+        Function to display progress (takes in an integer, maximum is
+        the number of picks). If 'console', progress is displayed in the
+        console. If None, no progress is displayed. Default is None.
+
+    Returns
+    -------
+    out_locs : pd.DataFrame
+        Localizations after combining localizations in the picked
+        regions.
+    """
+    assert pick_shape in {
+        "Circle",
+        "Rectangle",
+        "Polygon",
+        "Square",
+    }, "Invalid pick shape"
+    if pick_shape in {"Circle", "Rectangle", "Square"}:
+        assert (
+            pick_size is not None
+        ), "Pick size must be provided for non-polygonal picks."
+    if pick_shape == "Circle":
+        pick_size /= 2  # convert diameter to radius
+    pl = picked_locs(
+        locs=locs,
+        info=info,
+        picks=picks,
+        pick_shape=pick_shape,
+        pick_size=pick_size,
+        index_blocks=index_blocks,
+    )
+    # use very large values for linking localizations
+    r_max = 2 * max(
+        lib.get_from_metadata(info, "Height"),
+        lib.get_from_metadata(info, "Width"),
+    )
+    max_dark = lib.get_from_metadata(info, "Frames", default=10_000)
+
+    # link every localization in each pick
+    if progress_callback == "console":
+        iter_range = tqdm(range(len(pl)), desc="Combining picks", unit="pick")
+    else:
+        iter_range = range(len(pl))
+    out_locs = []
+    for i in iter_range:
+        if callable(progress_callback):
+            progress_callback(i)
+        pick_locs = pl[i]
+        pick_locs_out = link(
+            pick_locs,
+            info,
+            r_max=r_max,
+            max_dark_time=max_dark,
+            remove_ambiguous_lengths=False,
+        )
+        if len(pick_locs_out):
+            out_locs.append(pick_locs_out)
+    if callable(progress_callback):
+        progress_callback(len(pl))
+    out_locs = pd.concat(out_locs, ignore_index=True)
+    return out_locs
 
 
 # Combine localizations: calculate the properties of the group
@@ -1714,25 +2336,23 @@ def cluster_combine_dist(
                         cluster_locs["x"].to_numpy(),
                         cluster_locs["y"].to_numpy(),
                         cluster_locs["z"].to_numpy() / pixelsize,
-                    )
+                    ),
+                    axis=1,
                 )
                 all_points = np.stack(
                     (
                         group_locs["x"].to_numpy(),
                         group_locs["y"].to_numpy(),
                         group_locs["z"].to_numpy() / pixelsize,
-                    )
+                    ),
+                    axis=1,
                 )
-                distances = distance.cdist(
-                    ref_point.transpose(), all_points.transpose()
-                )
+                distances = distance.cdist(ref_point, all_points)
                 min_dist[i] = np.amin(distances)
                 # find nearest neighbor in xy
                 ref_point_xy = np.array(cluster_locs[["x", "y"]])
                 all_points_xy = np.array(group_locs[["x", "y"]])
-                distances_xy = distance.cdist(
-                    ref_point_xy.transpose(), all_points_xy.transpose()
-                )
+                distances_xy = distance.cdist(ref_point_xy, all_points_xy)
                 min_dist_xy[i] = np.amin(distances_xy)
 
             clusters = pd.DataFrame(
@@ -1776,9 +2396,7 @@ def cluster_combine_dist(
                 cluster_locs = temp[temp["cluster"] == clusterval]
                 ref_point_xy = np.array(cluster_locs[["x", "y"]])
                 all_points_xy = np.array(group_locs[["x", "y"]])
-                distances_xy = distance.cdist(
-                    ref_point_xy.transpose(), all_points_xy.transpose()
-                )
+                distances_xy = distance.cdist(ref_point_xy, all_points_xy)
                 min_dist[i] = np.amin(distances_xy)
 
             clusters = pd.DataFrame(
@@ -1801,36 +2419,54 @@ def cluster_combine_dist(
     return combined_locs
 
 
-@numba.jit(nopython=True)
 def get_link_groups(
-    frame: np.ndarray,
-    x: np.ndarray,
-    y: np.ndarray,
+    frame: lib.IntArray1D,
+    x: lib.FloatArray1D,
+    y: lib.FloatArray1D,
     d_max: float,
     max_dark_time: int,
-    group: np.ndarray,
-) -> np.ndarray:
+    group: lib.IntArray1D,
+) -> lib.IntArray1D:
+    """Alias to _get_link_groups, deprecated.
+
+    TODO: remove in v0.11.0."""
+    lib.deprecation_warning(
+        "Deprecation warning: This function will become private in "
+        "v0.11.0. Use _get_link_groups instead."
+    )
+    return _get_link_groups(frame, x, y, d_max, max_dark_time, group)
+
+
+@numba.jit(nopython=True)
+def _get_link_groups(
+    frame: lib.IntArray1D,
+    x: lib.FloatArray1D,
+    y: lib.FloatArray1D,
+    d_max: float,
+    max_dark_time: int,
+    group: lib.IntArray1D,
+) -> lib.IntArray1D:
     """Find the groups for linking localizations into binding events.
     Assumes that ``locs`` are sorted by frame.
 
     Parameters
     ----------
-    frame : np.ndarray
+    frame : lib.IntArray1D
         Frame numbers of localizations.
-    x, y : np.ndarray
+    x, y : lib.FloatArray1D
         Coordinates of localizations.
     d_max : float
         Maximum distance for linking localizations.
     max_dark_time : int
         Maximum number of frames between localizations to be considered
         as originating from the same binding event.
-    group : np.ndarray
+    group : lib.IntArray1D
         Grouping array for binding events. If None, all binding events
         are considered to be in the same group.
 
     Returns
     -------
-    link_group : np.ndarray
+    link_group : lib.IntArray1D
         Array of link groups for each localization. Each group is
         represented by a unique integer. Localizations that are not
         linked to any other localization are assigned -1.
@@ -1872,16 +2508,16 @@ def get_link_groups(
 
 
 @numba.jit(nopython=True)
-def _get_next_loc_index_in_link_group(
+def _get_next_loc_index_in_link_group(  # noqa: C901
     current_index: int,
-    link_group: np.ndarray,
+    link_group: lib.IntArray1D,
     N: int,
-    frame: np.ndarray,
-    x: np.ndarray,
-    y: np.ndarray,
+    frame: lib.IntArray1D,
+    x: lib.FloatArray1D,
+    y: lib.FloatArray1D,
     d_max: float,
     max_dark_time: float,
-    group: np.ndarray,
+    group: lib.IntArray1D,
 ) -> int:
     """Find the next localization index in the link group for a given
     current localization index. The next localization is the one that
@@ -1917,10 +2553,10 @@ def _get_next_loc_index_in_link_group(
 
 @numba.jit(nopython=True)
 def _link_group_count(
-    link_group: np.ndarray,
+    link_group: lib.IntArray1D,
     n_locs: int,
     n_groups: int,
-) -> np.ndarray:
+) -> lib.IntArray1D:
     """Count the number of localizations in each link group."""
     result = np.zeros(n_groups, dtype=np.uint32)
     for i in range(n_locs):
@@ -1931,11 +2567,11 @@ def _link_group_count(
 
 @numba.jit(nopython=True)
 def _link_group_sum(
-    column: np.ndarray,
-    link_group: np.ndarray,
+    column: lib.IntArray1D | lib.FloatArray1D,
+    link_group: lib.IntArray1D,
     n_locs: int,
     n_groups: int,
-) -> np.ndarray:
+) -> lib.IntArray1D | lib.FloatArray1D:
     """Sum the values of a column for each link group."""
     result = np.zeros(n_groups, dtype=column.dtype)
     for i in range(n_locs):
@@ -1946,12 +2582,12 @@ def _link_group_sum(
 
 @numba.jit(nopython=True)
 def _link_group_mean(
-    column: np.ndarray,
-    link_group: np.ndarray,
+    column: lib.IntArray1D | lib.FloatArray1D,
+    link_group: lib.IntArray1D,
     n_locs: int,
     n_groups: int,
-    n_locs_per_group: np.ndarray,
-) -> np.ndarray:
+    n_locs_per_group: lib.IntArray1D,
+) -> lib.FloatArray1D:
     """Calculate the mean of a column for each link group."""
     group_sum = _link_group_sum(column, link_group, n_locs, n_groups)
     result = np.empty(
@@ -1963,13 +2599,13 @@ def _link_group_mean(
 
 @numba.jit(nopython=True)
 def _link_group_weighted_mean(
-    column: np.ndarray,
-    weights: np.ndarray,
-    link_group: np.ndarray,
+    column: lib.IntArray1D | lib.FloatArray1D,
+    weights: lib.FloatArray1D,
+    link_group: lib.IntArray1D,
     n_locs: int,
     n_groups: int,
-    n_locs_per_group: np.ndarray,
-) -> tuple[np.ndarray, np.ndarray]:
+    n_locs_per_group: lib.IntArray1D,
+) -> tuple[lib.FloatArray1D, lib.FloatArray1D]:
     """Calculate the mean of a column for each link group and the sum
     of the weights."""
     sum_weights = _link_group_sum(weights, link_group, n_locs, n_groups)
@@ -1987,11 +2623,13 @@ def _link_group_weighted_mean(
 
 @numba.jit(nopython=True)
 def _link_group_min_max(
-    column: np.ndarray,
-    link_group: np.ndarray,
+    column: lib.IntArray1D | lib.FloatArray1D,
+    link_group: lib.IntArray1D,
     n_locs: int,
     n_groups: int,
-) -> tuple[np.ndarray, np.ndarray]:
+) -> tuple[
+    lib.IntArray1D | lib.FloatArray1D, lib.IntArray1D | lib.FloatArray1D
+]:
     """Calculate the minimum and maximum of a column for each link
     group."""
     min_ = np.empty(n_groups, dtype=column.dtype)
@@ -2010,11 +2648,11 @@ def _link_group_min_max(
 
 @numba.jit(nopython=True)
 def _link_group_last(
-    column: np.ndarray,
-    link_group: np.ndarray,
+    column: lib.IntArray1D | lib.FloatArray1D,
+    link_group: lib.IntArray1D,
     n_locs: int,
     n_groups: int,
-) -> np.ndarray:
+) -> lib.IntArray1D | lib.FloatArray1D:
     """Return the last value of a column for each link group."""
     result = np.zeros(n_groups, dtype=column.dtype)
     for i in range(n_locs):
@@ -2026,7 +2664,23 @@ def _link_group_last(
 def link_loc_groups(
     locs: pd.DataFrame,
     info: list[dict],
-    link_group: np.ndarray,
+    link_group: lib.IntArray1D,
+    remove_ambiguous_lengths: bool = True,
+) -> pd.DataFrame:
+    """Alias to _link_loc_groups, deprecated.
+
+    TODO: remove in v0.11.0."""
+    lib.deprecation_warning(
+        "Deprecation warning: This function will become private in "
+        "v0.11.0. Use _link_loc_groups instead."
+    )
+    return _link_loc_groups(locs, info, link_group, remove_ambiguous_lengths)
+
+
+def _link_loc_groups(  # noqa: C901
+    locs: pd.DataFrame,
+    info: list[dict],
+    link_group: lib.IntArray1D,
     remove_ambiguous_lengths: bool = True,
 ) -> pd.DataFrame:
     """Combine localizations into binding events based on the
@@ -2039,7 +2693,7 @@ def link_loc_groups(
         Localizations.
     info : list of dicts
         Metadata of the localization list.
-    link_group : np.ndarray
+    link_group : lib.IntArray1D
         Array that defines the link groups for the localizations.
     remove_ambiguous_lengths : bool, optional
         If True, removes linked localizations with ambiguous lengths,
@@ -2122,13 +2776,25 @@ def link_loc_groups(
             locs["iterations"].to_numpy(), link_group, n_locs, n_groups, n_
         )
     if "z" in locs.columns:
-        columns["z"] = _link_group_mean(
-            locs["z"].to_numpy(),
-            link_group,
-            n_locs,
-            n_groups,
-            n_,
-        )
+        if "lpz" in locs.columns:
+            weights_z = 1 / locs["lpz"].to_numpy() ** 2
+            columns["z"], sum_weights_z_ = _link_group_weighted_mean(
+                locs["z"].to_numpy(),
+                weights_z,
+                link_group,
+                n_locs,
+                n_groups,
+                n_,
+            )
+            columns["lpz"] = np.sqrt(1 / sum_weights_z_)
+        else:
+            columns["z"] = _link_group_mean(
+                locs["z"].to_numpy(),
+                link_group,
+                n_locs,
+                n_groups,
+                n_,
+            )
     if "d_zcalib" in locs.columns:
         columns["d_zcalib"] = _link_group_mean(
             locs["d_zcalib"].to_numpy(), link_group, n_locs, n_groups, n_
@@ -2172,7 +2838,7 @@ def n_segments(info: list[dict], segmentation: int) -> int:
         Number of segments based on the total number of frames and the
         segmentation value.
     """
-    n_frames = info[0]["Frames"]
+    n_frames = lib.get_from_metadata(info, "Frames")
     n_segments = int(np.round(n_frames / segmentation))
     return n_segments
 
@@ -2183,14 +2849,14 @@ def segment(
     segmentation: int,
     kwargs: dict = {},
     callback: Callable[[int], None] = None,
-) -> tuple[np.ndarray, np.ndarray]:
+) -> tuple[lib.IntArray1D, lib.FloatArray3D]:
     """Split localizations into temporal segments (number of segments
     is defined by the segmentation parameter) and render each segment
     into a 2D image.
 
     Parameters
     ----------
-    locs : np.ndarray
+    locs : pd.DataFrame
         Localization list.
     info : list of dicts
         Metadata of the localization list.
@@ -2206,10 +2872,10 @@ def segment(
 
     Returns
     -------
-    bounds : np.ndarray
+    bounds : lib.IntArray1D
         Array of bounds for each segment, where each bound is the
         starting frame of the segment.
-    segments : np.ndarray
+    segments : lib.FloatArray3D
         3D array of segments, where each segment is a 2D image of the
         localizations in that segment.
     """
@@ -2272,6 +2938,7 @@ def undrift(
         Undrifted localization list with the drift applied to the 'x'
         and 'y' coordinates.
     """
+    locs = locs.copy()
     bounds, segments = segment(
         locs,
         info,
@@ -2287,48 +2954,109 @@ def undrift(
     drift_ = (drift_x_pol(t_inter), drift_y_pol(t_inter))
     drift = pd.DataFrame({"x": drift_[0], "y": drift_[1]})
     if display:
-        fig1 = plt.figure(figsize=(10, 6), constrained_layout=True)
-        plt.suptitle("Estimated drift")
-        plt.subplot(1, 2, 1)
-        plt.plot(drift["x"], label="x interpolated")
-        plt.plot(drift["y"], label="y interpolated")
-        t = (bounds[1:] + bounds[:-1]) / 2
-        plt.plot(
-            t,
-            shift_x,
-            "o",
-            color=list(plt.rcParams["axes.prop_cycle"])[0]["color"],
-            label="x",
-        )
-        plt.plot(
-            t,
-            shift_y,
-            "o",
-            color=list(plt.rcParams["axes.prop_cycle"])[1]["color"],
-            label="y",
-        )
-        plt.legend(loc="best")
-        plt.xlabel("Frame")
-        plt.ylabel("Drift (pixel)")
-        plt.subplot(1, 2, 2)
-        plt.plot(
-            drift["x"],
-            drift["y"],
-            color=list(plt.rcParams["axes.prop_cycle"])[2]["color"],
-        )
-        plt.plot(
-            shift_x,
-            shift_y,
-            "o",
-            color=list(plt.rcParams["axes.prop_cycle"])[2]["color"],
-        )
-        plt.axis("equal")
-        plt.xlabel("x")
-        plt.ylabel("y")
+        pixelsize = lib.get_from_metadata(info, "Pixelsize", 1.0)
+        plot_drift(drift, pixelsize)
         plt.show()
-    locs["x"] -= drift["x"][locs["frame"]].to_numpy()
-    locs["y"] -= drift["y"][locs["frame"]].to_numpy()
+    locs = apply_drift(locs, info, drift=drift)
     return drift, locs
+
+
+def undrift_from_fiducials(
+    locs: pd.DataFrame,
+    info: list[dict],
+    picks: list[tuple] | None = None,
+    pick_size: float | None = None,
+    undrift_z: bool = True,
+    index_blocks: tuple | None = None,
+) -> tuple[pd.DataFrame, list[dict], pd.DataFrame]:
+    """Undrift localizations based on picked regions (fiducial markers).
+
+    Parameters
+    ----------
+    locs : pd.DataFrame
+        Localizations to be undrifted.
+    info : list of dicts
+        Localizations' metadata.
+    picks : list of (2,) tuples or None, optional
+        Coordinates of picked regions as (x, y) tuples. If None
+        (default), fiducials are automatically detected using
+        ``picasso.imageprocess.find_fiducials``.
+    pick_size : float or None, optional
+        Pick radius in camera pixels. Required when ``picks`` is a list
+        of coordinates. Ignored when ``picks`` is None (determined by
+        ``find_fiducials``).
+    undrift_z : bool, optional
+        If True, also undrift the z coordinate if it exists in the
+        localizations. Default is True.
+    index_blocks : tuple or None, optional
+        Precomputed spatial index over ``locs`` as returned by
+        ``get_index_blocks`` (built with block size equal to
+        ``pick_size``). When provided, used to skip re-indexing inside
+        circular ``picked_locs``. Ignored when ``picks`` is None
+        (auto-detected fiducials use a radius that may not match the
+        precomputed index). Default is None.
+
+    Returns
+    -------
+    locs : pd.DataFrame
+        Undrifted localizations.
+    new_info : list of dicts
+        Updated metadata.
+    drift : pd.DataFrame
+        Drift in x and y (and optionally z) directions.
+
+    Raises
+    ------
+    ValueError
+        If ``pick_size`` is not provided when ``picks`` is a list.
+    """
+    locs = locs.copy()
+    pixelsize = lib.get_from_metadata(info, "Pixelsize", raise_error=True)
+
+    if picks is None:
+        # auto-detect fiducials
+        picks, box = imageprocess.find_fiducials(locs, info)
+        pick_radius = box / 2
+        # passed-in index_blocks was built for a different radius; drop
+        index_blocks = None
+    else:
+        # user-provided list of pick coordinates
+        if pick_size is None:
+            raise ValueError(
+                "pick_size (radius in camera pixels) must be provided "
+                "when picks are given as a list of coordinates."
+            )
+        pick_radius = pick_size
+
+    if len(picks) == 0:
+        raise ValueError("No picks found for drift correction.")
+
+    # get picked localizations
+    pl = picked_locs(
+        locs,
+        info,
+        picks,
+        "Circle",
+        pick_size=pick_radius,
+        add_group=False,
+        index_blocks=index_blocks,
+    )
+
+    # calculate drift
+    drift = undrift_from_picked(pl, info)
+    if not undrift_z:
+        drift = drift.drop(columns="z", errors="ignore")
+    locs = apply_drift(locs, info, drift=drift)
+
+    new_info = info + [
+        {
+            "Generated by": (f"Picasso v{__version__} Undrift from picked"),
+            "Number of picks": len(picks),
+            "Pick radius (nm)": pick_radius * pixelsize,
+        }
+    ]
+
+    return locs, new_info, drift
 
 
 def undrift_from_picked(
@@ -2371,7 +3099,7 @@ def _undrift_from_picked_coordinate(
     picked_locs: list[pd.DataFrame],
     info: list[dict],
     coordinate: Literal["x", "y", "z"],
-) -> np.ndarray:
+) -> lib.FloatArray1D:
     """Calculate drift in a given coordinate from picked localizations.
     Uses the center of mass of each pick to find the drift in the
     specified coordinate across all frames. The drift is calculated as
@@ -2389,7 +3117,7 @@ def _undrift_from_picked_coordinate(
 
     Returns
     -------
-    drift_mean : np.ndarray
+    drift_mean : lib.FloatArray1D
         Average drift across picks for all frames
     """
     n_picks = len(picked_locs)
@@ -2428,14 +3156,157 @@ def _undrift_from_picked_coordinate(
     return drift_mean
 
 
+def _apply_drift(locs: pd.DataFrame, drift: pd.DataFrame) -> pd.DataFrame:
+    """Apply drift to localizations. This is a helper function that assumes
+    the drift is already in the correct format and that the number of
+    frames matches."""
+    frames = locs["frame"]
+    locs["x"] -= drift["x"].iloc[frames].to_numpy()
+    locs["y"] -= drift["y"].iloc[frames].to_numpy()
+    if "z" in drift.columns and "z" in locs.columns:
+        locs["z"] -= drift["z"].iloc[frames].to_numpy()
+    return locs
+
+
+def apply_drift(
+    locs: pd.DataFrame,
+    info: list[dict],
+    *,
+    drift: pd.DataFrame | lib.FloatArray2D,
+):
+    """Convenience function to apply drift to localizations. Runs checks
+    to ensure correct formats.
+
+    Parameters
+    ----------
+    locs : pd.DataFrame
+        Localizations to apply drift to.
+    info : list of dicts
+        Metadata of the localization list.
+    drift : pd.DataFrame or lib.FloatArray2D
+        Drift to apply. If a DataFrame, it should have columns 'x' and
+        'y', and optionally 'z'. If a numpy array, it should have shape
+        (n_frames, 2) for x and y drift, or (n_frames, 3) for x, y, and
+        z drift.
+
+    Returns
+    -------
+    locs : pd.DataFrame
+        Localizations with drift applied to the 'x' and 'y' coordinates
+        (and 'z' if it exists in the drift).
+    """
+    assert isinstance(
+        drift, (pd.DataFrame, np.ndarray)
+    ), "Drift must be a DataFrame or numpy array"
+    n_frames = lib.get_from_metadata(info, "Frames", raise_error=True)
+    if isinstance(drift, pd.DataFrame):
+        required_columns = {"x", "y"}
+        if not required_columns.issubset(drift.columns):
+            raise ValueError(
+                f"Drift DataFrame must contain columns {required_columns}"
+            )
+    elif isinstance(drift, np.ndarray):
+        if not (drift.shape[1] in [2, 3] and drift.shape[0] == n_frames):
+            raise ValueError(
+                "Drift array must have shape (n_frames, 2) for x and y drift, "
+                "or (n_frames, 3) for x, y, and z drift."
+            )
+        drift = pd.DataFrame(
+            drift,
+            columns=["x", "y"] + (["z"] if drift.shape[1] == 3 else []),
+        )
+    return _apply_drift(locs, drift)
+
+
+def plot_drift(
+    drift: pd.DataFrame,
+    pixelsize: int | float,
+    fig: plt.Figure | None = None,
+) -> plt.Figure:
+    """Convenience function to plot 2D or 3D drift from a DataFrame.
+
+    Parameters
+    ----------
+    drift : pd.DataFrame
+        DataFrame containing the drift to plot. Should have columns 'x'
+        and 'y', and optionally 'z'.
+    pixelsize : int or float
+        Pixel size in nm to convert drift from pixels to nm for
+        plotting.
+    fig : plt.Figure or None, optional
+        Matplotlib figure to plot on. If None (default), a new figure is
+        created.
+
+    Returns
+    -------
+    fig : plt.Figure
+        The figure containing the plot.
+    """
+    assert isinstance(drift, pd.DataFrame), "Drift must be a DataFrame."
+    assert (
+        "x" in drift.columns and "y" in drift.columns
+    ), "Drift must have 'x' and 'y' columns."
+    if fig is None:
+        fig = plt.Figure(figsize=(10, 6), constrained_layout=True)
+    else:
+        fig.clear()
+
+    if "z" in drift.columns:
+        ax1 = fig.add_subplot(131)
+        ax1.plot(drift["x"] * pixelsize, label="x")
+        ax1.plot(drift["y"] * pixelsize, label="y")
+        ax1.legend(loc="best")
+        ax1.set_xlabel("Frame")
+        ax1.set_ylabel("Drift (nm)")
+        ax2 = fig.add_subplot(132)
+        ax2.plot(
+            drift.x * pixelsize,
+            drift.y * pixelsize,
+            color=list(plt.rcParams["axes.prop_cycle"])[2]["color"],
+        )
+        ax2.set_aspect("equal")
+        ax2.set_xlabel("x (nm)")
+        ax2.set_ylabel("y (nm)")
+        ax2.invert_yaxis()
+        ax3 = fig.add_subplot(133)
+        ax3.plot(drift.z, label="z")
+        ax3.legend(loc="best")
+        ax3.set_xlabel("Frame")
+        ax3.set_ylabel("Drift (nm)")
+    else:
+        ax1 = fig.add_subplot(121)
+        ax1.plot(drift["x"] * pixelsize, label="x")
+        ax1.plot(drift["y"] * pixelsize, label="y")
+        ax1.legend(loc="best")
+        ax1.set_xlabel("Frame")
+        ax1.set_ylabel("Drift (nm)")
+        ax2 = fig.add_subplot(122)
+        ax2.plot(
+            drift.x * pixelsize,
+            drift.y * pixelsize,
+            color=list(plt.rcParams["axes.prop_cycle"])[2]["color"],
+        )
+        ax2.set_xlabel("x (nm)")
+        ax2.set_ylabel("y (nm)")
+        ax2.invert_yaxis()
+        ax2.set_aspect("equal")
+    return fig
+
+
 def align(
     locs: list[pd.DataFrame],
     infos: list[dict],
     display: bool = False,
+    *,
+    apply_shifts: bool = True,
+    return_shifts: bool = False,
 ) -> pd.DataFrame:
     """Align localizations from multiple channels (one per each element
     in `locs`) by calculating the shifts between the rendered images
     using RCC.
+
+    TODO: v1.0: This should be the main function that uses align_rcc or
+        align_from_picked.
 
     Parameters
     ----------
@@ -2447,6 +3318,12 @@ def align(
         localization array in `locs`.
     display : bool, optional
         Not used.
+    apply_shifts: bool, optional
+        If True, applies the calculated shifts to the 'x' and 'y'
+        coordinates of the localizations. If False, returns the original
+        localizations without applying the shifts. Default is True.
+    return_shifts : bool, optional
+        If True, also returns the calculated shifts for each channel.
 
     Returns
     -------
@@ -2455,19 +3332,254 @@ def align(
         'y' coordinates.
     """
     images = []
-    for i, (locs_, info_) in enumerate(zip(locs, infos)):
+    for locs_, info_ in zip(locs, infos):
         _, image = render.render(locs_, info_, blur_method="smooth")
         images.append(image)
-    shift_y, shift_x = imageprocess.rcc(images)
-    for i, (locs_, dx, dy) in enumerate(zip(locs, shift_x, shift_y)):
-        locs_["y"] -= dy
-        locs_["x"] -= dx
-    return locs
+    shift_y, shift_x = imageprocess.rcc(
+        images, callback=lib.MockProgress().set_value
+    )
+    if apply_shifts:
+        for i, (locs_, dx, dy) in enumerate(zip(locs, shift_x, shift_y)):
+            locs_["y"] -= dy
+            locs_["x"] -= dx
+    if return_shifts:
+        shifts = (shift_x, shift_y)
+        return locs, shifts
+    else:
+        return locs
+
+
+def align_rcc(
+    locs: list[pd.DataFrame],
+    infos: list[list[dict]],
+    display: bool = False,
+    return_shifts: bool = False,
+) -> pd.DataFrame:
+    """Align localizations from multiple channels (one per each element
+    in `locs`) by calculating the shifts between the rendered images
+    using RCC. This is a wrapper around `align` for backward compatibility.
+
+    Parameters
+    ----------
+    locs : list of pd.DataFrames
+        List of localization datasets which are to be aligned.
+    infos : list of list of dicts
+        List of metadata dictionaries corresponding to each
+        localization DataFrame in `locs`.
+    display : bool, optional
+        If True, displays the estimated shifts. Default is False.
+    return_shifts : bool, optional
+        If True, also returns the calculated shifts for each channel.
+        Default is False.
+
+    Returns
+    -------
+    locs : list of pd.DataFrames
+        Aligned localizations with the shifts applied to the 'x' and
+        'y' coordinates.
+    """
+    locs = deepcopy(locs)
+    max_iterations = 5
+    iteration = 0
+    convergence = 0.001  # (camera pixels), around 0.1 nm
+    shift_x = []
+    shift_y = []
+    shift_z = []
+    for iteration in range(max_iterations):
+        completed = True
+
+        # find shift between channels
+        shift = align(
+            locs, infos, display=False, apply_shifts=False, return_shifts=True
+        )[1]
+        temp_shift_x = []
+        temp_shift_y = []
+        temp_shift_z = []
+        for i, locs_ in enumerate(locs):
+            if (
+                np.absolute(shift[0][i]) + np.absolute(shift[1][i])
+                > convergence
+            ):
+                completed = False
+
+            # shift each channel
+            locs_["x"] -= shift[0][i]
+            locs_["y"] -= shift[1][i]
+
+            temp_shift_x.append(shift[0][i])
+            temp_shift_y.append(shift[1][i])
+
+            if len(shift) == 3:
+                locs_["z"] -= shift[2][i]
+                temp_shift_z.append(shift[2][i])
+        shift_x.append(np.mean(temp_shift_x))
+        shift_y.append(np.mean(temp_shift_y))
+        if len(shift) == 3:
+            shift_z.append(np.mean(temp_shift_z))
+        iteration += 1
+
+        # Skip when converged:
+        if completed:
+            break
+
+    # Plot shift
+    if display:
+        fig1 = plt.figure(figsize=(8, 8), constrained_layout=True)
+        plt.suptitle("Shift")
+        plt.subplot(1, 1, 1)
+        plt.plot(shift_x, "o-", label="x shift")
+        plt.plot(shift_y, "o-", label="y shift")
+        plt.xlabel("Iteration")
+        plt.ylabel("Mean Shift per Iteration (Px)")
+        plt.legend(loc="best")
+        fig1.show()
+
+    if return_shifts:
+        shifts = list(zip(shift_x, shift_y))
+        if len(shift) == 3:
+            shifts = list(zip(shift_x, shift_y, shift_z))
+        return locs, shifts
+    else:
+        return locs
+
+
+def align_from_picked(
+    all_locs: list[pd.DataFrame],
+    infos: list[list[dict]],
+    *,
+    picks: list[tuple],
+    pick_shape: Literal["Circle", "Rectangle", "Polygon", "Square"],
+    pick_size: float | None = None,
+    return_shifts: bool = False,
+    index_blocks: list[tuple | None] | None = None,
+):
+    """Align picked localizations from multiple channels using picked
+    localizations.
+
+    Parameters
+    ----------
+    all_locs : list of pd.DataFrames
+        List of localization datasets.
+    infos : list of list of dicts
+        List of metadata dictionaries corresponding to each localization
+        dataset in `all_locs`.
+    picks : list of (2,) tuples
+        Coordinates of picked regions as (x, y) tuples. See
+        ``io.load_picks``.
+    pick_shape : {"Circle", "Rectangle", "Polygon", "Square"}, optional
+        Shape of the picks.
+    pick_size : float or None, optional
+        Size of the picks. For circular picks, the size is the diameter.
+        For square picks, the size is the side length. For rectangular
+        picks, the size is the width. None for polygon picks. Default is
+        None.
+    return_shifts : bool, optional
+        If True, also returns the calculated shifts for each channel.
+        Default is False.
+    index_blocks : list of tuple or None, optional
+        Per-channel precomputed spatial indices (one entry per dataset
+        in ``all_locs``, aligned by position) as returned by
+        ``get_index_blocks``. Each entry may be ``None`` to recompute
+        for that channel. Used to skip re-indexing inside circular
+        ``picked_locs``. Ignored for non-circular pick shapes. Default
+        is None (all channels recompute on demand).
+
+    Returns
+    -------
+    aligned_locs: list of pd.DataFrames
+        List of aligned localization datasets, where the localizations
+        have been shifted according to the average shift calculated from
+        the picked localizations.
+    shifts: list of tuples
+        List of (dx, dy) shifts applied to each localization dataset in
+        `all_locs`, calculated as the average shift from the picked
+        localizations. Returned only if `return_shifts` is True.
+    """
+    assert pick_shape in {"Circle", "Rectangle", "Polygon", "Square"}, (
+        "pick_shape must be one of 'Circle', 'Rectangle', 'Polygon', or "
+        "'Square'"
+    )
+    if pick_shape != "Polygon":
+        assert (
+            pick_size is not None
+        ), "pick_size must be provided when picks is a list of coordinates"
+    if pick_shape == "Circle":
+        pick_size = pick_size / 2  # convert diameter to radius
+    ib_list = (
+        index_blocks if index_blocks is not None else [None] * len(all_locs)
+    )
+    pl = [
+        picked_locs(locs, i, picks, pick_shape, pick_size, index_blocks=ib)
+        for locs, i, ib in zip(all_locs, infos, ib_list)
+    ]
+    dy = _shifts_from_picked_coordinate(pl, coordinate="y")
+    dx = _shifts_from_picked_coordinate(pl, coordinate="x")
+    if all(["z" in _[0].columns for _ in pl]):
+        dz = _shifts_from_picked_coordinate(pl, coordinate="z")
+    else:
+        dz = None
+    shift = lib.minimize_shifts(dx, dy, shifts_z=dz)
+
+    # align each channel
+    aligned_locs = []
+    for i, locs_ in enumerate(all_locs):
+        locs_.y -= shift[0][i]
+        locs_.x -= shift[1][i]
+        if len(shift) == 3:
+            locs_.z -= shift[2][i]
+        aligned_locs.append(locs_.copy())
+
+    if return_shifts:
+        return aligned_locs, shift
+    else:
+        return aligned_locs
+
+
+def _shifts_from_picked_coordinate(
+    locs: list[list[pd.DataFrame]],
+    infos: None = None,
+    *,
+    coordinate: Literal["x", "y", "z"] = "x",
+):
+    """Calculate shifts between channels along a given coordinate.
+
+    Parameters
+    ----------
+    locs : list of lists of pd.DataFrames
+        Each element stores picked localizations from a channel, pick
+        by pick, see `picked_locs`.
+    infos : None
+        Ignored, kept for compatibility.
+    coordinate : {'x', 'y', 'z'}
+        Specifies which coordinate should be used.
+
+    Returns
+    -------
+    shifts : lib.FloatArray2D
+        Array of shape (n_channels, n_channels) with shifts between
+        all channels.
+    """
+    n_channels = len(locs)
+    # Calculating center of mass for each channel and pick
+    coms = []
+    for channel_locs in locs:
+        coms.append([])
+        for group_locs in channel_locs:
+            group_com = getattr(group_locs, coordinate).mean()
+            coms[-1].append(group_com)
+    # Calculating image shifts
+    shifts = np.zeros((n_channels, n_channels))
+    for i in range(n_channels - 1):
+        for j in range(i + 1, n_channels):
+            shifts[i, j] = np.nanmean(
+                [cj - ci for ci, cj in zip(coms[i], coms[j])]
+            )
+    return shifts
 
 
 def groupprops(
     locs: pd.DataFrame,
-    callback: Callable[[int], None] | None = None,
+    callback: Callable[[int], None] | Literal["console"] | None = None,
 ) -> pd.DataFrame:
     """Calculate group statistics for localizations, such as mean and
     standard deviation.
@@ -2476,10 +3588,11 @@ def groupprops(
     ----------
     locs : pd.DataFrame
         Localizations with a 'group' field that defines the groups.
-    callback : Callable[[int], None], optional
+    callback : callable, "console" or None, optional
         Callback function to report progress. It should accept an
-        integer argument representing the current group index.
-        Default is None, which means no callback is used.
+        integer argument representing the current group index. If
+        "console", uses tqdm to display progress in the console.
+        Default is None, which means no progress is reported.
 
     Returns
     -------
@@ -2496,22 +3609,31 @@ def groupprops(
         itertools.chain(*[(_ + "_mean", _ + "_std") for _ in locs.columns])
     )
     groups = pd.DataFrame(np.empty((n, len(names))), columns=names)
-    if callback is not None:
-        callback(0)
-        it = enumerate(group_ids)
-    else:
-        it = enumerate(
-            tqdm(group_ids, desc="Calculating group statistics", unit="Groups")
+
+    # progress reporting
+    use_tqdm = callback == "console"
+    if use_tqdm:
+        iter_range = tqdm(
+            total=len(group_ids),
+            desc="Calculating group statistics",
+            unit="Groups",
         )
-    for i, group_id in it:
+    else:
+        iter_range = range(len(group_ids))
+
+    for i in iter_range:
+        if callable(callback):
+            callback(i)
+        group_id = group_ids[i]
         group_locs = locs[locs["group"] == group_id]
         groups.loc[i, "group"] = group_id
         groups.loc[i, "n_events"] = len(group_locs)
         for name in locs.columns:
             groups.loc[i, name + "_mean"] = group_locs[name].mean()
             groups.loc[i, name + "_std"] = group_locs[name].std()
-        if callback is not None:
-            callback(i + 1)
+    if callable(callback):  # close the progress dialog
+        callback(len(group_ids))
+
     # set dtypes
     groups = groups.astype(
         {
@@ -2580,15 +3702,15 @@ def calculate_fret(
 
 
 def nn_analysis(
-    X1: np.ndarray,
-    X2: np.ndarray,
+    X1: lib.FloatArray2D,
+    X2: lib.FloatArray2D,
     nn_count: int,
-) -> np.ndarray:
+) -> lib.FloatArray2D:
     """Find the nearest neighbors between two sets of localizations.
 
     Parameters
     ----------
-    X1, X2 : np.ndarray
+    X1, X2 : lib.FloatArray2D
         Arrays of shape (N, D) and (M, D) representing the coordinates
         of the two sets of localizations, where N and M are the number
         of localizations in each set, and D is the number of spatial
@@ -2599,7 +3721,7 @@ def nn_analysis(
 
     Returns
     -------
-    nnd : np.ndarray
+    nnd : lib.FloatArray2D
         Array of nearest neighbors distances, where each row corresponds
         to a localization in the first set and contains the distances to
         its nearest neighbors in the second set.
@@ -2615,3 +3737,265 @@ def nn_analysis(
         nn = distances
     nn.reshape(-1, nn_count)  # ensure the shape is (N, nn_count)
     return nn
+
+
+def resi(
+    locs: list[pd.DataFrame],
+    infos: list[list[dict]],
+    radius_xy: float | list[float],
+    radius_z: float | list[float] | None = None,
+    min_locs: int | list[int] = 10,
+    apply_fa: bool = True,
+    save_clustered_locs: bool = False,
+    save_cluster_centers: bool = False,
+    resi_path: str | None = None,
+    output_paths: list[str] | None = None,
+    suffix_locs: str = "_clustered",
+    suffix_centers: str = "_cluster_centers",
+    progress_callback: (
+        Callable[[int], None] | Literal["console"] | None
+    ) = None,
+) -> tuple[pd.DataFrame, list[dict]]:
+    """Perform RESI (REsolution by Sequential Imaging) analysis on
+    multiple channels.
+
+    Clusters localizations from each channel using the SMLM clusterer,
+    extracts cluster centers, and combines them into a single DataFrame
+    with channel IDs.
+
+    Parameters
+    ----------
+    locs : list of pd.DataFrames
+        List of localization datasets, one DataFrame per channel.
+    infos : list of list of dicts
+        List of metadata dictionaries for each channel.
+    radius_xy : float or list of float
+        Clustering radius in xy (camera pixels). If a single float is
+        provided, it is applied to all channels. If a list, must have
+        length equal to the number of channels.
+    radius_z : float, list of float, or None, optional
+        Clustering radius in z (camera pixels). Only used for 3D data.
+        If a float, applied to all channels. If a list, must have length
+        equal to the number of channels. Default is None.
+    min_locs : int or list of int, optional
+        Minimum number of localizations in a cluster. If an int, applied
+        to all channels. If a list, must have length equal to the number
+        of channels. Default is 10.
+    apply_fa : bool, optional
+        If True, apply basic frame analysis to clustered localizations.
+        Default is True.
+    save_clustered_locs : bool, optional
+        If True, save clustered localizations for each channel to a
+        file. Requires output_paths to be provided. Default is False.
+    save_cluster_centers : bool, optional
+        If True, save cluster centers for each channel to a file.
+        Requires output_paths to be provided. Default is False.
+    resi_path : str or None, optional
+        Path to save the combined RESI cluster centers with metadata. If
+        None, the combined cluster centers will not be saved. Default is
+        None.
+    output_paths : list of str or None, optional
+        List of paths to save cluster centers for each channel. If None
+        and save_* parameters are True, clustered data will not be
+        saved. Default is None.
+    suffix_locs : str, optional
+        Suffix appended to output_paths for saved clustered
+        localizations. Default is "_clustered".
+    suffix_centers : str, optional
+        Suffix appended to output_paths for saved cluster centers from
+        individual channels. Default is "_cluster_centers".
+    progress_callback : {callable, "console", None}, optional
+        Callback function to report progress where the input integer is
+        the index of the channel currently processed. If "console", uses
+        a simple console print. If None, no progress is reported.
+        Default is None.
+
+    Returns
+    -------
+    resi_centers : pd.DataFrame
+        Combined cluster centers from all channels. Contains all columns
+        from the original localizations plus a 'resi_channel_id' column
+        indicating which channel each cluster belongs to. The 'group'
+        column is renamed to 'cluster_id'.
+    resi_info : list of dicts
+        Metadata for the RESI cluster centers, containing clustering
+        parameters for each channel.
+
+    Raises
+    ------
+    ValueError
+        If fewer than 2 channels are provided, or if list parameters
+        have incorrect lengths.
+
+    Notes
+    -----
+    RESI (REsolution by Sequential Imaging) relies on sequential imaging
+    to ensure sufficient sparsity of binding sites. Therefore, at least
+    2 channels are required.
+
+    If output_paths are provided, the combined RESI cluster centers will
+    be saved with a new metadata entry containing clustering parameters
+    for each channel.
+    """
+    n_channels = len(locs)
+    if n_channels < 2:
+        raise ValueError(
+            f"RESI requires at least 2 channels, but got {n_channels}. "
+            "Consider using SMLM Clusterer for single-channel clustering."
+        )
+
+    # Ensure all parameters are lists for consistent handling
+    if isinstance(radius_xy, (int, float)):
+        radius_xy = [radius_xy] * n_channels
+    elif len(radius_xy) != n_channels:
+        raise ValueError(
+            f"radius_xy list length ({len(radius_xy)}) must match "
+            f"number of channels ({n_channels})"
+        )
+
+    if radius_z is not None:
+        if isinstance(radius_z, (int, float)):
+            radius_z = [radius_z] * n_channels
+        elif len(radius_z) != n_channels:
+            raise ValueError(
+                f"radius_z list length ({len(radius_z)}) must match "
+                f"number of channels ({n_channels})"
+            )
+    else:
+        radius_z = [None] * n_channels
+
+    if isinstance(min_locs, int):
+        min_locs = [min_locs] * n_channels
+    elif len(min_locs) != n_channels:
+        raise ValueError(
+            f"min_locs list length ({len(min_locs)}) must match "
+            f"number of channels ({n_channels})"
+        )
+    return _resi(
+        locs=locs,
+        infos=infos,
+        radius_xy=radius_xy,
+        radius_z=radius_z,
+        min_locs=min_locs,
+        apply_fa=apply_fa,
+        save_clustered_locs=save_clustered_locs,
+        save_cluster_centers=save_cluster_centers,
+        resi_path=resi_path,
+        output_paths=output_paths,
+        suffix_locs=suffix_locs,
+        suffix_centers=suffix_centers,
+        progress_callback=progress_callback,
+    )
+
+
+def _resi(
+    locs: list[pd.DataFrame],
+    infos: list[list[dict]],
+    radius_xy: list[float],
+    radius_z: list[float] | None = None,
+    min_locs: list[int] = 10,
+    apply_fa: bool = True,
+    save_clustered_locs: bool = False,
+    save_cluster_centers: bool = False,
+    resi_path: str | None = None,
+    output_paths: list[str] | None = None,
+    suffix_locs: str = "_clustered",
+    suffix_centers: str = "_cluster_centers",
+    progress_callback: (
+        Callable[[int], None] | Literal["console"] | None
+    ) = None,
+) -> tuple[pd.DataFrame, list[dict]]:
+    """Internal function to perform RESI analysis, assumes all
+    parameters are in the correct format and that there are at least 2
+    chennels. See `resi` for details."""
+    ndim = 3 if all(["z" in locs_.columns for locs_ in locs]) else 2
+    pixelsize = lib.get_from_metadata(infos[0], "Pixelsize", raise_error=True)
+
+    # Process each channel
+    resi_channels = []
+    if progress_callback == "console":
+        iter_range = tqdm(
+            total=len(locs), desc="Processing channels", unit="Channels"
+        )
+    else:
+        iter_range = range(len(locs))
+    for i in iter_range:
+        if callable(progress_callback):
+            progress_callback(i)
+        locs_ = locs[i]
+        info_ = infos[i]
+        r_xy = radius_xy[i]
+        r_z = radius_z[i]
+        min_locs_ = min_locs[i]
+
+        # Cluster localizations for this channel
+        clustered_locs = clusterer.cluster(
+            locs_,
+            radius_xy=r_xy,
+            min_locs=min_locs_,
+            frame_analysis=apply_fa,
+            radius_z=r_z if ndim == 3 else None,
+            pixelsize=pixelsize,
+        )
+
+        new_info = {
+            "Generated by": "RESI analysis",
+            "Clustering radius xy (nm)": r_xy * pixelsize,
+            "Min. number of locs": min_locs_,
+            "Basic frame analysis": apply_fa,
+        }
+        if ndim == 3:
+            new_info["Clustering radius z (nm)"] = r_z * pixelsize
+
+        # Save clustered localizations if requested
+        if save_clustered_locs and output_paths is not None:
+            save_path = (
+                os.path.splitext(output_paths[i])[0] + f"{suffix_locs}.hdf5"
+            )
+            io.save_locs(save_path, clustered_locs, info_ + [new_info])
+
+        # Extract cluster centers from clustered localizations
+        centers = clusterer.find_cluster_centers(clustered_locs, pixelsize)
+
+        # Save cluster centers if requested
+        if save_cluster_centers and output_paths is not None:
+            save_path = (
+                os.path.splitext(output_paths[i])[0] + f"{suffix_centers}.hdf5"
+            )
+            io.save_locs(save_path, centers, info_ + [new_info])
+
+        # Add RESI channel ID to identify which channel this cluster belongs to
+        centers["resi_channel_id"] = i * np.ones(
+            len(centers),
+            dtype=np.int8,
+        )
+        resi_channels.append(centers)
+    if callable(progress_callback):  # close the progress dialog
+        progress_callback(len(locs))
+
+    # Combine cluster centers from all channels
+    all_resi = pd.concat(resi_channels, ignore_index=True)
+
+    # Rename 'group' to 'cluster_id' for clarity
+    all_resi["cluster_id"] = all_resi["group"]
+    all_resi.drop(columns=["group"], inplace=True)
+    all_resi.sort_values(kind="quicksort", by="frame", inplace=True)
+
+    new_info = {
+        "Generated by": "RESI analysis",
+        "Clustering radius xy (nm) for each channel": [
+            float(r * pixelsize) for r in radius_xy
+        ],
+        "Min. number of locs in a cluster for each channel": list(min_locs),
+        "Basic frame analysis": apply_fa,
+    }
+    if ndim == 3:
+        new_info["Clustering radius z (nm) for each channel"] = [
+            float(r * pixelsize) for r in radius_z
+        ]
+    new_info = infos[0] + [new_info]
+    # Save combined RESI results if output paths are provided
+    if resi_path is not None:
+        io.save_locs(resi_path, all_resi, new_info)
+
+    return all_resi, new_info

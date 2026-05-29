@@ -1,5 +1,8 @@
 """Template for creating a Picasso plugin. Any plugin should be moved to
 picasso/gui/plugins/.
+
+For more details, see https://picassosr.readthedocs.io/en/latest/plugins.html
+
 Author:
 Date:
 """

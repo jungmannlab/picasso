@@ -3,13 +3,13 @@ picasso.__init__.py
 ~~~~~~~~~~~~~~~~~~~
 
 :authors: Joerg Schnitzbauer, Maximilian Thomas Strauss,
-    Rafal Kowalewski 2016-2026
+    Rafal Kowalewski
 :copyright: Copyright (c) 2016-2026 Jungmann Lab, MPI of Biochemistry
 """
 
 import os.path
 import yaml
-from .version import __version__
+from .version import __version__  # noqa: F401
 
 _this_file = os.path.abspath(__file__)
 _this_dir = os.path.dirname(_this_file)

@@ -50,7 +50,7 @@ Load data and parameters
 1. Click the *Load structures* button in the top left corner of the window. Upon loading, new widgets will appear in the GUI.  
 2. For each detected molecular target species, load the experimental data which must be saved in .hdf5 format that is compatible with localizations files in other Picasso modules, see `here <https://picassosr.readthedocs.io/en/latest/files.html#hdf5-files>`_.
 3. Furthermore, input label uncertainty and labeling efficiency and observed density in the *Load data* box. Alternatively, load the mask to simulate heterogeneous distribution by clicking on *Masks* in the bottom left corner of the box. For more information about the mask, see **Mask generation tab**.
-4. Moreover, in the *Load data* box, the user can change the dimensionality of the simulation, change the mode of rotations (random rotations around z axis (2D), random rotations around 3 axes or no rotations). If 3D simulation is chosen without a mask, the user needs to input the range of z coordinates of molecular targets simulated by clicking *Z range*.
+4. Moreover, in the *Load data* box, the user can change the dimensionality of the simulation. If 3D simulation is chosen without a mask, the user needs to input the range of z coordinates of molecular targets simulated by clicking *Z range*. In the "Optional settings" dialog, the user can change the mode of rotations (random rotations around z axis (2D), random rotations around 3 axes or no rotations). Additionally, the fitting mode can be adjusted - one of "bayesian", "coarse to fine" or "brute force". The chosen fitting mode applies to all fitting workflows (*Find best fitting combination*, *Compare models* and *Fit LE*). For more information about the fitting modes, see **Fitting** below.
 
 Fitting
 ~~~~~~~
@@ -60,17 +60,27 @@ Within the *Fitting* box:
 1. To generate the search space, i.e., the set of stoichiometries tested in SPINNA, click the button *Generate parameter search space* and define the number of simulation repeats and granularity. For more information, see Supplementary Figure 2 in the `SPINNA publication <https://doi.org/10.1038/s41467-025-59500-z>`_.
 2. To save the fitting scores for each tested stoichiometry, tick *Save fitting scores*. The user will be asked to input the name of the resulting .csv file.
 3. To obtain the result’s uncertainty, check the *Bootstrap* box, which will resample from the best fitting model 20 times and rerun SPINNA on the resampled datasets. Note that this will increase the computation time.
-4. To test different SPINNA models, click *Compare models*. The dialog will open, asking the user to input the range of tested label uncertainties (the user can choose to fit label uncertainty or not) and the candidate SPINNA models. For example, the user may want to explore the models with different spacings between the structures or different shape. We recommend the choose lower granularity when comparing models since the fitting may take a long time. 
+4. To test different SPINNA models, click *Compare models*. The dialog will open, asking the user to input the range of tested label uncertainties (the user can choose to fit label uncertainty or not) and the candidate SPINNA models. For example, the user may want to explore the models with different spacings between the structures or different shape. We recommend the choose lower granularity when comparing models since the fitting may take a long time. A single progress dialog is displayed throughout the comparison; its title shows the current round number (``[Round X/Y]``) so the user knows how many SPINNA rounds remain. The fitting mode selected in *Optional settings* is honored.
 5. To run SPINNA, click *Find best fitting combination*. The progress dialog will be displayed.
 6. After the fitting is finished, specify the name for saving a fit summary file (.txt). This file includes all the information about the fitting, the parameters and the results. The user may also choose not to save the file by clicking *Cancel* in the dialog. Additionally, the fitted stoichiometry is displayed in the *Single simulation* box and the NND histograms are shown in the *Plotting* box, see image below.
 
-If labeling efficiency values are to be fitted, the user needs to load structures first which consists of:
+Fitting labeling efficiency
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-* Monomer of the reference protein
-* Monomer of the target protein
-* Heterodimer of the reference and target protein
+Since v0.10.1 the labeling efficiency (LE) fit has its own workflow. Whenever exactly two molecular targets are loaded, a *Fit labeling efficiencies* button is shown in the *Fitting* box. The user no longer needs to load the three "monomer A / monomer B / heterodimer AB" structures manually — SPINNA constructs them internally from the two target names alone.
 
-SPINNA will automatically detect if these conditions are met. If so, an extra check box will appear in the *Fitting* box, titled "Fit labeling efficiency". By checking it, LE used for simulations is kept at 100% and the reported fit result will only show the LE values of the reference and target proteins (in practice, which target is named reference or target does not matter and they can be interchanged). Additionally, the saved ``.txt`` file will contain the same information.
+Clicking *Fit labeling efficiencies* opens a small dialog with three sections:
+
+1. **Fit label uncertainty** (checkbox) — when checked, the dialog exposes a *From / To / Step* row per target so SPINNA can search for the best label uncertainty. When unchecked, the current value from the *Load data* box is used as a fixed input for that target.
+2. **Fit heterodimer distance** (checkbox) — when checked, the dialog exposes a *From / To / Step* row in nm. When unchecked, a single fixed distance is used (entered in the *Distance (nm)* field).
+3. **Save fit scores** (checkbox) — when checked, the user selects a folder where SPINNA saves the fit scores for every candidate.
+
+The dialog also displays a live "Estimated SPINNA rounds" preview that updates as the spin boxes change, so the user can gauge how long the fit will take before starting it.
+
+Fitting modes
+~~~~~~~~~~~~~
+
+Since v0.10.0, in the "Optional settings", the user can choose between three fitting modes: "bayesian", "coarse to fine" and "brute force". The chosen mode is honored by *Find best fitting combination*, *Compare models* and *Fit LE...*. In the "bayesian" mode, the search space is explored using Bayesian optimization with Gaussian process regression. This is a more efficient way to explore the search space, especially when it is large, and it is recommended as the default fitting mode. In the "coarse to fine" mode, a coarse grid of structure combinations is tested, which consists of 10% of evenly distributed structure combinations. Then, a finer grid is tested around the best combination from the coarse grid. In the "brute force" mode, all combinations of structures are tested sequentially. The "coarse to fine" mode is recommended for faster fitting, especially when the search space is large. Previously, only brute force mode was available.
 
 .. image:: ../docs/spinna_simulate_tab_after_fit.png
    :alt: simulate_tab_after_fit
@@ -109,11 +119,11 @@ Mask generation tab
 This tab allows the user to create a density/binary mask capable of recovering the heterogeneous density distribution present in the experimental data. 
  
 1. Click *Load molecules* to open the .hdf5 file with molecules/localizations that will be used to generate the mask. 
-2. Adjust bin size and Gaussian blur to be applied to the mask.
+2. Adjust bin size and Gaussian blur to be applied to the mask. Since v0.9.6, the user can choose anisotropic bin size and Gaussian blur with one value in the xy plane and another value in the z direction.
 3. The mask can be generated in 3D and/or converted to a binary mask.
 4. Click *Generate mask*. This may take a while, especially for a 3D mask. The mask will be displayed automatically. The legend in the *Navigation* box displays the probability of finding a molecular target per pixel/voxel. 
 5. The density mask can be thresholded at any user-defined probability value. By default, the Otsu threshold is used (Otsu. *Automatica*, 1975). 
-6. To explore the mask, use the buttons in the *Navigation* box. Alternatively, arrow keys can be used too.
+6. To explore the mask, use the buttons in the *Navigation* box. Alternatively, arrow keys can be used too. For 3D masks, the user can slice through individual z planes using the slider.
 7. Once the mask is ready, click *Save mask*. This saves a numpy array in the .npy format.
 
 
@@ -127,10 +137,10 @@ SPINNA can be run directly from the command window to allow fast and efficient b
 
 Each row in the .csv file will specify parameters for which SPINNA is run. In the file, define the following column names (i.e., the values typed into the first row) as follows:
 
-- *structures_filename* : Path to the file with structures saved (.yaml), see **Structures tab** above.
-- *exp_data_TARGET* : Path to the file with experimental data (.hdf5) for each molecular target species. Each target in the structures must have a corresponding column, for example, *exp_data_EGFR".
-- *le_TARGET* : Labeling efficiency (%) for each molecular target species. 
-- *label_unc_TARGET* : Label uncertainty (nm) for each molecular target species. 
+- *structures_filename* : Path to the file with structures saved (.yaml), see **Structures tab** above. Required unless ``le_fitting=1``, in which case the monomer/heterodimer structures are built internally from the two ``exp_data_TARGET`` columns.
+- *exp_data_TARGET* : Path to the file with experimental data (.hdf5) for each molecular target species. Each target in the structures must have a corresponding column, for example, *exp_data_EGFR*.
+- *le_TARGET* : Labeling efficiency (%) for each molecular target species. Ignored when ``le_fitting=1``.
+- *label_unc_TARGET* : Label uncertainty (nm) for each molecular target species. When ``le_fitting=1``, this may be a comma-separated list of candidates (e.g. ``"3,4,5,6"``); a single value disables the per-target search.
 - *granularity* : Granularity used in parameters search space generation. The higher the value the more combinations of structure counts will be tested.
 - *save_filename* : Name of the .txt file where the results will be saved.
 - *NND_bin* : Bin size (nm) for plotting the NND histogram(s).
@@ -140,16 +150,19 @@ Each row in the .csv file will specify parameters for which SPINNA is run. In th
 Depending on whether a homo- or heterogeneous distribution is used, the following columns must be present:
 
 For a homogeneous distribution:
-- *area* or *volume* : Area (2D simulation) or volume (3D simulation) of the simulated ROI (um^2 or um^3).
+- *area* or *volume* : Area (2D simulation) or volume (3D simulation) of the simulated ROI (um^2 or um^3). For 2D rows, *area* is optional: if omitted, the area is read from the experimental data metadata key ``Area (um^2)`` (written by Picasso when picks/areas are saved).
 - *z_range* : Applicable only when *volume* is provided. Defines the range of z coordinates (nm) of simulated molecular targets.
 
 For a heterogeneous distribution:
 - *mask_filename_TARGET* : Name of the .npy file with the mask saved for each molecular target species.
 
 Optional columns are:
-- *rotation_mode* : Random rotations mode used in analysis. Values must be one of {*3D*, *2D*, *None*}. Default: *3D*.
+- *rotation_mode* : Random rotations mode used in analysis. Values must be one of {*3D*, *2D*, *None*}. Default: *2D*.
 - *nn_plotted* : Number of nearest neighbors plotted, default: 4.
-- *le_fitting* : 0 if standard SPINNA is ran, 1 if labeling efficiency fitting is to be performed. Then, 100% LE is used in the pipeline and different output file is saved. If the column is not provided, standard SPINNA is ran.
+- *le_fitting* : 0 if standard SPINNA is ran, 1 if labeling efficiency fitting is to be performed. When set to 1, monomer A, monomer B and heterodimer structures are built internally for each candidate ``distances`` value, label uncertainty is fit per target from the comma-separated candidates in ``label_unc_TARGET``, and the per-target LE is recovered from the fitted structure proportions. Exactly two ``exp_data_*`` columns must be present; the first maps to ``target_a``. ``-b/--bootstrap`` is ignored on LE-fitting rows. If the column is not provided, standard SPINNA is ran. For more details, see `Hellmeier, Strauss, et al. Nature Methods, 2024 <https://doi.org/10.1038/s41592-024-02242-5>`_.
+- *distances* : Comma-separated list of candidate heterodimer distances in nm (e.g. ``"5,10,15,20"``). A single value fixes the distance. Required when ``le_fitting=1``; ignored otherwise.
+
+The full column reference can also be printed from the command line via ``python -m picasso spinna --columns``.
 
 
 SPINNA in Python

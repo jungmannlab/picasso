@@ -76,7 +76,7 @@ RESI
    :alt: UML Render RESI
 
 
-In Picasso 0.6.0, a new RESI (Resolution Enhancement by Sequential Imaging) dialog was introduced. It allows for a substantial resolution boost by sequential imaging of a single target with multiple labels with Exchange-PAINT (*Reinhardt, et al., Nature, 2023.* DOI: 10.1038/s41586-023-05925-9).
+In Picasso 0.6.0, a new RESI (Resolution Enhancement by Sequential Imaging) dialog was introduced. It allows for a substantial resolution boost by sequential imaging of a single target with multiple labels with Exchange-PAINT (*Reinhardt, Masullo, Baudrexel, Steen, et al., Nature, 2023.* DOI: 10.1038/s41586-023-05925-9).
 
 To use RESI, prepare your individual RESI channels (localization, undrifting, filtering and **alignment**). Load such localization lists into Picasso Render and open ``Postprocess > RESI``. The dialog shown above will appear. Each channel will be clustered using the SMLM clusterer (other clustering algorithms could be applied as well although only the SMLM clusterer is implemented for RESI in Picasso). Clustering parameters can be defined for each RESI channel individually, although it is possible to apply the same parameters to all channels by clicking ``Apply the same clustering parameters to all channels``, which will copy the clustering parameters from the first row and paste it to all other channels.
 
@@ -208,7 +208,7 @@ These columns can be used to plot density profiles of localizations along the re
 
 Save pick properties
 ^^^^^^^^^^^^^^^^^^^^
-Calculates the properties of each pick (i.e., mean frame, mean x mean y as well as kinetic information and saves it as an hdf5 file.
+Calculates the properties of each pick (i.e., mean frame, mean x mean y as well as kinetic information) and saves it as an hdf5 file.
 
 Save pick regions
 ^^^^^^^^^^^^^^^^^
@@ -272,7 +272,59 @@ Opens the Display Settings Dialog.
 
 Files (CTRL + F)
 ^^^^^^^^^^^^^^^^
-Open a dialog to select the color and toggle visibility for each loaded dataset.
+Opens the **Datasets** dialog, which lists every loaded channel and lets you
+control its title, visibility, color (or colormap), and relative intensity.
+A small horizontal gradient next to each channel previews what that channel
+will look like at intensity 0 → intensity 1.
+
+Each channel's *Color* dropdown is organised into three sections:
+
+* **Solid colors** — the 14 default named colors (``red``, ``cyan``,
+  ``green``, …). You can also type a hexadecimal code such as ``#FF5733``
+  directly into the dropdown. Solid colors are rendered as a black →
+  color ramp, exactly matching the previous "intensity × RGB" behaviour.
+* **Built-in colormaps** — one 3-stop *black → color → white* gradient
+  per default solid color, named ``<color>_gradient`` (e.g.
+  ``blue_gradient``, ``red_gradient``).
+* **Custom** — any user-defined colormaps (see "Edit custom colormaps…"
+  below). This section only appears once at least one custom colormap
+  has been defined.
+
+Channels are blended additively in the final image and clipped to 1.0,
+so overlapping high-intensity regions saturate toward the sum of the
+channel colors.
+
+The ``Automatic coloring`` checkbox overrides per-channel selections with
+HSV-spaced colors for as long as it's ticked. ``Save colors`` /
+``Load colors`` write / read a one-identifier-per-line ``.txt`` file —
+any name from the three dropdown sections (or a hex code) is valid.
+
+Edit custom colormaps
++++++++++++++++++++++
+Opens a small editor where you can create, rename, duplicate, or delete
+your own colormaps. Each custom colormap is a list of 2-5 *stops*; each
+stop has a position in [0, 1] and an RGB color. Stops are linearly
+interpolated into the 256-row look-up table (LUT) used at render time. Click any of the R / G / B cells to type a value, or **double-click** the row to pick the
+stop color from a standard color dialog. Use ``Add stop`` /
+``Remove stop`` to grow or shrink the gradient.
+
+Programmatic use
+++++++++++++++++
+The underlying conversion from solid colors or stops to a ``(256, 3)``
+LUT is also exposed as part of ``picasso.render``::
+
+    from picasso import render
+    lut_red   = render.solid_to_lut((1.0, 0.0, 0.0))     # black → red
+    lut_fire  = render.stops_to_lut([(0, 0, 0, 0),
+                                     (0.5, 1, 0, 0),
+                                     (1, 1, 1, 0)])      # black → red → yellow
+    qimage, *_ = render.render_scene(
+        locs=..., info=..., colors=[lut_red, lut_fire], ...
+    )
+
+Passing a list of LUTs to ``render_scene`` selects the per-channel
+colormap path; passing a list of plain RGB triplets (legacy) still works
+and is equivalent to ``solid_to_lut`` per channel.
 
 Left / Right / Up / Down
 ^^^^^^^^^^^^^^^^^^^^^^^^
@@ -380,7 +432,9 @@ Allows performing k-means clustering in picks. Users can specify the number of c
 
 Mask image
 ^^^^^^^^^^
-Opens a dialog that allows the user to specify a mask for filtering localizations within and outside it.
+Opens a dialog that allows the user to specify a mask for filtering localizations within and outside it. The user can adjust the histogram bin size, blur thereof and the threshold applied.
+
+The images can be zoomed in/out (Ctrl/Cmd + scrolling) and panned (mouse right click). Double clicking resets the zoom.
 
 Fast rendering
 ^^^^^^^^^^^^^^

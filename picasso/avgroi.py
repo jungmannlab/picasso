@@ -5,23 +5,24 @@ picasso.avgroi
 Fits spots, i.e., finds the average of the pixels in a region of
 interest (ROI).
 
-:author: Maximilian Thomas Strauss, 2016
-:copyright: Copyright (c) 2016 Jungmann Lab, MPI of Biochemistry
+:authors: Maximilian Thomas Strauss
+:copyright: Copyright (c) 2016-2026 Jungmann Lab, MPI of Biochemistry
 """
 
 import multiprocessing
 from concurrent import futures
+from typing import Callable, Literal
 
 import numba
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
 
-from . import gausslq
+from . import gausslq, lib
 
 
 @numba.jit(nopython=True, nogil=True)
-def _sum(spot: np.ndarray, size: int) -> float:
+def _sum(spot: lib.FloatArray2D, size: int) -> float:
     """Calculate the sum of all pixels in a spot."""
     _sum_ = 0.0
     for i in range(size):
@@ -31,7 +32,7 @@ def _sum(spot: np.ndarray, size: int) -> float:
     return _sum_
 
 
-def fit_spot(spot: np.ndarray) -> np.ndarray:
+def fit_spot(spot: lib.FloatArray2D) -> list[float]:
     """Fit a single spot and return fit parameters."""
     size = spot.shape[0]
     avg_roi = _sum(spot, size)
@@ -40,19 +41,32 @@ def fit_spot(spot: np.ndarray) -> np.ndarray:
     return result
 
 
-def fit_spots(spots: np.ndarray) -> np.ndarray:
+def fit_spots(
+    spots: lib.FloatArray3D,
+    progress_callback: (
+        Callable[[int], None] | Literal["console"] | None
+    ) = None,
+) -> lib.FloatArray2D:
     """Fit spots and return fit parameters."""
     theta = np.empty((len(spots), 6), dtype=np.float32)
     theta.fill(np.nan)
-    for i, spot in enumerate(spots):
+    use_tqdm = progress_callback == "console"
+    if use_tqdm:
+        iter_range = tqdm(range(len(spots)), desc="Fitting...", unit="spot")
+    else:
+        iter_range = range(len(spots))
+    for i in iter_range:
+        spot = spots[i]
         theta[i] = fit_spot(spot)
+        if callable(progress_callback):
+            progress_callback(i)
     return theta
 
 
 def fit_spots_parallel(
-    spots: np.ndarray,
+    spots: lib.FloatArray3D,
     asynch: bool = False,
-) -> np.ndarray | list[futures.Future]:
+) -> lib.FloatArray2D | list[futures.Future]:
     """Fit spots in parallel (if ``asynch`` is True)."""
     n_workers = min(
         60, max(1, int(0.75 * multiprocessing.cpu_count()))
@@ -80,7 +94,7 @@ def fit_spots_parallel(
     return fits_from_futures(fs)
 
 
-def fits_from_futures(futures: list[futures.Future]) -> np.ndarray:
+def fits_from_futures(futures: list[futures.Future]) -> lib.FloatArray2D:
     """Collect fit results from futures."""
     theta = [_.result() for _ in futures]
     return np.vstack(theta)
@@ -88,14 +102,13 @@ def fits_from_futures(futures: list[futures.Future]) -> np.ndarray:
 
 def locs_from_fits(
     identifications: pd.DataFrame,
-    theta: np.ndarray,
+    theta: lib.FloatArray2D,
     box: int,
     em: float,
 ) -> pd.DataFrame:
     """Convert fit results to localization DataFrame."""
-    box_offset = int(box / 2)
-    x = theta[:, 0] + identifications["x"]  # - box_offset
-    y = theta[:, 1] + identifications["y"]  # - box_offset
+    x = theta[:, 0] + identifications["x"]
+    y = theta[:, 1] + identifications["y"]
     lpx = gausslq.localization_precision(
         theta[:, 2], theta[:, 4], theta[:, 5], theta[:, 3], em=em
     )

@@ -4,14 +4,13 @@ picasso.gui.design
 
 GUI for designing rectangular rothemund origami.
 
-:author: Maximilian Thomas Strauss, 2016
-:copyright: Copyright (c) 2016 Jungmann Lab, MPI of Biochemistry
+:authors: Maximilian Thomas Strauss
+:copyright: Copyright (c) 2016-2026 Jungmann Lab, MPI of Biochemistry
 """
 
 import glob
 import os
 import sys
-import traceback
 import importlib
 import pkgutil
 from math import sqrt
@@ -21,7 +20,7 @@ import matplotlib.patches as patches
 import matplotlib.pyplot as plt
 import numpy as _np
 from matplotlib.backends.backend_pdf import PdfPages
-from PyQt5 import QtCore, QtGui, QtWidgets, QtPrintSupport
+from PyQt6 import QtCore, QtGui, QtWidgets, QtPrintSupport
 
 from .. import io as _io
 from .. import design, design_sequences
@@ -33,7 +32,7 @@ PAINT_SEQUENCES = design_sequences.paint_sequences
 
 def plotPlate(
     selection: list[str],
-    selectioncolors: list[float],
+    selectioncolors: list[list[float]],
     platename: str,
 ) -> plt.Figure:
     """Plot a 96-well plate with docking strands color-coded.
@@ -62,7 +61,7 @@ def plotPlate(
     rowsStr = ["A", "B", "C", "D", "E", "F", "G", "H"]
     rowsStr = rowsStr[::-1]
 
-    fig = plt.figure(constrained_layout=True, frameon=False)
+    fig = plt.figure(frameon=False)
     fig.set_size_inches(5, 8)
     ax = plt.Axes(fig, [0.0, 0.0, 1.0, 1.0])
     ax.set_axis_off()
@@ -284,7 +283,7 @@ defaultcolor = allcolors[0]
 maxcolor = 8
 
 
-def indextoHex(y: float, x: float) -> tuple[float, float]:
+def indextoHex(y: int, x: int) -> tuple[float, float]:
     """Convert 2D index (row, col) to hexagonal coordinates."""
     hex_center_x = x * 1.5 * HEX_SIDE_HALF
     if _np.mod(x, 2) == 0:
@@ -294,7 +293,7 @@ def indextoHex(y: float, x: float) -> tuple[float, float]:
     return hex_center_x, hex_center_y
 
 
-def indextoStr(x: float, y: float) -> tuple[str, int]:
+def indextoStr(x: int, y: int) -> tuple[str, int]:
     """Convert 2D index (col, row) to string representation."""
     rowStr = rowIndex[y]
     colStr = columnIndex[x]
@@ -302,7 +301,7 @@ def indextoStr(x: float, y: float) -> tuple[str, int]:
     return strIndex
 
 
-class PipettingDialog(QtWidgets.QDialog):
+class PipettingDialog(lib.Dialog):
     """Dialog for selecting the folder to create the .pdf file with
     displayed 96-well plated based on the .csv file with sequence
     information.
@@ -349,8 +348,9 @@ class PipettingDialog(QtWidgets.QDialog):
         layout.addWidget(self.uniqueCounter)
 
         self.buttons = QtWidgets.QDialogButtonBox(
-            QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel,
-            QtCore.Qt.Horizontal,
+            QtWidgets.QDialogButtonBox.StandardButton.Ok
+            | QtWidgets.QDialogButtonBox.StandardButton.Cancel,
+            QtCore.Qt.Orientation.Horizontal,
             self,
         )
 
@@ -413,13 +413,13 @@ class PipettingDialog(QtWidgets.QDialog):
         dialog = PipettingDialog(parent)
         if pwd:
             dialog.pwd = pwd
-        result = dialog.exec_()
+        result = dialog.exec()
         fulllist = dialog.getfulllist()
 
-        return (fulllist, result == QtWidgets.QDialog.Accepted)
+        return (fulllist, result == QtWidgets.QDialog.DialogCode.Accepted)
 
 
-class SeqDialog(QtWidgets.QDialog):
+class SeqDialog(lib.Dialog):
     """Dialog for setting extensions based on the UI selection.
 
     ...
@@ -456,8 +456,9 @@ class SeqDialog(QtWidgets.QDialog):
         layout.addWidget(self.table)
 
         self.buttons = QtWidgets.QDialogButtonBox(
-            QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel,
-            QtCore.Qt.Horizontal,
+            QtWidgets.QDialogButtonBox.StandardButton.Ok
+            | QtWidgets.QDialogButtonBox.StandardButton.Cancel,
+            QtCore.Qt.Orientation.Horizontal,
             self,
         )
 
@@ -579,7 +580,7 @@ class SeqDialog(QtWidgets.QDialog):
         return tablelong, tableshort
 
 
-class FoldingDialog(QtWidgets.QDialog):
+class FoldingDialog(lib.Dialog):
     """Dialog for calculating the volumes of reagents for preparing the
     given DNA origami.
 
@@ -721,12 +722,16 @@ class FoldingDialog(QtWidgets.QDialog):
         parent: QtWidgets.QWidget | None = None,
     ) -> tuple[list[str], list[str], bool]:
         dialog = FoldingDialog(parent)
-        result = dialog.exec_()
+        result = dialog.exec()
         tablelong, tableshort = dialog.evalTable()
-        return (tablelong, tableshort, result == QtWidgets.QDialog.Accepted)
+        return (
+            tablelong,
+            tableshort,
+            result == QtWidgets.QDialog.DialogCode.Accepted,
+        )
 
 
-class PlateDialog(QtWidgets.QDialog):
+class PlateDialog(lib.Dialog):
     """Dialog for selecting plate export options.
 
     The user can choose either to export only the sequences needed for
@@ -768,8 +773,9 @@ class PlateDialog(QtWidgets.QDialog):
         layout.addWidget(self.radio2)
 
         self.buttons = QtWidgets.QDialogButtonBox(
-            QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel,
-            QtCore.Qt.Horizontal,
+            QtWidgets.QDialogButtonBox.StandardButton.Ok
+            | QtWidgets.QDialogButtonBox.StandardButton.Cancel,
+            QtCore.Qt.Orientation.Horizontal,
             self,
         )
 
@@ -794,9 +800,9 @@ class PlateDialog(QtWidgets.QDialog):
         parent: QtWidgets.QWidget | None = None,
     ) -> tuple[int, bool]:
         dialog = PlateDialog(parent)
-        result = dialog.exec_()
+        result = dialog.exec()
         selection = dialog.evalSelection()
-        return (selection, result == QtWidgets.QDialog.Accepted)
+        return (selection, result == QtWidgets.QDialog.DialogCode.Accepted)
 
 
 class BindingSiteItem(QtWidgets.QGraphicsPolygonItem):
@@ -1046,38 +1052,22 @@ class Scene(QtWidgets.QGraphicsScene):
                 paletteindex = lenitems - bindingitems
                 selectedcolor = allitems[paletteindex].brush().color()
 
-                if clicked_item == allitems[paletteindex]:  # DO NOTHING
-                    pass
-                elif clicked_item == allitems[paletteindex + 1]:
-                    allitems[paletteindex].setBrush(allcolors[1])
-                    selectedcolor = allcolors[1]
-                elif clicked_item == allitems[paletteindex + 2]:
-                    allitems[paletteindex].setBrush(allcolors[2])
-                    selectedcolor = allcolors[2]
-                elif clicked_item == allitems[paletteindex + 3]:
-                    allitems[paletteindex].setBrush(allcolors[3])
-                    selectedcolor = allcolors[3]
-                elif clicked_item == allitems[paletteindex + 4]:
-                    allitems[paletteindex].setBrush(allcolors[4])
-                    selectedcolor = allcolors[4]
-                elif clicked_item == allitems[paletteindex + 5]:
-                    selectedcolor = allcolors[5]
-                    allitems[paletteindex].setBrush(allcolors[5])
-                elif clicked_item == allitems[paletteindex + 6]:
-                    allitems[paletteindex].setBrush(allcolors[6])
-                    selectedcolor = allcolors[6]
-                elif clicked_item == allitems[paletteindex + 7]:
-                    allitems[paletteindex].setBrush(allcolors[7])
-                    selectedcolor = allcolors[7]
-                elif clicked_item == allitems[paletteindex + 8]:
-                    allitems[paletteindex].setBrush(QtGui.QBrush(defaultcolor))
-                    selectedcolor = defaultcolor
+                palette_map = {
+                    allitems[paletteindex + i]: allcolors[i]
+                    for i in range(1, maxcolor + 1)
+                }
+                # index 8 (last) resets to default grey
+                palette_map[allitems[paletteindex + maxcolor]] = defaultcolor
+
+                if clicked_item == allitems[paletteindex]:
+                    pass  # clicked the "current color" swatch — do nothing
+                elif clicked_item in palette_map:
+                    new_color = palette_map[clicked_item]
+                    allitems[paletteindex].setBrush(QtGui.QBrush(new_color))
                 else:
                     currentcolor = clicked_item.brush().color()
                     if currentcolor == selectedcolor:
-                        clicked_item.setBrush(
-                            defaultcolor
-                        )  # TURN WHITE AGAIN IF NOT USED
+                        clicked_item.setBrush(defaultcolor)
                     else:
                         clicked_item.setBrush(QtGui.QBrush(selectedcolor))
                 self.evaluateCanvas()
@@ -1148,13 +1138,13 @@ class Scene(QtWidgets.QGraphicsScene):
         )
         self.evaluateCanvas()
 
-    def vectorToString(self, x: _np.ndarray) -> str:
+    def vectorToString(self, x: lib.FloatArray1D) -> str:
         """Convert a numpy vector to a string representation."""
         x_arrstr = _np.char.mod("%f", x)
         x_str = ", ".join(x_arrstr)
         return x_str
 
-    def vectorToStringInt(self, x: _np.ndarray) -> str:
+    def vectorToStringInt(self, x: lib.IntArray1D) -> str:
         """Convert a numpy vector of integers to a string
         representation."""
         x_arrstr = _np.char.mod("%i", x)
@@ -1323,6 +1313,72 @@ class Scene(QtWidgets.QGraphicsScene):
         return allplates
 
 
+def _match_pipett_sequences(
+    structureData: list,
+    fulllist: list,
+) -> tuple[list, list, list]:
+    """Match structure sequences against the reference plate list.
+
+    Returns
+    -------
+    tuple[list, list, list]
+        ``(fullpipettlist, pipettlist, platelist)``
+    """
+    fullpipettlist = [
+        ["PLATE NAME", "PLATE POSITION", "OLIGO NAME", "SEQUENCE", "COLOR"]
+    ]
+    pipettlist: list = []
+    platelist: list = []
+
+    for i in range(1, len(structureData)):
+        sequencerow = structureData[i]
+        sequence = sequencerow[3]
+        fullpipettlist.append(sequencerow)
+        fullpipettlist[i][0] = "NOT FOUND"
+        if fullpipettlist[i][2] == " ":
+            fullpipettlist[i][0] = "BIOTIN PLACEHOLDER"
+        if sequence != " ":
+            for fulllistrow in fulllist:
+                if sequence == fulllistrow[3]:
+                    pipettlist.append(
+                        [
+                            fulllistrow[0],
+                            fulllistrow[1],
+                            fulllistrow[2],
+                            fulllistrow[3],
+                            rgbcolors[sequencerow[4]],
+                        ]
+                    )
+                    platelist.append(fulllistrow[0])
+                    del fullpipettlist[-1]
+                    fullpipettlist.append(fulllistrow)
+                    break  # first found will be taken
+
+    return fullpipettlist, pipettlist, platelist
+
+
+def _build_plate_figures(
+    pipettlist: list,
+    platelist: list,
+) -> tuple[dict, list]:
+    """Build per-plate figures for the pipetting scheme.
+
+    Returns
+    -------
+    tuple[dict, list]
+        ``(allfig, platenames)``
+    """
+    platenames = sorted(set(platelist))
+    allfig: dict = {}
+
+    for x, platename in enumerate(platenames):
+        selection = [e[1] for e in pipettlist if e[0] == platename]
+        selectioncolors = [e[4] for e in pipettlist if e[0] == platename]
+        allfig[x] = plotPlate(selection, selectioncolors, platename)
+
+    return allfig, platenames
+
+
 class Window(QtWidgets.QMainWindow):
     """Main window displaying the origami and providing the interface.
 
@@ -1342,11 +1398,12 @@ class Window(QtWidgets.QMainWindow):
         super().__init__()
         self.mainscene = Scene(self)
         self.view = QtWidgets.QGraphicsView(self.mainscene)
-        self.view.setRenderHint(QtGui.QPainter.Antialiasing)
+        self.view.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
         self.setCentralWidget(self.view)
         self.statusBar().showMessage(
             "Ready."
         )  # . . Sequences loaded from " + BaseSequencesFile + ".")
+        self.user_settings_dialog = lib.UserSettingsDialog(self)
 
     def openDialog(self) -> None:
         """Open a dialog to select a design file."""
@@ -1378,6 +1435,9 @@ class Window(QtWidgets.QMainWindow):
                 self, "Save design to..", filter="*.yaml"
             )
         if path:
+            base, ext = os.path.splitext(path)
+            if ext == ".yml":
+                path = base + ".yaml"
             self.mainscene.saveCanvas(path)
             self.statusBar().showMessage("File saved as: " + path)
             self.pwd = os.path.dirname(path)
@@ -1516,151 +1576,80 @@ class Window(QtWidgets.QMainWindow):
                             "Filename not specified. Plates not saved."
                         )
 
+    def _save_pipett_pdf(self, allfig: dict, platenames: list) -> None:
+        """Open a save dialog and export all plate figures to a PDF."""
+        if hasattr(self, "pwd"):
+            path, ext = lib.get_save_filename_ext_dialog(
+                self,
+                "Save pipetting schemes to.",
+                self.pwd,
+                filter="*.pdf",
+            )
+        else:
+            path, ext = lib.get_save_filename_ext_dialog(
+                self, "Save pipetting schemes to.", filter="*.pdf"
+            )
+        if path:
+            progress = lib.ProgressDialog(
+                "Exporting PDFs", 0, len(platenames), self
+            )
+            progress.set_value(0)
+            progress.show()
+            with PdfPages(path) as pdf:
+                for x in range(len(platenames)):
+                    progress.set_value(x)
+                    pdf.savefig(
+                        allfig[x],
+                        bbox_inches="tight",
+                        pad_inches=0.2,
+                        dpi=200,
+                    )
+            progress.close()
+            self.statusBar().showMessage("Pippetting scheme saved to: " + path)
+            self.pwd = os.path.dirname(path)
+
     def pipettingScheme(self) -> None:
         """Creates the pipetting scheme (i.e., the .pdf file showing
         which wells in the 96-well plates should be used)."""
         seqcheck = self.checkSeq()
-        if self.mainscene.tableshort == [
-            "None",
-            "None",
-            "None",
-            "None",
-            "None",
-            "None",
-            "None",
-        ]:
+        no_ext_set = all(s == "None" for s in self.mainscene.tableshort)
+        if no_ext_set:
             self.statusBar().showMessage(
                 "Error: No extensions have been set."
                 " Please set extensions first."
             )
-        elif seqcheck >= 1:
+            return
+        if seqcheck >= 1:
             self.statusBar().showMessage(
-                "Error: "
-                + str(seqcheck)
-                + " Color(s) do not have extensions. Please set first."
+                f"Error: {seqcheck} Color(s) do not have extensions."
+                " Please set first."
+            )
+            return
+
+        structureData = self.mainscene.readCanvas()[0]
+        pwd = getattr(self, "pwd", [])
+        fulllist, _ = PipettingDialog.getSchemes(pwd=pwd)
+        if not fulllist:
+            self.statusBar().showMessage("No *.csv found. Scheme not created.")
+            return
+
+        _, pipettlist, platelist = _match_pipett_sequences(
+            structureData, fulllist
+        )
+        noplates = len(set(platelist))
+        if (len(structureData) - 1 - 16) == len(pipettlist):
+            self.statusBar().showMessage(
+                f"All sequences found in {noplates} Plates."
+                " Pipetting scheme complete."
             )
         else:
-            structureData = self.mainscene.readCanvas()[0]
-            fullpipettlist = [
-                [
-                    "PLATE NAME",
-                    "PLATE POSITION",
-                    "OLIGO NAME",
-                    "SEQUENCE",
-                    "COLOR",
-                ]
-            ]
-            if hasattr(self, "pwd"):
-                pwd = self.pwd
-            else:
-                pwd = []
-            fulllist, ok = PipettingDialog.getSchemes(pwd=pwd)
-            if fulllist == []:
-                self.statusBar().showMessage(
-                    "No *.csv found. Scheme not created."
-                )
-            else:
-                pipettlist = []
-                platelist = []
-                for i in range(1, len(structureData)):
-                    sequencerow = structureData[i]
-                    sequence = sequencerow[3]
-                    fullpipettlist.append(sequencerow)
-                    fullpipettlist[i][0] = "NOT FOUND"
-                    if fullpipettlist[i][2] == " ":
-                        fullpipettlist[i][0] = "BIOTIN PLACEHOLDER"
-                    if sequence == " ":
-                        pass
-                    else:
-                        for j in range(0, len(fulllist)):
-                            fulllistrow = fulllist[j]
-                            fulllistseq = fulllistrow[3]
-                            if sequence == fulllistseq:
-                                pipettlist.append(
-                                    [
-                                        fulllist[j][0],
-                                        fulllist[j][1],
-                                        fulllist[j][2],
-                                        fulllist[j][3],
-                                        rgbcolors[sequencerow[4]],
-                                    ]
-                                )
-                                platelist.append(fulllist[j][0])
-                                del fullpipettlist[-1]
-                                fullpipettlist.append(fulllist[j])
-                                break  # first found will be taken
+            self.statusBar().showMessage(
+                "Error: Sequences sequences missing."
+                " Please check *.csv file.."
+            )
 
-                exportlist = dict()
-                exportlist[0] = fullpipettlist
-                noplates = len(set(platelist))
-                platenames = list(set(platelist))
-                platenames.sort()
-                if (len(structureData) - 1 - 16) == (len(pipettlist)):
-                    self.statusBar().showMessage(
-                        "All sequences found in "
-                        + str(noplates)
-                        + " Plates. Pipetting scheme complete."
-                    )
-                else:
-                    self.statusBar().showMessage(
-                        (
-                            "Error: Sequences sequences missing."
-                            " Please check *.csv file.."
-                        )
-                    )
-
-                allfig = dict()
-                for x in range(0, len(platenames)):
-                    platename = platenames[x]
-
-                    selection = []
-                    selectioncolors = []
-                    for y in range(0, len(platelist)):
-                        if pipettlist[y][0] == platename:
-                            selection.append(pipettlist[y][1])
-                            selectioncolors.append(pipettlist[y][4])
-
-                    allfig[x] = plotPlate(
-                        selection,
-                        selectioncolors,
-                        platename,
-                    )
-                if hasattr(self, "pwd"):
-                    path, ext = lib.get_save_filename_ext_dialog(
-                        self,
-                        "Save pipetting schemes to.",
-                        self.pwd,
-                        filter="*.pdf",
-                    )
-                else:
-                    path, ext = lib.get_save_filename_ext_dialog(
-                        self, "Save pipetting schemes to.", filter="*.pdf"
-                    )
-
-                if path:
-                    progress = lib.ProgressDialog(
-                        "Exporting PDFs", 0, len(platenames), self
-                    )
-                    progress.set_value(0)
-                    progress.show()
-                    with PdfPages(path) as pdf:
-                        for x in range(0, len(platenames)):
-                            progress.set_value(x)
-                            # pdf.savefig(allfig[x])
-                            pdf.savefig(
-                                allfig[x],
-                                bbox_inches="tight",
-                                pad_inches=0.2,
-                                dpi=200,
-                            )
-                            # base, ext = _ospath.splitext(path)
-                            # csv_path = base + ".csv"
-                            # design.savePlate(csv_path, exportlist)
-                    progress.close()
-                    self.statusBar().showMessage(
-                        "Pippetting scheme saved to: " + path
-                    )
-                    self.pwd = os.path.dirname(path)
+        allfig, platenames = _build_plate_figures(pipettlist, platelist)
+        self._save_pipett_pdf(allfig, platenames)
 
     def foldingScheme(self) -> None:
         """Run the folding dialog to get volumes to mix."""
@@ -1728,6 +1717,8 @@ class Window(QtWidgets.QMainWindow):
 class MainWindow(QtWidgets.QWidget):
     """Main window for the Picasso application."""
 
+    DOCS_URL = "https://picassosr.readthedocs.io/en/latest/design.html"
+
     def __init__(self):
         super(MainWindow, self).__init__()
         self.setWindowTitle(f"Picasso v{__version__}: Design")
@@ -1771,6 +1762,7 @@ class MainWindow(QtWidgets.QWidget):
         foldbtn.clicked.connect(self.window.foldingScheme)
 
         hbox = QtWidgets.QHBoxLayout()
+        hbox.addWidget(lib.HelpButton(self.DOCS_URL))
         hbox.addWidget(loadbtn)
         hbox.addWidget(savebtn)
         hbox.addWidget(clearbtn)
@@ -1788,10 +1780,17 @@ class MainWindow(QtWidgets.QWidget):
 
         # make white background
         palette = QtGui.QPalette()
-        palette.setColor(QtGui.QPalette.Background, QtCore.Qt.white)
+        palette.setColor(
+            QtGui.QPalette.ColorRole.Window, QtCore.Qt.GlobalColor.white
+        )
         self.setPalette(palette)
 
         menu_bar = QtWidgets.QMenuBar(self)
+        file_menu = menu_bar.addMenu("File")
+        picasso_settings_action = file_menu.addAction("Picasso settings")
+        picasso_settings_action.triggered.connect(
+            self.window.user_settings_dialog.show
+        )
         self.plugin_menu = menu_bar.addMenu("Plugins")  # do not delete
 
 
@@ -1815,20 +1814,14 @@ def main():
             p.execute()
 
     window.show()
-    sys.exit(app.exec_())
 
-    def excepthook(type, value, tback):
-        lib.cancel_dialogs()
-        message = "".join(traceback.format_exception(type, value, tback))
-        errorbox = QtWidgets.QMessageBox.critical(
-            window,
-            "An error occured",
-            message,
-        )
-        errorbox.exec_()
-        sys.__excepthook__(type, value, tback)
+    from ..updater import setup_gui_update_check
 
-    sys.excepthook = excepthook
+    setup_gui_update_check(window)
+
+    lib.install_excepthook(window)
+
+    sys.exit(app.exec())
 
 
 if __name__ == "__main__":
