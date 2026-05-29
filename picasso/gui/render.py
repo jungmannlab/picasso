@@ -2279,8 +2279,9 @@ class COMETDialog(QtWidgets.QDialog):
         vbox.addLayout(grid)
 
         self.buttons = QtWidgets.QDialogButtonBox(
-            QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel,
-            QtCore.Qt.Horizontal,
+            QtWidgets.QDialogButtonBox.StandardButton.Ok
+            | QtWidgets.QDialogButtonBox.StandardButton.Cancel,
+            QtCore.Qt.Orientation.Horizontal,
             self,
         )
         vbox.addWidget(self.buttons)
@@ -2293,13 +2294,13 @@ class COMETDialog(QtWidgets.QDialog):
     ) -> tuple[dict, bool]:
         """Create the dialog and return the requested COMET parameters."""
         dialog = COMETDialog(parent)
-        result = dialog.exec_()
+        result = dialog.exec()
         params = {
             "locs_per_segment": dialog.locs_per_segment.value(),
             "max_drift_nm": dialog.max_drift_nm.value(),
             "max_locs_per_segment": dialog.max_locs_per_segment.value(),
         }
-        return params, result == QtWidgets.QDialog.Accepted
+        return params, result == QtWidgets.QDialog.DialogCode.Accepted
 
 
 class AIMDialog(lib.Dialog):
@@ -11084,7 +11085,7 @@ class View(QtWidgets.QLabel):
         Bates M. biorxiv, 2026."""
         channel = self.get_channel("Undrift by COMET")
         if channel is not None:
-            locs = self.all_locs[channel]
+            locs = self.locs[channel]
             info = self.infos[channel]
 
             params, ok = COMETDialog.getParams(self.window)
