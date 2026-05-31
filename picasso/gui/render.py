@@ -57,7 +57,6 @@ from .rotation import RotationWindow
 
 # Optional modules with external/hardware dependencies live in ext
 from ..ext.bitplane import IMSWRITER  # PyImarisWrite works on Windows only
-from ..ext import comet
 
 if IMSWRITER:
     from ..ext.bitplane import numpy_to_imaris
@@ -2218,89 +2217,6 @@ class ClsDlg2D(lib.Dialog):
             l_locs,
             clustered_locs,
         )
-
-
-class COMETDialog(QtWidgets.QDialog):
-    """Dialog to choose parameters for COMET undrifting.
-
-    Attributes
-    ----------
-    locs_per_segment : QSpinBox
-        Target number of localizations per temporal segment.
-    max_drift_nm : QDoubleSpinBox
-        Maximum expected drift in nm.
-    max_locs_per_segment : QSpinBox
-        Optional cap for downsampling localizations per segment.
-        Use -1 to disable downsampling.
-    """
-
-    def __init__(self, window: QtWidgets.QMainWindow) -> None:
-        super().__init__(window)
-        self.window = window
-        self.setWindowTitle("COMET undrifting")
-
-        vbox = QtWidgets.QVBoxLayout(self)
-        grid = QtWidgets.QGridLayout()
-
-        locs_label = QtWidgets.QLabel("Localizations per segment:")
-        locs_label.setToolTip(
-            "Target number of localizations used to form each temporal segment."
-        )
-        grid.addWidget(locs_label, 0, 0)
-        self.locs_per_segment = QtWidgets.QSpinBox()
-        self.locs_per_segment.setRange(1, int(1e6))
-        self.locs_per_segment.setValue(500)
-        grid.addWidget(self.locs_per_segment, 0, 1)
-
-        max_drift_label = QtWidgets.QLabel("Maximum drift (nm):")
-        max_drift_label.setToolTip(
-            "Maximum expected drift over the dataset. "
-            "Used for pairing and optimization bounds."
-        )
-        grid.addWidget(max_drift_label, 1, 0)
-        self.max_drift_nm = QtWidgets.QDoubleSpinBox()
-        self.max_drift_nm.setRange(0.1, 1e6)
-        self.max_drift_nm.setValue(60.0)
-        self.max_drift_nm.setDecimals(1)
-        self.max_drift_nm.setSingleStep(1.0)
-        grid.addWidget(self.max_drift_nm, 1, 1)
-
-        downsample_label = QtWidgets.QLabel("Max. localizations per segment:")
-        downsample_label.setToolTip(
-            "Optional downsampling cap per segment. "
-            "Set to -1 to keep all localizations."
-        )
-        grid.addWidget(downsample_label, 2, 0)
-        self.max_locs_per_segment = QtWidgets.QSpinBox()
-        self.max_locs_per_segment.setRange(-1, int(1e6))
-        self.max_locs_per_segment.setValue(-1)
-        grid.addWidget(self.max_locs_per_segment, 2, 1)
-
-        vbox.addLayout(grid)
-
-        self.buttons = QtWidgets.QDialogButtonBox(
-            QtWidgets.QDialogButtonBox.StandardButton.Ok
-            | QtWidgets.QDialogButtonBox.StandardButton.Cancel,
-            QtCore.Qt.Orientation.Horizontal,
-            self,
-        )
-        vbox.addWidget(self.buttons)
-        self.buttons.accepted.connect(self.accept)
-        self.buttons.rejected.connect(self.reject)
-
-    @staticmethod
-    def getParams(
-        parent: QtWidgets.QMainWindow | None = None,
-    ) -> tuple[dict, bool]:
-        """Create the dialog and return the requested COMET parameters."""
-        dialog = COMETDialog(parent)
-        result = dialog.exec()
-        params = {
-            "locs_per_segment": dialog.locs_per_segment.value(),
-            "max_drift_nm": dialog.max_drift_nm.value(),
-            "max_locs_per_segment": dialog.max_locs_per_segment.value(),
-        }
-        return params, result == QtWidgets.QDialog.DialogCode.Accepted
 
 
 class AIMDialog(lib.Dialog):
@@ -11079,44 +10995,6 @@ class View(QtWidgets.QLabel):
                 self.plot_window.plot(drift)
                 self.plot_window.show()
 
-    def undrift_comet(self) -> None:
-        """Undrift with COMET. See https://comet.smlm.tools and
-        Reinkensmeier L., Aufmkolk S., Farabella I., Egner A., and
-        Bates M. biorxiv, 2026."""
-        channel = self.get_channel("Undrift by COMET")
-        if channel is not None:
-            locs = self.locs[channel]
-            info = self.infos[channel]
-
-            params, ok = COMETDialog.getParams(self.window)
-            if ok:
-                try:
-                    locs, new_info, drift = comet.comet(
-                        locs,
-                        info,
-                        **params,
-                    )
-                except RuntimeError as e:
-                    QtWidgets.QMessageBox.warning(
-                        self.window,
-                        "COMET not available",
-                        (
-                            f"{e}\n\n"
-                            "Please use a different drift-correction method, "
-                            "such as Undrift by AIM or Undrift by RCC."
-                        ),
-                    )
-                    return
-
-                locs = lib.ensure_sanity(locs, info)
-                self.locs[channel] = locs
-                self.infos[channel] = new_info
-                self.index_blocks[channel] = None
-                self.render_index[channel] = None
-                self.add_drift(channel, drift)
-                self.update_scene(resample_locs=True)
-                self.show_drift()
-
     def undrift_aim(self) -> None:
         """Undrift with Adaptive Intersection Maximization (AIM).
 
@@ -12134,10 +12012,6 @@ class Window(QtWidgets.QMainWindow):
         undrift_from_picked2d_action.triggered.connect(
             self.view.undrift_from_picked2d
         )
-        undrift_comet_action = postprocess_menu.addAction("Undrift by COMET")
-        undrift_comet_action.triggered.connect(self.view.undrift_comet)
-        if not comet._CUDA_AVAILABLE:
-            undrift_comet_action.setVisible(False)
 
         undrift_action = postprocess_menu.addAction("Undrift by RCC")
         undrift_action.triggered.connect(self.view.undrift_rcc)
