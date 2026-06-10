@@ -2572,6 +2572,7 @@ class Window(QtWidgets.QMainWindow):
                         step,
                         self.parameters_dialog.magnification_factor.value(),
                         path=path,
+                        frame_bounds=self.frame_range,
                     )
                     dt = time.time() - t0
                     if dt > lib.SOUND_NOTIFICATION_DURATION:

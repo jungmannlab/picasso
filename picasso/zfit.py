@@ -49,6 +49,7 @@ def calibrate_z(
     d: float,
     magnification_factor: float,
     path: str | None = None,
+    frame_bounds: tuple[int, int] | None = None,
 ) -> dict:
     """Given localizations of a calibration sample (e.g., gold beads at
     different z positions), calibrate the z-axis by fitting a polynomial
@@ -72,6 +73,12 @@ def calibrate_z(
     path : str, optional
         Path to save the calibration data as a YAML file. If None, the
         calibration data will not be saved. Default is None.
+    frame_bounds : tuple, optional
+        Minimum and maximum frame numbers to consider for the
+        calibration. If None, all frames are used. If only min or max
+        is to be specified, the other is to be set to None, for example,
+        ``(5, None)`` sets minimum frame to 5 without maximum frame.
+        Default is None.
 
     Returns
     -------
@@ -85,6 +92,16 @@ def calibrate_z(
     frame_range = np.arange(n_frames)
     z_range = -(frame_range * d - range / 2)  # negative so that the
     # first frames of a bottom-to-up scan are positive z coordinates.
+    if frame_bounds is not None:
+        frame_min, frame_max = frame_bounds
+        frame_min = frame_min or 0
+        frame_max = frame_max or (n_frames - 1)
+        # frame bounds are inclusive, like in picasso.localize
+        frame_range = frame_range[frame_min : frame_max + 1]
+        z_range = z_range[frame_min : frame_max + 1]
+        locs = locs[
+            (locs["frame"] >= frame_min) & (locs["frame"] <= frame_max)
+        ]
 
     mean_sx = np.array(
         [locs["sx"][locs["frame"] == _].mean() for _ in frame_range]
@@ -99,8 +116,11 @@ def calibrate_z(
         [locs["sy"][locs["frame"] == _].var() for _ in frame_range]
     )
 
-    keep_x = (locs["sx"] - mean_sx[locs["frame"]]) ** 2 < var_sx[locs["frame"]]
-    keep_y = (locs["sy"] - mean_sy[locs["frame"]]) ** 2 < var_sy[locs["frame"]]
+    # index of each localization's frame in the (possibly bounded)
+    # frame_range
+    frame_idx = locs["frame"] - frame_range[0]
+    keep_x = (locs["sx"] - mean_sx[frame_idx]) ** 2 < var_sx[frame_idx]
+    keep_y = (locs["sy"] - mean_sy[frame_idx]) ** 2 < var_sy[frame_idx]
     keep = keep_x & keep_y
     locs = locs[keep]
 
@@ -134,6 +154,7 @@ def calibrate_z(
         "Step size in nm": float(d),
         "Magnification factor": float(magnification_factor),
         "Path": path if path is not None else "N/A",
+        "Frame bounds": frame_bounds,
     }
     if path is not None:
         with open(path, "w") as f:
@@ -142,6 +163,7 @@ def calibrate_z(
     # pixelsize does not matter here anyway
     locs = _fit_z(locs, info, calibration, magnification_factor, pixelsize=130)
     locs["z"] /= magnification_factor
+    frame_idx = locs["frame"] - frame_range[0]
 
     plt.figure(figsize=(18, 10))
 
@@ -186,7 +208,7 @@ def calibrate_z(
     plt.legend(loc="best")
 
     ax = plt.subplot(234)
-    plt.plot(z_range[locs["frame"]], locs["z"], ".k", alpha=0.1)
+    plt.plot(z_range[frame_idx], locs["z"], ".k", alpha=0.1)
     plt.plot(
         [z_range.min(), z_range.max()],
         [z_range.min(), z_range.max()],
@@ -201,7 +223,7 @@ def calibrate_z(
     plt.legend(loc="best")
 
     ax = plt.subplot(235)
-    deviation = locs["z"] - z_range[locs["frame"]]
+    deviation = locs["z"] - z_range[frame_idx]
     bins = lib.calculate_optimal_bins(deviation, max_n_bins=1000)
     plt.hist(deviation, bins)
     plt.xlabel("Deviation to true position")

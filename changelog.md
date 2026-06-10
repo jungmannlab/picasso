@@ -4,6 +4,7 @@ Last change: 10-JUN-2026 CEST
 
 ## 0.10.2
 - Fixed "Best fitting combination" button in SPINNA ([#676](https://github.com/jungmannlab/picasso/issues/676))
+- Fixed 3D calibration when frame range is user-specified
 
 ## 0.10.1
 
