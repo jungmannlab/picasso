@@ -1,6 +1,9 @@
 # Changelog
 
-Last change: 29-MAY-2026 CEST
+Last change: 10-JUN-2026 CEST
+
+## 0.10.2
+- Fixed "Best fitting combination" button in SPINNA ([#676](https://github.com/jungmannlab/picasso/issues/676))
 
 ## 0.10.1
 

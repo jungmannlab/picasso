@@ -3893,7 +3893,9 @@ class SimulationsTab(lib.Dialog):
         def retrieve_results():
             for i, ps in enumerate(prop_str):
                 spin = self.prop_str_input_spins[i]
+                spin.blockSignals(True)
                 spin.setValue(ps)
+                spin.blockSignals(False)
 
         button.released.connect(retrieve_results)
         self.prop_str_input.add_widget(
