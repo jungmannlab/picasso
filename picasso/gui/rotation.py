@@ -641,6 +641,62 @@ class AnimationDialog(lib.Dialog):
             progress.close()
 
 
+class RotateByAngleDialog(lib.Dialog):
+    """Choose rotations angles.
+
+    ...
+
+    Attributes
+    ----------
+    angx, angy, angz: QtWidgets.QDoubleSpinBoxes
+        Store the rotation angles input by the user.
+    """
+
+    def __init__(self, window: QtWidgets.QMainWindow) -> None:
+        super().__init__(window)
+        self.window = window
+        self.setWindowTitle(f"Enter rotation angles")
+        layout = QtWidgets.QFormLayout(self)
+        self.angx = QtWidgets.QDoubleSpinBox()
+        self.angx.setValue(0)
+        self.angx.setRange(-999999, 999999)
+        self.angx.setSingleStep(1)
+        layout.addRow("Angle x (deg)", self.angx)
+        self.angy = QtWidgets.QDoubleSpinBox()
+        self.angy.setValue(0)
+        self.angy.setRange(-999999, 999999)
+        self.angy.setSingleStep(1)
+        layout.addRow("Angle y (deg)", self.angy)
+        self.angz = QtWidgets.QDoubleSpinBox()
+        self.angz.setValue(0)
+        self.angz.setRange(-999999, 999999)
+        self.angz.setSingleStep(1)
+        layout.addRow("Angle z (deg)", self.angz)
+
+        # OK and Cancel buttons
+        self.buttons = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.StandardButton.Ok
+            | QtWidgets.QDialogButtonBox.StandardButton.Cancel,
+            QtCore.Qt.Orientation.Horizontal,
+            self,
+        )
+        layout.addRow(self.buttons)
+        self.buttons.accepted.connect(self.accept)
+        self.buttons.rejected.connect(self.reject)
+
+    @staticmethod
+    def getParams(parent: QtWidgets.QMainWindow | None = None) -> tuple:
+        """Create the dialog and return the requested rot. angles."""
+        dialog = RotateByAngleDialog(parent)
+        result = dialog.exec()
+        return (
+            dialog.angx.value(),
+            dialog.angy.value(),
+            dialog.angz.value(),
+            result == QtWidgets.QDialog.DialogCode.Accepted,
+        )
+
+
 class ViewRotation(QtWidgets.QLabel):
     """Display rotated super-resolution datasets.
 
@@ -1244,44 +1300,15 @@ class ViewRotation(QtWidgets.QLabel):
         degrees are preserved, e.g. 720 degrees encodes two full turns
         (relevant for animations).
         """
-        angx, ok = QtWidgets.QInputDialog.getDouble(
-            self,
-            "Rotation angle x",
-            "Angle x (degrees):",
-            0,
-            decimals=2,
-        )
+        angx, angy, angz, ok = RotateByAngleDialog.getParams(self)
         if ok:
-            angy, ok2 = QtWidgets.QInputDialog.getDouble(
-                self,
-                "Rotation angle y",
-                "Angle y (degrees):",
-                0,
-                decimals=2,
-            )
-            if ok2:
-                angz, ok3 = QtWidgets.QInputDialog.getDouble(
-                    self,
-                    "Rotation angle z",
-                    "Angle z (degrees):",
-                    0,
-                    decimals=2,
-                )
-                if ok3:
-                    # codebase convention: x angle is the negative of
-                    # scipy's right-handed x rotation; "object" frame
-                    # rotates around the data's own axes
-                    self.apply_rotation(
-                        [-np.radians(angx), 0.0, 0.0], frame="object"
-                    )
-                    self.apply_rotation(
-                        [0.0, np.radians(angy), 0.0], frame="object"
-                    )
-                    self.apply_rotation(
-                        [0.0, 0.0, np.radians(angz)], frame="object"
-                    )
-
-        self.update_scene()
+            # codebase convention: x angle is the negative of
+            # scipy's right-handed x rotation; "object" frame
+            # rotates around the data's own axes
+            self.apply_rotation([-np.radians(angx), 0.0, 0.0], frame="object")
+            self.apply_rotation([0.0, np.radians(angy), 0.0], frame="object")
+            self.apply_rotation([0.0, 0.0, np.radians(angz)], frame="object")
+            self.update_scene()
 
     def delete_rotation(self) -> None:
         """Reset rotation and any accumulated pan offset."""
