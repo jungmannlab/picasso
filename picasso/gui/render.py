@@ -55,8 +55,8 @@ from ..lib import (
 )
 from .rotation import RotationWindow
 
-# PyImarisWrite works on windows only
-from ..ext.bitplane import IMSWRITER
+# Optional modules with external/hardware dependencies live in ext
+from ..ext.bitplane import IMSWRITER  # PyImarisWrite works on Windows only
 
 if IMSWRITER:
     from ..ext.bitplane import numpy_to_imaris
@@ -10995,14 +10995,6 @@ class View(QtWidgets.QLabel):
                 self.plot_window.plot(drift)
                 self.plot_window.show()
 
-    def sync_groups(self) -> None:
-        """Remove localizations whose group field is not found in all
-        channels."""
-        if len(self.locs_paths) < 2:
-            return
-        self.locs = lib.sync_groups(self.locs)
-        self.update_scene(resample_locs=True)
-
     def undrift_aim(self) -> None:
         """Undrift with Adaptive Intersection Maximization (AIM).
 
@@ -11250,6 +11242,14 @@ class View(QtWidgets.QLabel):
         self.currentdrift[channel] = copy.copy(drift)
         self.index_blocks[channel] = None
         self.render_index[channel] = None
+        self.update_scene(resample_locs=True)
+
+    def sync_groups(self) -> None:
+        """Remove localizations whose group field is not found in all
+        channels."""
+        if len(self.locs_paths) < 2:
+            return
+        self.locs = lib.sync_groups(self.locs)
         self.update_scene(resample_locs=True)
 
     def unfold_groups_square(self) -> None:
@@ -11995,6 +11995,7 @@ class Window(QtWidgets.QMainWindow):
 
         # menu bar - Postprocess
         postprocess_menu = self.menu_bar.addMenu("Postprocess")
+
         undrift_aim_action = postprocess_menu.addAction("Undrift by AIM")
         undrift_aim_action.setShortcut("Ctrl+U")
         undrift_aim_action.triggered.connect(self.view.undrift_aim)
@@ -12011,6 +12012,7 @@ class Window(QtWidgets.QMainWindow):
         undrift_from_picked2d_action.triggered.connect(
             self.view.undrift_from_picked2d
         )
+
         undrift_action = postprocess_menu.addAction("Undrift by RCC")
         undrift_action.triggered.connect(self.view.undrift_rcc)
         drift_action = postprocess_menu.addAction("Undo drift")
@@ -12829,9 +12831,9 @@ class Window(QtWidgets.QMainWindow):
                     self.tools_settings_dialog.pick_side_length.setValue(
                         self.view.infos[0][-1]["Pick size (nm)"]
                     )
-                self.window_rot.view_rot.angx = self.view.infos[0][-1]["angx"]
-                self.window_rot.view_rot.angy = self.view.infos[0][-1]["angy"]
-                self.window_rot.view_rot.angz = self.view.infos[0][-1]["angz"]
+                self.window_rot.view_rot.load_saved_rotation(
+                    self.view.infos[0][-1]
+                )
                 self.rot_win()
 
     def resize_view_to_fov(self, w: float, h: float) -> None:

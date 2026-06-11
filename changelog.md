@@ -1,6 +1,14 @@
 # Changelog
 
-Last change: 28-MAY-2026 CEST
+Last change: 11-JUN-2026 CEST
+
+## 0.10.2
+- Rotations use quaterions for unambiguous workflow, fixing bugs [#673](https://github.com/jungmannlab/picasso/issues/673), [#674](https://github.com/jungmannlab/picasso/issues/674) and [#675](https://github.com/jungmannlab/picasso/issues/675)
+- All 3 angles in "Rotate by angle" in the 3D rotation window are accumulated into a single widget
+- Render by property fixed for large files ([#677](https://github.com/jungmannlab/picasso/issues/677)), possibly related to [#672](https://github.com/jungmannlab/picasso/issues/672)
+- Fixed "Best fitting combination" button in SPINNA ([#676](https://github.com/jungmannlab/picasso/issues/676))
+- Fixed 3D calibration when frame range is user-specified
+- Fixed redoing 3D calibration when identification parameters change
 
 ## 0.10.1
 

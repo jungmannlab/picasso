@@ -43,7 +43,7 @@ def render(
         Literal["gaussian", "gaussian_iso", "smooth", "convolve"] | None
     ) = None,
     min_blur_width: float = 0.0,
-    ang: tuple | None = None,
+    ang: tuple | Rotation | None = None,
     disp_px_size: float | None = None,
 ) -> tuple[int, lib.FloatArray2D]:
     """Render localizations given FOV and blur method.
@@ -74,9 +74,11 @@ def render(
         localizations which is the median localization precision.
     min_blur_width : float, optional
         Minimum size of blur (camera pixels).
-    ang : tuple, optional
-        Rotation angles of locs around x, y and z axes in radians. If
-        None, locs are not rotated.
+    ang : tuple or scipy.spatial.transform.Rotation, optional
+        Rotation of locs; either a scipy Rotation (e.g. built from a
+        quaternion) or a tuple of 3 rotation angles around the x, y
+        and z axes in radians (legacy Euler convention, see
+        ``rotation_matrix``). If None, locs are not rotated.
     disp_px_size : float, optional
         Display pixel size in nm. Will replace oversampling in v0.11.0.
 
@@ -637,7 +639,7 @@ def _fill_gaussian_rot(
     sz: lib.FloatArray1D,
     n_pixel_x: int,
     n_pixel_y: int,
-    ang: tuple[float, float, float],
+    rot_matrix: lib.Array3x3,
 ) -> None:
     """Fill image with rotated gaussian-blurred localizations.
 
@@ -654,38 +656,12 @@ def _fill_gaussian_rot(
         Localization precision in x, y and z for each localization.
     n_pixel_x, n_pixel_y : int
         Number of pixels in x and y.
-    ang : tuple
-        Rotation angles of locs around x, y and z axes (radians).
+    rot_matrix : lib.Array3x3
+        Rotation matrix (float32) applied to the localizations.
     """
     n_locs = len(x)
     if n_locs == 0:
         return
-    angx, angy, angz = ang
-    rot_mat_x = np.array(
-        [
-            [1.0, 0.0, 0.0],
-            [0.0, np.cos(angx), np.sin(angx)],
-            [0.0, -np.sin(angx), np.cos(angx)],
-        ],
-        dtype=np.float32,
-    )
-    rot_mat_y = np.array(
-        [
-            [np.cos(angy), 0.0, np.sin(angy)],
-            [0.0, 1.0, 0.0],
-            [-np.sin(angy), 0.0, np.cos(angy)],
-        ],
-        dtype=np.float32,
-    )
-    rot_mat_z = np.array(
-        [
-            [np.cos(angz), -np.sin(angz), 0.0],
-            [np.sin(angz), np.cos(angz), 0.0],
-            [0.0, 0.0, 1.0],
-        ],
-        dtype=np.float32,
-    )
-    rot_matrix = (rot_mat_x @ rot_mat_y @ rot_mat_z).astype(np.float32)
     rot_matrixT = np.ascontiguousarray(rot_matrix.T)
 
     for i in range(n_locs):
@@ -804,7 +780,7 @@ def render_hist(
     x_min: float,
     y_max: float,
     x_max: float,
-    ang: tuple[float, float, float] | None = None,
+    ang: tuple[float, float, float] | Rotation | None = None,
 ) -> tuple[int, lib.FloatArray2D]:
     """Alias for _render_hist which will be a private function in
     v0.11.0. Kept for backward compatibility but will be removed in
@@ -826,7 +802,7 @@ def _render_hist(
     x_min: float,
     y_max: float,
     x_max: float,
-    ang: tuple[float, float, float] | None = None,
+    ang: tuple[float, float, float] | Rotation | None = None,
 ) -> tuple[int, lib.FloatArray2D]:
     """Render localizations with no blur by assigning them to pixels.
 
@@ -840,9 +816,11 @@ def _render_hist(
         Minimum y and x coordinates to be rendered (camera pixels)
     y_max, x_max : float
         Maximum y and x coordinates to be rendered (camera pixels)
-    ang : tuple (default=None)
-        Rotation angles of locs around x, y and z axes in radians. If
-        None, locs are not rotated.
+    ang : tuple or scipy.spatial.transform.Rotation, optional
+        Rotation of locs; either a scipy Rotation (e.g. built from a
+        quaternion) or a tuple of 3 rotation angles around the x, y
+        and z axes in radians (legacy Euler convention, see
+        ``rotation_matrix``). If None, locs are not rotated.
 
     Returns
     -------
@@ -1017,7 +995,7 @@ def render_gaussian(
     y_max: float,
     x_max: float,
     min_blur_width: float,
-    ang: tuple[float, float, float] | None = None,
+    ang: tuple[float, float, float] | Rotation | None = None,
 ) -> tuple[int, lib.FloatArray2D]:
     """Alias for _render_gaussian which will be a private function in
     v0.11.0. Kept for backward compatibility but will be removed in v0.11.0. Use
@@ -1047,7 +1025,7 @@ def _render_gaussian(
     y_max: float,
     x_max: float,
     min_blur_width: float,
-    ang: tuple[float, float, float] | None = None,
+    ang: tuple[float, float, float] | Rotation | None = None,
 ) -> tuple[int, lib.FloatArray2D]:
     """Render localizations with with individual localization precision
     which differs in x and y.
@@ -1064,9 +1042,11 @@ def _render_gaussian(
         Minimum and maximum x coordinates to be rendered (camera pixels).
     min_blur_width : float
         Minimum localization precision (camera pixels).
-    ang : tuple, optional
-        Rotation angles of localizations around x, y and z axes in
-        radians. If None, localizations are not rotated.
+    ang : tuple or scipy.spatial.transform.Rotation, optional
+        Rotation of localizations; either a scipy Rotation (e.g. built
+        from a quaternion) or a tuple of 3 rotation angles around the
+        x, y and z axes in radians (legacy Euler convention, see
+        ``rotation_matrix``). If None, localizations are not rotated.
 
     Returns
     -------
@@ -1124,7 +1104,12 @@ def _render_gaussian(
         sx = blur_width[in_view]
         sz = blur_depth[in_view]
 
-        _fill_gaussian_rot(image, x, y, sx, sy, sz, n_pixel_x, n_pixel_y, ang)
+        rot_matrix = np.ascontiguousarray(
+            to_rotation(ang).as_matrix(), dtype=np.float32
+        )
+        _fill_gaussian_rot(
+            image, x, y, sx, sy, sz, n_pixel_x, n_pixel_y, rot_matrix
+        )
 
     n = len(x)
     return n, image
@@ -1138,7 +1123,7 @@ def render_gaussian_iso(
     y_max: float,
     x_max: float,
     min_blur_width: float,
-    ang: tuple[float, float, float] | None = None,
+    ang: tuple[float, float, float] | Rotation | None = None,
 ) -> tuple[int, lib.FloatArray2D]:
     """Alias for _render_gaussian_iso which will be a private function in
     v0.11.0. Kept for backward compatibility but will be removed in v0.11.0. Use
@@ -1168,7 +1153,7 @@ def _render_gaussian_iso(
     y_max: float,
     x_max: float,
     min_blur_width: float,
-    ang: tuple[float, float, float] | None = None,
+    ang: tuple[float, float, float] | Rotation | None = None,
 ) -> tuple[int, lib.FloatArray2D]:
     """Same as ``_render_gaussian``, but uses the same localization
     precision in x and y."""
@@ -1221,7 +1206,12 @@ def _render_gaussian_iso(
         sx = sy
         sz = blur_depth[in_view]
 
-        _fill_gaussian_rot(image, x, y, sx, sy, sz, n_pixel_x, n_pixel_y, ang)
+        rot_matrix = np.ascontiguousarray(
+            to_rotation(ang).as_matrix(), dtype=np.float32
+        )
+        _fill_gaussian_rot(
+            image, x, y, sx, sy, sz, n_pixel_x, n_pixel_y, rot_matrix
+        )
 
     return len(x), image
 
@@ -1234,7 +1224,7 @@ def render_convolve(
     y_max: float,
     x_max: float,
     min_blur_width: float,
-    ang: tuple[float, float, float] | None = None,
+    ang: tuple[float, float, float] | Rotation | None = None,
 ) -> tuple[int, lib.FloatArray2D]:
     """Alias for _render_convolve which will be a private function in v0.11.0.
     Kept for backward compatibility but will be removed in v0.11.0. Use
@@ -1264,7 +1254,7 @@ def _render_convolve(
     y_max: float,
     x_max: float,
     min_blur_width: float,
-    ang: tuple[float, float, float] | None = None,
+    ang: tuple[float, float, float] | Rotation | None = None,
 ) -> tuple[int, lib.FloatArray2D]:
     """Render localizations with with global localization precision,
     i.e. each localization is blurred by the median localization
@@ -1282,9 +1272,11 @@ def _render_convolve(
         Maximum y and x coordinates to be rendered (camera pixels).
     min_blur_width : float
         Minimum localization precision (camera pixels).
-    ang : tuple, optional
-        Rotation angles of localizations around x, y and z axes in
-        radians. If None, localizations are not rotated.
+    ang : tuple or scipy.spatial.transform.Rotation, optional
+        Rotation of localizations; either a scipy Rotation (e.g. built
+        from a quaternion) or a tuple of 3 rotation angles around the
+        x, y and z axes in radians (legacy Euler convention, see
+        ``rotation_matrix``). If None, localizations are not rotated.
 
     Returns
     -------
@@ -1334,7 +1326,7 @@ def render_smooth(
     x_min: float,
     y_max: float,
     x_max: float,
-    ang: tuple[float, float, float] | None = None,
+    ang: tuple[float, float, float] | Rotation | None = None,
 ) -> tuple[int, lib.FloatArray2D]:
     """Alias for _render_smooth which will be a private function in v0.11.0. Kept for
     backward compatibility but will be removed in v0.11.0. Use _render_smooth
@@ -1361,7 +1353,7 @@ def _render_smooth(
     x_min: float,
     y_max: float,
     x_max: float,
-    ang: tuple[float, float, float] | None = None,
+    ang: tuple[float, float, float] | Rotation | None = None,
 ) -> tuple[int, lib.FloatArray2D]:
     """Render localizations with with blur of one display pixel (set by
     oversampling).
@@ -1376,9 +1368,11 @@ def _render_smooth(
         Minimum y and x coordinates to be rendered (camera pixels).
     y_max, x_max : float
         Maximum y and x coordinates to be rendered (camera pixels).
-    ang : tuple, optional
-        Rotation angles of localizations around x, y and z axes in
-        radians. If None, localizations are not rotated.
+    ang : tuple or scipy.spatial.transform.Rotation, optional
+        Rotation of localizations; either a scipy Rotation (e.g. built
+        from a quaternion) or a tuple of 3 rotation angles around the
+        x, y and z axes in radians (legacy Euler convention, see
+        ``rotation_matrix``). If None, localizations are not rotated.
 
     Returns
     -------
@@ -1504,6 +1498,76 @@ def rotation_matrix(angx: float, angy: float, angz: float) -> Rotation:
     return Rotation.from_matrix(rot_mat)
 
 
+def to_rotation(
+    ang: tuple[float, float, float] | Rotation | None,
+) -> Rotation | None:
+    """Normalize a rotation input to a scipy Rotation.
+
+    Parameters
+    ----------
+    ang : tuple, Rotation or None
+        Rotation to be normalized. Either a scipy Rotation (e.g. built
+        from a quaternion; used as is), a tuple of 3 rotation angles
+        around the x, y and z axes in radians (legacy Euler convention,
+        see ``rotation_matrix``), or None.
+
+    Returns
+    -------
+    scipy.spatial.transform.Rotation or None
+        The rotation as a scipy Rotation, or None if ``ang`` is None.
+    """
+    if ang is None:
+        return None
+    if isinstance(ang, Rotation):
+        return ang
+    return rotation_matrix(*ang)
+
+
+def closest_rotvec(
+    rotation: Rotation,
+    reference: lib.FloatArray1D,
+) -> lib.FloatArray1D:
+    """Find the rotation vector representing ``rotation`` that is
+    closest to ``reference``.
+
+    A rotation vector (axis * angle, radians) is not unique: adding
+    full turns (2 pi) around the same axis yields the same rotation.
+    This function picks the representation closest to ``reference``,
+    which allows keeping track of rotations beyond +/- 180 degrees
+    (e.g. unwrapping a continuously updated rotation, or encoding
+    multiple full turns in an animation segment).
+
+    Parameters
+    ----------
+    rotation : scipy.spatial.transform.Rotation
+        The rotation to be represented.
+    reference : lib.FloatArray1D
+        Rotation vector (radians) to which the result should be
+        closest.
+
+    Returns
+    -------
+    rotvec : lib.FloatArray1D
+        Rotation vector (radians) such that
+        ``Rotation.from_rotvec(rotvec) == rotation``, with the number
+        of full turns chosen to match ``reference``. Its magnitude may
+        exceed pi.
+    """
+    reference = np.asarray(reference, dtype=float)
+    base = rotation.as_rotvec()  # magnitude <= pi
+    theta = np.linalg.norm(base)
+    if theta < 1e-9:
+        # identity rotation; keep the full turns along reference's axis
+        ref_magnitude = np.linalg.norm(reference)
+        if ref_magnitude < 1e-9:
+            return np.zeros(3)
+        n_turns = np.round(ref_magnitude / (2 * np.pi))
+        return reference * (2 * np.pi * n_turns / ref_magnitude)
+    axis = base / theta
+    n_turns = np.round((axis @ reference - theta) / (2 * np.pi))
+    return axis * (theta + 2 * np.pi * n_turns)
+
+
 def locs_rotation(
     locs: pd.DataFrame,
     oversampling: float,
@@ -1511,7 +1575,7 @@ def locs_rotation(
     x_max: float,
     y_min: float,
     y_max: float,
-    ang: tuple[float, float, float],
+    ang: tuple[float, float, float] | Rotation,
 ) -> tuple[
     lib.FloatArray1D, lib.FloatArray1D, lib.BoolArray1D, lib.FloatArray1D
 ]:
@@ -1527,9 +1591,10 @@ def locs_rotation(
         Minimum y and x coordinate to be rendered (camera pixels).
     y_max, x_max : float
         Maximum y and x coordinate to be rendered (camera pixels).
-    ang : tuple
-        Rotation angles of localizations around x, y and z axes in
-        radians.
+    ang : tuple or scipy.spatial.transform.Rotation
+        Rotation of localizations; either a scipy Rotation or a tuple
+        of 3 rotation angles around the x, y and z axes in radians
+        (legacy Euler convention, see ``rotation_matrix``).
 
     Returns
     -------
@@ -1551,7 +1616,7 @@ def locs_rotation(
     locs_coord[:, 1] -= y_min + (y_max - y_min) / 2
 
     # rotate locs
-    R = rotation_matrix(ang[0], ang[1], ang[2])
+    R = to_rotation(ang)
     locs_coord = R.apply(locs_coord)
 
     # unshift locs
@@ -2538,7 +2603,7 @@ def draw_minimap(
 
 def draw_rotation(
     image: QtGui.QImage,
-    ang: tuple[float, float, float],
+    ang: tuple[float, float, float] | Rotation,
     axis_length: int = 30,
     axis_center: tuple[int, int] = (50, -50),  # bottom left
 ) -> QtGui.QImage:
@@ -2548,8 +2613,10 @@ def draw_rotation(
     ----------
     image : QImage
         Image containing rendered localizations.
-    ang : tuple of float
-        Rotation angles around x, y, and z axes in radians.
+    ang : tuple of float or scipy.spatial.transform.Rotation
+        Rotation of the localizations; either a scipy Rotation or a
+        tuple of 3 rotation angles around the x, y and z axes in
+        radians (legacy Euler convention, see ``rotation_matrix``).
     axis_length : int, optional
         Length of the rotation axes in display pixels. Default is 30.
     axis_center : tuple of int, optional
@@ -2592,7 +2659,7 @@ def draw_rotation(
 
     # rotate these points
     coordinates = [[xx, xy, xz], [yx, yy, yz], [zx, zy, zz]]
-    R = rotation_matrix(*ang)
+    R = to_rotation(ang)
     coordinates = R.apply(coordinates).astype(int)
     (xx, xy, xz) = coordinates[0]
     (yx, yy, yz) = coordinates[1]
@@ -2635,7 +2702,8 @@ def draw_rotation_angles(
     image : QImage
         Image containing rendered localizations.
     ang : tuple of float
-        Rotation angles around x, y, and z axes in radians.
+        Rotation angles (or rotation-vector components) around x, y,
+        and z axes in radians, used only for the displayed text.
     color : QColor, optional
         Color of the text. Default is white.
 
@@ -2667,7 +2735,7 @@ def render_scene(
         Literal["gaussian", "gaussian_iso", "smooth", "convolve"] | None
     ) = None,
     min_blur_width: float = 0.0,
-    ang: tuple | None = None,
+    ang: tuple | Rotation | None = None,
     contrast: tuple[float, float] | None = None,
     invert_colors: bool = False,
     single_channel_colormap: str | lib.FloatArray2D = "magma",
@@ -2738,9 +2806,11 @@ def render_scene(
         localizations which is the median localization precision.
     min_blur_width : float, optional
         Minimum size of blur (camera pixels).
-    ang : tuple, optional
-        Rotation angles of locs around x, y and z axes in radians. If
-        None, locs are not rotated.
+    ang : tuple or scipy.spatial.transform.Rotation, optional
+        Rotation of locs; either a scipy Rotation (e.g. built from a
+        quaternion) or a tuple of 3 rotation angles around the x, y
+        and z axes in radians (legacy Euler convention, see
+        ``rotation_matrix``). If None, locs are not rotated.
     contrast : tuple of float, optional
         Contrast limits for scaling. If None, contrast is automatically
         determined.
@@ -2751,10 +2821,17 @@ def render_scene(
         corresponding pyplot colormap is selected. If a 2D array, a
         256x4  array is expected with values between 0 and 1. Default is
         'magma'.
-    colors : list of tuples, optional
-        List of RGB tuples corresponding to the colors of the channels.
-        Only needs to be specified for multi-channel data. Must range
-        between 0 and 1. Default is None.
+    colors : list of tuples or list of lib.FloatArray2D, optional
+        Colors of the channels, one entry per channel. Each entry is
+        either an ``(r, g, b)`` tuple with values between 0 and 1
+        (the channel is rendered as ``intensity * rgb``) or a
+        ``(256, 3)`` lookup table with values between 0 and 1 (the
+        channel intensity is indexed into the LUT, allowing
+        per-channel colormaps; see ``solid_to_lut`` and
+        ``stops_to_lut``). The two forms cannot be mixed. Channels are
+        blended additively. Only needs to be specified for
+        multi-channel data. Default is None, in which case colors are
+        taken from ``lib.get_colors``.
     relative_intensities : list of float, optional
         List of relative intensities for each channel. Only needs to be
         specified for multi-channel data. Default is None, in which
@@ -2854,7 +2931,7 @@ def _render_multi_channel(
         Literal["gaussian", "gaussian_iso", "smooth", "convolve"] | None
     ) = None,
     min_blur_width: float = 0.0,
-    ang: tuple | None = None,
+    ang: tuple | Rotation | None = None,
     contrast: tuple[float, float] | None = None,
     relative_intensities: list[float] | None = None,
     invert_colors: bool = False,
@@ -2933,7 +3010,7 @@ def _render_single_channel(
         Literal["gaussian", "gaussian_iso", "smooth", "convolve"] | None
     ) = None,
     min_blur_width: float = 0.0,
-    ang: tuple | None = None,
+    ang: tuple | Rotation | None = None,
     contrast: tuple[float, float] | None = None,
     invert_colors: bool = False,
     single_channel_colormap: str = "magma",
@@ -3244,41 +3321,91 @@ def optimal_scalebar_length(pixelsize: int | float, width: int | float) -> int:
     return scalebar
 
 
+def _normalize_animation_positions(
+    positions: list,
+) -> list[tuple[Rotation, tuple]]:
+    """Normalize animation checkpoints to (Rotation, viewport) tuples.
+
+    Accepts two formats: each position is (rotation, viewport) with
+    rotation being a scipy Rotation, as well as the legacy format
+    (angle_x, angle_y, angle_z, viewport) with Euler angles in radians
+    (see ``rotation_matrix``), which is deprecated.
+    """
+    normalized = []
+    legacy = False
+    for p in positions:
+        if len(p) == 2 and isinstance(p[0], Rotation):
+            normalized.append((p[0], p[1]))
+        elif len(p) == 4:
+            legacy = True
+            normalized.append((rotation_matrix(p[0], p[1], p[2]), p[3]))
+        else:
+            raise ValueError(
+                "Each position must be a tuple (rotation, viewport) with "
+                "rotation being a scipy Rotation, or the deprecated "
+                "4-element form (angle_x, angle_y, angle_z, viewport)."
+            )
+    if legacy:
+        lib.deprecation_warning(
+            "Deprecation warning: passing animation positions as Euler "
+            "angles (angle_x, angle_y, angle_z, viewport) is deprecated "
+            "and will be removed in v0.12.0. Pass (rotation, viewport) "
+            "with rotation being a scipy.spatial.transform.Rotation "
+            "instead."
+        )
+    return normalized
+
+
 def _animation_sequence(
-    positions: list[list[float, float, float, tuple]],
+    positions: list[tuple[Rotation, tuple]],
     durations: list[float],
     fps: int,
-) -> tuple[list, list]:
-    """Calculate the sequence of angles and viewports for the animation.
-    See ``build_animation`` for more details."""
-    n_frames = [0]
-    for i in range(len(positions) - 1):
-        n_frames.append(int(fps * durations[i]))
+    segment_rotations: list | None = None,
+) -> tuple[list[Rotation], list]:
+    """Calculate the sequence of rotations and viewports for the
+    animation. See ``build_animation`` for more details.
 
-    # find rotation angles and viewport for each frame
-    angles = []
+    Each segment is interpolated along the geodesic between the two
+    checkpoint rotations at constant angular velocity (slerp). If
+    ``segment_rotations`` is given, the corresponding rotation vector
+    defines the rotation path of each segment and may include full
+    turns (magnitude beyond pi), e.g. 4 pi for two full turns. The
+    vector is snapped to the true relative rotation between the two
+    checkpoints (see ``closest_rotvec``) so that each segment always
+    ends exactly at the next checkpoint. This is equivalent to
+    splitting a segment with a rotation larger than 180 degrees into
+    sub-180-degree pieces and applying slerp to each piece."""
+    rotations = []
     viewports = []
     for i in range(len(positions) - 1):
-        # angles
-        x1, y1, z1 = positions[i][:3]
-        x2, y2, z2 = positions[i + 1][:3]
-        current_angles = np.linspace(
-            [x1, y1, z1], [x2, y2, z2], n_frames[i + 1]
+        n_frames = int(fps * durations[i])
+
+        # rotations
+        R1, vp1 = positions[i]
+        R2, vp2 = positions[i + 1]
+        relative = R2 * R1.inv()
+        if segment_rotations is not None:
+            rotvec = closest_rotvec(
+                relative, np.asarray(segment_rotations[i], dtype=float)
+            )
+        else:
+            rotvec = relative.as_rotvec()
+        fractions = np.linspace(0, 1, n_frames)
+        rotations.extend(
+            Rotation.from_rotvec(fraction * rotvec) * R1
+            for fraction in fractions
         )
-        angles.extend(current_angles)
 
         # viewports
-        vp1 = positions[i][3]
-        vp2 = positions[i + 1][3]
-        ymin = np.linspace(vp1[0][0], vp2[0][0], n_frames[i + 1])
-        xmin = np.linspace(vp1[0][1], vp2[0][1], n_frames[i + 1])
-        ymax = np.linspace(vp1[1][0], vp2[1][0], n_frames[i + 1])
-        xmax = np.linspace(vp1[1][1], vp2[1][1], n_frames[i + 1])
+        ymin = np.linspace(vp1[0][0], vp2[0][0], n_frames)
+        xmin = np.linspace(vp1[0][1], vp2[0][1], n_frames)
+        ymax = np.linspace(vp1[1][0], vp2[1][0], n_frames)
+        xmax = np.linspace(vp1[1][1], vp2[1][1], n_frames)
         current_viewports = [
             ((ymin[j], xmin[j]), (ymax[j], xmax[j])) for j in range(len(ymin))
         ]
         viewports.extend(current_viewports)
-    return angles, viewports
+    return rotations, viewports
 
 
 def build_animation(
@@ -3286,10 +3413,14 @@ def build_animation(
     locs: pd.DataFrame | list[pd.DataFrame],
     info: list[dict] | list[list[dict]],
     *,
-    positions: list[tuple[float, float, float, tuple]],
+    positions: (
+        list[tuple[Rotation, tuple]]
+        | list[tuple[tuple[float, float, float], tuple]]
+    ),
     durations: list[float],
     disp_px_size: int | float,  # nm
     image_size: tuple[int, int],
+    segment_rotations: list | None = None,
     blur_method: (
         Literal["gaussian", "gaussian_iso", "smooth", "convolve"] | None
     ) = None,
@@ -3306,7 +3437,7 @@ def build_animation(
     ) = None,
 ) -> None:
     """Build an animation of rendered localizations given the
-    checkpoints (angle, viewport, etc) and the time between them.
+    checkpoints (rotation, viewport, etc) and the time between them.
 
     Parameters
     ----------
@@ -3328,13 +3459,27 @@ def build_animation(
     image_size : tuple of int
         Size of the rendered image in pixels, given as (width, height).
     positions : list
-        Each element determines the checkpoint of the animation, which
-        is a tuple of 4 elements: (angle_x, angle_y, angle_z, viewport).
-        Angles are in radians. Viewport is given as ((y_min, x_min),
-        (y_max, x_max)) in camera pixels.
+        Each element determines a checkpoint of the animation, which
+        is a tuple of 2 elements: (rotation, viewport). Rotation is a
+        ``scipy.spatial.transform.Rotation`` defining the orientation
+        of the localizations at the checkpoint. Viewport is given as
+        ((y_min, x_min), (y_max, x_max)) in camera pixels. The
+        deprecated legacy format (angle_x, angle_y, angle_z, viewport)
+        with Euler angles in radians (see ``rotation_matrix``) is also
+        accepted and will be removed in v0.12.0.
     durations : list
         List of durations in seconds between the checkpoints. Must have
         the same length as positions - 1.
+    segment_rotations : list, optional
+        One rotation vector (3 floats, radians, scipy convention) per
+        segment, i.e., of length len(positions) - 1, describing the
+        full rotation path from one checkpoint to the next. The
+        magnitude may exceed pi to encode rotations larger than 180
+        degrees, e.g. (0, 0, 4 * pi) for two full turns around the z
+        axis. Each vector is snapped to the true relative rotation
+        between its two checkpoints, so the segment always ends
+        exactly at the next checkpoint. If None, each segment follows
+        the shortest path (slerp). Default is None.
     blur_method : {"gaussian", "gaussian_iso", "smooth", "convolve"} or None, \
             optional
         Defines localizations' blur. The string has to be one of
@@ -3359,10 +3504,17 @@ def build_animation(
         corresponding pyplot colormap is selected. If a 2D array, a
         256x4  array is expected with values between 0 and 1. Default is
         'magma'.
-    colors : list of tuples, optional
-        List of RGB tuples corresponding to the colors of the channels.
-        Only needs to be specified for multi-channel data. Must range
-        between 0 and 1. Default is None.
+    colors : list of tuples or list of lib.FloatArray2D, optional
+        Colors of the channels, one entry per channel. Each entry is
+        either an ``(r, g, b)`` tuple with values between 0 and 1
+        (the channel is rendered as ``intensity * rgb``) or a
+        ``(256, 3)`` lookup table with values between 0 and 1 (the
+        channel intensity is indexed into the LUT, allowing
+        per-channel colormaps; see ``solid_to_lut`` and
+        ``stops_to_lut``). The two forms cannot be mixed. Channels are
+        blended additively. Only needs to be specified for
+        multi-channel data. Default is None, in which case colors are
+        taken from ``lib.get_colors``.
     relative_intensities : list of float, optional
         List of relative intensities for each channel. Only needs to be
         specified for multi-channel data. Default is None, in which
@@ -3397,10 +3549,16 @@ def build_animation(
     assert (
         isinstance(positions, list) and len(positions) >= 2
     ), "positions must be a list with at least 2 elements."
-    assert all(len(p) == 4 for p in positions), (
-        "Each position must be a tuple/list of 4 elements: "
-        "(angle_x, angle_y, angle_z, viewport)."
-    )
+    positions = _normalize_animation_positions(positions)
+    if segment_rotations is not None:
+        assert (
+            isinstance(segment_rotations, list)
+            and len(segment_rotations) == len(positions) - 1
+        ), "segment_rotations must be a list of length len(positions) - 1."
+        assert all(
+            np.asarray(rotvec, dtype=float).shape == (3,)
+            for rotvec in segment_rotations
+        ), "Each segment rotation must be a rotation vector of 3 floats."
     assert (
         isinstance(durations, list) and len(durations) == len(positions) - 1
     ), "durations must be a list of length len(positions) - 1."
@@ -3448,9 +3606,6 @@ def build_animation(
         assert (
             len(colors) == n_channels
         ), "colors must have one entry per channel."
-        assert all(
-            len(c) == 3 and all(0.0 <= v <= 1.0 for v in c) for c in colors
-        ), "Each color must be an RGB tuple with values between 0 and 1."
     if relative_intensities is not None:
         n_channels = len(locs) if isinstance(locs, list) else 1
         assert (
@@ -3475,6 +3630,7 @@ def build_animation(
         info=info,
         positions=positions,
         durations=durations,
+        segment_rotations=segment_rotations,
         disp_px_size=disp_px_size,
         image_size=image_size,
         blur_method=blur_method,
@@ -3494,8 +3650,9 @@ def _build_animation(
     path: str,
     locs: pd.DataFrame | list[pd.DataFrame],
     info: list[dict] | list[list[dict]],
-    positions: list[tuple[float, float, float, tuple]],
+    positions: list[tuple[Rotation, tuple]],
     durations: list[float],
+    segment_rotations: list | None,
     disp_px_size: int | float,
     image_size: tuple[int, int],
     blur_method: (
@@ -3513,7 +3670,9 @@ def _build_animation(
 ) -> None:
     """Internal function to build an animation of rendered localizations
     given the checkpoints. See ``build_animation`` for more details."""
-    angles, viewports = _animation_sequence(positions, durations, fps)
+    rotations, viewports = _animation_sequence(
+        positions, durations, fps, segment_rotations=segment_rotations
+    )
 
     # width and height for building the animation; must be divisible by 16
     # as ffmpeg codecs require this for proper encoding
@@ -3526,10 +3685,10 @@ def _build_animation(
     use_tqdm = progress_callback == "console"
     if use_tqdm:
         iter_range = tqdm(
-            range(len(angles)), desc="Building animation", unit="frame"
+            range(len(rotations)), desc="Building animation", unit="frame"
         )
     else:
-        iter_range = range(len(angles))
+        iter_range = range(len(rotations))
 
     for i in iter_range:
         if callable(progress_callback):
@@ -3546,7 +3705,7 @@ def _build_animation(
             info=info,
             disp_px_size=disp_px_size_,
             viewport=viewports[i],
-            ang=angles[i],
+            ang=rotations[i],
             blur_method=blur_method,
             min_blur_width=min_blur_width,
             contrast=contrast_,
@@ -3570,30 +3729,32 @@ def _build_animation(
         video_writer.append_data(frame)
 
     if callable(progress_callback):
-        progress_callback(len(angles))
+        progress_callback(len(rotations))
     video_writer.close()
 
     # save a yaml with animation settings, note that yaml does not support
     # numpy types and arrays
-    angles_yaml = [
-        (
-            float(np.degrees(p[0])),
-            float(np.degrees(p[1])),
-            float(np.degrees(p[2])),
-        )
-        for p in positions
-    ]
+    quaternions_yaml = [[float(q) for q in R.as_quat()] for R, _ in positions]
     viewports_yaml = [
         (
-            (float(p[3][0][0]), float(p[3][0][1])),
-            (float(p[3][1][0]), float(p[3][1][1])),
+            (float(vp[0][0]), float(vp[0][1])),
+            (float(vp[1][0]), float(vp[1][1])),
         )
-        for p in positions
+        for _, vp in positions
+    ]
+    if segment_rotations is None:
+        segment_rotations = [
+            (positions[i + 1][0] * positions[i][0].inv()).as_rotvec()
+            for i in range(len(positions) - 1)
+        ]
+    segments_yaml = [
+        [float(np.degrees(v)) for v in rotvec] for rotvec in segment_rotations
     ]
     anim_settings = {
         "Generated by": f"Picasso v{__version__} Render 3D Animation",
         "FPS": fps,
-        "Angles at checkpoints (x, y, z) (deg)": angles_yaml,
+        "Quaternions at checkpoints (x, y, z, w)": quaternions_yaml,
+        "Rotations between checkpoints (x, y, z) (deg)": segments_yaml,
         "Viewports at checkpoints (camera pixels)": viewports_yaml,
         "Durations (s)": durations,
     }
