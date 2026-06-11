@@ -2821,10 +2821,17 @@ def render_scene(
         corresponding pyplot colormap is selected. If a 2D array, a
         256x4  array is expected with values between 0 and 1. Default is
         'magma'.
-    colors : list of tuples, optional
-        List of RGB tuples corresponding to the colors of the channels.
-        Only needs to be specified for multi-channel data. Must range
-        between 0 and 1. Default is None.
+    colors : list of tuples or list of lib.FloatArray2D, optional
+        Colors of the channels, one entry per channel. Each entry is
+        either an ``(r, g, b)`` tuple with values between 0 and 1
+        (the channel is rendered as ``intensity * rgb``) or a
+        ``(256, 3)`` lookup table with values between 0 and 1 (the
+        channel intensity is indexed into the LUT, allowing
+        per-channel colormaps; see ``solid_to_lut`` and
+        ``stops_to_lut``). The two forms cannot be mixed. Channels are
+        blended additively. Only needs to be specified for
+        multi-channel data. Default is None, in which case colors are
+        taken from ``lib.get_colors``.
     relative_intensities : list of float, optional
         List of relative intensities for each channel. Only needs to be
         specified for multi-channel data. Default is None, in which
@@ -3497,10 +3504,17 @@ def build_animation(
         corresponding pyplot colormap is selected. If a 2D array, a
         256x4  array is expected with values between 0 and 1. Default is
         'magma'.
-    colors : list of tuples, optional
-        List of RGB tuples corresponding to the colors of the channels.
-        Only needs to be specified for multi-channel data. Must range
-        between 0 and 1. Default is None.
+    colors : list of tuples or list of lib.FloatArray2D, optional
+        Colors of the channels, one entry per channel. Each entry is
+        either an ``(r, g, b)`` tuple with values between 0 and 1
+        (the channel is rendered as ``intensity * rgb``) or a
+        ``(256, 3)`` lookup table with values between 0 and 1 (the
+        channel intensity is indexed into the LUT, allowing
+        per-channel colormaps; see ``solid_to_lut`` and
+        ``stops_to_lut``). The two forms cannot be mixed. Channels are
+        blended additively. Only needs to be specified for
+        multi-channel data. Default is None, in which case colors are
+        taken from ``lib.get_colors``.
     relative_intensities : list of float, optional
         List of relative intensities for each channel. Only needs to be
         specified for multi-channel data. Default is None, in which
