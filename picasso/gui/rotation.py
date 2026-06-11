@@ -311,9 +311,14 @@ class AnimationDialog(lib.Dialog):
         Click to delete the last saved position.
     fps : QSpinBox
         Contains frames per second used in the animation.
-    positions : list
-        Contains all positions in the animation sequence; each includes
-        3 rotations angles and viewport.
+    positions : list of dict
+        Contains all positions in the animation sequence. Each holds
+        the rotation (scipy Rotation, key ``"R"``), the accumulated
+        rotation vector (key ``"rotvec"``, radians, scipy convention,
+        keeps full turns), the rotation accumulated since the previous
+        position (key ``"segment_rotvec"``, radians, scipy convention;
+        may encode turns beyond 180 degrees) and the viewport (key
+        ``"viewport"``).
     rows : list of dict
         One entry per saved position, holding the row's widgets:
         ``p_label``, ``angle_label``, ``show_btn``, ``d_label``,
@@ -352,7 +357,10 @@ class AnimationDialog(lib.Dialog):
         # Header: current position
         header = QtWidgets.QHBoxLayout()
         cp_label = QtWidgets.QLabel("Current position:")
-        cp_label.setToolTip("Current rotation angles in x, y, z (deg).")
+        cp_label.setToolTip(
+            "Current rotation in x, y, z (deg). The angles keep track "
+            "of full turns, e.g. 720 encodes two full rotations."
+        )
         header.addWidget(cp_label)
         angx = np.round(self.window.view_rot.angx * 180 / np.pi, 1)
         angy = np.round(self.window.view_rot.angy * 180 / np.pi, 1)
@@ -453,25 +461,35 @@ class AnimationDialog(lib.Dialog):
             True when the new position is the same as the last one,
             i.e., when self.stay is clicked.
         """
-        # check that the viewport or angle(s) have changed
-        cond1 = cond2 = cond3 = False
+        view = self.window.view_rot
+        # rotation accumulated since the last position (keeps full
+        # turns, e.g. 720 deg); zero when freezing in place
+        segment_rotvec = (
+            np.zeros(3) if freeze else view.rotation_since_anchor()
+        )
+
+        # check that the viewport or the rotation have changed
         if not freeze and self.positions:
-            cond1 = self.window.view_rot.angx == self.positions[-1][0]
-            cond2 = self.window.view_rot.angy == self.positions[-1][1]
-            cond3 = self.window.view_rot.angz == self.positions[-1][2]
-            cond4 = self.window.view_rot.viewport == self.positions[-1][3]
-            if all([cond1, cond2, cond3, cond4]):
+            last = self.positions[-1]
+            same_rotation = (
+                view.rotation * last["R"].inv()
+            ).magnitude() < 1e-9
+            no_turns = np.linalg.norm(segment_rotvec) < 1e-9
+            same_viewport = view.viewport == last["viewport"]
+            if same_rotation and no_turns and same_viewport:
                 return
 
         # add a new position to the attribute
         self.positions.append(
-            [
-                self.window.view_rot.angx,
-                self.window.view_rot.angy,
-                self.window.view_rot.angz,
-                self.window.view_rot.viewport,
-            ]
+            {
+                "R": view.rotation,
+                "rotvec": view._rotvec.copy(),
+                "segment_rotvec": segment_rotvec,
+                "viewport": view.viewport,
+            }
         )
+        # track the next segment's rotation from this position onwards
+        view.reset_rotation_anchor()
 
         index = len(self.positions) - 1
         grid_row = index
@@ -483,9 +501,9 @@ class AnimationDialog(lib.Dialog):
         )
         self.rows_layout.addWidget(p_label, grid_row, 0)
 
-        angx = np.round(self.window.view_rot.angx * 180 / np.pi, 1)
-        angy = np.round(self.window.view_rot.angy * 180 / np.pi, 1)
-        angz = np.round(self.window.view_rot.angz * 180 / np.pi, 1)
+        angx = np.round(view.angx * 180 / np.pi, 1)
+        angy = np.round(view.angy * 180 / np.pi, 1)
+        angz = np.round(view.angz * 180 / np.pi, 1)
         angle_label = QtWidgets.QLabel("{}, {}, {}".format(angx, angy, angz))
         self.rows_layout.addWidget(angle_label, grid_row, 1)
 
@@ -507,14 +525,12 @@ class AnimationDialog(lib.Dialog):
             duration.setDecimals(2)
             self.rows_layout.addWidget(duration, grid_row, 4)
 
-            # calculate recommended duration
-            if not freeze and not all([cond1, cond2, cond3]):
-                dx = self.positions[-1][0] - self.positions[-2][0]
-                dy = self.positions[-1][1] - self.positions[-2][1]
-                dz = self.positions[-1][2] - self.positions[-2][2]
-                dmax = np.max(np.abs([dx, dy, dz]))
+            # calculate recommended duration from the total rotation
+            # (including full turns) at the requested rotation speed
+            total_angle = float(np.linalg.norm(segment_rotvec))
+            if not freeze and total_angle > 1e-9:
                 rot_speed = self.rot_speed.value() * np.pi / 180
-                duration.setValue(dmax / rot_speed)
+                duration.setValue(total_angle / rot_speed)
 
         self.rows.append(
             {
@@ -553,10 +569,11 @@ class AnimationDialog(lib.Dialog):
             Index of the position to be displayed.
         """
         if i <= len(self.positions) - 1:
-            self.window.view_rot.angx = self.positions[i][0]
-            self.window.view_rot.angy = self.positions[i][1]
-            self.window.view_rot.angz = self.positions[i][2]
-            self.window.view_rot.update_scene(viewport=self.positions[i][3])
+            position = self.positions[i]
+            self.window.view_rot.set_rotation(
+                position["R"], rotvec=position["rotvec"]
+            )
+            self.window.view_rot.update_scene(viewport=position["viewport"])
 
     def build_animation(self) -> None:
         """Create an animation as an .mp4 file using the positions from
@@ -592,12 +609,17 @@ class AnimationDialog(lib.Dialog):
             )
             adjust_display_pixel = disp_dlg.dynamic_disp_px.isChecked()
             intensities = self.window.window.view.read_relative_intensities()
+            positions = [(p["R"], p["viewport"]) for p in self.positions]
+            segment_rotations = [
+                p["segment_rotvec"] for p in self.positions[1:]
+            ]
             render.build_animation(
                 path,
                 locs,
                 infos,
-                positions=self.positions,
+                positions=positions,
                 durations=durations,
+                segment_rotations=segment_rotations,
                 disp_px_size=disp_dlg.disp_px_size.value(),
                 image_size=(
                     self.window.view_rot.width(),
@@ -629,8 +651,10 @@ class ViewRotation(QtWidgets.QLabel):
     Attributes
     ----------
     angx, angy, angz : float
-        Current rotation angle around x, y, and z axes (read/write
-        properties; backed by ``self._R``).
+        Accumulated rotation around the x, y and z axes (radians) in
+        the codebase's angle convention (read-only properties; backed
+        by ``self._rotvec``). They keep track of full turns, e.g. read
+        720 degrees after two full rotations.
     block_x, block_y, block_z : bool
         True if rotate only around x, y, or z axis respectively.
     group_color : lib.IntArray1D
@@ -660,8 +684,21 @@ class ViewRotation(QtWidgets.QLabel):
     qimage : QImage
         Current image of rendered locs, picks and other drawings.
     _R : scipy.spatial.transform.Rotation
-        Source of truth for the current rotation. ``angx/angy/angz``
-        are derived from this via ``_codebase_euler``.
+        Source of truth for the current rotation (quaternion-backed).
+    _rotvec : np.ndarray
+        Accumulated rotation vector (radians, scipy convention) - the
+        sum of all applied rotation vectors (a path integral), so full
+        turns are preserved, e.g. two full rotations around z read
+        (0, 0, 4 pi). For rotations around a single axis it represents
+        ``_R`` exactly; in general the exact orientation is ``_R``.
+        ``angx/angy/angz`` are derived from this.
+    _anchor_R : scipy.spatial.transform.Rotation
+        Reference orientation for per-segment rotation tracking (set
+        when an animation position is added or shown).
+    _anchor_rotvec : np.ndarray
+        Unwrapped rotation vector (radians, scipy convention) of the
+        rotation accumulated since ``_anchor_R``; used to encode
+        rotations beyond 180 degrees in animation segments.
     _last_mouse_x, _last_mouse_y : int
         Previous mouse position (Qt coords) during a trackball drag.
     viewport : tuple
@@ -674,6 +711,9 @@ class ViewRotation(QtWidgets.QLabel):
         super().__init__(window)
         self.window = window
         self._R = Rotation.identity()
+        self._rotvec = np.zeros(3)
+        self._anchor_R = Rotation.identity()
+        self._anchor_rotvec = np.zeros(3)
         self._pan_z = 0.0
         self._last_mouse_x = 0
         self._last_mouse_y = 0
@@ -692,37 +732,139 @@ class ViewRotation(QtWidgets.QLabel):
         self.block_z = False
         self.setFocusPolicy(QtCore.Qt.FocusPolicy.ClickFocus)
 
-    # --- rotation angles --- #
-    def _codebase_euler(self) -> tuple[float, float, float]:
-        e = self._R.as_euler("XYZ")
-        return -float(e[0]), float(e[1]), float(e[2])
-
+    # --- rotation state --- #
+    # The codebase's angle convention (see ``render.rotation_matrix``)
+    # flips the sign of the x rotation relative to scipy's right-hand
+    # rule, i.e., rotation_matrix(a, 0, 0).as_rotvec() == (-a, 0, 0).
+    # The angx/angy/angz properties report the accumulated rotation
+    # vector in that convention.
+    #
+    # ``_rotvec`` accumulates the applied rotation vectors (a path
+    # integral) rather than re-deriving angles from ``_R``. An absolute
+    # orientation cannot count full turns - spinning a tilted structure
+    # by 360 degrees returns to the same orientation - so this is the
+    # only way the displayed angles can keep track of the number of
+    # turns (e.g. read 720 after two full rotations). For rotations
+    # around a single axis the accumulated values match the orientation
+    # exactly; for composed rotations around different axes they are a
+    # record of the applied rotations and the exact orientation is
+    # given by ``_R``.
     @property
     def angx(self) -> float:
-        return self._codebase_euler()[0]
-
-    @angx.setter
-    def angx(self, value: float) -> None:
-        _, b, c = self._codebase_euler()
-        self._R = render.rotation_matrix(float(value), b, c)
+        return -float(self._rotvec[0])
 
     @property
     def angy(self) -> float:
-        return self._codebase_euler()[1]
-
-    @angy.setter
-    def angy(self, value: float) -> None:
-        a, _, c = self._codebase_euler()
-        self._R = render.rotation_matrix(a, float(value), c)
+        return float(self._rotvec[1])
 
     @property
     def angz(self) -> float:
-        return self._codebase_euler()[2]
+        return float(self._rotvec[2])
 
-    @angz.setter
-    def angz(self, value: float) -> None:
-        a, b, _ = self._codebase_euler()
-        self._R = render.rotation_matrix(a, b, float(value))
+    @property
+    def rotation(self) -> Rotation:
+        """Current rotation of the localizations."""
+        return self._R
+
+    def set_rotation(
+        self,
+        R: Rotation,
+        rotvec: np.ndarray | None = None,
+    ) -> None:
+        """Set the absolute rotation and reset the per-segment anchor.
+
+        Parameters
+        ----------
+        R : scipy.spatial.transform.Rotation
+            New rotation.
+        rotvec : np.ndarray, optional
+            Accumulated rotation vector to restore as the displayed
+            angles (radians, scipy convention), e.g. saved earlier
+            from ``self._rotvec``; keeps full-turn information. If
+            None, the shortest rotation vector of ``R`` is used.
+        """
+        self._R = R
+        if rotvec is None:
+            self._rotvec = R.as_rotvec()
+        else:
+            self._rotvec = np.asarray(rotvec, dtype=float).copy()
+        self.reset_rotation_anchor()
+
+    def reset_rotation_anchor(self) -> None:
+        """Start tracking the rotation accumulated from the current
+        orientation (used for animation segments)."""
+        self._anchor_R = self._R
+        self._anchor_rotvec = np.zeros(3)
+
+    def rotation_since_anchor(self) -> np.ndarray:
+        """Unwrapped rotation vector (radians, scipy convention)
+        accumulated since the last anchor; magnitude may exceed pi if
+        rotated beyond 180 degrees."""
+        return self._anchor_rotvec.copy()
+
+    def apply_rotation(
+        self,
+        rotvec: np.ndarray,
+        frame: str = "world",
+    ) -> None:
+        """Compose a rotation onto the current one and track turns.
+
+        Parameters
+        ----------
+        rotvec : np.ndarray
+            Rotation vector (radians, scipy convention). Its magnitude
+            may exceed pi; full turns are preserved in the displayed
+            angles and in the per-segment tracking.
+        frame : {"world", "object"}, optional
+            Frame in which ``rotvec`` is given. "world": the fixed
+            world/screen frame (rotation composed as ``delta * R``).
+            "object": the data's own (rotated) frame, i.e., rotation
+            around the data axes shown by the axes icon (composed as
+            ``R * delta``). Default is "world".
+        """
+        rotvec = np.asarray(rotvec, dtype=float)
+        magnitude = float(np.linalg.norm(rotvec))
+        if magnitude < 1e-12:
+            return
+        # accumulate the displayed angles (path integral; an absolute
+        # orientation cannot count full turns, so the applied rotation
+        # vectors are summed instead)
+        self._rotvec = self._rotvec + rotvec
+        # apply in sub-steps small enough for unambiguous unwrapping of
+        # the per-segment rotation
+        n_steps = max(1, int(np.ceil(magnitude / (np.pi / 2))))
+        step = Rotation.from_rotvec(rotvec / n_steps)
+        for _ in range(n_steps):
+            if frame == "object":
+                self._R = self._R * step
+            else:
+                self._R = step * self._R
+            relative = self._R * self._anchor_R.inv()
+            self._anchor_rotvec = render.closest_rotvec(
+                relative, self._anchor_rotvec
+            )
+
+    def load_saved_rotation(self, info: dict) -> None:
+        """Restore the rotation saved by
+        ``RotationWindow.save_locs_rotated``.
+
+        New files store a quaternion together with the accumulated
+        rotation angles (keeping full turns); legacy files store Euler
+        angles (angx, angy, angz, radians, codebase convention).
+        """
+        angles = (
+            info.get("angx", 0.0),
+            info.get("angy", 0.0),
+            info.get("angz", 0.0),
+        )
+        if "Quaternion (x, y, z, w)" in info:
+            R = Rotation.from_quat(info["Quaternion (x, y, z, w)"])
+            # angx is stored in the codebase convention (x negated
+            # relative to scipy's rotation vector)
+            rotvec = np.array([-angles[0], angles[1], angles[2]])
+            self.set_rotation(R, rotvec=rotvec)
+        else:  # legacy: Euler angles
+            self.set_rotation(render.rotation_matrix(*angles))
 
     def sizeHint(self) -> QtCore.QSize:
         return QtCore.QSize(*self._size_hint)
@@ -851,9 +993,6 @@ class ViewRotation(QtWidgets.QLabel):
         viewport : tuple, optional
             Viewport to be rendered ``((y_min, x_min), (y_max, x_max))``.
             If None, takes current viewport.
-        ang : tuple, optional
-            Rotation angles to be rendered. If None, takes the current
-            angles.
         autoscale : bool, optional
             If True, optimally adjust contrast.
         use_cache : bool, optional
@@ -882,7 +1021,7 @@ class ViewRotation(QtWidgets.QLabel):
             locs=locs,
             info=infos,
             **kwargs,
-            ang=(self.angx, self.angy, self.angz),
+            ang=self._R,
             contrast=contrast,
             invert_colors=self.window.dataset_dialog.wbackground.isChecked(),
             single_channel_colormap=cmap,
@@ -1053,9 +1192,7 @@ class ViewRotation(QtWidgets.QLabel):
             Image with the drawn rotation axes icon.
         """
         if self.window.rotation_action.isChecked():
-            image = render.draw_rotation(
-                image=image, ang=(self.angx, self.angy, self.angz)
-            )
+            image = render.draw_rotation(image=image, ang=self._R)
         return image
 
     def draw_rotation_angles(self, image: QtGui.QImage) -> QtGui.QImage:
@@ -1098,7 +1235,15 @@ class ViewRotation(QtWidgets.QLabel):
         )
 
     def rotation_input(self) -> None:
-        """Ask the user to input 3 rotation angles manually."""
+        """Ask the user to input 3 rotation angles manually.
+
+        The rotations are applied sequentially around the data's own
+        (rotated) x, y and z axes - the axes shown by the axes icon -
+        so each displayed angle changes by exactly the entered amount
+        regardless of the current orientation. Angles beyond +/- 180
+        degrees are preserved, e.g. 720 degrees encodes two full turns
+        (relevant for animations).
+        """
         angx, ok = QtWidgets.QInputDialog.getDouble(
             self,
             "Rotation angle x",
@@ -1123,15 +1268,24 @@ class ViewRotation(QtWidgets.QLabel):
                     decimals=2,
                 )
                 if ok3:
-                    self.angx += np.pi * angx / 180
-                    self.angy += np.pi * angy / 180
-                    self.angz += np.pi * angz / 180
+                    # codebase convention: x angle is the negative of
+                    # scipy's right-handed x rotation; "object" frame
+                    # rotates around the data's own axes
+                    self.apply_rotation(
+                        [-np.radians(angx), 0.0, 0.0], frame="object"
+                    )
+                    self.apply_rotation(
+                        [0.0, np.radians(angy), 0.0], frame="object"
+                    )
+                    self.apply_rotation(
+                        [0.0, 0.0, np.radians(angz)], frame="object"
+                    )
 
         self.update_scene()
 
     def delete_rotation(self) -> None:
         """Reset rotation and any accumulated pan offset."""
-        self._R = Rotation.identity()
+        self.set_rotation(Rotation.identity())
         self._pan_z = 0.0
         self.update_scene()
 
@@ -1182,24 +1336,18 @@ class ViewRotation(QtWidgets.QLabel):
             self.update_scene()
 
     def xy_projection(self) -> None:
-        """Set angles to 0 to get XY projection."""
-        self.angx = 0
-        self.angy = 0
-        self.angz = 0
+        """Reset rotation to get XY projection."""
+        self.set_rotation(Rotation.identity())
         self.update_scene()
 
     def xz_projection(self) -> None:
-        """Set angles to get XZ projection."""
-        self.angx = np.pi / 2
-        self.angy = 0
-        self.angz = 0
+        """Set rotation to get XZ projection."""
+        self.set_rotation(render.rotation_matrix(np.pi / 2, 0, 0))
         self.update_scene()
 
     def yz_projection(self) -> None:
-        """Set angles to get YZ projection."""
-        self.angx = 0
-        self.angy = np.pi / 2
-        self.angz = 0
+        """Set rotation to get YZ projection."""
+        self.set_rotation(render.rotation_matrix(0, np.pi / 2, 0))
         self.update_scene()
 
     def _arrow_pan(self, sx: float, sy: float) -> None:
@@ -1332,12 +1480,13 @@ class ViewRotation(QtWidgets.QLabel):
             ax = 0.0
 
         # Axis locks: pressing X/Y/Z constrains rotation to the
-        # corresponding *world* axis. Project the screen-frame rotation
-        # vector into world frame, zero the components we don't want, and
-        # rotate it back.
+        # corresponding *data* axis (the axes shown by the axes icon).
+        # Project the screen-frame rotation vector into the data frame,
+        # keep only the locked component and apply it around the data
+        # axis; the displayed angle then changes only for that axis.
         if self.block_x or self.block_y or self.block_z:
-            v_screen = np.array([ax, ay, az], dtype=float)
-            v_world = self._R.inv().apply(v_screen)
+            v_screen = render.rotation_matrix(ax, ay, az).as_rotvec()
+            v_object = self._R.inv().apply(v_screen)
             keep = np.array(
                 [
                     1.0 if self.block_x else 0.0,
@@ -1345,20 +1494,10 @@ class ViewRotation(QtWidgets.QLabel):
                     1.0 if self.block_z else 0.0,
                 ]
             )
-            v_world = v_world * keep
-            v_screen = self._R.apply(v_world)
-            ax, ay, az = (
-                float(v_screen[0]),
-                float(v_screen[1]),
-                float(v_screen[2]),
-            )
-
-        # The codebase's render.rotation_matrix flips the sign of the X
-        # rotation relative to scipy's right-hand-rule convention; using
-        # it here keeps screen-aligned tilts feeling identical to the old
-        # Euler-update behaviour at R = I.
-        delta_R = render.rotation_matrix(ax, ay, az)
-        self._R = delta_R * self._R
+            self.apply_rotation(v_object * keep, frame="object")
+        else:
+            delta_R = render.rotation_matrix(ax, ay, az)
+            self.apply_rotation(delta_R.as_rotvec())
         self.update_scene()
 
     def _pan_drag(self, event: QtGui.QMouseEvent) -> None:
@@ -1949,9 +2088,14 @@ class RotationWindow(QtWidgets.QMainWindow):
                     "Pick": pick,
                     "Pick shape": self.view_rot.pick_shape,
                     "Pick size (nm)": size * pixelsize,
-                    "angx": self.view_rot.angx,
-                    "angy": self.view_rot.angy,
-                    "angz": self.view_rot.angz,
+                    # accumulated rotation angles incl. full turns
+                    # (radians, codebase convention); legacy keys
+                    "angx": float(self.view_rot.angx),
+                    "angy": float(self.view_rot.angy),
+                    "angz": float(self.view_rot.angz),
+                    "Quaternion (x, y, z, w)": [
+                        float(q) for q in self.view_rot.rotation.as_quat()
+                    ],
                 }
             ]
 

@@ -11,6 +11,7 @@ import numpy as np
 import pandas as pd
 import pytest
 from PyQt6 import QtCore, QtGui
+from scipy.spatial.transform import Rotation
 
 from picasso import io, masking, render
 
@@ -539,6 +540,99 @@ class TestRotation:
         assert len(x_out) == n_in_view
         assert len(y_out) == n_in_view
         assert len(z_out) == n_in_view
+
+    def test_to_rotation_none(self):
+        assert render.to_rotation(None) is None
+
+    def test_to_rotation_passes_rotation_through(self):
+        R = Rotation.from_rotvec([0.1, -0.2, 0.3])
+        assert render.to_rotation(R) is R
+
+    def test_to_rotation_legacy_euler_equivalence(self):
+        ang = (0.4, -0.7, 1.1)
+        R = render.to_rotation(ang)
+        expected = render.rotation_matrix(*ang)
+        assert np.allclose(R.as_matrix(), expected.as_matrix())
+
+    def test_locs_rotation_accepts_rotation_object(self, locs_3d):
+        ang = (0.1, 0.2, 0.3)
+        out_tuple = render.locs_rotation(
+            locs_3d, 5.0, 0.0, 32.0, 0.0, 32.0, ang
+        )
+        out_rotation = render.locs_rotation(
+            locs_3d, 5.0, 0.0, 32.0, 0.0, 32.0, render.rotation_matrix(*ang)
+        )
+        for a, b in zip(out_tuple, out_rotation):
+            assert np.allclose(a, b)
+
+    def test_render_accepts_rotation_object(self, locs_3d, info):
+        """Rendering with a scipy Rotation matches the legacy Euler
+        tuple input for all rotation-aware code paths."""
+        ang = (0.5, 0.3, 0.2)
+        for blur_method in (None, "gaussian"):
+            _, im_tuple = render.render(
+                locs_3d,
+                info,
+                oversampling=5,
+                viewport=FULL_VIEWPORT,
+                blur_method=blur_method,
+                ang=ang,
+            )
+            _, im_rotation = render.render(
+                locs_3d,
+                info,
+                oversampling=5,
+                viewport=FULL_VIEWPORT,
+                blur_method=blur_method,
+                ang=render.rotation_matrix(*ang),
+            )
+            assert np.allclose(im_tuple, im_rotation)
+
+
+class TestClosestRotvec:
+    def test_zero_reference_returns_base(self):
+        R = Rotation.from_rotvec([0.3, 0.0, 0.0])
+        out = render.closest_rotvec(R, np.zeros(3))
+        assert np.allclose(out, [0.3, 0.0, 0.0])
+
+    def test_unwraps_full_turns(self):
+        """A 10-degree rotation with a reference near 370 degrees must
+        unwrap to 370 degrees."""
+        axis = np.array([0.0, 0.0, 1.0])
+        R = Rotation.from_rotvec(np.radians(10) * axis)
+        reference = np.radians(365) * axis
+        out = render.closest_rotvec(R, reference)
+        assert np.allclose(out, np.radians(370) * axis)
+
+    def test_unwraps_across_pi(self):
+        """Crossing 180 degrees must continue counting up instead of
+        flipping the axis."""
+        axis = np.array([1.0, 0.0, 0.0])
+        R = Rotation.from_rotvec(np.radians(181) * axis)  # wraps to -179
+        reference = np.radians(180) * axis
+        out = render.closest_rotvec(R, reference)
+        assert np.allclose(out, np.radians(181) * axis)
+
+    def test_identity_keeps_turns_of_reference(self):
+        """The identity rotation with a reference of ~2 turns must keep
+        the full turns along the reference axis."""
+        axis = np.array([0.0, 1.0, 0.0])
+        out = render.closest_rotvec(
+            Rotation.identity(), np.radians(719) * axis
+        )
+        assert np.allclose(out, np.radians(720) * axis)
+
+    def test_identity_zero_reference(self):
+        out = render.closest_rotvec(Rotation.identity(), np.zeros(3))
+        assert np.allclose(out, np.zeros(3))
+
+    def test_result_represents_same_rotation(self):
+        R = Rotation.from_rotvec([0.2, -0.4, 0.6])
+        reference = np.array([2.5, -4.0, 6.5])
+        out = render.closest_rotvec(R, reference)
+        assert np.allclose(
+            (Rotation.from_rotvec(out) * R.inv()).magnitude(), 0.0, atol=1e-9
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -1366,13 +1460,129 @@ class TestRgbToQImage:
 # ---------------------------------------------------------------------------
 
 
+class TestAnimationSequence:
+    def test_slerp_endpoints_and_midpoint(self):
+        """Default interpolation is slerp: endpoints exact, midpoint at
+        half the rotation angle."""
+        R1 = Rotation.identity()
+        R2 = Rotation.from_rotvec([0.0, 0.0, np.pi / 2])
+        positions = [(R1, FULL_VIEWPORT), (R2, FULL_VIEWPORT)]
+        rotations, viewports = render._animation_sequence(
+            positions, [1.0], fps=3
+        )
+        assert len(rotations) == 3
+        assert len(viewports) == 3
+        assert (rotations[0] * R1.inv()).magnitude() == pytest.approx(
+            0.0, abs=1e-9
+        )
+        assert (rotations[-1] * R2.inv()).magnitude() == pytest.approx(
+            0.0, abs=1e-9
+        )
+        assert np.allclose(
+            rotations[1].as_rotvec(), [0.0, 0.0, np.pi / 4], atol=1e-9
+        )
+
+    def test_full_turn_segment(self):
+        """A 360-degree segment rotation spins the full turn even though
+        both checkpoints have the same orientation."""
+        R = Rotation.identity()
+        positions = [(R, FULL_VIEWPORT), (R, FULL_VIEWPORT)]
+        rotations, _ = render._animation_sequence(
+            positions,
+            [1.0],
+            fps=5,
+            segment_rotations=[np.array([0.0, 0.0, 2 * np.pi])],
+        )
+        assert len(rotations) == 5
+        # quarter of the way through: 90 degrees around z
+        assert np.allclose(
+            rotations[1].as_rotvec(), [0.0, 0.0, np.pi / 2], atol=1e-9
+        )
+        # halfway through: 180 degrees around z
+        assert rotations[2].magnitude() == pytest.approx(np.pi, abs=1e-9)
+        # ends exactly at the checkpoint again
+        assert rotations[-1].magnitude() == pytest.approx(0.0, abs=1e-9)
+
+    def test_segment_rotation_snaps_to_checkpoints(self):
+        """The segment rotation vector is snapped so that the segment
+        ends exactly at the next checkpoint, keeping its turns."""
+        R1 = Rotation.identity()
+        R2 = Rotation.from_rotvec([0.0, 0.0, np.pi / 2])
+        positions = [(R1, FULL_VIEWPORT), (R2, FULL_VIEWPORT)]
+        # 450 degrees = 90 degrees + 1 full turn; pass a slightly off
+        # target to verify snapping
+        target = np.array([0.0, 0.0, np.radians(449)])
+        rotations, _ = render._animation_sequence(
+            positions, [1.0], fps=11, segment_rotations=[target]
+        )
+        assert (rotations[-1] * R2.inv()).magnitude() == pytest.approx(
+            0.0, abs=1e-9
+        )
+        # total rotation path is 450 degrees: 1/5 of the way is 90 deg
+        assert np.allclose(
+            rotations[2].as_rotvec(), [0.0, 0.0, np.pi / 2], atol=1e-6
+        )
+
+    def test_multi_segment_viewports(self):
+        """Viewports interpolate linearly per segment."""
+        R = Rotation.identity()
+        vp1 = ((0.0, 0.0), (32.0, 32.0))
+        vp2 = ((8.0, 8.0), (24.0, 24.0))
+        positions = [(R, vp1), (R, vp2)]
+        _, viewports = render._animation_sequence(positions, [1.0], fps=3)
+        assert np.allclose(viewports[0], vp1)
+        assert np.allclose(viewports[1], ((4.0, 4.0), (28.0, 28.0)))
+        assert np.allclose(viewports[-1], vp2)
+
+    def test_normalize_legacy_positions(self):
+        """Legacy Euler positions are converted with a deprecation
+        warning and match rotation_matrix."""
+        legacy = [(0.1, 0.2, 0.3, FULL_VIEWPORT)]
+        with pytest.warns(DeprecationWarning):
+            normalized = render._normalize_animation_positions(legacy)
+        R, vp = normalized[0]
+        expected = render.rotation_matrix(0.1, 0.2, 0.3)
+        assert (R * expected.inv()).magnitude() == pytest.approx(0.0, abs=1e-9)
+        assert vp == FULL_VIEWPORT
+
+    def test_normalize_invalid_position_raises(self):
+        with pytest.raises(ValueError):
+            render._normalize_animation_positions([(0.1, FULL_VIEWPORT)])
+
+
 class TestBuildAnimation:
-    def test_smoke_two_frames(self, locs_3d, info, tmp_path):
-        """A 2-frame animation writes both an .mp4 and the sidecar .yaml."""
+    def test_smoke_two_frames_legacy_euler(self, locs_3d, info, tmp_path):
+        """A 2-frame animation from legacy Euler positions writes both
+        an .mp4 and the sidecar .yaml (deprecated input format)."""
         out_path = tmp_path / "anim.mp4"
         positions = [
             (0.0, 0.0, 0.0, FULL_VIEWPORT),
             (0.1, 0.0, 0.0, FULL_VIEWPORT),
+        ]
+        with pytest.warns(DeprecationWarning):
+            render.build_animation(
+                str(out_path),
+                locs_3d,
+                info,
+                positions=positions,
+                durations=[1.0],
+                disp_px_size=PIXELSIZE,
+                image_size=(64, 64),
+                fps=2,
+            )
+        assert out_path.exists()
+        assert out_path.stat().st_size > 0
+        yaml_path = out_path.with_suffix(".yaml")
+        assert yaml_path.exists()
+        assert yaml_path.stat().st_size > 0
+
+    def test_smoke_quaternions_with_turns(self, locs_3d, info, tmp_path):
+        """An animation from scipy Rotations with a multi-turn segment
+        writes both an .mp4 and the sidecar .yaml."""
+        out_path = tmp_path / "anim.mp4"
+        positions = [
+            (Rotation.identity(), FULL_VIEWPORT),
+            (Rotation.from_rotvec([0.1, 0.0, 0.0]), FULL_VIEWPORT),
         ]
         render.build_animation(
             str(out_path),
@@ -1380,6 +1590,7 @@ class TestBuildAnimation:
             info,
             positions=positions,
             durations=[1.0],
+            segment_rotations=[np.array([0.1 + 2 * np.pi, 0.0, 0.0])],
             disp_px_size=PIXELSIZE,
             image_size=(64, 64),
             fps=2,

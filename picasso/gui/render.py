@@ -12831,9 +12831,9 @@ class Window(QtWidgets.QMainWindow):
                     self.tools_settings_dialog.pick_side_length.setValue(
                         self.view.infos[0][-1]["Pick size (nm)"]
                     )
-                self.window_rot.view_rot.angx = self.view.infos[0][-1]["angx"]
-                self.window_rot.view_rot.angy = self.view.infos[0][-1]["angy"]
-                self.window_rot.view_rot.angz = self.view.infos[0][-1]["angz"]
+                self.window_rot.view_rot.load_saved_rotation(
+                    self.view.infos[0][-1]
+                )
                 self.rot_win()
 
     def resize_view_to_fov(self, w: float, h: float) -> None:
