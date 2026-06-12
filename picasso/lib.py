@@ -1829,7 +1829,7 @@ def locs_at(x: float, y: float, locs: pd.DataFrame, r: float) -> pd.DataFrame:
 
 
 @numba.jit(nopython=True, nogil=True, cache=True)
-def _locs_at_numba(
+def is_loc_at_numba(
     x: float,
     y: float,
     locs_xy: FloatArray2D,
@@ -1853,7 +1853,7 @@ def locs_at_numba(
 ) -> FloatArray2D:
     """Numba implementation of ``locs_at``. Return the localizations at
     the given coordinates within radius ``r``."""
-    is_picked = _locs_at_numba(x, y, locs_xy, r)
+    is_picked = is_loc_at_numba(x, y, locs_xy, r)
     return locs_xy[:, is_picked]
 
 

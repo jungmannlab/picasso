@@ -184,7 +184,7 @@ def _picked_circular_locs(
             index_blocks[7],
         )
         block_locs = index_blocks[0].iloc[block_locs_idx]
-        group_locs_idx = lib._locs_at_numba(
+        group_locs_idx = lib.is_loc_at_numba(
             x, y, locs_xy[:, block_locs_idx], pick_size
         )
         group_locs = block_locs.iloc[group_locs_idx].copy()

@@ -73,9 +73,10 @@ def rotate_img(img: lib.FloatArray2D, angle: float) -> lib.FloatArray2D:
 
 def roi_to_img(
     locs: pd.DataFrame,
+    info: list[dict],
     pick: int,
     radius: float,
-    oversampling: float,
+    disp_px_size: float,
     picks: tuple[float, float] | None = None,
 ) -> lib.FloatArray2D:
     """Convert a region of interest (ROI) defined by localizations to an
@@ -85,13 +86,15 @@ def roi_to_img(
     ----------
     locs : pd.DataFrame
         Localizations from which to create the image.
+    info : list of dicts
+        Localization metadata.
     pick : int
         The group number of the localizations to be picked.
     radius : float
         Radius around the mean position of the localizations to define
         the ROI.
-    oversampling : float
-        Number of super-resolution pixels per camera pixel.
+    disp_px_size : float
+        Display pixel size used for rendering images (nm).
     picks : tuple[float, float] | None, optional
         Specific coordinates (x, y) to isolate localizations from, by
         default None. If None, uses the mean position of the localizations
@@ -139,9 +142,10 @@ def roi_to_img(
 
 def prepare_data(
     locs: pd.DataFrame,
+    info: list[dict],
     label: int,
     pick_radius: float,
-    oversampling: float,
+    disp_px_size: float,
     alpha: float = 10,
     bg: float = 1,
     export: bool = False,
@@ -153,13 +157,15 @@ def prepare_data(
     ----------
     locs : pd.DataFrame
         Localizations from which to create the images.
+    info : list of dicts
+        Localization metadata. Must contain the camera pixel size.
     label : int
         Label for the data, typically the group number.
     pick_radius : float
         Radius around the mean position of the localizations to define
         the ROI.
-    oversampling : float
-        Number of super-resolution pixels per camera pixel.
+    disp_px_size : float
+        Display pixel size used for rendering images (nm).
     alpha : float, optional
         Scaling factor for the image, by default 10.
     bg : float, optional
@@ -175,14 +181,13 @@ def prepare_data(
     labels : list[int]
         List of labels corresponding to the images.
     """
-    img_shape = int(2 * pick_radius * oversampling)
     data = []
     labels = []
 
     for pick in tqdm(range(locs["group"].max()), desc="Prepare " + str(label)):
 
         pick_img = roi_to_img(
-            locs, pick, radius=pick_radius, oversampling=oversampling
+            locs, info, pick, radius=pick_radius, disp_px_size=disp_px_size
         )
 
         if export is True and pick < 10:
@@ -194,6 +199,9 @@ def prepare_data(
                 vmax=10,
             )
 
+        # derive the image shape from the rendered ROI so it always
+        # matches render's pixel count for the given display pixel size
+        img_shape = pick_img.shape[0]
         pick_img = prepare_img(
             pick_img,
             img_shape=img_shape,
@@ -204,15 +212,16 @@ def prepare_data(
         data.append(pick_img)
         labels.append(label)
 
-    return data, label
+    return data, labels
 
 
 def predict_structure(
     mlp: MLPClassifier,
     locs: pd.DataFrame,
+    info: list[dict],
     pick: int,
     pick_radius: float,
-    oversampling: float,
+    disp_px_size: float,
     picks: tuple[float, float] | None = None,
 ) -> tuple[int, lib.FloatArray1D]:
     """Predict the structure of localizations using a trained MLP
@@ -224,12 +233,14 @@ def predict_structure(
         Trained MLP classifier.
     locs : pd.DataFrame
         Localizations to predict.
+    info : list of dicts
+        Localization metadata. Must contain the camera pixel size.
     pick : int
         Index of the localizations to predict.
     pick_radius : float
         Radius around the localizations to consider.
-    oversampling : float
-        Oversampling factor for the image.
+    disp_px_size : float
+        Display pixel size used for rendering images (nm).
     picks : tuple[float, float] | None, optional
         Coordinates of the region of interest (ROI) to predict.
 
@@ -240,14 +251,17 @@ def predict_structure(
     pred_proba : lib.FloatArray1D
         Predicted probabilities for each class.
     """
-    img_shape = int(2 * pick_radius * oversampling)
     img = roi_to_img(
         locs,
+        info,
         pick=pick,
         radius=pick_radius,
-        oversampling=oversampling,
+        disp_px_size=disp_px_size,
         picks=picks,
     )
+    # derive the image shape from the rendered ROI so it always matches
+    # render's pixel count for the given display pixel size
+    img_shape = img.shape[0]
     img = prepare_img(img, img_shape=img_shape, alpha=10, bg=1)
     img = img.reshape(1, img_shape**2)
 

@@ -93,11 +93,10 @@ def render(
     oversampling = pixelsize / disp_px_size
 
     if viewport is None:
-        try:
-            # all locs
-            viewport = [(0, 0), (info[0]["Height"], info[0]["Width"])]
-        except TypeError:
-            raise ValueError("Need info if no viewport is provided.")
+        height = lib.get_from_metadata(info, "Height", raise_error=True)
+        width = lib.get_from_metadata(info, "Width", raise_error=True)
+        viewport = [(0, 0), (height, width)]
+
     (y_min, x_min), (y_max, x_max) = viewport
     if blur_method is None:
         # no blur
