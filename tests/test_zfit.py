@@ -494,6 +494,221 @@ class TestCalibrateZ:
         assert loaded["Step size in nm"] == calib["Step size in nm"]
 
 
+class TestCalibrateZFrameBounds:
+    """``frame_bounds`` restricts which frames enter the calibration.
+    Bounds are inclusive on both ends, matching ``picasso.localize``."""
+
+    N_FRAMES = 50
+    D = 10.0  # nm step
+
+    @pytest.fixture(autouse=True)
+    def _no_show(self, monkeypatch):
+        monkeypatch.setattr("matplotlib.pyplot.show", lambda *a, **k: None)
+
+    @pytest.fixture
+    def bead_stack(self):
+        """Same synthetic bead stack as in ``TestCalibrateZ``: sx/sy
+        driven by known polynomials of stage z plus tiny noise."""
+        rng = np.random.default_rng(0)
+        rows = []
+        z_total = (self.N_FRAMES - 1) * self.D
+        for fi in range(self.N_FRAMES):
+            z = -(fi * self.D - z_total / 2)
+            sx_mean = 1.5 + 1e-3 * z + 1e-5 * z**2
+            sy_mean = 1.5 - 1e-3 * z + 1e-5 * z**2
+            for _ in range(40):
+                rows.append(
+                    {
+                        "frame": fi,
+                        "x": 16.0,
+                        "y": 16.0,
+                        "sx": sx_mean + rng.normal(0, 0.02),
+                        "sy": sy_mean + rng.normal(0, 0.02),
+                        "photons": 5000.0,
+                        "bg": 10.0,
+                        "lpx": 0.01,
+                        "lpy": 0.01,
+                    }
+                )
+        locs = pd.DataFrame(rows)
+        info = [
+            {
+                "Frames": self.N_FRAMES,
+                "Pixelsize": 130,
+                "Width": 32,
+                "Height": 32,
+            }
+        ]
+        return locs, info
+
+    def _polyfit_lengths(self, monkeypatch):
+        """Spy on ``np.polyfit`` to record how many frames enter each
+        calibration fit."""
+        lengths = []
+        orig = np.polyfit
+
+        def spy(x, y, deg, **kwargs):
+            lengths.append(len(x))
+            return orig(x, y, deg, **kwargs)
+
+        monkeypatch.setattr(np, "polyfit", spy)
+        return lengths
+
+    def test_none_and_none_none_equivalent(self, bead_stack):
+        """``frame_bounds=(None, None)`` must behave exactly like
+        ``frame_bounds=None`` (all frames used)."""
+        locs, info = bead_stack
+        calib_none = zfit.calibrate_z(
+            locs, info, self.D, magnification_factor=0.79, frame_bounds=None
+        )
+        calib_nn = zfit.calibrate_z(
+            locs,
+            info,
+            self.D,
+            magnification_factor=0.79,
+            frame_bounds=(None, None),
+        )
+        np.testing.assert_allclose(
+            calib_none["X Coefficients"], calib_nn["X Coefficients"]
+        )
+        np.testing.assert_allclose(
+            calib_none["Y Coefficients"], calib_nn["Y Coefficients"]
+        )
+
+    def test_full_range_bounds_equivalent_to_none(self, bead_stack):
+        """``(0, n_frames - 1)`` covers all frames, so it must match the
+        unbounded calibration."""
+        locs, info = bead_stack
+        calib_none = zfit.calibrate_z(
+            locs, info, self.D, magnification_factor=0.79
+        )
+        calib_full = zfit.calibrate_z(
+            locs,
+            info,
+            self.D,
+            magnification_factor=0.79,
+            frame_bounds=(0, self.N_FRAMES - 1),
+        )
+        np.testing.assert_allclose(
+            calib_none["X Coefficients"], calib_full["X Coefficients"]
+        )
+        np.testing.assert_allclose(
+            calib_none["Y Coefficients"], calib_full["Y Coefficients"]
+        )
+
+    def test_bounds_are_inclusive(self, bead_stack, monkeypatch):
+        """``(10, 39)`` keeps frames 10..39 inclusive -> 30 frames enter
+        every polynomial fit."""
+        locs, info = bead_stack
+        lengths = self._polyfit_lengths(monkeypatch)
+        zfit.calibrate_z(
+            locs,
+            info,
+            self.D,
+            magnification_factor=0.79,
+            frame_bounds=(10, 39),
+        )
+        assert lengths and all(n == 30 for n in lengths)
+
+    def test_one_sided_bounds(self, bead_stack, monkeypatch):
+        """``(None, max)`` and ``(min, None)`` each leave the other side
+        unbounded."""
+        locs, info = bead_stack
+        lengths = self._polyfit_lengths(monkeypatch)
+        zfit.calibrate_z(
+            locs,
+            info,
+            self.D,
+            magnification_factor=0.79,
+            frame_bounds=(None, 29),  # frames 0..29
+        )
+        assert lengths and all(n == 30 for n in lengths)
+        lengths.clear()
+        zfit.calibrate_z(
+            locs,
+            info,
+            self.D,
+            magnification_factor=0.79,
+            frame_bounds=(20, None),  # frames 20..49
+        )
+        assert lengths and all(n == 30 for n in lengths)
+
+    def test_bounds_including_last_frame(self, bead_stack):
+        """Regression test: a nonzero minimum together with the last
+        frame as maximum used to raise IndexError (localizations'
+        frame numbers were used as indices into the sliced per-frame
+        arrays without offsetting)."""
+        locs, info = bead_stack
+        calib = zfit.calibrate_z(
+            locs,
+            info,
+            self.D,
+            magnification_factor=0.79,
+            frame_bounds=(10, self.N_FRAMES - 1),
+        )
+        assert len(calib["X Coefficients"]) == 7
+        assert len(calib["Y Coefficients"]) == 7
+
+    def test_locs_outside_bounds_are_ignored(self, bead_stack):
+        """Passing the full locs with bounds must equal passing locs
+        already restricted to those frames."""
+        locs, info = bead_stack
+        bounds = (10, 39)
+        pre_filtered = locs[
+            (locs["frame"] >= bounds[0]) & (locs["frame"] <= bounds[1])
+        ]
+        calib_full = zfit.calibrate_z(
+            locs,
+            info,
+            self.D,
+            magnification_factor=0.79,
+            frame_bounds=bounds,
+        )
+        calib_pre = zfit.calibrate_z(
+            pre_filtered,
+            info,
+            self.D,
+            magnification_factor=0.79,
+            frame_bounds=bounds,
+        )
+        np.testing.assert_allclose(
+            calib_full["X Coefficients"], calib_pre["X Coefficients"]
+        )
+        np.testing.assert_allclose(
+            calib_full["Y Coefficients"], calib_pre["Y Coefficients"]
+        )
+
+    def test_bounded_calibration_differs_from_unbounded(self, bead_stack):
+        """Restricting the frames must actually change the fit."""
+        locs, info = bead_stack
+        calib_none = zfit.calibrate_z(
+            locs, info, self.D, magnification_factor=0.79
+        )
+        calib_bounded = zfit.calibrate_z(
+            locs,
+            info,
+            self.D,
+            magnification_factor=0.79,
+            frame_bounds=(10, 39),
+        )
+        assert not np.allclose(
+            calib_none["X Coefficients"], calib_bounded["X Coefficients"]
+        )
+
+    def test_frame_bounds_stored_in_calibration(self, bead_stack):
+        locs, info = bead_stack
+        calib = zfit.calibrate_z(
+            locs,
+            info,
+            self.D,
+            magnification_factor=0.79,
+            frame_bounds=(10, 39),
+        )
+        assert calib["Frame bounds"] == (10, 39)
+        calib = zfit.calibrate_z(locs, info, self.D, magnification_factor=0.79)
+        assert calib["Frame bounds"] is None
+
+
 # ---------------------------------------------------------------------------
 # locs_from_futures
 # ---------------------------------------------------------------------------

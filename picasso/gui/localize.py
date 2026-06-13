@@ -2103,6 +2103,8 @@ class Window(QtWidgets.QMainWindow):
         self.last_identification_info = {
             "Box Size": self.parameters_dialog.box_spinbox.value(),
             "Min. Net Gradient": self.parameters_dialog.mng_slider.value(),
+            "ROI": self.view.roi,
+            "Frame bounds": self.frame_range,
         }
         self.ready_for_fit = True
         self.draw_frame()
@@ -2551,6 +2553,7 @@ class Window(QtWidgets.QMainWindow):
                 playsound(sound_path, block=False)
         base, ext = os.path.splitext(self.movie_path)
         if calibrate_z:
+            self.parameters_dialog.gpufit_checkbox.setDisabled(False)
             step, ok = QtWidgets.QInputDialog.getDouble(
                 self,
                 "3D Calibration",
@@ -2572,6 +2575,7 @@ class Window(QtWidgets.QMainWindow):
                         step,
                         self.parameters_dialog.magnification_factor.value(),
                         path=path,
+                        frame_bounds=self.frame_range,
                     )
                     dt = time.time() - t0
                     if dt > lib.SOUND_NOTIFICATION_DURATION:
@@ -2902,10 +2906,33 @@ class Window(QtWidgets.QMainWindow):
             Default is False.
         """
         self.parameters_dialog.gpufit_checkbox.setDisabled(True)
-        if self.identifications is not None and calibrate_z is True:
+        if (
+            calibrate_z
+            and self.identifications is not None
+            and self.ready_for_fit
+            and not self.identifications_outdated()
+        ):
+            # reuse existing identifications (e.g., loaded picks/locs)
             self.fit(calibrate_z=calibrate_z)
         else:
             self.identify(fit_afterwards=True, calibrate_z=calibrate_z)
+
+    def identifications_outdated(self) -> bool:
+        """Check whether the identification settings (box size, min. net
+        gradient, ROI, frame range) have changed since
+        ``self.identifications`` was created."""
+        last = self.last_identification_info
+        if last is None:
+            return True
+        if any(
+            last.get(key) != value for key, value in self.parameters.items()
+        ):
+            return True
+        if last.get("ROI") != self.view.roi:
+            return True
+        if last.get("Frame bounds") != self.frame_range:
+            return True
+        return False
 
     def select_locs_columns(self) -> None:
         """Select only the columns that are checked in the corresponding

@@ -1510,6 +1510,7 @@ def calculate_optimal_bins(
     bins : FloatArray1D
         Bins for display.
     """
+    data = np.asarray(data)  # positional indexing below; Series use labels
     n = len(data)
     if n == 0:
         return np.array([0.0, 1.0])
