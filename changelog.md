@@ -19,6 +19,7 @@ Last change: 13-JUN-2026 CEST
 - Nanotron accepts `disp_px_size` instead of `oversampling` for easier user interaction
 
 #### *Deprecation warnings:*
+- `picasso.localize.identify` and `picasso.localize.localize` will always return metadata in v0.12.0, `return_info` will no longer be accepted
 
 ## 0.10.1
 

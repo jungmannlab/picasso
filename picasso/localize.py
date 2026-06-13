@@ -1929,7 +1929,7 @@ def check_drift(
     steps = max(1, steps)
     locs = locs[::steps]
 
-    n_frames = info[0]["Frames"]
+    n_frames = lib.get_from_metadata(info, "Frames", raise_error=True)
     segmentation = max(1, int(n_frames // 10))
 
     print(f"Estimating drift with segmentation {segmentation}")

@@ -178,14 +178,14 @@ def test_rref_does_not_mutate_input():
 
 
 def test_find_target_counts_shape_and_values(monomer_dimer_structures):
-    counts = spinna.find_target_counts(["target"], monomer_dimer_structures)
+    counts = spinna._find_target_counts(["target"], monomer_dimer_structures)
     assert counts.shape == (1, 2)
     # monomer has 1 target, dimer has 2
     assert np.array_equal(counts, np.array([[1.0, 2.0]]))
 
 
 def test_find_target_counts_missing_target_zero(monomer_dimer_structures):
-    counts = spinna.find_target_counts(
+    counts = spinna._find_target_counts(
         ["target", "missing"], monomer_dimer_structures
     )
     assert counts.shape == (2, 2)
@@ -196,13 +196,13 @@ def test_find_target_counts_missing_target_zero(monomer_dimer_structures):
 def test_targets_from_structures_is_unique_and_order_preserving(
     het_structures,
 ):
-    targets = spinna.targets_from_structures(het_structures)
+    targets = spinna._targets_from_structures(het_structures)
     assert targets == ["A", "B"]
 
 
 def test_get_structures_permutation_homo_dimer(monomer_dimer_structures):
-    t_counts = spinna.find_target_counts(["target"], monomer_dimer_structures)
-    perm = spinna.get_structures_permutation(t_counts.copy())
+    t_counts = spinna._find_target_counts(["target"], monomer_dimer_structures)
+    perm = spinna._get_structures_permutation(t_counts.copy())
     # 2 structures, 1 target → exactly one free param goes last
     assert perm.shape == (2,)
     assert sorted(perm.tolist()) == [0, 1]

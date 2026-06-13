@@ -2729,12 +2729,17 @@ def segment(
         3D array of segments, where each segment is a 2D image of the
         localizations in that segment.
     """
-    Y = info[0]["Height"]
-    X = info[0]["Width"]
-    n_frames = info[0]["Frames"]
+    Y = lib.get_from_metadata(info, "Height", raise_error=True)
+    X = lib.get_from_metadata(info, "Width", raise_error=True)
+    n_frames = lib.get_from_metadata(info, "Frames", raise_error=True)
+    pixelsize = lib.get_from_metadata(info, "Pixelsize", raise_error=True)
+    disp_px_size = kwargs.get("disp_px_size", pixelsize)
+    oversampling = pixelsize / disp_px_size
+    n_pixel_y = int(np.ceil(oversampling * Y))
+    n_pixel_x = int(np.ceil(oversampling * X))
     n_seg = n_segments(info, segmentation)
     bounds = np.linspace(0, n_frames - 1, n_seg + 1, dtype=np.uint32)
-    segments = np.zeros((n_seg, Y, X))
+    segments = np.zeros((n_seg, n_pixel_y, n_pixel_x))
     if callback is None:
         it = trange(n_seg, desc="Generating segments", unit="segments")
     else:
@@ -2744,7 +2749,9 @@ def segment(
         segment_locs = locs[
             (locs["frame"] >= bounds[i]) & (locs["frame"] < bounds[i + 1])
         ]
-        _, segments[i] = render.render(segment_locs, info, **kwargs)
+        _, segments[i] = render.render(
+            segment_locs, info, disp_px_size=disp_px_size, **kwargs
+        )
         if callback is not None:
             callback(i + 1)
     return bounds, segments
@@ -3191,9 +3198,13 @@ def align(
         images, callback=lib.MockProgress().set_value
     )
     if apply_shifts:
-        for i, (locs_, dx, dy) in enumerate(zip(locs, shift_x, shift_y)):
-            locs_["y"] -= dy
-            locs_["x"] -= dx
+        for i, (locs_, info_, dx, dy) in enumerate(
+            zip(locs, infos, shift_x, shift_y)
+        ):
+            pixelsize = lib.get_from_metadata(info_, "Pixelsize")
+            oversampling = pixelsize / 100  # disp_px_size hardcoded as 100
+            locs_["y"] -= dy / oversampling
+            locs_["x"] -= dx / oversampling
     if return_shifts:
         shifts = (shift_x, shift_y)
         return locs, shifts

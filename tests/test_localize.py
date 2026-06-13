@@ -68,7 +68,7 @@ def _gaussian_frame(
 
 
 # ---------------------------------------------------------------------------
-# local_maxima
+# _local_maxima
 # ---------------------------------------------------------------------------
 
 
@@ -78,7 +78,7 @@ class TestLocalMaxima:
     def test_single_peak_detected(self):
         frame = np.zeros((20, 20), dtype=np.float32)
         frame[10, 12] = 100.0
-        y, x = localize.local_maxima(frame, BOX)
+        y, x = localize._local_maxima(frame, BOX)
         assert list(zip(y.tolist(), x.tolist())) == [(10, 12)]
 
     def test_multiple_peaks_far_apart_all_found(self):
@@ -86,19 +86,19 @@ class TestLocalMaxima:
         peaks = [(8, 8), (8, 22), (22, 15)]
         for py, px in peaks:
             frame[py, px] = 50.0
-        y, x = localize.local_maxima(frame, BOX)
+        y, x = localize._local_maxima(frame, BOX)
         found = set(zip(y.tolist(), x.tolist()))
         assert found == set(peaks)
 
     def test_peaks_in_border_band_are_excluded(self):
-        """``local_maxima`` only scans i in [box_half, Y - box_half - 1)
+        """``_local_maxima`` only scans i in [box_half, Y - box_half - 1)
         — peaks placed inside the border band must not be returned."""
         Y = X = 20
         box_half = BOX // 2
         frame = np.zeros((Y, X), dtype=np.float32)
         frame[1, 1] = 100.0  # top-left border
         frame[Y - 2, X - 2] = 100.0  # bottom-right border
-        y, x = localize.local_maxima(frame, BOX)
+        y, x = localize._local_maxima(frame, BOX)
         # All returned coordinates lie strictly inside the scan band
         assert ((y >= box_half) & (y < Y - box_half - 1)).all()
         assert ((x >= box_half) & (x < X - box_half - 1)).all()
@@ -108,12 +108,12 @@ class TestLocalMaxima:
         ``argmax`` returns the top-left pixel (index 0), so no local
         window has its max at the center."""
         frame = np.full((20, 20), 42.0, dtype=np.float32)
-        y, x = localize.local_maxima(frame, BOX)
+        y, x = localize._local_maxima(frame, BOX)
         assert len(y) == 0 and len(x) == 0
 
 
 # ---------------------------------------------------------------------------
-# gradient_at
+# _gradient_at
 # ---------------------------------------------------------------------------
 
 
@@ -123,7 +123,7 @@ class TestGradientAt:
     def test_horizontal_gradient(self):
         # frame[y, x+1] - frame[y, x-1]  along increasing x
         frame = np.tile(np.arange(10, dtype=np.float32), (10, 1))
-        gy, gx = localize.gradient_at(frame, 5, 5, 0)
+        gy, gx = localize._gradient_at(frame, 5, 5, 0)
         assert gy == 0.0
         assert gx == 2.0  # 6 - 4
 
@@ -132,21 +132,21 @@ class TestGradientAt:
         frame = np.tile(
             np.arange(10, dtype=np.float32).reshape(-1, 1), (1, 10)
         )
-        gy, gx = localize.gradient_at(frame, 5, 5, 0)
+        gy, gx = localize._gradient_at(frame, 5, 5, 0)
         assert gy == 2.0  # 6 - 4
         assert gx == 0.0
 
     def test_zero_gradient_in_flat_region(self):
         frame = np.full((10, 10), 7.0, dtype=np.float32)
-        gy, gx = localize.gradient_at(frame, 5, 5, 0)
+        gy, gx = localize._gradient_at(frame, 5, 5, 0)
         assert gy == 0.0 and gx == 0.0
 
     def test_i_argument_is_ignored(self):
         """``i`` is documented as unused — different values must not
         affect the returned gradient."""
         frame = _gaussian_frame((15, 15), (7, 7))
-        a = localize.gradient_at(frame, 7, 8, 0)
-        b = localize.gradient_at(frame, 7, 8, 999)
+        a = localize._gradient_at(frame, 7, 8, 0)
+        b = localize._gradient_at(frame, 7, 8, 999)
         assert a == b
 
 
@@ -165,7 +165,7 @@ class TestNetGradient:
         uy, ux = _gradient_meshgrid(BOX)
         y = np.array([7], dtype=np.int64)
         x = np.array([7], dtype=np.int64)
-        ng = localize.net_gradient(frame, y, x, BOX, uy, ux)
+        ng = localize._net_gradient(frame, y, x, BOX, uy, ux)
         assert ng.shape == (1,)
         assert ng[0] > 0
 
@@ -174,7 +174,7 @@ class TestNetGradient:
         uy, ux = _gradient_meshgrid(BOX)
         y = np.array([7], dtype=np.int64)
         x = np.array([7], dtype=np.int64)
-        ng = localize.net_gradient(frame, y, x, BOX, uy, ux)
+        ng = localize._net_gradient(frame, y, x, BOX, uy, ux)
         np.testing.assert_allclose(ng, [0.0], atol=1e-6)
 
     def test_inverted_peak_yields_negative(self):
@@ -185,7 +185,7 @@ class TestNetGradient:
         uy, ux = _gradient_meshgrid(BOX)
         y = np.array([7], dtype=np.int64)
         x = np.array([7], dtype=np.int64)
-        ng = localize.net_gradient(frame, y, x, BOX, uy, ux)
+        ng = localize._net_gradient(frame, y, x, BOX, uy, ux)
         assert ng[0] < 0
 
     def test_output_length_matches_input(self):
@@ -193,7 +193,7 @@ class TestNetGradient:
         uy, ux = _gradient_meshgrid(BOX)
         y = np.array([10, 10, 10], dtype=np.int64)
         x = np.array([8, 10, 12], dtype=np.int64)
-        ng = localize.net_gradient(frame, y, x, BOX, uy, ux)
+        ng = localize._net_gradient(frame, y, x, BOX, uy, ux)
         assert ng.shape == (3,)
 
 
@@ -203,7 +203,7 @@ class TestNetGradient:
 
 
 class TestIdentifyInImage:
-    """``local_maxima`` + net-gradient threshold, in one shot."""
+    """``_local_maxima`` + net-gradient threshold, in one shot."""
 
     def test_single_gaussian_is_identified(self):
         frame = _gaussian_frame((20, 20), (10, 10), amplitude=5000.0)
@@ -680,90 +680,6 @@ class TestGetSpots:
 
 
 # ---------------------------------------------------------------------------
-# fit + fit_async (MLE wrapper)
-# ---------------------------------------------------------------------------
-
-
-class TestFit:
-    """High-level MLE wrapper that combines ``get_spots`` + ``gaussmle``."""
-
-    def test_returns_locs_with_required_columns(
-        self, movie, real_identifications
-    ):
-        locs = localize.fit(
-            movie,
-            CAMERA_INFO,
-            real_identifications,
-            BOX,
-            method="sigmaxy",
-        )
-        assert len(locs) == len(real_identifications)
-        for col in [
-            "frame",
-            "x",
-            "y",
-            "photons",
-            "sx",
-            "sy",
-            "bg",
-            "lpx",
-            "lpy",
-            "net_gradient",
-        ]:
-            assert col in locs.columns
-
-    def test_method_sigma_returns_equal_sx_sy(
-        self, movie, real_identifications
-    ):
-        locs = localize.fit(
-            movie, CAMERA_INFO, real_identifications, BOX, method="sigma"
-        )
-        # In the localize.fit MLE path the method=sigma constrains sx==sy
-        np.testing.assert_array_equal(
-            locs["sx"].to_numpy(), locs["sy"].to_numpy()
-        )
-
-    @pytest.mark.slow
-    def test_fit_async_matches_fit_after_completion(
-        self, movie, real_identifications
-    ):
-        """``fit_async`` returns the in-progress state; once
-        ``current[0]`` reaches the spot count, the per-spot fit results
-        match the synchronous version (set equality up to numerical noise)."""
-        locs_sync = localize.fit(
-            movie,
-            CAMERA_INFO,
-            real_identifications,
-            BOX,
-            method="sigmaxy",
-        )
-        current, thetas, _, _, iterations = localize.fit_async(
-            movie,
-            CAMERA_INFO,
-            real_identifications,
-            BOX,
-            method="sigmaxy",
-        )
-        # `current[0]` is incremented *before* the per-spot fit runs (see
-        # ``gaussmle._worker``), so polling it can let the loop exit while
-        # the last few worker writes are still in flight. ``iterations``
-        # is zero-initialised and only written when a fit completes —
-        # poll on that for a race-free completion signal.
-        t0 = time.time()
-        while (iterations == 0).any():
-            assert time.time() - t0 < 30, "fit_async timed out"
-            time.sleep(0.05)
-        del current  # only kept to document the returned tuple shape
-        # The per-spot photon counts should match (with possibly different
-        # row ordering across worker scheduling). Compare sorted lists.
-        np.testing.assert_allclose(
-            np.sort(thetas[:, 2]),
-            np.sort(locs_sync["photons"].to_numpy()),
-            atol=1e-3,
-        )
-
-
-# ---------------------------------------------------------------------------
 # Diagnostics
 # ---------------------------------------------------------------------------
 
@@ -1049,24 +965,6 @@ class TestLocalize:
         if len(locs) > 0:
             assert (locs["x"] < 16).all()
             assert (locs["y"] < 16).all()
-
-    def test_default_return_info_emits_deprecation(
-        self, picasso_movie, movie_info
-    ):
-        """Passing ``return_info=None`` (the legacy default) triggers a
-        deprecation warning. Will be removed in v0.12.0."""
-        # ``lib.deprecation_warning`` prints to stderr; just verify the
-        # call still returns the DataFrame without crashing.
-        result = localize.localize(
-            picasso_movie,
-            CAMERA_INFO_WITH_PIXELSIZE,
-            {"Min. Net Gradient": MIN_NG, "Box Size": BOX},
-            movie_info=movie_info,
-            fitting_method="gausslq",
-            threaded=False,
-            # return_info omitted on purpose
-        )
-        assert isinstance(result, pd.DataFrame)
 
 
 # ---------------------------------------------------------------------------

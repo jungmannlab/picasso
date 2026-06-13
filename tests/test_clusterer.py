@@ -46,7 +46,9 @@ def info(locs_data):
 @pytest.fixture(scope="module")
 def db_locs(locs):
     """DBSCAN-clustered real locs, for downstream area/center tests."""
-    return clusterer.dbscan(locs, DBSCAN_EPS, DBSCAN_MIN_SAMPLES, min_locs=0)
+    return clusterer.dbscan(locs, DBSCAN_EPS, DBSCAN_MIN_SAMPLES, min_locs=0)[
+        0
+    ]
 
 
 # ---------------------------------------------------------------------
@@ -129,7 +131,9 @@ def synth_info():
 
 
 def _run_dbscan_2d(locs):
-    return clusterer.dbscan(locs, DBSCAN_EPS, DBSCAN_MIN_SAMPLES, min_locs=0)
+    return clusterer.dbscan(locs, DBSCAN_EPS, DBSCAN_MIN_SAMPLES, min_locs=0)[
+        0
+    ]
 
 
 def _run_hdbscan_2d(locs):
@@ -138,7 +142,7 @@ def _run_hdbscan_2d(locs):
         min_cluster_size=HDBSCAN_MIN_CLUSTER_SIZE,
         min_samples=HDBSCAN_MIN_SAMPLES,
         cluster_eps=HDBSCAN_CLUSTER_EPS,
-    )
+    )[0]
 
 
 def _run_smlm_2d(locs):
@@ -147,7 +151,7 @@ def _run_smlm_2d(locs):
         radius_xy=GA_RADIUS,
         min_locs=GA_MIN_LOCS,
         frame_analysis=False,
-    )
+    )[0]
 
 
 def _run_dbscan_3d(locs):
@@ -158,7 +162,7 @@ def _run_dbscan_3d(locs):
         min_locs=0,
         pixelsize=PIXELSIZE,
         radius_z=DBSCAN_EPS * 2.5,
-    )
+    )[0]
 
 
 def _run_hdbscan_3d(locs):
@@ -168,7 +172,7 @@ def _run_hdbscan_3d(locs):
         min_samples=HDBSCAN_MIN_SAMPLES,
         cluster_eps=HDBSCAN_CLUSTER_EPS,
         pixelsize=PIXELSIZE,
-    )
+    )[0]
 
 
 def _run_smlm_3d(locs):
@@ -179,7 +183,7 @@ def _run_smlm_3d(locs):
         frame_analysis=False,
         radius_z=GA_RADIUS_Z,
         pixelsize=PIXELSIZE,
-    )
+    )[0]
 
 
 # sklearn>=1.8 raises TypeError inside cluster_selection_epsilon on this real
