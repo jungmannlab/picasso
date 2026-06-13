@@ -10,9 +10,6 @@ Covers the new (non-deprecated) API:
   (Kowalewski et al. 2026);
 - ``calibrate_z`` driven by synthetic bead-stack data.
 
-Deprecated functions (``fit_z``, ``fit_z_parallel``) are intentionally not
-exercised here.
-
 :author: Rafal Kowalewski, 2025-2026
 :copyright: Copyright (c) 2025-2026 Jungmann Lab, MPI of Biochemistry
 """

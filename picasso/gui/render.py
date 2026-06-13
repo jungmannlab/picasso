@@ -3442,13 +3442,13 @@ class TestClustererDialog(lib.Dialog):
         params["pixelsize"] = pixelsize
         clusterer_name = self.clusterer_name.currentText()
         if clusterer_name == "DBSCAN":
-            locs = clusterer.dbscan(locs, **params)
+            locs, _ = clusterer.dbscan(locs, **params)
         elif clusterer_name == "HDBSCAN":
-            locs = clusterer.hdbscan(locs, **params)
+            locs, _ = clusterer.hdbscan(locs, **params)
         elif clusterer_name == "SMLM":
-            locs = clusterer.cluster(locs, **params)
+            locs, _ = clusterer.cluster(locs, **params)
         elif clusterer_name == "G5M":
-            locs = clusterer.dbscan(locs, **params["DBSCAN"])
+            locs, _ = clusterer.dbscan(locs, **params["DBSCAN"])
             # in g5m, the info parameter is only for getting the pixel
             # size
             centers, locs, _ = g5m.g5m(
@@ -3657,7 +3657,7 @@ class TestClustererDialog(lib.Dialog):
             params["DBSCAN"]["radius"] *= pixelsize
             params["G5M"]["callback_parent"] = self.window
             params["G5M"]["asynch"] = True
-            locs = clusterer.dbscan(locs, **params["DBSCAN"])
+            locs, _ = clusterer.dbscan(locs, **params["DBSCAN"])
             centers, clustered_locs, new_info = g5m.g5m(
                 locs, [{"Pixelsize": pixelsize}], **params["G5M"]
             )
@@ -5388,8 +5388,8 @@ class MaskSettingsDialog(lib.Dialog):
         """Mask localizations given a mask."""
         locs_in, locs_out = masking.mask_locs(
             locs,
+            self.infos[self.channel],
             self.mask,
-            info=self.infos[self.channel],
         )
         self.index_locs.append(locs_in)  # locs in the mask
         self.index_locs_out.append(locs_out)  # locs outside the mask
@@ -7463,7 +7463,6 @@ class View(QtWidgets.QLabel):
             pixelsize=pixelsize,
             min_locs=min_locs,
             radius_z=radius_z_px,
-            return_info=True,
         )
         io.save_locs(path, locs, self.infos[channel] + [dbscan_info])
         status.close()
@@ -12594,7 +12593,7 @@ class Window(QtWidgets.QMainWindow):
                         pixelsize,
                     )
                 else:
-                    n, image = render.render_hist(
+                    n, image = render._render_hist(
                         locs,
                         oversampling,
                         y_min,

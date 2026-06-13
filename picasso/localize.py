@@ -1600,7 +1600,6 @@ def localize(
         frame_bounds=frame_bounds,
         threaded=threaded,
         progress_callback=identification_progress_callback,
-        return_info=True,
     )
 
     # Fit spots

@@ -756,7 +756,7 @@ def render_hist_numba(
     t_max: float,
 ) -> tuple[int, lib.FloatArray2D]:
     """Calculate 2D histogram of xy coordinates. Similar to
-    ``render_hist`` but modified to work with numba.
+    ``_render_hist`` but modified to work with numba.
 
     Parameters
     ----------

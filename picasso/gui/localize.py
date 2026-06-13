@@ -2958,7 +2958,6 @@ class IdentificationWorker(QtCore.QThread):
             threaded=True,
             progress_callback=self.on_progress,
             abort_callback=self.isInterruptionRequested,
-            return_info=True,
         )
         elapsed_time = time.time() - t0
         self.finished.emit(

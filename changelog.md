@@ -1,6 +1,6 @@
 # Changelog
 
-Last change: 12-JUN-2026 CEST
+Last change: 13-JUN-2026 CEST
 
 ## 0.11.0
 
@@ -13,7 +13,8 @@ Last change: 12-JUN-2026 CEST
 #### *Other improvements:*
 
 ### **Backward incompatible changes:**
-- All the functions deprecated in v0.10 were removed, see below
+- All the functions deprecated in v0.10 were removed, see section 0.10.0 below
+- `picasso.clusterer.cluster_center` removed (the functionality provided by `find_cluster_centers`)
 - `render.render` only keyword arguments except `locs` and `info`
 - Nanotron accepts `disp_px_size` instead of `oversampling` for easier user interaction
 
