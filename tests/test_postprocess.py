@@ -906,7 +906,7 @@ class TestAlign:
         b["x"] += 2.0
         aligned = postprocess.align_rcc([a, b], [info, info])
         residual = aligned[1]["x"].mean() - aligned[0]["x"].mean()
-        assert abs(residual) < 0.5
+        assert abs(residual) < 0.05
 
     def test_align_from_picked_recovers_known_shift(
         self, locs_copy, info, origami_picks

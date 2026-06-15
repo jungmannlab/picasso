@@ -3189,22 +3189,30 @@ def align(
         'y' coordinates.
     """
     images = []
+    disp_px_size = 100  # nm
     for locs_, info_ in zip(locs, infos):
         _, image = render.render(
-            locs_, info_, disp_px_size=100, blur_method="smooth"
+            locs_, info_, disp_px_size=disp_px_size, blur_method="smooth"
         )
         images.append(image)
     shift_y, shift_x = imageprocess.rcc(
         images, callback=lib.MockProgress().set_value
     )
+    # `rcc` returns shifts in rendered-image pixels (disp_px_size = 100 nm
+    # per pixel). Convert them to camera pixels so that both the applied
+    # and the returned shifts are in the same units as the localizations'
+    # 'x' and 'y' coordinates.
+    shift_x = np.asarray(shift_x, dtype=float)
+    shift_y = np.asarray(shift_y, dtype=float)
+    for i, info_ in enumerate(infos):
+        pixelsize = lib.get_from_metadata(info_, "Pixelsize")
+        oversampling = pixelsize / disp_px_size
+        shift_x[i] /= oversampling
+        shift_y[i] /= oversampling
     if apply_shifts:
-        for i, (locs_, info_, dx, dy) in enumerate(
-            zip(locs, infos, shift_x, shift_y)
-        ):
-            pixelsize = lib.get_from_metadata(info_, "Pixelsize")
-            oversampling = pixelsize / 100  # disp_px_size hardcoded as 100
-            locs_["y"] -= dy / oversampling
-            locs_["x"] -= dx / oversampling
+        for locs_, dx, dy in zip(locs, shift_x, shift_y):
+            locs_["y"] -= dy
+            locs_["x"] -= dx
     if return_shifts:
         shifts = (shift_x, shift_y)
         return locs, shifts
