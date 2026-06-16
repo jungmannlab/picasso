@@ -1204,8 +1204,16 @@ def _localize(args: argparse.Namespace) -> None:  # noqa: C901
     min_net_gradient = args.gradient
     roi = args.roi
     if roi is not None:
-        y_min, x_min, y_max, x_max = roi
-        roi = [[y_min, x_min], [y_max, x_max]]
+        # argparse (action="append", nargs=4) yields a list of 4-int
+        # lists; map each to [[y_min, x_min], [y_max, x_max]] and clip so
+        # the regions do not overlap.
+        from .localize import clip_rois
+
+        rois = [
+            [[y_min, x_min], [y_max, x_max]]
+            for y_min, x_min, y_max, x_max in roi
+        ]
+        roi = clip_rois(rois, min_size=box)
     frame_bounds = args.frame_bounds
     camera_info = {
         "Baseline": args.baseline,
@@ -2411,10 +2419,14 @@ def main():  # noqa: C901
         "--roi",
         type=int,
         nargs=4,
+        action="append",
         default=None,
         help=(
-            "ROI (y_min, x_min, y_max, x_max) in camera pixels;\n"
-            "note the origin of the image is in the top left corner"
+            "ROI (y_min, x_min, y_max, x_max) in camera pixels; note the\n"
+            "origin of the image is in the top left corner. May be given\n"
+            "multiple times to analyze several regions, e.g.\n"
+            "--roi 10 10 100 100 --roi 200 200 300 300. Overlapping ROIs\n"
+            "are corrected automatically so that they do not overlap."
         ),
     )
     localize_parser.add_argument(

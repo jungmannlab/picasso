@@ -73,18 +73,22 @@ class View(QtWidgets.QGraphicsView):
     ----------
     hscrollbar, vscrollbar : QtWidgets.QScrollBar
         Horizontal and vertical scroll bars.
-    numeric_roi : bool
-        Whether the view is currently in numeric (manual) ROI mode.
     pan : bool
         Whether the view is currently panned.
     pan_start_x, pan_start_y : int
         Starting position of the pan gesture.
     rubberband : QtWidgets.QRubberBand
-        Rubber band used for selecting ROIs.
-    roi : list
-        Region of interest (ROI) selected by the user.
+        Transient rubber band shown while dragging a new ROI.
+    rois : list
+        Regions of interest (ROIs) selected by the user. Each ROI is
+        ``[[y_min, x_min], [y_max, x_max]]``. The ROIs are kept disjoint
+        (overlapping selections are clipped via
+        ``localize.clip_rois``). An empty list means the whole frame.
+    selected_roi : int or None
+        Index of the ROI currently highlighted (selected in the
+        parameters dialog table), or None.
     roi_end : QtCore.QPoint
-        End point of the selected ROI.
+        End point of the ROI being dragged.
     window : QtWidgets.QMainWindow
         Reference to the main window.
     """
@@ -99,16 +103,13 @@ class View(QtWidgets.QGraphicsView):
         self.vscrollbar = self.verticalScrollBar()
         self.vscrollbar.valueChanged.connect(self.on_scroll)
         self.rubberband = RubberBand(self)
-        self.roi = None
-        self.numeric_roi = False
+        self.rois = []
+        self.selected_roi = None
 
     def mousePressEvent(self, event: QtGui.QMouseEvent) -> None:
         """Start either a rubber band for selecting a ROI or panning the
         view."""
-        if (
-            event.button() == QtCore.Qt.MouseButton.LeftButton
-            and not self.numeric_roi
-        ):
+        if event.button() == QtCore.Qt.MouseButton.LeftButton:
             self.roi_origin = QtCore.QPoint(event.pos())
             self.rubberband.setGeometry(
                 QtCore.QRect(self.roi_origin, QtCore.QSize())
@@ -125,10 +126,7 @@ class View(QtWidgets.QGraphicsView):
 
     def mouseMoveEvent(self, event: QtGui.QMouseEvent) -> None:
         """Update the rubber band or pan the view."""
-        if (
-            event.buttons() == QtCore.Qt.MouseButton.LeftButton
-            and not self.numeric_roi
-        ):
+        if event.buttons() == QtCore.Qt.MouseButton.LeftButton:
             self.rubberband.setGeometry(
                 QtCore.QRect(self.roi_origin, event.pos())
             )
@@ -147,29 +145,24 @@ class View(QtWidgets.QGraphicsView):
             event.ignore()
 
     def mouseReleaseEvent(self, event: QtGui.QMouseEvent) -> None:
-        """Select the ROI or stop panning the view."""
-        if (
-            event.button() == QtCore.Qt.MouseButton.LeftButton
-            and not self.numeric_roi
-        ):
+        """Add the dragged ROI (clipping against existing ones) or stop
+        panning the view."""
+        if event.button() == QtCore.Qt.MouseButton.LeftButton:
             self.roi_end = QtCore.QPoint(event.pos())
+            self.rubberband.hide()
             dx = abs(self.roi_end.x() - self.roi_origin.x())
             dy = abs(self.roi_end.y() - self.roi_origin.y())
-            if dx < 10 or dy < 10:
-                self.roi = None
-                self.rubberband.hide()
-                self.window.parameters_dialog.roi_edit.setText("")
-            else:
+            if dx >= 10 and dy >= 10:
                 roi_points = (
                     self.mapToScene(self.roi_origin),
                     self.mapToScene(self.roi_end),
                 )
-                self.roi = [[int(_.y()), int(_.x())] for _ in roi_points]
-                (y_min, x_min), (y_max, x_max) = self.roi
-                self.window.parameters_dialog.roi_edit.setText(
-                    f"{y_min},{x_min},{y_max},{x_max}"
+                new_roi = [[int(_.y()), int(_.x())] for _ in roi_points]
+                box = self.window.parameters.get("Box Size", 7)
+                self.rois = localize.clip_rois(
+                    self.rois + [new_roi], min_size=box
                 )
-                self.numeric_roi = False
+                self.window.parameters_dialog.update_roi_table()
             self.window.draw_frame()
         elif event.button() == QtCore.Qt.MouseButton.RightButton:
             self.pan = False
@@ -649,8 +642,8 @@ class ParametersDialog(lib.Dialog):
         Spin box for setting camera pixel size (nm).
     preview_checkbox : QtWidgets.QCheckBox
         Checkbox for enabling/disabling preview of identified spots.
-    roi_edit : QtWidgets.QLineEdit
-        Line edit for selecting the region of interest (ROI).
+    roi_table : QtWidgets.QTableWidget
+        Table listing the regions of interest (ROIs), one per row.
     sensitivity : QtWidgets.QDoubleSpinBox
         Spin box for setting camera sensitivity.
     qe : QtWidgets.QDoubleSpinBox
@@ -773,26 +766,47 @@ class ParametersDialog(lib.Dialog):
         self.preview_checkbox.stateChanged.connect(self.on_preview_changed)
         identification_grid.addWidget(self.preview_checkbox, 4, 0)
 
-        # ROI
-        label = QtWidgets.QLabel(
-            "ROI (y<sub>min</sub>,x<sub>min</sub>,"
-            "y<sub>max</sub>,x<sub>max</sub>):"
-        )
+        # ROIs
+        label = QtWidgets.QLabel("ROIs:")
         label.setToolTip(
-            "Specify the ROI to be analyzed;\n"
-            "also available by dragging a rectangle in the preview.\n"
-            "Note that no spaces between the numbers and commas are allowed."
+            "Restrict the analysis to one or more rectangular regions\n"
+            "(y_min, x_min, y_max, x_max, in camera pixels).\n"
+            "Drag a rectangle in the preview to add a ROI, or use Add\n"
+            "and edit the cells. Overlapping ROIs are corrected\n"
+            "automatically so that they do not overlap. Leave empty to\n"
+            "analyze the whole frame."
         )
+        label.setAlignment(QtCore.Qt.AlignmentFlag.AlignTop)
         identification_grid.addWidget(label, 5, 0)
-        self.roi_edit = QtWidgets.QLineEdit()
-        regex = r"\d+,\d+,\d+,\d+"  # regex for 4 integers separated by commas
-        validator = QtGui.QRegularExpressionValidator(
-            QtCore.QRegularExpression(regex)
+
+        self._updating_roi_table = False
+        roi_layout = QtWidgets.QVBoxLayout()
+        self.roi_table = QtWidgets.QTableWidget(0, 4)
+        self.roi_table.setHorizontalHeaderLabels(
+            ["y_min", "x_min", "y_max", "x_max"]
         )
-        self.roi_edit.setValidator(validator)
-        self.roi_edit.editingFinished.connect(self.on_roi_edit_finished)
-        self.roi_edit.textChanged.connect(self.on_roi_edit_changed)
-        identification_grid.addWidget(self.roi_edit, 5, 1)
+        self.roi_table.horizontalHeader().setSectionResizeMode(
+            QtWidgets.QHeaderView.ResizeMode.Stretch
+        )
+        self.roi_table.verticalHeader().setVisible(False)
+        self.roi_table.setSelectionBehavior(
+            QtWidgets.QAbstractItemView.SelectionBehavior.SelectRows
+        )
+        self.roi_table.setMaximumHeight(120)
+        self.roi_table.itemChanged.connect(self.on_roi_table_changed)
+        self.roi_table.itemSelectionChanged.connect(
+            self.on_roi_selection_changed
+        )
+        roi_layout.addWidget(self.roi_table)
+        roi_buttons = QtWidgets.QHBoxLayout()
+        self.roi_add_button = QtWidgets.QPushButton("Add")
+        self.roi_add_button.clicked.connect(self.on_roi_add)
+        self.roi_remove_button = QtWidgets.QPushButton("Remove")
+        self.roi_remove_button.clicked.connect(self.on_roi_remove)
+        roi_buttons.addWidget(self.roi_add_button)
+        roi_buttons.addWidget(self.roi_remove_button)
+        roi_layout.addLayout(roi_buttons)
+        identification_grid.addLayout(roi_layout, 5, 1)
 
         # min/max frames
         label = QtWidgets.QLabel("Frames (min,max):")
@@ -1177,22 +1191,73 @@ class ParametersDialog(lib.Dialog):
         ):
             self.window.draw_frame()
 
-    def on_roi_edit_changed(self) -> None:
-        """Handle changes to the ROI edit field."""
-        if self.roi_edit.text() == "":
-            self.window.view.numeric_roi = False
-            self.window.view.roi = None
-            self.window.view.rubberband.hide()
-            self.window.draw_frame()
+    def update_roi_table(self) -> None:
+        """Repopulate the ROI table from the view's ROIs."""
+        view = self.window.view
+        self._updating_roi_table = True
+        self.roi_table.setRowCount(len(view.rois))
+        for row, ((y_min, x_min), (y_max, x_max)) in enumerate(view.rois):
+            for col, val in enumerate((y_min, x_min, y_max, x_max)):
+                item = QtWidgets.QTableWidgetItem(str(int(val)))
+                item.setTextAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+                self.roi_table.setItem(row, col, item)
+        self._updating_roi_table = False
 
-    def on_roi_edit_finished(self) -> None:
-        """Handle the completion of ROI editing."""
-        text = self.roi_edit.text().split(",")
-        y_min, x_min, y_max, x_max = [int(_) for _ in text]
-        # update roi
-        self.window.view.roi = [[y_min, x_min], [y_max, x_max]]
+    def on_roi_table_changed(self, item: object = None) -> None:
+        """Rebuild the view's ROIs from the table, clipping overlaps."""
+        if self._updating_roi_table:
+            return
+        rois = []
+        for row in range(self.roi_table.rowCount()):
+            try:
+                vals = [
+                    int(self.roi_table.item(row, c).text()) for c in range(4)
+                ]
+            except (AttributeError, ValueError):
+                return  # incomplete row, wait for the user to finish
+            y_min, x_min, y_max, x_max = vals
+            rois.append([[y_min, x_min], [y_max, x_max]])
+        box = self.window.parameters.get("Box Size", 7)
+        self.window.view.rois = localize.clip_rois(rois, min_size=box)
+        self.update_roi_table()
         self.window.draw_frame()
-        self.window.view.numeric_roi = True
+
+    def on_roi_add(self) -> None:
+        """Add a default ROI row that the user can edit."""
+        view = self.window.view
+        if self.window.movie is not None:
+            height, width = self.window.movie.shape[1:]
+            side = int(min(height, width) / 4)
+        else:
+            side = 50
+        offset = 10 * len(view.rois)  # avoid fully overlapping the last one
+        new_roi = [[offset, offset], [offset + side, offset + side]]
+        box = self.window.parameters.get("Box Size", 7)
+        view.rois = localize.clip_rois(view.rois + [new_roi], min_size=box)
+        self.update_roi_table()
+        self.window.draw_frame()
+
+    def on_roi_remove(self) -> None:
+        """Remove the ROI(s) selected in the table."""
+        view = self.window.view
+        rows = sorted(
+            {idx.row() for idx in self.roi_table.selectedIndexes()},
+            reverse=True,
+        )
+        for row in rows:
+            if 0 <= row < len(view.rois):
+                del view.rois[row]
+        view.selected_roi = None
+        self.update_roi_table()
+        self.window.draw_frame()
+
+    def on_roi_selection_changed(self) -> None:
+        """Highlight the ROI selected in the table."""
+        if self._updating_roi_table:
+            return
+        rows = {idx.row() for idx in self.roi_table.selectedIndexes()}
+        self.window.view.selected_roi = min(rows) if rows else None
+        self.window.draw_frame()
 
     def on_fit_method_changed(self) -> None:
         """Enable/disable GPU fitting checkbox based on selected fit
@@ -2103,7 +2168,7 @@ class Window(QtWidgets.QMainWindow):
         self.last_identification_info = {
             "Box Size": self.parameters_dialog.box_spinbox.value(),
             "Min. Net Gradient": self.parameters_dialog.mng_slider.value(),
-            "ROI": self.view.roi,
+            "ROI": self.view.rois,
             "Frame bounds": self.frame_range,
         }
         self.ready_for_fit = True
@@ -2203,20 +2268,21 @@ class Window(QtWidgets.QMainWindow):
             self.scene = Scene(self)
             self.scene.addPixmap(pixmap)
             self.view.setScene(self.scene)
-            # draw the ROI rectangle if applicable
-            if self.view.roi is not None:
-                [[y_min, x_min], [y_max, x_max]] = self.view.roi
-                topleft_xy = self.view.mapFromScene(x_min, y_min)
-                bottomright_xy = self.view.mapFromScene(x_max, y_max)
-                topleft = QtCore.QPoint(topleft_xy.x(), topleft_xy.y())
-                bottomright = QtCore.QPoint(
-                    bottomright_xy.x(),
-                    bottomright_xy.y(),
+            # draw the ROI rectangles (in scene/pixel coordinates)
+            for i, ((y_min, x_min), (y_max, x_max)) in enumerate(
+                self.view.rois
+            ):
+                color = (
+                    QtGui.QColor("cyan")
+                    if i == self.view.selected_roi
+                    else QtGui.QColor("blue")
                 )
-                self.view.rubberband.setGeometry(
-                    QtCore.QRect(topleft, bottomright)
+                pen = QtGui.QPen(color)
+                pen.setCosmetic(True)  # constant width regardless of zoom
+                self.scene.addRect(
+                    QtCore.QRectF(x_min, y_min, x_max - x_min, y_max - y_min),
+                    pen,
                 )
-                self.view.rubberband.show()
             if self.ready_for_fit:
                 identifications_frame = self.identifications[
                     self.identifications.frame == self.curr_frame_number
@@ -2232,7 +2298,7 @@ class Window(QtWidgets.QMainWindow):
                         self.parameters["Min. Net Gradient"],
                         self.parameters["Box Size"],
                         self.curr_frame_number,
-                        roi=self.view.roi,
+                        roi=self.view.rois,
                         frame_bounds=self.frame_range,
                     )
                     box = self.parameters["Box Size"]
@@ -2419,7 +2485,7 @@ class Window(QtWidgets.QMainWindow):
     def on_identify_finished(
         self,
         parameters: dict,
-        roi: list[int],
+        roi: list,
         elapsed_time: float,
         identifications: pd.DataFrame,
         fit_afterwards: bool,
@@ -2928,7 +2994,7 @@ class Window(QtWidgets.QMainWindow):
             last.get(key) != value for key, value in self.parameters.items()
         ):
             return True
-        if last.get("ROI") != self.view.roi:
+        if last.get("ROI") != self.view.rois:
             return True
         if last.get("Frame bounds") != self.frame_range:
             return True
@@ -2963,7 +3029,7 @@ class IdentificationWorker(QtCore.QThread):
         super().__init__()
         self.window = window
         self.movie = window.movie
-        self.roi = window.view.roi
+        self.rois = window.view.rois
         self.frame_range = window.frame_range
         self.parameters = window.parameters
         self.fit_afterwards = fit_afterwards
@@ -2980,7 +3046,7 @@ class IdentificationWorker(QtCore.QThread):
             movie=self.movie,
             minimum_ng=self.parameters["Min. Net Gradient"],
             box=self.parameters["Box Size"],
-            roi=self.roi,
+            roi=self.rois,
             frame_bounds=self.frame_range,
             threaded=True,
             progress_callback=self.on_progress,
@@ -2989,7 +3055,7 @@ class IdentificationWorker(QtCore.QThread):
         elapsed_time = time.time() - t0
         self.finished.emit(
             self.parameters,
-            self.roi,
+            self.rois,
             elapsed_time,
             identifications,
             self.fit_afterwards,

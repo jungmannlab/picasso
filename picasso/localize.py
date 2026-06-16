@@ -245,14 +245,124 @@ def identify_in_image(
     return y, x, ng
 
 
+def _normalize_rect(
+    rect: tuple[tuple[int, int], tuple[int, int]],
+) -> list[list[int]]:
+    """Return a rectangle as ``[[y_min, x_min], [y_max, x_max]]`` with
+    integer, correctly ordered corners (the input corners may be given
+    in any order)."""
+    (y0, x0), (y1, x1) = rect
+    return [
+        [int(min(y0, y1)), int(min(x0, x1))],
+        [int(max(y0, y1)), int(max(x0, x1))],
+    ]
+
+
+def _subtract_rect(
+    a: list[list[int]], b: list[list[int]]
+) -> list[list[list[int]]]:
+    """Subtract rectangle ``b`` from rectangle ``a``.
+
+    Returns the parts of ``a`` not covered by ``b`` as a list of up to
+    four disjoint axis-aligned rectangles (a guillotine split into top,
+    bottom, left and right bands around the intersection). If the
+    rectangles do not overlap, ``[a]`` is returned unchanged. Both
+    rectangles must use the ``[[y_min, x_min], [y_max, x_max]]`` format.
+    """
+    (ay0, ax0), (ay1, ax1) = a
+    (by0, bx0), (by1, bx1) = b
+    # intersection
+    iy0, iy1 = max(ay0, by0), min(ay1, by1)
+    ix0, ix1 = max(ax0, bx0), min(ax1, bx1)
+    if iy0 >= iy1 or ix0 >= ix1:
+        return [a]  # no overlap
+    pieces = []
+    if ay0 < iy0:  # top band, full width of a
+        pieces.append([[ay0, ax0], [iy0, ax1]])
+    if iy1 < ay1:  # bottom band, full width of a
+        pieces.append([[iy1, ax0], [ay1, ax1]])
+    if ax0 < ix0:  # left band, between the horizontal cuts
+        pieces.append([[iy0, ax0], [iy1, ix0]])
+    if ix1 < ax1:  # right band, between the horizontal cuts
+        pieces.append([[iy0, ix1], [iy1, ax1]])
+    return pieces
+
+
+def clip_rois(
+    rois: list[tuple[tuple[int, int], tuple[int, int]]],
+    min_size: int = 0,
+) -> list[list[list[int]]]:
+    """Clip a list of (possibly overlapping) ROIs into a list of
+    disjoint rectangles.
+
+    The ROIs are processed in order; each rectangle is trimmed against
+    the union of the already-accepted rectangles (via ``_subtract_rect``)
+    so that earlier ROIs take precedence and no pixel is covered twice.
+    A single ROI may therefore split into several rectangles. Corners
+    are normalized and pieces smaller than ``min_size`` in either
+    dimension are dropped (pass ``box`` so slivers that cannot hold a
+    spot are discarded).
+
+    Parameters
+    ----------
+    rois : list of rectangles
+        Each rectangle is ``((y_min, x_min), (y_max, x_max))`` (corners
+        may be in any order).
+    min_size : int, optional
+        Minimum side length (in pixels) for a clipped piece to be kept.
+        Default is 0 (keep any piece with positive area).
+
+    Returns
+    -------
+    list of rectangles
+        Disjoint rectangles in ``[[y_min, x_min], [y_max, x_max]]``
+        format whose union equals the union of the inputs (minus dropped
+        slivers).
+    """
+    accepted: list[list[list[int]]] = []
+    for rect in rois:
+        pieces = [_normalize_rect(rect)]
+        for acc in accepted:
+            new_pieces: list[list[list[int]]] = []
+            for piece in pieces:
+                new_pieces.extend(_subtract_rect(piece, acc))
+            pieces = new_pieces
+        for piece in pieces:
+            height = piece[1][0] - piece[0][0]
+            width = piece[1][1] - piece[0][1]
+            if height > 0 and width > 0:
+                if height >= min_size and width >= min_size:
+                    accepted.append(piece)
+    return accepted
+
+
+def _as_roi_list(
+    roi: tuple[tuple[int, int], tuple[int, int]] | list | None,
+) -> list[list[list[int]]] | None:
+    """Normalize the ``roi`` argument into a list of rectangles or None.
+
+    Accepts a single rectangle ``((y0, x0), (y1, x1))`` (for backward
+    compatibility) or a list of such rectangles. An empty list and
+    ``None`` both map to ``None`` (whole frame).
+    """
+    if roi is None or len(roi) == 0:
+        return None
+    first = roi[0][0]
+    if isinstance(first, (list, tuple, np.ndarray)):
+        rois = [_normalize_rect(r) for r in roi]  # list of rectangles
+    else:
+        rois = [_normalize_rect(roi)]  # single rectangle
+    return rois if len(rois) else None
+
+
 def identify_in_frame(
     frame: lib.IntArray2D,
     minimum_ng: float,
     box: int,
-    roi: tuple[tuple[int, int], tuple[int, int]] | None = None,
+    roi: tuple[tuple[int, int], tuple[int, int]] | list | None = None,
 ) -> tuple[lib.IntArray1D, lib.IntArray1D, lib.FloatArray1D]:
-    """Identify local maxima in a single frame with an optionally
-    specified subregion (ROI) and calculate the net gradient at those
+    """Identify local maxima in a single frame within optionally
+    specified subregion(s) (ROI) and calculate the net gradient at those
     maxima.
 
     Parameters
@@ -264,11 +374,14 @@ def identify_in_frame(
     box : int
         Size of the box used for calculating the gradient. Should be
         an odd integer.
-    roi : tuple, optional
-        Region of interest (ROI) defined as a tuple of two tuples,
-        where the first tuple contains the start coordinates
-        (y_start, x_start) and the second tuple contains the end
-        coordinates (y_end, x_end). If None, the entire frame is used.
+    roi : tuple or list of tuples, optional
+        Region(s) of interest (ROI). A single ROI is a tuple of two
+        tuples, where the first contains the start coordinates
+        (y_start, x_start) and the second the end coordinates
+        (y_end, x_end). A list of such tuples restricts identification to
+        several (disjoint) regions. If None, the entire frame is used.
+        Note that the origin of the image is in the top-left corner.
+        Default is None.
 
     Returns
     -------
@@ -280,14 +393,18 @@ def identify_in_frame(
         Net gradient values at the identified maxima. The shape is
         (len(y),).
     """
-    if roi is not None:
-        frame = frame[roi[0][0] : roi[1][0], roi[0][1] : roi[1][1]]
-    image = np.float32(frame)  # otherwise numba goes crazy
-    y, x, net_gradient = identify_in_image(image, minimum_ng, box)
-    if roi is not None:
-        y += roi[0][0]
-        x += roi[0][1]
-    return y, x, net_gradient
+    rois = _as_roi_list(roi)
+    if rois is None:
+        image = np.float32(frame)  # otherwise numba goes crazy
+        return identify_in_image(image, minimum_ng, box)
+    ys, xs, ngs = [], [], []
+    for (y0, x0), (y1, x1) in rois:
+        image = np.float32(frame[y0:y1, x0:x1])  # numba needs float32!
+        y, x, net_gradient = identify_in_image(image, minimum_ng, box)
+        ys.append(y + y0)  # offset back to global frame coordinates
+        xs.append(x + x0)
+        ngs.append(net_gradient)
+    return np.concatenate(ys), np.concatenate(xs), np.concatenate(ngs)
 
 
 def identify_by_frame_number(
@@ -296,7 +413,7 @@ def identify_by_frame_number(
     box: int,
     frame_number: int,
     *,
-    roi: tuple[tuple[int, int], tuple[int, int]] | None = None,
+    roi: tuple[tuple[int, int], tuple[int, int]] | list | None = None,
     frame_bounds: tuple[int, int] | None = None,
     lock: threading.Lock | None = None,
 ) -> pd.DataFrame:
@@ -316,11 +433,13 @@ def identify_by_frame_number(
         an odd integer.
     frame_number : int
         The index of the frame in the movie sequence to be processed.
-    roi : tuple, optional
-        Region of interest (ROI) defined as a tuple of two tuples,
-        where the first tuple contains the start coordinates
-        (y_start, x_start) and the second tuple contains the end
-        coordinates (y_end, x_end). If None, the entire frame is used.
+    roi : tuple or list of tuples, optional
+        Region(s) of interest (ROI). A single ROI is a tuple of two
+        tuples, where the first contains the start coordinates
+        (y_start, x_start) and the second the end coordinates
+        (y_end, x_end). A list of such tuples restricts identification to
+        several (disjoint) regions. If None, the entire frame is used.
+        Note that the origin of the image is in the top-left corner.
         Default is None.
     frame_bounds : tuple, optional
         Minimum and maximum frame numbers to consider for the
@@ -379,7 +498,7 @@ def _identify_worker(
     current: list[int],
     minimum_ng: float,
     box: int,
-    roi: tuple[tuple[int, int], tuple[int, int]] | None,
+    roi: tuple[tuple[int, int], tuple[int, int]] | list | None,
     frame_bounds: tuple[int, int] | None,
     lock: threading.Lock | None,
 ) -> list[pd.DataFrame]:
@@ -437,7 +556,7 @@ def identify_async(
     minimum_ng: float,
     box: int,
     *,
-    roi: tuple[tuple[int, int], tuple[int, int]] | None = None,
+    roi: tuple[tuple[int, int], tuple[int, int]] | list | None = None,
     frame_bounds: tuple[int, int] | None = None,
 ) -> tuple[list[int], list[multiprocessing.pool.Future]]:
     """Asynchronously (i.e., using multithreading) identify local
@@ -452,8 +571,13 @@ def identify_async(
         The minimum net gradient for a spot to be considered.
     box : int
         The size of the box to extract around each spot.
-    roi : tuple[tuple[int, int], tuple[int, int]] | None
-        The region of interest (ROI) for the analysis.
+    roi : tuple or list of tuples, optional
+        Region(s) of interest (ROI). A single ROI is a tuple of two
+        tuples, where the first contains the start coordinates
+        (y_start, x_start) and the second the end coordinates
+        (y_end, x_end). A list of such tuples restricts identification to
+        several (disjoint) regions. If None, the entire frame is used.
+        Default is None.
     frame_bounds : tuple, optional
         Minimum and maximum frame numbers to consider for the
         identification. If None, all frames are used. If only min or max
@@ -594,7 +718,7 @@ def identify(
     minimum_ng: float,
     box: int,
     *,
-    roi: tuple[tuple[int, int], tuple[int, int]] | None = None,
+    roi: tuple[tuple[int, int], tuple[int, int]] | list | None = None,
     frame_bounds: tuple[int, int] | None = None,
     threaded: bool = True,
     progress_callback: (
@@ -615,11 +739,13 @@ def identify(
         The minimum net gradient for a spot to be considered.
     box : int
         The size of the box to extract around each spot.
-    roi : tuple, optional
-        Region of interest (ROI) defined as a tuple of two tuples,
-        where the first tuple contains the start coordinates
-        (y_start, x_start) and the second tuple contains the end
-        coordinates (y_end, x_end). If None, the entire frame is used.
+    roi : tuple or list of tuples, optional
+        Region(s) of interest (ROI). A single ROI is a tuple of two
+        tuples, where the first contains the start coordinates
+        (y_start, x_start) and the second the end coordinates
+        (y_end, x_end). A list of such tuples restricts identification to
+        several (disjoint) regions. If None, the entire frame is used.
+        Note that the origin of the image is in the top-left corner.
         Default is None.
     frame_bounds : tuple, optional
         Minimum and maximum frame numbers to consider for the

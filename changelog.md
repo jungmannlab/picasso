@@ -1,12 +1,13 @@
 # Changelog
 
-Last change: 13-JUN-2026 CEST
+Last change: 16-JUN-2026 CEST
 
 ## 0.11.0
 
 ### **General updates:**
 
 #### Localize
+- Accept multiple rectangular ROIs
 
 #### Render
 

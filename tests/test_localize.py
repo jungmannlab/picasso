@@ -268,6 +268,92 @@ class TestIdentifyInFrame:
         y, x, ng = localize.identify_in_frame(frame, 1.0, BOX, roi=roi)
         assert len(y) == 0 and len(x) == 0 and len(ng) == 0
 
+    def test_multiple_rois_find_all_peaks(self):
+        """A list of disjoint ROIs collects peaks from every region and
+        ignores peaks outside all of them."""
+        frame = _gaussian_frame((40, 40), (8, 8)).astype(np.int32)
+        frame += (_gaussian_frame((40, 40), (30, 30)) - 100).astype(np.int32)
+        frame += (_gaussian_frame((40, 40), (8, 30)) - 100).astype(np.int32)
+        rois = [((0, 0), (16, 16)), ((24, 24), (38, 38))]
+        y, x, _ = localize.identify_in_frame(frame, 1.0, BOX, roi=rois)
+        found = {(int(yi), int(xi)) for yi, xi in zip(y, x)}
+        assert (8, 8) in found  # first ROI
+        assert (30, 30) in found  # second ROI
+        assert (8, 30) not in found  # outside both ROIs
+
+    def test_multiple_rois_no_double_counting(self):
+        """Disjoint ROIs never report the same peak twice."""
+        frame = _gaussian_frame((40, 40), (8, 8)).astype(np.int32)
+        frame += (_gaussian_frame((40, 40), (30, 30)) - 100).astype(np.int32)
+        rois = [((0, 0), (16, 16)), ((24, 24), (38, 38))]
+        y, x, _ = localize.identify_in_frame(frame, 1.0, BOX, roi=rois)
+        coords = list(zip([int(v) for v in y], [int(v) for v in x]))
+        assert len(coords) == len(set(coords))
+
+
+# ---------------------------------------------------------------------------
+# clip_rois
+# ---------------------------------------------------------------------------
+
+
+def _area(rects) -> int:
+    """Total area of a list of [[y0, x0], [y1, x1]] rectangles."""
+    return sum((y1 - y0) * (x1 - x0) for (y0, x0), (y1, x1) in rects)
+
+
+def _overlap(a, b) -> int:
+    """Area of the overlap between two [[y0, x0], [y1, x1]] rectangles."""
+    (ay0, ax0), (ay1, ax1) = a
+    (by0, bx0), (by1, bx1) = b
+    dy = max(0, min(ay1, by1) - max(ay0, by0))
+    dx = max(0, min(ax1, bx1) - max(ax0, bx0))
+    return dy * dx
+
+
+class TestClipRois:
+    """Geometric clipping of (possibly overlapping) ROIs into disjoint
+    rectangles."""
+
+    def test_disjoint_unchanged(self):
+        rois = [((0, 0), (5, 5)), ((10, 10), (15, 15))]
+        out = localize.clip_rois(rois)
+        assert out == [[[0, 0], [5, 5]], [[10, 10], [15, 15]]]
+
+    def test_overlap_is_disjoint_and_preserves_union(self):
+        rois = [((0, 0), (10, 10)), ((5, 5), (15, 15))]
+        out = localize.clip_rois(rois)
+        # pairwise disjoint
+        for i in range(len(out)):
+            for j in range(i + 1, len(out)):
+                assert _overlap(out[i], out[j]) == 0
+        # union area = 100 + 100 - 25 (overlap)
+        assert _area(out) == 175
+
+    def test_full_containment_drops_inner(self):
+        rois = [((0, 0), (20, 20)), ((5, 5), (10, 10))]
+        out = localize.clip_rois(rois)
+        assert out == [[[0, 0], [20, 20]]]
+
+    def test_corner_overlap(self):
+        rois = [((0, 0), (10, 10)), ((8, 8), (18, 18))]
+        out = localize.clip_rois(rois)
+        for i in range(len(out)):
+            for j in range(i + 1, len(out)):
+                assert _overlap(out[i], out[j]) == 0
+        assert _area(out) == 100 + 100 - 4
+
+    def test_min_size_drops_slivers(self):
+        # second ROI overlaps the first leaving a 1-pixel-tall sliver
+        rois = [((0, 0), (10, 10)), ((9, 0), (20, 20))]
+        out = localize.clip_rois(rois, min_size=3)
+        assert [[10, 0], [20, 20]] in out
+        # the 1-pixel band (y in 9..10) is discarded
+        assert all(piece[1][0] - piece[0][0] >= 3 for piece in out)
+
+    def test_normalizes_corner_order(self):
+        out = localize.clip_rois([((25, 28), (10, 12))])
+        assert out == [[[10, 12], [25, 28]]]
+
 
 # ---------------------------------------------------------------------------
 # _to_photons
