@@ -14,7 +14,6 @@ from __future__ import annotations
 import abc
 import glob
 import re
-import struct
 import json
 import os
 import threading
@@ -1008,7 +1007,7 @@ class ND2Movie(AbstractPicassoMovie):
         self.nd2file.close()
 
     def get_frame(self, index: int) -> lib.IntArray2D:
-        """Load one frame of the movie
+        """Load one frame of the movie.
 
         Parameters
         ----------
@@ -1130,151 +1129,108 @@ class ND2Movie(AbstractPicassoMovie):
         return np.dtype(self.meta["Data Type"])
 
 
+def _mm_metadata_from_tifffile(tif: "tifffile.TiffFile") -> dict:
+    """Translate MicroManager metadata from a ``tifffile.TiffFile`` into
+    the fields Picasso stores in its info dictionary.
+
+    Returns a dict that may contain ``"Micro-Manager Metadata"``,
+    ``"Camera"`` and ``"Micro-Manager Acquisition Comments"``. Missing
+    keys simply mean the corresponding metadata was not present (e.g. for
+    a non-MicroManager TIFF). All parsing is wrapped defensively so that a
+    malformed or absent block never raises."""
+    out = {}
+
+    # Per-image MicroManager metadata lives in tag 51123 on the first IFD.
+    try:
+        raw = None
+        tag = tif.pages[0].tags.get(51123)
+        if tag is not None:
+            raw = tag.value
+        if isinstance(raw, (bytes, bytearray)):
+            # Strip null bytes which MM 1.4.22 appends, then JSON-decode.
+            raw = bytes(raw).strip(b"\0").decode(errors="replace")
+        if isinstance(raw, str):
+            raw = json.loads(raw)
+        if isinstance(raw, dict):
+            # Flatten to ensure compatibility with MM 2.0, where every
+            # value is nested as {"PropName": ..., "PropVal": ...}.
+            mm_info = {}
+            for key, val in raw.items():
+                if key == "scopeDataKeys":
+                    continue
+                if isinstance(val, dict):
+                    mm_info[key] = val.get("PropVal")
+                else:
+                    mm_info[key] = val
+            out["Micro-Manager Metadata"] = mm_info
+            out["Camera"] = mm_info.get("Camera", "None")
+    except Exception:
+        pass
+
+    # Acquisition comments live in the file-level Comments/Summary block,
+    # which tifffile parses into ``micromanager_metadata``.
+    try:
+        mm_file = tif.micromanager_metadata or {}
+        comments_block = mm_file.get("Comments")
+        if isinstance(comments_block, dict):
+            summary = comments_block.get("Summary")
+            if isinstance(summary, str):
+                out["Micro-Manager Acquisition Comments"] = summary.split("\n")
+    except Exception:
+        pass
+
+    return out
+
+
 class TiffMap:
-    """Read TIFF files and provide array-like access to TIFF image data.
-    Frames are loaded into memory on access (not memory-mapped).
-    This class is used for single-frame TIFF files, not multi-page TIFFs.
-    Both classic TIFF (magic 42) and BigTIFF (magic 43) are supported."""
+    """Read a single TIFF file and provide array-like access to its frames.
 
-    TIFF_TYPES = {
-        1: "B",
-        2: "c",
-        3: "H",
-        4: "L",
-        5: "RATIONAL",
-        16: "Q",  # BigTIFF LONG8:  unsigned 64-bit
-        17: "q",  # BigTIFF SLONG8: signed 64-bit
-        18: "Q",  # BigTIFF IFD8:   64-bit IFD offset (same struct format as Q)
-    }
+    Backed by :mod:`tifffile`, which robustly parses classic TIFF,
+    BigTIFF, OME-TIFF and MicroManager files and others - including
+    compressed, tiled and multi-strip variants that were not available
+    before v0.11.0.
 
-    TYPE_SIZES = {
-        "c": 1,
-        "B": 1,
-        "h": 2,
-        "H": 2,
-        "i": 4,
-        "I": 4,
-        "L": 4,
-        "q": 8,  # BigTIFF SLONG8: signed 64-bit
-        "Q": 8,  # BigTIFF LONG8 / IFD8: unsigned 64-bit
-        "RATIONAL": 8,
-    }
+    Frames are read lazily, one at a time, so resident memory stays at a
+    single frame even for multi-gigabyte movies. For the common case of
+    an uncompressed, contiguous, single-strip page the frame is read
+    directly from its file offset with ``np.fromfile``. Compressed or
+    tiled pages fall back to ``page.asarray()``."""
 
-    def __init__(self, path: str, verbose: bool = False):  # noqa: C901
-        """Initialize the TiffMap object by reading the TIFF file and
-        extracting metadata such as width, height, and data type.
-        Automatically detects classic TIFF (magic=42) and BigTIFF
-        (magic=43) and sets format-specific layout attributes."""
+    def __init__(self, path: str, verbose: bool = False):
+        """Open the TIFF file with tifffile and extract the geometry,
+        data type and per-page layout needed for lazy frame access."""
         if verbose:
             print("Reading info from {}".format(path))
         self.path = os.path.abspath(path)
-        self.file = open(self.path, "rb")
-        self._tif_byte_order = {b"II": "<", b"MM": ">"}[self.file.read(2)]
+        self._tif = tifffile.TiffFile(self.path)
 
-        # Read magic number to distinguish classic TIFF (42) from BigTIFF (43).
-        # We read it manually here because self.read() depends on attributes
-        # that haven't been set yet.
-        magic = struct.unpack(self._tif_byte_order + "H", self.file.read(2))[0]
-        if magic == 42:
-            # Classic TIFF: all offsets and counts are 4-byte (L),
-            # each IFD entry is 12 bytes, n_entries field is 2 bytes (H).
-            self.bigtiff = False
-            self._offset_type = "L"  # 4-byte file offsets
-            self._count_type = "L"  # 4-byte IFD entry count/value field
-            self._n_entries_type = "H"  # 2-byte number-of-IFD-entries field
-            self._entry_size = 12  # bytes per IFD entry
-            self._ifd_count_size = 2  # bytes consumed by the n_entries header
-            self._value_field_size = 4  # max bytes that fit inline in an entry
-            # Bytes 4-7 hold the first IFD offset in classic TIFF.
-            self.first_ifd_offset = self.read("L")
-        elif magic == 43:
-            # BigTIFF: all offsets and counts are 8-byte (Q),
-            # each IFD entry is 20 bytes, n_entries field is 8 bytes (Q).
-            self.bigtiff = True
-            self._offset_type = "Q"  # 8-byte file offsets
-            self._count_type = "Q"  # 8-byte IFD entry count/value field
-            self._n_entries_type = "Q"  # 8-byte number-of-IFD-entries field
-            self._entry_size = 20  # bytes per IFD entry
-            self._ifd_count_size = 8  # bytes consumed by the n_entries header
-            self._value_field_size = 8  # max bytes that fit inline in an entry
-            # Bytes 4-5: bytesize of offsets (always 8, we can skip).
-            # Bytes 6-7: constant 0 (reserved, we can skip).
-            # Bytes 8-15: first IFD offset as 8-byte integer.
-            self.file.seek(8)
-            self.first_ifd_offset = self.read("Q")
-        else:
-            raise ValueError(
-                f"Not a valid TIFF file (magic number={magic}): {path}"
-            )
+        # Use the IFDs physically present in this file (not the OME
+        # series, which may span sibling files - those are handled by
+        # TiffMultiMap).
+        self._pages = self._tif.pages
+        self.n_frames = len(self._pages)
 
-        # Read info from first IFD.
-        # Entry layout per IFD entry:
-        #   classic:  tag(H) type(H) count(L) value_or_offset(L)   = 12 bytes
-        #   BigTIFF:  tag(H) type(H) count(Q) value_or_offset(Q)   = 20 bytes
-        self.file.seek(self.first_ifd_offset)
-        n_entries = self.read(self._n_entries_type)
-        for i in range(n_entries):
-            self.file.seek(
-                self.first_ifd_offset
-                + self._ifd_count_size
-                + i * self._entry_size
-            )
-            tag = self.read("H")
-            type = self.TIFF_TYPES[self.read("H")]
-            count = self.read(self._count_type)
-            # If the value doesn't fit inline, the field holds an offset to it.
-            # Threshold is _value_field_size (4 for classic, 8 for BigTIFF).
-            if count * self.TYPE_SIZES[type] > self._value_field_size:
-                self.file.seek(self.read(self._offset_type))
-            if tag == 256:
-                self.width = self.read(type, count)
-            elif tag == 257:
-                self.height = self.read(type, count)
-            elif tag == 258:
-                bits_per_sample = self.read(type, count)
-                dtype_str = "u" + str(int(bits_per_sample / 8))
-                # Picasso uses internally exclusively little endian byte order
-                self.dtype = np.dtype(dtype_str)
-                # the tiff byte order might be different
-                # so we also store the file dtype
-                self._tif_dtype = np.dtype(self._tif_byte_order + dtype_str)
+        page0 = self._pages[0]
+        self.height = int(page0.imagelength)
+        self.width = int(page0.imagewidth)
+        bits = int(page0.bitspersample)
+
+        # Picasso works internally with little-endian unsigned integers; the
+        # file may be big-endian, so keep both the file dtype and the target.
+        self._tif_byte_order = self._tif.byteorder  # "<" or ">"
+        dtype_str = "u" + str(bits // 8)
+        self.dtype = np.dtype(dtype_str)
+        self._tif_dtype = np.dtype(self._tif_byte_order + dtype_str)
+
         self.frame_shape = (self.height, self.width)
         self.frame_size = self.height * self.width
+        self._frame_nbytes = self.frame_size * self.dtype.itemsize
 
-        # Collect image offsets by walking the IFD chain.
-        self.image_offsets = []
-        offset = self.first_ifd_offset
-        last_offset = (
-            self.first_ifd_offset
-        )  # safe fallback if first read fails
-        while offset != 0:
-            self.file.seek(offset)
-            n_entries = self.read(self._n_entries_type)
-            if n_entries is None:
-                # Some MM files have trailing nonsense bytes
-                break
-            for i in range(n_entries):
-                self.file.seek(
-                    offset + self._ifd_count_size + i * self._entry_size
-                )
-                tag = self.read("H")
-                if tag == 273:
-                    type = self.TIFF_TYPES[self.read("H")]
-                    count = self.read(self._count_type)
-                    self.image_offsets.append(self.read(type, count))
-                    break
+        # The fast np.fromfile path only applies to uncompressed data.
+        self._uncompressed = int(page0.compression) == 1
 
-            # Seek to the next-IFD pointer, which sits immediately after
-            # all entries. Its width is _offset_type (4 or 8 bytes).
-            self.file.seek(
-                offset + self._ifd_count_size + n_entries * self._entry_size
-            )
-            last_offset = (
-                offset + self._ifd_count_size + n_entries * self._entry_size
-            )
-            offset = self.read(self._offset_type)
-        self.n_frames = len(self.image_offsets)
-        self.last_ifd_offset = last_offset
+        # A persistent binary handle for the fast offset-based read path.
+        self.file = open(self.path, "rb")
         self.lock = threading.Lock()
 
     def __enter__(self):
@@ -1326,11 +1282,11 @@ class TiffMap:
     def __len__(self):
         return self.n_frames
 
-    def info(self) -> dict:  # noqa: C901
-        """Extract metadata from the TIFF file and returns it in a
-        dictionary format. This includes byte order, file path, height,
-        width, data type, number of frames, and Micro-Manager
-        metadata."""
+    def info(self) -> dict:
+        """Extract metadata from the TIFF file and return it as a
+        Picasso info dictionary: byte order, file path, height, width,
+        data type, number of frames, and - for MicroManager files - the
+        MicroManager metadata, camera name and acquisition comments."""
         info = {
             "Byte Order": self._tif_byte_order,
             "File": self.path,
@@ -1339,102 +1295,47 @@ class TiffMap:
             "Data Type": self.dtype.name,
             "Frames": self.n_frames,
         }
-        # The following block is MM-specific
-        self.file.seek(self.first_ifd_offset)
-        n_entries = self.read(self._n_entries_type)
-        for i in range(n_entries):
-            self.file.seek(
-                self.first_ifd_offset
-                + self._ifd_count_size
-                + i * self._entry_size
-            )
-            tag = self.read("H")
-            type = self.TIFF_TYPES[self.read("H")]
-            count = self.read(self._count_type)
-            # If the value doesn't fit inline, the field holds an offset to it.
-            # Threshold is _value_field_size (4 for classic, 8 for BigTIFF).
-            if count * self.TYPE_SIZES[type] > self._value_field_size:
-                self.file.seek(self.read(self._offset_type))
-            if tag == 51123:
-                # This is the Micro-Manager tag
-                # We generate an info dict that contains any info we need.
-                readout = self.read(type, count).strip(
-                    b"\0"
-                )  # Strip null bytes which MM 1.4.22 adds
-                mm_info_raw = json.loads(readout.decode())
-                # Convert to ensure compatbility with MM 2.0
-                mm_info = {}
-                for key in mm_info_raw.keys():
-                    if key != "scopeDataKeys":
-                        try:
-                            mm_info[key] = mm_info_raw[key].get("PropVal")
-                        except AttributeError:
-                            mm_info[key] = mm_info_raw[key]
-
-                info["Micro-Manager Metadata"] = mm_info
-                if "Camera" in mm_info.keys():
-                    info["Camera"] = mm_info["Camera"]
-                else:
-                    info["Camera"] = "None"
-
-        # Acquisition comments
-        self.file.seek(self.last_ifd_offset)
-        comments = ""
-        offset = 0
-        while True:  # Find the block with the summary
-            line = self.file.readline()
-            if "Summary" in str(line):
-                readout_s = str(line)
-                try:
-                    readout_s = readout_s[
-                        readout_s.index("{") : -readout_s[::-1].index("}")
-                    ]
-                    comments = json.loads(readout_s)["Summary"].split("\n")
-                except Exception:
-                    pass
-                break
-            if not line:
-                break
-            offset += len(line)
-
-        info["Micro-Manager Acquisition Comments"] = comments
+        mm = _mm_metadata_from_tifffile(self._tif)
+        # The comments key is always present (possibly empty)
+        info["Micro-Manager Acquisition Comments"] = mm.get(
+            "Micro-Manager Acquisition Comments", ""
+        )
+        if "Micro-Manager Metadata" in mm:
+            info["Micro-Manager Metadata"] = mm["Micro-Manager Metadata"]
+            info["Camera"] = mm["Camera"]
         return info
 
-    def get_frame(self, index: int, array: None = None) -> lib.IntArray2D:
-        """Load one frame of the TIFF movie."""
-        self.file.seek(self.image_offsets[index])
-        frame = np.reshape(
-            np.fromfile(
-                self.file,
-                dtype=self._tif_dtype,
-                count=self.frame_size,
-            ),
-            self.frame_shape,
-        )
-        # We only want to deal with little endian byte order downstream:
-        if self._tif_byte_order == ">":
-            frame.byteswap(True)
-            frame = frame.view(frame.dtype.newbyteorder("<"))
-        return frame
+    def get_frame(self, index: int) -> lib.IntArray2D:
+        """Lazily load one frame of the TIFF movie (one frame in
+        memory).
 
-    def read(self, type: str, count: int = 1) -> bytes | float | None:
-        if type == "c":
-            return self.file.read(count)
-        elif type == "RATIONAL":
-            return self.read_numbers("L") / self.read_numbers("L")
-        else:
-            return self.read_numbers(type, count)
-
-    def read_numbers(self, type: str, count: int = 1) -> float | None:
-        size = self.TYPE_SIZES[type]
-        fmt = self._tif_byte_order + count * type
-        try:
-            return struct.unpack(fmt, self.file.read(count * size))[0]
-        except struct.error:
-            return None
+        Uncompressed, contiguous, single-strip pages are read directly
+        from their file offset with ``np.fromfile`` (no decode
+        overhead); all other layouts fall back to ``tifffile``'s
+        decoder."""
+        page = self._pages[index]
+        frame = None
+        if self._uncompressed:
+            offsets = page.dataoffsets
+            bytecounts = page.databytecounts
+            if len(offsets) == 1 and bytecounts[0] == self._frame_nbytes:
+                self.file.seek(int(offsets[0]))
+                frame = np.fromfile(
+                    self.file,
+                    dtype=self._tif_dtype,
+                    count=self.frame_size,
+                ).reshape(self.frame_shape)
+        if frame is None:
+            # Compressed / tiled / multi-strip pages: let tifffile decode
+            # this single page (still lazy - other frames stay on disk).
+            frame = np.asarray(page.asarray())
+        # Downstream code expects little-endian unsigned integers; astype
+        # is a no-op (no copy) when the data is already in that order.
+        return frame.astype(self.dtype, copy=False)
 
     def close(self) -> None:
         self.file.close()
+        self._tif.close()
 
     def tofile(self, file_handle, byte_order=None):
         do_byteswap = byte_order != self._tif_byte_order

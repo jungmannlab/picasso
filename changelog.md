@@ -1,12 +1,14 @@
 # Changelog
 
-Last change: 13-JUN-2026 CEST
+Last change: 16-JUN-2026 CEST
 
 ## 0.11.0
 
 ### **General updates:**
 
 #### Localize
+- Picasso relies on package `tifffile` for processing `.tif` files and many other extensions
+- Localize supports many more file formats, see [here](https://pypi.org/project/tifffile/#:~:text=Image%20and%20metadata%20can,ThermoFisher%20EER%20formatted%20files.)  (*experimental*, do not hesitate to raise issues on our [GitHub page](https://github.com/jungmannlab/picasso/issues))
 
 #### Render
 

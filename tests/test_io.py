@@ -4,8 +4,11 @@ Every write goes to a ``tmp_path`` so nothing pollutes ``tests/data/``.
 The bundled ``locs`` and ``movie`` fixtures from ``tests/conftest.py``
 are reused for round-trip checks against real Picasso data.
 
+TIFF loading (``load_tif`` / ``TiffMap`` / ``TiffMultiMap`` / ``to_raw``)
+is covered with synthetic ``tifffile``-written stacks generated per test.
+
 Skipped functions (need fixtures we don't have bundled): ``load_ims*``,
-``load_nd2``, ``load_stk``, ``load_tif``, ``to_raw``, ``to_raw_combined``.
+``load_nd2``, ``load_stk``.
 
 :author: Rafal Kowalewski, 2026
 :copyright: Copyright (c) 2026 Jungmann Lab, MPI of Biochemistry
@@ -14,11 +17,13 @@ Skipped functions (need fixtures we don't have bundled): ``load_ims*``,
 from __future__ import annotations
 
 import os
+import json
 
 import h5py
 import numpy as np
 import pandas as pd
 import pytest
+import tifffile
 import yaml
 
 from picasso import io, lib
@@ -409,3 +414,217 @@ class TestThunderstormRoundtrip:
         )
         # Frame count is preserved (frames re-zeroed by import_ts)
         assert out_info[0]["Frames"] == 3
+
+
+# ---------------------------------------------------------------------------
+# TIFF loading — TiffMap / TiffMultiMap / load_tif / to_raw
+#
+# Picasso reads TIFFs via ``tifffile`` (see picasso.io.TiffMap). Real
+# microscopy movies store one IFD per frame, so the fixtures here are
+# written frame-by-frame (a single 3-D array would be collapsed into one
+# volumetric page by tifffile and would not represent a real movie).
+# ---------------------------------------------------------------------------
+
+
+def _write_tif_stack(
+    path,
+    data,
+    byteorder=None,
+    bigtiff=False,
+    compression=None,
+    mm_metadata=None,
+):
+    """Write ``data`` (frames, H, W) as a multi-page TIFF, one IFD per
+    frame. Optionally big-endian, BigTIFF, compressed, or with a
+    MicroManager metadata tag (51123) on the first page."""
+    with tifffile.TiffWriter(
+        str(path), byteorder=byteorder, bigtiff=bigtiff, ome=False
+    ) as tw:
+        for i, frame in enumerate(data):
+            kw = {}
+            if i == 0 and mm_metadata is not None:
+                kw["extratags"] = [
+                    (51123, "s", 0, json.dumps(mm_metadata), True)
+                ]
+            tw.write(
+                frame,
+                photometric="minisblack",
+                compression=compression,
+                contiguous=(compression is None),
+                **kw,
+            )
+
+
+class TestTiffLoading:
+    def test_load_tif_basic_shape_dtype_frames(self, tmp_path):
+        rng = np.random.default_rng(0)
+        data = rng.integers(0, 60000, size=(7, 32, 48), dtype="<u2")
+        path = tmp_path / "plain.tif"
+        _write_tif_stack(path, data)
+
+        movie, info = io.load_tif(str(path))
+        try:
+            assert movie.shape == (7, 32, 48)
+            assert movie.dtype == np.dtype("<u2")
+            assert movie.n_frames == 7
+            assert len(movie) == 7
+            assert info[0]["Height"] == 32
+            assert info[0]["Width"] == 48
+            assert info[0]["Frames"] == 7
+            assert info[0]["Data Type"] == "uint16"
+        finally:
+            movie.close()
+
+    def test_frame_slice_and_iter_access(self, tmp_path):
+        rng = np.random.default_rng(1)
+        data = rng.integers(0, 60000, size=(6, 16, 20), dtype="<u2")
+        path = tmp_path / "access.tif"
+        _write_tif_stack(path, data)
+
+        movie, _ = io.load_tif(str(path))
+        try:
+            np.testing.assert_array_equal(movie[3], data[3])
+            np.testing.assert_array_equal(np.array(movie[2:5]), data[2:5])
+            np.testing.assert_array_equal(movie[...], data)
+            np.testing.assert_array_equal(np.array(list(movie)), data)
+            # Region indexing
+            np.testing.assert_array_equal(
+                movie[4, 5:10, 3:7], data[4, 5:10, 3:7]
+            )
+            # Single frames are little-endian 2-D arrays
+            assert movie[0].dtype == np.dtype("<u2")
+            assert movie[0].shape == (16, 20)
+        finally:
+            movie.close()
+
+    def test_big_endian_normalized_to_little_endian(self, tmp_path):
+        rng = np.random.default_rng(2)
+        data = rng.integers(0, 60000, size=(4, 16, 20), dtype="<u2")
+        path = tmp_path / "be.tif"
+        _write_tif_stack(path, data.astype(">u2"), byteorder=">")
+
+        movie, info = io.load_tif(str(path))
+        try:
+            # Values must be preserved despite byte-order conversion
+            np.testing.assert_array_equal(np.array(list(movie)), data)
+            assert movie.dtype == np.dtype("<u2")
+            assert movie[1].dtype.byteorder in ("<", "=")
+            # info preserves the file's native byte order
+            assert info[0]["Byte Order"] == ">"
+        finally:
+            movie.close()
+
+    def test_bigtiff(self, tmp_path):
+        rng = np.random.default_rng(3)
+        data = rng.integers(0, 255, size=(3, 10, 12), dtype="<u2")
+        path = tmp_path / "big.tif"
+        _write_tif_stack(path, data, bigtiff=True)
+
+        movie, _ = io.load_tif(str(path))
+        try:
+            assert movie.n_frames == 3
+            np.testing.assert_array_equal(np.array(list(movie)), data)
+        finally:
+            movie.close()
+
+    def test_compressed_falls_back_to_decoder(self, tmp_path):
+        rng = np.random.default_rng(4)
+        data = rng.integers(0, 1000, size=(5, 16, 16), dtype="<u2")
+        path = tmp_path / "zip.tif"
+        _write_tif_stack(path, data, compression="zlib")
+
+        movie, _ = io.load_tif(str(path))
+        try:
+            # Compressed pages are not contiguous → fast path disabled
+            assert movie.maps[0]._uncompressed is False
+            np.testing.assert_array_equal(np.array(list(movie)), data)
+            np.testing.assert_array_equal(movie[2], data[2])
+        finally:
+            movie.close()
+
+    def test_multifile_ome_concatenation(self, tmp_path):
+        rng = np.random.default_rng(5)
+        parts = [
+            rng.integers(0, 500, size=(3, 8, 8), dtype="<u2") for _ in range(3)
+        ]
+        base = tmp_path / "mov"
+        _write_tif_stack(str(base) + ".ome.tif", parts[0])
+        _write_tif_stack(str(base) + "_1.ome.tif", parts[1])
+        _write_tif_stack(str(base) + "_2.ome.tif", parts[2])
+
+        movie, info = io.load_tif(str(base) + ".ome.tif")
+        try:
+            expected = np.concatenate(parts, axis=0)
+            assert movie.n_frames == 9
+            assert info[0]["Frames"] == 9
+            np.testing.assert_array_equal(np.array(list(movie)), expected)
+            # Frame routing across files
+            np.testing.assert_array_equal(movie[7], expected[7])
+        finally:
+            movie.close()
+
+    def test_micromanager_metadata_flattened(self, tmp_path):
+        rng = np.random.default_rng(6)
+        data = rng.integers(0, 500, size=(2, 8, 8), dtype="<u2")
+        path = tmp_path / "mm.tif"
+        mm = {
+            "Camera": "TestCam",
+            # MM 2.0 nests values under PropVal — must be flattened
+            "TestCam-Gain": {"PropName": "Gain", "PropVal": "300"},
+            "scopeDataKeys": {"ignored": 1},
+        }
+        _write_tif_stack(path, data, mm_metadata=mm)
+
+        movie, info = io.load_tif(str(path))
+        try:
+            meta = info[0]
+            assert meta["Camera"] == "TestCam"
+            mm_meta = meta["Micro-Manager Metadata"]
+            assert mm_meta["TestCam-Gain"] == "300"
+            assert mm_meta["Camera"] == "TestCam"
+            assert "scopeDataKeys" not in mm_meta
+            # The comments key is always present for parity with old reader
+            assert "Micro-Manager Acquisition Comments" in meta
+        finally:
+            movie.close()
+
+    def test_non_mm_tiff_has_no_camera_key(self, tmp_path):
+        rng = np.random.default_rng(7)
+        data = rng.integers(0, 500, size=(2, 8, 8), dtype="<u2")
+        path = tmp_path / "plain2.tif"
+        _write_tif_stack(path, data)
+
+        movie, info = io.load_tif(str(path))
+        try:
+            assert "Camera" not in info[0]
+            assert "Micro-Manager Metadata" not in info[0]
+        finally:
+            movie.close()
+
+    def test_load_movie_dispatches_tif(self, tmp_path):
+        rng = np.random.default_rng(8)
+        data = rng.integers(0, 60000, size=(4, 12, 10), dtype="<u2")
+        path = tmp_path / "dispatch.tif"
+        _write_tif_stack(path, data)
+
+        movie, _ = io.load_movie(str(path))
+        try:
+            assert isinstance(movie, io.AbstractPicassoMovie)
+            np.testing.assert_array_equal(np.array(list(movie)), data)
+        finally:
+            movie.close()
+
+    def test_to_raw_roundtrip(self, tmp_path):
+        rng = np.random.default_rng(9)
+        data = rng.integers(0, 60000, size=(4, 8, 8), dtype="<u2")
+        base = tmp_path / "grp"
+        _write_tif_stack(str(base) + ".ome.tif", data[:2])
+        _write_tif_stack(str(base) + "_1.ome.tif", data[2:])
+
+        io.to_raw(str(base) + "*.ome.tif", verbose=False)
+
+        raw = np.fromfile(str(base) + ".ome.raw", dtype="<u2").reshape(4, 8, 8)
+        np.testing.assert_array_equal(raw, data)
+        meta = io.load_info(str(base) + ".ome.yaml")
+        assert meta[0]["Frames"] == 4
+        assert meta[0]["Byte Order"] == "<"
