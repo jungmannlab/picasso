@@ -1,6 +1,6 @@
 # Changelog
 
-Last change: 16-JUN-2026 CEST
+Last change: 17-JUN-2026 CEST
 
 ## 0.11.0
 
@@ -8,6 +8,8 @@ Last change: 16-JUN-2026 CEST
 
 #### Localize
 - Accept multiple rectangular ROIs
+- Remove a ROI by double-clicking it in the preview
+- Fixed a gap of roughly one box size in the identified spots along the borders between adjacent (e.g. overlapping) ROIs
 
 #### Render
 

@@ -397,13 +397,22 @@ def identify_in_frame(
     if rois is None:
         image = np.float32(frame)  # otherwise numba goes crazy
         return identify_in_image(image, minimum_ng, box)
+    height, width = frame.shape
+    # pad each ROI to identify at the border
+    pad = int(box / 2) + 1
     ys, xs, ngs = [], [], []
     for (y0, x0), (y1, x1) in rois:
-        image = np.float32(frame[y0:y1, x0:x1])  # numba needs float32!
+        py0, px0 = max(y0 - pad, 0), max(x0 - pad, 0)
+        py1, px1 = min(y1 + pad, height), min(x1 + pad, width)
+        image = np.float32(frame[py0:py1, px0:px1])  # numba needs float32!
         y, x, net_gradient = identify_in_image(image, minimum_ng, box)
-        ys.append(y + y0)  # offset back to global frame coordinates
-        xs.append(x + x0)
-        ngs.append(net_gradient)
+        y += py0  # offset back to global frame coordinates
+        x += px0
+        # keep only maxima centered inside the actual ROI
+        inside = (y >= y0) & (y < y1) & (x >= x0) & (x < x1)
+        ys.append(y[inside])
+        xs.append(x[inside])
+        ngs.append(net_gradient[inside])
     return np.concatenate(ys), np.concatenate(xs), np.concatenate(ngs)
 
 

@@ -290,6 +290,42 @@ class TestIdentifyInFrame:
         coords = list(zip([int(v) for v in y], [int(v) for v in x]))
         assert len(coords) == len(set(coords))
 
+    def test_peak_near_roi_border_is_found(self):
+        """A peak close to the ROI border is detected: the slice is
+        padded internally so the gradient box still sees real pixels."""
+        # Peak two pixels inside the bottom-right corner of the ROI.
+        frame = _gaussian_frame((40, 40), (18, 18)).astype(np.int32)
+        roi = ((5, 5), (20, 20))
+        y, x, _ = localize.identify_in_frame(frame, 1.0, BOX, roi=roi)
+        found = {(int(yi), int(xi)) for yi, xi in zip(y, x)}
+        assert (18, 18) in found
+
+    def test_adjacent_rois_have_no_seam_gap(self):
+        """Splitting a region into two ROIs that share an edge must find
+        the same peaks as the single, undivided region - no gap of
+        ~``box`` pixels along the seam (regression test)."""
+        # Two peaks straddling the y = 20 seam, each only two pixels away
+        # from it (i.e. within ``box`` pixels) and far apart in x so they
+        # do not suppress one another.
+        centers = [(18, 12), (22, 28)]
+        frame = np.full((40, 40), 100, dtype=np.int32)
+        for cy, cx in centers:
+            frame += (_gaussian_frame((40, 40), (cy, cx)) - 100).astype(
+                np.int32
+            )
+        whole = ((8, 8), (32, 32))
+        split = [((8, 8), (20, 32)), ((20, 8), (32, 32))]
+        y_w, x_w, _ = localize.identify_in_frame(frame, 1.0, BOX, roi=whole)
+        y_s, x_s, _ = localize.identify_in_frame(frame, 1.0, BOX, roi=split)
+        found_whole = {(int(a), int(b)) for a, b in zip(y_w, x_w)}
+        found_split = {(int(a), int(b)) for a, b in zip(y_s, x_s)}
+        # every seeded peak is found in both cases ...
+        for c in centers:
+            assert c in found_whole
+            assert c in found_split
+        # ... and the two ROIs together reproduce the single-region result
+        assert found_whole == found_split
+
 
 # ---------------------------------------------------------------------------
 # clip_rois

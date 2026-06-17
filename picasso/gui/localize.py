@@ -162,7 +162,7 @@ class View(QtWidgets.QGraphicsView):
                 self.rois = localize.clip_rois(
                     self.rois + [new_roi], min_size=box
                 )
-                self.window.parameters_dialog.update_roi_table()
+                self.window.parameters_dialog.update_roi_display()
             self.window.draw_frame()
         elif event.button() == QtCore.Qt.MouseButton.RightButton:
             self.pan = False
@@ -170,6 +170,35 @@ class View(QtWidgets.QGraphicsView):
             event.accept()
         else:
             event.ignore()
+
+    def mouseDoubleClickEvent(self, event: QtGui.QMouseEvent) -> None:
+        """Remove the ROI under the cursor on a (left) double click. If
+        several ROIs contain the point, the smallest one is removed."""
+        if event.button() != QtCore.Qt.MouseButton.LeftButton or not self.rois:
+            event.ignore()
+            return
+        scene_pos = self.mapToScene(event.pos())
+        px, py = scene_pos.x(), scene_pos.y()
+        containing = [
+            i
+            for i, ((y_min, x_min), (y_max, x_max)) in enumerate(self.rois)
+            if y_min <= py <= y_max and x_min <= px <= x_max
+        ]
+        if not containing:
+            event.ignore()
+            return
+        idx = min(
+            containing,
+            key=lambda i: (
+                (self.rois[i][1][0] - self.rois[i][0][0])
+                * (self.rois[i][1][1] - self.rois[i][0][1])
+            ),
+        )
+        del self.rois[idx]
+        self.selected_roi = None
+        self.window.parameters_dialog.update_roi_display()
+        self.window.draw_frame()
+        event.accept()
 
     def wheelEvent(self, event: QtGui.QWheelEvent) -> None:
         """Zoom in/out with the mouse wheel."""
@@ -595,6 +624,155 @@ class PromptChannelDialog(lib.Dialog):
         return channel, result == QtWidgets.QDialog.DialogCode.Accepted
 
 
+class ROIDialog(lib.Dialog):
+    """Sub-dialog for managing several regions of interest (ROIs)
+    numerically.
+
+    The dialog edits ``window.view.rois`` directly (clipping overlaps via
+    ``localize.clip_rois``) and keeps the compact ROI field in the
+    parameters dialog in sync. It is modeless, so the user can keep
+    drawing ROIs in the preview while it is open.
+
+    Attributes
+    ----------
+    table : QtWidgets.QTableWidget
+        Table listing the ROIs, one rectangle per row.
+    window : QtWidgets.QMainWindow
+        Reference to the main window.
+    """
+
+    def __init__(self, window: QtWidgets.QMainWindow) -> None:
+        super().__init__(window)
+        self.window = window
+        self.setWindowTitle("Regions of interest")
+        self.setModal(False)
+        self._updating = False
+
+        layout = QtWidgets.QVBoxLayout(self)
+        info = QtWidgets.QLabel(
+            "Each row is a rectangular ROI (y_min, x_min, y_max, x_max, "
+            "in camera pixels). Drag a rectangle in the preview or use "
+            "Add, then edit the cells. Overlapping ROIs are clipped "
+            "automatically so they never cover a pixel twice. Clear the "
+            "list to analyze the whole frame."
+        )
+        info.setWordWrap(True)
+        layout.addWidget(info)
+
+        self.table = QtWidgets.QTableWidget(0, 4)
+        self.table.setHorizontalHeaderLabels(
+            ["y_min", "x_min", "y_max", "x_max"]
+        )
+        self.table.horizontalHeader().setSectionResizeMode(
+            QtWidgets.QHeaderView.ResizeMode.Stretch
+        )
+        self.table.verticalHeader().setVisible(False)
+        self.table.setSelectionBehavior(
+            QtWidgets.QAbstractItemView.SelectionBehavior.SelectRows
+        )
+        self.table.itemChanged.connect(self.on_table_changed)
+        self.table.itemSelectionChanged.connect(self.on_selection_changed)
+        layout.addWidget(self.table)
+
+        buttons = QtWidgets.QHBoxLayout()
+        self.add_button = QtWidgets.QPushButton("Add")
+        self.add_button.clicked.connect(self.on_add)
+        self.remove_button = QtWidgets.QPushButton("Remove")
+        self.remove_button.clicked.connect(self.on_remove)
+        self.clear_button = QtWidgets.QPushButton("Clear")
+        self.clear_button.clicked.connect(self.on_clear)
+        buttons.addWidget(self.add_button)
+        buttons.addWidget(self.remove_button)
+        buttons.addWidget(self.clear_button)
+        layout.addLayout(buttons)
+
+        self.resize(360, 280)
+        self.update_table()
+
+    def _box(self) -> int:
+        """Current box size, used as the minimum ROI side length."""
+        return self.window.parameters.get("Box Size", 7)
+
+    def _commit(self, rois: list) -> None:
+        """Clip ``rois`` and store them on the view, refreshing the
+        compact field in the parameters dialog."""
+        self.window.view.rois = localize.clip_rois(rois, min_size=self._box())
+        self.window.parameters_dialog.update_roi_display(skip_dialog=True)
+        self.window.draw_frame()
+
+    def update_table(self) -> None:
+        """Repopulate the table from the view's ROIs."""
+        view = self.window.view
+        self._updating = True
+        self.table.setRowCount(len(view.rois))
+        for row, ((y_min, x_min), (y_max, x_max)) in enumerate(view.rois):
+            for col, val in enumerate((y_min, x_min, y_max, x_max)):
+                item = QtWidgets.QTableWidgetItem(str(int(val)))
+                item.setTextAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+                self.table.setItem(row, col, item)
+        if view.selected_roi is not None and view.selected_roi < len(
+            view.rois
+        ):
+            self.table.selectRow(view.selected_roi)
+        self._updating = False
+
+    def on_table_changed(self, item: object = None) -> None:
+        """Rebuild the view's ROIs from the table, clipping overlaps."""
+        if self._updating:
+            return
+        rois = []
+        for row in range(self.table.rowCount()):
+            try:
+                vals = [int(self.table.item(row, c).text()) for c in range(4)]
+            except (AttributeError, ValueError):
+                return  # incomplete row, wait for the user to finish
+            y_min, x_min, y_max, x_max = vals
+            rois.append([[y_min, x_min], [y_max, x_max]])
+        self._commit(rois)
+        self.update_table()
+
+    def on_add(self) -> None:
+        """Add a default ROI row that the user can edit."""
+        view = self.window.view
+        if self.window.movie is not None:
+            height, width = self.window.movie.shape[1:]
+            side = int(min(height, width) / 4)
+        else:
+            side = 50
+        offset = 10 * len(view.rois)  # avoid fully overlapping the last one
+        new_roi = [[offset, offset], [offset + side, offset + side]]
+        self._commit(view.rois + [new_roi])
+        self.update_table()
+
+    def on_remove(self) -> None:
+        """Remove the ROI(s) selected in the table."""
+        view = self.window.view
+        rows = sorted(
+            {idx.row() for idx in self.table.selectedIndexes()},
+            reverse=True,
+        )
+        for row in rows:
+            if 0 <= row < len(view.rois):
+                del view.rois[row]
+        view.selected_roi = None
+        self._commit(view.rois)
+        self.update_table()
+
+    def on_clear(self) -> None:
+        """Remove all ROIs (analyze the whole frame)."""
+        self.window.view.selected_roi = None
+        self._commit([])
+        self.update_table()
+
+    def on_selection_changed(self) -> None:
+        """Highlight the ROI selected in the table."""
+        if self._updating:
+            return
+        rows = {idx.row() for idx in self.table.selectedIndexes()}
+        self.window.view.selected_roi = min(rows) if rows else None
+        self.window.draw_frame()
+
+
 class ParametersDialog(lib.Dialog):
     """Choose analysis parameters.
 
@@ -642,8 +820,13 @@ class ParametersDialog(lib.Dialog):
         Spin box for setting camera pixel size (nm).
     preview_checkbox : QtWidgets.QCheckBox
         Checkbox for enabling/disabling preview of identified spots.
-    roi_table : QtWidgets.QTableWidget
-        Table listing the regions of interest (ROIs), one per row.
+    roi_field : QtWidgets.QLineEdit
+        Compact field summarizing the regions of interest (ROIs): empty
+        for the whole frame, the four coordinates of the single ROI when
+        there is exactly one (editable), or a count when there are
+        several.
+    roi_dialog : ROIDialog or None
+        Sub-dialog (lazily created) for managing several ROIs in a table.
     sensitivity : QtWidgets.QDoubleSpinBox
         Spin box for setting camera sensitivity.
     qe : QtWidgets.QDoubleSpinBox
@@ -769,43 +952,31 @@ class ParametersDialog(lib.Dialog):
         # ROIs
         label = QtWidgets.QLabel("ROIs:")
         label.setToolTip(
-            "Restrict the analysis to one or more rectangular regions\n"
-            "(y_min, x_min, y_max, x_max, in camera pixels).\n"
-            "Drag a rectangle in the preview to add a ROI, or use Add\n"
-            "and edit the cells. Overlapping ROIs are corrected\n"
-            "automatically so that they do not overlap. Leave empty to\n"
-            "analyze the whole frame."
+            "Restrict the analysis to one or more rectangular regions.\n"
+            "Drag a rectangle in the preview to add a ROI, double-click a\n"
+            "ROI to remove it, or click 'Edit ROIs...' to enter them\n"
+            "numerically. With a single ROI its coordinates\n"
+            "(y_min, x_min, y_max, x_max, in camera pixels) can be edited\n"
+            "directly here. Leave empty to analyze the whole frame."
         )
-        label.setAlignment(QtCore.Qt.AlignmentFlag.AlignTop)
         identification_grid.addWidget(label, 5, 0)
 
-        self._updating_roi_table = False
-        roi_layout = QtWidgets.QVBoxLayout()
-        self.roi_table = QtWidgets.QTableWidget(0, 4)
-        self.roi_table.setHorizontalHeaderLabels(
-            ["y_min", "x_min", "y_max", "x_max"]
+        self._updating_roi_field = False
+        self.roi_dialog = None
+        roi_layout = QtWidgets.QHBoxLayout()
+        self.roi_field = QtWidgets.QLineEdit()
+        self.roi_field.setPlaceholderText("Whole frame")
+        regex = r"\d+,\d+,\d+,\d+"  # 4 integers separated by commas
+        validator = QtGui.QRegularExpressionValidator(
+            QtCore.QRegularExpression(regex)
         )
-        self.roi_table.horizontalHeader().setSectionResizeMode(
-            QtWidgets.QHeaderView.ResizeMode.Stretch
-        )
-        self.roi_table.verticalHeader().setVisible(False)
-        self.roi_table.setSelectionBehavior(
-            QtWidgets.QAbstractItemView.SelectionBehavior.SelectRows
-        )
-        self.roi_table.setMaximumHeight(120)
-        self.roi_table.itemChanged.connect(self.on_roi_table_changed)
-        self.roi_table.itemSelectionChanged.connect(
-            self.on_roi_selection_changed
-        )
-        roi_layout.addWidget(self.roi_table)
-        roi_buttons = QtWidgets.QHBoxLayout()
-        self.roi_add_button = QtWidgets.QPushButton("Add")
-        self.roi_add_button.clicked.connect(self.on_roi_add)
-        self.roi_remove_button = QtWidgets.QPushButton("Remove")
-        self.roi_remove_button.clicked.connect(self.on_roi_remove)
-        roi_buttons.addWidget(self.roi_add_button)
-        roi_buttons.addWidget(self.roi_remove_button)
-        roi_layout.addLayout(roi_buttons)
+        self.roi_field.setValidator(validator)
+        self.roi_field.editingFinished.connect(self.on_roi_field_finished)
+        self.roi_field.textChanged.connect(self.on_roi_field_changed)
+        roi_layout.addWidget(self.roi_field)
+        self.roi_edit_button = QtWidgets.QPushButton("Edit ROIs...")
+        self.roi_edit_button.clicked.connect(self.on_edit_rois)
+        roi_layout.addWidget(self.roi_edit_button)
         identification_grid.addLayout(roi_layout, 5, 1)
 
         # min/max frames
@@ -1191,73 +1362,77 @@ class ParametersDialog(lib.Dialog):
         ):
             self.window.draw_frame()
 
-    def update_roi_table(self) -> None:
-        """Repopulate the ROI table from the view's ROIs."""
-        view = self.window.view
-        self._updating_roi_table = True
-        self.roi_table.setRowCount(len(view.rois))
-        for row, ((y_min, x_min), (y_max, x_max)) in enumerate(view.rois):
-            for col, val in enumerate((y_min, x_min, y_max, x_max)):
-                item = QtWidgets.QTableWidgetItem(str(int(val)))
-                item.setTextAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
-                self.roi_table.setItem(row, col, item)
-        self._updating_roi_table = False
+    def update_roi_display(self, skip_dialog: bool = False) -> None:
+        """Refresh the compact ROI field (and the ROI sub-dialog) from
+        the view's ROIs.
 
-    def on_roi_table_changed(self, item: object = None) -> None:
-        """Rebuild the view's ROIs from the table, clipping overlaps."""
-        if self._updating_roi_table:
-            return
-        rois = []
-        for row in range(self.roi_table.rowCount()):
-            try:
-                vals = [
-                    int(self.roi_table.item(row, c).text()) for c in range(4)
-                ]
-            except (AttributeError, ValueError):
-                return  # incomplete row, wait for the user to finish
-            y_min, x_min, y_max, x_max = vals
-            rois.append([[y_min, x_min], [y_max, x_max]])
-        box = self.window.parameters.get("Box Size", 7)
-        self.window.view.rois = localize.clip_rois(rois, min_size=box)
-        self.update_roi_table()
-        self.window.draw_frame()
+        The field shows nothing (placeholder "Whole frame") when there
+        are no ROIs, the four editable coordinates when there is exactly
+        one, and a read-only count when there are several.
 
-    def on_roi_add(self) -> None:
-        """Add a default ROI row that the user can edit."""
+        Parameters
+        ----------
+        skip_dialog : bool, optional
+            If True, do not refresh the ROI sub-dialog's table (used when
+            the call originates from that dialog to avoid recursion).
+        """
         view = self.window.view
-        if self.window.movie is not None:
-            height, width = self.window.movie.shape[1:]
-            side = int(min(height, width) / 4)
+        n = len(view.rois)
+        self._updating_roi_field = True
+        if n == 1:
+            self.roi_field.setReadOnly(False)
+            (y_min, x_min), (y_max, x_max) = view.rois[0]
+            self.roi_field.setText(
+                f"{int(y_min)},{int(x_min)},{int(y_max)},{int(x_max)}"
+            )
+        elif n == 0:
+            self.roi_field.setReadOnly(False)
+            self.roi_field.setText("")
         else:
-            side = 50
-        offset = 10 * len(view.rois)  # avoid fully overlapping the last one
-        new_roi = [[offset, offset], [offset + side, offset + side]]
-        box = self.window.parameters.get("Box Size", 7)
-        view.rois = localize.clip_rois(view.rois + [new_roi], min_size=box)
-        self.update_roi_table()
-        self.window.draw_frame()
+            self.roi_field.setReadOnly(True)
+            self.roi_field.setText(f"{n} ROIs")
+        self._updating_roi_field = False
+        if not skip_dialog and self.roi_dialog is not None:
+            self.roi_dialog.update_table()
 
-    def on_roi_remove(self) -> None:
-        """Remove the ROI(s) selected in the table."""
-        view = self.window.view
-        rows = sorted(
-            {idx.row() for idx in self.roi_table.selectedIndexes()},
-            reverse=True,
-        )
-        for row in rows:
-            if 0 <= row < len(view.rois):
-                del view.rois[row]
-        view.selected_roi = None
-        self.update_roi_table()
-        self.window.draw_frame()
-
-    def on_roi_selection_changed(self) -> None:
-        """Highlight the ROI selected in the table."""
-        if self._updating_roi_table:
+    def on_roi_field_changed(self) -> None:
+        """Clear the ROIs when the user empties the field."""
+        if self._updating_roi_field or self.roi_field.isReadOnly():
             return
-        rows = {idx.row() for idx in self.roi_table.selectedIndexes()}
-        self.window.view.selected_roi = min(rows) if rows else None
+        if self.roi_field.text() == "":
+            self.window.view.rois = []
+            self.window.view.selected_roi = None
+            if self.roi_dialog is not None:
+                self.roi_dialog.update_table()
+            self.window.draw_frame()
+
+    def on_roi_field_finished(self) -> None:
+        """Parse the single ROI typed into the compact field."""
+        if self._updating_roi_field or self.roi_field.isReadOnly():
+            return
+        text = self.roi_field.text()
+        if text == "":
+            return
+        try:
+            y_min, x_min, y_max, x_max = (int(v) for v in text.split(","))
+        except ValueError:
+            return  # incomplete input, wait for the user to finish
+        box = self.window.parameters.get("Box Size", 7)
+        self.window.view.rois = localize.clip_rois(
+            [[[y_min, x_min], [y_max, x_max]]], min_size=box
+        )
+        self.window.view.selected_roi = None
+        self.update_roi_display()
         self.window.draw_frame()
+
+    def on_edit_rois(self) -> None:
+        """Open (or raise) the ROI management sub-dialog."""
+        if self.roi_dialog is None:
+            self.roi_dialog = ROIDialog(self.window)
+        self.roi_dialog.update_table()
+        self.roi_dialog.show()
+        self.roi_dialog.raise_()
+        self.roi_dialog.activateWindow()
 
     def on_fit_method_changed(self) -> None:
         """Enable/disable GPU fitting checkbox based on selected fit
