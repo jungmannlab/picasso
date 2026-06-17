@@ -15,6 +15,7 @@ Last change: 17-JUN-2026 CEST
 - Fixed handling abortions during identification
 
 #### Render
+- Fixed double-multiplication of picked areas (affecting square and circular picks)
 
 #### SPINNA
 - Fixed verbose for batch analysis
