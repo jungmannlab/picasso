@@ -1238,6 +1238,28 @@ class TiffMap:
         # The fast np.fromfile path only applies to uncompressed data.
         self._uncompressed = int(page0.compression) == 1
 
+        # Precompute every frame's byte offset in a single pass over the
+        # IFDs. This keeps `get_frame` a pure seek + np.fromfile (one
+        # large sequential read per frame) and avoids a per-frame IFD
+        # parse, which is costly on network storage. self._offsets stays
+        # None for compressed / tiled / multi-strip files, which fall
+        # back to tifffile's decoder in get_frame.
+        self._offsets = None
+        if self._uncompressed:
+            offsets = []
+            for page in self._pages:
+                data_offsets = page.dataoffsets
+                byte_counts = page.databytecounts
+                if (
+                    len(data_offsets) == 1
+                    and byte_counts[0] == self._frame_nbytes
+                ):
+                    offsets.append(int(data_offsets[0]))
+                else:
+                    offsets = None
+                    break
+            self._offsets = offsets
+
         # A persistent binary handle for the fast offset-based read path.
         self.file = open(self.path, "rb")
         self.lock = threading.Lock()
@@ -1319,25 +1341,21 @@ class TiffMap:
         memory).
 
         Uncompressed, contiguous, single-strip pages are read directly
-        from their file offset with ``np.fromfile`` (no decode
-        overhead); all other layouts fall back to ``tifffile``'s
-        decoder."""
-        page = self._pages[index]
-        frame = None
-        if self._uncompressed:
-            offsets = page.dataoffsets
-            bytecounts = page.databytecounts
-            if len(offsets) == 1 and bytecounts[0] == self._frame_nbytes:
-                self.file.seek(int(offsets[0]))
-                frame = np.fromfile(
-                    self.file,
-                    dtype=self._tif_dtype,
-                    count=self.frame_size,
-                ).reshape(self.frame_shape)
-        if frame is None:
+        from their precomputed file offset with ``np.fromfile`` (one
+        large sequential read, no decode overhead and no per-frame IFD
+        parse); all other layouts fall back to ``tifffile``'s decoder."""
+        if self._offsets is not None:
+            # Fast path: pure seek + read, no tifffile access per frame.
+            self.file.seek(self._offsets[index])
+            frame = np.fromfile(
+                self.file,
+                dtype=self._tif_dtype,
+                count=self.frame_size,
+            ).reshape(self.frame_shape)
+        else:
             # Compressed / tiled / multi-strip pages: let tifffile decode
             # this single page (still lazy - other frames stay on disk).
-            frame = np.asarray(page.asarray())
+            frame = np.asarray(self._pages[index].asarray())
         # Downstream code expects little-endian unsigned integers; astype
         # is a no-op (no copy) when the data is already in that order.
         return frame.astype(self.dtype, copy=False)
