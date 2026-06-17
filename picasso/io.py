@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import abc
 import glob
+import logging
 import re
 import json
 import os
@@ -27,6 +28,14 @@ import nd2
 import numpy as np
 import pandas as pd
 from PyQt6 import QtWidgets
+
+# MicroManager OME-TIFF continuation files store a non-ASCII
+# ImageDescription (tag 270), which makes tifffile log a benign
+# "coercing invalid ASCII to bytes" warning for every such file. The
+# bytes are unused by Picasso (frames and the metadata we read are
+# unaffected), so silence tifffile's logger below the error level to
+# keep the console clean.
+logging.getLogger("tifffile").setLevel(logging.ERROR)
 
 from . import lib, __version__
 
