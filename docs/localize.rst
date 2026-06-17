@@ -13,14 +13,16 @@ Localize allows performing super-resolution reconstruction of image stacks. For 
 
 **Please note:** Picasso Localize supports file formats:
 
-- ``.ome.tif``, including BigTiff (as of Picasso 0.9.10),
+- ``.ome.tif`` and plain ``.tif`` / ``.tiff`` image stacks,
 - ``NDTiffStack`` with extension ``.tif``,
+- BigTIFF, with extensions ``.tif``, ``.btf``, ``.tf8`` or ``.tf2``,
+- Zeiss ``.lsm``,
 - ``.raw``,
 - ``.ims`` (supported only on Windows),
 - ``.nd2``,
-- ``.stk`` (MetaMorph Stack, as of Picasso 0.10.0).
+- ``.stk``.
 
-There is limited support for ``.tiff`` files.
+TIFF-family files (``.tif``, ``.tiff``, ``.ome.tif``, ``.btf``, ``.tf8``, ``.tf2``, ``.lsm``) are read via the `tifffile <https://github.com/cgohlke/tifffile>`_ library. Picasso expects grayscale image stacks with one frame per TIFF page; multi-channel, RGB or tiled whole-slide TIFF variants are not supported. We are open to feature requests regarding support for other file formats, please visit our `GitHub page <https://github.com/jungmannlab/picasso>`_.
 
 Identification and fitting of single-molecule spots
 ---------------------------------------------------

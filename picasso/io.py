@@ -29,6 +29,14 @@ import numpy as np
 import pandas as pd
 from PyQt6 import QtWidgets
 
+from . import lib, __version__
+
+from .ext import bitplane
+
+if bitplane.IMSWRITER:
+    from .ext.bitplane import IMSFile
+
+
 # MicroManager OME-TIFF continuation files store a non-ASCII
 # ImageDescription (tag 270), which makes tifffile log a benign
 # "coercing invalid ASCII to bytes" warning for every such file. The
@@ -37,12 +45,13 @@ from PyQt6 import QtWidgets
 # keep the console clean.
 logging.getLogger("tifffile").setLevel(logging.ERROR)
 
-from . import lib, __version__
 
-from .ext import bitplane
-
-if bitplane.IMSWRITER:
-    from .ext.bitplane import IMSFile
+# Movie file extensions Picasso can open. TIFF_EXTENSIONS are routed to
+# the tifffile-backed reader (load_tif); the others have dedicated
+# loaders. ".ome.tif" is covered by ".tif" (os.path.splitext yields
+# ".tif").
+TIFF_EXTENSIONS = (".tif", ".tiff", ".btf", ".tf8", ".tf2", ".lsm")
+MOVIE_EXTENSIONS = (".raw", ".ims", ".nd2", ".stk") + TIFF_EXTENSIONS
 
 
 class NoMetadataFileError(FileNotFoundError):
@@ -347,8 +356,9 @@ def load_movie(
     progress=None,
 ) -> tuple[AbstractPicassoMovie, list[dict]]:
     """Load a movie file based on its extension and returns the movie
-    object and its metadata. Accepted format are ``.raw``, ``ome.tif``,
-    ``.ims``, ``.nd2``, and ``.stk``.
+    object and its metadata.
+
+    Accepted formats are specified by ``MOVIE_EXTENSIONS``.
 
     Parameters
     ----------
@@ -365,12 +375,17 @@ def load_movie(
         The loaded movie object.
     info : list[dict]
         A list containing a dictionary with metadata about the movie.
+
+    Raises
+    ------
+    ValueError
+        If the file extension is not a supported movie format.
     """
     base, ext = os.path.splitext(path)
     ext = ext.lower()
     if ext == ".raw":
         return load_raw(path, prompt_info=prompt_info)
-    elif ext == ".tif" or ext == ".tiff":
+    elif ext in TIFF_EXTENSIONS:
         return load_tif(path)
     elif ext == ".ims":
         return load_ims(path, prompt_info=prompt_info)
@@ -378,6 +393,11 @@ def load_movie(
         return load_nd2(path)
     elif ext == ".stk":
         return load_stk(path)
+    else:
+        raise ValueError(
+            f"Unsupported movie format: {ext}. Supported formats are"
+            f" {MOVIE_EXTENSIONS}."
+        )
 
 
 def load_info(
@@ -1213,16 +1233,22 @@ class TiffMap:
         self.path = os.path.abspath(path)
         self._tif = tifffile.TiffFile(self.path)
 
-        # Use the IFDs physically present in this file (not the OME
-        # series, which may span sibling files - those are handled by
-        # TiffMultiMap).
-        self._pages = self._tif.pages
-        # Parse the IFDs as lightweight TiffFrames, which read only the
-        # essential offset tags per page instead of fully parsing every
-        # tag. This keeps opening a movie fast (minimal reads per IFD,
-        # matching the old reader) - important on network storage where
-        # each extra per-page read is a round-trip.
-        self._pages.useframes = True
+        # Choose the per-frame list. Zeiss LSM interleaves a
+        # reduced-size thumbnail IFD after every image, so tif.pages
+        # would double-count; tifffile's LSM series excludes the
+        # thumbnails and gives the true plane list. For every other
+        # format use the IFDs physically present in this file
+        # (TiffMultiMap assembles multi-file OME movies, and tif.series
+        # can split compressed stacks into many series, so it is not
+        # reliable in general). For tif.pages, parse the IFDs as
+        # lightweight TiffFrames (only the essential offset tags per
+        # page), which keeps opening a movie fast - important on network
+        # storage where each extra per-page read is a round-trip.
+        if self._tif.is_lsm:
+            self._pages = self._tif.series[0].pages
+        else:
+            self._tif.pages.useframes = True
+            self._pages = self._tif.pages
         self.n_frames = len(self._pages)
 
         page0 = self._pages[0]

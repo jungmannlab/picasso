@@ -7,8 +7,7 @@ Last change: 17-JUN-2026 CEST
 ### **General updates:**
 
 #### Localize
-- Picasso relies on package `tifffile` for processing `.tif` files and many other file formats
-- Localize supports many more file formats, see [here](https://pypi.org/project/tifffile/#:~:text=Image%20and%20metadata%20can,ThermoFisher%20EER%20formatted%20files.)  (*experimental*, do not hesitate to raise issues on our [GitHub page](https://github.com/jungmannlab/picasso/issues) if you detect bugs/unexpected behavior)
+- Picasso relies on package `tifffile` for processing `.tif` files and many other grayscale movie formats, see [localize documentation](https://picassosr.readthedocs.io/en/latest/localize.html). **Note:** this is an experimental feature, do not hesitate to let us know if you detect bugs/unexpected behavior or would like to see more file formats in Picasso, see our [GitHub page](https://github.com/jungmannlab/picasso/issues) for contact information.
 
 #### Render
 

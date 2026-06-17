@@ -628,3 +628,64 @@ class TestTiffLoading:
         meta = io.load_info(str(base) + ".ome.yaml")
         assert meta[0]["Frames"] == 4
         assert meta[0]["Byte Order"] == "<"
+
+    @pytest.mark.parametrize("ext", [".btf", ".tf8", ".tf2"])
+    def test_bigtiff_extensions_load_via_load_movie(self, tmp_path, ext):
+        rng = np.random.default_rng(10)
+        data = rng.integers(0, 60000, size=(4, 12, 10), dtype="<u2")
+        path = tmp_path / ("movie" + ext)
+        _write_tif_stack(path, data, bigtiff=True)
+
+        movie, info = io.load_movie(str(path))
+        try:
+            assert isinstance(movie, io.AbstractPicassoMovie)
+            assert movie.shape == (4, 12, 10)
+            assert movie.n_frames == 4
+            assert info[0]["Frames"] == 4
+            np.testing.assert_array_equal(np.array(list(movie)), data)
+        finally:
+            movie.close()
+
+
+# ---------------------------------------------------------------------------
+# Movie extension dispatch — MOVIE_EXTENSIONS / TIFF_EXTENSIONS / load_movie
+#
+# Note: tifffile cannot WRITE .lsm, so LSM read-correctness cannot be
+# unit-tested without a real sample file. We only verify that a .lsm path is
+# dispatched to load_tif; reading a real .lsm should be validated manually.
+# ---------------------------------------------------------------------------
+
+
+class TestMovieExtensions:
+    def test_constants_contents(self):
+        # TIFF family routed to the tifffile-backed reader
+        for ext in (".tif", ".tiff", ".btf", ".tf8", ".tf2", ".lsm"):
+            assert ext in io.TIFF_EXTENSIONS
+        # MOVIE_EXTENSIONS is the full set incl. the dedicated-loader formats
+        assert set(io.TIFF_EXTENSIONS) <= set(io.MOVIE_EXTENSIONS)
+        for ext in (".raw", ".ims", ".nd2", ".stk"):
+            assert ext in io.MOVIE_EXTENSIONS
+
+    def test_unsupported_extension_raises(self, tmp_path):
+        path = tmp_path / "movie.foobar"
+        path.write_bytes(b"not a movie")
+        with pytest.raises(ValueError, match="Unsupported movie format"):
+            io.load_movie(str(path))
+
+    @pytest.mark.parametrize("ext", [".tif", ".tiff", ".btf", ".tf8", ".lsm"])
+    def test_tiff_family_dispatches_to_load_tif(
+        self, tmp_path, monkeypatch, ext
+    ):
+        # Route every TIFF-family extension through load_tif without needing
+        # a real file for each (esp. .lsm, which tifffile cannot write).
+        called = {}
+
+        def fake_load_tif(path, progress=None):
+            called["path"] = path
+            return "MOVIE", [{}]
+
+        monkeypatch.setattr(io, "load_tif", fake_load_tif)
+        path = tmp_path / ("movie" + ext)
+        movie, info = io.load_movie(str(path))
+        assert movie == "MOVIE"
+        assert called["path"] == str(path)

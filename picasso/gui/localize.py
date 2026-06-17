@@ -214,14 +214,7 @@ class Scene(QtWidgets.QGraphicsScene):
             return False
         path, extension = self.path_from_drop(event)
 
-        if extension.lower() not in [
-            ".raw",
-            ".tif",
-            ".ims",
-            ".nd2",
-            ".tiff",
-            ".stk",
-        ]:
+        if extension.lower() not in io.MOVIE_EXTENSIONS:
             return False
         return True
 
@@ -1911,12 +1904,15 @@ class Window(QtWidgets.QMainWindow):
             "Open image sequence",
             directory=dir,
             filter=(
-                "All supported formats (*.raw *.tif *.nd2 *.ims *.tiff *.stk)"
+                "All supported formats ("
+                + " ".join("*" + e for e in io.MOVIE_EXTENSIONS)
+                + ")"
                 ";;Raw files (*.raw)"
-                ";;Tif images (*.tif)"
+                ";;Tif images (*.tif *.tiff)"
+                ";;BigTiff (*.btf *.tf8 *.tf2)"
+                ";;Zeiss LSM (*.lsm)"
                 ";;ImaRIS IMS (*.ims)"
-                ";;Nd2 files (*.nd2);;"
-                ";;Tiff images (*.tiff)"
+                ";;Nd2 files (*.nd2)"
                 ";;STK files (*.stk)"
             ),
         )
