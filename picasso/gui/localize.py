@@ -3226,7 +3226,7 @@ class IdentificationWorker(QtCore.QThread):
         t0 = time.time()
         # we ignore info since we will merge the metadata from identification
         # as well when saving localizations
-        identifications, info = localize.identify(
+        result = localize.identify(
             movie=self.movie,
             minimum_ng=self.parameters["Min. Net Gradient"],
             box=self.parameters["Box Size"],
@@ -3236,6 +3236,10 @@ class IdentificationWorker(QtCore.QThread):
             progress_callback=self.on_progress,
             abort_callback=self.isInterruptionRequested,
         )
+        if result is None:  # handle aborted process
+            self.aborted.emit()
+            return
+        identifications, info = result
         elapsed_time = time.time() - t0
         self.finished.emit(
             self.parameters,

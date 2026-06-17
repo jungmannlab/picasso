@@ -12,6 +12,7 @@ Last change: 17-JUN-2026 CEST
 - Accept multiple rectangular ROIs
 - Remove a ROI by double-clicking it in the preview
 - Fixed a gap of roughly one box size in the identified spots along the borders between adjacent (e.g. overlapping) ROIs
+- Fixed handling abortions during identification
 
 #### Render
 
