@@ -1217,6 +1217,12 @@ class TiffMap:
         # series, which may span sibling files - those are handled by
         # TiffMultiMap).
         self._pages = self._tif.pages
+        # Parse the IFDs as lightweight TiffFrames, which read only the
+        # essential offset tags per page instead of fully parsing every
+        # tag. This keeps opening a movie fast (minimal reads per IFD,
+        # matching the old reader) - important on network storage where
+        # each extra per-page read is a round-trip.
+        self._pages.useframes = True
         self.n_frames = len(self._pages)
 
         page0 = self._pages[0]
