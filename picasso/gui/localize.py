@@ -649,6 +649,7 @@ class ROIDialog(lib.Dialog):
         self._updating = False
 
         layout = QtWidgets.QVBoxLayout(self)
+        header = QtWidgets.QHBoxLayout()
         info = QtWidgets.QLabel(
             "Each row is a rectangular ROI (y_min, x_min, y_max, x_max, "
             "in camera pixels). Drag a rectangle in the preview or use "
@@ -657,7 +658,10 @@ class ROIDialog(lib.Dialog):
             "list to analyze the whole frame."
         )
         info.setWordWrap(True)
-        layout.addWidget(info)
+        header.addWidget(info, 1)
+        help_button = lib.HelpButton(ParametersDialog.ROI_URL)
+        header.addWidget(help_button, 0, QtCore.Qt.AlignmentFlag.AlignTop)
+        layout.addLayout(header)
 
         self.table = QtWidgets.QTableWidget(0, 4)
         self.table.setHorizontalHeaderLabels(
@@ -846,6 +850,7 @@ class ParametersDialog(lib.Dialog):
 
     CALIB_URL = "https://picassosr.readthedocs.io/en/latest/localize.html#d-calibration"  # noqa: E501
     IDENT_URL = "https://picassosr.readthedocs.io/en/latest/localize.html#identification-and-fitting-of-single-molecule-spots"  # noqa: E501
+    ROI_URL = "https://picassosr.readthedocs.io/en/latest/localize.html#regions-of-interest-rois"  # noqa: E501
 
     def __init__(  # noqa: C901
         self, parent: QtWidgets.QMainWindow | None = None
@@ -959,7 +964,11 @@ class ParametersDialog(lib.Dialog):
             "(y_min, x_min, y_max, x_max, in camera pixels) can be edited\n"
             "directly here. Leave empty to analyze the whole frame."
         )
-        identification_grid.addWidget(label, 5, 0)
+        roi_label_layout = QtWidgets.QHBoxLayout()
+        roi_label_layout.addWidget(lib.HelpButton(self.ROI_URL))
+        roi_label_layout.addWidget(label)
+        roi_label_layout.addStretch(1)
+        identification_grid.addLayout(roi_label_layout, 5, 0)
 
         self._updating_roi_field = False
         self.roi_dialog = None
