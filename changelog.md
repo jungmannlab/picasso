@@ -15,6 +15,9 @@ Last change: 17-JUN-2026 CEST
 
 #### Render
 
+#### SPINNA
+- Fixed verbose for batch analysis
+
 #### *Other improvements:*
 
 ### **Backward incompatible changes:**

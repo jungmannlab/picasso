@@ -3251,6 +3251,7 @@ def main():  # noqa: C901
                     args.parameters,
                     args.asynch,
                     args.bootstrap,
+                    args.verbose,
                 )
             else:
                 from .gui import spinna
