@@ -4,8 +4,11 @@ Every write goes to a ``tmp_path`` so nothing pollutes ``tests/data/``.
 The bundled ``locs`` and ``movie`` fixtures from ``tests/conftest.py``
 are reused for round-trip checks against real Picasso data.
 
+TIFF loading (``load_tif`` / ``TiffMap`` / ``TiffMultiMap`` / ``to_raw``)
+is covered with synthetic ``tifffile``-written stacks generated per test.
+
 Skipped functions (need fixtures we don't have bundled): ``load_ims*``,
-``load_nd2``, ``load_stk``, ``load_tif``, ``to_raw``, ``to_raw_combined``.
+``load_nd2``, ``load_stk``.
 
 :author: Rafal Kowalewski, 2026
 :copyright: Copyright (c) 2026 Jungmann Lab, MPI of Biochemistry
@@ -14,17 +17,19 @@ Skipped functions (need fixtures we don't have bundled): ``load_ims*``,
 from __future__ import annotations
 
 import os
+import json
+import types
 
 import h5py
 import numpy as np
 import pandas as pd
 import pytest
+import tifffile
 import yaml
 
 from picasso import io, lib
 
 from tests.conftest import PIXELSIZE
-
 
 # ---------------------------------------------------------------------------
 # NoMetadataFileError sanity
@@ -409,3 +414,564 @@ class TestThunderstormRoundtrip:
         )
         # Frame count is preserved (frames re-zeroed by import_ts)
         assert out_info[0]["Frames"] == 3
+
+
+# ---------------------------------------------------------------------------
+# TIFF loading — TiffMap / TiffMultiMap / load_tif / to_raw
+#
+# Picasso reads TIFFs via ``tifffile`` (see picasso.io.TiffMap). Real
+# microscopy movies store one IFD per frame, so the fixtures here are
+# written frame-by-frame (a single 3-D array would be collapsed into one
+# volumetric page by tifffile and would not represent a real movie).
+# ---------------------------------------------------------------------------
+
+
+def _write_tif_stack(
+    path,
+    data,
+    byteorder=None,
+    bigtiff=False,
+    compression=None,
+    mm_metadata=None,
+):
+    """Write ``data`` (frames, H, W) as a multi-page TIFF, one IFD per
+    frame. Optionally big-endian, BigTIFF, compressed, or with a
+    MicroManager metadata tag (51123) on the first page."""
+    with tifffile.TiffWriter(
+        str(path), byteorder=byteorder, bigtiff=bigtiff, ome=False
+    ) as tw:
+        for i, frame in enumerate(data):
+            kw = {}
+            if i == 0 and mm_metadata is not None:
+                kw["extratags"] = [
+                    (51123, "s", 0, json.dumps(mm_metadata), True)
+                ]
+            tw.write(
+                frame,
+                photometric="minisblack",
+                compression=compression,
+                contiguous=(compression is None),
+                **kw,
+            )
+
+
+class TestTiffLoading:
+    def test_load_tif_basic_shape_dtype_frames(self, tmp_path):
+        rng = np.random.default_rng(0)
+        data = rng.integers(0, 60000, size=(7, 32, 48), dtype="<u2")
+        path = tmp_path / "plain.tif"
+        _write_tif_stack(path, data)
+
+        movie, info = io.load_tif(str(path))
+        try:
+            assert movie.shape == (7, 32, 48)
+            assert movie.dtype == np.dtype("<u2")
+            assert movie.n_frames == 7
+            assert len(movie) == 7
+            assert info[0]["Height"] == 32
+            assert info[0]["Width"] == 48
+            assert info[0]["Frames"] == 7
+            assert info[0]["Data Type"] == "uint16"
+        finally:
+            movie.close()
+
+    def test_frame_slice_and_iter_access(self, tmp_path):
+        rng = np.random.default_rng(1)
+        data = rng.integers(0, 60000, size=(6, 16, 20), dtype="<u2")
+        path = tmp_path / "access.tif"
+        _write_tif_stack(path, data)
+
+        movie, _ = io.load_tif(str(path))
+        try:
+            np.testing.assert_array_equal(movie[3], data[3])
+            np.testing.assert_array_equal(np.array(movie[2:5]), data[2:5])
+            np.testing.assert_array_equal(movie[...], data)
+            np.testing.assert_array_equal(np.array(list(movie)), data)
+            # Region indexing
+            np.testing.assert_array_equal(
+                movie[4, 5:10, 3:7], data[4, 5:10, 3:7]
+            )
+            # Single frames are little-endian 2-D arrays
+            assert movie[0].dtype == np.dtype("<u2")
+            assert movie[0].shape == (16, 20)
+        finally:
+            movie.close()
+
+    def test_big_endian_normalized_to_little_endian(self, tmp_path):
+        rng = np.random.default_rng(2)
+        data = rng.integers(0, 60000, size=(4, 16, 20), dtype="<u2")
+        path = tmp_path / "be.tif"
+        _write_tif_stack(path, data.astype(">u2"), byteorder=">")
+
+        movie, info = io.load_tif(str(path))
+        try:
+            # Values must be preserved despite byte-order conversion
+            np.testing.assert_array_equal(np.array(list(movie)), data)
+            assert movie.dtype == np.dtype("<u2")
+            assert movie[1].dtype.byteorder in ("<", "=")
+            # info preserves the file's native byte order
+            assert info[0]["Byte Order"] == ">"
+        finally:
+            movie.close()
+
+    def test_bigtiff(self, tmp_path):
+        rng = np.random.default_rng(3)
+        data = rng.integers(0, 255, size=(3, 10, 12), dtype="<u2")
+        path = tmp_path / "big.tif"
+        _write_tif_stack(path, data, bigtiff=True)
+
+        movie, _ = io.load_tif(str(path))
+        try:
+            assert movie.n_frames == 3
+            np.testing.assert_array_equal(np.array(list(movie)), data)
+        finally:
+            movie.close()
+
+    def test_compressed_falls_back_to_decoder(self, tmp_path):
+        rng = np.random.default_rng(4)
+        data = rng.integers(0, 1000, size=(5, 16, 16), dtype="<u2")
+        path = tmp_path / "zip.tif"
+        _write_tif_stack(path, data, compression="zlib")
+
+        movie, _ = io.load_tif(str(path))
+        try:
+            # Compressed pages are not contiguous → fast path disabled
+            assert movie.maps[0]._uncompressed is False
+            np.testing.assert_array_equal(np.array(list(movie)), data)
+            np.testing.assert_array_equal(movie[2], data[2])
+        finally:
+            movie.close()
+
+    def test_multifile_ome_concatenation(self, tmp_path):
+        rng = np.random.default_rng(5)
+        parts = [
+            rng.integers(0, 500, size=(3, 8, 8), dtype="<u2") for _ in range(3)
+        ]
+        base = tmp_path / "mov"
+        _write_tif_stack(str(base) + ".ome.tif", parts[0])
+        _write_tif_stack(str(base) + "_1.ome.tif", parts[1])
+        _write_tif_stack(str(base) + "_2.ome.tif", parts[2])
+
+        movie, info = io.load_tif(str(base) + ".ome.tif")
+        try:
+            expected = np.concatenate(parts, axis=0)
+            assert movie.n_frames == 9
+            assert info[0]["Frames"] == 9
+            np.testing.assert_array_equal(np.array(list(movie)), expected)
+            # Frame routing across files
+            np.testing.assert_array_equal(movie[7], expected[7])
+        finally:
+            movie.close()
+
+    def test_micromanager_metadata_flattened(self, tmp_path):
+        rng = np.random.default_rng(6)
+        data = rng.integers(0, 500, size=(2, 8, 8), dtype="<u2")
+        path = tmp_path / "mm.tif"
+        mm = {
+            "Camera": "TestCam",
+            # MM 2.0 nests values under PropVal — must be flattened
+            "TestCam-Gain": {"PropName": "Gain", "PropVal": "300"},
+            "scopeDataKeys": {"ignored": 1},
+        }
+        _write_tif_stack(path, data, mm_metadata=mm)
+
+        movie, info = io.load_tif(str(path))
+        try:
+            meta = info[0]
+            assert meta["Camera"] == "TestCam"
+            mm_meta = meta["Micro-Manager Metadata"]
+            assert mm_meta["TestCam-Gain"] == "300"
+            assert mm_meta["Camera"] == "TestCam"
+            assert "scopeDataKeys" not in mm_meta
+            # The comments key is always present for parity with old reader
+            assert "Micro-Manager Acquisition Comments" in meta
+        finally:
+            movie.close()
+
+    def test_non_mm_tiff_has_no_camera_key(self, tmp_path):
+        rng = np.random.default_rng(7)
+        data = rng.integers(0, 500, size=(2, 8, 8), dtype="<u2")
+        path = tmp_path / "plain2.tif"
+        _write_tif_stack(path, data)
+
+        movie, info = io.load_tif(str(path))
+        try:
+            assert "Camera" not in info[0]
+            assert "Micro-Manager Metadata" not in info[0]
+        finally:
+            movie.close()
+
+    def test_load_movie_dispatches_tif(self, tmp_path):
+        rng = np.random.default_rng(8)
+        data = rng.integers(0, 60000, size=(4, 12, 10), dtype="<u2")
+        path = tmp_path / "dispatch.tif"
+        _write_tif_stack(path, data)
+
+        movie, _ = io.load_movie(str(path))
+        try:
+            assert isinstance(movie, io.AbstractPicassoMovie)
+            np.testing.assert_array_equal(np.array(list(movie)), data)
+        finally:
+            movie.close()
+
+    def test_to_raw_roundtrip(self, tmp_path):
+        rng = np.random.default_rng(9)
+        data = rng.integers(0, 60000, size=(4, 8, 8), dtype="<u2")
+        base = tmp_path / "grp"
+        _write_tif_stack(str(base) + ".ome.tif", data[:2])
+        _write_tif_stack(str(base) + "_1.ome.tif", data[2:])
+
+        io.to_raw(str(base) + "*.ome.tif", verbose=False)
+
+        raw = np.fromfile(str(base) + ".ome.raw", dtype="<u2").reshape(4, 8, 8)
+        np.testing.assert_array_equal(raw, data)
+        meta = io.load_info(str(base) + ".ome.yaml")
+        assert meta[0]["Frames"] == 4
+        assert meta[0]["Byte Order"] == "<"
+
+    @pytest.mark.parametrize("ext", [".btf", ".tf8", ".tf2"])
+    def test_bigtiff_extensions_load_via_load_movie(self, tmp_path, ext):
+        rng = np.random.default_rng(10)
+        data = rng.integers(0, 60000, size=(4, 12, 10), dtype="<u2")
+        path = tmp_path / ("movie" + ext)
+        _write_tif_stack(path, data, bigtiff=True)
+
+        movie, info = io.load_movie(str(path))
+        try:
+            assert isinstance(movie, io.AbstractPicassoMovie)
+            assert movie.shape == (4, 12, 10)
+            assert movie.n_frames == 4
+            assert info[0]["Frames"] == 4
+            np.testing.assert_array_equal(np.array(list(movie)), data)
+        finally:
+            movie.close()
+
+
+# ---------------------------------------------------------------------------
+# Movie extension dispatch — MOVIE_EXTENSIONS / TIFF_EXTENSIONS / load_movie
+#
+# Note: tifffile cannot WRITE .lsm, so LSM read-correctness cannot be
+# unit-tested without a real sample file. We only verify that a .lsm path is
+# dispatched to load_tif; reading a real .lsm should be validated manually.
+# ---------------------------------------------------------------------------
+
+
+class TestMovieExtensions:
+    def test_constants_contents(self):
+        # TIFF family routed to the tifffile-backed reader
+        for ext in (".tif", ".tiff", ".btf", ".tf8", ".tf2", ".lsm"):
+            assert ext in io.TIFF_EXTENSIONS
+        # MOVIE_EXTENSIONS is the full set incl. the dedicated-loader formats
+        assert set(io.TIFF_EXTENSIONS) <= set(io.MOVIE_EXTENSIONS)
+        for ext in (".raw", ".ims", ".nd2", ".stk"):
+            assert ext in io.MOVIE_EXTENSIONS
+
+    def test_unsupported_extension_raises(self, tmp_path):
+        path = tmp_path / "movie.foobar"
+        path.write_bytes(b"not a movie")
+        with pytest.raises(ValueError, match="Unsupported movie format"):
+            io.load_movie(str(path))
+
+    @pytest.mark.parametrize("ext", [".tif", ".tiff", ".btf", ".tf8", ".lsm"])
+    def test_tiff_family_dispatches_to_load_tif(
+        self, tmp_path, monkeypatch, ext
+    ):
+        # Route every TIFF-family extension through load_tif without needing
+        # a real file for each (esp. .lsm, which tifffile cannot write).
+        called = {}
+
+        def fake_load_tif(path, progress=None):
+            called["path"] = path
+            return "MOVIE", [{}]
+
+        monkeypatch.setattr(io, "load_tif", fake_load_tif)
+        path = tmp_path / ("movie" + ext)
+        movie, info = io.load_movie(str(path))
+        assert movie == "MOVIE"
+        assert called["path"] == str(path)
+
+
+# ---------------------------------------------------------------------------
+# Zeiss .czi / Leica .lif loading (CZIMovie / LIFMovie)
+#
+# czifile / liffile are read-only, so we cannot write synthetic sample
+# files. Instead we exercise the *adapter* logic (channel selection, plane
+# indexing, squeeze, shape/dtype/info) against lightweight fakes that mimic
+# the small slice of each library's API that the adapters use, plus the
+# availability / dispatch / graceful-degradation paths.
+# ---------------------------------------------------------------------------
+
+
+class _FakeCziImage:
+    """Mimics czifile.CziImage for a ``(T, C, [Z, ]Y, X)`` array."""
+
+    def __init__(self, data, dims, mpp=(0.13, 0.13), channels=None, sel=None):
+        self._data = data
+        self.dims = dims
+        self.sizes = dict(zip(dims, data.shape))
+        self.dtype = data.dtype
+        self.mpp = mpp
+        self.attrs = {"meta": "value"}
+        self._channels = channels
+        self._sel = sel or {}
+
+    @property
+    def channels(self):
+        # czifile exposes a dict keyed by channel name; empty when unknown.
+        return self._channels if self._channels is not None else {}
+
+    def __call__(self, **selection):
+        return _FakeCziImage(
+            self._data,
+            self.dims,
+            self.mpp,
+            self._channels,
+            {**self._sel, **selection},
+        )
+
+    def asarray(self):
+        idx = tuple(
+            slice(None) if d in ("Y", "X") else self._sel.get(d, 0)
+            for d in self.dims
+        )
+        return self._data[idx]
+
+
+class _FakeCziFile:
+    def __init__(self, image):
+        self.scenes = {0: image}
+        self.subblock_directory = ()
+        self.closed = False
+
+    def close(self):
+        self.closed = True
+
+
+def _install_fake_czifile(monkeypatch, data, dims, **kwargs):
+    image = _FakeCziImage(data, dims, **kwargs)
+    fake = types.SimpleNamespace(
+        CziFile=lambda path, *a, **k: _FakeCziFile(image),
+        CziImage=lambda parent, entries, *a, **k: image,
+    )
+    monkeypatch.setattr(io, "czifile", fake)
+    return image
+
+
+class TestCZIMovie:
+    def test_shape_dtype_frames_and_access(self, tmp_path, monkeypatch):
+        rng = np.random.default_rng(0)
+        data = rng.integers(0, 60000, size=(5, 1, 8, 6), dtype="<u2")
+        _install_fake_czifile(monkeypatch, data, ("T", "C", "Y", "X"))
+
+        movie, info = io.load_czi(str(tmp_path / "m.czi"))
+        try:
+            assert isinstance(movie, io.AbstractPicassoMovie)
+            assert movie.shape == (5, 8, 6)
+            assert movie.n_frames == 5
+            assert len(movie) == 5
+            assert movie.dtype == np.dtype("uint16")
+            np.testing.assert_array_equal(movie[2], data[2, 0])
+            np.testing.assert_array_equal(np.array(movie[1:3]), data[1:3, 0])
+            np.testing.assert_array_equal(np.array(list(movie)), data[:, 0])
+            assert movie[0].shape == (8, 6)
+            assert info[0]["Height"] == 8
+            assert info[0]["Width"] == 6
+            assert info[0]["Frames"] == 5
+            assert info[0]["Pixelsize"] == 130.0  # 0.13 um -> nm
+        finally:
+            movie.close()
+
+    def test_channel_prompt_selects_channel(self, tmp_path, monkeypatch):
+        rng = np.random.default_rng(1)
+        data = rng.integers(0, 60000, size=(3, 2, 4, 4), dtype="<u2")
+        _install_fake_czifile(
+            monkeypatch,
+            data,
+            ("T", "C", "Y", "X"),
+            channels={"DAPI": {}, "GFP": {}},
+        )
+
+        picked = {}
+
+        def prompt(channels):
+            picked["channels"] = list(channels)
+            return "GFP"
+
+        movie, info = io.load_czi(str(tmp_path / "m.czi"), prompt_info=prompt)
+        try:
+            assert picked["channels"] == ["DAPI", "GFP"]
+            assert info[0]["Channel"] == "GFP"
+            np.testing.assert_array_equal(movie[0], data[0, 1])
+        finally:
+            movie.close()
+
+    def test_defaults_to_first_channel_without_prompt(
+        self, tmp_path, monkeypatch
+    ):
+        rng = np.random.default_rng(2)
+        data = rng.integers(0, 60000, size=(2, 3, 4, 4), dtype="<u2")
+        _install_fake_czifile(monkeypatch, data, ("T", "C", "Y", "X"))
+
+        movie, _ = io.load_czi(str(tmp_path / "m.czi"))  # prompt_info=None
+        try:
+            np.testing.assert_array_equal(movie[1], data[1, 0])
+        finally:
+            movie.close()
+
+    def test_extra_z_dimension_pinned(self, tmp_path, monkeypatch):
+        rng = np.random.default_rng(3)
+        data = rng.integers(0, 1000, size=(4, 1, 2, 5, 5), dtype="<u2")
+        _install_fake_czifile(monkeypatch, data, ("T", "C", "Z", "Y", "X"))
+
+        movie, _ = io.load_czi(str(tmp_path / "m.czi"))
+        try:
+            assert movie.shape == (4, 5, 5)
+            # Z is pinned to 0 -> the first z-plane is returned.
+            np.testing.assert_array_equal(movie[3], data[3, 0, 0])
+        finally:
+            movie.close()
+
+
+class _FakeLifImage:
+    def __init__(self, data, name="Image0", coords=None, outer=("T", "C")):
+        self._data = data
+        self.dims = ("T", "C", "Y", "X")
+        self.sizes = dict(zip(self.dims, data.shape))
+        self.dtype = data.dtype
+        self.size = int(data.size)
+        self.name = name
+        self.coords = coords or {}
+        self.attrs = {"meta": "value"}
+        self.frames = types.SimpleNamespace(dims=outer)
+
+    def frame(self, **indices):
+        return self._data[indices.get("T", 0), indices.get("C", 0)]
+
+
+class _FakeLifFile:
+    def __init__(self, images):
+        self.images = images
+        self.closed = False
+
+    def close(self):
+        self.closed = True
+
+
+def _install_fake_liffile(monkeypatch, images):
+    fake = types.SimpleNamespace(
+        LifFile=lambda path, *a, **k: _FakeLifFile(images),
+    )
+    monkeypatch.setattr(io, "liffile", fake)
+
+
+class TestLIFMovie:
+    def test_shape_dtype_frames_and_access(self, tmp_path, monkeypatch):
+        rng = np.random.default_rng(4)
+        data = rng.integers(0, 60000, size=(6, 1, 7, 9), dtype="<u2")
+        # X coords spaced 1e-7 m = 100 nm
+        coords = {"X": np.arange(9) * 1e-7}
+        _install_fake_liffile(
+            monkeypatch, [_FakeLifImage(data, coords=coords)]
+        )
+
+        movie, info = io.load_lif(str(tmp_path / "m.lif"))
+        try:
+            assert movie.shape == (6, 7, 9)
+            assert movie.n_frames == 6
+            assert movie.dtype == np.dtype("uint16")
+            np.testing.assert_array_equal(movie[4], data[4, 0])
+            np.testing.assert_array_equal(np.array(list(movie)), data[:, 0])
+            assert info[0]["Frames"] == 6
+            assert info[0]["Image"] == "Image0"
+            assert info[0]["Pixelsize"] == 100.0
+        finally:
+            movie.close()
+
+    def test_picks_image_series_with_most_frames(self, tmp_path, monkeypatch):
+        rng = np.random.default_rng(5)
+        small = _FakeLifImage(
+            rng.integers(0, 100, size=(2, 1, 4, 4), dtype="<u2"),
+            name="snap",
+        )
+        big = _FakeLifImage(
+            rng.integers(0, 100, size=(20, 1, 4, 4), dtype="<u2"),
+            name="movie",
+        )
+        _install_fake_liffile(monkeypatch, [small, big])
+
+        movie, info = io.load_lif(str(tmp_path / "m.lif"))
+        try:
+            assert info[0]["Image"] == "movie"
+            assert movie.n_frames == 20
+        finally:
+            movie.close()
+
+    def test_channel_prompt_selects_channel(self, tmp_path, monkeypatch):
+        rng = np.random.default_rng(6)
+        data = rng.integers(0, 60000, size=(3, 2, 4, 4), dtype="<u2")
+        coords = {"C": ["red", "green"]}
+        _install_fake_liffile(
+            monkeypatch, [_FakeLifImage(data, coords=coords)]
+        )
+
+        movie, info = io.load_lif(
+            str(tmp_path / "m.lif"), prompt_info=lambda ch: "green"
+        )
+        try:
+            assert info[0]["Channel"] == "green"
+            np.testing.assert_array_equal(movie[2], data[2, 1])
+        finally:
+            movie.close()
+
+    def test_implausible_pixelsize_is_dropped(self, tmp_path, monkeypatch):
+        rng = np.random.default_rng(7)
+        data = rng.integers(0, 100, size=(2, 1, 4, 4), dtype="<u2")
+        # 1 m spacing -> 1e9 nm, far outside the plausible range
+        coords = {"X": np.arange(4) * 1.0}
+        _install_fake_liffile(
+            monkeypatch, [_FakeLifImage(data, coords=coords)]
+        )
+
+        movie, info = io.load_lif(str(tmp_path / "m.lif"))
+        try:
+            assert "Pixelsize" not in info[0]
+        finally:
+            movie.close()
+
+
+class TestCZILIFAvailabilityAndDispatch:
+    def test_extensions_advertised_when_library_present(self):
+        if io.czifile is not None:
+            assert ".czi" in io.MOVIE_EXTENSIONS
+        if io.liffile is not None:
+            assert ".lif" in io.MOVIE_EXTENSIONS
+
+    def test_load_czi_without_library_raises(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(io, "czifile", None)
+        with pytest.raises(ImportError, match=r"picassosr\[czi\]"):
+            io.load_czi(str(tmp_path / "m.czi"))
+
+    def test_load_lif_without_library_raises(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(io, "liffile", None)
+        with pytest.raises(ImportError, match=r"picassosr\[lif\]"):
+            io.load_lif(str(tmp_path / "m.lif"))
+
+    def test_load_movie_dispatches_czi(self, tmp_path, monkeypatch):
+        rng = np.random.default_rng(8)
+        data = rng.integers(0, 60000, size=(3, 1, 4, 4), dtype="<u2")
+        _install_fake_czifile(monkeypatch, data, ("T", "C", "Y", "X"))
+        movie, _ = io.load_movie(str(tmp_path / "m.czi"))
+        try:
+            assert isinstance(movie, io.CZIMovie)
+        finally:
+            movie.close()
+
+    def test_load_movie_dispatches_lif(self, tmp_path, monkeypatch):
+        rng = np.random.default_rng(9)
+        data = rng.integers(0, 60000, size=(3, 1, 4, 4), dtype="<u2")
+        _install_fake_liffile(monkeypatch, [_FakeLifImage(data)])
+        movie, _ = io.load_movie(str(tmp_path / "m.lif"))
+        try:
+            assert isinstance(movie, io.LIFMovie)
+        finally:
+            movie.close()

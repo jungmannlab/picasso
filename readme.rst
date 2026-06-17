@@ -60,6 +60,7 @@ Via PyPI
 3. Install Picasso package using: ``pip install picassosr``.
 4. You can now run any Picasso function directly from the console/terminal by running: ``picasso render``, ``picasso localize``, etc, or import Picasso functions in your own Python scripts.
 5. To update Picasso (you should get a notification about available updates since v0.10.0) run ``pip install --upgrade picassosr``.
+6. You can optionally install dependencies for .czi and .lif formats by passing ``pip install picassosr[czi]`` or ``pip install picassosr[lif]``.
 
 For Developers (local, editable installation)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

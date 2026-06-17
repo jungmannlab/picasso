@@ -935,6 +935,8 @@ def _localize_collect_paths(files: str) -> list[str]:
             + glob(files + "/*.raw")
             + glob(files + "/*.nd2")
             + glob(files + "/*.stk")
+            + glob(files + "/*.czi")
+            + glob(files + "/*.lif")
         )
         print("A total of {} files detected".format(len(paths)))
     else:
