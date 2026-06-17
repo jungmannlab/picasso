@@ -6,7 +6,7 @@ This section describes the different file format and name conventions used in Pi
 Movie Files
 -----------
 
-Picasso accepts three types of raw movie files: TIFF (preferably from μManager), raw binary data (file extension “.raw”) and the Nikon format .nd2.
+Picasso accepts several types of raw movie files: TIFF-family stacks (“.tif”/“.tiff”/“.ome.tif”/BigTIFF/Zeiss “.lsm”), raw binary data (file extension “.raw”), the Nikon format “.nd2”, MetaMorph “.stk”, Imaris “.ims” (Windows only), and — with the optional ``czi``/``lif`` extras (Python ≥ 3.12) — Zeiss “.czi” and Leica “.lif”.
 
 When loading raw binary files, the user will be prompted for movie metadata such as the number of frames, number of pixels, etc. Alternatively, this metadata can be supplied by an accompanying metadata file with the same filename as the raw binary file, but with the extension .yaml. See ``YAML Metadata Files`` for more details.
 

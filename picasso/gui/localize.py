@@ -1911,6 +1911,8 @@ class Window(QtWidgets.QMainWindow):
                 ";;Tif images (*.tif *.tiff)"
                 ";;BigTiff (*.btf *.tf8 *.tf2)"
                 ";;Zeiss LSM (*.lsm)"
+                ";;Zeiss CZI (*.czi)"
+                ";;Leica LIF (*.lif)"
                 ";;ImaRIS IMS (*.ims)"
                 ";;Nd2 files (*.nd2)"
                 ";;STK files (*.stk)"
@@ -1924,7 +1926,8 @@ class Window(QtWidgets.QMainWindow):
         """Open a movie file."""
         t0 = time.time()
 
-        if path.endswith(".ims"):
+        if path.lower().endswith((".ims", ".czi", ".lif")):
+            # Multi-channel .ims/.czi/.lif files prompt for a channel.
             prompt_info = self.prompt_channel
         else:
             prompt_info = self.prompt_info
@@ -2116,7 +2119,8 @@ class Window(QtWidgets.QMainWindow):
             return info, save
 
     def prompt_channel(self, channels: list[str]) -> str | None:
-        """Prompt for channel selection for IMARIS files."""
+        """Prompt for channel selection for multi-channel movies
+        (IMARIS .ims, Zeiss .czi, Leica .lif)."""
         channel, ok = PromptChannelDialog.getMovieSpecs(self, channels)
         if ok:
             return channel

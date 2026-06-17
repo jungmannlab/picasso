@@ -36,6 +36,21 @@ from .ext import bitplane
 if bitplane.IMSWRITER:
     from .ext.bitplane import IMSFile
 
+# Optional vendor readers for Zeiss .czi and Leica .lif movies. Both are
+# Christoph Gohlke's BSD-licensed libraries (same author as tifffile)
+# and require Python >= 3.12, so they are optional dependencies (extras
+# ``czi`` / ``lif``). When absent, the corresponding extensions are
+# simply not advertised and the loaders raise a helpful ImportError,
+# mirroring how ``.ims`` is gated on ``bitplane.IMSWRITER``.
+try:
+    import czifile
+except ImportError:
+    czifile = None
+try:
+    import liffile
+except ImportError:
+    liffile = None
+
 
 # MicroManager OME-TIFF continuation files store a non-ASCII
 # ImageDescription (tag 270), which makes tifffile log a benign
@@ -51,7 +66,16 @@ logging.getLogger("tifffile").setLevel(logging.ERROR)
 # loaders. ".ome.tif" is covered by ".tif" (os.path.splitext yields
 # ".tif").
 TIFF_EXTENSIONS = (".tif", ".tiff", ".btf", ".tf8", ".tf2", ".lsm")
-MOVIE_EXTENSIONS = (".raw", ".ims", ".nd2", ".stk") + TIFF_EXTENSIONS
+# .czi (Zeiss) and .lif (Leica) are only advertised when their optional
+# reader libraries are importable (see the guarded imports above).
+CZI_EXTENSIONS = (".czi",) if czifile is not None else ()
+LIF_EXTENSIONS = (".lif",) if liffile is not None else ()
+MOVIE_EXTENSIONS = (
+    (".raw", ".ims", ".nd2", ".stk")
+    + TIFF_EXTENSIONS
+    + CZI_EXTENSIONS
+    + LIF_EXTENSIONS
+)
 
 
 class NoMetadataFileError(FileNotFoundError):
@@ -350,6 +374,75 @@ def load_stk(path: str) -> tuple[STKMultiMovie, list[dict]]:
     return movie, [info]
 
 
+def load_czi(
+    path: str,
+    prompt_info: Callable[[list[str]], str] | None = None,
+) -> tuple[CZIMovie, list[dict]]:
+    """Load a Zeiss CZI movie file and its metadata.
+
+    Multi-channel/Z files are reduced to a single-channel ``(T, Y, X)``
+    movie; when more than one channel is present, ``prompt_info`` is
+    called to choose one (defaulting to the first channel otherwise).
+
+    Parameters
+    ----------
+    path : str
+        The path to the CZI movie file.
+    prompt_info : Callable, optional
+        Called with the list of channel names to select one.
+
+    Returns
+    -------
+    movie : CZIMovie
+        A movie object providing array-like access to CZI frames.
+    info : list[dict]
+        A list containing a dictionary with metadata about the movie.
+    """
+    if czifile is None:
+        raise ImportError(
+            "Reading .czi files requires the optional 'czifile' package "
+            "(needs Python >= 3.12). Install it with: "
+            "pip install picassosr[czi]"
+        )
+    movie = CZIMovie(path, prompt_info=prompt_info)
+    return movie, [movie.info()]
+
+
+def load_lif(
+    path: str,
+    prompt_info: Callable[[list[str]], str] | None = None,
+) -> tuple[LIFMovie, list[dict]]:
+    """Load a Leica LIF movie file and its metadata.
+
+    A LIF file may contain several image series; the one with the most
+    time frames is used. Multi-channel files are reduced to a
+    single-channel ``(T, Y, X)`` movie via ``prompt_info`` (defaulting to
+    the first channel otherwise).
+
+    Parameters
+    ----------
+    path : str
+        The path to the LIF movie file.
+    prompt_info : Callable, optional
+        Called with the list of channel names to select one.
+
+    Returns
+    -------
+    movie : LIFMovie
+        A movie object providing array-like access to LIF frames.
+    info : list[dict]
+        A list containing a dictionary with metadata about the movie.
+    """
+    if liffile is None:
+        raise ImportError(
+            "Reading .lif files requires the optional 'liffile' package "
+            "(needs Python >= 3.12). Install it with: "
+            "pip install picassosr[lif]"
+        )
+    movie = LIFMovie(path, prompt_info=prompt_info)
+    return movie, [movie.info()]
+
+
 def load_movie(
     path: str,
     prompt_info=None,
@@ -393,6 +486,10 @@ def load_movie(
         return load_nd2(path)
     elif ext == ".stk":
         return load_stk(path)
+    elif ext == ".czi":
+        return load_czi(path, prompt_info=prompt_info)
+    elif ext == ".lif":
+        return load_lif(path, prompt_info=prompt_info)
     else:
         raise ValueError(
             f"Unsupported movie format: {ext}. Supported formats are"
@@ -1156,6 +1253,314 @@ class ND2Movie(AbstractPicassoMovie):
     @property
     def dtype(self):
         return np.dtype(self.meta["Data Type"])
+
+
+class _MultiDimMovie(AbstractPicassoMovie):
+    """Shared base for vendor formats (Zeiss .czi, Leica .lif) that store a
+    multi-dimensional image which Picasso reduces to a single-channel
+    ``(T, Y, X)`` movie.
+
+    Subclasses open the file in ``__init__``, populate ``n_frames``,
+    ``height``, ``width`` and ``_dtype``, call :meth:`_select_channel` to
+    pick the channel, and implement :meth:`_read_plane` (return the 2D
+    image of one time point at the selected channel) and :meth:`info`.
+    The array-like interface, channel selection and frame validation are
+    provided here. Mirrors the channel-prompt behaviour of ``load_ims``.
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.path = None
+        self.n_frames = 0
+        self.height = 0
+        self.width = 0
+        self._dtype = np.dtype("uint16")
+        self.channels = ["Channel 0"]
+        self._channel = 0
+
+    def _select_channel(
+        self,
+        channels: list[str],
+        prompt_info: Callable[[list[str]], str] | None,
+    ) -> None:
+        """Store the available channels and pick one.
+
+        Defaults to the first channel when there is only one or when no
+        prompt is supplied (e.g. command-line batch processing), matching
+        ``load_ims``.
+        """
+        self.channels = list(channels) if channels else ["Channel 0"]
+        if len(self.channels) > 1 and prompt_info is not None:
+            choice = prompt_info(self.channels)
+            if choice in self.channels:
+                self._channel = self.channels.index(choice)
+            else:
+                self._channel = 0
+        else:
+            self._channel = 0
+        print(f"Setting channel to {self.channels[self._channel]}")
+
+    def _read_plane(self, index: int) -> np.ndarray:
+        """Return the raw 2D image of time point ``index`` at the selected
+        channel. Implemented by subclasses."""
+        raise NotImplementedError
+
+    def get_frame(self, index: int) -> lib.IntArray2D:
+        """Load one frame of the movie as a 2D array."""
+        if index < 0:
+            index += self.n_frames
+        frame = np.squeeze(np.asarray(self._read_plane(index)))
+        if frame.ndim != 2:
+            raise ValueError(
+                f"Expected a 2D frame from {self.path}, got shape "
+                f"{frame.shape}. Multi-sample/RGB frames are not supported."
+            )
+        return frame
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        self.close()
+
+    def __getitem__(self, it):
+        if isinstance(it, slice):
+            return np.stack(
+                [self.get_frame(i) for i in range(*it.indices(self.n_frames))]
+            )
+        return self.get_frame(it)
+
+    def __iter__(self):
+        for i in range(self.n_frames):
+            yield self.get_frame(i)
+
+    def __len__(self) -> int:
+        return self.n_frames
+
+    @property
+    def shape(self) -> tuple[int, int, int]:
+        return (self.n_frames, self.height, self.width)
+
+    @property
+    def dtype(self):
+        return np.dtype(self._dtype)
+
+    def camera_parameters(self, config: dict) -> dict:
+        """No camera-specific calibration is derived from .czi/.lif
+        metadata yet; return neutral defaults so localization proceeds with
+        the parameters set in the GUI."""
+        return {
+            "gain": [1],
+            "qe": [1],
+            "wavelength": [0],
+            "cam_index": 0,
+            "camera": "None",
+        }
+
+    def tofile(self, file_handle, byte_order=None):
+        raise NotImplementedError(
+            f"Writing {type(self).__name__} data to a raw file is not "
+            "supported."
+        )
+
+    def close(self):
+        pass
+
+
+class CZIMovie(_MultiDimMovie):
+    """Read Zeiss CZI movies via the optional ``czifile`` library,
+    presenting a single channel as a ``(T, Y, X)`` movie."""
+
+    def __init__(
+        self,
+        path: str,
+        prompt_info: Callable[[list[str]], str] | None = None,
+    ):
+        super().__init__()
+        self.path = os.path.abspath(path)
+        self._czi = czifile.CziFile(path)
+        # A scene is a dimension-aware CziImage. Single-scene files (the
+        # SMLM norm) expose one; fall back to a view over all subblocks.
+        scenes = self._czi.scenes
+        if scenes:
+            self._image = next(iter(scenes.values()))
+        else:
+            self._image = czifile.CziImage(
+                self._czi, self._czi.subblock_directory
+            )
+        self.sizes = dict(self._image.sizes)
+        if "Y" not in self.sizes or "X" not in self.sizes:
+            self._czi.close()
+            raise ValueError(
+                f"CZI file {self.path} has no Y/X image axes; cannot read "
+                "it as a movie."
+            )
+        self.height = int(self.sizes["Y"])
+        self.width = int(self.sizes["X"])
+        self.n_frames = int(self.sizes.get("T", 1))
+        self._dtype = np.dtype(self._image.dtype)
+        self._mpp = self._image.mpp  # (mpp-x, mpp-y) in micrometer or None
+
+        n_channels = int(self.sizes.get("C", 1))
+        channels = [f"Channel {i}" for i in range(n_channels)]
+        try:
+            names = list(self._image.channels.keys())
+            if len(names) == n_channels:
+                channels = [str(n) for n in names]
+        except Exception:
+            pass
+        self._select_channel(channels, prompt_info)
+
+    def _read_plane(self, index: int) -> np.ndarray:
+        # Pin every non-spatial axis to a single coordinate so asarray
+        # returns one Y/X plane.
+        selection = {}
+        for dim in self.sizes:
+            if dim in ("Y", "X"):
+                continue
+            elif dim == "T":
+                selection[dim] = index
+            elif dim == "C":
+                selection[dim] = self._channel
+            else:
+                selection[dim] = 0
+        return self._image(**selection).asarray()
+
+    def info(self) -> dict:
+        info = {
+            "File": self.path,
+            "Height": self.height,
+            "Width": self.width,
+            "Frames": self.n_frames,
+            "Data Type": self._dtype.name,
+            "Channel": self.channels[self._channel],
+            "Generated by": "Picasso Localize (CZI)",
+        }
+        if self._mpp and self._mpp[0]:
+            info["Pixelsize"] = round(float(self._mpp[0]) * 1000, 3)
+        try:
+            info["CZI Metadata"] = _yaml_safe(self._image.attrs)
+        except Exception:
+            pass
+        return info
+
+    def close(self):
+        try:
+            self._czi.close()
+        except Exception:
+            pass
+
+
+class LIFMovie(_MultiDimMovie):
+    """Read Leica LIF movies via the optional ``liffile`` library,
+    presenting a single channel of one image series as a ``(T, Y, X)``
+    movie."""
+
+    def __init__(
+        self,
+        path: str,
+        prompt_info: Callable[[list[str]], str] | None = None,
+    ):
+        super().__init__()
+        self.path = os.path.abspath(path)
+        self._lif = liffile.LifFile(path)
+        images = list(self._lif.images)
+        if not images:
+            self._lif.close()
+            raise ValueError(f"LIF file {self.path} contains no images.")
+        # A LIF file can hold several acquisitions; use the one with the
+        # most time points (the actual movie).
+        self._image = max(
+            images, key=lambda im: (int(im.sizes.get("T", 1)), int(im.size))
+        )
+        self.image_name = self._image.name
+        self.sizes = dict(self._image.sizes)
+        if "Y" not in self.sizes or "X" not in self.sizes:
+            self._lif.close()
+            raise ValueError(
+                f"LIF image '{self.image_name}' in {self.path} has no Y/X "
+                "axes; cannot read it as a movie."
+            )
+        self.height = int(self.sizes["Y"])
+        self.width = int(self.sizes["X"])
+        self.n_frames = int(self.sizes.get("T", 1))
+        self._dtype = np.dtype(self._image.dtype)
+        # Outer (non-frame) dimensions to index when reading one plane.
+        self._outer_dims = tuple(self._image.frames.dims)
+
+        n_channels = int(self.sizes.get("C", 1))
+        channels = [f"Channel {i}" for i in range(n_channels)]
+        try:
+            names = self._image.coords.get("C")
+            if names is not None and len(names) == n_channels:
+                channels = [str(n) for n in list(names)]
+        except Exception:
+            pass
+        self._select_channel(channels, prompt_info)
+
+    def _read_plane(self, index: int) -> np.ndarray:
+        indices = {}
+        for dim in self._outer_dims:
+            if dim == "T":
+                indices[dim] = index
+            elif dim == "C":
+                indices[dim] = self._channel
+            else:
+                indices[dim] = 0
+        return self._image.frame(**indices)
+
+    def info(self) -> dict:
+        info = {
+            "File": self.path,
+            "Height": self.height,
+            "Width": self.width,
+            "Frames": self.n_frames,
+            "Data Type": self._dtype.name,
+            "Channel": self.channels[self._channel],
+            "Image": self.image_name,
+            "Generated by": "Picasso Localize (LIF)",
+        }
+        pixelsize = self._pixelsize_nm()
+        if pixelsize is not None:
+            info["Pixelsize"] = pixelsize
+        try:
+            info["LIF Metadata"] = _yaml_safe(self._image.attrs)
+        except Exception:
+            pass
+        return info
+
+    def _pixelsize_nm(self) -> float | None:
+        """Best-effort pixel size in nm from the X coordinate spacing.
+
+        liffile stores physical coordinates in meters; only return a value
+        when it is physically plausible to avoid auto-filling the GUI with
+        garbage."""
+        try:
+            xs = self._image.coords.get("X")
+            if xs is None or len(xs) < 2:
+                return None
+            spacing_nm = abs(float(xs[1]) - float(xs[0])) * 1e9
+            if 1.0 <= spacing_nm <= 100000.0:
+                return round(spacing_nm, 3)
+        except Exception:
+            pass
+        return None
+
+    def close(self):
+        try:
+            self._lif.close()
+        except Exception:
+            pass
+
+
+def _yaml_safe(obj):
+    """Coerce arbitrary metadata into YAML/JSON-serialisable builtins so it
+    can be stored in the movie info dict (which gets written to
+    ``_locs.yaml``)."""
+    try:
+        return json.loads(json.dumps(obj, default=str))
+    except Exception:
+        return str(obj)
 
 
 def _mm_metadata_from_tifffile(tif: "tifffile.TiffFile") -> dict:

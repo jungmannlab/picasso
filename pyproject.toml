@@ -69,6 +69,20 @@ dev = [
     "pre-commit",
     "twine",
 ]
+# Optional movie-format readers (czifile and liffile require Python >=
+# 3.12). Used by picasso.io to open Zeiss .czi / Leica .lif files;
+# absent installs simply do not advertise those formats.
+czi = [
+    "czifile>=2026.6.12; python_version>='3.12'",
+    "imagecodecs>=2026.6.6; python_version>='3.12'",
+]
+lif = [
+    "liffile>=2026.4.11; python_version>='3.12'",
+    "imagecodecs>=2026.6.6; python_version>='3.12'",
+]
+formats = [
+    "picassosr[czi,lif]",
+]
 installer = [
     "PyQt6==6.11.0",
     "numpy==2.4.4",
@@ -91,6 +105,9 @@ installer = [
     "imageio==2.37.3",
     "imageio-ffmpeg==0.6.0",
     "tifffile==2026.4.11",
+    "czifile==2026.6.12",
+    "liffile==2026.4.11",
+    "imagecodecs==2026.6.6",
     "pyinstaller==6.19.0",
     "PyImarisWriter==0.7.0; sys_platform=='win32'",
     "hdf5plugin==6.0.0; sys_platform=='win32'"
@@ -117,6 +134,9 @@ installer_gpu = [
     "imageio==2.37.3",
     "imageio-ffmpeg==0.6.0",
     "tifffile==2026.4.11",
+    "czifile==2026.6.12",
+    "liffile==2026.4.11",
+    "imagecodecs==2026.6.6",
     "pyinstaller==6.19.0",
     "PyImarisWriter==0.7.0; sys_platform=='win32'",
     "hdf5plugin==6.0.0; sys_platform=='win32'",

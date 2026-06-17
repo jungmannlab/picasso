@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import os
 import json
+import types
 
 import h5py
 import numpy as np
@@ -29,7 +30,6 @@ import yaml
 from picasso import io, lib
 
 from tests.conftest import PIXELSIZE
-
 
 # ---------------------------------------------------------------------------
 # NoMetadataFileError sanity
@@ -689,3 +689,289 @@ class TestMovieExtensions:
         movie, info = io.load_movie(str(path))
         assert movie == "MOVIE"
         assert called["path"] == str(path)
+
+
+# ---------------------------------------------------------------------------
+# Zeiss .czi / Leica .lif loading (CZIMovie / LIFMovie)
+#
+# czifile / liffile are read-only, so we cannot write synthetic sample
+# files. Instead we exercise the *adapter* logic (channel selection, plane
+# indexing, squeeze, shape/dtype/info) against lightweight fakes that mimic
+# the small slice of each library's API that the adapters use, plus the
+# availability / dispatch / graceful-degradation paths.
+# ---------------------------------------------------------------------------
+
+
+class _FakeCziImage:
+    """Mimics czifile.CziImage for a ``(T, C, [Z, ]Y, X)`` array."""
+
+    def __init__(self, data, dims, mpp=(0.13, 0.13), channels=None, sel=None):
+        self._data = data
+        self.dims = dims
+        self.sizes = dict(zip(dims, data.shape))
+        self.dtype = data.dtype
+        self.mpp = mpp
+        self.attrs = {"meta": "value"}
+        self._channels = channels
+        self._sel = sel or {}
+
+    @property
+    def channels(self):
+        # czifile exposes a dict keyed by channel name; empty when unknown.
+        return self._channels if self._channels is not None else {}
+
+    def __call__(self, **selection):
+        return _FakeCziImage(
+            self._data,
+            self.dims,
+            self.mpp,
+            self._channels,
+            {**self._sel, **selection},
+        )
+
+    def asarray(self):
+        idx = tuple(
+            slice(None) if d in ("Y", "X") else self._sel.get(d, 0)
+            for d in self.dims
+        )
+        return self._data[idx]
+
+
+class _FakeCziFile:
+    def __init__(self, image):
+        self.scenes = {0: image}
+        self.subblock_directory = ()
+        self.closed = False
+
+    def close(self):
+        self.closed = True
+
+
+def _install_fake_czifile(monkeypatch, data, dims, **kwargs):
+    image = _FakeCziImage(data, dims, **kwargs)
+    fake = types.SimpleNamespace(
+        CziFile=lambda path, *a, **k: _FakeCziFile(image),
+        CziImage=lambda parent, entries, *a, **k: image,
+    )
+    monkeypatch.setattr(io, "czifile", fake)
+    return image
+
+
+class TestCZIMovie:
+    def test_shape_dtype_frames_and_access(self, tmp_path, monkeypatch):
+        rng = np.random.default_rng(0)
+        data = rng.integers(0, 60000, size=(5, 1, 8, 6), dtype="<u2")
+        _install_fake_czifile(monkeypatch, data, ("T", "C", "Y", "X"))
+
+        movie, info = io.load_czi(str(tmp_path / "m.czi"))
+        try:
+            assert isinstance(movie, io.AbstractPicassoMovie)
+            assert movie.shape == (5, 8, 6)
+            assert movie.n_frames == 5
+            assert len(movie) == 5
+            assert movie.dtype == np.dtype("uint16")
+            np.testing.assert_array_equal(movie[2], data[2, 0])
+            np.testing.assert_array_equal(np.array(movie[1:3]), data[1:3, 0])
+            np.testing.assert_array_equal(np.array(list(movie)), data[:, 0])
+            assert movie[0].shape == (8, 6)
+            assert info[0]["Height"] == 8
+            assert info[0]["Width"] == 6
+            assert info[0]["Frames"] == 5
+            assert info[0]["Pixelsize"] == 130.0  # 0.13 um -> nm
+        finally:
+            movie.close()
+
+    def test_channel_prompt_selects_channel(self, tmp_path, monkeypatch):
+        rng = np.random.default_rng(1)
+        data = rng.integers(0, 60000, size=(3, 2, 4, 4), dtype="<u2")
+        _install_fake_czifile(
+            monkeypatch,
+            data,
+            ("T", "C", "Y", "X"),
+            channels={"DAPI": {}, "GFP": {}},
+        )
+
+        picked = {}
+
+        def prompt(channels):
+            picked["channels"] = list(channels)
+            return "GFP"
+
+        movie, info = io.load_czi(str(tmp_path / "m.czi"), prompt_info=prompt)
+        try:
+            assert picked["channels"] == ["DAPI", "GFP"]
+            assert info[0]["Channel"] == "GFP"
+            np.testing.assert_array_equal(movie[0], data[0, 1])
+        finally:
+            movie.close()
+
+    def test_defaults_to_first_channel_without_prompt(
+        self, tmp_path, monkeypatch
+    ):
+        rng = np.random.default_rng(2)
+        data = rng.integers(0, 60000, size=(2, 3, 4, 4), dtype="<u2")
+        _install_fake_czifile(monkeypatch, data, ("T", "C", "Y", "X"))
+
+        movie, _ = io.load_czi(str(tmp_path / "m.czi"))  # prompt_info=None
+        try:
+            np.testing.assert_array_equal(movie[1], data[1, 0])
+        finally:
+            movie.close()
+
+    def test_extra_z_dimension_pinned(self, tmp_path, monkeypatch):
+        rng = np.random.default_rng(3)
+        data = rng.integers(0, 1000, size=(4, 1, 2, 5, 5), dtype="<u2")
+        _install_fake_czifile(monkeypatch, data, ("T", "C", "Z", "Y", "X"))
+
+        movie, _ = io.load_czi(str(tmp_path / "m.czi"))
+        try:
+            assert movie.shape == (4, 5, 5)
+            # Z is pinned to 0 -> the first z-plane is returned.
+            np.testing.assert_array_equal(movie[3], data[3, 0, 0])
+        finally:
+            movie.close()
+
+
+class _FakeLifImage:
+    def __init__(self, data, name="Image0", coords=None, outer=("T", "C")):
+        self._data = data
+        self.dims = ("T", "C", "Y", "X")
+        self.sizes = dict(zip(self.dims, data.shape))
+        self.dtype = data.dtype
+        self.size = int(data.size)
+        self.name = name
+        self.coords = coords or {}
+        self.attrs = {"meta": "value"}
+        self.frames = types.SimpleNamespace(dims=outer)
+
+    def frame(self, **indices):
+        return self._data[indices.get("T", 0), indices.get("C", 0)]
+
+
+class _FakeLifFile:
+    def __init__(self, images):
+        self.images = images
+        self.closed = False
+
+    def close(self):
+        self.closed = True
+
+
+def _install_fake_liffile(monkeypatch, images):
+    fake = types.SimpleNamespace(
+        LifFile=lambda path, *a, **k: _FakeLifFile(images),
+    )
+    monkeypatch.setattr(io, "liffile", fake)
+
+
+class TestLIFMovie:
+    def test_shape_dtype_frames_and_access(self, tmp_path, monkeypatch):
+        rng = np.random.default_rng(4)
+        data = rng.integers(0, 60000, size=(6, 1, 7, 9), dtype="<u2")
+        # X coords spaced 1e-7 m = 100 nm
+        coords = {"X": np.arange(9) * 1e-7}
+        _install_fake_liffile(
+            monkeypatch, [_FakeLifImage(data, coords=coords)]
+        )
+
+        movie, info = io.load_lif(str(tmp_path / "m.lif"))
+        try:
+            assert movie.shape == (6, 7, 9)
+            assert movie.n_frames == 6
+            assert movie.dtype == np.dtype("uint16")
+            np.testing.assert_array_equal(movie[4], data[4, 0])
+            np.testing.assert_array_equal(np.array(list(movie)), data[:, 0])
+            assert info[0]["Frames"] == 6
+            assert info[0]["Image"] == "Image0"
+            assert info[0]["Pixelsize"] == 100.0
+        finally:
+            movie.close()
+
+    def test_picks_image_series_with_most_frames(self, tmp_path, monkeypatch):
+        rng = np.random.default_rng(5)
+        small = _FakeLifImage(
+            rng.integers(0, 100, size=(2, 1, 4, 4), dtype="<u2"),
+            name="snap",
+        )
+        big = _FakeLifImage(
+            rng.integers(0, 100, size=(20, 1, 4, 4), dtype="<u2"),
+            name="movie",
+        )
+        _install_fake_liffile(monkeypatch, [small, big])
+
+        movie, info = io.load_lif(str(tmp_path / "m.lif"))
+        try:
+            assert info[0]["Image"] == "movie"
+            assert movie.n_frames == 20
+        finally:
+            movie.close()
+
+    def test_channel_prompt_selects_channel(self, tmp_path, monkeypatch):
+        rng = np.random.default_rng(6)
+        data = rng.integers(0, 60000, size=(3, 2, 4, 4), dtype="<u2")
+        coords = {"C": ["red", "green"]}
+        _install_fake_liffile(
+            monkeypatch, [_FakeLifImage(data, coords=coords)]
+        )
+
+        movie, info = io.load_lif(
+            str(tmp_path / "m.lif"), prompt_info=lambda ch: "green"
+        )
+        try:
+            assert info[0]["Channel"] == "green"
+            np.testing.assert_array_equal(movie[2], data[2, 1])
+        finally:
+            movie.close()
+
+    def test_implausible_pixelsize_is_dropped(self, tmp_path, monkeypatch):
+        rng = np.random.default_rng(7)
+        data = rng.integers(0, 100, size=(2, 1, 4, 4), dtype="<u2")
+        # 1 m spacing -> 1e9 nm, far outside the plausible range
+        coords = {"X": np.arange(4) * 1.0}
+        _install_fake_liffile(
+            monkeypatch, [_FakeLifImage(data, coords=coords)]
+        )
+
+        movie, info = io.load_lif(str(tmp_path / "m.lif"))
+        try:
+            assert "Pixelsize" not in info[0]
+        finally:
+            movie.close()
+
+
+class TestCZILIFAvailabilityAndDispatch:
+    def test_extensions_advertised_when_library_present(self):
+        if io.czifile is not None:
+            assert ".czi" in io.MOVIE_EXTENSIONS
+        if io.liffile is not None:
+            assert ".lif" in io.MOVIE_EXTENSIONS
+
+    def test_load_czi_without_library_raises(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(io, "czifile", None)
+        with pytest.raises(ImportError, match=r"picassosr\[czi\]"):
+            io.load_czi(str(tmp_path / "m.czi"))
+
+    def test_load_lif_without_library_raises(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(io, "liffile", None)
+        with pytest.raises(ImportError, match=r"picassosr\[lif\]"):
+            io.load_lif(str(tmp_path / "m.lif"))
+
+    def test_load_movie_dispatches_czi(self, tmp_path, monkeypatch):
+        rng = np.random.default_rng(8)
+        data = rng.integers(0, 60000, size=(3, 1, 4, 4), dtype="<u2")
+        _install_fake_czifile(monkeypatch, data, ("T", "C", "Y", "X"))
+        movie, _ = io.load_movie(str(tmp_path / "m.czi"))
+        try:
+            assert isinstance(movie, io.CZIMovie)
+        finally:
+            movie.close()
+
+    def test_load_movie_dispatches_lif(self, tmp_path, monkeypatch):
+        rng = np.random.default_rng(9)
+        data = rng.integers(0, 60000, size=(3, 1, 4, 4), dtype="<u2")
+        _install_fake_liffile(monkeypatch, [_FakeLifImage(data)])
+        movie, _ = io.load_movie(str(tmp_path / "m.lif"))
+        try:
+            assert isinstance(movie, io.LIFMovie)
+        finally:
+            movie.close()
