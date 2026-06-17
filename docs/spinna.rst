@@ -159,6 +159,7 @@ For a heterogeneous distribution:
 Optional columns are:
 - *rotation_mode* : Random rotations mode used in analysis. Values must be one of {*3D*, *2D*, *None*}. Default: *2D*.
 - *nn_plotted* : Number of nearest neighbors plotted, default: 4.
+- *fitting_mode* : Optimization method used to fit the structure counts. Values must be one of {*coarse-to-fine*, *bayesian*, *brute-force*}. Default: *bayesian*.
 - *le_fitting* : 0 if standard SPINNA is ran, 1 if labeling efficiency fitting is to be performed. When set to 1, monomer A, monomer B and heterodimer structures are built internally for each candidate ``distances`` value, label uncertainty is fit per target from the comma-separated candidates in ``label_unc_TARGET``, and the per-target LE is recovered from the fitted structure proportions. Exactly two ``exp_data_*`` columns must be present; the first maps to ``target_a``. ``-b/--bootstrap`` is ignored on LE-fitting rows. If the column is not provided, standard SPINNA is ran. For more details, see `Hellmeier, Strauss, et al. Nature Methods, 2024 <https://doi.org/10.1038/s41592-024-02242-5>`_.
 - *distances* : Comma-separated list of candidate heterodimer distances in nm (e.g. ``"5,10,15,20"``). A single value fixes the distance. Required when ``le_fitting=1``; ignored otherwise.
 

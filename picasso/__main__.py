@@ -1949,6 +1949,20 @@ def _spinna_process_row(
         else:
             nn_plotted = int(row["nn_plotted"])
 
+    # None means "use the per-branch default" (bayesian for standard
+    # SPINNA, coarse-to-fine for LE fitting)
+    fitting_mode = None
+    if "fitting_mode" in row.index and pd.notna(row["fitting_mode"]):
+        mode = str(row["fitting_mode"]).strip()
+        if mode in ("coarse-to-fine", "bayesian", "brute-force"):
+            fitting_mode = mode
+        else:
+            print(
+                f"Invalid fitting_mode '{mode}'. Must be one of "
+                "'coarse-to-fine', 'bayesian', 'brute-force'. Using "
+                "default."
+            )
+
     if le_fitting:
         targets = _spinna_targets_from_row(row)
     else:
@@ -1997,6 +2011,7 @@ def _spinna_process_row(
             save_filename=save_filename,
             asynch=asynch,
             verbose=verbose,
+            fitting_mode=fitting_mode,
             spinna=spinna,
         )
 
@@ -2025,7 +2040,7 @@ def _spinna_process_row(
         N_sim=sim_repeats,
     ).fit_stoichiometry(
         N_structures,
-        fitting_mode="bayesian",
+        fitting_mode=fitting_mode if fitting_mode is not None else "bayesian",
         save=f"{save_filename}_fit_scores.csv",
         asynch=asynch,
         bootstrap=bootstrap,
@@ -2099,6 +2114,7 @@ def _spinna_process_row_le(
     save_filename: str,
     asynch: bool,
     verbose: bool,
+    fitting_mode: str | None,
     spinna,
 ) -> dict:
     """LE-fitting branch of ``_spinna_process_row``: builds monomer/
@@ -2145,7 +2161,9 @@ def _spinna_process_row_le(
         asynch=asynch,
         savedir=os.path.dirname(save_filename),
         callback="console" if verbose else None,
-        fitting_mode="coarse-to-fine",
+        fitting_mode=(
+            fitting_mode if fitting_mode is not None else "bayesian"
+        ),
     )
 
     structures = best_mixer.structures
@@ -2261,6 +2279,9 @@ def _spinna_batch_analysis(
         must be one of {"3D", "2D", "None"}. Default: "2D".
     - "nn_plotted" : Number of nearest neighbors plotted in the NND.
         Only integer values are accepted. Default: 4.
+    - "fitting_mode" : Optimization method used to fit the structure
+        counts. Values must be one of {"coarse-to-fine", "bayesian",
+        "brute-force"}. Default: "bayesian".
     - "le_fitting" : 0 if standard SPINNA is ran, 1 if labeling
         efficiency fitting is to be performed. If the column is not
         provided, standard SPINNA is ran. When set to 1, the batch

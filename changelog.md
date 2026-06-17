@@ -17,6 +17,7 @@ Last change: 17-JUN-2026 CEST
 
 #### SPINNA
 - Fixed verbose for batch analysis
+- Batch analysis allows for specifying fitting mode (brute force/coarse to fine/bayesian)
 
 #### *Other improvements:*
 
