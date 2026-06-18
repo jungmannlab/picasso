@@ -6946,8 +6946,17 @@ class View(QtWidgets.QLabel):
     _pixmap : QPixMap
         Pixmap currently displayed.
     _points : list
-        Contains the coordinates of points to measure distances
-        between them.
+        Coordinates of the points of the measurement set currently
+        being drawn (connected by lines with live distances).
+    _point_sets : list
+        Finalized measurement sets, each a list of point coordinates.
+        Kept separate so lines and distances are only drawn within a
+        set, not across sets.
+    _measure_following : bool
+        True while the cursor is followed live and left clicks extend
+        the current set. Set to False (frozen) by the first right click
+        so a new set can be started; a further right click then deletes
+        the last finalized set.
     qimage : QImage
         Current image of rendered locs, picks and other drawings.
     qimage_no_picks : QImage
@@ -7005,6 +7014,11 @@ class View(QtWidgets.QLabel):
         self.n_locs = 0
         self._picks = []
         self._points = []
+        self._point_sets = []  # finalized measurement sets
+        self._measure_following = True  # cursor followed live while True
+        self._measure_cursor = None  # live cursor position in Measure mode
+        # track the cursor without a pressed button for live measuring
+        self.setMouseTracking(True)
         self.index_blocks = []
         self.render_index = []
         self._drift = []
@@ -8056,12 +8070,29 @@ class View(QtWidgets.QLabel):
             if not self.window.dataset_dialog.wbackground.isChecked()
             else QtGui.QColor("red")
         )
+        # draw all finalized measurement sets (static, no live cursor)
+        for point_set in self._point_sets:
+            image = render.draw_points(
+                image=image,
+                viewport=self.viewport,
+                points=point_set,
+                pixelsize=self.pixelsize,
+                color=color,
+            )
+        # draw the active set; show the live cursor cross and running
+        # distance only in Measure mode while the cursor is followed
+        cursor = (
+            self._measure_cursor
+            if self._mode == "Measure" and self._measure_following
+            else None
+        )
         return render.draw_points(
             image=image,
             viewport=self.viewport,
             points=self._points,
             pixelsize=self.pixelsize,
             color=color,
+            cursor=cursor,
         )
 
     def draw_scalebar(self, image: QtGui.QImage) -> QtGui.QImage:
@@ -8839,6 +8870,19 @@ class View(QtWidgets.QLabel):
                     self.rectangle_pick_current_x = event.pos().x()
                     self.rectangle_pick_current_y = event.pos().y()
                     self.update_scene(picks_only=True)
+        # live update of the measuring cross and distance
+        elif self._mode == "Measure" and self._measure_following:
+            self._measure_cursor = self.map_to_movie(event.pos())
+            self.update_scene(picks_only=True)
+
+    def leaveEvent(self, event: QtCore.QEvent) -> None:
+        """Hide the live measuring cross when the cursor leaves the
+        canvas."""
+        if self._mode == "Measure" and self._measure_cursor is not None:
+            self._measure_cursor = None
+            if len(self.locs):
+                self.update_scene(picks_only=True)
+        super().leaveEvent(event)
 
     def mousePressEvent(self, event: QtCore.QEvent) -> None:
         """Start drawing a zoom-in rectangle, start padding, start
@@ -8945,17 +8989,25 @@ class View(QtWidgets.QLabel):
                 self.remove_polygon_point()
 
     def _mouse_release_measure(self, event: QtCore.QEvent) -> None:
-        """Adds a measure point on left click, removes the last one on
-        right click."""
+        """Add a measure point on left click. The first right click
+        freezes the current set so a new one can be started; a further
+        right click then deletes the last finalized set."""
         if event.button() == QtCore.Qt.MouseButton.LeftButton:
+            # start a new set if the previous one was frozen
+            if not self._measure_following:
+                self._measure_following = True
+                self.update_cursor()
             # add measure point
             x, y = self.map_to_movie(event.pos())
             self.add_point((x, y))
             event.accept()
         elif event.button() == QtCore.Qt.MouseButton.RightButton:
-            # remove measure points
-            x, y = self.map_to_movie(event.pos())
-            self.remove_points()
+            if self._measure_following:
+                # freeze the current selection (stop following)
+                self.finalize_measure_set()
+            else:
+                # delete the last finalized set of measurements
+                self.remove_last_measure_set()
             event.accept()
         else:
             event.ignore()
@@ -10247,9 +10299,31 @@ class View(QtWidgets.QLabel):
             self.update_scene(picks_only=True)
 
     def remove_points(self) -> None:
-        """Remove all distance measurement points."""
+        """Remove all distance measurement points and sets."""
         self._points = []
+        self._point_sets = []
+        self._measure_following = True
+        self._measure_cursor = None
+        self.update_cursor()
         self.update_scene()
+
+    def finalize_measure_set(self) -> None:
+        """Freeze the current measurement set so a new one can be
+        started. The cursor is no longer followed until the next left
+        click."""
+        if self._points:
+            self._point_sets.append(self._points)
+            self._points = []
+        self._measure_following = False
+        self._measure_cursor = None
+        self.update_cursor()
+        self.update_scene()
+
+    def remove_last_measure_set(self) -> None:
+        """Delete the most recently finalized measurement set."""
+        if self._point_sets:
+            self._point_sets.pop()
+            self.update_scene()
 
     def render_scene(
         self,
@@ -11385,8 +11459,15 @@ class View(QtWidgets.QLabel):
 
     def update_cursor(self) -> None:
         """Change cursor according to self._mode."""
-        if self._mode == "Zoom" or self._mode == "Measure":
+        if self._mode == "Zoom":
             self.unsetCursor()  # normal cursor
+        elif self._mode == "Measure":
+            if self._measure_following:
+                # hide the OS cursor; the drawn cross marks the position
+                self.setCursor(QtCore.Qt.CursorShape.BlankCursor)
+            else:
+                # selection frozen, show the normal cursor again
+                self.unsetCursor()
         elif self._mode == "Pick":
             if self._pick_shape == "Circle":  # circle
                 self._update_cursor_circle()

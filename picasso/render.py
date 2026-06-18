@@ -2168,6 +2168,7 @@ def draw_points(
     pixelsize: int | float,  # camera pixel size in nm
     color: QtGui.QColor = QtGui.QColor("yellow"),
     mark_width: int = 20,  # width of the drawn crosses in display pixels
+    cursor: tuple | None = None,  # live cursor position in camera pixels
 ) -> QtGui.QImage:
     """Draw points, lines and distances between them onto image.
 
@@ -2187,6 +2188,10 @@ def draw_points(
         Color of the points, lines and text. Default is yellow.
     mark_width : int, optional
         Width of the drawn crosses in display pixels. Default is 20.
+    cursor : tuple or None, optional
+        Current cursor position in camera pixels. If given, it is drawn
+        as a cross and, when at least one point exists, a line with the
+        live distance to the last point is shown. Default is None.
 
     Returns
     -------
@@ -2195,6 +2200,37 @@ def draw_points(
     """
     painter = QtGui.QPainter(image)
     painter.setPen(color)
+
+    def draw_cross(x, y):
+        """Draw a cross marker centered at display coordinates."""
+        painter.drawPoint(x, y)
+        painter.drawLine(x, y, int(x + mark_width / 2), y)
+        painter.drawLine(x, y, x, int(y + mark_width / 2))
+        painter.drawLine(x, y, int(x - mark_width / 2), y)
+        painter.drawLine(x, y, x, int(y - mark_width / 2))
+
+    def draw_distance(x1, y1, x2, y2, p1, p2):
+        """Draw a line and the distance label between two points."""
+        painter.drawLine(x1, y1, x2, y2)
+        font = painter.font()
+        font.setPixelSize(20)
+        painter.setFont(font)
+        # get distance with 2 decimal places
+        distance = (
+            float(
+                int(
+                    np.sqrt((p1[0] - p2[0]) ** 2 + (p1[1] - p2[1]) ** 2)
+                    * pixelsize
+                    * 100
+                )
+            )
+            / 100
+        )
+        painter.drawText(
+            int((x1 + x2) / 2 + mark_width),
+            int((y1 + y2) / 2 + mark_width),
+            str(distance) + " nm",
+        )
 
     cx = []
     cy = []
@@ -2208,41 +2244,22 @@ def draw_points(
         cx, cy = map_to_view(*point, image.size(), viewport=viewport)
 
         # draw a cross
-        painter.drawPoint(cx, cy)
-        painter.drawLine(cx, cy, int(cx + mark_width / 2), cy)
-        painter.drawLine(cx, cy, cx, int(cy + mark_width / 2))
-        painter.drawLine(cx, cy, int(cx - mark_width / 2), cy)
-        painter.drawLine(cx, cy, cx, int(cy - mark_width / 2))
+        draw_cross(cx, cy)
 
         # draw a line between points and show distance
         if oldpoint != []:
-            painter.drawLine(cx, cy, ox, oy)
-            font = painter.font()
-            font.setPixelSize(20)
-            painter.setFont(font)
-
-            # get distance with 2 decimal places
-            distance = (
-                float(
-                    int(
-                        np.sqrt(
-                            (
-                                (oldpoint[0] - point[0]) ** 2
-                                + (oldpoint[1] - point[1]) ** 2
-                            )
-                        )
-                        * pixelsize
-                        * 100
-                    )
-                )
-                / 100
-            )
-            painter.drawText(
-                int((cx + ox) / 2 + mark_width),
-                int((cy + oy) / 2 + mark_width),
-                str(distance) + " nm",
-            )
+            draw_distance(cx, cy, ox, oy, oldpoint, point)
         oldpoint = point
+
+    # draw the live cursor as a cross and the running distance to the
+    # last placed point
+    if cursor is not None:
+        ccx, ccy = map_to_view(*cursor, image.size(), viewport=viewport)
+        draw_cross(ccx, ccy)
+        if points:
+            lx, ly = map_to_view(*points[-1], image.size(), viewport=viewport)
+            draw_distance(ccx, ccy, lx, ly, points[-1], cursor)
+
     painter.end()
     return image
 

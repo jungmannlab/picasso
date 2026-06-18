@@ -366,7 +366,16 @@ Selects the pick tool. The mouse can now be used for picking localizations. The 
 
 Measure (CTRL + M)
 ^^^^^^^^^^^^^^^^^^
-Selects the measure tool. The mouse can now be used for measuring distances. Left click adds a crosshair for measuring; right-click deletes the last crosshair.
+Selects the measure tool, which is used to measure distances on the rendered image.
+
+While the tool is active, the cursor is shown as a crosshair that follows the mouse. **Left click** drops a measurement point: each new point is connected to the previous one by a line, and the running total distance (in nm) is displayed live next to the line as you move the mouse, before the next point is even placed. Chaining several left clicks measures a multi-segment path.
+
+**Right click** has two functions:
+
+* The **first** right click *freezes* the current measurement set: the crosshair stops following the mouse and the measured path stays drawn on the image. A new, independent set of measurements can then be started simply by left-clicking again.
+* While in this frozen state, a **further** right click *deletes* the most recently finalized set. Repeating it removes the previous sets one by one.
+
+Distances and lines are only drawn within a set, never across sets, so multiple independent measurements can be displayed at the same time.
 
 Tools settings (CTRL + T)
 ^^^^^^^^^^^^^^^^^^^^^^^^^

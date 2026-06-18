@@ -1,6 +1,6 @@
 # Changelog
 
-Last change: 17-JUN-2026 CEST
+Last change: 18-JUN-2026 CEST
 
 ## 0.11.0
 
@@ -16,6 +16,7 @@ Last change: 17-JUN-2026 CEST
 
 #### Render
 - Fixed double-multiplication of picked areas (affecting square and circular picks)
+- Improved measure tool
 
 #### SPINNA
 - Fixed verbose for batch analysis
