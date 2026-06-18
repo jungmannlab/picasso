@@ -33,6 +33,10 @@ Last change: 18-JUN-2026 CEST
 #### *Deprecation warnings:*
 - `picasso.localize.identify` and `picasso.localize.localize` will always return metadata in v0.12.0, `return_info` will no longer be accepted
 
+## 0.10.3
+- Fixed total pick area in the .yamls for circular and square picks (Render)
+- Fixed plotting x and y in "Select picks (trace) in Render"
+
 ## 0.10.2
 - Rotations use quaterions for unambiguous workflow, fixing bugs [#673](https://github.com/jungmannlab/picasso/issues/673), [#674](https://github.com/jungmannlab/picasso/issues/674) and [#675](https://github.com/jungmannlab/picasso/issues/675)
 - All 3 angles in "Rotate by angle" in the 3D rotation window are accumulated into a single widget
