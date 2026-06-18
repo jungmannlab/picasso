@@ -3,7 +3,8 @@
 Last change: 18-JUN-2026 CEST
 
 ## 0.10.3
-- Fixed total pick area in the .yamls for circular and square picks
+- Fixed total pick area in the .yamls for circular and square picks (Render)
+- Fixed plotting x and y in "Select picks (trace) in Render"
 
 ## 0.10.2
 - Rotations use quaterions for unambiguous workflow, fixing bugs [#673](https://github.com/jungmannlab/picasso/issues/673), [#674](https://github.com/jungmannlab/picasso/issues/674) and [#675](https://github.com/jungmannlab/picasso/issues/675)

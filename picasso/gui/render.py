@@ -9219,8 +9219,10 @@ class View(QtWidgets.QLabel):
                     + "."
                 )
                 if locs_.size:
-                    fig.axes[0].set_ylim(yvec[yvec > 0].min(), yvec.max())
-                    fig.axes[1].set_ylim(yvec[yvec > 0].min(), yvec.max())
+                    for ax, col in zip(fig.axes[:2], ("x", "y")):
+                        lo, hi = locs_[col].min(), locs_[col].max()
+                        if lo != hi:
+                            ax.set_ylim(lo, hi)
                 plt.setp(fig.axes[0].get_xticklabels(), visible=False)
                 plt.setp(fig.axes[1].get_xticklabels(), visible=False)
 
