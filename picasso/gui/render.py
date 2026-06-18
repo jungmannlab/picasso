@@ -9219,8 +9219,10 @@ class View(QtWidgets.QLabel):
                     + "."
                 )
                 if locs_.size:
-                    fig.axes[0].set_ylim(yvec[yvec > 0].min(), yvec.max())
-                    fig.axes[1].set_ylim(yvec[yvec > 0].min(), yvec.max())
+                    for ax, col in zip(fig.axes[:2], ("x", "y")):
+                        lo, hi = locs_[col].min(), locs_[col].max()
+                        if lo != hi:
+                            ax.set_ylim(lo, hi)
                 plt.setp(fig.axes[0].get_xticklabels(), visible=False)
                 plt.setp(fig.axes[1].get_xticklabels(), visible=False)
 
@@ -10601,11 +10603,6 @@ class View(QtWidgets.QLabel):
         # save picked locs with .yaml
         if locs is not None:
             pick_info = self._build_base_pick_info()
-            # correct for the total area for certain shapes
-            if self._pick_shape in ["Circle", "Square"]:
-                pick_info["Area (um^2)"] = pick_info["Area (um^2)"] * len(
-                    self._picks
-                )
             self._add_shape_specific_info(pick_info)
             io.save_locs(path, locs, self.infos[channel] + [pick_info])
 
