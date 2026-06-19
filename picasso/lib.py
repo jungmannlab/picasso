@@ -70,6 +70,54 @@ Array3x3: TypeAlias = np.ndarray[
 ]
 
 
+def normalize_frame_bounds(frame_bounds, n_frames):
+    """Normalize ``frame_bounds`` to a list of concrete, inclusive,
+    0-indexed ``(lo, hi)`` segments.
+
+    Accepts either the legacy flat form ``(min, max)`` (where either bound
+    may be None for an open end) or a list of such segments. ``None``
+    bounds are resolved to ``0`` / ``n_frames``. Returns None when
+    ``frame_bounds`` is None (i.e., all frames are used).
+
+    Parameters
+    ----------
+    frame_bounds : tuple, list of tuples, or None
+        A single ``(min, max)`` tuple, a list of such tuples, or None.
+    n_frames : int
+        Number of frames in the movie, used to resolve open upper bounds.
+
+    Returns
+    -------
+    segments : list of tuple, or None
+        List of ``(lo, hi)`` inclusive 0-indexed segments, or None.
+    """
+    if frame_bounds is None:
+        return None
+    # detect the legacy flat (min, max) form: the first element is a
+    # scalar or None rather than a (lo, hi) segment
+    first = frame_bounds[0]
+    if first is None or np.isscalar(first):
+        segments = [frame_bounds]
+    else:
+        segments = frame_bounds
+    normalized = []
+    for lo, hi in segments:
+        lo = 0 if lo is None else lo
+        hi = n_frames if hi is None else hi
+        normalized.append((lo, hi))
+    return normalized
+
+
+def frame_in_bounds(frame_number, frame_bounds, n_frames):
+    """Return True if ``frame_number`` falls within any segment of
+    ``frame_bounds`` (or if ``frame_bounds`` is None, i.e., all frames are
+    used). Bounds are inclusive. See ``normalize_frame_bounds``."""
+    segments = normalize_frame_bounds(frame_bounds, n_frames)
+    if segments is None:
+        return True
+    return any(lo <= frame_number <= hi for lo, hi in segments)
+
+
 class Dialog(QtWidgets.QDialog):
     """Base class for dialogs without 'What's this?' help."""
 

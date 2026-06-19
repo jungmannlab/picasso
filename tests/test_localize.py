@@ -495,6 +495,34 @@ class TestIdentify:
             assert (ids["frame"] >= 20).all()
             assert (ids["frame"] <= 50).all()
 
+    def test_frame_bounds_multiple_segments(self, movie):
+        """A list of ``(min, max)`` segments confines identifications to
+        the union of those (disjoint) frame ranges."""
+        segments = [(10, 20), (40, 50)]
+        ids = localize.identify(
+            movie, MIN_NG, BOX, frame_bounds=segments, return_info=False
+        )
+        if len(ids):
+            in_any = ((ids["frame"] >= 10) & (ids["frame"] <= 20)) | (
+                (ids["frame"] >= 40) & (ids["frame"] <= 50)
+            )
+            assert in_any.all()
+            # nothing in the gap between segments
+            assert not ((ids["frame"] > 20) & (ids["frame"] < 40)).any()
+
+    def test_frame_bounds_single_segment_matches_flat_tuple(self, movie):
+        """A single-segment list behaves identically to the flat
+        ``(min, max)`` tuple form."""
+        flat = localize.identify(
+            movie, MIN_NG, BOX, frame_bounds=(20, 50), return_info=False
+        )
+        listed = localize.identify(
+            movie, MIN_NG, BOX, frame_bounds=[(20, 50)], return_info=False
+        )
+        flat_set = set(zip(flat["frame"], flat["y"], flat["x"]))
+        listed_set = set(zip(listed["frame"], listed["y"], listed["x"]))
+        assert flat_set == listed_set
+
     def test_return_info_returns_metadata_dict(self, movie):
         ids, info = localize.identify(
             movie, MIN_NG, BOX, return_info=True, threaded=False
@@ -560,6 +588,24 @@ class TestIdentifyByFrameNumber:
         )
         assert isinstance(out, pd.DataFrame)
         assert len(out) == 0
+
+    def test_frame_in_one_of_several_segments(self, movie):
+        """A frame inside any of several segments is processed; a frame
+        in the gap between segments returns empty."""
+        segments = [(0, 4), (20, 30)]
+        inside = localize.identify_by_frame_number(
+            movie, MIN_NG, BOX, 25, frame_bounds=segments
+        )
+        gap = localize.identify_by_frame_number(
+            movie, MIN_NG, BOX, 10, frame_bounds=segments
+        )
+        # frame 25 matches the full per-frame identification...
+        full = localize.identify_by_frame_number(movie, MIN_NG, BOX, 25)
+        assert set(zip(inside["y"], inside["x"])) == set(
+            zip(full["y"], full["x"])
+        )
+        # ...while frame 10 (in the gap) yields nothing
+        assert len(gap) == 0
 
 
 # ---------------------------------------------------------------------------

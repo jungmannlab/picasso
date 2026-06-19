@@ -423,7 +423,7 @@ def identify_by_frame_number(
     frame_number: int,
     *,
     roi: tuple[tuple[int, int], tuple[int, int]] | list | None = None,
-    frame_bounds: tuple[int, int] | None = None,
+    frame_bounds: tuple[int, int] | list | None = None,
     lock: threading.Lock | None = None,
 ) -> pd.DataFrame:
     """Identify local maxima in a specific frame of a movie and
@@ -450,10 +450,13 @@ def identify_by_frame_number(
         several (disjoint) regions. If None, the entire frame is used.
         Note that the origin of the image is in the top-left corner.
         Default is None.
-    frame_bounds : tuple, optional
-        Minimum and maximum frame numbers to consider for the
-        identification. If None, all frames are used. If only min or max
-        is to be specified, the other is to be set to None, for example,
+    frame_bounds : tuple, list of tuples, optional
+        Frame numbers to consider for the identification. A single
+        ``(min, max)`` tuple restricts identification to one contiguous,
+        inclusive range; a list of such tuples restricts it to several
+        (disjoint) segments, where a frame is processed if it falls in any
+        segment. If None, all frames are used. If only min or max is to be
+        specified, the other is to be set to None, for example,
         ``(5, None)`` sets minimum frame to 5 without maximum frame.
         Default is None.
     lock : threading.Lock, optional
@@ -473,21 +476,15 @@ def identify_by_frame_number(
     else:
         frame = movie[frame_number]
     # check frame bounds
-    min_max = (0, len(movie))
-    if frame_bounds is not None:
-        if frame_bounds[0] is not None:
-            min_max = (max(frame_bounds[0], min_max[0]), min_max[1])
-        if frame_bounds[1] is not None:
-            min_max = (min_max[0], min(frame_bounds[1], min_max[1]))
-        if not (min_max[0] <= frame_number <= min_max[1]):
-            return pd.DataFrame(
-                {
-                    "frame": pd.Series(dtype=int),
-                    "x": pd.Series(dtype=int),
-                    "y": pd.Series(dtype=int),
-                    "net_gradient": pd.Series(dtype=np.float32),
-                }
-            )
+    if not lib.frame_in_bounds(frame_number, frame_bounds, len(movie)):
+        return pd.DataFrame(
+            {
+                "frame": pd.Series(dtype=int),
+                "x": pd.Series(dtype=int),
+                "y": pd.Series(dtype=int),
+                "net_gradient": pd.Series(dtype=np.float32),
+            }
+        )
     # identify
     y, x, net_gradient = identify_in_frame(frame, minimum_ng, box, roi)
     frame = frame_number * np.ones(len(x))
@@ -508,7 +505,7 @@ def _identify_worker(
     minimum_ng: float,
     box: int,
     roi: tuple[tuple[int, int], tuple[int, int]] | list | None,
-    frame_bounds: tuple[int, int] | None,
+    frame_bounds: tuple[int, int] | list | None,
     lock: threading.Lock | None,
 ) -> list[pd.DataFrame]:
     """Worker function for identifying local maxima in a movie. This
@@ -566,7 +563,7 @@ def identify_async(
     box: int,
     *,
     roi: tuple[tuple[int, int], tuple[int, int]] | list | None = None,
-    frame_bounds: tuple[int, int] | None = None,
+    frame_bounds: tuple[int, int] | list | None = None,
 ) -> tuple[list[int], list[multiprocessing.pool.Future]]:
     """Asynchronously (i.e., using multithreading) identify local
     maxima in a movie using multiple threads. This function divides the
@@ -587,10 +584,13 @@ def identify_async(
         (y_end, x_end). A list of such tuples restricts identification to
         several (disjoint) regions. If None, the entire frame is used.
         Default is None.
-    frame_bounds : tuple, optional
-        Minimum and maximum frame numbers to consider for the
-        identification. If None, all frames are used. If only min or max
-        is to be specified, the other is to be set to None, for example,
+    frame_bounds : tuple, list of tuples, optional
+        Frame numbers to consider for the identification. A single
+        ``(min, max)`` tuple restricts identification to one contiguous,
+        inclusive range; a list of such tuples restricts it to several
+        (disjoint) segments, where a frame is processed if it falls in any
+        segment. If None, all frames are used. If only min or max is to be
+        specified, the other is to be set to None, for example,
         ``(5, None)`` sets minimum frame to 5 without maximum frame.
         Default is None.
 
@@ -728,7 +728,7 @@ def identify(
     box: int,
     *,
     roi: tuple[tuple[int, int], tuple[int, int]] | list | None = None,
-    frame_bounds: tuple[int, int] | None = None,
+    frame_bounds: tuple[int, int] | list | None = None,
     threaded: bool = True,
     progress_callback: (
         Callable[[list[int]], None] | Literal["console"] | None
@@ -756,10 +756,13 @@ def identify(
         several (disjoint) regions. If None, the entire frame is used.
         Note that the origin of the image is in the top-left corner.
         Default is None.
-    frame_bounds : tuple, optional
-        Minimum and maximum frame numbers to consider for the
-        identification. If None, all frames are used. If only min or max
-        is to be specified, the other is to be set to None, for example,
+    frame_bounds : tuple, list of tuples, optional
+        Frame numbers to consider for the identification. A single
+        ``(min, max)`` tuple restricts identification to one contiguous,
+        inclusive range; a list of such tuples restricts it to several
+        (disjoint) segments, where a frame is processed if it falls in any
+        segment. If None, all frames are used. If only min or max is to be
+        specified, the other is to be set to None, for example,
         ``(5, None)`` sets minimum frame to 5 without maximum frame.
         Default is None.
     threaded : bool, optional

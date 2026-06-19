@@ -1078,11 +1078,14 @@ class ParametersDialog(lib.Dialog):
         label.setToolTip(
             "Specify the first and last frame (inclusive) to be analyzed;\n"
             "by default, all frames are analyzed.\n"
-            "Note that no spaces between the numbers and comma are allowed."
+            "Several disjoint segments can be given as min,max pairs\n"
+            "separated by semicolons, e.g. '1,100; 200,300'."
         )
         identification_grid.addWidget(label, 6, 0)
         self.frames_edit = QtWidgets.QLineEdit()
-        regex = r"\d+,\d+"  # regex for 2 integers separated by a comma
+        # one or more "min,max" pairs separated by semicolons, with
+        # optional surrounding whitespace
+        regex = r"\s*\d+\s*,\s*\d+\s*(;\s*\d+\s*,\s*\d+\s*)*"
         validator = QtGui.QRegularExpressionValidator(
             QtCore.QRegularExpression(regex)
         )
@@ -1543,17 +1546,24 @@ class ParametersDialog(lib.Dialog):
             self.window.frame_range = None
 
     def on_frames_edit_finished(self) -> None:
-        """Handle the completion of frames editing."""
+        """Handle the completion of frames editing. Parses one or more
+        semicolon-separated ``min,max`` segments (1-indexed, inclusive),
+        clamps each to the movie length, and stores them as a list of
+        0-indexed ``[lo, hi]`` segments in ``window.frame_range``."""
         if not self.window.movie or self.frames_edit.text() == "":
             return
-        text = self.frames_edit.text().split(",")
-        min_frame, max_frame = [int(_) for _ in text]
-        frame_range = [
-            max(1, min_frame),
-            min(len(self.window.movie), max_frame),
-        ]
-        self.window.frame_range = [frame_range[0] - 1, frame_range[1] - 1]
-        self.frames_edit.setText(f"{frame_range[0]},{frame_range[1]}")
+        n_frames = len(self.window.movie)
+        segments = []
+        for part in self.frames_edit.text().split(";"):
+            min_frame, max_frame = [int(_) for _ in part.split(",")]
+            min_frame = max(1, min_frame)
+            max_frame = min(n_frames, max_frame)
+            segments.append([min_frame, max_frame])
+        # store as 0-indexed inclusive segments
+        self.window.frame_range = [[lo - 1, hi - 1] for lo, hi in segments]
+        self.frames_edit.setText(
+            "; ".join(f"{lo},{hi}" for lo, hi in segments)
+        )
 
     def load_z_calib(self) -> None:
         """Load the 3D calibration from a user-selected YAML file."""
@@ -2000,7 +2010,9 @@ class Window(QtWidgets.QMainWindow):
         # without moving the markers shown on screen.
         self.locs_display = None
         self.movie_path = []
-        self.frame_range = None  # analyze all frames by default
+        # None analyzes all frames; otherwise a list of 0-indexed
+        # inclusive [lo, hi] segments to restrict identification to
+        self.frame_range = None
         self.info = []
         self.extra_info = []
         self._active_worker = None

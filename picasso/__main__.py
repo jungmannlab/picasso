@@ -1159,8 +1159,10 @@ def _localize(args: argparse.Namespace) -> None:  # noqa: C901
         Minimum net gradient for localization.
     roi : list of int
         Region of interest defined as [y_min, x_min, y_max, x_max].
-    frame_bounds : list of int
-        Frame bounds defined as [start_frame, end_frame], 0-indexed.
+    frame_bounds : list of list of int
+        Frame bounds defined as one or more [start_frame, end_frame]
+        segments, 0-indexed and inclusive. Several segments restrict the
+        analysis to the union of those (disjoint) frame ranges.
     baseline : float
         Baseline value for the camera.
     sensitivity : float
@@ -2457,8 +2459,14 @@ def main():  # noqa: C901
         "--frame-bounds",
         type=int,
         nargs=2,
+        action="append",
         default=None,
-        help="frame bounds (start_frame, end_frame), 0-indexed",
+        help=(
+            "frame bounds (start_frame, end_frame), 0-indexed and\n"
+            "inclusive. May be given multiple times to analyze several\n"
+            "disjoint frame segments, e.g.\n"
+            "--frame-bounds 0 100 --frame-bounds 200 300."
+        ),
     )
     localize_parser.add_argument(
         "-bl", "--baseline", type=int, default=0, help="camera baseline"

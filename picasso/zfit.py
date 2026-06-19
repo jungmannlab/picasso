@@ -79,10 +79,13 @@ def calibrate_z(
     path : str, optional
         Path to save the calibration data as a YAML file. If None, the
         calibration data will not be saved. Default is None.
-    frame_bounds : tuple, optional
-        Minimum and maximum frame numbers to consider for the
-        calibration. If None, all frames are used. If only min or max
-        is to be specified, the other is to be set to None, for example,
+    frame_bounds : tuple, list of tuples, optional
+        Frame numbers to consider for the calibration. A single
+        ``(min, max)`` tuple restricts the calibration to one contiguous,
+        inclusive range; a list of such tuples restricts it to several
+        (disjoint) segments, where a frame is used if it falls in any
+        segment. If None, all frames are used. If only min or max is to be
+        specified, the other is to be set to None, for example,
         ``(5, None)`` sets minimum frame to 5 without maximum frame.
         Default is None.
     frames_per_step : int, optional
@@ -133,11 +136,13 @@ def calibrate_z(
     z_of_step = -(np.arange(n_steps) * d - z_span / 2)
 
     if frame_bounds is not None:
-        frame_min, frame_max = frame_bounds
-        frame_min = frame_min or 0
-        frame_max = frame_max if frame_max is not None else (n_frames - 1)
-        # frame bounds are inclusive, like in picasso.localize
-        in_bounds = (all_frames >= frame_min) & (all_frames <= frame_max)
+        # normalize to a list of inclusive (lo, hi) segments; a frame is
+        # kept if it falls in any segment (frame bounds are inclusive,
+        # like in picasso.localize)
+        segments = lib.normalize_frame_bounds(frame_bounds, n_frames - 1)
+        in_bounds = np.zeros(n_frames, dtype=bool)
+        for frame_min, frame_max in segments:
+            in_bounds |= (all_frames >= frame_min) & (all_frames <= frame_max)
         step_of_frame = np.where(in_bounds, step_of_frame, -1)
 
     # steps that still have at least one frame contributing to them

@@ -610,6 +610,46 @@ class TestCalibrateZFrameBounds:
         )
         assert lengths and all(n == 30 for n in lengths)
 
+    def test_multiple_segments(self, bead_stack, monkeypatch):
+        """A list of ``(min, max)`` segments keeps the union of the
+        (disjoint) ranges: ``[(10, 19), (30, 39)]`` -> 20 frames (z
+        positions) enter every polynomial fit."""
+        locs, info = bead_stack
+        lengths = self._polyfit_lengths(monkeypatch)
+        zfit.calibrate_z(
+            locs,
+            info,
+            self.D,
+            magnification_factor=0.79,
+            frame_bounds=[(10, 19), (30, 39)],
+        )
+        assert lengths and all(n == 20 for n in lengths)
+
+    def test_single_segment_matches_flat_tuple(self, bead_stack):
+        """A single-segment list behaves identically to the flat
+        ``(min, max)`` tuple form."""
+        locs, info = bead_stack
+        calib_flat = zfit.calibrate_z(
+            locs,
+            info,
+            self.D,
+            magnification_factor=0.79,
+            frame_bounds=(10, 39),
+        )
+        calib_list = zfit.calibrate_z(
+            locs,
+            info,
+            self.D,
+            magnification_factor=0.79,
+            frame_bounds=[(10, 39)],
+        )
+        np.testing.assert_allclose(
+            calib_flat["X Coefficients"], calib_list["X Coefficients"]
+        )
+        np.testing.assert_allclose(
+            calib_flat["Y Coefficients"], calib_list["Y Coefficients"]
+        )
+
     def test_one_sided_bounds(self, bead_stack, monkeypatch):
         """``(None, max)`` and ``(min, None)`` each leave the other side
         unbounded."""
