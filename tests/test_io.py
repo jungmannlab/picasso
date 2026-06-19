@@ -189,6 +189,56 @@ class TestSaveLoadLocs:
         with pytest.raises(ValueError, match="ThunderSTORM"):
             io.load_locs(str(path))
 
+    def test_metadata_embedded_in_hdf5(self, tmp_path, locs, info):
+        # save_locs always embeds metadata as a JSON string at /metadata
+        path = tmp_path / "locs.hdf5"
+        io.save_locs(str(path), locs, info)
+        with h5py.File(path, "r") as f:
+            assert "metadata" in f
+            raw = f["metadata"][()]
+        if isinstance(raw, bytes):
+            raw = raw.decode("utf-8")
+        assert json.loads(raw) == list(info)
+
+    def test_loads_from_embedded_metadata_when_yaml_missing(
+        self, tmp_path, locs, info
+    ):
+        # Deleting the sidecar .yaml must not break loading: the embedded
+        # /metadata dataset is used as a fallback.
+        path = tmp_path / "locs.hdf5"
+        io.save_locs(str(path), locs, info)
+        os.remove(tmp_path / "locs.yaml")
+
+        loaded, loaded_info = io.load_locs(str(path))
+        assert loaded_info == list(info)
+        assert len(loaded) == len(locs)
+
+    def test_no_metadata_anywhere_raises(self, tmp_path, locs):
+        # An HDF5 with neither a .yaml nor an embedded /metadata dataset
+        # still raises NoMetadataFileError.
+        path = tmp_path / "locs.hdf5"
+        with h5py.File(path, "w") as f:
+            f.create_dataset("locs", data=locs.to_records(index=False))
+        with pytest.raises(io.NoMetadataFileError):
+            io.load_locs(str(path))
+
+    def test_setting_disables_yaml_sidecar(
+        self, tmp_path, locs, info, monkeypatch
+    ):
+        # With "Save metadata in .yaml" off, only the embedded /metadata
+        # dataset is written — no .yaml file. (monkeypatched to avoid
+        # touching the real user settings file.)
+        monkeypatch.setattr(io, "_save_metadata_in_yaml", lambda: False)
+        path = tmp_path / "locs.hdf5"
+        io.save_locs(str(path), locs, info)
+
+        assert not (tmp_path / "locs.yaml").exists()
+        with h5py.File(path, "r") as f:
+            assert "metadata" in f
+        # The file is still loadable via the embedded metadata.
+        loaded, loaded_info = io.load_locs(str(path))
+        assert loaded_info == list(info)
+
 
 class TestSaveDatasets:
     def test_writes_named_datasets(self, tmp_path):

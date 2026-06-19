@@ -519,19 +519,25 @@ def load_info(
     """
     path_base, path_extension = os.path.splitext(path)
     filename = path_base + ".yaml"
+    # First, try the sidecar .yaml metadata file.
     try:
         with open(filename, "r") as info_file:
-            info = list(yaml.load_all(info_file, Loader=yaml.UnsafeLoader))
-    except FileNotFoundError as e:
-        print(f"\nAn error occured. Could not find metadata file:\n{filename}")
-        if qt_parent is not None:
-            QtWidgets.QMessageBox.critical(
-                qt_parent,
-                "An error occured",
-                f"Could not find metadata file:\n{filename}",
-            )
-        raise NoMetadataFileError(e)
-    return info
+            return list(yaml.load_all(info_file, Loader=yaml.UnsafeLoader))
+    except FileNotFoundError:
+        pass
+    # If absent, fall back to metadata embedded in the HDF5 file itself.
+    info = _load_info_from_hdf5(path)
+    if info is not None:
+        return info
+    # Neither the sidecar file nor embedded metadata was found.
+    print(f"\nAn error occured. Could not find metadata file:\n{filename}")
+    if qt_parent is not None:
+        QtWidgets.QMessageBox.critical(
+            qt_parent,
+            "An error occured",
+            f"Could not find metadata file:\n{filename}",
+        )
+    raise NoMetadataFileError(filename)
 
 
 def load_mask(
@@ -752,6 +758,74 @@ def save_user_settings(settings: dict) -> None:
     os.makedirs(os.path.dirname(settings_filename), exist_ok=True)
     with open(settings_filename, "w") as settings_file:
         yaml.dump(dict(settings), settings_file, default_flow_style=False)
+
+
+def _save_metadata_in_yaml() -> bool:
+    """Whether to also write the sidecar ``.yaml`` metadata file when
+    saving localizations.
+
+    Metadata is always embedded in the HDF5 file itself (see
+    ``_write_metadata_dataset``); this setting only controls whether the
+    convenience ``.yaml`` copy is written as well. Defaults to True.
+    When the setting is absent, the default is persisted to the user
+    settings file so it becomes visible and editable.
+
+    Returns
+    -------
+    bool
+        True if the ``.yaml`` metadata file should be written.
+    """
+    settings = load_user_settings()
+    # cannot rely on truthiness: AutoDict auto-creates an empty (falsy)
+    # dict for a missing key, so check membership explicitly.
+    if "Save metadata in .yaml" not in settings:
+        settings["Save metadata in .yaml"] = True
+        save_user_settings(settings)
+    return bool(settings["Save metadata in .yaml"])
+
+
+def _write_metadata_dataset(hdf_file: h5py.File, info: list[dict]) -> None:
+    """Embed metadata in an open HDF5 file as a JSON string dataset at
+    ``/metadata``.
+
+    Parameters
+    ----------
+    hdf_file : h5py.File
+        An HDF5 file opened in write mode.
+    info : list of dict
+        Metadata to embed.
+    """
+    hdf_file.create_dataset("metadata", data=json.dumps(list(info)))
+
+
+def _load_info_from_hdf5(path: str) -> list[dict] | None:
+    """Load metadata embedded in the ``/metadata`` dataset of an HDF5
+    file.
+
+    Parameters
+    ----------
+    path : str
+        The path to the HDF5 file.
+
+    Returns
+    -------
+    info : list of dict or None
+        The embedded metadata, or None if the file is not an HDF5 file or
+        does not contain a ``/metadata`` dataset.
+    """
+    try:
+        with h5py.File(path, "r") as hdf_file:
+            if "metadata" not in hdf_file:
+                return None
+            raw = hdf_file["metadata"][()]
+    except (OSError, KeyError):
+        return None
+    if isinstance(raw, bytes):
+        raw = raw.decode("utf-8")
+    try:
+        return list(json.loads(raw))
+    except (ValueError, TypeError):
+        return None
 
 
 class AbstractPicassoMovie(abc.ABC):
@@ -2446,9 +2520,11 @@ def save_datasets(path: str, info: dict, **kwargs) -> None:
         for key, val in kwargs.items():
             rec_locs = val.to_records(index=False)
             locs_file.create_dataset(key, data=rec_locs)
-    base, ext = os.path.splitext(path)
-    info_path = base + ".yaml"
-    save_info(info_path, info)
+        _write_metadata_dataset(locs_file, info)
+    if _save_metadata_in_yaml():
+        base, ext = os.path.splitext(path)
+        info_path = base + ".yaml"
+        save_info(info_path, info)
 
 
 def save_locs(path: str, locs: pd.DataFrame, info: list[dict]) -> None:
@@ -2470,9 +2546,11 @@ def save_locs(path: str, locs: pd.DataFrame, info: list[dict]) -> None:
     rec_locs = locs.to_records(index=False)
     with h5py.File(path, "w") as locs_file:
         locs_file.create_dataset("locs", data=rec_locs)
-    base, ext = os.path.splitext(path)
-    info_path = base + ".yaml"
-    save_info(info_path, info)
+        _write_metadata_dataset(locs_file, info)
+    if _save_metadata_in_yaml():
+        base, ext = os.path.splitext(path)
+        info_path = base + ".yaml"
+        save_info(info_path, info)
 
 
 def load_locs(
@@ -2548,9 +2626,11 @@ def save_identifications(
     rec_ids = identifications.to_records(index=False)
     with h5py.File(path, "w") as ids_file:
         ids_file.create_dataset("identifications", data=rec_ids)
-    base, ext = os.path.splitext(path)
-    info_path = base + ".yaml"
-    save_info(info_path, info)
+        _write_metadata_dataset(ids_file, info)
+    if _save_metadata_in_yaml():
+        base, ext = os.path.splitext(path)
+        info_path = base + ".yaml"
+        save_info(info_path, info)
 
 
 def load_identifications(

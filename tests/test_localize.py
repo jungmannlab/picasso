@@ -791,14 +791,18 @@ class TestSaveLoadIdentifications:
         with pytest.raises(KeyError):
             io.load_identifications(str(path))
 
-    def test_load_missing_yaml_raises(self, tmp_path, real_identifications):
-        """If the YAML sidecar is removed, ``load_identifications`` must
-        raise ``NoMetadataFileError`` (same contract as ``load_locs``)."""
+    def test_load_missing_yaml_falls_back_to_embedded(
+        self, tmp_path, real_identifications
+    ):
+        """If the YAML sidecar is removed, ``load_identifications`` falls
+        back to the metadata embedded in the HDF5 ``/metadata`` dataset
+        (same contract as ``load_locs``)."""
         path = tmp_path / "ids.hdf5"
-        io.save_identifications(str(path), real_identifications, self._info())
+        info = self._info()
+        io.save_identifications(str(path), real_identifications, info)
         (tmp_path / "ids.yaml").unlink()
-        with pytest.raises(io.NoMetadataFileError):
-            io.load_identifications(str(path))
+        _, loaded_info = io.load_identifications(str(path))
+        assert loaded_info == info
 
     def test_save_uses_yaml_sidecar_path(self, tmp_path, real_identifications):
         """The YAML path is derived from the HDF5 path's base name —

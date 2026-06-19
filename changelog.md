@@ -5,6 +5,7 @@ Last change: 19-JUN-2026 CEST
 ## 0.11.0
 
 ### **General updates:**
+- Localization metadata is now embedded directly in the `.hdf5` file (under the `/metadata` dataset, as a JSON string), making the file self-contained even if moved or renamed without its `.yaml` sidecar. When loading, Picasso looks for the metadata in the `.yaml` file first, then falls back to the embedded copy. Writing the `.yaml` sidecar is still on by default but can be disabled via the new user setting `Save metadata in .yaml` in `~/.picasso/settings.yaml` (also available via any module under File > Picasso settings). See [file formats documentation](https://picassosr.readthedocs.io/en/latest/files.html) for more info.
 
 #### Localize
 - Picasso relies on package `tifffile` for processing `.tif` files and many other grayscale movie formats, see [localize documentation](https://picassosr.readthedocs.io/en/latest/localize.html). **Note:** this is an experimental feature, do not hesitate to let us know if you detect bugs/unexpected behavior or would like to see more file formats in Picasso, see our [GitHub page](https://github.com/jungmannlab/picasso/issues) for contact information.
@@ -18,7 +19,6 @@ Last change: 19-JUN-2026 CEST
 - Fixed handling abortions during identification
 
 #### Render
-- Fixed double-multiplication of picked areas (affecting square and circular picks)
 - Improved measure tool
 
 #### SPINNA

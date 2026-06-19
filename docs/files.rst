@@ -15,11 +15,11 @@ HDF5 Files
 
 HDF5 is a generic and efficient binary file format for storing data. In Picasso, HDF5 files are used for storing tabular data of localizations with the file extension ``.hdf5``. Furthermore, Picasso saves the statistical properties of groups of localizations in an HDF5 file.
 
-Generally, several datasets can be stored within an HDF5 file. These datasets are accessible by specifying a path within the HDF5 file, similar to a path of an operating system. When saving localizations, Picasso stores tabular data under the path ``/locs``. When saving statistical properties of groups of localizations, Picasso saves the table under the path ``/groups``.
+Generally, several datasets can be stored within an HDF5 file. These datasets are accessible by specifying a path within the HDF5 file, similar to a path of an operating system. When saving localizations, Picasso stores tabular data under the path ``/locs``. When saving statistical properties of groups of localizations, Picasso saves the table under the path ``/groups``. Since v0.11, Picasso also embeds the metadata directly in the HDF5 file under the path ``/metadata`` (see "Metadata" below), so that the file is self-contained.
 
 An HDF5 file can be opened with various software packages. In Picasso, we use ``pandas`` for this purpose. For example, to open localizations, ``pandas.read_hdf(PATH_TO_LOCALIZATIONS, key="locs")`` is used. The ``key`` argument can be adjusted for other datasets. The available keys can be verified using ``pandas.HDFStore(PATH_TO_FILE).keys()``.
 
-**Note:** Picasso HDF5 files are accompanied by YAML metadata files which are read together using ``locs, info = picasso.io.load_locs``. **See sections "Localization HDF5 Files" and  "YAML Metadata Files" below for more details on the minimum requirements to process HDF5 files in Picasso.**
+**Note:** Picasso HDF5 files store their metadata both in the embedded ``/metadata`` dataset and (by default) in an accompanying YAML metadata file, which are read together using ``locs, info = picasso.io.load_locs``. **See sections "Localization HDF5 Files", "Metadata" and "YAML Metadata Files" below for more details on the minimum requirements to process HDF5 files in Picasso.**
 
 
 Importing HDF5 files in MATLAB and Origin
@@ -32,7 +32,7 @@ In Origin, select ``File > Import > HDF5`` or drag and drop the file into the ma
 Localization HDF5 Files
 -----------------------
 
-Picasso's localization HDF5 files are accompanied by a YAML metadata file with the same filename, but with the extension .yaml. See ``YAML Metadata File`` for more details. ``locs, info = picasso.io.load_locs`` is used to read both the HDF5 file and the metadata. The localization table is stored as a dataset of the HDF5 file in the path ``/locs``. This table can be explored by opening the HDF5 file with ``Picasso: Filter``. The localization table can have an unlimited number of columns. Table 1 explains the main column names in Picasso.
+Picasso's localization HDF5 files carry their metadata in two places: embedded in the HDF5 file itself under the path ``/metadata``, and (by default) in a YAML metadata file with the same filename, but with the extension .yaml. See ``Metadata`` and ``YAML Metadata Files`` below for more details. ``locs, info = picasso.io.load_locs`` is used to read both the HDF5 file and the metadata. The localization table is stored as a dataset of the HDF5 file in the path ``/locs``. This table can be explored by opening the HDF5 file with ``Picasso: Filter``. The localization table can have an unlimited number of columns. Table 1 explains the main column names in Picasso.
 
 .. csv-table:: Table 1: Name, description and data type for the main columns used in Picasso.
    :file: table01.csv
@@ -67,11 +67,26 @@ Furthermore, the following columns are included:
 - ``len_mean`` and ``dark_mean``: mean bright and dark times, respectively, obtained by averaging over all binding events, rather than fitting to the CDF. Units: frames;
 - ``len_std`` and ``dark_std``: standard deviation of bright and dark times,respectively;
 
+Metadata
+--------
+
+Metadata describes a localization (or identification) dataset: the size of the field of view, the number of frames, the pixel size, the processing history, etc. In Picasso, metadata is represented internally as a list of dictionaries (``info``) where each step of analysis appends a new dictionary to the list.
+
+Since v0.11, Picasso embeds this metadata directly inside the HDF5 file as a JSON string in the dataset ``/metadata``. This makes the HDF5 file self-contained, so the metadata is preserved even if the file is moved or renamed without its accompanying YAML file.
+
+For convenience and backward compatibility, the metadata is, by default, also written to a separate YAML file (see "YAML Metadata Files" below). Whether this YAML copy is written is controlled by the user setting ``Save metadata in .yaml`` in ``~/.picasso/settings.yaml`` (default: ``True``). Picasso settings are also available under Files > Picasso settings in any module. Set ``Save metadata in .yaml`` to ``False`` to save only the embedded ``/metadata`` dataset.
+
+When loading metadata (``picasso.io.load_info``, used by ``load_locs``), Picasso looks for the metadata in the following order:
+
+1. The accompanying ``.yaml`` file (preferred, as it is easy to inspect and hand-edit);
+2. The embedded ``/metadata`` dataset in the HDF5 file;
+3. Otherwise, a ``NoMetadataFileError`` is raised.
+
 YAML Metadata Files
 -------------------
 
 YAML files are document-oriented text files that can be opened and changed with any text editor. In Picasso, YAML files are used to store metadata of movie or localization files.
-Each localization HDF5 file must always be accompanied with a YAML file of the same filename, except for the extension, which is ``.yaml``. **Deleting this YAML metadata file will result in failure of the Picasso software!**
+By default, each localization HDF5 file is accompanied by a YAML file of the same filename, except for the extension, which is ``.yaml``. Since v0.11 the metadata is also embedded in the HDF5 file itself (see "Metadata" above), so deleting the YAML file no longer breaks loading as long as the HDF5 file contains the embedded ``/metadata`` dataset. For older Picasso files (or movie files such as ``.raw``) that have no embedded metadata, deleting the YAML metadata file will result in an error.
 
 The metadata file must contain the keys: ``Width``, ``Height`` (size of the field of view in camera pixels), ``Frames`` (number of frames in the movie), and ``Pixelsize`` (effective camera pixel size after magnification in nm). Example files can be found `here <https://github.com/jungmannlab/picasso/tree/master/samples/data>`_
 
