@@ -2689,8 +2689,9 @@ class Window(QtWidgets.QMainWindow):
             box = parameters["Box Size"]
             mng = parameters["Min. Net Gradient"]
             message = (
-                f"Identified {n_identifications:,} spots (Box Size: {box}; "
-                f"Min. Net Gradient: {mng}). Ready for fit."
+                f"Identified {n_identifications:,} spots in {elapsed_time:.2f}"
+                f" seconds. (Box Size: {box}; Min. Net Gradient: {mng}). "
+                "Ready for fit."
             )
             self.status_bar.showMessage(message)
             self.identifications = identifications
@@ -2876,7 +2877,7 @@ class Window(QtWidgets.QMainWindow):
             self.parameters_dialog.quality_check.setEnabled(True)
 
         self.parameters_dialog.gpufit_checkbox.setDisabled(False)
-        self.status_bar.showMessage(f"Saved {len(self.locs)} localizations.")
+        self.status_bar.showMessage(f"Saved {len(self.locs):,} localizations.")
 
         # apply drift if requested
         aim_check = self.parameters_dialog.aim_undrift_checkbox.isChecked()
