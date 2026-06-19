@@ -617,6 +617,98 @@ class PromptChannelDialog(lib.Dialog):
         return channel, result == QtWidgets.QDialog.DialogCode.Accepted
 
 
+class Calibrate3DDialog(lib.Dialog):
+    """Dialog for entering the parameters of a 3D (astigmatism)
+    calibration: the z step size, the number of frames acquired per z
+    (stage) position and, if more than one, the order in which those
+    frames were acquired."""
+
+    def __init__(self, window: QtWidgets.QWidget) -> None:
+        super().__init__(window)
+        self.window = window
+        self.setWindowTitle("3D Calibration")
+        vbox = QtWidgets.QVBoxLayout(self)
+        grid = QtWidgets.QGridLayout()
+        vbox.addLayout(grid)
+
+        # Step size
+        grid.addWidget(QtWidgets.QLabel("Calibration step size (nm):"), 0, 0)
+        self.step = QtWidgets.QDoubleSpinBox()
+        self.step.setRange(0.01, 1e6)
+        self.step.setDecimals(2)
+        self.step.setValue(5)
+        grid.addWidget(self.step, 0, 1)
+
+        # Number of frames per z (stage) position
+        frames_label = QtWidgets.QLabel("Number of frames per step size:")
+        frames_label.setToolTip(
+            "Number of frames acquired at each z (stage) position.\n"
+            "Acquiring several frames per position increases the number\n"
+            "of localizations per position and thus the confidence of\n"
+            "the calibration fit."
+        )
+        grid.addWidget(frames_label, 1, 0)
+        self.frames_per_step = QtWidgets.QSpinBox()
+        self.frames_per_step.setRange(1, 100)
+        self.frames_per_step.setValue(1)
+        grid.addWidget(self.frames_per_step, 1, 1)
+
+        # Frame order (only relevant when frames_per_step > 1)
+        self.order_label = QtWidgets.QLabel("Frame order:")
+        grid.addWidget(self.order_label, 2, 0)
+        self.frame_order = QtWidgets.QComboBox()
+        self.frame_order.addItem("Different FOVs first", userData="fov")
+        self.frame_order.addItem("Different z positions first", userData="z")
+        self.frame_order.setToolTip(
+            "Order in which the frames were acquired when more than one\n"
+            "frame per step size is used.\n"
+            "'Same z position, different FOVs': the z position is held\n"
+            "constant while several fields of view are imaged, i.e.,\n"
+            "consecutive frames share the same z position.\n"
+            "'Same FOV, z positions sequentially': the full z stack is\n"
+            "scanned and then repeated, i.e., frames cycle through all z\n"
+            "positions."
+        )
+        grid.addWidget(self.frame_order, 2, 1)
+
+        # The order only matters when more than one frame per step
+        self.frames_per_step.valueChanged.connect(self._update_order_enabled)
+        self._update_order_enabled(self.frames_per_step.value())
+
+        # OK and Cancel buttons
+        self.buttons = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.StandardButton.Ok
+            | QtWidgets.QDialogButtonBox.StandardButton.Cancel,
+            QtCore.Qt.Orientation.Horizontal,
+            self,
+        )
+        vbox.addWidget(self.buttons)
+        self.buttons.accepted.connect(self.accept)
+        self.buttons.rejected.connect(self.reject)
+
+    def _update_order_enabled(self, n_frames: int) -> None:
+        """Enable the frame order choice only if more than one frame is
+        acquired per z position."""
+        enabled = n_frames > 1
+        self.order_label.setEnabled(enabled)
+        self.frame_order.setEnabled(enabled)
+
+    @staticmethod
+    def getCalibrationSpecs(
+        parent: QtWidgets.QWidget | None = None,
+    ) -> tuple[float, int, str, bool]:
+        """Show the dialog and return the chosen step size, number of
+        frames per step, frame order and whether the dialog was
+        accepted."""
+        dialog = Calibrate3DDialog(parent)
+        result = dialog.exec()
+        step = dialog.step.value()
+        frames_per_step = dialog.frames_per_step.value()
+        frame_order = dialog.frame_order.currentData()
+        accepted = result == QtWidgets.QDialog.DialogCode.Accepted
+        return step, frames_per_step, frame_order, accepted
+
+
 class ROIDialog(lib.Dialog):
     """Sub-dialog for managing several regions of interest (ROIs)
     numerically.
@@ -2805,12 +2897,8 @@ class Window(QtWidgets.QMainWindow):
         base, ext = os.path.splitext(self.movie_path)
         if calibrate_z:
             self.parameters_dialog.gpufit_checkbox.setDisabled(False)
-            step, ok = QtWidgets.QInputDialog.getDouble(
-                self,
-                "3D Calibration",
-                "Calibration step size (nm):",
-                value=5,
-                decimals=2,
+            step, frames_per_step, frame_order, ok = (
+                Calibrate3DDialog.getCalibrationSpecs(self)
             )
             if ok:
                 base, ext = os.path.splitext(self.movie_path)
@@ -2827,6 +2915,8 @@ class Window(QtWidgets.QMainWindow):
                         self.parameters_dialog.magnification_factor.value(),
                         path=path,
                         frame_bounds=self.frame_range,
+                        frames_per_step=frames_per_step,
+                        frame_order=frame_order,
                     )
                     dt = time.time() - t0
                     if dt > lib.SOUND_NOTIFICATION_DURATION:

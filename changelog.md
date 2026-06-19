@@ -11,6 +11,7 @@ Last change: 19-JUN-2026 CEST
 - Added support for Zeiss `.czi` and Leica `.lif` movies in Localize (open dialog, drag-and-drop and batch CLI). These read via the optional `czifile` and `liffile` libraries (Python ≥ 3.12); install with `pip install picassosr[czi,lif]`. Multi-channel files prompt for a channel, and a `.lif` file with several acquisitions uses the one with the most frames.
 - Accept multiple rectangular ROIs
 - Remove a ROI by double-clicking it in the preview
+- 3D calibration allows for multiple FOVs per z position (thanks to Aditya Ajay Chhatre for the suggestion)
 - Slight adjustments to some status bar messages
 - Fixed a gap of roughly one box size in the identified spots along the borders between adjacent (e.g. overlapping) ROIs
 - Fixed handling abortions during identification

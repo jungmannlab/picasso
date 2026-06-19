@@ -50,11 +50,17 @@ def calibrate_z(
     magnification_factor: float,
     path: str | None = None,
     frame_bounds: tuple[int, int] | None = None,
+    frames_per_step: int = 1,
+    frame_order: Literal["fov", "z"] = "fov",
 ) -> dict:
     """Given localizations of a calibration sample (e.g., gold beads at
     different z positions), calibrate the z-axis by fitting a polynomial
-    to the mean spot width/height of each frame. See Huang et al.
-    Science, 2008. DOI: 10.1126/science.1153529.
+    to the mean spot width/height of each z (stage) position. See Huang
+    et al. Science, 2008. DOI: 10.1126/science.1153529.
+
+    Several frames may be acquired at each z (stage) position to
+    increase the number of localizations per position and thus the
+    confidence of the calibration fit (see ``frames_per_step``).
 
     Parameters
     ----------
@@ -79,6 +85,19 @@ def calibrate_z(
         is to be specified, the other is to be set to None, for example,
         ``(5, None)`` sets minimum frame to 5 without maximum frame.
         Default is None.
+    frames_per_step : int, optional
+        Number of frames acquired at each z (stage) position. With the
+        default of 1, every frame corresponds to a distinct z position
+        (the classic behavior). Default is 1.
+    frame_order : {"fov", "z"}, optional
+        Acquisition order of the frames when ``frames_per_step`` > 1.
+        ``"fov"`` means the z position is held constant while several
+        fields of view are imaged, i.e., consecutive frames share the
+        same z position (``[z0, z0, ..., z1, z1, ...]``). ``"z"`` means
+        the full z stack is scanned sequentially and then repeated,
+        i.e., frames cycle through all z positions
+        (``[z0, z1, ..., z0, z1, ...]``). Ignored when
+        ``frames_per_step`` is 1. Default is "fov".
 
     Returns
     -------
@@ -88,49 +107,67 @@ def calibrate_z(
         magnification factor.
     """
     n_frames = info[0]["Frames"]
-    range = (n_frames - 1) * d
-    frame_range = np.arange(n_frames)
-    z_range = -(frame_range * d - range / 2)  # negative so that the
-    # first frames of a bottom-to-up scan are positive z coordinates.
+    frames_per_step = max(1, int(frames_per_step))
+    # number of distinct z (stage) positions; any trailing frames that do
+    # not complete a step are ignored
+    n_steps = n_frames // frames_per_step
+    if n_steps < 1:
+        raise ValueError(
+            "Number of frames per step is larger than the number of "
+            "frames in the movie."
+        )
+
+    # map each frame to the index of its z (stage) position
+    all_frames = np.arange(n_frames)
+    valid = all_frames < n_steps * frames_per_step
+    if frame_order == "z":
+        # full z stack scanned sequentially, then repeated
+        step_of_frame = all_frames % n_steps
+    else:  # "fov": consecutive frames share the same z position
+        step_of_frame = all_frames // frames_per_step
+    step_of_frame = np.where(valid, step_of_frame, -1)
+
+    # z position of each step; negative so that the first frames of a
+    # bottom-to-up scan are positive z coordinates
+    z_span = (n_steps - 1) * d
+    z_of_step = -(np.arange(n_steps) * d - z_span / 2)
+
     if frame_bounds is not None:
         frame_min, frame_max = frame_bounds
         frame_min = frame_min or 0
-        frame_max = frame_max or (n_frames - 1)
+        frame_max = frame_max if frame_max is not None else (n_frames - 1)
         # frame bounds are inclusive, like in picasso.localize
-        frame_range = frame_range[frame_min : frame_max + 1]
-        z_range = z_range[frame_min : frame_max + 1]
-        locs = locs[
-            (locs["frame"] >= frame_min) & (locs["frame"] <= frame_max)
-        ]
+        in_bounds = (all_frames >= frame_min) & (all_frames <= frame_max)
+        step_of_frame = np.where(in_bounds, step_of_frame, -1)
 
-    mean_sx = np.array(
-        [locs["sx"][locs["frame"] == _].mean() for _ in frame_range]
-    )
-    mean_sy = np.array(
-        [locs["sy"][locs["frame"] == _].mean() for _ in frame_range]
-    )
-    var_sx = np.array(
-        [locs["sx"][locs["frame"] == _].var() for _ in frame_range]
-    )
-    var_sy = np.array(
-        [locs["sy"][locs["frame"] == _].var() for _ in frame_range]
-    )
+    # steps that still have at least one frame contributing to them
+    step_range = np.unique(step_of_frame[step_of_frame >= 0])
+    z_range = z_of_step[step_range]
+    # position of each step within the (bounded) step_range
+    step_to_pos = {int(s): i for i, s in enumerate(step_range)}
 
-    # index of each localization's frame in the (possibly bounded)
-    # frame_range
-    frame_idx = locs["frame"] - frame_range[0]
-    keep_x = (locs["sx"] - mean_sx[frame_idx]) ** 2 < var_sx[frame_idx]
-    keep_y = (locs["sy"] - mean_sy[frame_idx]) ** 2 < var_sy[frame_idx]
+    # assign each localization to its z (stage) position
+    locs = locs.copy()
+    locs_step = step_of_frame[locs["frame"].to_numpy()]
+    locs = locs[np.isin(locs_step, step_range)]
+    locs_step = step_of_frame[locs["frame"].to_numpy()]
+
+    mean_sx = np.array([locs["sx"][locs_step == _].mean() for _ in step_range])
+    mean_sy = np.array([locs["sy"][locs_step == _].mean() for _ in step_range])
+    var_sx = np.array([locs["sx"][locs_step == _].var() for _ in step_range])
+    var_sy = np.array([locs["sy"][locs_step == _].var() for _ in step_range])
+
+    # position of each localization's z (stage) position within step_range
+    pos = np.array([step_to_pos[int(s)] for s in locs_step], dtype=int)
+    keep_x = (locs["sx"] - mean_sx[pos]) ** 2 < var_sx[pos]
+    keep_y = (locs["sy"] - mean_sy[pos]) ** 2 < var_sy[pos]
     keep = keep_x & keep_y
     locs = locs[keep]
+    locs_step = step_of_frame[locs["frame"].to_numpy()]
 
-    # Fits calibration curve to the mean of each frame
-    mean_sx = np.array(
-        [locs["sx"][locs["frame"] == _].mean() for _ in frame_range]
-    )
-    mean_sy = np.array(
-        [locs["sy"][locs["frame"] == _].mean() for _ in frame_range]
-    )
+    # Fits calibration curve to the mean of each z (stage) position
+    mean_sx = np.array([locs["sx"][locs_step == _].mean() for _ in step_range])
+    mean_sy = np.array([locs["sy"][locs_step == _].mean() for _ in step_range])
 
     # Fix nan
     mean_sx = _interpolate_nan(mean_sx)
@@ -155,6 +192,8 @@ def calibrate_z(
         "Magnification factor": float(magnification_factor),
         "Path": path if path is not None else "N/A",
         "Frame bounds": frame_bounds,
+        "Frames per step": int(frames_per_step),
+        "Frame order": frame_order,
     }
     if path is not None:
         with open(path, "w") as f:
@@ -163,7 +202,9 @@ def calibrate_z(
     # pixelsize does not matter here anyway
     locs = _fit_z(locs, info, calibration, magnification_factor, pixelsize=130)
     locs["z"] /= magnification_factor
-    frame_idx = locs["frame"] - frame_range[0]
+    # position of each localization's z (stage) position within step_range
+    locs_step = step_of_frame[locs["frame"].to_numpy()]
+    pos = np.array([step_to_pos[int(s)] for s in locs_step], dtype=int)
 
     plt.figure(figsize=(18, 10))
 
@@ -208,7 +249,7 @@ def calibrate_z(
     plt.legend(loc="best")
 
     ax = plt.subplot(234)
-    plt.plot(z_range[frame_idx], locs["z"], ".k", alpha=0.1)
+    plt.plot(z_range[pos], locs["z"], ".k", alpha=0.1)
     plt.plot(
         [z_range.min(), z_range.max()],
         [z_range.min(), z_range.max()],
@@ -223,19 +264,19 @@ def calibrate_z(
     plt.legend(loc="best")
 
     ax = plt.subplot(235)
-    deviation = locs["z"] - z_range[frame_idx]
+    deviation = locs["z"] - z_range[pos]
     bins = lib.calculate_optimal_bins(deviation, max_n_bins=1000)
     plt.hist(deviation, bins)
     plt.xlabel("Deviation to true position")
     plt.ylabel("Occurence")
 
     ax = plt.subplot(236)
-    square_deviation = deviation**2
-    mean_square_deviation_frame = [
-        np.mean(square_deviation[locs["frame"] == _]) for _ in frame_range
+    square_deviation = deviation.to_numpy() ** 2
+    mean_square_deviation_step = [
+        np.mean(square_deviation[locs_step == _]) for _ in step_range
     ]
-    rmsd_frame = np.sqrt(mean_square_deviation_frame)
-    plt.plot(z_range, rmsd_frame, ".-", color="0.3")
+    rmsd_step = np.sqrt(mean_square_deviation_step)
+    plt.plot(z_range, rmsd_step, ".-", color="0.3")
     plt.xlim(z_range.min(), z_range.max())
     plt.gca().set_ylim(bottom=0)
     plt.xlabel("Stage position")
