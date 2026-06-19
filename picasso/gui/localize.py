@@ -2739,6 +2739,7 @@ class Window(QtWidgets.QMainWindow):
                 use_gpufit,
             )
             self.fit_worker.progressMade.connect(self.on_fit_progress)
+            self.fit_worker.cutProgressMade.connect(self.on_cut_progress)
             self.fit_worker.finished.connect(self.on_fit_finished)
             self.fit_worker.aborted.connect(self.on_worker_aborted)
             self._active_worker = self.fit_worker
@@ -2769,6 +2770,11 @@ class Window(QtWidgets.QMainWindow):
         self._active_worker = self.fit_z_worker
         self.abort_action.setEnabled(True)
         self.fit_z_worker.start()
+
+    def on_cut_progress(self, curr: int, total: int) -> None:
+        """Update the status bar with the spot cutting progress."""
+        message = f"Cutting spot {curr:,} / {total:,} ..."
+        self.status_bar.showMessage(message)
 
     def on_fit_progress(self, curr: int, total: int) -> None:
         """Update the status bar with the fitting progress."""
@@ -3256,6 +3262,7 @@ class FitWorker(QtCore.QThread):
     multiprocessing and update the status bar accordingly."""
 
     progressMade = QtCore.pyqtSignal(int, int)
+    cutProgressMade = QtCore.pyqtSignal(int, int)
     finished = QtCore.pyqtSignal(pd.DataFrame, float, bool, bool)
     aborted = QtCore.pyqtSignal()
 
@@ -3291,6 +3298,9 @@ class FitWorker(QtCore.QThread):
     def on_progress(self, n_done: int) -> None:
         self.progressMade.emit(n_done, self.N)
 
+    def on_cut_progress(self, n_done: int) -> None:
+        self.cutProgressMade.emit(n_done, self.N)
+
     def run(self) -> None:
         t0 = time.time()
         # we ignore info since we will merge the metadata from identification
@@ -3308,6 +3318,7 @@ class FitWorker(QtCore.QThread):
             multiprocess=True,
             progress_callback=self.on_progress,
             abort_callback=self.isInterruptionRequested,
+            cut_progress_callback=self.on_cut_progress,
         )
         if locs is None:  # handle aborted process
             self.aborted.emit()

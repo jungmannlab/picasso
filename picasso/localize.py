@@ -1096,6 +1096,7 @@ def _cut_spots_framebyframe(
     ids_y: lib.IntArray1D,
     box: int,
     spots: lib.IntArray3D,
+    progress_callback: Callable[[int], None] | None = None,
 ):
     """Extract the spots out of a movie frame by frame.
 
@@ -1111,6 +1112,9 @@ def _cut_spots_framebyframe(
     spots : lib.IntArray3D
         3D array to store the cut spots, with shape (k, box, box),
         where k is the number of spots identified.
+    progress_callback : callable or None, optional
+        If a callable is provided, it is called after each frame with
+        the cumulative number of spots cut so far. Default is None.
 
     Returns
     -------
@@ -1133,22 +1137,44 @@ def _cut_spots_framebyframe(
             N,
             spots,
         )
+        if callable(progress_callback):
+            progress_callback(start)
     return spots
 
 
 def _cut_spots(
-    movie: lib.IntArray3D, ids: pd.DataFrame, box: int
+    movie: lib.IntArray3D,
+    ids: pd.DataFrame,
+    box: int,
+    progress_callback: Callable[[int], None] | None = None,
 ) -> lib.IntArray3D:
-    """Cut out spots from a movie based on the identified positions."""
+    """Cut out spots from a movie based on the identified positions.
+
+    If a callable `progress_callback` is provided, it is called with the
+    cumulative number of spots cut so far, allowing the cutting progress
+    to be tracked.
+    """
     N = len(ids)
+    ids_frame = ids["frame"].to_numpy()
+    ids_x = ids["x"].to_numpy()
+    ids_y = ids["y"].to_numpy()
     if isinstance(movie, np.ndarray):
-        return _cut_spots_numba(
-            movie,
-            ids["frame"].to_numpy(),
-            ids["x"].to_numpy(),
-            ids["y"].to_numpy(),
-            box,
-        )
+        if not callable(progress_callback):
+            return _cut_spots_numba(movie, ids_frame, ids_x, ids_y, box)
+        # cut in chunks so that progress can be reported
+        spots = np.zeros((N, box, box), dtype=movie.dtype)
+        chunk = max(1, N // 100)
+        for chunk_start in range(0, N, chunk):
+            chunk_end = min(chunk_start + chunk, N)
+            spots[chunk_start:chunk_end] = _cut_spots_numba(
+                movie,
+                ids_frame[chunk_start:chunk_end],
+                ids_x[chunk_start:chunk_end],
+                ids_y[chunk_start:chunk_end],
+                box,
+            )
+            progress_callback(chunk_end)
+        return spots
     elif isinstance(movie, io.ND2Movie) and movie.use_dask:
         """Assumes that identifications are in order of frames!"""
         spots = np.zeros((N, box, box), dtype=movie.dtype)
@@ -1157,25 +1183,28 @@ def _cut_spots(
             "(p,n,m),(b),(k),(k),(k),(),(k,l,l)->(k,l,l)",
             movie.data,
             np.array([len(movie)]),
-            ids["frame"].to_numpy(),
-            ids["x"].to_numpy(),
-            ids["y"].to_numpy(),
+            ids_frame,
+            ids_x,
+            ids_y,
             box,
             spots,
             output_dtypes=[movie.dtype],
             allow_rechunk=True,
         ).compute()
+        if callable(progress_callback):
+            progress_callback(N)
         return spots
     else:
         """Assumes that identifications are in order of frames!"""
         spots = np.zeros((N, box, box), dtype=movie.dtype)
         spots = _cut_spots_framebyframe(
             movie,
-            ids["frame"].to_numpy(),
-            ids["x"].to_numpy(),
-            ids["y"].to_numpy(),
+            ids_frame,
+            ids_x,
+            ids_y,
             box,
             spots,
+            progress_callback=progress_callback,
         )
         return spots
 
@@ -1199,6 +1228,7 @@ def get_spots(
     identifications: pd.DataFrame,
     box: int,
     camera_info: dict,
+    progress_callback: Callable[[int], None] | None = None,
 ) -> lib.FloatArray3D:
     """Extract the spots from a movie based on the identified positions
     and convert camera signal to photon counts.
@@ -1216,6 +1246,10 @@ def get_spots(
     camera_info : dict
         A dictionary containing camera information such as
         `Baseline`, `Sensitivity`, and `Gain`.
+    progress_callback : callable or None, optional
+        If a callable is provided, it is called with the cumulative
+        number of spots cut so far, allowing the cutting progress to be
+        tracked. Default is None.
 
     Returns
     -------
@@ -1223,7 +1257,9 @@ def get_spots(
         A 3D numpy array containing the extracted spots, with shape
         (k, box, box), where k is the number of spots identified.
     """
-    spots = _cut_spots(movie, identifications, box)
+    spots = _cut_spots(
+        movie, identifications, box, progress_callback=progress_callback
+    )
     return _to_photons(spots, camera_info)
 
 
@@ -1307,6 +1343,7 @@ def fit2D(
         Callable[[int], None] | Literal["console"] | None
     ) = None,
     abort_callback: Callable[[], bool] | None = None,
+    cut_progress_callback: Callable[[int], None] | None = None,
 ) -> tuple[pd.DataFrame | None, dict]:
     """Fit 2D localizations to a movie, given positions of the detected
     spots (identifications).
@@ -1353,6 +1390,11 @@ def fit2D(
         callable provided, it must accept no input and return a boolean
         indicating whether the fitting should be aborted. Default is
         None.
+    cut_progress_callback : callable or None, optional
+        If a callable is provided, it is called with the cumulative
+        number of spots cut so far while extracting the spots from the
+        movie (before fitting). It must accept one integer input.
+        Default is None.
 
     Returns
     -------
@@ -1400,7 +1442,13 @@ def fit2D(
         )
         camera_info["Pixelsize"] = 130
 
-    spots = get_spots(movie, identifications, box, camera_info)
+    spots = get_spots(
+        movie,
+        identifications,
+        box,
+        camera_info,
+        progress_callback=cut_progress_callback,
+    )
     em = camera_info["Gain"] > 1
     if fitting_method == "gausslq":
         locs = _fit2d_gausslq(
