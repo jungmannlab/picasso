@@ -2231,12 +2231,35 @@ class Window(QtWidgets.QMainWindow):
         view_menu = menu_bar.addMenu("View")
         previous_frame_action = view_menu.addAction("Previous frame")
         previous_frame_action.setShortcut("Left")
-        previous_frame_action.triggered.connect(self.previous_frame)
+        previous_frame_action.triggered.connect(lambda: self.previous_frame(1))
         view_menu.addAction(previous_frame_action)
         next_frame_action = view_menu.addAction("Next frame")
         next_frame_action.setShortcut("Right")
-        next_frame_action.triggered.connect(self.next_frame)
+        next_frame_action.triggered.connect(lambda: self.next_frame(1))
         view_menu.addAction(next_frame_action)
+        # Jump multiple frames at once using modifier keys with the arrows.
+        # Shift -> 10, Ctrl/Cmd -> 100, Ctrl/Cmd + Shift -> 1000 frames.
+        for step, modifier in (
+            (10, "Shift"),
+            (100, "Ctrl"),
+            (1000, "Ctrl+Shift"),
+        ):
+            jump_back_action = view_menu.addAction(
+                "Previous {} frames".format(step)
+            )
+            jump_back_action.setShortcut("{}+Left".format(modifier))
+            jump_back_action.triggered.connect(
+                lambda *_, s=step: self.previous_frame(s)
+            )
+            view_menu.addAction(jump_back_action)
+            jump_forward_action = view_menu.addAction(
+                "Next {} frames".format(step)
+            )
+            jump_forward_action.setShortcut("{}+Right".format(modifier))
+            jump_forward_action.triggered.connect(
+                lambda *_, s=step: self.next_frame(s)
+            )
+            view_menu.addAction(jump_forward_action)
         view_menu.addSeparator()
         first_frame_action = view_menu.addAction("First frame")
         first_frame_action.setShortcut("Home")
@@ -2589,17 +2612,18 @@ class Window(QtWidgets.QMainWindow):
         if ok:
             return channel
 
-    def previous_frame(self) -> None:
-        """Navigate to the previous frame and display it."""
+    def previous_frame(self, step: int = 1) -> None:
+        """Navigate backwards by ``step`` frames and display the result."""
         if self.movie is not None:
             if self.curr_frame_number > 0:
-                self.set_frame(self.curr_frame_number - 1)
+                self.set_frame(max(0, self.curr_frame_number - step))
 
-    def next_frame(self) -> None:
-        """Navigate to the next frame and display it."""
+    def next_frame(self, step: int = 1) -> None:
+        """Navigate forwards by ``step`` frames and display the result."""
         if self.movie is not None:
-            if self.curr_frame_number + 1 < self.info[0]["Frames"]:
-                self.set_frame(self.curr_frame_number + 1)
+            last_frame = self.info[0]["Frames"] - 1
+            if self.curr_frame_number < last_frame:
+                self.set_frame(min(last_frame, self.curr_frame_number + step))
 
     def first_frame(self) -> None:
         """Navigate to the first frame and display it."""
