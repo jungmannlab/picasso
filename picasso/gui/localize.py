@@ -2083,9 +2083,38 @@ class Window(QtWidgets.QMainWindow):
         self.user_settings_dialog = lib.UserSettingsDialog(self)
         self.init_menu_bar()
         self.view = View(self)
-        self.setCentralWidget(self.view)
         self.scene = Scene(self)
         self.view.setScene(self.scene)
+        # Slider below the movie for quickly navigating between frames.
+        self.frame_slider = QtWidgets.QSlider(QtCore.Qt.Orientation.Horizontal)
+        self.frame_slider.setMinimum(0)
+        self.frame_slider.setMaximum(0)
+        self.frame_slider.setEnabled(False)
+        self.frame_slider.setMaximumHeight(15)
+        self.frame_slider.setStyleSheet(
+            """
+            QSlider::groove:horizontal {
+                height: 4px;
+                background: #b0b0b0;
+                border-radius: 2px;
+            }
+            QSlider::handle:horizontal {
+                width: 10px;
+                height: 12px;
+                margin: -5px 0;
+                border-radius: 3px;
+                background: #5a5a5a;
+            }
+            """
+        )
+        self.frame_slider.valueChanged.connect(self.on_frame_slider_changed)
+        central_widget = QtWidgets.QWidget()
+        central_layout = QtWidgets.QVBoxLayout(central_widget)
+        central_layout.setContentsMargins(0, 0, 0, 0)
+        central_layout.setSpacing(0)
+        central_layout.addWidget(self.view)
+        central_layout.addWidget(self.frame_slider)
+        self.setCentralWidget(central_widget)
         self.status_bar = self.statusBar()
         self.status_bar_frame_indicator = QtWidgets.QLabel()
         self.status_bar.addPermanentWidget(self.status_bar_frame_indicator)
@@ -2416,6 +2445,10 @@ class Window(QtWidgets.QMainWindow):
             self.locs = None
             self.locs_display = None
             self.ready_for_fit = False
+            self.frame_slider.setEnabled(True)
+            self.frame_slider.setMaximum(
+                lib.get_from_metadata(self.info, "Frames") - 1
+            )
             self.set_frame(0)
             self.fit_in_view()
             self.parameters_dialog.set_camera_parameters(self.info[0])
@@ -2659,8 +2692,19 @@ class Window(QtWidgets.QMainWindow):
             self.contrast_dialog.change_contrast_silently(black, white)
         self.draw_frame()
         self.status_bar_frame_indicator.setText(
-            "{:,}/{:,}".format(number + 1, self.info[0]["Frames"])
+            "{:,}/{:,}".format(
+                number + 1, lib.get_from_metadata(self.info, "Frames")
+            )
         )
+        # Keep the slider in sync without re-triggering set_frame.
+        self.frame_slider.blockSignals(True)
+        self.frame_slider.setValue(number)
+        self.frame_slider.blockSignals(False)
+
+    def on_frame_slider_changed(self, value: int) -> None:
+        """Navigate to the frame selected with the slider."""
+        if self.movie is not None and value != self.curr_frame_number:
+            self.set_frame(value)
 
     def draw_frame(self) -> None:
         """Draw the current frame - show the movie frame, apply
