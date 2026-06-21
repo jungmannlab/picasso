@@ -1,6 +1,6 @@
 # Changelog
 
-Last change: 19-JUN-2026 CEST
+Last change: 21-JUN-2026 CEST
 
 ## 0.11.0
 
@@ -13,6 +13,7 @@ Last change: 19-JUN-2026 CEST
 - Accept multiple frame bounds
 - Accept multiple rectangular ROIs
 - Remove a ROI by double-clicking it in the preview
+- Loading a movie with corrupted metadata lets the user specify the most important ones without errors
 - 3D calibration allows for multiple FOVs per z position (thanks to Aditya Ajay Chhatre for the suggestion)
 - Slight adjustments to some status bar messages
 - Fixed a gap of roughly one box size in the identified spots along the borders between adjacent (e.g. overlapping) ROIs

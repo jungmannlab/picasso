@@ -305,13 +305,151 @@ def load_calibration(path: str) -> dict:
     return calibration
 
 
-def load_tif(path: str, progress=None) -> tuple[TiffMultiMap, list[dict]]:
+def _readable_movie_dims(movie: AbstractPicassoMovie) -> dict:
+    """Collect the movie dimensions that can be read straight from the
+    file structure (frames, height, width), independent of the embedded
+    metadata. Used to pre-fill the manual-metadata fallback dialog.
+
+    Parameters
+    ----------
+    movie : AbstractPicassoMovie
+        A movie object whose pixel data could be opened but whose
+        metadata could not be parsed.
+
+    Returns
+    -------
+    dims : dict
+        Any of the keys ``Frames``, ``Height`` and ``Width`` that could
+        be determined.
+    """
+    dims = {}
+    try:
+        dims["Frames"] = int(len(movie))
+    except Exception:
+        pass
+    height = getattr(movie, "height", None)
+    width = getattr(movie, "width", None)
+    if height is None or width is None:
+        # ND2 movies keep their dimensions in a ``sizes`` mapping rather
+        # than as plain attributes.
+        sizes = getattr(movie, "sizes", None)
+        if sizes is not None:
+            height = sizes.get("Y", height)
+            width = sizes.get("X", width)
+    if height is not None:
+        dims["Height"] = int(height)
+    if width is not None:
+        dims["Width"] = int(width)
+    return dims
+
+
+def _movie_metadata_fallback(
+    movie: AbstractPicassoMovie,
+    path: str,
+    prompt_info: Callable[[dict], tuple[dict, bool]] | None,
+    cause: BaseException | None = None,
+) -> dict | None:
+    """Build movie metadata when it could not be read from the file.
+
+    First tries an accompanying ``.yaml`` metadata file (e.g. one saved
+    during a previous fallback). If none is found and ``prompt_info`` is
+    given, the user is asked to enter the required metadata manually,
+    pre-filled with whatever dimensions could still be read. Without a
+    prompt callback (e.g. when called programmatically rather than from
+    the GUI), a ``NoMetadataFileError`` is raised instead.
+
+    Parameters
+    ----------
+    movie : AbstractPicassoMovie
+        The movie whose pixel data opened but whose metadata could not
+        be parsed.
+    path : str
+        Path to the movie file.
+    prompt_info : Callable or None
+        Called with the readable dimensions; must return ``(info, save)``
+        or None if the user cancels.
+    cause : BaseException or None, optional
+        The original error raised while reading the metadata, chained
+        onto ``NoMetadataFileError`` for context.
+
+    Returns
+    -------
+    info : dict or None
+        The metadata dictionary, or None if the user cancelled the
+        prompt dialog.
+
+    Raises
+    ------
+    NoMetadataFileError
+        If the metadata could not be read, there is no sidecar ``.yaml``
+        file, and no ``prompt_info`` callback was provided to obtain it
+        interactively.
+    """
+    # A sidecar YAML file (possibly saved during an earlier fallback)
+    # takes precedence over prompting the user again.
+    try:
+        return load_info(path)[0]
+    except (FileNotFoundError, NoMetadataFileError):
+        pass
+    if prompt_info is None:
+        # No way to obtain the metadata interactively (e.g. programmatic
+        # use). Raise rather than silently returning None so the caller
+        # gets an informative error instead of an unpack failure.
+        raise NoMetadataFileError(
+            f"Could not read metadata for movie:\n{path}\n"
+            "No accompanying .yaml metadata file was found."
+        ) from cause
+    result = prompt_info(_readable_movie_dims(movie))
+    if result is None:
+        return None
+    info, save = result
+    if save:
+        base, _ = os.path.splitext(path)
+        save_info(base + ".yaml", [info])
+    return info
+
+
+def _movie_info_or_prompt(
+    movie: AbstractPicassoMovie,
+    path: str,
+    prompt_info: Callable[[dict], tuple[dict, bool]] | None,
+) -> dict | None:
+    """Return the movie's metadata, falling back to manual entry if it
+    cannot be read.
+
+    Returns None only when the metadata could not be read and the user
+    cancelled the fallback dialog, in which case the caller should abort
+    loading. When no ``prompt_info`` callback is available (e.g.
+    programmatic use), a ``NoMetadataFileError`` is raised instead of
+    returning None.
+    """
+    try:
+        info = movie.info()
+    except Exception as error:
+        info = None
+        cause = error
+    else:
+        cause = None
+    if not info:
+        return _movie_metadata_fallback(movie, path, prompt_info, cause)
+    return info
+
+
+def load_tif(
+    path: str,
+    prompt_info: Callable[[dict], tuple[dict, bool]] | None = None,
+    progress=None,
+) -> tuple[TiffMultiMap, list[dict]] | None:
     """Load a TIFF movie file and its metadata.
 
     Parameters
     ----------
     path : str
         The path to the TIFF movie file.
+    prompt_info : Callable, optional
+        Called with the readable movie dimensions if the embedded
+        metadata cannot be parsed, so the user can enter it manually.
+        Must return ``(info, save)`` or None if cancelled.
     progress : None, optional
         A placeholder for progress tracking, not used in this function.
         Default is None.
@@ -323,19 +461,31 @@ def load_tif(path: str, progress=None) -> tuple[TiffMultiMap, list[dict]]:
         Frames are loaded into memory on access.
     info : list[dict]
         A list containing a dictionary with metadata about the movie.
+
+    Returns None if the metadata could not be read and the user
+    cancelled the manual-metadata fallback dialog.
     """
     movie = TiffMultiMap(path, memmap_frames=False)
-    info = movie.info()
+    info = _movie_info_or_prompt(movie, path, prompt_info)
+    if info is None:
+        return None
     return movie, [info]
 
 
-def load_nd2(path: str) -> tuple[ND2Movie, list[dict]]:
+def load_nd2(
+    path: str,
+    prompt_info: Callable[[dict], tuple[dict, bool]] | None = None,
+) -> tuple[ND2Movie, list[dict]] | None:
     """Load a Nikon ND2 movie file and its metadata.
 
     Parameters
     ----------
     path : str
         The path to the ND2 movie file.
+    prompt_info : Callable, optional
+        Called with the readable movie dimensions if the embedded
+        metadata cannot be parsed, so the user can enter it manually.
+        Must return ``(info, save)`` or None if cancelled.
 
     Returns
     -------
@@ -343,13 +493,21 @@ def load_nd2(path: str) -> tuple[ND2Movie, list[dict]]:
         The loaded ND2 movie.
     info : list of dicts
         A list containing a dictionary with metadata about the movie.
+
+    Returns None if the metadata could not be read and the user
+    cancelled the manual-metadata fallback dialog.
     """
     movie = ND2Movie(path)
-    info = movie.info()
+    info = _movie_info_or_prompt(movie, path, prompt_info)
+    if info is None:
+        return None
     return movie, [info]
 
 
-def load_stk(path: str) -> tuple[STKMultiMovie, list[dict]]:
+def load_stk(
+    path: str,
+    prompt_info: Callable[[dict], tuple[dict, bool]] | None = None,
+) -> tuple[STKMultiMovie, list[dict]] | None:
     """Load a MetaMorph STK movie file and its metadata.
 
     If the filename contains a numeric suffix (e.g. ``name_003.stk``),
@@ -360,6 +518,10 @@ def load_stk(path: str) -> tuple[STKMultiMovie, list[dict]]:
     ----------
     path : str
         The path to the STK movie file.
+    prompt_info : Callable, optional
+        Called with the readable movie dimensions if the embedded
+        metadata cannot be parsed, so the user can enter it manually.
+        Must return ``(info, save)`` or None if cancelled.
 
     Returns
     -------
@@ -368,9 +530,14 @@ def load_stk(path: str) -> tuple[STKMultiMovie, list[dict]]:
         Frames are loaded into memory on access.
     info : list[dict]
         A list containing a dictionary with metadata about the movie.
+
+    Returns None if the metadata could not be read and the user
+    cancelled the manual-metadata fallback dialog.
     """
     movie = STKMultiMovie(path)
-    info = movie.info()
+    info = _movie_info_or_prompt(movie, path, prompt_info)
+    if info is None:
+        return None
     return movie, [info]
 
 
@@ -457,8 +624,10 @@ def load_movie(
     ----------
     path : str
         The path to the movie file.
-    prompt_info : None
-        Placeholder for prompt information, not used in this function.
+    prompt_info : Callable, optional
+        Format-specific callback used to obtain missing metadata
+        interactively (e.g. to select a channel for multi-channel files
+        or to enter movie metadata manually when it cannot be read).
     progress : None
         Placeholder for progress tracking, not used in this function.
 
@@ -479,13 +648,13 @@ def load_movie(
     if ext == ".raw":
         return load_raw(path, prompt_info=prompt_info)
     elif ext in TIFF_EXTENSIONS:
-        return load_tif(path)
+        return load_tif(path, prompt_info=prompt_info)
     elif ext == ".ims":
         return load_ims(path, prompt_info=prompt_info)
     elif ext == ".nd2":
-        return load_nd2(path)
+        return load_nd2(path, prompt_info=prompt_info)
     elif ext == ".stk":
-        return load_stk(path)
+        return load_stk(path, prompt_info=prompt_info)
     elif ext == ".czi":
         return load_czi(path, prompt_info=prompt_info)
     elif ext == ".lif":
@@ -940,7 +1109,14 @@ class ND2Movie(AbstractPicassoMovie):
                 + "but should have exactly {:s}.".format(str(required_dims))
             )
 
-        self.meta = self.get_metadata(self.nd2file)
+        # Pixel access only needs the dimensions checked above; parsing
+        # the (often vendor-specific) metadata may still fail. Keep that
+        # failure recoverable so the movie can be loaded with manually
+        # entered metadata (info() then returns None).
+        try:
+            self.meta = self.get_metadata(self.nd2file)
+        except Exception:
+            self.meta = None
         self._shape = [
             self.nd2file.sizes["T"],
             self.nd2file.sizes["X"],

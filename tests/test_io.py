@@ -698,6 +698,117 @@ class TestTiffLoading:
 
 
 # ---------------------------------------------------------------------------
+# Manual-metadata fallback for movie files whose metadata cannot be read
+# (load_tif / load_nd2 / load_stk via _movie_info_or_prompt).
+# ---------------------------------------------------------------------------
+
+
+class TestMovieMetadataFallback:
+    def test_prompt_used_when_info_unreadable(self, tmp_path, monkeypatch):
+        rng = np.random.default_rng(7)
+        data = rng.integers(0, 60000, size=(5, 16, 24), dtype="<u2")
+        path = tmp_path / "broken.tif"
+        _write_tif_stack(path, data)
+
+        # Simulate metadata extraction failing.
+        monkeypatch.setattr(
+            io.TiffMultiMap,
+            "info",
+            lambda self: (_ for _ in ()).throw(RuntimeError("bad meta")),
+        )
+
+        captured = {}
+
+        def prompt(partial):
+            captured["partial"] = partial
+            return {**partial, "Pixelsize": 130}, False
+
+        movie, info = io.load_tif(str(path), prompt_info=prompt)
+        try:
+            # The dialog is pre-filled with the dimensions read from the
+            # file structure.
+            assert captured["partial"]["Frames"] == 5
+            assert captured["partial"]["Height"] == 16
+            assert captured["partial"]["Width"] == 24
+            assert info[0]["Pixelsize"] == 130
+        finally:
+            movie.close()
+
+    def test_cancelled_prompt_returns_none(self, tmp_path, monkeypatch):
+        rng = np.random.default_rng(8)
+        data = rng.integers(0, 60000, size=(3, 16, 16), dtype="<u2")
+        path = tmp_path / "broken2.tif"
+        _write_tif_stack(path, data)
+
+        monkeypatch.setattr(
+            io.TiffMultiMap,
+            "info",
+            lambda self: (_ for _ in ()).throw(RuntimeError("bad meta")),
+        )
+
+        assert io.load_tif(str(path), prompt_info=lambda partial: None) is None
+
+    def test_no_prompt_raises_instead_of_returning_none(
+        self, tmp_path, monkeypatch
+    ):
+        # Programmatic use (no GUI callback) must raise an informative
+        # error rather than silently returning None.
+        rng = np.random.default_rng(11)
+        data = rng.integers(0, 60000, size=(3, 16, 16), dtype="<u2")
+        path = tmp_path / "broken_noprompt.tif"
+        _write_tif_stack(path, data)
+
+        monkeypatch.setattr(
+            io.TiffMultiMap,
+            "info",
+            lambda self: (_ for _ in ()).throw(RuntimeError("bad meta")),
+        )
+
+        with pytest.raises(io.NoMetadataFileError):
+            io.load_tif(str(path))
+
+    def test_sidecar_yaml_preferred_over_prompt(self, tmp_path, monkeypatch):
+        rng = np.random.default_rng(9)
+        data = rng.integers(0, 60000, size=(4, 16, 16), dtype="<u2")
+        path = tmp_path / "broken3.tif"
+        _write_tif_stack(path, data)
+        io.save_info(
+            str(tmp_path / "broken3.yaml"),
+            [{"Frames": 4, "Height": 16, "Width": 16, "Pixelsize": 99}],
+        )
+
+        monkeypatch.setattr(
+            io.TiffMultiMap,
+            "info",
+            lambda self: (_ for _ in ()).throw(RuntimeError("bad meta")),
+        )
+
+        def prompt(partial):
+            raise AssertionError("prompt should not be called")
+
+        movie, info = io.load_tif(str(path), prompt_info=prompt)
+        try:
+            assert info[0]["Pixelsize"] == 99
+        finally:
+            movie.close()
+
+    def test_readable_info_does_not_prompt(self, tmp_path):
+        rng = np.random.default_rng(10)
+        data = rng.integers(0, 60000, size=(6, 16, 16), dtype="<u2")
+        path = tmp_path / "fine.tif"
+        _write_tif_stack(path, data)
+
+        def prompt(partial):
+            raise AssertionError("prompt should not be called")
+
+        movie, info = io.load_tif(str(path), prompt_info=prompt)
+        try:
+            assert info[0]["Frames"] == 6
+        finally:
+            movie.close()
+
+
+# ---------------------------------------------------------------------------
 # Movie extension dispatch — MOVIE_EXTENSIONS / TIFF_EXTENSIONS / load_movie
 #
 # Note: tifffile cannot WRITE .lsm, so LSM read-correctness cannot be
@@ -730,7 +841,7 @@ class TestMovieExtensions:
         # a real file for each (esp. .lsm, which tifffile cannot write).
         called = {}
 
-        def fake_load_tif(path, progress=None):
+        def fake_load_tif(path, prompt_info=None, progress=None):
             called["path"] = path
             return "MOVIE", [{}]
 

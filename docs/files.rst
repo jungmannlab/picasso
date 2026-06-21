@@ -10,6 +10,8 @@ Picasso accepts several types of raw movie files: TIFF-family stacks (“.tif”
 
 When loading raw binary files, the user will be prompted for movie metadata such as the number of frames, number of pixels, etc. Alternatively, this metadata can be supplied by an accompanying metadata file with the same filename as the raw binary file, but with the extension .yaml. See ``YAML Metadata Files`` for more details.
 
+For TIFF-family, “.nd2” and “.stk” movies the metadata is normally read directly from the file. If this metadata cannot be parsed, ``Picasso: Localize`` falls back to prompting the user to enter the required information (``Frames``, ``Width``, ``Height`` and ``Pixelsize``) manually; the field of view dimensions are pre-filled from the file when they can be read. As with raw files, the entered metadata can optionally be saved to an accompanying “.yaml” file so it is reused the next time the movie is opened.
+
 HDF5 Files
 ----------
 
