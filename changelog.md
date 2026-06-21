@@ -27,6 +27,7 @@ Last change: 21-JUN-2026 CEST
 - Batch analysis allows for specifying fitting mode (brute force/coarse to fine/bayesian)
 
 #### *Other improvements:*
+- Removed folder `distribution` from the repository; `create_linux_shortcuts.py` was moved to `release`
 
 ### **Backward incompatible changes:**
 - All the functions deprecated in v0.10 were removed, see section 0.10.0 below
