@@ -1,6 +1,6 @@
 # Changelog
 
-Last change: 21-JUN-2026 CEST
+Last change: 22-JUN-2026 CEST
 
 ## 0.11.0
 
@@ -18,6 +18,7 @@ Last change: 21-JUN-2026 CEST
 - Slider at the bottom of the app was added to allow easy navigation across frames
 - New keyboard shortcuts for navigating movies (move by 10/100/1,000 frames)
 - Slight adjustments to some status bar messages
+- Cutting spots progress is reported between identification and fitting
 - Fixed a gap of roughly one box size in the identified spots along the borders between adjacent (e.g. overlapping) ROIs
 - Fixed handling abortions during identification
 

@@ -3022,6 +3022,7 @@ class Window(QtWidgets.QMainWindow):
                 use_gpufit,
             )
             self.fit_worker.progressMade.connect(self.on_fit_progress)
+            self.fit_worker.cutProgressMade.connect(self.on_cut_progress)
             self.fit_worker.finished.connect(self.on_fit_finished)
             self.fit_worker.aborted.connect(self.on_worker_aborted)
             self._active_worker = self.fit_worker
@@ -3052,6 +3053,11 @@ class Window(QtWidgets.QMainWindow):
         self._active_worker = self.fit_z_worker
         self.abort_action.setEnabled(True)
         self.fit_z_worker.start()
+
+    def on_cut_progress(self, curr: int, total: int) -> None:
+        """Update the status bar with the spot cutting progress."""
+        message = f"Extracting spot {curr:,} / {total:,} ..."
+        self.status_bar.showMessage(message)
 
     def on_fit_progress(self, curr: int, total: int) -> None:
         """Update the status bar with the fitting progress."""
@@ -3537,6 +3543,7 @@ class FitWorker(QtCore.QThread):
     multiprocessing and update the status bar accordingly."""
 
     progressMade = QtCore.pyqtSignal(int, int)
+    cutProgressMade = QtCore.pyqtSignal(int, int)
     finished = QtCore.pyqtSignal(pd.DataFrame, float, bool, bool)
     aborted = QtCore.pyqtSignal()
 
@@ -3565,12 +3572,22 @@ class FitWorker(QtCore.QThread):
         self.fit_z = fit_z
         self.calibrate_z = calibrate_z
         self.N = len(identifications)
+        self._last_cut_emit = 0
         if use_gpufit and method == "gausslq":
             method = "gausslq-gpu"
         self.method = method
 
     def on_progress(self, n_done: int) -> None:
         self.progressMade.emit(n_done, self.N)
+
+    def on_cut_progress(self, n_done: int) -> None:
+        # The underlying cut loop may call back very frequently (e.g. once
+        # per frame), so throttle GUI updates to ~1% increments to avoid
+        # flooding the main thread's event queue. Always emit the last one.
+        step = max(1, self.N // 1000)
+        if n_done - self._last_cut_emit >= step or n_done >= self.N:
+            self._last_cut_emit = n_done
+            self.cutProgressMade.emit(n_done, self.N)
 
     def run(self) -> None:
         t0 = time.time()
@@ -3589,6 +3606,7 @@ class FitWorker(QtCore.QThread):
             multiprocess=True,
             progress_callback=self.on_progress,
             abort_callback=self.isInterruptionRequested,
+            cut_progress_callback=self.on_cut_progress,
         )
         if locs is None:  # handle aborted process
             self.aborted.emit()
