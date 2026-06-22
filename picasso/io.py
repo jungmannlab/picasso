@@ -1886,11 +1886,12 @@ class TiffMap:
     tiled pages fall back to ``page.asarray()``.
 
     For speed, pages are parsed as lightweight ``tifffile`` frames
-    (``useframes``). A few OME-TIFF / ImageJ files have a page that
-    disagrees with the first one (strip count or width), which makes
-    tifffile raise ``"incompatible keyframe"``; ``__init__`` then falls
-    back to full, independent per-page parsing, which is slower to open
-    but reads the file."""
+    (``useframes``). A few OME-TIFF / ImageJ files append a stray
+    trailing IFD that disagrees with the first one (strip count or
+    width), which makes tifffile raise ``"incompatible keyframe"``;
+    ``__init__`` then falls back to full, independent per-page parsing
+    (slower to open but reads the file) and drops the stray IFD so
+    ``n_frames`` matches the real number of image planes."""
 
     def __init__(self, path: str, verbose: bool = False):
         """Open the TIFF file with tifffile and extract the geometry,
@@ -1916,12 +1917,14 @@ class TiffMap:
         else:
             self._tif.pages.useframes = True
             self._pages = self._tif.pages
-        self.n_frames = len(self._pages)
 
         page0 = self._pages[0]
         self.height = int(page0.imagelength)
         self.width = int(page0.imagewidth)
         bits = int(page0.bitspersample)
+        # A genuine movie frame has the same array shape as page 0;
+        # _build_offsets uses this to drop stray trailing IFDs.
+        self._page_shape = tuple(page0.shape)
 
         # Picasso works internally with little-endian unsigned integers; the
         # file may be big-endian, so keep both the file dtype and the target.
@@ -1937,22 +1940,25 @@ class TiffMap:
         # The fast np.fromfile path only applies to uncompressed data.
         self._uncompressed = int(page0.compression) == 1
 
-        # Precompute every frame's byte offset in a single pass over the
-        # IFDs. This keeps `get_frame` a pure seek + np.fromfile (one
-        # large sequential read per frame) and avoids a per-frame IFD
-        # parse, which is costly on network storage. self._offsets stays
-        # None for compressed / tiled / multi-strip files, which fall
-        # back to tifffile's decoder in get_frame.
+        # Precompute every frame's byte offset and the true frame count
+        # in a single pass over the IFDs. The offset table keeps
+        # `get_frame` a pure seek + np.fromfile (one large sequential
+        # read per frame) and avoids a per-frame IFD parse, which is
+        # costly on network storage; it stays None for compressed /
+        # tiled / multi-strip files, which fall back to tifffile's
+        # decoder in get_frame.
         #
-        # Building the offsets touches pages 1..N as lightweight
-        # TiffFrames, each validated against page 0 (the keyframe). Some
-        # OME-TIFF / ImageJ files have a page whose strip count or width
-        # disagrees with page 0, which makes tifffile raise
+        # Building this touches pages 1..N as lightweight TiffFrames,
+        # each validated against page 0 (the keyframe). Some OME-TIFF /
+        # ImageJ files append a stray trailing IFD whose strip count or
+        # width disagrees with page 0, which makes tifffile raise
         # "incompatible keyframe". In that case re-parse every IFD as a
-        # full, independent TiffPage (no keyframe comparison) - slower to
-        # open but reads the file, matching the pre-tifffile behaviour.
+        # full, independent TiffPage (no keyframe comparison) and drop
+        # the stray IFD from the frame count - slower to open but reads
+        # the file with the right number of frames, as the pre-tifffile
+        # reader did.
         try:
-            self._offsets = self._build_offsets()
+            self._offsets, self.n_frames = self._build_offsets()
         except RuntimeError:
             # Flipping useframes in place is cache-safe (Picasso never
             # enables tifffile's page cache, so no stale TiffFrames are
@@ -1960,37 +1966,73 @@ class TiffMap:
             # LSM branch above uses full TiffPages and never raises here.
             self._tif.pages.useframes = False
             self._pages = self._tif.pages
-            self._offsets = self._build_offsets()
+            self._offsets, self.n_frames = self._build_offsets()
 
         # A persistent binary handle for the fast offset-based read path.
         self.file = open(self.path, "rb")
         self.lock = threading.Lock()
 
-    def _build_offsets(self) -> list[int] | None:
-        """Return each frame's byte offset for the fast np.fromfile path,
-        or None if any page is compressed / tiled / multi-strip (those
-        fall back to tifffile's decoder in get_frame).
+    def _build_offsets(self) -> tuple[list[int] | None, int]:
+        """Return ``(offsets, n_frames)`` for the movie.
 
-        Iterating the pages here creates a TiffFrame per page validated
-        against the keyframe, so this is also where tifffile's
-        "incompatible keyframe" RuntimeError surfaces; __init__ catches
-        it and retries with full-page parsing."""
+        ``n_frames`` is the number of genuine image planes: a stray
+        trailing IFD whose array shape differs from page 0 (some
+        MicroManager / ImageJ OME-TIFFs append one - the same mismatch
+        that makes tifffile raise "incompatible keyframe") is dropped, so
+        the count matches the data as the pre-tifffile reader did.
+
+        ``offsets`` is each frame's byte offset for the fast np.fromfile
+        path, or ``None`` when any frame is compressed / tiled /
+        multi-strip (those are decoded by tifffile in get_frame).
+
+        Iterating the pages creates a TiffFrame per page validated
+        against the keyframe, so this is also where the "incompatible
+        keyframe" RuntimeError surfaces; __init__ catches it and retries
+        with full-page parsing, where the stray IFD has its real shape
+        and is dropped below."""
+        n_pages = len(self._pages)
+
         if not self._uncompressed:
-            # Probe one non-zero page so an incompatible keyframe is
-            # detected now (open time) rather than mid-scroll in
-            # get_frame; cheap (a single extra IFD read).
-            if self.n_frames > 1:
-                _ = self._pages[1].dataoffsets
-            return None
+            # Compressed / tiled: no fast offset path. In the lightweight
+            # frame mode every frame reports page 0's shape, so a stray
+            # IFD cannot be told apart without reading every IFD (costly
+            # on network storage). Probe the first and last extra pages
+            # so an incompatible one triggers the full-page fallback;
+            # with full pages (after that fallback, or for LSM) the
+            # shapes are real, so drop trailing mismatched IFDs.
+            if (not self._tif.is_lsm) and self._tif.pages.useframes:
+                if n_pages > 1:
+                    _ = self._pages[1].dataoffsets
+                    _ = self._pages[n_pages - 1].dataoffsets
+                return None, n_pages
+            n_frames = 0
+            for page in self._pages:
+                if tuple(page.shape) != self._page_shape:
+                    break
+                n_frames += 1
+            return None, n_frames
+
+        # Uncompressed: one pass collects each frame's byte offset and
+        # stops at the first IFD whose shape differs from page 0.
         offsets = []
+        n_frames = 0
+        fast = True
         for page in self._pages:
-            data_offsets = page.dataoffsets
-            byte_counts = page.databytecounts
-            if len(data_offsets) == 1 and byte_counts[0] == self._frame_nbytes:
-                offsets.append(int(data_offsets[0]))
-            else:
-                return None
-        return offsets
+            if tuple(page.shape) != self._page_shape:
+                break
+            n_frames += 1
+            if fast:
+                data_offsets = page.dataoffsets
+                byte_counts = page.databytecounts
+                if (
+                    len(data_offsets) == 1
+                    and byte_counts[0] == self._frame_nbytes
+                ):
+                    offsets.append(int(data_offsets[0]))
+                else:
+                    # Valid frame, but not eligible for the fast path.
+                    fast = False
+        return (offsets if fast else None), n_frames
 
     def __enter__(self):
         return self
