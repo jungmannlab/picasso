@@ -2773,7 +2773,7 @@ class Window(QtWidgets.QMainWindow):
 
     def on_cut_progress(self, curr: int, total: int) -> None:
         """Update the status bar with the spot cutting progress."""
-        message = f"Cutting spot {curr:,} / {total:,} ..."
+        message = f"Extracting spot {curr:,} / {total:,} ..."
         self.status_bar.showMessage(message)
 
     def on_fit_progress(self, curr: int, total: int) -> None:

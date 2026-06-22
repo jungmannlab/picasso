@@ -997,6 +997,29 @@ def locs_to_identifications(
 
 
 @numba.jit(nopython=True, cache=False)
+def _cut_spots_numba_into(
+    movie: lib.IntArray3D,
+    ids_frame: lib.IntArray1D,
+    ids_x: lib.IntArray1D,
+    ids_y: lib.IntArray1D,
+    box: int,
+    spots: lib.IntArray3D,
+    start: int,
+) -> None:
+    """Extract spots out of a movie directly into a preallocated array.
+
+    Spots are written into `spots[start : start + len(ids_x)]`, avoiding
+    an intermediate allocation and copy. Used for chunked, progress-aware
+    cutting.
+    """
+    r = int(box / 2)
+    for id, (frame, xc, yc) in enumerate(zip(ids_frame, ids_x, ids_y)):
+        spots[start + id] = movie[
+            frame, yc - r : yc + r + 1, xc - r : xc + r + 1
+        ]
+
+
+@numba.jit(nopython=True, cache=False)
 def _cut_spots_numba(
     movie: lib.IntArray3D,
     ids_frame: lib.IntArray1D,
@@ -1006,10 +1029,8 @@ def _cut_spots_numba(
 ) -> lib.IntArray3D:
     """Extract the spots out of a movie using Numba for performance."""
     n_spots = len(ids_x)
-    r = int(box / 2)
     spots = np.zeros((n_spots, box, box), dtype=movie.dtype)
-    for id, (frame, xc, yc) in enumerate(zip(ids_frame, ids_x, ids_y)):
-        spots[id] = movie[frame, yc - r : yc + r + 1, xc - r : xc + r + 1]
+    _cut_spots_numba_into(movie, ids_frame, ids_x, ids_y, box, spots, 0)
     return spots
 
 
@@ -1161,17 +1182,20 @@ def _cut_spots(
     if isinstance(movie, np.ndarray):
         if not callable(progress_callback):
             return _cut_spots_numba(movie, ids_frame, ids_x, ids_y, box)
-        # cut in chunks so that progress can be reported
+        # cut in chunks so that progress can be reported; spots are
+        # written directly into the output array to avoid an extra copy
         spots = np.zeros((N, box, box), dtype=movie.dtype)
         chunk = max(1, N // 100)
         for chunk_start in range(0, N, chunk):
             chunk_end = min(chunk_start + chunk, N)
-            spots[chunk_start:chunk_end] = _cut_spots_numba(
+            _cut_spots_numba_into(
                 movie,
                 ids_frame[chunk_start:chunk_end],
                 ids_x[chunk_start:chunk_end],
                 ids_y[chunk_start:chunk_end],
                 box,
+                spots,
+                chunk_start,
             )
             progress_callback(chunk_end)
         return spots
