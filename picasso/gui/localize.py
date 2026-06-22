@@ -3291,6 +3291,7 @@ class FitWorker(QtCore.QThread):
         self.fit_z = fit_z
         self.calibrate_z = calibrate_z
         self.N = len(identifications)
+        self._last_cut_emit = 0
         if use_gpufit and method == "gausslq":
             method = "gausslq-gpu"
         self.method = method
@@ -3299,7 +3300,13 @@ class FitWorker(QtCore.QThread):
         self.progressMade.emit(n_done, self.N)
 
     def on_cut_progress(self, n_done: int) -> None:
-        self.cutProgressMade.emit(n_done, self.N)
+        # The underlying cut loop may call back very frequently (e.g. once
+        # per frame), so throttle GUI updates to ~1% increments to avoid
+        # flooding the main thread's event queue. Always emit the last one.
+        step = max(1, self.N // 1000)
+        if n_done - self._last_cut_emit >= step or n_done >= self.N:
+            self._last_cut_emit = n_done
+            self.cutProgressMade.emit(n_done, self.N)
 
     def run(self) -> None:
         t0 = time.time()
