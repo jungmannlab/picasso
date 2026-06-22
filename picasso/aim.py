@@ -14,24 +14,21 @@ Adapted from: Ma, H., et al. Science Advances. 2024.
 
 from typing import Literal
 
+import numba
 import numpy as np
 import pandas as pd
 from scipy.interpolate import InterpolatedUnivariateSpline
 
 from . import lib, __version__
 
-# Maximum number of (target coordinate, shift) pairs held in memory at
-# once while counting intersections. Caps peak memory of the vectorized
-# search-region evaluation; the target coordinates are processed in row
-# chunks so that no temporary exceeds roughly this many elements.
-_COUNT_CHUNK = 4_000_000
 
-
+@numba.njit(cache=True, nogil=True)
 def _count_intersections(
     l0_coords: lib.IntArray1D,
     l0_counts: lib.IntArray1D,
-    l1_coords_shifted: lib.IntArray2D,
+    l1_coords: lib.IntArray1D,
     l1_counts: lib.IntArray1D,
+    shifts: lib.IntArray1D | lib.FloatArray1D,
 ) -> lib.IntArray1D:
     """Count the number of intersected localizations between the
     reference and the target dataset for every shift at once.
@@ -42,10 +39,12 @@ def _count_intersections(
     1D integers (e.g. ``x + y * width``).
 
     ``l0_coords`` must be sorted and unique (as returned by
-    ``np.unique``). Each column of ``l1_coords_shifted`` is the same
-    sorted, unique target coordinates offset by a constant shift, so it
-    stays sorted; matches are therefore located with ``np.searchsorted``
-    instead of a full sort per shift.
+    ``np.unique``). Each shift is a constant offset added to the sorted,
+    unique target coordinates, so each shifted coordinate is located in
+    the reference with a binary search. The whole search region is
+    evaluated in a single allocation-free pass (no ``(M, S)`` temporary
+    is materialized), which is why this is a numba kernel rather than a
+    vectorized numpy expression.
 
     Parameters
     ----------
@@ -54,11 +53,13 @@ def _count_intersections(
         ``(L,)``.
     l0_counts : lib.IntArray1D
         Counts of the unique reference coordinates, shape ``(L,)``.
-    l1_coords_shifted : lib.IntArray2D
-        Target coordinates shifted by each element of the local search
-        region, shape ``(M, S)`` where ``S`` is the number of shifts.
+    l1_coords : lib.IntArray1D
+        Sorted, unique coordinates of the target localizations, shape
+        ``(M,)``.
     l1_counts : lib.IntArray1D
         Counts of the unique target coordinates, shape ``(M,)``.
+    shifts : lib.IntArray1D | lib.FloatArray1D
+        The ``S`` offsets spanning the local search region.
 
     Returns
     -------
@@ -67,21 +68,26 @@ def _count_intersections(
         ``(S,)``.
     """
     n_ref = l0_coords.size
-    n_shifts = l1_coords_shifted.shape[1]
+    n_shifts = shifts.size
     roi_cc = np.zeros(n_shifts, dtype=np.int64)
-    # process the target coordinates in row chunks so that no temporary
-    # below exceeds roughly _COUNT_CHUNK elements
-    chunk = max(1, _COUNT_CHUNK // max(1, n_shifts))
-    for start in range(0, l1_coords_shifted.shape[0], chunk):
-        block = l1_coords_shifted[start : start + chunk]  # (m, S)
-        block_counts = l1_counts[start : start + chunk, np.newaxis]  # (m, 1)
-        # locate each shifted target coordinate in the sorted reference
-        pos = np.searchsorted(l0_coords, block)
-        np.minimum(pos, n_ref - 1, out=pos)
-        matched = l0_coords[pos] == block
-        # for each match, add min(reference count, target count)
-        contrib = np.minimum(l0_counts[pos], block_counts)
-        roi_cc += np.where(matched, contrib, 0).sum(axis=0)
+    for j in range(l1_coords.size):
+        base = l1_coords[j]
+        cj = l1_counts[j]
+        for s in range(n_shifts):
+            key = base + shifts[s]
+            # leftmost binary search for key in the sorted reference
+            lo = 0
+            hi = n_ref
+            while lo < hi:
+                mid = (lo + hi) // 2
+                if l0_coords[mid] < key:
+                    lo = mid + 1
+                else:
+                    hi = mid
+            if lo < n_ref and l0_coords[lo] == key:
+                # for a match, add min(reference count, target count)
+                c0 = l0_counts[lo]
+                roi_cc[s] += c0 if c0 < cj else cj
     return roi_cc
 
 
@@ -117,11 +123,8 @@ def _run_intersections(
         2D array with the number of intersections across the local
         search region. 1D array for z intersections in 3D undrifting.
     """
-    # every shift is a constant offset of the same sorted, unique target
-    # coordinates, so each shifted column stays sorted
-    l1_coords_shifted = l1_coords[:, np.newaxis] + shifts[np.newaxis, :]
     roi_cc = _count_intersections(
-        l0_coords, l0_counts, l1_coords_shifted, l1_counts
+        l0_coords, l0_counts, l1_coords, l1_counts, shifts
     )
     if box == 1:  # z intersections only, for z undrifting
         return roi_cc
