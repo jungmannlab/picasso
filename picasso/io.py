@@ -1740,8 +1740,14 @@ class LIFMovie(_MultiDimMovie):
         self.width = int(self.sizes["X"])
         self.n_frames = int(self.sizes.get("T", 1))
         self._dtype = np.dtype(self._image.dtype)
-        # Outer (non-frame) dimensions to index when reading one plane.
-        self._outer_dims = tuple(self._image.frames.dims)
+        # Outer (non-frame) dimensions to index when reading one plane. The
+        # frame itself is the innermost Y/X (plus optional S for RGB), so those
+        # are excluded here. Derive from ``sizes`` rather than ``frames.dims``
+        # for compatibility with older ``liffile`` versions that lack the
+        # ``frames`` accessor.
+        self._outer_dims = tuple(
+            d for d in self.sizes if d not in ("Y", "X", "S")
+        )
 
         n_channels = int(self.sizes.get("C", 1))
         channels = [f"Channel {i}" for i in range(n_channels)]
