@@ -12,7 +12,6 @@ Adapted from: Ma, H., et al. Science Advances. 2024.
 :copyright: Copyright (c) 2016-2026 Jungmann Lab, MPI of Biochemistry
 """
 
-from concurrent.futures import ThreadPoolExecutor
 from typing import Literal
 
 import numpy as np
@@ -21,82 +20,69 @@ from scipy.interpolate import InterpolatedUnivariateSpline
 
 from . import lib, __version__
 
-
-def _intersect1d(
-    a: lib.IntArray1D,
-    b: lib.IntArray1D,
-) -> tuple[lib.IntArray1D, lib.IntArray1D]:
-    """Find the indices of common elements in two 1D arrays (a and b).
-    Both a and b are assumed to be sorted and contain only unique
-    values.
-
-    Slightly faster implementation of ``np.intersect1d`` without
-    unnecessary checks, etc.
-
-    Parameters
-    ----------
-    a : lib.IntArray1D
-        1D array of integers.
-    b : lib.IntArray1D
-        1D array of integers.
-
-    Returns
-    -------
-    a_indices : lib.IntArray1D
-        Indices of common elements in a.
-    b_indices : lib.IntArray1D
-        Indices of common elements in b.
-    """
-    aux = np.concatenate((a, b))
-    # quicksort is not stable, do not change below!
-    aux_sort_indices = np.argsort(aux, kind="stable")
-    aux = aux[aux_sort_indices]
-
-    mask = aux[1:] == aux[:-1]
-    a_indices = aux_sort_indices[:-1][mask]
-    b_indices = aux_sort_indices[1:][mask] - a.size
-
-    return a_indices, b_indices
+# Maximum number of (target coordinate, shift) pairs held in memory at
+# once while counting intersections. Caps peak memory of the vectorized
+# search-region evaluation; the target coordinates are processed in row
+# chunks so that no temporary exceeds roughly this many elements.
+_COUNT_CHUNK = 4_000_000
 
 
 def _count_intersections(
     l0_coords: lib.IntArray1D,
     l0_counts: lib.IntArray1D,
-    l1_coords: lib.IntArray1D,
+    l1_coords_shifted: lib.IntArray2D,
     l1_counts: lib.IntArray1D,
-) -> int:
-    """Count the number of intersected localizations between the two
-    datasets. We assume that the intersection distance is 1 and since
-    the coordinates are expressed in the units of intersection distance,
-    we require the coordinates to be exactly the same to count as
-    intersection. Also, coordinates are converted to 1D arrays
-    (x + y * width).
+) -> lib.IntArray1D:
+    """Count the number of intersected localizations between the
+    reference and the target dataset for every shift at once.
+
+    We assume the intersection distance is 1 and, since the coordinates
+    are expressed in units of intersection distance, two coordinates
+    intersect only if they are exactly equal. Coordinates are encoded as
+    1D integers (e.g. ``x + y * width``).
+
+    ``l0_coords`` must be sorted and unique (as returned by
+    ``np.unique``). Each column of ``l1_coords_shifted`` is the same
+    sorted, unique target coordinates offset by a constant shift, so it
+    stays sorted; matches are therefore located with ``np.searchsorted``
+    instead of a full sort per shift.
 
     Parameters
     ----------
     l0_coords : lib.IntArray1D
-        Unique coordinates of the reference localizations.
+        Sorted, unique coordinates of the reference localizations, shape
+        ``(L,)``.
     l0_counts : lib.IntArray1D
-        Counts of the unique values of reference localizations.
-    l1_coords : lib.IntArray1D
-        Unique coordinates of the target localizations.
+        Counts of the unique reference coordinates, shape ``(L,)``.
+    l1_coords_shifted : lib.IntArray2D
+        Target coordinates shifted by each element of the local search
+        region, shape ``(M, S)`` where ``S`` is the number of shifts.
     l1_counts : lib.IntArray1D
-        Counts of the unique values of target localizations.
+        Counts of the unique target coordinates, shape ``(M,)``.
 
     Returns
     -------
-    n_intersections : int
-        Number of intersections.
+    roi_cc : lib.IntArray1D
+        Number of intersections for each of the ``S`` shifts, shape
+        ``(S,)``.
     """
-    # indices of common elements
-    idx0, idx1 = _intersect1d(l0_coords, l1_coords)
-    # extract the counts of these elements
-    l0_counts_subset = l0_counts[idx0]
-    l1_counts_subset = l1_counts[idx1]
-    # for each overlapping coordinate, take the minimum count from l0
-    # and l1, sum up across all overlapping coordinates
-    n_intersections = np.sum(np.minimum(l0_counts_subset, l1_counts_subset))
-    return n_intersections
+    n_ref = l0_coords.size
+    n_shifts = l1_coords_shifted.shape[1]
+    roi_cc = np.zeros(n_shifts, dtype=np.int64)
+    # process the target coordinates in row chunks so that no temporary
+    # below exceeds roughly _COUNT_CHUNK elements
+    chunk = max(1, _COUNT_CHUNK // max(1, n_shifts))
+    for start in range(0, l1_coords_shifted.shape[0], chunk):
+        block = l1_coords_shifted[start : start + chunk]  # (m, S)
+        block_counts = l1_counts[start : start + chunk, np.newaxis]  # (m, 1)
+        # locate each shifted target coordinate in the sorted reference
+        pos = np.searchsorted(l0_coords, block)
+        np.minimum(pos, n_ref - 1, out=pos)
+        matched = l0_coords[pos] == block
+        # for each match, add min(reference count, target count)
+        contrib = np.minimum(l0_counts[pos], block_counts)
+        roi_cc += np.where(matched, contrib, 0).sum(axis=0)
+    return roi_cc
 
 
 def _run_intersections(
@@ -104,101 +90,42 @@ def _run_intersections(
     l0_counts: lib.IntArray1D,
     l1_coords: lib.IntArray1D,
     l1_counts: lib.IntArray1D,
-    shifts_xy: lib.IntArray1D,
-    box: int,
-) -> lib.IntArray2D:
-    """Run intersection counting across the local search region. Return
-    the 2D array with number of intersections across the local search
-    region.
-
-    Parameters
-    ----------
-    l0_coords : lib.IntArray1D
-        Unique coordinates of the reference localizations.
-    l0_counts : lib.IntArray1D
-        Counts of the reference localizations.
-    l1_coords : lib.IntArray1D
-        Unique coordinates of the target localizations.
-    l1_counts : lib.IntArray1D
-        Counts of the target localizations.
-    shifts_xy : lib.IntArray1D
-        1D array with x and y shifts.
-    box : int
-        Side length of the local search region.
-
-    Returns
-    -------
-    roi_cc : lib.IntArray2D
-        2D array with number of intersections across the local search
-        region.
-    """
-    # create the 2D array with shifts
-    roi_cc = np.zeros(shifts_xy.shape, dtype=np.int32)
-    # shift target coordinates
-    l1_coords_shifted = l1_coords[:, np.newaxis] + shifts_xy
-    # go through each element in the local search region
-    for i in range(len(shifts_xy)):
-        n_intersections = _count_intersections(
-            l0_coords, l0_counts, l1_coords_shifted[:, i], l1_counts
-        )
-        roi_cc[i] = n_intersections
-    return roi_cc.reshape(box, box)
-
-
-def _run_intersections_multithread(
-    l0_coords: lib.IntArray1D,
-    l0_counts: lib.IntArray1D,
-    l1_coords: lib.IntArray1D,
-    l1_counts: lib.IntArray1D,
-    shifts_xy: lib.IntArray1D,
+    shifts: lib.IntArray1D,
     box: int,
 ) -> lib.IntArray2D | lib.IntArray1D:
-    """Run intersection counting across the local search region. Return
-    the 2D array with number of intersections across the local search
-    region. Uses multithreading.
+    """Run intersection counting across the whole local search region.
 
     Parameters
     ----------
     l0_coords : lib.IntArray1D
-        Unique coordinates of the reference localizations.
+        Sorted, unique coordinates of the reference localizations.
     l0_counts : lib.IntArray1D
         Counts of the reference localizations.
     l1_coords : lib.IntArray1D
-        Unique coordinates of the target localizations.
+        Sorted, unique coordinates of the target localizations.
     l1_counts : lib.IntArray1D
         Counts of the target localizations.
-    shifts_xy : lib.IntArray1D
-        1D array with x and y shifts.
+    shifts : lib.IntArray1D
+        1D array with the shifts spanning the local search region.
     box : int
-        Side length of the local search region.
+        Side length of the local search region. ``box == 1`` signals z
+        intersections (1D search region) for 3D undrifting.
 
     Returns
     -------
     roi_cc : lib.IntArray2D | lib.IntArray1D
-        2D array with number of intersections across the local search
-        region. 1D array for z intersections in 3D undrifting.
+        2D array with the number of intersections across the local
+        search region. 1D array for z intersections in 3D undrifting.
     """
-    # shift target coordinates
-    l1_coords_shifted = l1_coords[:, np.newaxis] + shifts_xy
-    # run multiple threads
-    n_workers = len(shifts_xy)
-    executor = ThreadPoolExecutor(n_workers)
-    f = [
-        executor.submit(
-            _count_intersections,
-            l0_coords,
-            l0_counts,
-            l1_coords_shifted[:, i],
-            l1_counts,
-        )
-        for i in range(len(shifts_xy))
-    ]
-    executor.shutdown(wait=True)
-    if box == 1:  # z intersection only, for z undrifting
-        roi_cc = np.array([_.result() for _ in f])
-    else:  # 2D intersection
-        roi_cc = np.array([_.result() for _ in f]).reshape(box, box)
-    return roi_cc
+    # every shift is a constant offset of the same sorted, unique target
+    # coordinates, so each shifted column stays sorted
+    l1_coords_shifted = l1_coords[:, np.newaxis] + shifts[np.newaxis, :]
+    roi_cc = _count_intersections(
+        l0_coords, l0_counts, l1_coords_shifted, l1_counts
+    )
+    if box == 1:  # z intersections only, for z undrifting
+        return roi_cc
+    return roi_cc.reshape(box, box)
 
 
 def _point_intersect_2d(
@@ -245,7 +172,7 @@ def _point_intersect_2d(
     # get unique values and counts of the target localizations
     l1_coords, l1_counts = np.unique(l1, return_counts=True)
     # run the intersections counting
-    roi_cc = _run_intersections_multithread(
+    roi_cc = _run_intersections(
         l0_coords, l0_counts, l1_coords, l1_counts, shifts_xy, box
     )
     return roi_cc
@@ -302,7 +229,7 @@ def _point_intersect_3d(
     # get unique values and counts of the target localizations
     l1_coords, l1_counts = np.unique(l1, return_counts=True)
     # run the intersections counting
-    roi_cc = _run_intersections_multithread(
+    roi_cc = _run_intersections(
         l0_coords, l0_counts, l1_coords, l1_counts, shifts_z, 1
     )
     return roi_cc
@@ -453,6 +380,19 @@ def intersection_max(
     l0 = np.int32(x0_units + y0_units * width_units)  # 1d list
     l0_coords, l0_counts = np.unique(l0, return_counts=True)
 
+    # sort the target localizations by frame so that each segment is a
+    # contiguous slice (located with searchsorted). This avoids
+    # re-scanning the whole array for every segment, which dominates the
+    # runtime for low segmentation and large datasets.
+    frame_sorted = np.asarray(frame)
+    order = np.argsort(frame_sorted, kind="stable")
+    frame_sorted = frame_sorted[order]
+    x_sorted = np.asarray(x)[order]
+    y_sorted = np.asarray(y)[order]
+    # first index of every segment: segment s spans the localizations
+    # with seg_bounds[s] < frame <= seg_bounds[s + 1]
+    seg_idx = np.searchsorted(frame_sorted, seg_bounds, side="right")
+
     # initialize progress such that if GUI is used, tqdm is omitted
     start_idx = 1 if aim_round == 1 else 0
     iterator = progress.get_iterator(start_idx, n_segments)
@@ -460,20 +400,17 @@ def intersection_max(
     # run across each segment
     for s in iterator:
         # get the target localizations within the current segment
-        min_frame_idx = frame > seg_bounds[s]
-        max_frame_idx = frame <= seg_bounds[s + 1]
-        x1 = x[min_frame_idx & max_frame_idx]
-        y1 = y[min_frame_idx & max_frame_idx]
+        lo, hi = seg_idx[s], seg_idx[s + 1]
 
-        # skip if no reference localizations
-        if len(x1) == 0:
+        # skip if no target localizations
+        if hi == lo:
             drift_x[s] = drift_x[s - 1]
             drift_y[s] = drift_y[s - 1]
             continue
 
-        # undrifting from the previous round
-        x1 += rel_drift_x
-        y1 += rel_drift_y
+        # undrifting from the previous round (new array, not a view)
+        x1 = x_sorted[lo:hi] + rel_drift_x
+        y1 = y_sorted[lo:hi] + rel_drift_y
 
         # count the number of intersected localizations
         roi_cc = _point_intersect_2d(
@@ -568,6 +505,20 @@ def intersection_max_z(
     )  # 1d list
     l0_coords, l0_counts = np.unique(l0, return_counts=True)
 
+    # sort the target localizations by frame so that each segment is a
+    # contiguous slice (located with searchsorted). This avoids
+    # re-scanning the whole array for every segment, which dominates the
+    # runtime for low segmentation and large datasets.
+    frame_sorted = np.asarray(frame)
+    order = np.argsort(frame_sorted, kind="stable")
+    frame_sorted = frame_sorted[order]
+    x_sorted = np.asarray(x)[order]
+    y_sorted = np.asarray(y)[order]
+    z_sorted = np.asarray(z)[order]
+    # first index of every segment: segment s spans the localizations
+    # with seg_bounds[s] < frame <= seg_bounds[s + 1]
+    seg_idx = np.searchsorted(frame_sorted, seg_bounds, side="right")
+
     # initialize progress such that if GUI is used, tqdm is omitted
     start_idx = 1 if aim_round == 1 else 0
     iterator = progress.get_iterator(start_idx, n_segments)
@@ -575,19 +526,17 @@ def intersection_max_z(
     # run across each segment
     for s in iterator:
         # get the target localizations within the current segment
-        min_frame_idx = frame > seg_bounds[s]
-        max_frame_idx = frame <= seg_bounds[s + 1]
-        x1 = x[min_frame_idx & max_frame_idx]
-        y1 = y[min_frame_idx & max_frame_idx]
-        z1 = z[min_frame_idx & max_frame_idx]
+        lo, hi = seg_idx[s], seg_idx[s + 1]
 
-        # skip if no reference localizations
-        if len(x1) == 0:
+        # skip if no target localizations
+        if hi == lo:
             drift_z[s] = drift_z[s - 1]
             continue
 
-        # undrifting from the previous round
-        z1 += rel_drift_z
+        x1 = x_sorted[lo:hi]
+        y1 = y_sorted[lo:hi]
+        # undrifting from the previous round (new array, not a view)
+        z1 = z_sorted[lo:hi] + rel_drift_z
 
         # count the number of intersected localizations
         roi_cc = _point_intersect_3d(

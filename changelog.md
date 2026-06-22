@@ -24,6 +24,7 @@ Last change: 22-JUN-2026 CEST
 
 #### Render
 - Improved measure tool
+- Faster AIM through smarter implementation
 
 #### SPINNA
 - Fixed verbose for batch analysis
