@@ -1883,7 +1883,14 @@ class TiffMap:
     single frame even for multi-gigabyte movies. For the common case of
     an uncompressed, contiguous, single-strip page the frame is read
     directly from its file offset with ``np.fromfile``. Compressed or
-    tiled pages fall back to ``page.asarray()``."""
+    tiled pages fall back to ``page.asarray()``.
+
+    For speed, pages are parsed as lightweight ``tifffile`` frames
+    (``useframes``). A few OME-TIFF / ImageJ files have a page that
+    disagrees with the first one (strip count or width), which makes
+    tifffile raise ``"incompatible keyframe"``; ``__init__`` then falls
+    back to full, independent per-page parsing, which is slower to open
+    but reads the file."""
 
     def __init__(self, path: str, verbose: bool = False):
         """Open the TIFF file with tifffile and extract the geometry,
@@ -1936,25 +1943,54 @@ class TiffMap:
         # parse, which is costly on network storage. self._offsets stays
         # None for compressed / tiled / multi-strip files, which fall
         # back to tifffile's decoder in get_frame.
-        self._offsets = None
-        if self._uncompressed:
-            offsets = []
-            for page in self._pages:
-                data_offsets = page.dataoffsets
-                byte_counts = page.databytecounts
-                if (
-                    len(data_offsets) == 1
-                    and byte_counts[0] == self._frame_nbytes
-                ):
-                    offsets.append(int(data_offsets[0]))
-                else:
-                    offsets = None
-                    break
-            self._offsets = offsets
+        #
+        # Building the offsets touches pages 1..N as lightweight
+        # TiffFrames, each validated against page 0 (the keyframe). Some
+        # OME-TIFF / ImageJ files have a page whose strip count or width
+        # disagrees with page 0, which makes tifffile raise
+        # "incompatible keyframe". In that case re-parse every IFD as a
+        # full, independent TiffPage (no keyframe comparison) - slower to
+        # open but reads the file, matching the pre-tifffile behaviour.
+        try:
+            self._offsets = self._build_offsets()
+        except RuntimeError:
+            # Flipping useframes in place is cache-safe (Picasso never
+            # enables tifffile's page cache, so no stale TiffFrames are
+            # held) and keeps the already-discovered IFD offset list. The
+            # LSM branch above uses full TiffPages and never raises here.
+            self._tif.pages.useframes = False
+            self._pages = self._tif.pages
+            self._offsets = self._build_offsets()
 
         # A persistent binary handle for the fast offset-based read path.
         self.file = open(self.path, "rb")
         self.lock = threading.Lock()
+
+    def _build_offsets(self) -> list[int] | None:
+        """Return each frame's byte offset for the fast np.fromfile path,
+        or None if any page is compressed / tiled / multi-strip (those
+        fall back to tifffile's decoder in get_frame).
+
+        Iterating the pages here creates a TiffFrame per page validated
+        against the keyframe, so this is also where tifffile's
+        "incompatible keyframe" RuntimeError surfaces; __init__ catches
+        it and retries with full-page parsing."""
+        if not self._uncompressed:
+            # Probe one non-zero page so an incompatible keyframe is
+            # detected now (open time) rather than mid-scroll in
+            # get_frame; cheap (a single extra IFD read).
+            if self.n_frames > 1:
+                _ = self._pages[1].dataoffsets
+            return None
+        offsets = []
+        for page in self._pages:
+            data_offsets = page.dataoffsets
+            byte_counts = page.databytecounts
+            if len(data_offsets) == 1 and byte_counts[0] == self._frame_nbytes:
+                offsets.append(int(data_offsets[0]))
+            else:
+                return None
+        return offsets
 
     def __enter__(self):
         return self
