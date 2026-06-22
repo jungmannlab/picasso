@@ -91,6 +91,70 @@ def _count_intersections(
     return roi_cc
 
 
+@numba.njit(cache=True, nogil=True)
+def _count_intersections_box(
+    l0_coords: lib.IntArray1D,
+    l0_counts: lib.IntArray1D,
+    l1_coords: lib.IntArray1D,
+    l1_counts: lib.IntArray1D,
+    shifts: lib.IntArray1D,
+    box: int,
+) -> lib.IntArray1D:
+    """Count intersections across a 2D ``box``-by-``box`` search region,
+    exploiting the contiguity of each row of shifts.
+
+    The shifts span a 2D box and are encoded into 1D as
+    ``shift = dx + dy * width_units`` (see ``intersection_max``), laid
+    out row-major as ``shifts[i * box + j]`` with ``dx`` indexed by ``i``
+    and ``dy`` by ``j``. For a fixed ``dy`` (a single row), the ``box``
+    encoded shifts are ``box`` consecutive integers — incrementing ``dx``
+    by one increments the (truncated) encoded shift by exactly one,
+    because ``width_units`` is always far larger than the search radius,
+    so no row wraps. Therefore, for every target coordinate, the whole
+    row is located with a single binary search into the sorted reference
+    plus a short forward scan, instead of one binary search per shift.
+    This reduces the work from ``M * box**2 * log L`` to roughly
+    ``M * box * (log L + box)``.
+
+    ``l0_coords`` must be sorted and unique. Parameters mirror
+    ``_count_intersections``; ``box`` is the side length of the search
+    region, so ``shifts.size == box * box``.
+
+    Returns
+    -------
+    roi_cc : lib.IntArray1D
+        Number of intersections for each of the ``box * box`` shifts,
+        flattened row-major as ``roi_cc[i * box + j]``.
+    """
+    n_ref = l0_coords.size
+    roi_cc = np.zeros(shifts.size, dtype=np.int64)
+    for m in range(l1_coords.size):
+        base = l1_coords[m]
+        cm = l1_counts[m]
+        for j in range(box):  # one dy-row at a time
+            # the row's encoded shifts are the consecutive integers
+            # run_start .. run_start + box - 1 (i = 0 .. box - 1)
+            run_start = base + shifts[j]
+            run_end = run_start + (box - 1)
+            # leftmost binary search for run_start in the reference
+            lo = 0
+            hi = n_ref
+            while lo < hi:
+                mid = (lo + hi) // 2
+                if l0_coords[mid] < run_start:
+                    lo = mid + 1
+                else:
+                    hi = mid
+            # scan the contiguous run, mapping each hit back to its shift
+            p = lo
+            while p < n_ref and l0_coords[p] <= run_end:
+                i = l0_coords[p] - run_start  # dx index, 0 .. box - 1
+                c0 = l0_counts[p]
+                roi_cc[i * box + j] += c0 if c0 < cm else cm
+                p += 1
+    return roi_cc
+
+
 def _run_intersections(
     l0_coords: lib.IntArray1D,
     l0_counts: lib.IntArray1D,
@@ -123,11 +187,14 @@ def _run_intersections(
         2D array with the number of intersections across the local
         search region. 1D array for z intersections in 3D undrifting.
     """
-    roi_cc = _count_intersections(
-        l0_coords, l0_counts, l1_coords, l1_counts, shifts
+    if box == 1:  # z intersections only (1D search region), for z undrift
+        return _count_intersections(
+            l0_coords, l0_counts, l1_coords, l1_counts, shifts
+        )
+    # 2D search region: exploit the row-wise contiguity of the shifts
+    roi_cc = _count_intersections_box(
+        l0_coords, l0_counts, l1_coords, l1_counts, shifts, box
     )
-    if box == 1:  # z intersections only, for z undrifting
-        return roi_cc
     return roi_cc.reshape(box, box)
 
 
