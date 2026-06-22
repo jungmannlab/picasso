@@ -52,13 +52,18 @@ except ImportError:
     liffile = None
 
 
-# MicroManager OME-TIFF continuation files store a non-ASCII
-# ImageDescription (tag 270), which makes tifffile log a benign
-# "coercing invalid ASCII to bytes" warning for every such file. The
-# bytes are unused by Picasso (frames and the metadata we read are
-# unaffected), so silence tifffile's logger below the error level to
-# keep the console clean.
-logging.getLogger("tifffile").setLevel(logging.ERROR)
+# MicroManager OME-TIFF files make tifffile log a couple of benign
+# messages that are unused by Picasso (frames and the metadata we read
+# are unaffected):
+#   * continuation files store a non-ASCII ImageDescription (tag 270),
+#     triggering a "coercing invalid ASCII to bytes" warning;
+#   * the MicroManagerMetadata tag (50839) can carry a zero value
+#     offset, which tifffile reports at ERROR level as
+#     "<TiffTag.fromfile> raised TiffFileError(... invalid value
+#     offset 0)" while still recovering and reading the file.
+# Silence tifffile's logger below CRITICAL so these don't reach the
+# console; genuine read failures still raise exceptions in load_tif.
+logging.getLogger("tifffile").setLevel(logging.CRITICAL)
 
 
 # Movie file extensions Picasso can open. TIFF_EXTENSIONS are routed to

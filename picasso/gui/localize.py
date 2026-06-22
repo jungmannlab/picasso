@@ -2267,11 +2267,10 @@ class Window(QtWidgets.QMainWindow):
         next_frame_action.triggered.connect(lambda: self.next_frame(1))
         view_menu.addAction(next_frame_action)
         # Jump multiple frames at once using modifier keys with the arrows.
-        # Shift -> 10, Ctrl/Cmd -> 100, Ctrl/Cmd + Shift -> 1000 frames.
+        # Shift -> 10, Ctrl/Cmd -> 100
         for step, modifier in (
             (10, "Shift"),
             (100, "Ctrl"),
-            (1000, "Ctrl+Shift"),
         ):
             jump_back_action = view_menu.addAction(
                 "Previous {} frames".format(step)
