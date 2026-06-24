@@ -30,7 +30,6 @@ from .. import io, lib, render, __version__
 from cmath import rect, phase
 
 import scipy.ndimage.filters
-import importlib, pkgutil
 
 DEFAULT_OVERSAMPLING = 1.0
 INITIAL_REL_MAXIMUM = 2.0
@@ -2100,21 +2099,6 @@ def main():
 
     app = QtWidgets.QApplication(sys.argv)
     window = Window()
-
-    from . import plugins
-
-    def iter_namespace(pkg):
-        return pkgutil.iter_modules(pkg.__path__, pkg.__name__ + ".")
-
-    plugins = [
-        importlib.import_module(name)
-        for finder, name, ispkg in iter_namespace(plugins)
-    ]
-
-    for plugin in plugins:
-        p = plugin.Plugin(window)
-        if p.name == "average3":
-            p.execute()
 
     window.show()
 
