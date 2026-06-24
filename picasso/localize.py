@@ -470,7 +470,16 @@ def identify_by_frame_number(
         DataFrame containing the frame number, x and y coordinates of
         the identified maxima, and their net gradient.
     """
-    if lock is not None:
+    # Movies that read each frame through their own per-thread file
+    # handle (TiffMap, STKMovie and the multi-file maps) or a memory map
+    # are safe to read concurrently, so they skip the shared lock. This
+    # lets several frame reads be in flight at once, which hides per-frame
+    # I/O latency on network storage. Formats whose readers are not
+    # reentrant stay serialized behind the lock.
+    concurrent = getattr(
+        movie, "supports_concurrent_reads", False
+    ) or isinstance(movie, np.memmap)
+    if lock is not None and not concurrent:
         with lock:
             frame = movie[frame_number]
     else:

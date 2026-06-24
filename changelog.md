@@ -1,6 +1,6 @@
 # Changelog
 
-Last change: 22-JUN-2026 CEST
+Last change: 24-JUN-2026 CEST
 
 ## 0.11.0
 
@@ -20,6 +20,7 @@ Last change: 22-JUN-2026 CEST
 - New keyboard shortcuts for navigating movies (move by 10/100/1,000 frames)
 - Slight adjustments to some status bar messages
 - Cutting spots progress is reported between identification and fitting
+- Faster spot identification on network storage: `.tif`/`.ome.tif` and `.stk` movies are now read through a private file handle per worker thread instead of one shared, lock-serialized handle, so frame reads overlap and per-frame network latency is hidden
 - Fixed a gap of roughly one box size in the identified spots along the borders between adjacent (e.g. overlapping) ROIs
 - Fixed handling abortions during identification
 

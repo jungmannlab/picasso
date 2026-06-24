@@ -1988,9 +1988,35 @@ class TiffMap:
             self._pages = self._tif.pages
             self._offsets, self.n_frames = self._build_offsets()
 
-        # A persistent binary handle for the fast offset-based read path.
-        self.file = open(self.path, "rb")
-        self.lock = threading.Lock()
+        # Per-thread binary handles for the fast offset-based read path.
+        # A single shared handle forces every concurrent reader to
+        # serialize on one file position (seek + read is stateful), so on
+        # network storage the per-frame round-trips cannot overlap. Giving
+        # each thread its own handle lets the OS / network stack keep
+        # several reads in flight at once, which hides per-frame latency.
+        # The lock only guards the slow tifffile-decode fallback used for
+        # compressed / tiled pages, which is not reentrant.
+        self._local = threading.local()
+        self._open_handles = []
+        self._handles_lock = threading.Lock()
+        self._decode_lock = threading.Lock()
+
+    # Read frames concurrently without the shared identify lock; each
+    # thread uses its own file handle (see ``_handle``).
+    supports_concurrent_reads = True
+
+    def _handle(self):
+        """Return this thread's private binary file handle, opening one
+        on first use. Per-thread handles let concurrent ``get_frame``
+        calls issue overlapping seek + read requests instead of
+        contending on a single shared file position."""
+        handle = getattr(self._local, "file", None)
+        if handle is None:
+            handle = open(self.path, "rb")
+            self._local.file = handle
+            with self._handles_lock:
+                self._open_handles.append(handle)
+        return handle
 
     def _build_offsets(self) -> tuple[list[int] | None, int]:
         """Return ``(offsets, n_frames)`` for the movie.
@@ -2061,40 +2087,40 @@ class TiffMap:
         self.close()
 
     def __getitem__(self, it):  # noqa: C901
-        with self.lock:  # for reading frames from multiple threads
-            if isinstance(it, tuple):
-                if isinstance(it, int) or np.issubdtype(it[0], np.integer):
-                    return self[it[0]][it[1:]]
-                elif isinstance(it[0], slice):
-                    indices = range(*it[0].indices(self.n_frames))
-                    stack = np.array([self.get_frame(_) for _ in indices])
-                    if len(indices) == 0:
-                        return stack
-                    else:
-                        if len(it) == 2:
-                            return stack[:, it[1]]
-                        elif len(it) == 3:
-                            return stack[:, it[1], it[2]]
-                        else:
-                            raise IndexError
-                elif it[0] == Ellipsis:
-                    stack = self[it[0]]
+        # No shared lock here: get_frame is thread-safe on its own (each
+        # thread reads through its private handle, and the compressed
+        # fallback takes _decode_lock), so concurrent reads can overlap.
+        if isinstance(it, tuple):
+            if isinstance(it, int) or np.issubdtype(it[0], np.integer):
+                return self[it[0]][it[1:]]
+            elif isinstance(it[0], slice):
+                indices = range(*it[0].indices(self.n_frames))
+                stack = np.array([self.get_frame(_) for _ in indices])
+                if len(indices) == 0:
+                    return stack
+                else:
                     if len(it) == 2:
                         return stack[:, it[1]]
                     elif len(it) == 3:
                         return stack[:, it[1], it[2]]
                     else:
                         raise IndexError
-            elif isinstance(it, slice):
-                indices = range(*it.indices(self.n_frames))
-                return np.array([self.get_frame(_) for _ in indices])
-            elif it == Ellipsis:
-                return np.array(
-                    [self.get_frame(_) for _ in range(self.n_frames)]
-                )
-            elif isinstance(it, int) or np.issubdtype(it, np.integer):
-                return self.get_frame(it)
-            raise TypeError
+            elif it[0] == Ellipsis:
+                stack = self[it[0]]
+                if len(it) == 2:
+                    return stack[:, it[1]]
+                elif len(it) == 3:
+                    return stack[:, it[1], it[2]]
+                else:
+                    raise IndexError
+        elif isinstance(it, slice):
+            indices = range(*it.indices(self.n_frames))
+            return np.array([self.get_frame(_) for _ in indices])
+        elif it == Ellipsis:
+            return np.array([self.get_frame(_) for _ in range(self.n_frames)])
+        elif isinstance(it, int) or np.issubdtype(it, np.integer):
+            return self.get_frame(it)
+        raise TypeError
 
     def __iter__(self):
         for i in range(self.n_frames):
@@ -2135,23 +2161,31 @@ class TiffMap:
         large sequential read, no decode overhead and no per-frame IFD
         parse); all other layouts fall back to ``tifffile``'s decoder."""
         if self._offsets is not None:
-            # Fast path: pure seek + read, no tifffile access per frame.
-            self.file.seek(self._offsets[index])
+            # Fast path: pure seek + read on this thread's own handle, no
+            # tifffile access and no shared lock, so reads from different
+            # threads overlap instead of serializing.
+            handle = self._handle()
+            handle.seek(self._offsets[index])
             frame = np.fromfile(
-                self.file,
+                handle,
                 dtype=self._tif_dtype,
                 count=self.frame_size,
             ).reshape(self.frame_shape)
         else:
             # Compressed / tiled / multi-strip pages: let tifffile decode
             # this single page (still lazy - other frames stay on disk).
-            frame = np.asarray(self._pages[index].asarray())
+            # tifffile's reader is not reentrant, so serialize the decode.
+            with self._decode_lock:
+                frame = np.asarray(self._pages[index].asarray())
         # Downstream code expects little-endian unsigned integers; astype
         # is a no-op (no copy) when the data is already in that order.
         return frame.astype(self.dtype, copy=False)
 
     def close(self) -> None:
-        self.file.close()
+        with self._handles_lock:
+            for handle in self._open_handles:
+                handle.close()
+            self._open_handles = []
         self._tif.close()
 
     def tofile(self, file_handle, byte_order=None):
@@ -2215,9 +2249,29 @@ class STKMovie(AbstractPicassoMovie):
         self.frame_shape = (self.height, self.width)
         self.shape = (self.n_frames, self.height, self.width)
 
-        # Open a persistent binary file handle for lazy frame reading.
-        self._file = open(self.path, "rb")
-        self._lock = threading.Lock()
+        # Per-thread binary handles for lazy frame reading. A shared
+        # handle would serialize concurrent reads on one file position;
+        # a private handle per thread lets reads overlap, which hides
+        # per-frame latency on network storage. See ``TiffMap._handle``.
+        self._local = threading.local()
+        self._open_handles = []
+        self._handles_lock = threading.Lock()
+
+    # Read frames concurrently without the shared identify lock; each
+    # thread uses its own file handle (see ``_handle``).
+    supports_concurrent_reads = True
+
+    def _handle(self):
+        """Return this thread's private binary file handle, opening one
+        on first use, so concurrent ``get_frame`` calls do not contend
+        on a single shared file position."""
+        handle = getattr(self._local, "file", None)
+        if handle is None:
+            handle = open(self.path, "rb")
+            self._local.file = handle
+            with self._handles_lock:
+                self._open_handles.append(handle)
+        return handle
 
     # ------------------------------------------------------------------
     # AbstractPicassoMovie interface
@@ -2230,39 +2284,38 @@ class STKMovie(AbstractPicassoMovie):
         self.close()
 
     def __getitem__(self, it):  # noqa: C901
-        with self._lock:
-            if isinstance(it, tuple):
-                if isinstance(it[0], int) or np.issubdtype(it[0], np.integer):
-                    return self[it[0]][it[1:]]
-                elif isinstance(it[0], slice):
-                    indices = range(*it[0].indices(self.n_frames))
-                    stack = np.array([self.get_frame(_) for _ in indices])
-                    if len(indices) == 0:
-                        return stack
-                    if len(it) == 2:
-                        return stack[:, it[1]]
-                    elif len(it) == 3:
-                        return stack[:, it[1], it[2]]
-                    else:
-                        raise IndexError
-                elif it[0] == Ellipsis:
-                    stack = self[it[0]]
-                    if len(it) == 2:
-                        return stack[:, it[1]]
-                    elif len(it) == 3:
-                        return stack[:, it[1], it[2]]
-                    else:
-                        raise IndexError
-            elif isinstance(it, slice):
-                indices = range(*it.indices(self.n_frames))
-                return np.array([self.get_frame(_) for _ in indices])
-            elif it == Ellipsis:
-                return np.array(
-                    [self.get_frame(_) for _ in range(self.n_frames)]
-                )
-            elif isinstance(it, int) or np.issubdtype(it, np.integer):
-                return self.get_frame(it)
-            raise TypeError
+        # No shared lock: get_frame reads through this thread's private
+        # handle, so concurrent reads overlap instead of serializing.
+        if isinstance(it, tuple):
+            if isinstance(it[0], int) or np.issubdtype(it[0], np.integer):
+                return self[it[0]][it[1:]]
+            elif isinstance(it[0], slice):
+                indices = range(*it[0].indices(self.n_frames))
+                stack = np.array([self.get_frame(_) for _ in indices])
+                if len(indices) == 0:
+                    return stack
+                if len(it) == 2:
+                    return stack[:, it[1]]
+                elif len(it) == 3:
+                    return stack[:, it[1], it[2]]
+                else:
+                    raise IndexError
+            elif it[0] == Ellipsis:
+                stack = self[it[0]]
+                if len(it) == 2:
+                    return stack[:, it[1]]
+                elif len(it) == 3:
+                    return stack[:, it[1], it[2]]
+                else:
+                    raise IndexError
+        elif isinstance(it, slice):
+            indices = range(*it.indices(self.n_frames))
+            return np.array([self.get_frame(_) for _ in indices])
+        elif it == Ellipsis:
+            return np.array([self.get_frame(_) for _ in range(self.n_frames)])
+        elif isinstance(it, int) or np.issubdtype(it, np.integer):
+            return self.get_frame(it)
+        raise TypeError
 
     def __iter__(self):
         for i in range(self.n_frames):
@@ -2320,9 +2373,10 @@ class STKMovie(AbstractPicassoMovie):
                 f"{self.n_frames} frames."
             )
         offset = self._first_data_offset + index * self._frame_bytes
-        self._file.seek(offset)
+        handle = self._handle()
+        handle.seek(offset)
         frame = np.fromfile(
-            self._file,
+            handle,
             dtype=self._tif_dtype,
             count=self.height * self.width,
         ).reshape(self.frame_shape)
@@ -2331,7 +2385,10 @@ class STKMovie(AbstractPicassoMovie):
         return frame
 
     def close(self) -> None:
-        self._file.close()
+        with self._handles_lock:
+            for handle in self._open_handles:
+                handle.close()
+            self._open_handles = []
 
     def tofile(self, file_handle, byte_order=None):
         do_byteswap = byte_order != self._byte_order
@@ -2391,6 +2448,10 @@ class STKMultiMovie(AbstractPicassoMovie):
         self.height = self.maps[0].height
         self.width = self.maps[0].width
         self.shape = (self.n_frames, self.height, self.width)
+
+    # Reads dispatch to the underlying STKMovie maps, which each manage
+    # their own per-thread handles, so concurrent reads are safe.
+    supports_concurrent_reads = True
 
     def __enter__(self):
         return self
@@ -2517,6 +2578,10 @@ class TiffMultiMap(AbstractPicassoMovie):
         self.height = self.maps[0].height
         self.width = self.maps[0].width
         self.shape = (self.n_frames, self.height, self.width)
+
+    # Reads dispatch to the underlying TiffMap maps, which each manage
+    # their own per-thread handles, so concurrent reads are safe.
+    supports_concurrent_reads = True
 
     def __enter__(self):
         return self
