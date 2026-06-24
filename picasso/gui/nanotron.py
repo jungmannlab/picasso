@@ -12,8 +12,6 @@ from __future__ import annotations
 
 import os
 import sys
-import importlib
-import pkgutil
 import datetime
 import threading
 import multiprocessing
@@ -1570,20 +1568,11 @@ def main():
     app.setWindowIcon(QIcon(icon_path))
     window = Window()
 
-    from . import plugins
+    # load plugins from ~/.picasso/plugins
+    from .plugins_loader import load_plugins, add_plugins_menu_actions
 
-    def iter_namespace(pkg):
-        return pkgutil.iter_modules(pkg.__path__, pkg.__name__ + ".")
-
-    plugins = [
-        importlib.import_module(name)
-        for finder, name, ispkg in iter_namespace(plugins)
-    ]
-
-    for plugin in plugins:
-        p = plugin.Plugin(window)
-        if p.name == "nanotron":
-            p.execute()
+    load_plugins(window, "nanotron")
+    add_plugins_menu_actions(window, "nanotron")
 
     window.show()
 

@@ -93,6 +93,20 @@ def _user_settings_filename() -> str:
     return os.path.join(home, ".picasso", "settings.yaml")
 
 
+def plugins_directory() -> str:
+    """Return the user plugins directory (``~/.picasso/plugins``).
+
+    The directory is created if it does not yet exist. It sits next to
+    ``~/.picasso/settings.yaml`` so that every install type (one-click
+    installer, PyPI, source) shares one stable, user-writable location
+    that survives uninstalling Picasso.
+    """
+    home = os.path.expanduser("~")
+    directory = os.path.join(home, ".picasso", "plugins")
+    os.makedirs(directory, exist_ok=True)
+    return directory
+
+
 def load_raw(
     path: str,
     prompt_info: Callable[[None], tuple[dict, bool]] | None = None,

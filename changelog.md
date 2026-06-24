@@ -6,6 +6,7 @@ Last change: 22-JUN-2026 CEST
 
 ### **General updates:**
 - Localization metadata is now embedded directly in the `.hdf5` file (under the `/metadata` dataset, as a JSON string), making the file self-contained even if moved or renamed without its `.yaml` sidecar. When loading, Picasso looks for the metadata in the `.yaml` file first, then falls back to the embedded copy. Writing the `.yaml` sidecar is still on by default but can be disabled via the new user setting `Save metadata in .yaml` in `~/.picasso/settings.yaml` (also available via any module under File > Picasso settings). See [file formats documentation](https://picassosr.readthedocs.io/en/latest/files.html) for more info.
+- Improved architecture for plugins, see[here](https://picassosr.readthedocs.io/en/latest/plugins.html). Note that the plugins must now be stored in a different location.
 
 #### Localize
 - Picasso relies on package `tifffile` for processing `.tif` files and many other grayscale movie formats, see [localize documentation](https://picassosr.readthedocs.io/en/latest/localize.html). **Note:** this is an experimental feature, do not hesitate to let us know if you detect bugs/unexpected behavior or would like to see more file formats in Picasso, see our [GitHub page](https://github.com/jungmannlab/picasso/issues) for contact information.
@@ -39,6 +40,7 @@ Last change: 22-JUN-2026 CEST
 - `picasso.clusterer.cluster_center` removed (the functionality provided by `find_cluster_centers`)
 - `render.render` only keyword arguments except `locs` and `info`
 - Nanotron accepts `disp_px_size` instead of `oversampling` for easier user interaction
+- Plugins location changed, see [here](https://picassosr.readthedocs.io/en/latest/plugins.html); `picasso/gui/plugins` folder removed
 
 #### *Deprecation warnings:*
 - `picasso.localize.identify` and `picasso.localize.localize` will always return metadata in v0.12.0, `return_info` will no longer be accepted

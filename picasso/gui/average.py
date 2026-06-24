@@ -10,9 +10,7 @@ Graphical user interface for averaging particles.
 
 from __future__ import annotations
 
-import importlib
 import os.path
-import pkgutil
 import sys
 
 import matplotlib.pyplot as plt
@@ -465,20 +463,11 @@ def main() -> None:
     app = QtWidgets.QApplication(sys.argv)
     window = Window()
 
-    from . import plugins
+    # load plugins from ~/.picasso/plugins
+    from .plugins_loader import load_plugins, add_plugins_menu_actions
 
-    def iter_namespace(pkg):
-        return pkgutil.iter_modules(pkg.__path__, pkg.__name__ + ".")
-
-    plugins = [
-        importlib.import_module(name)
-        for finder, name, ispkg in iter_namespace(plugins)
-    ]
-
-    for plugin in plugins:
-        p = plugin.Plugin(window)
-        if p.name == "average":
-            p.execute()
+    load_plugins(window, "average")
+    add_plugins_menu_actions(window, "average")
 
     window.show()
 

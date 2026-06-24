@@ -14,8 +14,6 @@ from __future__ import annotations
 import os.path
 import sys
 import time
-import importlib
-import pkgutil
 from collections import UserDict
 from typing import Literal
 
@@ -3745,20 +3743,11 @@ def main():
     app = QtWidgets.QApplication(sys.argv)
     window = Window()
 
-    from . import plugins
+    # load plugins from ~/.picasso/plugins
+    from .plugins_loader import load_plugins, add_plugins_menu_actions
 
-    def iter_namespace(pkg):
-        return pkgutil.iter_modules(pkg.__path__, pkg.__name__ + ".")
-
-    plugins = [
-        importlib.import_module(name)
-        for finder, name, ispkg in iter_namespace(plugins)
-    ]
-
-    for plugin in plugins:
-        p = plugin.Plugin(window)
-        if p.name == "localize":
-            p.execute()
+    load_plugins(window, "localize")
+    add_plugins_menu_actions(window, "localize")
 
     window.show()
 
