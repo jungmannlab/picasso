@@ -474,7 +474,6 @@ def _fill3d(
     x = x.astype(np.int32)
     y = y.astype(np.int32)
     z = z.astype(np.int32)
-    z += np.min(z)  # because z takes also negative values
     for i, j, k in zip(x, y, z):
         image[j, i, k] += 1
 
