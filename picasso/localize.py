@@ -1070,6 +1070,42 @@ def _cut_spots_frame(
     return j
 
 
+@numba.jit(nopython=True, nogil=True, cache=False)
+def _cut_spots_single_frame_into(
+    frame: lib.IntArray2D,
+    ids_x: lib.IntArray1D,
+    ids_y: lib.IntArray1D,
+    r: int,
+    start: int,
+    end: int,
+    spots: lib.IntArray3D,
+) -> None:
+    """Cut every spot in ``ids_[start:end]`` out of a single 2D frame
+    into ``spots[start:end]``.
+
+    ``nogil=True`` lets several threads cut (and, more importantly, read
+    their frame) at the same time. Each call writes a disjoint slice of
+    ``spots``, so no locking is needed around the writes."""
+    for j in range(start, end):
+        yc = ids_y[j]
+        xc = ids_x[j]
+        spots[j] = frame[yc - r : yc + r + 1, xc - r : xc + r + 1]
+
+
+def _n_io_workers() -> int:
+    """Number of threads to use for I/O-bound frame reading, derived from
+    the same ``cpu_utilization`` user setting as identification."""
+    settings = io.load_user_settings()
+    try:
+        cpu_utilization = settings["Localize"]["cpu_utilization"]
+    except KeyError:
+        cpu_utilization = 0.8
+    if not isinstance(cpu_utilization, float) or cpu_utilization >= 1:
+        cpu_utilization = 0.8
+    # Python crashes when using >64 cores
+    return min(60, max(1, int(cpu_utilization * multiprocessing.cpu_count())))
+
+
 @numba.jit(nopython=True, cache=False)
 def _cut_spots_daskmov(
     movie: lib.IntArray3D,
@@ -1154,24 +1190,57 @@ def _cut_spots_framebyframe(
     spots : lib.IntArray3D
         3D array with extracted spots of shape (k, box, box), where k is
         the number of spots identified.
+
+    Notes
+    -----
+    When the movie supports concurrent reads (its frames are read
+    through a per-thread file handle), frames are read and cut in
+    parallel, which hides per-frame I/O latency the same way threaded
+    identification does. ``ids_frame`` is assumed to be sorted (as
+    ``identify`` returns it), so each frame maps to one contiguous slice
+    of ``spots``.
     """
     r = int(box / 2)
     N = len(ids_frame)
-    start = 0
-    for frame_number, frame in enumerate(movie):
-        start = _cut_spots_frame(
-            frame,
-            frame_number,
-            ids_frame,
-            ids_x,
-            ids_y,
-            r,
-            start,
-            N,
-            spots,
-        )
+    n_frames = len(movie)
+
+    # Since ids are frame-sorted, frame f's spots are the contiguous
+    # slice spots[starts[f]:ends[f]].
+    starts = np.searchsorted(ids_frame, np.arange(n_frames), side="left")
+    ends = np.append(starts[1:], N)
+
+    if getattr(movie, "supports_concurrent_reads", False):
+        done = [0]
+        progress_lock = threading.Lock()
+
+        def _read_and_cut(frame_number: int) -> None:
+            start = int(starts[frame_number])
+            end = int(ends[frame_number])
+            frame = movie[frame_number]
+            _cut_spots_single_frame_into(
+                frame, ids_x, ids_y, r, start, end, spots
+            )
+            if callable(progress_callback):
+                with progress_lock:
+                    done[0] += end - start
+                    progress_callback(done[0])
+
+        with ThreadPoolExecutor(_n_io_workers()) as executor:
+            # consume the iterator so exceptions propagate
+            list(executor.map(_read_and_cut, range(n_frames)))
+        return spots
+
+    # Serial fallback for movies whose readers are not reentrant
+    # (e.g. ND2/CZI/LIF).
+    cum = 0
+    for frame_number in range(n_frames):
+        start = int(starts[frame_number])
+        end = int(ends[frame_number])
+        frame = movie[frame_number]
+        _cut_spots_single_frame_into(frame, ids_x, ids_y, r, start, end, spots)
+        cum += end - start
         if callable(progress_callback):
-            progress_callback(start)
+            progress_callback(cum)
     return spots
 
 
