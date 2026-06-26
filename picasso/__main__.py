@@ -672,9 +672,11 @@ def _smlm_clusterer(
             print("Loading {} ...".format(path))
             locs, info = io.load_locs(path)
             locs, smlm_cluster_info = clusterer.cluster(
-                locs, **params, pixelsize=pixelsize
+                locs, **params, pixelsize=pixelsize, progress="console"
             )
-            clusters = clusterer.find_cluster_centers(locs, pixelsize)
+            clusters = clusterer.find_cluster_centers(
+                locs, pixelsize, progress="console"
+            )
             base, ext = os.path.splitext(path)
             info.append(smlm_cluster_info)
             io.save_locs(base + "_clusters.hdf5", locs, info)

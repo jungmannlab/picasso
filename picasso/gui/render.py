@@ -7726,7 +7726,7 @@ class View(QtWidgets.QLabel):
             radius_z=radius_z,
             pixelsize=pixelsize,
             return_info=True,
-            progress=progress.set_value,
+            progress=progress,
         )
         progress.close()
         info = self.infos[channel] + [new_info]
@@ -7744,7 +7744,7 @@ class View(QtWidgets.QLabel):
             progress.set_value(0)
             path = os.path.splitext(path)[0] + "_centers.hdf5"
             centers = clusterer.find_cluster_centers(
-                clustered_locs, pixelsize, progress.set_value
+                clustered_locs, pixelsize, progress
             )
             io.save_locs(path, centers, info)
             progress.close()

@@ -20,7 +20,7 @@ SMLM clusterer is based on:
 from __future__ import annotations
 
 import itertools
-from typing import Callable
+from typing import Callable, Literal
 
 import numpy as np
 import pandas as pd
@@ -148,7 +148,7 @@ def _build_neighbor_graph(
         Clustering radius.
     progress : callable or None, optional
         Called with the cumulative number of points processed after
-        each batch. If None, a tqdm progress bar is shown.
+        each batch. If None, no progress is reported.
 
     Returns
     -------
@@ -162,11 +162,8 @@ def _build_neighbor_graph(
     index_chunks = []
 
     n_batches = int(np.ceil(n_points / _NEIGHBOR_BATCH_SIZE))
-    iterator = range(n_batches)
-    if progress is None:
-        iterator = tqdm(iterator, desc="Clustering (finding neighbors)")
 
-    for b in iterator:
+    for b in range(n_batches):
         start = b * _NEIGHBOR_BATCH_SIZE
         end = min(start + _NEIGHBOR_BATCH_SIZE, n_points)
         # neighbors for this batch as a list of lists; discarded once
@@ -238,7 +235,7 @@ def _cluster(
     progress : callable or None, optional
         Called with the cumulative number of localizations processed
         while building the neighbor graph (the main, O(n) step). If
-        None, a tqdm progress bar is shown.
+        None, no progress is reported.
 
     Returns
     -------
@@ -318,8 +315,8 @@ def cluster_2D(
         True, if basic frame analysis is to be performed.
     progress : callable or None, optional
         Called with the cumulative number of localizations processed
-        while building the neighbor graph. If None, a tqdm progress bar
-        is shown.
+        while building the neighbor graph. If None, no progress is
+        reported.
 
     Returns
     -------
@@ -371,8 +368,8 @@ def cluster_3D(
         True, if basic frame analysis is to be performed.
     progress : callable or None, optional
         Called with the cumulative number of localizations processed
-        while building the neighbor graph. If None, a tqdm progress bar
-        is shown.
+        while building the neighbor graph. If None, no progress is
+        reported.
 
     Returns
     -------
@@ -394,6 +391,44 @@ def cluster_3D(
     return labels
 
 
+def _resolve_progress(
+    progress: lib.ProgressDialog | Literal["console"] | None,
+    total: int,
+    description: str,
+    unit: str = "it",
+) -> Callable[[int], None] | None:
+    """Normalize a public ``progress`` argument into a ``set_value``
+    callback for the internal per-item loops.
+
+    Mirrors ``picasso.aim.aim``'s convention: ``None`` reports nothing,
+    ``"console"`` displays a tqdm progress bar, and a
+    ``lib.ProgressDialog`` drives a GUI progress bar. ``total`` is the
+    number of steps the callback will count up to; ``unit`` is the tqdm
+    unit label.
+
+    Returns
+    -------
+    callable or None
+        Called with the cumulative number of processed items, or None if
+        no progress should be reported.
+    """
+    assert (
+        progress is None
+        or progress == "console"
+        or isinstance(progress, lib.ProgressDialog)
+    ), "progress must be None, 'console', or a ProgressDialog instance."
+    if progress is None:
+        return None
+    if progress == "console":
+        tqdm_progress = lib.TqdmProgress(description=description)
+        tqdm_progress.get_iterator(0, total, unit=unit)  # arm the tqdm bar
+        return tqdm_progress.set_value
+    # lib.ProgressDialog: set its range here so callers need not know the
+    # internal item count (e.g. number of KDTree batches or clusters)
+    progress.setMaximum(total)
+    return progress.set_value
+
+
 def cluster(
     locs: pd.DataFrame,
     radius_xy: float,
@@ -402,7 +437,7 @@ def cluster(
     radius_z: float | None = None,
     pixelsize: float | None = None,
     return_info: bool = True,  # TODO: remove in v0.12.0
-    progress: Callable[[int], None] | None = None,
+    progress: lib.ProgressDialog | Literal["console"] | None = None,
 ) -> tuple[pd.DataFrame, dict] | pd.DataFrame:
     """Cluster localizations from single molecules (SMLM clusterer).
 
@@ -448,11 +483,12 @@ def cluster(
         clustered localizations and info is a dictionary containing
         clustering information. Will be removed in v0.12.0 and both
         locs and metadata will be returned.
-    progress : callable or None, optional
-        Called with the cumulative number of localizations processed
-        while building the neighbor graph (the main, O(n) step). Useful
-        for wiring a progress bar in a GUI. If None, a tqdm progress bar
-        is shown in the console.
+    progress : picasso.lib.ProgressDialog or "console" or None, optional
+        Tracks progress while building the neighbor graph (the main,
+        O(n) step). If "console", a tqdm progress bar is shown in the
+        console. If a ProgressDialog, a GUI progress bar is updated. If
+        None (default), no progress is displayed. Same convention as
+        ``picasso.aim.aim``.
 
     Returns
     -------
@@ -471,6 +507,7 @@ def cluster(
         )
     locs = locs.copy()
     n_raw = len(locs)
+    progress_cb = _resolve_progress(progress, n_raw, "Clustering", unit="loc")
     if "z" in locs.columns:  # 3D
         if pixelsize is None or radius_z is None:
             raise ValueError(
@@ -484,7 +521,7 @@ def cluster(
             radius_z,
             min_locs,
             frame_analysis,
-            progress,
+            progress_cb,
         )
     else:
         labels = cluster_2D(
@@ -492,7 +529,7 @@ def cluster(
             radius_xy,
             min_locs,
             frame_analysis,
-            progress,
+            progress_cb,
         )
     locs = extract_valid_labels(locs, labels)
     if "z" in locs.columns:
@@ -914,7 +951,7 @@ def _weighted_z_means(
 def find_cluster_centers(
     locs: pd.DataFrame,
     pixelsize: float | None = None,
-    progress: Callable[[int], None] | None = None,
+    progress: lib.ProgressDialog | Literal["console"] | None = None,
 ) -> pd.DataFrame:
     """Calculate cluster centers.
 
@@ -929,11 +966,12 @@ def find_cluster_centers(
     pixelsize : float, optional
         Camera pixel size (used for finding volume and 3D convex hull).
         Only required for 3D localizations.
-    progress : callable or None, optional
-        Called with the cumulative number of clusters processed during
-        the per-cluster convex-hull pass (the run-time bottleneck for
-        datasets with many clusters). Useful for wiring a progress bar
-        in a GUI. If None (default), no progress is reported.
+    progress : picasso.lib.ProgressDialog or "console" or None, optional
+        Tracks progress of the per-cluster convex-hull pass (the
+        run-time bottleneck for datasets with many clusters). If
+        "console", a tqdm progress bar is shown in the console. If a
+        ProgressDialog, a GUI progress bar is updated. If None (default),
+        no progress is displayed. Same convention as ``picasso.aim.aim``.
 
     Returns
     -------
@@ -956,8 +994,14 @@ def find_cluster_centers(
     lpy = s["y_std"] / np.sqrt(s["n_locs"])
     ellipticity = s["sx_mean"] / s["sy_mean"]
     n_events, order, group_s = _count_binding_events(group_arr, frame_arr)
+    progress_cb = _resolve_progress(
+        progress,
+        len(s["unique_groups"]),
+        "Calculating cluster centers",
+        unit="cluster",
+    )
     convexhull = _cluster_convex_hulls(
-        locs, order, group_s, s["unique_groups"], has_z, pixelsize, progress
+        locs, order, group_s, s["unique_groups"], has_z, pixelsize, progress_cb
     )
 
     columns = {
