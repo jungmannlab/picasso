@@ -21,6 +21,7 @@ Last change: 26-JUN-2026 CEST
 - Slight adjustments to some status bar messages
 - Cutting spots progress is reported between identification and fitting
 - Faster spot identification on network storage: `.tif`/`.ome.tif` and `.stk` movies are now read through a private file handle per worker thread instead of one shared, lock-serialized handle, so frame reads overlap and per-frame network latency is hidden
+- Faster spot cutting (`get_spots`) on network storage (see above)
 - Fixed a gap of roughly one box size in the identified spots along the borders between adjacent (e.g. overlapping) ROIs
 - Fixed handling abortions during identification
 
