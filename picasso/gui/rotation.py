@@ -650,6 +650,10 @@ class RotateByAngleDialog(lib.Dialog):
     ----------
     angx, angy, angz: QtWidgets.QDoubleSpinBoxes
         Store the rotation angles input by the user.
+    frame: QtWidgets.QComboBox
+        Selects whether the angles rotate around the data's own axes
+        ("Localizations", the axes shown by the axes icon) or the fixed
+        screen/camera axes ("World").
     """
 
     def __init__(self, window: QtWidgets.QMainWindow) -> None:
@@ -673,6 +677,18 @@ class RotateByAngleDialog(lib.Dialog):
         self.angz.setSingleStep(1)
         layout.addRow("Angle z (deg)", self.angz)
 
+        # Coordinate system the angles are applied around. "Localizations"
+        # (default) rotates around the data's own axes; "World" rotates
+        # around the fixed screen/camera axes.
+        self.frame = QtWidgets.QComboBox()
+        self.frame.addItems(["Localizations", "World"])
+        self.frame.setToolTip(
+            "Localizations: rotate around the data's own axes (the axes "
+            "shown by the axes icon).\nWorld: rotate around the fixed "
+            "screen/camera axes."
+        )
+        layout.addRow("Rotate around", self.frame)
+
         # OK and Cancel buttons
         self.buttons = QtWidgets.QDialogButtonBox(
             QtWidgets.QDialogButtonBox.StandardButton.Ok
@@ -686,13 +702,16 @@ class RotateByAngleDialog(lib.Dialog):
 
     @staticmethod
     def getParams(parent: QtWidgets.QMainWindow | None = None) -> tuple:
-        """Create the dialog and return the requested rot. angles."""
+        """Create the dialog and return the requested rot. angles and
+        the frame ("object" or "world") to rotate around."""
         dialog = RotateByAngleDialog(parent)
         result = dialog.exec()
+        frame = "world" if dialog.frame.currentText() == "World" else "object"
         return (
             dialog.angx.value(),
             dialog.angy.value(),
             dialog.angz.value(),
+            frame,
             result == QtWidgets.QDialog.DialogCode.Accepted,
         )
 
@@ -1293,21 +1312,23 @@ class ViewRotation(QtWidgets.QLabel):
     def rotation_input(self) -> None:
         """Ask the user to input 3 rotation angles manually.
 
-        The rotations are applied sequentially around the data's own
-        (rotated) x, y and z axes - the axes shown by the axes icon -
-        so each displayed angle changes by exactly the entered amount
-        regardless of the current orientation. Angles beyond +/- 180
-        degrees are preserved, e.g. 720 degrees encodes two full turns
-        (relevant for animations).
+        The rotations are applied sequentially around either the data's
+        own (rotated) x, y and z axes - the axes shown by the axes icon,
+        "object" frame - or the fixed screen/camera axes ("world" frame),
+        as chosen in the dialog. With the "object" frame each displayed
+        angle changes by exactly the entered amount regardless of the
+        current orientation. Angles beyond +/- 180 degrees are preserved,
+        e.g. 720 degrees encodes two full turns (relevant for animations).
         """
-        angx, angy, angz, ok = RotateByAngleDialog.getParams(self)
+        angx, angy, angz, frame, ok = RotateByAngleDialog.getParams(self)
         if ok:
             # codebase convention: x angle is the negative of
-            # scipy's right-handed x rotation; "object" frame
-            # rotates around the data's own axes
-            self.apply_rotation([-np.radians(angx), 0.0, 0.0], frame="object")
-            self.apply_rotation([0.0, np.radians(angy), 0.0], frame="object")
-            self.apply_rotation([0.0, 0.0, np.radians(angz)], frame="object")
+            # scipy's right-handed x rotation. "object" frame rotates
+            # around the data's own axes, "world" around the fixed
+            # screen/camera axes.
+            self.apply_rotation([-np.radians(angx), 0.0, 0.0], frame=frame)
+            self.apply_rotation([0.0, np.radians(angy), 0.0], frame=frame)
+            self.apply_rotation([0.0, 0.0, np.radians(angz)], frame=frame)
             self.update_scene()
 
     def delete_rotation(self) -> None:
@@ -1496,24 +1517,29 @@ class ViewRotation(QtWidgets.QLabel):
 
         # Screen-frame rotation vector. Vertical drag rotates around the
         # screen X axis (tilt), horizontal drag around the screen Y axis
-        # (turn). With Ctrl, horizontal drag turns and vertical drag spins
-        # in the screen plane, matching the previous Ctrl semantics.
+        # (turn).
         ax = 2 * np.pi * dy_pix / self.height()
         ay = 2 * np.pi * dx_pix / self.width()
-        az = 0.0
         modifiers = QtWidgets.QApplication.keyboardModifiers()
-        if modifiers == QtCore.Qt.KeyboardModifier.ControlModifier:
-            az = ax
-            ax = 0.0
+        ctrl = modifiers == QtCore.Qt.KeyboardModifier.ControlModifier
 
-        # Axis locks: pressing X/Y/Z constrains rotation to the
-        # corresponding *data* axis (the axes shown by the axes icon).
-        # Project the screen-frame rotation vector into the data frame,
-        # keep only the locked component and apply it around the data
-        # axis; the displayed angle then changes only for that axis.
         if self.block_x or self.block_y or self.block_z:
-            v_screen = render.rotation_matrix(ax, ay, az).as_rotvec()
-            v_object = self._R.inv().apply(v_screen)
+            # Axis locks: pressing X/Y/Z constrains rotation to the
+            # corresponding axis. Without Ctrl the rotation is around the
+            # *data* axis (the axes shown by the axes icon, "object"
+            # frame); with Ctrl it is around the fixed screen/world axis.
+            # When Z is locked, vertical drag spins around the screen Z
+            # axis so the lock is drivable without Ctrl.
+            frame = "world" if ctrl else "object"
+            if self.block_z:
+                sax, say, saz = 0.0, ay, ax
+            else:
+                sax, say, saz = ax, ay, 0.0
+            v_screen = render.rotation_matrix(sax, say, saz).as_rotvec()
+            if frame == "object":
+                v = self._R.inv().apply(v_screen)
+            else:
+                v = v_screen
             keep = np.array(
                 [
                     1.0 if self.block_x else 0.0,
@@ -1521,8 +1547,15 @@ class ViewRotation(QtWidgets.QLabel):
                     1.0 if self.block_z else 0.0,
                 ]
             )
-            self.apply_rotation(v_object * keep, frame="object")
+            self.apply_rotation(v * keep, frame=frame)
         else:
+            # Free trackball. With Ctrl, horizontal drag turns and
+            # vertical drag spins in the screen plane (screen Z spin),
+            # matching the previous Ctrl semantics.
+            az = 0.0
+            if ctrl:
+                az = ax
+                ax = 0.0
             delta_R = render.rotation_matrix(ax, ay, az)
             self.apply_rotation(delta_R.as_rotvec())
         self.update_scene()

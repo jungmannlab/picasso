@@ -30,6 +30,7 @@ Last change: 26-JUN-2026 CEST
 - Faster AIM through smarter implementation
 - Faster and more memory efficient (especially for large datasets) SMLM clusterer + progress bar added
 - Progress bar for finding cluster centers
+- Rotation dialog allows for rotations around the localizations or the world (see [3D documentation](https://picassosr.readthedocs.io/en/latest/render.html#d-rotation-window))
 - Fixed removed plugins menu after removing all localizations
 
 #### SPINNA
