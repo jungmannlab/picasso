@@ -869,11 +869,15 @@ def _cluster_convex_hulls(
     unique_groups: lib.IntArray1D,
     has_z: bool,
     pixelsize: float | None,
+    progress: Callable[[int], None] | None = None,
 ) -> lib.FloatArray1D:
     """Convex-hull area (2D) or volume (3D) per cluster.
 
     The only per-cluster Python loop in ``find_cluster_centers``; runs
-    on raw NumPy slices of a group-sorted coordinate array.
+    on raw NumPy slices of a group-sorted coordinate array. For datasets
+    with many clusters this is the run-time bottleneck, so an optional
+    ``progress`` callable (called with the number of clusters processed)
+    can be passed for feedback.
     """
     coord_cols = ["x", "y", "z"] if has_z else ["x", "y"]
     coords_sorted = (
@@ -890,6 +894,8 @@ def _cluster_convex_hulls(
             convexhull[i] = ConvexHull(X).volume
         except QhullError:
             convexhull[i] = 0.0
+        if progress is not None:
+            progress(i + 1)
     return convexhull
 
 
@@ -908,6 +914,7 @@ def _weighted_z_means(
 def find_cluster_centers(
     locs: pd.DataFrame,
     pixelsize: float | None = None,
+    progress: Callable[[int], None] | None = None,
 ) -> pd.DataFrame:
     """Calculate cluster centers.
 
@@ -922,6 +929,11 @@ def find_cluster_centers(
     pixelsize : float, optional
         Camera pixel size (used for finding volume and 3D convex hull).
         Only required for 3D localizations.
+    progress : callable or None, optional
+        Called with the cumulative number of clusters processed during
+        the per-cluster convex-hull pass (the run-time bottleneck for
+        datasets with many clusters). Useful for wiring a progress bar
+        in a GUI. If None (default), no progress is reported.
 
     Returns
     -------
@@ -945,7 +957,7 @@ def find_cluster_centers(
     ellipticity = s["sx_mean"] / s["sy_mean"]
     n_events, order, group_s = _count_binding_events(group_arr, frame_arr)
     convexhull = _cluster_convex_hulls(
-        locs, order, group_s, s["unique_groups"], has_z, pixelsize
+        locs, order, group_s, s["unique_groups"], has_z, pixelsize, progress
     )
 
     columns = {

@@ -7735,11 +7735,19 @@ class View(QtWidgets.QLabel):
         io.save_locs(path, clustered_locs, info)
         # save cluster centers
         if save_centers:
-            status = lib.StatusDialog("Calculating cluster centers", self)
+            progress = lib.ProgressDialog(
+                "Calculating cluster centers",
+                0,
+                len(np.unique(clustered_locs.group)),
+                self,
+            )
+            progress.set_value(0)
             path = os.path.splitext(path)[0] + "_centers.hdf5"
-            centers = clusterer.find_cluster_centers(clustered_locs, pixelsize)
+            centers = clusterer.find_cluster_centers(
+                clustered_locs, pixelsize, progress.set_value
+            )
             io.save_locs(path, centers, info)
-            status.close()
+            progress.close()
         if save_areas:
             progress = lib.ProgressDialog(
                 "Calculating cluster areas",
