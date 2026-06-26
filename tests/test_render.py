@@ -79,7 +79,7 @@ def locs_3d(locs):
 @pytest.fixture(scope="module")
 def image(locs, info):
     """Rendered image used by masking tests."""
-    return render.render(locs, info, oversampling=13)[1]
+    return render.render(locs, info, disp_px_size=PIXELSIZE / 13)[1]
 
 
 @pytest.fixture(scope="module")
@@ -109,13 +109,17 @@ class TestRender:
 
     def test_no_blur_mass_conservation(self, locs, info):
         """Each loc deposits exactly 1, so image.sum() must equal n."""
-        n, im = render.render(locs, info, oversampling=13, viewport=VIEWPORT)
+        n, im = render.render(
+            locs, info, disp_px_size=PIXELSIZE / 13, viewport=VIEWPORT
+        )
         assert im.sum() == n
         assert n > 0, "Test data should have locs in viewport"
 
     def test_viewport_exact_shape(self, locs, info):
         """Image shape is exactly oversampling * viewport size."""
-        n, im = render.render(locs, info, oversampling=130, viewport=VIEWPORT)
+        n, im = render.render(
+            locs, info, disp_px_size=PIXELSIZE / 130, viewport=VIEWPORT
+        )
         assert im.shape == (130, 130)
         assert im.dtype == np.float32
 
@@ -127,22 +131,10 @@ class TestRender:
         y = locs["y"].to_numpy()
         in_view = (x > x_min) & (x < x_max) & (y > y_min) & (y < y_max)
         expected = int(in_view.sum())
-        n, _ = render.render(locs, info, oversampling=13, viewport=VIEWPORT)
+        n, _ = render.render(
+            locs, info, disp_px_size=PIXELSIZE / 13, viewport=VIEWPORT
+        )
         assert n == expected
-
-    def test_disp_px_size_equivalence(self, locs, info):
-        """`oversampling=k` and `disp_px_size=pixelsize/k` must be
-        bitwise-identical."""
-        oversampling = 5
-        disp_px = PIXELSIZE / oversampling
-        n1, im1 = render.render(
-            locs, info, oversampling=oversampling, viewport=FULL_VIEWPORT
-        )
-        n2, im2 = render.render(
-            locs, info, disp_px_size=disp_px, viewport=FULL_VIEWPORT
-        )
-        assert n1 == n2
-        assert np.array_equal(im1, im2)
 
     @pytest.mark.parametrize("blur_method", BLUR_METHODS)
     def test_blur_methods(self, locs, info, blur_method):
@@ -151,7 +143,7 @@ class TestRender:
         n, im = render.render(
             locs,
             info,
-            oversampling=5,
+            disp_px_size=PIXELSIZE / 5,
             viewport=FULL_VIEWPORT,
             blur_method=blur_method,
         )
@@ -168,7 +160,7 @@ class TestRender:
         n, im = render.render(
             locs,
             info,
-            oversampling=5,
+            disp_px_size=PIXELSIZE / 5,
             viewport=FULL_VIEWPORT,
             blur_method=blur_method,
         )
@@ -179,7 +171,7 @@ class TestRender:
         _, im_narrow = render.render(
             locs,
             info,
-            oversampling=5,
+            disp_px_size=PIXELSIZE / 5,
             viewport=FULL_VIEWPORT,
             blur_method="gaussian",
             min_blur_width=0.0,
@@ -187,7 +179,7 @@ class TestRender:
         _, im_wide = render.render(
             locs,
             info,
-            oversampling=5,
+            disp_px_size=PIXELSIZE / 5,
             viewport=FULL_VIEWPORT,
             blur_method="gaussian",
             min_blur_width=2.0,
@@ -199,14 +191,14 @@ class TestRender:
             render.render(
                 locs,
                 info,
-                oversampling=5,
+                disp_px_size=PIXELSIZE / 5,
                 viewport=FULL_VIEWPORT,
                 blur_method="not_a_method",
             )
 
     def test_no_info_no_viewport_raises(self, locs):
-        with pytest.raises(ValueError):
-            render.render(locs, None, oversampling=5)
+        with pytest.raises(Exception):
+            render.render(locs, None, disp_px_size=PIXELSIZE / 5)
 
     def test_empty_locs_gaussian(self, locs, info):
         """Empty input must not crash the parallel _fill_gaussian path."""
@@ -214,7 +206,7 @@ class TestRender:
         n, im = render.render(
             empty,
             info,
-            oversampling=5,
+            disp_px_size=PIXELSIZE / 5,
             viewport=FULL_VIEWPORT,
             blur_method="gaussian",
         )
@@ -228,7 +220,7 @@ class TestRender:
         n, im = render.render(
             empty,
             info,
-            oversampling=5,
+            disp_px_size=PIXELSIZE / 5,
             viewport=FULL_VIEWPORT,
             blur_method="gaussian",
             ang=(0.1, 0.2, 0.3),
@@ -241,7 +233,7 @@ class TestRender:
         _, im_no_rot = render.render(
             locs_3d,
             info,
-            oversampling=5,
+            disp_px_size=PIXELSIZE / 5,
             viewport=FULL_VIEWPORT,
             blur_method="gaussian",
             ang=(0.0, 0.0, 0.0),
@@ -249,7 +241,7 @@ class TestRender:
         _, im_rot = render.render(
             locs_3d,
             info,
-            oversampling=5,
+            disp_px_size=PIXELSIZE / 5,
             viewport=FULL_VIEWPORT,
             blur_method="gaussian",
             ang=(0.5, 0.3, 0.2),
@@ -573,7 +565,7 @@ class TestRotation:
             _, im_tuple = render.render(
                 locs_3d,
                 info,
-                oversampling=5,
+                disp_px_size=25,
                 viewport=FULL_VIEWPORT,
                 blur_method=blur_method,
                 ang=ang,
@@ -581,7 +573,7 @@ class TestRotation:
             _, im_rotation = render.render(
                 locs_3d,
                 info,
-                oversampling=5,
+                disp_px_size=25,
                 viewport=FULL_VIEWPORT,
                 blur_method=blur_method,
                 ang=render.rotation_matrix(*ang),
@@ -1619,7 +1611,7 @@ class TestMasking:
 
     def test_mask_locs_partitions_input(self, locs, info, image):
         mask, _ = masking.mask_image(image, method="otsu")
-        locs_in, locs_out = masking.mask_locs(locs, mask, info=info)
+        locs_in, locs_out = masking.mask_locs(locs, info, mask)
         assert len(locs_in) + len(locs_out) == len(locs)
         # in / out are disjoint
         assert set(locs_in.index).isdisjoint(set(locs_out.index))

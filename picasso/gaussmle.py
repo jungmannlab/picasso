@@ -49,16 +49,6 @@ def _sum_and_center_of_mass(
 
 
 @numba.jit(nopython=True, nogil=True)
-def mean_filter(spot: lib.FloatArray2D, size: int) -> lib.FloatArray2D:
-    """Alias to _mean_filter. Deprecated: TODO: v0.11.0"""
-    print(
-        "mean_filter is deprecated and will become a private function "
-        "in v0.11.0. Use _mean_filter instead."
-    )
-    return _mean_filter(spot, size)
-
-
-@numba.jit(nopython=True, nogil=True)
 def _mean_filter(spot: lib.FloatArray2D, size: int) -> lib.FloatArray2D:
     """Apply a mean filter to the spot. This function computes the mean
     of each pixel in a 3x3 neighborhood.

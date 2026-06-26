@@ -12,8 +12,6 @@ from __future__ import annotations
 
 import os
 import sys
-import importlib
-import pkgutil
 import datetime
 import threading
 import multiprocessing
@@ -63,8 +61,10 @@ class Generator(QtCore.QThread):
         Each entry is a localization dataset with 'group' field.
     n_datasets : int
         Number of localization datasets (classes).
-    oversampling : float
-        Number of display pixels per camera pixel.
+    disp_px_size : float
+        Display pixel size used for rendering images (nm).
+    infos : dict
+        Localization metadata for each dataset, keyed like ``locs``.
     pick_radius : float
         Pick radius used for picking.
 
@@ -72,12 +72,14 @@ class Generator(QtCore.QThread):
     ----------
     locs : dict
         Localization datasets with 'group' field.
+    infos : dict
+        Localization metadata for each dataset, keyed like ``locs``.
     classes : list of str
         The class labels for the localization datasets.
     pick_radius : float
         Pick radius used for picking.
-    oversampling : float
-        Number of display pixels per camera pixel.
+    disp_px_size : float
+        Display pixel size used for rendering images (nm).
     expand : bool
         Whether to expand the dataset by rotating images (augmentation).
     expand_paths : list of str
@@ -92,9 +94,10 @@ class Generator(QtCore.QThread):
     def __init__(
         self,
         locs: dict,
+        infos: dict,
         classes: list[str],
         pick_radius: float,
-        oversampling: float,
+        disp_px_size: float,
         expand: bool,
         export: bool,
         export_paths: list[str],
@@ -102,9 +105,10 @@ class Generator(QtCore.QThread):
     ) -> None:
         super().__init__()
         self.locs_files = locs.copy()
+        self.infos = infos
         self.pick_radius = pick_radius
         self.expand = expand
-        self.oversampling = oversampling
+        self.disp_px_size = disp_px_size
         self.classes = classes
         self.n_datasets = len(self.locs_files)
         self.export = export
@@ -131,7 +135,7 @@ class Generator(QtCore.QThread):
 
         for id, locs in self.locs_files.items():
 
-            img_shape = int(2 * self.pick_radius * self.oversampling)
+            info = self.infos[id]
             data = []
             labels = []
             label = self.classes[id]
@@ -143,10 +147,16 @@ class Generator(QtCore.QThread):
 
                 pick_img = nanotron.roi_to_img(
                     locs=locs,
+                    info=info,
                     pick=pick,
                     radius=self.pick_radius,
-                    oversampling=self.oversampling,
+                    disp_px_size=self.disp_px_size,
                 )
+
+                # derive the image shape from the rendered ROI so it
+                # always matches render's pixel count for the given
+                # display pixel size
+                img_shape = pick_img.shape[0]
 
                 if self.export is True and pick < 10:
                     filename = (
@@ -311,8 +321,10 @@ class Predictor(QtCore.QThread):
         Number of groups, i.e., picks.
     n_locs : int
         Number of localizations.
-    oversampling : float
-        Number of display pixels per camera pixel.
+    disp_px_size : float
+        Display pixel size used for rendering images (nm).
+    info : list of dicts
+        Localization metadata. Must contain the camera pixel size.
     pick_radius : float
         The radius used for picking localizations.
     prediction : pd.DataFrame
@@ -326,10 +338,12 @@ class Predictor(QtCore.QThread):
     locs : pd.DataFrame
         The input localizations for the model. Must contain the 'group'
         column.
+    info : list of dicts
+        Localization metadata. Must contain the camera pixel size.
     pick_radius : float
         The radius used for picking localizations.
-    oversampling : float
-        The factor by which to oversample the localizations.
+    disp_px_size : float
+        Display pixel size used for rendering images (nm).
     parent : QWidget, optional
         The parent widget. None by default.
     """
@@ -341,15 +355,17 @@ class Predictor(QtCore.QThread):
         self,
         mlp: MLPClassifier,
         locs: pd.DataFrame,
+        info: list[dict],
         pick_radius: float,
-        oversampling: float,
+        disp_px_size: float,
         parent: QtWidgets.QWidget | None = None,
     ) -> None:
         super().__init__()
         self.model = mlp
         self.locs = locs.copy()
+        self.info = info
         self.pick_radius = pick_radius
-        self.oversampling = oversampling
+        self.disp_px_size = disp_px_size
         self.n_locs = len(self.locs["group"])
         self.prediction = np.zeros(
             len(np.unique(self.locs["group"])),
@@ -366,9 +382,10 @@ class Predictor(QtCore.QThread):
         self,
         mlp: MLPClassifier,
         locs: pd.DataFrame,
+        info: list[dict],
         picks: lib.IntArray1D,
         pick_radius: float,
-        oversampling: float,
+        disp_px_size: float,
         current: list[int],
         lock: threading.Lock,
         n_picks: int,
@@ -389,9 +406,10 @@ class Predictor(QtCore.QThread):
             pred, pred_proba = nanotron.predict_structure(
                 mlp=mlp,
                 locs=locs,
+                info=info,
                 pick=pick,
                 pick_radius=pick_radius,
-                oversampling=oversampling,
+                disp_px_size=disp_px_size,
             )
             predictions[index] = pred[0]
             probabilities[index] = pred_proba.max()
@@ -403,9 +421,10 @@ class Predictor(QtCore.QThread):
         self,
         model: MLPClassifier,
         locs: pd.DataFrame,
+        info: list[dict],
         picks: lib.IntArray1D,
         pick_radius: float,
-        oversampling: float,
+        disp_px_size: float,
     ) -> tuple[list[int], lib.FloatArray1D, lib.FloatArray1D, list[int]]:
         """Make predictions asynchronously, i.e., using
         multiprocessing."""
@@ -428,9 +447,10 @@ class Predictor(QtCore.QThread):
                 self._worker,
                 model,
                 locs,
+                info,
                 picks,
                 pick_radius,
-                oversampling,
+                disp_px_size,
                 current,
                 lock,
                 n_picks,
@@ -448,7 +468,12 @@ class Predictor(QtCore.QThread):
         picks = self.prediction["group"]
 
         current, predictions, probabilities, finished = self._predict_async(
-            self.model, self.locs, picks, self.pick_radius, self.oversampling
+            self.model,
+            self.locs,
+            self.info,
+            picks,
+            self.pick_radius,
+            self.disp_px_size,
         )
 
         while finished[0] < N:
@@ -477,6 +502,7 @@ class train_dialog(lib.Dialog):
         self.file_slots_generated = False
         self.data_prepared = False
         self.training_files = {}
+        self.training_files_info = {}
         self.training_files_path = {}
         self.classes = {}
         self.classes_name = []
@@ -509,10 +535,12 @@ class train_dialog(lib.Dialog):
 
         train_img_box = QtWidgets.QGroupBox("Image Parameter")
         self.train_img_grid = QtWidgets.QGridLayout(train_img_box)
-        self.oversampling_box = QtWidgets.QSpinBox()
-        self.oversampling_box.resize(50, 50)
-        self.oversampling_box.setRange(1, 200)
-        self.oversampling_box.setValue(50)
+        self.disp_px_size_box = QtWidgets.QDoubleSpinBox()
+        self.disp_px_size_box.resize(50, 50)
+        self.disp_px_size_box.setRange(0.1, 1000)
+        self.disp_px_size_box.setDecimals(2)
+        self.disp_px_size_box.setSingleStep(0.1)
+        self.disp_px_size_box.setValue(2.6)
 
         self.expand_training = QtWidgets.QCheckBox("Expand Training Set")
         self.expand_training.setChecked(False)
@@ -520,8 +548,10 @@ class train_dialog(lib.Dialog):
         self.export_img = QtWidgets.QCheckBox("Export Image Subset")
         self.export_img.setChecked(False)
 
-        self.train_img_grid.addWidget(QtWidgets.QLabel("Oversampling:"), 0, 0)
-        self.train_img_grid.addWidget(self.oversampling_box, 0, 1)
+        self.train_img_grid.addWidget(
+            QtWidgets.QLabel("Display pixel size (nm):"), 0, 0
+        )
+        self.train_img_grid.addWidget(self.disp_px_size_box, 0, 1)
         self.train_img_grid.addWidget(self.expand_training, 1, 0)
         self.train_img_grid.addWidget(self.export_img, 1, 1)
 
@@ -824,6 +854,7 @@ class train_dialog(lib.Dialog):
             msgBox.exec()
         else:
             self.training_files[(file)] = locs
+            self.training_files_info[(file)] = info
             self.f_btns[file].setText("Loaded")
             self.f_btns[file].setEnabled(False)
 
@@ -921,19 +952,20 @@ class train_dialog(lib.Dialog):
                 self.pick_radii, key=lambda x: self.pick_radii.get(x)
             )
             self.pick_radius = self.pick_radii[max_key]
-            self.oversampling = self.oversampling_box.value()
+            self.disp_px_size = self.disp_px_size_box.value()
 
             self.train_log["Pick Diameter"] = 2 * self.pick_radius
-            self.train_log["Oversampling"] = self.oversampling
+            self.train_log["Display pixel size (nm)"] = self.disp_px_size
             self.train_log["Expand Training Set"] = (
                 self.expand_training.isChecked()
             )
 
             self.generate_thread = Generator(
                 locs=self.training_files,
+                infos=self.training_files_info,
                 classes=self.classes,
                 pick_radius=self.pick_radius,
-                oversampling=self.oversampling,
+                disp_px_size=self.disp_px_size,
                 expand=self.expand_training.isChecked(),
                 export=self.export_img.isChecked(),
                 export_paths=self.training_files_path,
@@ -1186,15 +1218,24 @@ class Window(QtWidgets.QMainWindow):
             self.dist_btn.setDisabled(True)
             self.export_btn.setDisabled(True)
 
-            self.oversampling = self.model_info["Oversampling"]
+            if "Display pixel size (nm)" in self.model_info:
+                self.disp_px_size = self.model_info["Display pixel size (nm)"]
+            else:
+                # backward compatibility with models trained with an
+                # oversampling factor instead of a display pixel size
+                pixelsize = lib.get_from_metadata(
+                    self.info, "Pixelsize", raise_error=True
+                )
+                self.disp_px_size = pixelsize / self.model_info["Oversampling"]
             self.pick_diameter = self.model_info["Pick Diameter"]
             self.pick_radius = self.pick_diameter / 2
 
             self.thread = Predictor(
                 self.model,
                 self.locs,
+                self.info,
                 self.pick_radius,
-                self.oversampling,
+                self.disp_px_size,
             )
             self.thread.predictions_made.connect(self.on_progress)
             self.thread.prediction_finished.connect(self.on_finished)
@@ -1527,20 +1568,11 @@ def main():
     app.setWindowIcon(QIcon(icon_path))
     window = Window()
 
-    from . import plugins
+    # load plugins from ~/.picasso/plugins
+    from .plugins_loader import load_plugins, add_plugins_menu_actions
 
-    def iter_namespace(pkg):
-        return pkgutil.iter_modules(pkg.__path__, pkg.__name__ + ".")
-
-    plugins = [
-        importlib.import_module(name)
-        for finder, name, ispkg in iter_namespace(plugins)
-    ]
-
-    for plugin in plugins:
-        p = plugin.Plugin(window)
-        if p.name == "nanotron":
-            p.execute()
+    load_plugins(window, "nanotron")
+    add_plugins_menu_actions(window, "nanotron")
 
     window.show()
 

@@ -92,18 +92,6 @@ def rref(M: lib.FloatArray2D | lib.IntArray2D) -> lib.FloatArray2D:
     return M
 
 
-def find_target_counts(
-    targets: list[str],
-    structures: list[Structure],
-) -> lib.FloatArray2D:
-    """Deprecated, TODO: remove in v0.11.0."""
-    lib.deprecation_warning(
-        "Deprecation warning: This function will become private in "
-        "v0.11.0. Use _find_target_counts instead."
-    )
-    return _find_target_counts(targets, structures)
-
-
 def _find_target_counts(
     targets: list[str],
     structures: list[Structure],
@@ -129,15 +117,6 @@ def _find_target_counts(
     for ii, structure in enumerate(structures):
         t_counts[:, ii] = structure.get_ind_target_count(targets)
     return t_counts
-
-
-def get_structures_permutation(t_counts: lib.FloatArray2D) -> lib.IntArray1D:
-    """Deprecated, TODO: remove in v0.11.0."""
-    lib.deprecation_warning(
-        "Deprecation warning: This function will become private in "
-        "v0.11.0. Use _get_structures_permutation instead."
-    )
-    return _get_structures_permutation(t_counts)
 
 
 def _get_structures_permutation(t_counts: lib.FloatArray2D) -> lib.IntArray1D:
@@ -179,15 +158,6 @@ def _get_structures_permutation(t_counts: lib.FloatArray2D) -> lib.IntArray1D:
             perm[lpc] = i
             lpc += 1
     return perm
-
-
-def targets_from_structures(structures: list[Structure]) -> list[str]:
-    """Deprecated, TODO: remove in v0.11.0."""
-    lib.deprecation_warning(
-        "Deprecation warning: This function will become private in "
-        "v0.11.0. Use _targets_from_structures instead."
-    )
-    return _targets_from_structures(structures)
 
 
 def _targets_from_structures(structures: list[Structure]) -> list[str]:
@@ -1002,7 +972,6 @@ class MaskGenerator:
         binsize: int | tuple = 130,
         sigma: int | tuple = 500,
         ndim: int | None = None,
-        run_checks=None,
     ) -> None:
         # open localizations
         locs, info = io.load_locs(locs_path)
@@ -1039,12 +1008,6 @@ class MaskGenerator:
             info[0]["Width"] * self.pixelsize,
             info[0]["Height"] * self.pixelsize,
         ]
-
-        if run_checks is not None:
-            lib.deprecation_warning(
-                "The argument run_checks is not used since v0.9.6 and is"
-                " deprecated. It will be removed in v0.11.0."
-            )
 
     def set_binsize(self, binsize: int | tuple) -> None:
         """Convert the input binsize to a tuple of 2/3 values.

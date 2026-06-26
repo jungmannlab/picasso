@@ -36,15 +36,15 @@ POLYGON_POINTER_SIZE = 16  # must be even
 
 def render(
     locs: pd.DataFrame,
-    info: dict | None,
-    oversampling: float = 1.0,
+    info: dict,
+    *,
+    disp_px_size: float,
     viewport: tuple[tuple[float, float], tuple[float, float]] | None = None,
     blur_method: (
         Literal["gaussian", "gaussian_iso", "smooth", "convolve"] | None
     ) = None,
     min_blur_width: float = 0.0,
     ang: tuple | Rotation | None = None,
-    disp_px_size: float | None = None,
 ) -> tuple[int, lib.FloatArray2D]:
     """Render localizations given FOV and blur method.
 
@@ -52,12 +52,10 @@ def render(
     ----------
     locs : pd.DataFrame
         Localizations to be rendered.
-    info : dict, optional
+    info : dict
         Contains localizations metadata.
-    oversampling : float, optional
-        Number of super-resolution pixels per camera pixel. Default is
-        1. Deprecated, use disp_px_size instead. Will be removed in
-        v0.11.0. Ignored if disp_px_size is specified.
+    disp_px_size : float
+        Display pixel size in nm.
     viewport : tuple, optional
         Field of view to be rendered (in camera pixels). The input is
         ``((y_min, x_min), (y_max, x_max))``. If None, all localizations
@@ -79,8 +77,6 @@ def render(
         quaternion) or a tuple of 3 rotation angles around the x, y
         and z axes in radians (legacy Euler convention, see
         ``rotation_matrix``). If None, locs are not rotated.
-    disp_px_size : float, optional
-        Display pixel size in nm. Will replace oversampling in v0.11.0.
 
     Raises
     ------
@@ -96,21 +92,13 @@ def render(
         Rendered image.
     """
     pixelsize = lib.get_from_metadata(info, "Pixelsize", raise_error=True)
-    if disp_px_size is None:
-        lib.deprecation_warning(
-            "Deprecation warning: the 'oversampling' parameter is "
-            "deprecated and will be removed in v0.11.0. Use "
-            "'disp_px_size' instead."
-        )
-        disp_px_size = pixelsize / oversampling
     oversampling = pixelsize / disp_px_size
 
     if viewport is None:
-        try:
-            # all locs
-            viewport = [(0, 0), (info[0]["Height"], info[0]["Width"])]
-        except TypeError:
-            raise ValueError("Need info if no viewport is provided.")
+        height = lib.get_from_metadata(info, "Height", raise_error=True)
+        width = lib.get_from_metadata(info, "Width", raise_error=True)
+        viewport = [(0, 0), (height, width)]
+
     (y_min, x_min), (y_max, x_max) = viewport
     if blur_method is None:
         # no blur
@@ -486,7 +474,6 @@ def _fill3d(
     x = x.astype(np.int32)
     y = y.astype(np.int32)
     z = z.astype(np.int32)
-    z += np.min(z)  # because z takes also negative values
     for i, j, k in zip(x, y, z):
         image[j, i, k] += 1
 
@@ -744,7 +731,7 @@ def render_hist_numba(
     t_max: float,
 ) -> tuple[int, lib.FloatArray2D]:
     """Calculate 2D histogram of xy coordinates. Similar to
-    ``render_hist`` but modified to work with numba.
+    ``_render_hist`` but modified to work with numba.
 
     Parameters
     ----------
@@ -771,28 +758,6 @@ def render_hist_numba(
     image = np.zeros((n_pixel, n_pixel), dtype=np.float32)
     _fill(image, x, y)
     return len(x), image
-
-
-def render_hist(
-    locs: pd.DataFrame,
-    oversampling: float,
-    y_min: float,
-    x_min: float,
-    y_max: float,
-    x_max: float,
-    ang: tuple[float, float, float] | Rotation | None = None,
-) -> tuple[int, lib.FloatArray2D]:
-    """Alias for _render_hist which will be a private function in
-    v0.11.0. Kept for backward compatibility but will be removed in
-    v0.11.0. Use _render_hist instead if necessary."""
-    lib.deprecation_warning(
-        "Deprecation warning: the 'render_hist' function is deprecated "
-        "and will be removed in v0.11.0. Use _render_hist instead if "
-        "necessary."
-    )
-    return _render_hist(
-        locs, oversampling, y_min, x_min, y_max, x_max, ang=ang
-    )
 
 
 def _render_hist(
@@ -987,36 +952,6 @@ def render_hist3d_anisotropic(
     return n, image
 
 
-def render_gaussian(
-    locs: pd.DataFrame,
-    oversampling: float,
-    y_min: float,
-    x_min: float,
-    y_max: float,
-    x_max: float,
-    min_blur_width: float,
-    ang: tuple[float, float, float] | Rotation | None = None,
-) -> tuple[int, lib.FloatArray2D]:
-    """Alias for _render_gaussian which will be a private function in
-    v0.11.0. Kept for backward compatibility but will be removed in v0.11.0. Use
-    _render_gaussian instead if necessary."""
-    lib.deprecation_warning(
-        "Deprecation warning: the 'render_gaussian' function is deprecated "
-        "and will be removed in v0.11.0. Use _render_gaussian instead if "
-        "necessary."
-    )
-    return _render_gaussian(
-        locs,
-        oversampling,
-        y_min,
-        x_min,
-        y_max,
-        x_max,
-        min_blur_width,
-        ang=ang,
-    )
-
-
 def _render_gaussian(
     locs: pd.DataFrame,
     oversampling: float,
@@ -1115,36 +1050,6 @@ def _render_gaussian(
     return n, image
 
 
-def render_gaussian_iso(
-    locs: pd.DataFrame,
-    oversampling: float,
-    y_min: float,
-    x_min: float,
-    y_max: float,
-    x_max: float,
-    min_blur_width: float,
-    ang: tuple[float, float, float] | Rotation | None = None,
-) -> tuple[int, lib.FloatArray2D]:
-    """Alias for _render_gaussian_iso which will be a private function in
-    v0.11.0. Kept for backward compatibility but will be removed in v0.11.0. Use
-    _render_gaussian_iso instead if necessary."""
-    lib.deprecation_warning(
-        "Deprecation warning: the 'render_gaussian_iso' function is "
-        "deprecated and will be removed in v0.11.0. Use "
-        "_render_gaussian_iso instead if necessary."
-    )
-    return _render_gaussian_iso(
-        locs,
-        oversampling,
-        y_min,
-        x_min,
-        y_max,
-        x_max,
-        min_blur_width,
-        ang=ang,
-    )
-
-
 def _render_gaussian_iso(
     locs: pd.DataFrame,
     oversampling: float,
@@ -1214,36 +1119,6 @@ def _render_gaussian_iso(
         )
 
     return len(x), image
-
-
-def render_convolve(
-    locs: pd.DataFrame,
-    oversampling: float,
-    y_min: float,
-    x_min: float,
-    y_max: float,
-    x_max: float,
-    min_blur_width: float,
-    ang: tuple[float, float, float] | Rotation | None = None,
-) -> tuple[int, lib.FloatArray2D]:
-    """Alias for _render_convolve which will be a private function in v0.11.0.
-    Kept for backward compatibility but will be removed in v0.11.0. Use
-    _render_convolve instead if necessary."""
-    lib.deprecation_warning(
-        "Deprecation warning: the 'render_convolve' function is "
-        "deprecated and will be removed in v0.11.0. Use "
-        "_render_convolve instead if necessary."
-    )
-    return _render_convolve(
-        locs,
-        oversampling,
-        y_min,
-        x_min,
-        y_max,
-        x_max,
-        min_blur_width,
-        ang=ang,
-    )
 
 
 def _render_convolve(
@@ -1317,33 +1192,6 @@ def _render_convolve(
             np.median(locs["lpy"].to_numpy()[in_view]), min_blur_width
         )
         return n, _fftconvolve(image, blur_width, blur_height)
-
-
-def render_smooth(
-    locs: pd.DataFrame,
-    oversampling: float,
-    y_min: float,
-    x_min: float,
-    y_max: float,
-    x_max: float,
-    ang: tuple[float, float, float] | Rotation | None = None,
-) -> tuple[int, lib.FloatArray2D]:
-    """Alias for _render_smooth which will be a private function in v0.11.0. Kept for
-    backward compatibility but will be removed in v0.11.0. Use _render_smooth
-    instead if necessary."""
-    lib.deprecation_warning(
-        "Deprecation warning: the 'render_smooth' function is deprecated and "
-        "will be removed in v0.11.0. Use _render_smooth instead if necessary."
-    )
-    return _render_smooth(
-        locs,
-        oversampling,
-        y_min,
-        x_min,
-        y_max,
-        x_max,
-        ang=ang,
-    )
 
 
 def _render_smooth(
@@ -2319,6 +2167,7 @@ def draw_points(
     pixelsize: int | float,  # camera pixel size in nm
     color: QtGui.QColor = QtGui.QColor("yellow"),
     mark_width: int = 20,  # width of the drawn crosses in display pixels
+    cursor: tuple | None = None,  # live cursor position in camera pixels
 ) -> QtGui.QImage:
     """Draw points, lines and distances between them onto image.
 
@@ -2338,6 +2187,10 @@ def draw_points(
         Color of the points, lines and text. Default is yellow.
     mark_width : int, optional
         Width of the drawn crosses in display pixels. Default is 20.
+    cursor : tuple or None, optional
+        Current cursor position in camera pixels. If given, it is drawn
+        as a cross and, when at least one point exists, a line with the
+        live distance to the last point is shown. Default is None.
 
     Returns
     -------
@@ -2346,6 +2199,37 @@ def draw_points(
     """
     painter = QtGui.QPainter(image)
     painter.setPen(color)
+
+    def draw_cross(x, y):
+        """Draw a cross marker centered at display coordinates."""
+        painter.drawPoint(x, y)
+        painter.drawLine(x, y, int(x + mark_width / 2), y)
+        painter.drawLine(x, y, x, int(y + mark_width / 2))
+        painter.drawLine(x, y, int(x - mark_width / 2), y)
+        painter.drawLine(x, y, x, int(y - mark_width / 2))
+
+    def draw_distance(x1, y1, x2, y2, p1, p2):
+        """Draw a line and the distance label between two points."""
+        painter.drawLine(x1, y1, x2, y2)
+        font = painter.font()
+        font.setPixelSize(20)
+        painter.setFont(font)
+        # get distance with 2 decimal places
+        distance = (
+            float(
+                int(
+                    np.sqrt((p1[0] - p2[0]) ** 2 + (p1[1] - p2[1]) ** 2)
+                    * pixelsize
+                    * 100
+                )
+            )
+            / 100
+        )
+        painter.drawText(
+            int((x1 + x2) / 2 + mark_width),
+            int((y1 + y2) / 2 + mark_width),
+            str(distance) + " nm",
+        )
 
     cx = []
     cy = []
@@ -2359,41 +2243,22 @@ def draw_points(
         cx, cy = map_to_view(*point, image.size(), viewport=viewport)
 
         # draw a cross
-        painter.drawPoint(cx, cy)
-        painter.drawLine(cx, cy, int(cx + mark_width / 2), cy)
-        painter.drawLine(cx, cy, cx, int(cy + mark_width / 2))
-        painter.drawLine(cx, cy, int(cx - mark_width / 2), cy)
-        painter.drawLine(cx, cy, cx, int(cy - mark_width / 2))
+        draw_cross(cx, cy)
 
         # draw a line between points and show distance
         if oldpoint != []:
-            painter.drawLine(cx, cy, ox, oy)
-            font = painter.font()
-            font.setPixelSize(20)
-            painter.setFont(font)
-
-            # get distance with 2 decimal places
-            distance = (
-                float(
-                    int(
-                        np.sqrt(
-                            (
-                                (oldpoint[0] - point[0]) ** 2
-                                + (oldpoint[1] - point[1]) ** 2
-                            )
-                        )
-                        * pixelsize
-                        * 100
-                    )
-                )
-                / 100
-            )
-            painter.drawText(
-                int((cx + ox) / 2 + mark_width),
-                int((cy + oy) / 2 + mark_width),
-                str(distance) + " nm",
-            )
+            draw_distance(cx, cy, ox, oy, oldpoint, point)
         oldpoint = point
+
+    # draw the live cursor as a cross and the running distance to the
+    # last placed point
+    if cursor is not None:
+        ccx, ccy = map_to_view(*cursor, image.size(), viewport=viewport)
+        draw_cross(ccx, ccy)
+        if points:
+            lx, ly = map_to_view(*points[-1], image.size(), viewport=viewport)
+            draw_distance(ccx, ccy, lx, ly, points[-1], cursor)
+
     painter.end()
     return image
 

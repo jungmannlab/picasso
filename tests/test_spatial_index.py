@@ -249,7 +249,6 @@ class TestRendererParity:
         # Slightly off-center, asymmetric viewport so the chosen pyramid
         # level isn't trivially the coarsest.
         viewport = ((40.0, 60.0), (180.0, 240.0))
-        oversampling = 4.0
 
         idx = spatial_index.query_viewport(pyr, viewport)
         filtered = locs.iloc[idx]
@@ -257,14 +256,14 @@ class TestRendererParity:
         n_full, img_full = render.render(
             locs,
             info,
-            oversampling=oversampling,
+            disp_px_size=30,
             viewport=viewport,
             blur_method=blur_method,
         )
         n_filt, img_filt = render.render(
             filtered,
             info,
-            oversampling=oversampling,
+            disp_px_size=30,
             viewport=viewport,
             blur_method=blur_method,
         )

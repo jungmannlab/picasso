@@ -58,7 +58,7 @@ Start the render module (GUI) or render from command line. With no arguments the
 
 ::
 
-   '-o', '--oversampling', type=float, default=1.0, help='the number of super-resolution pixels per camera pixel'
+   '-px', '--disp-px-size', type=float, default=1.0, help='the size of the rendered pixel in nm'
    '-b', '--blur-method', choices=['none', 'convolve', 'gaussian'], default='convolve'
    '-w', '--min-blur-width', type=float, default=0.0, help='minimum blur width if blur is applied'
    '--vmin', type=float, default=0.0, help='minimum colormap level in range 0-100 or absolute value'

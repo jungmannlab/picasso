@@ -68,7 +68,7 @@ def _gaussian_frame(
 
 
 # ---------------------------------------------------------------------------
-# local_maxima
+# _local_maxima
 # ---------------------------------------------------------------------------
 
 
@@ -78,7 +78,7 @@ class TestLocalMaxima:
     def test_single_peak_detected(self):
         frame = np.zeros((20, 20), dtype=np.float32)
         frame[10, 12] = 100.0
-        y, x = localize.local_maxima(frame, BOX)
+        y, x = localize._local_maxima(frame, BOX)
         assert list(zip(y.tolist(), x.tolist())) == [(10, 12)]
 
     def test_multiple_peaks_far_apart_all_found(self):
@@ -86,19 +86,19 @@ class TestLocalMaxima:
         peaks = [(8, 8), (8, 22), (22, 15)]
         for py, px in peaks:
             frame[py, px] = 50.0
-        y, x = localize.local_maxima(frame, BOX)
+        y, x = localize._local_maxima(frame, BOX)
         found = set(zip(y.tolist(), x.tolist()))
         assert found == set(peaks)
 
     def test_peaks_in_border_band_are_excluded(self):
-        """``local_maxima`` only scans i in [box_half, Y - box_half - 1)
+        """``_local_maxima`` only scans i in [box_half, Y - box_half - 1)
         — peaks placed inside the border band must not be returned."""
         Y = X = 20
         box_half = BOX // 2
         frame = np.zeros((Y, X), dtype=np.float32)
         frame[1, 1] = 100.0  # top-left border
         frame[Y - 2, X - 2] = 100.0  # bottom-right border
-        y, x = localize.local_maxima(frame, BOX)
+        y, x = localize._local_maxima(frame, BOX)
         # All returned coordinates lie strictly inside the scan band
         assert ((y >= box_half) & (y < Y - box_half - 1)).all()
         assert ((x >= box_half) & (x < X - box_half - 1)).all()
@@ -108,12 +108,12 @@ class TestLocalMaxima:
         ``argmax`` returns the top-left pixel (index 0), so no local
         window has its max at the center."""
         frame = np.full((20, 20), 42.0, dtype=np.float32)
-        y, x = localize.local_maxima(frame, BOX)
+        y, x = localize._local_maxima(frame, BOX)
         assert len(y) == 0 and len(x) == 0
 
 
 # ---------------------------------------------------------------------------
-# gradient_at
+# _gradient_at
 # ---------------------------------------------------------------------------
 
 
@@ -123,7 +123,7 @@ class TestGradientAt:
     def test_horizontal_gradient(self):
         # frame[y, x+1] - frame[y, x-1]  along increasing x
         frame = np.tile(np.arange(10, dtype=np.float32), (10, 1))
-        gy, gx = localize.gradient_at(frame, 5, 5, 0)
+        gy, gx = localize._gradient_at(frame, 5, 5, 0)
         assert gy == 0.0
         assert gx == 2.0  # 6 - 4
 
@@ -132,21 +132,21 @@ class TestGradientAt:
         frame = np.tile(
             np.arange(10, dtype=np.float32).reshape(-1, 1), (1, 10)
         )
-        gy, gx = localize.gradient_at(frame, 5, 5, 0)
+        gy, gx = localize._gradient_at(frame, 5, 5, 0)
         assert gy == 2.0  # 6 - 4
         assert gx == 0.0
 
     def test_zero_gradient_in_flat_region(self):
         frame = np.full((10, 10), 7.0, dtype=np.float32)
-        gy, gx = localize.gradient_at(frame, 5, 5, 0)
+        gy, gx = localize._gradient_at(frame, 5, 5, 0)
         assert gy == 0.0 and gx == 0.0
 
     def test_i_argument_is_ignored(self):
         """``i`` is documented as unused — different values must not
         affect the returned gradient."""
         frame = _gaussian_frame((15, 15), (7, 7))
-        a = localize.gradient_at(frame, 7, 8, 0)
-        b = localize.gradient_at(frame, 7, 8, 999)
+        a = localize._gradient_at(frame, 7, 8, 0)
+        b = localize._gradient_at(frame, 7, 8, 999)
         assert a == b
 
 
@@ -165,7 +165,7 @@ class TestNetGradient:
         uy, ux = _gradient_meshgrid(BOX)
         y = np.array([7], dtype=np.int64)
         x = np.array([7], dtype=np.int64)
-        ng = localize.net_gradient(frame, y, x, BOX, uy, ux)
+        ng = localize._net_gradient(frame, y, x, BOX, uy, ux)
         assert ng.shape == (1,)
         assert ng[0] > 0
 
@@ -174,7 +174,7 @@ class TestNetGradient:
         uy, ux = _gradient_meshgrid(BOX)
         y = np.array([7], dtype=np.int64)
         x = np.array([7], dtype=np.int64)
-        ng = localize.net_gradient(frame, y, x, BOX, uy, ux)
+        ng = localize._net_gradient(frame, y, x, BOX, uy, ux)
         np.testing.assert_allclose(ng, [0.0], atol=1e-6)
 
     def test_inverted_peak_yields_negative(self):
@@ -185,7 +185,7 @@ class TestNetGradient:
         uy, ux = _gradient_meshgrid(BOX)
         y = np.array([7], dtype=np.int64)
         x = np.array([7], dtype=np.int64)
-        ng = localize.net_gradient(frame, y, x, BOX, uy, ux)
+        ng = localize._net_gradient(frame, y, x, BOX, uy, ux)
         assert ng[0] < 0
 
     def test_output_length_matches_input(self):
@@ -193,7 +193,7 @@ class TestNetGradient:
         uy, ux = _gradient_meshgrid(BOX)
         y = np.array([10, 10, 10], dtype=np.int64)
         x = np.array([8, 10, 12], dtype=np.int64)
-        ng = localize.net_gradient(frame, y, x, BOX, uy, ux)
+        ng = localize._net_gradient(frame, y, x, BOX, uy, ux)
         assert ng.shape == (3,)
 
 
@@ -203,7 +203,7 @@ class TestNetGradient:
 
 
 class TestIdentifyInImage:
-    """``local_maxima`` + net-gradient threshold, in one shot."""
+    """``_local_maxima`` + net-gradient threshold, in one shot."""
 
     def test_single_gaussian_is_identified(self):
         frame = _gaussian_frame((20, 20), (10, 10), amplitude=5000.0)
@@ -267,6 +267,128 @@ class TestIdentifyInFrame:
         roi = ((15, 15), (28, 28))
         y, x, ng = localize.identify_in_frame(frame, 1.0, BOX, roi=roi)
         assert len(y) == 0 and len(x) == 0 and len(ng) == 0
+
+    def test_multiple_rois_find_all_peaks(self):
+        """A list of disjoint ROIs collects peaks from every region and
+        ignores peaks outside all of them."""
+        frame = _gaussian_frame((40, 40), (8, 8)).astype(np.int32)
+        frame += (_gaussian_frame((40, 40), (30, 30)) - 100).astype(np.int32)
+        frame += (_gaussian_frame((40, 40), (8, 30)) - 100).astype(np.int32)
+        rois = [((0, 0), (16, 16)), ((24, 24), (38, 38))]
+        y, x, _ = localize.identify_in_frame(frame, 1.0, BOX, roi=rois)
+        found = {(int(yi), int(xi)) for yi, xi in zip(y, x)}
+        assert (8, 8) in found  # first ROI
+        assert (30, 30) in found  # second ROI
+        assert (8, 30) not in found  # outside both ROIs
+
+    def test_multiple_rois_no_double_counting(self):
+        """Disjoint ROIs never report the same peak twice."""
+        frame = _gaussian_frame((40, 40), (8, 8)).astype(np.int32)
+        frame += (_gaussian_frame((40, 40), (30, 30)) - 100).astype(np.int32)
+        rois = [((0, 0), (16, 16)), ((24, 24), (38, 38))]
+        y, x, _ = localize.identify_in_frame(frame, 1.0, BOX, roi=rois)
+        coords = list(zip([int(v) for v in y], [int(v) for v in x]))
+        assert len(coords) == len(set(coords))
+
+    def test_peak_near_roi_border_is_found(self):
+        """A peak close to the ROI border is detected: the slice is
+        padded internally so the gradient box still sees real pixels."""
+        # Peak two pixels inside the bottom-right corner of the ROI.
+        frame = _gaussian_frame((40, 40), (18, 18)).astype(np.int32)
+        roi = ((5, 5), (20, 20))
+        y, x, _ = localize.identify_in_frame(frame, 1.0, BOX, roi=roi)
+        found = {(int(yi), int(xi)) for yi, xi in zip(y, x)}
+        assert (18, 18) in found
+
+    def test_adjacent_rois_have_no_seam_gap(self):
+        """Splitting a region into two ROIs that share an edge must find
+        the same peaks as the single, undivided region - no gap of
+        ~``box`` pixels along the seam (regression test)."""
+        # Two peaks straddling the y = 20 seam, each only two pixels away
+        # from it (i.e. within ``box`` pixels) and far apart in x so they
+        # do not suppress one another.
+        centers = [(18, 12), (22, 28)]
+        frame = np.full((40, 40), 100, dtype=np.int32)
+        for cy, cx in centers:
+            frame += (_gaussian_frame((40, 40), (cy, cx)) - 100).astype(
+                np.int32
+            )
+        whole = ((8, 8), (32, 32))
+        split = [((8, 8), (20, 32)), ((20, 8), (32, 32))]
+        y_w, x_w, _ = localize.identify_in_frame(frame, 1.0, BOX, roi=whole)
+        y_s, x_s, _ = localize.identify_in_frame(frame, 1.0, BOX, roi=split)
+        found_whole = {(int(a), int(b)) for a, b in zip(y_w, x_w)}
+        found_split = {(int(a), int(b)) for a, b in zip(y_s, x_s)}
+        # every seeded peak is found in both cases ...
+        for c in centers:
+            assert c in found_whole
+            assert c in found_split
+        # ... and the two ROIs together reproduce the single-region result
+        assert found_whole == found_split
+
+
+# ---------------------------------------------------------------------------
+# clip_rois
+# ---------------------------------------------------------------------------
+
+
+def _area(rects) -> int:
+    """Total area of a list of [[y0, x0], [y1, x1]] rectangles."""
+    return sum((y1 - y0) * (x1 - x0) for (y0, x0), (y1, x1) in rects)
+
+
+def _overlap(a, b) -> int:
+    """Area of the overlap between two [[y0, x0], [y1, x1]] rectangles."""
+    (ay0, ax0), (ay1, ax1) = a
+    (by0, bx0), (by1, bx1) = b
+    dy = max(0, min(ay1, by1) - max(ay0, by0))
+    dx = max(0, min(ax1, bx1) - max(ax0, bx0))
+    return dy * dx
+
+
+class TestClipRois:
+    """Geometric clipping of (possibly overlapping) ROIs into disjoint
+    rectangles."""
+
+    def test_disjoint_unchanged(self):
+        rois = [((0, 0), (5, 5)), ((10, 10), (15, 15))]
+        out = localize.clip_rois(rois)
+        assert out == [[[0, 0], [5, 5]], [[10, 10], [15, 15]]]
+
+    def test_overlap_is_disjoint_and_preserves_union(self):
+        rois = [((0, 0), (10, 10)), ((5, 5), (15, 15))]
+        out = localize.clip_rois(rois)
+        # pairwise disjoint
+        for i in range(len(out)):
+            for j in range(i + 1, len(out)):
+                assert _overlap(out[i], out[j]) == 0
+        # union area = 100 + 100 - 25 (overlap)
+        assert _area(out) == 175
+
+    def test_full_containment_drops_inner(self):
+        rois = [((0, 0), (20, 20)), ((5, 5), (10, 10))]
+        out = localize.clip_rois(rois)
+        assert out == [[[0, 0], [20, 20]]]
+
+    def test_corner_overlap(self):
+        rois = [((0, 0), (10, 10)), ((8, 8), (18, 18))]
+        out = localize.clip_rois(rois)
+        for i in range(len(out)):
+            for j in range(i + 1, len(out)):
+                assert _overlap(out[i], out[j]) == 0
+        assert _area(out) == 100 + 100 - 4
+
+    def test_min_size_drops_slivers(self):
+        # second ROI overlaps the first leaving a 1-pixel-tall sliver
+        rois = [((0, 0), (10, 10)), ((9, 0), (20, 20))]
+        out = localize.clip_rois(rois, min_size=3)
+        assert [[10, 0], [20, 20]] in out
+        # the 1-pixel band (y in 9..10) is discarded
+        assert all(piece[1][0] - piece[0][0] >= 3 for piece in out)
+
+    def test_normalizes_corner_order(self):
+        out = localize.clip_rois([((25, 28), (10, 12))])
+        assert out == [[[10, 12], [25, 28]]]
 
 
 # ---------------------------------------------------------------------------
@@ -373,6 +495,34 @@ class TestIdentify:
             assert (ids["frame"] >= 20).all()
             assert (ids["frame"] <= 50).all()
 
+    def test_frame_bounds_multiple_segments(self, movie):
+        """A list of ``(min, max)`` segments confines identifications to
+        the union of those (disjoint) frame ranges."""
+        segments = [(10, 20), (40, 50)]
+        ids = localize.identify(
+            movie, MIN_NG, BOX, frame_bounds=segments, return_info=False
+        )
+        if len(ids):
+            in_any = ((ids["frame"] >= 10) & (ids["frame"] <= 20)) | (
+                (ids["frame"] >= 40) & (ids["frame"] <= 50)
+            )
+            assert in_any.all()
+            # nothing in the gap between segments
+            assert not ((ids["frame"] > 20) & (ids["frame"] < 40)).any()
+
+    def test_frame_bounds_single_segment_matches_flat_tuple(self, movie):
+        """A single-segment list behaves identically to the flat
+        ``(min, max)`` tuple form."""
+        flat = localize.identify(
+            movie, MIN_NG, BOX, frame_bounds=(20, 50), return_info=False
+        )
+        listed = localize.identify(
+            movie, MIN_NG, BOX, frame_bounds=[(20, 50)], return_info=False
+        )
+        flat_set = set(zip(flat["frame"], flat["y"], flat["x"]))
+        listed_set = set(zip(listed["frame"], listed["y"], listed["x"]))
+        assert flat_set == listed_set
+
     def test_return_info_returns_metadata_dict(self, movie):
         ids, info = localize.identify(
             movie, MIN_NG, BOX, return_info=True, threaded=False
@@ -438,6 +588,24 @@ class TestIdentifyByFrameNumber:
         )
         assert isinstance(out, pd.DataFrame)
         assert len(out) == 0
+
+    def test_frame_in_one_of_several_segments(self, movie):
+        """A frame inside any of several segments is processed; a frame
+        in the gap between segments returns empty."""
+        segments = [(0, 4), (20, 30)]
+        inside = localize.identify_by_frame_number(
+            movie, MIN_NG, BOX, 25, frame_bounds=segments
+        )
+        gap = localize.identify_by_frame_number(
+            movie, MIN_NG, BOX, 10, frame_bounds=segments
+        )
+        # frame 25 matches the full per-frame identification...
+        full = localize.identify_by_frame_number(movie, MIN_NG, BOX, 25)
+        assert set(zip(inside["y"], inside["x"])) == set(
+            zip(full["y"], full["x"])
+        )
+        # ...while frame 10 (in the gap) yields nothing
+        assert len(gap) == 0
 
 
 # ---------------------------------------------------------------------------
@@ -623,14 +791,18 @@ class TestSaveLoadIdentifications:
         with pytest.raises(KeyError):
             io.load_identifications(str(path))
 
-    def test_load_missing_yaml_raises(self, tmp_path, real_identifications):
-        """If the YAML sidecar is removed, ``load_identifications`` must
-        raise ``NoMetadataFileError`` (same contract as ``load_locs``)."""
+    def test_load_missing_yaml_falls_back_to_embedded(
+        self, tmp_path, real_identifications
+    ):
+        """If the YAML sidecar is removed, ``load_identifications`` falls
+        back to the metadata embedded in the HDF5 ``/metadata`` dataset
+        (same contract as ``load_locs``)."""
         path = tmp_path / "ids.hdf5"
-        io.save_identifications(str(path), real_identifications, self._info())
+        info = self._info()
+        io.save_identifications(str(path), real_identifications, info)
         (tmp_path / "ids.yaml").unlink()
-        with pytest.raises(io.NoMetadataFileError):
-            io.load_identifications(str(path))
+        _, loaded_info = io.load_identifications(str(path))
+        assert loaded_info == info
 
     def test_save_uses_yaml_sidecar_path(self, tmp_path, real_identifications):
         """The YAML path is derived from the HDF5 path's base name —
@@ -677,90 +849,6 @@ class TestGetSpots:
         spots_x1 = localize.get_spots(movie, real_identifications, BOX, cam_x1)
         spots_x2 = localize.get_spots(movie, real_identifications, BOX, cam_x2)
         np.testing.assert_allclose(spots_x2, spots_x1 / 2, rtol=1e-5)
-
-
-# ---------------------------------------------------------------------------
-# fit + fit_async (MLE wrapper)
-# ---------------------------------------------------------------------------
-
-
-class TestFit:
-    """High-level MLE wrapper that combines ``get_spots`` + ``gaussmle``."""
-
-    def test_returns_locs_with_required_columns(
-        self, movie, real_identifications
-    ):
-        locs = localize.fit(
-            movie,
-            CAMERA_INFO,
-            real_identifications,
-            BOX,
-            method="sigmaxy",
-        )
-        assert len(locs) == len(real_identifications)
-        for col in [
-            "frame",
-            "x",
-            "y",
-            "photons",
-            "sx",
-            "sy",
-            "bg",
-            "lpx",
-            "lpy",
-            "net_gradient",
-        ]:
-            assert col in locs.columns
-
-    def test_method_sigma_returns_equal_sx_sy(
-        self, movie, real_identifications
-    ):
-        locs = localize.fit(
-            movie, CAMERA_INFO, real_identifications, BOX, method="sigma"
-        )
-        # In the localize.fit MLE path the method=sigma constrains sx==sy
-        np.testing.assert_array_equal(
-            locs["sx"].to_numpy(), locs["sy"].to_numpy()
-        )
-
-    @pytest.mark.slow
-    def test_fit_async_matches_fit_after_completion(
-        self, movie, real_identifications
-    ):
-        """``fit_async`` returns the in-progress state; once
-        ``current[0]`` reaches the spot count, the per-spot fit results
-        match the synchronous version (set equality up to numerical noise)."""
-        locs_sync = localize.fit(
-            movie,
-            CAMERA_INFO,
-            real_identifications,
-            BOX,
-            method="sigmaxy",
-        )
-        current, thetas, _, _, iterations = localize.fit_async(
-            movie,
-            CAMERA_INFO,
-            real_identifications,
-            BOX,
-            method="sigmaxy",
-        )
-        # `current[0]` is incremented *before* the per-spot fit runs (see
-        # ``gaussmle._worker``), so polling it can let the loop exit while
-        # the last few worker writes are still in flight. ``iterations``
-        # is zero-initialised and only written when a fit completes —
-        # poll on that for a race-free completion signal.
-        t0 = time.time()
-        while (iterations == 0).any():
-            assert time.time() - t0 < 30, "fit_async timed out"
-            time.sleep(0.05)
-        del current  # only kept to document the returned tuple shape
-        # The per-spot photon counts should match (with possibly different
-        # row ordering across worker scheduling). Compare sorted lists.
-        np.testing.assert_allclose(
-            np.sort(thetas[:, 2]),
-            np.sort(locs_sync["photons"].to_numpy()),
-            atol=1e-3,
-        )
 
 
 # ---------------------------------------------------------------------------
@@ -1049,24 +1137,6 @@ class TestLocalize:
         if len(locs) > 0:
             assert (locs["x"] < 16).all()
             assert (locs["y"] < 16).all()
-
-    def test_default_return_info_emits_deprecation(
-        self, picasso_movie, movie_info
-    ):
-        """Passing ``return_info=None`` (the legacy default) triggers a
-        deprecation warning. Will be removed in v0.12.0."""
-        # ``lib.deprecation_warning`` prints to stderr; just verify the
-        # call still returns the DataFrame without crashing.
-        result = localize.localize(
-            picasso_movie,
-            CAMERA_INFO_WITH_PIXELSIZE,
-            {"Min. Net Gradient": MIN_NG, "Box Size": BOX},
-            movie_info=movie_info,
-            fitting_method="gausslq",
-            threaded=False,
-            # return_info omitted on purpose
-        )
-        assert isinstance(result, pd.DataFrame)
 
 
 # ---------------------------------------------------------------------------

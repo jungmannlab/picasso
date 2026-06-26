@@ -19,7 +19,8 @@ SMLM clusterer is based on:
 
 from __future__ import annotations
 
-from typing import Callable
+import itertools
+from typing import Callable, Literal
 
 import numpy as np
 import pandas as pd
@@ -111,11 +112,94 @@ def frame_analysis(
     return labels
 
 
+# number of points whose neighbors are queried from the KDTree at once;
+# bounds peak memory and provides progress granularity in ``_cluster``
+_NEIGHBOR_BATCH_SIZE = 100_000
+
+
+def _build_neighbor_graph(
+    tree: KDTree,
+    X: lib.FloatArray2D,
+    radius: float,
+    progress: Callable[[int], None] | None = None,
+) -> tuple[lib.IntArray1D, lib.IntArray1D]:
+    """Build a compact (CSR-like) neighbor graph for all points in X.
+
+    For each point, finds the indices of all points within ``radius``
+    (including the point itself). Rather than keeping scipy's
+    list-of-lists (Python ints, very memory heavy for millions of
+    points), neighbors are stored as two flat NumPy arrays:
+
+    * ``indptr`` of shape (n_points + 1,); the neighbors of point ``i``
+      are ``indices[indptr[i]:indptr[i + 1]]``.
+    * ``indices``, the concatenated neighbor indices (int32).
+
+    The tree is queried in batches of ``_NEIGHBOR_BATCH_SIZE`` points,
+    so only one batch of Python lists is alive at any time and progress
+    can be reported.
+
+    Parameters
+    ----------
+    tree : scipy.spatial.KDTree
+        KDTree built from ``X``.
+    X : lib.FloatArray2D
+        Array of points of shape (n_points, n_dim).
+    radius : float
+        Clustering radius.
+    progress : callable or None, optional
+        Called with the cumulative number of points processed after
+        each batch. If None, no progress is reported.
+
+    Returns
+    -------
+    indptr : lib.IntArray1D
+        Neighbor offsets, shape (n_points + 1,), dtype int64.
+    indices : lib.IntArray1D
+        Concatenated neighbor indices, dtype int32.
+    """
+    n_points = X.shape[0]
+    counts = np.empty(n_points, dtype=np.int32)
+    index_chunks = []
+
+    n_batches = int(np.ceil(n_points / _NEIGHBOR_BATCH_SIZE))
+
+    for b in range(n_batches):
+        start = b * _NEIGHBOR_BATCH_SIZE
+        end = min(start + _NEIGHBOR_BATCH_SIZE, n_points)
+        # neighbors for this batch as a list of lists; discarded once
+        # flattened into compact arrays below
+        nb = tree.query_ball_point(X[start:end], radius, workers=-1)
+        batch_counts = np.fromiter(
+            (len(n) for n in nb), dtype=np.int32, count=len(nb)
+        )
+        counts[start:end] = batch_counts
+        total = int(batch_counts.sum())
+        if total:
+            index_chunks.append(
+                np.fromiter(
+                    itertools.chain.from_iterable(nb),
+                    dtype=np.int32,
+                    count=total,
+                )
+            )
+        if progress is not None:
+            progress(end)
+
+    indptr = np.zeros(n_points + 1, dtype=np.int64)
+    np.cumsum(counts, out=indptr[1:])
+    if index_chunks:
+        indices = np.concatenate(index_chunks)
+    else:
+        indices = np.empty(0, dtype=np.int32)
+    return indptr, indices
+
+
 def _cluster(
     X: lib.FloatArray2D,
     radius: float,
     min_locs: int,
     frame: pd.Series | None = None,
+    progress: Callable[[int], None] | None = None,
 ) -> lib.IntArray1D:
     """Cluster points given by X with a given clustering radius and
     minimum number of localizations within that radius using KDTree.
@@ -127,6 +211,10 @@ def _cluster(
        within their neighborhood.
     4. Assign cluster labels to all points. If two local maxima are
        within the radius from each other, combine such clusters.
+
+    The neighbor graph is built in batches and stored as compact NumPy
+    arrays (see ``_build_neighbor_graph``) so peak memory stays bounded
+    even for tens of millions of localizations.
 
     Based on the algorithm published by Schichthaerle et al.
     Nature Comm, 2021 (10.1038/s41467-021-22606-1) and first implemented
@@ -144,6 +232,10 @@ def _cluster(
     frame : pd.Series or None, optional
         Frame number of each localization. If None, no frame analysis
         is performed.
+    progress : callable or None, optional
+        Called with the cumulative number of localizations processed
+        while building the neighbor graph (the main, O(n) step). If
+        None, no progress is reported.
 
     Returns
     -------
@@ -151,40 +243,41 @@ def _cluster(
         Cluster labels for each localization (-1 means no cluster
         assigned).
     """
-    # build kdtree (use cKDTree in case user did not update scipy)
-    tree = KDTree(X)
+    n_points = X.shape[0]
 
-    # find neighbors for each point within radius
-    neighbors = tree.query_ball_tree(tree, radius)
+    # build kdtree and a compact, batched neighbor graph (bounded memory)
+    tree = KDTree(X)
+    indptr, indices = _build_neighbor_graph(tree, X, radius, progress)
+
+    # number of neighbors of each point (point is its own neighbor)
+    counts = np.diff(indptr).astype(np.int32)
 
     # find local maxima, i.e., points with the most neighbors within
-    # their neighborhood
-    lm = np.zeros(X.shape[0], dtype=np.int8)
-    for i in range(len(lm)):
-        idx = neighbors[i]  # indeces of points that are neighbors of i
-        n = len(idx)  # number of neighbors of i
-        if n > min_locs:  # note that i is included in its neighbors
-            # if i has the most neighbors in its neighborhood
-            if n == max([len(neighbors[_]) for _ in idx]):
-                lm[i] = 1
+    # their neighborhood. ``reduceat`` computes, per point, the maximum
+    # neighbor count over that point's neighborhood in one vectorised
+    # pass (no Python loop over all points).
+    if n_points:
+        neighbor_max = np.maximum.reduceat(counts[indices], indptr[:-1])
+    else:
+        neighbor_max = np.empty(0, dtype=np.int32)
+    # note that a point is included in its own neighbors
+    lm = (counts > min_locs) & (counts == neighbor_max)
 
     # assign cluster labels to all points (-1 means no cluster)
     # if two local maxima are within radius from each other, combine
     # such clusters
-    labels = -1 * np.ones(X.shape[0], dtype=np.int32)  # cluster labels
-    lm_idx = np.where(lm == 1)[0]  # indeces of local maxima
+    labels = -1 * np.ones(n_points, dtype=np.int32)  # cluster labels
+    lm_idx = np.where(lm)[0]  # indeces of local maxima
 
     for count, i in enumerate(lm_idx):  # for each local maximum
+        neighbors_i = indices[indptr[i] : indptr[i + 1]]
         label = labels[i]
         if label == -1:  # if lm not assigned yet
-            labels[neighbors[i]] = count
+            labels[neighbors_i] = count
         else:
-            # indeces of locs that were not assigned to any cluster
-            idx = [
-                neighbors[i][_]
-                for _ in np.where(labels[neighbors[i]] == -1)[0]
-            ]
-            if len(idx):  # if such a loc exists, assign it to a cluster
+            # locs in the neighborhood not yet assigned to any cluster
+            idx = neighbors_i[labels[neighbors_i] == -1]
+            if idx.size:  # if such a loc exists, assign it to a cluster
                 labels[idx] = label
 
     # check for number of locs per cluster to be above min_locs
@@ -206,6 +299,7 @@ def cluster_2D(
     radius: float,
     min_locs: int,
     fa: bool,
+    progress: Callable[[int], None] | None = None,
 ) -> lib.IntArray1D:
     """Prepare 2D input to be used by ``_cluster``.
 
@@ -219,6 +313,10 @@ def cluster_2D(
         Minimum number of localizations in a cluster.
     fa : bool
         True, if basic frame analysis is to be performed.
+    progress : callable or None, optional
+        Called with the cumulative number of localizations processed
+        while building the neighbor graph. If None, no progress is
+        reported.
 
     Returns
     -------
@@ -233,7 +331,7 @@ def cluster_2D(
     else:
         frame = locs["frame"]
 
-    labels = _cluster(X, radius, min_locs, frame)
+    labels = _cluster(X, radius, min_locs, frame, progress)
 
     return labels
 
@@ -244,6 +342,7 @@ def cluster_3D(
     radius_z: float,
     min_locs: int,
     fa: bool,
+    progress: Callable[[int], None] | None = None,
 ) -> lib.IntArray1D:
     """Prepare 3D input to be used by ``_cluster``.
 
@@ -267,6 +366,10 @@ def cluster_3D(
         Minimum number of localizations in a cluster.
     fa : bool
         True, if basic frame analysis is to be performed.
+    progress : callable or None, optional
+        Called with the cumulative number of localizations processed
+        while building the neighbor graph. If None, no progress is
+        reported.
 
     Returns
     -------
@@ -283,9 +386,47 @@ def cluster_3D(
     else:
         frame = locs["frame"]
 
-    labels = _cluster(X, radius, min_locs, frame)
+    labels = _cluster(X, radius, min_locs, frame, progress)
 
     return labels
+
+
+def _resolve_progress(
+    progress: lib.ProgressDialog | Literal["console"] | None,
+    total: int,
+    description: str,
+    unit: str = "it",
+) -> Callable[[int], None] | None:
+    """Normalize a public ``progress`` argument into a ``set_value``
+    callback for the internal per-item loops.
+
+    Mirrors ``picasso.aim.aim``'s convention: ``None`` reports nothing,
+    ``"console"`` displays a tqdm progress bar, and a
+    ``lib.ProgressDialog`` drives a GUI progress bar. ``total`` is the
+    number of steps the callback will count up to; ``unit`` is the tqdm
+    unit label.
+
+    Returns
+    -------
+    callable or None
+        Called with the cumulative number of processed items, or None if
+        no progress should be reported.
+    """
+    assert (
+        progress is None
+        or progress == "console"
+        or isinstance(progress, lib.ProgressDialog)
+    ), "progress must be None, 'console', or a ProgressDialog instance."
+    if progress is None:
+        return lib.MockProgress().set_value
+    if progress == "console":
+        tqdm_progress = lib.TqdmProgress(description=description)
+        tqdm_progress.get_iterator(0, total, unit=unit)  # arm the tqdm bar
+        return tqdm_progress.set_value
+    # lib.ProgressDialog: set its range here so callers need not know the
+    # internal item count (e.g. number of KDTree batches or clusters)
+    progress.setMaximum(total)
+    return progress.set_value
 
 
 def cluster(
@@ -295,7 +436,8 @@ def cluster(
     frame_analysis: bool,
     radius_z: float | None = None,
     pixelsize: float | None = None,
-    return_info: bool = None,  # TODO: change to true in v0.11.0 and remove in v0.12.0
+    return_info: bool = True,  # TODO: remove in v0.12.0
+    progress: lib.ProgressDialog | Literal["console"] | None = None,
 ) -> tuple[pd.DataFrame, dict] | pd.DataFrame:
     """Cluster localizations from single molecules (SMLM clusterer).
 
@@ -339,7 +481,14 @@ def cluster(
     return_info : bool, optional
         If True, returns a tuple of (locs, info), where locs is the
         clustered localizations and info is a dictionary containing
-        clustering information.
+        clustering information. Will be removed in v0.12.0 and both
+        locs and metadata will be returned.
+    progress : picasso.lib.ProgressDialog or "console" or None, optional
+        Tracks progress while building the neighbor graph (the main,
+        O(n) step). If "console", a tqdm progress bar is shown in the
+        console. If a ProgressDialog, a GUI progress bar is updated. If
+        None (default), no progress is displayed. Same convention as
+        ``picasso.aim.aim``.
 
     Returns
     -------
@@ -351,17 +500,14 @@ def cluster(
         Dictionary containing clustering information, only returned if
         return_info is True.
     """
-    if return_info is None:
-        return_info = False
+    if not return_info:
         lib.deprecation_warning(
-            "Deprecation warning: In v0.11.0, cluster will return both "
-            "locs and cluster info by default. You can change the "
-            "output already by setting return_info=True. In v0.12.0, "
-            "this will not be optional anymore and cluster will always "
-            "return both locs and cluster info."
+            "In v0.12.0, return_info will not be an argument and"
+            "cluster will always return both locs and cluster info."
         )
     locs = locs.copy()
     n_raw = len(locs)
+    progress_cb = _resolve_progress(progress, n_raw, "Clustering", unit="loc")
     if "z" in locs.columns:  # 3D
         if pixelsize is None or radius_z is None:
             raise ValueError(
@@ -375,6 +521,7 @@ def cluster(
             radius_z,
             min_locs,
             frame_analysis,
+            progress_cb,
         )
     else:
         labels = cluster_2D(
@@ -382,6 +529,7 @@ def cluster(
             radius_xy,
             min_locs,
             frame_analysis,
+            progress_cb,
         )
     locs = extract_valid_labels(locs, labels)
     if "z" in locs.columns:
@@ -452,7 +600,7 @@ def dbscan(
     min_locs: int = 10,
     pixelsize: float | None = None,
     radius_z: float | None = None,
-    return_info: bool = None,  # TODO: change to true in v0.11.0 and remove in v0.12.0
+    return_info: bool = True,  # TODO: remove in v0.12.0
 ) -> tuple[pd.DataFrame, dict] | pd.DataFrame:
     """Perform DBSCAN on localizations.
 
@@ -488,7 +636,8 @@ def dbscan(
     return_info : bool, optional
         If True, returns a tuple of (locs, info), where locs is the
         clustered localizations and info is a dictionary containing
-        clustering information.
+        clustering information. Will be removed in v0.12.0 and both
+        locs and metadata will be returned.
 
     Returns
     -------
@@ -500,14 +649,10 @@ def dbscan(
         Dictionary containing clustering information, only returned if
         return_info is True.
     """
-    if return_info is None:
-        return_info = False
+    if not return_info:
         lib.deprecation_warning(
-            "Deprecation warning: In v0.11.0, dbscan will return both "
-            "locs and cluster info by default. You can change the "
-            "output already by setting return_info=True. In v0.12.0, "
-            "this will not be optional anymore and dbscan will always "
-            "return both locs and cluster info."
+            "In v0.12.0, return_info will not be an argument and"
+            "dbscan will always return both locs and cluster info."
         )
     locs = locs.copy()
     n_raw = len(locs)
@@ -588,7 +733,7 @@ def hdbscan(
     min_samples: int,
     pixelsize: float | None = None,
     cluster_eps: float = 0.0,
-    return_info: bool = None,  # TODO: change to true in v0.11.0 and remove in v0.12.0
+    return_info: bool = True,  # TODO: remove in v0.12.0
 ) -> tuple[pd.DataFrame, dict] | pd.DataFrame:
     """Perform HDBSCAN on localizations.
 
@@ -610,7 +755,8 @@ def hdbscan(
     return_info : bool, optional
         If True, returns a tuple of (locs, info), where locs is the
         clustered localizations and info is a dictionary containing
-        clustering information.
+        clustering information. Will be removed in v0.12.0 and both
+        locs and metadata will be returned.
 
     Returns
     -------
@@ -622,14 +768,10 @@ def hdbscan(
         Dictionary containing clustering information, only returned if
         return_info is True.
     """
-    if return_info is None:
-        return_info = False
+    if not return_info:
         lib.deprecation_warning(
-            "Deprecation warning: In v0.11.0, hdbscan will return both "
-            "locs and cluster info by default. You can change the "
-            "output already by setting return_info=True. In v0.12.0, "
-            "this will not be optional anymore and hdbscan will always "
-            "return both locs and cluster info."
+            "In v0.12.0, return_info will not be an argument and"
+            "cluster will always return both locs and cluster info."
         )
     locs = locs.copy()
     n_raw = len(locs)
@@ -764,11 +906,15 @@ def _cluster_convex_hulls(
     unique_groups: lib.IntArray1D,
     has_z: bool,
     pixelsize: float | None,
+    progress: Callable[[int], None] | None = None,
 ) -> lib.FloatArray1D:
     """Convex-hull area (2D) or volume (3D) per cluster.
 
     The only per-cluster Python loop in ``find_cluster_centers``; runs
-    on raw NumPy slices of a group-sorted coordinate array.
+    on raw NumPy slices of a group-sorted coordinate array. For datasets
+    with many clusters this is the run-time bottleneck, so an optional
+    ``progress`` callable (called with the number of clusters processed)
+    can be passed for feedback.
     """
     coord_cols = ["x", "y", "z"] if has_z else ["x", "y"]
     coords_sorted = (
@@ -785,6 +931,8 @@ def _cluster_convex_hulls(
             convexhull[i] = ConvexHull(X).volume
         except QhullError:
             convexhull[i] = 0.0
+        if progress is not None:
+            progress(i + 1)
     return convexhull
 
 
@@ -803,6 +951,7 @@ def _weighted_z_means(
 def find_cluster_centers(
     locs: pd.DataFrame,
     pixelsize: float | None = None,
+    progress: lib.ProgressDialog | Literal["console"] | None = None,
 ) -> pd.DataFrame:
     """Calculate cluster centers.
 
@@ -817,6 +966,12 @@ def find_cluster_centers(
     pixelsize : float, optional
         Camera pixel size (used for finding volume and 3D convex hull).
         Only required for 3D localizations.
+    progress : picasso.lib.ProgressDialog or "console" or None, optional
+        Tracks progress of the per-cluster convex-hull pass (the
+        run-time bottleneck for datasets with many clusters). If
+        "console", a tqdm progress bar is shown in the console. If a
+        ProgressDialog, a GUI progress bar is updated. If None (default),
+        no progress is displayed. Same convention as ``picasso.aim.aim``.
 
     Returns
     -------
@@ -839,8 +994,14 @@ def find_cluster_centers(
     lpy = s["y_std"] / np.sqrt(s["n_locs"])
     ellipticity = s["sx_mean"] / s["sy_mean"]
     n_events, order, group_s = _count_binding_events(group_arr, frame_arr)
+    progress_cb = _resolve_progress(
+        progress,
+        len(s["unique_groups"]),
+        "Calculating cluster centers",
+        unit="cluster",
+    )
     convexhull = _cluster_convex_hulls(
-        locs, order, group_s, s["unique_groups"], has_z, pixelsize
+        locs, order, group_s, s["unique_groups"], has_z, pixelsize, progress_cb
     )
 
     columns = {
@@ -895,174 +1056,6 @@ def find_cluster_centers(
         )
 
     return pd.DataFrame(columns)
-
-
-def cluster_center(
-    grouplocs: pd.SeriesGroupBy,
-    pixelsize: float | None = None,
-    separate_lp: bool = False,
-) -> list:
-    """Alias for _cluster_center which will be a private function in the
-    future release. Kept for backward compatibility."""
-    lib.deprecation_warning(
-        "cluster_center is deprecated and will be removed in v0.11.0."
-        " Use find_cluster_centers instead."
-    )
-    return _cluster_center(grouplocs, pixelsize, separate_lp)
-
-
-def _cluster_center(
-    grouplocs: pd.SeriesGroupBy,
-    pixelsize: float | None = None,
-    separate_lp: bool = False,
-) -> list:  # TODO: remove in v0.11.0
-    """Find cluster centers and their attributes, such as mean number
-    of photons per localization, etc.
-
-    Assumes locs to be a ``pandas.SeriesGroupBy`` object, grouped by
-    cluster ids.
-
-    Parameters
-    ----------
-    grouplocs : pandas.SeriesGroupBy
-        Localizations grouped by cluster ids.
-    pixelsize : float, optional
-        Camera pixel size (used for finding volume and 3D convex hull).
-        Only required for 3D localizations.
-    separate_lp : bool, optional
-        If True, localization precision in x and y will be calculated
-        separately. Otherwise, the mean of the two is taken.
-
-    Returns
-    -------
-    results : list
-        Cluster center attributes. For each group, a list of values is
-        returned: x, y, (z, optional), etc.
-    """
-    lib.deprecation_warning(
-        "_cluster_center is deprecated and will be removed in v0.11.0."
-        " Use find_cluster_centers instead."
-    )
-    # mean and std frame
-    frame = grouplocs.frame.mean()
-    std_frame = grouplocs.frame.std()
-    # average x and y, weighted by lpx, lpy
-    # x = np.average(grouplocs.x, weights=1/(grouplocs.lpx)**2)
-    # y = np.average(grouplocs.y, weights=1/(grouplocs.lpy)**2)
-    x = np.mean(grouplocs.x)
-    y = np.mean(grouplocs.y)
-    std_x = grouplocs.x.std()
-    std_y = grouplocs.y.std()
-    # mean values
-    photons = grouplocs.photons.mean()
-    sx = grouplocs.sx.mean()
-    sy = grouplocs.sy.mean()
-    bg = grouplocs.bg.mean()
-    # weighted mean loc precision
-    # lpx = np.sqrt(
-    #     error_sums_wtd(grouplocs.x, grouplocs.lpx)
-    #     / (len(grouplocs) - 1)
-    # )
-    # lpy = np.sqrt(
-    #     error_sums_wtd(grouplocs.y, grouplocs.lpy)
-    #     / (len(grouplocs) - 1)
-    # )
-    lpx = np.std(grouplocs.x) / len(grouplocs) ** 0.5
-    lpy = np.std(grouplocs.y) / len(grouplocs) ** 0.5
-    if not separate_lp:
-        lpx = (lpx + lpy) / 2
-        lpy = lpx
-    # other attributes
-    ellipticity = sx / sy
-    net_gradient = grouplocs.net_gradient.mean()
-    # n_locs in cluster
-    n = len(grouplocs)
-    # number of binding events
-    split_idx = np.where(np.diff(grouplocs.frame) > 3)[0] + 1  # split locs by
-    # consecutive frames
-    x_events = np.split(grouplocs.x.to_numpy(), split_idx)
-    n_events = len(x_events)  # number of binding events
-    if "z" in grouplocs.columns:
-        if pixelsize is None:
-            raise ValueError(
-                "Camera pixel size must be specified as an integer for 3D"
-                " cluster centers calculation."
-            )
-        z = np.average(
-            grouplocs.z,
-            weights=1 / ((grouplocs.lpx + grouplocs.lpy) ** 2),
-        )  # take lpz = 2 * mean(lpx, lpy)
-        std_z = grouplocs.z.std()
-        # lpz = std_z
-        volume = (
-            np.power((std_x + std_y + std_z / pixelsize) / 3 * 2, 3) * 4.18879
-        )  # assume radius = 2 * std_xyz
-        try:
-            X = np.stack(
-                (grouplocs.x, grouplocs.y, grouplocs.z / pixelsize),
-                axis=0,
-            ).T
-            hull = ConvexHull(X)
-            convexhull = hull.volume
-        except QhullError:
-            convexhull = 0
-        result = [
-            frame,
-            std_frame,
-            x,
-            y,
-            std_x,
-            std_y,
-            photons,
-            sx,
-            sy,
-            bg,
-            lpx,
-            lpy,
-            ellipticity,
-            net_gradient,
-            n,
-            n_events,
-            z,
-            std_z,
-            # lpz,
-            volume,
-            convexhull,
-        ]
-    else:
-        # assume radius = 2 * std_xyz
-        area = np.power(std_x + std_y, 2) * np.pi
-        try:
-            X = np.stack((grouplocs.x, grouplocs.y), axis=0).T
-            hull = ConvexHull(X)
-            convexhull = hull.volume
-        except QhullError:
-            convexhull = 0
-        result = [
-            frame,
-            std_frame,
-            x,
-            y,
-            std_x,
-            std_y,
-            photons,
-            sx,
-            sy,
-            bg,
-            lpx,
-            lpy,
-            ellipticity,
-            net_gradient,
-            n,
-            n_events,
-            area,
-            convexhull,
-        ]
-
-    if "group_input" in grouplocs.columns:
-        # assumes only one group input!
-        result.append(np.unique(grouplocs.group_input)[0])
-    return result
 
 
 def _cluster_area(X: lib.FloatArray2D, lp: float) -> float:

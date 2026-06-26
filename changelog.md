@@ -1,6 +1,56 @@
 # Changelog
 
-Last change: 18-JUN-2026 CEST
+Last change: 26-JUN-2026 CEST
+
+## 0.11.0
+
+### **General updates:**
+- Localization metadata is now embedded directly in the `.hdf5` file (under the `/metadata` dataset, as a JSON string), making the file self-contained even if moved or renamed without its `.yaml` sidecar. When loading, Picasso looks for the metadata in the `.yaml` file first, then falls back to the embedded copy. Writing the `.yaml` sidecar is still on by default but can be disabled via the new user setting `Save metadata in .yaml` in `~/.picasso/settings.yaml` (also available via any module under File > Picasso settings). See [file formats documentation](https://picassosr.readthedocs.io/en/latest/files.html) for more info.
+- Improved architecture for plugins, see[here](https://picassosr.readthedocs.io/en/latest/plugins.html). Note that the plugins must now be stored in a different location.
+
+#### Localize
+- Picasso relies on package `tifffile` for processing `.tif` files and many other grayscale movie formats, see [localize documentation](https://picassosr.readthedocs.io/en/latest/localize.html). **Note:** this is an experimental feature, do not hesitate to let us know if you detect bugs/unexpected behavior or would like to see more file formats in Picasso, see our [GitHub page](https://github.com/jungmannlab/picasso/issues) for contact information.
+- Added support for Zeiss `.czi` and Leica `.lif` movies in Localize (open dialog, drag-and-drop and batch CLI). These read via the optional `czifile` and `liffile` libraries (Python ≥ 3.12); install with `pip install picassosr[czi,lif]`. Multi-channel files prompt for a channel, and a `.lif` file with several acquisitions uses the one with the most frames.
+- Accept multiple frame bounds
+- Accept multiple rectangular ROIs
+- Remove a ROI by double-clicking it in the preview
+- Loading a movie with corrupted metadata lets the user specify the most important ones without errors
+- 3D calibration allows for multiple FOVs per z position (thanks to Aditya Ajay Chhatre for the suggestion)
+- Slider at the bottom of the app was added to allow easy navigation across frames
+- New keyboard shortcuts for navigating movies (move by 10/100/1,000 frames)
+- Slight adjustments to some status bar messages
+- Cutting spots progress is reported between identification and fitting
+- Faster spot identification on network storage: `.tif`/`.ome.tif` and `.stk` movies are now read through a private file handle per worker thread instead of one shared, lock-serialized handle, so frame reads overlap and per-frame network latency is hidden
+- Faster spot cutting (`get_spots`) on network storage (see above)
+- Fixed a gap of roughly one box size in the identified spots along the borders between adjacent (e.g. overlapping) ROIs
+- Fixed handling abortions during identification
+
+#### Render
+- Improved measure tool
+- Faster AIM through smarter implementation
+- Faster and more memory efficient (especially for large datasets) SMLM clusterer + progress bar added
+- Progress bar for finding cluster centers
+- Rotation dialog allows for rotations around the localizations or the world (see [3D documentation](https://picassosr.readthedocs.io/en/latest/render.html#d-rotation-window))
+- Fixed removed plugins menu after removing all localizations
+
+#### SPINNA
+- Fixed verbose for batch analysis
+- Batch analysis allows for specifying fitting mode (brute force/coarse to fine/bayesian)
+- Batch analysis closes unused plots to save RAM
+- Removed the obsolete line of code in `_fill3d` ([#682](https://github.com/jungmannlab/picasso/issues/682)). This should not affect standard functionality of 3D masks; only the usage of `render_hist3d_anisotropic` directly might be affected 
+
+#### *Other improvements:*
+- Removed folder `distribution` from the repository; `create_linux_shortcuts.py` was moved to `release`
+
+### **Backward incompatible changes:**
+- All the functions deprecated in v0.10 were removed, see section 0.10.0 below
+- `picasso.clusterer.cluster_center` removed (the functionality provided by `find_cluster_centers`)
+- `render.render` only keyword arguments except `locs` and `info`
+- Nanotron accepts `disp_px_size` instead of `oversampling` for easier user interaction
+- Plugins location changed, see [here](https://picassosr.readthedocs.io/en/latest/plugins.html); `picasso/gui/plugins` folder removed
+
+#### *Deprecation warnings:*
+- `picasso.localize.identify` and `picasso.localize.localize` will always return metadata in v0.12.0, `return_info` will no longer be accepted
 
 ## 0.10.3
 - Fixed total pick area in the .yamls for circular and square picks (Render)

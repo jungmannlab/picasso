@@ -15,8 +15,6 @@ import os
 import sys
 import time
 import re
-import importlib
-import pkgutil
 from functools import partial
 from multiprocessing import cpu_count
 from datetime import datetime
@@ -5061,20 +5059,11 @@ def main():
     app = QtWidgets.QApplication(sys.argv)
     window = Window()
 
-    from . import plugins
+    # load plugins from ~/.picasso/plugins
+    from .plugins_loader import load_plugins, add_plugins_menu_actions
 
-    def iter_namespace(pkg):
-        return pkgutil.iter_modules(pkg.__path__, pkg.__name__ + ".")
-
-    plugins = [
-        importlib.import_module(name)
-        for finder, name, ispkg in iter_namespace(plugins)
-    ]
-
-    for plugin in plugins:
-        p = plugin.Plugin(window)
-        if p.name == "spinna":
-            p.execute()
+    load_plugins(window, "spinna")
+    add_plugins_menu_actions(window, "spinna")
 
     window.show()
 

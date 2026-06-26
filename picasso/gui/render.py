@@ -16,8 +16,6 @@ import sys
 import copy
 import time
 import os.path
-import importlib
-import pkgutil
 from math import ceil
 from collections import Counter
 from functools import partial
@@ -3442,13 +3440,13 @@ class TestClustererDialog(lib.Dialog):
         params["pixelsize"] = pixelsize
         clusterer_name = self.clusterer_name.currentText()
         if clusterer_name == "DBSCAN":
-            locs = clusterer.dbscan(locs, **params)
+            locs, _ = clusterer.dbscan(locs, **params)
         elif clusterer_name == "HDBSCAN":
-            locs = clusterer.hdbscan(locs, **params)
+            locs, _ = clusterer.hdbscan(locs, **params)
         elif clusterer_name == "SMLM":
-            locs = clusterer.cluster(locs, **params)
+            locs, _ = clusterer.cluster(locs, **params)
         elif clusterer_name == "G5M":
-            locs = clusterer.dbscan(locs, **params["DBSCAN"])
+            locs, _ = clusterer.dbscan(locs, **params["DBSCAN"])
             # in g5m, the info parameter is only for getting the pixel
             # size
             centers, locs, _ = g5m.g5m(
@@ -3657,7 +3655,7 @@ class TestClustererDialog(lib.Dialog):
             params["DBSCAN"]["radius"] *= pixelsize
             params["G5M"]["callback_parent"] = self.window
             params["G5M"]["asynch"] = True
-            locs = clusterer.dbscan(locs, **params["DBSCAN"])
+            locs, _ = clusterer.dbscan(locs, **params["DBSCAN"])
             centers, clustered_locs, new_info = g5m.g5m(
                 locs, [{"Pixelsize": pixelsize}], **params["G5M"]
             )
@@ -5388,8 +5386,8 @@ class MaskSettingsDialog(lib.Dialog):
         """Mask localizations given a mask."""
         locs_in, locs_out = masking.mask_locs(
             locs,
+            self.infos[self.channel],
             self.mask,
-            info=self.infos[self.channel],
         )
         self.index_locs.append(locs_in)  # locs in the mask
         self.index_locs_out.append(locs_out)  # locs outside the mask
@@ -6946,8 +6944,17 @@ class View(QtWidgets.QLabel):
     _pixmap : QPixMap
         Pixmap currently displayed.
     _points : list
-        Contains the coordinates of points to measure distances
-        between them.
+        Coordinates of the points of the measurement set currently
+        being drawn (connected by lines with live distances).
+    _point_sets : list
+        Finalized measurement sets, each a list of point coordinates.
+        Kept separate so lines and distances are only drawn within a
+        set, not across sets.
+    _measure_following : bool
+        True while the cursor is followed live and left clicks extend
+        the current set. Set to False (frozen) by the first right click
+        so a new set can be started; a further right click then deletes
+        the last finalized set.
     qimage : QImage
         Current image of rendered locs, picks and other drawings.
     qimage_no_picks : QImage
@@ -7005,6 +7012,11 @@ class View(QtWidgets.QLabel):
         self.n_locs = 0
         self._picks = []
         self._points = []
+        self._point_sets = []  # finalized measurement sets
+        self._measure_following = True  # cursor followed live while True
+        self._measure_cursor = None  # live cursor position in Measure mode
+        # track the cursor without a pressed button for live measuring
+        self.setMouseTracking(True)
         self.index_blocks = []
         self.render_index = []
         self._drift = []
@@ -7463,7 +7475,6 @@ class View(QtWidgets.QLabel):
             pixelsize=pixelsize,
             min_locs=min_locs,
             radius_z=radius_z_px,
-            return_info=True,
         )
         io.save_locs(path, locs, self.infos[channel] + [dbscan_info])
         status.close()
@@ -7695,7 +7706,6 @@ class View(QtWidgets.QLabel):
         """
         # for converting z coordinates
         pixelsize = self.pixelsize
-        status = lib.StatusDialog("Clustering localizations", self)
 
         # keep group info if already present
         if "group" in self.locs[channel].columns:
@@ -7704,6 +7714,10 @@ class View(QtWidgets.QLabel):
         else:
             locs = self.locs[channel]
 
+        progress = lib.ProgressDialog(
+            "Clustering localizations", 0, len(locs), self
+        )
+        progress.set_value(0)
         clustered_locs, new_info = clusterer.cluster(
             locs,
             radius_xy,
@@ -7712,19 +7726,28 @@ class View(QtWidgets.QLabel):
             radius_z=radius_z,
             pixelsize=pixelsize,
             return_info=True,
+            progress=progress,
         )
-        status.close()
+        progress.close()
         info = self.infos[channel] + [new_info]
 
         # save locs
         io.save_locs(path, clustered_locs, info)
         # save cluster centers
         if save_centers:
-            status = lib.StatusDialog("Calculating cluster centers", self)
+            progress = lib.ProgressDialog(
+                "Calculating cluster centers",
+                0,
+                len(np.unique(clustered_locs.group)),
+                self,
+            )
+            progress.set_value(0)
             path = os.path.splitext(path)[0] + "_centers.hdf5"
-            centers = clusterer.find_cluster_centers(clustered_locs, pixelsize)
+            centers = clusterer.find_cluster_centers(
+                clustered_locs, pixelsize, progress
+            )
             io.save_locs(path, centers, info)
-            status.close()
+            progress.close()
         if save_areas:
             progress = lib.ProgressDialog(
                 "Calculating cluster areas",
@@ -8057,12 +8080,29 @@ class View(QtWidgets.QLabel):
             if not self.window.dataset_dialog.wbackground.isChecked()
             else QtGui.QColor("red")
         )
+        # draw all finalized measurement sets (static, no live cursor)
+        for point_set in self._point_sets:
+            image = render.draw_points(
+                image=image,
+                viewport=self.viewport,
+                points=point_set,
+                pixelsize=self.pixelsize,
+                color=color,
+            )
+        # draw the active set; show the live cursor cross and running
+        # distance only in Measure mode while the cursor is followed
+        cursor = (
+            self._measure_cursor
+            if self._mode == "Measure" and self._measure_following
+            else None
+        )
         return render.draw_points(
             image=image,
             viewport=self.viewport,
             points=self._points,
             pixelsize=self.pixelsize,
             color=color,
+            cursor=cursor,
         )
 
     def draw_scalebar(self, image: QtGui.QImage) -> QtGui.QImage:
@@ -8840,6 +8880,19 @@ class View(QtWidgets.QLabel):
                     self.rectangle_pick_current_x = event.pos().x()
                     self.rectangle_pick_current_y = event.pos().y()
                     self.update_scene(picks_only=True)
+        # live update of the measuring cross and distance
+        elif self._mode == "Measure" and self._measure_following:
+            self._measure_cursor = self.map_to_movie(event.pos())
+            self.update_scene(picks_only=True)
+
+    def leaveEvent(self, event: QtCore.QEvent) -> None:
+        """Hide the live measuring cross when the cursor leaves the
+        canvas."""
+        if self._mode == "Measure" and self._measure_cursor is not None:
+            self._measure_cursor = None
+            if len(self.locs):
+                self.update_scene(picks_only=True)
+        super().leaveEvent(event)
 
     def mousePressEvent(self, event: QtCore.QEvent) -> None:
         """Start drawing a zoom-in rectangle, start padding, start
@@ -8946,17 +8999,25 @@ class View(QtWidgets.QLabel):
                 self.remove_polygon_point()
 
     def _mouse_release_measure(self, event: QtCore.QEvent) -> None:
-        """Adds a measure point on left click, removes the last one on
-        right click."""
+        """Add a measure point on left click. The first right click
+        freezes the current set so a new one can be started; a further
+        right click then deletes the last finalized set."""
         if event.button() == QtCore.Qt.MouseButton.LeftButton:
+            # start a new set if the previous one was frozen
+            if not self._measure_following:
+                self._measure_following = True
+                self.update_cursor()
             # add measure point
             x, y = self.map_to_movie(event.pos())
             self.add_point((x, y))
             event.accept()
         elif event.button() == QtCore.Qt.MouseButton.RightButton:
-            # remove measure points
-            x, y = self.map_to_movie(event.pos())
-            self.remove_points()
+            if self._measure_following:
+                # freeze the current selection (stop following)
+                self.finalize_measure_set()
+            else:
+                # delete the last finalized set of measurements
+                self.remove_last_measure_set()
             event.accept()
         else:
             event.ignore()
@@ -9778,7 +9839,7 @@ class View(QtWidgets.QLabel):
                 index_blocks[6],
                 index_blocks[7],
             )
-            pick_locs_xy = postprocess.locs_at_numba(x, y, block_locs_xy, r)
+            pick_locs_xy = lib.locs_at_numba(x, y, block_locs_xy, r)
             loccount[i] = pick_locs_xy.shape[1]
             progress.set_value(i)
         progress.close()
@@ -10250,9 +10311,31 @@ class View(QtWidgets.QLabel):
             self.update_scene(picks_only=True)
 
     def remove_points(self) -> None:
-        """Remove all distance measurement points."""
+        """Remove all distance measurement points and sets."""
         self._points = []
+        self._point_sets = []
+        self._measure_following = True
+        self._measure_cursor = None
+        self.update_cursor()
         self.update_scene()
+
+    def finalize_measure_set(self) -> None:
+        """Freeze the current measurement set so a new one can be
+        started. The cursor is no longer followed until the next left
+        click."""
+        if self._points:
+            self._point_sets.append(self._points)
+            self._points = []
+        self._measure_following = False
+        self._measure_cursor = None
+        self.update_cursor()
+        self.update_scene()
+
+    def remove_last_measure_set(self) -> None:
+        """Delete the most recently finalized measurement set."""
+        if self._point_sets:
+            self._point_sets.pop()
+            self.update_scene()
 
     def render_scene(
         self,
@@ -11388,8 +11471,15 @@ class View(QtWidgets.QLabel):
 
     def update_cursor(self) -> None:
         """Change cursor according to self._mode."""
-        if self._mode == "Zoom" or self._mode == "Measure":
+        if self._mode == "Zoom":
             self.unsetCursor()  # normal cursor
+        elif self._mode == "Measure":
+            if self._measure_following:
+                # hide the OS cursor; the drawn cross marks the position
+                self.setCursor(QtCore.Qt.CursorShape.BlankCursor)
+            else:
+                # selection frozen, show the normal cursor again
+                self.unsetCursor()
         elif self._mode == "Pick":
             if self._pick_shape == "Circle":  # circle
                 self._update_cursor_circle()
@@ -11757,8 +11847,11 @@ class Window(QtWidgets.QMainWindow):
             self.user_settings_dialog,
         ]
 
-        # menu bar
-        self.menu_bar = self.menuBar()
+        # setMenuBar deletes any previously installed bar, so re-running
+        # initUI (e.g. on "Remove all localizations") replaces it
+        # cleanly instead of appending duplicate menus.
+        self.menu_bar = QtWidgets.QMenuBar()
+        self.setMenuBar(self.menu_bar)
 
         # menu bar - File
         file_menu = self.menu_bar.addMenu("File")
@@ -12094,17 +12187,21 @@ class Window(QtWidgets.QMainWindow):
         for action in self.actions_3d:
             action.setVisible(False)
 
-        # add plugins; if it's the first initialization
-        # (plugins_loaded=False), they are not added because they're
-        # loaded in __main___. Otherwise, (remove all locs) plugins
-        # need to be added to the menu bar.
-        self.plugin_menu = self.menu_bar.addMenu("Plugins")  # do not delete
+        # Plugins menu. On the first initialization (plugins_loaded=False)
+        # it is left empty here and populated by __main__, which discovers
+        # and loads the plugins. When the menu bar is rebuilt later
+        # (plugins_loaded=True, e.g. "Remove all localizations"), the
+        # already-loaded plugins and the standard plugin actions are
+        # restored so the menu matches startup.
+        self.plugin_menu = self.menu_bar.addMenu("Plugins")
         if plugins_loaded:
-            try:
-                for plugin in self.plugins:
-                    plugin.execute()
-            except Exception:
-                pass
+            from .plugins_loader import (
+                add_plugins_menu_actions,
+                execute_plugins,
+            )
+
+            execute_plugins(self)
+            add_plugins_menu_actions(self, "render")
 
         # De-select all menus until file is loaded
         self.menus = [
@@ -12593,7 +12690,7 @@ class Window(QtWidgets.QMainWindow):
                         pixelsize,
                     )
                 else:
-                    n, image = render.render_hist(
+                    n, image = render._render_hist(
                         locs,
                         oversampling,
                         y_min,
@@ -13144,11 +13241,10 @@ class Window(QtWidgets.QMainWindow):
             self.view.save_picks(path)
 
     def remove_locs(self) -> None:
-        """Reset Window."""
+        """Remove all localizations and reset the window to its initial
+        state by rebuilding the view, dialogs and menu bar."""
         for dialog in self.dialogs:
             dialog.close()
-        self.menu_bar.clear()  # otherwise the menu bar is doubled
-        self.setWindowTitle(f"Picasso v{__version__}: Render")
         self.initUI(plugins_loaded=True)
 
     def show_metadata(self) -> None:
@@ -13225,24 +13321,12 @@ class Window(QtWidgets.QMainWindow):
 def main():
     app = QtWidgets.QApplication(sys.argv)
     window = Window()
-    window.plugins = []
 
-    # load plugins from picasso/gui/plugins
-    from . import plugins
+    # load plugins from ~/.picasso/plugins
+    from .plugins_loader import load_plugins, add_plugins_menu_actions
 
-    def iter_namespace(pkg):
-        return pkgutil.iter_modules(pkg.__path__, pkg.__name__ + ".")
-
-    plugins = [
-        importlib.import_module(name)
-        for finder, name, ispkg in iter_namespace(plugins)
-    ]
-
-    for plugin in plugins:
-        p = plugin.Plugin(window)
-        if p.name == "render":
-            p.execute()
-            window.plugins.append(p)
+    load_plugins(window, "render")
+    add_plugins_menu_actions(window, "render")
 
     window.show()
 

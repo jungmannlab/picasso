@@ -81,19 +81,6 @@ SET_COLS = [
 ]
 
 
-def local_maxima(
-    frame: lib.IntArray2D, box: int
-) -> tuple[lib.IntArray1D, lib.IntArray1D]:
-    """Alias to _local_maxima, deprecated
-
-    TODO: remove in v0.11.0"""
-    lib.deprecation_warning(
-        "Deprecation warning: This function will become private in "
-        "v0.11.0. Use _local_maxima instead."
-    )
-    return _local_maxima(frame, box)
-
-
 @numba.jit(nopython=True, nogil=True, cache=False)
 def _local_maxima(
     frame: lib.IntArray2D, box: int
@@ -134,22 +121,6 @@ def _local_maxima(
     return y, x
 
 
-def gradient_at(
-    frame: lib.IntArray2D,
-    y: int,
-    x: int,
-    i: int,
-) -> tuple[float, float]:
-    """Alias to _gradient_at, deprecated
-
-    TODO: remove in v0.11.0"""
-    lib.deprecation_warning(
-        "Deprecation warning: This function will become private in "
-        "v0.11.0. Use _gradient_at instead."
-    )
-    return _gradient_at(frame, y, x, i)
-
-
 @numba.jit(nopython=True, nogil=True, cache=False)
 def _gradient_at(
     frame: lib.IntArray2D,
@@ -179,24 +150,6 @@ def _gradient_at(
     gy = frame[y + 1, x] - frame[y - 1, x]
     gx = frame[y, x + 1] - frame[y, x - 1]
     return gy, gx
-
-
-def net_gradient(
-    frame: lib.IntArray2D,
-    y: lib.IntArray1D,
-    x: lib.IntArray1D,
-    box: int,
-    uy: lib.FloatArray2D,
-    ux: lib.FloatArray2D,
-) -> lib.FloatArray1D:
-    """Alias to _net_gradient, deprecated
-
-    TODO: remove in v0.11.0"""
-    lib.deprecation_warning(
-        "Deprecation warning: This function will become private in "
-        "v0.11.0. Use _net_gradient instead."
-    )
-    return _net_gradient(frame, y, x, box, uy, ux)
 
 
 @numba.jit(nopython=True, nogil=True, cache=False)
@@ -292,14 +245,124 @@ def identify_in_image(
     return y, x, ng
 
 
+def _normalize_rect(
+    rect: tuple[tuple[int, int], tuple[int, int]],
+) -> list[list[int]]:
+    """Return a rectangle as ``[[y_min, x_min], [y_max, x_max]]`` with
+    integer, correctly ordered corners (the input corners may be given
+    in any order)."""
+    (y0, x0), (y1, x1) = rect
+    return [
+        [int(min(y0, y1)), int(min(x0, x1))],
+        [int(max(y0, y1)), int(max(x0, x1))],
+    ]
+
+
+def _subtract_rect(
+    a: list[list[int]], b: list[list[int]]
+) -> list[list[list[int]]]:
+    """Subtract rectangle ``b`` from rectangle ``a``.
+
+    Returns the parts of ``a`` not covered by ``b`` as a list of up to
+    four disjoint axis-aligned rectangles (a guillotine split into top,
+    bottom, left and right bands around the intersection). If the
+    rectangles do not overlap, ``[a]`` is returned unchanged. Both
+    rectangles must use the ``[[y_min, x_min], [y_max, x_max]]`` format.
+    """
+    (ay0, ax0), (ay1, ax1) = a
+    (by0, bx0), (by1, bx1) = b
+    # intersection
+    iy0, iy1 = max(ay0, by0), min(ay1, by1)
+    ix0, ix1 = max(ax0, bx0), min(ax1, bx1)
+    if iy0 >= iy1 or ix0 >= ix1:
+        return [a]  # no overlap
+    pieces = []
+    if ay0 < iy0:  # top band, full width of a
+        pieces.append([[ay0, ax0], [iy0, ax1]])
+    if iy1 < ay1:  # bottom band, full width of a
+        pieces.append([[iy1, ax0], [ay1, ax1]])
+    if ax0 < ix0:  # left band, between the horizontal cuts
+        pieces.append([[iy0, ax0], [iy1, ix0]])
+    if ix1 < ax1:  # right band, between the horizontal cuts
+        pieces.append([[iy0, ix1], [iy1, ax1]])
+    return pieces
+
+
+def clip_rois(
+    rois: list[tuple[tuple[int, int], tuple[int, int]]],
+    min_size: int = 0,
+) -> list[list[list[int]]]:
+    """Clip a list of (possibly overlapping) ROIs into a list of
+    disjoint rectangles.
+
+    The ROIs are processed in order; each rectangle is trimmed against
+    the union of the already-accepted rectangles (via ``_subtract_rect``)
+    so that earlier ROIs take precedence and no pixel is covered twice.
+    A single ROI may therefore split into several rectangles. Corners
+    are normalized and pieces smaller than ``min_size`` in either
+    dimension are dropped (pass ``box`` so slivers that cannot hold a
+    spot are discarded).
+
+    Parameters
+    ----------
+    rois : list of rectangles
+        Each rectangle is ``((y_min, x_min), (y_max, x_max))`` (corners
+        may be in any order).
+    min_size : int, optional
+        Minimum side length (in pixels) for a clipped piece to be kept.
+        Default is 0 (keep any piece with positive area).
+
+    Returns
+    -------
+    list of rectangles
+        Disjoint rectangles in ``[[y_min, x_min], [y_max, x_max]]``
+        format whose union equals the union of the inputs (minus dropped
+        slivers).
+    """
+    accepted: list[list[list[int]]] = []
+    for rect in rois:
+        pieces = [_normalize_rect(rect)]
+        for acc in accepted:
+            new_pieces: list[list[list[int]]] = []
+            for piece in pieces:
+                new_pieces.extend(_subtract_rect(piece, acc))
+            pieces = new_pieces
+        for piece in pieces:
+            height = piece[1][0] - piece[0][0]
+            width = piece[1][1] - piece[0][1]
+            if height > 0 and width > 0:
+                if height >= min_size and width >= min_size:
+                    accepted.append(piece)
+    return accepted
+
+
+def _as_roi_list(
+    roi: tuple[tuple[int, int], tuple[int, int]] | list | None,
+) -> list[list[list[int]]] | None:
+    """Normalize the ``roi`` argument into a list of rectangles or None.
+
+    Accepts a single rectangle ``((y0, x0), (y1, x1))`` (for backward
+    compatibility) or a list of such rectangles. An empty list and
+    ``None`` both map to ``None`` (whole frame).
+    """
+    if roi is None or len(roi) == 0:
+        return None
+    first = roi[0][0]
+    if isinstance(first, (list, tuple, np.ndarray)):
+        rois = [_normalize_rect(r) for r in roi]  # list of rectangles
+    else:
+        rois = [_normalize_rect(roi)]  # single rectangle
+    return rois if len(rois) else None
+
+
 def identify_in_frame(
     frame: lib.IntArray2D,
     minimum_ng: float,
     box: int,
-    roi: tuple[tuple[int, int], tuple[int, int]] | None = None,
+    roi: tuple[tuple[int, int], tuple[int, int]] | list | None = None,
 ) -> tuple[lib.IntArray1D, lib.IntArray1D, lib.FloatArray1D]:
-    """Identify local maxima in a single frame with an optionally
-    specified subregion (ROI) and calculate the net gradient at those
+    """Identify local maxima in a single frame within optionally
+    specified subregion(s) (ROI) and calculate the net gradient at those
     maxima.
 
     Parameters
@@ -311,11 +374,14 @@ def identify_in_frame(
     box : int
         Size of the box used for calculating the gradient. Should be
         an odd integer.
-    roi : tuple, optional
-        Region of interest (ROI) defined as a tuple of two tuples,
-        where the first tuple contains the start coordinates
-        (y_start, x_start) and the second tuple contains the end
-        coordinates (y_end, x_end). If None, the entire frame is used.
+    roi : tuple or list of tuples, optional
+        Region(s) of interest (ROI). A single ROI is a tuple of two
+        tuples, where the first contains the start coordinates
+        (y_start, x_start) and the second the end coordinates
+        (y_end, x_end). A list of such tuples restricts identification to
+        several (disjoint) regions. If None, the entire frame is used.
+        Note that the origin of the image is in the top-left corner.
+        Default is None.
 
     Returns
     -------
@@ -327,14 +393,27 @@ def identify_in_frame(
         Net gradient values at the identified maxima. The shape is
         (len(y),).
     """
-    if roi is not None:
-        frame = frame[roi[0][0] : roi[1][0], roi[0][1] : roi[1][1]]
-    image = np.float32(frame)  # otherwise numba goes crazy
-    y, x, net_gradient = identify_in_image(image, minimum_ng, box)
-    if roi is not None:
-        y += roi[0][0]
-        x += roi[0][1]
-    return y, x, net_gradient
+    rois = _as_roi_list(roi)
+    if rois is None:
+        image = np.float32(frame)  # otherwise numba goes crazy
+        return identify_in_image(image, minimum_ng, box)
+    height, width = frame.shape
+    # pad each ROI to identify at the border
+    pad = int(box / 2) + 1
+    ys, xs, ngs = [], [], []
+    for (y0, x0), (y1, x1) in rois:
+        py0, px0 = max(y0 - pad, 0), max(x0 - pad, 0)
+        py1, px1 = min(y1 + pad, height), min(x1 + pad, width)
+        image = np.float32(frame[py0:py1, px0:px1])  # numba needs float32!
+        y, x, net_gradient = identify_in_image(image, minimum_ng, box)
+        y += py0  # offset back to global frame coordinates
+        x += px0
+        # keep only maxima centered inside the actual ROI
+        inside = (y >= y0) & (y < y1) & (x >= x0) & (x < x1)
+        ys.append(y[inside])
+        xs.append(x[inside])
+        ngs.append(net_gradient[inside])
+    return np.concatenate(ys), np.concatenate(xs), np.concatenate(ngs)
 
 
 def identify_by_frame_number(
@@ -343,8 +422,8 @@ def identify_by_frame_number(
     box: int,
     frame_number: int,
     *,
-    roi: tuple[tuple[int, int], tuple[int, int]] | None = None,
-    frame_bounds: tuple[int, int] | None = None,
+    roi: tuple[tuple[int, int], tuple[int, int]] | list | None = None,
+    frame_bounds: tuple[int, int] | list | None = None,
     lock: threading.Lock | None = None,
 ) -> pd.DataFrame:
     """Identify local maxima in a specific frame of a movie and
@@ -363,16 +442,21 @@ def identify_by_frame_number(
         an odd integer.
     frame_number : int
         The index of the frame in the movie sequence to be processed.
-    roi : tuple, optional
-        Region of interest (ROI) defined as a tuple of two tuples,
-        where the first tuple contains the start coordinates
-        (y_start, x_start) and the second tuple contains the end
-        coordinates (y_end, x_end). If None, the entire frame is used.
+    roi : tuple or list of tuples, optional
+        Region(s) of interest (ROI). A single ROI is a tuple of two
+        tuples, where the first contains the start coordinates
+        (y_start, x_start) and the second the end coordinates
+        (y_end, x_end). A list of such tuples restricts identification to
+        several (disjoint) regions. If None, the entire frame is used.
+        Note that the origin of the image is in the top-left corner.
         Default is None.
-    frame_bounds : tuple, optional
-        Minimum and maximum frame numbers to consider for the
-        identification. If None, all frames are used. If only min or max
-        is to be specified, the other is to be set to None, for example,
+    frame_bounds : tuple, list of tuples, optional
+        Frame numbers to consider for the identification. A single
+        ``(min, max)`` tuple restricts identification to one contiguous,
+        inclusive range; a list of such tuples restricts it to several
+        (disjoint) segments, where a frame is processed if it falls in any
+        segment. If None, all frames are used. If only min or max is to be
+        specified, the other is to be set to None, for example,
         ``(5, None)`` sets minimum frame to 5 without maximum frame.
         Default is None.
     lock : threading.Lock, optional
@@ -386,27 +470,30 @@ def identify_by_frame_number(
         DataFrame containing the frame number, x and y coordinates of
         the identified maxima, and their net gradient.
     """
-    if lock is not None:
+    # Movies that read each frame through their own per-thread file
+    # handle (TiffMap, STKMovie and the multi-file maps) or a memory map
+    # are safe to read concurrently, so they skip the shared lock. This
+    # lets several frame reads be in flight at once, which hides per-frame
+    # I/O latency on network storage. Formats whose readers are not
+    # reentrant stay serialized behind the lock.
+    concurrent = getattr(
+        movie, "supports_concurrent_reads", False
+    ) or isinstance(movie, np.memmap)
+    if lock is not None and not concurrent:
         with lock:
             frame = movie[frame_number]
     else:
         frame = movie[frame_number]
     # check frame bounds
-    min_max = (0, len(movie))
-    if frame_bounds is not None:
-        if frame_bounds[0] is not None:
-            min_max = (max(frame_bounds[0], min_max[0]), min_max[1])
-        if frame_bounds[1] is not None:
-            min_max = (min_max[0], min(frame_bounds[1], min_max[1]))
-        if not (min_max[0] <= frame_number <= min_max[1]):
-            return pd.DataFrame(
-                {
-                    "frame": pd.Series(dtype=int),
-                    "x": pd.Series(dtype=int),
-                    "y": pd.Series(dtype=int),
-                    "net_gradient": pd.Series(dtype=np.float32),
-                }
-            )
+    if not lib.frame_in_bounds(frame_number, frame_bounds, len(movie)):
+        return pd.DataFrame(
+            {
+                "frame": pd.Series(dtype=int),
+                "x": pd.Series(dtype=int),
+                "y": pd.Series(dtype=int),
+                "net_gradient": pd.Series(dtype=np.float32),
+            }
+        )
     # identify
     y, x, net_gradient = identify_in_frame(frame, minimum_ng, box, roi)
     frame = frame_number * np.ones(len(x))
@@ -426,8 +513,8 @@ def _identify_worker(
     current: list[int],
     minimum_ng: float,
     box: int,
-    roi: tuple[tuple[int, int], tuple[int, int]] | None,
-    frame_bounds: tuple[int, int] | None,
+    roi: tuple[tuple[int, int], tuple[int, int]] | list | None,
+    frame_bounds: tuple[int, int] | list | None,
     lock: threading.Lock | None,
 ) -> list[pd.DataFrame]:
     """Worker function for identifying local maxima in a movie. This
@@ -484,8 +571,8 @@ def identify_async(
     minimum_ng: float,
     box: int,
     *,
-    roi: tuple[tuple[int, int], tuple[int, int]] | None = None,
-    frame_bounds: tuple[int, int] | None = None,
+    roi: tuple[tuple[int, int], tuple[int, int]] | list | None = None,
+    frame_bounds: tuple[int, int] | list | None = None,
 ) -> tuple[list[int], list[multiprocessing.pool.Future]]:
     """Asynchronously (i.e., using multithreading) identify local
     maxima in a movie using multiple threads. This function divides the
@@ -499,12 +586,20 @@ def identify_async(
         The minimum net gradient for a spot to be considered.
     box : int
         The size of the box to extract around each spot.
-    roi : tuple[tuple[int, int], tuple[int, int]] | None
-        The region of interest (ROI) for the analysis.
-    frame_bounds : tuple, optional
-        Minimum and maximum frame numbers to consider for the
-        identification. If None, all frames are used. If only min or max
-        is to be specified, the other is to be set to None, for example,
+    roi : tuple or list of tuples, optional
+        Region(s) of interest (ROI). A single ROI is a tuple of two
+        tuples, where the first contains the start coordinates
+        (y_start, x_start) and the second the end coordinates
+        (y_end, x_end). A list of such tuples restricts identification to
+        several (disjoint) regions. If None, the entire frame is used.
+        Default is None.
+    frame_bounds : tuple, list of tuples, optional
+        Frame numbers to consider for the identification. A single
+        ``(min, max)`` tuple restricts identification to one contiguous,
+        inclusive range; a list of such tuples restricts it to several
+        (disjoint) segments, where a frame is processed if it falls in any
+        segment. If None, all frames are used. If only min or max is to be
+        specified, the other is to be set to None, for example,
         ``(5, None)`` sets minimum frame to 5 without maximum frame.
         Default is None.
 
@@ -641,14 +736,14 @@ def identify(
     minimum_ng: float,
     box: int,
     *,
-    roi: tuple[tuple[int, int], tuple[int, int]] | None = None,
-    frame_bounds: tuple[int, int] | None = None,
+    roi: tuple[tuple[int, int], tuple[int, int]] | list | None = None,
+    frame_bounds: tuple[int, int] | list | None = None,
     threaded: bool = True,
     progress_callback: (
         Callable[[list[int]], None] | Literal["console"] | None
     ) = None,
     abort_callback: Callable[[], bool] | None = None,
-    return_info: bool = None,  # TODO: change the deprecation warning in 0.11.0
+    return_info: bool = True,  # TODO: remove in v0.12.0
 ) -> pd.DataFrame | tuple[pd.DataFrame, dict]:
     """Identify local maxima in a movie and calculate the net
     gradient at those maxima. This function can run in a threaded or
@@ -662,16 +757,21 @@ def identify(
         The minimum net gradient for a spot to be considered.
     box : int
         The size of the box to extract around each spot.
-    roi : tuple, optional
-        Region of interest (ROI) defined as a tuple of two tuples,
-        where the first tuple contains the start coordinates
-        (y_start, x_start) and the second tuple contains the end
-        coordinates (y_end, x_end). If None, the entire frame is used.
+    roi : tuple or list of tuples, optional
+        Region(s) of interest (ROI). A single ROI is a tuple of two
+        tuples, where the first contains the start coordinates
+        (y_start, x_start) and the second the end coordinates
+        (y_end, x_end). A list of such tuples restricts identification to
+        several (disjoint) regions. If None, the entire frame is used.
+        Note that the origin of the image is in the top-left corner.
         Default is None.
-    frame_bounds : tuple, optional
-        Minimum and maximum frame numbers to consider for the
-        identification. If None, all frames are used. If only min or max
-        is to be specified, the other is to be set to None, for example,
+    frame_bounds : tuple, list of tuples, optional
+        Frame numbers to consider for the identification. A single
+        ``(min, max)`` tuple restricts identification to one contiguous,
+        inclusive range; a list of such tuples restricts it to several
+        (disjoint) segments, where a frame is processed if it falls in any
+        segment. If None, all frames are used. If only min or max is to be
+        specified, the other is to be set to None, for example,
         ``(5, None)`` sets minimum frame to 5 without maximum frame.
         Default is None.
     threaded : bool, optional
@@ -687,9 +787,10 @@ def identify(
         indicating whether the fitting should be aborted. Default is
         None.
     return_info : bool, optional
-        Whether to return additional information about the
-        identification process. Default is None, which is treated as
-        False. If True, a tuple of (identifications, info) is returned.
+        Whether to return additional information about the fitting
+        process. Default is True. If True, a tuple of (locs, info) is
+        returned. In v0.12.0 return_info will be removed and the
+        function will always return info.
 
     Returns
     -------
@@ -701,19 +802,12 @@ def identify(
         the time taken for identification. Only returned if `return_info`
         is True.
     """
-    if return_info is None:
-        return_info = False
-        # TODO: change the message in v0.11.0
+    if not return_info:
+        # TODO: remove in v0.12.0
         lib.deprecation_warning(
-            "Warning: In Picasso v0.11.0, "
-            "picasso.localize.identify() will return both the "
-            "identifications and a metadata dictionary by default.\n"
-            "Before v0.12.0, when using picasso.localize.identify(), "
-            "please add the argument 'return_info' explicitly as True "
-            "or False.\n"
-            "In version 0.12, this argument will also be removed such "
-            "that picasso.localize.identify() will always return both "
-            "the identifications and the metadata dictionary."
+            "In version 0.12, return_info argument will be removed such "
+            "that picasso.localize.localize() will always return both "
+            "the localizations and the metadata dictionary."
         )
     if threaded:
         ids = _identify_threaded(
@@ -915,6 +1009,29 @@ def locs_to_identifications(
 
 
 @numba.jit(nopython=True, cache=False)
+def _cut_spots_numba_into(
+    movie: lib.IntArray3D,
+    ids_frame: lib.IntArray1D,
+    ids_x: lib.IntArray1D,
+    ids_y: lib.IntArray1D,
+    box: int,
+    spots: lib.IntArray3D,
+    start: int,
+) -> None:
+    """Extract spots out of a movie directly into a preallocated array.
+
+    Spots are written into `spots[start : start + len(ids_x)]`, avoiding
+    an intermediate allocation and copy. Used for chunked, progress-aware
+    cutting.
+    """
+    r = int(box / 2)
+    for id, (frame, xc, yc) in enumerate(zip(ids_frame, ids_x, ids_y)):
+        spots[start + id] = movie[
+            frame, yc - r : yc + r + 1, xc - r : xc + r + 1
+        ]
+
+
+@numba.jit(nopython=True, cache=False)
 def _cut_spots_numba(
     movie: lib.IntArray3D,
     ids_frame: lib.IntArray1D,
@@ -924,10 +1041,8 @@ def _cut_spots_numba(
 ) -> lib.IntArray3D:
     """Extract the spots out of a movie using Numba for performance."""
     n_spots = len(ids_x)
-    r = int(box / 2)
     spots = np.zeros((n_spots, box, box), dtype=movie.dtype)
-    for id, (frame, xc, yc) in enumerate(zip(ids_frame, ids_x, ids_y)):
-        spots[id] = movie[frame, yc - r : yc + r + 1, xc - r : xc + r + 1]
+    _cut_spots_numba_into(movie, ids_frame, ids_x, ids_y, box, spots, 0)
     return spots
 
 
@@ -953,6 +1068,42 @@ def _cut_spots_frame(
         xc = ids_x[j]
         spots[j] = frame[yc - r : yc + r + 1, xc - r : xc + r + 1]
     return j
+
+
+@numba.jit(nopython=True, nogil=True, cache=False)
+def _cut_spots_single_frame_into(
+    frame: lib.IntArray2D,
+    ids_x: lib.IntArray1D,
+    ids_y: lib.IntArray1D,
+    r: int,
+    start: int,
+    end: int,
+    spots: lib.IntArray3D,
+) -> None:
+    """Cut every spot in ``ids_[start:end]`` out of a single 2D frame
+    into ``spots[start:end]``.
+
+    ``nogil=True`` lets several threads cut (and, more importantly, read
+    their frame) at the same time. Each call writes a disjoint slice of
+    ``spots``, so no locking is needed around the writes."""
+    for j in range(start, end):
+        yc = ids_y[j]
+        xc = ids_x[j]
+        spots[j] = frame[yc - r : yc + r + 1, xc - r : xc + r + 1]
+
+
+def _n_io_workers() -> int:
+    """Number of threads to use for I/O-bound frame reading, derived from
+    the same ``cpu_utilization`` user setting as identification."""
+    settings = io.load_user_settings()
+    try:
+        cpu_utilization = settings["Localize"]["cpu_utilization"]
+    except KeyError:
+        cpu_utilization = 0.8
+    if not isinstance(cpu_utilization, float) or cpu_utilization >= 1:
+        cpu_utilization = 0.8
+    # Python crashes when using >64 cores
+    return min(60, max(1, int(cpu_utilization * multiprocessing.cpu_count())))
 
 
 @numba.jit(nopython=True, cache=False)
@@ -1014,6 +1165,7 @@ def _cut_spots_framebyframe(
     ids_y: lib.IntArray1D,
     box: int,
     spots: lib.IntArray3D,
+    progress_callback: Callable[[int], None] | None = None,
 ):
     """Extract the spots out of a movie frame by frame.
 
@@ -1029,44 +1181,105 @@ def _cut_spots_framebyframe(
     spots : lib.IntArray3D
         3D array to store the cut spots, with shape (k, box, box),
         where k is the number of spots identified.
+    progress_callback : callable or None, optional
+        If a callable is provided, it is called after each frame with
+        the cumulative number of spots cut so far. Default is None.
 
     Returns
     -------
     spots : lib.IntArray3D
         3D array with extracted spots of shape (k, box, box), where k is
         the number of spots identified.
+
+    Notes
+    -----
+    When the movie supports concurrent reads (its frames are read
+    through a per-thread file handle), frames are read and cut in
+    parallel, which hides per-frame I/O latency the same way threaded
+    identification does. ``ids_frame`` is assumed to be sorted (as
+    ``identify`` returns it), so each frame maps to one contiguous slice
+    of ``spots``.
     """
     r = int(box / 2)
     N = len(ids_frame)
-    start = 0
-    for frame_number, frame in enumerate(movie):
-        start = _cut_spots_frame(
-            frame,
-            frame_number,
-            ids_frame,
-            ids_x,
-            ids_y,
-            r,
-            start,
-            N,
-            spots,
-        )
+    n_frames = len(movie)
+
+    # Since ids are frame-sorted, frame f's spots are the contiguous
+    # slice spots[starts[f]:ends[f]].
+    starts = np.searchsorted(ids_frame, np.arange(n_frames), side="left")
+    ends = np.append(starts[1:], N)
+
+    if getattr(movie, "supports_concurrent_reads", False):
+        done = [0]
+        progress_lock = threading.Lock()
+
+        def _read_and_cut(frame_number: int) -> None:
+            start = int(starts[frame_number])
+            end = int(ends[frame_number])
+            frame = movie[frame_number]
+            _cut_spots_single_frame_into(
+                frame, ids_x, ids_y, r, start, end, spots
+            )
+            if callable(progress_callback):
+                with progress_lock:
+                    done[0] += end - start
+                    progress_callback(done[0])
+
+        with ThreadPoolExecutor(_n_io_workers()) as executor:
+            # consume the iterator so exceptions propagate
+            list(executor.map(_read_and_cut, range(n_frames)))
+        return spots
+
+    # Serial fallback for movies whose readers are not reentrant
+    # (e.g. ND2/CZI/LIF).
+    cum = 0
+    for frame_number in range(n_frames):
+        start = int(starts[frame_number])
+        end = int(ends[frame_number])
+        frame = movie[frame_number]
+        _cut_spots_single_frame_into(frame, ids_x, ids_y, r, start, end, spots)
+        cum += end - start
+        if callable(progress_callback):
+            progress_callback(cum)
     return spots
 
 
 def _cut_spots(
-    movie: lib.IntArray3D, ids: pd.DataFrame, box: int
+    movie: lib.IntArray3D,
+    ids: pd.DataFrame,
+    box: int,
+    progress_callback: Callable[[int], None] | None = None,
 ) -> lib.IntArray3D:
-    """Cut out spots from a movie based on the identified positions."""
+    """Cut out spots from a movie based on the identified positions.
+
+    If a callable `progress_callback` is provided, it is called with the
+    cumulative number of spots cut so far, allowing the cutting progress
+    to be tracked.
+    """
     N = len(ids)
+    ids_frame = ids["frame"].to_numpy()
+    ids_x = ids["x"].to_numpy()
+    ids_y = ids["y"].to_numpy()
     if isinstance(movie, np.ndarray):
-        return _cut_spots_numba(
-            movie,
-            ids["frame"].to_numpy(),
-            ids["x"].to_numpy(),
-            ids["y"].to_numpy(),
-            box,
-        )
+        if not callable(progress_callback):
+            return _cut_spots_numba(movie, ids_frame, ids_x, ids_y, box)
+        # cut in chunks so that progress can be reported; spots are
+        # written directly into the output array to avoid an extra copy
+        spots = np.zeros((N, box, box), dtype=movie.dtype)
+        chunk = max(1, N // 100)
+        for chunk_start in range(0, N, chunk):
+            chunk_end = min(chunk_start + chunk, N)
+            _cut_spots_numba_into(
+                movie,
+                ids_frame[chunk_start:chunk_end],
+                ids_x[chunk_start:chunk_end],
+                ids_y[chunk_start:chunk_end],
+                box,
+                spots,
+                chunk_start,
+            )
+            progress_callback(chunk_end)
+        return spots
     elif isinstance(movie, io.ND2Movie) and movie.use_dask:
         """Assumes that identifications are in order of frames!"""
         spots = np.zeros((N, box, box), dtype=movie.dtype)
@@ -1075,25 +1288,28 @@ def _cut_spots(
             "(p,n,m),(b),(k),(k),(k),(),(k,l,l)->(k,l,l)",
             movie.data,
             np.array([len(movie)]),
-            ids["frame"].to_numpy(),
-            ids["x"].to_numpy(),
-            ids["y"].to_numpy(),
+            ids_frame,
+            ids_x,
+            ids_y,
             box,
             spots,
             output_dtypes=[movie.dtype],
             allow_rechunk=True,
         ).compute()
+        if callable(progress_callback):
+            progress_callback(N)
         return spots
     else:
         """Assumes that identifications are in order of frames!"""
         spots = np.zeros((N, box, box), dtype=movie.dtype)
         spots = _cut_spots_framebyframe(
             movie,
-            ids["frame"].to_numpy(),
-            ids["x"].to_numpy(),
-            ids["y"].to_numpy(),
+            ids_frame,
+            ids_x,
+            ids_y,
             box,
             spots,
+            progress_callback=progress_callback,
         )
         return spots
 
@@ -1117,6 +1333,7 @@ def get_spots(
     identifications: pd.DataFrame,
     box: int,
     camera_info: dict,
+    progress_callback: Callable[[int], None] | None = None,
 ) -> lib.FloatArray3D:
     """Extract the spots from a movie based on the identified positions
     and convert camera signal to photon counts.
@@ -1134,6 +1351,10 @@ def get_spots(
     camera_info : dict
         A dictionary containing camera information such as
         `Baseline`, `Sensitivity`, and `Gain`.
+    progress_callback : callable or None, optional
+        If a callable is provided, it is called with the cumulative
+        number of spots cut so far, allowing the cutting progress to be
+        tracked. Default is None.
 
     Returns
     -------
@@ -1141,141 +1362,10 @@ def get_spots(
         A 3D numpy array containing the extracted spots, with shape
         (k, box, box), where k is the number of spots identified.
     """
-    spots = _cut_spots(movie, identifications, box)
+    spots = _cut_spots(
+        movie, identifications, box, progress_callback=progress_callback
+    )
     return _to_photons(spots, camera_info)
-
-
-def fit(
-    movie: lib.IntArray3D,
-    camera_info: dict,
-    identifications: pd.DataFrame,
-    box: int,
-    eps: float = 0.001,
-    max_it: int = 100,
-    method: Literal["sigma", "sigmaxy"] = "sigmaxy",
-) -> pd.DataFrame:
-    """Fit Gaussians using Maximum Likelihood Estimation (MLE) to the
-    identified spots in a movie to localize fluorescent molecules. See
-    Smith, et al. Nature Methods, 2010. DOI: 10.1038/nmeth.1449.
-
-    Deprecated: Use fit2D instead.
-
-    TODO: remove in v0.11.0.
-
-    Parameters
-    ----------
-    movie : lib.IntArray3D
-        The input movie data as a 3D numpy array.
-    camera_info : dict
-        A dictionary containing camera information such as
-        `Baseline`, `Sensitivity`, and `Gain`.
-    identifications : pd.DataFrame
-        Data frame containing the identified spots. Contains fields
-        `frame`, `x`, `y`, and `net_gradient`.
-    box : int
-        Size of the box to cut out around each spot. Should be an odd
-        integer.
-    eps : float, optional
-        The convergence criterion for the fitting algorithm. Default is
-        0.001.
-    max_it : int, optional
-        The maximum number of iterations for the fitting algorithm.
-        Default is 100.
-    method : Literal["sigma", "sigmaxy"], optional
-        The method used for fitting (impose same sigma in x and y or
-        not, respectively). Default is "sigma".
-
-    Returns
-    -------
-    locs : pd.DataFrame
-        Data frame containing the localized spots. The fields include
-        `frame`, `x`, `y`, `photons`, `sx`, `sy`, `bg`, `lpx`, `lpy`,
-        `net_gradient`, `likelihood`, and `iterations`.
-    """
-    lib.deprecation_warning(
-        "Deprecation warning: this function will be removed in v0.11.0."
-        " Use localize.fit2D instead."
-    )
-    spots = get_spots(movie, identifications, box, camera_info)
-    theta, CRLBs, likelihoods, iterations = gaussmle.gaussmle(
-        spots, eps, max_it, method=method
-    )
-    locs = locs_from_fits(
-        identifications,
-        theta,
-        CRLBs,
-        likelihoods,
-        iterations,
-        box,
-    )
-    return locs
-
-
-def fit_async(
-    movie: lib.IntArray3D,
-    camera_info: dict,
-    identifications: pd.DataFrame,
-    box: int,
-    eps: float = 0.001,
-    max_it: int = 100,
-    method: Literal["sigma", "sigmaxy"] = "sigmaxy",
-) -> tuple[
-    int, lib.FloatArray2D, lib.FloatArray2D, lib.FloatArray1D, lib.FloatArray1D
-]:
-    """Asynchronously fit Gaussians using Maximum Likelihood Estimation
-    (MLE) to the identified spots in a movie to localize fluorescent
-    molecules. This function is designed to run in a separate thread or
-    process. See Smith, et al. Nature Methods, 2010.
-    DOI: 10.1038/nmeth.1449.
-
-    Deprecated, use fit2D instead.
-
-    TODO: remove in v0.11.0.
-
-    Parameters
-    ----------
-    movie : lib.IntArray3D
-        The input movie data as a 3D numpy array.
-    camera_info : dict
-        A dictionary containing camera information such as
-        `Baseline`, `Sensitivity`, and `Gain`.
-    identifications : pd.DataFrame
-        Data frame containing the identified spots. Contains fields
-        `frame`, `x`, `y`, and `net_gradient`.
-    box : int
-        Size of the box to cut out around each spot. Should be an odd
-        integer.
-    eps : float, optional
-        The convergence criterion for the fitting algorithm. Default is
-        0.001.
-    max_it : int, optional
-        The maximum number of iterations for the fitting algorithm.
-        Default is 100.
-    method : Literal["sigma", "sigmaxy"], optional
-        The method used for fitting (impose same sigma in x and y or
-        not, respectively). Default is "sigmaxy".
-
-    Returns
-    -------
-    current : int
-        Index of the currently processed spot.
-    thetas : lib.FloatArray2D
-        The fitted Gaussian parameters for each spot (x, y positions,
-        photon counts, background, single-emitter image size in x and
-        y).
-    CRLBs : lib.FloatArray2D
-        The Cramer-Rao Lower Bounds for each fitted parameter.
-    likelihoods : lib.FloatArray1D
-        The log-likelihoods of the fitted models.
-    iterations : lib.FloatArray1D
-        The number of iterations taken to converge for each spot.
-    """
-    lib.deprecation_warning(
-        "Deprecation warning: this function will be removed in v0.11.0."
-        " Use localize.fit2D instead."
-    )
-    spots = get_spots(movie, identifications, box, camera_info)
-    return gaussmle.gaussmle_async(spots, eps, max_it, method=method)
 
 
 def locs_from_fits(
@@ -1358,6 +1448,7 @@ def fit2D(
         Callable[[int], None] | Literal["console"] | None
     ) = None,
     abort_callback: Callable[[], bool] | None = None,
+    cut_progress_callback: Callable[[int], None] | None = None,
 ) -> tuple[pd.DataFrame | None, dict]:
     """Fit 2D localizations to a movie, given positions of the detected
     spots (identifications).
@@ -1404,6 +1495,11 @@ def fit2D(
         callable provided, it must accept no input and return a boolean
         indicating whether the fitting should be aborted. Default is
         None.
+    cut_progress_callback : callable or None, optional
+        If a callable is provided, it is called with the cumulative
+        number of spots cut so far while extracting the spots from the
+        movie (before fitting). It must accept one integer input.
+        Default is None.
 
     Returns
     -------
@@ -1451,7 +1547,13 @@ def fit2D(
         )
         camera_info["Pixelsize"] = 130
 
-    spots = get_spots(movie, identifications, box, camera_info)
+    spots = get_spots(
+        movie,
+        identifications,
+        box,
+        camera_info,
+        progress_callback=cut_progress_callback,
+    )
     em = camera_info["Gain"] > 1
     if fitting_method == "gausslq":
         locs = _fit2d_gausslq(
@@ -1700,7 +1802,7 @@ def localize(
     fit_progress_callback: (
         Callable[[int], None] | Literal["console"] | None
     ) = None,
-    return_info: bool = None,  # TODO: change to bool in v0.11.0
+    return_info: bool = True,  # TODO: remove in v0.12.0
 ) -> pd.DataFrame | tuple[pd.DataFrame, list[dict]]:
     """Localize (i.e., identify and fit) spots in 2D in a movie using
     the specified parameters.
@@ -1753,8 +1855,9 @@ def localize(
         not reported. Default is None.
     return_info : bool, optional
         Whether to return additional information about the fitting
-        process. Default is None, which is treated as False. If True,
-        a tuple of (locs, info) is returned.
+        process. Default is True. If True, a tuple of (locs, info) is
+        returned. In v0.12.0 return_info will be removed and the
+        function will always return info.
 
     Returns
     -------
@@ -1764,17 +1867,10 @@ def localize(
         A list of dictionaries containing metadata about the movie and
         the fitting process. Only returned if `return_info` is True.
     """
-    if return_info is None:
-        return_info = False
-        # TODO: change the message in v0.11.0
+    if not return_info:
+        # TODO: remove in v0.12.0
         lib.deprecation_warning(
-            "Warning: In Picasso v0.11.0, "
-            "picasso.localize.localize() will return both the "
-            "localizations and a metadata dictionary by default.\n"
-            "Before v0.12.0, when using picasso.localize.localize(), "
-            "please add the argument 'return_info' explicitly as True "
-            "or False.\n"
-            "In version 0.12, this argument will also be removed such "
+            "In version 0.12, return_info argument will be removed such "
             "that picasso.localize.localize() will always return both "
             "the localizations and the metadata dictionary."
         )
@@ -1792,7 +1888,6 @@ def localize(
         frame_bounds=frame_bounds,
         threaded=threaded,
         progress_callback=identification_progress_callback,
-        return_info=True,
     )
 
     # Fit spots
@@ -2122,7 +2217,7 @@ def check_drift(
     steps = max(1, steps)
     locs = locs[::steps]
 
-    n_frames = info[0]["Frames"]
+    n_frames = lib.get_from_metadata(info, "Frames", raise_error=True)
     segmentation = max(1, int(n_frames // 10))
 
     print(f"Estimating drift with segmentation {segmentation}")
@@ -2226,17 +2321,6 @@ def _db_filename() -> str:
     picasso_dir = os.path.join(home, ".picasso")
     os.makedirs(picasso_dir, exist_ok=True)
     return os.path.abspath(os.path.join(picasso_dir, "app_0410.db"))
-
-
-def save_file_summary(summary: dict) -> None:
-    """Alias to _save_file_summary, deprecated
-
-    TODO: remove in v0.11.0"""
-    lib.deprecation_warning(
-        "Deprecation warning: This function will become private in "
-        "v0.11.0. Use _save_file_summary instead."
-    )
-    return _save_file_summary(summary)
 
 
 def _save_file_summary(summary: dict) -> None:

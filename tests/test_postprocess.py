@@ -79,16 +79,22 @@ class TestIndexBlocks:
 
     def test_index_blocks_shape_matches_field_of_view(self, info):
         size = 2.0
-        n_y, n_x = postprocess.index_blocks_shape(info, size)
+        n_y, n_x = postprocess._index_blocks_shape(info, size)
         assert n_y == int(np.ceil(info[0]["Height"] / size))
         assert n_x == int(np.ceil(info[0]["Width"] / size))
 
     def test_get_block_locs_at_returns_some_locs(self, locs, info):
-        index_blocks = postprocess.get_index_blocks(locs, info, PICK_SIZE / 2)
-        locs_at = postprocess.get_block_locs_at(15.5, 15.5, index_blocks)
-        assert len(locs_at) > 0
+        r = PICK_SIZE / 2
+        index_blocks = postprocess.get_index_blocks(locs, info, r)
+        locs_sorted, size, _, _, block_starts, block_ends, K, L = index_blocks
+        locs_xy = locs_sorted[["x", "y"]].to_numpy().T
+        x, y = 15.5, 15.5
+        locs_at = postprocess.get_block_locs_at_numba(
+            int(x / r), int(y / r), locs_xy, block_starts, block_ends, K, L
+        )
+        assert locs_at.shape[1] > 0
         # Block lookup is conservative — within ~PICK_SIZE
-        d = np.hypot(locs_at["x"] - 15.5, locs_at["y"] - 15.5)
+        d = np.hypot(locs_at[0] - x, locs_at[1] - y)
         assert (d < 2 * PICK_SIZE).all()
 
     def test_n_block_locs_at_matches_get_block_locs_at(self, locs, info):
@@ -98,7 +104,7 @@ class TestIndexBlocks:
         # uses strict inequality and skips the edges)
         for y_idx in range(2, K - 2):
             for x_idx in range(2, L - 2):
-                n = postprocess.n_block_locs_at(
+                n = postprocess._n_block_locs_at(
                     x_idx, y_idx, K, L, b_starts, b_ends
                 )
                 if n == 0:
@@ -113,17 +119,6 @@ class TestIndexBlocks:
                                 expected += b_ends[k, ll] - b_starts[k, ll]
                 assert int(n) == int(expected)
                 return  # one populated cell is enough
-
-
-class TestRmsdAtCom:
-    def test_known_value(self):
-        # COM = (1, 0), distances 1, 0, 1 -> RMSD = sqrt(2/3)
-        xy = np.array([[0.0, 1.0, 2.0], [0.0, 0.0, 0.0]])
-        assert postprocess.rmsd_at_com(xy) == pytest.approx(np.sqrt(2 / 3))
-
-    def test_zero_for_identical_points(self):
-        xy = np.full((2, 5), 3.0)
-        assert postprocess.rmsd_at_com(xy) == pytest.approx(0.0)
 
 
 # ---------------------------------------------------------------------------
@@ -420,8 +415,8 @@ class TestNena:
 
 class TestNextFrameNeighborDistanceHistogram:
     def test_shape_and_non_negative(self, locs):
-        bin_centers, dnfl = postprocess.next_frame_neighbor_distance_histogram(
-            locs.copy()
+        bin_centers, dnfl = (
+            postprocess._next_frame_neighbor_distance_histogram(locs.copy())
         )
         assert bin_centers.shape == dnfl.shape
         assert (dnfl >= 0).all()
@@ -430,7 +425,7 @@ class TestNextFrameNeighborDistanceHistogram:
         assert np.allclose(diffs, diffs[0])
 
     def test_some_neighbors_present(self, locs):
-        _, dnfl = postprocess.next_frame_neighbor_distance_histogram(
+        _, dnfl = postprocess._next_frame_neighbor_distance_histogram(
             locs.copy()
         )
         # Bundled DNA-PAINT data has many on-events lasting >1 frame, so
@@ -590,7 +585,7 @@ class TestLinking:
         x = sl["x"].to_numpy()
         y = sl["y"].to_numpy()
         group = np.zeros(len(sl), dtype=np.int32)
-        lg = postprocess.get_link_groups(frame, x, y, 0.05, 3, group)
+        lg = postprocess._get_link_groups(frame, x, y, 0.05, 3, group)
         assert len(lg) == len(locs)
         # All locs must be assigned to a real link group (>= 0)
         assert (lg >= 0).all()
@@ -603,7 +598,7 @@ class TestLinking:
         x = sl["x"].to_numpy()
         y = sl["y"].to_numpy()
         group = np.zeros(len(sl), dtype=np.int32)
-        lg = postprocess.get_link_groups(frame, x, y, 1e-9, 1, group)
+        lg = postprocess._get_link_groups(frame, x, y, 1e-9, 1, group)
         assert len(np.unique(lg)) == len(sl)
 
 
@@ -736,7 +731,12 @@ class TestSegmentation:
         n_seg = postprocess.n_segments(info, segmentation)
         bounds, segs = postprocess.segment(locs.copy(), info, segmentation)
         assert bounds.shape == (n_seg + 1,)
-        assert segs.shape == (n_seg, info[0]["Height"], info[0]["Width"])
+        from picasso import lib
+
+        oversampling = 1
+        n_pixel_y = int(np.ceil(oversampling * info[0]["Height"]))
+        n_pixel_x = int(np.ceil(oversampling * info[0]["Width"]))
+        assert segs.shape == (n_seg, n_pixel_y, n_pixel_x)
         # bounds are strictly increasing and span the movie
         assert (np.diff(bounds) > 0).all()
         assert bounds[0] == 0
@@ -906,7 +906,7 @@ class TestAlign:
         b["x"] += 2.0
         aligned = postprocess.align_rcc([a, b], [info, info])
         residual = aligned[1]["x"].mean() - aligned[0]["x"].mean()
-        assert abs(residual) < 0.5
+        assert abs(residual) < 0.05
 
     def test_align_from_picked_recovers_known_shift(
         self, locs_copy, info, origami_picks
@@ -1012,7 +1012,7 @@ class TestClusterCombine:
         column) but lump every loc into a single group, so that
         ``cluster_combine_dist`` can compute inter-cluster distances
         within that group."""
-        out = clusterer.dbscan(locs, radius=2 / 130, min_samples=2)
+        out = clusterer.dbscan(locs, radius=2 / 130, min_samples=2)[0]
         out = out.copy()
         out["cluster"] = out["group"].to_numpy()
         out["group"] = 0
@@ -1192,7 +1192,7 @@ class TestResi:
 class TestG5M:
     @pytest.fixture
     def dbscan_locs(self, locs):
-        out = clusterer.dbscan(locs, radius=2 / 130, min_samples=2)
+        out = clusterer.dbscan(locs, radius=2 / 130, min_samples=2)[0]
         assert len(out) > 0
         return out
 
@@ -1220,7 +1220,7 @@ class TestG5M:
 class TestG5M3D:
     @pytest.fixture
     def dbscan_locs_3d(self, locs, info):
-        out = clusterer.dbscan(locs, radius=2 / 130, min_samples=2)
+        out = clusterer.dbscan(locs, radius=2 / 130, min_samples=2)[0]
         assert len(out) > 0
         rng = np.random.default_rng(42)
         out = out.copy()

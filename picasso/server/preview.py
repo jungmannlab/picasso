@@ -5,6 +5,7 @@ import pandas as pd
 import os
 import numpy as np
 from picasso import io
+from picasso import lib
 from picasso import render
 import matplotlib.pyplot as plt
 
@@ -22,20 +23,20 @@ def load_file(path: str):
 
 @st.cache_data
 def picasso_render(
-    locs: pd.DataFrame, info: list[dict], viewport: tuple, oversampling: float
+    locs: pd.DataFrame, info: list[dict], viewport: tuple, disp_px_size: float
 ):
     """Helper function to render a viewport. Cached.
 
     Args:
         locs (pd.DataFrame): Localizations.
         viewport (tuple): Viewport as tuple.
-        oversampling (int): Oversampling.
+        disp_px_size (int): Display pixel size of the rendered image in nm.
     """
     len_x, image = render.render(
         locs,
-        info=info,
+        info,
+        disp_px_size=disp_px_size,
         viewport=viewport,
-        oversampling=oversampling,
         blur_method="smooth",
     )
 
@@ -76,7 +77,7 @@ def preview():
 
                 st.info(
                     "Performance Warning: This preview will render the full "
-                    "image, so it might be slow for large oversampling."
+                    "image, so it might be slow for small display pixel size."
                 )
 
                 with st.spinner("Loading file"):
@@ -93,15 +94,15 @@ def preview():
 
                         c1, c2, c3 = st.columns(3)
 
-                        oversampling = c1.number_input(
-                            "Oversampling",
-                            value=5.0,
+                        disp_px_size = c1.number_input(
+                            "Display pixel size",
+                            value=50,
                             min_value=1.0,
-                            max_value=40.0,
+                            max_value=40000.0,
                         )
 
                         image = picasso_render(
-                            locs, info, viewport, oversampling
+                            locs, info, viewport, disp_px_size
                         )
 
                         vmin = c2.number_input(

@@ -271,6 +271,22 @@ class TestHist2DNumba:
 
 
 # ---------------------------------------------------------------------------
+# RMSD at center of mass
+# ---------------------------------------------------------------------------
+
+
+class TestRmsdAtCom:
+    def test_known_value(self):
+        # COM = (1, 0), distances 1, 0, 1 -> RMSD = sqrt(2/3)
+        xy = np.array([[0.0, 1.0, 2.0], [0.0, 0.0, 0.0]])
+        assert lib.rmsd_at_com(xy) == pytest.approx(np.sqrt(2 / 3))
+
+    def test_zero_for_identical_points(self):
+        xy = np.full((2, 5), 3.0)
+        assert lib.rmsd_at_com(xy) == pytest.approx(0.0)
+
+
+# ---------------------------------------------------------------------------
 # Recarray manipulation (deprecated path — explicit warnings expected)
 # ---------------------------------------------------------------------------
 

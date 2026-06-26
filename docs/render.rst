@@ -9,7 +9,7 @@ render
 Opening Files
 -------------
 1. Rendering of the super-resolution image: In ``Picasso: Render``, open a movie file by dragging a localization file (ending with '.hdf5') into the window or by selecting ``File > Open``. The super-resolution image will be rendered automatically. A region of choice can be zoomed into by a rectangular selection using the left mouse button. The 'View' menu contains more options for zooming and panning.
-2. (Optional) Adjust rendering options by selecting ``View > Display Settings``. The field 'Oversampling' defines the number of super-resolution pixels per camera pixel. The contrast settings ``Min. Density`` and ``Max. Density`` define at which number of localizations per super-resolution pixel the minimum and maximum color of the colormap should be applied.
+2. (Optional) Adjust rendering options by selecting ``View > Display Settings``. The field 'Display pixel size (nm)' defines the size of the rendered pixels of the super-resolution image. The contrast settings ``Min. Density`` and ``Max. Density`` define at which number of localizations per super-resolution pixel the minimum and maximum color of the colormap should be applied.
 3. (Optional) For multiplexed image acquisition, open HDF5 localization files from other channels subsequently. Alternatively, drag and drop all HDF5 files to be displayed simultaneously.
 
 Drift Correction
@@ -63,9 +63,11 @@ The 3D rotation window allows the user to render 3D localization data. To use it
 
 The user may perform multiple actions in the rotation window, including: saving rotated localizations, building animations (.mp4 format), rotating by a specified angle, etc.
 
-Note that to build animations, the user must have ``ffmpeg`` installed on their system. 
+Note that to build animations, the user must have ``ffmpeg`` installed on their system.
 
-Rotation around z-axis is available by pressing Ctrl/Command. Rotation axis can be frozen by pressing x/y/z to freeze around the corresponding axes (to freeze around the z-axis, Ctrl/Command must be pressed as well).
+When rotating by a specified angle, the dialog offers a ``Rotate around`` choice between **Localizations** (the default) and **World**. ``Localizations`` rotates around the data's own axes - the axes shown by the axes icon, which rotate together with the data - so each entered angle changes the corresponding displayed angle by exactly that amount. ``World`` rotates around the fixed screen/camera axes instead.
+
+Rotation around the z-axis is available by pressing Ctrl/Command. Rotation axis can be frozen by pressing x/y/z to freeze around the corresponding axis. By default the frozen rotation is around the data's own axes (Localizations frame); holding Ctrl/Command together with x/y/z instead rotates around the fixed screen/World axes. The z-axis can now be frozen by pressing z alone (vertical dragging spins around it); Ctrl/Command is only needed for the z-axis if you want to rotate it in the World frame, or to spin around the screen z-axis when no axis is frozen.
 
 RESI
 ----
@@ -123,9 +125,9 @@ Zoom
 +++++
 Set the magnification factor.
 
-Oversampling
-++++++++++++
-Set the oversampling. Choose ``dynamic`` to automatically adjust to current window size when zooming.
+Display pixel size (nm)
++++++++++++++++++++++++
+Set the size of the pixel in the rendered image. Choose ``dynamic`` to automatically adjust to current window size when zooming.
 
 Minimap
 +++++++
@@ -219,7 +221,7 @@ Resets the current picked regions and loads regions from a .yaml file that conta
 Export ROI for Imaris
 ^^^^^^^^^^^^^^^^^^^^^
 This function allows to export the current ROI for Imaris. Note that this is currently only implemented for Windows.
-Click on File / Export ROI for imaris and enter a filename for export. Picasso will export the current region of interest with the current oversampling settings. If multiple channels are loaded it will export the channels with the same colors as set in Picasso (Shortcut CTRL+F or View / Files to change.)
+Click on File / Export ROI for imaris and enter a filename for export. Picasso will export the current region of interest with the current display pixel size settings. If multiple channels are loaded it will export the channels with the same colors as set in Picasso (Shortcut CTRL+F or View / Files to change.)
 Depending on the size of the ROI, the export will take a couple of seconds. Once exporting is finished, the file will be saved at the set location.
 The resulting file can be opened e.g. with ImarisViewer or Imaris. Note that the orientation is the same as in Picasso.
 
@@ -366,7 +368,16 @@ Selects the pick tool. The mouse can now be used for picking localizations. The 
 
 Measure (CTRL + M)
 ^^^^^^^^^^^^^^^^^^
-Selects the measure tool. The mouse can now be used for measuring distances. Left click adds a crosshair for measuring; right-click deletes the last crosshair.
+Selects the measure tool, which is used to measure distances on the rendered image.
+
+While the tool is active, the cursor is shown as a crosshair that follows the mouse. **Left click** drops a measurement point: each new point is connected to the previous one by a line, and the running total distance (in nm) is displayed live next to the line as you move the mouse, before the next point is even placed. Chaining several left clicks measures a multi-segment path.
+
+**Right click** has two functions:
+
+* The **first** right click *freezes* the current measurement set: the crosshair stops following the mouse and the measured path stays drawn on the image. A new, independent set of measurements can then be started simply by left-clicking again.
+* While in this frozen state, a **further** right click *deletes* the most recently finalized set. Repeating it removes the previous sets one by one.
+
+Distances and lines are only drawn within a set, never across sets, so multiple independent measurements can be displayed at the same time.
 
 Tools settings (CTRL + T)
 ^^^^^^^^^^^^^^^^^^^^^^^^^

@@ -14,8 +14,6 @@ from __future__ import annotations
 import os.path
 import sys
 import time
-import importlib
-import pkgutil
 from collections import UserDict
 from typing import Literal
 
@@ -73,18 +71,22 @@ class View(QtWidgets.QGraphicsView):
     ----------
     hscrollbar, vscrollbar : QtWidgets.QScrollBar
         Horizontal and vertical scroll bars.
-    numeric_roi : bool
-        Whether the view is currently in numeric (manual) ROI mode.
     pan : bool
         Whether the view is currently panned.
     pan_start_x, pan_start_y : int
         Starting position of the pan gesture.
     rubberband : QtWidgets.QRubberBand
-        Rubber band used for selecting ROIs.
-    roi : list
-        Region of interest (ROI) selected by the user.
+        Transient rubber band shown while dragging a new ROI.
+    rois : list
+        Regions of interest (ROIs) selected by the user. Each ROI is
+        ``[[y_min, x_min], [y_max, x_max]]``. The ROIs are kept disjoint
+        (overlapping selections are clipped via
+        ``localize.clip_rois``). An empty list means the whole frame.
+    selected_roi : int or None
+        Index of the ROI currently highlighted (selected in the
+        parameters dialog table), or None.
     roi_end : QtCore.QPoint
-        End point of the selected ROI.
+        End point of the ROI being dragged.
     window : QtWidgets.QMainWindow
         Reference to the main window.
     """
@@ -99,16 +101,13 @@ class View(QtWidgets.QGraphicsView):
         self.vscrollbar = self.verticalScrollBar()
         self.vscrollbar.valueChanged.connect(self.on_scroll)
         self.rubberband = RubberBand(self)
-        self.roi = None
-        self.numeric_roi = False
+        self.rois = []
+        self.selected_roi = None
 
     def mousePressEvent(self, event: QtGui.QMouseEvent) -> None:
         """Start either a rubber band for selecting a ROI or panning the
         view."""
-        if (
-            event.button() == QtCore.Qt.MouseButton.LeftButton
-            and not self.numeric_roi
-        ):
+        if event.button() == QtCore.Qt.MouseButton.LeftButton:
             self.roi_origin = QtCore.QPoint(event.pos())
             self.rubberband.setGeometry(
                 QtCore.QRect(self.roi_origin, QtCore.QSize())
@@ -125,10 +124,7 @@ class View(QtWidgets.QGraphicsView):
 
     def mouseMoveEvent(self, event: QtGui.QMouseEvent) -> None:
         """Update the rubber band or pan the view."""
-        if (
-            event.buttons() == QtCore.Qt.MouseButton.LeftButton
-            and not self.numeric_roi
-        ):
+        if event.buttons() == QtCore.Qt.MouseButton.LeftButton:
             self.rubberband.setGeometry(
                 QtCore.QRect(self.roi_origin, event.pos())
             )
@@ -147,29 +143,24 @@ class View(QtWidgets.QGraphicsView):
             event.ignore()
 
     def mouseReleaseEvent(self, event: QtGui.QMouseEvent) -> None:
-        """Select the ROI or stop panning the view."""
-        if (
-            event.button() == QtCore.Qt.MouseButton.LeftButton
-            and not self.numeric_roi
-        ):
+        """Add the dragged ROI (clipping against existing ones) or stop
+        panning the view."""
+        if event.button() == QtCore.Qt.MouseButton.LeftButton:
             self.roi_end = QtCore.QPoint(event.pos())
+            self.rubberband.hide()
             dx = abs(self.roi_end.x() - self.roi_origin.x())
             dy = abs(self.roi_end.y() - self.roi_origin.y())
-            if dx < 10 or dy < 10:
-                self.roi = None
-                self.rubberband.hide()
-                self.window.parameters_dialog.roi_edit.setText("")
-            else:
+            if dx >= 10 and dy >= 10:
                 roi_points = (
                     self.mapToScene(self.roi_origin),
                     self.mapToScene(self.roi_end),
                 )
-                self.roi = [[int(_.y()), int(_.x())] for _ in roi_points]
-                (y_min, x_min), (y_max, x_max) = self.roi
-                self.window.parameters_dialog.roi_edit.setText(
-                    f"{y_min},{x_min},{y_max},{x_max}"
+                new_roi = [[int(_.y()), int(_.x())] for _ in roi_points]
+                box = self.window.parameters.get("Box Size", 7)
+                self.rois = localize.clip_rois(
+                    self.rois + [new_roi], min_size=box
                 )
-                self.numeric_roi = False
+                self.window.parameters_dialog.update_roi_display()
             self.window.draw_frame()
         elif event.button() == QtCore.Qt.MouseButton.RightButton:
             self.pan = False
@@ -177,6 +168,35 @@ class View(QtWidgets.QGraphicsView):
             event.accept()
         else:
             event.ignore()
+
+    def mouseDoubleClickEvent(self, event: QtGui.QMouseEvent) -> None:
+        """Remove the ROI under the cursor on a (left) double click. If
+        several ROIs contain the point, the smallest one is removed."""
+        if event.button() != QtCore.Qt.MouseButton.LeftButton or not self.rois:
+            event.ignore()
+            return
+        scene_pos = self.mapToScene(event.pos())
+        px, py = scene_pos.x(), scene_pos.y()
+        containing = [
+            i
+            for i, ((y_min, x_min), (y_max, x_max)) in enumerate(self.rois)
+            if y_min <= py <= y_max and x_min <= px <= x_max
+        ]
+        if not containing:
+            event.ignore()
+            return
+        idx = min(
+            containing,
+            key=lambda i: (
+                (self.rois[i][1][0] - self.rois[i][0][0])
+                * (self.rois[i][1][1] - self.rois[i][0][1])
+            ),
+        )
+        del self.rois[idx]
+        self.selected_roi = None
+        self.window.parameters_dialog.update_roi_display()
+        self.window.draw_frame()
+        event.accept()
 
     def wheelEvent(self, event: QtGui.QWheelEvent) -> None:
         """Zoom in/out with the mouse wheel."""
@@ -214,14 +234,7 @@ class Scene(QtWidgets.QGraphicsScene):
             return False
         path, extension = self.path_from_drop(event)
 
-        if extension.lower() not in [
-            ".raw",
-            ".tif",
-            ".ims",
-            ".nd2",
-            ".tiff",
-            ".stk",
-        ]:
+        if extension.lower() not in io.MOVIE_EXTENSIONS:
             return False
         return True
 
@@ -561,6 +574,100 @@ class PromptInfoDialog(lib.Dialog):
         return info, save, result == QtWidgets.QDialog.DialogCode.Accepted
 
 
+class PromptMovieInfoDialog(lib.Dialog):
+    """Enter movie metadata manually when it cannot be read from the
+    file.
+
+    Used as a fallback for ``.tif``/``.stk``/``.nd2`` movies whose pixel
+    data could be opened but whose embedded metadata could not be
+    parsed. The dialog is pre-filled with whatever dimensions could
+    still be read from the file structure; the user supplies the rest
+    (notably the pixel size). See ``docs/files.rst`` for the required
+    metadata keys (Width, Height, Frames, Pixelsize).
+
+    Attributes
+    ----------
+    frames : QtWidgets.QSpinBox
+        Spin box for the number of frames.
+    movie_height, movie_width : QtWidgets.QSpinBox
+        Spin boxes for the height and width of the movie.
+    pixelsize : QtWidgets.QSpinBox
+        Spin box for the effective camera pixel size in nm.
+    save : QtWidgets.QCheckBox
+        Whether to save the entered metadata to a YAML file next to the
+        movie, so it is reused the next time the movie is opened.
+    """
+
+    def __init__(
+        self,
+        window: QtWidgets.QWidget,
+        partial_info: dict | None = None,
+    ) -> None:
+        super().__init__(window)
+        self.window = window
+        self.setWindowTitle("Enter movie info")
+        partial_info = partial_info or {}
+        vbox = QtWidgets.QVBoxLayout(self)
+        message = QtWidgets.QLabel(
+            "The movie metadata could not be read from the file.\n"
+            "Please enter the required information manually."
+        )
+        message.setWordWrap(True)
+        vbox.addWidget(message)
+        grid = QtWidgets.QGridLayout()
+        grid.addWidget(QtWidgets.QLabel("Frames:"), 0, 0)
+        self.frames = QtWidgets.QSpinBox()
+        self.frames.setRange(1, int(1e9))
+        self.frames.setValue(int(partial_info.get("Frames", 1)))
+        grid.addWidget(self.frames, 0, 1)
+        grid.addWidget(QtWidgets.QLabel("Height:"), 1, 0)
+        self.movie_height = QtWidgets.QSpinBox()
+        self.movie_height.setRange(1, int(1e9))
+        self.movie_height.setValue(int(partial_info.get("Height", 1)))
+        grid.addWidget(self.movie_height, 1, 1)
+        grid.addWidget(QtWidgets.QLabel("Width:"), 2, 0)
+        self.movie_width = QtWidgets.QSpinBox()
+        self.movie_width.setRange(1, int(1e9))
+        self.movie_width.setValue(int(partial_info.get("Width", 1)))
+        grid.addWidget(self.movie_width, 2, 1)
+        grid.addWidget(QtWidgets.QLabel("Pixel size (nm):"), 3, 0)
+        self.pixelsize = QtWidgets.QSpinBox()
+        self.pixelsize.setRange(1, 10000)
+        self.pixelsize.setValue(int(partial_info.get("Pixelsize", 130)))
+        grid.addWidget(self.pixelsize, 3, 1)
+        self.save = QtWidgets.QCheckBox("Save info to yaml file")
+        self.save.setChecked(True)
+        grid.addWidget(self.save, 4, 0, 1, 2)
+        vbox.addLayout(grid)
+        # OK and Cancel buttons
+        self.buttons = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.StandardButton.Ok
+            | QtWidgets.QDialogButtonBox.StandardButton.Cancel,
+            QtCore.Qt.Orientation.Horizontal,
+            self,
+        )
+        vbox.addWidget(self.buttons)
+        self.buttons.accepted.connect(self.accept)
+        self.buttons.rejected.connect(self.reject)
+
+    @staticmethod
+    def getMovieSpecs(
+        parent: QtWidgets.QWidget | None = None,
+        partial_info: dict | None = None,
+    ) -> tuple[dict, bool, bool]:
+        dialog = PromptMovieInfoDialog(parent, partial_info)
+        result = dialog.exec()
+        # Preserve any extra readable keys (e.g. "File") already present.
+        info = dict(partial_info or {})
+        info["Frames"] = dialog.frames.value()
+        info["Height"] = dialog.movie_height.value()
+        info["Width"] = dialog.movie_width.value()
+        info["Pixelsize"] = dialog.pixelsize.value()
+        info["Generated by"] = "Picasso Localize (manual metadata)"
+        save = dialog.save.isChecked()
+        return info, save, result == QtWidgets.QDialog.DialogCode.Accepted
+
+
 class PromptChannelDialog(lib.Dialog):
     """Dialog for selecting a channel. Used for .IMS files."""
 
@@ -600,6 +707,251 @@ class PromptChannelDialog(lib.Dialog):
         result = dialog.exec()
         channel = dialog.byte_order.currentText()
         return channel, result == QtWidgets.QDialog.DialogCode.Accepted
+
+
+class Calibrate3DDialog(lib.Dialog):
+    """Dialog for entering the parameters of a 3D (astigmatism)
+    calibration: the z step size, the number of frames acquired per z
+    (stage) position and, if more than one, the order in which those
+    frames were acquired."""
+
+    def __init__(self, window: QtWidgets.QWidget) -> None:
+        super().__init__(window)
+        self.window = window
+        self.setWindowTitle("3D Calibration")
+        vbox = QtWidgets.QVBoxLayout(self)
+        grid = QtWidgets.QGridLayout()
+        vbox.addLayout(grid)
+
+        # Step size
+        grid.addWidget(QtWidgets.QLabel("Calibration step size (nm):"), 0, 0)
+        self.step = QtWidgets.QDoubleSpinBox()
+        self.step.setRange(0.01, 1e6)
+        self.step.setDecimals(2)
+        self.step.setValue(5)
+        grid.addWidget(self.step, 0, 1)
+
+        # Number of frames per z (stage) position
+        frames_label = QtWidgets.QLabel("Number of frames per step size:")
+        frames_label.setToolTip(
+            "Number of frames acquired at each z (stage) position.\n"
+            "Acquiring several frames per position increases the number\n"
+            "of localizations per position and thus the confidence of\n"
+            "the calibration fit."
+        )
+        grid.addWidget(frames_label, 1, 0)
+        self.frames_per_step = QtWidgets.QSpinBox()
+        self.frames_per_step.setRange(1, 100)
+        self.frames_per_step.setValue(1)
+        grid.addWidget(self.frames_per_step, 1, 1)
+
+        # Frame order (only relevant when frames_per_step > 1)
+        self.order_label = QtWidgets.QLabel("Frame order:")
+        grid.addWidget(self.order_label, 2, 0)
+        self.frame_order = QtWidgets.QComboBox()
+        self.frame_order.addItem("Different FOVs first", userData="fov")
+        self.frame_order.addItem("Different z positions first", userData="z")
+        self.frame_order.setToolTip(
+            "Order in which the frames were acquired when more than one\n"
+            "frame per step size is used.\n"
+            "'Same z position, different FOVs': the z position is held\n"
+            "constant while several fields of view are imaged, i.e.,\n"
+            "consecutive frames share the same z position.\n"
+            "'Same FOV, z positions sequentially': the full z stack is\n"
+            "scanned and then repeated, i.e., frames cycle through all z\n"
+            "positions."
+        )
+        grid.addWidget(self.frame_order, 2, 1)
+
+        # The order only matters when more than one frame per step
+        self.frames_per_step.valueChanged.connect(self._update_order_enabled)
+        self._update_order_enabled(self.frames_per_step.value())
+
+        # OK and Cancel buttons
+        self.buttons = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.StandardButton.Ok
+            | QtWidgets.QDialogButtonBox.StandardButton.Cancel,
+            QtCore.Qt.Orientation.Horizontal,
+            self,
+        )
+        vbox.addWidget(self.buttons)
+        self.buttons.accepted.connect(self.accept)
+        self.buttons.rejected.connect(self.reject)
+
+    def _update_order_enabled(self, n_frames: int) -> None:
+        """Enable the frame order choice only if more than one frame is
+        acquired per z position."""
+        enabled = n_frames > 1
+        self.order_label.setEnabled(enabled)
+        self.frame_order.setEnabled(enabled)
+
+    @staticmethod
+    def getCalibrationSpecs(
+        parent: QtWidgets.QWidget | None = None,
+    ) -> tuple[float, int, str, bool]:
+        """Show the dialog and return the chosen step size, number of
+        frames per step, frame order and whether the dialog was
+        accepted."""
+        dialog = Calibrate3DDialog(parent)
+        result = dialog.exec()
+        step = dialog.step.value()
+        frames_per_step = dialog.frames_per_step.value()
+        frame_order = dialog.frame_order.currentData()
+        accepted = result == QtWidgets.QDialog.DialogCode.Accepted
+        return step, frames_per_step, frame_order, accepted
+
+
+class ROIDialog(lib.Dialog):
+    """Sub-dialog for managing several regions of interest (ROIs)
+    numerically.
+
+    The dialog edits ``window.view.rois`` directly (clipping overlaps via
+    ``localize.clip_rois``) and keeps the compact ROI field in the
+    parameters dialog in sync. It is modeless, so the user can keep
+    drawing ROIs in the preview while it is open.
+
+    Attributes
+    ----------
+    table : QtWidgets.QTableWidget
+        Table listing the ROIs, one rectangle per row.
+    window : QtWidgets.QMainWindow
+        Reference to the main window.
+    """
+
+    def __init__(self, window: QtWidgets.QMainWindow) -> None:
+        super().__init__(window)
+        self.window = window
+        self.setWindowTitle("Regions of interest")
+        self.setModal(False)
+        self._updating = False
+
+        layout = QtWidgets.QVBoxLayout(self)
+        header = QtWidgets.QHBoxLayout()
+        info = QtWidgets.QLabel(
+            "Each row is a rectangular ROI (y_min, x_min, y_max, x_max, "
+            "in camera pixels). Drag a rectangle in the preview or use "
+            "Add, then edit the cells. Overlapping ROIs are clipped "
+            "automatically so they never cover a pixel twice. Clear the "
+            "list to analyze the whole frame."
+        )
+        info.setWordWrap(True)
+        header.addWidget(info, 1)
+        help_button = lib.HelpButton(ParametersDialog.ROI_URL)
+        header.addWidget(help_button, 0, QtCore.Qt.AlignmentFlag.AlignTop)
+        layout.addLayout(header)
+
+        self.table = QtWidgets.QTableWidget(0, 4)
+        self.table.setHorizontalHeaderLabels(
+            ["y_min", "x_min", "y_max", "x_max"]
+        )
+        self.table.horizontalHeader().setSectionResizeMode(
+            QtWidgets.QHeaderView.ResizeMode.Stretch
+        )
+        self.table.verticalHeader().setVisible(False)
+        self.table.setSelectionBehavior(
+            QtWidgets.QAbstractItemView.SelectionBehavior.SelectRows
+        )
+        self.table.itemChanged.connect(self.on_table_changed)
+        self.table.itemSelectionChanged.connect(self.on_selection_changed)
+        layout.addWidget(self.table)
+
+        buttons = QtWidgets.QHBoxLayout()
+        self.add_button = QtWidgets.QPushButton("Add")
+        self.add_button.clicked.connect(self.on_add)
+        self.remove_button = QtWidgets.QPushButton("Remove")
+        self.remove_button.clicked.connect(self.on_remove)
+        self.clear_button = QtWidgets.QPushButton("Clear")
+        self.clear_button.clicked.connect(self.on_clear)
+        buttons.addWidget(self.add_button)
+        buttons.addWidget(self.remove_button)
+        buttons.addWidget(self.clear_button)
+        layout.addLayout(buttons)
+
+        self.resize(360, 280)
+        self.update_table()
+
+    def _box(self) -> int:
+        """Current box size, used as the minimum ROI side length."""
+        return self.window.parameters.get("Box Size", 7)
+
+    def _commit(self, rois: list) -> None:
+        """Clip ``rois`` and store them on the view, refreshing the
+        compact field in the parameters dialog."""
+        self.window.view.rois = localize.clip_rois(rois, min_size=self._box())
+        self.window.parameters_dialog.update_roi_display(skip_dialog=True)
+        self.window.draw_frame()
+
+    def update_table(self) -> None:
+        """Repopulate the table from the view's ROIs."""
+        view = self.window.view
+        self._updating = True
+        self.table.setRowCount(len(view.rois))
+        for row, ((y_min, x_min), (y_max, x_max)) in enumerate(view.rois):
+            for col, val in enumerate((y_min, x_min, y_max, x_max)):
+                item = QtWidgets.QTableWidgetItem(str(int(val)))
+                item.setTextAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+                self.table.setItem(row, col, item)
+        if view.selected_roi is not None and view.selected_roi < len(
+            view.rois
+        ):
+            self.table.selectRow(view.selected_roi)
+        self._updating = False
+
+    def on_table_changed(self, item: object = None) -> None:
+        """Rebuild the view's ROIs from the table, clipping overlaps."""
+        if self._updating:
+            return
+        rois = []
+        for row in range(self.table.rowCount()):
+            try:
+                vals = [int(self.table.item(row, c).text()) for c in range(4)]
+            except (AttributeError, ValueError):
+                return  # incomplete row, wait for the user to finish
+            y_min, x_min, y_max, x_max = vals
+            rois.append([[y_min, x_min], [y_max, x_max]])
+        self._commit(rois)
+        self.update_table()
+
+    def on_add(self) -> None:
+        """Add a default ROI row that the user can edit."""
+        view = self.window.view
+        if self.window.movie is not None:
+            height, width = self.window.movie.shape[1:]
+            side = int(min(height, width) / 4)
+        else:
+            side = 50
+        offset = 10 * len(view.rois)  # avoid fully overlapping the last one
+        new_roi = [[offset, offset], [offset + side, offset + side]]
+        self._commit(view.rois + [new_roi])
+        self.update_table()
+
+    def on_remove(self) -> None:
+        """Remove the ROI(s) selected in the table."""
+        view = self.window.view
+        rows = sorted(
+            {idx.row() for idx in self.table.selectedIndexes()},
+            reverse=True,
+        )
+        for row in rows:
+            if 0 <= row < len(view.rois):
+                del view.rois[row]
+        view.selected_roi = None
+        self._commit(view.rois)
+        self.update_table()
+
+    def on_clear(self) -> None:
+        """Remove all ROIs (analyze the whole frame)."""
+        self.window.view.selected_roi = None
+        self._commit([])
+        self.update_table()
+
+    def on_selection_changed(self) -> None:
+        """Highlight the ROI selected in the table."""
+        if self._updating:
+            return
+        rows = {idx.row() for idx in self.table.selectedIndexes()}
+        self.window.view.selected_roi = min(rows) if rows else None
+        self.window.draw_frame()
 
 
 class ParametersDialog(lib.Dialog):
@@ -649,8 +1001,13 @@ class ParametersDialog(lib.Dialog):
         Spin box for setting camera pixel size (nm).
     preview_checkbox : QtWidgets.QCheckBox
         Checkbox for enabling/disabling preview of identified spots.
-    roi_edit : QtWidgets.QLineEdit
-        Line edit for selecting the region of interest (ROI).
+    roi_field : QtWidgets.QLineEdit
+        Compact field summarizing the regions of interest (ROIs): empty
+        for the whole frame, the four coordinates of the single ROI when
+        there is exactly one (editable), or a count when there are
+        several.
+    roi_dialog : ROIDialog or None
+        Sub-dialog (lazily created) for managing several ROIs in a table.
     sensitivity : QtWidgets.QDoubleSpinBox
         Spin box for setting camera sensitivity.
     qe : QtWidgets.QDoubleSpinBox
@@ -670,6 +1027,7 @@ class ParametersDialog(lib.Dialog):
 
     CALIB_URL = "https://picassosr.readthedocs.io/en/latest/localize.html#d-calibration"  # noqa: E501
     IDENT_URL = "https://picassosr.readthedocs.io/en/latest/localize.html#identification-and-fitting-of-single-molecule-spots"  # noqa: E501
+    ROI_URL = "https://picassosr.readthedocs.io/en/latest/localize.html#regions-of-interest-rois"  # noqa: E501
 
     def __init__(  # noqa: C901
         self, parent: QtWidgets.QMainWindow | None = None
@@ -773,37 +1131,53 @@ class ParametersDialog(lib.Dialog):
         self.preview_checkbox.stateChanged.connect(self.on_preview_changed)
         identification_grid.addWidget(self.preview_checkbox, 4, 0)
 
-        # ROI
-        label = QtWidgets.QLabel(
-            "ROI (y<sub>min</sub>,x<sub>min</sub>,"
-            "y<sub>max</sub>,x<sub>max</sub>):"
-        )
+        # ROIs
+        label = QtWidgets.QLabel("ROIs:")
         label.setToolTip(
-            "Specify the ROI to be analyzed;\n"
-            "also available by dragging a rectangle in the preview.\n"
-            "Note that no spaces between the numbers and commas are allowed."
+            "Restrict the analysis to one or more rectangular regions.\n"
+            "Drag a rectangle in the preview to add a ROI, double-click a\n"
+            "ROI to remove it, or click 'Edit ROIs...' to enter them\n"
+            "numerically. With a single ROI its coordinates\n"
+            "(y_min, x_min, y_max, x_max, in camera pixels) can be edited\n"
+            "directly here. Leave empty to analyze the whole frame."
         )
-        identification_grid.addWidget(label, 5, 0)
-        self.roi_edit = QtWidgets.QLineEdit()
-        regex = r"\d+,\d+,\d+,\d+"  # regex for 4 integers separated by commas
+        roi_label_layout = QtWidgets.QHBoxLayout()
+        roi_label_layout.addWidget(lib.HelpButton(self.ROI_URL))
+        roi_label_layout.addWidget(label)
+        roi_label_layout.addStretch(1)
+        identification_grid.addLayout(roi_label_layout, 5, 0)
+
+        self._updating_roi_field = False
+        self.roi_dialog = None
+        roi_layout = QtWidgets.QHBoxLayout()
+        self.roi_field = QtWidgets.QLineEdit()
+        self.roi_field.setPlaceholderText("Whole frame")
+        regex = r"\d+,\d+,\d+,\d+"  # 4 integers separated by commas
         validator = QtGui.QRegularExpressionValidator(
             QtCore.QRegularExpression(regex)
         )
-        self.roi_edit.setValidator(validator)
-        self.roi_edit.editingFinished.connect(self.on_roi_edit_finished)
-        self.roi_edit.textChanged.connect(self.on_roi_edit_changed)
-        identification_grid.addWidget(self.roi_edit, 5, 1)
+        self.roi_field.setValidator(validator)
+        self.roi_field.editingFinished.connect(self.on_roi_field_finished)
+        self.roi_field.textChanged.connect(self.on_roi_field_changed)
+        roi_layout.addWidget(self.roi_field)
+        self.roi_edit_button = QtWidgets.QPushButton("Edit ROIs...")
+        self.roi_edit_button.clicked.connect(self.on_edit_rois)
+        roi_layout.addWidget(self.roi_edit_button)
+        identification_grid.addLayout(roi_layout, 5, 1)
 
         # min/max frames
         label = QtWidgets.QLabel("Frames (min,max):")
         label.setToolTip(
             "Specify the first and last frame (inclusive) to be analyzed;\n"
             "by default, all frames are analyzed.\n"
-            "Note that no spaces between the numbers and comma are allowed."
+            "Several disjoint segments can be given as min,max pairs\n"
+            "separated by semicolons, e.g. '1,100; 200,300'."
         )
         identification_grid.addWidget(label, 6, 0)
         self.frames_edit = QtWidgets.QLineEdit()
-        regex = r"\d+,\d+"  # regex for 2 integers separated by a comma
+        # one or more "min,max" pairs separated by semicolons, with
+        # optional surrounding whitespace
+        regex = r"\s*\d+\s*,\s*\d+\s*(;\s*\d+\s*,\s*\d+\s*)*"
         validator = QtGui.QRegularExpressionValidator(
             QtCore.QRegularExpression(regex)
         )
@@ -1177,22 +1551,77 @@ class ParametersDialog(lib.Dialog):
         ):
             self.window.draw_frame()
 
-    def on_roi_edit_changed(self) -> None:
-        """Handle changes to the ROI edit field."""
-        if self.roi_edit.text() == "":
-            self.window.view.numeric_roi = False
-            self.window.view.roi = None
-            self.window.view.rubberband.hide()
+    def update_roi_display(self, skip_dialog: bool = False) -> None:
+        """Refresh the compact ROI field (and the ROI sub-dialog) from
+        the view's ROIs.
+
+        The field shows nothing (placeholder "Whole frame") when there
+        are no ROIs, the four editable coordinates when there is exactly
+        one, and a read-only count when there are several.
+
+        Parameters
+        ----------
+        skip_dialog : bool, optional
+            If True, do not refresh the ROI sub-dialog's table (used when
+            the call originates from that dialog to avoid recursion).
+        """
+        view = self.window.view
+        n = len(view.rois)
+        self._updating_roi_field = True
+        if n == 1:
+            self.roi_field.setReadOnly(False)
+            (y_min, x_min), (y_max, x_max) = view.rois[0]
+            self.roi_field.setText(
+                f"{int(y_min)},{int(x_min)},{int(y_max)},{int(x_max)}"
+            )
+        elif n == 0:
+            self.roi_field.setReadOnly(False)
+            self.roi_field.setText("")
+        else:
+            self.roi_field.setReadOnly(True)
+            self.roi_field.setText(f"{n} ROIs")
+        self._updating_roi_field = False
+        if not skip_dialog and self.roi_dialog is not None:
+            self.roi_dialog.update_table()
+
+    def on_roi_field_changed(self) -> None:
+        """Clear the ROIs when the user empties the field."""
+        if self._updating_roi_field or self.roi_field.isReadOnly():
+            return
+        if self.roi_field.text() == "":
+            self.window.view.rois = []
+            self.window.view.selected_roi = None
+            if self.roi_dialog is not None:
+                self.roi_dialog.update_table()
             self.window.draw_frame()
 
-    def on_roi_edit_finished(self) -> None:
-        """Handle the completion of ROI editing."""
-        text = self.roi_edit.text().split(",")
-        y_min, x_min, y_max, x_max = [int(_) for _ in text]
-        # update roi
-        self.window.view.roi = [[y_min, x_min], [y_max, x_max]]
+    def on_roi_field_finished(self) -> None:
+        """Parse the single ROI typed into the compact field."""
+        if self._updating_roi_field or self.roi_field.isReadOnly():
+            return
+        text = self.roi_field.text()
+        if text == "":
+            return
+        try:
+            y_min, x_min, y_max, x_max = (int(v) for v in text.split(","))
+        except ValueError:
+            return  # incomplete input, wait for the user to finish
+        box = self.window.parameters.get("Box Size", 7)
+        self.window.view.rois = localize.clip_rois(
+            [[[y_min, x_min], [y_max, x_max]]], min_size=box
+        )
+        self.window.view.selected_roi = None
+        self.update_roi_display()
         self.window.draw_frame()
-        self.window.view.numeric_roi = True
+
+    def on_edit_rois(self) -> None:
+        """Open (or raise) the ROI management sub-dialog."""
+        if self.roi_dialog is None:
+            self.roi_dialog = ROIDialog(self.window)
+        self.roi_dialog.update_table()
+        self.roi_dialog.show()
+        self.roi_dialog.raise_()
+        self.roi_dialog.activateWindow()
 
     def on_fit_method_changed(self) -> None:
         """Enable/disable GPU fitting checkbox based on selected fit
@@ -1209,17 +1638,24 @@ class ParametersDialog(lib.Dialog):
             self.window.frame_range = None
 
     def on_frames_edit_finished(self) -> None:
-        """Handle the completion of frames editing."""
+        """Handle the completion of frames editing. Parses one or more
+        semicolon-separated ``min,max`` segments (1-indexed, inclusive),
+        clamps each to the movie length, and stores them as a list of
+        0-indexed ``[lo, hi]`` segments in ``window.frame_range``."""
         if not self.window.movie or self.frames_edit.text() == "":
             return
-        text = self.frames_edit.text().split(",")
-        min_frame, max_frame = [int(_) for _ in text]
-        frame_range = [
-            max(1, min_frame),
-            min(len(self.window.movie), max_frame),
-        ]
-        self.window.frame_range = [frame_range[0] - 1, frame_range[1] - 1]
-        self.frames_edit.setText(f"{frame_range[0]},{frame_range[1]}")
+        n_frames = len(self.window.movie)
+        segments = []
+        for part in self.frames_edit.text().split(";"):
+            min_frame, max_frame = [int(_) for _ in part.split(",")]
+            min_frame = max(1, min_frame)
+            max_frame = min(n_frames, max_frame)
+            segments.append([min_frame, max_frame])
+        # store as 0-indexed inclusive segments
+        self.window.frame_range = [[lo - 1, hi - 1] for lo, hi in segments]
+        self.frames_edit.setText(
+            "; ".join(f"{lo},{hi}" for lo, hi in segments)
+        )
 
     def load_z_calib(self) -> None:
         """Load the 3D calibration from a user-selected YAML file."""
@@ -1645,9 +2081,38 @@ class Window(QtWidgets.QMainWindow):
         self.user_settings_dialog = lib.UserSettingsDialog(self)
         self.init_menu_bar()
         self.view = View(self)
-        self.setCentralWidget(self.view)
         self.scene = Scene(self)
         self.view.setScene(self.scene)
+        # Slider below the movie for quickly navigating between frames.
+        self.frame_slider = QtWidgets.QSlider(QtCore.Qt.Orientation.Horizontal)
+        self.frame_slider.setMinimum(0)
+        self.frame_slider.setMaximum(0)
+        self.frame_slider.setEnabled(False)
+        self.frame_slider.setMaximumHeight(15)
+        self.frame_slider.setStyleSheet(
+            """
+            QSlider::groove:horizontal {
+                height: 4px;
+                background: #b0b0b0;
+                border-radius: 2px;
+            }
+            QSlider::handle:horizontal {
+                width: 10px;
+                height: 12px;
+                margin: -5px 0;
+                border-radius: 3px;
+                background: #5a5a5a;
+            }
+            """
+        )
+        self.frame_slider.valueChanged.connect(self.on_frame_slider_changed)
+        central_widget = QtWidgets.QWidget()
+        central_layout = QtWidgets.QVBoxLayout(central_widget)
+        central_layout.setContentsMargins(0, 0, 0, 0)
+        central_layout.setSpacing(0)
+        central_layout.addWidget(self.view)
+        central_layout.addWidget(self.frame_slider)
+        self.setCentralWidget(central_widget)
         self.status_bar = self.statusBar()
         self.status_bar_frame_indicator = QtWidgets.QLabel()
         self.status_bar.addPermanentWidget(self.status_bar_frame_indicator)
@@ -1666,7 +2131,9 @@ class Window(QtWidgets.QMainWindow):
         # without moving the markers shown on screen.
         self.locs_display = None
         self.movie_path = []
-        self.frame_range = None  # analyze all frames by default
+        # None analyzes all frames; otherwise a list of 0-indexed
+        # inclusive [lo, hi] segments to restrict identification to
+        self.frame_range = None
         self.info = []
         self.extra_info = []
         self._active_worker = None
@@ -1791,12 +2258,34 @@ class Window(QtWidgets.QMainWindow):
         view_menu = menu_bar.addMenu("View")
         previous_frame_action = view_menu.addAction("Previous frame")
         previous_frame_action.setShortcut("Left")
-        previous_frame_action.triggered.connect(self.previous_frame)
+        previous_frame_action.triggered.connect(lambda: self.previous_frame(1))
         view_menu.addAction(previous_frame_action)
         next_frame_action = view_menu.addAction("Next frame")
         next_frame_action.setShortcut("Right")
-        next_frame_action.triggered.connect(self.next_frame)
+        next_frame_action.triggered.connect(lambda: self.next_frame(1))
         view_menu.addAction(next_frame_action)
+        # Jump multiple frames at once using modifier keys with the arrows.
+        # Shift -> 10, Ctrl/Cmd -> 100
+        for step, modifier in (
+            (10, "Shift"),
+            (100, "Ctrl"),
+        ):
+            jump_back_action = view_menu.addAction(
+                "Previous {} frames".format(step)
+            )
+            jump_back_action.setShortcut("{}+Left".format(modifier))
+            jump_back_action.triggered.connect(
+                lambda *_, s=step: self.previous_frame(s)
+            )
+            view_menu.addAction(jump_back_action)
+            jump_forward_action = view_menu.addAction(
+                "Next {} frames".format(step)
+            )
+            jump_forward_action.setShortcut("{}+Right".format(modifier))
+            jump_forward_action.triggered.connect(
+                lambda *_, s=step: self.next_frame(s)
+            )
+            view_menu.addAction(jump_forward_action)
         view_menu.addSeparator()
         first_frame_action = view_menu.addAction("First frame")
         first_frame_action.setShortcut("Home")
@@ -1911,12 +2400,17 @@ class Window(QtWidgets.QMainWindow):
             "Open image sequence",
             directory=dir,
             filter=(
-                "All supported formats (*.raw *.tif *.nd2 *.ims *.tiff *.stk)"
+                "All supported formats ("
+                + " ".join("*" + e for e in io.MOVIE_EXTENSIONS)
+                + ")"
                 ";;Raw files (*.raw)"
-                ";;Tif images (*.tif)"
+                ";;Tif images (*.tif *.tiff)"
+                ";;BigTiff (*.btf *.tf8 *.tf2)"
+                ";;Zeiss LSM (*.lsm)"
+                ";;Zeiss CZI (*.czi)"
+                ";;Leica LIF (*.lif)"
                 ";;ImaRIS IMS (*.ims)"
-                ";;Nd2 files (*.nd2);;"
-                ";;Tiff images (*.tiff)"
+                ";;Nd2 files (*.nd2)"
                 ";;STK files (*.stk)"
             ),
         )
@@ -1928,8 +2422,13 @@ class Window(QtWidgets.QMainWindow):
         """Open a movie file."""
         t0 = time.time()
 
-        if path.endswith(".ims"):
+        if path.lower().endswith((".ims", ".czi", ".lif")):
+            # Multi-channel .ims/.czi/.lif files prompt for a channel.
             prompt_info = self.prompt_channel
+        elif path.lower().endswith(io.TIFF_EXTENSIONS + (".stk", ".nd2")):
+            # For these formats the metadata may fail to parse; prompt the
+            # user to enter it manually as a fallback.
+            prompt_info = self.prompt_movie_info
         else:
             prompt_info = self.prompt_info
 
@@ -1943,6 +2442,10 @@ class Window(QtWidgets.QMainWindow):
             self.locs = None
             self.locs_display = None
             self.ready_for_fit = False
+            self.frame_slider.setEnabled(True)
+            self.frame_slider.setMaximum(
+                lib.get_from_metadata(self.info, "Frames") - 1
+            )
             self.set_frame(0)
             self.fit_in_view()
             self.parameters_dialog.set_camera_parameters(self.info[0])
@@ -2103,7 +2606,7 @@ class Window(QtWidgets.QMainWindow):
         self.last_identification_info = {
             "Box Size": self.parameters_dialog.box_spinbox.value(),
             "Min. Net Gradient": self.parameters_dialog.mng_slider.value(),
-            "ROI": self.view.roi,
+            "ROI": self.view.rois,
             "Frame bounds": self.frame_range,
         }
         self.ready_for_fit = True
@@ -2119,23 +2622,38 @@ class Window(QtWidgets.QMainWindow):
         if ok:
             return info, save
 
+    def prompt_movie_info(
+        self, partial_info: dict | None = None
+    ) -> tuple[dict, bool] | None:
+        """Prompt for movie metadata when it cannot be read from the
+        file (fallback for .tif/.stk/.nd2 movies). Pre-filled with the
+        dimensions that could still be read. Returns ``(info, save)`` or
+        None if cancelled."""
+        info, save, ok = PromptMovieInfoDialog.getMovieSpecs(
+            self, partial_info
+        )
+        if ok:
+            return info, save
+
     def prompt_channel(self, channels: list[str]) -> str | None:
-        """Prompt for channel selection for IMARIS files."""
+        """Prompt for channel selection for multi-channel movies
+        (IMARIS .ims, Zeiss .czi, Leica .lif)."""
         channel, ok = PromptChannelDialog.getMovieSpecs(self, channels)
         if ok:
             return channel
 
-    def previous_frame(self) -> None:
-        """Navigate to the previous frame and display it."""
+    def previous_frame(self, step: int = 1) -> None:
+        """Navigate backwards by ``step`` frames and display the result."""
         if self.movie is not None:
             if self.curr_frame_number > 0:
-                self.set_frame(self.curr_frame_number - 1)
+                self.set_frame(max(0, self.curr_frame_number - step))
 
-    def next_frame(self) -> None:
-        """Navigate to the next frame and display it."""
+    def next_frame(self, step: int = 1) -> None:
+        """Navigate forwards by ``step`` frames and display the result."""
         if self.movie is not None:
-            if self.curr_frame_number + 1 < self.info[0]["Frames"]:
-                self.set_frame(self.curr_frame_number + 1)
+            last_frame = self.info[0]["Frames"] - 1
+            if self.curr_frame_number < last_frame:
+                self.set_frame(min(last_frame, self.curr_frame_number + step))
 
     def first_frame(self) -> None:
         """Navigate to the first frame and display it."""
@@ -2171,8 +2689,19 @@ class Window(QtWidgets.QMainWindow):
             self.contrast_dialog.change_contrast_silently(black, white)
         self.draw_frame()
         self.status_bar_frame_indicator.setText(
-            "{:,}/{:,}".format(number + 1, self.info[0]["Frames"])
+            "{:,}/{:,}".format(
+                number + 1, lib.get_from_metadata(self.info, "Frames")
+            )
         )
+        # Keep the slider in sync without re-triggering set_frame.
+        self.frame_slider.blockSignals(True)
+        self.frame_slider.setValue(number)
+        self.frame_slider.blockSignals(False)
+
+    def on_frame_slider_changed(self, value: int) -> None:
+        """Navigate to the frame selected with the slider."""
+        if self.movie is not None and value != self.curr_frame_number:
+            self.set_frame(value)
 
     def draw_frame(self) -> None:
         """Draw the current frame - show the movie frame, apply
@@ -2203,20 +2732,21 @@ class Window(QtWidgets.QMainWindow):
             self.scene = Scene(self)
             self.scene.addPixmap(pixmap)
             self.view.setScene(self.scene)
-            # draw the ROI rectangle if applicable
-            if self.view.roi is not None:
-                [[y_min, x_min], [y_max, x_max]] = self.view.roi
-                topleft_xy = self.view.mapFromScene(x_min, y_min)
-                bottomright_xy = self.view.mapFromScene(x_max, y_max)
-                topleft = QtCore.QPoint(topleft_xy.x(), topleft_xy.y())
-                bottomright = QtCore.QPoint(
-                    bottomright_xy.x(),
-                    bottomright_xy.y(),
+            # draw the ROI rectangles (in scene/pixel coordinates)
+            for i, ((y_min, x_min), (y_max, x_max)) in enumerate(
+                self.view.rois
+            ):
+                color = (
+                    QtGui.QColor("cyan")
+                    if i == self.view.selected_roi
+                    else QtGui.QColor("blue")
                 )
-                self.view.rubberband.setGeometry(
-                    QtCore.QRect(topleft, bottomright)
+                pen = QtGui.QPen(color)
+                pen.setCosmetic(True)  # constant width regardless of zoom
+                self.scene.addRect(
+                    QtCore.QRectF(x_min, y_min, x_max - x_min, y_max - y_min),
+                    pen,
                 )
-                self.view.rubberband.show()
             if self.ready_for_fit:
                 identifications_frame = self.identifications[
                     self.identifications.frame == self.curr_frame_number
@@ -2232,7 +2762,7 @@ class Window(QtWidgets.QMainWindow):
                         self.parameters["Min. Net Gradient"],
                         self.parameters["Box Size"],
                         self.curr_frame_number,
-                        roi=self.view.roi,
+                        roi=self.view.rois,
                         frame_bounds=self.frame_range,
                     )
                     box = self.parameters["Box Size"]
@@ -2419,7 +2949,7 @@ class Window(QtWidgets.QMainWindow):
     def on_identify_finished(
         self,
         parameters: dict,
-        roi: list[int],
+        roi: list,
         elapsed_time: float,
         identifications: pd.DataFrame,
         fit_afterwards: bool,
@@ -2439,8 +2969,9 @@ class Window(QtWidgets.QMainWindow):
             box = parameters["Box Size"]
             mng = parameters["Min. Net Gradient"]
             message = (
-                f"Identified {n_identifications:,} spots (Box Size: {box}; "
-                f"Min. Net Gradient: {mng}). Ready for fit."
+                f"Identified {n_identifications:,} spots in {elapsed_time:.2f}"
+                f" seconds. (Box Size: {box}; Min. Net Gradient: {mng}). "
+                "Ready for fit."
             )
             self.status_bar.showMessage(message)
             self.identifications = identifications
@@ -2489,6 +3020,7 @@ class Window(QtWidgets.QMainWindow):
                 use_gpufit,
             )
             self.fit_worker.progressMade.connect(self.on_fit_progress)
+            self.fit_worker.cutProgressMade.connect(self.on_cut_progress)
             self.fit_worker.finished.connect(self.on_fit_finished)
             self.fit_worker.aborted.connect(self.on_worker_aborted)
             self._active_worker = self.fit_worker
@@ -2519,6 +3051,11 @@ class Window(QtWidgets.QMainWindow):
         self._active_worker = self.fit_z_worker
         self.abort_action.setEnabled(True)
         self.fit_z_worker.start()
+
+    def on_cut_progress(self, curr: int, total: int) -> None:
+        """Update the status bar with the spot cutting progress."""
+        message = f"Extracting spot {curr:,} / {total:,} ..."
+        self.status_bar.showMessage(message)
 
     def on_fit_progress(self, curr: int, total: int) -> None:
         """Update the status bar with the fitting progress."""
@@ -2554,12 +3091,8 @@ class Window(QtWidgets.QMainWindow):
         base, ext = os.path.splitext(self.movie_path)
         if calibrate_z:
             self.parameters_dialog.gpufit_checkbox.setDisabled(False)
-            step, ok = QtWidgets.QInputDialog.getDouble(
-                self,
-                "3D Calibration",
-                "Calibration step size (nm):",
-                value=5,
-                decimals=2,
+            step, frames_per_step, frame_order, ok = (
+                Calibrate3DDialog.getCalibrationSpecs(self)
             )
             if ok:
                 base, ext = os.path.splitext(self.movie_path)
@@ -2576,6 +3109,8 @@ class Window(QtWidgets.QMainWindow):
                         self.parameters_dialog.magnification_factor.value(),
                         path=path,
                         frame_bounds=self.frame_range,
+                        frames_per_step=frames_per_step,
+                        frame_order=frame_order,
                     )
                     dt = time.time() - t0
                     if dt > lib.SOUND_NOTIFICATION_DURATION:
@@ -2626,7 +3161,7 @@ class Window(QtWidgets.QMainWindow):
             self.parameters_dialog.quality_check.setEnabled(True)
 
         self.parameters_dialog.gpufit_checkbox.setDisabled(False)
-        self.status_bar.showMessage(f"Saved {len(self.locs)} localizations.")
+        self.status_bar.showMessage(f"Saved {len(self.locs):,} localizations.")
 
         # apply drift if requested
         aim_check = self.parameters_dialog.aim_undrift_checkbox.isChecked()
@@ -2928,7 +3463,7 @@ class Window(QtWidgets.QMainWindow):
             last.get(key) != value for key, value in self.parameters.items()
         ):
             return True
-        if last.get("ROI") != self.view.roi:
+        if last.get("ROI") != self.view.rois:
             return True
         if last.get("Frame bounds") != self.frame_range:
             return True
@@ -2963,7 +3498,7 @@ class IdentificationWorker(QtCore.QThread):
         super().__init__()
         self.window = window
         self.movie = window.movie
-        self.roi = window.view.roi
+        self.rois = window.view.rois
         self.frame_range = window.frame_range
         self.parameters = window.parameters
         self.fit_afterwards = fit_afterwards
@@ -2976,21 +3511,24 @@ class IdentificationWorker(QtCore.QThread):
         t0 = time.time()
         # we ignore info since we will merge the metadata from identification
         # as well when saving localizations
-        identifications, info = localize.identify(
+        result = localize.identify(
             movie=self.movie,
             minimum_ng=self.parameters["Min. Net Gradient"],
             box=self.parameters["Box Size"],
-            roi=self.roi,
+            roi=self.rois,
             frame_bounds=self.frame_range,
             threaded=True,
             progress_callback=self.on_progress,
             abort_callback=self.isInterruptionRequested,
-            return_info=True,
         )
+        if result is None:  # handle aborted process
+            self.aborted.emit()
+            return
+        identifications, info = result
         elapsed_time = time.time() - t0
         self.finished.emit(
             self.parameters,
-            self.roi,
+            self.rois,
             elapsed_time,
             identifications,
             self.fit_afterwards,
@@ -3003,6 +3541,7 @@ class FitWorker(QtCore.QThread):
     multiprocessing and update the status bar accordingly."""
 
     progressMade = QtCore.pyqtSignal(int, int)
+    cutProgressMade = QtCore.pyqtSignal(int, int)
     finished = QtCore.pyqtSignal(pd.DataFrame, float, bool, bool)
     aborted = QtCore.pyqtSignal()
 
@@ -3031,12 +3570,22 @@ class FitWorker(QtCore.QThread):
         self.fit_z = fit_z
         self.calibrate_z = calibrate_z
         self.N = len(identifications)
+        self._last_cut_emit = 0
         if use_gpufit and method == "gausslq":
             method = "gausslq-gpu"
         self.method = method
 
     def on_progress(self, n_done: int) -> None:
         self.progressMade.emit(n_done, self.N)
+
+    def on_cut_progress(self, n_done: int) -> None:
+        # The underlying cut loop may call back very frequently (e.g. once
+        # per frame), so throttle GUI updates to ~1% increments to avoid
+        # flooding the main thread's event queue. Always emit the last one.
+        step = max(1, self.N // 1000)
+        if n_done - self._last_cut_emit >= step or n_done >= self.N:
+            self._last_cut_emit = n_done
+            self.cutProgressMade.emit(n_done, self.N)
 
     def run(self) -> None:
         t0 = time.time()
@@ -3055,6 +3604,7 @@ class FitWorker(QtCore.QThread):
             multiprocess=True,
             progress_callback=self.on_progress,
             abort_callback=self.isInterruptionRequested,
+            cut_progress_callback=self.on_cut_progress,
         )
         if locs is None:  # handle aborted process
             self.aborted.emit()
@@ -3193,20 +3743,11 @@ def main():
     app = QtWidgets.QApplication(sys.argv)
     window = Window()
 
-    from . import plugins
+    # load plugins from ~/.picasso/plugins
+    from .plugins_loader import load_plugins, add_plugins_menu_actions
 
-    def iter_namespace(pkg):
-        return pkgutil.iter_modules(pkg.__path__, pkg.__name__ + ".")
-
-    plugins = [
-        importlib.import_module(name)
-        for finder, name, ispkg in iter_namespace(plugins)
-    ]
-
-    for plugin in plugins:
-        p = plugin.Plugin(window)
-        if p.name == "localize":
-            p.execute()
+    load_plugins(window, "localize")
+    add_plugins_menu_actions(window, "localize")
 
     window.show()
 

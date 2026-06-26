@@ -11,8 +11,6 @@ GUI for designing rectangular rothemund origami.
 import glob
 import os
 import sys
-import importlib
-import pkgutil
 from math import sqrt
 from copy import deepcopy
 
@@ -1798,20 +1796,11 @@ def main():
     app = QtWidgets.QApplication(sys.argv)
     window = MainWindow()
 
-    from . import plugins
+    # load plugins from ~/.picasso/plugins
+    from .plugins_loader import load_plugins, add_plugins_menu_actions
 
-    def iter_namespace(pkg):
-        return pkgutil.iter_modules(pkg.__path__, pkg.__name__ + ".")
-
-    plugins = [
-        importlib.import_module(name)
-        for finder, name, ispkg in iter_namespace(plugins)
-    ]
-
-    for plugin in plugins:
-        p = plugin.Plugin(window)
-        if p.name == "design":
-            p.execute()
+    load_plugins(window, "design")
+    add_plugins_menu_actions(window, "design")
 
     window.show()
 
