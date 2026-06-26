@@ -565,7 +565,7 @@ class TestRotation:
             _, im_tuple = render.render(
                 locs_3d,
                 info,
-                oversampling=5,
+                disp_px_size=25,
                 viewport=FULL_VIEWPORT,
                 blur_method=blur_method,
                 ang=ang,
@@ -573,7 +573,7 @@ class TestRotation:
             _, im_rotation = render.render(
                 locs_3d,
                 info,
-                oversampling=5,
+                disp_px_size=25,
                 viewport=FULL_VIEWPORT,
                 blur_method=blur_method,
                 ang=render.rotation_matrix(*ang),
