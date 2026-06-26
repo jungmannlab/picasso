@@ -33,6 +33,7 @@ Last change: 26-JUN-2026 CEST
 #### SPINNA
 - Fixed verbose for batch analysis
 - Batch analysis allows for specifying fitting mode (brute force/coarse to fine/bayesian)
+- Batch analysis closes unused plots to save RAM
 - Removed the obsolete line of code in `_fill3d` ([#682](https://github.com/jungmannlab/picasso/issues/682)). This should not affect standard functionality of 3D masks; only the usage of `render_hist3d_anisotropic` directly might be affected 
 
 #### *Other improvements:*

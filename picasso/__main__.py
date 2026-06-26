@@ -1861,6 +1861,8 @@ def _spinna_plot_nnd(
     save_filename: str,
 ) -> None:
     """Compute and save NND plots for all target pairs."""
+    import matplotlib.pyplot as plt
+
     nn_counts = {
         f"{t1}-{t2}": nn_plotted
         for i, t1 in enumerate(targets)
@@ -1907,6 +1909,9 @@ def _spinna_plot_nnd(
                 f"{save_filename}_NND_{t1}_{t2}.{_}" for _ in ["png", "svg"]
             ],
         )
+        # release the figure; otherwise pyplot keeps every figure of
+        # every batch row in memory (growing RAM + "too many figures")
+        plt.close(fig)
 
 
 def _spinna_process_row(
