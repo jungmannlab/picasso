@@ -418,7 +418,7 @@ def _resolve_progress(
         or isinstance(progress, lib.ProgressDialog)
     ), "progress must be None, 'console', or a ProgressDialog instance."
     if progress is None:
-        return None
+        return lib.MockProgress().set_value
     if progress == "console":
         tqdm_progress = lib.TqdmProgress(description=description)
         tqdm_progress.get_iterator(0, total, unit=unit)  # arm the tqdm bar
