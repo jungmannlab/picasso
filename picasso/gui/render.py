@@ -11847,8 +11847,11 @@ class Window(QtWidgets.QMainWindow):
             self.user_settings_dialog,
         ]
 
-        # menu bar
-        self.menu_bar = self.menuBar()
+        # setMenuBar deletes any previously installed bar, so re-running
+        # initUI (e.g. on "Remove all localizations") replaces it
+        # cleanly instead of appending duplicate menus.
+        self.menu_bar = QtWidgets.QMenuBar()
+        self.setMenuBar(self.menu_bar)
 
         # menu bar - File
         file_menu = self.menu_bar.addMenu("File")
@@ -12184,17 +12187,21 @@ class Window(QtWidgets.QMainWindow):
         for action in self.actions_3d:
             action.setVisible(False)
 
-        # add plugins; if it's the first initialization
-        # (plugins_loaded=False), they are not added because they're
-        # loaded in __main___. Otherwise, (remove all locs) plugins
-        # need to be added to the menu bar.
-        self.plugin_menu = self.menu_bar.addMenu("Plugins")  # do not delete
+        # Plugins menu. On the first initialization (plugins_loaded=False)
+        # it is left empty here and populated by __main__, which discovers
+        # and loads the plugins. When the menu bar is rebuilt later
+        # (plugins_loaded=True, e.g. "Remove all localizations"), the
+        # already-loaded plugins and the standard plugin actions are
+        # restored so the menu matches startup.
+        self.plugin_menu = self.menu_bar.addMenu("Plugins")
         if plugins_loaded:
-            try:
-                for plugin in self.plugins:
-                    plugin.execute()
-            except Exception:
-                pass
+            from .plugins_loader import (
+                add_plugins_menu_actions,
+                execute_plugins,
+            )
+
+            execute_plugins(self)
+            add_plugins_menu_actions(self, "render")
 
         # De-select all menus until file is loaded
         self.menus = [
@@ -13234,11 +13241,10 @@ class Window(QtWidgets.QMainWindow):
             self.view.save_picks(path)
 
     def remove_locs(self) -> None:
-        """Reset Window."""
+        """Remove all localizations and reset the window to its initial
+        state by rebuilding the view, dialogs and menu bar."""
         for dialog in self.dialogs:
             dialog.close()
-        self.menu_bar.clear()  # otherwise the menu bar is doubled
-        self.setWindowTitle(f"Picasso v{__version__}: Render")
         self.initUI(plugins_loaded=True)
 
     def show_metadata(self) -> None:

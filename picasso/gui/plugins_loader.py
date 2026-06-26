@@ -74,6 +74,22 @@ def load_plugins(window, app_name: str) -> list:
     return plugins
 
 
+def execute_plugins(window) -> None:
+    """Re-run ``execute`` on the plugins already loaded into ``window``.
+
+    Used when the menu bar is rebuilt (e.g. "Remove all localizations") to
+    re-add plugin actions to the new ``window.plugin_menu`` without
+    re-discovering plugins from disk. Tolerant: a failing plugin is logged
+    and skipped.
+    """
+    for plugin in getattr(window, "plugins", []):
+        try:
+            plugin.execute()
+        except Exception:
+            print(f"Failed to execute plugin {plugin!r}:")
+            traceback.print_exc()
+
+
 def add_plugins_menu_actions(window, app_name: str) -> None:
     """Append a separator plus 'Open plugins folder...' and 'Reload plugins'
     actions to ``window.plugin_menu``."""

@@ -30,6 +30,7 @@ Last change: 26-JUN-2026 CEST
 - Faster AIM through smarter implementation
 - Faster and more memory efficient (especially for large datasets) SMLM clusterer + progress bar added
 - Progress bar for finding cluster centers
+- Fixed removed plugins menu after removing all localizations
 
 #### SPINNA
 - Fixed verbose for batch analysis
