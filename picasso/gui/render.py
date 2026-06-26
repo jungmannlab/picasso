@@ -7706,7 +7706,6 @@ class View(QtWidgets.QLabel):
         """
         # for converting z coordinates
         pixelsize = self.pixelsize
-        status = lib.StatusDialog("Clustering localizations", self)
 
         # keep group info if already present
         if "group" in self.locs[channel].columns:
@@ -7715,6 +7714,10 @@ class View(QtWidgets.QLabel):
         else:
             locs = self.locs[channel]
 
+        progress = lib.ProgressDialog(
+            "Clustering localizations", 0, len(locs), self
+        )
+        progress.set_value(0)
         clustered_locs, new_info = clusterer.cluster(
             locs,
             radius_xy,
@@ -7723,8 +7726,9 @@ class View(QtWidgets.QLabel):
             radius_z=radius_z,
             pixelsize=pixelsize,
             return_info=True,
+            progress=progress.set_value,
         )
-        status.close()
+        progress.close()
         info = self.infos[channel] + [new_info]
 
         # save locs

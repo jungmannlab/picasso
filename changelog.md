@@ -1,6 +1,6 @@
 # Changelog
 
-Last change: 24-JUN-2026 CEST
+Last change: 26-JUN-2026 CEST
 
 ## 0.11.0
 
@@ -27,6 +27,7 @@ Last change: 24-JUN-2026 CEST
 #### Render
 - Improved measure tool
 - Faster AIM through smarter implementation
+- Faster and more memory efficient (especially for large datasets) SMLM clusterer + progress bar added
 
 #### SPINNA
 - Fixed verbose for batch analysis

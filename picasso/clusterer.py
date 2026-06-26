@@ -19,6 +19,7 @@ SMLM clusterer is based on:
 
 from __future__ import annotations
 
+import itertools
 from typing import Callable
 
 import numpy as np
@@ -111,11 +112,97 @@ def frame_analysis(
     return labels
 
 
+# number of points whose neighbors are queried from the KDTree at once;
+# bounds peak memory and provides progress granularity in ``_cluster``
+_NEIGHBOR_BATCH_SIZE = 100_000
+
+
+def _build_neighbor_graph(
+    tree: KDTree,
+    X: lib.FloatArray2D,
+    radius: float,
+    progress: Callable[[int], None] | None = None,
+) -> tuple[lib.IntArray1D, lib.IntArray1D]:
+    """Build a compact (CSR-like) neighbor graph for all points in X.
+
+    For each point, finds the indices of all points within ``radius``
+    (including the point itself). Rather than keeping scipy's
+    list-of-lists (Python ints, very memory heavy for millions of
+    points), neighbors are stored as two flat NumPy arrays:
+
+    * ``indptr`` of shape (n_points + 1,); the neighbors of point ``i``
+      are ``indices[indptr[i]:indptr[i + 1]]``.
+    * ``indices``, the concatenated neighbor indices (int32).
+
+    The tree is queried in batches of ``_NEIGHBOR_BATCH_SIZE`` points,
+    so only one batch of Python lists is alive at any time and progress
+    can be reported.
+
+    Parameters
+    ----------
+    tree : scipy.spatial.KDTree
+        KDTree built from ``X``.
+    X : lib.FloatArray2D
+        Array of points of shape (n_points, n_dim).
+    radius : float
+        Clustering radius.
+    progress : callable or None, optional
+        Called with the cumulative number of points processed after
+        each batch. If None, a tqdm progress bar is shown.
+
+    Returns
+    -------
+    indptr : lib.IntArray1D
+        Neighbor offsets, shape (n_points + 1,), dtype int64.
+    indices : lib.IntArray1D
+        Concatenated neighbor indices, dtype int32.
+    """
+    n_points = X.shape[0]
+    counts = np.empty(n_points, dtype=np.int32)
+    index_chunks = []
+
+    n_batches = int(np.ceil(n_points / _NEIGHBOR_BATCH_SIZE))
+    iterator = range(n_batches)
+    if progress is None:
+        iterator = tqdm(iterator, desc="Clustering (finding neighbors)")
+
+    for b in iterator:
+        start = b * _NEIGHBOR_BATCH_SIZE
+        end = min(start + _NEIGHBOR_BATCH_SIZE, n_points)
+        # neighbors for this batch as a list of lists; discarded once
+        # flattened into compact arrays below
+        nb = tree.query_ball_point(X[start:end], radius, workers=-1)
+        batch_counts = np.fromiter(
+            (len(n) for n in nb), dtype=np.int32, count=len(nb)
+        )
+        counts[start:end] = batch_counts
+        total = int(batch_counts.sum())
+        if total:
+            index_chunks.append(
+                np.fromiter(
+                    itertools.chain.from_iterable(nb),
+                    dtype=np.int32,
+                    count=total,
+                )
+            )
+        if progress is not None:
+            progress(end)
+
+    indptr = np.zeros(n_points + 1, dtype=np.int64)
+    np.cumsum(counts, out=indptr[1:])
+    if index_chunks:
+        indices = np.concatenate(index_chunks)
+    else:
+        indices = np.empty(0, dtype=np.int32)
+    return indptr, indices
+
+
 def _cluster(
     X: lib.FloatArray2D,
     radius: float,
     min_locs: int,
     frame: pd.Series | None = None,
+    progress: Callable[[int], None] | None = None,
 ) -> lib.IntArray1D:
     """Cluster points given by X with a given clustering radius and
     minimum number of localizations within that radius using KDTree.
@@ -127,6 +214,10 @@ def _cluster(
        within their neighborhood.
     4. Assign cluster labels to all points. If two local maxima are
        within the radius from each other, combine such clusters.
+
+    The neighbor graph is built in batches and stored as compact NumPy
+    arrays (see ``_build_neighbor_graph``) so peak memory stays bounded
+    even for tens of millions of localizations.
 
     Based on the algorithm published by Schichthaerle et al.
     Nature Comm, 2021 (10.1038/s41467-021-22606-1) and first implemented
@@ -144,6 +235,10 @@ def _cluster(
     frame : pd.Series or None, optional
         Frame number of each localization. If None, no frame analysis
         is performed.
+    progress : callable or None, optional
+        Called with the cumulative number of localizations processed
+        while building the neighbor graph (the main, O(n) step). If
+        None, a tqdm progress bar is shown.
 
     Returns
     -------
@@ -151,40 +246,41 @@ def _cluster(
         Cluster labels for each localization (-1 means no cluster
         assigned).
     """
-    # build kdtree (use cKDTree in case user did not update scipy)
-    tree = KDTree(X)
+    n_points = X.shape[0]
 
-    # find neighbors for each point within radius
-    neighbors = tree.query_ball_tree(tree, radius)
+    # build kdtree and a compact, batched neighbor graph (bounded memory)
+    tree = KDTree(X)
+    indptr, indices = _build_neighbor_graph(tree, X, radius, progress)
+
+    # number of neighbors of each point (point is its own neighbor)
+    counts = np.diff(indptr).astype(np.int32)
 
     # find local maxima, i.e., points with the most neighbors within
-    # their neighborhood
-    lm = np.zeros(X.shape[0], dtype=np.int8)
-    for i in range(len(lm)):
-        idx = neighbors[i]  # indeces of points that are neighbors of i
-        n = len(idx)  # number of neighbors of i
-        if n > min_locs:  # note that i is included in its neighbors
-            # if i has the most neighbors in its neighborhood
-            if n == max([len(neighbors[_]) for _ in idx]):
-                lm[i] = 1
+    # their neighborhood. ``reduceat`` computes, per point, the maximum
+    # neighbor count over that point's neighborhood in one vectorised
+    # pass (no Python loop over all points).
+    if n_points:
+        neighbor_max = np.maximum.reduceat(counts[indices], indptr[:-1])
+    else:
+        neighbor_max = np.empty(0, dtype=np.int32)
+    # note that a point is included in its own neighbors
+    lm = (counts > min_locs) & (counts == neighbor_max)
 
     # assign cluster labels to all points (-1 means no cluster)
     # if two local maxima are within radius from each other, combine
     # such clusters
-    labels = -1 * np.ones(X.shape[0], dtype=np.int32)  # cluster labels
-    lm_idx = np.where(lm == 1)[0]  # indeces of local maxima
+    labels = -1 * np.ones(n_points, dtype=np.int32)  # cluster labels
+    lm_idx = np.where(lm)[0]  # indeces of local maxima
 
     for count, i in enumerate(lm_idx):  # for each local maximum
+        neighbors_i = indices[indptr[i] : indptr[i + 1]]
         label = labels[i]
         if label == -1:  # if lm not assigned yet
-            labels[neighbors[i]] = count
+            labels[neighbors_i] = count
         else:
-            # indeces of locs that were not assigned to any cluster
-            idx = [
-                neighbors[i][_]
-                for _ in np.where(labels[neighbors[i]] == -1)[0]
-            ]
-            if len(idx):  # if such a loc exists, assign it to a cluster
+            # locs in the neighborhood not yet assigned to any cluster
+            idx = neighbors_i[labels[neighbors_i] == -1]
+            if idx.size:  # if such a loc exists, assign it to a cluster
                 labels[idx] = label
 
     # check for number of locs per cluster to be above min_locs
@@ -206,6 +302,7 @@ def cluster_2D(
     radius: float,
     min_locs: int,
     fa: bool,
+    progress: Callable[[int], None] | None = None,
 ) -> lib.IntArray1D:
     """Prepare 2D input to be used by ``_cluster``.
 
@@ -219,6 +316,10 @@ def cluster_2D(
         Minimum number of localizations in a cluster.
     fa : bool
         True, if basic frame analysis is to be performed.
+    progress : callable or None, optional
+        Called with the cumulative number of localizations processed
+        while building the neighbor graph. If None, a tqdm progress bar
+        is shown.
 
     Returns
     -------
@@ -233,7 +334,7 @@ def cluster_2D(
     else:
         frame = locs["frame"]
 
-    labels = _cluster(X, radius, min_locs, frame)
+    labels = _cluster(X, radius, min_locs, frame, progress)
 
     return labels
 
@@ -244,6 +345,7 @@ def cluster_3D(
     radius_z: float,
     min_locs: int,
     fa: bool,
+    progress: Callable[[int], None] | None = None,
 ) -> lib.IntArray1D:
     """Prepare 3D input to be used by ``_cluster``.
 
@@ -267,6 +369,10 @@ def cluster_3D(
         Minimum number of localizations in a cluster.
     fa : bool
         True, if basic frame analysis is to be performed.
+    progress : callable or None, optional
+        Called with the cumulative number of localizations processed
+        while building the neighbor graph. If None, a tqdm progress bar
+        is shown.
 
     Returns
     -------
@@ -283,7 +389,7 @@ def cluster_3D(
     else:
         frame = locs["frame"]
 
-    labels = _cluster(X, radius, min_locs, frame)
+    labels = _cluster(X, radius, min_locs, frame, progress)
 
     return labels
 
@@ -296,6 +402,7 @@ def cluster(
     radius_z: float | None = None,
     pixelsize: float | None = None,
     return_info: bool = True,  # TODO: remove in v0.12.0
+    progress: Callable[[int], None] | None = None,
 ) -> tuple[pd.DataFrame, dict] | pd.DataFrame:
     """Cluster localizations from single molecules (SMLM clusterer).
 
@@ -341,6 +448,11 @@ def cluster(
         clustered localizations and info is a dictionary containing
         clustering information. Will be removed in v0.12.0 and both
         locs and metadata will be returned.
+    progress : callable or None, optional
+        Called with the cumulative number of localizations processed
+        while building the neighbor graph (the main, O(n) step). Useful
+        for wiring a progress bar in a GUI. If None, a tqdm progress bar
+        is shown in the console.
 
     Returns
     -------
@@ -372,6 +484,7 @@ def cluster(
             radius_z,
             min_locs,
             frame_analysis,
+            progress,
         )
     else:
         labels = cluster_2D(
@@ -379,6 +492,7 @@ def cluster(
             radius_xy,
             min_locs,
             frame_analysis,
+            progress,
         )
     locs = extract_valid_labels(locs, labels)
     if "z" in locs.columns:
