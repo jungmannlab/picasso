@@ -69,6 +69,7 @@ cuda13 = [
 gpu = [
     "picassosr[cuda12]"
 ]
+test = ["pytest>=6.0.0",]
 dev = [
     "build",
     "black",
@@ -91,13 +92,13 @@ formats = [
 ]
 installer = [
     "PyQt6==6.11.0",
-    "numpy==2.4.4",
+    "numpy==2.4.4; python_version>='3.11'",
     "matplotlib==3.10.8",
     "h5py==3.16.0",
     "numba==0.65.0",
-    "scipy==1.17.1",
+    "scipy==1.17.1; python_version>='3.11'",
     "pandas==2.3.3",
-    "tables==3.11.1",
+    "tables==3.11.1; python_version>='3.11'",
     "pyyaml==6.0.3",
     "scikit-learn==1.7.2",
     "tqdm==4.67.3",
@@ -110,10 +111,10 @@ installer = [
     "playsound3==3.3.1",
     "imageio==2.37.3",
     "imageio-ffmpeg==0.6.0",
-    "tifffile==2026.4.11",
-    "czifile==2026.6.12",
-    "liffile==2026.4.11",
-    "imagecodecs==2026.6.6",
+    "tifffile==2026.4.11; python_version>='3.12'",
+    "czifile==2026.6.12; python_version>='3.12'",
+    "liffile==2026.4.11; python_version>='3.12'",
+    "imagecodecs==2026.6.6; python_version>='3.12'",
     "pyinstaller==6.19.0",
     "PyImarisWriter==0.7.0; sys_platform=='win32'",
     "hdf5plugin==6.0.0; sys_platform=='win32'"
@@ -169,3 +170,29 @@ exclude = '''
   | dist
 )
 '''
+
+[tool.uv]
+package = true
+
+conflicts = [
+    [
+        { extra = "cuda11" },
+        { extra = "cuda12" },
+    ],
+    [
+        { extra = "cuda11" },
+        { extra = "cuda13" },
+    ],
+    [
+        { extra = "cuda12" },
+        { extra = "cuda13" },
+    ],
+    [
+        { extra = "cuda11" },
+        { extra = "installer_gpu" },
+    ],
+    [
+        { extra = "cuda13" },
+        { extra = "installer_gpu" },
+    ],
+]
