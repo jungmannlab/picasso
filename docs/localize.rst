@@ -713,3 +713,5 @@ From a script
 ~~~~~~~~~~~~~
 
 The same is available from Python: :func:`picasso.localize.fit_independent` fits one set of detections per movie, and :func:`picasso.localize.fit_split_fov_independent` fits the regions of one movie, returning each region's localizations in its own coordinates together with its metadata. Both take the fitting method, the convergence settings and the spline calibration either once for all channels or once per channel. :func:`picasso.localize.split_locs_by_region` splits an existing set of localizations by region in the same way.
+
+For **in-memory or streaming input** — frames already held as a NumPy array, or arriving batch by batch from a running acquisition rather than read from a file — :func:`picasso.localize.localize_frames` runs the same identification and fit on a frame stack and returns the localization table. Its ``start_frame`` argument offsets the ``frame`` column, so successive batches carry absolute, contiguous frame numbers and concatenate into one growing table; it imports and runs with no display (no Qt). The result is identical to :func:`picasso.localize.localize` on the same frames and parameters.
