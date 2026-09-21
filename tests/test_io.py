@@ -378,6 +378,48 @@ class TestSavePicksInMetadataSetting:
         assert settings["Save picks in metadata"] is False
 
 
+class TestColorbarFormatSetting:
+    @pytest.fixture(autouse=True)
+    def _settings_file(self, tmp_path, monkeypatch):
+        # Never touch the developer's ~/.picasso/settings.yaml.
+        path = tmp_path / "settings.yaml"
+        monkeypatch.setattr(io, "_user_settings_filename", lambda: str(path))
+        return path
+
+    def test_defaults_to_png_and_is_persisted(self, _settings_file):
+        # Nothing is defined yet: the default must not crash and must be
+        # written out, so the setting is visible and editable.
+        assert io.colorbar_export_format() == ".png"
+        settings = yaml.safe_load(_settings_file.read_text())
+        assert settings["Render"]["Colorbar format"] == ".png"
+
+    def test_respects_the_setting(self, _settings_file):
+        io.save_user_settings({"Render": {"Colorbar format": ".svg"}})
+        assert io.colorbar_export_format() == ".svg"
+        io.save_user_settings({"Render": {"Colorbar format": ".png"}})
+        assert io.colorbar_export_format() == ".png"
+
+    @pytest.mark.parametrize("value", ["svg", "SVG", " .Svg "])
+    def test_accepts_the_format_as_written_by_hand(
+        self, _settings_file, value
+    ):
+        io.save_user_settings({"Render": {"Colorbar format": value}})
+        assert io.colorbar_export_format() == ".svg"
+
+    def test_falls_back_on_an_unknown_format(self, _settings_file):
+        io.save_user_settings({"Render": {"Colorbar format": ".pdf"}})
+        with pytest.warns(UserWarning):
+            assert io.colorbar_export_format() == ".png"
+
+    def test_other_settings_are_kept(self, _settings_file):
+        # Persisting the default must not wipe unrelated settings.
+        io.save_user_settings({"Render": {"Colormap": "hot"}})
+        io.colorbar_export_format()
+        settings = io.load_user_settings()
+        assert settings["Render"]["Colormap"] == "hot"
+        assert settings["Render"]["Colorbar format"] == ".png"
+
+
 class TestSaveMMMetadataSetting:
     @pytest.fixture(autouse=True)
     def _settings_file(self, tmp_path, monkeypatch):

@@ -28,6 +28,9 @@ INITIAL_REL_MAXIMUM = 0.5
 N_GROUP_COLORS = render.N_GROUP_COLORS  # 8
 SHIFT = 0.1
 ZOOM = 9 / 7
+# suffix of the color bar saved next to an image exported while
+# rendering by property
+COLORBAR_SUFFIX = "_colorbar"
 
 
 class DisplaySettingsRotationDialog(lib.Dialog):
@@ -795,13 +798,12 @@ class ViewRotation(QtWidgets.QLabel):
         (0, 0, 4 pi). For rotations around a single axis it represents
         ``_R`` exactly; in general the exact orientation is ``_R``.
         ``angx/angy/angz`` are derived from this.
-    _anchor_R : scipy.spatial.transform.Rotation
-        Reference orientation for per-segment rotation tracking (set
-        when an animation position is added or shown).
     _anchor_rotvec : np.ndarray
-        Unwrapped rotation vector (radians, scipy convention) of the
-        rotation accumulated since ``_anchor_R``; used to encode
-        rotations beyond 180 degrees in animation segments.
+        Rotation vector (radians, scipy convention, world frame)
+        accumulated since the last anchor (set when an animation
+        position is added or shown) - like ``_rotvec``, a path
+        integral, so rotations beyond 180 degrees and full turns are
+        preserved in animation segments.
     _last_mouse_x, _last_mouse_y : int
         Previous mouse position (Qt coords) during a trackball drag.
     viewport : tuple or None
@@ -816,7 +818,6 @@ class ViewRotation(QtWidgets.QLabel):
         self.window = window
         self._R = Rotation.identity()
         self._rotvec = np.zeros(3)
-        self._anchor_R = Rotation.identity()
         self._anchor_rotvec = np.zeros(3)
         self._pan_z = 0.0
         self._last_mouse_x = 0
@@ -909,13 +910,12 @@ class ViewRotation(QtWidgets.QLabel):
     def reset_rotation_anchor(self) -> None:
         """Start tracking the rotation accumulated from the current
         orientation (used for animation segments)."""
-        self._anchor_R = self._R
         self._anchor_rotvec = np.zeros(3)
 
     def rotation_since_anchor(self) -> np.ndarray:
-        """Unwrapped rotation vector (radians, scipy convention)
-        accumulated since the last anchor; magnitude may exceed pi if
-        rotated beyond 180 degrees."""
+        """Rotation vector (radians, scipy convention, world frame)
+        accumulated since the last anchor; its magnitude may exceed pi
+        and encodes full turns, e.g. 4 pi for two full turns."""
         return self._anchor_rotvec.copy()
 
     def apply_rotation(
@@ -946,19 +946,18 @@ class ViewRotation(QtWidgets.QLabel):
         # orientation cannot count full turns, so the applied rotation
         # vectors are summed instead)
         self._rotvec = self._rotvec + rotvec
-        # apply in sub-steps small enough for unambiguous unwrapping of
-        # the per-segment rotation
-        n_steps = max(1, int(np.ceil(magnitude / (np.pi / 2))))
-        step = Rotation.from_rotvec(rotvec / n_steps)
-        for _ in range(n_steps):
-            if frame == "object":
-                self._R = self._R * step
-            else:
-                self._R = step * self._R
-            relative = self._R * self._anchor_R.inv()
-            self._anchor_rotvec = render.closest_rotvec(
-                relative, self._anchor_rotvec
-            )
+        # accumulate the per-segment rotation the same way, but always
+        # in the world frame, since that is how animation segments are
+        # interpreted (``render._animation_sequence``). An object-frame
+        # delta d applied to R equals the world-frame delta R.apply(d):
+        # from_rotvec(R d) * R == R * from_rotvec(d).
+        delta = Rotation.from_rotvec(rotvec)
+        if frame == "object":
+            self._anchor_rotvec = self._anchor_rotvec + self._R.apply(rotvec)
+            self._R = self._R * delta
+        else:
+            self._anchor_rotvec = self._anchor_rotvec + rotvec
+            self._R = delta * self._R
 
     def load_saved_rotation(self, info: dict) -> None:
         """Restore the rotation saved by
@@ -1834,6 +1833,8 @@ class ViewRotation(QtWidgets.QLabel):
         scalebar = scalebar_box.isChecked()
         if scalebar:
             check_ext.append("_scalebar.png")
+        if self.x_render_state:
+            check_ext.append(COLORBAR_SUFFIX + io.colorbar_export_format())
         path, ext = lib.get_save_filename_ext_dialog(
             self,
             "Save image",
@@ -1843,6 +1844,7 @@ class ViewRotation(QtWidgets.QLabel):
         )
         if path:
             self.qimage.save(path)
+            self.save_property_colorbar(path)
             self.export_current_view_info(path)
             if not scalebar:
                 self.set_optimal_scalebar(force=True)
@@ -1851,6 +1853,25 @@ class ViewRotation(QtWidgets.QLabel):
                 self.qimage.save(os.path.splitext(path)[0] + "_scalebar.png")
                 scalebar_box.setChecked(False)
                 self.update_scene()
+
+    def save_property_colorbar(self, path: str) -> None:
+        """Save the color bar (LUT) of the rendered property next to an
+        exported image, as ``*_colorbar.*``.
+
+        The color bar is saved by the main window, which holds the
+        colormap and the property values that the rotated view is
+        rendered with, and the format it is saved in. Does nothing if
+        rendering by property is inactive.
+
+        Parameters
+        ----------
+        path : str
+            Path that the image itself was saved to. The color bar is
+            saved next to it.
+        """
+        if not self.x_render_state:
+            return
+        self.window.window.view.save_property_colorbar(path)
 
     def export_current_view_info(self, path: str) -> None:
         """Export current view's information."""
@@ -1881,6 +1902,12 @@ class ViewRotation(QtWidgets.QLabel):
             "Localizations loaded": self.paths,
             "Colors": colors,
         }
+        if self.x_render_state:  # rendering by property
+            info["Render property"] = self.x_property
+            info["Render property min."] = self.x_min_val
+            info["Render property max."] = self.x_max_val
+            info["Render property colors"] = self.x_n_colors
+            info["Colormap property"] = self.x_colormap
         path, ext = os.path.splitext(path)
         path = path + ".yaml"
         io.save_info(path, [info])

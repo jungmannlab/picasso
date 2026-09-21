@@ -1723,6 +1723,182 @@ class TestDrawing:
 
 
 # ---------------------------------------------------------------------------
+# Color bar of a rendered property
+# ---------------------------------------------------------------------------
+
+
+class TestColorbarImage:
+    """``render.colorbar_image`` - the LUT saved next to an image that is
+    color-coded by a property (e.g., z)."""
+
+    @staticmethod
+    def _colors(n=8, cmap="gist_rainbow"):
+        return render.get_colors_from_colormap(n, cmap)
+
+    def test_returns_image(self):
+        out = render.colorbar_image(self._colors(), -300.0, 300.0)
+        assert isinstance(out, QtGui.QImage)
+        assert out.width() > 0 and out.height() > 0
+
+    def test_vertical_is_taller_than_wide(self):
+        out = render.colorbar_image(self._colors(), 0.0, 1.0)
+        assert out.height() > out.width()
+
+    def test_horizontal_is_wider_than_tall(self):
+        out = render.colorbar_image(self._colors(), 0.0, 1.0, vertical=False)
+        assert out.width() > out.height()
+
+    def test_bands_are_the_rendered_colors(self):
+        """Each band of the bar holds the exact color that the matching
+        group of localizations is rendered with, the first at the bottom
+        of a vertical bar."""
+        colors = self._colors(n=4)
+        bar_length, bar_width, margin = 400, 40, 12
+        out = render.colorbar_image(
+            colors,
+            0.0,
+            1.0,
+            bar_length=bar_length,
+            bar_width=bar_width,
+            margin=margin,
+            n_ticks=0,  # no ticks, so the bar starts right at the margin
+        )
+        array = _qimage_to_array(out)
+        x = margin + bar_width // 2  # inside the bar, away from the frame
+        for i, color in enumerate(colors):
+            # center of band i, counted from the bottom of the bar
+            y = margin + bar_length - int((i + 0.5) * bar_length / len(colors))
+            expected = [int(round(255 * c)) for c in color]
+            # the buffer is BGRA
+            assert list(array[y, x, :3][::-1]) == expected
+
+    def test_first_color_is_on_the_left_when_horizontal(self):
+        colors = self._colors(n=4)
+        bar_length, bar_width, margin = 400, 40, 12
+        out = render.colorbar_image(
+            colors,
+            0.0,
+            1.0,
+            vertical=False,
+            bar_length=bar_length,
+            bar_width=bar_width,
+            margin=margin,
+            n_ticks=0,
+        )
+        array = _qimage_to_array(out)
+        y = margin + bar_width // 2
+        x = margin + int(0.5 * bar_length / len(colors))
+        expected = [int(round(255 * c)) for c in colors[0]]
+        assert list(array[y, x, :3][::-1]) == expected
+
+    def test_background_is_kept(self):
+        """The corner of the image shows the requested background, so
+        that the bar matches an image rendered on white."""
+        out = render.colorbar_image(
+            self._colors(),
+            0.0,
+            1.0,
+            color=QtGui.QColor("black"),
+            background=QtGui.QColor("white"),
+        )
+        array = _qimage_to_array(out)
+        assert list(array[0, 0, :3]) == [255, 255, 255]
+
+    def test_labels_change_the_size(self):
+        """The label and the tick text are given room, rather than being
+        drawn over the bar."""
+        plain = render.colorbar_image(self._colors(), 0.0, 1.0, n_ticks=0)
+        labeled = render.colorbar_image(
+            self._colors(), 0.0, 1.0, label="z (nm)", n_ticks=5
+        )
+        assert labeled.width() > plain.width()
+        assert labeled.height() > plain.height()
+
+    def test_single_color(self):
+        out = render.colorbar_image(self._colors(n=1), 0.0, 1.0)
+        assert isinstance(out, QtGui.QImage)
+
+    def test_equal_limits_draw_no_ticks(self):
+        """A degenerate property range must not divide by zero."""
+        out = render.colorbar_image(self._colors(), 5.0, 5.0)
+        assert isinstance(out, QtGui.QImage)
+
+    def test_rejects_malformed_colors(self):
+        with pytest.raises(AssertionError):
+            render.colorbar_image([0.1, 0.2, 0.3], 0.0, 1.0)
+
+    @pytest.mark.parametrize(
+        "value, expected",
+        [
+            (0.0, "0"),
+            (-300.0, "-300"),
+            (12.5, "12.5"),
+            (0.125, "0.125"),
+            (1e6, "1.0e+06"),
+            (1e-4, "1.0e-04"),
+        ],
+    )
+    def test_tick_format(self, value, expected):
+        assert render._format_tick(value) == expected
+
+
+class TestSaveColorbar:
+    """``render.save_colorbar`` - the same bar written as a raster image
+    or as a vector graphic."""
+
+    @staticmethod
+    def _colors(n=8, cmap="gist_rainbow"):
+        return render.get_colors_from_colormap(n, cmap)
+
+    def test_png(self, tmp_path):
+        out = tmp_path / "bar.png"
+        render.save_colorbar(
+            str(out), colors=self._colors(), min_value=-300.0, max_value=300.0
+        )
+        assert out.exists() and out.stat().st_size > 0
+
+    def test_svg_is_drawn_not_embedded(self, tmp_path):
+        """The bands, ticks and text are vector objects, so the bar can
+        be scaled and edited in figure software."""
+        out = tmp_path / "bar.svg"
+        render.save_colorbar(
+            str(out),
+            colors=self._colors(n=4),
+            min_value=-300.0,
+            max_value=300.0,
+            label="z (nm)",
+        )
+        svg = out.read_text()
+        assert svg.lstrip().startswith("<?xml")
+        # one filled rectangle per color band, plus the frame
+        assert svg.count("<rect") >= 5
+        assert "z (nm)" in svg  # the label is text, not pixels
+        assert "image/png" not in svg  # nothing rasterized
+
+    def test_svg_and_png_have_the_same_size(self, tmp_path):
+        colors = self._colors()
+        image = render.colorbar_image(colors, 0.0, 1.0, label="z (nm)")
+        out = tmp_path / "bar.svg"
+        render.colorbar_svg(
+            str(out),
+            colors=colors,
+            min_value=0.0,
+            max_value=1.0,
+            label="z (nm)",
+        )
+        svg = out.read_text()
+        assert f'width="{image.width()}"' in svg
+        assert f'height="{image.height()}"' in svg
+
+    def test_extension_is_case_insensitive(self, tmp_path):
+        out = tmp_path / "bar.SVG"
+        render.save_colorbar(
+            str(out), colors=self._colors(), min_value=0.0, max_value=1.0
+        )
+        assert "<rect" in out.read_text()
+
+
+# ---------------------------------------------------------------------------
 # QImage export
 # ---------------------------------------------------------------------------
 
@@ -1840,6 +2016,56 @@ class TestAnimationSequence:
         # total rotation path is 450 degrees: 1/5 of the way is 90 deg
         assert np.allclose(
             rotations[2].as_rotvec(), [0.0, 0.0, np.pi / 2], atol=1e-6
+        )
+
+    def test_full_turn_survives_off_axis_residual(self):
+        """A segment of more than one turn keeps its turns even when
+        the two checkpoints are nearly the same orientation (the turn
+        cannot be read off the checkpoints, so the given path defines
+        it)."""
+        R1 = Rotation.identity()
+        # a wobbly full turn plus 18 degrees around y: the checkpoints
+        # differ by a small, mostly off-axis rotation
+        R2 = Rotation.from_rotvec(np.radians([-0.8, 18.0, -0.5]))
+        segment = np.radians([-0.8, 378.0, -0.5])
+        rotations, _ = render._animation_sequence(
+            positions=[(R1, FULL_VIEWPORT), (R2, FULL_VIEWPORT)],
+            durations=[1.0],
+            fps=60,
+            segment_rotations=[segment],
+        )
+        swept = sum(
+            (rotations[i + 1] * rotations[i].inv()).magnitude()
+            for i in range(len(rotations) - 1)
+        )
+        assert np.degrees(swept) == pytest.approx(378.0, abs=1.0)
+        assert (rotations[-1] * R2.inv()).magnitude() == pytest.approx(
+            0.0, abs=1e-9
+        )
+
+    def test_segments_do_not_repeat_checkpoints(self):
+        """Every checkpoint is rendered once, so no frame is held twice
+        at the junction between two segments."""
+        R1 = Rotation.identity()
+        R2 = Rotation.from_rotvec([0.0, 0.0, np.pi / 2])
+        R3 = Rotation.from_rotvec([0.0, 0.0, np.pi])
+        positions = [
+            (R1, FULL_VIEWPORT),
+            (R2, FULL_VIEWPORT),
+            (R3, FULL_VIEWPORT),
+        ]
+        rotations, viewports = render._animation_sequence(
+            positions, [1.0, 1.0], fps=4
+        )
+        assert len(rotations) == 8
+        assert len(viewports) == 8
+        steps = [
+            (rotations[i + 1] * rotations[i].inv()).magnitude()
+            for i in range(len(rotations) - 1)
+        ]
+        assert min(steps) > 1e-9
+        assert (rotations[-1] * R3.inv()).magnitude() == pytest.approx(
+            0.0, abs=1e-9
         )
 
     def test_multi_segment_viewports(self):

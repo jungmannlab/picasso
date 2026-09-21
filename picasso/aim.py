@@ -308,22 +308,28 @@ def _point_intersect_3d(
 
 
 def _get_fft_peak(
-    roi_cc: lib.IntArray2D, roi_size: int
+    roi_cc: lib.IntArray2D, intersect_d: float
 ) -> tuple[float, float]:
     """Estimate the precise sub-pixel position of the peak of ``roi_cc``
     with FFT.
+
+    The phase of the first Fourier coefficient gives the peak position in
+    units of ``roi_cc`` bins. Adjacent bins are one integer shift of the
+    local search region apart, i.e. ``intersect_d`` camera pixels, so the
+    peak is scaled by ``intersect_d`` to return camera pixels.
 
     Parameters
     ----------
     roi_cc : lib.IntArray2D
         2D array with numbers of intersections in the local search region.
-    roi_size : int
-        Size of the local search region.
+    intersect_d : float
+        Intersect distance in camera pixels, i.e. the spacing between
+        adjacent bins of ``roi_cc``.
 
     Returns
     -------
     px, py : float
-        Estimated x and y coordinates of the peak.
+        Estimated x and y coordinates of the peak, in camera pixels.
     """
     fft_values = np.fft.fft2(roi_cc.T)
     ang_x = np.angle(fft_values[0, 1])
@@ -332,33 +338,37 @@ def _get_fft_peak(
         np.abs(ang_x) / (2 * np.pi / roi_cc.shape[0])
         - (roi_cc.shape[0] - 1) / 2
     )  # peak in x
-    px *= roi_size / roi_cc.shape[0]  # convert to intersect_d units
+    px *= intersect_d  # convert from bins to camera pixels
     ang_y = np.angle(fft_values[1, 0])
     ang_y = ang_y - 2 * np.pi * (ang_y > 0)  # normalize
     py = (
         np.abs(ang_y) / (2 * np.pi / roi_cc.shape[1])
         - (roi_cc.shape[1] - 1) / 2
     )  # peak in y
-    py *= roi_size / roi_cc.shape[1]  # convert to intersect_d units
+    py *= intersect_d  # convert from bins to camera pixels
     return px, py
 
 
-def _get_fft_peak_z(roi_cc: lib.IntArray1D, roi_size: int) -> float:
+def _get_fft_peak_z(roi_cc: lib.IntArray1D, intersect_d: float) -> float:
     """Estimate the precise sub-pixel position of the peak of 1D
     ``roi_cc``.
+
+    See :func:`_get_fft_peak` (its 2D counterpart) for the scaling of the
+    peak from ``roi_cc`` bins to camera pixels.
 
     Parameters
     ----------
     roi_cc : lib.IntArray1D
         1D array with numbers of intersections in the local search
         region.
-    roi_size : int
-        Size of the local search region.
+    intersect_d : float
+        Intersect distance in camera pixels, i.e. the spacing between
+        adjacent bins of ``roi_cc``.
 
     Returns
     -------
     pz : float
-        Estimated z-coordinate of the peak.
+        Estimated z-coordinate of the peak, in camera pixels.
     """
     fft_values = np.fft.fft(roi_cc)
     ang_z = np.angle(fft_values[1])
@@ -366,8 +376,48 @@ def _get_fft_peak_z(roi_cc: lib.IntArray1D, roi_size: int) -> float:
     pz = (
         np.abs(ang_z) / (2 * np.pi / roi_cc.size) - (roi_cc.size - 1) / 2
     )  # peak in z
-    pz *= roi_size / roi_cc.size  # convert to intersect_d units
+    pz *= intersect_d  # convert from bins to camera pixels
     return pz
+
+
+def _interpolate_drift(
+    seg_bounds: lib.IntArray1D, *drifts: lib.FloatArray1D
+) -> list[lib.FloatArray1D]:
+    """Interpolate per-segment drifts to per-frame drifts (cubic spline).
+
+    The drifts are sampled at the segment midpoints, so the first and the
+    last half segment fall outside the knots. A cubic spline extrapolates
+    freely there and can swing wildly, which is why one linearly
+    extrapolated knot is appended at each end (as in the reference MATLAB
+    implementation), bracketing every frame.
+
+    Parameters
+    ----------
+    seg_bounds : lib.IntArray1D
+        Frame indices of the segmentation bounds.
+    *drifts : lib.FloatArray1D
+        One drift array per dimension, each with one value per segment.
+
+    Returns
+    -------
+    interpolated : list of lib.FloatArray1D
+        The drifts sampled at every frame, in the order given.
+    """
+    t = (seg_bounds[1:] + seg_bounds[:-1]) / 2
+    t_inter = np.arange(seg_bounds[-1]) + 1
+    if t.size == 1:  # a single segment holds no drift information
+        return [np.full(t_inter.size, drift[0]) for drift in drifts]
+    # bracket the frame range with one linearly extrapolated knot per end
+    t = np.concatenate(([2 * t[0] - t[1]], t, [2 * t[-1] - t[-2]]))
+    interpolated = []
+    for drift in drifts:
+        drift = np.concatenate(
+            ([2 * drift[0] - drift[1]], drift, [2 * drift[-1] - drift[-2]])
+        )
+        interpolated.append(
+            InterpolatedUnivariateSpline(t, drift, k=3)(t_inter)
+        )
+    return interpolated
 
 
 def intersection_max(
@@ -381,6 +431,7 @@ def intersection_max(
     roi_r: float,
     width: int,
     aim_round: int = 1,
+    exclude_self: bool = False,
     progress: lib.ProgressType | None = None,
 ) -> tuple[
     lib.FloatArray1D, lib.FloatArray1D, lib.FloatArray1D, lib.FloatArray1D
@@ -410,6 +461,15 @@ def intersection_max(
         as reference, the second round uses the entire dataset as
         reference. The impact is that in the second round, the first
         interval is also undrifted.
+    exclude_self : bool, optional
+        Leave each segment out of the reference while that segment is
+        being aligned. Only meaningful when the reference is the dataset
+        itself (the second round), where it requires ``ref_x``/``ref_y``
+        to be the same localizations as ``x``/``y``. A segment scored
+        against a reference that contains it intersects itself perfectly
+        at zero shift, which biases the estimated shift towards zero and
+        compresses exactly the large corrections the second round exists
+        to make. Default is False.
     progress : lib.ProgressType | None, optional
         Progress dialog. If TqdmProgress, progress is displayed with tqdm.
         If None or MockProgress, progress is not displayed. Default is None.
@@ -452,6 +512,19 @@ def intersection_max(
     l0 = np.int32(x0_units + y0_units * width_units)  # 1d list
     l0_coords, l0_counts = np.unique(l0, return_counts=True)
 
+    if exclude_self:
+        # a segment's own bins are subtracted from the reference counts,
+        # which is only defined if the reference holds the same bins
+        l1 = np.int32(
+            np.round(np.asarray(x) / intersect_d)
+            + np.round(np.asarray(y) / intersect_d) * width_units
+        )
+        if not np.array_equal(l0, l1):
+            raise ValueError(
+                "exclude_self requires the reference to be the target"
+                " itself, but ref_x/ref_y differ from x/y."
+            )
+
     # sort the target localizations by frame so that each segment is a
     # contiguous slice (located with searchsorted). This avoids
     # re-scanning the whole array for every segment, which dominates the
@@ -464,6 +537,9 @@ def intersection_max(
     # first index of every segment: segment s spans the localizations
     # with seg_bounds[s] < frame <= seg_bounds[s + 1]
     seg_idx = np.searchsorted(frame_sorted, seg_bounds, side="right")
+    # the reference encoded in the same order, so that each segment's own
+    # contribution can be taken out of it again (see exclude_self)
+    l0_sorted = l0[order] if exclude_self else None
 
     # initialize progress such that if GUI is used, tqdm is omitted
     start_idx = 1 if aim_round == 1 else 0
@@ -484,6 +560,14 @@ def intersection_max(
         x1 = x_sorted[lo:hi] + rel_drift_x
         y1 = y_sorted[lo:hi] + rel_drift_y
 
+        # take this segment out of the reference counts (restored below).
+        # Counts that drop to zero are left in place: a zero count
+        # contributes min(0, target count) == 0 to every shift.
+        if exclude_self:
+            own, own_counts = np.unique(l0_sorted[lo:hi], return_counts=True)
+            own_pos = np.searchsorted(l0_coords, own)
+            l0_counts[own_pos] -= own_counts
+
         # count the number of intersected localizations
         roi_cc = _point_intersect_2d(
             l0_coords,
@@ -496,9 +580,17 @@ def intersection_max(
             box,
         )
 
+        if exclude_self:
+            l0_counts[own_pos] += own_counts
+            # nothing left to align against (e.g. a single segment)
+            if not roi_cc.any():
+                drift_x[s] = drift_x[s - 1]
+                drift_y[s] = drift_y[s - 1]
+                continue
+
         # estimate the precise sub-pixel position of the peak of roi_cc
         # with FFT
-        px, py = _get_fft_peak(roi_cc, 2 * roi_r)
+        px, py = _get_fft_peak(roi_cc, intersect_d)
 
         # update the relative drift reference for the subsequent
         # segmented subset (interval) and save the drifts
@@ -511,12 +603,7 @@ def intersection_max(
         progress.set_value(s)
 
     # interpolate the drifts (cubic spline) for all frames
-    t = (seg_bounds[1:] + seg_bounds[:-1]) / 2
-    drift_x_pol = InterpolatedUnivariateSpline(t, drift_x, k=3)
-    drift_y_pol = InterpolatedUnivariateSpline(t, drift_y, k=3)
-    t_inter = np.arange(seg_bounds[-1]) + 1
-    drift_x = drift_x_pol(t_inter)
-    drift_y = drift_y_pol(t_inter)
+    drift_x, drift_y = _interpolate_drift(seg_bounds, drift_x, drift_y)
 
     # undrift the localizations
     x_pdc = x - drift_x[frame - 1]
@@ -540,6 +627,7 @@ def intersection_max_z(
     height: int,
     pixelsize: float,
     aim_round: int = 1,
+    exclude_self: bool = False,
     progress: lib.ProgressType | None = None,
 ) -> tuple[lib.FloatArray1D, lib.FloatArray1D]:
     """Maximize intersection (undrift) for 3D localizations.
@@ -578,6 +666,21 @@ def intersection_max_z(
     )  # 1d list
     l0_coords, l0_counts = np.unique(l0, return_counts=True)
 
+    if exclude_self:
+        # see the 2D counterpart
+        l1 = np.int32(
+            np.round(np.asarray(x) / intersect_d)
+            + np.round(np.asarray(y) / intersect_d) * width_units
+            + np.round(np.asarray(z) / intersect_d)
+            * width_units
+            * height_units
+        )
+        if not np.array_equal(l0, l1):
+            raise ValueError(
+                "exclude_self requires the reference to be the target"
+                " itself, but ref_x/ref_y/ref_z differ from x/y/z."
+            )
+
     # sort the target localizations by frame so that each segment is a
     # contiguous slice (located with searchsorted). This avoids
     # re-scanning the whole array for every segment, which dominates the
@@ -588,6 +691,9 @@ def intersection_max_z(
     x_sorted = np.asarray(x)[order]
     y_sorted = np.asarray(y)[order]
     z_sorted = np.asarray(z)[order]
+    # the reference encoded in the same order, so that each segment's own
+    # contribution can be taken out of it again (see exclude_self)
+    l0_sorted = l0[order] if exclude_self else None
     # first index of every segment: segment s spans the localizations
     # with seg_bounds[s] < frame <= seg_bounds[s + 1]
     seg_idx = np.searchsorted(frame_sorted, seg_bounds, side="right")
@@ -611,6 +717,13 @@ def intersection_max_z(
         # undrifting from the previous round (new array, not a view)
         z1 = z_sorted[lo:hi] + rel_drift_z
 
+        # take this segment out of the reference counts (see the 2D
+        # counterpart); restored right after the intersection counting
+        if exclude_self:
+            own, own_counts = np.unique(l0_sorted[lo:hi], return_counts=True)
+            own_pos = np.searchsorted(l0_coords, own)
+            l0_counts[own_pos] -= own_counts
+
         # count the number of intersected localizations
         roi_cc = _point_intersect_3d(
             l0_coords,
@@ -624,9 +737,16 @@ def intersection_max_z(
             shifts_z,
         )
 
+        if exclude_self:
+            l0_counts[own_pos] += own_counts
+            # nothing left to align against (e.g. a single segment)
+            if not roi_cc.any():
+                drift_z[s] = drift_z[s - 1]
+                continue
+
         # estimate the precise sub-pixel position of the peak of roi_cc
         # with FFT
-        pz = _get_fft_peak_z(roi_cc, 2 * roi_r)
+        pz = _get_fft_peak_z(roi_cc, intersect_d)
 
         # update the relative drift reference for the subsequent
         # segmented subset (interval) and save the drifts
@@ -637,10 +757,7 @@ def intersection_max_z(
         progress.set_value(s)
 
     # interpolate the drifts (cubic spline) for all frames
-    t = (seg_bounds[1:] + seg_bounds[:-1]) / 2
-    drift_z_pol = InterpolatedUnivariateSpline(t, drift_z, k=3)
-    t_inter = np.arange(seg_bounds[-1]) + 1
-    drift_z = drift_z_pol(t_inter)
+    (drift_z,) = _interpolate_drift(seg_bounds, drift_z)
 
     # undrift the localizations
     z_pdc = z - drift_z[frame - 1]
@@ -739,6 +856,7 @@ def aim(
         roi_r,
         width,
         aim_round=2,
+        exclude_self=True,
         progress=progress,
     )
 
@@ -793,6 +911,7 @@ def aim(
             height,
             pixelsize,
             aim_round=2,
+            exclude_self=True,
             progress=progress,
         )
         drift_z = drift_z1 + drift_z2
