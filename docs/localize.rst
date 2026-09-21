@@ -333,6 +333,31 @@ Camera Priorities
 
 If many cameras are configured, the dropdown can become cluttered. For that reason, the config can additionally include a "CameraPriority" field. It describes a list of camera names which must match names in the "Cameras" field. The listed cameras are then displayed on top of the dropdown menu while the non-listed cameras are shown below in alphabetical order.
 
+Incorporating calibrations in config file
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The calibration depends on the microscope, camera, and emission wavelength used. It can become tedious to navigate to and select the correct calibration yaml file. Therefore, the config file can include a field to map camera and emission wavelength to path of the z calibration yaml file:
+
+::
+
+   z-calibrations:
+      Camera1:
+         525: /path/to/Camera1-GFP-zcalibration.yaml
+         595: /path/to/Camera1-Cy3B-zcalibration.yaml
+
+If the camera names and emission wavelengths match the settings in Micromanager, the correct z-calibration is automatically loaded. In any case an alternative calibration yaml file can be loaded by button.
+
+The same mechanism is available for the experimental PSF (cubic spline) calibration, using a ``spline-calibrations`` field that maps camera and emission wavelength to the path of the spline calibration ``.hdf5`` file:
+
+::
+
+   spline-calibrations:
+      Camera1:
+         525: /path/to/Camera1-GFP-spline-calibration.hdf5
+         595: /path/to/Camera1-Cy3B-spline-calibration.hdf5
+
+As with the z-calibration, the matching spline calibration is loaded automatically when the camera and emission wavelength match the Micromanager settings, and an alternative calibration file can always be loaded via the "Load calibration" button in the "Experimental PSF (spline)" box.
+
 3D-Calibration
 --------------
 
@@ -428,31 +453,6 @@ From Python, ``localize.localize`` takes ``affine_calibration`` alongside ``cali
         calibration=z_calibration,
         lateral_transforms="chromatic.yaml",
     )
-
-Incorporating calibrations in config file
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-The calibration depends on the microscope, camera, and emission wavelength used. It can become tedious to navigate to and select the correct calibration yaml file. Therefore, the config file can include a field to map camera and emission wavelength to path of the z calibration yaml file:
-
-::
-
-   z-calibrations:
-      Camera1:
-         525: /path/to/Camera1-GFP-zcalibration.yaml
-         595: /path/to/Camera1-Cy3B-zcalibration.yaml
-
-If the camera names and emission wavelengths match the settings in Micromanager, the correct z-calibration is automatically loaded. In any case an alternative calibration yaml file can be loaded by button.
-
-The same mechanism is available for the experimental PSF (cubic spline) calibration, using a ``spline-calibrations`` field that maps camera and emission wavelength to the path of the spline calibration ``.hdf5`` file:
-
-::
-
-   spline-calibrations:
-      Camera1:
-         525: /path/to/Camera1-GFP-spline-calibration.hdf5
-         595: /path/to/Camera1-Cy3B-spline-calibration.hdf5
-
-As with the z-calibration, the matching spline calibration is loaded automatically when the camera and emission wavelength match the Micromanager settings, and an alternative calibration file can always be loaded via the "Load calibration" button in the "Experimental PSF (spline)" box.
 
 Experimental PSF (cubic-spline) fitting
 ---------------------------------------

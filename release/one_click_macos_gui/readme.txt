@@ -22,11 +22,13 @@ Alternatively, you can create the dmg file yourself by cloning our GitHub repo a
 Adding camera configuration and plugins
 ---------------------------------------
 
-Camera configuration is essential for correct photon conversion and thus correct localization precision calculation. For more details, see documentation: https://picassosr.readthedocs.io/en/latest/localize.html#camera-config
+Since version 0.11, both the camera configuration and plugins live in your Picasso user folder, ~/.picasso (that is, /Users/<your user name>/.picasso). This is the same folder that already holds settings.yaml and the log file, and it is the same for every installation type (one-click installer, PyPI, conda, source). Because it sits outside the app bundle, it survives updating or removing Picasso, and you no longer need "Show Package Contents" to get to it.
 
-To add your config.yaml file, navigate to your Applications folder and right-click on the picasso app, then select "Show Package Contents". Add your config file to Contents/Frameworks/picasso.
+Camera configuration is essential for correct photon conversion and thus correct localization precision calculation. Put your config file at ~/.picasso/config.yaml. The file is never created for you - you have to create it yourself. The quickest way to get there is to open Picasso: Localize and select File > "Open camera config file location", which opens the folder in Finder (creating it if needed) or reveals wherever a config already in use actually lives. To start from a template, copy config_template.yaml (bundled inside the picasso package, next to __init__.py) into ~/.picasso and rename it to config.yaml. For more details, see documentation: https://picassosr.readthedocs.io/en/latest/localize.html#camera-config
 
-Similarly, you can add Picasso plugins under the folder Contents/Frameworks/picasso/gui/plugins. For more details on how to create plugins, see documentation: https://picassosr.readthedocs.io/en/latest/plugins.html
+Older versions read config.yaml from inside the app bundle (Contents/Frameworks/picasso). *That still works*: if no ~/.picasso/config.yaml exists, Picasso falls back to the in-bundle file and reads it in place, so an existing setup keeps working. When both are present, ~/.picasso/config.yaml wins.
+
+Plugins go in ~/.picasso/plugins, which is created automatically the first time you run any Picasso app. Open it from any Picasso app via Plugins > "Open plugins folder...". A plugin file copied in by hand is found but not enabled: review it and tick its "Enabled" checkbox under Plugins > "Browse online plugins...", which is also where you can install hash-verified plugins from our online registry. The same can be done without a GUI using the "picasso plugins" command. For more details on how to create and manage plugins, see documentation: https://picassosr.readthedocs.io/en/latest/plugins.html
 
 Changelog
 ---------

@@ -14,26 +14,19 @@ How to install
 2. Open the downloaded exe file and follow the installation instructions.
 
 [!] If installed in "Program Files", Render and Localize may not be available for non-administrator users. Therefore, we recommend installing Picasso outside of "Program Files". The current default location is C:\Picasso.
-[!] When using Windows installer, camera config file needs to be moved to C:\Picasso\_internal\picasso. Before v0.9.7 under C:\Picasso\picasso.
+[!] Camera config and plugins belong in C:\Users\<your user name>\.picasso, not in the installation folder, see "Adding camera configuration and plugins" below.
 [!] Windows Safety features and Windows Defender may ask multiple times for permission during the installation and download.
-
-Creating your own installer
----------------------------
-
-You can create the exe file yourself by cloning our GitHub repo and running the script picasso/release/one_click_windows_gui/create_installer_windows.bat from the Command Prompt. Note that you must have conda installed on your computer.
-
-There are two editions of the installer:
-- create_installer_windows.bat builds the standard (CPU) installer (Picasso-Windows-64bit-<version>.exe, installs to C:\Picasso).
-- create_installer_windows_gpu.bat builds the GPU edition (Picasso-Windows-64bit-GPU-<version>.exe, installs to C:\Picasso-GPU). It additionally bundles the CUDA runtime (numba-cuda[cu12]) so GPU-accelerated (numba.cuda) code can run. It requires an NVIDIA (CUDA-capable) GPU and produces a noticeably larger installer. The two editions install to separate folders and can coexist.
 
 Adding camera configuration and plugins
 ---------------------------------------
 
-Camera configuration is essential for correct photon conversion and thus correct localization precision calculation. For more details, see documentation: https://picassosr.readthedocs.io/en/latest/localize.html#camera-config
+Since version 0.11, both the camera configuration and plugins live in your Picasso user folder, C:\Users\<your user name>\.picasso. This is the same folder that already holds settings.yaml and the log file, and it is the same for every installation type (one-click installer, PyPI, conda, source). Because it sits outside the installation folder, it survives updating or uninstalling Picasso, it is writable without administrator rights, and it is shared by the standard and GPU editions.
 
-To add your config.yaml file, navigate to your Picasso folder (by default C:/Picasso) and find the subdirectory _internal/picasso. Add the config file there.
+Camera configuration is essential for correct photon conversion and thus correct localization precision calculation. Put your config file at C:\Users\<your user name>\.picasso\config.yaml. The file is never created for you - you have to create it yourself. The quickest way to get there is to open Picasso: Localize and select File > "Open camera config file location", which opens the folder in Explorer (creating it if needed) or reveals wherever a config already in use actually lives. To start from a template, copy config_template.yaml (bundled inside the picasso package, next to __init__.py) into that folder and rename it to config.yaml. For more details, see documentation: https://picassosr.readthedocs.io/en/latest/localize.html#camera-config
 
-Similarly, you can add Picasso plugins under the folder _internal/picasso/gui/plugins. For more details on how to create plugins, see documentation: https://picassosr.readthedocs.io/en/latest/plugins.html
+Older versions read config.yaml from the installation folder (C:\Picasso\_internal\picasso). *That still works*: if no config.yaml exists in the user folder, Picasso falls back to the in-package file and reads it in place, so an existing setup keeps working. When both are present, the one in .picasso wins.
+
+Plugins go in C:\Users\<your user name>\.picasso\plugins, which is created automatically the first time you run any Picasso app. Open it from any Picasso app via Plugins > "Open plugins folder...". A plugin file copied in by hand is found but not enabled: review it and tick its "Enabled" checkbox under Plugins > "Browse online plugins...", which is also where you can install hash-verified plugins from our online registry. The same can be done without a GUI using the "picasso plugins" command. For more details on how to create and manage plugins, see documentation: https://picassosr.readthedocs.io/en/latest/plugins.html
 
 Changelog
 ---------
@@ -101,3 +94,12 @@ Credits
 -  SPINNA icon based on "Spinner" by Viktor Ostrovsky from the Noun Project
 
 .. SYNC-END: credits
+
+Creating your own installer
+---------------------------
+
+You can create the exe file yourself by cloning our GitHub repo and running the script picasso/release/one_click_windows_gui/create_installer_windows.bat from the Command Prompt. Note that you must have conda installed on your computer.
+
+There are two editions of the installer:
+- create_installer_windows.bat builds the standard (CPU) installer (Picasso-Windows-64bit-<version>.exe, installs to C:\Picasso).
+- create_installer_windows_gpu.bat builds the GPU edition (Picasso-Windows-64bit-GPU-<version>.exe, installs to C:\Picasso-GPU). It additionally bundles the CUDA runtime (numba-cuda[cu12]) so GPU-accelerated (numba.cuda) code can run. It requires an NVIDIA (CUDA-capable) GPU and produces a noticeably larger installer. The two editions install to separate folders and can coexist.

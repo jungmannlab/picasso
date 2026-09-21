@@ -110,6 +110,14 @@ BUILTIN_CMAP_SUFFIX = "_gradient"
 # peaks of gradients that pass through white at intensity 1.
 LEGEND_SAMPLE_IDX = 200
 
+# Units of the localization properties that can be color-coded, used to
+# label the color bar exported next to an image rendered by property.
+# Properties that are not listed are labeled with their name alone.
+PROPERTY_UNITS = {"z": "nm", "lpz": "nm"}
+# Suffix of the color bar saved next to an image exported while
+# rendering by property
+COLORBAR_SUFFIX = "_colorbar"
+
 
 def _gradient_pixmap(
     lut: lib.FloatArray2D, width: int = 80, height: int = 14
@@ -983,6 +991,14 @@ class DatasetDialog(lib.Dialog):
             return
         view_rot = window_rot.view_rot
         if view_rot.locs and getattr(view_rot, "viewport", None):
+            # the rotation window keeps its own copy of the picked locs,
+            # while the colors it renders with come from the main view;
+            # reload if files were added/removed since the last load so
+            # that both agree on the number of channels
+            if len(view_rot.locs) != len(self.window.view.locs):
+                if not self.window.view._picks:
+                    return  # nothing to reload from
+                view_rot.load_locs(update_window=True)
             view_rot.update_scene()
 
     def select_background_color(self) -> None:
@@ -9318,6 +9334,76 @@ class View(QtWidgets.QLabel):
             )
         return image
 
+    def property_colorbar_kwargs(self) -> dict | None:
+        """Describe the color bar (LUT) of the currently rendered
+        property, to be drawn next to an exported image.
+
+        Returns
+        -------
+        kwargs : dict or None
+            Arguments for ``render.colorbar_image`` /
+            ``render.save_colorbar``, holding the colors and values that
+            localizations are currently rendered with. None if rendering
+            by property is inactive.
+        """
+        d_dialog = self.window.display_settings_dlg
+        if not d_dialog.render_check.isChecked():
+            return None
+        colors = render.get_colors_from_colormap(
+            d_dialog.color_step.value(),
+            d_dialog.colormap_prop.currentText(),
+        )
+        # the rendered image is inverted with white background, so the
+        # color bar is inverted too and thus shows the colors seen in
+        # the image
+        if self.window.dataset_dialog.wbackground.isChecked():
+            colors = 1 - np.asarray(colors)
+            color = QtGui.QColor("black")
+            background = QtGui.QColor("white")
+        else:
+            color = QtGui.QColor("white")
+            background = QtGui.QColor("black")
+        parameter = d_dialog.parameter.currentText()
+        unit = PROPERTY_UNITS.get(parameter)
+        return {
+            "colors": colors,
+            "min_value": d_dialog.minimum_render.value(),
+            "max_value": d_dialog.maximum_render.value(),
+            "label": f"{parameter} ({unit})" if unit else parameter,
+            "color": color,
+            "background": background,
+        }
+
+    def property_colorbar(self) -> QtGui.QImage | None:
+        """Build a color bar (LUT) image of the currently rendered
+        property, or None if rendering by property is inactive."""
+        kwargs = self.property_colorbar_kwargs()
+        if kwargs is None:
+            return None
+        return render.colorbar_image(**kwargs)
+
+    def save_property_colorbar(self, path: str) -> None:
+        """Save the color bar (LUT) of the rendered property next to an
+        exported image, as ``*_colorbar.*``.
+
+        The format (``.png`` or ``.svg``) comes from the user settings,
+        see ``io.colorbar_export_format``. Does nothing if rendering by
+        property is inactive.
+
+        Parameters
+        ----------
+        path : str
+            Path that the image itself was saved to. The color bar is
+            saved next to it.
+        """
+        kwargs = self.property_colorbar_kwargs()
+        if kwargs is None:
+            return
+        base = os.path.splitext(path)[0]
+        render.save_colorbar(
+            base + COLORBAR_SUFFIX + io.colorbar_export_format(), **kwargs
+        )
+
     def draw_minimap(self, image: QtGui.QImage) -> QtGui.QImage:
         """Draw a minimap showing the position of current viewport.
 
@@ -13594,6 +13680,8 @@ class Window(QtWidgets.QMainWindow):
         check_ext = [".yaml"]
         if not scalebar:
             check_ext.append("_scalebar.png")
+        if self.display_settings_dlg.render_check.isChecked():
+            check_ext.append(COLORBAR_SUFFIX + io.colorbar_export_format())
         path, ext = lib.get_save_filename_ext_dialog(
             self,
             "Save image",
@@ -13627,6 +13715,7 @@ class Window(QtWidgets.QMainWindow):
                     qimage_scale.save(new_path)
                 self.display_settings_dlg.scalebar_groupbox.setChecked(False)
             self.save_qimage_to_path(path, self.view.qimage, dpi=dpi)
+            self.view.save_property_colorbar(path)
             self.export_current_info(path)
         self.view.setMinimumSize(1, 1)
 
@@ -13722,6 +13811,12 @@ class Window(QtWidgets.QMainWindow):
                 else min_blur_width
             ),
         }
+        if d.render_check.isChecked():  # rendering by property
+            info["Render property"] = d.parameter.currentText()
+            info["Render property min."] = d.minimum_render.value()
+            info["Render property max."] = d.maximum_render.value()
+            info["Render property colors"] = d.color_step.value()
+            info["Colormap property"] = d.colormap_prop.currentText()
         if path is not None:
             path, ext = os.path.splitext(path)
             path = path + ".yaml"
@@ -13736,12 +13831,15 @@ class Window(QtWidgets.QMainWindow):
         except AttributeError:
             return
         out_path = base + ".png"
+        check_ext = [".yaml"]
+        if self.display_settings_dlg.render_check.isChecked():
+            check_ext.append(COLORBAR_SUFFIX + io.colorbar_export_format())
         path, ext = lib.get_save_filename_ext_dialog(
             self,
             "Save image",
             out_path,
             filter="*.png;;*.tif;;*.pdf",
-            check_ext="yaml",
+            check_ext=check_ext,
         )
         if path:
             movie_height, movie_width = self.view.movie_size()
@@ -13759,6 +13857,7 @@ class Window(QtWidgets.QMainWindow):
                 if not ok:
                     return
             self.save_qimage_to_path(path, qimage, dpi=dpi)
+            self.view.save_property_colorbar(path)
             self.export_current_info(path)
 
     def export_kwargs(self) -> None:
@@ -13772,12 +13871,15 @@ class Window(QtWidgets.QMainWindow):
         except AttributeError:
             return
         out_path = base + "_view.png"
+        check_ext = [".yaml"]
+        if self.display_settings_dlg.render_check.isChecked():
+            check_ext.append(COLORBAR_SUFFIX + io.colorbar_export_format())
         path, ext = lib.get_save_filename_ext_dialog(
             self,
             "Save image",
             out_path,
             filter="*.png;;*.tif;;*.pdf;;*.svg",
-            check_ext=".yaml",
+            check_ext=check_ext,
         )
         if not path:
             return
@@ -13808,6 +13910,7 @@ class Window(QtWidgets.QMainWindow):
             if not ok:
                 return
         self.save_qimage_to_path(path, qimage, dpi=dpi)
+        self.view.save_property_colorbar(path)
         self.export_current_info(path, **kwargs)
 
         # export an extra image with scalebar if necessary
@@ -14102,7 +14205,9 @@ class Window(QtWidgets.QMainWindow):
     def load_user_settings(self) -> None:  # noqa: C901
         """Load user settings (colormap and current directory)."""
         settings = io.load_user_settings()
-        colormap = settings["Render"]["Colormap"]
+        # a "Render" section written without a colormap (e.g. by hand)
+        # is a plain dict, which does not auto-create the missing key
+        colormap = settings["Render"].get("Colormap", "magma")
         if len(colormap) == 0:
             colormap = "magma"
         for index in range(self.display_settings_dlg.colormap.count()):
