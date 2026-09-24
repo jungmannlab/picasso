@@ -4506,33 +4506,56 @@ class ParametersDialog(lib.Dialog):
         if path:
             self.update_camera_calib(path)
 
+    def config_calib_path(self, section: str) -> str | None:
+        """Path configured in ``section`` for the selected camera and
+        emission wavelength, or ``None`` when the config has no entry for it.
+
+        The three calibration sections a camera configuration can carry
+        ("z-calibrations", "spline-calibrations" and "camera-calibrations")
+        are all keyed by camera and then by emission wavelength. A single
+        path in place of the wavelength mapping is also accepted and then
+        serves every wavelength - one sensor read out one way needs one set
+        of maps, and repeating the same path under each wavelength is only a
+        way for them to drift apart.
+
+        ``None`` means *clear*: switching to a camera or wavelength the
+        config knows nothing about must not leave the previous camera's
+        calibration in place, since it no longer describes the data (see the
+        callers).
+        """
+        section_config = CONFIG.get(section)
+        if not isinstance(section_config, dict):
+            return None
+        if not hasattr(self, "camera"):
+            return None
+        camera = self.camera.currentText()
+        entry = section_config.get(camera)
+        if isinstance(entry, dict):
+            em_combo = self.emission_combos.get(camera)
+            if em_combo is None:
+                # wavelength-keyed, but this camera has no emission combo
+                # (no Quantum Efficiency mapping): nothing selects an entry
+                return None
+            text = em_combo.currentText()
+            try:
+                wavelength = int(text)
+            except ValueError:
+                wavelength = text
+            entry = entry.get(wavelength)
+        return entry or None
+
     def update_camera_calib_with_config_path(self) -> None:
         """Pick up the calibration configured for the selected camera.
-
-        Keyed by camera and then by emission wavelength, exactly like the z
-        and spline calibrations.
-
-        A single path in place of the wavelength mapping is also accepted and
-        then serves every wavelength - one sensor read out one way needs one
-        set of maps, and repeating the same path under each wavelength is only
-        a way for them to drift apart.
 
         Switching to a camera or wavelength the config has no entry for
         *clears* the calibration rather than leaving the previous one in
         place.
         """
         if "camera-calibrations" not in CONFIG:
+            # nothing is configured for any camera, so nothing was
+            # auto-loaded: leave a manually loaded calibration alone
             return
-        if not hasattr(self, "camera"):
-            return
-        camera = self.camera.currentText()
-        entry = CONFIG["camera-calibrations"].get(camera)
-        if isinstance(entry, dict):
-            em_combo = self.emission_combos.get(camera)
-            if em_combo is None:
-                return
-            entry = entry.get(int(em_combo.currentText()))
-        self.update_camera_calib(entry)
+        self.update_camera_calib(self.config_calib_path("camera-calibrations"))
 
     #: Index of each photon-conversion scalar in ``_scalars_before_calib``.
     _SCALARS = {"gain": 0, "baseline": 1, "sensitivity": 2}
@@ -4830,19 +4853,19 @@ class ParametersDialog(lib.Dialog):
 
     def update_spline_calib_with_config_path(self) -> None:
         """Retrieve the spline PSF calibration path that corresponds to the
-        selected camera and emission wavelength, from the config."""
+        selected camera and emission wavelength, from the config.
+
+        Switching to a camera or wavelength the config has no entry for
+        *clears* the calibration rather than leaving the previous one in
+        place.
+        """
         if self.spline_groupbox is None:  # fit UI not built yet
             return
         if "spline-calibrations" not in CONFIG:
+            # nothing is configured for any camera, so nothing was
+            # auto-loaded: leave a manually loaded calibration alone
             return
-        camera = self.camera.currentText()
-        fp_calib_lam = CONFIG["spline-calibrations"].get(camera)
-        if fp_calib_lam is not None:
-            em_combo = self.emission_combos[camera]
-            wavelength = int(em_combo.currentText())
-            fp_calib = fp_calib_lam.get(wavelength)
-            if fp_calib is not None:
-                self.update_spline_calib(fp_calib)
+        self.update_spline_calib(self.config_calib_path("spline-calibrations"))
 
     def update_spline_calib(self, path: str | None) -> None:
         """Load (or clear) a cubic-spline PSF calibration from an HDF5 file."""
@@ -4891,12 +4914,21 @@ class ParametersDialog(lib.Dialog):
                 self.update_roi_display()
                 self.window.draw_frame()
         else:
+            nothing_loaded = not (
+                self.spline_calibration or self.spline_calibration_path
+            )
+            if nothing_loaded:
+                # nothing to clear: a camera or wavelength change must not
+                # drop the channel sum and redraw for no reason. The load
+                # error paths above still set their own label afterwards.
+                return
             self.spline_calibration = {}
             self.spline_calibration_path = None
             self.spline_calib_label.setAlignment(
                 QtCore.Qt.AlignmentFlag.AlignCenter
             )
             self.spline_calib_label.setText("-- no calibration loaded --")
+            self.spline_calib_label.setToolTip("")
         self._update_link_photons_visibility()
         # The channel sum may have been registered from the calibration that
         # has just been replaced. Dropping it re-registers it from the new one
@@ -5084,30 +5116,29 @@ class ParametersDialog(lib.Dialog):
         cb = getattr(self, "gauss_link_photons_checkbox", None)
         return cb.isChecked() if cb is not None else False
 
-    def update_z_calib_with_config_path(self):
+    def update_z_calib_with_config_path(self) -> None:
         """Retrieve the z calibration path that corresponds to the
-        selected camera and emission wavelength, from the config"""
-        if "z-calibrations" not in CONFIG:
-            return
-        camera = self.camera.currentText()
-        fp_calib_lam = CONFIG["z-calibrations"].get(camera)
-        if fp_calib_lam is not None:
-            em_combo = self.emission_combos[camera]
-            wavelength = int(em_combo.currentText())
-            fp_calib = fp_calib_lam.get(wavelength)
-            if fp_calib is not None:
-                self.update_z_calib(fp_calib)
-                # To avoid the situation where the user runs a 3D localization
-                # just because the calib file was loaded, uncheck the "Fit Z"
-                # checkbox;
-                self.fit_z_checkbox.setChecked(False)
-            else:
-                self.update_z_calib(None)
-        else:
-            self.update_z_calib(None)
+        selected camera and emission wavelength, from the config.
 
-    def update_z_calib(self, path: str) -> None:
-        """Load the 3D calibration from a YAML file."""
+        Switching to a camera or wavelength the config has no entry for
+        *clears* the calibration rather than leaving the previous one in
+        place.
+        """
+        if "z-calibrations" not in CONFIG:
+            # nothing is configured for any camera, so nothing was
+            # auto-loaded: leave a manually loaded calibration alone
+            return
+        path = self.config_calib_path("z-calibrations")
+        self.update_z_calib(path)
+        if path:
+            # To avoid the situation where the user runs a 3D localization
+            # just because the calib file was loaded, uncheck the "Fit Z"
+            # checkbox;
+            self.fit_z_checkbox.setChecked(False)
+
+    def update_z_calib(self, path: str | None) -> None:
+        """Load (or clear, with ``None``) the 3D calibration from a YAML
+        file."""
         if path:
             if os.path.exists(path):
                 self.z_calibration = io.load_calibration(path)

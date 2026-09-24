@@ -1537,6 +1537,51 @@ def _save_picks_in_metadata() -> bool:
     return bool(settings["Save picks in metadata"])
 
 
+#: File formats that the color bar (LUT) of a rendered property can be
+#: saved in, see ``colorbar_export_format``. The first one is the
+#: default.
+COLORBAR_FORMATS = (".png", ".svg")
+
+
+def colorbar_export_format() -> str:
+    """Format of the color bar (LUT) that Render saves next to an image
+    exported while rendering by property.
+
+    ``.png`` (the default) saves it as an image, ``.svg`` as a vector
+    graphic whose bands, ticks and text stay editable in figure
+    software. Read from ``Colorbar format`` in the ``Render`` section of
+    the user settings, next to the colormaps it belongs with; when the
+    setting is absent, the default is persisted to the user settings
+    file so it becomes visible and editable.
+
+    Returns
+    -------
+    extension : str
+        One of ``COLORBAR_FORMATS``.
+    """
+    settings = load_user_settings()
+    # a "Render" section loaded from the file is a plain dict, so a
+    # missing key raises instead of auto-creating; and truthiness cannot
+    # be relied on, as AutoDict auto-creates an empty (falsy) dict for
+    # the section itself
+    render_settings = settings["Render"]
+    if "Colorbar format" not in render_settings:
+        render_settings["Colorbar format"] = COLORBAR_FORMATS[0]
+        save_user_settings(settings)
+    extension = str(render_settings["Colorbar format"]).strip().lower()
+    if not extension.startswith("."):
+        extension = "." + extension
+    if extension not in COLORBAR_FORMATS:
+        warnings.warn(
+            f"Unknown color bar format '{extension}' in the user settings "
+            f"(Render -> Colorbar format). Expected one of "
+            f"{', '.join(COLORBAR_FORMATS)}; using "
+            f"{COLORBAR_FORMATS[0]} instead."
+        )
+        return COLORBAR_FORMATS[0]
+    return extension
+
+
 #: Key holding the (often very large) block of MicroManager properties
 #: read from a movie, see ``_mm_metadata_from_tifffile``.
 _MM_METADATA_KEY = "Micro-Manager Metadata"

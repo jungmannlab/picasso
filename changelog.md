@@ -1,11 +1,21 @@
 # Changelog
 
-Last change: 08-SEP-2026 CEST
+Last change: 18-SEP-2026 CEST
 
-## Unreleased
-
-### Localize
+## 0.11.3
 - New `picasso.localize.localize_frames`: a GUI-free wrapper that runs the existing identification and fit on an in-memory frame stack (instead of a movie read from disk) and assigns absolute frame indices, so batched or live input concatenates into one growing localization table. Results are numerically identical to `picasso.localize.localize` on the same frames and parameters.
+
+## 0.11.2
+- Fixed the calibrations stored in the camera config (z, experimental PSF and sCMOS) not being cleared when switching to a camera the config has no entry for.
+- Render saves the color bar (LUT) of the rendered property next to every image exported while rendering by property (`*_colorbar.png`), from the main and from the 3D window.
+- Fixed AIM's second round barely correcting the drift ([HohlbeinLab/webSMLM#9](https://github.com/HohlbeinLab/webSMLM/issues/9), reported by @HazenBabcock against a port of this code). Also, thanks to @jhohlbein for the information.
+- Fixed AIM drift correction underestimating the drift.
+- AIM no longer extrapolates the drift with a cubic spline before the first and after the last segment midpoint, where it could swing far off; the spline knots are now padded as in the reference implementation.
+- Fixed Render failing to start when `~/.picasso/settings.yaml` holds a `Render` section without a `Colormap` entry.
+- Fixed 3D animations losing full turns
+- 3D animations no longer render each position twice, which held one frame at every position of the sequence.
+- Fixed error when adding new channels when 3D render is open.
+- Updated readme.txt for both installers regarding camera config and plugins.
 
 ## 0.11.1
 

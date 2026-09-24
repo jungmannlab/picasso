@@ -205,6 +205,19 @@ Render properties
 ^^^^^^^^^^^^^^^^^
 This allows rendering properties by color.
 
+Color bar (LUT)
++++++++++++++++
+When rendering by property is active, exporting an image additionally saves the color bar (LUT) next to it, named after the image with the suffix ``_colorbar`` (e.g., ``locs_view.png`` and ``locs_view_colorbar.png``) - for instance, to annotate z color-coding in a figure. It displays the colors that localizations are rendered with, one band per color as set by ``Colors``, and the property values along the bar.
+
+This applies to ``Export current view``, ``Export complete image`` and ``Export view manually``, as well as to ``Export current view`` in the 3D rotation window. The property, its limits, the number of colors and the colormap are additionally written to the ``.yaml`` file that accompanies the exported image.
+
+The color bar is saved as a ``.png`` by default. To save it as a vector graphic instead - whose bands, ticks and text stay editable in figure software - set ``Colorbar format`` to ``.svg`` under ``Render`` in ``~/.picasso/settings.yaml`` (also available under File > Picasso settings in any module)::
+
+    Render:
+      Colorbar format: .svg
+
+The setting applies to the color bar only; the image itself keeps the format chosen in the save dialog.
+
 Show Info
 ~~~~~~~~~
 Displays the info dialog.

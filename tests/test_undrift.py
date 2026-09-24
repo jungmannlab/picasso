@@ -49,7 +49,14 @@ TOL_PICKED_Z_PX = 0.2
 # synthetic injected drift goes up to ~1 px, so widen the search ROI
 # in tests that exercise AIM on synthetic data.
 AIM_ROI_R_SYNTH = 2.5  # camera pixels
+# AIM's own defaults, in camera pixels, for the round-2 unit tests
+AIM_INTERSECT_D_DEFAULT = 20 / PIXELSIZE
+AIM_ROI_R_DEFAULT = 60 / PIXELSIZE
 AIM_INTERSECT_D_SYNTH = 0.2  # camera pixels
+# The 3D tests inject a 50 nm z amplitude, i.e. only ~2 intersection
+# distances peak-to-peak at 0.2 px. That is too coarse to resolve the z
+# drift, so the 3D tests quantize finer.
+AIM_INTERSECT_D_SYNTH_3D = 0.1  # camera pixels
 
 # AIM treats z as nm and converts to camera pixels with Pixelsize, unlike
 # the picked/fiducial undrifters which track the raw z column. So the AIM
@@ -730,6 +737,36 @@ def test_plot_drift_missing_columns_raises():
 # ---------------------------------------------------------------------
 
 
+# The FFT peak estimators return the peak in units of roi_cc bins, and
+# adjacent bins are exactly intersect_d camera pixels apart, whatever the
+# search radius. A delta-like roi_cc therefore has to come back as the
+# exact bin offset times intersect_d; scaling it by anything else (e.g.
+# the ROI extent divided by the number of bins) silently rescales every
+# drift estimate.
+@pytest.mark.parametrize("intersect_d", [0.2, 20 / PIXELSIZE])
+@pytest.mark.parametrize("box", [7, 27])
+def test_aim_fft_peak_scales_with_intersect_d(box, intersect_d):
+    center = (box - 1) // 2
+    for offset in range(-center, center + 1):
+        roi_cc = np.zeros((box, box), dtype=np.int64)
+        # a single spike, offset along x only
+        roi_cc[center + offset, center] = 100
+        px, py = aim._get_fft_peak(roi_cc, intersect_d)
+        assert px == pytest.approx(offset * intersect_d, abs=1e-9)
+        assert py == pytest.approx(0.0, abs=1e-9)
+
+
+@pytest.mark.parametrize("intersect_d", [0.2, 20 / PIXELSIZE])
+@pytest.mark.parametrize("box", [7, 27])
+def test_aim_fft_peak_z_scales_with_intersect_d(box, intersect_d):
+    center = (box - 1) // 2
+    for offset in range(-center, center + 1):
+        roi_cc = np.zeros(box, dtype=np.int64)
+        roi_cc[center + offset] = 100
+        pz = aim._get_fft_peak_z(roi_cc, intersect_d)
+        assert pz == pytest.approx(offset * intersect_d, abs=1e-9)
+
+
 def test_aim_smoke(locs, info):
     new_locs, new_info, drift = aim.aim(locs, info, segmentation=SEGMENTATION)
     n_frames = lib.get_from_metadata(info, "Frames")
@@ -757,13 +794,146 @@ def test_aim_recovers_injected_drift(
     _assert_drift_recovers(drift, injected_drift_2d, tol=TOL_AIM_PX)
 
 
+def _static_locs_with_displaced_segment(
+    seed, segment, offset_px, segmentation, n_segments
+):
+    """Static structure, drift-free, except one segment shifted in x."""
+    rng = np.random.default_rng(seed)
+    n_frames = segmentation * n_segments
+    mol_x = rng.uniform(20, 236, 300)
+    mol_y = rng.uniform(20, 236, 300)
+    frame = np.repeat(np.arange(1, n_frames + 1), 6)
+    idx = rng.integers(0, 300, frame.size)
+    x = mol_x[idx] + rng.normal(0, 8 / PIXELSIZE, frame.size)
+    y = mol_y[idx] + rng.normal(0, 8 / PIXELSIZE, frame.size)
+    displaced = (frame > segment * segmentation) & (
+        frame <= (segment + 1) * segmentation
+    )
+    return frame, x + displaced * offset_px, y
+
+
+def test_aim_round2_excludes_own_segment_from_reference():
+    """The second round must be able to move a misplaced segment back.
+
+    Its reference is the dataset itself, so without leaving the segment
+    out, the segment intersects its own copy perfectly at zero shift and
+    the estimated shift is dragged towards zero.
+    """
+    segmentation, n_segments, segment = 100, 12, 5
+    offset_nm = 60.0
+    frame, x, y = _static_locs_with_displaced_segment(
+        0, segment, offset_nm / PIXELSIZE, segmentation, n_segments
+    )
+    n_frames = segmentation * n_segments
+    seg_bounds = np.concatenate(
+        (np.arange(0, n_frames, segmentation), [n_frames])
+    )
+    _, _, drift_x, _ = aim.intersection_max(
+        x,
+        y,
+        x,
+        y,
+        frame,
+        seg_bounds,
+        AIM_INTERSECT_D_DEFAULT,
+        AIM_ROI_R_DEFAULT,
+        SYNTH_FOV * 4,
+        aim_round=2,
+        exclude_self=True,
+    )
+    mid = (seg_bounds[segment] + seg_bounds[segment + 1]) // 2
+    baseline = np.median(
+        np.delete(drift_x, slice(seg_bounds[segment], seg_bounds[segment + 1]))
+    )
+    recovered = (drift_x[mid] - baseline) * PIXELSIZE
+    assert recovered > 0.85 * offset_nm, (
+        f"only {recovered:.1f} nm of the {offset_nm:.0f} nm displacement "
+        "was recovered"
+    )
+
+
+def test_aim_exclude_self_rejects_mismatched_reference():
+    frame, x, y = _static_locs_with_displaced_segment(0, 1, 0.0, 100, 4)
+    seg_bounds = np.array([0, 100, 200, 300, 400])
+    with pytest.raises(ValueError, match="exclude_self"):
+        aim.intersection_max(
+            x,
+            y,
+            x[:10],
+            y[:10],
+            frame,
+            seg_bounds,
+            AIM_INTERSECT_D_DEFAULT,
+            AIM_ROI_R_DEFAULT,
+            SYNTH_FOV * 4,
+            aim_round=2,
+            exclude_self=True,
+        )
+    # same length, different localizations
+    with pytest.raises(ValueError, match="exclude_self"):
+        aim.intersection_max(
+            x,
+            y,
+            x + 1.0,
+            y,
+            frame,
+            seg_bounds,
+            AIM_INTERSECT_D_DEFAULT,
+            AIM_ROI_R_DEFAULT,
+            SYNTH_FOV * 4,
+            aim_round=2,
+            exclude_self=True,
+        )
+
+
+def test_aim_exclude_self_survives_a_single_segment():
+    """Leaving the only segment out empties the reference."""
+    frame, x, y = _static_locs_with_displaced_segment(0, 0, 0.0, 400, 1)
+    seg_bounds = np.array([0, 400])
+    _, _, drift_x, drift_y = aim.intersection_max(
+        x,
+        y,
+        x,
+        y,
+        frame,
+        seg_bounds,
+        AIM_INTERSECT_D_DEFAULT,
+        AIM_ROI_R_DEFAULT,
+        SYNTH_FOV * 4,
+        aim_round=2,
+        exclude_self=True,
+    )
+    assert np.isfinite(drift_x).all() and np.isfinite(drift_y).all()
+    assert np.allclose(drift_x, 0) and np.allclose(drift_y, 0)
+
+
+@pytest.mark.parametrize("n_segments", [1, 2, 3, 4])
+def test_aim_runs_with_few_segments(synthetic_fiducials_2d, n_segments):
+    """Padding the spline knots must keep coarse segmentations working.
+
+    The per-segment drifts are interpolated with a cubic spline, which
+    needs more knots than a handful of segments provide on its own.
+    """
+    locs_, info_ = synthetic_fiducials_2d
+    n_frames = lib.get_from_metadata(info_, "Frames")
+    _, _, drift = aim.aim(
+        locs_,
+        info_,
+        segmentation=int(np.ceil(n_frames / n_segments)),
+        intersect_d=AIM_INTERSECT_D_SYNTH,
+        roi_r=AIM_ROI_R_SYNTH,
+    )
+    assert len(drift) == n_frames
+    assert drift.isna().sum().sum() == 0
+
+
 def test_aim_3d_smoke(synthetic_fiducials_3d_aim):
     locs_, info_ = synthetic_fiducials_3d_aim
     new_locs, new_info, drift = aim.aim(
         locs_,
         info_,
         segmentation=SEGMENTATION,
-        intersect_d=AIM_INTERSECT_D_SYNTH,
+        intersect_d=AIM_INTERSECT_D_SYNTH_3D,
         roi_r=AIM_ROI_R_SYNTH,
     )
     n_frames = lib.get_from_metadata(info_, "Frames")
@@ -787,7 +957,7 @@ def test_aim_recovers_injected_drift_3d(
         locs_,
         info_,
         segmentation=SEGMENTATION,
-        intersect_d=AIM_INTERSECT_D_SYNTH,
+        intersect_d=AIM_INTERSECT_D_SYNTH_3D,
         roi_r=AIM_ROI_R_SYNTH,
     )
     assert "z" in drift.columns
@@ -809,7 +979,7 @@ def test_aim_undrifts_z_residual(
         locs_,
         info_,
         segmentation=SEGMENTATION,
-        intersect_d=AIM_INTERSECT_D_SYNTH,
+        intersect_d=AIM_INTERSECT_D_SYNTH_3D,
         roi_r=AIM_ROI_R_SYNTH,
     )
     injected_std = injected_drift_3d_aim["z"].std()

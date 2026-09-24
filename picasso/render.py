@@ -1633,9 +1633,16 @@ def closest_rotvec(
     A rotation vector (axis * angle, radians) is not unique: adding
     full turns (2 pi) around the same axis yields the same rotation.
     This function picks the representation closest to ``reference``,
-    which allows keeping track of rotations beyond +/- 180 degrees
-    (e.g. unwrapping a continuously updated rotation, or encoding
-    multiple full turns in an animation segment).
+    which allows keeping track of rotations beyond +/- 180 degrees,
+    e.g. unwrapping a continuously updated rotation.
+
+    Note that full turns cannot be recovered from an orientation this
+    way: near a full turn ``rotation`` is close to the identity and the
+    axis of its rotation vector is dominated by whatever small residual
+    rotation is left, so the turns held by ``reference`` are dropped.
+    Rotation paths that may contain full turns (the displayed angles of
+    the rotation window, animation segments) are therefore accumulated
+    as a path integral of the applied rotations instead.
 
     Parameters
     ----------
@@ -2892,6 +2899,386 @@ def draw_legend(
     return image
 
 
+def _format_tick(value: float) -> str:
+    """Format a color bar tick value with a sensible number of digits.
+
+    Parameters
+    ----------
+    value : float
+        Value of the rendered property at the tick.
+
+    Returns
+    -------
+    text : str
+        Formatted value.
+    """
+    if value == 0:
+        return "0"
+    magnitude = abs(value)
+    if magnitude >= 1e5 or magnitude < 1e-2:
+        return f"{value:.1e}"
+    if magnitude >= 100:
+        return f"{value:.0f}"
+    if magnitude >= 1:
+        return f"{value:.1f}"
+    return f"{value:.3f}"
+
+
+def _colorbar_layout(
+    colors: list[tuple[float, float, float]] | lib.FloatArray2D,
+    min_value: float,
+    max_value: float,
+    label: str = "",
+    vertical: bool = True,
+    bar_length: int = 400,
+    bar_width: int = 40,
+    n_ticks: int = 5,
+    color: QtGui.QColor | None = None,  # default: white
+    background: QtGui.QColor | None = None,  # default: black
+    text_fontsize: int = 20,
+    margin: int = 12,
+    tick_length: int = 8,
+    tick_spacer: int = 4,
+) -> dict:
+    """Lay out a color bar: its size and everything needed to paint it.
+
+    Shared by ``colorbar_image`` and ``colorbar_svg``, so that the two
+    draw the same bar onto their different paint devices. See
+    ``colorbar_image`` for the parameters.
+
+    Returns
+    -------
+    layout : dict
+        Everything ``_paint_colorbar`` needs, including the ``width``
+        and ``height`` of the bar in display pixels.
+    """
+    colors_arr = np.asarray(colors, dtype=np.float32)
+    assert (
+        colors_arr.ndim == 2 and colors_arr.shape[1] == 3
+    ), "colors must hold one (r, g, b) tuple (0 to 1) per color."
+    if color is None:
+        color = QtGui.QColor("white")
+    if background is None:
+        background = QtGui.QColor("black")
+
+    font = QtGui.QFont()
+    font.setPixelSize(text_fontsize)
+    fm = QtGui.QFontMetrics(font)
+    text_height = fm.height()
+
+    # ticks as (fraction along the bar, text) pairs
+    if n_ticks < 2 or max_value <= min_value:
+        ticks = []
+        text_width = 0
+    else:
+        values = np.linspace(min_value, max_value, n_ticks)
+        ticks = [
+            (
+                (value - min_value) / (max_value - min_value),
+                _format_tick(value),
+            )
+            for value in values
+        ]
+        text_width = max(fm.horizontalAdvance(text) for _, text in ticks)
+    # space taken by the ticks next to the bar
+    tick_extent = tick_length + tick_spacer
+    tick_space = (
+        tick_extent + (text_width if vertical else text_height) if ticks else 0
+    )
+    label_height = text_height + margin // 2 if label else 0
+
+    # size and position of the bar; the outermost tick labels stick out
+    # beyond the ends of the bar, hence the padding
+    if vertical:
+        pad = text_height // 2 if ticks else 0
+        bar_x = margin
+        bar_y = margin + label_height + pad
+        width = margin + bar_width + tick_space + margin
+        height = bar_y + bar_length + pad + margin
+    else:
+        pad = text_width // 2 if ticks else 0
+        bar_x = margin + pad
+        bar_y = margin + label_height
+        width = bar_x + bar_length + pad + margin
+        height = bar_y + bar_width + tick_space + margin
+    if label:  # do not cut off the label
+        width = max(width, fm.horizontalAdvance(label) + 2 * margin)
+
+    return {
+        "colors": colors_arr,
+        "label": label,
+        "vertical": vertical,
+        "bar_length": bar_length,
+        "bar_width": bar_width,
+        "bar_x": bar_x,
+        "bar_y": bar_y,
+        "width": width,
+        "height": height,
+        "ticks": ticks,
+        "tick_length": tick_length,
+        "tick_extent": tick_extent,
+        "text_width": text_width,
+        "text_height": text_height,
+        "font": font,
+        "color": color,
+        "background": background,
+        "margin": margin,
+    }
+
+
+def _paint_colorbar(painter: QtGui.QPainter, layout: dict) -> None:
+    """Paint a color bar laid out by ``_colorbar_layout`` onto any paint
+    device (an image or an SVG generator).
+
+    Parameters
+    ----------
+    painter : QPainter
+        Painter active on the paint device, sized as the layout says.
+    layout : dict
+        As returned by ``_colorbar_layout``.
+    """
+    colors = layout["colors"]
+    vertical = layout["vertical"]
+    bar_x, bar_y = layout["bar_x"], layout["bar_y"]
+    bar_length, bar_width = layout["bar_length"], layout["bar_width"]
+    color = layout["color"]
+    text_width, text_height = layout["text_width"], layout["text_height"]
+
+    painter.setFont(layout["font"])
+    painter.fillRect(
+        0, 0, layout["width"], layout["height"], layout["background"]
+    )
+
+    # color bands; integer edges, so that neighboring bands neither
+    # overlap nor leave gaps
+    n_colors = len(colors)
+    edges = np.round(np.linspace(0, bar_length, n_colors + 1)).astype(int)
+    painter.setPen(QtGui.QPen(QtCore.Qt.PenStyle.NoPen))
+    for i in range(n_colors):
+        rgb = colors[i]
+        painter.setBrush(
+            QtGui.QBrush(
+                QtGui.QColor(
+                    int(round(255 * rgb[0])),
+                    int(round(255 * rgb[1])),
+                    int(round(255 * rgb[2])),
+                )
+            )
+        )
+        thickness = int(edges[i + 1] - edges[i])
+        if vertical:  # the first color is at the bottom
+            y = bar_y + bar_length - int(edges[i + 1])
+            painter.drawRect(bar_x, y, bar_width, thickness)
+        else:
+            x = bar_x + int(edges[i])
+            painter.drawRect(x, bar_y, thickness, bar_width)
+
+    # frame, ticks and text
+    painter.setBrush(QtGui.QBrush(QtCore.Qt.BrushStyle.NoBrush))
+    painter.setPen(QtGui.QPen(color))
+    if vertical:
+        painter.drawRect(bar_x, bar_y, bar_width, bar_length)
+    else:
+        painter.drawRect(bar_x, bar_y, bar_length, bar_width)
+    for fraction, text in layout["ticks"]:
+        if vertical:
+            y = int(round(bar_y + (1 - fraction) * bar_length))
+            painter.drawLine(
+                bar_x + bar_width,
+                y,
+                bar_x + bar_width + layout["tick_length"],
+                y,
+            )
+            text_rect = QtCore.QRect(
+                bar_x + bar_width + layout["tick_extent"],
+                y - text_height // 2,
+                text_width,
+                text_height,
+            )
+            alignment = (
+                QtCore.Qt.AlignmentFlag.AlignLeft
+                | QtCore.Qt.AlignmentFlag.AlignVCenter
+            )
+        else:
+            x = int(round(bar_x + fraction * bar_length))
+            painter.drawLine(
+                x,
+                bar_y + bar_width,
+                x,
+                bar_y + bar_width + layout["tick_length"],
+            )
+            text_rect = QtCore.QRect(
+                x - text_width // 2,
+                bar_y + bar_width + layout["tick_extent"],
+                text_width,
+                text_height,
+            )
+            alignment = (
+                QtCore.Qt.AlignmentFlag.AlignHCenter
+                | QtCore.Qt.AlignmentFlag.AlignTop
+            )
+        painter.drawText(text_rect, alignment, text)
+    if layout["label"]:
+        margin = layout["margin"]
+        painter.drawText(
+            QtCore.QRect(
+                margin, margin, layout["width"] - 2 * margin, text_height
+            ),
+            QtCore.Qt.AlignmentFlag.AlignHCenter
+            | QtCore.Qt.AlignmentFlag.AlignTop,
+            layout["label"],
+        )
+
+
+def colorbar_image(
+    colors: list[tuple[float, float, float]] | lib.FloatArray2D,
+    min_value: float,
+    max_value: float,
+    label: str = "",
+    vertical: bool = True,
+    bar_length: int = 400,
+    bar_width: int = 40,
+    n_ticks: int = 5,
+    color: QtGui.QColor | None = None,  # default: white
+    background: QtGui.QColor | None = None,  # default: black
+    text_fontsize: int = 20,
+    margin: int = 12,
+    tick_length: int = 8,
+    tick_spacer: int = 4,
+) -> QtGui.QImage:
+    """Draw a standalone color bar (LUT) of a rendered property.
+
+    One band is drawn per color, i.e., the bar shows the discretized
+    colors that localizations are rendered with when rendering by
+    property (see ``get_colors_from_colormap`` and
+    ``split_locs_by_property``), not the continuous colormap. The bar is
+    annotated with the property values at ``n_ticks`` evenly spaced
+    positions; the two ends of the bar correspond to `min_value` and
+    `max_value`. The first color is drawn at the bottom (vertical bar)
+    or at the left (horizontal bar).
+
+    Meant to be saved next to an exported image, e.g., to annotate z
+    color-coding in a figure. See ``colorbar_svg`` for the same bar as a
+    vector graphic and ``save_colorbar`` to write either.
+
+    Parameters
+    ----------
+    colors : list of tuples or lib.FloatArray2D
+        Colors of the bands, one ``(r, g, b)`` tuple (values between 0
+        and 1) per color, as used for rendering, see
+        ``get_colors_from_colormap``.
+    min_value : float
+        Value of the rendered property at the start of the bar.
+    max_value : float
+        Value of the rendered property at the end of the bar.
+    label : str, optional
+        Text displayed above the bar, e.g., 'z (nm)'. Default is "",
+        i.e., no label.
+    vertical : bool, optional
+        Whether the bar is drawn vertically (True) or horizontally
+        (False). Default is True.
+    bar_length : int, optional
+        Length of the bar in display pixels. Default is 400.
+    bar_width : int, optional
+        Thickness of the bar in display pixels. Default is 40.
+    n_ticks : int, optional
+        Number of annotated positions along the bar. If less than 2, no
+        ticks are drawn. Default is 5.
+    color : QColor, optional
+        Color of the frame, ticks and text. Default is white.
+    background : QColor, optional
+        Color of the background. Default is black. Pass a fully
+        transparent QColor for a transparent background.
+    text_fontsize : int, optional
+        Font size of the label and tick text in display pixels. Default
+        is 20.
+    margin : int, optional
+        Margin around the drawn elements in display pixels. Default is
+        12.
+    tick_length : int, optional
+        Length of the tick marks in display pixels. Default is 8.
+    tick_spacer : int, optional
+        Spacing between the tick marks and the tick text in display
+        pixels. Default is 4.
+
+    Returns
+    -------
+    image : QImage
+        Image with the drawn color bar.
+    """
+    layout = _colorbar_layout(
+        colors=colors,
+        min_value=min_value,
+        max_value=max_value,
+        label=label,
+        vertical=vertical,
+        bar_length=bar_length,
+        bar_width=bar_width,
+        n_ticks=n_ticks,
+        color=color,
+        background=background,
+        text_fontsize=text_fontsize,
+        margin=margin,
+        tick_length=tick_length,
+        tick_spacer=tick_spacer,
+    )
+    image = QtGui.QImage(
+        layout["width"], layout["height"], QtGui.QImage.Format.Format_ARGB32
+    )
+    image.fill(QtCore.Qt.GlobalColor.transparent)
+    painter = QtGui.QPainter(image)
+    _paint_colorbar(painter, layout)
+    painter.end()
+    return image
+
+
+def colorbar_svg(path: str, **kwargs) -> None:
+    """Write a color bar (LUT) of a rendered property to an SVG file.
+
+    Unlike ``export_qimage_to_svg``, which embeds a rendered image, this
+    draws the bar itself into the SVG: the bands, the frame, the ticks
+    and the text stay vector objects that can be scaled and edited in
+    figure software.
+
+    Parameters
+    ----------
+    path : str
+        Where to write the SVG.
+    **kwargs
+        The color bar to draw, see ``colorbar_image``.
+    """
+    layout = _colorbar_layout(**kwargs)
+    generator = QtSvg.QSvgGenerator()
+    generator.setFileName(path)
+    generator.setSize(QtCore.QSize(layout["width"], layout["height"]))
+    generator.setViewBox(QtCore.QRect(0, 0, layout["width"], layout["height"]))
+    generator.setTitle(layout["label"] or "Color bar")
+    generator.setDescription(f"Color bar generated by Picasso v{__version__}")
+    painter = QtGui.QPainter(generator)
+    _paint_colorbar(painter, layout)
+    painter.end()
+
+
+def save_colorbar(path: str, **kwargs) -> None:
+    """Save a color bar (LUT) of a rendered property, in the format
+    given by the extension of `path`.
+
+    ``.svg`` gives a vector graphic (``colorbar_svg``), every other
+    extension an image written by Qt (``colorbar_image``).
+
+    Parameters
+    ----------
+    path : str
+        Where to write the color bar; its extension selects the format.
+    **kwargs
+        The color bar to draw, see ``colorbar_image``.
+    """
+    if path.lower().endswith(".svg"):
+        colorbar_svg(path, **kwargs)
+    else:
+        colorbar_image(**kwargs).save(path)
+
+
 @adjust_viewport_decorator
 def draw_minimap(
     image: QtGui.QImage,
@@ -3762,38 +4149,58 @@ def _animation_sequence(
     checkpoint rotations at constant angular velocity (slerp). If
     ``segment_rotations`` is given, the corresponding rotation vector
     defines the rotation path of each segment and may include full
-    turns (magnitude beyond pi), e.g. 4 pi for two full turns. The
-    vector is snapped to the true relative rotation between the two
-    checkpoints (see ``closest_rotvec``) so that each segment always
-    ends exactly at the next checkpoint. This is equivalent to
-    splitting a segment with a rotation larger than 180 degrees into
-    sub-180-degree pieces and applying slerp to each piece."""
+    turns (magnitude beyond pi), e.g. 4 pi for two full turns.
+
+    Such a path is followed as
+    ``from_rotvec(t * correction) * from_rotvec(t * rotvec) * R1``,
+    where ``correction`` is the (shortest) residual rotation left
+    between the end of the given path and the next checkpoint. The
+    segment therefore always ends exactly at the next checkpoint while
+    keeping the requested turns, without having to re-derive the turns
+    from the checkpoint orientations - which is impossible, as a full
+    turn leaves the orientation unchanged. When the given path already
+    matches the relative rotation (e.g. both around the same axis),
+    the correction vanishes and this is plain slerp, split into
+    sub-180-degree pieces.
+
+    Frames are placed at ``t = 0, 1/n, ...`` for every segment but the
+    last, whose final frame lands on the last checkpoint. This way each
+    checkpoint is rendered once, rather than once as the end of one
+    segment and again as the start of the next."""
     rotations = []
     viewports = []
     for i in range(len(positions) - 1):
-        n_frames = int(fps * durations[i])
+        n_frames = max(1, int(fps * durations[i]))
+        # only the last segment includes its final checkpoint; the
+        # others end where the next segment starts
+        endpoint = i == len(positions) - 2
 
         # rotations
         R1, vp1 = positions[i]
         R2, vp2 = positions[i + 1]
         relative = R2 * R1.inv()
         if segment_rotations is not None:
-            rotvec = closest_rotvec(
-                relative, np.asarray(segment_rotations[i], dtype=float)
-            )
+            rotvec = np.asarray(segment_rotations[i], dtype=float)
         else:
             rotvec = relative.as_rotvec()
-        fractions = np.linspace(0, 1, n_frames)
+        # residual rotation between the end of the requested path and
+        # the next checkpoint, spread evenly over the segment
+        correction = (
+            relative * Rotation.from_rotvec(rotvec).inv()
+        ).as_rotvec()
+        fractions = np.linspace(0, 1, n_frames, endpoint=endpoint)
         rotations.extend(
-            Rotation.from_rotvec(fraction * rotvec) * R1
+            Rotation.from_rotvec(fraction * correction)
+            * Rotation.from_rotvec(fraction * rotvec)
+            * R1
             for fraction in fractions
         )
 
         # viewports
-        ymin = np.linspace(vp1[0][0], vp2[0][0], n_frames)
-        xmin = np.linspace(vp1[0][1], vp2[0][1], n_frames)
-        ymax = np.linspace(vp1[1][0], vp2[1][0], n_frames)
-        xmax = np.linspace(vp1[1][1], vp2[1][1], n_frames)
+        ymin = np.linspace(vp1[0][0], vp2[0][0], n_frames, endpoint=endpoint)
+        xmin = np.linspace(vp1[0][1], vp2[0][1], n_frames, endpoint=endpoint)
+        ymax = np.linspace(vp1[1][0], vp2[1][0], n_frames, endpoint=endpoint)
+        xmax = np.linspace(vp1[1][1], vp2[1][1], n_frames, endpoint=endpoint)
         current_viewports = [
             ((ymin[j], xmin[j]), (ymax[j], xmax[j])) for j in range(len(ymin))
         ]
@@ -3869,10 +4276,10 @@ def build_animation(
         full rotation path from one checkpoint to the next. The
         magnitude may exceed pi to encode rotations larger than 180
         degrees, e.g. (0, 0, 4 * pi) for two full turns around the z
-        axis. Each vector is snapped to the true relative rotation
-        between its two checkpoints, so the segment always ends
-        exactly at the next checkpoint. If None, each segment follows
-        the shortest path (slerp). Default is None.
+        axis. Any rotation left between the end of such a path and the
+        next checkpoint is spread over the segment, so the segment
+        always ends exactly at the next checkpoint. If None, each
+        segment follows the shortest path (slerp). Default is None.
     blur_method : {"gaussian", "gaussian_iso", "smooth", "convolve"} or None, \
             optional
         Defines localizations' blur. The string has to be one of
