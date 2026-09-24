@@ -7721,6 +7721,209 @@ def localize(
     return _localize_return(locs, info, return_info=return_info)
 
 
+#: Camera keys ``fit`` reads off ``camera_info`` (see ``_to_photons`` /
+#: ``_sensitivity``); the rest of a picasso info list is movie metadata.
+#: Pulled out of the info list-of-dicts by ``localize_frames`` when no
+#: ``camera_info`` is passed explicitly.
+_CAMERA_INFO_KEYS = ("Baseline", "Sensitivity", "Gain", "Qe", "Pixelsize")
+
+
+def _camera_info_from_info(info: list[dict] | None) -> dict:
+    """Collect the camera parameters from a picasso info list-of-dicts.
+
+    The streaming contract (S0B-2, contract 3) carries the camera info inside
+    ``info`` rather than as a separate argument, so ``localize_frames`` pulls
+    the keys ``fit`` needs (``Baseline``, ``Sensitivity``, ``Gain`` and,
+    optionally, ``Qe``/``Pixelsize``) out of it. Later dicts win, so a
+    fit/identify block appended to a raw-movie block can override it.
+    """
+    camera_info: dict = {}
+    for entry in info or []:
+        if isinstance(entry, dict):
+            for key in _CAMERA_INFO_KEYS:
+                if key in entry:
+                    camera_info[key] = entry[key]
+    return camera_info
+
+
+class _InMemoryMovie(io.AbstractPicassoMovie):
+    """Minimal ``AbstractPicassoMovie`` backed by an in-memory frame stack.
+
+    ``fit`` asserts its movie is an ``AbstractPicassoMovie`` (or a memmap) so
+    that filtered movie views cannot reach it; a raw in-memory stack is a
+    legitimate thing to fit, so ``localize_frames`` wraps one in this thin
+    adapter that just delegates to the underlying ndarray. Spots are cut with
+    the same per-frame slicing as the memmap path (``_cut_spots_framebyframe``
+    vs ``_cut_spots_numba``), so the localizations are identical.
+    """
+
+    def __init__(self, frames, info: list[dict] | None = None):
+        super().__init__()
+        self._frames = np.asarray(frames)
+        if self._frames.ndim != 3:
+            raise ValueError(
+                "frames must be a 3D (n_frames, height, width) stack; got "
+                f"shape {self._frames.shape!r}"
+            )
+        self._info = info or []
+        self.shape = self._frames.shape
+
+    @property
+    def n_frames(self) -> int:
+        # Derived so it cannot desync from the backing array; the localize
+        # pipeline reads ``len(movie)`` and ``movie.shape``, but other movie
+        # classes expose ``n_frames`` and callers may expect it too.
+        return self._frames.shape[0]
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        return None
+
+    def info(self):
+        return self._info[0] if self._info else {}
+
+    def camera_parameters(self, config: dict) -> dict:
+        return super().camera_parameters(config)
+
+    def __getitem__(self, it):
+        return self._frames[it]
+
+    def __iter__(self):
+        return iter(self._frames)
+
+    def __len__(self) -> int:
+        return len(self._frames)
+
+    def get_frame(self, index: int):
+        return self._frames[index]
+
+    def tofile(self, file_handle, byte_order=None):
+        self._frames.tofile(file_handle)
+
+    @property
+    def dtype(self):
+        return self._frames.dtype
+
+
+def localize_frames(
+    frames,
+    info: list[dict] | None,
+    params: dict,
+    *,
+    start_frame: int = 0,
+    camera_info: dict | None = None,
+    fitting_method: str = "gausslq",
+    eps: float | None = None,
+    max_it: int | None = None,
+    spline_calibration: dict | None = None,
+    camera_calibration: dict | None = None,
+    threaded: bool = True,
+    identification_progress_callback: (
+        Callable[[int], None] | Literal["console"] | None
+    ) = None,
+    fit_progress_callback: (
+        Callable[[int], None] | Literal["console"] | None
+    ) = None,
+) -> pd.DataFrame:
+    """Localize an in-memory frame stack, GUI-free (streaming/live input).
+
+    A thin wrapper around :func:`localize` (identify + fit) for batched or
+    live acquisition: it takes an in-memory frame stack instead of a movie
+    loaded from disk and assigns absolute frame indices, so successive batches
+    concatenate into one growing localization table. It runs no new
+    localization algorithm - the fit is exactly the one :func:`localize`
+    (and Picasso: Localize) runs, so the result matches that path spot for
+    spot on the same frames and parameters.
+
+    Implements contract 3 of the S0B-2 shared data contracts.
+
+    Parameters
+    ----------
+    frames : array-like
+        In-memory frame stack, a 3D ``(n_frames, height, width)`` array (or
+        anything :func:`numpy.asarray` turns into one). An already-loaded
+        movie (a memmap or an ``io.AbstractPicassoMovie``) is used as-is.
+    info : list of dict or None
+        Picasso info list-of-dicts: movie metadata and, unless
+        ``camera_info`` is passed, the camera parameters (``Baseline``,
+        ``Sensitivity``, ``Gain`` and, optionally, ``Qe``/``Pixelsize``),
+        which are read out of it (see :func:`_camera_info_from_info`).
+    params : dict
+        Identification parameters, at least ``"Min. Net Gradient"`` and
+        ``"Box Size"``; ``"Temporal Median Window"`` and
+        ``"Gaussian Filter Sigma"`` are honored if present, as in
+        :func:`localize`.
+    start_frame : int, optional
+        Absolute index of the first frame in ``frames``. The returned
+        ``frame`` column is offset by this, so a caller that increments it by
+        each batch's frame count gets one table whose frame indices are
+        absolute and contiguous across batch boundaries. Default is 0.
+    camera_info : dict or None, optional
+        Camera parameters, overriding those found in ``info``. Default None
+        (read them from ``info``).
+    fitting_method : str, optional
+        Which fitting algorithm to use, see :func:`fit`. Default ``"gausslq"``
+        (GPU variants such as ``"gausslq-gpu"`` run on the GPU if available).
+    eps, max_it, spline_calibration, camera_calibration, threaded
+        Forwarded to :func:`localize` unchanged.
+    identification_progress_callback, fit_progress_callback
+        Progress callbacks forwarded to :func:`localize`.
+
+    Returns
+    -------
+    locs : pd.DataFrame
+        The localization table, columns ``frame, x, y, photons, sx, sy, bg,
+        lpx, lpy, net_gradient`` (plus ``z``/``lpz`` for a 3D spline fit), as
+        :func:`localize` returns them, with ``frame`` shifted by
+        ``start_frame``.
+    """
+    assert isinstance(params, dict), "params must be a dict"
+    assert (
+        isinstance(start_frame, (int, np.integer)) and start_frame >= 0
+    ), "start_frame must be a non-negative integer"
+    if camera_info is None:
+        camera_info = _camera_info_from_info(info)
+    else:
+        # ``fit`` fills a missing "Pixelsize" into camera_info in place; copy
+        # it so a caller reusing one dict across streaming batches is not
+        # silently mutated.
+        camera_info = dict(camera_info)
+
+    if isinstance(frames, (io.AbstractPicassoMovie, np.memmap)):
+        movie = frames
+    else:
+        movie = _InMemoryMovie(frames, info)
+
+    locs, _ = localize(
+        movie,
+        camera_info=camera_info,
+        identification_parameters=params,
+        movie_info=info if info is not None else [],
+        fitting_method=fitting_method,
+        eps=eps,
+        max_it=max_it,
+        spline_calibration=spline_calibration,
+        camera_calibration=camera_calibration,
+        threaded=threaded,
+        identification_progress_callback=identification_progress_callback,
+        fit_progress_callback=fit_progress_callback,
+        return_info=True,
+    )
+
+    if start_frame:
+        # Shift into absolute coordinates without changing the column dtype,
+        # so a batch starting at 0 is byte-for-byte the non-streaming table.
+        # ``frame`` is uint32, so the absolute index is assumed to stay below
+        # 2**32 (~4.3e9 frames), which holds for any real acquisition.
+        locs = locs.copy()
+        locs["frame"] = (locs["frame"].to_numpy() + start_frame).astype(
+            locs["frame"].dtype
+        )
+    return locs
+
+
 # TODO: remove in v0.12.0 (return_info is removed, info is always returned)
 def _localize_return(
     locs: pd.DataFrame,

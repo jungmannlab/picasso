@@ -2,6 +2,9 @@
 
 Last change: 18-SEP-2026 CEST
 
+## 0.11.3
+- New `picasso.localize.localize_frames`: a GUI-free wrapper that runs the existing identification and fit on an in-memory frame stack (instead of a movie read from disk) and assigns absolute frame indices, so batched or live input concatenates into one growing localization table. Results are numerically identical to `picasso.localize.localize` on the same frames and parameters.
+
 ## 0.11.2
 - Fixed the calibrations stored in the camera config (z, experimental PSF and sCMOS) not being cleared when switching to a camera the config has no entry for.
 - Render saves the color bar (LUT) of the rendered property next to every image exported while rendering by property (`*_colorbar.png`), from the main and from the 3D window.
