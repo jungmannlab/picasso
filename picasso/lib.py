@@ -340,6 +340,8 @@ class MockProgress:
         ----------
         maximum : int
             The value progress runs up to.
+        *args, **kwargs
+            Accepted and ignored, for ``ProgressDialog`` compatibility.
         """
         self._maximum = maximum
 
@@ -367,6 +369,8 @@ class MockProgress:
         ----------
         description : str, optional
             Ignored; a real dialog would show it as the new phase's label.
+        *args, **kwargs
+            Accepted and ignored, for ``ProgressDialog`` compatibility.
         """
         pass
 
@@ -414,9 +418,9 @@ class TqdmProgress:
         ----------
         unit : str, optional
             Name of one iteration, shown by tqdm. Default "it".
-        **kwargs
-            ``description`` is used as the bar's label; anything else a real
-            progress dialog takes is accepted and ignored.
+        *args, **kwargs
+            ``description`` (keyword) is used as the bar's label; anything
+            else a real progress dialog takes is accepted and ignored.
         """
         self.description_base = (
             "" if "description" not in kwargs else kwargs["description"]
@@ -426,8 +430,7 @@ class TqdmProgress:
         self._maximum = 0
 
     def init(self, *args, **kwargs):
-        """Do nothing; the bar is armed lazily on the first
-        :meth:`set_value`."""
+        """Do nothing; the bar is armed on the first :meth:`set_value`."""
         pass
 
     def set_value(self, value, *args, **kwargs):
@@ -437,6 +440,8 @@ class TqdmProgress:
         ----------
         value : int
             Cumulative progress so far.
+        *args, **kwargs
+            Accepted and ignored, for ``ProgressDialog`` compatibility.
         """
         if self.iterator is None:
             self.iterator = tqdm(
@@ -453,6 +458,8 @@ class TqdmProgress:
         ----------
         maximum : int
             The total the bar counts towards.
+        *args, **kwargs
+            Accepted and ignored, for ``ProgressDialog`` compatibility.
         """
         self._maximum = maximum
         if self.iterator is not None:
@@ -484,6 +491,8 @@ class TqdmProgress:
         ----------
         description : str, optional
             Label of the new phase. None keeps the current one.
+        *args, **kwargs
+            Accepted and ignored, for ``ProgressDialog`` compatibility.
         """
         if description:
             self.description_base = description
@@ -2422,18 +2431,29 @@ def rectangles_overlap(  # noqa: C901
 
     Parameters
     ----------
-    x1, y1, x2, y2 : float
-        Centers of the two rectangles.
-    theta1, theta2 : float
-        Angles of the center axes (radians).
-    length1, length2 : float
-        Lengths of the rectangles along their center axes.
-    width1, width2 : float
-        Widths of the rectangles.
-    r1, r2 : float
-        Circumscribed circle radii, i.e.,
-        ``sqrt(length ** 2 + width ** 2) / 2``. Passed in because they
-        are usually precomputed.
+    x1, y1 : float
+        Center of the first rectangle.
+    theta1 : float
+        Angle of the first rectangle's center axis (radians).
+    length1 : float
+        Length of the first rectangle along its center axis.
+    width1 : float
+        Width of the first rectangle.
+    r1 : float
+        Circumscribed circle radius of the first rectangle, i.e.,
+        ``sqrt(length1 ** 2 + width1 ** 2) / 2``. Passed in because it
+        is usually precomputed.
+    x2, y2 : float
+        Center of the second rectangle.
+    theta2 : float
+        Angle of the second rectangle's center axis (radians).
+    length2 : float
+        Length of the second rectangle along its center axis.
+    width2 : float
+        Width of the second rectangle.
+    r2 : float
+        Circumscribed circle radius of the second rectangle, see
+        ``r1``.
 
     Returns
     -------

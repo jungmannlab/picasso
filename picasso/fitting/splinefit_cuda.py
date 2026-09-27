@@ -796,12 +796,33 @@ def fit_spots(
 
     Parameters
     ----------
-    kind, spots, coefficients, jacobians, residuals : array
-        As in ``splinefit.fit_spots``.
-    initial_parameters, z_seeds, apply_seeds, mle : array and bool
-        As in ``splinefit.fit_spots``.
-    tolerance, max_iterations, variance : optional
-        As in ``splinefit.fit_spots``.
+    kind : int
+        ``splinefit.KIND_2D``, ``splinefit.KIND_3D`` or
+        ``splinefit.KIND_LINK_XYZ``.
+    spots : np.ndarray
+        Channel-major ``(n_spots, n_channels, box, box)`` photon counts, as
+        in ``splinefit.fit_spots``.
+    coefficients : np.ndarray
+        Reshaped spline coefficients, as in ``splinefit.fit_spots``.
+    jacobians : np.ndarray
+        ``(n_spots, n_channels, 4)`` per-channel local Jacobians, as in
+        ``splinefit.fit_spots``.
+    residuals : np.ndarray
+        ``(n_spots, n_channels, 2)`` sub-pixel ROI offsets, as in
+        ``splinefit.fit_spots``.
+    initial_parameters : np.ndarray
+        ``(n_spots, n_params)`` seeds, as in ``splinefit.fit_spots``.
+    z_seeds : np.ndarray
+        Axial seeds for the multi-start, in z-shift units.
+    apply_seeds : bool
+        Whether to run the multi-start at all; False keeps each spot's own
+        initial z.
+    mle : bool, optional
+        Use the Poisson maximum-likelihood estimator instead of least squares.
+    tolerance : float, optional
+        Convergence tolerance, as in ``splinefit.fit_spots``.
+    max_iterations : int, optional
+        Maximum number of iterations, as in ``splinefit.fit_spots``.
     progress_callback : callable, "console" or None, optional
         ``"console"`` shows a tqdm bar; a callable is invoked with the
         cumulative number of spots fitted. Updated once per chunk, not once
@@ -814,6 +835,8 @@ def fit_spots(
     single_precision : bool, optional
         Evaluate the spline in single precision (the default). Everything
         downstream of the model is double regardless. See the module docstring.
+    variance : np.ndarray, optional
+        Per-pixel sCMOS readout variance, as in ``splinefit.fit_spots``.
 
     Returns
     -------

@@ -278,8 +278,10 @@ def build_render_index_arrays(
     height: float,
     n_levels: int = 3,
 ) -> RenderIndexPyramid:
-    """``build_render_index`` on coordinate arrays (camera pixels) and
-    the field of view size; see there.
+    """Build the pyramid from coordinate arrays and the FOV size.
+
+    Same as ``build_render_index`` but on coordinate arrays (camera
+    pixels) and the field of view size.
 
     The permutation sorts the rows by their fine Morton key (the
     Morton code of the cell at ``_FINE_BITS`` levels below the base
@@ -288,6 +290,21 @@ def build_render_index_arrays(
     it: the block tables of the pyramid levels and the implicit
     quad-tree of ``quadtree_layout`` (rendered by ``picasso.render``)
     both read the same permutation.
+
+    Parameters
+    ----------
+    x, y : lib.FloatArray1D
+        Coordinates of the localizations (camera pixels).
+    width, height : float
+        Size of the field of view (camera pixels).
+    n_levels : int, optional
+        Number of pyramid levels, each with blocks 4x larger than the
+        last. Default 3.
+
+    Returns
+    -------
+    pyramid : RenderIndexPyramid
+        The spatial index of the localizations.
     """
     base = _base_block_size(width, height)
     block_sizes = tuple(base * (4**lvl) for lvl in range(n_levels))
@@ -825,15 +842,10 @@ def load_render_index(
 def quadtree_layout(
     pyramid: RenderIndexPyramid,
 ) -> tuple[lib.IntArray1D, lib.IntArray1D, float, int]:
-    """The implicit quad-tree of a pyramid, for the adaptive-histogram
-    renderer (``picasso.render.kernels._quadtree_fill``).
+    """Return the implicit quad-tree of a pyramid.
 
-    Returns ``(sorted_keys, perm, root_px, total_bits)``: the fine
-    Morton key of every row in permutation order (ascending), the
-    permutation, the side of the root square in camera pixels (a
-    power-of-two number of base blocks covering the field of view,
-    anchored at the origin) and the depth of the tree, i.e. the number
-    of levels from the root to the finest cell.
+    Used by the adaptive-histogram renderer
+    (``picasso.render.kernels._quadtree_fill``).
 
     The contract a consumer relies on: the node at depth ``d`` with
     Morton prefix ``p`` (``d`` bits per axis interleaved, x in the even
@@ -843,8 +855,31 @@ def quadtree_layout(
     ``4 * p + c`` for ``c`` in 0..3, ``c & 1`` being the x half and
     ``c >> 1`` the y half, each of side ``root_px / 2 ** (d + 1)``.
 
-    Raises ``ValueError`` if the pyramid carries no keys (read from a
-    file but not validated).
+    Parameters
+    ----------
+    pyramid : RenderIndexPyramid
+        The spatial index of a channel.
+
+    Returns
+    -------
+    sorted_keys : lib.IntArray1D
+        The fine Morton key of every row in permutation order
+        (ascending).
+    perm : lib.IntArray1D
+        The permutation.
+    root_px : float
+        The side of the root square in camera pixels (a power-of-two
+        number of base blocks covering the field of view, anchored at
+        the origin).
+    total_bits : int
+        The depth of the tree, i.e. the number of levels from the root
+        to the finest cell.
+
+    Raises
+    ------
+    ValueError
+        If the pyramid carries no keys (read from a file but not
+        validated).
     """
     if pyramid.sorted_keys is None:
         raise ValueError(

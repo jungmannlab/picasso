@@ -533,7 +533,14 @@ class LinkGroup(QtCore.QObject):
 
     @contextmanager
     def muted(self):
-        """Context in which no change is mirrored."""
+        """Context in which no change is mirrored.
+
+        Yields
+        ------
+        None
+            Control returns to the ``with`` block while mirroring is
+            suppressed; the previous state is restored on exit.
+        """
         previous = self._applying
         self._applying = True
         try:

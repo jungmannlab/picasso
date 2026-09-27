@@ -1358,7 +1358,7 @@ class EmissionComboBoxDict(UserDict):
         super().__init__()
 
     def set_emcombo_value(self, cam: str, wavelength: str):
-        """Sets the selected value of one combo box
+        """Set the selected value of one combo box.
 
         Parameters
         ----------

@@ -1063,6 +1063,12 @@ def _localize_load_3d_calibration(
 ) -> tuple[str, float, dict]:
     """Load 3D z-calibration, prompting interactively if needed.
 
+    Parameters
+    ----------
+    args : argparse.Namespace
+        Parsed ``picasso localize`` arguments; ``zc`` (calibration path)
+        and ``mf`` (magnification factor, 0 to prompt) are read.
+
     Returns
     -------
     tuple[str, float, dict]
@@ -1218,12 +1224,38 @@ def _localize_process_file(
         The movie to process. Several paths (``--concat``) are read as
         one movie whose frames run through the files in that order; the
         results are saved next to the first file.
+    i : int
+        Index of the movie, for the progress message.
+    n_total : int
+        Total number of movies, for the progress message.
+    args : argparse.Namespace
+        Parsed ``picasso localize`` arguments.
+    box : int
+        Side length of the fitting box in camera pixels.
+    min_net_gradient : float or list of float
+        Minimum net gradient for identification; one value per ROI
+        region if a list.
+    roi : list or None
+        ROI regions, each ``[[y_min, x_min], [y_max, x_max]]``, or None
+        for the whole frame.
+    frame_bounds : list of list of int or None
+        Frame segments ``[start, end]`` (0-indexed, inclusive) to
+        analyze, or None for all frames.
+    camera_info : dict
+        Camera parameters (baseline, sensitivity, gain, QE).
+    convergence : float
+        Fit convergence criterion; 0 uses the fitting method's default.
+    max_iterations : int
+        Maximum number of fit iterations; 0 uses the fitting method's
+        default.
     z_params : tuple or None
         If 3D astigmatism fitting is active, a tuple
         ``(zpath, magnification_factor, z_calibration)``; else ``None``.
     spline_calibration : dict or None
         Cubic-spline PSF calibration when the fit method is a spline method;
         else ``None``. A 3D spline fit recovers z directly (no ``zfit``).
+    camera_calibration : dict or None, optional
+        Per-pixel sCMOS camera calibration, or None for a uniform camera.
     lateral_transforms : list or None
         Lateral corrections loaded separately from the calibration used
         for fitting (see ``--affine-calibration``), applied to x/y after
@@ -1493,6 +1525,23 @@ def _localize_finish(
 
     Parameters
     ----------
+    locs : pd.DataFrame
+        Fitted localizations.
+    info : list of dict
+        Metadata of the localizations.
+    path : str
+        Path of the movie; the output is saved next to it.
+    args : argparse.Namespace
+        Parsed ``picasso localize`` arguments.
+    z_params : tuple or None
+        If 3D astigmatism fitting is active, a tuple
+        ``(zpath, magnification_factor, z_calibration)``; else ``None``.
+    lateral_transforms : list or None
+        Lateral corrections loaded separately from the calibration used
+        for fitting (see ``_localize_process_file``).
+    spline_calibration : dict or None
+        Spline PSF calibration used for fitting, whose own lateral
+        corrections are not applied again; None if not a spline fit.
     suffix : str, optional
         Inserted into the output name before ``_locs``, e.g. ``"_ref"`` for
         one region of a split field of view. Default "" (one file per movie).
@@ -1602,32 +1651,26 @@ def _localize(args: argparse.Namespace) -> None:  # noqa: C901
 
     Parameters
     ----------
-    files : str
-        Path to the microscopy image files or a directory containing
-        image files.
-    fit_method : str
-        Method to use for fitting localizations. Options are:
-        - 'mle': Maximum Likelihood Estimation
-        - 'lq-3d': LQ 3D fitting
-        - 'lq-gpu-3d': LQ GPU 3D fitting
-    box_side_length : int
-        Side length of the box used for localization.
-    gradient : float
-        Minimum net gradient for localization.
-    roi : list of int
-        Region of interest defined as [y_min, x_min, y_max, x_max].
-    frame_bounds : list of list of int
-        Frame bounds defined as one or more [start_frame, end_frame]
-        segments, 0-indexed and inclusive. Several segments restrict the
-        analysis to the union of those (disjoint) frame ranges.
-    baseline : float
-        Baseline value for the camera.
-    sensitivity : float
-        Sensitivity of the camera.
-    gain : float
-        Gain of the camera.
-    qe : float
-        Not used in the calculations.
+    args : argparse.Namespace
+        Parsed ``picasso localize`` arguments. Among others:
+
+        - ``files`` (str): path to the microscopy image files or a
+          directory containing image files.
+        - ``fit_method`` (list of str): fitting method(s), e.g.
+          ``'mle'``, ``'lq-3d'`` or ``'lq-gpu-3d'``; one per ROI region
+          with ``regions_separately``.
+        - ``box_side_length`` (int): side length of the fitting box.
+        - ``gradient`` (list of float): minimum net gradient(s), one per
+          ROI region or a single one for all.
+        - ``roi`` (list of list of int): regions of interest, each
+          ``[y_min, x_min, y_max, x_max]``.
+        - ``frame_bounds`` (list of list of int): one or more
+          ``[start_frame, end_frame]`` segments, 0-indexed and inclusive.
+          Several segments restrict the analysis to the union of those
+          (disjoint) frame ranges.
+        - ``baseline``, ``sensitivity``, ``gain`` (float): camera
+          parameters.
+        - ``qe`` (float): not used in the calculations.
     """
     from . import localize
     from .io import save_info
@@ -2254,29 +2297,25 @@ def _render(args: argparse.Namespace) -> None:
 
     Parameters
     ----------
-    files : str
-        Path to the localization files or a directory containing
-        HDF5 files.
-    disp_px_size : float
-        Size of the rendered pixel in nm.
-    blur_method : str
-        Defines localizations' blur. The string has to be one of
-        'gaussian', 'gaussian_iso', 'smooth', 'convolve'. If None, no
-        blurring is applied.
-    min_blur_width : float
-        Minimum width of the blur kernel in pixels.
-    vmin : float
-        Minimum value for the color scale.
-    vmax : float
-        Maximum value for the color scale.
-    cmap : str
-        Colormap to use for rendering. If None, the colormap from
-        user settings is used.
-    scaling : str
-        If 'yes', the image is scaled to the range [vmin, vmax].
-        If 'no', the image is not scaled.
-    silent : bool
-        If True, the rendered images are not opened automatically.
+    args : argparse.Namespace
+        Parsed ``picasso render`` arguments:
+
+        - ``files`` (str): path to the localization files or a directory
+          containing HDF5 files.
+        - ``disp_px_size`` (float): size of the rendered pixel in nm.
+        - ``blur_method`` (str): localizations' blur, one of
+          ``'gaussian'``, ``'gaussian_iso'``, ``'smooth'``,
+          ``'convolve'``. If None, no blurring is applied.
+        - ``min_blur_width`` (float): minimum width of the blur kernel
+          in pixels.
+        - ``vmin``, ``vmax`` (float): minimum and maximum of the color
+          scale.
+        - ``cmap`` (str): colormap to use for rendering. If None, the
+          colormap from user settings is used.
+        - ``scaling`` (str): if ``'yes'``, the image is scaled to the
+          range [vmin, vmax]; if ``'no'``, it is not scaled.
+        - ``silent`` (bool): if True, the rendered images are not opened
+          automatically.
     """
     from .lib import locs_glob_map
     from os.path import isdir
@@ -2381,8 +2420,15 @@ def _spinna_parse_distances(row) -> list:
 def _spinna_validate_parameters(
     parameters_filename: str,
 ) -> tuple:
-    """Validate the parameters file, create a unique result directory
-    name, and check that all required columns are present.
+    """Validate the parameters file and create a result directory name.
+
+    Also checks that all required columns are present; the result
+    directory name is made unique.
+
+    Parameters
+    ----------
+    parameters_filename : str
+        Path to the ``.csv`` file with the SPINNA fitting parameters.
 
     Returns
     -------
@@ -2489,7 +2535,18 @@ def _spinna_load_target_data(
     When ``le_fitting`` is True, ``label_unc_TARGET`` is parsed as a
     comma-separated list of candidates (single values are still accepted),
     ``le_TARGET`` is not read (LE is what is being fit), and
-    ``n_simulated`` is the raw localisation count (no LE division).
+    ``n_simulated`` is the raw localization count (no LE division).
+
+    Parameters
+    ----------
+    row : pd.Series
+        One row of the parameters file.
+    targets : list of str
+        Names of the targets.
+    io : module
+        The ``picasso.io`` module, used to load the localizations.
+    le_fitting : bool, optional
+        Whether the labeling efficiency is fitted. Default is False.
 
     Returns
     -------
@@ -2525,6 +2582,11 @@ def _spinna_load_target_data(
 def _spinna_resolve_roi_3d(row) -> tuple:
     """Resolve a homogeneous 3D ROI (volume, z_range) from a row.
 
+    Parameters
+    ----------
+    row : pd.Series
+        One row of the parameters file.
+
     Returns
     -------
     tuple[float | None, float | None, bool]
@@ -2548,6 +2610,15 @@ def _spinna_resolve_roi_2d(row, targets: list, infos: dict | None) -> tuple:
     If the ``area`` column is missing or empty, the area is recovered from
     the experimental data metadata key ``"Area (um^2)"`` (taken from the
     first target's info).
+
+    Parameters
+    ----------
+    row : pd.Series
+        One row of the parameters file.
+    targets : list of str
+        Names of the targets.
+    infos : dict or None
+        Metadata of the experimental data per target.
 
     Returns
     -------
@@ -2584,6 +2655,18 @@ def _spinna_resolve_roi(
 ) -> tuple:
     """Determine ROI parameters for a row: homogeneous or masked.
 
+    Parameters
+    ----------
+    row : pd.Series
+        One row of the parameters file.
+    dim : int
+        Dimensionality of the data, 2 or 3.
+    targets : list of str
+        Names of the targets.
+    infos : dict or None, optional
+        Metadata of the experimental data per target, used to recover
+        the 2D area. Default is None.
+
     Returns
     -------
     tuple[bool, dict, float | None, float | None, float | None]
@@ -2611,6 +2694,23 @@ def _spinna_compute_roi(
     z_range,
 ) -> tuple:
     """Resolve the simulation ROI for a row.
+
+    Parameters
+    ----------
+    targets : list of str
+        Names of the targets.
+    apply_mask : bool
+        Whether masks are used instead of a homogeneous ROI.
+    mask_paths : dict
+        Path of the ``.npy`` mask per target.
+    dim : int
+        Dimensionality of the data, 2 or 3.
+    area : float or None
+        Area of the 2D homogeneous ROI in um^2.
+    volume : float or None
+        Volume of the 3D homogeneous ROI in um^3.
+    z_range : float or None
+        Depth of the 3D homogeneous ROI in nm.
 
     Returns
     -------

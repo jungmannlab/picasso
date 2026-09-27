@@ -877,10 +877,54 @@ class WgpuBackend(SplatBackend):
         triangulation_passes: int | None = None,
         triangulation_jitter: float | None = None,
     ) -> list[tuple[int, lib.FloatArray2D]]:
-        """Render each channel offscreen on the GPU (see
-        ``backend.SplatBackend.render_channels``). The ``quadtree``
-        method is CPU-only (``scene._render_channels`` never sends it
-        here; ``quadtree_capacity`` is accepted for the contract)."""
+        """Render each channel offscreen on the GPU.
+
+        See ``backend.SplatBackend.render_channels``. The ``quadtree``
+        and ``triangulation`` methods are CPU-only
+        (``scene._render_channels`` never sends them here; their
+        parameters are accepted for the contract).
+
+        Parameters
+        ----------
+        columns : list of splat._RenderColumns
+            Localization columns, one per channel (already extracted,
+            angle in radians and lpz fallback applied).
+        info : list of list of dict
+            Metadata, one entry per channel.
+        disp_px_size : float
+            Display pixel size in nm, see ``splat.render``.
+        viewport : tuple or None
+            Field of view ``((y_min, x_min), (y_max, x_max))`` in
+            camera pixels, see ``splat.render``.
+        blur_method : {"gaussian", "gaussian_iso", "smooth", \
+                "convolve"} or None
+            Blur method, see ``splat.render``.
+        min_blur_width : float
+            Minimum size of blur (camera pixels), see ``splat.render``.
+        ang : tuple or scipy.spatial.transform.Rotation or None
+            Rotation of the localizations, see ``splat.render``.
+        quadtree_capacity : int, optional
+            Accepted for the backend contract and ignored. Default is
+            None.
+        triangulation_passes : int, optional
+            Accepted for the backend contract and ignored. Default is
+            None.
+        triangulation_jitter : float, optional
+            Accepted for the backend contract and ignored. Default is
+            None.
+
+        Returns
+        -------
+        renderings : list of (int, lib.FloatArray2D)
+            ``(number of locs in view, image)`` per channel, in input
+            order.
+
+        Raises
+        ------
+        SplatBackendError
+            If the request cannot be rendered on the GPU or the GPU
+            render fails.
+        """
         self._validate_render_request(columns, blur_method, viewport, ang)
         try:
             with self._lock:

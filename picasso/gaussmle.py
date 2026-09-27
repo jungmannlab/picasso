@@ -440,8 +440,7 @@ def gaussmle(
 ) -> tuple[
     lib.FloatArray2D, lib.FloatArray2D, lib.FloatArray1D, lib.IntArray1D
 ]:
-    """Fits Gaussians using Maximum Likelihood Estimation (MLE) to the
-    extracted spots.
+    """Fit Gaussians to the extracted spots by maximum likelihood.
 
     .. deprecated:: 0.11
         This whole module is removed in Picasso 1.0. Use
@@ -449,7 +448,35 @@ def gaussmle(
         fits with Levenberg-Marquardt instead of this module's Newton solver
         and runs on the CPU or the GPU.
 
-    See :func:`_gaussmle` for the full description."""
+    See :func:`_gaussmle` for the full description.
+
+    Parameters
+    ----------
+    spots : lib.FloatArray3D
+        ``(N, size, size)`` image patches containing the spots.
+    eps : float
+        The convergence criterion for the fitting algorithm.
+    max_it : int
+        The maximum number of iterations for the fitting algorithm.
+    method : {"sigma", "sigmaxy"}, optional
+        Fit a single width ("sigma") or separate x and y widths
+        ("sigmaxy", the default).
+    progress_callback : callable, "console" or None, optional
+        A callable receives the number of localized spots; "console" shows
+        a tqdm bar; None disables progress tracking.
+
+    Returns
+    -------
+    thetas : lib.FloatArray2D
+        The fitted parameters for each spot (x, y, photons, background,
+        sigma_x, sigma_y).
+    CRLBs : lib.FloatArray2D
+        The Cramer-Rao lower bounds for the fitted parameters.
+    likelihoods : lib.FloatArray1D
+        The log-likelihoods for each fitted spot, shape (N,).
+    iterations : lib.IntArray1D
+        The number of iterations taken for each spot, shape (N,).
+    """
     lib.deprecation_warning(_DEPRECATION_MESSAGE)
     return _gaussmle(spots, eps, max_it, method, progress_callback)
 
@@ -531,7 +558,7 @@ def gaussmle_async(
 ) -> tuple[
     list, lib.FloatArray2D, lib.FloatArray2D, lib.FloatArray1D, lib.IntArray1D
 ]:
-    """Runs ``gaussmle`` asynchronously on several CPU threads.
+    """Run ``gaussmle`` asynchronously on several CPU threads.
 
     .. deprecated:: 0.11
         This whole module is removed in Picasso 1.0. Use
@@ -542,7 +569,34 @@ def gaussmle_async(
     :func:`picasso.fitting.gaussfit.fit_spots_async` is the direct
     replacement.
 
-    See :func:`_gaussmle_async` for the full description."""
+    See :func:`_gaussmle_async` for the full description.
+
+    Parameters
+    ----------
+    spots : lib.FloatArray3D
+        ``(N, size, size)`` image patches containing the spots.
+    eps : float
+        The convergence criterion for the fitting algorithm.
+    max_it : int
+        The maximum number of iterations for the fitting algorithm.
+    method : {"sigma", "sigmaxy"}, optional
+        Fit a single width ("sigma") or separate x and y widths
+        ("sigmaxy", the default).
+
+    Returns
+    -------
+    current : list
+        A single-element list holding the number of spots claimed so far,
+        for polling progress.
+    thetas : lib.FloatArray2D
+        The fitted parameters for each spot, filled in place.
+    CRLBs : lib.FloatArray2D
+        The Cramer-Rao lower bounds, filled in place.
+    likelihoods : lib.FloatArray1D
+        The log-likelihoods, filled in place.
+    iterations : lib.IntArray1D
+        The number of iterations per spot, filled in place.
+    """
     lib.deprecation_warning(_DEPRECATION_MESSAGE)
     return _gaussmle_async(spots, eps, max_it, method)
 
@@ -555,17 +609,34 @@ def _gaussmle_async(
 ) -> tuple[
     list, lib.FloatArray2D, lib.FloatArray2D, lib.FloatArray1D, lib.IntArray1D
 ]:
-    """Runs ``gaussmle`` asynchronously on several CPU threads to fit
-    Gaussians using Maximum Likelihood Estimation (MLE) to the
-    extracted spots. See ``gaussmle`` for parameter details.
+    """Run ``gaussmle`` asynchronously on several CPU threads.
+
+    Fits Gaussians to the extracted spots by maximum likelihood.
+
+    Parameters
+    ----------
+    spots : lib.FloatArray3D
+        ``(N, size, size)`` image patches containing the spots.
+    eps : float
+        The convergence criterion for the fitting algorithm.
+    max_it : int
+        The maximum number of iterations for the fitting algorithm.
+    method : {"sigma", "sigmaxy"}, optional
+        Fit a single width ("sigma") or separate x and y widths
+        ("sigmaxy", the default).
 
     Returns
     -------
     current : list
         A single-element list containing the current index of the
         spot being processed.
-    thetas, CRLBs, likelihoods, iterations
-        The same as in ``gaussmle``.
+    thetas, CRLBs : lib.FloatArray2D
+        Fitted parameters and Cramer-Rao lower bounds, as in
+        :func:`_gaussmle`, filled in place.
+    likelihoods : lib.FloatArray1D
+        Log-likelihoods, filled in place.
+    iterations : lib.IntArray1D
+        Iterations per spot, filled in place.
     """
     N = len(spots)
     thetas = np.zeros((N, 6), dtype=np.float32)
@@ -1039,7 +1110,33 @@ def locs_from_fits(
         This whole module is removed in Picasso 1.0. Use
         ``picasso.localize.locs_from_fits_gauss``.
 
-    See :func:`_locs_from_fits` for the full description."""
+    See :func:`_locs_from_fits` for the full description.
+
+    Parameters
+    ----------
+    identifications : pd.DataFrame
+        Identifications of the spots ('frame', 'x', 'y' and
+        'net_gradient').
+    theta : lib.FloatArray2D
+        The fitted parameters for each spot.
+    CRLBs : lib.FloatArray2D
+        The Cramer-Rao lower bounds for the fitted parameters.
+    log_likelihoods : lib.FloatArray1D
+        The log-likelihoods for each fitted spot, shape (N,).
+    iterations : lib.IntArray1D
+        The number of iterations taken for each spot, shape (N,).
+    box : int
+        The size of the box used for fitting.
+    spherical : bool, optional
+        If True, the fit was a spherical Gaussian and the ``ellipticity``
+        column is omitted. Default is False.
+
+    Returns
+    -------
+    locs : pd.DataFrame
+        Data frame containing the fitted parameters, precisions and
+        uncertainties for each spot.
+    """
     lib.deprecation_warning(_DEPRECATION_MESSAGE)
     return _locs_from_fits(
         identifications,
@@ -1076,7 +1173,7 @@ def _locs_from_fits(
     CRLBs : lib.FloatArray2D
         The Cramer-Rao Lower Bounds for the fitted parameters, shape
         (N, 6) or (N, 5).
-    likelihoods : lib.FloatArray1D
+    log_likelihoods : lib.FloatArray1D
         The log-likelihoods for each fitted spot, shape (N,).
     iterations : lib.IntArray1D
         The number of iterations taken to converge for each spot,
@@ -1160,6 +1257,23 @@ def sigma_uncertainty(
         :func:`picasso.fitting.precision.sigma_uncertainty_mle` - renamed
         because ``picasso.gausslq`` defined a different formula under this
         name.
+
+    Parameters
+    ----------
+    sigma : lib.SeriesOrFloatArray1D
+        Fitted sigma values in camera pixels.
+    sigma_orth : lib.SeriesOrFloatArray1D
+        Unused; accepted so the signature matches the least-squares
+        variant.
+    photons : lib.SeriesOrFloatArray1D
+        Number of photons.
+    bg : lib.SeriesOrFloatArray1D
+        Background photons per pixel.
+
+    Returns
+    -------
+    se_sigma : lib.FloatArray1D
+        Standard error of fitted sigma values in camera pixels.
     """
     lib.deprecation_warning(_DEPRECATION_MESSAGE)
     return precision.sigma_uncertainty_mle(sigma, sigma_orth, photons, bg)

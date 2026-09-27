@@ -215,6 +215,17 @@ def _assemble_covs_3D_rot(
     R(theta).T, cov_z)``, i.e. a full 2x2 xy block rotated by ``theta``
     and an independent z variance.
 
+    Parameters
+    ----------
+    cov_maj, cov_min : np.ndarray
+        Variances along the major and minor principal axes in xy, shape
+        (n_components,).
+    cov_z : np.ndarray
+        Variances in z, shape (n_components,).
+    theta : np.ndarray
+        Rotation angle of the major axis in radians, shape
+        (n_components,).
+
     Returns
     -------
     covs : np.ndarray
@@ -526,6 +537,8 @@ class G5M(metaclass=ABCMeta):
         components. If local loc. prec. is used, the bounds specify the
         margin of error in units of localization precision. Else,
         absolute bounds on sigma.
+    covariance_type : {"spherical", "diagonal", "rotated"}
+        Covariance model of the Gaussian components (keyword-only).
     means_init : np.ndarray or None, optional
         Initial means (mu) of the Gaussian components. If None, the
         means are initialized using kmeans++.
@@ -1637,11 +1650,29 @@ def _estimate_gaussian_parameters_3D_rot(
     the returned covariances are the principal-axis variances
     ``(cov_u, cov_v, cov_z)`` rather than camera-axis ones.
 
+    Parameters
+    ----------
+    X : lib.FloatArray2D
+        Data points, shape (n_samples, 3).
+    resp : lib.FloatArray2D
+        Responsibilities of the components, shape (n_samples,
+        n_components).
+    theta : lib.FloatArray1D
+        Rotation angle of each component's major axis in radians, shape
+        (n_components,).
+    reg_covar : float, optional
+        Non-negative regularization added to the variances. Default is
+        1e-6.
+
     Returns
     -------
-    nk, means, covariances : tuple
-        Number of localizations per component, means, and principal-axis
-        covariances of shape (n_components, 3).
+    nk : lib.FloatArray1D
+        Number of localizations per component, shape (n_components,).
+    means : lib.FloatArray2D
+        Means of the components, shape (n_components, 3).
+    covariances : lib.FloatArray2D
+        Principal-axis variances of the components, shape
+        (n_components, 3).
     """
     nk = (
         _sum_along_axis0(resp, (resp.shape[1],))
@@ -2070,6 +2101,11 @@ def _run_g5m_group_3D(
         Fitting mode of the input localizations. "spline" uses a plain
         diagonal 3D model and reads lpz directly from the locs. Default
         is "astigmatism".
+    covariance_type : {"diagonal", "rotated"}, optional
+        Shape of the G5M components. "diagonal" is axis-aligned;
+        "rotated" gives the xy block a rotation measured from the
+        ``"angle"`` column of ``locs_group`` (in degrees). Default is
+        "diagonal".
     max_rounds_without_best_bic : int, optional
         Maximum number of rounds without BIC improvement to terminate
         the search for optimal G5M n_components. Default is
@@ -2175,6 +2211,10 @@ class G5M_3D(G5M):
         the x/y covariances via the calibration polynomials; "spline"
         uses a plain diagonal 3D model (independent x/y/z covariances).
         Default is "astigmatism".
+    covariance_type : {"diagonal", "rotated"}, optional
+        Shape of the G5M components. "diagonal" is axis-aligned;
+        "rotated" rotates the xy block of each component and requires
+        ``mode="astigmatism"``. Default is "diagonal".
     means_init : np.ndarray or None, optional
         Initial means (mu) of the Gaussian components. If None, the
         means are initialized using kmeans++. Default is None.
@@ -2600,6 +2640,17 @@ def _binding_event_counts(
     A binding event links localizations that are contiguous in frame
     (up to 3 frames of no signal allowed) and is assigned to the G5M
     component closest to its center of mass.
+
+    Parameters
+    ----------
+    g5m : G5M
+        Fitted G5M.
+    locs_group : pd.DataFrame
+        Localizations of one cluster, expected in frame order.
+    pixelsize : float
+        Camera pixel size in nm, used to convert z to camera pixels.
+    is_3d : bool
+        Whether the localizations are 3D.
 
     Returns
     -------
@@ -3132,8 +3183,8 @@ def _run_g5m_in_clusters(
     mode: Literal["astigmatism", "spline"] = "astigmatism",
     covariance_type: Literal["diagonal", "rotated"] = "diagonal",
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Run G5M for a given group of localizations clusters. See ``g5m``
-    for parameters explanation.
+    """Run G5M for a given group of localizations clusters. See
+    :func:`g5m` for a detailed explanation of the parameters.
 
     Note that the arguments are passed positionally by
     ``_run_g5m_parallel``, so their order must be kept in sync there.
@@ -3144,6 +3195,32 @@ def _run_g5m_in_clusters(
         Index of the first group to analyze.
     n_groups_task : int
         Number of groups to analyze.
+    locs : pd.DataFrame
+        Clustered localizations with a "group" column.
+    min_locs : int
+        Minimum number of localizations per component.
+    loc_prec_handle : {"local", "abs"}
+        How to handle sigma bounds, see :func:`g5m`.
+    sigma_bounds : tuple
+        Bounds for the standard deviation (sigma) of the Gaussian
+        components, see :func:`g5m`.
+    pixelsize : float
+        Camera pixel size in nm.
+    max_rounds_without_best_bic : int
+        Maximum number of rounds without BIC improvement to terminate
+        the search for optimal G5M n_components.
+    bootstrap_check : bool
+        If True, the SEM is calculated using bootstrapping.
+    calibration : dict or None
+        Astigmatism calibration dictionary. Only used for 3D data with
+        ``mode="astigmatism"``.
+    max_locs_per_cluster : int
+        Maximum number of localizations per cluster accepted for G5M.
+    mode : {"astigmatism", "spline"}, optional
+        Fitting mode of the input 3D localizations. Default is
+        "astigmatism".
+    covariance_type : {"diagonal", "rotated"}, optional
+        Shape of the 3D G5M components. Default is "diagonal".
 
     Returns
     -------
@@ -3202,8 +3279,43 @@ def _run_g5m_parallel(
     mode: Literal["astigmatism", "spline"] = "astigmatism",
     covariance_type: Literal["diagonal", "rotated"] = "diagonal",
 ) -> list:
-    """Run G5M in parallel using multiprocessing. See ``g5m`` for
-    parameters explanation.
+    """Run G5M in parallel using multiprocessing. See :func:`g5m` for a
+    detailed explanation of the parameters.
+
+    Parameters
+    ----------
+    locs : pd.DataFrame
+        Clustered localizations with a "group" column.
+    min_locs : int, optional
+        Minimum number of localizations per component. Default is
+        `MIN_LOCS`.
+    loc_prec_handle : {"local", "abs"}, optional
+        How to handle sigma bounds, see :func:`g5m`. Default is
+        "local".
+    sigma_bounds : tuple, optional
+        Bounds for the standard deviation (sigma) of the Gaussian
+        components, see :func:`g5m`. Default is `(MIN_SIGMA_FACTOR,
+        MAX_SIGMA_FACTOR)`.
+    pixelsize : float, optional
+        Camera pixel size in nm. Default is 130.0.
+    max_rounds_without_best_bic : int, optional
+        Maximum number of rounds without BIC improvement to terminate
+        the search for optimal G5M n_components. Default is
+        `MAX_ROUNDS_WITHOUT_BEST_BIC`.
+    bootstrap_check : bool, optional
+        If True, the SEM is calculated using bootstrapping. Default is
+        False.
+    calibration : dict or None, optional
+        Astigmatism calibration dictionary. Only used for 3D data with
+        ``mode="astigmatism"``. Default is None.
+    max_locs_per_cluster : int, optional
+        Maximum number of localizations per cluster accepted for G5M.
+        Default is np.inf.
+    mode : {"astigmatism", "spline"}, optional
+        Fitting mode of the input 3D localizations. Default is
+        "astigmatism".
+    covariance_type : {"diagonal", "rotated"}, optional
+        Shape of the 3D G5M components. Default is "diagonal".
 
     Returns
     -------

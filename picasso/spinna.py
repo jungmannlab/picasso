@@ -182,12 +182,33 @@ def _solve_unique_structure_counts(
     N_total`` has zero degrees of freedom, so the structure counts are
     uniquely determined and no search space needs to be sampled.
 
+    Parameters
+    ----------
+    structures : list of Structure
+        Structures that are to be simulated.
+    targets : list of str
+        Unique names of the molecular targets in ``structures``.
+    t_counts : lib.FloatArray2D
+        Number of each target (rows) in each structure (columns),
+        shape ``(n_targets, n_structures)``.
+    N_total : dict
+        Total number of molecules to be simulated for each target
+        (corrected for labeling efficiency), keyed by target name.
+    save : str
+        Path to save a .csv file with the structure counts. If '' is
+        given, no file is saved.
+
     Returns
     -------
     structure_counts : dict
         Specifies the (single) structure counts to be simulated. Keys
         are the names of the structures and values are one-element
         arrays of integers.
+
+    Raises
+    ------
+    ValueError
+        If ``t_counts`` is singular.
     """
     N_total_arr = np.asarray(
         [N_total[target] for target in targets], dtype=np.float64
@@ -223,6 +244,19 @@ def _compute_dependent_structure_counts(
     see documentation. Once this is done, the next dependent structure
     can be found by repeating the process with the second to last row
     of eqs, and so on.
+
+    Parameters
+    ----------
+    eqs : lib.FloatArray2D
+        Reduced row echelon form of the augmented matrix of the linear
+        system linking structure counts to the target totals.
+    N_structures : lib.FloatArray2D
+        Structure counts, one combination per row; the first ``n_t``
+        (dependent) columns are overwritten in place, the remaining
+        (free) columns are read.
+    n_t : int
+        Number of unique molecular targets, i.e., the number of
+        dependent structures.
 
     Returns
     -------
@@ -564,67 +598,75 @@ def plot_NN(  # noqa: C901
 
     Parameters
     ----------
-    data1, data2 : lib.FloatArray2D
+    data1, data2 : lib.FloatArray2D or None, optional
         Coordinates of two datasets to be compared and whose NND
         (nearest neighbor distribution) is plotted. If None, dist must
-        be provided.
-    dist : lib.FloatArray2D
-        Contains the NN distances (obtained with get_NN_dist). If None,
-        the distances are calculated from data1 and data2. Otherwise,
-        the NND calculation is skipped.
-    n_neighbors : int
+        be provided. Default is None.
+    n_neighbors : int, optional
         Number of neighbors to consider. Only used if dist and
         hist_data are None. Default is 1.
-    hist_data : dict (default=None)
+    dist : lib.FloatArray2D or None, optional
+        Contains the NN distances (obtained with get_NN_dist). If None,
+        the distances are calculated from data1 and data2. Otherwise,
+        the NND calculation is skipped. Default is None.
+    hist_data : dict or None, optional
         Dictionary containing precomputed histogram data with keys
         "bins" and "counts". If provided, dist, data1 and data2 are
         ignored. Default is None.
-    mode : {'hist', 'plot'}
+    mode : {'hist', 'plot'}, optional
         Mode of plotting. If 'hist', histogram is plotted. If 'plot'
         NNDs are histogramed and a line is plotted. Default is 'hist'.
-    fig, ax : plt.Figure, plt.Axes
-        Figure and Axes to be used for plotting. If None, new figure
-        and axes are created. Default is None.
-    figsize : tuple of ints
+    fig : plt.Figure or None, optional
+        Figure to be used for plotting. If None (or ``ax`` is None), a
+        new figure and axes are created. Default is None.
+    ax : plt.Axes or None, optional
+        Axes to be used for plotting. If None (or ``fig`` is None), a
+        new figure and axes are created. Default is None.
+    figsize : tuple of floats, optional
         Figure size, used when new fig and ax are created. Default is
         (6, 6).
-    dpi : int
+    dpi : int, optional
         Resolution of the figure, used when a new fig and ax are created.
         Default is 300.
-    binsize : float
+    binsize : float, optional
         Binsize used for histograming NNDs. Only used when hist_data is
         None. Default is 4.0.
-    colors : list
+    xlim : tuple of floats or None, optional
+        Limits in which the x axis is plotted. If None, the automatic
+        limits are used. Default is (0, 200).
+    ylim : tuple of floats or None, optional
+        Limits in which the y axis is plotted. If None, the automatic
+        limits are used. Default is None.
+    colors : list, optional
         List specifying the colors of the histogram bins or plotted
         lines. If the number of neighbors is larger than the number of
         colors, the colors are repeated. Each element must be specified
         as in:
         https://matplotlib.org/stable/tutorials/colors/colors.html.
-    title, xlabel, ylabel : strs
+        Default is ``NN_COLORS``.
+    title, xlabel, ylabel : str, optional
         Title and label of x and y axes, respectively.
-    fontsize_ticks, fontsize_labels, fontsize_title : int
+    fontsize_ticks, fontsize_labels, fontsize_title : int, optional
         Font sizes of the tick labels, axis labels and title,
-        respectively.
-    fontname_ticks, fontname_labels, fontname_title : str or None
+        respectively. Defaults are 10, 12 and 12.
+    fontname_ticks, fontname_labels, fontname_title : str or None, optional
         Font family (e.g. "Arial") of the tick labels, axis labels and
         title, respectively. If None, the matplotlib default is used.
-    xlim, ylim : tuples of floats (default=None, None)
-        Limits in which x and y axes are plotted. If None, the
-        automatic limits are used.
-    alpha : float
+        Default is None.
+    show_legend : bool, optional
+        If True, legend is shown. Default is True.
+    alpha : float, optional
         Alpha (transparency) of histogram bins (not applied to
         lineplot). Default is 0.6.
-    edgecolor : str
+    edgecolor : str, optional
         Histogram bin edgecolor (not applied to lineplot). Default is
         'black'.
-    show : bool
+    show : bool, optional
         If True, the plot is shown using plt.show(). Default is False.
-    show_legend : bool
-        If True, legend is shown. Default is True.
-    return_fig : bool
+    return_fig : bool, optional
         If True, fig and ax are returned and can be used for further
         processing. Default is False.
-    savefig : str or list of strs
+    savefig : str or list of strs, optional
         Path to save the plot. If '', the plot is not saved. If a list
         of strings is given, several paths can be specified (with
         different extensions). Default is ''.
@@ -1408,7 +1450,8 @@ class Structure:
 
     Parameters
     ----------
-    Same as attributes.
+    title : str
+        The name of the structure.
     """
 
     def __init__(self, title: str) -> None:
@@ -1698,7 +1741,7 @@ class StructureSimulator:
         Dimensions of the region of interest (ROI) for the simulation in
         nm. Depth is required only for 3D data. If ``mask`` is not
         specified, ROI must be provided. Default is None.
-    random_rot_data : {'3D', '2D'} or None, optional
+    random_rot_mode : {'3D', '2D'} or None, optional
         Random rotation mode for the simulation. If None, no rotations
         are applied. Default is '2D'.
     """
@@ -3310,10 +3353,25 @@ class SPINNA:
 
         Parameters
         ----------
-        N_structures, fitting_mode, save, asynch, bootstrap, return_scores
-            As in :meth:`fit`.
-        callback
-            As in :meth:`fit`.
+        N_structures : lib.IntArray2D or dict
+            Combinations of structure counts to test, as in :meth:`fit`.
+        fitting_mode : {"coarse-to-fine", "bayesian", "brute-force"}, optional
+            Search strategy, as in :meth:`fit`. Default is
+            "coarse-to-fine".
+        save : str, optional
+            Path of a .csv file for the tested combinations and scores.
+            If '' is given, the file is not saved. Default is ''.
+        asynch : bool, optional
+            If True, multiprocessing is used. Default is True.
+        bootstrap : bool, optional
+            If True, bootstrapping is used to estimate the fitting
+            error. Default is False.
+        return_scores : bool, optional
+            If True, scores for all combinations of structures are also
+            returned. Default is False.
+        callback : {lib.ProgressDialog, "console", None}, optional
+            Progress bar to track fitting progress, as in :meth:`fit`.
+            Default is None.
 
         Returns
         -------
@@ -3469,8 +3527,17 @@ class SPINNA:
             Radius (in %-proportion space) around the coarse winner
             used to select candidates for the fine pass. Default is
             BOOTSTRAP_DISTANCE.
-        save, asynch, bootstrap, callback
-            Same as in ``fit``.
+        save : str, optional
+            Path of a .csv file for the tested combinations and scores,
+            as in :meth:`fit`. Default is ''.
+        asynch : bool, optional
+            If True, multiprocessing is used. Default is True.
+        bootstrap : bool, optional
+            If True, bootstrapping is used to estimate the fitting
+            error. Default is False.
+        callback : {lib.ProgressDialog, "console", None}, optional
+            Progress bar to track fitting progress, as in :meth:`fit`.
+            Default is None.
 
         Returns
         -------
@@ -4177,7 +4244,44 @@ def _fit_label_unc_for_target(
         Starting-point values (first element of each list) for every target.
     nn_counts_keys : list of str
         Keys for the nn_counts dict (used to reset counts per trial).
-    ...remaining parameters forwarded to compare_models_given_label_unc.
+    exp_data : dict
+        Molecular targets' names as keys and spatial coordinates of the
+        observed molecules as values.
+    granularity : int
+        Granularity as in :func:`generate_N_structures`.
+    le : dict
+        Labeling efficiency for each molecular target species.
+    mask_dict : dict or None
+        Dictionary of the form {"mask": mask, "info": mask_info}, or
+        None if no mask is used.
+    width, height, depth : float or None
+        Width, height and depth of the simulated ROI in nm, see
+        :func:`compare_models_given_label_unc`.
+    random_rot_mode : {"2D", "3D", None}
+        Mode of random rotation of structures.
+    N_sim : int
+        Number of times each simulation is repeated.
+    asynch : bool
+        If True, multiprocessing is used for fitting.
+    savedir : str
+        Directory where the fitting scores are saved as .csv files. If
+        "" is given, the files are not saved.
+    callback : {lib.ProgressDialog, "console", None}
+        Progress bar to track fitting progress.
+    fitting_mode : {"coarse-to-fine", "bayesian", "brute-force"}, optional
+        How the stoichiometry search space is explored; see
+        :meth:`SPINNA.fit`. Default is "coarse-to-fine".
+    round_counter : list, optional
+        One-element list counting the rounds run so far, see
+        :func:`compare_models_given_label_unc`. Default is None.
+    total_rounds : int, optional
+        Total number of rounds, shown alongside ``round_counter``.
+        Default is None.
+
+    Notes
+    -----
+    The parameters from ``exp_data`` on are forwarded to
+    :func:`compare_models_given_label_unc`.
 
     Returns
     -------
@@ -4244,13 +4348,17 @@ def _compute_nn_counts(
     Parameters
     ----------
     targets : list of str
+        Names of the molecular targets.
     models : list of lists of Structure
+        Models whose structures are scanned for NN counts.
     nn_counts : dict
-        Updated in-place and returned.
+        NN count per "target1-target2" key. Updated in-place and
+        returned.
 
     Returns
     -------
     nn_counts : dict
+        The updated ``nn_counts``.
     """
     for ii, target1 in enumerate(targets):
         for target2 in targets[ii:]:
@@ -4669,9 +4777,27 @@ def fit_le(
     distances : list of float
         Heterodimer distances (nm) to test. When a single entry is
         given the heterodimer distance is fixed.
-    N_sim, mask_dict, width, height, depth, random_rot_mode, asynch,
-    savedir, callback, fitting_mode
-        Forwarded to ``compare_models``.
+    N_sim : int, optional
+        Number of times each simulation is repeated to obtain smoother
+        NND histograms. Default is 1.
+    mask_dict : dict or None, optional
+        Dictionary of the form {"mask": mask, "info": mask_info}, see
+        ``compare_models``. Default is None.
+    width, height, depth : float or None, optional
+        Width, height and depth of the simulated ROI in nm, see
+        ``compare_models``. Default is None.
+    random_rot_mode : {"2D", "3D", None}, optional
+        Mode of random rotation of structures. Default is "2D".
+    asynch : bool, optional
+        If True, multiprocessing is used for fitting. Default is True.
+    savedir : str, optional
+        Directory where the fitting scores are saved as .csv files. If
+        "" is given, the files are not saved. Default is "".
+    callback : {lib.ProgressDialog, "console", None}, optional
+        Progress bar to track fitting progress. Default is None.
+    fitting_mode : {"coarse-to-fine", "bayesian", "brute-force"}, optional
+        How the stoichiometry search space is explored; see
+        :meth:`SPINNA.fit`. Default is "coarse-to-fine".
 
     Returns
     -------
@@ -4689,6 +4815,12 @@ def fit_le(
     best_mixer : StructureMixer
         Mixer corresponding to the best fit (its ``structures`` attribute
         holds [monomer_a, monomer_b, heterodimer(best_distance)]).
+
+    Raises
+    ------
+    ValueError
+        If a target is missing from ``exp_data``, the two targets are
+        the same, or ``distances`` is empty.
     """
     # validate
     if target_a not in exp_data or target_b not in exp_data:

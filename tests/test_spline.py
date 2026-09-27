@@ -1179,8 +1179,10 @@ class TestCalibrateSplineMultichannel:
         assert abs(t1[1, 2] - (h - 1)) < 2.0  # y offset ~ H - 1
 
     def test_axial_precision_multichannel_is_joint(self):
-        """The multichannel axial-precision diagnostic must fit all channels
-        *jointly* (the real pipeline) rather than each plane alone. This checks
+        """The multichannel axial-precision diagnostic fits jointly.
+
+        It must fit all channels *jointly* (the real pipeline) rather than
+        each plane alone. This checks
         the joint contract: it stacks every channel's per-frame spots, fits them
         against the full calibration, tags the result as a joint N-channel fit
         and returns one bias/precision sample per z-step. (Degeneracy-breaking

@@ -2,8 +2,9 @@
 ext/bitplane
 ~~~~~~~~~~~~
 Utility functions to handle bitplane data.
-:author: Maximilian T Strauss, 2021-2022
-:copyright: Copyright (c) 2021-2022 Maximilian T Strauss
+
+Author: Maximilian T Strauss, 2021-2022.
+Copyright (c) 2021-2022 Maximilian T Strauss.
 """
 
 import os.path as _ospath
@@ -49,6 +50,7 @@ if IMSWRITER:
 
         @property
         def shape(self):
+            """Movie shape as a tuple ``(n_frames, y, x)``."""
             return (len(self.frames), self.y, self.x)
 
         def __iter__(self):
@@ -81,6 +83,7 @@ if IMSWRITER:
 
         @property
         def shape(self):
+            """Stack shape as a tuple ``(n_frames, y, x)``."""
             data_shape = self.file["DataSet"][self.RL][self.frames[0]][
                 self.channel
             ]["Data"].shape
@@ -125,6 +128,18 @@ if IMSWRITER:
             self.lookup_dict = None
 
         def set_channel(self, channel):
+            """Select the channel to read and load its metadata.
+
+            Updates the image size, dtype, z extent, x/y size, pixel
+            size (estimated from the image extents, in nm) and the
+            image extents stored on the instance.
+
+            Parameters
+            ----------
+            channel : str
+                Name of the channel group in the IMS file, e.g.
+                ``"Channel 0"``.
+            """
             self.channel = channel
             data = self.file["DataSet"][self.RL][self.frames[0]][self.channel][
                 "Data"
@@ -256,6 +271,10 @@ if IMSWRITER:
             self.ext_min2 = ext_min2
 
         def read_frames(self):
+            """Build the lookup from frame index to time point group.
+
+            Only runs once; subsequent calls are no-ops.
+            """
             if not self.frames_read:
                 self.frames_int = np.array(
                     [int(_.split("TimePoint ")[1]) for _ in self.frames]
@@ -265,6 +284,18 @@ if IMSWRITER:
                 self.frames_read = True
 
         def read_frame(self, frame):
+            """Read a single frame of the current channel.
+
+            Parameters
+            ----------
+            frame : int
+                Frame (time point) index.
+
+            Returns
+            -------
+            h5py.Dataset
+                The first z plane of the requested frame.
+            """
             if not self.lookup_dict:
                 self.read_frames()
             return self.file["DataSet"][self.RL][self.lookup_dict[frame]][
@@ -272,6 +303,11 @@ if IMSWRITER:
             ]["Data"][0]
 
         def read_z_stack(self):
+            """Map the current channel as a z-stack.
+
+            Sets ``self.movie`` to a :class:`MovieMapperStack` whose
+            frames are the z planes.
+            """
             print("Reading stack")
             self.n_frames = self.z
             self.movie = MovieMapperStack(
@@ -284,6 +320,11 @@ if IMSWRITER:
             )
 
         def read_stack(self):
+            """Map the current channel as a time series.
+
+            Sets ``self.movie`` to a :class:`MovieMapper` whose frames
+            are the time points.
+            """
             print("Reading movie")
             if not self.lookup_dict:
                 self.read_frames()
@@ -300,6 +341,12 @@ if IMSWRITER:
             )
 
         def read_movie(self):
+            """Map the current channel as a movie.
+
+            Uses :meth:`read_z_stack` if the image has more than one z
+            plane and :meth:`read_stack` otherwise; the result is
+            stored in ``self.movie``.
+            """
 
             if self.z > 1:
                 self.read_z_stack()
@@ -307,10 +354,25 @@ if IMSWRITER:
                 self.read_stack()
 
     class ImsCallback(PW.CallbackClass):
+        """Progress callback for the PyImarisWriter image converter.
+
+        Records the write progress in 5% steps in
+        ``mUserDataProgress``.
+        """
+
         def __init__(self):
             self.mUserDataProgress = 0
 
         def RecordProgress(self, progress, total_bytes_written):
+            """Record the write progress reported by the converter.
+
+            Parameters
+            ----------
+            progress : float
+                Fraction of the data written, between 0 and 1.
+            total_bytes_written : int
+                Number of bytes written so far.
+            """
             progress100 = int(progress * 100)
             if progress100 - self.mUserDataProgress >= 5:
                 self.mUserDataProgress = progress100
@@ -331,6 +393,32 @@ if IMSWRITER:
         z_max,
         pixelsize,
     ):
+        """Write a rendered image stack to an Imaris (.ims) file.
+
+        Parameters
+        ----------
+        array : np.ndarray
+            Image data of shape ``(c, y, x)`` or ``(c, z, y, x)``; a 3D
+            array is treated as a single z plane per channel.
+        filename : str
+            Path of the output .ims file.
+        colors : list of PW.Color
+            Base color of each channel.
+        oversampling : float
+            Number of display pixels per camera pixel.
+        viewport : tuple
+            Rendered field of view as ``((y_min, x_min), (y_max,
+            x_max))`` in camera pixels.
+        info : list of dicts
+            Metadata of the localizations; the ``ExtMin0``,
+            ``ExtMin1``, ``ExtMin2`` and ``ExtMax2`` fields of the
+            first entry, if present, offset the image extents.
+        z_min, z_max : float
+            Axial range of the image (nm). If both are 0, the z extent
+            is derived from the number of z planes.
+        pixelsize : float
+            Camera pixel size (nm).
+        """
 
         if len(array.shape) == 3:
             array = np.expand_dims(array, 1)

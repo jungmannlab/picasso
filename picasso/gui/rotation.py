@@ -1032,9 +1032,9 @@ class RotateByAngleDialog(lib.Dialog):
 
     Attributes
     ----------
-    angx, angy, angz: QtWidgets.QDoubleSpinBoxes
+    angx, angy, angz : QtWidgets.QDoubleSpinBox
         Store the rotation angles input by the user.
-    frame: QtWidgets.QComboBox
+    frame : QtWidgets.QComboBox
         Selects whether the angles rotate around the data's own axes
         ("Localizations", the axes shown by the axes icon) or the fixed
         screen/camera axes ("World").

@@ -527,6 +527,15 @@ def _check_inputs(
 ) -> int:
     """Validate ``spots``/``initial_parameters``.
 
+    Parameters
+    ----------
+    model : int
+        :data:`SPHERICAL`, :data:`ELLIPTIC` or :data:`ROTATED`.
+    spots : np.ndarray
+        Spots, expected with shape ``(n_spots, box, box)``.
+    initial_parameters : np.ndarray
+        Seeds, expected with shape ``(n_spots, n_params)``.
+
     Returns
     -------
     n_params : int
@@ -583,11 +592,22 @@ def fit_spots(
         ``picasso.fitting.seeds.initial_parameters_gauss``.
     mle : bool, optional
         Use the Poisson maximum-likelihood estimator instead of least squares.
-    tolerance, max_iterations : float and int, optional
-        Convergence schedule. ``None`` (the default) uses :data:`TOLERANCE` /
+    tolerance : float, optional
+        Convergence tolerance. ``None`` (the default) uses
+        :data:`TOLERANCE`.
+    max_iterations : int, optional
+        Maximum number of iterations. ``None`` (the default) uses
         :data:`MAX_ITERATIONS`.
-    progress_callback, abort_callback, single_precision
-        As :func:`picasso.fitting.splinefit_cuda.fit_spots`.
+    progress_callback : callable, "console" or None, optional
+        ``"console"`` shows a tqdm bar; a callable is invoked with the
+        cumulative number of spots fitted. As in
+        :func:`picasso.fitting.splinefit_cuda.fit_spots`.
+    abort_callback : callable or None, optional
+        Polled between chunks; returning True stops the fit. As in
+        :func:`picasso.fitting.splinefit_cuda.fit_spots`.
+    single_precision : bool, optional
+        Evaluate the model in single precision (the default). As in
+        :func:`picasso.fitting.splinefit_cuda.fit_spots`.
     variance : np.ndarray, optional
         ``(n_spots, box, box)`` per-pixel sCMOS readout variance in
         photoelectrons squared, laid out exactly like ``spots``. ``None``

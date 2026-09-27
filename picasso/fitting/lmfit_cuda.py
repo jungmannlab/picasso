@@ -320,9 +320,19 @@ def _estimator_terms_strict(mle, value, data, var):
 def _find_pivot(a, n, ipiv):
     """Largest-magnitude unused entry of ``a[:n, :n]``, full pivoting.
 
+    Parameters
+    ----------
+    a : array
+        Square device matrix searched for the pivot.
+    n : int
+        Size of the active ``a[:n, :n]`` block.
+    ipiv : array
+        Pivot bookkeeping of the Gauss-Jordan solve: 1 for rows/columns
+        already used, 0 otherwise.
+
     Returns
     -------
-    irow, icol
+    irow, icol : int
         Location of the pivot among the rows/columns not yet used
         (``ipiv[.] != 1``/``!= 0``).
     """

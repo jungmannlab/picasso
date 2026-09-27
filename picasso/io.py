@@ -1462,9 +1462,18 @@ def _record_broken_settings(path: str, error: BaseException) -> None:
 
 
 def settings_load_error() -> tuple[str, str | None] | None:
-    """``(message, path of the kept copy or None)`` if a settings file
-    could not be read in this process (see ``load_user_settings``),
-    until ``dismiss_settings_load_error`` is called; None otherwise."""
+    """Return the settings load error recorded in this process, if any.
+
+    An error is recorded when a settings file could not be read (see
+    ``load_user_settings``) and kept until
+    ``dismiss_settings_load_error`` is called.
+
+    Returns
+    -------
+    error : tuple or None
+        ``(message, path of the kept copy or None)`` if an error is
+        recorded, None otherwise.
+    """
     if _settings_load_error is None:
         return None
     return _settings_load_error[:2]
@@ -1477,8 +1486,14 @@ def dismiss_settings_load_error() -> None:
 
 
 def settings_file_is_broken() -> bool:
-    """Whether the settings file on disk is (still) the one that could
-    not be read: True until it is rewritten or fixed."""
+    """Check whether the settings file on disk could not be read.
+
+    Returns
+    -------
+    bool
+        True if the settings file on disk is (still) the one that could
+        not be read, i.e., until it is rewritten or fixed.
+    """
     return (
         _settings_load_error is not None
         and _settings_load_error[2] is not None
@@ -1578,16 +1593,16 @@ def save_user_settings(settings: dict) -> None:
 
     For example, the default directory for loading and saving files.
 
+    The previous file is kept as ``settings.yaml.bak`` (see
+    ``_backup_user_settings``) and the new one is written to a temporary
+    file first and renamed into place, so an interrupted save cannot
+    leave a half-written file behind.
+
     Parameters
     ----------
     settings : dict
         The settings to save; nested mappings are converted to plain dicts
         first so PyYAML does not tag them.
-
-    The previous file is kept as ``settings.yaml.bak`` (see
-    ``_backup_user_settings``) and the new one is written to a temporary
-    file first and renamed into place, so an interrupted save cannot
-    leave a half-written file behind.
     """
     settings = _to_dict_walk(settings)
     settings_filename = _user_settings_filename()
@@ -2227,8 +2242,9 @@ class ND2Movie(AbstractPicassoMovie):
 
     @classmethod
     def nd2metadata_to_dict(cls, meta: dict) -> dict:
-        """Restructure the 'metadata' field from the package nd2 into a
-        dict for independent use.
+        """Restructure the nd2 package's 'metadata' field into a dict.
+
+        The dict can be used independently of the nd2 package, see
         https://github.com/tlambert03/nd2/blob/main/src/nd2/structures.py
 
         Parameters
@@ -2777,8 +2793,15 @@ def _mm_metadata_from_tifffile(tif: "tifffile.TiffFile") -> dict:
 
 
 def _mm_per_image_metadata_from_tifffile(tif: "tifffile.TiffFile") -> dict:
-    """Extract per-image MicroManager metadata (tag 51123 on the first
-    IFD) into ``"Micro-Manager Metadata"`` and ``"Camera"``.
+    """Extract the per-image MicroManager metadata of a TIFF file.
+
+    Reads tag 51123 on the first IFD into ``"Micro-Manager Metadata"``
+    and ``"Camera"``.
+
+    Parameters
+    ----------
+    tif : tifffile.TiffFile
+        The opened TIFF file.
 
     Returns
     -------
@@ -2815,11 +2838,16 @@ def _mm_per_image_metadata_from_tifffile(tif: "tifffile.TiffFile") -> dict:
 
 
 def _mm_acquisition_comments_from_tifffile(tif: "tifffile.TiffFile") -> dict:
-    """Extract the file-level acquisition comments into
-    ``"Micro-Manager Acquisition Comments"``.
+    """Extract the file-level MicroManager acquisition comments.
 
-    Comments live in the Comments/Summary block, which tifffile parses
-    into ``micromanager_metadata``.
+    The comments are stored under ``"Micro-Manager Acquisition
+    Comments"``. They live in the Comments/Summary block, which tifffile
+    parses into ``micromanager_metadata``.
+
+    Parameters
+    ----------
+    tif : tifffile.TiffFile
+        The opened TIFF file.
 
     Returns
     -------
@@ -2990,13 +3018,23 @@ class TiffMap(_PerThreadFileHandles):
     ``n_frames`` matches the real number of image planes."""
 
     def __init__(self, path: str, verbose: bool = False, progress=None):
-        """Open the TIFF file with tifffile and extract the geometry,
-        data type and per-page layout needed for lazy frame access.
+        """Open the TIFF file and extract its frame layout.
 
-        ``progress`` is an optional ``callable(done, total)`` invoked as
-        the per-page IFD scan in ``_build_offsets`` proceeds, so the GUI
-        can show a smooth determinate bar while a single large movie is
-        opened. It is throttled to at most ~200 calls per file."""
+        The geometry, data type and per-page layout needed for lazy
+        frame access are read with tifffile.
+
+        Parameters
+        ----------
+        path : str
+            Path to the TIFF file.
+        verbose : bool, optional
+            If True, print the path being read. Default is False.
+        progress : callable, optional
+            ``callable(done, total)`` invoked as the per-page IFD scan
+            in ``_build_offsets`` proceeds, so the GUI can show a smooth
+            determinate bar while a single large movie is opened. It is
+            throttled to at most ~200 calls per file. Default is None.
+        """
         if verbose:
             print("Reading info from {}".format(path))
         self.path = os.path.abspath(path)

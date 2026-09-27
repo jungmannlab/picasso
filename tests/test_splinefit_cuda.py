@@ -9,12 +9,11 @@ builders are imported from :mod:`tests.test_splinefit` rather than duplicated:
 the CPU fitter is the specification the CUDA kernels are transcribed from, so
 both backends must be measured against exactly the same ground truth.
 
-How the two devices are compared
---------------------------------
-The sharp test is a **fixed iteration budget** - ``tolerance=0`` and a handful
-of iterations, no multi-start. That removes the convergence branch from the
-comparison, so what is left is pure algebra and it cannot be flaky. In double
-precision the kernels then have no rounding excuse and must agree to ~1e-9.
+The two devices are compared as follows. The sharp test is a **fixed
+iteration budget** - ``tolerance=0`` and a handful of iterations, no
+multi-start. That removes the convergence branch from the comparison, so what
+is left is pure algebra and it cannot be flaky. In double precision the
+kernels then have no rounding excuse and must agree to ~1e-9.
 
 Converged fits are deliberately *not* compared value-for-value. A 1e-6
 perturbation of the chi-square flips which Levenberg-Marquardt step is accepted

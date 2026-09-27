@@ -584,11 +584,39 @@ def _lm_seed(
 ) -> tuple:
     """Evaluate chi-square and curvature at the seed parameters.
 
+    Parameters
+    ----------
+    model : int
+        :data:`SPHERICAL`, :data:`ELLIPTIC` or :data:`ROTATED`.
+    spots : np.ndarray
+        ``(n_spots, box, box)`` photon counts, indexed ``[spot, y, x]``.
+    index : int
+        Index of the spot to fit.
+    variance : np.ndarray
+        Per-pixel sCMOS readout variance, laid out like ``spots``; ignored
+        unless ``use_variance``.
+    use_variance : bool
+        Whether ``variance`` is applied.
+    theta : np.ndarray
+        ``(n_params,)`` seed parameters.
+    mle : bool
+        Use the Poisson maximum-likelihood estimator instead of least squares.
+    hess, grad : np.ndarray
+        Scratch Hessian ``(n_params, n_params)`` and gradient
+        ``(n_params,)``, filled at ``theta``.
+    hess_ok, grad_ok : np.ndarray
+        Curvature of the last accepted iteration; set to ``hess``/``grad``
+        when the seed is valid.
+    n_params : int
+        Number of model parameters.
+
     Returns
     -------
-    chi_square, state
-        ``state`` is :data:`FIT_STATE_CONVERGED`, unless the seed model is
-        non-finite or non-positive, in which case it is
+    chi_square : float
+        Chi-square at the seed.
+    state : int
+        :data:`FIT_STATE_CONVERGED`, unless the seed model is non-finite or
+        non-positive, in which case it is
         :data:`FIT_STATE_NEG_CURVATURE_MLE` and the fit never enters the
         iteration loop.
     """
@@ -622,9 +650,35 @@ def _lm_reject_step(
     Aborting here would return the seed unchanged, which for a wide box
     shows up as sigma pinned to the seed width and integer coordinates.
 
+    Parameters
+    ----------
+    theta : np.ndarray
+        ``(n_params,)`` trial parameters; restored in place to
+        ``theta_previous``.
+    theta_previous : np.ndarray
+        ``(n_params,)`` parameters before the trial step.
+    previous_chi_square : float
+        Chi-square of the last accepted iteration.
+    lam : float
+        Current Levenberg-Marquardt damping.
+    state : int
+        Current fit state.
+    iteration : int
+        Index of the current iteration.
+    max_iterations : int
+        Maximum number of iterations.
+    n_params : int
+        Number of model parameters.
+
     Returns
     -------
-    chi_square, lam, state
+    chi_square : float
+        ``previous_chi_square``, the chi-square of the restored parameters.
+    lam : float
+        Increased damping.
+    state : int
+        Updated fit state; :data:`FIT_STATE_NEG_CURVATURE_MLE` if this was
+        the last iteration.
     """
     for p in range(n_params):
         theta[p] = theta_previous[p]
@@ -653,9 +707,53 @@ def _lm_accept_or_reject(
 ) -> tuple:
     """Update curvature, damping and convergence after a valid trial step.
 
+    Parameters
+    ----------
+    theta : np.ndarray
+        ``(n_params,)`` trial parameters; restored in place to
+        ``theta_previous`` if the step is rejected.
+    theta_previous : np.ndarray
+        ``(n_params,)`` parameters before the trial step.
+    grad : np.ndarray
+        Gradient evaluated at the trial parameters.
+    grad_ok : np.ndarray
+        Gradient of the last accepted iteration; refreshed from ``grad`` on
+        an improving step.
+    hess : np.ndarray
+        Hessian evaluated at the trial parameters.
+    hess_ok : np.ndarray
+        Hessian of the last accepted iteration; refreshed from ``hess`` on
+        an improving step.
+    n_params : int
+        Number of model parameters.
+    chi_square : float
+        Chi-square at the trial parameters.
+    previous_chi_square : float
+        Chi-square of the last accepted iteration.
+    lam : float
+        Current Levenberg-Marquardt damping.
+    tolerance : float
+        Convergence tolerance on the change in chi-square.
+    iteration : int
+        Index of the current iteration.
+    max_iterations : int
+        Maximum number of iterations.
+    state : int
+        Current fit state.
+
     Returns
     -------
-    chi_square, previous_chi_square, lam, state, converged
+    chi_square : float
+        Chi-square of the parameters kept.
+    previous_chi_square : float
+        Updated chi-square of the last accepted iteration.
+    lam : float
+        Updated damping.
+    state : int
+        Updated fit state; :data:`FIT_STATE_MAX_ITERATION` if the last
+        iteration did not converge.
+    converged : bool
+        Whether the change in chi-square fell below the tolerance.
     """
     if chi_square < previous_chi_square or previous_chi_square == 0.0:
         # Only an improving iteration refreshes the curvature the next step
@@ -710,9 +808,47 @@ def _lm_iterate(
 
     ``theta`` is updated in place with the best parameters found.
 
+    Parameters
+    ----------
+    model : int
+        :data:`SPHERICAL`, :data:`ELLIPTIC` or :data:`ROTATED`.
+    spots : np.ndarray
+        ``(n_spots, box, box)`` photon counts, indexed ``[spot, y, x]``.
+    index : int
+        Index of the spot to fit.
+    variance : np.ndarray
+        Per-pixel sCMOS readout variance, laid out like ``spots``; ignored
+        unless ``use_variance``.
+    use_variance : bool
+        Whether ``variance`` is applied.
+    mle : bool
+        Use the Poisson maximum-likelihood estimator instead of least squares.
+    tolerance : float
+        Convergence tolerance on the change in chi-square.
+    max_iterations : int
+        Maximum number of iterations.
+    theta : np.ndarray
+        ``(n_params,)`` seed parameters, updated in place.
+    theta_previous, grad, grad_ok, delta, scaling : np.ndarray
+        ``(n_params,)`` scratch buffers.
+    hess, hess_ok, hess_damped : np.ndarray
+        ``(n_params, n_params)`` scratch buffers; ``hess_ok``/``grad_ok``
+        must hold the seed curvature from :func:`_lm_seed`.
+    indxc, indxr, ipiv : np.ndarray
+        ``(n_params,)`` integer scratch buffers of the linear solver.
+    n_params : int
+        Number of model parameters.
+    chi_square : float
+        Chi-square at the seed.
+
     Returns
     -------
-    chi_square, state, n_iterations
+    chi_square : float
+        Chi-square at the best parameters found.
+    state : int
+        Final fit state.
+    n_iterations : int
+        Number of iterations run.
     """
     state = FIT_STATE_CONVERGED
     lam = _LAMBDA_INITIAL
@@ -1048,8 +1184,11 @@ def fit_spots(
         ``picasso.fitting.seeds.initial_parameters_gauss``.
     mle : bool, optional
         Use the Poisson maximum-likelihood estimator instead of least squares.
-    tolerance, max_iterations : float and int, optional
-        Convergence schedule. ``None`` (the default) uses :data:`TOLERANCE` /
+    tolerance : float, optional
+        Convergence tolerance. ``None`` (the default) uses
+        :data:`TOLERANCE`.
+    max_iterations : int, optional
+        Maximum number of iterations. ``None`` (the default) uses
         :data:`MAX_ITERATIONS`.
     progress_callback : callable, "console" or None, optional
         ``"console"`` shows a tqdm bar; a callable is invoked with the
@@ -1139,12 +1278,27 @@ def fit_spots_async(
 
     Parameters
     ----------
-    model, spots, initial_parameters, mle, tolerance, max_iterations, variance
-        As in :func:`fit_spots`.
+    model : int
+        :data:`SPHERICAL`, :data:`ELLIPTIC` or :data:`ROTATED`.
+    spots : np.ndarray
+        ``(n_spots, box, box)`` photon counts, indexed ``[spot, y, x]``.
+    initial_parameters : np.ndarray
+        ``(n_spots, n_params)`` seeds, from
+        ``picasso.fitting.seeds.initial_parameters_gauss``.
+    mle : bool, optional
+        Use the Poisson maximum-likelihood estimator instead of least squares.
+    tolerance : float, optional
+        Convergence tolerance. ``None`` (the default) uses
+        :data:`TOLERANCE`.
+    max_iterations : int, optional
+        Maximum number of iterations. ``None`` (the default) uses
+        :data:`MAX_ITERATIONS`.
     n_threads : int, optional
         Number of worker threads. ``None`` (the default) uses
         ``picasso.fitting.splinefit.n_workers``, and the count is clipped to
         at most one thread per spot.
+    variance : np.ndarray, optional
+        Per-pixel sCMOS readout variance, as in :func:`fit_spots`.
 
     Returns
     -------
@@ -1370,6 +1524,17 @@ def _reset_decoupled_scratch(
     theta: np.ndarray, n_params: int, grad: np.ndarray, hess: np.ndarray
 ) -> bool:
     """Zero ``grad``/``hess`` for the decoupled accumulator.
+
+    Parameters
+    ----------
+    theta : np.ndarray
+        ``(n_params,)`` current parameters, checked for finiteness.
+    n_params : int
+        Number of model parameters.
+    grad : np.ndarray
+        ``(n_params,)`` gradient, zeroed in place.
+    hess : np.ndarray
+        ``(n_params, n_params)`` Hessian, zeroed in place.
 
     Returns
     -------

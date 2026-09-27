@@ -118,9 +118,25 @@ def _count_intersections_box(
     This reduces the work from ``M * box**2 * log L`` to roughly
     ``M * box * (log L + box)``.
 
-    ``l0_coords`` must be sorted and unique. Parameters mirror
-    ``_count_intersections``; ``box`` is the side length of the search
-    region, so ``shifts.size == box * box``.
+    ``l0_coords`` must be sorted and unique.
+
+    Parameters
+    ----------
+    l0_coords : lib.IntArray1D
+        Sorted, unique coordinates of the reference localizations, shape
+        ``(L,)``.
+    l0_counts : lib.IntArray1D
+        Counts of the unique reference coordinates, shape ``(L,)``.
+    l1_coords : lib.IntArray1D
+        Sorted, unique coordinates of the target localizations, shape
+        ``(M,)``.
+    l1_counts : lib.IntArray1D
+        Counts of the unique target coordinates, shape ``(M,)``.
+    shifts : lib.IntArray1D
+        Encoded shifts spanning the search region, laid out row-major
+        as ``shifts[i * box + j]``, so ``shifts.size == box * box``.
+    box : int
+        Side length of the search region.
 
     Returns
     -------
@@ -423,6 +439,19 @@ def _interpolate_drift(
 def _check_exclude_self_reference(x, y, l0, width_units, intersect_d):
     """Verify that the reference matches the target for ``exclude_self``.
 
+    Parameters
+    ----------
+    x, y : lib.SeriesOrFloatArray1D
+        x and y coordinates of the target localizations in camera
+        pixels.
+    l0 : lib.IntArray1D
+        Reference localizations encoded as 1D integers in units of
+        ``intersect_d`` (``x + y * width_units``).
+    width_units : float
+        Width of the camera image in units of ``intersect_d``.
+    intersect_d : float
+        Intersect distance in camera pixels.
+
     Raises
     ------
     ValueError
@@ -458,6 +487,37 @@ def _align_segment(
     box,
 ):
     """Estimate the sub-pixel shift of one segment against the reference.
+
+    Parameters
+    ----------
+    lo, hi : int
+        Start (inclusive) and end (exclusive) indices of the segment in
+        the frame-sorted target arrays.
+    x_sorted, y_sorted : lib.FloatArray1D
+        x and y coordinates of the target localizations, sorted by
+        frame.
+    rel_drift_x, rel_drift_y : float
+        Accumulated relative drift applied to the segment before the
+        intersection counting.
+    exclude_self : bool
+        If True, the segment's own localizations are taken out of the
+        reference counts while it is being aligned.
+    l0_sorted : lib.IntArray1D or None
+        Encoded reference localizations in the frame-sorted order. Only
+        used (and required) when ``exclude_self`` is True.
+    l0_coords : lib.IntArray1D
+        Sorted, unique coordinates of the reference localizations.
+    l0_counts : lib.IntArray1D
+        Counts of the unique reference coordinates. Temporarily modified
+        in place when ``exclude_self`` is True and restored afterwards.
+    intersect_d : float
+        Intersect distance in camera pixels.
+    width_units : float
+        Width of the camera image in units of ``intersect_d``.
+    shifts_xy : lib.IntArray1D
+        Encoded x and y shifts spanning the local search region.
+    box : int
+        Side length of the local search region.
 
     Returns
     -------
@@ -680,9 +740,56 @@ def intersection_max_z(
 ) -> tuple[lib.FloatArray1D, lib.FloatArray1D]:
     """Maximize intersection (undrift) for 3D localizations.
 
-    Assumes that x and y coordinates were already undrifted. See
-    :func:`intersection_max` for the algorithm and parameters
-    explanation (its 2D counterpart).
+    Assumes that x and y coordinates were already undrifted.
+
+    Parameters
+    ----------
+    x, y : lib.SeriesOrFloatArray1D
+        x and y coordinates of the (already undrifted in x and y)
+        localizations in camera pixels.
+    z : lib.SeriesOrFloatArray1D
+        z coordinates of the localizations in nm.
+    ref_x, ref_y : lib.SeriesOrFloatArray1D
+        x and y coordinates of the reference localizations in camera
+        pixels.
+    ref_z : lib.SeriesOrFloatArray1D
+        z coordinates of the reference localizations in nm.
+    frame : lib.SeriesOrIntArray1D
+        Frame indices of localizations, starting at 1.
+    seg_bounds : lib.IntArray1D
+        Frame indices of the segmentation bounds. Defines temporal
+        intervals used to estimate drift.
+    intersect_d : float
+        Intersect distance in camera pixels.
+    roi_r : float
+        Radius of the local search region in camera pixels. Should be
+        higher than the maximum expected drift within one segment.
+    width, height : int
+        Width and height of the camera image in camera pixels.
+    pixelsize : float
+        Camera pixel size in nm, used to convert z to camera pixels.
+    aim_round : {1, 2}, optional
+        Round of AIM algorithm, see :func:`intersection_max`. Default
+        is 1.
+    exclude_self : bool, optional
+        Leave each segment out of the reference while that segment is
+        being aligned, see :func:`intersection_max`. Default is False.
+    progress : lib.ProgressType | None, optional
+        Progress dialog. If TqdmProgress, progress is displayed with tqdm.
+        If None or MockProgress, progress is not displayed. Default is None.
+
+    Returns
+    -------
+    z_pdc : lib.FloatArray1D
+        Undrifted z coordinates in nm.
+    drift_z : lib.FloatArray1D
+        Drift in z in nm for every frame.
+
+    Raises
+    ------
+    ValueError
+        If ``exclude_self`` is True and the reference is not the same
+        localizations as the target.
     """
     # convert z to camera pixels
     z = z.copy() / pixelsize
@@ -833,13 +940,14 @@ def aim(
         Localizations list to be undrifted.
     info : list of dicts
         Localizations list's metadata.
-    intersect_d : float
-        Intersect distance in camera pixels.
-    segmentation : int
-        Time interval for drift tracking, unit: frames.
-    roi_r : float
+    segmentation : int, optional
+        Time interval for drift tracking, unit: frames. Default is 100.
+    intersect_d : float, optional
+        Intersect distance in camera pixels. Default is 20 / 130.
+    roi_r : float, optional
         Radius of the local search region in camera pixels. Should be
-        larger than the  maximum expected drift within segmentation.
+        larger than the maximum expected drift within segmentation.
+        Default is 60 / 130.
     progress : picasso.lib.ProgressDialog or "console" or None, optional
         Progress dialog. If "console", progress is displayed in the
         console. If None, no progress is displayed. Default is None.

@@ -658,8 +658,8 @@ def draw_picks(
     image : QImage
         Image containing rendered localizations.
     viewport : tuple
-        Current field of view in camera pixels, ((y_min, y_max), (x_min,
-        x_max)).
+        Current field of view in camera pixels, ``((y_min, x_min),
+        (y_max, x_max))``.
     pick_shape : {"Circle", "Rectangle", "Polygon", "Square", "Box", "Brush"}
         Shape of the picks to be drawn.
     picks : list of tuples
@@ -776,8 +776,8 @@ def draw_points(
     image : QImage
         Image containing rendered localizations.
     viewport : tuple
-        Current field of view in camera pixels, ((y_min, y_max), (x_min,
-        x_max)).
+        Current field of view in camera pixels, ``((y_min, x_min),
+        (y_max, x_max))``.
     points : list of tuples
         List of points, where each point is a tuple specifying the point
         coordinates in camera pixels.
@@ -892,16 +892,16 @@ def draw_scalebar(
     image : QImage
         Image containing rendered localizations.
     viewport : tuple
-        Current field of view in camera pixels, ((y_min, y_max), (x_min,
-        x_max)).
+        Current field of view in camera pixels, ``((y_min, x_min),
+        (y_max, x_max))``.
     scalebar_length_nm : int or float
         Scale bar length in nm.
     pixelsize : int or float
         Camera pixel size in nm.
-    color : QColor, optional
-        Color of the scalebar and text. Default is white.
     display_length : bool, optional
         Whether to display scalebar length in nm. Default is True.
+    color : QColor, optional
+        Color of the scalebar and text. Default is white.
     display_height : int, optional
         Thickness of the scalebar in display pixels. Default is 10.
     margin : tuple of int, optional
@@ -1068,8 +1068,44 @@ def _colorbar_layout(
     """Lay out a color bar: its size and everything needed to paint it.
 
     Shared by ``colorbar_image`` and ``colorbar_svg``, so that the two
-    draw the same bar onto their different paint devices. See
-    ``colorbar_image`` for the parameters.
+    draw the same bar onto their different paint devices.
+
+    Parameters
+    ----------
+    colors : list of tuples or lib.FloatArray2D
+        Colors of the bands, one ``(r, g, b)`` tuple (values between 0
+        and 1) per color.
+    min_value : float
+        Value of the rendered property at the start of the bar.
+    max_value : float
+        Value of the rendered property at the end of the bar.
+    label : str, optional
+        Text displayed above the bar. Default is "", i.e., no label.
+    vertical : bool, optional
+        Whether the bar is drawn vertically (True) or horizontally
+        (False). Default is True.
+    bar_length : int, optional
+        Length of the bar in display pixels. Default is 400.
+    bar_width : int, optional
+        Thickness of the bar in display pixels. Default is 40.
+    n_ticks : int, optional
+        Number of annotated positions along the bar. If less than 2, no
+        ticks are drawn. Default is 5.
+    color : QColor, optional
+        Color of the frame, ticks and text. Default is white.
+    background : QColor, optional
+        Color of the background. Default is black.
+    text_fontsize : int, optional
+        Font size of the label and tick text in display pixels. Default
+        is 20.
+    margin : int, optional
+        Margin around the drawn elements in display pixels. Default is
+        12.
+    tick_length : int, optional
+        Length of the tick marks in display pixels. Default is 8.
+    tick_spacer : int, optional
+        Spacing between the tick marks and the tick text in display
+        pixels. Default is 4.
 
     Returns
     -------
@@ -1421,8 +1457,8 @@ def draw_minimap(
     image : QImage
         Image containing rendered localizations.
     viewport : tuple
-        Current field of view in camera pixels, ((y_min, y_max), (x_min,
-        x_max)).
+        Current field of view in camera pixels, ``((y_min, x_min),
+        (y_max, x_max))``.
     max_viewport_size : tuple
         Maximum viewport size in camera pixels, i.e., the acquired
         movie size (height, width).

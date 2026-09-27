@@ -5293,10 +5293,12 @@ class TestSplineCRLBGPU:
         np.testing.assert_allclose(got, expected)
 
     def test_device_error_falls_back_and_warns_once(self, monkeypatch):
-        """A device that is present but fails still returns the right numbers,
-        but must not do it silently - a permanently broken GPU path would
-        otherwise never be noticed. (Having no device at all is not an error
-        and stays quiet; see test_no_cuda_uses_the_cpu_silently.)"""
+        """A present but failing device warns and still returns the numbers.
+
+        It still returns the right numbers, but must not do it silently - a
+        permanently broken GPU path would otherwise never be noticed. (Having
+        no device at all is not an error and stays quiet; see
+        test_no_cuda_uses_the_cpu_silently.)"""
         monkeypatch.setattr(precision, "CUDA_AVAILABLE", True)
         monkeypatch.setattr(precision, "_crlb_gpu_fallback_warned", False)
 
@@ -8778,9 +8780,11 @@ class TestChainedAffineTransforms:
         assert len(new) == 2 and duplicates == []
 
     def test_a_duplicate_of_the_fits_own_calibration_is_dropped(self):
-        """The 2D / spline route: the fit applies what its calibration
-        carries, so the same one handed in as an extra must be skipped.
-        (The astigmatic 3D route does this inside ``zfit`` - see
+        """The 2D / spline route skips an extra equal to its calibration.
+
+        The fit applies what its calibration carries, so the same one handed
+        in as an extra must be skipped. (The astigmatic 3D route does this
+        inside ``zfit`` - see
         ``TestZfitSeparatelyLoadedLateralCorrections``.)"""
         locs = pd.DataFrame(
             {"x": [10.0, 20.0], "y": [30.0, 40.0], "frame": [0, 1]}

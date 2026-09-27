@@ -2208,11 +2208,11 @@ def identify_multichannel_sum(
     ) = None,
     abort_callback: Callable[[], bool] | None = None,
 ) -> tuple[pd.DataFrame, dict]:
-    """Identify spots on the *sum* of registered channels rather than in each
-    channel on its own.
+    """Identify spots on the *sum* of registered channels.
 
-    Every channel is converted to photons, mapped into the reference channel
-    through its affine transform and added up (see
+    The spots are identified on the sum rather than in each channel on its
+    own. Every channel is converted to photons, mapped into the reference
+    channel through its affine transform and added up (see
     :class:`SummedChannelsMovie`); the summed movie is then identified exactly
     as a single-channel movie is. This is the mode for data where a channel is
     too dim to detect in by itself: the molecule is found from the combined
@@ -2241,15 +2241,43 @@ def identify_multichannel_sum(
     transforms : list of lib.FloatArray2D
         One ``(2, 3)`` reference->channel affine per channel; see
         :class:`SummedChannelsMovie`.
-    camera_infos, regions, reference, camera_calibrations, order
-        Passed to :class:`SummedChannelsMovie`.
+    camera_infos : list of dict, optional
+        One camera info per channel, used to convert counts to photons;
+        see :class:`SummedChannelsMovie`. Default is None.
+    regions : list, optional
+        Split-FOV: one ``[[y_min, x_min], [y_max, x_max]]`` rectangle per
+        channel; see :class:`SummedChannelsMovie`. Default is None.
+    reference : int, optional
+        Index of the reference channel. Default is 0.
+    camera_calibrations : list of dict, optional
+        One sCMOS camera calibration per channel; see
+        :class:`SummedChannelsMovie`. Default is None.
     roi : tuple or list of tuples, optional
         Region(s) to identify in, in reference-channel coordinates. Defaults to
         the reference region for split-FOV data (the only part of the canvas
         that is filled) and to the whole frame otherwise.
-    frame_bounds, threaded, temporal_median_window, temporal_median_stride, \
-gaussian_filter_sigma, wavelet, progress_callback, abort_callback
-        As in :func:`identify`.
+    frame_bounds : tuple, list of tuples, optional
+        Frame numbers to consider, as in :func:`identify`. Default is None.
+    threaded : bool, optional
+        Whether to use threading, as in :func:`identify`. Default is True.
+    temporal_median_window : int or None, optional
+        Temporal median window applied to the sum, as in
+        :func:`identify`. Default is None.
+    temporal_median_stride : int or None, optional
+        Temporal median stride, as in :func:`identify`. Default is None.
+    gaussian_filter_sigma : float or None, optional
+        Gaussian filter sigma applied to the sum, as in :func:`identify`.
+        Default is None.
+    wavelet : wavelet.WaveletParameters, optional
+        Settings of the wavelet identification, as in :func:`identify`.
+        Default is None.
+    order : int, optional
+        Spline order of the resampling; see :class:`SummedChannelsMovie`.
+        Default is 1.
+    progress_callback : callable, "console" or None, optional
+        Progress reporting, as in :func:`identify`. Default is None.
+    abort_callback : callable, optional
+        Abort check, as in :func:`identify`. Default is None.
 
     Returns
     -------
@@ -3331,7 +3359,7 @@ def fit(
             "spline-mle-gpu" or "avg"}, optional
         Which 2D fitting algorithm to use. "gausslq" for least-squares
         fitting of a 2D Gaussian. "gausslq-gpu" for its GPU
-        implemntation (if available). "gaussmle" for MLE 2D Gaussian
+        implementation (if available). "gaussmle" for MLE 2D Gaussian
         fitting (CPU). "gaussmle-gpu" for MLE fitting of a 2D Gaussian
         on the GPU (the Poisson maximum likelihood estimator).
         "gausslq-rotated" for CPU least-squares fitting, and
@@ -3377,7 +3405,7 @@ def fit(
         ``camera_info``, and the per-pixel readout variance enters the
         noise model of Huang et al., Nat. Methods 10:653 (2013): every
         MLE fit and every uncertainty estimate ("lpx", "lpy", CRLB) then
-        de-emphasises noisy pixels. Least-squares fits are unaffected by
+        de-emphasizes noisy pixels. Least-squares fits are unaffected by
         the variance term itself (the shift cancels), but their
         uncertainties do grow on noisy pixels; prefer an MLE method for
         sCMOS data. Default is None.
@@ -3545,10 +3573,42 @@ def _dispatch_fit(
 ) -> pd.DataFrame | None:
     """Run the fitting backend selected by ``fitting_method``.
 
+    Parameters
+    ----------
+    fitting_method : str
+        The fit code, as in :func:`fit`.
+    gauss_flags : dict or None
+        Flags of a Gaussian fit code (see :func:`parse_gauss_code`), or
+        None if ``fitting_method`` is not a Gaussian fit.
+    spots : np.ndarray
+        The spots cut out of the movie, in photons.
+    identifications : pd.DataFrame
+        The identified spots, one per entry of ``spots``.
+    box : int
+        Side length of the spots in camera pixels.
+    em : bool
+        Whether the camera uses EM gain.
+    variance : np.ndarray or None
+        Per-pixel sCMOS readout variance in photoelectrons squared, laid
+        out like ``spots``, or None for a uniform camera.
+    eps : float or None
+        The convergence criterion, as in :func:`fit`.
+    max_it : int or None
+        The maximum number of iterations per spot, as in :func:`fit`.
+    spline_calibration : dict or None
+        Cubic-spline PSF calibration for the "spline*" methods.
+    multiprocess : bool
+        Whether to use multiprocessing. Ignored for GPU fitting.
+    progress_callback : callable, "console" or None
+        Progress reporting, as in :func:`fit`.
+    abort_callback : callable or None
+        Abort check, as in :func:`fit`.
+
     Returns
     -------
     locs : pd.DataFrame or None
-        Data frame containing the localized spots.
+        Data frame containing the localized spots; None if the fit was
+        aborted.
     """
     if gauss_flags is not None:
         if gauss_flags["use_gpu"] and callable(progress_callback):
@@ -3850,8 +3910,12 @@ def fit_spots_gauss(
         Run on a CUDA GPU. Default False.
     return_stats : bool, optional
         Additionally return ``(log_likelihood, iterations, chi_square)``.
-    tolerance, max_iterations : optional
-        ``None`` uses the method's own schedule, see :func:`gauss_schedule`.
+    tolerance : float or None, optional
+        Convergence criterion. ``None`` uses the method's own schedule, see
+        :func:`gauss_schedule`.
+    max_iterations : int or None, optional
+        Maximum number of iterations per spot. ``None`` uses the method's
+        own schedule, see :func:`gauss_schedule`.
     progress_callback : callable, "console" or None, optional
         Reported per spot on the CPU; the GPU fit is one launch per chunk.
     variance : lib.FloatArray3D, optional
@@ -3965,10 +4029,26 @@ def fit_spots_gauss_gpu(
 
     Parameters
     ----------
-    spots, rotated, mle, spherical, return_stats, tolerance, max_iterations
-        As in :func:`fit_spots_gauss`.
-    variance
-        As in :func:`fit_spots_gauss`.
+    spots : lib.FloatArray3D
+        ``(n_spots, box, box)`` photon counts.
+    rotated : bool, optional
+        Fit a rotated elliptical Gaussian. Default False.
+    mle : bool, optional
+        Use the Poisson maximum-likelihood estimator instead of least
+        squares. Default False.
+    spherical : bool, optional
+        Fit a single shared width. Default False.
+    return_stats : bool, optional
+        Additionally return ``(log_likelihood, iterations, chi_square)``.
+        Default False.
+    tolerance : float or None, optional
+        Convergence criterion, as in :func:`fit_spots_gauss`.
+    max_iterations : int or None, optional
+        Maximum number of iterations per spot, as in
+        :func:`fit_spots_gauss`.
+    variance : lib.FloatArray3D, optional
+        Per-pixel sCMOS readout variance in photoelectrons squared, as in
+        :func:`fit_spots_gauss`. Default is None.
 
     Returns
     -------
@@ -4300,9 +4380,12 @@ def fit_spots_gauss_multichannel(
         :func:`fit_gauss_multichannel`.
     use_gpu : bool or None, optional
         None uses a CUDA GPU when one is available.
-    tolerance, max_iterations : optional
-        Convergence schedule. None uses the method's own, see
+    tolerance : float or None, optional
+        Convergence criterion. None uses the method's own, see
         :func:`gauss_schedule`.
+    max_iterations : int or None, optional
+        Maximum number of iterations per spot. None uses the method's own,
+        see :func:`gauss_schedule`.
     multiprocess : bool, optional
         Run the CPU kernels on a thread pool (they are ``nogil``). Ignored on
         the GPU, where one launch fits every spot.
@@ -4649,9 +4732,12 @@ def fit_gauss_multichannel(
         width.
     use_gpu : bool or None, optional
         Fit on the GPU, the CPU, or (None, the default) whichever is available.
-    tolerance, max_iterations : optional
-        Convergence schedule. None uses the method's own, see
+    tolerance : float or None, optional
+        Convergence criterion. None uses the method's own, see
         :func:`gauss_schedule`.
+    max_iterations : int or None, optional
+        Maximum number of iterations per spot. None uses the method's own,
+        see :func:`gauss_schedule`.
     multiprocess : bool, optional
         Run the CPU kernels on a thread pool (they are ``nogil``). Ignored on
         the GPU. Default True.
@@ -4784,8 +4870,10 @@ def fit_gauss_split_fov(
 
     Parameters
     ----------
-    movie, camera_info
-        The single loaded movie and its camera info dict.
+    movie : LoadedMovie
+        The single loaded movie.
+    camera_info : dict
+        Camera info of ``movie``.
     identifications : pd.DataFrame
         Detections. With ``confine_to_reference`` (the default) they are
         filtered to the reference region, so each molecule yields one spot that
@@ -4799,11 +4887,28 @@ def fit_gauss_split_fov(
         x_max]]`` per channel, reference first. When given, the absolute
         channel transforms are rebuilt at these positions from the stored
         region-local ones. None uses the registration's own regions.
+    mle : bool, optional
+        Use the Poisson maximum-likelihood estimator, as in
+        :func:`fit_gauss_multichannel`. Default False.
+    link_photons : bool, optional
+        Share one photon count and background across the channels, as in
+        :func:`fit_gauss_multichannel`. Default False.
     confine_to_reference : bool, optional
         Restrict the detections to the reference region first. Default True.
-    mle, link_photons, use_gpu, tolerance, max_iterations, multiprocess, \
-    progress_callback, abort_callback
-        As :func:`fit_gauss_multichannel`.
+    use_gpu : bool or None, optional
+        Fit on the GPU, the CPU, or (None, the default) whichever is
+        available.
+    tolerance : float or None, optional
+        Convergence criterion, as in :func:`fit_gauss_multichannel`.
+    max_iterations : int or None, optional
+        Maximum number of iterations per spot, as in
+        :func:`fit_gauss_multichannel`.
+    multiprocess : bool, optional
+        Run the CPU kernels on a thread pool. Default True.
+    progress_callback : callable, optional
+        Called with the cumulative number of spots processed.
+    abort_callback : callable, optional
+        Polled during the fit; returning True stops it and returns None.
     camera_calibration : dict, optional
         One per-pixel sCMOS calibration for the single camera. Split-FOV is one
         sensor and the maps are indexed by absolute frame coordinates, so the
@@ -5122,6 +5227,32 @@ def _prepare_splinefit_args(
     and the schedule - must be byte-identical between the CPU and GPU
     backends for a CPU/GPU comparison to be meaningful.
 
+    Parameters
+    ----------
+    spots : lib.FloatArray3D
+        Photon counts of the spots, as in :func:`fit_spots_splinefit`.
+    calibration : dict
+        A spline PSF calibration, cropped to the spots' box.
+    mle : bool
+        Use the Poisson maximum-likelihood estimator instead of least
+        squares.
+    n_z_starts : int or None
+        Number of axial seeds of the multi-start; None uses
+        ``_default_n_z_starts``.
+    residuals : np.ndarray or None
+        Sub-pixel ROI offsets of the multichannel models; None means
+        zeros.
+    jacobians : np.ndarray or None
+        Local Jacobians of the channel transforms; None means the
+        identity.
+    tolerance : float or None
+        Convergence criterion; None uses the default schedule.
+    max_iterations : int or None
+        Maximum number of iterations; None uses the default schedule.
+    variance : lib.FloatArray3D or None
+        Per-pixel sCMOS readout variance in photoelectrons squared, laid
+        out like ``spots``.
+
     Returns
     -------
     args : tuple
@@ -5256,9 +5387,27 @@ def _await_splinefit(
 ) -> tuple[bool, int]:
     """Poll the thread pool until every spot is claimed, or an abort fires.
 
+    Parameters
+    ----------
+    fit : object
+        The running fit, as returned by ``splinefit.fit_spots_async``.
+    n_spots : int
+        Total number of spots.
+    progress_callback : callable, "console" or None
+        Called with the cumulative number of claimed spots, unless
+        ``use_tqdm``.
+    abort_callback : callable or None
+        Polled on every iteration; returning True stops the fit.
+    use_tqdm : bool
+        Whether progress goes to ``iter_range`` instead of
+        ``progress_callback``.
+    iter_range : tqdm.tqdm or None
+        The progress bar, if ``use_tqdm``.
+
     Returns
     -------
     aborted : bool
+        True if ``abort_callback`` stopped the fit.
     last : int
         Spot count last reported to ``iter_range``, for the caller's final
         tqdm update.
@@ -5341,9 +5490,14 @@ def fit_spots_splinefit(
         ``(n_spots, n_channels, 4)`` local Jacobians of the channel transforms
         (see :func:`channel_roi_geometry`). None (the default) means the
         identity.
-    tolerance, max_iterations : optional
-        Convergence schedule. None (the default) uses the one that fit would
-        use by default, see ``picasso.fitting.splinefit.convergence_schedule``.
+    tolerance : float or None, optional
+        Convergence criterion. None (the default) uses the one that fit
+        would use by default, see
+        ``picasso.fitting.splinefit.convergence_schedule``.
+    max_iterations : int or None, optional
+        Maximum number of iterations per spot. None (the default) uses the
+        one that fit would use by default, see
+        ``picasso.fitting.splinefit.convergence_schedule``.
     multiprocess : bool, optional
         Keeps ``fit``'s argument name, but selects a **thread** pool: the CPU
         kernels are ``nogil``. False fits serially in the calling thread.
@@ -5486,13 +5640,39 @@ def fit_spots_spline(
 
     Parameters
     ----------
-    spots, calibration, mle, n_z_starts, return_stats, residuals, jacobians
-        As in :func:`fit_spots_splinefit`.
+    spots : lib.FloatArray3D
+        ``(n_spots, box, box)`` photon counts, or
+        ``(n_spots, n_channels, box, box)`` for the multichannel models.
+    calibration : dict
+        A spline PSF calibration.
+    mle : bool, optional
+        Use the Poisson maximum-likelihood estimator instead of least
+        squares. Default False.
+    n_z_starts : int, optional
+        Number of axial seeds of the multi-start, as in
+        :func:`fit_spots_splinefit`. Default None.
+    return_stats : bool, optional
+        Additionally return ``(log_likelihood, iterations, chi_square)``.
+        Default False.
+    residuals : np.ndarray, optional
+        Sub-pixel ROI offsets of the multichannel models, as in
+        :func:`fit_spots_splinefit`. Default None.
+    jacobians : np.ndarray, optional
+        Local Jacobians of the channel transforms, as in
+        :func:`fit_spots_splinefit`. Default None.
     use_gpu : bool, optional
         None (the default) uses the GPU when one is available; True raises if
         none is.
-    tolerance, max_iterations, progress_callback, variance
-        As in :func:`fit_spots_splinefit`.
+    tolerance : float or None, optional
+        Convergence criterion, as in :func:`fit_spots_splinefit`.
+    max_iterations : int or None, optional
+        Maximum number of iterations per spot, as in
+        :func:`fit_spots_splinefit`.
+    progress_callback : callable, "console" or None, optional
+        Progress reporting, as in :func:`fit_spots_splinefit`.
+    variance : lib.FloatArray3D, optional
+        Per-pixel sCMOS readout variance in photoelectrons squared, laid
+        out like ``spots``. Default None.
 
     Returns
     -------
@@ -6713,11 +6893,6 @@ def fit_spline_multichannel(
         A ``"spline-3d-multichannel"`` calibration (see ``picasso.spline``).
     mle : bool, optional
         Use the Poisson maximum-likelihood estimator. Default False.
-    use_gpu : bool or None, optional
-        Fit on the GPU (``picasso.fitting.splinefit_cuda``) or on the CPU
-        (``picasso.fitting.splinefit``). None (the default) uses the GPU when
-        one is
-        available. Both compute the same quantity, so this only affects speed.
     link_photons : bool, optional
         If True (default), the shared-amplitude model links one photon
         amplitude and one background across all channels. If False, use
@@ -6725,6 +6900,9 @@ def fit_spline_multichannel(
         gets its own photon count and background, reported as
         ``photons_ch{c}`` / ``bg_ch{c}`` / ``rel_photons_ch{c}``.
         Available for 2 to 6 channels. See :func:`_as_link_xyz_calibration`.
+    progress_callback : callable, optional
+        Invoked with the cumulative spot count as the extraction, the fit and
+        the CRLB computation proceed.
     apply_roi_residuals : bool, optional
         Hand the sub-pixel ROI-placement residuals to the fit model (default
         True), so each channel's spline is evaluated where its data actually
@@ -6732,6 +6910,20 @@ def fit_spline_multichannel(
         :func:`channel_roi_residuals` for why this matters and by how much. Set
         False to reproduce results from before this correction, or to A/B the
         two on the same data.
+    n_z_starts : int, optional
+        Number of axial seeds of the multi-start. None (the default) picks it
+        from the calibration; see :func:`fit_spots_splinefit`.
+    use_gpu : bool or None, optional
+        Fit on the GPU (``picasso.fitting.splinefit_cuda``) or on the CPU
+        (``picasso.fitting.splinefit``). None (the default) uses the GPU when
+        one is available. Both compute the same quantity, so this only affects
+        speed.
+    tolerance : float or None, optional
+        Convergence criterion. None (the default) uses the one the fit
+        would use by default; see :func:`fit_spots_splinefit`.
+    max_iterations : int or None, optional
+        Maximum number of iterations per spot. None (the default) uses the
+        one the fit would use by default; see :func:`fit_spots_splinefit`.
     camera_calibrations : list of dict or None, optional
         One per-pixel sCMOS camera calibration per channel (from
         ``picasso.scmos`` or ``io.load_camera_calibration``), or None for none
@@ -6739,15 +6931,6 @@ def fit_spline_multichannel(
         a characterized camera. Each channel's maps are cut at that channel's
         own mapped, rounded box origin, so a calibration follows its channel
         through the affine registration. Default None.
-    progress_callback : callable, optional
-        Invoked with the cumulative spot count as the extraction, the fit and
-        the CRLB computation proceed.
-    n_z_starts : int, optional
-        Number of axial seeds of the multi-start. None (the default) picks it
-        from the calibration; see :func:`fit_spots_splinefit`.
-    tolerance, max_iterations : optional
-        Convergence schedule. None (the default) uses the one the fit would
-        use by default; see :func:`fit_spots_splinefit`.
 
     Returns
     -------
@@ -6926,8 +7109,17 @@ def fit_spline_multichannel_ratiometric(
 
     Parameters
     ----------
-    movies, camera_infos, identifications, box, calibration
-        As in :func:`fit_spline_multichannel`.
+    movies : list
+        One movie per channel; ``movies[0]`` is the reference channel. As
+        in :func:`fit_spline_multichannel`.
+    camera_infos : list of dict
+        One camera-info dict per channel.
+    identifications : pd.DataFrame
+        Detections in the reference channel.
+    box : int
+        Box side length (camera pixels), must match the calibration.
+    calibration : dict
+        A ``"spline-3d-multichannel"`` calibration (see ``picasso.spline``).
     photon_ratios : lib.FloatArray2D, optional
         ``(n_hypotheses, n_channels)`` candidate per-channel photon ratios,
         one row per dye/color. None (the default) takes them from the
@@ -6944,8 +7136,11 @@ def fit_spline_multichannel_ratiometric(
         comparable. None (the default) picks it from the calibration.
     use_gpu : bool or None, optional
         As in :func:`fit_spline_multichannel`.
-    tolerance, max_iterations : optional
-        Convergence schedule. None (the default) uses the fit's own.
+    tolerance : float or None, optional
+        Convergence criterion. None (the default) uses the fit's own.
+    max_iterations : int or None, optional
+        Maximum number of iterations per spot. None (the default) uses the
+        fit's own.
     camera_calibrations : list of dict or None, optional
         One per-pixel sCMOS camera calibration per channel (from
         ``picasso.scmos`` or ``io.load_camera_calibration``), or None for none
@@ -7053,6 +7248,16 @@ def _validate_ratiometric_inputs(
 ) -> tuple[lib.FloatArray2D, list, int]:
     """Validate and normalize ``fit_spline_multichannel_ratiometric``'s inputs.
 
+    Parameters
+    ----------
+    calibration : dict
+        A ``"spline-3d-multichannel"`` calibration.
+    photon_ratios : lib.FloatArray2D or None
+        Candidate per-channel photon ratios; None takes them from the
+        calibration.
+    movies : list
+        One movie per channel.
+
     Returns
     -------
     photon_ratios : lib.FloatArray2D
@@ -7061,6 +7266,13 @@ def _validate_ratiometric_inputs(
     transforms : list
         The calibration's channel transforms.
     n_channels : int
+        Number of channels.
+
+    Raises
+    ------
+    ValueError
+        If the calibration is not ``"spline-3d-multichannel"``, if no
+        photon ratios are available, or if the channel counts disagree.
     """
     if calibration.get("model") != "spline-3d-multichannel":
         raise ValueError(
@@ -7104,6 +7316,32 @@ def _fit_ratiometric_hypotheses(
     variance: lib.FloatArray3D | None,
 ) -> tuple[list, list, np.ndarray, np.ndarray]:
     """Fit every photon-ratio hypothesis, keeping per-spot params and score.
+
+    Parameters
+    ----------
+    spots : lib.FloatArray3D
+        Channel-stacked spots in photons.
+    calibration : dict
+        A ``"spline-3d-multichannel"`` calibration.
+    ratios_norm : lib.FloatArray2D
+        ``(n_hypotheses, n_channels)`` photon ratios, each row summing
+        to 1.
+    mle : bool
+        Use the Poisson maximum-likelihood estimator.
+    n_z_starts : int
+        Number of axial seeds, shared by every hypothesis.
+    roi_residuals : np.ndarray or None
+        Sub-pixel ROI offsets per spot and channel, or None.
+    jacobians : np.ndarray or None
+        Local Jacobians of the channel transforms, or None.
+    tolerance : float or None
+        Convergence criterion; None uses the fit's own.
+    max_iterations : int or None
+        Maximum number of iterations; None uses the fit's own.
+    use_gpu : bool or None
+        Fit on the GPU, the CPU, or (None) whichever is available.
+    variance : lib.FloatArray3D or None
+        Per-pixel sCMOS readout variance, laid out like ``spots``.
 
     Returns
     -------
@@ -7172,6 +7410,40 @@ def _assemble_ratiometric_locs(
     Each group uses that hypothesis's (scaled) calibration for z-conversion
     and CRLB. Index-aligned column assignment keeps per-channel photons
     correct across the internal frame-sort of :func:`locs_from_fits_spline`.
+
+    Parameters
+    ----------
+    n_hyp : int
+        Number of photon-ratio hypotheses.
+    best_k : np.ndarray
+        Index of the winning hypothesis per spot.
+    calibration : dict
+        A ``"spline-3d-multichannel"`` calibration.
+    ratios_norm : lib.FloatArray2D
+        ``(n_hypotheses, n_channels)`` photon ratios, each row summing
+        to 1.
+    identifications : pd.DataFrame
+        Detections in the reference channel, one per spot.
+    thetas : list of np.ndarray
+        Fitted parameters per hypothesis.
+    chis : list of np.ndarray
+        Chi-squares per hypothesis.
+    box : int
+        Box side length (camera pixels).
+    em : bool
+        Whether the camera uses EM gain.
+    roi_residuals : np.ndarray or None
+        Sub-pixel ROI offsets per spot and channel, or None.
+    jacobians : np.ndarray or None
+        Local Jacobians of the channel transforms.
+    mle : bool
+        Whether the maximum-likelihood estimator was used.
+    variance : lib.FloatArray3D or None
+        Per-pixel sCMOS readout variance, laid out like ``spots``.
+    n_channels : int
+        Number of channels.
+    spots : np.ndarray
+        Channel-stacked spots in photons.
 
     Returns
     -------
@@ -7405,10 +7677,10 @@ def fit_spline_split_fov(
     max_iterations: int | None = None,
     camera_calibration: dict | None = None,
 ) -> pd.DataFrame:
-    """Fit a split-FOV multichannel spline PSF from a *single* movie whose
-    rectangular sub-regions are the channels.
+    """Fit a split-FOV multichannel spline PSF from a *single* movie.
 
-    Global fit as in globLoc (Li et al., Nat. Commun. 13, 3133, 2022), for the
+    The rectangular sub-regions of the movie are the channels. Global fit as
+    in globLoc (Li et al., Nat. Commun. 13, 3133, 2022), for the
     single-camera split-FOV geometry.
 
     The calibration (built by
@@ -7423,12 +7695,18 @@ def fit_spline_split_fov(
 
     Parameters
     ----------
-    movie, camera_info
-        The single loaded movie and its camera info dict.
+    movie : LoadedMovie
+        The single loaded movie.
+    camera_info : dict
+        Camera info of ``movie``.
     identifications : pd.DataFrame
         Detections; when ``confine_to_reference`` is True (default) they are
         filtered to the reference region so each molecule yields one spot
         that is mapped into the other regions via the transforms.
+    box : int
+        Box side length (camera pixels), must match the calibration.
+    calibration : dict
+        A split-FOV ``"spline-3d-multichannel"`` calibration.
     regions : list, optional
         The channel ROIs *for this data* (one ``[[y_min, x_min], [y_max,
         x_max]]`` per channel, reference first), e.g. re-drawn in the GUI.
@@ -7437,10 +7715,6 @@ def fit_spline_split_fov(
         calibration can be applied to data whose split sits at a different
         position. When omitted, the calibration's own ``regions`` (the
         calibration-time positions) are used.
-    box : int
-        Box side length (camera pixels), must match the calibration.
-    calibration : dict
-        A split-FOV ``"spline-3d-multichannel"`` calibration.
     photon_ratios : lib.FloatArray2D, optional
         Candidate per-channel ratios for the ratiometric path (else taken from
         the calibration).
@@ -7460,8 +7734,11 @@ def fit_spline_split_fov(
         calibration.
     use_gpu : bool or None, optional
         As in :func:`fit_spline_multichannel`.
-    tolerance, max_iterations : optional
-        Convergence schedule. None (the default) uses the fit's own.
+    tolerance : float or None, optional
+        Convergence criterion. None (the default) uses the fit's own.
+    max_iterations : int or None, optional
+        Maximum number of iterations per spot. None (the default) uses the
+        fit's own.
     camera_calibration : dict or None, optional
         A per-pixel sCMOS camera calibration for the (single) camera. All
         split-FOV regions are read from one sensor and the maps are indexed by
@@ -7629,8 +7906,20 @@ def _check_single_channel_calibration(
 
 
 def region_label(index: int) -> str:
-    """How a split-FOV region is named on screen and in its output files:
-    the first region is the reference channel, the rest are numbered."""
+    """How a split-FOV region is named on screen and in its output files.
+
+    The first region is the reference channel, the rest are numbered.
+
+    Parameters
+    ----------
+    index : int
+        Index of the region, the reference first.
+
+    Returns
+    -------
+    label : str
+        ``"ref"`` for the reference region, else ``"ch{index}"``.
+    """
     return "ref" if index == 0 else f"ch{index}"
 
 
@@ -8125,10 +8414,6 @@ def localize(
           fitted on the raw movie. Note that the minimum net gradient
           has to be re-tuned when this is changed, since smoothing
           lowers gradient magnitudes. 0 or missing disables it.
-    threaded : bool, optional
-        Whether to use multithreading/multiprocessing. Default is True.
-    movie_info : list[dict], optional
-        Movie metadata. If None, an empty list is used. Default is None.
     roi : tuple or list of tuples, optional
         Region of interest (ROI) defined as a tuple of two tuples,
         where the first tuple contains the start coordinates
@@ -8141,6 +8426,8 @@ def localize(
     frame_bounds : tuple, optional
         Minimum and maximum frame numbers to consider for the
         identification. If None, all frames are used. Default is None.
+    movie_info : list[dict], optional
+        Movie metadata. If None, an empty list is used. Default is None.
     fitting_method : {"gausslq", "gausslq-spherical", "gausslq-rotated", \
             "gausslq-gpu", "gausslq-rotated-gpu", "gausslq-spherical-gpu", \
             "gaussmle", "gaussmle-spherical", "gaussmle-gpu", \
@@ -8202,6 +8489,8 @@ def localize(
         forwarded to ``fit``. When given, its maps replace the scalar
         "Baseline" (and, if a gain map is present, "Sensitivity") of
         ``camera_info``. Default is None.
+    threaded : bool, optional
+        Whether to use multithreading/multiprocessing. Default is True.
     identification_progress_callback : callable or "console" or None
         A callback for progress updates during identification. If
         "console", progress will be printed to the console. If None,
@@ -8576,9 +8865,16 @@ def _db_filename() -> str:  # TODO: remove in 1.0
 
 
 def db_filename() -> str:
-    """Return the path to the SQLite database file used for storing
-    localization summaries. The database is stored in the user's home
-    directory under the ``.picasso`` folder."""
+    """Return the path to the SQLite database of localization summaries.
+
+    The database is stored in the user's home directory under the
+    ``.picasso`` folder, which is created if needed.
+
+    Returns
+    -------
+    path : str
+        Absolute path of the database file.
+    """
     home = os.path.expanduser("~")
     picasso_dir = os.path.join(home, ".picasso")
     os.makedirs(picasso_dir, exist_ok=True)
@@ -8603,9 +8899,24 @@ def add_file_to_db(
 
     Parameters
     ----------
-    file, file_hdf, drift, len_mean, nena
-        As in :func:`get_file_summary`, which builds the summary that is
-        appended to the ``files`` table of the database (see ``db_filename``).
+    file : str
+        Path of the analyzed file, as in :func:`get_file_summary`.
+    file_hdf : str
+        The path to the HDF5 file containing localizations.
+    drift : tuple[float, float] | None, optional
+        Drift in x and y. If None, it is calculated from the
+        localizations.
+    len_mean : float | None, optional
+        Mean length of binding events in frames. If None, it is
+        calculated from the localizations.
+    nena : float | None, optional
+        NeNA value in pixels. If None, it is calculated from the
+        localizations.
+
+    Notes
+    -----
+    The summary is built by :func:`get_file_summary` and appended to the
+    ``files`` table of the database (see ``db_filename``).
     """
     summary = get_file_summary(file, file_hdf, drift, len_mean, nena)
     _save_file_summary(summary)
@@ -8618,7 +8929,7 @@ def _movie_to_image(movie) -> np.ndarray:
     scale means the net gradient computed during bead detection is
     comparable to the "Min. Net Gradient" used for normal localization.
     Frames are read one-at-a-time so the lazy-loading movie classes in
-    ``picasso.io`` don't have to materialise the full stack at once."""
+    ``picasso.io`` don't have to materialize the full stack at once."""
     n = len(movie)
     if n == 0:
         raise ValueError("Movie has zero frames.")
@@ -8807,6 +9118,18 @@ def _bead_xcorr_mean(
     coords_b: np.ndarray,
 ) -> tuple[np.ndarray, int]:
     """Mean cross-correlation of matched bead crops across two frames.
+
+    Parameters
+    ----------
+    frame_a : np.ndarray
+        2D image of the first frame.
+    coords_a : np.ndarray
+        ``(n_pairs, 2)`` bead positions ``(y, x)`` in ``frame_a``.
+    frame_b : np.ndarray
+        2D image of the second frame, same shape as ``frame_a``.
+    coords_b : np.ndarray
+        ``(n_pairs, 2)`` positions ``(y, x)`` of the matched beads in
+        ``frame_b``.
 
     Returns
     -------
@@ -9055,14 +9378,15 @@ def fit_lateral_transform(
     model: str = "affine",
     wavelet: wavelets.WaveletParameters | None = None,
 ) -> tuple[dict, dict]:
-    """Fit the target -> reference transform and append it to
-    ``calibration``'s ordered list of affine corrections.
+    """Fit the target -> reference transform and append it to a calibration.
 
-    This is the computational half of :func:`calibrate_lateral_transform`.
-    It touches no matplotlib state, so it is safe to call from a worker
-    thread; the returned ``qc`` dict carries everything
-    :func:`plot_lateral_calibration` needs to draw the diagnostic figure
-    afterwards (on the GUI thread, where matplotlib must be driven from).
+    The transform is appended to ``calibration``'s ordered list of affine
+    corrections. This is the computational half of
+    :func:`calibrate_lateral_transform`. It touches no matplotlib state, so
+    it is safe to call from a worker thread; the returned ``qc`` dict
+    carries everything :func:`plot_lateral_calibration` needs to draw the
+    diagnostic figure afterwards (on the GUI thread, where matplotlib must
+    be driven from).
 
     Parameters
     ----------
@@ -9070,11 +9394,35 @@ def fit_lateral_transform(
         As in :func:`calibrate_lateral_transform`.
     calibration : dict
         As in :func:`calibrate_lateral_transform`.
-    box, minimum_ng, pixelsize : int, float and float
-        As in :func:`calibrate_lateral_transform`.
-    transform_type, ref_path, target_path, model, wavelet
-        As in :func:`calibrate_lateral_transform`. ``plot_path`` is the only
-        argument of that function not accepted here.
+    box : int
+        Box size used to identify bead candidates. Should be an odd
+        integer.
+    minimum_ng : float
+        Minimum net gradient for a bead candidate to be kept. Ignored if
+        ``wavelet`` is given.
+    pixelsize : float, optional
+        Camera pixel size in nm. If None (default), values are reported in
+        pixels.
+    transform_type : {"astigmatism", "chromatic"}, optional
+        What the transform corrects. Default is "astigmatism".
+    ref_path : str, optional
+        Path to the reference image, recorded in the calibration. Default
+        is "".
+    target_path : str, optional
+        Path to the target image, recorded in the calibration. Default is
+        "".
+    model : str, optional
+        The transform model, one of ``picasso.transforms.MODELS``. Default
+        is "affine".
+    wavelet : wavelet.WaveletParameters, optional
+        Detect the bead candidates by wavelet segmentation with these
+        settings instead of by their net gradient. Default is None.
+
+    Notes
+    -----
+    All arguments are as in :func:`calibrate_lateral_transform`;
+    ``plot_path`` is the only argument of that function not accepted
+    here.
 
     Returns
     -------

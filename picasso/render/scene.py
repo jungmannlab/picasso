@@ -117,8 +117,10 @@ def get_colors_from_colormap(
     n_channels: int,
     cmap: str = "gist_rainbow",
 ) -> list[tuple[float, float, float]]:
-    """Create a list with rgb channels for each of the channels used in
-    rendering property using the gist_rainbow colormap, see:
+    """Create a list of RGB colors for rendering by property.
+
+    One color is drawn per channel from the colormap (gist_rainbow by
+    default), see
     https://matplotlib.org/stable/tutorials/colors/colormaps.html
 
     Parameters
@@ -266,32 +268,35 @@ def render_scene(
         Localizations whose ``lpx`` or ``lpy`` exceeds this (camera
         pixels) are not rendered by 'gaussian' and 'gaussian_iso'.
         If None (default), all localizations are rendered.
-    global_precision : list of tuple or tuple, optional
-        For each channel (a single ``(lpx, lpy)`` for a single ``locs``
-        DataFrame), the blur of the 'convolve' method in camera pixels
-        (see ``render``); None entries use the median precision of the
-        rows rendered.
-    indices : list of lib.IntArray1D, optional
-        For each channel (a single array for a single ``locs``
-        DataFrame), the positions of the rows to render, e.g. a
-        viewport pre-selection; None entries render every row. If None
-        (default), all rows of every channel are rendered.
     ang : tuple or scipy.spatial.transform.Rotation, optional
         Rotation of locs; either a scipy Rotation (e.g. built from a
         quaternion) or a tuple of 3 rotation angles around the x, y
         and z axes in radians (legacy Euler convention, see
         ``rotation_matrix``). If None, locs are not rotated.
+    indices : list of lib.IntArray1D, optional
+        For each channel (a single array for a single ``locs``
+        DataFrame), the positions of the rows to render, e.g. a
+        viewport pre-selection; None entries render every row. If None
+        (default), all rows of every channel are rendered.
+    global_precision : list of tuple or tuple, optional
+        For each channel (a single ``(lpx, lpy)`` for a single ``locs``
+        DataFrame), the blur of the 'convolve' method in camera pixels
+        (see ``render``); None entries use the median precision of the
+        rows rendered.
     quadtree_capacity : int, optional
         Leaf capacity of the 'quadtree' method, see ``render``. If None
         (default), ``lib.RENDER_QUADTREE_CAPACITY_DEFAULT``.
+    triangulation_passes : int, optional
+        Number of passes averaged by the 'triangulation' method, see
+        ``render``. Default is None (the method's default).
+    triangulation_jitter : float, optional
+        Jitter width of the 'triangulation' method, see ``render``.
+        Default is None (the method's default).
     render_index : list of spatial_index.RenderIndexPyramid or None, \
             optional
         Per channel, its spatial index for the 'quadtree' method (see
         ``render``); None entries (or None) build one on the fly.
         Default is None.
-    triangulation_passes, triangulation_jitter : optional
-        Passes averaged and jitter width of the 'triangulation' method,
-        see ``render``. Default is None (the method's defaults).
     contrast : tuple of float, optional
         Contrast limits for scaling. If None, contrast is automatically
         determined.
@@ -459,8 +464,20 @@ def _render_channels(
         Localizations, one DataFrame per channel.
     info : list of list of dict
         Metadata, one entry per channel.
-    disp_px_size, viewport, blur_method, min_blur_width, max_blur_width, ang
-        See ``render``.
+    disp_px_size : float
+        Display pixel size in nm, see ``render``.
+    viewport : tuple or None
+        Field of view ``((y_min, x_min), (y_max, x_max))`` in camera
+        pixels, see ``render``.
+    blur_method : {"gaussian", "gaussian_iso", "smooth", "convolve"} or None
+        Blur method, see ``render``.
+    min_blur_width : float
+        Minimum size of blur (camera pixels), see ``render``.
+    max_blur_width : float, optional
+        Maximum localization precision rendered by the Gaussian
+        methods (camera pixels), see ``render``. Default is None.
+    ang : tuple or scipy.spatial.transform.Rotation or None
+        Rotation of the localizations, see ``render``.
     indices : list of lib.IntArray1D or None, optional
         Per channel, the rows to render (see ``render``); None entries
         (or None) render every row.
@@ -469,6 +486,10 @@ def _render_channels(
         (or None) use the median precision of the rows rendered.
     quadtree_capacity : int or None, optional
         Leaf capacity of the 'quadtree' method (see ``render``).
+    triangulation_passes : int or None, optional
+        Passes of the 'triangulation' method (see ``render``).
+    triangulation_jitter : float or None, optional
+        Jitter width of the 'triangulation' method (see ``render``).
     render_index : list of spatial_index.RenderIndexPyramid or None, \
             optional
         Per channel, its spatial index for the 'quadtree' method (see
@@ -785,9 +806,11 @@ def color_range(
     background_color: tuple[float, float, float] | None = None,
     single_channel_colormap: str | lib.FloatArray2D = "magma",
 ) -> tuple[lib.IntArray1D, lib.IntArray1D]:
-    """Colors that ``render_scene`` gives pixels without localizations
-    and pixels where every channel is at the maximum contrast, e.g., to
-    tell localizations apart from the background.
+    """Find the background and maximum-contrast colors of a rendering.
+
+    These are the colors that ``render_scene`` gives pixels without
+    localizations and pixels where every channel is at the maximum
+    contrast, e.g., to tell localizations apart from the background.
 
     The multi-channel path renormalizes each image by its maximum; the
     colors are those of an image containing both kinds of pixels, as a
@@ -798,9 +821,21 @@ def color_range(
     n_channels : int or None
         Number of rendered channels; None for single-channel rendering
         (``locs`` passed as a DataFrame).
-    colors, relative_intensities, invert_colors, background_color, \
-single_channel_colormap
-        As in ``render_scene``.
+    colors : list of tuples or list of lib.FloatArray2D, optional
+        Colors of the channels, as in ``render_scene``. Default is
+        None.
+    relative_intensities : list of float, optional
+        Relative intensity of each channel, as in ``render_scene``.
+        Default is None.
+    invert_colors : bool, optional
+        If True, colors are inverted, as in ``render_scene``. Default
+        is False.
+    background_color : tuple of float, optional
+        ``(r, g, b)`` background color of multi-channel data, as in
+        ``render_scene``. Default is None.
+    single_channel_colormap : str or lib.FloatArray2D, optional
+        Colormap of single-channel data, as in ``render_scene``.
+        Default is 'magma'.
 
     Returns
     -------

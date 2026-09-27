@@ -437,12 +437,13 @@ class Transform:
 
         Parameters
         ----------
-        tol : float
-            Absolute tolerance of the comparison.
+        tol : float, optional
+            Absolute tolerance of the comparison. Default is 1e-12.
 
         Returns
         -------
         is_identity : bool
+            True if the transform is the identity within ``tol``.
         """
         raise NotImplementedError
 

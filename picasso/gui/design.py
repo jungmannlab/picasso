@@ -784,8 +784,10 @@ class PlateDialog(lib.Dialog):
         self.buttons.rejected.connect(self.reject)
 
     def evalSelection(self) -> int:
-        """Evaluate the selected export option:
-        0 = Cancel, 1 = Design, 2 = Full Plates"""
+        """Evaluate the selected export option.
+
+        Returns 0 for Cancel, 1 for Design and 2 for Full Plates.
+        """
         if self.radio1.isChecked():
             selection = 1
         elif self.radio2.isChecked():

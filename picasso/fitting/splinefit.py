@@ -428,9 +428,19 @@ def _eval_spline_3d(
 def _find_pivot(a: np.ndarray, n: int, ipiv: np.ndarray) -> tuple:
     """Largest-magnitude unused entry of ``a[:n, :n]``, full pivoting.
 
+    Parameters
+    ----------
+    a : np.ndarray
+        Square matrix searched for the pivot.
+    n : int
+        Size of the active ``a[:n, :n]`` block.
+    ipiv : np.ndarray
+        Pivot bookkeeping of the Gauss-Jordan solve: 1 for rows/columns
+        already used, 0 otherwise.
+
     Returns
     -------
-    irow, icol
+    irow, icol : int
         Location of the pivot among the rows/columns not yet used
         (``ipiv[.] != 1``/``!= 0``).
     """
@@ -794,6 +804,17 @@ def _reset_decoupled_scratch(
     theta: np.ndarray, n_params: int, grad: np.ndarray, hess: np.ndarray
 ) -> bool:
     """Zero ``grad``/``hess`` for the photon-decoupled link-xyz accumulator.
+
+    Parameters
+    ----------
+    theta : np.ndarray
+        ``(n_params,)`` current parameters, checked for finiteness.
+    n_params : int
+        Number of model parameters.
+    grad : np.ndarray
+        ``(n_params,)`` gradient, zeroed in place.
+    hess : np.ndarray
+        ``(n_params, n_params)`` Hessian, zeroed in place.
 
     Returns
     -------
@@ -1348,6 +1369,16 @@ def _resolve_n_params(
 ) -> int:
     """Validate ``coefficients`` against ``kind``/``n_channels``.
 
+    Parameters
+    ----------
+    kind : int
+        :data:`KIND_2D`, :data:`KIND_3D` or :data:`KIND_LINK_XYZ`.
+    coefficients : np.ndarray
+        Reshaped spline coefficients, 5-D for :data:`KIND_2D` and 7-D
+        otherwise.
+    n_channels : int
+        Number of channels in ``spots``.
+
     Returns
     -------
     n_params : int
@@ -1557,16 +1588,19 @@ def fit_spots(
         initial z.
     mle : bool, optional
         Use the Poisson maximum-likelihood estimator instead of least squares.
-    tolerance, max_iterations : optional
-        Convergence schedule. ``None`` (the default) uses the one the GPU path
-        uses for this kind of fit, see :func:`convergence_schedule`.
+    tolerance : float, optional
+        Convergence tolerance. ``None`` (the default) uses the one the GPU
+        path uses for this kind of fit, see :func:`convergence_schedule`.
+    max_iterations : int, optional
+        Maximum number of iterations. ``None`` (the default) uses the one the
+        GPU path uses for this kind of fit, see :func:`convergence_schedule`.
+    progress_callback : callable, "console" or None, optional
+        ``"console"`` shows a tqdm bar; a callable is invoked with the
+        cumulative number of spots fitted.
     variance : np.ndarray, optional
         Per-pixel sCMOS readout variance in photoelectrons squared, laid out
         exactly like ``spots``. ``None`` (the default) fits the plain Poisson
         model. See :func:`_estimator_terms`.
-    progress_callback : callable, "console" or None, optional
-        ``"console"`` shows a tqdm bar; a callable is invoked with the
-        cumulative number of spots fitted.
 
     Returns
     -------
@@ -1643,16 +1677,38 @@ def fit_spots_async(
 
     Parameters
     ----------
-    kind, spots, coefficients, jacobians, residuals : array
-        As in :func:`fit_spots`.
-    initial_parameters, z_seeds, apply_seeds, mle : array and bool
-        As in :func:`fit_spots`.
-    tolerance, max_iterations, variance : optional
-        As in :func:`fit_spots`.
+    kind : int
+        :data:`KIND_2D`, :data:`KIND_3D` or :data:`KIND_LINK_XYZ`.
+    spots : np.ndarray
+        Channel-major ``(n_spots, n_channels, box, box)`` photon counts, as
+        in :func:`fit_spots`.
+    coefficients : np.ndarray
+        Reshaped spline coefficients, as in :func:`fit_spots`.
+    jacobians : np.ndarray
+        ``(n_spots, n_channels, 4)`` per-channel local Jacobians, as in
+        :func:`fit_spots`.
+    residuals : np.ndarray
+        ``(n_spots, n_channels, 2)`` sub-pixel ROI offsets, as in
+        :func:`fit_spots`.
+    initial_parameters : np.ndarray
+        ``(n_spots, n_params)`` seeds, as in :func:`fit_spots`.
+    z_seeds : np.ndarray
+        Axial seeds for the multi-start, in z-shift units.
+    apply_seeds : bool
+        Whether to run the multi-start at all; False keeps each spot's own
+        initial z.
+    mle : bool, optional
+        Use the Poisson maximum-likelihood estimator instead of least squares.
+    tolerance : float, optional
+        Convergence tolerance, as in :func:`fit_spots`.
+    max_iterations : int, optional
+        Maximum number of iterations, as in :func:`fit_spots`.
     n_threads : int, optional
         Number of worker threads. ``None`` (the default) uses
         :func:`n_workers`, and the count is clipped to at most one thread per
         spot.
+    variance : np.ndarray, optional
+        Per-pixel sCMOS readout variance, as in :func:`fit_spots`.
 
     Returns
     -------

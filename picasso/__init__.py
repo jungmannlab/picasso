@@ -30,6 +30,11 @@ def user_config_dir() -> str:
     Shared with ``~/.picasso/settings.yaml`` and the other per-user files
     (see ``picasso.io``) so every install type (one-click installer, PyPI,
     source) keeps a single, user-writable, uninstall-surviving location.
+
+    Returns
+    -------
+    path : str
+        ``~/.picasso`` expanded for the current user.
     """
     return os.path.join(os.path.expanduser("~"), ".picasso")
 
@@ -61,11 +66,16 @@ def resolve_config_path() -> str | None:
     """Return the path of the config file to read, or None if none exists.
 
     Resolution:
-      1. ``~/.picasso/config.yaml`` (preferred, user-writable);
-      2. the legacy in-package ``config.yaml`` (older installs), read in
-         place and never moved, so a user who keeps editing it there still
-         sees their changes take effect.
-    Returns None when neither exists.
+
+    1. ``~/.picasso/config.yaml`` (preferred, user-writable);
+    2. the legacy in-package ``config.yaml`` (older installs), read in
+       place and never moved, so a user who keeps editing it there still
+       sees their changes take effect.
+
+    Returns
+    -------
+    path : str or None
+        Path of the config file to read; None when neither exists.
     """
     user_config = config_filename()
     if os.path.isfile(user_config):

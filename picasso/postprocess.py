@@ -2014,17 +2014,26 @@ def _pick_similar_rectangle_kernel(
         Minimum and maximum RMSD along the center axis.
     min_across, max_across : float
         Minimum and maximum RMSD across the center axis.
-    xc_similar, yc_similar, theta_similar, length_similar, r_similar :
-    lib.FloatArray1D
-        Center, angle, length and circumscribed radius of the accepted
-        picks, seeded with the input picks.
+    xc_similar, yc_similar : lib.FloatArray1D
+        Centers of the accepted picks, seeded with the input picks.
+    theta_similar : lib.FloatArray1D
+        Angles of the accepted picks, seeded with the input picks.
+    length_similar : lib.FloatArray1D
+        Lengths of the accepted picks, seeded with the input picks.
+    r_similar : lib.FloatArray1D
+        Circumscribed radii of the accepted picks, seeded with the input
+        picks.
 
     Returns
     -------
-    xc_similar, yc_similar, theta_similar, length_similar, r_similar :
-    lib.FloatArray1D
-        Center, angle, length and circumscribed radius of the accepted
-        picks.
+    xc_similar, yc_similar : lib.FloatArray1D
+        Centers of the accepted picks.
+    theta_similar : lib.FloatArray1D
+        Angles of the accepted picks.
+    length_similar : lib.FloatArray1D
+        Lengths of the accepted picks.
+    r_similar : lib.FloatArray1D
+        Circumscribed radii of the accepted picks.
     """
     bootstrap_r = 0.5 * length
     for i in range(len(grid_x)):
@@ -5040,7 +5049,7 @@ def align_from_picked(
     picks : list of (2,) tuples
         Coordinates of picked regions as (x, y) tuples. See
         ``io.load_picks``.
-    pick_shape : str, optional
+    pick_shape : str
         Shape of the picks, one of ``lib.PICK_SHAPES``.
     pick_size : float or None, optional
         Size of the picks. For circular picks, the size is the diameter.
@@ -5060,11 +5069,11 @@ def align_from_picked(
 
     Returns
     -------
-    aligned_locs: list of pd.DataFrames
+    aligned_locs : list of pd.DataFrames
         List of aligned localization datasets, where the localizations
         have been shifted according to the average shift calculated from
         the picked localizations.
-    shifts: list of tuples
+    shifts : list of tuples
         List of (dx, dy) shifts applied to each localization dataset in
         `all_locs`, calculated as the average shift from the picked
         localizations. Returned only if `return_shifts` is True.

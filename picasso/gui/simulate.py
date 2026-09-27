@@ -234,10 +234,17 @@ class Window(QtWidgets.QMainWindow):
     structureIncorporationEdit : QtWidgets.QDoubleSpinBox
         Spin box for the probability that dockings strands are
         incorporated (%).
-    structurexxEdit, structureyyEdit, structure3DEdit, structureexEdit
-        : QtWidgets.QLineEdit
-        Input windows for docking strand positions in the structure
-        (x, y, z) in nm and the exchange round id.
+    structurexxEdit : QtWidgets.QLineEdit
+        Input window for the docking strand x positions in the
+        structure (nm).
+    structureyyEdit : QtWidgets.QLineEdit
+        Input window for the docking strand y positions in the
+        structure (nm).
+    structure3DEdit : QtWidgets.QLineEdit
+        Input window for the docking strand z positions in the
+        structure (nm).
+    structureexEdit : QtWidgets.QLineEdit
+        Input window for the exchange round id of each docking strand.
     structurerandomEdit : QtWidgets.QCheckBox
         Check box for random arrangement of the structures in the
         simulated ROI.

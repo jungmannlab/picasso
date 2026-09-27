@@ -496,8 +496,12 @@ def validate_calibration(
         ``picasso.io.load_camera_calibration``.
     test_movie : array-like or io.AbstractPicassoMovie
         A short, fresh dark movie recorded exactly as the calibration's was.
-    progress_callback, abort_callback
-        As :func:`calibrate_scmos`.
+    progress_callback : callable, "console" or None, optional
+        Called with the cumulative number of frames processed. ``"console"``
+        draws a tqdm bar. As in :func:`calibrate_scmos`.
+    abort_callback : callable or None, optional
+        Polled once per chunk; returning True abandons the check and returns
+        None.
 
     Returns
     -------

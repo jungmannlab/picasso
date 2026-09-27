@@ -59,13 +59,23 @@ def log_dir() -> str:
     Kept next to the other per-user Picasso files so that it survives
     uninstalling the one-click build and is writable without admin
     rights.
+
+    Returns
+    -------
+    path : str
+        Directory of the Picasso log.
     """
     return os.path.join(user_config_dir(), "logs")
 
 
 def log_path() -> str:
-    """Return the path of the Picasso log file
-    (``~/.picasso/logs/picasso.log``)."""
+    """Return the path of the Picasso log file.
+
+    Returns
+    -------
+    path : str
+        ``~/.picasso/logs/picasso.log``.
+    """
     return os.path.join(log_dir(), "picasso.log")
 
 

@@ -4785,7 +4785,7 @@ class InfoDialog(lib.Dialog):
         Contains the calculated or input influx rate (1/frames).
     locs_label : QLabel
         Shows the number of locs in the current FOV.
-    lp: float
+    lp : float
         NeNA localization precision (camera pixels). None, if not
         calculated yet.
     max_dark_time : QSpinBox
@@ -4807,8 +4807,8 @@ class InfoDialog(lib.Dialog):
         Shows the calculated std number of binding sites in all picks.
     picks_grid : QGridLayout
         Contains all the info about the picks.
-    pick_info: dict
-        Summary of pick information (see self.udpate_pick_info_long).
+    pick_info : dict
+        Summary of pick information (see self.update_pick_info_long).
         Contains keys: "pooled dark" (mean dark time), "length" (list
         of bright times per pick), and "dark" (list of dark times per
         pick).
@@ -11154,6 +11154,11 @@ class View(QtWidgets.QLabel):
         picks_only : bool, optional
             True if only picks and points are to be rendered. Default is
             False.
+        interactive : bool, optional
+            True if the render is a live pan/zoom preview: a strided
+            subsample is rendered asynchronously and followed by a
+            full-quality render once the gesture pauses. Default is
+            False.
         """
         if not picks_only:
             # make sure viewport has the same shape as the main window
@@ -11760,7 +11765,7 @@ class View(QtWidgets.QLabel):
             self.add_multiple(paths)
 
     def fit_in_view(self, autoscale: bool = False) -> None:
-        """Update scene with all localization shown"""
+        """Update scene with all localizations shown."""
         movie_height, movie_width = self.movie_size()
         viewport = [(0, 0), (movie_height, movie_width)]
         self.update_scene(viewport=viewport, autoscale=autoscale)
@@ -15159,8 +15164,7 @@ class View(QtWidgets.QLabel):
     def set_optimal_scalebar(
         self, force: bool = False, silent: bool = False
     ) -> None:
-        """Set scalebar to approx. 1/8 of the current viewport's
-        width"""
+        """Set scalebar to approx. 1/8 of the current viewport's width."""
         optimal_scalebar_checked = (
             self.window.display_settings_dlg.optimal_scalebar_check.isChecked()
         )
@@ -15766,6 +15770,9 @@ class View(QtWidgets.QLabel):
             ``self.invalidate_locs_index``) before redrawing. Use after
             operations that mutate ``self.locs`` (link, undrift, remove
             pick, etc.). Default is False.
+        interactive : bool, optional
+            True if the render is a live pan/zoom preview, see
+            ``draw_scene``. Default is False.
         """
         # linked windows pass on channels replaced since the last redraw
         self.scene_requested.emit()
@@ -16852,7 +16859,7 @@ class Window(QtWidgets.QMainWindow):
             io.export_smap(path, locs, info)
 
     def export_fov_ims(self) -> None:  # noqa: C901
-        """Exports current FOV to .ims"""
+        """Export current FOV to .ims."""
         base, ext = os.path.splitext(self.view.locs_paths[0])
         out_path = base + ".ims"
 

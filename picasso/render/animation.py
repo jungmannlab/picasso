@@ -178,15 +178,6 @@ def build_animation(
     info : list of dict or list of list of dict
         List of info dictionaries corresponding to the localization
         file(s).
-    disp_px_size : int or float
-        Display pixel size in nm. If 'adjust_pixel_size' is True,
-        disp_px_size defines the pixel size in the last frame of the
-        animation and will be adjusted if the viewport is zoomed in or
-        out such that the number of display pixels remains the same.
-        If 'adjust_pixel_size' is False, disp_px_size remains the same
-        across the animation
-    image_size : tuple of int
-        Size of the rendered image in pixels, given as (width, height).
     positions : list
         Each element determines a checkpoint of the animation, which
         is a tuple of 2 elements: (rotation, viewport). Rotation is a
@@ -199,6 +190,15 @@ def build_animation(
     durations : list
         List of durations in seconds between the checkpoints. Must have
         the same length as positions - 1.
+    disp_px_size : int or float
+        Display pixel size in nm. If 'adjust_pixel_size' is True,
+        disp_px_size defines the pixel size in the last frame of the
+        animation and will be adjusted if the viewport is zoomed in or
+        out such that the number of display pixels remains the same.
+        If 'adjust_pixel_size' is False, disp_px_size remains the same
+        across the animation.
+    image_size : tuple of int
+        Size of the rendered image in pixels, given as (width, height).
     segment_rotations : list, optional
         One rotation vector (3 floats, radians, scipy convention) per
         segment, i.e., of length len(positions) - 1, describing the
@@ -224,9 +224,12 @@ def build_animation(
     quadtree_capacity : int, optional
         Leaf capacity of the 'quadtree' blur method, see ``render``.
         Default is None (``lib.RENDER_QUADTREE_CAPACITY_DEFAULT``).
-    triangulation_passes, triangulation_jitter : optional
-        Passes and jitter width of the 'triangulation' blur method, see
-        ``render``. Default is None (the method's defaults).
+    triangulation_passes : int, optional
+        Number of passes of the 'triangulation' blur method, see
+        ``render``. Default is None (the method's default).
+    triangulation_jitter : float, optional
+        Jitter width of the 'triangulation' blur method, see
+        ``render``. Default is None (the method's default).
     contrast : tuple of float, optional
         Contrast limits for scaling. If None, contrast is automatically
         determined. If given, only the last checkpoint is used to
@@ -269,13 +272,13 @@ def build_animation(
     cancel : callable, optional
         Polled before each frame; when it returns True the build stops,
         the incomplete video file is removed and no settings file is
-        written. Default is None (never cancelled).
+        written. Default is None (never canceled).
 
     Returns
     -------
     completed : bool
         True when the animation and its settings file were written,
-        False when the build was cancelled.
+        False when the build was canceled.
     """
     assert isinstance(path, str) and path.endswith(
         ".mp4"

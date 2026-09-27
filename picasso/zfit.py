@@ -905,8 +905,25 @@ def _await_parallel_z_fit(
     progress_callback: Callable[[int], None] | Literal["console"] | None,
     abort_callback: Callable[[], bool] | None,
 ) -> pd.DataFrame | None:
-    """Poll the futures submitted by ``_fit_z_parallel`` until all tasks
-    finish, reporting progress along the way.
+    """Poll the futures submitted by ``_fit_z_parallel`` until done.
+
+    Progress is reported along the way.
+
+    Parameters
+    ----------
+    fs : list
+        Futures returned by ``_fit_z_parallel``.
+    N : int
+        Total number of localizations being fitted, for progress.
+    filter : int
+        Filter for the z fits, passed on to :func:`locs_from_futures`. If
+        set to 0, no filtering is applied; if set to 2, the z fits are
+        filtered based on the RMSD of the z calibration.
+    progress_callback : callable, "console" or None
+        A callable receives the number of localizations fitted so far;
+        "console" shows a tqdm bar; None disables progress tracking.
+    abort_callback : callable or None
+        Polled while waiting; returning True cancels the pending tasks.
 
     Returns
     -------
@@ -1127,7 +1144,7 @@ def axial_localization_precision(
 
     Returns
     -------
-    lpz: lib.FloatArray1D
+    lpz : lib.FloatArray1D
         Calculated lpz values for the given localizations in nm.
     """
     if modality != "astigmatic":
@@ -1168,7 +1185,7 @@ def axial_localization_precision_astig(
 
     Returns
     -------
-    lpz: lib.FloatArray1D
+    lpz : lib.FloatArray1D
         Calculated lpz values for the given localizations in nm.
     """
     assert fitting_method in [
@@ -1221,6 +1238,10 @@ def _axial_localization_precision_astig(
         3D calibration coefficients for x.
     cy : lib.FloatArray1D
         3D calibration coefficients for y.
+    magnification_factor : float
+        Magnification factor of the microscope, i.e., the ratio between
+        the actual z position of the calibration sample and the
+        estimated z position from the localization data.
     pixelsize : float
         Camera pixel size in nm.
     fitting_method : {"gausslq", "gaussmle"}, optional
@@ -1229,7 +1250,7 @@ def _axial_localization_precision_astig(
 
     Returns
     -------
-    lpz: lib.FloatArray1D
+    lpz : lib.FloatArray1D
         Calculated lpz values for the given localizations in nm.
     """
     if fitting_method == "gausslq":

@@ -98,8 +98,27 @@ class SplatBackend(abc.ABC):
             angle in radians and lpz fallback applied).
         info : list of list of dict
             Metadata, one entry per channel.
-        disp_px_size, viewport, blur_method, min_blur_width, ang
-            See ``splat.render``.
+        disp_px_size : float
+            Display pixel size in nm, see ``splat.render``.
+        viewport : tuple or None
+            Field of view ``((y_min, x_min), (y_max, x_max))`` in
+            camera pixels, see ``splat.render``.
+        blur_method : {"gaussian", "gaussian_iso", "smooth", \
+                "convolve"} or None
+            Blur method, see ``splat.render``.
+        min_blur_width : float
+            Minimum size of blur (camera pixels), see ``splat.render``.
+        ang : tuple or scipy.spatial.transform.Rotation or None
+            Rotation of the localizations, see ``splat.render``.
+        quadtree_capacity : int, optional
+            Leaf capacity of the 'quadtree' method, see
+            ``splat.render``. Default is None.
+        triangulation_passes : int, optional
+            Passes of the 'triangulation' method, see
+            ``splat.render``. Default is None.
+        triangulation_jitter : float, optional
+            Jitter width of the 'triangulation' method, see
+            ``splat.render``. Default is None.
 
         Returns
         -------
@@ -161,11 +180,19 @@ def _render_settings() -> dict:
 
 
 def gpu_settings() -> dict:
-    """``settings["Render"]["gpu"]`` validated: ``enabled`` (``"auto"``,
-    ``"on"`` or ``"off"``; YAML's bare ``on``/``off`` parse as booleans
-    and are accepted), ``adapter`` (a non-empty string) and
-    ``vram_budget_bytes`` (None = unlimited). Invalid values fall back
-    to the ``lib.RENDER_GPU_*`` defaults."""
+    """Read and validate the GPU rendering settings.
+
+    Invalid values of ``settings["Render"]["gpu"]`` fall back to the
+    ``lib.RENDER_GPU_*`` defaults.
+
+    Returns
+    -------
+    settings : dict
+        ``enabled`` (``"auto"``, ``"on"`` or ``"off"``; YAML's bare
+        ``on``/``off`` parse as booleans and are accepted), ``adapter``
+        (a non-empty string) and ``vram_budget_bytes`` (None =
+        unlimited).
+    """
     raw = _render_settings().get("gpu", None)
     if not isinstance(raw, dict):
         raw = {}
@@ -193,14 +220,26 @@ def gpu_settings() -> dict:
 
 
 def vram_budget_bytes() -> int | None:
-    """GPU memory the backend may keep resident for uploads (see
-    ``gpu_settings``); None means unlimited."""
+    """Return the GPU memory budget for resident uploads.
+
+    Returns
+    -------
+    budget : int or None
+        GPU memory (bytes) the backend may keep resident for uploads
+        (see ``gpu_settings``); None means unlimited.
+    """
     return gpu_settings()["vram_budget_bytes"]
 
 
 def render_settings_defaults() -> dict:
-    """The ``Render`` settings keys rendering reads, with their
-    defaults (``max_workers`` is optional and therefore absent)."""
+    """Return the ``Render`` settings keys rendering reads.
+
+    Returns
+    -------
+    defaults : dict
+        The keys with their defaults (``max_workers`` is optional and
+        therefore absent).
+    """
     return {
         "cpu_utilization": lib.RENDER_CPU_UTILIZATION_DEFAULT,
         "interaction_subsample": lib.RENDER_INTERACTION_SUBSAMPLE_DEFAULT,
@@ -228,14 +267,20 @@ def _fill_missing(target: dict, defaults: dict) -> bool:
 
 
 def persist_render_defaults() -> bool:
-    """Write the ``Render`` settings the user settings file does not
-    name yet, with their defaults, as the other Picasso settings do —
-    so every key is visible and editable in the file. Existing values
-    are kept. Returns True when the file was written.
+    """Write the missing ``Render`` settings with their defaults.
+
+    Writes the ``Render`` settings the user settings file does not name
+    yet, as the other Picasso settings do — so every key is visible and
+    editable in the file. Existing values are kept.
 
     Nothing is written while the settings file on disk is one that
     could not be read (``io.settings_file_is_broken``): a fresh file
     would replace the user's file before they had a chance to fix it.
+
+    Returns
+    -------
+    bool
+        True when the file was written.
     """
     io = lib.io
     settings = io.load_user_settings()
@@ -319,10 +364,18 @@ _last_fallback: str | None = None
 
 
 def note_fallback(reason: str | None) -> None:
-    """Record why a render fell back to the CPU (``reason``), or that
-    the chosen backend rendered again (None). The scene dispatch calls
-    this; the GUI shows the reason in its info dialog, since the
-    warning in the log is invisible in the windowed application."""
+    """Record why a render fell back to the CPU.
+
+    The scene dispatch calls this; the GUI shows the reason in its info
+    dialog, since the warning in the log is invisible in the windowed
+    application.
+
+    Parameters
+    ----------
+    reason : str or None
+        Why the render fell back to the CPU, or None if the chosen
+        backend rendered again.
+    """
     global _last_fallback
     _last_fallback = reason
 
@@ -333,11 +386,18 @@ def last_fallback() -> str | None:
 
 
 def describe_active() -> str:
-    """Where large renders currently run, for the GUI's info dialog:
-    ``"GPU (Apple M4 via Metal)"`` or ``"CPU (5 workers)"``. When the
-    last render on the GPU fell back to the CPU, the reason follows,
-    e.g. ``"GPU (...) - last render on the CPU: channel exceeds the
-    GPU storage-binding limit"``."""
+    """Describe where large renders currently run.
+
+    Used by the GUI's info dialog.
+
+    Returns
+    -------
+    description : str
+        E.g. ``"GPU (Apple M4 via Metal)"`` or ``"CPU (5 workers)"``.
+        When the last render on the GPU fell back to the CPU, the
+        reason follows, e.g. ``"GPU (...) - last render on the CPU:
+        channel exceeds the GPU storage-binding limit"``.
+    """
     backend = _get_backend()
     if backend.persistent_uploads:
         text = f"GPU ({backend.describe()})"

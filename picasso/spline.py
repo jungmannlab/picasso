@@ -2850,24 +2850,61 @@ def calibrate_spline_split_fov(
 
     Parameters
     ----------
-    movie, info, camera_info
-        The single bead z-stack movie, its info list and camera info dict.
+    movie : localize.LoadedMovie
+        The single bead z-stack movie holding all channels.
+    info : list of dicts
+        Movie metadata.
+    camera_info : dict
+        Camera information ("Baseline", "Sensitivity", "Gain",
+        "Pixelsize").
+    box : int
+        Lateral ROI size (camera pixels). The resulting calibration expects
+        fits with this same box size.
+    minimum_ng : float or sequence of float
+        Bead detection threshold, shared or one per region (in the order of
+        ``regions``, i.e. before the reference-first reordering).
+    d : float
+        Step size in nm between consecutive z (stage) positions.
     regions : list
         One ``[[y_min, x_min], [y_max, x_max]]`` rectangle per channel (as
         produced by the GUI ROI tool), all the same size.
     reference : int, optional
         Index into ``regions`` of the reference channel. Default 0.
-    minimum_ng : float or sequence of float
-        Bead detection threshold, shared or one per region (in the order of
-        ``regions``, i.e. before the reference-first reordering).
-    box, d, frames_per_step, frame_bounds, frame_order
-        As in :func:`calibrate_spline_multichannel`.
-    magnification_factor, correct_z_bias, max_match_distance
-        As in :func:`calibrate_spline_multichannel`.
-    photon_ratios, link_photons, path, progress_callback
-        As in :func:`calibrate_spline_multichannel`.
-    return_diagnostics, model
-        As in :func:`calibrate_spline_multichannel`.
+    frames_per_step : int, optional
+        Number of frames acquired at each z position (multi-FOV). Default 1.
+    frame_bounds : tuple, list of tuples, optional
+        Frame numbers to consider (see ``zfit.calibrate_z``). Default None.
+    frame_order : {"fov", "z"}, optional
+        Acquisition order when ``frames_per_step`` > 1 (see
+        ``zfit.calibrate_z``). Default "fov".
+    magnification_factor : float, optional
+        Ratio between the actual axial position and the stage travel of the
+        calibration scan (refractive-index mismatch). Default 0.79.
+    correct_z_bias : bool, optional
+        If True, define z = 0 at the axial intensity peak of the averaged PSF
+        instead of at the raw stage-scan center. Default False.
+    max_match_distance : float, optional
+        Largest distance (camera pixels) at which a reference bead and a
+        channel bead may be paired during registration. None (the default)
+        uses ``box``.
+    photon_ratios : np.ndarray or list, optional
+        Per-channel photon splitting ratios of a ratiometric setup, stored in
+        the calibration. None (the default) stores none.
+    link_photons : bool, optional
+        Whether fits with this calibration link one photon count and
+        background across all channels, see
+        :func:`calibrate_spline_multichannel`. Default True.
+    path : str, optional
+        Where to save the calibration (HDF5) and the diagnostic PNGs. If None,
+        nothing is written. Default None.
+    progress_callback : callable, optional
+        Called with an integer step count as the calibration proceeds.
+        Default None.
+    return_diagnostics : bool, optional
+        If True, return ``(calibration, diagnostics)``. Default False.
+    model : str, optional
+        Transform model for the channel registration, one of
+        ``picasso.transforms.MODELS``. Default "affine".
     wavelet : wavelet.WaveletParameters, optional
         Detect the beads by wavelet segmentation with these settings
         instead of by their net gradient, in which case ``minimum_ng`` is

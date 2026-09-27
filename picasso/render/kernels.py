@@ -251,8 +251,9 @@ def _render_setup3d_anisotropic(
     x, y, z : lib.FloatArray1D
         x, y and z coordinates of the localizations to be rendered (1D
         arrays).
-    oversampling : float
-        Number of super-resolution pixels per camera pixel.
+    oversampling_x, oversampling_y, oversampling_z : float
+        Number of super-resolution pixels per camera pixel in x, y and
+        z.
     y_min, x_min : float
         Minimum y and x coordinate to be rendered (camera pixels).
     y_max, x_max : float
@@ -351,8 +352,17 @@ def _gaussian_bbox(
     n_pixel_x: int,
     n_pixel_y: int,
 ) -> tuple[int, int, int, int]:
-    """Clamp the +/- ``_DRAW_MAX_SIGMA`` box of a Gaussian to the image
-    bounds.
+    """Clamp the +/- ``_DRAW_MAX_SIGMA`` box of a Gaussian to the image.
+
+    Parameters
+    ----------
+    x_, y_ : float
+        Center of the Gaussian (display pixels).
+    sx_, sy_ : float
+        Standard deviations of the Gaussian in x and y (display
+        pixels).
+    n_pixel_x, n_pixel_y : int
+        Image size in x and y (display pixels).
 
     Returns
     -------
@@ -679,8 +689,8 @@ def _fill_gaussian_rot(
     ----------
     image : lib.FloatArray2D
         Empty image array.
-    x, y, z : lib.FloatArray1D
-        3D coordinates to be rendered.
+    x, y : lib.FloatArray1D
+        Rotated x and y coordinates to be rendered (display pixels).
     sx, sy, sz : lib.FloatArray1D
         Localization precision in x, y and z for each localization.
     n_pixel_x, n_pixel_y : int
@@ -732,8 +742,8 @@ def _fill_gaussian_rot_theta(
     ----------
     image : lib.FloatArray2D
         Empty image array.
-    x, y, z : lib.FloatArray1D
-        3D coordinates to be rendered.
+    x, y : lib.FloatArray1D
+        Rotated x and y coordinates to be rendered (display pixels).
     sx, sy, sz : lib.FloatArray1D
         Localization precision in x, y and z for each localization.
     angle : lib.FloatArray1D
@@ -1119,8 +1129,36 @@ def _quadtree_push_children(
     e: int,
     total_bits: int,
 ) -> int:
-    """Push a node's four children onto the traversal stack (their
-    permutation ranges found by binary search on the sorted keys).
+    """Push a node's four children onto the traversal stack.
+
+    The children's permutation ranges are found by binary search on the
+    sorted keys.
+
+    Parameters
+    ----------
+    sorted_keys : lib.IntArray1D
+        Sorted Morton keys of the rows, see
+        ``picasso.spatial_index.quadtree_layout``.
+    st_d, st_ix, st_iy : lib.IntArray1D
+        Stack buffers of the node depth and x/y cell indices.
+    st_pre : np.ndarray
+        Stack buffer of the node key prefixes (uint64).
+    st_s, st_e : lib.IntArray1D
+        Stack buffers of the start (inclusive) and end (exclusive) of
+        the nodes' permutation ranges.
+    top : int
+        Current stack top (number of entries on the stack).
+    d : int
+        Depth of the node.
+    ix, iy : int
+        x and y cell indices of the node at depth ``d``.
+    pre : np.uint64
+        Key prefix of the node.
+    s, e : int
+        Start (inclusive) and end (exclusive) of the node's permutation
+        range.
+    total_bits : int
+        Number of bits per coordinate of the Morton keys (tree depth).
 
     Returns
     -------

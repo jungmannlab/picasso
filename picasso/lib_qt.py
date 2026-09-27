@@ -1379,7 +1379,8 @@ class DensityContrastSlider(RangeSlider):
         image: Callable[[], object] | None = None,
         parent: QtWidgets.QWidget | None = None,
     ) -> None:
-        """
+        """Bind the slider to the minimum and maximum spin boxes.
+
         Parameters
         ----------
         minimum_box, maximum_box : QDoubleSpinBox

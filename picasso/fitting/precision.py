@@ -639,9 +639,25 @@ def _crlb_pixel_weights(mu, var, m, ch, j, i, use_var, mu_floor, mle):
     With ``mle``, ``wa = 1 / mu`` and ``wb`` is unused (0); otherwise
     ``wa = 1`` and ``wb = mu`` (Poisson pixel variance).
 
+    Parameters
+    ----------
+    mu : float
+        Noise-free model mean of the pixel.
+    var : np.ndarray
+        ``(n_locs, n_channels, box, box)`` sCMOS readout variance.
+    m, ch, j, i : int
+        Localization, channel, row and column index of the pixel in ``var``.
+    use_var : bool
+        Whether ``var`` is applied.
+    mu_floor : float
+        Lower bound the shifted mean is clamped to.
+    mle : bool
+        Poisson Fisher weights (True) or least-squares sandwich weights.
+
     Returns
     -------
-    wa, wb
+    wa, wb : float
+        Fisher and sandwich weights of the pixel.
     """
     if use_var:
         mu = mu + var[m, ch, j, i]
@@ -989,9 +1005,12 @@ def _gauss_crlb_multichannel(
         EMCCD excess noise doubles every variance.
     link_photons : bool, optional
         Which model produced ``theta``.
-    variance : optional
+    variance : lib.FloatArray4D, optional
         ``(n_locs, n_channels, box, box)`` sCMOS readout variance, laid out
         like the (channel-major) spots.
+    progress_callback : callable, "console" or None, optional
+        Progress over localization chunks. ``"console"`` shows a tqdm bar; a
+        callable is invoked with the cumulative number of localizations done.
 
     Returns
     -------
@@ -1130,9 +1149,31 @@ def _spline_basis_3d(
     triples are the per-axis cubic basis values and derivatives at that
     pixel's fractional offset within the cell.
 
+    Parameters
+    ----------
+    coeff : np.ndarray
+        ``(n_channels, niz, niy, nix, 4, 4, 4)`` spline coefficients.
+    ch : int
+        Channel index.
+    zi, yi, xi : int
+        Knot cell of the pixel.
+    pz0, pz1, pz2, pz3 : float
+        Axial cubic basis values.
+    dz1, dz2, dz3 : float
+        Axial basis derivatives (the constant term's is zero).
+    py0, py1, py2, py3 : float
+        Row cubic basis values.
+    dy1, dy2, dy3 : float
+        Row basis derivatives.
+    px0, px1, px2, px3 : float
+        Column cubic basis values.
+    dx1, dx2, dx3 : float
+        Column basis derivatives.
+
     Returns
     -------
-    phi, gx, gy, gz
+    phi, gx, gy, gz : float
+        Spline value and its x, y and z derivatives.
     """
     pz = (pz0, pz1, pz2, pz3)
     dz = (0.0, dz1, dz2, dz3)
@@ -1179,12 +1220,29 @@ def _spline_basis_2d(
     dx2,
     dx3,
 ):
-    """2D analogue of :func:`_spline_basis_3d`; ``coeff`` is a channel's
-    ``(niy, nix, 4, 4)`` table.
+    """2D analogue of :func:`_spline_basis_3d`.
+
+    Parameters
+    ----------
+    coeff : np.ndarray
+        ``(n_channels, niy, nix, 4, 4)`` spline coefficients.
+    ch : int
+        Channel index.
+    yi, xi : int
+        Knot cell of the pixel.
+    py0, py1, py2, py3 : float
+        Row cubic basis values.
+    dy1, dy2, dy3 : float
+        Row basis derivatives (the constant term's is zero).
+    px0, px1, px2, px3 : float
+        Column cubic basis values.
+    dx1, dx2, dx3 : float
+        Column basis derivatives.
 
     Returns
     -------
-    phi, gx, gy
+    phi, gx, gy : float
+        Spline value and its x and y derivatives.
     """
     py = (py0, py1, py2, py3)
     dy = (0.0, dy1, dy2, dy3)
@@ -1716,9 +1774,18 @@ def _jacobi_init_identity_device(v, n) -> None:
 def _jacobi_off_diagonal_norms_device(a, n):
     """Squared off-diagonal norm and full Frobenius norm of ``a[:n, :n]``.
 
+    Parameters
+    ----------
+    a : array
+        Symmetric device matrix; only the upper triangle is read.
+    n : int
+        Size of the active ``a[:n, :n]`` block.
+
     Returns
     -------
-    off, fro
+    off, fro : float
+        Squared norm of the upper off-diagonal triangle and squared Frobenius
+        norm of the full block.
     """
     off = 0.0
     fro = 0.0
@@ -1894,9 +1961,31 @@ def _spline_basis_3d_device(
 ):
     """Device twin of :func:`_spline_basis_3d`.
 
+    Parameters
+    ----------
+    coeff : np.ndarray
+        ``(n_channels, niz, niy, nix, 4, 4, 4)`` spline coefficients.
+    ch : int
+        Channel index.
+    zi, yi, xi : int
+        Knot cell of the pixel.
+    pz0, pz1, pz2, pz3 : float
+        Axial cubic basis values.
+    dz1, dz2, dz3 : float
+        Axial basis derivatives (the constant term's is zero).
+    py0, py1, py2, py3 : float
+        Row cubic basis values.
+    dy1, dy2, dy3 : float
+        Row basis derivatives.
+    px0, px1, px2, px3 : float
+        Column cubic basis values.
+    dx1, dx2, dx3 : float
+        Column basis derivatives.
+
     Returns
     -------
-    phi, gx, gy, gz
+    phi, gx, gy, gz : float
+        Spline value and its x, y and z derivatives.
     """
     pz = (pz0, pz1, pz2, pz3)
     dz = (0.0, dz1, dz2, dz3)
@@ -1945,9 +2034,27 @@ def _spline_basis_2d_device(
 ):
     """Device twin of :func:`_spline_basis_2d`.
 
+    Parameters
+    ----------
+    coeff : np.ndarray
+        ``(n_channels, niy, nix, 4, 4)`` spline coefficients.
+    ch : int
+        Channel index.
+    yi, xi : int
+        Knot cell of the pixel.
+    py0, py1, py2, py3 : float
+        Row cubic basis values.
+    dy1, dy2, dy3 : float
+        Row basis derivatives (the constant term's is zero).
+    px0, px1, px2, px3 : float
+        Column cubic basis values.
+    dx1, dx2, dx3 : float
+        Column basis derivatives.
+
     Returns
     -------
-    phi, gx, gy
+    phi, gx, gy : float
+        Spline value and its x and y derivatives.
     """
     py = (py0, py1, py2, py3)
     dy = (0.0, dy1, dy2, dy3)
@@ -2556,6 +2663,36 @@ def _spline_crlb_cuda(
     caller owns the calibration parsing and the NaN masking. ``z_eval`` None
     selects the 2D model, which has no channel geometry and so ignores ``jac``
     and ``res``.
+
+    Parameters
+    ----------
+    coeff : np.ndarray
+        Reshaped spline coefficients (see :func:`_spline_coeff_reshaped`).
+    jac : np.ndarray
+        ``(n_locs, n_channels, 4)`` per-spot channel Jacobians.
+    res : np.ndarray
+        ``(n_locs, n_channels, 2)`` sub-pixel ROI offsets.
+    box : int
+        Fit box side length.
+    amplitude, x_shift, y_shift : lib.FloatArray1D
+        Fitted amplitude and lateral shifts.
+    z_eval : lib.FloatArray1D or None
+        Native axial sampling coordinate (``-z_shift``); None for the 2D
+        model.
+    offset : lib.FloatArray1D
+        Fitted background.
+    finite : np.ndarray
+        Boolean mask of converged rows; the others are skipped.
+    mu_floor : float
+        Lower bound the model mean is clamped to.
+    mle : bool
+        Poisson Cramer-Rao bound (True) or the least-squares sandwich.
+    progress_callback : callable, "console" or None, optional
+        Progress over localization chunks. ``"console"`` shows a tqdm bar; a
+        callable is invoked with the cumulative number of localizations done.
+    variance : lib.FloatArray4D, optional
+        ``(n_locs, n_channels, box, box)`` channel-major sCMOS readout
+        variance. Default None.
 
     Returns
     -------
@@ -3186,8 +3323,18 @@ def _spline_crlb(
         ``None`` (the default) means zero, which is the single-channel
         case. Pass whatever
         the fit used: the covariance is evaluated at ``theta`` under the same
-        geometry, and the per-spot Jacobians that go with it are read from
-        ``calibration["channel_transforms"]``.
+        geometry.
+    variance : lib.FloatArray4D, optional
+        Per-pixel sCMOS readout variance in photoelectrons squared, in the
+        same layout as the spots (``(n_locs, box, box)`` or channel-last
+        ``(n_locs, box, box, n_channels)``). ``None`` (the default) uses the
+        plain Poisson model.
+    jacobians : np.ndarray, optional
+        ``(n_locs, n_channels, 4)`` per-spot channel Jacobians
+        ``[a00, a01, a10, a11]``, as passed to the fit (see
+        :func:`picasso.localize.channel_roi_geometry`). ``None`` (the default)
+        evaluates ``calibration["channel_transforms"]`` once, which is only
+        valid for an affine registration or a single channel.
 
     Returns
     -------

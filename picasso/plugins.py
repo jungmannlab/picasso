@@ -93,6 +93,16 @@ def is_safe_id(value) -> bool:
     Ids come from a remote manifest and are turned into file names inside
     the user plugins directory, so they must not be able to escape it:
     only ASCII letters, digits, ``_`` and ``-`` are allowed.
+
+    Parameters
+    ----------
+    value : object
+        Candidate plugin id.
+
+    Returns
+    -------
+    safe : bool
+        True if ``value`` is a string of allowed characters only.
     """
     return isinstance(value, str) and bool(_ID_RE.match(value))
 
@@ -103,6 +113,16 @@ def is_safe_repo_path(value) -> bool:
     Rejects absolute paths, Windows separators, ``..`` segments and
     anything that is not a ``.py`` file, so a manifest entry cannot point
     the download at another repository or at a path outside it.
+
+    Parameters
+    ----------
+    value : object
+        Candidate repository path.
+
+    Returns
+    -------
+    safe : bool
+        True if ``value`` is a safe relative ``.py`` path.
     """
     if not isinstance(value, str) or not value.endswith(".py"):
         return False
@@ -127,6 +147,16 @@ def is_safe_command(value) -> bool:
     Plugin command names end up in ``picasso -h`` next to the built-in
     ones, so they are held to the same shape: lowercase ASCII letters,
     digits, ``_`` and ``-``.
+
+    Parameters
+    ----------
+    value : object
+        Candidate subcommand name.
+
+    Returns
+    -------
+    safe : bool
+        True if ``value`` is a string of allowed characters only.
     """
     return isinstance(value, str) and bool(_COMMAND_RE.match(value))
 
@@ -144,8 +174,21 @@ def sha256_bytes(data: bytes) -> str:
 def plugin_path(filename: str) -> str:
     """Absolute path of ``filename`` inside the user plugins directory.
 
-    Raises ``ValueError`` if ``filename`` is not a bare ``.py`` name or if
-    the resolved path would land outside the plugins directory.
+    Parameters
+    ----------
+    filename : str
+        Bare ``.py`` file name, without a directory part.
+
+    Returns
+    -------
+    path : str
+        Absolute path of the file in the plugins directory.
+
+    Raises
+    ------
+    ValueError
+        If ``filename`` is not a bare ``.py`` name or if the resolved path
+        would land outside the plugins directory.
     """
     if not is_safe_filename(filename):
         raise ValueError(f"Unsafe plugin file name: {filename!r}")
@@ -497,7 +540,7 @@ def register_cli_plugins(subparsers) -> set[str]:
 
     Parameters
     ----------
-    subparsers
+    subparsers : argparse._SubParsersAction
         The ``argparse`` subparsers action of the ``picasso`` parser.
 
     Returns
@@ -531,8 +574,18 @@ def plugin_cli_commands(module: ModuleType) -> list[str]:
     """The subcommand names ``module`` would register, for reporting.
 
     Uses a throwaway parser so that listing what a plugin provides never
-    touches the real CLI. Returns an empty list if the plugin has no
-    ``register_cli`` or if it fails.
+    touches the real CLI.
+
+    Parameters
+    ----------
+    module : ModuleType
+        Imported plugin module.
+
+    Returns
+    -------
+    commands : list of str
+        Sorted subcommand names; empty if the plugin has no
+        ``register_cli`` or if it fails.
     """
     register = getattr(module, "register_cli", None)
     if register is None:
@@ -578,6 +631,16 @@ def parse_version(value: str | None) -> tuple[int, ...]:
     Non-numeric suffixes (e.g. the ``a0`` in ``0.11.0a0``) are split on so
     that ``0.11.0a0`` -> ``(0, 11, 0, 0)``. Good enough to order the simple
     versions plugins use; it is not a full PEP 440 implementation.
+
+    Parameters
+    ----------
+    value : str or None
+        Version string.
+
+    Returns
+    -------
+    version : tuple of int
+        Numeric components; empty if ``value`` is None or empty.
     """
     if not value:
         return ()
@@ -614,6 +677,12 @@ def load_state() -> dict:
     The state holds three things: ``plugins`` (per-id records of what was
     installed from the registry), ``enabled`` (per-file-name flags deciding
     what may be loaded) and ``trust_acknowledged`` (the one-time warning).
+
+    Returns
+    -------
+    state : dict
+        The installed state; the defaults (no plugins, nothing enabled,
+        trust not acknowledged) if the file is missing or corrupt.
     """
     path = _sidecar_path()
     state = {"plugins": {}, "enabled": {}, "trust_acknowledged": False}
@@ -636,6 +705,13 @@ def load_state() -> dict:
 
 
 def save_state(state: dict) -> None:
+    """Write the installed state to the sidecar file.
+
+    Parameters
+    ----------
+    state : dict
+        Installed state, as returned by :func:`load_state`.
+    """
     with open(_sidecar_path(), "w", encoding="utf-8") as f:
         json.dump(state, f, indent=2)
 
@@ -645,6 +721,18 @@ def is_enabled(state: dict, filename: str) -> bool:
 
     Unknown files are *not* enabled: enabling is the explicit consent step,
     so a plugin only ever runs after the user has said so.
+
+    Parameters
+    ----------
+    state : dict
+        Installed state, as returned by :func:`load_state`.
+    filename : str
+        Bare file name of the plugin.
+
+    Returns
+    -------
+    enabled : bool
+        True if the user has enabled ``filename``.
     """
     return bool(state.get("enabled", {}).get(filename))
 
@@ -679,9 +767,13 @@ def _is_usable_entry(entry: dict) -> bool:
 def fetch_manifest() -> list[dict]:
     """Download and parse the registry manifest.
 
-    Returns the list of plugin entries whose id and file path pass
-    validation. Raises on any network/parse error so the caller can show a
-    message and offer to retry.
+    Network and parse errors propagate so the caller can show a message
+    and offer to retry.
+
+    Returns
+    -------
+    entries : list of dict
+        The plugin entries whose id and file path pass validation.
     """
     data = json.loads(_get(MANIFEST_URL).decode("utf-8"))
     plugins = data.get("plugins", []) if isinstance(data, dict) else []
@@ -709,9 +801,24 @@ def _local_filename(entry: dict) -> str:
 def download_source(entry: dict) -> bytes:
     """Download an entry's ``.py`` and verify it against the pinned hash.
 
-    Raises ``ValueError`` if the entry carries no valid ``sha256`` or if the
-    downloaded bytes do not match it, so unverified code is never written to
-    disk or shown as if it were the published plugin.
+    Unverified code is never written to disk or shown as if it were the
+    published plugin.
+
+    Parameters
+    ----------
+    entry : dict
+        Registry manifest entry.
+
+    Returns
+    -------
+    content : bytes
+        The verified source of the plugin.
+
+    Raises
+    ------
+    ValueError
+        If the entry is unsafe, carries no valid ``sha256``, or if the
+        downloaded bytes do not match it.
     """
     if not _is_usable_entry(entry):
         raise ValueError(f"Unsafe registry entry for {entry.get('id')!r}")
@@ -739,6 +846,13 @@ def install(entry: dict, state: dict) -> None:
 
     Installing is an explicit user action, so the file is enabled on
     success. Raises before touching the disk if verification fails.
+
+    Parameters
+    ----------
+    entry : dict
+        Registry manifest entry.
+    state : dict
+        Installed state, updated in place and saved.
     """
     content = download_source(entry)
     filename = _local_filename(entry)
@@ -809,6 +923,22 @@ ORPHAN = "orphan"  # installed but no longer in the manifest
 
 
 def status_for(entry: dict, state: dict) -> str:
+    """Status of a plugin entry relative to what is installed.
+
+    Parameters
+    ----------
+    entry : dict
+        Entry as returned by :func:`merged_entries`.
+    state : dict
+        Installed state, as returned by :func:`load_state`.
+
+    Returns
+    -------
+    status : str
+        One of ``ORPHAN``, ``LOCAL_ONLY``, ``INCOMPATIBLE``,
+        ``UNVERIFIED``, ``UNMANAGED``, ``NOT_INSTALLED``,
+        ``UPDATE_AVAILABLE`` or ``UP_TO_DATE``.
+    """
     installed = state["plugins"].get(entry["id"])
     if entry.get("_orphan"):
         return ORPHAN
@@ -847,6 +977,18 @@ def merged_entries(manifest: list[dict], state: dict) -> list[dict]:
     Files sitting in the plugins folder that the registry knows nothing
     about are surfaced too — flagged with ``_local`` — so that manually
     shared plugins can be reviewed and enabled from the same place.
+
+    Parameters
+    ----------
+    manifest : list of dict
+        Entries as returned by :func:`fetch_manifest`.
+    state : dict
+        Installed state, as returned by :func:`load_state`.
+
+    Returns
+    -------
+    entries : list of dict
+        All entries, sorted by display name.
     """
     by_id = {e["id"]: e for e in manifest}
     entries = list(manifest)

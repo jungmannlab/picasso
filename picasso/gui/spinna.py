@@ -3015,9 +3015,12 @@ class SimulationsTab(lib.Dialog):
     N_structures_fit : dict
         Number of structures to be simulated for each target when
         fitting.
-    nnd_ax, nnd_fig, nnd_canvas: matplotlib objects
-        Axes, Figure and FigureCanvas for displaying the nearest
-        neighbors distances histograms.
+    nnd_ax : matplotlib.axes.Axes
+        Axes displaying the nearest neighbors distances histograms.
+    nnd_fig : matplotlib.figure.Figure
+        Figure holding ``nnd_ax``.
+    nnd_canvas : FigureCanvas
+        Canvas displaying ``nnd_fig``.
     nnd_hist_data_exp, nnd_hist_data_sim : list of dicts
         Histogram data for the nearest neighbors distances plots, one
         element per target pair for experimental/simulated data. Each

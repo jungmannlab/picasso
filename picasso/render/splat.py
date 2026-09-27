@@ -835,8 +835,9 @@ def _render_gaussian(
     min_blur_width: float,
     ang: tuple[float, float, float] | Rotation | None = None,
 ) -> tuple[int, lib.FloatArray2D]:
-    """Render localizations with with individual localization precision
-    which differs in x and y.
+    """Render localizations with individual precisions in x and y.
+
+    The localization precision of each localization differs in x and y.
 
     Parameters
     ----------
@@ -844,10 +845,10 @@ def _render_gaussian(
         Column arrays of the localizations to be rendered.
     oversampling : float
         Number of super-resolution pixels per camera pixel.
-    y_min, y_max : float
-        Minimum and maximum y coordinates to be rendered (camera pixels).
-    x_min, x_max : float
-        Minimum and maximum x coordinates to be rendered (camera pixels).
+    y_min, x_min : float
+        Minimum y and x coordinates to be rendered (camera pixels).
+    y_max, x_max : float
+        Maximum y and x coordinates to be rendered (camera pixels).
     min_blur_width : float
         Minimum localization precision (camera pixels).
     ang : tuple or scipy.spatial.transform.Rotation, optional
@@ -1006,7 +1007,7 @@ def _render_convolve(
     min_blur_width: float,
     ang: tuple[float, float, float] | Rotation | None = None,
 ) -> tuple[int, lib.FloatArray2D]:
-    """Render localizations with with global localization precision,
+    """Render localizations with global localization precision,
     i.e. each localization is blurred by the median localization
     precision in x and y.
 
@@ -1067,11 +1068,26 @@ def _render_convolve(
 
 
 def global_blur(columns: _RenderColumns) -> tuple[float, float]:
-    """The ``convolve`` blur of a channel in camera pixels: the caller's
-    ``global_precision`` when given (see ``render``), else the median
-    ``lpx`` and ``lpy`` of the rows to render. The same for every
-    backend, zoom level and rotation, so an in-view mask (which a 3D
-    rotation would make expensive) is never needed."""
+    """Find the ``convolve`` blur of a channel in camera pixels.
+
+    The blur is the caller's ``global_precision`` when given (see
+    ``render``), else the median ``lpx`` and ``lpy`` of the rows to
+    render. It is the same for every backend, zoom level and rotation,
+    so an in-view mask (which a 3D rotation would make expensive) is
+    never needed.
+
+    Parameters
+    ----------
+    columns : _RenderColumns
+        Column arrays of the channel's localizations.
+
+    Returns
+    -------
+    lpx : float
+        Blur in x (camera pixels); 0 if there are no rows to render.
+    lpy : float
+        Blur in y (camera pixels); 0 if there are no rows to render.
+    """
     if columns.global_lp is not None:
         return columns.global_lp
     lpx, lpy = columns.lpx, columns.lpy
@@ -1091,7 +1107,7 @@ def _render_smooth(
     x_max: float,
     ang: tuple[float, float, float] | Rotation | None = None,
 ) -> tuple[int, lib.FloatArray2D]:
-    """Render localizations with with blur of one display pixel (set by
+    """Render localizations with blur of one display pixel (set by
     oversampling).
 
     Parameters
@@ -1215,10 +1231,12 @@ def locs_rotation(
         Localizations to be rotated.
     oversampling : float
         Number of super-resolution pixels per camera pixel.
-    y_min, x_min : float
-        Minimum y and x coordinate to be rendered (camera pixels).
-    y_max, x_max : float
-        Maximum y and x coordinate to be rendered (camera pixels).
+    x_min, x_max : float
+        Minimum and maximum x coordinates to be rendered (camera
+        pixels).
+    y_min, y_max : float
+        Minimum and maximum y coordinates to be rendered (camera
+        pixels).
     ang : tuple or scipy.spatial.transform.Rotation
         Rotation of localizations; either a scipy Rotation or a tuple
         of 3 rotation angles around the x, y and z axes in radians
@@ -1227,13 +1245,13 @@ def locs_rotation(
     Returns
     -------
     x : lib.FloatArray1D
-        New (rotated) x coordinates
+        New (rotated) x coordinates.
     y : lib.FloatArray1D
-        New y coordinates
+        New y coordinates.
     in_view : lib.BoolArray1D
-        Indeces of locs that are rendered
+        Mask of the locs that are rendered.
     z : lib.FloatArray1D
-        New z coordinates
+        New z coordinates.
     """
     return _locs_rotation_arrays(
         _extract_render_columns(locs, None, ang),

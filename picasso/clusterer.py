@@ -403,9 +403,18 @@ def _resolve_progress(
 
     Mirrors ``picasso.aim.aim``'s convention: ``None`` reports nothing,
     ``"console"`` displays a tqdm progress bar, and a
-    ``lib.ProgressDialog`` drives a GUI progress bar. ``total`` is the
-    number of steps the callback will count up to; ``unit`` is the tqdm
-    unit label.
+    ``lib.ProgressDialog`` drives a GUI progress bar.
+
+    Parameters
+    ----------
+    progress : lib.ProgressDialog or "console" or None
+        Public progress argument to normalize.
+    total : int
+        Number of steps the callback will count up to.
+    description : str
+        Description shown next to the progress bar.
+    unit : str, optional
+        tqdm unit label. Default is ``"it"``.
 
     Returns
     -------
@@ -842,8 +851,15 @@ def _count_binding_events(
     """Number of binding events per cluster.
 
     A new event starts whenever consecutive frames within a cluster are
-    more than 3 frames apart. Vectorised across all groups with one
+    more than 3 frames apart. Vectorized across all groups with one
     stable sort + one diff pass.
+
+    Parameters
+    ----------
+    group_arr : lib.IntArray1D
+        Cluster (group) id of each localization.
+    frame_arr : lib.IntArray1D
+        Frame number of each localization.
 
     Returns
     -------

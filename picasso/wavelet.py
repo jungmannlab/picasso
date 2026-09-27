@@ -171,8 +171,14 @@ class WaveletParameters:
         object.__setattr__(self, "min_area", int(self.min_area))
 
     def to_dict(self) -> dict:
-        """Parameters as a plain dictionary with the field names as
-        keys."""
+        """Return the parameters as a plain dictionary.
+
+        Returns
+        -------
+        params : dict
+            Threshold, noise estimate and minimum area under the field
+            names as keys.
+        """
         return {
             "threshold": self.threshold,
             "noise": self.noise,

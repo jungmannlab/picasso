@@ -1151,12 +1151,37 @@ def _validate_channel_setup(
     reference: int,
     movie_noun: str = "movie",
 ) -> tuple[bool, int]:
-    """The channel-count / split-FOV / reference-index checks shared by both
-    calibration builders.
+    """Validate the channel setup of a registration calibration.
+
+    The channel-count / split-FOV / reference-index checks shared by
+    both calibration builders.
+
+    Parameters
+    ----------
+    movies : list
+        The input movies (or bead movies), one per channel, or a single
+        one in split-FOV mode.
+    regions : list or None
+        Split field of view: one ``[[y_min, x_min], [y_max, x_max]]``
+        rectangle per channel, or None for separate movies.
+    reference : int
+        Index of the reference channel.
+    movie_noun : str, optional
+        Noun naming the movies in error messages. Default is
+        ``"movie"``.
 
     Returns
     -------
-    split_fov, n_channels : bool, int
+    split_fov : bool
+        True if the channels are regions of a single movie.
+    n_channels : int
+        Number of channels.
+
+    Raises
+    ------
+    ValueError
+        If there are fewer than 2 channels, split-FOV mode is not given
+        exactly one movie, or ``reference`` is out of range.
     """
     split_fov = regions is not None
     n_channels = len(regions) if split_fov else len(movies)
