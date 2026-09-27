@@ -2019,11 +2019,11 @@ class ViewRotation(QtWidgets.QLabel):
         image : QImage
             Image with the drawn points.
         """
-        color = (
-            QtGui.QColor("yellow")
-            if not self.window.dataset_dialog.wbackground.isChecked()
-            else QtGui.QColor("red")
-        )
+        # the Measure tool looks as in the main window, whose background
+        # this window shares
+        t_dialog = self.window.window.tools_settings_dialog
+        style = t_dialog.measure_overlay_style()
+        mark_width = t_dialog.measure_style.value("marker_size")
         # draw all finalized measurement sets (static, no live cursor)
         for point_set in self._point_sets:
             image = render.draw_points(
@@ -2031,7 +2031,8 @@ class ViewRotation(QtWidgets.QLabel):
                 viewport=self.viewport,
                 points=point_set,
                 pixelsize=self.window.window.view.pixelsize,
-                color=color,
+                mark_width=mark_width,
+                style=style,
             )
         # draw the active set; show the live cursor cross and running
         # distance only in Measure mode while the cursor is followed
@@ -2045,8 +2046,9 @@ class ViewRotation(QtWidgets.QLabel):
             viewport=self.viewport,
             points=self._points,
             pixelsize=self.window.window.view.pixelsize,
-            color=color,
+            mark_width=mark_width,
             cursor=cursor,
+            style=style,
         )
 
     def rotation_input(self) -> None:

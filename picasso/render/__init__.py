@@ -84,6 +84,8 @@ from .splat import (
 from .overlays_qt import (
     POLYGON_POINTER_SIZE,
     BRUSH_FILL_ALPHA,
+    LINE_STYLES,
+    OverlayStyle,
     export_qimage_to_pdf,
     export_qimage_to_svg,
     get_rectangle_pick_polygon,
@@ -215,6 +217,8 @@ __all__ = [
     # overlays_qt
     "POLYGON_POINTER_SIZE",
     "BRUSH_FILL_ALPHA",
+    "LINE_STYLES",
+    "OverlayStyle",
     "export_qimage_to_pdf",
     "export_qimage_to_svg",
     "get_rectangle_pick_polygon",

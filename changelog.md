@@ -18,6 +18,7 @@ Last change: 27-SEP-2026 CEST
 - New action to move xy positions of localizations with a mouse. See the [documentation](https://picassosr.readthedocs.io/en/latest/render.html#move-ctrl-g).
 - Apply expression to localizations expands the canvas (metadata's `Height` and `Width`) if x and y positions are out of range.
 - Overlay of image files (`.png` and `.tif`), see the [documentation](https://picassosr.readthedocs.io/en/latest/render.html#overlay-image).
+- Editable appearance of the tools (e.g., picks), see the [documentation](https://picassosr.readthedocs.io/en/latest/render.html#tools-settings-ctrl-t).
 - Faster circular picking of localizations.
 - Faster FRC.
 - FRC in several random ROIs (*Info* dialog, *FRC in several ROIs*).

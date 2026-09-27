@@ -121,6 +121,9 @@ Top level
    * - ``Colorbar format``
      - ``.png``
      - Format of the exported colorbar/LUT image next to a "render by property" export - ``.png`` or ``.svg``. See :ref:`render-colorbar-format`.
+   * - ``ToolStyles``
+     - *(last used)*
+     - Remembered last value: the appearance of the picks, the Measure tool and the Move tool's shift label, set in Render's ``Tools > Tools Settings``. Saved when Render is closed.
    * - ``cpu_utilization``
      - ``0.5``
      - Fraction of CPU cores rendering's worker pool may use. See :ref:`render-cpu-usage`.

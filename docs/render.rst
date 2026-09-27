@@ -557,6 +557,19 @@ Tools settings (CTRL + T)
 ^^^^^^^^^^^^^^^^^^^^^^^^^
 Define the settings of the tools, i.e., the radius of the pick and an option to annotate each pick. The range of pick similar can be set here as well.
 
+How the tools are drawn is set in the **Appearance** section at the bottom, hidden by default; click its title to show it. It has one tab per tool: **Pick**, **Measure** and **Move** (the label showing the shift while dragging). The settings apply to the main window, to exported images and, for the Measure tool, to the 3D window. If the dialog does not fit on the screen, it scrolls.
+
+* *Color*: *Auto* is yellow on a black and red on a white background. You can choose a preset color, or *Custom...* to pick any color.
+* *Line*: solid, dashed, dotted or dash-dot lines. The crosses of the Measure tool are always solid.
+* *Width*: line width in screen pixels. Lines wider than one pixel are smoothed (antialiased).
+* *Opacity*: opacity of the lines and labels.
+* *Fill* (picks only): opacity of the fill of closed picks, in the line color; 0% draws outlines only. *Default* fills only brush picks. A polygon is filled once it is closed.
+* *Label size*: size of the pick indices (see *Annotate picks*), the measured distances and the shift label, in screen pixels.
+* *While drawing* (picks only): color of a rectangle, box or brush stroke that is still being dragged.
+* *Marker size* (Measure only): size of the crosses marking the measured points.
+
+*Reset* restores the default appearance. The appearance is saved when Render is closed and restored at the next start (``ToolStyles`` in the ``Render`` section of the :ref:`user-settings-file`).
+
 Pick similar (CTRL + Shift + P)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 Automatically identifies picks that are similar to the current picks. Available for circular, square and rectangular picks. For rectangular picks, the new picks take the median length of the current picks and are oriented along the localizations they contain.

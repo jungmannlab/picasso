@@ -536,6 +536,300 @@ class StatusDialog(Dialog):
 ProgressType: TypeAlias = ProgressDialog | MockProgress | TqdmProgress
 
 
+class CollapsibleHeader(QtWidgets.QAbstractButton):
+    """Clickable header of a ``CollapsibleGroupBox``.
+
+    Shows a chevron that turns from right (collapsed) to down
+    (expanded), the title and, while collapsed, a muted summary on the
+    right. The header is highlighted on hover and shows a focus ring
+    when reached with the Tab key. All colors come from the palette, so
+    that light and dark themes work alike.
+
+    Parameters
+    ----------
+    title : str
+        Title, shown in bold.
+    summary : str, optional
+        Short description of the contents, shown on the right while
+        collapsed. Default "".
+    parent : QWidget or None, optional
+        Parent widget. Default None.
+    """
+
+    #: Duration of the chevron's turn in ms.
+    ANIMATION_MS = 160
+    _PADDING = 8  # horizontal padding in pixels
+    _CHEVRON = 5  # half the height of the chevron in pixels
+
+    def __init__(
+        self,
+        title: str,
+        summary: str = "",
+        parent: QtWidgets.QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.setText(title)
+        self.setAccessibleName(title)
+        self._summary = summary
+        # fraction of the turn, 0 when collapsed and 1 when expanded
+        self._progress = 0.0
+        self._animation = QtCore.QVariantAnimation(self)
+        self._animation.setDuration(self.ANIMATION_MS)
+        self._animation.setEasingCurve(QtCore.QEasingCurve.Type.OutCubic)
+        self._animation.valueChanged.connect(self._set_progress)
+        font = self.font()
+        font.setBold(True)
+        self.setFont(font)
+        self.setCursor(QtCore.Qt.CursorShape.PointingHandCursor)
+        # a click does not leave a focus ring behind, the Tab key does
+        self.setFocusPolicy(QtCore.Qt.FocusPolicy.TabFocus)
+        self.setSizePolicy(
+            QtWidgets.QSizePolicy.Policy.Expanding,
+            QtWidgets.QSizePolicy.Policy.Fixed,
+        )
+
+    def progress(self) -> float:
+        """How far the chevron has turned: 0 collapsed, 1 expanded."""
+        return self._progress
+
+    def set_expanded(self, expanded: bool, animate: bool = True) -> None:
+        """Turn the chevron to the expanded or collapsed state.
+
+        Parameters
+        ----------
+        expanded : bool
+            The new state.
+        animate : bool, optional
+            Turn smoothly if the header is visible, otherwise at once.
+            Default True.
+        """
+        end = 1.0 if expanded else 0.0
+        self._animation.stop()
+        if animate and self.isVisible():
+            self._animation.setStartValue(self._progress)
+            self._animation.setEndValue(end)
+            self._animation.start()
+        else:
+            self._set_progress(end)
+
+    def _set_progress(self, value: float) -> None:
+        self._progress = float(value)
+        self.update()
+
+    def _summary_font(self) -> QtGui.QFont:
+        font = self.font()
+        font.setBold(False)
+        return font
+
+    def minimumSizeHint(self) -> QtCore.QSize:
+        metrics = self.fontMetrics()
+        width = (
+            3 * self._PADDING
+            + 2 * self._CHEVRON
+            + metrics.horizontalAdvance(self.text())
+        )
+        return QtCore.QSize(width, max(metrics.height() + 12, 28))
+
+    def sizeHint(self) -> QtCore.QSize:
+        hint = self.minimumSizeHint()
+        if self._summary:
+            metrics = QtGui.QFontMetrics(self._summary_font())
+            hint.setWidth(
+                hint.width()
+                + 2 * self._PADDING
+                + metrics.horizontalAdvance(self._summary)
+            )
+        return hint
+
+    def enterEvent(self, event: QtGui.QEnterEvent) -> None:
+        super().enterEvent(event)
+        self.update()
+
+    def leaveEvent(self, event: QtCore.QEvent) -> None:
+        super().leaveEvent(event)
+        self.update()
+
+    def paintEvent(self, event: QtGui.QPaintEvent) -> None:
+        palette = self.palette()
+        highlight = palette.color(QtGui.QPalette.ColorRole.Highlight)
+        text_color = palette.color(QtGui.QPalette.ColorRole.WindowText)
+        muted = palette.color(QtGui.QPalette.ColorRole.PlaceholderText)
+        progress = self._progress
+        rect = QtCore.QRectF(self.rect()).adjusted(1, 1, -1, -1)
+
+        painter = QtGui.QPainter(self)
+        painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
+
+        # background: a tint of the accent color on hover and press
+        alpha = 0
+        if self.isDown():
+            alpha = 55
+        elif self.underMouse():
+            alpha = 28
+        if alpha:
+            tint = QtGui.QColor(highlight)
+            tint.setAlpha(alpha)
+            painter.setPen(QtCore.Qt.PenStyle.NoPen)
+            painter.setBrush(tint)
+            painter.drawRoundedRect(rect, 5, 5)
+        if self.hasFocus():
+            ring = QtGui.QColor(highlight)
+            ring.setAlpha(180)
+            painter.setPen(QtGui.QPen(ring, 1.5))
+            painter.setBrush(QtCore.Qt.BrushStyle.NoBrush)
+            painter.drawRoundedRect(rect, 5, 5)
+
+        # divider under the header, fading in as the contents open
+        if progress > 0:
+            divider = QtGui.QColor(muted)
+            divider.setAlphaF(0.35 * progress * divider.alphaF())
+            painter.setPen(QtGui.QPen(divider, 1))
+            y = rect.bottom() - 0.5
+            painter.drawLine(
+                QtCore.QPointF(rect.left() + self._PADDING, y),
+                QtCore.QPointF(rect.right() - self._PADDING, y),
+            )
+
+        # chevron, turning from right to down and taking on the accent
+        # color as it does
+        c = self._CHEVRON
+        center = QtCore.QPointF(
+            rect.left() + self._PADDING + c, rect.center().y()
+        )
+        # (the muted color is often translucent, so alpha is blended too)
+        chevron_color = QtGui.QColor.fromRgbF(
+            *(
+                m + (h - m) * progress
+                for m, h in zip(muted.getRgbF(), highlight.getRgbF())
+            )
+        )
+        pen = QtGui.QPen(chevron_color, 1.8)
+        pen.setCapStyle(QtCore.Qt.PenCapStyle.RoundCap)
+        pen.setJoinStyle(QtCore.Qt.PenJoinStyle.RoundJoin)
+        painter.save()
+        painter.translate(center)
+        painter.rotate(90 * progress)
+        painter.setPen(pen)
+        painter.setBrush(QtCore.Qt.BrushStyle.NoBrush)
+        painter.drawPolyline(
+            QtGui.QPolygonF(
+                [
+                    QtCore.QPointF(-c / 2, -c),
+                    QtCore.QPointF(c / 2, 0),
+                    QtCore.QPointF(-c / 2, c),
+                ]
+            )
+        )
+        painter.restore()
+
+        # title
+        text_left = rect.left() + 2 * self._PADDING + 2 * c
+        text_rect = QtCore.QRectF(
+            text_left, rect.top(), rect.right() - text_left, rect.height()
+        )
+        painter.setPen(text_color)
+        painter.setFont(self.font())
+        align = (
+            QtCore.Qt.AlignmentFlag.AlignLeft
+            | QtCore.Qt.AlignmentFlag.AlignVCenter
+        )
+        painter.drawText(text_rect, align, self.text())
+
+        # summary, fading out as the contents open
+        if self._summary and progress < 1:
+            title_width = self.fontMetrics().horizontalAdvance(self.text())
+            summary_rect = text_rect.adjusted(
+                title_width + 2 * self._PADDING, 0, -self._PADDING, 0
+            )
+            font = self._summary_font()
+            summary = QtGui.QFontMetrics(font).elidedText(
+                self._summary,
+                QtCore.Qt.TextElideMode.ElideRight,
+                int(summary_rect.width()),
+            )
+            color = QtGui.QColor(muted)
+            color.setAlphaF(color.alphaF() * (1 - progress))
+            painter.setPen(color)
+            painter.setFont(font)
+            painter.drawText(
+                summary_rect,
+                QtCore.Qt.AlignmentFlag.AlignRight
+                | QtCore.Qt.AlignmentFlag.AlignVCenter,
+                summary,
+            )
+        painter.end()
+
+
+class CollapsibleGroupBox(QtWidgets.QGroupBox):
+    """QGroupBox whose contents are shown or hidden by clicking its
+    header, which carries the title, see ``CollapsibleHeader``.
+
+    Lay out the contents on ``content``, e.g.,
+    ``QtWidgets.QGridLayout(box.content)``.
+
+    Parameters
+    ----------
+    title : str
+        Title shown in the header.
+    expanded : bool, optional
+        Whether the contents are shown initially. Default True.
+    summary : str, optional
+        Short description of the contents, shown in the header while
+        collapsed. Default "".
+    parent : QWidget or None, optional
+        Parent widget. Default None.
+
+    Attributes
+    ----------
+    content : QWidget
+        Holds the contents.
+    expandedChanged : pyqtSignal
+        Emitted with the new state when the contents are shown or
+        hidden.
+    toggle_button : CollapsibleHeader
+        The header.
+    """
+
+    expandedChanged = QtCore.pyqtSignal(bool)
+
+    def __init__(
+        self,
+        title: str,
+        expanded: bool = True,
+        summary: str = "",
+        parent: QtWidgets.QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.setContentsMargins(4, 4, 4, 4)
+        layout.setSpacing(4)
+        self.toggle_button = CollapsibleHeader(title, summary)
+        self.toggle_button.setToolTip(f"Show or hide the {title} settings.")
+        layout.addWidget(self.toggle_button)
+        self.content = QtWidgets.QWidget()
+        layout.addWidget(self.content)
+        self._expanded = True
+        self.toggle_button.clicked.connect(
+            lambda: self.setExpanded(not self._expanded)
+        )
+        self.setExpanded(expanded)
+        self.toggle_button.set_expanded(expanded, animate=False)
+
+    def isExpanded(self) -> bool:
+        """Whether the contents are shown."""
+        return self._expanded
+
+    def setExpanded(self, expanded: bool) -> None:
+        """Show or hide the contents."""
+        expanded = bool(expanded)
+        if expanded == self._expanded:
+            return
+        self._expanded = expanded
+        self.toggle_button.set_expanded(expanded)
+        self.content.setVisible(expanded)
+        self.expandedChanged.emit(expanded)
+
+
 class ScrollableGroupBox(QtWidgets.QGroupBox):
     """QGroupBox with QScrollArea as the top widget that enables
     scrolling."""

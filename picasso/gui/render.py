@@ -63,6 +63,7 @@ from .render_worker import (  # noqa: F401
     subsample_request,
 )
 from . import render_link
+from .overlay_style import OverlayStyleWidget
 from .rotation import RotationWindow, source_key
 from .app import run_gui
 
@@ -6734,8 +6735,9 @@ class MoveChannelsDialog(lib.Dialog):
 
 
 class ToolsSettingsDialog(lib.Dialog):
-    """Customize picks - shape and size, annotate, change std for
-    picking similar.
+    """Customize the tools - pick shape and size, annotate, change std
+    for picking similar, the channels of the Move tool and how the
+    picks, measured points and the Move tool's label are drawn.
 
     ...
 
@@ -6743,6 +6745,15 @@ class ToolsSettingsDialog(lib.Dialog):
     ----------
     brush_width : QDoubleSpinBox
         Contains the width of the next brush stroke (nm).
+    appearance_groupbox : CollapsibleGroupBox
+        Holds ``appearance_tabs``, collapsed by default.
+    appearance_tabs : QTabWidget
+        One tab with the appearance of each tool: ``pick_style``,
+        ``measure_style`` and ``move_style``.
+    measure_style : OverlayStyleWidget
+        Appearance of the points and distances of the Measure tool.
+    move_style : OverlayStyleWidget
+        Appearance of the Move tool's shift label.
     pick_annotation : QCheckBox
         Tick to display picks' indeces.
     pick_diameter : QDoubleSpinBox
@@ -6754,6 +6765,9 @@ class ToolsSettingsDialog(lib.Dialog):
         Contains the side length of square picks (nm).
     pick_similar_range : QDoubleSpinBox
         Contains the standard deviation range used by Pick similar.
+    pick_style : OverlayStyleWidget
+        Appearance of the picks, including the color of a pick being
+        drawn.
     pick_width : QDoubleSpinBox
         Contains the width of rectangular picks (nm).
     point_picks : QCheckBox
@@ -6767,7 +6781,21 @@ class ToolsSettingsDialog(lib.Dialog):
         self.window = window
         self.setWindowTitle("Tools Settings")
         self.setModal(False)
-        self.vbox = QtWidgets.QVBoxLayout(self)
+        # the sections collapse and the contents scroll, so that the
+        # dialog fits on small screens
+        self.scroll_area = QtWidgets.QScrollArea()
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setFrameShape(QtWidgets.QFrame.Shape.NoFrame)
+        self.scroll_area.setHorizontalScrollBarPolicy(
+            QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        container = QtWidgets.QWidget()
+        self.vbox = QtWidgets.QVBoxLayout(container)
+        self.scroll_area.setWidget(container)
+        main_layout = QtWidgets.QVBoxLayout(self)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.addWidget(self.scroll_area)
+        self._fitted = False  # sized to the contents on the first show
 
         self.pick_groupbox = QtWidgets.QGroupBox("Pick")
         self.vbox.addWidget(self.pick_groupbox)
@@ -6899,6 +6927,108 @@ class ToolsSettingsDialog(lib.Dialog):
         self.move_undo_button.clicked.connect(self.window.view.undo_move)
         move_grid.addWidget(self.move_undo_button, 1, 0, 1, 3)
 
+        # how the tools are drawn, one tab per tool; collapsed by
+        # default to keep the dialog compact
+        self.appearance_groupbox = lib.CollapsibleGroupBox(
+            "Appearance", expanded=False, summary="Pick · Measure · Move"
+        )
+        self.vbox.addWidget(self.appearance_groupbox)
+        appearance_layout = QtWidgets.QVBoxLayout(
+            self.appearance_groupbox.content
+        )
+        appearance_layout.setContentsMargins(0, 0, 0, 0)
+        self.appearance_tabs = QtWidgets.QTabWidget()
+        appearance_layout.addWidget(self.appearance_tabs)
+
+        self.pick_style = OverlayStyleWidget(
+            (
+                "color",
+                "line_style",
+                "line_width",
+                "opacity",
+                "fill_opacity",
+                "font_size",
+                "drawing_color",
+            )
+        )
+        self.pick_style.changed.connect(self.update_scene_with_cache)
+        self.measure_style = OverlayStyleWidget(
+            (
+                "color",
+                "line_style",
+                "line_width",
+                "opacity",
+                "font_size",
+                "marker_size",
+            ),
+            defaults={"font_size": 20},
+        )
+        self.measure_style.changed.connect(self.on_measure_style_changed)
+        # the label showing the shift while dragging
+        self.move_style = OverlayStyleWidget(
+            ("color", "opacity", "font_size"),
+        )
+        for name, widget, tooltip in (
+            ("Pick", self.pick_style, "Appearance of the picks."),
+            (
+                "Measure",
+                self.measure_style,
+                "Appearance of the points and distances of the Measure\n"
+                "tool, also in the 3D window.",
+            ),
+            (
+                "Move",
+                self.move_style,
+                "Appearance of the label showing the shift while dragging\n"
+                "with the Move tool.",
+            ),
+        ):
+            page = QtWidgets.QWidget()
+            page_layout = QtWidgets.QVBoxLayout(page)
+            page_layout.addWidget(widget)
+            page_layout.addStretch()
+            index = self.appearance_tabs.addTab(page, name)
+            self.appearance_tabs.setTabToolTip(index, tooltip)
+
+        # a collapsed section stays at the top
+        self.vbox.addStretch()
+        # resize once the layout has taken the change into account
+        self.appearance_groupbox.expandedChanged.connect(
+            lambda _: QtCore.QTimer.singleShot(0, self.fit_to_contents)
+        )
+
+    def showEvent(self, event: QtGui.QShowEvent) -> None:
+        super().showEvent(event)
+        if not self._fitted:
+            self._fitted = True
+            self.fit_to_contents()
+
+    def fit_to_contents(self, *args) -> None:
+        """Resize the dialog to its contents after the appearance section
+        is expanded or collapsed, at most to 85% of the screen height;
+        beyond that, the contents scroll."""
+        container = self.scroll_area.widget()
+        container.adjustSize()
+        hint = container.sizeHint()
+        # never narrower than the contents, as they do not scroll
+        # horizontally; room is kept for the vertical scroll bar (the
+        # style's scroll bar extent can be narrower than the bar)
+        scrollbar = self.scroll_area.verticalScrollBar().sizeHint().width()
+        width = (
+            max(hint.width(), container.minimumSizeHint().width())
+            + scrollbar
+            + 2 * self.scroll_area.frameWidth()
+        )
+        self.scroll_area.setMinimumWidth(
+            max(self.scroll_area.minimumWidth(), width)
+        )
+        height = hint.height()
+        screen = self.screen()
+        if screen is not None:
+            max_height = int(0.85 * screen.availableGeometry().height())
+            height = min(height, max_height)
+        self.resize(max(self.width(), width), height)
+
     def add_move_channel(self) -> None:
         """Add a loaded channel to the Move tool's selection. Only the
         first channel is selected by default."""
@@ -6965,6 +7095,69 @@ class ToolsSettingsDialog(lib.Dialog):
         """Enable the Move tool's undo button if there is a move to
         undo."""
         self.move_undo_button.setEnabled(bool(self.window.view._move_undo))
+
+    def auto_overlay_color(self) -> QtGui.QColor:
+        """Automatic color of the tool overlays: yellow on a dark and
+        red on a white background."""
+        if self.window.dataset_dialog.wbackground.isChecked():
+            return QtGui.QColor("red")
+        return QtGui.QColor("yellow")
+
+    def pick_overlay_style(self, drawing: bool = False) -> render.OverlayStyle:
+        """Appearance of the picks.
+
+        Parameters
+        ----------
+        drawing : bool, optional
+            If True, the appearance of a pick still being drawn (in the
+            color chosen for drawing). Default False.
+
+        Returns
+        -------
+        style : render.OverlayStyle
+            The appearance.
+        """
+        auto_color = self.auto_overlay_color()
+        if drawing:
+            return self.pick_style.drawing_style(auto_color)
+        return self.pick_style.style(auto_color)
+
+    def measure_overlay_style(self) -> render.OverlayStyle:
+        """Appearance of the points and distances of the Measure
+        tool."""
+        return self.measure_style.style(self.auto_overlay_color())
+
+    def move_overlay_style(self) -> render.OverlayStyle:
+        """Appearance of the Move tool's shift label."""
+        return self.move_style.style(self.auto_overlay_color())
+
+    def overlay_style_settings(self) -> dict:
+        """Appearance of the tools, as saved in the user settings."""
+        return {
+            "Pick": self.pick_style.settings(),
+            "Measure": self.measure_style.settings(),
+            "Move": self.move_style.settings(),
+        }
+
+    def load_overlay_style_settings(self, settings: dict) -> None:
+        """Set the appearance of the tools from the user settings, see
+        ``overlay_style_settings``; missing or invalid entries keep the
+        current appearance."""
+        if not isinstance(settings, dict):
+            return
+        self.pick_style.load_settings(settings.get("Pick"))
+        self.measure_style.load_settings(settings.get("Measure"))
+        self.move_style.load_settings(settings.get("Move"))
+
+    def on_measure_style_changed(self, *args) -> None:
+        """Redraw the measured points in the main and 3D windows."""
+        self.update_scene_with_cache()
+        window_rot = getattr(self.window, "window_rot", None)
+        if window_rot is None or not window_rot.isVisible():
+            return
+        view_rot = window_rot.view_rot
+        if view_rot.locs and getattr(view_rot, "viewport", None):
+            view_rot.update_scene(use_cache=True)
 
     def on_brush_width_changed(self, *args) -> None:
         """Update the cursor to the new brush width.
@@ -10605,11 +10798,6 @@ class View(QtWidgets.QLabel):
             Image with the drawn picks.
         """
         t_dialog = self.window.tools_settings_dialog
-        color = (
-            QtGui.QColor("yellow")
-            if not self.window.dataset_dialog.wbackground.isChecked()
-            else QtGui.QColor("red")
-        )
         return render.draw_picks(
             image=image,
             viewport=self.viewport,
@@ -10618,7 +10806,7 @@ class View(QtWidgets.QLabel):
             pick_size=self._pick_size,
             point_picks=t_dialog.point_picks.isChecked(),
             annotate_picks=t_dialog.pick_annotation.isChecked(),
-            color=color,
+            style=t_dialog.pick_overlay_style(),
         )
 
     def draw_rectangle_pick_ongoing(self, image: QtGui.QImage) -> QtGui.QImage:
@@ -10634,16 +10822,13 @@ class View(QtWidgets.QLabel):
         image : QImage
             Image with the drawn pick.
         """
-        painter = QtGui.QPainter(image)
-        painter.setPen(QtGui.QColor("green"))
-
-        # draw a line across the pick
-        painter.drawLine(
-            self.rectangle_pick_start_x,
-            self.rectangle_pick_start_y,
-            self.rectangle_pick_current_x,
-            self.rectangle_pick_current_y,
+        style = self.window.tools_settings_dialog.pick_overlay_style(
+            drawing=True
         )
+        painter = style.painter(image)
+        fill = style.fill()
+        if fill is not None:
+            painter.setBrush(fill)
 
         # convert from camera units to display units
         w = (
@@ -10662,6 +10847,14 @@ class View(QtWidgets.QLabel):
 
         # draw a rectangle
         painter.drawPolygon(polygon)
+
+        # draw a line across the pick, over the fill
+        painter.drawLine(
+            self.rectangle_pick_start_x,
+            self.rectangle_pick_start_y,
+            self.rectangle_pick_current_x,
+            self.rectangle_pick_current_y,
+        )
         painter.end()
         return image
 
@@ -10678,8 +10871,13 @@ class View(QtWidgets.QLabel):
         image : QImage
             Image with the drawn pick.
         """
-        painter = QtGui.QPainter(image)
-        painter.setPen(QtGui.QColor("green"))
+        style = self.window.tools_settings_dialog.pick_overlay_style(
+            drawing=True
+        )
+        painter = style.painter(image)
+        fill = style.fill()
+        if fill is not None:
+            painter.setBrush(fill)
         # the drag anchors are already in display pixels, so unlike the
         # rectangular pick no size conversion is needed
         painter.drawRect(
@@ -10710,12 +10908,14 @@ class View(QtWidgets.QLabel):
             return image
         stroke = (self._brush_width, self._brush_stroke)
         region = render.brush_pick_path([stroke], image.size(), self.viewport)
-        fill = QtGui.QColor("green")
-        fill.setAlpha(render.BRUSH_FILL_ALPHA)
-        painter = QtGui.QPainter(image)
+        style = self.window.tools_settings_dialog.pick_overlay_style(
+            drawing=True
+        )
+        fill = style.fill(default_opacity=render.BRUSH_FILL_ALPHA / 255)
+        painter = style.painter(image)
         painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
-        painter.setPen(QtGui.QColor("green"))
-        painter.fillPath(region, QtGui.QBrush(fill))
+        if fill is not None:
+            painter.fillPath(region, fill)
         painter.drawPath(region)
         painter.end()
         return image
@@ -10733,11 +10933,9 @@ class View(QtWidgets.QLabel):
         image : QImage
             Image with the drawn points.
         """
-        color = (
-            QtGui.QColor("yellow")
-            if not self.window.dataset_dialog.wbackground.isChecked()
-            else QtGui.QColor("red")
-        )
+        style_widget = self.window.tools_settings_dialog.measure_style
+        style = self.window.tools_settings_dialog.measure_overlay_style()
+        mark_width = style_widget.value("marker_size")
         # draw all finalized measurement sets (static, no live cursor)
         for point_set in self._point_sets:
             image = render.draw_points(
@@ -10745,7 +10943,8 @@ class View(QtWidgets.QLabel):
                 viewport=self.viewport,
                 points=point_set,
                 pixelsize=self.pixelsize,
-                color=color,
+                mark_width=mark_width,
+                style=style,
             )
         # draw the active set; show the live cursor cross and running
         # distance only in Measure mode while the cursor is followed
@@ -10759,8 +10958,9 @@ class View(QtWidgets.QLabel):
             viewport=self.viewport,
             points=self._points,
             pixelsize=self.pixelsize,
-            color=color,
+            mark_width=mark_width,
             cursor=cursor,
+            style=style,
         )
 
     def draw_scalebar(self, image: QtGui.QImage) -> QtGui.QImage:
@@ -12489,16 +12689,15 @@ class View(QtWidgets.QLabel):
             f"Δx = {dx:.2f} px ({dx * pixelsize:.1f} nm)\n"
             f"Δy = {dy:.2f} px ({dy * pixelsize:.1f} nm)"
         )
-        color = (
-            QtGui.QColor("yellow")
-            if not self.window.dataset_dialog.wbackground.isChecked()
-            else QtGui.QColor("red")
+        style = self.window.tools_settings_dialog.move_overlay_style()
+        painter = style.painter(image)
+        # the label grows with its font
+        rect = painter.fontMetrics().boundingRect(
+            QtCore.QRect(0, 0, 10000, 10000),
+            QtCore.Qt.AlignmentFlag.AlignLeft,
+            text,
         )
-        painter = QtGui.QPainter(image)
-        painter.setPen(color)
-        rect = QtCore.QRect(
-            self._move_cursor.x() + 16, self._move_cursor.y() + 16, 400, 60
-        )
+        rect.moveTo(self._move_cursor.x() + 16, self._move_cursor.y() + 16)
         painter.drawText(rect, QtCore.Qt.AlignmentFlag.AlignLeft, text)
         painter.end()
         return image
@@ -16280,6 +16479,9 @@ class Window(QtWidgets.QMainWindow):
             name: [list(stop) for stop in stops]
             for name, stops in self.custom_colormaps_stops.items()
         }
+        settings["Render"][
+            "ToolStyles"
+        ] = self.tools_settings_dialog.overlay_style_settings()
         io.save_user_settings(settings)
         QtWidgets.QApplication.instance().closeAllWindows()
 
@@ -16825,7 +17027,8 @@ class Window(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.information(self, "Warning", warning)
 
     def load_user_settings(self) -> None:  # noqa: C901
-        """Load user settings (colormap and current directory)."""
+        """Load user settings (colormaps, current directory and the
+        appearance of the tools)."""
         settings = io.load_user_settings()
         # the section may be absent, or present without these keys (the
         # file names only what the user or a persisted default set)
@@ -16871,6 +17074,11 @@ class Window(QtWidgets.QMainWindow):
         self.custom_colormaps_stops = parsed
         if hasattr(self, "dataset_dialog"):
             self.dataset_dialog.refresh_color_lists()
+
+        # appearance of picks, measured points and the Move tool
+        self.tools_settings_dialog.load_overlay_style_settings(
+            render_settings.get("ToolStyles")
+        )
 
     def open_apply_dialog(self) -> None:
         """Load expression and apply it to locs."""

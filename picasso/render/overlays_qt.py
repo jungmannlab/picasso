@@ -11,6 +11,7 @@ legend, minimap and rotation widgets, plus PDF/SVG export.
 
 from __future__ import annotations
 
+from dataclasses import dataclass, replace
 from typing import Literal, TYPE_CHECKING
 
 import numpy as np
@@ -39,6 +40,188 @@ POLYGON_POINTER_SIZE = 16  # must be even
 # opacity of the fill of a brush pick, so that the localizations under
 # the painted region stay visible
 BRUSH_FILL_ALPHA = 70
+# line styles of the tool overlays, see ``OverlayStyle``
+LINE_STYLES = ("Solid", "Dashed", "Dotted", "Dash-dot")
+
+
+@dataclass(frozen=True)
+class OverlayStyle:
+    """Appearance of a tool overlay drawn onto a rendered image, such
+    as picks or measured points.
+
+    Every field left at None falls back to the default of the drawing
+    function, e.g., a yellow outline for picks, with only brush picks
+    filled.
+
+    Parameters
+    ----------
+    color : QColor, str or None, optional
+        Color of the lines and labels: a ``QColor`` or anything it
+        accepts, e.g., ``"yellow"`` or ``"#FF8800"``. Default None.
+    line_style : {"Solid", "Dashed", "Dotted", "Dash-dot"}, optional
+        Pattern of the lines. Default "Solid".
+    line_width : float, optional
+        Width of the lines in display pixels. Default 1.
+    opacity : float, optional
+        Opacity of the lines and labels, from 0 (transparent) to 1.
+        Default 1.
+    fill_opacity : float or None, optional
+        Opacity of the fill of closed shapes, from 0 (no fill) to 1,
+        filled with ``color``. Default None.
+    font_size : int or None, optional
+        Pixel size of the labels. Default None.
+
+    Raises
+    ------
+    ValueError
+        If ``line_style`` is unknown, ``line_width`` or ``font_size`` is
+        not positive or an opacity is outside [0, 1].
+    """
+
+    color: QtGui.QColor | str | None = None
+    line_style: Literal["Solid", "Dashed", "Dotted", "Dash-dot"] = "Solid"
+    line_width: float = 1.0
+    opacity: float = 1.0
+    fill_opacity: float | None = None
+    font_size: int | None = None
+
+    def __post_init__(self) -> None:
+        if self.line_style not in LINE_STYLES:
+            raise ValueError(
+                f"Unknown line style: {self.line_style}. Expected one of "
+                f"{', '.join(LINE_STYLES)}."
+            )
+        if not self.line_width > 0:
+            raise ValueError("line_width must be positive.")
+        if self.font_size is not None and not self.font_size > 0:
+            raise ValueError("font_size must be positive.")
+        for name in ("opacity", "fill_opacity"):
+            value = getattr(self, name)
+            if value is not None and not 0 <= value <= 1:
+                raise ValueError(f"{name} must be between 0 and 1.")
+
+    def qcolor(self, default: QtGui.QColor | str = "yellow") -> QtGui.QColor:
+        """Color of the lines and labels, including their opacity.
+
+        Parameters
+        ----------
+        default : QColor or str, optional
+            Color used if ``color`` is None. Default "yellow".
+
+        Returns
+        -------
+        color : QColor
+            The color.
+        """
+        color = QtGui.QColor(default if self.color is None else self.color)
+        color.setAlphaF(color.alphaF() * self.opacity)
+        return color
+
+    def pen(self, default: QtGui.QColor | str = "yellow") -> QtGui.QPen:
+        """Pen that draws the lines and labels.
+
+        Parameters
+        ----------
+        default : QColor or str, optional
+            Color used if ``color`` is None. Default "yellow".
+
+        Returns
+        -------
+        pen : QPen
+            The pen.
+        """
+        pen = QtGui.QPen(self.qcolor(default), self.line_width)
+        pen.setStyle(
+            {
+                "Solid": QtCore.Qt.PenStyle.SolidLine,
+                "Dashed": QtCore.Qt.PenStyle.DashLine,
+                "Dotted": QtCore.Qt.PenStyle.DotLine,
+                "Dash-dot": QtCore.Qt.PenStyle.DashDotLine,
+            }[self.line_style]
+        )
+        return pen
+
+    def fill(
+        self,
+        default: QtGui.QColor | str = "yellow",
+        default_opacity: float = 0.0,
+    ) -> QtGui.QBrush | None:
+        """Brush that fills closed shapes, or None if they are not
+        filled.
+
+        Parameters
+        ----------
+        default : QColor or str, optional
+            Color used if ``color`` is None. Default "yellow".
+        default_opacity : float, optional
+            Opacity used if ``fill_opacity`` is None. Default 0, i.e.,
+            no fill.
+
+        Returns
+        -------
+        brush : QBrush or None
+            The brush.
+        """
+        opacity = (
+            default_opacity if self.fill_opacity is None else self.fill_opacity
+        )
+        if opacity <= 0:
+            return None
+        color = QtGui.QColor(default if self.color is None else self.color)
+        color.setAlphaF(color.alphaF() * opacity)
+        return QtGui.QBrush(color)
+
+    def painter(
+        self,
+        image: QtGui.QImage,
+        default: QtGui.QColor | str = "yellow",
+        default_font_size: int | None = None,
+    ) -> QtGui.QPainter:
+        """Open a painter on ``image`` with this style's pen and font.
+
+        Lines wider than one pixel are antialiased; thin lines are not,
+        so that they stay sharp.
+
+        Parameters
+        ----------
+        image : QImage
+            Image to paint on.
+        default : QColor or str, optional
+            Color used if ``color`` is None. Default "yellow".
+        default_font_size : int or None, optional
+            Pixel size of the labels if ``font_size`` is None; None
+            keeps the painter's font. Default None.
+
+        Returns
+        -------
+        painter : QPainter
+            The painter; call its ``end`` once done.
+        """
+        painter = QtGui.QPainter(image)
+        painter.setPen(self.pen(default))
+        if self.line_width > 1:
+            painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
+        font_size = (
+            default_font_size if self.font_size is None else self.font_size
+        )
+        if font_size is not None:
+            font = painter.font()
+            font.setPixelSize(int(font_size))
+            painter.setFont(font)
+        return painter
+
+
+def _overlay_style(
+    style: OverlayStyle | None,
+    color: QtGui.QColor | str | None,
+) -> OverlayStyle:
+    """Combine the ``style`` and ``color`` arguments of a drawing
+    function; ``color``, if given, takes precedence."""
+    if style is None:
+        style = OverlayStyle()
+    if color is not None:
+        style = replace(style, color=color)
+    return style
 
 
 def export_qimage_to_pdf(
@@ -153,15 +336,14 @@ def _draw_picks_circle(
     point_picks: bool = False,
     annotate_picks: bool = False,
     color: QtGui.QColor | None = None,  # default: yellow
+    style: OverlayStyle | None = None,
 ) -> QtGui.QImage:
     """Draw circular picks onto the image of rendered localizations.
     See ``draw_picks`` for more details."""
-    if color is None:
-        color = QtGui.QColor("yellow")
+    style = _overlay_style(style, color)
+    painter = style.painter(image)
     if point_picks:  # draw circular picks as points
-        painter = QtGui.QPainter(image)
-        painter.setBrush(QtGui.QBrush(color))
-        painter.setPen(color)
+        painter.setBrush(QtGui.QBrush(style.qcolor()))
         for i, pick in enumerate(picks):
             # convert from camera units to display units
             cx, cy = map_to_view(*pick, image.size(), viewport)
@@ -171,8 +353,9 @@ def _draw_picks_circle(
 
     else:  # draw circles
         d = int(pick_size * image.width() / viewport_width(viewport))
-        painter = QtGui.QPainter(image)
-        painter.setPen(color)
+        fill = style.fill()
+        if fill is not None:
+            painter.setBrush(fill)
         for i, pick in enumerate(picks):
             # check that the pick is within the view
             if (
@@ -199,25 +382,27 @@ def _draw_picks_rectangle(
     pick_size: float,  # width in camera pixels
     annotate_picks: bool = False,
     color: QtGui.QColor | None = None,  # default: yellow
+    style: OverlayStyle | None = None,
 ) -> QtGui.QImage:
     """Draw rectangular picks onto the image of rendered
     localizations. See ``draw_picks`` for more details."""
-    if color is None:
-        color = QtGui.QColor("yellow")
+    style = _overlay_style(style, color)
     w = pick_size * image.width() / viewport_width(viewport)
-    painter = QtGui.QPainter(image)
-    painter.setPen(color)
+    painter = style.painter(image)
+    fill = style.fill()
+    if fill is not None:
+        painter.setBrush(fill)
     for i, pick in enumerate(picks):
         # convert from camera units to display units
         start_x, start_y = map_to_view(*pick[0], image.size(), viewport)
         end_x, end_y = map_to_view(*pick[1], image.size(), viewport)
-        # draw a straight line across the pick
-        painter.drawLine(start_x, start_y, end_x, end_y)
         # draw a rectangle
         polygon, most_right = get_rectangle_pick_polygon(
             start_x, start_y, end_x, end_y, w, return_most_right=True
         )
         painter.drawPolygon(polygon)
+        # draw a straight line across the pick, over the fill
+        painter.drawLine(start_x, start_y, end_x, end_y)
         if annotate_picks:
             painter.drawText(int(most_right[0]), int(most_right[1]), str(i))
     painter.end()
@@ -230,14 +415,25 @@ def _draw_picks_polygon(
     picks: list[tuple],  # picks in camera pixels
     annotate_picks: bool = False,
     color: QtGui.QColor | None = None,  # default: yellow
+    style: OverlayStyle | None = None,
 ) -> QtGui.QImage:
     """Draw polygon picks onto the image of rendered localizations. See
     ``draw_picks`` for more details."""
-    if color is None:
-        color = QtGui.QColor("yellow")
-    painter = QtGui.QPainter(image)
-    painter.setPen(color)
+    style = _overlay_style(style, color)
+    painter = style.painter(image)
+    fill = style.fill()
     for i, pick in enumerate(picks):
+        # only closed polygons are filled; the one being drawn is not
+        if fill is not None and len(pick) > 3 and pick[0] == pick[-1]:
+            polygon = QtGui.QPolygonF(
+                [
+                    QtCore.QPointF(*map_to_view(*p, image.size(), viewport))
+                    for p in pick
+                ]
+            )
+            path = QtGui.QPainterPath()
+            path.addPolygon(polygon)
+            painter.fillPath(path, fill)
         oldpoint = []
         for point in pick:
             cx, cy = map_to_view(*point, image.size(), viewport)
@@ -269,13 +465,15 @@ def _draw_picks_square(
     pick_size: float,  # side length in camera pixels
     annotate_picks: bool = False,
     color: QtGui.QColor | None = None,  # default: yellow
+    style: OverlayStyle | None = None,
 ) -> QtGui.QImage:
     """Draw square picks onto the image of rendered localizations."""
-    if color is None:
-        color = QtGui.QColor("yellow")
+    style = _overlay_style(style, color)
     w = int(pick_size * image.width() / viewport_width(viewport))
-    painter = QtGui.QPainter(image)
-    painter.setPen(color)
+    painter = style.painter(image)
+    fill = style.fill()
+    if fill is not None:
+        painter.setBrush(fill)
     for i, pick in enumerate(picks):
         # check that the pick is within the view
         if (
@@ -305,13 +503,15 @@ def _draw_picks_box(
     picks: list[tuple],  # picks in camera pixels
     annotate_picks: bool = False,
     color: QtGui.QColor | None = None,  # default: yellow
+    style: OverlayStyle | None = None,
 ) -> QtGui.QImage:
     """Draw box picks onto the image of rendered localizations. See
     ``draw_picks`` for more details."""
-    if color is None:
-        color = QtGui.QColor("yellow")
-    painter = QtGui.QPainter(image)
-    painter.setPen(color)
+    style = _overlay_style(style, color)
+    painter = style.painter(image)
+    fill = style.fill()
+    if fill is not None:
+        painter.setBrush(fill)
     for i, pick in enumerate(picks):
         X, Y = lib.get_pick_box_corners(pick)
         # unlike the click-placed shapes, a box can be larger than the
@@ -398,17 +598,15 @@ def _draw_picks_brush(
     picks: list[tuple],  # picks in camera pixels
     annotate_picks: bool = False,
     color: QtGui.QColor | None = None,  # default: yellow
+    style: OverlayStyle | None = None,
 ) -> QtGui.QImage:
-    """Draw brush picks onto the image of rendered localizations, as a
-    translucent highlight with a solid outline. See ``draw_picks`` for
-    more details."""
-    if color is None:
-        color = QtGui.QColor("yellow")
-    fill = QtGui.QColor(color)
-    fill.setAlpha(BRUSH_FILL_ALPHA)
-    painter = QtGui.QPainter(image)
+    """Draw brush picks onto the image of rendered localizations, by
+    default as a translucent highlight with a solid outline. See
+    ``draw_picks`` for more details."""
+    style = _overlay_style(style, color)
+    fill = style.fill(default_opacity=BRUSH_FILL_ALPHA / 255)
+    painter = style.painter(image)
     painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
-    painter.setPen(color)
     for i, pick in enumerate(picks):
         if not len(pick):
             continue
@@ -424,7 +622,8 @@ def _draw_picks_brush(
             continue
 
         region = brush_pick_path(pick, image.size(), viewport)
-        painter.fillPath(region, QtGui.QBrush(fill))
+        if fill is not None:
+            painter.fillPath(region, fill)
         painter.drawPath(region)
 
         # annotate picks just outside the end of the last stroke
@@ -449,6 +648,7 @@ def draw_picks(
     point_picks: bool = False,
     annotate_picks: bool = False,
     color: QtGui.QColor | None = None,  # default: yellow
+    style: OverlayStyle | None = None,
 ) -> QtGui.QImage:
     """Draw all selected picks onto the image (QImage) of rendered
     localizations.
@@ -478,7 +678,12 @@ def draw_picks(
         If True, annotate each pick with its index in the picks list.
         Default is False.
     color : QtGui.QColor, optional
-        Color of the picks. Default is yellow.
+        Color of the picks; overrides the color of ``style``. Default is
+        yellow.
+    style : OverlayStyle, optional
+        Line style, width, opacity, fill and label size of the picks.
+        By default, picks are drawn with solid 1-pixel lines and only
+        brush picks are filled.
 
     Returns
     -------
@@ -500,6 +705,7 @@ def draw_picks(
             point_picks=point_picks,
             annotate_picks=annotate_picks,
             color=color,
+            style=style,
         )
     elif pick_shape == "Rectangle":
         return _draw_picks_rectangle(
@@ -509,6 +715,7 @@ def draw_picks(
             pick_size=pick_size,
             annotate_picks=annotate_picks,
             color=color,
+            style=style,
         )
     elif pick_shape == "Polygon":
         return _draw_picks_polygon(
@@ -517,6 +724,7 @@ def draw_picks(
             picks=picks,
             annotate_picks=annotate_picks,
             color=color,
+            style=style,
         )
     elif pick_shape == "Square":
         return _draw_picks_square(
@@ -526,6 +734,7 @@ def draw_picks(
             pick_size=pick_size,
             annotate_picks=annotate_picks,
             color=color,
+            style=style,
         )
     elif pick_shape == "Box":
         return _draw_picks_box(
@@ -534,6 +743,7 @@ def draw_picks(
             picks=picks,
             annotate_picks=annotate_picks,
             color=color,
+            style=style,
         )
     elif pick_shape == "Brush":
         return _draw_picks_brush(
@@ -542,6 +752,7 @@ def draw_picks(
             picks=picks,
             annotate_picks=annotate_picks,
             color=color,
+            style=style,
         )
     else:
         raise ValueError(f"Unknown pick shape: {pick_shape}")
@@ -556,6 +767,7 @@ def draw_points(
     color: QtGui.QColor | None = None,  # default: yellow
     mark_width: int = 20,  # width of the drawn crosses in display pixels
     cursor: tuple | None = None,  # live cursor position in camera pixels
+    style: OverlayStyle | None = None,
 ) -> QtGui.QImage:
     """Draw points, lines and distances between them onto image.
 
@@ -572,26 +784,35 @@ def draw_points(
     pixelsize : int or float
         Camera pixel size in nm.
     color : QtGui.QColor, optional
-        Color of the points, lines and text. Default is yellow.
+        Color of the points, lines and text; overrides the color of
+        ``style``. Default is yellow.
     mark_width : int, optional
         Width of the drawn crosses in display pixels. Default is 20.
     cursor : tuple or None, optional
         Current cursor position in camera pixels. If given, it is drawn
         as a cross and, when at least one point exists, a line with the
         live distance to the last point is shown. Default is None.
+    style : OverlayStyle, optional
+        Line style, width and opacity of the lines between the points
+        and the size of the distance labels (20 pixels by default).
+        The crosses are drawn with the same width and opacity, always
+        with solid lines. Its fill is ignored.
 
     Returns
     -------
     image : QImage
         Image with the drawn points.
     """
-    if color is None:
-        color = QtGui.QColor("yellow")
-    painter = QtGui.QPainter(image)
-    painter.setPen(color)
+    style = _overlay_style(style, color)
+    painter = style.painter(image, default_font_size=20)
+    line_pen = painter.pen()
+    # a dashed cross would lose its center, so crosses stay solid
+    cross_pen = QtGui.QPen(line_pen)
+    cross_pen.setStyle(QtCore.Qt.PenStyle.SolidLine)
 
     def draw_cross(x, y):
         """Draw a cross marker centered at display coordinates."""
+        painter.setPen(cross_pen)
         painter.drawPoint(x, y)
         painter.drawLine(x, y, int(x + mark_width / 2), y)
         painter.drawLine(x, y, x, int(y + mark_width / 2))
@@ -600,10 +821,8 @@ def draw_points(
 
     def draw_distance(x1, y1, x2, y2, p1, p2):
         """Draw a line and the distance label between two points."""
+        painter.setPen(line_pen)
         painter.drawLine(x1, y1, x2, y2)
-        font = painter.font()
-        font.setPixelSize(20)
-        painter.setFont(font)
         # get distance with 2 decimal places
         distance = (
             float(

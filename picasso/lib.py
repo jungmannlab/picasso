@@ -110,6 +110,8 @@ _QT_NAMES = (
     "ProgressDialog",
     "StatusDialog",
     "ProgressType",
+    "CollapsibleHeader",
+    "CollapsibleGroupBox",
     "ScrollableGroupBox",
     "LogDoubleSpinBox",
     "RangeSlider",

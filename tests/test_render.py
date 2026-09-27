@@ -1725,6 +1725,181 @@ class TestDrawing:
 
 
 # ---------------------------------------------------------------------------
+# Appearance of the tool overlays (OverlayStyle)
+# ---------------------------------------------------------------------------
+
+# 32 camera pixels drawn onto the 120 display pixels of ``_fresh_canvas``
+FOV_32 = ((0, 0), (32, 32))
+
+
+def _lit(image) -> np.ndarray:
+    """Mask of the pixels drawn onto the black canvas."""
+    return (_qimage_to_array(image)[..., :3] > 0).any(axis=-1)
+
+
+def _circle(style=None, **kwargs):
+    # a circle of diameter 60 display pixels, centered at (60, 60)
+    return render.draw_picks(
+        _fresh_canvas(),
+        FOV_32,
+        "Circle",
+        [(16, 16)],
+        pick_size=16,
+        style=style,
+        **kwargs,
+    )
+
+
+class TestOverlayStyle:
+    def test_default_style_draws_as_before(self):
+        # no style and the default style draw the same yellow outline
+        np.testing.assert_array_equal(
+            _qimage_to_array(_circle()),
+            _qimage_to_array(_circle(render.OverlayStyle())),
+        )
+        red = _qimage_to_array(_circle(color=QtGui.QColor("red")))
+        assert red[..., 2].max() == 255  # BGRA: red channel
+        assert red[..., 1].max() == 0
+
+    def test_color_argument_overrides_style_color(self):
+        style = render.OverlayStyle(color="blue", line_width=3)
+        np.testing.assert_array_equal(
+            _qimage_to_array(_circle(style, color="red")),
+            _qimage_to_array(_circle(render.OverlayStyle("red", "Solid", 3))),
+        )
+
+    def test_wider_lines_cover_more_pixels(self):
+        thin = _lit(_circle()).sum()
+        wide = _lit(_circle(render.OverlayStyle(line_width=4))).sum()
+        assert wide > 2.5 * thin
+
+    @pytest.mark.parametrize("line_style", ["Dashed", "Dotted", "Dash-dot"])
+    def test_patterned_lines_leave_gaps(self, line_style):
+        solid = _lit(_circle()).sum()
+        patterned = _lit(_circle(render.OverlayStyle(line_style=line_style)))
+        assert 0 < patterned.sum() < 0.9 * solid
+
+    def test_opacity_blends_lines_with_the_image(self):
+        pixels = _qimage_to_array(_circle(render.OverlayStyle(opacity=0.5)))
+        assert pixels[..., 2].max() == pytest.approx(128, abs=2)
+
+    @pytest.mark.parametrize("shape", ["Circle", "Square"])
+    def test_fill_opacity_fills_closed_shapes(self, shape):
+        def center(style):
+            out = render.draw_picks(
+                _fresh_canvas(),
+                FOV_32,
+                shape,
+                [(16, 16)],
+                pick_size=16,
+                style=style,
+            )
+            return _qimage_to_array(out)[60, 60, :3]
+
+        assert not center(None).any()  # hollow by default
+        filled = center(render.OverlayStyle(fill_opacity=0.5))
+        assert filled[2] == pytest.approx(128, abs=2)  # half-bright red
+        assert filled[0] == 0  # yellow has no blue
+
+    def test_fill_of_rectangle_and_box(self):
+        style = render.OverlayStyle(fill_opacity=0.5)
+        for shape, pick, size in (
+            ("Rectangle", ((4, 16), (28, 16)), 8),
+            ("Box", ((8, 8), (24, 24)), None),
+        ):
+            out = render.draw_picks(
+                _fresh_canvas(), FOV_32, shape, [pick], size, style=style
+            )
+            # a point inside, off the rectangle's center line
+            assert _lit(out)[50, 45], shape
+
+    def test_only_closed_polygons_are_filled(self):
+        style = render.OverlayStyle(fill_opacity=0.5)
+        triangle = [(4, 4), (28, 4), (16, 28)]
+
+        def inside(pick):
+            out = render.draw_picks(
+                _fresh_canvas(), FOV_32, "Polygon", [pick], 1, style=style
+            )
+            return _lit(out)[45, 60]  # the centroid (16, 12)
+
+        assert not inside(triangle)  # still being drawn
+        assert inside(triangle + [triangle[0]])
+
+    def test_brush_is_filled_by_default_and_can_be_hollow(self):
+        pick = [[(8.0, [(4.0, 16.0), (28.0, 16.0)])]]
+
+        def center(style):
+            out = render.draw_picks(
+                _fresh_canvas(), FOV_32, "Brush", pick, None, style=style
+            )
+            return _qimage_to_array(out)[60, 60, 2]
+
+        assert center(None) == pytest.approx(render.BRUSH_FILL_ALPHA, abs=2)
+        assert center(render.OverlayStyle(fill_opacity=0)) == 0
+        assert center(render.OverlayStyle(fill_opacity=1)) == 255
+
+    def test_font_size_scales_the_annotations(self):
+        def lit(font_size):
+            style = render.OverlayStyle(font_size=font_size)
+            return _lit(_circle(style, annotate_picks=True)).sum()
+
+        outline = _lit(_circle()).sum()
+        assert lit(40) - outline > 4 * (lit(10) - outline)
+
+    def test_draw_points_patterns_lines_but_not_crosses(self):
+        points = [(4, 16), (28, 16)]  # crosses at x = 15 and 105
+
+        def draw(style):
+            out = render.draw_points(
+                _fresh_canvas(),
+                FOV_32,
+                points,
+                pixelsize=PIXELSIZE,
+                style=style,
+            )
+            return _lit(out)
+
+        solid = draw(None)
+        dashed = draw(render.OverlayStyle(line_style="Dashed"))
+        assert solid[60, 30:90].all()
+        assert 0 < dashed[60, 30:90].sum() < 60
+        # the vertical arm of a cross stays solid
+        assert dashed[51:70, 15].all()
+
+    def test_draw_points_font_size(self):
+        def lit(font_size):
+            out = render.draw_points(
+                _fresh_canvas(),
+                FOV_32,
+                [(4, 4), (8, 4)],
+                pixelsize=PIXELSIZE,
+                style=render.OverlayStyle(font_size=font_size),
+            )
+            return _lit(out).sum()
+
+        assert lit(30) > lit(10)
+        default = render.draw_points(
+            _fresh_canvas(), FOV_32, [(4, 4), (8, 4)], pixelsize=PIXELSIZE
+        )
+        assert _lit(default).sum() == lit(20)
+
+    @pytest.mark.parametrize(
+        "kwargs",
+        [
+            {"line_style": "Wavy"},
+            {"line_width": 0},
+            {"opacity": 1.5},
+            {"fill_opacity": -0.1},
+            {"font_size": 0},
+        ],
+    )
+    def test_invalid_values_raise(self, kwargs):
+        with pytest.raises(ValueError):
+            render.OverlayStyle(**kwargs)
+
+
+# ---------------------------------------------------------------------------
 # Color bar of a rendered property
 # ---------------------------------------------------------------------------
 
