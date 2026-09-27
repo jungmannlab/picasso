@@ -16885,18 +16885,14 @@ class Window(QtWidgets.QMainWindow):
 
             pixelsize = self.view.pixelsize
 
+            # defaults for the image extents, used where the loaded
+            # metadata (e.g. of an .ims movie) does not provide them
             ims_fields = {
                 "ExtMin0": 0,
                 "ExtMin1": 0,
                 "ExtMin2": -0.5,
                 "ExtMax2": 0.5,
             }
-
-            for k, v in ims_fields.items():
-                try:
-                    ims_fields[k] = None
-                except KeyError:
-                    pass
 
             (y_min, x_min), (y_max, x_max) = viewport
 
@@ -16923,10 +16919,12 @@ class Window(QtWidgets.QMainWindow):
                     )
 
                     for k, v in ims_fields.items():
-                        if v is not None:
+                        if not any(k in d for d in self.view.infos[channel]):
                             add_dict[k] = v
 
                     info = self.view.infos[channel] + [add_dict]
+                    if not to_render:
+                        ims_info = info
                     io.save_locs(
                         f"{channel_base}_ch_{channel}.hdf5",
                         locs[in_view],
@@ -17005,7 +17003,7 @@ class Window(QtWidgets.QMainWindow):
                 colors_ims,
                 oversampling,
                 viewport,
-                info,
+                ims_info,
                 z_min,
                 z_max,
                 pixelsize,

@@ -116,8 +116,8 @@ def stops_to_lut(
 def get_colors_from_colormap(
     n_channels: int,
     cmap: str = "gist_rainbow",
-) -> list[tuple[float, float, float]]:
-    """Create a list of RGB colors for rendering by property.
+) -> lib.FloatArray2D:
+    """Create an array of RGB colors for rendering by property.
 
     One color is drawn per channel from the colormap (gist_rainbow by
     default), see
@@ -132,12 +132,12 @@ def get_colors_from_colormap(
 
     Returns
     -------
-    colors : list of tuples
-        Contains tuples with RGB channels ranging between 0 and 1.
+    colors : lib.FloatArray2D
+        RGB colors of shape (n_channels, 3), ranging between 0 and 1.
     """
     # array of shape (256, 3) with RGB channels with 256 colors
     base = plt.get_cmap(cmap)(np.arange(256))[:, :3]
-    # indeces to draw from base
+    # indices to draw from base
     idx = np.linspace(0, 255, n_channels).astype(int)
     # extract the colors of interest
     colors = base[idx]

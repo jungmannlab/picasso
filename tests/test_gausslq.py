@@ -126,13 +126,13 @@ class TestFitSpots:
 
     def test_progress_callback_invoked(self, synthetic_spots):
         """The progress callback is invoked once per spot, with the
-        running index."""
+        number of spots fitted so far."""
         spots, _ = synthetic_spots
         calls = []
         gausslq.fit_spots(spots, progress_callback=calls.append)
         assert len(calls) == len(spots)
-        # callback receives the running index, monotonically increasing
-        assert calls == list(range(len(spots)))
+        # the last call reports all spots done
+        assert calls == list(range(1, len(spots) + 1))
 
 
 class TestConvergenceSchedule:

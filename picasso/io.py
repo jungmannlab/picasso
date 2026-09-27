@@ -229,8 +229,8 @@ def load_ims(
     info = {}
 
     info["Frames"] = file.n_frames
-    info["Height"] = file.x
-    info["Width"] = file.y
+    info["Height"] = file.y
+    info["Width"] = file.x
     info["Channel"] = channel
 
     if file.pixelsize is not None:
@@ -281,8 +281,8 @@ def load_ims_all(path: str) -> tuple[list[np.memmap], list[list[dict]]]:
 
         info = {}
         info["Frames"] = file.n_frames
-        info["Height"] = file.x
-        info["Width"] = file.y
+        info["Height"] = file.y
+        info["Width"] = file.x
         info["Channel"] = channel
 
         if file.pixelsize is not None:

@@ -126,7 +126,7 @@ class TestGaussmle:
             method="sigmaxy",
             progress_callback=calls.append,
         )
-        assert calls == list(range(len(spots)))
+        assert calls == list(range(1, len(spots) + 1))
 
     def test_looser_eps_fewer_iterations_on_average(
         self, synthetic_spots_noisy

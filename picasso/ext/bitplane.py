@@ -184,8 +184,9 @@ if IMSWRITER:
                     )
                 )
             except KeyError:
-                self.x = self.img_size[1]
-                self.y = self.img_size[2]
+                # Data is laid out (z, y, x)
+                self.x = self.img_size[2]
+                self.y = self.img_size[1]
 
             # The pixelsize is being estimated on the image dimensions
 
@@ -411,8 +412,8 @@ if IMSWRITER:
             x_max))`` in camera pixels.
         info : list of dicts
             Metadata of the localizations; the ``ExtMin0``,
-            ``ExtMin1``, ``ExtMin2`` and ``ExtMax2`` fields of the
-            first entry, if present, offset the image extents.
+            ``ExtMin1``, ``ExtMin2`` and ``ExtMax2`` fields, if present
+            in any entry, offset the image extents.
         z_min, z_max : float
             Axial range of the image (nm). If both are 0, the z extent
             is derived from the number of z planes.
@@ -490,20 +491,25 @@ if IMSWRITER:
         x_1 = (x_max) * pixelsize / 1000
         y_1 = (y_max) * pixelsize / 1000
 
+        # the extents may be stored in any entry of the metadata
+        meta = {}
+        for entry in info:
+            meta.update(entry)
+
         # TODO: Later use GlobalExtMin to add
         # Todo: Check for z
         try:
-            x_0 += info[0]["ExtMin0"]
-            y_0 += info[0]["ExtMin1"]
+            x_0 += meta["ExtMin0"]
+            y_0 += meta["ExtMin1"]
 
-            x_1 += info[0]["ExtMin0"]
-            y_1 += info[0]["ExtMin1"]
+            x_1 += meta["ExtMin0"]
+            y_1 += meta["ExtMin1"]
 
         except KeyError as e:
             print(f"Exception: {e}")
 
         try:
-            z_base = (info[0]["ExtMin2"] + info[0]["ExtMax2"]) / 2
+            z_base = (meta["ExtMin2"] + meta["ExtMax2"]) / 2
         except KeyError as e:
             print(f"Exception: {e}")
             z_base = 0

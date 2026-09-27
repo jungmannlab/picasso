@@ -3437,6 +3437,27 @@ class TestSplineHelpers:
         )
         assert calls == [n_starts] * n_hyp
 
+    def test_multistart_dispatcher_forwards_variance(self, monkeypatch):
+        # the ratiometric fitter passes the sCMOS variance through the
+        # device dispatcher; dropping it there silently fits Poisson only
+        captured = {}
+
+        def fake_multistart(spots_, calibration, **kw):
+            captured.update(kw)
+            return None
+
+        monkeypatch.setattr(
+            localize, "_fit_splinefit_multistart", fake_multistart
+        )
+        variance = np.ones((2, 5, 5), np.float32)
+        localize._fit_spline_multistart(
+            np.zeros((2, 5, 5), np.float32),
+            {},
+            use_gpu=False,
+            variance=variance,
+        )
+        assert captured["variance"] is variance
+
     def test_fit_spots_single_start_is_still_reachable(self, monkeypatch):
         calib = _fake_spline_calibration(model="spline-3d")
         box = calib["box"]

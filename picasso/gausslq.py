@@ -667,7 +667,7 @@ def _fit_spots(
             max_iterations=max_iterations,
         )
         if callable(progress_callback):
-            progress_callback(i)
+            progress_callback(i + 1)
     return theta
 
 

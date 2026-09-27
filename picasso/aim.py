@@ -791,6 +791,9 @@ def intersection_max_z(
         If ``exclude_self`` is True and the reference is not the same
         localizations as the target.
     """
+    if progress is None:
+        progress = lib.MockProgress()
+
     # convert z to camera pixels
     z = z.copy() / pixelsize
     ref_z = ref_z.copy() / pixelsize

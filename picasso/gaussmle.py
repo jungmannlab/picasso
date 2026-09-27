@@ -515,12 +515,12 @@ def _gaussmle(
     Returns
     -------
     thetas : lib.FloatArray2D
-        The fitted parameters for each spot, shape (N, 6) or (N, 5)
-        depending on the method. The columns are x, y, photons,
-        background and sigma (or sigmax, sigmay).
+        The fitted parameters for each spot, shape (N, 6). The columns
+        are x, y, photons, background, sigmax and sigmay; with method
+        "sigma" the single fitted sigma fills both sigma columns.
     CRLBs : lib.FloatArray2D
         The Cramer-Rao Lower Bounds for the fitted parameters, shape
-        (N, 6) or (N, 5).
+        (N, 6), with the same columns as ``thetas``.
     likelihoods : lib.FloatArray1D
         The log-likelihoods for each fitted spot, shape (N,).
     iterations : lib.IntArray1D
@@ -546,7 +546,7 @@ def _gaussmle(
     for i in iter_range:
         func(spots, i, thetas, CRLBs, likelihoods, iterations, eps, max_it)
         if callable(progress_callback):
-            progress_callback(i)
+            progress_callback(i + 1)
     return thetas, CRLBs, likelihoods, iterations
 
 
@@ -1168,11 +1168,11 @@ def _locs_from_fits(
         spots, which should include 'frame', 'x', 'y' and
         'net_gradient'.
     theta : lib.FloatArray2D
-        The fitted parameters for each spot, shape (N, 6) or (N, 5)
-        depending on the method used.
+        The fitted parameters for each spot, shape (N, 6): x, y,
+        photons, background, sigmax and sigmay.
     CRLBs : lib.FloatArray2D
         The Cramer-Rao Lower Bounds for the fitted parameters, shape
-        (N, 6) or (N, 5).
+        (N, 6), with the same columns as ``theta``.
     log_likelihoods : lib.FloatArray1D
         The log-likelihoods for each fitted spot, shape (N,).
     iterations : lib.IntArray1D

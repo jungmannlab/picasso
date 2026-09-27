@@ -907,6 +907,30 @@ def test_aim_exclude_self_survives_a_single_segment():
     assert np.allclose(drift_x, 0) and np.allclose(drift_y, 0)
 
 
+def test_aim_intersection_max_z_runs_without_progress():
+    """``progress`` defaults to None, like in ``intersection_max``."""
+    frame, x, y = _static_locs_with_displaced_segment(0, 1, 0.0, 100, 4)
+    z = np.random.default_rng(1).normal(0, 50, x.size)
+    seg_bounds = np.array([0, 100, 200, 300, 400])
+    z_pdc, drift_z = aim.intersection_max_z(
+        x,
+        y,
+        z,
+        x,
+        y,
+        z,
+        frame,
+        seg_bounds,
+        AIM_INTERSECT_D_DEFAULT,
+        AIM_ROI_R_DEFAULT,
+        SYNTH_FOV * 4,
+        SYNTH_FOV * 4,
+        PIXELSIZE,
+    )
+    assert z_pdc.shape == z.shape
+    assert np.isfinite(drift_z).all()
+
+
 @pytest.mark.parametrize("n_segments", [1, 2, 3, 4])
 def test_aim_runs_with_few_segments(synthetic_fiducials_2d, n_segments):
     """Padding the spline knots must keep coarse segmentations working.

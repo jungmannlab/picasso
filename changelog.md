@@ -26,10 +26,13 @@ Last change: 27-SEP-2026 CEST
 - `picasso.render` is distributed as a package (`kernels`, `geometry`, `splat`, `scene`, `overlays_qt`, `animation`, `backend`, `gpu`); every former `picasso.render.*` name is still importable from `picasso.render`.
 - Fixed: 3D histogram rendering scaled z unnecessarily.
 - Fixed NeNA (and FRC) overwriting group columns of localizations.
+- Fixed: *Export FOV as .ims* ignored the image extents of the loaded metadata and used only the last channel's metadata.
 
 ### Localize
 - New spot identification method: B-spline wavelet segmentation (Izeddin et al., *Opt. Express* 2012), see the [documentation](https://picassosr.readthedocs.io/en/latest/localize.html#b-spline-wavelet-identification).
 - New column `reduced_chi_square` for MLE and least-squares fits: the goodness of fit normalized for the box size and the photon counts, about 1 for a good fit (`picasso.localize.reduced_chi_square`).
+- Fixed: ratiometric multichannel spline fitting ignored the per-pixel sCMOS variance of the camera calibration.
+- Fixed: `Height` and `Width` were swapped in the metadata of non-square `.ims` movies.
 
 ### **Backward incompatible changes:**
 - *Tools > Fast rendering* is removed: with GPU rendering and other speed improvements it no longer serves a purpose.

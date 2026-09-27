@@ -940,6 +940,8 @@ def _await_parallel_z_fit(
         if abort_callback is not None and abort_callback():
             for f in fs:
                 f.cancel()
+            if use_tqdm:
+                iter_range.close()
             return None
 
         n_finished = round(N * lib.n_futures_done(fs) / n_tasks)
@@ -948,6 +950,9 @@ def _await_parallel_z_fit(
         elif callable(progress_callback):
             progress_callback(n_finished)
         time.sleep(0.2)
+    if use_tqdm:
+        iter_range.update(N - iter_range.n)
+        iter_range.close()
     return locs_from_futures(fs, filter=filter)
 
 
@@ -1177,8 +1182,8 @@ def axial_localization_precision_astig(
     info : list of dicts
         Localizations metadata.
     calibration : dict
-        Calibration dictionary with x and y coefficients, z step size
-        and the number of frames.
+        Calibration dictionary with the keys "X Coefficients",
+        "Y Coefficients" and "Magnification factor".
     fitting_method : {"gausslq", "gaussmle"}, optional
         Fitting method used to obtain 2D localization parameters (x, y,
         sx, sy). Default is "gausslq".

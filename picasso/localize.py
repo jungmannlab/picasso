@@ -5727,6 +5727,7 @@ def _fit_spline_multistart(
         tolerance=tolerance,
         max_iterations=max_iterations,
         use_gpu=_spline_use_gpu(use_gpu),
+        variance=variance,
     )
 
 
