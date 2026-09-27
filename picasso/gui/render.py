@@ -62,6 +62,7 @@ from .render_worker import (  # noqa: F401
     global_precisions_for,
     subsample_request,
 )
+from . import render_link
 from .rotation import RotationWindow, source_key
 from .app import run_gui
 
@@ -1038,6 +1039,7 @@ class DatasetDialog(lib.Dialog):
         )
         self._update_background_swatch()
         self.update_viewport()
+        self.window.link_notify("background_legend")
 
     def select_channel_color(self, button_name: str) -> None:
         """Open a color picker for one channel and write the chosen
@@ -8978,6 +8980,12 @@ class View(QtWidgets.QLabel):
         Draws a rectangle used in zooming in.
     _size_hint : tuple
         Used for size adjustment.
+    _link_crosshair : tuple or None
+        Cursor position (camera pixels) of a linked window, drawn as a
+        crosshair; None if not shown.
+    _link_interactive : bool
+        Whether the last viewport change was an interactive preview;
+        passed on to linked windows.
     window : QMainWindow
         Instance of the main window.
     x_locs : list of pd.DataFrames
@@ -8990,6 +8998,15 @@ class View(QtWidgets.QLabel):
     #: full renders run on a worker thread (see ``RenderWorker``); the
     #: synchronous-rendering tests disable this class-wide
     async_rendering = True
+
+    #: signals for linked windows (``picasso.gui.render_link``): the
+    #: viewport changed (argument: interactive preview), picks and
+    #: overlays were redrawn, the cursor moved (camera pixels, or None
+    #: when it left the view), a redraw was requested (before it runs)
+    viewport_changed = QtCore.pyqtSignal(bool)
+    picks_drawn = QtCore.pyqtSignal()
+    cursor_moved = QtCore.pyqtSignal(object)
+    scene_requested = QtCore.pyqtSignal()
 
     def __init__(self, window: QtWidgets.QMainWindow) -> None:
         super().__init__()
@@ -9083,6 +9100,9 @@ class View(QtWidgets.QLabel):
         self._refine_timer.setSingleShot(True)
         self._refine_timer.setInterval(150)
         self._refine_timer.timeout.connect(self._refine_render)
+        # linked windows
+        self._link_crosshair = None
+        self._link_interactive = False
 
     def _load_drift(self, info: list[dict]) -> pd.DataFrame | None:
         drift = None
@@ -9456,11 +9476,7 @@ class View(QtWidgets.QLabel):
         n_loaded = len(self.locs)
         self._finish_load()
         if n_loaded:  # if loading was successful
-            self._reconcile_pixelsizes()
-            if self._load_fit_in_view:
-                self.fit_in_view(autoscale=True)
-            else:
-                self.update_scene()
+            self._show_added_channels(self._load_fit_in_view)
         callback = self._load_callback
         self._load_callback = None
         if callback is not None and n_loaded:
@@ -9468,6 +9484,121 @@ class View(QtWidgets.QLabel):
         if self._load_queue:  # files requested while this load ran
             jobs, on_finished = self._load_queue.pop(0)
             self._start_load(jobs, on_finished)
+
+    def _show_added_channels(self, first: bool) -> None:
+        """Render newly added channels.
+
+        Parameters
+        ----------
+        first : bool
+            True if the view was empty before, i.e. the field of view
+            is set up anew: the linked windows' one if the window is
+            linked, otherwise the whole field of view.
+        """
+        self._reconcile_pixelsizes()
+        if first:
+            if self.window.link_group is not None:
+                self.window.link_group.adopt(self.window)
+            else:
+                self.fit_in_view(autoscale=True)
+        else:
+            self.update_scene()
+
+    def add_channels_from(
+        self, source: View, channels: list[int], share: bool = False
+    ) -> None:
+        """Add channels loaded in another view as they are, including
+        any unsaved changes (e.g. filtering, drift correction).
+
+        Parameters
+        ----------
+        source : View
+            View (of another window) holding the channels.
+        channels : list of int
+            Indices of the channels in ``source``.
+        share : bool, optional
+            If True, both views hold the same localizations, metadata
+            and drift (linked windows keep them in sync, see
+            ``render_link``); otherwise they are copied, such that later
+            edits in either view do not affect the other. The render
+            index only stores row positions, so it is shared either
+            way. Default is False.
+        """
+        first = len(self.locs) == 0
+        for i in channels:
+            locs, info = source.locs[i], source.infos[i]
+            self.add(
+                source.locs_paths[i],
+                locs if share else locs.copy(),
+                info if share else copy.deepcopy(info),
+                render_index=source.render_index[i],
+                render_=False,
+            )
+            # the drift state as it is in the source, not as on disk
+            self._drift[-1] = source._drift[i]
+            self._driftfiles[-1] = source._driftfiles[i]
+            self.currentdrift[-1] = source.currentdrift[i]
+            if not share:
+                self._copy_drift(len(self.locs) - 1)
+        if channels:
+            self._show_added_channels(first)
+
+    def _copy_drift(self, channel: int) -> None:
+        """Replace the drift state of ``channel`` with copies."""
+        drift = self._drift[channel]
+        self._drift[channel] = None if drift is None else drift.copy()
+        self.currentdrift[channel] = copy.deepcopy(self.currentdrift[channel])
+
+    def adopt_shared_channels(
+        self, source: View, pairs: list[tuple[int, int]]
+    ) -> None:
+        """Take over channels that a linked window changed (replaced or
+        modified in place) and drop everything derived from them.
+
+        Parameters
+        ----------
+        source : View
+            View of the window in which the channels changed.
+        pairs : list of tuples
+            ``(j, i)``: channel ``j`` of this view is channel ``i`` of
+            ``source``.
+        """
+        for j, i in pairs:
+            locs = source.locs[i]
+            self.locs[j] = locs
+            self.infos[j] = source.infos[i]
+            self._drift[j] = source._drift[i]
+            self._driftfiles[j] = source._driftfiles[i]
+            self.currentdrift[j] = source.currentdrift[i]
+            # set directly: ``invalidate_locs_index`` would report the
+            # change back to the linked windows
+            self.index_blocks[j] = None
+            self.render_index[j] = source.render_index[i]
+            self.window.slicer_dialog.zcoord[j] = (
+                locs["z"] if "z" in locs.columns else []
+            )
+        if (
+            len(self.locs) == 1
+            and "group" in self.locs[0].columns
+            and len(self.locs[0])
+        ):
+            self.group_color = render.get_group_color(self.locs[0])
+        # the other window may have moved the channels' canvas
+        self.fit_canvas()
+        self.image = None
+        if not hasattr(self, "viewport"):
+            return
+        if self.x_render_state:
+            self.activate_render_property()  # redraws
+        else:
+            self.update_scene()
+
+    def detach_channel(self, channel: int) -> None:
+        """Replace a channel shared with linked windows by a copy, such
+        that edits no longer affect the others."""
+        self.locs[channel] = self.locs[channel].copy()
+        self.infos[channel] = copy.deepcopy(self.infos[channel])
+        self._copy_drift(channel)
 
     def _finish_load(self) -> None:
         """Tear down the worker thread and the progress dialog."""
@@ -10850,6 +10981,8 @@ class View(QtWidgets.QLabel):
                 self._submit_async_render(
                     autoscale=autoscale, interactive=interactive
                 )
+            self._link_interactive = interactive
+            self.viewport_changed.emit(interactive)
         else:
             self._draw_picks_and_show()
 
@@ -10961,11 +11094,13 @@ class View(QtWidgets.QLabel):
         if self._brush_stroke_ongoing:
             self.qimage = self.draw_brush_stroke_ongoing(self.qimage)
         self.qimage = self.draw_move_shift(self.qimage)
+        self.qimage = self.draw_link_crosshair(self.qimage)
 
         # convert to pixmap
         self.pixmap = QtGui.QPixmap.fromImage(self.qimage)
         self.setPixmap(self.pixmap)
         self.window.update_info()
+        self.picks_drawn.emit()
 
     def _build_render_request(
         self, autoscale: bool = False
@@ -11311,6 +11446,7 @@ class View(QtWidgets.QLabel):
             vmin, vmax = contrast_limits
             self.window.display_settings_dlg.silent_minimum_update(vmin)
             self.window.display_settings_dlg.silent_maximum_update(vmax)
+            self.window.link_notify("contrast")  # e.g. autoscaled
         self._complete_scene(qimage, viewport)
 
     def _visible_n_locs(self, rendered_n: int) -> int:
@@ -12024,6 +12160,8 @@ class View(QtWidgets.QLabel):
         pick."""
         if not len(self.locs):
             return
+        if self.window.link_group is not None:
+            self.cursor_moved.emit(self.map_to_movie(event.pos()))
 
         # panning (right button, or Ctrl + left button in any tool)
         if self._pan:
@@ -12051,12 +12189,14 @@ class View(QtWidgets.QLabel):
             self.update_scene(picks_only=True)
 
     def leaveEvent(self, event: QtCore.QEvent) -> None:
-        """Hide the live measuring cross when the cursor leaves the
-        canvas."""
+        """Hide the live measuring cross and the linked windows'
+        crosshairs when the cursor leaves the canvas."""
         if self._mode == "Measure" and self._measure_cursor is not None:
             self._measure_cursor = None
             if len(self.locs):
                 self.update_scene(picks_only=True)
+        if self.window.link_group is not None:
+            self.cursor_moved.emit(None)
         super().leaveEvent(event)
 
     def _start_pan(self, event: QtCore.QEvent) -> None:
@@ -12362,6 +12502,100 @@ class View(QtWidgets.QLabel):
         painter.drawText(rect, QtCore.Qt.AlignmentFlag.AlignLeft, text)
         painter.end()
         return image
+
+    def draw_link_crosshair(self, image: QtGui.QImage) -> QtGui.QImage:
+        """Draw the cursor position of a linked window as a crosshair.
+
+        Parameters
+        ----------
+        image : QImage
+            Image containing rendered localizations.
+
+        Returns
+        -------
+        image : QImage
+            Image with the drawn crosshair.
+        """
+        if self._link_crosshair is None:
+            return image
+        x, y = render.map_to_view(
+            *self._link_crosshair, image.size(), self.viewport
+        )
+        arm = 14  # length of each arm, in display pixels
+        gap = 4  # free space around the center
+        segments = [
+            QtCore.QLineF(x - gap - arm, y, x - gap, y),
+            QtCore.QLineF(x + gap, y, x + gap + arm, y),
+            QtCore.QLineF(x, y - gap - arm, x, y - gap),
+            QtCore.QLineF(x, y + gap, x, y + gap + arm),
+        ]
+        painter = QtGui.QPainter(image)
+        painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
+        # a dark outline keeps the light core visible on any content
+        for color, width in (("black", 3), ("cyan", 1)):
+            painter.setPen(QtGui.QPen(QtGui.QColor(color), width))
+            painter.drawLines(segments)
+        painter.end()
+        return image
+
+    def set_link_crosshair(self, position: tuple | None) -> None:
+        """Show (or hide, if None) the cursor position of a linked
+        window; redraws the overlays only.
+
+        Parameters
+        ----------
+        position : tuple or None
+            (x, y) in camera pixels, or None to hide the crosshair.
+        """
+        if position == self._link_crosshair:
+            return
+        self._link_crosshair = position
+        if len(self.locs) and hasattr(self, "qimage_no_picks"):
+            self._draw_picks_and_show()
+
+    def apply_link_viewport(
+        self,
+        center: tuple[float, float],
+        scale: float,
+        use_center: bool,
+        use_scale: bool,
+        interactive: bool = False,
+        autoscale: bool = False,
+    ) -> None:
+        """Show a linked window's viewport center and/or scale, sized
+        to this view (windows of different sizes show the same center
+        at the same scale).
+
+        Parameters
+        ----------
+        center : tuple
+            Viewport center (y, x) of the linked window, in camera
+            pixels.
+        scale : float
+            Camera pixels per display pixel of the linked window.
+        use_center, use_scale : bool
+            Adopt the center / scale; otherwise keep this view's own.
+        interactive : bool, optional
+            Render an interactive preview, see ``update_scene``. Default
+            is False.
+        autoscale : bool, optional
+            Adjust the contrast automatically. Default is False.
+        """
+        if hasattr(self, "viewport"):
+            own_center = render.viewport_center(self.viewport)
+            own_scale = render.viewport_height(self.viewport) / max(
+                self.height(), 1
+            )
+        else:
+            own_center, own_scale = center, scale
+        y_c, x_c = center if use_center else own_center
+        scale = scale if use_scale else own_scale
+        half_h = max(self.height(), 1) * scale / 2
+        half_w = max(self.width(), 1) * scale / 2
+        viewport = [(y_c - half_h, x_c - half_w), (y_c + half_h, x_c + half_w)]
+        self.update_scene(
+            viewport=viewport, autoscale=autoscale, interactive=interactive
+        )
 
     def mousePressEvent(self, event: QtCore.QEvent) -> None:
         """Start panning, drawing a zoom-in rectangle or drawing a pick
@@ -13500,9 +13734,15 @@ class View(QtWidgets.QLabel):
         if channel is None:
             self.index_blocks = [None] * len(self.locs)
             self.render_index = [None] * len(self.locs)
+            channels = range(len(self.locs))
         else:
             self.index_blocks[channel] = None
             self.render_index[channel] = None
+            channels = [channel]
+        # linked windows sharing a changed channel update theirs
+        self.window.link_channels_changed(
+            [(self.locs[i], i) for i in channels]
+        )
 
     @check_pick
     def pick_areas(self) -> FloatArray1D:
@@ -13762,6 +14002,11 @@ class View(QtWidgets.QLabel):
         """
         pyramid = self.render_index[channel]
         if pyramid is not None:
+            return pyramid
+        # a linked window sharing the channel may have built it already
+        pyramid = self.window.link_render_index(self.locs[channel])
+        if pyramid is not None:
+            self.render_index[channel] = pyramid
             return pyramid
         try:
             pyramid = spatial_index.build_render_index(
@@ -14035,6 +14280,7 @@ class View(QtWidgets.QLabel):
             self.image = raw_image
         self.window.display_settings_dlg.silent_minimum_update(vmin)
         self.window.display_settings_dlg.silent_maximum_update(vmax)
+        self.window.link_notify("contrast")  # e.g. autoscaled
 
         return qimage
 
@@ -15322,6 +15568,8 @@ class View(QtWidgets.QLabel):
             operations that mutate ``self.locs`` (link, undrift, remove
             pick, etc.). Default is False.
         """
+        # linked windows pass on channels replaced since the last redraw
+        self.scene_requested.emit()
         # Clear slicer cache
         self.window.slicer_dialog.slicer_cache = {}
         if len(self.locs):
@@ -15453,6 +15701,9 @@ class Window(QtWidgets.QMainWindow):
         Instance of the dialog for display settings.
     info_dialog : InfoDialog
         Instance of the dialog storing information about data and picks.
+    link_group : render_link.LinkGroup or None
+        Group of linked windows this window belongs to, see
+        ``picasso.gui.render_link``; None if not linked.
     mask_settings_dialog : MaskSettingsDialog
         Instance of the dialog for masking image.
     menu_bar : QMenuBar
@@ -15463,6 +15714,8 @@ class Window(QtWidgets.QMainWindow):
         Contains plugins loaded from picasso/gui/plugins.
     slicer_dialog : SlicerDialog
         Instance of the dialog for slicing 3D data in z axis.
+    tools_actiongroup : QActionGroup
+        Tools menu actions (Zoom, Pick, Measure, Move).
     tools_settings_dialog : ToolsSettingsDialog
         Instance of the dialog for customizing picks.
     view : View
@@ -15479,9 +15732,36 @@ class Window(QtWidgets.QMainWindow):
 
     DOCS_URL = "https://picassosr.readthedocs.io/en/latest/render.html#"
 
-    def __init__(self, plugins_loaded: bool = False) -> None:
+    #: linked windows opened from another window; referenced here so
+    #: they stay alive while open, also after being unlinked
+    _secondary_windows = []
+
+    def __init__(
+        self,
+        plugins_loaded: bool = False,
+        link_group: render_link.LinkGroup | None = None,
+    ) -> None:
         super().__init__()
+        self._base_title = ""
+        # windows opened as linked windows never close the application
+        self._is_secondary = link_group is not None
+        self.link_group = None
         self.initUI(plugins_loaded)
+        if link_group is not None:
+            link_group.add(self)
+
+    def setWindowTitle(self, title: str) -> None:
+        """Set the window title; linked windows are numbered.
+
+        Parameters
+        ----------
+        title : str
+            Window title without the linked window number.
+        """
+        self._base_title = title
+        if self.link_group is not None:
+            title += self.link_group.title_suffix(self)
+        super().setWindowTitle(title)
 
     def initUI(self, plugins_loaded: bool) -> None:
         """Initialize the main window. Build dialogs and menu bar.
@@ -15706,6 +15986,18 @@ class Window(QtWidgets.QMainWindow):
             "current field of view when no pick is selected"
         )
         rot_win_action.triggered.connect(self.open_3d_view)
+        view_menu.addSeparator()
+        linked_window_action = view_menu.addAction("New linked window...")
+        linked_window_action.setToolTip(
+            "Open another Render window with its own channels that zooms,\n"
+            "pans, etc. together with this one (see Link settings)"
+        )
+        linked_window_action.triggered.connect(self.open_linked_window)
+        link_settings_action = view_menu.addAction("Link settings...")
+        link_settings_action.setToolTip(
+            "Choose the attributes shared by the linked windows"
+        )
+        link_settings_action.triggered.connect(self.show_link_settings)
 
         # menu bar - Tools
         tools_menu = self.menu_bar.addMenu("Tools")
@@ -15736,6 +16028,7 @@ class Window(QtWidgets.QMainWindow):
         )
         tools_menu.addAction(move_tool_action)
         tools_actiongroup.triggered.connect(self.view.set_mode)
+        self.tools_actiongroup = tools_actiongroup
 
         tools_menu.addSeparator()
         tools_settings_action = tools_menu.addAction("Tools settings...")
@@ -15945,12 +16238,29 @@ class Window(QtWidgets.QMainWindow):
         for menu in self.menus[1:]:
             menu.setDisabled(True)
 
+        self._plugins_loaded = plugins_loaded
+        # reconnect the rebuilt view and dialogs (``remove_locs``)
+        if self.link_group is not None:
+            self.link_group.attach(self)
+
     def closeEvent(self, event: QtGui.QCloseEvent) -> None:
-        """Update user settings and close all dialogs."""
+        """Update user settings and close all dialogs. A linked window
+        opened from another window closes only itself."""
         # destroying a running QThread aborts the process
         self.view.stop_load()
         self.view.stop_render_worker()
         self.window_rot.view_rot.stop_render_worker()
+        if self._is_secondary:
+            for dialog in self.dialogs:
+                dialog.close()
+            self.window_rot.close()
+            if self.link_group is not None:
+                self.link_group.remove(self, detach_data=False)
+            if self in Window._secondary_windows:
+                Window._secondary_windows.remove(self)
+            self.deleteLater()
+            event.accept()
+            return
         settings = io.load_user_settings()
         current_colormap = self.display_settings_dlg.colormap.currentText()
         if current_colormap == "Custom":
@@ -17032,6 +17342,72 @@ class Window(QtWidgets.QMainWindow):
         )
         if path:
             self.view.save_picks(path)
+
+    def link_notify(self, key: str) -> None:
+        """Mirror an attribute to the linked windows, if linked; see
+        ``render_link.LinkGroup.notify``.
+
+        Parameters
+        ----------
+        key : str
+            Attribute (category) key, see ``render_link.CATEGORIES``.
+        """
+        if self.link_group is not None:
+            self.link_group.notify(self, key)
+
+    def link_channels_changed(self, changes: list[tuple]) -> None:
+        """Pass changed channels on to the linked windows sharing them;
+        see ``render_link.LinkGroup.channels_changed``.
+
+        Parameters
+        ----------
+        changes : list of tuples
+            ``(held, i)``: the DataFrame the linked windows hold for
+            channel ``i`` of this window.
+        """
+        if self.link_group is not None:
+            self.link_group.channels_changed(self, changes)
+
+    def link_render_index(self, locs: pd.DataFrame):
+        """Render index a linked window built for ``locs``, or None;
+        see ``render_link.LinkGroup.shared_render_index``."""
+        if self.link_group is None:
+            return None
+        return self.link_group.shared_render_index(locs)
+
+    def open_linked_window(self) -> None:
+        """Open another Render window linked to this one, showing the
+        channels chosen in a dialog (shared with this window, or copies
+        if shared localizations are not linked)."""
+        dialog = render_link.NewLinkedWindowDialog(self.view.locs_paths, self)
+        if dialog.exec() != QtWidgets.QDialog.DialogCode.Accepted:
+            return
+        if self.link_group is None:
+            render_link.LinkGroup(self)
+        window = Window(
+            plugins_loaded=self._plugins_loaded, link_group=self.link_group
+        )
+        Window._secondary_windows.append(window)
+        window.resize(self.size())
+        window.show()
+        window.view.add_channels_from(
+            self.view,
+            dialog.selected_channels(),
+            share="localizations" in self.link_group.enabled,
+        )
+
+    def show_link_settings(self) -> None:
+        """Open the dialog choosing the attributes linked between
+        windows."""
+        if self.link_group is None:
+            QtWidgets.QMessageBox.information(
+                self,
+                "Link settings",
+                "This window is not linked. Open a linked window with\n"
+                "View > New linked window...",
+            )
+            return
+        self.link_group.show_settings(self)
 
     def remove_locs(self) -> None:
         """Remove all localizations and reset the window to its initial

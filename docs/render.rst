@@ -506,6 +506,14 @@ Show info
 ^^^^^^^^^
 Shows info for the current dataset. See Info Dialog.
 
+New linked window
+^^^^^^^^^^^^^^^^^
+Opens another, complete Render window with its own channels, for example to compare channels side by side. A dialog asks which of the current window's channels the new window starts with. They are taken as they are, including unsaved changes such as filtering or drift correction, and by default both windows share them in memory: filtering, drift correction, the Move tool, etc. in either window update both. More files can be opened in the new window later; they belong to that window only. By default the linked windows pan and zoom together; windows of different sizes show the same center at the same scale. Closing a linked window leaves the others open; closing the first window closes all of them.
+
+Link settings
+^^^^^^^^^^^^^
+Chooses which attributes the linked windows share: the localizations of shared channels (switching this off gives each window its own copy of them), pan, zoom, a crosshair marking the cursor position of the window the mouse is in, the active tool, render settings, contrast, colormap, render by property, scale bar, minimap, background and legend, camera pixel size, pick shape and size, the picks themselves, and slicing (the slice position is matched in nm). Channel colors and visibility are never shared. When an attribute is switched on, the other windows take it from the window the dialog was opened from; shared localizations, however, apply only to channels taken into a linked window while the option is on. The dialog also lists the linked windows and can bring one to the front or unlink it; an unlinked window keeps copies of the channels it shared. The choice is saved for the next session.
+
 
 Tools
 ~~~~~

@@ -1,6 +1,6 @@
 # Changelog
 
-Last change: 25-SEP-2026 CEST
+Last change: 27-SEP-2026 CEST
 
 ## 0.12.0
 
@@ -12,6 +12,7 @@ Last change: 25-SEP-2026 CEST
 ### Render
 - Render has been largely rewritten for fast and interactive rendering of localizations even for large, multiplex datasets. GPU via the package ``wgpu`` has been added for cross-platform support. More details in the section **Technical details on Render update** below. See these links for the relevant user guides: [navigation](https://picassosr.readthedocs.io/en/latest/render.html#navigating-the-image), [user_settings](https://picassosr.readthedocs.io/en/latest/render.html#cpu-usage-on-shared-workstations), [GPU](https://picassosr.readthedocs.io/en/latest/render.html#gpu-rendering).
 - `View > 3D view` (Ctrl+Shift+R, replacing *Update rotation window*) opens the rotation window on the single selected pick or, without a pick, on the current field of view, so any region can be inspected in 3D by zooming to it; pressed again on unchanged content it only raises the window.
+- Linked windows that share user-selected attributes, see [documentation](https://picassosr.readthedocs.io/en/latest/render.html#New-linked-window).
 - New blur methods *Adaptive Histogram (Quad-Tree)* and *Jittered Triangulation* (Baddeley, Cannell & Soeller, *Microsc. Microanal.* 2010). See the [blur documentation](https://picassosr.readthedocs.io/en/latest/render.html#blur).
 - The display settings (main and 3D window) show the minimum blur only for the Gaussian blur methods that use it.
 - New action to move xy positions of localizations with a mouse. See the [documentation](https://picassosr.readthedocs.io/en/latest/render.html#move-ctrl-g).
