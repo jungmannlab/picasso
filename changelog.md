@@ -1,8 +1,9 @@
 # Changelog
 
-Last change: 18-SEP-2026 CEST
+Last change: 28-SEP-2026 CEST
 
 ## 0.11.3
+- Localize: auto contrast button in the bottom right corner of the window; contrast dialog still exists for a numerical input.
 - New `picasso.localize.localize_frames`: a GUI-free wrapper that runs the existing identification and fit on an in-memory frame stack (instead of a movie read from disk) and assigns absolute frame indices, so batched or live input concatenates into one growing localization table. Results are numerically identical to `picasso.localize.localize` on the same frames and parameters.
 
 ## 0.11.2

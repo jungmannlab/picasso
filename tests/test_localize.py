@@ -8976,6 +8976,28 @@ class TestContrastSliderGUI:
         # one redraw per drag step, not one per spinbox
         assert len(draws) == 1
 
+    def test_auto_button_mirrors_the_dialog_checkbox(self, window):
+        self._show(window)
+        contrast = window.contrast_dialog
+        button = window.contrast_auto_button
+        assert button.isChecked() and contrast.auto_checkbox.isChecked()
+        # dialog -> button
+        contrast.auto_checkbox.setChecked(False)
+        assert not button.isChecked()
+        contrast.auto_checkbox.setChecked(True)
+        assert button.isChecked()
+        # a manual edit unchecks Auto, so the button follows it too
+        window.contrast_slider.setValues(150, 1000)
+        assert not button.isChecked()
+        # button -> dialog: re-derives the range from the frame
+        button.setChecked(True)
+        assert contrast.auto_checkbox.isChecked()
+        frame = window.identification_movie()[window.curr_frame_number]
+        assert (
+            contrast.black_spinbox.value(),
+            contrast.white_spinbox.value(),
+        ) == (frame.min(), frame.max())
+
     def test_the_track_does_not_shrink_while_browsing_frames(self, window):
         self._show(window)
         track = window.contrast_slider.range()

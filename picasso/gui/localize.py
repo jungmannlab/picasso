@@ -5811,6 +5811,12 @@ class Window(QtWidgets.QMainWindow):
         self.frame_slider.setMaximum(0)
         self.frame_slider.setEnabled(False)
         self.frame_slider.setMaximumHeight(15)
+        # lay out by the widget's full rect: macOS insets a QSlider's
+        # layout rect, which let the contrast row below overlap (and the
+        # Auto button paint over) the bottom of the handle
+        self.frame_slider.setAttribute(
+            QtCore.Qt.WidgetAttribute.WA_LayoutUsesWidgetRect
+        )
         self.frame_slider.setStyleSheet(
             """
             QSlider::groove:horizontal {
@@ -5841,6 +5847,39 @@ class Window(QtWidgets.QMainWindow):
         self.contrast_slider.valuesChanged.connect(
             self.on_contrast_slider_changed
         )
+        # Auto toggle at the slider's side, a second view onto the contrast
+        # dialog's Auto checkbox. Connected both ways; ``setChecked`` with
+        # an unchanged state emits nothing, so the pair does not loop.
+        self.contrast_auto_button = QtWidgets.QToolButton()
+        self.contrast_auto_button.setText("Auto")
+        self.contrast_auto_button.setToolTip(
+            "Set the contrast automatically for each frame?"
+        )
+        self.contrast_auto_button.setCheckable(True)
+        # as short as the slider, so the row does not grow into the frame
+        # slider above it
+        self.contrast_auto_button.setFixedHeight(15)
+        font = self.contrast_auto_button.font()
+        font.setPointSizeF(font.pointSizeF() * 0.8)
+        self.contrast_auto_button.setFont(font)
+        self.contrast_auto_button.setStyleSheet(
+            "QToolButton { padding: 0px 4px; }"
+        )
+        self.contrast_auto_button.setChecked(
+            self.contrast_dialog.auto_checkbox.isChecked()
+        )
+        self.contrast_auto_button.setEnabled(False)
+        self.contrast_auto_button.toggled.connect(
+            self.contrast_dialog.auto_checkbox.setChecked
+        )
+        self.contrast_dialog.auto_checkbox.toggled.connect(
+            self.contrast_auto_button.setChecked
+        )
+        contrast_layout = QtWidgets.QHBoxLayout()
+        contrast_layout.setContentsMargins(0, 0, 0, 0)
+        contrast_layout.setSpacing(4)
+        contrast_layout.addWidget(self.contrast_slider)
+        contrast_layout.addWidget(self.contrast_auto_button)
         # Channel selector (hidden unless several channels are loaded).
         self.channel_combo = QtWidgets.QComboBox()
         self.channel_combo.setVisible(False)
@@ -5854,7 +5893,7 @@ class Window(QtWidgets.QMainWindow):
         central_layout.addWidget(self.channel_combo)
         central_layout.addWidget(self.view)
         central_layout.addWidget(self.frame_slider)
-        central_layout.addWidget(self.contrast_slider)
+        central_layout.addLayout(contrast_layout)
         self.setCentralWidget(central_widget)
         self.status_bar = self.statusBar()
         self.status_bar_frame_indicator = QtWidgets.QLabel()
@@ -7709,6 +7748,7 @@ class Window(QtWidgets.QMainWindow):
         self._populate_channel_combo()
         self.frame_slider.setEnabled(True)
         self.contrast_slider.setEnabled(True)
+        self.contrast_auto_button.setEnabled(True)
         self.curr_frame_number = 0
         self._restore_current_channel()
         self.draw_frame()
