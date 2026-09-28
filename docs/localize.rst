@@ -560,24 +560,36 @@ Multichannel spline fitting benefits greatly from re-aligning the channels on th
 Identifying on the sum of the channels
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-When one channel carries very little signal, identifying the channels separately loses most molecules: the dim channel detects only a few of them, and the joint fit keeps only the spots found in *every* channel. The ``Identify on`` setting in the ``Parameters`` dialog (shown for multichannel and split-FOV data) offers a second mode for exactly this case:
+When one channel carries very little signal, identifying the channels separately loses most molecules: the dim channel detects only a few of them, and the joint fit keeps only the spots found in *every* channel. The ``Identify on`` setting in the ``Parameters`` dialog (shown for multichannel and split-FOV data) offers two more modes for exactly this case:
 
 - **Each channel separately** — the default described above.
-- **Sum of channels** — every channel is mapped onto the reference channel and added up in photons, and the spots are identified in that sum. A molecule that is too faint to detect in any single channel can still stand out in the combined signal.
+- **Sum of registered channels** — every channel is mapped onto the reference channel and added up in photons, and the spots are identified in that sum. A molecule that is too faint to detect in any single channel can still stand out in the combined signal.
+- **Sum of unregistered channels** — the channels are added up in photons pixel for pixel, as they are, without any registration (alignment). See `Summing without registration`_ below.
 
 The channels have to be (re)registered *before* they can be summed. The registration comes from the loaded multichannel / split-FOV spline calibration whenever one is loaded — the sum is then built with exactly the transforms the fit will use. Without a calibration, Picasso first identifies every channel (or region) as usual and estimates the transforms from those detections, and only then builds the sum; this needs enough detections in every channel, so lower the minimum net gradient of the dim channel until spots appear in it. A channel that cannot be registered is reported rather than assumed to be aligned, since summing it in at the wrong place would smear the very spots the mode is meant to recover.
 
 A few things to be aware of in this mode:
 
-- **The minimum net gradient has to be re-tuned.** The sum is in photons and over all channels, so its net gradients are on a different scale than a single channel's raw counts. In split-FOV mode the single shared threshold applies (there is one summed image), not the per-region thresholds.
-- **The image on screen is the sum.** The display and ``Preview`` run on the summed movie, exactly as the identification does, so the threshold can be swept on what is actually being searched. The summed view appears as soon as ``Sum of channels`` is selected, wherever the channels can be registered without identifying them first (a loaded calibration, or per-channel identifications already made) — so the minimum net gradient can be tuned with ``Preview`` before running ``Identify``. If neither is available, the status bar says so and the summed view appears once ``Identify`` has identified the channels to register them. For split-FOV data only the reference region is filled — the other regions have been mapped into it.
+- **The sum has its own identification settings.** Box size, minimum net gradient and the identification filters are one set for the sum, shown in the ``Parameters`` dialog whenever a sum mode is selected, whichever channel is displayed. Every channel keeps its own settings underneath: they come back when ``Identify on`` is set to ``Each channel separately``, and they are the ones the channels are identified with to register them for the sum. The first time a sum is selected, it starts from the settings then shown. Both sum modes share the one set.
+- **The minimum net gradient has to be re-tuned.** The sum is in photons and over all channels, so its net gradients are on a different scale than a single channel's raw counts. In split-FOV mode the sum's single threshold applies (there is one summed image), and the per-region thresholds are left as they are.
+- **The image on screen is the sum.** The display and ``Preview`` run on the summed movie, exactly as the identification does, so the threshold can be swept on what is actually being searched. The summed view appears as soon as ``Sum of registered channels`` is selected, wherever the channels can be registered without identifying them first (a loaded calibration, or per-channel identifications already made) — so the minimum net gradient can be tuned with ``Preview`` before running ``Identify``. If neither is available, the status bar says so and the summed view appears once ``Identify`` has identified the channels to register them. For split-FOV data only the reference region is filled — the other regions have been mapped into it.
 - **The fit does not link across channels.** The sum detections are already the cross-channel consensus, so they go into the joint fit as they are; requiring a detection in every channel on top of that would undo the whole point. The detections are in reference-channel coordinates, as the fit expects.
 - The temporal median and Gaussian identification filters apply to the sum.
 - The mode applies to the experimental data only. ``Calibrate spline PSF`` and the z-calibration are built from bead stacks one channel at a time and always identify the channels separately.
 
 If the loaded calibration's registration is off, re-align it first: ``Calibration`` > ``Re-align channels (current signal)`` re-fits the inter-channel transform from the current blinking data (use a high ``Min. net gradient``, so only bright spots are paired) and updates the loaded calibration in memory. It keeps the calibration's own model unless another is picked in the dialog, and reports the model it actually fitted — if too few pairs survive for the model asked for, it falls back to an affine and says so. The channel sum is then built from the refined transforms — any sum made before the re-alignment is discarded, so run ``Identify`` again afterwards. This is worth doing whenever the bead stack and the measurement were not acquired one after another, since the sum is only as sharp as the registration: a misaligned channel smears the summed spot and lowers its net gradient, which is exactly the signal the mode relies on.
 
-The same is available from a script via :func:`picasso.localize.identify_multichannel_sum` (and :class:`picasso.localize.SummedChannelsMovie` for the summed view itself).
+Summing without registration
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+``Sum of unregistered channels`` needs neither a calibration nor per-channel detections: the summed view is on screen as soon as the mode is selected, and switching between the channels shows the same image. Use it when the channels already overlay each other pixel for pixel (for example, the same field of view imaged one after another on one camera), or to look at the combined signal before any registration exists. Separate channel movies must then have the same frame size. If the channels do not overlay, each molecule shows up once per channel in the sum rather than as one brighter spot; use ``Sum of registered channels`` then.
+
+The detections stand at the same pixel in every channel (or split-FOV region), which decides how they are fitted:
+
+- ``Fit`` > **Each channel separately** fits every channel (or region) at these detections, each with its own settings, and saves one file per channel as usual.
+- The joint fit takes them as it takes the registered sum's detections, without linking, but still places them in the other channels through the registration of the loaded calibration. This only makes sense when that registration is close to the identity, i.e. when the channels really do overlay.
+
+The same is available from a script via :func:`picasso.localize.identify_multichannel_sum` (and :class:`picasso.localize.SummedChannelsMovie` for the summed view itself); :func:`picasso.localize.unregistered_sum_transforms` gives the transforms that sum the channels without registration.
 
 Multichannel 2D Gaussian fitting
 --------------------------------

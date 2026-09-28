@@ -10625,6 +10625,65 @@ class TestSummedChannelsMovie:
         assert len(summed) == 3
 
 
+class TestUnregisteredSumTransforms:
+    """The transforms that add the channels up as they are."""
+
+    def test_separate_movies_are_summed_at_the_identity(self):
+        transforms = localize.unregistered_sum_transforms(3)
+        assert len(transforms) == 3
+        assert all(t.is_identity() for t in transforms)
+
+    def test_split_fov_regions_are_stacked_by_their_corners(self):
+        # corners in any order, as they come out of the view
+        regions = [[[0, 0], [48, 48]], [[48, 96], [0, 48]]]
+        reference, channel = localize.unregistered_sum_transforms(2, regions)
+        assert reference.is_identity()
+        np.testing.assert_allclose(channel.apply([[3.0, 4.0]]), [[51.0, 4.0]])
+
+    def test_split_fov_sum_adds_the_regions_pixel_for_pixel(self):
+        regions = [[[0, 0], [32, 32]], [[0, 32], [32, 64]]]
+        rng = np.random.default_rng(0)
+        movie = rng.poisson(20.0, (2, 32, 64)).astype(np.float32)
+        summed = localize.SummedChannelsMovie(
+            [movie, movie],
+            localize.unregistered_sum_transforms(2, regions),
+            regions=regions,
+        )
+        frame = summed[1]
+        np.testing.assert_allclose(
+            frame[:, :32], movie[1][:, :32] + movie[1][:, 32:], rtol=1e-6
+        )
+        assert np.all(frame[:, 32:] == 0)
+
+    def test_frames_of_another_size_cannot_be_added_as_they_are(self):
+        with pytest.raises(ValueError, match="differ from the reference"):
+            localize.SummedChannelsMovie(
+                [np.zeros((2, 8, 8)), np.zeros((2, 8, 10))],
+                localize.unregistered_sum_transforms(2),
+            )
+
+    def test_finds_a_molecule_too_dim_for_either_aligned_channel(self):
+        positions = [(16.0, 20.0), (32.0, 28.0)]
+        reference, channel = _channel_pair(
+            positions, IDENTITY_AFFINE, amplitudes=(300.0, 300.0), n_frames=4
+        )
+        minimum_ng = 7000
+        alone, _ = localize.identify(
+            reference, minimum_ng, BOX, threaded=False
+        )
+        assert len(alone) == 0
+        ids, _ = localize.identify_multichannel_sum(
+            [reference, channel],
+            minimum_ng,
+            BOX,
+            localize.unregistered_sum_transforms(2),
+            camera_infos=[UNIT_CAMERA] * 2,
+            threaded=False,
+        )
+        found = set(zip(ids["x"].tolist(), ids["y"].tolist()))
+        assert found == {(16, 20), (32, 28)}
+
+
 class TestIdentifyMultichannelSum:
     """Identification on the summed channels."""
 
@@ -10962,7 +11021,7 @@ class TestChannelSumRegistration:
                 estimate=True
             )
             assert regions is None
-            assert "per-channel identifications" in source
+            assert source.startswith("detections (")
             np.testing.assert_allclose(
                 affine_matrix(transforms[1]),
                 affine_matrix(transform),
@@ -11075,8 +11134,8 @@ class TestChannelSumPreview:
     will search - without having to identify first."""
 
     def _reselect_sum_mode(self, window):
-        """Re-pick 'Sum of channels', as the user would after loading a
-        calibration or identifying the channels."""
+        """Re-pick 'Sum of registered channels', as the user would after
+        loading a calibration or identifying the channels."""
         combo = window.parameters_dialog.identify_mode_combo
         combo.setCurrentText(localize_gui.IDENTIFY_MODE_SEPARATE)
         combo.setCurrentText(localize_gui.IDENTIFY_MODE_SUM)
@@ -11136,7 +11195,7 @@ class TestChannelSumPreview:
             window.identifications = ids[0]
             self._reselect_sum_mode(window)
             assert window._sum_movie is not None
-            assert "per-channel identifications" in window.sum_transform_source
+            assert window.sum_transform_source.startswith("detections (")
             np.testing.assert_allclose(
                 affine_matrix(window.sum_transforms[1]),
                 affine_matrix(transform),
@@ -11210,6 +11269,212 @@ class TestChannelSumPreview:
             localize_gui.ParametersDialog.update_spline_calib
         )
         assert "self.window.drop_channel_sum()" in source
+
+
+def _unregistered_sum_window(reference, channel):
+    """A Localize window with two channel movies loaded and the sum of
+    unregistered channels selected."""
+    window = _sum_mode_window(reference, channel)
+    window.parameters_dialog.identify_mode_combo.setCurrentText(
+        localize_gui.IDENTIFY_MODE_UNREGISTERED_SUM
+    )
+    return window
+
+
+@pytest.mark.gui
+class TestUnregisteredChannelSum:
+    """Identifying on the channels added up as they are."""
+
+    def test_the_sum_is_on_screen_without_any_registration(self):
+        positions = [(12.0, 15.0), (30.0, 22.0)]
+        reference, channel = _channel_pair(positions, IDENTITY_AFFINE)
+        window = _unregistered_sum_window(reference, channel)
+        try:
+            assert window._sum_movie is not None
+            assert (
+                window.sum_transform_source
+                == localize_gui.UNREGISTERED_SUM_SOURCE
+            )
+            assert "not registered" in window.status_bar.currentMessage()
+            shown = window.identification_movie()[0]
+            for x, y in positions:
+                assert shown[int(y), int(x)] == pytest.approx(400.0, rel=1e-3)
+            # the complaint this mode answers: every channel shows the sum
+            window.set_current_channel(1)
+            np.testing.assert_array_equal(
+                window.identification_movie()[0], shown
+            )
+        finally:
+            window.close()
+
+    def test_the_registered_sum_says_why_it_is_not_shown(self):
+        """The notice used to be cleared by the redraw that follows the mode
+        switch, so the raw channels were shown without a word."""
+        movie = np.zeros((2, 16, 16), np.float32)
+        window = _sum_mode_window(movie, movie)
+        try:
+            assert window._sum_movie is None
+            assert "not registered" in window.status_bar.currentMessage()
+        finally:
+            window.close()
+
+    def test_channels_of_another_size_are_reported(self):
+        window = _sum_mode_window(
+            np.zeros((2, 16, 16), np.float32),
+            np.zeros((2, 16, 20), np.float32),
+        )
+        try:
+            window.parameters_dialog.identify_mode_combo.setCurrentText(
+                localize_gui.IDENTIFY_MODE_UNREGISTERED_SUM
+            )
+            assert window._sum_movie is None
+            assert (
+                "differ from the reference"
+                in window.status_bar.currentMessage()
+            )
+        finally:
+            window.close()
+
+    def test_every_channel_carries_the_detections(self):
+        positions = [(12.0, 15.0), (30.0, 22.0)]
+        reference, channel = _channel_pair(positions, IDENTITY_AFFINE)
+        window = _unregistered_sum_window(reference, channel)
+        try:
+            window.identify()
+            window._active_worker.wait()
+            QtWidgets.QApplication.processEvents()
+            assert window.sum_is_unregistered()
+            assert (
+                window.last_identification_info["Channel sum registration"]
+                == localize_gui.UNREGISTERED_SUM_SOURCE
+            )
+            for c in window.channels:
+                assert c.ready_for_fit
+                found = set(
+                    zip(
+                        c.identifications["x"].tolist(),
+                        c.identifications["y"].tolist(),
+                    )
+                )
+                assert found == {(12, 15), (30, 22)}
+        finally:
+            window.close()
+
+    def test_the_registered_sum_stays_with_the_reference(self):
+        positions = [(12.0, 15.0), (30.0, 22.0)]
+        transform = affine([[1.0, 0.0, 4.0], [0.0, 1.0, -3.0]])
+        reference, channel = _channel_pair(positions, transform)
+        window = _sum_mode_window(reference, channel)
+        try:
+            window._run_sum_identification(
+                [IDENTITY_AFFINE, transform], None, "a test"
+            )
+            window._active_worker.wait()
+            QtWidgets.QApplication.processEvents()
+            assert not window.sum_is_unregistered()
+            assert window.channels[1].identifications is None
+        finally:
+            window.close()
+
+
+@pytest.mark.gui
+class TestSumSettings:
+    """The channel sum has one set of identification settings, apart from
+    every channel's own."""
+
+    def _window(self):
+        movie = np.zeros((4, 16, 16), np.float32)
+        window = localize_gui.Window()
+        window._set_channels(
+            [movie, movie],
+            [_info("Channel 0"), _info("Channel 1")],
+            ["a.tif", "b.tif"],
+            ["Channel 0", "Channel 1"],
+        )
+        dialog = window.parameters_dialog
+        for index, (mng, sigma) in enumerate(((1000, 0.0), (2000, 1.0))):
+            window.set_current_channel(index)
+            dialog.mng_spinbox.setValue(mng)
+            dialog.gaussian_filter_spinbox.setValue(sigma)
+        window.set_current_channel(0)
+        return window
+
+    @staticmethod
+    def _shown(window):
+        dialog = window.parameters_dialog
+        return (
+            dialog.mng_slider.value(),
+            dialog.gaussian_filter_spinbox.value(),
+        )
+
+    @staticmethod
+    def _select(window, mode):
+        window.parameters_dialog.identify_mode_combo.setCurrentText(mode)
+
+    def test_the_sum_keeps_its_settings_across_channels(self):
+        window = self._window()
+        dialog = window.parameters_dialog
+        try:
+            self._select(window, localize_gui.IDENTIFY_MODE_UNREGISTERED_SUM)
+            # the first sum starts from the settings on the dialog
+            assert self._shown(window) == (1000, 0.0)
+            dialog.mng_spinbox.setValue(9000)
+            dialog.gaussian_filter_spinbox.setValue(0.5)
+            window.set_current_channel(1)
+            assert self._shown(window) == (9000, 0.5)
+            assert window.parameters["Min. Net Gradient"] == 9000
+            # both sums share the one set
+            self._select(window, localize_gui.IDENTIFY_MODE_SUM)
+            assert self._shown(window) == (9000, 0.5)
+            # the channels kept their own
+            self._select(window, localize_gui.IDENTIFY_MODE_SEPARATE)
+            assert self._shown(window) == (2000, 1.0)
+            window.set_current_channel(0)
+            assert self._shown(window) == (1000, 0.0)
+            # ... and the sum its own
+            self._select(window, localize_gui.IDENTIFY_MODE_UNREGISTERED_SUM)
+            assert self._shown(window) == (9000, 0.5)
+        finally:
+            window.close()
+
+    def test_the_channels_are_registered_with_their_own_settings(self):
+        """Identifying every channel to register them for the sum uses each
+        channel's own threshold, not the sum's."""
+        window = self._window()
+        dialog = window.parameters_dialog
+        try:
+            self._select(window, localize_gui.IDENTIFY_MODE_SUM)
+            dialog.mng_spinbox.setValue(9000)
+            for channel, mng, sigma in ((0, 1000, 0.0), (1, 2000, 1.0)):
+                parameters = window.channel_parameters(channel)
+                assert parameters["Min. Net Gradient"] == mng
+                assert parameters["Gaussian Filter Sigma"] == sigma
+                assert (
+                    parameters["Identification Mode"]
+                    == localize_gui.IDENTIFY_MODE_SEPARATE
+                )
+        finally:
+            window.close()
+
+    def test_the_sum_leaves_the_region_thresholds_alone(self):
+        movie = np.zeros((4, 32, 64), np.float32)
+        window = localize_gui.Window()
+        dialog = window.parameters_dialog
+        try:
+            window._set_channels([movie], [_info()], ["a.tif"], ["Channel 0"])
+            window.view.rois = [[[0, 0], [32, 32]], [[0, 32], [32, 64]]]
+            window.set_split_fov_mode(True)
+            window.view.selected_roi = None
+            window.view.roi_mngs = [1000, 2000]
+            self._select(window, localize_gui.IDENTIFY_MODE_UNREGISTERED_SUM)
+            dialog.mng_spinbox.setValue(9000)
+            assert window.parameters["Min. Net Gradient"] == 9000
+            assert window.region_mngs() == [1000, 2000]
+            self._select(window, localize_gui.IDENTIFY_MODE_SEPARATE)
+            assert window.region_mngs() == [1000, 2000]
+            assert window.parameters["Min. Net Gradient"] == [1000, 2000]
+        finally:
+            window.close()
 
 
 @pytest.mark.gui
@@ -12880,7 +13145,6 @@ class TestSlotsSurviveAStaleWindow:
             )
             message = window.status_bar.currentMessage()
             assert "sum of 2 channels" in message
-            assert "registered from a test" in message
             assert (
                 window.last_identification_info["Channel sum registration"]
                 == "a test"
@@ -13889,6 +14153,91 @@ class TestFitEachRegionSeparately:
 
 
 @pytest.mark.gui
+class TestFitTheUnregisteredSumSeparately:
+    """Detections made on the sum of unregistered channels are fitted in
+    every channel (every region) on its own."""
+
+    def _identify(self, window):
+        dialog = window.parameters_dialog
+        dialog.box_spinbox.setValue(7)
+        dialog.mng_slider.setValue(3000)
+        dialog.identify_mode_combo.setCurrentText(
+            localize_gui.IDENTIFY_MODE_UNREGISTERED_SUM
+        )
+        dialog.fit_mode_combo.setCurrentText(localize_gui.FIT_MODE_SEPARATE)
+        window.identify()
+        window._active_worker.wait()
+        QtWidgets.QApplication.processEvents()
+        assert window.sum_is_unregistered()
+
+    def _unit_camera_window(self):
+        window = localize_gui.Window()
+        dialog = window.parameters_dialog
+        dialog.baseline.setValue(0)
+        dialog.sensitivity.setValue(1.0)
+        dialog.gain.setValue(1)
+        return window
+
+    def test_every_channel_is_fitted_at_the_sum_detections(
+        self, tmp_path, picasso_movie_factory
+    ):
+        # the same molecule, dimmer in the second channel
+        movie_a, _ = _spot_movie(spots=[(12.4, 15.6, 900.0)])
+        movie_b, _ = _spot_movie(spots=[(12.4, 15.6, 300.0)], seed=7)
+        info = [{"Frames": 4, "Height": 32, "Width": 64}]
+        window = self._unit_camera_window()
+        try:
+            window._set_channels(
+                [
+                    picasso_movie_factory(movie_a, info),
+                    picasso_movie_factory(movie_b, info),
+                ],
+                [list(info), list(info)],
+                [str(tmp_path / "a.tif"), str(tmp_path / "b.tif")],
+                ["c0", "c1"],
+            )
+            self._identify(window)
+            window.fit()
+            _pump(window)
+            first, _ = io.load_locs(str(tmp_path / "a_locs.hdf5"))
+            second, _ = io.load_locs(str(tmp_path / "b_locs.hdf5"))
+            assert len(first) == len(second) == 4
+            assert abs(first["x"].mean() - 12.4) < 0.5
+            assert abs(second["x"].mean() - 12.4) < 0.5
+        finally:
+            window.close()
+
+    def test_every_region_is_fitted_at_its_corner_offset(
+        self, tmp_path, picasso_movie_factory
+    ):
+        movie, _ = _spot_movie(
+            spots=[(12.4, 15.6, 900.0), (44.4, 15.6, 300.0)]
+        )
+        info = [{"Frames": 4, "Height": 32, "Width": 64}]
+        window = self._unit_camera_window()
+        try:
+            window._set_channels(
+                [picasso_movie_factory(movie, info)],
+                [list(info)],
+                [str(tmp_path / "split.tif")],
+                ["c0"],
+            )
+            window.view.rois = [[[0, 0], [32, 32]], [[0, 32], [32, 64]]]
+            window.set_split_fov_mode(True)
+            self._identify(window)
+            window.fit()
+            _pump(window)
+            first, _ = io.load_locs(str(tmp_path / "split_ref_locs.hdf5"))
+            second, _ = io.load_locs(str(tmp_path / "split_ch1_locs.hdf5"))
+            assert len(first) == len(second) == 4
+            assert abs(first["x"].mean() - 12.4) < 0.5
+            # in the region's own coordinates
+            assert abs(second["x"].mean() - 12.4) < 0.5
+        finally:
+            window.close()
+
+
+@pytest.mark.gui
 class TestIndependentFitGuards:
     """What the independent fit refuses, and why."""
 
@@ -13921,7 +14270,7 @@ class TestIndependentFitGuards:
             window.sum_identifications = ids
             window.ready_for_fit = True
             window.fit()
-            assert told and "sum of the channels" in told[0]
+            assert told and "sum of the registered channels" in told[0]
             assert window._multi_fit is None
         finally:
             window.close()
