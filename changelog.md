@@ -20,6 +20,7 @@ Last change: 27-SEP-2026 CEST
 - Apply expression to localizations expands the canvas (metadata's `Height` and `Width`) if x and y positions are out of range.
 - Overlay of image files (`.png` and `.tif`), see the [documentation](https://picassosr.readthedocs.io/en/latest/render.html#overlay-image).
 - Editable appearance of the tools (e.g., picks), see the [documentation](https://picassosr.readthedocs.io/en/latest/render.html#tools-settings-ctrl-t).
+- Smooth transitions in 3D animations: the motion eases in and out and passes through the positions without sharp turns, see the [documentation](https://picassosr.readthedocs.io/en/latest/render.html#build-an-animation).
 - Faster circular picking of localizations.
 - Faster FRC.
 - FRC in several random ROIs (*Info* dialog, *FRC in several ROIs*).

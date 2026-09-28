@@ -1654,9 +1654,9 @@ class TestDrawing:
             pick_size=None,
         )
         pixels = _qimage_to_array(out)
-        centre = pixels[60, 60, :3]  # where the two strokes cross
+        center = pixels[60, 60, :3]  # where the two strokes cross
         arm = pixels[60, 30, :3]  # only the horizontal stroke
-        np.testing.assert_array_equal(centre, arm)
+        np.testing.assert_array_equal(center, arm)
 
     def test_draw_picks_unknown_shape_raises(self):
         with pytest.raises(ValueError):
@@ -2256,6 +2256,108 @@ class TestAnimationSequence:
         assert np.allclose(viewports[1], ((4.0, 4.0), (28.0, 28.0)))
         assert np.allclose(viewports[-1], vp2)
 
+    @staticmethod
+    def _velocities(rotations, fps):
+        """World-frame angular velocity (rad/s) between frames."""
+        return (
+            np.array(
+                [
+                    (rotations[i + 1] * rotations[i].inv()).as_rotvec()
+                    for i in range(len(rotations) - 1)
+                ]
+            )
+            * fps
+        )
+
+    def _turning_sequence(self, fps, transition):
+        """Three segments whose directions change at each checkpoint,
+        the last one spinning more than a full turn."""
+        segments = [
+            np.radians([0.0, 0.0, 90.0]),
+            np.radians([0.0, 50.0, 80.0]),
+            np.radians([60.0, 20.0, 420.0]),
+        ]
+        checkpoints = [Rotation.identity()]
+        for segment in segments:
+            checkpoints.append(Rotation.from_rotvec(segment) * checkpoints[-1])
+        rotations, _ = render._animation_sequence(
+            [(R, FULL_VIEWPORT) for R in checkpoints],
+            [1.0, 1.0, 2.0],
+            fps,
+            segment_rotations=segments,
+            transition=transition,
+        )
+        return rotations, checkpoints
+
+    @pytest.mark.parametrize("transition", ["smooth", "ease"])
+    def test_eased_transitions_hit_checkpoints(self, transition):
+        """Eased paths pass exactly through every checkpoint, start and
+        end at rest and keep the requested full turn."""
+        fps = 120
+        rotations, checkpoints = self._turning_sequence(fps, transition)
+        for frame, R in zip((0, fps, 2 * fps, -1), checkpoints):
+            assert (rotations[frame] * R.inv()).magnitude() == pytest.approx(
+                0.0, abs=1e-9
+            )
+        speeds = np.linalg.norm(self._velocities(rotations, fps), axis=1)
+        assert speeds[0] < 0.05 * speeds.max()
+        assert speeds[-1] < 0.05 * speeds.max()
+        assert np.degrees(speeds.sum() / fps) > 560
+
+    def test_smooth_velocity_is_continuous(self):
+        """Unlike constant speed, the smooth path has no velocity jump
+        at the intermediate checkpoints: the largest frame-to-frame
+        change in velocity shrinks with the frame rate."""
+
+        def max_jump(fps, transition):
+            rotations, _ = self._turning_sequence(fps, transition)
+            velocities = self._velocities(rotations, fps)
+            return np.linalg.norm(np.diff(velocities, axis=0), axis=1).max()
+
+        assert max_jump(960, "smooth") < 0.3 * max_jump(240, "smooth")
+        # the constant-speed path jumps by the same amount at any rate
+        assert max_jump(960, "linear") == pytest.approx(
+            max_jump(240, "linear"), rel=0.05
+        )
+        assert max_jump(960, "smooth") < 0.05 * max_jump(960, "linear")
+
+    def test_ease_rests_at_every_checkpoint(self):
+        fps = 120
+        rotations, _ = self._turning_sequence(fps, "ease")
+        speeds = np.linalg.norm(self._velocities(rotations, fps), axis=1)
+        for frame in (fps, 2 * fps):
+            assert speeds[frame] < 0.05 * speeds.max()
+
+    def test_smooth_rests_before_a_stay(self):
+        """The motion comes to rest at a checkpoint followed by a stay
+        segment instead of overshooting and coming back."""
+        R1 = Rotation.identity()
+        R2 = Rotation.from_rotvec([0.0, 0.0, np.pi / 2])
+        fps = 100
+        rotations, _ = render._animation_sequence(
+            [(R1, FULL_VIEWPORT), (R2, FULL_VIEWPORT), (R2, FULL_VIEWPORT)],
+            [1.0, 1.0],
+            fps,
+            transition="smooth",
+        )
+        for R in rotations[fps:]:
+            assert (R * R2.inv()).magnitude() == pytest.approx(0.0, abs=1e-9)
+        angles = [R.magnitude() for R in rotations[: fps + 1]]
+        assert np.all(np.diff(angles) >= -1e-12)
+
+    def test_smooth_viewport_zooms_geometrically(self):
+        """Eased viewports interpolate the size logarithmically: halfway
+        through a 4x zoom the view is 2x zoomed, centered in between."""
+        R = Rotation.identity()
+        vp1 = ((0.0, 0.0), (32.0, 32.0))
+        vp2 = ((8.0, 8.0), (16.0, 16.0))
+        _, viewports = render._animation_sequence(
+            [(R, vp1), (R, vp2)], [1.0], fps=3, transition="smooth"
+        )
+        assert np.allclose(viewports[0], vp1)
+        assert np.allclose(viewports[1], ((6.0, 6.0), (22.0, 22.0)))
+        assert np.allclose(viewports[-1], vp2)
+
     def test_normalize_legacy_positions_raise(self):
         """Legacy Euler positions were removed in v0.12.0; the error
         names the replacement."""
@@ -2340,6 +2442,28 @@ class TestBuildAnimation:
         assert len(rendered) < 10  # stopped early
         assert not out_path.exists()
         assert not out_path.with_suffix(".yaml").exists()
+
+    def test_transition_saved_and_validated(self, locs_3d, info, tmp_path):
+        out_path = tmp_path / "anim.mp4"
+        kwargs = dict(
+            positions=[
+                (Rotation.identity(), FULL_VIEWPORT),
+                (Rotation.from_rotvec([0.1, 0.0, 0.0]), FULL_VIEWPORT),
+            ],
+            durations=[1.0],
+            disp_px_size=PIXELSIZE,
+            image_size=(64, 64),
+            fps=2,
+        )
+        with pytest.raises(AssertionError, match="transition"):
+            render.build_animation(
+                str(out_path), locs_3d, info, transition="cubic", **kwargs
+            )
+        render.build_animation(
+            str(out_path), locs_3d, info, transition="smooth", **kwargs
+        )
+        settings = io.load_info(str(out_path.with_suffix(".yaml")))[0]
+        assert settings["Transition"] == "smooth"
 
 
 # ---------------------------------------------------------------------------

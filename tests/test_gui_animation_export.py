@@ -164,3 +164,32 @@ def test_closing_the_window_stops_a_build(dialog, qapp, monkeypatch):
     dialog.window.close()
     assert dialog._build_thread is None
     assert dialog.build.isEnabled()
+
+
+def test_transition_choice_reaches_the_build(dialog, qapp, monkeypatch):
+    """The dialog defaults to stopping at each position and passes the
+    selected one on to ``render.build_animation``."""
+    received = []
+
+    def record_build(path, locs, info, *, transition, **kwargs):
+        received.append(transition)
+        return True
+
+    monkeypatch.setattr(rotation.render, "build_animation", record_build)
+    assert dialog.transition.currentText() == "Stop at each position"
+    for name, expected in (
+        ("Smooth", "smooth"),
+        ("Stop at each position", "ease"),
+        ("Constant speed", "linear"),
+    ):
+        dialog.transition.setCurrentText(name)
+        dialog.build_animation()
+        _wait_until(qapp, lambda: dialog._build_thread is None)
+        assert received[-1] == expected
+    assert dialog.warnings == []
+
+
+def test_help_button_links_to_the_animation_docs(dialog):
+    buttons = dialog.findChildren(lib.HelpButton)
+    assert [b.help_url for b in buttons] == [dialog.DOCS_URL]
+    assert dialog.DOCS_URL.endswith("render.html#build-an-animation")

@@ -553,9 +553,33 @@ class AnimationDialog(lib.Dialog):
     rot_speed : QDoubleSpinBox
         Contains the default rotation speed calculated when adding a
         position with different angles.
+    transition : QComboBox
+        Timing of the motion between positions, one of
+        ``TRANSITIONS`` (see ``render.build_animation``).
     window : QMainWindow
         Instance of the rotation window.
     """
+
+    DOCS_URL = "https://picassosr.readthedocs.io/en/latest/render.html#build-an-animation"  # noqa: E501
+
+    # display name -> (``render.build_animation`` transition, tooltip)
+    TRANSITIONS = {
+        "Stop at each position": (
+            "ease",
+            "Accelerates and decelerates between every two positions, "
+            "coming to rest at each of them.",
+        ),
+        "Smooth": (
+            "smooth",
+            "Starts and ends at rest and passes through the positions "
+            "without abrupt changes of direction or speed.",
+        ),
+        "Constant speed": (
+            "linear",
+            "Moves at a constant speed between every two positions; "
+            "direction and speed change abruptly at the positions.",
+        ),
+    }
 
     def __init__(self, window: QtWidgets.QMainWindow) -> None:
         super().__init__(window)
@@ -568,7 +592,8 @@ class AnimationDialog(lib.Dialog):
         self.window = window
         self.setWindowTitle("Build an animation")
         self.setModal(False)
-        self.resize(600, 500)
+        # as narrow as the controls allow
+        self.resize(0, 420)
 
         self.positions = []
         self.rows = []
@@ -577,6 +602,7 @@ class AnimationDialog(lib.Dialog):
 
         # Header: current position
         header = QtWidgets.QHBoxLayout()
+        header.addWidget(lib.HelpButton(self.DOCS_URL))
         cp_label = QtWidgets.QLabel("Current position:")
         cp_label.setToolTip(
             "Current rotation in x, y, z (deg). The angles keep track "
@@ -621,66 +647,78 @@ class AnimationDialog(lib.Dialog):
         scroll_area.setWidget(rows_container)
         main_layout.addWidget(scroll_area, 1)
 
-        # Controls panel (fixed at the bottom)
-        controls = QtWidgets.QGridLayout()
-
-        fps_label = QtWidgets.QLabel("FPS: ")
-        fps_label.setToolTip("Frames per second used in the animation.")
-        controls.addWidget(fps_label, 0, 0)
-        self.fps = QtWidgets.QSpinBox()
-        self.fps.setValue(30)
-        self.fps.setRange(1, 60)
-        controls.addWidget(self.fps, 1, 0)
-
-        rs_label = QtWidgets.QLabel("Rotation speed (deg/s): ")
-        rs_label.setToolTip(
-            "Speed of rotation between positions in the animation."
-        )
-        controls.addWidget(rs_label, 0, 1)
-        self.rot_speed = QtWidgets.QDoubleSpinBox()
-        self.rot_speed.setValue(90)
-        self.rot_speed.setDecimals(1)
-        self.rot_speed.setRange(0.1, 1000)
-        controls.addWidget(self.rot_speed, 1, 1)
-
+        # Editing the sequence, right below the positions
+        sequence_row = QtWidgets.QHBoxLayout()
         self.add = QtWidgets.QPushButton("Add this position")
         self.add.setToolTip(
             "Add the current rotation/view to the animation sequence."
         )
-        self.add.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
         self.add.clicked.connect(self.add_position)
-        controls.addWidget(self.add, 0, 2)
-
+        self.stay = QtWidgets.QPushButton("Stay in the position")
+        self.stay.setToolTip("Add the current position again (no movement).")
+        self.stay.clicked.connect(partial(self.add_position, True))
         self.delete = QtWidgets.QPushButton("Remove last position")
         self.delete.setToolTip(
             "Remove the last position from the animation sequence."
         )
-        self.delete.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
         self.delete.clicked.connect(self.delete_position)
-        controls.addWidget(self.delete, 1, 2)
+        for button in (self.add, self.stay, self.delete):
+            button.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
+            sequence_row.addWidget(button)
+        sequence_row.addStretch(1)
+        main_layout.addLayout(sequence_row)
 
-        self.build = QtWidgets.QPushButton("Build\nanimation")
-        self.build.setToolTip("Create the animation as an .mp4 file.")
-        self.build.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
-        self.build.clicked.connect(self.build_animation)
-        controls.addWidget(self.build, 0, 3)
+        # Settings: two columns of label/field pairs
+        settings = QtWidgets.QGridLayout()
+        settings.setColumnMinimumWidth(2, 12)  # gap between the pairs
+        settings.setColumnStretch(5, 1)  # keep the fields compact
 
-        self.stay = QtWidgets.QPushButton("Stay in the\n position")
-        self.stay.setToolTip("Add the current position again (no movement).")
-        self.stay.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
-        self.stay.clicked.connect(partial(self.add_position, True))
-        controls.addWidget(self.stay, 1, 3)
+        fps_label = QtWidgets.QLabel("FPS:")
+        fps_label.setToolTip("Frames per second used in the animation.")
+        settings.addWidget(fps_label, 0, 0)
+        self.fps = QtWidgets.QSpinBox()
+        self.fps.setValue(30)
+        self.fps.setRange(1, 60)
+        settings.addWidget(self.fps, 0, 1)
+
+        rs_label = QtWidgets.QLabel("Rotation speed (deg/s):")
+        rs_label.setToolTip(
+            "Average speed of rotation between positions in the "
+            "animation, used to suggest the durations."
+        )
+        settings.addWidget(rs_label, 1, 0)
+        self.rot_speed = QtWidgets.QDoubleSpinBox()
+        self.rot_speed.setValue(90)
+        self.rot_speed.setDecimals(1)
+        self.rot_speed.setRange(0.1, 1000)
+        settings.addWidget(self.rot_speed, 1, 1)
+
+        transition_label = QtWidgets.QLabel("Transition:")
+        transition_label.setToolTip(
+            "How the motion is timed between the positions."
+        )
+        settings.addWidget(transition_label, 0, 3)
+        self.transition = QtWidgets.QComboBox()
+        for name, (_, tooltip) in self.TRANSITIONS.items():
+            self.transition.addItem(name)
+            self.transition.setItemData(
+                self.transition.count() - 1,
+                tooltip,
+                QtCore.Qt.ItemDataRole.ToolTipRole,
+            )
+        self.transition.setCurrentText("Stop at each position")
+        settings.addWidget(self.transition, 0, 4)
 
         # output resolution, independent of the window's size; follows
         # the window until edited by hand (see ``showEvent``)
-        size_label = QtWidgets.QLabel("Resolution (px): ")
+        size_label = QtWidgets.QLabel("Resolution (px):")
         size_label.setToolTip(
             "Width and height of the video in pixels (rounded up to a "
             "multiple of 16 for the encoder). Defaults to the window's "
             "size; the frames are rendered at this resolution, whatever "
             "the window's."
         )
-        controls.addWidget(size_label, 0, 4)
+        settings.addWidget(size_label, 1, 3)
         size_row = QtWidgets.QHBoxLayout()
         self.width_px = QtWidgets.QSpinBox()
         self.width_px.setRange(16, 8192)
@@ -693,9 +731,19 @@ class AnimationDialog(lib.Dialog):
         size_row.addWidget(self.width_px)
         size_row.addWidget(QtWidgets.QLabel("x"))
         size_row.addWidget(self.height_px)
-        controls.addLayout(size_row, 1, 4)
+        size_row.addStretch(1)
+        settings.addLayout(size_row, 1, 4)
 
-        main_layout.addLayout(controls)
+        main_layout.addLayout(settings)
+
+        build_row = QtWidgets.QHBoxLayout()
+        build_row.addStretch(1)
+        self.build = QtWidgets.QPushButton("Build animation")
+        self.build.setToolTip("Create the animation as an .mp4 file.")
+        self.build.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
+        self.build.clicked.connect(self.build_animation)
+        build_row.addWidget(self.build)
+        main_layout.addLayout(build_row)
 
         # the build in progress: its thread, worker and the cancel flag
         self._build_thread = None
@@ -894,6 +942,7 @@ class AnimationDialog(lib.Dialog):
             positions=positions,
             durations=durations,
             segment_rotations=segment_rotations,
+            transition=self.TRANSITIONS[self.transition.currentText()][0],
             disp_px_size=float(disp_px_size),
             image_size=(width, height),
             blur_method=disp_dlg.blur_method(),

@@ -61,22 +61,35 @@ def _normalize_animation_positions(
     return normalized
 
 
+ANIMATION_TRANSITIONS = ("linear", "smooth", "ease")
+
+
 def _animation_sequence(
     positions: list[tuple[Rotation, tuple]],
     durations: list[float],
     fps: int,
     segment_rotations: list | None = None,
+    transition: Literal["linear", "smooth", "ease"] = "linear",
 ) -> tuple[list[Rotation], list]:
     """Calculate the sequence of rotations and viewports for the
     animation. See ``build_animation`` for more details.
 
-    Each segment is interpolated along the geodesic between the two
-    checkpoint rotations at constant angular velocity (slerp). If
-    ``segment_rotations`` is given, the corresponding rotation vector
-    defines the rotation path of each segment and may include full
-    turns (magnitude beyond pi), e.g. 4 pi for two full turns.
+    ``transition`` sets how the motion is timed:
 
-    Such a path is followed as
+    - ``"linear"``: each segment runs at its own constant speed, so
+      the velocity jumps at every checkpoint.
+    - ``"smooth"``: the motion starts and ends at rest and passes
+      through the intermediate checkpoints without any jump in
+      velocity (see ``_smooth_rotations``).
+    - ``"ease"``: the motion comes to rest at every checkpoint,
+      accelerating and decelerating within each segment.
+
+    Each segment follows the rotation vector given in
+    ``segment_rotations``, which may include full turns (magnitude
+    beyond pi), e.g. 4 pi for two full turns. Without it, the segment
+    takes the shortest path between the two checkpoints.
+
+    Such a path is followed (for ``"linear"``) as
     ``from_rotvec(t * correction) * from_rotvec(t * rotvec) * R1``,
     where ``correction`` is the (shortest) residual rotation left
     between the end of the given path and the next checkpoint. The
@@ -92,45 +105,248 @@ def _animation_sequence(
     last, whose final frame lands on the last checkpoint. This way each
     checkpoint is rendered once, rather than once as the end of one
     segment and again as the start of the next."""
+    n_segments = len(positions) - 1
+    if segment_rotations is None:
+        rotvecs = np.array(
+            [
+                (positions[i + 1][0] * positions[i][0].inv()).as_rotvec()
+                for i in range(n_segments)
+            ]
+        )
+    else:
+        rotvecs = np.array(
+            [np.asarray(rotvec, dtype=float) for rotvec in segment_rotations]
+        )
+    durations = np.asarray(durations, dtype=float)
+    # knot velocities (per second) of the rotation and of the viewport,
+    # zero for "linear", where they are unused
+    rot_tangents = _knot_tangents(rotvecs / durations[:, None], transition)
+    vp_params = np.array([_viewport_params(vp) for _, vp in positions])
+    vp_tangents = _knot_tangents(
+        np.diff(vp_params, axis=0) / durations[:, None],
+        transition,
+        per_component=True,
+    )
+
     rotations = []
     viewports = []
-    for i in range(len(positions) - 1):
+    for i in range(n_segments):
         n_frames = max(1, int(fps * durations[i]))
         # only the last segment includes its final checkpoint; the
         # others end where the next segment starts
-        endpoint = i == len(positions) - 2
-
-        # rotations
+        endpoint = i == n_segments - 1
+        fractions = np.linspace(0, 1, n_frames, endpoint=endpoint)
         R1, vp1 = positions[i]
         R2, vp2 = positions[i + 1]
         relative = R2 * R1.inv()
-        if segment_rotations is not None:
-            rotvec = np.asarray(segment_rotations[i], dtype=float)
+
+        # rotations
+        if transition == "linear":
+            # residual rotation between the end of the requested path
+            # and the next checkpoint, spread evenly over the segment
+            correction = (
+                relative * Rotation.from_rotvec(rotvecs[i]).inv()
+            ).as_rotvec()
+            rotations.extend(
+                Rotation.from_rotvec(fraction * correction)
+                * Rotation.from_rotvec(fraction * rotvecs[i])
+                * R1
+                for fraction in fractions
+            )
         else:
-            rotvec = relative.as_rotvec()
-        # residual rotation between the end of the requested path and
-        # the next checkpoint, spread evenly over the segment
-        correction = (
-            relative * Rotation.from_rotvec(rotvec).inv()
-        ).as_rotvec()
-        fractions = np.linspace(0, 1, n_frames, endpoint=endpoint)
-        rotations.extend(
-            Rotation.from_rotvec(fraction * correction)
-            * Rotation.from_rotvec(fraction * rotvec)
-            * R1
-            for fraction in fractions
-        )
+            rotations.extend(
+                _smooth_rotations(
+                    R1,
+                    relative,
+                    rotvecs[i],
+                    rot_tangents[i] * durations[i],
+                    rot_tangents[i + 1] * durations[i],
+                    fractions,
+                )
+            )
 
         # viewports
-        ymin = np.linspace(vp1[0][0], vp2[0][0], n_frames, endpoint=endpoint)
-        xmin = np.linspace(vp1[0][1], vp2[0][1], n_frames, endpoint=endpoint)
-        ymax = np.linspace(vp1[1][0], vp2[1][0], n_frames, endpoint=endpoint)
-        xmax = np.linspace(vp1[1][1], vp2[1][1], n_frames, endpoint=endpoint)
-        current_viewports = [
-            ((ymin[j], xmin[j]), (ymax[j], xmax[j])) for j in range(len(ymin))
-        ]
-        viewports.extend(current_viewports)
+        if transition == "linear":
+            ymin = np.interp(fractions, [0, 1], [vp1[0][0], vp2[0][0]])
+            xmin = np.interp(fractions, [0, 1], [vp1[0][1], vp2[0][1]])
+            ymax = np.interp(fractions, [0, 1], [vp1[1][0], vp2[1][0]])
+            xmax = np.interp(fractions, [0, 1], [vp1[1][1], vp2[1][1]])
+            viewports.extend(
+                ((ymin[j], xmin[j]), (ymax[j], xmax[j]))
+                for j in range(len(fractions))
+            )
+        else:
+            params = _hermite(
+                vp_params[i],
+                vp_params[i + 1],
+                vp_tangents[i] * durations[i],
+                vp_tangents[i + 1] * durations[i],
+                fractions,
+            )
+            viewports.extend(_viewport_from_params(p) for p in params)
     return rotations, viewports
+
+
+def _knot_tangents(
+    slopes: lib.FloatArray2D,
+    transition: Literal["linear", "smooth", "ease"],
+    per_component: bool = False,
+) -> lib.FloatArray2D:
+    """Velocities at the checkpoints of a smooth animation path.
+
+    Parameters
+    ----------
+    slopes : lib.FloatArray2D
+        Mean velocity of each segment, shape (n_segments, d).
+    transition : {"linear", "smooth", "ease"}
+        Transition mode, see ``_animation_sequence``. The path is at
+        rest at the first and last checkpoints ("smooth") or at all of
+        them ("ease", "linear" - unused there).
+    per_component : bool, optional
+        If True, each of the d components is treated as a separate
+        curve (viewport parameters); otherwise the rows are vectors
+        (angular velocities). Default is False.
+
+    Returns
+    -------
+    tangents : lib.FloatArray2D
+        Velocity at each checkpoint, shape (n_segments + 1, d).
+
+    Notes
+    -----
+    An intermediate checkpoint takes the mean of the two adjacent
+    segment velocities, like a Catmull-Rom spline, but comes to rest
+    when the motion reverses or stops there (e.g. before a "stay"
+    segment) and is capped at three times the slower segment's
+    velocity, so that the path never overshoots a checkpoint (the
+    monotonicity condition of Fritsch & Carlson, *SIAM J. Numer.
+    Anal.* 1980).
+    """
+    if per_component:
+        return np.column_stack(
+            [
+                _knot_tangents(slopes[:, [j]], transition)[:, 0]
+                for j in range(slopes.shape[1])
+            ]
+        )
+    tangents = np.zeros((len(slopes) + 1, slopes.shape[1]))
+    if transition != "smooth":
+        return tangents
+    for k in range(1, len(slopes)):
+        a, b = slopes[k - 1], slopes[k]
+        if np.dot(a, b) <= 0:
+            continue
+        tangent = (a + b) / 2
+        limit = 3 * min(np.linalg.norm(a), np.linalg.norm(b))
+        norm = np.linalg.norm(tangent)
+        if norm > limit:
+            tangent *= limit / norm
+        tangents[k] = tangent
+    return tangents
+
+
+def _smooth_rotations(
+    R1: Rotation,
+    relative: Rotation,
+    rotvec: lib.FloatArray1D,
+    tangent1: lib.FloatArray1D,
+    tangent2: lib.FloatArray1D,
+    fractions: lib.FloatArray1D,
+) -> Rotation:
+    """Rotations along one segment of a smooth animation path.
+
+    The segment is a cumulative cubic Bezier curve on the rotation
+    group (Kim, Kim & Shin, *SIGGRAPH* 1995):
+    ``exp(b3 w3) exp(b2 w2) exp(b1 w1) R1`` with the cumulative
+    Bernstein polynomials ``b1 = 1 - (1 - t)^3``, ``b2 = 3t^2 - 2t^3``
+    and ``b3 = t^3``. Its angular velocity is ``3 w1`` at the start and
+    ``3 w3`` at the end, so ``w1`` and ``w3`` follow from the knot
+    velocities, and ``w2 = rotvec - w1 - w3`` carries the rest of the
+    requested path, full turns included. The (shortest) residual left
+    between the end of this curve and the next checkpoint is inserted
+    as ``exp(b2 c)`` between the last two factors: its slope vanishes
+    at both ends and, unlike a residual applied last, it does not
+    rotate the end velocity ``3 w3``. The segment thus ends exactly at
+    the next checkpoint with the velocities there unchanged.
+
+    Parameters
+    ----------
+    R1 : Rotation
+        Rotation at the start of the segment.
+    relative : Rotation
+        Rotation from the start to the end checkpoint.
+    rotvec : lib.FloatArray1D
+        Requested rotation path of the segment (radians, world frame,
+        magnitude may exceed pi).
+    tangent1, tangent2 : lib.FloatArray1D
+        Angular velocities (world frame) at the start and end, per
+        unit of the segment's parameter (i.e., multiplied by the
+        segment's duration).
+    fractions : lib.FloatArray1D
+        Curve parameters in [0, 1] of the frames.
+
+    Returns
+    -------
+    rotations : Rotation
+        One rotation per fraction.
+    """
+    w1 = tangent1 / 3
+    w3 = tangent2 / 3
+    w2 = rotvec - w1 - w3
+    E1, E2, E3 = (Rotation.from_rotvec(w) for w in (w1, w2, w3))
+    # E3 * C * E2 * E1 == relative
+    correction = (E3.inv() * relative * (E2 * E1).inv()).as_rotvec()
+    t = np.asarray(fractions, dtype=float)[:, None]
+    b1 = 1 - (1 - t) ** 3
+    b2 = 3 * t**2 - 2 * t**3
+    b3 = t**3
+    return (
+        Rotation.from_rotvec(b3 * w3)
+        * Rotation.from_rotvec(b2 * correction)
+        * Rotation.from_rotvec(b2 * w2)
+        * Rotation.from_rotvec(b1 * w1)
+        * R1
+    )
+
+
+def _hermite(
+    p1: lib.FloatArray1D,
+    p2: lib.FloatArray1D,
+    m1: lib.FloatArray1D,
+    m2: lib.FloatArray1D,
+    fractions: lib.FloatArray1D,
+) -> lib.FloatArray2D:
+    """Cubic Hermite interpolation from ``p1`` (slope ``m1``) to ``p2``
+    (slope ``m2``), slopes per unit of the parameter; one row per
+    fraction."""
+    t = np.asarray(fractions, dtype=float)[:, None]
+    h00 = 2 * t**3 - 3 * t**2 + 1
+    h10 = t**3 - 2 * t**2 + t
+    h01 = -2 * t**3 + 3 * t**2
+    h11 = t**3 - t**2
+    return h00 * p1 + h10 * m1 + h01 * p2 + h11 * m2
+
+
+def _viewport_params(viewport: tuple) -> lib.FloatArray1D:
+    """Center and log size of a viewport, (yc, xc, log h, log w), in
+    which smooth animations interpolate: zooming then proceeds at a
+    constant rate rather than speeding up as the view closes in."""
+    (ymin, xmin), (ymax, xmax) = viewport
+    return np.array(
+        [
+            (ymin + ymax) / 2,
+            (xmin + xmax) / 2,
+            np.log(ymax - ymin),
+            np.log(xmax - xmin),
+        ]
+    )
+
+
+def _viewport_from_params(params: lib.FloatArray1D) -> tuple:
+    """Inverse of ``_viewport_params``."""
+    yc, xc, log_h, log_w = params
+    h, w = np.exp(log_h), np.exp(log_w)
+    return ((yc - h / 2, xc - w / 2), (yc + h / 2, xc + w / 2))
 
 
 def build_animation(
@@ -146,6 +362,7 @@ def build_animation(
     disp_px_size: int | float,  # nm
     image_size: tuple[int, int],
     segment_rotations: list | None = None,
+    transition: Literal["linear", "smooth", "ease"] = "linear",
     blur_method: (
         Literal["gaussian", "gaussian_iso", "smooth", "convolve"] | None
     ) = None,
@@ -209,6 +426,20 @@ def build_animation(
         next checkpoint is spread over the segment, so the segment
         always ends exactly at the next checkpoint. If None, each
         segment follows the shortest path (slerp). Default is None.
+    transition : {"linear", "smooth", "ease"}, optional
+        Timing of the motion between the checkpoints. 'linear' moves at
+        a constant speed within each segment, so the motion changes
+        abruptly at every checkpoint. 'smooth' accelerates from rest
+        at the first checkpoint, passes through the intermediate ones
+        without any jump in velocity (a C1-continuous spline through
+        the checkpoints) and decelerates to rest at the last one; it
+        comes to rest at an intermediate checkpoint only where the
+        motion reverses or stops. 'ease' accelerates and decelerates
+        within every segment, coming to rest at each checkpoint. For
+        'smooth' and 'ease', zooming proceeds at a constant rate
+        (the viewport size is interpolated logarithmically). The
+        durations are kept, so the peak speeds are higher than for
+        'linear'. Default is 'linear'.
     blur_method : {"gaussian", "gaussian_iso", "smooth", "convolve"} or None, \
             optional
         Defines localizations' blur. The string has to be one of
@@ -311,6 +542,11 @@ def build_animation(
         isinstance(durations, list) and len(durations) == len(positions) - 1
     ), "durations must be a list of length len(positions) - 1."
     assert all(d > 0 for d in durations), "All durations must be positive."
+    assert transition in ANIMATION_TRANSITIONS, (
+        "transition must be one of "
+        + ", ".join(f"'{t}'" for t in ANIMATION_TRANSITIONS)
+        + "."
+    )
     assert (
         isinstance(disp_px_size, (int, float)) and disp_px_size > 0
     ), "disp_px_size must be a positive number."
@@ -382,6 +618,7 @@ def build_animation(
         positions=positions,
         durations=durations,
         segment_rotations=segment_rotations,
+        transition=transition,
         disp_px_size=disp_px_size,
         image_size=image_size,
         blur_method=blur_method,
@@ -408,6 +645,7 @@ def _build_animation(
     positions: list[tuple[Rotation, tuple]],
     durations: list[float],
     segment_rotations: list | None,
+    transition: Literal["linear", "smooth", "ease"],
     disp_px_size: int | float,
     image_size: tuple[int, int],
     blur_method: (
@@ -430,7 +668,11 @@ def _build_animation(
     """Internal function to build an animation of rendered localizations
     given the checkpoints. See ``build_animation`` for more details."""
     rotations, viewports = _animation_sequence(
-        positions, durations, fps, segment_rotations=segment_rotations
+        positions,
+        durations,
+        fps,
+        segment_rotations=segment_rotations,
+        transition=transition,
     )
 
     # width and height for building the animation; must be divisible by 16
@@ -527,6 +769,7 @@ def _build_animation(
         "Rotations between checkpoints (x, y, z) (deg)": segments_yaml,
         "Viewports at checkpoints (camera pixels)": viewports_yaml,
         "Durations (s)": durations,
+        "Transition": transition,
     }
     info_path = os.path.splitext(path)[0] + ".yaml"
     io.save_info(info_path, [anim_settings])

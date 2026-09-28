@@ -145,6 +145,7 @@ from .scene import (
     split_locs_by_group,
 )
 from .animation import (
+    ANIMATION_TRANSITIONS,
     _normalize_animation_positions,
     _animation_sequence,
     build_animation,
@@ -274,6 +275,7 @@ __all__ = [
     "split_locs_by_property",
     "split_locs_by_group",
     # animation
+    "ANIMATION_TRANSITIONS",
     "_normalize_animation_positions",
     "_animation_sequence",
     "build_animation",

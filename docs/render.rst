@@ -120,8 +120,6 @@ The user may perform multiple actions in the rotation window, including: saving 
 
 Rendering in the rotation window runs in the background, as in the main window: rotating and panning never block the interface, a burst of mouse movements renders only the newest orientation, and large picks are previewed with a subset of the localizations while you drag (``interaction_subsample``, see *CPU usage on shared workstations*, counted over the localizations in view) and sharpened as soon as the drag pauses. The renders use the GPU when it is enabled (see *GPU rendering*).
 
-**Animation:** the frames are rendered in the background, at the resolution set in the animation dialog (``Resolution (px)``, by default the window's size, e.g. 1920 x 1080 for a full-HD video whatever the window's size), so the windows stay usable while the video is built; a progress dialog shows the frames done and lets you cancel, in which case no partial video is left behind. The frames use the GPU when it is enabled.
-
 When rotating by a specified angle, the dialog offers a ``Rotate around`` choice between **Localizations** (the default) and **World**. ``Localizations`` rotates around the data's own axes - the axes shown by the axes icon, which rotate together with the data - so each entered angle changes the corresponding displayed angle by exactly that amount. ``World`` rotates around the fixed screen/camera axes instead.
 
 Navigating the 3D window (the zoom and pan controls match the main window's, see :ref:`render-navigation`):
@@ -132,6 +130,11 @@ Navigating the 3D window (the zoom and pan controls match the main window's, see
 - **Reset**: triple click fits the loaded region into the window (``Home`` does the same); ``Shift`` + triple click also resets the rotation. ``1``, ``2`` and ``3`` select the XY, XZ and YZ projections.
 
 Rotations turn the data about the point at the center of the view, at the depth of the localizations shown there, so zooming in and panning to a structure lets you rotate around it. Rotation around the z-axis is available by pressing Ctrl/Command. Rotation axis can be frozen by pressing x/y/z to freeze around the corresponding axis. By default the frozen rotation is around the data's own axes (Localizations frame); holding Ctrl/Command together with x/y/z instead rotates around the fixed screen/World axes. The z-axis can now be frozen by pressing z alone (vertical dragging spins around it); Ctrl/Command is only needed for the z-axis if you want to rotate it in the World frame, or to spin around the screen z-axis when no axis is frozen.
+
+Build an animation
+~~~~~~~~~~~~~~~~~~
+
+Build an animation with ``File > Build an animation...`` (Ctrl+Shift+E): rotate, zoom and pan to each view the video should show and click ``Add this position`` (``Stay in the position`` adds a pause), then set the durations of the transitions and click ``Build animation``. The frames are rendered in the background, at the resolution set in the animation dialog (``Resolution (px)``, by default the window's size, e.g. 1920 x 1080 for a full-HD video whatever the window's size), so the windows stay usable while the video is built; a progress dialog shows the frames done and lets you cancel, in which case no partial video is left behind. The frames use the GPU when it is enabled. ``Transition`` sets how the motion is timed between the positions: *Stop at each position* (default) accelerates and decelerates between every two positions, coming to rest at each of them, *Smooth* starts and ends at rest and passes through the positions without abrupt changes of direction or speed (it still comes to rest where the motion reverses, stops or turns by 90 degrees or more), and *Constant speed* moves at a constant speed between every two positions, with sharp turns at the positions. The durations are kept in each case, so the rotation speed only sets the average speed.
 
 RESI
 ----
