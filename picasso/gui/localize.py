@@ -5856,14 +5856,30 @@ class Window(QtWidgets.QMainWindow):
             "Set the contrast automatically for each frame?"
         )
         self.contrast_auto_button.setCheckable(True)
-        # as short as the slider, so the row does not grow into the frame
-        # slider above it
-        self.contrast_auto_button.setFixedHeight(15)
         font = self.contrast_auto_button.font()
         font.setPointSizeF(font.pointSizeF() * 0.8)
         self.contrast_auto_button.setFont(font)
         self.contrast_auto_button.setStyleSheet(
-            "QToolButton { padding: 0px 4px; }"
+            """
+            QToolButton {
+                border: 1px solid #b0b0b0;
+                border-radius: 3px;
+                padding: 0px 4px;
+                background: transparent;
+            }
+            QToolButton:checked {
+                border-color: #5a5a5a;
+                background: #5a5a5a;
+                color: white;
+            }
+            QToolButton:disabled {
+                border-color: #d8d8d8;
+                color: #b8b8b8;
+            }
+            """
+        )
+        self.contrast_auto_button.setFixedHeight(
+            max(15, self.contrast_auto_button.fontMetrics().height() + 2)
         )
         self.contrast_auto_button.setChecked(
             self.contrast_dialog.auto_checkbox.isChecked()
