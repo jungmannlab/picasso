@@ -71,6 +71,9 @@ MASK_LEGEND_FIGSIZE = (
     70 / MASK_LEGEND_DPI,
 )  # width, height in inches
 FIT_RESULT_LIM = 100
+# number of molecules (before labeling efficiency) of the first target
+# in a single simulation run without experimental data
+SINGLE_SIM_N_MOL = 10_000
 
 # The font matplotlib actually resolves for its default family
 # (e.g. "DejaVu Sans"), used as the default in the NND plot font
@@ -4520,14 +4523,31 @@ class SimulationsTab(lib.Dialog):
         n_total : int
             Total number of molecules to simulate.
         """
-        n_total = int(
-            sum(
-                [
-                    len(self.exp_data[t]) / self.le_spins[i].value() * 100
-                    for i, t in enumerate(self.targets)
-                ]
+        if self.check_exp_loaded():
+            n_total = int(
+                sum(
+                    [
+                        len(self.exp_data[t]) / self.le_spins[i].value() * 100
+                        for i, t in enumerate(self.targets)
+                    ]
+                )
             )
-        )
+        else:  # observed densities over the simulated ROI
+            width, height, depth = self.mixer.roi
+            if depth is None:
+                roi_size = width * height * 1e-6  # um^2
+            else:
+                roi_size = width * height * depth * 1e-9  # um^3
+            n_total = int(
+                sum(
+                    [
+                        den_spin.value() * roi_size / le_spin.value() * 100
+                        for den_spin, le_spin in zip(
+                            self.densities_spins, self.le_spins
+                        )
+                    ]
+                )
+            )
         return n_total
 
     @check_structures_loaded
@@ -4557,6 +4577,20 @@ class SimulationsTab(lib.Dialog):
             self.window.pwd = os.path.dirname(path)
         else:
             path = ""
+
+        # without experimental data, the numbers of molecules come from
+        # the observed densities, which are not used with masks
+        if (
+            self.mask_den_stack.currentIndex() == 0
+            and not self.check_exp_loaded()
+        ):
+            message = (
+                "Simulating in masks requires experimental data to find the"
+                " numbers of molecules. Please load experimental data or"
+                " simulate a homogeneous distribution."
+            )
+            QtWidgets.QMessageBox.information(self, "Warning", message)
+            return
 
         # create the mixer instance
         self.mixer = self.setup_mixer(mode="single_sim")
@@ -4879,14 +4913,18 @@ class SimulationsTab(lib.Dialog):
             self.prop_str_input_spins[idx].value() - (sum_ - 100)
         )
 
-    def find_roi(self) -> tuple[float, float, float]:
+    def find_roi(self) -> tuple[float | None, float | None, float | None]:
         """Find width, height, depth to conduct simulation(s) with
         homogeneous distribution.
+
+        Without experimental data, the ROI holds ``SINGLE_SIM_N_MOL``
+        molecules of the first target.
 
         Returns
         -------
         result : tuple
-            Width, height, depth (all nm).
+            Width, height, depth (all nm), or Nones when the density of
+            the first target is zero (a warning is shown in that case).
         """
         target = self.targets[0]
         density = self.densities_spins[0].value()
@@ -4897,7 +4935,14 @@ class SimulationsTab(lib.Dialog):
         # density of the molecule before LE
         le = self.le_spins[0].value() / 100
         tot_density = density / le
-        n_mol = self.find_n_mol_from_target(target)
+        if tot_density == 0:
+            message = f"Please enter a non-zero observed density of {target}."
+            QtWidgets.QMessageBox.information(self, "Warning", message)
+            return None, None, None
+        if self.check_exp_loaded():
+            n_mol = self.find_n_mol_from_target(target)
+        else:
+            n_mol = SINGLE_SIM_N_MOL
 
         # get depth (only 3D)
         depth = None if self.dim_widget.currentIndex() == 0 else self.depth
