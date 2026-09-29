@@ -8,6 +8,7 @@ Last change: 29-SEP-2026 CEST
 - Localize: the channel sum has its own box size, min. net gradient and identification filters, the same whichever channel is displayed. Each channel keeps its own settings for identifying the channels separately (and for registering them for the sum).
 - Fixed Localize not saying why the channel sum was not shown (channels not registered/aligned yet).
 - New `picasso.localize.localize_frames`: a GUI-free wrapper that runs the existing identification and fit on an in-memory frame stack (instead of a movie read from disk) and assigns absolute frame indices, so batched or live input concatenates into one growing localization table. Results are numerically identical to `picasso.localize.localize` on the same frames and parameters.
+- Render: NeNA is saved to metadata when calculated.
 - Fixed saving rotated localizations [#708](https://github.com/jungmannlab/picasso/issues/708)
 - Fixed .csv export in plot profile [#709](https://github.com/jungmannlab/picasso/issues/709)
 
