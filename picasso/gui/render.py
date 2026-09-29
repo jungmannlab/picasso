@@ -7202,11 +7202,12 @@ class SlicerDialog(lib.Dialog):
     slicer_cache : dict
         Contains QPixmaps that have been drawn for each slice.
     slicermax : float
-        Maximum value of self.sl.
+        Upper z bound of the displayed slice (nm).
     slicermin : float
-        Minimum value of self.sl.
-    slicerposition : float
-        Current position of self.sl.
+        Lower z bound of the displayed slice (nm).
+    slicerposition : int or None
+        Current position of self.sl, None before the histogram is
+        calculated.
     slicer_radio_button : QCheckBox
         Tick to slice locs.
     window : QMainWindow
@@ -7284,6 +7285,14 @@ class SlicerDialog(lib.Dialog):
         slicer_grid.addWidget(self.export_button, 6, 0)
 
         self.zcoord = []
+        # slice bounds are set in on_slice_position_changed; until then
+        # slicing keeps all localizations
+        self.bins = np.array([])
+        self.patches = []
+        self.slicer_cache = {}
+        self.slicermin = -np.inf
+        self.slicermax = np.inf
+        self.slicerposition = None
 
     def initialize(self) -> None:
         """Called when the dialog is open, calculate the histograms and
@@ -7303,12 +7312,13 @@ class SlicerDialog(lib.Dialog):
             for i in range(len(self.window.dataset_dialog.colordisp_all))
         ]
 
-        # get bins, starting with minimum z and ending with max z
-        self.bins = np.arange(
-            np.amin(np.hstack(self.zcoord)),
-            np.amax(np.hstack(self.zcoord)),
-            slice_thickness,
-        )
+        # get bins, starting with minimum z and ending above maximum z,
+        # so that there is always at least one slice and every loc
+        # falls into a slice [bins[i], bins[i + 1])
+        z_all = np.hstack(self.zcoord)
+        z_min = np.amin(z_all)
+        n_slices = int((np.amax(z_all) - z_min) // slice_thickness) + 1
+        self.bins = z_min + slice_thickness * np.arange(n_slices + 1)
 
         # plot histograms
         self.patches = []
@@ -7325,23 +7335,21 @@ class SlicerDialog(lib.Dialog):
         self.ax.set_xlabel("Z position (nm)")
         self.ax.set_ylabel("Rel. frequency")
         self.ax.set_title("No. of localizations per z slice")
-        self.canvas.draw()
-        self.sl.setMaximum(int(len(self.bins)) - 2)
-        self.sl.setValue(int(len(self.bins) / 2))
-
         # reset cache
         self.slicer_cache = {}
+
+        # valueChanged is not emitted if the slider value does not
+        # change, so block it and update the slice bounds explicitly
+        self.sl.blockSignals(True)
+        self.sl.setMaximum(len(self.bins) - 2)
+        self.sl.setValue((len(self.bins) - 1) // 2)
+        self.sl.blockSignals(False)
+        self.on_slice_position_changed(self.sl.value())
 
     def on_pick_slice_changed(self) -> None:
         """Modify histograms when slice thickness changes."""
         # reset cache
-        self.slicer_cache = {}
-        if len(self.bins) < 3:  # in case there should be only 1 bin
-            self.calculate_histogram()
-        else:
-            self.calculate_histogram()
-            self.sl.setValue(int(len(self.bins) / 2))
-            # self.on_slice_position_changed(self.sl.value())
+        self.calculate_histogram()
 
     def toggle_slicer(self) -> None:
         """Update scene in the main window when slicing is called."""
@@ -11936,7 +11944,7 @@ class View(QtWidgets.QLabel):
                 if slicer.isChecked():
                     z_min = self.window.slicer_dialog.slicermin
                     z_max = self.window.slicer_dialog.slicermax
-                    in_view = (locs[i]["z"] > z_min) & (locs[i]["z"] <= z_max)
+                    in_view = (locs[i]["z"] >= z_min) & (locs[i]["z"] < z_max)
                     locs[i] = locs[i][in_view]
 
         # if multiple channels are loaded, selected only the ones which

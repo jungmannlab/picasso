@@ -11,6 +11,7 @@ Last change: 29-SEP-2026 CEST
 - Render: NeNA is saved to metadata when calculated.
 - Fixed saving rotated localizations [#708](https://github.com/jungmannlab/picasso/issues/708)
 - Fixed .csv export in plot profile [#709](https://github.com/jungmannlab/picasso/issues/709)
+- Fixed Render's 3D slicer failing to open for some z ranges and for data thinner than one slice [#710](https://github.com/jungmannlab/picasso/issues/710).
 
 ## 0.11.2
 - Fixed the calibrations stored in the camera config (z, experimental PSF and sCMOS) not being cleared when switching to a camera the config has no entry for.
