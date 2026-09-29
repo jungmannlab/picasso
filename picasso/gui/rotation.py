@@ -3292,7 +3292,7 @@ class RotationWindow(QtWidgets.QMainWindow):
 
     def _resolve_picks(self) -> tuple:
         """Obtain pick coordiantes for saving given their shape."""
-        pixelsize = self.window.window.view.pixelsize
+        pixelsize = self.window.view.pixelsize
         if self.view_rot.pick_shape is None:
             # the field of view: its bounds, like a box pick
             (y0, x0), (y1, x1) = self.view_rot.viewport
@@ -3327,7 +3327,7 @@ class RotationWindow(QtWidgets.QMainWindow):
             angx = int(self.view_rot.angx * 180 / np.pi)
             angy = int(self.view_rot.angy * 180 / np.pi)
             angz = int(self.view_rot.angz * 180 / np.pi)
-            pixelsize = self.window.window.view.pixelsize
+            pixelsize = self.window.view.pixelsize
             pick = self._resolve_picks()
             size = self.view_rot.pick_size
             new_info = [
@@ -3351,7 +3351,7 @@ class RotationWindow(QtWidgets.QMainWindow):
             ]
 
             # combine all channels
-            if channel is (len(self.view_rot.paths) + 1):
+            if channel == len(self.view_rot.paths) + 1:
                 base, ext = os.path.splitext(self.view_rot.paths[0])
                 out_path = base + "_multi.hdf5"
                 path, ext = lib.get_save_filename_ext_dialog(
@@ -3373,7 +3373,7 @@ class RotationWindow(QtWidgets.QMainWindow):
                     info = self.view_rot.infos[0] + new_info
                     io.save_locs(path, all_locs, info)
             # save all channels one by one
-            elif channel is (len(self.view_rot.paths)):  # all channels
+            elif channel == len(self.view_rot.paths):  # all channels
                 suffix, ok = QtWidgets.QInputDialog.getText(
                     self,
                     "Input Dialog",
@@ -3401,11 +3401,12 @@ class RotationWindow(QtWidgets.QMainWindow):
                     self,
                     "Save rotated localizations",
                     out_path,
-                    filter="*hdf5",
+                    filter="*.hdf5",
                     check_ext=".yaml",
                 )
-                info = self.view_rot.infos[channel] + new_info
-                io.save_locs(path, self.window.view.locs[channel], info)
+                if path:
+                    info = self.view_rot.infos[channel] + new_info
+                    io.save_locs(path, self.window.view.locs[channel], info)
 
     def update_scene(self) -> None:
         """Update the scene in ViewRotation."""

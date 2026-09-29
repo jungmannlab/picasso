@@ -1,6 +1,6 @@
 # Changelog
 
-Last change: 27-SEP-2026 CEST
+Last change: 29-SEP-2026 CEST
 
 ## 0.12.0
 
@@ -69,6 +69,16 @@ Last change: 27-SEP-2026 CEST
 - `picasso.render.build_animation` gained a `cancel` callback and returns whether the build completed.
 - New `picasso.spatial_index` functions: `query_rect`, `query_circle` (circular picks through the pyramid), `save_render_index`, `read_render_index`, `validate_render_index`, `load_render_index`. `picasso.postprocess.picked_locs` and the functions taking `index_blocks` (`pick_similar`, `combine_locs_in_picks`, `remove_locs_in_picks`, `align_from_picked`, `undrift_from_fiducials`) accept a `spatial_index.RenderIndexPyramid` in that argument.
 - `picasso.io.save_locs` gained `render_index`; `picasso.lib.standardize_dtypes` is new.
+
+## 0.11.3
+- Localize: auto contrast button in the bottom right corner of the window; contrast dialog still exists for a numerical input.
+- Localize: new `Identify on` mode for multichannel and split-FOV data, *Sum of unregistered channels*. It adds the channels up (in photons) pixel for pixel, without any registration. See the [documentation](https://picassosr.readthedocs.io/en/latest/localize.html#summing-without-registration). The existing mode is renamed *Sum of registered channels*.
+- Localize: the channel sum has its own box size, min. net gradient and identification filters, the same whichever channel is displayed. Each channel keeps its own settings for identifying the channels separately (and for registering them for the sum).
+- Fixed Localize not saying why the channel sum was not shown (channels not registered/aligned yet).
+- New `picasso.localize.localize_frames`: a GUI-free wrapper that runs the existing identification and fit on an in-memory frame stack (instead of a movie read from disk) and assigns absolute frame indices, so batched or live input concatenates into one growing localization table. Results are numerically identical to `picasso.localize.localize` on the same frames and parameters.
+- Render: NeNA is saved to metadata when calculated.
+- Fixed saving rotated localizations [#708](https://github.com/jungmannlab/picasso/issues/708)
+- Fixed .csv export in plot profile [#709](https://github.com/jungmannlab/picasso/issues/709)
 
 ## 0.11.2
 - Fixed the calibrations stored in the camera config (z, experimental PSF and sCMOS) not being cleared when switching to a camera the config has no entry for.

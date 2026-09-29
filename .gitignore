@@ -127,3 +127,6 @@ build_cuda/
 dist_cuda/
 build_gpu/
 dist_gpu/
+
+# Generated GitHub release notes
+release/release_notes.txt
