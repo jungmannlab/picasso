@@ -11274,7 +11274,7 @@ class View(QtWidgets.QLabel):
         channel = self.get_channel_all_seq("Plot profile")
         if channel is None:
             return
-        if channel is len(self.locs_paths):
+        if channel == len(self.locs_paths):
             channels = list(range(len(self.locs_paths)))
         else:
             channels = [channel]
@@ -11285,6 +11285,7 @@ class View(QtWidgets.QLabel):
         specified channels. Assumes that only one rectangular pick is
         selected."""
         self.profiles = []
+        self.profile_channels = channels
         pick_size = (
             self._pick_size / 2
             if self._pick_shape == "Circle"
@@ -11367,7 +11368,20 @@ class View(QtWidgets.QLabel):
             filter="*.csv",
         )
         if path:
-            df = pd.concat(self.profiles, axis=1)
+            # one column per channel; channels with fewer localizations
+            # are padded with empty cells
+            columns = [
+                pd.Series(
+                    profile,
+                    name=(
+                        os.path.basename(self.locs_paths[channel]) + " (nm)"
+                    ),
+                )
+                for profile, channel in zip(
+                    self.profiles, self.profile_channels
+                )
+            ]
+            df = pd.concat(columns, axis=1)
             df.to_csv(path, index=False)
 
     @check_picks

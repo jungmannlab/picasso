@@ -1,6 +1,6 @@
 # Changelog
 
-Last change: 28-SEP-2026 CEST
+Last change: 29-SEP-2026 CEST
 
 ## 0.11.3
 - Localize: auto contrast button in the bottom right corner of the window; contrast dialog still exists for a numerical input.
@@ -9,6 +9,7 @@ Last change: 28-SEP-2026 CEST
 - Fixed Localize not saying why the channel sum was not shown (channels not registered/aligned yet).
 - New `picasso.localize.localize_frames`: a GUI-free wrapper that runs the existing identification and fit on an in-memory frame stack (instead of a movie read from disk) and assigns absolute frame indices, so batched or live input concatenates into one growing localization table. Results are numerically identical to `picasso.localize.localize` on the same frames and parameters.
 - Fixed saving rotated localizations [#708](https://github.com/jungmannlab/picasso/issues/708)
+- Fixed .csv export in plot profile [#709](https://github.com/jungmannlab/picasso/issues/709)
 
 ## 0.11.2
 - Fixed the calibrations stored in the camera config (z, experimental PSF and sCMOS) not being cleared when switching to a camera the config has no entry for.
