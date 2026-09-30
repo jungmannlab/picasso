@@ -26,7 +26,7 @@ import matplotlib.pyplot as plt
 from PyQt6 import QtCore, QtWidgets, QtGui
 from playsound3 import playsound
 
-from picasso import diagnostics, io
+from picasso import diagnostics, docs_url, io
 from picasso.lib import (
     _dialogs,
     SOUND_NOTIFICATION_DURATION,
@@ -71,10 +71,7 @@ class UserSettingsDialog(Dialog):
 
     #: Reference listing every settings key, its default and what it
     #: does, grouped by section - see docs/others.rst.
-    DOCS_URL = (
-        "https://picassosr.readthedocs.io/en/latest/others.html"
-        "#user-settings-file"
-    )
+    DOCS_URL = docs_url("others.html#user-settings-file")
 
     def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
         super().__init__(parent)

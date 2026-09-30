@@ -15,7 +15,7 @@ import os.path
 import argparse
 from typing import TYPE_CHECKING, Literal
 import pandas as pd
-from . import __version__
+from . import __version__, docs_url
 from .transforms import MODELS as TRANSFORM_MODELS
 
 if TYPE_CHECKING:  # imported lazily, like every analysis module here
@@ -4569,10 +4569,7 @@ def main():  # noqa: C901
     )
 
     # spinna
-    _spinna_docs_url = (
-        "https://picassosr.readthedocs.io/en/latest/spinna.html"
-        "#command-window-batch-analysis"
-    )
+    _spinna_docs_url = docs_url("spinna.html#command-window-batch-analysis")
     spinna_parser = subparsers.add_parser(
         "spinna",
         help=(

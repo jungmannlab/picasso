@@ -20,6 +20,7 @@
 # -- Project information -----------------------------------------------------
 
 import os
+import re
 import sys
 
 project = "Picasso"
@@ -39,6 +40,21 @@ with open(
 ) as _vf:
     exec(_vf.read(), _version_globals)
 release = _version_globals["__version__"]
+
+# Development branches (vX.Y) are built as separate Read the Docs versions
+# for the test builds of Picasso, whose help buttons link there (see
+# picasso.docs_url). Flag them so readers know the page is not the
+# released documentation.
+_rtd_version = os.environ.get("READTHEDOCS_VERSION", "")
+if re.fullmatch(r"v\d+\.\d+", _rtd_version):
+    rst_prolog = f"""
+.. warning::
+
+   This is the documentation of the **test version {release}** of Picasso.
+   It describes features that are not yet part of the official release.
+   For the released version, see the
+   `main documentation <https://picassosr.readthedocs.io/en/latest/>`_.
+"""
 
 # -- General configuration ---------------------------------------------------
 

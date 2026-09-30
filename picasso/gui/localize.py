@@ -38,6 +38,7 @@ from .. import (
     spline,
     wavelet,
     __version__,
+    docs_url,
     zfit,
 )
 
@@ -3048,7 +3049,7 @@ class CalibrateAffineDialog(lib.Dialog):
     one after another.
     """
 
-    LATERAL_URL = "https://picassosr.readthedocs.io/en/latest/localize.html#lateral-corrections-of-x-and-y"  # noqa: E501
+    LATERAL_URL = docs_url("localize.html#lateral-corrections-of-x-and-y")
 
     # Emitted when "Calibrate" is pressed. Not ``accepted``: the dialog
     # stays open so the pairing can be inspected on both bead images.
@@ -3399,13 +3400,17 @@ class ParametersDialog(lib.Dialog):
         The main window of the application.
     """
 
-    CALIB_URL = "https://picassosr.readthedocs.io/en/latest/localize.html#d-calibration"  # noqa: E501
-    GAUSSIAN_FILTER_URL = "https://picassosr.readthedocs.io/en/latest/localize.html#gaussian-filter"  # noqa: E501
-    IDENT_URL = "https://picassosr.readthedocs.io/en/latest/localize.html#identification-and-fitting-of-single-molecule-spots"  # noqa: E501
-    WAVELET_URL = "https://picassosr.readthedocs.io/en/latest/localize.html#b-spline-wavelet-identification"  # noqa: E501
-    ROI_URL = "https://picassosr.readthedocs.io/en/latest/localize.html#regions-of-interest-rois"  # noqa: E501
-    SPLINE_URL = "https://picassosr.readthedocs.io/en/latest/localize.html#experimental-psf-cubic-spline-fitting"  # noqa: E501
-    TEMPORAL_MEDIAN_URL = "https://picassosr.readthedocs.io/en/latest/localize.html#temporal-median-filter"  # noqa: E501
+    CALIB_URL = docs_url("localize.html#d-calibration")
+    GAUSSIAN_FILTER_URL = docs_url("localize.html#gaussian-filter")
+    IDENT_URL = docs_url(
+        "localize.html#identification-and-fitting-of-single-molecule-spots"
+    )
+    WAVELET_URL = docs_url("localize.html#b-spline-wavelet-identification")
+    ROI_URL = docs_url("localize.html#regions-of-interest-rois")
+    SPLINE_URL = docs_url(
+        "localize.html#experimental-psf-cubic-spline-fitting"
+    )
+    TEMPORAL_MEDIAN_URL = docs_url("localize.html#temporal-median-filter")
 
     def __init__(  # noqa: C901
         self, parent: QtWidgets.QMainWindow | None = None
@@ -4248,7 +4253,7 @@ class ParametersDialog(lib.Dialog):
         load_z_calib.setToolTip(
             "Load a 3D calibration file (.yaml).\n"
             "Please visit the documentation:\n"
-            "https://picassosr.readthedocs.io/en/latest/\n"
+            f"{docs_url()}\n"
             "for instructions on how to obtain it."
         )
         load_z_calib.setAutoDefault(False)
@@ -6165,7 +6170,7 @@ class Window(QtWidgets.QMainWindow):
         The main view for displaying the image.
     """
 
-    DOCS_URL = "https://picassosr.readthedocs.io/en/latest/localize.html"
+    DOCS_URL = docs_url("localize.html")
 
     def __init__(self) -> None:
         super().__init__()

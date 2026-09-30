@@ -22,7 +22,7 @@ from PyQt6 import QtCore, QtGui, QtWidgets, QtPrintSupport
 
 from .. import io as _io
 from .. import design, design_sequences
-from .. import lib, __version__
+from .. import lib, __version__, docs_url
 from .app import run_gui
 
 BASE_SEQUENCES = design_sequences.base_sequences
@@ -1718,7 +1718,7 @@ class Window(QtWidgets.QMainWindow):
 class MainWindow(QtWidgets.QWidget):
     """Main window for the Picasso application."""
 
-    DOCS_URL = "https://picassosr.readthedocs.io/en/latest/design.html"
+    DOCS_URL = docs_url("design.html")
 
     def __init__(self):
         super(MainWindow, self).__init__()

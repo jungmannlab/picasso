@@ -8,8 +8,9 @@ picasso.__init__.py
 """
 
 import os.path
+import re
 import yaml
-from .version import __version__  # noqa: F401
+from .version import __version__
 
 # In frozen (PyInstaller) builds the numba-cuda redirect (a site-packages .pth)
 # never runs, so "from numba import cuda" would fall back to Numba's built-in
@@ -22,6 +23,50 @@ _numba_cuda_compat.install()
 
 _this_file = os.path.abspath(__file__)
 _this_dir = os.path.dirname(_this_file)
+
+DOCS_ROOT_URL = "https://picassosr.readthedocs.io/en"
+
+
+def docs_version(version: str = __version__) -> str:
+    """Return the Read the Docs version slug matching a Picasso version.
+
+    Final releases read the default documentation (``latest``, built
+    from ``master``). Pre-releases (``a``, ``b``, ``rc`` or ``.dev``,
+    e.g. ``0.12.0a2``) read the documentation built from their
+    development branch ``vX.Y`` (e.g. ``v0.12``), which describes
+    features not yet merged into ``master``.
+
+    Parameters
+    ----------
+    version : str, optional
+        Picasso version string. Default is the installed version.
+
+    Returns
+    -------
+    slug : str
+        ``"latest"`` or ``"vX.Y"``.
+    """
+    match = re.match(r"(\d+)\.(\d+)(?:\.\d+)*(a|b|rc|\.dev)?", version)
+    if match is None or match.group(3) is None:
+        return "latest"
+    return f"v{match.group(1)}.{match.group(2)}"
+
+
+def docs_url(page: str = "") -> str:
+    """Return the URL of a documentation page for this Picasso version.
+
+    Parameters
+    ----------
+    page : str, optional
+        Page (and anchor) relative to the documentation root, e.g.
+        ``"render.html#resi"``. Default is the documentation root.
+
+    Returns
+    -------
+    url : str
+        Full URL, see ``docs_version`` for the version it points to.
+    """
+    return f"{DOCS_ROOT_URL}/{docs_version()}/{page}"
 
 
 def user_config_dir() -> str:

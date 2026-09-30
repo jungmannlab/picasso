@@ -48,7 +48,7 @@ Load data and parameters
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
 1. Click the *Load structures* button in the top left corner of the window. Upon loading, new widgets will appear in the GUI.  
-2. For each detected molecular target species, load the experimental data which must be saved in .hdf5 format that is compatible with localizations files in other Picasso modules, see `here <https://picassosr.readthedocs.io/en/latest/files.html#hdf5-files>`_.
+2. For each detected molecular target species, load the experimental data which must be saved in .hdf5 format that is compatible with localizations files in other Picasso modules, see `here <files.html#hdf5-files>`_.
 3. Furthermore, input label uncertainty and labeling efficiency and observed density in the *Load data* box. Alternatively, load the mask to simulate heterogeneous distribution by clicking on *Masks* in the bottom left corner of the box. For more information about the mask, see **Mask generation tab**.
 4. Moreover, in the *Load data* box, the user can change the dimensionality of the simulation. If 3D simulation is chosen without a mask, the user needs to input the range of z coordinates of molecular targets simulated by clicking *Z range*. In the "Optional settings" dialog, the user can change the mode of rotations (random rotations around z axis (2D), random rotations around 3 axes or no rotations). Additionally, the fitting mode can be adjusted - one of "bayesian", "coarse to fine" or "brute force". The chosen fitting mode applies to all fitting workflows (*Find best fitting combination*, *Compare models* and *Fit LE*). For more information about the fitting modes, see **Fitting** below. The fitting mode chosen here is remembered across sessions, under ``Fitting mode`` in the ``SPINNA`` section of ``~/.picasso/settings.yaml`` (see :ref:`user-settings-file`).
 
@@ -130,7 +130,7 @@ This tab allows the user to create a density/binary mask capable of recovering t
 Command window - batch analysis
 -------------------------------
 
-SPINNA can be run directly from the command window to allow fast and efficient batch analysis – either to analyze many datasets or to analyze the same datasets with many user settings, or both. The entire list thereof is summarized in a .csv file. For more information on Picasso direct command window usage, see `here <https://picassosr.readthedocs.io/en/latest/cmd.html>`_. To run SPINNA batch analysis, run ``python -m picasso spinna -p NAME_OF_CSV_FILE``. The following arguments are available:
+SPINNA can be run directly from the command window to allow fast and efficient batch analysis – either to analyze many datasets or to analyze the same datasets with many user settings, or both. The entire list thereof is summarized in a .csv file. For more information on Picasso direct command window usage, see `here <cmd.html>`_. To run SPINNA batch analysis, run ``python -m picasso spinna -p NAME_OF_CSV_FILE``. The following arguments are available:
 - ``-a`` or ``--asynch`` switches off the multiprocessing mode. If not specified, multiprocessing is used.
 - ``-v`` or ``--verbose`` switches on the verbose mode, i.e., a progress bar for each row is displayed. If not specified, the verbose mode is off. 
 - ``-b`` or ``--bootstrap`` switches on the bootstrap mode, i.e., the best fitting model is resampled 20 times and SPINNA is rerun on the resampled datasets. If not specified, the bootstrap mode is off.

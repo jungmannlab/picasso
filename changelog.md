@@ -9,6 +9,7 @@ Last change: 30-SEP-2026 CEST
 ### General
 - Removed support for Python 3.10 (Python 3.11–3.14 are supported).
 - All docstrings of public functions have been improved to match the NumPy style.
+- Test version documentation online.
 
 ### Render
 - Render has been largely rewritten for fast and interactive rendering of localizations even for large, multiplex datasets. GPU via the package ``wgpu`` has been added for cross-platform support. More details in the section **Technical details on Render update** below. See these links for the relevant user guides: [navigation](https://picassosr.readthedocs.io/en/latest/render.html#navigating-the-image), [user_settings](https://picassosr.readthedocs.io/en/latest/render.html#cpu-usage-on-shared-workstations), [GPU](https://picassosr.readthedocs.io/en/latest/render.html#gpu-rendering).

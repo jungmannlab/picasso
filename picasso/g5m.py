@@ -29,7 +29,7 @@ from numba import njit
 from scipy.special import erf
 from sklearn.utils import check_random_state
 
-from . import lib, zfit, __version__
+from . import lib, zfit, __version__, docs_url
 
 if TYPE_CHECKING:
     from PyQt6 import QtWidgets  # only used in type annotations
@@ -3799,7 +3799,7 @@ def g5m(
             "Calibration dictionary must be provided for astigmatism 3D "
             "data. The dictionary must specify 'X Coefficients' and 'Y "
             "Coefficients' and 'Magnification factor'. See "
-            "https://picassosr.readthedocs.io/en/latest/localize.html#d-calibration"  # noqa: E501
+            f"{docs_url('localize.html#d-calibration')}"
         )
 
     # determine how many steps are displayed in the progress bar

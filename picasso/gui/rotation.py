@@ -21,7 +21,7 @@ import matplotlib.pyplot as plt
 from PyQt6 import QtCore, QtGui, QtWidgets
 from scipy.spatial.transform import Rotation
 
-from .. import io, render, lib, lib_qt, __version__
+from .. import io, render, lib, lib_qt, __version__, docs_url
 from .render_worker import (
     RenderWorker,
     global_precisions_for,
@@ -560,7 +560,7 @@ class AnimationDialog(lib.Dialog):
         Instance of the rotation window.
     """
 
-    DOCS_URL = "https://picassosr.readthedocs.io/en/latest/render.html#build-an-animation"  # noqa: E501
+    DOCS_URL = docs_url("render.html#build-an-animation")
 
     # display name -> (``render.build_animation`` transition, tooltip)
     TRANSITIONS = {
@@ -3113,7 +3113,7 @@ class RotationWindow(QtWidgets.QMainWindow):
         parent).
     """
 
-    DOCS_URL = "https://picassosr.readthedocs.io/en/latest/render.html#d-rotation-window"  # noqa: E501
+    DOCS_URL = docs_url("render.html#d-rotation-window")
 
     def __init__(self, window: QtWidgets.QMainWindow) -> None:
         super().__init__()

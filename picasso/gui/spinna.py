@@ -37,7 +37,7 @@ from PyQt6 import QtCore, QtGui, QtWidgets
 from matplotlib.backends.backend_qt5agg import FigureCanvas
 from scipy.spatial.transform import Rotation
 
-from .. import io, lib, render, spinna, __version__
+from .. import io, lib, render, spinna, __version__, docs_url
 from .app import run_gui
 
 matplotlib.use("agg")
@@ -451,7 +451,7 @@ class MaskGeneratorTab(lib.Dialog):
         probability cutoff.
     """
 
-    DOCS_URL = "https://picassosr.readthedocs.io/en/latest/spinna.html#mask-generation-tab"  # noqa: E501
+    DOCS_URL = docs_url("spinna.html#mask-generation-tab")
 
     def __init__(self, window: QtWidgets.QMainWindow) -> None:
         super().__init__(window)
@@ -1391,9 +1391,7 @@ class StructuresTab(lib.Dialog):
         Checkbox for showing/hiding scalebar.
     """
 
-    DOCS_URL = (
-        "https://picassosr.readthedocs.io/en/latest/spinna.html#structures-tab"
-    )
+    DOCS_URL = docs_url("spinna.html#structures-tab")
 
     def __init__(self, window: QtWidgets.QMainWindow) -> None:
         super().__init__(window)
@@ -3072,9 +3070,7 @@ class SimulationsTab(lib.Dialog):
         Main window.
     """
 
-    DOCS_URL = (
-        "https://picassosr.readthedocs.io/en/latest/spinna.html#simulate-tab"
-    )
+    DOCS_URL = docs_url("spinna.html#simulate-tab")
 
     def __init__(self, window: QtWidgets.QMainWindow) -> None:
         super().__init__(window)

@@ -29,7 +29,7 @@ from matplotlib.backends.backend_qt5agg import FigureCanvas
 from scipy.optimize import curve_fit
 from scipy.stats import norm
 
-from .. import io, lib, simulate, __version__
+from .. import io, lib, simulate, __version__, docs_url
 from .app import run_gui
 
 
@@ -258,7 +258,7 @@ class Window(QtWidgets.QMainWindow):
         Label for the total acquisition time.
     """
 
-    DOCS_URL = "https://picassosr.readthedocs.io/en/latest/simulate.html"
+    DOCS_URL = docs_url("simulate.html")
 
     def __init__(self):
         super().__init__()
