@@ -25,6 +25,7 @@ Last change: 30-SEP-2026 CEST
 - Faster FRC.
 - FRC in several random ROIs (*Info* dialog, *FRC in several ROIs*).
 - `picasso.render` is distributed as a package (`kernels`, `geometry`, `splat`, `scene`, `overlays_qt`, `animation`, `backend`, `gpu`); every former `picasso.render.*` name is still importable from `picasso.render`.
+- Rectangular pick minimum length set to 5 display pixels.
 - Fixed: 3D histogram rendering scaled z unnecessarily.
 - Fixed NeNA (and FRC) overwriting group columns of localizations.
 - Fixed: *Export FOV as .ims* ignored the image extents of the loaded metadata and used only the last channel's metadata.

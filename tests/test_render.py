@@ -1813,6 +1813,21 @@ class TestOverlayStyle:
             # a point inside, off the rectangle's center line
             assert _lit(out)[50, 45], shape
 
+    def test_rectangle_center_line_is_optional(self):
+        def center(style):
+            out = render.draw_picks(
+                _fresh_canvas(),
+                FOV_32,
+                "Rectangle",
+                [((4, 16), (28, 16))],
+                8,
+                style=style,
+            )
+            return _lit(out)[60, 60]  # on the center line
+
+        assert center(None)  # shown by default
+        assert not center(render.OverlayStyle(center_line=False))
+
     def test_only_closed_polygons_are_filled(self):
         style = render.OverlayStyle(fill_opacity=0.5)
         triangle = [(4, 4), (28, 4), (16, 28)]

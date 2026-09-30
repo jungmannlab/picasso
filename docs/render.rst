@@ -79,7 +79,7 @@ Pick shapes
      - ``Side length``, shared by all picks.
      - The same use as the circle, where a square footprint is preferred.
    * - ``Rectangle``
-     - Dragging from one end of its center axis to the other, so it can take any orientation and length.
+     - Dragging from one end of its center axis to the other, so it can take any orientation and length. A drag shorter than 5 screen pixels, e.g., a stray click, creates no pick.
      - ``Width`` (across the axis) shared by all picks; the length is per pick.
      - Elongated structures - filaments, nanorulers, edges - and the only shape that can be projected onto its own axes, see ``Plot pick profile`` below.
    * - ``Polygon``
@@ -558,7 +558,7 @@ The shift of each channel done with the move tool is saved in its metadata as ``
 
 Tools settings (CTRL + T)
 ^^^^^^^^^^^^^^^^^^^^^^^^^
-Define the settings of the tools, i.e., the radius of the pick and an option to annotate each pick. The range of pick similar can be set here as well.
+Define the settings of the tools. The **Pick** section sets the pick shape and its size (``Diameter``, ``Width``, ``Side length`` or ``Stroke width``, see `Pick shapes`_), the range of *Pick similar*, whether the picks are annotated with their indices and whether circular picks are displayed as points. The **Move** section selects the channels dragged with the move tool and undoes the last move, see `Move (CTRL + G)`_.
 
 How the tools are drawn is set in the **Appearance** section at the bottom, hidden by default; click its title to show it. It has one tab per tool: **Pick**, **Measure** and **Move** (the label showing the shift while dragging). The settings apply to the main window, to exported images and, for the Measure tool, to the 3D window. If the dialog does not fit on the screen, it scrolls.
 
@@ -569,13 +569,14 @@ How the tools are drawn is set in the **Appearance** section at the bottom, hidd
 * *Fill* (picks only): opacity of the fill of closed picks, in the line color; 0% draws outlines only. *Default* fills only brush picks. A polygon is filled once it is closed.
 * *Label size*: size of the pick indices (see *Annotate picks*), the measured distances and the shift label, in screen pixels.
 * *While drawing* (picks only): color of a rectangle, box or brush stroke that is still being dragged.
+* *Center line* (picks only): draws the line along the center of rectangular picks, from the start to the end point. On by default.
 * *Marker size* (Measure only): size of the crosses marking the measured points.
 
 *Reset* restores the default appearance. The appearance is saved when Render is closed and restored at the next start (``ToolStyles`` in the ``Render`` section of the :ref:`user-settings-file`).
 
 Pick similar (CTRL + Shift + P)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Automatically identifies picks that are similar to the current picks. Available for circular, square and rectangular picks. For rectangular picks, the new picks take the median length of the current picks and are oriented along the localizations they contain.
+Automatically identifies picks that are similar to the current picks. Available for circular, square, rectangular and box picks. For rectangular picks, the new picks take the median length of the current picks and are oriented along the localizations they contain.
 
 Remove localizations in picks
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

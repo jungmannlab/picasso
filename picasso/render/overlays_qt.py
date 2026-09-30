@@ -70,6 +70,9 @@ class OverlayStyle:
         filled with ``color``. Default None.
     font_size : int or None, optional
         Pixel size of the labels. Default None.
+    center_line : bool, optional
+        If True, rectangular picks are drawn with the line along their
+        center, from the start to the end point. Default True.
 
     Raises
     ------
@@ -84,6 +87,7 @@ class OverlayStyle:
     opacity: float = 1.0
     fill_opacity: float | None = None
     font_size: int | None = None
+    center_line: bool = True
 
     def __post_init__(self) -> None:
         if self.line_style not in LINE_STYLES:
@@ -401,8 +405,9 @@ def _draw_picks_rectangle(
             start_x, start_y, end_x, end_y, w, return_most_right=True
         )
         painter.drawPolygon(polygon)
-        # draw a straight line across the pick, over the fill
-        painter.drawLine(start_x, start_y, end_x, end_y)
+        if style.center_line:
+            # draw a straight line across the pick, over the fill
+            painter.drawLine(start_x, start_y, end_x, end_y)
         if annotate_picks:
             painter.drawText(int(most_right[0]), int(most_right[1]), str(i))
     painter.end()

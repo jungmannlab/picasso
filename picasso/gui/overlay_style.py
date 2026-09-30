@@ -4,9 +4,10 @@ picasso.gui.overlay_style
 
 Widgets that set how the tool overlays of Picasso: Render (picks,
 measured points, the Move tool's label) are drawn: color, line style,
-line width, opacity, fill and label size. The chosen appearance is
-turned into a ``picasso.render.OverlayStyle`` for the drawing functions
-and saved in the user settings.
+line width, opacity, fill, label size and the center line of
+rectangular picks. The chosen appearance is turned into a
+``picasso.render.OverlayStyle`` for the drawing functions and saved in
+the user settings.
 
 :author: Rafal Kowalewski
 :copyright: Copyright (c) 2026 Jungmann Lab, MPI of Biochemistry
@@ -52,6 +53,7 @@ FIELDS = {
     "font_size": ("Label size:", "Label size (px)"),
     "marker_size": ("Marker size:", "Marker size (px)"),
     "drawing_color": ("While drawing:", "Color while drawing"),
+    "center_line": ("Center line:", "Rectangle center line"),
 }
 #: Values of the fields when not given otherwise.
 DEFAULTS = {
@@ -63,6 +65,7 @@ DEFAULTS = {
     "font_size": None,
     "marker_size": 20,
     "drawing_color": "Green",
+    "center_line": True,
 }
 
 
@@ -238,6 +241,8 @@ class OverlayStyleWidget(QtWidgets.QWidget):
         Pixel size of the labels, or "Default".
     marker_size : QSpinBox
         Size of the point markers in display pixels.
+    center_line : QCheckBox
+        Whether rectangular picks show the line along their center.
     """
 
     changed = QtCore.pyqtSignal()
@@ -292,6 +297,14 @@ class OverlayStyleWidget(QtWidgets.QWidget):
                 "Color of the lines and labels."
                 if field == "color"
                 else "Color of a shape while it is being drawn."
+            )
+            return widget
+        if field == "center_line":
+            widget = QtWidgets.QCheckBox()
+            widget.toggled.connect(self.changed)
+            widget.setToolTip(
+                "Draw the line along the center of rectangular picks,\n"
+                "from the start to the end point."
             )
             return widget
         if field == "line_style":
@@ -354,6 +367,8 @@ class OverlayStyleWidget(QtWidgets.QWidget):
             return widget.value()
         if field == "line_style":
             return widget.currentText()
+        if field == "center_line":
+            return widget.isChecked()
         value = widget.value()
         if field == "fill_opacity" and value == DEFAULT_FILL:
             return None
@@ -370,6 +385,9 @@ class OverlayStyleWidget(QtWidgets.QWidget):
         elif field == "line_style":
             if value in render.LINE_STYLES:
                 widget.setCurrentText(value)
+        elif field == "center_line":
+            if isinstance(value, bool):
+                widget.setChecked(value)
         else:
             if value is None:
                 value = widget.minimum()  # "Default"
@@ -436,6 +454,8 @@ class OverlayStyleWidget(QtWidgets.QWidget):
             kwargs["fill_opacity"] = None if fill is None else fill / 100
         if "font_size" in self.fields:
             kwargs["font_size"] = self.value("font_size")
+        if "center_line" in self.fields:
+            kwargs["center_line"] = self.value("center_line")
         return render.OverlayStyle(**kwargs)
 
     def drawing_style(

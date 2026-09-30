@@ -89,6 +89,9 @@ POLYGON_POINTER_SIZE = 16  # must be even
 # shortest drag (display pixels, in x and y) that still yields a box
 # pick, so that a stray click does not create one of zero area
 MIN_BOX_PICK_DRAG = 3
+# shortest rectangular pick (display pixels, start to end point), so
+# that a stray click does not create one of zero length
+MIN_RECTANGLE_PICK_LENGTH = 5
 # how far (display pixels) the cursor must travel before another point
 # is appended to the brush stroke being painted
 MIN_BRUSH_POINT_SPACING = 2
@@ -6960,6 +6963,7 @@ class ToolsSettingsDialog(lib.Dialog):
                 "fill_opacity",
                 "font_size",
                 "drawing_color",
+                "center_line",
             )
         )
         self.pick_style.changed.connect(self.update_scene_with_cache)
@@ -10867,13 +10871,14 @@ class View(QtWidgets.QLabel):
         # draw a rectangle
         painter.drawPolygon(polygon)
 
-        # draw a line across the pick, over the fill
-        painter.drawLine(
-            self.rectangle_pick_start_x,
-            self.rectangle_pick_start_y,
-            self.rectangle_pick_current_x,
-            self.rectangle_pick_current_y,
-        )
+        if style.center_line:
+            # draw a line across the pick, over the fill
+            painter.drawLine(
+                self.rectangle_pick_start_x,
+                self.rectangle_pick_start_y,
+                self.rectangle_pick_current_x,
+                self.rectangle_pick_current_y,
+            )
         painter.end()
         return image
 
@@ -12910,12 +12915,24 @@ class View(QtWidgets.QLabel):
 
     def _mouse_release_pick_rectangle(self, event: QtCore.QEvent) -> None:
         """Finish and add a rectangular pick (left click), or remove a
-        pick (right click)."""
+        pick (right click).
+
+        Picks shorter than ``MIN_RECTANGLE_PICK_LENGTH`` display pixels
+        are discarded, as they come from a stray click rather than a
+        drag."""
         if event.button() == QtCore.Qt.MouseButton.LeftButton:
-            # finish drawing rectangular pick and add it
-            rectangle_pick_end = self.map_to_movie(event.pos())
+            # finish drawing rectangular pick and add it, unless it is
+            # too short to be intended
             self._rectangle_pick_ongoing = False
-            self.add_pick((self.rectangle_pick_start, rectangle_pick_end))
+            length = np.hypot(
+                event.pos().x() - self.rectangle_pick_start_x,
+                event.pos().y() - self.rectangle_pick_start_y,
+            )
+            if length < MIN_RECTANGLE_PICK_LENGTH:
+                self.update_scene(picks_only=True)  # clear the overlay
+            else:
+                rectangle_pick_end = self.map_to_movie(event.pos())
+                self.add_pick((self.rectangle_pick_start, rectangle_pick_end))
             event.accept()
         elif event.button() == QtCore.Qt.MouseButton.RightButton:
             # remove pick

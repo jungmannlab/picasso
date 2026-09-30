@@ -159,6 +159,29 @@ def test_drawing_color_is_used_for_a_box_being_dragged(window):
     np.testing.assert_array_equal(pixels[120, 120, :3], [255, 0, 255])
 
 
+def test_rectangle_center_line_is_optional(window):
+    view = window.view
+    view._pick_shape = "Rectangle"
+    window.tools_settings_dialog.pick_width.setValue(8 * PIXELSIZE)
+    view._picks = [((4.0, 16.0), (28.0, 16.0))]
+    view.rectangle_pick_start_x, view.rectangle_pick_start_y = 32, 128
+    view.rectangle_pick_current_x, view.rectangle_pick_current_y = 224, 128
+    style = window.tools_settings_dialog.pick_style
+    assert window.tools_settings_dialog.pick_overlay_style().center_line
+    # the center of the pick and of the pick being dragged
+    assert _pixels(view.draw_picks(_canvas()))[128, 128, :3].any()
+    assert _pixels(view.draw_rectangle_pick_ongoing(_canvas()))[
+        128, 128, :3
+    ].any()
+
+    style.center_line.setChecked(False)
+    assert not _pixels(view.draw_picks(_canvas()))[128, 128, :3].any()
+    assert not _pixels(view.draw_rectangle_pick_ongoing(_canvas()))[
+        128, 128, :3
+    ].any()
+    assert style.settings()["Rectangle center line"] is False
+
+
 def test_measure_style_sets_markers_and_lines(window):
     view = window.view
     view._points = [(4.0, 16.0), (28.0, 16.0)]
@@ -237,6 +260,7 @@ def test_styles_are_saved_on_close_and_loaded_on_start(qt_offscreen, tmp_path):
     t_dialog.pick_style.color.set_value("#ABCDEF")
     t_dialog.pick_style.set_value("line_style", "Dash-dot")
     t_dialog.pick_style.set_value("fill_opacity", 30)
+    t_dialog.pick_style.center_line.setChecked(False)
     t_dialog.measure_style.set_value("font_size", 12)
     t_dialog.move_style.set_value("opacity", 50)
     window.close()
@@ -247,6 +271,7 @@ def test_styles_are_saved_on_close_and_loaded_on_start(qt_offscreen, tmp_path):
     assert styles["Pick"]["Line style"] == "Dash-dot"
     assert styles["Pick"]["Fill opacity (%)"] == 30
     assert styles["Pick"]["Label size (px)"] is None  # "Default"
+    assert styles["Pick"]["Rectangle center line"] is False
     assert styles["Measure"]["Label size (px)"] == 12
     assert styles["Move"]["Opacity (%)"] == 50
     assert "Line style" not in styles["Move"]  # not a field of the label
@@ -258,6 +283,7 @@ def test_styles_are_saved_on_close_and_loaded_on_start(qt_offscreen, tmp_path):
     assert pick.line_style == "Dash-dot"
     assert pick.fill_opacity == pytest.approx(0.3)
     assert pick.font_size is None
+    assert not pick.center_line
     assert t_dialog.measure_overlay_style().font_size == 12
     assert t_dialog.move_overlay_style().opacity == pytest.approx(0.5)
     window.view.stop_render_worker()

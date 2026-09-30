@@ -260,6 +260,31 @@ class TestBoxPickTool:
         assert image is not None
 
 
+class TestRectanglePickMinimumLength:
+    @pytest.fixture
+    def rectangle_view(self, window):
+        view = window.view
+        window.tools_settings_dialog.pick_shape.setCurrentText("Rectangle")
+        view._mode = "Pick"
+        assert view._pick_shape == "Rectangle"
+        return view
+
+    def test_a_bare_click_creates_nothing(self, rectangle_view):
+        _drag(rectangle_view, 60, 60, 60, 60)
+        assert rectangle_view._picks == []
+        assert not rectangle_view._rectangle_pick_ongoing
+
+    def test_drag_shorter_than_the_minimum_creates_nothing(
+        self, rectangle_view
+    ):
+        _drag(rectangle_view, 60, 60, 63, 63)  # 4.2 display pixels
+        assert rectangle_view._picks == []
+
+    def test_drag_of_the_minimum_length_creates_a_pick(self, rectangle_view):
+        _drag(rectangle_view, 60, 60, 63, 64)  # 5 display pixels
+        assert len(rectangle_view._picks) == 1
+
+
 class TestLoaderUsesTheStoredIndex:
     """The loader thread reads the pyramid stored in the file by
     ``io.save_locs`` instead of building one, when it is valid."""
