@@ -3392,10 +3392,17 @@ def _g5m(
         )
 
         # display progress
-        while lib.n_futures_done(fs) < n_steps:
-            n_done = lib.n_futures_done(fs)
-            progress.set_value(n_done)
-            time.sleep(0.2)
+        try:
+            while lib.n_futures_done(fs) < n_steps:
+                n_done = lib.n_futures_done(fs)
+                progress.set_value(n_done)
+                time.sleep(0.2)
+        except BaseException:
+            # e.g. canceled in the GUI (lib.OperationCanceled): drop the
+            # tasks not started yet instead of running them to the end
+            for f in fs:
+                f.cancel()
+            raise
 
         # extract centers from futures
         centers = [_.result()[0] for _ in fs if len(_.result())]

@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import math
 import os
+import sys
 import time
 import traceback
 from collections.abc import Callable
@@ -23,7 +24,7 @@ from typing import TypeAlias
 
 import yaml
 import matplotlib.pyplot as plt
-from PyQt6 import QtCore, QtWidgets, QtGui
+from PyQt6 import QtCore, QtWidgets, QtGui, sip
 from playsound3 import playsound
 
 from picasso import diagnostics, docs_url, io
@@ -32,6 +33,7 @@ from picasso.lib import (
     SOUND_NOTIFICATION_DURATION,
     REQUIRED_COLUMNS,
     MockProgress,
+    OperationCanceled,
     TqdmProgress,
     get_sound_notification_path,
     is_path_available,
@@ -322,6 +324,14 @@ class MetadataDialog(Dialog):
 class ProgressDialog(QtWidgets.QProgressDialog):
     """ProgressDialog displays a progress dialog with a progress bar."""
 
+    # pump the event loop on every update, such that the dialog repaints
+    # while the computation blocks the GUI thread; not needed (and
+    # re-entrant) when the computation runs on a worker thread
+    _process_events = True
+    # play the finish sound when the bar reaches its maximum; a task with
+    # several phases plays it once the whole task is done instead
+    _sound_on_maximum = True
+
     def __init__(self, description, minimum, maximum, parent):
         # append time estimate to description
         super().__init__(
@@ -385,7 +395,11 @@ class ProgressDialog(QtWidgets.QProgressDialog):
             )
             self.setLabelText(description)
         # sound notification
-        if value >= self.maximum() and self.finished is False:
+        if (
+            self._sound_on_maximum
+            and value >= self.maximum()
+            and self.finished is False
+        ):
             self.finished = True
             self.play_sound_notification()
         # if value is above zero, count has started, enabling time estimate
@@ -393,7 +407,8 @@ class ProgressDialog(QtWidgets.QProgressDialog):
             if value > 0:
                 self.count_started = True
                 self.t0_est = time.time()
-        self.app.processEvents()
+        if self._process_events:
+            self.app.processEvents()
 
     def close(self):
         """Close the dialog for good, cancelling a pending delayed show.
@@ -527,6 +542,655 @@ class StatusDialog(Dialog):
                         f" {self.sound_notification_path}:\n"
                         f"{traceback.format_exc()}"
                     )
+
+
+class TaskProgressDialog(ProgressDialog):
+    """Progress dialog of a task running on a worker thread, see
+    :func:`run_task`.
+
+    Unlike :class:`ProgressDialog`, it has a Cancel button and is driven
+    by the worker's progress signals instead of pumping the event loop.
+    Cancel (also Escape or closing the dialog) does not hide it: it
+    emits ``cancel_requested`` and shows "Canceling..." until the worker
+    has reached its next cancellation point and stopped. The task closes
+    the dialog with :meth:`finish`.
+
+    A maximum of 0 shows a busy indicator, for steps that report no
+    progress.
+    """
+
+    _process_events = False
+    _sound_on_maximum = False
+
+    cancel_requested = QtCore.pyqtSignal()
+
+    def __init__(self, description, maximum, parent, title=None):
+        super().__init__(description, 0, maximum, parent)
+        self.setCancelButtonText("Cancel")
+        # QProgressDialog hides itself on cancel and, with auto-reset and
+        # auto-close, at the maximum; only the task may close this one
+        self.canceled.disconnect(self.cancel)
+        self.canceled.connect(self.request_cancel)
+        self.setAutoReset(False)
+        self.setAutoClose(False)
+        if title:
+            self.setWindowTitle(title)
+        self.cancel_was_requested = False
+        self._closing = False
+        self.set_value(0)  # arm: modal, delayed show, clock
+
+    def set_value(self, value):
+        """Advance the bar; see :meth:`ProgressDialog.set_value`.
+
+        Parameters
+        ----------
+        value : int
+            Cumulative progress so far, ignored by the busy indicator.
+        """
+        if self.maximum() == 0:  # busy indicator, no time estimate
+            if not self.initalized:
+                self.init()
+            self.setValue(0)
+            return
+        super().set_value(value)
+
+    def request_cancel(self):
+        """Show that the task is being canceled and emit
+        ``cancel_requested``, once."""
+        if self.cancel_was_requested:
+            return
+        self.cancel_was_requested = True
+        self.finished = True  # no finish sound for a canceled task
+        self.setRange(0, 0)  # busy until the worker has stopped
+        self.setLabelText(
+            "Canceling...\nWaiting for the current step to finish."
+        )
+        button = self.findChild(QtWidgets.QPushButton)
+        if button is not None:
+            button.setEnabled(False)
+        self.cancel_requested.emit()
+
+    def reject(self):
+        """Escape cancels the task instead of hiding the dialog."""
+        self.canceled.emit()
+
+    def closeEvent(self, event):
+        """Cancel the task instead of closing, unless the task closes the
+        dialog via :meth:`finish`.
+
+        Parameters
+        ----------
+        event : QtGui.QCloseEvent
+            The Qt close event.
+        """
+        if self._closing:
+            super().closeEvent(event)
+        else:
+            event.ignore()
+            self.canceled.emit()
+
+    def finish(self, completed: bool) -> None:
+        """Close the dialog for good.
+
+        Parameters
+        ----------
+        completed : bool
+            Whether the task ran to completion, which plays the finish
+            sound if the task took long enough.
+        """
+        try:
+            self.canceled.disconnect()
+        except TypeError:  # finished twice
+            pass
+        if completed and not self.finished:
+            self.play_sound_notification()
+        self.finished = True
+        self._closing = True
+        self.close()
+
+
+class TaskProgress(QtCore.QObject):
+    """Progress tracker handed to the function run by :func:`run_task`.
+
+    Implements the ``ProgressDialog`` interface (see
+    ``lib.normalize_progress``), so analysis functions that take a
+    progress dialog, or a progress callback such as ``progress.set_value``,
+    run unchanged on the worker thread. Updates reach the dialog on the
+    GUI thread through queued signals, at most every ``INTERVAL`` seconds.
+
+    Once the user canceled the task, the next ``set_value`` (or
+    ``zero_progress``, ``check_canceled``) raises
+    ``lib.OperationCanceled``, so every progress update is a
+    cancellation point.
+
+    Parameters
+    ----------
+    description : str
+        Label of the first phase.
+    maximum : int
+        Maximum of the first phase; 0 shows a busy indicator.
+    """
+
+    #: Minimum time between two value updates sent to the dialog, in s.
+    INTERVAL = 0.05
+
+    value_changed = QtCore.pyqtSignal(int)
+    maximum_changed = QtCore.pyqtSignal(int)
+    label_changed = QtCore.pyqtSignal(str)
+    phase_changed = QtCore.pyqtSignal(str)
+
+    def __init__(self, description: str, maximum: int) -> None:
+        super().__init__()
+        self.description_base = description
+        self._maximum = int(maximum)
+        self._value = 0
+        self._last_emit = 0.0
+        self._canceled = False  # set from the GUI thread
+
+    @property
+    def canceled(self) -> bool:
+        """Whether the user canceled the task."""
+        return self._canceled
+
+    def cancel(self) -> None:
+        """Request cancellation, which the next update raises."""
+        self._canceled = True
+
+    def check_canceled(self) -> None:
+        """Raise ``lib.OperationCanceled`` if the task was canceled.
+
+        For explicit cancellation points between steps that report no
+        progress, e.g. before saving the result.
+
+        Raises
+        ------
+        OperationCanceled
+            If the user canceled the task.
+        """
+        if self._canceled:
+            raise OperationCanceled
+
+    def set_value(self, value, *args, **kwargs) -> None:
+        """Report the cumulative progress of the current phase.
+
+        Parameters
+        ----------
+        value : int
+            Cumulative progress so far.
+        *args, **kwargs
+            Accepted and ignored, for ``ProgressDialog`` compatibility.
+
+        Raises
+        ------
+        OperationCanceled
+            If the user canceled the task.
+        """
+        self.check_canceled()
+        self._value = int(value)
+        now = time.monotonic()
+        if (
+            now - self._last_emit >= self.INTERVAL
+            or self._value >= self._maximum
+        ):
+            self._last_emit = now
+            self.value_changed.emit(self._value)
+
+    def value(self) -> int:
+        """The progress last reported."""
+        return self._value
+
+    def setMaximum(self, maximum, *args, **kwargs) -> None:
+        """Set the maximum of the current phase.
+
+        Parameters
+        ----------
+        maximum : int
+            The value progress runs up to; 0 shows a busy indicator.
+        *args, **kwargs
+            Accepted and ignored, for ``ProgressDialog`` compatibility.
+        """
+        self._maximum = int(maximum)
+        self.maximum_changed.emit(self._maximum)
+
+    def maximum(self) -> int:
+        """The maximum of the current phase."""
+        return self._maximum
+
+    def setLabelText(self, text, *args, **kwargs) -> None:
+        """Show ``text`` in the dialog, until the next time estimate.
+
+        Parameters
+        ----------
+        text : str
+            Label text.
+        *args, **kwargs
+            Accepted and ignored, for ``ProgressDialog`` compatibility.
+        """
+        self.label_changed.emit(str(text))
+
+    def zero_progress(self, description=None, *args, **kwargs) -> None:
+        """Start a new phase at zero progress.
+
+        Parameters
+        ----------
+        description : str, optional
+            Label of the new phase. None keeps the current one.
+        *args, **kwargs
+            Accepted and ignored, for ``ProgressDialog`` compatibility.
+
+        Raises
+        ------
+        OperationCanceled
+            If the user canceled the task.
+        """
+        self.check_canceled()
+        if description:
+            self.description_base = description
+        self._value = 0
+        self._last_emit = time.monotonic()
+        self.phase_changed.emit(self.description_base)
+
+    def phase(self, description: str, maximum: int) -> None:
+        """Start a new phase with its own label and maximum.
+
+        Parameters
+        ----------
+        description : str
+            Label of the new phase.
+        maximum : int
+            Maximum of the new phase; 0 shows a busy indicator.
+
+        Raises
+        ------
+        OperationCanceled
+            If the user canceled the task.
+        """
+        self.setMaximum(maximum)
+        self.zero_progress(description)
+
+    def callback(self, description: str, maximum: int) -> Callable:
+        """A progress callback that starts its own phase when first
+        called, for functions that report several steps through
+        separate callbacks.
+
+        Parameters
+        ----------
+        description : str
+            Label of the phase.
+        maximum : int
+            Maximum of the phase.
+
+        Returns
+        -------
+        callback : callable
+            Takes the cumulative progress of the phase, like
+            :meth:`set_value`.
+        """
+        started = False
+
+        def callback(value, *args, **kwargs):
+            nonlocal started
+            if not started:
+                started = True
+                self.phase(description, maximum)
+            self.set_value(value)
+
+        return callback
+
+    def get_iterator(self, start=None, end=None):
+        """Get an iterator that spans the remaining progress.
+
+        Parameters
+        ----------
+        start, end : int, optional
+            First and one-past-last value. None uses the current value
+            and maximum.
+
+        Returns
+        -------
+        iterator : range
+        """
+        start = self._value if start is None else start
+        end = self._maximum if end is None else end
+        return range(start, end)
+
+    def init(self, *args, **kwargs) -> None:
+        """Do nothing; the dialog is armed by the task."""
+
+    def update(self, *args, **kwargs) -> None:
+        """Do nothing."""
+
+    def close(self, *args, **kwargs) -> None:
+        """Do nothing; the task closes the dialog when the function
+        returns."""
+
+    def closeEvent(self, *args, **kwargs) -> None:
+        """Do nothing."""
+
+    def play_sound_notification(self, *args, **kwargs) -> None:
+        """Do nothing; the dialog plays it when the task completes."""
+
+
+class _TaskThread(QtCore.QThread):
+    """Runs a task's function and keeps its outcome for the GUI thread."""
+
+    def __init__(self, fn: Callable, progress: TaskProgress) -> None:
+        super().__init__()
+        self._fn = fn
+        self._progress = progress
+        self.outcome = None  # "finished", "canceled" or "failed"
+        self.result = None
+        self.error = None
+
+    def run(self) -> None:
+        try:
+            self.result = self._fn(self._progress)
+            self.outcome = "finished"
+        except OperationCanceled:
+            self.outcome = "canceled"
+        except BaseException as error:  # noqa: BLE001 - reported by Task
+            self.error = error
+            self.outcome = "failed"
+
+
+class _InputBlocker(QtCore.QObject):
+    """Swallow user input to all windows except modal dialogs, i.e.,
+    the task's progress dialog and any message box, while tasks run.
+
+    A computation on the GUI thread froze all input; a task keeps that
+    guarantee (the user cannot change the data the worker reads, start a
+    second task or close a window under it) while windows still repaint.
+    The filter covers the time before the progress dialog shows (which
+    is delayed, so quick tasks do not flash a dialog) and non-modal
+    windows the modal dialog does not block, e.g. linked windows.
+    """
+
+    _BLOCKED = frozenset(
+        {
+            QtCore.QEvent.Type.MouseButtonPress,
+            QtCore.QEvent.Type.MouseButtonRelease,
+            QtCore.QEvent.Type.MouseButtonDblClick,
+            QtCore.QEvent.Type.Wheel,
+            QtCore.QEvent.Type.KeyPress,
+            QtCore.QEvent.Type.KeyRelease,
+            QtCore.QEvent.Type.ShortcutOverride,
+            QtCore.QEvent.Type.Shortcut,
+            QtCore.QEvent.Type.ContextMenu,
+            QtCore.QEvent.Type.Close,
+            QtCore.QEvent.Type.DragEnter,
+            QtCore.QEvent.Type.DragMove,
+            QtCore.QEvent.Type.Drop,
+            QtCore.QEvent.Type.TouchBegin,
+            QtCore.QEvent.Type.TouchUpdate,
+            QtCore.QEvent.Type.TouchEnd,
+            QtCore.QEvent.Type.TabletPress,
+            QtCore.QEvent.Type.TabletRelease,
+            QtCore.QEvent.Type.NativeGesture,
+            QtCore.QEvent.Type.Gesture,
+        }
+    )
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._count = 0
+
+    def acquire(self) -> None:
+        if self._count == 0:
+            QtCore.QCoreApplication.instance().installEventFilter(self)
+        self._count += 1
+
+    def release(self) -> None:
+        self._count -= 1
+        if self._count == 0:
+            QtCore.QCoreApplication.instance().removeEventFilter(self)
+
+    def eventFilter(self, obj, event):
+        if event.type() not in self._BLOCKED:
+            return False
+        # window-level objects (QWindow) forward input to their widgets,
+        # which are filtered below
+        if not isinstance(obj, QtWidgets.QWidget):
+            return False
+        if obj.window().isModal():
+            return False
+        if event.type() in (
+            QtCore.QEvent.Type.Close,
+            QtCore.QEvent.Type.ShortcutOverride,
+        ):
+            # a close event must be ignored to keep the window open; an
+            # accepted override stops the key from triggering a shortcut
+            if event.type() == QtCore.QEvent.Type.Close:
+                event.ignore()
+            else:
+                event.accept()
+        return True
+
+
+_input_blocker = None
+# running tasks, referenced such that a running QThread is never
+# garbage-collected (which aborts the process)
+_running_tasks = []
+
+
+def _stop_running_tasks() -> None:
+    """Cancel all running tasks and wait for their threads, called when
+    the application quits."""
+    for task in list(_running_tasks):
+        task.cancel()
+        task.wait()
+
+
+class Task(QtCore.QObject):
+    """A function running on a worker thread behind a cancelable progress
+    dialog. Created and started by :func:`run_task`, which describes the
+    behavior.
+
+    Attributes
+    ----------
+    progress : TaskProgress
+        Progress tracker passed to the function.
+    dialog : TaskProgressDialog
+        The progress dialog.
+    outcome : {"finished", "canceled", "failed"} or None
+        How the task ended; None while it runs.
+    """
+
+    def __init__(
+        self,
+        fn: Callable,
+        description: str,
+        parent: QtWidgets.QWidget,
+        maximum: int,
+        on_finished: Callable | None,
+        on_failed: Callable | None,
+        on_canceled: Callable | None,
+        title: str | None,
+    ) -> None:
+        super().__init__()
+        self._on_finished = on_finished
+        self._on_failed = on_failed
+        self._on_canceled = on_canceled
+        self.outcome = None
+        self.progress = TaskProgress(description, maximum)
+        self.dialog = TaskProgressDialog(description, maximum, parent, title)
+        self.progress.value_changed.connect(self._on_value)
+        self.progress.maximum_changed.connect(self._on_maximum)
+        self.progress.label_changed.connect(self._on_label)
+        self.progress.phase_changed.connect(self._on_phase)
+        self.dialog.cancel_requested.connect(self.cancel)
+        self._thread = _TaskThread(fn, self.progress)
+        self._thread.finished.connect(self._on_thread_finished)
+
+    def start(self) -> None:
+        """Block input and start the worker thread."""
+        global _input_blocker
+        app = QtCore.QCoreApplication.instance()
+        if _input_blocker is None:
+            _input_blocker = _InputBlocker()
+            app.aboutToQuit.connect(_stop_running_tasks)
+        _input_blocker.acquire()
+        _running_tasks.append(self)
+        self._thread.start()
+
+    def cancel(self) -> None:
+        """Request cancellation. The function stops at its next progress
+        update; its result, if it still completes, is discarded."""
+        self.progress.cancel()
+
+    def is_running(self) -> bool:
+        """Whether the task has not ended yet, i.e., its callbacks have
+        not been called."""
+        return self.outcome is None
+
+    def wait(self, msecs: int | None = None) -> bool:
+        """Block until the worker thread has stopped. The callbacks run
+        later, from the event loop.
+
+        Parameters
+        ----------
+        msecs : int, optional
+            Timeout in ms. None waits indefinitely.
+
+        Returns
+        -------
+        stopped : bool
+            False if the timeout expired first.
+        """
+        if msecs is None:
+            return self._thread.wait()
+        return self._thread.wait(msecs)
+
+    def _dialog_alive(self) -> bool:
+        return not sip.isdeleted(self.dialog)
+
+    def _forward(self) -> bool:
+        """Whether progress updates should reach the dialog."""
+        return self._dialog_alive() and not self.progress.canceled
+
+    def _on_value(self, value: int) -> None:
+        if self._forward():
+            self.dialog.set_value(value)
+
+    def _on_maximum(self, maximum: int) -> None:
+        if self._forward():
+            self.dialog.setMaximum(maximum)
+
+    def _on_label(self, text: str) -> None:
+        if self._forward():
+            self.dialog.setLabelText(text)
+
+    def _on_phase(self, description: str) -> None:
+        if self._forward():
+            self.dialog.zero_progress(description)
+
+    def _on_thread_finished(self) -> None:
+        thread = self._thread
+        thread.wait()  # run() has returned; make sure the thread is done
+        outcome = thread.outcome
+        if self.progress.canceled and outcome != "canceled":
+            # the user asked to cancel: discard a late result, and only
+            # log an error, which the cancellation may have caused
+            if outcome == "failed":
+                diagnostics.log_message(
+                    "Error in a canceled task:\n"
+                    + "".join(
+                        traceback.format_exception(
+                            type(thread.error),
+                            thread.error,
+                            thread.error.__traceback__,
+                        )
+                    )
+                )
+            outcome = "canceled"
+        self.outcome = outcome
+        result, error = thread.result, thread.error
+        thread.result = thread.error = None
+
+        # tear down before calling back, so a callback can start a task
+        if self._dialog_alive():
+            self.dialog.finish(completed=outcome == "finished")
+            self.dialog.deleteLater()
+        _input_blocker.release()
+        _running_tasks.remove(self)
+
+        if outcome == "finished":
+            if self._on_finished is not None:
+                self._on_finished(result)
+        elif outcome == "failed":
+            if self._on_failed is not None:
+                self._on_failed(error)
+            else:
+                sys.excepthook(type(error), error, error.__traceback__)
+        elif self._on_canceled is not None:
+            self._on_canceled()
+
+
+def run_task(
+    fn: Callable,
+    description: str,
+    parent: QtWidgets.QWidget,
+    on_finished: Callable | None = None,
+    *,
+    maximum: int = 0,
+    on_failed: Callable | None = None,
+    on_canceled: Callable | None = None,
+    title: str | None = None,
+) -> Task:
+    """Run ``fn(progress)`` on a worker thread behind a cancelable
+    progress dialog.
+
+    The GUI stays responsive (windows repaint) while user input is
+    blocked as during a computation on the GUI thread, except for the
+    dialog's Cancel button. ``fn`` receives a :class:`TaskProgress`,
+    which can be passed to any function that takes a progress dialog or
+    a progress callback (``progress.set_value``). Cancel makes the next
+    progress update raise ``lib.OperationCanceled``, which ends the task
+    as canceled.
+
+    ``fn`` runs on the worker thread, so it must not touch widgets or
+    mutate GUI state: read the inputs before, and apply the result in
+    ``on_finished``, which runs on the GUI thread.
+
+    Parameters
+    ----------
+    fn : callable
+        Takes the ``TaskProgress`` and returns the result.
+    description : str
+        Label of the progress dialog.
+    parent : QWidget
+        Parent of the progress dialog.
+    on_finished : callable, optional
+        Called with the result of ``fn`` if it completed and was not
+        canceled. Default None.
+    maximum : int, optional
+        Maximum of the progress bar; 0 (default) shows a busy indicator
+        until ``fn`` sets a maximum.
+    on_failed : callable, optional
+        Called with the exception raised by ``fn``. None (default) shows
+        it like any uncaught exception (see :func:`install_excepthook`).
+    on_canceled : callable, optional
+        Called once the task stopped after the user canceled it. Default
+        None.
+    title : str, optional
+        Window title of the progress dialog. Default None.
+
+    Returns
+    -------
+    task : Task
+        The started task.
+    """
+    task = Task(
+        fn,
+        description,
+        parent,
+        maximum,
+        on_finished,
+        on_failed,
+        on_canceled,
+        title,
+    )
+    task.start()
+    return task
 
 
 # type alias for the progress dialogs
@@ -1650,7 +2314,10 @@ def cancel_dialogs():
     dialogs = [_ for _ in _dialogs]
     for dialog in dialogs:
         try:
-            if isinstance(dialog, ProgressDialog):
+            if isinstance(dialog, TaskProgressDialog):
+                # stop the worker; the task closes its dialog
+                dialog.request_cancel()
+            elif isinstance(dialog, ProgressDialog):
                 dialog.cancel()
             else:
                 dialog.close()

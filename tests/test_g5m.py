@@ -903,8 +903,8 @@ class TestRenderDialog:
 
     def test_getparams_leaves_covariance_type_to_g5m(self):
         """``getParams`` must not pin covariance_type, so that
-        ``View._g5m`` falls back to "auto" and the model is resolved from
-        the data."""
+        ``View._g5m_in_channel_job`` falls back to "auto" and the model
+        is resolved from the data."""
         import inspect
 
         from picasso.gui.render import G5MDialog, View
@@ -913,8 +913,8 @@ class TestRenderDialog:
         assert 'params["covariance_type"]' not in inspect.getsource(
             G5MDialog.getParams
         )
-        # so View._g5m always takes the "auto" fallback
-        src = inspect.getsource(View._g5m)
+        # so View._g5m_in_channel_job always takes the "auto" fallback
+        src = inspect.getsource(View._g5m_in_channel_job)
         assert 'params.get("covariance_type", "auto")' in src
 
 
