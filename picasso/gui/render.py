@@ -15590,10 +15590,11 @@ class View(QtWidgets.QLabel):
         if channel is None:
             return
         if channel == len(self.locs_paths):  # apply to all channels
-            for channel in range(len(self.locs_paths)):
-                self._undrift_from_picked(channel, undrift_z=True)
+            self._undrift_from_picked(
+                list(range(len(self.locs_paths))), undrift_z=True
+            )
         else:
-            self._undrift_from_picked(channel, undrift_z=True)
+            self._undrift_from_picked([channel], undrift_z=True)
 
     @check_picks
     def undrift_from_picked2d(self) -> None:
@@ -15603,47 +15604,98 @@ class View(QtWidgets.QLabel):
         if channel is None:
             return
         if channel == len(self.locs_paths):  # apply to all channels
-            for channel in range(len(self.locs_paths)):
-                self._undrift_from_picked(channel, undrift_z=False)
+            self._undrift_from_picked(
+                list(range(len(self.locs_paths))), undrift_z=False
+            )
         else:
-            self._undrift_from_picked(channel, undrift_z=False)
+            self._undrift_from_picked([channel], undrift_z=False)
 
-    def _undrift_from_picked(self, channel: int, undrift_z: bool) -> None:
-        """Undrift a given channel based on picked localizations.
+    def _undrift_from_picked(
+        self, channels: list[int], undrift_z: bool
+    ) -> None:
+        """Undrift channels based on picked localizations, in one
+        cancelable task.
+
+        A circular pick needs the channel's spatial index. When it is not
+        cached (any change of the localizations drops it), the worker
+        builds it; it is kept if the task is canceled or fails, since
+        the localizations are unchanged then.
 
         Parameters
         ----------
-        channel : int
-            Index of the channel to undrift.
+        channels : list of int
+            Indices of the channels to undrift.
         undrift_z : bool
             Whether to also undrift in z (ignored for 2D data).
         """
-        status = lib.StatusDialog("Calculating drift...", self)
+        pick_shape = self._pick_shape
         pick_size = (
-            self._pick_size / 2
-            if self._pick_shape == "Circle"
-            else self._pick_size
+            self._pick_size / 2 if pick_shape == "Circle" else self._pick_size
         )
-        if self._pick_shape == "Circle":
-            index_blocks = self._pick_index(channel)
-        else:
-            index_blocks = None
-        undrifted_locs, new_info, drift = postprocess.undrift_from_fiducials(
-            locs=self.locs[channel],
-            info=self.infos[channel],
-            picks=self._picks,
-            pick_size=pick_size,
-            pick_shape=self._pick_shape,
-            undrift_z=undrift_z,
-            index_blocks=index_blocks,
+        picks = list(self._picks)
+        jobs = []  # channel, locs, info, index
+        for channel in channels:
+            locs = self.locs[channel]
+            index = None
+            if pick_shape == "Circle":
+                index = self.render_index[channel]
+                if index is None:  # a linked window may have built it
+                    index = self.window.link_render_index(locs)
+            jobs.append((channel, locs, self.infos[channel], index))
+        built = []  # (channel, locs, index) built by the worker
+
+        def compute(progress: lib.TaskProgress) -> list[tuple]:
+            results = []
+            for channel, locs, info, index in jobs:
+                if pick_shape == "Circle" and index is None:
+                    progress.phase("Indexing localizations", 0)
+                    try:
+                        index = spatial_index.build_render_index(locs, info)
+                    except Exception:  # noqa: BLE001 - picking indexes itself
+                        index = None
+                    built.append((channel, locs, index))
+                    progress.check_canceled()
+                undrifted_locs, new_info, drift = (
+                    postprocess.undrift_from_fiducials(
+                        locs=locs,
+                        info=info,
+                        picks=picks,
+                        pick_size=pick_size,
+                        pick_shape=pick_shape,
+                        undrift_z=undrift_z,
+                        index_blocks=index,
+                        progress=progress,
+                    )
+                )
+                results.append((channel, undrifted_locs, new_info, drift))
+            return results
+
+        def apply(results: list[tuple]) -> None:
+            for channel, locs, new_info, drift in results:
+                self.locs[channel] = locs
+                self.infos[channel] = new_info
+                self.invalidate_locs_index(channel)
+                self.add_drift(channel, drift)
+            self.update_scene(resample_locs=True)
+
+        def keep_indices() -> None:
+            for channel, locs, index in built:
+                if index is not None and self.locs[channel] is locs:
+                    self.render_index[channel] = index
+
+        def failed(error: Exception) -> None:
+            keep_indices()
+            sys.excepthook(type(error), error, error.__traceback__)
+
+        lib.run_task(
+            compute,
+            "Calculating drift...",
+            self,
+            apply,
+            on_failed=failed,
+            on_canceled=keep_indices,
+            title="Undrift from picked",
         )
-        self.locs[channel] = undrifted_locs
-        self.infos[channel] = new_info
-        # Cleanup
-        self.invalidate_locs_index(channel)
-        self.add_drift(channel, drift)
-        status.close()
-        self.update_scene(resample_locs=True)
 
     def undo_drift(self) -> None:
         """Get a channel to undo drift."""

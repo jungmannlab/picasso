@@ -579,6 +579,106 @@ def test_undrift_from_picked_interpolates_missing_frames(
     _assert_drift_recovers(drift, injected_drift_2d, tol=2 * TOL_PICKED_PX)
 
 
+def _dense_drift_reference(picked_locs, n_frames, coordinate):
+    """The original (picks x frames) table implementation of the drift
+    from picked localizations, as the reference for the table-free one."""
+    drift = np.full((len(picked_locs), n_frames), np.nan)
+    with warnings.catch_warnings():  # empty picks and frames
+        warnings.simplefilter("ignore", RuntimeWarning)
+        for i, locs in enumerate(picked_locs):
+            values = locs[coordinate].to_numpy().astype(np.float64)
+            drift[i, locs["frame"].to_numpy()] = values - np.mean(values)
+        drift_mean = np.nanmean(drift, 0)
+        msd = np.nanmean((drift - drift_mean) ** 2, 1)
+        masked = np.ma.MaskedArray(drift, mask=np.isnan(drift))
+        drift_mean = np.ma.average(masked, axis=0, weights=1 / msd)
+    drift_mean = drift_mean.filled(np.nan)
+    nans = np.isnan(drift_mean)
+    drift_mean[nans] = np.interp(
+        np.flatnonzero(nans), np.flatnonzero(~nans), drift_mean[~nans]
+    )
+    return drift_mean
+
+
+def _random_picks(rng, n_picks, n_frames, max_locs, n_empty=0, n_single=0):
+    """Picks with a shared random-walk drift; frames repeat within a
+    pick (several localizations of one pick in a frame), some picks are
+    empty or hold a single localization."""
+    drift = np.cumsum(rng.normal(0, 0.02, n_frames))
+    picked_locs = []
+    for i in range(n_picks):
+        if i < n_empty:
+            n = 0
+        elif i < n_empty + n_single:
+            n = 1
+        else:
+            n = int(rng.integers(1, max_locs))
+        frame = rng.integers(0, n_frames, n).astype(np.uint32)
+        center = rng.uniform(0, 100)
+        picked_locs.append(
+            pd.DataFrame(
+                {
+                    "frame": frame,
+                    "x": center + drift[frame] + rng.normal(0, 0.05, n),
+                    "y": center + rng.normal(0, 0.05, n),
+                }
+            )
+        )
+    return picked_locs
+
+
+@pytest.mark.parametrize(
+    "n_picks, n_frames, max_locs, n_empty, n_single",
+    [
+        (50, 2000, 300, 0, 0),  # few dense picks
+        (3000, 5000, 20, 0, 0),  # many small picks
+        (200, 1000, 50, 5, 5),  # empty and single-localization picks
+        (30, 20000, 40, 0, 0),  # most frames without localizations
+    ],
+)
+def test_undrift_from_picked_matches_dense_reference(
+    n_picks, n_frames, max_locs, n_empty, n_single
+):
+    rng = np.random.default_rng(RNG_SEED)
+    picked_locs = _random_picks(
+        rng, n_picks, n_frames, max_locs, n_empty, n_single
+    )
+    drift = postprocess.undrift_from_picked(
+        picked_locs, [{"Frames": n_frames}]
+    )
+    for coordinate in ("x", "y"):
+        reference = _dense_drift_reference(picked_locs, n_frames, coordinate)
+        np.testing.assert_allclose(
+            drift[coordinate].to_numpy(), reference, rtol=0, atol=1e-10
+        )
+
+
+def test_undrift_from_picked_needs_no_picks_by_frames_table():
+    """Tens of thousands of small picks over a long acquisition: a
+    (picks x frames) float table would take 16 GB here."""
+    n_picks, n_frames = 20_000, 100_000
+    rng = np.random.default_rng(RNG_SEED)
+    lengths = rng.integers(1, 50, n_picks)
+    frames = rng.integers(0, n_frames, lengths.sum()).astype(np.uint32)
+    x = rng.normal(0, 0.05, lengths.sum())
+    bounds = np.concatenate([[0], np.cumsum(lengths)])
+    picked_locs = [
+        pd.DataFrame(
+            {
+                "frame": frames[a:b],
+                "x": x[a:b],
+                "y": x[a:b],
+            }
+        )
+        for a, b in zip(bounds[:-1], bounds[1:])
+    ]
+    drift = postprocess.undrift_from_picked(
+        picked_locs, [{"Frames": n_frames}]
+    )
+    assert len(drift) == n_frames
+    assert np.isfinite(drift.to_numpy()).all()
+
+
 # ---------------------------------------------------------------------
 # apply_drift
 # ---------------------------------------------------------------------
