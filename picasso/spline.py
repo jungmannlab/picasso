@@ -141,6 +141,11 @@ def spline_coefficients(data: np.ndarray) -> np.ndarray:
     return coeff.reshape(shape).astype(np.float32)
 
 
+# Fewest z slices a spline calibration is built from, after z binning: the
+# per-voxel axial smoothing (``_smooth_z``) needs five points to be stable.
+_MIN_Z_SLICES = 5
+
+
 def _step_of_frame(
     n_frames: int,
     d: float,
@@ -1047,6 +1052,7 @@ def build_psf_template(
     return_spots: bool = False,
     roi: tuple[tuple[int, int], tuple[int, int]] | list | None = None,
     wavelet: wavelets.WaveletParameters | None = None,
+    z_binning: int = 1,
 ) -> dict:
     """Build a normalized PSF template volume from a bead z-stack.
 
@@ -1093,13 +1099,23 @@ def build_psf_template(
         Detect the beads by wavelet segmentation with these settings
         instead of by their net gradient, in which case ``minimum_ng`` is
         ignored (and may be None). Default is None.
+    z_binning : int, optional
+        Number of consecutive z (stage) steps averaged into one slice of the
+        template, right after the bead volumes are extracted and before they
+        are registered, smoothed and normalized (see ``lib.bin_z_steps``).
+        The template's slices are then ``z_binning * d`` apart and each sits
+        at the mean stage position of its steps; trailing steps that do not
+        fill a whole slice are dropped. Coarser slices suppress stage
+        jitter that is correlated between neighboring steps, which the
+        per-voxel smoothing keeps as signal. Default 1 (no binning).
 
     Returns
     -------
     built : dict
         With keys:
 
-        * ``template`` - ``(box, box, n_steps)`` normalized PSF volume.
+        * ``template`` - ``(box, box, n_steps)`` normalized PSF volume, one
+          slice per z bin (per stage step without binning).
         * ``z_center`` (int) - index of the in-focus (sharpest) slice.
         * ``z_focus`` (float) - fractional slice of the axial intensity peak.
         * ``effective_sigma`` (float) - Gaussian sigma at focus (px).
@@ -1108,6 +1124,7 @@ def build_psf_template(
         * ``n_beads`` (int) - beads detected or supplied.
         * ``n_beads_used`` (int) - beads that survived the outlier filtering.
         * ``z_of_step`` - stage z (nm) of each template slice.
+        * ``z_binning`` (int) - stage steps per template slice.
         * ``gof`` (dict) - goodness of fit of the template to the individual
           beads (see ``_goodness_of_fit``).
         * ``registered`` - ``(n_used, box, box, n_steps)`` 3D-registered
@@ -1120,7 +1137,9 @@ def build_psf_template(
         If ``return_spots`` is True, the dict also carries ``spots`` (every
         individual per-frame bead spot, ``(n_spots, box, box)``, photon
         units), ``spot_step_idx`` (the index into the template z-axis of each
-        spot's stage step) and ``spot_bead_idx`` (the row of ``beads`` each
+        spot's stage step), ``spot_z`` (the exact stage z, nm, of each spot's
+        own step, which differs from its template slice's z when steps are
+        binned) and ``spot_bead_idx`` (the row of ``beads`` each
         spot came from), which ``_axial_precision`` fits one by one to measure
         the axial precision in the realistic single-frame regime.
     """
@@ -1166,6 +1185,30 @@ def build_psf_template(
             step_range,
             fov_of_frame=fov_of_frame,
         )
+    # Axial binning: average groups of consecutive stage steps into one
+    # template slice. Done on the raw bead volumes, so registration, focus
+    # search, smoothing and normalization all run on the binned stack.
+    z_binning = max(1, int(z_binning))
+    z_of_slice = lib.bin_z_steps(z_of_step[step_range], z_binning)
+    if len(z_of_slice) < _MIN_Z_SLICES:
+        raise ValueError(
+            f"Only {len(z_of_slice)} z slices remain after z binning of "
+            f"{z_binning} (from {len(step_range)} z steps); the spline "
+            f"calibration needs at least {_MIN_Z_SLICES}. Reduce the z "
+            "binning or widen the frame range."
+        )
+    volumes = lib.bin_z_steps(volumes, z_binning, axis=3)
+    if return_spots:
+        # Keep every single-frame spot, each compared with the exact stage
+        # position of its own step; drop the trailing steps binning left out.
+        spot_z = np.asarray(z_of_step[step_range], dtype=np.float64)[
+            spot_step_pos
+        ]
+        kept = spot_step_pos < len(z_of_slice) * z_binning
+        spots = spots[kept]
+        spot_z = spot_z[kept]
+        spot_bead_idx = spot_bead_idx[kept]
+        spot_step_pos = spot_step_pos[kept] // z_binning
     # first pass on the raw bead-average to locate focus, then register
     z_center, _ = _focus_step(volumes.mean(axis=0))
     mean_volume, registered, quality = _register_and_average(
@@ -1197,7 +1240,8 @@ def build_psf_template(
         "photon_scale": photon_scale,
         "n_beads": int(len(beads)),
         "n_beads_used": int(bead_quality["keep"].sum()),
-        "z_of_step": z_of_step[step_range],
+        "z_of_step": z_of_slice,
+        "z_binning": z_binning,
         "gof": gof,
         "registered": registered,
         "bead_quality": bead_quality,
@@ -1205,10 +1249,13 @@ def build_psf_template(
     if return_spots:
         # every individual per-frame bead spot, flattened to (n_spots, box,
         # box), with for each spot the index into the template z-axis
-        # (0..n_steps-1) of its stage step. z_of_step[step_idx] is then the
-        # spot's known stage position (see _axial_precision).
+        # (0..n_slices-1) of its stage step's slice, and its exact stage
+        # position spot_z. Without binning spot_z == z_of_step[step_idx];
+        # with binning it resolves the spot's step within its slice (see
+        # _axial_precision).
         result["spots"] = spots
         result["spot_step_idx"] = spot_step_pos
+        result["spot_z"] = spot_z
         # which bead each spot came from, so a caller that knows where the
         # beads sit can attach per-spot geometry (e.g. the multichannel ROI
         # residuals) without re-deriving the flattening order
@@ -1234,6 +1281,7 @@ def calibrate_spline(
     progress_callback: Callable[[int], None] | None = None,
     return_diagnostics: bool = False,
     wavelet: wavelets.WaveletParameters | None = None,
+    z_binning: int = 1,
 ) -> dict | tuple[dict, list]:
     """Generate a cubic-spline PSF calibration from a bead z-stack movie.
 
@@ -1296,6 +1344,13 @@ def calibrate_spline(
         Detect the beads by wavelet segmentation with these settings
         instead of by their net gradient, in which case ``minimum_ng`` is
         ignored (and may be None). Default is None.
+    z_binning : int, optional
+        Number of consecutive z (stage) steps averaged into one slice of the
+        PSF template (see ``build_psf_template``). The spline's axial knots
+        are then ``z_binning * d`` apart, which is stored as ``z_step_nm``.
+        Coarser knots keep stage jitter that is correlated between
+        neighboring steps out of the model. Stored in the calibration.
+        Default 1 (no binning).
 
     Returns
     -------
@@ -1327,7 +1382,10 @@ def calibrate_spline(
         # the axial precision by fitting each spot (only needed when we plot)
         return_spots=path is not None,
         wavelet=wavelet,
+        z_binning=z_binning,
     )
+    # axial spacing of the template slices, i.e. of the spline's z knots
+    z_slice_nm = float(d) * built["z_binning"]
     template = built["template"]  # (box, box, n_steps)
     z_center = built["z_center"]
     # Two distinct z references (see also
@@ -1390,7 +1448,7 @@ def calibrate_spline(
         "lateral_centered": True,
         "z_center": float(z_origin),
         "z_init": float(z_init),
-        "z_step_nm": float(d),
+        "z_step_nm": z_slice_nm,
         "magnification_factor": float(magnification_factor),
         "correct_z_bias": bool(correct_z_bias),
         "effective_sigma": float(built["effective_sigma"]),
@@ -1402,6 +1460,8 @@ def calibrate_spline(
         # beads that survived the outlier filtering and were actually averaged
         # into the PSF (see _keep_inliers); the rest live in the diagnostics
         "n_beads_used": int(built["n_beads_used"]),
+        "Step size in nm": float(d),
+        "Z binning": int(built["z_binning"]),
         "Frames per step": int(frames_per_step),
         "Frame order": frame_order,
         "Frame bounds": frame_bounds,
@@ -1837,6 +1897,7 @@ def _build_per_channel_templates(
     transforms: list,
     ref_xy: np.ndarray,
     n_channels: int,
+    z_binning: int = 1,
 ) -> list[dict]:
     """Build a per-channel PSF template from the same physical beads.
 
@@ -1868,6 +1929,7 @@ def _build_per_channel_templates(
             frame_order=frame_order,
             beads=beads_c,
             return_spots=True,  # per-channel axial-precision diagnostic
+            z_binning=z_binning,
         )
         per_channel.append(built)
     return per_channel
@@ -1915,6 +1977,8 @@ def _build_multichannel_calibration_dict(
 ) -> dict:
     """Assemble the ``spline-3d-multichannel`` calibration dict."""
     ref = per_channel[0]
+    # axial spacing of the template slices, i.e. of the spline's z knots
+    z_slice_nm = float(d) * ref["z_binning"]
     # z_init (sharpest slice, fit initialization) vs z_origin (output z = 0
     # reference: raw stage-scan zero, or the intensity focus with
     # correct_z_bias); see ``calibrate_spline`` for why they must be
@@ -1941,7 +2005,7 @@ def _build_multichannel_calibration_dict(
         "lateral_centered": True,
         "z_center": float(z_origin),
         "z_init": float(z_init),
-        "z_step_nm": float(d),
+        "z_step_nm": z_slice_nm,
         "magnification_factor": float(magnification_factor),
         "correct_z_bias": bool(correct_z_bias),
         "link_photons": bool(link_photons),
@@ -1950,7 +2014,8 @@ def _build_multichannel_calibration_dict(
         "photon_scale": [float(p["photon_scale"]) for p in per_channel],
         # Per-channel focus offset
         "plane_offsets": [
-            float((p["z_center"] - ref["z_center"]) * d) for p in per_channel
+            float((p["z_center"] - ref["z_center"]) * z_slice_nm)
+            for p in per_channel
         ],
         "box": int(box),
         "pixelsize": float(pixelsize),
@@ -1958,6 +2023,8 @@ def _build_multichannel_calibration_dict(
         # per channel: the beads that survived that channel's outlier
         # filtering and were averaged into its PSF (see _keep_inliers)
         "n_beads_used": [int(p["n_beads_used"]) for p in per_channel],
+        "Step size in nm": float(d),
+        "Z binning": int(ref["z_binning"]),
         "Frames per step": int(frames_per_step),
         "Frame order": frame_order,
         "Frame bounds": frame_bounds,
@@ -2077,6 +2144,7 @@ def calibrate_spline_multichannel(
     return_diagnostics: bool = False,
     model: str = "affine",
     wavelet: wavelets.WaveletParameters | None = None,
+    z_binning: int = 1,
 ) -> dict | tuple[dict, list]:
     """Generate a multichannel cubic-spline PSF calibration from registered
     bead z-stacks (one movie per channel).
@@ -2181,6 +2249,11 @@ def calibrate_spline_multichannel(
         Detect the beads by wavelet segmentation with these settings
         instead of by their net gradient, in which case ``minimum_ng`` is
         ignored (and may be None). Default is None.
+    z_binning : int, optional
+        Number of consecutive z (stage) steps averaged into one slice of every
+        channel's PSF template (see ``build_psf_template``). The axial knots
+        and the stored ``z_step_nm`` are then ``z_binning * d`` apart. Stored
+        in the calibration. Default 1 (no binning).
 
     Returns
     -------
@@ -2290,6 +2363,7 @@ def calibrate_spline_multichannel(
         transforms,
         ref_xy,
         n_channels,
+        z_binning,
     )
 
     _report_progress(progress_callback, 2)
@@ -2832,6 +2906,7 @@ def calibrate_spline_split_fov(
     return_diagnostics: bool = False,
     model: str = "affine",
     wavelet: wavelets.WaveletParameters | None = None,
+    z_binning: int = 1,
 ) -> dict | tuple[dict, list]:
     """Build a multichannel spline calibration from a *single* bead z-stack in
     which several rectangular field-of-view regions are the channels (split-FOV
@@ -2909,6 +2984,10 @@ def calibrate_spline_split_fov(
         Detect the beads by wavelet segmentation with these settings
         instead of by their net gradient, in which case ``minimum_ng`` is
         ignored (and may be None). Default is None.
+    z_binning : int, optional
+        Number of consecutive z (stage) steps averaged into one slice of every
+        channel's PSF template, see :func:`calibrate_spline_multichannel`.
+        Default 1 (no binning).
 
     Returns
     -------
@@ -2953,6 +3032,7 @@ def calibrate_spline_split_fov(
         return_diagnostics=return_diagnostics,
         model=model,
         wavelet=wavelet,
+        z_binning=z_binning,
     )
 
 
@@ -4104,6 +4184,7 @@ def _axial_precision(built: dict, calibration: dict) -> dict | None:
         z_of_step,
         calibration,
         int(built.get("n_beads", 0)),
+        spot_z=built.get("spot_z"),
     )
 
 
@@ -4114,6 +4195,7 @@ def _axial_precision_from_theta(
     calibration: dict,
     n_beads: int,
     z_col: int = 3,
+    spot_z: np.ndarray | None = None,
 ) -> dict | None:
     """Per-z-step axial bias/precision from fitted spline parameters.
 
@@ -4122,8 +4204,13 @@ def _axial_precision_from_theta(
     (``theta[:, z_col]``) to stage nm, compares it to each spot's known stage
     position and reduces to a robust per-step bias and spread. ``z_col`` is the
     z_shift parameter column: 3 for the amplitude-shared models, 2 for the
-    photon-decoupled (link-XYZ) model. Returns the same dict shape both callers
-    emit, or ``None`` if nothing usable remains.
+    photon-decoupled (link-XYZ) model. ``spot_z`` is each spot's exact stage
+    position (nm); it is the ground truth when given, which matters once
+    several stage steps are binned into one template slice, so that the
+    spread of stage positions inside a slice is not reported as imprecision.
+    Without it the spot's slice position ``z_of_step[spot_step_idx]`` is used.
+    The results are still reduced per template slice. Returns the same dict
+    shape both callers emit, or ``None`` if nothing usable remains.
     """
     theta = np.asarray(theta)
     z_of_step = np.asarray(z_of_step, dtype=np.float64)
@@ -4131,7 +4218,11 @@ def _axial_precision_from_theta(
     z_step_nm = float(calibration.get("z_step_nm", 1.0))
     scan_center = _scan_center_index(z_of_step)
     z_fit = (theta[:, z_col] + scan_center) * z_step_nm  # (n_spots,)
-    deviation = z_fit - z_of_step[spot_step_idx]  # (n_spots,)
+    if spot_z is None or len(spot_z) != len(spot_step_idx):
+        z_true = z_of_step[spot_step_idx]
+    else:
+        z_true = np.asarray(spot_z, dtype=np.float64)
+    deviation = z_fit - z_true  # (n_spots,)
 
     n_steps = len(z_of_step)
     bias_spread = [
@@ -4143,7 +4234,6 @@ def _axial_precision_from_theta(
     if not np.any(np.isfinite(precision_z)):
         return None
 
-    z_true = z_of_step[spot_step_idx]
     finite = np.isfinite(z_fit) & np.isfinite(z_true)
     scatter_fit = z_fit[finite]
     scatter_stage = z_true[finite]
@@ -4239,6 +4329,7 @@ def _axial_precision_multichannel(
         calibration,
         int(per_channel[0].get("n_beads", 0)),
         z_col=z_col,
+        spot_z=per_channel[0].get("spot_z"),
     )
     if result is not None:
         result["joint"] = int(len(per_channel))

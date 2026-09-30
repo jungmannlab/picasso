@@ -61,6 +61,7 @@ def calibrate_z(
     frame_bounds: tuple[int, int] | None = None,
     frames_per_step: int = 1,
     frame_order: Literal["fov", "z"] = "fov",
+    z_binning: int = 1,
 ) -> dict:
     """Given localizations of a calibration sample (e.g., gold beads at
     different z positions), calibrate the z-axis by fitting a polynomial
@@ -110,13 +111,22 @@ def calibrate_z(
         i.e., frames cycle through all z positions
         (``[z0, z1, ..., z0, z1, ...]``). Ignored when
         ``frames_per_step`` is 1. Default is "fov".
+    z_binning : int, optional
+        Number of consecutive z (stage) steps merged into one axial bin
+        before the calibration curves are fitted: the mean spot
+        width/height of the bin is the average of its steps' means,
+        placed at the average of their stage positions (see
+        ``lib.bin_z_steps``). Trailing steps that do not fill a whole bin
+        are left out of the fit. The diagnostics still compare every
+        localization with the stage position of its own step. 1 (the
+        default) fits every step.
 
     Returns
     -------
     calibration : dict
         Dictionary containing the calibration coefficients (i.e.,
-        polynomial coefficients), number of frames, step size, and
-        magnification factor.
+        polynomial coefficients), number of frames, step size, z binning
+        and magnification factor.
     """
     n_frames = info[0]["Frames"]
     frames_per_step = max(1, int(frames_per_step))
@@ -187,16 +197,33 @@ def calibrate_z(
     mean_sx = _interpolate_nan(mean_sx)
     mean_sy = _interpolate_nan(mean_sy)
 
-    cx = np.polyfit(z_range, mean_sx, 6, full=False)
-    cy = np.polyfit(z_range, mean_sy, 6, full=False)
+    # Merge consecutive steps into axial bins for the fit. The per-step
+    # arrays (z_range, mean_sx/sy) stay as they are: the diagnostics below
+    # compare every localization with the stage position of its own step.
+    z_binning = max(1, int(z_binning))
+    z_bins = lib.bin_z_steps(z_range, z_binning)
+    mean_sx_bins = lib.bin_z_steps(mean_sx, z_binning)
+    mean_sy_bins = lib.bin_z_steps(mean_sy, z_binning)
+    if len(z_bins) < 7:
+        raise ValueError(
+            f"Only {len(z_bins)} axial bins remain after z binning of "
+            f"{z_binning} (from {len(z_range)} z steps); the 6th-order "
+            "calibration polynomial needs at least 7. Reduce the z binning "
+            "or widen the frame range."
+        )
+
+    cx = np.polyfit(z_bins, mean_sx_bins, 6, full=False)
+    cy = np.polyfit(z_bins, mean_sy_bins, 6, full=False)
 
     # make sure that the calibration curves cross at z = 0
-    z = np.linspace(z_range[0], z_range[-1], 10000)
+    z = np.linspace(z_bins[0], z_bins[-1], 10000)
     spot_width = np.poly1d(cx)
     spot_height = np.poly1d(cy)
-    z_range -= z[np.argmin(np.abs(spot_width(z) - spot_height(z)))]
-    cx = np.polyfit(z_range, mean_sx, 6, full=False)
-    cy = np.polyfit(z_range, mean_sy, 6, full=False)
+    z_zero = z[np.argmin(np.abs(spot_width(z) - spot_height(z)))]
+    z_range -= z_zero
+    z_bins = z_bins - z_zero
+    cx = np.polyfit(z_bins, mean_sx_bins, 6, full=False)
+    cy = np.polyfit(z_bins, mean_sy_bins, 6, full=False)
 
     calibration = {
         "X Coefficients": [float(_) for _ in cx],
@@ -208,6 +235,7 @@ def calibrate_z(
         "Frame bounds": frame_bounds,
         "Frames per step": int(frames_per_step),
         "Frame order": frame_order,
+        "Z binning": int(z_binning),
     }
     if path is not None:
         io.save_calibration(path, calibration)
@@ -222,8 +250,8 @@ def calibrate_z(
     plt.figure(figsize=(18, 10))
 
     plt.subplot(231)
-    plt.plot(z_range, mean_sx, ".-", label="x")
-    plt.plot(z_range, mean_sy, ".-", label="y")
+    plt.plot(z_bins, mean_sx_bins, ".-", label="x")
+    plt.plot(z_bins, mean_sy_bins, ".-", label="y")
     plt.plot(z_range, np.polyval(cx, z_range), "0.3", lw=1.5, label="x fit")
     plt.plot(z_range, np.polyval(cy, z_range), "0.3", lw=1.5, label="y fit")
     plt.xlabel("Stage position")

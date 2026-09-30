@@ -2073,6 +2073,7 @@ def _spline_calibrate_split_fov(
         reference=getattr(args, "reference", 0) or 0,
         frames_per_step=args.frames_per_step,
         frame_order=args.frame_order,
+        z_binning=args.z_binning,
         magnification_factor=args.magnification_factor,
         correct_z_bias=args.correct_z_bias,
         photon_ratios=_parse_photon_ratios(args),
@@ -2100,6 +2101,7 @@ def _spline_calibrate_single(
         d=args.step,
         frames_per_step=args.frames_per_step,
         frame_order=args.frame_order,
+        z_binning=args.z_binning,
         model=args.model,
         magnification_factor=args.magnification_factor,
         correct_z_bias=args.correct_z_bias,
@@ -2132,6 +2134,7 @@ def _spline_calibrate_multichannel(
         d=args.step,
         frames_per_step=args.frames_per_step,
         frame_order=args.frame_order,
+        z_binning=args.z_binning,
         magnification_factor=args.magnification_factor,
         correct_z_bias=args.correct_z_bias,
         photon_ratios=_parse_photon_ratios(args),
@@ -4299,6 +4302,19 @@ def main():  # noqa: C901
         choices=["fov", "z"],
         default="fov",
         help="acquisition order when frames-per-step > 1",
+    )
+    spline_calib_parser.add_argument(
+        "-zb",
+        "--z-binning",
+        type=int,
+        default=1,
+        help=(
+            "number of consecutive z steps averaged into one slice of the PSF"
+            " model, so its axial knots are z-binning * step apart; e.g. 10"
+            " turns a 5 nm scan into 50 nm slices, which suppresses stage"
+            " jitter that is correlated between neighboring steps. Default 1"
+            " (no binning)"
+        ),
     )
     spline_calib_parser.add_argument(
         "-rm",

@@ -311,6 +311,70 @@ def frame_in_bounds(frame_number, frame_bounds, n_frames):
     return any(lo <= frame_number <= hi for lo, hi in segments)
 
 
+def bin_z_steps(
+    values: np.ndarray, z_binning: int, axis: int = 0
+) -> np.ndarray:
+    """Average groups of ``z_binning`` consecutive z (stage) steps.
+
+    Used by the 3D calibrations (``picasso.zfit.calibrate_z`` and
+    ``picasso.spline.build_psf_template``) to merge a finely stepped bead
+    scan into coarser axial bins before the calibration model is built.
+    Bin ``k`` is the mean of steps ``k * z_binning`` to
+    ``(k + 1) * z_binning - 1``, so a bin of the stage positions themselves
+    lies at the center of its steps. Trailing steps that do not fill a
+    whole bin are dropped, which keeps the bins evenly spaced.
+
+    Parameters
+    ----------
+    values : np.ndarray
+        Per-step values, with the steps along ``axis``: e.g. the stage
+        position of each step, the mean spot width per step, or a stack of
+        bead volumes.
+    z_binning : int
+        Number of consecutive steps per bin. 1 returns ``values``
+        unchanged.
+    axis : int, optional
+        Axis of ``values`` that runs over the steps. Default 0.
+
+    Returns
+    -------
+    binned : np.ndarray
+        ``values`` with ``axis`` shortened to
+        ``values.shape[axis] // z_binning``. NaN entries are ignored within
+        a bin; a bin that is NaN throughout stays NaN.
+
+    Raises
+    ------
+    ValueError
+        If ``z_binning`` is smaller than 1 or larger than the number of
+        steps.
+    """
+    z_binning = int(z_binning)
+    values = np.asarray(values)
+    if z_binning < 1:
+        raise ValueError(f"z binning must be at least 1, got {z_binning}.")
+    if z_binning == 1:
+        return values
+    n_steps = values.shape[axis]
+    n_bins = n_steps // z_binning
+    if n_bins < 1:
+        raise ValueError(
+            f"z binning ({z_binning}) is larger than the number of z steps "
+            f"({n_steps})."
+        )
+    moved = np.moveaxis(values, axis, 0)[: n_bins * z_binning]
+    grouped = moved.reshape((n_bins, z_binning) + moved.shape[1:])
+    with warnings.catch_warnings():
+        # an all-NaN bin (e.g. a step without localizations on each of its
+        # steps) is legitimately NaN; the caller interpolates it
+        warnings.simplefilter("ignore", category=RuntimeWarning)
+        binned = np.nanmean(grouped, axis=1)
+    # keep a floating input's precision; integer input averages to float
+    if np.issubdtype(values.dtype, np.floating):
+        binned = binned.astype(values.dtype, copy=False)
+    return np.moveaxis(binned, 0, axis)
+
+
 class MockProgress:
     """Class to mock a progress bar or dialog, allowing for calling
     the same methods but not displaying anything.

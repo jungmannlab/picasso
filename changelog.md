@@ -1,6 +1,6 @@
 # Changelog
 
-Last change: 29-SEP-2026 CEST
+Last change: 30-SEP-2026 CEST
 
 ## 0.12.0
 
@@ -71,14 +71,19 @@ Last change: 29-SEP-2026 CEST
 - `picasso.io.save_locs` gained `render_index`; `picasso.lib.standardize_dtypes` is new.
 
 ## 0.11.3
+- **Breaking change:** dark times are now the number of frames without signal between binding events, i.e., one frame shorter than before (two binding events in consecutive frames have a dark time of 0). Together with the bright time, each now counts the frames spent in its state. This affects Render's pick info, qPAINT (`picasso.postprocess.evaluate_picks`, `pick_kinetics` and `pick_properties`) and `picasso dark`; influx rates calibrated with earlier versions should be recalibrated. See the [documentation](https://picassosr.readthedocs.io/en/latest/files.html#hdf5-pick-property-files) for the convention.
+
 - Localize: auto contrast button in the bottom right corner of the window; contrast dialog still exists for a numerical input.
 - Localize: new `Identify on` mode for multichannel and split-FOV data, *Sum of unregistered channels*. It adds the channels up (in photons) pixel for pixel, without any registration. See the [documentation](https://picassosr.readthedocs.io/en/latest/localize.html#summing-without-registration). The existing mode is renamed *Sum of registered channels*.
 - Localize: the channel sum has its own box size, min. net gradient and identification filters, the same whichever channel is displayed. Each channel keeps its own settings for identifying the channels separately (and for registering them for the sum).
-- Fixed Localize not saying why the channel sum was not shown (channels not registered/aligned yet).
+- Z binning for 3D calibration (Gaussian astigmatism and spline).
 - New `picasso.localize.localize_frames`: a GUI-free wrapper that runs the existing identification and fit on an in-memory frame stack (instead of a movie read from disk) and assigns absolute frame indices, so batched or live input concatenates into one growing localization table. Results are numerically identical to `picasso.localize.localize` on the same frames and parameters.
+- Fixed Localize not saying why the channel sum was not shown (channels not registered/aligned yet).
 - Render: NeNA is saved to metadata when calculated.
 - Fixed saving rotated localizations [#708](https://github.com/jungmannlab/picasso/issues/708)
 - Fixed .csv export in plot profile [#709](https://github.com/jungmannlab/picasso/issues/709)
+- Fixed Render's 3D slicer failing to open for some z ranges and for data thinner than one slice [#710](https://github.com/jungmannlab/picasso/issues/710).
+- Fixed SPINNA single simulation without loading experimental data.
 
 ## 0.11.2
 - Fixed the calibrations stored in the camera config (z, experimental PSF and sCMOS) not being cleared when switching to a camera the config has no entry for.

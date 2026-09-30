@@ -780,14 +780,15 @@ class LinkGroup(QtCore.QObject):
     def _apply_slicer(src, dst) -> None:
         s = src.slicer_dialog
         d = dst.slicer_dialog
-        active = s.slicer_radio_button.isChecked() and hasattr(s, "bins")
+        # bins has at least two edges once the histogram is calculated
+        active = s.slicer_radio_button.isChecked() and len(s.bins) >= 2
         if not active:
             d.slicer_radio_button.setChecked(False)
             return
         if not any(len(z) for z in d.zcoord):
             return  # 2D data cannot be sliced
         thickness = s.pick_slice.value()
-        if not hasattr(d, "bins") or d.pick_slice.value() != thickness:
+        if len(d.bins) < 2 or d.pick_slice.value() != thickness:
             d.pick_slice.blockSignals(True)
             d.pick_slice.setValue(thickness)
             d.pick_slice.blockSignals(False)
@@ -795,8 +796,7 @@ class LinkGroup(QtCore.QObject):
         if len(d.bins) < 2:
             return
         # the bins depend on the data, so the slice is matched in nm
-        z_min = getattr(s, "slicermin", s.bins[s.sl.value()])
-        position = int(np.argmin(np.abs(d.bins[:-1] - z_min)))
+        position = int(np.argmin(np.abs(d.bins[:-1] - s.slicermin)))
         d.sl.setValue(min(position, d.sl.maximum()))
         d.slicer_radio_button.setChecked(True)
 

@@ -838,6 +838,172 @@ class TestMultiFov:
             assert tpl.min() == pytest.approx(0.0, abs=0.1)
 
 
+class TestZBinning:
+    """``z_binning`` averages consecutive stage steps into template slices."""
+
+    D = 20.0  # nm stage step
+
+    @staticmethod
+    def _beads(bead_xy):
+        return pd.DataFrame(
+            {"x": [x for x, _ in bead_xy], "y": [y for _, y in bead_xy]}
+        )
+
+    def test_slices_sit_at_the_mean_stage_position(self):
+        # 23 frames in bins of 3: 7 slices, the last two frames are dropped
+        movie, bead_xy, _ = _synthetic_bead_movie(n_frames=23)
+        built = spline.build_psf_template(
+            movie,
+            CAMERA_INFO,
+            box=BOX,
+            minimum_ng=2000.0,
+            d=self.D,
+            beads=self._beads(bead_xy),
+            return_spots=True,
+            z_binning=3,
+        )
+        assert built["z_binning"] == 3
+        assert built["template"].shape == (BOX, BOX, 7)
+        z_steps = -(np.arange(23) * self.D - 22 * self.D / 2)
+        np.testing.assert_allclose(
+            built["z_of_step"], z_steps[:21].reshape(7, 3).mean(axis=1)
+        )
+        # every single-frame spot of a complete bin is kept for the
+        # precision diagnostic, with its own step's exact stage position
+        n_beads = len(bead_xy)
+        assert len(built["spots"]) == 21 * n_beads
+        assert built["spot_step_idx"].max() == 6
+        np.testing.assert_allclose(
+            np.sort(np.unique(built["spot_z"])), np.sort(z_steps[:21])
+        )
+        # a spot's exact position lies within its slice's three steps
+        slice_z = built["z_of_step"][built["spot_step_idx"]]
+        assert np.abs(built["spot_z"] - slice_z).max() == pytest.approx(self.D)
+
+    def test_matches_a_movie_binned_beforehand(self):
+        """Binning the extracted volumes is the same as averaging the frames
+        of each bin first: the photon conversion is linear."""
+        movie, bead_xy, _ = _synthetic_bead_movie(n_frames=21)
+        beads = self._beads(bead_xy)
+        binned = spline.build_psf_template(
+            movie,
+            CAMERA_INFO,
+            box=BOX,
+            minimum_ng=2000.0,
+            d=self.D,
+            beads=beads,
+            z_binning=3,
+        )
+        pre = movie.astype(np.float32).reshape(7, 3, *movie.shape[1:])
+        reference = spline.build_psf_template(
+            pre.mean(axis=1),
+            CAMERA_INFO,
+            box=BOX,
+            minimum_ng=2000.0,
+            d=3 * self.D,
+            beads=beads,
+        )
+        np.testing.assert_allclose(
+            binned["template"], reference["template"], atol=1e-4
+        )
+        np.testing.assert_allclose(
+            binned["z_of_step"], reference["z_of_step"], atol=1e-9
+        )
+        assert binned["z_center"] == reference["z_center"]
+
+    def test_multifov_bins_every_field(self):
+        """With several FOVs per step, each bead's bin averages its own
+        field's frames of the binned steps."""
+        movie, fov_beads, focus = _synthetic_multifov_movie(
+            n_fov=2, n_steps=15, order="fov"
+        )
+        built = spline.build_psf_template(
+            movie,
+            CAMERA_INFO,
+            box=BOX,
+            minimum_ng=2000.0,
+            d=self.D,
+            frames_per_step=2,
+            frame_order="fov",
+            return_spots=True,
+            z_binning=3,
+        )
+        tpl = built["template"]
+        assert tpl.shape == (BOX, BOX, 5)
+        # the focus step (7) falls in the central bin (steps 6-8)
+        assert built["z_center"] == focus // 3
+        assert tpl[:, :, built["z_center"]].max() == pytest.approx(
+            1.0, abs=0.05
+        )
+        n_total = sum(len(b) for b in fov_beads)
+        assert len(built["spots"]) == 15 * n_total
+
+    def test_calibration_stores_the_slice_spacing(self):
+        movie, _, _ = _synthetic_bead_movie(n_frames=21)
+        calib = spline.calibrate_spline(
+            movie,
+            info=[{"Frames": int(movie.shape[0])}],
+            camera_info=CAMERA_INFO,
+            box=BOX,
+            minimum_ng=2000.0,
+            d=self.D,
+            z_binning=3,
+        )
+        # the fit converts slices to nm with the slice spacing
+        assert calib["z_step_nm"] == pytest.approx(3 * self.D)
+        assert calib["Step size in nm"] == pytest.approx(self.D)
+        assert calib["Z binning"] == 3
+        assert list(calib["n_data"]) == [BOX, BOX, 7]
+
+    def test_default_calibration_is_unbinned(self):
+        movie, _, _ = _synthetic_bead_movie(n_frames=21)
+        calib = spline.calibrate_spline(
+            movie,
+            info=[{"Frames": int(movie.shape[0])}],
+            camera_info=CAMERA_INFO,
+            box=BOX,
+            minimum_ng=2000.0,
+            d=self.D,
+        )
+        assert calib["z_step_nm"] == pytest.approx(self.D)
+        assert calib["Z binning"] == 1
+        assert list(calib["n_data"]) == [BOX, BOX, 21]
+
+    def test_too_coarse_binning_raises(self):
+        movie, _, _ = _synthetic_bead_movie(n_frames=21)
+        # 21 steps in bins of 5 leaves 4 slices
+        with pytest.raises(ValueError, match="at least 5"):
+            spline.build_psf_template(
+                movie,
+                CAMERA_INFO,
+                box=BOX,
+                minimum_ng=2000.0,
+                d=self.D,
+                z_binning=5,
+            )
+
+    def test_precision_is_measured_against_the_exact_stage_position(self):
+        """A fit that recovers every spot's own stage position exactly has no
+        bias and no spread, although the spots of one slice span its steps."""
+        z_of_slice = np.array([40.0, 0.0, -40.0])  # 20 nm steps, bins of 2
+        spot_z = np.array([50.0, 30.0, 10.0, -10.0, -30.0, -50.0])
+        spot_idx = np.array([0, 0, 1, 1, 2, 2])
+        calibration = {"z_step_nm": 40.0}
+        # z_fit = (z_shift + scan_center) * z_step_nm, scan_center = 1
+        theta = np.zeros((6, 5))
+        theta[:, 3] = spot_z / 40.0 - 1.0
+        exact = spline._axial_precision_from_theta(
+            theta, spot_idx, z_of_slice, calibration, 1, spot_z=spot_z
+        )
+        np.testing.assert_allclose(exact["bias_z"], 0.0, atol=1e-9)
+        np.testing.assert_allclose(exact["precision_z"], 0.0, atol=1e-9)
+        # against the slice centers the same fits look 10 nm off
+        centers = spline._axial_precision_from_theta(
+            theta, spot_idx, z_of_slice, calibration, 1
+        )
+        assert np.nanmax(centers["precision_z"]) > 5.0
+
+
 class TestCalibrateSpline:
     """Full calibration including the spline-coefficient step (CPU)."""
 
@@ -2265,6 +2431,15 @@ class TestGuiWiring:
         )
         assert "bead_diagnostics" in finished
         assert "inspect_beads_action" in finished
+
+    def test_spline_calibration_worker_forwards_the_z_binning(self):
+        """Every calibration entry point the worker calls gets the dialog's
+        z binning; a missing one would silently build an unbinned PSF."""
+        import inspect
+        from picasso.gui import localize as glocalize
+
+        src = inspect.getsource(glocalize.SplineCalibrationWorker.run)
+        assert src.count("z_binning=self.z_binning") == 3
 
 
 # ---------------------------------------------------------------------------

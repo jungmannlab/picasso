@@ -3406,9 +3406,10 @@ def compute_dark_times(
     -------
     locs : pd.DataFrame
         Binding events with added 'dark' field/column, which contains
-        the dark time for each binding event. If a binding event is not
-        followed by another binding event in the same group, the dark
-        time is set to -1.
+        the dark time preceding each binding event in frames (see
+        ``dark_times`` for the convention). Binding events that are not
+        preceded by another binding event in the same group are
+        removed.
     """
     if "len" not in locs.columns:
         raise AttributeError(
@@ -3426,6 +3427,25 @@ def dark_times(
 ) -> lib.IntArray1D:
     """Calculate dark times for each binding event.
 
+    The dark time of a binding event is the number of frames without
+    signal between the end of the closest preceding binding event in
+    the same group and its own first frame, i.e.,
+    ``first_frame - previous_last_frame - 1``. For example, two binding
+    events of one frame each, in frames 100 and 5000, are separated by
+    a dark time of 4899 frames. Since ``link`` merges localizations
+    separated by up to ``max_dark_time`` frames without signal into one
+    binding event, dark times at the same site are longer than
+    ``max_dark_time``. Together with the bright time (``len``, see
+    ``link``), each counts the frames spent in its state, so that bright
+    plus dark time equals the time between the starts of consecutive
+    binding events.
+
+    Both are unbiased estimates of the underlying continuous times when
+    a frame is detected as bright once the binding event covers half of
+    it. With a lower detection threshold, bright times are overestimated
+    and dark times underestimated, by up to one frame each; with a
+    higher one, the other way round. Their sum is unbiased either way.
+
     Parameters
     ----------
     locs : pd.DataFrame
@@ -3437,9 +3457,14 @@ def dark_times(
     Returns
     -------
     dark : lib.IntArray1D
-        Array of dark times for each binding event. If a binding event
-        is not followed by another binding event in the same group, the
-        dark time is set to -1.
+        Array of dark times for each binding event in frames. If a
+        binding event is not preceded by another binding event in the
+        same group, the dark time is set to -1.
+
+    Notes
+    -----
+    Before Picasso 0.11.3, the dark time was ``first_frame -
+    previous_last_frame``, i.e., one frame longer than now.
     """
     frame = locs["frame"].to_numpy()
     lens = locs["len"].to_numpy()
@@ -3459,19 +3484,18 @@ def _dark_times(
     group: lib.IntArray1D,
     last_frame: lib.IntArray1D,
 ) -> lib.IntArray1D:
-    """Calculate dark times for each binding event."""
+    """Calculate dark times for each binding event, see
+    ``dark_times``."""
     N = len(frame)
-    max_frame = frame.max()
-    dark = max_frame * np.ones(len(frame), dtype=np.int32)
+    dark = -np.ones(N, dtype=np.int32)
     for i in range(N):
         for j in range(N):
-            if (group[i] == group[j]) and (i != j):
-                dark_ij = frame[i] - last_frame[j]
-                if (dark_ij > 0) and (dark_ij < dark[i]):
+            # j must end before i starts; checked before subtracting
+            # since the frames are unsigned
+            if (group[i] == group[j]) and (frame[i] > last_frame[j]):
+                dark_ij = frame[i] - last_frame[j] - 1
+                if (dark[i] == -1) or (dark_ij < dark[i]):
                     dark[i] = dark_ij
-    for i in range(N):
-        if dark[i] == max_frame:
-            dark[i] = -1
     return dark
 
 
@@ -3495,7 +3519,9 @@ def link(
     r_max : float, optional
         Maximum distance for linking localizations. Default is 0.05.
     max_dark_time : int, optional
-        Maximum dark time for linking localizations. Default is 1.
+        Maximum number of frames without a localization between two
+        localizations that are still linked into one binding event.
+        Default is 3.
     combine_mode : {'average', 'refit'}, optional
         Mode for combining linked localizations. 'average' calculates
         the average position and properties of the linked localizations,
@@ -3510,7 +3536,11 @@ def link(
     -------
     linked_locs : pd.DataFrame
         Linked localizations, i.e., binding events with their
-        properties.
+        properties. The column ``len`` holds the bright time of each
+        binding event in frames, counted from its first to its last
+        frame (``last_frame - first_frame + 1``), including frames
+        bridged by ``max_dark_time``. See ``dark_times`` for the
+        matching dark time convention.
     """
     if len(locs) == 0:  # special case of an empty localization list
         linked_locs = locs.copy()
