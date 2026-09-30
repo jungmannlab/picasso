@@ -372,6 +372,8 @@ Calibrating z
 
 After entering the step size, picasso will calculate the mean and the variance for sigma_x and sigma_y for each z position. Localizations that are not within one standard deviation are discarded. A six-degree polynomial is fitted to the mean values of x and y.
 
+**Z binning** (default 1) merges that many consecutive z positions into one axial bin before the polynomials are fitted: the mean widths of a bin's positions are averaged and placed at the mean of their stage positions. Positions at the end of the scan that do not fill a whole bin are left out of the fit. The diagnostic plot still compares every localization with the stage position of its own frame. Because the sixth-order polynomial is already smooth, binning changes an astigmatism calibration little; it matters mostly for the spline PSF (see `Building a spline calibration`_).
+
 -  mean_sx = cx[6]z0 + cx[5]z1 .. + cx[0]z6
 -  mean_sy = cy[6]z0 + cy[5]z1 .. + cy[0]z6
 
@@ -476,6 +478,7 @@ In the GUI, load the bead movie and select ``Calibration`` > ``Calibrate spline 
 
 - **Calibration step size (nm)** — the axial stage step between consecutive frames (or z-positions).
 - **Number of frames per step size** and **Frame order** — for multi-FOV stacks that image several fields of view at each z-position (as in the 3D astigmatism dialog).
+- **Z binning (steps per bin)** (default 1) — averages that many consecutive z-positions into one slice of the PSF model, so the spline's axial knots are *binning × step size* apart (the dialog shows the resulting bin size). Each slice sits at the mean stage position of its steps; trailing steps that do not fill a whole slice are dropped. This can mitigate the fitted ``z`` positions of single emitters at certain values since the PSF model is smoother. For an astigmatic PSF, bins of about 50 nm remove these spikes without a measurable loss of precision, and the coarser model also fits faster. *Keep in mind that your system might work better with different binning!*. PSFs with fine axial structure (e.g. interference PSFs) need finer bins. The diagnostic plot compares every single-frame bead spot with the stage position of its own frame, so binning does not inflate the reported precision.
 - **Spline PSF model** — ``3D (recovers z)`` or ``2D (single plane)``.
 - **Magnification factor** (default 0.79) — scales the fitted ``z`` to correct for the refractive-index mismatch, as in the astigmatism fit (Huang et al., 2008). It is stored in the calibration and applied at fit time, not during calibration.
 - **Set z = 0 at max. intensity** — define ``z = 0`` at the axial intensity peak of the averaged PSF instead of the center of the stage scan. Only meaningful for a PSF with a single, well-defined focus (e.g. astigmatism); off by default. This will impact the behavior of magnification factor if the measured calibration data is offset.
@@ -486,7 +489,7 @@ The same calibration can be built from the command line::
 
    picasso spline-calibrate my_beads.tif -s 20
 
-where ``-s/--step`` (the z step in nm) is required. Useful options: ``-b`` box side length (default 13), ``-g`` minimum net gradient, ``-m`` model (``spline-3d`` / ``spline-2d``), ``-fps`` / ``-fo`` frames-per-step and order, ``-mf`` magnification factor, ``-cz`` to set ``z = 0`` at the intensity peak, the camera parameters ``-bl`` / ``-se`` / ``-ga`` / ``-px`` (baseline, sensitivity, gain, pixel size), and ``-o`` for the output path (default ``<movie>_spline_calib.hdf5``).
+where ``-s/--step`` (the z step in nm) is required. Useful options: ``-b`` box side length (default 13), ``-g`` minimum net gradient, ``-m`` model (``spline-3d`` / ``spline-2d``), ``-fps`` / ``-fo`` frames-per-step and order, ``-zb`` z binning, ``-mf`` magnification factor, ``-cz`` to set ``z = 0`` at the intensity peak, the camera parameters ``-bl`` / ``-se`` / ``-ga`` / ``-px`` (baseline, sensitivity, gain, pixel size), and ``-o`` for the output path (default ``<movie>_spline_calib.hdf5``).
 
 **The fit box size must not be larger the box size the calibration was built with.** If they differ, Picasso Localize shows a dialog and offers to set the box size to the calibration's value (you then re-run identification before fitting).
 

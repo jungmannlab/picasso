@@ -1732,11 +1732,48 @@ class ConcatenateMoviesDialog(lib.Dialog):
         )
 
 
+Z_BINNING_TIP = (
+    "Number of consecutive z steps averaged into one axial bin before\n"
+    "the calibration model is built. Each bin sits at the mean stage\n"
+    "position of its steps; trailing steps that do not fill a whole bin\n"
+    "are left out.\n\n"
+    "If too low z spacing is used, this may lead to clustering of\n"
+    "fitted z values at certain positions due to local minima.\n\n"
+    "1 means no binning."
+)
+
+
+def _z_binning_widgets(
+    grid: QtWidgets.QGridLayout, row: int, step: QtWidgets.QDoubleSpinBox
+) -> QtWidgets.QSpinBox:
+    """Add the z binning spin box of the 3D calibration dialogs to
+    ``grid`` at ``row``, with a live readout of the resulting bin size
+    computed from the ``step`` spin box, and return the spin box."""
+    label = QtWidgets.QLabel("Z binning (steps per bin):")
+    label.setToolTip(Z_BINNING_TIP)
+    grid.addWidget(label, row, 0)
+    z_binning = QtWidgets.QSpinBox()
+    z_binning.setRange(1, 1000)
+    z_binning.setValue(1)
+    z_binning.setToolTip(Z_BINNING_TIP)
+    grid.addWidget(z_binning, row, 1)
+    readout = QtWidgets.QLabel()
+    grid.addWidget(readout, row, 2)
+
+    def update_readout() -> None:
+        readout.setText(f"= {step.value() * z_binning.value():g} nm bins")
+
+    z_binning.valueChanged.connect(update_readout)
+    step.valueChanged.connect(update_readout)
+    update_readout()
+    return z_binning
+
+
 class Calibrate3DDialog(lib.Dialog):
     """Dialog for entering the parameters of a 3D (astigmatism)
     calibration: the z step size, the number of frames acquired per z
     (stage) position and, if more than one, the order in which those
-    frames were acquired."""
+    frames were acquired, and how many z steps are binned together."""
 
     def __init__(self, window: QtWidgets.QWidget) -> None:
         super().__init__(window)
@@ -1786,6 +1823,9 @@ class Calibrate3DDialog(lib.Dialog):
         )
         grid.addWidget(self.frame_order, 2, 1)
 
+        # Axial binning of consecutive z steps
+        self.z_binning = _z_binning_widgets(grid, 3, self.step)
+
         # The order only matters when more than one frame per step
         self.frames_per_step.valueChanged.connect(self._update_order_enabled)
         self._update_order_enabled(self.frames_per_step.value())
@@ -1811,17 +1851,18 @@ class Calibrate3DDialog(lib.Dialog):
     @staticmethod
     def getCalibrationSpecs(
         parent: QtWidgets.QWidget | None = None,
-    ) -> tuple[float, int, str, bool]:
+    ) -> tuple[float, int, str, int, bool]:
         """Show the dialog and return the chosen step size, number of
-        frames per step, frame order and whether the dialog was
-        accepted."""
+        frames per step, frame order, z binning and whether the dialog
+        was accepted."""
         dialog = Calibrate3DDialog(parent)
         result = dialog.exec()
         step = dialog.step.value()
         frames_per_step = dialog.frames_per_step.value()
         frame_order = dialog.frame_order.currentData()
+        z_binning = dialog.z_binning.value()
         accepted = result == QtWidgets.QDialog.DialogCode.Accepted
-        return step, frames_per_step, frame_order, accepted
+        return step, frames_per_step, frame_order, z_binning, accepted
 
 
 class CameraCalibrationDialog(lib.Dialog):
@@ -2105,8 +2146,9 @@ class CameraCalibrationDialog(lib.Dialog):
 class CalibrateSplineDialog(lib.Dialog):
     """Dialog for entering the parameters of a cubic-spline PSF calibration
     built from a bead z-stack: the z step size, the number of frames acquired
-    per z (stage) position, the acquisition order of those frames, and whether
-    to build a 3D (z-recovering) or 2D (single-plane) spline PSF. The box size
+    per z (stage) position, the acquisition order of those frames, how many z
+    steps are binned into one slice of the PSF model, and whether to build a
+    3D (z-recovering) or 2D (single-plane) spline PSF. The box size
     and minimum net gradient are taken from the main parameters."""
 
     def __init__(
@@ -2152,15 +2194,18 @@ class CalibrateSplineDialog(lib.Dialog):
         )
         grid.addWidget(self.frame_order, 2, 1)
 
+        # Axial binning of consecutive z steps (the spline's z knot spacing)
+        self.z_binning = _z_binning_widgets(grid, 3, self.step)
+
         # Spline PSF dimensionality / model
-        grid.addWidget(QtWidgets.QLabel("Spline PSF model:"), 3, 0)
+        grid.addWidget(QtWidgets.QLabel("Spline PSF model:"), 4, 0)
         self.model = QtWidgets.QComboBox()
         self.model.addItem("3D (recovers z)", userData="spline-3d")
         self.model.addItem("2D (single plane)", userData="spline-2d")
         self.model.setToolTip(
             "3D / 2D: single- or multichannel cubic-spline PSF."
         )
-        grid.addWidget(self.model, 3, 1)
+        grid.addWidget(self.model, 4, 1)
 
         # Magnification factor (applied to the fitted z, as in astigmatism)
         magnification_label = QtWidgets.QLabel("Magnification factor:")
@@ -2168,12 +2213,12 @@ class CalibrateSplineDialog(lib.Dialog):
             "Factor used to correct for z-position abberation due to\n"
             "refractive index mismatch, see Huang B, et al. Science. 2008."
         )
-        grid.addWidget(magnification_label, 4, 0)
+        grid.addWidget(magnification_label, 5, 0)
         self.magnification_factor = QtWidgets.QDoubleSpinBox()
         self.magnification_factor.setRange(0, 1e6)
         self.magnification_factor.setDecimals(4)
         self.magnification_factor.setValue(0.79)
-        grid.addWidget(self.magnification_factor, 4, 1)
+        grid.addWidget(self.magnification_factor, 5, 1)
 
         # Optional z-bias correction (astigmatism)
         self.correct_z_bias = QtWidgets.QCheckBox(
@@ -2186,7 +2231,7 @@ class CalibrateSplineDialog(lib.Dialog):
             "well-defined intensity focus (e.g. astigmatism)."
         )
         self.correct_z_bias.setChecked(False)
-        grid.addWidget(self.correct_z_bias, 5, 0, 1, 2)
+        grid.addWidget(self.correct_z_bias, 6, 0, 1, 2)
 
         # Multichannel (2- to 6-channel) default fit mode. Stored in the
         # calibration. Only shown for a multichannel build (several channels
@@ -2197,7 +2242,7 @@ class CalibrateSplineDialog(lib.Dialog):
         self.link_photons.setToolTip(LINK_PHOTONS_TIP)
         self.link_photons.setChecked(True)
         self.link_photons.setVisible(multichannel)
-        grid.addWidget(self.link_photons, 6, 0, 1, 2)
+        grid.addWidget(self.link_photons, 7, 0, 1, 2)
 
         # How the channels are registered to the reference. Multichannel only:
         # a single-channel calibration has nothing to register.
@@ -2205,8 +2250,8 @@ class CalibrateSplineDialog(lib.Dialog):
         self.registration_model = _transform_model_combo()
         self.registration_label.setVisible(multichannel)
         self.registration_model.setVisible(multichannel)
-        grid.addWidget(self.registration_label, 7, 0)
-        grid.addWidget(self.registration_model, 7, 1)
+        grid.addWidget(self.registration_label, 8, 0)
+        grid.addWidget(self.registration_model, 8, 1)
 
         self.frames_per_step.valueChanged.connect(self._update_order_enabled)
         self._update_order_enabled(self.frames_per_step.value())
@@ -2233,11 +2278,12 @@ class CalibrateSplineDialog(lib.Dialog):
     def getCalibrationSpecs(
         parent: QtWidgets.QWidget | None = None,
         multichannel: bool = False,
-    ) -> tuple[float, int, str, str, float, bool, bool, str, int | None, bool]:
+    ) -> tuple[float, int, str, int, str, float, bool, bool, str, bool]:
         """Show the dialog and return the chosen step size, number of frames
-        per step, frame order, spline model, magnification factor, whether to
-        correct the z bias, whether to link photons across channels, the
-        channel-registration model, and whether it was accepted. ``multichannel`` shows the multichannel-only options (link
+        per step, frame order, z binning, spline model, magnification factor,
+        whether to correct the z bias, whether to link photons across
+        channels, the channel-registration model, and whether it was
+        accepted. ``multichannel`` shows the multichannel-only options (link
         photons, registration model); they are hidden for a single-channel
         calibration."""
         dialog = CalibrateSplineDialog(parent, multichannel=multichannel)
@@ -2245,6 +2291,7 @@ class CalibrateSplineDialog(lib.Dialog):
         step = dialog.step.value()
         frames_per_step = dialog.frames_per_step.value()
         frame_order = dialog.frame_order.currentData()
+        z_binning = dialog.z_binning.value()
         model = dialog.model.currentData()
         magnification_factor = dialog.magnification_factor.value()
         correct_z_bias = dialog.correct_z_bias.isChecked()
@@ -2255,6 +2302,7 @@ class CalibrateSplineDialog(lib.Dialog):
             step,
             frames_per_step,
             frame_order,
+            z_binning,
             model,
             magnification_factor,
             correct_z_bias,
@@ -7161,6 +7209,7 @@ class Window(QtWidgets.QMainWindow):
             step,
             frames_per_step,
             frame_order,
+            z_binning,
             model,
             magnification_factor,
             correct_z_bias,
@@ -7202,6 +7251,7 @@ class Window(QtWidgets.QMainWindow):
             step=step,
             frames_per_step=frames_per_step,
             frame_order=frame_order,
+            z_binning=z_binning,
             frame_bounds=frame_bounds,
             model=model,
             magnification_factor=magnification_factor,
@@ -12137,7 +12187,7 @@ class Window(QtWidgets.QMainWindow):
         if calibrate_z:
             # restore the GPU checkbox state for the selected model
             self.parameters_dialog.on_fit_optimizer_changed()
-            step, frames_per_step, frame_order, ok = (
+            step, frames_per_step, frame_order, z_binning, ok = (
                 Calibrate3DDialog.getCalibrationSpecs(self)
             )
             if ok:
@@ -12157,6 +12207,7 @@ class Window(QtWidgets.QMainWindow):
                         frame_bounds=self.frame_range,
                         frames_per_step=frames_per_step,
                         frame_order=frame_order,
+                        z_binning=z_binning,
                     )
                     dt = time.time() - t0
                     if dt > lib.SOUND_NOTIFICATION_DURATION:
@@ -13632,6 +13683,7 @@ class SplineCalibrationWorker(QtCore.QThread):
         movies=None,
         infos=None,
         camera_infos=None,
+        z_binning: int = 1,
     ) -> None:
         super().__init__()
         self.bead_diagnostics: list[dict] = []
@@ -13643,6 +13695,7 @@ class SplineCalibrationWorker(QtCore.QThread):
         self.step = step
         self.frames_per_step = frames_per_step
         self.frame_order = frame_order
+        self.z_binning = z_binning
         self.frame_bounds = frame_bounds
         self.model = model
         self.magnification_factor = magnification_factor
@@ -13675,6 +13728,7 @@ class SplineCalibrationWorker(QtCore.QThread):
                         frames_per_step=self.frames_per_step,
                         frame_bounds=self.frame_bounds,
                         frame_order=self.frame_order,
+                        z_binning=self.z_binning,
                         magnification_factor=self.magnification_factor,
                         correct_z_bias=self.correct_z_bias,
                         link_photons=self.link_photons,
@@ -13696,6 +13750,7 @@ class SplineCalibrationWorker(QtCore.QThread):
                     frames_per_step=self.frames_per_step,
                     frame_bounds=self.frame_bounds,
                     frame_order=self.frame_order,
+                    z_binning=self.z_binning,
                     magnification_factor=self.magnification_factor,
                     correct_z_bias=self.correct_z_bias,
                     link_photons=self.link_photons,
@@ -13714,6 +13769,7 @@ class SplineCalibrationWorker(QtCore.QThread):
                     frames_per_step=self.frames_per_step,
                     frame_bounds=self.frame_bounds,
                     frame_order=self.frame_order,
+                    z_binning=self.z_binning,
                     model=self.model,
                     magnification_factor=self.magnification_factor,
                     correct_z_bias=self.correct_z_bias,
