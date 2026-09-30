@@ -31,9 +31,16 @@ FULL_VIEWPORT = ((0.0, 0.0), (32.0, 32.0))
 class _Event:
     """The parts of a Qt mouse event the rotate handlers read."""
 
-    def __init__(self, x, y, button=QtCore.Qt.MouseButton.LeftButton):
+    def __init__(
+        self,
+        x,
+        y,
+        button=QtCore.Qt.MouseButton.LeftButton,
+        modifiers=QtCore.Qt.KeyboardModifier.NoModifier,
+    ):
         self._pos = QtCore.QPoint(int(x), int(y))
         self._button = button
+        self._modifiers = modifiers
 
     def pos(self):
         return self._pos
@@ -43,6 +50,10 @@ class _Event:
 
     def buttons(self):
         return self._button
+
+    def modifiers(self):
+        # a plain drag: Shift drags a zoom rectangle and Alt pans
+        return self._modifiers
 
     def accept(self):
         pass

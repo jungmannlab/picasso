@@ -67,7 +67,21 @@ Furthermore, the following columns are included:
 - ``len_cdf`` and ``dark_cdf``: estimates of mean bright and dark times, respectively, obtained by fitting the distributions to the CDF of the exponential distribution. Units: frames;
 - ``locs``: the number of localizations in the region;
 - ``len_mean`` and ``dark_mean``: mean bright and dark times, respectively, obtained by averaging over all binding events, rather than fitting to the CDF. Units: frames;
-- ``len_std`` and ``dark_std``: standard deviation of bright and dark times,respectively;
+- ``len_std`` and ``dark_std``: standard deviation of bright and dark times, respectively;
+
+Bright and dark times are counted in frames. The bright time (``len``) of a binding event runs from its first to its last frame, both included. The dark time is the number of frames without signal between the end of one binding event and the start of the next one in the same pick. Dark times are only measured between binding events: the frames before the first and after the last binding event in a pick are not counted, and a pick with a single binding event has no dark time.
+
+**Note:** before Picasso 0.11.3, the dark time was the difference between the first frame of a binding event and the last frame of the previous one, i.e., one frame longer than now. Dark times, qPAINT influx rates and numbers of units calculated with earlier versions are therefore not directly comparable; recalibrate the influx rate with the current version. See ``picasso.postprocess.dark_times`` for the details.
+
+.. _spatial-index:
+
+Spatial index
+-------------
+Since v0.12, ``picasso.io.save_locs`` also stores the spatial index that ``Picasso: Render`` uses for fast zooming, rotating and picking (a multi-resolution grid over the localizations, see ``picasso.spatial_index``) in the HDF5 group ``/render_index``, for files of 100,000 localizations or more (``render_index=True`` or ``False`` overrides this). When such a file is opened in Render, the stored index is read instead of built, which saves about a second per million localizations. Before it is used, the index is checked against the localizations (every entry must cover exactly one row and every grid cell must hold only the rows that fall in it), so a file whose ``/locs`` table was rewritten by other software or by a script without ``save_locs`` is simply re-indexed; the check cannot be fooled by a stale index. Older Picasso versions and other software ignore the group.
+
+Localizations are stored with float32 floating-point columns and a uint32 ``frame`` column, whatever dtypes a pipeline produced in memory (``picasso.lib.standardize_dtypes``, applied when loading, saving and by most processing functions). float32 resolvesfar below any localization precision, and halves memory and file size compared to float64.
+
+.. _files-metadata-settings:
 
 Metadata
 --------

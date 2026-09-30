@@ -213,21 +213,20 @@ class TestSaveLoadLocs:
             locs["x"].to_numpy(),
         )
 
-    def test_combine_channels_inner_join_preserves_all_rows(
-        self, tmp_path, locs, info
-    ):
+    def test_combine_channels_preserves_all_rows(self, tmp_path, locs, info):
         # Regression test for "Combine all channels" only saving the first
-        # channel. The GUI combines channels with
-        # ``pd.concat(..., join="inner")``. If an outer join were used,
-        # columns missing from some channels would become NaN and
-        # io.save_locs -> lib.ensure_sanity (dropna how="any") would drop
-        # every row from those channels, silently discarding all but one.
+        # channel. The GUI combines channels with ``lib.concat_locs``. A
+        # plain (outer) ``pd.concat`` would turn columns missing from some
+        # channels into NaN and io.save_locs -> lib.ensure_sanity (dropna
+        # how="any") would drop every row from those channels, silently
+        # discarding all but one.
         ch0 = locs.copy()
         # Second channel lacks a column present in the first (e.g. "z").
         extra_col = "z" if "z" in ch0.columns else ch0.columns[-1]
         ch1 = locs.copy().drop(columns=[extra_col])
 
-        combined = pd.concat([ch0, ch1], ignore_index=True, join="inner")
+        with pytest.warns(UserWarning, match=extra_col):
+            combined = lib.concat_locs([ch0, ch1])
         # No NaN-introducing columns survive, so no rows are dropped.
         assert extra_col not in combined.columns
         assert len(combined) == len(ch0) + len(ch1)
@@ -342,6 +341,63 @@ class TestSaveLoadLocs:
         # The file is still loadable via the embedded metadata.
         loaded, loaded_info = io.load_locs(str(path))
         assert loaded_info == list(info)
+
+
+class TestStandardDtypes:
+    """Localizations are saved and loaded with float32 floats and a
+    uint32 frame, whatever a pipeline promoted them to."""
+
+    def _float64_locs(self, n=200):
+        rng = np.random.default_rng(1)
+        return pd.DataFrame(
+            {
+                "frame": rng.integers(0, 50, size=n).astype(np.int64),
+                "x": rng.uniform(0, 32, size=n),  # float64
+                "y": rng.uniform(0, 32, size=n),
+                "photons": rng.uniform(100, 1000, size=n).astype(np.float32),
+                "lpx": rng.uniform(0.01, 0.1, size=n),
+                "lpy": rng.uniform(0.01, 0.1, size=n),
+                "group": rng.integers(0, 5, size=n).astype(np.int32),
+                "z": rng.uniform(-300, 300, size=n),
+            }
+        )
+
+    def _info(self):
+        return [{"Width": 32, "Height": 32, "Frames": 50, "Pixelsize": 130}]
+
+    def test_saved_file_and_loaded_locs_are_float32(self, tmp_path):
+        locs = self._float64_locs()
+        path = str(tmp_path / "f64.hdf5")
+        io.save_locs(path, locs, self._info())
+        with h5py.File(path, "r") as f:
+            dtype = f["locs"].dtype
+        assert dtype["x"] == np.float32 and dtype["z"] == np.float32
+        assert dtype["frame"] == np.uint32
+        assert dtype["group"] == np.int32  # other integers untouched
+        loaded, _ = io.load_locs(path)
+        assert loaded["x"].dtype == np.float32
+        assert loaded["lpy"].dtype == np.float32
+        assert loaded["frame"].dtype == np.uint32
+        assert loaded["group"].dtype == np.int32
+        np.testing.assert_allclose(loaded["x"], locs["x"], rtol=1e-6)
+
+    def test_float64_files_load_as_float32(self, tmp_path):
+        # a file written by other software or an older pandas path
+        locs = self._float64_locs()
+        path = str(tmp_path / "raw.hdf5")
+        with h5py.File(path, "w") as f:
+            f.create_dataset("locs", data=locs.to_records(index=False))
+        io.save_info(str(tmp_path / "raw.yaml"), self._info())
+        loaded, _ = io.load_locs(path)
+        assert all(
+            loaded[c].dtype == np.float32 for c in ["x", "y", "lpx", "z"]
+        )
+        assert loaded["frame"].dtype == np.uint32
+
+    def test_standardize_dtypes_is_a_no_op_on_standard_locs(self):
+        locs = self._float64_locs()
+        standard = lib.standardize_dtypes(locs)
+        assert lib.standardize_dtypes(standard) is standard
 
 
 class TestSavePicksInMetadataSetting:

@@ -19,7 +19,7 @@ Finding out which arguments exist
 
 The arguments fall into a few groups:
 
-* **Spot identification** — box side length, minimum net gradient, and the pre-filters ``--temporal-median`` and ``--gaussian-filter``.
+* **Spot identification** — box side length, the identification method (``--identification-method``) with its threshold (the minimum net gradient, or the ``--wavelet-*`` settings), and the pre-filters ``--temporal-median`` and ``--gaussian-filter``.
 * **Fitting** — the fit method and the calibration files that some methods require (a spline PSF calibration for the spline fits, a magnification factor and a 3D calibration for the astigmatism fits).
 * **Camera** — baseline, sensitivity, gain and pixel size.
 * **What is analyzed** — region of interest, frame bounds, and the flags that change how several movies or several regions are grouped (``--concat``, ``--regions-separately``).
@@ -45,6 +45,12 @@ Pre-filters
 ``--temporal-median`` subtracts a rolling per-pixel median background before spots are identified, which suppresses uneven background and static structures. It affects identification only. See Martens KJA, Turkowyd B, Endesfelder U, `Raw data to results: a hands-on introduction and overview of computational analysis for single-molecule localization microscopy <https://doi.org/10.3389/fbinf.2021.817254>`_, *Frontiers in Bioinformatics* 1, 817254 (2022).
 
 ``--gaussian-filter`` smooths each frame with a Gaussian of the given standard deviation before spots are identified. Spot identification looks for a single local maximum per spot, so a PSF that is not Gaussian-shaped may break into several maxima and is detected several times; smoothing merges them into one. It affects identification only — fitting always uses the raw movie — and since smoothing lowers gradient magnitudes, the minimum net gradient needs re-tuning when it is changed. It can be combined with ``--temporal-median``, which is applied first.
+
+B-spline wavelet identification
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+``--identification-method wavelet`` (``-im wavelet``) identifies spots by the B-spline wavelet segmentation of Izeddin et al., *Optics Express* 20, 2081 (2012), instead of by their net gradient; ``--gradient`` is then ignored. ``--wavelet-threshold`` sets the threshold in units of the noise standard deviation (default 0.5), ``--wavelet-noise`` how the noise is estimated (``image-std``, the default, or ``w1-mad``, which is robust to dense spots and uneven background) and ``--wavelet-min-area`` the smallest region kept (default 4 pixels). The localizations have no ``net_gradient`` column. See *B-spline wavelet identification* in the Localize documentation. ``spline-calibrate`` and ``lateral-calibrate`` accept the same arguments for detecting beads::
+
+   picasso localize movie.tif -b 7 -im wavelet --wavelet-threshold 1
 
 Analyzing several movies as one
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -158,7 +164,7 @@ Convert hdf5 files to SMAP ``_sml.mat`` files. The output is named ``<file>_sml.
 
 join
 ----
-Combine two hdf5 localization files. Type ``picasso join file1 file2``. A new joined file will be created. Note that the frame information of consecutive files is reindexed, i.e., frame 1 now can contain localizations from file 1 and file 2. Therefore, do not perform kinetic analysis and drift correction on joined files. Pass ``-k/--keepindex`` to keep the original frame numbers instead of reindexing.
+Combine two hdf5 localization files. Type ``picasso join file1 file2``. A new joined file will be created. Note that the frame information of consecutive files is reindexed, i.e., frame 1 now can contain localizations from file 1 and file 2. Therefore, do not perform kinetic analysis and drift correction on joined files. Pass ``-k/--keepindex`` to keep the original frame numbers instead of reindexing. Columns that not all files have (e.g. ``z`` when joining 2D and 3D files, or ``net_gradient`` when only some were identified by their net gradient) are dropped with a warning, so that no localizations are lost.
 
 link
 ----

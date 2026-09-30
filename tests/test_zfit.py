@@ -882,6 +882,83 @@ class TestCalibrateZ:
         assert len(loaded["Y Coefficients"]) == 7
 
 
+class TestCalibrateZBinning:
+    """``z_binning`` merges consecutive z steps into the bins the calibration
+    polynomials are fitted to."""
+
+    N_FRAMES = 50
+    D = 10.0  # nm step
+
+    @pytest.fixture(autouse=True)
+    def _no_show(self, monkeypatch):
+        monkeypatch.setattr("matplotlib.pyplot.show", lambda *a, **k: None)
+
+    @pytest.fixture
+    def bead_stack(self):
+        """sx/sy driven by known polynomials of stage z plus tiny noise, as in
+        ``TestCalibrateZ``."""
+        rng = np.random.default_rng(0)
+        z_total = (self.N_FRAMES - 1) * self.D
+        rows = []
+        for fi in range(self.N_FRAMES):
+            z = -(fi * self.D - z_total / 2)
+            sx_mean = 1.5 + 1e-3 * z + 1e-5 * z**2
+            sy_mean = 1.5 - 1e-3 * z + 1e-5 * z**2
+            for _ in range(40):
+                rows.append(
+                    {
+                        "frame": fi,
+                        "x": 16.0,
+                        "y": 16.0,
+                        "sx": sx_mean + rng.normal(0, 0.02),
+                        "sy": sy_mean + rng.normal(0, 0.02),
+                        "photons": 5000.0,
+                        "bg": 10.0,
+                        "lpx": 0.01,
+                        "lpy": 0.01,
+                    }
+                )
+        info = [
+            {
+                "Frames": self.N_FRAMES,
+                "Pixelsize": 130,
+                "Width": 32,
+                "Height": 32,
+            }
+        ]
+        return pd.DataFrame(rows), info
+
+    def test_binning_of_one_is_the_default(self, bead_stack):
+        locs, info = bead_stack
+        default = zfit.calibrate_z(locs, info, self.D, 0.79)
+        explicit = zfit.calibrate_z(locs, info, self.D, 0.79, z_binning=1)
+        assert explicit == default
+        assert default["Z binning"] == 1
+
+    def test_binned_calibration_is_recorded_and_accurate(self, bead_stack):
+        locs, info = bead_stack
+        calib = zfit.calibrate_z(locs, info, self.D, 0.79, z_binning=5)
+        assert calib["Z binning"] == 5
+        # the stage step stays the raw one; only the fit points are binned
+        assert calib["Step size in nm"] == self.D
+        cx = np.array(calib["X Coefficients"])
+        cy = np.array(calib["Y Coefficients"])
+        # same crossing as the unbinned calibration: the curves are smooth
+        # on the scale of five 10 nm steps
+        assert zfit._get_calib_size(cx, 0.0) == pytest.approx(1.5, abs=0.1)
+        assert zfit._get_calib_size(cy, 0.0) == pytest.approx(1.5, abs=0.1)
+        # and they still separate with z in opposite directions
+        assert zfit._get_calib_size(cx, 150.0) > zfit._get_calib_size(
+            cy, 150.0
+        )
+
+    def test_too_coarse_binning_raises(self, bead_stack):
+        locs, info = bead_stack
+        # 50 steps in bins of 8 leaves 6 bins, too few for a 6th-order fit
+        with pytest.raises(ValueError, match="at least 7"):
+            zfit.calibrate_z(locs, info, self.D, 0.79, z_binning=8)
+
+
 class TestCalibrateZFrameBounds:
     """``frame_bounds`` restricts which frames enter the calibration.
     Bounds are inclusive on both ends, matching ``picasso.localize``."""

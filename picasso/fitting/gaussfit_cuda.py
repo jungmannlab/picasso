@@ -8,7 +8,8 @@ the same Levenberg-Marquardt driver as :mod:`picasso.fitting.splinefit_cuda`.
 Every model identifier, parameter count and schedule constant is imported from
 the CPU module, so the two devices cannot disagree about what a model is; only
 the device code lives here. The models are transcribed from Gpufit's
-``models/gauss_2d.cuh``, ``gauss_2d_elliptic.cuh`` and ``gauss_2d_rotated.cuh``.
+``models/gauss_2d.cuh``, ``gauss_2d_elliptic.cuh`` and
+``gauss_2d_rotated.cuh``.
 
 ===================  ==========  ==============================================
 model                parameters  layout
@@ -76,7 +77,8 @@ from picasso.fitting.lmfit_cuda import (
 
 
 def _make_accumulate_spherical(ftype):
-    """Isotropic Gaussian, ``[photons, x, y, s, bg]`` (Gpufit's ``GAUSS_2D``)."""
+    """Isotropic Gaussian, ``[photons, x, y, s, bg]`` (Gpufit's
+    ``GAUSS_2D``)."""
     half = ftype(0.5)
 
     @cuda.jit(device=True)
@@ -520,6 +522,49 @@ def _get_kernel(model: int, single_precision: bool):
     return kernel
 
 
+def _check_inputs(
+    model: int, spots: np.ndarray, initial_parameters: np.ndarray
+) -> int:
+    """Validate ``spots``/``initial_parameters``.
+
+    Parameters
+    ----------
+    model : int
+        :data:`SPHERICAL`, :data:`ELLIPTIC` or :data:`ROTATED`.
+    spots : np.ndarray
+        Spots, expected with shape ``(n_spots, box, box)``.
+    initial_parameters : np.ndarray
+        Seeds, expected with shape ``(n_spots, n_params)``.
+
+    Returns
+    -------
+    n_params : int
+        Parameter count of ``model``.
+    """
+    if spots.ndim != 3 or spots.shape[1] != spots.shape[2]:
+        raise ValueError(
+            f"spots must have shape (n_spots, box, box), got {spots.shape}."
+        )
+    n_params = _N_PARAMS[model]
+    if initial_parameters.shape != (len(spots), n_params):
+        raise ValueError(
+            "initial_parameters must have shape "
+            f"{(len(spots), n_params)}, got {initial_parameters.shape}."
+        )
+    return n_params
+
+
+def _resolve_schedule(
+    tolerance: float | None, max_iterations: int | None
+) -> tuple:
+    """Fall back to the module defaults for an unset tolerance/iterations."""
+    if tolerance is None:
+        tolerance = TOLERANCE
+    if max_iterations is None:
+        max_iterations = MAX_ITERATIONS
+    return tolerance, max_iterations
+
+
 def fit_spots(
     model: int,
     spots: np.ndarray,
@@ -547,11 +592,22 @@ def fit_spots(
         ``picasso.fitting.seeds.initial_parameters_gauss``.
     mle : bool, optional
         Use the Poisson maximum-likelihood estimator instead of least squares.
-    tolerance, max_iterations : float and int, optional
-        Convergence schedule. ``None`` (the default) uses :data:`TOLERANCE` /
+    tolerance : float, optional
+        Convergence tolerance. ``None`` (the default) uses
+        :data:`TOLERANCE`.
+    max_iterations : int, optional
+        Maximum number of iterations. ``None`` (the default) uses
         :data:`MAX_ITERATIONS`.
-    progress_callback, abort_callback, single_precision
-        As :func:`picasso.fitting.splinefit_cuda.fit_spots`.
+    progress_callback : callable, "console" or None, optional
+        ``"console"`` shows a tqdm bar; a callable is invoked with the
+        cumulative number of spots fitted. As in
+        :func:`picasso.fitting.splinefit_cuda.fit_spots`.
+    abort_callback : callable or None, optional
+        Polled between chunks; returning True stops the fit. As in
+        :func:`picasso.fitting.splinefit_cuda.fit_spots`.
+    single_precision : bool, optional
+        Evaluate the model in single precision (the default). As in
+        :func:`picasso.fitting.splinefit_cuda.fit_spots`.
     variance : np.ndarray, optional
         ``(n_spots, box, box)`` per-pixel sCMOS readout variance in
         photoelectrons squared, laid out exactly like ``spots``. ``None``
@@ -571,20 +627,8 @@ def fit_spots(
     """
     lmfit_cuda.require_cuda()
     spots = np.asarray(spots)
-    if spots.ndim != 3 or spots.shape[1] != spots.shape[2]:
-        raise ValueError(
-            "spots must have shape (n_spots, box, box), got " f"{spots.shape}."
-        )
-    n_params = _N_PARAMS[model]
-    if initial_parameters.shape != (len(spots), n_params):
-        raise ValueError(
-            "initial_parameters must have shape "
-            f"{(len(spots), n_params)}, got {initial_parameters.shape}."
-        )
-    if tolerance is None:
-        tolerance = TOLERANCE
-    if max_iterations is None:
-        max_iterations = MAX_ITERATIONS
+    n_params = _check_inputs(model, spots, initial_parameters)
+    tolerance, max_iterations = _resolve_schedule(tolerance, max_iterations)
 
     n_spots, box = spots.shape[0], spots.shape[1]
     thetas, chi_squares, states, iterations = allocate_outputs(
@@ -830,16 +874,39 @@ def _make_accumulate_spherical_multichannel(ftype):
     return accumulate
 
 
+@cuda.jit(device=True)
+def _reset_decoupled_scratch(theta, n_params, grad, hess):
+    """Zero ``grad``/``hess`` for the decoupled accumulator.
+
+    Returns False if any parameter is non-finite, in which case ``grad``/
+    ``hess`` are left as found."""
+    for p in range(n_params):
+        if not math.isfinite(theta[p]):
+            return False
+        grad[p] = 0.0
+        for q in range(n_params):
+            hess[p, q] = 0.0
+    return True
+
+
+@cuda.jit(device=True)
+def _mirror_upper_triangle(hess, n_params):
+    """Mirror the upper triangle of ``hess`` into the lower triangle."""
+    for p in range(n_params):
+        for q in range(p):
+            hess[p, q] = hess[q, p]
+
+
 def _make_accumulate_spherical_decoupled(ftype, n_channels: int):
     """Photon-decoupled multichannel isotropic Gaussian at a fixed channel
     count, ``[x_shift, y_shift, sigma, N_0..N_{C-1}, bg_0..bg_{C-1}]``.
 
-    A pixel of channel ``ch`` touches only five of the ``3 + 2C`` parameters, so
-    - as in ``splinefit_cuda._make_accumulate_link_xyz`` - the fifteen affected
-    quantities live in registers and are written out once per channel rather
-    than round-tripping through local memory per pixel. The summation order
-    matches ``gaussfit._accumulate_spherical_decoupled``, so the two devices
-    agree to rounding."""
+    A pixel of channel ``ch`` touches only five of the ``3 + 2C`` parameters,
+    so - as in ``splinefit_cuda._make_accumulate_link_xyz`` - the fifteen
+    affected quantities live in registers and are written out once per channel
+    rather than round-tripping through local memory per pixel. The summation
+    order matches ``gaussfit._accumulate_spherical_decoupled``, so the two
+    devices agree to rounding."""
     half = ftype(0.5)
     n_ch = n_channels
 
@@ -862,12 +929,8 @@ def _make_accumulate_spherical_decoupled(ftype, n_channels: int):
         x_shift = theta[0]
         y_shift = theta[1]
         sigma = theta[2]
-        for p in range(n_params):
-            if not math.isfinite(theta[p]):
-                return _INF, False
-            grad[p] = 0.0
-            for q in range(n_params):
-                hess[p, q] = 0.0
+        if not _reset_decoupled_scratch(theta, n_params, grad, hess):
+            return _INF, False
         if not abs(sigma) > 0.0:
             return _INF, False
         inv_s2 = ftype(1.0 / (sigma * sigma))
@@ -973,9 +1036,7 @@ def _make_accumulate_spherical_decoupled(ftype, n_channels: int):
         # Only the upper triangle was filled (0 < 1 < 2 < ia < ib always
         # holds); mirror it once at the end. The cross-channel photon and
         # background blocks are structurally zero and were cleared above.
-        for p in range(n_params):
-            for q in range(p):
-                hess[p, q] = hess[q, p]
+        _mirror_upper_triangle(hess, n_params)
         return chi_square, True
 
     return accumulate
@@ -1096,10 +1157,7 @@ def fit_spots_multichannel(
     n_params = _check_inputs_multichannel(
         kind, spots, jacobians, residuals, initial_parameters
     )
-    if tolerance is None:
-        tolerance = TOLERANCE
-    if max_iterations is None:
-        max_iterations = MAX_ITERATIONS
+    tolerance, max_iterations = _resolve_schedule(tolerance, max_iterations)
 
     n_spots, n_channels, box = spots.shape[0], spots.shape[1], spots.shape[2]
     thetas, chi_squares, states, iterations = allocate_outputs(

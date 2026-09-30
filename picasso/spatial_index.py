@@ -10,9 +10,12 @@ hierarchical, each coarser block at level L corresponds to a contiguous
 range in the same sorted permutation -- so all levels reuse one ``perm``
 array (~4 N bytes) rather than one per level.
 
-See :mod:`picasso.postprocess` for the original single-resolution
-``get_index_blocks`` used by pick/cluster code; this module is
-intentionally separate so the pick code path is unaffected.
+Circular picks query the same pyramid (``query_circle``): the block
+sizes do not depend on the pick size, so the index built at load time
+serves every pick diameter, whereas the single-resolution
+``get_index_blocks`` of :mod:`picasso.postprocess` has to be rebuilt
+(sorting and copying the whole DataFrame) whenever the pick size
+changes; it remains the fallback where no pyramid could be built.
 
 :author: Rafal Kowalewski, 2026
 :copyright: Copyright (c) 2026 Jungmann Lab, MPI of Biochemistry
@@ -20,13 +23,33 @@ intentionally separate so the pick code path is unaffected.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 
+import h5py
 import numba
 import numpy as np
 import pandas as pd
 
 from . import lib
+
+
+_log = logging.getLogger(__name__)
+
+#: HDF5 group holding a persisted pyramid, see ``save_render_index``.
+RENDER_INDEX_GROUP = "render_index"
+#: Files with fewer localizations get no persisted pyramid: theirs
+#: builds in milliseconds and the 4 bytes per row would be a large part
+#: of a small file.
+PERSIST_MIN_LOCS = 100_000
+#: version 2 sorts the permutation by fine Morton keys (see
+#: ``_FINE_BITS``), which the quad-tree needs; version 1 files are
+#: rebuilt
+_RENDER_INDEX_VERSION = 2
+#: Levels of the implicit quad-tree below the pyramid's base block: the
+#: finest cell is ``base / 2**_FINE_BITS`` (2 px / 256 ≈ 0.008 px, about
+#: 1 nm at 130 nm pixels, for the usual 512 px field of view).
+_FINE_BITS = 8
 
 
 # Target upper bound on blocks per viewport edge at the chosen level.
@@ -70,6 +93,17 @@ class RenderIndexPyramid:
     block_ends: list[lib.IntArray2D]
     width: float
     height: float
+    #: bits per axis of the quad-tree root above the base block: the
+    #: root is a square of ``2**root_bits`` base blocks covering the
+    #: field of view (see ``_quadtree_geometry``)
+    root_bits: int = 0
+    #: levels below the base block (``_FINE_BITS`` at build time)
+    fine_bits: int = 0
+    #: the fine Morton key of every row in ``perm`` order, ascending;
+    #: the quad-tree is implicit in it (``quadtree_layout``). Filled by
+    #: ``build_render_index`` and by ``validate_render_index`` for an
+    #: index read from a file.
+    sorted_keys: lib.IntArray1D | None = None
 
 
 def _base_block_size(width: float, height: float) -> float:
@@ -114,6 +148,63 @@ def _morton_encode_2d(x: lib.IntArray1D, y: lib.IntArray1D) -> lib.IntArray1D:
         yi = (yi | (yi << one)) & M4
         out[i] = xi | (yi << one)
     return out
+
+
+def _quadtree_geometry(
+    width: float, height: float, base: float
+) -> tuple[int, int, int]:
+    """``(L, K, root_bits)``: base blocks per row and column and the
+    bits per axis of the smallest dyadic square of base blocks that
+    covers the ``(K, L)`` grid (the quad-tree root)."""
+    L = max(1, int(np.ceil(width / base)))
+    K = max(1, int(np.ceil(height / base)))
+    root_bits = max(1, int(np.ceil(np.log2(max(K, L)))))
+    return L, K, root_bits
+
+
+@numba.njit(cache=True)
+def _fine_cells(
+    x: lib.FloatArray1D,
+    y: lib.FloatArray1D,
+    base: float,
+    fine_bits: int,
+    L: int,
+    K: int,
+) -> tuple[lib.IntArray1D, lib.IntArray1D]:
+    """Cell coordinates at the finest quad-tree level: the base block
+    (clipped to the grid, so out-of-FOV rows stay queryable) times
+    ``2**fine_bits`` plus the sub-block cell, so that shifting a fine
+    coordinate right by ``fine_bits`` gives the base block exactly."""
+    n = x.shape[0]
+    ix = np.empty(n, dtype=np.uint32)
+    iy = np.empty(n, dtype=np.uint32)
+    sub = 1 << fine_bits
+    cell = base / sub
+    for i in range(n):
+        bx = int(np.floor(x[i] / base))
+        bx = min(max(bx, 0), L - 1)
+        fx = int(np.floor((x[i] - bx * base) / cell))
+        fx = min(max(fx, 0), sub - 1)
+        ix[i] = bx * sub + fx
+        by = int(np.floor(y[i] / base))
+        by = min(max(by, 0), K - 1)
+        fy = int(np.floor((y[i] - by * base) / cell))
+        fy = min(max(fy, 0), sub - 1)
+        iy[i] = by * sub + fy
+    return ix, iy
+
+
+def _fine_keys(
+    x: lib.FloatArray1D,
+    y: lib.FloatArray1D,
+    base: float,
+    fine_bits: int,
+    L: int,
+    K: int,
+) -> lib.IntArray1D:
+    """Fine Morton key of every row (see ``_fine_cells``)."""
+    ix, iy = _fine_cells(x, y, base, fine_bits, L, K)
+    return _morton_encode_2d(ix, iy)
 
 
 @numba.njit(cache=True)
@@ -171,13 +262,55 @@ def build_render_index(
     height = lib.get_from_metadata(info, "Height")
     if width is None or height is None:
         return None
-    width = float(width)
-    height = float(height)
+    return build_render_index_arrays(
+        locs["x"].to_numpy(),
+        locs["y"].to_numpy(),
+        float(width),
+        float(height),
+        n_levels=n_levels,
+    )
 
+
+def build_render_index_arrays(
+    x: lib.FloatArray1D,
+    y: lib.FloatArray1D,
+    width: float,
+    height: float,
+    n_levels: int = 3,
+) -> RenderIndexPyramid:
+    """Build the pyramid from coordinate arrays and the FOV size.
+
+    Same as ``build_render_index`` but on coordinate arrays (camera
+    pixels) and the field of view size.
+
+    The permutation sorts the rows by their fine Morton key (the
+    Morton code of the cell at ``_FINE_BITS`` levels below the base
+    block), so every aligned dyadic square at every level, from the
+    quad-tree root down to the finest cell, is one contiguous range of
+    it: the block tables of the pyramid levels and the implicit
+    quad-tree of ``quadtree_layout`` (rendered by ``picasso.render``)
+    both read the same permutation.
+
+    Parameters
+    ----------
+    x, y : lib.FloatArray1D
+        Coordinates of the localizations (camera pixels).
+    width, height : float
+        Size of the field of view (camera pixels).
+    n_levels : int, optional
+        Number of pyramid levels, each with blocks 4x larger than the
+        last. Default 3.
+
+    Returns
+    -------
+    pyramid : RenderIndexPyramid
+        The spatial index of the localizations.
+    """
     base = _base_block_size(width, height)
     block_sizes = tuple(base * (4**lvl) for lvl in range(n_levels))
+    L0, K0, root_bits = _quadtree_geometry(width, height, base)
 
-    n = len(locs)
+    n = x.shape[0]
     if n == 0:
         block_starts = []
         block_ends = []
@@ -193,22 +326,18 @@ def build_render_index(
             block_ends=block_ends,
             width=width,
             height=height,
+            root_bits=root_bits,
+            fine_bits=_FINE_BITS,
+            sorted_keys=np.empty(0, dtype=np.uint64),
         )
 
-    x = locs["x"].to_numpy()
-    y = locs["y"].to_numpy()
-
-    # Block coords at the finest level, clipped to the grid. Out-of-FOV
-    # locs are pinned to the boundary so they stay queryable -- matches
-    # the existing renderer, which just doesn't draw them.
-    n_blocks_x0 = max(1, int(np.ceil(width / base)))
-    n_blocks_y0 = max(1, int(np.ceil(height / base)))
-    bx0 = np.clip(np.floor(x / base), 0, n_blocks_x0 - 1).astype(np.uint32)
-    by0 = np.clip(np.floor(y / base), 0, n_blocks_y0 - 1).astype(np.uint32)
-
-    # Sort by Morton at finest level -> hierarchical contiguity.
-    keys = _morton_encode_2d(bx0, by0)
+    # Cell coords at the finest quad-tree level, clipped to the grid.
+    # Out-of-FOV locs are pinned to the boundary so they stay queryable
+    # -- matches the existing renderer, which just doesn't draw them.
+    keys = _fine_keys(x, y, base, _FINE_BITS, L0, K0)
+    # Sort by Morton at the finest level -> hierarchical contiguity.
     perm = np.argsort(keys, kind="stable").astype(np.uint32)
+    sorted_keys = keys[perm]
 
     block_starts = []
     block_ends = []
@@ -230,6 +359,9 @@ def build_render_index(
         block_ends=block_ends,
         width=width,
         height=height,
+        root_bits=root_bits,
+        fine_bits=_FINE_BITS,
+        sorted_keys=sorted_keys,
     )
 
 
@@ -328,7 +460,32 @@ def query_viewport(
     if pyramid.perm.shape[0] == 0:
         return np.empty(0, dtype=np.uint32)
 
-    lvl = _select_level(pyramid, viewport)
+    return query_rect(pyramid, viewport)
+
+
+def query_rect(pyramid: RenderIndexPyramid, rect: tuple) -> lib.IntArray1D:
+    """Indices into the original locs DataFrame for locs in ``rect``.
+
+    Unlike ``query_viewport`` there is no full-FOV bypass: the result is
+    always an index array, a superset of the locs strictly inside the
+    rectangle (whole blocks at its edges are included).
+
+    Parameters
+    ----------
+    pyramid : RenderIndexPyramid
+        The index built by :func:`build_render_index`.
+    rect : tuple
+        ``((y_min, x_min), (y_max, x_max))`` in camera pixels.
+
+    Returns
+    -------
+    indices : lib.IntArray1D
+        Positions into the original locs DataFrame.
+    """
+    (y_min, x_min), (y_max, x_max) = rect
+    if pyramid.perm.shape[0] == 0:
+        return np.empty(0, dtype=np.uint32)
+    lvl = _select_level(pyramid, rect)
     size = pyramid.block_sizes[lvl]
     bs = pyramid.block_starts[lvl]
     be = pyramid.block_ends[lvl]
@@ -349,3 +506,491 @@ def query_viewport(
         return np.empty(0, dtype=np.uint32)
 
     return _gather_blocks(pyramid.perm, bs, be, cy_min, cy_max, cx_min, cx_max)
+
+
+@numba.njit(cache=True)
+def _count_blocks_in_rect(
+    perm: lib.IntArray1D,
+    block_starts: lib.IntArray2D,
+    block_ends: lib.IntArray2D,
+    cy_min: int,
+    cy_max: int,
+    cx_min: int,
+    cx_max: int,
+    x: lib.FloatArray1D,
+    y: lib.FloatArray1D,
+    x_min: float,
+    y_min: float,
+    x_max: float,
+    y_max: float,
+) -> int:
+    """Count the locs strictly inside the rectangle. Blocks between the
+    edge blocks lie wholly inside it and are counted by size; only the
+    edge blocks' locs are tested one by one."""
+    n = 0
+    for by in range(cy_min, cy_max + 1):
+        for bx in range(cx_min, cx_max + 1):
+            s = block_starts[by, bx]
+            e = block_ends[by, bx]
+            if cy_min < by < cy_max and cx_min < bx < cx_max:
+                n += e - s
+                continue
+            for k in range(s, e):
+                i = perm[k]
+                if (
+                    x[i] > x_min
+                    and y[i] > y_min
+                    and x[i] < x_max
+                    and y[i] < y_max
+                ):
+                    n += 1
+    return n
+
+
+def count_rect(
+    pyramid: RenderIndexPyramid,
+    x: lib.FloatArray1D,
+    y: lib.FloatArray1D,
+    rect: tuple,
+) -> int:
+    """Number of locs strictly inside ``rect``, with the renderer's
+    ``in_view`` test (``x_min < x < x_max``, likewise for y).
+
+    Unlike the length of ``query_rect``, which includes whole blocks at
+    the edges, the count is exact.
+
+    Parameters
+    ----------
+    pyramid : RenderIndexPyramid
+        The index built by :func:`build_render_index` for ``x``, ``y``.
+    x, y : lib.FloatArray1D
+        Coordinates of all the localizations the pyramid indexes (the
+        DataFrame's columns), in camera pixels.
+    rect : tuple
+        ``((y_min, x_min), (y_max, x_max))`` in camera pixels.
+
+    Returns
+    -------
+    n : int
+        Number of localizations inside ``rect``.
+    """
+    (y_min, x_min), (y_max, x_max) = rect
+    if pyramid.perm.shape[0] == 0:
+        return 0
+    lvl = _select_level(pyramid, rect)
+    size = pyramid.block_sizes[lvl]
+    bs = pyramid.block_starts[lvl]
+    be = pyramid.block_ends[lvl]
+    K, L = bs.shape
+    if x_min >= x_max or y_min >= y_max:
+        return 0
+    # locs outside the FOV are held by the border blocks, so a rect
+    # beyond the FOV is clamped onto them rather than found empty
+    cx_min = min(max(0, int(np.floor(x_min / size))), L - 1)
+    cy_min = min(max(0, int(np.floor(y_min / size))), K - 1)
+    cx_max = min(max(0, int(np.floor((x_max - 1e-9) / size))), L - 1)
+    cy_max = min(max(0, int(np.floor((y_max - 1e-9) / size))), K - 1)
+    return int(
+        _count_blocks_in_rect(
+            pyramid.perm,
+            bs,
+            be,
+            cy_min,
+            cy_max,
+            cx_min,
+            cx_max,
+            np.asarray(x),
+            np.asarray(y),
+            float(x_min),
+            float(y_min),
+            float(x_max),
+            float(y_max),
+        )
+    )
+
+
+@numba.njit(cache=True)
+def _filter_circle(
+    indices: lib.IntArray1D,
+    x: lib.FloatArray1D,
+    y: lib.FloatArray1D,
+    cx: float,
+    cy: float,
+    r2: float,
+) -> lib.IntArray1D:
+    """Keep the indices whose coordinates lie strictly within the
+    circle (squared radius ``r2``), as ``lib.is_loc_at_numba`` does."""
+    keep = np.empty(indices.shape[0], dtype=np.uint32)
+    n = 0
+    for k in range(indices.shape[0]):
+        i = indices[k]
+        dx = x[i] - cx
+        dy = y[i] - cy
+        if dx * dx + dy * dy < r2:
+            keep[n] = i
+            n += 1
+    return keep[:n]
+
+
+def query_circle(
+    pyramid: RenderIndexPyramid,
+    x: lib.FloatArray1D,
+    y: lib.FloatArray1D,
+    cx: float,
+    cy: float,
+    radius: float,
+) -> lib.IntArray1D:
+    """Indices into the original locs DataFrame for locs within a
+    circular pick, the way ``picasso.postprocess.picked_locs`` selects
+    them (``dx**2 + dy**2 < radius**2``).
+
+    The blocks overlapping the circle's bounding box are gathered from
+    the pyramid and the distance test is applied to those locs only.
+
+    Parameters
+    ----------
+    pyramid : RenderIndexPyramid
+        The index built by :func:`build_render_index` for ``x``, ``y``.
+    x, y : lib.FloatArray1D
+        Coordinates of all the localizations the pyramid indexes (the
+        DataFrame's columns), in camera pixels.
+    cx, cy : float
+        Center of the pick in camera pixels.
+    radius : float
+        Radius of the pick in camera pixels.
+
+    Returns
+    -------
+    indices : lib.IntArray1D
+        Positions into the original locs DataFrame, in the pyramid's
+        (Morton) order.
+    """
+    rect = ((cy - radius, cx - radius), (cy + radius, cx + radius))
+    indices = query_rect(pyramid, rect)
+    return _filter_circle(indices, x, y, float(cx), float(cy), radius**2)
+
+
+# ---------------------------------------------------------------------------
+# Persistence: the pyramid stored in the localizations' HDF5 file
+# ---------------------------------------------------------------------------
+
+
+def save_render_index(
+    hdf_file: h5py.File, pyramid: RenderIndexPyramid
+) -> None:
+    """Write ``pyramid`` into an open HDF5 file as the group
+    ``/render_index``: the permutation and every level's block tables
+    as datasets, the block sizes, field size and row count as
+    attributes. Older Picasso versions read only ``/locs`` and
+    ``/metadata`` and are unaffected by the group.
+
+    Parameters
+    ----------
+    hdf_file : h5py.File
+        The localizations file, open for writing.
+    pyramid : RenderIndexPyramid
+        The index of the ``/locs`` rows of that file, in their order.
+    """
+    if RENDER_INDEX_GROUP in hdf_file:
+        del hdf_file[RENDER_INDEX_GROUP]
+    group = hdf_file.create_group(RENDER_INDEX_GROUP)
+    group.attrs["version"] = _RENDER_INDEX_VERSION
+    group.attrs["n"] = int(pyramid.perm.shape[0])
+    group.attrs["width"] = float(pyramid.width)
+    group.attrs["height"] = float(pyramid.height)
+    group.attrs["block_sizes"] = np.asarray(
+        pyramid.block_sizes, dtype=np.float64
+    )
+    group.attrs["root_bits"] = int(pyramid.root_bits)
+    group.attrs["fine_bits"] = int(pyramid.fine_bits)
+    group.create_dataset("perm", data=pyramid.perm)
+    for lvl, (bs, be) in enumerate(
+        zip(pyramid.block_starts, pyramid.block_ends)
+    ):
+        group.create_dataset(f"block_starts_{lvl}", data=bs)
+        group.create_dataset(f"block_ends_{lvl}", data=be)
+
+
+def read_render_index(path: str) -> RenderIndexPyramid | None:
+    """Read the pyramid stored by ``save_render_index`` in the
+    localizations file ``path``; None if the file has none (or it
+    cannot be read). The result is *unchecked*: use
+    ``load_render_index`` to get one that is known to describe the
+    localizations.
+
+    Parameters
+    ----------
+    path : str
+        The localizations HDF5 file.
+
+    Returns
+    -------
+    pyramid : RenderIndexPyramid or None
+    """
+    try:
+        with h5py.File(path, "r") as hdf_file:
+            if RENDER_INDEX_GROUP not in hdf_file:
+                return None
+            group = hdf_file[RENDER_INDEX_GROUP]
+            if int(group.attrs.get("version", 0)) != _RENDER_INDEX_VERSION:
+                return None
+            block_sizes = tuple(float(s) for s in group.attrs["block_sizes"])
+            perm = group["perm"][()].astype(np.uint32, copy=False)
+            block_starts = []
+            block_ends = []
+            for lvl in range(len(block_sizes)):
+                block_starts.append(
+                    group[f"block_starts_{lvl}"][()].astype(
+                        np.uint32, copy=False
+                    )
+                )
+                block_ends.append(
+                    group[f"block_ends_{lvl}"][()].astype(
+                        np.uint32, copy=False
+                    )
+                )
+            return RenderIndexPyramid(
+                perm=perm,
+                block_sizes=block_sizes,
+                block_starts=block_starts,
+                block_ends=block_ends,
+                width=float(group.attrs["width"]),
+                height=float(group.attrs["height"]),
+                root_bits=int(group.attrs["root_bits"]),
+                fine_bits=int(group.attrs["fine_bits"]),
+            )
+    except (OSError, KeyError, ValueError, TypeError):
+        return None
+
+
+@numba.njit(cache=True)
+def _is_permutation(perm: lib.IntArray1D, n: int) -> bool:
+    """Whether ``perm`` lists every index below ``n`` exactly once."""
+    if perm.shape[0] != n:
+        return False
+    seen = np.zeros(n, dtype=np.uint8)
+    for k in range(n):
+        p = perm[k]
+        if p >= n or seen[p]:
+            return False
+        seen[p] = 1
+    return True
+
+
+@numba.njit(cache=True)
+def _is_sorted(keys: lib.IntArray1D) -> bool:
+    """Whether ``keys`` is non-decreasing."""
+    for k in range(1, keys.shape[0]):
+        if keys[k] < keys[k - 1]:
+            return False
+    return True
+
+
+@numba.njit(cache=True)
+def _blocks_hold_their_locs(
+    perm: lib.IntArray1D,
+    block_starts: lib.IntArray2D,
+    block_ends: lib.IntArray2D,
+    x: lib.FloatArray1D,
+    y: lib.FloatArray1D,
+    size: float,
+) -> bool:
+    """Whether every block's range lists only localizations whose
+    (clipped) block coordinates are that block, and the ranges cover
+    all ``perm`` entries. This is the correctness criterion of the
+    index: as long as it holds, every query is right."""
+    n = perm.shape[0]
+    K, L = block_starts.shape
+    total = 0
+    for i in range(K):
+        for j in range(L):
+            s = block_starts[i, j]
+            e = block_ends[i, j]
+            if e < s or e > n:
+                return False
+            total += e - s
+            for k in range(s, e):
+                p = perm[k]
+                bx = int(np.floor(x[p] / size))
+                by = int(np.floor(y[p] / size))
+                bx = min(max(bx, 0), L - 1)
+                by = min(max(by, 0), K - 1)
+                if bx != j or by != i:
+                    return False
+    return total == n
+
+
+def _validate_index_dimensions(
+    pyramid: RenderIndexPyramid, info: list[dict]
+) -> bool:
+    """Whether the pyramid's field-of-view size matches ``info``."""
+    width = lib.get_from_metadata(info, "Width")
+    height = lib.get_from_metadata(info, "Height")
+    if width is None or height is None:
+        return False
+    return float(width) == pyramid.width and float(height) == pyramid.height
+
+
+def _validate_index_block_shapes(
+    pyramid: RenderIndexPyramid, x: np.ndarray, y: np.ndarray
+) -> bool:
+    """Whether every block level has consistent shapes and holds its locs."""
+    if len(pyramid.block_sizes) != len(pyramid.block_starts) or len(
+        pyramid.block_starts
+    ) != len(pyramid.block_ends):
+        return False
+    for size, bs, be in zip(
+        pyramid.block_sizes, pyramid.block_starts, pyramid.block_ends
+    ):
+        K = max(1, int(np.ceil(pyramid.height / size)))
+        L = max(1, int(np.ceil(pyramid.width / size)))
+        if bs.shape != (K, L) or be.shape != (K, L):
+            return False
+        if not _blocks_hold_their_locs(
+            pyramid.perm, bs, be, x, y, float(size)
+        ):
+            return False
+    return True
+
+
+def validate_render_index(
+    pyramid: RenderIndexPyramid, locs: pd.DataFrame, info: list[dict]
+) -> bool:
+    """Whether ``pyramid`` correctly indexes ``locs``.
+
+    Checked against the index's own correctness criterion rather than a
+    checksum: the permutation covers every row exactly once, every
+    block, at every level, holds only rows whose coordinates fall in it
+    (one pass per level), and the rows' fine Morton keys are ascending
+    along the permutation (the quad-tree's requirement; the keys are
+    kept on the pyramid, ``sorted_keys``). Any edit of the file that
+    changed, dropped, added or reordered coordinates fails; an edit
+    that leaves the index correct (say, other columns) passes, which
+    is what matters.
+
+    Parameters
+    ----------
+    pyramid : RenderIndexPyramid
+        A pyramid, e.g. read from the file by ``read_render_index``.
+    locs : pd.DataFrame
+        The localizations it claims to index, in file order.
+    info : list of dicts
+        Their metadata (the field size must match the pyramid's).
+
+    Returns
+    -------
+    valid : bool
+    """
+    if not _validate_index_dimensions(pyramid, info):
+        return False
+    n = len(locs)
+    if not _is_permutation(pyramid.perm, n):
+        return False
+    if n == 0:
+        pyramid.sorted_keys = np.empty(0, dtype=np.uint64)
+        return True
+    x = locs["x"].to_numpy()
+    y = locs["y"].to_numpy()
+    if not _validate_index_block_shapes(pyramid, x, y):
+        return False
+    base = pyramid.block_sizes[0]
+    L0, K0, root_bits = _quadtree_geometry(pyramid.width, pyramid.height, base)
+    if pyramid.root_bits != root_bits or pyramid.fine_bits <= 0:
+        return False
+    keys = _fine_keys(x, y, base, pyramid.fine_bits, L0, K0)[pyramid.perm]
+    if not _is_sorted(keys):
+        return False
+    pyramid.sorted_keys = keys
+    return True
+
+
+def load_render_index(
+    path: str, locs: pd.DataFrame, info: list[dict]
+) -> RenderIndexPyramid | None:
+    """The pyramid stored in ``path`` if it (still) describes ``locs``,
+    else None -- the caller then builds one with
+    ``build_render_index``. A stored index that fails the check (the
+    file was edited without ``picasso.io.save_locs``) is reported in
+    the log at INFO level.
+
+    Parameters
+    ----------
+    path : str
+        The localizations HDF5 file.
+    locs : pd.DataFrame
+        The localizations loaded from it.
+    info : list of dicts
+        Their metadata.
+
+    Returns
+    -------
+    pyramid : RenderIndexPyramid or None
+    """
+    pyramid = read_render_index(path)
+    if pyramid is None:
+        return None
+    if not validate_render_index(pyramid, locs, info):
+        _log.info(
+            "The render index stored in %s does not match its localizations "
+            "(the file was modified without picasso.io.save_locs); it is "
+            "rebuilt.",
+            path,
+        )
+        return None
+    return pyramid
+
+
+def quadtree_layout(
+    pyramid: RenderIndexPyramid,
+) -> tuple[lib.IntArray1D, lib.IntArray1D, float, int]:
+    """Return the implicit quad-tree of a pyramid.
+
+    Used by the adaptive-histogram renderer
+    (``picasso.render.kernels._quadtree_fill``).
+
+    The contract a consumer relies on: the node at depth ``d`` with
+    Morton prefix ``p`` (``d`` bits per axis interleaved, x in the even
+    bits) holds exactly the rows whose keys lie in
+    ``[p << 2 * (total_bits - d), (p + 1) << 2 * (total_bits - d))``,
+    a contiguous range of ``perm``; its four children are the prefixes
+    ``4 * p + c`` for ``c`` in 0..3, ``c & 1`` being the x half and
+    ``c >> 1`` the y half, each of side ``root_px / 2 ** (d + 1)``.
+
+    Parameters
+    ----------
+    pyramid : RenderIndexPyramid
+        The spatial index of a channel.
+
+    Returns
+    -------
+    sorted_keys : lib.IntArray1D
+        The fine Morton key of every row in permutation order
+        (ascending).
+    perm : lib.IntArray1D
+        The permutation.
+    root_px : float
+        The side of the root square in camera pixels (a power-of-two
+        number of base blocks covering the field of view, anchored at
+        the origin).
+    total_bits : int
+        The depth of the tree, i.e. the number of levels from the root
+        to the finest cell.
+
+    Raises
+    ------
+    ValueError
+        If the pyramid carries no keys (read from a file but not
+        validated).
+    """
+    if pyramid.sorted_keys is None:
+        raise ValueError(
+            "the render index carries no sorted keys; validate it against "
+            "its localizations or rebuild it"
+        )
+    root_px = pyramid.block_sizes[0] * (1 << pyramid.root_bits)
+    return (
+        pyramid.sorted_keys,
+        pyramid.perm,
+        float(root_px),
+        int(pyramid.root_bits + pyramid.fine_bits),
+    )

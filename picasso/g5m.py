@@ -29,7 +29,7 @@ from numba import njit
 from scipy.special import erf
 from sklearn.utils import check_random_state
 
-from . import lib, zfit, __version__
+from . import lib, zfit, __version__, docs_url
 
 if TYPE_CHECKING:
     from PyQt6 import QtWidgets  # only used in type annotations
@@ -214,6 +214,17 @@ def _assemble_covs_3D_rot(
     Each component gets ``blockdiag(R(theta) @ diag(cov_maj, cov_min) @
     R(theta).T, cov_z)``, i.e. a full 2x2 xy block rotated by ``theta``
     and an independent z variance.
+
+    Parameters
+    ----------
+    cov_maj, cov_min : np.ndarray
+        Variances along the major and minor principal axes in xy, shape
+        (n_components,).
+    cov_z : np.ndarray
+        Variances in z, shape (n_components,).
+    theta : np.ndarray
+        Rotation angle of the major axis in radians, shape
+        (n_components,).
 
     Returns
     -------
@@ -526,6 +537,8 @@ class G5M(metaclass=ABCMeta):
         components. If local loc. prec. is used, the bounds specify the
         margin of error in units of localization precision. Else,
         absolute bounds on sigma.
+    covariance_type : {"spherical", "diagonal", "rotated"}
+        Covariance model of the Gaussian components (keyword-only).
     means_init : np.ndarray or None, optional
         Initial means (mu) of the Gaussian components. If None, the
         means are initialized using kmeans++.
@@ -1637,11 +1650,29 @@ def _estimate_gaussian_parameters_3D_rot(
     the returned covariances are the principal-axis variances
     ``(cov_u, cov_v, cov_z)`` rather than camera-axis ones.
 
+    Parameters
+    ----------
+    X : lib.FloatArray2D
+        Data points, shape (n_samples, 3).
+    resp : lib.FloatArray2D
+        Responsibilities of the components, shape (n_samples,
+        n_components).
+    theta : lib.FloatArray1D
+        Rotation angle of each component's major axis in radians, shape
+        (n_components,).
+    reg_covar : float, optional
+        Non-negative regularization added to the variances. Default is
+        1e-6.
+
     Returns
     -------
-    nk, means, covariances : tuple
-        Number of localizations per component, means, and principal-axis
-        covariances of shape (n_components, 3).
+    nk : lib.FloatArray1D
+        Number of localizations per component, shape (n_components,).
+    means : lib.FloatArray2D
+        Means of the components, shape (n_components, 3).
+    covariances : lib.FloatArray2D
+        Principal-axis variances of the components, shape
+        (n_components, 3).
     """
     nk = (
         _sum_along_axis0(resp, (resp.shape[1],))
@@ -2070,6 +2101,11 @@ def _run_g5m_group_3D(
         Fitting mode of the input localizations. "spline" uses a plain
         diagonal 3D model and reads lpz directly from the locs. Default
         is "astigmatism".
+    covariance_type : {"diagonal", "rotated"}, optional
+        Shape of the G5M components. "diagonal" is axis-aligned;
+        "rotated" gives the xy block a rotation measured from the
+        ``"angle"`` column of ``locs_group`` (in degrees). Default is
+        "diagonal".
     max_rounds_without_best_bic : int, optional
         Maximum number of rounds without BIC improvement to terminate
         the search for optimal G5M n_components. Default is
@@ -2175,6 +2211,10 @@ class G5M_3D(G5M):
         the x/y covariances via the calibration polynomials; "spline"
         uses a plain diagonal 3D model (independent x/y/z covariances).
         Default is "astigmatism".
+    covariance_type : {"diagonal", "rotated"}, optional
+        Shape of the G5M components. "diagonal" is axis-aligned;
+        "rotated" rotates the xy block of each component and requires
+        ``mode="astigmatism"``. Default is "diagonal".
     means_init : np.ndarray or None, optional
         Initial means (mu) of the Gaussian components. If None, the
         means are initialized using kmeans++. Default is None.
@@ -2472,6 +2512,237 @@ def _bootstrap_sem(
     return sem
 
 
+def _select_X_and_estep(
+    g5m: G5M, locs_group: pd.DataFrame, pixelsize: float
+) -> tuple:
+    """Localization coordinates and the E-step matching the G5M's shape.
+
+    Parameters
+    ----------
+    g5m : G5M
+        Fitted G5M.
+    locs_group : pd.DataFrame
+        Localizations that g5m was fitted to.
+    pixelsize : float
+        Camera pixel size in nm.
+
+    Returns
+    -------
+    X : np.ndarray
+        ``(n_locs, 2)`` or ``(n_locs, 3)`` coordinates, z converted to
+        camera pixels.
+    e_step : callable
+        ``_e_step_2D``, ``_e_step_3D`` or ``_e_step_3D_rot``, matching
+        ``g5m.covariance_type``.
+    """
+    if "z" in locs_group.columns:
+        X = locs_group[["x", "y", "z"]].to_numpy()
+        X[:, 2] /= pixelsize  # convert z to camera pixels
+        if g5m.covariance_type == "rotated":
+            e_step = _e_step_3D_rot
+        else:
+            e_step = _e_step_3D
+    else:
+        X = locs_group[["x", "y"]].to_numpy()
+        e_step = _e_step_2D
+    return X, e_step
+
+
+def _shape_columns(
+    is_3d: bool,
+    rotated: bool,
+    means: np.ndarray,
+    covariances: np.ndarray,
+    sem: np.ndarray,
+    resp: np.ndarray,
+    rsum: np.ndarray,
+    locs_group: pd.DataFrame,
+    pixelsize: float,
+) -> dict:
+    """Fitted/relative width columns for the centers DataFrame.
+
+    Handles the 2D/3D and diagonal/rotated covariance layouts; see
+    :func:`_convert_G5M_results`.
+    """
+    if not is_3d:
+        sigma = np.sqrt(covariances) * pixelsize
+        lp = locs_group[["lpx", "lpy"]].mean(axis=1).to_numpy()
+        weighted_lp = ((resp * lp.reshape(-1, 1)).sum(0) / rsum).reshape(-1)
+        rel_sigma = sigma / weighted_lp / pixelsize
+        return {"fitted_sigma": sigma, "rel_sigma": rel_sigma}
+
+    z = means[:, 2] * pixelsize
+    if rotated:
+        # marginal (camera-axis) widths, so that fitted_sigma_x/y/z keep
+        # the same meaning as for the diagonal model
+        marginal = np.diagonal(covariances, axis1=1, axis2=2)
+        sigma_x = np.sqrt(marginal[:, 0]) * pixelsize
+        sigma_y = np.sqrt(marginal[:, 1]) * pixelsize
+        sigma_z = np.sqrt(marginal[:, 2]) * pixelsize
+        # principal axes of the xy block; eigh returns ascending
+        # eigenvalues, so the major axis is the second one
+        eigvals, eigvecs = np.linalg.eigh(covariances[:, :2, :2])
+        eigvals = np.maximum(eigvals, 0.0)
+        sigma_minor = np.sqrt(eigvals[:, 0]) * pixelsize
+        sigma_major = np.sqrt(eigvals[:, 1]) * pixelsize
+        axis_ratio = sigma_major / sigma_minor
+        # orientation of the major axis, in the same convention as the
+        # "angle" column written by picasso.localize: degrees wrapped
+        # into [-90, 90)
+        angle = np.rad2deg(np.arctan2(eigvecs[:, 1, 1], eigvecs[:, 0, 1]))
+        angle = np.mod(angle + 90.0, 180.0) - 90.0
+    else:
+        sigma_x = np.sqrt(covariances[:, 0]) * pixelsize
+        sigma_y = np.sqrt(covariances[:, 1]) * pixelsize
+        sigma_z = np.sqrt(covariances[:, 2]) * pixelsize
+
+    lpz = sem[:, 2] * pixelsize
+    weighted_lpx = (
+        (resp * locs_group["lpx"].to_numpy().reshape(-1, 1)).sum(0) / rsum
+    ).reshape(-1)
+    weighted_lpy = (
+        (resp * locs_group["lpy"].to_numpy().reshape(-1, 1)).sum(0) / rsum
+    ).reshape(-1)
+    weighted_lpz = (
+        (resp * locs_group["lpz"].to_numpy().reshape(-1, 1)).sum(0) / rsum
+    ).reshape(-1)
+    columns = {
+        "z": z,
+        "lpz": lpz,
+        "fitted_sigma_x": sigma_x,
+        "fitted_sigma_y": sigma_y,
+        "fitted_sigma_z": sigma_z,
+        "rel_sigma_x": sigma_x / weighted_lpx / pixelsize,
+        "rel_sigma_y": sigma_y / weighted_lpy / pixelsize,
+        "rel_sigma_z": sigma_z / weighted_lpz,
+    }
+    if rotated:
+        # the principal axes do not correspond to the camera axes, so
+        # they are normalized by the mean in-plane precision - the same
+        # scalar the m-step bounds them with
+        weighted_lpxy = 0.5 * (weighted_lpx + weighted_lpy)
+        columns.update(
+            fitted_sigma_major=sigma_major,
+            fitted_sigma_minor=sigma_minor,
+            rel_sigma_major=sigma_major / weighted_lpxy / pixelsize,
+            rel_sigma_minor=sigma_minor / weighted_lpxy / pixelsize,
+            axis_ratio=axis_ratio,
+            angle=angle,
+        )
+    return columns
+
+
+def _binding_event_counts(
+    g5m: G5M, locs_group: pd.DataFrame, pixelsize: float, is_3d: bool
+) -> np.ndarray:
+    """Number of binding events assigned to each G5M component.
+
+    A binding event links localizations that are contiguous in frame
+    (up to 3 frames of no signal allowed) and is assigned to the G5M
+    component closest to its center of mass.
+
+    Parameters
+    ----------
+    g5m : G5M
+        Fitted G5M.
+    locs_group : pd.DataFrame
+        Localizations of one cluster, expected in frame order.
+    pixelsize : float
+        Camera pixel size in nm, used to convert z to camera pixels.
+    is_3d : bool
+        Whether the localizations are 3D.
+
+    Returns
+    -------
+    n_events : np.ndarray
+        ``(n_components,)`` binding event count per component.
+    """
+    split_idx = np.where(np.diff(locs_group["frame"].to_numpy()) > 3)[0] + 1
+    x_events = [
+        np.mean(_) for _ in np.split(locs_group["x"].to_numpy(), split_idx)
+    ]
+    y_events = [
+        np.mean(_) for _ in np.split(locs_group["y"].to_numpy(), split_idx)
+    ]
+    if is_3d:
+        z_events = [
+            np.mean(_) / pixelsize
+            for _ in np.split(locs_group["z"].to_numpy(), split_idx)
+        ]
+        X_events = np.stack((x_events, y_events, z_events)).T
+    else:
+        X_events = np.stack((x_events, y_events)).T
+    labels = g5m.predict(X_events)
+    expected_labels = np.arange(len(g5m.valid_idx))
+    found_labels, counts = np.unique(labels, return_counts=True)
+    count_dict = dict(zip(found_labels, counts))
+    return np.array([count_dict.get(_, 0) for _ in expected_labels])
+
+
+def _add_mean_extra_columns(
+    centers: pd.DataFrame,
+    locs_group: pd.DataFrame,
+    resp: np.ndarray,
+    rsum: np.ndarray,
+    ignore_columns: list,
+) -> None:
+    """Add the ``{col}_mean`` weighted-average columns to ``centers`` in place.
+
+    Covers extra localization columns (e.g. photons) that would otherwise
+    be lost in the conversion to centers.
+    """
+    for col in locs_group.columns:
+        if col not in ignore_columns:
+            centers[f"{col}_mean"] = (
+                (resp * locs_group[col].to_numpy().reshape(-1, 1)).sum(0)
+                / rsum
+            ).reshape(-1)
+
+
+def _ordered_center_columns(
+    is_3d: bool, base: dict, shape_columns: dict
+) -> dict:
+    """Interleave ``base``/``shape_columns`` into the historical column order.
+
+    ``base`` holds the columns common to 2D/3D (already computed by the
+    caller); ``shape_columns`` is the output of :func:`_shape_columns`.
+    """
+    columns = {
+        "frame": base["frame"],
+        "std_frame": base["std_frame"],
+        "x": base["x"],
+        "y": base["y"],
+    }
+    if is_3d:
+        columns["z"] = shape_columns["z"]
+    columns["lpx"] = base["lpx"]
+    columns["lpy"] = base["lpy"]
+    if is_3d:
+        for key in (
+            "lpz",
+            "fitted_sigma_x",
+            "fitted_sigma_y",
+            "fitted_sigma_z",
+            "rel_sigma_x",
+            "rel_sigma_y",
+            "rel_sigma_z",
+        ):
+            columns[key] = shape_columns[key]
+    else:
+        columns["fitted_sigma"] = shape_columns["fitted_sigma"]
+        columns["rel_sigma"] = shape_columns["rel_sigma"]
+    for key in (
+        "p_val",
+        "mol_log_likelihood",
+        "group_log_likelihood",
+        "n_locs",
+        "n_events",
+        "group_input",
+    ):
+        columns[key] = base[key]
+    return columns
+
+
 def _convert_G5M_results(
     g5m: G5M,
     locs_group: pd.DataFrame,
@@ -2510,16 +2781,8 @@ def _convert_G5M_results(
     weights = g5m.weights
     # find responsibilites which are used for weighted averaging of
     # properties per component
-    if "z" in locs_group.columns:
-        X = locs_group[["x", "y", "z"]].to_numpy()
-        X[:, 2] /= pixelsize  # convert z to camera pixels
-        if g5m.covariance_type == "rotated":
-            e_step = _e_step_3D_rot
-        else:
-            e_step = _e_step_3D
-    else:
-        X = locs_group[["x", "y"]].to_numpy()
-        e_step = _e_step_2D
+    X, e_step = _select_X_and_estep(g5m, locs_group, pixelsize)
+    is_3d = X.shape[1] == 3
     log_prob = g5m.estimate_weighted_log_prob(X)
     sample_scores = _logsumexp_axis1(log_prob, (X.shape[0],))
     # average LL
@@ -2569,57 +2832,17 @@ def _convert_G5M_results(
     lpy = sem[:, 1]
 
     rotated = g5m.covariance_type == "rotated"
-    if "z" in locs_group.columns:
-        z = means[:, 2] * pixelsize
-        if rotated:
-            # marginal (camera-axis) widths, so that fitted_sigma_x/y/z
-            # keep the same meaning as for the diagonal model
-            marginal = np.diagonal(covariances, axis1=1, axis2=2)
-            sigma_x = np.sqrt(marginal[:, 0]) * pixelsize
-            sigma_y = np.sqrt(marginal[:, 1]) * pixelsize
-            sigma_z = np.sqrt(marginal[:, 2]) * pixelsize
-            # principal axes of the xy block; eigh returns ascending
-            # eigenvalues, so the major axis is the second one
-            eigvals, eigvecs = np.linalg.eigh(covariances[:, :2, :2])
-            eigvals = np.maximum(eigvals, 0.0)
-            sigma_minor = np.sqrt(eigvals[:, 0]) * pixelsize
-            sigma_major = np.sqrt(eigvals[:, 1]) * pixelsize
-            axis_ratio = sigma_major / sigma_minor
-            # orientation of the major axis, in the same convention as
-            # the "angle" column written by picasso.localize: degrees
-            # wrapped into [-90, 90)
-            angle = np.rad2deg(np.arctan2(eigvecs[:, 1, 1], eigvecs[:, 0, 1]))
-            angle = np.mod(angle + 90.0, 180.0) - 90.0
-        else:
-            sigma_x = np.sqrt(covariances[:, 0]) * pixelsize
-            sigma_y = np.sqrt(covariances[:, 1]) * pixelsize
-            sigma_z = np.sqrt(covariances[:, 2]) * pixelsize
-        lpz = sem[:, 2] * pixelsize
-        weighted_lpx = (
-            (resp * locs_group["lpx"].to_numpy().reshape(-1, 1)).sum(0) / rsum
-        ).reshape(-1)
-        weighted_lpy = (
-            (resp * locs_group["lpy"].to_numpy().reshape(-1, 1)).sum(0) / rsum
-        ).reshape(-1)
-        weighted_lpz = (
-            (resp * locs_group["lpz"].to_numpy().reshape(-1, 1)).sum(0) / rsum
-        ).reshape(-1)
-        rel_sigma_x = sigma_x / weighted_lpx / pixelsize
-        rel_sigma_y = sigma_y / weighted_lpy / pixelsize
-        rel_sigma_z = sigma_z / weighted_lpz
-        if rotated:
-            # the principal axes do not correspond to the camera axes,
-            # so they are normalized by the mean in-plane precision -
-            # the same scalar the m-step bounds them with
-            weighted_lpxy = 0.5 * (weighted_lpx + weighted_lpy)
-            rel_sigma_major = sigma_major / weighted_lpxy / pixelsize
-            rel_sigma_minor = sigma_minor / weighted_lpxy / pixelsize
-    else:
-        sigma = np.sqrt(covariances) * pixelsize
-        # relative sigma
-        lp = locs_group[["lpx", "lpy"]].mean(axis=1).to_numpy()
-        weighted_lp = ((resp * lp.reshape(-1, 1)).sum(0) / rsum).reshape(-1)
-        rel_sigma = sigma / weighted_lp / pixelsize
+    shape_columns = _shape_columns(
+        is_3d,
+        rotated,
+        means,
+        covariances,
+        sem,
+        resp,
+        rsum,
+        locs_group,
+        pixelsize,
+    )
 
     # extract frame info and group_input
     frames_locs = np.reshape(locs_group["frame"].to_numpy(), (-1, 1))
@@ -2645,85 +2868,42 @@ def _convert_G5M_results(
 
     # extract the number of binding events, i.e., link localizations
     # and assign them to molecules - sticky events will likely have only
-    # one or two such events associated
-
-    # idx to split localizations into binding events, where up to 3
-    # frames of no signal are allowed
-    split_idx = np.where(np.diff(locs_group["frame"].to_numpy()) > 3)[0] + 1
-    # link localizations into binding events, we only need the center
-    # of mass
-    x_events = np.split(locs_group["x"].to_numpy(), split_idx)
-    x_events = [np.mean(_) for _ in x_events]
-    y_events = np.split(locs_group["y"].to_numpy(), split_idx)
-    y_events = [np.mean(_) for _ in y_events]
-    if "z" in locs_group.columns:
-        z_events = np.split(locs_group["z"].to_numpy(), split_idx)
-        z_events = [np.mean(_) / pixelsize for _ in z_events]
-        X_events = np.stack((x_events, y_events, z_events)).T
-    else:
-        X_events = np.stack((x_events, y_events)).T
-    # find the closest G5M component to each binding event and assign
-    # the binding event to the component but account for the case when
-    # no binding event is assigned to a component
-    labels = g5m.predict(X_events)
-    expected_labels = np.arange(len(g5m.valid_idx))
-    found_labels, counts = np.unique(labels, return_counts=True)
-    count_dict = dict(zip(found_labels, counts))
-    n_events = np.array([count_dict.get(_, 0) for _ in expected_labels])
+    # one or two such events associated, then find the closest G5M
+    # component to each event, accounting for a component with none
+    n_events = _binding_event_counts(g5m, locs_group, pixelsize, is_3d)
 
     # convert to DataFrame
-    if "z" in locs_group.columns:
-        centers = pd.DataFrame(
-            {
-                "frame": frame.astype(np.float32),
-                "std_frame": std_frame.astype(np.float32),
-                "x": x.astype(np.float32),
-                "y": y.astype(np.float32),
-                "z": z.astype(np.float32),
-                "lpx": lpx.astype(np.float32),
-                "lpy": lpy.astype(np.float32),
-                "lpz": lpz.astype(np.float32),
-                "fitted_sigma_x": sigma_x.astype(np.float32),
-                "fitted_sigma_y": sigma_y.astype(np.float32),
-                "fitted_sigma_z": sigma_z.astype(np.float32),
-                "rel_sigma_x": rel_sigma_x.astype(np.float32),
-                "rel_sigma_y": rel_sigma_y.astype(np.float32),
-                "rel_sigma_z": rel_sigma_z.astype(np.float32),
-                "p_val": p_val.astype(np.float32),
-                "mol_log_likelihood": mol_ll.astype(np.float32),
-                "group_log_likelihood": group_ll.astype(np.float32),
-                "n_locs": g5m.n_locs.astype(np.int32),
-                "n_events": n_events.astype(np.int32),
-                "group_input": group_input.astype(np.int32),
-            }
-        )
-        if rotated:
-            # extra shape columns for the rotated model
-            centers["fitted_sigma_major"] = sigma_major.astype(np.float32)
-            centers["fitted_sigma_minor"] = sigma_minor.astype(np.float32)
-            centers["rel_sigma_major"] = rel_sigma_major.astype(np.float32)
-            centers["rel_sigma_minor"] = rel_sigma_minor.astype(np.float32)
-            centers["axis_ratio"] = axis_ratio.astype(np.float32)
-            centers["angle"] = angle.astype(np.float32)
-    else:
-        centers = pd.DataFrame(
-            {
-                "frame": frame.astype(np.float32),
-                "std_frame": std_frame.astype(np.float32),
-                "x": x.astype(np.float32),
-                "y": y.astype(np.float32),
-                "lpx": lpx.astype(np.float32),
-                "lpy": lpy.astype(np.float32),
-                "fitted_sigma": sigma.astype(np.float32),
-                "rel_sigma": rel_sigma.astype(np.float32),
-                "p_val": p_val.astype(np.float32),
-                "mol_log_likelihood": mol_ll.astype(np.float32),
-                "group_log_likelihood": group_ll.astype(np.float32),
-                "n_locs": g5m.n_locs.astype(np.int32),
-                "n_events": n_events.astype(np.int32),
-                "group_input": group_input.astype(np.int32),
-            }
-        )
+    base_columns = {
+        "frame": frame.astype(np.float32),
+        "std_frame": std_frame.astype(np.float32),
+        "x": x.astype(np.float32),
+        "y": y.astype(np.float32),
+        "lpx": lpx.astype(np.float32),
+        "lpy": lpy.astype(np.float32),
+        "p_val": p_val.astype(np.float32),
+        "mol_log_likelihood": mol_ll.astype(np.float32),
+        "group_log_likelihood": group_ll.astype(np.float32),
+        "n_locs": g5m.n_locs.astype(np.int32),
+        "n_events": n_events.astype(np.int32),
+        "group_input": group_input.astype(np.int32),
+    }
+    shape_columns = {
+        key: value.astype(np.float32) for key, value in shape_columns.items()
+    }
+    centers = pd.DataFrame(
+        _ordered_center_columns(is_3d, base_columns, shape_columns)
+    )
+    if rotated:
+        # extra shape columns for the rotated model
+        for key in (
+            "fitted_sigma_major",
+            "fitted_sigma_minor",
+            "rel_sigma_major",
+            "rel_sigma_minor",
+            "axis_ratio",
+            "angle",
+        ):
+            centers[key] = shape_columns[key]
     # add mean values of extra columns from locs_group so that
     # the info is not lost, e.g., mean photons
     ignore_columns = [
@@ -2738,12 +2918,7 @@ def _convert_G5M_results(
         "group_input",
         "angle",
     ]
-    for col in locs_group.columns:
-        if col not in ignore_columns:
-            centers[f"{col}_mean"] = (
-                (resp * locs_group[col].to_numpy().reshape(-1, 1)).sum(0)
-                / rsum
-            ).reshape(-1)
+    _add_mean_extra_columns(centers, locs_group, resp, rsum, ignore_columns)
     return centers, locs_group
 
 
@@ -2875,7 +3050,7 @@ def _fit_G5M(
         is "local".
     cx, cy : np.ndarray, optional
         X and Y coefficients for astigmatism fitting. Required for 3D
-        data only. See https://picassosr.readthedocs.io/en/latest/localize.html#d-calibration.
+        data only. See https://picassosr.readthedocs.io/en/latest/localize.html#d-calibration.  # noqa: E501
     mag_factor : float, optional
         Magnification factor for astigmatism fitting. Required for 3D
         data only.
@@ -3008,8 +3183,8 @@ def _run_g5m_in_clusters(
     mode: Literal["astigmatism", "spline"] = "astigmatism",
     covariance_type: Literal["diagonal", "rotated"] = "diagonal",
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Run G5M for a given group of localizations clusters. See ``g5m``
-    for parameters explanation.
+    """Run G5M for a given group of localizations clusters. See
+    :func:`g5m` for a detailed explanation of the parameters.
 
     Note that the arguments are passed positionally by
     ``_run_g5m_parallel``, so their order must be kept in sync there.
@@ -3020,6 +3195,32 @@ def _run_g5m_in_clusters(
         Index of the first group to analyze.
     n_groups_task : int
         Number of groups to analyze.
+    locs : pd.DataFrame
+        Clustered localizations with a "group" column.
+    min_locs : int
+        Minimum number of localizations per component.
+    loc_prec_handle : {"local", "abs"}
+        How to handle sigma bounds, see :func:`g5m`.
+    sigma_bounds : tuple
+        Bounds for the standard deviation (sigma) of the Gaussian
+        components, see :func:`g5m`.
+    pixelsize : float
+        Camera pixel size in nm.
+    max_rounds_without_best_bic : int
+        Maximum number of rounds without BIC improvement to terminate
+        the search for optimal G5M n_components.
+    bootstrap_check : bool
+        If True, the SEM is calculated using bootstrapping.
+    calibration : dict or None
+        Astigmatism calibration dictionary. Only used for 3D data with
+        ``mode="astigmatism"``.
+    max_locs_per_cluster : int
+        Maximum number of localizations per cluster accepted for G5M.
+    mode : {"astigmatism", "spline"}, optional
+        Fitting mode of the input 3D localizations. Default is
+        "astigmatism".
+    covariance_type : {"diagonal", "rotated"}, optional
+        Shape of the 3D G5M components. Default is "diagonal".
 
     Returns
     -------
@@ -3078,8 +3279,43 @@ def _run_g5m_parallel(
     mode: Literal["astigmatism", "spline"] = "astigmatism",
     covariance_type: Literal["diagonal", "rotated"] = "diagonal",
 ) -> list:
-    """Run G5M in parallel using multiprocessing. See ``g5m`` for
-    parameters explanation.
+    """Run G5M in parallel using multiprocessing. See :func:`g5m` for a
+    detailed explanation of the parameters.
+
+    Parameters
+    ----------
+    locs : pd.DataFrame
+        Clustered localizations with a "group" column.
+    min_locs : int, optional
+        Minimum number of localizations per component. Default is
+        `MIN_LOCS`.
+    loc_prec_handle : {"local", "abs"}, optional
+        How to handle sigma bounds, see :func:`g5m`. Default is
+        "local".
+    sigma_bounds : tuple, optional
+        Bounds for the standard deviation (sigma) of the Gaussian
+        components, see :func:`g5m`. Default is `(MIN_SIGMA_FACTOR,
+        MAX_SIGMA_FACTOR)`.
+    pixelsize : float, optional
+        Camera pixel size in nm. Default is 130.0.
+    max_rounds_without_best_bic : int, optional
+        Maximum number of rounds without BIC improvement to terminate
+        the search for optimal G5M n_components. Default is
+        `MAX_ROUNDS_WITHOUT_BEST_BIC`.
+    bootstrap_check : bool, optional
+        If True, the SEM is calculated using bootstrapping. Default is
+        False.
+    calibration : dict or None, optional
+        Astigmatism calibration dictionary. Only used for 3D data with
+        ``mode="astigmatism"``. Default is None.
+    max_locs_per_cluster : int, optional
+        Maximum number of localizations per cluster accepted for G5M.
+        Default is np.inf.
+    mode : {"astigmatism", "spline"}, optional
+        Fitting mode of the input 3D localizations. Default is
+        "astigmatism".
+    covariance_type : {"diagonal", "rotated"}, optional
+        Shape of the 3D G5M components. Default is "diagonal".
 
     Returns
     -------
@@ -3288,6 +3524,151 @@ def _resolve_covariance_type(
     return covariance_type
 
 
+def _validate_g5m_args(
+    loc_prec_handle: str,
+    sigma_bounds: tuple,
+    group_column: str,
+    mode: str,
+    locs: pd.DataFrame,
+) -> None:
+    """Validate the argument combination :func:`g5m` was called with."""
+    assert loc_prec_handle in [
+        "local",
+        "abs",
+    ], "loc_prec_handle must be 'local' or 'abs'."
+    assert (
+        len(sigma_bounds) == 2
+    ), "sigma_bounds must be a tuple of two values."
+    assert (
+        sigma_bounds[0] <= sigma_bounds[1]
+    ), "sigma_bounds[0] must not be larger than sigma_bounds[1]."
+    assert group_column in [
+        "group",
+        "group_input",
+    ], "group_column must be 'group' or 'group_input'."
+    assert group_column in locs.columns, (
+        f"Localizations must be grouped. Column '{group_column}' not "
+        "found. Use DBSCAN or similar."
+    )
+    assert mode in [
+        "astigmatism",
+        "spline",
+    ], "mode must be 'astigmatism' or 'spline'."
+
+
+def _resolve_group_column(
+    locs: pd.DataFrame, group_column: str
+) -> pd.DataFrame:
+    """Copy ``group_column`` into "group" if a different column was named.
+
+    G5M works on the "group" column internally; if a different column is
+    requested (e.g. because "group" was overwritten), copy it over.
+    """
+    if group_column != "group":
+        locs = locs.copy()
+        locs["group"] = locs[group_column].to_numpy()
+    return locs
+
+
+def _build_g5m_progress(callback_parent, n_steps: int):
+    """Progress tracker for :func:`g5m`, matching ``lib.normalize_progress``.
+
+    A parent widget builds a ``lib.ProgressDialog`` for it; "console" uses
+    tqdm; a ready-made tracker (anything with the ``ProgressDialog``
+    interface) is driven directly instead of being wrapped.
+    """
+    if callback_parent is None or callback_parent == "console":
+        progress = lib.normalize_progress(
+            callback_parent, description="Running G5M..."
+        )
+        progress.setMaximum(n_steps)
+    elif callable(getattr(callback_parent, "set_value", None)):
+        progress = callback_parent
+        progress.zero_progress("Running G5M...")
+        progress.setMaximum(n_steps)
+    else:  # a parent widget: build the dialog for it
+        progress = lib.ProgressDialog(
+            "Running G5M...", 0, n_steps, callback_parent
+        )
+        progress.set_value(0)
+    return progress
+
+
+def _g5m_info(
+    locs: pd.DataFrame,
+    centers: pd.DataFrame,
+    min_locs: int,
+    max_rounds_without_best_bic: int,
+    bootstrap_check: bool,
+    covariance_type: str,
+    loc_prec_handle: str,
+    sigma_bounds: tuple,
+    pixelsize: float,
+    mode: str,
+    calibration: dict | None,
+) -> dict:
+    """The info dictionary :func:`g5m` appends for one run."""
+    new_info = {
+        "Generated by": f"Picasso v{__version__} G5M",
+        "Model determination": "BIC",
+        "Number of molecules": int(len(centers)),
+        "Min. no. locs per molecule": int(min_locs),
+        "Max. rounds w/o BIC improvement": int(max_rounds_without_best_bic),
+        "Bootstrap SEM": bool(bootstrap_check),
+        "Initialization method": "KMeans++",
+        # the resolved type, not the requested one, so the saved file
+        # always records the model that actually ran
+        "Covariance type": covariance_type,
+        "Filtered": False,
+    }
+    if loc_prec_handle == "local":
+        new_info["Sigma bounds (factors)"] = [float(_) for _ in sigma_bounds]
+        new_info["Sigma bounds method"] = "Local"
+    else:
+        new_info["Sigma bounds (nm)"] = [
+            float(sigma_bounds[0] * pixelsize),
+            float(sigma_bounds[1] * pixelsize),
+        ]
+        new_info["Sigma bounds method"] = "Abs"
+    if "z" in locs.columns:
+        new_info["Fit mode"] = mode
+        if mode == "astigmatism":
+            new_info["X Coefficients"] = [
+                float(_) for _ in calibration["X Coefficients"]
+            ]
+            new_info["Y Coefficients"] = [
+                float(_) for _ in calibration["Y Coefficients"]
+            ]
+            new_info["Magnification factor"] = float(
+                calibration["Magnification factor"]
+            )
+    return new_info
+
+
+def _postprocess_g5m(
+    centers: pd.DataFrame, clustered_locs: pd.DataFrame, info: list[dict]
+) -> tuple:
+    """Filter G5M centers by mean frame, std frame, p-value and n_events."""
+    n_frames = info[0]["Frames"]
+    min_std_frame = 0.1 * n_frames
+    min_pval = 0.015
+    min_n_events = 3
+    idx = (
+        (centers["std_frame"] > min_std_frame)
+        & (centers["p_val"] > min_pval)
+        & (centers["n_events"] > min_n_events)
+    )
+    centers = centers[idx]
+    clustered_locs = clustered_locs[
+        np.isin(clustered_locs["group"], np.arange(len(idx))[idx])
+    ]
+    info[-1]["Filtered"] = True
+    info[-1]["Filter; min. std frame"] = float(min_std_frame)
+    info[-1]["Filter; min. p value"] = float(min_pval)
+    info[-1]["Filter; min. n_events"] = int(min_n_events)
+    return centers, clustered_locs
+
+
 def g5m(
     locs: pd.DataFrame,
     info: list[dict],
@@ -3400,34 +3781,8 @@ def g5m(
     info : list
         Updated information dictionaries.
     """
-    assert loc_prec_handle in [
-        "local",
-        "abs",
-    ], "loc_prec_handle must be 'local' or 'abs'."
-    assert (
-        len(sigma_bounds) == 2
-    ), "sigma_bounds must be a tuple of two values."
-    assert (
-        sigma_bounds[0] <= sigma_bounds[1]
-    ), "sigma_bounds[0] must not be larger than sigma_bounds[1]."
-    assert group_column in [
-        "group",
-        "group_input",
-    ], "group_column must be 'group' or 'group_input'."
-    assert group_column in locs.columns, (
-        f"Localizations must be grouped. Column '{group_column}' not "
-        "found. Use DBSCAN or similar."
-    )
-    # G5M works on the "group" column internally; if a different column
-    # is requested (e.g. because "group" was overwritten), copy it over.
-    if group_column != "group":
-        locs = locs.copy()
-        locs["group"] = locs[group_column].to_numpy()
-
-    assert mode in [
-        "astigmatism",
-        "spline",
-    ], "mode must be 'astigmatism' or 'spline'."
+    _validate_g5m_args(loc_prec_handle, sigma_bounds, group_column, mode, locs)
+    locs = _resolve_group_column(locs, group_column)
 
     # resolve "auto" once, here, so that everything downstream (and the
     # metadata) sees the concrete model that was actually used
@@ -3444,29 +3799,15 @@ def g5m(
             "Calibration dictionary must be provided for astigmatism 3D "
             "data. The dictionary must specify 'X Coefficients' and 'Y "
             "Coefficients' and 'Magnification factor'. See "
-            "https://picassosr.readthedocs.io/en/latest/localize.html#d-calibration"  # noqa: E501
+            f"{docs_url('localize.html#d-calibration')}"
         )
 
     # determine how many steps are displayed in the progress bar
     n_steps = N_TASKS if asynch else len(np.unique(locs["group"]))
-
-    # initialize the progress bar. Everything below drives the same
-    # ProgressDialog-like interface (see lib.normalize_progress), so a
-    # ready-made tracker can be passed instead of a parent window.
-    if callback_parent is None or callback_parent == "console":
-        progress = lib.normalize_progress(
-            callback_parent, description="Running G5M..."
-        )
-        progress.setMaximum(n_steps)
-    elif callable(getattr(callback_parent, "set_value", None)):
-        progress = callback_parent
-        progress.zero_progress("Running G5M...")
-        progress.setMaximum(n_steps)
-    else:  # a parent widget: build the dialog for it
-        progress = lib.ProgressDialog(
-            "Running G5M...", 0, n_steps, callback_parent
-        )
-        progress.set_value(0)
+    # everything below drives the same ProgressDialog-like interface (see
+    # lib.normalize_progress), so a ready-made tracker can be passed
+    # instead of a parent window.
+    progress = _build_g5m_progress(callback_parent, n_steps)
 
     centers, clustered_locs = _g5m(
         locs,
@@ -3498,59 +3839,22 @@ def g5m(
     clustered_locs = pd.concat(clustered_locs, ignore_index=True)
 
     # update info
-    new_info = {
-        "Generated by": f"Picasso v{__version__} G5M",
-        "Model determination": "BIC",
-        "Number of molecules": int(len(centers)),
-        "Min. no. locs per molecule": int(min_locs),
-        "Max. rounds w/o BIC improvement": int(max_rounds_without_best_bic),
-        "Bootstrap SEM": bool(bootstrap_check),
-        "Initialization method": "KMeans++",
-        # the resolved type, not the requested one, so the saved file
-        # always records the model that actually ran
-        "Covariance type": covariance_type,
-        "Filtered": False,
-    }
-    if loc_prec_handle == "local":
-        new_info["Sigma bounds (factors)"] = [float(_) for _ in sigma_bounds]
-        new_info["Sigma bounds method"] = "Local"
-    else:
-        new_info["Sigma bounds (nm)"] = [
-            float(sigma_bounds[0] * pixelsize),
-            float(sigma_bounds[1] * pixelsize),
-        ]
-        new_info["Sigma bounds method"] = "Abs"
-    if "z" in locs.columns:
-        new_info["Fit mode"] = mode
-        if mode == "astigmatism":
-            new_info["X Coefficients"] = [
-                float(_) for _ in calibration["X Coefficients"]
-            ]
-            new_info["Y Coefficients"] = [
-                float(_) for _ in calibration["Y Coefficients"]
-            ]
-            new_info["Magnification factor"] = float(
-                calibration["Magnification factor"]
-            )
+    new_info = _g5m_info(
+        locs,
+        centers,
+        min_locs,
+        max_rounds_without_best_bic,
+        bootstrap_check,
+        covariance_type,
+        loc_prec_handle,
+        sigma_bounds,
+        pixelsize,
+        mode,
+        calibration,
+    )
     info = info + [new_info]
     if postprocess:
-        # filter out by mean frame, std frame, p_val and n_events
-        n_frames = info[0]["Frames"]
-        min_std_frame = 0.1 * n_frames
-        min_pval = 0.015
-        min_n_events = 3
-
-        idx = (
-            (centers["std_frame"] > min_std_frame)
-            & (centers["p_val"] > min_pval)
-            & (centers["n_events"] > min_n_events)
+        centers, clustered_locs = _postprocess_g5m(
+            centers, clustered_locs, info
         )
-        centers = centers[idx]
-        clustered_locs = clustered_locs[
-            np.isin(clustered_locs["group"], np.arange(len(idx))[idx])
-        ]
-        info[-1]["Filtered"] = True
-        info[-1]["Filter; min. std frame"] = float(min_std_frame)
-        info[-1]["Filter; min. p value"] = float(min_pval)
-        info[-1]["Filter; min. n_events"] = int(min_n_events)
     return centers, clustered_locs, info

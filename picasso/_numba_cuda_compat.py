@@ -8,7 +8,8 @@ interpreter runs at startup to install a meta-path finder which maps
 
 That mechanism is lost in a frozen (PyInstaller) build:
 
-  1. PyInstaller never executes ``.pth`` files, so the redirect is never set up.
+  1. PyInstaller never executes ``.pth`` files, so the redirect is never set
+    up.
   2. The stock redirector rewrites the module *search path* and asks every
      meta-path finder to load ``numba.cuda`` from numba_cuda's directory. In a
      frozen app the frozen importer comes first and resolves modules by *name*,
@@ -77,9 +78,9 @@ class _NumbaCudaRedirector:
             return None
 
         # For "numba.cuda" itself, point PathFinder at numba_cuda's "numba"
-        # directory. For submodules, Python passes the parent package's __path__
-        # (which our top-level spec set to numba_cuda's "cuda" directory), so we
-        # forward that unchanged.
+        # directory. For submodules, Python passes the parent package's
+        # __path__ (which our top-level spec set to numba_cuda's "cuda"
+        # directory), so we forward that unchanged.
         search = self._parent_paths if fullname == _SRC else path
         try:
             spec = PathFinder.find_spec(fullname, search)
@@ -97,8 +98,8 @@ class _NumbaCudaRedirector:
 
 def install():
     """Install the numba.cuda -> numba_cuda redirect for frozen builds."""
-    # In a normal (non-frozen) install the site-packages .pth redirector already
-    # runs at startup, so there is nothing to do.
+    # In a normal (non-frozen) install the site-packages .pth redirector
+    # already runs at startup, so there is nothing to do.
     if not getattr(sys, "frozen", False):
         return
 

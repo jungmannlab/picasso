@@ -19,6 +19,7 @@ Provides:
 from __future__ import annotations
 
 import os
+import sys
 
 import numpy as np
 import pandas as pd
@@ -545,7 +546,7 @@ def real_identifications(movie):
     """Identifications from the bundled .raw — shared across test files."""
     from picasso import localize
 
-    return localize.identify(movie, MIN_NG, BOX, return_info=False)
+    return localize.identify(movie, MIN_NG, BOX)[0]
 
 
 @pytest.fixture(scope="session")
@@ -560,8 +561,8 @@ def real_spots(movie, real_identifications):
 # AbstractPicassoMovie wrapper
 # ---------------------------------------------------------------------------
 #
-# ``localize.fit2D`` / ``localize.localize`` / ``localize.localize_3D`` all
-# assert ``isinstance(movie, io.AbstractPicassoMovie)``, but ``io.load_movie``
+# ``localize.fit`` / ``localize.localize`` assert
+# ``isinstance(movie, io.AbstractPicassoMovie)``, but ``io.load_movie``
 # returns a plain ``np.memmap`` for ``.raw`` files. To exercise these paths
 # without bundling an OME-TIFF, we wrap the memmap in a thin subclass that
 # delegates everything to the underlying ndarray.
@@ -624,9 +625,9 @@ class _MemmapPicassoMovie(io.AbstractPicassoMovie):
 def picasso_movie(movie, movie_info):
     """``AbstractPicassoMovie`` wrapper around the bundled .raw movie.
 
-    Use this for ``localize.fit2D`` / ``localize.localize`` /
-    ``localize.localize_3D`` tests — those functions assert their movie
-    argument ``isinstance`` of ``AbstractPicassoMovie``."""
+    Use this for ``localize.fit`` / ``localize.localize`` tests — those
+    functions assert their movie argument ``isinstance`` of
+    ``AbstractPicassoMovie``."""
     return _MemmapPicassoMovie(movie, movie_info)
 
 
@@ -708,3 +709,49 @@ def dark_movie_factory():
         return frames.astype(dtype)
 
     return camera_output
+
+
+@pytest.fixture(autouse=True)
+def isolated_user_settings(tmp_path, monkeypatch):
+    """Every test reads and writes its own, initially absent, settings
+    file: the GUIs persist defaults on start and save on close, and the
+    developer's ``~/.picasso/settings.yaml`` must never be touched by
+    the suite. Tests that need a specific file patch the same name."""
+    from picasso import io
+
+    monkeypatch.setattr(
+        io, "_user_settings_filename", lambda: str(tmp_path / "settings.yaml")
+    )
+    monkeypatch.setattr(io, "_settings_load_error", None)
+
+
+@pytest.fixture(autouse=True)
+def cpu_render_backend(request, monkeypatch):
+    """Rendering tests compare against CPU references, and the GPU
+    backend is selected by default wherever a GPU initializes, so every
+    test renders on the CPU unless it opts in: ``tests/test_render_gpu.py``
+    and tests marked ``gpu_backend`` see the real selection."""
+    if request.node.fspath.basename == "test_render_gpu.py":
+        return
+    if request.node.get_closest_marker("gpu_backend") is not None:
+        return
+    from picasso.render import backend
+
+    monkeypatch.setattr(backend, "_gpu_backend", lambda adapter, warn: None)
+
+
+@pytest.fixture(autouse=True)
+def synchronous_gui_rendering(monkeypatch):
+    """GUI tests assert on images immediately after ``update_scene``,
+    so the async render worker is disabled by default whenever the
+    render GUI module is loaded; async-specific tests re-enable it
+    explicitly. Zero-cost for tests that never import the GUI."""
+    gui_render = sys.modules.get("picasso.gui.render")
+    if gui_render is not None:
+        monkeypatch.setattr(gui_render.View, "async_rendering", False)
+    gui_rotation = sys.modules.get("picasso.gui.rotation")
+    if gui_rotation is not None:
+        monkeypatch.setattr(
+            gui_rotation.ViewRotation, "async_rendering", False
+        )
+    yield

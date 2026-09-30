@@ -28,7 +28,7 @@ from matplotlib.backends.backend_qt5agg import (
 from matplotlib.widgets import SpanSelector, RectangleSelector
 from matplotlib.colors import LogNorm
 
-from .. import io, lib, clusterer, __version__
+from .. import io, lib, clusterer, __version__, docs_url
 from .app import run_gui
 
 plt.style.use("ggplot")
@@ -389,7 +389,7 @@ class FilterNum(lib.Dialog):
         Main window.
     """
 
-    DOCS_URL = "https://picassosr.readthedocs.io/en/latest/filter.html"
+    DOCS_URL = docs_url("filter.html")
 
     def __init__(self, window: QtWidgets.QMainWindow) -> None:
         super().__init__(window)
@@ -598,7 +598,7 @@ class Window(QtWidgets.QMainWindow):
         Table view for displaying data.
     """
 
-    DOCS_URL = "https://picassosr.readthedocs.io/en/latest/filter.html"
+    DOCS_URL = docs_url("filter.html")
 
     def __init__(self) -> None:
         super().__init__()

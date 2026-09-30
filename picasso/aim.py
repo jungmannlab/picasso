@@ -118,9 +118,25 @@ def _count_intersections_box(
     This reduces the work from ``M * box**2 * log L`` to roughly
     ``M * box * (log L + box)``.
 
-    ``l0_coords`` must be sorted and unique. Parameters mirror
-    ``_count_intersections``; ``box`` is the side length of the search
-    region, so ``shifts.size == box * box``.
+    ``l0_coords`` must be sorted and unique.
+
+    Parameters
+    ----------
+    l0_coords : lib.IntArray1D
+        Sorted, unique coordinates of the reference localizations, shape
+        ``(L,)``.
+    l0_counts : lib.IntArray1D
+        Counts of the unique reference coordinates, shape ``(L,)``.
+    l1_coords : lib.IntArray1D
+        Sorted, unique coordinates of the target localizations, shape
+        ``(M,)``.
+    l1_counts : lib.IntArray1D
+        Counts of the unique target coordinates, shape ``(M,)``.
+    shifts : lib.IntArray1D
+        Encoded shifts spanning the search region, laid out row-major
+        as ``shifts[i * box + j]``, so ``shifts.size == box * box``.
+    box : int
+        Side length of the search region.
 
     Returns
     -------
@@ -420,6 +436,124 @@ def _interpolate_drift(
     return interpolated
 
 
+def _check_exclude_self_reference(x, y, l0, width_units, intersect_d):
+    """Verify that the reference matches the target for ``exclude_self``.
+
+    Parameters
+    ----------
+    x, y : lib.SeriesOrFloatArray1D
+        x and y coordinates of the target localizations in camera
+        pixels.
+    l0 : lib.IntArray1D
+        Reference localizations encoded as 1D integers in units of
+        ``intersect_d`` (``x + y * width_units``).
+    width_units : float
+        Width of the camera image in units of ``intersect_d``.
+    intersect_d : float
+        Intersect distance in camera pixels.
+
+    Raises
+    ------
+    ValueError
+        If the reference is not the same localizations as ``x``/``y``,
+        in which case each segment's own bins cannot be identified in
+        the reference.
+    """
+    l1 = np.int32(
+        np.round(np.asarray(x) / intersect_d)
+        + np.round(np.asarray(y) / intersect_d) * width_units
+    )
+    if not np.array_equal(l0, l1):
+        raise ValueError(
+            "exclude_self requires the reference to be the target"
+            " itself, but ref_x/ref_y differ from x/y."
+        )
+
+
+def _align_segment(
+    lo,
+    hi,
+    x_sorted,
+    y_sorted,
+    rel_drift_x,
+    rel_drift_y,
+    exclude_self,
+    l0_sorted,
+    l0_coords,
+    l0_counts,
+    intersect_d,
+    width_units,
+    shifts_xy,
+    box,
+):
+    """Estimate the sub-pixel shift of one segment against the reference.
+
+    Parameters
+    ----------
+    lo, hi : int
+        Start (inclusive) and end (exclusive) indices of the segment in
+        the frame-sorted target arrays.
+    x_sorted, y_sorted : lib.FloatArray1D
+        x and y coordinates of the target localizations, sorted by
+        frame.
+    rel_drift_x, rel_drift_y : float
+        Accumulated relative drift applied to the segment before the
+        intersection counting.
+    exclude_self : bool
+        If True, the segment's own localizations are taken out of the
+        reference counts while it is being aligned.
+    l0_sorted : lib.IntArray1D or None
+        Encoded reference localizations in the frame-sorted order. Only
+        used (and required) when ``exclude_self`` is True.
+    l0_coords : lib.IntArray1D
+        Sorted, unique coordinates of the reference localizations.
+    l0_counts : lib.IntArray1D
+        Counts of the unique reference coordinates. Temporarily modified
+        in place when ``exclude_self`` is True and restored afterwards.
+    intersect_d : float
+        Intersect distance in camera pixels.
+    width_units : float
+        Width of the camera image in units of ``intersect_d``.
+    shifts_xy : lib.IntArray1D
+        Encoded x and y shifts spanning the local search region.
+    box : int
+        Side length of the local search region.
+
+    Returns
+    -------
+    tuple of float or None
+        ``(px, py)`` shift, or None if there is nothing to align (an
+        empty segment, or, with ``exclude_self``, a reference left with
+        no localizations once the segment is taken out of it).
+    """
+    if hi == lo:  # no target localizations in this segment
+        return None
+
+    x1 = x_sorted[lo:hi] + rel_drift_x
+    y1 = y_sorted[lo:hi] + rel_drift_y
+
+    # take this segment out of the reference counts (restored below).
+    # Counts that drop to zero are left in place: a zero count
+    # contributes min(0, target count) == 0 to every shift.
+    if exclude_self:
+        own, own_counts = np.unique(l0_sorted[lo:hi], return_counts=True)
+        own_pos = np.searchsorted(l0_coords, own)
+        l0_counts[own_pos] -= own_counts
+
+    # count the number of intersected localizations
+    roi_cc = _point_intersect_2d(
+        l0_coords, l0_counts, x1, y1, intersect_d, width_units, shifts_xy, box
+    )
+
+    if exclude_self:
+        l0_counts[own_pos] += own_counts
+        if not roi_cc.any():  # nothing left to align against
+            return None
+
+    # estimate the precise sub-pixel position of the peak of roi_cc with FFT
+    return _get_fft_peak(roi_cc, intersect_d)
+
+
 def intersection_max(
     x: lib.SeriesOrFloatArray1D,
     y: lib.SeriesOrFloatArray1D,
@@ -515,15 +649,7 @@ def intersection_max(
     if exclude_self:
         # a segment's own bins are subtracted from the reference counts,
         # which is only defined if the reference holds the same bins
-        l1 = np.int32(
-            np.round(np.asarray(x) / intersect_d)
-            + np.round(np.asarray(y) / intersect_d) * width_units
-        )
-        if not np.array_equal(l0, l1):
-            raise ValueError(
-                "exclude_self requires the reference to be the target"
-                " itself, but ref_x/ref_y differ from x/y."
-            )
+        _check_exclude_self_reference(x, y, l0, width_units, intersect_d)
 
     # sort the target localizations by frame so that each segment is a
     # contiguous slice (located with searchsorted). This avoids
@@ -550,50 +676,32 @@ def intersection_max(
         # get the target localizations within the current segment
         lo, hi = seg_idx[s], seg_idx[s + 1]
 
-        # skip if no target localizations
-        if hi == lo:
-            drift_x[s] = drift_x[s - 1]
-            drift_y[s] = drift_y[s - 1]
-            continue
-
-        # undrifting from the previous round (new array, not a view)
-        x1 = x_sorted[lo:hi] + rel_drift_x
-        y1 = y_sorted[lo:hi] + rel_drift_y
-
-        # take this segment out of the reference counts (restored below).
-        # Counts that drop to zero are left in place: a zero count
-        # contributes min(0, target count) == 0 to every shift.
-        if exclude_self:
-            own, own_counts = np.unique(l0_sorted[lo:hi], return_counts=True)
-            own_pos = np.searchsorted(l0_coords, own)
-            l0_counts[own_pos] -= own_counts
-
-        # count the number of intersected localizations
-        roi_cc = _point_intersect_2d(
+        shift = _align_segment(
+            lo,
+            hi,
+            x_sorted,
+            y_sorted,
+            rel_drift_x,
+            rel_drift_y,
+            exclude_self,
+            l0_sorted,
             l0_coords,
             l0_counts,
-            x1,
-            y1,
             intersect_d,
             width_units,
             shifts_xy,
             box,
         )
-
-        if exclude_self:
-            l0_counts[own_pos] += own_counts
-            # nothing left to align against (e.g. a single segment)
-            if not roi_cc.any():
-                drift_x[s] = drift_x[s - 1]
-                drift_y[s] = drift_y[s - 1]
-                continue
-
-        # estimate the precise sub-pixel position of the peak of roi_cc
-        # with FFT
-        px, py = _get_fft_peak(roi_cc, intersect_d)
+        if shift is None:
+            # no target localizations, or (with exclude_self) nothing
+            # left to align against, e.g. a single segment
+            drift_x[s] = drift_x[s - 1]
+            drift_y[s] = drift_y[s - 1]
+            continue
 
         # update the relative drift reference for the subsequent
         # segmented subset (interval) and save the drifts
+        px, py = shift
         rel_drift_x += px
         rel_drift_y += py
         drift_x[s] = -rel_drift_x
@@ -632,10 +740,60 @@ def intersection_max_z(
 ) -> tuple[lib.FloatArray1D, lib.FloatArray1D]:
     """Maximize intersection (undrift) for 3D localizations.
 
-    Assumes that x and y coordinates were already undrifted. See
-    :func:`intersection_max` for the algorithm and parameters
-    explanation (its 2D counterpart).
+    Assumes that x and y coordinates were already undrifted.
+
+    Parameters
+    ----------
+    x, y : lib.SeriesOrFloatArray1D
+        x and y coordinates of the (already undrifted in x and y)
+        localizations in camera pixels.
+    z : lib.SeriesOrFloatArray1D
+        z coordinates of the localizations in nm.
+    ref_x, ref_y : lib.SeriesOrFloatArray1D
+        x and y coordinates of the reference localizations in camera
+        pixels.
+    ref_z : lib.SeriesOrFloatArray1D
+        z coordinates of the reference localizations in nm.
+    frame : lib.SeriesOrIntArray1D
+        Frame indices of localizations, starting at 1.
+    seg_bounds : lib.IntArray1D
+        Frame indices of the segmentation bounds. Defines temporal
+        intervals used to estimate drift.
+    intersect_d : float
+        Intersect distance in camera pixels.
+    roi_r : float
+        Radius of the local search region in camera pixels. Should be
+        higher than the maximum expected drift within one segment.
+    width, height : int
+        Width and height of the camera image in camera pixels.
+    pixelsize : float
+        Camera pixel size in nm, used to convert z to camera pixels.
+    aim_round : {1, 2}, optional
+        Round of AIM algorithm, see :func:`intersection_max`. Default
+        is 1.
+    exclude_self : bool, optional
+        Leave each segment out of the reference while that segment is
+        being aligned, see :func:`intersection_max`. Default is False.
+    progress : lib.ProgressType | None, optional
+        Progress dialog. If TqdmProgress, progress is displayed with tqdm.
+        If None or MockProgress, progress is not displayed. Default is None.
+
+    Returns
+    -------
+    z_pdc : lib.FloatArray1D
+        Undrifted z coordinates in nm.
+    drift_z : lib.FloatArray1D
+        Drift in z in nm for every frame.
+
+    Raises
+    ------
+    ValueError
+        If ``exclude_self`` is True and the reference is not the same
+        localizations as the target.
     """
+    if progress is None:
+        progress = lib.MockProgress()
+
     # convert z to camera pixels
     z = z.copy() / pixelsize
     ref_z = ref_z.copy() / pixelsize
@@ -785,13 +943,14 @@ def aim(
         Localizations list to be undrifted.
     info : list of dicts
         Localizations list's metadata.
-    intersect_d : float
-        Intersect distance in camera pixels.
-    segmentation : int
-        Time interval for drift tracking, unit: frames.
-    roi_r : float
+    segmentation : int, optional
+        Time interval for drift tracking, unit: frames. Default is 100.
+    intersect_d : float, optional
+        Intersect distance in camera pixels. Default is 20 / 130.
+    roi_r : float, optional
         Radius of the local search region in camera pixels. Should be
-        larger than the  maximum expected drift within segmentation.
+        larger than the maximum expected drift within segmentation.
+        Default is 60 / 130.
     progress : picasso.lib.ProgressDialog or "console" or None, optional
         Progress dialog. If "console", progress is displayed in the
         console. If None, no progress is displayed. Default is None.

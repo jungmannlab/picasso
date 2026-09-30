@@ -29,7 +29,7 @@ from .app import run_gui
 
 from cmath import rect, phase
 
-import scipy.ndimage.filters
+import scipy.ndimage
 
 DEFAULT_OVERSAMPLING = 1.0
 INITIAL_REL_MAXIMUM = 2.0
@@ -804,9 +804,7 @@ class Window(QtWidgets.QMainWindow):
                     render.render_hist3d(
                         locs[i]["x"].to_numpy(),
                         locs[i]["y"].to_numpy(),
-                        locs[i]["z"]
-                        .to_numpy()
-                        .copy(),  # do not remove the copy!
+                        locs[i]["z"].to_numpy(),
                         oversampling,
                         self.t_min,
                         self.t_min,
@@ -886,7 +884,7 @@ class Window(QtWidgets.QMainWindow):
             render.render_hist3d(
                 _["x"].to_numpy(),
                 _["y"].to_numpy(),
-                _["z"].to_numpy().copy(),  # do not remove the copy!
+                _["z"].to_numpy(),
                 self.oversampling,
                 self.t_min,
                 self.t_min,
@@ -1166,7 +1164,7 @@ class Window(QtWidgets.QMainWindow):
             render.render_hist3d(
                 _["x"].to_numpy(),
                 _["y"].to_numpy(),
-                _["z"].to_numpy().copy(),  # do not remove the copy!
+                _["z"].to_numpy(),
                 self.oversampling,
                 self.t_min,
                 self.t_min,
@@ -1305,7 +1303,7 @@ class Window(QtWidgets.QMainWindow):
             render.render_hist3d(
                 _["x"].to_numpy(),
                 _["y"].to_numpy(),
-                _["z"].to_numpy().copy(),  # do not remove the copy!
+                _["z"].to_numpy(),
                 self.oversampling,
                 self.t_min,
                 self.t_min,
@@ -1496,9 +1494,7 @@ class Window(QtWidgets.QMainWindow):
             model_x, model_y, model_z, proplane, pixelsize
         )
 
-        self.template_img = scipy.ndimage.filters.gaussian_filter(
-            template_img, blur
-        )
+        self.template_img = scipy.ndimage.gaussian_filter(template_img, blur)
 
     def model_preview(self):
 
@@ -1521,7 +1517,7 @@ class Window(QtWidgets.QMainWindow):
             render.render_hist3d(
                 _["x"].to_numpy(),
                 _["y"].to_numpy(),
-                _["z"].to_numpy().copy(),  # do not remove the copy!
+                _["z"].to_numpy(),
                 self.oversampling,
                 self.t_min,
                 self.t_min,

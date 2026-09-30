@@ -35,6 +35,7 @@ This module fixes both halves of that problem:
 from __future__ import annotations
 
 import datetime
+import functools
 import os
 import sys
 import threading
@@ -58,13 +59,23 @@ def log_dir() -> str:
     Kept next to the other per-user Picasso files so that it survives
     uninstalling the one-click build and is writable without admin
     rights.
+
+    Returns
+    -------
+    path : str
+        Directory of the Picasso log.
     """
     return os.path.join(user_config_dir(), "logs")
 
 
 def log_path() -> str:
-    """Return the path of the Picasso log file
-    (``~/.picasso/logs/picasso.log``)."""
+    """Return the path of the Picasso log file.
+
+    Returns
+    -------
+    path : str
+        ``~/.picasso/logs/picasso.log``.
+    """
     return os.path.join(log_dir(), "picasso.log")
 
 
@@ -229,6 +240,64 @@ def log_message(message: str) -> None:
         pass
 
 
+def _handle_exception(
+    message: str, report: Callable[[str], None] | None
+) -> None:
+    """Log ``message`` and, if given, pass it to ``report``.
+
+    Exceptions raised by ``report`` are ignored.
+    """
+    log_message(message)
+    if report is not None:
+        try:
+            report(message)
+        except Exception:  # noqa: BLE001 - reporting must not raise
+            pass
+
+
+def _excepthook(
+    type_,
+    value,
+    tback,
+    report: Callable[[str], None] | None,
+    default_excepthook: Callable,
+) -> None:
+    _handle_exception(
+        "".join(traceback.format_exception(type_, value, tback)), report
+    )
+    if not _streams_replaced:  # console builds: keep printing there
+        default_excepthook(type_, value, tback)
+
+
+def _thread_excepthook(
+    args,
+    report: Callable[[str], None] | None,
+    default_thread_excepthook: Callable,
+) -> None:
+    if args.exc_type is SystemExit:
+        return
+    name = args.thread.name if args.thread is not None else "unknown"
+    message = "".join(
+        traceback.format_exception(
+            args.exc_type, args.exc_value, args.exc_traceback
+        )
+    )
+    _handle_exception(f"Exception in thread {name}:\n{message}", report)
+    if not _streams_replaced:
+        default_thread_excepthook(args)
+
+
+def _unraisablehook(args, default_unraisablehook: Callable) -> None:
+    message = "".join(
+        traceback.format_exception(
+            args.exc_type, args.exc_value, args.exc_traceback
+        )
+    )
+    log_message(f"{args.err_msg or 'Unraisable exception'}:\n{message}")
+    if not _streams_replaced:
+        default_unraisablehook(args)
+
+
 def install_excepthooks(report: Callable[[str], None] | None = None) -> None:
     """Log (and optionally report) every uncaught exception.
 
@@ -248,46 +317,14 @@ def install_excepthooks(report: Callable[[str], None] | None = None) -> None:
     # the interpreter's own hooks, not the currently installed ones, so
     # that installing twice (CLI entry point, then a GUI) does not chain
     # the handlers and log everything twice
-    default_excepthook = sys.__excepthook__
-    default_thread_excepthook = threading.__excepthook__
-    default_unraisablehook = sys.__unraisablehook__
-
-    def handle(message: str) -> None:
-        log_message(message)
-        if report is not None:
-            try:
-                report(message)
-            except Exception:  # noqa: BLE001 - reporting must not raise
-                pass
-
-    def excepthook(type_, value, tback) -> None:
-        handle("".join(traceback.format_exception(type_, value, tback)))
-        if not _streams_replaced:  # console builds: keep printing there
-            default_excepthook(type_, value, tback)
-
-    def thread_excepthook(args) -> None:
-        if args.exc_type is SystemExit:
-            return
-        name = args.thread.name if args.thread is not None else "unknown"
-        message = "".join(
-            traceback.format_exception(
-                args.exc_type, args.exc_value, args.exc_traceback
-            )
-        )
-        handle(f"Exception in thread {name}:\n{message}")
-        if not _streams_replaced:
-            default_thread_excepthook(args)
-
-    def unraisablehook(args) -> None:
-        message = "".join(
-            traceback.format_exception(
-                args.exc_type, args.exc_value, args.exc_traceback
-            )
-        )
-        log_message(f"{args.err_msg or 'Unraisable exception'}:\n{message}")
-        if not _streams_replaced:
-            default_unraisablehook(args)
-
-    sys.excepthook = excepthook
-    threading.excepthook = thread_excepthook
-    sys.unraisablehook = unraisablehook
+    sys.excepthook = functools.partial(
+        _excepthook, report=report, default_excepthook=sys.__excepthook__
+    )
+    threading.excepthook = functools.partial(
+        _thread_excepthook,
+        report=report,
+        default_thread_excepthook=threading.__excepthook__,
+    )
+    sys.unraisablehook = functools.partial(
+        _unraisablehook, default_unraisablehook=sys.__unraisablehook__
+    )

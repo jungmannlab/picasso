@@ -15,7 +15,7 @@ How to install
 3. Repeat the same for all other icons with separate Picasso modules (Localize, Render, etc) that you wish to use.
 4. Note: The main picasso app must remain in the Applications folder, the shortcuts for the other modules can be moved to the desktop or elsewhere if desired.
 
-Picasso is distributed without an Apple Developer ID, which means that macOS may block the installation of the software. If the steps above do not work, please follow the instructions here: https://support.apple.com/en-gb/guide/mac-help/mh40616/mac. Note that you may need to run it several times, one for each module (e.g., Picasso Render) and once for the picasso app.
+[!] Picasso is distributed without an Apple Developer ID. macOS may therefore refuse to open the installer, warning that it cannot check it for malicious software. If this happens, click the "?" button in the warning dialog and follow the instructions to open Picasso anyway. This needs to be repeated for both the main "picasso" app and each individual module you use (e.g., Picasso Render). For more details, see: https://support.apple.com/en-gb/guide/mac-help/mh40616/mac
 
 Alternatively, you can create the dmg file yourself by cloning our GitHub repo and running the bash script picasso/release/one_click_macos_gui/create_macos_dmg.sh from the Terminal. Note that you must have conda installed on your computer.
 
@@ -61,11 +61,13 @@ If you use some of the functionalities provided by Picasso, please also cite the
 - Experimental PSF (cubic-spline) fitting. DOIs: 10.1038/nmeth.4661 (https://doi.org/10.1038/nmeth.4661) (Li et al., experimental-PSF localization and bead alignment) and 10.1038/s41598-017-00622-w (https://doi.org/10.1038/s41598-017-00622-w) (Babcock & Zhuang, cubic-spline PSF model). The spline calibration follows the coefficient scheme of Gpuspline; license can be found here (https://github.com/jungmannlab/picasso/blob/master/LICENSES/Gpuspline-LICENSE.txt).
 - Multichannel (global) experimental-PSF fitting. DOI: 10.1038/s41467-022-30719-4 (https://doi.org/10.1038/s41467-022-30719-4) (Li et al., globLoc).
 - 3D fitting via astigmatism. DOI: 10.1126/science.1153529 (https://www.science.org/doi/10.1126/science.1153529).
+- B-spline wavelet spot identification. DOI: 10.1364/OE.20.002081 (https://doi.org/10.1364/OE.20.002081) (Izeddin et al., Opt. Express 2012)
 - sCMOS pixel-dependent noise modeling. DOI: 10.1038/nmeth.2488 (https://doi.org/10.1038/nmeth.2488).
 - NeNA. DOI: 10.1007/s00418-014-1192-3 (https://doi.org/10.1007/s00418-014-1192-3)
 - FRC. DOI: 10.1038/nmeth.2448 (https://doi.org/10.1038/nmeth.2448)
 - Theoretical lateral localization precision (lpx / lpy, Gaussian least-squares). DOI: 10.1038/nmeth.1447 (https://doi.org/10.1038/nmeth.1447)
 - Theoretical axial localization precision (lpz values, Gaussian). DOI: 10.1038/s41467-026-70198-5 (https://doi.org/10.1038/s41467-026-70198-5)
+- Quad-tree adaptive histogram rendering. DOI: 10.1017/S143192760999122X (https://doi.org/10.1017/S143192760999122X) (Baddeley, Cannell & Soeller, Microsc. Microanal. 2010)
 - RCC undrifting: DOI: 10.1364/OE.22.015982 (https://doi.org/10.1364/OE.22.015982)
 - AIM undrifting. DOI: 10.1126/sciadv.adm776 (https://www.science.org/doi/10.1126/sciadv.adm7765)
 - SMLM clusterer. DOIs: 10.1038/s41467-021-22606-1 (https://doi.org/10.1038/s41467-021-22606-1) and 10.1038/s41586-023-05925-9 (https://doi.org/10.1038/s41586-023-05925-9)

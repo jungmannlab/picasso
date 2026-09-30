@@ -2,8 +2,10 @@
 # =============================================================================
 # create_macos_dmg.sh
 # Builds a macOS DMG installer for Picasso
-# Requirements: PyInstaller, create-dmg (brew install create-dmg)
-# Usage: bash create_macos_dmg.sh
+# Requirements: conda, create-dmg >= 1.3.0 (brew install create-dmg)
+# Usage: bash create_macos_dmg.sh, from an environment in which
+#        "import picasso" works (the version is read before the build
+#        environment exists)
 # =============================================================================
 
 set -e  # Exit immediately on any error
@@ -37,8 +39,11 @@ declare -a TOOLS=(
 # Step 0: Create a conda environment and prepare the package
 # -----------------------------------------------------------------------------
 echo ">>> Setting up conda environment and preparing package..."
-# Create conda environment (if not already created)
+# Create the conda environment. A previous run that failed part-way
+# (set -e) leaves the environment behind, and conda refuses to create
+# an existing one, so remove any leftover first.
 echo "Creating conda environment 'installer'..."
+conda env remove -n installer -y > /dev/null 2>&1 || true
 conda create -n installer python=3.14.4 -y
 conda activate installer
 pip install build
@@ -181,7 +186,16 @@ if [ -d "\$INTERNAL_DIR" ]; then
     export DYLD_LIBRARY_PATH="\$INTERNAL_DIR:\$DYLD_LIBRARY_PATH"
 fi
 
-exec "\$MAIN_EXEC" $argument "\$@"
+# Launch natively. LaunchServices starts a script-only bundle under
+# Rosetta unless its Info.plist says otherwise (see LSArchitecturePriority
+# below), and a translated shell passes an x86_64 spawn preference on to
+# every descendant: the arm64-only Picasso binary still runs natively,
+# but the "uname -p" that Python's platform.processor() spawns then
+# answers "i386", rubicon-objc (used by wgpu) believes it is on Intel and
+# looks up objc_msgSendSuper_stret, which does not exist on arm64 - and
+# GPU rendering silently falls back to the CPU. "arch -arm64" resets the
+# preference even if a user ticked "Open using Rosetta".
+exec arch -arm64 "\$MAIN_EXEC" $argument "\$@"
 EOF
     chmod +x "$launcher_script"
     
@@ -223,6 +237,14 @@ EOF
     <true/>
     <key>NSPrincipalClass</key>
     <string>NSApplication</string>
+    <!-- a bundle whose executable is a shell script has no Mach-O
+         architecture, and LaunchServices then runs it under Rosetta;
+         declare arm64 so the launcher (and everything it spawns) is
+         native - see the note in the launcher script -->
+    <key>LSArchitecturePriority</key>
+    <array>
+        <string>arm64</string>
+    </array>
 </dict>
 </plist>
 EOF
@@ -255,12 +277,18 @@ done
 # -----------------------------------------------------------------------------
 echo ">>> Building DMG with create-dmg..."
 
-# Remove any previous DMG
-rm -f "${DMG_NAME}.dmg"
+# Remove any previous DMG, and the read-write scratch image a failed
+# create-dmg run leaves behind
+rm -f "${DMG_NAME}.dmg" rw.*."${DMG_NAME}.dmg"
 
 # Build the DMG
 # Note: With multiple apps, we'll let create-dmg handle the layout automatically
-# or you can manually position each icon if you prefer more control
+# or you can manually position each icon if you prefer more control.
+# create-dmg lays the window out through a Finder AppleScript after
+# mounting the image; with an image of this size (~1.7 GB) Finder has not
+# registered the volume within the tool's default 2 s wait and the script
+# died with "Can't get disk (-1728)" on macOS 26, hence the longer wait
+# (create-dmg >= 1.3.0) and the hdiutil retries.
 create-dmg \
     --volname "$APP_NAME $VERSION" \
     --volicon "../logos/localize.icns" \
@@ -270,6 +298,8 @@ create-dmg \
     --text-size 12 \
     --app-drop-link 650 250 \
     --no-internet-enable \
+    --applescript-sleep-duration 15 \
+    --hdiutil-retries 5 \
     "${DMG_NAME}.dmg" \
     "$STAGING_DIR"
 

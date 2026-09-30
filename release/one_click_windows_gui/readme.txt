@@ -17,6 +17,15 @@ How to install
 [!] Camera config and plugins belong in C:\Users\<your user name>\.picasso, not in the installation folder, see "Adding camera configuration and plugins" below.
 [!] Windows Safety features and Windows Defender may ask multiple times for permission during the installation and download.
 
+Creating your own installer
+---------------------------
+
+You can create the exe file yourself by cloning our GitHub repo and running the script picasso/release/one_click_windows_gui/create_installer_windows.bat from the Command Prompt. Note that you must have conda installed on your computer.
+
+There are two editions of the installer:
+- create_installer_windows.bat builds the standard (CPU) installer (Picasso-Windows-64bit-<version>.exe, installs to C:\Picasso).
+- create_installer_windows_cuda.bat builds the CUDA edition (Picasso-Windows-64bit-CUDA-<version>.exe, installs to C:\Picasso-CUDA). It additionally bundles the CUDA runtime (numba-cuda[cu12]) so GPU-accelerated (numba.cuda) code can run. It requires an NVIDIA (CUDA-capable) GPU and produces a noticeably larger installer. The two editions install to separate folders and can coexist. GPU rendering in Picasso: Render (via wgpu, any graphics card) is included in both editions; the CUDA edition is only needed for CUDA-accelerated fitting.
+
 Adding camera configuration and plugins
 ---------------------------------------
 
@@ -59,11 +68,13 @@ If you use some of the functionalities provided by Picasso, please also cite the
 - Experimental PSF (cubic-spline) fitting. DOIs: 10.1038/nmeth.4661 (https://doi.org/10.1038/nmeth.4661) (Li et al., experimental-PSF localization and bead alignment) and 10.1038/s41598-017-00622-w (https://doi.org/10.1038/s41598-017-00622-w) (Babcock & Zhuang, cubic-spline PSF model). The spline calibration follows the coefficient scheme of Gpuspline; license can be found here (https://github.com/jungmannlab/picasso/blob/master/LICENSES/Gpuspline-LICENSE.txt).
 - Multichannel (global) experimental-PSF fitting. DOI: 10.1038/s41467-022-30719-4 (https://doi.org/10.1038/s41467-022-30719-4) (Li et al., globLoc).
 - 3D fitting via astigmatism. DOI: 10.1126/science.1153529 (https://www.science.org/doi/10.1126/science.1153529).
+- B-spline wavelet spot identification. DOI: 10.1364/OE.20.002081 (https://doi.org/10.1364/OE.20.002081) (Izeddin et al., Opt. Express 2012)
 - sCMOS pixel-dependent noise modeling. DOI: 10.1038/nmeth.2488 (https://doi.org/10.1038/nmeth.2488).
 - NeNA. DOI: 10.1007/s00418-014-1192-3 (https://doi.org/10.1007/s00418-014-1192-3)
 - FRC. DOI: 10.1038/nmeth.2448 (https://doi.org/10.1038/nmeth.2448)
 - Theoretical lateral localization precision (lpx / lpy, Gaussian least-squares). DOI: 10.1038/nmeth.1447 (https://doi.org/10.1038/nmeth.1447)
 - Theoretical axial localization precision (lpz values, Gaussian). DOI: 10.1038/s41467-026-70198-5 (https://doi.org/10.1038/s41467-026-70198-5)
+- Quad-tree adaptive histogram rendering. DOI: 10.1017/S143192760999122X (https://doi.org/10.1017/S143192760999122X) (Baddeley, Cannell & Soeller, Microsc. Microanal. 2010)
 - RCC undrifting: DOI: 10.1364/OE.22.015982 (https://doi.org/10.1364/OE.22.015982)
 - AIM undrifting. DOI: 10.1126/sciadv.adm776 (https://www.science.org/doi/10.1126/sciadv.adm7765)
 - SMLM clusterer. DOIs: 10.1038/s41467-021-22606-1 (https://doi.org/10.1038/s41467-021-22606-1) and 10.1038/s41586-023-05925-9 (https://doi.org/10.1038/s41586-023-05925-9)

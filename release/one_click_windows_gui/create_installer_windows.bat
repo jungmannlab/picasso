@@ -10,7 +10,7 @@ call conda activate picasso_installer
 call pip install build
 
 for /f %%i in ('python -c "exec(open('picasso/version.py').read()); print(__version__)"') do set PICASSO_VERSION=%%i
-REM The CPU and GPU installers share the repo-level dist/ folder. If both are
+REM The CPU and CUDA installers share the repo-level dist/ folder. If both are
 REM created at the same time, the second "python -m build" run fails because the
 REM sdist/wheel already exist, so only build when they are missing.
 if exist "dist\picassosr-%PICASSO_VERSION%-py3-none-any.whl" (

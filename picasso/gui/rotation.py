@@ -12,6 +12,7 @@ import.
 """
 
 import os
+import threading
 from functools import partial
 
 import numpy as np
@@ -20,11 +21,31 @@ import matplotlib.pyplot as plt
 from PyQt6 import QtCore, QtGui, QtWidgets
 from scipy.spatial.transform import Rotation
 
-from .. import io, render, lib, __version__
+from .. import io, render, lib, lib_qt, __version__, docs_url
+from .render_worker import (
+    RenderWorker,
+    global_precisions_for,
+    subsample_request,
+)
 
 
 DEFAULT_OVERSAMPLING = 1.0
 INITIAL_REL_MAXIMUM = 0.5
+
+
+def source_key(view, source: str) -> tuple:
+    """Identify what the 3D view would show for the main ``view``: its
+    single pick (shape and size included) or its field of view. Equal
+    keys mean the loaded content would not change."""
+    if source == "fov":
+        (y_min, x_min), (y_max, x_max) = view.viewport
+        return (
+            "fov",
+            (float(y_min), float(x_min), float(y_max), float(x_max)),
+        )
+    return ("pick", repr(view._picks[0]), view._pick_shape, view._pick_size)
+
+
 N_GROUP_COLORS = render.N_GROUP_COLORS  # 8
 SHIFT = 0.1
 ZOOM = 9 / 7
@@ -192,19 +213,49 @@ class DisplaySettingsRotationDialog(lib.Dialog):
             "its individual localization precision, isotropic in xy."
         )
         self.blur_buttongroup.addButton(gaussian_iso_button)
+        # the same buttons as the main window's dialog, in the same
+        # order (the windows sync by button id)
+        quadtree_button = QtWidgets.QRadioButton(
+            "Adaptive histogram (quad-tree)"
+        )
+        quadtree_button.setToolTip(
+            "Histogram whose bins split while they hold more than the\n"
+            "leaf capacity, so every bin has about the same signal-to-noise\n"
+            "ratio (Baddeley, Cannell & Soeller, 2010). In 3D the tree is\n"
+            "built from the projected localizations for every orientation."
+        )
+        self.blur_buttongroup.addButton(quadtree_button)
+        triangulation_button = QtWidgets.QRadioButton("Jittered triangulation")
+        triangulation_button.setToolTip(
+            "Delaunay triangles drawn with an intensity inverse to their\n"
+            "area, averaged over triangulations of the localizations\n"
+            "jittered by their mean distance to their neighbors, so the\n"
+            "blur follows the local sampling (Baddeley, Cannell & Soeller,\n"
+            "2010). In 3D the projected localizations are triangulated for\n"
+            "every orientation. Costly: rendered up to a number of loaded\n"
+            "localizations, the histogram is shown above this number instead."
+        )
+        self.blur_buttongroup.addButton(triangulation_button)
 
         blur_grid.addWidget(points_button, 0, 0, 1, 2)
         blur_grid.addWidget(smooth_button, 1, 0, 1, 2)
         blur_grid.addWidget(convolve_button, 2, 0, 1, 2)
         blur_grid.addWidget(gaussian_button, 3, 0, 1, 2)
         blur_grid.addWidget(gaussian_iso_button, 4, 0, 1, 2)
+        blur_grid.addWidget(quadtree_button, 5, 0, 1, 2)
+        blur_grid.addWidget(triangulation_button, 6, 0, 1, 2)
         convolve_button.setChecked(True)
         self.blur_buttongroup.buttonReleased.connect(self.render_scene_nocache)
+        # the minimum blur, shown only for the Gaussian methods that
+        # use it (a container, so the grid keeps no empty row otherwise)
+        self.min_blur_widgets = QtWidgets.QWidget()
+        min_blur_grid = QtWidgets.QGridLayout(self.min_blur_widgets)
+        min_blur_grid.setContentsMargins(0, 0, 0, 0)
         min_blur_label = QtWidgets.QLabel("Min. Blur (nm):")
         min_blur_label.setToolTip(
             "Minimum blur applied to all localizations in nm."
         )
-        blur_grid.addWidget(min_blur_label, 5, 0, 1, 1)
+        min_blur_grid.addWidget(min_blur_label, 0, 0, 1, 1)
         self.min_blur_width = QtWidgets.QDoubleSpinBox()
         self.min_blur_width.setRange(0, 999999)
         self.min_blur_width.setSingleStep(0.1)
@@ -212,7 +263,103 @@ class DisplaySettingsRotationDialog(lib.Dialog):
         self.min_blur_width.setDecimals(1)
         self.min_blur_width.setKeyboardTracking(False)
         self.min_blur_width.valueChanged.connect(self.render_scene_nocache)
-        blur_grid.addWidget(self.min_blur_width, 5, 1, 1, 1)
+        min_blur_grid.addWidget(self.min_blur_width, 0, 1, 1, 1)
+        blur_grid.addWidget(self.min_blur_widgets, 7, 0, 1, 2)
+        # the quad-tree's settings, shown only while it is selected
+        self.quadtree_widgets = QtWidgets.QWidget()
+        quadtree_grid = QtWidgets.QGridLayout(self.quadtree_widgets)
+        quadtree_grid.setContentsMargins(0, 0, 0, 0)
+        capacity_label = QtWidgets.QLabel("Leaf capacity:")
+        capacity_label.setToolTip(
+            "Largest number of localizations a bin of the adaptive\n"
+            "histogram may hold before it is split into four; every bin\n"
+            "then has about the same signal-to-noise ratio,\n"
+            "sqrt(capacity / 2) on average."
+        )
+        quadtree_grid.addWidget(capacity_label, 0, 0, 1, 1)
+        self.quadtree_capacity = QtWidgets.QSpinBox()
+        self.quadtree_capacity.setRange(1, 100000)
+        self.quadtree_capacity.setValue(lib.RENDER_QUADTREE_CAPACITY_DEFAULT)
+        self.quadtree_capacity.setKeyboardTracking(False)
+        self.quadtree_capacity.setToolTip(capacity_label.toolTip())
+        quadtree_grid.addWidget(self.quadtree_capacity, 0, 1, 1, 1)
+        self.quadtree_snr = QtWidgets.QLabel()
+        quadtree_grid.addWidget(self.quadtree_snr, 1, 0, 1, 2)
+        blur_grid.addWidget(self.quadtree_widgets, 8, 0, 1, 2)
+        # the triangulation's settings (synced from the main window)
+        self.triangulation_widgets = QtWidgets.QWidget()
+        triangulation_grid = QtWidgets.QGridLayout(self.triangulation_widgets)
+        triangulation_grid.setContentsMargins(0, 0, 0, 0)
+        passes_label = QtWidgets.QLabel("Passes:")
+        passes_label.setToolTip(
+            "Jittered triangulations averaged (the original paper uses 25\n"
+            "to 50); 1 shows a single jittered triangulation, more take"
+            " longer."
+        )
+        triangulation_grid.addWidget(passes_label, 0, 0, 1, 1)
+        self.triangulation_passes = QtWidgets.QSpinBox()
+        self.triangulation_passes.setRange(1, 500)
+        self.triangulation_passes.setValue(
+            lib.RENDER_TRIANGULATION_PASSES_DEFAULT
+        )
+        self.triangulation_passes.setKeyboardTracking(False)
+        self.triangulation_passes.setToolTip(passes_label.toolTip())
+        triangulation_grid.addWidget(self.triangulation_passes, 0, 1, 1, 1)
+        jitter_label = QtWidgets.QLabel("Jitter:")
+        jitter_label.setToolTip(
+            "Width of the random displacement of every localization in\n"
+            "units of its mean distance to its neighbors: 1 (the paper's\n"
+            "choice) blurs to the local sampling limit, 0.5 keeps more\n"
+            "detail for known periodic structures."
+        )
+        triangulation_grid.addWidget(jitter_label, 1, 0, 1, 1)
+        self.triangulation_jitter = QtWidgets.QDoubleSpinBox()
+        self.triangulation_jitter.setRange(0.0, 10.0)
+        self.triangulation_jitter.setSingleStep(0.1)
+        self.triangulation_jitter.setDecimals(2)
+        self.triangulation_jitter.setValue(
+            lib.RENDER_TRIANGULATION_JITTER_DEFAULT
+        )
+        self.triangulation_jitter.setKeyboardTracking(False)
+        self.triangulation_jitter.setToolTip(jitter_label.toolTip())
+        triangulation_grid.addWidget(self.triangulation_jitter, 1, 1, 1, 1)
+        max_locs_label = QtWidgets.QLabel("Max. localizations:")
+        max_locs_label.setToolTip(
+            "Triangulating is computationally expensive.\n"
+            "With more localizations loaded than this (every one is\n"
+            "projected and triangulated for each orientation) the\n"
+            "histogram is rendered instead."
+        )
+        triangulation_grid.addWidget(max_locs_label, 2, 0, 1, 1)
+        self.triangulation_max_locs = QtWidgets.QSpinBox()
+        self.triangulation_max_locs.setRange(1000, 100_000_000)
+        self.triangulation_max_locs.setSingleStep(10000)
+        self.triangulation_max_locs.setValue(
+            lib.RENDER_TRIANGULATION_MAX_LOCS_DEFAULT
+        )
+        self.triangulation_max_locs.setKeyboardTracking(False)
+        self.triangulation_max_locs.setToolTip(max_locs_label.toolTip())
+        triangulation_grid.addWidget(self.triangulation_max_locs, 2, 1, 1, 1)
+        self.triangulation_note = QtWidgets.QLabel()
+        self.triangulation_note.setWordWrap(True)
+        self.triangulation_note.setSizePolicy(
+            QtWidgets.QSizePolicy.Policy.Ignored,
+            QtWidgets.QSizePolicy.Policy.Preferred,
+        )
+        triangulation_grid.addWidget(self.triangulation_note, 3, 0, 1, 2)
+        blur_grid.addWidget(self.triangulation_widgets, 9, 0, 1, 2)
+        for widget in (
+            self.triangulation_passes,
+            self.triangulation_jitter,
+            self.triangulation_max_locs,
+        ):
+            widget.valueChanged.connect(self.render_scene_nocache)
+        self.triangulation_widgets.setVisible(False)
+        self.quadtree_capacity.valueChanged.connect(self._update_quadtree_snr)
+        self.quadtree_capacity.valueChanged.connect(self.render_scene_nocache)
+        self._update_quadtree_snr()
+        self.blur_buttongroup.buttonToggled.connect(self._toggle_blur_widgets)
+        self.quadtree_widgets.setVisible(False)
 
         vbox.addWidget(blur_groupbox)
         self.blur_methods = {
@@ -221,6 +368,8 @@ class DisplaySettingsRotationDialog(lib.Dialog):
             convolve_button: "convolve",
             gaussian_button: "gaussian",
             gaussian_iso_button: "gaussian_iso",
+            quadtree_button: "quadtree",
+            triangulation_button: "triangulation",
         }
 
         # scalebar
@@ -256,6 +405,59 @@ class DisplaySettingsRotationDialog(lib.Dialog):
         scalebar_grid.addWidget(self.optimal_scalebar_check, 1, 1)
 
         self._silent_disp_px_update = False
+
+    def blur_method(self) -> str | None:
+        """The selected blur method (``render`` name)."""
+        return self.blur_methods[self.blur_buttongroup.checkedButton()]
+
+    def _update_quadtree_snr(self, *args) -> None:
+        """Show the signal-to-noise ratio the leaf capacity implies
+        (Baddeley et al. 2010, sqrt(N / 2))."""
+        snr = np.sqrt(self.quadtree_capacity.value() / 2.0)
+        self.quadtree_snr.setText(f"Mean SNR per bin \u2248 {snr:.1f}")
+
+    def set_triangulation_note(self, n_loaded: int | None) -> None:
+        """Say why the histogram was rendered instead of the
+        triangulation (too many localizations loaded), or clear the
+        note (None)."""
+        if n_loaded is None:
+            self.triangulation_note.setText("")
+        else:
+            self.triangulation_note.setText(
+                f"{n_loaded:,} localizations exceed the limit; the "
+                "histogram is shown. Open a smaller region or raise the "
+                "limit."
+            )
+
+    def _toggle_blur_widgets(self, *args) -> None:
+        """Show only the settings the selected blur method uses: the
+        minimum blur for the Gaussian methods, the leaf capacity for
+        the quad-tree. The dialog then grows or shrinks by exactly the
+        change of its content (``_follow_content_height``), so it keeps
+        the size the user gave it and shows no empty space."""
+        method = self.blur_methods[self.blur_buttongroup.checkedButton()]
+        content = self
+        if getattr(self, "_content_height", None) is None:
+            self._content_height = content.sizeHint().height()
+        self.min_blur_widgets.setVisible(
+            method in ("gaussian", "gaussian_iso", "convolve")
+        )
+        self.quadtree_widgets.setVisible(method == "quadtree")
+        self.triangulation_widgets.setVisible(method == "triangulation")
+        # the layouts settle in the event loop; measure afterwards
+        QtCore.QTimer.singleShot(0, self._follow_content_height)
+
+    def _follow_content_height(self) -> None:
+        """Resize the dialog by the change of its content's height since
+        the last measurement (see ``_toggle_blur_widgets``)."""
+        content = self
+        height = content.sizeHint().height()
+        previous = self._content_height
+        self._content_height = height
+        if self.isVisible() and height != previous:
+            self.resize(
+                self.width(), max(self.height() + height - previous, 1)
+            )
 
     def on_disp_px_changed(self, value: float) -> None:
         """Set new display pixel size, update contrast and update scene
@@ -351,9 +553,33 @@ class AnimationDialog(lib.Dialog):
     rot_speed : QDoubleSpinBox
         Contains the default rotation speed calculated when adding a
         position with different angles.
+    transition : QComboBox
+        Timing of the motion between positions, one of
+        ``TRANSITIONS`` (see ``render.build_animation``).
     window : QMainWindow
         Instance of the rotation window.
     """
+
+    DOCS_URL = docs_url("render.html#build-an-animation")
+
+    # display name -> (``render.build_animation`` transition, tooltip)
+    TRANSITIONS = {
+        "Stop at each position": (
+            "ease",
+            "Accelerates and decelerates between every two positions, "
+            "coming to rest at each of them.",
+        ),
+        "Smooth": (
+            "smooth",
+            "Starts and ends at rest and passes through the positions "
+            "without abrupt changes of direction or speed.",
+        ),
+        "Constant speed": (
+            "linear",
+            "Moves at a constant speed between every two positions; "
+            "direction and speed change abruptly at the positions.",
+        ),
+    }
 
     def __init__(self, window: QtWidgets.QMainWindow) -> None:
         super().__init__(window)
@@ -366,7 +592,8 @@ class AnimationDialog(lib.Dialog):
         self.window = window
         self.setWindowTitle("Build an animation")
         self.setModal(False)
-        self.resize(600, 500)
+        # as narrow as the controls allow
+        self.resize(0, 420)
 
         self.positions = []
         self.rows = []
@@ -375,6 +602,7 @@ class AnimationDialog(lib.Dialog):
 
         # Header: current position
         header = QtWidgets.QHBoxLayout()
+        header.addWidget(lib.HelpButton(self.DOCS_URL))
         cp_label = QtWidgets.QLabel("Current position:")
         cp_label.setToolTip(
             "Current rotation in x, y, z (deg). The angles keep track "
@@ -419,57 +647,126 @@ class AnimationDialog(lib.Dialog):
         scroll_area.setWidget(rows_container)
         main_layout.addWidget(scroll_area, 1)
 
-        # Controls panel (fixed at the bottom)
-        controls = QtWidgets.QGridLayout()
-
-        fps_label = QtWidgets.QLabel("FPS: ")
-        fps_label.setToolTip("Frames per second used in the animation.")
-        controls.addWidget(fps_label, 0, 0)
-        self.fps = QtWidgets.QSpinBox()
-        self.fps.setValue(30)
-        self.fps.setRange(1, 60)
-        controls.addWidget(self.fps, 1, 0)
-
-        rs_label = QtWidgets.QLabel("Rotation speed (deg/s): ")
-        rs_label.setToolTip(
-            "Speed of rotation between positions in the animation."
-        )
-        controls.addWidget(rs_label, 0, 1)
-        self.rot_speed = QtWidgets.QDoubleSpinBox()
-        self.rot_speed.setValue(90)
-        self.rot_speed.setDecimals(1)
-        self.rot_speed.setRange(0.1, 1000)
-        controls.addWidget(self.rot_speed, 1, 1)
-
+        # Editing the sequence, right below the positions
+        sequence_row = QtWidgets.QHBoxLayout()
         self.add = QtWidgets.QPushButton("Add this position")
         self.add.setToolTip(
             "Add the current rotation/view to the animation sequence."
         )
-        self.add.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
         self.add.clicked.connect(self.add_position)
-        controls.addWidget(self.add, 0, 2)
-
+        self.stay = QtWidgets.QPushButton("Stay in the position")
+        self.stay.setToolTip("Add the current position again (no movement).")
+        self.stay.clicked.connect(partial(self.add_position, True))
         self.delete = QtWidgets.QPushButton("Remove last position")
         self.delete.setToolTip(
             "Remove the last position from the animation sequence."
         )
-        self.delete.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
         self.delete.clicked.connect(self.delete_position)
-        controls.addWidget(self.delete, 1, 2)
+        for button in (self.add, self.stay, self.delete):
+            button.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
+            sequence_row.addWidget(button)
+        sequence_row.addStretch(1)
+        main_layout.addLayout(sequence_row)
 
-        self.build = QtWidgets.QPushButton("Build\nanimation")
+        # Settings: two columns of label/field pairs
+        settings = QtWidgets.QGridLayout()
+        settings.setColumnMinimumWidth(2, 12)  # gap between the pairs
+        settings.setColumnStretch(5, 1)  # keep the fields compact
+
+        fps_label = QtWidgets.QLabel("FPS:")
+        fps_label.setToolTip("Frames per second used in the animation.")
+        settings.addWidget(fps_label, 0, 0)
+        self.fps = QtWidgets.QSpinBox()
+        self.fps.setValue(30)
+        self.fps.setRange(1, 60)
+        settings.addWidget(self.fps, 0, 1)
+
+        rs_label = QtWidgets.QLabel("Rotation speed (deg/s):")
+        rs_label.setToolTip(
+            "Average speed of rotation between positions in the "
+            "animation, used to suggest the durations."
+        )
+        settings.addWidget(rs_label, 1, 0)
+        self.rot_speed = QtWidgets.QDoubleSpinBox()
+        self.rot_speed.setValue(90)
+        self.rot_speed.setDecimals(1)
+        self.rot_speed.setRange(0.1, 1000)
+        settings.addWidget(self.rot_speed, 1, 1)
+
+        transition_label = QtWidgets.QLabel("Transition:")
+        transition_label.setToolTip(
+            "How the motion is timed between the positions."
+        )
+        settings.addWidget(transition_label, 0, 3)
+        self.transition = QtWidgets.QComboBox()
+        for name, (_, tooltip) in self.TRANSITIONS.items():
+            self.transition.addItem(name)
+            self.transition.setItemData(
+                self.transition.count() - 1,
+                tooltip,
+                QtCore.Qt.ItemDataRole.ToolTipRole,
+            )
+        self.transition.setCurrentText("Stop at each position")
+        settings.addWidget(self.transition, 0, 4)
+
+        # output resolution, independent of the window's size; follows
+        # the window until edited by hand (see ``showEvent``)
+        size_label = QtWidgets.QLabel("Resolution (px):")
+        size_label.setToolTip(
+            "Width and height of the video in pixels (rounded up to a "
+            "multiple of 16 for the encoder). Defaults to the window's "
+            "size; the frames are rendered at this resolution, whatever "
+            "the window's."
+        )
+        settings.addWidget(size_label, 1, 3)
+        size_row = QtWidgets.QHBoxLayout()
+        self.width_px = QtWidgets.QSpinBox()
+        self.width_px.setRange(16, 8192)
+        self.height_px = QtWidgets.QSpinBox()
+        self.height_px.setRange(16, 8192)
+        self._size_edited = False
+        for box in (self.width_px, self.height_px):
+            box.setValue(512)
+            box.valueChanged.connect(self._mark_size_edited)
+        size_row.addWidget(self.width_px)
+        size_row.addWidget(QtWidgets.QLabel("x"))
+        size_row.addWidget(self.height_px)
+        size_row.addStretch(1)
+        settings.addLayout(size_row, 1, 4)
+
+        main_layout.addLayout(settings)
+
+        build_row = QtWidgets.QHBoxLayout()
+        build_row.addStretch(1)
+        self.build = QtWidgets.QPushButton("Build animation")
         self.build.setToolTip("Create the animation as an .mp4 file.")
         self.build.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
         self.build.clicked.connect(self.build_animation)
-        controls.addWidget(self.build, 0, 3)
+        build_row.addWidget(self.build)
+        main_layout.addLayout(build_row)
 
-        self.stay = QtWidgets.QPushButton("Stay in the\n position")
-        self.stay.setToolTip("Add the current position again (no movement).")
-        self.stay.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
-        self.stay.clicked.connect(partial(self.add_position, True))
-        controls.addWidget(self.stay, 1, 3)
+        # the build in progress: its thread, worker and the cancel flag
+        self._build_thread = None
+        self._build_worker = None
+        self._build_cancel = None
+        self._build_progress = None
 
-        main_layout.addLayout(controls)
+    def _mark_size_edited(self) -> None:
+        self._size_edited = True
+
+    def showEvent(self, event: QtGui.QShowEvent) -> None:
+        """Default the output resolution to the window's size until the
+        user sets one."""
+        if not self._size_edited:
+            view = self.window.view_rot
+            for box, value in (
+                (self.width_px, view.width()),
+                (self.height_px, view.height()),
+            ):
+                box.blockSignals(True)
+                box.setValue(max(16, value))
+                box.blockSignals(False)
+        super().showEvent(event)
 
     def add_position(self, freeze: bool = False) -> None:
         """Add a new position to the animation sequence.
@@ -617,47 +914,164 @@ class AnimationDialog(lib.Dialog):
         path, ext = lib.get_save_filename_ext_dialog(
             self, "Save animation", out_path, filter="*.mp4", check_ext=".yaml"
         )
-        if path:
-            disp_dlg = self.window.display_settings_dlg
-            data_dlg = self.window.window.dataset_dialog
-            pixelsize = self.window.window.view.pixelsize
-            locs, infos = self.window.view_rot._prepare_locs_for_rendering()
-            n_frames = int(self.fps.value() * sum(durations))
-            progress = lib.ProgressDialog(
-                "Rendering frames", 0, n_frames, self.window
+        if not path:
+            return
+        if self._build_thread is not None:
+            QtWidgets.QMessageBox.information(
+                self, "Build an animation", "An animation is being built."
             )
-            adjust_display_pixel = disp_dlg.dynamic_disp_px.isChecked()
-            intensities = self.window.window.view.read_relative_intensities()
-            positions = [(p["R"], p["viewport"]) for p in self.positions]
-            segment_rotations = [
-                p["segment_rotvec"] for p in self.positions[1:]
-            ]
-            render.build_animation(
-                path,
-                locs,
-                infos,
-                positions=positions,
-                durations=durations,
-                segment_rotations=segment_rotations,
-                disp_px_size=disp_dlg.disp_px_size.value(),
-                image_size=(
-                    self.window.view_rot.width(),
-                    self.window.view_rot.height(),
-                ),
-                blur_method=disp_dlg.blur_methods[
-                    disp_dlg.blur_buttongroup.checkedButton()
-                ],
-                min_blur_width=disp_dlg.min_blur_width.value() / pixelsize,
-                contrast=(disp_dlg.minimum.value(), disp_dlg.maximum.value()),
-                invert_colors=data_dlg.wbackground.isChecked(),
-                single_channel_colormap=disp_dlg.colormap.currentText(),
-                colors=self.window.window.view.read_colors(),
-                relative_intensities=intensities,
-                fps=self.fps.value(),
-                adjust_pixel_size=adjust_display_pixel,
-                progress_callback=progress.set_value,
+            return
+        disp_dlg = self.window.display_settings_dlg
+        data_dlg = self.window.window.dataset_dialog
+        pixelsize = self.window.window.view.pixelsize
+        view = self.window.view_rot
+        locs, infos = view._prepare_locs_for_rendering()
+        if view._pan_z:
+            locs = view._apply_pan_z(locs)
+        n_frames = int(self.fps.value() * sum(durations))
+        adjust_display_pixel = disp_dlg.dynamic_disp_px.isChecked()
+        intensities = self.window.window.view.read_relative_intensities()
+        positions = [(p["R"], p["viewport"]) for p in self.positions]
+        segment_rotations = [p["segment_rotvec"] for p in self.positions[1:]]
+        # the frames are rendered at the output resolution: the display
+        # pixel size follows from the last position's field of view
+        width, height = self.width_px.value(), self.height_px.value()
+        last_viewport = positions[-1][1]
+        disp_px_size = pixelsize * render.viewport_width(last_viewport) / width
+        kwargs = dict(
+            positions=positions,
+            durations=durations,
+            segment_rotations=segment_rotations,
+            transition=self.TRANSITIONS[self.transition.currentText()][0],
+            disp_px_size=float(disp_px_size),
+            image_size=(width, height),
+            blur_method=disp_dlg.blur_method(),
+            min_blur_width=disp_dlg.min_blur_width.value() / pixelsize,
+            quadtree_capacity=disp_dlg.quadtree_capacity.value(),
+            triangulation_passes=disp_dlg.triangulation_passes.value(),
+            triangulation_jitter=disp_dlg.triangulation_jitter.value(),
+            contrast=(disp_dlg.minimum.value(), disp_dlg.maximum.value()),
+            invert_colors=data_dlg.wbackground.isChecked(),
+            single_channel_colormap=disp_dlg.colormap.currentText(),
+            colors=self.window.window.view.read_colors(),
+            relative_intensities=intensities,
+            fps=self.fps.value(),
+            adjust_pixel_size=adjust_display_pixel,
+        )
+        self._start_build(path, locs, infos, kwargs, n_frames)
+
+    def _start_build(self, path, locs, infos, kwargs, n_frames) -> None:
+        """Render and encode the frames on a worker thread, with a
+        cancellable, non-modal progress dialog; the windows stay
+        usable meanwhile."""
+        self._build_cancel = threading.Event()
+        progress = QtWidgets.QProgressDialog(
+            "Rendering animation frames", "Cancel", 0, n_frames, self
+        )
+        progress.setWindowTitle("Build an animation")
+        progress.setModal(False)
+        progress.setMinimumDuration(0)
+        progress.setAutoClose(False)
+        progress.setAutoReset(False)
+        progress.canceled.connect(self._build_cancel.set)
+        progress.show()
+        self._build_progress = progress
+        self.build.setEnabled(False)
+
+        worker = AnimationBuilder(
+            path, locs, infos, kwargs, cancel=self._build_cancel.is_set
+        )
+        thread = QtCore.QThread()  # unparented, see ViewRotation
+        worker.moveToThread(thread)
+        worker.progress.connect(progress.setValue)
+        worker.finished.connect(self._build_finished)
+        self._build_thread = thread
+        self._build_worker = worker
+        thread.start()
+        # the work runs inside the thread's event loop (queued signal),
+        # not from ``started``: a build that finished before the loop
+        # began would swallow the ``quit()`` and ``wait()`` forever
+        worker.start()
+
+    def _build_finished(self, completed: bool, error: str) -> None:
+        """Wrap up a build on the GUI thread."""
+        thread = self._build_thread
+        self._build_thread = None
+        self._build_worker = None
+        if thread is not None:
+            thread.quit()
+            thread.wait()
+        if self._build_progress is not None:
+            self._build_progress.close()
+            self._build_progress = None
+        self.build.setEnabled(True)
+        if error:
+            QtWidgets.QMessageBox.warning(
+                self, "Build an animation", f"Building failed:\n\n{error}"
             )
-            progress.close()
+
+    def stop_build(self) -> None:
+        """Cancel a build in progress and wait for its thread (a live
+        QThread must never be destroyed)."""
+        if self._build_cancel is not None:
+            self._build_cancel.set()
+        thread = self._build_thread
+        if thread is not None:
+            thread.quit()
+            thread.wait()
+            self._build_thread = None
+            self._build_worker = None
+        if self._build_progress is not None:
+            self._build_progress.close()
+            self._build_progress = None
+        self.build.setEnabled(True)
+
+
+class AnimationBuilder(QtCore.QObject):
+    """Runs ``render.build_animation`` on a worker thread.
+
+    Attributes
+    ----------
+    progress : QtCore.pyqtSignal
+        The frame number just rendered (drives the progress dialog).
+    finished : QtCore.pyqtSignal
+        Emitted with ``(completed, error)``: ``completed`` is False when
+        cancelled, ``error`` the message of a failure (empty otherwise).
+    """
+
+    progress = QtCore.pyqtSignal(int)
+    finished = QtCore.pyqtSignal(bool, str)
+    _start = QtCore.pyqtSignal()
+
+    def __init__(self, path, locs, infos, kwargs, cancel):
+        super().__init__()
+        self._path = path
+        self._locs = locs
+        self._infos = infos
+        self._kwargs = kwargs
+        self._cancel = cancel
+        # auto connection: queued once this object lives on its thread
+        self._start.connect(self.run)
+
+    def start(self) -> None:
+        """Begin the build on the thread this object was moved to."""
+        self._start.emit()
+
+    @QtCore.pyqtSlot()
+    def run(self) -> None:
+        try:
+            completed = render.build_animation(
+                self._path,
+                self._locs,
+                self._infos,
+                progress_callback=self.progress.emit,
+                cancel=self._cancel,
+                **self._kwargs,
+            )
+        except Exception as error:  # reported in the GUI, never lost
+            self.finished.emit(False, f"{type(error).__name__}: {error}")
+            return
+        self.finished.emit(bool(completed), "")
 
 
 class RotateByAngleDialog(lib.Dialog):
@@ -667,9 +1081,9 @@ class RotateByAngleDialog(lib.Dialog):
 
     Attributes
     ----------
-    angx, angy, angz: QtWidgets.QDoubleSpinBoxes
+    angx, angy, angz : QtWidgets.QDoubleSpinBox
         Store the rotation angles input by the user.
-    frame: QtWidgets.QComboBox
+    frame : QtWidgets.QComboBox
         Selects whether the angles rotate around the data's own axes
         ("Localizations", the axes shown by the axes icon) or the fixed
         screen/camera axes ("World").
@@ -678,7 +1092,7 @@ class RotateByAngleDialog(lib.Dialog):
     def __init__(self, window: QtWidgets.QMainWindow) -> None:
         super().__init__(window)
         self.window = window
-        self.setWindowTitle(f"Enter rotation angles")
+        self.setWindowTitle("Enter rotation angles")
         layout = QtWidgets.QFormLayout(self)
         self.angx = QtWidgets.QDoubleSpinBox()
         self.angx.setValue(0)
@@ -811,11 +1225,33 @@ class ViewRotation(QtWidgets.QLabel):
         loaded.
     window : QMainWindow
         Instance of the rotation window.
+    async_rendering : bool
+        Class attribute: full renders run on a worker thread
+        (``render_worker.RenderWorker``, latest request wins) and the
+        result is shown when it lands, so a drag never blocks the GUI.
+        False renders synchronously on the GUI thread (tests, and the
+        fallback that stays available).
     """
+
+    async_rendering = True
 
     def __init__(self, window: QtWidgets.QMainWindow) -> None:
         super().__init__(window)
         self.window = window
+        self.image = None  # raw image of the last full render (cache)
+        # asynchronous rendering: completed renders are matched against
+        # the newest request id (see ``_on_render_finished``); the
+        # worker thread starts with the first asynchronous request
+        self._render_request_id = 0
+        self._current_request_interactive = False
+        self._render_worker = None
+        self._render_thread = None
+        # interactive requests (drags) render a subsample; the refine
+        # timer follows up with a full-quality render on idle
+        self._refine_timer = QtCore.QTimer(self)
+        self._refine_timer.setSingleShot(True)
+        self._refine_timer.setInterval(150)
+        self._refine_timer.timeout.connect(self._refine_render)
         self._R = Rotation.identity()
         self._rotvec = np.zeros(3)
         self._anchor_rotvec = np.zeros(3)
@@ -826,11 +1262,18 @@ class ViewRotation(QtWidgets.QLabel):
         self.infos = []
         self.paths = []
         self.viewport = None
-        # the pick this window shows, copied from the main window when
-        # it is opened (see ``_sync_from_main_window``); None until then
+        # what this window shows, copied from the main window when it is
+        # opened (see ``_sync_from_main_window``): the single pick, or
+        # the main window's field of view (``_source == "fov"``, pick
+        # attributes None). ``_source_key`` identifies the loaded
+        # content so opening the view again with nothing changed only
+        # raises the window.
         self.pick = None
         self.pick_shape = None
         self.pick_size = None
+        self._source = "pick"
+        self._source_key = None
+        self._fov_viewport = None  # the loaded field of view (fov mode)
         self.group_color = []
         self.x_render_state = False
         self.x_locs = []
@@ -845,6 +1288,18 @@ class ViewRotation(QtWidgets.QLabel):
         self.block_x = False
         self.block_y = False
         self.block_z = False
+        # navigation gestures: the zoom rectangle being dragged (start
+        # and current position in widget pixels), and snapped rotation
+        # while S is held (rotation accumulates until a step is due)
+        self._zoom_rect = None
+        # the rectangle's outline, the same widget the 2D window uses
+        self.rubberband = QtWidgets.QRubberBand(
+            QtWidgets.QRubberBand.Shape.Rectangle, self
+        )
+        self.rubberband.setStyleSheet("selection-background-color: white")
+        self._triple_click = lib_qt.TripleClick()
+        self._snap = False
+        self._snap_accum = np.zeros(3)
         self.setFocusPolicy(QtCore.Qt.FocusPolicy.ClickFocus)
         # track the cursor without a pressed button for live measuring
         self.setMouseTracking(True)
@@ -997,6 +1452,17 @@ class ViewRotation(QtWidgets.QLabel):
             True
         )
         self.window.display_settings_dlg.colormap.setCurrentText(color)
+        self.window.display_settings_dlg.quadtree_capacity.setValue(
+            w.display_settings_dlg.quadtree_capacity.value()
+        )
+        for name in (
+            "triangulation_passes",
+            "triangulation_jitter",
+            "triangulation_max_locs",
+        ):
+            getattr(self.window.display_settings_dlg, name).setValue(
+                getattr(w.display_settings_dlg, name).value()
+            )
 
         # remove measurement points
         self._points = []
@@ -1004,13 +1470,22 @@ class ViewRotation(QtWidgets.QLabel):
         self._measure_following = True
         self._measure_cursor = None
 
-        # save the pick information
-        self.pick = w.view._picks[0]
-        self.pick_shape = w.view._pick_shape
-        self.pick_size = w.view._pick_size
+        if self._source == "fov":
+            # the main window's field of view, rotated about its center
+            self.pick = None
+            self.pick_shape = None
+            self.pick_size = None
+            (y_min, x_min), (y_max, x_max) = w.view.viewport
+            self.viewport = [(y_min, x_min), (y_max, x_max)]
+        else:
+            # save the pick information
+            self.pick = w.view._picks[0]
+            self.pick_shape = w.view._pick_shape
+            self.pick_size = w.view._pick_size
+            self.viewport = self.fit_in_view_rotated(get_viewport=True)
+        self._source_key = source_key(w.view, self._source)
 
-        # update view, dataset_dialog for multichannel data and paths
-        self.viewport = self.fit_in_view_rotated(get_viewport=True)
+        # update dataset_dialog for multichannel data and paths
         self.window.dataset_dialog = w.dataset_dialog
         self.paths = w.view.locs_paths
 
@@ -1026,27 +1501,46 @@ class ViewRotation(QtWidgets.QLabel):
         else:
             self.x_locs = []
 
-    def _collect_picked_locs(self, w, fast_render):
+    def _collect_picked_locs(self, w):
         n_channels = len(self.paths)
         self.locs = []
         self.infos = []
         for i in range(n_channels):
             # only one pick, take the first element
             temp = w.view.picked_locs(i, add_group=False)[0]
-            # restrict to the exact rows the main view is currently
-            # displaying (intersection of the pick with the fast-render
-            # subsample) so the rotation window shows the same locs
-            if fast_render:
-                main_idx = w.view.fast_render_indices[i]
-                if main_idx is not None and len(temp) > 0:
-                    temp = temp.loc[temp.index.isin(main_idx)].reset_index(
-                        drop=True
-                    )
-            temp["z"] /= self.pixelsize
-            if "lpz" in temp.columns:
-                temp["lpz"] /= self.pixelsize
-            self.locs.append(temp)
-            self.infos.append(w.view.infos[i])
+            self._append_channel(temp, w.view.infos[i])
+
+    def _collect_fov_locs(self, w):
+        """The localizations of each channel inside this window's
+        viewport (the main window's field of view when opened, shifted
+        with the arrow keys since), copied like a pick's."""
+        n_channels = len(self.paths)
+        self.locs = []
+        self.infos = []
+        (y_min, x_min), (y_max, x_max) = self.viewport
+        self._fov_viewport = [(y_min, x_min), (y_max, x_max)]  # for fit
+        for i in range(n_channels):
+            locs = w.view.locs[i]
+            # the viewport pyramid's selection where it exists (a slight
+            # superset around the edges is harmless here), else a scan
+            idx = w.view._viewport_indices(i, self.viewport)
+            if idx is None:
+                x = locs["x"].to_numpy()
+                y = locs["y"].to_numpy()
+                idx = np.flatnonzero(
+                    (x >= x_min) & (x < x_max) & (y >= y_min) & (y < y_max)
+                )
+            temp = locs.iloc[idx].reset_index(drop=True)
+            self._append_channel(temp, w.view.infos[i])
+
+    def _append_channel(self, temp, info):
+        """Store one channel's copied localizations with z and lpz in
+        camera pixels, as the rotation math expects them."""
+        temp["z"] /= self.pixelsize
+        if "lpz" in temp.columns:
+            temp["lpz"] /= self.pixelsize
+        self.locs.append(temp)
+        self.infos.append(info)
 
     def _apply_render_property_split(self):
         if not (self.x_render_state and len(self.locs) == 1):
@@ -1076,24 +1570,33 @@ class ViewRotation(QtWidgets.QLabel):
             self.x_render_state = False
             self.x_locs = []
 
-    def load_locs(self, update_window=False):
-        """Load localizations from a pick in the main window.
+    def load_locs(self, update_window=False, source=None):
+        """Load localizations from the main window: those of its single
+        pick, or those in its field of view.
 
-        Called when updating rotation window from there or when
-        shifting the pick from rotation window.
+        Called when updating the rotation window from there or when
+        shifting the pick / the viewport from the rotation window.
 
         Parameters
         ----------
         update_window : bool, optional
             If True, load attributes, such as blur method, from the
             main window.
+        source : {"pick", "fov"}, optional
+            What to show: the main window's single pick or its current
+            field of view. If None, the source shown last is kept
+            (a pick before the window was first opened).
         """
         w = self.window.window  # main window
-        fast_render = update_window
+        if source is not None:
+            self._source = source
         if update_window:
             self._sync_from_main_window(w)
 
-        self._collect_picked_locs(w, fast_render)
+        if self._source == "fov":
+            self._collect_fov_locs(w)
+        else:
+            self._collect_picked_locs(w)
 
         # shift z positions of locs so that the middle of the dataset is
         # at z = 0
@@ -1140,21 +1643,43 @@ class ViewRotation(QtWidgets.QLabel):
         qimage : QImage
             Shows rendered locs; 8 bit, scaled.
         """
+        request = self._build_render_request(
+            viewport=viewport, autoscale=autoscale, use_cache=use_cache
+        )
+        qimage, _, contrast_limits, raw_image = render.render_scene(**request)
+        self._adopt_render_result(contrast_limits, raw_image, cache=cache)
+        return qimage
+
+    def _build_render_request(
+        self,
+        viewport: (
+            tuple[tuple[float, float], tuple[float, float]] | None
+        ) = None,
+        autoscale: bool = False,
+        use_cache: bool = False,
+    ) -> dict:
+        """Snapshot everything ``render.render_scene`` needs, on the GUI
+        thread (dialog reads and locs preparation are not thread safe).
+        The current rotation goes along as ``ang``, so the request
+        renders the same on either thread and either backend."""
         # get disp px size, blur method, etc
         kwargs = self.get_render_kwargs(viewport=viewport)
         locs, infos = self._prepare_locs_for_rendering()
         if self._pan_z:
             locs = self._apply_pan_z(locs)
+        self._apply_triangulation_limit(kwargs, locs)
         vmin = self.window.display_settings_dlg.minimum.value()
         vmax = self.window.display_settings_dlg.maximum.value()
         cmap = self.window.display_settings_dlg.colormap.currentText()
         contrast = None if autoscale else (vmin, vmax)
         raw_image = self.image if use_cache else None
         intensities = self.window.window.view.read_relative_intensities()
-
-        qimage, n_locs, (vmin, vmax), raw_image = render.render_scene(
+        return dict(
             locs=locs,
             info=infos,
+            global_precision=self._global_precisions(
+                locs, kwargs["blur_method"]
+            ),
             **kwargs,
             ang=self._R,
             contrast=contrast,
@@ -1166,17 +1691,66 @@ class ViewRotation(QtWidgets.QLabel):
             return_contrast_limits=True,
             return_raw_image=True,
         )
+
+    def _apply_triangulation_limit(self, kwargs: dict, locs) -> None:
+        """Render the histogram instead of the jittered triangulation
+        when more localizations than the dialog's limit are loaded
+        (every one is projected and triangulated per frame), and say
+        so in the display settings; ``kwargs`` is updated in place."""
+        dialog = self.window.display_settings_dlg
+        if kwargs.get("blur_method") != "triangulation":
+            dialog.set_triangulation_note(None)
+            return
+        channels = [locs] if isinstance(locs, pd.DataFrame) else locs
+        n = sum(len(channel) for channel in channels)
+        if n > dialog.triangulation_max_locs.value():
+            kwargs["blur_method"] = None
+            dialog.set_triangulation_note(n)
+        else:
+            dialog.set_triangulation_note(None)
+
+    def _global_precisions(self, locs, blur_method: str | None):
+        """``render_scene``'s ``global_precision`` for the prepared
+        ``locs``: per frame, its channel's median precision, computed
+        once per loaded channel (see ``render_worker.global_precision_of``);
+        None unless the blur method is 'convolve'."""
+        if blur_method != "convolve":
+            return None
+        cache = getattr(self, "_precision_cache", None)
+        if cache is None:
+            cache = self._precision_cache = {}
+        return global_precisions_for(
+            locs,
+            self.locs,
+            cache,
+            checked=lambda i: (
+                len(self.locs) == 1
+                or self.window.dataset_dialog.checks[i].isChecked()
+            ),
+        )
+
+    def _adopt_render_result(
+        self,
+        contrast_limits: tuple[float, float],
+        raw_image: np.ndarray,
+        cache: bool = True,
+    ) -> None:
+        """Keep a completed render's raw image as the cache of the
+        contrast redraws and show its contrast limits in the display
+        settings dialog."""
         if cache:
             self.image = raw_image
+        vmin, vmax = contrast_limits
         self.window.display_settings_dlg.silent_minimum_update(vmin)
         self.window.display_settings_dlg.silent_maximum_update(vmax)
-        return qimage
 
     def update_scene(
         self,
         viewport: tuple[float, float, float, float] | None = None,
         autoscale: bool = False,
         use_cache: bool = False,
+        interactive: bool = False,
+        synchronous: bool = False,
     ) -> None:
         """Update the view of rendered localizations.
 
@@ -1189,11 +1763,23 @@ class ViewRotation(QtWidgets.QLabel):
             True if optimally adjust contrast.
         use_cache : bool, optional
             True if the rendered scene should be taken from cache.
+        interactive : bool, optional
+            True during a drag: the render may be a subsampled preview,
+            followed by a full-quality render once the drag pauses.
+        synchronous : bool, optional
+            True to render on the GUI thread and return with the new
+            image on screen (exports), whatever ``async_rendering``.
         """
         n_channels = len(self.locs)
         if n_channels:
             viewport = viewport or self.viewport
-            self.draw_scene(viewport, autoscale=autoscale, use_cache=use_cache)
+            self.draw_scene(
+                viewport,
+                autoscale=autoscale,
+                use_cache=use_cache,
+                interactive=interactive,
+                synchronous=synchronous,
+            )
 
         # update current position in the animation dialog
         angx = np.round(self.angx * 180 / np.pi, 1)
@@ -1208,6 +1794,8 @@ class ViewRotation(QtWidgets.QLabel):
         viewport: tuple[float, float, float, float],
         autoscale: bool = False,
         use_cache: bool = False,
+        interactive: bool = False,
+        synchronous: bool = False,
     ) -> None:
         """Render localizations in the given viewport and draws legend,
         rotation, etc.
@@ -1221,13 +1809,32 @@ class ViewRotation(QtWidgets.QLabel):
             True if contrast should be optimally adjusted.
         use_cache : bool, optional
             True if the rendered scene should be taken from cache.
+        interactive, synchronous : bool, optional
+            See ``update_scene``.
         """
         # make sure viewport has the same shape as the main window
         self.viewport = self.adjust_viewport_to_view(viewport)
         if not use_cache:
             self.set_optimal_scalebar(silent=True)
-        # render locs
-        qimage = self.render_scene(autoscale=autoscale, use_cache=use_cache)
+        if use_cache or synchronous or not self.async_rendering:
+            # cache redraws (contrast, colormap, the live measuring
+            # cross) are cheap and stay synchronous for instant feedback
+            qimage = self.render_scene(
+                autoscale=autoscale, use_cache=use_cache
+            )
+            self._complete_scene(qimage)
+        else:
+            # full renders run on the worker thread; the last frame
+            # stays on screen until the new one lands
+            self._submit_async_render(
+                autoscale=autoscale, interactive=interactive
+            )
+
+    def _complete_scene(self, qimage: QtGui.QImage) -> None:
+        """Second half of ``draw_scene``: scale the rendered frame to
+        the window, draw the overlays and show it. Runs on the GUI
+        thread, directly for synchronous renders or from
+        ``_on_render_finished``."""
         # scale image's size to the window
         self.qimage = qimage.scaled(
             self.width(),
@@ -1244,6 +1851,111 @@ class ViewRotation(QtWidgets.QLabel):
         # convert to pixmap
         self.pixmap = QtGui.QPixmap.fromImage(self.qimage)
         self.setPixmap(self.pixmap)
+
+    # --- asynchronous rendering --- #
+    def _ensure_render_worker(self) -> RenderWorker:
+        """The worker and its thread, started on first use so a window
+        that never shows 3D data never runs a thread."""
+        if self._render_thread is None:
+            self._render_worker = RenderWorker()
+            # deliberately unparented: a parented QThread would be
+            # destroyed by Qt while still running whenever the window
+            # is torn down outside closeEvent, which is a hard abort;
+            # the Python reference owns it and stop_render_worker()
+            # ends it
+            self._render_thread = QtCore.QThread()
+            self._render_worker.moveToThread(self._render_thread)
+            self._render_worker.finished.connect(self._on_render_finished)
+            self._render_thread.start()
+        return self._render_worker
+
+    def _submit_async_render(
+        self, autoscale: bool = False, interactive: bool = False
+    ) -> None:
+        """Post the newest render request to the worker (latest wins).
+
+        Interactive requests (drags) render a strided subsample with
+        compensated contrast, by the main view's ``interaction_subsample``
+        rule, and arm the refine timer, which follows up with a
+        full-quality render once the drag pauses.
+        """
+        request = self._build_render_request(autoscale=autoscale)
+        if interactive:
+            interactive = subsample_request(
+                request, self._interaction_subsample_target
+            )
+        self._render_request_id += 1
+        self._current_request_interactive = interactive
+        self._ensure_render_worker().submit(
+            self._render_request_id, request, self.viewport
+        )
+        if interactive:
+            self._refine_timer.start()
+        else:
+            self._refine_timer.stop()
+
+    def _refine_render(self) -> None:
+        """Follow the last interactive preview with a full render."""
+        if len(self.locs) and self.async_rendering:
+            self._submit_async_render()
+
+    def _interaction_subsample_target(self, population: int = 0) -> int:
+        """Preview target for a request of ``population`` loaded
+        localizations, sized by what is in view.
+
+        The main view's rule (one setting for both windows, see
+        ``render.View._interaction_subsample_target``) is applied to the
+        *visible* population - the requests of this window carry every
+        loaded localization, and the preview stride applies to all of
+        them alike - and scaled back to the loaded population. Zoomed
+        in on a few localizations, a preview therefore renders them
+        all; only a view over many localizations is thinned.
+        """
+        rule = self.window.window.view._interaction_subsample_target
+        fraction = self._visible_fraction()
+        visible = int(round(fraction * population))
+        if visible <= 0:
+            return population  # nothing (or no sample) in view: no thinning
+        target = rule(visible)
+        if target <= 0:
+            return 0  # previews disabled
+        return int(np.ceil(target * population / visible))
+
+    def _on_render_finished(
+        self,
+        request_id: int,
+        viewport: tuple,
+        qimage: QtGui.QImage,
+        n_locs: int,
+        contrast_limits: tuple[float, float],
+        raw_image: np.ndarray,
+    ) -> None:
+        """Apply a completed worker render on the GUI thread.
+
+        Every frame is shown: a superseded one is still fresher than
+        what is on screen and, during a drag, an intermediate
+        orientation on the way to the newest request. Only the newest
+        full-quality render updates the raw-image cache and the
+        contrast spinboxes — a preview's subsampled image would corrupt
+        later contrast redraws, and its compensated limits are not the
+        user's.
+        """
+        if (
+            request_id == self._render_request_id
+            and not self._current_request_interactive
+        ):
+            self._adopt_render_result(contrast_limits, raw_image)
+        self._complete_scene(qimage)
+
+    def stop_render_worker(self) -> None:
+        """Stop the render worker thread, if one was started. A render
+        in flight is allowed to finish first — destroying a live
+        QThread aborts the process."""
+        if self._render_thread is not None:
+            self._render_thread.quit()
+            self._render_thread.wait()
+            self._render_thread = None
+            self._render_worker = None
 
     def draw_scalebar(self, image: QtGui.QImage) -> QtGui.QImage:
         """Draw a scalebar.
@@ -1356,11 +2068,11 @@ class ViewRotation(QtWidgets.QLabel):
         image : QImage
             Image with the drawn points.
         """
-        color = (
-            QtGui.QColor("yellow")
-            if not self.window.dataset_dialog.wbackground.isChecked()
-            else QtGui.QColor("red")
-        )
+        # the Measure tool looks as in the main window, whose background
+        # this window shares
+        t_dialog = self.window.window.tools_settings_dialog
+        style = t_dialog.measure_overlay_style()
+        mark_width = t_dialog.measure_style.value("marker_size")
         # draw all finalized measurement sets (static, no live cursor)
         for point_set in self._point_sets:
             image = render.draw_points(
@@ -1368,7 +2080,8 @@ class ViewRotation(QtWidgets.QLabel):
                 viewport=self.viewport,
                 points=point_set,
                 pixelsize=self.window.window.view.pixelsize,
-                color=color,
+                mark_width=mark_width,
+                style=style,
             )
         # draw the active set; show the live cursor cross and running
         # distance only in Measure mode while the cursor is followed
@@ -1382,8 +2095,9 @@ class ViewRotation(QtWidgets.QLabel):
             viewport=self.viewport,
             points=self._points,
             pixelsize=self.window.window.view.pixelsize,
-            color=color,
+            mark_width=mark_width,
             cursor=cursor,
+            style=style,
         )
 
     def rotation_input(self) -> None:
@@ -1432,16 +2146,21 @@ class ViewRotation(QtWidgets.QLabel):
             copied from the main window yet, i.e. before this window has
             been opened for the first time.
         """
-        if self.pick_shape is None:  # never opened; nothing to fit to
+        if self.pick_shape is not None:
+            x_min, x_max, y_min, y_max = lib.pick_bounds(
+                self.pick, self.pick_shape, self.pick_size
+            )
+            viewport = [(y_min, x_min), (y_max, x_max)]
+        elif self._fov_viewport is not None:
+            # the field of view that was loaded (see _collect_fov_locs)
+            viewport = [tuple(v) for v in self._fov_viewport]
+        else:  # never opened; nothing to fit to
             return None
-        x_min, x_max, y_min, y_max = lib.pick_bounds(
-            self.pick, self.pick_shape, self.pick_size
-        )
-        viewport = [(y_min, x_min), (y_max, x_max)]
         if get_viewport:
             return viewport
         else:
             self.viewport = viewport
+            self._reanchor_pivot()
             self.update_scene()
 
     def xy_projection(self) -> None:
@@ -1539,36 +2258,48 @@ class ViewRotation(QtWidgets.QLabel):
         """
         (y_min, x_min), (y_max, x_max) = self.viewport
         new_viewport = [(y_min + dy, x_min + dx), (y_max + dy, x_max + dx)]
-        self.load_locs()  # pick locs in the new viewport
-        self.update_scene(viewport=new_viewport)
+        self.viewport = new_viewport
+        self.load_locs()  # the (moved) pick's locs, or the new viewport's
+        self._reanchor_pivot()
+        self.update_scene(viewport=self.viewport)
 
     def keyPressEvent(self, event: QtGui.QKeyEvent) -> None:
-        """Block axes if 'X', 'Y' or 'Z' is pressed on the keyboard."""
-        if event.key() == 88:  # x
-            self.block_x = True
-            self.block_y = False
-            self.block_z = False
-            event.accept()
-        elif event.key() == 89:  # y
-            self.block_x = False
-            self.block_y = True
-            self.block_z = False
-            event.accept()
-        elif event.key() == 90:  # z
-            self.block_x = False
-            self.block_y = False
-            self.block_z = True
-            event.accept()
+        """Held keys: X, Y, Z lock the rotation axis, S snaps rotation
+        to 15 degree steps. Pressed keys: Home fits the loaded region,
+        1, 2 and 3 select the XY, XZ and YZ projections."""
+        key = event.key()
+        Key = QtCore.Qt.Key
+        if key == Key.Key_X:
+            self.block_x, self.block_y, self.block_z = True, False, False
+        elif key == Key.Key_Y:
+            self.block_x, self.block_y, self.block_z = False, True, False
+        elif key == Key.Key_Z:
+            self.block_x, self.block_y, self.block_z = False, False, True
+        elif key == Key.Key_S:
+            self._snap = True
+            self._snap_accum = np.zeros(3)
+        elif key == Key.Key_Home and len(self.locs):
+            self.fit_in_view_rotated()
+        elif key == Key.Key_1 and len(self.locs):
+            self.xy_projection()
+        elif key == Key.Key_2 and len(self.locs):
+            self.xz_projection()
+        elif key == Key.Key_3 and len(self.locs):
+            self.yz_projection()
         else:
             event.ignore()
+            return
+        event.accept()
 
     def keyReleaseEvent(self, event: QtGui.QKeyEvent) -> None:
-        """Stop blocking axes if 'X', 'Y' or 'Z' is released on the
-        keyboard."""
-        if event.key() in [88, 89, 90]:  # x, y or z
-            self.block_x = False
-            self.block_y = False
-            self.block_z = False
+        """Release the axis lock or the rotation snapping."""
+        key = event.key()
+        Key = QtCore.Qt.Key
+        if key in (Key.Key_X, Key.Key_Y, Key.Key_Z):
+            self.block_x = self.block_y = self.block_z = False
+            event.accept()
+        elif key == Key.Key_S:
+            self._snap = False
             event.accept()
         else:
             event.ignore()
@@ -1576,6 +2307,22 @@ class ViewRotation(QtWidgets.QLabel):
     def mouseMoveEvent(self, event: QtGui.QMouseEvent) -> None:
         """Define actions taken when moving mouse, for example, rotating
         locs, panning or live updating the measuring cross."""
+        if self._zoom_rect is not None:
+            (x0, y0), _ = self._zoom_rect
+            self._zoom_rect = (
+                self._zoom_rect[0],
+                (event.pos().x(), event.pos().y()),
+            )
+            # like the 2D window: the rectangle only stretches towards
+            # the bottom right; dragging the other way collapses it
+            self.rubberband.setGeometry(
+                QtCore.QRect(QtCore.QPoint(x0, y0), event.pos())
+            )
+            return
+        if self._pan:
+            self._pan_drag(event)
+            return
+
         # live update of the measuring cross and distance
         if self._mode == "Measure" and self._measure_following:
             self._measure_cursor = self.map_to_movie(event.pos())
@@ -1586,11 +2333,9 @@ class ViewRotation(QtWidgets.QLabel):
         if self._mode != "Rotate":
             return
 
-        if self._pan:
-            self._pan_drag(event)
         # only rotate while the left button is held; mouse tracking is on
         # so hover events (no button) must not rotate the data
-        elif event.buttons() & QtCore.Qt.MouseButton.LeftButton:
+        if event.buttons() & QtCore.Qt.MouseButton.LeftButton:
             self._rotate_drag(event)
 
     def leaveEvent(self, event: QtCore.QEvent) -> None:
@@ -1645,7 +2390,7 @@ class ViewRotation(QtWidgets.QLabel):
                     1.0 if self.block_z else 0.0,
                 ]
             )
-            self.apply_rotation(v * keep, frame=frame)
+            self._apply_drag_rotation(v * keep, frame)
         else:
             # Free trackball. With Ctrl, horizontal drag turns and
             # vertical drag spins in the screen plane (screen Z spin),
@@ -1655,8 +2400,8 @@ class ViewRotation(QtWidgets.QLabel):
                 az = ax
                 ax = 0.0
             delta_R = render.rotation_matrix(ax, ay, az)
-            self.apply_rotation(delta_R.as_rotvec())
-        self.update_scene()
+            self._apply_drag_rotation(delta_R.as_rotvec(), "world")
+        self.update_scene(interactive=True)
 
     def _pan_drag(self, event: QtGui.QMouseEvent) -> None:
         """Inverse-rotation panning: convert the screen-space mouse delta
@@ -1670,46 +2415,194 @@ class ViewRotation(QtWidgets.QLabel):
         self.pan_start_y = event.pos().y()
         if dx_pix == 0 and dy_pix == 0:
             return
-
         vh, vw = render.viewport_size(self.viewport)
-        screen_delta = np.array(
-            [dx_pix / self.width() * vw, dy_pix / self.height() * vh, 0.0]
+        # the content follows the mouse: the view target moves the
+        # other way
+        self._shift_view(
+            -dx_pix / self.width() * vw, -dy_pix / self.height() * vh
         )
-        world_delta = self._R.inv().apply(screen_delta)
-        # The viewport stores X/Y of the view target; ``_pan_z`` stores Z.
-        # Same sign convention as the viewport (subtract on pan). Update
-        # ``_pan_z`` before ``pan_relative`` because ``pan_relative`` calls
-        # ``update_scene`` internally and we want both deltas in one frame.
-        self._pan_z -= float(world_delta[2])
-        # pan_relative takes (dy, dx) in *relative* viewport units and
-        # subtracts ``dx * vw`` from the viewport X (and similarly for Y),
-        # which is exactly ``viewport_center -= world_delta[:2]``.
-        self.pan_relative(
-            float(world_delta[1]) / vh, float(world_delta[0]) / vw
-        )
+        self._reanchor_pivot()
+        self.update_scene(interactive=True)
+
+    def _shift_view(self, screen_dx: float, screen_dy: float) -> None:
+        """Move the view target by a shift given in the screen frame
+        (camera pixels along the screen axes): converted to world
+        coordinates through ``R^-1``, its X/Y components move the
+        viewport and its Z component the depth ``_pan_z``, so the shift
+        is right at any rotation, including ±90°."""
+        world_delta = self._R.inv().apply([screen_dx, screen_dy, 0.0])
+        (y_min, x_min), (y_max, x_max) = self.viewport
+        dx, dy = float(world_delta[0]), float(world_delta[1])
+        self.viewport = [(y_min + dy, x_min + dx), (y_max + dy, x_max + dx)]
+        self._pan_z += float(world_delta[2])
+
+    def _zoom_at(self, factor: float, pos: QtCore.QPointF | None) -> None:
+        """Zoom the view by ``factor`` (below one zooms in) about the
+        widget position ``pos``, which stays under the cursor; about
+        the center when ``pos`` is None."""
+        if self.viewport is None or not len(self.locs):
+            return
+        vh, vw = render.viewport_size(self.viewport)
+        if pos is not None:
+            # the cursor's offset from the center (screen frame) keeps
+            # its place: the target moves towards it by (1 - factor)
+            rel_x = pos.x() / self.width() - 0.5
+            rel_y = pos.y() / self.height() - 0.5
+            self._shift_view(
+                rel_x * vw * (1 - factor), rel_y * vh * (1 - factor)
+            )
+        self.viewport = render.zoom_viewport(self.viewport, factor)
+        self._reanchor_pivot()
+        self.update_scene()
+
+    def wheelEvent(self, event: QtGui.QWheelEvent) -> None:
+        """Ctrl (Cmd on macOS) + mouse wheel or trackpad scroll zooms
+        about the cursor (smooth: about ten percent per wheel notch),
+        as in the main window."""
+        delta = event.angleDelta().y()
+        ctrl = event.modifiers() & QtCore.Qt.KeyboardModifier.ControlModifier
+        if delta == 0 or not ctrl or not len(self.locs):
+            event.ignore()
+            return
+        self._zoom_at(1.1 ** (-delta / 120.0), event.position())
+        event.accept()
+
+    def event(self, event: QtCore.QEvent) -> bool:
+        """Pinch-to-zoom on trackpads (macOS native gesture)."""
+        if event.type() == QtCore.QEvent.Type.NativeGesture and (
+            event.gestureType()
+            == QtCore.Qt.NativeGestureType.ZoomNativeGesture
+        ):
+            if len(self.locs):
+                self._zoom_at(1.0 / (1.0 + event.value()), event.position())
+            return True
+        return super().event(event)
+
+    def mouseDoubleClickEvent(self, event: QtGui.QMouseEvent) -> None:
+        """Treat the double click as a press, which is what QWidget does
+        by default, then remember it: a third click completes a triple
+        click (see ``mousePressEvent``)."""
+        self.mousePressEvent(event)
+        self._triple_click.double_clicked(event)
+
+    def _triple_clicked(self, event: QtGui.QMouseEvent) -> None:
+        """Triple click fits the loaded region back into the window;
+        with Shift it also resets the rotation."""
+        if event.modifiers() & QtCore.Qt.KeyboardModifier.ShiftModifier:
+            self.set_rotation(Rotation.identity())
+            self._pan_z = 0.0
+        self.fit_in_view_rotated()
+        event.accept()
+
+    def _finish_zoom_rectangle(self) -> None:
+        """Zoom to the rectangle dragged with Shift + left button (a
+        drag too small to be one is ignored)."""
+        (x0, y0), (x1, y1) = self._zoom_rect
+        self._zoom_rect = None
+        self.rubberband.hide()
+        # releasing above or left of the start cancels (as in 2D)
+        w_pix, h_pix = x1 - x0, y1 - y0
+        if w_pix < 5 or h_pix < 5 or not len(self.locs):
+            return
+        vh, vw = render.viewport_size(self.viewport)
+        # the rectangle's center becomes the view target, its extent
+        # (widened to the window's aspect by draw_scene) the field
+        cx = (x0 + x1) / 2 / self.width() - 0.5
+        cy = (y0 + y1) / 2 / self.height() - 0.5
+        self._shift_view(cx * vw, cy * vh)
+        (y_min, x_min), (y_max, x_max) = self.viewport
+        new_w, new_h = w_pix / self.width() * vw, h_pix / self.height() * vh
+        center_y, center_x = render.viewport_center(self.viewport)
+        self.viewport = [
+            (center_y - new_h / 2, center_x - new_w / 2),
+            (center_y + new_h / 2, center_x + new_w / 2),
+        ]
+        self.viewport = self.adjust_viewport_to_view(self.viewport)
+        self._reanchor_pivot()
+        self.update_scene()
+
+    def _apply_drag_rotation(self, rotvec: np.ndarray, frame: str) -> None:
+        """Apply a drag's rotation increment, or, while S is held,
+        accumulate it and apply whole ``SNAP_STEP`` steps only."""
+        if not self._snap:
+            self.apply_rotation(rotvec, frame=frame)
+            return
+        self._snap_accum = self._snap_accum + rotvec
+        magnitude = float(np.linalg.norm(self._snap_accum))
+        if magnitude < self.SNAP_STEP:
+            return
+        steps = int(magnitude // self.SNAP_STEP)
+        quantum = self._snap_accum / magnitude * self.SNAP_STEP * steps
+        self._snap_accum = self._snap_accum - quantum
+        self.apply_rotation(quantum, frame=frame)
+
+    #: rotation step while S is held (radians): 15 degrees
+    SNAP_STEP = np.pi / 12
 
     def mousePressEvent(self, event: QtGui.QMouseEvent) -> None:
         """Define actions taken when pressing mouse buttons, for
-        example, starting rotating locs or panning."""
-        if self._mode == "Rotate":
-            # start rotation
-            if event.button() == QtCore.Qt.MouseButton.LeftButton:
-                self._last_mouse_x = event.pos().x()
-                self._last_mouse_y = event.pos().y()
-                event.accept()
+        example, starting rotating locs or panning.
 
-            # start panning
-            elif event.button() == QtCore.Qt.MouseButton.RightButton:
-                self._pan = True
-                self.pan_start_x = event.pos().x()
-                self.pan_start_y = event.pos().y()
-                self.setCursor(QtCore.Qt.CursorShape.ClosedHandCursor)
-                event.accept()
+        Navigation works in every mode: Shift + left button drags a
+        zoom rectangle; the right button, the middle button or Alt
+        (Option) + left button pan. In Rotate mode a plain left drag
+        rotates. In Measure mode the right button keeps its measuring
+        role (freeze a set, delete the last set, see
+        ``mouseReleaseEvent``), as in the main window; pan with the
+        middle button or Alt + left there."""
+        left = event.button() == QtCore.Qt.MouseButton.LeftButton
+        right = event.button() == QtCore.Qt.MouseButton.RightButton
+        middle = event.button() == QtCore.Qt.MouseButton.MiddleButton
+        modifiers = event.modifiers()
+        if self._triple_click.is_third(event) and len(self.locs):
+            self._triple_clicked(event)
+            return
+        if left and modifiers & QtCore.Qt.KeyboardModifier.ShiftModifier:
+            self._zoom_rect = (
+                (event.pos().x(), event.pos().y()),
+                (event.pos().x(), event.pos().y()),
+            )
+            self.rubberband.setGeometry(
+                QtCore.QRect(event.pos(), QtCore.QSize())
+            )
+            self.rubberband.show()
+            event.accept()
+            return
+        if (
+            middle
+            or (right and self._mode != "Measure")
+            or (left and modifiers & QtCore.Qt.KeyboardModifier.AltModifier)
+        ):
+            self._pan = True
+            self.pan_start_x = event.pos().x()
+            self.pan_start_y = event.pos().y()
+            self.setCursor(QtCore.Qt.CursorShape.ClosedHandCursor)
+            event.accept()
+            return
+        if self._mode == "Rotate" and left:
+            # start rotation
+            self._last_mouse_x = event.pos().x()
+            self._last_mouse_y = event.pos().y()
+            self._snap_accum = np.zeros(3)
+            event.accept()
 
     def mouseReleaseEvent(self, event: QtGui.QMouseEvent) -> None:
         """Define actions taken when releasing mouse buttons, for
         example, stopping rotating locs or panning, add or delete a measure
         point."""
+        if self._zoom_rect is not None:
+            self._zoom_rect = (
+                self._zoom_rect[0],
+                (event.pos().x(), event.pos().y()),
+            )
+            self._finish_zoom_rectangle()
+            event.accept()
+            return
+        if self._pan:
+            self._pan = False
+            self.update_cursor()
+            event.accept()
+            return
         if self._mode == "Measure":
             # add a measure point on left click; the first right click
             # freezes the current set so a new one can be started; a
@@ -1737,10 +2630,6 @@ class ViewRotation(QtWidgets.QLabel):
             # stop rotation
             if event.button() == QtCore.Qt.MouseButton.LeftButton:
                 event.accept()
-            # stop panning
-            elif event.button() == QtCore.Qt.MouseButton.RightButton:
-                self._pan = False
-                event.accept()
 
     def map_to_movie(self, position: QtCore.QPoint) -> tuple[float, float]:
         """Convert coordinates from Qt display units to camera units."""
@@ -1754,13 +2643,17 @@ class ViewRotation(QtWidgets.QLabel):
         )
         return x_movie, y_movie
 
-    def pan_relative(self, dy: float, dx: float) -> None:
+    def pan_relative(
+        self, dy: float, dx: float, interactive: bool = False
+    ) -> None:
         """Move viewport by a given relative distance.
 
         Parameters
         ----------
         dy, dx : float
             Relative displacement of the viewport in y or x axis.
+        interactive : bool, optional
+            True during a drag, see ``update_scene``.
         """
         viewport_height, viewport_width = render.viewport_size(self.viewport)
         x_move = dx * viewport_width
@@ -1770,7 +2663,7 @@ class ViewRotation(QtWidgets.QLabel):
         y_min = self.viewport[0][0] - y_move
         y_max = self.viewport[1][0] - y_move
         self.viewport = [(y_min, x_min), (y_max, x_max)]
-        self.update_scene()
+        self.update_scene(interactive=interactive)
 
     def add_point(
         self,
@@ -1849,10 +2742,10 @@ class ViewRotation(QtWidgets.QLabel):
             if not scalebar:
                 self.set_optimal_scalebar(force=True)
                 scalebar_box.setChecked(True)
-                self.update_scene()
+                self.update_scene(synchronous=True)
                 self.qimage.save(os.path.splitext(path)[0] + "_scalebar.png")
                 scalebar_box.setChecked(False)
-                self.update_scene()
+                self.update_scene(synchronous=True)
 
     def save_property_colorbar(self, path: str) -> None:
         """Save the color bar (LUT) of the rendered property next to an
@@ -1896,7 +2789,7 @@ class ViewRotation(QtWidgets.QLabel):
             "Min. density": d.minimum.value(),
             "Max. density": d.maximum.value(),
             "Colormap": d.colormap.currentText(),
-            "Blur method": d.blur_methods[d.blur_buttongroup.checkedButton()],
+            "Blur method": d.blur_method(),
             "Scale bar length (nm)": d.scalebar.value(),
             "Min. blur (nm)": d.min_blur_width.value() / pixelsize,
             "Localizations loaded": self.paths,
@@ -1922,8 +2815,97 @@ class ViewRotation(QtWidgets.QLabel):
 
     def zoom(self, factor: float) -> None:
         """Change zoom relatively to factor by changing viewport."""
-        new_viewport = render.zoom_viewport(self.viewport, factor)
-        self.update_scene(new_viewport)
+        self.viewport = render.zoom_viewport(self.viewport, factor)
+        # what is in view changed: keep the pivot at its depth
+        self._reanchor_pivot()
+        self.update_scene()
+
+    # --- rotation pivot --- #
+    # The render pipeline rotates about the world point at the screen
+    # center: the viewport center in x/y at depth ``_pan_z`` (z is
+    # shifted by ``-_pan_z`` before rotating, see ``_apply_pan_z``).
+    # A screen-space pan while the view is tilted has a z component in
+    # world coordinates, which would accumulate in ``_pan_z`` and leave
+    # the pivot in front of or behind the structure at the screen
+    # center - rotations then make it orbit. Under the orthographic
+    # projection the pivot can slide along the viewing direction without
+    # changing the image, so after every pan or zoom it is slid to the
+    # median depth of the localizations in view.
+    _PIVOT_SAMPLE = 200_000  # localizations sampled for the median depth
+
+    def _in_view_sample(self) -> tuple[np.ndarray, np.ndarray] | None:
+        """A sample of at most ``_PIVOT_SAMPLE`` localizations (x, y, z
+        in the loaded frame) and, per row, whether its rotated position
+        falls inside the viewport; None when nothing is loaded."""
+        if not self.locs or self.viewport is None:
+            return None
+        channels = [
+            locs
+            for locs in self.locs
+            if len(locs) and {"x", "y", "z"} <= set(locs.columns)
+        ]
+        if not channels:
+            return None
+        total = sum(len(locs) for locs in channels)
+        step = max(1, -(-total // self._PIVOT_SAMPLE))
+        xyz = np.concatenate(
+            [
+                locs[["x", "y", "z"]].to_numpy(dtype=float)[::step]
+                for locs in channels
+            ]
+        )
+        (y_min, x_min), (y_max, x_max) = self.viewport
+        pivot = np.array(
+            [
+                x_min + (x_max - x_min) / 2,
+                y_min + (y_max - y_min) / 2,
+                self._pan_z,
+            ]
+        )
+        screen = self._R.apply(xyz - pivot)
+        in_view = (np.abs(screen[:, 0]) <= (x_max - x_min) / 2) & (
+            np.abs(screen[:, 1]) <= (y_max - y_min) / 2
+        )
+        return xyz, in_view
+
+    def _in_view_median_z(self) -> float | None:
+        """Median z (camera pixels, the loaded frame) of the localizations
+        whose rotated position falls inside the viewport; None when no
+        localization is in view."""
+        sample = self._in_view_sample()
+        if sample is None:
+            return None
+        xyz, in_view = sample
+        if not in_view.any():
+            return None
+        return float(np.median(xyz[in_view, 2]))
+
+    def _visible_fraction(self) -> float:
+        """Fraction of the loaded localizations whose rotated position
+        falls inside the viewport (estimated from a sample); 1.0 when
+        nothing is loaded."""
+        sample = self._in_view_sample()
+        if sample is None:
+            return 1.0
+        return float(sample[1].mean())
+
+    def _reanchor_pivot(self) -> None:
+        """Slide the rotation pivot along the viewing direction to the
+        median depth of the localizations in view (see the note above);
+        the viewport and ``_pan_z`` move together, the image does not."""
+        if not self.locs or self.viewport is None:
+            return
+        direction = self._R.inv().apply([0.0, 0.0, 1.0])  # screen normal
+        if abs(direction[2]) < 0.2:
+            return  # nearly edge-on: no well-defined depth along the ray
+        z_ref = self._in_view_median_z()
+        if z_ref is None:
+            return
+        t = (z_ref - self._pan_z) / direction[2]
+        dx, dy = t * float(direction[0]), t * float(direction[1])
+        (y_min, x_min), (y_max, x_max) = self.viewport
+        self.viewport = [(y_min + dy, x_min + dx), (y_max + dy, x_max + dx)]
+        self._pan_z = z_ref
 
     def set_mode(self, action: QtGui.QAction) -> None:
         """Set ``self._mode`` for QMouseEvents.
@@ -1991,8 +2973,6 @@ class ViewRotation(QtWidgets.QLabel):
         disp_dlg = self.window.display_settings_dlg
         pixelsize = self.window.window.view.pixelsize
 
-        # blur method
-        blur_button = disp_dlg.blur_buttongroup.checkedButton()
         # oversampling
         opt_oversampling = self.display_pixels_per_viewport_pixels(
             viewport=viewport
@@ -2023,10 +3003,13 @@ class ViewRotation(QtWidgets.QLabel):
         kwargs = {
             "disp_px_size": disp_px_size,
             "viewport": viewport,
-            "blur_method": disp_dlg.blur_methods[blur_button],
+            "blur_method": disp_dlg.blur_method(),
             "min_blur_width": float(
                 disp_dlg.min_blur_width.value() / pixelsize
             ),
+            "quadtree_capacity": disp_dlg.quadtree_capacity.value(),
+            "triangulation_passes": disp_dlg.triangulation_passes.value(),
+            "triangulation_jitter": disp_dlg.triangulation_jitter.value(),
         }
         return kwargs
 
@@ -2130,7 +3113,7 @@ class RotationWindow(QtWidgets.QMainWindow):
         parent).
     """
 
-    DOCS_URL = "https://picassosr.readthedocs.io/en/latest/render.html#d-rotation-window"  # noqa: E501
+    DOCS_URL = docs_url("render.html#d-rotation-window")
 
     def __init__(self, window: QtWidgets.QMainWindow) -> None:
         super().__init__()
@@ -2266,6 +3249,8 @@ class RotationWindow(QtWidgets.QMainWindow):
         dx, dy : float
             Pick shift in x or y axis (camera pixels).
         """
+        if self.view_rot.pick_shape is None:
+            return  # the field of view is shown: no pick to move
         if self.view_rot.pick_shape in ["Circle", "Square"]:
             x = self.window.view._picks[0][0]
             y = self.window.view._picks[0][1]
@@ -2305,6 +3290,32 @@ class RotationWindow(QtWidgets.QMainWindow):
 
         self.window.view.update_scene()  # update scene in main window
 
+    def _resolve_picks(self) -> tuple:
+        """Obtain pick coordiantes for saving given their shape."""
+        pixelsize = self.window.view.pixelsize
+        if self.view_rot.pick_shape is None:
+            # the field of view: its bounds, like a box pick
+            (y0, x0), (y1, x1) = self.view_rot.viewport
+            pick = [[float(x0), float(y0)], [float(x1), float(y1)]]
+        elif self.view_rot.pick_shape in ["Circle", "Square"]:
+            x, y = self.view_rot.pick
+            pick = [float(x), float(y)]
+        elif self.view_rot.pick_shape in ["Rectangle", "Box"]:
+            (x0, y0), (x1, y1) = self.view_rot.pick
+            pick = [[float(x0), float(y0)], [float(x1), float(y1)]]
+        elif self.view_rot.pick_shape == "Brush":
+            # same stroke form as the picks file, widths in nm
+            pick = [
+                {
+                    "Width (nm)": float(stroke[0] * pixelsize),
+                    "Path": [[float(x), float(y)] for x, y in stroke[1]],
+                }
+                for stroke in self.view_rot.pick
+            ]
+        else:  # polygon - an arbitrary number of vertices
+            pick = [[float(x), float(y)] for x, y in self.view_rot.pick]
+        return pick
+
     def save_locs_rotated(self) -> None:
         """Save locs from the main window and provides rotation info for
         later loading."""
@@ -2316,30 +3327,14 @@ class RotationWindow(QtWidgets.QMainWindow):
             angx = int(self.view_rot.angx * 180 / np.pi)
             angy = int(self.view_rot.angy * 180 / np.pi)
             angz = int(self.view_rot.angz * 180 / np.pi)
-            pixelsize = self.window.window.view.pixelsize
-            if self.view_rot.pick_shape in ["Circle", "Square"]:
-                x, y = self.view_rot.pick
-                pick = [float(x), float(y)]
-            elif self.view_rot.pick_shape in ["Rectangle", "Box"]:
-                (x0, y0), (x1, y1) = self.view_rot.pick
-                pick = [[float(x0), float(y0)], [float(x1), float(y1)]]
-            elif self.view_rot.pick_shape == "Brush":
-                # same stroke form as the picks file, widths in nm
-                pick = [
-                    {
-                        "Width (nm)": float(stroke[0] * pixelsize),
-                        "Path": [[float(x), float(y)] for x, y in stroke[1]],
-                    }
-                    for stroke in self.view_rot.pick
-                ]
-            else:  # polygon - an arbitrary number of vertices
-                pick = [[float(x), float(y)] for x, y in self.view_rot.pick]
+            pixelsize = self.window.view.pixelsize
+            pick = self._resolve_picks()
             size = self.view_rot.pick_size
             new_info = [
                 {
                     "Generated by": f"Picasso v{__version__} Render 3D",
                     "Pick": pick,
-                    "Pick shape": self.view_rot.pick_shape,
+                    "Pick shape": self.view_rot.pick_shape or "Field of view",
                     # polygons and boxes carry their own extent
                     "Pick size (nm)": (
                         size * pixelsize if size is not None else None
@@ -2356,7 +3351,7 @@ class RotationWindow(QtWidgets.QMainWindow):
             ]
 
             # combine all channels
-            if channel is (len(self.view_rot.paths) + 1):
+            if channel == len(self.view_rot.paths) + 1:
                 base, ext = os.path.splitext(self.view_rot.paths[0])
                 out_path = base + "_multi.hdf5"
                 path, ext = lib.get_save_filename_ext_dialog(
@@ -2367,11 +3362,9 @@ class RotationWindow(QtWidgets.QMainWindow):
                     check_ext=".yaml",
                 )
                 if path:
-                    # combine locs from all channels
-                    all_locs = pd.concat(
-                        self.window.view.locs,
-                        ignore_index=True,
-                    )
+                    # combine locs from all channels, which need not all
+                    # have the same columns
+                    all_locs = lib.concat_locs(self.window.view.locs)
                     all_locs.sort_values(
                         kind="quicksort",
                         by="frame",
@@ -2380,7 +3373,7 @@ class RotationWindow(QtWidgets.QMainWindow):
                     info = self.view_rot.infos[0] + new_info
                     io.save_locs(path, all_locs, info)
             # save all channels one by one
-            elif channel is (len(self.view_rot.paths)):  # all channels
+            elif channel == len(self.view_rot.paths):  # all channels
                 suffix, ok = QtWidgets.QInputDialog.getText(
                     self,
                     "Input Dialog",
@@ -2408,11 +3401,12 @@ class RotationWindow(QtWidgets.QMainWindow):
                     self,
                     "Save rotated localizations",
                     out_path,
-                    filter="*hdf5",
+                    filter="*.hdf5",
                     check_ext=".yaml",
                 )
-                info = self.view_rot.infos[channel] + new_info
-                io.save_locs(path, self.window.view.locs[channel], info)
+                if path:
+                    info = self.view_rot.infos[channel] + new_info
+                    io.save_locs(path, self.window.view.locs[channel], info)
 
     def update_scene(self) -> None:
         """Update the scene in ViewRotation."""
@@ -2436,7 +3430,11 @@ class RotationWindow(QtWidgets.QMainWindow):
         QtWidgets.QMainWindow.hideEvent(self, event)
 
     def closeEvent(self, event: QtGui.QCloseEvent) -> None:
-        """Close all children dialogs and self."""
+        """Close all children dialogs and self; the render worker
+        thread stops too (it restarts with the next asynchronous
+        render when the window is opened again)."""
         self.display_settings_dlg.close()
+        self.animation_dialog.stop_build()
         self.animation_dialog.close()
+        self.view_rot.stop_render_worker()
         QtWidgets.QMainWindow.closeEvent(self, event)

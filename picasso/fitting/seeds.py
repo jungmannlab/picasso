@@ -155,10 +155,32 @@ def initial_parameters_gauss(
     rotated: bool = False,
     spherical: bool = False,
 ) -> lib.FloatArray2D:
-    """Initialize the parameters for a Gaussian fit - photons, x, y, sx,
-    sy, bg (plus the rotation angle if ``rotated``). If ``spherical``,
-    a single width is used and the layout is photons, x, y, s, bg
-    (the isotropic ``GAUSS_2D`` model)."""
+    """Initialize the parameters for a 2D Gaussian fit.
+
+    The layout is amplitude, x, y, sx, sy, bg (plus the rotation angle if
+    ``rotated``). If ``spherical``, a single width is used and the layout is
+    amplitude, x, y, s, bg (the isotropic ``GAUSS_2D`` model).
+
+    Parameters
+    ----------
+    spots : lib.FloatArray3D
+        ``(n_spots, size, size)`` spots, indexed ``[spot, y, x]``.
+    size : int
+        Box side length in camera pixels.
+    rotated : bool, optional
+        Seed the rotated elliptical Gaussian, with the widths and angle taken
+        from the spot's second-moment tensor. Default False.
+    spherical : bool, optional
+        Seed the isotropic Gaussian with a single width. Takes precedence
+        over ``rotated``. Default False.
+
+    Returns
+    -------
+    initial_parameters : lib.FloatArray2D
+        ``(n_spots, n_params)`` float32 seeds, with ``n_params`` 5
+        (spherical), 6 (elliptical) or 7 (rotated). The position is seeded at
+        the box center.
+    """
     center = (size / 2.0) - 0.5
 
     spot_max = np.amax(spots, axis=(1, 2))
@@ -207,8 +229,8 @@ def initial_parameters_gauss_multichannel(
 
     ``spots`` is channel-major ``(n_spots, n_channels, box, box)``. The shared
     position and width are seeded from the **reference channel**, which is
-    exactly right: its Jacobian is the identity and its ROI residual is zero, so
-    the position that describes its spot *is* the shared position the fit
+    exactly right: its Jacobian is the identity and its ROI residual is zero,
+    so the position that describes its spot *is* the shared position the fit
     solves for.
 
     With ``link_photons`` the layout is the single-channel one
@@ -216,6 +238,23 @@ def initial_parameters_gauss_multichannel(
     :func:`initial_parameters_gauss` is reused unchanged. Otherwise each
     channel's own photon count and background are seeded from that channel's
     own spot, giving ``[x, y, sigma, N_0.., bg_0..]``.
+
+    Parameters
+    ----------
+    spots : np.ndarray
+        Channel-major ``(n_spots, n_channels, size, size)`` spots; channel 0
+        is the reference channel.
+    size : int
+        Box side length in camera pixels.
+    link_photons : bool, optional
+        Seed the photon-linked model (one amplitude and background shared by
+        all channels) instead of the photon-decoupled one. Default True.
+
+    Returns
+    -------
+    initial_parameters : lib.FloatArray2D
+        ``(n_spots, 5)`` float32 seeds if ``link_photons``, else
+        ``(n_spots, 3 + 2 * n_channels)``.
     """
     n_channels = spots.shape[1]
     reference = np.ascontiguousarray(spots[:, 0])
@@ -256,7 +295,24 @@ def initial_parameters_spline(
 
     For the multichannel model ``spots`` is channel-stacked
     ``(n, box, box, n_channels)``; amplitude/offset are estimated across all
-    channels."""
+    channels. The photon-decoupled (link-xyz) model is seeded as
+    ``[x_shift, y_shift, z_shift, N_0.., bg_0..]``, with each channel's
+    photons and background estimated from that channel alone.
+
+    Parameters
+    ----------
+    spots : lib.FloatArray3D
+        ``(n, box, box)`` spots, or ``(n, box, box, n_channels)`` for the
+        multichannel models.
+    calibration : dict
+        The spline PSF calibration; its ``"model"`` selects the layout and
+        its ``"z_init"`` (or ``"z_center"``) the initial axial position.
+
+    Returns
+    -------
+    initial_parameters : lib.FloatArray2D
+        ``(n, n_params)`` float32 seeds in the column order above.
+    """
     model = calibration["model"]
     if model == precision._LINK_XYZ_MODEL:
         # Photon-decoupled (link-XYZ) model: parameters
@@ -286,7 +342,8 @@ def initial_parameters_spline(
     spot_min = np.amin(spots, axis=reduce_axes)
     initial = np.zeros((len(spots), n_parameters), dtype=np.float32)
     initial[:, 0] = spot_max - spot_min  # amplitude
-    # x_shift (col 1) and y_shift (col 2) start at 0 (spot centered in the ROI).
+    # x_shift (col 1) and y_shift (col 2) start at 0 (spot centered in the
+    # ROI).
     if model == "spline-2d":
         initial[:, 3] = spot_min  # offset
     else:

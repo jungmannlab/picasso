@@ -12,7 +12,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from picasso import clusterer, lib, postprocess
+from picasso import clusterer, io, lib, postprocess
 
 
 # Reused parameters
@@ -52,6 +52,64 @@ def locs_copy(locs):
 # ---------------------------------------------------------------------------
 # Indexing helpers
 # ---------------------------------------------------------------------------
+
+
+class TestPyramidAsPickIndex:
+    """The load-time render pyramid can stand in for the index blocks
+    of circular picks, with identical results."""
+
+    def test_picked_locs(self, locs, info, origami_picks):
+        from picasso import spatial_index
+
+        pyramid = spatial_index.build_render_index(locs, info)
+        via_blocks = postprocess.picked_locs(
+            locs, info, origami_picks, "Circle", pick_size=PICK_SIZE / 2
+        )
+        via_pyramid = postprocess.picked_locs(
+            locs,
+            info,
+            origami_picks,
+            "Circle",
+            pick_size=PICK_SIZE / 2,
+            index_blocks=pyramid,
+        )
+        assert sum(len(_) for _ in via_pyramid) > 0
+        for a, b in zip(via_blocks, via_pyramid):
+            # equal-frame rows may come out in a different order
+            pd.testing.assert_frame_equal(
+                a.sort_index(), b.sort_index(), check_like=True
+            )
+
+    def test_pick_similar(self, locs, info, origami_picks):
+        from picasso import spatial_index
+
+        pyramid = spatial_index.build_render_index(locs, info)
+        kwargs = dict(
+            locs=locs,
+            info=info,
+            picks=origami_picks,
+            pick_shape="Circle",
+            pick_size=PICK_SIZE,
+            std_range=2.0,
+        )
+        via_blocks = postprocess.pick_similar(**kwargs)
+        via_pyramid = postprocess.pick_similar(index_blocks=pyramid, **kwargs)
+        assert via_pyramid == via_blocks
+
+    def test_other_shapes_ignore_the_pyramid(self, locs, info, origami_picks):
+        from picasso import spatial_index
+
+        pyramid = spatial_index.build_render_index(locs, info)
+        square = postprocess.pick_similar(
+            locs=locs,
+            info=info,
+            picks=origami_picks,
+            pick_shape="Square",
+            pick_size=PICK_SIZE,
+            std_range=2.0,
+            index_blocks=pyramid,
+        )
+        assert isinstance(square, list)
 
 
 class TestIndexBlocks:
@@ -1061,6 +1119,53 @@ class TestFrc:
         frc_res = postprocess.frc(locs, info, viewport=viewport)
         assert frc_res["images"][0].shape[0] == frc_res["images"][0].shape[1]
 
+    def test_given_lp_skips_nena(self, locs, info, monkeypatch):
+        viewport = ((15, 15), (16, 16))
+        expected = postprocess.frc(locs, info, viewport=viewport)
+        lp = postprocess.nena(locs, info)[1]
+
+        def fail(*args, **kwargs):
+            raise AssertionError("nena must not run when lp is given")
+
+        monkeypatch.setattr(postprocess, "nena", fail)
+        frc_res = postprocess.frc(locs, info, viewport=viewport, lp=lp)
+        assert frc_res["resolution"] == pytest.approx(expected["resolution"])
+
+    def test_does_not_modify_locs(self, locs, info):
+        ref = locs.copy()
+        postprocess.frc(locs, info, viewport=((15, 15), (16, 16)))
+        pd.testing.assert_frame_equal(locs, ref)
+
+    def test_plot_without_resolution(self, locs, info):
+        frc_res = postprocess.frc(locs, info, viewport=((15, 15), (16, 16)))
+        frc_res["resolution"] = None
+        fig = postprocess.plot_frc(frc_res)
+        assert "n/a" in fig.axes[0].get_title()
+
+
+class TestFrcRois:
+    def test_results_per_roi(self, locs, info):
+        viewport = ((10, 10), (20, 20))
+        ref = locs.copy()
+        progress = []
+        result = postprocess.frc_rois(
+            locs,
+            info,
+            viewport,
+            n_rois=4,
+            roi_size=260,  # 2 camera pixels
+            min_locs=20,
+            callback=progress.append,
+        )
+        n = len(result["rois"])
+        assert 0 < n <= 4
+        assert len(result["frc_results"]) == n
+        assert result["resolutions"].shape == (n,)
+        assert (result["n_locs"] >= 20).all()
+        assert all("images" not in _ for _ in result["frc_results"])
+        assert progress[-1] == n
+        pd.testing.assert_frame_equal(locs, ref)
+
 
 class TestPairCorrelation:
     def test_shape(self, locs, info):
@@ -1244,9 +1349,39 @@ class TestDarkTimes:
         linked = postprocess.link(locs.copy(), info)
         dt = postprocess.dark_times(linked)
         assert dt.shape == (len(linked),)
-        # -1 sentinel for events not followed by another in the group;
-        # all others must be strictly positive (gap of at least 1 frame).
-        assert ((dt > 0) | (dt == -1)).all()
+        # -1 sentinel for events not preceded by another in the group;
+        # all others count the frames without signal (0 = no gap).
+        assert ((dt >= 0) | (dt == -1)).all()
+
+    def test_dark_times_count_off_frames(self):
+        # frames 3-4 on, 5 off, 6 on (issue example): one dark frame
+        locs = pd.DataFrame(
+            {"frame": np.array([3, 6], dtype=np.uint32), "len": [2, 1]}
+        )
+        assert postprocess.dark_times(locs).tolist() == [-1, 1]
+        # unlinked events in consecutive frames (e.g., separated by more
+        # than the linking radius): no dark frame
+        locs["frame"] = np.array([3, 5], dtype=np.uint32)
+        assert postprocess.dark_times(locs).tolist() == [-1, 0]
+
+    def test_dark_times_closest_preceding_event(self):
+        # unsorted input, one overlapping event (ignored)
+        locs = pd.DataFrame(
+            {
+                "frame": np.array([20, 0, 10, 12], dtype=np.uint32),
+                "len": [1, 5, 5, 1],
+            }
+        )
+        # 20 <- 10-14 (5 dark), 10 <- 0-4 (5 dark), 12 overlaps 10-14
+        # so it follows 0-4 (7 dark)
+        assert postprocess.dark_times(locs).tolist() == [5, -1, 5, 7]
+
+    def test_compute_dark_times_drops_unpreceded(self):
+        locs = pd.DataFrame(
+            {"frame": np.array([3, 6], dtype=np.uint32), "len": [2, 1]}
+        )
+        out = postprocess.compute_dark_times(locs)
+        assert out["dark"].tolist() == [1]
 
     def test_dark_times_with_explicit_group(self, locs, info):
         linked = postprocess.link(locs.copy(), info)
@@ -1916,6 +2051,28 @@ class TestResi:
         assert any(
             "Clustering radius xy (nm) for each channel" in d for d in new_info
         )
+
+    def test_channels_with_different_columns_keep_all_centers(
+        self, locs, info, tmp_path
+    ):
+        """E.g. a wavelet-identified channel (no ``net_gradient``) next to a
+        net gradient one: every center survives the save, which drops rows
+        with NaN."""
+        assert "net_gradient" in locs.columns
+        no_ng = locs.drop(columns="net_gradient")
+        path = str(tmp_path / "resi.hdf5")
+        with pytest.warns(UserWarning, match="net_gradient"):
+            out, _ = postprocess.resi(
+                [locs.copy(), no_ng],
+                [info, info],
+                radius_xy=2 / 130,
+                min_locs=2,
+                resi_path=path,
+            )
+        assert "net_gradient" not in out.columns
+        assert set(out["resi_channel_id"]) == {0, 1}
+        saved, _ = io.load_locs(path)
+        assert len(saved) == len(out)
 
     def test_resi_requires_two_channels(self, locs, info):
         with pytest.raises(ValueError):

@@ -6,7 +6,7 @@ calibration from beads and from the experimental blinking signal.
 import numpy as np
 import pytest
 
-from picasso import io, registration
+from picasso import io, registration, wavelet
 from picasso import transforms as tform
 
 BOX = 7
@@ -671,3 +671,86 @@ class TestMultiFovBeads:
         assert self._register(movie, multi_fov=True)["n_pairs"] == (
             self._register(movie, multi_fov=False)["n_pairs"]
         )
+
+
+class TestWaveletDetection:
+    """Both builders can detect by wavelet segmentation (Izeddin et al.,
+    2012) instead of by the net gradient, as selected for the movie."""
+
+    WAVELET = wavelet.WaveletParameters()
+
+    def test_beads(self):
+        grid = _bead_grid()
+        truth = _rotation(0.015, 5.0, -4.0)
+        movies = [
+            _bead_image(grid, seed=1),
+            _bead_image(_apply(grid, truth), seed=2),
+        ]
+
+        calibration = registration.calibrate_channel_registration_from_beads(
+            movies, box=BOX, minimum_ng=None, wavelet=self.WAVELET
+        )
+
+        np.testing.assert_allclose(
+            _matrix(calibration["channel_transforms"][1]), truth, atol=0.15
+        )
+        assert calibration["identification_method"] == "wavelet"
+        assert calibration["wavelet"] == self.WAVELET.to_dict()
+        assert "minimum_ng" not in calibration
+
+    def test_signal(self):
+        truth = _rotation(0.02, 4.0, -3.0)
+        movies = _blinking_movies([truth])
+
+        calibration = registration.calibrate_channel_registration_from_signal(
+            movies, box=BOX, minimum_ng=None, wavelet=self.WAVELET
+        )
+
+        np.testing.assert_allclose(
+            _matrix(calibration["channel_transforms"][1]), truth, atol=0.35
+        )
+        assert calibration["identification_method"] == "wavelet"
+
+    def test_net_gradient_is_recorded_as_before(self):
+        grid = _bead_grid()
+        movies = [_bead_image(grid, seed=1), _bead_image(grid, seed=2)]
+
+        calibration = registration.calibrate_channel_registration_from_beads(
+            movies, box=BOX, minimum_ng=2000.0
+        )
+
+        assert calibration["identification_method"] == "net gradient"
+        assert calibration["minimum_ng"] == 2000.0
+        assert "wavelet" not in calibration
+
+    def test_the_calibration_file_is_plain_yaml(self, tmp_path):
+        grid = _bead_grid()
+        movies = [_bead_image(grid, seed=1), _bead_image(grid, seed=2)]
+        path = str(tmp_path / "registration.yaml")
+
+        registration.calibrate_channel_registration_from_beads(
+            movies,
+            box=BOX,
+            minimum_ng=None,
+            path=path,
+            wavelet=self.WAVELET,
+        )
+
+        with open(path) as f:
+            text = f.read()
+        assert "!!python" not in text
+        assert io.load_any_calibration(path)["wavelet"] == (
+            self.WAVELET.to_dict()
+        )
+
+    def test_detections_by_frame(self):
+        truth = _rotation(0.0, 0.0, 0.0)
+        movie = _blinking_movies([truth], n_frames=6)[0]
+
+        by_frame = registration.detections_by_frame(
+            movie, None, BOX, np.arange(6), wavelet=self.WAVELET
+        )
+
+        assert sorted(by_frame) == list(range(6))
+        for xy in by_frame.values():
+            assert xy.shape[1] == 2 and len(xy) >= 4

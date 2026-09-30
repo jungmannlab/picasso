@@ -215,11 +215,7 @@ def locs_from_fits(
                 "lpx": lpx.astype(np.float32),
                 "lpy": lpy.astype(np.float32),
                 "ellipticity": ellipticity.astype(np.float32),
-                "net_gradient": (
-                    identifications["net_gradient"]
-                    .to_numpy()
-                    .astype(np.float32)
-                ),
+                **lib.net_gradient_column(identifications),
                 "n_id": identifications["n_id"].to_numpy().astype(np.uint32),
             }
         )
@@ -237,11 +233,7 @@ def locs_from_fits(
                 "lpx": lpx.astype(np.float32),
                 "lpy": lpy.astype(np.float32),
                 "ellipticity": ellipticity.astype(np.float32),
-                "net_gradient": (
-                    identifications["net_gradient"]
-                    .to_numpy()
-                    .astype(np.float32)
-                ),
+                **lib.net_gradient_column(identifications),
             }
         )
         locs.sort_values(by="frame", kind="quicksort", inplace=True)

@@ -445,10 +445,10 @@ def _spline_coeff_reshaped(
                 for c in range(n_channels)
             ]
         )
-    # Single-channel models get their leading channel axis from reshape rather
-    # than ``[None]``: the latter gives that axis stride 0, which numba (CPU and
-    # CUDA alike) types as a non-contiguous array and then indexes through
-    # computed strides - several times slower for no reason.
+    # Single-channel models get their leading channel axis from reshape
+    # rather than ``[None]``: the latter gives that axis stride 0, which
+    # numba (CPU and CUDA alike) types as a non-contiguous array and then
+    # indexes through computed strides - several times slower for no reason.
     if model == "spline-2d":
         _, nix, niy = coeff.shape
         return coeff.reshape(1, niy, nix, 4, 4)
@@ -459,11 +459,12 @@ def _spline_coeff_reshaped(
 def _spline_crlb_coeff_dtype(calibration: dict) -> type:
     """Precision to upload the spline coefficients to the GPU in.
 
-    Calibrations are stored float32 (``picasso.io.load_spline_calibration``), so
-    widening them for the device would cost bandwidth without adding
-    information - the kernels widen each coefficient to float64 in-register
-    anyway, which is what the CPU kernels do in bulk. Anything not already
-    float32 is passed through as float64."""
+    Calibrations are stored float32 (see
+    ``picasso.io.load_spline_calibration``), so widening them for the
+    device would cost bandwidth without adding information - the kernels
+    widen each coefficient to float64 in-register anyway, which is what the
+    CPU kernels do in bulk. Anything not already float32 is passed through
+    as float64."""
     if np.asarray(calibration["coefficients"]).dtype == np.float32:
         return np.float32
     return np.float64
@@ -545,8 +546,8 @@ def _gauss_crlb(
     if n_locs == 0:
         return crlb
 
-    # One kernel spans all localizations; chunk only to bound peak memory of the
-    # (chunk, n_params, box, box) gradient tensor.
+    # One kernel spans all localizations; chunk only to bound peak memory of
+    # the (chunk, n_params, box, box) gradient tensor.
     chunk = max(1, min(n_locs, 50_000))
     for start in range(0, n_locs, chunk):
         stop = min(start + chunk, n_locs)
@@ -596,8 +597,9 @@ def _gauss_crlb(
         gw = g / mu[:, None, :, :]
         fisher = np.einsum("mpij,mqij->mpq", gw, g)  # (m, n_params, n_params)
 
-        # Non-converged rows carry NaN parameters (hence NaN Fisher); set them to
-        # the identity so the batched pinv stays well-defined, then mask below.
+        # Non-converged rows carry NaN parameters (hence NaN Fisher); set
+        # them to the identity so the batched pinv stays well-defined, then
+        # mask below.
         bad = ~finite[sl] | ~np.isfinite(fisher).all(axis=(1, 2))
         fisher[bad] = np.eye(n_params)
         with np.errstate(invalid="ignore", divide="ignore"):
@@ -614,6 +616,56 @@ def _gauss_crlb(
         crlb *= _EM_EXCESS_NOISE_FACTOR
     crlb = np.where(crlb > 0.0, crlb, np.nan)
     return crlb
+
+
+# ----------------------------------------------------------------------
+# Shared per-pixel Fisher/least-squares weights
+#
+# Every information-matrix kernel below (Gaussian and spline, CPU and CUDA)
+# turns a pixel's model mean into the same pair of weights: the Fisher
+# weight ``wa`` that multiplies the Poisson outer product, and the
+# least-squares sandwich weight ``wb`` (Huang et al.'s sCMOS shift
+# ``mu -> mu + var`` folded in). Sharing this one computation keeps the
+# floor/variance/MLE branching out of every accumulation loop.
+# ----------------------------------------------------------------------
+
+
+@numba.njit(nogil=True, cache=True, fastmath=True)
+def _crlb_pixel_weights(mu, var, m, ch, j, i, use_var, mu_floor, mle):
+    """Fisher (``wa``) and least-squares sandwich (``wb``) pixel weights.
+
+    ``mu`` is the noise-free model mean; ``var[m, ch, j, i]`` (only indexed
+    when ``use_var``) is added first, matching Huang et al.'s sCMOS shift.
+    With ``mle``, ``wa = 1 / mu`` and ``wb`` is unused (0); otherwise
+    ``wa = 1`` and ``wb = mu`` (Poisson pixel variance).
+
+    Parameters
+    ----------
+    mu : float
+        Noise-free model mean of the pixel.
+    var : np.ndarray
+        ``(n_locs, n_channels, box, box)`` sCMOS readout variance.
+    m, ch, j, i : int
+        Localization, channel, row and column index of the pixel in ``var``.
+    use_var : bool
+        Whether ``var`` is applied.
+    mu_floor : float
+        Lower bound the shifted mean is clamped to.
+    mle : bool
+        Poisson Fisher weights (True) or least-squares sandwich weights.
+
+    Returns
+    -------
+    wa, wb : float
+        Fisher and sandwich weights of the pixel.
+    """
+    if use_var:
+        mu = mu + var[m, ch, j, i]
+    if mu < mu_floor:
+        mu = mu_floor
+    if mle:
+        return 1.0 / mu, 0.0
+    return 1.0, mu
 
 
 # ----------------------------------------------------------------------
@@ -708,17 +760,9 @@ def _gauss_infomats_multichannel(
                     r2 = pos_x * pos_x + pos_y * pos_y
                     E = np.exp(-0.5 * r2 * inv_s2)
                     s = peak * E
-                    mu = s + o
-                    if use_var:
-                        mu += var[m, ch, j, i]
-                    if mu < mu_floor:
-                        mu = mu_floor
-                    if mle:
-                        wa = 1.0 / mu
-                        wb = 0.0
-                    else:
-                        wa = 1.0
-                        wb = mu
+                    wa, wb = _crlb_pixel_weights(
+                        s + o, var, m, ch, j, i, use_var, mu_floor, mle
+                    )
                     # d(mu)/d(parameter). The lateral pair picks up the
                     # transpose of the channel Jacobian; the overall sign of a
                     # parameter's derivative does not affect the inverse's
@@ -792,6 +836,30 @@ def _gauss_infomats_multichannel(
             meat[m, 4, 4] = s44
 
 
+@numba.njit(nogil=True, cache=True, fastmath=True)
+def _reset_infomat_row(bread, meat, m, n_params):
+    """Zero row ``m`` of ``bread``/``meat``, for an in-place accumulator.
+
+    The caller's identity seed (which keeps *skipped* rows invertible) has
+    to be cleared first, or accumulating in place would add a spurious 1 to
+    every diagonal entry - swamping blocks whose entries are small."""
+    for p in range(n_params):
+        for q in range(n_params):
+            bread[m, p, q] = 0.0
+            meat[m, p, q] = 0.0
+
+
+@numba.njit(nogil=True, cache=True, fastmath=True)
+def _mirror_infomat_row(bread, meat, m, n_params, mle):
+    """Mirror the upper triangle of row ``m`` of ``bread``/``meat`` into the
+    lower triangle, for a kernel that only filled the upper one."""
+    for p in range(n_params):
+        for q in range(p):
+            bread[m, p, q] = bread[m, q, p]
+            if not mle:
+                meat[m, p, q] = meat[m, q, p]
+
+
 @numba.njit(parallel=True, cache=True, fastmath=True)
 def _gauss_infomats_decoupled(
     jac,
@@ -828,14 +896,10 @@ def _gauss_infomats_decoupled(
         if not (sig > 0.0):
             continue
         inv_s2 = 1.0 / (sig * sig)
-        # This kernel accumulates in place rather than assigning at the end, so
-        # the caller's identity seed (which keeps *skipped* rows invertible)
-        # has to be cleared first or it would add a spurious 1 to every
-        # diagonal - swamping the photon block, whose entries are small.
-        for p in range(n_params):
-            for q in range(n_params):
-                bread[m, p, q] = 0.0
-                meat[m, p, q] = 0.0
+        # This kernel accumulates in place rather than assigning at the end,
+        # so the identity seed has to be cleared first (see
+        # _reset_infomat_row) - the photon block's entries are small.
+        _reset_infomat_row(bread, meat, m, n_params)
         # The channel Jacobian linearizes the emitter's *displacement*
         # from the box center, not the box coordinate itself: channel ch
         # sits at center + J @ (shift - center) + residual (see
@@ -862,17 +926,9 @@ def _gauss_infomats_decoupled(
                     r2 = pos_x * pos_x + pos_y * pos_y
                     E = np.exp(-0.5 * r2 * inv_s2)
                     s = peak * E
-                    mu = s + o
-                    if use_var:
-                        mu += var[m, ch, j, i]
-                    if mu < mu_floor:
-                        mu = mu_floor
-                    if mle:
-                        wa = 1.0 / mu
-                        wb = 0.0
-                    else:
-                        wa = 1.0
-                        wb = mu
+                    wa, wb = _crlb_pixel_weights(
+                        s + o, var, m, ch, j, i, use_var, mu_floor, mle
+                    )
                     d0 = s * (a00 * pos_x + a10 * pos_y) * inv_s2
                     d1 = s * (a01 * pos_x + a11 * pos_y) * inv_s2
                     d2 = s * (r2 / (sig * sig * sig) - 2.0 / sig)
@@ -910,11 +966,7 @@ def _gauss_infomats_decoupled(
                         meat[m, ia, ib] += da * wb
                         meat[m, ib, ib] += wb
         # only the upper triangle was filled (0 < 1 < 2 < ia < ib always)
-        for p in range(n_params):
-            for q in range(p):
-                bread[m, p, q] = bread[m, q, p]
-                if not mle:
-                    meat[m, p, q] = meat[m, q, p]
+        _mirror_infomat_row(bread, meat, m, n_params, mle)
 
 
 def _gauss_crlb_multichannel(
@@ -945,16 +997,20 @@ def _gauss_crlb_multichannel(
         Fit box side length.
     jacobians, residuals : np.ndarray
         ``(n_locs, n_channels, 4)`` channel Jacobians and ``(n_locs,
-        n_channels, 2)`` sub-pixel ROI offsets - the same geometry the fit used.
+        n_channels, 2)`` sub-pixel ROI offsets - the same geometry the fit
+        used.
     mle : bool, optional
         Poisson Cramer-Rao bound (True) or the least-squares sandwich.
     em : bool, optional
         EMCCD excess noise doubles every variance.
     link_photons : bool, optional
         Which model produced ``theta``.
-    variance : optional
+    variance : lib.FloatArray4D, optional
         ``(n_locs, n_channels, box, box)`` sCMOS readout variance, laid out
         like the (channel-major) spots.
+    progress_callback : callable, "console" or None, optional
+        Progress over localization chunks. ``"console"`` shows a tqdm bar; a
+        callable is invoked with the cumulative number of localizations done.
 
     Returns
     -------
@@ -1057,6 +1113,155 @@ def _gauss_crlb_multichannel(
 # ---------------------------------------------------------------------------
 
 
+@numba.njit(nogil=True, cache=True, fastmath=True)
+def _spline_basis_3d(
+    coeff,
+    ch,
+    zi,
+    yi,
+    xi,
+    pz0,
+    pz1,
+    pz2,
+    pz3,
+    dz1,
+    dz2,
+    dz3,
+    py0,
+    py1,
+    py2,
+    py3,
+    dy1,
+    dy2,
+    dy3,
+    px0,
+    px1,
+    px2,
+    px3,
+    dx1,
+    dx2,
+    dx3,
+):
+    """Cubic-spline value and spatial gradient at one pixel of channel ``ch``.
+
+    ``coeff`` is that channel's full ``(niz, niy, nix, 4, 4, 4)`` table,
+    indexed at the pixel's own knot cell ``[zi, yi, xi]``; the ``p*``/``d*``
+    triples are the per-axis cubic basis values and derivatives at that
+    pixel's fractional offset within the cell.
+
+    Parameters
+    ----------
+    coeff : np.ndarray
+        ``(n_channels, niz, niy, nix, 4, 4, 4)`` spline coefficients.
+    ch : int
+        Channel index.
+    zi, yi, xi : int
+        Knot cell of the pixel.
+    pz0, pz1, pz2, pz3 : float
+        Axial cubic basis values.
+    dz1, dz2, dz3 : float
+        Axial basis derivatives (the constant term's is zero).
+    py0, py1, py2, py3 : float
+        Row cubic basis values.
+    dy1, dy2, dy3 : float
+        Row basis derivatives.
+    px0, px1, px2, px3 : float
+        Column cubic basis values.
+    dx1, dx2, dx3 : float
+        Column basis derivatives.
+
+    Returns
+    -------
+    phi, gx, gy, gz : float
+        Spline value and its x, y and z derivatives.
+    """
+    pz = (pz0, pz1, pz2, pz3)
+    dz = (0.0, dz1, dz2, dz3)
+    py = (py0, py1, py2, py3)
+    dy = (0.0, dy1, dy2, dy3)
+    px = (px0, px1, px2, px3)
+    dx = (0.0, dx1, dx2, dx3)
+    phi = gx = gy = gz = 0.0
+    for zp in range(4):
+        pzv = pz[zp]
+        dzv = dz[zp]
+        for yp in range(4):
+            pyv = py[yp]
+            dyv = dy[yp]
+            for xp in range(4):
+                cf = coeff[ch, zi, yi, xi, zp, yp, xp]
+                pxv = px[xp]
+                dxv = dx[xp]
+                phi += cf * pzv * pyv * pxv
+                gx += cf * pzv * pyv * dxv
+                gy += cf * pzv * dyv * pxv
+                gz += cf * dzv * pyv * pxv
+    return phi, gx, gy, gz
+
+
+@numba.njit(nogil=True, cache=True, fastmath=True)
+def _spline_basis_2d(
+    coeff,
+    ch,
+    yi,
+    xi,
+    py0,
+    py1,
+    py2,
+    py3,
+    dy1,
+    dy2,
+    dy3,
+    px0,
+    px1,
+    px2,
+    px3,
+    dx1,
+    dx2,
+    dx3,
+):
+    """2D analogue of :func:`_spline_basis_3d`.
+
+    Parameters
+    ----------
+    coeff : np.ndarray
+        ``(n_channels, niy, nix, 4, 4)`` spline coefficients.
+    ch : int
+        Channel index.
+    yi, xi : int
+        Knot cell of the pixel.
+    py0, py1, py2, py3 : float
+        Row cubic basis values.
+    dy1, dy2, dy3 : float
+        Row basis derivatives (the constant term's is zero).
+    px0, px1, px2, px3 : float
+        Column cubic basis values.
+    dx1, dx2, dx3 : float
+        Column basis derivatives.
+
+    Returns
+    -------
+    phi, gx, gy : float
+        Spline value and its x and y derivatives.
+    """
+    py = (py0, py1, py2, py3)
+    dy = (0.0, dy1, dy2, dy3)
+    px = (px0, px1, px2, px3)
+    dx = (0.0, dx1, dx2, dx3)
+    phi = gx = gy = 0.0
+    for yp in range(4):
+        pyv = py[yp]
+        dyv = dy[yp]
+        for xp in range(4):
+            cf = coeff[ch, yi, xi, yp, xp]
+            pxv = px[xp]
+            dxv = dx[xp]
+            phi += cf * pyv * pxv
+            gx += cf * pyv * dxv
+            gy += cf * dyv * pxv
+    return phi, gx, gy
+
+
 @numba.njit(parallel=True, cache=True, fastmath=True)
 def _spline_infomats_3d(
     coeff,
@@ -1078,14 +1283,15 @@ def _spline_infomats_3d(
 ):
     """Fill the per-localization information matrices of the 3D cubic-spline
     model. Parallel per-spot numba kernel. Non-converged rows are skipped
-    (left as preset by the caller). Parameter order [x, y, z, amplitude, offset].
+    (left as preset by the caller). Parameter order
+    [x, y, z, amplitude, offset].
 
     ``jac`` is ``(n_channels, 4)`` ``[a00, a01, a10, a11]`` and ``res`` is
-    ``(n_locs, n_channels, 2)`` sub-pixel ROI offsets, so that each channel is
-    evaluated exactly where the fitting kernels evaluate it - the
-    shared shift mapped through that channel's Jacobian, minus its ROI residual -
-    and the x/y derivatives pick up the matching ``Aᵀ`` chain rule. Both reduce
-    to the single-channel case at identity and zero.
+    ``(n_locs, n_channels, 2)`` sub-pixel ROI offsets, so that each channel
+    is evaluated exactly where the fitting kernels evaluate it - the shared
+    shift mapped through that channel's Jacobian, minus its ROI residual -
+    and the x/y derivatives pick up the matching ``Aᵀ`` chain rule. Both
+    reduce to the single-channel case at identity and zero.
 
     With ``mle`` True, ``bread`` (n, 5, 5) receives the Poisson Fisher matrix
     ``I = Σ g gᵀ / μ`` (its inverse is the MLE Cramer-Rao bound) and ``meat``
@@ -1112,7 +1318,8 @@ def _spline_infomats_3d(
         f22 = f23 = f24 = 0.0
         f33 = f34 = 0.0
         f44 = 0.0
-        # meat accumulators (s*): least-squares sandwich M = Σ μ g gᵀ (0 if mle).
+        # meat accumulators (s*): least-squares sandwich M = Σ μ g gᵀ (0 if
+        # mle).
         s00 = s01 = s02 = s03 = s04 = 0.0
         s11 = s12 = s13 = s14 = 0.0
         s22 = s23 = s24 = 0.0
@@ -1150,85 +1357,43 @@ def _spline_infomats_3d(
                     fy = yco - yi
                     py0, py1, py2, py3 = 1.0, fy, fy * fy, fy * fy * fy
                     dy1, dy2, dy3 = 1.0, 2.0 * fy, 3.0 * fy * fy
-                    phi = gx = gy = gz = 0.0
-                    for zp in range(4):
-                        pzv = (
-                            pz0
-                            if zp == 0
-                            else (
-                                pz1 if zp == 1 else (pz2 if zp == 2 else pz3)
-                            )
-                        )
-                        dzv = (
-                            0.0
-                            if zp == 0
-                            else (
-                                dz1 if zp == 1 else (dz2 if zp == 2 else dz3)
-                            )
-                        )
-                        for yp in range(4):
-                            pyv = (
-                                py0
-                                if yp == 0
-                                else (
-                                    py1
-                                    if yp == 1
-                                    else (py2 if yp == 2 else py3)
-                                )
-                            )
-                            dyv = (
-                                0.0
-                                if yp == 0
-                                else (
-                                    dy1
-                                    if yp == 1
-                                    else (dy2 if yp == 2 else dy3)
-                                )
-                            )
-                            for xp in range(4):
-                                cf = coeff[ch, zi, yi, xi, zp, yp, xp]
-                                pxv = (
-                                    px0
-                                    if xp == 0
-                                    else (
-                                        px1
-                                        if xp == 1
-                                        else (px2 if xp == 2 else px3)
-                                    )
-                                )
-                                dxv = (
-                                    0.0
-                                    if xp == 0
-                                    else (
-                                        dx1
-                                        if xp == 1
-                                        else (dx2 if xp == 2 else dx3)
-                                    )
-                                )
-                                phi += cf * pzv * pyv * pxv
-                                gx += cf * pzv * pyv * dxv
-                                gy += cf * pzv * dyv * pxv
-                                gz += cf * dzv * pyv * pxv
-                    mu = o + a * phi
-                    # Huang et al.'s sCMOS shift: a pixel's readout
-                    # variance adds to the model mean, so the Fisher
-                    # weight becomes 1/(mu + var) and the least-
-                    # squares sandwich meat becomes the true pixel
-                    # variance.
-                    if use_var:
-                        mu += var[m, ch, j, i]
-                    if mu < mu_floor:
-                        mu = mu_floor
+                    phi, gx, gy, gz = _spline_basis_3d(
+                        coeff,
+                        ch,
+                        zi,
+                        yi,
+                        xi,
+                        pz0,
+                        pz1,
+                        pz2,
+                        pz3,
+                        dz1,
+                        dz2,
+                        dz3,
+                        py0,
+                        py1,
+                        py2,
+                        py3,
+                        dy1,
+                        dy2,
+                        dy3,
+                        px0,
+                        px1,
+                        px2,
+                        px3,
+                        dx1,
+                        dx2,
+                        dx3,
+                    )
                     # bread weight wa (1/μ Fisher, else 1) and meat weight wb
-                    # (μ for the least-squares sandwich, else unused).
-                    if mle:
-                        wa = 1.0 / mu
-                        wb = 0.0
-                    else:
-                        wa = 1.0
-                        wb = mu
-                    # d(mu)/d(param); the CRLB diagonal is sign-invariant per
-                    # parameter, so native-coordinate vs shift sign is irrelevant.
+                    # (μ for the least-squares sandwich, else unused); the
+                    # Huang et al. sCMOS shift is folded into the pixel mean.
+                    wa, wb = _crlb_pixel_weights(
+                        o + a * phi, var, m, ch, j, i, use_var, mu_floor, mle
+                    )
+                    # d(mu)/d(param); the CRLB diagonal is sign-invariant
+                    # per parameter, so native-coordinate vs shift sign is
+                    # irrelevant.
                     d0 = a * (a00 * gx + a10 * gy)
                     d1 = a * (a01 * gx + a11 * gy)
                     d2 = a * gz
@@ -1313,7 +1478,8 @@ def _spline_infomats_2d(
     meat,
 ):
     """2D analogue of :func:`_spline_infomats_3d`. ``coeff`` is
-    ``(n_channels, niy, nix, 4, 4)``; parameter order [x, y, amplitude, offset].
+    ``(n_channels, niy, nix, 4, 4)``; parameter order
+    [x, y, amplitude, offset].
     """
     n_channels, niy, nix = coeff.shape[0], coeff.shape[1], coeff.shape[2]
     n_locs = amp.shape[0]
@@ -1327,7 +1493,8 @@ def _spline_infomats_2d(
         f11 = f12 = f13 = 0.0
         f22 = f23 = 0.0
         f33 = 0.0
-        # meat accumulators (s*): least-squares sandwich M = Σ μ g gᵀ (0 if mle).
+        # meat accumulators (s*): least-squares sandwich M = Σ μ g gᵀ (0 if
+        # mle).
         s00 = s01 = s02 = s03 = 0.0
         s11 = s12 = s13 = 0.0
         s22 = s23 = 0.0
@@ -1347,61 +1514,31 @@ def _spline_infomats_2d(
                     fy = yco - yi
                     py0, py1, py2, py3 = 1.0, fy, fy * fy, fy * fy * fy
                     dy1, dy2, dy3 = 1.0, 2.0 * fy, 3.0 * fy * fy
-                    phi = gx = gy = 0.0
-                    for yp in range(4):
-                        pyv = (
-                            py0
-                            if yp == 0
-                            else (
-                                py1 if yp == 1 else (py2 if yp == 2 else py3)
-                            )
-                        )
-                        dyv = (
-                            0.0
-                            if yp == 0
-                            else (
-                                dy1 if yp == 1 else (dy2 if yp == 2 else dy3)
-                            )
-                        )
-                        for xp in range(4):
-                            cf = coeff[ch, yi, xi, yp, xp]
-                            pxv = (
-                                px0
-                                if xp == 0
-                                else (
-                                    px1
-                                    if xp == 1
-                                    else (px2 if xp == 2 else px3)
-                                )
-                            )
-                            dxv = (
-                                0.0
-                                if xp == 0
-                                else (
-                                    dx1
-                                    if xp == 1
-                                    else (dx2 if xp == 2 else dx3)
-                                )
-                            )
-                            phi += cf * pyv * pxv
-                            gx += cf * pyv * dxv
-                            gy += cf * dyv * pxv
-                    mu = o + a * phi
-                    # Huang et al.'s sCMOS shift: a pixel's readout
-                    # variance adds to the model mean, so the Fisher
-                    # weight becomes 1/(mu + var) and the least-
-                    # squares sandwich meat becomes the true pixel
-                    # variance.
-                    if use_var:
-                        mu += var[m, ch, j, i]
-                    if mu < mu_floor:
-                        mu = mu_floor
-                    if mle:
-                        wa = 1.0 / mu
-                        wb = 0.0
-                    else:
-                        wa = 1.0
-                        wb = mu
+                    phi, gx, gy = _spline_basis_2d(
+                        coeff,
+                        ch,
+                        yi,
+                        xi,
+                        py0,
+                        py1,
+                        py2,
+                        py3,
+                        dy1,
+                        dy2,
+                        dy3,
+                        px0,
+                        px1,
+                        px2,
+                        px3,
+                        dx1,
+                        dx2,
+                        dx3,
+                    )
+                    # Huang et al.'s sCMOS shift is folded into the pixel
+                    # mean before the Fisher/meat weights are derived.
+                    wa, wb = _crlb_pixel_weights(
+                        o + a * phi, var, m, ch, j, i, use_var, mu_floor, mle
+                    )
                     d0, d1, d2 = a * gx, a * gy, phi
                     f00 += d0 * d0 * wa
                     f01 += d0 * d1 * wa
@@ -1446,6 +1583,25 @@ def _spline_infomats_2d(
             meat[m, 3, 3] = s33
 
 
+@numba.njit(nogil=True, cache=True, fastmath=True)
+def _accumulate_infomat_outer(bread, meat, m, g, n_params, wa, wb, mle):
+    """Accumulate the rank-1 outer product of a block-sparse gradient.
+
+    Adds ``wa * g gᵀ`` into ``bread[m]`` (and ``wb * g gᵀ`` into ``meat[m]``
+    unless ``mle``), skipping zero entries of ``g`` and filling only the
+    upper triangle - the caller mirrors it afterward
+    (:func:`_mirror_infomat_row`)."""
+    for a_ in range(n_params):
+        ga = g[a_]
+        if ga == 0.0:
+            continue
+        for b_ in range(a_, n_params):
+            v = ga * g[b_]
+            bread[m, a_, b_] += v * wa
+            if not mle:
+                meat[m, a_, b_] += v * wb
+
+
 @numba.njit(parallel=True, cache=True, fastmath=True)
 def _spline_infomats_link_xyz_3d(
     coeff,
@@ -1465,19 +1621,20 @@ def _spline_infomats_link_xyz_3d(
     bread,
     meat,
 ):
-    """Per-localization information matrices for the photon-decoupled (link-XYZ)
-    3D cubic-spline model. Parameter order
+    """Per-localization information matrices for the photon-decoupled
+    (link-XYZ) 3D cubic-spline model. Parameter order
     ``[x, y, z, N_0..N_{c-1}, bg_0..bg_{c-1}]`` (P = 3 + 2*n_channels).
 
-    Unlike :func:`_spline_infomats_3d` (shared amplitude/offset), each pixel of
-    channel ``ch`` has ``mu = bg[ch] + N[ch] * phi_ch`` and a block-sparse
-    gradient: the shared x/y/z columns scale by that channel's ``N[ch]``, while
-    only channel ``ch``'s photon column (= phi) and background column (= 1) are
-    non-zero. ``bread``/``meat`` play the same Fisher / least-squares-sandwich
-    roles as in :func:`_spline_infomats_3d`. Rows preset by the caller (identity)
-    for non-converged fits are left untouched; converged rows are zeroed and
-    filled here. CRLB diagonals are invariant to the per-parameter gradient sign,
-    so x/y/z use the unsigned spline derivative..
+    Unlike :func:`_spline_infomats_3d` (shared amplitude/offset), each pixel
+    of channel ``ch`` has ``mu = bg[ch] + N[ch] * phi_ch`` and a block-sparse
+    gradient: the shared x/y/z columns scale by that channel's ``N[ch]``,
+    while only channel ``ch``'s photon column (= phi) and background column
+    (= 1) are non-zero. ``bread``/``meat`` play the same Fisher /
+    least-squares-sandwich roles as in :func:`_spline_infomats_3d`. Rows
+    preset by the caller (identity) for non-converged fits are left
+    untouched; converged rows are zeroed and filled here. CRLB diagonals are
+    invariant to the per-parameter gradient sign, so x/y/z use the unsigned
+    spline derivative.
 
     Each channel sees the shared lateral shift through its own local
     Jacobian, exactly as the fit does."""
@@ -1490,10 +1647,7 @@ def _spline_infomats_link_xyz_3d(
     for m in numba.prange(n_locs):
         if not finite[m]:
             continue
-        for a_ in range(n_params):
-            for b_ in range(n_params):
-                bread[m, a_, b_] = 0.0
-                meat[m, a_, b_] = 0.0
+        _reset_infomat_row(bread, meat, m, n_params)
         g = np.zeros(n_params)
         zc = z_eval[m]
         zi = int(np.floor(zc))
@@ -1525,81 +1679,47 @@ def _spline_infomats_link_xyz_3d(
                     fy = yco - yi
                     py0, py1, py2, py3 = 1.0, fy, fy * fy, fy * fy * fy
                     dy1, dy2, dy3 = 1.0, 2.0 * fy, 3.0 * fy * fy
-                    phi = gx = gy = gz = 0.0
-                    for zp in range(4):
-                        pzv = (
-                            pz0
-                            if zp == 0
-                            else (
-                                pz1 if zp == 1 else (pz2 if zp == 2 else pz3)
-                            )
-                        )
-                        dzv = (
-                            0.0
-                            if zp == 0
-                            else (
-                                dz1 if zp == 1 else (dz2 if zp == 2 else dz3)
-                            )
-                        )
-                        for yp in range(4):
-                            pyv = (
-                                py0
-                                if yp == 0
-                                else (
-                                    py1
-                                    if yp == 1
-                                    else (py2 if yp == 2 else py3)
-                                )
-                            )
-                            dyv = (
-                                0.0
-                                if yp == 0
-                                else (
-                                    dy1
-                                    if yp == 1
-                                    else (dy2 if yp == 2 else dy3)
-                                )
-                            )
-                            for xp in range(4):
-                                cf = coeff[ch, zi, yi, xi, zp, yp, xp]
-                                pxv = (
-                                    px0
-                                    if xp == 0
-                                    else (
-                                        px1
-                                        if xp == 1
-                                        else (px2 if xp == 2 else px3)
-                                    )
-                                )
-                                dxv = (
-                                    0.0
-                                    if xp == 0
-                                    else (
-                                        dx1
-                                        if xp == 1
-                                        else (dx2 if xp == 2 else dx3)
-                                    )
-                                )
-                                phi += cf * pzv * pyv * pxv
-                                gx += cf * pzv * pyv * dxv
-                                gy += cf * pzv * dyv * pxv
-                                gz += cf * dzv * pyv * pxv
-                    mu = bgc + nc * phi
-                    # Huang et al.'s sCMOS shift: a pixel's readout
-                    # variance adds to the model mean, so the Fisher
-                    # weight becomes 1/(mu + var) and the least-
-                    # squares sandwich meat becomes the true pixel
-                    # variance.
-                    if use_var:
-                        mu += var[m, ch, j, i]
-                    if mu < mu_floor:
-                        mu = mu_floor
-                    if mle:
-                        wa = 1.0 / mu
-                        wb = 0.0
-                    else:
-                        wa = 1.0
-                        wb = mu
+                    phi, gx, gy, gz = _spline_basis_3d(
+                        coeff,
+                        ch,
+                        zi,
+                        yi,
+                        xi,
+                        pz0,
+                        pz1,
+                        pz2,
+                        pz3,
+                        dz1,
+                        dz2,
+                        dz3,
+                        py0,
+                        py1,
+                        py2,
+                        py3,
+                        dy1,
+                        dy2,
+                        dy3,
+                        px0,
+                        px1,
+                        px2,
+                        px3,
+                        dx1,
+                        dx2,
+                        dx3,
+                    )
+                    # Huang et al.'s sCMOS shift is folded into the pixel
+                    # mean before the Fisher/meat weights are derived.
+                    wa, wb = _crlb_pixel_weights(
+                        bgc + nc * phi,
+                        var,
+                        m,
+                        ch,
+                        j,
+                        i,
+                        use_var,
+                        mu_floor,
+                        mle,
+                    )
                     for t in range(n_params):
                         g[t] = 0.0
                     g[0] = nc * (a00 * gx + a10 * gy)
@@ -1607,20 +1727,10 @@ def _spline_infomats_link_xyz_3d(
                     g[2] = nc * gz
                     g[3 + ch] = phi
                     g[3 + n_channels + ch] = 1.0
-                    for a_ in range(n_params):
-                        ga = g[a_]
-                        if ga == 0.0:
-                            continue
-                        for b_ in range(a_, n_params):
-                            v = ga * g[b_]
-                            bread[m, a_, b_] += v * wa
-                            if not mle:
-                                meat[m, a_, b_] += v * wb
-        for a_ in range(n_params):
-            for b_ in range(a_ + 1, n_params):
-                bread[m, b_, a_] = bread[m, a_, b_]
-                if not mle:
-                    meat[m, b_, a_] = meat[m, a_, b_]
+                    _accumulate_infomat_outer(
+                        bread, meat, m, g, n_params, wa, wb, mle
+                    )
+        _mirror_infomat_row(bread, meat, m, n_params, mle)
 
 
 # ---------------------------------------------------------------------------
@@ -1632,8 +1742,8 @@ _SPLINE_CRLB_JACOBI_SWEEPS = 30
 _SPLINE_CRLB_JACOBI_TOL = 1e-30
 
 # Largest link-XYZ parameter count. Device-local arrays need a compile-time
-# constant shape, so one kernel is compiled at this size for every channel count
-# and indexes the leading ``n_params`` rows and columns.
+# constant shape, so one kernel is compiled at this size for every channel
+# count and indexes the leading ``n_params`` rows and columns.
 _LINK_XYZ_MAX_P = 3 + 2 * _LINK_XYZ_MAX_CHANNELS
 
 _SPLINE_CRLB_CUDA_THREADS = 128
@@ -1652,65 +1762,81 @@ _SPLINE_CRLB_CUDA_MAX_ROWS = 4_000_000
 
 
 @cuda.jit(device=True)
-def _sym_pinv_device(a, n, v, lam) -> int:
-    """Moore-Penrose pseudo-inverse of the symmetric ``a[:n, :n]``, in place.
-
-    Cyclic Jacobi eigendecomposition ``a = V Λ Vᵀ``, then
-    ``a⁺ = Σ_{|λ| > rcond·max|λ|} v vᵀ / λ``. ``v`` and ``lam`` are per-thread
-    scratch of at least ``(n, n)`` and ``(n,)``. Returns 0 on success, 1 if the
-    sweeps did not converge (the caller then hands that localization back to the
-    host).
-
-    A plain inverse would be cheaper, but the information matrix is genuinely
-    rank deficient whenever the model's parameters are locally collinear - a PSF
-    whose z-dependence is a pure rescaling makes the z and amplitude columns
-    proportional, and then only the truncating pseudo-inverse gives a finite
-    answer. The CPU path uses ``numpy.linalg.pinv``.
-    """
+def _jacobi_init_identity_device(v, n) -> None:
+    """Set ``v[:n, :n]`` to the identity - the eigenvector accumulator's
+    starting point for the Jacobi sweep."""
     for p in range(n):
         for q in range(n):
             v[p, q] = 1.0 if p == q else 0.0
-    converged = False
-    for _ in range(_SPLINE_CRLB_JACOBI_SWEEPS):
-        off = 0.0
-        fro = 0.0
-        for p in range(n):
-            fro += a[p, p] * a[p, p]
-            for q in range(p + 1, n):
-                off += a[p, q] * a[p, q]
-        fro += 2.0 * off
-        if off <= _SPLINE_CRLB_JACOBI_TOL * fro:
-            converged = True
-            break
-        for p in range(n - 1):
-            for q in range(p + 1, n):
-                apq = a[p, q]
-                if apq == 0.0:
-                    continue
-                # Rotation that annihilates a[p, q]; the smaller root of
-                # t² + 2θt - 1 = 0 keeps the rotation angle below 45°.
-                theta = (a[q, q] - a[p, p]) / (2.0 * apq)
-                sgn = 1.0 if theta >= 0.0 else -1.0
-                t = sgn / (abs(theta) + math.sqrt(theta * theta + 1.0))
-                c = 1.0 / math.sqrt(t * t + 1.0)
-                s = t * c
-                for k in range(n):  # a <- a J
-                    akp = a[k, p]
-                    akq = a[k, q]
-                    a[k, p] = c * akp - s * akq
-                    a[k, q] = s * akp + c * akq
-                for k in range(n):  # a <- Jᵀ a
-                    apk = a[p, k]
-                    aqk = a[q, k]
-                    a[p, k] = c * apk - s * aqk
-                    a[q, k] = s * apk + c * aqk
-                for k in range(n):  # v <- v J
-                    vkp = v[k, p]
-                    vkq = v[k, q]
-                    v[k, p] = c * vkp - s * vkq
-                    v[k, q] = s * vkp + c * vkq
-    if not converged:
-        return 1
+
+
+@cuda.jit(device=True)
+def _jacobi_off_diagonal_norms_device(a, n):
+    """Squared off-diagonal norm and full Frobenius norm of ``a[:n, :n]``.
+
+    Parameters
+    ----------
+    a : array
+        Symmetric device matrix; only the upper triangle is read.
+    n : int
+        Size of the active ``a[:n, :n]`` block.
+
+    Returns
+    -------
+    off, fro : float
+        Squared norm of the upper off-diagonal triangle and squared Frobenius
+        norm of the full block.
+    """
+    off = 0.0
+    fro = 0.0
+    for p in range(n):
+        fro += a[p, p] * a[p, p]
+        for q in range(p + 1, n):
+            off += a[p, q] * a[p, q]
+    fro += 2.0 * off
+    return off, fro
+
+
+@cuda.jit(device=True)
+def _jacobi_sweep_device(a, v, n) -> None:
+    """One cyclic Jacobi sweep: annihilate every off-diagonal ``a[p, q]`` in
+    turn, accumulating the rotations into ``v``."""
+    for p in range(n - 1):
+        for q in range(p + 1, n):
+            apq = a[p, q]
+            if apq == 0.0:
+                continue
+            # Rotation that annihilates a[p, q]; the smaller root of
+            # t² + 2θt - 1 = 0 keeps the rotation angle below 45°.
+            theta = (a[q, q] - a[p, p]) / (2.0 * apq)
+            sgn = 1.0 if theta >= 0.0 else -1.0
+            t = sgn / (abs(theta) + math.sqrt(theta * theta + 1.0))
+            c = 1.0 / math.sqrt(t * t + 1.0)
+            s = t * c
+            for k in range(n):  # a <- a J
+                akp = a[k, p]
+                akq = a[k, q]
+                a[k, p] = c * akp - s * akq
+                a[k, q] = s * akp + c * akq
+            for k in range(n):  # a <- Jᵀ a
+                apk = a[p, k]
+                aqk = a[q, k]
+                a[p, k] = c * apk - s * aqk
+                a[q, k] = s * apk + c * aqk
+            for k in range(n):  # v <- v J
+                vkp = v[k, p]
+                vkq = v[k, q]
+                v[k, p] = c * vkp - s * vkq
+                v[k, q] = s * vkp + c * vkq
+
+
+@cuda.jit(device=True)
+def _jacobi_pseudo_inverse_device(a, v, lam, n) -> None:
+    """Build the truncated pseudo-inverse from the diagonalized ``a`` and its
+    eigenvectors ``v``, writing it back into ``a[:n, :n]``.
+
+    Eigenvalues at or below ``rcond`` times the largest one are dropped, as
+    in ``numpy.linalg.pinv``."""
     biggest = 0.0
     for p in range(n):
         lam[p] = a[p, p]
@@ -1725,6 +1851,36 @@ def _sym_pinv_device(a, n, v, lam) -> int:
                     acc += v[p, k] * v[q, k] / lam[k]
             a[p, q] = acc
             a[q, p] = acc
+
+
+@cuda.jit(device=True)
+def _sym_pinv_device(a, n, v, lam) -> int:
+    """Moore-Penrose pseudo-inverse of the symmetric ``a[:n, :n]``, in place.
+
+    Cyclic Jacobi eigendecomposition ``a = V Λ Vᵀ``, then
+    ``a⁺ = Σ_{|λ| > rcond·max|λ|} v vᵀ / λ``. ``v`` and ``lam`` are per-thread
+    scratch of at least ``(n, n)`` and ``(n,)``. Returns 0 on success, 1 if
+    the sweeps did not converge (the caller then hands that localization
+    back to the host).
+
+    A plain inverse would be cheaper, but the information matrix is
+    genuinely rank deficient whenever the model's parameters are locally
+    collinear - a PSF whose z-dependence is a pure rescaling makes the z and
+    amplitude columns proportional, and then only the truncating
+    pseudo-inverse gives a finite answer. The CPU path uses
+    ``numpy.linalg.pinv``.
+    """
+    _jacobi_init_identity_device(v, n)
+    converged = False
+    for _ in range(_SPLINE_CRLB_JACOBI_SWEEPS):
+        off, fro = _jacobi_off_diagonal_norms_device(a, n)
+        if off <= _SPLINE_CRLB_JACOBI_TOL * fro:
+            converged = True
+            break
+        _jacobi_sweep_device(a, v, n)
+    if not converged:
+        return 1
+    _jacobi_pseudo_inverse_device(a, v, lam, n)
     return 0
 
 
@@ -1748,6 +1904,174 @@ def _crlb_diag_device(ainv, meat, n, mle, out, m) -> None:
                     t += meat[k, ll] * ainv[p, ll]
                 s += ainv[p, k] * t
             out[m, p] = s
+
+
+@cuda.jit(device=True)
+def _clear_square_device(bread, meat, n) -> None:
+    """Zero the leading ``n``x``n`` block of ``bread``/``meat``, for an
+    in-place accumulator that only fills the blocks it touches."""
+    for p in range(n):
+        for q in range(n):
+            bread[p, q] = 0.0
+            meat[p, q] = 0.0
+
+
+@cuda.jit(device=True)
+def _crlb_pixel_weights_device(mu, var, m, ch, j, i, use_var, mu_floor, mle):
+    """Device twin of :func:`_crlb_pixel_weights` - see there for the
+    weights' meaning. Kept in lockstep so the CPU and CUDA CRLB kernels
+    agree to rounding."""
+    if use_var:
+        mu = mu + var[m, ch, j, i]
+    if mu < mu_floor:
+        mu = mu_floor
+    if mle:
+        return 1.0 / mu, 0.0
+    return 1.0, mu
+
+
+@cuda.jit(device=True)
+def _spline_basis_3d_device(
+    coeff,
+    ch,
+    zi,
+    yi,
+    xi,
+    pz0,
+    pz1,
+    pz2,
+    pz3,
+    dz1,
+    dz2,
+    dz3,
+    py0,
+    py1,
+    py2,
+    py3,
+    dy1,
+    dy2,
+    dy3,
+    px0,
+    px1,
+    px2,
+    px3,
+    dx1,
+    dx2,
+    dx3,
+):
+    """Device twin of :func:`_spline_basis_3d`.
+
+    Parameters
+    ----------
+    coeff : np.ndarray
+        ``(n_channels, niz, niy, nix, 4, 4, 4)`` spline coefficients.
+    ch : int
+        Channel index.
+    zi, yi, xi : int
+        Knot cell of the pixel.
+    pz0, pz1, pz2, pz3 : float
+        Axial cubic basis values.
+    dz1, dz2, dz3 : float
+        Axial basis derivatives (the constant term's is zero).
+    py0, py1, py2, py3 : float
+        Row cubic basis values.
+    dy1, dy2, dy3 : float
+        Row basis derivatives.
+    px0, px1, px2, px3 : float
+        Column cubic basis values.
+    dx1, dx2, dx3 : float
+        Column basis derivatives.
+
+    Returns
+    -------
+    phi, gx, gy, gz : float
+        Spline value and its x, y and z derivatives.
+    """
+    pz = (pz0, pz1, pz2, pz3)
+    dz = (0.0, dz1, dz2, dz3)
+    py = (py0, py1, py2, py3)
+    dy = (0.0, dy1, dy2, dy3)
+    px = (px0, px1, px2, px3)
+    dx = (0.0, dx1, dx2, dx3)
+    phi = gx = gy = gz = 0.0
+    for zp in range(4):
+        pzv = pz[zp]
+        dzv = dz[zp]
+        for yp in range(4):
+            pyv = py[yp]
+            dyv = dy[yp]
+            for xp in range(4):
+                cf = coeff[ch, zi, yi, xi, zp, yp, xp]
+                pxv = px[xp]
+                dxv = dx[xp]
+                phi += cf * pzv * pyv * pxv
+                gx += cf * pzv * pyv * dxv
+                gy += cf * pzv * dyv * pxv
+                gz += cf * dzv * pyv * pxv
+    return phi, gx, gy, gz
+
+
+@cuda.jit(device=True)
+def _spline_basis_2d_device(
+    coeff,
+    ch,
+    yi,
+    xi,
+    py0,
+    py1,
+    py2,
+    py3,
+    dy1,
+    dy2,
+    dy3,
+    px0,
+    px1,
+    px2,
+    px3,
+    dx1,
+    dx2,
+    dx3,
+):
+    """Device twin of :func:`_spline_basis_2d`.
+
+    Parameters
+    ----------
+    coeff : np.ndarray
+        ``(n_channels, niy, nix, 4, 4)`` spline coefficients.
+    ch : int
+        Channel index.
+    yi, xi : int
+        Knot cell of the pixel.
+    py0, py1, py2, py3 : float
+        Row cubic basis values.
+    dy1, dy2, dy3 : float
+        Row basis derivatives (the constant term's is zero).
+    px0, px1, px2, px3 : float
+        Column cubic basis values.
+    dx1, dx2, dx3 : float
+        Column basis derivatives.
+
+    Returns
+    -------
+    phi, gx, gy : float
+        Spline value and its x and y derivatives.
+    """
+    py = (py0, py1, py2, py3)
+    dy = (0.0, dy1, dy2, dy3)
+    px = (px0, px1, px2, px3)
+    dx = (0.0, dx1, dx2, dx3)
+    phi = gx = gy = 0.0
+    for yp in range(4):
+        pyv = py[yp]
+        dyv = dy[yp]
+        for xp in range(4):
+            cf = coeff[ch, yi, xi, yp, xp]
+            pxv = px[xp]
+            dxv = dx[xp]
+            phi += cf * pyv * pxv
+            gx += cf * pyv * dxv
+            gy += cf * dyv * pxv
+    return phi, gx, gy
 
 
 # ---------------------------------------------------------------------------
@@ -1847,75 +2171,40 @@ def _spline_crlb_3d_kernel(
                 fy = yco - yi
                 py0, py1, py2, py3 = 1.0, fy, fy * fy, fy * fy * fy
                 dy1, dy2, dy3 = 1.0, 2.0 * fy, 3.0 * fy * fy
-                phi = gx = gy = gz = 0.0
-                for zp in range(4):
-                    pzv = (
-                        pz0
-                        if zp == 0
-                        else (pz1 if zp == 1 else (pz2 if zp == 2 else pz3))
-                    )
-                    dzv = (
-                        0.0
-                        if zp == 0
-                        else (dz1 if zp == 1 else (dz2 if zp == 2 else dz3))
-                    )
-                    for yp in range(4):
-                        pyv = (
-                            py0
-                            if yp == 0
-                            else (
-                                py1 if yp == 1 else (py2 if yp == 2 else py3)
-                            )
-                        )
-                        dyv = (
-                            0.0
-                            if yp == 0
-                            else (
-                                dy1 if yp == 1 else (dy2 if yp == 2 else dy3)
-                            )
-                        )
-                        for xp in range(4):
-                            cf = coeff[ch, zi, yi, xi, zp, yp, xp]
-                            pxv = (
-                                px0
-                                if xp == 0
-                                else (
-                                    px1
-                                    if xp == 1
-                                    else (px2 if xp == 2 else px3)
-                                )
-                            )
-                            dxv = (
-                                0.0
-                                if xp == 0
-                                else (
-                                    dx1
-                                    if xp == 1
-                                    else (dx2 if xp == 2 else dx3)
-                                )
-                            )
-                            phi += cf * pzv * pyv * pxv
-                            gx += cf * pzv * pyv * dxv
-                            gy += cf * pzv * dyv * pxv
-                            gz += cf * dzv * pyv * pxv
-                mu = o + a * phi
-                # Huang et al.'s sCMOS shift: a pixel's readout
-                # variance adds to the model mean, so the Fisher
-                # weight becomes 1/(mu + var) and the least-
-                # squares sandwich meat becomes the true pixel
-                # variance.
-                if use_var:
-                    mu += var[m, ch, j, i]
-                if mu < mu_floor:
-                    mu = mu_floor
+                phi, gx, gy, gz = _spline_basis_3d_device(
+                    coeff,
+                    ch,
+                    zi,
+                    yi,
+                    xi,
+                    pz0,
+                    pz1,
+                    pz2,
+                    pz3,
+                    dz1,
+                    dz2,
+                    dz3,
+                    py0,
+                    py1,
+                    py2,
+                    py3,
+                    dy1,
+                    dy2,
+                    dy3,
+                    px0,
+                    px1,
+                    px2,
+                    px3,
+                    dx1,
+                    dx2,
+                    dx3,
+                )
                 # bread weight wa (1/μ Fisher, else 1) and meat weight wb
-                # (μ for the least-squares sandwich, else unused).
-                if mle:
-                    wa = 1.0 / mu
-                    wb = 0.0
-                else:
-                    wa = 1.0
-                    wb = mu
+                # (μ for the least-squares sandwich, else unused); the
+                # Huang et al. sCMOS shift is folded into the pixel mean.
+                wa, wb = _crlb_pixel_weights_device(
+                    o + a * phi, var, m, ch, j, i, use_var, mu_floor, mle
+                )
                 # d(mu)/d(param); the CRLB diagonal is sign-invariant per
                 # parameter, so native-coordinate vs shift sign is irrelevant.
                 d0 = a * (a00 * gx + a10 * gy)
@@ -2012,7 +2301,8 @@ def _spline_crlb_2d_kernel(
 ) -> None:
     """2D analogue of :func:`_spline_crlb_3d_kernel`, transcribing
     :func:`_spline_infomats_2d`. ``coeff`` is
-    ``(n_channels, niy, nix, 4, 4)``; parameter order [x, y, amplitude, offset].
+    ``(n_channels, niy, nix, 4, 4)``; parameter order
+    [x, y, amplitude, offset].
     """
     m = cuda.grid(1)
     if m >= amp.shape[0]:
@@ -2052,53 +2342,31 @@ def _spline_crlb_2d_kernel(
                 fy = yco - yi
                 py0, py1, py2, py3 = 1.0, fy, fy * fy, fy * fy * fy
                 dy1, dy2, dy3 = 1.0, 2.0 * fy, 3.0 * fy * fy
-                phi = gx = gy = 0.0
-                for yp in range(4):
-                    pyv = (
-                        py0
-                        if yp == 0
-                        else (py1 if yp == 1 else (py2 if yp == 2 else py3))
-                    )
-                    dyv = (
-                        0.0
-                        if yp == 0
-                        else (dy1 if yp == 1 else (dy2 if yp == 2 else dy3))
-                    )
-                    for xp in range(4):
-                        cf = coeff[ch, yi, xi, yp, xp]
-                        pxv = (
-                            px0
-                            if xp == 0
-                            else (
-                                px1 if xp == 1 else (px2 if xp == 2 else px3)
-                            )
-                        )
-                        dxv = (
-                            0.0
-                            if xp == 0
-                            else (
-                                dx1 if xp == 1 else (dx2 if xp == 2 else dx3)
-                            )
-                        )
-                        phi += cf * pyv * pxv
-                        gx += cf * pyv * dxv
-                        gy += cf * dyv * pxv
-                mu = o + a * phi
-                # Huang et al.'s sCMOS shift: a pixel's readout
-                # variance adds to the model mean, so the Fisher
-                # weight becomes 1/(mu + var) and the least-
-                # squares sandwich meat becomes the true pixel
-                # variance.
-                if use_var:
-                    mu += var[m, ch, j, i]
-                if mu < mu_floor:
-                    mu = mu_floor
-                if mle:
-                    wa = 1.0 / mu
-                    wb = 0.0
-                else:
-                    wa = 1.0
-                    wb = mu
+                phi, gx, gy = _spline_basis_2d_device(
+                    coeff,
+                    ch,
+                    yi,
+                    xi,
+                    py0,
+                    py1,
+                    py2,
+                    py3,
+                    dy1,
+                    dy2,
+                    dy3,
+                    px0,
+                    px1,
+                    px2,
+                    px3,
+                    dx1,
+                    dx2,
+                    dx3,
+                )
+                # Huang et al.'s sCMOS shift is folded into the pixel
+                # mean before the Fisher/meat weights are derived.
+                wa, wb = _crlb_pixel_weights_device(
+                    o + a * phi, var, m, ch, j, i, use_var, mu_floor, mle
+                )
                 d0, d1, d2 = a * gx, a * gy, phi
                 f00 += d0 * d0 * wa
                 f01 += d0 * d1 * wa
@@ -2203,13 +2471,10 @@ def _spline_crlb_link_xyz_kernel(
     meat = cuda.local.array((_LINK_XYZ_MAX_P, _LINK_XYZ_MAX_P), numba.float64)
     vecs = cuda.local.array((_LINK_XYZ_MAX_P, _LINK_XYZ_MAX_P), numba.float64)
     lam = cuda.local.array(_LINK_XYZ_MAX_P, numba.float64)
-    # The cross-channel photon/background blocks are structurally zero (a pixel
-    # belongs to exactly one channel), so clear both matrices once and then fill
-    # only the blocks that are actually touched.
-    for p in range(n_params):
-        for q in range(n_params):
-            bread[p, q] = 0.0
-            meat[p, q] = 0.0
+    # The cross-channel photon/background blocks are structurally zero (a
+    # pixel belongs to exactly one channel), so clear both matrices once and
+    # then fill only the blocks that are actually touched.
+    _clear_square_device(bread, meat, n_params)
 
     # Shared x/y/z block, accumulated across every channel.
     xx = xy = xz = yy = yz = zz = 0.0
@@ -2247,76 +2512,42 @@ def _spline_crlb_link_xyz_kernel(
                 fy = yco - yi
                 py0, py1, py2, py3 = 1.0, fy, fy * fy, fy * fy * fy
                 dy1, dy2, dy3 = 1.0, 2.0 * fy, 3.0 * fy * fy
-                phi = gx = gy = gz = 0.0
-                for zp in range(4):
-                    pzv = (
-                        pz0
-                        if zp == 0
-                        else (pz1 if zp == 1 else (pz2 if zp == 2 else pz3))
-                    )
-                    dzv = (
-                        0.0
-                        if zp == 0
-                        else (dz1 if zp == 1 else (dz2 if zp == 2 else dz3))
-                    )
-                    for yp in range(4):
-                        pyv = (
-                            py0
-                            if yp == 0
-                            else (
-                                py1 if yp == 1 else (py2 if yp == 2 else py3)
-                            )
-                        )
-                        dyv = (
-                            0.0
-                            if yp == 0
-                            else (
-                                dy1 if yp == 1 else (dy2 if yp == 2 else dy3)
-                            )
-                        )
-                        for xp in range(4):
-                            cf = coeff[ch, zi, yi, xi, zp, yp, xp]
-                            pxv = (
-                                px0
-                                if xp == 0
-                                else (
-                                    px1
-                                    if xp == 1
-                                    else (px2 if xp == 2 else px3)
-                                )
-                            )
-                            dxv = (
-                                0.0
-                                if xp == 0
-                                else (
-                                    dx1
-                                    if xp == 1
-                                    else (dx2 if xp == 2 else dx3)
-                                )
-                            )
-                            phi += cf * pzv * pyv * pxv
-                            gx += cf * pzv * pyv * dxv
-                            gy += cf * pzv * dyv * pxv
-                            gz += cf * dzv * pyv * pxv
-                mu = bgc + nc * phi
-                # Huang et al.'s sCMOS shift: a pixel's readout
-                # variance adds to the model mean, so the Fisher
-                # weight becomes 1/(mu + var) and the least-
-                # squares sandwich meat becomes the true pixel
-                # variance.
-                if use_var:
-                    mu += var[m, ch, j, i]
-                if mu < mu_floor:
-                    mu = mu_floor
-                if mle:
-                    wa = 1.0 / mu
-                    wb = 0.0
-                else:
-                    wa = 1.0
-                    wb = mu
-                # Gradient columns: x/y/z scale with this channel's photons, the
-                # photon column is phi and the background column is 1. x/y also
-                # pick up the channel Jacobian's Jᵀ chain rule.
+                phi, gx, gy, gz = _spline_basis_3d_device(
+                    coeff,
+                    ch,
+                    zi,
+                    yi,
+                    xi,
+                    pz0,
+                    pz1,
+                    pz2,
+                    pz3,
+                    dz1,
+                    dz2,
+                    dz3,
+                    py0,
+                    py1,
+                    py2,
+                    py3,
+                    dy1,
+                    dy2,
+                    dy3,
+                    px0,
+                    px1,
+                    px2,
+                    px3,
+                    dx1,
+                    dx2,
+                    dx3,
+                )
+                # Huang et al.'s sCMOS shift is folded into the pixel
+                # mean before the Fisher/meat weights are derived.
+                wa, wb = _crlb_pixel_weights_device(
+                    bgc + nc * phi, var, m, ch, j, i, use_var, mu_floor, mle
+                )
+                # Gradient columns: x/y/z scale with this channel's photons,
+                # the photon column is phi and the background column is 1.
+                # x/y also pick up the channel Jacobian's Jᵀ chain rule.
                 d0 = nc * (a00 * gx + a10 * gy)
                 d1 = nc * (a01 * gx + a11 * gy)
                 d2 = nc * gz
@@ -2432,6 +2663,36 @@ def _spline_crlb_cuda(
     caller owns the calibration parsing and the NaN masking. ``z_eval`` None
     selects the 2D model, which has no channel geometry and so ignores ``jac``
     and ``res``.
+
+    Parameters
+    ----------
+    coeff : np.ndarray
+        Reshaped spline coefficients (see :func:`_spline_coeff_reshaped`).
+    jac : np.ndarray
+        ``(n_locs, n_channels, 4)`` per-spot channel Jacobians.
+    res : np.ndarray
+        ``(n_locs, n_channels, 2)`` sub-pixel ROI offsets.
+    box : int
+        Fit box side length.
+    amplitude, x_shift, y_shift : lib.FloatArray1D
+        Fitted amplitude and lateral shifts.
+    z_eval : lib.FloatArray1D or None
+        Native axial sampling coordinate (``-z_shift``); None for the 2D
+        model.
+    offset : lib.FloatArray1D
+        Fitted background.
+    finite : np.ndarray
+        Boolean mask of converged rows; the others are skipped.
+    mu_floor : float
+        Lower bound the model mean is clamped to.
+    mle : bool
+        Poisson Cramer-Rao bound (True) or the least-squares sandwich.
+    progress_callback : callable, "console" or None, optional
+        Progress over localization chunks. ``"console"`` shows a tqdm bar; a
+        callable is invoked with the cumulative number of localizations done.
+    variance : lib.FloatArray4D, optional
+        ``(n_locs, n_channels, box, box)`` channel-major sCMOS readout
+        variance. Default None.
 
     Returns
     -------
@@ -2680,10 +2941,10 @@ def _spline_link_xyz_crlb_cpu(
     variance: lib.FloatArray4D | None = None,
 ) -> lib.FloatArray2D:
     """CPU (numba) parameter variances for the photon-decoupled (link-XYZ)
-    model. The numerical core of :func:`_spline_link_xyz_crlb`, split out so it
-    can also be run on a subset of rows (the GPU path falls back here for
-    localizations the device could not diagonalize). ``jac`` and ``res`` are the
-    per-spot Jacobians and ROI residuals the fit used (see
+    model. The numerical core of :func:`_spline_link_xyz_crlb`, split out so
+    it can also be run on a subset of rows (the GPU path falls back here for
+    localizations the device could not diagonalize). ``jac`` and ``res`` are
+    the per-spot Jacobians and ROI residuals the fit used (see
     :func:`_spline_channel_jacobians` / :func:`_spline_crlb_residuals`); both
     must already be sliced to the same rows as ``x_shift``. Returns the raw
     ``(n_locs, 3 + 2*n_channels)`` covariance diagonal; masking non-finite and
@@ -2729,7 +2990,8 @@ def _spline_link_xyz_crlb_cpu(
             meat,
         )
         # Guard against LAPACK's batched SVD segfaulting on a non-finite
-        # information matrix (a pathological finite-theta spot can produce one).
+        # information matrix (a pathological finite-theta spot can produce
+        # one).
         bad = ~np.isfinite(bread).all(axis=(1, 2))
         if not mle:
             bad = bad | ~np.isfinite(meat).all(axis=(1, 2))
@@ -2898,10 +3160,11 @@ def _spline_crlb_cpu(
 ) -> lib.FloatArray2D:
     """CPU (numba) parameter variances for the shared-amplitude spline models.
 
-    The numerical core of :func:`_spline_crlb`, split out so it can also be run
-    on a subset of rows (the GPU path falls back here for localizations the
-    device could not diagonalize). ``z_eval`` None selects the 2D model. ``jac``
-    and ``res`` are the per-spot Jacobians and ROI residuals the fit used (see
+    The numerical core of :func:`_spline_crlb`, split out so it can also be
+    run on a subset of rows (the GPU path falls back here for localizations
+    the device could not diagonalize). ``z_eval`` None selects the 2D
+    model. ``jac`` and ``res`` are the per-spot Jacobians and ROI residuals
+    the fit used (see
     :func:`_spline_channel_jacobians` / :func:`_spline_crlb_residuals`); both
     must already be sliced to the same rows as ``amplitude``, and neither is
     used by the single-channel 2D model. Returns the raw ``(n_locs, P)``
@@ -2911,10 +3174,11 @@ def _spline_crlb_cpu(
     n_params = 5 if is_3d else 4
     n_locs = len(amplitude)
 
-    # Per-localization information matrices (float64). ``bread`` is the Fisher
-    # matrix (mle) or the least-squares normal matrix J; non-converged rows stay
-    # the identity so the batched pinv is well-defined (the caller NaNs them).
-    # ``meat`` M is only filled for the least-squares sandwich (stays 0 for mle).
+    # Per-localization information matrices (float64). ``bread`` is the
+    # Fisher matrix (mle) or the least-squares normal matrix J;
+    # non-converged rows stay the identity so the batched pinv is
+    # well-defined (the caller NaNs them). ``meat`` M is only filled for the
+    # least-squares sandwich (stays 0 for mle).
     bread = np.tile(np.eye(n_params), (max(n_locs, 1), 1, 1))
     meat = np.zeros((max(n_locs, 1), n_params, n_params))
 
@@ -3036,7 +3300,8 @@ def _spline_crlb(
         so ``mu`` is an expected photon count and the Poisson noise model
         applies directly.
     calibration : dict
-        The spline PSF calibration (see ``picasso.io.load_spline_calibration``).
+        The spline PSF calibration (see
+        ``picasso.io.load_spline_calibration``).
     box : int
         Fit box side length (camera pixels).
     mle : bool, optional
@@ -3054,11 +3319,22 @@ def _spline_crlb(
     residuals : np.ndarray, optional
         Per-localization, per-channel sub-pixel ROI offsets ``(n_locs,
         n_channels, 2)``, as passed to the fit (see
-        :func:`picasso.localize.channel_roi_residuals`). Multichannel only; ``None`` (the
-        default) means zero, which is the single-channel case. Pass whatever
+        :func:`picasso.localize.channel_roi_residuals`). Multichannel only;
+        ``None`` (the default) means zero, which is the single-channel
+        case. Pass whatever
         the fit used: the covariance is evaluated at ``theta`` under the same
-        geometry, and the per-spot Jacobians that go with it are read from
-        ``calibration["channel_transforms"]``.
+        geometry.
+    variance : lib.FloatArray4D, optional
+        Per-pixel sCMOS readout variance in photoelectrons squared, in the
+        same layout as the spots (``(n_locs, box, box)`` or channel-last
+        ``(n_locs, box, box, n_channels)``). ``None`` (the default) uses the
+        plain Poisson model.
+    jacobians : np.ndarray, optional
+        ``(n_locs, n_channels, 4)`` per-spot channel Jacobians
+        ``[a00, a01, a10, a11]``, as passed to the fit (see
+        :func:`picasso.localize.channel_roi_geometry`). ``None`` (the default)
+        evaluates ``calibration["channel_transforms"]`` once, which is only
+        valid for an affine registration or a single channel.
 
     Returns
     -------

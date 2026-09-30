@@ -63,6 +63,10 @@ from scipy.ndimage import shift as _ndi_shift, zoom as _ndi_zoom
 
 from . import io, lib, localize, __version__
 
+# aliased: `wavelet` is the keyword that passes the wavelet identification
+# settings through this module
+from . import wavelet as wavelets
+
 # aliased: `transforms` is used as a local name for lists of channel
 # transforms throughout this module
 from . import transforms as tform
@@ -135,6 +139,11 @@ def spline_coefficients(data: np.ndarray) -> np.ndarray:
         raise ValueError("data must be 1, 2 or 3-dimensional.")
     shape = [4**data.ndim] + [n - 1 for n in data.shape]
     return coeff.reshape(shape).astype(np.float32)
+
+
+# Fewest z slices a spline calibration is built from, after z binning: the
+# per-voxel axial smoothing (``_smooth_z``) needs five points to be stable.
+_MIN_Z_SLICES = 5
 
 
 def _step_of_frame(
@@ -254,6 +263,7 @@ def _detect_bead_positions(
     threaded: bool = True,
     min_separation: float | None = None,
     fov_of_frame: np.ndarray | None = None,
+    wavelet: wavelets.WaveletParameters | None = None,
 ) -> pd.DataFrame:
     """Detect bead centers (integer pixel positions) from a set of reference
     frames (ideally the in-focus ones, where beads are brightest).
@@ -282,11 +292,13 @@ def _detect_bead_positions(
         roi=roi,
         frame_bounds=ref_frame_bounds,
         threaded=threaded,
+        wavelet=wavelet,
     )
     if len(ids) == 0:
         raise ValueError(
             "No beads detected for the spline calibration. Lower the minimum "
-            "net gradient or check the reference frames."
+            "net gradient (or the wavelet threshold) or check the reference "
+            "frames."
         )
 
     x = np.rint(np.asarray(ids["x"])).astype(int)
@@ -533,7 +545,8 @@ def _subpixel_shift(
     ip = np.array(np.unravel_index(int(np.argmax(region)), region.shape)) + lo
     peak_value = float(cc[ip[0], ip[1], ip[2]])
 
-    # sub-voxel refinement: cubic-spline upsample a small window around the peak
+    # sub-voxel refinement: cubic-spline upsample a small window around the
+    # peak
     wlo = np.maximum(ip - radius, 0)
     whi = np.minimum(ip + radius + 1, shape)
     window = cc[wlo[0] : whi[0], wlo[1] : whi[1], wlo[2] : whi[2]]
@@ -1038,6 +1051,8 @@ def build_psf_template(
     beads: pd.DataFrame | None = None,
     return_spots: bool = False,
     roi: tuple[tuple[int, int], tuple[int, int]] | list | None = None,
+    wavelet: wavelets.WaveletParameters | None = None,
+    z_binning: int = 1,
 ) -> dict:
     """Build a normalized PSF template volume from a bead z-stack.
 
@@ -1080,13 +1095,27 @@ def build_psf_template(
         ``[[y_min, x_min], [y_max, x_max]]`` form as ``localize.identify``.
         Only beads inside the ROI(s) are used; None (or an empty list) uses
         the whole frame. Ignored if ``beads`` is given. Default None.
+    wavelet : wavelet.WaveletParameters, optional
+        Detect the beads by wavelet segmentation with these settings
+        instead of by their net gradient, in which case ``minimum_ng`` is
+        ignored (and may be None). Default is None.
+    z_binning : int, optional
+        Number of consecutive z (stage) steps averaged into one slice of the
+        template, right after the bead volumes are extracted and before they
+        are registered, smoothed and normalized (see ``lib.bin_z_steps``).
+        The template's slices are then ``z_binning * d`` apart and each sits
+        at the mean stage position of its steps; trailing steps that do not
+        fill a whole slice are dropped. Coarser slices suppress stage
+        jitter that is correlated between neighboring steps, which the
+        per-voxel smoothing keeps as signal. Default 1 (no binning).
 
     Returns
     -------
     built : dict
         With keys:
 
-        * ``template`` - ``(box, box, n_steps)`` normalized PSF volume.
+        * ``template`` - ``(box, box, n_steps)`` normalized PSF volume, one
+          slice per z bin (per stage step without binning).
         * ``z_center`` (int) - index of the in-focus (sharpest) slice.
         * ``z_focus`` (float) - fractional slice of the axial intensity peak.
         * ``effective_sigma`` (float) - Gaussian sigma at focus (px).
@@ -1095,6 +1124,7 @@ def build_psf_template(
         * ``n_beads`` (int) - beads detected or supplied.
         * ``n_beads_used`` (int) - beads that survived the outlier filtering.
         * ``z_of_step`` - stage z (nm) of each template slice.
+        * ``z_binning`` (int) - stage steps per template slice.
         * ``gof`` (dict) - goodness of fit of the template to the individual
           beads (see ``_goodness_of_fit``).
         * ``registered`` - ``(n_used, box, box, n_steps)`` 3D-registered
@@ -1107,7 +1137,9 @@ def build_psf_template(
         If ``return_spots`` is True, the dict also carries ``spots`` (every
         individual per-frame bead spot, ``(n_spots, box, box)``, photon
         units), ``spot_step_idx`` (the index into the template z-axis of each
-        spot's stage step) and ``spot_bead_idx`` (the row of ``beads`` each
+        spot's stage step), ``spot_z`` (the exact stage z, nm, of each spot's
+        own step, which differs from its template slice's z when steps are
+        binned) and ``spot_bead_idx`` (the row of ``beads`` each
         spot came from), which ``_axial_precision`` fits one by one to measure
         the axial precision in the realistic single-frame regime.
     """
@@ -1130,6 +1162,7 @@ def build_psf_template(
             roi=roi,
             threaded=threaded,
             fov_of_frame=fov_of_frame,
+            wavelet=wavelet,
         )
     if return_spots:
         volumes, spots, spot_step_pos, spot_bead_idx = _bead_volumes(
@@ -1152,6 +1185,30 @@ def build_psf_template(
             step_range,
             fov_of_frame=fov_of_frame,
         )
+    # Axial binning: average groups of consecutive stage steps into one
+    # template slice. Done on the raw bead volumes, so registration, focus
+    # search, smoothing and normalization all run on the binned stack.
+    z_binning = max(1, int(z_binning))
+    z_of_slice = lib.bin_z_steps(z_of_step[step_range], z_binning)
+    if len(z_of_slice) < _MIN_Z_SLICES:
+        raise ValueError(
+            f"Only {len(z_of_slice)} z slices remain after z binning of "
+            f"{z_binning} (from {len(step_range)} z steps); the spline "
+            f"calibration needs at least {_MIN_Z_SLICES}. Reduce the z "
+            "binning or widen the frame range."
+        )
+    volumes = lib.bin_z_steps(volumes, z_binning, axis=3)
+    if return_spots:
+        # Keep every single-frame spot, each compared with the exact stage
+        # position of its own step; drop the trailing steps binning left out.
+        spot_z = np.asarray(z_of_step[step_range], dtype=np.float64)[
+            spot_step_pos
+        ]
+        kept = spot_step_pos < len(z_of_slice) * z_binning
+        spots = spots[kept]
+        spot_z = spot_z[kept]
+        spot_bead_idx = spot_bead_idx[kept]
+        spot_step_pos = spot_step_pos[kept] // z_binning
     # first pass on the raw bead-average to locate focus, then register
     z_center, _ = _focus_step(volumes.mean(axis=0))
     mean_volume, registered, quality = _register_and_average(
@@ -1183,7 +1240,8 @@ def build_psf_template(
         "photon_scale": photon_scale,
         "n_beads": int(len(beads)),
         "n_beads_used": int(bead_quality["keep"].sum()),
-        "z_of_step": z_of_step[step_range],
+        "z_of_step": z_of_slice,
+        "z_binning": z_binning,
         "gof": gof,
         "registered": registered,
         "bead_quality": bead_quality,
@@ -1191,10 +1249,13 @@ def build_psf_template(
     if return_spots:
         # every individual per-frame bead spot, flattened to (n_spots, box,
         # box), with for each spot the index into the template z-axis
-        # (0..n_steps-1) of its stage step. z_of_step[step_idx] is then the
-        # spot's known stage position (see _axial_precision).
+        # (0..n_slices-1) of its stage step's slice, and its exact stage
+        # position spot_z. Without binning spot_z == z_of_step[step_idx];
+        # with binning it resolves the spot's step within its slice (see
+        # _axial_precision).
         result["spots"] = spots
         result["spot_step_idx"] = spot_step_pos
+        result["spot_z"] = spot_z
         # which bead each spot came from, so a caller that knows where the
         # beads sit can attach per-spot geometry (e.g. the multichannel ROI
         # residuals) without re-deriving the flattening order
@@ -1219,6 +1280,8 @@ def calibrate_spline(
     path: str | None = None,
     progress_callback: Callable[[int], None] | None = None,
     return_diagnostics: bool = False,
+    wavelet: wavelets.WaveletParameters | None = None,
+    z_binning: int = 1,
 ) -> dict | tuple[dict, list]:
     """Generate a cubic-spline PSF calibration from a bead z-stack movie.
 
@@ -1262,9 +1325,10 @@ def calibrate_spline(
         Default is False.
     roi : tuple or list of tuples, optional
         Region(s) of interest for bead detection, in the same
-        ``[[y_min, x_min], [y_max, x_max]]`` form as ``localize.identify`` and
-        the GUI's ``view.rois``. Only beads inside the ROI(s) are used for the
-        calibration; None (or an empty list) uses the whole frame. Default None.
+        ``[[y_min, x_min], [y_max, x_max]]`` form as ``localize.identify``
+        and the GUI's ``view.rois``. Only beads inside the ROI(s) are used
+        for the calibration; None (or an empty list) uses the whole frame.
+        Default None.
     path : str, optional
         Where to save the calibration (HDF5) and a diagnostic PNG. If None,
         nothing is written. Default is None.
@@ -1276,6 +1340,17 @@ def calibrate_spline(
         :func:`bead_inspection_data`) so a caller such as the GUI can show
         which beads were averaged into the PSF and which were rejected.
         Default is False.
+    wavelet : wavelet.WaveletParameters, optional
+        Detect the beads by wavelet segmentation with these settings
+        instead of by their net gradient, in which case ``minimum_ng`` is
+        ignored (and may be None). Default is None.
+    z_binning : int, optional
+        Number of consecutive z (stage) steps averaged into one slice of the
+        PSF template (see ``build_psf_template``). The spline's axial knots
+        are then ``z_binning * d`` apart, which is stored as ``z_step_nm``.
+        Coarser knots keep stage jitter that is correlated between
+        neighboring steps out of the model. Stored in the calibration.
+        Default 1 (no binning).
 
     Returns
     -------
@@ -1306,15 +1381,20 @@ def calibrate_spline(
         # keep the individual per-frame spots so the diagnostic PNG can measure
         # the axial precision by fitting each spot (only needed when we plot)
         return_spots=path is not None,
+        wavelet=wavelet,
+        z_binning=z_binning,
     )
+    # axial spacing of the template slices, i.e. of the spline's z knots
+    z_slice_nm = float(d) * built["z_binning"]
     template = built["template"]  # (box, box, n_steps)
     z_center = built["z_center"]
     # Two distinct z references (see also
     # ``picasso.fitting.seeds.initial_parameters_spline`` /
     # ``locs_from_fits_spline``):
-    #  - z_init: the sharpest (in-focus) slice. The fit's z_shift is initialized
-    #    to -z_init. This is the numerically sound, convention-INDEPENDENT start
-    #    and must NOT depend on ``correct_z_bias`` - otherwise the two
+    #  - z_init: the sharpest (in-focus) slice. The fit's z_shift is
+    #    initialized to -z_init. This is the numerically sound,
+    #    convention-INDEPENDENT start and must NOT depend on
+    #    ``correct_z_bias`` - otherwise the two
     #    calibrations start the fit from different z, converge to different
     #    (x, y, z) minima (an astigmatic PSF has flat gradients off-focus), and
     #    the z=0 shift leaks into x/y instead of being a clean constant.
@@ -1368,7 +1448,7 @@ def calibrate_spline(
         "lateral_centered": True,
         "z_center": float(z_origin),
         "z_init": float(z_init),
-        "z_step_nm": float(d),
+        "z_step_nm": z_slice_nm,
         "magnification_factor": float(magnification_factor),
         "correct_z_bias": bool(correct_z_bias),
         "effective_sigma": float(built["effective_sigma"]),
@@ -1380,6 +1460,8 @@ def calibrate_spline(
         # beads that survived the outlier filtering and were actually averaged
         # into the PSF (see _keep_inliers); the rest live in the diagnostics
         "n_beads_used": int(built["n_beads_used"]),
+        "Step size in nm": float(d),
+        "Z binning": int(built["z_binning"]),
         "Frames per step": int(frames_per_step),
         "Frame order": frame_order,
         "Frame bounds": frame_bounds,
@@ -1456,6 +1538,117 @@ def registration_model_name(calibration: dict) -> str | None:
     return None
 
 
+def _split_fov_coarse_candidates(
+    c_xy: np.ndarray,
+    channel_roi: tuple[tuple[int, int], tuple[int, int]] | list,
+    coarse_shift: tuple[float, float] | np.ndarray,
+    flips: tuple[tuple[str, float, float], ...],
+) -> list[tuple[str, np.ndarray]]:
+    """Coarse-align split-FOV channel beads onto the reference region.
+
+    The flip is taken about the channel region (its size == the reference
+    region's) and the known region-origin offset places it on the reference
+    region.
+    """
+    (cy0, cx0), (cy1, cx1) = _normalized_region(channel_roi)
+    h, w = float(cy1 - cy0), float(cx1 - cx0)
+    x0_ref = cx0 + float(coarse_shift[0])
+    y0_ref = cy0 + float(coarse_shift[1])
+    xl = c_xy[:, 0] - cx0
+    yl = c_xy[:, 1] - cy0
+    candidates = []
+    for label, sx, sy in flips:
+        fx = (w - xl) if sx < 0 else xl
+        fy = (h - yl) if sy < 0 else yl
+        candidates.append((label, np.column_stack([fx + x0_ref, fy + y0_ref])))
+    return candidates
+
+
+def _separate_movie_coarse_candidates(
+    movie_ref,
+    movie_c,
+    mid_frame: int,
+    ref_xy: np.ndarray,
+    c_xy: np.ndarray,
+    flips: tuple[tuple[str, float, float], ...],
+) -> list[tuple[str, np.ndarray]]:
+    """Coarse-align separate-movie channel beads onto the reference channel.
+
+    For every candidate orientation the coarse translation is measured
+    directly by cross-correlating the reference mid-frame against the
+    (identically mirrored) channel mid-frame.
+    """
+    from . import imageprocess
+
+    try:
+        img_ref = np.asarray(movie_ref[mid_frame], dtype=np.float32)
+        img_c = np.asarray(movie_c[mid_frame], dtype=np.float32)
+    except Exception:
+        img_ref = img_c = None
+    height, width = int(movie_c.shape[1]), int(movie_c.shape[2])
+    ref_centroid = ref_xy.mean(axis=0)
+    candidates = []
+    for label, sx, sy in flips:
+        # mirror the channel beads about the frame (consistently with the
+        # image flip below) so the same orientation is applied to both
+        fx = (width - 1 - c_xy[:, 0]) if sx < 0 else c_xy[:, 0]
+        fy = (height - 1 - c_xy[:, 1]) if sy < 0 else c_xy[:, 1]
+        flipped = np.column_stack([fx, fy])
+        if img_ref is not None:
+            img_cf = img_c
+            if sx < 0:
+                img_cf = img_cf[:, ::-1]
+            if sy < 0:
+                img_cf = img_cf[::-1, :]
+            try:
+                dy, dx = imageprocess.get_image_shift(img_ref, img_cf, 5)
+            except Exception:
+                dx = dy = 0.0
+            # the cross-correlation sign convention can go either way, so
+            # try both and let the match count decide
+            for sign in (1.0, -1.0):
+                candidates.append((label, flipped + sign * np.array([dx, dy])))
+        else:
+            # a flip plus an arbitrary translation is recovered by aligning
+            # centroids (coarser, needs the bead sets to overlap)
+            candidates.append(
+                (label, flipped + (ref_centroid - flipped.mean(axis=0)))
+            )
+    return candidates
+
+
+def _best_orientation_match(
+    candidates: list[tuple[str, np.ndarray]],
+    ref_xy: np.ndarray,
+    c_xy: np.ndarray,
+    ref_fov: np.ndarray | None,
+    c_fov: np.ndarray | None,
+    radius: float,
+    inlier_tol: float,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Match every coarse orientation with RANSAC, keep the best one.
+
+    The coarse overlay only proposes candidate pairs (a generous radius
+    covers an imperfectly placed ROI); the transform is fit on absolute
+    coordinates and mismatches are rejected, so the registration is
+    independent of exact ROI placement (see :func:`ransac_match`).
+    """
+    best_ref_idx, best_c_idx = np.array([], int), np.array([], int)
+    for _label, aligned in candidates:
+        ri, ci = ransac_match(
+            ref_xy,
+            c_xy,
+            aligned,
+            inlier_tol,
+            radius,
+            ref_fov=ref_fov,
+            c_fov=c_fov,
+        )
+        if len(ri) > len(best_ref_idx):
+            best_ref_idx, best_c_idx = ri, ci
+    return best_ref_idx, best_c_idx
+
+
 def _estimate_channel_transform(
     movie_ref,
     movie_c,
@@ -1470,6 +1663,7 @@ def _estimate_channel_transform(
     return_matches: bool = False,
     model: str = "affine",
     fov_of_frame: np.ndarray | None = None,
+    wavelet: wavelets.WaveletParameters | None = None,
 ) -> tuple[np.ndarray, int] | tuple[np.ndarray, int, np.ndarray, np.ndarray]:
     """Estimate the transform mapping reference-channel coordinates to
     channel ``c``.
@@ -1490,13 +1684,15 @@ def _estimate_channel_transform(
       whole frame and the coarse shift is measured by image cross-correlation
       of a mid (in-focus) frame; both shift signs are tried.
     * **Split-FOV** (``channel_roi`` and ``coarse_shift`` given): the two
-      "channels" are two regions of the *same* movie, so channel ``c`` beads are
-      detected inside ``channel_roi`` and pre-aligned by the known region-origin
-      offset ``coarse_shift`` (added to the channel beads to overlay them on the
-      reference region). ``coarse_shift`` is ``(x0_ref - x0_c, y0_ref - y0_c)``.
+      "channels" are two regions of the *same* movie, so channel ``c`` beads
+      are detected inside ``channel_roi`` and pre-aligned by the known
+      region-origin offset ``coarse_shift`` (added to the channel beads to
+      overlay them on the reference region). ``coarse_shift`` is
+      ``(x0_ref - x0_c, y0_ref - y0_c)``.
 
-    ``fov_of_frame`` must be the same array the *reference* beads were detected
-    with, so both clouds are de-duplicated by the same rule. Grouped per FOV,
+    ``fov_of_frame`` must be the same array the *reference* beads were
+    detected with, so both clouds are de-duplicated by the same rule.
+    Grouped per FOV,
     ``_dedupe_beads`` merges the same physical bead re-detected across frames;
     pooled globally it also merges *different* beads from *different* fields
     that land within ``box`` pixels of each other on the sensor - worst of all
@@ -1506,8 +1702,6 @@ def _estimate_channel_transform(
     within their own field (see :func:`ransac_match`). The transform itself
     stays global and is fitted on the pooled inliers of all fields.
     """
-    from . import imageprocess
-
     beads_c = _detect_bead_positions(
         movie_c,
         minimum_ng,
@@ -1515,6 +1709,7 @@ def _estimate_channel_transform(
         ref_bounds,
         roi=channel_roi,
         fov_of_frame=fov_of_frame,
+        wavelet=wavelet,
     )
     ref_xy = beads_ref[["x", "y"]].to_numpy(dtype=np.float64)
     c_xy = beads_c[["x", "y"]].to_numpy(dtype=np.float64)
@@ -1525,8 +1720,8 @@ def _estimate_channel_transform(
     )
     c_fov = beads_c["fov"].to_numpy() if "fov" in beads_c.columns else None
 
-    # Coarse pre-alignment for bead matching only: the affine below is fit on the
-    # original (untransformed) channel coordinates, so it absorbs whatever
+    # Coarse pre-alignment for bead matching only: the affine below is fit on
+    # the original (untransformed) channel coordinates, so it absorbs whatever
     # orientation the matching candidate implied. Tries flipping if it
     # matches more beads
     flips = (
@@ -1535,84 +1730,20 @@ def _estimate_channel_transform(
         ("flip-y", 1.0, -1.0),
         ("flip-xy", -1.0, -1.0),
     )
-    candidates = []  # (label, channel coords pre-aligned onto the reference)
     if coarse_shift is not None:
-        # split-FOV: the two channels are regions of one movie, so the flip is
-        # taken about the channel region (its size == the reference region's)
-        # and the known region-origin offset places it on the reference region.
-        (cy0, cx0), (cy1, cx1) = _normalized_region(channel_roi)
-        h, w = float(cy1 - cy0), float(cx1 - cx0)
-        x0_ref = cx0 + float(coarse_shift[0])
-        y0_ref = cy0 + float(coarse_shift[1])
-        xl = c_xy[:, 0] - cx0
-        yl = c_xy[:, 1] - cy0
-        for label, sx, sy in flips:
-            fx = (w - xl) if sx < 0 else xl
-            fy = (h - yl) if sy < 0 else yl
-            candidates.append(
-                (label, np.column_stack([fx + x0_ref, fy + y0_ref]))
-            )
+        candidates = _split_fov_coarse_candidates(
+            c_xy, channel_roi, coarse_shift, flips
+        )
     else:
-        # separate movies: no known geometry, so for every candidate orientation
-        # the coarse translation is measured directly by cross-correlating the
-        # reference mid-frame against the (identically mirrored) channel
-        # mid-frame
-        try:
-            img_ref = np.asarray(movie_ref[mid_frame], dtype=np.float32)
-            img_c = np.asarray(movie_c[mid_frame], dtype=np.float32)
-        except Exception:
-            img_ref = img_c = None
-        height, width = int(movie_c.shape[1]), int(movie_c.shape[2])
-        ref_centroid = ref_xy.mean(axis=0)
-        for label, sx, sy in flips:
-            # mirror the channel beads about the frame (consistently with the
-            # image flip below) so the same orientation is applied to both
-            fx = (width - 1 - c_xy[:, 0]) if sx < 0 else c_xy[:, 0]
-            fy = (height - 1 - c_xy[:, 1]) if sy < 0 else c_xy[:, 1]
-            flipped = np.column_stack([fx, fy])
-            if img_ref is not None:
-                img_cf = img_c
-                if sx < 0:
-                    img_cf = img_cf[:, ::-1]
-                if sy < 0:
-                    img_cf = img_cf[::-1, :]
-                try:
-                    dy, dx = imageprocess.get_image_shift(img_ref, img_cf, 5)
-                except Exception:
-                    dx = dy = 0.0
-                # the cross-correlation sign convention can go either way, so try
-                # both and let the match count decide
-                for sign in (1.0, -1.0):
-                    candidates.append(
-                        (label, flipped + sign * np.array([dx, dy]))
-                    )
-            else:
-                # a flip plus an arbitrary translation is recovered by aligning
-                # centroids (coarser, needs the bead sets to overlap)
-                candidates.append(
-                    (label, flipped + (ref_centroid - flipped.mean(axis=0)))
-                )
+        candidates = _separate_movie_coarse_candidates(
+            movie_ref, movie_c, mid_frame, ref_xy, c_xy, flips
+        )
 
-    # Match against each coarse orientation with RANSAC and keep the orientation
-    # with the most inliers. The coarse overlay only proposes candidate pairs
-    # (a generous radius covers an imperfectly placed ROI); the transform is fit
-    # on absolute coordinates and mismatches are rejected, so the registration
-    # is independent of exact ROI placement (see ransac_match).
     radius = max(3.0 * box, float(max_distance))
     inlier_tol = max(3.0, 0.25 * box)
-    best_ref_idx, best_c_idx = np.array([], int), np.array([], int)
-    for _label, aligned in candidates:
-        ri, ci = ransac_match(
-            ref_xy,
-            c_xy,
-            aligned,
-            inlier_tol,
-            radius,
-            ref_fov=ref_fov,
-            c_fov=c_fov,
-        )
-        if len(ri) > len(best_ref_idx):
-            best_ref_idx, best_c_idx = ri, ci
+    best_ref_idx, best_c_idx = _best_orientation_match(
+        candidates, ref_xy, c_xy, ref_fov, c_fov, radius, inlier_tol
+    )
 
     needed = tform.min_points(model)
     if len(best_ref_idx) < needed:
@@ -1633,10 +1764,11 @@ def _estimate_channel_transform(
     # (see :func:`transforms.is_plausible`, used the same way when the signal
     # re-registration picks a mirror orientation).
     if not tform.is_plausible(transform):
+        area_scale = abs(np.linalg.det(np.asarray(transform.matrix)[:2, :2]))
         raise ValueError(
             f"The {model} registration fitted between the reference channel "
             f"and another channel is geometrically implausible (it rescales "
-            f"areas by {abs(np.linalg.det(np.asarray(transform.matrix)[:2, :2])):.4g}x, "
+            f"areas by {area_scale:.4g}x, "
             f"expected about 1x), fitted on only {len(best_ref_idx)} bead "
             "correspondences. The bead matching locked onto coincidental "
             "pairs rather than the true ones. Check that the channel ROIs are "
@@ -1649,6 +1781,344 @@ def _estimate_channel_transform(
         # registration diagnostic (residual = transform(ref) - channel)
         return transform, n_matches, ref_xy[best_ref_idx], c_xy[best_c_idx]
     return transform, n_matches
+
+
+def _resolve_split_fov_regions(
+    regions: list,
+    n_channels: int,
+    reference: int,
+    minimum_ngs: list,
+) -> tuple[list, list, list, tuple]:
+    """Validate and reorder split-FOV regions, precomputing coarse shifts.
+
+    Returns ``(region_rects, minimum_ngs, coarse_shifts, ref_roi)`` with
+    ``region_rects`` reordered so the reference channel comes first
+    (channel 0).
+    """
+    if len(regions) != n_channels:
+        raise ValueError(
+            f"Got {n_channels} channels (movies) but {len(regions)} "
+            "regions; they must match for a split-FOV calibration."
+        )
+    if not (0 <= reference < n_channels):
+        raise ValueError(
+            f"reference={reference} is out of range for {n_channels} "
+            "regions."
+        )
+    region_rects = [_normalized_region(r) for r in regions]
+    # reference region must be channel 0 (identity) for the transform and
+    # template conventions; reorder so it comes first.
+    order = [reference] + [c for c in range(n_channels) if c != reference]
+    region_rects = [region_rects[c] for c in order]
+    # the thresholds belong to the regions, so they follow the reorder
+    minimum_ngs = [minimum_ngs[c] for c in order]
+    sizes = {(r[1][0] - r[0][0], r[1][1] - r[0][1]) for r in region_rects}
+    if len(sizes) != 1:
+        raise ValueError(
+            "All split-FOV regions must have the same size (height, "
+            f"width); got {sorted(sizes)}."
+        )
+    y0_ref, x0_ref = region_rects[0][0]
+    # shift added to a channel's beads to overlay them on the reference
+    # region: (x0_ref - x0_c, y0_ref - y0_c)
+    coarse_shifts = [
+        (float(x0_ref - r[0][1]), float(y0_ref - r[0][0]))
+        for r in region_rects
+    ]
+    ref_roi = region_rects[0]
+    return region_rects, minimum_ngs, coarse_shifts, ref_roi
+
+
+def _estimate_all_channel_transforms(
+    movies: list,
+    beads_ref: pd.DataFrame,
+    minimum_ngs: list,
+    box: int,
+    ref_bounds: tuple[int, int] | list,
+    mid_frame: int,
+    max_match_distance: float,
+    n_channels: int,
+    split_fov: bool,
+    region_rects: list | None,
+    coarse_shifts: list | None,
+    model: str,
+    fov_of_frame: np.ndarray,
+    wavelet: wavelets.WaveletParameters | None = None,
+) -> tuple[list, list]:
+    """Estimate the reference -> channel transform for every other channel.
+
+    Returns ``(transforms, reg_info)``, channel 0's identity transform first
+    and ``reg_info`` holding, per non-reference channel, the matched beads
+    for the registration diagnostic.
+    """
+    identity = tform.identity()
+    transforms = [identity]
+    reg_info = []
+    for c in range(1, n_channels):
+        transform, n_matches, ref_m, c_m = _estimate_channel_transform(
+            movies[0],
+            movies[c],
+            beads_ref,
+            minimum_ngs[c],
+            box,
+            ref_bounds,
+            mid_frame,
+            max_match_distance,
+            channel_roi=region_rects[c] if split_fov else None,
+            coarse_shift=coarse_shifts[c] if split_fov else None,
+            return_matches=True,
+            model=model,
+            fov_of_frame=fov_of_frame,
+            wavelet=wavelet,
+        )
+        transforms.append(transform)
+        reg_info.append(
+            {
+                "channel": c,
+                "n_matches": n_matches,
+                "ref_xy": ref_m,
+                "c_xy": c_m,
+                "transform": transform,
+            }
+        )
+    return transforms, reg_info
+
+
+def _build_per_channel_templates(
+    movies: list,
+    camera_infos: list[dict],
+    box: int,
+    minimum_ngs: list,
+    d: float,
+    frames_per_step: int,
+    frame_bounds: tuple[int, int] | list | None,
+    frame_order: str,
+    beads_ref: pd.DataFrame,
+    transforms: list,
+    ref_xy: np.ndarray,
+    n_channels: int,
+    z_binning: int = 1,
+) -> list[dict]:
+    """Build a per-channel PSF template from the same physical beads.
+
+    Non-reference channels get the reference beads mapped through that
+    channel's transform, carrying each bead's FOV so it is still extracted
+    per field (see :func:`_bead_volumes`).
+    """
+    per_channel = []
+    for c in range(n_channels):
+        if c == 0:
+            beads_c = beads_ref
+        else:
+            mapped = transforms[c].apply(ref_xy)
+            beads_c = pd.DataFrame(
+                {
+                    "x": np.rint(mapped[:, 0]).astype(int),
+                    "y": np.rint(mapped[:, 1]).astype(int),
+                    "fov": beads_ref["fov"].to_numpy(),
+                }
+            )
+        built = build_psf_template(
+            movies[c],
+            camera_infos[c],
+            box,
+            minimum_ngs[c],
+            d,
+            frames_per_step=frames_per_step,
+            frame_bounds=frame_bounds,
+            frame_order=frame_order,
+            beads=beads_c,
+            return_spots=True,  # per-channel axial-precision diagnostic
+            z_binning=z_binning,
+        )
+        per_channel.append(built)
+    return per_channel
+
+
+def _assemble_multichannel_coefficients(
+    per_channel: list[dict], n_channels: int
+) -> tuple[np.ndarray, list[int], list[np.ndarray]]:
+    """Assemble per-channel PSF templates into one coefficient table.
+
+    Shape ``(64, n_int_x, n_int_y, n_int_z, n_channels)``. The lateral axes
+    are swapped (row=y, col=x) -> (x, y) so the spline's first axis is x,
+    matching the model's fast pixel index (see :func:`calibrate_spline`).
+    """
+    templates = [
+        np.ascontiguousarray(p["template"].transpose(1, 0, 2))
+        for p in per_channel
+    ]
+    n_intervals = [int(i) for i in (np.array(templates[0].shape) - 1)]
+    coefficients = np.zeros(
+        [64] + n_intervals + [n_channels], dtype=np.float32
+    )
+    for c, template in enumerate(templates):
+        coefficients[..., c] = spline_coefficients(template)
+    return coefficients, n_intervals, templates
+
+
+def _build_multichannel_calibration_dict(
+    per_channel: list[dict],
+    coefficients: np.ndarray,
+    n_intervals: list[int],
+    templates: list[np.ndarray],
+    n_channels: int,
+    transforms: list,
+    camera_infos: list[dict],
+    box: int,
+    d: float,
+    frames_per_step: int,
+    frame_order: str,
+    frame_bounds: tuple[int, int] | list | None,
+    magnification_factor: float,
+    correct_z_bias: bool,
+    link_photons: bool,
+    path: str | None,
+) -> dict:
+    """Assemble the ``spline-3d-multichannel`` calibration dict."""
+    ref = per_channel[0]
+    # axial spacing of the template slices, i.e. of the spline's z knots
+    z_slice_nm = float(d) * ref["z_binning"]
+    # z_init (sharpest slice, fit initialization) vs z_origin (output z = 0
+    # reference: raw stage-scan zero, or the intensity focus with
+    # correct_z_bias); see ``calibrate_spline`` for why they must be
+    # decoupled.
+    z_init = float(ref["z_center"])
+    z_origin = (
+        ref["z_focus"]
+        if correct_z_bias
+        else _scan_center_index(ref["z_of_step"])
+    )
+    pixelsize = camera_infos[0].get("Pixelsize", 130)
+    return {
+        "model": "spline-3d-multichannel",
+        "coefficients": coefficients,
+        "n_data": [int(s) for s in templates[0].shape],
+        "n_intervals": n_intervals,
+        "n_channels": n_channels,
+        "channel_transforms": [t.to_dict() for t in transforms],
+        "oversampling": 1.0,
+        # every channel's template is centered on its own box, so the
+        # channels share one lateral origin and the linked fit is free of
+        # the constant inter-channel offset an anchor-bead-centered
+        # template would carry
+        "lateral_centered": True,
+        "z_center": float(z_origin),
+        "z_init": float(z_init),
+        "z_step_nm": z_slice_nm,
+        "magnification_factor": float(magnification_factor),
+        "correct_z_bias": bool(correct_z_bias),
+        "link_photons": bool(link_photons),
+        "effective_sigma": float(ref["effective_sigma"]),
+        # Per-channel amplitude->photon conversion
+        "photon_scale": [float(p["photon_scale"]) for p in per_channel],
+        # Per-channel focus offset
+        "plane_offsets": [
+            float((p["z_center"] - ref["z_center"]) * z_slice_nm)
+            for p in per_channel
+        ],
+        "box": int(box),
+        "pixelsize": float(pixelsize),
+        "n_beads": int(ref["n_beads"]),
+        # per channel: the beads that survived that channel's outlier
+        # filtering and were averaged into its PSF (see _keep_inliers)
+        "n_beads_used": [int(p["n_beads_used"]) for p in per_channel],
+        "Step size in nm": float(d),
+        "Z binning": int(ref["z_binning"]),
+        "Frames per step": int(frames_per_step),
+        "Frame order": frame_order,
+        "Frame bounds": frame_bounds,
+        "Generated by": (
+            f"Picasso: v{__version__} Spline PSF calibration (multichannel)"
+        ),
+        "Path": path if path is not None else "N/A",
+    }
+
+
+def _add_split_fov_calibration_fields(
+    calibration: dict, region_rects: list, transforms: list
+) -> None:
+    """Add split-FOV region/registration metadata to the calibration, in place.
+
+    The inter-channel affine is stored relative to the region origins (not
+    absolute) so the channels can be re-placed at fit time by re-drawing the
+    ROIs; the absolute ``channel_transforms`` are recomputed from these plus
+    the ROIs.
+    """
+    calibration["split_fov"] = True
+    calibration["reference"] = 0
+    calibration["regions"] = [
+        [[int(r[0][0]), int(r[0][1])], [int(r[1][0]), int(r[1][1])]]
+        for r in region_rects
+    ]
+    channel_registration = localize.decompose_region_transforms(
+        region_rects, transforms
+    )
+    calibration["channel_registration"] = [
+        a.to_dict() for a in channel_registration
+    ]
+    h = region_rects[0][1][0] - region_rects[0][0][0]
+    w = region_rects[0][1][1] - region_rects[0][0][1]
+    calibration["region_size"] = [int(h), int(w)]
+
+
+def _save_multichannel_calibration(
+    path: str,
+    calibration: dict,
+    per_channel: list[dict],
+    coefficients: np.ndarray,
+    reg_info: list,
+    ref_xy: np.ndarray,
+    transforms: list,
+) -> None:
+    """Save the calibration and its diagnostic PNGs. Never fatal."""
+    io.save_spline_calibration(path, calibration)
+    try:
+        _save_multichannel_diagnostics(
+            per_channel,
+            calibration,
+            coefficients,
+            reg_info,
+            path,
+            spot_geometry=_spot_roi_geometry(per_channel, ref_xy, transforms),
+        )
+    except Exception:
+        pass
+
+
+def _multichannel_bead_diagnostics(
+    per_channel: list[dict], calibration: dict
+) -> list:
+    """Build the per-channel bead-inspection diagnostic records."""
+    return [
+        bead_inspection_data(
+            built,
+            calibration,
+            label=("reference channel - " if c == 0 else f"channel {c} - "),
+        )
+        for c, built in enumerate(per_channel)
+    ]
+
+
+def _report_progress(
+    progress_callback: Callable[[int], None] | None, step: int
+) -> None:
+    """Call ``progress_callback(step)`` if a callback was given."""
+    if callable(progress_callback):
+        progress_callback(step)
+
+
+def _add_photon_ratios(
+    calibration: dict, photon_ratios: np.ndarray | list, n_channels: int
+) -> None:
+    """Validate and store the per-channel photon splitting ratios, in place."""
+    ratios = np.atleast_2d(np.asarray(photon_ratios, dtype=float))
+    if ratios.shape[1] != n_channels:
+        raise ValueError(
+            f"photon_ratios has {ratios.shape[1]} channels but the "
+            f"calibration has {n_channels}."
+        )
+    calibration["photon_ratios"] = ratios.tolist()
 
 
 def calibrate_spline_multichannel(
@@ -1673,6 +2143,8 @@ def calibrate_spline_multichannel(
     progress_callback: Callable[[int], None] | None = None,
     return_diagnostics: bool = False,
     model: str = "affine",
+    wavelet: wavelets.WaveletParameters | None = None,
+    z_binning: int = 1,
 ) -> dict | tuple[dict, list]:
     """Generate a multichannel cubic-spline PSF calibration from registered
     bead z-stacks (one movie per channel).
@@ -1692,8 +2164,8 @@ def calibrate_spline_multichannel(
     ``localize.fit_spline_multichannel`` / ``get_spots_multichannel``.
 
     **Split-FOV mode** (``regions`` given): the channels are rectangular
-    sub-regions of a *single* movie (all ``movies`` entries are the same movie).
-    Reference beads are detected inside the reference region and each
+    sub-regions of a *single* movie (all ``movies`` entries are the same
+    movie). Reference beads are detected inside the reference region and each
     channel-to-channel transform is estimated from beads inside that channel's
     region, pre-aligned by the known region-origin offset (see
     :func:`_estimate_channel_transform`). The regions and reference index are
@@ -1773,6 +2245,15 @@ def calibrate_spline_multichannel(
     model : str, optional
         Transform model for the channel registration, one of
         ``picasso.transforms.MODELS``. Default "affine".
+    wavelet : wavelet.WaveletParameters, optional
+        Detect the beads by wavelet segmentation with these settings
+        instead of by their net gradient, in which case ``minimum_ng`` is
+        ignored (and may be None). Default is None.
+    z_binning : int, optional
+        Number of consecutive z (stage) steps averaged into one slice of every
+        channel's PSF template (see ``build_psf_template``). The axial knots
+        and the stored ``z_step_nm`` are then ``z_binning * d`` apart. Stored
+        in the calibration. Default 1 (no binning).
 
     Returns
     -------
@@ -1819,40 +2300,13 @@ def calibrate_spline_multichannel(
     coarse_shifts = None
     ref_roi = roi
     if split_fov:
-        if len(regions) != n_channels:
-            raise ValueError(
-                f"Got {n_channels} channels (movies) but {len(regions)} "
-                "regions; they must match for a split-FOV calibration."
+        region_rects, minimum_ngs, coarse_shifts, ref_roi = (
+            _resolve_split_fov_regions(
+                regions, n_channels, reference, minimum_ngs
             )
-        if not (0 <= reference < n_channels):
-            raise ValueError(
-                f"reference={reference} is out of range for {n_channels} "
-                "regions."
-            )
-        region_rects = [_normalized_region(r) for r in regions]
-        # reference region must be channel 0 (identity) for the transform and
-        # template conventions; reorder so it comes first.
-        order = [reference] + [c for c in range(n_channels) if c != reference]
-        region_rects = [region_rects[c] for c in order]
-        # the thresholds belong to the regions, so they follow the reorder
-        minimum_ngs = [minimum_ngs[c] for c in order]
-        sizes = {(r[1][0] - r[0][0], r[1][1] - r[0][1]) for r in region_rects}
-        if len(sizes) != 1:
-            raise ValueError(
-                "All split-FOV regions must have the same size (height, "
-                f"width); got {sorted(sizes)}."
-            )
-        y0_ref, x0_ref = region_rects[0][0]
-        # shift added to a channel's beads to overlay them on the reference
-        # region: (x0_ref - x0_c, y0_ref - y0_c)
-        coarse_shifts = [
-            (float(x0_ref - r[0][1]), float(y0_ref - r[0][0]))
-            for r in region_rects
-        ]
-        ref_roi = region_rects[0]
+        )
 
-    if callable(progress_callback):
-        progress_callback(0)
+    _report_progress(progress_callback, 0)
 
     n_frames = int(movies[0].shape[0])
     step_of_frame, _, step_range = _step_of_frame(
@@ -1871,207 +2325,99 @@ def calibrate_spline_multichannel(
         ref_bounds,
         roi=ref_roi,
         fov_of_frame=fov_of_frame,
+        wavelet=wavelet,
     )
 
     # channel transforms (channel 0 is the identity reference)
-    identity = tform.identity()
-    transforms = [identity]
-    reg_info = (
-        []
-    )  # per non-reference channel: matched beads for the diagnostic
-    for c in range(1, n_channels):
-        transform, n_matches, ref_m, c_m = _estimate_channel_transform(
-            movies[0],
-            movies[c],
-            beads_ref,
-            minimum_ngs[c],
-            box,
-            ref_bounds,
-            mid_frame,
-            max_match_distance,
-            channel_roi=region_rects[c] if split_fov else None,
-            coarse_shift=coarse_shifts[c] if split_fov else None,
-            return_matches=True,
-            model=model,
-            fov_of_frame=fov_of_frame,
-        )
-        transforms.append(transform)
-        reg_info.append(
-            {
-                "channel": c,
-                "n_matches": n_matches,
-                "ref_xy": ref_m,
-                "c_xy": c_m,
-                "transform": transform,
-            }
-        )
+    transforms, reg_info = _estimate_all_channel_transforms(
+        movies,
+        beads_ref,
+        minimum_ngs,
+        box,
+        ref_bounds,
+        mid_frame,
+        max_match_distance,
+        n_channels,
+        split_fov,
+        region_rects,
+        coarse_shifts,
+        model,
+        fov_of_frame,
+        wavelet=wavelet,
+    )
 
-    if callable(progress_callback):
-        progress_callback(1)
+    _report_progress(progress_callback, 1)
 
     # per-channel PSF templates from the same physical beads
     ref_xy = beads_ref[["x", "y"]].to_numpy(dtype=np.float64)
-    per_channel = []
-    for c in range(n_channels):
-        if c == 0:
-            beads_c = beads_ref
-        else:
-            mapped = transforms[c].apply(ref_xy)
-            beads_c = pd.DataFrame(
-                {
-                    "x": np.rint(mapped[:, 0]).astype(int),
-                    "y": np.rint(mapped[:, 1]).astype(int),
-                    # same physical beads, so carry each bead's FOV over so
-                    # this channel is also extracted per FOV
-                    "fov": beads_ref["fov"].to_numpy(),
-                }
-            )
-        built = build_psf_template(
-            movies[c],
-            camera_infos[c],
-            box,
-            minimum_ngs[c],
-            d,
-            frames_per_step=frames_per_step,
-            frame_bounds=frame_bounds,
-            frame_order=frame_order,
-            beads=beads_c,
-            return_spots=True,  # per-channel axial-precision diagnostic
-        )
-        per_channel.append(built)
-
-    if callable(progress_callback):
-        progress_callback(2)
-
-    # assemble coefficients (64, n_int_x, n_int_y, n_int_z, n_channels).
-    # Swap the lateral axes (row=y, col=x) -> (x, y) so the spline's first axis
-    # is x, matching the model's fast pixel index (see calibrate_spline).
-    templates = [
-        np.ascontiguousarray(p["template"].transpose(1, 0, 2))
-        for p in per_channel
-    ]
-    n_intervals = [int(i) for i in (np.array(templates[0].shape) - 1)]
-    coefficients = np.zeros(
-        [64] + n_intervals + [n_channels], dtype=np.float32
+    per_channel = _build_per_channel_templates(
+        movies,
+        camera_infos,
+        box,
+        minimum_ngs,
+        d,
+        frames_per_step,
+        frame_bounds,
+        frame_order,
+        beads_ref,
+        transforms,
+        ref_xy,
+        n_channels,
+        z_binning,
     )
-    for c, template in enumerate(templates):
-        coefficients[..., c] = spline_coefficients(template)
 
-    ref = per_channel[0]
-    # z_init (sharpest slice, fit initialization) vs z_origin (output z = 0
-    # reference: raw stage-scan zero, or the intensity focus with
-    # correct_z_bias); see ``calibrate_spline`` for why they must be decoupled.
-    z_init = float(ref["z_center"])
-    z_origin = (
-        ref["z_focus"]
-        if correct_z_bias
-        else _scan_center_index(ref["z_of_step"])
+    _report_progress(progress_callback, 2)
+
+    coefficients, n_intervals, templates = _assemble_multichannel_coefficients(
+        per_channel, n_channels
     )
-    pixelsize = camera_infos[0].get("Pixelsize", 130)
-    calibration = {
-        "model": "spline-3d-multichannel",
-        "coefficients": coefficients,
-        "n_data": [int(s) for s in templates[0].shape],
-        "n_intervals": n_intervals,
-        "n_channels": n_channels,
-        "channel_transforms": [t.to_dict() for t in transforms],
-        "oversampling": 1.0,
-        # every channel's template is centered on its own box, so the channels
-        # share one lateral origin and the linked fit is free of the constant
-        # inter-channel offset an anchor-bead-centered template would carry
-        "lateral_centered": True,
-        "z_center": float(z_origin),
-        "z_init": float(z_init),
-        "z_step_nm": float(d),
-        "magnification_factor": float(magnification_factor),
-        "correct_z_bias": bool(correct_z_bias),
-        "link_photons": bool(link_photons),
-        "effective_sigma": float(ref["effective_sigma"]),
-        # Per-channel amplitude->photon conversion
-        "photon_scale": [float(p["photon_scale"]) for p in per_channel],
-        # Per-channel focus offset
-        "plane_offsets": [
-            float((p["z_center"] - ref["z_center"]) * d) for p in per_channel
-        ],
-        "box": int(box),
-        "pixelsize": float(pixelsize),
-        "n_beads": int(ref["n_beads"]),
-        # per channel: the beads that survived that channel's outlier filtering
-        # and were averaged into its PSF (see _keep_inliers)
-        "n_beads_used": [int(p["n_beads_used"]) for p in per_channel],
-        "Frames per step": int(frames_per_step),
-        "Frame order": frame_order,
-        "Frame bounds": frame_bounds,
-        "Generated by": (
-            f"Picasso: v{__version__} Spline PSF calibration (multichannel)"
-        ),
-        "Path": path if path is not None else "N/A",
-    }
+
+    calibration = _build_multichannel_calibration_dict(
+        per_channel,
+        coefficients,
+        n_intervals,
+        templates,
+        n_channels,
+        transforms,
+        camera_infos,
+        box,
+        d,
+        frames_per_step,
+        frame_order,
+        frame_bounds,
+        magnification_factor,
+        correct_z_bias,
+        link_photons,
+        path,
+    )
 
     if photon_ratios is not None:
-        ratios = np.atleast_2d(np.asarray(photon_ratios, dtype=float))
-        if ratios.shape[1] != n_channels:
-            raise ValueError(
-                f"photon_ratios has {ratios.shape[1]} channels but the "
-                f"calibration has {n_channels}."
-            )
-        calibration["photon_ratios"] = ratios.tolist()
+        _add_photon_ratios(calibration, photon_ratios, n_channels)
 
     if split_fov:
         # single-movie channels: the fit path rebuilds the channel stack from
         # one movie using these regions (reference region first).
-        calibration["split_fov"] = True
-        calibration["reference"] = 0
-        calibration["regions"] = [
-            [[int(r[0][0]), int(r[0][1])], [int(r[1][0]), int(r[1][1])]]
-            for r in region_rects
-        ]
-        # ROI-agnostic registration: store the inter-channel affine relative to
-        # the region origins so the channels can be re-placed at fit time by
-        # re-drawing the ROIs (the ``regions`` above are only the defaults). The
-        # absolute ``channel_transforms`` are recomputed from these + the ROIs.
-        channel_registration = localize.decompose_region_transforms(
-            region_rects, transforms
+        _add_split_fov_calibration_fields(
+            calibration, region_rects, transforms
         )
-        calibration["channel_registration"] = [
-            a.to_dict() for a in channel_registration
-        ]
-        h = region_rects[0][1][0] - region_rects[0][0][0]
-        w = region_rects[0][1][1] - region_rects[0][0][1]
-        calibration["region_size"] = [int(h), int(w)]
 
     if path is not None:
-        io.save_spline_calibration(path, calibration)
         # diagnostic PNGs: one per-channel PSF plot (reusing the single-channel
         # diagnostic, with its axial-precision panels) plus one
-        # channel-registration plot. Never fatal.
-        try:
-            _save_multichannel_diagnostics(
-                per_channel,
-                calibration,
-                coefficients,
-                reg_info,
-                path,
-                spot_geometry=_spot_roi_geometry(
-                    per_channel, ref_xy, transforms
-                ),
-            )
-        except Exception:
-            pass
+        # channel-registration plot.
+        _save_multichannel_calibration(
+            path,
+            calibration,
+            per_channel,
+            coefficients,
+            reg_info,
+            ref_xy,
+            transforms,
+        )
 
-    if callable(progress_callback):
-        progress_callback(3)
+    _report_progress(progress_callback, 3)
     if return_diagnostics:
-        diagnostics = [
-            bead_inspection_data(
-                built,
-                calibration,
-                label=(
-                    "reference channel - " if c == 0 else f"channel {c} - "
-                ),
-            )
-            for c, built in enumerate(per_channel)
-        ]
+        diagnostics = _multichannel_bead_diagnostics(per_channel, calibration)
         return calibration, diagnostics
     return calibration
 
@@ -2235,8 +2581,9 @@ def _save_multichannel_diagnostics(
 
     * ``<base>_ch{c}.png`` - a per-channel PSF diagnostic (xy/xz/yz montages,
       axial intensity and per-channel model-vs-data agreement) via
-      :func:`_save_diagnostic_plot`. The axial z-accuracy panels are *not* shown
-      here: a single plane is z-degenerate, so that is a cross-channel property.
+      :func:`_save_diagnostic_plot`. The axial z-accuracy panels are *not*
+      shown here: a single plane is z-degenerate, so that is a cross-channel
+      property.
     * ``<base>_ch{c}_beads.png`` - that channel's bead gallery
       (:func:`_save_bead_gallery_plot`): which individual beads were averaged
       into its PSF and which were rejected as outliers.
@@ -2244,18 +2591,20 @@ def _save_multichannel_diagnostics(
       (:func:`_save_multichannel_summary_plot`): overlaid axial intensity
       profiles with the per-channel focus (plane offsets) and the joint
       all-channel z accuracy.
-    * ``<base>_registration.png`` - how well the non-reference channels align to
-      the reference (residual field, RMS, and the affine decomposed into
-      rotation / scale / mirror; see :func:`_save_registration_diagnostic_plot`).
+    * ``<base>_registration.png`` - how well the non-reference channels align
+      to the reference (residual field, RMS, and the affine decomposed into
+      rotation / scale / mirror; see
+      :func:`_save_registration_diagnostic_plot`).
     """
     n_channels = len(per_channel)
     base, _ = os.path.splitext(path)
     photon_scale = np.asarray(
         calibration.get("photon_scale", 1.0), dtype=float
     ).ravel()
-    # Axial z-accuracy is a JOINT property: a single plane is z-degenerate, so it
-    # is computed once from an all-channel fit (the real pipeline) and shown on
-    # the summary figure, not repeated (misleadingly) on every channel's plot.
+    # Axial z-accuracy is a JOINT property: a single plane is z-degenerate,
+    # so it is computed once from an all-channel fit (the real pipeline) and
+    # shown on the summary figure, not repeated (misleadingly) on every
+    # channel's plot.
     try:
         joint_precision = _axial_precision_multichannel(
             per_channel, calibration, spot_geometry=spot_geometry
@@ -2288,8 +2637,8 @@ def _save_multichannel_diagnostics(
             calib_c["photon_scale"] = float(photon_scale[c])
         # The joint z accuracy is a cross-channel property shown once on the
         # summary figure, so the per-channel PSF plots drop the (duplicated,
-        # single-plane-degenerate) axial panels and keep their own model-vs-data
-        # agreement instead.
+        # single-plane-degenerate) axial panels and keep their own
+        # model-vs-data agreement instead.
         label = "reference channel" if c == 0 else f"channel {c}"
         _save_diagnostic_plot(
             per_channel[c],
@@ -2320,42 +2669,15 @@ def _save_multichannel_diagnostics(
         _save_registration_diagnostic_plot(reg_info, calibration, path)
 
 
-def _save_registration_diagnostic_plot(
-    reg_info: list[dict], calibration: dict, path: str
-) -> None:
-    """Save a channel-registration diagnostic PNG (``<base>_registration.png``).
+def _channel_registration_residuals(
+    reg_info: list[dict],
+) -> tuple[list[np.ndarray], list[np.ndarray]]:
+    """Compute and attach per-channel registration residuals, in place.
 
-    For each non-reference channel the affine-fit residual (``transform(ref) -
-    channel`` at the matched beads) is drawn as a vector field over the reference
-    field of view (magnified for visibility) and summarized as an RMS bar chart.
-    A footer table lists, per channel, the matched-bead count, RMS, the affine
-    decomposed into rotation / principal scales / mirror (see
-    :meth:`picasso.transforms.Transform.decompose`) - so a reflected
-    channel or an unexpected
-    rotation/scale is obvious - plus the focus (plane) offset and photon scale. A
-    tight, structure-free residual field with small RMS means the channels are
-    well registered; a systematic pattern reveals a rotation/scale the affine
-    could not absorb.
+    Adds ``_resid`` (``transform(ref) - channel``, camera px), ``_ref`` and
+    ``_rms_px`` to every entry of ``reg_info``. Returns the reference bead x
+    and y coordinates of every channel, for the overall plot bounds.
     """
-    ps = float(calibration.get("pixelsize", 130)) or 130.0  # nm / camera px
-    plane_offsets = np.asarray(
-        calibration.get("plane_offsets", []), dtype=float
-    ).ravel()
-    photon_scale = np.asarray(
-        calibration.get("photon_scale", 1.0), dtype=float
-    ).ravel()
-    colors = [
-        "tab:orange",
-        "tab:green",
-        "tab:red",
-        "tab:purple",
-        "tab:brown",
-        "tab:pink",
-        "tab:olive",
-        "tab:cyan",
-    ]
-
-    # residuals per channel and overall bead-position bounds
     all_x, all_y = [], []
     for r in reg_info:
         ref = np.asarray(r["ref_xy"], dtype=float)
@@ -2372,12 +2694,23 @@ def _save_registration_diagnostic_plot(
         if len(ref):
             all_x.append(ref[:, 0])
             all_y.append(ref[:, 1])
+    return all_x, all_y
 
-    fig = Figure(figsize=(12.0, 5.4))
-    FigureCanvasAgg(fig)
-    fig.suptitle("Multichannel registration diagnostic", fontsize=12)
 
-    ax = fig.add_axes([0.06, 0.26, 0.52, 0.60])
+def _plot_registration_residual_field(
+    ax,
+    reg_info: list[dict],
+    all_x: list[np.ndarray],
+    all_y: list[np.ndarray],
+    colors: list[str],
+    ps: float,
+) -> None:
+    """Draw the per-channel registration residual vector field on ``ax``.
+
+    Residuals are magnified so the largest is ~12% of the FOV span, capped so
+    a near-perfect registration doesn't blow numerical noise up to full
+    scale.
+    """
     max_resid = max(
         (
             float(np.sqrt(np.sum(r["_resid"] ** 2, axis=1)).max())
@@ -2392,13 +2725,12 @@ def _save_registration_diagnostic_plot(
         span = max(float(np.ptp(xs)), float(np.ptp(ys)), 1.0)
     else:
         span = 1.0
-    # magnify residuals so the largest is ~12% of the FOV span, capped so a
-    # near-perfect registration doesn't blow numerical noise up to full scale
     negligible = max_resid < 1e-3  # px: below this, residuals are just noise
-    if negligible:
-        mag = 1.0
-    else:
-        mag = float(np.clip((0.12 * span) / max_resid, 1.0, 200.0))
+    mag = (
+        1.0
+        if negligible
+        else float(np.clip((0.12 * span) / max_resid, 1.0, 200.0))
+    )
     for i, r in enumerate(reg_info):
         ref, resid = r["_ref"], r["_resid"]
         if not len(ref):
@@ -2433,20 +2765,20 @@ def _save_registration_diagnostic_plot(
     if not negligible and len(reg_info) > 1:
         ax.legend(loc="best", fontsize=8)
 
-    # per-channel RMS bar chart
-    ax2 = fig.add_axes([0.68, 0.34, 0.29, 0.52])
-    chans = [f"ch{r['channel']}" for r in reg_info]
-    rms_nm = [r["_rms_px"] * ps for r in reg_info]
-    bar_colors = [colors[i % len(colors)] for i in range(len(reg_info))]
-    ax2.bar(chans, rms_nm, color=bar_colors)
-    ax2.set_ylabel("Registration RMS (nm)")
-    ax2.set_title("Per-channel registration error", fontsize=10)
-    ax2.set_ylim(bottom=0.0)
 
-    # full-width text summary footer (so wide columns never clip). The affine is
-    # decomposed into rotation / scale / mirror (see Transform.decompose) so a
-    # reflected channel or an unexpected rotation/scale is obvious at a glance
-    # rather than hidden in a raw 2x3 matrix.
+def _registration_summary_lines(
+    reg_info: list[dict],
+    plane_offsets: np.ndarray,
+    photon_scale: np.ndarray,
+    ps: float,
+) -> list[str]:
+    """Build the footer text table lines for the registration diagnostic.
+
+    The affine is decomposed into rotation / scale / mirror (see
+    :meth:`picasso.transforms.Transform.decompose`) so a reflected channel or
+    an unexpected rotation/scale is obvious at a glance rather than hidden in
+    a raw 2x3 matrix.
+    """
     cols = (
         ("channel", 9),
         ("beads", 7),
@@ -2476,6 +2808,69 @@ def _save_registration_diagnostic_plot(
             f"{pscale:.3f}",
         ]
         lines.append("".join(f.ljust(w) for f, w in zip(fields, widths)))
+    return lines
+
+
+def _save_registration_diagnostic_plot(
+    reg_info: list[dict], calibration: dict, path: str
+) -> None:
+    """Save a channel-registration diagnostic PNG
+    (``<base>_registration.png``).
+
+
+    For each non-reference channel the affine-fit residual
+    (``transform(ref) - channel`` at the matched beads) is drawn as a vector
+    field over the reference field of view (magnified for visibility) and
+    summarized as an RMS bar chart. A footer table lists, per channel, the
+    matched-bead count, RMS, the affine decomposed into rotation / principal
+    scales / mirror (see :meth:`picasso.transforms.Transform.decompose`) -
+    so a reflected channel or an unexpected rotation/scale is obvious - plus
+    the focus (plane) offset and photon scale. A tight, structure-free
+    residual field with small RMS means the channels are well registered; a
+    systematic pattern reveals a rotation/scale the affine could not absorb.
+    """
+    ps = float(calibration.get("pixelsize", 130)) or 130.0  # nm / camera px
+    plane_offsets = np.asarray(
+        calibration.get("plane_offsets", []), dtype=float
+    ).ravel()
+    photon_scale = np.asarray(
+        calibration.get("photon_scale", 1.0), dtype=float
+    ).ravel()
+    colors = [
+        "tab:orange",
+        "tab:green",
+        "tab:red",
+        "tab:purple",
+        "tab:brown",
+        "tab:pink",
+        "tab:olive",
+        "tab:cyan",
+    ]
+
+    # residuals per channel and overall bead-position bounds
+    all_x, all_y = _channel_registration_residuals(reg_info)
+
+    fig = Figure(figsize=(12.0, 5.4))
+    FigureCanvasAgg(fig)
+    fig.suptitle("Multichannel registration diagnostic", fontsize=12)
+
+    ax = fig.add_axes([0.06, 0.26, 0.52, 0.60])
+    _plot_registration_residual_field(ax, reg_info, all_x, all_y, colors, ps)
+
+    # per-channel RMS bar chart
+    ax2 = fig.add_axes([0.68, 0.34, 0.29, 0.52])
+    chans = [f"ch{r['channel']}" for r in reg_info]
+    rms_nm = [r["_rms_px"] * ps for r in reg_info]
+    bar_colors = [colors[i % len(colors)] for i in range(len(reg_info))]
+    ax2.bar(chans, rms_nm, color=bar_colors)
+    ax2.set_ylabel("Registration RMS (nm)")
+    ax2.set_title("Per-channel registration error", fontsize=10)
+    ax2.set_ylim(bottom=0.0)
+
+    # full-width text summary footer (so wide columns never clip).
+    lines = _registration_summary_lines(
+        reg_info, plane_offsets, photon_scale, ps
+    )
     fig.text(
         0.06,
         0.04,
@@ -2510,6 +2905,8 @@ def calibrate_spline_split_fov(
     progress_callback: Callable[[int], None] | None = None,
     return_diagnostics: bool = False,
     model: str = "affine",
+    wavelet: wavelets.WaveletParameters | None = None,
+    z_binning: int = 1,
 ) -> dict | tuple[dict, list]:
     """Build a multichannel spline calibration from a *single* bead z-stack in
     which several rectangular field-of-view regions are the channels (split-FOV
@@ -2518,34 +2915,79 @@ def calibrate_spline_split_fov(
     This is the acquisition geometry globLoc was designed around (Li et al.,
     Nat. Commun. 13, 3133, 2022).
 
-    This is a thin wrapper over :func:`calibrate_spline_multichannel`: it repeats
-    the one ``movie``/``info``/``camera_info`` once per region and forwards
-    ``regions`` (and ``reference``) to the split-FOV path, which detects
-    reference beads inside the reference region and estimates each region's
-    affine from beads inside that region (pre-aligned by the known region-origin
-    offset). All regions must have the same size; ``regions[reference]`` is the
-    reference channel.
+    This is a thin wrapper over :func:`calibrate_spline_multichannel`: it
+    repeats the one ``movie``/``info``/``camera_info`` once per region and
+    forwards ``regions`` (and ``reference``) to the split-FOV path, which
+    detects reference beads inside the reference region and estimates each
+    region's affine from beads inside that region (pre-aligned by the known
+    region-origin offset). All regions must have the same size;
+    ``regions[reference]`` is the reference channel.
 
     Parameters
     ----------
-    movie, info, camera_info
-        The single bead z-stack movie, its info list and camera info dict.
+    movie : localize.LoadedMovie
+        The single bead z-stack movie holding all channels.
+    info : list of dicts
+        Movie metadata.
+    camera_info : dict
+        Camera information ("Baseline", "Sensitivity", "Gain",
+        "Pixelsize").
+    box : int
+        Lateral ROI size (camera pixels). The resulting calibration expects
+        fits with this same box size.
+    minimum_ng : float or sequence of float
+        Bead detection threshold, shared or one per region (in the order of
+        ``regions``, i.e. before the reference-first reordering).
+    d : float
+        Step size in nm between consecutive z (stage) positions.
     regions : list
         One ``[[y_min, x_min], [y_max, x_max]]`` rectangle per channel (as
         produced by the GUI ROI tool), all the same size.
     reference : int, optional
         Index into ``regions`` of the reference channel. Default 0.
-    minimum_ng : float or sequence of float
-        Bead detection threshold, shared or one per region (in the order of
-        ``regions``, i.e. before the reference-first reordering).
-    box, d, frames_per_step, frame_bounds, frame_order
-        As in :func:`calibrate_spline_multichannel`.
-    magnification_factor, correct_z_bias, max_match_distance
-        As in :func:`calibrate_spline_multichannel`.
-    photon_ratios, link_photons, path, progress_callback
-        As in :func:`calibrate_spline_multichannel`.
-    return_diagnostics, model
-        As in :func:`calibrate_spline_multichannel`.
+    frames_per_step : int, optional
+        Number of frames acquired at each z position (multi-FOV). Default 1.
+    frame_bounds : tuple, list of tuples, optional
+        Frame numbers to consider (see ``zfit.calibrate_z``). Default None.
+    frame_order : {"fov", "z"}, optional
+        Acquisition order when ``frames_per_step`` > 1 (see
+        ``zfit.calibrate_z``). Default "fov".
+    magnification_factor : float, optional
+        Ratio between the actual axial position and the stage travel of the
+        calibration scan (refractive-index mismatch). Default 0.79.
+    correct_z_bias : bool, optional
+        If True, define z = 0 at the axial intensity peak of the averaged PSF
+        instead of at the raw stage-scan center. Default False.
+    max_match_distance : float, optional
+        Largest distance (camera pixels) at which a reference bead and a
+        channel bead may be paired during registration. None (the default)
+        uses ``box``.
+    photon_ratios : np.ndarray or list, optional
+        Per-channel photon splitting ratios of a ratiometric setup, stored in
+        the calibration. None (the default) stores none.
+    link_photons : bool, optional
+        Whether fits with this calibration link one photon count and
+        background across all channels, see
+        :func:`calibrate_spline_multichannel`. Default True.
+    path : str, optional
+        Where to save the calibration (HDF5) and the diagnostic PNGs. If None,
+        nothing is written. Default None.
+    progress_callback : callable, optional
+        Called with an integer step count as the calibration proceeds.
+        Default None.
+    return_diagnostics : bool, optional
+        If True, return ``(calibration, diagnostics)``. Default False.
+    model : str, optional
+        Transform model for the channel registration, one of
+        ``picasso.transforms.MODELS``. Default "affine".
+    wavelet : wavelet.WaveletParameters, optional
+        Detect the beads by wavelet segmentation with these settings
+        instead of by their net gradient, in which case ``minimum_ng`` is
+        ignored (and may be None). Default is None.
+    z_binning : int, optional
+        Number of consecutive z (stage) steps averaged into one slice of every
+        channel's PSF template, see :func:`calibrate_spline_multichannel`.
+        Default 1 (no binning).
 
     Returns
     -------
@@ -2589,6 +3031,8 @@ def calibrate_spline_split_fov(
         progress_callback=progress_callback,
         return_diagnostics=return_diagnostics,
         model=model,
+        wavelet=wavelet,
+        z_binning=z_binning,
     )
 
 
@@ -2611,6 +3055,137 @@ def _split_fov_local_affines(
     return [tform.from_dict(a) for a in affines]
 
 
+def _frame_indexed_points(ids, ref_frames: np.ndarray) -> dict:
+    """Group a detection table's ``(x, y)`` by frame, restricted to
+    ``ref_frames``.
+
+    Returns ``{frame: xy}`` with ``xy`` of shape ``(n, 2)``.
+    """
+    if ids is None or len(ids) == 0:
+        return {}
+    frame = np.asarray(ids["frame"], dtype=np.int64)
+    keep = np.isin(frame, ref_frames)
+    frame = frame[keep]
+    xy = np.column_stack(
+        [
+            np.asarray(ids["x"], dtype=np.float64)[keep],
+            np.asarray(ids["y"], dtype=np.float64)[keep],
+        ]
+    )
+    return {int(f): xy[frame == f] for f in np.unique(frame)}
+
+
+def _icp_refine_seed(
+    seed,
+    ref_by_frame: dict,
+    chan_by_frame: dict,
+    common: list,
+    tols: np.ndarray,
+) -> tuple[int, object]:
+    """Refine one coarse seed transform by ICP over shrinking pairing radii.
+
+    Per-frame nearest-neighbor pairing (see :func:`match_points`) followed by
+    re-fitting the affine on the pooled correspondences, one iteration per
+    tolerance in ``tols``. Returns ``(n_pairs, transform)`` at the tightest
+    radius reached.
+    """
+    transform = seed
+    n_pairs = 0
+    for tol in tols:
+        acc_ref, acc_c = [], []
+        for f in common:
+            rxy, cxy = ref_by_frame[f], chan_by_frame[f]
+            pred = transform.apply(rxy)
+            ri, ci = match_points(pred, cxy, tol)
+            if len(ri):
+                acc_ref.append(rxy[ri])
+                acc_c.append(cxy[ci])
+        if not acc_ref:
+            n_pairs = 0
+            break
+        matched_ref = np.vstack(acc_ref)
+        matched_c = np.vstack(acc_c)
+        n_pairs = len(matched_ref)
+        if n_pairs < 3:
+            break
+        transform = tform.estimate(matched_ref, matched_c)
+    return n_pairs, transform
+
+
+def _register_channel_by_icp(
+    c: int,
+    region_rects: list | None,
+    frame_shape: tuple[int, int] | None,
+    ref_pool: np.ndarray,
+    chan_pool: np.ndarray,
+    ref_by_frame: dict,
+    chan_by_frame: dict,
+    common: list,
+    tols: np.ndarray,
+) -> tuple[int, object | None]:
+    """Try every coarse mirror seed for channel ``c`` and keep the best fit.
+
+    A wrong orientation converges onto coincidental pairs, which are few at
+    the tightest radius and usually imply an absurd scale (see
+    :func:`transforms.is_plausible`).
+    """
+    best_pairs, best_transform = 0, None
+    for seed in flip_seed_transforms(
+        c, region_rects, frame_shape, ref_pool, chan_pool
+    ):
+        n_pairs, transform = _icp_refine_seed(
+            seed, ref_by_frame, chan_by_frame, common, tols
+        )
+        if n_pairs > best_pairs and tform.is_plausible(transform):
+            best_pairs, best_transform = n_pairs, transform
+    return best_pairs, best_transform
+
+
+def _register_all_channels_by_icp(
+    n_channels: int,
+    per_channel: list[dict],
+    ref_by_frame: dict,
+    sample: set,
+    region_rects: list | None,
+    frame_shape: tuple[int, int] | None,
+    tols: np.ndarray,
+    min_pairs: int,
+) -> tuple[list, list]:
+    """ICP-register every non-reference channel against the reference.
+
+    Returns ``(transforms, n_pairs_per_channel)``, channel 0's identity
+    transform first; a channel with too few correspondences (below
+    ``min_pairs`` at the tightest radius, or none in common with the
+    reference sample) gets ``None`` and 0 pairs.
+    """
+    transforms: list = [tform.identity()]
+    n_pairs_per_channel: list = [0]
+    for c in range(1, n_channels):
+        chan_by_frame = per_channel[c]
+        common = sorted(sample & set(chan_by_frame))
+        if not common:
+            transforms.append(None)
+            n_pairs_per_channel.append(0)
+            continue
+        ref_pool = np.vstack([ref_by_frame[f] for f in common])
+        chan_pool = np.vstack([chan_by_frame[f] for f in common])
+        best_pairs, best_transform = _register_channel_by_icp(
+            c,
+            region_rects,
+            frame_shape,
+            ref_pool,
+            chan_pool,
+            ref_by_frame,
+            chan_by_frame,
+            common,
+            tols,
+        )
+        registered = best_pairs >= min_pairs
+        transforms.append(best_transform if registered else None)
+        n_pairs_per_channel.append(best_pairs if registered else 0)
+    return transforms, n_pairs_per_channel
+
+
 def estimate_transforms_from_identifications(
     identifications: list,
     box: int,
@@ -2627,14 +3202,15 @@ def estimate_transforms_from_identifications(
     This is the registration-free counterpart of
     :func:`refine_split_fov_transforms_from_signal` /
     :func:`refine_multichannel_transforms_from_signal`: it needs no seed
-    transform and no access to the movies, only the per-channel detections that
-    the Localize preview has already computed. Each mirror orientation
-    (identity / flip-x / flip-y / flip-xy, see :data:`_FLIP_SIGNS`) is used as a
-    coarse seed and refined by ICP - per-frame nearest-neighbor pairing with a
-    shrinking radius, re-fitting the affine on the pooled correspondences - and
-    the orientation that still holds the most pairs at the tightest radius wins.
-    Mirrored channels (the common case for image splitters) are therefore picked
-    up automatically, which an identity assumption cannot do.
+    transform and no access to the movies, only the per-channel detections
+    that the Localize preview has already computed. Each mirror orientation
+    (identity / flip-x / flip-y / flip-xy, see :data:`_FLIP_SIGNS`) is used
+    as a coarse seed and refined by ICP - per-frame nearest-neighbor pairing
+    with a shrinking radius, re-fitting the affine on the pooled
+    correspondences - and the orientation that still holds the most pairs at
+    the tightest radius wins. Mirrored channels (the common case for image
+    splitters) are therefore picked up automatically, which an identity
+    assumption cannot do.
 
     Parameters
     ----------
@@ -2702,21 +3278,9 @@ def estimate_transforms_from_identifications(
         ref_frames = ref_frames[pick]
     sample = set(int(f) for f in ref_frames)
 
-    def by_frame(ids) -> dict:
-        if ids is None or len(ids) == 0:
-            return {}
-        frame = np.asarray(ids["frame"], dtype=np.int64)
-        keep = np.isin(frame, ref_frames)
-        frame = frame[keep]
-        xy = np.column_stack(
-            [
-                np.asarray(ids["x"], dtype=np.float64)[keep],
-                np.asarray(ids["y"], dtype=np.float64)[keep],
-            ]
-        )
-        return {int(f): xy[frame == f] for f in np.unique(frame)}
-
-    per_channel = [by_frame(ids) for ids in identifications]
+    per_channel = [
+        _frame_indexed_points(ids, ref_frames) for ids in identifications
+    ]
     ref_by_frame = per_channel[0]
     if not ref_by_frame:
         return result(None, [0] * n_channels)
@@ -2730,51 +3294,291 @@ def estimate_transforms_from_identifications(
     tols = np.linspace(
         1.5 * float(box), max(2.0, 0.3 * float(box)), max(1, int(n_iter))
     )
-    transforms: list = [tform.identity()]
-    n_pairs_per_channel: list = [0]
-    for c in range(1, n_channels):
-        chan_by_frame = per_channel[c]
-        common = sorted(sample & set(chan_by_frame))
-        if not common:
-            transforms.append(None)
-            n_pairs_per_channel.append(0)
-            continue
-        ref_pool = np.vstack([ref_by_frame[f] for f in common])
-        chan_pool = np.vstack([chan_by_frame[f] for f in common])
-        best_pairs, best_transform = 0, None
-        for seed in flip_seed_transforms(
-            c, region_rects, frame_shape, ref_pool, chan_pool
-        ):
-            transform = seed
-            n_pairs = 0
-            for tol in tols:
-                acc_ref, acc_c = [], []
-                for f in common:
-                    rxy, cxy = ref_by_frame[f], chan_by_frame[f]
-                    pred = transform.apply(rxy)
-                    ri, ci = match_points(pred, cxy, tol)
-                    if len(ri):
-                        acc_ref.append(rxy[ri])
-                        acc_c.append(cxy[ci])
-                if not acc_ref:
-                    n_pairs = 0
-                    break
-                matched_ref = np.vstack(acc_ref)
-                matched_c = np.vstack(acc_c)
-                n_pairs = len(matched_ref)
-                if n_pairs < 3:
-                    break
-                transform = tform.estimate(matched_ref, matched_c)
-            # a wrong orientation converges onto coincidental pairs, which are
-            # few at the tightest radius and usually imply an absurd scale
-            if n_pairs > best_pairs and tform.is_plausible(transform):
-                best_pairs, best_transform = n_pairs, transform
-        registered = best_pairs >= min_pairs
-        transforms.append(best_transform if registered else None)
-        n_pairs_per_channel.append(best_pairs if registered else 0)
+    transforms, n_pairs_per_channel = _register_all_channels_by_icp(
+        n_channels,
+        per_channel,
+        ref_by_frame,
+        sample,
+        region_rects,
+        frame_shape,
+        tols,
+        min_pairs,
+    )
     if all(t is None for t in transforms[1:]):
         return result(None, n_pairs_per_channel)
     return result(transforms, n_pairs_per_channel)
+
+
+def _validate_split_fov_signal_args(
+    calibration: dict,
+    regions: list,
+    reference: int,
+    box: int | None,
+    max_pair_distance: float | None,
+) -> tuple[int, int, float]:
+    """Validate the split-FOV signal-registration arguments.
+
+    Returns ``(n_channels, box, max_pair_distance)`` with the defaults
+    (calibration's own box; ``1.5 * box``) filled in.
+    """
+    if not calibration.get("split_fov"):
+        raise ValueError(
+            "refine_split_fov_transforms_from_signal requires a split-FOV "
+            "calibration."
+        )
+    n_channels = int(calibration.get("n_channels", len(regions)))
+    if len(regions) != n_channels:
+        raise ValueError(
+            f"Got {len(regions)} regions but the calibration has "
+            f"{n_channels} channels."
+        )
+    if not (0 <= reference < n_channels):
+        raise ValueError(f"reference={reference} out of range.")
+    if box is None:
+        box = int(calibration.get("box") or calibration["n_data"][0])
+    if max_pair_distance is None:
+        # the coarse seed is flip + ROI placement only, so allow a little more
+        # slack than one box for an imperfectly drawn ROI (still well below
+        # the typical single-molecule spacing, so per-frame matches stay
+        # unambiguous)
+        max_pair_distance = 1.5 * float(box)
+    return n_channels, box, max_pair_distance
+
+
+def _prepare_split_fov_regions_and_affines(
+    calibration: dict,
+    regions: list,
+    reference: int,
+    minimum_ng: float | list | np.ndarray,
+    n_channels: int,
+) -> tuple[list, list, list]:
+    """Reorder regions/thresholds/affines so the reference channel is first.
+
+    Returns ``(region_rects, minimum_ngs, affines)``.
+    """
+    order = [reference] + [c for c in range(n_channels) if c != reference]
+    region_rects = [_normalized_region(regions[c]) for c in order]
+    # one threshold per region, reordered with them (a scalar covers all)
+    minimum_ngs = localize._as_ng_list(minimum_ng, n_channels)
+    minimum_ngs = [minimum_ngs[c] for c in order]
+    sizes = {(r[1][0] - r[0][0], r[1][1] - r[0][1]) for r in region_rects}
+    if len(sizes) != 1:
+        raise ValueError("All regions must have the same size.")
+    affines_stored = _split_fov_local_affines(calibration, regions)
+    affines = [affines_stored[c] for c in order]
+    return region_rects, minimum_ngs, affines
+
+
+def _split_fov_seed_transforms(
+    affines: list, region_rects: list, n_channels: int
+) -> list:
+    """Coarse seed transforms: only the calibration's flip, placed at the ROIs.
+
+    Evaluated at the region center - the only place the question is well
+    posed for a non-linear map (identical everywhere for an affine).
+    """
+    h = region_rects[0][1][0] - region_rects[0][0][0]
+    w = region_rects[0][1][1] - region_rects[0][0][1]
+    identity = tform.identity()
+    seed_local_affines = [identity]
+    for c in range(1, n_channels):
+        dec = affines[c].decompose(pixelsize=1.0, at=(w / 2.0, h / 2.0))
+        if dec["mirror"] and dec["flip_axis"] == "x":
+            seed_local_affines.append(
+                flip_affine(-1.0, 1.0, float(w), float(h))
+            )
+        elif dec["mirror"] and dec["flip_axis"] == "y":
+            seed_local_affines.append(
+                flip_affine(1.0, -1.0, float(w), float(h))
+            )
+        else:
+            # transforms are immutable, so the identity can be shared
+            seed_local_affines.append(identity)
+    return localize.compose_region_transforms(region_rects, seed_local_affines)
+
+
+def _sample_frames_for_signal_registration(
+    movie, frame_bounds: tuple[int, int] | list | None, max_frames: int
+) -> tuple[np.ndarray, np.ndarray]:
+    """Pick a bounded, evenly-spaced sample of frames and stack them.
+
+    Returns ``(sample_frames, movie_sub)``. The same subset is used for
+    every region so per-frame pairing stays aligned.
+    """
+    n_frames = int(movie.shape[0])
+    allowed = frames_in_bounds(n_frames, frame_bounds)
+    if allowed.size == 0:
+        raise ValueError("No frames in the requested frame range.")
+    pick = np.unique(
+        np.linspace(
+            0, allowed.size - 1, min(int(max_frames), allowed.size)
+        ).astype(int)
+    )
+    sample_frames = allowed[pick]
+    movie_sub = np.stack([np.asarray(movie[int(f)]) for f in sample_frames])
+    return sample_frames, movie_sub
+
+
+def _region_detections_by_frame(
+    movie_sub: np.ndarray,
+    mng: float | None,
+    box: int,
+    rect,
+    wavelet: wavelets.WaveletParameters | None = None,
+) -> dict:
+    """Detect single molecules inside ``rect`` and group them by frame."""
+    ids, _ = localize.identify(movie_sub, mng, box, roi=rect, wavelet=wavelet)
+    if len(ids) == 0:
+        return {}
+    frame = np.asarray(ids["frame"], dtype=np.int64)
+    xy = np.column_stack(
+        [
+            np.asarray(ids["x"], dtype=np.float64),
+            np.asarray(ids["y"], dtype=np.float64),
+        ]
+    )
+    out = {}
+    for f in np.unique(frame):
+        out[int(f)] = xy[frame == f]
+    return out
+
+
+def _icp_refine_split_fov_seed(
+    seed_transform,
+    ref_by_frame: dict,
+    chan_by_frame: dict,
+    common: list,
+    tols: np.ndarray,
+    model: str,
+) -> tuple:
+    """ICP-refine one channel's coarse seed over shrinking pairing radii.
+
+    ``model`` is only fitted on the final iteration (see
+    :func:`fit_registration`); earlier iterations fit a plain affine so a
+    flexible model cannot bend to accommodate wrong correspondences.
+    Returns ``(transform, fitted_model, matched_ref, matched_c)``.
+    """
+    transform = seed_transform
+    fitted_model = "affine"
+    matched_ref = matched_c = np.empty((0, 2))
+    for k, tol in enumerate(tols):
+        acc_ref, acc_c = [], []
+        for f in common:
+            rxy = ref_by_frame[f]
+            cxy = chan_by_frame[f]
+            pred = transform.apply(rxy)
+            ri, ci = match_points(pred, cxy, tol)
+            if len(ri):
+                acc_ref.append(rxy[ri])
+                acc_c.append(cxy[ci])
+        if not acc_ref:
+            break
+        matched_ref = np.vstack(acc_ref)
+        matched_c = np.vstack(acc_c)
+        if len(matched_ref) < 3:
+            break
+        transform, fitted_model = fit_registration(
+            matched_ref, matched_c, model, final=k == len(tols) - 1
+        )
+    return transform, fitted_model, matched_ref, matched_c
+
+
+def _robust_trim_and_refit(
+    transform,
+    fitted_model: str,
+    matched_ref: np.ndarray,
+    matched_c: np.ndarray,
+    tol_lo: float,
+    model: str,
+) -> tuple:
+    """Drop coincidental pairs far from the converged transform, refit once.
+
+    Returns ``(transform, fitted_model, matched_ref, matched_c)``.
+    """
+    if len(matched_ref) >= 3:
+        resid = matched_c - transform.apply(matched_ref)
+        dist = np.sqrt(np.sum(resid**2, axis=1))
+        keep = dist <= max(tol_lo, 3.0 * np.median(dist))
+        if keep.sum() >= 3:
+            matched_ref = matched_ref[keep]
+            matched_c = matched_c[keep]
+            transform, fitted_model = fit_registration(
+                matched_ref, matched_c, model
+            )
+    return transform, fitted_model, matched_ref, matched_c
+
+
+def _register_split_fov_channel_by_signal(
+    c: int,
+    ref_by_frame: dict,
+    chan_by_frame: dict,
+    seed_transform,
+    tols: np.ndarray,
+    tol_lo: float,
+    model: str,
+    min_pairs: int,
+) -> tuple:
+    """Register one split-FOV channel from single-molecule signal.
+
+    Returns ``(transform, reg_info_entry)`` (see
+    :func:`refine_split_fov_transforms_from_signal`).
+    """
+    common = sorted(set(ref_by_frame) & set(chan_by_frame))
+    if not common:
+        raise ValueError(
+            f"No frames with detections in both the reference and channel "
+            f"{c} regions; the channels may not share signal (needs "
+            "biplane / ratiometric data)."
+        )
+    transform, fitted_model, matched_ref, matched_c = (
+        _icp_refine_split_fov_seed(
+            seed_transform, ref_by_frame, chan_by_frame, common, tols, model
+        )
+    )
+    transform, fitted_model, matched_ref, matched_c = _robust_trim_and_refit(
+        transform, fitted_model, matched_ref, matched_c, tol_lo, model
+    )
+    n_pairs = int(len(matched_ref))
+    if n_pairs < min_pairs:
+        raise ValueError(
+            f"Only {n_pairs} signal correspondences for channel {c} "
+            f"(need >= {min_pairs}); use a longer / denser movie, lower the "
+            "minimum net gradient, or re-register on beads instead."
+        )
+    resid = matched_c - transform.apply(matched_ref)
+    rms = float(np.sqrt(np.mean(np.sum(resid**2, axis=1))))
+    reg_entry = {
+        "channel": c,
+        "n_matches": n_pairs,
+        "ref_xy": matched_ref,
+        "c_xy": matched_c,
+        "transform": transform,
+        "rms": rms,
+        # what was actually fitted, and what was asked for: they differ when
+        # too few pairs survived for the chosen model
+        "model": fitted_model,
+        "model_requested": model,
+    }
+    return transform, reg_entry
+
+
+def _update_split_fov_calibration_registration(
+    calibration: dict, region_rects: list, transforms: list
+) -> None:
+    """Write the refined registration into the calibration, in place."""
+    new_affines = localize.decompose_region_transforms(
+        region_rects, transforms
+    )
+    calibration["channel_registration"] = [a.to_dict() for a in new_affines]
+    calibration["channel_transforms"] = [t.to_dict() for t in transforms]
+    calibration["regions"] = [
+        [[int(r[0][0]), int(r[0][1])], [int(r[1][0]), int(r[1][1])]]
+        for r in region_rects
+    ]
+    h0 = region_rects[0][1][0] - region_rects[0][0][0]
+    w0 = region_rects[0][1][1] - region_rects[0][0][1]
+    calibration["region_size"] = [int(h0), int(w0)]
+    calibration["reference"] = 0
 
 
 def refine_split_fov_transforms_from_signal(
@@ -2791,6 +3595,7 @@ def refine_split_fov_transforms_from_signal(
     min_pairs: int = 20,
     update: bool = True,
     model: str | None = None,
+    wavelet: wavelets.WaveletParameters | None = None,
 ) -> tuple[dict, list]:
     """Re-register a split-FOV spline calibration from the experimental
     (blinking) data.
@@ -2858,6 +3663,10 @@ def refine_split_fov_transforms_from_signal(
         default) uses the one the calibration was registered with, so a plain
         re-registration keeps it. Only the final ICP iteration fits that model
         - see :func:`_fit_registration`.
+    wavelet : wavelet.WaveletParameters, optional
+        Detect the single molecules by wavelet segmentation with these
+        settings instead of by their net gradient, in which case
+        ``minimum_ng`` is ignored (and may be None). Default is None.
 
     Returns
     -------
@@ -2879,96 +3688,35 @@ def refine_split_fov_transforms_from_signal(
         channel count or the regions differ in size, if ``reference`` is out
         of range, or if no frames fall inside ``frame_bounds``.
     """
-    if not calibration.get("split_fov"):
-        raise ValueError(
-            "refine_split_fov_transforms_from_signal requires a split-FOV "
-            "calibration."
-        )
-    n_channels = int(calibration.get("n_channels", len(regions)))
-    if len(regions) != n_channels:
-        raise ValueError(
-            f"Got {len(regions)} regions but the calibration has "
-            f"{n_channels} channels."
-        )
-    if not (0 <= reference < n_channels):
-        raise ValueError(f"reference={reference} out of range.")
-    if box is None:
-        box = int(calibration.get("box") or calibration["n_data"][0])
-    if max_pair_distance is None:
-        # the coarse seed is flip + ROI placement only, so allow a little more
-        # slack than one box for an imperfectly drawn ROI (still well below the
-        # typical single-molecule spacing, so per-frame matches stay unambiguous)
-        max_pair_distance = 1.5 * float(box)
+    n_channels, box, max_pair_distance = _validate_split_fov_signal_args(
+        calibration, regions, reference, box, max_pair_distance
+    )
 
     # reference-first ordering for both the regions and the stored affines
-    order = [reference] + [c for c in range(n_channels) if c != reference]
-    region_rects = [_normalized_region(regions[c]) for c in order]
-    # one threshold per region, reordered with them (a scalar covers all)
-    minimum_ngs = localize._as_ng_list(minimum_ng, n_channels)
-    minimum_ngs = [minimum_ngs[c] for c in order]
-    sizes = {(r[1][0] - r[0][0], r[1][1] - r[0][1]) for r in region_rects}
-    if len(sizes) != 1:
-        raise ValueError("All regions must have the same size.")
-    affines_stored = _split_fov_local_affines(calibration, regions)
-    affines = [affines_stored[c] for c in order]
+    region_rects, minimum_ngs, affines = (
+        _prepare_split_fov_regions_and_affines(
+            calibration, regions, reference, minimum_ng, n_channels
+        )
+    )
 
     # coarse seed = only the flip the calibration applied placed at the
     # drawn regions
-    h = region_rects[0][1][0] - region_rects[0][0][0]
-    w = region_rects[0][1][1] - region_rects[0][0][1]
-    identity = tform.identity()
-    seed_local_affines = [identity]
-    for c in range(1, n_channels):
-        # at the region center: the only place the question is well posed
-        # for a non-linear map (identical everywhere for an affine)
-        dec = affines[c].decompose(pixelsize=1.0, at=(w / 2.0, h / 2.0))
-        if dec["mirror"] and dec["flip_axis"] == "x":
-            seed_local_affines.append(
-                flip_affine(-1.0, 1.0, float(w), float(h))
-            )
-        elif dec["mirror"] and dec["flip_axis"] == "y":
-            seed_local_affines.append(
-                flip_affine(1.0, -1.0, float(w), float(h))
-            )
-        else:
-            # transforms are immutable, so the identity can be shared
-            seed_local_affines.append(identity)
-    seed_transforms = localize.compose_region_transforms(
-        region_rects, seed_local_affines
+    seed_transforms = _split_fov_seed_transforms(
+        affines, region_rects, n_channels
     )
 
-    # detect only on a bounded, evenly-spaced sample of frames (several tens):
-    # the same subset is used for every region so per-frame pairing stays aligned
-    n_frames = int(movie.shape[0])
-    allowed = frames_in_bounds(n_frames, frame_bounds)
-    if allowed.size == 0:
-        raise ValueError("No frames in the requested frame range.")
-    pick = np.unique(
-        np.linspace(
-            0, allowed.size - 1, min(int(max_frames), allowed.size)
-        ).astype(int)
+    # detect only on a bounded, evenly-spaced sample of frames (several
+    # tens): the same subset is used for every region so per-frame pairing
+    # stays aligned
+    _sample_frames, movie_sub = _sample_frames_for_signal_registration(
+        movie, frame_bounds, max_frames
     )
-    sample_frames = allowed[pick]
-    movie_sub = np.stack([np.asarray(movie[int(f)]) for f in sample_frames])
 
-    # per-region, per-frame detections (absolute coords) on the sampled frames
-    def _by_frame(rect, mng):
-        ids, _ = localize.identify(movie_sub, mng, box, roi=rect)
-        if len(ids) == 0:
-            return {}
-        frame = np.asarray(ids["frame"], dtype=np.int64)
-        xy = np.column_stack(
-            [
-                np.asarray(ids["x"], dtype=np.float64),
-                np.asarray(ids["y"], dtype=np.float64),
-            ]
-        )
-        out = {}
-        for f in np.unique(frame):
-            out[int(f)] = xy[frame == f]
-        return out
-
-    ref_by_frame = _by_frame(region_rects[0], minimum_ngs[0])
+    # per-region, per-frame detections (absolute coords) on the sampled
+    # frames
+    ref_by_frame = _region_detections_by_frame(
+        movie_sub, minimum_ngs[0], box, region_rects[0], wavelet=wavelet
+    )
     if not ref_by_frame:
         raise ValueError(
             "No detections in the reference region; lower the minimum net "
@@ -2987,93 +3735,162 @@ def refine_split_fov_transforms_from_signal(
     transforms = [tform.identity()]
     reg_info = []
     for c in range(1, n_channels):
-        chan_by_frame = _by_frame(region_rects[c], minimum_ngs[c])
-        common = sorted(set(ref_by_frame) & set(chan_by_frame))
-        if not common:
-            raise ValueError(
-                f"No frames with detections in both the reference and channel "
-                f"{c} regions; the channels may not share signal (needs "
-                "biplane / ratiometric data)."
-            )
-        transform = tform.from_dict(seed_transforms[c])
-        fitted_model = "affine"
-        matched_ref = matched_c = np.empty((0, 2))
-        for k, tol in enumerate(tols):
-            acc_ref, acc_c = [], []
-            for f in common:
-                rxy = ref_by_frame[f]
-                cxy = chan_by_frame[f]
-                pred = transform.apply(rxy)
-                ri, ci = match_points(pred, cxy, tol)
-                if len(ri):
-                    acc_ref.append(rxy[ri])
-                    acc_c.append(cxy[ci])
-            if not acc_ref:
-                break
-            matched_ref = np.vstack(acc_ref)
-            matched_c = np.vstack(acc_c)
-            if len(matched_ref) < 3:
-                break
-            transform, fitted_model = fit_registration(
-                matched_ref,
-                matched_c,
-                model,
-                final=k == len(tols) - 1,
-            )
-        # robust trim: drop coincidental pairs far from the converged transform,
-        # then re-fit once on the inliers
-        if len(matched_ref) >= 3:
-            resid = matched_c - transform.apply(matched_ref)
-            dist = np.sqrt(np.sum(resid**2, axis=1))
-            keep = dist <= max(tol_lo, 3.0 * np.median(dist))
-            if keep.sum() >= 3:
-                matched_ref = matched_ref[keep]
-                matched_c = matched_c[keep]
-                transform, fitted_model = fit_registration(
-                    matched_ref, matched_c, model
-                )
-        n_pairs = int(len(matched_ref))
-        if n_pairs < min_pairs:
-            raise ValueError(
-                f"Only {n_pairs} signal correspondences for channel {c} "
-                f"(need >= {min_pairs}); use a longer / denser movie, lower the "
-                "minimum net gradient, or re-register on beads instead."
-            )
-        resid = matched_c - transform.apply(matched_ref)
-        rms = float(np.sqrt(np.mean(np.sum(resid**2, axis=1))))
-        transforms.append(transform)
-        reg_info.append(
-            {
-                "channel": c,
-                "n_matches": n_pairs,
-                "ref_xy": matched_ref,
-                "c_xy": matched_c,
-                "transform": transform,
-                "rms": rms,
-                # what was actually fitted, and what was asked for: they
-                # differ when too few pairs survived for the chosen model
-                "model": fitted_model,
-                "model_requested": model,
-            }
+        chan_by_frame = _region_detections_by_frame(
+            movie_sub, minimum_ngs[c], box, region_rects[c], wavelet=wavelet
         )
+        transform, reg_entry = _register_split_fov_channel_by_signal(
+            c,
+            ref_by_frame,
+            chan_by_frame,
+            tform.from_dict(seed_transforms[c]),
+            tols,
+            tol_lo,
+            model,
+            min_pairs,
+        )
+        transforms.append(transform)
+        reg_info.append(reg_entry)
 
-    new_affines = localize.decompose_region_transforms(
-        region_rects, transforms
-    )
     if update:
-        calibration["channel_registration"] = [
-            a.to_dict() for a in new_affines
-        ]
-        calibration["channel_transforms"] = [t.to_dict() for t in transforms]
-        calibration["regions"] = [
-            [[int(r[0][0]), int(r[0][1])], [int(r[1][0]), int(r[1][1])]]
-            for r in region_rects
-        ]
-        h0 = region_rects[0][1][0] - region_rects[0][0][0]
-        w0 = region_rects[0][1][1] - region_rects[0][0][1]
-        calibration["region_size"] = [int(h0), int(w0)]
-        calibration["reference"] = 0
+        _update_split_fov_calibration_registration(
+            calibration, region_rects, transforms
+        )
     return calibration, reg_info
+
+
+def _validate_multichannel_signal_args(
+    calibration: dict,
+    movies: list,
+    reference: int,
+    box: int | None,
+    max_pair_distance: float | None,
+) -> tuple[int, int, float, list]:
+    """Validate the multichannel signal-registration arguments.
+
+    Returns ``(n_channels, box, max_pair_distance, stored)`` with the
+    defaults (calibration's own box; ``box``) filled in and ``stored`` the
+    calibration's existing ``channel_transforms``.
+    """
+    if calibration.get("split_fov"):
+        raise ValueError(
+            "refine_multichannel_transforms_from_signal is for separate-movie "
+            "multichannel calibrations; use "
+            "refine_split_fov_transforms_from_signal for split-FOV."
+        )
+    stored = calibration.get("channel_transforms")
+    if not stored:
+        raise ValueError("Calibration has no channel_transforms to refine.")
+    n_channels = int(calibration.get("n_channels", len(stored)))
+    if len(movies) != n_channels:
+        raise ValueError(
+            f"Got {len(movies)} channel movies but the calibration has "
+            f"{n_channels} channels."
+        )
+    if len(stored) != n_channels:
+        raise ValueError(
+            f"Calibration has {n_channels} channels but {len(stored)} "
+            "channel transforms."
+        )
+    if not (0 <= reference < n_channels):
+        raise ValueError(f"reference={reference} out of range.")
+    if box is None:
+        box = int(calibration.get("box") or calibration["n_data"][0])
+    if max_pair_distance is None:
+        # the seed is the stored (already close) transform, so a match radius
+        # of about one box absorbs the residual drift without inviting
+        # coincidental cross-molecule pairs
+        max_pair_distance = float(box)
+    return n_channels, box, max_pair_distance, stored
+
+
+def _sample_frame_numbers(
+    movies: list, frame_bounds: tuple[int, int] | list | None, max_frames: int
+) -> np.ndarray:
+    """Pick a bounded, evenly-spaced sample of frame numbers shared by every
+    movie."""
+    n_frames = min(int(m.shape[0]) for m in movies)
+    allowed = frames_in_bounds(n_frames, frame_bounds)
+    if allowed.size == 0:
+        raise ValueError("No frames in the requested frame range.")
+    pick = np.unique(
+        np.linspace(
+            0, allowed.size - 1, min(int(max_frames), allowed.size)
+        ).astype(int)
+    )
+    return allowed[pick]
+
+
+def _movie_detections_by_frame(
+    movie,
+    sample_frames: np.ndarray,
+    minimum_ng: float | None,
+    box: int,
+    wavelet: wavelets.WaveletParameters | None = None,
+) -> dict:
+    """Detect single molecules on the sampled frames and group them by
+    frame."""
+    movie_sub = np.stack([np.asarray(movie[int(f)]) for f in sample_frames])
+    ids, _ = localize.identify(movie_sub, minimum_ng, box, wavelet=wavelet)
+    if len(ids) == 0:
+        return {}
+    frame = np.asarray(ids["frame"], dtype=np.int64)
+    xy = np.column_stack(
+        [
+            np.asarray(ids["x"], dtype=np.float64),
+            np.asarray(ids["y"], dtype=np.float64),
+        ]
+    )
+    return {int(f): xy[frame == f] for f in np.unique(frame)}
+
+
+def _register_all_channels_by_signal(
+    n_channels: int,
+    reference: int,
+    movies: list,
+    sample_frames: np.ndarray,
+    minimum_ng: float,
+    box: int,
+    ref_by_frame: dict,
+    seed_transforms: list,
+    model: str,
+    n_iter: int,
+    max_pair_distance: float,
+    min_pairs: int,
+    wavelet: wavelets.WaveletParameters | None = None,
+) -> tuple[list, list]:
+    """Register every non-reference channel's movie against the reference.
+
+    Returns ``(transforms, reg_info)``, the reference's identity transform
+    already in place.
+    """
+    identity = tform.identity()
+    transforms = [
+        identity if c == reference else None for c in range(n_channels)
+    ]
+    reg_info = []
+    for c in range(n_channels):
+        if c == reference:
+            continue
+        chan_by_frame = _movie_detections_by_frame(
+            movies[c], sample_frames, minimum_ng, box, wavelet=wavelet
+        )
+        try:
+            info = register_from_point_sets(
+                ref_by_frame,
+                chan_by_frame,
+                model,
+                box,
+                seed=seed_transforms[c],
+                n_iter=n_iter,
+                max_pair_distance=max_pair_distance,
+                min_pairs=min_pairs,
+            )
+        except ValueError as e:
+            raise ValueError(f"Channel {c}: {e}") from e
+        info["channel"] = c
+        transforms[c] = info["transform"]
+        reg_info.append(info)
+    return transforms, reg_info
 
 
 def refine_multichannel_transforms_from_signal(
@@ -3089,31 +3906,33 @@ def refine_multichannel_transforms_from_signal(
     min_pairs: int = 20,
     update: bool = True,
     model: str | None = None,
+    wavelet: wavelets.WaveletParameters | None = None,
 ) -> tuple[dict, list]:
     """Re-register a separate-movie multichannel spline calibration from the
     experimental (blinking) data.
 
-    The multi-movie analogue of :func:`refine_split_fov_transforms_from_signal`.
-    In a multichannel acquisition the same emitter fluoresces in every channel's
-    movie in the *same frame* (the channels are frame-synchronized, as the
-    multichannel linking in :func:`localize.link_identifications_multichannel`
-    already assumes), so the inter-channel affine can be re-fit directly from that
+    The multi-movie analogue of
+    :func:`refine_split_fov_transforms_from_signal`. In a multichannel
+    acquisition the same emitter fluoresces in every channel's movie in the
+    *same frame* (the channels are frame-synchronized, as the multichannel
+    linking in :func:`localize.link_identifications_multichannel` already
+    assumes), so the inter-channel affine can be re-fit directly from that
     shared signal:
 
     1. Single molecules are detected in each channel's movie on a bounded,
        evenly-spaced sample of ``max_frames`` frames.
-    2. The calibration's **existing** ``channel_transforms`` seed the pairing -
-       they are already close, so no flip/cross-correlation search is needed;
-       this refines a registration that drifted (e.g. across days), it does not
-       recover a grossly wrong one.
-    3. Reference and channel detections are paired frame by frame at that seed and
-       a fresh affine is fit on the pooled correspondences; a few ICP iterations
-       with a shrinking radius tighten it and a final robust trim drops the
-       coincidental (non-physical) pairs.
+    2. The calibration's **existing** ``channel_transforms`` seed the
+       pairing - they are already close, so no flip/cross-correlation search
+       is needed; this refines a registration that drifted (e.g. across
+       days), it does not recover a grossly wrong one.
+    3. Reference and channel detections are paired frame by frame at that
+       seed and a fresh affine is fit on the pooled correspondences; a few
+       ICP iterations with a shrinking radius tighten it and a final robust
+       trim drops the coincidental (non-physical) pairs.
 
-    Unlike the split-FOV refinement this needs no ``regions`` - the channels are
-    whole separate movies - so only ``channel_transforms`` is updated (the PSF
-    ``coefficients`` are untouched).
+    Unlike the split-FOV refinement this needs no ``regions`` - the channels
+    are whole separate movies - so only ``channel_transforms`` is updated
+    (the PSF ``coefficients`` are untouched).
 
     Parameters
     ----------
@@ -3149,6 +3968,10 @@ def refine_multichannel_transforms_from_signal(
     model : str, optional
         The transform model (see :mod:`picasso.transforms`). None (the
         default) uses the one the calibration was registered with.
+    wavelet : wavelet.WaveletParameters, optional
+        Detect the single molecules by wavelet segmentation with these
+        settings instead of by their net gradient, in which case
+        ``minimum_ng`` is ignored (and may be None). Default is None.
 
     Returns
     -------
@@ -3165,69 +3988,22 @@ def refine_multichannel_transforms_from_signal(
         or its channel count disagrees with ``movies`` or with the stored
         transforms, or if ``reference`` is out of range.
     """
-    if calibration.get("split_fov"):
-        raise ValueError(
-            "refine_multichannel_transforms_from_signal is for separate-movie "
-            "multichannel calibrations; use "
-            "refine_split_fov_transforms_from_signal for split-FOV."
+    n_channels, box, max_pair_distance, stored = (
+        _validate_multichannel_signal_args(
+            calibration, movies, reference, box, max_pair_distance
         )
-    stored = calibration.get("channel_transforms")
-    if not stored:
-        raise ValueError("Calibration has no channel_transforms to refine.")
-    n_channels = int(calibration.get("n_channels", len(stored)))
-    if len(movies) != n_channels:
-        raise ValueError(
-            f"Got {len(movies)} channel movies but the calibration has "
-            f"{n_channels} channels."
-        )
-    if len(stored) != n_channels:
-        raise ValueError(
-            f"Calibration has {n_channels} channels but {len(stored)} "
-            "channel transforms."
-        )
-    if not (0 <= reference < n_channels):
-        raise ValueError(f"reference={reference} out of range.")
-    if box is None:
-        box = int(calibration.get("box") or calibration["n_data"][0])
-    if max_pair_distance is None:
-        # the seed is the stored (already close) transform, so a match radius of
-        # about one box absorbs the residual drift without inviting coincidental
-        # cross-molecule pairs
-        max_pair_distance = float(box)
+    )
 
     seed_transforms = [tform.from_dict(t) for t in stored]
 
-    # detect on a bounded, evenly-spaced sample of frames shared by every movie,
-    # so per-frame pairing across the synchronized movies stays aligned
-    n_frames = min(int(m.shape[0]) for m in movies)
-    allowed = frames_in_bounds(n_frames, frame_bounds)
-    if allowed.size == 0:
-        raise ValueError("No frames in the requested frame range.")
-    pick = np.unique(
-        np.linspace(
-            0, allowed.size - 1, min(int(max_frames), allowed.size)
-        ).astype(int)
+    # detect on a bounded, evenly-spaced sample of frames shared by every
+    # movie, so per-frame pairing across the synchronized movies stays
+    # aligned
+    sample_frames = _sample_frame_numbers(movies, frame_bounds, max_frames)
+
+    ref_by_frame = _movie_detections_by_frame(
+        movies[reference], sample_frames, minimum_ng, box, wavelet=wavelet
     )
-    sample_frames = allowed[pick]
-
-    def _by_frame(movie):
-        """Per-frame detections (absolute coords) on the sampled frames."""
-        movie_sub = np.stack(
-            [np.asarray(movie[int(f)]) for f in sample_frames]
-        )
-        ids, _ = localize.identify(movie_sub, minimum_ng, box)
-        if len(ids) == 0:
-            return {}
-        frame = np.asarray(ids["frame"], dtype=np.int64)
-        xy = np.column_stack(
-            [
-                np.asarray(ids["x"], dtype=np.float64),
-                np.asarray(ids["y"], dtype=np.float64),
-            ]
-        )
-        return {int(f): xy[frame == f] for f in np.unique(frame)}
-
-    ref_by_frame = _by_frame(movies[reference])
     if not ref_by_frame:
         raise ValueError(
             "No detections in the reference channel; lower the minimum net "
@@ -3237,31 +4013,21 @@ def refine_multichannel_transforms_from_signal(
     # keep the calibration's own model unless the caller asks for another
     model = resolve_model(calibration, model)
 
-    identity = tform.identity()
-    transforms = [
-        identity if c == reference else None for c in range(n_channels)
-    ]
-    reg_info = []
-    for c in range(n_channels):
-        if c == reference:
-            continue
-        chan_by_frame = _by_frame(movies[c])
-        try:
-            info = register_from_point_sets(
-                ref_by_frame,
-                chan_by_frame,
-                model,
-                box,
-                seed=seed_transforms[c],
-                n_iter=n_iter,
-                max_pair_distance=max_pair_distance,
-                min_pairs=min_pairs,
-            )
-        except ValueError as e:
-            raise ValueError(f"Channel {c}: {e}") from e
-        info["channel"] = c
-        transforms[c] = info["transform"]
-        reg_info.append(info)
+    transforms, reg_info = _register_all_channels_by_signal(
+        n_channels,
+        reference,
+        movies,
+        sample_frames,
+        minimum_ng,
+        box,
+        ref_by_frame,
+        seed_transforms,
+        model,
+        n_iter,
+        max_pair_distance,
+        min_pairs,
+        wavelet=wavelet,
+    )
 
     if update:
         calibration["channel_transforms"] = [t.to_dict() for t in transforms]
@@ -3323,14 +4089,15 @@ def _place_row(fig, panels, top_in, fig_w_in, fig_h_in, scale, gap_in):
 def _robust_bias_spread(deviation: np.ndarray) -> tuple[float, float]:
     """Robust ``(bias, spread)`` of a 1D deviation-to-truth array.
 
-    ``bias`` is the mean deviation (the systematic z offset from the true stage
-    position - e.g. a per-bead/registration offset) and ``spread`` is the
-    standard deviation about that mean (the shot-noise-limited single-frame
-    precision). Splitting the two keeps a consistent bias from masquerading as
-    imprecision (the total RMSD is ``sqrt(bias**2 + spread**2)``). Robust to the
-    occasional non-converged fit: deviations farther than 5 (scaled) MADs from
-    the median are dropped first. Returns ``(nan, nan)`` if fewer than two
-    finite values are present."""
+    ``bias`` is the mean deviation (the systematic z offset from the true
+    stage position - e.g. a per-bead/registration offset) and ``spread`` is
+    the standard deviation about that mean (the shot-noise-limited
+    single-frame precision). Splitting the two keeps a consistent bias from
+    masquerading as imprecision (the total RMSD is
+    ``sqrt(bias**2 + spread**2)``). Robust to the occasional non-converged
+    fit: deviations farther than 5 (scaled) MADs from the median are dropped
+    first. Returns ``(nan, nan)`` if fewer than two finite values are
+    present."""
     dev = np.asarray(deviation, dtype=np.float64)
     dev = dev[np.isfinite(dev)]
     if dev.size < 2:
@@ -3347,19 +4114,19 @@ def _robust_bias_spread(deviation: np.ndarray) -> tuple[float, float]:
 def _axial_precision(built: dict, calibration: dict) -> dict | None:
     """Empirical axial precision of the spline PSF model across z.
 
-    Every individual single-frame bead spot (``built["spots"]``) is fitted with
-    the calibration's own spline PSF model (the very fitter used at
-    localization time) and the recovered z - referenced to the scan center, the
-    same zero as ``z_of_step`` - is compared against the known stage position of
-    its frame. The per-z-step RMSD of that deviation is the calibration's axial
-    precision at that z - the spline analog of the "mean z precision" curve in
-    ``zfit.calibrate_z``, which likewise fits the calibration data back with its
-    own model, per single-frame localization, and reports the RMSD to the true
-    stage position. Fitting the raw per-frame
-    spots (rather than the frame-averaged bead volumes) keeps the realistic,
-    single-frame shot-noise regime and gives many samples per z-step. Only z
-    has a ground truth (the known stage position), so no lateral precision is
-    reported.
+    Every individual single-frame bead spot (``built["spots"]``) is fitted
+    with the calibration's own spline PSF model (the very fitter used at
+    localization time) and the recovered z - referenced to the scan center,
+    the same zero as ``z_of_step`` - is compared against the known stage
+    position of its frame. The per-z-step RMSD of that deviation is the
+    calibration's axial precision at that z - the spline analog of the "mean
+    z precision" curve in ``zfit.calibrate_z``, which likewise fits the
+    calibration data back with its own model, per single-frame localization,
+    and reports the RMSD to the true stage position. Fitting the raw
+    per-frame spots (rather than the frame-averaged bead volumes) keeps the
+    realistic, single-frame shot-noise regime and gives many samples per
+    z-step. Only z has a ground truth (the known stage position), so no
+    lateral precision is reported.
 
     Parameters
     ----------
@@ -3417,6 +4184,7 @@ def _axial_precision(built: dict, calibration: dict) -> dict | None:
         z_of_step,
         calibration,
         int(built.get("n_beads", 0)),
+        spot_z=built.get("spot_z"),
     )
 
 
@@ -3427,6 +4195,7 @@ def _axial_precision_from_theta(
     calibration: dict,
     n_beads: int,
     z_col: int = 3,
+    spot_z: np.ndarray | None = None,
 ) -> dict | None:
     """Per-z-step axial bias/precision from fitted spline parameters.
 
@@ -3435,8 +4204,13 @@ def _axial_precision_from_theta(
     (``theta[:, z_col]``) to stage nm, compares it to each spot's known stage
     position and reduces to a robust per-step bias and spread. ``z_col`` is the
     z_shift parameter column: 3 for the amplitude-shared models, 2 for the
-    photon-decoupled (link-XYZ) model. Returns the same dict shape both callers
-    emit, or ``None`` if nothing usable remains.
+    photon-decoupled (link-XYZ) model. ``spot_z`` is each spot's exact stage
+    position (nm); it is the ground truth when given, which matters once
+    several stage steps are binned into one template slice, so that the
+    spread of stage positions inside a slice is not reported as imprecision.
+    Without it the spot's slice position ``z_of_step[spot_step_idx]`` is used.
+    The results are still reduced per template slice. Returns the same dict
+    shape both callers emit, or ``None`` if nothing usable remains.
     """
     theta = np.asarray(theta)
     z_of_step = np.asarray(z_of_step, dtype=np.float64)
@@ -3444,7 +4218,11 @@ def _axial_precision_from_theta(
     z_step_nm = float(calibration.get("z_step_nm", 1.0))
     scan_center = _scan_center_index(z_of_step)
     z_fit = (theta[:, z_col] + scan_center) * z_step_nm  # (n_spots,)
-    deviation = z_fit - z_of_step[spot_step_idx]  # (n_spots,)
+    if spot_z is None or len(spot_z) != len(spot_step_idx):
+        z_true = z_of_step[spot_step_idx]
+    else:
+        z_true = np.asarray(spot_z, dtype=np.float64)
+    deviation = z_fit - z_true  # (n_spots,)
 
     n_steps = len(z_of_step)
     bias_spread = [
@@ -3456,7 +4234,6 @@ def _axial_precision_from_theta(
     if not np.any(np.isfinite(precision_z)):
         return None
 
-    z_true = z_of_step[spot_step_idx]
     finite = np.isfinite(z_fit) & np.isfinite(z_true)
     scatter_fit = z_fit[finite]
     scatter_stage = z_true[finite]
@@ -3552,81 +4329,54 @@ def _axial_precision_multichannel(
         calibration,
         int(per_channel[0].get("n_beads", 0)),
         z_col=z_col,
+        spot_z=per_channel[0].get("spot_z"),
     )
     if result is not None:
         result["joint"] = int(len(per_channel))
     return result
 
 
-def _save_diagnostic_plot(
-    built: dict,
-    calibration: dict,
-    path: str,
-    n_slices: int = 10,
-    precision: dict | None = None,
-    title_prefix: str = "",
-) -> None:
-    """Save a PNG summarizing the calibration.
+def _diagnostic_z_axis(
+    z_of_step: np.ndarray, z_center: int, calibration: dict, n_steps: int
+) -> tuple:
+    """Compute the fitter's z = 0 reference and the plotting z axis.
 
-    Three montages of ``n_slices`` slices each - xy across z, xz across y, yz
-    across x - plus, at the bottom, the axial intensity profile and, when
-    ``precision`` is given (from re-fitting the beads, see ``_axial_precision``),
-    three further panels: the estimated-z-vs-stage scatter (with the identity
-    line), the systematic axial bias (z offset to the true stage position) and
-    the shot-noise axial precision (z spread). Without ``precision`` the bottom
-    row falls back to a single model-vs-data agreement (per-z RMSE) panel. The
-    xz/yz cross-sections are oriented with z on the
-    vertical axis (lateral on the horizontal). Every image panel shares one
-    intensity scale, and one camera pixel renders at the same physical size in
-    all panels: the z axis of the cross-sections is converted from nm to camera
-    pixels via the calibration pixel size.
+    Returns ``(z_plot, z_ref_nm, outline_idx, z_outline_nm, z_lo, z_hi)``.
     """
-    template = built["template"]
-    z_center = int(built["z_center"])
-    z_of_step = np.asarray(built["z_of_step"])
-    gof = built.get("gof") or {}
-    have_gof = bool(gof.get("n_used"))
-    have_prec = bool(precision) and np.any(
-        np.isfinite(precision["precision_z"])
-    )
-    box, _, n_steps = template.shape
-    c = box // 2
-    ps = float(calibration.get("pixelsize", 130)) or 130.0  # nm / camera px
-    vmax = float(template.max()) or 1.0
-    img_kw = dict(cmap="hot", vmin=0.0, vmax=vmax)
-
-    # z = 0 reference the fitter (localize) uses
     z_origin = float(calibration.get("z_center", z_center))
     if n_steps > 1:
         dz_step = (float(z_of_step[-1]) - float(z_of_step[0])) / (n_steps - 1)
-        z_ref_nm = (
-            float(z_of_step[0]) + z_origin * dz_step
-        )  # stage nm at origin
+        # stage nm at origin
+        z_ref_nm = float(z_of_step[0]) + z_origin * dz_step
     else:
         z_ref_nm = 0.0
     z_plot = np.asarray(z_of_step, dtype=float) - z_ref_nm
-    # After the shift the fitter's z = 0 reference sits at 0; the bottom profile
-    # plots mark it with a vertical line. The in-focus (sharpest) slice is
-    # outlined in the xy row and marked by the cyan line in the cross-sections
-    z_origin_marker = 0.0
     outline_idx = int(np.clip(z_center, 0, n_steps - 1))
     z_outline_nm = float(z_plot[outline_idx])
-    x_label = "Stage position (nm)"
     z_lo, z_hi = float(z_plot[-1]), float(z_plot[0])  # z decreases
+    return z_plot, z_ref_nm, outline_idx, z_outline_nm, z_lo, z_hi
 
-    # slice indices for each projection
-    z_idx = _even_slice_indices(n_steps, n_slices, forced=outline_idx)
-    y_idx = _even_slice_indices(box, n_slices, forced=c)
-    x_idx = _even_slice_indices(box, n_slices, forced=c)
 
-    # cross-sections: z (converted to camera px) on the vertical axis, lateral
-    # px on the horizontal axis, with z increasing upward. Extents are given at
-    # pixel *edges* (half a pixel/step beyond the first and last sample
-    # centers) so N pixels span exactly N units on every axis - the lateral and
-    # z axes then render one camera pixel at the identical physical size, so xy,
-    # xz and yz share one pixel scale. (Center-based extents would span only
-    # box-1 laterally while the panel is box wide, stretching lateral pixels
-    # ~box/(box-1) relative to z.)
+def _diagnostic_panel_geometry(
+    box: int,
+    c: int,
+    n_steps: int,
+    z_lo: float,
+    z_hi: float,
+    ps: float,
+    img_kw: dict,
+) -> tuple:
+    """Shared cross-section / xy-slice imshow geometry and kwargs.
+
+    Extents are given at pixel *edges* (half a pixel/step beyond the first
+    and last sample centers) so N pixels span exactly N units on every axis -
+    the lateral and z axes then render one camera pixel at the identical
+    physical size, so xy, xz and yz share one pixel scale. (Center-based
+    extents would span only box-1 laterally while the panel is box wide,
+    stretching lateral pixels ~box/(box-1) relative to z.)
+
+    Returns ``(cs_kw, xy_kw, z_span_px)``.
+    """
     dz_px = (abs(z_hi - z_lo) / (n_steps - 1)) / ps if n_steps > 1 else 1.0
     z_top = z_hi / ps + dz_px / 2.0  # +z edge (top of the panel)
     z_bot = z_lo / ps - dz_px / 2.0  # -z edge (bottom of the panel)
@@ -3636,11 +4386,28 @@ def _save_diagnostic_plot(
     cs_kw = dict(extent=cs_ext, origin="upper", **img_kw)
     xy_ext = [lat_lo, lat_hi, lat_hi, lat_lo]
     xy_kw = dict(extent=xy_ext, origin="upper", **img_kw)
+    return cs_kw, xy_kw, z_span_px
 
-    z_outline_px = (
-        z_outline_nm / ps
-    )  # cyan cross-section line at the sharpest slice
-    # (image, title, imshow_kwargs, w_px, h_px, highlight, hline)
+
+def _diagnostic_slice_panels(
+    template: np.ndarray,
+    z_plot: np.ndarray,
+    outline_idx: int,
+    z_idx: np.ndarray,
+    y_idx: np.ndarray,
+    x_idx: np.ndarray,
+    box: int,
+    c: int,
+    xy_kw: dict,
+    cs_kw: dict,
+    z_span_px: float,
+    z_outline_px: float,
+) -> tuple:
+    """Build the xy / xz / yz panel lists for :func:`_place_row`.
+
+    Each entry is ``(image, title, imshow_kwargs, w_px, h_px, highlight,
+    hline)``.
+    """
     xy_panels = [
         (
             template[:, :, k],
@@ -3678,6 +4445,190 @@ def _save_diagnostic_plot(
         )
         for x in x_idx
     ]
+    return xy_panels, xz_panels, yz_panels
+
+
+def _diagnostic_bead_count_text(built: dict) -> str:
+    """The figure suptitle's bead-count fragment, noting rejects if any."""
+    n_beads_txt = f"{built['n_beads']} beads"
+    n_used = built.get("n_beads_used")
+    if n_used is not None and n_used < built["n_beads"]:
+        # the rejected beads are not in the PSF; say so here rather than
+        # letting the bead count suggest they all contributed
+        n_rejected = built["n_beads"] - n_used
+        n_beads_txt += f" ({n_used} used, {n_rejected} rejected)"
+    return n_beads_txt
+
+
+def _diagnostic_bottom_panels(
+    template: np.ndarray,
+    z_plot: np.ndarray,
+    z_ref_nm: float,
+    z_origin_marker: float,
+    x_label: str,
+    have_prec: bool,
+    precision: dict | None,
+    have_gof: bool,
+    gof: dict,
+) -> list:
+    """Build the ``(heading, plot_fn)`` list for the bottom panel row.
+
+    Always includes the axial intensity profile; adds the empirical axial
+    bias/precision panels (and the estimated-z-vs-stage scatter) when
+    ``precision`` is available, else falls back to the model-vs-data
+    agreement (per-z RMSE) panel when ``gof`` is available.
+    """
+
+    def _plot_intensity(ax):
+        # axial intensity profile: brightest normalized pixel per slice, ~1 at
+        # focus and decaying as the PSF spreads with defocus (a sharpness
+        # check)
+        ax.plot(z_plot, template.max(axis=(0, 1)), ".-")
+        ax.axvline(z_origin_marker, color="0.3", lw=1.0)
+        ax.set_xlabel(x_label)
+        ax.set_ylabel("Peak pixel value (norm.)")
+
+    def _plot_bias(ax):
+        # systematic z offset between the spline-refitted z and the known
+        # stage position at each z-step (signed; ideally ~0). Kept separate
+        # from the precision so a per-bead/registration z offset is not
+        # mistaken for imprecision.
+        ax.axhline(0.0, color="0.6", lw=1.0)
+        ax.plot(z_plot, precision["bias_z"], ".-", color="tab:red")
+        ax.axvline(z_origin_marker, color="0.3", lw=1.0)
+        ax.set_xlabel(x_label)
+        ax.set_ylabel("z bias (nm)")
+        ax.set_title(f"{precision['n_beads']} beads", fontsize=9)
+
+    def _plot_precision(ax):
+        # shot-noise spread of the spline-refitted z about its per-step mean -
+        # the single-frame axial precision the calibration delivers (lower is
+        # better; rises with defocus). Analogous to the "mean z precision"
+        # panel in ``zfit.calibrate_z``, but with the systematic bias
+        # removed.
+        ax.plot(z_plot, precision["precision_z"], ".-", color="tab:red")
+        ax.axvline(z_origin_marker, color="0.3", lw=1.0)
+        ax.set_xlabel(x_label)
+        ax.set_ylabel("z precision (nm)")
+        ax.set_ylim(bottom=0.0)
+        ax.set_title(f"{precision['n_beads']} beads", fontsize=9)
+
+    def _plot_scatter(ax):
+        # per-spot estimated z vs known stage position, with the identity
+        # line
+        st = np.asarray(precision["scatter_stage"], dtype=float) - z_ref_nm
+        zf = np.asarray(precision["scatter_fit"], dtype=float) - z_ref_nm
+        lo, hi = float(np.min(z_plot)), float(np.max(z_plot))
+        ax.plot(st, zf, ".k", alpha=0.1, markersize=2)
+        ax.plot([lo, hi], [lo, hi], color="tab:red", lw=1.5, label="identity")
+        ax.set_xlim(lo, hi)
+        ax.set_ylim(lo, hi)
+        ax.set_xlabel(x_label)
+        ax.set_ylabel("Estimated z (nm)")
+        ax.legend(loc="best", fontsize=8)
+
+    def _plot_gof(ax):
+        # amplitude-normalized RMSE between the averaged PSF model and the
+        # individual beads, per z-slice: how faithfully one PSF describes the
+        # measured beads (lower is better; rises where beads disagree)
+        ax.plot(z_plot, gof["residual_profile_pct"], ".-", color="tab:red")
+        ax.axvline(z_origin_marker, color="0.3", lw=1.0)
+        ax.set_xlabel(x_label)
+        ax.set_ylabel("RMSE (% of peak)")
+        ax.set_ylim(bottom=0.0)
+        ax.set_title(
+            f"median bead R² = {gof['r2_median']:.3f}  (n = {gof['n_used']})",
+            fontsize=9,
+        )
+
+    bottom_panels = [("Axial intensity profile", _plot_intensity)]
+    if have_prec:
+        # a joint (multichannel) fit reflects the real pipeline; label it so
+        # the panels aren't read as a per-channel (z-degenerate) single-plane
+        # fit
+        n_joint = precision.get("joint") if precision else None
+        sfx = f" (joint {n_joint}-ch fit)" if n_joint else ""
+        bottom_panels.append((f"Estimated z vs stage{sfx}", _plot_scatter))
+        bottom_panels.append((f"Axial bias{sfx}", _plot_bias))
+        bottom_panels.append((f"Axial precision{sfx}", _plot_precision))
+    elif have_gof:
+        bottom_panels.append(("Model–data agreement (per-z RMSE)", _plot_gof))
+    return bottom_panels
+
+
+def _save_diagnostic_plot(
+    built: dict,
+    calibration: dict,
+    path: str,
+    n_slices: int = 10,
+    precision: dict | None = None,
+    title_prefix: str = "",
+) -> None:
+    """Save a PNG summarizing the calibration.
+
+    Three montages of ``n_slices`` slices each - xy across z, xz across y, yz
+    across x - plus, at the bottom, the axial intensity profile and, when
+    ``precision`` is given (from re-fitting the beads, see
+    ``_axial_precision``), three further panels: the estimated-z-vs-stage
+    scatter (with the identity line), the systematic axial bias (z offset to
+    the true stage position) and the shot-noise axial precision (z spread).
+    Without ``precision`` the bottom row falls back to a single
+    model-vs-data agreement (per-z RMSE) panel. The xz/yz cross-sections are
+    oriented with z on the vertical axis (lateral on the horizontal). Every
+    image panel shares one intensity scale, and one camera pixel renders at
+    the same physical size in all panels: the z axis of the cross-sections
+    is converted from nm to camera pixels via the calibration pixel size.
+    """
+    template = built["template"]
+    z_center = int(built["z_center"])
+    z_of_step = np.asarray(built["z_of_step"])
+    gof = built.get("gof") or {}
+    have_gof = bool(gof.get("n_used"))
+    have_prec = bool(precision) and np.any(
+        np.isfinite(precision["precision_z"])
+    )
+    box, _, n_steps = template.shape
+    c = box // 2
+    ps = float(calibration.get("pixelsize", 130)) or 130.0  # nm / camera px
+    vmax = float(template.max()) or 1.0
+    img_kw = dict(cmap="hot", vmin=0.0, vmax=vmax)
+
+    # z = 0 reference the fitter (localize) uses
+    z_plot, z_ref_nm, outline_idx, z_outline_nm, z_lo, z_hi = (
+        _diagnostic_z_axis(z_of_step, z_center, calibration, n_steps)
+    )
+    # After the shift the fitter's z = 0 reference sits at 0; the bottom
+    # profile plots mark it with a vertical line. The in-focus (sharpest)
+    # slice is outlined in the xy row and marked by the cyan line in the
+    # cross-sections
+    z_origin_marker = 0.0
+    x_label = "Stage position (nm)"
+
+    # slice indices for each projection
+    z_idx = _even_slice_indices(n_steps, n_slices, forced=outline_idx)
+    y_idx = _even_slice_indices(box, n_slices, forced=c)
+    x_idx = _even_slice_indices(box, n_slices, forced=c)
+
+    cs_kw, xy_kw, z_span_px = _diagnostic_panel_geometry(
+        box, c, n_steps, z_lo, z_hi, ps, img_kw
+    )
+    z_outline_px = (
+        z_outline_nm / ps
+    )  # cyan cross-section line at the sharpest slice
+    xy_panels, xz_panels, yz_panels = _diagnostic_slice_panels(
+        template,
+        z_plot,
+        outline_idx,
+        z_idx,
+        y_idx,
+        x_idx,
+        box,
+        c,
+        xy_kw,
+        cs_kw,
+        z_span_px,
+        z_outline_px,
+    )
 
     # Manual inch-based layout so the pixel scale is identical across rows.
     scale = 0.09  # inches per camera pixel
@@ -3721,14 +4672,7 @@ def _save_diagnostic_plot(
     # manage and would warn too.
     fig = Figure(figsize=(fig_w, fig_h))
     FigureCanvasAgg(fig)
-    n_beads_txt = f"{built['n_beads']} beads"
-    n_used = built.get("n_beads_used")
-    if n_used is not None and n_used < built["n_beads"]:
-        # the rejected beads are not in the PSF; say so here rather than
-        # letting the bead count suggest they all contributed
-        n_beads_txt += (
-            f" ({n_used} used, {built['n_beads'] - n_used} rejected)"
-        )
+    n_beads_txt = _diagnostic_bead_count_text(built)
     fig.suptitle(
         f"{title_prefix}{n_beads_txt} | z range {z_lo:.0f} to "
         f"{z_hi:.0f} nm | box {box} px | 1 px = 1 camera pixel ({ps:.0f} nm)"
@@ -3754,76 +4698,17 @@ def _save_diagnostic_plot(
     # bottom row: the axial intensity profile plus, when available, the
     # empirical axial bias and precision (two panels); otherwise the single
     # model-vs-data agreement (per-z RMSE) curve.
-    def _plot_intensity(ax):
-        # axial intensity profile: brightest normalized pixel per slice, ~1 at
-        # focus and decaying as the PSF spreads with defocus (a sharpness check)
-        ax.plot(z_plot, template.max(axis=(0, 1)), ".-")
-        ax.axvline(z_origin_marker, color="0.3", lw=1.0)
-        ax.set_xlabel(x_label)
-        ax.set_ylabel("Peak pixel value (norm.)")
-
-    def _plot_bias(ax):
-        # systematic z offset between the spline-refitted z and the known stage
-        # position at each z-step (signed; ideally ~0). Kept separate from the
-        # precision so a per-bead/registration z offset is not mistaken for
-        # imprecision.
-        ax.axhline(0.0, color="0.6", lw=1.0)
-        ax.plot(z_plot, precision["bias_z"], ".-", color="tab:red")
-        ax.axvline(z_origin_marker, color="0.3", lw=1.0)
-        ax.set_xlabel(x_label)
-        ax.set_ylabel("z bias (nm)")
-        ax.set_title(f"{precision['n_beads']} beads", fontsize=9)
-
-    def _plot_precision(ax):
-        # shot-noise spread of the spline-refitted z about its per-step mean -
-        # the single-frame axial precision the calibration delivers (lower is
-        # better; rises with defocus). Analogous to the "mean z precision" panel
-        # in ``zfit.calibrate_z``, but with the systematic bias removed.
-        ax.plot(z_plot, precision["precision_z"], ".-", color="tab:red")
-        ax.axvline(z_origin_marker, color="0.3", lw=1.0)
-        ax.set_xlabel(x_label)
-        ax.set_ylabel("z precision (nm)")
-        ax.set_ylim(bottom=0.0)
-        ax.set_title(f"{precision['n_beads']} beads", fontsize=9)
-
-    def _plot_scatter(ax):
-        # per-spot estimated z vs known stage position, with the identity line
-        st = np.asarray(precision["scatter_stage"], dtype=float) - z_ref_nm
-        zf = np.asarray(precision["scatter_fit"], dtype=float) - z_ref_nm
-        lo, hi = float(np.min(z_plot)), float(np.max(z_plot))
-        ax.plot(st, zf, ".k", alpha=0.1, markersize=2)
-        ax.plot([lo, hi], [lo, hi], color="tab:red", lw=1.5, label="identity")
-        ax.set_xlim(lo, hi)
-        ax.set_ylim(lo, hi)
-        ax.set_xlabel(x_label)
-        ax.set_ylabel("Estimated z (nm)")
-        ax.legend(loc="best", fontsize=8)
-
-    def _plot_gof(ax):
-        # amplitude-normalized RMSE between the averaged PSF model and the
-        # individual beads, per z-slice: how faithfully one PSF describes the
-        # measured beads (lower is better; rises where beads disagree)
-        ax.plot(z_plot, gof["residual_profile_pct"], ".-", color="tab:red")
-        ax.axvline(z_origin_marker, color="0.3", lw=1.0)
-        ax.set_xlabel(x_label)
-        ax.set_ylabel("RMSE (% of peak)")
-        ax.set_ylim(bottom=0.0)
-        ax.set_title(
-            f"median bead R² = {gof['r2_median']:.3f}  (n = {gof['n_used']})",
-            fontsize=9,
-        )
-
-    bottom_panels = [("Axial intensity profile", _plot_intensity)]
-    if have_prec:
-        # a joint (multichannel) fit reflects the real pipeline; label it so the
-        # panels aren't read as a per-channel (z-degenerate) single-plane fit
-        n_joint = precision.get("joint") if precision else None
-        sfx = f" (joint {n_joint}-ch fit)" if n_joint else ""
-        bottom_panels.append((f"Estimated z vs stage{sfx}", _plot_scatter))
-        bottom_panels.append((f"Axial bias{sfx}", _plot_bias))
-        bottom_panels.append((f"Axial precision{sfx}", _plot_precision))
-    elif have_gof:
-        bottom_panels.append(("Model–data agreement (per-z RMSE)", _plot_gof))
+    bottom_panels = _diagnostic_bottom_panels(
+        template,
+        z_plot,
+        z_ref_nm,
+        z_origin_marker,
+        x_label,
+        have_prec,
+        precision,
+        have_gof,
+        gof,
+    )
 
     usable_w = fig_w - 2 * margin
     n_bp = len(bottom_panels)
@@ -3990,6 +4875,155 @@ def _rejection_reasons(data: dict) -> list[str]:
     return reasons
 
 
+def _select_gallery_beads(
+    keep: np.ndarray, only_rejected: bool, max_beads: int | None
+) -> tuple[list, list]:
+    """Pick which beads the gallery draws, rejected first.
+
+    The cap (``max_beads``) only ever drops *kept* beads, so a rejection is
+    never hidden. Returns ``(order, shown)``.
+    """
+    rejected = list(np.flatnonzero(~keep))
+    accepted = [] if only_rejected else list(np.flatnonzero(keep))
+    order = rejected + accepted
+    if max_beads is None:
+        shown = order
+    else:
+        room = max(0, int(max_beads) - len(rejected))
+        shown = rejected + accepted[:room]
+    return order, shown
+
+
+def _gallery_threshold_labels(data: dict) -> list[str]:
+    """Rejection-threshold labels shown in the gallery title."""
+    thresholds = []
+    if np.isfinite(data["ncc_min"]):
+        thresholds.append(f"NCC ≥ {data['ncc_min']:.3f}")
+    if np.isfinite(data["mse_max"]):
+        thresholds.append(f"MSE ≤ {data['mse_max']:.3g}")
+    if data["fallback"]:
+        thresholds.append("fallback: kept the lowest-MSE half")
+    return thresholds
+
+
+def _gallery_title(
+    data: dict,
+    n_beads: int,
+    n_used: int,
+    n_rejected: int,
+    thresholds: list[str],
+    order: list,
+    shown: list,
+) -> str:
+    """Build the gallery figure's suptitle."""
+    title = (
+        f"{data['label']}{n_beads} beads: {n_used} averaged into the PSF, "
+        f"{n_rejected} rejected as outliers"
+    )
+    if thresholds:
+        title += "  |  " + ", ".join(thresholds)
+    n_hidden = len(order) - len(shown)
+    if n_hidden > 0:
+        title += f"  |  showing {len(shown)} of {len(order)} beads"
+    return title
+
+
+def _draw_gallery_cells(
+    fig, grid, cells: list, columns: int, xy_kw: dict, cs_kw: dict
+) -> None:
+    """Draw the averaged-PSF cell plus one cell per shown bead into
+    ``grid``."""
+    for i, (title_i, sublabel, reason, views, color) in enumerate(cells):
+        inner = grid[i // columns, i % columns].subgridspec(
+            3, 1, hspace=0.08, height_ratios=[1.0, 1.0, 1.0]
+        )
+        for j, (view, kw) in enumerate(zip(views, (xy_kw, cs_kw, cs_kw))):
+            ax = fig.add_subplot(inner[j])
+            ax.imshow(view, **kw)
+            ax.set_xticks([])
+            ax.set_yticks([])
+            for spine in ax.spines.values():
+                spine.set_color(color)
+                spine.set_linewidth(1.6 if color == "tab:red" else 0.8)
+            if i == 0:
+                # label the reference cell's panels once, as a key for the
+                # bead cells that follow
+                ax.set_ylabel(
+                    ("xy (focus)", "xz", "yz")[j], fontsize=6, labelpad=2
+                )
+            if j == 0:
+                ax.set_title(title_i, fontsize=7, color=color, pad=3)
+            elif j == 2:
+                label = sublabel if not reason else f"{sublabel}\n{reason}"
+                ax.set_xlabel(
+                    label,
+                    fontsize=6,
+                    color="tab:red" if reason else "0.3",
+                    labelpad=2,
+                )
+
+
+def _draw_gallery_scatter(
+    fig,
+    data: dict,
+    keep: np.ndarray,
+    n_used: int,
+    n_rejected: int,
+    margin: float,
+    fig_w: float,
+    fig_h: float,
+    bottom_margin: float,
+    scatter_h: float,
+) -> None:
+    """Draw the NCC-vs-MSE dissimilarity scatter below the bead cells."""
+    # left offset leaves room for the (two-line) y label and its ticks
+    scatter_left = margin + 0.95
+    ax = fig.add_axes(
+        [
+            scatter_left / fig_w,
+            bottom_margin / fig_h,
+            min(3.6, fig_w - scatter_left - margin) / fig_w,
+            (scatter_h - 0.45) / fig_h,
+        ]
+    )
+    ax.plot(
+        data["mse"][keep],
+        data["ncc"][keep],
+        "o",
+        color="0.4",
+        markersize=4,
+        label=f"kept ({n_used})",
+    )
+    ax.plot(
+        data["mse"][~keep],
+        data["ncc"][~keep],
+        "x",
+        color="tab:red",
+        markersize=6,
+        label=f"rejected ({n_rejected})",
+    )
+    for b in np.flatnonzero(~keep):
+        ax.annotate(
+            f"#{b}",
+            (data["mse"][b], data["ncc"][b]),
+            textcoords="offset points",
+            xytext=(4, 3),
+            fontsize=6,
+            color="tab:red",
+        )
+    if np.isfinite(data["mse_max"]):
+        ax.axvline(data["mse_max"], color="tab:red", lw=1.0, ls="--")
+    if np.isfinite(data["ncc_min"]):
+        ax.axhline(data["ncc_min"], color="tab:red", lw=1.0, ls="--")
+    ax.set_xlabel("Mean-square error vs the average (photons²)", fontsize=8)
+    ax.set_ylabel("Correlation with\nthe average (NCC)", fontsize=8)
+    ax.tick_params(labelsize=7)
+    ax.set_title(
+        "Bead dissimilarity (dashed: rejection thresholds)", fontsize=9
+    )
+    ax.legend(loc="best", fontsize=7)
+
+
 def plot_bead_gallery(
     data: dict,
     fig,
@@ -4031,18 +5065,10 @@ def plot_bead_gallery(
     n_rejected = n_beads - n_used
     # rejected first: they are the point of the figure, and the cap only ever
     # drops beads that were kept, so a rejection is never hidden
-    rejected = list(np.flatnonzero(~keep))
-    accepted = [] if only_rejected else list(np.flatnonzero(keep))
-    order = rejected + accepted
-    if max_beads is None:
-        shown = order
-    else:
-        room = max(0, int(max_beads) - len(rejected))
-        shown = rejected + accepted[:room]
+    order, shown = _select_gallery_beads(keep, only_rejected, max_beads)
 
     ps = data["pixelsize"]
     z_nm = np.asarray(data["z_nm"], dtype=float)
-    n_steps = len(z_nm)
     box = data["template_xy"].shape[0]
     # cross-sections share the xy panel's lateral axis; z is drawn in camera
     # pixels so one camera pixel is the same physical size on both axes
@@ -4102,22 +5128,10 @@ def plot_bead_gallery(
     )
     fig.set_size_inches(fig_w, fig_h)
 
-    thresholds = []
-    if np.isfinite(data["ncc_min"]):
-        thresholds.append(f"NCC ≥ {data['ncc_min']:.3f}")
-    if np.isfinite(data["mse_max"]):
-        thresholds.append(f"MSE ≤ {data['mse_max']:.3g}")
-    if data["fallback"]:
-        thresholds.append("fallback: kept the lowest-MSE half")
-    title = (
-        f"{data['label']}{n_beads} beads: {n_used} averaged into the PSF, "
-        f"{n_rejected} rejected as outliers"
+    thresholds = _gallery_threshold_labels(data)
+    title = _gallery_title(
+        data, n_beads, n_used, n_rejected, thresholds, order, shown
     )
-    if thresholds:
-        title += "  |  " + ", ".join(thresholds)
-    n_hidden = len(order) - len(shown)
-    if n_hidden > 0:
-        title += f"  |  showing {len(shown)} of {len(order)} beads"
     fig.suptitle(title, fontsize=11, y=1.0 - 0.25 / fig_h)
 
     grid = fig.add_gridspec(
@@ -4130,81 +5144,19 @@ def plot_bead_gallery(
         wspace=0.25,
         hspace=0.25,
     )
-    for i, (title_i, sublabel, reason, views, color) in enumerate(cells):
-        inner = grid[i // columns, i % columns].subgridspec(
-            3, 1, hspace=0.08, height_ratios=[1.0, 1.0, 1.0]
-        )
-        for j, (view, kw) in enumerate(zip(views, (xy_kw, cs_kw, cs_kw))):
-            ax = fig.add_subplot(inner[j])
-            ax.imshow(view, **kw)
-            ax.set_xticks([])
-            ax.set_yticks([])
-            for spine in ax.spines.values():
-                spine.set_color(color)
-                spine.set_linewidth(1.6 if color == "tab:red" else 0.8)
-            if i == 0:
-                # label the reference cell's panels once, as a key for the
-                # bead cells that follow
-                ax.set_ylabel(
-                    ("xy (focus)", "xz", "yz")[j], fontsize=6, labelpad=2
-                )
-            if j == 0:
-                ax.set_title(title_i, fontsize=7, color=color, pad=3)
-            elif j == 2:
-                label = sublabel if not reason else f"{sublabel}\n{reason}"
-                ax.set_xlabel(
-                    label,
-                    fontsize=6,
-                    color="tab:red" if reason else "0.3",
-                    labelpad=2,
-                )
-
-    # left offset leaves room for the (two-line) y label and its ticks
-    scatter_left = margin + 0.95
-    ax = fig.add_axes(
-        [
-            scatter_left / fig_w,
-            bottom_margin / fig_h,
-            min(3.6, fig_w - scatter_left - margin) / fig_w,
-            (scatter_h - 0.45) / fig_h,
-        ]
+    _draw_gallery_cells(fig, grid, cells, columns, xy_kw, cs_kw)
+    _draw_gallery_scatter(
+        fig,
+        data,
+        keep,
+        n_used,
+        n_rejected,
+        margin,
+        fig_w,
+        fig_h,
+        bottom_margin,
+        scatter_h,
     )
-    ax.plot(
-        data["mse"][keep],
-        data["ncc"][keep],
-        "o",
-        color="0.4",
-        markersize=4,
-        label=f"kept ({n_used})",
-    )
-    ax.plot(
-        data["mse"][~keep],
-        data["ncc"][~keep],
-        "x",
-        color="tab:red",
-        markersize=6,
-        label=f"rejected ({n_rejected})",
-    )
-    for b in np.flatnonzero(~keep):
-        ax.annotate(
-            f"#{b}",
-            (data["mse"][b], data["ncc"][b]),
-            textcoords="offset points",
-            xytext=(4, 3),
-            fontsize=6,
-            color="tab:red",
-        )
-    if np.isfinite(data["mse_max"]):
-        ax.axvline(data["mse_max"], color="tab:red", lw=1.0, ls="--")
-    if np.isfinite(data["ncc_min"]):
-        ax.axhline(data["ncc_min"], color="tab:red", lw=1.0, ls="--")
-    ax.set_xlabel("Mean-square error vs the average (photons²)", fontsize=8)
-    ax.set_ylabel("Correlation with\nthe average (NCC)", fontsize=8)
-    ax.tick_params(labelsize=7)
-    ax.set_title(
-        "Bead dissimilarity (dashed: rejection thresholds)", fontsize=9
-    )
-    ax.legend(loc="best", fontsize=7)
 
 
 def _save_bead_gallery_plot(

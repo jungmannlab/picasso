@@ -1,9 +1,91 @@
 # Changelog
 
-Last change: 18-SEP-2026 CEST
+Last change: 30-SEP-2026 CEST
+
+## 0.12.0
+
+**TODO**: Describe the general overview - fast render, etc.
+
+### General
+- Removed support for Python 3.10 (Python 3.11–3.14 are supported).
+- All docstrings of public functions have been improved to match the NumPy style.
+- Test version documentation online.
+
+### Render
+- Render has been largely rewritten for fast and interactive rendering of localizations even for large, multiplex datasets. GPU via the package ``wgpu`` has been added for cross-platform support. More details in the section **Technical details on Render update** below. See these links for the relevant user guides: [navigation](https://picassosr.readthedocs.io/en/latest/render.html#navigating-the-image), [user_settings](https://picassosr.readthedocs.io/en/latest/render.html#cpu-usage-on-shared-workstations), [GPU](https://picassosr.readthedocs.io/en/latest/render.html#gpu-rendering).
+- `View > 3D view` (Ctrl+Shift+R, replacing *Update rotation window*) opens the rotation window on the single selected pick or, without a pick, on the current field of view, so any region can be inspected in 3D by zooming to it; pressed again on unchanged content it only raises the window.
+- Linked windows that share user-selected attributes, see [documentation](https://picassosr.readthedocs.io/en/latest/render.html#New-linked-window).
+- New blur methods *Adaptive Histogram (Quad-Tree)* and *Jittered Triangulation* (Baddeley, Cannell & Soeller, *Microsc. Microanal.* 2010). See the [blur documentation](https://picassosr.readthedocs.io/en/latest/render.html#blur).
+- The display settings (main and 3D window) show the minimum blur only for the Gaussian blur methods that use it.
+- New action to move xy positions of localizations with a mouse. See the [documentation](https://picassosr.readthedocs.io/en/latest/render.html#move-ctrl-g).
+- Apply expression to localizations expands the canvas (metadata's `Height` and `Width`) if x and y positions are out of range.
+- Overlay of image files (`.png` and `.tif`), see the [documentation](https://picassosr.readthedocs.io/en/latest/render.html#overlay-image).
+- Editable appearance of the tools (e.g., picks), see the [documentation](https://picassosr.readthedocs.io/en/latest/render.html#tools-settings-ctrl-t).
+- Smooth transitions in 3D animations: the motion eases in and out and passes through the positions without sharp turns, see the [documentation](https://picassosr.readthedocs.io/en/latest/render.html#build-an-animation).
+- Faster circular picking of localizations.
+- Faster FRC.
+- FRC in several random ROIs (*Info* dialog, *FRC in several ROIs*).
+- `picasso.render` is distributed as a package (`kernels`, `geometry`, `splat`, `scene`, `overlays_qt`, `animation`, `backend`, `gpu`); every former `picasso.render.*` name is still importable from `picasso.render`.
+- Rectangular pick minimum length set to 5 display pixels.
+- Fixed: 3D histogram rendering scaled z unnecessarily.
+- Fixed NeNA (and FRC) overwriting group columns of localizations.
+- Fixed: *Export FOV as .ims* ignored the image extents of the loaded metadata and used only the last channel's metadata.
+
+### Localize
+- New spot identification method: B-spline wavelet segmentation (Izeddin et al., *Opt. Express* 2012), see the [documentation](https://picassosr.readthedocs.io/en/latest/localize.html#b-spline-wavelet-identification).
+- New column `reduced_chi_square` for MLE and least-squares fits: the goodness of fit normalized for the box size and the photon counts, about 1 for a good fit (`picasso.localize.reduced_chi_square`).
+- Fixed: ratiometric multichannel spline fitting ignored the per-pixel sCMOS variance of the camera calibration.
+- Fixed: `Height` and `Width` were swapped in the metadata of non-square `.ims` movies.
+
+### **Backward incompatible changes:**
+- *Tools > Fast rendering* is removed: with GPU rendering and other speed improvements it no longer serves a purpose.
+- The API deprecated in v0.11 is removed:
+    - `picasso.localize.fit2D` is removed, use `picasso.localize.fit` (without the `movie_info` and `mle_method` arguments, which had no effect).
+    - `picasso.localize.localize_3D` is removed, use `picasso.localize.localize` with its `calibration_3d` argument.
+    - `picasso.localize.localize` accepts only the movie positionally; `camera_info` and `identification_parameters` are keyword-only. Its `parameters` (renamed to `identification_parameters`) and `mle_method` arguments are removed.
+    - The `return_info` argument is removed from `picasso.localize.identify`, `picasso.localize.localize`, `picasso.clusterer.cluster`, `picasso.clusterer.dbscan` and `picasso.clusterer.hdbscan`; they always return `(locs, info)`.
+    - `picasso.render.build_animation` no longer accepts positions given as Euler angles `(angle_x, angle_y, angle_z, viewport)`; pass `(rotation, viewport)` with a `scipy.spatial.transform.Rotation` (`picasso.render.rotation_matrix` converts the old angles).
+
+### Others
+- Code readability clean ups (flake8).
+- The spatial index stored in localization .hdf5 files (`/render_index`). See the [documentation](https://picassosr.readthedocs.io/en/latest/files.html#spatial-index).
+- The user settings file (`~/.picasso/settings.yaml`) is no longer lost when it cannot be read. Also, the [documentation](https://picassosr.readthedocs.io/en/latest/others.html#user-settings-file) has been added.
+- The Windows one-click installer's *GPU* edition is renamed *CUDA*, similarly the installed folders were renamed etc.
+- Fixed: combining localizations whose columns differ (e.g. with and without `net_gradient`, spherical and elliptical, least-squares and MLE fits, or 2D and 3D data) silently deleted all localizations of the files lacking a column when saving. `picasso join`, RESI, and the multi-channel saves of Render (picked localizations, also per pick) and its 3D window now drop the columns not all of them have, with a warning.
+
+### Technical details on Render update
+- **Multi-threaded CPU rendering**: the render kernels release the GIL and channels are rendered in parallel by a thread pool; a single large channel is split into row chunks rendered in parallel and summed in a fixed order.
+- New user setting `cpu_utilization` (`Render` section of `~/.picasso/settings.yaml`, default 0.5): the fraction of the CPU cores rendering may use, for shared workstations. See the [documentation](https://picassosr.readthedocs.io/en/latest/render.html#cpu-usage-on-shared-workstations).
+- The display pipeline after splatting (contrast, colormaps, channel compositing, 8-bit conversion) runs in fused numba kernels instead of a chain of numpy operations (another speed improvement).
+- **GPU rendering in Render**: localizations are rendered on the graphics card (Metal, Direct3D 12 or Vulkan via `wgpu`, any vendor, no CUDA needed) — uploaded once, then every view is computed on the GPU, several times faster than the CPU threads. See the [documentation](https://picassosr.readthedocs.io/en/latest/render.html#gpu-rendering).
+- `View > Show info` shows the active renderer ("GPU (Apple M4 via Metal)" or "CPU (5 workers)") with a help button that opens the GPU documentation, which lists the requirements and what to check when it says CPU.
+- New user setting `max_blur_width` (`Render` section, default 100 nm): localizations with a precision worse than this are not rendered by the individual-precision blur methods (they would only add a faint wide haze while costing most of the render time). `0` or `off` disables the limit.
+- **Rendering runs on a background thread** in the main window: panning and zooming never block the interface, a burst of mouse events renders only the newest view, and the last image is shifted or scaled on screen immediately while the new one renders, so dragging feels continuous. Renders cover a 15% margin around the window so small pans need no new render at all; exports still render the exact view.
+- While panning and zooming, large datasets are previewed with a subset of the localizations (new user setting `interaction_subsample`, `Render` section: `auto` = at least 500,000 or 10% of the localizations in view, or a fixed number) with the contrast compensated, and sharpened as soon as the mouse pauses.
+- Loading localization files no longer needs the *indexing localizations...* step before circular picking, and the spatial index used for zoomed views is now stored in the files.
+- The rotation window renders in the background like the main window: rotating and panning never block the GUI, a burst of mouse moves renders only the newest orientation, large picks are previewed with a subset of localizations while dragging (sized by the localizations in view, not by the loaded total) and sharpened as soon as the drag pauses, and the renders use the GPU when it is enabled.
+- 3D animations are built in the background at a resolution of your choice (`Resolution (px)` in the animation dialog, independent of the window's size, e.g. 1920 x 1080), with a cancel button; failures are reported instead of silently producing nothing; the frames use the GPU when it is enabled.
+- Localizations are standardized to float32 floating-point columns and a uint32 `frame` on loading, saving and in the processing functions (`picasso.lib.standardize_dtypes`, via `ensure_sanity`), the dtypes Localize writes. Pipelines that had promoted columns to float64 (undrifting, z fitting, imports) now produce files and DataFrames half the size, and the GPU renderer no longer converts such columns on every render.
+- New `picasso.render.backend` seam: `SplatBackend` (CPU and wgpu implementations), `SplatBackendError`, `describe_active()`, `release_uploads()`, `gpu_settings()`; `picasso.render.render` itself always uses the CPU kernels, `render_scene` goes through the selected backend.
+- `picasso.render.render` and `render_scene` accept `max_blur_width`, `global_precision` (the blur of *Global loc. prec.*) and `indices` (per-channel row selections rendered without copying the DataFrame).
+- `picasso.render.build_animation` gained a `cancel` callback and returns whether the build completed.
+- New `picasso.spatial_index` functions: `query_rect`, `query_circle` (circular picks through the pyramid), `save_render_index`, `read_render_index`, `validate_render_index`, `load_render_index`. `picasso.postprocess.picked_locs` and the functions taking `index_blocks` (`pick_similar`, `combine_locs_in_picks`, `remove_locs_in_picks`, `align_from_picked`, `undrift_from_fiducials`) accept a `spatial_index.RenderIndexPyramid` in that argument.
+- `picasso.io.save_locs` gained `render_index`; `picasso.lib.standardize_dtypes` is new.
 
 ## 0.11.3
+- **Breaking change:** dark times are now the number of frames without signal between binding events, i.e., one frame shorter than before (two binding events in consecutive frames have a dark time of 0). Together with the bright time, each now counts the frames spent in its state. This affects Render's pick info, qPAINT (`picasso.postprocess.evaluate_picks`, `pick_kinetics` and `pick_properties`) and `picasso dark`; influx rates calibrated with earlier versions should be recalibrated. See the [documentation](https://picassosr.readthedocs.io/en/latest/files.html#hdf5-pick-property-files) for the convention.
+
+- Localize: auto contrast button in the bottom right corner of the window; contrast dialog still exists for a numerical input.
+- Localize: new `Identify on` mode for multichannel and split-FOV data, *Sum of unregistered channels*. It adds the channels up (in photons) pixel for pixel, without any registration. See the [documentation](https://picassosr.readthedocs.io/en/latest/localize.html#summing-without-registration). The existing mode is renamed *Sum of registered channels*.
+- Localize: the channel sum has its own box size, min. net gradient and identification filters, the same whichever channel is displayed. Each channel keeps its own settings for identifying the channels separately (and for registering them for the sum).
+- Z binning for 3D calibration (Gaussian astigmatism and spline).
 - New `picasso.localize.localize_frames`: a GUI-free wrapper that runs the existing identification and fit on an in-memory frame stack (instead of a movie read from disk) and assigns absolute frame indices, so batched or live input concatenates into one growing localization table. Results are numerically identical to `picasso.localize.localize` on the same frames and parameters.
+- Fixed Localize not saying why the channel sum was not shown (channels not registered/aligned yet).
+- Render: NeNA is saved to metadata when calculated.
+- Fixed saving rotated localizations [#708](https://github.com/jungmannlab/picasso/issues/708)
+- Fixed .csv export in plot profile [#709](https://github.com/jungmannlab/picasso/issues/709)
+- Fixed Render's 3D slicer failing to open for some z ranges and for data thinner than one slice [#710](https://github.com/jungmannlab/picasso/issues/710).
+- Fixed SPINNA single simulation without loading experimental data.
 
 ## 0.11.2
 - Fixed the calibrations stored in the camera config (z, experimental PSF and sCMOS) not being cleared when switching to a camera the config has no entry for.

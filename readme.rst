@@ -48,11 +48,10 @@ Installation
 
 Check out the `Picasso release page <https://github.com/jungmannlab/picasso/releases/>`__ to download and run the latest compiled one-click installer for Windows or MacOS (the latter is experimental and feedback is welcome). Here you will also find the Nature Protocols legacy version (v0.1.0).
 
-For Windows, two one-click installers are provided: a default (CPU) build and a **GPU** build. The GPU build additionally bundles the CUDA runtime so that GPU-accelerated (numba.cuda) code can run. It is larger and requires an NVIDIA (CUDA-capable) GPU; on machines without one, GPU-only options are simply hidden. Choose the GPU installer only if you have a compatible NVIDIA GPU and want to use the accelerated tools, for example localization fitting. Picasso uses Cuda12 in the one-click-installer.
+For Windows, two one-click installers are provided: a default build and a **CUDA** build. Both render on the graphics card in Picasso: Render (via ``wgpu``, any vendor). The CUDA build additionally bundles the CUDA runtime so that CUDA-accelerated (numba.cuda) code can run, for example localization fitting. It is larger and requires an NVIDIA (CUDA-capable) GPU; on machines without one, CUDA-only options are simply hidden. Choose the CUDA installer only if you have a compatible NVIDIA GPU and want to use the accelerated fitting tools. Picasso uses CUDA 12 in the one-click installer.
 
 Python is also distributed as a PyPI package that is platform-independent (``pip install picassosr``) which grants not only GUI but also access to Picasso’s internal routines in custom Python programs. For more details, see the `Via PyPI <https://github.com/jungmannlab/picasso#via-pypi>`__ section below. For examples of how to use Picasso in Python scripts, see the section `Example Usage <https://github.com/jungmannlab/picasso#example-usage>`__ below.
 
-Note: Since v0.10.0 Picasso is more flexible in terms of dependencies and Python versions. Previously only Python 3.10 was supported, now newer versions are encouraged.
 
 Via PyPI
 ^^^^^^^^
@@ -137,11 +136,13 @@ If you use Picasso in your research, please cite our Nature Protocols publicatio
 - Experimental PSF (cubic-spline) fitting. DOIs: `10.1038/nmeth.4661 <https://doi.org/10.1038/nmeth.4661>`__ (Li et al., experimental-PSF localization and bead alignment) and `10.1038/s41598-017-00622-w <https://doi.org/10.1038/s41598-017-00622-w>`__ (Babcock & Zhuang, cubic-spline PSF model). The spline calibration follows the coefficient scheme of Gpuspline; license can be found `here <https://github.com/jungmannlab/picasso/blob/master/LICENSES/Gpuspline-LICENSE.txt>`__.
 - Multichannel (global) experimental-PSF fitting. DOI: `10.1038/s41467-022-30719-4 <https://doi.org/10.1038/s41467-022-30719-4>`__ (Li et al., globLoc).
 - 3D fitting via astigmatism. DOI: `10.1126/science.1153529 <https://www.science.org/doi/10.1126/science.1153529>`__.
+- B-spline wavelet spot identification. DOI: `10.1364/OE.20.002081 <https://doi.org/10.1364/OE.20.002081>`__ (Izeddin et al., Opt. Express 2012)
 - sCMOS pixel-dependent noise modeling. DOI: `10.1038/nmeth.2488 <https://doi.org/10.1038/nmeth.2488>`__.
 - NeNA. DOI: `10.1007/s00418-014-1192-3 <https://doi.org/10.1007/s00418-014-1192-3>`__
 - FRC. DOI: `10.1038/nmeth.2448 <https://doi.org/10.1038/nmeth.2448>`__
 - Theoretical lateral localization precision (``lpx`` / ``lpy``, Gaussian least-squares). DOI: `10.1038/nmeth.1447 <https://doi.org/10.1038/nmeth.1447>`__
 - Theoretical axial localization precision (``lpz`` values, Gaussian). DOI: `10.1038/s41467-026-70198-5 <https://doi.org/10.1038/s41467-026-70198-5>`__
+- Quad-tree adaptive histogram rendering. DOI: `10.1017/S143192760999122X <https://doi.org/10.1017/S143192760999122X>`__ (Baddeley, Cannell & Soeller, Microsc. Microanal. 2010)
 - RCC undrifting: DOI: `10.1364/OE.22.015982 <https://doi.org/10.1364/OE.22.015982>`__
 - AIM undrifting. DOI: `10.1126/sciadv.adm776 <https://www.science.org/doi/10.1126/sciadv.adm7765>`__
 - SMLM clusterer. DOIs: `10.1038/s41467-021-22606-1 <https://doi.org/10.1038/s41467-021-22606-1>`__ and `10.1038/s41586-023-05925-9 <https://doi.org/10.1038/s41586-023-05925-9>`__

@@ -8,19 +8,65 @@ picasso.__init__.py
 """
 
 import os.path
+import re
 import yaml
-from .version import __version__  # noqa: F401
+from .version import __version__
 
 # In frozen (PyInstaller) builds the numba-cuda redirect (a site-packages .pth)
 # never runs, so "from numba import cuda" would fall back to Numba's built-in
-# CUDA stub and GPU-accelerated (numba.cuda) code silently vanishes. Install the
-# redirect here, before anything imports numba.cuda. No-op outside frozen builds.
+# CUDA stub and GPU-accelerated (numba.cuda) code silently vanishes. Install
+# the redirect here, before anything imports numba.cuda. No-op outside frozen
+# builds.
 from . import _numba_cuda_compat as _numba_cuda_compat
 
 _numba_cuda_compat.install()
 
 _this_file = os.path.abspath(__file__)
 _this_dir = os.path.dirname(_this_file)
+
+DOCS_ROOT_URL = "https://picassosr.readthedocs.io/en"
+
+
+def docs_version(version: str = __version__) -> str:
+    """Return the Read the Docs version slug matching a Picasso version.
+
+    Final releases read the default documentation (``latest``, built
+    from ``master``). Pre-releases (``a``, ``b``, ``rc`` or ``.dev``,
+    e.g. ``0.12.0a2``) read the documentation built from their
+    development branch ``vX.Y`` (e.g. ``v0.12``), which describes
+    features not yet merged into ``master``.
+
+    Parameters
+    ----------
+    version : str, optional
+        Picasso version string. Default is the installed version.
+
+    Returns
+    -------
+    slug : str
+        ``"latest"`` or ``"vX.Y"``.
+    """
+    match = re.match(r"(\d+)\.(\d+)(?:\.\d+)*(a|b|rc|\.dev)?", version)
+    if match is None or match.group(3) is None:
+        return "latest"
+    return f"v{match.group(1)}.{match.group(2)}"
+
+
+def docs_url(page: str = "") -> str:
+    """Return the URL of a documentation page for this Picasso version.
+
+    Parameters
+    ----------
+    page : str, optional
+        Page (and anchor) relative to the documentation root, e.g.
+        ``"render.html#resi"``. Default is the documentation root.
+
+    Returns
+    -------
+    url : str
+        Full URL, see ``docs_version`` for the version it points to.
+    """
+    return f"{DOCS_ROOT_URL}/{docs_version()}/{page}"
 
 
 def user_config_dir() -> str:
@@ -29,6 +75,11 @@ def user_config_dir() -> str:
     Shared with ``~/.picasso/settings.yaml`` and the other per-user files
     (see ``picasso.io``) so every install type (one-click installer, PyPI,
     source) keeps a single, user-writable, uninstall-surviving location.
+
+    Returns
+    -------
+    path : str
+        ``~/.picasso`` expanded for the current user.
     """
     return os.path.join(os.path.expanduser("~"), ".picasso")
 
@@ -60,11 +111,16 @@ def resolve_config_path() -> str | None:
     """Return the path of the config file to read, or None if none exists.
 
     Resolution:
-      1. ``~/.picasso/config.yaml`` (preferred, user-writable);
-      2. the legacy in-package ``config.yaml`` (older installs), read in
-         place and never moved, so a user who keeps editing it there still
-         sees their changes take effect.
-    Returns None when neither exists.
+
+    1. ``~/.picasso/config.yaml`` (preferred, user-writable);
+    2. the legacy in-package ``config.yaml`` (older installs), read in
+       place and never moved, so a user who keeps editing it there still
+       sees their changes take effect.
+
+    Returns
+    -------
+    path : str or None
+        Path of the config file to read; None when neither exists.
     """
     user_config = config_filename()
     if os.path.isfile(user_config):

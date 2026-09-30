@@ -122,6 +122,11 @@ ENV/
 # mypy
 .mypy_cache/
 
-# GPU installer build artifacts
+# CUDA installer build artifacts
+build_cuda/
+dist_cuda/
 build_gpu/
 dist_gpu/
+
+# Generated GitHub release notes
+release/release_notes.txt

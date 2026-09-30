@@ -1022,7 +1022,7 @@ class TestInputValidation:
 
 
 # ---------------------------------------------------------------------------
-# End-to-end: the CPU spline through localize.fit2D
+# End-to-end: the CPU spline through localize.fit
 # ---------------------------------------------------------------------------
 def _synthetic_movie(
     calibration,
@@ -1079,7 +1079,7 @@ def _native_z(locs, calibration):
 
 
 class TestFit2DIntegration:
-    """``localize.fit2D`` with the CPU spline codes."""
+    """``localize.fit`` with the CPU spline codes."""
 
     @pytest.fixture
     def scene(self, picasso_movie_factory):
@@ -1100,12 +1100,11 @@ class TestFit2DIntegration:
     @pytest.mark.parametrize("method", ["spline", "spline-mle"])
     def test_recovers_ground_truth(self, scene, method):
         calibration, movie, info, camera_info, identifications, truth = scene
-        locs, fit_info = localize.fit2D(
+        locs, fit_info = localize.fit(
             movie,
-            info,
-            camera_info,
-            identifications,
-            BOX,
+            camera_info=camera_info,
+            identifications=identifications,
+            box=BOX,
             fitting_method=method,
             spline_calibration=calibration,
         )
@@ -1126,12 +1125,11 @@ class TestFit2DIntegration:
 
     def test_metadata_records_the_device_and_schedule(self, scene):
         calibration, movie, info, camera_info, identifications, _ = scene
-        _, fit_info = localize.fit2D(
+        _, fit_info = localize.fit(
             movie,
-            info,
-            camera_info,
-            identifications,
-            BOX,
+            camera_info=camera_info,
+            identifications=identifications,
+            box=BOX,
             fitting_method="spline",
             spline_calibration=calibration,
         )
@@ -1149,12 +1147,11 @@ class TestFit2DIntegration:
 
     def test_explicit_schedule_is_honored(self, scene):
         calibration, movie, info, camera_info, identifications, _ = scene
-        _, fit_info = localize.fit2D(
+        _, fit_info = localize.fit(
             movie,
-            info,
-            camera_info,
-            identifications,
-            BOX,
+            camera_info=camera_info,
+            identifications=identifications,
+            box=BOX,
             fitting_method="spline",
             spline_calibration=calibration,
             eps=1e-6,
@@ -1166,12 +1163,11 @@ class TestFit2DIntegration:
     def test_progress_and_abort(self, scene):
         calibration, movie, info, camera_info, identifications, truth = scene
         seen = []
-        locs, _ = localize.fit2D(
+        locs, _ = localize.fit(
             movie,
-            info,
-            camera_info,
-            identifications,
-            BOX,
+            camera_info=camera_info,
+            identifications=identifications,
+            box=BOX,
             fitting_method="spline",
             spline_calibration=calibration,
             progress_callback=seen.append,
@@ -1180,12 +1176,11 @@ class TestFit2DIntegration:
         assert seen and seen[-1] == len(truth)
         assert all(0 <= n <= len(truth) for n in seen)
 
-        aborted, _ = localize.fit2D(
+        aborted, _ = localize.fit(
             movie,
-            info,
-            camera_info,
-            identifications,
-            BOX,
+            camera_info=camera_info,
+            identifications=identifications,
+            box=BOX,
             fitting_method="spline",
             spline_calibration=calibration,
             abort_callback=lambda: True,
@@ -1195,21 +1190,19 @@ class TestFit2DIntegration:
     def test_serial_matches_threaded(self, scene):
         calibration, movie, info, camera_info, identifications, _ = scene
         common = dict(fitting_method="spline", spline_calibration=calibration)
-        serial, _ = localize.fit2D(
+        serial, _ = localize.fit(
             movie,
-            info,
-            camera_info,
-            identifications,
-            BOX,
+            camera_info=camera_info,
+            identifications=identifications,
+            box=BOX,
             multiprocess=False,
             **common,
         )
-        threaded, _ = localize.fit2D(
+        threaded, _ = localize.fit(
             movie,
-            info,
-            camera_info,
-            identifications,
-            BOX,
+            camera_info=camera_info,
+            identifications=identifications,
+            box=BOX,
             multiprocess=True,
             **common,
         )
@@ -1224,22 +1217,20 @@ class TestFit2DIntegration:
         calibration has to give the same answer."""
         calibration, movie, info, camera_info, identifications, _ = scene
         small = 7
-        full, _ = localize.fit2D(
+        full, _ = localize.fit(
             movie,
-            info,
-            camera_info,
-            identifications,
-            small,
+            camera_info=camera_info,
+            identifications=identifications,
+            box=small,
             fitting_method="spline",
             spline_calibration=calibration,
         )
         cropped = localize.crop_spline_calibration(calibration, small)
-        pre, _ = localize.fit2D(
+        pre, _ = localize.fit(
             movie,
-            info,
-            camera_info,
-            identifications,
-            small,
+            camera_info=camera_info,
+            identifications=identifications,
+            box=small,
             fitting_method="spline",
             spline_calibration=cropped,
         )
@@ -1251,12 +1242,11 @@ class TestFit2DIntegration:
     def test_2d_calibration_yields_no_z(self, scene):
         _, movie, info, camera_info, identifications, _ = scene
         calibration_2d, _ = _flat_calibration()
-        locs, _ = localize.fit2D(
+        locs, _ = localize.fit(
             movie,
-            info,
-            camera_info,
-            identifications,
-            BOX,
+            camera_info=camera_info,
+            identifications=identifications,
+            box=BOX,
             fitting_method="spline",
             spline_calibration=calibration_2d,
         )

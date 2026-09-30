@@ -24,7 +24,6 @@ import pytest
 
 from picasso.gui import render as gui_render
 
-
 WIDTH = HEIGHT = 256.0
 
 
@@ -53,6 +52,16 @@ def _info() -> list[dict]:
     ]
 
 
+class _WindowStub:
+    """A window without linked windows."""
+
+    def link_channels_changed(self, changes) -> None:
+        pass
+
+    def link_render_index(self, locs) -> None:
+        return None
+
+
 class _ViewStub:
     """The parts of ``View`` the display path touches, and nothing else."""
 
@@ -67,7 +76,8 @@ class _ViewStub:
         self.infos = [_info()]
         self.index_blocks = [None]
         self.render_index = [None]
-        self.fast_render_indices = [None]
+        self._move_channels = ()  # no channel dragged by the Move tool
+        self.window = _WindowStub()
 
 
 def _brute_force(locs: pd.DataFrame, viewport) -> pd.DataFrame:
@@ -167,6 +177,9 @@ _EXEMPT = {
     ("View", "__init__"),  # creates the empty lists
     ("View", "add"),  # appends a fresh entry to every cache
     ("DatasetDialog", "_close_one_channel"),  # drops the entry everywhere
+    # takes a linked window's channel together with its (valid) index
+    ("View", "adopt_shared_channels"),
+    ("View", "detach_channel"),  # a row-for-row copy: indices stay valid
     ("TestClustererDialog", "test_clusterer"),  # own copy, not the View's
     ("TestClustererView", "__init__"),  # own copy
     ("MaskSettingsDialog", "init_dialog"),  # reference, read only
@@ -235,10 +248,13 @@ def test_locs_mutation_invalidates_the_index(cls_name, fn_name, node):
     if (cls_name, fn_name) in _EXEMPT:
         pytest.skip("exempt by construction")
     source = ast.unparse(node)
+    # View.locs_moved invalidates the indices (and is checked here too)
     assert (
-        "invalidate_locs_index" in source or "resample_locs=True" in source
+        "invalidate_locs_index" in source
+        or "resample_locs=True" in source
+        or "locs_moved(" in source
     ), (
         f"{cls_name}.{fn_name} mutates the localizations without dropping "
-        "the cached spatial indices: call invalidate_locs_index(channel) "
-        "or update_scene(resample_locs=True)"
+        "the cached spatial indices: call invalidate_locs_index(channel), "
+        "update_scene(resample_locs=True) or locs_moved(channel)"
     )

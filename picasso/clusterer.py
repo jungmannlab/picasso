@@ -403,9 +403,18 @@ def _resolve_progress(
 
     Mirrors ``picasso.aim.aim``'s convention: ``None`` reports nothing,
     ``"console"`` displays a tqdm progress bar, and a
-    ``lib.ProgressDialog`` drives a GUI progress bar. ``total`` is the
-    number of steps the callback will count up to; ``unit`` is the tqdm
-    unit label.
+    ``lib.ProgressDialog`` drives a GUI progress bar.
+
+    Parameters
+    ----------
+    progress : lib.ProgressDialog or "console" or None
+        Public progress argument to normalize.
+    total : int
+        Number of steps the callback will count up to.
+    description : str
+        Description shown next to the progress bar.
+    unit : str, optional
+        tqdm unit label. Default is ``"it"``.
 
     Returns
     -------
@@ -426,9 +435,8 @@ def cluster(
     frame_analysis: bool,
     radius_z: float | None = None,
     pixelsize: float | None = None,
-    return_info: bool = True,  # TODO: remove in v0.12.0
     progress: lib.ProgressDialog | Literal["console"] | None = None,
-) -> tuple[pd.DataFrame, dict] | pd.DataFrame:
+) -> tuple[pd.DataFrame, dict]:
     """Cluster localizations from single molecules (SMLM clusterer).
 
     The general workflow is as follows:
@@ -464,15 +472,6 @@ def cluster(
         3D clustering.
     pixelsize : int, optional
         Camera pixel size in nm. Only needed for 3D clustering.
-    return_info : bool, optional
-        If True, returns a tuple of (locs, info), where locs is the
-        clustered localizations and info is a dictionary containing
-        clustering information.
-    return_info : bool, optional
-        If True, returns a tuple of (locs, info), where locs is the
-        clustered localizations and info is a dictionary containing
-        clustering information. Will be removed in v0.12.0 and both
-        locs and metadata will be returned.
     progress : picasso.lib.ProgressDialog or "console" or None, optional
         Tracks progress while building the neighbor graph (the main,
         O(n) step). If "console", a tqdm progress bar is shown in the
@@ -486,15 +485,9 @@ def cluster(
         Clusterered localizations, with column 'group' added, which
         specifies cluster label for each localization. Noise (label -1)
         is removed.
-    info : dict, optional
-        Dictionary containing clustering information, only returned if
-        return_info is True.
+    info : dict
+        Dictionary containing clustering information.
     """
-    if not return_info:
-        lib.deprecation_warning(
-            "In v0.12.0, return_info will not be an argument and"
-            "cluster will always return both locs and cluster info."
-        )
     locs = locs.copy()
     n_raw = len(locs)
     progress_cb = _resolve_progress(progress, n_raw, "Clustering", unit="loc")
@@ -539,10 +532,7 @@ def cluster(
         info[f"Clustering radius z ({unit})"] = radius_z * pixelsize
     else:
         info[f"Clustering radius ({unit})"] = radius_xy * pixelsize
-    if return_info:
-        return locs, info
-    else:
-        return locs
+    return locs, info
 
 
 def _dbscan(
@@ -590,8 +580,7 @@ def dbscan(
     min_locs: int = 10,
     pixelsize: float | None = None,
     radius_z: float | None = None,
-    return_info: bool = True,  # TODO: remove in v0.12.0
-) -> tuple[pd.DataFrame, dict] | pd.DataFrame:
+) -> tuple[pd.DataFrame, dict]:
     """Perform DBSCAN on localizations.
 
     See Ester, et al. Inkdd, 1996. (Vol. 96, No. 34, pp. 226-231).
@@ -623,11 +612,6 @@ def dbscan(
         DBSCAN search radius in z (camera pixels). If None (default),
         the clustering is isotropic and uses ``radius`` in all
         dimensions. Only used for 3D.
-    return_info : bool, optional
-        If True, returns a tuple of (locs, info), where locs is the
-        clustered localizations and info is a dictionary containing
-        clustering information. Will be removed in v0.12.0 and both
-        locs and metadata will be returned.
 
     Returns
     -------
@@ -635,15 +619,9 @@ def dbscan(
         Clusterered localizations, with column 'group' added, which
         specifies cluster label for each localization. Noise (label -1)
         is removed.
-    info : dict, optional
-        Dictionary containing clustering information, only returned if
-        return_info is True.
+    info : dict
+        Dictionary containing clustering information.
     """
-    if not return_info:
-        lib.deprecation_warning(
-            "In v0.12.0, return_info will not be an argument and"
-            "dbscan will always return both locs and cluster info."
-        )
     locs = locs.copy()
     n_raw = len(locs)
     if "z" in locs.columns:
@@ -673,10 +651,7 @@ def dbscan(
     }
     if "z" in locs.columns and radius_z is not None:
         info[f"Radius z ({unit})"] = radius_z * pixelsize_unit
-    if return_info:
-        return locs, info
-    else:
-        return locs
+    return locs, info
 
 
 def _hdbscan(
@@ -723,8 +698,7 @@ def hdbscan(
     min_samples: int,
     pixelsize: float | None = None,
     cluster_eps: float = 0.0,
-    return_info: bool = True,  # TODO: remove in v0.12.0
-) -> tuple[pd.DataFrame, dict] | pd.DataFrame:
+) -> tuple[pd.DataFrame, dict]:
     """Perform HDBSCAN on localizations.
 
     See Campello, et al. PAKDD, 2013 (DOI: 10.1007/978-3-642-37456-2_14).
@@ -742,11 +716,6 @@ def hdbscan(
         Camera pixel size in nm. Only needed for 3D.
     cluster_eps : float, optional
         Distance threshold. Clusters below this value will be merged.
-    return_info : bool, optional
-        If True, returns a tuple of (locs, info), where locs is the
-        clustered localizations and info is a dictionary containing
-        clustering information. Will be removed in v0.12.0 and both
-        locs and metadata will be returned.
 
     Returns
     -------
@@ -754,15 +723,9 @@ def hdbscan(
         Clusterered localizations, with column 'group' added, which
         specifies cluster label for each localization. Noise (label -1)
         is removed.
-    info : dict, optional
-        Dictionary containing clustering information, only returned if
-        return_info is True.
+    info : dict
+        Dictionary containing clustering information.
     """
-    if not return_info:
-        lib.deprecation_warning(
-            "In v0.12.0, return_info will not be an argument and"
-            "cluster will always return both locs and cluster info."
-        )
     locs = locs.copy()
     n_raw = len(locs)
     if "z" in locs.columns:
@@ -788,10 +751,7 @@ def hdbscan(
         "Intercluster distance": cluster_eps,
         "Fraction of rejected locs (%)": 100 * (n_raw - n_clusters) / n_raw,
     }
-    if return_info:
-        return locs, info
-    else:
-        return locs
+    return locs, info
 
 
 def extract_valid_labels(
@@ -891,8 +851,15 @@ def _count_binding_events(
     """Number of binding events per cluster.
 
     A new event starts whenever consecutive frames within a cluster are
-    more than 3 frames apart. Vectorised across all groups with one
+    more than 3 frames apart. Vectorized across all groups with one
     stable sort + one diff pass.
+
+    Parameters
+    ----------
+    group_arr : lib.IntArray1D
+        Cluster (group) id of each localization.
+    frame_arr : lib.IntArray1D
+        Frame number of each localization.
 
     Returns
     -------

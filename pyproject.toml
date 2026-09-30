@@ -14,14 +14,13 @@ maintainers = [{name = "Rafal Kowalewski", email = "rafalkowalewski998@gmail.com
 keywords = ["super-resolution", "DNA-PAINT", "microscopy"]
 description = "Collection of tools for painting super-resolution images"
 readme = "readme.rst"
-requires-python = ">=3.10,<3.15"
+requires-python = ">=3.11,<3.15"
 license = "MIT"
 license-files = ["LICENSE.txt", "LICENSES/*.txt"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Science/Research",
     "Programming Language :: Python",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
@@ -64,10 +63,17 @@ cuda12 = [
 cuda13 = [
     "numba-cuda[cu13]"
 ]
-# Convenience alias for the most common CUDA toolkit (12.x). For other
-# toolkits install picassosr[cuda11] or picassosr[cuda13] instead.
+# GPU rendering in Render (WebGPU via wgpu: Metal, Direct3D 12 or
+# Vulkan; any vendor). Pinned to a minor version: the shader and API
+# surface are validated against it.
+wgpu = [
+    "wgpu>=0.32,<0.33"
+]
+# Convenience alias for all GPU features with the most common CUDA
+# toolkit (12.x). For other toolkits install picassosr[cuda11,wgpu] or
+# picassosr[cuda13,wgpu] instead.
 gpu = [
-    "picassosr[cuda12]"
+    "picassosr[cuda12,wgpu]"
 ]
 dev = [
     "build",
@@ -89,10 +95,11 @@ lif = [
 formats = [
     "picassosr[czi,lif]",
 ]
-# Not for general use: the installer / installer_gpu extras exist only to
+# Not for general use: the installer / installer_cuda extras exist only to
 # build the one-click installers, where every version is pinned exactly so
 # the frozen bundles stay reproducible and stable. Regular users should
 # install picassosr (optionally with [gpu] / [formats]) instead.
+# 'installer' uses python 3.14, see, e.g., create_installer_windows.bat
 installer = [
     "PyQt6==6.11.0",
     "numpy==2.4.4",
@@ -118,13 +125,15 @@ installer = [
     "czifile==2026.6.12",
     "liffile==2026.4.11",
     "imagecodecs==2026.6.6",
+    "wgpu==0.32.0",
     "pyinstaller==6.19.0",
     "PyImarisWriter==0.7.0; sys_platform=='win32'",
     "hdf5plugin==6.0.0; sys_platform=='win32'"
 ]
-# GPU build: identical to the CPU installer plus the CUDA runtime.
+# CUDA build: identical to the CPU installer plus the CUDA runtime
+# (GPU rendering via wgpu is in both; this one adds CUDA fitting).
 # Reuse picassosr[installer] so the pinned versions never drift apart.
-installer_gpu = [
+installer_cuda = [
     "picassosr[installer]",
     "numba-cuda[cu12]==0.30.2"
 ]
@@ -155,6 +164,7 @@ picasso = [
 markers = [
     "slow: long-running tests (multiprocessing, Bayesian fits, compare_models)",
     "gui: tests that build Qt widgets (applied automatically to anything using the qapp / qt_offscreen fixtures); deselect with -m \"not gui\"",
+    "gpu_backend: tests that exercise the real GPU render backend selection (every other test renders on the CPU reference, whatever the machine has)",
 ]
 
 [tool.black]

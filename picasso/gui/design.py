@@ -22,7 +22,7 @@ from PyQt6 import QtCore, QtGui, QtWidgets, QtPrintSupport
 
 from .. import io as _io
 from .. import design, design_sequences
-from .. import lib, __version__
+from .. import lib, __version__, docs_url
 from .app import run_gui
 
 BASE_SEQUENCES = design_sequences.base_sequences
@@ -784,8 +784,10 @@ class PlateDialog(lib.Dialog):
         self.buttons.rejected.connect(self.reject)
 
     def evalSelection(self) -> int:
-        """Evaluate the selected export option:
-        0 = Cancel, 1 = Design, 2 = Full Plates"""
+        """Evaluate the selected export option.
+
+        Returns 0 for Cancel, 1 for Design and 2 for Full Plates.
+        """
         if self.radio1.isChecked():
             selection = 1
         elif self.radio2.isChecked():
@@ -1716,7 +1718,7 @@ class Window(QtWidgets.QMainWindow):
 class MainWindow(QtWidgets.QWidget):
     """Main window for the Picasso application."""
 
-    DOCS_URL = "https://picassosr.readthedocs.io/en/latest/design.html"
+    DOCS_URL = docs_url("design.html")
 
     def __init__(self):
         super(MainWindow, self).__init__()

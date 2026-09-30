@@ -8,16 +8,16 @@ Fit spots (single-molecule images) with 2D Gaussian least squares.
     **This whole module will be removed in Picasso 1.0.** Every public
     name in it now warns. All fitting lives in :mod:`picasso.fitting`:
 
-    ==============================  ===============================
-    this module                     replacement
-    ==============================  ===============================
-    ``fit_spot`` / ``fit_spots``    ``fitting.gaussfit.fit_spots``
-    ``fit_spots_parallel``          ``fitting.gaussfit.fit_spots_async``
-    ``fit_spots_gauss_gpu``         ``fitting.gaussfit_cuda.fit_spots``
-    ``locs_from_fits``              ``localize.locs_from_fits_gauss``
-    ``localization_precision``      ``fitting.precision.localization_precision``
-    ``sigma_uncertainty``           ``fitting.precision.sigma_uncertainty_lsq``
-    ==============================  ===============================
+    ============================  ============================================
+    this module                   replacement
+    ============================  ============================================
+    ``fit_spot`` / ``fit_spots``  ``fitting.gaussfit.fit_spots``
+    ``fit_spots_parallel``        ``fitting.gaussfit.fit_spots_async``
+    ``fit_spots_gauss_gpu``       ``fitting.gaussfit_cuda.fit_spots``
+    ``locs_from_fits``            ``localize.locs_from_fits_gauss``
+    ``localization_precision``    ``fitting.precision.localization_precision``
+    ``sigma_uncertainty``         ``fitting.precision.sigma_uncertainty_lsq``
+    ============================  ============================================
 
 The optimizer here is SciPy's ``leastsq`` (MINPACK) and is *not* derived from
 Gpufit. Its GPU counterpart is: ``fit_spots_gauss_gpu`` below is a thin shim
@@ -368,7 +368,33 @@ def fit_spot(
         sampled Gaussian with the Levenberg-Marquardt driver shared with the
         GPU backend, on either device.
 
-    See :func:`_fit_spot` for the full description."""
+    See :func:`_fit_spot` for the full description.
+
+    Parameters
+    ----------
+    spot : lib.FloatArray2D
+        ``(size, size)`` pixel values of the spot image.
+    spherical : bool, optional
+        If True, fit a spherical (isotropic) Gaussian with a single width.
+        Default is False.
+    rotated : bool, optional
+        If True, fit a rotated elliptical Gaussian. Default is False.
+    return_chi_square : bool, optional
+        If True, append the chi-square at the fit optimum to the returned
+        parameters. Default is False.
+    tolerance : float or None, optional
+        Convergence criterion. None (the default) uses :data:`TOLERANCE`.
+    max_iterations : int or None, optional
+        Maximum number of iterations. None (the default) uses
+        :data:`MAX_ITERATIONS`.
+
+    Returns
+    -------
+    result_ : lib.FloatArray1D
+        Optimized parameters [x, y, photons, bg, sx, sy] (plus the angle in
+        radians if ``rotated``, and the chi-square if
+        ``return_chi_square``).
+    """
     lib.deprecation_warning(_DEPRECATION_MESSAGE)
     return _fit_spot(
         spot,
@@ -522,7 +548,36 @@ def fit_spots(
         sampled Gaussian with the Levenberg-Marquardt driver shared with the
         GPU backend, on either device.
 
-    See :func:`_fit_spots` for the full description."""
+    See :func:`_fit_spots` for the full description.
+
+    Parameters
+    ----------
+    spots : lib.FloatArray3D
+        ``(n_spots, size, size)`` spot images.
+    progress_callback : callable, "console" or None, optional
+        A callable receives the number of localized spots; "console" shows
+        a tqdm bar; None disables progress tracking.
+    spherical : bool, optional
+        If True, fit a spherical (isotropic) Gaussian with a single width.
+        Default is False.
+    rotated : bool, optional
+        If True, fit a rotated elliptical Gaussian. Default is False.
+    return_chi_square : bool, optional
+        If True, append the per-spot chi-square as one extra trailing
+        column. Default is False.
+    tolerance : float or None, optional
+        Convergence criterion. None (the default) uses :data:`TOLERANCE`.
+    max_iterations : int or None, optional
+        Maximum number of iterations per spot. None (the default) uses
+        :data:`MAX_ITERATIONS`.
+
+    Returns
+    -------
+    theta : lib.FloatArray2D
+        Optimized parameters per spot, columns [x, y, photons, bg, sx, sy]
+        (plus the angle in radians if ``rotated``, and the chi-square if
+        ``return_chi_square``).
+    """
     lib.deprecation_warning(_DEPRECATION_MESSAGE)
     return _fit_spots(
         spots,
@@ -612,7 +667,7 @@ def _fit_spots(
             max_iterations=max_iterations,
         )
         if callable(progress_callback):
-            progress_callback(i)
+            progress_callback(i + 1)
     return theta
 
 
@@ -637,7 +692,35 @@ def fit_spots_parallel(
     replacement, and uses threads rather than up to 60 worker
     processes.
 
-    See :func:`_fit_spots_parallel` for the full description."""
+    See :func:`_fit_spots_parallel` for the full description.
+
+    Parameters
+    ----------
+    spots : lib.FloatArray3D
+        ``(n_spots, size, size)`` spot images.
+    asynch : bool, optional
+        If True, return the futures immediately instead of waiting for the
+        results. Default is False.
+    spherical : bool, optional
+        If True, fit a spherical (isotropic) Gaussian with a single width.
+        Default is False.
+    rotated : bool, optional
+        If True, fit a rotated elliptical Gaussian. Default is False.
+    return_chi_square : bool, optional
+        If True, append the per-spot chi-square as one extra trailing
+        column. Default is False.
+    tolerance : float or None, optional
+        Convergence criterion. None (the default) uses :data:`TOLERANCE`.
+    max_iterations : int or None, optional
+        Maximum number of iterations per spot. None (the default) uses
+        :data:`MAX_ITERATIONS`.
+
+    Returns
+    -------
+    lib.FloatArray2D or list of futures.Future
+        The stacked parameters (as in :func:`fit_spots`) if ``asynch`` is
+        False, else the list of futures.
+    """
     lib.deprecation_warning(_DEPRECATION_MESSAGE)
     return _fit_spots_parallel(
         spots,
@@ -777,8 +860,19 @@ def fits_from_futures(futures: list[futures.Future]) -> lib.FloatArray2D:
 
     .. deprecated:: 0.11
         This whole module is removed in Picasso 1.0. Plumbing for
-        ``fit_spots_parallel``; :func:`picasso.fitting.gaussfit.fit_spots_async`
-        needs no equivalent, since its threads write into shared arrays.
+        ``fit_spots_parallel``;
+        :func:`picasso.fitting.gaussfit.fit_spots_async` needs no
+        equivalent, since its threads write into shared arrays.
+
+    Parameters
+    ----------
+    futures : list of futures.Future
+        Futures returned by :func:`fit_spots_parallel` with ``asynch=True``.
+
+    Returns
+    -------
+    lib.FloatArray2D
+        The per-task parameter arrays, stacked row-wise.
     """
     lib.deprecation_warning(_DEPRECATION_MESSAGE)
     return _fits_from_futures(futures)
@@ -805,7 +899,31 @@ def locs_from_fits(
         ``picasso.localize.locs_from_fits_gauss``, which builds the same
         table from the parameter layout ``picasso.fitting.gaussfit`` returns.
 
-    See :func:`_locs_from_fits` for the full description."""
+    See :func:`_locs_from_fits` for the full description.
+
+    Parameters
+    ----------
+    identifications : pd.DataFrame
+        Identifications of the spots (frame, x, y and net gradient).
+    theta : lib.FloatArray2D
+        Optimized parameters per spot, columns [x, y, photons, bg, sx, sy]
+        (plus the rotation angle in radians, if present).
+    box : int
+        Size of the box used for localization.
+    em : bool
+        Whether EMCCD was used for the localization.
+    spherical : bool, optional
+        If True, the fit was a spherical Gaussian and the ``ellipticity``
+        column is omitted. Default is False.
+    chi_square : lib.FloatArray1D, optional
+        Per-spot chi-square; if provided, the ``chi_square`` column is
+        added.
+
+    Returns
+    -------
+    locs : pd.DataFrame
+        Data frame containing the localized spots.
+    """
     lib.deprecation_warning(_DEPRECATION_MESSAGE)
     return _locs_from_fits(
         identifications, theta, box, em, spherical, chi_square
@@ -885,9 +1003,7 @@ def _locs_from_fits(
         b = np.minimum(theta[:, 4], theta[:, 5])
         ellipticity = (a - b) / a
         columns["ellipticity"] = ellipticity.astype(np.float32)
-    columns["net_gradient"] = identifications["net_gradient"].astype(
-        np.float32
-    )
+    columns.update(lib.net_gradient_column(identifications))
     if rotated:
         # Match the fitting subpackage's convention (see
         # localize.locs_from_fits_gauss):
@@ -956,13 +1072,34 @@ def localization_precision(
     bg: lib.FloatArray1D,
     em: bool,
 ) -> lib.FloatArray1D:
-    """Theoretical localization precision of a 2D unweighted Gaussian fit
-    (Mortensen et al., Nature Methods, 2010).
+    """Theoretical localization precision of a 2D unweighted Gaussian fit.
+
+    Mortensen et al., Nature Methods, 2010.
 
     .. deprecated:: 0.11
         This whole module is removed in Picasso 1.0. Moved verbatim to
         :func:`picasso.fitting.precision.localization_precision`, which this
         now forwards to.
+
+    Parameters
+    ----------
+    photons : lib.FloatArray1D
+        Number of photons collected for the localization.
+    s : lib.FloatArray1D
+        Size of the single-emitter image for each localization.
+    s_orth : lib.FloatArray1D
+        Size of the single-emitter image in the orthogonal direction
+        for each localization.
+    bg : lib.FloatArray1D
+        Background signal for each localization (per pixel).
+    em : bool
+        Whether EMCCD was used for the localization.
+
+    Returns
+    -------
+    lib.FloatArray1D
+        Cramer-Rao lower bound for localization precision for each
+        localization.
     """
     lib.deprecation_warning(_DEPRECATION_MESSAGE)
     return precision.localization_precision(photons, s, s_orth, bg, em)
@@ -981,6 +1118,23 @@ def sigma_uncertainty(
         :func:`picasso.fitting.precision.sigma_uncertainty_lsq` - renamed
         because ``picasso.gaussmle`` defined a different formula under this
         name.
+
+    Parameters
+    ----------
+    sigma : lib.SeriesOrFloatArray1D
+        Fitted sigma values in camera pixels.
+    sigma_orth : lib.SeriesOrFloatArray1D
+        Fitted sigma values in the orthogonal direction in camera
+        pixels.
+    photons : lib.SeriesOrFloatArray1D
+        Number of photons.
+    bg : lib.SeriesOrFloatArray1D
+        Background photons per pixel.
+
+    Returns
+    -------
+    se_sigma : lib.FloatArray1D
+        Standard error of fitted sigma values in camera pixels.
     """
     lib.deprecation_warning(_DEPRECATION_MESSAGE)
     return precision.sigma_uncertainty_lsq(sigma, sigma_orth, photons, bg)

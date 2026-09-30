@@ -4,7 +4,7 @@ Other
 
 Sound notifications
 -------------------
-Starting in version 0.8.5, Picasso supports sound notifications. In Render and SPINNA, these can be selected in the ``File`` menu in the menu bar. The available files are read from the ``picasso/gui/notification_sounds`` folder. ``.mp3`` and ``.wav`` files are supported. Default sound notification is saved automatically when manually changed.
+Picasso supports sound notifications for processes running longer than 1 minute. In Render and SPINNA, these can be selected in the ``File`` menu in the menu bar. The available files are read from the ``picasso/gui/notification_sounds`` folder. ``.mp3`` and ``.wav`` files are supported. Default sound notification is saved automatically when manually changed, under ``filename`` in the ``Sound_notification`` section of ``~/.picasso/settings.yaml`` (see :ref:`user-settings-file`); the default is no sound (``None``).
 
 Custom notifications
 ~~~~~~~~~~~~~~~~~~~~
@@ -44,6 +44,213 @@ If you installed Picasso using the one click installer from `the Picasso release
 - Navigate to your Applications folder and right-click on the picasso app, then select "Show Package Contents".
 - Add your sound files to ``Contents/Frameworks/picasso/gui/notification_sounds``.
 
+
+.. _user-settings-file:
+
+User settings file
+------------------
+Picasso keeps its user settings in ``~/.picasso/settings.yaml`` (``C:\Users\<you>\.picasso\settings.yaml`` on Windows): the last directory used, the Render colormap, the Localize parameters, the CPU and GPU budgets of rendering, the sound notification, and so on. Each module owns a section of the file (``Render``, ``Localize``, ...). The file can be edited with any text editor or via ``File > Picasso settings`` in any module, and changes apply the next time the setting is read - for most settings immediately, without restarting Picasso.
+
+A setting that is missing from the file is written into it with its default the first time it is needed, so every setting a module uses is visible and editable in the file; ``Picasso: Render``, for example, writes all of its ``Render`` keys when it starts. Optional keys that are off unless present (such as ``Render: max_workers``) are the exception.
+
+Every module loads the file, changes its own keys and writes the whole file back, so the file is guarded against mistakes:
+
+- before it is rewritten, the previous version is kept as ``settings.yaml.bak``, so the last good version is always at hand;
+- a file that cannot be parsed (a stray tab or a misplaced colon is enough) is never overwritten silently: a copy is kept as ``settings.yaml.broken``, a warning goes to the :ref:`error log <error-log>` and default settings are used - ``Picasso: Render`` also tells you so when it starts. To get your settings back, fix the YAML in the kept copy and paste it into ``File > Picasso settings``, which validates the YAML before saving.
+
+Reference: every key
+~~~~~~~~~~~~~~~~~~~~
+The tables below list every key Picasso reads from or writes to ``settings.yaml``, grouped by the section (top-level, or a module) that owns it.
+
+Top level
++++++++++
+
+.. list-table::
+   :widths: 22 10 68
+   :header-rows: 1
+
+   * - Key
+     - Default
+     - Description
+   * - ``Save metadata in .yaml``
+     - ``True``
+     - Also write a sidecar ``.yaml`` metadata file next to saved localizations, in addition to the metadata already embedded in the ``.hdf5`` file. See :ref:`files-metadata-settings`.
+   * - ``Save picks in metadata``
+     - ``False``
+     - Embed the picked regions (shape, size, positions) in the metadata when saving picked localizations from Render. See :ref:`render-save-picks-in-metadata`.
+   * - ``Save Micro-Manager metadata``
+     - ``True``
+     - Keep the (often large) MicroManager property block when copying a movie's metadata into the localizations fitted from it. See :ref:`files-metadata-settings`.
+
+``Sound_notification``
++++++++++++++++++++++++
+
+.. list-table::
+   :widths: 22 10 68
+   :header-rows: 1
+
+   * - Key
+     - Default
+     - Description
+   * - ``filename``
+     - ``None`` (no sound)
+     - The sound file (from ``~/.picasso/notification_sounds``) played on long-running jobs in Render and SPINNA. See *Sound notifications* above.
+
+``Render``
+++++++++++
+
+.. list-table::
+   :widths: 22 10 68
+   :header-rows: 1
+
+   * - Key
+     - Default
+     - Description
+   * - ``Colormap``
+     - ``magma`` (GUI), ``viridis`` (command line)
+     - The last colormap selected for the loaded channels, restored on the next Render session or ``picasso render`` run. See :ref:`render-colormap-setting`.
+   * - ``Colormap Property``
+     - ``gist_rainbow``
+     - The colormap used when rendering by property. Kept separately from ``Colormap`` above.
+   * - ``CustomColormaps``
+     - *(none)*
+     - User-defined colormaps created with the custom colormap editor, keyed by name; each is a list of color stops. See :ref:`render-colormap-setting`.
+   * - ``PWD``
+     - *(last used)*
+     - Remembered last value: the directory used in Render's file dialogs.
+   * - ``Colorbar format``
+     - ``.png``
+     - Format of the exported colorbar/LUT image next to a "render by property" export - ``.png`` or ``.svg``. See :ref:`render-colorbar-format`.
+   * - ``ToolStyles``
+     - *(last used)*
+     - Remembered last value: the appearance of the picks, the Measure tool and the Move tool's shift label, set in Render's ``Tools > Tools Settings``. Saved when Render is closed.
+   * - ``cpu_utilization``
+     - ``0.5``
+     - Fraction of CPU cores rendering's worker pool may use. See :ref:`render-cpu-usage`.
+   * - ``max_workers``
+     - *(unset = no cap)*
+     - Absolute cap on rendering worker threads, overriding ``cpu_utilization``. See :ref:`render-cpu-usage`.
+   * - ``interaction_subsample``
+     - ``auto``
+     - Target number of localizations rendered during live pan/zoom previews. See :ref:`render-cpu-usage`.
+   * - ``max_blur_width``
+     - ``100`` (nm)
+     - Localizations whose precision (``lpx``/``lpy``) exceeds this are skipped by the per-localization blur methods. See :ref:`render-cpu-usage`.
+   * - ``gpu: enabled``
+     - ``auto``
+     - Whether/when rendering uses the GPU backend - ``auto``, ``on`` or ``off``. See :ref:`render-gpu-rendering`.
+   * - ``gpu: adapter``
+     - ``high-performance``
+     - Which GPU to use on a computer with several. See :ref:`render-gpu-rendering`.
+   * - ``gpu: vram_budget_mb``
+     - ``8192``
+     - GPU memory budget (MB) for resident localization uploads; ``0`` removes the cap. See :ref:`render-gpu-rendering`.
+
+``Localize``
+++++++++++++
+
+.. list-table::
+   :widths: 22 10 68
+   :header-rows: 1
+
+   * - Key
+     - Default
+     - Description
+   * - ``cpu_utilization``
+     - ``0.8``
+     - Fraction of CPU cores used by the spot identification/fitting worker pool. See the *GPU fitting* section of the Localize docs.
+   * - ``PWD``
+     - *(last used)*
+     - Remembered last value: the directory used in Localize's file dialogs.
+   * - ``box_size``
+     - *(last used)*
+     - Remembered last value: the ``Box side length`` in the ``Parameters`` dialog.
+   * - ``gradient``
+     - *(last used)*
+     - Remembered last value: the ``Min. net gradient`` in the ``Parameters`` dialog.
+   * - ``temporal_median``
+     - *(last used)*
+     - Remembered last value: the temporal median filter window.
+   * - ``temporal_median_on``
+     - *(last used)*
+     - Remembered last value: whether the temporal median filter was ticked.
+   * - ``gaussian_filter_sigma``
+     - *(last used)*
+     - Remembered last value: the Gaussian pre-filter sigma.
+   * - ``fit_model``
+     - *(last used)*
+     - Remembered last value: the PSF fit **Model**.
+   * - ``fit_optimizer``
+     - *(last used)*
+     - Remembered last value: the fit **Optimizer** (least squares / MLE).
+   * - ``fit_mode``
+     - *(last used)*
+     - Remembered last value: the **Fit mode** selection.
+   * - ``Columns to save``
+     - *(all columns)*
+     - Which localization columns are ticked in ``File`` > ``Select columns to save...`` when saving fit results.
+
+All ``Localize`` keys above are documented together in :doc:`localize`.
+
+``Filter``
+++++++++++
+
+.. list-table::
+   :widths: 22 10 68
+   :header-rows: 1
+
+   * - Key
+     - Default
+     - Description
+   * - ``PWD``
+     - *(last used)*
+     - Remembered last value: the directory used in Filter's file dialogs.
+
+``SPINNA``
+++++++++++
+
+.. list-table::
+   :widths: 22 10 68
+   :header-rows: 1
+
+   * - Key
+     - Default
+     - Description
+   * - ``PWD``
+     - current working directory
+     - Remembered last value: the directory used in SPINNA's file dialogs.
+   * - ``Fitting mode``
+     - *(last used)*
+     - The fitting method (``bayesian``, ``coarse to fine`` or ``brute force``) chosen in the "Optional settings" dialog. See :doc:`spinna`.
+   * - ``NND fonts``
+     - *(widget defaults)*
+     - Font family and size for the title, axis labels and ticks of the NND plot, set in *Plot settings*. See :doc:`spinna`.
+
+``Updates``
++++++++++++
+Written and read only by the update-notification feature, not by any module's own GUI - see *Update notifications* below.
+
+.. list-table::
+   :widths: 22 10 68
+   :header-rows: 1
+
+   * - Key
+     - Default
+     - Description
+   * - ``Last update check``
+     - *(unset)*
+     - Timestamp (ISO format) of the last update check; a new check is due again 24 hours after it.
+   * - ``Skipped version``
+     - *(unset)*
+     - A release version the user chose "skip this version" for; suppresses notifications for that version only.
+   * - ``Snoozed until``
+     - *(unset)*
+     - Timestamp (ISO format) until which "remind me later" suppresses notifications.
+   * - ``Disabled``
+     - ``False``
+     - Update checks are switched off entirely.
+
+.. _error-log:
 
 Error log
 ---------

@@ -30,10 +30,10 @@ Pixel loop order
 Coefficient layout
     ``precision._spline_coeff_reshaped``'s natural view,
     ``(n_channels, niz, niy, nix, 4, 4, 4)`` indexed
-    ``[c, k, j, i, z_power, y_power, x_power]`` - the same array the CPU kernels
-    and the CUDA CRLB kernels take. This is **not** the axis-reordered blob the
-    old Gpufit path packed into ``user_info``; feeding that in would scramble
-    the model without raising anything.
+    ``[c, k, j, i, z_power, y_power, x_power]`` - the same array the CPU
+    kernels and the CUDA CRLB kernels take. This is **not** the axis-reordered
+    blob the old Gpufit path packed into ``user_info``; feeding that in would
+    scramble the model without raising anything.
 
 Precision
     The tricubic evaluation runs in single precision by default and everything
@@ -41,14 +41,14 @@ Precision
     Gauss-Jordan solve - in double, unconditionally. The evaluation is where
     almost all the arithmetic is (64 coefficient reads and their Horner passes
     per pixel per channel) and calibrations are stored ``float32`` to begin
-    with, so a single-precision tricubic carries ~1e-6 relative error, far below
-    the shot noise the fit is limited by. The solve is the opposite case: with
-    six channels the Hessian is 15x15 with near-collinear columns - the same
-    conditioning that makes the CRLB path need a truncating pseudo-inverse - and
-    the damping vector is a monotone running maximum, so a single bad diagonal
-    would poison every later step. Pass ``single_precision=False`` to evaluate
-    in double too; the tests use it to compare against the CPU kernels without
-    a rounding excuse.
+    with, so a single-precision tricubic carries ~1e-6 relative error, far
+    below the shot noise the fit is limited by. The solve is the opposite case:
+    with six channels the Hessian is 15x15 with near-collinear columns - the
+    same conditioning that makes the CRLB path need a truncating pseudo-inverse
+    - and the damping vector is a monotone running maximum, so a single bad
+    diagonal would poison every later step. Pass ``single_precision=False`` to
+    evaluate in double too; the tests use it to compare against the CPU kernels
+    without a rounding excuse.
 
 References
 ----------
@@ -85,7 +85,7 @@ import math
 from typing import Callable, Literal
 
 import numpy as np
-from numba import cuda, float64
+from numba import cuda
 from tqdm import tqdm
 
 from picasso.fitting import lmfit_cuda
@@ -127,11 +127,12 @@ def _interval(pos, n_intervals):
     """Spline interval containing ``pos``, clamped to the coefficient grid.
 
     Only the *index* is clamped. The caller keeps the true fractional
-    coordinate ``pos - i``, which may fall outside ``[0, 1)``, so a position off
-    the edge of the box **extrapolates** the boundary cubic rather than
+    coordinate ``pos - i``, which may fall outside ``[0, 1)``, so a position
+    off the edge of the box **extrapolates** the boundary cubic rather than
     saturating at it - what Gpufit's models do and what ``splinefit._interval``
-    reproduces. Computed in double even when the evaluation is single precision,
-    so that the interval never lands one cell off for a large coordinate."""
+    reproduces. Computed in double even when the evaluation is single
+    precision, so that the interval never lands one cell off for a large
+    coordinate."""
     i = int(math.floor(pos))
     if i < 0:
         i = 0
@@ -150,8 +151,8 @@ def _make_eval_spline_2d(ftype):
     The precision is a closure constant rather than an argument because numba
     infers arithmetic types from operands, and a bare Python float literal is
     always double - so keeping an expression in single precision means spelling
-    every constant ``ftype(...)``. Confining that to the evaluator keeps it to a
-    handful of lines instead of infecting the whole module.
+    every constant ``ftype(...)``. Confining that to the evaluator keeps it to
+    a handful of lines instead of infecting the whole module.
     """
     two = ftype(2.0)
     three = ftype(3.0)
@@ -398,8 +399,8 @@ def _make_accumulate_3d(eval_spline_3d):
 
     Parameters are ``[amplitude, x, y, z, offset]``, shared across every
     channel. The single-channel ``spline-3d`` model is the ``n_channels == 1``,
-    identity-Jacobian, zero-residual case of the multichannel one. Transcription
-    of ``splinefit._accumulate_3d``."""
+    identity-Jacobian, zero-residual case of the multichannel one.
+    Transcription of ``splinefit._accumulate_3d``."""
 
     @cuda.jit(device=True)
     def accumulate(
@@ -460,10 +461,10 @@ def _make_accumulate_3d(eval_spline_3d):
                     value = amp * phi + offset
                     data = spots[index, ch, j, i]
                     # The lateral pair picks up the transpose of the channel
-                    # Jacobian (shift = J @ theta), and the leading minus is the
-                    # chain rule of position = pixel - shift. Unlike the CRLB,
-                    # whose diagonal is sign-invariant, an LM step is not:
-                    # dropping the minus sends x, y and z the wrong way.
+                    # Jacobian (shift = J @ theta), and the leading minus is
+                    # the chain rule of position = pixel - shift. Unlike the
+                    # CRLB, whose diagonal is sign-invariant, an LM step is
+                    # not: dropping the minus sends x, y and z the wrong way.
                     d0 = phi
                     d1 = -amp * (a00 * gx + a10 * gy)
                     d2 = -amp * (a01 * gx + a11 * gy)
@@ -527,20 +528,42 @@ def _make_accumulate_3d(eval_spline_3d):
     return accumulate
 
 
+@cuda.jit(device=True)
+def _reset_decoupled_scratch(theta, n_params, grad, hess):
+    """Zero ``grad``/``hess`` for the photon-decoupled link-xyz accumulator.
+
+    Returns False if any parameter is non-finite, in which case ``grad``/
+    ``hess`` are left as found."""
+    for p in range(n_params):
+        if not math.isfinite(theta[p]):
+            return False
+        grad[p] = 0.0
+        for q in range(n_params):
+            hess[p, q] = 0.0
+    return True
+
+
+@cuda.jit(device=True)
+def _mirror_upper_triangle(hess, n_params):
+    """Mirror the upper triangle of ``hess`` into the lower triangle."""
+    for p in range(n_params):
+        for q in range(p):
+            hess[p, q] = hess[q, p]
+
+
 def _make_accumulate_link_xyz(eval_spline_3d, n_channels: int):
     """Accumulator for the photon-decoupled 3D model at a fixed channel count.
 
     Parameters are ``[x, y, z, N_0..N_{C-1}, bg_0..bg_{C-1}]``: x, y and z are
     shared while every channel fits its own photon count and background.
 
-    A pixel of channel ``ch`` touches only five of the ``3 + 2C`` parameters, so
-    the Jacobian is block sparse. ``splinefit._accumulate_link_xyz`` exploits
-    that with 15 read-modify-writes into ``hess`` per pixel; on the GPU those
-    would be 15 local-memory round trips, so here the same 15 quantities live in
-    registers and are written out once per channel - the arrangement
-    ``precision._spline_crlb_link_xyz_kernel`` already uses. The summation
-    order is unchanged, so the two still agree to rounding.
-    """
+    A pixel of channel ``ch`` touches only five of the ``3 + 2C`` parameters,
+    so the Jacobian is block sparse. ``splinefit._accumulate_link_xyz``
+    exploits that with 15 read-modify-writes into ``hess`` per pixel; on the
+    GPU those would be 15 local-memory round trips, so here the same 15
+    quantities live in registers and are written out once per channel - the
+    arrangement ``precision._spline_crlb_link_xyz_kernel`` already uses. The
+    summation order is unchanged, so the two still agree to rounding."""
     n_ch = n_channels
 
     @cuda.jit(device=True)
@@ -562,12 +585,8 @@ def _make_accumulate_link_xyz(eval_spline_3d, n_channels: int):
         x_shift = theta[0]
         y_shift = theta[1]
         z_shift = theta[2]
-        for p in range(n_params):
-            if not math.isfinite(theta[p]):
-                return _INF, False
-            grad[p] = 0.0
-            for q in range(n_params):
-                hess[p, q] = 0.0
+        if not _reset_decoupled_scratch(theta, n_params, grad, hess):
+            return _INF, False
         pos_z = -z_shift
         chi_square = 0.0
         # Shared x/y/z block, accumulated across every channel.
@@ -663,9 +682,7 @@ def _make_accumulate_link_xyz(eval_spline_3d, n_channels: int):
         # Only the upper triangle was filled (0 < 1 < 2 < ia < ib always
         # holds); mirror it once at the end. The cross-channel photon and
         # background blocks are structurally zero and were cleared above.
-        for p in range(n_params):
-            for q in range(p):
-                hess[p, q] = hess[q, p]
+        _mirror_upper_triangle(hess, n_params)
         return chi_square, True
 
     return accumulate
@@ -710,9 +727,9 @@ def _get_kernel(kind: int, n_channels: int, single_precision: bool):
     """Memoized :func:`_build_kernel`.
 
     Only the photon-decoupled model needs one kernel per channel count - its
-    parameter count is ``3 + 2C``, and a device-local array needs a compile-time
-    shape. The other two have a fixed parameter count and loop over channels at
-    run time, so a single kernel serves every channel count."""
+    parameter count is ``3 + 2C``, and a device-local array needs a compile-
+    time shape. The other two have a fixed parameter count and loop over
+    channels at run time, so a single kernel serves every channel count."""
     key = (
         kind,
         int(n_channels) if kind == KIND_LINK_XYZ else 0,
@@ -779,12 +796,33 @@ def fit_spots(
 
     Parameters
     ----------
-    kind, spots, coefficients, jacobians, residuals : array
-        As in ``splinefit.fit_spots``.
-    initial_parameters, z_seeds, apply_seeds, mle : array and bool
-        As in ``splinefit.fit_spots``.
-    tolerance, max_iterations, variance : optional
-        As in ``splinefit.fit_spots``.
+    kind : int
+        ``splinefit.KIND_2D``, ``splinefit.KIND_3D`` or
+        ``splinefit.KIND_LINK_XYZ``.
+    spots : np.ndarray
+        Channel-major ``(n_spots, n_channels, box, box)`` photon counts, as
+        in ``splinefit.fit_spots``.
+    coefficients : np.ndarray
+        Reshaped spline coefficients, as in ``splinefit.fit_spots``.
+    jacobians : np.ndarray
+        ``(n_spots, n_channels, 4)`` per-channel local Jacobians, as in
+        ``splinefit.fit_spots``.
+    residuals : np.ndarray
+        ``(n_spots, n_channels, 2)`` sub-pixel ROI offsets, as in
+        ``splinefit.fit_spots``.
+    initial_parameters : np.ndarray
+        ``(n_spots, n_params)`` seeds, as in ``splinefit.fit_spots``.
+    z_seeds : np.ndarray
+        Axial seeds for the multi-start, in z-shift units.
+    apply_seeds : bool
+        Whether to run the multi-start at all; False keeps each spot's own
+        initial z.
+    mle : bool, optional
+        Use the Poisson maximum-likelihood estimator instead of least squares.
+    tolerance : float, optional
+        Convergence tolerance, as in ``splinefit.fit_spots``.
+    max_iterations : int, optional
+        Maximum number of iterations, as in ``splinefit.fit_spots``.
     progress_callback : callable, "console" or None, optional
         ``"console"`` shows a tqdm bar; a callable is invoked with the
         cumulative number of spots fitted. Updated once per chunk, not once
@@ -797,6 +835,8 @@ def fit_spots(
     single_precision : bool, optional
         Evaluate the spline in single precision (the default). Everything
         downstream of the model is double regardless. See the module docstring.
+    variance : np.ndarray, optional
+        Per-pixel sCMOS readout variance, as in ``splinefit.fit_spots``.
 
     Returns
     -------

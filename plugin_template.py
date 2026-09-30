@@ -36,6 +36,21 @@ def circle_area(radius):
 
 # class that defines modifications to the GUI and actions
 class Plugin:
+    """Adds an entry to the Plugins menu of one Picasso app.
+
+    Parameters
+    ----------
+    window : QtWidgets.QMainWindow
+        Main window of the Picasso app that loads the plugin.
+
+    Attributes
+    ----------
+    name : str
+        Name of the app the plugin extends, e.g. ``"render"``.
+    window : QtWidgets.QMainWindow
+        Main window of the Picasso app.
+    """
+
     def __init__(self, window):
         self.name = "render"  # input the name of the app
         self.window = window
@@ -106,6 +121,11 @@ def register_cli(subparsers):
     ``set_defaults(func=...)``; the handler is called with the parsed
     ``argparse.Namespace``. Command names must not clash with an existing
     ``picasso`` command.
+
+    Parameters
+    ----------
+    subparsers : argparse._SubParsersAction
+        Subparsers of the ``picasso`` command line parser.
     """
     parser = subparsers.add_parser(
         "circle-area", help="compute the area of a circle"

@@ -5,13 +5,15 @@ picasso.masking.
 :copyright: Copyright (c) 2025 Jungmann Lab, MPI of Biochemistry
 """
 
+import logging
+
 import numpy as np
 import pandas as pd
 import pytest
 from PyQt6 import QtCore, QtGui
 from scipy.spatial.transform import Rotation
 
-from picasso import io, masking, render
+from picasso import io, lib, masking, render
 
 from tests.conftest import PIXELSIZE
 
@@ -1652,9 +1654,9 @@ class TestDrawing:
             pick_size=None,
         )
         pixels = _qimage_to_array(out)
-        centre = pixels[60, 60, :3]  # where the two strokes cross
+        center = pixels[60, 60, :3]  # where the two strokes cross
         arm = pixels[60, 30, :3]  # only the horizontal stroke
-        np.testing.assert_array_equal(centre, arm)
+        np.testing.assert_array_equal(center, arm)
 
     def test_draw_picks_unknown_shape_raises(self):
         with pytest.raises(ValueError):
@@ -1720,6 +1722,196 @@ class TestDrawing:
         out = render.draw_rotation_angles(canvas, ang=(0.4, 0.3, 0.2))
         assert isinstance(out, QtGui.QImage)
         assert not np.array_equal(before, _qimage_to_array(out))
+
+
+# ---------------------------------------------------------------------------
+# Appearance of the tool overlays (OverlayStyle)
+# ---------------------------------------------------------------------------
+
+# 32 camera pixels drawn onto the 120 display pixels of ``_fresh_canvas``
+FOV_32 = ((0, 0), (32, 32))
+
+
+def _lit(image) -> np.ndarray:
+    """Mask of the pixels drawn onto the black canvas."""
+    return (_qimage_to_array(image)[..., :3] > 0).any(axis=-1)
+
+
+def _circle(style=None, **kwargs):
+    # a circle of diameter 60 display pixels, centered at (60, 60)
+    return render.draw_picks(
+        _fresh_canvas(),
+        FOV_32,
+        "Circle",
+        [(16, 16)],
+        pick_size=16,
+        style=style,
+        **kwargs,
+    )
+
+
+class TestOverlayStyle:
+    def test_default_style_draws_as_before(self):
+        # no style and the default style draw the same yellow outline
+        np.testing.assert_array_equal(
+            _qimage_to_array(_circle()),
+            _qimage_to_array(_circle(render.OverlayStyle())),
+        )
+        red = _qimage_to_array(_circle(color=QtGui.QColor("red")))
+        assert red[..., 2].max() == 255  # BGRA: red channel
+        assert red[..., 1].max() == 0
+
+    def test_color_argument_overrides_style_color(self):
+        style = render.OverlayStyle(color="blue", line_width=3)
+        np.testing.assert_array_equal(
+            _qimage_to_array(_circle(style, color="red")),
+            _qimage_to_array(_circle(render.OverlayStyle("red", "Solid", 3))),
+        )
+
+    def test_wider_lines_cover_more_pixels(self):
+        thin = _lit(_circle()).sum()
+        wide = _lit(_circle(render.OverlayStyle(line_width=4))).sum()
+        assert wide > 2.5 * thin
+
+    @pytest.mark.parametrize("line_style", ["Dashed", "Dotted", "Dash-dot"])
+    def test_patterned_lines_leave_gaps(self, line_style):
+        solid = _lit(_circle()).sum()
+        patterned = _lit(_circle(render.OverlayStyle(line_style=line_style)))
+        assert 0 < patterned.sum() < 0.9 * solid
+
+    def test_opacity_blends_lines_with_the_image(self):
+        pixels = _qimage_to_array(_circle(render.OverlayStyle(opacity=0.5)))
+        assert pixels[..., 2].max() == pytest.approx(128, abs=2)
+
+    @pytest.mark.parametrize("shape", ["Circle", "Square"])
+    def test_fill_opacity_fills_closed_shapes(self, shape):
+        def center(style):
+            out = render.draw_picks(
+                _fresh_canvas(),
+                FOV_32,
+                shape,
+                [(16, 16)],
+                pick_size=16,
+                style=style,
+            )
+            return _qimage_to_array(out)[60, 60, :3]
+
+        assert not center(None).any()  # hollow by default
+        filled = center(render.OverlayStyle(fill_opacity=0.5))
+        assert filled[2] == pytest.approx(128, abs=2)  # half-bright red
+        assert filled[0] == 0  # yellow has no blue
+
+    def test_fill_of_rectangle_and_box(self):
+        style = render.OverlayStyle(fill_opacity=0.5)
+        for shape, pick, size in (
+            ("Rectangle", ((4, 16), (28, 16)), 8),
+            ("Box", ((8, 8), (24, 24)), None),
+        ):
+            out = render.draw_picks(
+                _fresh_canvas(), FOV_32, shape, [pick], size, style=style
+            )
+            # a point inside, off the rectangle's center line
+            assert _lit(out)[50, 45], shape
+
+    def test_rectangle_center_line_is_optional(self):
+        def center(style):
+            out = render.draw_picks(
+                _fresh_canvas(),
+                FOV_32,
+                "Rectangle",
+                [((4, 16), (28, 16))],
+                8,
+                style=style,
+            )
+            return _lit(out)[60, 60]  # on the center line
+
+        assert center(None)  # shown by default
+        assert not center(render.OverlayStyle(center_line=False))
+
+    def test_only_closed_polygons_are_filled(self):
+        style = render.OverlayStyle(fill_opacity=0.5)
+        triangle = [(4, 4), (28, 4), (16, 28)]
+
+        def inside(pick):
+            out = render.draw_picks(
+                _fresh_canvas(), FOV_32, "Polygon", [pick], 1, style=style
+            )
+            return _lit(out)[45, 60]  # the centroid (16, 12)
+
+        assert not inside(triangle)  # still being drawn
+        assert inside(triangle + [triangle[0]])
+
+    def test_brush_is_filled_by_default_and_can_be_hollow(self):
+        pick = [[(8.0, [(4.0, 16.0), (28.0, 16.0)])]]
+
+        def center(style):
+            out = render.draw_picks(
+                _fresh_canvas(), FOV_32, "Brush", pick, None, style=style
+            )
+            return _qimage_to_array(out)[60, 60, 2]
+
+        assert center(None) == pytest.approx(render.BRUSH_FILL_ALPHA, abs=2)
+        assert center(render.OverlayStyle(fill_opacity=0)) == 0
+        assert center(render.OverlayStyle(fill_opacity=1)) == 255
+
+    def test_font_size_scales_the_annotations(self):
+        def lit(font_size):
+            style = render.OverlayStyle(font_size=font_size)
+            return _lit(_circle(style, annotate_picks=True)).sum()
+
+        outline = _lit(_circle()).sum()
+        assert lit(40) - outline > 4 * (lit(10) - outline)
+
+    def test_draw_points_patterns_lines_but_not_crosses(self):
+        points = [(4, 16), (28, 16)]  # crosses at x = 15 and 105
+
+        def draw(style):
+            out = render.draw_points(
+                _fresh_canvas(),
+                FOV_32,
+                points,
+                pixelsize=PIXELSIZE,
+                style=style,
+            )
+            return _lit(out)
+
+        solid = draw(None)
+        dashed = draw(render.OverlayStyle(line_style="Dashed"))
+        assert solid[60, 30:90].all()
+        assert 0 < dashed[60, 30:90].sum() < 60
+        # the vertical arm of a cross stays solid
+        assert dashed[51:70, 15].all()
+
+    def test_draw_points_font_size(self):
+        def lit(font_size):
+            out = render.draw_points(
+                _fresh_canvas(),
+                FOV_32,
+                [(4, 4), (8, 4)],
+                pixelsize=PIXELSIZE,
+                style=render.OverlayStyle(font_size=font_size),
+            )
+            return _lit(out).sum()
+
+        assert lit(30) > lit(10)
+        default = render.draw_points(
+            _fresh_canvas(), FOV_32, [(4, 4), (8, 4)], pixelsize=PIXELSIZE
+        )
+        assert _lit(default).sum() == lit(20)
+
+    @pytest.mark.parametrize(
+        "kwargs",
+        [
+            {"line_style": "Wavy"},
+            {"line_width": 0},
+            {"opacity": 1.5},
+            {"fill_opacity": -0.1},
+            {"font_size": 0},
+        ],
+    )
+    def test_invalid_values_raise(self, kwargs):
+        with pytest.raises(ValueError):
+            render.OverlayStyle(**kwargs)
 
 
 # ---------------------------------------------------------------------------
@@ -2079,16 +2271,114 @@ class TestAnimationSequence:
         assert np.allclose(viewports[1], ((4.0, 4.0), (28.0, 28.0)))
         assert np.allclose(viewports[-1], vp2)
 
-    def test_normalize_legacy_positions(self):
-        """Legacy Euler positions are converted with a deprecation
-        warning and match rotation_matrix."""
+    @staticmethod
+    def _velocities(rotations, fps):
+        """World-frame angular velocity (rad/s) between frames."""
+        return (
+            np.array(
+                [
+                    (rotations[i + 1] * rotations[i].inv()).as_rotvec()
+                    for i in range(len(rotations) - 1)
+                ]
+            )
+            * fps
+        )
+
+    def _turning_sequence(self, fps, transition):
+        """Three segments whose directions change at each checkpoint,
+        the last one spinning more than a full turn."""
+        segments = [
+            np.radians([0.0, 0.0, 90.0]),
+            np.radians([0.0, 50.0, 80.0]),
+            np.radians([60.0, 20.0, 420.0]),
+        ]
+        checkpoints = [Rotation.identity()]
+        for segment in segments:
+            checkpoints.append(Rotation.from_rotvec(segment) * checkpoints[-1])
+        rotations, _ = render._animation_sequence(
+            [(R, FULL_VIEWPORT) for R in checkpoints],
+            [1.0, 1.0, 2.0],
+            fps,
+            segment_rotations=segments,
+            transition=transition,
+        )
+        return rotations, checkpoints
+
+    @pytest.mark.parametrize("transition", ["smooth", "ease"])
+    def test_eased_transitions_hit_checkpoints(self, transition):
+        """Eased paths pass exactly through every checkpoint, start and
+        end at rest and keep the requested full turn."""
+        fps = 120
+        rotations, checkpoints = self._turning_sequence(fps, transition)
+        for frame, R in zip((0, fps, 2 * fps, -1), checkpoints):
+            assert (rotations[frame] * R.inv()).magnitude() == pytest.approx(
+                0.0, abs=1e-9
+            )
+        speeds = np.linalg.norm(self._velocities(rotations, fps), axis=1)
+        assert speeds[0] < 0.05 * speeds.max()
+        assert speeds[-1] < 0.05 * speeds.max()
+        assert np.degrees(speeds.sum() / fps) > 560
+
+    def test_smooth_velocity_is_continuous(self):
+        """Unlike constant speed, the smooth path has no velocity jump
+        at the intermediate checkpoints: the largest frame-to-frame
+        change in velocity shrinks with the frame rate."""
+
+        def max_jump(fps, transition):
+            rotations, _ = self._turning_sequence(fps, transition)
+            velocities = self._velocities(rotations, fps)
+            return np.linalg.norm(np.diff(velocities, axis=0), axis=1).max()
+
+        assert max_jump(960, "smooth") < 0.3 * max_jump(240, "smooth")
+        # the constant-speed path jumps by the same amount at any rate
+        assert max_jump(960, "linear") == pytest.approx(
+            max_jump(240, "linear"), rel=0.05
+        )
+        assert max_jump(960, "smooth") < 0.05 * max_jump(960, "linear")
+
+    def test_ease_rests_at_every_checkpoint(self):
+        fps = 120
+        rotations, _ = self._turning_sequence(fps, "ease")
+        speeds = np.linalg.norm(self._velocities(rotations, fps), axis=1)
+        for frame in (fps, 2 * fps):
+            assert speeds[frame] < 0.05 * speeds.max()
+
+    def test_smooth_rests_before_a_stay(self):
+        """The motion comes to rest at a checkpoint followed by a stay
+        segment instead of overshooting and coming back."""
+        R1 = Rotation.identity()
+        R2 = Rotation.from_rotvec([0.0, 0.0, np.pi / 2])
+        fps = 100
+        rotations, _ = render._animation_sequence(
+            [(R1, FULL_VIEWPORT), (R2, FULL_VIEWPORT), (R2, FULL_VIEWPORT)],
+            [1.0, 1.0],
+            fps,
+            transition="smooth",
+        )
+        for R in rotations[fps:]:
+            assert (R * R2.inv()).magnitude() == pytest.approx(0.0, abs=1e-9)
+        angles = [R.magnitude() for R in rotations[: fps + 1]]
+        assert np.all(np.diff(angles) >= -1e-12)
+
+    def test_smooth_viewport_zooms_geometrically(self):
+        """Eased viewports interpolate the size logarithmically: halfway
+        through a 4x zoom the view is 2x zoomed, centered in between."""
+        R = Rotation.identity()
+        vp1 = ((0.0, 0.0), (32.0, 32.0))
+        vp2 = ((8.0, 8.0), (16.0, 16.0))
+        _, viewports = render._animation_sequence(
+            [(R, vp1), (R, vp2)], [1.0], fps=3, transition="smooth"
+        )
+        assert np.allclose(viewports[0], vp1)
+        assert np.allclose(viewports[1], ((6.0, 6.0), (22.0, 22.0)))
+        assert np.allclose(viewports[-1], vp2)
+
+    def test_normalize_legacy_positions_raise(self):
+        """Legacy Euler positions were removed in v0.12.0; the error
+        names the replacement."""
         legacy = [(0.1, 0.2, 0.3, FULL_VIEWPORT)]
-        with pytest.warns(DeprecationWarning):
-            normalized = render._normalize_animation_positions(legacy)
-        R, vp = normalized[0]
-        expected = render.rotation_matrix(0.1, 0.2, 0.3)
-        assert (R * expected.inv()).magnitude() == pytest.approx(0.0, abs=1e-9)
-        assert vp == FULL_VIEWPORT
+        with pytest.raises(ValueError, match="rotation_matrix"):
+            render._normalize_animation_positions(legacy)
 
     def test_normalize_invalid_position_raises(self):
         with pytest.raises(ValueError):
@@ -2096,31 +2386,6 @@ class TestAnimationSequence:
 
 
 class TestBuildAnimation:
-    def test_smoke_two_frames_legacy_euler(self, locs_3d, info, tmp_path):
-        """A 2-frame animation from legacy Euler positions writes both
-        an .mp4 and the sidecar .yaml (deprecated input format)."""
-        out_path = tmp_path / "anim.mp4"
-        positions = [
-            (0.0, 0.0, 0.0, FULL_VIEWPORT),
-            (0.1, 0.0, 0.0, FULL_VIEWPORT),
-        ]
-        with pytest.warns(DeprecationWarning):
-            render.build_animation(
-                str(out_path),
-                locs_3d,
-                info,
-                positions=positions,
-                durations=[1.0],
-                disp_px_size=PIXELSIZE,
-                image_size=(64, 64),
-                fps=2,
-            )
-        assert out_path.exists()
-        assert out_path.stat().st_size > 0
-        yaml_path = out_path.with_suffix(".yaml")
-        assert yaml_path.exists()
-        assert yaml_path.stat().st_size > 0
-
     def test_smoke_quaternions_with_turns(self, locs_3d, info, tmp_path):
         """An animation from scipy Rotations with a multi-turn segment
         writes both an .mp4 and the sidecar .yaml."""
@@ -2145,6 +2410,75 @@ class TestBuildAnimation:
         yaml_path = out_path.with_suffix(".yaml")
         assert yaml_path.exists()
         assert yaml_path.stat().st_size > 0
+
+    def test_reports_progress_and_completion(self, locs_3d, info, tmp_path):
+        out_path = tmp_path / "anim.mp4"
+        positions = [
+            (Rotation.identity(), FULL_VIEWPORT),
+            (Rotation.from_rotvec([0.1, 0.0, 0.0]), FULL_VIEWPORT),
+        ]
+        frames = []
+        completed = render.build_animation(
+            str(out_path),
+            locs_3d,
+            info,
+            positions=positions,
+            durations=[1.0],
+            disp_px_size=PIXELSIZE,
+            image_size=(64, 64),
+            fps=3,
+            progress_callback=frames.append,
+        )
+        assert completed is True
+        assert frames == [0, 1, 2, 3]  # each frame, then the total
+
+    def test_cancel_leaves_no_partial_output(self, locs_3d, info, tmp_path):
+        """A build cancelled part-way removes the incomplete video and
+        never writes the sidecar, and reports that it did not finish."""
+        out_path = tmp_path / "anim.mp4"
+        positions = [
+            (Rotation.identity(), FULL_VIEWPORT),
+            (Rotation.from_rotvec([0.1, 0.0, 0.0]), FULL_VIEWPORT),
+        ]
+        rendered = []
+        completed = render.build_animation(
+            str(out_path),
+            locs_3d,
+            info,
+            positions=positions,
+            durations=[2.0],
+            disp_px_size=PIXELSIZE,
+            image_size=(64, 64),
+            fps=5,
+            progress_callback=rendered.append,
+            cancel=lambda: len(rendered) >= 3,
+        )
+        assert completed is False
+        assert len(rendered) < 10  # stopped early
+        assert not out_path.exists()
+        assert not out_path.with_suffix(".yaml").exists()
+
+    def test_transition_saved_and_validated(self, locs_3d, info, tmp_path):
+        out_path = tmp_path / "anim.mp4"
+        kwargs = dict(
+            positions=[
+                (Rotation.identity(), FULL_VIEWPORT),
+                (Rotation.from_rotvec([0.1, 0.0, 0.0]), FULL_VIEWPORT),
+            ],
+            durations=[1.0],
+            disp_px_size=PIXELSIZE,
+            image_size=(64, 64),
+            fps=2,
+        )
+        with pytest.raises(AssertionError, match="transition"):
+            render.build_animation(
+                str(out_path), locs_3d, info, transition="cubic", **kwargs
+            )
+        render.build_animation(
+            str(out_path), locs_3d, info, transition="smooth", **kwargs
+        )
+        settings = io.load_info(str(out_path.with_suffix(".yaml")))[0]
+        assert settings["Transition"] == "smooth"
 
 
 # ---------------------------------------------------------------------------
@@ -2171,3 +2505,1029 @@ class TestMasking:
         # both partitions only contain valid loc indices
         all_idx = set(locs_in.index) | set(locs_out.index)
         assert all_idx == set(locs.index)
+
+
+# ---------------------------------------------------------------------------
+# Rendering purity: inputs are never mutated, repeat calls are identical
+# ---------------------------------------------------------------------------
+
+
+PURITY_ANG = (0.35, -0.6, 0.8)
+
+
+def _column_snapshot(df):
+    return {name: df[name].to_numpy().copy() for name in df.columns}
+
+
+def _assert_columns_unchanged(df, snapshot):
+    for name, before in snapshot.items():
+        np.testing.assert_array_equal(
+            df[name].to_numpy(),
+            before,
+            err_msg=f"rendering mutated input column {name!r}",
+        )
+
+
+class TestRenderPurity:
+    """Rendering must never mutate its inputs, so calling it twice with
+    the same data gives bit-identical images.
+
+    Before the in-place ``z /= pixelsize`` was removed from
+    ``_render_setup3d(_anisotropic)``, this held for the 3D histogram
+    renderers only if every caller defensively copied its z array.
+    """
+
+    @pytest.mark.parametrize("blur_method", [None] + BLUR_METHODS)
+    def test_render_2d(self, locs, info, blur_method):
+        snapshot = _column_snapshot(locs)
+        kwargs = dict(
+            disp_px_size=PIXELSIZE / 10,
+            viewport=FULL_VIEWPORT,
+            blur_method=blur_method,
+        )
+        n1, image1 = render.render(locs, info, **kwargs)
+        n2, image2 = render.render(locs, info, **kwargs)
+        _assert_columns_unchanged(locs, snapshot)
+        assert n1 == n2
+        np.testing.assert_array_equal(image1, image2)
+
+    @pytest.mark.parametrize("blur_method", [None] + BLUR_METHODS)
+    def test_render_rotated(self, locs_3d, info, blur_method):
+        snapshot = _column_snapshot(locs_3d)
+        kwargs = dict(
+            disp_px_size=PIXELSIZE / 10,
+            viewport=FULL_VIEWPORT,
+            blur_method=blur_method,
+            ang=PURITY_ANG,
+        )
+        n1, image1 = render.render(locs_3d, info, **kwargs)
+        n2, image2 = render.render(locs_3d, info, **kwargs)
+        _assert_columns_unchanged(locs_3d, snapshot)
+        assert n1 == n2
+        np.testing.assert_array_equal(image1, image2)
+
+    def test_render_hist3d(self, locs_3d):
+        x = locs_3d["x"].to_numpy()
+        y = locs_3d["y"].to_numpy()
+        z = locs_3d["z"].to_numpy()
+        before = (x.copy(), y.copy(), z.copy())
+        args = (10, 0, 0, 32, 32, -100.0, 100.0, PIXELSIZE)
+        n1, image1 = render.render_hist3d(x, y, z, *args)
+        n2, image2 = render.render_hist3d(x, y, z, *args)
+        for arr, orig in zip((x, y, z), before):
+            np.testing.assert_array_equal(arr, orig)
+        assert n1 == n2
+        np.testing.assert_array_equal(image1, image2)
+
+    def test_render_hist3d_anisotropic(self, locs_3d):
+        x = locs_3d["x"].to_numpy()
+        y = locs_3d["y"].to_numpy()
+        z = locs_3d["z"].to_numpy()
+        before = (x.copy(), y.copy(), z.copy())
+        args = (10, 10, 5, 0, 0, 32, 32, -100.0, 100.0, PIXELSIZE)
+        n1, image1 = render.render_hist3d_anisotropic(x, y, z, *args)
+        n2, image2 = render.render_hist3d_anisotropic(x, y, z, *args)
+        for arr, orig in zip((x, y, z), before):
+            np.testing.assert_array_equal(arr, orig)
+        assert n1 == n2
+        np.testing.assert_array_equal(image1, image2)
+
+
+# ---------------------------------------------------------------------------
+# Parallel channel rendering
+# ---------------------------------------------------------------------------
+
+
+class TestParallelChannels:
+    """Chunked parallel rendering must match the sequential result,
+    stay deterministic, and respect the user's render CPU budget."""
+
+    CHANNEL_COLORS = [(1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0)]
+
+    def _force_budget(self, monkeypatch, n):
+        monkeypatch.setattr(
+            lib.io,
+            "load_user_settings",
+            lambda: {"Render": {"cpu_utilization": 0.9, "max_workers": n}},
+        )
+
+    def _scene_kwargs(self, rotated, blur="gaussian"):
+        return dict(
+            disp_px_size=PIXELSIZE / 10,
+            colors=self.CHANNEL_COLORS,
+            viewport=FULL_VIEWPORT,
+            blur_method=blur,
+            min_blur_width=0.0,
+            ang=PURITY_ANG if rotated else None,
+            contrast=(0.0, 5.0),
+        )
+
+    @pytest.mark.parametrize("blur", ["gaussian", "smooth"])
+    @pytest.mark.parametrize("rotated", [False, True])
+    def test_parallel_matches_sequential(
+        self, locs, locs_3d, info, monkeypatch, rotated, blur
+    ):
+        # tiny chunk floor so the small fixture actually chunks
+        monkeypatch.setattr(render.splat, "_MIN_CHUNK_LOCS", 50)
+        source = locs_3d if rotated else locs
+        channels = [source.iloc[i::3] for i in range(3)]
+        kwargs = self._scene_kwargs(rotated, blur)
+        self._force_budget(monkeypatch, 1)
+        n_seq, rgb_seq, _, raw_seq = render._render_multi_channel(
+            channels, [info] * 3, **kwargs
+        )
+        self._force_budget(monkeypatch, 3)
+        n_par, rgb_par, _, raw_par = render._render_multi_channel(
+            channels, [info] * 3, **kwargs
+        )
+        assert n_seq == n_par
+        # chunk summing reorders float additions: equal to tolerance,
+        # not bit-exact
+        np.testing.assert_allclose(raw_par, raw_seq, rtol=1e-5, atol=1e-6)
+        diff = np.abs(rgb_par.astype(np.int16) - rgb_seq.astype(np.int16))
+        assert diff.max() <= 1
+
+    def test_parallel_is_deterministic(self, locs, info, monkeypatch):
+        monkeypatch.setattr(render.splat, "_MIN_CHUNK_LOCS", 50)
+        self._force_budget(monkeypatch, 3)
+        channels = [locs.iloc[i::3] for i in range(3)]
+
+        def run():
+            return render._render_multi_channel(
+                channels, [info] * 3, **self._scene_kwargs(rotated=False)
+            )
+
+        _, rgb1, _, raw1 = run()
+        _, rgb2, _, raw2 = run()
+        np.testing.assert_array_equal(raw1, raw2)
+        np.testing.assert_array_equal(rgb1, rgb2)
+
+    def test_small_single_channel_parses_settings_at_most_once(
+        self, locs, info, monkeypatch
+    ):
+        # backend selection reads the settings through an mtime cache;
+        # the CPU pool itself is not consulted for a small channel
+        calls = []
+
+        def counting():
+            calls.append(1)
+            return {"Render": {"gpu": {"enabled": "off"}}}
+
+        monkeypatch.setattr(lib.io, "load_user_settings", counting)
+        for _ in range(3):
+            ((n, image),) = render._render_channels(
+                [locs],
+                [info],
+                disp_px_size=PIXELSIZE / 10,
+                viewport=FULL_VIEWPORT,
+                blur_method="gaussian",
+                min_blur_width=0.0,
+                ang=None,
+            )
+            assert n > 0
+        assert len(calls) <= 1
+
+    def test_convolve_never_chunks_but_gaussian_does(
+        self, locs, info, monkeypatch
+    ):
+        monkeypatch.setattr(render.splat, "_MIN_CHUNK_LOCS", 10)
+        self._force_budget(monkeypatch, 4)
+        calls = []
+        original = render._render_arrays
+
+        def counting(*args, **kwargs):
+            calls.append(1)
+            return original(*args, **kwargs)
+
+        # patch where CpuBackend looks the name up (splat's global)
+        monkeypatch.setattr(render.splat, "_render_arrays", counting)
+        channels = [locs.iloc[i::2] for i in range(2)]
+        common = dict(
+            disp_px_size=PIXELSIZE / 10,
+            viewport=FULL_VIEWPORT,
+            min_blur_width=0.0,
+            ang=None,
+        )
+        render._render_channels(
+            channels, [info] * 2, blur_method="convolve", **common
+        )
+        assert len(calls) == 2  # one render per channel, no chunking
+        calls.clear()
+        render._render_channels(
+            channels, [info] * 2, blur_method="gaussian", **common
+        )
+        assert len(calls) > 2  # per-loc blur chunks
+
+    def test_worker_budget_caps(self, monkeypatch):
+        self._force_budget(monkeypatch, 2)
+        assert render._render_worker_budget() == 2
+
+    def test_chunk_tasks_plan(self):
+        sizes = [1_000_000, 100_000]
+        tasks = render._chunk_tasks(sizes, budget=4)
+        by_channel = {}
+        for i, start, stop in tasks:
+            by_channel.setdefault(i, []).append((start, stop))
+        # the big channel splits, the small one stays whole
+        assert len(by_channel[0]) > 1
+        assert by_channel[1] == [(0, 100_000)]
+        # the chunks of each channel tile it exactly, in row order
+        for i, n in enumerate(sizes):
+            spans = by_channel[i]
+            assert spans[0][0] == 0 and spans[-1][1] == n
+            for (_, stop), (start, _) in zip(spans, spans[1:]):
+                assert stop == start
+        # every *split* chunk respects the minimum size; only a whole
+        # small channel may fall below it
+        assert all(
+            stop - start >= render._MIN_CHUNK_LOCS
+            or (start, stop) == (0, sizes[i])
+            for i, start, stop in tasks
+        )
+
+
+# ---------------------------------------------------------------------------
+# Splat backend seam
+# ---------------------------------------------------------------------------
+
+
+class TestSplatBackend:
+    """_render_channels extracts columns once and routes them through
+    the backend selected by backend._get_backend(); a failing non-CPU
+    backend falls back to the CPU reference without crashing."""
+
+    KWARGS = dict(
+        disp_px_size=PIXELSIZE / 10,
+        viewport=FULL_VIEWPORT,
+        blur_method="gaussian",
+        min_blur_width=0.0,
+        ang=None,
+    )
+
+    def _settings(self, monkeypatch, gpu):
+        monkeypatch.setattr(
+            lib.io, "load_user_settings", lambda: {"Render": {"gpu": gpu}}
+        )
+
+    def test_cpu_backend_when_gpu_is_off(self, monkeypatch):
+        self._settings(monkeypatch, {"enabled": "off"})
+        chosen = render.backend._get_backend()
+        assert isinstance(chosen, render.CpuBackend)
+        assert isinstance(chosen, render.SplatBackend)
+        assert chosen is render.backend._cpu_backend()
+        assert chosen is render.backend._get_backend()
+
+    def test_render_channels_routes_through_selected_backend(
+        self, locs, info, monkeypatch
+    ):
+        received = {}
+
+        class Fake(render.SplatBackend):
+            name = "fake"
+
+            def render_channels(self, columns, info_arg, **kwargs):
+                received["columns"] = columns
+                received["kwargs"] = kwargs
+                return render.backend._cpu_backend().render_channels(
+                    columns, info_arg, **kwargs
+                )
+
+        fake = Fake()
+        monkeypatch.setattr(render.scene, "_get_backend", lambda **kw: fake)
+        renderings = render._render_channels([locs], [info], **self.KWARGS)
+        assert len(renderings) == 1
+        # the seam passes extracted column arrays, not DataFrames
+        assert all(
+            isinstance(c, render._RenderColumns) for c in received["columns"]
+        )
+        assert received["kwargs"]["blur_method"] == "gaussian"
+
+    def test_failing_backend_falls_back_to_cpu(
+        self, locs, info, monkeypatch, caplog
+    ):
+        class Failing(render.SplatBackend):
+            name = "failing"
+
+            def render_channels(self, columns, info_arg, **kwargs):
+                raise render.SplatBackendError("no device")
+
+        failing = Failing()
+        monkeypatch.setattr(render.scene, "_get_backend", lambda **kw: failing)
+        with caplog.at_level(logging.WARNING, logger="picasso.render.scene"):
+            renderings = render._render_channels([locs], [info], **self.KWARGS)
+        ((n, image),) = renderings
+        n_ref, image_ref = render.render(locs, info, **self.KWARGS)
+        assert n == n_ref
+        np.testing.assert_array_equal(image, image_ref)
+        assert any("failing" in record.message for record in caplog.records)
+
+    def test_cpu_backend_has_no_resident_uploads(self, monkeypatch):
+        assert render.CpuBackend.persistent_uploads is False
+        assert render.backend._cpu_backend().persistent_uploads is False
+        # releasing is always safe, GPU backend or not
+        monkeypatch.setattr(render.backend, "_gpu_singleton", None)
+        render.backend.release_uploads()
+
+    def test_vram_budget_setting(self, monkeypatch):
+        default = lib.RENDER_VRAM_BUDGET_MB_DEFAULT * 2**20
+
+        def with_value(value):
+            settings = {"Render": {"gpu": {"vram_budget_mb": value}}}
+            monkeypatch.setattr(lib.io, "load_user_settings", lambda: settings)
+            return render.backend.vram_budget_bytes()
+
+        assert with_value(512) == 512 * 2**20
+        assert with_value(1.5) == int(1.5 * 2**20)
+        assert with_value(0) is None  # unlimited
+        assert with_value(-1) == default
+        assert with_value(True) == default
+        assert with_value("lots") == default
+        monkeypatch.setattr(lib.io, "load_user_settings", lambda: {})
+        assert render.backend.vram_budget_bytes() == default
+
+    def test_gpu_settings_parsing(self, monkeypatch):
+        default_budget = lib.RENDER_VRAM_BUDGET_MB_DEFAULT * 2**20
+
+        def parsed(gpu):
+            self._settings(monkeypatch, gpu)
+            return render.backend.gpu_settings()
+
+        assert parsed({}) == {
+            "enabled": "auto",
+            "adapter": "high-performance",
+            "vram_budget_bytes": default_budget,
+        }
+        assert parsed({"enabled": "ON"})["enabled"] == "on"
+        # YAML's bare on/off parse as booleans
+        assert parsed({"enabled": True})["enabled"] == "on"
+        assert parsed({"enabled": False})["enabled"] == "off"
+        assert parsed({"enabled": "maybe"})["enabled"] == "auto"
+        assert parsed({"adapter": " NVIDIA "})["adapter"] == "NVIDIA"
+        assert parsed({"adapter": ""})["adapter"] == "high-performance"
+        assert parsed({"vram_budget_mb": 0})["vram_budget_bytes"] is None
+        assert parsed("nonsense")["enabled"] == "auto"
+        monkeypatch.setattr(lib.io, "load_user_settings", lambda: {})
+        assert render.backend.gpu_settings()["enabled"] == "auto"
+
+    def test_selection_honors_enabled_and_size(self, monkeypatch):
+        class FakeGpu(render.SplatBackend):
+            name = "fake-gpu"
+            persistent_uploads = True
+
+            def render_channels(self, *args, **kwargs):
+                raise NotImplementedError
+
+        fake = FakeGpu()
+        requested = []
+
+        def fake_gpu_backend(adapter, warn):
+            requested.append((adapter, warn))
+            return fake
+
+        monkeypatch.setattr(render.backend, "_gpu_backend", fake_gpu_backend)
+        cpu = render.backend._cpu_backend()
+        # off: the GPU is never even probed
+        self._settings(monkeypatch, {"enabled": "off"})
+        assert render.backend._get_backend() is cpu
+        assert render.backend._get_backend(n_locs=10**7) is cpu
+        assert requested == []
+        # auto / on: the GPU for large requests, the CPU for tiny ones
+        self._settings(monkeypatch, {"enabled": "auto", "adapter": "Intel"})
+        assert render.backend._get_backend() is fake
+        assert render.backend._get_backend(n_locs=10**7) is fake
+        assert requested[-1] == ("Intel", False)
+        assert (
+            render.backend._get_backend(n_locs=lib.RENDER_GPU_MIN_LOCS - 1)
+            is cpu
+        )
+        self._settings(monkeypatch, {"enabled": "on"})
+        assert render.backend._get_backend() is fake
+        assert requested[-1] == ("high-performance", True)
+        # an unavailable GPU means the CPU
+        monkeypatch.setattr(
+            render.backend, "_gpu_backend", lambda adapter, warn: None
+        )
+        assert render.backend._get_backend() is cpu
+        assert render.backend.describe_active().startswith("CPU (")
+
+    def test_convolve_blur_is_the_global_precision(self, locs, info):
+        """'convolve' blurs with the caller's global precision, else with
+        the median precision of the rows rendered (not of those in
+        view), so the blur is the same at every zoom and rotation."""
+        zoomed = ((8.0, 8.0), (20.0, 20.0))
+        kwargs = dict(disp_px_size=PIXELSIZE / 4, blur_method="convolve")
+        n, default = render.render(locs, info, viewport=zoomed, **kwargs)
+        medians = (
+            float(np.median(locs["lpx"])),
+            float(np.median(locs["lpy"])),
+        )
+        _, explicit = render.render(
+            locs, info, viewport=zoomed, global_precision=medians, **kwargs
+        )
+        np.testing.assert_array_equal(default, explicit)
+        # an explicit blur is honored: wider blurs are flatter, and the
+        # intensity is conserved
+        _, narrow = render.render(
+            locs, info, viewport=zoomed, global_precision=(0.5, 0.5), **kwargs
+        )
+        _, wide = render.render(
+            locs, info, viewport=zoomed, global_precision=(2.0, 2.0), **kwargs
+        )
+        assert wide.max() < narrow.max() < default.max()
+        # a wider blur spills a little more intensity over the border
+        assert 0.9 * narrow.sum() < wide.sum() <= narrow.sum()
+        # the scene entry point takes one pair per channel
+        _, _, raw = render.render_scene(
+            [locs, locs],
+            [info, info],
+            viewport=zoomed,
+            global_precision=[(0.5, 0.5), (2.0, 2.0)],
+            return_raw_image=True,
+            **kwargs,
+        )
+        np.testing.assert_array_equal(raw[0], narrow)
+        np.testing.assert_array_equal(raw[1], wide)
+
+    def test_rotated_renders_reach_the_gpu_sooner(
+        self, locs_3d, info, monkeypatch
+    ):
+        # a rotated 3D localization costs the CPU ~20x a 2D one, so the
+        # small-render cutoff counts it that many times
+        cpu = render.backend._cpu_backend()
+        served = []
+
+        class FakeGpu(render.SplatBackend):
+            name = "fake-gpu"
+
+            def render_channels(self, columns, info_arg, **kwargs):
+                served.append(sum(len(c) for c in columns))
+                return cpu.render_channels(columns, info_arg, **kwargs)
+
+        fake = FakeGpu()
+        monkeypatch.setattr(
+            render.backend, "_gpu_backend", lambda adapter, warn: fake
+        )
+        self._settings(monkeypatch, {"enabled": "auto"})
+        n = lib.RENDER_GPU_MIN_LOCS // lib.RENDER_ROTATED_COST_FACTOR + 1
+        repeats = -(-n // len(locs_3d))  # the fixture is smaller than n
+        small = pd.concat([locs_3d] * repeats).iloc[:n].reset_index(drop=True)
+        assert len(small) == n < lib.RENDER_GPU_MIN_LOCS
+        assert n * lib.RENDER_ROTATED_COST_FACTOR >= lib.RENDER_GPU_MIN_LOCS
+        kwargs = dict(
+            disp_px_size=PIXELSIZE / 4,
+            viewport=((0.0, 0.0), (32.0, 32.0)),
+            blur_method="gaussian",
+            min_blur_width=0.0,
+        )
+        render.scene._render_channels([small], [info], ang=None, **kwargs)
+        assert served == []  # 2D: below the cutoff, the CPU
+        render.scene._render_channels(
+            [small], [info], ang=(0.3, 0.2, 0.1), **kwargs
+        )
+        assert served == [n]  # rotated: weighted past the cutoff
+
+    @pytest.mark.gpu_backend
+    def test_unavailable_gpu_logs_once_per_preference(
+        self, monkeypatch, caplog
+    ):
+        import builtins
+
+        real_import = builtins.__import__
+
+        def no_wgpu(name, *args, **kwargs):
+            if name.startswith("picasso.render.gpu") or name == "wgpu":
+                raise ImportError("no wgpu here")
+            return real_import(name, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "__import__", no_wgpu)
+        monkeypatch.setattr(render.backend, "_gpu_singleton", None)
+        monkeypatch.setattr(render.backend, "_gpu_unavailable", False)
+        monkeypatch.setattr(render.backend, "_gpu_adapter", None)
+        with caplog.at_level(logging.INFO, logger="picasso.render.backend"):
+            assert (
+                render.backend._gpu_backend("high-performance", warn=True)
+                is None
+            )
+            assert (
+                render.backend._gpu_backend("high-performance", warn=True)
+                is None
+            )
+        unavailable = [r for r in caplog.records if "unavailable" in r.message]
+        assert len(unavailable) == 1
+        assert unavailable[0].levelno == logging.WARNING
+
+    def test_concurrent_renders_are_correct(self, locs, info):
+        # contract: render_channels may be called from several threads
+        # at once (async worker + a synchronous render)
+        from concurrent import futures
+
+        cpu = render.backend._cpu_backend()
+        channels = [locs.iloc[i::2] for i in range(2)]
+        columns = [
+            render._extract_render_columns(channel, "gaussian", None)
+            for channel in channels
+        ]
+        reference = cpu.render_channels(columns, [info] * 2, **self.KWARGS)
+        with futures.ThreadPoolExecutor(2) as pool:
+            results = list(
+                pool.map(
+                    lambda _: cpu.render_channels(
+                        columns, [info] * 2, **self.KWARGS
+                    ),
+                    range(2),
+                )
+            )
+        for renderings in results:
+            for (n, image), (n_ref, image_ref) in zip(renderings, reference):
+                assert n == n_ref
+                np.testing.assert_array_equal(image, image_ref)
+
+
+# ---------------------------------------------------------------------------
+# Row selections (indices) through the render API
+# ---------------------------------------------------------------------------
+
+
+class TestIndexedRender:
+    """``indices`` render a selection of rows, equivalently to slicing
+    the DataFrame first, without copying the columns up front."""
+
+    KWARGS = dict(
+        disp_px_size=PIXELSIZE / 10,
+        viewport=FULL_VIEWPORT,
+        min_blur_width=0.0,
+        ang=None,
+    )
+
+    @pytest.fixture
+    def selection(self, locs):
+        rng = np.random.default_rng(11)
+        return np.sort(
+            rng.choice(len(locs), size=len(locs) // 3, replace=False)
+        ).astype(np.uint32)
+
+    @pytest.mark.parametrize("blur", [None, "gaussian", "smooth"])
+    def test_render_matches_sliced_locs(self, locs, info, selection, blur):
+        n_ref, image_ref = render.render(
+            locs.iloc[selection], info, blur_method=blur, **self.KWARGS
+        )
+        n, image = render.render(
+            locs, info, blur_method=blur, indices=selection, **self.KWARGS
+        )
+        assert n == n_ref
+        np.testing.assert_array_equal(image, image_ref)
+
+    def test_columns_keep_the_full_arrays(self, locs, selection):
+        columns = render._extract_render_columns(
+            locs, "gaussian", None, indices=selection
+        )
+        assert len(columns) == len(selection)
+        assert len(columns.x) == len(locs)  # no copy of the columns
+        assert columns.indices.dtype == np.uint32
+        part = columns.slice(5, 50)
+        assert len(part) == 45 and part.x is columns.x
+        dense = columns.materialize()
+        assert dense.indices is None and len(dense.x) == len(selection)
+        np.testing.assert_array_equal(dense.x, locs["x"].to_numpy()[selection])
+
+    def test_max_blur_width_applies_to_the_selection(self, locs, selection):
+        whaled = locs.copy()
+        whaled.loc[whaled.index[selection[:10]], "lpx"] = 50.0
+        columns = render._extract_render_columns(
+            whaled, "gaussian", None, max_blur_width=5.0, indices=selection
+        )
+        assert len(columns) == len(selection) - 10
+        assert columns.lpx.max() > 5.0  # the columns stay whole...
+        assert columns.materialize().lpx.max() <= 5.0  # ...the rows do not
+
+    def test_render_scene_takes_per_channel_indices(
+        self, locs, info, selection
+    ):
+        _, n = render.render_scene(
+            [locs, locs],
+            [info, info],
+            blur_method="gaussian",
+            indices=[selection, None],
+            **self.KWARGS,
+        )
+        _, n_ref = render.render_scene(
+            [locs.iloc[selection], locs],
+            [info, info],
+            blur_method="gaussian",
+            **self.KWARGS,
+        )
+        assert n == n_ref
+        _, n_single = render.render_scene(
+            locs,
+            info,
+            blur_method="gaussian",
+            indices=selection,
+            **self.KWARGS,
+        )
+        assert (
+            n_single
+            == render.render(
+                locs,
+                info,
+                blur_method="gaussian",
+                indices=selection,
+                **self.KWARGS,
+            )[0]
+        )
+
+
+# ---------------------------------------------------------------------------
+# Maximum blur width (useless precisions are not rendered)
+# ---------------------------------------------------------------------------
+
+
+class TestMaxBlurWidth:
+    """``max_blur_width`` drops localizations with unphysical
+    precisions from the per-localization blur methods, consistently
+    for every entry point, count included."""
+
+    KWARGS = dict(
+        disp_px_size=PIXELSIZE / 10,
+        viewport=FULL_VIEWPORT,
+        min_blur_width=0.0,
+        ang=None,
+    )
+    LIMIT = 5.0  # camera pixels
+    N_WHALES = 8
+
+    @pytest.fixture
+    def whaled(self, locs):
+        whaled = locs.copy()
+        whaled.loc[whaled.index[:5], "lpx"] = 50.0
+        whaled.loc[whaled.index[5:8], "lpy"] = 50.0
+        return whaled
+
+    @pytest.mark.parametrize("blur", ["gaussian", "gaussian_iso"])
+    def test_extraction_drops_wide_precisions(self, whaled, blur):
+        columns = render._extract_render_columns(
+            whaled, blur, None, max_blur_width=self.LIMIT
+        )
+        assert len(columns) == len(whaled) - self.N_WHALES
+        assert columns.lpx.max() <= self.LIMIT
+        assert columns.lpy.max() <= self.LIMIT
+
+    @pytest.mark.parametrize("blur", [None, "smooth", "convolve"])
+    def test_other_methods_render_everything(self, whaled, blur):
+        columns = render._extract_render_columns(
+            whaled, blur, None, max_blur_width=self.LIMIT
+        )
+        assert len(columns) == len(whaled)
+
+    def test_no_limit_keeps_everything(self, whaled):
+        columns = render._extract_render_columns(whaled, "gaussian", None)
+        assert len(columns) == len(whaled)
+
+    def test_render_matches_prefiltered_locs(self, whaled, info):
+        keep = (whaled["lpx"] <= self.LIMIT) & (whaled["lpy"] <= self.LIMIT)
+        n_ref, image_ref = render.render(
+            whaled[keep], info, blur_method="gaussian", **self.KWARGS
+        )
+        n, image = render.render(
+            whaled,
+            info,
+            blur_method="gaussian",
+            max_blur_width=self.LIMIT,
+            **self.KWARGS,
+        )
+        assert n == n_ref
+        np.testing.assert_array_equal(image, image_ref)
+        # without the limit the whales are drawn (and counted)
+        n_all, image_all = render.render(
+            whaled, info, blur_method="gaussian", **self.KWARGS
+        )
+        assert n_all > n
+        assert not np.array_equal(image_all, image)
+
+    def test_render_scene_plumbs_the_limit(self, whaled, info):
+        _, n = render.render_scene(
+            whaled,
+            info,
+            blur_method="gaussian",
+            max_blur_width=self.LIMIT,
+            **self.KWARGS,
+        )
+        _, n_all = render.render_scene(
+            whaled, info, blur_method="gaussian", **self.KWARGS
+        )
+        assert n < n_all
+        _, n_multi = render.render_scene(
+            [whaled, whaled],
+            [info, info],
+            blur_method="gaussian",
+            max_blur_width=self.LIMIT,
+            **self.KWARGS,
+        )
+        assert n_multi == 2 * n
+
+
+# ---------------------------------------------------------------------------
+# Fused post-processing vs the legacy numpy chain
+# ---------------------------------------------------------------------------
+
+
+def _legacy_multi_lut(
+    raw, luts, contrast, relative_intensities, background_color, invert
+):
+    """The pre-fusion numpy post-processing chain, kept as the reference
+    the fused kernels are compared against (built from the public
+    helpers plus the removed inline steps)."""
+    vmin, vmax = contrast if contrast is not None else (None, None)
+    images = render.scale_contrast(
+        raw.copy(), vmin, vmax, autoscale=contrast is None
+    )
+    images = render.scale_intensities(
+        images, relative_intensities=relative_intensities
+    )
+    colors_arr = np.asarray(luts, dtype=np.float32)
+    images_f32 = np.ascontiguousarray(images, dtype=np.float32)
+    idx = np.clip((images_f32 * 255.0).astype(np.int32), 0, 255)
+    rgb = np.zeros(
+        (images_f32.shape[1], images_f32.shape[2], 3), dtype=np.float32
+    )
+    for c in range(images_f32.shape[0]):
+        rgb += colors_arr[c][idx[c]]
+    np.minimum(rgb, 1.0, out=rgb)
+    if background_color is not None and any(c > 0 for c in background_color):
+        bg = np.asarray(background_color, dtype=np.float32)
+        alpha = np.clip(images_f32.sum(axis=0), 0.0, 1.0)[..., None]
+        rgb = rgb + bg * (1.0 - alpha)
+        np.minimum(rgb, 1.0, out=rgb)
+    rgb = render.to_8bit(rgb)
+    if invert:
+        rgb = 255 - rgb
+    return rgb
+
+
+def _legacy_single(raw, colormap, contrast, invert):
+    vmin, vmax = contrast if contrast is not None else (None, None)
+    image = render.scale_contrast(
+        raw.copy(), vmin, vmax, autoscale=contrast is None
+    )
+    image = render.to_8bit(image)
+    rgb = render.apply_colormap(image, colormap)
+    if invert:
+        rgb = 255 - rgb
+    return rgb
+
+
+class TestFusedCompose:
+    """The fused post-processing kernels must reproduce the legacy
+    numpy chain to within uint8 rounding (<= 1 count per pixel)."""
+
+    @pytest.fixture(scope="class")
+    def raw_stack(self):
+        rng = np.random.default_rng(7)
+        raw = rng.exponential(2.0, size=(3, 80, 90)).astype(np.float32)
+        raw[:, ::7, ::5] = 0.0  # empty pixels
+        raw[0, 3, 4] = np.nan  # non-finite must map to 0
+        raw[1, 10, 11] = 500.0  # fiducial-grade hot pixel
+        return raw
+
+    @pytest.fixture(scope="class")
+    def luts(self):
+        return [render.solid_to_lut(rgb) for rgb in lib.get_colors(3)]
+
+    @pytest.mark.parametrize(
+        "contrast,rel,bg,invert",
+        [
+            ((0.0, 5.0), None, None, False),
+            ((0.0, 5.0), [1.0, 0.7, 1.3], None, False),
+            ((0.0, 5.0), None, (0.08, 0.08, 0.12), False),
+            ((0.5, 3.0), [1.0, 0.7, 1.3], (0.1, 0.0, 0.2), True),
+            (None, None, None, False),  # autoscale
+        ],
+    )
+    def test_multi_lut_matches_legacy(
+        self, raw_stack, luts, info, contrast, rel, bg, invert
+    ):
+        expected = _legacy_multi_lut(
+            raw_stack, luts, contrast, rel, bg, invert
+        )
+        _, rgb, _, _ = render._render_multi_channel(
+            [None] * 3,
+            [info] * 3,
+            disp_px_size=10.0,
+            colors=luts,
+            contrast=contrast,
+            relative_intensities=rel,
+            invert_colors=invert,
+            background_color=bg,
+            raw_image_cache=raw_stack,
+        )
+        diff = np.abs(rgb.astype(np.int16) - expected.astype(np.int16))
+        assert diff.max() <= 1
+
+    @pytest.mark.parametrize("contrast", [(0.0, 5.0), None])
+    @pytest.mark.parametrize("invert", [False, True])
+    def test_single_matches_legacy(self, raw_stack, info, contrast, invert):
+        raw = raw_stack[0]
+        for colormap in ["magma", np.linspace(0, 1, 256 * 4).reshape(256, 4)]:
+            expected = _legacy_single(raw, colormap, contrast, invert)
+            _, rgb, _, _ = render._render_single_channel(
+                None,
+                info,
+                disp_px_size=10.0,
+                contrast=contrast,
+                invert_colors=invert,
+                single_channel_colormap=colormap,
+                raw_image_cache=raw,
+            )
+            diff = np.abs(rgb.astype(np.int16) - expected.astype(np.int16))
+            assert diff.max() <= 1
+
+    def test_contrast_limits_match_scale_contrast(self, raw_stack):
+        for args in [
+            (None, None, True),
+            (0.5, 4.0, False),
+            (None, 2.0, False),
+        ]:
+            _, expected = render.scale_contrast(
+                raw_stack.copy(),
+                args[0],
+                args[1],
+                autoscale=args[2],
+                return_contrast_limits=True,
+            )
+            result = render._contrast_limits(raw_stack, *args)
+            # NaN-aware comparison: with NaN pixels and vmin=None both
+            # implementations agree on vmin=NaN, but NaN != NaN
+            np.testing.assert_array_equal(
+                np.asarray(result, dtype=np.float64),
+                np.asarray(expected, dtype=np.float64),
+            )
+
+
+class TestChunkMemory:
+    """The chunked CPU path bounds its memory: chunk images are summed
+    as they arrive (at most one per worker plus one alive) and the
+    worker count shrinks with the memory available."""
+
+    def _locs(self, n=400_000, seed=0):
+        rng = np.random.default_rng(seed)
+        return pd.DataFrame(
+            {
+                "x": rng.uniform(0, 64, n),
+                "y": rng.uniform(0, 64, n),
+                "lpx": rng.uniform(0.05, 0.2, n),
+                "lpy": rng.uniform(0.05, 0.2, n),
+            }
+        )
+
+    def _info(self):
+        return [{"Width": 64, "Height": 64, "Frames": 1, "Pixelsize": 130.0}]
+
+    def test_streamed_sum_equals_the_sequential_render(self, monkeypatch):
+        from picasso.render import splat
+
+        locs = self._locs()
+        info = self._info()
+        kwargs = dict(
+            disp_px_size=130 / 4,
+            viewport=((0, 0), (64, 64)),
+            blur_method="gaussian",
+        )
+        monkeypatch.setattr(splat, "_render_worker_budget", lambda: 1)
+        n1, sequential = render.render_scene(
+            locs, info, return_raw_image=True, **kwargs
+        )[1:]
+        monkeypatch.setattr(splat, "_render_worker_budget", lambda: 4)
+        n4, chunked = render.render_scene(
+            locs, info, return_raw_image=True, **kwargs
+        )[1:]
+        assert n1 == n4 == len(locs)
+        np.testing.assert_allclose(chunked, sequential, rtol=1e-5, atol=1e-6)
+        # and twice the same, whatever the completion order of the pool
+        again = render.render_scene(
+            locs, info, return_raw_image=True, **kwargs
+        )[2]
+        np.testing.assert_array_equal(chunked, again)
+
+    def test_at_most_one_image_per_worker_plus_one_is_alive(self, monkeypatch):
+        import threading
+        import weakref
+
+        from picasso.render import splat
+
+        original = splat._render_arrays
+        lock = threading.Lock()
+        live = [0]
+        peak = [0]
+        created = [0]
+
+        def freed():
+            with lock:
+                live[0] -= 1
+
+        def tracked(*args, **kwargs):
+            n, image = original(*args, **kwargs)
+            with lock:
+                live[0] += 1
+                created[0] += 1
+                peak[0] = max(peak[0], live[0])
+            weakref.finalize(image, freed)  # runs when the chunk is dropped
+            return n, image
+
+        monkeypatch.setattr(splat, "_render_arrays", tracked)
+        monkeypatch.setattr(splat, "_render_worker_budget", lambda: 3)
+        monkeypatch.setattr(splat, "_MIN_CHUNK_LOCS", 10_000)
+        render.render_scene(
+            self._locs(300_000),  # 6 chunks for 3 workers
+            self._info(),
+            disp_px_size=130 / 4,
+            viewport=((0, 0), (64, 64)),
+            blur_method="gaussian",
+        )
+        # never all kept: two in flight per worker, one being summed,
+        # the accumulator (six chunks here, so the bound is the window)
+        assert created[0] >= 6
+        assert peak[0] <= 2 * 3 + 2
+
+    def test_workers_shrink_with_available_memory(self, monkeypatch):
+        from picasso.render import splat
+
+        class _Memory:
+            def __init__(self, available):
+                self.available = available
+
+        image = 4 * 256 * 256
+        monkeypatch.setattr(
+            splat.psutil, "virtual_memory", lambda: _Memory(100 * image)
+        )
+        # room for (0.5 * 100 - 1) images, two per task: ~24 tasks,
+        # two of them in flight per worker
+        assert splat._memory_bounded_workers(32, 1, image, 0) == 11
+        monkeypatch.setattr(
+            splat.psutil, "virtual_memory", lambda: _Memory(3 * image)
+        )
+        assert splat._memory_bounded_workers(32, 1, image, 0) == 1  # never 0
+        monkeypatch.setattr(
+            splat.psutil, "virtual_memory", lambda: _Memory(10**12)
+        )
+        assert splat._memory_bounded_workers(8, 12, image, 100_000) == 8
+        # the render still runs, on one worker, when memory is tight
+        monkeypatch.setattr(
+            splat.psutil, "virtual_memory", lambda: _Memory(3 * image)
+        )
+        monkeypatch.setattr(splat, "_render_worker_budget", lambda: 4)
+        n, raw = render.render_scene(
+            self._locs(),
+            self._info(),
+            disp_px_size=130 / 4,
+            viewport=((0, 0), (64, 64)),
+            blur_method="gaussian",
+            return_raw_image=True,
+        )[1:]
+        assert n == 400_000 and raw.sum() > 0
+
+
+class TestFallbackNote:
+    """The reason of a CPU fallback reaches the info dialog's renderer
+    line (the log warning is invisible in the windowed application)."""
+
+    def test_reason_is_recorded_and_cleared(self, monkeypatch):
+        from picasso.render import backend, scene, splat
+
+        class _Flaky(backend.SplatBackend):
+            name = "fake"
+            persistent_uploads = True
+            fail = True
+
+            def describe(self):
+                return "Fake GPU"
+
+            def render_channels(self, columns, info, **kwargs):
+                if self.fail:
+                    raise backend.SplatBackendError(
+                        "channel exceeds the limit"
+                    )
+                return splat.CpuBackend().render_channels(
+                    columns, info, **kwargs
+                )
+
+        fake = _Flaky()
+        monkeypatch.setattr(scene, "_get_backend", lambda *a, **k: fake)
+        monkeypatch.setattr(backend, "_get_backend", lambda *a, **k: fake)
+        backend.note_fallback(None)
+        rng = np.random.default_rng(0)
+        locs = pd.DataFrame(
+            {"x": rng.uniform(0, 8, 500), "y": rng.uniform(0, 8, 500)}
+        )
+        info = [{"Width": 8, "Height": 8, "Frames": 1, "Pixelsize": 130.0}]
+        render.render_scene(
+            locs, info, disp_px_size=65, viewport=((0, 0), (8, 8))
+        )
+        assert backend.last_fallback() == "channel exceeds the limit"
+        assert backend.describe_active() == (
+            "GPU (Fake GPU) - last render on the CPU: channel exceeds the limit"
+        )
+        fake.fail = False
+        render.render_scene(
+            locs, info, disp_px_size=65, viewport=((0, 0), (8, 8))
+        )
+        assert backend.last_fallback() is None
+        assert backend.describe_active() == "GPU (Fake GPU)"

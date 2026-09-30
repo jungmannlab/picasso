@@ -23,26 +23,26 @@ get wrong when transcribing:
     (verified against numba-cuda 0.30.2), so every one becomes ``math.*``.
     ``np.log`` happens to compile, but is spelled ``math.log`` here for
     consistency. The unit tests compile every device function with
-    ``cuda.compile_ptx``, which is what catches this - the CUDA *simulator* runs
-    plain Python, where all the NumPy forms work fine, so it cannot.
+    ``cuda.compile_ptx``, which is what catches this - the CUDA *simulator*
+    runs plain Python, where all the NumPy forms work fine, so it cannot.
 
 ``fastmath`` is deliberately off
     ``picasso.fitting.splinefit`` uses a restricted LLVM flag set that
     excludes ``nnan`` and ``ninf``, because those let the compiler assume no
     NaN can occur and fold the divergence guards to a constant True. That
-    specific hazard does not exist here - ``numba.cuda.jit`` takes a boolean ``fastmath`` that maps to
-    NVVM's ``ftz``/``prec_div``/``prec_sqrt``/``fma``, not to LLVM's
-    ``nnan``/``ninf``. It is still left off, because flushing denormals and
-    approximating division would change results against the CPU backend for no
-    gain in kernels that are bound on coefficient-table reads. Please do not
-    "optimize" it on without benchmarking it first.
+    specific hazard does not exist here - ``numba.cuda.jit`` takes a boolean
+    ``fastmath`` that maps to NVVM's ``ftz``/``prec_div``/``prec_sqrt``/
+    ``fma``, not to LLVM's ``nnan``/``ninf``. It is still left off, because
+    flushing denormals and approximating division would change results against
+    the CPU backend for no gain in kernels that are bound on coefficient-table
+    reads. Please do not "optimize" it on without benchmarking it first.
 
 One thread per fit
-    There is no shared memory, no cross-thread reduction and no atomic in any of
-    these kernels, which is why results are bitwise reproducible across runs.
-    It also means **no ``cuda.syncthreads()`` may ever be added**: the driver
-    loop breaks out at different iterations in different lanes, so a barrier
-    would be unmatched and hang the warp.
+    There is no shared memory, no cross-thread reduction and no atomic in any
+    of these kernels, which is why results are bitwise reproducible across
+    runs. It also means **no ``cuda.syncthreads()`` may ever be added**: the
+    driver loop breaks out at different iterations in different lanes, so a
+    barrier would be unmatched and hang the warp.
 
 References
 ----------
@@ -87,16 +87,16 @@ try:
 except Exception:  # pragma: no cover - depends on the driver install
     CUDA_AVAILABLE = False
 
-# Module-level constants become compile-time constants in device code; ``np.inf``
-# and ``np.nan`` are not usable as attribute lookups there.
+# Module-level constants become compile-time constants in device code;
+# ``np.inf`` and ``np.nan`` are not usable as attribute lookups there.
 _INF = float(np.inf)
 _NAN = float(np.nan)
 
 # Threads per block. 128 matches the CRLB kernels; the wide photon-decoupled
 # models drop to 64 to halve the per-block local working set. Note this is a
-# working-set knob, not an occupancy fix: those kernels are register-bound at the
-# hardware ceiling, and occupancy goes as registers x threads, so a smaller block
-# yields the same threads per SM.
+# working-set knob, not an occupancy fix: those kernels are register-bound at
+# the hardware ceiling, and occupancy goes as registers x threads, so a smaller
+# block yields the same threads per SM.
 CUDA_THREADS = 128
 CUDA_THREADS_WIDE = 64
 
@@ -105,11 +105,12 @@ CUDA_THREADS_WIDE = 64
 # The row ceiling is NOT the CRLB path's ``_SPLINE_CRLB_CUDA_MAX_ROWS``. A CRLB
 # row is a single pass; a multi-start maximum-likelihood fit is up to
 # ``n_seeds * max_iterations`` = 15 * 100 passes over ``box**2 * n_channels``
-# pixels, three to four orders of magnitude more work per row. A display-attached
-# Windows GPU kills any kernel running past the ~2 s TDR limit, and the symptom
-# is a driver reset rather than a wrong number - so the budget below is scaled by
-# the per-row work rather than being a flat constant. ``PICASSO_FIT_CUDA_MAX_ROWS``
-# overrides the reference value for tuning on a specific card.
+# pixels, three to four orders of magnitude more work per row. A display-
+# attached Windows GPU kills any kernel running past the ~2 s TDR limit, and
+# the symptom is a driver reset rather than a wrong number - so the budget
+# below is scaled by the per-row work rather than being a flat constant.
+# ``PICASSO_FIT_CUDA_MAX_ROWS`` overrides the reference value for
+# tuning on a specific card.
 CUDA_CHUNK_BYTES = 256 << 20
 _MAX_ROWS_REFERENCE = 4_000_000
 # Per-row work, in passes, that ``_MAX_ROWS_REFERENCE`` is calibrated for.
@@ -175,11 +176,12 @@ _gpu_fallback_warned = False
 def warn_gpu_fallback(exc: Exception) -> None:
     """Report the first time a GPU fit falls back to the CPU.
 
-    Having no CUDA device at all is not an error and is never reported - the CPU
-    kernels are simply used. This is for the other case: a device is present but
-    the attempt failed (out of memory, driver error), where the results are still
-    correct but a silent fallback would hide a broken device path indefinitely.
-    Warned once per process so a per-chunk failure cannot spam the log.
+    Having no CUDA device at all is not an error and is never reported - the
+    CPU kernels are simply used. This is for the other case: a device is
+    present but the attempt failed (out of memory, driver error), where the
+    results are still correct but a silent fallback would hide a broken device
+    path indefinitely. Warned once per process so a per-chunk failure cannot
+    spam the log.
 
     Parameters
     ----------
@@ -241,8 +243,8 @@ def _poisson_terms(value, data):
 def _estimator_terms(mle, value, data, var):
     """Per-pixel ``(chi_square, weight, factor, ok)``, flooring a low model.
 
-    ``weight`` multiplies the Hessian outer product and ``factor`` the gradient,
-    so a caller accumulates ``grad_k += d_k * factor`` and
+    ``weight`` multiplies the Hessian outer product and ``factor`` the
+    gradient, so a caller accumulates ``grad_k += d_k * factor`` and
     ``hess_kl += weight * d_k * d_l``. This is the one place the least-squares
     and Poisson branches are written down for the device kernels.
 
@@ -286,11 +288,11 @@ def _estimator_terms_strict(mle, value, data, var):
     For models that cannot ring negative - the Gaussians, whose value only
     drops below zero if the *background* parameter does. There the floor is not
     just unnecessary but harmful: it zeroes that pixel's gradient and Hessian
-    contribution, so nothing pushes the background back up, the chi-square stops
-    moving and the relative convergence test then reports a badly wrong fit as
-    converged. Gpufit aborts such a fit with ``NEG_CURVATURE_MLE`` and so does
-    this; the caller reports the state and the parameters stay at the last
-    accepted iterate.
+    contribution, so nothing pushes the background back up, the chi-square
+    stops moving and the relative convergence test then reports a badly wrong
+    fit as converged. Gpufit aborts such a fit with ``NEG_CURVATURE_MLE`` and
+    so does this; the caller reports the state and the parameters stay at the
+    last accepted iterate.
 
     Note that with a camera calibration loaded the test is on the *shifted*
     mean ``value + var``, which is the quantity the approximation makes
@@ -315,13 +317,47 @@ def _estimator_terms_strict(mle, value, data, var):
 
 
 @cuda.jit(device=True)
+def _find_pivot(a, n, ipiv):
+    """Largest-magnitude unused entry of ``a[:n, :n]``, full pivoting.
+
+    Parameters
+    ----------
+    a : array
+        Square device matrix searched for the pivot.
+    n : int
+        Size of the active ``a[:n, :n]`` block.
+    ipiv : array
+        Pivot bookkeeping of the Gauss-Jordan solve: 1 for rows/columns
+        already used, 0 otherwise.
+
+    Returns
+    -------
+    irow, icol : int
+        Location of the pivot among the rows/columns not yet used
+        (``ipiv[.] != 1``/``!= 0``).
+    """
+    big = 0.0
+    irow = 0
+    icol = 0
+    for j in range(n):
+        if ipiv[j] != 1:
+            for k in range(n):
+                if ipiv[k] == 0:
+                    if abs(a[j, k]) >= big:
+                        big = abs(a[j, k])
+                        irow = j
+                        icol = k
+    return irow, icol
+
+
+@cuda.jit(device=True)
 def _solve_gj_device(a, b, n, ipiv):
     """Gauss-Jordan solve of ``a[:n, :n] x = b[:n]``, in place, full pivoting.
 
     Port of ``splinefit._solve_gj``, which is itself Gpufit's
-    ``LMFitCPP::solve_equation_system_gj``. Returns False on a zero or NaN pivot
-    instead of raising - there is nothing to raise to in device code, and the
-    caller reports the fit as :data:`FIT_STATE_SINGULAR_HESSIAN`.
+    ``LMFitCPP::solve_equation_system_gj``. Returns False on a zero or NaN
+    pivot instead of raising - there is nothing to raise to in device code, and
+    the caller reports the fit as :data:`FIT_STATE_SINGULAR_HESSIAN`.
 
     The CPU version also records the pivot permutation in ``indxc``/``indxr``.
     Those are written and never read: Gpufit drops the Numerical-Recipes column
@@ -332,17 +368,7 @@ def _solve_gj_device(a, b, n, ipiv):
     for i in range(n):
         ipiv[i] = 0
     for _ in range(n):
-        big = 0.0
-        irow = 0
-        icol = 0
-        for j in range(n):
-            if ipiv[j] != 1:
-                for k in range(n):
-                    if ipiv[k] == 0:
-                        if abs(a[j, k]) >= big:
-                            big = abs(a[j, k])
-                            irow = j
-                            icol = k
+        irow, icol = _find_pivot(a, n, ipiv)
         ipiv[icol] += 1
         if irow != icol:
             for lx in range(n):
@@ -385,8 +411,8 @@ def _lm_solve_step_device(hess, grad, scaling, lam, damped, delta, n, ipiv):
 
     ``hess`` and ``grad`` are the *undamped* matrices of the last accepted
     iteration and are left untouched; the damped system is rebuilt into
-    ``damped``/``delta``, which the solve destroys. Returns False if that system
-    is singular."""
+    ``damped``/``delta``, which the solve destroys. Returns False if that
+    system is singular."""
     for p in range(n):
         d = hess[p, p]
         if d > scaling[p]:
@@ -404,7 +430,9 @@ def _lm_solve_step_device(hess, grad, scaling, lam, damped, delta, n, ipiv):
 # ----------------------------------------------------------------------
 
 
-def make_lm_driver(accumulate, n_params: int, z_col: int, seedable: bool):
+def make_lm_driver(  # noqa: C901
+    accumulate, n_params: int, z_col: int, seedable: bool
+):
     """Build the per-fit LM driver device function for one model.
 
     The driver is generated rather than shared because ``cuda.local.array``
@@ -575,8 +603,8 @@ def make_lm_driver(accumulate, n_params: int, z_col: int, seedable: bool):
                 if not ok:
                     # A property of the trial *step*, not of the fit: undo it,
                     # damp harder and try again, exactly as for a step that
-                    # merely worsened chi-square. Aborting here would return the
-                    # seed unchanged. Kept identical to the CPU drivers in
+                    # merely worsened chi-square. Aborting here would return
+                    # the seed unchanged. Kept identical to the CPU drivers in
                     # ``picasso.fitting.gaussfit`` and ``.splinefit``.
                     chi_square = previous_chi_square
                     for p in range(n):
@@ -669,7 +697,8 @@ def make_lm_driver(accumulate, n_params: int, z_col: int, seedable: bool):
 
 
 def make_fit_kernel(driver, cache: bool = False):
-    """Wrap a driver from :func:`make_lm_driver` in a one-thread-per-fit kernel.
+    """Wrap a driver from :func:`make_lm_driver` in a one-thread-per-fit
+    kernel.
 
     Parameters
     ----------

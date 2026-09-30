@@ -129,7 +129,7 @@ Before you submit a pull request, check that it meets these guidelines:
 
 1. The pull request should include tests.
 2. If the pull request adds functionality, the docs should be updated.
-3. The pull request should work for all Python versions specified in ``pyproject.toml`` (currently 3.10–3.14).
+3. The pull request should work for all Python versions specified in ``pyproject.toml`` (currently 3.11–3.14).
 4. Keep pull requests small and focused to make them easier to review. Make one pull request per issue/feature. If your pull request addresses multiple issues, consider splitting it into multiple pull requests.
 5. Reference the related issue (if any was raised) in the pull request description (e.g. "Closes #123").
 6. All CI checks must pass before the pull request can be merged. If your pull request fails CI checks, don't worry! The maintainers will work with you to resolve any issues. If you're not sure how to fix a CI failure, feel free to ask for help in the pull request comments.

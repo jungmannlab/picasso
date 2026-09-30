@@ -75,6 +75,168 @@ class TestOverwriteMetadata:
             lib.overwrite_metadata({"Width": 32}, "Missing", 1)
 
 
+def _canvas_locs(x, y):
+    n = len(x)
+    return pd.DataFrame(
+        {
+            "frame": np.zeros(n, dtype=np.uint32),
+            "x": np.asarray(x, dtype=np.float32),
+            "y": np.asarray(y, dtype=np.float32),
+            "lpx": np.full(n, 0.1, dtype=np.float32),
+            "lpy": np.full(n, 0.1, dtype=np.float32),
+        }
+    )
+
+
+def _canvas_info(width=32, height=32):
+    return [
+        {"Width": width, "Height": height, "Frames": 1},
+        {"Pixelsize": 130},
+    ]
+
+
+class TestFitCanvas:
+    def test_in_bounds_is_unchanged(self):
+        locs = _canvas_locs([1.0, 30.5], [2.0, 31.9])
+        info = _canvas_info()
+        _, _, shifts = lib.fit_canvas([locs], [info])
+        assert shifts == [(0, 0)]
+        assert locs["x"].tolist() == pytest.approx([1.0, 30.5])
+        assert info[0]["Width"] == 32 and info[0]["Height"] == 32
+        # no new keys while the canvas is the camera image
+        for key in lib.CANVAS_OFFSET_KEYS + lib.CAMERA_SIZE_KEYS:
+            assert key not in info[-1]
+
+    def test_negative_translates_all_channels(self):
+        moved = _canvas_locs([-2.5, 10.0], [5.0, -0.2])
+        other = _canvas_locs([0.0, 31.0], [0.0, 31.0])
+        infos = [_canvas_info(), _canvas_info()]
+        _, _, shifts = lib.fit_canvas([moved, other], infos)
+        assert shifts == [(3, 1), (3, 1)]  # whole camera pixels
+        assert moved["x"].min() >= 0 and moved["y"].min() >= 0
+        # the relative position of channels is kept
+        assert other["x"].tolist() == pytest.approx([3.0, 34.0])
+        assert other["y"].tolist() == pytest.approx([1.0, 32.0])
+        for info in infos:
+            assert info[-1][lib.CANVAS_OFFSET_KEYS[0]] == 3
+            assert info[-1][lib.CANVAS_OFFSET_KEYS[1]] == 1
+            assert info[-1][lib.CAMERA_SIZE_KEYS[0]] == 32
+            # grown by the offset, so the camera FOV stays inside
+            assert info[0]["Width"] == 35 and info[0]["Height"] == 33
+
+    def test_canvas_follows_the_bottom_right(self):
+        locs = _canvas_locs([40.0], [32.0])  # x == Width is invalid
+        info = _canvas_info()
+        lib.fit_canvas([locs], [info])
+        assert info[0]["Width"] == 41 and info[0]["Height"] == 33
+        # shrinks back, but not below the camera image
+        locs["x"] = np.float32([1.0])
+        locs["y"] = np.float32([1.0])
+        lib.fit_canvas([locs], [info])
+        assert info[0]["Width"] == 32 and info[0]["Height"] == 32
+
+    def test_moving_back_restores_the_canvas(self):
+        moved = _canvas_locs([0.5, 31.5], [1.0, 1.0])
+        other = _canvas_locs([0.5, 31.5], [1.0, 1.0])
+        infos = [_canvas_info(), _canvas_info()]
+        moved["x"] = moved["x"].to_numpy() - np.float32(10)
+        _, _, shifts = lib.fit_canvas([moved, other], infos)
+        assert shifts[0] == (10, 0)
+        assert infos[0][0]["Width"] == 42
+        moved["x"] = moved["x"].to_numpy() + np.float32(10)
+        _, _, shifts = lib.fit_canvas([moved, other], infos)
+        assert shifts[0] == (-10, 0)
+        assert moved["x"].tolist() == pytest.approx([0.5, 31.5])
+        assert other["x"].tolist() == pytest.approx([0.5, 31.5])
+        for info in infos:
+            assert info[0]["Width"] == 32
+            assert info[-1][lib.CANVAS_OFFSET_KEYS[0]] == 0
+
+    def test_offset_follows_the_camera_frame(self):
+        locs = _canvas_locs([-1.5], [1.0])
+        info = _canvas_info()
+        lib.fit_canvas([locs], [info])
+        assert info[-1][lib.CANVAS_OFFSET_KEYS[0]] == 2
+        locs["x"] = locs["x"].to_numpy() - np.float32(4.0)
+        lib.fit_canvas([locs], [info])
+        assert info[-1][lib.CANVAS_OFFSET_KEYS[0]] == 2 + 4
+        assert info[0]["Width"] == 32 + 6
+
+    def test_channels_with_different_offsets_are_aligned(self):
+        # e.g., a file saved after a translation, opened with a raw one
+        saved = _canvas_locs([0.0, 5.0], [1.0, 1.0])
+        saved_info = _canvas_info(width=37)
+        saved_info[-1][lib.CANVAS_OFFSET_KEYS[0]] = 5
+        saved_info[-1][lib.CAMERA_SIZE_KEYS[0]] = 32
+        raw = _canvas_locs([2.0], [1.0])
+        infos = [saved_info, _canvas_info()]
+        _, _, shifts = lib.fit_canvas([saved, raw], infos)
+        assert shifts == [(0, 0), (5, 0)]
+        assert raw["x"].tolist() == pytest.approx([7.0])
+        for info in infos:
+            assert info[-1][lib.CANVAS_OFFSET_KEYS[0]] == 5
+            assert info[0]["Width"] == 37
+
+    def test_replaces_column_arrays(self):
+        # the GPU backend keys its uploads on the array memory
+        locs = _canvas_locs([-1.0], [1.0])
+        before = locs["x"].to_numpy()
+        lib.fit_canvas([locs], [_canvas_info()])
+        assert not np.shares_memory(before, locs["x"].to_numpy())
+        assert before[0] == -1.0
+
+    def test_ignores_non_finite(self):
+        locs = _canvas_locs([np.nan, -np.inf, 3.0], [1.0, 1.0, 1.0])
+        _, _, shifts = lib.fit_canvas([locs], [_canvas_info()])
+        assert shifts == [(0, 0)]
+
+    def test_save_keeps_every_loc(self, tmp_path):
+        from picasso import io
+
+        locs = _canvas_locs([-3.2, 12.0, 40.7], [-0.5, 33.0, 4.0])
+        info = _canvas_info()
+        lib.fit_canvas([locs], [info])
+        path = str(tmp_path / "locs.hdf5")
+        io.save_locs(path, locs, info)
+        loaded, _ = io.load_locs(path)
+        assert len(loaded) == 3
+
+
+class TestTranslatePicks:
+    @pytest.mark.parametrize(
+        "shape, picks, expected",
+        [
+            ("Circle", [(1.0, 2.0)], [(2.0, 4.0)]),
+            ("Square", [(1.0, 2.0)], [(2.0, 4.0)]),
+            (
+                "Rectangle",
+                [((0.0, 0.0), (3.0, 1.0))],
+                [((1.0, 2.0), (4.0, 3.0))],
+            ),
+            ("Box", [((0.0, 0.0), (3.0, 1.0))], [((1.0, 2.0), (4.0, 3.0))]),
+            (
+                "Polygon",
+                [[(0.0, 0.0), (1.0, 0.0), (0.0, 0.0)]],
+                [[(1.0, 2.0), (2.0, 2.0), (1.0, 2.0)]],
+            ),
+            (
+                "Brush",
+                [[(0.5, [(0.0, 0.0), (1.0, 1.0)])]],
+                [[(0.5, [(1.0, 2.0), (2.0, 3.0)])]],
+            ),
+        ],
+    )
+    def test_shapes(self, shape, picks, expected):
+        assert lib.translate_picks(picks, shape, 1.0, 2.0) == expected
+
+    def test_no_picks(self):
+        assert lib.translate_picks([], None, 1.0, 2.0) == []
+
+    def test_unknown_shape_raises(self):
+        with pytest.raises(ValueError):
+            lib.translate_picks([(0.0, 0.0)], "Hexagon", 1.0, 1.0)
+
+
 # ---------------------------------------------------------------------------
 # Color / path utilities
 # ---------------------------------------------------------------------------
@@ -347,6 +509,105 @@ class TestMergeLocs:
         # b's frames should now be shifted by max(a.frame) = 2
         # → b frames become 2, 3, 4
         assert merged["frame"].max() == 4
+
+
+class TestConcatLocs:
+    """Localization tables need not share their columns (no
+    ``net_gradient`` after the wavelet identification, no ``ellipticity``
+    for spherical fits, no ``z`` in 2D, ...); combining them must not lose
+    localizations to ``ensure_sanity``'s NaN filter."""
+
+    INFO = [{"Width": 32, "Height": 32, "Frames": 100}]
+
+    @staticmethod
+    def _locs(n: int, net_gradient: bool = True, **extra) -> pd.DataFrame:
+        locs = pd.DataFrame(
+            {
+                "frame": np.arange(n, dtype=int),
+                "x": np.linspace(1, 20, n),
+                "y": np.linspace(1, 20, n),
+                "lpx": np.full(n, 0.1),
+                "lpy": np.full(n, 0.1),
+            }
+        )
+        if net_gradient:
+            locs["net_gradient"] = np.full(n, 5000.0, dtype=np.float32)
+        for column, value in extra.items():
+            locs[column] = np.full(n, value)
+        return locs
+
+    def test_net_gradient_column(self):
+        ids = self._locs(3)
+        column = lib.net_gradient_column(ids)["net_gradient"]
+        np.testing.assert_array_equal(column, [5000.0] * 3)
+        assert column.dtype == np.float32
+        assert lib.net_gradient_column(self._locs(3, False)) == {}
+
+    def test_mixed_tables_drop_the_column_with_a_warning(self):
+        with pytest.warns(UserWarning, match="net_gradient"):
+            locs = lib.concat_locs([self._locs(3), self._locs(4, False)])
+        assert len(locs) == 7
+        assert "net_gradient" not in locs.columns
+        assert len(lib.ensure_sanity(locs, self.INFO)) == 7
+
+    def test_any_partial_column_is_dropped(self):
+        # a 3D elliptical fit next to a 2D spherical one
+        with pytest.warns(UserWarning, match="ellipticity, z"):
+            locs = lib.concat_locs(
+                [
+                    self._locs(3, ellipticity=0.1, z=5.0),
+                    self._locs(2, photons_unc=3.0),
+                    self._locs(2, photons_unc=4.0, z=1.0),
+                ]
+            )
+        assert list(locs.columns) == [
+            "frame",
+            "x",
+            "y",
+            "lpx",
+            "lpy",
+            "net_gradient",
+        ]
+        assert len(lib.ensure_sanity(locs, self.INFO)) == 7
+
+    @pytest.mark.parametrize("net_gradient", [True, False])
+    def test_matching_tables_are_left_alone(self, net_gradient):
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            locs = lib.concat_locs(
+                [
+                    self._locs(3, net_gradient, z=1.0),
+                    self._locs(2, net_gradient, z=2.0),
+                ]
+            )
+        assert len(locs) == 5
+        assert ("net_gradient" in locs.columns) == net_gradient
+        assert list(locs["z"]) == [1.0] * 3 + [2.0] * 2
+        assert list(locs.index) == list(range(5))
+
+    def test_empty_tables_do_not_decide_the_columns(self):
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            locs = lib.concat_locs(
+                [
+                    self._locs(0, False),
+                    pd.DataFrame(),
+                    self._locs(3, z=1.0),
+                ]
+            )
+        assert len(locs) == 3
+        assert {"net_gradient", "z"} <= set(locs.columns)
+        assert locs["frame"].dtype.kind == "i"
+        # nothing to combine at all
+        assert len(lib.concat_locs([self._locs(0), self._locs(0)])) == 0
+
+    def test_merge_locs_keeps_every_localization(self):
+        with pytest.warns(UserWarning, match="net_gradient"):
+            merged = lib.merge_locs(
+                [self._locs(3), self._locs(4, False)],
+                increment_groups=False,
+            )
+        assert len(lib.ensure_sanity(merged, self.INFO)) == 7
 
 
 class TestEnsureSanity:
@@ -1333,3 +1594,215 @@ class TestLazyQtImports:
     def test_unknown_attribute_raises(self):
         with pytest.raises(AttributeError):
             lib.no_such_attribute
+
+
+# ---------------------------------------------------------------------------
+# Render worker budget
+# ---------------------------------------------------------------------------
+
+
+class TestNWorkersFromSettings:
+    """``lib.n_workers(..., settings_section=...)`` reads the given
+    settings section with the same defensive semantics as Localize's
+    ``cpu_utilization`` handling and caps the result with the optional
+    ``max_workers``."""
+
+    def _render_workers(self):
+        return lib.n_workers(
+            lib.RENDER_CPU_UTILIZATION_DEFAULT, settings_section="Render"
+        )
+
+    def _set_settings(self, monkeypatch, render_section):
+        settings = {} if render_section is None else {"Render": render_section}
+        monkeypatch.setattr(lib.io, "load_user_settings", lambda: settings)
+
+    def test_no_section_never_reads_settings(self, monkeypatch):
+        def _boom():
+            raise AssertionError("settings must not be read")
+
+        monkeypatch.setattr(lib.io, "load_user_settings", _boom)
+        assert lib.n_workers(0.75) >= 1
+
+    def test_default_when_section_missing(self, monkeypatch):
+        self._set_settings(monkeypatch, None)
+        assert self._render_workers() == lib.n_workers(
+            lib.RENDER_CPU_UTILIZATION_DEFAULT
+        )
+
+    def test_valid_fraction(self, monkeypatch):
+        self._set_settings(monkeypatch, {"cpu_utilization": 0.25})
+        assert self._render_workers() == lib.n_workers(0.25)
+
+    @pytest.mark.parametrize("bad", [1.5, -0.2, 0.0, 1, True, "half", None])
+    def test_invalid_fraction_falls_back(self, monkeypatch, bad):
+        self._set_settings(monkeypatch, {"cpu_utilization": bad})
+        assert self._render_workers() == lib.n_workers(
+            lib.RENDER_CPU_UTILIZATION_DEFAULT
+        )
+
+    def test_max_workers_caps(self, monkeypatch):
+        self._set_settings(
+            monkeypatch, {"cpu_utilization": 0.9, "max_workers": 1}
+        )
+        assert self._render_workers() == 1
+
+    @pytest.mark.parametrize("bad", [0, -3, True, "two", 2.5, None])
+    def test_invalid_max_workers_ignored(self, monkeypatch, bad):
+        self._set_settings(
+            monkeypatch, {"cpu_utilization": 0.25, "max_workers": bad}
+        )
+        assert self._render_workers() == lib.n_workers(0.25)
+
+
+class TestStandardizeDtypes:
+    def test_float64_and_frame_are_cast(self):
+        locs = pd.DataFrame(
+            {
+                "frame": np.array([3, 1, 2], dtype=np.int64),
+                "x": np.array([1.5, 2.5, 3.5]),  # float64
+                "photons": np.array([1.0, 2.0, 3.0], dtype=np.float32),
+                "group": np.array([0, 0, 1], dtype=np.int32),
+                "flag": np.array([True, False, True]),
+            }
+        )
+        out = lib.standardize_dtypes(locs)
+        assert out["frame"].dtype == np.uint32
+        assert out["x"].dtype == np.float32
+        assert out["photons"].dtype == np.float32
+        assert out["group"].dtype == np.int32
+        assert out["flag"].dtype == bool
+        assert list(out["frame"]) == [3, 1, 2]
+        assert lib.standardize_dtypes(out) is out  # already standard
+
+    def test_ensure_sanity_standardizes(self):
+        locs = pd.DataFrame(
+            {"frame": [0, 1], "x": [1.0, 2.0], "y": [1.0, 2.0]}
+        )
+        info = [{"Width": 8, "Height": 8, "Frames": 2}]
+        out = lib.ensure_sanity(locs, info)
+        assert out["x"].dtype == np.float32
+        assert out["frame"].dtype == np.uint32
+
+
+class TestSelectFrcRois:
+    @pytest.fixture
+    def uniform_locs(self):
+        rng = np.random.default_rng(0)
+        n = 50_000
+        return pd.DataFrame(
+            {
+                "x": rng.uniform(0, 100, n).astype(np.float32),
+                "y": rng.uniform(0, 100, n).astype(np.float32),
+            }
+        )
+
+    # pixel size 100 nm, so a 1000 nm ROI is 10 camera pixels
+    info = [{"Pixelsize": 100}]
+    viewport = ((0, 0), (100, 100))
+
+    def test_rois_inside_viewport_and_not_overlapping(self, uniform_locs):
+        rois = lib.select_frc_rois(
+            uniform_locs,
+            self.info,
+            self.viewport,
+            n_rois=40,
+            roi_size=1000,
+            min_locs=100,
+        )
+        assert 0 < len(rois) <= 40
+        for (y0, x0), (y1, x1) in rois:
+            assert y1 - y0 == pytest.approx(10)
+            assert x1 - x0 == pytest.approx(10)
+            assert y0 >= 0 and x0 >= 0 and y1 <= 100 and x1 <= 100
+        for a, ((ay0, ax0), _) in enumerate(rois):
+            for (by0, bx0), _ in rois[a + 1 :]:
+                overlap_y = abs(ay0 - by0) < 10 - 1e-9
+                overlap_x = abs(ax0 - bx0) < 10 - 1e-9
+                assert not (overlap_y and overlap_x)
+
+    def test_min_locs_respected(self, uniform_locs):
+        # ~500 locs per 10 x 10 px ROI; the right half is emptied
+        locs = uniform_locs[uniform_locs["x"] < 50]
+        rois = lib.select_frc_rois(
+            locs,
+            self.info,
+            self.viewport,
+            n_rois=50,
+            roi_size=1000,
+            min_locs=300,
+        )
+        assert len(rois) > 0
+        x = locs["x"].to_numpy()
+        y = locs["y"].to_numpy()
+        for (y0, x0), (y1, x1) in rois:
+            in_roi = (x >= x0) & (x < x1) & (y >= y0) & (y < y1)
+            assert in_roi.sum() >= 300
+
+    def test_no_rois_if_too_few_locs(self, uniform_locs):
+        rois = lib.select_frc_rois(
+            uniform_locs,
+            self.info,
+            self.viewport,
+            roi_size=1000,
+            min_locs=10_000,
+        )
+        assert rois == []
+
+    def test_deterministic_with_seed(self, uniform_locs):
+        kwargs = dict(n_rois=20, roi_size=1000, min_locs=100, random_seed=3)
+        a = lib.select_frc_rois(
+            uniform_locs, self.info, self.viewport, **kwargs
+        )
+        b = lib.select_frc_rois(
+            uniform_locs, self.info, self.viewport, **kwargs
+        )
+        assert a == b
+
+    def test_viewport_smaller_than_roi_raises(self, uniform_locs):
+        with pytest.raises(ValueError):
+            lib.select_frc_rois(
+                uniform_locs, self.info, ((0, 0), (5, 5)), roi_size=1000
+            )
+
+
+class TestBinZSteps:
+    """``lib.bin_z_steps``: axial binning shared by the 3D calibrations."""
+
+    def test_no_binning_returns_the_input(self):
+        values = np.arange(7.0)
+        assert lib.bin_z_steps(values, 1) is values
+
+    def test_averages_consecutive_groups_and_drops_the_remainder(self):
+        # 7 steps in bins of 3: [0, 1, 2] and [3, 4, 5]; step 6 is dropped
+        binned = lib.bin_z_steps(np.arange(7.0), 3)
+        np.testing.assert_allclose(binned, [1.0, 4.0])
+
+    def test_stage_positions_land_at_the_bin_centers(self):
+        # a descending 5 nm scan binned by 4 gives an even 20 nm grid
+        z = -(np.arange(12) * 5.0 - 27.5)
+        binned = lib.bin_z_steps(z, 4)
+        np.testing.assert_allclose(np.diff(binned), -20.0)
+        np.testing.assert_allclose(binned, [20.0, 0.0, -20.0])
+
+    def test_bins_along_the_requested_axis(self):
+        volumes = np.random.default_rng(0).random((2, 3, 3, 8))
+        binned = lib.bin_z_steps(volumes, 4, axis=3)
+        assert binned.shape == (2, 3, 3, 2)
+        np.testing.assert_allclose(
+            binned[..., 1], volumes[..., 4:8].mean(axis=3)
+        )
+
+    def test_ignores_nan_within_a_bin(self):
+        values = np.array([1.0, np.nan, 3.0, np.nan, np.nan, np.nan])
+        binned = lib.bin_z_steps(values, 3)
+        assert binned[0] == pytest.approx(2.0)
+        assert np.isnan(binned[1])
+
+    def test_integer_input_averages_to_float(self):
+        binned = lib.bin_z_steps(np.array([1, 2, 3, 4]), 2)
+        np.testing.assert_allclose(binned, [1.5, 3.5])
+
+    @pytest.mark.parametrize("z_binning", [0, 9])
+    def test_rejects_impossible_binning(self, z_binning):
+        with pytest.raises(ValueError, match="z binning"):
+            lib.bin_z_steps(np.arange(8.0), z_binning)

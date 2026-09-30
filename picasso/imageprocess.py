@@ -365,14 +365,19 @@ def radial_sum(image: lib.FloatArray2D) -> lib.FloatArray1D:
 
     size = image.shape[0]
     center = size // 2
-    r = np.arange(0, center + 1)
-    # get the square distances of each pixel from the center
+    # ring index n = floor(r) satisfies n**2 <= r**2 < (n + 1)**2; sqrt
+    # of an integer perfect square is exact, so the rings are exact too
     y, x = np.ogrid[:size, :size]
     dist_sq = (x - center) ** 2 + (y - center) ** 2
-    # create an array to hold the counts
-    counts = np.zeros_like(r, dtype=image.dtype)
-    # iterate over each radius and compute the sum and count
-    for r_idx, radius in enumerate(r):
-        mask = (dist_sq >= radius**2) & (dist_sq < (radius + 1) ** 2)
-        counts[r_idx] = np.sum(image[mask])
-    return counts
+    ring = np.floor(np.sqrt(dist_sq)).astype(np.intp).ravel()
+    keep = ring <= center
+    ring = ring[keep]
+    values = image.ravel()[keep]
+    n_bins = center + 1
+    if np.iscomplexobj(values):
+        counts = np.bincount(
+            ring, weights=values.real, minlength=n_bins
+        ) + 1j * np.bincount(ring, weights=values.imag, minlength=n_bins)
+    else:
+        counts = np.bincount(ring, weights=values, minlength=n_bins)
+    return counts.astype(image.dtype, copy=False)

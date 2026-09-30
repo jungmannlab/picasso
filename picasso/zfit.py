@@ -61,6 +61,7 @@ def calibrate_z(
     frame_bounds: tuple[int, int] | None = None,
     frames_per_step: int = 1,
     frame_order: Literal["fov", "z"] = "fov",
+    z_binning: int = 1,
 ) -> dict:
     """Given localizations of a calibration sample (e.g., gold beads at
     different z positions), calibrate the z-axis by fitting a polynomial
@@ -110,13 +111,22 @@ def calibrate_z(
         i.e., frames cycle through all z positions
         (``[z0, z1, ..., z0, z1, ...]``). Ignored when
         ``frames_per_step`` is 1. Default is "fov".
+    z_binning : int, optional
+        Number of consecutive z (stage) steps merged into one axial bin
+        before the calibration curves are fitted: the mean spot
+        width/height of the bin is the average of its steps' means,
+        placed at the average of their stage positions (see
+        ``lib.bin_z_steps``). Trailing steps that do not fill a whole bin
+        are left out of the fit. The diagnostics still compare every
+        localization with the stage position of its own step. 1 (the
+        default) fits every step.
 
     Returns
     -------
     calibration : dict
         Dictionary containing the calibration coefficients (i.e.,
-        polynomial coefficients), number of frames, step size, and
-        magnification factor.
+        polynomial coefficients), number of frames, step size, z binning
+        and magnification factor.
     """
     n_frames = info[0]["Frames"]
     frames_per_step = max(1, int(frames_per_step))
@@ -187,16 +197,33 @@ def calibrate_z(
     mean_sx = _interpolate_nan(mean_sx)
     mean_sy = _interpolate_nan(mean_sy)
 
-    cx = np.polyfit(z_range, mean_sx, 6, full=False)
-    cy = np.polyfit(z_range, mean_sy, 6, full=False)
+    # Merge consecutive steps into axial bins for the fit. The per-step
+    # arrays (z_range, mean_sx/sy) stay as they are: the diagnostics below
+    # compare every localization with the stage position of its own step.
+    z_binning = max(1, int(z_binning))
+    z_bins = lib.bin_z_steps(z_range, z_binning)
+    mean_sx_bins = lib.bin_z_steps(mean_sx, z_binning)
+    mean_sy_bins = lib.bin_z_steps(mean_sy, z_binning)
+    if len(z_bins) < 7:
+        raise ValueError(
+            f"Only {len(z_bins)} axial bins remain after z binning of "
+            f"{z_binning} (from {len(z_range)} z steps); the 6th-order "
+            "calibration polynomial needs at least 7. Reduce the z binning "
+            "or widen the frame range."
+        )
+
+    cx = np.polyfit(z_bins, mean_sx_bins, 6, full=False)
+    cy = np.polyfit(z_bins, mean_sy_bins, 6, full=False)
 
     # make sure that the calibration curves cross at z = 0
-    z = np.linspace(z_range[0], z_range[-1], 10000)
+    z = np.linspace(z_bins[0], z_bins[-1], 10000)
     spot_width = np.poly1d(cx)
     spot_height = np.poly1d(cy)
-    z_range -= z[np.argmin(np.abs(spot_width(z) - spot_height(z)))]
-    cx = np.polyfit(z_range, mean_sx, 6, full=False)
-    cy = np.polyfit(z_range, mean_sy, 6, full=False)
+    z_zero = z[np.argmin(np.abs(spot_width(z) - spot_height(z)))]
+    z_range -= z_zero
+    z_bins = z_bins - z_zero
+    cx = np.polyfit(z_bins, mean_sx_bins, 6, full=False)
+    cy = np.polyfit(z_bins, mean_sy_bins, 6, full=False)
 
     calibration = {
         "X Coefficients": [float(_) for _ in cx],
@@ -208,6 +235,7 @@ def calibrate_z(
         "Frame bounds": frame_bounds,
         "Frames per step": int(frames_per_step),
         "Frame order": frame_order,
+        "Z binning": int(z_binning),
     }
     if path is not None:
         io.save_calibration(path, calibration)
@@ -222,8 +250,8 @@ def calibrate_z(
     plt.figure(figsize=(18, 10))
 
     plt.subplot(231)
-    plt.plot(z_range, mean_sx, ".-", label="x")
-    plt.plot(z_range, mean_sy, ".-", label="y")
+    plt.plot(z_bins, mean_sx_bins, ".-", label="x")
+    plt.plot(z_bins, mean_sy_bins, ".-", label="y")
     plt.plot(z_range, np.polyval(cx, z_range), "0.3", lw=1.5, label="x fit")
     plt.plot(z_range, np.polyval(cy, z_range), "0.3", lw=1.5, label="y fit")
     plt.xlabel("Stage position")
@@ -476,6 +504,113 @@ def _fit_z_target_device(
     ) ** 2
 
 
+@cuda.jit(device=True, inline=True)
+def _brent_trial_step_device(
+    a: float,
+    b: float,
+    xf: float,
+    fx: float,
+    fulc: float,
+    ffulc: float,
+    nfc: float,
+    fnfc: float,
+    e: float,
+    rat: float,
+    tol1: float,
+    tol2: float,
+    xm: float,
+    golden_mean: float,
+) -> tuple[float, float, float]:
+    """One Brent iteration's trial point: a parabolic-fit step, falling
+    back to golden section when the parabola is rejected.
+
+    Returns the trial point ``x`` and the updated ``e``/``rat``, which
+    the next iteration's parabolic-step test needs.
+    """
+    golden = True
+    # Try a parabolic (Brent) step
+    if abs(e) > tol1:
+        golden = False
+        r = (xf - nfc) * (fx - ffulc)
+        q = (xf - fulc) * (fx - fnfc)
+        p = (xf - fulc) * q - (xf - nfc) * r
+        q = 2.0 * (q - r)
+        if q > 0.0:
+            p = -p
+        q = abs(q)
+        r = e
+        e = rat
+        # Is the parabola acceptable?
+        if (
+            (abs(p) < abs(0.5 * q * r))
+            and (p > q * (a - xf))
+            and (p < q * (b - xf))
+        ):
+            rat = p / q
+            x = xf + rat
+            if ((x - a) < tol2) or ((b - x) < tol2):
+                si = 1.0 if (xm - xf) >= 0 else -1.0
+                rat = tol1 * si
+        else:  # fall back to golden section
+            golden = True
+
+    if golden:  # golden-section step
+        if xf >= xm:
+            e = a - xf
+        else:
+            e = b - xf
+        rat = golden_mean * e
+
+    si = 1.0 if rat >= 0 else -1.0
+    x = xf + si * max(abs(rat), tol1)
+    return x, e, rat
+
+
+@cuda.jit(device=True, inline=True)
+def _brent_update_bracket_device(
+    a: float,
+    b: float,
+    xf: float,
+    fx: float,
+    fulc: float,
+    ffulc: float,
+    nfc: float,
+    fnfc: float,
+    x: float,
+    fu: float,
+) -> tuple[float, float, float, float, float, float, float, float]:
+    """Update the Brent bracket and point set after evaluating a trial
+    point.
+
+    Returns the updated ``a, b, fulc, ffulc, nfc, fnfc, xf, fx``.
+    """
+    if fu <= fx:
+        if x >= xf:
+            a = xf
+        else:
+            b = xf
+        fulc = nfc
+        ffulc = fnfc
+        nfc = xf
+        fnfc = fx
+        xf = x
+        fx = fu
+    else:
+        if x < xf:
+            a = x
+        else:
+            b = x
+        if (fu <= fnfc) or (nfc == xf):
+            fulc = nfc
+            ffulc = fnfc
+            nfc = x
+            fnfc = fu
+        elif (fu <= ffulc) or (fulc == xf) or (fulc == nfc):
+            fulc = x
+            ffulc = fu
+    return a, b, fulc, ffulc, nfc, fnfc, xf, fx
+
+
 @cuda.jit(device=True)
 def _minimize_z_device(
     sx: float,
@@ -515,69 +650,28 @@ def _minimize_z_device(
     tol2 = 2.0 * tol1
 
     while abs(xf - xm) > (tol2 - 0.5 * (b - a)):
-        golden = True
-        # Try a parabolic (Brent) step
-        if abs(e) > tol1:
-            golden = False
-            r = (xf - nfc) * (fx - ffulc)
-            q = (xf - fulc) * (fx - fnfc)
-            p = (xf - fulc) * q - (xf - nfc) * r
-            q = 2.0 * (q - r)
-            if q > 0.0:
-                p = -p
-            q = abs(q)
-            r = e
-            e = rat
-            # Is the parabola acceptable?
-            if (
-                (abs(p) < abs(0.5 * q * r))
-                and (p > q * (a - xf))
-                and (p < q * (b - xf))
-            ):
-                rat = p / q
-                x = xf + rat
-                if ((x - a) < tol2) or ((b - x) < tol2):
-                    si = 1.0 if (xm - xf) >= 0 else -1.0
-                    rat = tol1 * si
-            else:  # fall back to golden section
-                golden = True
-
-        if golden:  # golden-section step
-            if xf >= xm:
-                e = a - xf
-            else:
-                e = b - xf
-            rat = golden_mean * e
-
-        si = 1.0 if rat >= 0 else -1.0
-        x = xf + si * max(abs(rat), tol1)
+        x, e, rat = _brent_trial_step_device(
+            a,
+            b,
+            xf,
+            fx,
+            fulc,
+            ffulc,
+            nfc,
+            fnfc,
+            e,
+            rat,
+            tol1,
+            tol2,
+            xm,
+            golden_mean,
+        )
         fu = _fit_z_target_device(x, sx, sy, cx, cy)
         num += 1
 
-        if fu <= fx:
-            if x >= xf:
-                a = xf
-            else:
-                b = xf
-            fulc = nfc
-            ffulc = fnfc
-            nfc = xf
-            fnfc = fx
-            xf = x
-            fx = fu
-        else:
-            if x < xf:
-                a = x
-            else:
-                b = x
-            if (fu <= fnfc) or (nfc == xf):
-                fulc = nfc
-                ffulc = fnfc
-                nfc = x
-                fnfc = fu
-            elif (fu <= ffulc) or (fulc == xf) or (fulc == nfc):
-                fulc = x
-                ffulc = fu
+        a, b, fulc, ffulc, nfc, fnfc, xf, fx = _brent_update_bracket_device(
+            a, b, xf, fx, fulc, ffulc, nfc, fnfc, x, fu
+        )
 
         xm = 0.5 * (a + b)
         tol1 = sqrt_eps * abs(xf) + xatol / 3.0
@@ -832,74 +926,76 @@ def zfit(
     )
 
 
-def _zfit(
+def _await_parallel_z_fit(
+    fs: list,
+    N: int,
+    filter: int,
+    progress_callback: Callable[[int], None] | Literal["console"] | None,
+    abort_callback: Callable[[], bool] | None,
+) -> pd.DataFrame | None:
+    """Poll the futures submitted by ``_fit_z_parallel`` until done.
+
+    Progress is reported along the way.
+
+    Parameters
+    ----------
+    fs : list
+        Futures returned by ``_fit_z_parallel``.
+    N : int
+        Total number of localizations being fitted, for progress.
+    filter : int
+        Filter for the z fits, passed on to :func:`locs_from_futures`. If
+        set to 0, no filtering is applied; if set to 2, the z fits are
+        filtered based on the RMSD of the z calibration.
+    progress_callback : callable, "console" or None
+        A callable receives the number of localizations fitted so far;
+        "console" shows a tqdm bar; None disables progress tracking.
+    abort_callback : callable or None
+        Polled while waiting; returning True cancels the pending tasks.
+
+    Returns
+    -------
+    pd.DataFrame or None
+        The combined localizations, or None if ``abort_callback``
+        requested cancellation.
+    """
+    use_tqdm = progress_callback == "console"
+    if use_tqdm:
+        iter_range = tqdm(range(N), desc="Fitting z...", unit="locs")
+    n_tasks = len(fs)
+    while lib.n_futures_done(fs) < n_tasks:
+        # check for abort
+        if abort_callback is not None and abort_callback():
+            for f in fs:
+                f.cancel()
+            if use_tqdm:
+                iter_range.close()
+            return None
+
+        n_finished = round(N * lib.n_futures_done(fs) / n_tasks)
+        if use_tqdm:
+            iter_range.update(n_finished - iter_range.n)
+        elif callable(progress_callback):
+            progress_callback(n_finished)
+        time.sleep(0.2)
+    if use_tqdm:
+        iter_range.update(N - iter_range.n)
+        iter_range.close()
+    return locs_from_futures(fs, filter=filter)
+
+
+def _apply_lateral_transforms_and_build_info(
     locs: pd.DataFrame,
     info: list[dict],
     calibration: dict,
-    fitting_method: Literal["gausslq", "gaussmle"],
-    filter: int,
     lateral_transforms: dict | list | str | None,
-    multiprocess: bool,
-    gpu: bool,
-    progress_callback: Callable[[int], None] | Literal["console"] | None,
-    abort_callback: Callable[[], bool] | None,
-) -> tuple[pd.DataFrame, list[dict]] | tuple[None, None]:
-    """Internal function for fitting z coordinates to the localizations.
-    See `zfit` for details."""
-    pixelsize = lib.get_from_metadata(info, "Pixelsize", raise_error=True)
-    N = len(locs)
-    if gpu:
-        locs = _fit_z_gpu(
-            locs=locs,
-            info=info,
-            calibration=calibration,
-            magnification_factor=calibration["Magnification factor"],
-            pixelsize=pixelsize,
-            fitting_method=fitting_method,
-            filter=filter,
-            progress_callback=progress_callback,
-        )
-    elif multiprocess:
-        use_tqdm = progress_callback == "console"
-        if use_tqdm:
-            iter_range = tqdm(range(N), desc="Fitting z...", unit="locs")
+    filter: int,
+) -> tuple[pd.DataFrame, list[dict]]:
+    """Apply the calibration's lateral corrections plus any extra ones,
+    and assemble the info dict describing the z fit.
 
-        fs = _fit_z_parallel(
-            locs=locs,
-            info=info,
-            calibration=calibration,
-            magnification_factor=calibration["Magnification factor"],
-            pixelsize=pixelsize,
-            fitting_method=fitting_method,
-            filter=0,  # will be applied later
-            asynch=True,
-        )
-        n_tasks = len(fs)
-        while lib.n_futures_done(fs) < n_tasks:
-            # check for abort
-            if abort_callback is not None and abort_callback():
-                for f in fs:
-                    f.cancel()
-                return None, None
-
-            n_finished = round(N * lib.n_futures_done(fs) / n_tasks)
-            if use_tqdm:
-                iter_range.update(n_finished - iter_range.n)
-            elif callable(progress_callback):
-                progress_callback(n_finished)
-            time.sleep(0.2)
-        locs = locs_from_futures(fs, filter=filter)
-    else:
-        locs = _fit_z(
-            locs=locs,
-            info=info,
-            calibration=calibration,
-            magnification_factor=calibration["Magnification factor"],
-            pixelsize=pixelsize,
-            fitting_method=fitting_method,
-            filter=filter,
-            progress_callback=progress_callback,
-        )
+    See `_zfit` for details.
+    """
     # The corrections the calibration carries, then the ones loaded
     # separately: keeping a chromatic correction in its own file must give
     # the same coordinates as appending it to the 3D calibration, so the
@@ -934,6 +1030,65 @@ def _zfit(
         )
     new_info = info + [new_info | calibration]
     return locs, new_info
+
+
+def _zfit(
+    locs: pd.DataFrame,
+    info: list[dict],
+    calibration: dict,
+    fitting_method: Literal["gausslq", "gaussmle"],
+    filter: int,
+    lateral_transforms: dict | list | str | None,
+    multiprocess: bool,
+    gpu: bool,
+    progress_callback: Callable[[int], None] | Literal["console"] | None,
+    abort_callback: Callable[[], bool] | None,
+) -> tuple[pd.DataFrame, list[dict]] | tuple[None, None]:
+    """Internal function for fitting z coordinates to the localizations.
+    See `zfit` for details."""
+    pixelsize = lib.get_from_metadata(info, "Pixelsize", raise_error=True)
+    N = len(locs)
+    if gpu:
+        locs = _fit_z_gpu(
+            locs=locs,
+            info=info,
+            calibration=calibration,
+            magnification_factor=calibration["Magnification factor"],
+            pixelsize=pixelsize,
+            fitting_method=fitting_method,
+            filter=filter,
+            progress_callback=progress_callback,
+        )
+    elif multiprocess:
+        fs = _fit_z_parallel(
+            locs=locs,
+            info=info,
+            calibration=calibration,
+            magnification_factor=calibration["Magnification factor"],
+            pixelsize=pixelsize,
+            fitting_method=fitting_method,
+            filter=0,  # will be applied later
+            asynch=True,
+        )
+        locs = _await_parallel_z_fit(
+            fs, N, filter, progress_callback, abort_callback
+        )
+        if locs is None:
+            return None, None
+    else:
+        locs = _fit_z(
+            locs=locs,
+            info=info,
+            calibration=calibration,
+            magnification_factor=calibration["Magnification factor"],
+            pixelsize=pixelsize,
+            fitting_method=fitting_method,
+            filter=filter,
+            progress_callback=progress_callback,
+        )
+    return _apply_lateral_transforms_and_build_info(
+        locs, info, calibration, lateral_transforms, filter
+    )
 
 
 def locs_from_futures(
@@ -1022,7 +1177,7 @@ def axial_localization_precision(
 
     Returns
     -------
-    lpz: lib.FloatArray1D
+    lpz : lib.FloatArray1D
         Calculated lpz values for the given localizations in nm.
     """
     if modality != "astigmatic":
@@ -1055,15 +1210,15 @@ def axial_localization_precision_astig(
     info : list of dicts
         Localizations metadata.
     calibration : dict
-        Calibration dictionary with x and y coefficients, z step size
-        and the number of frames.
+        Calibration dictionary with the keys "X Coefficients",
+        "Y Coefficients" and "Magnification factor".
     fitting_method : {"gausslq", "gaussmle"}, optional
         Fitting method used to obtain 2D localization parameters (x, y,
         sx, sy). Default is "gausslq".
 
     Returns
     -------
-    lpz: lib.FloatArray1D
+    lpz : lib.FloatArray1D
         Calculated lpz values for the given localizations in nm.
     """
     assert fitting_method in [
@@ -1116,6 +1271,10 @@ def _axial_localization_precision_astig(
         3D calibration coefficients for x.
     cy : lib.FloatArray1D
         3D calibration coefficients for y.
+    magnification_factor : float
+        Magnification factor of the microscope, i.e., the ratio between
+        the actual z position of the calibration sample and the
+        estimated z position from the localization data.
     pixelsize : float
         Camera pixel size in nm.
     fitting_method : {"gausslq", "gaussmle"}, optional
@@ -1124,7 +1283,7 @@ def _axial_localization_precision_astig(
 
     Returns
     -------
-    lpz: lib.FloatArray1D
+    lpz : lib.FloatArray1D
         Calculated lpz values for the given localizations in nm.
     """
     if fitting_method == "gausslq":

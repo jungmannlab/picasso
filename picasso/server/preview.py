@@ -4,9 +4,7 @@ from sqlalchemy import create_engine
 import pandas as pd
 import os
 import numpy as np
-from picasso import io
-from picasso import lib
-from picasso import render
+from picasso import io, render
 import matplotlib.pyplot as plt
 
 

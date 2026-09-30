@@ -110,6 +110,8 @@ _QT_NAMES = (
     "ProgressDialog",
     "StatusDialog",
     "ProgressType",
+    "CollapsibleHeader",
+    "CollapsibleGroupBox",
     "ScrollableGroupBox",
     "LogDoubleSpinBox",
     "RangeSlider",
@@ -139,14 +141,83 @@ def __getattr__(name: str) -> Any:
 WINDOWS_MAX_WORKERS = 61
 
 
-def n_workers(cpu_utilization: float = 0.75) -> int:
+#: Default fraction of CPU cores available to rendering. Deliberately
+#: lower than Localize's 0.8: localization is a one-off batch job,
+#: whereas rendering runs continuously while a user interacts with the
+#: GUI, often on shared analysis workstations.
+RENDER_CPU_UTILIZATION_DEFAULT = 0.5
+#: localizations whose precision (lpx or lpy, nm) exceeds this are not
+#: rendered by the per-localization blur methods; settable per user in
+#: ``settings["Render"]["max_blur_width"]`` (see docs/render.rst)
+RENDER_MAX_BLUR_WIDTH_DEFAULT = 100.0
+#: default of ``settings["Render"]["interaction_subsample"]``: live
+#: previews of max(500,000, a tenth of the visible localizations) while
+#: panning and zooming (see ``picasso.gui.render``)
+RENDER_INTERACTION_SUBSAMPLE_DEFAULT = "auto"
+#: GPU memory (MB) the render backend may keep resident for uploaded
+#: localizations; ``settings["Render"]["gpu"]["vram_budget_mb"]``, 0 =
+#: unlimited (see docs/render.rst)
+RENDER_VRAM_BUDGET_MB_DEFAULT = 8192
+#: ``settings["Render"]["gpu"]["enabled"]``: "auto" renders on the GPU
+#: whenever one initializes, "on" additionally warns when it does not,
+#: "off" never touches the GPU
+RENDER_GPU_ENABLED_DEFAULT = "auto"
+#: ``settings["Render"]["gpu"]["adapter"]``: "high-performance",
+#: "low-power", or a substring of the adapter's name
+RENDER_GPU_ADAPTER_DEFAULT = "high-performance"
+#: requests with fewer localizations render on the CPU even when the
+#: GPU is enabled: the GPU's fixed cost per render (~6 ms) exceeds the
+#: CPU's time for them
+RENDER_GPU_MIN_LOCS = 20_000
+#: Leaf capacity of the quad-tree adaptive histogram (blur method
+#: "quadtree"): bins split while they hold more localizations, so every
+#: bin has a signal-to-noise ratio of about sqrt(capacity / 2) (10 -> 2.2;
+#: Baddeley et al. 2010 used 5)
+RENDER_QUADTREE_CAPACITY_DEFAULT = 10
+#: Jittered triangulation (blur method "triangulation", Baddeley et al.
+#: 2010): passes averaged, jitter width in units of the mean neighbor
+#: distance, and the most localizations in view the GUI renders it for
+#: (above, the histogram is shown: Qhull costs ~0.3 s per pass per
+#: 200k rows)
+RENDER_TRIANGULATION_PASSES_DEFAULT = 25
+RENDER_TRIANGULATION_JITTER_DEFAULT = 1.0
+RENDER_TRIANGULATION_MAX_LOCS_DEFAULT = 100_000
+#: how many times a rotated 3D localization counts towards
+#: ``RENDER_GPU_MIN_LOCS``: the projected z precision widens every
+#: footprint, so the CPU kernels cost 15-20x more per localization
+#: than in 2D, and the GPU wins from a few thousand localizations on
+RENDER_ROTATED_COST_FACTOR = 20
+
+
+def n_workers(
+    cpu_utilization: float = 0.75,
+    settings_section: str | None = None,
+) -> int:
     """Number of workers (processes or threads) to use for parallel
     computation.
 
     Parameters
     ----------
     cpu_utilization : float, optional
-        Fraction of the available CPUs to use. Default 0.75.
+        Fraction of the available CPUs to use. Default 0.75. When
+        ``settings_section`` is given, this acts as the fallback for an
+        invalid or missing setting.
+    settings_section : str, optional
+        Name of a section in the user settings file
+        (``~/.picasso/settings.yaml``, also editable via
+        ``File > Picasso settings`` in the GUIs) that overrides
+        ``cpu_utilization``. The file is read on every call, so changes
+        apply without restarting Picasso:
+
+        .. code-block:: yaml
+
+            Render:
+              cpu_utilization: 0.5  # fraction of CPU cores, in (0, 1)
+              max_workers: 4        # optional absolute cap
+
+        ``max_workers``, when set to a positive integer, additionally
+        caps the result. Rendering uses ``settings_section="Render"``
+        with ``RENDER_CPU_UTILIZATION_DEFAULT`` as the fallback.
 
     Returns
     -------
@@ -154,9 +225,28 @@ def n_workers(cpu_utilization: float = 0.75) -> int:
         ``cpu_utilization`` times the CPU count, at least 1 and, on
         Windows only, at most ``WINDOWS_MAX_WORKERS``.
     """
+    max_workers = None
+    if settings_section is not None:
+        settings = io.load_user_settings()
+        try:
+            value = settings[settings_section]["cpu_utilization"]
+        except Exception:
+            value = None
+        if isinstance(value, float) and 0.0 < value < 1.0:
+            cpu_utilization = value
+        try:
+            max_workers = settings[settings_section]["max_workers"]
+        except Exception:
+            max_workers = None
     n = max(1, int(cpu_utilization * multiprocessing.cpu_count()))
     if sys.platform == "win32":
         n = min(WINDOWS_MAX_WORKERS, n)
+    if (
+        isinstance(max_workers, int)
+        and not isinstance(max_workers, bool)
+        and max_workers >= 1
+    ):
+        n = min(n, max_workers)
     return n
 
 
@@ -221,6 +311,70 @@ def frame_in_bounds(frame_number, frame_bounds, n_frames):
     return any(lo <= frame_number <= hi for lo, hi in segments)
 
 
+def bin_z_steps(
+    values: np.ndarray, z_binning: int, axis: int = 0
+) -> np.ndarray:
+    """Average groups of ``z_binning`` consecutive z (stage) steps.
+
+    Used by the 3D calibrations (``picasso.zfit.calibrate_z`` and
+    ``picasso.spline.build_psf_template``) to merge a finely stepped bead
+    scan into coarser axial bins before the calibration model is built.
+    Bin ``k`` is the mean of steps ``k * z_binning`` to
+    ``(k + 1) * z_binning - 1``, so a bin of the stage positions themselves
+    lies at the center of its steps. Trailing steps that do not fill a
+    whole bin are dropped, which keeps the bins evenly spaced.
+
+    Parameters
+    ----------
+    values : np.ndarray
+        Per-step values, with the steps along ``axis``: e.g. the stage
+        position of each step, the mean spot width per step, or a stack of
+        bead volumes.
+    z_binning : int
+        Number of consecutive steps per bin. 1 returns ``values``
+        unchanged.
+    axis : int, optional
+        Axis of ``values`` that runs over the steps. Default 0.
+
+    Returns
+    -------
+    binned : np.ndarray
+        ``values`` with ``axis`` shortened to
+        ``values.shape[axis] // z_binning``. NaN entries are ignored within
+        a bin; a bin that is NaN throughout stays NaN.
+
+    Raises
+    ------
+    ValueError
+        If ``z_binning`` is smaller than 1 or larger than the number of
+        steps.
+    """
+    z_binning = int(z_binning)
+    values = np.asarray(values)
+    if z_binning < 1:
+        raise ValueError(f"z binning must be at least 1, got {z_binning}.")
+    if z_binning == 1:
+        return values
+    n_steps = values.shape[axis]
+    n_bins = n_steps // z_binning
+    if n_bins < 1:
+        raise ValueError(
+            f"z binning ({z_binning}) is larger than the number of z steps "
+            f"({n_steps})."
+        )
+    moved = np.moveaxis(values, axis, 0)[: n_bins * z_binning]
+    grouped = moved.reshape((n_bins, z_binning) + moved.shape[1:])
+    with warnings.catch_warnings():
+        # an all-NaN bin (e.g. a step without localizations on each of its
+        # steps) is legitimately NaN; the caller interpolates it
+        warnings.simplefilter("ignore", category=RuntimeWarning)
+        binned = np.nanmean(grouped, axis=1)
+    # keep a floating input's precision; integer input averages to float
+    if np.issubdtype(values.dtype, np.floating):
+        binned = binned.astype(values.dtype, copy=False)
+    return np.moveaxis(binned, 0, axis)
+
+
 class MockProgress:
     """Class to mock a progress bar or dialog, allowing for calling
     the same methods but not displaying anything.
@@ -250,6 +404,8 @@ class MockProgress:
         ----------
         maximum : int
             The value progress runs up to.
+        *args, **kwargs
+            Accepted and ignored, for ``ProgressDialog`` compatibility.
         """
         self._maximum = maximum
 
@@ -277,6 +433,8 @@ class MockProgress:
         ----------
         description : str, optional
             Ignored; a real dialog would show it as the new phase's label.
+        *args, **kwargs
+            Accepted and ignored, for ``ProgressDialog`` compatibility.
         """
         pass
 
@@ -324,9 +482,9 @@ class TqdmProgress:
         ----------
         unit : str, optional
             Name of one iteration, shown by tqdm. Default "it".
-        **kwargs
-            ``description`` is used as the bar's label; anything else a real
-            progress dialog takes is accepted and ignored.
+        *args, **kwargs
+            ``description`` (keyword) is used as the bar's label; anything
+            else a real progress dialog takes is accepted and ignored.
         """
         self.description_base = (
             "" if "description" not in kwargs else kwargs["description"]
@@ -336,8 +494,7 @@ class TqdmProgress:
         self._maximum = 0
 
     def init(self, *args, **kwargs):
-        """Do nothing; the bar is armed lazily on the first
-        :meth:`set_value`."""
+        """Do nothing; the bar is armed on the first :meth:`set_value`."""
         pass
 
     def set_value(self, value, *args, **kwargs):
@@ -347,6 +504,8 @@ class TqdmProgress:
         ----------
         value : int
             Cumulative progress so far.
+        *args, **kwargs
+            Accepted and ignored, for ``ProgressDialog`` compatibility.
         """
         if self.iterator is None:
             self.iterator = tqdm(
@@ -363,6 +522,8 @@ class TqdmProgress:
         ----------
         maximum : int
             The total the bar counts towards.
+        *args, **kwargs
+            Accepted and ignored, for ``ProgressDialog`` compatibility.
         """
         self._maximum = maximum
         if self.iterator is not None:
@@ -394,6 +555,8 @@ class TqdmProgress:
         ----------
         description : str, optional
             Label of the new phase. None keeps the current one.
+        *args, **kwargs
+            Accepted and ignored, for ``ProgressDialog`` compatibility.
         """
         if description:
             self.description_base = description
@@ -640,10 +803,59 @@ def get_from_metadata(
         raise ValueError("info must be a dict or a list of dicts.")
 
 
+def _merge_filter_range(
+    ranges: dict, missing: list, current: set, key, xmin: float, xmax: float
+) -> None:
+    """Intersect one column's [min, max] filter range into ``ranges``.
+
+    Appends ``key`` to ``missing`` instead when it is absent from
+    ``current``.
+    """
+    if key not in current:
+        missing.append(key)
+        return
+    if key in ranges:
+        ranges[key][0] = max(ranges[key][0], xmin)
+        ranges[key][1] = min(ranges[key][1], xmax)
+    else:
+        ranges[key] = [xmin, xmax]
+
+
+def _extract_filter_dict(
+    d: dict, current: set, ranges: dict, missing: list, to_remove_all: list
+) -> None:
+    """Fold one filter-step metadata dict into the running totals."""
+    for key, value in d.items():
+        if key == "Generated by":
+            continue
+        if key == "Removed columns" and isinstance(value, (list, tuple)):
+            to_remove_all.extend(value)
+            continue
+        if (
+            isinstance(value, (list, tuple))
+            and len(value) == 2
+            and all(isinstance(v, (int, float)) for v in value)
+        ):
+            _merge_filter_range(
+                ranges, missing, current, key, float(value[0]), float(value[1])
+            )
+
+
+def _dedupe_preserve_order(items: list) -> list:
+    """``items`` with duplicates removed, keeping first-seen order."""
+    seen: set = set()
+    result = []
+    for item in items:
+        if item not in seen:
+            seen.add(item)
+            result.append(item)
+    return result
+
+
 def extract_filter_steps(
     info: list[dict],
     current_columns,
-) -> tuple[dict[str, list[float]], list[str], list[str]]:  # noqa: C901
+) -> tuple[dict[str, list[float]], list[str], list[str]]:
     """Parse filter steps out of a Picasso Filter metadata list.
 
     Iterates ``info`` oldest -> newest. A dict is treated as a filter
@@ -679,40 +891,12 @@ def extract_filter_steps(
         gen_by = get_from_metadata(d, "Generated by", default="")
         if "Filter" not in str(gen_by):
             continue
-        for key, value in d.items():
-            if key == "Generated by":
-                continue
-            if key == "Removed columns" and isinstance(value, (list, tuple)):
-                to_remove_all.extend(value)
-                continue
-            if (
-                isinstance(value, (list, tuple))
-                and len(value) == 2
-                and all(isinstance(v, (int, float)) for v in value)
-            ):
-                xmin, xmax = float(value[0]), float(value[1])
-                if key not in current:
-                    missing.append(key)
-                    continue
-                if key in ranges:
-                    ranges[key][0] = max(ranges[key][0], xmin)
-                    ranges[key][1] = min(ranges[key][1], xmax)
-                else:
-                    ranges[key] = [xmin, xmax]
+        _extract_filter_dict(d, current, ranges, missing, to_remove_all)
 
     to_remove = [c for c in to_remove_all if c in current]
-    for c in to_remove_all:
-        if c not in current:
-            missing.append(c)
+    missing.extend(c for c in to_remove_all if c not in current)
 
-    seen: set = set()
-    missing_unique: list[str] = []
-    for c in missing:
-        if c not in seen:
-            seen.add(c)
-            missing_unique.append(c)
-
-    return ranges, to_remove, missing_unique
+    return ranges, to_remove, _dedupe_preserve_order(missing)
 
 
 def apply_filter_steps(
@@ -797,6 +981,171 @@ def overwrite_metadata(
     if not success:
         raise KeyError(f"Key '{key}' not found in metadata.")
     return info
+
+
+#: Metadata keys holding the translation of the localizations from the
+#: camera frame applied by ``fit_canvas`` (camera pixels); subtract it to
+#: return to the camera coordinates
+CANVAS_OFFSET_KEYS = ("Canvas offset x (cam. px)", "Canvas offset y (cam. px)")
+#: Metadata keys holding the size of the camera image (camera pixels),
+#: stored by ``fit_canvas`` once ``Width`` or ``Height`` differ from it
+CAMERA_SIZE_KEYS = ("Camera Width", "Camera Height")
+
+
+def fit_canvas(
+    locs_list: list[pd.DataFrame], infos_list: list[list[dict]]
+) -> tuple[list[pd.DataFrame], list[list[dict]], list[tuple[int, int]]]:
+    """Fit the canvas (``Width`` and ``Height`` in the metadata) of one
+    or more channels to their localizations, so that none is removed by
+    ``ensure_sanity``, e.g., when saving.
+
+    The canvas is recomputed from the camera frame, i.e., from the
+    coordinates minus the current offset (``CANVAS_OFFSET_KEYS``, 0 if
+    missing):
+
+    - The offset becomes the smallest whole number of camera pixels
+      that makes every coordinate of every channel non-negative (0 if
+      none is negative). It is the same for all channels, so their
+      relative position is preserved.
+    - ``Width`` and ``Height`` become the camera size
+      (``CAMERA_SIZE_KEYS``, or the current ``Width`` and ``Height`` if
+      missing) or the extent of the localizations, whichever is
+      larger, plus the offset.
+
+    The canvas thus grows and shrinks with the localizations, but it
+    never becomes smaller than the camera image, which stays at the
+    offset. For example, moving a channel beyond the left edge and
+    back restores the original canvas.
+
+    The localizations and metadata are modified in place (translated
+    columns are replaced with new arrays rather than modified in
+    memory, so caches keyed on the array memory, e.g., the GPU
+    uploads, see the change). The offset and the camera size are
+    stored in the last metadata dictionary of each channel once they
+    differ from the defaults.
+
+    Parameters
+    ----------
+    locs_list : list of pd.DataFrames
+        Localizations of each channel.
+    infos_list : list of lists of dicts
+        Metadata of each channel.
+
+    Returns
+    -------
+    locs_list : list of pd.DataFrames
+        The input localizations, translated if needed.
+    infos_list : list of lists of dicts
+        The input metadata with the updated canvas.
+    shifts : list of tuples of ints
+        Translation ``(dx, dy)`` applied to each channel in this call
+        (camera pixels), e.g., to move picks along with the
+        localizations. Channels that shared an offset share the shift.
+
+    Raises
+    ------
+    KeyError
+        If ``Width`` or ``Height`` is missing from the metadata.
+    """
+
+    def finite(locs, column):
+        # NaN and inf are removed by ensure_sanity, not translated
+        values = locs[column].to_numpy()
+        return values[np.isfinite(values)]
+
+    extents = [(finite(locs, "x"), finite(locs, "y")) for locs in locs_list]
+    offsets = [
+        [get_from_metadata(info, key, 0) for key in CANVAS_OFFSET_KEYS]
+        for info in infos_list
+    ]
+
+    # the new offset, from the minimum in the camera frame
+    new_offset = []
+    for axis in range(2):
+        camera_min = [
+            ext[axis].min() - offset[axis]
+            for ext, offset in zip(extents, offsets)
+            if len(ext[axis])
+        ]
+        lowest = min(camera_min, default=0)
+        new_offset.append(int(np.ceil(-lowest)) if lowest < 0 else 0)
+
+    shifts = []
+    for locs, ext, info, offset in zip(
+        locs_list, extents, infos_list, offsets
+    ):
+        shift = tuple(int(new - old) for new, old in zip(new_offset, offset))
+        for column, delta in zip(("x", "y"), shift):
+            if delta:
+                locs[column] = locs[column].to_numpy() + np.float32(delta)
+        shifts.append(shift)
+
+        for axis, (size_key, camera_key) in enumerate(
+            zip(("Width", "Height"), CAMERA_SIZE_KEYS)
+        ):
+            stored = get_from_metadata(info, camera_key)
+            camera = stored
+            if camera is None:
+                camera = get_from_metadata(info, size_key, raise_error=True)
+            value = camera + new_offset[axis]
+            if len(ext[axis]):
+                # strictly x < Width is kept by ensure_sanity, hence + 1
+                top = ext[axis].max() + np.float32(shift[axis])
+                value = max(value, int(np.floor(top)) + 1)
+            # the canvas size is read from the first and from the last
+            # dictionary in different places, so every occurrence is set
+            for inf in info:
+                if size_key in inf:
+                    inf[size_key] = int(value)
+            if value != camera or stored is not None:
+                info[-1][camera_key] = int(camera)
+            offset_key = CANVAS_OFFSET_KEYS[axis]
+            if new_offset[axis] or get_from_metadata(info, offset_key):
+                info[-1][offset_key] = new_offset[axis]
+    return locs_list, infos_list, shifts
+
+
+def translate_picks(
+    picks: list, shape: str | None, dx: float, dy: float
+) -> list:
+    """Translate picks by ``(dx, dy)`` camera pixels, e.g., to follow
+    localizations moved by ``fit_canvas``.
+
+    Parameters
+    ----------
+    picks : list
+        Picks in the format of the Render window (see
+        ``gui.render.View._picks``).
+    shape : {"Circle", "Rectangle", "Polygon", "Square", "Box", \
+            "Brush"} or None
+        Shape of the picks. None is allowed only with no picks.
+    dx, dy : float
+        Translation in camera pixels.
+
+    Returns
+    -------
+    translated : list
+        New list of translated picks; sizes (e.g., brush widths) are
+        kept.
+    """
+
+    def point(p):
+        return (p[0] + dx, p[1] + dy)
+
+    if not len(picks):
+        return []
+    if shape in ("Circle", "Square"):
+        return [point(p) for p in picks]
+    if shape in ("Rectangle", "Box"):
+        return [(point(a), point(b)) for a, b in picks]
+    if shape == "Polygon":
+        return [[point(v) for v in pick] for pick in picks]
+    if shape == "Brush":
+        return [
+            [(width, [point(p) for p in path]) for width, path in pick]
+            for pick in picks
+        ]
+    raise ValueError(f"Unrecognized pick shape: {shape}")
 
 
 def get_colors(n_channels):
@@ -1172,6 +1521,27 @@ def plot_trace(
         return fig
 
 
+def _data_min_max(data: FloatArray1D | IntArray1D) -> tuple:
+    """Min/max of ``data``, ignoring NaNs for float dtypes."""
+    if data.dtype.kind == "f":
+        return np.nanmin(data), np.nanmax(data)
+    return data.min(), data.max()
+
+
+def _iqr_sample(
+    data: FloatArray1D | IntArray1D, n: int, sample_size: int
+) -> FloatArray1D:
+    """Subsample of ``data`` to estimate the IQR from, finite values only."""
+    if n > sample_size:
+        rng = np.random.default_rng(0)
+        sample = data[rng.choice(n, sample_size, replace=False)]
+    else:
+        sample = data
+    if sample.dtype.kind == "f":
+        sample = sample[np.isfinite(sample)]
+    return sample
+
+
 def calculate_optimal_bins(
     data: FloatArray1D | IntArray1D,
     max_n_bins: int | None = None,
@@ -1201,19 +1571,8 @@ def calculate_optimal_bins(
     n = len(data)
     if n == 0:
         return np.array([0.0, 1.0])
-    if data.dtype.kind == "f":
-        data_min = np.nanmin(data)
-        data_max = np.nanmax(data)
-    else:
-        data_min = data.min()
-        data_max = data.max()
-    if n > sample_size:
-        rng = np.random.default_rng(0)
-        sample = data[rng.choice(n, sample_size, replace=False)]
-    else:
-        sample = data
-    if sample.dtype.kind == "f":
-        sample = sample[np.isfinite(sample)]
+    data_min, data_max = _data_min_max(data)
+    sample = _iqr_sample(data, n, sample_size)
     if len(sample) == 0:
         return np.array([data_min - 1.0, data_max + 1.0])
     iqr = np.subtract(*np.percentile(sample, [75, 25]))
@@ -1290,6 +1649,98 @@ def hist2d_numba(
             if 0 <= ix < nx and 0 <= iy < ny:
                 local[t, ix, iy] += 1
     return local.sum(axis=0)
+
+
+def select_frc_rois(
+    locs: pd.DataFrame,
+    info: list[dict],
+    viewport: tuple[tuple[float, float], tuple[float, float]],
+    *,
+    n_rois: int = 30,
+    roi_size: float = 5000.0,
+    min_locs: int = 1000,
+    random_seed: int = 42,
+) -> list[tuple[tuple[float, float], tuple[float, float]]]:
+    """Randomly place non-overlapping square ROIs, e.g., for FRC in
+    several ROIs (``postprocess.frc_rois``).
+
+    ROIs are placed on a grid with a step of a tenth of the ROI side
+    length inside ``viewport``, in random order; a candidate is kept if
+    it holds at least ``min_locs`` localizations and does not overlap
+    an already kept ROI. Placement stops once ``n_rois`` ROIs are kept
+    or no candidates are left, so fewer ROIs may be returned.
+
+    Parameters
+    ----------
+    locs : pd.DataFrame
+        Localization list.
+    info : list of dicts
+        Metadata of the localizations list.
+    viewport : tuple of floats
+        Region ((y_min, x_min), (y_max, x_max)) in camera pixels in
+        which the ROIs are placed.
+    n_rois : int, optional
+        Maximum number of ROIs. Default is 30.
+    roi_size : float, optional
+        Side length of the square ROIs in nm. Default is 5000.
+    min_locs : int, optional
+        Minimum number of localizations per ROI. Default is 1000.
+    random_seed : int, optional
+        Random seed for the ROI placement. Default is 42.
+
+    Returns
+    -------
+    rois : list of tuples
+        Viewports ((y_min, x_min), (y_max, x_max)) of the selected ROIs
+        in camera pixels.
+
+    Raises
+    ------
+    ValueError
+        If ``viewport`` is smaller than one ROI.
+    """
+    pixelsize = get_from_metadata(info, "Pixelsize", raise_error=True)
+    (y_min, x_min), (y_max, x_max) = viewport
+    n_sub = 10  # grid steps per ROI side
+    step = roi_size / pixelsize / n_sub
+    ny = int((y_max - y_min) / step)
+    nx = int((x_max - x_min) / step)
+    if ny < n_sub or nx < n_sub:
+        raise ValueError(
+            f"The viewport is smaller than one ROI of {roi_size:.0f} nm."
+        )
+    # localization counts per grid cell and their integral image, so
+    # that the count of any grid-aligned ROI is exact and O(1)
+    counts, _, _ = np.histogram2d(
+        locs["y"].to_numpy(),
+        locs["x"].to_numpy(),
+        bins=(ny, nx),
+        range=((y_min, y_min + ny * step), (x_min, x_min + nx * step)),
+    )
+    integral = np.zeros((ny + 1, nx + 1))
+    integral[1:, 1:] = counts.cumsum(0).cumsum(1)
+    roi_counts = (
+        integral[n_sub:, n_sub:]
+        - integral[:-n_sub, n_sub:]
+        - integral[n_sub:, :-n_sub]
+        + integral[:-n_sub, :-n_sub]
+    )
+    candidates = np.argwhere(roi_counts >= min_locs)
+    rng = np.random.default_rng(random_seed)
+    candidates = candidates[rng.permutation(len(candidates))]
+
+    occupied = np.zeros((ny, nx), dtype=bool)
+    rois = []
+    for i, j in candidates:
+        if len(rois) == n_rois:
+            break
+        if occupied[i : i + n_sub, j : j + n_sub].any():
+            continue
+        occupied[i : i + n_sub, j : j + n_sub] = True
+        y0 = y_min + i * step
+        x0 = x_min + j * step
+        rois.append(((y0, x0), (y0 + n_sub * step, x0 + n_sub * step)))
+    return rois
 
 
 def append_to_rec(
@@ -1400,6 +1851,85 @@ def merge_locs(
     return _merge_locs(locs_list, increment_frames, increment_groups)
 
 
+def net_gradient_column(identifications: pd.DataFrame) -> dict:
+    """The ``net_gradient`` column of identifications, to be copied into
+    the localizations fitted from them, or nothing: spots identified by
+    wavelet segmentation (see ``picasso.wavelet``) have no net gradient.
+
+    Parameters
+    ----------
+    identifications : pd.DataFrame
+        Identifications the localizations are fitted from.
+
+    Returns
+    -------
+    dict
+        ``{"net_gradient": values}`` (float32) if the column exists,
+        otherwise empty.
+    """
+    if "net_gradient" not in identifications.columns:
+        return {}
+    return {
+        "net_gradient": np.asarray(
+            identifications["net_gradient"], dtype=np.float32
+        )
+    }
+
+
+def concat_locs(locs_list: list[pd.DataFrame]) -> pd.DataFrame:
+    """Concatenate localization tables into one with a new index.
+
+    The tables need not have the same columns: which ones a table has
+    depends on how it was made, e.g. spots identified by wavelet
+    segmentation (see ``picasso.wavelet``) have no ``net_gradient``,
+    spherical Gaussian fits no ``ellipticity``, least-squares fits a
+    ``chi_square`` instead of the ``log_likelihood`` of maximum likelihood
+    ones, and 2D data no ``z``. A column that not every table has is
+    dropped, with a warning: ``pd.concat`` would fill it with NaN for the
+    tables without it, and ``ensure_sanity`` would then delete all of
+    their localizations when the result is saved.
+
+    Tables without localizations are left out, so their columns neither
+    remove nor add any.
+
+    Parameters
+    ----------
+    locs_list : list of pd.DataFrame
+        Localization tables.
+
+    Returns
+    -------
+    locs : pd.DataFrame
+        All localizations, with the columns of the first table that every
+        (non-empty) table has.
+    """
+    locs_list = list(locs_list)
+    filled = [locs for locs in locs_list if len(locs)]
+    if not filled:
+        return pd.concat(locs_list, ignore_index=True)
+    common = set(filled[0].columns).intersection(
+        *(locs.columns for locs in filled[1:])
+    )
+    partial = list(
+        dict.fromkeys(
+            column
+            for locs in filled
+            for column in locs.columns
+            if column not in common
+        )
+    )
+    if partial:
+        warnings.warn(
+            f"Column(s) {', '.join(map(str, partial))} are missing from some "
+            "of the localizations being combined and were dropped, so that "
+            "no localizations are lost."
+        )
+        filled = [
+            locs.drop(columns=partial, errors="ignore") for locs in filled
+        ]
+    return pd.concat(filled, ignore_index=True)
+
+
 def _merge_locs(
     locs_list: list[pd.DataFrame],
     increment_frames: list[int],
@@ -1413,7 +1943,7 @@ def _merge_locs(
         if "group" in locs.columns:
             locs["group"] += increment_groups[i]
         locs_list[i] = locs
-    locs = pd.concat(locs_list, ignore_index=True)
+    locs = concat_locs(locs_list)
     locs.sort_values(by="frame", inplace=True)
     return locs
 
@@ -1496,7 +2026,44 @@ def ensure_sanity(locs: pd.DataFrame, info: list[dict]) -> pd.DataFrame:
     ]:
         if attr in locs.columns:
             locs = locs[locs[attr] >= 0]
-    return locs
+    return standardize_dtypes(locs)
+
+
+def standardize_dtypes(locs: pd.DataFrame) -> pd.DataFrame:
+    """Return ``locs`` with float64 columns cast to float32 and an
+    integer ``frame`` column cast to uint32 (the dtypes Localize
+    writes), leaving every other column as it is.
+
+    float32 resolves 2e-4 camera pixels at 4096 pixels and far below a
+    nanometer in z, two orders below any localization precision, while
+    halving memory and file size for columns that pandas arithmetic or
+    imports from other software promoted to float64, and sparing the
+    GPU renderer a converted copy of such columns on every render.
+    Called by ``ensure_sanity``, i.e., on loading, saving and in most
+    processing functions.
+
+    Parameters
+    ----------
+    locs : pd.DataFrame
+        Localizations.
+
+    Returns
+    -------
+    locs : pd.DataFrame
+        The same DataFrame if nothing had to change, else a copy.
+    """
+    casts = {
+        name: np.float32
+        for name, dtype in locs.dtypes.items()
+        if dtype == np.float64
+    }
+    if "frame" in locs.columns:
+        frame_dtype = locs["frame"].dtype
+        if np.issubdtype(frame_dtype, np.integer) and frame_dtype != np.uint32:
+            casts["frame"] = np.uint32
+    if not casts:
+        return locs
+    return locs.astype(casts, copy=False)
 
 
 def is_loc_at(x: float, y: float, locs: pd.DataFrame, r: float) -> BoolArray1D:
@@ -1928,18 +2495,29 @@ def rectangles_overlap(  # noqa: C901
 
     Parameters
     ----------
-    x1, y1, x2, y2 : float
-        Centers of the two rectangles.
-    theta1, theta2 : float
-        Angles of the center axes (radians).
-    length1, length2 : float
-        Lengths of the rectangles along their center axes.
-    width1, width2 : float
-        Widths of the rectangles.
-    r1, r2 : float
-        Circumscribed circle radii, i.e.,
-        ``sqrt(length ** 2 + width ** 2) / 2``. Passed in because they
-        are usually precomputed.
+    x1, y1 : float
+        Center of the first rectangle.
+    theta1 : float
+        Angle of the first rectangle's center axis (radians).
+    length1 : float
+        Length of the first rectangle along its center axis.
+    width1 : float
+        Width of the first rectangle.
+    r1 : float
+        Circumscribed circle radius of the first rectangle, i.e.,
+        ``sqrt(length1 ** 2 + width1 ** 2) / 2``. Passed in because it
+        is usually precomputed.
+    x2, y2 : float
+        Center of the second rectangle.
+    theta2 : float
+        Angle of the second rectangle's center axis (radians).
+    length2 : float
+        Length of the second rectangle along its center axis.
+    width2 : float
+        Width of the second rectangle.
+    r2 : float
+        Circumscribed circle radius of the second rectangle, see
+        ``r1``.
 
     Returns
     -------
@@ -3101,6 +3679,67 @@ def permutation_test(
     return obs_d, p_perm, ks_pval
 
 
+def _subcluster_label(
+    name: str, dist: float | None, comparator: str, mean: float, std: float
+) -> str:
+    """Legend label for one subclustering population's histogram bar.
+
+    ``comparator`` is "<" for the clustered population, ">" for sparse.
+    """
+    if dist is not None:
+        return (
+            f"{name} (d {comparator} {dist:.1f} nm) {mean:.1f} +/- {std:.1f}"
+        )
+    return f"{name} {mean:.1f} +/- {std:.1f}"
+
+
+def _plot_subcluster_bar(
+    ax: plt.Axes, events: IntArray1D, label: str, color: str
+) -> None:
+    """Bar histogram + mean line for one subclustering population."""
+    vals, counts = np.unique(events, return_counts=True)
+    ax.bar(vals, counts, width=0.8, alpha=0.5, label=label, color=color)
+    ax.axvline(events.mean(), color=color, linestyle="--")
+
+
+def _subclustering_title(
+    has_clustered: bool,
+    has_sparse: bool,
+    clustered_n_events: IntArray1D,
+    sparse_n_events: IntArray1D,
+) -> str:
+    """Plot title: KS-test summary, or why no test was performed."""
+    if has_clustered and has_sparse:
+        stat, p_perm, p = permutation_test(clustered_n_events, sparse_n_events)
+        p_value_str = r"$p_{value}$"
+        return (
+            f"KS test: stat={stat:.4f}\n"
+            f"permutation {p_value_str}={p_perm:.4f}\n"
+            f"theoretical {p_value_str}={p:.4f}"
+        )
+    if has_clustered or has_sparse:
+        return (
+            "Only one population found, no statistical test performed; "
+            "adjust distance parameters."
+        )
+    return (
+        "No molecules found in either population, adjust distance"
+        " parameters."
+    )
+
+
+def _save_subclustering_plot(
+    fig: plt.Figure, plot_path: str | list[str]
+) -> None:
+    """Save ``fig`` to each path in ``plot_path`` (a str or list of strs)."""
+    if not len(plot_path):
+        return
+    if isinstance(plot_path, str):
+        plot_path = [plot_path]
+    for path in plot_path:
+        fig.savefig(path, dpi=300)
+
+
 def plot_subclustering_check(
     clustered_n_events: IntArray1D,
     sparse_n_events: IntArray1D,
@@ -3149,42 +3788,16 @@ def plot_subclustering_check(
         min_bin, max_bin = np.percentile(all_events, [2.5, 97.5])
 
     if has_clustered:
-        vals, counts = np.unique(clustered_n_events, return_counts=True)
-        if clustering_dist is not None:
-            label = (
-                f"Clustered (d < {clustering_dist:.1f} nm) "
-                f"{m_clustered:.1f} +/- {s_clustered:.1f}"
-            )
-        else:
-            label = f"Clustered {m_clustered:.1f} +/- {s_clustered:.1f}"
-        ax1.bar(
-            vals,
-            counts,
-            width=0.8,
-            alpha=0.5,
-            label=label,
-            color="C0",
+        label = _subcluster_label(
+            "Clustered", clustering_dist, "<", m_clustered, s_clustered
         )
-        ax1.axvline(m_clustered, color="C0", linestyle="--")
+        _plot_subcluster_bar(ax1, clustered_n_events, label, "C0")
 
     if has_sparse:
-        vals, counts = np.unique(sparse_n_events, return_counts=True)
-        if sparse_dist is not None:
-            label = (
-                f"Sparse (d > {sparse_dist:.1f} nm) "
-                f"{m_sparse:.1f} +/- {s_sparse:.1f}"
-            )
-        else:
-            label = f"Sparse {m_sparse:.1f} +/- {s_sparse:.1f}"
-        ax1.bar(
-            vals,
-            counts,
-            width=0.8,
-            alpha=0.5,
-            label=label,
-            color="C1",
+        label = _subcluster_label(
+            "Sparse", sparse_dist, ">", m_sparse, s_sparse
         )
-        ax1.axvline(m_sparse, color="C1", linestyle="--")
+        _plot_subcluster_bar(ax1, sparse_n_events, label, "C1")
 
     if has_clustered or has_sparse:
         ax1.set_xlabel("Number of events")
@@ -3192,30 +3805,11 @@ def plot_subclustering_check(
         ax1.set_xlim(min_bin - 1, max_bin + 1)
         ax1.legend()
 
-    if has_clustered and has_sparse:
-        stat, p_perm, p = permutation_test(clustered_n_events, sparse_n_events)
-        p_value_str = r"$p_{value}$"
-        title = (
-            f"KS test: stat={stat:.4f}\n"
-            f"permutation {p_value_str}={p_perm:.4f}\n"
-            f"theoretical {p_value_str}={p:.4f}"
-        )
-    elif has_clustered or has_sparse:
-        title = (
-            "Only one population found, no statistical test performed; "
-            "adjust distance parameters."
-        )
-    else:
-        title = (
-            "No molecules found in either population, adjust distance"
-            " parameters."
-        )
+    title = _subclustering_title(
+        has_clustered, has_sparse, clustered_n_events, sparse_n_events
+    )
     ax1.set_title(title, fontsize=10)
-    if len(plot_path):
-        if isinstance(plot_path, str):
-            plot_path = [plot_path]
-        for path in plot_path:
-            fig.savefig(path, dpi=300)
+    _save_subclustering_plot(fig, plot_path)
 
     if return_fig:
         return fig, ax1

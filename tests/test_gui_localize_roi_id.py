@@ -103,7 +103,7 @@ class TestAttachRoiId:
 
     def test_the_id_is_attached_before_the_first_save(self):
         """Drift correction moves x/y by up to several pixels, which
-        would push localizations near an ROI seam into the neighbouring
+        would push localizations near an ROI seam into the neighboring
         rectangle - so the ids must be derived before it runs."""
         source = inspect.getsource(gui_localize.Window.save_locs_after_fit)
         assert source.index("attach_roi_id") < source.index("drift_correction")

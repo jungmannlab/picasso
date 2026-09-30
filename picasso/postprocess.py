@@ -30,7 +30,23 @@ from scipy.optimize import curve_fit, OptimizeWarning
 from scipy.spatial import distance, KDTree
 from tqdm import tqdm, trange
 
-from . import io, lib, clusterer, render, imageprocess, masking, __version__
+from . import (
+    io,
+    lib,
+    clusterer,
+    render,
+    imageprocess,
+    masking,
+    spatial_index,
+    __version__,
+)
+
+
+def _is_pyramid(index_blocks) -> bool:
+    """Whether a pick index is a ``spatial_index.RenderIndexPyramid``
+    (built once per channel, any pick size) rather than the tuple of
+    ``get_index_blocks`` (built for one block size)."""
+    return isinstance(index_blocks, spatial_index.RenderIndexPyramid)
 
 
 def get_index_blocks(
@@ -168,25 +184,36 @@ def _picked_circular_locs(
     """Helper function for picking localizations using circular picks.
     See ``picked_locs`` for more details."""
     picked_locs = []
-    if index_blocks is None:
-        index_blocks = get_index_blocks(locs, info, pick_size)
-    locs_xy = index_blocks[0][["x", "y"]].to_numpy().T
+    if _is_pyramid(index_blocks):
+        # the load-time pyramid: no pick-size specific indexing needed
+        pyramid = index_blocks
+        xs = locs["x"].to_numpy()
+        ys = locs["y"].to_numpy()
+    else:
+        pyramid = None
+        if index_blocks is None:
+            index_blocks = get_index_blocks(locs, info, pick_size)
+        locs_xy = index_blocks[0][["x", "y"]].to_numpy().T
     for i, pick in enumerate(picks):
         x, y = pick
-        x_, y_ = int(x / pick_size), int(y / pick_size)
-        block_locs_idx = _get_block_locs_at_numba(
-            x_,
-            y_,
-            index_blocks[4],
-            index_blocks[5],
-            index_blocks[6],
-            index_blocks[7],
-        )
-        block_locs = index_blocks[0].iloc[block_locs_idx]
-        group_locs_idx = lib.is_loc_at_numba(
-            x, y, locs_xy[:, block_locs_idx], pick_size
-        )
-        group_locs = block_locs.iloc[group_locs_idx].copy()
+        if pyramid is not None:
+            idx = spatial_index.query_circle(pyramid, xs, ys, x, y, pick_size)
+            group_locs = locs.iloc[idx].copy()
+        else:
+            x_, y_ = int(x / pick_size), int(y / pick_size)
+            block_locs_idx = _get_block_locs_at_numba(
+                x_,
+                y_,
+                index_blocks[4],
+                index_blocks[5],
+                index_blocks[6],
+                index_blocks[7],
+            )
+            block_locs = index_blocks[0].iloc[block_locs_idx]
+            group_locs_idx = lib.is_loc_at_numba(
+                x, y, locs_xy[:, block_locs_idx], pick_size
+            )
+            group_locs = block_locs.iloc[group_locs_idx].copy()
 
         if add_group:
             group_locs = lib.append_group(group_locs, i)
@@ -420,10 +447,12 @@ def picked_locs(
     add_group : boolean, optional
         True if group id should be added to locs. Each pick will be
         assigned a different id. Default is True.
-    index_blocks : tuple, optional
+    index_blocks : tuple or spatial_index.RenderIndexPyramid, optional
         Used only for circular picks. Precomputed index blocks for
-        localizations, see  ``get_index_blocks``.If None, they will be
-        calculated internally. Default is None.
+        localizations, see ``get_index_blocks`` (built with block size
+        ``pick_size``), or the pick-size independent pyramid of
+        ``spatial_index.build_render_index``. If None, index blocks
+        will be calculated internally. Default is None.
     callback : Callable[[int], None] | Literal["console"] | None, optional
         Function to display progress. If "console", tqdm is used to
         display the progress. If None, no progress is displayed. Default
@@ -574,38 +603,16 @@ def pick_similar(
     new_picks : list of tuples
         List of similar picks, in the same format as ``picks``.
     """
-    _valid_shapes = ("Circle", "Rectangle", "Square", "Box")
-    assert (
-        pick_shape in _valid_shapes
-    ), f"Invalid pick shape: {pick_shape}. Choose one of {_valid_shapes}."
+    _validate_pick_similar_args(pick_shape, pick_size, grid_spacing)
     if len(picks) == 0:
         return []
-    if pick_shape != "Box":
-        assert isinstance(
-            pick_size, (int, float)
-        ), "pick_size must be a number."
-    if grid_spacing is not None and pick_shape != "Rectangle":
-        raise ValueError(
-            "grid_spacing is only supported for rectangular picks."
-        )
 
     # the index grid size must guarantee that the 3x3 block neighborhood
     # around a pick's center contains all localizations in that pick
-    if pick_shape == "Rectangle":
-        length = _median_pick_length(picks)
-        block_size = np.sqrt(length**2 + pick_size**2) / 2
-    elif pick_shape == "Box":
-        box_w, box_h = _median_box_size(picks)
-        # a box reaches at most half its longer side in x and y
-        block_size = max(box_w, box_h) / 2
-    else:  # circles and squares reach at most pick_size / 2 in x and y
-        block_size = pick_size / 2
-    if index_blocks is not None and not np.isclose(
-        index_blocks[1], block_size
-    ):
-        index_blocks = None
-    if index_blocks is None:
-        index_blocks = get_index_blocks(locs, info, block_size)
+    block_size = _pick_similar_block_size(pick_shape, picks, pick_size)
+    index_blocks = _resolve_pick_similar_index_blocks(
+        locs, info, index_blocks, pick_shape, block_size
+    )
 
     if pick_shape == "Circle":
         return _pick_similar_circular(
@@ -616,6 +623,7 @@ def pick_similar(
             info, picks, pick_size, std_range, index_blocks
         )
     elif pick_shape == "Box":
+        box_w, box_h = _median_box_size(picks)
         return _pick_similar_box(
             info, picks, box_w, box_h, std_range, index_blocks
         )
@@ -623,6 +631,64 @@ def pick_similar(
         return _pick_similar_rectangular(
             info, picks, pick_size, std_range, index_blocks, grid_spacing
         )
+
+
+def _validate_pick_similar_args(
+    pick_shape: str, pick_size: float | None, grid_spacing: float | None
+) -> None:
+    """Validate ``pick_similar``'s shape/size/spacing arguments."""
+    _valid_shapes = ("Circle", "Rectangle", "Square", "Box")
+    assert (
+        pick_shape in _valid_shapes
+    ), f"Invalid pick shape: {pick_shape}. Choose one of {_valid_shapes}."
+    if pick_shape != "Box":
+        assert isinstance(
+            pick_size, (int, float)
+        ), "pick_size must be a number."
+    if grid_spacing is not None and pick_shape != "Rectangle":
+        raise ValueError(
+            "grid_spacing is only supported for rectangular picks."
+        )
+
+
+def _pick_similar_block_size(
+    pick_shape: str, picks: list[tuple], pick_size: float | None
+) -> float:
+    """Index-block half-size covering a pick's 3x3 block neighborhood."""
+    if pick_shape == "Rectangle":
+        length = _median_pick_length(picks)
+        return np.sqrt(length**2 + pick_size**2) / 2
+    if pick_shape == "Box":
+        box_w, box_h = _median_box_size(picks)
+        # a box reaches at most half its longer side in x and y
+        return max(box_w, box_h) / 2
+    # circles and squares reach at most pick_size / 2 in x and y
+    return pick_size / 2
+
+
+def _resolve_pick_similar_index_blocks(
+    locs: pd.DataFrame,
+    info: list[dict],
+    index_blocks: tuple | None,
+    pick_shape: str,
+    block_size: float,
+) -> tuple:
+    """Reuse ``index_blocks`` when compatible, else rebuild for ``block_size``.
+
+    A pyramid has no fixed block size; keep it only for circular picks,
+    which use it to characterize the current picks rather than to walk
+    the grid search (see ``_pick_similar_circular``).
+    """
+    if _is_pyramid(index_blocks):
+        if pick_shape != "Circle":
+            index_blocks = None
+    elif index_blocks is not None and not np.isclose(
+        index_blocks[1], block_size
+    ):
+        index_blocks = None
+    if index_blocks is None:
+        index_blocks = get_index_blocks(locs, info, block_size)
+    return index_blocks
 
 
 def _median_pick_length(picks: list[tuple]) -> float:
@@ -651,23 +717,32 @@ def _pick_similar_circular(
     r = d / 2
     d2 = d**2
     # extract n_locs and rmsd from current picks
-    if index_blocks is None:
+    pyramid = index_blocks if _is_pyramid(index_blocks) else None
+    if pyramid is not None or index_blocks is None:
+        # the grid search needs blocks of the pick size
         index_blocks = get_index_blocks(locs, info, r)
     locs_xy = index_blocks[0][["x", "y"]].to_numpy().T
+    if pyramid is not None:
+        xs = locs["x"].to_numpy()
+        ys = locs["y"].to_numpy()
     n_locs = []
     rmsd = []
     for i, pick in enumerate(picks):
         x, y = pick
-        block_locs_xy = get_block_locs_at_numba(
-            int(x / r),
-            int(y / r),
-            locs_xy,
-            index_blocks[4],
-            index_blocks[5],
-            index_blocks[6],
-            index_blocks[7],
-        )
-        pick_locs_xy = lib.locs_at_numba(x, y, block_locs_xy, r)
+        if pyramid is not None:
+            idx = spatial_index.query_circle(pyramid, xs, ys, x, y, r)
+            pick_locs_xy = np.stack((xs[idx], ys[idx]))
+        else:
+            block_locs_xy = get_block_locs_at_numba(
+                int(x / r),
+                int(y / r),
+                locs_xy,
+                index_blocks[4],
+                index_blocks[5],
+                index_blocks[6],
+                index_blocks[7],
+            )
+            pick_locs_xy = lib.locs_at_numba(x, y, block_locs_xy, r)
         n_locs.append(pick_locs_xy.shape[1])
         rmsd.append(lib.rmsd_at_com(pick_locs_xy))
 
@@ -1939,17 +2014,26 @@ def _pick_similar_rectangle_kernel(
         Minimum and maximum RMSD along the center axis.
     min_across, max_across : float
         Minimum and maximum RMSD across the center axis.
-    xc_similar, yc_similar, theta_similar, length_similar, r_similar :
-    lib.FloatArray1D
-        Center, angle, length and circumscribed radius of the accepted
-        picks, seeded with the input picks.
+    xc_similar, yc_similar : lib.FloatArray1D
+        Centers of the accepted picks, seeded with the input picks.
+    theta_similar : lib.FloatArray1D
+        Angles of the accepted picks, seeded with the input picks.
+    length_similar : lib.FloatArray1D
+        Lengths of the accepted picks, seeded with the input picks.
+    r_similar : lib.FloatArray1D
+        Circumscribed radii of the accepted picks, seeded with the input
+        picks.
 
     Returns
     -------
-    xc_similar, yc_similar, theta_similar, length_similar, r_similar :
-    lib.FloatArray1D
-        Center, angle, length and circumscribed radius of the accepted
-        picks.
+    xc_similar, yc_similar : lib.FloatArray1D
+        Centers of the accepted picks.
+    theta_similar : lib.FloatArray1D
+        Angles of the accepted picks.
+    length_similar : lib.FloatArray1D
+        Lengths of the accepted picks.
+    r_similar : lib.FloatArray1D
+        Circumscribed radii of the accepted picks.
     """
     bootstrap_r = 0.5 * length
     for i in range(len(grid_x)):
@@ -2450,7 +2534,9 @@ def _next_frame_neighbor_distance_histogram(
     dnfl : lib.FloatArray1D
         Distance histogram of next frame neighbors.
     """
-    locs.sort_values(kind="quicksort", by="frame", inplace=True)
+    # sort a copy: callers (e.g. the Render GUI) hold position-aligned
+    # arrays such as group colors that an in-place sort would scramble
+    locs = locs.sort_values(kind="quicksort", by="frame")
     frame = locs["frame"].to_numpy()
     x = locs["x"].to_numpy()
     y = locs["y"].to_numpy()
@@ -2566,7 +2652,10 @@ def plot_frc(
     )
     ax.set_xlabel("Spatial frequency (nm\u207b\u00b9)")
     ax.set_ylabel("FRC")
-    ax.set_title(f"FIRE resolution: {res:.2f} nm")
+    if res is None:
+        ax.set_title("FIRE resolution: n/a (no 1/7 crossing)")
+    else:
+        ax.set_title(f"FIRE resolution: {res:.2f} nm")
     ax.legend()
     return fig
 
@@ -2577,6 +2666,7 @@ def frc(
     viewport: tuple[tuple[float, float], tuple[float, float]],
     *,
     random_seed: int = 42,
+    lp: float | None = None,
 ) -> dict:
     """Calculate the Fourier Ring Correlation (FRC) resolution.
 
@@ -2594,6 +2684,10 @@ def frc(
         corner.
     random_seed : int, optional
         Random seed for splitting the data into halves. Default is 42.
+    lp : float or None, optional
+        Localization precision (camera pixels) that sets the bin size of
+        the rendered images. If None (default), NeNA of ``locs`` is
+        used.
 
     Returns
     -------
@@ -2604,7 +2698,8 @@ def frc(
         (2 grayscale images rendered and masked).
     """
     pixelsize = lib.get_from_metadata(info, "Pixelsize", raise_error=True)
-    lp = nena(locs, info)[1]
+    if lp is None:
+        lp = nena(locs, info)[1]
     # correct for the viewport to be square
     viewport_width = viewport[1][1] - viewport[0][1]
     viewport_height = viewport[1][0] - viewport[0][0]
@@ -2647,6 +2742,102 @@ def frc(
         "images": images,
     }
     return frc_result
+
+
+def frc_rois(
+    locs: pd.DataFrame,
+    info: list[dict],
+    viewport: tuple[tuple[float, float], tuple[float, float]],
+    *,
+    n_rois: int = 30,
+    roi_size: float = 5000.0,
+    min_locs: int = 1000,
+    random_seed: int = 42,
+    callback: Callable[[int], None] | None = None,
+) -> dict:
+    """Calculate the FRC resolution in several random ROIs.
+
+    Places up to ``n_rois`` non-overlapping square ROIs in ``viewport``
+    (see ``lib.select_frc_rois``) and runs ``frc`` in each of them. The
+    image bin size is set by the NeNA of all ``locs``, computed once,
+    so that the ROIs are comparable. The spread of the resolutions
+    across ROIs estimates the uncertainty of the FRC resolution.
+
+    Parameters
+    ----------
+    locs : pd.DataFrame
+        Localization list.
+    info : list of dicts
+        Metadata of the localizations list.
+    viewport : tuple of floats
+        Region ((y_min, x_min), (y_max, x_max)) in camera pixels in
+        which the ROIs are placed.
+    n_rois : int, optional
+        Maximum number of ROIs. Default is 30.
+    roi_size : float, optional
+        Side length of the square ROIs in nm. Default is 5000.
+    min_locs : int, optional
+        Minimum number of localizations per ROI. Default is 1000.
+    random_seed : int, optional
+        Random seed for the ROI placement and the splitting into
+        halves. Default is 42.
+    callback : function or None, optional
+        Function to display progress, called with the number of ROIs
+        processed. If None, no progress is displayed.
+
+    Returns
+    -------
+    result : dict
+        Dictionary with keys "rois" (viewports of the ROIs in camera
+        pixels), "n_locs" (localizations per ROI), "frc_results"
+        (list of ``frc`` results, one per ROI), "resolutions" (in nm,
+        NaN where the FRC curve does not cross the 1/7 threshold) and
+        "lp" (NeNA in camera pixels).
+    """
+    rois = lib.select_frc_rois(
+        locs,
+        info,
+        viewport,
+        n_rois=n_rois,
+        roi_size=roi_size,
+        min_locs=min_locs,
+        random_seed=random_seed,
+    )
+    lp = nena(locs, info)[1]
+    x = locs["x"].to_numpy()
+    y = locs["y"].to_numpy()
+    n_locs = []
+    frc_results = []
+    for k, ((y0, x0), (y1, x1)) in enumerate(rois):
+        if callable(callback):
+            callback(k)
+        in_roi = (x > x0) & (y > y0) & (x < x1) & (y < y1)
+        n_locs.append(int(in_roi.sum()))
+        frc_result = frc(
+            locs.loc[in_roi],
+            info,
+            ((y0, x0), (y1, x1)),
+            random_seed=random_seed,
+            lp=lp,
+        )
+        # drop the rendered images: tens of ROIs would hold GBs
+        del frc_result["images"]
+        frc_results.append(frc_result)
+    if callable(callback):
+        callback(len(rois))
+    resolutions = np.array(
+        [
+            np.nan if _["resolution"] is None else _["resolution"]
+            for _ in frc_results
+        ]
+    )
+    return {
+        "rois": rois,
+        "n_locs": np.array(n_locs, dtype=int),
+        "frc_results": frc_results,
+        "resolutions": resolutions,
+        "lp": lp,
+    }
 
 
 def _frc(
@@ -3215,9 +3406,10 @@ def compute_dark_times(
     -------
     locs : pd.DataFrame
         Binding events with added 'dark' field/column, which contains
-        the dark time for each binding event. If a binding event is not
-        followed by another binding event in the same group, the dark
-        time is set to -1.
+        the dark time preceding each binding event in frames (see
+        ``dark_times`` for the convention). Binding events that are not
+        preceded by another binding event in the same group are
+        removed.
     """
     if "len" not in locs.columns:
         raise AttributeError(
@@ -3235,6 +3427,25 @@ def dark_times(
 ) -> lib.IntArray1D:
     """Calculate dark times for each binding event.
 
+    The dark time of a binding event is the number of frames without
+    signal between the end of the closest preceding binding event in
+    the same group and its own first frame, i.e.,
+    ``first_frame - previous_last_frame - 1``. For example, two binding
+    events of one frame each, in frames 100 and 5000, are separated by
+    a dark time of 4899 frames. Since ``link`` merges localizations
+    separated by up to ``max_dark_time`` frames without signal into one
+    binding event, dark times at the same site are longer than
+    ``max_dark_time``. Together with the bright time (``len``, see
+    ``link``), each counts the frames spent in its state, so that bright
+    plus dark time equals the time between the starts of consecutive
+    binding events.
+
+    Both are unbiased estimates of the underlying continuous times when
+    a frame is detected as bright once the binding event covers half of
+    it. With a lower detection threshold, bright times are overestimated
+    and dark times underestimated, by up to one frame each; with a
+    higher one, the other way round. Their sum is unbiased either way.
+
     Parameters
     ----------
     locs : pd.DataFrame
@@ -3246,9 +3457,14 @@ def dark_times(
     Returns
     -------
     dark : lib.IntArray1D
-        Array of dark times for each binding event. If a binding event
-        is not followed by another binding event in the same group, the
-        dark time is set to -1.
+        Array of dark times for each binding event in frames. If a
+        binding event is not preceded by another binding event in the
+        same group, the dark time is set to -1.
+
+    Notes
+    -----
+    Before Picasso 0.11.3, the dark time was ``first_frame -
+    previous_last_frame``, i.e., one frame longer than now.
     """
     frame = locs["frame"].to_numpy()
     lens = locs["len"].to_numpy()
@@ -3268,19 +3484,18 @@ def _dark_times(
     group: lib.IntArray1D,
     last_frame: lib.IntArray1D,
 ) -> lib.IntArray1D:
-    """Calculate dark times for each binding event."""
+    """Calculate dark times for each binding event, see
+    ``dark_times``."""
     N = len(frame)
-    max_frame = frame.max()
-    dark = max_frame * np.ones(len(frame), dtype=np.int32)
+    dark = -np.ones(N, dtype=np.int32)
     for i in range(N):
         for j in range(N):
-            if (group[i] == group[j]) and (i != j):
-                dark_ij = frame[i] - last_frame[j]
-                if (dark_ij > 0) and (dark_ij < dark[i]):
+            # j must end before i starts; checked before subtracting
+            # since the frames are unsigned
+            if (group[i] == group[j]) and (frame[i] > last_frame[j]):
+                dark_ij = frame[i] - last_frame[j] - 1
+                if (dark[i] == -1) or (dark_ij < dark[i]):
                     dark[i] = dark_ij
-    for i in range(N):
-        if dark[i] == max_frame:
-            dark[i] = -1
     return dark
 
 
@@ -3304,7 +3519,9 @@ def link(
     r_max : float, optional
         Maximum distance for linking localizations. Default is 0.05.
     max_dark_time : int, optional
-        Maximum dark time for linking localizations. Default is 1.
+        Maximum number of frames without a localization between two
+        localizations that are still linked into one binding event.
+        Default is 3.
     combine_mode : {'average', 'refit'}, optional
         Mode for combining linked localizations. 'average' calculates
         the average position and properties of the linked localizations,
@@ -3319,7 +3536,11 @@ def link(
     -------
     linked_locs : pd.DataFrame
         Linked localizations, i.e., binding events with their
-        properties.
+        properties. The column ``len`` holds the bright time of each
+        binding event in frames, counted from its first to its last
+        frame (``last_frame - first_frame + 1``), including frames
+        bridged by ``max_dark_time``. See ``dark_times`` for the
+        matching dark time convention.
     """
     if len(locs) == 0:  # special case of an empty localization list
         linked_locs = locs.copy()
@@ -4094,10 +4315,16 @@ def _link_loc_groups(  # noqa: C901
         columns["net_gradient"] = _link_group_mean(
             locs["net_gradient"].to_numpy(), link_group, n_locs, n_groups, n_
         )
-    for col in ("log_likelihood", "likelihood", "chi_square"):
+    for col in (
+        "log_likelihood",
+        "likelihood",
+        "chi_square",
+        "reduced_chi_square",
+    ):
         # "likelihood" is the old name of the column, kept for files saved
         # with earlier versions of Picasso. "chi_square" is its least-squares
-        # counterpart; averaged the same way (a mean over the linked locs).
+        # counterpart and "reduced_chi_square" the normalized form of both;
+        # averaged the same way (a mean over the linked locs).
         if col in locs.columns:
             columns[col] = _link_group_mean(
                 locs[col].to_numpy(), link_group, n_locs, n_groups, n_
@@ -4371,7 +4598,9 @@ def undrift_from_fiducials(
         pick_shape = "Circle"
         pick_radius = box / 2
         # passed-in index_blocks was built for a different radius; drop
-        index_blocks = None
+        # (the pyramid serves any radius)
+        if not _is_pyramid(index_blocks):
+            index_blocks = None
     else:
         # user-provided list of pick coordinates
         needs_size = pick_shape not in lib.PICK_SHAPES_WITHOUT_SIZE
@@ -4850,7 +5079,7 @@ def align_from_picked(
     picks : list of (2,) tuples
         Coordinates of picked regions as (x, y) tuples. See
         ``io.load_picks``.
-    pick_shape : str, optional
+    pick_shape : str
         Shape of the picks, one of ``lib.PICK_SHAPES``.
     pick_size : float or None, optional
         Size of the picks. For circular picks, the size is the diameter.
@@ -4870,11 +5099,11 @@ def align_from_picked(
 
     Returns
     -------
-    aligned_locs: list of pd.DataFrames
+    aligned_locs : list of pd.DataFrames
         List of aligned localization datasets, where the localizations
         have been shifted according to the average shift calculated from
         the picked localizations.
-    shifts: list of tuples
+    shifts : list of tuples
         List of (dx, dy) shifts applied to each localization dataset in
         `all_locs`, calculated as the average shift from the picked
         localizations. Returned only if `return_shifts` is True.
@@ -5367,8 +5596,9 @@ def _resi(
     if callable(progress_callback):  # close the progress dialog
         progress_callback(len(locs))
 
-    # Combine cluster centers from all channels
-    all_resi = pd.concat(resi_channels, ignore_index=True)
+    # Combine cluster centers from all channels; they carry the columns of
+    # their channel's localizations, which need not all be the same
+    all_resi = lib.concat_locs(resi_channels)
 
     # Rename 'group' to 'cluster_id' for clarity
     all_resi["cluster_id"] = all_resi["group"]

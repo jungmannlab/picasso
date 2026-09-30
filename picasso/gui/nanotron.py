@@ -81,8 +81,10 @@ class Generator(QtCore.QThread):
         Display pixel size used for rendering images (nm).
     expand : bool
         Whether to expand the dataset by rotating images (augmentation).
-    expand_paths : list of str
-        Paths to save the expanded images.
+    export : bool
+        Whether to export the generated images.
+    export_paths : list of str
+        Paths to save the exported images.
     parent : QWidget, optional
         Parent widget for the generator thread. None by default.
     """

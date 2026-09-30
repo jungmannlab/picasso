@@ -13,10 +13,13 @@ from __future__ import annotations
 
 import os.path
 import argparse
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 import pandas as pd
-from . import __version__
+from . import __version__, docs_url
 from .transforms import MODELS as TRANSFORM_MODELS
+
+if TYPE_CHECKING:  # imported lazily, like every analysis module here
+    from .wavelet import WaveletParameters
 
 
 def picasso_logo():
@@ -1060,6 +1063,12 @@ def _localize_load_3d_calibration(
 ) -> tuple[str, float, dict]:
     """Load 3D z-calibration, prompting interactively if needed.
 
+    Parameters
+    ----------
+    args : argparse.Namespace
+        Parsed ``picasso localize`` arguments; ``zc`` (calibration path)
+        and ``mf`` (magnification factor, 0 to prompt) are read.
+
     Returns
     -------
     tuple[str, float, dict]
@@ -1119,6 +1128,76 @@ _FIT_METHOD_MAP = {
 }
 
 
+def _add_identification_method_args(
+    parser: argparse.ArgumentParser, what: str = "spot"
+) -> None:
+    """Add the arguments that select the identification method (and the
+    wavelet settings), shared by every command that identifies spots or
+    beads. The wavelet defaults are left to ``wavelet.WaveletParameters``,
+    see ``_wavelet_from_args``."""
+    parser.add_argument(
+        "-im",
+        "--identification-method",
+        choices=["net-gradient", "wavelet"],
+        default="net-gradient",
+        help=(
+            f"how {what}s are identified: local maxima above the minimum net"
+            " gradient (the default), or B-spline wavelet segmentation"
+            " (Izeddin et al., Opt. Express, 2012), which ignores --gradient"
+        ),
+    )
+    parser.add_argument(
+        "--wavelet-threshold",
+        type=float,
+        default=None,
+        help=(
+            "threshold of the wavelet identification in units of the noise"
+            " standard deviation; default 0.5 (Izeddin et al. use 0.5-2)"
+        ),
+    )
+    parser.add_argument(
+        "--wavelet-noise",
+        choices=["image-std", "w1-mad"],
+        default=None,
+        help=(
+            "noise estimate of the wavelet identification: the standard"
+            " deviation of the frame (image-std, the default) or the median"
+            " absolute deviation of the first wavelet plane (w1-mad), which"
+            " is robust to dense spots and uneven background"
+        ),
+    )
+    parser.add_argument(
+        "--wavelet-min-area",
+        type=int,
+        default=None,
+        help=(
+            "smallest region (in pixels) kept by the wavelet identification;"
+            " default 4"
+        ),
+    )
+
+
+def _wavelet_from_args(
+    args: argparse.Namespace,
+) -> WaveletParameters | None:
+    """The wavelet identification settings given on the command line, or
+    None for the net gradient identification. Read with defaults, since
+    ``picasso.server.watcher`` builds its own argument namespace."""
+    if getattr(args, "identification_method", None) != "wavelet":
+        return None
+    from .wavelet import WaveletParameters
+
+    default = WaveletParameters()
+    threshold = getattr(args, "wavelet_threshold", None)
+    noise = getattr(args, "wavelet_noise", None)
+    min_area = getattr(args, "wavelet_min_area", None)
+    return WaveletParameters(
+        threshold=default.threshold if threshold is None else threshold,
+        noise=default.noise if noise is None else noise.replace("-", "_"),
+        min_area=default.min_area if min_area is None else min_area,
+    )
+
+
 def _localize_process_file(
     paths: str | list[str],
     i: int,
@@ -1145,12 +1224,38 @@ def _localize_process_file(
         The movie to process. Several paths (``--concat``) are read as
         one movie whose frames run through the files in that order; the
         results are saved next to the first file.
+    i : int
+        Index of the movie, for the progress message.
+    n_total : int
+        Total number of movies, for the progress message.
+    args : argparse.Namespace
+        Parsed ``picasso localize`` arguments.
+    box : int
+        Side length of the fitting box in camera pixels.
+    min_net_gradient : float or list of float
+        Minimum net gradient for identification; one value per ROI
+        region if a list.
+    roi : list or None
+        ROI regions, each ``[[y_min, x_min], [y_max, x_max]]``, or None
+        for the whole frame.
+    frame_bounds : list of list of int or None
+        Frame segments ``[start, end]`` (0-indexed, inclusive) to
+        analyze, or None for all frames.
+    camera_info : dict
+        Camera parameters (baseline, sensitivity, gain, QE).
+    convergence : float
+        Fit convergence criterion; 0 uses the fitting method's default.
+    max_iterations : int
+        Maximum number of fit iterations; 0 uses the fitting method's
+        default.
     z_params : tuple or None
         If 3D astigmatism fitting is active, a tuple
         ``(zpath, magnification_factor, z_calibration)``; else ``None``.
     spline_calibration : dict or None
         Cubic-spline PSF calibration when the fit method is a spline method;
         else ``None``. A 3D spline fit recovers z directly (no ``zfit``).
+    camera_calibration : dict or None, optional
+        Per-pixel sCMOS camera calibration, or None for a uniform camera.
     lateral_transforms : list or None
         Lateral corrections loaded separately from the calibration used
         for fitting (see ``--affine-calibration``), applied to x/y after
@@ -1216,6 +1321,12 @@ def _localize_process_file(
         "Temporal Median Window": args.temporal_median,
         "Gaussian Filter Sigma": args.gaussian_filter,
     }
+    wavelet = _wavelet_from_args(args)
+    if wavelet is not None:
+        from .localize import IDENTIFY_METHOD_WAVELET
+
+        parameters["Identification Method"] = IDENTIFY_METHOD_WAVELET
+        parameters.update(wavelet.to_info())
 
     locs, info = localize(
         movie,
@@ -1232,7 +1343,6 @@ def _localize_process_file(
         threaded=True,
         identification_progress_callback="console",
         fit_progress_callback="console",
-        return_info=True,
     )
 
     _localize_finish(
@@ -1328,6 +1438,7 @@ def _localize_regions(
         threaded=True,
         temporal_median_window=args.temporal_median,
         gaussian_filter_sigma=args.gaussian_filter,
+        wavelet=_wavelet_from_args(args),
         progress_callback="console",
     )
     print(
@@ -1414,6 +1525,23 @@ def _localize_finish(
 
     Parameters
     ----------
+    locs : pd.DataFrame
+        Fitted localizations.
+    info : list of dict
+        Metadata of the localizations.
+    path : str
+        Path of the movie; the output is saved next to it.
+    args : argparse.Namespace
+        Parsed ``picasso localize`` arguments.
+    z_params : tuple or None
+        If 3D astigmatism fitting is active, a tuple
+        ``(zpath, magnification_factor, z_calibration)``; else ``None``.
+    lateral_transforms : list or None
+        Lateral corrections loaded separately from the calibration used
+        for fitting (see ``_localize_process_file``).
+    spline_calibration : dict or None
+        Spline PSF calibration used for fitting, whose own lateral
+        corrections are not applied again; None if not a spline fit.
     suffix : str, optional
         Inserted into the output name before ``_locs``, e.g. ``"_ref"`` for
         one region of a split field of view. Default "" (one file per movie).
@@ -1523,32 +1651,26 @@ def _localize(args: argparse.Namespace) -> None:  # noqa: C901
 
     Parameters
     ----------
-    files : str
-        Path to the microscopy image files or a directory containing
-        image files.
-    fit_method : str
-        Method to use for fitting localizations. Options are:
-        - 'mle': Maximum Likelihood Estimation
-        - 'lq-3d': LQ 3D fitting
-        - 'lq-gpu-3d': LQ GPU 3D fitting
-    box_side_length : int
-        Side length of the box used for localization.
-    gradient : float
-        Minimum net gradient for localization.
-    roi : list of int
-        Region of interest defined as [y_min, x_min, y_max, x_max].
-    frame_bounds : list of list of int
-        Frame bounds defined as one or more [start_frame, end_frame]
-        segments, 0-indexed and inclusive. Several segments restrict the
-        analysis to the union of those (disjoint) frame ranges.
-    baseline : float
-        Baseline value for the camera.
-    sensitivity : float
-        Sensitivity of the camera.
-    gain : float
-        Gain of the camera.
-    qe : float
-        Not used in the calculations.
+    args : argparse.Namespace
+        Parsed ``picasso localize`` arguments. Among others:
+
+        - ``files`` (str): path to the microscopy image files or a
+          directory containing image files.
+        - ``fit_method`` (list of str): fitting method(s), e.g.
+          ``'mle'``, ``'lq-3d'`` or ``'lq-gpu-3d'``; one per ROI region
+          with ``regions_separately``.
+        - ``box_side_length`` (int): side length of the fitting box.
+        - ``gradient`` (list of float): minimum net gradient(s), one per
+          ROI region or a single one for all.
+        - ``roi`` (list of list of int): regions of interest, each
+          ``[y_min, x_min, y_max, x_max]``.
+        - ``frame_bounds`` (list of list of int): one or more
+          ``[start_frame, end_frame]`` segments, 0-indexed and inclusive.
+          Several segments restrict the analysis to the union of those
+          (disjoint) frame ranges.
+        - ``baseline``, ``sensitivity``, ``gain`` (float): camera
+          parameters.
+        - ``qe`` (float): not used in the calculations.
     """
     from . import localize
     from .io import save_info
@@ -1898,11 +2020,135 @@ def _camera_validate(args: argparse.Namespace) -> None:
         )
 
 
+def _parse_photon_ratios(args: argparse.Namespace):
+    """Parse optional candidate per-channel photon ratios for ratiometric
+    color assignment: "0.7,0.3;0.4,0.6" -> [[0.7, 0.3], [0.4, 0.6]]."""
+    if not getattr(args, "photon_ratios", None):
+        return None
+    ratios = [
+        [float(v) for v in row.split(",")]
+        for row in args.photon_ratios.split(";")
+        if row.strip()
+    ]
+    print(f"  ratiometric: {len(ratios)} candidate ratios")
+    return ratios
+
+
+def _parse_split_fov_regions(split_fov: str) -> list:
+    """Parse --split-fov regions: "y0,x0,y1,x1;y0,x0,y1,x1;..." ->
+    [[[y0,x0],[y1,x1]], ...]."""
+    regions = []
+    for row in split_fov.split(";"):
+        if not row.strip():
+            continue
+        v = [int(t) for t in row.split(",")]
+        if len(v) != 4:
+            raise ValueError(
+                "Each --split-fov region needs 4 ints y0,x0,y1,x1; got "
+                f"'{row}'."
+            )
+        regions.append([[v[0], v[1]], [v[2], v[3]]])
+    return regions
+
+
+def _spline_calibrate_split_fov(
+    args: argparse.Namespace, files, camera_info, registration, out_path
+) -> dict:
+    """Calibrate from a single movie whose channels are rectangular FOV
+    regions."""
+    from . import spline
+    from .io import load_movie
+
+    regions = _parse_split_fov_regions(args.split_fov)
+    print(f"Split-FOV calibration from {len(regions)} regions of one movie")
+    movie, info = load_movie(files[0])
+    return spline.calibrate_spline_split_fov(
+        movie,
+        info=info,
+        camera_info=camera_info,
+        box=args.box_side_length,
+        minimum_ng=args.gradient,
+        d=args.step,
+        regions=regions,
+        reference=getattr(args, "reference", 0) or 0,
+        frames_per_step=args.frames_per_step,
+        frame_order=args.frame_order,
+        z_binning=args.z_binning,
+        magnification_factor=args.magnification_factor,
+        correct_z_bias=args.correct_z_bias,
+        photon_ratios=_parse_photon_ratios(args),
+        model=registration,
+        path=out_path,
+        progress_callback=lambda i: print(f"  step {i}/3"),
+        wavelet=_wavelet_from_args(args),
+    )
+
+
+def _spline_calibrate_single(
+    args: argparse.Namespace, files, camera_info, out_path
+) -> dict:
+    """Calibrate from a single-channel bead z-stack movie."""
+    from . import spline
+    from .io import load_movie
+
+    movie, info = load_movie(files[0])
+    return spline.calibrate_spline(
+        movie,
+        info=info,
+        camera_info=camera_info,
+        box=args.box_side_length,
+        minimum_ng=args.gradient,
+        d=args.step,
+        frames_per_step=args.frames_per_step,
+        frame_order=args.frame_order,
+        z_binning=args.z_binning,
+        model=args.model,
+        magnification_factor=args.magnification_factor,
+        correct_z_bias=args.correct_z_bias,
+        path=out_path,
+        progress_callback=lambda i: print(f"  step {i}/3"),
+        wavelet=_wavelet_from_args(args),
+    )
+
+
+def _spline_calibrate_multichannel(
+    args: argparse.Namespace, files, camera_info, registration, out_path
+) -> dict:
+    """Calibrate from several single-channel bead z-stack movies."""
+    from . import spline
+    from .io import load_movie
+
+    print(f"Multichannel calibration from {len(files)} channels")
+    movies, infos, camera_infos = [], [], []
+    for f in files:
+        movie, info = load_movie(f)
+        movies.append(movie)
+        infos.append(info)
+        camera_infos.append(dict(camera_info))
+    return spline.calibrate_spline_multichannel(
+        movies,
+        infos=infos,
+        camera_infos=camera_infos,
+        box=args.box_side_length,
+        minimum_ng=args.gradient,
+        d=args.step,
+        frames_per_step=args.frames_per_step,
+        frame_order=args.frame_order,
+        z_binning=args.z_binning,
+        magnification_factor=args.magnification_factor,
+        correct_z_bias=args.correct_z_bias,
+        photon_ratios=_parse_photon_ratios(args),
+        model=registration,
+        path=out_path,
+        progress_callback=lambda i: print(f"  step {i}/3"),
+        wavelet=_wavelet_from_args(args),
+    )
+
+
 def _spline_calibrate(args: argparse.Namespace) -> None:
     """Build a cubic-spline PSF calibration from a bead z-stack movie."""
     from os.path import splitext
-    from . import localize, spline
-    from .io import load_movie
+    from . import spline
 
     picasso_logo()
     print("Spline PSF calibration")
@@ -1922,97 +2168,20 @@ def _spline_calibrate(args: argparse.Namespace) -> None:
         base, _ = splitext(files[0])
         out_path = base + "_spline_calib.hdf5"
 
-    # optional candidate per-channel photon ratios for ratiometric color
-    # assignment: "0.7,0.3;0.4,0.6" -> [[0.7, 0.3], [0.4, 0.6]]
-    def _parse_photon_ratios():
-        if getattr(args, "photon_ratios", None):
-            ratios = [
-                [float(v) for v in row.split(",")]
-                for row in args.photon_ratios.split(";")
-                if row.strip()
-            ]
-            print(f"  ratiometric: {len(ratios)} candidate ratios")
-            return ratios
-        return None
-
     split_fov = getattr(args, "split_fov", None)
     if split_fov and len(files) == 1:
-        # single movie; several rectangular FOV regions are the channels.
-        # "y0,x0,y1,x1;y0,x0,y1,x1;..." -> [[[y0,x0],[y1,x1]], ...]
-        regions = []
-        for row in split_fov.split(";"):
-            if not row.strip():
-                continue
-            v = [int(t) for t in row.split(",")]
-            if len(v) != 4:
-                raise ValueError(
-                    "Each --split-fov region needs 4 ints y0,x0,y1,x1; got "
-                    f"'{row}'."
-                )
-            regions.append([[v[0], v[1]], [v[2], v[3]]])
-        print(
-            f"Split-FOV calibration from {len(regions)} regions of one movie"
-        )
-        movie, info = load_movie(files[0])
-        calibration = spline.calibrate_spline_split_fov(
-            movie,
-            info=info,
-            camera_info=camera_info,
-            box=args.box_side_length,
-            minimum_ng=args.gradient,
-            d=args.step,
-            regions=regions,
-            reference=getattr(args, "reference", 0) or 0,
-            frames_per_step=args.frames_per_step,
-            frame_order=args.frame_order,
-            magnification_factor=args.magnification_factor,
-            correct_z_bias=args.correct_z_bias,
-            photon_ratios=_parse_photon_ratios(),
-            model=registration,
-            path=out_path,
-            progress_callback=lambda i: print(f"  step {i}/3"),
+        calibration = _spline_calibrate_split_fov(
+            args, files, camera_info, registration, out_path
         )
     elif len(files) == 1:
-        movie, info = load_movie(files[0])
-        calibration = spline.calibrate_spline(
-            movie,
-            info=info,
-            camera_info=camera_info,
-            box=args.box_side_length,
-            minimum_ng=args.gradient,
-            d=args.step,
-            frames_per_step=args.frames_per_step,
-            frame_order=args.frame_order,
-            model=args.model,
-            magnification_factor=args.magnification_factor,
-            correct_z_bias=args.correct_z_bias,
-            path=out_path,
-            progress_callback=lambda i: print(f"  step {i}/3"),
+        calibration = _spline_calibrate_single(
+            args, files, camera_info, out_path
         )
     else:
-        print(f"Multichannel calibration from {len(files)} channels")
-        movies, infos, camera_infos = [], [], []
-        for f in files:
-            movie, info = load_movie(f)
-            movies.append(movie)
-            infos.append(info)
-            camera_infos.append(dict(camera_info))
-        calibration = spline.calibrate_spline_multichannel(
-            movies,
-            infos=infos,
-            camera_infos=camera_infos,
-            box=args.box_side_length,
-            minimum_ng=args.gradient,
-            d=args.step,
-            frames_per_step=args.frames_per_step,
-            frame_order=args.frame_order,
-            magnification_factor=args.magnification_factor,
-            correct_z_bias=args.correct_z_bias,
-            photon_ratios=_parse_photon_ratios(),
-            model=registration,
-            path=out_path,
-            progress_callback=lambda i: print(f"  step {i}/3"),
+        calibration = _spline_calibrate_multichannel(
+            args, files, camera_info, registration, out_path
         )
+
     print("------------------------------------------")
     n_beads = calibration["n_beads"]
     n_used = spline.n_beads_used(calibration)
@@ -2064,6 +2233,7 @@ def _lateral_calibrate(args: argparse.Namespace) -> None:
         ref_path=args.reference,
         target_path=args.target,
         model=args.model,
+        wavelet=_wavelet_from_args(args),
     )
     if args.plot:
         localize.plot_lateral_calibration(qc, save_path=args.plot)
@@ -2130,29 +2300,25 @@ def _render(args: argparse.Namespace) -> None:
 
     Parameters
     ----------
-    files : str
-        Path to the localization files or a directory containing
-        HDF5 files.
-    disp_px_size : float
-        Size of the rendered pixel in nm.
-    blur_method : str
-        Defines localizations' blur. The string has to be one of
-        'gaussian', 'gaussian_iso', 'smooth', 'convolve'. If None, no
-        blurring is applied.
-    min_blur_width : float
-        Minimum width of the blur kernel in pixels.
-    vmin : float
-        Minimum value for the color scale.
-    vmax : float
-        Maximum value for the color scale.
-    cmap : str
-        Colormap to use for rendering. If None, the colormap from
-        user settings is used.
-    scaling : str
-        If 'yes', the image is scaled to the range [vmin, vmax].
-        If 'no', the image is not scaled.
-    silent : bool
-        If True, the rendered images are not opened automatically.
+    args : argparse.Namespace
+        Parsed ``picasso render`` arguments:
+
+        - ``files`` (str): path to the localization files or a directory
+          containing HDF5 files.
+        - ``disp_px_size`` (float): size of the rendered pixel in nm.
+        - ``blur_method`` (str): localizations' blur, one of
+          ``'gaussian'``, ``'gaussian_iso'``, ``'smooth'``,
+          ``'convolve'``. If None, no blurring is applied.
+        - ``min_blur_width`` (float): minimum width of the blur kernel
+          in pixels.
+        - ``vmin``, ``vmax`` (float): minimum and maximum of the color
+          scale.
+        - ``cmap`` (str): colormap to use for rendering. If None, the
+          colormap from user settings is used.
+        - ``scaling`` (str): if ``'yes'``, the image is scaled to the
+          range [vmin, vmax]; if ``'no'``, it is not scaled.
+        - ``silent`` (bool): if True, the rendered images are not opened
+          automatically.
     """
     from .lib import locs_glob_map
     from os.path import isdir
@@ -2257,8 +2423,15 @@ def _spinna_parse_distances(row) -> list:
 def _spinna_validate_parameters(
     parameters_filename: str,
 ) -> tuple:
-    """Validate the parameters file, create a unique result directory
-    name, and check that all required columns are present.
+    """Validate the parameters file and create a result directory name.
+
+    Also checks that all required columns are present; the result
+    directory name is made unique.
+
+    Parameters
+    ----------
+    parameters_filename : str
+        Path to the ``.csv`` file with the SPINNA fitting parameters.
 
     Returns
     -------
@@ -2304,6 +2477,56 @@ def _spinna_validate_parameters(
     return parameters, result_dir
 
 
+def _spinna_check_target_columns(row, target: str, le_fitting: bool) -> None:
+    """Raise if a target's required columns are missing from the row."""
+    for col_name in [f"{_}_{target}" for _ in ["label_unc", "exp_data"]]:
+        if col_name not in row.index:
+            raise ValueError(
+                f"Column {col_name} not found in the parameters file."
+            )
+    if not le_fitting and f"le_{target}" not in row.index:
+        raise ValueError(
+            f"Column le_{target} not found in the parameters file."
+        )
+
+
+def _spinna_parse_target_uncertainty(
+    row, target: str, le_fitting: bool
+) -> tuple:
+    """Parse ``label_unc_TARGET`` and ``le_TARGET`` for one target."""
+    if le_fitting:
+        label_unc = _parse_float_list(row[f"label_unc_{target}"])
+        if not label_unc:
+            raise ValueError(
+                f"label_unc_{target} must contain at least one value."
+            )
+        return label_unc, 1.0
+    return float(row[f"label_unc_{target}"]), float(row[f"le_{target}"]) / 100
+
+
+def _spinna_target_pixelsize(info) -> float:
+    """Recover the pixel size (nm) from a locs info list, defaulting to
+    130 when not found."""
+    for element in info:
+        # in newer versions it's Picasso vX.Y.Z Localize
+        if "Picasso" in element.values() and "Localize" in element.values():
+            if "Pixelsize" in element:
+                return element["Pixelsize"]
+    return 130
+
+
+def _spinna_stack_exp_data(locs, pixelsize: float) -> tuple:
+    """Stack loc coordinates (scaled to nm) into an (N, dim) array."""
+    import numpy as np
+
+    if "z" in locs.columns:
+        return (
+            np.stack((locs.x * pixelsize, locs.y * pixelsize, locs.z)).T,
+            3,
+        )
+    return np.stack((locs.x * pixelsize, locs.y * pixelsize)).T, 2
+
+
 def _spinna_load_target_data(
     row,
     targets: list,
@@ -2315,15 +2538,24 @@ def _spinna_load_target_data(
     When ``le_fitting`` is True, ``label_unc_TARGET`` is parsed as a
     comma-separated list of candidates (single values are still accepted),
     ``le_TARGET`` is not read (LE is what is being fit), and
-    ``n_simulated`` is the raw localisation count (no LE division).
+    ``n_simulated`` is the raw localization count (no LE division).
+
+    Parameters
+    ----------
+    row : pd.Series
+        One row of the parameters file.
+    targets : list of str
+        Names of the targets.
+    io : module
+        The ``picasso.io`` module, used to load the localizations.
+    le_fitting : bool, optional
+        Whether the labeling efficiency is fitted. Default is False.
 
     Returns
     -------
     tuple[dict, dict, dict, dict, int, dict]
         ``(label_unc, le, exp_data, n_simulated, dim, infos)``
     """
-    import numpy as np
-
     label_unc: dict = {}
     le: dict = {}
     exp_data: dict = {}
@@ -2332,49 +2564,15 @@ def _spinna_load_target_data(
     dim = 2
 
     for target in targets:
-        for col_name in [f"{_}_{target}" for _ in ["label_unc", "exp_data"]]:
-            if col_name not in row.index:
-                raise ValueError(
-                    f"Column {col_name} not found in the parameters file."
-                )
-        if not le_fitting and f"le_{target}" not in row.index:
-            raise ValueError(
-                f"Column le_{target} not found in the parameters file."
-            )
-
-        if le_fitting:
-            label_unc[target] = _parse_float_list(row[f"label_unc_{target}"])
-            if not label_unc[target]:
-                raise ValueError(
-                    f"label_unc_{target} must contain at least one value."
-                )
-            le[target] = 1.0
-        else:
-            label_unc[target] = float(row[f"label_unc_{target}"])
-            le[target] = float(row[f"le_{target}"]) / 100
+        _spinna_check_target_columns(row, target, le_fitting)
+        label_unc[target], le[target] = _spinna_parse_target_uncertainty(
+            row, target, le_fitting
+        )
 
         locs, info = io.load_locs(str(row[f"exp_data_{target}"]))
         infos[target] = info
-        pixelsize = 130
-        for element in info:
-            if (
-                "Picasso" in element.values()
-                and "Localize" in element.values()
-            ):  # in newer versions it's Picasso vX.Y.Z Localize
-                if "Pixelsize" in element:
-                    pixelsize = element["Pixelsize"]
-                    break
-
-        if "z" in locs.columns:
-            exp_data[target] = np.stack(
-                (locs.x * pixelsize, locs.y * pixelsize, locs.z)
-            ).T
-            dim = 3
-        else:
-            exp_data[target] = np.stack(
-                (locs.x * pixelsize, locs.y * pixelsize)
-            ).T
-            dim = 2
+        pixelsize = _spinna_target_pixelsize(info)
+        exp_data[target], dim = _spinna_stack_exp_data(locs, pixelsize)
 
         if le_fitting:
             n_simulated[target] = len(locs)
@@ -2384,60 +2582,108 @@ def _spinna_load_target_data(
     return label_unc, le, exp_data, n_simulated, dim, infos
 
 
+def _spinna_resolve_roi_3d(row) -> tuple:
+    """Resolve a homogeneous 3D ROI (volume, z_range) from a row.
+
+    Parameters
+    ----------
+    row : pd.Series
+        One row of the parameters file.
+
+    Returns
+    -------
+    tuple[float | None, float | None, bool]
+        ``(volume, z_range, apply_mask)``
+    """
+    if "volume" not in row.index:
+        return None, None, True
+    volume = float(row["volume"])
+    if "z_range" not in row.index:
+        raise ValueError(
+            "Column z_range not found in the parameters file."
+            " 3D simulation was specified with homogeneous"
+            " distribution. Please specify z_range."
+        )
+    return volume, float(row["z_range"]), False
+
+
+def _spinna_resolve_roi_2d(row, targets: list, infos: dict | None) -> tuple:
+    """Resolve a homogeneous 2D ROI (area) from a row.
+
+    If the ``area`` column is missing or empty, the area is recovered from
+    the experimental data metadata key ``"Area (um^2)"`` (taken from the
+    first target's info).
+
+    Parameters
+    ----------
+    row : pd.Series
+        One row of the parameters file.
+    targets : list of str
+        Names of the targets.
+    infos : dict or None
+        Metadata of the experimental data per target.
+
+    Returns
+    -------
+    tuple[float | None, bool]
+        ``(area, apply_mask)``
+    """
+    import pandas as pd
+    from . import lib
+
+    if "area" in row.index and pd.notna(row["area"]):
+        return float(row["area"]), False
+    if infos:
+        meta_area = lib.get_from_metadata(infos[targets[0]], "Area (um^2)")
+        if meta_area is not None:
+            return float(meta_area), False
+    return None, True
+
+
+def _spinna_resolve_mask_paths(row, targets: list) -> dict:
+    """Collect and validate the per-target mask filenames from a row."""
+    mask_paths = {}
+    for target in targets:
+        if f"mask_filename_{target}" not in row.index:
+            raise ValueError(
+                f"Column mask_filename_{target} not found in the"
+                " parameters file."
+            )
+        mask_paths[target] = row[f"mask_filename_{target}"]
+    return mask_paths
+
+
 def _spinna_resolve_roi(
     row, dim: int, targets: list, infos: dict | None = None
 ) -> tuple:
     """Determine ROI parameters for a row: homogeneous or masked.
 
-    For 2D rows, if the ``area`` column is missing or empty, the area is
-    recovered from the experimental data metadata key ``"Area (um^2)"``
-    (taken from the first target's info).
+    Parameters
+    ----------
+    row : pd.Series
+        One row of the parameters file.
+    dim : int
+        Dimensionality of the data, 2 or 3.
+    targets : list of str
+        Names of the targets.
+    infos : dict or None, optional
+        Metadata of the experimental data per target, used to recover
+        the 2D area. Default is None.
 
     Returns
     -------
     tuple[bool, dict, float | None, float | None, float | None]
         ``(apply_mask, mask_paths, area, volume, z_range)``
     """
-    import pandas as pd
-    from . import lib
-
     apply_mask = True
     area = volume = z_range = None
-    mask_paths = {}
 
     if dim == 3:
-        if "volume" in row.index:
-            volume = float(row["volume"])
-            apply_mask = False
-            if "z_range" not in row.index:
-                raise ValueError(
-                    "Column z_range not found in the parameters file."
-                    " 3D simulation was specified with homogeneous"
-                    " distribution. Please specify z_range."
-                )
-            z_range = float(row["z_range"])
+        volume, z_range, apply_mask = _spinna_resolve_roi_3d(row)
     elif dim == 2:
-        if "area" in row.index and pd.notna(row["area"]):
-            area = float(row["area"])
-            apply_mask = False
-        elif infos:
-            first_target = targets[0]
-            meta_area = lib.get_from_metadata(
-                infos[first_target], "Area (um^2)"
-            )
-            if meta_area is not None:
-                area = float(meta_area)
-                apply_mask = False
+        area, apply_mask = _spinna_resolve_roi_2d(row, targets, infos)
 
-    if apply_mask:
-        for target in targets:
-            if f"mask_filename_{target}" not in row.index:
-                raise ValueError(
-                    f"Column mask_filename_{target} not found in the"
-                    " parameters file."
-                )
-            mask_paths[target] = row[f"mask_filename_{target}"]
-
+    mask_paths = _spinna_resolve_mask_paths(row, targets) if apply_mask else {}
     return apply_mask, mask_paths, area, volume, z_range
 
 
@@ -2451,6 +2697,23 @@ def _spinna_compute_roi(
     z_range,
 ) -> tuple:
     """Resolve the simulation ROI for a row.
+
+    Parameters
+    ----------
+    targets : list of str
+        Names of the targets.
+    apply_mask : bool
+        Whether masks are used instead of a homogeneous ROI.
+    mask_paths : dict
+        Path of the ``.npy`` mask per target.
+    dim : int
+        Dimensionality of the data, 2 or 3.
+    area : float or None
+        Area of the 2D homogeneous ROI in um^2.
+    volume : float or None
+        Volume of the 3D homogeneous ROI in um^3.
+    z_range : float or None
+        Depth of the 3D homogeneous ROI in nm.
 
     Returns
     -------
@@ -2521,6 +2784,172 @@ def _spinna_build_mixer(
     )
 
 
+def _spinna_roi_results(
+    row, targets: list, apply_mask: bool, dim: int, area, volume, z_range
+) -> dict:
+    """Report the ROI (mask paths, or area/volume/z-range) used for a row."""
+    if apply_mask:
+        return {
+            "File location of masks": [
+                row[f"mask_filename_{target}"] for target in targets
+            ]
+        }
+    if dim == 2:
+        return {"Area (um^2)": area}
+    if dim == 3:
+        return {"Volume (um^3)": volume, "Z range (nm)": z_range}
+    return {}
+
+
+def _spinna_collect_le_fit_results(
+    row,
+    targets: list,
+    structures: list,
+    opt_props,
+    score,
+    label_unc: dict,
+    random_rot_mode: str,
+    dim: int,
+    granularity,
+    sim_repeats: int,
+    apply_mask: bool,
+    area,
+    volume,
+    z_range,
+    label_unc_search: dict | None,
+    distances_search: list | None,
+    best_distance: float | None,
+    le_values: dict | None,
+) -> dict:
+    """Assemble the results dict for an LE-fitting row."""
+    results: dict = {
+        "Molecular targets": targets,
+        "File location of experimental data": [
+            str(row[f"exp_data_{target}"]) for target in targets
+        ],
+        "Parameters search space granularity": granularity,
+        "Dimensionality": f"{dim}D",
+        "Rotation mode": random_rot_mode,
+        "Number of simulation repeats": sim_repeats,
+    }
+    if label_unc_search is not None:
+        for target in targets:
+            results[f"Label-uncertainty search space (nm) for {target}"] = (
+                ", ".join(f"{float(v):.2f}" for v in label_unc_search[target])
+            )
+    for target in targets:
+        results[f"Fitted label uncertainty (nm) for {target}"] = (
+            f"{float(label_unc[target]):.4f}"
+        )
+    if distances_search is not None:
+        results["Heterodimer distance search space (nm)"] = ", ".join(
+            f"{float(v):.2f}" for v in distances_search
+        )
+    if best_distance is not None:
+        results["Fitted heterodimer distance (nm)"] = (
+            f"{float(best_distance):.4f}"
+        )
+    if le_values is not None:
+        for target in targets:
+            results[f"Fitted labeling efficiency (%) for {target}"] = (
+                f"{float(le_values[target]):.2f}"
+            )
+    results["Best fitting structure proportions (%)"] = ", ".join(
+        f"{s.title}: {float(p):.2f}" for s, p in zip(structures, opt_props)
+    )
+    results["Modified Kolmogorov-Smirnov score"] = score
+    results.update(
+        _spinna_roi_results(
+            row, targets, apply_mask, dim, area, volume, z_range
+        )
+    )
+    return results
+
+
+def _spinna_relative_proportions(
+    targets: list, structures: list, mixer, opt_props, n_simulated: dict
+) -> dict:
+    """Report each target's relative proportion across structures."""
+    import numpy as np
+
+    opt_props_ = opt_props[0] if isinstance(opt_props, tuple) else opt_props
+    results = {}
+    for target in targets:
+        rel_props = mixer.convert_props_for_target(
+            opt_props_, target, n_simulated
+        )
+        idx_valid = np.where(rel_props != np.inf)[0]
+        value = ", ".join(
+            [f"{structures[i].title}: {rel_props[i]:.2f}%" for i in idx_valid]
+        )
+        results[f"Relative proportions of {target} in"] = value
+    return results
+
+
+def _spinna_collect_structure_results(
+    row,
+    targets: list,
+    structures: list,
+    mixer,
+    opt_props,
+    score,
+    label_unc: dict,
+    le: dict,
+    random_rot_mode: str,
+    dim: int,
+    granularity,
+    N_structures: dict,
+    sim_repeats: int,
+    apply_mask: bool,
+    area,
+    volume,
+    z_range,
+    n_simulated: dict,
+) -> dict:
+    """Assemble the results dict for a structure-fitting row."""
+    results: dict = {
+        "File location of structures": row["structures_filename"],
+        "Molecular targets": targets,
+        "File location of experimenal data": [
+            str(row[f"exp_data_{target}"]) for target in targets
+        ],
+        "Labeling efficiency (%)": [le[target] * 100 for target in targets],
+        "Label uncertainty (nm)": list(label_unc.values()),
+        "Rotation mode": random_rot_mode,
+        "Dimensionality": f"{dim}D",
+        "Parameters search space granularity": granularity,
+        "Fitted structures names": list(N_structures.keys()),
+        "Number of simulation repeats": sim_repeats,
+    }
+
+    if isinstance(opt_props, tuple):
+        props_mean, props_std = opt_props
+        results["Modified Kolmogorov-Smirnov score +/- s.d."] = score
+        results["Fitted proportions of structures"] = ", ".join(
+            [
+                f"{props_mean[i]:.2f} +/- {props_std[i]:.2f}%"
+                for i in range(len(props_mean))
+            ]
+        )
+    else:
+        results["Modified Kolmogorov-Smirnov score"] = score
+        results["Fitted proportions of structures"] = opt_props
+
+    if len(targets) > 1:
+        results.update(
+            _spinna_relative_proportions(
+                targets, structures, mixer, opt_props, n_simulated
+            )
+        )
+
+    results.update(
+        _spinna_roi_results(
+            row, targets, apply_mask, dim, area, volume, z_range
+        )
+    )
+    return results
+
+
 def _spinna_collect_results(
     row,
     targets: list,
@@ -2554,117 +2983,56 @@ def _spinna_collect_results(
     values, fitted label uncertainty and heterodimer distance (plus the
     search spaces used), mirroring the GUI's Fit LE summary keys.
     """
-    import numpy as np
     from datetime import datetime
 
-    results: dict = {}
-    results["Date"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    results = {"Date": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
 
     if le_fitting:
-        results["Molecular targets"] = targets
-        results["File location of experimental data"] = [
-            str(row[f"exp_data_{target}"]) for target in targets
-        ]
-        results["Parameters search space granularity"] = granularity
-        results["Dimensionality"] = f"{dim}D"
-        results["Rotation mode"] = random_rot_mode
-        results["Number of simulation repeats"] = sim_repeats
-        if label_unc_search is not None:
-            for target in targets:
-                results[
-                    f"Label-uncertainty search space (nm) for {target}"
-                ] = ", ".join(
-                    f"{float(v):.2f}" for v in label_unc_search[target]
-                )
-        for target in targets:
-            results[f"Fitted label uncertainty (nm) for {target}"] = (
-                f"{float(label_unc[target]):.4f}"
+        results.update(
+            _spinna_collect_le_fit_results(
+                row,
+                targets,
+                structures,
+                opt_props,
+                score,
+                label_unc,
+                random_rot_mode,
+                dim,
+                granularity,
+                sim_repeats,
+                apply_mask,
+                area,
+                volume,
+                z_range,
+                label_unc_search,
+                distances_search,
+                best_distance,
+                le_values,
             )
-        if distances_search is not None:
-            results["Heterodimer distance search space (nm)"] = ", ".join(
-                f"{float(v):.2f}" for v in distances_search
-            )
-        if best_distance is not None:
-            results["Fitted heterodimer distance (nm)"] = (
-                f"{float(best_distance):.4f}"
-            )
-        if le_values is not None:
-            for target in targets:
-                results[f"Fitted labeling efficiency (%) for {target}"] = (
-                    f"{float(le_values[target]):.2f}"
-                )
-        results["Best fitting structure proportions (%)"] = ", ".join(
-            f"{s.title}: {float(p):.2f}" for s, p in zip(structures, opt_props)
-        )
-        results["Modified Kolmogorov-Smirnov score"] = score
-
-        if apply_mask:
-            results["File location of masks"] = [
-                row[f"mask_filename_{target}"] for target in targets
-            ]
-        else:
-            if dim == 2:
-                results["Area (um^2)"] = area
-            elif dim == 3:
-                results["Volume (um^3)"] = volume
-                results["Z range (nm)"] = z_range
-        return results
-
-    results["File location of structures"] = row["structures_filename"]
-    results["Molecular targets"] = targets
-    results["File location of experimenal data"] = [
-        str(row[f"exp_data_{target}"]) for target in targets
-    ]
-    results["Labeling efficiency (%)"] = [
-        le[target] * 100 for target in targets
-    ]
-    results["Label uncertainty (nm)"] = list(label_unc.values())
-    results["Rotation mode"] = random_rot_mode
-    results["Dimensionality"] = f"{dim}D"
-    results["Parameters search space granularity"] = granularity
-    results["Fitted structures names"] = list(N_structures.keys())
-    results["Number of simulation repeats"] = sim_repeats
-
-    if isinstance(opt_props, tuple):
-        props_mean, props_std = opt_props
-        results["Modified Kolmogorov-Smirnov score +/- s.d."] = score
-        results["Fitted proportions of structures"] = ", ".join(
-            [
-                f"{props_mean[i]:.2f} +/- {props_std[i]:.2f}%"
-                for i in range(len(props_mean))
-            ]
         )
     else:
-        results["Modified Kolmogorov-Smirnov score"] = score
-        results["Fitted proportions of structures"] = opt_props
-
-    if len(targets) > 1:
-        for target in targets:
-            opt_props_ = (
-                opt_props[0] if isinstance(opt_props, tuple) else opt_props
+        results.update(
+            _spinna_collect_structure_results(
+                row,
+                targets,
+                structures,
+                mixer,
+                opt_props,
+                score,
+                label_unc,
+                le,
+                random_rot_mode,
+                dim,
+                granularity,
+                N_structures,
+                sim_repeats,
+                apply_mask,
+                area,
+                volume,
+                z_range,
+                n_simulated,
             )
-            rel_props = mixer.convert_props_for_target(
-                opt_props_, target, n_simulated
-            )
-            idx_valid = np.where(rel_props != np.inf)[0]
-            value = ", ".join(
-                [
-                    f"{structures[i].title}: {rel_props[i]:.2f}%"
-                    for i in idx_valid
-                ]
-            )
-            results[f"Relative proportions of {target} in"] = value
-
-    if apply_mask:
-        results["File location of masks"] = [
-            row[f"mask_filename_{target}"] for target in targets
-        ]
-    else:
-        if dim == 2:
-            results["Area (um^2)"] = area
-        elif dim == 3:
-            results["Volume (um^3)"] = volume
-            results["Z range (nm)"] = z_range
+        )
 
     return results
 
@@ -2736,6 +3104,68 @@ def _spinna_plot_nnd(
         plt.close(fig)
 
 
+def _spinna_row_rotation_mode(row) -> str:
+    """Read ``rotation_mode`` from a row, defaulting to "2D"."""
+    if "rotation_mode" in row.index:
+        if not isinstance(row["rotation_mode"], str):
+            print("Invalid rotation_mode. Using default: 2D")
+        else:
+            return str(row["rotation_mode"])
+    return "2D"
+
+
+def _spinna_row_nn_plotted(row) -> int:
+    """Read ``nn_plotted`` from a row, defaulting to 4."""
+    if "nn_plotted" in row.index:
+        if not isinstance(row["nn_plotted"], int):
+            print("Invalid nn_plotted. Using default: 4")
+        else:
+            return int(row["nn_plotted"])
+    return 4
+
+
+def _spinna_row_fitting_mode(row) -> str | None:
+    """Read ``fitting_mode`` from a row.
+
+    None means "use the per-branch default" (bayesian for standard
+    SPINNA, coarse-to-fine for LE fitting).
+    """
+    import pandas as pd
+
+    if "fitting_mode" not in row.index or pd.isna(row["fitting_mode"]):
+        return None
+    mode = str(row["fitting_mode"]).strip()
+    if mode in ("coarse-to-fine", "bayesian", "brute-force"):
+        return mode
+    print(
+        f"Invalid fitting_mode '{mode}'. Must be one of "
+        "'coarse-to-fine', 'bayesian', 'brute-force'. Using default."
+    )
+    return None
+
+
+def _spinna_row_targets_and_structures(
+    index: int, row, spinna, le_fitting: bool
+) -> tuple:
+    """Resolve ``(structures, targets)`` for a row.
+
+    ``structures`` is None when ``le_fitting`` is True, since LE fitting
+    does not use a structures file.
+    """
+    import pandas as pd
+
+    if le_fitting:
+        return None, _spinna_targets_from_row(row)
+    if "structures_filename" not in row.index or pd.isna(
+        row["structures_filename"]
+    ):
+        raise ValueError(
+            f"Row {index}: structures_filename is required when "
+            "le_fitting != 1."
+        )
+    return spinna.load_structures(row["structures_filename"])
+
+
 def _spinna_process_row(
     index: int,
     row,
@@ -2766,47 +3196,13 @@ def _spinna_process_row(
     save_filename, _ = os.path.splitext(row["save_filename"])
     save_filename = os.path.join(result_dir, os.path.basename(save_filename))
 
-    random_rot_mode = "2D"
-    if "rotation_mode" in row.index:
-        if not isinstance(row["rotation_mode"], str):
-            print("Invalid rotation_mode. Using default: 2D")
-        else:
-            random_rot_mode = str(row["rotation_mode"])
+    random_rot_mode = _spinna_row_rotation_mode(row)
+    nn_plotted = _spinna_row_nn_plotted(row)
+    fitting_mode = _spinna_row_fitting_mode(row)
 
-    nn_plotted = 4
-    if "nn_plotted" in row.index:
-        if not isinstance(row["nn_plotted"], int):
-            print("Invalid nn_plotted. Using default: 4")
-        else:
-            nn_plotted = int(row["nn_plotted"])
-
-    # None means "use the per-branch default" (bayesian for standard
-    # SPINNA, coarse-to-fine for LE fitting)
-    fitting_mode = None
-    if "fitting_mode" in row.index and pd.notna(row["fitting_mode"]):
-        mode = str(row["fitting_mode"]).strip()
-        if mode in ("coarse-to-fine", "bayesian", "brute-force"):
-            fitting_mode = mode
-        else:
-            print(
-                f"Invalid fitting_mode '{mode}'. Must be one of "
-                "'coarse-to-fine', 'bayesian', 'brute-force'. Using "
-                "default."
-            )
-
-    if le_fitting:
-        targets = _spinna_targets_from_row(row)
-    else:
-        if "structures_filename" not in row.index or pd.isna(
-            row["structures_filename"]
-        ):
-            raise ValueError(
-                f"Row {index}: structures_filename is required when "
-                "le_fitting != 1."
-            )
-        structures, targets = spinna.load_structures(
-            row["structures_filename"]
-        )
+    structures, targets = _spinna_row_targets_and_structures(
+        index, row, spinna, le_fitting
+    )
 
     label_unc, le, exp_data, n_simulated, dim, infos = (
         _spinna_load_target_data(
@@ -3283,6 +3679,66 @@ _PLUGIN_TRUST_WARNING = (
 )
 
 
+def _plugins_file_origin(name: str, by_file: dict) -> str:
+    """Describe where a plugin file came from: local, or registry+version."""
+    installed = by_file.get(name)
+    if installed is None:
+        return "local file"
+    pid, record = installed
+    version = record.get("version") or "?"
+    return f"registry: {pid} {version}"
+
+
+def _plugins_module_details(module) -> list:
+    """Summarize what an enabled plugin module contributes."""
+    from . import plugins
+
+    details = []
+    if getattr(module, "Plugin", None) is not None:
+        details.append("GUI menu entry")
+    commands = plugins.plugin_cli_commands(module)
+    if commands:
+        details.append("commands: " + ", ".join(commands))
+    try:
+        exports = plugins._api_names(module)
+    except Exception:  # noqa: BLE001
+        exports = {}
+    if exports:
+        details.append("API: " + ", ".join(sorted(exports)))
+    return details
+
+
+def _plugins_describe_file(path: str, state: dict, by_file: dict) -> bool:
+    """Print one plugin file's status and, if enabled, what it contributes.
+
+    Returns True if the file is enabled but failed to load.
+    """
+    from . import plugins
+
+    name = os.path.basename(path)
+    enabled = plugins.is_enabled(state, name)
+    origin = _plugins_file_origin(name, by_file)
+    print(f"  {'[x]' if enabled else '[ ]'} {name}  ({origin})")
+    if not enabled:
+        return False
+
+    # Only an enabled plugin may be imported, so only an enabled one
+    # can be asked what it provides.
+    try:
+        module = plugins._load_module_from_path(path)
+    except Exception:  # noqa: BLE001 - reported, not fatal
+        import traceback
+
+        print("        failed to load:")
+        for line in traceback.format_exc().rstrip().splitlines():
+            print(f"          {line}")
+        return True
+
+    for detail in _plugins_module_details(module):
+        print(f"        {detail}")
+    return False
+
+
 def _plugins_list() -> None:
     """Print every plugin file found, with what it contributes."""
     from . import io, plugins
@@ -3299,48 +3755,12 @@ def _plugins_list() -> None:
         for pid, record in state["plugins"].items()
         if record.get("file")
     }
-    failed = False
 
     print(f"Plugins in {directory}:\n")
+    failed = False
     for path in files:
-        name = os.path.basename(path)
-        enabled = plugins.is_enabled(state, name)
-        installed = by_file.get(name)
-        origin = "local file"
-        if installed is not None:
-            pid, record = installed
-            version = record.get("version") or "?"
-            origin = f"registry: {pid} {version}"
-        print(f"  {'[x]' if enabled else '[ ]'} {name}  ({origin})")
-
-        if not enabled:
-            continue
-        # Only an enabled plugin may be imported, so only an enabled one
-        # can be asked what it provides.
-        try:
-            module = plugins._load_module_from_path(path)
-        except Exception:  # noqa: BLE001 - reported, not fatal
-            import traceback
-
+        if _plugins_describe_file(path, state, by_file):
             failed = True
-            print("        failed to load:")
-            for line in traceback.format_exc().rstrip().splitlines():
-                print(f"          {line}")
-            continue
-        details = []
-        if getattr(module, "Plugin", None) is not None:
-            details.append("GUI menu entry")
-        commands = plugins.plugin_cli_commands(module)
-        if commands:
-            details.append("commands: " + ", ".join(commands))
-        try:
-            exports = plugins._api_names(module)
-        except Exception:  # noqa: BLE001
-            exports = {}
-        if exports:
-            details.append("API: " + ", ".join(sorted(exports)))
-        for detail in details:
-            print(f"        {detail}")
 
     disabled = plugins.disabled_plugin_files(state)
     if disabled:
@@ -3645,6 +4065,7 @@ def main():  # noqa: C901
             "needs re-tuning when this is changed"
         ),
     )
+    _add_identification_method_args(localize_parser)
     localize_parser.add_argument(
         "-cc",
         "--convergence",
@@ -3860,6 +4281,7 @@ def main():  # noqa: C901
         default=5000,
         help="minimum net gradient for bead detection",
     )
+    _add_identification_method_args(spline_calib_parser, what="bead")
     spline_calib_parser.add_argument(
         "-s",
         "--step",
@@ -3880,6 +4302,19 @@ def main():  # noqa: C901
         choices=["fov", "z"],
         default="fov",
         help="acquisition order when frames-per-step > 1",
+    )
+    spline_calib_parser.add_argument(
+        "-zb",
+        "--z-binning",
+        type=int,
+        default=1,
+        help=(
+            "number of consecutive z steps averaged into one slice of the PSF"
+            " model, so its axial knots are z-binning * step apart; e.g. 10"
+            " turns a 5 nm scan into 50 nm slices, which suppresses stage"
+            " jitter that is correlated between neighboring steps. Default 1"
+            " (no binning)"
+        ),
     )
     spline_calib_parser.add_argument(
         "-rm",
@@ -4038,6 +4473,7 @@ def main():  # noqa: C901
         default=5000,
         help="minimum net gradient for bead detection",
     )
+    _add_identification_method_args(lateral_parser, what="bead")
     lateral_parser.add_argument(
         "-px",
         "--pixelsize",
@@ -4133,10 +4569,7 @@ def main():  # noqa: C901
     )
 
     # spinna
-    _spinna_docs_url = (
-        "https://picassosr.readthedocs.io/en/latest/spinna.html"
-        "#command-window-batch-analysis"
-    )
+    _spinna_docs_url = docs_url("spinna.html#command-window-batch-analysis")
     spinna_parser = subparsers.add_parser(
         "spinna",
         help=(

@@ -18,7 +18,7 @@ import numpy as np
 import pandas as pd
 from PyQt6 import QtCore, QtGui, QtWidgets
 
-from .. import io, lib, average, render, __version__
+from .. import io, lib, average, render, __version__, docs_url
 from .app import run_gui
 
 
@@ -517,7 +517,7 @@ class Window(QtWidgets.QMainWindow):
         The dialog for adjusting processing parameters.
     """
 
-    DOCS_URL = "https://picassosr.readthedocs.io/en/latest/average.html"
+    DOCS_URL = docs_url("average.html")
 
     def __init__(self) -> None:
         super().__init__()

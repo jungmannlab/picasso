@@ -17,6 +17,7 @@ import logging
 import re
 import json
 import os
+import shutil
 import threading
 import warnings
 from typing import Callable, TYPE_CHECKING
@@ -228,8 +229,8 @@ def load_ims(
     info = {}
 
     info["Frames"] = file.n_frames
-    info["Height"] = file.x
-    info["Width"] = file.y
+    info["Height"] = file.y
+    info["Width"] = file.x
     info["Channel"] = channel
 
     if file.pixelsize is not None:
@@ -280,8 +281,8 @@ def load_ims_all(path: str) -> tuple[list[np.memmap], list[list[dict]]]:
 
         info = {}
         info["Frames"] = file.n_frames
-        info["Height"] = file.x
-        info["Width"] = file.y
+        info["Height"] = file.y
+        info["Width"] = file.x
         info["Channel"] = channel
 
         if file.pixelsize is not None:
@@ -1410,10 +1411,106 @@ def load_drift(path: str) -> pd.DataFrame | None:
     return drift_df
 
 
+_settings_log = logging.getLogger(__name__)
+#: suffix of the copy kept of a settings file that could not be parsed
+SETTINGS_BROKEN_SUFFIX = ".broken"
+#: suffix of the copy kept of the previous settings file before a save
+SETTINGS_BACKUP_SUFFIX = ".bak"
+# (message, path of the kept copy or None, file signature) of the last
+# settings file that could not be read; sticky for the process so a GUI
+# can report it once (``dismiss_settings_load_error``)
+_settings_load_error: tuple[str, str | None, tuple | None] | None = None
+
+
+def _file_signature(path: str) -> tuple | None:
+    """Cheap identity of a file's contents (mtime, size), None if
+    unreadable."""
+    try:
+        stat = os.stat(path)
+    except OSError:
+        return None
+    return (stat.st_mtime_ns, stat.st_size)
+
+
+def _record_broken_settings(path: str, error: BaseException) -> None:
+    """Keep a copy of an unparsable settings file and warn once about
+    it. Every Picasso tool loads the settings, changes its own keys and
+    writes the whole file back, so a file that cannot be read would
+    otherwise be silently replaced by the next save, losing every other
+    section."""
+    global _settings_load_error
+    signature = _file_signature(path)
+    if (
+        _settings_load_error is not None
+        and signature is not None
+        and _settings_load_error[2] == signature
+    ):
+        return  # this very file was already reported
+    kept: str | None = path + SETTINGS_BROKEN_SUFFIX
+    try:
+        shutil.copy2(path, kept)
+    except OSError:
+        kept = None
+    _settings_log.warning(
+        "The user settings file %s could not be read (%s); default "
+        "settings are used%s.",
+        path,
+        error,
+        f" and a copy of the file was kept as {kept}" if kept else "",
+    )
+    _settings_load_error = (str(error), kept, signature)
+
+
+def settings_load_error() -> tuple[str, str | None] | None:
+    """Return the settings load error recorded in this process, if any.
+
+    An error is recorded when a settings file could not be read (see
+    ``load_user_settings``) and kept until
+    ``dismiss_settings_load_error`` is called.
+
+    Returns
+    -------
+    error : tuple or None
+        ``(message, path of the kept copy or None)`` if an error is
+        recorded, None otherwise.
+    """
+    if _settings_load_error is None:
+        return None
+    return _settings_load_error[:2]
+
+
+def dismiss_settings_load_error() -> None:
+    """Forget a recorded settings load error (after reporting it)."""
+    global _settings_load_error
+    _settings_load_error = None
+
+
+def settings_file_is_broken() -> bool:
+    """Check whether the settings file on disk could not be read.
+
+    Returns
+    -------
+    bool
+        True if the settings file on disk is (still) the one that could
+        not be read, i.e., until it is rewritten or fixed.
+    """
+    return (
+        _settings_load_error is not None
+        and _settings_load_error[2] is not None
+        and _settings_load_error[2]
+        == _file_signature(_user_settings_filename())
+    )
+
+
 def load_user_settings() -> lib.AutoDict:
     """Load user settings from a YAML file containing information such
     as the default directory for loading/saving files, Render color map,
     Localize parameters, etc.
+
+    A file that cannot be parsed yields default (empty) settings, as
+    before, but is never lost: a copy is kept next to it as
+    ``settings.yaml.broken``, a warning is logged and the error is
+    reported through ``settings_load_error`` so a GUI can tell the user.
 
     Returns
     -------
@@ -1427,14 +1524,37 @@ def load_user_settings() -> lib.AutoDict:
     except FileNotFoundError:
         return lib.AutoDict()
     try:
-        settings = yaml.load(settings_file, Loader=yaml.FullLoader)
-        settings_file.close()
-    except Exception as e:
-        print(e)
-        print("Error reading user settings, Reset.")
+        with settings_file:
+            settings = yaml.load(settings_file, Loader=yaml.FullLoader)
+    except Exception as error:
+        _record_broken_settings(settings_filename, error)
+        return lib.AutoDict()
+    if settings is not None and not isinstance(settings, dict):
+        _record_broken_settings(
+            settings_filename,
+            TypeError("the settings file must be a YAML mapping (key: value)"),
+        )
+        return lib.AutoDict()
     if not settings:
         return lib.AutoDict()
     return lib.AutoDict(settings)
+
+
+def _backup_user_settings(settings_filename: str) -> None:
+    """Keep the previous settings file as ``settings.yaml.bak`` before
+    it is overwritten, so the last good version is always at hand. A
+    file recorded as unreadable is not backed up (its copy is
+    ``settings.yaml.broken``), so the ``.bak`` keeps the last good one."""
+    if not os.path.exists(settings_filename) or settings_file_is_broken():
+        return
+    try:
+        shutil.copy2(
+            settings_filename, settings_filename + SETTINGS_BACKUP_SUFFIX
+        )
+    except OSError as error:
+        _settings_log.warning(
+            "Could not back up the user settings file before saving: %s", error
+        )
 
 
 def save_info(
@@ -1473,6 +1593,11 @@ def save_user_settings(settings: dict) -> None:
 
     For example, the default directory for loading and saving files.
 
+    The previous file is kept as ``settings.yaml.bak`` (see
+    ``_backup_user_settings``) and the new one is written to a temporary
+    file first and renamed into place, so an interrupted save cannot
+    leave a half-written file behind.
+
     Parameters
     ----------
     settings : dict
@@ -1482,8 +1607,11 @@ def save_user_settings(settings: dict) -> None:
     settings = _to_dict_walk(settings)
     settings_filename = _user_settings_filename()
     os.makedirs(os.path.dirname(settings_filename), exist_ok=True)
-    with open(settings_filename, "w") as settings_file:
+    _backup_user_settings(settings_filename)
+    temporary = settings_filename + ".tmp"
+    with open(temporary, "w") as settings_file:
         yaml.dump(dict(settings), settings_file, default_flow_style=False)
+    os.replace(temporary, settings_filename)
 
 
 def _save_metadata_in_yaml() -> bool:
@@ -1857,6 +1985,32 @@ class ND2Movie(AbstractPicassoMovie):
         self.dask = self.nd2file.to_dask()
         self.sizes = self.nd2file.sizes
 
+        self._validate_nd2_dimensions()
+        self._resolve_nd2_channels(channel)
+
+        # Pixel access only needs the dimensions checked above; parsing
+        # the (often vendor-specific) metadata may still fail. Keep that
+        # failure recoverable so the movie can be loaded with manually
+        # entered metadata (info() then returns None).
+        try:
+            self.meta = self.get_metadata(self.nd2file)
+        except Exception:
+            self.meta = None
+        self._shape = [
+            self.nd2file.sizes[self.frame_axis],
+            self.nd2file.sizes["X"],
+            self.nd2file.sizes["Y"],
+        ]
+
+    def _validate_nd2_dimensions(self):
+        """Check required dimensions and set self.frame_axis.
+
+        Raises
+        ------
+        KeyError
+            If a required dimension is missing or an unsupported extra
+            dimension is present.
+        """
         for dim in ["Y", "X"]:  # always required
             if dim not in self.nd2file.sizes.keys():
                 raise KeyError(
@@ -1887,8 +2041,12 @@ class ND2Movie(AbstractPicassoMovie):
                 )
             )
 
-        # Channel selection. Single-channel files default to channel 0, so
-        # their behavior is unchanged.
+    def _resolve_nd2_channels(self, channel: int):
+        """Set n_channels, the selected channel and channel names.
+
+        Single-channel files default to channel 0, so their behavior
+        is unchanged.
+        """
         self.n_channels = int(self.nd2file.sizes.get("C", 1))
         self._channel = channel if 0 <= channel < self.n_channels else 0
         self.channels = [f"Channel {i}" for i in range(self.n_channels)]
@@ -1898,20 +2056,6 @@ class ND2Movie(AbstractPicassoMovie):
                 self.channels = [str(n) for n in names]
         except Exception:
             pass
-
-        # Pixel access only needs the dimensions checked above; parsing
-        # the (often vendor-specific) metadata may still fail. Keep that
-        # failure recoverable so the movie can be loaded with manually
-        # entered metadata (info() then returns None).
-        try:
-            self.meta = self.get_metadata(self.nd2file)
-        except Exception:
-            self.meta = None
-        self._shape = [
-            self.nd2file.sizes[self.frame_axis],
-            self.nd2file.sizes["X"],
-            self.nd2file.sizes["Y"],
-        ]
 
     def info(self) -> dict:
         if self.meta is None:
@@ -2098,8 +2242,9 @@ class ND2Movie(AbstractPicassoMovie):
 
     @classmethod
     def nd2metadata_to_dict(cls, meta: dict) -> dict:
-        """Restructure the 'metadata' field from the package nd2 into a
-        dict for independent use.
+        """Restructure the nd2 package's 'metadata' field into a dict.
+
+        The dict can be used independently of the nd2 package, see
         https://github.com/tlambert03/nd2/blob/main/src/nd2/structures.py
 
         Parameters
@@ -2642,8 +2787,28 @@ def _mm_metadata_from_tifffile(tif: "tifffile.TiffFile") -> dict:
     a non-MicroManager TIFF). All parsing is wrapped defensively so that a
     malformed or absent block never raises."""
     out = {}
+    out.update(_mm_per_image_metadata_from_tifffile(tif))
+    out.update(_mm_acquisition_comments_from_tifffile(tif))
+    return out
 
-    # Per-image MicroManager metadata lives in tag 51123 on the first IFD.
+
+def _mm_per_image_metadata_from_tifffile(tif: "tifffile.TiffFile") -> dict:
+    """Extract the per-image MicroManager metadata of a TIFF file.
+
+    Reads tag 51123 on the first IFD into ``"Micro-Manager Metadata"``
+    and ``"Camera"``.
+
+    Parameters
+    ----------
+    tif : tifffile.TiffFile
+        The opened TIFF file.
+
+    Returns
+    -------
+    dict
+        Empty if the tag is absent or malformed.
+    """
+    out = {}
     try:
         raw = None
         tag = tif.pages[0].tags.get(51123)
@@ -2669,9 +2834,27 @@ def _mm_metadata_from_tifffile(tif: "tifffile.TiffFile") -> dict:
             out["Camera"] = mm_info.get("Camera", "None")
     except Exception:
         pass
+    return out
 
-    # Acquisition comments live in the file-level Comments/Summary block,
-    # which tifffile parses into ``micromanager_metadata``.
+
+def _mm_acquisition_comments_from_tifffile(tif: "tifffile.TiffFile") -> dict:
+    """Extract the file-level MicroManager acquisition comments.
+
+    The comments are stored under ``"Micro-Manager Acquisition
+    Comments"``. They live in the Comments/Summary block, which tifffile
+    parses into ``micromanager_metadata``.
+
+    Parameters
+    ----------
+    tif : tifffile.TiffFile
+        The opened TIFF file.
+
+    Returns
+    -------
+    dict
+        Empty if the block is absent, malformed or empty.
+    """
+    out = {}
     try:
         mm_file = tif.micromanager_metadata or {}
         comments_block = mm_file.get("Comments")
@@ -2682,7 +2865,6 @@ def _mm_metadata_from_tifffile(tif: "tifffile.TiffFile") -> dict:
                 out["Micro-Manager Acquisition Comments"] = summary.split("\n")
     except Exception:
         pass
-
     return out
 
 
@@ -2836,13 +3018,23 @@ class TiffMap(_PerThreadFileHandles):
     ``n_frames`` matches the real number of image planes."""
 
     def __init__(self, path: str, verbose: bool = False, progress=None):
-        """Open the TIFF file with tifffile and extract the geometry,
-        data type and per-page layout needed for lazy frame access.
+        """Open the TIFF file and extract its frame layout.
 
-        ``progress`` is an optional ``callable(done, total)`` invoked as
-        the per-page IFD scan in ``_build_offsets`` proceeds, so the GUI
-        can show a smooth determinate bar while a single large movie is
-        opened. It is throttled to at most ~200 calls per file."""
+        The geometry, data type and per-page layout needed for lazy
+        frame access are read with tifffile.
+
+        Parameters
+        ----------
+        path : str
+            Path to the TIFF file.
+        verbose : bool, optional
+            If True, print the path being read. Default is False.
+        progress : callable, optional
+            ``callable(done, total)`` invoked as the per-page IFD scan
+            in ``_build_offsets`` proceeds, so the GUI can show a smooth
+            determinate bar while a single large movie is opened. It is
+            throttled to at most ~200 calls per file. Default is None.
+        """
         if verbose:
             print("Reading info from {}".format(path))
         self.path = os.path.abspath(path)
@@ -3009,49 +3201,70 @@ class TiffMap(_PerThreadFileHandles):
                 progress(done, n_pages)
 
         if self._imagej_planes is not None:
-            # ImageJ contiguous stack: one IFD, then every plane's data
-            # laid out back-to-back from the first plane's offset. Derive
-            # each frame's offset arithmetically instead of from
-            # (non-existent) per-page IFDs. Guard against a truncated file
-            # by keeping only the planes that physically fit.
-            base = int(self._pages[0].dataoffsets[0])
-            n = self._imagej_planes
-            try:
-                file_size = os.path.getsize(self.path)
-                fit = (file_size - base) // self._frame_nbytes
-                if fit < n:
-                    n = max(fit, 0)
-            except OSError:
-                pass
-            offsets = [base + i * self._frame_nbytes for i in range(n)]
-            if progress is not None:
-                progress(n, n)
-            return offsets, n
+            return self._build_offsets_imagej(progress)
 
         if not self._uncompressed:
-            # Compressed / tiled: no fast offset path. In the lightweight
-            # frame mode every frame reports page 0's shape, so a stray
-            # IFD cannot be told apart without reading every IFD (costly
-            # on network storage). Probe the first and last extra pages
-            # so an incompatible one triggers the full-page fallback;
-            # with full pages (after that fallback, or for LSM) the
-            # shapes are real, so drop trailing mismatched IFDs.
-            if (not self._tif.is_lsm) and self._tif.pages.useframes:
-                if n_pages > 1:
-                    _ = self._pages[1].dataoffsets
-                    _ = self._pages[n_pages - 1].dataoffsets
-                report(n_pages)
-                return None, n_pages
-            n_frames = 0
-            for i, page in enumerate(self._pages):
-                if tuple(page.shape) != self._page_shape:
-                    break
-                n_frames += 1
-                report(i + 1)
-            return None, n_frames
+            return self._build_offsets_compressed(n_pages, report)
 
-        # Uncompressed: one pass collects each frame's byte offset and
-        # stops at the first IFD whose shape differs from page 0.
+        return self._build_offsets_uncompressed(report)
+
+    def _build_offsets_imagej(self, progress=None) -> tuple[list[int], int]:
+        """Derive offsets for an ImageJ contiguous stack.
+
+        ImageJ writes one IFD, then every plane's data laid out
+        back-to-back from the first plane's offset, so each frame's
+        offset is computed arithmetically instead of from (non-existent)
+        per-page IFDs. Guards against a truncated file by keeping only
+        the planes that physically fit.
+        """
+        base = int(self._pages[0].dataoffsets[0])
+        n = self._imagej_planes
+        try:
+            file_size = os.path.getsize(self.path)
+            fit = (file_size - base) // self._frame_nbytes
+            if fit < n:
+                n = max(fit, 0)
+        except OSError:
+            pass
+        offsets = [base + i * self._frame_nbytes for i in range(n)]
+        if progress is not None:
+            progress(n, n)
+        return offsets, n
+
+    def _build_offsets_compressed(
+        self, n_pages: int, report
+    ) -> tuple[None, int]:
+        """Return ``(None, n_frames)`` for a compressed / tiled movie.
+
+        In the lightweight frame mode every frame reports page 0's shape,
+        so a stray IFD cannot be told apart without reading every IFD
+        (costly on network storage). Probe the first and last extra
+        pages so an incompatible one triggers the full-page fallback;
+        with full pages (after that fallback, or for LSM) the shapes
+        are real, so drop trailing mismatched IFDs.
+        """
+        if (not self._tif.is_lsm) and self._tif.pages.useframes:
+            if n_pages > 1:
+                _ = self._pages[1].dataoffsets
+                _ = self._pages[n_pages - 1].dataoffsets
+            report(n_pages)
+            return None, n_pages
+        n_frames = 0
+        for i, page in enumerate(self._pages):
+            if tuple(page.shape) != self._page_shape:
+                break
+            n_frames += 1
+            report(i + 1)
+        return None, n_frames
+
+    def _build_offsets_uncompressed(
+        self, report
+    ) -> tuple[list[int] | None, int]:
+        """One pass collecting each frame's byte offset for an
+        uncompressed movie.
+
+        Stops at the first IFD whose shape differs from page 0.
+        """
         offsets = []
         n_frames = 0
         fast = True
@@ -4260,8 +4473,16 @@ def save_datasets(path: str, info: dict, **kwargs) -> None:
         save_info(info_path, info)
 
 
-def save_locs(path: str, locs: pd.DataFrame, info: list[dict]) -> None:
+def save_locs(
+    path: str,
+    locs: pd.DataFrame,
+    info: list[dict],
+    render_index: bool | str | object = "auto",
+) -> None:
     """Save localization data to an HDF5 file.
+
+    The localizations are written with float32 floating-point columns
+    and a uint32 ``frame`` (see ``lib.ensure_sanity``).
 
     Parameters
     ----------
@@ -4272,18 +4493,51 @@ def save_locs(path: str, locs: pd.DataFrame, info: list[dict]) -> None:
     info : list of dict
         Metadata information to be saved alongside the localization
         data.
+    render_index : {"auto", True, False} or spatial_index.RenderIndexPyramid
+        Whether to store the spatial index (the render pyramid, see
+        ``picasso.spatial_index``) in the file as the group
+        ``/render_index``, so Render can skip building it when the file
+        is opened. ``"auto"`` (default) stores it for files of at least
+        ``spatial_index.PERSIST_MIN_LOCS`` localizations, ``True``
+        always, ``False`` never; a pyramid of these very rows (in this
+        order) is stored as given. Files carrying the group are read by
+        older Picasso versions as before.
     """
     locs = lib.ensure_sanity(locs, info)
+    pyramid = _render_index_to_save(locs, info, render_index)
     # locs.to_hdf(path, key="locs", mode="w", format="fixed")
     # cannot use to_hdf for backward compatibility with older Picasso
     rec_locs = locs.to_records(index=False)
     with h5py.File(path, "w") as locs_file:
         locs_file.create_dataset("locs", data=rec_locs)
         embedded = _write_metadata_dataset(locs_file, info)
+        if pyramid is not None:
+            from . import spatial_index
+
+            spatial_index.save_render_index(locs_file, pyramid)
     if _save_metadata_in_yaml() or not embedded:
         base, ext = os.path.splitext(path)
         info_path = base + ".yaml"
         save_info(info_path, info)
+
+
+def _render_index_to_save(locs: pd.DataFrame, info: list[dict], render_index):
+    """The pyramid ``save_locs`` stores for ``locs`` (already sanitized,
+    in file order), or None. See ``save_locs`` for the choices."""
+    from . import spatial_index
+
+    if render_index is False or render_index is None:
+        return None
+    if isinstance(render_index, spatial_index.RenderIndexPyramid):
+        return render_index
+    if render_index == "auto" and len(locs) < spatial_index.PERSIST_MIN_LOCS:
+        return None
+    if render_index is not True and render_index != "auto":
+        raise ValueError(
+            "render_index must be 'auto', True, False or a "
+            f"RenderIndexPyramid, not {render_index!r}"
+        )
+    return spatial_index.build_render_index(locs, info)  # None w/o FOV size
 
 
 def _raise_if_truncated(path: str, error: OSError) -> None:
@@ -4457,7 +4711,8 @@ def save_identifications(
         The path where the identifications will be saved.
     identifications : pd.DataFrame
         The identifications to be saved (typically with columns
-        ``frame``, ``x``, ``y``, ``net_gradient``, ``n_id``).
+        ``frame``, ``x``, ``y``, ``net_gradient``, ``n_id``; the
+        wavelet identification has no ``net_gradient``).
     info : list of dict
         Metadata information to be saved alongside the identifications.
     """
@@ -5060,6 +5315,71 @@ def _read_smap_loc(path: str) -> dict:
     return loc
 
 
+def _smap_psf_widths(loc: dict, n: int, pixelsize: float):
+    """Return ``(sx, sy)`` PSF widths in px, converted from SMAP's nm.
+
+    A neutral 1 px default is used when the corresponding field is
+    absent.
+    """
+    if "PSFxnm" in loc:
+        sx = loc["PSFxnm"] / pixelsize
+    else:
+        sx = np.ones(n)
+    if "PSFynm" in loc:
+        sy = loc["PSFynm"] / pixelsize
+    elif "PSFxnm" in loc:
+        sy = sx
+    else:
+        sy = np.ones(n)
+    return sx, sy
+
+
+def _smap_locprec(loc: dict, n: int, pixelsize: float):
+    """Return ``(lpx, lpy)`` localization precision in px.
+
+    SMAP stores a single combined value (``locprecnm``); some files use
+    separate ``locprecxnm``/``locprecynm`` instead.
+    """
+    if "locprecnm" in loc:
+        lpx = loc["locprecnm"] / pixelsize
+        lpy = loc["locprecnm"] / pixelsize
+    elif "locprecxnm" in loc:
+        lpx = loc["locprecxnm"] / pixelsize
+        lpy = loc.get("locprecynm", loc["locprecxnm"]) / pixelsize
+    else:
+        lpx = np.zeros(n)
+        lpy = np.zeros(n)
+    return lpx, lpy
+
+
+def _add_smap_extra_columns(loc: dict, n: int, data: dict) -> None:
+    """Add any additional (non-predefined) fields from the SMAP file to
+    ``data`` in place, with their names sanitized to valid identifiers."""
+    used_fields = {
+        "frame",
+        "xnm",
+        "ynm",
+        "znm",
+        "phot",
+        "PSFxnm",
+        "PSFynm",
+        "bg",
+        "locprecnm",
+        "locprecxnm",
+        "locprecynm",
+        "locprecznm",
+    }
+    for field, values in loc.items():
+        if field in used_fields or len(values) != n:
+            continue
+        name = _sanitize_column_name(field)
+        if name in data:
+            continue
+        if values.dtype.kind == "f":
+            values = values.astype(np.float32)
+        data[name] = values
+
+
 def import_smap(
     path: str, pixelsize: float
 ) -> tuple[pd.DataFrame, list[dict]]:
@@ -5112,64 +5432,21 @@ def import_smap(
     photons = loc["phot"] if "phot" in loc else np.ones(n)
     data["photons"] = np.broadcast_to(photons, (n,)).astype(np.float32)
 
-    # PSF widths (nm -> px); use a neutral 1 px default when absent.
-    if "PSFxnm" in loc:
-        sx = loc["PSFxnm"] / pixelsize
-    else:
-        sx = np.ones(n)
-    if "PSFynm" in loc:
-        sy = loc["PSFynm"] / pixelsize
-    elif "PSFxnm" in loc:
-        sy = sx
-    else:
-        sy = np.ones(n)
+    sx, sy = _smap_psf_widths(loc, n, pixelsize)
     data["sx"] = np.asarray(sx, dtype=np.float32)
     data["sy"] = np.asarray(sy, dtype=np.float32)
 
     bg = loc["bg"] if "bg" in loc else np.zeros(n)
     data["bg"] = np.broadcast_to(bg, (n,)).astype(np.float32)
 
-    # Localization precision (nm -> px). SMAP stores a single combined
-    # value (locprecnm); some files use separate locprecxnm/locprecynm.
-    if "locprecnm" in loc:
-        lpx = loc["locprecnm"] / pixelsize
-        lpy = loc["locprecnm"] / pixelsize
-    elif "locprecxnm" in loc:
-        lpx = loc["locprecxnm"] / pixelsize
-        lpy = loc.get("locprecynm", loc["locprecxnm"]) / pixelsize
-    else:
-        lpx = np.zeros(n)
-        lpy = np.zeros(n)
+    lpx, lpy = _smap_locprec(loc, n, pixelsize)
     data["lpx"] = np.asarray(lpx, dtype=np.float32)
     data["lpy"] = np.asarray(lpy, dtype=np.float32)
 
     if "znm" in loc and "locprecznm" in loc:
         data["lpz"] = loc["locprecznm"].astype(np.float32)
 
-    # Keep any additional (non-predefined) fields from the SMAP file.
-    used_fields = {
-        "frame",
-        "xnm",
-        "ynm",
-        "znm",
-        "phot",
-        "PSFxnm",
-        "PSFynm",
-        "bg",
-        "locprecnm",
-        "locprecxnm",
-        "locprecynm",
-        "locprecznm",
-    }
-    for field, values in loc.items():
-        if field in used_fields or len(values) != n:
-            continue
-        name = _sanitize_column_name(field)
-        if name in data:
-            continue
-        if values.dtype.kind == "f":
-            values = values.astype(np.float32)
-        data[name] = values
+    _add_smap_extra_columns(loc, n, data)
 
     locs = pd.DataFrame(data)
     locs.sort_values(kind="quicksort", by="frame", inplace=True)

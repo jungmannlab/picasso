@@ -1,12 +1,12 @@
 ; VARIANT is an optional suffix used to build alternative editions (e.g.
-; the GPU build passes /DVARIANT=-GPU). When left undefined it defaults to
+; the CUDA build passes /DVARIANT=-CUDA). When left undefined it defaults to
 ; an empty string, reproducing the standard CPU installer names exactly.
 #ifndef VARIANT
   #define VARIANT ""
 #endif
 
-; DISTDIR is the PyInstaller output folder to package. The GPU build writes to
-; a separate "dist_gpu" tree (passed via /DDISTDIR=dist_gpu) so it does not
+; DISTDIR is the PyInstaller output folder to package. The CUDA build writes to
+; a separate "dist_cuda" tree (passed via /DDISTDIR=dist_cuda) so it does not
 ; clash with the CPU build's "dist". Defaults to "dist" for the CPU installer.
 #ifndef DISTDIR
   #define DISTDIR "dist"

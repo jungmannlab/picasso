@@ -76,6 +76,9 @@ class _Event:
     def button(self):
         return self._button
 
+    def modifiers(self):
+        return QtCore.Qt.KeyboardModifier.NoModifier
+
     def accept(self):
         pass
 
@@ -257,6 +260,127 @@ class TestBoxPickTool:
         assert image is not None
 
 
+class TestRectanglePickMinimumLength:
+    @pytest.fixture
+    def rectangle_view(self, window):
+        view = window.view
+        window.tools_settings_dialog.pick_shape.setCurrentText("Rectangle")
+        view._mode = "Pick"
+        assert view._pick_shape == "Rectangle"
+        return view
+
+    def test_a_bare_click_creates_nothing(self, rectangle_view):
+        _drag(rectangle_view, 60, 60, 60, 60)
+        assert rectangle_view._picks == []
+        assert not rectangle_view._rectangle_pick_ongoing
+
+    def test_drag_shorter_than_the_minimum_creates_nothing(
+        self, rectangle_view
+    ):
+        _drag(rectangle_view, 60, 60, 63, 63)  # 4.2 display pixels
+        assert rectangle_view._picks == []
+
+    def test_drag_of_the_minimum_length_creates_a_pick(self, rectangle_view):
+        _drag(rectangle_view, 60, 60, 63, 64)  # 5 display pixels
+        assert len(rectangle_view._picks) == 1
+
+
+class TestLoaderUsesTheStoredIndex:
+    """The loader thread reads the pyramid stored in the file by
+    ``io.save_locs`` instead of building one, when it is valid."""
+
+    def _load(self, path):
+        worker = gui_render.LocsLoadWorker([(path, None)])
+        results = []
+        worker.loaded.connect(lambda *args: results.append(args))
+        worker.run()
+        assert len(results) == 1
+        return results[0]
+
+    def test_stored_index_is_used(self, qt_offscreen, tmp_path, monkeypatch):
+        from picasso import io, spatial_index
+
+        path = str(tmp_path / "indexed.hdf5")
+        io.save_locs(path, _locs(), _info(), render_index=True)
+        monkeypatch.setattr(
+            spatial_index,
+            "build_render_index",
+            lambda *a, **k: pytest.fail("the index was rebuilt"),
+        )
+        _, locs, info, render_index = self._load(path)
+        assert render_index is not None
+        assert spatial_index.validate_render_index(render_index, locs, info)
+
+    def test_invalid_stored_index_is_rebuilt(self, qt_offscreen, tmp_path):
+        import h5py
+
+        from picasso import io, spatial_index
+
+        path = str(tmp_path / "edited.hdf5")
+        io.save_locs(path, _locs(), _info(), render_index=True)
+        with h5py.File(path, "r+") as f:  # a script rewrote the rows
+            rows = f["locs"][()][::-1]
+            del f["locs"]
+            f.create_dataset("locs", data=rows)
+        _, locs, info, render_index = self._load(path)
+        assert render_index is not None
+        assert spatial_index.validate_render_index(render_index, locs, info)
+
+
+class TestCircularPicksUseThePyramid:
+    """Circular picks query the render pyramid built at load, so no
+    pick-size specific index blocks are built (that indexing sorted
+    and copied every channel, again after each pick-size change)."""
+
+    @pytest.fixture
+    def circle_view(self, window):
+        view = window.view
+        view._pick_shape = "Circle"
+        window.tools_settings_dialog.pick_diameter.setValue(6.0 * PIXELSIZE)
+        view._picks = [(20.0, 20.0), (40.0, 44.0), (58.0, 6.0)]
+        return view
+
+    def test_no_index_blocks_are_built(self, circle_view, monkeypatch):
+        view = circle_view
+        assert view.render_index[0] is not None
+        monkeypatch.setattr(
+            view,
+            "index_locs",
+            lambda channel: pytest.fail("index blocks were built"),
+        )
+        picked = view.picked_locs(0)
+        assert len(picked) == 3
+        counts = view._count_locs_in_picks(0)
+        assert list(counts) == [len(p) for p in picked]
+        assert view.index_blocks[0] is None
+
+    def test_matches_the_index_block_path(self, circle_view):
+        view = circle_view
+        via_pyramid = view.picked_locs(0)
+        view.render_index[0] = None
+        view._ensure_render_index = lambda channel: None  # no pyramid
+        via_blocks = view.picked_locs(0)
+        assert view.index_blocks[0] is not None  # the fallback indexed
+        for a, b in zip(via_pyramid, via_blocks):
+            # the index-block path standardizes dtypes (ensure_sanity)
+            pd.testing.assert_frame_equal(
+                a.sort_index(),
+                b.sort_index(),
+                check_like=True,
+                check_dtype=False,
+            )
+
+    def test_pick_size_change_needs_no_reindexing(self, circle_view):
+        view = circle_view
+        before = view.picked_locs(0)
+        view.window.tools_settings_dialog.pick_diameter.setValue(
+            12.0 * PIXELSIZE
+        )
+        after = view.picked_locs(0)
+        assert view.index_blocks[0] is None
+        assert all(len(a) >= len(b) for a, b in zip(after, before))
+
+
 class TestPickRemovalAcrossShapes:
     """``remove_picks`` dispatches through ``lib.point_in_pick``."""
 
@@ -313,10 +437,11 @@ class TestRotationWindowShapes:
     class _Stub:
         """The attributes ``fit_in_view_rotated`` reads."""
 
-        def __init__(self, pick, pick_shape, pick_size):
+        def __init__(self, pick, pick_shape, pick_size, fov_viewport=None):
             self.pick = pick
             self.pick_shape = pick_shape
             self.pick_size = pick_size
+            self._fov_viewport = fov_viewport  # field-of-view mode
 
     def _viewport(self, pick, shape, size):
         return rotation.ViewRotation.fit_in_view_rotated(
@@ -594,3 +719,85 @@ class TestBrushRotationWindow:
         )
         assert (x_min, x_max) == pytest.approx((-1.0, 11.0))
         assert (y_min, y_max) == pytest.approx((-1.0, 1.0))
+
+
+class TestMultiChannelSavesKeepAllLocs:
+    """Saving several channels into one file keeps every localization even
+    when the channels differ in their columns (here: only one has a
+    ``net_gradient``, as after a wavelet identification). ``pd.concat``
+    alone would fill the missing column with NaN, and ``io.save_locs``
+    would then drop all of that channel's localizations."""
+
+    LEFT = [(1.0, 1.0), (12.0, 1.0), (12.0, 12.0), (1.0, 12.0), (1.0, 1.0)]
+    RIGHT = [
+        (18.0, 18.0),
+        (30.0, 18.0),
+        (30.0, 30.0),
+        (18.0, 30.0),
+        (18.0, 18.0),
+    ]
+
+    @pytest.fixture
+    def two_channels(self, window, tmp_path):
+        with_ng = _locs(seed=1)
+        with_ng["net_gradient"] = np.full(len(with_ng), 5000.0, np.float32)
+        window.view.add(
+            str(tmp_path / "ng_locs.hdf5"), with_ng, _info(), render_=False
+        )
+        window.tools_settings_dialog.pick_shape.setCurrentText("Polygon")
+        window.view._picks = [self.LEFT, self.RIGHT]
+        return window
+
+    @staticmethod
+    def _n_picked(view, pick=None):
+        return sum(
+            len(picks[pick]) if pick is not None else sum(map(len, picks))
+            for picks in (
+                view.picked_locs(c, add_group=False)
+                for c in range(len(view.locs_paths))
+            )
+        )
+
+    def test_picked_locs_combined(self, two_channels, tmp_path):
+        view = two_channels.view
+        path = str(tmp_path / "picked_multi.hdf5")
+        with pytest.warns(UserWarning, match="net_gradient"):
+            view.save_picked_locs_multi(path)
+        saved, _ = io.load_locs(path)
+        assert len(saved) == self._n_picked(view) > 0
+        assert "net_gradient" not in saved.columns
+
+    def test_picked_locs_combined_per_pick(self, two_channels, tmp_path):
+        view = two_channels.view
+        path = str(tmp_path / "picked_sep.hdf5")
+        with pytest.warns(UserWarning, match="net_gradient"):
+            view.save_picked_locs_multi_sep(path)
+        for i in range(2):
+            saved, _ = io.load_locs(str(tmp_path / f"picked_sep_{i}.hdf5"))
+            assert len(saved) == self._n_picked(view, i) > 0
+
+    def test_all_channels_combined(self, two_channels, tmp_path, monkeypatch):
+        window = two_channels
+        path = str(tmp_path / "combined_multi.hdf5")
+        n_channels = len(window.view.locs_paths)
+        monkeypatch.setattr(
+            window.view,
+            "get_channel_save_locs",
+            lambda *_: n_channels + 1,
+        )
+        monkeypatch.setattr(
+            lib,
+            "get_save_filename_ext_dialog",
+            lambda *args, **kwargs: (path, ".hdf5"),
+        )
+        with pytest.warns(UserWarning, match="net_gradient"):
+            window.save_locs()
+        saved, _ = io.load_locs(path)
+        assert len(saved) == sum(len(locs) for locs in window.view.locs)
+
+    def test_the_3d_window_combines_the_same_way(self):
+        import inspect
+
+        source = inspect.getsource(rotation.RotationWindow.save_locs_rotated)
+        assert "lib.concat_locs(self.window.view.locs)" in source
+        assert "pd.concat" not in source

@@ -1,16 +1,16 @@
-call DEL /F/Q/S build_gpu > NUL
-call DEL /F/Q/S dist_gpu > NUL
-call RMDIR /Q/S build_gpu
-call RMDIR /Q/S dist_gpu
+call DEL /F/Q/S build_cuda > NUL
+call DEL /F/Q/S dist_cuda > NUL
+call RMDIR /Q/S build_cuda
+call RMDIR /Q/S dist_cuda
 
 call cd %~dp0\..\..
 
-call conda create -n picasso_installer_gpu python=3.14.4 -y
-call conda activate picasso_installer_gpu
+call conda create -n picasso_installer_cuda python=3.14.4 -y
+call conda activate picasso_installer_cuda
 call pip install build
 
 for /f %%i in ('python -c "exec(open('picasso/version.py').read()); print(__version__)"') do set PICASSO_VERSION=%%i
-REM The CPU and GPU installers share the repo-level dist/ folder. If both are
+REM The CPU and CUDA installers share the repo-level dist/ folder. If both are
 REM created at the same time, the second "python -m build" run fails because the
 REM sdist/wheel already exist, so only build when they are missing.
 if exist "dist\picassosr-%PICASSO_VERSION%-py3-none-any.whl" (
@@ -18,12 +18,12 @@ if exist "dist\picassosr-%PICASSO_VERSION%-py3-none-any.whl" (
 ) else (
     call python -m build
 )
-REM installer_gpu adds numba-cuda[cu12], which pulls the nvidia-*-cu12 CUDA
+REM installer_cuda adds numba-cuda[cu12], which pulls the nvidia-*-cu12 CUDA
 REM runtime wheels needed to run numba.cuda (GPU-accelerated) code.
-call pip install "dist/picassosr-%PICASSO_VERSION%-py3-none-any.whl[installer_gpu]"
+call pip install "dist/picassosr-%PICASSO_VERSION%-py3-none-any.whl[installer_cuda]"
 call cd release/one_click_windows_gui
 
-REM GPU build differs from the CPU build by the extra flags below:
+REM CUDA build differs from the CPU build by the extra flags below:
 REM   --collect-all numba_cuda : the CUDA target package for numba
 REM   --collect-all nvidia     : the bundled CUDA runtime libraries (cu12)
 REM   --collect-all cuda       : NVIDIA's official CUDA binding (cuda.bindings
@@ -45,14 +45,14 @@ REM would keep Numba's built-in CUDA stub and GPU-accelerated (numba.cuda) code
 REM would fall back to CPU or vanish. picasso/_numba_cuda_compat.py reinstalls
 REM that redirect at import time (shipped via --collect-all picasso), so no extra
 REM PyInstaller flag is needed here.
-REM GPU artifacts go to _gpu-suffixed folders (--distpath/--workpath/--specpath)
+REM CUDA artifacts go to _gpu-suffixed folders (--distpath/--workpath/--specpath)
 REM so they never clash with the CPU build's build/dist/*.spec. The exe names
 REM (--name) stay "picasso"/"picassow" so picasso_innoinstaller.iss is unchanged.
 call pyinstaller "../pyinstaller/picasso_pyinstaller.py" ^
     --onedir ^
-    --distpath dist_gpu ^
-    --workpath build_gpu ^
-    --specpath build_gpu ^
+    --distpath dist_cuda ^
+    --workpath build_cuda ^
+    --specpath build_cuda ^
     --collect-all picasso ^
     --collect-all PyImarisWriter ^
     --collect-all streamlit ^
@@ -74,9 +74,9 @@ call pyinstaller "../pyinstaller/picasso_pyinstaller.py" ^
 call pyinstaller "../pyinstaller/picasso_pyinstaller.py" ^
     --onedir ^
     --windowed ^
-    --distpath dist_gpu ^
-    --workpath build_gpu ^
-    --specpath build_gpu ^
+    --distpath dist_cuda ^
+    --workpath build_cuda ^
+    --specpath build_cuda ^
     --collect-all picasso ^
     --collect-all PyImarisWriter ^
     --collect-all streamlit ^
@@ -96,11 +96,11 @@ call pyinstaller "../pyinstaller/picasso_pyinstaller.py" ^
     --icon "../../logos/localize.ico" ^
     --noconfirm
 
-REM Spec files were written to build_gpu (via --specpath); they are removed with
-REM the build_gpu tree below, so no separate *.spec deletion is needed here.
+REM Spec files were written to build_cuda (via --specpath); they are removed with
+REM the build_cuda tree below, so no separate *.spec deletion is needed here.
 
 call conda deactivate
-call conda env remove -n picasso_installer_gpu -y
+call conda env remove -n picasso_installer_cuda -y
 
-copy dist_gpu\picassow\picassow.exe dist_gpu\picasso\picassow.exe
-call "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DAPP_VERSION=%PICASSO_VERSION% /DVARIANT=-GPU /DDISTDIR=dist_gpu picasso_innoinstaller.iss
+copy dist_cuda\picassow\picassow.exe dist_cuda\picasso\picassow.exe
+call "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DAPP_VERSION=%PICASSO_VERSION% /DVARIANT=-CUDA /DDISTDIR=dist_cuda picasso_innoinstaller.iss
