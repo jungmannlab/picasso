@@ -17243,9 +17243,21 @@ class Window(QtWidgets.QMainWindow):
         """Apply the pick and rotation saved in the metadata of the
         first channel, see ``self.open_rotated_locs``."""
         info = self.view.infos[0][-1]
-        if "Pick" not in info:
+        pick_shape = info.get("Pick shape")
+        if info.get("Pick") is None or pick_shape in (None, "Field of view"):
+            # no pick saved: the 3D view showed the field of view,
+            # whose bounds are stored like a box pick
+            # not ``clear_picks``, which warns when there are none
+            self.view._picks = []
+            self.info_dialog.n_picks.setText("0")
+            bounds = info.get("Pick")
+            if pick_shape == "Field of view" and bounds is not None:
+                (x0, y0), (x1, y1) = bounds
+                self.view.update_scene(viewport=((y0, x0), (y1, x1)))
+            self.window_rot.view_rot.load_saved_rotation(info)
+            self.rot_win()
             return
-        self.view._pick_shape = info["Pick shape"]
+        self.view._pick_shape = pick_shape
         if self.view._pick_shape == "Brush":
             # stored as stroke dicts with widths in nm, see
             # ``RotationWindow.save_locs_rotated``
