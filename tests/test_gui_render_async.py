@@ -532,6 +532,26 @@ class TestAsyncRender:
         assert view.image is image_cache
         assert view.n_locs == n_locs_before
 
+    @pytest.mark.parametrize("size", [WIDTH, 20.0, 3.0, 0.7])
+    def test_n_locs_counts_the_visible_viewport(self, window, qapp, size):
+        # the render covers a margin and the pyramid query whole edge
+        # blocks; neither may leak into the count shown in Info
+        view = window.view
+        viewport = ((10.2, 10.2), (10.2 + size, 10.2 + size))
+        view.update_scene(viewport=viewport)
+        _wait_until(qapp, lambda: getattr(view, "image", None) is not None)
+        (y_min, x_min), (y_max, x_max) = view.viewport
+        locs = view.locs[0]
+        expected = int(
+            (
+                (locs["x"] > x_min)
+                & (locs["x"] < x_max)
+                & (locs["y"] > y_min)
+                & (locs["y"] < y_max)
+            ).sum()
+        )
+        assert view.n_locs == expected
+
     def test_remove_locs_stops_worker(self, window, qapp):
         # "Remove all localizations" rebuilds the view; the old view's
         # worker thread must be stopped first — a running QThread being

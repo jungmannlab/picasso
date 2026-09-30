@@ -135,6 +135,55 @@ def _clustered_locs(n=2000, width=64.0, height=64.0, seed=0):
     return x[keep].astype(np.float32), y[keep].astype(np.float32)
 
 
+# ---------------------------------------------------------------------------
+# Exact counts in a rectangle
+# ---------------------------------------------------------------------------
+
+
+class TestCountRect:
+    def test_matches_brute_force(self):
+        # locs also beyond the FOV (held by the border blocks) and on a
+        # block boundary; viewports from sub-pixel to beyond the FOV
+        rng = np.random.default_rng(3)
+        n, width = 50_000, 256.0
+        locs = pd.DataFrame(
+            {
+                "x": rng.uniform(-2.0, width + 2.0, n).astype(np.float32),
+                "y": rng.uniform(-2.0, width + 2.0, n).astype(np.float32),
+            }
+        )
+        locs.loc[:99, "x"] = np.float32(100.0)
+        pyramid = spatial_index.build_render_index(locs, _info(width, width))
+        x = locs["x"].to_numpy()
+        y = locs["y"].to_numpy()
+        for _ in range(500):
+            cx, cy = rng.uniform(-20.0, width + 20.0, 2)
+            half = 10 ** rng.uniform(-2.0, 2.5) / 2
+            viewport = ((cy - half, cx - half), (cy + half, cx + half))
+            expected = len(_brute_force_in_view(locs, viewport))
+            assert spatial_index.count_rect(pyramid, x, y, viewport) == (
+                expected
+            )
+
+    def test_zoomed_in_count_excludes_edge_blocks(self):
+        # the pyramid query returns whole edge blocks; the count must not
+        locs = _make_locs(200_000, 64.0, 64.0)
+        pyramid = spatial_index.build_render_index(locs, _info(64.0, 64.0))
+        viewport = ((20.3, 20.3), (20.8, 20.8))
+        x = locs["x"].to_numpy()
+        y = locs["y"].to_numpy()
+        expected = len(_brute_force_in_view(locs, viewport))
+        assert len(spatial_index.query_viewport(pyramid, viewport)) > expected
+        assert spatial_index.count_rect(pyramid, x, y, viewport) == expected
+
+    def test_empty(self):
+        locs = _make_locs(0, 64.0, 64.0)
+        pyramid = spatial_index.build_render_index(locs, _info(64.0, 64.0))
+        empty = np.empty(0, dtype=np.float32)
+        viewport = ((0.0, 0.0), (10.0, 10.0))
+        assert spatial_index.count_rect(pyramid, empty, empty, viewport) == 0
+
+
 class TestQuadTreeLayout:
     W = H = 64.0
 

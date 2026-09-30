@@ -509,6 +509,107 @@ def query_rect(pyramid: RenderIndexPyramid, rect: tuple) -> lib.IntArray1D:
 
 
 @numba.njit(cache=True)
+def _count_blocks_in_rect(
+    perm: lib.IntArray1D,
+    block_starts: lib.IntArray2D,
+    block_ends: lib.IntArray2D,
+    cy_min: int,
+    cy_max: int,
+    cx_min: int,
+    cx_max: int,
+    x: lib.FloatArray1D,
+    y: lib.FloatArray1D,
+    x_min: float,
+    y_min: float,
+    x_max: float,
+    y_max: float,
+) -> int:
+    """Count the locs strictly inside the rectangle. Blocks between the
+    edge blocks lie wholly inside it and are counted by size; only the
+    edge blocks' locs are tested one by one."""
+    n = 0
+    for by in range(cy_min, cy_max + 1):
+        for bx in range(cx_min, cx_max + 1):
+            s = block_starts[by, bx]
+            e = block_ends[by, bx]
+            if cy_min < by < cy_max and cx_min < bx < cx_max:
+                n += e - s
+                continue
+            for k in range(s, e):
+                i = perm[k]
+                if (
+                    x[i] > x_min
+                    and y[i] > y_min
+                    and x[i] < x_max
+                    and y[i] < y_max
+                ):
+                    n += 1
+    return n
+
+
+def count_rect(
+    pyramid: RenderIndexPyramid,
+    x: lib.FloatArray1D,
+    y: lib.FloatArray1D,
+    rect: tuple,
+) -> int:
+    """Number of locs strictly inside ``rect``, with the renderer's
+    ``in_view`` test (``x_min < x < x_max``, likewise for y).
+
+    Unlike the length of ``query_rect``, which includes whole blocks at
+    the edges, the count is exact.
+
+    Parameters
+    ----------
+    pyramid : RenderIndexPyramid
+        The index built by :func:`build_render_index` for ``x``, ``y``.
+    x, y : lib.FloatArray1D
+        Coordinates of all the localizations the pyramid indexes (the
+        DataFrame's columns), in camera pixels.
+    rect : tuple
+        ``((y_min, x_min), (y_max, x_max))`` in camera pixels.
+
+    Returns
+    -------
+    n : int
+        Number of localizations inside ``rect``.
+    """
+    (y_min, x_min), (y_max, x_max) = rect
+    if pyramid.perm.shape[0] == 0:
+        return 0
+    lvl = _select_level(pyramid, rect)
+    size = pyramid.block_sizes[lvl]
+    bs = pyramid.block_starts[lvl]
+    be = pyramid.block_ends[lvl]
+    K, L = bs.shape
+    if x_min >= x_max or y_min >= y_max:
+        return 0
+    # locs outside the FOV are held by the border blocks, so a rect
+    # beyond the FOV is clamped onto them rather than found empty
+    cx_min = min(max(0, int(np.floor(x_min / size))), L - 1)
+    cy_min = min(max(0, int(np.floor(y_min / size))), K - 1)
+    cx_max = min(max(0, int(np.floor((x_max - 1e-9) / size))), L - 1)
+    cy_max = min(max(0, int(np.floor((y_max - 1e-9) / size))), K - 1)
+    return int(
+        _count_blocks_in_rect(
+            pyramid.perm,
+            bs,
+            be,
+            cy_min,
+            cy_max,
+            cx_min,
+            cx_max,
+            np.asarray(x),
+            np.asarray(y),
+            float(x_min),
+            float(y_min),
+            float(x_max),
+            float(y_max),
+        )
+    )
+
+
+@numba.njit(cache=True)
 def _filter_circle(
     indices: lib.IntArray1D,
     x: lib.FloatArray1D,

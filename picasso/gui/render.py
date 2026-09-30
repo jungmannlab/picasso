@@ -11693,10 +11693,20 @@ class View(QtWidgets.QLabel):
                 self.window.dataset_dialog.checks[i].isChecked()
             ):
                 continue
-            indices = self._viewport_indices(i, self.viewport)
-            if indices is None:
+            pyramid = self._ensure_render_index(i)
+            if pyramid is None:
                 return rendered_n
-            total += len(indices)
+            viewport = self.viewport
+            if i in self._move_channels:
+                # while dragged with the Move tool, the pyramid indexes
+                # the coordinates at the press, before the current shift
+                dx, dy = self._move_shift
+                viewport = render.shift_viewport(viewport, -dx, -dy)
+                x, y = self._move_origin[self._move_channels.index(i)]
+            else:
+                x = self.locs[i]["x"].to_numpy()
+                y = self.locs[i]["y"].to_numpy()
+            total += spatial_index.count_rect(pyramid, x, y, viewport)
         return total
 
     def stop_render_worker(self) -> None:
