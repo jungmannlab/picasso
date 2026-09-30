@@ -5007,26 +5007,19 @@ class InfoDialog(lib.Dialog):
 
         # FRC in several random ROIs, for the uncertainty; collapsed by
         # default to keep the dialog compact
-        self.frc_rois_toggle = QtWidgets.QToolButton()
-        self.frc_rois_toggle.setText("FRC in several ROIs (uncertainty)")
-        self.frc_rois_toggle.setToolButtonStyle(
-            QtCore.Qt.ToolButtonStyle.ToolButtonTextBesideIcon
+        self.frc_rois_groupbox = lib.CollapsibleGroupBox(
+            "FRC in several ROIs",
+            expanded=False,
+            summary="Resolution uncertainty",
         )
-        self.frc_rois_toggle.setArrowType(QtCore.Qt.ArrowType.RightArrow)
-        self.frc_rois_toggle.setCheckable(True)
-        self.frc_rois_toggle.setAutoRaise(True)
-        self.frc_rois_toggle.toggled.connect(self.toggle_frc_rois)
-        self.frc_grid.addWidget(self.frc_rois_toggle, 3, 0, 1, 2)
-        self.frc_rois_widget = QtWidgets.QWidget()
-        self.frc_rois_widget.setVisible(False)
-        self.frc_grid.addWidget(self.frc_rois_widget, 4, 0, 1, 2)
-        rois_grid = QtWidgets.QGridLayout(self.frc_rois_widget)
+        self.frc_grid.addWidget(self.frc_rois_groupbox, 3, 0, 1, 2)
+        rois_grid = QtWidgets.QGridLayout(self.frc_rois_groupbox.content)
         rois_grid.setContentsMargins(0, 0, 0, 0)
         frc_rois_label = QtWidgets.QLabel("FRC resolution, ROIs (nm):")
         frc_rois_label.setToolTip(
             "Mean ± standard deviation of the FRC resolution in several\n"
-            " random, non-overlapping square ROIs placed in the current"
-            " FOV."
+            " random, non-overlapping square ROIs placed across the whole"
+            " image, not only the current FOV."
         )
         rois_grid.addWidget(frc_rois_label, 0, 0)
         self.frc_rois_resolution = QtWidgets.QLabel("-")
@@ -5036,7 +5029,7 @@ class InfoDialog(lib.Dialog):
         self.frc_n_rois.setRange(1, 10_000)
         self.frc_n_rois.setValue(30)
         self.frc_n_rois.setToolTip(
-            "Maximum number of ROIs; fewer are used if the FOV does not\n"
+            "Maximum number of ROIs; fewer are used if the image does not\n"
             " fit enough ROIs with enough localizations."
         )
         rois_grid.addWidget(self.frc_n_rois, 1, 1)
@@ -5317,18 +5310,9 @@ class InfoDialog(lib.Dialog):
             else:
                 self.frc_resolution.setText(f"{res_nm:.2f} nm")
 
-    def toggle_frc_rois(self, checked: bool) -> None:
-        """Show or hide the widgets for FRC in several ROIs."""
-        self.frc_rois_toggle.setArrowType(
-            QtCore.Qt.ArrowType.DownArrow
-            if checked
-            else QtCore.Qt.ArrowType.RightArrow
-        )
-        self.frc_rois_widget.setVisible(checked)
-
     def calculate_frc_rois(self) -> None:
-        """Calculate FRC resolution in random ROIs of the current FOV and
-        open the review window."""
+        """Calculate FRC resolution in random ROIs of the whole image
+        and open the review window."""
         channel = self.window.view.get_channel(
             "Calculate FRC resolution in ROIs"
         )
@@ -5336,7 +5320,8 @@ class InfoDialog(lib.Dialog):
             return
         locs = self.window.view.locs[channel]
         info = self.window.view.infos[channel]
-        viewport = self.window.view.viewport
+        # ROIs are placed across all localizations, not only the FOV
+        viewport = ((0, 0), (info[0]["Height"], info[0]["Width"]))
         n_rois = self.frc_n_rois.value()
         # close the previous review window, so that it is not mistaken
         # for the new results while they are computed
@@ -5366,9 +5351,9 @@ class InfoDialog(lib.Dialog):
             QtWidgets.QMessageBox.information(
                 self,
                 "FRC in ROIs",
-                "No ROI with enough localizations fits in the current FOV."
-                " Zoom out, reduce the ROI side length or the minimum"
-                " number of localizations per ROI.",
+                "No ROI with enough localizations fits in the image."
+                " Reduce the ROI side length or the minimum number of"
+                " localizations per ROI.",
             )
             return
         pixelsize = lib.get_from_metadata(info, "Pixelsize")
@@ -5382,7 +5367,7 @@ class InfoDialog(lib.Dialog):
                 self.frc_rois_window,
                 "FRC in ROIs",
                 f"Only {n_found} of {n_rois} requested non-overlapping ROIs"
-                " with enough localizations fit in the current FOV, so the"
+                " with enough localizations fit in the image, so the"
                 " uncertainty estimate is less reliable.",
             )
 
@@ -5526,7 +5511,7 @@ class FRCRoisWindow(QtWidgets.QWidget):
 
     Lists the ROIs with their resolutions; unticking an ROI excludes it
     from the mean and standard deviation. The overview shows where the
-    ROIs lie in the FOV (used: green, excluded: gray, selected: red)
+    ROIs lie in the image (used: green, excluded: gray, selected: red)
     and the lower plot shows the FRC curve of the selected ROI.
     """
 
@@ -5620,7 +5605,7 @@ class FRCRoisWindow(QtWidgets.QWidget):
         right.addWidget(self.canvas)
         right.addWidget(NavigationToolbar2QT(self.canvas, self))
 
-        # overview image of the FOV, rendered once
+        # overview image of the whole image, rendered once
         (y_min, x_min), (y_max, x_max) = viewport
         x = locs["x"].to_numpy()
         y = locs["y"].to_numpy()
