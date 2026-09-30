@@ -19,8 +19,9 @@ log_likelihood,"(Optional) The log-likelihood of the fit. Only available for MLE
 chi_square,"(Optional) The chi-square of the fit, i.e. the sum of squared residuals between the spot and the fitted model at the fit optimum, in photons squared. Only available for least-squares fitting, where it is the counterpart of the “log_likelihood” column of MLE fits.","float "
 "group ","(Optional) An identifier to assign multiple localizations to groups, for example by picking regions of interest or clustering. ","long "
 group_input," ""(Optional) Assigned after clustering if the input localizations had a “group” column. This allows to trace back which input group a clustered group originated from.""",long
-"len ","(Optional) The length of the event in frames, if localizations from consecutive frames have been linked.","long "
+"len ","(Optional) The length of the event in frames, if localizations from consecutive frames have been linked, counted from the first to the last frame of the event (both included).","long "
 "n ","(Optional) The number of localizations in this event, if localizations from consecutive frames have been linked, potentially diverging from the “len” column due to a transient dark time tolerance.","long "
+"dark ","(Optional) The dark time preceding the event in frames, i.e., the number of frames without signal since the end of the previous event in the same group. Only available after computing dark times (e.g., “picasso dark”). Events without a preceding event are removed. Before Picasso 0.11.3, dark times were one frame longer.","long "
 "photon_rate ","(Optional) The mean number of photons per frame, if localizations from consecutive frames have been linked. The total number of photons is set in the “photons” column. ","float "
 "x_pick_rot ","(Optional) Projection of localizations onto the axis of the rectangular pick in camera pixels. Only available after saving rectangular pick(s). ",float
 "y_pick_rot ","(Optional) Projection of localizations against the axis of the rectangular pick in camera pixels. Can be used to plot profile along the pick. Only available after saving rectangular pick(s). ",float

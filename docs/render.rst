@@ -240,7 +240,7 @@ Shows the number of localizations in the current FoV.
 
 Picks
 ^^^^^
-Allows calculating statistics about the picked localizations. Press ``Calculate info below`` to calculate. ``Ignore dark times`` allows treating consecutive localizations as on, even if there are localizations (specified by the parameter) missing between them. When defining the number of units per pick, you can calibrate the influx rate via ``Calibrate influx``. A histogram of the dark and bright time can be plotted when clicking ``Histograms``. 
+Allows calculating statistics about the picked localizations. Press ``Calculate info below`` to calculate. ``Ignore dark times`` allows treating consecutive localizations as on, even if there are localizations (specified by the parameter) missing between them. When defining the number of units per pick, you can calibrate the influx rate via ``Calibrate influx``. A histogram of the dark and bright time can be plotted when clicking ``Histograms``. Dark times are counted as the number of frames without signal between two binding events in a pick; see "HDF5 Pick Property Files" in the file format documentation for the exact convention. **Note:** since Picasso 0.11.3, dark times are one frame shorter than in earlier versions, so influx rates calibrated with earlier versions should be recalibrated.
 
 
 Menu items
