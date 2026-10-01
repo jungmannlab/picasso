@@ -26,6 +26,7 @@ from asyncio import Future
 import numba
 import numpy as np
 import pandas as pd
+import matplotlib.colors as mcolors
 import matplotlib.pyplot as plt
 from numpy.lib.recfunctions import append_fields, drop_fields
 from scipy import stats, optimize
@@ -1405,6 +1406,61 @@ def estimate_kinetic_rate(data: FloatArray1D) -> float:
     else:
         rate = np.nanmean(data)
     return rate
+
+
+#: Opacity of histogram bars that are filled and outlined, so that the
+#: outline in the full color stands out.
+OUTLINED_FILL_ALPHA = 0.55
+
+
+def histogram_style(
+    color: str | tuple,
+    fill: bool = True,
+    outline: bool = False,
+    fill_alpha: float | None = None,
+    line_width: float | None = None,
+) -> dict:
+    """Matplotlib properties of histogram bars: filled, filled with an
+    outline or outlined only.
+
+    The properties apply to the patches of ``Axes.hist`` (with
+    ``histtype="stepfilled"``), ``Axes.stairs`` and ``Axes.bar``.
+
+    Parameters
+    ----------
+    color : str or tuple
+        Color of the bars.
+    fill : bool, optional
+        Whether the bars are filled. Default True.
+    outline : bool, optional
+        Whether the bars are outlined in ``color``; always True if
+        ``fill`` is False. Default False.
+    fill_alpha : float, optional
+        Opacity of the fill. If None, 1 without and
+        ``OUTLINED_FILL_ALPHA`` with an outline. Default None.
+    line_width : float, optional
+        Width of the outline of bars that are not filled, in points. If
+        None, matplotlib's default line width. Default None.
+
+    Returns
+    -------
+    style : dict
+        ``fill``, ``facecolor``, ``edgecolor`` and ``linewidth``.
+    """
+    if not fill:
+        if line_width is None:
+            line_width = plt.rcParams["lines.linewidth"]
+        return dict(
+            fill=False, facecolor="none", edgecolor=color, linewidth=line_width
+        )
+    if fill_alpha is None:
+        fill_alpha = OUTLINED_FILL_ALPHA if outline else 1.0
+    return dict(
+        fill=True,
+        facecolor=mcolors.to_rgba(color, fill_alpha),
+        edgecolor=mcolors.to_rgba(color) if outline else "none",
+        linewidth=1.0 if outline else 0.0,
+    )
 
 
 def plot_cumulative_exponential_fit(
@@ -3738,11 +3794,21 @@ def _subcluster_label(
 
 
 def _plot_subcluster_bar(
-    ax: plt.Axes, events: IntArray1D, label: str, color: str
+    ax: plt.Axes,
+    events: IntArray1D,
+    label: str,
+    color: str,
+    fill: bool = True,
+    outline: bool = False,
 ) -> None:
     """Bar histogram + mean line for one subclustering population."""
+    # resolve "CN" colors now: lines would otherwise look them up when
+    # drawn, outside of any style context active here
+    color = mcolors.to_hex(color)
     vals, counts = np.unique(events, return_counts=True)
-    ax.bar(vals, counts, width=0.8, alpha=0.5, label=label, color=color)
+    # half-transparent so that both populations stay visible
+    style = histogram_style(color, fill, outline, fill_alpha=0.5)
+    ax.bar(vals, counts, width=0.8, label=label, **style)
     ax.axvline(events.mean(), color=color, linestyle="--")
 
 
@@ -3791,6 +3857,9 @@ def plot_subclustering_check(
     return_fig: bool = False,
     clustering_dist: float | None = None,
     sparse_dist: float | None = None,
+    fig: plt.Figure | None = None,
+    fill: bool = True,
+    outline: bool = False,
 ) -> tuple[plt.Figure, plt.Axes] | tuple[None, None]:
     """Plot the results of subclustering analysis, see
     ``picasso.clusterer.test_subclustering``.
@@ -3810,6 +3879,12 @@ def plot_subclustering_check(
     clustering_dist, sparse_dist : float, optional
         Clustering and sparse distances that are displayed in the
         legend. If None, distances are not displayed. Default is None.
+    fig : plt.Figure, optional
+        If given, the plot is drawn on this figure (which is cleared
+        first). Otherwise, a new figure is created. Default is None.
+    fill, outline : bool, optional
+        Whether the bars are filled and/or outlined, see
+        ``histogram_style``. Default is filled without an outline.
 
     Returns
     -------
@@ -3826,7 +3901,11 @@ def plot_subclustering_check(
     s_sparse = sparse_n_events.std()
 
     # create the plot
-    fig, ax1 = plt.subplots(1, figsize=(6, 4), constrained_layout=True)
+    if fig is None:
+        fig, ax1 = plt.subplots(1, figsize=(6, 4), constrained_layout=True)
+    else:
+        fig.clear()
+        ax1 = fig.subplots()
     if has_clustered or has_sparse:
         all_events = np.concatenate((sparse_n_events, clustered_n_events))
         min_bin, max_bin = np.percentile(all_events, [2.5, 97.5])
@@ -3835,13 +3914,15 @@ def plot_subclustering_check(
         label = _subcluster_label(
             "Clustered", clustering_dist, "<", m_clustered, s_clustered
         )
-        _plot_subcluster_bar(ax1, clustered_n_events, label, "C0")
+        _plot_subcluster_bar(
+            ax1, clustered_n_events, label, "C0", fill, outline
+        )
 
     if has_sparse:
         label = _subcluster_label(
             "Sparse", sparse_dist, ">", m_sparse, s_sparse
         )
-        _plot_subcluster_bar(ax1, sparse_n_events, label, "C1")
+        _plot_subcluster_bar(ax1, sparse_n_events, label, "C1", fill, outline)
 
     if has_clustered or has_sparse:
         ax1.set_xlabel("Number of events")

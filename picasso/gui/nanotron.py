@@ -750,51 +750,56 @@ class train_dialog(lib.Dialog):
         if self.mlp is not None:
 
             canvas = lib.GenericPlotWindow("Learning history", "nanotron")
-            canvas.figure.clear()
 
-            ax1, ax2 = canvas.figure.subplots(1, 2)
-            ax1.set_title("Learning Curve")
-            ax1.plot(self.mlp.loss_curve_, label="Train")
-            ax1.legend(loc="best")
-            ax1.set_xlabel("Iterations")
-            ax1.set_ylabel("Loss")
+            def draw():
+                with canvas.plot_context():
+                    canvas.figure.clear()
 
-            im = ax2.imshow(
-                self.cm,
-                interpolation="nearest",
-                cmap=plt.cm.Blues,
-            )
-            ax2.figure.colorbar(im, ax=ax2)
-            ax2.set(
-                xticks=np.arange(self.cm.shape[1]),
-                yticks=np.arange(self.cm.shape[0]),
-                xticklabels=self.classes.values(),
-                yticklabels=self.classes.values(),
-                title="Confusion Matrix",
-                ylabel="True label",
-                xlabel="Predicted label",
-            )
+                    ax1, ax2 = canvas.figure.subplots(1, 2)
+                    ax1.set_title("Learning Curve")
+                    ax1.plot(self.mlp.loss_curve_, label="Train")
+                    ax1.legend(loc="best")
+                    ax1.set_xlabel("Iterations")
+                    ax1.set_ylabel("Loss")
 
-            plt.setp(
-                ax2.get_yticklabels(),
-                rotation="vertical",
-                horizontalalignment="right",
-                verticalalignment="center",
-            )
-
-            thresh = self.cm.max() / 2.0
-            for i in range(self.cm.shape[0]):
-                for j in range(self.cm.shape[1]):
-                    ax2.text(
-                        j,
-                        i,
-                        format(self.cm[i, j], "d"),
-                        ha="center",
-                        va="center",
-                        color="white" if self.cm[i, j] > thresh else "black",
+                    im = ax2.imshow(
+                        self.cm,
+                        interpolation="nearest",
+                        cmap=plt.cm.Blues,
                     )
-            plt.autoscale()
-            plt.tight_layout()
+                    ax2.figure.colorbar(im, ax=ax2)
+                    ax2.set(
+                        xticks=np.arange(self.cm.shape[1]),
+                        yticks=np.arange(self.cm.shape[0]),
+                        xticklabels=self.classes.values(),
+                        yticklabels=self.classes.values(),
+                        title="Confusion Matrix",
+                        ylabel="True label",
+                        xlabel="Predicted label",
+                    )
+
+                    plt.setp(
+                        ax2.get_yticklabels(),
+                        rotation="vertical",
+                        horizontalalignment="right",
+                        verticalalignment="center",
+                    )
+
+                    thresh = self.cm.max() / 2.0
+                    for i in range(self.cm.shape[0]):
+                        for j in range(self.cm.shape[1]):
+                            dark = self.cm[i, j] > thresh
+                            ax2.text(
+                                j,
+                                i,
+                                format(self.cm[i, j], "d"),
+                                ha="center",
+                                va="center",
+                                color="white" if dark else "black",
+                            )
+
+            draw()
+            canvas.redraw = draw
             canvas.canvas.draw()
             canvas.show()
 
@@ -1262,7 +1267,6 @@ class Window(QtWidgets.QMainWindow):
             else:
 
                 canvas = lib.GenericPlotWindow("Probabilities", "nanotron")
-                canvas.figure.clear()
 
                 probabilities_per_pick = np.zeros(
                     len(np.unique(self.locs.group))
@@ -1272,19 +1276,22 @@ class Window(QtWidgets.QMainWindow):
                     pick_score = np.unique(pick.score)[0]
                     probabilities_per_pick[c] = pick_score
 
-                ax1 = canvas.figure.subplots(1, 1)
-                ax1.hist(
-                    probabilities_per_pick,
-                    bins=100,
-                    range=(0, 1.0),
-                    align="mid",
-                    rwidth=1,
-                )
-                ax1.set_xlabel("Probability")
-                ax1.set_ylabel("Counts")
+                def draw():
+                    with canvas.plot_context():
+                        canvas.figure.clear()
+                        ax1 = canvas.figure.subplots(1, 1)
+                        ax1.hist(
+                            probabilities_per_pick,
+                            bins=100,
+                            range=(0, 1.0),
+                            histtype="stepfilled",
+                            **canvas.plot_style.hist_kwargs(),
+                        )
+                        ax1.set_xlabel("Probability")
+                        ax1.set_ylabel("Counts")
 
-                plt.autoscale()
-                plt.tight_layout()
+                draw()
+                canvas.redraw = draw
                 canvas.canvas.draw()
                 canvas.show()
 

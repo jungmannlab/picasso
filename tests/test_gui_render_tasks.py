@@ -161,6 +161,14 @@ def test_nena_label_and_plot(window, qt_offscreen):
     assert "NeNA (nm)" in window.view.infos[0][-1]
 
 
+def test_nena_button(window, qt_offscreen):
+    """The button's checked state must not be taken for ``on_done``."""
+    info_dialog = window.info_dialog
+    info_dialog.nena_button.click()
+    _wait_for_tasks(qt_offscreen)
+    assert info_dialog.nena_label.text().endswith("nm")
+
+
 def test_rcc_applies_drift(window, qt_offscreen, monkeypatch):
     monkeypatch.setattr(
         QtWidgets.QInputDialog, "getInt", lambda *a, **k: (500, True)

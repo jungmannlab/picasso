@@ -14,6 +14,7 @@ PyQt6 is only imported on first use.
 
 from __future__ import annotations
 
+import contextlib
 import math
 import os
 import sys
@@ -2137,13 +2138,37 @@ class DensityContrastSlider(RangeSlider):
 
 class GenericPlotWindow(QtWidgets.QTabWidget):
     """Interface for displaying matplotlib plots in a separate
-    window."""
+    window.
+
+    The plots take the shared appearance of Picasso's chart windows
+    (``picasso.gui.plot_style``) when drawn inside ``plot_context``.
+    The toolbar opens the plot settings; when they change, ``redraw``
+    is called if set, otherwise the drawn figure is restyled (keeping
+    the colors of the data).
+
+    Attributes
+    ----------
+    figure : plt.Figure
+        The figure to draw on.
+    canvas : FigureCanvas
+        Canvas showing ``figure``.
+    toolbar : NavigationToolbar2QT
+        Toolbar of the canvas; callers may add widgets.
+    plot_style : picasso.gui.plot_style.PlotStyle
+        The current appearance.
+    redraw : Callable[[], None] or None
+        Draws the plot again (inside ``plot_context``); set by the
+        caller so that style changes also recolor the data.
+    """
 
     def __init__(self, window_title, app_name):
         from matplotlib.backends.backend_qt5agg import (
             FigureCanvas,
             NavigationToolbar2QT,
         )
+
+        # imported here: picasso.gui.plot_style imports picasso.lib
+        from picasso.gui import plot_style
 
         super().__init__()
         self.setWindowTitle(window_title)
@@ -2159,6 +2184,35 @@ class GenericPlotWindow(QtWidgets.QTabWidget):
         vbox.addWidget(self.canvas)
         self.toolbar = NavigationToolbar2QT(self.canvas, self)
         vbox.addWidget(self.toolbar)
+        self.plot_style = plot_style.current()
+        self.plot_style.style_figure(self.figure)
+        self.redraw = None
+        self.toolbar.addSeparator()
+        settings_action = self.toolbar.addAction("Plot settings")
+        settings_action.setToolTip("Appearance of all chart windows")
+        settings_action.triggered.connect(lambda: plot_style.show_dialog())
+        plot_style.hub().changed.connect(self._on_style_changed)
+
+    @contextlib.contextmanager
+    def plot_context(self):
+        """Context in which to draw on ``figure`` with the current plot
+        style, see ``PlotStyle.context``."""
+        self.plot_style.style_figure(self.figure)
+        with self.plot_style.context():
+            yield
+        # ticks created at draw time, after the context, would take the
+        # global defaults (e.g., on log axes); store the style on the axes
+        self.plot_style.apply(self.figure)
+
+    def _on_style_changed(self, style) -> None:
+        if sip.isdeleted(self):
+            return
+        self.plot_style = style
+        if self.redraw is not None:
+            self.redraw()
+        else:
+            style.apply(self.figure)
+        self.canvas.draw_idle()
 
 
 class RemoveColumnsDialog(Dialog):

@@ -2472,6 +2472,8 @@ def nena(
 def plot_nena(
     nena_result: dict,
     fig: plt.Figure = None,
+    fill: bool = True,
+    outline: bool = False,
 ) -> plt.Figure:
     """Plot the results of NeNA.
 
@@ -2485,6 +2487,9 @@ def plot_nena(
     fig : plt.Figure
         Figure to plot on. If None, a new figure and axes are
         created.
+    fill, outline : bool, optional
+        Whether the histogram bars are filled and/or outlined, see
+        ``lib.histogram_style``. Default is filled without an outline.
 
     Returns
     -------
@@ -2506,8 +2511,23 @@ def plot_nena(
         "Next frame neighbor distance histogram, "
         f"\u03c3 = {nena_result['best_values']['s'] * pixelsize:.2f} {unit}"
     )
-    ax.plot(d, nena_result["data"], label="Data")
-    ax.plot(d, nena_result["best_fit"], label="Fit")
+    # the data is a histogram over bin centers: draw it as filled bars
+    d = np.asarray(d, dtype=float)
+    half_bin = (d[1] - d[0]) / 2 if len(d) > 1 else 0.5
+    edges = np.append(d - half_bin, d[-1] + half_bin)
+    # colors of the active style, resolved now (lines look "CN" colors
+    # up only when drawn)
+    data_color, fit_color = plt.rcParams["axes.prop_cycle"].by_key()["color"][
+        :2
+    ]
+    ax.stairs(
+        nena_result["data"],
+        edges,
+        label="Data",
+        **lib.histogram_style(data_color, fill, outline),
+    )
+    ax.plot(d, nena_result["best_fit"], color=fit_color, label="Fit")
+    ax.set_ylim(bottom=0)
     ax.set_xlabel(f"Distance ({unit})")
     ax.set_ylabel("Counts")
     ax.legend(loc="best")
@@ -2645,7 +2665,8 @@ def plot_frc(
     ax.plot(q, frc_curve_smooth, label="Smoothed")
     ax.axhline(
         1 / 7,
-        color="black",
+        # black by default; follows the theme of a plot style
+        color=plt.rcParams["text.color"],
         linewidth=1.0,
         linestyle="--",
         label="1/7 threshold",
@@ -4914,7 +4935,12 @@ def plot_drift(
         ax2.set_ylabel("y (nm)")
         ax2.invert_yaxis()
         ax3 = fig.add_subplot(133)
-        ax3.plot(drift.z, label="z")
+        # fourth color, so that z is not mistaken for x
+        ax3.plot(
+            drift.z,
+            label="z",
+            color=list(plt.rcParams["axes.prop_cycle"])[3]["color"],
+        )
         ax3.legend(loc="best")
         ax3.set_xlabel("Frame")
         ax3.set_ylabel("Drift (nm)")

@@ -51,6 +51,7 @@ Last change: 01-OCT-2026 CEST
 
 ### Others
 - Filter shows 1D histograms of both variablies in the 2D histogram filtering.
+- Many plots are not customizable.
 - Code readability clean ups (flake8).
 - The spatial index stored in localization .hdf5 files (`/render_index`). See the [documentation](https://picassosr.readthedocs.io/en/latest/files.html#spatial-index).
 - The user settings file (`~/.picasso/settings.yaml`) is no longer lost when it cannot be read. Also, the [documentation](https://picassosr.readthedocs.io/en/latest/others.html#user-settings-file) has been added.

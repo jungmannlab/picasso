@@ -240,26 +240,14 @@ class FloatEdit(QtWidgets.QLineEdit):
         return value
 
 
-class PickHistWindow(QtWidgets.QTabWidget):
+class PickHistWindow(lib.GenericPlotWindow):
     """Class to display binding kinetics plots."""
 
     def __init__(self) -> None:
-        super().__init__()
-        self.setWindowTitle("Pick Histograms")
-        this_directory = os.path.dirname(os.path.realpath(__file__))
-        icon_path = os.path.join(this_directory, "icons", "render.ico")
-        icon = QtGui.QIcon(icon_path)
-        self.setWindowIcon(icon)
-        self.resize(1000, 500)
+        super().__init__("Pick Histograms", "render")
         self.plotted = False
-        self.figure = plt.Figure(constrained_layout=True)
-        self.axes1 = self.figure.add_subplot(121)
-        self.axes2 = self.figure.add_subplot(122)
-        self.canvas = FigureCanvas(self.figure)
-        vbox = QtWidgets.QVBoxLayout()
-        self.setLayout(vbox)
-        vbox.addWidget(self.canvas)
-        vbox.addWidget((NavigationToolbar2QT(self.canvas, self)))
+        self._plot_args = None
+        self.redraw = self._draw
 
     def plot(
         self,
@@ -281,6 +269,28 @@ class PickHistWindow(QtWidgets.QTabWidget):
             Cumulative exponential fit results for dark times, see
             ``fit_cum_exp``.
         """
+        self._plot_args = (pooled_locs, fit_result_len, fit_result_dark)
+        self._draw()
+        self.canvas.draw()
+        self.plotted = True
+
+    def _draw(self) -> None:
+        """Draw the last plotted data with the current plot style."""
+        if self._plot_args is None:
+            return
+        pooled_locs, fit_result_len, fit_result_dark = self._plot_args
+        with self.plot_context():
+            self.figure.clear()
+            self.axes1 = self.figure.add_subplot(121)
+            self.axes2 = self.figure.add_subplot(122)
+            self._draw_axes(pooled_locs, fit_result_len, fit_result_dark)
+
+    def _draw_axes(
+        self,
+        pooled_locs: pd.DataFrame,
+        fit_result_len: dict,
+        fit_result_dark: dict,
+    ) -> None:
         # Bright
         self.figure = lib.plot_cumulative_exponential_fit(
             pooled_locs["len"].copy(),
@@ -312,8 +322,6 @@ class PickHistWindow(QtWidgets.QTabWidget):
             )
         )
         self.figure.suptitle("Binding kinetics per pick")
-        self.canvas.draw()
-        self.plotted = True
 
 
 class ApplyDialog(lib.Dialog):
@@ -4633,30 +4641,24 @@ class TestClustererView(QtWidgets.QLabel):
         return ([y_min, x_min], [y_max, x_max])
 
 
-class DriftPlotWindow(QtWidgets.QTabWidget):
+class DriftPlotWindow(lib.GenericPlotWindow):
     """Display 2D/3D drift."""
 
     def __init__(self, parent: QtWidgets.QWidget) -> None:
-        super().__init__()
+        super().__init__("Drift Plot", "render")
         self.parent = parent
-        self.setWindowTitle("Drift Plot")
-        this_directory = os.path.dirname(os.path.realpath(__file__))
-        icon_path = os.path.join(this_directory, "icons", "render.ico")
-        icon = QtGui.QIcon(icon_path)
-        self.setWindowIcon(icon)
-        self.resize(1000, 500)
-        self.figure = plt.Figure(constrained_layout=True)
-        self.canvas = FigureCanvas(self.figure)
-        vbox = QtWidgets.QVBoxLayout()
-        self.setLayout(vbox)
-        vbox.addWidget(self.canvas)
-        vbox.addWidget((NavigationToolbar2QT(self.canvas, self)))
 
     def plot(self, drift: pd.DataFrame) -> None:
         """Plot drift in 2D or 3D depending on the columns of the input
         DataFrame."""
         pixelsize = self.parent.pixelsize
-        postprocess.plot_drift(drift, pixelsize, self.figure)
+
+        def draw() -> None:
+            with self.plot_context():
+                postprocess.plot_drift(drift, pixelsize, self.figure)
+
+        draw()
+        self.redraw = draw
         self.canvas.draw()
 
 
@@ -4999,7 +5001,8 @@ class InfoDialog(lib.Dialog):
         self.movie_grid.addWidget(self.nena_label, 1, 1)
         self.nena_button = QtWidgets.QPushButton("Calculate NeNA")
         self.nena_button.setToolTip("Click to calculate NeNA precision.")
-        self.nena_button.clicked.connect(self.calculate_nena_lp)
+        # clicked passes its checked state, which is not an on_done
+        self.nena_button.clicked.connect(lambda: self.calculate_nena_lp())
         self.movie_grid.addWidget(self.nena_button, 2, 0)
         show_nena_plot_button = QtWidgets.QPushButton("Show NeNA plot")
         show_nena_plot_button.setToolTip("Display NeNA fit.")
@@ -5528,51 +5531,43 @@ class InfoDialog(lib.Dialog):
             return
 
 
-class NenaPlotWindow(QtWidgets.QTabWidget):
+class NenaPlotWindow(lib.GenericPlotWindow):
     """Plot NeNA precision."""
 
     def __init__(self, info_dialog: InfoDialog) -> None:
-        super().__init__()
+        super().__init__("Nena Plot", "render")
         self.info_dialog = info_dialog
-        self.setWindowTitle("Nena Plot")
-        this_directory = os.path.dirname(os.path.realpath(__file__))
-        icon_path = os.path.join(this_directory, "icons", "render.ico")
-        icon = QtGui.QIcon(icon_path)
-        self.setWindowIcon(icon)
-        self.resize(1000, 500)
-        self.figure = plt.Figure(constrained_layout=True)
-        self.canvas = FigureCanvas(self.figure)
-        vbox = QtWidgets.QVBoxLayout()
-        self.setLayout(vbox)
-        vbox.addWidget(self.canvas)
-        vbox.addWidget((NavigationToolbar2QT(self.canvas, self)))
 
     def plot(self, nena_result: dict) -> None:
-        postprocess.plot_nena(nena_result, self.figure)
+        def draw() -> None:
+            style = self.plot_style
+            with self.plot_context():
+                postprocess.plot_nena(
+                    nena_result,
+                    self.figure,
+                    fill=style.hist_fill,
+                    outline=style.hist_outline,
+                )
+
+        draw()
+        self.redraw = draw
         self.canvas.draw()
 
 
-class FRCPlotWindow(QtWidgets.QTabWidget):
+class FRCPlotWindow(lib.GenericPlotWindow):
     """Plot FRC resolution."""
 
     def __init__(self, info_dialog: InfoDialog) -> None:
-        super().__init__()
+        super().__init__("FRC Plot", "render")
         self.info_dialog = info_dialog
-        self.setWindowTitle("FRC Plot")
-        this_directory = os.path.dirname(os.path.realpath(__file__))
-        icon_path = os.path.join(this_directory, "icons", "render.ico")
-        icon = QtGui.QIcon(icon_path)
-        self.setWindowIcon(icon)
-        self.resize(1000, 500)
-        self.figure = plt.Figure(constrained_layout=True)
-        self.canvas = FigureCanvas(self.figure)
-        vbox = QtWidgets.QVBoxLayout()
-        self.setLayout(vbox)
-        vbox.addWidget(self.canvas)
-        vbox.addWidget((NavigationToolbar2QT(self.canvas, self)))
 
     def plot(self, frc_result: dict) -> None:
-        postprocess.plot_frc(frc_result, self.figure)
+        def draw() -> None:
+            with self.plot_context():
+                postprocess.plot_frc(frc_result, self.figure)
+
+        draw()
+        self.redraw = draw
         self.canvas.draw()
 
 
@@ -6532,25 +6527,39 @@ class MaskSettingsDialog(lib.Dialog):
             "Blurred image values",
             "render",
         )
-        self.hist_window.figure.clear()
-
-        ax = self.hist_window.figure.add_subplot(111)
-        ax.set_title("Density of blurred image values")
         vals = self.H_blur.ravel()
         vals = vals[vals > 0]  # exclude zeroes that skew the image
-        bins = lib.calculate_optimal_bins(vals, max_n_bins=1000)
-        hist, bins, _ = ax.hist(vals, bins=bins, label="Data", density=True)
-        ax.axvline(
-            self.mask_thresh.value(),
-            0,
-            max(hist),
-            color="r",
-            label="Threshold",
-            linestyle="--",
-        )
-        ax.set_xlabel("Pixel value (a.u.)")
-        ax.set_ylabel("Density")
-        ax.legend(loc="best")
+        threshold = self.mask_thresh.value()
+
+        def draw() -> None:
+            window = self.hist_window
+            with window.plot_context():
+                window.figure.clear()
+                ax = window.figure.add_subplot(111)
+                ax.set_title("Density of blurred image values")
+                bins = lib.calculate_optimal_bins(vals, max_n_bins=1000)
+                hist, bins, _ = ax.hist(
+                    vals,
+                    bins=bins,
+                    label="Data",
+                    density=True,
+                    histtype="stepfilled",
+                    **window.plot_style.hist_kwargs(),
+                )
+                ax.axvline(
+                    threshold,
+                    0,
+                    max(hist),
+                    color="r",
+                    label="Threshold",
+                    linestyle="--",
+                )
+                ax.set_xlabel("Pixel value (a.u.)")
+                ax.set_ylabel("Density")
+                ax.legend(loc="best")
+
+        draw()
+        self.hist_window.redraw = draw
         self.hist_window.canvas.draw()
         self.hist_window.show()
 
@@ -13337,12 +13346,21 @@ class View(QtWidgets.QLabel):
 
             self.canvas = lib.GenericPlotWindow("Trace", "render")
             self.canvas.resize(1000, 750)
-            self.canvas.figure, (xvec, yvec, yvec_ph) = lib.plot_trace(
-                locs=locs,
-                info=self.infos[channel],
-                fig=self.canvas.figure,
-                return_trace=True,
-            )
+            canvas = self.canvas
+            info = self.infos[channel]
+
+            def draw() -> tuple:
+                with canvas.plot_context():
+                    _, trace = lib.plot_trace(
+                        locs=locs,
+                        info=info,
+                        fig=canvas.figure,
+                        return_trace=True,
+                    )
+                return trace
+
+            xvec, yvec, yvec_ph = draw()
+            self.canvas.redraw = draw
             self.current_trace_x = xvec
             self.current_trace_y = yvec
             self.current_trace_y_ph = yvec_ph
@@ -14242,9 +14260,7 @@ class View(QtWidgets.QLabel):
         # plot profiles
         self.canvas = lib.GenericPlotWindow("Pick profile", "render")
         self.canvas.resize(800, 500)
-        self.canvas.figure.clear()
-
-        ax = self.canvas.figure.add_subplot(111)
+        canvas = self.canvas
         colors = [
             list(self.window.dataset_dialog.legend_color(i))
             for i in range(len(self.window.dataset_dialog.colordisp_all))
@@ -14258,18 +14274,27 @@ class View(QtWidgets.QLabel):
             edges = np.arange(data_lo, data_hi + bin_width_nm, bin_width_nm)
             if edges.size < 2:
                 return
-            ax.clear()
-            for i, channel in enumerate(channels):
-                ax.hist(
-                    self.profiles[i],
-                    bins=edges,
-                    density=False,
-                    facecolor=colors[channel],
-                    alpha=0.5,
+            with canvas.plot_context():
+                canvas.figure.clear()
+                ax = canvas.figure.add_subplot(111)
+                # channel colors as in the image, or the plot colors
+                plot_colors = canvas.plot_style.channel_colors(
+                    [colors[channel] for channel in channels]
                 )
-            ax.set_xlabel("Position along pick (nm)")
-            ax.set_ylabel("Counts")
-            self.canvas.canvas.draw_idle()
+                # half-transparent fill: the channels overlap
+                for i, channel in enumerate(channels):
+                    ax.hist(
+                        self.profiles[i],
+                        bins=edges,
+                        density=False,
+                        histtype="stepfilled",
+                        **canvas.plot_style.hist_kwargs(
+                            plot_colors[i], fill_alpha=0.5
+                        ),
+                    )
+                ax.set_xlabel("Position along pick (nm)")
+                ax.set_ylabel("Counts")
+            canvas.canvas.draw_idle()
 
         redraw(initial_bin_width)
 
@@ -14283,6 +14308,7 @@ class View(QtWidgets.QLabel):
         self.canvas.toolbar.addWidget(QtWidgets.QLabel("Bin width:"))
         self.canvas.toolbar.addWidget(bin_spin)
         bin_spin.valueChanged.connect(redraw)
+        self.canvas.redraw = lambda: redraw(bin_spin.value())
 
         export_profile = QtWidgets.QPushButton("Export (*.csv)")
         self.canvas.toolbar.addWidget(export_profile)
