@@ -1211,7 +1211,8 @@ class SummedChannelsMovie:
         coordinates into that channel (the calibration's
         ``channel_transforms``; the reference's is the identity). None entries
         are rejected: a channel that could not be registered must not be summed
-        in at the identity, since that would smear the sum.
+        in at the identity, since that would smear the sum. To add channels as
+        they are, pass :func:`unregistered_sum_transforms` explicitly.
     camera_infos : list of dict, optional
         One camera info per channel, used to convert counts to photons. If
         None, the raw counts are summed instead (only sensible when the
@@ -1314,6 +1315,17 @@ class SummedChannelsMovie:
         # the window of the canvas that is filled: the reference region for
         # split-FOV data, the whole frame for separate channel movies
         if self.regions is None:
+            # a channel at the identity is added pixel for pixel, which needs
+            # the reference's frame size (a resampled one is not)
+            for c, transform in enumerate(self.transforms):
+                shape = np.asarray(self.movies[c][0]).shape
+                if transform.is_identity() and shape != self.frame_shape:
+                    raise ValueError(
+                        f"Channel {c}'s frames ({shape[0]} x {shape[1]}) "
+                        "differ from the reference's "
+                        f"({self.frame_shape[0]} x {self.frame_shape[1]}); "
+                        "register the channels to sum them."
+                    )
             self._window = [[0, 0], list(self.frame_shape)]
         else:
             self._window = self.regions[self.reference]
@@ -1440,6 +1452,50 @@ class SummedChannelsMovie:
 
     def __exit__(self, exc_type, exc_value, traceback):
         self.close()
+
+
+def unregistered_sum_transforms(
+    n_channels: int,
+    regions: list | None = None,
+    reference: int = 0,
+) -> list:
+    """The transforms that add channels up as they are, without registering
+    them against each other.
+
+    For :class:`SummedChannelsMovie` and :func:`identify_multichannel_sum`,
+    when the channels already overlay each other pixel for pixel (or when no
+    registration is at hand): separate channel movies are summed at the
+    identity, and split-FOV regions (all the same size) are overlaid, i.e.
+    region ``c`` is shifted by its offset from the reference region. The
+    shifts are whole pixels, so no pixel is interpolated either way.
+
+    Parameters
+    ----------
+    n_channels : int
+        Number of channels (or split-FOV regions).
+    regions : list, optional
+        Split-FOV: one ``[[y_min, x_min], [y_max, x_max]]`` rectangle per
+        channel. If None, the channels are separate movies.
+    reference : int, optional
+        Index of the reference channel. Default is 0.
+
+    Returns
+    -------
+    transforms : list of transforms.Transform
+        One reference->channel transform per channel.
+    """
+    if regions is None:
+        return [tform.identity() for _ in range(n_channels)]
+    if len(regions) != n_channels:
+        raise ValueError(
+            f"Got {n_channels} channels but {len(regions)} regions."
+        )
+    rects = [_normalize_rect(r) for r in regions]
+    (y_ref, x_ref), _ = rects[reference]
+    return [
+        tform.TranslationTransform.from_shift((x0 - x_ref, y0 - y_ref))
+        for (y0, x0), _ in rects
+    ]
 
 
 def identify_in_frame(

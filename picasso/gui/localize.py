@@ -64,7 +64,26 @@ DEFAULT_PARAMETERS = {
 }
 
 IDENTIFY_MODE_SEPARATE = "Each channel separately"
-IDENTIFY_MODE_SUM = "Sum of channels"
+IDENTIFY_MODE_SUM = "Sum of registered channels"
+IDENTIFY_MODE_UNREGISTERED_SUM = "Sum of unregistered channels"
+# Both sum modes search one summed image; they differ only in how the channels
+# are placed on top of each other (see ``Window._sum_channel_transforms``).
+IDENTIFY_SUM_MODES = (IDENTIFY_MODE_SUM, IDENTIFY_MODE_UNREGISTERED_SUM)
+# What ``Window.sum_transform_source`` (and the metadata's "Channel sum
+# registration") says for a sum of unregistered channels.
+UNREGISTERED_SUM_SOURCE = "none (the channels are added as they are)"
+# The identification settings (``Window._capture_params`` keys) the channel
+# sum has one set of, apart from every channel's own: the sum is one image,
+# in photons and over all channels (see ``Window.show_sum_settings``).
+_SUM_SETTING_KEYS = (
+    "box",
+    "mng",
+    "mng_min",
+    "mng_max",
+    "temporal_median_on",
+    "temporal_median",
+    "gaussian_filter_sigma",
+)
 # How multichannel (and split-FOV) data is fitted: all channels tied into one
 # global fit, or every channel on its own. Defined in ``picasso.localize``,
 # which records the mode in the metadata of an independent fit.
@@ -542,6 +561,14 @@ def _format_mng(minimum_ng: float | list) -> str:
     if isinstance(minimum_ng, (list, tuple)):
         return "/".join(f"{int(_):,}" for _ in minimum_ng)
     return f"{int(minimum_ng):,}"
+
+
+def _sum_registration_phrase(source: str) -> str:
+    """How a channel sum was put together, for the status bar: where its
+    registration came from, or that it was not registered at all."""
+    if source == UNREGISTERED_SUM_SOURCE:
+        return "not registered"
+    return f"registered from {source}"
 
 
 class _LoadCanceledError(Exception):
@@ -1705,11 +1732,48 @@ class ConcatenateMoviesDialog(lib.Dialog):
         )
 
 
+Z_BINNING_TIP = (
+    "Number of consecutive z steps averaged into one axial bin before\n"
+    "the calibration model is built. Each bin sits at the mean stage\n"
+    "position of its steps; trailing steps that do not fill a whole bin\n"
+    "are left out.\n\n"
+    "If too low z spacing is used, this may lead to clustering of\n"
+    "fitted z values at certain positions due to local minima.\n\n"
+    "1 means no binning."
+)
+
+
+def _z_binning_widgets(
+    grid: QtWidgets.QGridLayout, row: int, step: QtWidgets.QDoubleSpinBox
+) -> QtWidgets.QSpinBox:
+    """Add the z binning spin box of the 3D calibration dialogs to
+    ``grid`` at ``row``, with a live readout of the resulting bin size
+    computed from the ``step`` spin box, and return the spin box."""
+    label = QtWidgets.QLabel("Z binning (steps per bin):")
+    label.setToolTip(Z_BINNING_TIP)
+    grid.addWidget(label, row, 0)
+    z_binning = QtWidgets.QSpinBox()
+    z_binning.setRange(1, 1000)
+    z_binning.setValue(1)
+    z_binning.setToolTip(Z_BINNING_TIP)
+    grid.addWidget(z_binning, row, 1)
+    readout = QtWidgets.QLabel()
+    grid.addWidget(readout, row, 2)
+
+    def update_readout() -> None:
+        readout.setText(f"= {step.value() * z_binning.value():g} nm bins")
+
+    z_binning.valueChanged.connect(update_readout)
+    step.valueChanged.connect(update_readout)
+    update_readout()
+    return z_binning
+
+
 class Calibrate3DDialog(lib.Dialog):
     """Dialog for entering the parameters of a 3D (astigmatism)
     calibration: the z step size, the number of frames acquired per z
     (stage) position and, if more than one, the order in which those
-    frames were acquired."""
+    frames were acquired, and how many z steps are binned together."""
 
     def __init__(self, window: QtWidgets.QWidget) -> None:
         super().__init__(window)
@@ -1759,6 +1823,9 @@ class Calibrate3DDialog(lib.Dialog):
         )
         grid.addWidget(self.frame_order, 2, 1)
 
+        # Axial binning of consecutive z steps
+        self.z_binning = _z_binning_widgets(grid, 3, self.step)
+
         # The order only matters when more than one frame per step
         self.frames_per_step.valueChanged.connect(self._update_order_enabled)
         self._update_order_enabled(self.frames_per_step.value())
@@ -1784,17 +1851,18 @@ class Calibrate3DDialog(lib.Dialog):
     @staticmethod
     def getCalibrationSpecs(
         parent: QtWidgets.QWidget | None = None,
-    ) -> tuple[float, int, str, bool]:
+    ) -> tuple[float, int, str, int, bool]:
         """Show the dialog and return the chosen step size, number of
-        frames per step, frame order and whether the dialog was
-        accepted."""
+        frames per step, frame order, z binning and whether the dialog
+        was accepted."""
         dialog = Calibrate3DDialog(parent)
         result = dialog.exec()
         step = dialog.step.value()
         frames_per_step = dialog.frames_per_step.value()
         frame_order = dialog.frame_order.currentData()
+        z_binning = dialog.z_binning.value()
         accepted = result == QtWidgets.QDialog.DialogCode.Accepted
-        return step, frames_per_step, frame_order, accepted
+        return step, frames_per_step, frame_order, z_binning, accepted
 
 
 class CameraCalibrationDialog(lib.Dialog):
@@ -2078,8 +2146,9 @@ class CameraCalibrationDialog(lib.Dialog):
 class CalibrateSplineDialog(lib.Dialog):
     """Dialog for entering the parameters of a cubic-spline PSF calibration
     built from a bead z-stack: the z step size, the number of frames acquired
-    per z (stage) position, the acquisition order of those frames, and whether
-    to build a 3D (z-recovering) or 2D (single-plane) spline PSF. The box size
+    per z (stage) position, the acquisition order of those frames, how many z
+    steps are binned into one slice of the PSF model, and whether to build a
+    3D (z-recovering) or 2D (single-plane) spline PSF. The box size
     and minimum net gradient are taken from the main parameters."""
 
     def __init__(
@@ -2125,15 +2194,18 @@ class CalibrateSplineDialog(lib.Dialog):
         )
         grid.addWidget(self.frame_order, 2, 1)
 
+        # Axial binning of consecutive z steps (the spline's z knot spacing)
+        self.z_binning = _z_binning_widgets(grid, 3, self.step)
+
         # Spline PSF dimensionality / model
-        grid.addWidget(QtWidgets.QLabel("Spline PSF model:"), 3, 0)
+        grid.addWidget(QtWidgets.QLabel("Spline PSF model:"), 4, 0)
         self.model = QtWidgets.QComboBox()
         self.model.addItem("3D (recovers z)", userData="spline-3d")
         self.model.addItem("2D (single plane)", userData="spline-2d")
         self.model.setToolTip(
             "3D / 2D: single- or multichannel cubic-spline PSF."
         )
-        grid.addWidget(self.model, 3, 1)
+        grid.addWidget(self.model, 4, 1)
 
         # Magnification factor (applied to the fitted z, as in astigmatism)
         magnification_label = QtWidgets.QLabel("Magnification factor:")
@@ -2141,12 +2213,12 @@ class CalibrateSplineDialog(lib.Dialog):
             "Factor used to correct for z-position abberation due to\n"
             "refractive index mismatch, see Huang B, et al. Science. 2008."
         )
-        grid.addWidget(magnification_label, 4, 0)
+        grid.addWidget(magnification_label, 5, 0)
         self.magnification_factor = QtWidgets.QDoubleSpinBox()
         self.magnification_factor.setRange(0, 1e6)
         self.magnification_factor.setDecimals(4)
         self.magnification_factor.setValue(0.79)
-        grid.addWidget(self.magnification_factor, 4, 1)
+        grid.addWidget(self.magnification_factor, 5, 1)
 
         # Optional z-bias correction (astigmatism)
         self.correct_z_bias = QtWidgets.QCheckBox(
@@ -2159,7 +2231,7 @@ class CalibrateSplineDialog(lib.Dialog):
             "well-defined intensity focus (e.g. astigmatism)."
         )
         self.correct_z_bias.setChecked(False)
-        grid.addWidget(self.correct_z_bias, 5, 0, 1, 2)
+        grid.addWidget(self.correct_z_bias, 6, 0, 1, 2)
 
         # Multichannel (2- to 6-channel) default fit mode. Stored in the
         # calibration. Only shown for a multichannel build (several channels
@@ -2170,7 +2242,7 @@ class CalibrateSplineDialog(lib.Dialog):
         self.link_photons.setToolTip(LINK_PHOTONS_TIP)
         self.link_photons.setChecked(True)
         self.link_photons.setVisible(multichannel)
-        grid.addWidget(self.link_photons, 6, 0, 1, 2)
+        grid.addWidget(self.link_photons, 7, 0, 1, 2)
 
         # How the channels are registered to the reference. Multichannel only:
         # a single-channel calibration has nothing to register.
@@ -2178,8 +2250,8 @@ class CalibrateSplineDialog(lib.Dialog):
         self.registration_model = _transform_model_combo()
         self.registration_label.setVisible(multichannel)
         self.registration_model.setVisible(multichannel)
-        grid.addWidget(self.registration_label, 7, 0)
-        grid.addWidget(self.registration_model, 7, 1)
+        grid.addWidget(self.registration_label, 8, 0)
+        grid.addWidget(self.registration_model, 8, 1)
 
         self.frames_per_step.valueChanged.connect(self._update_order_enabled)
         self._update_order_enabled(self.frames_per_step.value())
@@ -2206,11 +2278,12 @@ class CalibrateSplineDialog(lib.Dialog):
     def getCalibrationSpecs(
         parent: QtWidgets.QWidget | None = None,
         multichannel: bool = False,
-    ) -> tuple[float, int, str, str, float, bool, bool, str, int | None, bool]:
+    ) -> tuple[float, int, str, int, str, float, bool, bool, str, bool]:
         """Show the dialog and return the chosen step size, number of frames
-        per step, frame order, spline model, magnification factor, whether to
-        correct the z bias, whether to link photons across channels, the
-        channel-registration model, and whether it was accepted. ``multichannel`` shows the multichannel-only options (link
+        per step, frame order, z binning, spline model, magnification factor,
+        whether to correct the z bias, whether to link photons across
+        channels, the channel-registration model, and whether it was
+        accepted. ``multichannel`` shows the multichannel-only options (link
         photons, registration model); they are hidden for a single-channel
         calibration."""
         dialog = CalibrateSplineDialog(parent, multichannel=multichannel)
@@ -2218,6 +2291,7 @@ class CalibrateSplineDialog(lib.Dialog):
         step = dialog.step.value()
         frames_per_step = dialog.frames_per_step.value()
         frame_order = dialog.frame_order.currentData()
+        z_binning = dialog.z_binning.value()
         model = dialog.model.currentData()
         magnification_factor = dialog.magnification_factor.value()
         correct_z_bias = dialog.correct_z_bias.isChecked()
@@ -2228,6 +2302,7 @@ class CalibrateSplineDialog(lib.Dialog):
             step,
             frames_per_step,
             frame_order,
+            z_binning,
             model,
             magnification_factor,
             correct_z_bias,
@@ -3506,11 +3581,11 @@ class ParametersDialog(lib.Dialog):
         identification_grid.addLayout(preview_row, 6, 0)
 
         # Multichannel: identify each channel on its own, or on the channels
-        # added together. Shown by the window for multichannel / split-FOV
-        # data (see Window._update_multichannel_widgets); its space is
-        # reserved while hidden, so loading channels does not reflow the
-        # dialog.
-        mode_row = QtWidgets.QHBoxLayout()
+        # added together. A row of its own, like the 'Fit' mode below, so
+        # the combo box has the whole field column. Shown by the window for
+        # multichannel / split-FOV data (see
+        # Window._update_multichannel_widgets); its space is reserved while
+        # hidden, so loading channels does not reflow the dialog.
         self.identify_mode_label = QtWidgets.QLabel("Identify on:")
         identify_mode_tip = (
             "What the spots are searched in.\n\n"
@@ -3527,26 +3602,39 @@ class ParametersDialog(lib.Dialog):
             "spline calibration; without one, every channel is identified\n"
             "first and the transform is estimated from those detections.\n"
             "The sum is shown (and previewed) as soon as it is selected,\n"
-            "wherever the channels are already registered.\n"
-            "Note that the minimum net gradient has to be re-tuned for the\n"
-            "sum: it is in photons and over all channels."
+            "wherever the channels are already registered.\n\n"
+            f"'{IDENTIFY_MODE_UNREGISTERED_SUM}': the channels (or split-FOV\n"
+            "regions) are added up (in photons) pixel for pixel, as they\n"
+            "are. Use this when the channels already overlay each other, or\n"
+            "to look at the sum without a registration. The detections then\n"
+            "stand at the same pixel in every channel: fitting each channel\n"
+            "separately fits every channel at them, while the joint fit\n"
+            "still places them in the other channels through its\n"
+            "registration.\n\n"
+            "Either sum has its own box size, minimum net gradient and\n"
+            "identification filters, the same whichever channel is shown;\n"
+            "the channels keep their own for identifying them separately.\n"
+            "The minimum net gradient has to be re-tuned for the sum: it is\n"
+            "in photons and over all channels."
         )
         self.identify_mode_label.setToolTip(identify_mode_tip)
         self.identify_mode_combo = QtWidgets.QComboBox()
         self.identify_mode_combo.addItems(
-            [IDENTIFY_MODE_SEPARATE, IDENTIFY_MODE_SUM]
+            [
+                IDENTIFY_MODE_SEPARATE,
+                IDENTIFY_MODE_SUM,
+                IDENTIFY_MODE_UNREGISTERED_SUM,
+            ]
         )
         self.identify_mode_combo.setToolTip(identify_mode_tip)
         self.identify_mode_combo.currentIndexChanged.connect(
             self.on_identify_mode_changed
         )
-        mode_row.addWidget(self.identify_mode_label)
-        mode_row.addWidget(self.identify_mode_combo)
-        mode_row.addStretch(1)
+        identification_grid.addWidget(self.identify_mode_label, 7, 0)
+        identification_grid.addWidget(self.identify_mode_combo, 7, 1)
         for widget in (self.identify_mode_label, self.identify_mode_combo):
             _retain_size_when_hidden(widget)
             widget.hide()
-        identification_grid.addLayout(mode_row, 6, 1)
 
         # ROIs
         label = QtWidgets.QLabel("ROIs:")
@@ -3579,7 +3667,7 @@ class ParametersDialog(lib.Dialog):
         self.split_fov_checkbox.setTristate(False)
         self.split_fov_checkbox.stateChanged.connect(self.on_split_fov_changed)
         roi_label_layout.addWidget(self.split_fov_checkbox)
-        identification_grid.addLayout(roi_label_layout, 7, 0)
+        identification_grid.addLayout(roi_label_layout, 8, 0)
 
         self._updating_roi_field = False
         self.roi_dialog = None
@@ -3597,7 +3685,7 @@ class ParametersDialog(lib.Dialog):
         self.roi_edit_button = QtWidgets.QPushButton("Edit ROIs...")
         self.roi_edit_button.clicked.connect(self.on_edit_rois)
         roi_layout.addWidget(self.roi_edit_button)
-        identification_grid.addLayout(roi_layout, 7, 1)
+        identification_grid.addLayout(roi_layout, 8, 1)
 
         # min/max frames
         label = QtWidgets.QLabel("Frames (min,max):")
@@ -3607,7 +3695,7 @@ class ParametersDialog(lib.Dialog):
             "Several disjoint segments can be given as min,max pairs\n"
             "separated by semicolons, e.g. '1,100; 200,300'."
         )
-        identification_grid.addWidget(label, 8, 0)
+        identification_grid.addWidget(label, 9, 0)
         self.frames_edit = QtWidgets.QLineEdit()
         # one or more "min,max" pairs separated by semicolons, with
         # optional surrounding whitespace
@@ -3618,7 +3706,7 @@ class ParametersDialog(lib.Dialog):
         self.frames_edit.setValidator(validator)
         self.frames_edit.editingFinished.connect(self.on_frames_edit_finished)
         self.frames_edit.textChanged.connect(self.on_frames_edit_changed)
-        identification_grid.addWidget(self.frames_edit, 8, 1)
+        identification_grid.addWidget(self.frames_edit, 9, 1)
 
         # Multichannel: optionally use the same key settings for every channel.
         # Shown only when more than one channel is loaded (see the Window's
@@ -5306,9 +5394,11 @@ class ParametersDialog(lib.Dialog):
         # in split-FOV mode the slider edits the selected region's own
         # threshold; do this before ``_last_mng`` moves, so any region that
         # has no threshold yet inherits the previous value rather than the
-        # one being typed, and before the preview, so it uses the new one
-        self._store_mng_for_regions(value)
-        self._last_mng = value
+        # one being typed, and before the preview, so it uses the new one.
+        # The channel sum's threshold is its own and none of the regions'.
+        if not self._sum_settings_on_dialog():
+            self._store_mng_for_regions(value)
+            self._last_mng = value
         if self.preview_checkbox.isChecked():
             self.window.on_parameters_changed()
 
@@ -5335,11 +5425,20 @@ class ParametersDialog(lib.Dialog):
             # redraw comes from on_parameters_changed instead
             window.draw_frame()
 
+    def _sum_settings_on_dialog(self) -> bool:
+        """Whether the dialog holds the channel sum's identification settings
+        (see ``Window.show_sum_settings``). The dialog is also built for
+        windows that have no channel sum at all, and during the window's own
+        construction."""
+        shown = getattr(self.window, "sum_settings_on_dialog", None)
+        return bool(shown is not None and shown())
+
     def sync_mng_to_selected_region(self) -> None:
         """Show the selected split-FOV region's own threshold on the min.
         net gradient slider/spinbox, so selecting a region tunes that
-        region. A no-op outside split-FOV mode or with nothing selected."""
-        if self._syncing_mng:
+        region. A no-op outside split-FOV mode, with nothing selected or
+        while the slider holds the channel sum's own threshold."""
+        if self._syncing_mng or self._sum_settings_on_dialog():
             return
         window = self.window
         mngs = window.region_mngs()
@@ -5384,11 +5483,24 @@ class ParametersDialog(lib.Dialog):
         Selecting the sum builds the summed view straight away wherever the
         channels can be registered without identifying them first, so that the
         display and the identification preview show the image the
-        identification will actually search rather than the raw movie."""
+        identification will actually search rather than the raw movie.
+
+        The sum has its own identification settings, which take the channels'
+        place on the dialog while it is selected (see
+        ``Window.show_sum_settings``)."""
         self.window.drop_channel_sum()
-        if self.identify_mode_combo.currentText() == IDENTIFY_MODE_SUM:
+        summing = self.identify_mode_combo.currentText() in IDENTIFY_SUM_MODES
+        self.window.show_sum_settings(summing)
+        notice = ""
+        if summing:
             self.window.ensure_channel_sum(notify=True)
+            # the redraw below clears the status bar while the preview is
+            # off, and would take the notice (the sum is up, or why it is
+            # not) with it
+            notice = self.window.status_bar.currentMessage()
         self._reset_contrast_and_refresh()
+        if notice:
+            self.window.status_bar.showMessage(notice)
 
     def joint_fit_selected(self) -> bool:
         """Whether the 'Fit' setting asks for the joint multichannel fit.
@@ -5811,6 +5923,12 @@ class Window(QtWidgets.QMainWindow):
         self.frame_slider.setMaximum(0)
         self.frame_slider.setEnabled(False)
         self.frame_slider.setMaximumHeight(15)
+        # lay out by the widget's full rect: macOS insets a QSlider's
+        # layout rect, which let the contrast row below overlap (and the
+        # Auto button paint over) the bottom of the handle
+        self.frame_slider.setAttribute(
+            QtCore.Qt.WidgetAttribute.WA_LayoutUsesWidgetRect
+        )
         self.frame_slider.setStyleSheet(
             """
             QSlider::groove:horizontal {
@@ -5841,6 +5959,55 @@ class Window(QtWidgets.QMainWindow):
         self.contrast_slider.valuesChanged.connect(
             self.on_contrast_slider_changed
         )
+        # Auto toggle at the slider's side, a second view onto the contrast
+        # dialog's Auto checkbox. Connected both ways; ``setChecked`` with
+        # an unchanged state emits nothing, so the pair does not loop.
+        self.contrast_auto_button = QtWidgets.QToolButton()
+        self.contrast_auto_button.setText("Auto")
+        self.contrast_auto_button.setToolTip(
+            "Set the contrast automatically for each frame?"
+        )
+        self.contrast_auto_button.setCheckable(True)
+        font = self.contrast_auto_button.font()
+        font.setPointSizeF(font.pointSizeF() * 0.8)
+        self.contrast_auto_button.setFont(font)
+        self.contrast_auto_button.setStyleSheet(
+            """
+            QToolButton {
+                border: 1px solid #b0b0b0;
+                border-radius: 3px;
+                padding: 0px 4px;
+                background: transparent;
+            }
+            QToolButton:checked {
+                border-color: #5a5a5a;
+                background: #5a5a5a;
+                color: white;
+            }
+            QToolButton:disabled {
+                border-color: #d8d8d8;
+                color: #b8b8b8;
+            }
+            """
+        )
+        self.contrast_auto_button.setFixedHeight(
+            max(15, self.contrast_auto_button.fontMetrics().height() + 2)
+        )
+        self.contrast_auto_button.setChecked(
+            self.contrast_dialog.auto_checkbox.isChecked()
+        )
+        self.contrast_auto_button.setEnabled(False)
+        self.contrast_auto_button.toggled.connect(
+            self.contrast_dialog.auto_checkbox.setChecked
+        )
+        self.contrast_dialog.auto_checkbox.toggled.connect(
+            self.contrast_auto_button.setChecked
+        )
+        contrast_layout = QtWidgets.QHBoxLayout()
+        contrast_layout.setContentsMargins(0, 0, 0, 0)
+        contrast_layout.setSpacing(4)
+        contrast_layout.addWidget(self.contrast_slider)
+        contrast_layout.addWidget(self.contrast_auto_button)
         # Channel selector (hidden unless several channels are loaded).
         self.channel_combo = QtWidgets.QComboBox()
         self.channel_combo.setVisible(False)
@@ -5854,7 +6021,7 @@ class Window(QtWidgets.QMainWindow):
         central_layout.addWidget(self.channel_combo)
         central_layout.addWidget(self.view)
         central_layout.addWidget(self.frame_slider)
-        central_layout.addWidget(self.contrast_slider)
+        central_layout.addLayout(contrast_layout)
         self.setCentralWidget(central_widget)
         self.status_bar = self.statusBar()
         self.status_bar_frame_indicator = QtWidgets.QLabel()
@@ -5928,7 +6095,7 @@ class Window(QtWidgets.QMainWindow):
         # Which split-FOV region the fit settings now on the dialog belong to
         # (see ``sync_region_fit_params``); None when none is selected.
         self._region_params_owner = None
-        # Channel-sum identification (IDENTIFY_MODE_SUM), see
+        # Channel-sum identification (IDENTIFY_SUM_MODES), see
         # ``identify_channel_sum``. ``sum_identifications`` marks the current
         # detections as coming from the summed channels, which is what tells
         # the joint fit not to link them across channels again;
@@ -5943,6 +6110,11 @@ class Window(QtWidgets.QMainWindow):
         # this remembers a failed attempt, so that a registration that cannot
         # succeed is not retried on every redraw
         self._sum_registration_failed = False
+        # The channel sum's own identification settings (see
+        # ``show_sum_settings``): None until a sum mode is first selected,
+        # and ``_sum_settings_shown`` while they are the ones on the dialog.
+        self.sum_settings = None
+        self._sum_settings_shown = False
         # Multichannel state. ``self.channels[self.current_channel]`` is
         # the active channel, mirrored into the flat attributes above.
         # Single movies are stored as a one-element list.
@@ -6986,6 +7158,7 @@ class Window(QtWidgets.QMainWindow):
             combo.setCurrentText(IDENTIFY_MODE_SEPARATE)
             combo.blockSignals(False)
             self.drop_channel_sum()
+            self.show_sum_settings(False)
         pdialog.identify_mode_label.setVisible(multichannel)
         combo.setVisible(multichannel)
         fit_combo = pdialog.fit_mode_combo
@@ -7036,6 +7209,7 @@ class Window(QtWidgets.QMainWindow):
             step,
             frames_per_step,
             frame_order,
+            z_binning,
             model,
             magnification_factor,
             correct_z_bias,
@@ -7077,6 +7251,7 @@ class Window(QtWidgets.QMainWindow):
             step=step,
             frames_per_step=frames_per_step,
             frame_order=frame_order,
+            z_binning=z_binning,
             frame_bounds=frame_bounds,
             model=model,
             magnification_factor=magnification_factor,
@@ -7691,6 +7866,12 @@ class Window(QtWidgets.QMainWindow):
         # snapshot from the current dialog state, applying any camera /
         # pixel-size hints from that channel's metadata. Guarded so the
         # value changes don't wipe localizations.
+        # While the dialog holds the channel sum's identification settings,
+        # the new channels take the replaced active channel's own instead.
+        own = {}
+        if self.sum_settings_on_dialog() and self.channels:
+            previous = self.channels[self.current_channel].params or {}
+            own = {k: previous[k] for k in _SUM_SETTING_KEYS if k in previous}
         self._switching_channel = True
         try:
             self.channels = []
@@ -7701,7 +7882,7 @@ class Window(QtWidgets.QMainWindow):
                     self.parameters_dialog.pixelsize.setValue(
                         int(info[0]["Pixelsize"])
                     )
-                channel.params = self._capture_params()
+                channel.params = self._capture_params() | own
                 self.channels.append(channel)
             self.current_channel = 0
         finally:
@@ -7709,6 +7890,7 @@ class Window(QtWidgets.QMainWindow):
         self._populate_channel_combo()
         self.frame_slider.setEnabled(True)
         self.contrast_slider.setEnabled(True)
+        self.contrast_auto_button.setEnabled(True)
         self.curr_frame_number = 0
         self._restore_current_channel()
         self.draw_frame()
@@ -7782,7 +7964,14 @@ class Window(QtWidgets.QMainWindow):
         channel.ready_for_fit = self.ready_for_fit
         channel.last_identification_info = self.last_identification_info
         channel.extra_info = self.extra_info
-        channel.params = self._capture_params()
+        params = self._capture_params()
+        if self.sum_settings_on_dialog() and channel.params:
+            # the dialog holds the sum's identification settings, which are
+            # not this channel's: it keeps its own
+            for key in _SUM_SETTING_KEYS:
+                if key in channel.params:
+                    params[key] = channel.params[key]
+        channel.params = params
         # Contrast, the current frame and the frame range are shared across
         # channels (see _restore_current_channel), so they are not
         # snapshotted per channel.
@@ -7891,13 +8080,12 @@ class Window(QtWidgets.QMainWindow):
         # from the config, which we then override with the channel's values.
         if not link_cam and hasattr(pd, "camera") and "camera" in params:
             pd.camera.setCurrentIndex(params["camera"])
-        if not link_box:
-            pd.box_spinbox.setValue(params["box"])
-        if not link_mng:
-            pd.mng_min_spinbox.setValue(params["mng_min"])
-            pd.mng_max_spinbox.setValue(params["mng_max"])
-            pd.mng_slider.setValue(params["mng"])
-            pd.mng_spinbox.setValue(params["mng"])
+        # the channel sum has one set of identification settings for every
+        # channel, which stays on the dialog (see ``show_sum_settings``)
+        if not self.sum_settings_on_dialog():
+            self._apply_identification_settings(
+                params, box=not link_box, mng=not link_mng
+            )
         # Set the model first so its handler repopulates the optimizer list,
         # then restore the optimizer selection.
         pd.fit_model.setCurrentIndex(params.get("fit_model", 0))
@@ -7910,22 +8098,6 @@ class Window(QtWidgets.QMainWindow):
             pd.pixelsize.setValue(params["pixelsize"])
         pd.convergence_criterion.setValue(params["convergence"])
         pd.max_it.setValue(params["max_it"])
-        # .get() with defaults: parameter sets captured before the
-        # identification filters existed must still restore
-        pd.temporal_median_spinbox.setValue(
-            params.get(
-                "temporal_median", DEFAULT_PARAMETERS["Temporal Median Window"]
-            )
-        )
-        pd.temporal_median_checkbox.setChecked(
-            params.get("temporal_median_on", False)
-        )
-        pd.gaussian_filter_spinbox.setValue(
-            params.get(
-                "gaussian_filter_sigma",
-                DEFAULT_PARAMETERS["Gaussian Filter Sigma"],
-            )
-        )
         pd.magnification_factor.setValue(params["magnification"])
         pd.z_calibration = params["z_calibration"]
         pd.z_calibration_path = params["z_calibration_path"]
@@ -7949,6 +8121,100 @@ class Window(QtWidgets.QMainWindow):
             params.get("use_gpu", params.get("gpufit", False))
         )
 
+    def _apply_identification_settings(
+        self, params: dict, box: bool = True, mng: bool = True
+    ) -> None:
+        """Put a set of identification settings (``_SUM_SETTING_KEYS``) on
+        the dialog: a channel's own, or the channel sum's.
+
+        ``box`` / ``mng`` False leave those as they are, for a setting that
+        is shared across the channels anyway (see ``_apply_params``)."""
+        pd = self.parameters_dialog
+        if box:
+            pd.box_spinbox.setValue(params["box"])
+        if mng:
+            pd.mng_min_spinbox.setValue(params["mng_min"])
+            pd.mng_max_spinbox.setValue(params["mng_max"])
+            pd.mng_slider.setValue(params["mng"])
+            pd.mng_spinbox.setValue(params["mng"])
+        # .get() with defaults: parameter sets captured before the
+        # identification filters existed must still restore
+        pd.temporal_median_spinbox.setValue(
+            params.get(
+                "temporal_median", DEFAULT_PARAMETERS["Temporal Median Window"]
+            )
+        )
+        pd.temporal_median_checkbox.setChecked(
+            params.get("temporal_median_on", False)
+        )
+        pd.gaussian_filter_spinbox.setValue(
+            params.get(
+                "gaussian_filter_sigma",
+                DEFAULT_PARAMETERS["Gaussian Filter Sigma"],
+            )
+        )
+
+    def sum_settings_on_dialog(self) -> bool:
+        """Whether the Parameters dialog shows the channel sum's
+        identification settings rather than the active channel's own (see
+        ``show_sum_settings``)."""
+        try:
+            return bool(self._sum_settings_shown)
+        except (AttributeError, RuntimeError):
+            return False  # a partially built window shows no sum settings
+
+    def show_sum_settings(self, show: bool) -> None:
+        """Swap the channel sum's identification settings onto the dialog,
+        or the active channel's own back.
+
+        The sum is one image, in photons and over all channels, so its box
+        size, min. net gradient and identification filters are one set,
+        apart from every channel's own (``_SUM_SETTING_KEYS``): switching
+        channels leaves them on the dialog, and tuning them does not touch
+        the thresholds the channels are identified with on their own - with
+        'Identify on' back on the channels separately, or to register them
+        for the sum (see ``channel_parameters``). The first time a sum is
+        selected it starts from the settings then on the dialog.
+
+        Split-FOV data has one channel, whose settings (and per-region
+        thresholds, see ``region_mngs``) are set aside the same way.
+        """
+        if show == self.sum_settings_on_dialog():
+            return
+        pd = self.parameters_dialog
+        if show:
+            # the channel's own settings, before they leave the dialog
+            self._snapshot_current_channel()
+            current = self._capture_params()
+            if self.sum_settings is None:
+                self.sum_settings = {k: current[k] for k in _SUM_SETTING_KEYS}
+            self._sum_settings_shown = True
+            settings = self.sum_settings
+        else:
+            current = self._capture_params()
+            self.sum_settings = {k: current[k] for k in _SUM_SETTING_KEYS}
+            self._sum_settings_shown = False
+            settings = (
+                self.channels[self.current_channel].params
+                if self.channels
+                else None
+            )
+        # the links share the channels' own settings; the sum has one set
+        pd.link_box_checkbox.setVisible(not show)
+        pd.link_mng_checkbox.setVisible(not show)
+        if not settings:
+            return
+        self._switching_channel = True
+        # restoring the channel's own threshold must not be read as editing
+        # the split-FOV regions' (see ``on_mng_slider_changed``)
+        pd._syncing_mng = not show
+        try:
+            self._apply_identification_settings(settings)
+        finally:
+            pd._syncing_mng = False
+            self._switching_channel = False
+        pd.sync_mng_to_selected_region()
+
     def propagate_linked_params(self) -> None:
         """Copy each linked (shared) parameter group from the active channel's
         current dialog state into every channel, so enabling a link takes
@@ -7957,6 +8223,11 @@ class Window(QtWidgets.QMainWindow):
             return
         pd = self.parameters_dialog
         cur = self._capture_params()
+        if self.sum_settings_on_dialog():
+            # the dialog holds the sum's settings; the channels share their
+            # own
+            own = self.channels[self.current_channel].params or {}
+            cur |= {k: own[k] for k in _SUM_SETTING_KEYS if k in own}
         keys: list[str] = []
         if pd.link_box_checkbox.isChecked():
             keys += ["box"]
@@ -8408,6 +8679,10 @@ class Window(QtWidgets.QMainWindow):
             # draw the ROI rectangles (in scene/pixel coordinates)
             split_fov = self.view.split_fov_mode
             region_mngs = self.region_mngs()
+            if self.sum_settings_on_dialog():
+                # the sum has one threshold, on the slider; the regions' own
+                # are not in use
+                region_mngs = []
             for i, ((y_min, x_min), (y_max, x_max)) in enumerate(
                 self.view.rois
             ):
@@ -8656,7 +8931,7 @@ class Window(QtWidgets.QMainWindow):
             return None
         if not pdialog.link_colors_checkbox.isChecked():
             return None
-        if self.identify_mode() == IDENTIFY_MODE_SUM:
+        if self.identify_mode() in IDENTIFY_SUM_MODES:
             # the preview searches the summed channels, so every detection is
             # a cross-channel spot already - there is nothing to pair
             return None
@@ -8725,26 +9000,30 @@ class Window(QtWidgets.QMainWindow):
         return identifications
 
     def channel_parameters(self, channel: int) -> dict:
-        """The identification settings of a channel that is not on screen.
+        """The settings a channel is identified with on its own.
 
         The dialog only ever holds the active channel's values, so the others
         come from the snapshot taken when they were last displayed - except
         for the settings whose 'Same across channels' box is ticked, which are
-        the dialog's current ones by definition. The temporal median needs a
+        the dialog's current ones by definition. While the dialog holds the
+        channel sum's settings (see ``show_sum_settings``), the active
+        channel's own come from its snapshot too. The temporal median needs a
         stack, so it is switched off for a channel whose movie is too short
         for it, exactly as ``parameters`` does for the displayed one.
         """
         parameters = dict(self.parameters)
-        if channel == self.current_channel:
+        sum_shown = self.sum_settings_on_dialog()
+        if channel == self.current_channel and not sum_shown:
             return parameters
+        parameters["Identification Mode"] = IDENTIFY_MODE_SEPARATE
         pdialog = self.parameters_dialog
         params = self.channels[channel].params or {}
         if params:
-            if not pdialog.link_box_checkbox.isChecked():
+            if sum_shown or not pdialog.link_box_checkbox.isChecked():
                 parameters["Box Size"] = params.get(
                     "box", parameters["Box Size"]
                 )
-            if not pdialog.link_mng_checkbox.isChecked():
+            if sum_shown or not pdialog.link_mng_checkbox.isChecked():
                 parameters["Min. Net Gradient"] = params.get(
                     "mng", parameters["Min. Net Gradient"]
                 )
@@ -9538,7 +9817,7 @@ class Window(QtWidgets.QMainWindow):
 
     def identify_mode(self) -> str:
         """Whether the channels are identified separately or added together,
-        see ``IDENTIFY_MODE_SEPARATE`` / ``IDENTIFY_MODE_SUM``.
+        see ``IDENTIFY_MODE_SEPARATE`` / ``IDENTIFY_SUM_MODES``.
 
         Single-channel data always reports the separate mode: there is nothing
         to sum, and the combo box is hidden then (see
@@ -9552,6 +9831,17 @@ class Window(QtWidgets.QMainWindow):
         if not multichannel:
             return IDENTIFY_MODE_SEPARATE
         return dialog.identify_mode_combo.currentText()
+
+    def sum_is_unregistered(self) -> bool:
+        """Whether the current detections were identified on the sum of
+        unregistered channels (``IDENTIFY_MODE_UNREGISTERED_SUM``).
+
+        Those stand at the same pixel in every channel (or split-FOV region)
+        rather than in the reference channel's coordinates only."""
+        if self.sum_identifications is None:
+            return False
+        info = self.last_identification_info or {}
+        return info.get("Channel sum registration") == UNREGISTERED_SUM_SOURCE
 
     def fit_mode(self) -> str:
         """Whether the channels are fitted together or each on its own, see
@@ -9593,7 +9883,7 @@ class Window(QtWidgets.QMainWindow):
             "Box Size": dialog.box_spinbox.value(),
             "Min. Net Gradient": (
                 dialog.mng_slider.value()
-                if mode == IDENTIFY_MODE_SUM
+                if mode in IDENTIFY_SUM_MODES
                 else (self.region_mngs() or dialog.mng_slider.value())
             ),
             "Identification Mode": mode,
@@ -9665,7 +9955,7 @@ class Window(QtWidgets.QMainWindow):
         if (
             summed is not None
             and summed.regions is not None
-            and self.identify_mode() == IDENTIFY_MODE_SUM
+            and self.identify_mode() in IDENTIFY_SUM_MODES
         ):
             return _copied_rois([summed.regions[summed.reference]])
         return _copied_rois(self.view.rois)
@@ -9743,7 +10033,7 @@ class Window(QtWidgets.QMainWindow):
             self._reset_contrast_to_frame()
 
     def ensure_channel_sum(self, notify: bool = False) -> bool:
-        """Build the summed view for ``IDENTIFY_MODE_SUM`` without identifying
+        """Build the summed view for ``IDENTIFY_SUM_MODES`` without identifying
         anything, so that the display and the identification preview run on it
         as soon as the mode is selected.
 
@@ -9760,7 +10050,7 @@ class Window(QtWidgets.QMainWindow):
         Returns whether a summed view is in place.
         """
         try:
-            if self.identify_mode() != IDENTIFY_MODE_SUM:
+            if self.identify_mode() not in IDENTIFY_SUM_MODES:
                 return False
             if self._sum_movie is not None:
                 return True
@@ -9777,33 +10067,31 @@ class Window(QtWidgets.QMainWindow):
                         "regions" if self.view.split_fov_mode else "channels"
                     )
                     self.status_bar.showMessage(
-                        f"The {where} are not registered yet, so the summed "
-                        "view cannot be shown. Identify (Ctrl+I) registers "
-                        f"the {where} from their own detections first, or "
-                        "load a multichannel / split-FOV spline PSF "
-                        "calibration to use its registration."
+                        f"No sum yet: the {where} are not registered. "
+                        "Identify (Ctrl+I) or load a calibration."
                     )
                 return False
             self._build_channel_sum(transforms, regions, source)
-        except ValueError:
+        except ValueError as error:
             self.drop_channel_sum()
             self._sum_registration_failed = True
+            if notify:
+                self.status_bar.showMessage(str(error))
             return False
         except (AttributeError, RuntimeError):
             return False  # a partially built window has no channels to sum
         self._sum_registration_failed = False
         if notify:
             self.status_bar.showMessage(
-                f"Showing the sum of {len(self.sum_transforms)} channels "
-                f"(registered from {source}). Note that it is in photons and "
-                "over all channels, so the minimum net gradient has to be "
-                "re-tuned for it."
+                f"Sum of {len(self.sum_transforms)} channels, "
+                f"{_sum_registration_phrase(source)}. Re-tune the min. net "
+                "gradient."
             )
         return True
 
     def identification_movie(self) -> lib.IntArray3D:
         """The movie the display and the identification preview run on:
-        the raw movie (or the channel sum, in ``IDENTIFY_MODE_SUM``),
+        the raw movie (or the channel sum, in ``IDENTIFY_SUM_MODES``),
         optionally temporal median filtered and then Gaussian smoothed -
         built the way ``localize.identify`` builds it, so that the preview
         and the batch run agree. The one difference is that the filters
@@ -9825,7 +10113,7 @@ class Window(QtWidgets.QMainWindow):
         # subtracted and smoothed. It only exists once the channels have been
         # registered (see ``ensure_channel_sum`` / ``identify_channel_sum``).
         summed = self.channel_sum_view()
-        if summed is not None and self.identify_mode() == IDENTIFY_MODE_SUM:
+        if summed is not None and self.identify_mode() in IDENTIFY_SUM_MODES:
             movie = summed
         if movie is None:
             self._temporal_movie = None
@@ -9902,7 +10190,7 @@ class Window(QtWidgets.QMainWindow):
         # so they always identify the channels separately - only the
         # experimental data can be identified on the sum.
         if (
-            self.identify_mode() == IDENTIFY_MODE_SUM
+            self.identify_mode() in IDENTIFY_SUM_MODES
             and not calibrate_spline
             and not calibrate_z
         ):
@@ -10175,7 +10463,19 @@ class Window(QtWidgets.QMainWindow):
         if self.movie is None:
             self._identify_run_next()
             return
-        worker = IdentificationWorker(self, False, False, False)
+        # every channel is identified with its own settings, also when the
+        # dialog holds the channel sum's (registering the channels for it)
+        worker = IdentificationWorker(
+            self,
+            False,
+            False,
+            False,
+            parameters=(
+                self.channel_parameters(idx)
+                if self.sum_settings_on_dialog()
+                else None
+            ),
+        )
         worker.progressMade.connect(self.on_identify_progress)
         worker.finished.connect(self._on_multi_identify_finished)
         worker.aborted.connect(self._on_multi_identify_aborted)
@@ -10302,6 +10602,10 @@ class Window(QtWidgets.QMainWindow):
         registered from their own detections (``estimate``), which is why the
         sum mode identifies every channel first.
 
+        The sum of unregistered channels (``IDENTIFY_MODE_UNREGISTERED_SUM``)
+        takes none of these: its channels are added as they are, see
+        ``localize.unregistered_sum_transforms``.
+
         Returns ``(transforms, regions, source)``: one ``(2, 3)``
         reference->channel affine per channel, the split-FOV regions (None for
         separate channel movies) and a phrase naming where the transforms came
@@ -10318,6 +10622,12 @@ class Window(QtWidgets.QMainWindow):
             if self.view.split_fov_mode
             else None
         )
+        if self.identify_mode() == IDENTIFY_MODE_UNREGISTERED_SUM:
+            return (
+                localize.unregistered_sum_transforms(n_channels, regions),
+                regions,
+                UNREGISTERED_SUM_SOURCE,
+            )
         transforms, source = self._sum_transforms_from_calibration(
             n_channels, regions
         )
@@ -10346,13 +10656,12 @@ class Window(QtWidgets.QMainWindow):
         return (
             list(transforms),
             regions,
-            "the per-channel identifications "
-            f"({min(n_pairs[1:]):,} pairs or more per channel)",
+            f"detections ({min(n_pairs[1:]):,}+ pairs)",
         )
 
     def identify_channel_sum(self, fit_afterwards: bool = False) -> None:
         """Identify spots on the channels added together
-        (``IDENTIFY_MODE_SUM``).
+        (``IDENTIFY_SUM_MODES``).
 
         The channels are mapped onto the reference channel and summed in
         photons, and the spots are identified in that sum, so a molecule too
@@ -10360,7 +10669,9 @@ class Window(QtWidgets.QMainWindow):
         ``localize.SummedChannelsMovie``). The registration comes from the
         loaded spline calibration; without one every channel is identified
         first and the transforms are estimated from those detections, and only
-        then is the sum built.
+        then is the sum built. The sum of unregistered channels
+        (``IDENTIFY_MODE_UNREGISTERED_SUM``) skips all of that and adds the
+        channels as they are.
 
         The summed view shown while the mode is selected (see
         ``ensure_channel_sum``) is registered the same way, so when one is on
@@ -10429,9 +10740,10 @@ class Window(QtWidgets.QMainWindow):
         """Split-FOV: one ordinary whole-movie identification pass over the
         drawn regions, whose detections register the regions against each
         other before they are summed."""
-        parameters = dict(self.parameters)
-        # the regions are identified as the channels they are, each with its
-        # own threshold - the single summed threshold applies to the sum only
+        # the regions are identified as the channels they are, with the
+        # movie's own settings and each region's own threshold - the sum's
+        # settings apply to the sum only
+        parameters = self.channel_parameters(self.current_channel)
         parameters["Identification Mode"] = IDENTIFY_MODE_SEPARATE
         parameters["Min. Net Gradient"] = (
             self.region_mngs() or self.parameters_dialog.mng_slider.value()
@@ -10578,8 +10890,7 @@ class Window(QtWidgets.QMainWindow):
             self._sum_identify["n_channels"] = len(summed.movies)
             self._sum_identify["source"] = self.sum_transform_source
         self.status_bar.showMessage(
-            f"Identifying on the sum of {len(summed.movies)} channels "
-            f"(registered from {self.sum_transform_source})..."
+            f"Identifying on the sum of {len(summed.movies)} channels..."
         )
         worker.start()
 
@@ -10605,9 +10916,8 @@ class Window(QtWidgets.QMainWindow):
             self.sum_identifications = None
             self.ready_for_fit = False
             self.status_bar.showMessage(
-                "No spots identified on the channel sum. Note that the sum is "
-                "in photons and over all channels, so the minimum net "
-                "gradient has to be re-tuned for it."
+                "No spots found on the channel sum. Re-tune the min. net "
+                "gradient: the sum is in photons."
             )
             self.draw_frame()
             return
@@ -10627,18 +10937,28 @@ class Window(QtWidgets.QMainWindow):
         source = state.get("source") or self.sum_transform_source
         self.last_identification_info["Channel sum registration"] = source
         if not self.view.split_fov_mode:
-            reference = self.channels[0]
-            reference.identifications = identifications
-            reference.ready_for_fit = True
-            reference.last_identification_info = self.last_identification_info
+            # Registered, the detections are in the reference channel's
+            # coordinates only. Unregistered, they stand at the same pixel in
+            # every channel, so every channel carries them - which is what
+            # the separate fit then fits each channel at.
+            channels = (
+                self.channels
+                if source == UNREGISTERED_SUM_SOURCE
+                else self.channels[:1]
+            )
+            for channel in channels:
+                channel.identifications = identifications
+                channel.ready_for_fit = True
+                channel.last_identification_info = (
+                    self.last_identification_info
+                )
         box = parameters["Box Size"]
         mng = _format_mng(parameters["Min. Net Gradient"])
+        # the registration is in the metadata ("Channel sum registration")
         self.status_bar.showMessage(
             f"Identified {len(identifications):,} spots on the sum of "
-            f"{n_summed} channels in "
-            f"{elapsed_time:.2f} seconds. (Box Size: {box}; Min. Net "
-            f"Gradient: {mng}; registered from {source}). "
-            "Ready for fit."
+            f"{n_summed} channels in {elapsed_time:.2f} seconds. (Box Size: "
+            f"{box}; Min. Net Gradient: {mng}). Ready for fit."
         )
         self.draw_frame()
         if elapsed_time > lib.SOUND_NOTIFICATION_DURATION:
@@ -10892,20 +11212,26 @@ class Window(QtWidgets.QMainWindow):
         calibrations it carries, and each saved to its own file. Nothing is
         registered or linked, so every detection is fitted and the channels
         come out independent, to be connected afterwards.
+
+        Detections made on the sum of unregistered channels stand at the same
+        pixel in every channel, so every channel is fitted at them (see
+        ``sum_is_unregistered``).
         """
-        if self.sum_identifications is not None:
-            # the sum's detections are one consensus set in the reference
-            # channel's coordinates, made for the joint fit; fitted
+        unregistered_sum = self.sum_is_unregistered()
+        if self.sum_identifications is not None and not unregistered_sum:
+            # the registered sum's detections are one consensus set in the
+            # reference channel's coordinates, made for the joint fit; fitted
             # separately they would put the reference channel's positions
             # into every channel
             QtWidgets.QMessageBox.information(
                 self,
                 "Fit",
                 "These detections were identified on the sum of the "
-                "channels, which is made for the joint fit: they are one "
-                "set in the reference channel's coordinates. Set "
-                f"'Identify on' to '{IDENTIFY_MODE_SEPARATE}' and identify "
-                "again to fit the channels on their own.",
+                "registered channels, which is made for the joint fit: they "
+                "are one set in the reference channel's coordinates. Set "
+                f"'Identify on' to '{IDENTIFY_MODE_SEPARATE}' or "
+                f"'{IDENTIFY_MODE_UNREGISTERED_SUM}' and identify again to "
+                "fit the channels on their own.",
             )
             self.status_bar.showMessage("")
             return
@@ -10940,6 +11266,7 @@ class Window(QtWidgets.QMainWindow):
                 "selected_roi": None,
             }
         state |= {
+            "unregistered_sum": unregistered_sum,
             "done": 0,
             "sum": 0,
             "skipped": [],
@@ -11013,9 +11340,18 @@ class Window(QtWidgets.QMainWindow):
         self.view.selected_roi = index
         self._apply_region_fit_params(state["params"][index])
         self._region_params_owner = index
-        identifications = localize.confine_to_region(
-            self.identifications, region
-        )
+        identifications = self.identifications
+        if state.get("unregistered_sum"):
+            # the sum overlaid the regions (all the same size), so its
+            # detections (in the reference region) move into this region by
+            # the offset between the two regions
+            (y_ref, x_ref), _ = _normalize_rect(state["regions"][0])
+            (y_min, x_min), _ = _normalize_rect(region)
+            identifications = identifications.assign(
+                x=identifications["x"] + (x_min - x_ref),
+                y=identifications["y"] + (y_min - y_ref),
+            )
+        identifications = localize.confine_to_region(identifications, region)
         if not len(identifications):
             self._skip_in_batch(label, "no identifications in it")
             return
@@ -11851,7 +12187,7 @@ class Window(QtWidgets.QMainWindow):
         if calibrate_z:
             # restore the GPU checkbox state for the selected model
             self.parameters_dialog.on_fit_optimizer_changed()
-            step, frames_per_step, frame_order, ok = (
+            step, frames_per_step, frame_order, z_binning, ok = (
                 Calibrate3DDialog.getCalibrationSpecs(self)
             )
             if ok:
@@ -11871,6 +12207,7 @@ class Window(QtWidgets.QMainWindow):
                         frame_bounds=self.frame_range,
                         frames_per_step=frames_per_step,
                         frame_order=frame_order,
+                        z_binning=z_binning,
                     )
                     dt = time.time() - t0
                     if dt > lib.SOUND_NOTIFICATION_DURATION:
@@ -13346,6 +13683,7 @@ class SplineCalibrationWorker(QtCore.QThread):
         movies=None,
         infos=None,
         camera_infos=None,
+        z_binning: int = 1,
     ) -> None:
         super().__init__()
         self.bead_diagnostics: list[dict] = []
@@ -13357,6 +13695,7 @@ class SplineCalibrationWorker(QtCore.QThread):
         self.step = step
         self.frames_per_step = frames_per_step
         self.frame_order = frame_order
+        self.z_binning = z_binning
         self.frame_bounds = frame_bounds
         self.model = model
         self.magnification_factor = magnification_factor
@@ -13389,6 +13728,7 @@ class SplineCalibrationWorker(QtCore.QThread):
                         frames_per_step=self.frames_per_step,
                         frame_bounds=self.frame_bounds,
                         frame_order=self.frame_order,
+                        z_binning=self.z_binning,
                         magnification_factor=self.magnification_factor,
                         correct_z_bias=self.correct_z_bias,
                         link_photons=self.link_photons,
@@ -13410,6 +13750,7 @@ class SplineCalibrationWorker(QtCore.QThread):
                     frames_per_step=self.frames_per_step,
                     frame_bounds=self.frame_bounds,
                     frame_order=self.frame_order,
+                    z_binning=self.z_binning,
                     magnification_factor=self.magnification_factor,
                     correct_z_bias=self.correct_z_bias,
                     link_photons=self.link_photons,
@@ -13428,6 +13769,7 @@ class SplineCalibrationWorker(QtCore.QThread):
                     frames_per_step=self.frames_per_step,
                     frame_bounds=self.frame_bounds,
                     frame_order=self.frame_order,
+                    z_binning=self.z_binning,
                     model=self.model,
                     magnification_factor=self.magnification_factor,
                     correct_z_bias=self.correct_z_bias,

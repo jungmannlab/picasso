@@ -1244,9 +1244,39 @@ class TestDarkTimes:
         linked = postprocess.link(locs.copy(), info)
         dt = postprocess.dark_times(linked)
         assert dt.shape == (len(linked),)
-        # -1 sentinel for events not followed by another in the group;
-        # all others must be strictly positive (gap of at least 1 frame).
-        assert ((dt > 0) | (dt == -1)).all()
+        # -1 sentinel for events not preceded by another in the group;
+        # all others count the frames without signal (0 = no gap).
+        assert ((dt >= 0) | (dt == -1)).all()
+
+    def test_dark_times_count_off_frames(self):
+        # frames 3-4 on, 5 off, 6 on (issue example): one dark frame
+        locs = pd.DataFrame(
+            {"frame": np.array([3, 6], dtype=np.uint32), "len": [2, 1]}
+        )
+        assert postprocess.dark_times(locs).tolist() == [-1, 1]
+        # unlinked events in consecutive frames (e.g., separated by more
+        # than the linking radius): no dark frame
+        locs["frame"] = np.array([3, 5], dtype=np.uint32)
+        assert postprocess.dark_times(locs).tolist() == [-1, 0]
+
+    def test_dark_times_closest_preceding_event(self):
+        # unsorted input, one overlapping event (ignored)
+        locs = pd.DataFrame(
+            {
+                "frame": np.array([20, 0, 10, 12], dtype=np.uint32),
+                "len": [1, 5, 5, 1],
+            }
+        )
+        # 20 <- 10-14 (5 dark), 10 <- 0-4 (5 dark), 12 overlaps 10-14
+        # so it follows 0-4 (7 dark)
+        assert postprocess.dark_times(locs).tolist() == [5, -1, 5, 7]
+
+    def test_compute_dark_times_drops_unpreceded(self):
+        locs = pd.DataFrame(
+            {"frame": np.array([3, 6], dtype=np.uint32), "len": [2, 1]}
+        )
+        out = postprocess.compute_dark_times(locs)
+        assert out["dark"].tolist() == [1]
 
     def test_dark_times_with_explicit_group(self, locs, info):
         linked = postprocess.link(locs.copy(), info)

@@ -38,3 +38,14 @@ datas = [
         os.path.join(_core_dir, "**", "*.pyd"), recursive=True
     )
 ]
+
+# cuda-core's wheel is delvewheel-repaired too: those extensions link a private,
+# hash-mangled copy of msvcp140 vendored in a top-level ``cuda_core.libs``
+# directory, which ``cuda/core/__init__.py`` registers via os.add_dll_directory
+# (resolved as ``cuda/core/../../cuda_core.libs``). Copying the .pyd as data
+# skips PyInstaller's dependency analysis, so bundle the DLLs at that path.
+_libs_dir = os.path.join(_site_packages, "cuda_core.libs")
+datas += [
+    (dll, "cuda_core.libs")
+    for dll in glob.glob(os.path.join(_libs_dir, "*.dll"))
+]
