@@ -1,6 +1,9 @@
 # Changelog
 
-Last change: 30-SEP-2026 CEST
+Last change: 01-OCT-2026 CEST
+
+## Unreleased
+- Plot profile (rectangular) allows for lower bin size.
 
 ## 0.11.3
 - **Breaking change:** dark times are now the number of frames without signal between binding events, i.e., one frame shorter than before (two binding events in consecutive frames have a dark time of 0). Together with the bright time, each now counts the frames spent in its state. This affects Render's pick info, qPAINT (`picasso.postprocess.evaluate_picks`, `pick_kinetics` and `pick_properties`) and `picasso dark`; influx rates calibrated with earlier versions should be recalibrated. See the [documentation](https://picassosr.readthedocs.io/en/latest/files.html#hdf5-pick-property-files) for the convention.

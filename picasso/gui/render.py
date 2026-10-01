@@ -11356,10 +11356,16 @@ class View(QtWidgets.QLabel):
 
         redraw(initial_bin_width)
 
+        # bin width ranges from a cap of 10,000 bins (keeps redrawing
+        # responsive) up to a single bin spanning the whole profile
+        span = data_hi - data_lo
+        min_bin_width = max(0.01, span / 10_000)
         bin_spin = QtWidgets.QDoubleSpinBox()
         bin_spin.setDecimals(2)
-        bin_spin.setRange(max(0.1, concat.min()), concat.max())
-        bin_spin.setSingleStep(1)
+        bin_spin.setRange(min_bin_width, max(span, min_bin_width))
+        bin_spin.setStepType(
+            QtWidgets.QAbstractSpinBox.StepType.AdaptiveDecimalStepType
+        )
         bin_spin.setValue(initial_bin_width)
         bin_spin.setSuffix(" nm")
         bin_spin.setKeyboardTracking(False)
