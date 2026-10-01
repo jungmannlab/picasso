@@ -39,6 +39,11 @@ REM                              runtime as compiled Cython extensions under a
 REM                              cu12/cu13 subpackage it merges in at import time
 REM                              via __path__; --collect-all drops those .pyd, so
 REM                              hook-cuda.core.py copies them to their real path.
+REM                              hook-cuda.bindings.py / hook-cuda.core.py also
+REM                              bundle the cuda_bindings.libs / cuda_core.libs
+REM                              DLLs (delvewheel-vendored msvcp140); without them
+REM                              the app fails with "DLL load failed while
+REM                              importing runtime".
 REM Note: numba-cuda redirects "numba.cuda" to its own target via a
 REM site-packages .pth file that PyInstaller does not run, so the frozen app
 REM would keep Numba's built-in CUDA stub and GPU-accelerated (numba.cuda) code

@@ -135,7 +135,13 @@ installer = [
 # Reuse picassosr[installer] so the pinned versions never drift apart.
 installer_cuda = [
     "picassosr[installer]",
-    "numba-cuda[cu12]==0.30.2"
+    "numba-cuda[cu12]==0.30.2",
+    # numba-cuda's NVIDIA dependencies are pinned too: their wheel layout
+    # (vendored DLLs, compiled subpackages) is what release/pyinstaller/hooks
+    # bundles, so an unpinned rebuild can silently break the frozen app.
+    "cuda-bindings==12.9.9",
+    "cuda-core==1.2.1",
+    "cuda-pathfinder==1.8.2"
 ]
 
 [project.urls]
