@@ -3985,18 +3985,26 @@ class TestClustererDialog(lib.Dialog):
                 return
             paths = [path]
 
-        for channel, path in zip(channels, paths):
-            self._apply_to_all(channel, path)
+        jobs = [
+            self._apply_to_all_job(channel, path)
+            for channel, path in zip(channels, paths)
+        ]
+        self.window.view.run_jobs(
+            jobs,
+            f"Applying {self.clusterer_name.currentText()}...",
+            "Apply clusterer to all",
+        )
 
-    def _apply_to_all(self, channel: int, path: str) -> None:
-        """Apply the currently selected clusterer and parameters to the
-        the entire dataset for a given channel."""
+    def _apply_to_all_job(self, channel: int, path: str) -> Callable:
+        """Worker job applying the currently selected clusterer and
+        parameters to the entire dataset for a given channel, see
+        ``View.run_jobs``."""
         params = self.get_cluster_params()
         locs = self.window.view.locs[channel]
         pixelsize = self.window.view.pixelsize
         save_centers = self.display_centers.isChecked()
         if self.clusterer_name.currentText() == "DBSCAN":
-            self.window.view._dbscan(
+            return self.window.view._dbscan_job(
                 channel=channel,
                 path=path,
                 radius=params["radius"] * pixelsize,
@@ -4006,7 +4014,7 @@ class TestClustererDialog(lib.Dialog):
                 save_centers=save_centers,
             )
         elif self.clusterer_name.currentText() == "HDBSCAN":
-            self.window.view._hdbscan(
+            return self.window.view._hdbscan_job(
                 channel=channel,
                 path=path,
                 min_cluster=params["min_cluster_size"],
@@ -4015,7 +4023,7 @@ class TestClustererDialog(lib.Dialog):
                 save_centers=save_centers,
             )
         elif self.clusterer_name.currentText() == "SMLM":
-            self.window.view._smlm_clusterer(
+            return self.window.view._smlm_clusterer_job(
                 channel=channel,
                 path=path,
                 radius_xy=params["radius_xy"] * pixelsize,
@@ -4026,16 +4034,24 @@ class TestClustererDialog(lib.Dialog):
             )
         elif self.clusterer_name.currentText() == "G5M":
             params["DBSCAN"]["radius"] *= pixelsize
-            params["G5M"]["callback_parent"] = self.window
             params["G5M"]["asynch"] = True
-            locs, _ = clusterer.dbscan(locs, **params["DBSCAN"])
-            centers, clustered_locs, new_info = g5m.g5m(
-                locs, [{"Pixelsize": pixelsize}], **params["G5M"]
-            )
-            # save clustered locs and centers
-            io.save_locs(path, clustered_locs, info=new_info)
-            centers_path = os.path.splitext(path)[0] + "_centers.hdf5"
-            io.save_locs(centers_path, centers, info=new_info)
+
+            def job(progress: lib.TaskProgress) -> None:
+                progress.phase("Applying DBSCAN...", 0)
+                clustered, _ = clusterer.dbscan(locs, **params["DBSCAN"])
+                centers, clustered_locs, new_info = g5m.g5m(
+                    clustered,
+                    [{"Pixelsize": pixelsize}],
+                    **params["G5M"],
+                    callback_parent=progress,
+                )
+                progress.check_canceled()
+                # save clustered locs and centers
+                io.save_locs(path, clustered_locs, info=new_info)
+                centers_path = os.path.splitext(path)[0] + "_centers.hdf5"
+                io.save_locs(centers_path, centers, info=new_info)
+
+            return job
 
 
 class TestDBSCANParams(QtWidgets.QWidget):
@@ -5327,24 +5343,46 @@ class InfoDialog(lib.Dialog):
         if self.frc_rois_window is not None:
             self.frc_rois_window.close()
             self.frc_rois_window = None
-        progress = lib.ProgressDialog(
-            "Calculating FRC in ROIs", 0, n_rois, self
-        )
-        try:
-            result = postprocess.frc_rois(
+        roi_size = 1000 * self.frc_roi_size.value()
+        min_locs = self.frc_min_locs.value()
+
+        def compute(progress: lib.TaskProgress) -> dict:
+            return postprocess.frc_rois(
                 locs,
                 info,
                 viewport,
                 n_rois=n_rois,
-                roi_size=1000 * self.frc_roi_size.value(),
-                min_locs=self.frc_min_locs.value(),
+                roi_size=roi_size,
+                min_locs=min_locs,
                 callback=progress.set_value,
             )
-        except (ValueError, RuntimeError) as error:
-            progress.close()
-            QtWidgets.QMessageBox.warning(self, "FRC in ROIs", str(error))
-            return
-        progress.close()
+
+        def failed(error: Exception) -> None:
+            if isinstance(error, (ValueError, RuntimeError)):
+                QtWidgets.QMessageBox.warning(self, "FRC in ROIs", str(error))
+            else:  # unexpected, report as usual
+                sys.excepthook(type(error), error, error.__traceback__)
+
+        lib.run_task(
+            compute,
+            "Calculating FRC in ROIs",
+            self,
+            lambda result: self._show_frc_rois_result(
+                locs, info, viewport, n_rois, result
+            ),
+            maximum=n_rois,
+            on_failed=failed,
+        )
+
+    def _show_frc_rois_result(
+        self,
+        locs: pd.DataFrame,
+        info: list[dict],
+        viewport: tuple,
+        n_rois: int,
+        result: dict,
+    ) -> None:
+        """Open the review window of computed FRC ROIs."""
         n_found = len(result["rois"])
         if n_found == 0:
             QtWidgets.QMessageBox.information(
@@ -5378,21 +5416,30 @@ class InfoDialog(lib.Dialog):
             self.frc_rois_window.show()
             self.frc_rois_window.raise_()
 
-    def calculate_nena_lp(self) -> None:
-        """Calculate NeNA precision in a given channel."""
-        channel = self.window.view.get_channel("Calculate NeNA precision")
-        if channel is not None:
-            locs = self.window.view.locs[channel]
-            info = self.window.view.infos[channel]
+    def calculate_nena_lp(
+        self, on_done: Callable[[], None] | None = None
+    ) -> None:
+        """Calculate NeNA precision in a given channel.
 
-            # calculate nena
-            progress = lib.ProgressDialog(
-                "Calculating NeNA precision", 0, 100, self
-            )
-            self.nena_result, self.lp = postprocess.nena(
-                locs, info, progress.set_value
-            )
-            self.lp *= self.window.view.pixelsize
+        Parameters
+        ----------
+        on_done : callable, optional
+            Called once the result is shown, since the calculation runs
+            on a worker thread. Default None.
+        """
+        channel = self.window.view.get_channel("Calculate NeNA precision")
+        if channel is None:
+            return
+        locs = self.window.view.locs[channel]
+        info = self.window.view.infos[channel]
+        pixelsize = self.window.view.pixelsize
+
+        def compute(progress: lib.TaskProgress) -> tuple:
+            return postprocess.nena(locs, info, progress.set_value)
+
+        def apply(result: tuple) -> None:
+            self.nena_result, self.lp = result
+            self.lp *= pixelsize
             self.nena_label.setText(f"{self.lp:.3} nm")
 
             # save NeNA to metadata; a repeated calculation with no other
@@ -5405,6 +5452,12 @@ class InfoDialog(lib.Dialog):
                 info[-1] = nena_info
             else:
                 info.append(nena_info)
+            if on_done is not None:
+                on_done()
+
+        lib.run_task(
+            compute, "Calculating NeNA precision", self, apply, maximum=100
+        )
 
     def calibrate_influx(self) -> None:
         """Calculate influx rate (1/frames)."""
@@ -5430,7 +5483,12 @@ class InfoDialog(lib.Dialog):
     def show_nena_plot(self) -> None:
         """Show NeNA plot window."""
         if not self.nena_result:
-            self.calculate_nena_lp()
+            self.calculate_nena_lp(on_done=self._show_nena_window)
+        else:
+            self._show_nena_window()
+
+    def _show_nena_window(self) -> None:
+        """Plot the NeNA result in a new window."""
         # keep a reference to the window to prevent garbage collection
         self.nena_window = NenaPlotWindow(self)
         self.nena_window.plot(self.nena_result)
@@ -7401,29 +7459,38 @@ class RESIDialog(lib.Dialog):
                 return
 
         # Perform RESI
-        progress = lib.ProgressDialog(
-            "Performing RESI analysis...", 0, self.n_channels, self.window
-        )
-        progress.set_value(0)
-        progress.show()
+        locs = list(self.window.view.locs)
+        infos = list(self.window.view.infos)
+        paths = list(self.paths)
+        save_clustered_locs = self.save_clustered_locs.isChecked()
+        save_cluster_centers = self.save_cluster_centers.isChecked()
 
-        all_resi, resi_info = postprocess.resi(
-            locs=self.window.view.locs,
-            infos=self.window.view.infos,
-            radius_xy=r_xy,
-            radius_z=r_z,
-            min_locs=min_locs,
-            apply_fa=apply_fa,
-            save_clustered_locs=self.save_clustered_locs.isChecked(),
-            save_cluster_centers=self.save_cluster_centers.isChecked(),
-            suffix_locs=suffix_locs,
-            output_paths=self.paths,
-            suffix_centers=suffix_centers,
-            progress_callback=progress.set_value,
+        def compute(progress: lib.TaskProgress) -> None:
+            all_resi, resi_info = postprocess.resi(
+                locs=locs,
+                infos=infos,
+                radius_xy=r_xy,
+                radius_z=r_z,
+                min_locs=min_locs,
+                apply_fa=apply_fa,
+                save_clustered_locs=save_clustered_locs,
+                save_cluster_centers=save_cluster_centers,
+                suffix_locs=suffix_locs,
+                output_paths=paths,
+                suffix_centers=suffix_centers,
+                progress_callback=progress.set_value,
+            )
+            progress.check_canceled()
+            resi_info[-1]["Paths to RESI channels"] = paths
+            io.save_locs(resi_path, all_resi, resi_info)
+
+        lib.run_task(
+            compute,
+            "Performing RESI analysis...",
+            self.window,
+            maximum=self.n_channels,
+            title="RESI",
         )
-        progress.close()
-        resi_info[-1]["Paths to RESI channels"] = self.paths
-        io.save_locs(resi_path, all_resi, resi_info)
 
 
 class DisplaySettingsDialog(lib.Dialog):
@@ -10184,12 +10251,16 @@ class View(QtWidgets.QLabel):
                     "_dbscan",
                 )
                 if ok:
-                    for channel in range(len(self.locs_paths)):
-                        path = (
+                    jobs = [
+                        self._dbscan_job(
+                            channel,
                             os.path.splitext(self.locs_paths[channel])[0]
-                            + f"{suffix}.hdf5"
+                            + f"{suffix}.hdf5",
+                            **params,
                         )
-                        self._dbscan(channel, path, **params)
+                        for channel in range(len(self.locs_paths))
+                    ]
+                    self.run_jobs(jobs, "DBSCAN", "DBSCAN")
             else:
                 # get the path to save
                 check_ext = [".yaml"]
@@ -10209,7 +10280,15 @@ class View(QtWidgets.QLabel):
                 if path:
                     self._dbscan(channel, path, **params)
 
-    def _dbscan(
+    def _dbscan(self, channel: int, path: str, **params) -> None:
+        """Perform DBSCAN in a given channel with user-defined
+        parameters and save the result, in a cancelable task. See
+        ``_dbscan_job`` for the parameters."""
+        self.run_jobs(
+            [self._dbscan_job(channel, path, **params)], "DBSCAN", "DBSCAN"
+        )
+
+    def _dbscan_job(
         self,
         channel: int,
         path: str,
@@ -10219,9 +10298,10 @@ class View(QtWidgets.QLabel):
         radius_z: float | None = None,
         save_centers: bool = False,
         save_areas: bool = False,
-    ) -> None:
+    ) -> Callable:
         """Perform DBSCAN in a given channel with user-defined
-        parameters and save the result.
+        parameters and save the result: the worker job, see
+        ``run_jobs``.
 
         Parameters
         ----------
@@ -10244,11 +10324,14 @@ class View(QtWidgets.QLabel):
         save_areas : bool, optional
             Specifies if cluster areas should be saved. Default is
             False.
+
+        Returns
+        -------
+        job : callable
+            Takes the task's ``lib.TaskProgress``.
         """
-        status = lib.StatusDialog(
-            "Applying DBSCAN. This may take a while.", self
-        )
         locs = self.locs[channel]
+        info = self.infos[channel]
         pixelsize = self.pixelsize
 
         # Only pass radius_z for 3D data; convert nm -> camera pixels.
@@ -10256,36 +10339,28 @@ class View(QtWidgets.QLabel):
         radius_z_px = (
             radius_z / pixelsize if (is_3d and radius_z is not None) else None
         )
-        locs, dbscan_info = clusterer.dbscan(
-            locs,
-            radius / pixelsize,  # convert to camera pixels
-            min_density,
-            pixelsize=pixelsize,
-            min_locs=min_locs,
-            radius_z=radius_z_px,
-        )
-        io.save_locs(path, locs, self.infos[channel] + [dbscan_info])
-        status.close()
-        if save_centers:
-            status = lib.StatusDialog("Calculating cluster centers", self)
-            path = os.path.splitext(path)[0] + "_centers.hdf5"
-            centers = clusterer.find_cluster_centers(locs, pixelsize=pixelsize)
-            io.save_locs(path, centers, self.infos[channel] + [dbscan_info])
-            status.close()
-        if save_areas:
-            progress = lib.ProgressDialog(
-                "Calculating cluster areas",
-                0,
-                len(np.unique(locs.group)),
-                self,
+
+        def job(progress: lib.TaskProgress) -> None:
+            progress.phase("Applying DBSCAN. This may take a while.", 0)
+            clustered_locs, dbscan_info = clusterer.dbscan(
+                locs,
+                radius / pixelsize,  # convert to camera pixels
+                min_density,
+                pixelsize=pixelsize,
+                min_locs=min_locs,
+                radius_z=radius_z_px,
             )
-            progress.set_value(0)
-            areas = clusterer.cluster_areas(
-                locs, self.infos[channel], progress.set_value
+            self._save_clusters(
+                progress,
+                path,
+                clustered_locs,
+                info + [dbscan_info],
+                pixelsize,
+                save_centers,
+                save_areas,
             )
-            path = os.path.splitext(path)[0] + "_areas.csv"
-            areas.to_csv(path, index=False)
-            progress.close()
+
+        return job
 
     def hdbscan(self) -> None:
         """Get a channel, parameters and path for HDBSCAN."""
@@ -10305,12 +10380,16 @@ class View(QtWidgets.QLabel):
                     "_hdbscan",
                 )
                 if ok:
-                    for channel in range(len(self.locs_paths)):
-                        path = (
+                    jobs = [
+                        self._hdbscan_job(
+                            channel,
                             os.path.splitext(self.locs_paths[channel])[0]
-                            + f"{suffix}.hdf5"
+                            + f"{suffix}.hdf5",
+                            **params,
                         )
-                        self._hdbscan(channel, path, **params)
+                        for channel in range(len(self.locs_paths))
+                    ]
+                    self.run_jobs(jobs, "HDBSCAN", "HDBSCAN")
             else:
                 # get the path to save
                 check_ext = [".yaml"]
@@ -10330,7 +10409,15 @@ class View(QtWidgets.QLabel):
                 if path:
                     self._hdbscan(channel, path, **params)
 
-    def _hdbscan(
+    def _hdbscan(self, channel: int, path: str, **params) -> None:
+        """Perform HDBSCAN in a given channel with user-defined
+        parameters and save the result, in a cancelable task. See
+        ``_hdbscan_job`` for the parameters."""
+        self.run_jobs(
+            [self._hdbscan_job(channel, path, **params)], "HDBSCAN", "HDBSCAN"
+        )
+
+    def _hdbscan_job(
         self,
         channel: int,
         path: str,
@@ -10339,9 +10426,10 @@ class View(QtWidgets.QLabel):
         cluster_eps: float,
         save_centers: bool = False,
         save_areas: bool = False,
-    ) -> None:
+    ) -> Callable:
         """Perform HDBSCAN in a given channel with user-defined
-        parameters and save the result.
+        parameters and save the result: the worker job, see
+        ``run_jobs``.
 
         Parameters
         ----------
@@ -10363,42 +10451,36 @@ class View(QtWidgets.QLabel):
         save_areas : bool, optional
             Specifies if cluster areas should be saved. Default is
             False.
+
+        Returns
+        -------
+        job : callable
+            Takes the task's ``lib.TaskProgress``.
         """
-        status = lib.StatusDialog(
-            "Applying HDBSCAN. This may take a while.", self
-        )
         locs = self.locs[channel]
+        info = self.infos[channel]
         pixelsize = self.pixelsize
 
-        locs, hdbscan_info = clusterer.hdbscan(
-            locs,
-            min_cluster,
-            min_samples,
-            pixelsize=pixelsize,
-            cluster_eps=cluster_eps,
-        )
-        io.save_locs(path, locs, self.infos[channel] + [hdbscan_info])
-        status.close()
-        if save_centers:
-            status = lib.StatusDialog("Calculating cluster centers", self)
-            path = os.path.splitext(path)[0] + "_centers.hdf5"
-            centers = clusterer.find_cluster_centers(locs, pixelsize=pixelsize)
-            io.save_locs(path, centers, self.infos[channel] + [hdbscan_info])
-            status.close()
-        if save_areas:
-            progress = lib.ProgressDialog(
-                "Calculating cluster areas",
-                0,
-                len(np.unique(locs.group)),
-                self,
+        def job(progress: lib.TaskProgress) -> None:
+            progress.phase("Applying HDBSCAN. This may take a while.", 0)
+            clustered_locs, hdbscan_info = clusterer.hdbscan(
+                locs,
+                min_cluster,
+                min_samples,
+                pixelsize=pixelsize,
+                cluster_eps=cluster_eps,
             )
-            progress.set_value(0)
-            areas = clusterer.cluster_areas(
-                locs, self.infos[channel], progress.set_value
+            self._save_clusters(
+                progress,
+                path,
+                clustered_locs,
+                info + [hdbscan_info],
+                pixelsize,
+                save_centers,
+                save_areas,
             )
-            path = os.path.splitext(path)[0] + "_areas.csv"
-            areas.to_csv(path, index=False)
-            progress.close()
+
+        return job
 
     def smlm_clusterer(self) -> None:
         """Get a channel, parameters and path for SMLM clustering."""
@@ -10427,12 +10509,16 @@ class View(QtWidgets.QLabel):
                     "_clustered",
                 )
                 if ok:
-                    for channel in range(len(self.locs_paths)):
-                        path = (
+                    jobs = [
+                        self._smlm_clusterer_job(
+                            channel,
                             os.path.splitext(self.locs_paths[channel])[0]
-                            + f"{suffix}.hdf5"
+                            + f"{suffix}.hdf5",
+                            **params,
                         )
-                        self._smlm_clusterer(channel, path, **params)
+                        for channel in range(len(self.locs_paths))
+                    ]
+                    self.run_jobs(jobs, "SMLM clusterer", "SMLM clusterer")
             else:
                 # get the path to save
                 check_ext = [".yaml"]
@@ -10452,7 +10538,17 @@ class View(QtWidgets.QLabel):
                 if path:
                     self._smlm_clusterer(channel, path, **params)
 
-    def _smlm_clusterer(
+    def _smlm_clusterer(self, channel: int, path: str, **params) -> None:
+        """Perform SMLM clustering in a given channel with user-defined
+        parameters and save the result, in a cancelable task. See
+        ``_smlm_clusterer_job`` for the parameters."""
+        self.run_jobs(
+            [self._smlm_clusterer_job(channel, path, **params)],
+            "SMLM clusterer",
+            "SMLM clusterer",
+        )
+
+    def _smlm_clusterer_job(
         self,
         channel: int,
         path: str,
@@ -10462,9 +10558,10 @@ class View(QtWidgets.QLabel):
         frame_analysis: bool,
         save_centers: bool = False,
         save_areas: bool = False,
-    ) -> None:
+    ) -> Callable:
         """Perform SMLM clustering in a given channel with user-defined
-        parameters and save the result.
+        parameters and save the result: the worker job, see
+        ``run_jobs``.
 
         Parameters
         ----------
@@ -10485,59 +10582,120 @@ class View(QtWidgets.QLabel):
             If True, saves cluster centers. Default is False.
         save_areas : bool, optional
             If True, saves cluster areas. Default is False.
+
+        Returns
+        -------
+        job : callable
+            Takes the task's ``lib.TaskProgress``.
         """
         # for converting z coordinates
         pixelsize = self.pixelsize
-
         locs = self.locs[channel]
+        info = self.infos[channel]
 
-        progress = lib.ProgressDialog(
-            "Clustering localizations", 0, len(locs), self
-        )
-        progress.set_value(0)
-        clustered_locs, new_info = clusterer.cluster(
-            locs,
-            radius_xy,
-            min_locs,
-            frame_analysis,
-            radius_z=radius_z,
-            pixelsize=pixelsize,
-            progress=progress,
-        )
-        progress.close()
-        info = self.infos[channel] + [new_info]
+        def job(progress: lib.TaskProgress) -> None:
+            progress.phase("Clustering localizations", len(locs))
+            clustered_locs, new_info = clusterer.cluster(
+                locs,
+                radius_xy,
+                min_locs,
+                frame_analysis,
+                radius_z=radius_z,
+                pixelsize=pixelsize,
+                progress=progress,
+            )
+            self._save_clusters(
+                progress,
+                path,
+                clustered_locs,
+                info + [new_info],
+                pixelsize,
+                save_centers,
+                save_areas,
+            )
 
-        # save locs
+        return job
+
+    @staticmethod
+    def _save_clusters(
+        progress: lib.TaskProgress,
+        path: str,
+        clustered_locs: pd.DataFrame,
+        info: list[dict],
+        pixelsize: float,
+        save_centers: bool,
+        save_areas: bool,
+    ) -> None:
+        """Save clustered localizations and, if requested, cluster
+        centers (``*_centers.hdf5``) and areas (``*_areas.csv``) next to
+        them. Runs on the worker thread of a clustering task.
+
+        Parameters
+        ----------
+        progress : lib.TaskProgress
+            Progress of the task.
+        path : str
+            Path of the clustered localizations.
+        clustered_locs : pd.DataFrame
+            Clustered localizations.
+        info : list of dicts
+            Metadata of the clustered localizations.
+        pixelsize : float
+            Camera pixel size in nm.
+        save_centers, save_areas : bool
+            Whether to calculate and save cluster centers and areas.
+        """
+        # nothing is saved once the user canceled
+        progress.check_canceled()
         io.save_locs(path, clustered_locs, info)
-        # save cluster centers
+        base = os.path.splitext(path)[0]
         if save_centers:
-            progress = lib.ProgressDialog(
-                "Calculating cluster centers",
-                0,
-                len(np.unique(clustered_locs.group)),
-                self,
-            )
-            progress.set_value(0)
-            path = os.path.splitext(path)[0] + "_centers.hdf5"
+            progress.phase("Calculating cluster centers", 0)
             centers = clusterer.find_cluster_centers(
-                clustered_locs, pixelsize, progress
+                clustered_locs, pixelsize=pixelsize, progress=progress
             )
-            io.save_locs(path, centers, info)
-            progress.close()
+            progress.check_canceled()
+            io.save_locs(base + "_centers.hdf5", centers, info)
         if save_areas:
-            progress = lib.ProgressDialog(
-                "Calculating cluster areas",
-                0,
-                len(np.unique(clustered_locs.group)),
-                self,
-            )
-            progress.set_value(0)
             areas = clusterer.cluster_areas(
-                clustered_locs, self.infos[channel], progress.set_value
+                clustered_locs,
+                info,
+                progress.callback(
+                    "Calculating cluster areas",
+                    len(np.unique(clustered_locs["group"])),
+                ),
             )
-            path = os.path.splitext(path)[0] + "_areas.csv"
-            areas.to_csv(path, index=False)
-            progress.close()
+            progress.check_canceled()
+            areas.to_csv(base + "_areas.csv", index=False)
+
+    def run_jobs(
+        self, jobs: list[Callable | None], description: str, title: str
+    ) -> None:
+        """Run worker jobs one after the other in one cancelable task.
+
+        Parameters
+        ----------
+        jobs : list of callable or None
+            Each takes the task's ``lib.TaskProgress`` and runs on the
+            worker thread. A job may return a callable without arguments,
+            which is called on the GUI thread once all jobs are done
+            (e.g. to plot with pyplot). None entries are skipped.
+        description : str
+            Initial label of the progress dialog.
+        title : str
+            Window title of the progress dialog.
+        """
+        jobs = [job for job in jobs if job is not None]
+
+        def compute(progress: lib.TaskProgress) -> list[Callable]:
+            follow_ups = [job(progress) for job in jobs]
+            return [_ for _ in follow_ups if _ is not None]
+
+        def finish(follow_ups: list[Callable]) -> None:
+            for follow_up in follow_ups:
+                follow_up()
+
+        lib.run_task(compute, description, self, finish, title=title)
 
     def _g5m_get_suffixes(self, params) -> tuple[str, str, bool]:
         """Get suffixes for G5M molecules and clustered locs when
@@ -10596,6 +10754,7 @@ class View(QtWidgets.QLabel):
             if not ok:
                 return
 
+            jobs = []
             for i in range(len(self.locs)):
                 path_mols = (
                     os.path.splitext(self.locs_paths[i])[0]
@@ -10607,12 +10766,12 @@ class View(QtWidgets.QLabel):
                     if params["clustered_locs"]
                     else ""
                 )
-                self._g5m_in_channel(
-                    i,
-                    params,
-                    path_mols,
-                    path_clusters,
+                jobs.append(
+                    self._g5m_in_channel_job(
+                        i, params, path_mols, path_clusters
+                    )
                 )
+            self.run_jobs(jobs, "Running G5M...", "G5M")
         else:  # single channel
             base, _ = os.path.splitext(self.locs_paths[channel])
             out_path = base + "_molmap.hdf5"
@@ -10639,74 +10798,73 @@ class View(QtWidgets.QLabel):
                     return
             else:
                 path_clusters = ""
-            self._g5m_in_channel(
+            job = self._g5m_in_channel_job(
                 channel, params, path_molecules, path_clusters
             )
+            self.run_jobs([job], "Running G5M...", "G5M")
 
-    def _g5m_in_channel(
+    def _g5m_in_channel_job(
         self,
         channel: int,
         params: dict,
         path_molecules: str,
         path_clusters: str,
-    ) -> None:
-        """Run G5M in a given channel and save the result."""
+    ) -> Callable:
+        """Worker job running G5M in a given channel and saving the
+        result, see ``run_jobs``. Returns the plotting of the checks,
+        which uses pyplot and hence runs on the GUI thread."""
         clustering_dist, sparse_dist = 25, 80  # nm
-        g5m_centers, clustered_locs, info = self._g5m(channel, params)
-        if g5m_centers is not None:
-            io.save_locs(path_molecules, g5m_centers, info)
-            # automatically save the subclustering check
-            clust_events, sparse_events = clusterer.test_subclustering(
-                g5m_centers,
-                info,
-                clustering_dist=clustering_dist,
-                sparse_dist=sparse_dist,
-            )
-            lib.plot_subclustering_check(
-                clust_events,
-                sparse_events,
-                os.path.splitext(path_molecules)[0] + "_subcluster_check.png",
-                clustering_dist=clustering_dist,
-                sparse_dist=sparse_dist,
-            )
-            # automatically save rel_sigma plot
-            lib.plot_rel_sigma_check(
-                g5m_centers,
-                info,
-                os.path.splitext(path_molecules)[0] + "_relsigma_check.png",
-            )
-            if params["clustered_locs"]:
-                if clustered_locs is not None:
-                    io.save_locs(path_clusters, clustered_locs, info)
-
-    def _g5m(
-        self,
-        channel: int,
-        params: dict,
-    ) -> (
-        tuple[pd.DataFrame, pd.DataFrame, list[dict]] | tuple[None, None, None]
-    ):
-        """Run G5M in channel given parameters."""
         locs = self.locs[channel]
         info = self.infos[channel]
 
-        centers, clustered_locs, info = g5m.g5m(
-            locs=locs,
-            info=info,
-            min_locs=params["min_locs"],
-            loc_prec_handle=params["loc_prec_handle"],
-            sigma_bounds=params["sigma_bounds"],
-            bootstrap_check=params["bootstrap_check"],
-            calibration=params.get("calibration", None),
-            mode=params.get("mode", "astigmatism"),
-            covariance_type=params.get("covariance_type", "auto"),
-            postprocess=params["postprocess_check"],
-            max_locs_per_cluster=params["max_locs_per_cluster"][channel],
-            asynch=params["multiprocessing_check"],
-            group_column=params["group_column"],
-            callback_parent=self.window,
-        )
-        return centers, clustered_locs, info
+        def job(progress: lib.TaskProgress) -> Callable | None:
+            g5m_centers, clustered_locs, new_info = g5m.g5m(
+                locs=locs,
+                info=info,
+                min_locs=params["min_locs"],
+                loc_prec_handle=params["loc_prec_handle"],
+                sigma_bounds=params["sigma_bounds"],
+                bootstrap_check=params["bootstrap_check"],
+                calibration=params.get("calibration", None),
+                mode=params.get("mode", "astigmatism"),
+                covariance_type=params.get("covariance_type", "auto"),
+                postprocess=params["postprocess_check"],
+                max_locs_per_cluster=params["max_locs_per_cluster"][channel],
+                asynch=params["multiprocessing_check"],
+                group_column=params["group_column"],
+                callback_parent=progress,
+            )
+            if g5m_centers is None:
+                return None
+            progress.check_canceled()
+            io.save_locs(path_molecules, g5m_centers, new_info)
+            if params["clustered_locs"] and clustered_locs is not None:
+                io.save_locs(path_clusters, clustered_locs, new_info)
+            clust_events, sparse_events = clusterer.test_subclustering(
+                g5m_centers,
+                new_info,
+                clustering_dist=clustering_dist,
+                sparse_dist=sparse_dist,
+            )
+
+            def plot_checks() -> None:
+                # automatically save the subclustering check
+                base = os.path.splitext(path_molecules)[0]
+                lib.plot_subclustering_check(
+                    clust_events,
+                    sparse_events,
+                    base + "_subcluster_check.png",
+                    clustering_dist=clustering_dist,
+                    sparse_dist=sparse_dist,
+                )
+                # automatically save rel_sigma plot
+                lib.plot_rel_sigma_check(
+                    g5m_centers, new_info, base + "_relsigma_check.png"
+                )
+
+            return plot_checks
+
+        return job
 
     def _g5m_max_locs_per_channel(
         self, channels, group_column: str = "group"
@@ -14287,29 +14445,36 @@ class View(QtWidgets.QLabel):
                 "Creating localization list", 0, len(self._picks), self
             )
             progress.set_value(0)
-
-            locs = self.locs[channel]
-
-            # find pick size
-            index_blocks = None
-            if self._pick_shape == "Circle":
-                pick_size = self._pick_size / 2
-                index_blocks = self._pick_index(channel)
-            else:
-                pick_size = self._pick_size
-
-            # pick localizations
-            picked_locs = postprocess.picked_locs(
-                locs,
-                self.infos[channel],
-                self._picks,
-                self._pick_shape,
-                pick_size=pick_size,
-                add_group=add_group,
-                index_blocks=index_blocks,
+            return postprocess.picked_locs(
+                **self._picked_locs_kwargs(channel, add_group),
                 callback=progress.set_value,
             )
-            return picked_locs
+
+    def _picked_locs_kwargs(
+        self, channel: int, add_group: bool = True
+    ) -> dict:
+        """Arguments of ``postprocess.picked_locs`` for the current picks
+        in ``channel``, without the callback.
+
+        Resolving the spatial index may build it (and show a dialog), so
+        this runs on the GUI thread; the picking itself can then run on
+        a worker thread, see ``lib.run_task``.
+        """
+        index_blocks = None
+        if self._pick_shape == "Circle":
+            pick_size = self._pick_size / 2
+            index_blocks = self._pick_index(channel)
+        else:
+            pick_size = self._pick_size
+        return dict(
+            locs=self.locs[channel],
+            info=self.infos[channel],
+            picks=list(self._picks),
+            pick_shape=self._pick_shape,
+            pick_size=pick_size,
+            add_group=add_group,
+            index_blocks=index_blocks,
+        )
 
     def remove_picks(self, position: tuple[float, float]) -> None:
         """Delete picks found at a given position.
@@ -15013,54 +15178,84 @@ class View(QtWidgets.QLabel):
         channel : int
             Channel of locs to be saved.
         """
+        self.save_pick_properties_many([(path, channel)])
+
+    def save_pick_properties_many(self, jobs: list[tuple[str, int]]) -> None:
+        """Save picks' (or groups) properties of several channels, in
+        one cancelable task. See ``save_pick_properties``.
+
+        Parameters
+        ----------
+        jobs : list of tuple
+            ``(path, channel)`` for each channel to be saved.
+        """
         # allow running even if no picks are present but group info is
         if len(self._picks) == 0:
-            locs = self.locs[channel]
-            if "group" not in locs.columns:
-                message = (
-                    "No picks found. Please create picks or assign group "
-                    "identity to localizations before calculating pick "
-                    "properties."
-                )
-                QtWidgets.QMessageBox.warning(self, "Warning", message)
-                return
-            picked_locs = [
-                locs[locs["group"] == i] for i in np.unique(locs["group"])
-            ]
+            for _, channel in jobs:
+                if "group" not in self.locs[channel].columns:
+                    message = (
+                        "No picks found. Please create picks or assign "
+                        "group identity to localizations before "
+                        "calculating pick properties."
+                    )
+                    QtWidgets.QMessageBox.warning(self, "Warning", message)
+                    return
             pick_areas = None
         else:
-            picked_locs = self.picked_locs(channel)
             pick_areas = self.pick_areas()
+        n_picks = len(self._picks)
+        influx = self.window.info_dialog.influx_rate.value()
+        max_dark_time = self.window.info_dialog.max_dark_time.value()
+        gen_by = f"Picasso v{__version__}: Render Pick Properties"
+        inputs = []  # (path, info, locs or picking arguments)
+        for path, channel in jobs:
+            if n_picks:
+                source = self._picked_locs_kwargs(channel)
+            else:
+                source = self.locs[channel]
+            inputs.append((path, self.infos[channel], source))
 
-        kinetics_progress = lib.ProgressDialog(
-            "Calculating kinetics", 0, len(picked_locs), self
+        def compute(progress: lib.TaskProgress) -> None:
+            for path, info, source in inputs:
+                if n_picks:
+                    picked_locs = postprocess.picked_locs(
+                        **source,
+                        callback=progress.callback(
+                            "Creating localization list", n_picks
+                        ),
+                    )
+                else:
+                    progress.phase("Grouping localizations", 0)
+                    picked_locs = [
+                        source[source["group"] == i]
+                        for i in np.unique(source["group"])
+                    ]
+                n = len(picked_locs)
+                pick_props = postprocess.pick_properties(
+                    picked_locs=picked_locs,
+                    info=info,
+                    max_dark_time=max_dark_time,
+                    influx_rate=influx,
+                    pick_areas=pick_areas,
+                    kinetics_progress=progress.callback(
+                        "Calculating kinetics", n
+                    ),
+                    groupprops_progress=progress.callback(
+                        "Calculating pick properties", n
+                    ),
+                )
+                progress.check_canceled()
+                new_info = info + [
+                    {"Generated by": gen_by, "Influx rate": influx}
+                ]
+                io.save_datasets(path, new_info, groups=pick_props)
+
+        lib.run_task(
+            compute,
+            "Calculating pick properties",
+            self,
+            title="Save pick properties",
         )
-        groupprops_progress = lib.ProgressDialog(
-            "Calculating pick properties", 0, len(picked_locs), self
-        )
-        groupprops_progress.show()
-        try:
-            influx = self.window.info_dialog.influx_rate.value()
-            pick_props = postprocess.pick_properties(
-                picked_locs=picked_locs,
-                info=self.infos[channel],
-                max_dark_time=self.window.info_dialog.max_dark_time.value(),
-                influx_rate=influx,
-                pick_areas=pick_areas,
-                kinetics_progress=kinetics_progress.set_value,
-                groupprops_progress=groupprops_progress.set_value,
-            )
-            gen_by = f"Picasso v{__version__}: Render Pick Properties"
-            info = self.infos[channel] + [
-                {
-                    "Generated by": gen_by,
-                    "Influx rate": influx,
-                }
-            ]
-            io.save_datasets(path, info, groups=pick_props)
-        finally:
-            kinetics_progress.close()
-            groupprops_progress.close()
 
     def save_picks(self, path: str) -> None:
         """Save picked regions in .yaml format to path.
@@ -15274,31 +15469,43 @@ class View(QtWidgets.QLabel):
         params["roi_r"] = params["roi_r"] / self.pixelsize
 
         if channel == len(self.locs_paths):  # apply to all channels
-            for channel in range(len(self.locs_paths)):
-                self._undrift_aim(channel, params)
+            channels = list(range(len(self.locs_paths)))
         else:
-            self._undrift_aim(channel, params)
-            self.show_drift()
+            channels = [channel]
+        jobs = [(c, self.locs[c], self.infos[c]) for c in channels]
 
-    def _undrift_aim(self, channel: int, params: dict) -> None:
-        """Undrift a given channel by AIM with pre-computed parameters."""
-        locs = self.locs[channel]
-        info = self.infos[channel]
-        n_frames = lib.get_from_metadata(info, "Frames", raise_error=True)
-        n_segments = int(np.ceil(n_frames / params["segmentation"]))
-        progress = lib.ProgressDialog(
-            "Undrifting by AIM (1/2)", 0, n_segments, self.window
+        def compute(progress: lib.TaskProgress) -> list[tuple]:
+            results = []
+            for c, locs, info in jobs:
+                n_frames = lib.get_from_metadata(
+                    info, "Frames", raise_error=True
+                )
+                n_segments = int(np.ceil(n_frames / params["segmentation"]))
+                progress.phase("Undrifting by AIM (1/2)", n_segments)
+                new_locs, new_info, drift = aim.aim(
+                    locs, info, **params, progress=progress
+                )
+                new_locs = lib.ensure_sanity(new_locs, info)
+                results.append((c, new_locs, new_info, drift))
+            return results
+
+        def apply(results: list[tuple]) -> None:
+            for c, locs, new_info, drift in results:
+                self.locs[c] = locs
+                self.infos[c] = new_info
+                self.invalidate_locs_index(c)
+                self.add_drift(c, drift)
+            self.update_scene(resample_locs=True)
+            if len(channels) == 1:
+                self.show_drift()
+
+        lib.run_task(
+            compute,
+            "Undrifting by AIM (1/2)",
+            self.window,
+            apply,
+            title="Undrift by AIM",
         )
-        locs, new_info, drift = aim.aim(
-            locs, info, **params, progress=progress
-        )
-        # sanity check and assign attributes
-        locs = lib.ensure_sanity(locs, info)
-        self.locs[channel] = locs
-        self.infos[channel] = new_info
-        self.invalidate_locs_index(channel)
-        self.add_drift(channel, drift)
-        self.update_scene(resample_locs=True)
 
     def undrift_rcc(self) -> None:
         """Undrift with RCC.
@@ -15325,53 +15532,56 @@ class View(QtWidgets.QLabel):
             return
 
         if channel == len(self.locs_paths):  # apply to all channels
-            for channel in range(len(self.locs_paths)):
-                self._undrift_rcc(channel, segmentation)
+            channels = list(range(len(self.locs_paths)))
         else:
-            self._undrift_rcc(channel, segmentation)
-            self.show_drift()
+            channels = [channel]
+        jobs = [(c, self.locs[c], self.infos[c]) for c in channels]
 
-    def _undrift_rcc(self, channel: int, segmentation: int) -> None:
-        """Undrift a given channel by RCC with a chosen segmentation."""
-        locs = self.locs[channel]
-        info = self.infos[channel]
-        n_segments = postprocess.n_segments(info, segmentation)
-        seg_progress = lib.ProgressDialog(
-            "Generating segments", 0, n_segments, self
-        )
-        n_pairs = int(n_segments * (n_segments - 1) / 2)
-        rcc_progress = lib.ProgressDialog(
-            "Correlating image pairs", 0, n_pairs, self
-        )
-        try:
-            # find drift and apply it to locs
-            drift, undrifted_locs = postprocess.undrift(
-                locs,
-                info,
-                segmentation,
-                False,
-                seg_progress.set_value,
-                rcc_progress.set_value,
-            )
-            # sanity check and assign attributes
-            self.invalidate_locs_index(channel)
-            self.add_drift(channel, drift)
-            # ignore undrift_locs since we use _apply_drift to
-            # assign attributes
-            self._apply_drift(channel, drift)
+        def compute(progress: lib.TaskProgress) -> list[tuple]:
+            results = []
+            for c, locs, info in jobs:
+                n_segments = postprocess.n_segments(info, segmentation)
+                n_pairs = int(n_segments * (n_segments - 1) / 2)
+                # the undrifted locs are ignored, since _apply_drift
+                # assigns them together with the drift attributes
+                drift, _ = postprocess.undrift(
+                    locs,
+                    info,
+                    segmentation,
+                    False,
+                    progress.callback("Generating segments", n_segments),
+                    progress.callback("Correlating image pairs", n_pairs),
+                )
+                results.append((c, drift))
+            return results
 
-        except Exception as e:
+        def apply(results: list[tuple]) -> None:
+            for c, drift in results:
+                self.invalidate_locs_index(c)
+                self.add_drift(c, drift)
+                self._apply_drift(c, drift)
+            if len(channels) == 1:
+                self.show_drift()
+
+        def failed(error: Exception) -> None:
             QtWidgets.QMessageBox.information(
                 self,
                 "RCC Error",
                 (
                     "RCC failed. \nConsider changing segmentation "
                     "and make sure there are enough locs per frame.\n"
-                    f"The following exception occured:\n\n {e}."
+                    f"The following exception occurred:\n\n {error}."
                 ),
             )
-            rcc_progress.set_value(n_pairs)
-            self.update_scene()
+
+        lib.run_task(
+            compute,
+            "Generating segments",
+            self,
+            apply,
+            on_failed=failed,
+            title="Undrift by RCC",
+        )
 
     @check_picks
     def undrift_from_picked(self) -> None:
@@ -15380,10 +15590,11 @@ class View(QtWidgets.QLabel):
         if channel is None:
             return
         if channel == len(self.locs_paths):  # apply to all channels
-            for channel in range(len(self.locs_paths)):
-                self._undrift_from_picked(channel, undrift_z=True)
+            self._undrift_from_picked(
+                list(range(len(self.locs_paths))), undrift_z=True
+            )
         else:
-            self._undrift_from_picked(channel, undrift_z=True)
+            self._undrift_from_picked([channel], undrift_z=True)
 
     @check_picks
     def undrift_from_picked2d(self) -> None:
@@ -15393,47 +15604,98 @@ class View(QtWidgets.QLabel):
         if channel is None:
             return
         if channel == len(self.locs_paths):  # apply to all channels
-            for channel in range(len(self.locs_paths)):
-                self._undrift_from_picked(channel, undrift_z=False)
+            self._undrift_from_picked(
+                list(range(len(self.locs_paths))), undrift_z=False
+            )
         else:
-            self._undrift_from_picked(channel, undrift_z=False)
+            self._undrift_from_picked([channel], undrift_z=False)
 
-    def _undrift_from_picked(self, channel: int, undrift_z: bool) -> None:
-        """Undrift a given channel based on picked localizations.
+    def _undrift_from_picked(
+        self, channels: list[int], undrift_z: bool
+    ) -> None:
+        """Undrift channels based on picked localizations, in one
+        cancelable task.
+
+        A circular pick needs the channel's spatial index. When it is not
+        cached (any change of the localizations drops it), the worker
+        builds it; it is kept if the task is canceled or fails, since
+        the localizations are unchanged then.
 
         Parameters
         ----------
-        channel : int
-            Index of the channel to undrift.
+        channels : list of int
+            Indices of the channels to undrift.
         undrift_z : bool
             Whether to also undrift in z (ignored for 2D data).
         """
-        status = lib.StatusDialog("Calculating drift...", self)
+        pick_shape = self._pick_shape
         pick_size = (
-            self._pick_size / 2
-            if self._pick_shape == "Circle"
-            else self._pick_size
+            self._pick_size / 2 if pick_shape == "Circle" else self._pick_size
         )
-        if self._pick_shape == "Circle":
-            index_blocks = self._pick_index(channel)
-        else:
-            index_blocks = None
-        undrifted_locs, new_info, drift = postprocess.undrift_from_fiducials(
-            locs=self.locs[channel],
-            info=self.infos[channel],
-            picks=self._picks,
-            pick_size=pick_size,
-            pick_shape=self._pick_shape,
-            undrift_z=undrift_z,
-            index_blocks=index_blocks,
+        picks = list(self._picks)
+        jobs = []  # channel, locs, info, index
+        for channel in channels:
+            locs = self.locs[channel]
+            index = None
+            if pick_shape == "Circle":
+                index = self.render_index[channel]
+                if index is None:  # a linked window may have built it
+                    index = self.window.link_render_index(locs)
+            jobs.append((channel, locs, self.infos[channel], index))
+        built = []  # (channel, locs, index) built by the worker
+
+        def compute(progress: lib.TaskProgress) -> list[tuple]:
+            results = []
+            for channel, locs, info, index in jobs:
+                if pick_shape == "Circle" and index is None:
+                    progress.phase("Indexing localizations", 0)
+                    try:
+                        index = spatial_index.build_render_index(locs, info)
+                    except Exception:  # noqa: BLE001 - picking indexes itself
+                        index = None
+                    built.append((channel, locs, index))
+                    progress.check_canceled()
+                undrifted_locs, new_info, drift = (
+                    postprocess.undrift_from_fiducials(
+                        locs=locs,
+                        info=info,
+                        picks=picks,
+                        pick_size=pick_size,
+                        pick_shape=pick_shape,
+                        undrift_z=undrift_z,
+                        index_blocks=index,
+                        progress=progress,
+                    )
+                )
+                results.append((channel, undrifted_locs, new_info, drift))
+            return results
+
+        def apply(results: list[tuple]) -> None:
+            for channel, locs, new_info, drift in results:
+                self.locs[channel] = locs
+                self.infos[channel] = new_info
+                self.invalidate_locs_index(channel)
+                self.add_drift(channel, drift)
+            self.update_scene(resample_locs=True)
+
+        def keep_indices() -> None:
+            for channel, locs, index in built:
+                if index is not None and self.locs[channel] is locs:
+                    self.render_index[channel] = index
+
+        def failed(error: Exception) -> None:
+            keep_indices()
+            sys.excepthook(type(error), error, error.__traceback__)
+
+        lib.run_task(
+            compute,
+            "Calculating drift...",
+            self,
+            apply,
+            on_failed=failed,
+            on_canceled=keep_indices,
+            title="Undrift from picked",
         )
-        self.locs[channel] = undrifted_locs
-        self.infos[channel] = new_info
-        # Cleanup
-        self.invalidate_locs_index(channel)
-        self.add_drift(channel, drift)
-        status.close()
-        self.update_scene(resample_locs=True)
 
     def undo_drift(self) -> None:
         """Get a channel to undo drift."""
@@ -15707,72 +15969,83 @@ class View(QtWidgets.QLabel):
     def update_pick_info_long(self) -> None:
         """Evaluate pick statistics in ``InfoDialog``."""
         channel = self.get_channel("Calculate pick info")
-        if channel is not None:
-            progress = lib.ProgressDialog(
-                "Calculating pick statistics", 0, len(self._picks), self
-            )
-            max_dark_time = self.window.info_dialog.max_dark_time.value()
-            N, n_events, rmsd, rmsd_z, length, dark, new_locs = (
-                postprocess.evaluate_picks(
-                    picked_locs=self.picked_locs(channel),
-                    info=self.infos[channel],
-                    max_dark_time=max_dark_time,
-                    progress_callback=progress.set_value,
-                )
-            )
-            progress.close()
+        if channel is None:
+            return
+        pick_kwargs = self._picked_locs_kwargs(channel)
+        n_picks = len(self._picks)
+        info = self.infos[channel]
+        max_dark_time = self.window.info_dialog.max_dark_time.value()
+        is_3d = "z" in self.locs[channel].columns
 
-            # update labels in info dialog
-            self.window.info_dialog.n_localizations_mean.setText(
-                "{:.2f}".format(np.nanmean(N))
-            )  # mean number of locs per pick
-            self.window.info_dialog.n_localizations_std.setText(
-                "{:.2f}".format(np.nanstd(N))
-            )  # std number of locs per pick
-            self.window.info_dialog.n_events_mean.setText(
-                "{:.2f}".format(np.nanmean(n_events))
-            )  # mean number of events per pick
-            self.window.info_dialog.n_events_std.setText(
-                "{:.2f}".format(np.nanstd(n_events))
-            )  # std number of events per pick
-            self.window.info_dialog.rmsd_mean.setText(
-                "{:.2}".format(np.nanmean(rmsd))
-            )  # mean rmsd per pick
-            self.window.info_dialog.rmsd_std.setText(
-                "{:.2}".format(np.nanstd(rmsd))
-            )  # std rmsd per pick
-            if "z" in self.locs[channel].columns:
-                self.window.info_dialog.rmsd_z_mean.setText(
-                    "{:.2f}".format(np.nanmean(rmsd_z))
-                )  # mean rmsd in z per pick
-                self.window.info_dialog.rmsd_z_std.setText(
-                    "{:.2f}".format(np.nanstd(rmsd_z))
-                )  # std rmsd in z per pick
+        def compute(progress: lib.TaskProgress) -> tuple:
+            picked_locs = postprocess.picked_locs(
+                **pick_kwargs,
+                callback=progress.callback(
+                    "Creating localization list", n_picks
+                ),
+            )
+            stats = postprocess.evaluate_picks(
+                picked_locs=picked_locs,
+                info=info,
+                max_dark_time=max_dark_time,
+                progress_callback=progress.callback(
+                    "Calculating pick statistics", n_picks
+                ),
+            )
+            new_locs = stats[-1]
+            progress.phase("Fitting kinetics", 0)
             fit_result_len = lib.fit_cum_exp(new_locs["len"].to_numpy())
             fit_result_dark = lib.fit_cum_exp(new_locs["dark"].to_numpy())
-            self.window.info_dialog.length_mean.setText(
-                "{:.2f}".format(np.nanmean(length))
-            )  # mean bright time
-            self.window.info_dialog.length_std.setText(
-                "{:.2f}".format(np.nanstd(length))
-            )  # std bright time
-            self.window.info_dialog.dark_mean.setText(
-                "{:.2f}".format(np.nanmean(dark))
-            )  # mean dark time
-            self.window.info_dialog.dark_std.setText(
-                "{:.2f}".format(np.nanstd(dark))
-            )  # std dark time
-            self.window.info_dialog.pick_info = {
-                "pooled dark": lib.estimate_kinetic_rate(
-                    new_locs["dark"].to_numpy()
-                ),
-                "length": length,
-                "dark": dark,
-            }
-            self.window.info_dialog.update_n_units()
-            self.window.info_dialog.pick_hist_window.plot(
-                new_locs, fit_result_len, fit_result_dark
-            )
+            return stats, fit_result_len, fit_result_dark
+
+        lib.run_task(
+            compute,
+            "Creating localization list",
+            self,
+            lambda result: self._show_pick_info_long(is_3d, *result),
+            maximum=n_picks,
+        )
+
+    def _show_pick_info_long(
+        self,
+        is_3d: bool,
+        stats: tuple,
+        fit_result_len: dict,
+        fit_result_dark: dict,
+    ) -> None:
+        """Display pick statistics computed by
+        ``update_pick_info_long``."""
+        N, n_events, rmsd, rmsd_z, length, dark, new_locs = stats
+        info_dialog = self.window.info_dialog
+        # mean and std number of locs per pick
+        info_dialog.n_localizations_mean.setText(f"{np.nanmean(N):.2f}")
+        info_dialog.n_localizations_std.setText(f"{np.nanstd(N):.2f}")
+        # mean and std number of events per pick
+        info_dialog.n_events_mean.setText(f"{np.nanmean(n_events):.2f}")
+        info_dialog.n_events_std.setText(f"{np.nanstd(n_events):.2f}")
+        # mean and std rmsd per pick
+        info_dialog.rmsd_mean.setText(f"{np.nanmean(rmsd):.2}")
+        info_dialog.rmsd_std.setText(f"{np.nanstd(rmsd):.2}")
+        if is_3d:  # mean and std rmsd in z per pick
+            info_dialog.rmsd_z_mean.setText(f"{np.nanmean(rmsd_z):.2f}")
+            info_dialog.rmsd_z_std.setText(f"{np.nanstd(rmsd_z):.2f}")
+        # mean and std bright time
+        info_dialog.length_mean.setText(f"{np.nanmean(length):.2f}")
+        info_dialog.length_std.setText(f"{np.nanstd(length):.2f}")
+        # mean and std dark time
+        info_dialog.dark_mean.setText(f"{np.nanmean(dark):.2f}")
+        info_dialog.dark_std.setText(f"{np.nanstd(dark):.2f}")
+        info_dialog.pick_info = {
+            "pooled dark": lib.estimate_kinetic_rate(
+                new_locs["dark"].to_numpy()
+            ),
+            "length": length,
+            "dark": dark,
+        }
+        info_dialog.update_n_units()
+        info_dialog.pick_hist_window.plot(
+            new_locs, fit_result_len, fit_result_dark
+        )
 
     def update_pick_info_short(self) -> None:
         """Updates number of picks in Info Dialog."""
@@ -17374,12 +17647,13 @@ class Window(QtWidgets.QMainWindow):
                     "_properties",
                 )
                 if ok:
+                    jobs = []
                     for channel in range(len(self.view.locs_paths)):
                         base, ext = os.path.splitext(
                             self.view.locs_paths[channel]
                         )
-                        out_path = base + suffix + ".hdf5"
-                        self.view.save_pick_properties(out_path, channel)
+                        jobs.append((base + suffix + ".hdf5", channel))
+                    self.view.save_pick_properties_many(jobs)
             else:
                 base, ext = os.path.splitext(self.view.locs_paths[channel])
                 out_path = base + "_properties.hdf5"

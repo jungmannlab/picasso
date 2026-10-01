@@ -109,6 +109,10 @@ _QT_NAMES = (
     "MetadataDialog",
     "ProgressDialog",
     "StatusDialog",
+    "TaskProgressDialog",
+    "TaskProgress",
+    "Task",
+    "run_task",
     "ProgressType",
     "CollapsibleHeader",
     "CollapsibleGroupBox",
@@ -373,6 +377,17 @@ def bin_z_steps(
     if np.issubdtype(values.dtype, np.floating):
         binned = binned.astype(values.dtype, copy=False)
     return np.moveaxis(binned, 0, axis)
+
+
+class OperationCanceled(Exception):
+    """Raised inside a long computation when the user canceled it.
+
+    The progress tracker of a GUI task (``lib_qt.TaskProgress``) raises it
+    from ``set_value`` once Cancel was pressed, so every progress update
+    of a computation doubles as a cancellation point, without the
+    computation knowing about Qt. Code that must clean up (e.g. shut down
+    a process pool) can catch it, clean up and re-raise.
+    """
 
 
 class MockProgress:

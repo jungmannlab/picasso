@@ -1,6 +1,6 @@
 # Changelog
 
-Last change: 30-SEP-2026 CEST
+Last change: 01-OCT-2026 CEST
 
 ## 0.12.0
 
@@ -12,7 +12,7 @@ Last change: 30-SEP-2026 CEST
 - Test version documentation online.
 
 ### Render
-- Render has been largely rewritten for fast and interactive rendering of localizations even for large, multiplex datasets. GPU via the package ``wgpu`` has been added for cross-platform support. More details in the section **Technical details on Render update** below. See these links for the relevant user guides: [navigation](https://picassosr.readthedocs.io/en/latest/render.html#navigating-the-image), [user_settings](https://picassosr.readthedocs.io/en/latest/render.html#cpu-usage-on-shared-workstations), [GPU](https://picassosr.readthedocs.io/en/latest/render.html#gpu-rendering).
+- **Render has been largely rewritten for fast and interactive rendering of localizations even for large, multiplex datasets. GPU via the package ``wgpu`` has been added for cross-platform support**. More details in the section **Technical details on Render update** below. See these links for the relevant user guides: [navigation](https://picassosr.readthedocs.io/en/latest/render.html#navigating-the-image), [user_settings](https://picassosr.readthedocs.io/en/latest/render.html#cpu-usage-on-shared-workstations), [GPU](https://picassosr.readthedocs.io/en/latest/render.html#gpu-rendering).
 - `View > 3D view` (Ctrl+Shift+R, replacing *Update rotation window*) opens the rotation window on the single selected pick or, without a pick, on the current field of view, so any region can be inspected in 3D by zooming to it; pressed again on unchanged content it only raises the window.
 - Linked windows that share user-selected attributes, see [documentation](https://picassosr.readthedocs.io/en/latest/render.html#New-linked-window).
 - New blur methods *Adaptive Histogram (Quad-Tree)* and *Jittered Triangulation* (Baddeley, Cannell & Soeller, *Microsc. Microanal.* 2010). See the [blur documentation](https://picassosr.readthedocs.io/en/latest/render.html#blur).
@@ -23,12 +23,15 @@ Last change: 30-SEP-2026 CEST
 - Editable appearance of the tools (e.g., picks), see the [documentation](https://picassosr.readthedocs.io/en/latest/render.html#tools-settings-ctrl-t).
 - Smooth transitions in 3D animations: the motion eases in and out and passes through the positions without sharp turns, see the [documentation](https://picassosr.readthedocs.io/en/latest/render.html#build-an-animation).
 - Faster circular picking of localizations.
+- Undrifting from picked localizations is fast and memory-efficient for many picks.
 - Faster FRC.
 - FRC in several random ROIs (*Info* dialog, *FRC in several ROIs*).
 - `picasso.render` is distributed as a package (`kernels`, `geometry`, `splat`, `scene`, `overlays_qt`, `animation`, `backend`, `gpu`); every former `picasso.render.*` name is still importable from `picasso.render`.
 - Rectangular pick minimum length set to 5 display pixels.
+- Long operations run in the background and can be canceled: undrifting (AIM, RCC, from picked), DBSCAN, HDBSCAN, SMLM clusterer, G5M, RESI, NeNA, FRC in ROIs, pick statistics and saving pick properties. The windows keep repainting while they run.
 - Fixed: 3D histogram rendering scaled z unnecessarily.
 - Fixed NeNA (and FRC) overwriting group columns of localizations.
+- Fixed: DBSCAN, HDBSCAN and SMLM clusterer saved the cluster areas as `*_centers_areas.csv` instead of `*_areas.csv` when the cluster centers were saved, too.
 - Fixed: *Export FOV as .ims* ignored the image extents of the loaded metadata and used only the last channel's metadata.
 
 ### Localize

@@ -4536,6 +4536,7 @@ def undrift_from_fiducials(
     ] = "Circle",
     undrift_z: bool = True,
     index_blocks: tuple | None = None,
+    progress: lib.ProgressDialog | Literal["console"] | None = None,
 ) -> tuple[pd.DataFrame, list[dict], pd.DataFrame]:
     """Undrift localizations based on picked regions (fiducial markers).
 
@@ -4570,6 +4571,11 @@ def undrift_from_fiducials(
         circular ``picked_locs``. Ignored for every other pick shape,
         and when ``picks`` is None (auto-detected fiducials use a radius
         that may not match the precomputed index). Default is None.
+    progress : picasso.lib.ProgressDialog or "console" or None, optional
+        Tracks progress of picking the localizations, one step per pick.
+        If "console", a tqdm progress bar is shown in the console. If a
+        ProgressDialog, a GUI progress bar is updated. If None (default),
+        no progress is displayed. Same convention as ``picasso.aim.aim``.
 
     Returns
     -------
@@ -4620,6 +4626,11 @@ def undrift_from_fiducials(
         raise ValueError("No picks found for drift correction.")
 
     # get picked localizations
+    progress = lib.normalize_progress(
+        progress, description="Picking localizations", unit="pick"
+    )
+    progress.setMaximum(len(picks))
+    progress.zero_progress("Picking localizations")
     pl = picked_locs(
         locs,
         info,
@@ -4628,10 +4639,14 @@ def undrift_from_fiducials(
         pick_size=pick_radius,
         add_group=False,
         index_blocks=index_blocks,
+        callback=progress.set_value,
     )
 
     # calculate drift
+    progress.setMaximum(0)
+    progress.zero_progress("Calculating drift")
     drift = undrift_from_picked(pl, info)
+    progress.close()
     if not undrift_z:
         drift = drift.drop(columns="z", errors="ignore")
     locs = apply_drift(locs, info, drift=drift)
@@ -4674,75 +4689,114 @@ def undrift_from_picked(
         optionally 'z' if the z coordinate exists in the picked
         localizations.
     """
-    drift_x = _undrift_from_picked_coordinate(picked_locs, info, "x")
-    drift_y = _undrift_from_picked_coordinate(picked_locs, info, "y")
+    n_frames = info[0]["Frames"]
+    # the picks' localizations as flat arrays, with the index of the pick
+    lengths = np.array([len(_) for _ in picked_locs], dtype=np.int64)
+    pick = np.repeat(np.arange(len(picked_locs)), lengths)
+    if len(pick):
+        frame = np.concatenate(
+            [_["frame"].to_numpy() for _ in picked_locs]
+        ).astype(np.int64)
+    else:
+        frame = np.empty(0, dtype=np.int64)
+    # one entry per pick and frame: the pick's last localization in it
+    key = pick * n_frames + frame
+    _, first_in_reversed = np.unique(key[::-1], return_index=True)
+    entries = len(key) - 1 - first_in_reversed
+
+    def coordinate_drift(coordinate: str) -> lib.FloatArray1D:
+        if len(pick):
+            values = np.concatenate(
+                [_[coordinate].to_numpy() for _ in picked_locs]
+            )
+        else:
+            values = np.empty(0)
+        return _undrift_from_picked_coordinate(
+            values, pick, frame, lengths, entries, n_frames
+        )
 
     # A data frame to store the applied drift
-    drift = pd.DataFrame({"x": drift_x, "y": drift_y})
+    drift = pd.DataFrame(
+        {"x": coordinate_drift("x"), "y": coordinate_drift("y")}
+    )
     # If z coordinate exists, also apply drift there
     if all(["z" in _.columns for _ in picked_locs]):
-        drift_z = _undrift_from_picked_coordinate(picked_locs, info, "z")
-        drift["z"] = drift_z
+        drift["z"] = coordinate_drift("z")
     return drift
 
 
 def _undrift_from_picked_coordinate(
-    picked_locs: list[pd.DataFrame],
-    info: list[dict],
-    coordinate: Literal["x", "y", "z"],
+    values: lib.FloatArray1D,
+    pick: lib.IntArray1D,
+    frame: lib.IntArray1D,
+    lengths: lib.IntArray1D,
+    entries: lib.IntArray1D,
+    n_frames: int,
 ) -> lib.FloatArray1D:
-    """Calculate drift in a given coordinate from picked localizations.
-    Uses the center of mass of each pick to find the drift in the
-    specified coordinate across all frames. The drift is calculated as
-    the average of the localizations' coordinates minus the mean of the
-    coordinates for each pick.
+    """Calculate drift in one coordinate from picked localizations.
+
+    Each pick's drift is its localizations' coordinate minus the pick's
+    center of mass. The drift of a frame is the average over the picks
+    with a localization in it (one per pick; the last one if a pick has
+    several), each pick weighted by the inverse of its mean square
+    deviation from the unweighted average drift. Frames without
+    localizations are interpolated linearly.
+
+    The statistics are accumulated over the localizations, never over a
+    (picks x frames) table, whose memory would grow with the number of
+    picks times the number of frames.
 
     Parameters
     ----------
-    picked_locs : list of pd.DataFrames
-        List of pd.DataFrames with locs for each pick.
-    info : list of dicts
-        Localizations' metadata.
-    coordinate : {"x", "y", "z"}
-        Spatial coordinate where drift is to be found.
+    values : lib.FloatArray1D
+        Coordinate of all picked localizations, pick by pick.
+    pick : lib.IntArray1D
+        Index of the pick of each localization in ``values``.
+    frame : lib.IntArray1D
+        Frame of each localization in ``values``.
+    lengths : lib.IntArray1D
+        Number of localizations in each pick.
+    entries : lib.IntArray1D
+        Indices into ``values`` of the localization that represents
+        each pick in each of its frames.
+    n_frames : int
+        Number of frames.
 
     Returns
     -------
     drift_mean : lib.FloatArray1D
-        Average drift across picks for all frames
+        Average drift across picks for all frames.
     """
-    n_picks = len(picked_locs)
-    n_frames = info[0]["Frames"]
-
-    # Drift per pick per frame
-    drift = np.empty((n_picks, n_frames))
-    drift.fill(np.nan)
-
-    # Remove center of mass offset
-    for i, locs in enumerate(picked_locs):
-        coordinates = locs[coordinate].to_numpy()
-        drift[i, locs["frame"].to_numpy()] = coordinates - np.mean(coordinates)
-
-    # Mean drift over picks
-    drift_mean = np.nanmean(drift, 0)
-    # Square deviation of each pick's drift to mean drift along frames
-    sd = (drift - drift_mean) ** 2
-    # Mean of square deviation for each pick
-    msd = np.nanmean(sd, 1)
-    # New mean drift over picks
-    # where each pick is weighted according to its msd
-    nan_mask = np.isnan(drift)
-    drift = np.ma.MaskedArray(drift, mask=nan_mask)
-    drift_mean = np.ma.average(drift, axis=0, weights=1 / msd)
-    drift_mean = drift_mean.filled(np.nan)
+    n_picks = len(lengths)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        # center of mass of each pick, over all of its localizations
+        com = np.bincount(pick, weights=values, minlength=n_picks) / lengths
+        pick_e = pick[entries]
+        frame_e = frame[entries]
+        drift = values[entries] - com[pick_e]
+        # mean drift over picks
+        n_per_frame = np.bincount(frame_e, minlength=n_frames)
+        drift_mean = (
+            np.bincount(frame_e, weights=drift, minlength=n_frames)
+            / n_per_frame
+        )
+        # mean square deviation of each pick's drift to the mean drift
+        sd = (drift - drift_mean[frame_e]) ** 2
+        msd = np.bincount(pick_e, weights=sd, minlength=n_picks) / (
+            np.bincount(pick_e, minlength=n_picks)
+        )
+        # new mean drift over picks, where each pick is weighted
+        # according to its msd
+        weights = 1 / msd[pick_e]
+        drift_mean = np.bincount(
+            frame_e, weights=weights * drift, minlength=n_frames
+        ) / np.bincount(frame_e, weights=weights, minlength=n_frames)
+    drift_mean[n_per_frame == 0] = np.nan
 
     # Linear interpolation for frames without localizations
-    def nan_helper(y):
-        return np.isnan(y), lambda z: z.nonzero()[0]
-
-    nans, nonzero = nan_helper(drift_mean)
+    nans = np.isnan(drift_mean)
     drift_mean[nans] = np.interp(
-        nonzero(nans), nonzero(~nans), drift_mean[~nans]
+        np.flatnonzero(nans), np.flatnonzero(~nans), drift_mean[~nans]
     )
     return drift_mean
 
