@@ -258,6 +258,11 @@ class HistWindow(PlotWindow):
 class Hist2DWindow(PlotWindow):
     """Window for displaying 2D histograms.
 
+    The 2D histogram is flanked by the 1D histograms (marginal
+    distributions) of both fields, computed from the same bins. A
+    rectangle drawn on the 2D histogram filters both fields; a span
+    selected on either 1D histogram filters only that field.
+
     Attributes
     ----------
     field_x, field_y : str
@@ -287,8 +292,8 @@ class Hist2DWindow(PlotWindow):
     def plot(self) -> None:
         x, y = self.main_window.get_columns([self.field_x, self.field_y])
         self.figure.clear()
-        axes = self.figure.add_subplot(111)
         if len(x) == 0:
+            axes = self.figure.add_subplot(111)
             axes.get_xaxis().set_label_text(self.field_x)
             axes.get_yaxis().set_label_text(self.field_y)
             self.canvas.draw()
@@ -309,6 +314,31 @@ class Hist2DWindow(PlotWindow):
             nx,
             ny,
         )
+        grid = self.figure.add_gridspec(
+            2, 3, width_ratios=[5, 1, 0.15], height_ratios=[1, 5]
+        )
+        axes = self.figure.add_subplot(grid[1, 0])
+        axes_x = self.figure.add_subplot(grid[0, 0], sharex=axes)
+        axes_y = self.figure.add_subplot(grid[1, 1], sharey=axes)
+        colorbar_axes = self.figure.add_subplot(grid[1, 2])
+        # marginals from the 2D counts so that both use identical bins
+        axes_x.hist(
+            bins_x[:-1],
+            bins_x,
+            weights=counts.sum(axis=1),
+            rwidth=1,
+            linewidth=0,
+        )
+        axes_y.hist(
+            bins_y[:-1],
+            bins_y,
+            weights=counts.sum(axis=0),
+            rwidth=1,
+            linewidth=0,
+            orientation="horizontal",
+        )
+        axes_x.tick_params(labelbottom=False)
+        axes_y.tick_params(labelleft=False)
         masked = np.ma.masked_equal(counts.T, 0)
         image = axes.pcolormesh(
             bins_x, bins_y, masked, norm=LogNorm(), shading="flat"
@@ -331,7 +361,7 @@ class Hist2DWindow(PlotWindow):
         axes.set_ylim(
             [bins_y[0] - 0.05 * y_range, y_data_max + 0.05 * y_range]
         )
-        self.figure.colorbar(image, ax=axes)
+        self.figure.colorbar(image, cax=colorbar_axes)
         axes.grid(False)
         axes.get_xaxis().set_label_text(self.field_x)
         axes.get_yaxis().set_label_text(self.field_y)
@@ -341,7 +371,31 @@ class Hist2DWindow(PlotWindow):
             useblit=True,
             props=dict(facecolor="green", alpha=0.2, fill=True),
         )
+        self.span_x = SpanSelector(
+            axes_x,
+            self.on_span_select_x,
+            "horizontal",
+            useblit=True,
+            props=dict(facecolor="green", alpha=0.2),
+        )
+        self.span_y = SpanSelector(
+            axes_y,
+            self.on_span_select_y,
+            "vertical",
+            useblit=True,
+            props=dict(facecolor="green", alpha=0.2),
+        )
         self.canvas.draw()
+
+    def on_span_select_x(self, xmin: float, xmax: float) -> None:
+        """Apply the range selected on the x-field 1D histogram as a
+        filter on the main window."""
+        self.main_window.apply_range(self.field_x, float(xmin), float(xmax))
+
+    def on_span_select_y(self, ymin: float, ymax: float) -> None:
+        """Apply the range selected on the y-field 1D histogram as a
+        filter on the main window."""
+        self.main_window.apply_range(self.field_y, float(ymin), float(ymax))
 
     def on_rect_select(
         self,
