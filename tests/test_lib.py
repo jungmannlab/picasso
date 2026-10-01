@@ -1333,3 +1333,46 @@ class TestLazyQtImports:
     def test_unknown_attribute_raises(self):
         with pytest.raises(AttributeError):
             lib.no_such_attribute
+
+
+class TestBinZSteps:
+    """``lib.bin_z_steps``: axial binning shared by the 3D calibrations."""
+
+    def test_no_binning_returns_the_input(self):
+        values = np.arange(7.0)
+        assert lib.bin_z_steps(values, 1) is values
+
+    def test_averages_consecutive_groups_and_drops_the_remainder(self):
+        # 7 steps in bins of 3: [0, 1, 2] and [3, 4, 5]; step 6 is dropped
+        binned = lib.bin_z_steps(np.arange(7.0), 3)
+        np.testing.assert_allclose(binned, [1.0, 4.0])
+
+    def test_stage_positions_land_at_the_bin_centers(self):
+        # a descending 5 nm scan binned by 4 gives an even 20 nm grid
+        z = -(np.arange(12) * 5.0 - 27.5)
+        binned = lib.bin_z_steps(z, 4)
+        np.testing.assert_allclose(np.diff(binned), -20.0)
+        np.testing.assert_allclose(binned, [20.0, 0.0, -20.0])
+
+    def test_bins_along_the_requested_axis(self):
+        volumes = np.random.default_rng(0).random((2, 3, 3, 8))
+        binned = lib.bin_z_steps(volumes, 4, axis=3)
+        assert binned.shape == (2, 3, 3, 2)
+        np.testing.assert_allclose(
+            binned[..., 1], volumes[..., 4:8].mean(axis=3)
+        )
+
+    def test_ignores_nan_within_a_bin(self):
+        values = np.array([1.0, np.nan, 3.0, np.nan, np.nan, np.nan])
+        binned = lib.bin_z_steps(values, 3)
+        assert binned[0] == pytest.approx(2.0)
+        assert np.isnan(binned[1])
+
+    def test_integer_input_averages_to_float(self):
+        binned = lib.bin_z_steps(np.array([1, 2, 3, 4]), 2)
+        np.testing.assert_allclose(binned, [1.5, 3.5])
+
+    @pytest.mark.parametrize("z_binning", [0, 9])
+    def test_rejects_impossible_binning(self, z_binning):
+        with pytest.raises(ValueError, match="z binning"):
+            lib.bin_z_steps(np.arange(8.0), z_binning)

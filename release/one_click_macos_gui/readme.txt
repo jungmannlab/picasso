@@ -15,7 +15,7 @@ How to install
 3. Repeat the same for all other icons with separate Picasso modules (Localize, Render, etc) that you wish to use.
 4. Note: The main picasso app must remain in the Applications folder, the shortcuts for the other modules can be moved to the desktop or elsewhere if desired.
 
-Picasso is distributed without an Apple Developer ID, which means that macOS may block the installation of the software. If the steps above do not work, please follow the instructions here: https://support.apple.com/en-gb/guide/mac-help/mh40616/mac. Note that you may need to run it several times, one for each module (e.g., Picasso Render) and once for the picasso app.
+[!] Picasso is distributed without an Apple Developer ID. macOS may therefore refuse to open the installer, warning that it cannot check it for malicious software. If this happens, click the "?" button in the warning dialog and follow the instructions to open Picasso anyway. This needs to be repeated for both the main "picasso" app and each individual module you use (e.g., Picasso Render). For more details, see: https://support.apple.com/en-gb/guide/mac-help/mh40616/mac
 
 Alternatively, you can create the dmg file yourself by cloning our GitHub repo and running the bash script picasso/release/one_click_macos_gui/create_macos_dmg.sh from the Terminal. Note that you must have conda installed on your computer.
 

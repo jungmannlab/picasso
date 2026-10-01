@@ -125,3 +125,6 @@ ENV/
 # GPU installer build artifacts
 build_gpu/
 dist_gpu/
+
+# Generated GitHub release notes
+release/release_notes.txt
