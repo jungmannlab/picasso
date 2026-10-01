@@ -1095,29 +1095,58 @@ def fit_canvas(
                 locs[column] = locs[column].to_numpy() + np.float32(delta)
         shifts.append(shift)
 
-        for axis, (size_key, camera_key) in enumerate(
-            zip(("Width", "Height"), CAMERA_SIZE_KEYS)
-        ):
-            stored = get_from_metadata(info, camera_key)
-            camera = stored
-            if camera is None:
-                camera = get_from_metadata(info, size_key, raise_error=True)
-            value = camera + new_offset[axis]
-            if len(ext[axis]):
-                # strictly x < Width is kept by ensure_sanity, hence + 1
-                top = ext[axis].max() + np.float32(shift[axis])
-                value = max(value, int(np.floor(top)) + 1)
-            # the canvas size is read from the first and from the last
-            # dictionary in different places, so every occurrence is set
-            for inf in info:
-                if size_key in inf:
-                    inf[size_key] = int(value)
-            if value != camera or stored is not None:
-                info[-1][camera_key] = int(camera)
-            offset_key = CANVAS_OFFSET_KEYS[axis]
-            if new_offset[axis] or get_from_metadata(info, offset_key):
-                info[-1][offset_key] = new_offset[axis]
+        for axis in range(2):
+            _fit_canvas_axis(
+                info, axis, ext[axis], shift[axis], new_offset[axis]
+            )
     return locs_list, infos_list, shifts
+
+
+def _fit_canvas_axis(
+    info: list[dict],
+    axis: int,
+    values: np.ndarray,
+    shift: int,
+    offset: int,
+) -> None:
+    """Update the canvas size, camera size and offset of one channel
+    along one axis in place, see ``fit_canvas``.
+
+    Parameters
+    ----------
+    info : list of dicts
+        Metadata of the channel.
+    axis : {0, 1}
+        0 for x (``Width``), 1 for y (``Height``).
+    values : np.ndarray
+        Finite coordinates of the channel along ``axis`` before the
+        shift (camera pixels).
+    shift : int
+        Translation applied to the channel along ``axis``.
+    offset : int
+        The new canvas offset along ``axis``.
+    """
+    size_key = ("Width", "Height")[axis]
+    camera_key = CAMERA_SIZE_KEYS[axis]
+    offset_key = CANVAS_OFFSET_KEYS[axis]
+    stored = get_from_metadata(info, camera_key)
+    camera = stored
+    if camera is None:
+        camera = get_from_metadata(info, size_key, raise_error=True)
+    value = camera + offset
+    if len(values):
+        # strictly x < Width is kept by ensure_sanity, hence + 1
+        top = values.max() + np.float32(shift)
+        value = max(value, int(np.floor(top)) + 1)
+    # the canvas size is read from the first and from the last
+    # dictionary in different places, so every occurrence is set
+    for inf in info:
+        if size_key in inf:
+            inf[size_key] = int(value)
+    if value != camera or stored is not None:
+        info[-1][camera_key] = int(camera)
+    if offset or get_from_metadata(info, offset_key):
+        info[-1][offset_key] = offset
 
 
 def translate_picks(

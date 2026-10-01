@@ -618,26 +618,22 @@ class LinkGroup(QtCore.QObject):
         """
         if key in ("viewport_center", "viewport_zoom"):
             self._apply_viewport(src, dst, interactive=False)
-        elif key in ("crosshair", "localizations"):
-            pass  # follow the cursor / the shared channels' changes
-        elif key == "tool_mode":
-            self._apply_tool_mode(src, dst)
-        elif key == "render_settings":
-            self._apply_render_settings(src, dst)
-        elif key == "contrast":
-            self._apply_contrast(src, dst)
-        elif key == "colormap":
-            self._apply_colormap(src, dst)
-        elif key == "render_property":
-            self._apply_render_property(src, dst)
-        elif key == "scalebar":
-            self._apply_scalebar(src, dst)
-        elif key == "background_legend":
-            self._apply_background_legend(src, dst)
-        elif key == "picks":
-            self._apply_picks(src, dst)
-        elif key == "slicer":
-            self._apply_slicer(src, dst)
+            return
+        if key in ("crosshair", "localizations"):
+            return  # follow the cursor / the shared channels' changes
+        appliers = {
+            "tool_mode": self._apply_tool_mode,
+            "render_settings": self._apply_render_settings,
+            "contrast": self._apply_contrast,
+            "colormap": self._apply_colormap,
+            "render_property": self._apply_render_property,
+            "scalebar": self._apply_scalebar,
+            "background_legend": self._apply_background_legend,
+            "picks": self._apply_picks,
+            "slicer": self._apply_slicer,
+        }
+        if key in appliers:
+            appliers[key](src, dst)
         else:
             dialog_name, names = WIDGET_CATEGORIES[key]
             src_dialog = getattr(src, dialog_name)

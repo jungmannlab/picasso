@@ -8624,13 +8624,24 @@ class Window(QtWidgets.QMainWindow):
         effect immediately rather than only on the next channel switch."""
         if len(self.channels) < 2:
             return
-        pd = self.parameters_dialog
         cur = self._capture_params()
         if self.sum_settings_on_dialog():
             # the dialog holds the sum's settings; the channels share their
             # own
             own = self.channels[self.current_channel].params or {}
             cur |= {k: own[k] for k in _SUM_SETTING_KEYS if k in own}
+        keys = self._linked_param_keys()
+        for channel in self.channels:
+            if not channel.params:
+                continue
+            for key in keys:
+                if key in cur:
+                    channel.params[key] = cur[key]
+
+    def _linked_param_keys(self) -> list[str]:
+        """Parameter keys of the groups currently linked across channels
+        in the Parameters dialog."""
+        pd = self.parameters_dialog
         keys: list[str] = []
         if pd.link_box_checkbox.isChecked():
             keys += ["box"]
@@ -8648,12 +8659,7 @@ class Window(QtWidgets.QMainWindow):
                 "qe",
                 "pixelsize",
             ]
-        for channel in self.channels:
-            if not channel.params:
-                continue
-            for key in keys:
-                if key in cur:
-                    channel.params[key] = cur[key]
+        return keys
 
     def _channels_share_file(self) -> bool:
         """True when several channels were loaded from one file (so their
@@ -10613,21 +10619,9 @@ class Window(QtWidgets.QMainWindow):
             if self._sum_registration_failed or self._sum_identify is not None:
                 # already tried, or an identification is building one right now
                 return False
-            self._sum_registration_failed = True
-            transforms, regions, source = self._sum_channel_transforms(
-                estimate=True
-            )
-            if transforms is None:
-                if notify:
-                    where = (
-                        "regions" if self.view.split_fov_mode else "channels"
-                    )
-                    self.status_bar.showMessage(
-                        f"No sum yet: the {where} are not registered. "
-                        "Identify (Ctrl+I) or load a calibration."
-                    )
+            source = self._register_channel_sum(notify)
+            if source is None:
                 return False
-            self._build_channel_sum(transforms, regions, source)
         except ValueError as error:
             self.drop_channel_sum()
             self._sum_registration_failed = True
@@ -10638,16 +10632,44 @@ class Window(QtWidgets.QMainWindow):
             return False  # a partially built window has no channels to sum
         self._sum_registration_failed = False
         if notify:
-            retune = (
-                " Re-tune the min. net gradient."
-                if localize.wavelet_from_parameters(self.parameters) is None
-                else ""
-            )
-            self.status_bar.showMessage(
-                f"Sum of {len(self.sum_transforms)} channels, "
-                f"{_sum_registration_phrase(source)}.{retune}"
-            )
+            self._notify_sum_built(source)
         return True
+
+    def _register_channel_sum(self, notify: bool) -> str | None:
+        """Build the summed view from the channel registration that needs
+        no movie pass, see ``ensure_channel_sum``. Marks the attempt as
+        failed until it succeeds. Returns the source of the registration,
+        or None if the channels are not registered yet."""
+        self._sum_registration_failed = True
+        transforms, regions, source = self._sum_channel_transforms(
+            estimate=True
+        )
+        if transforms is None:
+            if notify:
+                self._notify_sum_unregistered()
+            return None
+        self._build_channel_sum(transforms, regions, source)
+        return source
+
+    def _notify_sum_unregistered(self) -> None:
+        """Tell the user why no summed view could be built yet."""
+        where = "regions" if self.view.split_fov_mode else "channels"
+        self.status_bar.showMessage(
+            f"No sum yet: the {where} are not registered. "
+            "Identify (Ctrl+I) or load a calibration."
+        )
+
+    def _notify_sum_built(self, source: str) -> None:
+        """Report the summed view just built and how it was registered."""
+        retune = (
+            " Re-tune the min. net gradient."
+            if localize.wavelet_from_parameters(self.parameters) is None
+            else ""
+        )
+        self.status_bar.showMessage(
+            f"Sum of {len(self.sum_transforms)} channels, "
+            f"{_sum_registration_phrase(source)}.{retune}"
+        )
 
     def identification_movie(self) -> lib.IntArray3D:
         """The movie the display and the identification preview run on:
