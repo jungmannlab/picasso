@@ -77,6 +77,9 @@ Last change: 01-OCT-2026 CEST
 - New `picasso.spatial_index` functions: `query_rect`, `query_circle` (circular picks through the pyramid), `save_render_index`, `read_render_index`, `validate_render_index`, `load_render_index`. `picasso.postprocess.picked_locs` and the functions taking `index_blocks` (`pick_similar`, `combine_locs_in_picks`, `remove_locs_in_picks`, `align_from_picked`, `undrift_from_fiducials`) accept a `spatial_index.RenderIndexPyramid` in that argument.
 - `picasso.io.save_locs` gained `render_index`; `picasso.lib.standardize_dtypes` is new.
 
+## 0.11.4
+- Plot profile (rectangular) allows for lower bin size.
+
 ## 0.11.3
 - **Breaking change:** dark times are now the number of frames without signal between binding events, i.e., one frame shorter than before (two binding events in consecutive frames have a dark time of 0). Together with the bright time, each now counts the frames spent in its state. This affects Render's pick info, qPAINT (`picasso.postprocess.evaluate_picks`, `pick_kinetics` and `pick_properties`) and `picasso dark`; influx rates calibrated with earlier versions should be recalibrated. See the [documentation](https://picassosr.readthedocs.io/en/latest/files.html#hdf5-pick-property-files) for the convention.
 
