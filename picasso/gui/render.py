@@ -87,6 +87,7 @@ matplotlib.rcParams.update({"axes.titlesize": "large"})
 DEFAULT_OVERSAMPLING = 1.0  # number of display pixels per camera pixel
 INITIAL_REL_MAXIMUM = 0.5
 ZOOM = 9 / 7
+WHEEL_ZOOM = 1.2  # zoom factor per mouse wheel notch
 N_GROUP_COLORS = render.N_GROUP_COLORS  # 8
 POLYGON_POINTER_SIZE = 16  # must be even
 # shortest drag (display pixels, in x and y) that still yields a box
@@ -16280,11 +16281,13 @@ class View(QtWidgets.QLabel):
     def wheelEvent(self, event: QtGui.QWheelEvent) -> None:
         """Define what happens when mouse wheel is used.
 
-        Press Ctrl/Command to zoom in/out.
+        Press Ctrl/Command to zoom in/out, by ``WHEEL_ZOOM`` per wheel
+        notch (120 eighths of a degree); trackpads report fractions of
+        a notch and zoom smoothly.
         """
         modifiers = QtWidgets.QApplication.keyboardModifiers()
         if modifiers == QtCore.Qt.KeyboardModifier.ControlModifier:
-            scale = 1.008 ** (-event.angleDelta().y())
+            scale = WHEEL_ZOOM ** (-event.angleDelta().y() / 120)
             position = self.map_to_movie(event.position())
             self.zoom(scale, cursor_position=position)
 
