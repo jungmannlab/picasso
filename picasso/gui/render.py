@@ -12573,6 +12573,7 @@ class View(QtWidgets.QLabel):
             return
         if self.window.link_group is not None:
             self.cursor_moved.emit(self.map_to_movie(event.pos()))
+        self._drop_stale_drags(event.buttons())
 
         # panning (right button, or Ctrl + left button in any tool)
         if self._pan:
@@ -12609,6 +12610,22 @@ class View(QtWidgets.QLabel):
         if self.window.link_group is not None:
             self.cursor_moved.emit(None)
         super().leaveEvent(event)
+
+    def _drop_stale_drags(self, buttons) -> None:
+        """End a pan or a zoom-in rectangle whose button is no longer
+        held.
+
+        The release that ends a drag can be lost (e.g., a dialog or
+        another app takes the mouse mid-drag); without this, a stuck
+        pan swallows every later drag, so no zoom-in rectangle is
+        drawn.
+        """
+        if self._pan and not buttons & self._pan_button:
+            self._stop_pan()
+        if self.rubberband.isVisible() and not (
+            buttons & QtCore.Qt.MouseButton.LeftButton
+        ):
+            self.rubberband.hide()
 
     def _start_pan(self, event: QtCore.QEvent) -> None:
         """Begin dragging the view; ``_pan_button`` remembers which
@@ -13016,6 +13033,8 @@ class View(QtWidgets.QLabel):
         button = event.button()
         modifiers = event.modifiers()
         left = button == QtCore.Qt.MouseButton.LeftButton
+        # the pressed button is not held yet in a stale drag's state
+        self._drop_stale_drags(event.buttons() & ~button)
         # a triple click with the Zoom tool fits the image to the window
         # (like Ctrl + W); Pick and Measure keep their clicks
         if self._triple_click.is_third(event) and self._mode == "Zoom":
