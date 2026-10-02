@@ -119,6 +119,24 @@ def plugins_directory() -> str:
     return directory
 
 
+def user_icons_directory() -> str:
+    """Return the folder of the user's own icons
+    (``~/.picasso/icons``), e.g., for the toolbar buttons.
+
+    The directory is created if it does not yet exist, next to
+    ``~/.picasso/settings.yaml`` like ``plugins_directory``.
+
+    Returns
+    -------
+    directory : str
+        ``~/.picasso/icons``.
+    """
+    home = os.path.expanduser("~")
+    directory = os.path.join(home, ".picasso", "icons")
+    os.makedirs(directory, exist_ok=True)
+    return directory
+
+
 def notification_sounds_directory() -> str:
     """Return the user notification sounds directory
     (``~/.picasso/notification_sounds``).

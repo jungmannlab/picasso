@@ -48,6 +48,7 @@ from .. import transforms as transforms_mod
 from ..fitting import precision, splinefit
 from .app import run_gui
 from . import theme
+from . import toolbars
 from PyQt6 import QtCore, QtGui, QtWidgets
 from playsound3 import playsound
 
@@ -6168,7 +6169,7 @@ class Window(QtWidgets.QMainWindow):
     status_bar : QtWidgets.QStatusBar
         Status bar displayed in the bottom of the window.
     toolbar : QtWidgets.QToolBar
-        The most used actions of the menus, see ``theme.add_toolbar``.
+        The most used actions of the menus, see ``toolbars.add_toolbar``.
     view : View
         The main view for displaying the image.
     """
@@ -6931,7 +6932,7 @@ class Window(QtWidgets.QMainWindow):
         self.plugin_menu = menu_bar.addMenu("Plugins")  # do not delete
 
         # toolbar of the most used actions, shared with the menus
-        self.toolbar = theme.add_toolbar(
+        self.toolbar = toolbars.add_toolbar(
             self,
             "Localize toolbar",
             [

@@ -68,6 +68,7 @@ from .overlay_style import OverlayStyleWidget
 from .rotation import RotationWindow, source_key
 from .app import run_gui
 from . import theme
+from . import toolbars
 
 # Optional modules with external/hardware dependencies live in ext
 from ..ext.bitplane import IMSWRITER  # PyImarisWrite works on Windows only
@@ -16300,8 +16301,8 @@ class Window(QtWidgets.QMainWindow):
     actions_3d : list
         Specifies actions that are displayed for 3D data only.
     data_actions : list of QAction
-        Actions of the View and Tools menus on the toolbar, enabled
-        once a file is loaded.
+        Actions of the View, Tools and Postprocess menus, which the
+        toolbar may show, enabled once a file is loaded.
     dataset_dialog : DatasetDialog
         Instance of the dialog for multichannel display.
     dialogs : list
@@ -16324,7 +16325,7 @@ class Window(QtWidgets.QMainWindow):
     slicer_dialog : SlicerDialog
         Instance of the dialog for slicing 3D data in z axis.
     toolbar : QToolBar
-        The most used actions of the menus, see ``theme.add_toolbar``.
+        The most used actions of the menus, see ``toolbars.add_toolbar``.
     tools_actiongroup : QActionGroup
         Tools menu actions (Zoom, Pick, Measure, Move).
     tools_settings_dialog : ToolsSettingsDialog
@@ -16865,7 +16866,7 @@ class Window(QtWidgets.QMainWindow):
         if getattr(self, "toolbar", None) is not None:  # rebuilt UI
             self.removeToolBar(self.toolbar)
             self.toolbar.deleteLater()
-        self.toolbar = theme.add_toolbar(
+        self.toolbar = toolbars.add_toolbar(
             self,
             "Render toolbar",
             [
@@ -16887,20 +16888,13 @@ class Window(QtWidgets.QMainWindow):
                 (rot_win_action, "view-3d", "3D view"),
             ],
         )
-        # actions of the View and Tools menus on the toolbar; disabled
-        # with their menus until a file is loaded (a disabled menu does
-        # not disable its actions)
+        # actions of the View, Tools and Postprocess menus, which the
+        # toolbar may show; disabled with their menus until a file is
+        # loaded (a disabled menu does not disable its actions)
         self.data_actions = [
-            zoom_tool_action,
-            pick_tool_action,
-            measure_tool_action,
-            move_tool_action,
-            tools_settings_action,
-            fit_in_view_action,
-            display_settings_action,
-            dataset_action,
-            info_action,
-            rot_win_action,
+            action
+            for menu in (view_menu, tools_menu, postprocess_menu)
+            for action in toolbars.leaf_actions(menu)
         ]
 
         # De-select all menus until file is loaded

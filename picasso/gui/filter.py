@@ -30,6 +30,7 @@ from matplotlib.widgets import SpanSelector, RectangleSelector
 from .. import io, lib, clusterer, __version__, docs_url
 from .app import run_gui
 from . import theme
+from . import toolbars
 from . import plot_style
 from .plot_style import PlotStyle
 
@@ -812,7 +813,7 @@ class Window(QtWidgets.QMainWindow):
         self.plugin_menu = menu_bar.addMenu("Plugins")  # do not delete
 
         # toolbar of the most used actions, shared with the menus
-        self.toolbar = theme.add_toolbar(
+        self.toolbar = toolbars.add_toolbar(
             self,
             "Filter toolbar",
             [

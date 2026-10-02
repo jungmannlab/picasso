@@ -1,10 +1,11 @@
 """Icons and toolbars of the Picasso windows.
 
 ``picasso.gui.theme.icon`` draws single-color SVG icons in the colors of
-the theme, and ``theme.add_toolbar`` puts existing menu actions on a
-toolbar of Render and Localize. These tests cover the icon colors and
-the fallback without an icon file, the toolbar's buttons, tooltips and
-style setting, and the toolbars of Render and Localize.
+the theme, and ``picasso.gui.toolbars.add_toolbar`` puts existing menu
+actions on a toolbar of Render and Localize. These tests cover the icon
+colors and the fallback without an icon file, the toolbar's buttons,
+tooltips and style setting, and the toolbars of Render and Localize.
+Customizing the toolbars is covered in ``test_gui_toolbar_customize``.
 
 :author: Rafal Kowalewski, 2026
 :copyright: Copyright (c) 2026 Jungmann Lab, MPI of Biochemistry
@@ -19,7 +20,7 @@ from PyQt6 import QtCore, QtGui, QtWidgets
 
 from picasso.gui import localize as gui_localize
 from picasso.gui import render as gui_render
-from picasso.gui import theme
+from picasso.gui import theme, toolbars
 from picasso.gui.theme import Appearance
 
 #: A filled square, whatever its color, is drawn in the theme's colors.
@@ -89,7 +90,7 @@ def main_window(qt_offscreen, restore_theme):
 
 def test_toolbar_shares_the_menu_actions(main_window, icons):
     window, open_action, move_action, plain_action = main_window
-    toolbar = theme.add_toolbar(
+    toolbar = toolbars.add_toolbar(
         window,
         "Test toolbar",
         [(open_action, "square", "Open"), None, (move_action, "missing")],
@@ -113,7 +114,9 @@ def test_toolbar_shares_the_menu_actions(main_window, icons):
 def test_toolbar_style_follows_the_appearance(main_window, restore_theme):
     window, open_action, *_ = main_window
     theme.apply(restore_theme, Appearance(toolbar="Icons and text"))
-    toolbar = theme.add_toolbar(window, "Test toolbar", [(open_action, "x")])
+    toolbar = toolbars.add_toolbar(
+        window, "Test toolbar", [(open_action, "x")]
+    )
     window.show()
     assert toolbar.toolButtonStyle() == (
         QtCore.Qt.ToolButtonStyle.ToolButtonTextUnderIcon
@@ -182,18 +185,18 @@ def test_render_toolbar(qt_offscreen, tmp_path):
         visible = [a for a in window.data_actions if a.isVisible()]
         assert all(action.isEnabled() for action in visible)
         # 3D view is offered for 3D data only, also on the toolbar
-        assert {a.text() for a in window.data_actions} - {
-            a.text() for a in visible
-        } == {"3D view"}
+        on_toolbar = [a for a in window.data_actions if a in toolbar.actions()]
+        hidden = {a.text() for a in on_toolbar if not a.isVisible()}
+        assert hidden == {"3D view"}
         # rebuilding the UI replaces the toolbar instead of adding one
         window.remove_locs()
         QtWidgets.QApplication.processEvents()
-        toolbars = [
+        shown = [
             t
             for t in window.findChildren(QtWidgets.QToolBar)
             if t.property("picassoToolbar") and not t.isHidden()
         ]
-        assert toolbars == [window.toolbar]
+        assert shown == [window.toolbar]
     finally:
         window.view.stop_render_worker()
         window.close()

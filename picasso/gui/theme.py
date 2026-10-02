@@ -22,11 +22,12 @@ The user chooses in ``AppearanceDialog`` (File > Appearance...):
   and focus frames;
 - the font size, in percent of the system's;
 - the density, i.e., the spacing of controls;
-- how the toolbars of Render and Localize show their buttons.
+- how the toolbars show their buttons; which actions they hold is set
+  in ``picasso.gui.toolbars``.
 
 Icons are single-color SVG files in ``ICONS_DIR`` (``picasso/gui/icons``),
-named as the callers of ``icon`` and ``add_toolbar`` use them, e.g.,
-``open.svg``. ``icon`` draws them in the colors of the theme, so any
+named as the callers of ``icon`` and ``toolbars.add_toolbar`` use them,
+e.g., ``open.svg``. ``icon`` draws them in the colors of the theme, so any
 color in the files is ignored; a missing file leaves the button with its
 text. Without an SVG, an ``.ico`` or ``.png`` of the same name is used
 the same way, e.g., Average's application icon. The SVG icons are from
@@ -55,10 +56,9 @@ from __future__ import annotations
 
 import os
 import re
-from collections.abc import Iterable
 from dataclasses import asdict, dataclass, fields, replace
 
-from PyQt6 import QtCore, QtGui, QtSvg, QtWidgets
+from PyQt6 import QtCore, QtGui, QtSvg, QtWidgets, sip
 
 from .. import docs_url, io, lib
 
@@ -67,13 +67,15 @@ from .. import docs_url, io, lib
 MODES = ("System", "Light", "Dark", "Native")
 #: Spacing of the controls.
 DENSITIES = ("Comfortable", "Compact")
-#: How the toolbars of Render and Localize show their buttons.
+#: How the toolbars show their buttons.
 TOOLBAR_STYLES = {
     "Icons": QtCore.Qt.ToolButtonStyle.ToolButtonIconOnly,
     "Icons and text": QtCore.Qt.ToolButtonStyle.ToolButtonTextUnderIcon,
     "Text": QtCore.Qt.ToolButtonStyle.ToolButtonTextOnly,
     "Hidden": None,
 }
+#: Image files of the icons, in the order they are looked for.
+ICON_EXTENSIONS = (".svg", ".ico", ".png")
 #: Folder of the icons, ``<name>.svg``, see ``icon``.
 ICONS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "icons")
 #: Preset accent colors.
@@ -769,12 +771,42 @@ def icon(
         The icon, or a null icon if the file is missing or invalid, in
         which case buttons show their text instead.
     """
-    for extension in (".svg", ".ico", ".png"):
-        path = os.path.join(ICONS_DIR, name + extension)
-        if os.path.isfile(path):
-            break
-    else:
+    path = icon_path(ICONS_DIR, name)
+    if path is None:
         return QtGui.QIcon()
+    return icon_from_file(path, role)
+
+
+def icon_path(folder: str, name: str) -> str | None:
+    """The image of the icon ``name`` in ``folder``: ``<name>.svg``,
+    else ``<name>.ico`` or ``<name>.png``; None if there is none."""
+    for extension in ICON_EXTENSIONS:
+        path = os.path.join(folder, name + extension)
+        if os.path.isfile(path):
+            return path
+    return None
+
+
+def icon_from_file(
+    path: str, role: QtGui.QPalette.ColorRole | None = None
+) -> QtGui.QIcon:
+    """The image ``path`` as an icon in the colors of the theme, like
+    ``icon``; a null icon if the file is invalid.
+
+    Parameters
+    ----------
+    path : str
+        An SVG file or a raster image with a transparent background,
+        see ``ICON_EXTENSIONS``.
+    role : QtGui.QPalette.ColorRole or None, optional
+        Palette color of the enabled, unchecked icon instead of the text
+        color. Default None.
+
+    Returns
+    -------
+    icon : QtGui.QIcon
+        The icon.
+    """
     engine = _TintedIconEngine(path, role)
     if not engine.is_valid():
         return QtGui.QIcon()
@@ -816,8 +848,9 @@ def follow_toolbar_style(
     toolbar: QtWidgets.QToolBar, action: QtGui.QAction
 ) -> None:
     """Show the button of ``action`` on a toolbar that is not one of
-    ``add_toolbar`` (e.g., matplotlib's) as the toolbar buttons are set
-    in the appearance (``Appearance.toolbar``): icon, text or both.
+    ``toolbars.add_toolbar`` (e.g., matplotlib's) as the toolbar
+    buttons are set in the appearance (``Appearance.toolbar``): icon,
+    text or both.
 
     Parameters
     ----------
@@ -837,56 +870,6 @@ def _stripped(text: str) -> str:
     """``text`` as Qt shows it on a button: without the ellipsis and
     the mnemonic ampersands."""
     return re.sub(r"&(.)", r"\1", text.replace("...", ""))
-
-
-def add_toolbar(
-    window: QtWidgets.QMainWindow,
-    title: str,
-    items: Iterable[tuple | None],
-) -> QtWidgets.QToolBar:
-    """Add a toolbar of existing actions (e.g., those of the menus) to
-    ``window``. The actions get their icon (see ``icon``), which the
-    menus show too, and, unless they have their own, a tooltip with the
-    shortcut. The toolbar is shown as set in the appearance
-    (``Appearance.toolbar``).
-
-    Parameters
-    ----------
-    window : QtWidgets.QMainWindow
-        The window.
-    title : str
-        Name of the toolbar, shown in the window's context menu.
-    items : iterable of tuple or None
-        ``(action, icon_name)`` or ``(action, icon_name, label)``,
-        where ``label`` is a short text for the button, or None for a
-        separator.
-
-    Returns
-    -------
-    toolbar : QtWidgets.QToolBar
-        The toolbar.
-    """
-    toolbar = window.addToolBar(title)
-    toolbar.setObjectName(title)
-    toolbar.setProperty(_TOOLBAR_PROPERTY, True)
-    for item in items:
-        if item is None:
-            toolbar.addSeparator()
-            continue
-        action, name, *label = item
-        has_own_tooltip = action.toolTip() != _stripped(action.text())
-        action.setIcon(icon(name))
-        if label:
-            action.setIconText(label[0])
-        shortcut = action.shortcut().toString(
-            QtGui.QKeySequence.SequenceFormat.NativeText
-        )
-        if not has_own_tooltip:
-            text = _stripped(action.text())
-            action.setToolTip(f"{text} ({shortcut})" if shortcut else text)
-        toolbar.addAction(action)
-    _style_toolbar(toolbar, applied() or Appearance())
-    return toolbar
 
 
 def set_button_state(
@@ -951,9 +934,17 @@ def hub() -> _Hub:
     return _hub
 
 
-def show_dialog() -> AppearanceDialog:
+def show_dialog(
+    window: QtWidgets.QMainWindow | None = None,
+) -> AppearanceDialog:
     """Show the appearance dialog, creating it on first use. One dialog
     serves all windows; it opens with the saved appearance.
+
+    Parameters
+    ----------
+    window : QtWidgets.QMainWindow or None, optional
+        The window it is opened from, whose toolbar it offers to
+        customize. Default None.
 
     Returns
     -------
@@ -969,6 +960,7 @@ def show_dialog() -> AppearanceDialog:
         _dialog.appearanceChanged.connect(set_current)
     elif not _dialog.isVisible():
         _dialog.set_appearance(current(), notify=False)
+    _dialog.set_window(window)
     _dialog.show()
     _dialog.raise_()
     _dialog.activateWindow()
@@ -991,8 +983,16 @@ def add_menu_action(menu: QtWidgets.QMenu) -> QtGui.QAction:
     """
     action = menu.addAction("Appearance...")
     action.setIcon(icon("plot-settings"))
-    action.triggered.connect(lambda: show_dialog())
+    action.triggered.connect(lambda: show_dialog(_main_window(menu)))
     return action
+
+
+def _main_window(widget: QtWidgets.QWidget) -> QtWidgets.QMainWindow | None:
+    """The main window holding ``widget``, e.g., a menu of its menu
+    bar."""
+    while widget is not None and not isinstance(widget, QtWidgets.QMainWindow):
+        widget = widget.parentWidget()
+    return widget
 
 
 class AppearanceDialog(lib.Dialog):
@@ -1073,10 +1073,19 @@ class AppearanceDialog(lib.Dialog):
         self.toolbar = QtWidgets.QComboBox()
         self.toolbar.addItems(TOOLBAR_STYLES)
         self.toolbar.setToolTip(
-            "Buttons of the toolbars of Render and Localize.\n"
-            "Without an icon, a button shows its text."
+            "Buttons of the toolbars. Without an icon, a button shows its\n"
+            "text."
         )
         self.form.addRow("Toolbar:", self.toolbar)
+        self.customize_button = QtWidgets.QPushButton("Customize toolbar...")
+        self.customize_button.setToolTip(
+            "Choose the buttons of the toolbar of the window that opened\n"
+            "this dialog, their order, labels and icons. Also by\n"
+            "right-clicking the toolbar."
+        )
+        self.customize_button.clicked.connect(self._customize_toolbar)
+        self.form.addRow("", self.customize_button)
+        self.window_ = None
         self.menu_icons = QtWidgets.QCheckBox("Show icons in menus")
         self.menu_icons.setToolTip(
             "Icons next to the actions of the menu bar and context menus."
@@ -1100,6 +1109,7 @@ class AppearanceDialog(lib.Dialog):
         layout.addLayout(button_row)
 
         self.set_appearance(appearance, notify=False)
+        self.set_window(None)
         self.mode.currentIndexChanged.connect(self._on_mode_changed)
         self.accent.colorChanged.connect(self._timer.start)
         self.font_scale.valueChanged.connect(self._timer.start)
@@ -1114,6 +1124,31 @@ class AppearanceDialog(lib.Dialog):
             self._timer.stop()
             self.appearanceChanged.emit(self.appearance())
         super().closeEvent(event)
+
+    def set_window(self, window: QtWidgets.QMainWindow | None) -> None:
+        """Offer customizing the toolbar of ``window``, if it has one
+        (see ``picasso.gui.toolbars``)."""
+        self.window_ = window
+        self.form.setRowVisible(
+            self.customize_button, self._window_toolbar() is not None
+        )
+
+    def _window_toolbar(self) -> QtWidgets.QToolBar | None:
+        """The customizable toolbar of the window set in
+        ``set_window``, or None."""
+        if self.window_ is None or sip.isdeleted(self.window_):
+            return None
+        for toolbar in self.window_.findChildren(QtWidgets.QToolBar):
+            if toolbar.property(_TOOLBAR_PROPERTY) and hasattr(
+                toolbar, "customize"
+            ):
+                return toolbar
+        return None
+
+    def _customize_toolbar(self) -> None:
+        toolbar = self._window_toolbar()
+        if toolbar is not None:
+            toolbar.customize()
 
     def _on_mode_changed(self) -> None:
         self._update_visibility()

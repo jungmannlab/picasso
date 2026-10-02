@@ -55,10 +55,28 @@ Appearance
 - **Accent color**: the color of selections, checked and default buttons, sliders and focus frames; a preset or any color (*Custom...*).
 - **Font size**: the size of the text in percent of the system's. Open windows keep their size; reopen them to fit.
 - **Density**: *Compact* reduces the spacing of the controls, e.g., for small laptop screens.
-- **Toolbar**: how the toolbars of ``Picasso: Render`` and ``Picasso: Localize`` show their buttons: *Icons and text* (default), *Icons*, *Text* or *Hidden*. The toolbars hold the most used actions of the menus, e.g., opening and saving, the tools of Render and identifying and fitting in Localize, and can be moved to any side of the window.
+- **Toolbar**: how the toolbars of ``Picasso: Render``, ``Picasso: Localize``, ``Picasso: Filter`` and ``Picasso: Average`` show their buttons: *Icons and text* (default), *Icons*, *Text* or *Hidden*. Which actions they hold is set in :ref:`toolbars`.
 - **Menus**: *Show icons in menus* (default on) shows the icons next to the actions of the menus.
 
 Changes apply immediately to the module that is open and are saved in the ``Appearance`` section of ``~/.picasso/settings.yaml`` (see :ref:`user-settings-file`); other modules take them on when they are started next. The theme does not change the colors of the image content (rendered localizations, picks); the background and labels of Design's canvas follow it. Charts (e.g., Filter's histograms, Render's plot windows, Simulate's previews) are light or dark like the windows unless another theme is chosen in their plot settings.
+
+.. _toolbars:
+
+Toolbars
+--------
+The toolbars of ``Picasso: Render``, ``Picasso: Localize``, ``Picasso: Filter`` and ``Picasso: Average`` hold actions of the menus, by default the most used ones, e.g., opening and saving, the tools of Render and identifying and fitting in Localize. They can be dragged by their handle to any side of the window; the side is remembered for the next start.
+
+*Customize toolbar...* in ``File > Appearance...``, or a right-click on the toolbar, chooses the buttons. The left side lists the actions of the menus, grouped by menu, with a search field; the right side lists the toolbar's buttons from left to right (or top to bottom).
+
+- **Add** (or a double-click) puts the actions selected on the left after the selected button; actions that are on the toolbar already are grayed out.
+- **Remove** takes the selected button off the toolbar.
+- **Separator** adds a separator after the selected button.
+- **Up** and **Down**, or dragging, change the order.
+- **Label** gives the selected button a shorter text than its action's, e.g., *RCC* for *Undrift by RCC*; empty for the action's own.
+- **Icon** gives it another icon, or *No icon* to show only its label. The menus show the chosen icon too. *Choose file...* takes an icon of your own: an SVG, or a PNG or ICO with a transparent background. Only its shape is used, drawn in the colors of the theme like Picasso's icons, so single-color line icons (e.g., from `Lucide <https://lucide.dev>`_) fit best. The file is copied to ``~/.picasso/icons``; images put in that folder are offered too.
+- **Restore Defaults** shows the default buttons again.
+
+*OK* applies the toolbar to every open window of the module and saves it in the ``Toolbars`` section of ``~/.picasso/settings.yaml`` (see :ref:`user-settings-file`). Plugin actions can be on the toolbar too; a button whose action is not in the menus, e.g., of a plugin that is disabled, is kept and shown in italics in the dialog, and returns with its plugin. Whether the buttons show icons, text or both is set in :ref:`appearance`.
 
 .. _user-settings-file:
 
@@ -135,10 +153,24 @@ Top level
      - Spacing of the controls: ``Comfortable`` or ``Compact``.
    * - ``toolbar``
      - ``Icons and text``
-     - Buttons of the toolbars of Render and Localize: ``Icons``, ``Icons and text``, ``Text`` or ``Hidden``.
+     - Buttons of the toolbars of Render, Localize, Filter and Average: ``Icons``, ``Icons and text``, ``Text`` or ``Hidden``.
    * - ``menu_icons``
      - ``True``
      - Show the icons of the actions in the menus.
+
+``Toolbars``
+++++++++++++
+
+.. list-table::
+   :widths: 22 10 68
+   :header-rows: 1
+
+   * - Key
+     - Default
+     - Description
+   * - ``Render toolbar``, ``Localize toolbar``, ``Filter toolbar``, ``Average toolbar``
+     - not set (the default buttons, on top)
+     - The toolbar of the module (see :ref:`toolbars`), with the keys ``items``: the buttons from left to right, as the paths of the menu actions, e.g., ``File > Open``, and ``---`` for a separator; ``labels`` and ``icons``: the custom label and icon of a button by its path; an icon is the name of one of Picasso's, ``user:<file name without extension>`` for one in ``~/.picasso/icons``, or ``none``; ``area``: the side of the window, ``Top``, ``Bottom``, ``Left`` or ``Right``.
 
 ``Render``
 ++++++++++
