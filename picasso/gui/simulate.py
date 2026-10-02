@@ -270,8 +270,8 @@ class Window(QtWidgets.QMainWindow):
         icon_path = os.path.join(this_directory, "icons", "simulate.ico")
         icon = QtGui.QIcon(icon_path)
         self.setWindowIcon(icon)
-        self.initUI()
 
+        # the File menu comes first; initUI adds the Plugins menu
         self.user_settings_dialog = lib.UserSettingsDialog(self)
         file_menu = self.menuBar().addMenu("File")
         picasso_settings_action = file_menu.addAction("Picasso settings...")
@@ -284,6 +284,8 @@ class Window(QtWidgets.QMainWindow):
         plot_settings_action.triggered.connect(
             lambda: plot_style.show_dialog()
         )
+
+        self.initUI()
 
     def initUI(self):  # noqa: C901
         self.currentround = CURRENTROUND

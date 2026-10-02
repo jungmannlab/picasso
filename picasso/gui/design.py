@@ -893,11 +893,25 @@ class Scene(QtWidgets.QGraphicsScene):
     """
 
     def addItem(self, item: QtWidgets.QGraphicsItem) -> None:
-        """Add ``item`` to the scene; text is written in black, as the
-        design is drawn on white whatever the theme."""
+        """Add ``item`` to the scene; text in the windows' text color,
+        see ``apply_theme``."""
         if isinstance(item, QtWidgets.QGraphicsTextItem):
-            item.setDefaultTextColor(QtGui.QColor("black"))
+            item.setDefaultTextColor(
+                QtWidgets.QApplication.palette().color(
+                    QtGui.QPalette.ColorRole.Text
+                )
+            )
         super().addItem(item)
+
+    def apply_theme(self) -> None:
+        """Draw the background and the text of the design in the colors
+        of the windows (light or dark, see ``picasso.gui.theme``)."""
+        palette = QtWidgets.QApplication.palette()
+        self.setBackgroundBrush(palette.color(QtGui.QPalette.ColorRole.Base))
+        text = palette.color(QtGui.QPalette.ColorRole.Text)
+        for item in self.items():
+            if isinstance(item, QtWidgets.QGraphicsTextItem):
+                item.setDefaultTextColor(text)
 
     def __init__(self, window: QtWidgets.QMainWindow) -> None:
         super().__init__()
@@ -1417,11 +1431,9 @@ class Window(QtWidgets.QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.mainscene = Scene(self)
-        # the design is drawn on white (also in screenshots), whatever
-        # the theme of the window around it
-        self.mainscene.setBackgroundBrush(
-            QtGui.QBrush(QtCore.Qt.GlobalColor.white)
-        )
+        # the design follows the light or dark theme of the windows
+        self.mainscene.apply_theme()
+        theme.hub().changed.connect(self._on_theme_changed)
         self.view = QtWidgets.QGraphicsView(self.mainscene)
         self.view.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
         self.setCentralWidget(self.view)
@@ -1476,6 +1488,9 @@ class Window(QtWidgets.QMainWindow):
         self.mainscene.clearCanvas()
         self.statusBar().showMessage("Cleared.")
 
+    def _on_theme_changed(self, _appearance) -> None:
+        self.mainscene.apply_theme()
+
     def takeScreenshot(self) -> None:
         """Screenshot the current view."""
         filetypes = "*.png;;*.pdf"
@@ -1494,7 +1509,9 @@ class Window(QtWidgets.QMainWindow):
                 p.save(path, filter[2:])
             else:
                 pdf_printer = QtPrintSupport.QPrinter()
-                pdf_printer.setOutputFormat(QtPrintSupport.QPrinter.PdfFormat)
+                pdf_printer.setOutputFormat(
+                    QtPrintSupport.QPrinter.OutputFormat.PdfFormat
+                )
                 pdf_printer.setOutputFileName(path)
                 pdf_painter = QtGui.QPainter()
                 pdf_painter.begin(pdf_printer)
