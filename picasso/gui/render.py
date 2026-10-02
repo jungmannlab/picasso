@@ -9567,6 +9567,8 @@ class View(QtWidgets.QLabel):
         # allow using View, Tools and Postprocess menus
         for menu in self.window.menus:
             menu.setDisabled(False)
+        for action in self.window.data_actions:
+            action.setEnabled(True)
 
         # add the locs to the dataset dialog
         self.window.dataset_dialog.add_entry(path)
@@ -16276,6 +16278,9 @@ class Window(QtWidgets.QMainWindow):
     ----------
     actions_3d : list
         Specifies actions that are displayed for 3D data only.
+    data_actions : list of QAction
+        Actions of the View and Tools menus on the toolbar, enabled
+        once a file is loaded.
     dataset_dialog : DatasetDialog
         Instance of the dialog for multichannel display.
     dialogs : list
@@ -16297,6 +16302,8 @@ class Window(QtWidgets.QMainWindow):
         Contains plugins loaded from picasso/gui/plugins.
     slicer_dialog : SlicerDialog
         Instance of the dialog for slicing 3D data in z axis.
+    toolbar : QToolBar
+        The most used actions of the menus, see ``theme.add_toolbar``.
     tools_actiongroup : QActionGroup
         Tools menu actions (Zoom, Pick, Measure, Move).
     tools_settings_dialog : ToolsSettingsDialog
@@ -16811,6 +16818,48 @@ class Window(QtWidgets.QMainWindow):
             execute_plugins(self)
             add_plugins_menu_actions(self, "render")
 
+        # toolbar of the most used actions, shared with the menus
+        if getattr(self, "toolbar", None) is not None:  # rebuilt UI
+            self.removeToolBar(self.toolbar)
+            self.toolbar.deleteLater()
+        self.toolbar = theme.add_toolbar(
+            self,
+            "Render toolbar",
+            [
+                (open_action, "open", "Open"),
+                (save_action, "save", "Save"),
+                (save_picked_action, "save-picked", "Save picked"),
+                (export_current_action, "export-view", "Export view"),
+                None,
+                (zoom_tool_action, "tool-zoom"),
+                (pick_tool_action, "tool-pick"),
+                (measure_tool_action, "tool-measure"),
+                (move_tool_action, "tool-move"),
+                (tools_settings_action, "tools-settings", "Tools settings"),
+                None,
+                (fit_in_view_action, "fit-view", "Fit view"),
+                (display_settings_action, "display-settings", "Display"),
+                (dataset_action, "files", "Files"),
+                (info_action, "info", "Info"),
+                (rot_win_action, "view-3d", "3D view"),
+            ],
+        )
+        # actions of the View and Tools menus on the toolbar; disabled
+        # with their menus until a file is loaded (a disabled menu does
+        # not disable its actions)
+        self.data_actions = [
+            zoom_tool_action,
+            pick_tool_action,
+            measure_tool_action,
+            move_tool_action,
+            tools_settings_action,
+            fit_in_view_action,
+            display_settings_action,
+            dataset_action,
+            info_action,
+            rot_win_action,
+        ]
+
         # De-select all menus until file is loaded
         self.menus = [
             file_menu,
@@ -16821,6 +16870,8 @@ class Window(QtWidgets.QMainWindow):
         ]
         for menu in self.menus[1:]:
             menu.setDisabled(True)
+        for action in self.data_actions:
+            action.setEnabled(False)
 
         self._plugins_loaded = plugins_loaded
         # reconnect the rebuilt view and dialogs (``remove_locs``)

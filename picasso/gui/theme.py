@@ -21,7 +21,15 @@ The user chooses in ``AppearanceDialog`` (File > Appearance...):
 - the accent color of selections, checked and default buttons, sliders
   and focus frames;
 - the font size, in percent of the system's;
-- the density, i.e., the spacing of controls.
+- the density, i.e., the spacing of controls;
+- how the toolbars of Render and Localize show their buttons.
+
+Icons are single-color SVG files in ``ICONS_DIR`` (``picasso/gui/icons``),
+named as the callers of ``icon`` and ``add_toolbar`` use them, e.g.,
+``open.svg``. ``icon`` draws them in the colors of the theme, so any
+color in the files is ignored; a missing file leaves the button with its
+text. The icons are from Lucide (https://lucide.dev, ISC license, see
+``LICENSES/Lucide-LICENSE.txt``).
 
 ``current`` returns the appearance saved in the user settings
 (``settings["Appearance"]``); ``set_current`` saves a new one and
@@ -43,9 +51,12 @@ follow the theme. ``set_button_state`` marks a button, e.g., as done
 
 from __future__ import annotations
 
+import os
+import re
+from collections.abc import Iterable
 from dataclasses import asdict, dataclass, fields, replace
 
-from PyQt6 import QtCore, QtGui, QtWidgets
+from PyQt6 import QtCore, QtGui, QtSvg, QtWidgets
 
 from .. import docs_url, io, lib
 
@@ -54,6 +65,15 @@ from .. import docs_url, io, lib
 MODES = ("System", "Light", "Dark", "Native")
 #: Spacing of the controls.
 DENSITIES = ("Comfortable", "Compact")
+#: How the toolbars of Render and Localize show their buttons.
+TOOLBAR_STYLES = {
+    "Icons": QtCore.Qt.ToolButtonStyle.ToolButtonIconOnly,
+    "Icons and text": QtCore.Qt.ToolButtonStyle.ToolButtonTextUnderIcon,
+    "Text": QtCore.Qt.ToolButtonStyle.ToolButtonTextOnly,
+    "Hidden": None,
+}
+#: Folder of the icons, ``<name>.svg``, see ``icon``.
+ICONS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "icons")
 #: Preset accent colors.
 ACCENTS = {
     "Blue": "#2A78D6",
@@ -154,12 +174,15 @@ class Appearance:
         ``FONT_SCALE_RANGE``.
     density : str
         One of ``DENSITIES``.
+    toolbar : str
+        One of ``TOOLBAR_STYLES``.
     """
 
     mode: str = "System"
     accent: str = ACCENTS["Blue"]
     font_scale: int = 100
     density: str = "Comfortable"
+    toolbar: str = "Icons"
 
     @classmethod
     def from_settings(cls, settings: dict | None) -> Appearance:
@@ -193,6 +216,8 @@ class Appearance:
         appearance = replace(default, **values)
         if appearance.mode not in MODES:
             appearance = replace(appearance, mode=default.mode)
+        if appearance.toolbar not in TOOLBAR_STYLES:
+            appearance = replace(appearance, toolbar=default.toolbar)
         if appearance.density not in DENSITIES:
             appearance = replace(appearance, density=default.density)
         accent = QtGui.QColor(appearance.accent)
@@ -572,6 +597,10 @@ def apply(app: QtWidgets.QApplication, appearance: Appearance) -> None:
         app.setPalette(build_palette(appearance, dark))
         app.setFont(_scaled_font(original["font"], appearance.font_scale))
         app.setStyleSheet(stylesheet(appearance, dark))
+    for window in app.topLevelWidgets():
+        for toolbar in window.findChildren(QtWidgets.QToolBar):
+            if toolbar.property(_TOOLBAR_PROPERTY):
+                _style_toolbar(toolbar, appearance)
     _listen(app)
     hub().changed.emit(appearance)
 
@@ -586,6 +615,184 @@ def _listen(app: QtWidgets.QApplication) -> None:
 def applied() -> Appearance | None:
     """The appearance applied last, or None if none was applied."""
     return _state["applied"]
+
+
+class _TintedSvgEngine(QtGui.QIconEngine):
+    """Draws a single-color SVG icon in the colors of the palette: the
+    text color, dimmed when disabled, and the accent color when checked
+    (e.g., the active tool). The colors are read whenever the icon is
+    drawn, so that it follows the theme.
+
+    Parameters
+    ----------
+    path : str
+        The SVG file.
+    """
+
+    def __init__(self, path: str) -> None:
+        super().__init__()
+        self._path = path
+        self._renderer = QtSvg.QSvgRenderer(path)
+        self._cache = {}
+
+    def clone(self) -> QtGui.QIconEngine:
+        return _TintedSvgEngine(self._path)
+
+    def is_valid(self) -> bool:
+        """Whether the SVG file could be read."""
+        return self._renderer.isValid()
+
+    @staticmethod
+    def color(
+        mode: QtGui.QIcon.Mode, state: QtGui.QIcon.State
+    ) -> QtGui.QColor:
+        """The color of the icon in ``mode`` and ``state``."""
+        palette = QtWidgets.QApplication.palette()
+        Role = QtGui.QPalette.ColorRole
+        if mode == QtGui.QIcon.Mode.Disabled:
+            return palette.color(
+                QtGui.QPalette.ColorGroup.Disabled, Role.ButtonText
+            )
+        if mode == QtGui.QIcon.Mode.Selected:
+            return palette.color(Role.HighlightedText)
+        if state == QtGui.QIcon.State.On:
+            return palette.color(Role.Highlight)
+        return palette.color(Role.ButtonText)
+
+    def scaledPixmap(self, size, mode, state, scale):
+        color = self.color(mode, state)
+        key = (size.width(), size.height(), scale, mode, state, color.rgba())
+        pixmap = self._cache.get(key)
+        if pixmap is None:
+            width = max(1, round(size.width() * scale))
+            height = max(1, round(size.height() * scale))
+            image = QtGui.QImage(
+                width, height, QtGui.QImage.Format.Format_ARGB32_Premultiplied
+            )
+            image.fill(QtCore.Qt.GlobalColor.transparent)
+            painter = QtGui.QPainter(image)
+            painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
+            self._renderer.render(painter, QtCore.QRectF(0, 0, width, height))
+            # keep the shape, replace its color
+            painter.setCompositionMode(
+                QtGui.QPainter.CompositionMode.CompositionMode_SourceIn
+            )
+            painter.fillRect(image.rect(), color)
+            painter.end()
+            pixmap = QtGui.QPixmap.fromImage(image)
+            pixmap.setDevicePixelRatio(scale)
+            self._cache[key] = pixmap
+        return pixmap
+
+    def pixmap(self, size, mode, state):
+        return self.scaledPixmap(size, mode, state, 1.0)
+
+    def paint(self, painter, rect, mode, state):
+        device = painter.device()
+        scale = device.devicePixelRatioF() if device is not None else 1.0
+        painter.drawPixmap(
+            rect, self.scaledPixmap(rect.size(), mode, state, scale)
+        )
+
+
+def icon(name: str) -> QtGui.QIcon:
+    """The icon ``ICONS_DIR/<name>.svg`` in the colors of the theme.
+
+    The SVG is drawn in a single color: the text color of the palette,
+    dimmed when disabled and the accent color when checked; it changes
+    with the theme. Any color in the file is ignored.
+
+    Parameters
+    ----------
+    name : str
+        File name of the icon without the extension, e.g., "open".
+
+    Returns
+    -------
+    icon : QtGui.QIcon
+        The icon, or a null icon if the file is missing or invalid, in
+        which case buttons show their text instead.
+    """
+    path = os.path.join(ICONS_DIR, f"{name}.svg")
+    if not os.path.isfile(path):
+        return QtGui.QIcon()
+    engine = _TintedSvgEngine(path)
+    if not engine.is_valid():
+        return QtGui.QIcon()
+    return QtGui.QIcon(engine)
+
+
+#: Dynamic property that marks the toolbars styled by ``apply``.
+_TOOLBAR_PROPERTY = "picassoToolbar"
+
+
+def _style_toolbar(
+    toolbar: QtWidgets.QToolBar, appearance: Appearance
+) -> None:
+    """Show ``toolbar`` as set in ``appearance``."""
+    style = TOOLBAR_STYLES.get(appearance.toolbar)
+    toolbar.setVisible(style is not None)
+    if style is not None:
+        toolbar.setToolButtonStyle(style)
+    compact = appearance.density == "Compact" and appearance.mode != "Native"
+    size = 16 if compact else 20
+    toolbar.setIconSize(QtCore.QSize(size, size))
+
+
+def _stripped(text: str) -> str:
+    """``text`` as Qt shows it on a button: without the ellipsis and
+    the mnemonic ampersands."""
+    return re.sub(r"&(.)", r"\1", text.replace("...", ""))
+
+
+def add_toolbar(
+    window: QtWidgets.QMainWindow,
+    title: str,
+    items: Iterable[tuple | None],
+) -> QtWidgets.QToolBar:
+    """Add a toolbar of existing actions (e.g., those of the menus) to
+    ``window``. The actions get their icon (see ``icon``), so that the
+    menus show it too (not on macOS, whose menus have no icons), and,
+    unless they have their own, a tooltip with the shortcut. The
+    toolbar is shown as set in the appearance (``Appearance.toolbar``).
+
+    Parameters
+    ----------
+    window : QtWidgets.QMainWindow
+        The window.
+    title : str
+        Name of the toolbar, shown in the window's context menu.
+    items : iterable of tuple or None
+        ``(action, icon_name)`` or ``(action, icon_name, label)``,
+        where ``label`` is a short text for the button, or None for a
+        separator.
+
+    Returns
+    -------
+    toolbar : QtWidgets.QToolBar
+        The toolbar.
+    """
+    toolbar = window.addToolBar(title)
+    toolbar.setObjectName(title)
+    toolbar.setProperty(_TOOLBAR_PROPERTY, True)
+    for item in items:
+        if item is None:
+            toolbar.addSeparator()
+            continue
+        action, name, *label = item
+        has_own_tooltip = action.toolTip() != _stripped(action.text())
+        action.setIcon(icon(name))
+        if label:
+            action.setIconText(label[0])
+        shortcut = action.shortcut().toString(
+            QtGui.QKeySequence.SequenceFormat.NativeText
+        )
+        if not has_own_tooltip:
+            text = _stripped(action.text())
+            action.setToolTip(f"{text} ({shortcut})" if shortcut else text)
+        toolbar.addAction(action)
+    _style_toolbar(toolbar, applied() or Appearance())
+    return toolbar
 
 
 def set_button_state(
@@ -768,6 +975,13 @@ class AppearanceDialog(lib.Dialog):
         self.density.addItems(DENSITIES)
         self.density.setToolTip("Compact fits more controls on small screens.")
         self.form.addRow("Density:", self.density)
+        self.toolbar = QtWidgets.QComboBox()
+        self.toolbar.addItems(TOOLBAR_STYLES)
+        self.toolbar.setToolTip(
+            "Buttons of the toolbars of Render and Localize.\n"
+            "Without an icon, a button shows its text."
+        )
+        self.form.addRow("Toolbar:", self.toolbar)
         layout.addLayout(self.form)
 
         buttons = QtWidgets.QDialogButtonBox()
@@ -790,6 +1004,7 @@ class AppearanceDialog(lib.Dialog):
         self.accent.colorChanged.connect(self._timer.start)
         self.font_scale.valueChanged.connect(self._timer.start)
         self.density.currentIndexChanged.connect(self._timer.start)
+        self.toolbar.currentIndexChanged.connect(self._timer.start)
 
     def closeEvent(self, event: QtGui.QCloseEvent) -> None:
         # apply a change still waiting for the delay now, so that the
@@ -817,6 +1032,7 @@ class AppearanceDialog(lib.Dialog):
             accent=ACCENTS.get(accent, accent),
             font_scale=self.font_scale.value(),
             density=self.density.currentText(),
+            toolbar=self.toolbar.currentText(),
         )
 
     def set_appearance(
@@ -840,6 +1056,7 @@ class AppearanceDialog(lib.Dialog):
             self.accent.set_value("Blue")
         self.font_scale.setValue(appearance.font_scale)
         self.density.setCurrentText(appearance.density)
+        self.toolbar.setCurrentText(appearance.toolbar)
         self._update_visibility()
         if not notify:
             self._timer.stop()

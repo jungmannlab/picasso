@@ -6167,6 +6167,8 @@ class Window(QtWidgets.QMainWindow):
         The scene for displaying the image.
     status_bar : QtWidgets.QStatusBar
         Status bar displayed in the bottom of the window.
+    toolbar : QtWidgets.QToolBar
+        The most used actions of the menus, see ``theme.add_toolbar``.
     view : View
         The main view for displaying the image.
     """
@@ -6915,6 +6917,25 @@ class Window(QtWidgets.QMainWindow):
         )
 
         self.plugin_menu = menu_bar.addMenu("Plugins")  # do not delete
+
+        # toolbar of the most used actions, shared with the menus
+        self.toolbar = theme.add_toolbar(
+            self,
+            "Localize toolbar",
+            [
+                (open_action, "open-movie", "Open movie"),
+                (save_action, "save", "Save"),
+                None,
+                (parameters_action, "parameters", "Parameters"),
+                (identify_action, "identify"),
+                (fit_action, "fit"),
+                (localize_action, "localize", "Localize"),
+                (self.abort_action, "abort"),
+                None,
+                (constract_action, "contrast", "Contrast"),
+                (fit_in_view_action, "fit-view", "Fit view"),
+            ],
+        )
 
     def open_config_location(self) -> None:
         """Open the folder holding the camera config file in the system

@@ -163,6 +163,7 @@ include = ["picasso*"]
 picasso = [
     "gui/icons/*.ico",
     "gui/icons/*.png",
+    "gui/icons/*.svg",
     "config_template.yaml",
 ]
 
