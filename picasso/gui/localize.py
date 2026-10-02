@@ -6674,6 +6674,7 @@ class Window(QtWidgets.QMainWindow):
         file_menu.addAction(select_columns_action)
         file_menu.addSeparator()
         export_current_action = file_menu.addAction("Export current view...")
+        export_current_action.setIcon(theme.icon("export-view"))
         export_current_action.setShortcut("Ctrl+E")
         export_current_action.triggered.connect(self.export_current)
         metadata_action = file_menu.addAction("Show metadata...")
@@ -6765,6 +6766,7 @@ class Window(QtWidgets.QMainWindow):
         last_frame_action.triggered.connect(self.last_frame)
         view_menu.addAction(last_frame_action)
         go_to_frame_action = view_menu.addAction("Go to frame...")
+        go_to_frame_action.setIcon(theme.icon("go-to"))
         go_to_frame_action.setShortcut("Ctrl+G")
         go_to_frame_action.triggered.connect(self.to_frame)
         view_menu.addAction(go_to_frame_action)
@@ -6784,14 +6786,16 @@ class Window(QtWidgets.QMainWindow):
         self.next_channel_action.setEnabled(False)
         view_menu.addAction(self.next_channel_action)
         view_menu.addSeparator()
-        zoom_in_action = view_menu.addAction("Zoom in")
-        zoom_in_action.setShortcuts(["Ctrl++", "Ctrl+="])
-        zoom_in_action.triggered.connect(self.zoom_in)
-        view_menu.addAction(zoom_in_action)
-        zoom_out_action = view_menu.addAction("Zoom out")
-        zoom_out_action.setShortcut("Ctrl+-")
-        zoom_out_action.triggered.connect(self.zoom_out)
-        view_menu.addAction(zoom_out_action)
+        # zooming is not in the menu (the mouse does it), but its
+        # shortcuts work in the whole window
+        for text, shortcuts, slot in (
+            ("Zoom in", ["Ctrl++", "Ctrl+="], self.zoom_in),
+            ("Zoom out", ["Ctrl+-"], self.zoom_out),
+        ):
+            action = QtGui.QAction(text, self)
+            action.setShortcuts(shortcuts)
+            action.triggered.connect(slot)
+            self.addAction(action)
         fit_in_view_action = view_menu.addAction("Fit image to window")
         fit_in_view_action.setShortcut("Ctrl+W")
         fit_in_view_action.triggered.connect(self.fit_in_view)
