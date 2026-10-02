@@ -24,10 +24,13 @@ The user chooses in ``AppearanceDialog`` (File > Appearance...):
 - the density, i.e., the spacing of controls.
 
 ``current`` returns the appearance saved in the user settings
-(``settings["Appearance"]``); ``set_current`` saves a new one, applies
-it to the running application and announces it through
-``hub().changed``. Other Picasso GUIs that are running take it on when
-they are started next.
+(``settings["Appearance"]``); ``set_current`` saves a new one and
+applies it to the running application. ``apply`` announces every
+appearance it applies, also when the operating system switches between
+light and dark, through ``hub().changed``; charts in the "Same as
+windows" theme (``picasso.gui.plot_style``) follow it. Other Picasso
+GUIs that are running take a new appearance on when they are started
+next.
 
 Widgets that paint themselves take their colors from their palette and
 their stylesheets refer to it (e.g., ``palette(mid)``), so that they
@@ -529,7 +532,9 @@ def apply(app: QtWidgets.QApplication, appearance: Appearance) -> None:
 
     The first call remembers the platform's style, font and stylesheet;
     the "Native" mode returns to them. In the "System" mode the theme
-    follows later changes of the operating system's appearance.
+    follows later changes of the operating system's appearance. Each
+    applied appearance is announced through ``hub().changed``, e.g., to
+    the charts that follow the windows' theme.
 
     Parameters
     ----------
@@ -568,6 +573,7 @@ def apply(app: QtWidgets.QApplication, appearance: Appearance) -> None:
         app.setFont(_scaled_font(original["font"], appearance.font_scale))
         app.setStyleSheet(stylesheet(appearance, dark))
     _listen(app)
+    hub().changed.emit(appearance)
 
 
 def _listen(app: QtWidgets.QApplication) -> None:
@@ -615,15 +621,14 @@ def current() -> Appearance:
 
 
 def set_current(appearance: Appearance) -> None:
-    """Save ``appearance`` in the user settings, apply it to the
-    running application and announce it through ``hub().changed``."""
+    """Save ``appearance`` in the user settings and apply it to the
+    running application, which announces it through ``hub().changed``."""
     settings = io.load_user_settings()
     settings["Appearance"] = appearance.to_settings()
     io.save_user_settings(settings)
     app = QtWidgets.QApplication.instance()
     if app is not None:
         apply(app, appearance)
-    hub().changed.emit(appearance)
 
 
 class _Hub(QtCore.QObject):
@@ -785,6 +790,14 @@ class AppearanceDialog(lib.Dialog):
         self.accent.colorChanged.connect(self._timer.start)
         self.font_scale.valueChanged.connect(self._timer.start)
         self.density.currentIndexChanged.connect(self._timer.start)
+
+    def closeEvent(self, event: QtGui.QCloseEvent) -> None:
+        # apply a change still waiting for the delay now, so that the
+        # timer does not fire after the dialog is gone
+        if self._timer.isActive():
+            self._timer.stop()
+            self.appearanceChanged.emit(self.appearance())
+        super().closeEvent(event)
 
     def _on_mode_changed(self) -> None:
         self._update_visibility()

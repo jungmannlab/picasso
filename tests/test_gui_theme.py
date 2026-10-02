@@ -316,3 +316,31 @@ def test_menu_action_opens_the_one_dialog(qt_offscreen, home, restore_theme):
     assert dialog is not None and dialog.isVisible()
     action.trigger()
     assert theme._dialog is dialog
+
+
+def test_closing_the_dialog_applies_a_pending_change(qt_offscreen):
+    """Also so that the delay's timer does not fire after the dialog is
+    gone."""
+    dialog = theme.AppearanceDialog(Appearance())
+    received = []
+    dialog.appearanceChanged.connect(received.append)
+    dialog.density.setCurrentText("Compact")
+    assert dialog._timer.isActive()
+    dialog.close()
+    assert not dialog._timer.isActive()
+    assert received == [Appearance(density="Compact")]
+
+
+def test_apply_announces_the_appearance(restore_theme):
+    """E.g., to the charts that follow the windows' theme; also when
+    the operating system switches between light and dark."""
+    received = []
+    theme.hub().changed.connect(received.append)
+    appearance = Appearance(mode="System")
+    theme.apply(restore_theme, appearance)
+    theme._on_color_scheme_changed(None)
+    assert received == [appearance, appearance]
+    # a fixed mode does not follow the operating system
+    theme.apply(restore_theme, Appearance(mode="Light"))
+    theme._on_color_scheme_changed(None)
+    assert len(received) == 3

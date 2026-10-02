@@ -512,3 +512,51 @@ def test_drift_uses_four_colors(qt_offscreen):
     lines = [line for ax in window.figure.axes for line in ax.get_lines()]
     colors = [to_hex(line.get_color()) for line in lines]
     assert colors == PlotStyle().series_colors[:4]
+
+
+def test_charts_follow_the_windows_theme_by_default(
+    qt_offscreen, restore_theme
+):
+    """The default theme is light or dark like the windows; a chosen
+    theme stays as it is."""
+    from picasso.gui import theme
+
+    assert PlotStyle().theme == plot_style.SAME_AS_WINDOWS
+    theme.apply(restore_theme, theme.Appearance(mode="Dark"))
+    assert PlotStyle().theme_colors == THEMES["Dark"]
+    assert replace(PlotStyle(), theme="Light").theme_colors == THEMES["Light"]
+    theme.apply(restore_theme, theme.Appearance(mode="Light"))
+    assert PlotStyle().theme_colors == THEMES["Light"]
+
+
+def test_open_charts_follow_a_new_windows_theme(qt_offscreen, restore_theme):
+    from picasso.gui import theme
+
+    canvas = lib.GenericPlotWindow("Test", "render")
+    axes = canvas.figure.add_subplot()
+    theme.apply(restore_theme, theme.Appearance(mode="Dark"))
+    assert to_hex(axes.get_facecolor()) == THEMES["Dark"]["axes"]
+    theme.apply(restore_theme, theme.Appearance(mode="Light"))
+    assert to_hex(axes.get_facecolor()) == THEMES["Light"]["axes"]
+    # a chosen theme is kept when the windows change
+    plot_style.set_current(replace(PlotStyle(), theme="Classic"))
+    theme.apply(restore_theme, theme.Appearance(mode="Dark"))
+    assert to_hex(axes.get_facecolor()) == THEMES["Classic"]["axes"]
+
+
+def test_dialog_offers_same_as_windows(qt_offscreen):
+    dialog = plot_style.PlotStyleDialog(PlotStyle())
+    themes = [dialog.theme.itemText(i) for i in range(dialog.theme.count())]
+    assert themes[0] == plot_style.SAME_AS_WINDOWS
+    assert dialog.style().theme == plot_style.SAME_AS_WINDOWS
+
+
+def test_closing_the_dialog_applies_a_pending_change(qt_offscreen):
+    dialog = plot_style.PlotStyleDialog(PlotStyle())
+    received = []
+    dialog.styleChanged.connect(received.append)
+    dialog.grid.setChecked(False)
+    assert dialog._timer.isActive()
+    dialog.close()
+    assert not dialog._timer.isActive()
+    assert [style.grid for style in received] == [False]

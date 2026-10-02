@@ -31,7 +31,7 @@ from scipy.stats import norm
 
 from .. import io, lib, simulate, __version__, docs_url
 from .app import run_gui
-from . import theme
+from . import plot_style, theme
 
 
 def fitFuncBg(x: lib.FloatArray2D, a: float, b: float) -> lib.FloatArray1D:
@@ -45,8 +45,6 @@ def fitFuncStd(
     """Standard fitting function."""
     return a * x[0] * x[1] + b * x[2] + c
 
-
-plt.style.use("ggplot")
 
 "DEFAULT PARAMETERS"
 CURRENTROUND = 0
@@ -281,6 +279,11 @@ class Window(QtWidgets.QMainWindow):
             self.user_settings_dialog.show
         )
         theme.add_menu_action(file_menu)
+        plot_settings_action = file_menu.addAction("Plot settings...")
+        plot_settings_action.setToolTip("Appearance of all chart windows")
+        plot_settings_action.triggered.connect(
+            lambda: plot_style.show_dialog()
+        )
 
     def initUI(self):  # noqa: C901
         self.currentround = CURRENTROUND
@@ -955,6 +958,14 @@ class Window(QtWidgets.QMainWindow):
 
         self.canvas2 = FigureCanvas(self.figure2)
         self.canvas2.setMinimumSize(csize, csize)
+        # the previews take the shared chart style and are redrawn from
+        # the last drawn data when it changes
+        self.plot_style = plot_style.current()
+        self._positions_preview = None
+        self._structure_preview = None
+        self._noise_model_window = None
+        self._experiment_window = None
+        plot_style.hub().changed.connect(self._on_plot_style_changed)
 
         posgrid.addWidget(self.canvas1)
         strgrid.addWidget(self.canvas2)
@@ -1932,21 +1943,9 @@ class Window(QtWidgets.QMainWindow):
     def plotStructure(self) -> None:
         """Plot the structure and display it."""
         structurexx, structureyy, structureex, _ = self.readStructure()
-        noexchangecolors = len(set(structureex))
         exchangecolors = list(set(structureex))
-        self.ax2.clear()
-        self.ax2.axis("equal")
-
-        for i in range(0, noexchangecolors):
-            plotxx = []
-            plotyy = []
-            for j in range(0, len(structureex)):
-                if structureex[j] == exchangecolors[i]:
-                    plotxx.append(structurexx[j])
-                    plotyy.append(structureyy[j])
-            self.ax2.plot(plotxx, plotyy, "o")
-
-        self.canvas2.draw()
+        self._structure_preview = (structurexx, structureyy, structureex)
+        self._draw_previews()
 
         exchangecolorsList = ",".join(map(str, exchangecolors))
         # UPDATE THE EXCHANGE COLORS IN BUTTON TO BE simulated
@@ -2020,99 +2019,79 @@ class Window(QtWidgets.QMainWindow):
             in_frame = np.logical_and(in_x, in_y)
             self.newstruct = self.newstruct[:, in_frame]
 
-        self.ax1.clear()
-        self.ax1.axis("equal")
-        self.ax1.plot(self.newstruct[0, :], self.newstruct[1, :], "+")
-        # PLOT FRAME
-        self.ax1.add_patch(
-            patches.Rectangle(
-                (frame, frame),
-                imageSize - 2 * frame,
-                imageSize - 2 * frame,
-                linestyle="dashed",
-                edgecolor="#000000",
-                fill=False,  # remove background
-            )
-        )
-
-        self.canvas1.draw()
-
-        # PLOT first structure
-        struct1 = self.newstruct[:, self.newstruct[3, :] == 0]
-
-        noexchangecolors = len(set(struct1[2, :]))
-        exchangecolors = list(set(struct1[2, :]))
-        self.noexchangecolors = exchangecolors
-
-        self.ax2.clear()
-        # self.ax2.hold(True)
-        self.ax2.axis("equal")
-        structurexx = struct1[0, :]
-        structureyy = struct1[1, :]
-        structureex = struct1[2, :]
-        structurexx_nm = np.multiply(structurexx - min(structurexx), pixelsize)
-        structureyy_nm = np.multiply(structureyy - min(structureyy), pixelsize)
-
-        for i in range(0, noexchangecolors):
-            plotxx = []
-            plotyy = []
-            for j in range(0, len(structureex)):
-                if structureex[j] == exchangecolors[i]:
-                    plotxx.append(structurexx_nm[j])
-                    plotyy.append(structureyy_nm[j])
-            self.ax2.plot(plotxx, plotyy, "o")
-
-        self.canvas2.draw()
+        self._preview_positions(pixelsize, frame, imageSize)
 
     def plotPositions(self) -> None:
         """Plot the generated positions."""
-        structurexx, structureyy, structureex, _ = self.readStructure()
         pixelsize = self.pixelsizeEdit.value()
         imageSize = self.camerasizeEdit.value()
         frame = self.structureframeEdit.value()
 
-        # self.figure1.suptitle('Positions [Px]')
-        self.ax1.clear()
-        self.ax1.axis("equal")
-        self.ax1.plot(self.newstruct[0, :], self.newstruct[1, :], "+")
-        # PLOT FRAME
-        self.ax1.add_patch(
-            patches.Rectangle(
-                (frame, frame),
-                imageSize - 2 * frame,
-                imageSize - 2 * frame,
-                linestyle="dashed",
-                edgecolor="#000000",
-                fill=False,  # remove background
-            )
+        self._preview_positions(pixelsize, frame, imageSize)
+
+    def _preview_positions(
+        self, pixelsize: float, frame: int, image_size: int
+    ) -> None:
+        """Preview the generated positions (``newstruct``, in camera
+        pixels) inside the frame, and the first structure (in nm)."""
+        self._positions_preview = (
+            self.newstruct[0, :],
+            self.newstruct[1, :],
+            frame,
+            image_size,
         )
-
-        self.canvas1.draw()
-
-        # PLOT first structure
         struct1 = self.newstruct[:, self.newstruct[3, :] == 0]
-
-        noexchangecolors = len(set(struct1[2, :]))
-        exchangecolors = list(set(struct1[2, :]))
-        self.noexchangecolors = exchangecolors
-        self.ax2.clear()
-
+        self.noexchangecolors = list(set(struct1[2, :]))
         structurexx = struct1[0, :]
         structureyy = struct1[1, :]
-        structureex = struct1[2, :]
-        structurexx_nm = np.multiply(structurexx - min(structurexx), pixelsize)
-        structureyy_nm = np.multiply(structureyy - min(structureyy), pixelsize)
+        self._structure_preview = (
+            np.multiply(structurexx - min(structurexx), pixelsize),
+            np.multiply(structureyy - min(structureyy), pixelsize),
+            struct1[2, :],
+        )
+        self._draw_previews()
 
-        for i in range(0, noexchangecolors):
-            plotxx = []
-            plotyy = []
-            for j in range(0, len(structureex)):
-                if structureex[j] == exchangecolors[i]:
-                    plotxx.append(structurexx_nm[j])
-                    plotyy.append(structureyy_nm[j])
-            self.ax2.plot(plotxx, plotyy, "o")
-
+    def _draw_previews(self) -> None:
+        """Draw the positions and the structure previews from the data
+        drawn last, in the current plot style."""
+        style = self.plot_style
+        for figure in (self.figure1, self.figure2):
+            style.style_figure(figure)
+        with style.context():
+            if self._positions_preview is not None:
+                xx, yy, frame, image_size = self._positions_preview
+                self.ax1.clear()
+                self.ax1.axis("equal")
+                self.ax1.plot(xx, yy, "+")
+                # the frame structures are kept out of
+                self.ax1.add_patch(
+                    patches.Rectangle(
+                        (frame, frame),
+                        image_size - 2 * frame,
+                        image_size - 2 * frame,
+                        linestyle="dashed",
+                        edgecolor=style.theme_colors["text_muted"],
+                        fill=False,
+                    )
+                )
+            if self._structure_preview is not None:
+                xx, yy, exchange = self._structure_preview
+                xx, yy = np.asarray(xx), np.asarray(yy)
+                exchange = np.asarray(exchange)
+                self.ax2.clear()
+                self.ax2.axis("equal")
+                # one color per exchange round
+                for color in list(set(exchange)):
+                    in_round = exchange == color
+                    self.ax2.plot(xx[in_round], yy[in_round], "o")
+        for figure in (self.figure1, self.figure2):
+            style.apply(figure)
+        self.canvas1.draw()
         self.canvas2.draw()
+
+    def _on_plot_style_changed(self, style: plot_style.PlotStyle) -> None:
+        self.plot_style = style
+        self._draw_previews()
 
     def openDialog(self) -> None:
         """Open a dialog to select a design file."""
@@ -2162,32 +2141,33 @@ class Window(QtWidgets.QMainWindow):
         self.EquationCEdit.setValue(fitParamsStd[2])
 
         # Noise model working point
-
-        figure4 = plt.figure(constrained_layout=True)
-
-        # Background
         bgmodel = fitFuncBg(x_3d, fitParamsBg[0], fitParamsBg[1])
-        ax1 = figure4.add_subplot(121)
-        ax1.cla()
-        ax1.plot(bg, bgmodel, "o")
-        x = np.linspace(*ax1.get_xlim())
-        ax1.plot(x, x)
-        title = "Background Model:"
-        ax1.set_title(title)
-
-        # Std
         bgmodelstd = fitFuncStd(
             x_3dStd, fitParamsStd[0], fitParamsStd[1], fitParamsStd[2]
         )
-        ax2 = figure4.add_subplot(122)
-        ax2.cla()
-        ax2.plot(bgstd, bgmodelstd, "o")
-        x = np.linspace(*ax2.get_xlim())
-        ax2.plot(x, x)
-        title = "Background Model Std:"
-        ax2.set_title(title)
+        window = lib.GenericPlotWindow("Noise model", "simulate")
 
-        figure4.show()
+        def draw() -> None:
+            window.figure.clear()
+            with window.plot_context():
+                for i, (data, model, title) in enumerate(
+                    (
+                        (bg, bgmodel, "Background Model:"),
+                        (bgstd, bgmodelstd, "Background Model Std:"),
+                    )
+                ):
+                    axes = window.figure.add_subplot(1, 2, i + 1)
+                    axes.plot(data, model, "o")
+                    x = np.linspace(*axes.get_xlim())
+                    axes.plot(x, x)
+                    axes.set_title(title)
+            window.canvas.draw_idle()
+
+        window.redraw = draw
+        draw()
+        # kept so that the window is not garbage collected
+        self._noise_model_window = window
+        window.show()
 
     def sigmafilter(
         self, data: lib.FloatArray1D, sigmas: float
@@ -2240,58 +2220,49 @@ class Window(QtWidgets.QMainWindow):
                     sigmay = self.sigmafilter(sigmay, nosigmas)
                     bg = self.sigmafilter(bg, nosigmas)
 
-                    figure3 = plt.figure(constrained_layout=True)
-
-                    # Photons
-                    photonsmu, photonsstd = norm.fit(photons)
-                    ax1 = figure3.add_subplot(131)
-                    ax1.cla()
-                    ax1.hist(photons, bins=25, normed=True, alpha=0.6)
-                    xmin, xmax = plt.xlim()
-                    x = np.linspace(xmin, xmax, 100)
-                    p = norm.pdf(x, photonsmu, photonsstd)
-                    ax1.plot(x, p)
-                    title = "Photons:\n mu = %.2f\n  std = %.2f" % (
-                        photonsmu,
-                        photonsstd,
-                    )
-                    ax1.set_title(title)
-
-                    # Sigma X & Sigma Y
+                    # Photons, PSF (sigma x and y) and background
                     sigma = np.concatenate((sigmax, sigmay), axis=0)
+                    photonsmu, photonsstd = norm.fit(photons)
                     sigmamu, sigmastd = norm.fit(sigma)
-                    ax2 = figure3.add_subplot(132)
-                    ax2.cla()
-                    # ax2.hold(True)
-                    ax2.hist(sigma, bins=25, normed=True, alpha=0.6)
-                    xmin, xmax = plt.xlim()
-                    x = np.linspace(xmin, xmax, 100)
-                    p = norm.pdf(x, sigmamu, sigmastd)
-                    ax2.plot(x, p)
-                    title = "PSF:\n mu = %.2f\n  std = %.2f" % (
-                        sigmamu,
-                        sigmastd,
-                    )
-                    ax2.set_title(title)
-
-                    # Background
                     bgmu, bgstd = norm.fit(bg)
-                    ax3 = figure3.add_subplot(133)
-                    ax3.cla()
-                    # ax3.hold(True)
-                    # Plot the histogram.
-                    ax3.hist(bg, bins=25, normed=True, alpha=0.6)
-                    xmin, xmax = plt.xlim()
-                    x = np.linspace(xmin, xmax, 100)
-                    p = norm.pdf(x, bgmu, bgstd)
-                    ax3.plot(x, p)
-                    title = "Background:\n mu = %.2f\n  std = %.2f" % (
-                        bgmu,
-                        bgstd,
+                    fits = (
+                        ("Photons", photons, photonsmu, photonsstd),
+                        ("PSF", sigma, sigmamu, sigmastd),
+                        ("Background", bg, bgmu, bgstd),
                     )
-                    ax3.set_title(title)
-                    figure3.tight_layout()
-                    figure3.show()
+                    window = lib.GenericPlotWindow(
+                        "Experiment statistics", "simulate"
+                    )
+
+                    def draw() -> None:
+                        window.figure.clear()
+                        style = window.plot_style
+                        with window.plot_context():
+                            for i, (name, data, mu, std) in enumerate(fits):
+                                axes = window.figure.add_subplot(1, 3, i + 1)
+                                axes.hist(
+                                    data,
+                                    bins=25,
+                                    density=True,
+                                    **style.hist_kwargs(),
+                                )
+                                x = np.linspace(*axes.get_xlim(), 100)
+                                axes.plot(
+                                    x,
+                                    norm.pdf(x, mu, std),
+                                    color=style.series_colors[1],
+                                )
+                                axes.set_title(
+                                    f"{name}:\n mu = {mu:.2f}\n"
+                                    f"  std = {std:.2f}"
+                                )
+                        window.canvas.draw_idle()
+
+                    window.redraw = draw
+                    draw()
+                    # kept so that the window is not garbage collected
+                    self._experiment_window = window
+                    window.show()
 
                     # Calculate Rates
                     # Photonrate, Photonrate Std, PSF

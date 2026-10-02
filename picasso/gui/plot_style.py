@@ -4,16 +4,17 @@ picasso.gui.plot_style
 
 Appearance of Picasso's chart windows. One ``PlotStyle`` is shared by
 the histogram windows of Picasso: Filter (1D and 2D), Filter's
-subclustering test and every ``lib.GenericPlotWindow`` (e.g., Render's
-drift, NeNA, FRC and trace plots, Nanotron's learning history), so that
-they always look the same.
+subclustering test, every ``lib.GenericPlotWindow`` (e.g., Render's
+drift, NeNA, FRC and trace plots, Nanotron's learning history) and
+Simulate's previews, so that they always look the same.
 
 The general settings apply to every chart: theme (background, grid and
-text colors), titles, font and tick label sizes, the data color (of the
-first four plotted series, from one of ``PALETTES`` or set one by one;
-further series continue the palette), the
-line width and whether histograms are filled, filled with an outline or
-outlined only. The remaining settings only concern Filter's histograms:
+text colors; by default light or dark like the windows, see
+``picasso.gui.theme``), titles, font and tick label sizes, the data
+color (of the first four plotted series, from one of ``PALETTES`` or set
+one by one; further series continue the palette), the line width and
+whether histograms are filled, filled with an outline or outlined only.
+The remaining settings only concern Filter's histograms:
 number of bins, count axis, selection color and, for 2D histograms,
 colormap, color scale, side 1D histograms and colorbar. The dialog
 shows them only when opened from Filter.
@@ -51,7 +52,7 @@ from matplotlib.colors import (
     to_hex,
 )
 from matplotlib.figure import Figure
-from PyQt6 import QtCore, QtWidgets
+from PyQt6 import QtCore, QtGui, QtWidgets
 
 from .. import io, lib
 from .overlay_style import PRESET_COLORS, ColorComboBox
@@ -85,6 +86,12 @@ THEMES = {
         "text_muted": "#555555",
     },
 }
+
+#: Theme that matches the windows: "Dark" on a dark window background
+#: (see ``picasso.gui.theme``), "Light" otherwise.
+SAME_AS_WINDOWS = "Same as windows"
+#: Themes offered in the plot settings.
+THEME_CHOICES = (SAME_AS_WINDOWS, *THEMES)
 
 #: Single-hue blue ramp, light (sparse) to dark (dense).
 PICASSO_BLUES = LinearSegmentedColormap.from_list(
@@ -182,7 +189,8 @@ class PlotStyle:
     Attributes
     ----------
     theme : str
-        Key of ``THEMES``.
+        One of ``THEME_CHOICES``: ``SAME_AS_WINDOWS`` or a key of
+        ``THEMES``.
     grid : bool
         Whether gridlines are drawn.
     font_size : int
@@ -231,7 +239,7 @@ class PlotStyle:
         Color of the span and rectangle used to select a range.
     """
 
-    theme: str = "Light"
+    theme: str = SAME_AS_WINDOWS
     grid: bool = True
     font_size: int = 11
     tick_size: int = 9
@@ -301,7 +309,7 @@ class PlotStyle:
         # replace choices that are no longer offered by their default
         default = cls()
         for name, options in (
-            ("theme", THEMES),
+            ("theme", THEME_CHOICES),
             ("colormap", COLORMAPS),
             ("color_scale", SCALES),
             ("count_scale", SCALES),
@@ -336,7 +344,10 @@ class PlotStyle:
 
     @property
     def theme_colors(self) -> dict:
-        """Colors of the theme, see ``THEMES``."""
+        """Colors of the theme, see ``THEMES``; for ``SAME_AS_WINDOWS``
+        those of the windows' current theme."""
+        if self.theme == SAME_AS_WINDOWS:
+            return THEMES["Dark" if windows_are_dark() else "Light"]
         return THEMES[self.theme]
 
     @property
@@ -638,6 +649,16 @@ class PlotStyle:
         colorbar.ax.yaxis.label.set_fontsize(self.font_size)
 
 
+def windows_are_dark() -> bool:
+    """Whether the windows of the running application have a dark
+    background, in any theme of ``picasso.gui.theme`` (also "Native")."""
+    app = QtWidgets.QApplication.instance()
+    if app is None:
+        return False
+    window = app.palette().color(QtGui.QPalette.ColorRole.Window)
+    return window.lightness() < 128
+
+
 def current() -> PlotStyle:
     """The style saved in the user settings."""
     return PlotStyle.from_settings(io.load_user_settings()["PlotStyle"])
@@ -660,14 +681,30 @@ class _Hub(QtCore.QObject):
 
 _hub = None
 _dialog = None
+# the hub of picasso.gui.theme whose changes restyle the charts
+_windows_hub = None
 
 
 def hub() -> _Hub:
     """The object whose ``changed`` signal carries each new style."""
-    global _hub
+    global _hub, _windows_hub
     if _hub is None:
         _hub = _Hub()
+    # imported here: picasso.gui.theme is not needed before the first
+    # chart window
+    from . import theme
+
+    if _windows_hub is not theme.hub():
+        _windows_hub = theme.hub()
+        _windows_hub.changed.connect(_on_windows_theme_changed)
     return _hub
+
+
+def _on_windows_theme_changed(_appearance) -> None:
+    """Restyle the charts that follow the windows' theme."""
+    style = current()
+    if style.theme == SAME_AS_WINDOWS:
+        hub().changed.emit(style)
 
 
 def show_dialog(filter_options: bool = False) -> PlotStyleDialog:
@@ -743,8 +780,10 @@ class PlotStyleDialog(lib.Dialog):
         general = QtWidgets.QGroupBox("All plots")
         form = QtWidgets.QFormLayout(general)
         self.theme = QtWidgets.QComboBox()
-        self.theme.addItems(THEMES)
+        self.theme.addItems(THEME_CHOICES)
         self.theme.setToolTip(
+            "Same as windows: light or dark like the Picasso windows "
+            "(File > Appearance).\n"
             "Classic is the look of Filter's histograms in earlier versions."
         )
         form.addRow("Theme:", self.theme)
@@ -891,6 +930,14 @@ class PlotStyleDialog(lib.Dialog):
             color.colorChanged.connect(self._on_color_changed)
         self.palette.currentIndexChanged.connect(self._on_palette_changed)
         self.use_channel_colors.toggled.connect(self._timer.start)
+
+    def closeEvent(self, event: QtGui.QCloseEvent) -> None:
+        # apply a change still waiting for the delay now, so that the
+        # timer does not fire after the dialog is gone
+        if self._timer.isActive():
+            self._timer.stop()
+            self.styleChanged.emit(self.style())
+        super().closeEvent(event)
 
     def _set_colors(self, colors) -> None:
         """Show ``colors`` without marking the palette as custom."""

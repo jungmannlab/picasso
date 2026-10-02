@@ -56,7 +56,7 @@ Appearance
 - **Font size**: the size of the text in percent of the system's. Open windows keep their size; reopen them to fit.
 - **Density**: *Compact* reduces the spacing of the controls, e.g., for small laptop screens.
 
-Changes apply immediately to the module that is open and are saved in the ``Appearance`` section of ``~/.picasso/settings.yaml`` (see :ref:`user-settings-file`); other modules take them on when they are started next. The theme does not change the colors of the image content (rendered localizations, picks, the design canvas) or of the charts, which have their own plot settings.
+Changes apply immediately to the module that is open and are saved in the ``Appearance`` section of ``~/.picasso/settings.yaml`` (see :ref:`user-settings-file`); other modules take them on when they are started next. The theme does not change the colors of the image content (rendered localizations, picks, the design canvas). Charts (e.g., Filter's histograms, Render's plot windows, Simulate's previews) are light or dark like the windows unless another theme is chosen in their plot settings.
 
 .. _user-settings-file:
 
