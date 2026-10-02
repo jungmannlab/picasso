@@ -18,7 +18,7 @@ import pandas as pd
 import pytest
 from matplotlib.colors import to_hex
 from matplotlib.patches import Rectangle
-from PyQt6 import QtWidgets
+from PyQt6 import QtGui, QtWidgets
 
 from picasso import io
 from picasso.gui import plot_style, theme
@@ -128,3 +128,60 @@ def test_experiment_statistics_window(qt_offscreen, monkeypatch):
     assert to_hex(axes[0].get_facecolor()) == THEMES["Dark"]["axes"]
     plots.close()
     window.close()
+
+
+# -- layout -----------------------------------------------------------
+
+
+def test_menus_and_main_action(window):
+    menus = [a.text() for a in window.menuBar().actions()]
+    assert menus == ["File", "Simulation", "Plugins"]
+    assert not window.findChildren(QtWidgets.QToolBar)
+    # fits a laptop screen; the contents scroll if they need more
+    assert window.height() <= gui_simulate.Window.DEFAULT_HEIGHT
+    buttons = {b.text(): b for b in window.findChildren(QtWidgets.QPushButton)}
+    assert "Quit" not in buttons
+    # the main action is the one accent (default) button
+    assert buttons["Simulate data"].isDefault()
+    # the progress bar is shown only while simulating
+    assert window.mainpbar.isHidden()
+
+
+def test_progress_bar_shown_while_simulating(window, monkeypatch):
+    seen = []
+    monkeypatch.setattr(
+        window, "_simulate", lambda: seen.append(window.mainpbar.isHidden())
+    )
+    window.simulate()
+    assert seen == [False]
+    assert window.mainpbar.isHidden()
+
+
+def test_derived_values_are_muted(window):
+    muted = QtGui.QPalette.ColorRole.PlaceholderText
+    for label in (window.totaltimeEdit, window.taudEdit, window.psf_fwhmEdit):
+        assert label.foregroundRole() == muted
+    assert window.integrationtimeEdit.foregroundRole() != muted
+
+
+def test_structure_editor(window, monkeypatch):
+    """The table edits the docking strands; the type becomes Custom."""
+    dialog = gui_simulate.StructureEditDialog([0, 10], [0, 5], [0, 0], [1, 2])
+    assert dialog.values() == ([0, 10], [0, 5], [0, 0], [1, 2])
+    dialog.table.item(1, 3).setText("1.5")
+    with pytest.raises(ValueError, match="positive integer"):
+        dialog.values()
+    dialog.close()
+
+    class _Accepting(gui_simulate.StructureEditDialog):
+        def exec(self):
+            self._add_row((20, 30, 5, 3))
+            return QtWidgets.QDialog.DialogCode.Accepted
+
+    monkeypatch.setattr(gui_simulate, "StructureEditDialog", _Accepting)
+    window.editStructure()
+    assert window.structurecombo.currentText() == "Custom"
+    assert window.structurexxEdit.text().endswith(",20")
+    assert window.structureyyEdit.text().endswith(",30")
+    assert window.structure3DEdit.text().endswith(",5")
+    assert window.structureexEdit.text().endswith(",3")

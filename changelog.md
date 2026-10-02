@@ -60,6 +60,7 @@ Last change: 02-OCT-2026 CEST
 - The Windows one-click installer's *GPU* edition is renamed *CUDA*, similarly the installed folders were renamed etc.
 - Fixed: combining localizations whose columns differ (e.g. with and without `net_gradient`, spherical and elliptical, least-squares and MLE fits, or 2D and 3D data) silently deleted all localizations of the files lacking a column when saving. `picasso join`, RESI, and the multi-channel saves of Render (picked localizations, also per pick) and its 3D window now drop the columns not all of them have, with a warning.
 - Fixed Nanotron's PyQt6 information dialogs.
+- Picasso: Simulate has a new cleaner layout.
 
 ### Technical details on Render update
 - **Multi-threaded CPU rendering**: the render kernels release the GIL and channels are rendered in parallel by a thread pool; a single large channel is split into row chunks rendered in parallel and summed in a fixed order.
