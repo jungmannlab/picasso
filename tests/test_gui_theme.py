@@ -14,7 +14,7 @@ platform's look, the button states and the appearance dialog.
 from __future__ import annotations
 
 import pytest
-from PyQt6 import QtGui, QtWidgets
+from PyQt6 import QtCore, QtGui, QtWidgets
 
 from picasso import io
 from picasso.gui import theme
@@ -76,6 +76,12 @@ def test_invalid_values_take_their_default():
         }
     )
     assert appearance == Appearance()
+
+
+def test_menu_icons_take_only_booleans():
+    assert Appearance.from_settings({"menu_icons": False}).menu_icons is False
+    assert Appearance.from_settings({"menu_icons": 0}).menu_icons is True
+    assert Appearance.from_settings({"menu_icons": "no"}).menu_icons is True
 
 
 def test_font_scale_is_clamped_and_accent_normalized():
@@ -244,6 +250,19 @@ def test_native_first_leaves_the_platform_style(restore_theme):
     assert not isinstance(app.style(), theme._PicassoStyle)
 
 
+def test_apply_hides_and_shows_menu_icons(qt_offscreen, restore_theme):
+    app = restore_theme
+    attribute = QtCore.Qt.ApplicationAttribute.AA_DontShowIconsInMenus
+    window = QtWidgets.QMainWindow()
+    action = window.menuBar().addMenu("File").addAction("Open")
+    theme.apply(app, Appearance(mode="Light", menu_icons=False))
+    assert app.testAttribute(attribute)
+    assert not action.isIconVisibleInMenu()
+    theme.apply(app, Appearance(mode="Light"))
+    assert not app.testAttribute(attribute)
+    assert action.isIconVisibleInMenu()
+
+
 # -- button states ----------------------------------------------------
 
 
@@ -267,6 +286,7 @@ def test_dialog_shows_and_returns_the_appearance(qt_offscreen):
         accent=ACCENTS["Purple"],
         font_scale=110,
         density="Compact",
+        menu_icons=False,
     )
     dialog = theme.AppearanceDialog(appearance)
     assert dialog.appearance() == appearance

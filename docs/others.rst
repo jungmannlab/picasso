@@ -56,6 +56,7 @@ Appearance
 - **Font size**: the size of the text in percent of the system's. Open windows keep their size; reopen them to fit.
 - **Density**: *Compact* reduces the spacing of the controls, e.g., for small laptop screens.
 - **Toolbar**: how the toolbars of ``Picasso: Render`` and ``Picasso: Localize`` show their buttons: *Icons and text* (default), *Icons*, *Text* or *Hidden*. The toolbars hold the most used actions of the menus, e.g., opening and saving, the tools of Render and identifying and fitting in Localize, and can be moved to any side of the window.
+- **Menus**: *Show icons in menus* (default on) shows the icons next to the actions of the menus.
 
 Changes apply immediately to the module that is open and are saved in the ``Appearance`` section of ``~/.picasso/settings.yaml`` (see :ref:`user-settings-file`); other modules take them on when they are started next. The theme does not change the colors of the image content (rendered localizations, picks); the background and labels of Design's canvas follow it. Charts (e.g., Filter's histograms, Render's plot windows, Simulate's previews) are light or dark like the windows unless another theme is chosen in their plot settings.
 
@@ -135,6 +136,9 @@ Top level
    * - ``toolbar``
      - ``Icons and text``
      - Buttons of the toolbars of Render and Localize: ``Icons``, ``Icons and text``, ``Text`` or ``Hidden``.
+   * - ``menu_icons``
+     - ``True``
+     - Show the icons of the actions in the menus.
 
 ``Render``
 ++++++++++

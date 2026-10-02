@@ -178,6 +178,8 @@ class Appearance:
         One of ``DENSITIES``.
     toolbar : str
         One of ``TOOLBAR_STYLES``.
+    menu_icons : bool
+        Whether the menus show the actions' icons.
     """
 
     mode: str = "System"
@@ -185,6 +187,7 @@ class Appearance:
     font_scale: int = 100
     density: str = "Comfortable"
     toolbar: str = "Icons and text"
+    menu_icons: bool = True
 
     @classmethod
     def from_settings(cls, settings: dict | None) -> Appearance:
@@ -208,7 +211,10 @@ class Appearance:
         values = {}
         for field in fields(cls):
             value = settings.get(field.name)
-            if isinstance(getattr(default, field.name), int):
+            if isinstance(getattr(default, field.name), bool):
+                if isinstance(value, bool):
+                    values[field.name] = value
+            elif isinstance(getattr(default, field.name), int):
                 if isinstance(value, (int, float)) and not isinstance(
                     value, bool
                 ):
@@ -599,6 +605,7 @@ def apply(app: QtWidgets.QApplication, appearance: Appearance) -> None:
         app.setPalette(build_palette(appearance, dark))
         app.setFont(_scaled_font(original["font"], appearance.font_scale))
         app.setStyleSheet(stylesheet(appearance, dark))
+    _show_menu_icons(app, appearance.menu_icons)
     for window in app.topLevelWidgets():
         for toolbar in window.findChildren(QtWidgets.QToolBar):
             if toolbar.property(_TOOLBAR_PROPERTY):
@@ -608,6 +615,22 @@ def apply(app: QtWidgets.QApplication, appearance: Appearance) -> None:
                 _style_tool_button(button, appearance)
     _listen(app)
     hub().changed.emit(appearance)
+
+
+def _show_menu_icons(app: QtWidgets.QApplication, show: bool) -> None:
+    """Show or hide the icons of the menus' actions.
+
+    The application attribute covers menus built later; the open
+    menus' actions are set too, since the native menu bar on macOS
+    only takes a change of the action itself.
+    """
+    app.setAttribute(
+        QtCore.Qt.ApplicationAttribute.AA_DontShowIconsInMenus, not show
+    )
+    for window in app.topLevelWidgets():
+        for menu in window.findChildren(QtWidgets.QMenu):
+            for action in menu.actions():
+                action.setIconVisibleInMenu(show)
 
 
 def _listen(app: QtWidgets.QApplication) -> None:
@@ -1054,6 +1077,11 @@ class AppearanceDialog(lib.Dialog):
             "Without an icon, a button shows its text."
         )
         self.form.addRow("Toolbar:", self.toolbar)
+        self.menu_icons = QtWidgets.QCheckBox("Show icons in menus")
+        self.menu_icons.setToolTip(
+            "Icons next to the actions of the menu bar and context menus."
+        )
+        self.form.addRow("Menus:", self.menu_icons)
         layout.addLayout(self.form)
 
         buttons = QtWidgets.QDialogButtonBox()
@@ -1077,6 +1105,7 @@ class AppearanceDialog(lib.Dialog):
         self.font_scale.valueChanged.connect(self._timer.start)
         self.density.currentIndexChanged.connect(self._timer.start)
         self.toolbar.currentIndexChanged.connect(self._timer.start)
+        self.menu_icons.toggled.connect(self._timer.start)
 
     def closeEvent(self, event: QtGui.QCloseEvent) -> None:
         # apply a change still waiting for the delay now, so that the
@@ -1105,6 +1134,7 @@ class AppearanceDialog(lib.Dialog):
             font_scale=self.font_scale.value(),
             density=self.density.currentText(),
             toolbar=self.toolbar.currentText(),
+            menu_icons=self.menu_icons.isChecked(),
         )
 
     def set_appearance(
@@ -1129,6 +1159,7 @@ class AppearanceDialog(lib.Dialog):
         self.font_scale.setValue(appearance.font_scale)
         self.density.setCurrentText(appearance.density)
         self.toolbar.setCurrentText(appearance.toolbar)
+        self.menu_icons.setChecked(appearance.menu_icons)
         self._update_visibility()
         if not notify:
             self._timer.stop()
