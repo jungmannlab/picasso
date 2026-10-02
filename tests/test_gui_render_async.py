@@ -422,6 +422,21 @@ class TestAsyncRender:
         }
         assert view._whole_channel_view_fraction(full) == 1.0
 
+    def test_property_split_follows_changed_locs(self, window):
+        # undrifting etc. replace the locs; render by property must
+        # redraw the new coordinates, not the split taken when enabled
+        view = window.view
+        window.display_settings_dlg.parameter.setCurrentText("frame")
+        window.display_settings_dlg.render_check.setChecked(True)
+        view.activate_render_property()
+        x_before = pd.concat(view.property_locs())["x"].sort_values()
+        locs = view.locs[0].copy()
+        locs["x"] += 1.0
+        view.locs[0] = locs
+        view.update_scene(resample_locs=True)
+        x_after = pd.concat(view.property_locs())["x"].sort_values()
+        np.testing.assert_allclose(x_after.to_numpy(), x_before + 1.0)
+
     def test_ctrl_left_drag_pans_in_every_tool(self, window, qapp):
         from PyQt6 import QtCore, QtGui
 

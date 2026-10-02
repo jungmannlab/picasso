@@ -9273,9 +9273,10 @@ class View(QtWidgets.QLabel):
         passed on to linked windows.
     window : QMainWindow
         Instance of the main window.
-    x_locs : list of pd.DataFrames
+    x_locs : list of pd.DataFrames or None
         Contains pd.DataFrames with locs to be rendered by property; one
-        per color.
+        per color. None when the localizations changed since the split,
+        see ``property_locs``.
     x_render_state : bool
         Indicates if rendering by property is used.
     """
@@ -9343,6 +9344,7 @@ class View(QtWidgets.QLabel):
         self._driftfiles = []
         self.currentdrift = []
         self.x_render_state = False
+        self.x_locs = None
         # background loading (see ``LocsLoadWorker``)
         self._load_thread = None
         self._load_worker = None
@@ -12878,9 +12880,6 @@ class View(QtWidgets.QLabel):
                     self.group_color = render.get_group_color(self.locs[0])
             self.invalidate_locs_index(channel)
         self.image = None
-        if self.x_render_state:
-            # the per-color copies hold the old coordinates
-            self.activate_render_property()
         self.update_scene()
 
     def _translate_overlays(self, dx: float, dy: float) -> None:
@@ -14187,6 +14186,8 @@ class View(QtWidgets.QLabel):
             self.index_blocks[channel] = None
             self.render_index[channel] = None
             channels = [channel]
+        if 0 in channels:  # render by property splits the first channel
+            self.x_locs = None
         # linked windows sharing a changed channel update theirs
         self.window.link_channels_changed(
             [(self.locs[i], i) for i in channels]
@@ -14836,7 +14837,7 @@ class View(QtWidgets.QLabel):
         # render properties
         if self.x_render_state:
             prop_rgbs = render.get_colors_from_colormap(
-                len(self.x_locs),
+                len(self.property_locs()),
                 self.window.display_settings_dlg.colormap_prop.currentText(),
             )
             colors = [render.solid_to_lut(rgb) for rgb in prop_rgbs]
@@ -14865,7 +14866,7 @@ class View(QtWidgets.QLabel):
             if self.window.dataset_dialog.checks[i].isChecked()
         ]
         if self.x_render_state:
-            relative_intensities = [1.0] * len(self.x_locs)
+            relative_intensities = [1.0] * len(self.property_locs())
         elif len(self.locs) == 1 and "group" in self.locs[0].columns:
             relative_intensities = [1.0] * N_GROUP_COLORS
         return relative_intensities
@@ -14875,14 +14876,13 @@ class View(QtWidgets.QLabel):
     ) -> tuple[list[pd.DataFrame], list[dict]]:
         """locs/infos for the render-by-property branch.
 
-        x_locs was already built from the fast-render subset in
-        ``activate_render_property``, so it is reused as-is. It is
-        precomputed and shares an index that depends on the property
+        x_locs is split once (see ``property_locs``) and reused as-is
+        until the localizations change. It is precomputed and shares an index that depends on the property
         binning; the renderer's own brute-force in-view filter handles
         this case, since the pyramid pre-filter is only applied to the
         multichannel path below, the common redraw cost driver.
         """
-        locs = self.x_locs.copy()
+        locs = self.property_locs().copy()
         infos = [self.infos[0]] * len(locs)
         return locs, infos
 
@@ -15350,24 +15350,28 @@ class View(QtWidgets.QLabel):
         self.deactivate_property_menu()  # blocks changing render parameters
         if self.window.display_settings_dlg.render_check.isChecked():
             self.x_render_state = True
-            parameter = (
-                self.window.display_settings_dlg.parameter.currentText()
-            )  # frame or x or y, etc
-            n_colors = self.window.display_settings_dlg.color_step.value()
-            min_val = self.window.display_settings_dlg.minimum_render.value()
-            max_val = self.window.display_settings_dlg.maximum_render.value()
-            self.x_locs = render.split_locs_by_property(
-                locs=self._display_locs(0),
-                property_name=parameter,
-                n_colors=n_colors,
-                min_value=min_val,
-                max_value=max_val,
-            )
+            self.x_locs = None  # split on the next redraw
         else:
             self.x_render_state = False
         self.update_scene()
         self.activate_property_menu()  # allows changing render parameters
         self.window.display_settings_dlg.update_histogram()
+
+    def property_locs(self) -> list[pd.DataFrame]:
+        """The localizations of the first channel split by the chosen
+        property, one ``pd.DataFrame`` per color. The split is redone
+        if the localizations changed since (e.g., undrifting), see
+        ``invalidate_locs_index``."""
+        if self.x_locs is None:
+            dlg = self.window.display_settings_dlg
+            self.x_locs = render.split_locs_by_property(
+                locs=self._display_locs(0),
+                property_name=dlg.parameter.currentText(),
+                n_colors=dlg.color_step.value(),
+                min_value=dlg.minimum_render.value(),
+                max_value=dlg.maximum_render.value(),
+            )
+        return self.x_locs
 
     def activate_property_menu(self) -> None:
         """Allow changing render parameters."""
