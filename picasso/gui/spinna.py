@@ -919,9 +919,14 @@ class MaskGeneratorTab(lib.Dialog):
                 self.mask_generator.set_sigma((sigma_xy, sigma_z))
             self.mask_generator.ndim = ndim
             mode = ["loc_den", "binary"][self.mask_type.currentIndex()]
-            status = lib.StatusDialog("Generating mask...", self.preview)
-            self.mask_generator.generate_mask(apply_thresh=False, mode=mode)
-            status.close()
+            mask_generator = self.mask_generator
+            lib.run_with_status(
+                lambda: mask_generator.generate_mask(
+                    apply_thresh=False, mode=mode
+                ),
+                "Generating mask...",
+                self.preview,
+            )
             self.mask = deepcopy(self.mask_generator.mask)
             # if 3D mask, set z-slice slider range
             if self.mask.ndim == 3:

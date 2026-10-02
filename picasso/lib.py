@@ -114,6 +114,7 @@ _QT_NAMES = (
     "TaskProgress",
     "Task",
     "run_task",
+    "run_with_status",
     "ProgressType",
     "CollapsibleHeader",
     "CollapsibleGroupBox",

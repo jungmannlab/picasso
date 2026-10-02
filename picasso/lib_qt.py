@@ -21,7 +21,7 @@ import sys
 import time
 import traceback
 from collections.abc import Callable
-from typing import TypeAlias
+from typing import Any, TypeAlias
 
 import yaml
 import matplotlib.pyplot as plt
@@ -716,7 +716,12 @@ class ProgressDialog(QtWidgets.QProgressDialog):
 
 
 class StatusDialog(Dialog):
-    """StatusDialog displays the description string in a dialog."""
+    """StatusDialog displays the description string and a busy indicator
+    in a dialog.
+
+    The busy indicator only moves while the event loop runs, so run the
+    work with :func:`run_with_status`, which keeps it on a worker thread.
+    """
 
     def __init__(self, description, parent):
         super(StatusDialog, self).__init__(
@@ -726,7 +731,13 @@ class StatusDialog(Dialog):
         _dialogs.append(self)
         vbox = QtWidgets.QVBoxLayout(self)
         label = QtWidgets.QLabel(description)
+        label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
         vbox.addWidget(label)
+        bar = QtWidgets.QProgressBar()
+        bar.setRange(0, 0)  # busy indicator
+        bar.setTextVisible(False)
+        bar.setMinimumWidth(250)
+        vbox.addWidget(bar)
         self.sound_notification_path = get_sound_notification_path()
         self.t0 = time.time()
         self.show()
@@ -1201,6 +1212,17 @@ def _stop_running_tasks() -> None:
         task.wait()
 
 
+def _acquire_input_blocker() -> None:
+    """Block user input to non-modal windows until the matching
+    ``_input_blocker.release()``, see :class:`_InputBlocker`."""
+    global _input_blocker
+    if _input_blocker is None:
+        _input_blocker = _InputBlocker()
+        app = QtCore.QCoreApplication.instance()
+        app.aboutToQuit.connect(_stop_running_tasks)
+    _input_blocker.acquire()
+
+
 class Task(QtCore.QObject):
     """A function running on a worker thread behind a cancelable progress
     dialog. Created and started by :func:`run_task`, which describes the
@@ -1244,12 +1266,7 @@ class Task(QtCore.QObject):
 
     def start(self) -> None:
         """Block input and start the worker thread."""
-        global _input_blocker
-        app = QtCore.QCoreApplication.instance()
-        if _input_blocker is None:
-            _input_blocker = _InputBlocker()
-            app.aboutToQuit.connect(_stop_running_tasks)
-        _input_blocker.acquire()
+        _acquire_input_blocker()
         _running_tasks.append(self)
         self._thread.start()
 
@@ -1412,6 +1429,61 @@ def run_task(
     )
     task.start()
     return task
+
+
+def run_with_status(
+    fn: Callable,
+    description: str,
+    parent: QtWidgets.QWidget,
+) -> Any:
+    """Run ``fn()`` on a worker thread behind a :class:`StatusDialog`
+    and return its result.
+
+    For steps that report no progress and cannot be canceled. Unlike
+    :func:`run_task`, the call blocks until ``fn`` returns, so the
+    caller reads like a computation on the GUI thread, while the event
+    loop keeps running: windows repaint and the busy indicator moves.
+    User input is blocked meanwhile, as in :func:`run_task`.
+
+    ``fn`` runs on the worker thread, so it must not touch widgets or
+    mutate GUI state: read the inputs before and apply the result after
+    the call.
+
+    Parameters
+    ----------
+    fn : callable
+        Takes no arguments and returns the result.
+    description : str
+        Label of the status dialog.
+    parent : QWidget
+        Parent of the status dialog.
+
+    Returns
+    -------
+    result : Any
+        What ``fn`` returned.
+
+    Raises
+    ------
+    BaseException
+        Whatever ``fn`` raised, re-raised on the GUI thread.
+    """
+    status = StatusDialog(description, parent)
+    thread = _TaskThread(lambda progress: fn(), None)
+    loop = QtCore.QEventLoop()
+    # queued to the GUI thread, so it cannot quit the loop before exec()
+    thread.finished.connect(loop.quit)
+    _acquire_input_blocker()
+    try:
+        thread.start()
+        loop.exec()
+        thread.wait()
+    finally:
+        _input_blocker.release()
+        status.close()
+    if thread.outcome == "failed":
+        raise thread.error
+    return thread.result
 
 
 # type alias for the progress dialogs

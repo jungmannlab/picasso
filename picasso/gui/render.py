@@ -10130,7 +10130,7 @@ class View(QtWidgets.QLabel):
 
     def align(self) -> None:
         """Align channels by RCC or from picked localizations."""
-        status = lib.StatusDialog("Aligning channels..", self)
+        locs, infos = self.locs, self.infos
         if len(self._picks) > 0:  # shift from picked
             if self._pick_shape == "Circle":
                 index_blocks = [
@@ -10138,17 +10138,25 @@ class View(QtWidgets.QLabel):
                 ]
             else:
                 index_blocks = None
-            self.locs = postprocess.align_from_picked(
-                self.locs,
-                self.infos,
-                picks=self._picks,
-                pick_shape=self._pick_shape,
-                pick_size=self._pick_size,
-                index_blocks=index_blocks,
-            )
+            picks = self._picks
+            pick_shape, pick_size = self._pick_shape, self._pick_size
+
+            def align():
+                return postprocess.align_from_picked(
+                    locs,
+                    infos,
+                    picks=picks,
+                    pick_shape=pick_shape,
+                    pick_size=pick_size,
+                    index_blocks=index_blocks,
+                )
+
         else:  # align using whole images
-            self.locs = postprocess.align_rcc(self.locs, self.infos)
-        status.close()
+
+            def align():
+                return postprocess.align_rcc(locs, infos)
+
+        self.locs = lib.run_with_status(align, "Aligning channels...", self)
         self.update_scene(resample_locs=True)
 
     @check_pick
@@ -10201,14 +10209,14 @@ class View(QtWidgets.QLabel):
             # nm to pixels
             r_max /= self.pixelsize
             if ok:
-                status = lib.StatusDialog("Linking localizations...", self)
-                self.locs[channel] = postprocess.link(
-                    self.locs[channel],
-                    self.infos[channel],
-                    r_max=r_max,
-                    max_dark_time=max_dark,
+                locs, info = self.locs[channel], self.infos[channel]
+                self.locs[channel] = lib.run_with_status(
+                    lambda: postprocess.link(
+                        locs, info, r_max=r_max, max_dark_time=max_dark
+                    ),
+                    "Linking localizations...",
+                    self,
                 )
-                status.close()
                 if "group" in self.locs[channel].columns:
                     self.group_color = render.get_group_color(
                         self.locs[channel], shuffle=True
@@ -10237,13 +10245,14 @@ class View(QtWidgets.QLabel):
         if not ok:
             return
         r_max /= self.pixelsize  # nm to pixels
-        status = lib.StatusDialog("Selecting binding event cores...", self)
-        locs = postprocess.select_binding_event_cores(
-            self.locs[channel],
-            r_max=r_max,
-            max_dark_time=max_dark,
+        locs = self.locs[channel]
+        locs = lib.run_with_status(
+            lambda: postprocess.select_binding_event_cores(
+                locs, r_max=r_max, max_dark_time=max_dark
+            ),
+            "Selecting binding event cores...",
+            self,
         )
-        status.close()
         if len(locs) == 0:
             QtWidgets.QMessageBox.information(
                 self,
@@ -13287,18 +13296,19 @@ class View(QtWidgets.QLabel):
         )
         if not path:
             return
-        status = lib.StatusDialog(
-            "Calculating nearest neighbor distances...", self
+        lib.run_with_status(
+            lambda: self._nearest_neighbor(path, channel1, channel2, nn_count),
+            "Calculating nearest neighbor distances...",
+            self,
         )
-        self._nearest_neighbor(path, channel1, channel2, nn_count)
-        status.close()
 
     def _nearest_neighbor(
         self, path: str, channel1: int, channel2: int, nn_count: int
     ) -> None:
         """Calculate and save distances of the nearest neighbors between
         localizations in channels 1 and 2. Save as localizations .hdf5
-        file of channel 1."""
+        file of channel 1. Runs on a worker thread, so it only reads the
+        view's state."""
         pixelsize = self.pixelsize
         # extract x, y and z from both channels
         if "z" in self.locs[channel1].columns:
@@ -14131,9 +14141,11 @@ class View(QtWidgets.QLabel):
         locs = self.locs[channel]
         info = self.infos[channel]
         size = self._pick_size / 2
-        status = lib.StatusDialog("Indexing localizations...", self.window)
-        index_blocks = postprocess.get_index_blocks(locs, info, size)
-        status.close()
+        index_blocks = lib.run_with_status(
+            lambda: postprocess.get_index_blocks(locs, info, size),
+            "Indexing localizations...",
+            self.window,
+        )
         self.index_blocks[channel] = index_blocks
 
     def get_index_blocks(self, channel: int) -> tuple:
@@ -14223,11 +14235,13 @@ class View(QtWidgets.QLabel):
             QtWidgets.QMessageBox.warning(self, "Warning", message)
             return
 
-        status = lib.StatusDialog("Finding fiducials...", self.window)
         locs = self.locs[channel]
         info = self.infos[channel]
-        picks, box = imageprocess.find_fiducials(locs, info)
-        status.close()
+        picks, box = lib.run_with_status(
+            lambda: imageprocess.find_fiducials(locs, info),
+            "Finding fiducials...",
+            self.window,
+        )
 
         if len(picks) == 0:
             message = "No fiducials found, manual picking is required."
@@ -14398,20 +14412,25 @@ class View(QtWidgets.QLabel):
                 if self._pick_shape in ("Rectangle", "Box")
                 else self._pick_index(channel)
             )
-            status = lib.StatusDialog("Picking similar...", self.window)
-            new_picks = postprocess.pick_similar(
-                locs=self.locs[channel],
-                info=self.infos[channel],
-                picks=self._picks,
-                pick_shape=self._pick_shape,
-                pick_size=self._pick_size,
-                std_range=std_range,
-                index_blocks=index_blocks,
+            locs, info = self.locs[channel], self.infos[channel]
+            picks = self._picks
+            pick_shape, pick_size = self._pick_shape, self._pick_size
+            new_picks = lib.run_with_status(
+                lambda: postprocess.pick_similar(
+                    locs=locs,
+                    info=info,
+                    picks=picks,
+                    pick_shape=pick_shape,
+                    pick_size=pick_size,
+                    std_range=std_range,
+                    index_blocks=index_blocks,
+                ),
+                "Picking similar...",
+                self.window,
             )
             # add picks
             self._picks = []
             self.add_picks(new_picks)
-            status.close()
 
     def _display_indices(
         self,
@@ -17359,8 +17378,6 @@ class Window(QtWidgets.QMainWindow):
             os.remove(path)
 
         if path:
-            status = lib.StatusDialog("Exporting ROIs..", self)
-
             n_channels = len(self.view.locs_paths)
             viewport = self.view.viewport
             oversampling = (
@@ -17370,131 +17387,142 @@ class Window(QtWidgets.QMainWindow):
             maximum = self.display_settings_dlg.maximum.value()
 
             pixelsize = self.view.pixelsize
-
-            # defaults for the image extents, used where the loaded
-            # metadata (e.g. of an .ims movie) does not provide them
-            ims_fields = {
-                "ExtMin0": 0,
-                "ExtMin1": 0,
-                "ExtMin2": -0.5,
-                "ExtMax2": 0.5,
-            }
-
-            (y_min, x_min), (y_max, x_max) = viewport
-
-            z_mins = []
-            z_maxs = []
-            to_render = []
-
-            has_z = True
-
-            for channel in range(n_channels):
-                if self.dataset_dialog.checks[channel].isChecked():
-                    locs = self.view.locs[channel]
-
-                    in_view = (
-                        (locs["x"] > x_min)
-                        & (locs["x"] <= x_max)
-                        & (locs["y"] > y_min)
-                        & (locs["y"] <= y_max)
-                    )
-
-                    add_dict = {}
-                    add_dict["Generated by"] = (
-                        f"Picasso v{__version__} Render (IMS Export)"
-                    )
-
-                    for k, v in ims_fields.items():
-                        if not any(k in d for d in self.view.infos[channel]):
-                            add_dict[k] = v
-
-                    info = self.view.infos[channel] + [add_dict]
-                    if not to_render:
-                        ims_info = info
-                    io.save_locs(
-                        f"{channel_base}_ch_{channel}.hdf5",
-                        locs[in_view],
-                        info,
-                    )
-
-                    if "z" in locs.columns:
-                        z_min = locs["z"][in_view].min()
-                        z_max = locs["z"][in_view].max()
-                        z_mins.append(z_min)
-                        z_maxs.append(z_max)
-                    else:
-                        has_z = False
-
-                    to_render.append(channel)
-
-            if not has_z:
-                if len(z_mins) > 0:
-                    raise NotImplementedError(
-                        "Can't export mixed files with and without z."
-                    )
-
-            if has_z:
-                z_min = min(z_mins)
-                z_max = max(z_maxs)
-            else:
-                z_min, z_max = 0, 0
-
-            all_img = []
-            for idx, channel in enumerate(to_render):
-                locs = self.view.locs[channel]
-                if has_z:
-                    n, image = render.render_hist3d(
-                        locs["x"].to_numpy(),
-                        locs["y"].to_numpy(),
-                        locs["z"].to_numpy(),
-                        oversampling,
-                        y_min,
-                        x_min,
-                        y_max,
-                        x_max,
-                        z_min,
-                        z_max,
-                        pixelsize,
-                    )
-                else:
-                    n, image = render._render_hist(
-                        locs,
-                        oversampling,
-                        y_min,
-                        x_min,
-                        y_max,
-                        x_max,
-                    )
-
-                image = image / maximum * 65535
-                data = image.astype("uint16")
-                data = np.rot90(np.fliplr(data))
-                all_img.append(data)
-
-            s_image = np.stack(all_img, axis=-1).T.copy()
-
-            # Imaris expects a single RGB per channel. Sample each
-            # channel's LUT at LEGEND_SAMPLE_IDX to get a representative
-            # color (this matches the legend/histogram convention and
-            # avoids near-white peaks of reversed single-hue cmaps).
-            colors = self.view.read_colors()
-            colors_ims = [
-                PW.Color(*[float(v) for v in colors[_][LEGEND_SAMPLE_IDX]], 1)
-                for _ in to_render
+            checked = [
+                self.dataset_dialog.checks[channel].isChecked()
+                for channel in range(n_channels)
             ]
+            colors = self.view.read_colors()
 
-            numpy_to_imaris(
-                s_image,
-                path,
-                colors_ims,
-                oversampling,
-                viewport,
-                ims_info,
-                z_min,
-                z_max,
-                pixelsize,
-            )
-            status.close()
+            def export():  # noqa: C901
+                # defaults for the image extents, used where the loaded
+                # metadata (e.g. of an .ims movie) does not provide them
+                ims_fields = {
+                    "ExtMin0": 0,
+                    "ExtMin1": 0,
+                    "ExtMin2": -0.5,
+                    "ExtMax2": 0.5,
+                }
+
+                (y_min, x_min), (y_max, x_max) = viewport
+
+                z_mins = []
+                z_maxs = []
+                to_render = []
+
+                has_z = True
+
+                for channel in range(n_channels):
+                    if checked[channel]:
+                        locs = self.view.locs[channel]
+
+                        in_view = (
+                            (locs["x"] > x_min)
+                            & (locs["x"] <= x_max)
+                            & (locs["y"] > y_min)
+                            & (locs["y"] <= y_max)
+                        )
+
+                        add_dict = {}
+                        add_dict["Generated by"] = (
+                            f"Picasso v{__version__} Render (IMS Export)"
+                        )
+
+                        for k, v in ims_fields.items():
+                            if not any(
+                                k in d for d in self.view.infos[channel]
+                            ):
+                                add_dict[k] = v
+
+                        info = self.view.infos[channel] + [add_dict]
+                        if not to_render:
+                            ims_info = info
+                        io.save_locs(
+                            f"{channel_base}_ch_{channel}.hdf5",
+                            locs[in_view],
+                            info,
+                        )
+
+                        if "z" in locs.columns:
+                            z_min = locs["z"][in_view].min()
+                            z_max = locs["z"][in_view].max()
+                            z_mins.append(z_min)
+                            z_maxs.append(z_max)
+                        else:
+                            has_z = False
+
+                        to_render.append(channel)
+
+                if not has_z:
+                    if len(z_mins) > 0:
+                        raise NotImplementedError(
+                            "Can't export mixed files with and without z."
+                        )
+
+                if has_z:
+                    z_min = min(z_mins)
+                    z_max = max(z_maxs)
+                else:
+                    z_min, z_max = 0, 0
+
+                all_img = []
+                for idx, channel in enumerate(to_render):
+                    locs = self.view.locs[channel]
+                    if has_z:
+                        n, image = render.render_hist3d(
+                            locs["x"].to_numpy(),
+                            locs["y"].to_numpy(),
+                            locs["z"].to_numpy(),
+                            oversampling,
+                            y_min,
+                            x_min,
+                            y_max,
+                            x_max,
+                            z_min,
+                            z_max,
+                            pixelsize,
+                        )
+                    else:
+                        n, image = render._render_hist(
+                            locs,
+                            oversampling,
+                            y_min,
+                            x_min,
+                            y_max,
+                            x_max,
+                        )
+
+                    image = image / maximum * 65535
+                    data = image.astype("uint16")
+                    data = np.rot90(np.fliplr(data))
+                    all_img.append(data)
+
+                s_image = np.stack(all_img, axis=-1).T.copy()
+
+                # Imaris expects a single RGB per channel. Sample each
+                # channel's LUT at LEGEND_SAMPLE_IDX to get a
+                # representative color (this matches the
+                # legend/histogram convention and avoids near-white
+                # peaks of reversed single-hue cmaps).
+                colors_ims = [
+                    PW.Color(
+                        *[float(v) for v in colors[_][LEGEND_SAMPLE_IDX]], 1
+                    )
+                    for _ in to_render
+                ]
+
+                numpy_to_imaris(
+                    s_image,
+                    path,
+                    colors_ims,
+                    oversampling,
+                    viewport,
+                    ims_info,
+                    z_min,
+                    z_max,
+                    pixelsize,
+                )
+
+            lib.run_with_status(export, "Exporting ROIs...", self)
 
     def load_picks(self) -> None:
         """Load pick regions from a .yaml file."""
