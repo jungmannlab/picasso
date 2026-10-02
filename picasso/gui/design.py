@@ -1793,6 +1793,17 @@ class MainWindow(QtWidgets.QWidget):
         pipettbtn.setToolTip("Generate a pipetting scheme (.pdf) for mixing.")
         foldbtn = QtWidgets.QPushButton("Folding scheme")
         foldbtn.setToolTip("Calculate concentrations and volumes for folding.")
+        for button, name in (
+            (loadbtn, "open"),
+            (savebtn, "save"),
+            (clearbtn, "clear"),
+            (sshotbtn, "export-view"),
+            (seqbtn, "extensions"),
+            (platebtn, "plates"),
+            (pipettbtn, "pipetting"),
+            (foldbtn, "folding"),
+        ):
+            button.setIcon(theme.icon(name))
 
         loadbtn.clicked.connect(self.window.openDialog)
         savebtn.clicked.connect(self.window.saveDialog)
