@@ -39,6 +39,7 @@ from scipy.spatial.transform import Rotation
 
 from .. import io, lib, render, spinna, __version__, docs_url
 from .app import run_gui
+from . import theme
 
 matplotlib.use("agg")
 
@@ -3178,20 +3179,26 @@ class SimulationsTab(lib.Dialog):
 
         mask_den_layout = QtWidgets.QVBoxLayout()
         load_data_layout.addLayout(mask_den_layout, 2, 0)
+        # one of the two is checked, i.e., selected
         self.mask_button = QtWidgets.QPushButton("Masks")
+        self.mask_button.setCheckable(True)
         self.mask_button.released.connect(
             partial(self.set_mask_den_stack, self.mask_button.text())
         )
-        self.mask_button.setStyleSheet("background-color : gray")
         mask_den_layout.addWidget(self.mask_button)
         self.rect_roi_button = QtWidgets.QPushButton(
             "Homogeneous\ndistribution"
         )
+        self.rect_roi_button.setCheckable(True)
+        self.rect_roi_button.setChecked(True)
         self.rect_roi_button.released.connect(
             partial(self.set_mask_den_stack, self.rect_roi_button.text())
         )
-        self.rect_roi_button.setStyleSheet("background-color : lightgreen")
         mask_den_layout.addWidget(self.rect_roi_button)
+        self.mask_den_group = QtWidgets.QButtonGroup(self)
+        self.mask_den_group.setExclusive(True)
+        self.mask_den_group.addButton(self.mask_button)
+        self.mask_den_group.addButton(self.rect_roi_button)
 
         self.mask_den_stack = QtWidgets.QStackedWidget()
         load_data_layout.addWidget(self.mask_den_stack, 2, 1)
@@ -3448,9 +3455,7 @@ class SimulationsTab(lib.Dialog):
 
             self.load_single_sim_n_str_widgets()
             self.settings_dialog.update_neighbors_widgets()
-            self.load_structures_button.setStyleSheet(
-                "background-color : lightgreen"
-            )
+            theme.set_button_state(self.load_structures_button, "ok")
             self.fit_results_display.setText("  ")
             self.fit_le_button.setVisible(len(self.targets) == 2)
 
@@ -3525,7 +3530,7 @@ class SimulationsTab(lib.Dialog):
             # change the color of the button
             for button in self.load_exp_data_buttons:
                 if button.objectName() == name:
-                    button.setStyleSheet("background-color : lightgreen")
+                    theme.set_button_state(button, "ok")
                     button.setText(f"{target} loaded")
                     break
 
@@ -3557,7 +3562,7 @@ class SimulationsTab(lib.Dialog):
             # change the color of the button
             for button in self.load_mask_buttons:
                 if button.objectName() == name:
-                    button.setStyleSheet("background-color : lightgreen")
+                    theme.set_button_state(button, "ok")
                     button.setText(f"{target} loaded")
                     break
 
@@ -3774,13 +3779,11 @@ class SimulationsTab(lib.Dialog):
         homogenous distribution stack (observed densities)."""
         if name == "Masks":
             self.mask_den_stack.setCurrentIndex(0)
-            self.mask_button.setStyleSheet("background-color : lightgreen")
-            self.rect_roi_button.setStyleSheet("background-color : gray")
+            self.mask_button.setChecked(True)
             self.depth_stack.setCurrentIndex(0)
         else:
             self.mask_den_stack.setCurrentIndex(1)
-            self.rect_roi_button.setStyleSheet("background-color : lightgreen")
-            self.mask_button.setStyleSheet("background-color : gray")
+            self.rect_roi_button.setChecked(True)
             t = f"Z range: {self.depth} nm" if self.depth else "Z range (nm):"
             self.depth_button.setText(t)
             if self.dim_widget.currentIndex() == 0:
@@ -5306,6 +5309,7 @@ class Window(QtWidgets.QMainWindow):
         picasso_settings_action.triggered.connect(
             self.user_settings_dialog.show
         )
+        theme.add_menu_action(file_menu)
 
         self.plugin_menu = self.menuBar().addMenu("Plugins")  # do not delete
 

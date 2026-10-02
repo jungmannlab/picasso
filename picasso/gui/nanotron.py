@@ -30,6 +30,7 @@ from PyQt6 import QtCore, QtGui, QtWidgets
 
 from .. import io, lib, render, nanotron, __version__
 from .app import run_gui
+from . import theme
 
 DEFAULT_MODEL_PATH = os.path.join(
     os.sep,
@@ -1129,6 +1130,8 @@ class Window(QtWidgets.QMainWindow):
         export_action.setShortcut(QtGui.QKeySequence.StandardKey.Save)
         export_action.triggered.connect(self.export)
         file_menu.addAction(export_action)
+        file_menu.addSeparator()
+        theme.add_menu_action(file_menu)
 
         tools_menu = menu_bar.addMenu("Tools")
         load_model_action = tools_menu.addAction("Load Model...")

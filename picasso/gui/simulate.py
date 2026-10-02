@@ -31,6 +31,7 @@ from scipy.stats import norm
 
 from .. import io, lib, simulate, __version__, docs_url
 from .app import run_gui
+from . import theme
 
 
 def fitFuncBg(x: lib.FloatArray2D, a: float, b: float) -> lib.FloatArray1D:
@@ -279,6 +280,7 @@ class Window(QtWidgets.QMainWindow):
         picasso_settings_action.triggered.connect(
             self.user_settings_dialog.show
         )
+        theme.add_menu_action(file_menu)
 
     def initUI(self):  # noqa: C901
         self.currentround = CURRENTROUND

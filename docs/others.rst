@@ -45,6 +45,19 @@ If you installed Picasso using the one click installer from `the Picasso release
 - Add your sound files to ``Contents/Frameworks/picasso/gui/notification_sounds``.
 
 
+.. _appearance:
+
+Appearance
+----------
+``File > Appearance...`` in any module sets the look of the Picasso windows:
+
+- **Theme**: *System* (default) is light or dark like the operating system and follows it when it changes; *Light* and *Dark* fix it; *Native* is the platform's own style, the look of Picasso before version 0.12.
+- **Accent color**: the color of selections, checked and default buttons, sliders and focus frames; a preset or any color (*Custom...*).
+- **Font size**: the size of the text in percent of the system's. Open windows keep their size; reopen them to fit.
+- **Density**: *Compact* reduces the spacing of the controls, e.g., for small laptop screens.
+
+Changes apply immediately to the module that is open and are saved in the ``Appearance`` section of ``~/.picasso/settings.yaml`` (see :ref:`user-settings-file`); other modules take them on when they are started next. The theme does not change the colors of the image content (rendered localizations, picks, the design canvas) or of the charts, which have their own plot settings.
+
 .. _user-settings-file:
 
 User settings file
@@ -95,6 +108,29 @@ Top level
    * - ``filename``
      - ``None`` (no sound)
      - The sound file (from ``~/.picasso/notification_sounds``) played on long-running jobs in Render and SPINNA. See *Sound notifications* above.
+
+``Appearance``
+++++++++++++++
+
+.. list-table::
+   :widths: 22 10 68
+   :header-rows: 1
+
+   * - Key
+     - Default
+     - Description
+   * - ``mode``
+     - ``System``
+     - Theme of the windows: ``System``, ``Light``, ``Dark`` or ``Native``. See :ref:`appearance`.
+   * - ``accent``
+     - ``#2A78D6``
+     - Accent color as a hexadecimal code.
+   * - ``font_scale``
+     - ``100``
+     - Font size in percent of the system's, 80 to 150.
+   * - ``density``
+     - ``Comfortable``
+     - Spacing of the controls: ``Comfortable`` or ``Compact``.
 
 ``Render``
 ++++++++++

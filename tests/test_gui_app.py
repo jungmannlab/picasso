@@ -20,9 +20,10 @@ from picasso.gui import app as gui_app
 
 
 @pytest.fixture
-def isolated(tmp_path, monkeypatch, qapp):
+def isolated(tmp_path, monkeypatch, qapp, restore_theme):
     """Log into ``tmp_path``, skip the update check, and restore the
-    global hooks (pytest installs its own) afterwards."""
+    global hooks (pytest installs its own) and the look of the
+    application afterwards."""
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("USERPROFILE", str(tmp_path))
     monkeypatch.setattr(diagnostics, "_log_file", None, raising=False)
@@ -166,4 +167,52 @@ def test_a_broken_plugin_does_not_stop_the_gui(
     assert seen["visible"]  # started anyway
     assert "no module named 'my_plugin'" in _log_text()
     assert len(shown_errors) == 1  # and the user was told
+    window.close()
+
+
+def test_the_saved_theme_is_applied_before_the_window_is_built(
+    isolated, qapp, monkeypatch
+):
+    """The window is laid out in the theme's style and colors."""
+    from PyQt6 import QtWidgets
+
+    from picasso import io
+    from picasso.gui import theme
+
+    settings = io.load_user_settings()
+    settings["Appearance"] = theme.Appearance(mode="Dark").to_settings()
+    io.save_user_settings(settings)
+    monkeypatch.setattr(gui_app, "_load_plugins", lambda w, name: None)
+    seen = {}
+
+    def window_factory():
+        seen["window"] = qapp.palette().window().color().name()
+        return QtWidgets.QMainWindow()
+
+    _stub_event_loop(monkeypatch, qapp, lambda: 0)
+
+    assert gui_app.run_gui(window_factory, "render") == 0
+    assert seen["window"] == theme.NEUTRALS["Dark"]["window"]
+    assert theme.applied() == theme.Appearance(mode="Dark")
+
+
+def test_a_failing_theme_does_not_stop_the_gui(
+    isolated, qapp, monkeypatch, shown_errors
+):
+    """An error while applying the look is reported, not fatal."""
+    from PyQt6 import QtWidgets
+
+    from picasso.gui import theme
+
+    def boom():
+        raise RuntimeError("the theme broke")
+
+    monkeypatch.setattr(theme, "current", boom)
+    monkeypatch.setattr(gui_app, "_load_plugins", lambda w, name: None)
+    window = QtWidgets.QMainWindow()
+    _stub_event_loop(monkeypatch, qapp, lambda: 0)
+
+    assert gui_app.run_gui(lambda: window, "render") == 0
+    assert "the theme broke" in _log_text()
+    assert len(shown_errors) == 1
     window.close()

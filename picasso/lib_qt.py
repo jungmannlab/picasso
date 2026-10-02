@@ -100,7 +100,14 @@ class UserSettingsDialog(Dialog):
         layout.addLayout(header)
 
         self.editor = QtWidgets.QPlainTextEdit()
-        self.editor.setFont(QtGui.QFont("Helvetica", 12))
+        # fixed width for the YAML indentation, in the size of the
+        # application's font
+        font = QtGui.QFontDatabase.systemFont(
+            QtGui.QFontDatabase.SystemFont.FixedFont
+        )
+        if self.font().pointSizeF() > 0:
+            font.setPointSizeF(self.font().pointSizeF())
+        self.editor.setFont(font)
         layout.addWidget(self.editor)
 
         button_layout = QtWidgets.QHBoxLayout()
@@ -1778,9 +1785,20 @@ class RangeSlider(QtWidgets.QWidget):
         painter = QtGui.QPainter(self)
         painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
         painter.setPen(QtCore.Qt.PenStyle.NoPen)
-        enabled = self.isEnabled()
-        groove_color = QtGui.QColor("#b0b0b0" if enabled else "#d8d8d8")
-        handle_color = QtGui.QColor("#5a5a5a" if enabled else "#b8b8b8")
+        # from the palette, so that the slider follows the theme
+        palette = self.palette()
+        if self.isEnabled():
+            groove_color = palette.color(QtGui.QPalette.ColorRole.Mid)
+            handle_color = palette.color(QtGui.QPalette.ColorRole.Highlight)
+        else:
+            groove_color = palette.color(
+                QtGui.QPalette.ColorGroup.Disabled,
+                QtGui.QPalette.ColorRole.Midlight,
+            )
+            handle_color = palette.color(
+                QtGui.QPalette.ColorGroup.Disabled,
+                QtGui.QPalette.ColorRole.Mid,
+            )
         mid_y = self.height() / 2
         radius = self.GROOVE_HEIGHT / 2
         groove = QtCore.QRectF(
@@ -2480,6 +2498,15 @@ def adjust_widget_size(
     """
     intended_width = size_hint.width() + width_offset
     intended_height = size_hint.height() + height_offset
+    # a vertical scroll bar that is not overlaid (as it is on macOS'
+    # native style) takes width from the contents
+    style = widget.style()
+    if widget.findChild(QtWidgets.QScrollArea) is not None and not (
+        style.styleHint(QtWidgets.QStyle.StyleHint.SH_ScrollBar_Transient)
+    ):
+        intended_width += style.pixelMetric(
+            QtWidgets.QStyle.PixelMetric.PM_ScrollBarExtent
+        )
     # adjust to the screen size if necessary
     screen = QtWidgets.QApplication.primaryScreen()
     screen_height = 1000 if screen is None else screen.size().height()

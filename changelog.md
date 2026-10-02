@@ -1,12 +1,13 @@
 # Changelog
 
-Last change: 01-OCT-2026 CEST
+Last change: 02-OCT-2026 CEST
 
 ## 0.12.0
 
 **TODO**: Describe the general overview - fast render, etc.
 
 ### General
+- New look of all Picasso windows: a light and a dark theme that follow the operating system, with a selectable accent color, font size and density (`File > Appearance...`); the platform's own style remains available as *Native*. See the [documentation](https://picassosr.readthedocs.io/en/latest/others.html#appearance).
 - Removed support for Python 3.10 (Python 3.11–3.14 are supported).
 - All docstrings of public functions have been improved to match the NumPy style.
 - Test version documentation online.

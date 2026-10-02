@@ -47,6 +47,7 @@ from .. import (
 from .. import transforms as transforms_mod
 from ..fitting import precision, splinefit
 from .app import run_gui
+from . import theme
 from PyQt6 import QtCore, QtGui, QtWidgets
 from playsound3 import playsound
 
@@ -6203,11 +6204,13 @@ class Window(QtWidgets.QMainWindow):
         self.frame_slider.setAttribute(
             QtCore.Qt.WidgetAttribute.WA_LayoutUsesWidgetRect
         )
+        # slim to fit the row; colors from the palette, so that the
+        # slider follows the theme
         self.frame_slider.setStyleSheet(
             """
             QSlider::groove:horizontal {
                 height: 4px;
-                background: #b0b0b0;
+                background: palette(mid);
                 border-radius: 2px;
             }
             QSlider::handle:horizontal {
@@ -6215,7 +6218,10 @@ class Window(QtWidgets.QMainWindow):
                 height: 12px;
                 margin: -5px 0;
                 border-radius: 3px;
-                background: #5a5a5a;
+                background: palette(highlight);
+            }
+            QSlider::handle:horizontal:disabled {
+                background: palette(mid);
             }
             """
         )
@@ -6248,19 +6254,22 @@ class Window(QtWidgets.QMainWindow):
         self.contrast_auto_button.setStyleSheet(
             """
             QToolButton {
-                border: 1px solid #b0b0b0;
+                border: 1px solid palette(mid);
                 border-radius: 3px;
                 padding: 0px 4px;
                 background: transparent;
             }
             QToolButton:checked {
-                border-color: #5a5a5a;
-                background: #5a5a5a;
-                color: white;
+                border-color: palette(highlight);
+                background: palette(highlight);
+                color: palette(highlighted-text);
             }
             QToolButton:disabled {
-                border-color: #d8d8d8;
-                color: #b8b8b8;
+                border-color: palette(midlight);
+                color: palette(mid);
+            }
+            QToolButton:checked:disabled {
+                background: palette(midlight);
             }
             """
         )
@@ -6696,6 +6705,7 @@ class Window(QtWidgets.QMainWindow):
         picasso_settings_action.triggered.connect(
             self.user_settings_dialog.show
         )
+        theme.add_menu_action(file_menu)
         open_config_action = file_menu.addAction(
             "Open camera config file location"
         )
