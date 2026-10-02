@@ -121,9 +121,9 @@ This tab allows the user to create a density/binary mask capable of recovering t
 1. Click *Load molecules* to open the .hdf5 file with molecules/localizations that will be used to generate the mask. 
 2. Adjust bin size and Gaussian blur to be applied to the mask. Since v0.9.6, the user can choose anisotropic bin size and Gaussian blur with one value in the xy plane and another value in the z direction.
 3. The mask can be generated in 3D and/or converted to a binary mask.
-4. Click *Generate mask*. This may take a while, especially for a 3D mask. The mask will be displayed automatically. The legend in the *Navigation* box displays the probability of finding a molecular target per pixel/voxel. 
+4. Click *Generate mask*. This may take a while, especially for a 3D mask. The mask will be displayed automatically. The legend in the *Display* box displays the probability of finding a molecular target per pixel/voxel. 
 5. The density mask can be thresholded at any user-defined probability value. By default, the Otsu threshold is used (Otsu. *Automatica*, 1975). 
-6. To explore the mask, use the buttons in the *Navigation* box. Alternatively, arrow keys can be used too. For 3D masks, the user can slice through individual z planes using the slider.
+6. To explore the mask, scroll (or pinch on a trackpad) over the preview to zoom at the cursor, drag to pan and double-click to show the whole mask again. With the preview focused, the arrow keys pan, +/- zoom and 0 fits the whole mask. The position and probability of the pixel under the cursor are shown below the preview. For 3D masks, the user can slice through individual z planes using the slider in the *Display* box.
 7. Once the mask is ready, click *Save mask*. This saves a numpy array in the .npy format.
 
 

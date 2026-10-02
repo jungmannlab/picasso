@@ -43,10 +43,10 @@ from . import theme
 
 matplotlib.use("agg")
 
-MASK_PREVIEW_SIZE = 600
-MASK_PREVIEW_ZOOM = 9 / 7
-MASK_PREVIEW_PADDING = 0.3
-MASK_INFO_OFFSET = 18
+MASK_PREVIEW_MIN_SIZE = 300  # display pixels
+MASK_PREVIEW_WHEEL_ZOOM = 1.2  # zoom factor per mouse wheel notch
+MASK_PREVIEW_MIN_PX = 5  # max zoom: mask pixels across the preview
+MASK_PREVIEW_KEY_PAN = 0.2  # arrow key pan, fraction of the preview
 
 STRUCTURE_PREVIEW_SIZE = 512
 STRUCTURE_PREVIEW_SCALING = 0.8 * 1.44
@@ -205,135 +205,318 @@ def check_search_space_loaded(f: Callable) -> Callable:
     return wrapper
 
 
-class ignoreArrowsSpinBox(QtWidgets.QSpinBox):
-    """Convenience class that ignores the right and left arrow keys.
-    Used in MaskGeneratorTab."""
+class MaskPreview(QtWidgets.QWidget):
+    """Interactive display of the mask.
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-
-    def keyPressEvent(self, event):
-        if event.key() in (QtCore.Qt.Key.Key_Left, QtCore.Qt.Key.Key_Right):
-            self.clearFocus()
-        else:
-            super().keyPressEvent(event)
-
-
-class ignoreArrowsDoubleSpinBox(QtWidgets.QDoubleSpinBox):
-    """Convenience class that ignores the right and left arrow keys.
-    Used in MaskGeneratorTab."""
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-
-    def keyPressEvent(self, event):
-        if event.key() in (QtCore.Qt.Key.Key_Left, QtCore.Qt.Key.Key_Right):
-            self.clearFocus()
-        else:
-            super().keyPressEvent(event)
-
-
-class MaskPreview(QtWidgets.QLabel):
-    """Rendering window for masking.
+    Scroll (or pinch) to zoom at the cursor, drag to pan, double-click
+    to fit the whole mask. When the preview has focus, the arrow keys
+    pan, +/- zoom and 0 fits the mask. The mask value under the cursor
+    is shown in ``mask_tab.cursor_info``.
 
     ...
 
     Attributes
     ----------
+    center : tuple[float, float]
+        Mask point ``(x, y)``, in mask pixels, shown at the widget
+        center.
+    fit : bool
+        Whether the view shows the whole mask; kept on resizing.
     image : lib.FloatArray2D
-        Currently shown image of the mask.
+        Displayed 2D mask (sum projection or z-slice of a 3D mask).
     mask_tab : MaskGeneratorTab
         Parent tab, used for generating masks.
     qimage : QtGui.QImage
-        Currently shown image of the mask.
-    viewport : tuple
-        FOV of the mask ``((y_min, x_min), (y_max, x_max))``.
+        Colormapped ``image``, one image pixel per mask pixel.
+    scale : float
+        Zoom, display pixels per mask pixel.
     """
 
     def __init__(self, mask_tab: MaskGeneratorTab) -> None:
         super().__init__(mask_tab)
         self.mask_tab = mask_tab
-        self.qimage = None  # currently shown image of the mask (QImage)
-        self.image = (
-            None  # currently shown image of the mask (lib.FloatArray2D)
+        self.image = None
+        self.qimage = None
+        self.scale = 1.0
+        self.center = (0.0, 0.0)
+        self.fit = True
+        self._drag_pos = None
+        self.setMinimumSize(MASK_PREVIEW_MIN_SIZE, MASK_PREVIEW_MIN_SIZE)
+        self.setSizePolicy(
+            QtWidgets.QSizePolicy.Policy.Expanding,
+            QtWidgets.QSizePolicy.Policy.Expanding,
         )
-        self.viewport = None
-        self.setFixedWidth(MASK_PREVIEW_SIZE)
-        self.setFixedHeight(MASK_PREVIEW_SIZE)
-
-    def render_image(self) -> None:
-        """Render image in the preview."""
-        self.mask_tab.on_preview_updated(self.image)
-        img = self.image
-        img = self.to_2D(img)
-        img = render.to_8bit(img)
-        img = render.apply_colormap(img, "magma")
-        self.qimage = render.rgb_to_qimage(img)
-        self.qimage = self.qimage.scaled(
-            self.width(),
-            self.height(),
-            QtCore.Qt.AspectRatioMode.KeepAspectRatio,  # ByExpanding,
-        )
-        self.qimage = self.draw_scalebar(self.qimage)
-        self.setPixmap(QtGui.QPixmap.fromImage(self.qimage))
+        self.setMouseTracking(True)
+        self.setFocusPolicy(QtCore.Qt.FocusPolicy.StrongFocus)
 
     def on_mask_generated(self, full_fov: bool = True) -> None:
-        """Render the whole FOV with the new mask."""
+        """Display the current mask, either fitted to the widget or
+        keeping the current view."""
         if self.mask_tab.mask is None:
             return
 
+        self.image = self.to_2D(self.mask_tab.mask)
+        img = render.to_8bit(self.image / (self.image.max() or 1))
+        img = render.apply_colormap(img, "magma")
+        self.qimage = render.rgb_to_qimage(img)
+        self.mask_tab.on_preview_updated(self.image)
+        self.setCursor(QtCore.Qt.CursorShape.OpenHandCursor)
         if full_fov:
-            self.image = self.mask_tab.mask.copy()
-            self.viewport = (
-                (0, 0),
-                (self.image.shape[1], self.image.shape[0]),
-            )
+            self.fit_view()
         else:
-            if self.viewport is None:
-                self.viewport = (
-                    (0, 0),
-                    (self.mask_tab.mask.shape[0], self.mask_tab.mask.shape[1]),
-                )
-            (y_min, x_min), (y_max, x_max) = self.viewport
-            self.image = self.mask_tab.mask.copy()[y_min:y_max, x_min:x_max]
-        self.render_image()
+            self.set_view(self.scale, self.center)
 
-    def draw_scalebar(self, qimage: QtGui.QImage) -> QtGui.QImage:
-        if not self.mask_tab.scalebar_check.isChecked():
-            return qimage
+    def clear(self) -> None:
+        """Remove the displayed mask."""
+        self.image = None
+        self.qimage = None
+        self._drag_pos = None
+        self.unsetCursor()
+        self.mask_tab.cursor_info.setText("")
+        self.update()
 
-        binsize = self.mask_tab.mask_generator.binsize
-        if isinstance(binsize, (int, float)):
-            pixelsize = binsize
-        else:
-            pixelsize = binsize[0]
-        qimage = render.draw_scalebar(
-            qimage,
-            viewport=self.viewport,
-            scalebar_length_nm=self.mask_tab.scalebar_length.value(),
-            pixelsize=pixelsize,
-        )
-        return qimage
-
-    def to_2D(self, image: lib.FloatArray2D) -> lib.FloatArray2D:
+    def to_2D(
+        self, image: lib.FloatArray2D | lib.FloatArray3D
+    ) -> lib.FloatArray2D:
         """Convert mask to 2D that can be displayed (viewed from +z)."""
         if image.ndim == 3:
-            z_idx = (
-                self.mask_tab.zslice_slider.value()
-                if self.mask_tab.zslice_check.isChecked()
-                else None
-            )
-            if z_idx is None:
-                image = np.sum(image, axis=2)
+            if self.mask_tab.zslice_check.isChecked():
+                image = image[:, :, self.mask_tab.zslice_slider.value()]
             else:
-                image = image[:, :, z_idx]
+                image = np.sum(image, axis=2)
         elif image.ndim != 2:
             raise IndexError("Image is neither 3D or 2D.")
-        image /= image.max()
-        return image
+        return np.asarray(image, dtype=np.float64)
+
+    def fit_scale(self) -> float:
+        """Zoom at which the whole mask fits the widget."""
+        h, w = self.image.shape
+        return min(self.width() / w, self.height() / h)
+
+    def fit_view(self) -> None:
+        """Show the whole mask."""
+        if self.image is None:
+            return
+        h, w = self.image.shape
+        self.set_view(self.fit_scale(), (w / 2, h / 2))
+
+    def set_view(self, scale: float, center: tuple[float, float]) -> None:
+        """Set the zoom and center, limited so that the mask fills
+        the widget along each axis it does not fit in."""
+        if self.image is None:
+            return
+        h, w = self.image.shape
+        fit_scale = self.fit_scale()
+        max_scale = max(
+            fit_scale, min(self.width(), self.height()) / MASK_PREVIEW_MIN_PX
+        )
+        self.scale = min(max(scale, fit_scale), max_scale)
+        self.fit = isclose(self.scale, fit_scale)
+        clamped = []
+        for c, n, size in zip(center, (w, h), (self.width(), self.height())):
+            half = size / (2 * self.scale)
+            if 2 * half >= n:
+                clamped.append(n / 2)
+            else:
+                clamped.append(min(max(c, half), n - half))
+        self.center = tuple(clamped)
+        self.update()
+
+    def zoom(
+        self, factor: float, anchor: QtCore.QPointF | None = None
+    ) -> None:
+        """Zoom by ``factor``, keeping the mask point under ``anchor``
+        (widget coordinates; default: widget center) in place."""
+        if self.image is None:
+            return
+        if anchor is None:
+            anchor = QtCore.QPointF(self.width() / 2, self.height() / 2)
+        x, y = self.to_mask(anchor)
+        scale = self.scale * factor
+        dx = anchor.x() - self.width() / 2
+        dy = anchor.y() - self.height() / 2
+        self.set_view(scale, (x - dx / scale, y - dy / scale))
+
+    def pan(self, dx: float, dy: float) -> None:
+        """Move the mask by ``(dx, dy)`` display pixels."""
+        if self.image is None:
+            return
+        cx, cy = self.center
+        self.set_view(self.scale, (cx - dx / self.scale, cy - dy / self.scale))
+
+    def to_mask(self, pos: QtCore.QPointF) -> tuple[float, float]:
+        """Convert widget coordinates to mask pixels ``(x, y)``."""
+        cx, cy = self.center
+        x = cx + (pos.x() - self.width() / 2) / self.scale
+        y = cy + (pos.y() - self.height() / 2) / self.scale
+        return x, y
+
+    def pixelsize(self) -> float:
+        """Mask pixel size in the xy plane (nm)."""
+        binsize = self.mask_tab.mask_generator.binsize
+        if isinstance(binsize, (int, float)):
+            return binsize
+        return binsize[0]
+
+    def render_view(self) -> tuple[QtGui.QImage, QtCore.QPointF] | None:
+        """Render the visible part of the mask at display resolution,
+        with the scale bar if enabled.
+
+        Returns
+        -------
+        view : QtGui.QImage
+            Visible part of the mask.
+        origin : QtCore.QPointF
+            Position of ``view`` in the widget.
+        """
+        if self.qimage is None:
+            return None
+        h, w = self.image.shape
+        x_min, y_min = self.to_mask(QtCore.QPointF(0, 0))
+        x_max, y_max = self.to_mask(
+            QtCore.QPointF(self.width(), self.height())
+        )
+        x_min, y_min = max(x_min, 0), max(y_min, 0)
+        x_max, y_max = min(x_max, w), min(y_max, h)
+        view_w = round((x_max - x_min) * self.scale)
+        view_h = round((y_max - y_min) * self.scale)
+        if view_w < 1 or view_h < 1:
+            return None
+        view = QtGui.QImage(view_w, view_h, QtGui.QImage.Format.Format_RGB32)
+        painter = QtGui.QPainter(view)
+        # no smoothing: each mask pixel stays a crisp square
+        painter.scale(self.scale, self.scale)
+        painter.translate(-x_min, -y_min)
+        painter.drawImage(QtCore.QPointF(0, 0), self.qimage)
+        painter.end()
+        if self.mask_tab.scalebar_check.isChecked():
+            view = render.draw_scalebar(
+                view,
+                viewport=((y_min, x_min), (y_max, x_max)),
+                scalebar_length_nm=self.mask_tab.scalebar_length.value(),
+                pixelsize=self.pixelsize(),
+            )
+        cx, cy = self.center
+        origin = QtCore.QPointF(
+            round((x_min - cx) * self.scale + self.width() / 2),
+            round((y_min - cy) * self.scale + self.height() / 2),
+        )
+        return view, origin
+
+    def paintEvent(self, event: QtGui.QPaintEvent) -> None:
+        painter = QtGui.QPainter(self)
+        rendered = self.render_view()
+        if rendered is None:
+            painter.setPen(self.palette().color(QtGui.QPalette.ColorRole.Mid))
+            painter.drawText(
+                self.rect(),
+                QtCore.Qt.AlignmentFlag.AlignCenter,
+                "Load molecules and generate a mask to preview it here.",
+            )
+        else:
+            view, origin = rendered
+            painter.drawImage(origin, view)
+        painter.end()
+
+    def resizeEvent(self, event: QtGui.QResizeEvent) -> None:
+        if self.image is not None:
+            if self.fit:
+                self.fit_view()
+            else:
+                self.set_view(self.scale, self.center)
+        super().resizeEvent(event)
+
+    def wheelEvent(self, event: QtGui.QWheelEvent) -> None:
+        if self.image is None:
+            return
+        notches = event.angleDelta().y() / 120
+        self.zoom(MASK_PREVIEW_WHEEL_ZOOM**notches, event.position())
+        self.update_cursor_info(event.position())
+
+    def event(self, event: QtCore.QEvent) -> bool:
+        # trackpad pinch (macOS)
+        if (
+            event.type() == QtCore.QEvent.Type.NativeGesture
+            and event.gestureType()
+            == QtCore.Qt.NativeGestureType.ZoomNativeGesture
+        ):
+            self.zoom(1 + event.value(), event.position())
+            return True
+        return super().event(event)
+
+    def mousePressEvent(self, event: QtGui.QMouseEvent) -> None:
+        if (
+            event.button() == QtCore.Qt.MouseButton.LeftButton
+            and self.image is not None
+        ):
+            self._drag_pos = event.position()
+            self.setCursor(QtCore.Qt.CursorShape.ClosedHandCursor)
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event: QtGui.QMouseEvent) -> None:
+        if self._drag_pos is not None:
+            delta = event.position() - self._drag_pos
+            self._drag_pos = event.position()
+            self.pan(delta.x(), delta.y())
+        self.update_cursor_info(event.position())
+
+    def mouseReleaseEvent(self, event: QtGui.QMouseEvent) -> None:
+        if event.button() == QtCore.Qt.MouseButton.LeftButton:
+            self._drag_pos = None
+            if self.image is not None:
+                self.setCursor(QtCore.Qt.CursorShape.OpenHandCursor)
+        super().mouseReleaseEvent(event)
+
+    def mouseDoubleClickEvent(self, event: QtGui.QMouseEvent) -> None:
+        self.fit_view()
+
+    def leaveEvent(self, event: QtCore.QEvent) -> None:
+        self.mask_tab.cursor_info.setText("")
+        super().leaveEvent(event)
+
+    def keyPressEvent(self, event: QtGui.QKeyEvent) -> None:
+        step = MASK_PREVIEW_KEY_PAN * min(self.width(), self.height())
+        key = event.key()
+        Key = QtCore.Qt.Key
+        if key == Key.Key_Left:
+            self.pan(step, 0)
+        elif key == Key.Key_Right:
+            self.pan(-step, 0)
+        elif key == Key.Key_Up:
+            self.pan(0, step)
+        elif key == Key.Key_Down:
+            self.pan(0, -step)
+        elif key in (Key.Key_Plus, Key.Key_Equal):
+            self.zoom(MASK_PREVIEW_WHEEL_ZOOM)
+        elif key == Key.Key_Minus:
+            self.zoom(1 / MASK_PREVIEW_WHEEL_ZOOM)
+        elif key in (Key.Key_0, Key.Key_Home):
+            self.fit_view()
+        else:
+            super().keyPressEvent(event)
+
+    def update_cursor_info(self, pos: QtCore.QPointF) -> None:
+        """Show the position and mask value under the cursor."""
+        if self.image is None:
+            return
+        x, y = self.to_mask(pos)
+        h, w = self.image.shape
+        if not (0 <= x < w and 0 <= y < h):
+            self.mask_tab.cursor_info.setText("")
+            return
+        pixelsize = self.pixelsize()
+        value = self.image[int(y), int(x)]
+        self.mask_tab.cursor_info.setText(
+            f"x = {x * pixelsize / 1e3:.2f} μm, "
+            f"y = {y * pixelsize / 1e3:.2f} μm, "
+            f"p = {value:.2E}"
+        )
 
     def save_current_view(self) -> None:
-        """Save self.image (QImage, the current view) as png or tif."""
+        """Save the current view as png or tif."""
+        rendered = self.render_view()
+        if rendered is None:
+            return
         path, _ = lib.get_save_filename_ext_dialog(
             self,
             "Save current view",
@@ -342,77 +525,7 @@ class MaskPreview(QtWidgets.QLabel):
         )
         if path:
             self.mask_tab.window.pwd = os.path.dirname(path)
-            self.qimage.save(path)
-
-    def zoom_in(self) -> None:
-        """Zoom in the viewport."""
-        self.zoom(1 / MASK_PREVIEW_ZOOM)
-
-    def zoom_out(self) -> None:
-        """Zoom out the viewport."""
-        self.zoom(MASK_PREVIEW_ZOOM)
-
-    def zoom(self, factor) -> None:
-        """Zoom the viewport by the given factor."""
-        viewport = render.zoom_viewport(self.viewport, factor)
-        self.viewport = self.verify_boundaries(viewport)
-        (y_min, x_min), (y_max, x_max) = self.viewport
-        self.image = self.mask_tab.mask.copy()[y_min:y_max, x_min:x_max]
-        self.render_image()
-
-    def up(self) -> None:
-        """Move viewport one unit up."""
-        self.move_viewport(-MASK_PREVIEW_PADDING, 0)
-
-    def down(self) -> None:
-        """Move viewport one unit down."""
-        self.move_viewport(MASK_PREVIEW_PADDING, 0)
-
-    def left(self) -> None:
-        """Move viewport one unit left."""
-        self.move_viewport(0, -MASK_PREVIEW_PADDING)
-
-    def right(self) -> None:
-        """Move viewport one unit right."""
-        self.move_viewport(0, MASK_PREVIEW_PADDING)
-
-    def move_viewport(self, dy: float, dx: float) -> None:
-        """Move viewport by proportions given by dy and dx."""
-        vh, vw = render.viewport_size(self.viewport)
-        dy *= vh
-        dx *= vw
-        viewport = render.shift_viewport(self.viewport, int(dx), int(dy))
-        self.viewport = self.verify_boundaries(viewport)
-        (y_min, x_min), (y_max, x_max) = self.viewport
-        self.image = self.mask_tab.mask.copy()[y_min:y_max, x_min:x_max]
-        self.render_image()
-
-    def verify_boundaries(
-        self,
-        viewport: tuple[tuple[int, int], tuple[int, int]],
-    ) -> tuple[tuple[int, int], tuple[int, int]]:
-        """Check if the boundaries lie within the mask boundaries.
-        Return the verified boundaries."""
-        vh, vw = render.viewport_size(viewport)
-        ((y_min, x_min), (y_max, x_max)) = viewport
-        vh = y_max - y_min
-        vw = x_max - x_min
-        if x_min < 0:
-            x_min = 0
-            x_max = min(vw, self.mask_tab.mask.shape[1])
-        if y_min < 0:
-            y_min = 0
-            y_max = min(vh, self.mask_tab.mask.shape[0])
-        bounds_x_y = self.mask_tab.mask.shape
-        if x_max > bounds_x_y[1]:
-            x_max = bounds_x_y[1]
-            x_min = max(0, x_max - vw)
-        if y_max > bounds_x_y[0]:
-            y_max = bounds_x_y[0]
-            y_min = max(0, y_max - vh)
-
-        viewport = ((round(y_min), round(x_min)), (round(y_max), round(x_max)))
-        return viewport
+            rendered[0].save(path)
 
 
 class MaskGeneratorTab(lib.Dialog):
@@ -422,6 +535,11 @@ class MaskGeneratorTab(lib.Dialog):
 
     Attributes
     ----------
+    cursor_info : QtWidgets.QLabel
+        Position and mask value under the cursor in the preview.
+    fit_view_button, save_view_button : QtWidgets.QToolButton
+        Buttons that fit the whole mask in the preview and save the
+        current view.
     generate_mask_button : QtWidgets.QPushButton
         Button that generates the mask.
     legend : FigureCanvas
@@ -441,14 +559,12 @@ class MaskGeneratorTab(lib.Dialog):
         Size of the Gaussian blur (nm) in each dimension.
     mask_generator : spinna.MaskGenerator
         Mask generator.
-    mask_info_display1/2 : QtWidgets.QLabel
-        Display the mask info.
+    mask_area_label, mask_area_value, mask_dims_value : QtWidgets.QLabel
+        Display the mask area/volume and dimensions.
     mask_ndim : QtWidgets.QComboBox
         Dimensionality of the mask (2D/3D).
     mask_type : QtWidgets.QComboBox
         Type of the mask (binary or density map).
-    navigation_buttons : list
-        List of navigation buttons.
     preview : MaskPreview
         Displays the mask.
     save_mask_button : QtWidgets.QPushButton
@@ -469,7 +585,7 @@ class MaskGeneratorTab(lib.Dialog):
     def __init__(self, window: QtWidgets.QMainWindow) -> None:
         super().__init__(window)
         self.setAutoFillBackground(True)
-        layout = QtWidgets.QGridLayout(self)
+        layout = QtWidgets.QHBoxLayout(self)
         self.setLayout(layout)
         self.preview = MaskPreview(self)
         self.window = window
@@ -482,32 +598,56 @@ class MaskGeneratorTab(lib.Dialog):
 
         # PREVIEW
         preview_box = QtWidgets.QGroupBox("Preview")
-        layout.addWidget(preview_box, 0, 0, 3, 1)
-        preview_grid = QtWidgets.QGridLayout(preview_box)
-        preview_grid.addWidget(lib.HelpButton(self.DOCS_URL), 0, 0)
-        preview_grid.addWidget(self.preview, 1, 0, 1, 3)
+        layout.addWidget(preview_box, 1)
+        preview_layout = QtWidgets.QVBoxLayout(preview_box)
+        preview_layout.addWidget(self.preview, 1)
 
-        # scalebar
-        self.scalebar_check = QtWidgets.QCheckBox("Show scale bar")
-        self.scalebar_check.setChecked(False)
-        self.scalebar_check.setEnabled(False)
-        self.scalebar_check.stateChanged.connect(self.preview.render_image)
-        preview_grid.addWidget(self.scalebar_check, 2, 0)
+        preview_bar = QtWidgets.QHBoxLayout()
+        preview_layout.addLayout(preview_bar)
+        self.cursor_info = QtWidgets.QLabel("")
+        self.cursor_info.setToolTip(
+            "Position and probability of the mask pixel under the cursor\n"
+            "(for a 3D mask without z-slicing: summed over z)."
+        )
+        preview_bar.addWidget(self.cursor_info, 1)
+        hint = QtWidgets.QLabel(
+            "Scroll to zoom · drag to pan · double-click to fit"
+        )
+        hint.setEnabled(False)  # dimmed
+        hint.setToolTip(
+            "With the preview focused (click it): arrow keys pan,\n"
+            "+/- zoom and 0 fits the whole mask."
+        )
+        preview_bar.addWidget(hint)
 
-        label = QtWidgets.QLabel("Scale bar length (nm):")
-        label.setAlignment(QtCore.Qt.AlignmentFlag.AlignRight)
-        preview_grid.addWidget(label, 2, 1)
-        self.scalebar_length = ignoreArrowsSpinBox()
-        self.scalebar_length.setEnabled(False)
-        self.scalebar_length.setRange(1, 20_000)
-        self.scalebar_length.setValue(1_000)
-        self.scalebar_length.valueChanged.connect(self.preview.render_image)
-        preview_grid.addWidget(self.scalebar_length, 2, 2)
+        self.fit_view_button = QtWidgets.QToolButton()
+        self.fit_view_button.setText("Fit")
+        _icon_only(
+            self.fit_view_button,
+            "fit-view",
+            "Show the whole mask (double-click the preview).",
+        )
+        self.fit_view_button.clicked.connect(self.preview.fit_view)
+        preview_bar.addWidget(self.fit_view_button)
+        self.save_view_button = QtWidgets.QToolButton()
+        self.save_view_button.setText("Save view")
+        _icon_only(
+            self.save_view_button,
+            "export-view",
+            "Save the current view as an image (.png or .tif).",
+        )
+        self.save_view_button.clicked.connect(self.preview.save_current_view)
+        preview_bar.addWidget(self.save_view_button)
+        for button in (self.fit_view_button, self.save_view_button):
+            button.setEnabled(False)
+        preview_bar.addWidget(lib.HelpButton(self.DOCS_URL))
+
+        controls = QtWidgets.QVBoxLayout()
+        layout.addLayout(controls, 0)
 
         # MASK PARAMETERS AND LOADING
         mask_box = QtWidgets.QGroupBox("Parameters")
-        mask_box.setFixedHeight(380)
-        layout.addWidget(mask_box, 0, 1)
+        controls.addWidget(mask_box)
         mask_layout = QtWidgets.QGridLayout(mask_box)
 
         # load molecules
@@ -539,20 +679,20 @@ class MaskGeneratorTab(lib.Dialog):
         mask_layout.addWidget(self.z_label, 1, 2)
 
         # mask pixel / voxel size
-        pixel_label = QtWidgets.QLabel("Mask pixel/voxel size (nm):")
+        pixel_label = QtWidgets.QLabel("Pixel/voxel size (nm):")
         pixel_label.setToolTip(
             "Size of the mask pixel/voxel in nm.\n"
             "Can be controlled in z axis separately for a 3D mask,\n"
             "see the anisotropic mask option above."
         )
         mask_layout.addWidget(pixel_label, 2, 0)
-        self.mask_binsize_xy = ignoreArrowsSpinBox()
+        self.mask_binsize_xy = QtWidgets.QSpinBox()
         self.mask_binsize_xy.setRange(1, 10_000)
         self.mask_binsize_xy.setSingleStep(1)
         self.mask_binsize_xy.setValue(50)
         self.mask_binsize_xy.valueChanged.connect(self.on_mask_binsize_changed)
         mask_layout.addWidget(self.mask_binsize_xy, 2, 1)
-        self.mask_binsize_z = ignoreArrowsSpinBox()
+        self.mask_binsize_z = QtWidgets.QSpinBox()
         self.mask_binsize_z.setRange(1, 10_000)
         self.mask_binsize_z.setSingleStep(1)
         self.mask_binsize_z.setValue(50)
@@ -567,13 +707,13 @@ class MaskGeneratorTab(lib.Dialog):
             "see the anisotropic mask option above."
         )
         mask_layout.addWidget(blur_label, 3, 0)
-        self.mask_blur_xy = ignoreArrowsSpinBox()
+        self.mask_blur_xy = QtWidgets.QSpinBox()
         self.mask_blur_xy.setRange(0, 10_000)
         self.mask_blur_xy.setSingleStep(1)
         self.mask_blur_xy.setValue(500)
         self.mask_blur_xy.valueChanged.connect(self.on_mask_blur_changed)
         mask_layout.addWidget(self.mask_blur_xy, 3, 1)
-        self.mask_blur_z = ignoreArrowsSpinBox()
+        self.mask_blur_z = QtWidgets.QSpinBox()
         self.mask_blur_z.setRange(0, 10_000)
         self.mask_blur_z.setSingleStep(1)
         self.mask_blur_z.setValue(500)
@@ -591,7 +731,7 @@ class MaskGeneratorTab(lib.Dialog):
             widget.setVisible(False)
 
         # ndimensions:
-        ndim_label = QtWidgets.QLabel("Mask dimensionality:")
+        ndim_label = QtWidgets.QLabel("Dimensionality:")
         ndim_label.setToolTip(
             "Choose between a 2D or 3D mask.\n"
             "Only available if 3D data is loaded."
@@ -624,20 +764,30 @@ class MaskGeneratorTab(lib.Dialog):
         mask_layout.addWidget(self.generate_mask_button, 6, 0, 1, 3)
 
         # threshold
-        threshold_layout = QtWidgets.QHBoxLayout()
-        mask_layout.addLayout(threshold_layout, 7, 0, 1, 3)
         self.thresholding_check = QtWidgets.QCheckBox("Apply threshold")
         self.thresholding_check.setToolTip(
             "Set minimum probability cutoff in the mask?"
         )
         self.thresholding_check.setChecked(False)
         self.thresholding_check.stateChanged.connect(self.apply_threshold)
-        threshold_layout.addWidget(self.thresholding_check)
-        self.thresholding_value = ignoreArrowsDoubleSpinBox()
+        mask_layout.addWidget(self.thresholding_check, 7, 0)
+        self.thresholding_value = QtWidgets.QDoubleSpinBox()
         self.thresholding_value.setRange(0, 1)
         self.thresholding_value.setSingleStep(1e-8)
         self.thresholding_value.setDecimals(8)
-        threshold_layout.addWidget(self.thresholding_value)
+        mask_layout.addWidget(self.thresholding_value, 7, 1, 1, 2)
+
+        # save mask
+        self.save_mask_button = QtWidgets.QPushButton("Save mask")
+        self.save_mask_button.setIcon(theme.icon("save"))
+        self.save_mask_button.released.connect(self.save_mask)
+        self.save_mask_button.setEnabled(False)
+        mask_layout.addWidget(self.save_mask_button, 8, 0, 1, 3)
+
+        # DISPLAY
+        display_box = QtWidgets.QGroupBox("Display")
+        controls.addWidget(display_box)
+        display_layout = QtWidgets.QGridLayout(display_box)
 
         # z slicing of a 3D mask
         self.zslice_check = QtWidgets.QCheckBox("Show z-slice")
@@ -645,7 +795,7 @@ class MaskGeneratorTab(lib.Dialog):
         self.zslice_check.setChecked(False)
         self.zslice_check.stateChanged.connect(self.apply_zslice)
         self.zslice_check.setVisible(False)
-        mask_layout.addWidget(self.zslice_check, 8, 0)
+        display_layout.addWidget(self.zslice_check, 0, 0)
 
         self.zslice_slider = QtWidgets.QSlider(
             QtCore.Qt.Orientation.Horizontal
@@ -655,67 +805,24 @@ class MaskGeneratorTab(lib.Dialog):
         self.zslice_slider.setValue(0)
         self.zslice_slider.valueChanged.connect(self.apply_zslice)
         self.zslice_slider.setVisible(False)
-        mask_layout.addWidget(self.zslice_slider, 8, 1, 1, 2)
+        display_layout.addWidget(self.zslice_slider, 0, 1)
 
-        # save mask
-        self.save_mask_button = QtWidgets.QPushButton("Save mask")
-        self.save_mask_button.setIcon(theme.icon("save"))
-        self.save_mask_button.released.connect(self.save_mask)
-        self.save_mask_button.setEnabled(False)
-        mask_layout.addWidget(self.save_mask_button, 9, 0, 1, 3)
-
-        # PREVIEW NAVIGATION
-        navigation_box = QtWidgets.QGroupBox("Navigation")
-        layout.addWidget(navigation_box, 1, 1)
-        navigation_layout = QtWidgets.QGridLayout(navigation_box)
-
-        # Full FOV (reset)
-        full_fov_button = QtWidgets.QPushButton("Full FOV")
-        full_fov_button.setIcon(theme.icon("fit-view"))
-        full_fov_button.setToolTip("Reset to full field of view.")
-        full_fov_button.released.connect(self.preview.on_mask_generated)
-        navigation_layout.addWidget(full_fov_button, 0, 0, 1, 2)
-
-        # Save current view
-        save_view_button = QtWidgets.QPushButton("Save current view")
-        save_view_button.setIcon(theme.icon("export-view"))
-        save_view_button.setToolTip(
-            "Save the current view as an image (.png or .tif)."
+        # scalebar
+        self.scalebar_check = QtWidgets.QCheckBox("Scale bar (nm):")
+        self.scalebar_check.setChecked(False)
+        self.scalebar_check.setEnabled(False)
+        self.scalebar_check.stateChanged.connect(
+            lambda _: self.preview.update()
         )
-        save_view_button.released.connect(self.preview.save_current_view)
-        navigation_layout.addWidget(save_view_button, 0, 2, 1, 2)
-
-        # Zoom in/out
-        zoom_in_button = QtWidgets.QPushButton("Zoom in")
-        zoom_in_button.setIcon(theme.icon("tool-zoom"))
-        zoom_in_button.released.connect(self.preview.zoom_in)
-        navigation_layout.addWidget(zoom_in_button, 1, 0, 1, 2)
-        zoom_out_button = QtWidgets.QPushButton("Zoom out")
-        zoom_out_button.setIcon(theme.icon("zoom-out"))
-        zoom_out_button.released.connect(self.preview.zoom_out)
-        navigation_layout.addWidget(zoom_out_button, 1, 2, 1, 2)
-
-        # Padding (move viewport)
-        up_button = QtWidgets.QPushButton("Up")
-        up_button.setToolTip("Move current FOV up.")
-        up_button.setShortcut("Up")
-        up_button.released.connect(self.preview.up)
-        navigation_layout.addWidget(up_button, 2, 0)
-        down_button = QtWidgets.QPushButton("Down")
-        down_button.setToolTip("Move current FOV down.")
-        down_button.setShortcut("Down")
-        down_button.released.connect(self.preview.down)
-        navigation_layout.addWidget(down_button, 2, 1)
-        left_button = QtWidgets.QPushButton("Left")
-        left_button.setToolTip("Move current FOV left.")
-        left_button.setShortcut("Left")
-        left_button.released.connect(self.preview.left)
-        navigation_layout.addWidget(left_button, 2, 2)
-        right_button = QtWidgets.QPushButton("Right")
-        right_button.setToolTip("Move current FOV right.")
-        right_button.setShortcut("Right")
-        right_button.released.connect(self.preview.right)
-        navigation_layout.addWidget(right_button, 2, 3)
+        display_layout.addWidget(self.scalebar_check, 1, 0)
+        self.scalebar_length = QtWidgets.QSpinBox()
+        self.scalebar_length.setEnabled(False)
+        self.scalebar_length.setRange(1, 20_000)
+        self.scalebar_length.setValue(1_000)
+        self.scalebar_length.valueChanged.connect(
+            lambda _: self.preview.update()
+        )
+        display_layout.addWidget(self.scalebar_length, 1, 1)
 
         self.fig = plt.Figure(
             figsize=MASK_LEGEND_FIGSIZE,
@@ -725,10 +832,6 @@ class MaskGeneratorTab(lib.Dialog):
         self.fig.patch.set_alpha(0)  # set transparent background
         self.ax_mask_legend = self.fig.add_subplot(111)
         self.legend = FigureCanvas(self.fig)
-        self.legend.setSizePolicy(
-            QtWidgets.QSizePolicy.Policy.Expanding,
-            QtWidgets.QSizePolicy.Policy.Expanding,
-        )
         self.legend.setMinimumSize(
             QtCore.QSize(
                 int(MASK_LEGEND_FIGSIZE[0] * MASK_LEGEND_DPI),
@@ -736,69 +839,68 @@ class MaskGeneratorTab(lib.Dialog):
             )
         )
         self.legend.setToolTip("Displays probabilities per mask pixel/voxel.")
-        navigation_layout.addWidget(self.legend, 4, 0, 1, 4)
-
-        self.navigation_buttons = [
-            full_fov_button,
-            zoom_in_button,
-            zoom_out_button,
-            up_button,
-            down_button,
-            left_button,
-            right_button,
-            save_view_button,
-        ]
-        for button in self.navigation_buttons:
-            button.setEnabled(False)
+        display_layout.addWidget(self.legend, 2, 0, 1, 2)
 
         # MASK INFORMATION
         mask_info_box = QtWidgets.QGroupBox("Mask information")
-        mask_info_box.setFixedHeight(80)
-        layout.addWidget(mask_info_box, 2, 1)
-        mask_info_layout = QtWidgets.QHBoxLayout(mask_info_box)
-        self.mask_info_display1 = QtWidgets.QLabel(
-            "Area (\u03bcm\u00b2):\n" "Dimensions:"
-        )
-        self.mask_info_display1.setToolTip(
+        mask_info_box.setToolTip(
             "Mask area/volume above Otsu threshold;\n"
             "Number of pixels/voxels per dimension"
         )
-        self.mask_info_display1.setAlignment(
-            QtCore.Qt.AlignmentFlag.AlignRight
-        )
-        # make sure that the dash symbols are aligned
-        self.mask_info_display1.setFixedWidth(
-            self.mask_info_display1.fontMetrics().horizontalAdvance(
-                f"{' '*MASK_INFO_OFFSET}Volume (\u03bcm\u00b3):"
-            )
-        )
-        self.mask_info_display2 = QtWidgets.QLabel("-\n-")
-        self.mask_info_display2.setAlignment(QtCore.Qt.AlignmentFlag.AlignLeft)
-        mask_info_layout.addWidget(self.mask_info_display1)
-        mask_info_layout.addWidget(self.mask_info_display2)
+        controls.addWidget(mask_info_box)
+        mask_info_layout = QtWidgets.QFormLayout(mask_info_box)
+        self.mask_area_label = QtWidgets.QLabel("Area (μm²):")
+        self.mask_area_value = QtWidgets.QLabel("-")
+        mask_info_layout.addRow(self.mask_area_label, self.mask_area_value)
+        self.mask_dims_value = QtWidgets.QLabel("-")
+        mask_info_layout.addRow("Dimensions:", self.mask_dims_value)
+
+        controls.addStretch(1)
 
     def load_locs(self) -> None:
         """Load localizations / molecules for mask generation."""
-        # get localizations file
-        self.locs_path, _ = QtWidgets.QFileDialog.getOpenFileName(
+        path, _ = QtWidgets.QFileDialog.getOpenFileName(
             self,
             "Load molecules for mask generation",
             directory=self.window.pwd,
             filter="*.hdf5",
         )
-        if self.locs_path:
-            self.window.pwd = os.path.dirname(self.locs_path)
-            self.mask_generator = spinna.MaskGenerator(self.locs_path)
-            self.mask_ndim.clear()
-            if "z" in self.mask_generator.locs.columns:
-                self.mask_ndim.addItems(["2D", "3D"])
-            else:
-                self.mask_ndim.addItems(["2D"])
-            self.generate_mask_button.setEnabled(True)
-            self.save_mask_button.setEnabled(True)
-            self.load_locs_button.setText(
-                "Molecules loaded, ready for mask generation"
-            )
+        if not path:  # canceled: keep the loaded molecules
+            return
+
+        self.window.pwd = os.path.dirname(path)
+        self.locs_path = path
+        self.mask_generator = spinna.MaskGenerator(path)
+        self.clear_mask()
+        self.mask_ndim.clear()
+        if "z" in self.mask_generator.locs.columns:
+            self.mask_ndim.addItems(["2D", "3D"])
+        else:
+            self.mask_ndim.addItems(["2D"])
+        self.generate_mask_button.setEnabled(True)
+        theme.set_button_state(self.load_locs_button, "ok")
+        self.load_locs_button.setToolTip(
+            f"Loaded: {path}\nClick to load other molecules."
+        )
+
+    def clear_mask(self) -> None:
+        """Discard the generated mask, e.g., when other molecules are
+        loaded."""
+        self.mask = None
+        self.thresholding_check.setChecked(False)
+        self.preview.clear()
+        self.ax_mask_legend.cla()
+        self.legend.draw()
+        self.mask_area_value.setText("-")
+        self.mask_dims_value.setText("-")
+        for widget in (
+            self.save_mask_button,
+            self.fit_view_button,
+            self.save_view_button,
+            self.scalebar_check,
+            self.scalebar_length,
+        ):
+            widget.setEnabled(False)
 
     def generate_mask(self) -> None:
         """Generate a mask with the currently loaded settings."""
@@ -831,10 +933,14 @@ class MaskGeneratorTab(lib.Dialog):
             # set threshold to otsu threhold
             self.thresholding_check.setChecked(False)
             self.thresholding_value.setValue(self.mask_generator.thresh)
-            self.scalebar_check.setEnabled(True)
-            self.scalebar_length.setEnabled(True)
-            for button in self.navigation_buttons:
-                button.setEnabled(True)
+            for widget in (
+                self.save_mask_button,
+                self.fit_view_button,
+                self.save_view_button,
+                self.scalebar_check,
+                self.scalebar_length,
+            ):
+                widget.setEnabled(True)
 
     def apply_threshold(self, state: int) -> None:
         """Apply the threshold to the density map."""
@@ -904,8 +1010,9 @@ class MaskGeneratorTab(lib.Dialog):
         area_str, area = self.get_mask_area()
         dimensions = self.get_mask_dimensions()
 
-        self.mask_info_display1.setText(f"{area_str}\n Dimensions:")
-        self.mask_info_display2.setText(f"{area}\n{dimensions}")
+        self.mask_area_label.setText(area_str)
+        self.mask_area_value.setText(str(area))
+        self.mask_dims_value.setText(dimensions)
 
     def get_mask_area(self) -> tuple[str, float]:
         """Find the string with mask area/volume."""
@@ -986,14 +1093,12 @@ class MaskGeneratorTab(lib.Dialog):
                 blur.setValue(value)
                 blur.blockSignals(False)
 
-    def on_preview_updated(
-        self, image: lib.FloatArray2D | lib.FloatArray3D
-    ) -> None:
-        """Update the legend according to the current field of view.
+    def on_preview_updated(self, image: lib.FloatArray2D) -> None:
+        """Update the legend according to the displayed mask.
 
         Parameters
         ----------
-        image : lib.FloatArray2D | lib.FloatArray3D
+        image : lib.FloatArray2D
             Currently shown image of the mask. Values give the
             probability mass function for finding a molecule in the
             pixel/voxel.
@@ -1004,12 +1109,12 @@ class MaskGeneratorTab(lib.Dialog):
         self.ax_mask_legend.cla()
         self.ax_mask_legend.imshow(gradient, cmap="magma")
         self.ax_mask_legend.set_yticks([])
-        self.ax_mask_legend.set_xticks(np.linspace(0, 15, 5))
+        self.ax_mask_legend.set_xticks(np.linspace(0, 15, 3))
         self.ax_mask_legend.set_xticklabels(
-            ["0.00E+0"]
+            ["0"]
             + [
                 f"{Decimal(str(_)):.2E}"
-                for _ in np.linspace(0, max_value, 5)[1:]
+                for _ in np.linspace(0, max_value, 3)[1:]
             ]
         )
         self.legend.draw()
