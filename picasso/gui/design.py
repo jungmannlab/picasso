@@ -1484,7 +1484,18 @@ class Window(QtWidgets.QMainWindow):
             )
 
     def clearDialog(self) -> None:
-        """Reset the origami design."""
+        """Reset the origami design, asking first."""
+        reply = QtWidgets.QMessageBox.question(
+            self,
+            "Clear design",
+            "This clears the current design; unsaved changes are lost.\n"
+            "Do you want to continue?",
+            QtWidgets.QMessageBox.StandardButton.Discard
+            | QtWidgets.QMessageBox.StandardButton.Cancel,
+            QtWidgets.QMessageBox.StandardButton.Cancel,
+        )
+        if reply != QtWidgets.QMessageBox.StandardButton.Discard:
+            return
         self.mainscene.clearCanvas()
         self.statusBar().showMessage("Cleared.")
 

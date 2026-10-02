@@ -708,7 +708,10 @@ class CustomizeToolbarDialog(lib.Dialog):
         )
         box.button(
             QtWidgets.QDialogButtonBox.StandardButton.RestoreDefaults
-        ).clicked.connect(lambda: self.set_layout(toolbar.defaults))
+        ).clicked.connect(
+            lambda: lib.confirm_restore_defaults(self, "the toolbar")
+            and self.set_layout(toolbar.defaults)
+        )
         box.accepted.connect(self.accept)
         box.rejected.connect(self.reject)
         layout.addWidget(box)

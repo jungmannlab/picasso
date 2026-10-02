@@ -74,7 +74,7 @@ The toolbars of ``Picasso: Render``, ``Picasso: Localize``, ``Picasso: Filter`` 
 - **Up** and **Down**, or dragging, change the order.
 - **Label** gives the selected button a shorter text than its action's, e.g., *RCC* for *Undrift by RCC*; empty for the action's own.
 - **Icon** gives it another icon, or *No icon* to show only its label. The menus show the chosen icon too. *Choose file...* takes an icon of your own: an SVG, or a PNG or ICO with a transparent background. Only its shape is used, drawn in the colors of the theme like Picasso's icons, so single-color line icons (e.g., from `Lucide <https://lucide.dev>`_) fit best. The file is copied to ``~/.picasso/icons``; images put in that folder are offered too.
-- **Restore Defaults** shows the default buttons again.
+- **Restore Defaults** shows the default buttons again, after asking for confirmation.
 
 *OK* applies the toolbar to every open window of the module and saves it in the ``Toolbars`` section of ``~/.picasso/settings.yaml`` (see :ref:`user-settings-file`). Plugin actions can be on the toolbar too; a button whose action is not in the menus, e.g., of a plugin that is disabled, is kept and shown in italics in the dialog, and returns with its plugin. Whether the buttons show icons, text or both is set in :ref:`appearance`.
 

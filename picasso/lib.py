@@ -124,6 +124,7 @@ _QT_NAMES = (
     "GenericPlotWindow",
     "RemoveColumnsDialog",
     "HelpButton",
+    "confirm_restore_defaults",
     "cancel_dialogs",
     "install_excepthook",
     "adjust_widget_size",

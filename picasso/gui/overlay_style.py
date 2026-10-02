@@ -19,7 +19,7 @@ from dataclasses import replace
 
 from PyQt6 import QtCore, QtGui, QtWidgets
 
-from .. import render
+from .. import lib, render
 
 #: Color that follows the background: set by the caller, e.g., yellow
 #: on a black and red on a white background.
@@ -277,7 +277,12 @@ class OverlayStyleWidget(QtWidgets.QWidget):
 
         reset_button = QtWidgets.QPushButton("Reset")
         reset_button.setToolTip("Restore the default appearance.")
-        reset_button.clicked.connect(self.reset)
+        reset_button.clicked.connect(
+            lambda: lib.confirm_restore_defaults(
+                self, "the appearance of this tool"
+            )
+            and self.reset()
+        )
         grid.addWidget(
             reset_button,
             (len(fields) + 1) // 2,

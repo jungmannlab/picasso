@@ -1098,7 +1098,10 @@ class AppearanceDialog(lib.Dialog):
             "Restore defaults",
             QtWidgets.QDialogButtonBox.ButtonRole.ResetRole,
         )
-        reset.clicked.connect(lambda: self.set_appearance(Appearance()))
+        reset.clicked.connect(
+            lambda: lib.confirm_restore_defaults(self, "the appearance")
+            and self.set_appearance(Appearance())
+        )
         close = buttons.addButton(
             QtWidgets.QDialogButtonBox.StandardButton.Close
         )

@@ -156,7 +156,10 @@ class UserSettingsDialog(Dialog):
 
         reload_button = QtWidgets.QPushButton("Reload")
         reload_button.setIcon(theme.icon("reload"))
-        reload_button.clicked.connect(self.load_settings)
+        reload_button.setToolTip(
+            "Read the settings file again, discarding unsaved edits."
+        )
+        reload_button.clicked.connect(self._reload)
         button_layout.addWidget(reload_button)
         button_layout.addStretch()
         save_button = QtWidgets.QPushButton("Save")
@@ -186,6 +189,24 @@ class UserSettingsDialog(Dialog):
             self.editor.setPlainText(
                 "# No settings file found. Edit and save to create one."
             )
+        self.editor.document().setModified(False)
+
+    def _reload(self) -> None:
+        """Reload the settings file, asking first if there are unsaved
+        edits."""
+        if self.editor.document().isModified():
+            reply = QtWidgets.QMessageBox.question(
+                self,
+                "Reload settings",
+                "Reloading the settings file discards your unsaved edits.\n"
+                "Do you want to continue?",
+                QtWidgets.QMessageBox.StandardButton.Discard
+                | QtWidgets.QMessageBox.StandardButton.Cancel,
+                QtWidgets.QMessageBox.StandardButton.Cancel,
+            )
+            if reply != QtWidgets.QMessageBox.StandardButton.Discard:
+                return
+        self.load_settings()
 
     def _focus_search(self) -> None:
         """Move the focus to the search field, its text selected."""
@@ -355,6 +376,7 @@ class UserSettingsDialog(Dialog):
             )
             return
         io.save_user_settings(parsed)
+        self.editor.document().setModified(False)
         QtWidgets.QMessageBox.information(
             self, "Saved", "User settings saved successfully."
         )
@@ -2590,6 +2612,38 @@ class TripleClick:
             time.monotonic() - started <= interval
             and (event.pos() - pos).manhattanLength() <= distance
         )
+
+
+def confirm_restore_defaults(
+    parent: QtWidgets.QWidget | None = None,
+    what: str = "all settings in this dialog",
+) -> bool:
+    """Ask the user to confirm restoring the default settings, which
+    discards their changes.
+
+    Parameters
+    ----------
+    parent : QtWidgets.QWidget or None, optional
+        Parent of the message box. Default None.
+    what : str, optional
+        What is restored, completing "This resets ... to the defaults".
+        Default "all settings in this dialog".
+
+    Returns
+    -------
+    confirmed : bool
+        True if the user chose to restore the defaults.
+    """
+    reply = QtWidgets.QMessageBox.question(
+        parent,
+        "Restore defaults",
+        f"This resets {what} to the defaults; your changes are lost.\n"
+        "Do you want to continue?",
+        QtWidgets.QMessageBox.StandardButton.RestoreDefaults
+        | QtWidgets.QMessageBox.StandardButton.Cancel,
+        QtWidgets.QMessageBox.StandardButton.Cancel,
+    )
+    return reply == QtWidgets.QMessageBox.StandardButton.RestoreDefaults
 
 
 def cancel_dialogs():
