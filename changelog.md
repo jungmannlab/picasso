@@ -31,6 +31,7 @@ Last change: 02-OCT-2026 CEST
 - FRC in several random ROIs (*Info* dialog, *FRC in several ROIs*).
 - `picasso.render` is distributed as a package (`kernels`, `geometry`, `splat`, `scene`, `overlays_qt`, `animation`, `backend`, `gpu`); every former `picasso.render.*` name is still importable from `picasso.render`.
 - Rectangular pick minimum length set to 5 display pixels.
+- The View menu no longer lists Left/Right/Up/Down and Zoom in/out (their keyboard shortcuts still work); *Filter picks by number of localizations* is now *Filter picks by count*.
 - Long operations run in the background and can be canceled: undrifting (AIM, RCC, from picked), DBSCAN, HDBSCAN, SMLM clusterer, G5M, RESI, NeNA, FRC in ROIs, pick statistics and saving pick properties. The windows keep repainting while they run.
 - Fixed: 3D histogram rendering scaled z unnecessarily.
 - Fixed NeNA (and FRC) overwriting group columns of localizations.

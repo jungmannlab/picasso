@@ -18,9 +18,11 @@ Navigating the image
 ~~~~~~~~~~~~~~~~~~~~
 The ``Tools`` menu selects the active tool (Zoom, Pick, Measure or Move; ``Ctrl+Z``, ``Ctrl+P``, ``Ctrl+M``, ``Ctrl+G``). The following controls move the view; those marked *every tool* also work while picking or measuring, so the tool need not be changed to look around.
 
-- **Zoom**: with the Zoom tool, drag a rectangle with the left mouse button to zoom to it. The rectangle stretches towards the bottom right; releasing above or left of the start cancels. ``Shift`` + the left button drags the same rectangle in *every tool*. ``Ctrl`` (``Cmd`` on macOS) + the mouse wheel (or trackpad scroll) and a trackpad pinch zoom about the cursor; ``Ctrl`` +/- zoom about the center (``View`` menu).
+- **Zoom**: with the Zoom tool, drag a rectangle with the left mouse button to zoom to it. The rectangle stretches towards the bottom right; releasing above or left of the start cancels. ``Shift`` + the left button drags the same rectangle in *every tool*. ``Ctrl`` (``Cmd`` on macOS) + the mouse wheel (or trackpad scroll) and a trackpad pinch zoom about the cursor; ``Ctrl`` +/- zoom about the center.
 - **Pan**: drag with the right mouse button (Zoom tool), or, in *every tool*, with the middle mouse button, with ``Ctrl`` (``Cmd``) + the left button or with ``Alt`` (``Option`` on macOS) + the left button. The arrow keys (or ``W``/``A``/``S``/``D``) move the view by a fraction of the window.
 - **Fit**: ``View > Fit image to window`` (``Ctrl+W`` or ``Home``) shows the whole image; a triple click with the Zoom tool does the same.
+
+Moving and zooming with the keyboard (the arrow keys or ``W``/``A``/``S``/``D``, ``Ctrl`` +/-) has no menu entries; the shortcuts work anywhere in the window.
 
 The 3D rotation window uses the same controls, plus rotation; see *Navigating the 3D window* below.
 
@@ -481,18 +483,6 @@ Under *Display*, the overlay can be hidden, its opacity is set, and the blending
 
 The API functions are available as ``picasso.render.load_overlay_image``, ``overlay_extent``, ``overlay_to_qimage`` and ``draw_image_overlay``.
 
-Left / Right / Up / Down
-^^^^^^^^^^^^^^^^^^^^^^^^
-Moves the current field of view in a particular direction. Also possible by using the arrow keys.
-
-Zoom in (CTRL +)
-^^^^^^^^^^^^^^^^
-Zoom into the image.
-
-Zoom out (CTRL -)
-^^^^^^^^^^^^^^^^^
-Zoom out of the image.
-
 Fit image to window
 ^^^^^^^^^^^^^^^^^^^
 Fits the reconstructed image to be fully displayed in the window.
@@ -614,8 +604,8 @@ Select picks (XYZ scatter, 4 panels)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 Opens a dialog to that goes through all picks, displays four panels with an xyz-scatterplot and a top, bottom and side projection and asks to keep or discard it.
 
-Filter picks by locs
-^^^^^^^^^^^^^^^^^^^^
+Filter picks by count
+^^^^^^^^^^^^^^^^^^^^^
 Allows filtering picks by the number of localizations in each pick. When clicking, a histogram of the number of localizations of all selected picks will be calculated. A lower and upper boundary can be selected to filter the picks.
 
 Clear picks (Ctrl + C)

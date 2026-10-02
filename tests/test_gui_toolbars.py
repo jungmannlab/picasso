@@ -343,3 +343,23 @@ def test_spinna_help_and_icons(qt_offscreen):
         assert not buttons["Load molecules"].icon().isNull()
     finally:
         window.close()
+
+
+def test_render_navigation_shortcuts_without_menu_entries(qt_offscreen):
+    """Moving and zooming are off the View menu; their shortcuts stay,
+    once, also after the UI is rebuilt."""
+    window = gui_render.Window(plugins_loaded=True)
+    try:
+        view_menu = window.menuBar().actions()[1].menu()
+        texts = {a.text() for a in view_menu.actions()}
+        moves = {"Left", "Right", "Up", "Down", "Zoom in", "Zoom out"}
+        assert not moves & texts
+        window.remove_locs()
+        shortcuts = [
+            k.toString() for a in window.actions() for k in a.shortcuts()
+        ]
+        for key in ("Left", "A", "Ctrl++", "Ctrl+-"):
+            assert shortcuts.count(key) == 1
+    finally:
+        window.view.stop_render_worker()
+        window.close()

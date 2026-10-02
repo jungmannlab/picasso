@@ -13992,9 +13992,7 @@ class View(QtWidgets.QLabel):
     @check_picks
     def filter_picks(self) -> None:
         """Filters picks by number of localizations."""
-        channel = self.get_channel_all_seq(
-            "Filter picks by number of localizations"
-        )
+        channel = self.get_channel_all_seq("Filter picks by count")
         if channel is None:
             return
 
@@ -16471,6 +16469,7 @@ class Window(QtWidgets.QMainWindow):
 
         file_menu.addSeparator()
         export_multi_action = file_menu.addAction("Export localizations...")
+        export_multi_action.setIcon(theme.icon("export-csv"))
         export_multi_action.triggered.connect(self.export_multi)
         if IMSWRITER:
             export_ims_action = file_menu.addAction("Export ROI for Imaris...")
@@ -16505,6 +16504,7 @@ class Window(QtWidgets.QMainWindow):
         # remove all locs
         file_menu.addSeparator()
         delete_action = file_menu.addAction("Remove all localizations")
+        delete_action.setIcon(theme.icon("delete"))
         delete_action.setShortcuts(
             ["Ctrl+Shift+Backspace", "Ctrl+Shift+Delete"]
         )
@@ -16536,29 +16536,28 @@ class Window(QtWidgets.QMainWindow):
         overlay_action = view_menu.addAction("Overlay image...")
         overlay_action.triggered.connect(self.open_image_overlay)
 
-        view_menu.addSeparator()
-        to_left_action = view_menu.addAction("Left")
-        to_left_action.setShortcuts(["Left", "A"])
-        to_left_action.triggered.connect(self.view.to_left)
-        to_right_action = view_menu.addAction("Right")
-        to_right_action.setShortcuts(["Right", "D"])
-        to_right_action.triggered.connect(self.view.to_right)
-        to_up_action = view_menu.addAction("Up")
-        to_up_action.setShortcuts(["Up", "W"])
-        to_up_action.triggered.connect(self.view.to_up)
-        to_down_action = view_menu.addAction("Down")
-        to_down_action.setShortcuts(["Down", "S"])
-        to_down_action.triggered.connect(self.view.to_down)
+        # moving and zooming are not in the menu (the mouse does them),
+        # but their shortcuts work in the whole window; a rebuilt UI
+        # replaces them, as two actions with one shortcut block each other
+        for action in getattr(self, "_navigation_actions", []):
+            self.removeAction(action)
+            action.deleteLater()
+        self._navigation_actions = []
+        for text, shortcuts, slot in (
+            ("Left", ["Left", "A"], self.view.to_left),
+            ("Right", ["Right", "D"], self.view.to_right),
+            ("Up", ["Up", "W"], self.view.to_up),
+            ("Down", ["Down", "S"], self.view.to_down),
+            ("Zoom in", ["Ctrl++", "Ctrl+="], self.view.zoom_in),
+            ("Zoom out", ["Ctrl+-"], self.view.zoom_out),
+        ):
+            action = QtGui.QAction(text, self)
+            action.setShortcuts(shortcuts)
+            action.triggered.connect(slot)
+            self.addAction(action)
+            self._navigation_actions.append(action)
 
         view_menu.addSeparator()
-        zoom_in_action = view_menu.addAction("Zoom in")
-        zoom_in_action.setShortcuts(["Ctrl++", "Ctrl+="])
-        zoom_in_action.triggered.connect(self.view.zoom_in)
-        view_menu.addAction(zoom_in_action)
-        zoom_out_action = view_menu.addAction("Zoom out")
-        zoom_out_action.setShortcut("Ctrl+-")
-        zoom_out_action.triggered.connect(self.view.zoom_out)
-        view_menu.addAction(zoom_out_action)
         fit_in_view_action = view_menu.addAction("Fit image to window")
         fit_in_view_action.setShortcuts(["Ctrl+W", "Home"])
         fit_in_view_action.triggered.connect(self.view.fit_in_view)
@@ -16574,6 +16573,7 @@ class Window(QtWidgets.QMainWindow):
         metadata_action.setShortcut("Ctrl+Shift+M")
         metadata_action.triggered.connect(self.show_metadata)
         slicer_action = view_menu.addAction("Slice...")
+        slicer_action.setIcon(theme.icon("slice"))
         slicer_action.triggered.connect(self.slicer_dialog.initialize)
         rot_win_action = view_menu.addAction("3D view")
         rot_win_action.setShortcut("Ctrl+Shift+R")
@@ -16584,6 +16584,7 @@ class Window(QtWidgets.QMainWindow):
         rot_win_action.triggered.connect(self.open_3d_view)
         view_menu.addSeparator()
         linked_window_action = view_menu.addAction("New linked window...")
+        linked_window_action.setIcon(theme.icon("link"))
         linked_window_action.setToolTip(
             "Open another Render window with its own channels that zooms,\n"
             "pans, etc. together with this one (see Link settings)"
@@ -16634,6 +16635,7 @@ class Window(QtWidgets.QMainWindow):
         )
 
         pick_similar_action = tools_menu.addAction("Pick similar")
+        pick_similar_action.setIcon(theme.icon("pick-similar"))
         pick_similar_action.setShortcut("Ctrl+Shift+P")
         pick_similar_action.triggered.connect(self.view.pick_similar)
 
@@ -16652,13 +16654,16 @@ class Window(QtWidgets.QMainWindow):
         move_to_pick_action.triggered.connect(self.view.move_to_pick)
 
         pick_fiducials_action = tools_menu.addAction("Pick fiducials")
+        pick_fiducials_action.setIcon(theme.icon("fiducials"))
         pick_fiducials_action.triggered.connect(self.view.pick_fiducials)
 
         profile_action = tools_menu.addAction("Plot pick profile")
+        profile_action.setIcon(theme.icon("profile"))
         profile_action.triggered.connect(self.view.plot_profile)
 
         tools_menu.addSeparator()
         show_trace_action = tools_menu.addAction("Show trace")
+        show_trace_action.setIcon(theme.icon("trace"))
         show_trace_action.setShortcut("Ctrl+R")
         show_trace_action.triggered.connect(self.view.show_trace)
 
@@ -16677,8 +16682,10 @@ class Window(QtWidgets.QMainWindow):
         )
         plotpick3d_iso_action.triggered.connect(self.view.show_pick_3d_iso)
 
-        filter_picks_action = tools_menu.addAction(
-            "Filter picks by number of localizations..."
+        filter_picks_action = tools_menu.addAction("Filter picks by count...")
+        filter_picks_action.setIcon(theme.icon("filter"))
+        filter_picks_action.setToolTip(
+            "Keep the picks whose number of localizations is in a range."
         )
         filter_picks_action.triggered.connect(self.view.filter_picks)
 
@@ -16691,12 +16698,14 @@ class Window(QtWidgets.QMainWindow):
 
         tools_menu.addSeparator()
         mask_action = tools_menu.addAction("Mask image...")
+        mask_action.setIcon(theme.icon("mask"))
         mask_action.triggered.connect(self.mask_settings_dialog.init_dialog)
 
         # menu bar - Postprocess
         postprocess_menu = self.menu_bar.addMenu("Postprocess")
 
         undrift_aim_action = postprocess_menu.addAction("Undrift by AIM...")
+        undrift_aim_action.setIcon(theme.icon("undrift"))
         undrift_aim_action.setShortcut("Ctrl+U")
         undrift_aim_action.triggered.connect(self.view.undrift_aim)
         undrift_from_picked_action = postprocess_menu.addAction(
@@ -16715,12 +16724,15 @@ class Window(QtWidgets.QMainWindow):
         undrift_action = postprocess_menu.addAction("Undrift by RCC...")
         undrift_action.triggered.connect(self.view.undrift_rcc)
         drift_action = postprocess_menu.addAction("Undo drift")
+        drift_action.setIcon(theme.icon("undo"))
         drift_action.triggered.connect(self.view.undo_drift)
-        drift_action = postprocess_menu.addAction("Show drift")
-        drift_action.triggered.connect(self.view.show_drift)
+        show_drift_action = postprocess_menu.addAction("Show drift")
+        show_drift_action.setIcon(theme.icon("profile"))
+        show_drift_action.triggered.connect(self.view.show_drift)
         apply_drift_action = postprocess_menu.addAction(
             "Apply drift from an external file..."
         )
+        apply_drift_action.setIcon(theme.icon("undrift"))
         apply_drift_action.triggered.connect(self.view.apply_drift)
 
         postprocess_menu.addSeparator()
@@ -16739,6 +16751,7 @@ class Window(QtWidgets.QMainWindow):
         link_action = postprocess_menu.addAction(
             "Link localizations (binding events)..."
         )
+        link_action.setIcon(theme.icon("merge"))
         link_action.triggered.connect(self.view.link)
         event_cores_action = postprocess_menu.addAction(
             "Select central frames localizations..."
@@ -16749,6 +16762,7 @@ class Window(QtWidgets.QMainWindow):
         align_action = postprocess_menu.addAction(
             "Align channels (RCC or from picked)"
         )
+        align_action.setIcon(theme.icon("align"))
         align_action.triggered.connect(self.view.align)
         combine_action = postprocess_menu.addAction(
             "Combine localizations in picks"
@@ -16764,6 +16778,7 @@ class Window(QtWidgets.QMainWindow):
 
         postprocess_menu.addSeparator()
         clustering_menu = postprocess_menu.addMenu("Clustering")
+        clustering_menu.setIcon(theme.icon("clustering"))
         dbscan_action = clustering_menu.addAction("DBSCAN...")
         dbscan_action.triggered.connect(self.view.dbscan)
         hdbscan_action = clustering_menu.addAction("HDBSCAN...")
