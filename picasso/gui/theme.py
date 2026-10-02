@@ -28,7 +28,9 @@ Icons are single-color SVG files in ``ICONS_DIR`` (``picasso/gui/icons``),
 named as the callers of ``icon`` and ``add_toolbar`` use them, e.g.,
 ``open.svg``. ``icon`` draws them in the colors of the theme, so any
 color in the files is ignored; a missing file leaves the button with its
-text. The icons are from Lucide (https://lucide.dev, ISC license, see
+text. Without an SVG, an ``.ico`` or ``.png`` of the same name is used
+the same way, e.g., Average's application icon. The SVG icons are from
+Lucide (https://lucide.dev, ISC license, see
 ``LICENSES/Lucide-LICENSE.txt``).
 
 ``current`` returns the appearance saved in the user settings
@@ -617,16 +619,18 @@ def applied() -> Appearance | None:
     return _state["applied"]
 
 
-class _TintedSvgEngine(QtGui.QIconEngine):
-    """Draws a single-color SVG icon in the colors of the palette: the
-    text color, dimmed when disabled, and the accent color when checked
+class _TintedIconEngine(QtGui.QIconEngine):
+    """Draws a single-color icon in the colors of the palette: the text
+    color, dimmed when disabled, and the accent color when checked
     (e.g., the active tool). The colors are read whenever the icon is
-    drawn, so that it follows the theme.
+    drawn, so that it follows the theme. Only the shape of the image
+    (its opacity) is kept.
 
     Parameters
     ----------
     path : str
-        The SVG file.
+        The image: an SVG file or a raster image with a transparent
+        background (e.g., ``.ico`` or ``.png``).
     role : QtGui.QPalette.ColorRole or None, optional
         Palette color of the enabled, unchecked icon instead of the text
         color, e.g., ``HighlightedText`` on an accent background.
@@ -639,15 +643,22 @@ class _TintedSvgEngine(QtGui.QIconEngine):
         super().__init__()
         self._path = path
         self._role = role
-        self._renderer = QtSvg.QSvgRenderer(path)
+        if path.lower().endswith(".svg"):
+            self._renderer = QtSvg.QSvgRenderer(path)
+            self._image = None
+        else:
+            self._renderer = None
+            self._image = QtGui.QIcon(path)
         self._cache = {}
 
     def clone(self) -> QtGui.QIconEngine:
-        return _TintedSvgEngine(self._path, self._role)
+        return _TintedIconEngine(self._path, self._role)
 
     def is_valid(self) -> bool:
-        """Whether the SVG file could be read."""
-        return self._renderer.isValid()
+        """Whether the file could be read."""
+        if self._renderer is not None:
+            return self._renderer.isValid()
+        return not self._image.isNull()
 
     def color(
         self, mode: QtGui.QIcon.Mode, state: QtGui.QIcon.State
@@ -678,7 +689,12 @@ class _TintedSvgEngine(QtGui.QIconEngine):
             image.fill(QtCore.Qt.GlobalColor.transparent)
             painter = QtGui.QPainter(image)
             painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
-            self._renderer.render(painter, QtCore.QRectF(0, 0, width, height))
+            if self._renderer is not None:
+                self._renderer.render(
+                    painter, QtCore.QRectF(0, 0, width, height)
+                )
+            else:
+                self._image.paint(painter, QtCore.QRect(0, 0, width, height))
             # keep the shape, replace its color
             painter.setCompositionMode(
                 QtGui.QPainter.CompositionMode.CompositionMode_SourceIn
@@ -708,7 +724,9 @@ def icon(
 
     The SVG is drawn in a single color: the text color of the palette,
     dimmed when disabled and the accent color when checked; it changes
-    with the theme. Any color in the file is ignored.
+    with the theme. Any color in the file is ignored. Without an SVG, an
+    image ``<name>.ico`` or ``<name>.png`` with a transparent background
+    is used the same way, e.g., an application icon.
 
     Parameters
     ----------
@@ -725,10 +743,13 @@ def icon(
         The icon, or a null icon if the file is missing or invalid, in
         which case buttons show their text instead.
     """
-    path = os.path.join(ICONS_DIR, f"{name}.svg")
-    if not os.path.isfile(path):
+    for extension in (".svg", ".ico", ".png"):
+        path = os.path.join(ICONS_DIR, name + extension)
+        if os.path.isfile(path):
+            break
+    else:
         return QtGui.QIcon()
-    engine = _TintedSvgEngine(path, role)
+    engine = _TintedIconEngine(path, role)
     if not engine.is_valid():
         return QtGui.QIcon()
     return QtGui.QIcon(engine)

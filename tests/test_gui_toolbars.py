@@ -265,3 +265,43 @@ def test_filter_toolbar(qt_offscreen):
         ]
     finally:
         window.close()
+
+
+def test_average_toolbar(qt_offscreen):
+    from picasso.gui import average as gui_average
+
+    window = gui_average.Window()
+    try:
+        labels = [
+            action.iconText()
+            for action in window.toolbar.actions()
+            if not action.isSeparator()
+        ]
+        assert labels == ["Open", "Save", "Parameters", "Average", "Abort"]
+        assert not window.abort_action.isEnabled()
+    finally:
+        window.close()
+
+
+def test_raster_icon_without_svg(qt_offscreen, icons, restore_theme):
+    """Without an SVG, a raster image of the same name (e.g., an
+    application icon) is tinted the same way; an SVG wins."""
+    image = QtGui.QImage(24, 24, QtGui.QImage.Format.Format_ARGB32)
+    image.fill(QtCore.Qt.GlobalColor.transparent)
+    painter = QtGui.QPainter(image)
+    painter.fillRect(4, 4, 16, 16, QtGui.QColor("magenta"))
+    painter.end()
+    image.save(str(icons / "app.png"))
+    image.save(str(icons / "square.png"))
+    theme.apply(restore_theme, Appearance(mode="Dark"))
+    text = (
+        restore_theme.palette()
+        .color(QtGui.QPalette.ColorRole.ButtonText)
+        .name()
+    )
+    Mode, State = QtGui.QIcon.Mode, QtGui.QIcon.State
+    assert _center(theme.icon("app"), Mode.Normal, State.Off) == text
+    # the corner stays transparent: only the shape is kept
+    corner = theme.icon("app").pixmap(24, 24).toImage().pixelColor(1, 1)
+    assert corner.alpha() == 0
+    assert _center(theme.icon("square"), Mode.Normal, State.Off) == text

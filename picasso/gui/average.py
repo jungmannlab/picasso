@@ -571,6 +571,20 @@ class Window(QtWidgets.QMainWindow):
         self.abort_action.setEnabled(False)
         self.plugin_menu = menu_bar.addMenu("Plugins")  # do not delete
 
+        # toolbar of the most used actions, shared with the menus
+        self.toolbar = theme.add_toolbar(
+            self,
+            "Average toolbar",
+            [
+                (open_action, "open", "Open"),
+                (save_action, "save", "Save"),
+                None,
+                (parameters_action, "parameters", "Parameters"),
+                (average_action, "average"),
+                (self.abort_action, "abort"),
+            ],
+        )
+
     def closeEvent(self, event: QtGui.QCloseEvent) -> None:
         """Shut down the averaging processes before closing.
 
