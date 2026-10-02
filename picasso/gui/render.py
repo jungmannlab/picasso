@@ -16566,6 +16566,7 @@ class Window(QtWidgets.QMainWindow):
         info_action.triggered.connect(self.info_dialog.show)
         view_menu.addAction(info_action)
         metadata_action = view_menu.addAction("Show metadata...")
+        metadata_action.setIcon(theme.icon("metadata"))
         metadata_action.setShortcut("Ctrl+Shift+M")
         metadata_action.triggered.connect(self.show_metadata)
         slicer_action = view_menu.addAction("Slice...")

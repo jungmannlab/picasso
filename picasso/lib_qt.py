@@ -2186,7 +2186,7 @@ class GenericPlotWindow(QtWidgets.QTabWidget):
         )
 
         # imported here: picasso.gui.plot_style imports picasso.lib
-        from picasso.gui import plot_style
+        from picasso.gui import plot_style, theme
 
         super().__init__()
         self.setWindowTitle(window_title)
@@ -2207,6 +2207,7 @@ class GenericPlotWindow(QtWidgets.QTabWidget):
         self.redraw = None
         self.toolbar.addSeparator()
         settings_action = self.toolbar.addAction("Plot settings")
+        settings_action.setIcon(theme.icon("plot-settings"))
         settings_action.setToolTip("Appearance of all chart windows")
         settings_action.triggered.connect(lambda: plot_style.show_dialog())
         plot_style.hub().changed.connect(self._on_style_changed)

@@ -6677,6 +6677,7 @@ class Window(QtWidgets.QMainWindow):
         export_current_action.setShortcut("Ctrl+E")
         export_current_action.triggered.connect(self.export_current)
         metadata_action = file_menu.addAction("Show metadata...")
+        metadata_action.setIcon(theme.icon("metadata"))
         metadata_action.setShortcut("Ctrl+M")
         metadata_action.triggered.connect(self.show_metadata)
         file_menu.addAction(metadata_action)

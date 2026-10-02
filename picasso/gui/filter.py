@@ -187,6 +187,7 @@ class PlotWindow(QtWidgets.QWidget):
         toolbar = NavigationToolbar2QT(self.canvas, self)
         toolbar.addSeparator()
         settings_action = toolbar.addAction("Plot settings")
+        settings_action.setIcon(theme.icon("plot-settings"))
         settings_action.setToolTip(
             "Appearance of all chart windows and Filter's histograms"
         )
@@ -531,6 +532,7 @@ class FilterNum(lib.Dialog):
 
         # filter button
         filter_button = QtWidgets.QPushButton("Filter")
+        filter_button.setIcon(theme.icon("filter"))
         filter_button.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
         filter_button.clicked.connect(self.filter)
         self.layout.addWidget(filter_button, 3, 0, 1, 2)
@@ -612,6 +614,7 @@ class SubclusterNum(lib.Dialog):
         self.save_vals.setChecked(False)
         self.layout.addRow(self.save_vals)
         test_button = QtWidgets.QPushButton("Test subclustering")
+        test_button.setIcon(theme.icon("subclustering"))
         test_button.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
         test_button.clicked.connect(self.plot)
         self.layout.addRow(test_button)
@@ -803,6 +806,33 @@ class Window(QtWidgets.QMainWindow):
         plot_style.hub().changed.connect(self.set_plot_style)
 
         self.plugin_menu = menu_bar.addMenu("Plugins")  # do not delete
+
+        # toolbar of the most used actions, shared with the menus
+        self.toolbar = theme.add_toolbar(
+            self,
+            "Filter toolbar",
+            [
+                (open_action, "open", "Open"),
+                (save_action, "save", "Save"),
+                (export_csv_action, "export-csv", "Export CSV"),
+                None,
+                (histogram_action, "histogram"),
+                (scatter_action, "histogram-2d", "2D histogram"),
+                (test_subcluster_action, "subclustering", "Subclustering"),
+                None,
+                (filter_action, "filter", "Filter"),
+                (
+                    apply_from_metadata_action,
+                    "filter-metadata",
+                    "From metadata",
+                ),
+                None,
+                (plot_settings_action, "plot-settings", "Plot settings"),
+            ],
+        )
+        # in the menus only, not on the toolbar
+        metadata_action.setIcon(theme.icon("metadata"))
+        remove_columns_action.setIcon(theme.icon("remove-columns"))
 
     @property
     def locs(self) -> pd.DataFrame:

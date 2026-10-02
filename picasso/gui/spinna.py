@@ -3290,6 +3290,7 @@ class SimulationsTab(lib.Dialog):
         nnd_buttons_layout.addWidget(self.n_sim_plot_spin, 2, 1, 1, 1)
 
         plot_settings_button = QtWidgets.QPushButton("Plot settings")
+        plot_settings_button.setIcon(theme.icon("plot-settings"))
         plot_settings_button.setToolTip(
             "Adjust settings for plotting the nearest neighbors distances."
         )

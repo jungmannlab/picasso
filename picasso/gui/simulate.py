@@ -280,6 +280,7 @@ class Window(QtWidgets.QMainWindow):
         )
         theme.add_menu_action(file_menu)
         plot_settings_action = file_menu.addAction("Plot settings...")
+        plot_settings_action.setIcon(theme.icon("plot-settings"))
         plot_settings_action.setToolTip("Appearance of all chart windows")
         plot_settings_action.triggered.connect(
             lambda: plot_style.show_dialog()

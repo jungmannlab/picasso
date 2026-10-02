@@ -240,3 +240,28 @@ def test_help_button_is_filled_with_the_accent_color(
     assert _center(button.icon(), Mode.Normal, State.Off) == "#123456"
     button.leaveEvent(QtCore.QEvent(QtCore.QEvent.Type.Leave))
     assert _center(button.icon(), Mode.Normal, State.Off) == on_accent
+
+
+def test_filter_toolbar(qt_offscreen):
+    from picasso.gui import filter as gui_filter
+
+    window = gui_filter.Window()
+    try:
+        labels = [
+            action.iconText()
+            for action in window.toolbar.actions()
+            if not action.isSeparator()
+        ]
+        assert labels == [
+            "Open",
+            "Save",
+            "Export CSV",
+            "Histogram",
+            "2D histogram",
+            "Subclustering",
+            "Filter",
+            "From metadata",
+            "Plot settings",
+        ]
+    finally:
+        window.close()
