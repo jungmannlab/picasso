@@ -2309,24 +2309,49 @@ class HelpButton(QtWidgets.QToolButton):
         self.setFixedSize(*size)
         self.setToolTip("Open documentation")
         self.setCursor(QtCore.Qt.CursorShape.PointingHandCursor)
+        # filled with the accent color, so that the button stands out;
+        # inverted on hover. Shows the help icon, or "?" without it.
+        # imported here: picasso.gui.theme imports picasso.lib
+        from picasso.gui import theme
+
+        Role = QtGui.QPalette.ColorRole
+        self._icons = (
+            theme.icon("help", role=Role.HighlightedText),
+            theme.icon("help", role=Role.Highlight),  # on hover
+        )
+        if not self._icons[0].isNull():
+            self.setIcon(self._icons[0])
+            side = max(8, min(size) - 8)
+            self.setIconSize(QtCore.QSize(side, side))
+        radius = min(size) // 2
         self.setStyleSheet(
-            """
-            QToolButton {
-                border: 1px solid palette(mid);
-                border-radius: 11px;
+            f"""
+            QToolButton {{
+                border: 1px solid palette(highlight);
+                border-radius: {radius}px;
+                padding: 0px;
                 font-weight: bold;
                 font-size: 12px;
-                color: palette(button-text);
-                background: palette(button);
-            }
-            QToolButton:hover {
-                background: palette(highlight);
                 color: palette(highlighted-text);
-                border-color: palette(highlight);
-            }
+                background: palette(highlight);
+            }}
+            QToolButton:hover {{
+                color: palette(highlight);
+                background: palette(highlighted-text);
+            }}
         """
         )
         self.clicked.connect(self._open_docs)
+
+    def enterEvent(self, event) -> None:
+        if not self._icons[1].isNull():
+            self.setIcon(self._icons[1])
+        super().enterEvent(event)
+
+    def leaveEvent(self, event) -> None:
+        if not self._icons[0].isNull():
+            self.setIcon(self._icons[0])
+        super().leaveEvent(event)
 
     def _open_docs(self) -> None:
         QtGui.QDesktopServices.openUrl(QtCore.QUrl(self.help_url))

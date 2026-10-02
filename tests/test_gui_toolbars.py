@@ -212,3 +212,31 @@ def test_localize_toolbar(qt_offscreen):
         assert window.abort_action in window.toolbar.actions()
     finally:
         window.close()
+
+
+def test_help_button_is_filled_with_the_accent_color(
+    qt_offscreen, icons, restore_theme
+):
+    """The help icon in the text color on the accent, inverted on
+    hover; without the icon file a "?"."""
+    from picasso import lib
+
+    theme.apply(restore_theme, Appearance(mode="Light", accent="#123456"))
+    Mode, State = QtGui.QIcon.Mode, QtGui.QIcon.State
+    button = lib.HelpButton("https://example.org")
+    assert button.icon().isNull()
+    assert button.text() == "?"
+    assert "background: palette(highlight)" in button.styleSheet()
+    (icons / "help.svg").write_text(SQUARE)
+    button = lib.HelpButton("https://example.org")
+    on_accent = (
+        restore_theme.palette()
+        .color(QtGui.QPalette.ColorRole.HighlightedText)
+        .name()
+    )
+    assert _center(button.icon(), Mode.Normal, State.Off) == on_accent
+    point = QtCore.QPointF()
+    button.enterEvent(QtGui.QEnterEvent(point, point, point))
+    assert _center(button.icon(), Mode.Normal, State.Off) == "#123456"
+    button.leaveEvent(QtCore.QEvent(QtCore.QEvent.Type.Leave))
+    assert _center(button.icon(), Mode.Normal, State.Off) == on_accent

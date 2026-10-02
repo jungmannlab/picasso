@@ -627,24 +627,30 @@ class _TintedSvgEngine(QtGui.QIconEngine):
     ----------
     path : str
         The SVG file.
+    role : QtGui.QPalette.ColorRole or None, optional
+        Palette color of the enabled, unchecked icon instead of the text
+        color, e.g., ``HighlightedText`` on an accent background.
+        Default None.
     """
 
-    def __init__(self, path: str) -> None:
+    def __init__(
+        self, path: str, role: QtGui.QPalette.ColorRole | None = None
+    ) -> None:
         super().__init__()
         self._path = path
+        self._role = role
         self._renderer = QtSvg.QSvgRenderer(path)
         self._cache = {}
 
     def clone(self) -> QtGui.QIconEngine:
-        return _TintedSvgEngine(self._path)
+        return _TintedSvgEngine(self._path, self._role)
 
     def is_valid(self) -> bool:
         """Whether the SVG file could be read."""
         return self._renderer.isValid()
 
-    @staticmethod
     def color(
-        mode: QtGui.QIcon.Mode, state: QtGui.QIcon.State
+        self, mode: QtGui.QIcon.Mode, state: QtGui.QIcon.State
     ) -> QtGui.QColor:
         """The color of the icon in ``mode`` and ``state``."""
         palette = QtWidgets.QApplication.palette()
@@ -657,7 +663,7 @@ class _TintedSvgEngine(QtGui.QIconEngine):
             return palette.color(Role.HighlightedText)
         if state == QtGui.QIcon.State.On:
             return palette.color(Role.Highlight)
-        return palette.color(Role.ButtonText)
+        return palette.color(self._role or Role.ButtonText)
 
     def scaledPixmap(self, size, mode, state, scale):
         color = self.color(mode, state)
@@ -695,7 +701,9 @@ class _TintedSvgEngine(QtGui.QIconEngine):
         )
 
 
-def icon(name: str) -> QtGui.QIcon:
+def icon(
+    name: str, role: QtGui.QPalette.ColorRole | None = None
+) -> QtGui.QIcon:
     """The icon ``ICONS_DIR/<name>.svg`` in the colors of the theme.
 
     The SVG is drawn in a single color: the text color of the palette,
@@ -706,6 +714,10 @@ def icon(name: str) -> QtGui.QIcon:
     ----------
     name : str
         File name of the icon without the extension, e.g., "open".
+    role : QtGui.QPalette.ColorRole or None, optional
+        Palette color of the enabled, unchecked icon instead of the text
+        color, e.g., ``HighlightedText`` on an accent background.
+        Default None.
 
     Returns
     -------
@@ -716,7 +728,7 @@ def icon(name: str) -> QtGui.QIcon:
     path = os.path.join(ICONS_DIR, f"{name}.svg")
     if not os.path.isfile(path):
         return QtGui.QIcon()
-    engine = _TintedSvgEngine(path)
+    engine = _TintedSvgEngine(path, role)
     if not engine.is_valid():
         return QtGui.QIcon()
     return QtGui.QIcon(engine)
