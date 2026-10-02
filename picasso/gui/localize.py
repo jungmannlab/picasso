@@ -6794,6 +6794,8 @@ class Window(QtWidgets.QMainWindow):
         constract_action = view_menu.addAction("Contrast...")
         constract_action.setShortcut("Ctrl+C")
         constract_action.triggered.connect(self.contrast_dialog.show)
+        # in the menu only, not on the toolbar
+        constract_action.setIcon(theme.icon("contrast"))
         view_menu.addAction(constract_action)
         self.scalebar_action = view_menu.addAction("Show scale bar")
         self.scalebar_action.setCheckable(True)
@@ -6932,7 +6934,6 @@ class Window(QtWidgets.QMainWindow):
                 (localize_action, "localize", "Localize"),
                 (self.abort_action, "abort"),
                 None,
-                (constract_action, "contrast", "Contrast"),
                 (fit_in_view_action, "fit-view", "Fit view"),
             ],
         )

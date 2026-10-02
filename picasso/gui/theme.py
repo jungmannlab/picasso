@@ -182,7 +182,7 @@ class Appearance:
     accent: str = ACCENTS["Blue"]
     font_scale: int = 100
     density: str = "Comfortable"
-    toolbar: str = "Icons"
+    toolbar: str = "Icons and text"
 
     @classmethod
     def from_settings(cls, settings: dict | None) -> Appearance:
@@ -751,10 +751,10 @@ def add_toolbar(
     items: Iterable[tuple | None],
 ) -> QtWidgets.QToolBar:
     """Add a toolbar of existing actions (e.g., those of the menus) to
-    ``window``. The actions get their icon (see ``icon``), so that the
-    menus show it too (not on macOS, whose menus have no icons), and,
-    unless they have their own, a tooltip with the shortcut. The
-    toolbar is shown as set in the appearance (``Appearance.toolbar``).
+    ``window``. The actions get their icon (see ``icon``), which the
+    menus show too, and, unless they have their own, a tooltip with the
+    shortcut. The toolbar is shown as set in the appearance
+    (``Appearance.toolbar``).
 
     Parameters
     ----------

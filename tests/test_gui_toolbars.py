@@ -131,8 +131,10 @@ def test_toolbar_style_follows_the_appearance(main_window, restore_theme):
 
 
 def test_toolbar_setting_is_validated_and_in_the_dialog(qt_offscreen):
-    assert Appearance().toolbar == "Icons"
-    assert Appearance.from_settings({"toolbar": "Huge"}).toolbar == "Icons"
+    assert Appearance().toolbar == "Icons and text"
+    assert Appearance.from_settings({"toolbar": "Huge"}).toolbar == (
+        "Icons and text"
+    )
     dialog = theme.AppearanceDialog(Appearance(toolbar="Text"))
     assert dialog.appearance().toolbar == "Text"
     # the toolbar is offered in every mode, also "Native"
