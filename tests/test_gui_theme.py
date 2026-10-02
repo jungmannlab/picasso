@@ -277,6 +277,16 @@ def test_dialog_shows_and_returns_the_appearance(qt_offscreen):
     assert dialog.appearance() == custom
 
 
+def test_dialog_links_to_its_documentation(qt_offscreen):
+    from picasso import lib
+
+    dialog = theme.AppearanceDialog(Appearance())
+    help_buttons = dialog.findChildren(lib.HelpButton)
+    assert len(help_buttons) == 1
+    assert help_buttons[0].help_url == dialog.DOCS_URL
+    assert dialog.DOCS_URL.endswith("others.html#appearance")
+
+
 def test_dialog_hides_settings_native_does_not_use(qt_offscreen):
     dialog = theme.AppearanceDialog(Appearance(mode="Native"))
     for widget in (dialog.accent, dialog.font_scale, dialog.density):

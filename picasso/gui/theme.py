@@ -44,7 +44,7 @@ from dataclasses import asdict, dataclass, fields, replace
 
 from PyQt6 import QtCore, QtGui, QtWidgets
 
-from .. import io, lib
+from .. import docs_url, io, lib
 
 #: Modes of the theme; "System" follows the operating system and
 #: "Native" is the platform's own style.
@@ -705,6 +705,8 @@ class AppearanceDialog(lib.Dialog):
 
     appearanceChanged = QtCore.pyqtSignal(object)
 
+    DOCS_URL = docs_url("others.html#appearance")
+
     #: Delay between the last change and ``appearanceChanged`` (ms).
     DELAY = 250
 
@@ -773,7 +775,10 @@ class AppearanceDialog(lib.Dialog):
             QtWidgets.QDialogButtonBox.StandardButton.Close
         )
         close.clicked.connect(self.close)
-        layout.addWidget(buttons)
+        button_row = QtWidgets.QHBoxLayout()
+        button_row.addWidget(lib.HelpButton(self.DOCS_URL))
+        button_row.addWidget(buttons)
+        layout.addLayout(button_row)
 
         self.set_appearance(appearance, notify=False)
         self.mode.currentIndexChanged.connect(self._on_mode_changed)
