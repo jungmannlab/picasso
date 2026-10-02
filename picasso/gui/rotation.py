@@ -651,6 +651,7 @@ class AnimationDialog(lib.Dialog):
         # Editing the sequence, right below the positions
         sequence_row = QtWidgets.QHBoxLayout()
         self.add = QtWidgets.QPushButton("Add this position")
+        self.add.setIcon(theme.icon("add"))
         self.add.setToolTip(
             "Add the current rotation/view to the animation sequence."
         )
@@ -659,6 +660,7 @@ class AnimationDialog(lib.Dialog):
         self.stay.setToolTip("Add the current position again (no movement).")
         self.stay.clicked.connect(partial(self.add_position, True))
         self.delete = QtWidgets.QPushButton("Remove last position")
+        self.delete.setIcon(theme.icon("delete"))
         self.delete.setToolTip(
             "Remove the last position from the animation sequence."
         )
@@ -740,6 +742,7 @@ class AnimationDialog(lib.Dialog):
         build_row = QtWidgets.QHBoxLayout()
         build_row.addStretch(1)
         self.build = QtWidgets.QPushButton("Build animation")
+        self.build.setIcon(theme.icon("animation"))
         self.build.setToolTip("Create the animation as an .mp4 file.")
         self.build.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
         self.build.clicked.connect(self.build_animation)
@@ -3137,14 +3140,17 @@ class RotationWindow(QtWidgets.QMainWindow):
         file_menu = self.menu_bar.addMenu("File")
         save_action = file_menu.addAction("Save rotated localizations...")
         save_action.setShortcut("Ctrl+S")
+        save_action.setIcon(theme.icon("save"))
         save_action.triggered.connect(self.save_locs_rotated)
 
         file_menu.addSeparator()
         export_view = file_menu.addAction("Export current view...")
         export_view.setShortcut("Ctrl+E")
+        export_view.setIcon(theme.icon("export-view"))
         export_view.triggered.connect(self.view_rot.export_current_view)
         animation = file_menu.addAction("Build an animation...")
         animation.setShortcut("Ctrl+Shift+E")
+        animation.setIcon(theme.icon("animation"))
         animation.triggered.connect(self.animation_dialog.show)
         help_action = file_menu.addAction("Help")
         help_action.setIcon(theme.icon("help"))
@@ -3156,6 +3162,7 @@ class RotationWindow(QtWidgets.QMainWindow):
         view_menu = self.menu_bar.addMenu("View")
         display_settings_action = view_menu.addAction("Display settings...")
         display_settings_action.setShortcut("Ctrl+D")
+        display_settings_action.setIcon(theme.icon("display-settings"))
         display_settings_action.triggered.connect(
             self.display_settings_dlg.show
         )
@@ -3179,12 +3186,15 @@ class RotationWindow(QtWidgets.QMainWindow):
         rotation_action = view_menu.addAction("Rotate by angle...")
         rotation_action.triggered.connect(self.view_rot.rotation_input)
         rotation_action.setShortcut("Ctrl+Shift+R")
+        rotation_action.setIcon(theme.icon("view-3d"))
 
         delete_rotation_action = view_menu.addAction("Reset rotation")
         delete_rotation_action.triggered.connect(self.view_rot.delete_rotation)
         delete_rotation_action.setShortcut("Ctrl+Shift+W")
+        delete_rotation_action.setIcon(theme.icon("reload"))
         fit_in_view_action = view_menu.addAction("Fit image to window")
         fit_in_view_action.setShortcut("Ctrl+W")
+        fit_in_view_action.setIcon(theme.icon("fit-view"))
         fit_in_view_action.triggered.connect(self.view_rot.fit_in_view_rotated)
 
         view_menu.addSeparator()
@@ -3195,29 +3205,24 @@ class RotationWindow(QtWidgets.QMainWindow):
         yz_proj_action = view_menu.addAction("YZ projection")
         yz_proj_action.triggered.connect(self.view_rot.yz_projection)
 
-        view_menu.addSeparator()
-        to_left_action = view_menu.addAction("Left")
-        to_left_action.setShortcut("Left")
-        to_left_action.triggered.connect(self.view_rot.to_left_rot)
-        to_right_action = view_menu.addAction("Right")
-        to_right_action.setShortcut("Right")
-        to_right_action.triggered.connect(self.view_rot.to_right_rot)
-        to_up_action = view_menu.addAction("Up")
-        to_up_action.setShortcut("Up")
-        to_up_action.triggered.connect(self.view_rot.to_up_rot)
-        to_down_action = view_menu.addAction("Down")
-        to_down_action.setShortcut("Down")
-        to_down_action.triggered.connect(self.view_rot.to_down_rot)
-
-        view_menu.addSeparator()
-        zoom_in_action = view_menu.addAction("Zoom in")
-        zoom_in_action.setShortcuts(["Ctrl++", "Ctrl+="])
-        zoom_in_action.triggered.connect(self.view_rot.zoom_in)
-        view_menu.addAction(zoom_in_action)
-        zoom_out_action = view_menu.addAction("Zoom out")
-        zoom_out_action.setShortcut("Ctrl+-")
-        zoom_out_action.triggered.connect(self.view_rot.zoom_out)
-        view_menu.addAction(zoom_out_action)
+        # moving and zooming are not in the menu (the mouse does them),
+        # but their shortcuts work in the window; enabled with the menu
+        # bar, see ``hideEvent``
+        self._navigation_actions = []
+        for text, shortcuts, slot in (
+            ("Left", ["Left"], self.view_rot.to_left_rot),
+            ("Right", ["Right"], self.view_rot.to_right_rot),
+            ("Up", ["Up"], self.view_rot.to_up_rot),
+            ("Down", ["Down"], self.view_rot.to_down_rot),
+            ("Zoom in", ["Ctrl++", "Ctrl+="], self.view_rot.zoom_in),
+            ("Zoom out", ["Ctrl+-"], self.view_rot.zoom_out),
+        ):
+            action = QtGui.QAction(text, self)
+            action.setShortcuts(shortcuts)
+            action.triggered.connect(slot)
+            action.setEnabled(False)
+            self.addAction(action)
+            self._navigation_actions.append(action)
 
         # menu bar - Tools
         tools_menu = self.menu_bar.addMenu("Tools")
@@ -3227,6 +3232,7 @@ class RotationWindow(QtWidgets.QMainWindow):
             QtGui.QAction("Measure", tools_menu, checkable=True)
         )
         measure_tool_action.setShortcut("Ctrl+M")
+        measure_tool_action.setIcon(theme.icon("tool-measure"))
         tools_menu.addAction(measure_tool_action)
         tools_actiongroup.triggered.connect(self.view_rot.set_mode)
 
@@ -3234,6 +3240,7 @@ class RotationWindow(QtWidgets.QMainWindow):
             QtGui.QAction("Rotate", tools_menu, checkable=True)
         )
         rotate_tool_action.setShortcut("Ctrl+R")
+        rotate_tool_action.setIcon(theme.icon("view-3d"))
         tools_menu.addAction(rotate_tool_action)
 
         self.menus = [file_menu, view_menu, tools_menu]
@@ -3417,6 +3424,8 @@ class RotationWindow(QtWidgets.QMainWindow):
     def showEvent(self, event: QtGui.QShowEvent) -> None:
         """Arm the menu bar when the window is shown, see ``hideEvent``."""
         self.menu_bar.setEnabled(True)
+        for action in self._navigation_actions:
+            action.setEnabled(True)
         QtWidgets.QMainWindow.showEvent(self, event)
 
     def hideEvent(self, event: QtGui.QHideEvent) -> None:
@@ -3429,6 +3438,8 @@ class RotationWindow(QtWidgets.QMainWindow):
         been opened - the shortcuts of a disabled menu do not.
         """
         self.menu_bar.setEnabled(False)
+        for action in self._navigation_actions:
+            action.setEnabled(False)
         QtWidgets.QMainWindow.hideEvent(self, event)
 
     def closeEvent(self, event: QtGui.QCloseEvent) -> None:

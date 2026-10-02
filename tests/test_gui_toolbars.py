@@ -363,3 +363,32 @@ def test_render_navigation_shortcuts_without_menu_entries(qt_offscreen):
     finally:
         window.view.stop_render_worker()
         window.close()
+
+
+def test_3d_window_icons_and_navigation_shortcuts(qt_offscreen):
+    """The 3D window's actions have icons; moving and zooming are off
+    the View menu, their shortcuts work only while the window shows."""
+    window = gui_render.Window(plugins_loaded=True)
+    rot = window.window_rot
+    try:
+
+        def actions(menu_index):
+            menu = rot.menuBar().actions()[menu_index].menu()
+            return {a.text(): a for a in menu.actions() if a.text()}
+
+        file_actions, view_actions = actions(0), actions(1)
+        assert not file_actions["Build an animation..."].icon().isNull()
+        assert not view_actions["Reset rotation"].icon().isNull()
+        moves = {"Left", "Right", "Up", "Down", "Zoom in", "Zoom out"}
+        assert not moves & set(view_actions)
+        nav = {a.text(): a for a in rot.actions()}
+        assert moves <= set(nav)
+        assert not nav["Left"].isEnabled()  # hidden window
+        rot.show()
+        assert nav["Left"].isEnabled()
+        rot.hide()
+        assert not nav["Left"].isEnabled()
+    finally:
+        rot.view_rot.stop_render_worker()
+        window.view.stop_render_worker()
+        window.close()
