@@ -5286,6 +5286,7 @@ class Window(QtWidgets.QMainWindow):
         # menu bar
         file_menu = self.menuBar().addMenu("File")
         sounds_menu = file_menu.addMenu("Sound notifications")
+        sounds_menu.setIcon(theme.icon("sound"))
         sounds_actiongroup = QtGui.QActionGroup(self.menuBar())
         default_sound_path = lib.get_sound_notification_path()  # last used
         default_sound_name = os.path.basename(str(default_sound_path))
@@ -5303,10 +5304,12 @@ class Window(QtWidgets.QMainWindow):
         open_sounds_action = sounds_menu.addAction(
             "Open notification sounds folder..."
         )
+        open_sounds_action.setIcon(theme.icon("open"))
         open_sounds_action.triggered.connect(
             lib.open_sound_notifications_folder
         )
         picasso_settings_action = file_menu.addAction("Picasso settings...")
+        picasso_settings_action.setIcon(theme.icon("picasso-settings"))
         picasso_settings_action.triggered.connect(
             self.user_settings_dialog.show
         )

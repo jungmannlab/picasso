@@ -275,6 +275,7 @@ class Window(QtWidgets.QMainWindow):
         self.user_settings_dialog = lib.UserSettingsDialog(self)
         file_menu = self.menuBar().addMenu("File")
         picasso_settings_action = file_menu.addAction("Picasso settings...")
+        picasso_settings_action.setIcon(theme.icon("picasso-settings"))
         picasso_settings_action.triggered.connect(
             self.user_settings_dialog.show
         )

@@ -908,6 +908,7 @@ def add_menu_action(menu: QtWidgets.QMenu) -> QtGui.QAction:
         The added action.
     """
     action = menu.addAction("Appearance...")
+    action.setIcon(icon("plot-settings"))
     action.triggered.connect(lambda: show_dialog())
     return action
 

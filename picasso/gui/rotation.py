@@ -22,6 +22,7 @@ from PyQt6 import QtCore, QtGui, QtWidgets
 from scipy.spatial.transform import Rotation
 
 from .. import io, render, lib, lib_qt, __version__, docs_url
+from . import theme
 from .render_worker import (
     RenderWorker,
     global_precisions_for,
@@ -3146,6 +3147,7 @@ class RotationWindow(QtWidgets.QMainWindow):
         animation.setShortcut("Ctrl+Shift+E")
         animation.triggered.connect(self.animation_dialog.show)
         help_action = file_menu.addAction("Help")
+        help_action.setIcon(theme.icon("help"))
         help_action.triggered.connect(
             lambda: QtGui.QDesktopServices.openUrl(QtCore.QUrl(self.DOCS_URL))
         )

@@ -16479,6 +16479,7 @@ class Window(QtWidgets.QMainWindow):
         # sound notification submenu
         file_menu.addSeparator()
         sounds_menu = file_menu.addMenu("Sound notifications")
+        sounds_menu.setIcon(theme.icon("sound"))
         sounds_actiongroup = QtGui.QActionGroup(self.menu_bar)
         default_sound_path = lib.get_sound_notification_path()  # last used
         default_sound_name = os.path.basename(str(default_sound_path))
@@ -16496,6 +16497,7 @@ class Window(QtWidgets.QMainWindow):
         open_sounds_action = sounds_menu.addAction(
             "Open notification sounds folder..."
         )
+        open_sounds_action.setIcon(theme.icon("open"))
         open_sounds_action.triggered.connect(
             lib.open_sound_notifications_folder
         )
@@ -16509,11 +16511,13 @@ class Window(QtWidgets.QMainWindow):
         delete_action.triggered.connect(self.remove_locs)
 
         picasso_settings_action = file_menu.addAction("Picasso settings...")
+        picasso_settings_action.setIcon(theme.icon("picasso-settings"))
         picasso_settings_action.triggered.connect(
             self.user_settings_dialog.show
         )
         theme.add_menu_action(file_menu)
         help_action = file_menu.addAction("Help")
+        help_action.setIcon(theme.icon("help"))
         help_action.triggered.connect(
             lambda: QtGui.QDesktopServices.openUrl(QtCore.QUrl(self.DOCS_URL))
         )

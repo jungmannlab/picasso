@@ -1834,6 +1834,7 @@ class MainWindow(QtWidgets.QWidget):
         menu_bar = QtWidgets.QMenuBar(self)
         file_menu = menu_bar.addMenu("File")
         picasso_settings_action = file_menu.addAction("Picasso settings...")
+        picasso_settings_action.setIcon(theme.icon("picasso-settings"))
         picasso_settings_action.triggered.connect(
             self.window.user_settings_dialog.show
         )

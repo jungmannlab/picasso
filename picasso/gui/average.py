@@ -544,14 +544,17 @@ class Window(QtWidgets.QMainWindow):
         save_action.triggered.connect(self.save)
         file_menu.addAction(save_action)
         metadata_action = file_menu.addAction("Show metadata...")
+        metadata_action.setIcon(theme.icon("metadata"))
         metadata_action.setShortcut("Ctrl+M")
         metadata_action.triggered.connect(self.show_metadata)
         picasso_settings_action = file_menu.addAction("Picasso settings...")
+        picasso_settings_action.setIcon(theme.icon("picasso-settings"))
         picasso_settings_action.triggered.connect(
             self.user_settings_dialog.show
         )
         theme.add_menu_action(file_menu)
         help_action = file_menu.addAction("Help")
+        help_action.setIcon(theme.icon("help"))
         help_action.triggered.connect(
             lambda: QtGui.QDesktopServices.openUrl(QtCore.QUrl(self.DOCS_URL))
         )
