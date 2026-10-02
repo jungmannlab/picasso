@@ -8728,6 +8728,13 @@ class Window(QtWidgets.QMainWindow):
     def open_picks(self) -> None:
         """Open a file dialog to select a picks (from Picasso: Render)
         file to load."""
+        if self.movie is None:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Load picks as identifications",
+                "Load a movie before loading identifications.",
+            )
+            return
         if self.movie_path != []:
             dir = os.path.dirname(self.movie_path)
         else:
@@ -8778,6 +8785,13 @@ class Window(QtWidgets.QMainWindow):
     def open_locs(self) -> None:
         """Open localizations for refitting data. Provide spot
         identifications."""
+        if self.movie is None:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Load locs as identifications",
+                "Load a movie before loading identifications.",
+            )
+            return
         if self.movie_path != []:
             dir = os.path.dirname(self.movie_path)
         else:
@@ -8814,6 +8828,13 @@ class Window(QtWidgets.QMainWindow):
 
     def open_identifications(self) -> None:
         """Open identifications previously saved as a HDF5 file."""
+        if self.movie is None:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Load identifications",
+                "Load a movie before loading identifications.",
+            )
+            return
         if self.movie_path != []:
             dir = os.path.dirname(self.movie_path)
         else:
@@ -10834,6 +10855,11 @@ class Window(QtWidgets.QMainWindow):
             identification (see ``build_spline_calibration``). Default is
             False.
         """
+        if self.movie is None:
+            QtWidgets.QMessageBox.warning(
+                self, "Identify", "Load a movie before identifying."
+            )
+            return
         # The calibrations are built from bead stacks, one channel at a time,
         # so they always identify the channels separately - only the
         # experimental data can be identified on the sum.
@@ -13188,6 +13214,8 @@ class Window(QtWidgets.QMainWindow):
 
     def fit_in_view(self) -> None:
         """Reset the zoom in the scene."""
+        if self.movie is None:  # nothing to fit
+            return
         rectangle = QtCore.QRectF(
             0,
             0,
@@ -13265,6 +13293,11 @@ class Window(QtWidgets.QMainWindow):
 
     def save_spots_dialog(self) -> None:
         """Get the path for saving identified spots."""
+        if self.movie is None:
+            QtWidgets.QMessageBox.information(
+                self, "Save spots", "No file loaded."
+            )
+            return
         if self.movie_path != []:
             base = self.channel_output_base()
             path = base + "_spots.tif"
@@ -13280,6 +13313,11 @@ class Window(QtWidgets.QMainWindow):
 
     def export_current(self) -> None:
         """Export current view as .png or .tif."""
+        if self.movie is None:
+            QtWidgets.QMessageBox.information(
+                self, "Export current view", "No file loaded."
+            )
+            return
         try:
             base = self.channel_output_base()
         except AttributeError:
@@ -13383,6 +13421,11 @@ class Window(QtWidgets.QMainWindow):
 
     def save_locs_dialog(self) -> None:
         """Get the path to save localizations."""
+        if self.movie is None:
+            QtWidgets.QMessageBox.information(
+                self, "Save localizations", "No file loaded."
+            )
+            return
         if self.movie_path != []:
             base = self.channel_output_base()
             locs_path = base + "_locs.hdf5"
@@ -13455,6 +13498,12 @@ class Window(QtWidgets.QMainWindow):
             Whether to run z-calibration for 3D fitting afterwards
             Default is False.
         """
+        if self.movie is None:
+            title = "Calibrate astigmatism" if calibrate_z else "Localize"
+            QtWidgets.QMessageBox.warning(
+                self, title, "Load a movie before localizing."
+            )
+            return
         self.parameters_dialog.gpu_checkbox.setDisabled(True)
         if (
             calibrate_z

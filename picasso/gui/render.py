@@ -11979,12 +11979,9 @@ class View(QtWidgets.QLabel):
         viewport = [(0, 0), (movie_height, movie_width)]
         self.update_scene(viewport=viewport, autoscale=autoscale)
 
+    @check_pick
     def move_to_pick(self) -> None:
         """Adjust viewport to show a pick identified by its id."""
-        # raise error when no picks found
-        if len(self._picks) == 0:
-            raise ValueError("No picks detected")
-
         # get pick id
         pick_no, ok = QtWidgets.QInputDialog.getInt(
             self, "", "Input pick number: ", 0, 0
@@ -15789,8 +15786,16 @@ class View(QtWidgets.QLabel):
     def undo_drift(self) -> None:
         """Get a channel to undo drift."""
         channel = self.get_channel("Undo drift")
-        if channel is not None:
-            self._undo_drift(channel)
+        if channel is None:
+            return
+        if self.currentdrift[channel] is None:
+            QtWidgets.QMessageBox.information(
+                self,
+                "Undo drift",
+                "No drift correction to undo. Please undrift first.",
+            )
+            return
+        self._undo_drift(channel)
 
     def _undo_drift(self, channel: int) -> None:
         """Delete the latest drift in a given channel.
@@ -16960,6 +16965,8 @@ class Window(QtWidgets.QMainWindow):
 
     def export_current(self) -> None:
         """Export current view image."""
+        if self.no_locs_warning("Export current view"):
+            return
         try:
             # get the index of the first checked (displayed) channel
             checked_channels = [
@@ -17121,6 +17128,8 @@ class Window(QtWidgets.QMainWindow):
 
     def export_complete(self) -> None:
         """Export the whole field of view as an image."""
+        if self.no_locs_warning("Export complete image"):
+            return
         try:
             base, ext = os.path.splitext(self.view.locs_paths[0])
         except AttributeError:
@@ -17158,6 +17167,8 @@ class Window(QtWidgets.QMainWindow):
 
     def export_kwargs(self) -> None:
         """Exports a FOV given GUI-independent kwargs."""
+        if self.no_locs_warning("Export view manually"):
+            return
         kwargs, ok = ExportKwargsDialog.getParams(self)
         if not ok:
             return
@@ -17230,6 +17241,8 @@ class Window(QtWidgets.QMainWindow):
 
     def export_grayscale(self) -> None:
         """Export each channel in grayscale."""
+        if self.no_locs_warning("Export channels in grayscale"):
+            return
         suffix, ok = QtWidgets.QInputDialog.getText(
             self,
             "Save each channel in grayscale",
@@ -17258,6 +17271,8 @@ class Window(QtWidgets.QMainWindow):
 
     def export_multi(self):
         """Ask the user to choose a type of export."""
+        if self.no_locs_warning("Export localizations"):
+            return
         # get channel
         channel = self.view.get_channel_all_seq("Select channel to export")
         if channel is None:
@@ -17326,6 +17341,8 @@ class Window(QtWidgets.QMainWindow):
 
     def export_fov_ims(self) -> None:  # noqa: C901
         """Export current FOV to .ims."""
+        if self.no_locs_warning("Export ROI for Imaris"):
+            return
         base, ext = os.path.splitext(self.view.locs_paths[0])
         out_path = base + ".ims"
 
@@ -17478,6 +17495,8 @@ class Window(QtWidgets.QMainWindow):
 
     def load_picks(self) -> None:
         """Load pick regions from a .yaml file."""
+        if self.no_locs_warning("Load pick regions"):
+            return
         path, ext = QtWidgets.QFileDialog.getOpenFileName(
             self, "Load pick regions", filter="*.yaml"
         )
@@ -17790,6 +17809,8 @@ class Window(QtWidgets.QMainWindow):
 
     def save_pick_properties(self) -> None:
         """Save pick properties in a given channel (or channels)."""
+        if self.no_locs_warning("Save pick properties"):
+            return
         channel = self.view.get_channel_all_seq("Save pick properties")
         if channel is not None:
             if channel == len(self.view.locs_paths):
@@ -17823,6 +17844,8 @@ class Window(QtWidgets.QMainWindow):
 
     def save_locs(self) -> None:
         """Save localizations in a given channel (or all channels)."""
+        if self.no_locs_warning("Save localizations"):
+            return
         channel = self.view.get_channel_save_locs("Save localizations")
         if channel is not None:
             # combine all channels
@@ -17902,6 +17925,8 @@ class Window(QtWidgets.QMainWindow):
     def save_picked_locs(self) -> None:
         """Save picked localizations in a given channel (or all
         channels)."""
+        if self.no_locs_warning("Save picked localizations"):
+            return
         channel = self.view.get_channel_save_locs("Save picked localizations")
         if channel is not None:
             # combine channels to one .hdf5
@@ -17949,6 +17974,8 @@ class Window(QtWidgets.QMainWindow):
 
     def save_picked_locs_separately(self) -> None:
         """Save picked localizations for each pick separately."""
+        if self.no_locs_warning("Save picked localizations separately"):
+            return
         channel = self.view.get_channel_save_locs(
             "Save picked localizations separately"
         )
@@ -18027,6 +18054,8 @@ class Window(QtWidgets.QMainWindow):
 
     def save_picks(self) -> None:
         """Save pick regions as .yaml."""
+        if self.no_locs_warning("Save pick regions"):
+            return
         base, ext = os.path.splitext(self.view.locs_paths[0])
         out_path = base + "_picks.yaml"
         path, ext = lib.get_save_filename_ext_dialog(
@@ -18120,6 +18149,26 @@ class Window(QtWidgets.QMainWindow):
         self.image_overlay_dialog.raise_()
         if self.image_overlay_dialog.data is None:
             self.image_overlay_dialog.open_image_dialog()
+
+    def no_locs_warning(self, title: str) -> bool:
+        """Tell the user that no localizations are loaded, if so.
+
+        Parameters
+        ----------
+        title : str
+            Title of the message box, i.e., the name of the action that
+            needs localizations.
+
+        Returns
+        -------
+        missing : bool
+            True if no localizations are loaded (the action should
+            stop), False otherwise.
+        """
+        if self.view.locs:
+            return False
+        QtWidgets.QMessageBox.information(self, title, "No files loaded.")
+        return True
 
     def show_metadata(self) -> None:
         """Open the metadata dialog with current infos."""

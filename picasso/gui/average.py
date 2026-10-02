@@ -230,6 +230,11 @@ class View(QtWidgets.QLabel):
     def average(self):
         """Start the averaging in a worker thread, reading the parameters
         from the parameters dialog."""
+        if not hasattr(self, "locs"):
+            QtWidgets.QMessageBox.information(
+                self.window, "Average", "No file loaded."
+            )
+            return
         if not self.running:
             self.running = True
             display_px_size = (
@@ -346,19 +351,21 @@ class View(QtWidgets.QLabel):
         path : str
             Path to the localization file.
         """
-        self.path = path
         try:
-            self.locs, self.info = io.load_locs(path, qt_parent=self)
+            locs, info = io.load_locs(path, qt_parent=self)
         except io.NoMetadataFileError:
             return
-        self.avg_history = []
-        if "group" not in self.locs.columns:
+        if "group" not in locs.columns:
+            # not kept: averaging needs the groups
             message = (
                 "Loaded file contains no group information. Please load"
                 " localizations that were picked."
             )
             QtWidgets.QMessageBox.warning(self, "Warning", message)
             return
+        self.path = path
+        self.locs, self.info = locs, info
+        self.avg_history = []
         group_index = average.build_group_index(self.locs)
         self.locs = average.com_align(self.locs, group_index)
         self.r = 2 * np.sqrt(
@@ -619,6 +626,9 @@ class Window(QtWidgets.QMainWindow):
 
     def save(self) -> None:
         """Open the dialog for saving averaged localizations."""
+        if not hasattr(self.view, "locs"):
+            QtWidgets.QMessageBox.information(self, "Save", "No file loaded.")
+            return
         out_path = os.path.splitext(self.view.path)[0] + "_avg.hdf5"
         path, ext = lib.get_save_filename_ext_dialog(
             self,

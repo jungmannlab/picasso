@@ -541,6 +541,8 @@ class FilterNum(lib.Dialog):
 
     def filter(self) -> None:
         """Filters locs given the range values."""
+        if self.window.no_locs_warning("Filter"):
+            return
         xmin = self.min.value()
         xmax = self.max.value()
         if xmin < xmax:
@@ -1014,10 +1016,38 @@ class Window(QtWidgets.QMainWindow):
         )
         self.pwd = os.path.dirname(path)
 
+    def no_locs_warning(self, title: str) -> bool:
+        """Tell the user that no localizations are loaded, if so.
+
+        Parameters
+        ----------
+        title : str
+            Title of the message box, i.e., the name of the action that
+            needs localizations.
+
+        Returns
+        -------
+        missing : bool
+            True if no localizations are loaded (the action should
+            stop), False otherwise.
+        """
+        if self.locs_full is not None:
+            return False
+        QtWidgets.QMessageBox.information(self, title, "No file loaded.")
+        return True
+
     def plot_histogram(self) -> None:
+        if self.no_locs_warning("Histogram"):
+            return
         selection_model = self.table_view.selectionModel()
         indices = selection_model.selectedColumns()
-        if len(indices) > 0:
+        if len(indices) == 0:
+            QtWidgets.QMessageBox.information(
+                self,
+                "Histogram",
+                "Select one or more columns (click their headers) first.",
+            )
+        else:
             for index in indices:
                 index = index.column()
                 field = self.locs_full.columns[index]
@@ -1026,9 +1056,17 @@ class Window(QtWidgets.QMainWindow):
                 self.hist_windows[field].show()
 
     def plot_hist2d(self) -> None:
+        if self.no_locs_warning("2D Histogram"):
+            return
         selection_model = self.table_view.selectionModel()
         indices = selection_model.selectedColumns()
-        if len(indices) == 2:
+        if len(indices) != 2:
+            QtWidgets.QMessageBox.information(
+                self,
+                "2D Histogram",
+                "Select two columns (click their headers) first.",
+            )
+        else:
             indices = [index.column() for index in indices]
             field_x, field_y = [
                 self.locs_full.columns[index] for index in indices
@@ -1056,6 +1094,8 @@ class Window(QtWidgets.QMainWindow):
                 window.refresh()
 
     def plot_subclustering(self) -> None:
+        if self.no_locs_warning("Test subclustering"):
+            return
         self.subcluster_num = SubclusterNum(self)
         self.subcluster_num.show()
 
@@ -1083,7 +1123,7 @@ class Window(QtWidgets.QMainWindow):
 
     def remove_columns(self) -> None:
         """Remove columns from the loaded dataset."""
-        if self.locs_full is None:
+        if self.no_locs_warning("Remove columns"):
             return
         columns = self.locs_full.columns.to_list()
         to_remove, ok = lib.RemoveColumnsDialog.getParams(self, columns)
@@ -1183,7 +1223,7 @@ class Window(QtWidgets.QMainWindow):
             self.refresh()
 
     def export_csv_dialog(self) -> None:
-        if self.locs_full is None:
+        if self.no_locs_warning("Export as CSV"):
             return
         base, ext = os.path.splitext(self.locs_path)
         out_path = base + ".csv"
@@ -1197,7 +1237,7 @@ class Window(QtWidgets.QMainWindow):
             self.materialize_filtered().to_csv(path, index=False)
 
     def save_file_dialog(self) -> None:
-        if self.locs_full is None:
+        if self.no_locs_warning("Save"):
             return
         if "x" in self.locs_full.columns:  # Saving only for locs
             base, ext = os.path.splitext(self.locs_path)

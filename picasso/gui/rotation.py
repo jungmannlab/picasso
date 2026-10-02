@@ -2716,6 +2716,11 @@ class ViewRotation(QtWidgets.QLabel):
 
     def export_current_view(self) -> None:
         """Export current view as .png or .tif."""
+        if not self.locs:
+            QtWidgets.QMessageBox.information(
+                self, "Export current view", "No files loaded."
+            )
+            return
         try:
             base, ext = os.path.splitext(self.paths[0])
         except AttributeError:
@@ -3328,6 +3333,11 @@ class RotationWindow(QtWidgets.QMainWindow):
     def save_locs_rotated(self) -> None:
         """Save locs from the main window and provides rotation info for
         later loading."""
+        if not self.view_rot.locs:
+            QtWidgets.QMessageBox.information(
+                self, "Save rotated localizations", "No files loaded."
+            )
+            return
         channel = self.window.view.get_channel_save_locs(
             "Save rotated localizations"
         )
