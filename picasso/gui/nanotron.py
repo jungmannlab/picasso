@@ -915,7 +915,7 @@ class train_dialog(lib.Dialog):
                     ]
 
                     msgBox = QtWidgets.QMessageBox(self)
-                    msgBox.setIcon(QtWidgets.QMessageBox.Information)
+                    msgBox.setIcon(QtWidgets.QMessageBox.Icon.Information)
                     msgBox.setWindowTitle("Info")
                     msgBox.setText("Class {} will be downsampled".format(key))
                     msgBox.setInformativeText(
@@ -928,7 +928,7 @@ class train_dialog(lib.Dialog):
                     print("Dataset {} not large enough.".format(key))
 
                     msgBox = QtWidgets.QMessageBox(self)
-                    msgBox.setIcon(QtWidgets.QMessageBox.Information)
+                    msgBox.setIcon(QtWidgets.QMessageBox.Icon.Information)
                     msgBox.setWindowTitle("Info")
                     msgBox.setText(
                         f"Class {key} is to small. Not enough picks"
@@ -1250,7 +1250,7 @@ class Window(QtWidgets.QMainWindow):
 
         if self.model_loaded is False:
             msgBox = QtWidgets.QMessageBox(self)
-            msgBox.setIcon(QtWidgets.QMessageBox.Information)
+            msgBox.setIcon(QtWidgets.QMessageBox.Icon.Information)
             msgBox.setWindowTitle("Information")
             msgBox.setText("No model found")
             msgBox.setInformativeText("Load model first and try again.")
@@ -1262,7 +1262,7 @@ class Window(QtWidgets.QMainWindow):
 
             if "score" not in self.locs.columns:
                 msgBox = QtWidgets.QMessageBox(self)
-                msgBox.setIcon(QtWidgets.QMessageBox.Information)
+                msgBox.setIcon(QtWidgets.QMessageBox.Icon.Information)
                 msgBox.setWindowTitle("Information")
                 msgBox.setText("No predictions found")
                 msgBox.setInformativeText("Predict first and try again.")
@@ -1445,9 +1445,9 @@ class Window(QtWidgets.QMainWindow):
 
         if "prediction" not in self.locs.columns:
             msgBox = QtWidgets.QMessageBox(self)
-            msgBox.setIcon(QtWidgets.QMessageBox.Information)
+            msgBox.setIcon(QtWidgets.QMessageBox.Icon.Information)
             msgBox.setWindowTitle("Information")
-            ("No predictions found")
+            msgBox.setText("No predictions found")
             msgBox.setInformativeText("Predict first and try again.")
             msgBox.exec()
             return
