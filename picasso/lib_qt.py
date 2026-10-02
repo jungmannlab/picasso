@@ -2210,6 +2210,7 @@ class GenericPlotWindow(QtWidgets.QTabWidget):
         settings_action.setIcon(theme.icon("plot-settings"))
         settings_action.setToolTip("Appearance of all chart windows")
         settings_action.triggered.connect(lambda: plot_style.show_dialog())
+        theme.follow_toolbar_style(self.toolbar, settings_action)
         plot_style.hub().changed.connect(self._on_style_changed)
 
     @contextlib.contextmanager

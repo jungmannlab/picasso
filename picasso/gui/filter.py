@@ -192,6 +192,7 @@ class PlotWindow(QtWidgets.QWidget):
             "Appearance of all chart windows and Filter's histograms"
         )
         settings_action.triggered.connect(main_window.show_plot_settings)
+        theme.follow_toolbar_style(toolbar, settings_action)
         vbox.addWidget(toolbar)
         self.setWindowTitle(f"Picasso v{__version__}: Filter")
 

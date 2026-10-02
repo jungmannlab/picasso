@@ -305,3 +305,24 @@ def test_raster_icon_without_svg(qt_offscreen, icons, restore_theme):
     corner = theme.icon("app").pixmap(24, 24).toImage().pixelColor(1, 1)
     assert corner.alpha() == 0
     assert _center(theme.icon("square"), Mode.Normal, State.Off) == text
+
+
+def test_plot_settings_button_follows_the_toolbar_style(
+    qt_offscreen, restore_theme
+):
+    from picasso import lib
+
+    Style = QtCore.Qt.ToolButtonStyle
+    window = lib.GenericPlotWindow("Test", "render")
+    (action,) = [
+        a for a in window.toolbar.actions() if a.text() == "Plot settings"
+    ]
+    button = window.toolbar.widgetForAction(action)
+    theme.apply(restore_theme, Appearance(toolbar="Icons and text"))
+    assert button.toolButtonStyle() == Style.ToolButtonTextUnderIcon
+    theme.apply(restore_theme, Appearance(toolbar="Text"))
+    assert button.toolButtonStyle() == Style.ToolButtonTextOnly
+    # the button stays when the toolbars are hidden, as an icon
+    theme.apply(restore_theme, Appearance(toolbar="Hidden"))
+    assert button.toolButtonStyle() == Style.ToolButtonIconOnly
+    window.close()

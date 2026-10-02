@@ -603,6 +603,9 @@ def apply(app: QtWidgets.QApplication, appearance: Appearance) -> None:
         for toolbar in window.findChildren(QtWidgets.QToolBar):
             if toolbar.property(_TOOLBAR_PROPERTY):
                 _style_toolbar(toolbar, appearance)
+        for button in window.findChildren(QtWidgets.QToolButton):
+            if button.property(_TOOL_BUTTON_PROPERTY):
+                _style_tool_button(button, appearance)
     _listen(app)
     hub().changed.emit(appearance)
 
@@ -757,6 +760,9 @@ def icon(
 
 #: Dynamic property that marks the toolbars styled by ``apply``.
 _TOOLBAR_PROPERTY = "picassoToolbar"
+#: Dynamic property that marks the single toolbar buttons styled by
+#: ``apply``, see ``follow_toolbar_style``.
+_TOOL_BUTTON_PROPERTY = "picassoToolButton"
 
 
 def _style_toolbar(
@@ -770,6 +776,38 @@ def _style_toolbar(
     compact = appearance.density == "Compact" and appearance.mode != "Native"
     size = 16 if compact else 20
     toolbar.setIconSize(QtCore.QSize(size, size))
+
+
+def _style_tool_button(
+    button: QtWidgets.QToolButton, appearance: Appearance
+) -> None:
+    """Show ``button`` as the toolbar buttons in ``appearance``; icon
+    only if the toolbars are hidden, as the button itself is not."""
+    style = TOOLBAR_STYLES.get(appearance.toolbar)
+    if style is None:
+        style = QtCore.Qt.ToolButtonStyle.ToolButtonIconOnly
+    button.setToolButtonStyle(style)
+
+
+def follow_toolbar_style(
+    toolbar: QtWidgets.QToolBar, action: QtGui.QAction
+) -> None:
+    """Show the button of ``action`` on a toolbar that is not one of
+    ``add_toolbar`` (e.g., matplotlib's) as the toolbar buttons are set
+    in the appearance (``Appearance.toolbar``): icon, text or both.
+
+    Parameters
+    ----------
+    toolbar : QtWidgets.QToolBar
+        The toolbar holding ``action``.
+    action : QtGui.QAction
+        The action.
+    """
+    button = toolbar.widgetForAction(action)
+    if not isinstance(button, QtWidgets.QToolButton):
+        return
+    button.setProperty(_TOOL_BUTTON_PROPERTY, True)
+    _style_tool_button(button, applied() or Appearance())
 
 
 def _stripped(text: str) -> str:
