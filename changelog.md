@@ -7,7 +7,8 @@ Last change: 02-OCT-2026 CEST
 **TODO**: Describe the general overview - fast render, etc.
 
 ### General
-- New look of all Picasso windows: a light and a dark theme that follow the operating system, with a selectable accent color, font size and density (`File > Appearance...`); the platform's own style remains available as *Native*. See the [documentation](https://picassosr.readthedocs.io/en/latest/others.html#appearance).
+- New [documentation](https://picassosr.readthedocs.io/en/latest).
+- New appearance of all Picasso windows: a light and a dark theme that follow the operating system, with a selectable accent color, font size and density (`File > Appearance...`); the platform's own style remains available as *Native*. See the [documentation](https://picassosr.readthedocs.io/en/latest/others.html#appearance).
 - Toolbars in Render, Localize, Filter and Average with the most used actions of the menus, see the [documentation](https://picassosr.readthedocs.io/en/latest/others.html#toolbars).
 - Icons added to menu actions and buttons.
 - Removed support for Python 3.10 (Python 3.11–3.14 are supported).
@@ -15,16 +16,16 @@ Last change: 02-OCT-2026 CEST
 - Test version documentation online.
 
 ### Render
-- **Render has been largely rewritten for fast and interactive rendering of localizations even for large, multiplex datasets. GPU via the package ``wgpu`` has been added for cross-platform support**. More details in the section **Technical details on Render update** below. See these links for the relevant user guides: [navigation](https://picassosr.readthedocs.io/en/latest/render.html#navigating-the-image), [user_settings](https://picassosr.readthedocs.io/en/latest/render.html#cpu-usage-on-shared-workstations), [GPU](https://picassosr.readthedocs.io/en/latest/render.html#gpu-rendering).
+- **Render has been largely rewritten for fast and interactive rendering of localizations even for large, multiplex datasets. GPU via the package ``wgpu`` has been added for cross-platform support**. More details in the section **Technical details on Render update** below. See these links for the relevant user guides: [navigation](https://picassosr.readthedocs.io/en/latest/render.html#render-navigation), [user_settings](https://picassosr.readthedocs.io/en/latest/render/performance.html#render-cpu-usage), [GPU](https://picassosr.readthedocs.io/en/latest/render/performance.html#render-gpu-rendering).
 - `View > 3D view` (Ctrl+Shift+R, replacing *Update rotation window*) opens the rotation window on the single selected pick or, without a pick, on the current field of view, so any region can be inspected in 3D by zooming to it; pressed again on unchanged content it only raises the window.
-- Linked windows that share user-selected attributes, see [documentation](https://picassosr.readthedocs.io/en/latest/render.html#New-linked-window).
-- New blur methods *Adaptive Histogram (Quad-Tree)* and *Jittered Triangulation* (Baddeley, Cannell & Soeller, *Microsc. Microanal.* 2010). See the [blur documentation](https://picassosr.readthedocs.io/en/latest/render.html#blur).
+- Linked windows that share user-selected attributes, see [documentation](https://picassosr.readthedocs.io/en/latest/render/menu-view.html#render-new-linked-window).
+- New blur methods *Adaptive Histogram (Quad-Tree)* and *Jittered Triangulation* (Baddeley, Cannell & Soeller, *Microsc. Microanal.* 2010). See the [blur documentation](https://picassosr.readthedocs.io/en/latest/render/display-settings.html#render-blur).
 - The display settings (main and 3D window) show the minimum blur only for the Gaussian blur methods that use it.
-- New action to move xy positions of localizations with a mouse. See the [documentation](https://picassosr.readthedocs.io/en/latest/render.html#move-ctrl-g).
+- New action to move xy positions of localizations with a mouse. See the [documentation](https://picassosr.readthedocs.io/en/latest/render/menu-tools.html#render-move).
 - Apply expression to localizations expands the canvas (metadata's `Height` and `Width`) if x and y positions are out of range.
-- Overlay of image files (`.png` and `.tif`), see the [documentation](https://picassosr.readthedocs.io/en/latest/render.html#overlay-image).
-- Editable appearance of the tools (e.g., picks), see the [documentation](https://picassosr.readthedocs.io/en/latest/render.html#tools-settings-ctrl-t).
-- Smooth transitions in 3D animations: the motion eases in and out and passes through the positions without sharp turns, see the [documentation](https://picassosr.readthedocs.io/en/latest/render.html#build-an-animation).
+- Overlay of image files (`.png` and `.tif`), see the [documentation](https://picassosr.readthedocs.io/en/latest/render/menu-view.html#render-overlay-image).
+- Editable appearance of the tools (e.g., picks), see the [documentation](https://picassosr.readthedocs.io/en/latest/render/menu-tools.html#render-tools-settings).
+- Smooth transitions in 3D animations: the motion eases in and out and passes through the positions without sharp turns, see the [documentation](https://picassosr.readthedocs.io/en/latest/render/3d.html#render-animation).
 - Faster circular picking of localizations.
 - Undrifting from picked localizations is fast and memory-efficient for many picks.
 - Faster FRC.
@@ -39,7 +40,7 @@ Last change: 02-OCT-2026 CEST
 - Fixed: *Export FOV as .ims* ignored the image extents of the loaded metadata and used only the last channel's metadata.
 
 ### Localize
-- New spot identification method: B-spline wavelet segmentation (Izeddin et al., *Opt. Express* 2012), see the [documentation](https://picassosr.readthedocs.io/en/latest/localize.html#b-spline-wavelet-identification).
+- New spot identification method: B-spline wavelet segmentation (Izeddin et al., *Opt. Express* 2012), see the [documentation](https://picassosr.readthedocs.io/en/latest/localize/identification.html#localize-wavelet).
 - New column `reduced_chi_square` for MLE and least-squares fits: the goodness of fit normalized for the box size and the photon counts, about 1 for a good fit (`picasso.localize.reduced_chi_square`).
 - Fixed: ratiometric multichannel spline fitting ignored the per-pixel sCMOS variance of the camera calibration.
 - Fixed: `Height` and `Width` were swapped in the metadata of non-square `.ims` movies.
@@ -69,9 +70,9 @@ Last change: 02-OCT-2026 CEST
 
 ### Technical details on Render update
 - **Multi-threaded CPU rendering**: the render kernels release the GIL and channels are rendered in parallel by a thread pool; a single large channel is split into row chunks rendered in parallel and summed in a fixed order.
-- New user setting `cpu_utilization` (`Render` section of `~/.picasso/settings.yaml`, default 0.5): the fraction of the CPU cores rendering may use, for shared workstations. See the [documentation](https://picassosr.readthedocs.io/en/latest/render.html#cpu-usage-on-shared-workstations).
+- New user setting `cpu_utilization` (`Render` section of `~/.picasso/settings.yaml`, default 0.5): the fraction of the CPU cores rendering may use, for shared workstations. See the [documentation](https://picassosr.readthedocs.io/en/latest/render/performance.html#render-cpu-usage).
 - The display pipeline after splatting (contrast, colormaps, channel compositing, 8-bit conversion) runs in fused numba kernels instead of a chain of numpy operations (another speed improvement).
-- **GPU rendering in Render**: localizations are rendered on the graphics card (Metal, Direct3D 12 or Vulkan via `wgpu`, any vendor, no CUDA needed) — uploaded once, then every view is computed on the GPU, several times faster than the CPU threads. See the [documentation](https://picassosr.readthedocs.io/en/latest/render.html#gpu-rendering).
+- **GPU rendering in Render**: localizations are rendered on the graphics card (Metal, Direct3D 12 or Vulkan via `wgpu`, any vendor, no CUDA needed) — uploaded once, then every view is computed on the GPU, several times faster than the CPU threads. See the [documentation](https://picassosr.readthedocs.io/en/latest/render/performance.html#render-gpu-rendering).
 - `View > Show info` shows the active renderer ("GPU (Apple M4 via Metal)" or "CPU (5 workers)") with a help button that opens the GPU documentation, which lists the requirements and what to check when it says CPU.
 - New user setting `max_blur_width` (`Render` section, default 100 nm): localizations with a precision worse than this are not rendered by the individual-precision blur methods (they would only add a faint wide haze while costing most of the render time). `0` or `off` disables the limit.
 - **Rendering runs on a background thread** in the main window: panning and zooming never block the interface, a burst of mouse events renders only the newest view, and the last image is shifted or scaled on screen immediately while the new one renders, so dragging feels continuous. Renders cover a 15% margin around the window so small pans need no new render at all; exports still render the exact view.
@@ -93,7 +94,7 @@ Last change: 02-OCT-2026 CEST
 - **Breaking change:** dark times are now the number of frames without signal between binding events, i.e., one frame shorter than before (two binding events in consecutive frames have a dark time of 0). Together with the bright time, each now counts the frames spent in its state. This affects Render's pick info, qPAINT (`picasso.postprocess.evaluate_picks`, `pick_kinetics` and `pick_properties`) and `picasso dark`; influx rates calibrated with earlier versions should be recalibrated. See the [documentation](https://picassosr.readthedocs.io/en/latest/files.html#hdf5-pick-property-files) for the convention.
 
 - Localize: auto contrast button in the bottom right corner of the window; contrast dialog still exists for a numerical input.
-- Localize: new `Identify on` mode for multichannel and split-FOV data, *Sum of unregistered channels*. It adds the channels up (in photons) pixel for pixel, without any registration. See the [documentation](https://picassosr.readthedocs.io/en/latest/localize.html#summing-without-registration). The existing mode is renamed *Sum of registered channels*.
+- Localize: new `Identify on` mode for multichannel and split-FOV data, *Sum of unregistered channels*. It adds the channels up (in photons) pixel for pixel, without any registration. See the [documentation](https://picassosr.readthedocs.io/en/latest/localize/spline.html#localize-summing-without-registration). The existing mode is renamed *Sum of registered channels*.
 - Localize: the channel sum has its own box size, min. net gradient and identification filters, the same whichever channel is displayed. Each channel keeps its own settings for identifying the channels separately (and for registering them for the sum).
 - Z binning for 3D calibration (Gaussian astigmatism and spline).
 - New `picasso.localize.localize_frames`: a GUI-free wrapper that runs the existing identification and fit on an in-memory frame stack (instead of a movie read from disk) and assigns absolute frame indices, so batched or live input concatenates into one growing localization table. Results are numerically identical to `picasso.localize.localize` on the same frames and parameters.
@@ -123,8 +124,8 @@ Last change: 02-OCT-2026 CEST
 - Errors are no longer silently swallowed in the one-click installers. Picasso now redirects errors to a log file (`~/.picasso/logs/picasso.log`), logs every uncaught exception (main thread, worker threads and unraisable ones) there, and shows it in a message box - whose *Show Details...* holds the full traceback.
 
 ### Localize
-- Localize can fit multichannel data one channel at a time, see the [documentation](https://picassosr.readthedocs.io/en/latest/localize.html#analyzing-each-channel-on-its-own).
-- A lateral correction (astigmatism / chromatic) can now be kept in its own file and loaded separately from the 3D calibration, see the [documentation](https://picassosr.readthedocs.io/en/latest/localize.html#appending-or-loading-separately).
+- Localize can fit multichannel data one channel at a time, see the [documentation](https://picassosr.readthedocs.io/en/latest/localize/multichannel.html#localize-analyzing-each-channel).
+- A lateral correction (astigmatism / chromatic) can now be kept in its own file and loaded separately from the 3D calibration, see the [documentation](https://picassosr.readthedocs.io/en/latest/localize/3d-calibration.html#localize-appending-or-loading-separately).
 - New translation transform model (2 DOF, at least 1 bead pair), offered wherever Picasso fits a geometric transform. It fits a pure shift in x and y.
 - Localize loads z-stack `.nd2` files.
 - Localize's contrast is not set to auto on opening a new movie.
@@ -133,8 +134,8 @@ Last change: 02-OCT-2026 CEST
 - Fixed drawing ROIs in Localize while the temporal median filter is on.
 
 ### Render
-- New pick shape in Render: **Box**, an axis-aligned rectangle dragged out to any size with the left mouse button. See the [documentation](https://picassosr.readthedocs.io/en/latest/render.html#picking-of-regions-of-interest).
-- New pick shape in Render: **Brush**, painted freehand with the left mouse button. Strokes whose painted areas touch merge into one pick, a right click undoes the last stroke, and each stroke keeps the width it was painted with. See the [documentation](https://picassosr.readthedocs.io/en/latest/render.html#picking-of-regions-of-interest).
+- New pick shape in Render: **Box**, an axis-aligned rectangle dragged out to any size with the left mouse button. See the [documentation](https://picassosr.readthedocs.io/en/latest/render/picking.html#render-picking).
+- New pick shape in Render: **Brush**, painted freehand with the left mouse button. Strokes whose painted areas touch merge into one pick, a right click undoes the last stroke, and each stroke keeps the width it was painted with. See the [documentation](https://picassosr.readthedocs.io/en/latest/render/picking.html#render-picking).
 - Pick statistics (`View > Show info > Calculate info below`), `Filter picks by number of localizations` and `Select picks (XY scatter)` now work with every pick shape; they used to refuse anything but circles.
 - Log-scale contrast sliders in Render: in the Display Settings dialogs of the main and of the 3D (rotation) window, and in the Test Clustering dialog.
 - Render asks for the camera pixel size when loading `.hdf5` files whose metadata does not contain `Pixelsize` (e.g. saved by old Picasso versions), instead of raising an error at rendering.
@@ -174,9 +175,9 @@ This release substantially expands Picasso: Localize. Localization can now be pe
 - Picasso relies on package `tifffile` for processing `.tif` files and many other grayscale movie formats, see [localize documentation](https://picassosr.readthedocs.io/en/latest/localize.html). **Note:** this is an experimental feature, do not hesitate to let us know if you detect bugs/unexpected behavior or would like to see more file formats in Picasso, see our [GitHub page](https://github.com/jungmannlab/picasso/issues) for contact information.
 - Added support for Zeiss `.czi` and Leica `.lif` movies in Localize (open dialog, drag-and-drop and batch CLI). These read via the optional `czifile` and `liffile` libraries (Python ≥ 3.12); install with `pip install picassosr[czi,lif]`. Multi-channel files prompt for a channel, and a `.lif` file with several acquisitions uses the one with the most frames.
 - Added support for multichannel data, i.e., several movie files in a single Localize window. These can be analyzed sequentially or be treated as a multichannel data for combined localizations, for example, in biplane 3D imaging.
-- Added support for MicroManager "separate image files" acquisitions (one `img_*.tif` per frame in a folder), see [Localize documentation](https://picassosr.readthedocs.io/en/latest/localize.html#extra-features).
-- TIFF movies found across several folders can be opened as one concatenated movie (`File` > `Concatenate movies`), with the file order shown for confirmation before loading, see [Localize documentation](https://picassosr.readthedocs.io/en/latest/localize.html#extra-features).
-- New fitting model: **Experimental PSF (cubic spline)** — fits an experimentally measured PSF (a cubic-spline model built from a bead z-stack), via the new `picasso.fitting.splinefit_cuda` module on the GPU or `picasso.fitting.splinefit` on the CPU. The spline coefficients of the calibration are computed in pure Python (NumPy/SciPy) on the CPU. In single-channel data, the bead alignment follows the workflow from [Li, et al, Nature Methods, 2018](https://www.nature.com/articles/nmeth.4661). See the [experimental PSF (cubic-spline) fitting documentation](https://picassosr.readthedocs.io/en/latest/localize.html#experimental-psf-cubic-spline-fitting) for details. *Note this is an experimental feature, do let us know if you find any bugs/unexpected behavior*.
+- Added support for MicroManager "separate image files" acquisitions (one `img_*.tif` per frame in a folder), see [Localize documentation](https://picassosr.readthedocs.io/en/latest/localize/identification.html#localize-extra-features).
+- TIFF movies found across several folders can be opened as one concatenated movie (`File` > `Concatenate movies`), with the file order shown for confirmation before loading, see [Localize documentation](https://picassosr.readthedocs.io/en/latest/localize/identification.html#localize-extra-features).
+- New fitting model: **Experimental PSF (cubic spline)** — fits an experimentally measured PSF (a cubic-spline model built from a bead z-stack), via the new `picasso.fitting.splinefit_cuda` module on the GPU or `picasso.fitting.splinefit` on the CPU. The spline coefficients of the calibration are computed in pure Python (NumPy/SciPy) on the CPU. In single-channel data, the bead alignment follows the workflow from [Li, et al, Nature Methods, 2018](https://www.nature.com/articles/nmeth.4661). See the [experimental PSF (cubic-spline) fitting documentation](https://picassosr.readthedocs.io/en/latest/localize/spline.html#localize-spline) for details. *Note this is an experimental feature, do let us know if you find any bugs/unexpected behavior*.
 - **Multichannel spline PSF fitting** (a shared-amplitude 3D spline model, e.g. biplane); additionally a new model was added for uncoupled photons with up to 6 channels. The global (multichannel) fitting follows globLoc, see [Li, et al, Nature Communications, 2022](https://doi.org/10.1038/s41467-022-30719-4).
 - **Multichannel 2D spherical Gaussian fitting.** The spherical Gaussian can now be fitted jointly across several registered channels, sharing one position and width.
 - **Standalone channel registration** (`Calibration` > `Register channels (2D)`, new module `picasso.registration`), which measures where each loaded channel sits relative to the first and saves it as its own small `.yaml`.
@@ -220,7 +221,7 @@ This release substantially expands Picasso: Localize. Localization can now be pe
 - Fixed reading of the movies from the network storage after interuption.
 
 #### Render
-- `Pick similar` now works with square and rectangular picks, not only circular ones, see [documentation](https://picassosr.readthedocs.io/en/latest/render.html#pick-similar-ctrl-shift-p).
+- `Pick similar` now works with square and rectangular picks, not only circular ones, see [documentation](https://picassosr.readthedocs.io/en/latest/render/menu-tools.html#render-pick-similar).
 - Rendering rotated Gaussians.
 - More user-friendly measure tool.
 - Faster AIM through smarter implementation.
@@ -228,7 +229,7 @@ This release substantially expands Picasso: Localize. Localization can now be pe
 - Faster and more memory efficient (especially for large datasets) SMLM clusterer + progress bar.
 - Progress bar for finding cluster centers.
 - SMAP localization file reading, see "Other improvements" below.
-- Rotation dialog allows for rotations around the localizations or the world (see [3D documentation](https://picassosr.readthedocs.io/en/latest/render.html#d-rotation-window)).
+- Rotation dialog allows for rotations around the localizations or the world (see [3D documentation](https://picassosr.readthedocs.io/en/latest/render/3d.html#render-3d)).
 - Background color for multichannel data can be adjusted.
 - Files dialog allows for better color selection of individual channels.
 - Changes to the displayed channel selection (Files dialog) affect the 3D rotation window immediately.
@@ -572,7 +573,7 @@ This release substantially expands Picasso: Localize. Localization can now be pe
 - Render G5M: removed the check for min. locs.
 - Render G5M: moved the check for too large clusters (or if any are present) before applying G5M to all channels (all channels analysis).
 - Render masking: mask out saved area uses previously saved area if available in the metadata.
-- G5M documentation has been updated to include more troubleshooting tips and common issues, see [here](https://picassosr.readthedocs.io/en/latest/render.html#g5m).
+- G5M documentation has been updated to include more troubleshooting tips and common issues, see [here](https://picassosr.readthedocs.io/en/latest/render/analysis.html#render-g5m).
 - Localize zooms in and out centered at the current view.
 - Config file changes from 0.9.5 were [documented](https://picassosr.readthedocs.io/en/latest/localize.html) and [config template](https://github.com/jungmannlab/picasso/blob/master/picasso/config_template.yaml) was updated.
 - SPINNA 3D masking: z slicing added for visual inspection.
@@ -603,7 +604,7 @@ This release substantially expands Picasso: Localize. Localization can now be pe
 
 ### Important updates:
 
-- **Algorithm for molecular mapping introduced (G5M)**, see documentation [here](https://picassosr.readthedocs.io/en/latest/render.html#g5m). DOI: [10.1038/s41467-026-70198-5](https://doi.org/10.1038/s41467-026-70198-5).
+- **Algorithm for molecular mapping introduced (G5M)**, see documentation [here](https://picassosr.readthedocs.io/en/latest/render/analysis.html#render-g5m). DOI: [10.1038/s41467-026-70198-5](https://doi.org/10.1038/s41467-026-70198-5).
 - **Localize outputs axial localization precision for astigmatic imaging in 3D**. DOI: [10.1038/s41467-026-70198-5](https://doi.org/10.1038/s41467-026-70198-5).
 - Localize GUI allows the user to select which localization columns to save when saving localizations. See the new dialog in the *File* -> *Select columns to save*.
 - Localize accepts frame bounds to analyze only a subset of frames.

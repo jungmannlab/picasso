@@ -358,7 +358,9 @@ class ApplyDialog(lib.Dialog):
         Undo the last spiral action.
     """
 
-    DOCS_URL = docs_url("render.html#apply-expressions-to-localizations")
+    DOCS_URL = docs_url(
+        "render/menu-postprocess.html#render-apply-expressions"
+    )
 
     def __init__(self, window: QtWidgets.QMainWindow) -> None:
         super().__init__(window)
@@ -491,7 +493,7 @@ class DatasetDialog(lib.Dialog):
         Main window instance.
     """
 
-    DOCS_URL = docs_url("render.html#files-ctrl-f")
+    DOCS_URL = docs_url("render/menu-view.html#render-files")
 
     def __init__(self, window: QtWidgets.QMainWindow) -> None:
         super().__init__(window)
@@ -2505,9 +2507,7 @@ class AIMDialog(lib.Dialog):
         Contains the length of temporal segments in units of frames.
     """
 
-    DOCS_URL = docs_url(
-        "render.html#adaptive-intersection-maximization-aim-drift-correction"
-    )
+    DOCS_URL = docs_url("render/drift.html#render-aim")
 
     def __init__(self, window: QtWidgets.QMainWindow) -> None:
         super().__init__(window)
@@ -3041,7 +3041,7 @@ class SMLMDialog(lib.Dialog):
         Controls whether basic frame analysis is performed.
     """
 
-    DOCS_URL = docs_url("render.html#smlm-clusterer")
+    DOCS_URL = docs_url("render/analysis.html#render-smlm-clusterer")
 
     def __init__(
         self,
@@ -3202,7 +3202,7 @@ class G5MDialog(lib.Dialog):
     uncertainties, use multiprocessing, postprocess or save clustered
     localizations."""
 
-    DOCS_URL = docs_url("render.html#g5m")
+    DOCS_URL = docs_url("render/analysis.html#render-g5m")
 
     def __init__(self, window, channel):
         super().__init__(window)
@@ -4874,7 +4874,7 @@ class InfoDialog(lib.Dialog):
         Shows the minimum y and x coordinates in FOV (camera pixels).
     """
 
-    GPU_DOCS_URL = docs_url("render.html#gpu-rendering")
+    GPU_DOCS_URL = docs_url("render/performance.html#render-gpu-rendering")
 
     def __init__(self, window: QtWidgets.QMainWindow) -> None:
         super().__init__(window)
@@ -6046,7 +6046,7 @@ class MaskSettingsDialog(lib.Dialog):
         Height of the loaded localizations.
     """
 
-    DOCS_URL = docs_url("render.html#mask-image")
+    DOCS_URL = docs_url("render/menu-tools.html#render-mask-image")
 
     def __init__(self, window: QtWidgets.QMainWindow) -> None:
         super().__init__(window)
@@ -6730,7 +6730,7 @@ class MoveChannelsDialog(lib.Dialog):
         dragged.
     """
 
-    DOCS_URL = docs_url("render.html#move-ctrl-g")
+    DOCS_URL = docs_url("render/menu-tools.html#render-move")
 
     def __init__(
         self,
@@ -6853,7 +6853,7 @@ class ToolsSettingsDialog(lib.Dialog):
         Tick to display circular picks as 3-pixels-wide points.
     """
 
-    DOCS_URL = docs_url("render.html#picking-of-regions-of-interest")
+    DOCS_URL = docs_url("render/picking.html#render-picking")
 
     def __init__(self, window: QtWidgets.QMainWindow) -> None:
         super().__init__(window)
@@ -7305,7 +7305,7 @@ class RESIDialog(lib.Dialog):
         Instance of the main Picasso Render window.
     """
 
-    DOCS_URL = docs_url("render.html#resi")
+    DOCS_URL = docs_url("render/analysis.html#render-resi")
 
     def __init__(self, window: QtWidgets.QMainWindow) -> None:
         super().__init__()
@@ -7575,7 +7575,7 @@ class DisplaySettingsDialog(lib.Dialog):
         Contains zoom's magnitude.
     """
 
-    DOCS_URL = docs_url("render.html#display-settings")
+    DOCS_URL = docs_url("render/display-settings.html#render-display-settings")
 
     def __init__(self, window: QtWidgets.QMainWindow) -> None:
         super().__init__(window)
@@ -8254,7 +8254,7 @@ class ImageOverlayDialog(lib.Dialog):
         Instance of the main window.
     """
 
-    DOCS_URL = docs_url("render.html#overlay-image")
+    DOCS_URL = docs_url("render/menu-view.html#render-overlay-image")
 
     def __init__(self, window: QtWidgets.QMainWindow) -> None:
         super().__init__(window)
@@ -16369,7 +16369,7 @@ class Window(QtWidgets.QMainWindow):
         keyed by channel index.
     """
 
-    DOCS_URL = docs_url("render.html#")
+    DOCS_URL = docs_url("render.html")
 
     #: linked windows opened from another window; referenced here so
     #: they stay alive while open, also after being unlinked

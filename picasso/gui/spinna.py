@@ -580,7 +580,7 @@ class MaskGeneratorTab(lib.Dialog):
         probability cutoff.
     """
 
-    DOCS_URL = docs_url("spinna.html#mask-generation-tab")
+    DOCS_URL = docs_url("spinna.html#spinna-mask-generation-tab")
 
     def __init__(self, window: QtWidgets.QMainWindow) -> None:
         super().__init__(window)
@@ -1521,7 +1521,7 @@ class StructuresTab(lib.Dialog):
         Checkbox for showing/hiding scalebar.
     """
 
-    DOCS_URL = docs_url("spinna.html#structures-tab")
+    DOCS_URL = docs_url("spinna.html#spinna-structures-tab")
 
     def __init__(self, window: QtWidgets.QMainWindow) -> None:
         super().__init__(window)
@@ -3211,7 +3211,7 @@ class SimulationsTab(lib.Dialog):
         Main window.
     """
 
-    DOCS_URL = docs_url("spinna.html#simulate-tab")
+    DOCS_URL = docs_url("spinna.html#spinna-simulate-tab")
 
     def __init__(self, window: QtWidgets.QMainWindow) -> None:
         super().__init__(window)

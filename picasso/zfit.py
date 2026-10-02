@@ -1266,7 +1266,7 @@ def _axial_localization_precision_astig(
     ----------
     locs : pd.DataFrame
         Localizations. Must include columns 'photons', 'sx', 'sy', 'bg',
-        and 'z', see https://picassosr.readthedocs.io/en/latest/files.html#localization-hdf5-files  # noqa: E501
+        and 'z', see https://picassosr.readthedocs.io/en/latest/files.html#files-localization-hdf5  # noqa: E501
     cx : lib.FloatArray1D
         3D calibration coefficients for x.
     cy : lib.FloatArray1D

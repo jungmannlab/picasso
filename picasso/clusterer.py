@@ -7,6 +7,7 @@ Additionally, contains implementations of DBSCAN and HDBSCAN and other
 clustering-related functions.
 
 SMLM clusterer is based on:
+
 * Schlichthaerle, et al. Nature Comm, 2021
   (DOI: 10.1038/s41467-021-22606-1)
 * Reinhardt, Masullo, Baudrexel, Steen, et al. Nature, 2023
@@ -206,6 +207,7 @@ def _cluster(
     minimum number of localizations within that radius using KDTree.
 
     The general workflow is as follows:
+
     1. Build a KDTree from the points in X.
     2. For each point, find its neighbors within the given radius.
     3. Identify local maxima, i.e., points with the most neighbors
@@ -440,6 +442,7 @@ def cluster(
     """Cluster localizations from single molecules (SMLM clusterer).
 
     The general workflow is as follows:
+
     1. Build a KDTree from the points in X.
     2. For each point, find its neighbors within the given radius.
     3. Identify local maxima, i.e., points with the most neighbors

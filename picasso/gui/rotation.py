@@ -561,7 +561,7 @@ class AnimationDialog(lib.Dialog):
         Instance of the rotation window.
     """
 
-    DOCS_URL = docs_url("render.html#build-an-animation")
+    DOCS_URL = docs_url("render/3d.html#render-animation")
 
     # display name -> (``render.build_animation`` transition, tooltip)
     TRANSITIONS = {
@@ -3122,7 +3122,7 @@ class RotationWindow(QtWidgets.QMainWindow):
         parent).
     """
 
-    DOCS_URL = docs_url("render.html#d-rotation-window")
+    DOCS_URL = docs_url("render/3d.html#render-3d")
 
     def __init__(self, window: QtWidgets.QMainWindow) -> None:
         super().__init__()

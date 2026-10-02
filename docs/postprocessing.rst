@@ -3,18 +3,41 @@ Postprocessing
 
 Jupyter Notebooks
 -----------------
-For additional postprocessing steps, one might want to use different libraries without having to install the picasso package. For this check out the samples folder. Here you can find sample jupyter notebooks that show how the Picasso package can be used. 
+For additional postprocessing steps, one might want to use Picasso as a Python
+package together with other libraries. For this, check out the
+`samples folder <https://github.com/jungmannlab/picasso/tree/master/samples>`_
+of the repository. Here you can find sample Jupyter notebooks that show how the
+Picasso package can be used. The sample data in ``samples/data`` was created
+using :doc:`simulate`.
 
-SampleNotebook
+.. _postprocessing-notebook-localize:
+
+Localizing raw movies
+~~~~~~~~~~~~~~~~~~~~~
+``sample_notebook_1_localize.ipynb`` shows some basic interaction with the
+``picasso`` library for localizing raw movies, e.g., how to directly call its
+functions from a Jupyter notebook, and how to find the function behind a
+button or menu action of a Picasso GUI.
+
+.. _postprocessing-notebook-basic-analysis:
+
+Basic analysis
 ~~~~~~~~~~~~~~
-This notebook shows some basic interaction with the .hdf5 files using the pandas library.
+``sample_notebook_2_basic_analysis.ipynb`` shows some basic interaction with
+the ``picasso`` library for analyzing localizations: loading them, picking
+regions of interest and inspecting the picked localizations.
 
-SampleNotebook1
-~~~~~~~~~~~~~~~
-This notebook shows some basic interaction with the picasso library, e.g. how to directly call functions from a Jupyter Notebook.
+.. _postprocessing-notebook-clustering:
 
-SampleNotebook2
-~~~~~~~~~~~~~~~
-This notebook shows how to perform HDBSCAN clustering with picasso.
+Clustering
+~~~~~~~~~~
+``sample_notebook_3_clustering.ipynb`` shows how to perform clustering with
+picasso: DBSCAN and the SMLM clusterer, frame analysis for sticking events,
+RESI and molecular mapping.
 
+.. _postprocessing-notebook-spinna:
 
+SPINNA
+~~~~~~
+``sample_notebook_4_spinna.ipynb`` shows how to use the Python API of
+:doc:`spinna` on the exemplary EGFR data in ``samples/data``.

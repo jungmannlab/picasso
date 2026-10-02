@@ -4569,7 +4569,7 @@ def main():  # noqa: C901
     )
 
     # spinna
-    _spinna_docs_url = docs_url("spinna.html#command-window-batch-analysis")
+    _spinna_docs_url = docs_url("spinna.html#spinna-batch-analysis")
     spinna_parser = subparsers.add_parser(
         "spinna",
         help=(

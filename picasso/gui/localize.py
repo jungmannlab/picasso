@@ -3051,7 +3051,9 @@ class CalibrateAffineDialog(lib.Dialog):
     one after another.
     """
 
-    LATERAL_URL = docs_url("localize.html#lateral-corrections-of-x-and-y")
+    LATERAL_URL = docs_url(
+        "localize/3d-calibration.html#localize-lateral-corrections"
+    )
 
     # Emitted when "Calibrate" is pressed. Not ``accepted``: the dialog
     # stays open so the pairing can be inspected on both bead images.
@@ -3402,17 +3404,21 @@ class ParametersDialog(lib.Dialog):
         The main window of the application.
     """
 
-    CALIB_URL = docs_url("localize.html#d-calibration")
-    GAUSSIAN_FILTER_URL = docs_url("localize.html#gaussian-filter")
+    CALIB_URL = docs_url(
+        "localize/3d-calibration.html#localize-3d-calibration"
+    )
+    GAUSSIAN_FILTER_URL = docs_url(
+        "localize/identification.html#localize-gaussian-filter"
+    )
     IDENT_URL = docs_url(
-        "localize.html#identification-and-fitting-of-single-molecule-spots"
+        "localize/identification.html#localize-identification"
     )
-    WAVELET_URL = docs_url("localize.html#b-spline-wavelet-identification")
-    ROI_URL = docs_url("localize.html#regions-of-interest-rois")
-    SPLINE_URL = docs_url(
-        "localize.html#experimental-psf-cubic-spline-fitting"
+    WAVELET_URL = docs_url("localize/identification.html#localize-wavelet")
+    ROI_URL = docs_url("localize/identification.html#localize-rois")
+    SPLINE_URL = docs_url("localize/spline.html#localize-spline")
+    TEMPORAL_MEDIAN_URL = docs_url(
+        "localize/identification.html#localize-temporal-median-filter"
     )
-    TEMPORAL_MEDIAN_URL = docs_url("localize.html#temporal-median-filter")
 
     def __init__(  # noqa: C901
         self, parent: QtWidgets.QMainWindow | None = None

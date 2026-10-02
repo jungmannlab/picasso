@@ -1,45 +1,181 @@
-# -*- coding: utf-8 -*-
-#
-# Configuration file for the Sphinx documentation builder.
-#
-# This file does only contain a selection of the most common options. For a
-# full list see the documentation:
-# http://www.sphinx-doc.org/en/master/config
+"""Sphinx configuration for the Picasso documentation.
 
-# -- Path setup --------------------------------------------------------------
-
-# If extensions (or modules to document with autodoc) are in another directory,
-# add these directories to sys.path here. If the directory is relative to the
-# documentation root, use os.path.abspath to make it absolute, like shown here.
-#
-# import os
-# import sys
-# sys.path.insert(0, os.path.abspath('.'))
-
-
-# -- Project information -----------------------------------------------------
+See https://www.sphinx-doc.org/en/master/usage/configuration.html.
+"""
 
 import os
 import re
 import sys
 
+_HERE = os.path.dirname(os.path.abspath(__file__))
+_ROOT = os.path.abspath(os.path.join(_HERE, ".."))
+sys.path.insert(0, _ROOT)
+
+# -- Project information -----------------------------------------------------
+
 project = "Picasso"
 copyright = "2019-2026, Jungmann Lab"
-author = "Maximilian T. Strauss"
+author = "Jungmann Lab"
 
-# The short X.Y version
-version = ""
-# The full version, including alpha/beta/rc tags
-sys.path.insert(0, os.path.abspath("../.."))
-
-# Read version directly from picasso/version.py to avoid importing the
-# full package (which would require all runtime dependencies on RTD).
+# Read the version from picasso/version.py rather than importing the
+# package, so that the version is known even if an import fails.
 _version_globals = {}
-with open(
-    os.path.join(os.path.dirname(__file__), "..", "picasso", "version.py")
-) as _vf:
+with open(os.path.join(_ROOT, "picasso", "version.py")) as _vf:
     exec(_vf.read(), _version_globals)
 release = _version_globals["__version__"]
+version = ".".join(release.split(".")[:2])
+
+# -- General configuration ---------------------------------------------------
+
+extensions = [
+    "sphinx.ext.autodoc",
+    "sphinx.ext.autosummary",
+    "sphinx.ext.extlinks",
+    "sphinx.ext.napoleon",
+    "sphinx.ext.intersphinx",
+    "sphinx.ext.viewcode",
+    "sphinx.ext.mathjax",
+    "sphinx_design",
+    "sphinx_copybutton",
+    "myst_parser",
+]
+
+templates_path = ["_templates"]
+source_suffix = {".rst": "restructuredtext", ".md": "markdown"}
+root_doc = "index"
+exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
+
+# Markdown (the changelog): generate anchors for headings so that the
+# release sections can be linked to.
+myst_heading_anchors = 2
+myst_enable_extensions = ["colon_fence"]
+# The changelog skips heading levels (## release, #### detail).
+suppress_warnings = ["myst.header"]
+
+# -- Autodoc / autosummary ---------------------------------------------------
+
+autosummary_generate = True
+autosummary_imported_members = False
+# Members are listed by the autosummary module template
+# (_templates/autosummary/module.rst), not by automodule.
+autodoc_default_options = {"member-order": "bysource"}
+autodoc_typehints = "description"
+autodoc_typehints_description_target = "documented"
+# Heavy, optional or hardware-specific imports that are not needed to read
+# the docstrings. Mocking them keeps the API pages building on Read the
+# Docs, which has no GPU.
+autodoc_mock_imports = ["wgpu", "PyImarisWriter", "hdf5plugin"]
+
+napoleon_google_docstring = False
+napoleon_numpy_docstring = True
+napoleon_use_rtype = False
+# Class "Attributes" sections as fields, so that attributes also picked up
+# as members are not described twice.
+napoleon_use_ivar = True
+# Keep the type strings as written; converting them to references
+# garbles unions such as ``Callable[[int], None] | None``.
+napoleon_preprocess_types = False
+
+# :DOI:`10.xxxx/yyyy` in docstrings (role names are case-insensitive).
+extlinks = {"doi": ("https://doi.org/%s", "DOI: %s")}
+
+intersphinx_mapping = {
+    "python": ("https://docs.python.org/3", None),
+    "numpy": ("https://numpy.org/doc/stable/", None),
+    "scipy": ("https://docs.scipy.org/doc/scipy/", None),
+    "pandas": ("https://pandas.pydata.org/docs/", None),
+    "matplotlib": ("https://matplotlib.org/stable/", None),
+}
+
+copybutton_prompt_text = r">>> |\.\.\. |\$ "
+copybutton_prompt_is_regexp = True
+
+
+_MODULE_TITLE = re.compile(r"^picasso[\w.]*$")
+
+
+def _strip_module_title(app, what, name, obj, options, lines):
+    """Drop the ``picasso.module`` / ``~~~~`` title of module docstrings.
+
+    The title would otherwise become a section inside the generated page,
+    which already has the module name as its title.
+    """
+    if what != "module":
+        return
+    start = 0
+    while start < len(lines) and not lines[start].strip():
+        start += 1
+    if start + 1 >= len(lines):
+        return
+    title, underline = lines[start].strip(), lines[start + 1].strip()
+    if (
+        _MODULE_TITLE.match(title)
+        and underline
+        and set(underline) <= {"~", "=", "-"}
+    ):
+        del lines[: start + 2]
+
+
+def setup(app):
+    app.connect("autodoc-process-docstring", _strip_module_title)
+
+
+# -- HTML output -------------------------------------------------------------
+
+html_theme = "pydata_sphinx_theme"
+html_title = "Picasso"
+html_static_path = ["_static"]
+html_css_files = ["custom.css"]
+html_js_files = ["anchor-redirects.js"]
+html_show_sourcelink = False
+
+# The Picasso logo. Until the image is added to _static, the navbar shows
+# the project name as text.
+_LOGO_LIGHT = "picasso-logo.png"
+_LOGO_DARK = "picasso-logo-dark.png"
+_logo = {"text": "Picasso"}
+if os.path.exists(os.path.join(_HERE, "_static", _LOGO_LIGHT)):
+    _logo = {"image_light": f"_static/{_LOGO_LIGHT}", "alt_text": "Picasso"}
+    if os.path.exists(os.path.join(_HERE, "_static", _LOGO_DARK)):
+        _logo["image_dark"] = f"_static/{_LOGO_DARK}"
+    else:
+        _logo["image_dark"] = f"_static/{_LOGO_LIGHT}"
+    html_favicon = f"_static/{_LOGO_LIGHT}"
+
+html_theme_options = {
+    "logo": _logo,
+    "navbar_align": "left",
+    "header_links_before_dropdown": 6,
+    "show_toc_level": 2,
+    "navigation_with_keys": True,
+    "show_prev_next": True,
+    "use_edit_page_button": True,
+    "secondary_sidebar_items": ["page-toc", "edit-this-page"],
+    "footer_start": ["copyright"],
+    "footer_end": ["sphinx-version"],
+    "icon_links": [
+        {
+            "name": "GitHub",
+            "url": "https://github.com/jungmannlab/picasso",
+            "icon": "fa-brands fa-github",
+        },
+        {
+            "name": "PyPI",
+            "url": "https://pypi.org/project/picassosr/",
+            "icon": "fa-brands fa-python",
+        },
+    ],
+}
+
+html_context = {
+    "github_user": "jungmannlab",
+    "github_repo": "picasso",
+    "github_version": "master",
+    "doc_path": "docs",
+}
+
+# Pages without a left sidebar: the landing page has nothing to navigate.
+html_sidebars = {"index": [], "changelog": []}
 
 # Development branches (vX.Y) are built as separate Read the Docs versions
 # for the test builds of Picasso, whose help buttons link there (see
@@ -47,160 +183,9 @@ release = _version_globals["__version__"]
 # released documentation.
 _rtd_version = os.environ.get("READTHEDOCS_VERSION", "")
 if re.fullmatch(r"v\d+\.\d+", _rtd_version):
-    rst_prolog = f"""
-.. warning::
-
-   This is the documentation of the **test version {release}** of Picasso.
-   It describes features that are not yet part of the official release.
-   For the released version, see the
-   `main documentation <https://picassosr.readthedocs.io/en/latest/>`_.
-"""
-
-# -- General configuration ---------------------------------------------------
-
-# If your documentation needs a minimal Sphinx version, state it here.
-#
-# needs_sphinx = '1.0'
-
-# Add any Sphinx extension module names here, as strings. They can be
-# extensions coming with Sphinx (named 'sphinx.ext.*') or your custom
-# ones.
-extensions = [
-    "sphinx.ext.mathjax",  # for rendering math equations
-]
-
-# Add any paths that contain templates here, relative to this directory.
-templates_path = ["_templates"]
-
-# The suffix(es) of source filenames.
-# You can specify multiple suffix as a list of string:
-#
-# source_suffix = ['.rst', '.md']
-source_suffix = ".rst"
-
-# The master toctree document.
-master_doc = "index"
-
-# The language for content autogenerated by Sphinx. Refer to documentation
-# for a list of supported languages.
-#
-# This is also used if you do content translation via gettext catalogs.
-# Usually you set "language" from the command line for these cases.
-language = None
-
-# List of patterns, relative to source directory, that match files and
-# directories to ignore when looking for source files.
-# This pattern also affects html_static_path and html_extra_path.
-exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
-
-# The name of the Pygments (syntax highlighting) style to use.
-pygments_style = None
-
-
-# -- Options for HTML output -------------------------------------------------
-
-# The theme to use for HTML and HTML Help pages.  See the documentation for
-# a list of builtin themes.
-#
-html_theme = "sphinx_rtd_theme"
-
-# Theme options are theme-specific and customize the look and feel of a theme
-# further.  For a list of options available for each theme, see the
-# documentation.
-#
-# html_theme_options = {}
-
-# Add any paths that contain custom static files (such as style sheets) here,
-# relative to this directory. They are copied after the builtin static files,
-# so a file named "default.css" will overwrite the builtin "default.css".
-html_static_path = ["_static"]
-
-# Custom sidebar templates, must be a dictionary that maps document names
-# to template names.
-#
-# The default sidebars (for documents that don't match any pattern) are
-# defined by theme itself.  Builtin themes are using these templates by
-# default: ``['localtoc.html', 'relations.html', 'sourcelink.html',
-# 'searchbox.html']``.
-#
-# html_sidebars = {}
-
-
-# -- Options for HTMLHelp output ---------------------------------------------
-
-# Output file base name for HTML help builder.
-htmlhelp_basename = "Picassodoc"
-
-
-# -- Options for LaTeX output ------------------------------------------------
-
-latex_elements = {
-    # The paper size ('letterpaper' or 'a4paper').
-    #
-    # 'papersize': 'letterpaper',
-    # The font size ('10pt', '11pt' or '12pt').
-    #
-    # 'pointsize': '10pt',
-    # Additional stuff for the LaTeX preamble.
-    #
-    # 'preamble': '',
-    # Latex figure (float) alignment
-    #
-    # 'figure_align': 'htbp',
-}
-
-# Grouping the document tree into LaTeX files. List of tuples
-# (source start file, target name, title,
-#  author, documentclass [howto, manual, or own class]).
-latex_documents = [
-    (
-        master_doc,
-        "Picasso.tex",
-        "Picasso Documentation",
-        "Maximilian Thomas Strauss",
-        "manual",
-    ),
-]
-
-
-# -- Options for manual page output ------------------------------------------
-
-# One entry per manual page. List of tuples
-# (source start file, name, description, authors, manual section).
-man_pages = [(master_doc, "picasso", "Picasso Documentation", [author], 1)]
-
-
-# -- Options for Texinfo output ----------------------------------------------
-
-# Grouping the document tree into Texinfo files. List of tuples
-# (source start file, target name, title, author,
-#  dir menu entry, description, category)
-texinfo_documents = [
-    (
-        master_doc,
-        "Picasso",
-        "Picasso Documentation",
-        author,
-        "Picasso",
-        "One line description of project.",
-        "Miscellaneous",
-    ),
-]
-
-
-# -- Options for Epub output -------------------------------------------------
-
-# Bibliographic Dublin Core info.
-epub_title = project
-
-# The unique identifier of the text. This can be a ISBN number
-# or the project homepage.
-#
-# epub_identifier = ''
-
-# A unique identification for the text.
-#
-# epub_uid = ''
-
-# A list of files that should not be packed into the epub file.
-epub_exclude_files = ["search.html"]
+    html_theme_options["announcement"] = (
+        f"This is the documentation of the <b>test version {release}</b> of "
+        "Picasso, with features that are not yet released. See the "
+        '<a href="https://picassosr.readthedocs.io/en/latest/">main '
+        "documentation</a> for the released version."
+    )

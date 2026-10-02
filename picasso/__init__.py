@@ -59,7 +59,8 @@ def docs_url(page: str = "") -> str:
     ----------
     page : str, optional
         Page (and anchor) relative to the documentation root, e.g.
-        ``"render.html#resi"``. Default is the documentation root.
+        ``"render/analysis.html#render-resi"``. Default is the
+        documentation root.
 
     Returns
     -------
@@ -90,7 +91,7 @@ def config_filename() -> str:
 
     This is where Picasso Localize reads and writes its camera
     configuration (see https://picassosr.readthedocs.io/en/latest/
-    localize.html#camera-config). Keeping it next to the other
+    localize/camera.html#localize-camera-config). Keeping it next to the other
     ``~/.picasso`` files means it no longer hides inside the installed
     package directory, where it was hard to find.
 

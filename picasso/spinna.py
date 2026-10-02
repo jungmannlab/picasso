@@ -2901,9 +2901,10 @@ class StructureMixer:
 
         For example, if target1 forms monomers and dimers and target2
         forms dimers with target1, the following list of tuples is
-        given:
-        [(target1, target2, 2),
-         (target1, target2, 1)]
+        given::
+
+            [(target1, target2, 2),
+             (target1, target2, 1)]
 
         Parameters
         ----------
@@ -3512,9 +3513,9 @@ class SPINNA:
     ):
         """Two-pass coarse-to-fine fitting.
 
-        Pass 1: evaluate a random subsample of N_structures.
-        Pass 2: evaluate the full-resolution neighborhood around
-                the coarse-pass winner.
+        - Pass 1: evaluate a random subsample of N_structures.
+        - Pass 2: evaluate the full-resolution neighborhood around
+          the coarse-pass winner.
 
         Parameters
         ----------

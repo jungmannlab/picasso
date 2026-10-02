@@ -1,0 +1,124 @@
+.. _render-3d:
+
+3D Rotation Window
+==================
+
+The 3D rotation window allows the user to render 3D localization data. Open it
+with ``View > 3D view`` (:kbd:`Ctrl+Shift+R`):
+
+- With a single pick region selected (``Tools > Pick``) it shows that pick, as
+  before.
+- Without a pick (or with several) it shows the current field of view of the
+  main window, rotated about its center - so any region can be looked at in 3D
+  by zooming to it and pressing the shortcut.
+- Pressed again with nothing changed, it only brings the window to the front,
+  keeping the rotation; a new pick or a new field of view reloads it.
+
+Some of the display settings (colors, blur method, etc.) are automatically
+uploaded to the rotation window. In the field-of-view mode the arrow keys move
+the shown region (there is no pick to move), and *Save rotated localizations*
+records the field of view instead of a pick.
+
+The user may perform multiple actions in the rotation window, including:
+saving rotated localizations, building animations (.mp4 format), rotating by a
+specified angle, etc.
+
+Rendering in the rotation window runs in the background, as in the main
+window:
+
+- Rotating and panning never block the interface, and a burst of mouse
+  movements renders only the newest orientation.
+- Large picks are previewed with a subset of the localizations while you drag
+  (``interaction_subsample``, see :ref:`render-cpu-usage`, counted over the
+  localizations in view) and sharpened as soon as the drag pauses.
+- The renders use the GPU when it is enabled (see :ref:`render-gpu-rendering`).
+
+When rotating by a specified angle, the dialog offers a ``Rotate around``
+choice between **Localizations** (the default) and **World**.
+``Localizations`` rotates around the data's own axes - the axes shown by the
+axes icon, which rotate together with the data - so each entered angle changes
+the corresponding displayed angle by exactly that amount. ``World`` rotates
+around the fixed screen/camera axes instead.
+
+.. _render-3d-navigation:
+
+Navigating the 3D window
+------------------------
+
+The zoom and pan controls match the main window's, see
+:ref:`render-navigation`.
+
+- **Rotate**: drag with the left mouse button (trackball). Hold :kbd:`S` while
+  dragging to rotate in steps of 15 degrees.
+- **Zoom**:
+
+  - :kbd:`Ctrl` (:kbd:`Cmd` on macOS) + the mouse wheel (or trackpad scroll; a
+    pinch works too) zooms about the cursor.
+  - Drag a rectangle with :kbd:`Shift` + the left button to zoom to it (as in
+    the main window, the rectangle stretches towards the bottom right and
+    releasing above or left of the start cancels).
+  - :kbd:`Ctrl` +/- zoom about the center.
+
+- **Pan**: drag with the right or the middle mouse button, or with :kbd:`Alt`
+  (:kbd:`Option` on macOS) + the left button; the arrow keys move the view
+  too. With the Measure tool the right button keeps freezing and deleting
+  measurements (as in the main window), so pan with the middle button or
+  :kbd:`Alt` + the left button there.
+- **Reset**: triple click fits the loaded region into the window (:kbd:`Home`
+  does the same); :kbd:`Shift` + triple click also resets the rotation.
+  :kbd:`1`, :kbd:`2` and :kbd:`3` select the XY, XZ and YZ projections.
+
+Rotations turn the data about the point at the center of the view, at the
+depth of the localizations shown there, so zooming in and panning to a
+structure lets you rotate around it. Further rotation controls:
+
+- Rotation around the z-axis is available by pressing :kbd:`Ctrl`/:kbd:`Cmd`.
+- The rotation axis can be frozen by pressing :kbd:`X`/:kbd:`Y`/:kbd:`Z` to
+  freeze around the corresponding axis. By default the frozen rotation is
+  around the data's own axes (Localizations frame); holding
+  :kbd:`Ctrl`/:kbd:`Cmd` together with :kbd:`X`/:kbd:`Y`/:kbd:`Z` instead
+  rotates around the fixed screen/World axes.
+- The z-axis can now be frozen by pressing :kbd:`Z` alone (vertical dragging
+  spins around it); :kbd:`Ctrl`/:kbd:`Cmd` is only needed for the z-axis if
+  you want to rotate it in the World frame, or to spin around the screen
+  z-axis when no axis is frozen.
+
+.. _render-animation:
+
+Build an animation
+------------------
+
+.. rst-class:: shortcut
+
+Shortcut: :kbd:`Ctrl+Shift+E`
+
+Build an animation with ``File > Build an animation...`` in the rotation
+window:
+
+1. Rotate, zoom and pan to each view the video should show and click
+   ``Add this position`` (``Stay in the position`` adds a pause).
+2. Set the durations of the transitions.
+3. Click ``Build animation``.
+
+The frames are rendered in the background, at the resolution set in the
+animation dialog (``Resolution (px)``, by default the window's size, e.g. 1920
+x 1080 for a full-HD video whatever the window's size), so the windows stay
+usable while the video is built. A progress dialog shows the frames done and
+lets you cancel, in which case no partial video is left behind. The frames use
+the GPU when it is enabled.
+
+``Transition`` sets how the motion is timed between the positions:
+
+*Stop at each position* (default)
+   Accelerates and decelerates between every two positions, coming to rest at
+   each of them.
+*Smooth*
+   Starts and ends at rest and passes through the positions without abrupt
+   changes of direction or speed (it still comes to rest where the motion
+   reverses, stops or turns by 90 degrees or more).
+*Constant speed*
+   Moves at a constant speed between every two positions, with sharp turns at
+   the positions.
+
+The durations are kept in each case, so the rotation speed only sets the
+average speed.

@@ -1,49 +1,30 @@
-=====
-Other
-=====
+Settings and Customization
+==========================
+
+.. _sound-notifications:
 
 Sound notifications
 -------------------
-Picasso supports sound notifications for processes running longer than 1 minute. In Render and SPINNA, these can be selected in the ``File`` menu in the menu bar. The available files are read from the ``picasso/gui/notification_sounds`` folder. ``.mp3`` and ``.wav`` files are supported. Default sound notification is saved automatically when manually changed, under ``filename`` in the ``Sound_notification`` section of ``~/.picasso/settings.yaml`` (see :ref:`user-settings-file`); the default is no sound (``None``).
+Picasso supports sound notifications for processes running longer than 1
+minute. In Render and SPINNA, these can be selected in the ``File`` menu in
+the menu bar.
+
+- The available files are read from ``~/.picasso/notification_sounds``.
+  ``.mp3`` and ``.wav`` files are supported.
+- The default sound notification is saved automatically when manually
+  changed, under ``filename`` in the ``Sound_notification`` section of
+  ``~/.picasso/settings.yaml`` (see :ref:`user-settings-file`); the default is
+  no sound (``None``).
+
+.. _custom-notifications:
 
 Custom notifications
 ~~~~~~~~~~~~~~~~~~~~
-To add custom notification sounds, copy the sound files (``.mp3`` or ``.wav``) to the  ``picasso/gui/notification_sounds`` folder. Depending on how you installed Picasso, this folder can be found in different locations:
-
-GitHub
-------
-If you cloned the GitHub repository, you can add sound notifications by following these steps:
-
-- Find the directory where you cloned the GitHub repository with Picasso.
-- Go to ``picasso/gui/notification_sounds``.
-- Copy the sound files to this folder.
-
-PyPI
-----
-If you installed Picasso using ``pip install picassosr``, you can add sound notifications by following these steps:
-
-- Activate your conda environment where ``picassosr`` is installed by typing ``conda activate YOUR_ENVIRONMENT``.
-- To find the location of the package, type ``pip show picassosr`` and look for the line starting with ``Location:``.
-- Navigate to this location and go to ``picasso/gui/notification_sounds``.
-- Copy the sound files to this folder.
-
-
-One click installer (Windows)
------------------------------
-If you installed Picasso using the one click installer from `the Picasso release page <https://github.com/jungmannlab/picasso/releases/>`__ , you can add sound notifications by following these steps:
-
-- Find the location where you installed Picasso. By default, it is ``C:/Picasso``. *Before version 0.8.3, the default location was* ``C:/Program Files/Picasso``.
-- Go to the following subfolder: ``picasso/gui/notification_sounds``.
-- Copy the sound files to this folder.
-
-
-One click installer (macOS)
----------------------------
-If you installed Picasso using the one click installer from `the Picasso release page <https://github.com/jungmannlab/picasso/releases/>`__ , you can add sound notifications by following these steps:
-
-- Navigate to your Applications folder and right-click on the picasso app, then select "Show Package Contents".
-- Add your sound files to ``Contents/Frameworks/picasso/gui/notification_sounds``.
-
+To add custom notification sounds, copy the sound files (``.mp3`` or
+``.wav``) to ``~/.picasso/notification_sounds`` in your home directory.
+Picasso creates the folder the first time it looks for sounds. The location
+is the same for every installation type (one-click installer, PyPI or a
+cloned repository) and is kept when Picasso is uninstalled or updated.
 
 .. _appearance:
 
@@ -58,45 +39,99 @@ Appearance
 - **Toolbar**: how the toolbars of ``Picasso: Render``, ``Picasso: Localize``, ``Picasso: Filter`` and ``Picasso: Average`` show their buttons: *Icons and text* (default), *Icons*, *Text* or *Hidden*. Which actions they hold is set in :ref:`toolbars`.
 - **Menus**: *Show icons in menus* (default on) shows the icons next to the actions of the menus.
 
-Changes apply immediately to the module that is open and are saved in the ``Appearance`` section of ``~/.picasso/settings.yaml`` (see :ref:`user-settings-file`); other modules take them on when they are started next. The theme does not change the colors of the image content (rendered localizations, picks); the background and labels of Design's canvas follow it. Charts (e.g., Filter's histograms, Render's plot windows, Simulate's previews) are light or dark like the windows unless another theme is chosen in their plot settings.
+Changes apply immediately to the module that is open and are saved in the
+``Appearance`` section of ``~/.picasso/settings.yaml`` (see
+:ref:`user-settings-file`); other modules take them on when they are started
+next.
+
+The theme does not change the colors of the image content (rendered
+localizations, picks); the background and labels of Design's canvas follow
+it. Charts (e.g., Filter's histograms, Render's plot windows, Simulate's
+previews) are light or dark like the windows unless another theme is chosen in
+their plot settings.
 
 .. _toolbars:
 
 Toolbars
 --------
-The toolbars of ``Picasso: Render``, ``Picasso: Localize``, ``Picasso: Filter`` and ``Picasso: Average`` hold actions of the menus, by default the most used ones, e.g., opening and saving, the tools of Render and identifying and fitting in Localize. They can be dragged by their handle to any side of the window; the side is remembered for the next start.
+The toolbars of ``Picasso: Render``, ``Picasso: Localize``,
+``Picasso: Filter`` and ``Picasso: Average`` hold actions of the menus, by
+default the most used ones, e.g., opening and saving, the tools of Render and
+identifying and fitting in Localize. They can be dragged by their handle to
+any side of the window; the side is remembered for the next start.
 
-*Customize toolbar...* in ``File > Appearance...``, or a right-click on the toolbar, chooses the buttons. The left side lists the actions of the menus, grouped by menu, with a search field; the right side lists the toolbar's buttons from left to right (or top to bottom).
+*Customize toolbar...* in ``File > Appearance...``, or a right-click on the
+toolbar, chooses the buttons. The left side lists the actions of the menus,
+grouped by menu, with a search field; the right side lists the toolbar's
+buttons from left to right (or top to bottom).
 
 - **Add** (or a double-click) puts the actions selected on the left after the selected button; actions that are on the toolbar already are grayed out.
 - **Remove** takes the selected button off the toolbar.
 - **Separator** adds a separator after the selected button.
 - **Up** and **Down**, or dragging, change the order.
 - **Label** gives the selected button a shorter text than its action's, e.g., *RCC* for *Undrift by RCC*; empty for the action's own.
-- **Icon** gives it another icon, or *No icon* to show only its label. The menus show the chosen icon too. *Choose file...* takes an icon of your own: an SVG, or a PNG or ICO with a transparent background. Only its shape is used, drawn in the colors of the theme like Picasso's icons, so single-color line icons (e.g., from `Lucide <https://lucide.dev>`_) fit best. The file is copied to ``~/.picasso/icons``; images put in that folder are offered too.
+- **Icon** gives it another icon, or *No icon* to show only its label. The
+  menus show the chosen icon too.
+
+  *Choose file...* takes an icon of your own: an SVG, or a PNG or ICO with a
+  transparent background. Only its shape is used, drawn in the colors of the
+  theme like Picasso's icons, so single-color line icons (e.g., from
+  `Lucide <https://lucide.dev>`_) fit best. The file is copied to
+  ``~/.picasso/icons``; images put in that folder are offered too.
 - **Restore Defaults** shows the default buttons again, after asking for confirmation.
 
-*OK* applies the toolbar to every open window of the module and saves it in the ``Toolbars`` section of ``~/.picasso/settings.yaml`` (see :ref:`user-settings-file`). Plugin actions can be on the toolbar too; a button whose action is not in the menus, e.g., of a plugin that is disabled, is kept and shown in italics in the dialog, and returns with its plugin. Whether the buttons show icons, text or both is set in :ref:`appearance`.
+*OK* applies the toolbar to every open window of the module and saves it in
+the ``Toolbars`` section of ``~/.picasso/settings.yaml`` (see
+:ref:`user-settings-file`). Whether the buttons show icons, text or both is
+set in :ref:`appearance`.
+
+Plugin actions (see :doc:`plugins`) can be on the toolbar too; a button whose
+action is not in the menus, e.g., of a plugin that is disabled, is kept and
+shown in italics in the dialog, and returns with its plugin.
 
 .. _user-settings-file:
 
 User settings file
 ------------------
-Picasso keeps its user settings in ``~/.picasso/settings.yaml`` (``C:\Users\<you>\.picasso\settings.yaml`` on Windows): the last directory used, the Render colormap, the Localize parameters, the CPU and GPU budgets of rendering, the sound notification, and so on. Each module owns a section of the file (``Render``, ``Localize``, ...). The file can be edited with any text editor or via ``File > Picasso settings`` in any module, and changes apply the next time the setting is read - for most settings immediately, without restarting Picasso. The search field above the editor (Ctrl+F) highlights every occurrence of a text, e.g., a setting's name; Enter and Shift+Enter step through them.
+Picasso keeps its user settings in ``~/.picasso/settings.yaml``
+(``C:\Users\<you>\.picasso\settings.yaml`` on Windows): the last directory
+used, the Render colormap, the Localize parameters, the CPU and GPU budgets of
+rendering, the sound notification, and so on. Each module owns a section of
+the file (``Render``, ``Localize``, ...).
 
-A setting that is missing from the file is written into it with its default the first time it is needed, so every setting a module uses is visible and editable in the file; ``Picasso: Render``, for example, writes all of its ``Render`` keys when it starts. Optional keys that are off unless present (such as ``Render: max_workers``) are the exception.
+The file can be edited with any text editor or via ``File > Picasso settings``
+in any module, and changes apply the next time the setting is read - for most
+settings immediately, without restarting Picasso. The search field above the
+editor (:kbd:`Ctrl+F`) highlights every occurrence of a text, e.g., a
+setting's name; :kbd:`Enter` and :kbd:`Shift+Enter` step through them.
+
+A setting that is missing from the file is written into it with its default
+the first time it is needed, so every setting a module uses is visible and
+editable in the file; ``Picasso: Render``, for example, writes all of its
+``Render`` keys when it starts. Optional keys that are off unless present
+(such as ``Render: max_workers``) are the exception.
 
 Every module loads the file, changes its own keys and writes the whole file back, so the file is guarded against mistakes:
 
-- before it is rewritten, the previous version is kept as ``settings.yaml.bak``, so the last good version is always at hand;
-- a file that cannot be parsed (a stray tab or a misplaced colon is enough) is never overwritten silently: a copy is kept as ``settings.yaml.broken``, a warning goes to the :ref:`error log <error-log>` and default settings are used - ``Picasso: Render`` also tells you so when it starts. To get your settings back, fix the YAML in the kept copy and paste it into ``File > Picasso settings``, which validates the YAML before saving.
+- before it is rewritten, the previous version is kept as
+  ``settings.yaml.bak``, so the last good version is always at hand;
+- a file that cannot be parsed (a stray tab or a misplaced colon is enough) is
+  never overwritten silently: a copy is kept as ``settings.yaml.broken``, a
+  warning goes to the :ref:`error log <error-log>` and default settings are
+  used - ``Picasso: Render`` also tells you so when it starts.
+
+.. tip::
+
+   To get your settings back after a parsing error, fix the YAML in the kept
+   ``settings.yaml.broken`` copy and paste it into
+   ``File > Picasso settings``, which validates the YAML before saving.
 
 Reference: every key
 ~~~~~~~~~~~~~~~~~~~~
 The tables below list every key Picasso reads from or writes to ``settings.yaml``, grouped by the section (top-level, or a module) that owns it.
 
 Top level
-+++++++++
+^^^^^^^^^
 
 .. list-table::
    :widths: 22 10 68
@@ -116,7 +151,7 @@ Top level
      - Keep the (often large) MicroManager property block when copying a movie's metadata into the localizations fitted from it. See :ref:`files-metadata-settings`.
 
 ``Sound_notification``
-+++++++++++++++++++++++
+^^^^^^^^^^^^^^^^^^^^^^
 
 .. list-table::
    :widths: 22 10 68
@@ -127,10 +162,10 @@ Top level
      - Description
    * - ``filename``
      - ``None`` (no sound)
-     - The sound file (from ``~/.picasso/notification_sounds``) played on long-running jobs in Render and SPINNA. See *Sound notifications* above.
+     - The sound file (from ``~/.picasso/notification_sounds``) played on long-running jobs in Render and SPINNA. See :ref:`sound-notifications` above.
 
 ``Appearance``
-++++++++++++++
+^^^^^^^^^^^^^^
 
 .. list-table::
    :widths: 22 10 68
@@ -159,7 +194,7 @@ Top level
      - Show the icons of the actions in the menus.
 
 ``Toolbars``
-++++++++++++
+^^^^^^^^^^^^
 
 .. list-table::
    :widths: 22 10 68
@@ -170,10 +205,19 @@ Top level
      - Description
    * - ``Render toolbar``, ``Localize toolbar``, ``Filter toolbar``, ``Average toolbar``
      - not set (the default buttons, on top)
-     - The toolbar of the module (see :ref:`toolbars`), with the keys ``items``: the buttons from left to right, as the paths of the menu actions, e.g., ``File > Open``, and ``---`` for a separator; ``labels`` and ``icons``: the custom label and icon of a button by its path; an icon is the name of one of Picasso's, ``user:<file name without extension>`` for one in ``~/.picasso/icons``, or ``none``; ``area``: the side of the window, ``Top``, ``Bottom``, ``Left`` or ``Right``.
+     - The toolbar of the module (see :ref:`toolbars`), with the keys:
+
+       - ``items``: the buttons from left to right, as the paths of the menu
+         actions, e.g., ``File > Open``, and ``---`` for a separator;
+       - ``labels`` and ``icons``: the custom label and icon of a button by
+         its path; an icon is the name of one of Picasso's,
+         ``user:<file name without extension>`` for one in
+         ``~/.picasso/icons``, or ``none``;
+       - ``area``: the side of the window, ``Top``, ``Bottom``, ``Left`` or
+         ``Right``.
 
 ``Render``
-++++++++++
+^^^^^^^^^^
 
 .. list-table::
    :widths: 22 10 68
@@ -223,7 +267,7 @@ Top level
      - GPU memory budget (MB) for resident localization uploads; ``0`` removes the cap. See :ref:`render-gpu-rendering`.
 
 ``Localize``
-++++++++++++
+^^^^^^^^^^^^
 
 .. list-table::
    :widths: 22 10 68
@@ -234,7 +278,7 @@ Top level
      - Description
    * - ``cpu_utilization``
      - ``0.8``
-     - Fraction of CPU cores used by the spot identification/fitting worker pool. See the *GPU fitting* section of the Localize docs.
+     - Fraction of CPU cores used by the spot identification/fitting worker pool. See :ref:`localize-cpu-fitting`.
    * - ``PWD``
      - *(last used)*
      - Remembered last value: the directory used in Localize's file dialogs.
@@ -269,7 +313,7 @@ Top level
 All ``Localize`` keys above are documented together in :doc:`localize`.
 
 ``Filter``
-++++++++++
+^^^^^^^^^^
 
 .. list-table::
    :widths: 22 10 68
@@ -283,7 +327,7 @@ All ``Localize`` keys above are documented together in :doc:`localize`.
      - Remembered last value: the directory used in Filter's file dialogs.
 
 ``SPINNA``
-++++++++++
+^^^^^^^^^^
 
 .. list-table::
    :widths: 22 10 68
@@ -303,8 +347,8 @@ All ``Localize`` keys above are documented together in :doc:`localize`.
      - Font family and size for the title, axis labels and ticks of the NND plot, set in *Plot settings*. See :doc:`spinna`.
 
 ``Updates``
-+++++++++++
-Written and read only by the update-notification feature, not by any module's own GUI - see *Update notifications* below.
+^^^^^^^^^^^
+Written and read only by the update-notification feature, not by any module's own GUI.
 
 .. list-table::
    :widths: 22 10 68
@@ -332,6 +376,13 @@ Error log
 ---------
 Every uncaught error is appended to ``~/.picasso/logs/picasso.log`` (i.e. ``C:\Users\<you>\.picasso\logs\picasso.log`` on Windows), together with the tracebacks of failing background threads. The file rotates to ``picasso.log.1`` once it exceeds 5 MB.
 
-This matters most for the one-click installers: their GUIs are started from a windowed executable with no console attached, so anything the program prints has nowhere to go. Picasso therefore redirects its output to that log file. When an error occurs, Picasso shows it in a message box (click *Show Details...* for the full traceback) and writes the same traceback to the log.
+This matters most for the one-click installers: their GUIs are started from
+a windowed executable with no console attached, so anything the program
+prints has nowhere to go. Picasso therefore redirects its output to that log
+file.
+
+When an error occurs, Picasso shows it in a message box (click
+*Show Details...* for the full traceback) and writes the same traceback to the
+log.
 
 When reporting a problem on `GitHub <https://github.com/jungmannlab/picasso/issues>`__, please attach the log file - it contains the traceback of the failure.

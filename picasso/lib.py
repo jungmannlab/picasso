@@ -3300,9 +3300,9 @@ def get_pick_rectangle_corners(
     width: float,
 ) -> tuple[list[float], list[float]]:
     """Find the positions of corners of a rectangular pick.
-    A rectangular pick is defined by:
-        [(start_x, start_y), (end_x, end_y)]
-    and its width. (all values in camera pixels).
+
+    A rectangular pick is defined by ``[(start_x, start_y), (end_x,
+    end_y)]`` and its width, all values in camera pixels.
 
     Parameters
     ----------
@@ -3341,11 +3341,11 @@ def get_pick_box_corners(
 ) -> tuple[list[float], list[float]]:
     """Find the positions of corners of a box pick.
 
-    A box pick is defined by two opposite corners:
-        ``((x0, y0), (x1, y1))``
-    (all values in camera pixels). The corners are returned in the same
-    order as ``get_pick_rectangle_corners``, i.e., counter-clockwise
-    starting from the corner with the smaller x and y.
+    A box pick is defined by two opposite corners,
+    ``((x0, y0), (x1, y1))``, all values in camera pixels. The corners
+    are returned in the same order as ``get_pick_rectangle_corners``,
+    i.e., counter-clockwise starting from the corner with the smaller x
+    and y.
 
     Parameters
     ----------
