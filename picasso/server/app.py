@@ -17,9 +17,6 @@ from compare import compare
 
 from picasso import __version__ as VERSION_NO
 
-st.set_page_config(layout="wide")
-
-
 _this_file = os.path.abspath(__file__)
 _this_directory = os.path.dirname(_this_file)
 
@@ -27,6 +24,8 @@ LOGO_PATH = os.path.abspath(
     os.path.join(_this_directory, os.pardir, "gui/icons/picasso_server.png")
 )
 logo = Image.open(LOGO_PATH)
+
+st.set_page_config(page_title="Picasso Server", page_icon=logo, layout="wide")
 
 c1, c2, c3, c4 = st.sidebar.columns((1, 1, 1, 1))
 c1.image(logo)
@@ -44,7 +43,21 @@ sidebar = {
     "Preview": preview,
 }
 
-menu = st.sidebar.radio("", list(sidebar.keys()))
+# Material Symbols, bundled with Streamlit
+icons = {
+    "Status": ":material/monitor_heart:",
+    "History": ":material/history:",
+    "Compare": ":material/compare_arrows:",
+    "Watcher": ":material/visibility:",
+    "Preview": ":material/image:",
+}
+
+menu = st.sidebar.radio(
+    "Page",
+    list(sidebar.keys()),
+    format_func=lambda page: f"{icons[page]} {page}",
+    label_visibility="collapsed",
+)
 
 if menu:
     sidebar[menu]()

@@ -111,11 +111,16 @@ class UserSettingsDialog(Dialog):
         layout.addWidget(self.editor)
 
         button_layout = QtWidgets.QHBoxLayout()
+        # imported here: picasso.gui.theme imports picasso.lib
+        from picasso.gui import theme
+
         reload_button = QtWidgets.QPushButton("Reload")
+        reload_button.setIcon(theme.icon("reload"))
         reload_button.clicked.connect(self.load_settings)
         button_layout.addWidget(reload_button)
         button_layout.addStretch()
         save_button = QtWidgets.QPushButton("Save")
+        save_button.setIcon(theme.icon("save"))
         save_button.clicked.connect(self.save_settings)
         button_layout.addWidget(save_button)
         layout.addLayout(button_layout)

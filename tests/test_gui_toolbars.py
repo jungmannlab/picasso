@@ -326,3 +326,20 @@ def test_plot_settings_button_follows_the_toolbar_style(
     theme.apply(restore_theme, Appearance(toolbar="Hidden"))
     assert button.toolButtonStyle() == Style.ToolButtonIconOnly
     window.close()
+
+
+def test_spinna_help_and_icons(qt_offscreen):
+    from picasso.gui import spinna as gui_spinna
+
+    window = gui_spinna.Window()
+    try:
+        file_menu = window.menuBar().actions()[0].menu()
+        assert "Help" in [a.text() for a in file_menu.actions()]
+        # the Simulate tab shows the Simulate app icon
+        assert not window.tabs.tabIcon(1).isNull()
+        buttons = {
+            b.text(): b for b in window.findChildren(QtWidgets.QPushButton)
+        }
+        assert not buttons["Load molecules"].icon().isNull()
+    finally:
+        window.close()

@@ -123,6 +123,18 @@ def ignore_escape_key(event: QtCore.QEvent) -> None:
         event.ignore()
 
 
+def _icon_only(
+    button: QtWidgets.QAbstractButton, name: str, tooltip: str
+) -> None:
+    """Show the icon ``name`` instead of the text of ``button``, with
+    ``tooltip``; without the icon file, the text stays."""
+    icon = theme.icon(name)
+    if not icon.isNull():
+        button.setIcon(icon)
+        button.setText("")
+    button.setToolTip(tooltip)
+
+
 def split_name(name: str) -> tuple[str, int]:
     """Extract str with name (without integer at the end) and the
     integer from name. name is assumed to consist of a few lower
@@ -500,6 +512,7 @@ class MaskGeneratorTab(lib.Dialog):
 
         # load molecules
         self.load_locs_button = QtWidgets.QPushButton("Load molecules")
+        self.load_locs_button.setIcon(theme.icon("open"))
         self.load_locs_button.setToolTip(
             "Load localizations/molecules for mask generation."
         )
@@ -602,6 +615,7 @@ class MaskGeneratorTab(lib.Dialog):
 
         # generate mask
         self.generate_mask_button = QtWidgets.QPushButton("Generate mask")
+        self.generate_mask_button.setIcon(theme.icon("mask"))
         self.generate_mask_button.setToolTip(
             "Generate mask based on loaded molecules and parameters."
         )
@@ -645,6 +659,7 @@ class MaskGeneratorTab(lib.Dialog):
 
         # save mask
         self.save_mask_button = QtWidgets.QPushButton("Save mask")
+        self.save_mask_button.setIcon(theme.icon("save"))
         self.save_mask_button.released.connect(self.save_mask)
         self.save_mask_button.setEnabled(False)
         mask_layout.addWidget(self.save_mask_button, 9, 0, 1, 3)
@@ -656,12 +671,14 @@ class MaskGeneratorTab(lib.Dialog):
 
         # Full FOV (reset)
         full_fov_button = QtWidgets.QPushButton("Full FOV")
+        full_fov_button.setIcon(theme.icon("fit-view"))
         full_fov_button.setToolTip("Reset to full field of view.")
         full_fov_button.released.connect(self.preview.on_mask_generated)
         navigation_layout.addWidget(full_fov_button, 0, 0, 1, 2)
 
         # Save current view
         save_view_button = QtWidgets.QPushButton("Save current view")
+        save_view_button.setIcon(theme.icon("export-view"))
         save_view_button.setToolTip(
             "Save the current view as an image (.png or .tif)."
         )
@@ -670,9 +687,11 @@ class MaskGeneratorTab(lib.Dialog):
 
         # Zoom in/out
         zoom_in_button = QtWidgets.QPushButton("Zoom in")
+        zoom_in_button.setIcon(theme.icon("tool-zoom"))
         zoom_in_button.released.connect(self.preview.zoom_in)
         navigation_layout.addWidget(zoom_in_button, 1, 0, 1, 2)
         zoom_out_button = QtWidgets.QPushButton("Zoom out")
+        zoom_out_button.setIcon(theme.icon("zoom-out"))
         zoom_out_button.released.connect(self.preview.zoom_out)
         navigation_layout.addWidget(zoom_out_button, 1, 2, 1, 2)
 
@@ -1442,11 +1461,13 @@ class StructuresTab(lib.Dialog):
         preview_layout.addWidget(self.scalebar_length, 2, 3)
 
         reset_rot_button = QtWidgets.QPushButton("Reset rotation")
+        reset_rot_button.setIcon(theme.icon("reload"))
         reset_rot_button.setToolTip("Reset rotation angles to 0.")
         reset_rot_button.released.connect(partial(self.update_preview, True))
         preview_layout.addWidget(reset_rot_button, 3, 0, 1, 2)
 
         save_view_button = QtWidgets.QPushButton("Save view")
+        save_view_button.setIcon(theme.icon("export-view"))
         save_view_button.setToolTip("Save current view as an image.")
         save_view_button.released.connect(self.save_preview)
         preview_layout.addWidget(save_view_button, 3, 2, 1, 2)
@@ -1457,6 +1478,7 @@ class StructuresTab(lib.Dialog):
         layout.addWidget(self.structures_box, 0, 1)
 
         add_structure_button = QtWidgets.QPushButton("Add a new structure")
+        add_structure_button.setIcon(theme.icon("add"))
         add_structure_button.setToolTip("Create a new structure.")
         add_structure_button.released.connect(self.add_structure)
         self.structures_box.layout().addWidget(
@@ -1468,6 +1490,7 @@ class StructuresTab(lib.Dialog):
         )
 
         save_structures_button = QtWidgets.QPushButton("Save all structures")
+        save_structures_button.setIcon(theme.icon("save"))
         save_structures_button.setToolTip(
             "Save all designed structures in a .yaml format."
         )
@@ -1475,6 +1498,7 @@ class StructuresTab(lib.Dialog):
         self.structures_box.layout().addWidget(save_structures_button, 2, 0)
 
         load_structures_button = QtWidgets.QPushButton("Load structures")
+        load_structures_button.setIcon(theme.icon("open"))
         load_structures_button.setToolTip(
             "Load existing structures from a .yaml file."
         )
@@ -1503,6 +1527,7 @@ class StructuresTab(lib.Dialog):
         self.mol_tar_box.add_widget(label5, 0, 4)
 
         add_mol_tar_button = QtWidgets.QPushButton("Add a molecular target")
+        add_mol_tar_button.setIcon(theme.icon("add"))
         add_mol_tar_button.setToolTip(
             "Add a new molecular target to the current structure."
         )
@@ -1562,6 +1587,7 @@ class StructuresTab(lib.Dialog):
             self.structures_box.add_widget(structure_button, row_count, 0)
 
             delete_button = QtWidgets.QPushButton("Delete")
+            delete_button.setIcon(theme.icon("delete"))
             delete_button.released.connect(
                 partial(self.on_structure_deleted, title)
             )
@@ -1721,6 +1747,7 @@ class StructuresTab(lib.Dialog):
         delete_button = QtWidgets.QPushButton(
             "x", objectName=f"del{self.n_mol_tar}"
         )
+        _icon_only(delete_button, "delete", "Delete")
         delete_button.released.connect(
             partial(self.delete_molecular_target, delete_button.objectName())
         )
@@ -1814,6 +1841,7 @@ class StructuresTab(lib.Dialog):
                     delete_button = QtWidgets.QPushButton(
                         "x", objectName=f"del{self.n_mol_tar}"
                     )
+                    _icon_only(delete_button, "delete", "Delete")
                     delete_button.released.connect(
                         partial(
                             self.delete_molecular_target,
@@ -2036,6 +2064,7 @@ class CompareModelsDialog(lib.Dialog):
         self.models_box.setMinimumHeight(250)
         layout.addWidget(self.models_box)
         add_model_button = QtWidgets.QPushButton("Add a model")
+        add_model_button.setIcon(theme.icon("add"))
         add_model_button.setToolTip("Add a new model (list of structures).")
         add_model_button.setStyleSheet("font-weight : bold")
         add_model_button.released.connect(self.on_add_model)
@@ -2560,6 +2589,7 @@ class NNDPlotSettingsDialog(lib.Dialog):
 
         # update (run a simulation)
         update_button = QtWidgets.QPushButton("Update plot(s)")
+        update_button.setIcon(theme.icon("reload"))
         update_button.setToolTip(
             "Update the nearest neighbors distance plot(s)."
         )
@@ -3136,6 +3166,7 @@ class SimulationsTab(lib.Dialog):
         first_row.addWidget(lib.HelpButton(self.DOCS_URL))
         load_data_layout.addLayout(basic_buttons_layout, 0, 0)
         self.load_structures_button = QtWidgets.QPushButton("Load structures")
+        self.load_structures_button.setIcon(theme.icon("open"))
         self.load_structures_button.setToolTip(
             "Load structure files from a .yaml file (see Structures)."
         )
@@ -3150,6 +3181,7 @@ class SimulationsTab(lib.Dialog):
         basic_buttons_layout.addWidget(self.dim_widget)
 
         optional_settings_button = QtWidgets.QPushButton("Optional settings")
+        optional_settings_button.setIcon(theme.icon("parameters"))
         optional_settings_button.released.connect(self.settings_dialog.show)
         basic_buttons_layout.addWidget(optional_settings_button)
 
@@ -3261,6 +3293,7 @@ class SimulationsTab(lib.Dialog):
         nnd_buttons_layout.addWidget(right_nnd_button, 0, 2, 1, 2)
 
         save_nnd_png_button = QtWidgets.QPushButton("Save plots")
+        save_nnd_png_button.setIcon(theme.icon("export-view"))
         save_nnd_png_button.setToolTip(
             "Save the currently displayed NND plot(s) as .png/.svg file(s)."
         )
@@ -3268,6 +3301,7 @@ class SimulationsTab(lib.Dialog):
         nnd_buttons_layout.addWidget(save_nnd_png_button, 1, 0, 1, 2)
 
         save_nnd_csv_button = QtWidgets.QPushButton("Save values")
+        save_nnd_csv_button.setIcon(theme.icon("export-csv"))
         save_nnd_csv_button.setToolTip(
             "Save the currently displayed NND values as .csv file(s)."
         )
@@ -3308,6 +3342,7 @@ class SimulationsTab(lib.Dialog):
         generate_search_space_button = QtWidgets.QPushButton(
             "Generate parameter\nsearch space"
         )
+        generate_search_space_button.setIcon(theme.icon("generate"))
         generate_search_space_button.setToolTip(
             "Generate the tested stoichiometries of the model structures."
         )
@@ -3320,6 +3355,7 @@ class SimulationsTab(lib.Dialog):
         load_search_space_button = QtWidgets.QPushButton(
             "Load parameter\nsearch space"
         )
+        load_search_space_button.setIcon(theme.icon("open"))
         load_search_space_button.setToolTip(
             "Load a previously generated search space from a .csv file."
         )
@@ -3328,6 +3364,7 @@ class SimulationsTab(lib.Dialog):
         fitting_layout.addWidget(load_search_space_button, 0, 1)
 
         compare_models_button = QtWidgets.QPushButton("Compare models")
+        compare_models_button.setIcon(theme.icon("compare"))
         compare_models_button.setToolTip(
             "Choose from multiple models based on their best fitting scores."
         )
@@ -3353,6 +3390,7 @@ class SimulationsTab(lib.Dialog):
         fitting_layout.addWidget(self.bootstrap_check, 1, 1)
 
         self.fit_le_button = QtWidgets.QPushButton("Fit labeling efficiency")
+        self.fit_le_button.setIcon(theme.icon("fit"))
         self.fit_le_button.setToolTip(
             "Open the Fit LE dialog. Visible only when exactly two"
             " molecular targets are loaded.\n"
@@ -3366,6 +3404,7 @@ class SimulationsTab(lib.Dialog):
         self.fit_button = QtWidgets.QPushButton(
             "Find best fitting stoichiometry"
         )
+        self.fit_button.setIcon(theme.icon("fit"))
         self.fit_button.setToolTip("Run SPINNA")
         self.fit_button.released.connect(self.fit_n_str)
         fitting_layout.addWidget(self.fit_button, 2, 0, 1, 3)
@@ -3406,6 +3445,7 @@ class SimulationsTab(lib.Dialog):
         self.run_single_sim_button = QtWidgets.QPushButton(
             "Run single simulation"
         )
+        self.run_single_sim_button.setIcon(theme.icon("simulate"))
         self.run_single_sim_button.setToolTip(
             "Run a single simulation with the specified parameters."
         )
@@ -3675,6 +3715,7 @@ class SimulationsTab(lib.Dialog):
             target_button = QtWidgets.QPushButton(
                 f"Load {target}", objectName=f"exp{target}"
             )
+            target_button.setIcon(theme.icon("open"))
             target_button.setToolTip(
                 f"Load experimental molecular map for {target} (.hdf5 file)."
             )
@@ -3700,6 +3741,7 @@ class SimulationsTab(lib.Dialog):
             target_button = QtWidgets.QPushButton(
                 f"Load {target}", objectName=f"mask{target}"
             )
+            target_button.setIcon(theme.icon("open"))
             target_button.setToolTip(f"Load mask for {target} (.npy file).")
             target_button.released.connect(
                 partial(self.load_mask, target_button.objectName())
@@ -5271,15 +5313,21 @@ class Window(QtWidgets.QMainWindow):
 
         self.structures_tab = StructuresTab(self)
         self.structures_tab.keyPressEvent = ignore_escape_key
-        self.tabs.addTab(self.structures_tab, "Structures")
+        self.tabs.addTab(
+            self.structures_tab, theme.icon("structures"), "Structures"
+        )
 
         self.simulations_tab = SimulationsTab(self)
         self.simulations_tab.keyPressEvent = ignore_escape_key
-        self.tabs.addTab(self.simulations_tab, "Simulate")
+        self.tabs.addTab(
+            self.simulations_tab, theme.icon("simulate"), "Simulate"
+        )
 
         self.mask_generator_tab = MaskGeneratorTab(self)
         self.mask_generator_tab.keyPressEvent = ignore_escape_key
-        self.tabs.addTab(self.mask_generator_tab, "Mask generation")
+        self.tabs.addTab(
+            self.mask_generator_tab, theme.icon("mask"), "Mask generation"
+        )
 
         self.tabs.setCurrentIndex(0)
 
@@ -5314,6 +5362,13 @@ class Window(QtWidgets.QMainWindow):
             self.user_settings_dialog.show
         )
         theme.add_menu_action(file_menu)
+        help_action = file_menu.addAction("Help")
+        help_action.setIcon(theme.icon("help"))
+        help_action.triggered.connect(
+            lambda: QtGui.QDesktopServices.openUrl(
+                QtCore.QUrl(docs_url("spinna.html"))
+            )
+        )
 
         self.plugin_menu = self.menuBar().addMenu("Plugins")  # do not delete
 
