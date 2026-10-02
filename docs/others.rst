@@ -82,7 +82,7 @@ The toolbars of ``Picasso: Render``, ``Picasso: Localize``, ``Picasso: Filter`` 
 
 User settings file
 ------------------
-Picasso keeps its user settings in ``~/.picasso/settings.yaml`` (``C:\Users\<you>\.picasso\settings.yaml`` on Windows): the last directory used, the Render colormap, the Localize parameters, the CPU and GPU budgets of rendering, the sound notification, and so on. Each module owns a section of the file (``Render``, ``Localize``, ...). The file can be edited with any text editor or via ``File > Picasso settings`` in any module, and changes apply the next time the setting is read - for most settings immediately, without restarting Picasso.
+Picasso keeps its user settings in ``~/.picasso/settings.yaml`` (``C:\Users\<you>\.picasso\settings.yaml`` on Windows): the last directory used, the Render colormap, the Localize parameters, the CPU and GPU budgets of rendering, the sound notification, and so on. Each module owns a section of the file (``Render``, ``Localize``, ...). The file can be edited with any text editor or via ``File > Picasso settings`` in any module, and changes apply the next time the setting is read - for most settings immediately, without restarting Picasso. The search field above the editor (Ctrl+F) highlights every occurrence of a text, e.g., a setting's name; Enter and Shift+Enter step through them.
 
 A setting that is missing from the file is written into it with its default the first time it is needed, so every setting a module uses is visible and editable in the file; ``Picasso: Render``, for example, writes all of its ``Render`` keys when it starts. Optional keys that are off unless present (such as ``Render: max_workers``) are the exception.
 

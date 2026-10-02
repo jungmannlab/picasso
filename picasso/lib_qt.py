@@ -99,6 +99,42 @@ class UserSettingsDialog(Dialog):
         header.addWidget(help_button, 0, QtCore.Qt.AlignmentFlag.AlignTop)
         layout.addLayout(header)
 
+        # text search: all matches are highlighted, Enter / Shift+Enter
+        # (or the arrows) step through them, Ctrl+F focuses the field
+        search_layout = QtWidgets.QHBoxLayout()
+        self.search_edit = QtWidgets.QLineEdit()
+        self.search_edit.setPlaceholderText("Search settings (Ctrl+F)")
+        self.search_edit.setClearButtonEnabled(True)
+        self.search_edit.textChanged.connect(self._on_search_text_changed)
+        self.search_edit.returnPressed.connect(self.find_next)
+        QtGui.QShortcut(
+            QtGui.QKeySequence("Shift+Return"),
+            self.search_edit,
+            self.find_previous,
+            context=QtCore.Qt.ShortcutContext.WidgetShortcut,
+        )
+        QtGui.QShortcut(
+            QtGui.QKeySequence.StandardKey.Find, self, self._focus_search
+        )
+        search_layout.addWidget(self.search_edit, 1)
+        self.match_label = QtWidgets.QLabel()
+        search_layout.addWidget(self.match_label)
+        previous_button = QtWidgets.QToolButton()
+        previous_button.setArrowType(QtCore.Qt.ArrowType.UpArrow)
+        previous_button.setToolTip("Previous match (Shift+Enter)")
+        previous_button.clicked.connect(self.find_previous)
+        search_layout.addWidget(previous_button)
+        next_button = QtWidgets.QToolButton()
+        next_button.setArrowType(QtCore.Qt.ArrowType.DownArrow)
+        next_button.setToolTip("Next match (Enter)")
+        next_button.clicked.connect(self.find_next)
+        search_layout.addWidget(next_button)
+        layout.addLayout(search_layout)
+        #: (start, end) character positions of the search matches
+        self._matches: list[tuple[int, int]] = []
+        #: index of the current match in ``_matches``, -1 if none
+        self._current_match = -1
+
         self.editor = QtWidgets.QPlainTextEdit()
         # fixed width for the YAML indentation, in the size of the
         # application's font
@@ -108,6 +144,10 @@ class UserSettingsDialog(Dialog):
         if self.font().pointSizeF() > 0:
             font.setPointSizeF(self.font().pointSizeF())
         self.editor.setFont(font)
+        # edits shift the positions of the matches
+        self.editor.textChanged.connect(self._update_matches)
+        # clicking elsewhere ends the current match
+        self.editor.cursorPositionChanged.connect(self._sync_current_match)
         layout.addWidget(self.editor)
 
         button_layout = QtWidgets.QHBoxLayout()
@@ -146,6 +186,152 @@ class UserSettingsDialog(Dialog):
             self.editor.setPlainText(
                 "# No settings file found. Edit and save to create one."
             )
+
+    def _focus_search(self) -> None:
+        """Move the focus to the search field, its text selected."""
+        self.search_edit.setFocus()
+        self.search_edit.selectAll()
+
+    def _on_search_text_changed(self) -> None:
+        """Find the new search text and jump to its first match at or
+        after the cursor of the editor."""
+        self._update_matches()
+        if not self._matches:
+            return
+        position = self.editor.textCursor().selectionStart()
+        index = next(
+            (
+                i
+                for i, (start, _) in enumerate(self._matches)
+                if start >= position
+            ),
+            0,
+        )
+        self._go_to_match(index)
+
+    def _update_matches(self) -> None:
+        """Find all (case-insensitive) occurrences of the search text
+        in the editor and highlight them; the current match is the one
+        under the editor's selection, if any."""
+        text = self.search_edit.text()
+        self._matches = []
+        if text:
+            document = self.editor.document()
+            cursor = document.find(text, 0)
+            while not cursor.isNull():
+                self._matches.append(
+                    (cursor.selectionStart(), cursor.selectionEnd())
+                )
+                cursor = document.find(text, cursor)
+        self._current_match = self._match_under_selection()
+        self._highlight_matches()
+
+    def _match_under_selection(self) -> int:
+        """Index of the match selected in the editor, -1 if none."""
+        selection = self.editor.textCursor()
+        span = (selection.selectionStart(), selection.selectionEnd())
+        return next(
+            (i for i, match in enumerate(self._matches) if match == span),
+            -1,
+        )
+
+    def _sync_current_match(self) -> None:
+        """Follow the editor's cursor: the current match is the one
+        selected, if any."""
+        index = self._match_under_selection()
+        if index != self._current_match:
+            self._current_match = index
+            self._highlight_matches()
+
+    def _highlight_matches(self) -> None:
+        """Mark all matches in the editor, the current one stronger,
+        and show the match count."""
+        palette = self.editor.palette()
+        match_color = QtGui.QColor(
+            palette.color(QtGui.QPalette.ColorRole.Highlight)
+        )
+        match_color.setAlpha(70)
+        selections = []
+        for i, (start, end) in enumerate(self._matches):
+            selection = QtWidgets.QTextEdit.ExtraSelection()
+            selection.cursor = self.editor.textCursor()
+            selection.cursor.setPosition(start)
+            selection.cursor.setPosition(
+                end, QtGui.QTextCursor.MoveMode.KeepAnchor
+            )
+            if i == self._current_match:
+                selection.format.setBackground(
+                    palette.color(QtGui.QPalette.ColorRole.Highlight)
+                )
+                selection.format.setForeground(
+                    palette.color(QtGui.QPalette.ColorRole.HighlightedText)
+                )
+            else:
+                selection.format.setBackground(match_color)
+            selections.append(selection)
+        self.editor.setExtraSelections(selections)
+
+        if not self.search_edit.text():
+            self.match_label.setText("")
+        elif not self._matches:
+            self.match_label.setText("No matches")
+        elif self._current_match < 0:
+            n = len(self._matches)
+            self.match_label.setText(f"{n} match{'es' if n > 1 else ''}")
+        else:
+            self.match_label.setText(
+                f"{self._current_match + 1} of {len(self._matches)}"
+            )
+
+    def _go_to_match(self, index: int) -> None:
+        """Select the match ``index`` in the editor and scroll to it."""
+        self._current_match = index
+        start, end = self._matches[index]
+        cursor = self.editor.textCursor()
+        cursor.setPosition(start)
+        cursor.setPosition(end, QtGui.QTextCursor.MoveMode.KeepAnchor)
+        self.editor.setTextCursor(cursor)
+        self.editor.centerCursor()
+        self._highlight_matches()
+
+    def find_next(self) -> None:
+        """Go to the next match of the search text, wrapping around."""
+        self._step_match(1)
+
+    def find_previous(self) -> None:
+        """Go to the previous match of the search text, wrapping
+        around."""
+        self._step_match(-1)
+
+    def _step_match(self, step: int) -> None:
+        """Go ``step`` (1 or -1) matches from the current one, or from
+        the editor's cursor if no match is current."""
+        if not self._matches:
+            return
+        n = len(self._matches)
+        if self._current_match >= 0:
+            index = (self._current_match + step) % n
+        else:
+            position = self.editor.textCursor().position()
+            if step > 0:
+                index = next(
+                    (
+                        i
+                        for i, (start, _) in enumerate(self._matches)
+                        if start >= position
+                    ),
+                    0,
+                )
+            else:
+                index = next(
+                    (
+                        i
+                        for i in reversed(range(n))
+                        if self._matches[i][1] <= position
+                    ),
+                    n - 1,
+                )
+        self._go_to_match(index)
 
     def save_settings(self) -> None:
         """Validate YAML and write back to the settings file."""
