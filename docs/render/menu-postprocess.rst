@@ -102,6 +102,9 @@ Links localizations originating from individual binding events. If the
 localizations were already grouped the binding events are never linked across
 two input groups.
 
+With several channels loaded, choose *Apply to all sequentially* to link every
+channel with the same parameters. Channels that are already linked are skipped.
+
 .. _render-select-central-frames:
 
 Select central frames localizations

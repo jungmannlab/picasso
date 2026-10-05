@@ -269,3 +269,50 @@ def test_canceled_undrift_from_picked_keeps_index_and_locs(
     assert window.view._drift[0] is None
     # the index built for the unchanged locs is kept for the next run
     assert window.view.render_index[0] is not None
+
+
+def _link_all_channels(view, qapp, monkeypatch) -> list[str]:
+    """Choose *Apply to all sequentially* and the default linking
+    parameters; return the texts of the information boxes shown."""
+    messages = []
+    monkeypatch.setattr(
+        QtWidgets.QInputDialog,
+        "getItem",
+        lambda *a, **k: ("Apply to all sequentially", True),
+    )
+    monkeypatch.setattr(
+        gui_render.LinkDialog, "getParams", lambda *a, **k: (30.0, 3, True)
+    )
+    monkeypatch.setattr(
+        QtWidgets.QMessageBox,
+        "information",
+        lambda parent, title, text, *a, **k: messages.append(text),
+    )
+    view.link()
+    _wait_for_tasks(qapp)
+    return messages
+
+
+def test_link_all_channels_sequentially(
+    window, qt_offscreen, tmp_path, monkeypatch
+):
+    view = window.view
+    view.add(str(tmp_path / "locs2.hdf5"), _locs(1), _info(), render_=False)
+    n_before = [len(locs) for locs in view.locs]
+    messages = _link_all_channels(view, qt_offscreen, monkeypatch)
+    assert not messages
+    for locs, n in zip(view.locs, n_before):
+        assert "len" in locs.columns
+        assert len(locs) < n
+
+
+def test_link_all_channels_skips_linked_ones(
+    window, qt_offscreen, tmp_path, monkeypatch
+):
+    view = window.view
+    linked = gui_render.postprocess.link(_locs(1), _info(), r_max=0.2)
+    view.add(str(tmp_path / "linked.hdf5"), linked, _info(), render_=False)
+    messages = _link_all_channels(view, qt_offscreen, monkeypatch)
+    assert "len" in view.locs[0].columns
+    assert view.locs[1] is linked
+    assert len(messages) == 1 and "linked.hdf5" in messages[0]

@@ -10197,31 +10197,71 @@ class View(QtWidgets.QLabel):
         """Link localizations, i.e., combine localizations likely
         originating from the same binding events.
 
-        See ``picasso.postprocess.link`` for more details."""
-        channel = self.get_channel()
-        if "len" in self.locs[channel].columns:
+        See ``picasso.postprocess.link`` for more details. When applied
+        to all channels, the already linked ones are skipped."""
+        channel = self.get_channel_all_seq("Link localizations")
+        if channel is None:
+            return
+        if channel == len(self.locs_paths):  # apply to all channels
+            channels = list(range(len(self.locs_paths)))
+        else:
+            channels = [channel]
+        skipped = [c for c in channels if "len" in self.locs[c].columns]
+        channels = [c for c in channels if c not in skipped]
+        if not channels:
             QtWidgets.QMessageBox.information(
                 self, "Link", "Localizations are already linked. Aborting."
             )
             return
-        else:
-            r_max, max_dark, ok = LinkDialog.getParams()
-            # nm to pixels
-            r_max /= self.pixelsize
-            if ok:
-                locs, info = self.locs[channel], self.infos[channel]
-                self.locs[channel] = lib.run_with_status(
-                    lambda: postprocess.link(
-                        locs, info, r_max=r_max, max_dark_time=max_dark
-                    ),
-                    "Linking localizations...",
-                    self,
-                )
-                if "group" in self.locs[channel].columns:
-                    self.group_color = render.get_group_color(
-                        self.locs[channel], shuffle=True
+
+        r_max, max_dark, ok = LinkDialog.getParams()
+        if not ok:
+            return
+        r_max /= self.pixelsize  # nm to pixels
+        jobs = [(c, self.locs[c], self.infos[c]) for c in channels]
+
+        def compute(progress: lib.TaskProgress) -> list[tuple]:
+            results = []
+            for i, (c, locs, info) in enumerate(jobs):
+                description = "Linking localizations..."
+                if len(jobs) > 1:
+                    description = (
+                        f"Linking localizations (channel {i + 1}/"
+                        f"{len(jobs)})..."
                     )
-                self.update_scene(resample_locs=True)
+                progress.phase(description, 0)  # cancellation point
+                linked_locs = postprocess.link(
+                    locs, info, r_max=r_max, max_dark_time=max_dark
+                )
+                results.append((c, linked_locs))
+            return results
+
+        def apply(results: list[tuple]) -> None:
+            for c, linked_locs in results:
+                self.locs[c] = linked_locs
+            grouped = [locs for _, locs in results if "group" in locs.columns]
+            if grouped:
+                self.group_color = render.get_group_color(
+                    grouped[-1], shuffle=True
+                )
+            self.update_scene(resample_locs=True)
+            if skipped:
+                names = "\n".join(
+                    os.path.basename(self.locs_paths[c]) for c in skipped
+                )
+                QtWidgets.QMessageBox.information(
+                    self,
+                    "Link",
+                    f"Skipped the already linked channels:\n{names}",
+                )
+
+        lib.run_task(
+            compute,
+            "Linking localizations...",
+            self,
+            apply,
+            title="Link localizations",
+        )
 
     def select_binding_event_cores(self) -> None:
         """Keep only the localizations that are not at the borders of
