@@ -99,6 +99,30 @@ def load_overlay_image(
         If the file extension is not supported or the image is neither
         grayscale nor RGB(A).
     """
+    image = _read_image(path, page)
+    if image.dtype == bool:
+        image = image.astype(np.uint8) * 255
+    alpha = None
+    if image.ndim == 3 and image.shape[2] in (2, 4):  # gray/RGB + alpha
+        alpha = _to_uint8(image[:, :, -1])
+        image = image[:, :, :-1]
+    if image.ndim == 3 and image.shape[2] == 1:
+        image = image[:, :, 0]
+    if image.ndim == 3:
+        image = _rgb_or_gray(image)
+    elif image.ndim != 2:
+        raise ValueError(
+            f"Unsupported image shape {image.shape}; expected a "
+            "grayscale or an RGB(A) image."
+        )
+    if alpha is not None and np.all(alpha == 255):
+        alpha = None
+    return np.ascontiguousarray(image), alpha
+
+
+def _read_image(path: str, page: int) -> np.ndarray:
+    """Read a PNG or a page of a TIFF as is, with the samples last, see
+    ``load_overlay_image``."""
     extension = os.path.splitext(path)[1].lower()
     if extension in (".tif", ".tiff"):
         import tifffile
@@ -110,43 +134,30 @@ def load_overlay_image(
             image = tif.asarray(key=page)
         if separate and image.ndim == 3:  # samples first, (3, H, W)
             image = np.moveaxis(image, 0, -1)
-    elif extension == ".png":
+        return image
+    if extension == ".png":
         import imageio.v3 as iio
 
-        image = iio.imread(path)
-    else:
-        raise ValueError(
-            f"Unsupported file extension {extension!r}; expected one of "
-            f"{IMAGE_EXTENSIONS}."
-        )
-    if image.dtype == bool:
-        image = image.astype(np.uint8) * 255
-    alpha = None
-    if image.ndim == 3 and image.shape[2] in (2, 4):  # gray/RGB + alpha
-        alpha = _to_uint8(image[:, :, -1])
-        image = image[:, :, :-1]
-    if image.ndim == 3 and image.shape[2] == 1:
-        image = image[:, :, 0]
-    if image.ndim == 3:
-        if image.shape[2] != 3:
-            raise ValueError(
-                f"Unsupported image shape {image.shape}; expected a "
-                "grayscale or an RGB(A) image."
-            )
-        if np.array_equal(image[:, :, 0], image[:, :, 1]) and (
-            np.array_equal(image[:, :, 0], image[:, :, 2])
-        ):
-            image = image[:, :, 0]
-        else:
-            image = _to_uint8(image)
-    elif image.ndim != 2:
+        return iio.imread(path)
+    raise ValueError(
+        f"Unsupported file extension {extension!r}; expected one of "
+        f"{IMAGE_EXTENSIONS}."
+    )
+
+
+def _rgb_or_gray(image: np.ndarray) -> np.ndarray:
+    """An RGB image of shape ``(height, width, 3)`` as uint8, or as
+    grayscale if its three channels are identical."""
+    if image.shape[2] != 3:
         raise ValueError(
             f"Unsupported image shape {image.shape}; expected a "
             "grayscale or an RGB(A) image."
         )
-    if alpha is not None and np.all(alpha == 255):
-        alpha = None
-    return np.ascontiguousarray(image), alpha
+    if np.array_equal(image[:, :, 0], image[:, :, 1]) and (
+        np.array_equal(image[:, :, 0], image[:, :, 2])
+    ):
+        return image[:, :, 0]
+    return _to_uint8(image)
 
 
 def count_image_pages(path: str) -> int:

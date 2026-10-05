@@ -11,3 +11,5 @@ falls back to the CPU backend when it fails.
 """
 
 from .backend_wgpu import WgpuBackend
+
+__all__ = ["WgpuBackend"]

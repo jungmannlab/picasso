@@ -40,6 +40,8 @@ import traceback
 from PyQt6 import QtCore, QtGui, QtWidgets
 
 from .. import io
+from . import theme
+from . import toolbars
 
 # Re-exported for backwards compatibility with code and tests that
 # imported these from this module before they moved to picasso.plugins.
@@ -180,12 +182,15 @@ def add_plugins_menu_actions(window, app_name: str) -> None:
         pending_action = menu.addAction(
             f"{count} plugin {noun} found but not enabled..."
         )
+        pending_action.setIcon(theme.icon("plugins-browse"))
         pending_action.triggered.connect(lambda: _open_store(window, app_name))
 
     store_action = menu.addAction("Browse online plugins...")
+    store_action.setIcon(theme.icon("plugins-browse"))
     store_action.triggered.connect(lambda: _open_store(window, app_name))
 
     open_action = menu.addAction("Open plugins folder...")
+    open_action.setIcon(theme.icon("open"))
     open_action.triggered.connect(
         lambda: QtGui.QDesktopServices.openUrl(
             QtCore.QUrl.fromLocalFile(io.plugins_directory())
@@ -193,7 +198,11 @@ def add_plugins_menu_actions(window, app_name: str) -> None:
     )
 
     reload_action = menu.addAction("Reload plugins")
+    reload_action.setIcon(theme.icon("reload"))
     reload_action.triggered.connect(lambda: reload_plugins(window, app_name))
+
+    # show the plugins' actions on a toolbar customized to have them
+    toolbars.refresh(window)
 
 
 def _open_store(window, app_name: str) -> None:

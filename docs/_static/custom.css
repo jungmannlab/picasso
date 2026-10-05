@@ -1,0 +1,118 @@
+/* Picasso documentation theme tweaks on top of the PyData Sphinx theme.
+   The primary color is the default accent of the Picasso GUI (Blue in
+   picasso/gui/theme.py). */
+
+html[data-theme="light"] {
+  --pst-color-primary: #2a78d6;
+  --pst-color-primary-highlight: #1f5fae;
+  --pst-color-secondary: #e0662f;
+  --pst-color-secondary-highlight: #c24f1c;
+  --pst-color-link-hover: #1f5fae;
+}
+
+html[data-theme="dark"] {
+  --pst-color-primary: #5e9be6;
+  --pst-color-primary-highlight: #8bb7ee;
+  --pst-color-secondary: #f08a5a;
+  --pst-color-secondary-highlight: #f5a984;
+  --pst-color-link-hover: #8bb7ee;
+}
+
+/* ---- Landing page ------------------------------------------------------ */
+
+.hero {
+  text-align: center;
+  padding: 1.5rem 0 1rem;
+}
+
+.hero img {
+  max-width: min(420px, 80%);
+  height: auto;
+  margin-bottom: 1rem;
+}
+
+.hero .tagline {
+  font-size: 1.35rem;
+  line-height: 1.5;
+  max-width: 42rem;
+  margin: 0 auto 1.25rem;
+  color: var(--pst-color-text-muted);
+}
+
+/* Shown in place of the logo until the logo image exists. */
+.hero .hero-name {
+  font-size: 3.5rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  margin-bottom: 0.5rem;
+  color: var(--pst-color-primary);
+}
+
+/* The landing page uses its title only for the browser tab; the hero
+   shows the logo instead. */
+section:has(> .hero) > h1 {
+  display: none;
+}
+
+/* Landing page buttons in one row (each button is its own paragraph). */
+.hero-buttons > p {
+  display: inline-block;
+  margin: 0.25rem 0;
+}
+
+/* ---- Cards ------------------------------------------------------------- */
+
+.sd-card {
+  border-radius: 0.6rem;
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+
+.sd-card.sd-card-hover:hover {
+  transform: translateY(-2px);
+}
+
+.sd-card .module-icon,
+.sd-card img.module-icon {
+  width: 2.75rem;
+  height: 2.75rem;
+  margin-bottom: 0.5rem;
+}
+
+.sd-card-title {
+  font-weight: 600;
+}
+
+.sd-card-text {
+  color: var(--pst-color-text-muted);
+}
+
+/* ---- Content ----------------------------------------------------------- */
+
+/* Screenshots: a subtle frame so that light GUI captures stand out from a
+   light page. */
+img.screenshot {
+  border: 1px solid var(--pst-color-border);
+  border-radius: 0.4rem;
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.08);
+}
+
+figure figcaption {
+  color: var(--pst-color-text-muted);
+  font-size: 0.9rem;
+}
+
+/* Keyboard shortcut lines under menu-item headings. */
+p.shortcut {
+  margin-top: -0.4rem;
+  color: var(--pst-color-text-muted);
+  font-size: 0.9rem;
+}
+
+kbd.kbd:not(.compound) {
+  font-size: 0.8rem;
+}
+
+/* Wide CSV tables (file formats) scroll instead of overflowing. */
+.table-wrapper {
+  overflow-x: auto;
+}

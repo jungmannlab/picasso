@@ -326,7 +326,9 @@ def watcher():  # noqa: C901
         df["running"] = [psutil.pid_exists(_) for _ in df["process id"]]
         st.dataframe(df)
         if df["running"].sum() != len(df):
-            if st.button("Remove non-running watchers."):
+            if st.button(
+                "Remove non-running watchers", icon=":material/delete_sweep:"
+            ):
                 df = df[df["running"]]
                 engine = create_engine(
                     "sqlite:///" + localize.db_filename(), echo=False
@@ -472,7 +474,7 @@ def watcher():  # noqa: C901
             logfile = os.path.join(logfile_dir, f"{now_str}_watcher.log")
             logfile = st.text_input("Logfile", logfile)
 
-            if st.button("Submit"):
+            if st.button("Submit", icon=":material/send:"):
 
                 settings_list = []
 

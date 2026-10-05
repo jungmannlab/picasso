@@ -1,5 +1,6 @@
-"""Adaptively jittered, averaged Delaunay triangulation (Baddeley,
-Cannell & Soeller, *Microsc. Microanal.* 2010).
+"""Adaptively jittered, averaged Delaunay triangulation.
+
+After Baddeley, Cannell & Soeller, *Microsc. Microanal.* 2010.
 
 Every triangle of a Delaunay triangulation of the localizations is
 painted with an intensity inversely proportional to its area, which is

@@ -31,6 +31,7 @@ from scipy.stats import norm
 
 from .. import io, lib, simulate, __version__, docs_url
 from .app import run_gui
+from . import plot_style, theme
 
 
 def fitFuncBg(x: lib.FloatArray2D, a: float, b: float) -> lib.FloatArray1D:
@@ -44,8 +45,6 @@ def fitFuncStd(
     """Standard fitting function."""
     return a * x[0] * x[1] + b * x[2] + c
 
-
-plt.style.use("ggplot")
 
 "DEFAULT PARAMETERS"
 CURRENTROUND = 0
@@ -113,6 +112,17 @@ CY_DEFAULT = [
     0.0018155881468011011,
     1.011468185618154,
 ]
+
+
+def _mark_derived(*widgets: QtWidgets.QWidget) -> None:
+    """Show values that Simulate calculates from the settings (and their
+    labels) in the muted text color, apart from the settings."""
+    for widget in widgets:
+        widget.setForegroundRole(QtGui.QPalette.ColorRole.PlaceholderText)
+        widget.setToolTip(
+            (widget.toolTip() + "\n" if widget.toolTip() else "")
+            + "Calculated from the settings."
+        )
 
 
 class Window(QtWidgets.QMainWindow):
@@ -271,30 +281,88 @@ class Window(QtWidgets.QMainWindow):
         icon_path = os.path.join(this_directory, "icons", "simulate.ico")
         icon = QtGui.QIcon(icon_path)
         self.setWindowIcon(icon)
-        self.initUI()
 
+        # the File and Simulation menus come first; initUI adds the
+        # Plugins menu
         self.user_settings_dialog = lib.UserSettingsDialog(self)
         file_menu = self.menuBar().addMenu("File")
+        load_action = file_menu.addAction(
+            "Load settings from previous simulation..."
+        )
+        load_action.setShortcut(QtGui.QKeySequence.StandardKey.Open)
+        load_action.triggered.connect(self.loadSettings)
+        import_design_action = file_menu.addAction(
+            "Import structure from Picasso: Design..."
+        )
+        import_design_action.setToolTip(
+            "Load the .yaml file with the Picasso: Design structure."
+        )
+        import_design_action.triggered.connect(self.importDesign)
+        import_handles_action = file_menu.addAction("Import handles...")
+        import_handles_action.setToolTip(
+            "Use the docking strand positions of a .yaml or .hdf5 file as "
+            "the structure."
+        )
+        import_handles_action.triggered.connect(self.importHandles)
+        load_3d_action = file_menu.addAction("Load 3D calibration...")
+        load_3d_action.setToolTip(
+            "Load 3D calibration coefficients from a .yaml file."
+        )
+        load_3d_action.triggered.connect(self.load3dCalibration)
+        file_menu.addSeparator()
         picasso_settings_action = file_menu.addAction("Picasso settings...")
+        picasso_settings_action.setIcon(theme.icon("picasso-settings"))
         picasso_settings_action.triggered.connect(
             self.user_settings_dialog.show
         )
+        theme.add_menu_action(file_menu)
+        plot_settings_action = file_menu.addAction("Plot settings...")
+        plot_settings_action.setIcon(theme.icon("plot-settings"))
+        plot_settings_action.setToolTip("Appearance of all chart windows")
+        plot_settings_action.triggered.connect(
+            lambda: plot_style.show_dialog()
+        )
+        help_action = file_menu.addAction("Help")
+        help_action.setIcon(theme.icon("help"))
+        help_action.triggered.connect(
+            lambda: QtGui.QDesktopServices.openUrl(QtCore.QUrl(self.DOCS_URL))
+        )
+
+        simulation_menu = self.menuBar().addMenu("Simulation")
+        generate_action = simulation_menu.addAction("Generate positions")
+        generate_action.setShortcut("Ctrl+G")
+        generate_action.setToolTip(
+            "Generate the structures and their orientations again."
+        )
+        generate_action.triggered.connect(self.generatePositions)
+        simulate_action = simulation_menu.addAction("Simulate data...")
+        simulate_action.setShortcut("Ctrl+R")
+        simulate_action.triggered.connect(self.simulate)
+        for action, name in (
+            (load_action, "open"),
+            (import_design_action, "design"),
+            (import_handles_action, "import-handles"),
+            (load_3d_action, "view-3d"),
+            (generate_action, "generate"),
+            (simulate_action, "simulate"),
+        ):
+            action.setIcon(theme.icon(name))
+
+        self.initUI()
+        self._fit_to_contents()
 
     def initUI(self):  # noqa: C901
         self.currentround = CURRENTROUND
         self.structureMode = True
 
         containerWidget = QtWidgets.QWidget()
-        scroll_box = QtWidgets.QGridLayout(containerWidget)
+        scroll_box = QtWidgets.QVBoxLayout(containerWidget)
         scroll = QtWidgets.QScrollArea()
         scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QtWidgets.QFrame.Shape.NoFrame)
         scroll.setWidget(containerWidget)
         self.setCentralWidget(scroll)
-        max_height = 1300
-        screen = QtWidgets.QApplication.primaryScreen()
-        screen_height = 1000 if screen is None else screen.size().height()
-        max_height = min(max_height, screen_height - 100)
-        self.resize(800, max_height)
+        self._container = containerWidget
 
         # CAMERA PARAMETERS
         camera_groupbox = QtWidgets.QGroupBox("Camera parameters")
@@ -341,27 +409,20 @@ class Window(QtWidgets.QMainWindow):
 
         cgrid.addWidget(camerasize, 1, 0)
         cgrid.addWidget(self.camerasizeEdit, 1, 1)
-        cgrid.addWidget(QtWidgets.QLabel("Px"), 1, 2)
+        cgrid.addWidget(QtWidgets.QLabel("px"), 1, 2)
         cgrid.addWidget(integrationtime, 2, 0)
         cgrid.addWidget(self.integrationtimeEdit, 2, 1)
         cgrid.addWidget(QtWidgets.QLabel("ms"), 2, 2)
         cgrid.addWidget(frames, 3, 0)
         cgrid.addWidget(self.framesEdit, 3, 1)
+        totaltime_unit = QtWidgets.QLabel("min")
         cgrid.addWidget(totaltime, 4, 0)
         cgrid.addWidget(self.totaltimeEdit, 4, 1)
-        cgrid.addWidget(QtWidgets.QLabel("min"), 4, 2)
+        cgrid.addWidget(totaltime_unit, 4, 2)
+        _mark_derived(totaltime, self.totaltimeEdit, totaltime_unit)
         cgrid.addWidget(pixelsize, 5, 0)
         cgrid.addWidget(self.pixelsizeEdit, 5, 1)
         cgrid.addWidget(QtWidgets.QLabel("nm"), 5, 2)
-
-        cgrid.addItem(
-            QtWidgets.QSpacerItem(
-                1,
-                1,
-                QtWidgets.QSizePolicy.Policy.Minimum,
-                QtWidgets.QSizePolicy.Policy.Expanding,
-            )
-        )
 
         # PAINT PARAMETERS
         paint_groupbox = QtWidgets.QGroupBox("PAINT parameters")
@@ -405,20 +466,14 @@ class Window(QtWidgets.QMainWindow):
         pgrid.addWidget(imagerconcentration, 2, 0)
         pgrid.addWidget(self.imagerconcentrationEdit, 2, 1)
         pgrid.addWidget(QtWidgets.QLabel("nM"), 2, 2)
+        taud_unit = QtWidgets.QLabel("ms")
         pgrid.addWidget(taud, 3, 0)
         pgrid.addWidget(self.taudEdit, 3, 1)
-        pgrid.addWidget(QtWidgets.QLabel("ms"), 3, 2)
+        pgrid.addWidget(taud_unit, 3, 2)
+        _mark_derived(taud, self.taudEdit, taud_unit)
         pgrid.addWidget(taub, 4, 0)
         pgrid.addWidget(self.taubEdit, 4, 1)
         pgrid.addWidget(QtWidgets.QLabel("ms"), 4, 2)
-        pgrid.addItem(
-            QtWidgets.QSpacerItem(
-                1,
-                1,
-                QtWidgets.QSizePolicy.Policy.Minimum,
-                QtWidgets.QSizePolicy.Policy.Expanding,
-            )
-        )
 
         # IMAGER Parameters
         imager_groupbox = QtWidgets.QGroupBox("Imager parameters")
@@ -427,12 +482,12 @@ class Window(QtWidgets.QMainWindow):
         laserpower = QtWidgets.QLabel("Power density")
         laserpower.setToolTip("Laser power density at the objective (kW/cm²).")
         if ADVANCEDMODE:
-            laserpower = QtWidgets.QLabel("Laserpower")
+            laserpower = QtWidgets.QLabel("Laser power")
         psf = QtWidgets.QLabel("PSF")
         psf.setToolTip(
             "Point Spread Function (PSF) width (Gaussian \u03c3) in pixels."
         )
-        psf_fwhm = QtWidgets.QLabel("PSF(FWHM)")
+        psf_fwhm = QtWidgets.QLabel("PSF (FWHM)")
         psf_fwhm.setToolTip(
             "Full Width at Half Maximum (FWHM) of the PSF in nm."
         )
@@ -441,17 +496,17 @@ class Window(QtWidgets.QMainWindow):
         photonsframe.setToolTip(
             "Resulting mean number of photons per emitter per frame."
         )
-        photonratestd = QtWidgets.QLabel("Photon rate Std")
+        photonratestd = QtWidgets.QLabel("Photon rate std")
         photonratestd.setToolTip(
             "Resulting standard deviation of photons per emitter per frame."
         )
-        photonstdframe = QtWidgets.QLabel("Photons Std (frame)")
+        photonstdframe = QtWidgets.QLabel("Photons std (frame)")
         photonbudget = QtWidgets.QLabel("Photon budget")
         photonbudget.setToolTip(
             "Number of photons a molecule can emit before bleaching."
         )
         photonslope = QtWidgets.QLabel("Photon detection rate")
-        photonslopeStd = QtWidgets.QLabel("Photonrate Std ")
+        photonslopeStd = QtWidgets.QLabel("Photon detection rate std")
 
         self.laserpowerEdit = QtWidgets.QDoubleSpinBox()
         self.laserpowerEdit.setDecimals(3)
@@ -497,44 +552,54 @@ class Window(QtWidgets.QMainWindow):
         self.cx = CX_DEFAULT
         self.cy = CY_DEFAULT
 
-        self.photonslopemodeEdit = QtWidgets.QCheckBox()
+        self.photonslopemodeEdit = QtWidgets.QCheckBox(
+            "Constant detection rate"
+        )
 
         igrid.addWidget(psf, 0, 0)
         igrid.addWidget(self.psfEdit, 0, 1)
-        igrid.addWidget(QtWidgets.QLabel("Px"), 0, 2)
+        igrid.addWidget(QtWidgets.QLabel("px"), 0, 2)
+        psf_fwhm_unit = QtWidgets.QLabel("nm")
         igrid.addWidget(psf_fwhm, 1, 0)
         igrid.addWidget(self.psf_fwhmEdit, 1, 1)
-        igrid.addWidget(QtWidgets.QLabel("nm"), 1, 2)
+        igrid.addWidget(psf_fwhm_unit, 1, 2)
+        _mark_derived(psf_fwhm, self.psf_fwhmEdit, psf_fwhm_unit)
 
         igrid.addWidget(laserpower, 2, 0)
         igrid.addWidget(self.laserpowerEdit, 2, 1)
         if ADVANCEDMODE:
             igrid.addWidget(QtWidgets.QLabel("mW"), 2, 2)
         else:
-            igrid.addWidget(QtWidgets.QLabel("kW cm<sup>-2<sup>"), 2, 2)
+            igrid.addWidget(QtWidgets.QLabel("kW cm<sup>-2</sup>"), 2, 2)
 
         igridindex = 1
         if ADVANCEDMODE:
             igrid.addWidget(photonrate, 3, 0)
             igrid.addWidget(self.photonrateEdit, 3, 1)
-            igrid.addWidget(QtWidgets.QLabel("Photons ms<sup>-1<sup>"), 3, 2)
+            igrid.addWidget(QtWidgets.QLabel("Photons ms<sup>-1</sup>"), 3, 2)
 
             igridindex = 0
 
+        photonsframe_unit = QtWidgets.QLabel("Photons")
         igrid.addWidget(photonsframe, 4 - igridindex, 0)
         igrid.addWidget(self.photonsframeEdit, 4 - igridindex, 1)
-        igrid.addWidget(QtWidgets.QLabel("Photons"), 4 - igridindex, 2)
+        igrid.addWidget(photonsframe_unit, 4 - igridindex, 2)
+        _mark_derived(photonsframe, self.photonsframeEdit, photonsframe_unit)
         igridindex = 2
 
         if ADVANCEDMODE:
             igrid.addWidget(photonratestd, 5, 0)
             igrid.addWidget(self.photonratestdEdit, 5, 1)
-            igrid.addWidget(QtWidgets.QLabel("Photons ms<sup>-1<sup"), 5, 2)
+            igrid.addWidget(QtWidgets.QLabel("Photons ms<sup>-1</sup>"), 5, 2)
             igridindex = 0
 
+        photonstdframe_unit = QtWidgets.QLabel("Photons")
         igrid.addWidget(photonstdframe, 6 - igridindex, 0)
         igrid.addWidget(self.photonstdframeEdit, 6 - igridindex, 1)
-        igrid.addWidget(QtWidgets.QLabel("Photons"), 6 - igridindex, 2)
+        igrid.addWidget(photonstdframe_unit, 6 - igridindex, 2)
+        _mark_derived(
+            photonstdframe, self.photonstdframeEdit, photonstdframe_unit
+        )
         igrid.addWidget(photonbudget, 7 - igridindex, 0)
         igrid.addWidget(self.photonbudgetEdit, 7 - igridindex, 1)
         igrid.addWidget(QtWidgets.QLabel("Photons"), 7 - igridindex, 2)
@@ -542,34 +607,32 @@ class Window(QtWidgets.QMainWindow):
         igrid.addWidget(self.photonslopeEdit, 8 - igridindex, 1)
 
         photonslopeUnit = QtWidgets.QLabel(
-            "Photons  ms<sup>-1</sup> kW<sup>-1</sup> cm<sup>2</sup>"
+            "Photons ms<sup>-1</sup> kW<sup>-1</sup> cm<sup>2</sup>"
         )
         photonslopeUnit.setWordWrap(True)
         igrid.addWidget(photonslopeUnit, 8 - igridindex, 2)
 
-        igrid.addWidget(self.photonslopemodeEdit, 9 - igridindex, 1)
-        igrid.addWidget(
-            QtWidgets.QLabel("Constant detection rate"),
-            9 - igridindex,
-            0,
-        )
+        igrid.addWidget(self.photonslopemodeEdit, 9 - igridindex, 0, 1, 2)
 
         if ADVANCEDMODE:
             igrid.addWidget(photonslopeStd, 10 - igridindex, 0)
             igrid.addWidget(self.photonslopeStdEdit, 10 - igridindex, 1)
             igrid.addWidget(
                 QtWidgets.QLabel(
-                    "Photons  ms<sup>-1</sup> kW<sup>-1</sup> cm<sup>2</sup>"
+                    "Photons ms<sup>-1</sup> kW<sup>-1</sup> cm<sup>2</sup>"
                 ),
                 10 - igridindex,
                 2,
             )
 
         if not ADVANCEDMODE:
-            backgroundframesimple = QtWidgets.QLabel("Background (Frame)")
+            backgroundframesimple = QtWidgets.QLabel("Background (frame)")
             self.backgroundframesimpleEdit = QtWidgets.QLabel()
             igrid.addWidget(backgroundframesimple, 12 - igridindex, 0)
             igrid.addWidget(self.backgroundframesimpleEdit, 12 - igridindex, 1)
+            _mark_derived(
+                backgroundframesimple, self.backgroundframesimpleEdit
+            )
 
         # Make a spinbox for adjusting the background level
         backgroundlevel = QtWidgets.QLabel("Background level")
@@ -585,7 +648,7 @@ class Window(QtWidgets.QMainWindow):
         self.backgroundlevelEdit.valueChanged.connect(self.changeNoise)
 
         # NOISE MODEL
-        noise_groupbox = QtWidgets.QGroupBox("Noise Model")
+        noise_groupbox = QtWidgets.QGroupBox("Noise model")
         ngrid = QtWidgets.QGridLayout(noise_groupbox)
 
         laserc = QtWidgets.QLabel("Laser coefficient")
@@ -595,14 +658,14 @@ class Window(QtWidgets.QMainWindow):
         EquationB = QtWidgets.QLabel("Equation B")
         EquationC = QtWidgets.QLabel("Equation C")
 
-        Bgoffset = QtWidgets.QLabel("Background Offset")
-        BgStdoffset = QtWidgets.QLabel("Background Std Offset")
+        Bgoffset = QtWidgets.QLabel("Background offset")
+        BgStdoffset = QtWidgets.QLabel("Background std offset")
 
-        backgroundframe = QtWidgets.QLabel("Background (Frame)")
+        backgroundframe = QtWidgets.QLabel("Background (frame)")
         backgroundframe.setToolTip(
             "Resulting mean number of background photons per frame per pixel."
         )
-        noiseLabel = QtWidgets.QLabel("Noise (Frame)")
+        noiseLabel = QtWidgets.QLabel("Noise (frame)")
 
         self.lasercEdit = QtWidgets.QDoubleSpinBox()
         self.lasercEdit.setRange(0, 100000)
@@ -648,8 +711,8 @@ class Window(QtWidgets.QMainWindow):
         ]:
             button.valueChanged.connect(self.changeNoise)
 
-        backgroundframe = QtWidgets.QLabel("Background (Frame)")
-        noiseLabel = QtWidgets.QLabel("Noise (Frame)")
+        backgroundframe = QtWidgets.QLabel("Background (frame)")
+        noiseLabel = QtWidgets.QLabel("Noise (frame)")
 
         self.backgroundframeEdit = QtWidgets.QLabel()
         self.noiseEdit = QtWidgets.QLabel()
@@ -680,10 +743,16 @@ class Window(QtWidgets.QMainWindow):
         for i, tag in enumerate(tags):
             ngrid.addWidget(tag, i, 0)
             ngrid.addWidget(buttons[i], i, 1)
+        _mark_derived(
+            backgroundframe,
+            self.backgroundframeEdit,
+            noiseLabel,
+            self.noiseEdit,
+        )
 
-        calibrateNoiseButton = QtWidgets.QPushButton("Calibrate Noise Model")
+        calibrateNoiseButton = QtWidgets.QPushButton("Calibrate noise model")
         calibrateNoiseButton.clicked.connect(self.calibrateNoise)
-        importButton = QtWidgets.QPushButton("Import from Experiment (hdf5)")
+        importButton = QtWidgets.QPushButton("Import from experiment (.hdf5)")
         importButton.clicked.connect(self.importhdf5)
 
         ngrid.addWidget(calibrateNoiseButton, 10, 0, 1, 3)
@@ -707,23 +776,15 @@ class Window(QtWidgets.QMainWindow):
         hgrid.addWidget(self.structureIncorporationEdit, 0, 1)
         hgrid.addWidget(QtWidgets.QLabel("%"), 0, 2)
 
-        importHandlesButton = QtWidgets.QPushButton("Import handles")
-        importHandlesButton.clicked.connect(self.importHandles)
-        hgrid.addWidget(importHandlesButton, 1, 0, 1, 3)
-
         # 3D Settings
         self.mode3DEdit = QtWidgets.QCheckBox("Simulate 3D")
-        self.mode3DEdit.setToolTip("Simulate 3D data?")
+        self.mode3DEdit.setToolTip(
+            "Simulate 3D data with the 3D calibration\n"
+            "(File > Load 3D calibration...)."
+        )
         threed_groupbox = QtWidgets.QGroupBox("3D")
         tgrid = QtWidgets.QGridLayout(threed_groupbox)
         tgrid.addWidget(self.mode3DEdit, 0, 0)
-
-        load3dCalibrationButton = QtWidgets.QPushButton("Load 3D Calibration")
-        load3dCalibrationButton.setToolTip(
-            "Load 3D calibration coefficients from a .yaml file."
-        )
-        load3dCalibrationButton.clicked.connect(self.load3dCalibration)
-        tgrid.addWidget(load3dCalibrationButton, 0, 1)
 
         # STRUCTURE DEFINITIONS
         structure_groupbox = QtWidgets.QGroupBox("Structure")
@@ -738,7 +799,7 @@ class Window(QtWidgets.QMainWindow):
 
         self.structure1 = QtWidgets.QLabel("Columns")
         self.structure2 = QtWidgets.QLabel("Rows")
-        self.structure3 = QtWidgets.QLabel("Spacing X,Y")
+        self.structure3 = QtWidgets.QLabel("Spacing X, Y")
         self.structure3Label = QtWidgets.QLabel("nm")
 
         structurexx = QtWidgets.QLabel("Structure X")
@@ -749,7 +810,7 @@ class Window(QtWidgets.QMainWindow):
         structureyy.setToolTip(
             "Y positions of docking strands in the structure in nm."
         )
-        structure3d = QtWidgets.QLabel("Structure 3D")
+        structure3d = QtWidgets.QLabel("Structure Z")
         structure3d.setToolTip(
             "Z positions of docking strands in the structure in nm."
         )
@@ -825,10 +886,9 @@ class Window(QtWidgets.QMainWindow):
 
         sgrid.addWidget(structureno, 1, 0)
         sgrid.addWidget(self.structurenoEdit, 1, 1)
-        sgrid.addWidget(lib.HelpButton(self.DOCS_URL), 1, 2)
         sgrid.addWidget(structureframe, 2, 0)
         sgrid.addWidget(self.structureframeEdit, 2, 1)
-        sgrid.addWidget(QtWidgets.QLabel("Px"), 2, 2)
+        sgrid.addWidget(QtWidgets.QLabel("px"), 2, 2)
         sgrid.addWidget(structurecomboLabel)
         sgrid.addWidget(self.structurecombo, 3, 1)
 
@@ -863,81 +923,56 @@ class Window(QtWidgets.QMainWindow):
 
         sindex += -2
 
-        importDesignButton = QtWidgets.QPushButton(
-            "Import structure from Picasso: Design"
+        editStructureButton = QtWidgets.QPushButton("Edit structure...")
+        editStructureButton.setToolTip(
+            "Edit the positions and exchange labels of the docking "
+            "strands in a table."
         )
-        importDesignButton.setToolTip(
-            "Load the .yaml file with the Picasso: Design structure."
-        )
-        importDesignButton.clicked.connect(self.importDesign)
-        sgrid.addWidget(importDesignButton, 15 + sindex, 0, 1, 3)
+        editStructureButton.clicked.connect(self.editStructure)
+        sgrid.addWidget(editStructureButton, 15 + sindex, 0, 1, 3)
 
         generateButton = QtWidgets.QPushButton("Generate positions")
+        generateButton.setIcon(theme.icon("generate"))
         generateButton.setToolTip(
             "Generate the structures and their orientations again."
         )
         generateButton.clicked.connect(self.generatePositions)
         sgrid.addWidget(generateButton, 17 + sindex, 0, 1, 3)
-        cgrid.addItem(
-            QtWidgets.QSpacerItem(
-                1,
-                1,
-                QtWidgets.QSizePolicy.Policy.Minimum,
-                QtWidgets.QSizePolicy.Policy.Expanding,
-            )
-        )
 
-        simulateButton = QtWidgets.QPushButton("Simulate data")
+        # SIMULATION SETTINGS
+        simulation_groupbox = QtWidgets.QGroupBox("Simulation")
+        simgrid = QtWidgets.QGridLayout(simulation_groupbox)
         self.exchangeroundsEdit = QtWidgets.QLineEdit("1")
-
+        self.exchangeroundsEdit.setToolTip(
+            "Exchange rounds to simulate, separated by commas, e.g., 1,2."
+        )
         self.conroundsEdit = QtWidgets.QSpinBox()
         self.conroundsEdit.setRange(1, 1000)
-
-        quitButton = QtWidgets.QPushButton("Quit", self)
-        quitButton.clicked.connect(QtCore.QCoreApplication.instance().quit)
-        quitButton.resize(quitButton.sizeHint())
-
-        loadButton = QtWidgets.QPushButton(
-            "Load settings from previous simulation"
+        self.conroundsEdit.setToolTip(
+            "Number of rounds to concatenate into one movie."
         )
-
-        btngridR = QtWidgets.QGridLayout()
-
-        self.concatExchangeEdit = QtWidgets.QCheckBox()
-        self.exportkinetics = QtWidgets.QCheckBox()
-
-        btngridR.addWidget(loadButton, 0, 0, 1, 2)
-        btngridR.addWidget(
-            QtWidgets.QLabel("Exchange rounds to be simulated:"),
-            1,
-            0,
+        self.concatExchangeEdit = QtWidgets.QCheckBox(
+            "Concatenate exchange rounds"
         )
-        btngridR.addWidget(self.exchangeroundsEdit, 1, 1)
-        btngridR.addWidget(
-            QtWidgets.QLabel("Concatenate several rounds:"),
-            2,
-            0,
+        self.exportkinetics = QtWidgets.QCheckBox("Export kinetic data")
+        self.exportkinetics.setToolTip(
+            "Save the simulated binding kinetics next to the movie."
         )
-        btngridR.addWidget(self.conroundsEdit, 2, 1)
-        btngridR.addWidget(QtWidgets.QLabel("Concatenate Exchange"))
-        btngridR.addWidget(self.concatExchangeEdit, 3, 1)
-        btngridR.addWidget(QtWidgets.QLabel("Export kinetic data"))
-        btngridR.addWidget(self.exportkinetics, 4, 1)
-        btngridR.addWidget(simulateButton, 5, 0, 1, 2)
-        btngridR.addWidget(quitButton, 6, 0, 1, 2)
+        simgrid.addWidget(QtWidgets.QLabel("Exchange rounds"), 0, 0)
+        simgrid.addWidget(self.exchangeroundsEdit, 0, 1)
+        simgrid.addWidget(QtWidgets.QLabel("Concatenated rounds"), 1, 0)
+        simgrid.addWidget(self.conroundsEdit, 1, 1)
+        simgrid.addWidget(self.concatExchangeEdit, 2, 0, 1, 2)
+        simgrid.addWidget(self.exportkinetics, 3, 0, 1, 2)
 
-        simulateButton.clicked.connect(self.simulate)
-        loadButton.clicked.connect(self.loadSettings)
-
-        self.show()
         self.changeTime()
         self.changePSF()
         self.changeNoise()
         self.changePaint()
 
-        pos_groupbox = QtWidgets.QGroupBox("Positions (px)")
+        pos_groupbox = QtWidgets.QGroupBox("Positions")
         pos_groupbox.setToolTip("Positions of docking strands across the ROI.")
-        str_groupbox = QtWidgets.QGroupBox("Structure (nm)")
+        str_groupbox = QtWidgets.QGroupBox("Structure preview")
         str_groupbox.setToolTip("Example structure preview.")
 
         posgrid = QtWidgets.QGridLayout(pos_groupbox)
@@ -953,38 +988,74 @@ class Window(QtWidgets.QMainWindow):
 
         self.canvas2 = FigureCanvas(self.figure2)
         self.canvas2.setMinimumSize(csize, csize)
+        # the previews take the shared chart style and are redrawn from
+        # the last drawn data when it changes
+        self.plot_style = plot_style.current()
+        self._positions_preview = None
+        self._structure_preview = None
+        self._noise_model_window = None
+        self._experiment_window = None
+        plot_style.hub().changed.connect(self._on_plot_style_changed)
 
         posgrid.addWidget(self.canvas1)
         strgrid.addWidget(self.canvas2)
 
-        self.mainpbar = QtWidgets.QProgressBar(self)
-        # Arrange Buttons
+        # two columns of settings that are laid out independently, so
+        # that neither leaves gaps next to the other
+        columns = QtWidgets.QHBoxLayout()
+        scroll_box.addLayout(columns)
         if ADVANCEDMODE:
-            scroll_box.addWidget(pos_groupbox, 1, 0)
-            scroll_box.addWidget(str_groupbox, 1, 1)
-            scroll_box.addWidget(structure_groupbox, 2, 0, 2, 1)
-            scroll_box.addWidget(camera_groupbox, 1, 2)
-            scroll_box.addWidget(paint_groupbox, 3, 1)
-            scroll_box.addWidget(imager_groupbox, 2, 1)
-            scroll_box.addWidget(noise_groupbox, 2, 2)
-            scroll_box.addLayout(btngridR, 3, 2)
-            scroll_box.addWidget(self.mainpbar, 5, 0, 1, 3)
-            scroll_box.addWidget(threed_groupbox, 4, 0)
-            scroll_box.addWidget(handles_groupbox, 4, 1)
+            boxes = (
+                (
+                    pos_groupbox,
+                    structure_groupbox,
+                    handles_groupbox,
+                    threed_groupbox,
+                ),
+                (str_groupbox, imager_groupbox, paint_groupbox),
+                (camera_groupbox, noise_groupbox, simulation_groupbox),
+            )
         else:
-            # Left side
-            scroll_box.addWidget(pos_groupbox, 1, 0)
-            scroll_box.addWidget(str_groupbox, 1, 1)
-            scroll_box.addWidget(structure_groupbox, 2, 0)
-            scroll_box.addWidget(paint_groupbox, 3, 0)
-            scroll_box.addWidget(handles_groupbox, 4, 0)
-            scroll_box.addWidget(threed_groupbox, 5, 0)
+            boxes = (
+                (
+                    pos_groupbox,
+                    structure_groupbox,
+                    handles_groupbox,
+                    threed_groupbox,
+                    camera_groupbox,
+                ),
+                (
+                    str_groupbox,
+                    imager_groupbox,
+                    paint_groupbox,
+                    simulation_groupbox,
+                ),
+            )
+        for column_boxes in boxes:
+            column = QtWidgets.QVBoxLayout()
+            for box in column_boxes:
+                column.addWidget(box)
+            column.addStretch(1)
+            columns.addLayout(column, 1)
 
-            # Right side
-            scroll_box.addWidget(imager_groupbox, 2, 1)
-            scroll_box.addWidget(camera_groupbox, 3, 1)
-            scroll_box.addLayout(btngridR, 4, 1, 2, 1)
-            scroll_box.addWidget(self.mainpbar, 8, 0, 1, 2)
+        # help, progress and the main action
+        bottom = QtWidgets.QHBoxLayout()
+        bottom.addWidget(lib.HelpButton(self.DOCS_URL))
+        self.mainpbar = QtWidgets.QProgressBar(self)
+        # shown while a simulation runs
+        self.mainpbar.hide()
+        bottom.addWidget(self.mainpbar, 1)
+        # keeps the button on the right while there is no progress bar
+        bottom.addStretch(1)
+        self._bottom = bottom
+        simulateButton = QtWidgets.QPushButton("Simulate data")
+        simulateButton.setIcon(theme.icon("simulate"))
+        simulateButton.setToolTip("Simulate the movie and save it.")
+        simulateButton.setDefault(True)
+        simulateButton.setAutoDefault(False)
+        simulateButton.clicked.connect(self.simulate)
+        bottom.addWidget(simulateButton)
+        scroll_box.addLayout(bottom)
 
         # CALL FUNCTIONS
         self.generatePositions()
@@ -993,6 +1064,45 @@ class Window(QtWidgets.QMainWindow):
 
         menu_bar = self.menuBar()
         self.plugin_menu = menu_bar.addMenu("Plugins")  # do not delete
+
+    def editStructure(self) -> None:
+        """Edit the docking strands of the structure in a table. The
+        structure type becomes "Custom", so that the edits are kept."""
+        xx, yy, ex, zz = self.readStructure()
+        dialog = StructureEditDialog(xx, yy, zz, ex, parent=self)
+        if dialog.exec() != QtWidgets.QDialog.DialogCode.Accepted:
+            return
+        xx, yy, zz, ex = dialog.values()
+        self.structurecombo.setCurrentIndex(2)  # Custom
+        for edit, values in (
+            (self.structurexxEdit, xx),
+            (self.structureyyEdit, yy),
+            (self.structure3DEdit, zz),
+            (self.structureexEdit, ex),
+        ):
+            edit.setText(",".join(f"{v:g}" for v in values))
+        self.generatePositions()
+
+    #: Default height of the window (px); the contents scroll if they
+    #: need more.
+    DEFAULT_HEIGHT = 900
+
+    def _fit_to_contents(self) -> None:
+        """Size the window to the width of its contents and to
+        ``DEFAULT_HEIGHT``, at most to the screen."""
+        hint = self._container.sizeHint()
+        style = self.style()
+        width = hint.width() + style.pixelMetric(
+            QtWidgets.QStyle.PixelMetric.PM_ScrollBarExtent
+        )
+        # menu bar and status bar
+        height = min(hint.height() + 60, self.DEFAULT_HEIGHT)
+        screen = QtWidgets.QApplication.primaryScreen()
+        if screen is not None:
+            available = screen.availableGeometry()
+            width = min(width, available.width() - 50)
+            height = min(height, available.height() - 50)
+        self.resize(width, height)
 
     def load3dCalibration(self) -> None:
         """Load 3D calibration data from a YAML file."""
@@ -1005,7 +1115,9 @@ class Window(QtWidgets.QMainWindow):
                 z_calibration = yaml.full_load(f)
                 self.cx = [_ for _ in z_calibration["X Coefficients"]]
                 self.cy = [_ for _ in z_calibration["Y Coefficients"]]
-                self.statusBar().showMessage("Caliration loaded from: " + path)
+                self.statusBar().showMessage(
+                    "Calibration loaded from: " + path
+                )
 
     def changeTime(self) -> None:
         """Update the total acquisition time based on the current
@@ -1123,7 +1235,7 @@ class Window(QtWidgets.QMainWindow):
             self.structure3Label.show()
             self.structure1.setText("Columns")
             self.structure2.setText("Rows")
-            self.structure3.setText("Spacing X,Y")
+            self.structure3.setText("Spacing X, Y")
             self.structure1Edit.setValue(3)
             self.structure2Edit.setValue(4)
             self.structure3Edit.setText("20,20")
@@ -1136,7 +1248,7 @@ class Window(QtWidgets.QMainWindow):
             self.structure3Edit.show()
             self.structure3Label.show()
             self.structure1.hide()
-            self.structure2.setText("Number of Labels")
+            self.structure2.setText("Number of labels")
             self.structure3.setText("Diameter")
             self.structure1Edit.hide()
             self.structure2Edit.setValue(12)
@@ -1524,6 +1636,18 @@ class Window(QtWidgets.QMainWindow):
         self.currentround = 0
 
     def simulate(self) -> None:
+        """Run the simulation with the current parameters, showing its
+        progress while it runs."""
+        self.mainpbar.setValue(0)
+        self.mainpbar.show()
+        self._bottom.setStretch(2, 0)
+        try:
+            self._simulate()
+        finally:
+            self.mainpbar.hide()
+            self._bottom.setStretch(2, 1)
+
+    def _simulate(self) -> None:
         """Run the simulation with the current parameters."""
         exchangeroundstoSim = np.asarray(
             (self.exchangeroundsEdit.text()).split(",")
@@ -1930,21 +2054,9 @@ class Window(QtWidgets.QMainWindow):
     def plotStructure(self) -> None:
         """Plot the structure and display it."""
         structurexx, structureyy, structureex, _ = self.readStructure()
-        noexchangecolors = len(set(structureex))
         exchangecolors = list(set(structureex))
-        self.ax2.clear()
-        self.ax2.axis("equal")
-
-        for i in range(0, noexchangecolors):
-            plotxx = []
-            plotyy = []
-            for j in range(0, len(structureex)):
-                if structureex[j] == exchangecolors[i]:
-                    plotxx.append(structurexx[j])
-                    plotyy.append(structureyy[j])
-            self.ax2.plot(plotxx, plotyy, "o")
-
-        self.canvas2.draw()
+        self._structure_preview = (structurexx, structureyy, structureex)
+        self._draw_previews()
 
         exchangecolorsList = ",".join(map(str, exchangecolors))
         # UPDATE THE EXCHANGE COLORS IN BUTTON TO BE simulated
@@ -2018,99 +2130,83 @@ class Window(QtWidgets.QMainWindow):
             in_frame = np.logical_and(in_x, in_y)
             self.newstruct = self.newstruct[:, in_frame]
 
-        self.ax1.clear()
-        self.ax1.axis("equal")
-        self.ax1.plot(self.newstruct[0, :], self.newstruct[1, :], "+")
-        # PLOT FRAME
-        self.ax1.add_patch(
-            patches.Rectangle(
-                (frame, frame),
-                imageSize - 2 * frame,
-                imageSize - 2 * frame,
-                linestyle="dashed",
-                edgecolor="#000000",
-                fill=False,  # remove background
-            )
-        )
-
-        self.canvas1.draw()
-
-        # PLOT first structure
-        struct1 = self.newstruct[:, self.newstruct[3, :] == 0]
-
-        noexchangecolors = len(set(struct1[2, :]))
-        exchangecolors = list(set(struct1[2, :]))
-        self.noexchangecolors = exchangecolors
-
-        self.ax2.clear()
-        # self.ax2.hold(True)
-        self.ax2.axis("equal")
-        structurexx = struct1[0, :]
-        structureyy = struct1[1, :]
-        structureex = struct1[2, :]
-        structurexx_nm = np.multiply(structurexx - min(structurexx), pixelsize)
-        structureyy_nm = np.multiply(structureyy - min(structureyy), pixelsize)
-
-        for i in range(0, noexchangecolors):
-            plotxx = []
-            plotyy = []
-            for j in range(0, len(structureex)):
-                if structureex[j] == exchangecolors[i]:
-                    plotxx.append(structurexx_nm[j])
-                    plotyy.append(structureyy_nm[j])
-            self.ax2.plot(plotxx, plotyy, "o")
-
-        self.canvas2.draw()
+        self._preview_positions(pixelsize, frame, imageSize)
 
     def plotPositions(self) -> None:
         """Plot the generated positions."""
-        structurexx, structureyy, structureex, _ = self.readStructure()
         pixelsize = self.pixelsizeEdit.value()
         imageSize = self.camerasizeEdit.value()
         frame = self.structureframeEdit.value()
 
-        # self.figure1.suptitle('Positions [Px]')
-        self.ax1.clear()
-        self.ax1.axis("equal")
-        self.ax1.plot(self.newstruct[0, :], self.newstruct[1, :], "+")
-        # PLOT FRAME
-        self.ax1.add_patch(
-            patches.Rectangle(
-                (frame, frame),
-                imageSize - 2 * frame,
-                imageSize - 2 * frame,
-                linestyle="dashed",
-                edgecolor="#000000",
-                fill=False,  # remove background
-            )
+        self._preview_positions(pixelsize, frame, imageSize)
+
+    def _preview_positions(
+        self, pixelsize: float, frame: int, image_size: int
+    ) -> None:
+        """Preview the generated positions (``newstruct``, in camera
+        pixels) inside the frame, and the first structure (in nm)."""
+        self._positions_preview = (
+            self.newstruct[0, :],
+            self.newstruct[1, :],
+            frame,
+            image_size,
         )
-
-        self.canvas1.draw()
-
-        # PLOT first structure
         struct1 = self.newstruct[:, self.newstruct[3, :] == 0]
-
-        noexchangecolors = len(set(struct1[2, :]))
-        exchangecolors = list(set(struct1[2, :]))
-        self.noexchangecolors = exchangecolors
-        self.ax2.clear()
-
+        self.noexchangecolors = list(set(struct1[2, :]))
         structurexx = struct1[0, :]
         structureyy = struct1[1, :]
-        structureex = struct1[2, :]
-        structurexx_nm = np.multiply(structurexx - min(structurexx), pixelsize)
-        structureyy_nm = np.multiply(structureyy - min(structureyy), pixelsize)
+        self._structure_preview = (
+            np.multiply(structurexx - min(structurexx), pixelsize),
+            np.multiply(structureyy - min(structureyy), pixelsize),
+            struct1[2, :],
+        )
+        self._draw_previews()
 
-        for i in range(0, noexchangecolors):
-            plotxx = []
-            plotyy = []
-            for j in range(0, len(structureex)):
-                if structureex[j] == exchangecolors[i]:
-                    plotxx.append(structurexx_nm[j])
-                    plotyy.append(structureyy_nm[j])
-            self.ax2.plot(plotxx, plotyy, "o")
-
+    def _draw_previews(self) -> None:
+        """Draw the positions and the structure previews from the data
+        drawn last, in the current plot style."""
+        style = self.plot_style
+        for figure in (self.figure1, self.figure2):
+            style.style_figure(figure)
+        with style.context():
+            if self._positions_preview is not None:
+                xx, yy, frame, image_size = self._positions_preview
+                self.ax1.clear()
+                self.ax1.axis("equal")
+                self.ax1.set_xlabel("x (px)")
+                self.ax1.set_ylabel("y (px)")
+                self.ax1.plot(xx, yy, "+")
+                # the frame structures are kept out of
+                self.ax1.add_patch(
+                    patches.Rectangle(
+                        (frame, frame),
+                        image_size - 2 * frame,
+                        image_size - 2 * frame,
+                        linestyle="dashed",
+                        edgecolor=style.theme_colors["text_muted"],
+                        fill=False,
+                    )
+                )
+            if self._structure_preview is not None:
+                xx, yy, exchange = self._structure_preview
+                xx, yy = np.asarray(xx), np.asarray(yy)
+                exchange = np.asarray(exchange)
+                self.ax2.clear()
+                self.ax2.axis("equal")
+                self.ax2.set_xlabel("x (nm)")
+                self.ax2.set_ylabel("y (nm)")
+                # one color per exchange round
+                for color in list(set(exchange)):
+                    in_round = exchange == color
+                    self.ax2.plot(xx[in_round], yy[in_round], "o")
+        for figure in (self.figure1, self.figure2):
+            style.apply(figure)
+        self.canvas1.draw()
         self.canvas2.draw()
+
+    def _on_plot_style_changed(self, style: plot_style.PlotStyle) -> None:
+        self.plot_style = style
+        self._draw_previews()
 
     def openDialog(self) -> None:
         """Open a dialog to select a design file."""
@@ -2160,32 +2256,33 @@ class Window(QtWidgets.QMainWindow):
         self.EquationCEdit.setValue(fitParamsStd[2])
 
         # Noise model working point
-
-        figure4 = plt.figure(constrained_layout=True)
-
-        # Background
         bgmodel = fitFuncBg(x_3d, fitParamsBg[0], fitParamsBg[1])
-        ax1 = figure4.add_subplot(121)
-        ax1.cla()
-        ax1.plot(bg, bgmodel, "o")
-        x = np.linspace(*ax1.get_xlim())
-        ax1.plot(x, x)
-        title = "Background Model:"
-        ax1.set_title(title)
-
-        # Std
         bgmodelstd = fitFuncStd(
             x_3dStd, fitParamsStd[0], fitParamsStd[1], fitParamsStd[2]
         )
-        ax2 = figure4.add_subplot(122)
-        ax2.cla()
-        ax2.plot(bgstd, bgmodelstd, "o")
-        x = np.linspace(*ax2.get_xlim())
-        ax2.plot(x, x)
-        title = "Background Model Std:"
-        ax2.set_title(title)
+        window = lib.GenericPlotWindow("Noise model", "simulate")
 
-        figure4.show()
+        def draw() -> None:
+            window.figure.clear()
+            with window.plot_context():
+                for i, (data, model, title) in enumerate(
+                    (
+                        (bg, bgmodel, "Background Model:"),
+                        (bgstd, bgmodelstd, "Background Model Std:"),
+                    )
+                ):
+                    axes = window.figure.add_subplot(1, 2, i + 1)
+                    axes.plot(data, model, "o")
+                    x = np.linspace(*axes.get_xlim())
+                    axes.plot(x, x)
+                    axes.set_title(title)
+            window.canvas.draw_idle()
+
+        window.redraw = draw
+        draw()
+        # kept so that the window is not garbage collected
+        self._noise_model_window = window
+        window.show()
 
     def sigmafilter(
         self, data: lib.FloatArray1D, sigmas: float
@@ -2238,58 +2335,49 @@ class Window(QtWidgets.QMainWindow):
                     sigmay = self.sigmafilter(sigmay, nosigmas)
                     bg = self.sigmafilter(bg, nosigmas)
 
-                    figure3 = plt.figure(constrained_layout=True)
-
-                    # Photons
-                    photonsmu, photonsstd = norm.fit(photons)
-                    ax1 = figure3.add_subplot(131)
-                    ax1.cla()
-                    ax1.hist(photons, bins=25, normed=True, alpha=0.6)
-                    xmin, xmax = plt.xlim()
-                    x = np.linspace(xmin, xmax, 100)
-                    p = norm.pdf(x, photonsmu, photonsstd)
-                    ax1.plot(x, p)
-                    title = "Photons:\n mu = %.2f\n  std = %.2f" % (
-                        photonsmu,
-                        photonsstd,
-                    )
-                    ax1.set_title(title)
-
-                    # Sigma X & Sigma Y
+                    # Photons, PSF (sigma x and y) and background
                     sigma = np.concatenate((sigmax, sigmay), axis=0)
+                    photonsmu, photonsstd = norm.fit(photons)
                     sigmamu, sigmastd = norm.fit(sigma)
-                    ax2 = figure3.add_subplot(132)
-                    ax2.cla()
-                    # ax2.hold(True)
-                    ax2.hist(sigma, bins=25, normed=True, alpha=0.6)
-                    xmin, xmax = plt.xlim()
-                    x = np.linspace(xmin, xmax, 100)
-                    p = norm.pdf(x, sigmamu, sigmastd)
-                    ax2.plot(x, p)
-                    title = "PSF:\n mu = %.2f\n  std = %.2f" % (
-                        sigmamu,
-                        sigmastd,
-                    )
-                    ax2.set_title(title)
-
-                    # Background
                     bgmu, bgstd = norm.fit(bg)
-                    ax3 = figure3.add_subplot(133)
-                    ax3.cla()
-                    # ax3.hold(True)
-                    # Plot the histogram.
-                    ax3.hist(bg, bins=25, normed=True, alpha=0.6)
-                    xmin, xmax = plt.xlim()
-                    x = np.linspace(xmin, xmax, 100)
-                    p = norm.pdf(x, bgmu, bgstd)
-                    ax3.plot(x, p)
-                    title = "Background:\n mu = %.2f\n  std = %.2f" % (
-                        bgmu,
-                        bgstd,
+                    fits = (
+                        ("Photons", photons, photonsmu, photonsstd),
+                        ("PSF", sigma, sigmamu, sigmastd),
+                        ("Background", bg, bgmu, bgstd),
                     )
-                    ax3.set_title(title)
-                    figure3.tight_layout()
-                    figure3.show()
+                    window = lib.GenericPlotWindow(
+                        "Experiment statistics", "simulate"
+                    )
+
+                    def draw() -> None:
+                        window.figure.clear()
+                        style = window.plot_style
+                        with window.plot_context():
+                            for i, (name, data, mu, std) in enumerate(fits):
+                                axes = window.figure.add_subplot(1, 3, i + 1)
+                                axes.hist(
+                                    data,
+                                    bins=25,
+                                    density=True,
+                                    **style.hist_kwargs(),
+                                )
+                                x = np.linspace(*axes.get_xlim(), 100)
+                                axes.plot(
+                                    x,
+                                    norm.pdf(x, mu, std),
+                                    color=style.series_colors[1],
+                                )
+                                axes.set_title(
+                                    f"{name}:\n mu = {mu:.2f}\n"
+                                    f"  std = {std:.2f}"
+                                )
+                        window.canvas.draw_idle()
+
+                    window.redraw = draw
+                    draw()
+                    # kept so that the window is not garbage collected
+                    self._experiment_window = window
+                    window.show()
 
                     # Calculate Rates
                     # Photonrate, Photonrate Std, PSF
@@ -2336,6 +2424,122 @@ class Window(QtWidgets.QMainWindow):
 
                     self.imagerconcentrationEdit.setValue(imagerconcentration)
                     self.laserpowerEdit.setValue(laserpower)
+
+
+class StructureEditDialog(lib.Dialog):
+    """Edit the docking strands of a structure in a table: x, y and z
+    positions (nm) and the exchange round of each.
+
+    Parameters
+    ----------
+    xx, yy, zz : list of float
+        Positions of the docking strands (nm).
+    exchange : list of int
+        Exchange round of each docking strand.
+    parent : QWidget or None, optional
+        Parent widget. Default None.
+    """
+
+    COLUMNS = ("x (nm)", "y (nm)", "z (nm)", "Exchange round")
+
+    def __init__(
+        self,
+        xx: list[float],
+        yy: list[float],
+        zz: list[float],
+        exchange: list[int],
+        parent: QtWidgets.QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Edit structure")
+        layout = QtWidgets.QVBoxLayout(self)
+        self.table = QtWidgets.QTableWidget(0, len(self.COLUMNS))
+        self.table.setHorizontalHeaderLabels(self.COLUMNS)
+        self.table.horizontalHeader().setSectionResizeMode(
+            QtWidgets.QHeaderView.ResizeMode.Stretch
+        )
+        for row in zip(xx, yy, zz, exchange):
+            self._add_row(row)
+        layout.addWidget(self.table)
+
+        row_buttons = QtWidgets.QHBoxLayout()
+        add_button = QtWidgets.QPushButton("Add docking strand")
+        add_button.clicked.connect(lambda: self._add_row((0, 0, 0, 1)))
+        remove_button = QtWidgets.QPushButton("Remove selected")
+        remove_button.clicked.connect(self._remove_selected)
+        row_buttons.addWidget(add_button)
+        row_buttons.addWidget(remove_button)
+        row_buttons.addStretch(1)
+        layout.addLayout(row_buttons)
+
+        buttons = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.StandardButton.Ok
+            | QtWidgets.QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+        self.resize(480, 420)
+
+    def _add_row(self, values) -> None:
+        row = self.table.rowCount()
+        self.table.insertRow(row)
+        for column, value in enumerate(values):
+            self.table.setItem(
+                row, column, QtWidgets.QTableWidgetItem(f"{value:g}")
+            )
+
+    def _remove_selected(self) -> None:
+        rows = sorted(
+            {index.row() for index in self.table.selectedIndexes()},
+            reverse=True,
+        )
+        for row in rows:
+            self.table.removeRow(row)
+
+    def values(self) -> tuple[list[float], list[float], list[float], list]:
+        """The positions (nm) and exchange rounds in the table.
+
+        Raises
+        ------
+        ValueError
+            If a cell is empty or not a number, or an exchange round is
+            not a positive integer.
+        """
+        columns = ([], [], [], [])
+        for row in range(self.table.rowCount()):
+            for column in range(len(self.COLUMNS)):
+                item = self.table.item(row, column)
+                text = item.text().strip() if item is not None else ""
+                try:
+                    value = float(text)
+                except ValueError:
+                    raise ValueError(
+                        f"Row {row + 1}, {self.COLUMNS[column]}: "
+                        f"{text!r} is not a number."
+                    ) from None
+                if column == 3:
+                    if value != int(value) or value < 1:
+                        raise ValueError(
+                            f"Row {row + 1}: the exchange round must be a "
+                            "positive integer."
+                        )
+                    value = int(value)
+                columns[column].append(value)
+        return columns
+
+    def accept(self) -> None:
+        try:
+            values = self.values()
+        except ValueError as error:
+            QtWidgets.QMessageBox.warning(self, "Edit structure", str(error))
+            return
+        if not values[0]:
+            QtWidgets.QMessageBox.warning(
+                self, "Edit structure", "Add at least one docking strand."
+            )
+            return
+        super().accept()
 
 
 class CalibrationDialog(lib.Dialog):

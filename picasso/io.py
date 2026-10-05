@@ -119,6 +119,24 @@ def plugins_directory() -> str:
     return directory
 
 
+def user_icons_directory() -> str:
+    """Return the folder of the user's own icons
+    (``~/.picasso/icons``), e.g., for the toolbar buttons.
+
+    The directory is created if it does not yet exist, next to
+    ``~/.picasso/settings.yaml`` like ``plugins_directory``.
+
+    Returns
+    -------
+    directory : str
+        ``~/.picasso/icons``.
+    """
+    home = os.path.expanduser("~")
+    directory = os.path.join(home, ".picasso", "icons")
+    os.makedirs(directory, exist_ok=True)
+    return directory
+
+
 def notification_sounds_directory() -> str:
     """Return the user notification sounds directory
     (``~/.picasso/notification_sounds``).
@@ -309,7 +327,7 @@ def load_ims_all(path: str) -> tuple[list[np.memmap], list[list[dict]]]:
 def save_config(CONFIG: dict) -> None:
     """Save the camera configuration dictionary to the user config file
     (``~/.picasso/config.yaml``). See https://picassosr.readthedocs.io/
-    en/latest/localize.html#camera-config.
+    en/latest/localize/camera.html#localize-camera-config.
 
     Parameters
     ----------
@@ -1887,11 +1905,10 @@ class AbstractPicassoMovie(abc.ABC):
 
     @abc.abstractmethod
     def camera_parameters(self, config: dict) -> dict:
-        """Get the camera specific parameters:
-            * gain
-            * quantum efficiency
-            * wavelength
-        These parameters depend on camera settings (as described in metadata)
+        """Get the camera specific parameters.
+
+        These are the gain, the quantum efficiency and the wavelength. They
+        depend on camera settings (as described in metadata)
         but the values themselves are given in the config.yaml file.
         Each filetype (nd2, ome-tiff, ..) has their own structure of metadata,
         which needs to be matched in the config.yaml description, as detailed
@@ -2351,17 +2368,17 @@ class ND2Movie(AbstractPicassoMovie):
         raise NotImplementedError("Cannot write .nd2 file.")
 
     def camera_parameters(self, config):  # noqa: C901
-        """Get the camera specific parameters:
-            * gain
-            * quantum efficiency
-            * wavelength
-        These parameters depend on camera settings (as described in metadata)
+        """Get the camera specific parameters.
+
+        These are the gain, the quantum efficiency and the wavelength. They
+        depend on camera settings (as described in metadata)
         but the values themselves are given in the config.yaml file.
         Each filetype (nd2, ome-tiff, ..) has their own structure of metadata,
         which needs to be matched in the config.yaml description, as detailed
         in the specific child classes.
 
-        The config file for the corresponding camera should look like this:
+        The config file for the corresponding camera should look like this::
+
           Zyla 4.2:
             Pixelsize: 130
             Baseline: 100
@@ -3910,11 +3927,10 @@ class TiffMultiMap(AbstractPicassoMovie):
         return info
 
     def camera_parameters(self, config: dict) -> dict:  # noqa: C901
-        """Get the camera specific parameters:
-            * gain
-            * quantum efficiency
-            * wavelength
-        These parameters depend on camera settings (as described in metadata)
+        """Get the camera specific parameters.
+
+        These are the gain, the quantum efficiency and the wavelength. They
+        depend on camera settings (as described in metadata)
         but the values themselves are given in the config.yaml file.
         Each filetype (nd2, ome-tiff, ..) has their own structure of metadata,
         which needs to be matched in the config.yaml description, as detailed

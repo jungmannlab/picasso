@@ -14,16 +14,18 @@ PyQt6 is only imported on first use.
 
 from __future__ import annotations
 
+import contextlib
 import math
 import os
+import sys
 import time
 import traceback
 from collections.abc import Callable
-from typing import TypeAlias
+from typing import Any, TypeAlias
 
 import yaml
 import matplotlib.pyplot as plt
-from PyQt6 import QtCore, QtWidgets, QtGui
+from PyQt6 import QtCore, QtWidgets, QtGui, sip
 from playsound3 import playsound
 
 from picasso import diagnostics, docs_url, io
@@ -32,6 +34,7 @@ from picasso.lib import (
     SOUND_NOTIFICATION_DURATION,
     REQUIRED_COLUMNS,
     MockProgress,
+    OperationCanceled,
     TqdmProgress,
     get_sound_notification_path,
     is_path_available,
@@ -96,16 +99,71 @@ class UserSettingsDialog(Dialog):
         header.addWidget(help_button, 0, QtCore.Qt.AlignmentFlag.AlignTop)
         layout.addLayout(header)
 
+        # text search: all matches are highlighted, Enter / Shift+Enter
+        # (or the arrows) step through them, Ctrl+F focuses the field
+        search_layout = QtWidgets.QHBoxLayout()
+        self.search_edit = QtWidgets.QLineEdit()
+        self.search_edit.setPlaceholderText("Search settings (Ctrl+F)")
+        self.search_edit.setClearButtonEnabled(True)
+        self.search_edit.textChanged.connect(self._on_search_text_changed)
+        self.search_edit.returnPressed.connect(self.find_next)
+        QtGui.QShortcut(
+            QtGui.QKeySequence("Shift+Return"),
+            self.search_edit,
+            self.find_previous,
+            context=QtCore.Qt.ShortcutContext.WidgetShortcut,
+        )
+        QtGui.QShortcut(
+            QtGui.QKeySequence.StandardKey.Find, self, self._focus_search
+        )
+        search_layout.addWidget(self.search_edit, 1)
+        self.match_label = QtWidgets.QLabel()
+        search_layout.addWidget(self.match_label)
+        previous_button = QtWidgets.QToolButton()
+        previous_button.setArrowType(QtCore.Qt.ArrowType.UpArrow)
+        previous_button.setToolTip("Previous match (Shift+Enter)")
+        previous_button.clicked.connect(self.find_previous)
+        search_layout.addWidget(previous_button)
+        next_button = QtWidgets.QToolButton()
+        next_button.setArrowType(QtCore.Qt.ArrowType.DownArrow)
+        next_button.setToolTip("Next match (Enter)")
+        next_button.clicked.connect(self.find_next)
+        search_layout.addWidget(next_button)
+        layout.addLayout(search_layout)
+        #: (start, end) character positions of the search matches
+        self._matches: list[tuple[int, int]] = []
+        #: index of the current match in ``_matches``, -1 if none
+        self._current_match = -1
+
         self.editor = QtWidgets.QPlainTextEdit()
-        self.editor.setFont(QtGui.QFont("Helvetica", 12))
+        # fixed width for the YAML indentation, in the size of the
+        # application's font
+        font = QtGui.QFontDatabase.systemFont(
+            QtGui.QFontDatabase.SystemFont.FixedFont
+        )
+        if self.font().pointSizeF() > 0:
+            font.setPointSizeF(self.font().pointSizeF())
+        self.editor.setFont(font)
+        # edits shift the positions of the matches
+        self.editor.textChanged.connect(self._update_matches)
+        # clicking elsewhere ends the current match
+        self.editor.cursorPositionChanged.connect(self._sync_current_match)
         layout.addWidget(self.editor)
 
         button_layout = QtWidgets.QHBoxLayout()
+        # imported here: picasso.gui.theme imports picasso.lib
+        from picasso.gui import theme
+
         reload_button = QtWidgets.QPushButton("Reload")
-        reload_button.clicked.connect(self.load_settings)
+        reload_button.setIcon(theme.icon("reload"))
+        reload_button.setToolTip(
+            "Read the settings file again, discarding unsaved edits."
+        )
+        reload_button.clicked.connect(self._reload)
         button_layout.addWidget(reload_button)
         button_layout.addStretch()
         save_button = QtWidgets.QPushButton("Save")
+        save_button.setIcon(theme.icon("save"))
         save_button.clicked.connect(self.save_settings)
         button_layout.addWidget(save_button)
         layout.addLayout(button_layout)
@@ -131,6 +189,170 @@ class UserSettingsDialog(Dialog):
             self.editor.setPlainText(
                 "# No settings file found. Edit and save to create one."
             )
+        self.editor.document().setModified(False)
+
+    def _reload(self) -> None:
+        """Reload the settings file, asking first if there are unsaved
+        edits."""
+        if self.editor.document().isModified():
+            reply = QtWidgets.QMessageBox.question(
+                self,
+                "Reload settings",
+                "Reloading the settings file discards your unsaved edits.\n"
+                "Do you want to continue?",
+                QtWidgets.QMessageBox.StandardButton.Discard
+                | QtWidgets.QMessageBox.StandardButton.Cancel,
+                QtWidgets.QMessageBox.StandardButton.Cancel,
+            )
+            if reply != QtWidgets.QMessageBox.StandardButton.Discard:
+                return
+        self.load_settings()
+
+    def _focus_search(self) -> None:
+        """Move the focus to the search field, its text selected."""
+        self.search_edit.setFocus()
+        self.search_edit.selectAll()
+
+    def _on_search_text_changed(self) -> None:
+        """Find the new search text and jump to its first match at or
+        after the cursor of the editor."""
+        self._update_matches()
+        if not self._matches:
+            return
+        position = self.editor.textCursor().selectionStart()
+        index = next(
+            (
+                i
+                for i, (start, _) in enumerate(self._matches)
+                if start >= position
+            ),
+            0,
+        )
+        self._go_to_match(index)
+
+    def _update_matches(self) -> None:
+        """Find all (case-insensitive) occurrences of the search text
+        in the editor and highlight them; the current match is the one
+        under the editor's selection, if any."""
+        text = self.search_edit.text()
+        self._matches = []
+        if text:
+            document = self.editor.document()
+            cursor = document.find(text, 0)
+            while not cursor.isNull():
+                self._matches.append(
+                    (cursor.selectionStart(), cursor.selectionEnd())
+                )
+                cursor = document.find(text, cursor)
+        self._current_match = self._match_under_selection()
+        self._highlight_matches()
+
+    def _match_under_selection(self) -> int:
+        """Index of the match selected in the editor, -1 if none."""
+        selection = self.editor.textCursor()
+        span = (selection.selectionStart(), selection.selectionEnd())
+        return next(
+            (i for i, match in enumerate(self._matches) if match == span),
+            -1,
+        )
+
+    def _sync_current_match(self) -> None:
+        """Follow the editor's cursor: the current match is the one
+        selected, if any."""
+        index = self._match_under_selection()
+        if index != self._current_match:
+            self._current_match = index
+            self._highlight_matches()
+
+    def _highlight_matches(self) -> None:
+        """Mark all matches in the editor, the current one stronger,
+        and show the match count."""
+        palette = self.editor.palette()
+        match_color = QtGui.QColor(
+            palette.color(QtGui.QPalette.ColorRole.Highlight)
+        )
+        match_color.setAlpha(70)
+        selections = []
+        for i, (start, end) in enumerate(self._matches):
+            selection = QtWidgets.QTextEdit.ExtraSelection()
+            selection.cursor = self.editor.textCursor()
+            selection.cursor.setPosition(start)
+            selection.cursor.setPosition(
+                end, QtGui.QTextCursor.MoveMode.KeepAnchor
+            )
+            if i == self._current_match:
+                selection.format.setBackground(
+                    palette.color(QtGui.QPalette.ColorRole.Highlight)
+                )
+                selection.format.setForeground(
+                    palette.color(QtGui.QPalette.ColorRole.HighlightedText)
+                )
+            else:
+                selection.format.setBackground(match_color)
+            selections.append(selection)
+        self.editor.setExtraSelections(selections)
+
+        if not self.search_edit.text():
+            self.match_label.setText("")
+        elif not self._matches:
+            self.match_label.setText("No matches")
+        elif self._current_match < 0:
+            n = len(self._matches)
+            self.match_label.setText(f"{n} match{'es' if n > 1 else ''}")
+        else:
+            self.match_label.setText(
+                f"{self._current_match + 1} of {len(self._matches)}"
+            )
+
+    def _go_to_match(self, index: int) -> None:
+        """Select the match ``index`` in the editor and scroll to it."""
+        self._current_match = index
+        start, end = self._matches[index]
+        cursor = self.editor.textCursor()
+        cursor.setPosition(start)
+        cursor.setPosition(end, QtGui.QTextCursor.MoveMode.KeepAnchor)
+        self.editor.setTextCursor(cursor)
+        self.editor.centerCursor()
+        self._highlight_matches()
+
+    def find_next(self) -> None:
+        """Go to the next match of the search text, wrapping around."""
+        self._step_match(1)
+
+    def find_previous(self) -> None:
+        """Go to the previous match of the search text, wrapping
+        around."""
+        self._step_match(-1)
+
+    def _step_match(self, step: int) -> None:
+        """Go ``step`` (1 or -1) matches from the current one, or from
+        the editor's cursor if no match is current."""
+        if not self._matches:
+            return
+        n = len(self._matches)
+        if self._current_match >= 0:
+            index = (self._current_match + step) % n
+        else:
+            position = self.editor.textCursor().position()
+            if step > 0:
+                index = next(
+                    (
+                        i
+                        for i, (start, _) in enumerate(self._matches)
+                        if start >= position
+                    ),
+                    0,
+                )
+            else:
+                index = next(
+                    (
+                        i
+                        for i in reversed(range(n))
+                        if self._matches[i][1] <= position
+                    ),
+                    n - 1,
+                )
+        self._go_to_match(index)
 
     def save_settings(self) -> None:
         """Validate YAML and write back to the settings file."""
@@ -154,6 +376,7 @@ class UserSettingsDialog(Dialog):
             )
             return
         io.save_user_settings(parsed)
+        self.editor.document().setModified(False)
         QtWidgets.QMessageBox.information(
             self, "Saved", "User settings saved successfully."
         )
@@ -322,6 +545,14 @@ class MetadataDialog(Dialog):
 class ProgressDialog(QtWidgets.QProgressDialog):
     """ProgressDialog displays a progress dialog with a progress bar."""
 
+    # pump the event loop on every update, such that the dialog repaints
+    # while the computation blocks the GUI thread; not needed (and
+    # re-entrant) when the computation runs on a worker thread
+    _process_events = True
+    # play the finish sound when the bar reaches its maximum; a task with
+    # several phases plays it once the whole task is done instead
+    _sound_on_maximum = True
+
     def __init__(self, description, minimum, maximum, parent):
         # append time estimate to description
         super().__init__(
@@ -385,7 +616,11 @@ class ProgressDialog(QtWidgets.QProgressDialog):
             )
             self.setLabelText(description)
         # sound notification
-        if value >= self.maximum() and self.finished is False:
+        if (
+            self._sound_on_maximum
+            and value >= self.maximum()
+            and self.finished is False
+        ):
             self.finished = True
             self.play_sound_notification()
         # if value is above zero, count has started, enabling time estimate
@@ -393,7 +628,8 @@ class ProgressDialog(QtWidgets.QProgressDialog):
             if value > 0:
                 self.count_started = True
                 self.t0_est = time.time()
-        self.app.processEvents()
+        if self._process_events:
+            self.app.processEvents()
 
     def close(self):
         """Close the dialog for good, cancelling a pending delayed show.
@@ -480,7 +716,12 @@ class ProgressDialog(QtWidgets.QProgressDialog):
 
 
 class StatusDialog(Dialog):
-    """StatusDialog displays the description string in a dialog."""
+    """StatusDialog displays the description string and a busy indicator
+    in a dialog.
+
+    The busy indicator only moves while the event loop runs, so run the
+    work with :func:`run_with_status`, which keeps it on a worker thread.
+    """
 
     def __init__(self, description, parent):
         super(StatusDialog, self).__init__(
@@ -490,7 +731,13 @@ class StatusDialog(Dialog):
         _dialogs.append(self)
         vbox = QtWidgets.QVBoxLayout(self)
         label = QtWidgets.QLabel(description)
+        label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
         vbox.addWidget(label)
+        bar = QtWidgets.QProgressBar()
+        bar.setRange(0, 0)  # busy indicator
+        bar.setTextVisible(False)
+        bar.setMinimumWidth(250)
+        vbox.addWidget(bar)
         self.sound_notification_path = get_sound_notification_path()
         self.t0 = time.time()
         self.show()
@@ -527,6 +774,716 @@ class StatusDialog(Dialog):
                         f" {self.sound_notification_path}:\n"
                         f"{traceback.format_exc()}"
                     )
+
+
+class TaskProgressDialog(ProgressDialog):
+    """Progress dialog of a task running on a worker thread, see
+    :func:`run_task`.
+
+    Unlike :class:`ProgressDialog`, it has a Cancel button and is driven
+    by the worker's progress signals instead of pumping the event loop.
+    Cancel (also Escape or closing the dialog) does not hide it: it
+    emits ``cancel_requested`` and shows "Canceling..." until the worker
+    has reached its next cancellation point and stopped. The task closes
+    the dialog with :meth:`finish`.
+
+    A maximum of 0 shows a busy indicator, for steps that report no
+    progress.
+    """
+
+    _process_events = False
+    _sound_on_maximum = False
+
+    cancel_requested = QtCore.pyqtSignal()
+
+    def __init__(self, description, maximum, parent, title=None):
+        super().__init__(description, 0, maximum, parent)
+        self.setCancelButtonText("Cancel")
+        # QProgressDialog hides itself on cancel and, with auto-reset and
+        # auto-close, at the maximum; only the task may close this one
+        self.canceled.disconnect(self.cancel)
+        self.canceled.connect(self.request_cancel)
+        self.setAutoReset(False)
+        self.setAutoClose(False)
+        if title:
+            self.setWindowTitle(title)
+        self.cancel_was_requested = False
+        self._closing = False
+        self.set_value(0)  # arm: modal, delayed show, clock
+
+    def set_value(self, value):
+        """Advance the bar; see :meth:`ProgressDialog.set_value`.
+
+        Parameters
+        ----------
+        value : int
+            Cumulative progress so far, ignored by the busy indicator.
+        """
+        if self.maximum() == 0:  # busy indicator, no time estimate
+            if not self.initalized:
+                self.init()
+            self.setValue(0)
+            return
+        super().set_value(value)
+
+    def request_cancel(self):
+        """Show that the task is being canceled and emit
+        ``cancel_requested``, once."""
+        if self.cancel_was_requested:
+            return
+        self.cancel_was_requested = True
+        self.finished = True  # no finish sound for a canceled task
+        self.setRange(0, 0)  # busy until the worker has stopped
+        self.setLabelText(
+            "Canceling...\nWaiting for the current step to finish."
+        )
+        button = self.findChild(QtWidgets.QPushButton)
+        if button is not None:
+            button.setEnabled(False)
+        self.cancel_requested.emit()
+
+    def reject(self):
+        """Escape cancels the task instead of hiding the dialog."""
+        self.canceled.emit()
+
+    def closeEvent(self, event):
+        """Cancel the task instead of closing, unless the task closes the
+        dialog via :meth:`finish`.
+
+        Parameters
+        ----------
+        event : QtGui.QCloseEvent
+            The Qt close event.
+        """
+        if self._closing:
+            super().closeEvent(event)
+        else:
+            event.ignore()
+            self.canceled.emit()
+
+    def finish(self, completed: bool) -> None:
+        """Close the dialog for good.
+
+        Parameters
+        ----------
+        completed : bool
+            Whether the task ran to completion, which plays the finish
+            sound if the task took long enough.
+        """
+        try:
+            self.canceled.disconnect()
+        except TypeError:  # finished twice
+            pass
+        if completed and not self.finished:
+            self.play_sound_notification()
+        self.finished = True
+        self._closing = True
+        self.close()
+
+
+class TaskProgress(QtCore.QObject):
+    """Progress tracker handed to the function run by :func:`run_task`.
+
+    Implements the ``ProgressDialog`` interface (see
+    ``lib.normalize_progress``), so analysis functions that take a
+    progress dialog, or a progress callback such as ``progress.set_value``,
+    run unchanged on the worker thread. Updates reach the dialog on the
+    GUI thread through queued signals, at most every ``INTERVAL`` seconds.
+
+    Once the user canceled the task, the next ``set_value`` (or
+    ``zero_progress``, ``check_canceled``) raises
+    ``lib.OperationCanceled``, so every progress update is a
+    cancellation point.
+
+    Parameters
+    ----------
+    description : str
+        Label of the first phase.
+    maximum : int
+        Maximum of the first phase; 0 shows a busy indicator.
+    """
+
+    #: Minimum time between two value updates sent to the dialog, in s.
+    INTERVAL = 0.05
+
+    value_changed = QtCore.pyqtSignal(int)
+    maximum_changed = QtCore.pyqtSignal(int)
+    label_changed = QtCore.pyqtSignal(str)
+    phase_changed = QtCore.pyqtSignal(str)
+
+    def __init__(self, description: str, maximum: int) -> None:
+        super().__init__()
+        self.description_base = description
+        self._maximum = int(maximum)
+        self._value = 0
+        self._last_emit = 0.0
+        self._canceled = False  # set from the GUI thread
+
+    @property
+    def canceled(self) -> bool:
+        """Whether the user canceled the task."""
+        return self._canceled
+
+    def cancel(self) -> None:
+        """Request cancellation, which the next update raises."""
+        self._canceled = True
+
+    def check_canceled(self) -> None:
+        """Raise ``lib.OperationCanceled`` if the task was canceled.
+
+        For explicit cancellation points between steps that report no
+        progress, e.g. before saving the result.
+
+        Raises
+        ------
+        OperationCanceled
+            If the user canceled the task.
+        """
+        if self._canceled:
+            raise OperationCanceled
+
+    def set_value(self, value, *args, **kwargs) -> None:
+        """Report the cumulative progress of the current phase.
+
+        Parameters
+        ----------
+        value : int
+            Cumulative progress so far.
+        *args, **kwargs
+            Accepted and ignored, for ``ProgressDialog`` compatibility.
+
+        Raises
+        ------
+        OperationCanceled
+            If the user canceled the task.
+        """
+        self.check_canceled()
+        self._value = int(value)
+        now = time.monotonic()
+        if (
+            now - self._last_emit >= self.INTERVAL
+            or self._value >= self._maximum
+        ):
+            self._last_emit = now
+            self.value_changed.emit(self._value)
+
+    def value(self) -> int:
+        """The progress last reported."""
+        return self._value
+
+    def setMaximum(self, maximum, *args, **kwargs) -> None:
+        """Set the maximum of the current phase.
+
+        Parameters
+        ----------
+        maximum : int
+            The value progress runs up to; 0 shows a busy indicator.
+        *args, **kwargs
+            Accepted and ignored, for ``ProgressDialog`` compatibility.
+        """
+        self._maximum = int(maximum)
+        self.maximum_changed.emit(self._maximum)
+
+    def maximum(self) -> int:
+        """The maximum of the current phase."""
+        return self._maximum
+
+    def setLabelText(self, text, *args, **kwargs) -> None:
+        """Show ``text`` in the dialog, until the next time estimate.
+
+        Parameters
+        ----------
+        text : str
+            Label text.
+        *args, **kwargs
+            Accepted and ignored, for ``ProgressDialog`` compatibility.
+        """
+        self.label_changed.emit(str(text))
+
+    def zero_progress(self, description=None, *args, **kwargs) -> None:
+        """Start a new phase at zero progress.
+
+        Parameters
+        ----------
+        description : str, optional
+            Label of the new phase. None keeps the current one.
+        *args, **kwargs
+            Accepted and ignored, for ``ProgressDialog`` compatibility.
+
+        Raises
+        ------
+        OperationCanceled
+            If the user canceled the task.
+        """
+        self.check_canceled()
+        if description:
+            self.description_base = description
+        self._value = 0
+        self._last_emit = time.monotonic()
+        self.phase_changed.emit(self.description_base)
+
+    def phase(self, description: str, maximum: int) -> None:
+        """Start a new phase with its own label and maximum.
+
+        Parameters
+        ----------
+        description : str
+            Label of the new phase.
+        maximum : int
+            Maximum of the new phase; 0 shows a busy indicator.
+
+        Raises
+        ------
+        OperationCanceled
+            If the user canceled the task.
+        """
+        self.setMaximum(maximum)
+        self.zero_progress(description)
+
+    def callback(self, description: str, maximum: int) -> Callable:
+        """A progress callback that starts its own phase when first
+        called, for functions that report several steps through
+        separate callbacks.
+
+        Parameters
+        ----------
+        description : str
+            Label of the phase.
+        maximum : int
+            Maximum of the phase.
+
+        Returns
+        -------
+        callback : callable
+            Takes the cumulative progress of the phase, like
+            :meth:`set_value`.
+        """
+        started = False
+
+        def callback(value, *args, **kwargs):
+            nonlocal started
+            if not started:
+                started = True
+                self.phase(description, maximum)
+            self.set_value(value)
+
+        return callback
+
+    def get_iterator(self, start=None, end=None):
+        """Get an iterator that spans the remaining progress.
+
+        Parameters
+        ----------
+        start, end : int, optional
+            First and one-past-last value. None uses the current value
+            and maximum.
+
+        Returns
+        -------
+        iterator : range
+        """
+        start = self._value if start is None else start
+        end = self._maximum if end is None else end
+        return range(start, end)
+
+    def init(self, *args, **kwargs) -> None:
+        """Do nothing; the dialog is armed by the task."""
+
+    def update(self, *args, **kwargs) -> None:
+        """Do nothing."""
+
+    def close(self, *args, **kwargs) -> None:
+        """Do nothing; the task closes the dialog when the function
+        returns."""
+
+    def closeEvent(self, *args, **kwargs) -> None:
+        """Do nothing."""
+
+    def play_sound_notification(self, *args, **kwargs) -> None:
+        """Do nothing; the dialog plays it when the task completes."""
+
+
+class _TaskThread(QtCore.QThread):
+    """Runs a task's function and keeps its outcome for the GUI thread."""
+
+    def __init__(self, fn: Callable, progress: TaskProgress) -> None:
+        super().__init__()
+        self._fn = fn
+        self._progress = progress
+        self.outcome = None  # "finished", "canceled" or "failed"
+        self.result = None
+        self.error = None
+
+    def run(self) -> None:
+        try:
+            self.result = self._fn(self._progress)
+            self.outcome = "finished"
+        except OperationCanceled:
+            self.outcome = "canceled"
+        except BaseException as error:  # noqa: BLE001 - reported by Task
+            self.error = error
+            self.outcome = "failed"
+
+
+class _InputBlocker(QtCore.QObject):
+    """Swallow user input to all windows except modal dialogs, i.e.,
+    the task's progress dialog and any message box, while tasks run.
+
+    A computation on the GUI thread froze all input; a task keeps that
+    guarantee (the user cannot change the data the worker reads, start a
+    second task or close a window under it) while windows still repaint.
+    The filter covers the time before the progress dialog shows (which
+    is delayed, so quick tasks do not flash a dialog) and non-modal
+    windows the modal dialog does not block, e.g. linked windows.
+    """
+
+    _BLOCKED = frozenset(
+        {
+            QtCore.QEvent.Type.MouseButtonPress,
+            QtCore.QEvent.Type.MouseButtonRelease,
+            QtCore.QEvent.Type.MouseButtonDblClick,
+            QtCore.QEvent.Type.Wheel,
+            QtCore.QEvent.Type.KeyPress,
+            QtCore.QEvent.Type.KeyRelease,
+            QtCore.QEvent.Type.ShortcutOverride,
+            QtCore.QEvent.Type.Shortcut,
+            QtCore.QEvent.Type.ContextMenu,
+            QtCore.QEvent.Type.Close,
+            QtCore.QEvent.Type.DragEnter,
+            QtCore.QEvent.Type.DragMove,
+            QtCore.QEvent.Type.Drop,
+            QtCore.QEvent.Type.TouchBegin,
+            QtCore.QEvent.Type.TouchUpdate,
+            QtCore.QEvent.Type.TouchEnd,
+            QtCore.QEvent.Type.TabletPress,
+            QtCore.QEvent.Type.TabletRelease,
+            QtCore.QEvent.Type.NativeGesture,
+            QtCore.QEvent.Type.Gesture,
+        }
+    )
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._count = 0
+
+    def acquire(self) -> None:
+        if self._count == 0:
+            QtCore.QCoreApplication.instance().installEventFilter(self)
+        self._count += 1
+
+    def release(self) -> None:
+        self._count -= 1
+        if self._count == 0:
+            QtCore.QCoreApplication.instance().removeEventFilter(self)
+
+    def eventFilter(self, obj, event):
+        if event.type() not in self._BLOCKED:
+            return False
+        # window-level objects (QWindow) forward input to their widgets,
+        # which are filtered below
+        if not isinstance(obj, QtWidgets.QWidget):
+            return False
+        if obj.window().isModal():
+            return False
+        if event.type() in (
+            QtCore.QEvent.Type.Close,
+            QtCore.QEvent.Type.ShortcutOverride,
+        ):
+            # a close event must be ignored to keep the window open; an
+            # accepted override stops the key from triggering a shortcut
+            if event.type() == QtCore.QEvent.Type.Close:
+                event.ignore()
+            else:
+                event.accept()
+        return True
+
+
+_input_blocker = None
+# running tasks, referenced such that a running QThread is never
+# garbage-collected (which aborts the process)
+_running_tasks = []
+
+
+def _stop_running_tasks() -> None:
+    """Cancel all running tasks and wait for their threads, called when
+    the application quits."""
+    for task in list(_running_tasks):
+        task.cancel()
+        task.wait()
+
+
+def _acquire_input_blocker() -> None:
+    """Block user input to non-modal windows until the matching
+    ``_input_blocker.release()``, see :class:`_InputBlocker`."""
+    global _input_blocker
+    if _input_blocker is None:
+        _input_blocker = _InputBlocker()
+        app = QtCore.QCoreApplication.instance()
+        app.aboutToQuit.connect(_stop_running_tasks)
+    _input_blocker.acquire()
+
+
+class Task(QtCore.QObject):
+    """A function running on a worker thread behind a cancelable progress
+    dialog. Created and started by :func:`run_task`, which describes the
+    behavior.
+
+    Attributes
+    ----------
+    progress : TaskProgress
+        Progress tracker passed to the function.
+    dialog : TaskProgressDialog
+        The progress dialog.
+    outcome : {"finished", "canceled", "failed"} or None
+        How the task ended; None while it runs.
+    """
+
+    def __init__(
+        self,
+        fn: Callable,
+        description: str,
+        parent: QtWidgets.QWidget,
+        maximum: int,
+        on_finished: Callable | None,
+        on_failed: Callable | None,
+        on_canceled: Callable | None,
+        title: str | None,
+    ) -> None:
+        super().__init__()
+        self._on_finished = on_finished
+        self._on_failed = on_failed
+        self._on_canceled = on_canceled
+        self.outcome = None
+        self.progress = TaskProgress(description, maximum)
+        self.dialog = TaskProgressDialog(description, maximum, parent, title)
+        self.progress.value_changed.connect(self._on_value)
+        self.progress.maximum_changed.connect(self._on_maximum)
+        self.progress.label_changed.connect(self._on_label)
+        self.progress.phase_changed.connect(self._on_phase)
+        self.dialog.cancel_requested.connect(self.cancel)
+        self._thread = _TaskThread(fn, self.progress)
+        self._thread.finished.connect(self._on_thread_finished)
+
+    def start(self) -> None:
+        """Block input and start the worker thread."""
+        _acquire_input_blocker()
+        _running_tasks.append(self)
+        self._thread.start()
+
+    def cancel(self) -> None:
+        """Request cancellation. The function stops at its next progress
+        update; its result, if it still completes, is discarded."""
+        self.progress.cancel()
+
+    def is_running(self) -> bool:
+        """Whether the task has not ended yet, i.e., its callbacks have
+        not been called."""
+        return self.outcome is None
+
+    def wait(self, msecs: int | None = None) -> bool:
+        """Block until the worker thread has stopped. The callbacks run
+        later, from the event loop.
+
+        Parameters
+        ----------
+        msecs : int, optional
+            Timeout in ms. None waits indefinitely.
+
+        Returns
+        -------
+        stopped : bool
+            False if the timeout expired first.
+        """
+        if msecs is None:
+            return self._thread.wait()
+        return self._thread.wait(msecs)
+
+    def _dialog_alive(self) -> bool:
+        return not sip.isdeleted(self.dialog)
+
+    def _forward(self) -> bool:
+        """Whether progress updates should reach the dialog."""
+        return self._dialog_alive() and not self.progress.canceled
+
+    def _on_value(self, value: int) -> None:
+        if self._forward():
+            self.dialog.set_value(value)
+
+    def _on_maximum(self, maximum: int) -> None:
+        if self._forward():
+            self.dialog.setMaximum(maximum)
+
+    def _on_label(self, text: str) -> None:
+        if self._forward():
+            self.dialog.setLabelText(text)
+
+    def _on_phase(self, description: str) -> None:
+        if self._forward():
+            self.dialog.zero_progress(description)
+
+    def _on_thread_finished(self) -> None:
+        thread = self._thread
+        thread.wait()  # run() has returned; make sure the thread is done
+        outcome = thread.outcome
+        if self.progress.canceled and outcome != "canceled":
+            # the user asked to cancel: discard a late result, and only
+            # log an error, which the cancellation may have caused
+            if outcome == "failed":
+                diagnostics.log_message(
+                    "Error in a canceled task:\n"
+                    + "".join(
+                        traceback.format_exception(
+                            type(thread.error),
+                            thread.error,
+                            thread.error.__traceback__,
+                        )
+                    )
+                )
+            outcome = "canceled"
+        self.outcome = outcome
+        result, error = thread.result, thread.error
+        thread.result = thread.error = None
+
+        # tear down before calling back, so a callback can start a task
+        if self._dialog_alive():
+            self.dialog.finish(completed=outcome == "finished")
+            self.dialog.deleteLater()
+        _input_blocker.release()
+        _running_tasks.remove(self)
+
+        if outcome == "finished":
+            if self._on_finished is not None:
+                self._on_finished(result)
+        elif outcome == "failed":
+            if self._on_failed is not None:
+                self._on_failed(error)
+            else:
+                sys.excepthook(type(error), error, error.__traceback__)
+        elif self._on_canceled is not None:
+            self._on_canceled()
+
+
+def run_task(
+    fn: Callable,
+    description: str,
+    parent: QtWidgets.QWidget,
+    on_finished: Callable | None = None,
+    *,
+    maximum: int = 0,
+    on_failed: Callable | None = None,
+    on_canceled: Callable | None = None,
+    title: str | None = None,
+) -> Task:
+    """Run ``fn(progress)`` on a worker thread behind a cancelable
+    progress dialog.
+
+    The GUI stays responsive (windows repaint) while user input is
+    blocked as during a computation on the GUI thread, except for the
+    dialog's Cancel button. ``fn`` receives a :class:`TaskProgress`,
+    which can be passed to any function that takes a progress dialog or
+    a progress callback (``progress.set_value``). Cancel makes the next
+    progress update raise ``lib.OperationCanceled``, which ends the task
+    as canceled.
+
+    ``fn`` runs on the worker thread, so it must not touch widgets or
+    mutate GUI state: read the inputs before, and apply the result in
+    ``on_finished``, which runs on the GUI thread.
+
+    Parameters
+    ----------
+    fn : callable
+        Takes the ``TaskProgress`` and returns the result.
+    description : str
+        Label of the progress dialog.
+    parent : QWidget
+        Parent of the progress dialog.
+    on_finished : callable, optional
+        Called with the result of ``fn`` if it completed and was not
+        canceled. Default None.
+    maximum : int, optional
+        Maximum of the progress bar; 0 (default) shows a busy indicator
+        until ``fn`` sets a maximum.
+    on_failed : callable, optional
+        Called with the exception raised by ``fn``. None (default) shows
+        it like any uncaught exception (see :func:`install_excepthook`).
+    on_canceled : callable, optional
+        Called once the task stopped after the user canceled it. Default
+        None.
+    title : str, optional
+        Window title of the progress dialog. Default None.
+
+    Returns
+    -------
+    task : Task
+        The started task.
+    """
+    task = Task(
+        fn,
+        description,
+        parent,
+        maximum,
+        on_finished,
+        on_failed,
+        on_canceled,
+        title,
+    )
+    task.start()
+    return task
+
+
+def run_with_status(
+    fn: Callable,
+    description: str,
+    parent: QtWidgets.QWidget,
+) -> Any:
+    """Run ``fn()`` on a worker thread behind a :class:`StatusDialog`
+    and return its result.
+
+    For steps that report no progress and cannot be canceled. Unlike
+    :func:`run_task`, the call blocks until ``fn`` returns, so the
+    caller reads like a computation on the GUI thread, while the event
+    loop keeps running: windows repaint and the busy indicator moves.
+    User input is blocked meanwhile, as in :func:`run_task`.
+
+    ``fn`` runs on the worker thread, so it must not touch widgets or
+    mutate GUI state: read the inputs before and apply the result after
+    the call.
+
+    Parameters
+    ----------
+    fn : callable
+        Takes no arguments and returns the result.
+    description : str
+        Label of the status dialog.
+    parent : QWidget
+        Parent of the status dialog.
+
+    Returns
+    -------
+    result : Any
+        What ``fn`` returned.
+
+    Raises
+    ------
+    BaseException
+        Whatever ``fn`` raised, re-raised on the GUI thread.
+    """
+    status = StatusDialog(description, parent)
+    thread = _TaskThread(lambda progress: fn(), None)
+    loop = QtCore.QEventLoop()
+    # queued to the GUI thread, so it cannot quit the loop before exec()
+    thread.finished.connect(loop.quit)
+    _acquire_input_blocker()
+    try:
+        thread.start()
+        loop.exec()
+        thread.wait()
+    finally:
+        _input_blocker.release()
+        status.close()
+    if thread.outcome == "failed":
+        raise thread.error
+    return thread.result
 
 
 # type alias for the progress dialogs
@@ -1113,9 +2070,20 @@ class RangeSlider(QtWidgets.QWidget):
         painter = QtGui.QPainter(self)
         painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
         painter.setPen(QtCore.Qt.PenStyle.NoPen)
-        enabled = self.isEnabled()
-        groove_color = QtGui.QColor("#b0b0b0" if enabled else "#d8d8d8")
-        handle_color = QtGui.QColor("#5a5a5a" if enabled else "#b8b8b8")
+        # from the palette, so that the slider follows the theme
+        palette = self.palette()
+        if self.isEnabled():
+            groove_color = palette.color(QtGui.QPalette.ColorRole.Mid)
+            handle_color = palette.color(QtGui.QPalette.ColorRole.Highlight)
+        else:
+            groove_color = palette.color(
+                QtGui.QPalette.ColorGroup.Disabled,
+                QtGui.QPalette.ColorRole.Midlight,
+            )
+            handle_color = palette.color(
+                QtGui.QPalette.ColorGroup.Disabled,
+                QtGui.QPalette.ColorRole.Mid,
+            )
         mid_y = self.height() / 2
         radius = self.GROOVE_HEIGHT / 2
         groove = QtCore.QRectF(
@@ -1473,13 +2441,37 @@ class DensityContrastSlider(RangeSlider):
 
 class GenericPlotWindow(QtWidgets.QTabWidget):
     """Interface for displaying matplotlib plots in a separate
-    window."""
+    window.
+
+    The plots take the shared appearance of Picasso's chart windows
+    (``picasso.gui.plot_style``) when drawn inside ``plot_context``.
+    The toolbar opens the plot settings; when they change, ``redraw``
+    is called if set, otherwise the drawn figure is restyled (keeping
+    the colors of the data).
+
+    Attributes
+    ----------
+    figure : plt.Figure
+        The figure to draw on.
+    canvas : FigureCanvas
+        Canvas showing ``figure``.
+    toolbar : NavigationToolbar2QT
+        Toolbar of the canvas; callers may add widgets.
+    plot_style : picasso.gui.plot_style.PlotStyle
+        The current appearance.
+    redraw : Callable[[], None] or None
+        Draws the plot again (inside ``plot_context``); set by the
+        caller so that style changes also recolor the data.
+    """
 
     def __init__(self, window_title, app_name):
         from matplotlib.backends.backend_qt5agg import (
             FigureCanvas,
             NavigationToolbar2QT,
         )
+
+        # imported here: picasso.gui.plot_style imports picasso.lib
+        from picasso.gui import plot_style, theme
 
         super().__init__()
         self.setWindowTitle(window_title)
@@ -1495,6 +2487,37 @@ class GenericPlotWindow(QtWidgets.QTabWidget):
         vbox.addWidget(self.canvas)
         self.toolbar = NavigationToolbar2QT(self.canvas, self)
         vbox.addWidget(self.toolbar)
+        self.plot_style = plot_style.current()
+        self.plot_style.style_figure(self.figure)
+        self.redraw = None
+        self.toolbar.addSeparator()
+        settings_action = self.toolbar.addAction("Plot settings")
+        settings_action.setIcon(theme.icon("plot-settings"))
+        settings_action.setToolTip("Appearance of all chart windows")
+        settings_action.triggered.connect(lambda: plot_style.show_dialog())
+        theme.follow_toolbar_style(self.toolbar, settings_action)
+        plot_style.hub().changed.connect(self._on_style_changed)
+
+    @contextlib.contextmanager
+    def plot_context(self):
+        """Context in which to draw on ``figure`` with the current plot
+        style, see ``PlotStyle.context``."""
+        self.plot_style.style_figure(self.figure)
+        with self.plot_style.context():
+            yield
+        # ticks created at draw time, after the context, would take the
+        # global defaults (e.g., on log axes); store the style on the axes
+        self.plot_style.apply(self.figure)
+
+    def _on_style_changed(self, style) -> None:
+        if sip.isdeleted(self):
+            return
+        self.plot_style = style
+        if self.redraw is not None:
+            self.redraw()
+        else:
+            style.apply(self.figure)
+        self.canvas.draw_idle()
 
 
 class RemoveColumnsDialog(Dialog):
@@ -1573,24 +2596,49 @@ class HelpButton(QtWidgets.QToolButton):
         self.setFixedSize(*size)
         self.setToolTip("Open documentation")
         self.setCursor(QtCore.Qt.CursorShape.PointingHandCursor)
+        # filled with the accent color, so that the button stands out;
+        # inverted on hover. Shows the help icon, or "?" without it.
+        # imported here: picasso.gui.theme imports picasso.lib
+        from picasso.gui import theme
+
+        Role = QtGui.QPalette.ColorRole
+        self._icons = (
+            theme.icon("help", role=Role.HighlightedText),
+            theme.icon("help", role=Role.Highlight),  # on hover
+        )
+        if not self._icons[0].isNull():
+            self.setIcon(self._icons[0])
+            side = max(8, min(size) - 8)
+            self.setIconSize(QtCore.QSize(side, side))
+        radius = min(size) // 2
         self.setStyleSheet(
-            """
-            QToolButton {
-                border: 1px solid palette(mid);
-                border-radius: 11px;
+            f"""
+            QToolButton {{
+                border: 1px solid palette(highlight);
+                border-radius: {radius}px;
+                padding: 0px;
                 font-weight: bold;
                 font-size: 12px;
-                color: palette(button-text);
-                background: palette(button);
-            }
-            QToolButton:hover {
-                background: palette(highlight);
                 color: palette(highlighted-text);
-                border-color: palette(highlight);
-            }
+                background: palette(highlight);
+            }}
+            QToolButton:hover {{
+                color: palette(highlight);
+                background: palette(highlighted-text);
+            }}
         """
         )
         self.clicked.connect(self._open_docs)
+
+    def enterEvent(self, event) -> None:
+        if not self._icons[1].isNull():
+            self.setIcon(self._icons[1])
+        super().enterEvent(event)
+
+    def leaveEvent(self, event) -> None:
+        if not self._icons[0].isNull():
+            self.setIcon(self._icons[0])
+        super().leaveEvent(event)
 
     def _open_docs(self) -> None:
         QtGui.QDesktopServices.openUrl(QtCore.QUrl(self.help_url))
@@ -1638,6 +2686,38 @@ class TripleClick:
         )
 
 
+def confirm_restore_defaults(
+    parent: QtWidgets.QWidget | None = None,
+    what: str = "all settings in this dialog",
+) -> bool:
+    """Ask the user to confirm restoring the default settings, which
+    discards their changes.
+
+    Parameters
+    ----------
+    parent : QtWidgets.QWidget or None, optional
+        Parent of the message box. Default None.
+    what : str, optional
+        What is restored, completing "This resets ... to the defaults".
+        Default "all settings in this dialog".
+
+    Returns
+    -------
+    confirmed : bool
+        True if the user chose to restore the defaults.
+    """
+    reply = QtWidgets.QMessageBox.question(
+        parent,
+        "Restore defaults",
+        f"This resets {what} to the defaults; your changes are lost.\n"
+        "Do you want to continue?",
+        QtWidgets.QMessageBox.StandardButton.RestoreDefaults
+        | QtWidgets.QMessageBox.StandardButton.Cancel,
+        QtWidgets.QMessageBox.StandardButton.Cancel,
+    )
+    return reply == QtWidgets.QMessageBox.StandardButton.RestoreDefaults
+
+
 def cancel_dialogs():
     """Closes all open dialogs (``ProgressDialog`` and ``StatusDialog``)
     in the GUI.
@@ -1650,7 +2730,10 @@ def cancel_dialogs():
     dialogs = [_ for _ in _dialogs]
     for dialog in dialogs:
         try:
-            if isinstance(dialog, ProgressDialog):
+            if isinstance(dialog, TaskProgressDialog):
+                # stop the worker; the task closes its dialog
+                dialog.request_cancel()
+            elif isinstance(dialog, ProgressDialog):
                 dialog.cancel()
             else:
                 dialog.close()
@@ -1759,6 +2842,15 @@ def adjust_widget_size(
     """
     intended_width = size_hint.width() + width_offset
     intended_height = size_hint.height() + height_offset
+    # a vertical scroll bar that is not overlaid (as it is on macOS'
+    # native style) takes width from the contents
+    style = widget.style()
+    if widget.findChild(QtWidgets.QScrollArea) is not None and not (
+        style.styleHint(QtWidgets.QStyle.StyleHint.SH_ScrollBar_Transient)
+    ):
+        intended_width += style.pixelMetric(
+            QtWidgets.QStyle.PixelMetric.PM_ScrollBarExtent
+        )
     # adjust to the screen size if necessary
     screen = QtWidgets.QApplication.primaryScreen()
     screen_height = 1000 if screen is None else screen.size().height()

@@ -19,7 +19,7 @@ from dataclasses import replace
 
 from PyQt6 import QtCore, QtGui, QtWidgets
 
-from .. import render
+from .. import lib, render
 
 #: Color that follows the background: set by the caller, e.g., yellow
 #: on a black and red on a white background.
@@ -103,6 +103,9 @@ class ColorComboBox(QtWidgets.QComboBox):
         The automatic colors on a dark and a light background, shown in
         the icon of the "Auto" item. None offers no "Auto" item.
         Default None.
+    presets : dict or None, optional
+        Preset colors offered, name -> hexadecimal code. None (default)
+        offers ``PRESET_COLORS``.
     parent : QWidget or None, optional
         Parent widget. Default None.
     """
@@ -112,9 +115,11 @@ class ColorComboBox(QtWidgets.QComboBox):
     def __init__(
         self,
         auto_colors: tuple[str, str] | None = None,
+        presets: dict[str, str] | None = None,
         parent: QtWidgets.QWidget | None = None,
     ) -> None:
         super().__init__(parent)
+        self._presets = PRESET_COLORS if presets is None else presets
         if auto_colors is not None:
             self.addItem(
                 _swatch([QtGui.QColor(c) for c in auto_colors]), AUTO_COLOR
@@ -125,7 +130,7 @@ class ColorComboBox(QtWidgets.QComboBox):
                 "background",
                 QtCore.Qt.ItemDataRole.ToolTipRole,
             )
-        for name, code in PRESET_COLORS.items():
+        for name, code in self._presets.items():
             self.addItem(_swatch([QtGui.QColor(code)]), name)
         self.addItem(CUSTOM_COLOR)
         self._last_index = 0
@@ -202,7 +207,7 @@ class ColorComboBox(QtWidgets.QComboBox):
         text = self.value() if index is None else self.itemText(index)
         if text == AUTO_COLOR:
             return QtGui.QColor(auto_color)
-        return QtGui.QColor(PRESET_COLORS.get(text, text))
+        return QtGui.QColor(self._presets.get(text, text))
 
 
 class OverlayStyleWidget(QtWidgets.QWidget):
@@ -272,7 +277,12 @@ class OverlayStyleWidget(QtWidgets.QWidget):
 
         reset_button = QtWidgets.QPushButton("Reset")
         reset_button.setToolTip("Restore the default appearance.")
-        reset_button.clicked.connect(self.reset)
+        reset_button.clicked.connect(
+            lambda: lib.confirm_restore_defaults(
+                self, "the appearance of this tool"
+            )
+            and self.reset()
+        )
         grid.addWidget(
             reset_button,
             (len(fields) + 1) // 2,

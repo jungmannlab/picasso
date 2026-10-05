@@ -47,6 +47,8 @@ from .. import (
 from .. import transforms as transforms_mod
 from ..fitting import precision, splinefit
 from .app import run_gui
+from . import theme
+from . import toolbars
 from PyQt6 import QtCore, QtGui, QtWidgets
 from playsound3 import playsound
 
@@ -3049,7 +3051,9 @@ class CalibrateAffineDialog(lib.Dialog):
     one after another.
     """
 
-    LATERAL_URL = docs_url("localize.html#lateral-corrections-of-x-and-y")
+    LATERAL_URL = docs_url(
+        "localize/3d-calibration.html#localize-lateral-corrections"
+    )
 
     # Emitted when "Calibrate" is pressed. Not ``accepted``: the dialog
     # stays open so the pairing can be inspected on both bead images.
@@ -3400,17 +3404,21 @@ class ParametersDialog(lib.Dialog):
         The main window of the application.
     """
 
-    CALIB_URL = docs_url("localize.html#d-calibration")
-    GAUSSIAN_FILTER_URL = docs_url("localize.html#gaussian-filter")
+    CALIB_URL = docs_url(
+        "localize/3d-calibration.html#localize-3d-calibration"
+    )
+    GAUSSIAN_FILTER_URL = docs_url(
+        "localize/identification.html#localize-gaussian-filter"
+    )
     IDENT_URL = docs_url(
-        "localize.html#identification-and-fitting-of-single-molecule-spots"
+        "localize/identification.html#localize-identification"
     )
-    WAVELET_URL = docs_url("localize.html#b-spline-wavelet-identification")
-    ROI_URL = docs_url("localize.html#regions-of-interest-rois")
-    SPLINE_URL = docs_url(
-        "localize.html#experimental-psf-cubic-spline-fitting"
+    WAVELET_URL = docs_url("localize/identification.html#localize-wavelet")
+    ROI_URL = docs_url("localize/identification.html#localize-rois")
+    SPLINE_URL = docs_url("localize/spline.html#localize-spline")
+    TEMPORAL_MEDIAN_URL = docs_url(
+        "localize/identification.html#localize-temporal-median-filter"
     )
-    TEMPORAL_MEDIAN_URL = docs_url("localize.html#temporal-median-filter")
 
     def __init__(  # noqa: C901
         self, parent: QtWidgets.QMainWindow | None = None
@@ -6166,6 +6174,8 @@ class Window(QtWidgets.QMainWindow):
         The scene for displaying the image.
     status_bar : QtWidgets.QStatusBar
         Status bar displayed in the bottom of the window.
+    toolbar : QtWidgets.QToolBar
+        The most used actions of the menus, see ``toolbars.add_toolbar``.
     view : View
         The main view for displaying the image.
     """
@@ -6203,11 +6213,13 @@ class Window(QtWidgets.QMainWindow):
         self.frame_slider.setAttribute(
             QtCore.Qt.WidgetAttribute.WA_LayoutUsesWidgetRect
         )
+        # slim to fit the row; colors from the palette, so that the
+        # slider follows the theme
         self.frame_slider.setStyleSheet(
             """
             QSlider::groove:horizontal {
                 height: 4px;
-                background: #b0b0b0;
+                background: palette(mid);
                 border-radius: 2px;
             }
             QSlider::handle:horizontal {
@@ -6215,7 +6227,10 @@ class Window(QtWidgets.QMainWindow):
                 height: 12px;
                 margin: -5px 0;
                 border-radius: 3px;
-                background: #5a5a5a;
+                background: palette(highlight);
+            }
+            QSlider::handle:horizontal:disabled {
+                background: palette(mid);
             }
             """
         )
@@ -6248,19 +6263,22 @@ class Window(QtWidgets.QMainWindow):
         self.contrast_auto_button.setStyleSheet(
             """
             QToolButton {
-                border: 1px solid #b0b0b0;
+                border: 1px solid palette(mid);
                 border-radius: 3px;
                 padding: 0px 4px;
                 background: transparent;
             }
             QToolButton:checked {
-                border-color: #5a5a5a;
-                background: #5a5a5a;
-                color: white;
+                border-color: palette(highlight);
+                background: palette(highlight);
+                color: palette(highlighted-text);
             }
             QToolButton:disabled {
-                border-color: #d8d8d8;
-                color: #b8b8b8;
+                border-color: palette(midlight);
+                color: palette(mid);
+            }
+            QToolButton:checked:disabled {
+                background: palette(midlight);
             }
             """
         )
@@ -6663,15 +6681,18 @@ class Window(QtWidgets.QMainWindow):
         file_menu.addAction(select_columns_action)
         file_menu.addSeparator()
         export_current_action = file_menu.addAction("Export current view...")
+        export_current_action.setIcon(theme.icon("export-view"))
         export_current_action.setShortcut("Ctrl+E")
         export_current_action.triggered.connect(self.export_current)
         metadata_action = file_menu.addAction("Show metadata...")
+        metadata_action.setIcon(theme.icon("metadata"))
         metadata_action.setShortcut("Ctrl+M")
         metadata_action.triggered.connect(self.show_metadata)
         file_menu.addAction(metadata_action)
 
         file_menu.addSeparator()
         sounds_menu = file_menu.addMenu("Sound notifications")
+        sounds_menu.setIcon(theme.icon("sound"))
         sounds_actiongroup = QtGui.QActionGroup(file_menu)
         default_sound_path = lib.get_sound_notification_path()  # last used
         default_sound_name = os.path.basename(str(default_sound_path))
@@ -6689,18 +6710,23 @@ class Window(QtWidgets.QMainWindow):
         open_sounds_action = sounds_menu.addAction(
             "Open notification sounds folder..."
         )
+        open_sounds_action.setIcon(theme.icon("open"))
         open_sounds_action.triggered.connect(
             lib.open_sound_notifications_folder
         )
         picasso_settings_action = file_menu.addAction("Picasso settings...")
+        picasso_settings_action.setIcon(theme.icon("picasso-settings"))
         picasso_settings_action.triggered.connect(
             self.user_settings_dialog.show
         )
+        theme.add_menu_action(file_menu)
         open_config_action = file_menu.addAction(
             "Open camera config file location"
         )
+        open_config_action.setIcon(theme.icon("open"))
         open_config_action.triggered.connect(self.open_config_location)
         help_action = file_menu.addAction("Help")
+        help_action.setIcon(theme.icon("help"))
         help_action.triggered.connect(
             lambda: QtGui.QDesktopServices.openUrl(QtCore.QUrl(self.DOCS_URL))
         )
@@ -6747,6 +6773,7 @@ class Window(QtWidgets.QMainWindow):
         last_frame_action.triggered.connect(self.last_frame)
         view_menu.addAction(last_frame_action)
         go_to_frame_action = view_menu.addAction("Go to frame...")
+        go_to_frame_action.setIcon(theme.icon("go-to"))
         go_to_frame_action.setShortcut("Ctrl+G")
         go_to_frame_action.triggered.connect(self.to_frame)
         view_menu.addAction(go_to_frame_action)
@@ -6766,14 +6793,16 @@ class Window(QtWidgets.QMainWindow):
         self.next_channel_action.setEnabled(False)
         view_menu.addAction(self.next_channel_action)
         view_menu.addSeparator()
-        zoom_in_action = view_menu.addAction("Zoom in")
-        zoom_in_action.setShortcuts(["Ctrl++", "Ctrl+="])
-        zoom_in_action.triggered.connect(self.zoom_in)
-        view_menu.addAction(zoom_in_action)
-        zoom_out_action = view_menu.addAction("Zoom out")
-        zoom_out_action.setShortcut("Ctrl+-")
-        zoom_out_action.triggered.connect(self.zoom_out)
-        view_menu.addAction(zoom_out_action)
+        # zooming is not in the menu (the mouse does it), but its
+        # shortcuts work in the whole window
+        for text, shortcuts, slot in (
+            ("Zoom in", ["Ctrl++", "Ctrl+="], self.zoom_in),
+            ("Zoom out", ["Ctrl+-"], self.zoom_out),
+        ):
+            action = QtGui.QAction(text, self)
+            action.setShortcuts(shortcuts)
+            action.triggered.connect(slot)
+            self.addAction(action)
         fit_in_view_action = view_menu.addAction("Fit image to window")
         fit_in_view_action.setShortcut("Ctrl+W")
         fit_in_view_action.triggered.connect(self.fit_in_view)
@@ -6782,6 +6811,8 @@ class Window(QtWidgets.QMainWindow):
         constract_action = view_menu.addAction("Contrast...")
         constract_action.setShortcut("Ctrl+C")
         constract_action.triggered.connect(self.contrast_dialog.show)
+        # in the menu only, not on the toolbar
+        constract_action.setIcon(theme.icon("contrast"))
         view_menu.addAction(constract_action)
         self.scalebar_action = view_menu.addAction("Show scale bar")
         self.scalebar_action.setCheckable(True)
@@ -6905,6 +6936,24 @@ class Window(QtWidgets.QMainWindow):
         )
 
         self.plugin_menu = menu_bar.addMenu("Plugins")  # do not delete
+
+        # toolbar of the most used actions, shared with the menus
+        self.toolbar = toolbars.add_toolbar(
+            self,
+            "Localize toolbar",
+            [
+                (open_action, "open-movie", "Open movie"),
+                (save_action, "save", "Save"),
+                None,
+                (parameters_action, "parameters", "Parameters"),
+                (identify_action, "identify"),
+                (fit_action, "fit"),
+                (localize_action, "localize", "Localize"),
+                (self.abort_action, "abort"),
+                None,
+                (fit_in_view_action, "fit-view", "Fit view"),
+            ],
+        )
 
     def open_config_location(self) -> None:
         """Open the folder holding the camera config file in the system
@@ -8624,13 +8673,24 @@ class Window(QtWidgets.QMainWindow):
         effect immediately rather than only on the next channel switch."""
         if len(self.channels) < 2:
             return
-        pd = self.parameters_dialog
         cur = self._capture_params()
         if self.sum_settings_on_dialog():
             # the dialog holds the sum's settings; the channels share their
             # own
             own = self.channels[self.current_channel].params or {}
             cur |= {k: own[k] for k in _SUM_SETTING_KEYS if k in own}
+        keys = self._linked_param_keys()
+        for channel in self.channels:
+            if not channel.params:
+                continue
+            for key in keys:
+                if key in cur:
+                    channel.params[key] = cur[key]
+
+    def _linked_param_keys(self) -> list[str]:
+        """Parameter keys of the groups currently linked across channels
+        in the Parameters dialog."""
+        pd = self.parameters_dialog
         keys: list[str] = []
         if pd.link_box_checkbox.isChecked():
             keys += ["box"]
@@ -8648,12 +8708,7 @@ class Window(QtWidgets.QMainWindow):
                 "qe",
                 "pixelsize",
             ]
-        for channel in self.channels:
-            if not channel.params:
-                continue
-            for key in keys:
-                if key in cur:
-                    channel.params[key] = cur[key]
+        return keys
 
     def _channels_share_file(self) -> bool:
         """True when several channels were loaded from one file (so their
@@ -8679,6 +8734,13 @@ class Window(QtWidgets.QMainWindow):
     def open_picks(self) -> None:
         """Open a file dialog to select a picks (from Picasso: Render)
         file to load."""
+        if self.movie is None:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Load picks as identifications",
+                "Load a movie before loading identifications.",
+            )
+            return
         if self.movie_path != []:
             dir = os.path.dirname(self.movie_path)
         else:
@@ -8729,6 +8791,13 @@ class Window(QtWidgets.QMainWindow):
     def open_locs(self) -> None:
         """Open localizations for refitting data. Provide spot
         identifications."""
+        if self.movie is None:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Load locs as identifications",
+                "Load a movie before loading identifications.",
+            )
+            return
         if self.movie_path != []:
             dir = os.path.dirname(self.movie_path)
         else:
@@ -8765,6 +8834,13 @@ class Window(QtWidgets.QMainWindow):
 
     def open_identifications(self) -> None:
         """Open identifications previously saved as a HDF5 file."""
+        if self.movie is None:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Load identifications",
+                "Load a movie before loading identifications.",
+            )
+            return
         if self.movie_path != []:
             dir = os.path.dirname(self.movie_path)
         else:
@@ -10613,21 +10689,9 @@ class Window(QtWidgets.QMainWindow):
             if self._sum_registration_failed or self._sum_identify is not None:
                 # already tried, or an identification is building one right now
                 return False
-            self._sum_registration_failed = True
-            transforms, regions, source = self._sum_channel_transforms(
-                estimate=True
-            )
-            if transforms is None:
-                if notify:
-                    where = (
-                        "regions" if self.view.split_fov_mode else "channels"
-                    )
-                    self.status_bar.showMessage(
-                        f"No sum yet: the {where} are not registered. "
-                        "Identify (Ctrl+I) or load a calibration."
-                    )
+            source = self._register_channel_sum(notify)
+            if source is None:
                 return False
-            self._build_channel_sum(transforms, regions, source)
         except ValueError as error:
             self.drop_channel_sum()
             self._sum_registration_failed = True
@@ -10638,16 +10702,44 @@ class Window(QtWidgets.QMainWindow):
             return False  # a partially built window has no channels to sum
         self._sum_registration_failed = False
         if notify:
-            retune = (
-                " Re-tune the min. net gradient."
-                if localize.wavelet_from_parameters(self.parameters) is None
-                else ""
-            )
-            self.status_bar.showMessage(
-                f"Sum of {len(self.sum_transforms)} channels, "
-                f"{_sum_registration_phrase(source)}.{retune}"
-            )
+            self._notify_sum_built(source)
         return True
+
+    def _register_channel_sum(self, notify: bool) -> str | None:
+        """Build the summed view from the channel registration that needs
+        no movie pass, see ``ensure_channel_sum``. Marks the attempt as
+        failed until it succeeds. Returns the source of the registration,
+        or None if the channels are not registered yet."""
+        self._sum_registration_failed = True
+        transforms, regions, source = self._sum_channel_transforms(
+            estimate=True
+        )
+        if transforms is None:
+            if notify:
+                self._notify_sum_unregistered()
+            return None
+        self._build_channel_sum(transforms, regions, source)
+        return source
+
+    def _notify_sum_unregistered(self) -> None:
+        """Tell the user why no summed view could be built yet."""
+        where = "regions" if self.view.split_fov_mode else "channels"
+        self.status_bar.showMessage(
+            f"No sum yet: the {where} are not registered. "
+            "Identify (Ctrl+I) or load a calibration."
+        )
+
+    def _notify_sum_built(self, source: str) -> None:
+        """Report the summed view just built and how it was registered."""
+        retune = (
+            " Re-tune the min. net gradient."
+            if localize.wavelet_from_parameters(self.parameters) is None
+            else ""
+        )
+        self.status_bar.showMessage(
+            f"Sum of {len(self.sum_transforms)} channels, "
+            f"{_sum_registration_phrase(source)}.{retune}"
+        )
 
     def identification_movie(self) -> lib.IntArray3D:
         """The movie the display and the identification preview run on:
@@ -10769,6 +10861,11 @@ class Window(QtWidgets.QMainWindow):
             identification (see ``build_spline_calibration``). Default is
             False.
         """
+        if self.movie is None:
+            QtWidgets.QMessageBox.warning(
+                self, "Identify", "Load a movie before identifying."
+            )
+            return
         # The calibrations are built from bead stacks, one channel at a time,
         # so they always identify the channels separately - only the
         # experimental data can be identified on the sum.
@@ -13123,6 +13220,8 @@ class Window(QtWidgets.QMainWindow):
 
     def fit_in_view(self) -> None:
         """Reset the zoom in the scene."""
+        if self.movie is None:  # nothing to fit
+            return
         rectangle = QtCore.QRectF(
             0,
             0,
@@ -13200,6 +13299,11 @@ class Window(QtWidgets.QMainWindow):
 
     def save_spots_dialog(self) -> None:
         """Get the path for saving identified spots."""
+        if self.movie is None:
+            QtWidgets.QMessageBox.information(
+                self, "Save spots", "No file loaded."
+            )
+            return
         if self.movie_path != []:
             base = self.channel_output_base()
             path = base + "_spots.tif"
@@ -13215,6 +13319,11 @@ class Window(QtWidgets.QMainWindow):
 
     def export_current(self) -> None:
         """Export current view as .png or .tif."""
+        if self.movie is None:
+            QtWidgets.QMessageBox.information(
+                self, "Export current view", "No file loaded."
+            )
+            return
         try:
             base = self.channel_output_base()
         except AttributeError:
@@ -13318,6 +13427,11 @@ class Window(QtWidgets.QMainWindow):
 
     def save_locs_dialog(self) -> None:
         """Get the path to save localizations."""
+        if self.movie is None:
+            QtWidgets.QMessageBox.information(
+                self, "Save localizations", "No file loaded."
+            )
+            return
         if self.movie_path != []:
             base = self.channel_output_base()
             locs_path = base + "_locs.hdf5"
@@ -13390,6 +13504,12 @@ class Window(QtWidgets.QMainWindow):
             Whether to run z-calibration for 3D fitting afterwards
             Default is False.
         """
+        if self.movie is None:
+            title = "Calibrate astigmatism" if calibrate_z else "Localize"
+            QtWidgets.QMessageBox.warning(
+                self, title, "Load a movie before localizing."
+            )
+            return
         self.parameters_dialog.gpu_checkbox.setDisabled(True)
         if (
             calibrate_z

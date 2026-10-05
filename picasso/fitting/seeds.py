@@ -14,17 +14,13 @@ It lives beside the models rather than in ``picasso.localize`` because the
 column order of every array it builds is defined by the fit kernels
 (``_accumulate_rotated``, ``_accumulate_link_xyz`` and the rest).
 
-=========================================  ===================================
-function                                   seeds
-=========================================  ===================================
-:func:`initial_parameters_gauss`           the spherical, elliptical and
-                                           rotated 2D Gaussians
-:func:`initial_parameters_gauss_multichannel`  the multichannel spherical
-                                           Gaussian, both photon-linked and
-                                           photon-decoupled
-:func:`initial_parameters_spline`          the 2D, 3D and multichannel
-                                           cubic-spline PSFs
-=========================================  ===================================
+:func:`initial_parameters_gauss`
+    the spherical, elliptical and rotated 2D Gaussians
+:func:`initial_parameters_gauss_multichannel`
+    the multichannel spherical Gaussian, both photon-linked and
+    photon-decoupled
+:func:`initial_parameters_spline`
+    the 2D, 3D and multichannel cubic-spline PSFs
 
 :authors: Rafal Kowalewski
 :copyright: Copyright (c) 2026 Jungmann Lab, MPI of Biochemistry

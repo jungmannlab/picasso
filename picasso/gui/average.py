@@ -20,6 +20,8 @@ from PyQt6 import QtCore, QtGui, QtWidgets
 
 from .. import io, lib, average, render, __version__, docs_url
 from .app import run_gui
+from . import theme
+from . import toolbars
 
 
 class PoolWorker(QtCore.QThread):
@@ -228,6 +230,11 @@ class View(QtWidgets.QLabel):
     def average(self):
         """Start the averaging in a worker thread, reading the parameters
         from the parameters dialog."""
+        if not hasattr(self, "locs"):
+            QtWidgets.QMessageBox.information(
+                self.window, "Average", "No file loaded."
+            )
+            return
         if not self.running:
             self.running = True
             display_px_size = (
@@ -344,19 +351,21 @@ class View(QtWidgets.QLabel):
         path : str
             Path to the localization file.
         """
-        self.path = path
         try:
-            self.locs, self.info = io.load_locs(path, qt_parent=self)
+            locs, info = io.load_locs(path, qt_parent=self)
         except io.NoMetadataFileError:
             return
-        self.avg_history = []
-        if "group" not in self.locs.columns:
+        if "group" not in locs.columns:
+            # not kept: averaging needs the groups
             message = (
                 "Loaded file contains no group information. Please load"
                 " localizations that were picked."
             )
             QtWidgets.QMessageBox.warning(self, "Warning", message)
             return
+        self.path = path
+        self.locs, self.info = locs, info
+        self.avg_history = []
         group_index = average.build_group_index(self.locs)
         self.locs = average.com_align(self.locs, group_index)
         self.r = 2 * np.sqrt(
@@ -543,13 +552,17 @@ class Window(QtWidgets.QMainWindow):
         save_action.triggered.connect(self.save)
         file_menu.addAction(save_action)
         metadata_action = file_menu.addAction("Show metadata...")
+        metadata_action.setIcon(theme.icon("metadata"))
         metadata_action.setShortcut("Ctrl+M")
         metadata_action.triggered.connect(self.show_metadata)
         picasso_settings_action = file_menu.addAction("Picasso settings...")
+        picasso_settings_action.setIcon(theme.icon("picasso-settings"))
         picasso_settings_action.triggered.connect(
             self.user_settings_dialog.show
         )
+        theme.add_menu_action(file_menu)
         help_action = file_menu.addAction("Help")
+        help_action.setIcon(theme.icon("help"))
         help_action.triggered.connect(
             lambda: QtGui.QDesktopServices.openUrl(QtCore.QUrl(self.DOCS_URL))
         )
@@ -565,6 +578,20 @@ class Window(QtWidgets.QMainWindow):
         self.abort_action.triggered.connect(self.view.abort)
         self.abort_action.setEnabled(False)
         self.plugin_menu = menu_bar.addMenu("Plugins")  # do not delete
+
+        # toolbar of the most used actions, shared with the menus
+        self.toolbar = toolbars.add_toolbar(
+            self,
+            "Average toolbar",
+            [
+                (open_action, "open", "Open"),
+                (save_action, "save", "Save"),
+                None,
+                (parameters_action, "parameters", "Parameters"),
+                (average_action, "average"),
+                (self.abort_action, "abort"),
+            ],
+        )
 
     def closeEvent(self, event: QtGui.QCloseEvent) -> None:
         """Shut down the averaging processes before closing.
@@ -599,6 +626,9 @@ class Window(QtWidgets.QMainWindow):
 
     def save(self) -> None:
         """Open the dialog for saving averaged localizations."""
+        if not hasattr(self.view, "locs"):
+            QtWidgets.QMessageBox.information(self, "Save", "No file loaded.")
+            return
         out_path = os.path.splitext(self.view.path)[0] + "_avg.hdf5"
         path, ext = lib.get_save_filename_ext_dialog(
             self,

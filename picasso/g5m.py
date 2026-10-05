@@ -470,13 +470,13 @@ class G5M(metaclass=ABCMeta):
     calibration : dict
         Calibration dictionary with x and y coefficients and
         magnification factor. Required for 3D data only. See
-        https://picassosr.readthedocs.io/en/latest/localize.html#d-calibration.
+        https://picassosr.readthedocs.io/en/latest/localize/3d-calibration.html#localize-3d-calibration.
     converged : bool
         True if the G5M converged, False otherwise.
     covariances_ : np.ndarray
         Covariances of the G5M components, shape (n_components,).
     covariances : np.ndarray
-        Same as covariances_ but only valid components (based on
+        Same as ``covariances_`` but only valid components (based on
         min_locs) are indexed.
     loc_prec_handle : {"local", "abs"}
         How to handle sigma bounds. If "local", localization
@@ -489,7 +489,7 @@ class G5M(metaclass=ABCMeta):
     means_ : np.ndarray
         Means of the G5M components, shape (n_components, n_dimensions).
     means : np.ndarray
-        Same as means_ but only valid components (based on min_locs) are
+        Same as ``means_`` but only valid components (based on min_locs) are
         indexed.
     min_locs : int
         Minimum number of localizations per component. Used to filter
@@ -508,7 +508,7 @@ class G5M(metaclass=ABCMeta):
         Cholesky decomposition of the precision matrices of the G5M
         components, shape (n_components, n_dimensions).
     precisions_cholesky : np.ndarray
-        Same as precisions_cholesky_ but only valid components (based
+        Same as ``precisions_cholesky_`` but only valid components (based
         on min_locs) are indexed.
     random_state : int
         Random seed for reproducibility.
@@ -523,7 +523,7 @@ class G5M(metaclass=ABCMeta):
     weights_ : np.ndarray
         Weights of the G5M components, shape (n_components,).
     weights : np.ndarray
-        Same as weights_ but only valid components (based on min_locs)
+        Same as ``weights_`` but only valid components (based on min_locs)
         are indexed. Renormalized to sum to 1.
 
     Parameters
@@ -1952,7 +1952,7 @@ def _find_optimal_G5M_3D(
         Astigmatism calibration dictionary with the keys "X
         Coefficients", "Y Coefficients" and "Magnification factor".
         Required for ``mode="astigmatism"``, may be None for spline.
-        See https://picassosr.readthedocs.io/en/latest/localize.html#d-calibration.  # noqa: E501
+        See https://picassosr.readthedocs.io/en/latest/localize/3d-calibration.html#localize-3d-calibration.  # noqa: E501
     lp : lib.FloatArray2D
         Localization precision for each localization in x, y and z. Only
         used if loc_prec_handle is "local". Shape (n_samples, 3).
@@ -2080,7 +2080,7 @@ def _run_g5m_group_3D(
         Astigmatism calibration dictionary with the keys "X
         Coefficients", "Y Coefficients" and "Magnification factor".
         Required for ``mode="astigmatism"``, may be None for spline.
-        See https://picassosr.readthedocs.io/en/latest/localize.html#d-calibration.  # noqa: E501
+        See https://picassosr.readthedocs.io/en/latest/localize/3d-calibration.html#localize-3d-calibration.  # noqa: E501
     min_locs : int, optional
         Minimum number of localizations per component. Default is
         `MIN_LOCS`.
@@ -2205,7 +2205,7 @@ class G5M_3D(G5M):
         Coefficients", "Y Coefficients" and "Magnification factor".
         Required for ``mode="astigmatism"`` and ignored (may be None)
         for ``mode="spline"``.
-        See https://picassosr.readthedocs.io/en/latest/localize.html#d-calibration.  # noqa: E501
+        See https://picassosr.readthedocs.io/en/latest/localize/3d-calibration.html#localize-3d-calibration.  # noqa: E501
     mode : {"astigmatism", "spline"}, optional
         Fitting mode of the input localizations. "astigmatism" couples
         the x/y covariances via the calibration polynomials; "spline"
@@ -3050,7 +3050,7 @@ def _fit_G5M(
         is "local".
     cx, cy : np.ndarray, optional
         X and Y coefficients for astigmatism fitting. Required for 3D
-        data only. See https://picassosr.readthedocs.io/en/latest/localize.html#d-calibration.  # noqa: E501
+        data only. See https://picassosr.readthedocs.io/en/latest/localize/3d-calibration.html#localize-3d-calibration.  # noqa: E501
     mag_factor : float, optional
         Magnification factor for astigmatism fitting. Required for 3D
         data only.
@@ -3392,10 +3392,17 @@ def _g5m(
         )
 
         # display progress
-        while lib.n_futures_done(fs) < n_steps:
-            n_done = lib.n_futures_done(fs)
-            progress.set_value(n_done)
-            time.sleep(0.2)
+        try:
+            while lib.n_futures_done(fs) < n_steps:
+                n_done = lib.n_futures_done(fs)
+                progress.set_value(n_done)
+                time.sleep(0.2)
+        except BaseException:
+            # e.g. canceled in the GUI (lib.OperationCanceled): drop the
+            # tasks not started yet instead of running them to the end
+            for f in fs:
+                f.cancel()
+            raise
 
         # extract centers from futures
         centers = [_.result()[0] for _ in fs if len(_.result())]
@@ -3799,7 +3806,7 @@ def g5m(
             "Calibration dictionary must be provided for astigmatism 3D "
             "data. The dictionary must specify 'X Coefficients' and 'Y "
             "Coefficients' and 'Magnification factor'. See "
-            f"{docs_url('localize.html#d-calibration')}"
+            + docs_url("localize/3d-calibration.html#localize-3d-calibration")
         )
 
     # determine how many steps are displayed in the progress bar

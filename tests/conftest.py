@@ -171,6 +171,41 @@ def qt_offscreen(qapp):
     qapp.processEvents()
 
 
+@pytest.fixture
+def restore_theme(qapp):
+    """Undo what ``picasso.gui.theme`` did to the shared ``QApplication``.
+
+    Applying a theme changes the style, palette, font and stylesheet of
+    the one application every GUI test shares; later tests must not run
+    in it.
+    """
+    from PyQt6 import QtCore, QtGui, QtWidgets
+
+    from picasso.gui import theme
+
+    style = qapp.style().name()
+    font = QtGui.QFont(qapp.font())
+    stylesheet = qapp.styleSheet()
+    hide_menu_icons = qapp.testAttribute(
+        QtCore.Qt.ApplicationAttribute.AA_DontShowIconsInMenus
+    )
+    state = dict(theme._state)
+    yield qapp
+    if theme._state["listening"] and not state["listening"]:
+        qapp.styleHints().colorSchemeChanged.disconnect(
+            theme._on_color_scheme_changed
+        )
+    theme._state.clear()
+    theme._state.update(state)
+    qapp.setStyleSheet(stylesheet)
+    qapp.setStyle(QtWidgets.QStyleFactory.create(style))
+    qapp.setPalette(QtGui.QPalette())
+    qapp.setFont(font)
+    qapp.setAttribute(
+        QtCore.Qt.ApplicationAttribute.AA_DontShowIconsInMenus, hide_menu_icons
+    )
+
+
 # ---------------------------------------------------------------------------
 # Geometric transforms
 # ---------------------------------------------------------------------------

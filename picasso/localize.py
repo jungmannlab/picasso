@@ -1301,34 +1301,7 @@ class SummedChannelsMovie:
         order: int = 1,
         camera_calibrations: list | None = None,
     ) -> None:
-        n_channels = len(movies)
-        if n_channels < 2:
-            raise ValueError(
-                "Summing channels needs at least two channels; identify on "
-                "the movie itself to not sum at all."
-            )
-        if len(transforms) != n_channels:
-            raise ValueError(
-                f"Got {n_channels} channels but {len(transforms)} channel "
-                "transforms."
-            )
-        unregistered = [c for c, t in enumerate(transforms) if t is None]
-        if unregistered:
-            raise ValueError(
-                f"Channel(s) {unregistered} have no affine transform, so they "
-                "cannot be mapped onto the reference channel. Register them "
-                "(load a multichannel spline calibration or identify every "
-                "channel so the transforms can be estimated) before summing."
-            )
-        if not 0 <= reference < n_channels:
-            raise ValueError(
-                f"The reference channel {reference} is not one of the "
-                f"{n_channels} channels."
-            )
-        if regions is not None and len(regions) != n_channels:
-            raise ValueError(
-                f"Got {n_channels} channels but {len(regions)} regions."
-            )
+        self._validate_channels(movies, transforms, regions, reference)
         self.movies = list(movies)
         self.transforms = [tform.from_dict(t) for t in transforms]
         self.camera_infos = (
@@ -1358,20 +1331,63 @@ class SummedChannelsMovie:
         # the window of the canvas that is filled: the reference region for
         # split-FOV data, the whole frame for separate channel movies
         if self.regions is None:
-            # a channel at the identity is added pixel for pixel, which needs
-            # the reference's frame size (a resampled one is not)
-            for c, transform in enumerate(self.transforms):
-                shape = np.asarray(self.movies[c][0]).shape
-                if transform.is_identity() and shape != self.frame_shape:
-                    raise ValueError(
-                        f"Channel {c}'s frames ({shape[0]} x {shape[1]}) "
-                        "differ from the reference's "
-                        f"({self.frame_shape[0]} x {self.frame_shape[1]}); "
-                        "register the channels to sum them."
-                    )
+            self._check_identity_shapes()
             self._window = [[0, 0], list(self.frame_shape)]
         else:
             self._window = self.regions[self.reference]
+
+    @staticmethod
+    def _validate_channels(
+        movies: list,
+        transforms: list,
+        regions: list | None,
+        reference: int,
+    ) -> None:
+        """Raise a ValueError if the channels cannot be summed, see
+        ``__init__``."""
+        n_channels = len(movies)
+        if n_channels < 2:
+            raise ValueError(
+                "Summing channels needs at least two channels; identify on "
+                "the movie itself to not sum at all."
+            )
+        if len(transforms) != n_channels:
+            raise ValueError(
+                f"Got {n_channels} channels but {len(transforms)} channel "
+                "transforms."
+            )
+        unregistered = [c for c, t in enumerate(transforms) if t is None]
+        if unregistered:
+            raise ValueError(
+                f"Channel(s) {unregistered} have no affine transform, so they "
+                "cannot be mapped onto the reference channel. Register them "
+                "(load a multichannel spline calibration or identify every "
+                "channel so the transforms can be estimated) before summing."
+            )
+        if not 0 <= reference < n_channels:
+            raise ValueError(
+                f"The reference channel {reference} is not one of the "
+                f"{n_channels} channels."
+            )
+        if regions is not None and len(regions) != n_channels:
+            raise ValueError(
+                f"Got {n_channels} channels but {len(regions)} regions."
+            )
+
+    def _check_identity_shapes(self) -> None:
+        """Raise a ValueError if a channel at the identity transform has
+        a frame size other than the reference's: it is added pixel for
+        pixel, which needs the reference's frame size (a resampled one
+        is not)."""
+        for c, transform in enumerate(self.transforms):
+            shape = np.asarray(self.movies[c][0]).shape
+            if transform.is_identity() and shape != self.frame_shape:
+                raise ValueError(
+                    f"Channel {c}'s frames ({shape[0]} x {shape[1]}) "
+                    "differ from the reference's "
+                    f"({self.frame_shape[0]} x {self.frame_shape[1]}); "
+                    "register the channels to sum them."
+                )
 
     @property
     def filled_window(self) -> list | None:

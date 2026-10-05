@@ -30,3 +30,6 @@ sphinx:
 python:
   install:
   - requirements: docs/requirements.txt
+  # The package itself, so that the API reference can import it.
+  - method: pip
+    path: .

@@ -10,33 +10,30 @@ maximum-likelihood estimators, and its Gaussian and
 cubic-spline PSF models - written in Python and compiled by Numba, for the CPU
 (``numba.jit``) and for CUDA GPUs (``numba.cuda.jit``).
 
-===================  =========================================================
-module               contents
-===================  =========================================================
-:mod:`splinefit`     CPU cubic-spline PSF fitting: the LM driver, the four
-                     spline models and both estimators. The reference
-                     implementation the CUDA kernels are transcribed from, and
-                     the owner of every constant that decides *where a fit
-                     stops*.
-:mod:`lmfit_cuda`    CUDA device machinery shared by the GPU backends: the
-                     damping, the Gauss-Jordan solve, the estimators and the
-                     host-side launch bookkeeping.
-:mod:`splinefit_cuda`  GPU cubic-spline PSF fitting; interchangeable with
-                     ``splinefit``.
-:mod:`gaussfit`      CPU 2D Gaussian PSF fitting (spherical, elliptical and
-                     rotated), over the same LM driver.
-:mod:`gaussfit_cuda`   GPU 2D Gaussian PSF fitting (spherical, elliptical and
-                     rotated).
-:mod:`seeds`         The initial parameters the fitters above start from,
-                     one closed-form estimator per model family. Plain NumPy,
-                     and the one module that has to change in step with a
-                     model's parameter layout. Not part of the Gpufit port,
-                     which leaves the seed to its caller.
-:mod:`precision`     Uncertainties of the fitted parameters: the closed-form
-                     precisions and the numerically inverted Fisher matrices
-                     (Cramer-Rao bounds), on the CPU and on CUDA GPUs. Not
-                     part of the Gpufit port.
-===================  =========================================================
+:mod:`splinefit`
+    CPU cubic-spline PSF fitting: the LM driver, the four spline models and
+    both estimators. The reference implementation the CUDA kernels are
+    transcribed from, and the owner of every constant that decides *where a fit
+    stops*.
+:mod:`lmfit_cuda`
+    CUDA device machinery shared by the GPU backends: the damping, the
+    Gauss-Jordan solve, the estimators and the host-side launch bookkeeping.
+:mod:`splinefit_cuda`
+    GPU cubic-spline PSF fitting; interchangeable with ``splinefit``.
+:mod:`gaussfit`
+    CPU 2D Gaussian PSF fitting (spherical, elliptical and rotated), over the
+    same LM driver.
+:mod:`gaussfit_cuda`
+    GPU 2D Gaussian PSF fitting (spherical, elliptical and rotated).
+:mod:`seeds`
+    The initial parameters the fitters above start from, one closed-form
+    estimator per model family. Plain NumPy, and the one module that has to
+    change in step with a model's parameter layout. Not part of the Gpufit
+    port, which leaves the seed to its caller.
+:mod:`precision`
+    Uncertainties of the fitted parameters: the closed-form precisions and the
+    numerically inverted Fisher matrices (Cramer-Rao bounds), on the CPU and on
+    CUDA GPUs. Not part of the Gpufit port.
 
 References
 ----------

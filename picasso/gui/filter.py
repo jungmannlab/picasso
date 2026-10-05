@@ -26,10 +26,13 @@ from matplotlib.backends.backend_qt5agg import (
     NavigationToolbar2QT,
 )
 from matplotlib.widgets import SpanSelector, RectangleSelector
-from matplotlib.colors import LogNorm
 
 from .. import io, lib, clusterer, __version__, docs_url
 from .app import run_gui
+from . import theme
+from . import toolbars
+from . import plot_style
+from .plot_style import PlotStyle
 
 plt.style.use("ggplot")
 
@@ -157,6 +160,8 @@ class PlotWindow(QtWidgets.QWidget):
     Holds only a reference to the main window and the field name(s) it
     plots. The localization data is pulled from the main window on
     demand to avoid retaining per-window copies (as before v0.10.1).
+    The appearance is the main window's ``plot_style``, shared by all
+    histogram windows.
 
     Attributes
     ----------
@@ -180,7 +185,16 @@ class PlotWindow(QtWidgets.QWidget):
         vbox = QtWidgets.QVBoxLayout()
         self.setLayout(vbox)
         vbox.addWidget(self.canvas)
-        vbox.addWidget((NavigationToolbar2QT(self.canvas, self)))
+        toolbar = NavigationToolbar2QT(self.canvas, self)
+        toolbar.addSeparator()
+        settings_action = toolbar.addAction("Plot settings")
+        settings_action.setIcon(theme.icon("plot-settings"))
+        settings_action.setToolTip(
+            "Appearance of all chart windows and Filter's histograms"
+        )
+        settings_action.triggered.connect(main_window.show_plot_settings)
+        theme.follow_toolbar_style(toolbar, settings_action)
+        vbox.addWidget(toolbar)
         self.setWindowTitle(f"Picasso v{__version__}: Filter")
 
         this_directory = os.path.dirname(os.path.realpath(__file__))
@@ -221,17 +235,24 @@ class HistWindow(PlotWindow):
         super().__init__(main_window)
 
     def plot(self) -> None:
+        style = self.main_window.plot_style
         data = self.main_window.get_column(self.field)
         if data.dtype.kind == "f":
             data = data[np.isfinite(data)]
         self.figure.clear()
-        self.figure.suptitle(self.field)
+        style.style_figure(self.figure)
         axes = self.figure.add_subplot(111)
+        style.style_axes(axes)
+        style.label(axes, self.field, "Counts")
         if len(data) == 0:
             self.canvas.draw()
             return
-        bins = lib.calculate_optimal_bins(data, 1000)
-        axes.hist(data, bins, rwidth=1, linewidth=0)
+        bins = lib.calculate_optimal_bins(data, style.max_bins)
+        counts, _ = np.histogram(data, bins)
+        style.bars(axes, counts, bins)
+        style.title(
+            self.figure, f"{self.field}  ·  {len(data):,} localizations"
+        )
         data_max = data.max()
         data_range = data_max - data.min()
         axes.set_xlim(
@@ -242,7 +263,7 @@ class HistWindow(PlotWindow):
             self.on_span_select,
             "horizontal",
             useblit=True,
-            props=dict(facecolor="green", alpha=0.2),
+            props=style.selection,
         )
         self.canvas.draw()
 
@@ -257,6 +278,12 @@ class HistWindow(PlotWindow):
 
 class Hist2DWindow(PlotWindow):
     """Window for displaying 2D histograms.
+
+    The 2D histogram is flanked by the 1D histograms (marginal
+    distributions) of both fields, computed from the same bins, unless
+    turned off in the plot settings. A rectangle drawn on the 2D
+    histogram filters both fields; a span selected on either 1D
+    histogram filters only that field.
 
     Attributes
     ----------
@@ -285,16 +312,19 @@ class Hist2DWindow(PlotWindow):
         self.resize(1000, 800)
 
     def plot(self) -> None:
+        style = self.main_window.plot_style
         x, y = self.main_window.get_columns([self.field_x, self.field_y])
         self.figure.clear()
-        axes = self.figure.add_subplot(111)
+        style.style_figure(self.figure)
+        self.span_x = self.span_y = None
         if len(x) == 0:
-            axes.get_xaxis().set_label_text(self.field_x)
-            axes.get_yaxis().set_label_text(self.field_y)
+            axes = self.figure.add_subplot(111)
+            style.style_axes(axes)
+            style.label(axes, self.field_x, self.field_y)
             self.canvas.draw()
             return
-        bins_x = lib.calculate_optimal_bins(x, 1000)
-        bins_y = lib.calculate_optimal_bins(y, 1000)
+        bins_x = lib.calculate_optimal_bins(x, style.max_bins)
+        bins_y = lib.calculate_optimal_bins(y, style.max_bins)
         nx = len(bins_x) - 1
         ny = len(bins_y) - 1
         x_min, x_max = float(bins_x[0]), float(bins_x[-1])
@@ -309,9 +339,45 @@ class Hist2DWindow(PlotWindow):
             nx,
             ny,
         )
+        # optional 1D histograms on top and right, colorbar on the right
+        width_ratios = [5]
+        height_ratios = [5]
+        if style.show_marginals:
+            width_ratios.append(1)
+            height_ratios.insert(0, 1)
+        if style.show_colorbar:
+            width_ratios.append(0.12)
+        grid = self.figure.add_gridspec(
+            len(height_ratios),
+            len(width_ratios),
+            width_ratios=width_ratios,
+            height_ratios=height_ratios,
+        )
+        axes = self.figure.add_subplot(grid[-1, 0])
+        style.style_axes(axes)
+        if style.show_marginals:
+            axes_x = self.figure.add_subplot(grid[0, 0], sharex=axes)
+            axes_y = self.figure.add_subplot(grid[-1, 1], sharey=axes)
+            style.style_axes(axes_x, grid_axis="y")
+            style.style_axes(axes_y, grid_axis="x")
+            # marginals from the 2D counts so that both use identical bins
+            style.bars(axes_x, counts.sum(axis=1), bins_x)
+            style.bars(
+                axes_y, counts.sum(axis=0), bins_y, orientation="horizontal"
+            )
+            axes_x.tick_params(labelbottom=False)
+            axes_y.tick_params(labelleft=False)
+            style.label(axes_x, None, "Counts")
+            style.label(axes_y, "Counts", None)
         masked = np.ma.masked_equal(counts.T, 0)
         image = axes.pcolormesh(
-            bins_x, bins_y, masked, norm=LogNorm(), shading="flat"
+            bins_x,
+            bins_y,
+            masked,
+            norm=style.norm(),
+            cmap=style.cmap,
+            shading="flat",
+            rasterized=True,
         )
         if x.dtype.kind == "f":
             x_data_max = float(np.nanmax(x))
@@ -331,17 +397,49 @@ class Hist2DWindow(PlotWindow):
         axes.set_ylim(
             [bins_y[0] - 0.05 * y_range, y_data_max + 0.05 * y_range]
         )
-        self.figure.colorbar(image, ax=axes)
-        axes.grid(False)
-        axes.get_xaxis().set_label_text(self.field_x)
-        axes.get_yaxis().set_label_text(self.field_y)
+        if style.show_colorbar:
+            colorbar = self.figure.colorbar(
+                image, cax=self.figure.add_subplot(grid[-1, -1])
+            )
+            style.style_colorbar(colorbar)
+        style.label(axes, self.field_x, self.field_y)
+        style.title(
+            self.figure,
+            f"{self.field_x} vs. {self.field_y}  ·  "
+            f"{int(counts.sum()):,} localizations",
+        )
         self.selector = RectangleSelector(
             axes,
             self.on_rect_select,
             useblit=True,
-            props=dict(facecolor="green", alpha=0.2, fill=True),
+            props=dict(fill=True, **style.selection),
         )
+        if style.show_marginals:
+            self.span_x = SpanSelector(
+                axes_x,
+                self.on_span_select_x,
+                "horizontal",
+                useblit=True,
+                props=style.selection,
+            )
+            self.span_y = SpanSelector(
+                axes_y,
+                self.on_span_select_y,
+                "vertical",
+                useblit=True,
+                props=style.selection,
+            )
         self.canvas.draw()
+
+    def on_span_select_x(self, xmin: float, xmax: float) -> None:
+        """Apply the range selected on the x-field 1D histogram as a
+        filter on the main window."""
+        self.main_window.apply_range(self.field_x, float(xmin), float(xmax))
+
+    def on_span_select_y(self, ymin: float, ymax: float) -> None:
+        """Apply the range selected on the y-field 1D histogram as a
+        filter on the main window."""
+        self.main_window.apply_range(self.field_y, float(ymin), float(ymax))
 
     def on_rect_select(
         self,
@@ -436,12 +534,15 @@ class FilterNum(lib.Dialog):
 
         # filter button
         filter_button = QtWidgets.QPushButton("Filter")
+        filter_button.setIcon(theme.icon("filter"))
         filter_button.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
         filter_button.clicked.connect(self.filter)
         self.layout.addWidget(filter_button, 3, 0, 1, 2)
 
     def filter(self) -> None:
         """Filters locs given the range values."""
+        if self.window.no_locs_warning("Filter"):
+            return
         xmin = self.min.value()
         xmax = self.max.value()
         if xmin < xmax:
@@ -517,6 +618,7 @@ class SubclusterNum(lib.Dialog):
         self.save_vals.setChecked(False)
         self.layout.addRow(self.save_vals)
         test_button = QtWidgets.QPushButton("Test subclustering")
+        test_button.setIcon(theme.icon("subclustering"))
         test_button.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
         test_button.clicked.connect(self.plot)
         self.layout.addRow(test_button)
@@ -556,14 +658,29 @@ class SubclusterNum(lib.Dialog):
                 df, columns=["clustered_nevents", "sparse_nevents"]
             )
             df.to_csv(path, index=False)
-        fig, ax = lib.plot_subclustering_check(
-            clustered_nevents,
-            sparse_nevents,
-            return_fig=True,
-            clustering_dist=dist_clustered,
-            sparse_dist=dist_sparse,
+        self.plot_window = lib.GenericPlotWindow(
+            "Test subclustering", "filter"
         )
-        plt.show()
+        self.plot_window.resize(700, 500)
+
+        def draw() -> None:
+            style = self.plot_window.plot_style
+            with self.plot_window.plot_context():
+                lib.plot_subclustering_check(
+                    clustered_nevents,
+                    sparse_nevents,
+                    return_fig=True,
+                    clustering_dist=dist_clustered,
+                    sparse_dist=dist_sparse,
+                    fig=self.plot_window.figure,
+                    fill=style.hist_fill,
+                    outline=style.hist_outline,
+                )
+
+        draw()
+        self.plot_window.redraw = draw
+        self.plot_window.canvas.draw()
+        self.plot_window.show()
 
 
 class Window(QtWidgets.QMainWindow):
@@ -627,13 +744,17 @@ class Window(QtWidgets.QMainWindow):
         export_csv_action = file_menu.addAction("Export as CSV...")
         export_csv_action.triggered.connect(self.export_csv_dialog)
         metadata_action = file_menu.addAction("Show metadata...")
+        metadata_action.setIcon(theme.icon("metadata"))
         metadata_action.setShortcut("Ctrl+M")
         metadata_action.triggered.connect(self.show_metadata)
         picasso_settings_action = file_menu.addAction("Picasso settings...")
+        picasso_settings_action.setIcon(theme.icon("picasso-settings"))
         picasso_settings_action.triggered.connect(
             self.user_settings_dialog.show
         )
+        theme.add_menu_action(file_menu)
         help_action = file_menu.addAction("Help")
+        help_action.setIcon(theme.icon("help"))
         help_action.triggered.connect(
             lambda: QtGui.QDesktopServices.openUrl(QtCore.QUrl(self.DOCS_URL))
         )
@@ -646,6 +767,9 @@ class Window(QtWidgets.QMainWindow):
         scatter_action.triggered.connect(self.plot_hist2d)
         test_subcluster_action = plot_menu.addAction("Test subclustering...")
         test_subcluster_action.triggered.connect(self.plot_subclustering)
+        plot_menu.addSeparator()
+        plot_settings_action = plot_menu.addAction("Plot settings...")
+        plot_settings_action.triggered.connect(self.show_plot_settings)
 
         filter_menu = menu_bar.addMenu("Filter")
         filter_action = filter_menu.addAction("Filter numerically...")
@@ -685,8 +809,36 @@ class Window(QtWidgets.QMainWindow):
         if len(pwd) == 0:
             pwd = []
         self.pwd = pwd
+        self.plot_style = plot_style.current()
+        plot_style.hub().changed.connect(self.set_plot_style)
 
         self.plugin_menu = menu_bar.addMenu("Plugins")  # do not delete
+
+        # toolbar of the most used actions, shared with the menus
+        self.toolbar = toolbars.add_toolbar(
+            self,
+            "Filter toolbar",
+            [
+                (open_action, "open", "Open"),
+                (save_action, "save", "Save"),
+                (export_csv_action, "export-csv", "Export CSV"),
+                None,
+                (histogram_action, "histogram"),
+                (scatter_action, "histogram-2d", "2D histogram"),
+                (test_subcluster_action, "subclustering", "Subclustering"),
+                None,
+                (filter_action, "filter", "Filter"),
+                (
+                    apply_from_metadata_action,
+                    "filter-metadata",
+                    "From metadata",
+                ),
+                None,
+                (plot_settings_action, "plot-settings", "Plot settings"),
+            ],
+        )
+        # in the menus only, not on the toolbar
+        remove_columns_action.setIcon(theme.icon("remove-columns"))
 
     @property
     def locs(self) -> pd.DataFrame:
@@ -864,10 +1016,38 @@ class Window(QtWidgets.QMainWindow):
         )
         self.pwd = os.path.dirname(path)
 
+    def no_locs_warning(self, title: str) -> bool:
+        """Tell the user that no localizations are loaded, if so.
+
+        Parameters
+        ----------
+        title : str
+            Title of the message box, i.e., the name of the action that
+            needs localizations.
+
+        Returns
+        -------
+        missing : bool
+            True if no localizations are loaded (the action should
+            stop), False otherwise.
+        """
+        if self.locs_full is not None:
+            return False
+        QtWidgets.QMessageBox.information(self, title, "No file loaded.")
+        return True
+
     def plot_histogram(self) -> None:
+        if self.no_locs_warning("Histogram"):
+            return
         selection_model = self.table_view.selectionModel()
         indices = selection_model.selectedColumns()
-        if len(indices) > 0:
+        if len(indices) == 0:
+            QtWidgets.QMessageBox.information(
+                self,
+                "Histogram",
+                "Select one or more columns (click their headers) first.",
+            )
+        else:
             for index in indices:
                 index = index.column()
                 field = self.locs_full.columns[index]
@@ -876,9 +1056,17 @@ class Window(QtWidgets.QMainWindow):
                 self.hist_windows[field].show()
 
     def plot_hist2d(self) -> None:
+        if self.no_locs_warning("2D Histogram"):
+            return
         selection_model = self.table_view.selectionModel()
         indices = selection_model.selectedColumns()
-        if len(indices) == 2:
+        if len(indices) != 2:
+            QtWidgets.QMessageBox.information(
+                self,
+                "2D Histogram",
+                "Select two columns (click their headers) first.",
+            )
+        else:
             indices = [index.column() for index in indices]
             field_x, field_y = [
                 self.locs_full.columns[index] for index in indices
@@ -889,7 +1077,25 @@ class Window(QtWidgets.QMainWindow):
                 )
             self.hist2d_windows[field_x][field_y].show()
 
+    def show_plot_settings(self) -> None:
+        """Show the dialog that sets the appearance of the chart
+        windows."""
+        plot_style.show_dialog(filter_options=True)
+
+    def set_plot_style(self, style: PlotStyle) -> None:
+        """Set the appearance of the histogram windows and redraw the
+        open ones."""
+        self.plot_style = style
+        windows = list(self.hist_windows.values())
+        for by_y in self.hist2d_windows.values():
+            windows.extend(by_y.values())
+        for window in windows:
+            if window:
+                window.refresh()
+
     def plot_subclustering(self) -> None:
+        if self.no_locs_warning("Test subclustering"):
+            return
         self.subcluster_num = SubclusterNum(self)
         self.subcluster_num.show()
 
@@ -917,7 +1123,7 @@ class Window(QtWidgets.QMainWindow):
 
     def remove_columns(self) -> None:
         """Remove columns from the loaded dataset."""
-        if self.locs_full is None:
+        if self.no_locs_warning("Remove columns"):
             return
         columns = self.locs_full.columns.to_list()
         to_remove, ok = lib.RemoveColumnsDialog.getParams(self, columns)
@@ -1017,7 +1223,7 @@ class Window(QtWidgets.QMainWindow):
             self.refresh()
 
     def export_csv_dialog(self) -> None:
-        if self.locs_full is None:
+        if self.no_locs_warning("Export as CSV"):
             return
         base, ext = os.path.splitext(self.locs_path)
         out_path = base + ".csv"
@@ -1031,7 +1237,7 @@ class Window(QtWidgets.QMainWindow):
             self.materialize_filtered().to_csv(path, index=False)
 
     def save_file_dialog(self) -> None:
-        if self.locs_full is None:
+        if self.no_locs_warning("Save"):
             return
         if "x" in self.locs_full.columns:  # Saving only for locs
             base, ext = os.path.splitext(self.locs_path)

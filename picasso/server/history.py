@@ -277,11 +277,12 @@ def history():
                     csv = convert_df(table)
 
                     st.download_button(
-                        "Click to download as (csv)",
+                        "Download as CSV",
                         csv,
                         "file.csv",
                         "text/csv",
                         key="download-csv",
+                        icon=":material/download:",
                     )
                 else:
 

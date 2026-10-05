@@ -24,6 +24,7 @@ from .. import io as _io
 from .. import design, design_sequences
 from .. import lib, __version__, docs_url
 from .app import run_gui
+from . import theme
 
 BASE_SEQUENCES = design_sequences.base_sequences
 PAINT_SEQUENCES = design_sequences.paint_sequences
@@ -282,6 +283,16 @@ defaultcolor = allcolors[0]
 maxcolor = 8
 
 
+def set_item_color(
+    item: QtWidgets.QTableWidgetItem, color: QtGui.QColor
+) -> None:
+    """Fill a table cell with ``color`` and write it in black or white,
+    whichever reads better, also in a dark theme."""
+    item.setBackground(color)
+    text = "black" if QtGui.QColor(color).lightnessF() > 0.5 else "white"
+    item.setForeground(QtGui.QColor(text))
+
+
 def indextoHex(y: int, x: int) -> tuple[float, float]:
     """Convert 2D index (row, col) to hexagonal coordinates."""
     hex_center_x = x * 1.5 * HEX_SIDE_HALF
@@ -498,7 +509,7 @@ class SeqDialog(lib.Dialog):
                 self.table.setItem(
                     rowRunner, 1, QtWidgets.QTableWidgetItem(f"Ext {i + 1}")
                 )
-                self.table.item(rowRunner, 1).setBackground(allcolors[i + 1])
+                set_item_color(self.table.item(rowRunner, 1), allcolors[i + 1])
                 self.table.setItem(
                     rowRunner, 3, QtWidgets.QTableWidgetItem(tableshort[i])
                 )
@@ -704,18 +715,19 @@ class FoldingDialog(lib.Dialog):
         water = totalvolume - foldingbuffer - _np.sum(volume)
 
         self.writeTable(rowCount - 3, 5, str(_np.round(water, decimals=3)))
+        # mark a negative volume; otherwise the table's own colors
+        item = self.table.item(rowCount - 3, 5)
         if water < 0:
-            self.table.item(rowCount - 3, 5).setBackground(QtGui.QColor("red"))
+            set_item_color(item, QtGui.QColor("red"))
         else:
-            self.table.item(rowCount - 3, 5).setBackground(
-                QtGui.QColor("white")
-            )
+            item.setBackground(QtGui.QBrush())
+            item.setForeground(QtGui.QBrush())
 
     def writeTable(self, row: int, col: int, content: str) -> None:
         self.table.setItem(row, col, QtWidgets.QTableWidgetItem(content))
 
     def colorTable(self, row: int, col: int, color: QtGui.QColor) -> None:
-        self.table.item(row, col).setBackground(color)
+        set_item_color(self.table.item(row, col), color)
 
     def setExt(
         parent: QtWidgets.QWidget | None = None,
@@ -879,6 +891,27 @@ class Scene(QtWidgets.QGraphicsScene):
     window : QtWidgets.QMainWindow
         The main window of the application.
     """
+
+    def addItem(self, item: QtWidgets.QGraphicsItem) -> None:
+        """Add ``item`` to the scene; text in the windows' text color,
+        see ``apply_theme``."""
+        if isinstance(item, QtWidgets.QGraphicsTextItem):
+            item.setDefaultTextColor(
+                QtWidgets.QApplication.palette().color(
+                    QtGui.QPalette.ColorRole.Text
+                )
+            )
+        super().addItem(item)
+
+    def apply_theme(self) -> None:
+        """Draw the background and the text of the design in the colors
+        of the windows (light or dark, see ``picasso.gui.theme``)."""
+        palette = QtWidgets.QApplication.palette()
+        self.setBackgroundBrush(palette.color(QtGui.QPalette.ColorRole.Base))
+        text = palette.color(QtGui.QPalette.ColorRole.Text)
+        for item in self.items():
+            if isinstance(item, QtWidgets.QGraphicsTextItem):
+                item.setDefaultTextColor(text)
 
     def __init__(self, window: QtWidgets.QMainWindow) -> None:
         super().__init__()
@@ -1398,6 +1431,9 @@ class Window(QtWidgets.QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.mainscene = Scene(self)
+        # the design follows the light or dark theme of the windows
+        self.mainscene.apply_theme()
+        theme.hub().changed.connect(self._on_theme_changed)
         self.view = QtWidgets.QGraphicsView(self.mainscene)
         self.view.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
         self.setCentralWidget(self.view)
@@ -1448,9 +1484,23 @@ class Window(QtWidgets.QMainWindow):
             )
 
     def clearDialog(self) -> None:
-        """Reset the origami design."""
+        """Reset the origami design, asking first."""
+        reply = QtWidgets.QMessageBox.question(
+            self,
+            "Clear design",
+            "This clears the current design; unsaved changes are lost.\n"
+            "Do you want to continue?",
+            QtWidgets.QMessageBox.StandardButton.Discard
+            | QtWidgets.QMessageBox.StandardButton.Cancel,
+            QtWidgets.QMessageBox.StandardButton.Cancel,
+        )
+        if reply != QtWidgets.QMessageBox.StandardButton.Discard:
+            return
         self.mainscene.clearCanvas()
         self.statusBar().showMessage("Cleared.")
+
+    def _on_theme_changed(self, _appearance) -> None:
+        self.mainscene.apply_theme()
 
     def takeScreenshot(self) -> None:
         """Screenshot the current view."""
@@ -1470,7 +1520,9 @@ class Window(QtWidgets.QMainWindow):
                 p.save(path, filter[2:])
             else:
                 pdf_printer = QtPrintSupport.QPrinter()
-                pdf_printer.setOutputFormat(QtPrintSupport.QPrinter.PdfFormat)
+                pdf_printer.setOutputFormat(
+                    QtPrintSupport.QPrinter.OutputFormat.PdfFormat
+                )
                 pdf_printer.setOutputFileName(path)
                 pdf_painter = QtGui.QPainter()
                 pdf_painter.begin(pdf_printer)
@@ -1752,6 +1804,17 @@ class MainWindow(QtWidgets.QWidget):
         pipettbtn.setToolTip("Generate a pipetting scheme (.pdf) for mixing.")
         foldbtn = QtWidgets.QPushButton("Folding scheme")
         foldbtn.setToolTip("Calculate concentrations and volumes for folding.")
+        for button, name in (
+            (loadbtn, "open"),
+            (savebtn, "save"),
+            (clearbtn, "clear"),
+            (sshotbtn, "export-view"),
+            (seqbtn, "extensions"),
+            (platebtn, "plates"),
+            (pipettbtn, "pipetting"),
+            (foldbtn, "folding"),
+        ):
+            button.setIcon(theme.icon(name))
 
         loadbtn.clicked.connect(self.window.openDialog)
         savebtn.clicked.connect(self.window.saveDialog)
@@ -1779,19 +1842,14 @@ class MainWindow(QtWidgets.QWidget):
         vbox.addLayout(hbox)
         self.setLayout(vbox)
 
-        # make white background
-        palette = QtGui.QPalette()
-        palette.setColor(
-            QtGui.QPalette.ColorRole.Window, QtCore.Qt.GlobalColor.white
-        )
-        self.setPalette(palette)
-
         menu_bar = QtWidgets.QMenuBar(self)
         file_menu = menu_bar.addMenu("File")
         picasso_settings_action = file_menu.addAction("Picasso settings...")
+        picasso_settings_action.setIcon(theme.icon("picasso-settings"))
         picasso_settings_action.triggered.connect(
             self.window.user_settings_dialog.show
         )
+        theme.add_menu_action(file_menu)
         self.plugin_menu = menu_bar.addMenu("Plugins")  # do not delete
 
 

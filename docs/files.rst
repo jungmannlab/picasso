@@ -1,63 +1,156 @@
-filetypes
-=========
+File Formats
+============
 
-This section describes the different file format and name conventions used in Picasso.
+This section describes the different file format and name conventions used in
+Picasso.
+
+.. _files-movie:
 
 Movie Files
 -----------
 
-Picasso accepts several types of raw movie files: TIFF-family stacks (“.tif”/“.tiff”/“.ome.tif”/BigTIFF/Zeiss “.lsm”), raw binary data (file extension “.raw”), the Nikon format “.nd2”, MetaMorph “.stk”, Imaris “.ims” (Windows only), and — with the optional ``czi``/``lif`` extras (Python ≥ 3.12) — Zeiss “.czi” and Leica “.lif”.
+Picasso accepts several types of raw movie files:
 
-When loading raw binary files, the user will be prompted for movie metadata such as the number of frames, number of pixels, etc. Alternatively, this metadata can be supplied by an accompanying metadata file with the same filename as the raw binary file, but with the extension .yaml. See ``YAML Metadata Files`` for more details.
+- TIFF-family stacks (``.tif``/``.tiff``/``.ome.tif``/BigTIFF/Zeiss ``.lsm``);
+- raw binary data (file extension ``.raw``);
+- the Nikon format ``.nd2``;
+- MetaMorph ``.stk``;
+- Imaris ``.ims`` (Windows only);
+- with the optional ``czi``/``lif`` extras (Python ≥ 3.12), Zeiss ``.czi``
+  and Leica ``.lif``.
 
-For TIFF-family, “.nd2” and “.stk” movies the metadata is normally read directly from the file. If this metadata cannot be parsed, ``Picasso: Localize`` falls back to prompting the user to enter the required information (``Frames``, ``Width``, ``Height`` and ``Pixelsize``) manually; the field of view dimensions are pre-filled from the file when they can be read. As with raw files, the entered metadata can optionally be saved to an accompanying “.yaml” file so it is reused the next time the movie is opened.
+When loading raw binary files, the user will be prompted for movie metadata
+such as the number of frames, number of pixels, etc. Alternatively, this
+metadata can be supplied by an accompanying metadata file with the same
+filename as the raw binary file, but with the extension .yaml. See
+:ref:`files-yaml` for more details.
+
+For TIFF-family, ``.nd2`` and ``.stk`` movies the metadata is normally read
+directly from the file. If this metadata cannot be parsed,
+``Picasso: Localize`` falls back to prompting the user to enter the required
+information (``Frames``, ``Width``, ``Height`` and ``Pixelsize``) manually;
+the field of view dimensions are pre-filled from the file when they can be
+read.
+
+As with raw files, the entered metadata can optionally be saved to an
+accompanying ``.yaml`` file so it is reused the next time the movie is opened.
+
+.. _files-hdf5:
 
 HDF5 Files
 ----------
 
-HDF5 is a generic and efficient binary file format for storing data. In Picasso, HDF5 files are used for storing tabular data of localizations with the file extension ``.hdf5``. Furthermore, Picasso saves the statistical properties of groups of localizations in an HDF5 file.
+HDF5 is a generic and efficient binary file format for storing data. In
+Picasso, HDF5 files are used for storing tabular data of localizations with
+the file extension ``.hdf5``. Furthermore, Picasso saves the statistical
+properties of groups of localizations in an HDF5 file.
 
-Generally, several datasets can be stored within an HDF5 file. These datasets are accessible by specifying a path within the HDF5 file, similar to a path of an operating system. When saving localizations, Picasso stores tabular data under the path ``/locs``. When saving statistical properties of groups of localizations, Picasso saves the table under the path ``/groups``. Since v0.11, Picasso also embeds the metadata directly in the HDF5 file under the path ``/metadata`` (see "Metadata" below), so that the file is self-contained.
+Generally, several datasets can be stored within an HDF5 file. These datasets
+are accessible by specifying a path within the HDF5 file, similar to a path of
+an operating system:
 
-An HDF5 file can be opened with various software packages. In Picasso, we use ``pandas`` for this purpose. For example, to open localizations, ``pandas.read_hdf(PATH_TO_LOCALIZATIONS, key="locs")`` is used. The ``key`` argument can be adjusted for other datasets. The available keys can be verified using ``pandas.HDFStore(PATH_TO_FILE).keys()``.
+- When saving localizations, Picasso stores tabular data under the path
+  ``/locs``.
+- When saving statistical properties of groups of localizations, Picasso saves
+  the table under the path ``/groups``.
+- Since v0.11, Picasso also embeds the metadata directly in the HDF5 file
+  under the path ``/metadata`` (see :ref:`files-metadata-settings` below), so
+  that the file is self-contained.
 
-**Note:** Picasso HDF5 files store their metadata both in the embedded ``/metadata`` dataset and (by default) in an accompanying YAML metadata file, which are read together using ``locs, info = picasso.io.load_locs``. **See sections "Localization HDF5 Files", "Metadata" and "YAML Metadata Files" below for more details on the minimum requirements to process HDF5 files in Picasso.**
+An HDF5 file can be opened with various software packages. In Picasso, we use
+``pandas`` for this purpose. For example, to open localizations:
+
+.. code-block:: python
+
+   import pandas
+
+   locs = pandas.read_hdf(PATH_TO_LOCALIZATIONS, key="locs")
+
+The ``key`` argument can be adjusted for other datasets. The available keys
+can be verified using ``pandas.HDFStore(PATH_TO_FILE).keys()``.
+
+.. important::
+
+   Picasso HDF5 files store their metadata both in the embedded ``/metadata``
+   dataset and (by default) in an accompanying YAML metadata file, which are
+   read together using ``locs, info = picasso.io.load_locs``. See
+   :ref:`files-localization-hdf5`, :ref:`files-metadata-settings` and
+   :ref:`files-yaml` below for more details on the minimum requirements to
+   process HDF5 files in Picasso.
 
 
 Importing HDF5 files in MATLAB and Origin
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-In MATLAB, execute the command ``locs = h5read(filename, dataset)``. Replace dataset with ``/locs`` for localization files and with ``/groups`` for pick property files.
+In MATLAB, execute the command:
+
+.. code-block:: matlab
+
+   locs = h5read(filename, dataset)
+
+Replace ``dataset`` with ``/locs`` for localization files and with ``/groups``
+for pick property files.
 
 In Origin, select ``File > Import > HDF5`` or drag and drop the file into the main window.
+
+.. _files-localization-hdf5:
 
 Localization HDF5 Files
 -----------------------
 
-Picasso's localization HDF5 files carry their metadata in two places: embedded in the HDF5 file itself under the path ``/metadata``, and (by default) in a YAML metadata file with the same filename, but with the extension .yaml. See ``Metadata`` and ``YAML Metadata Files`` below for more details. ``locs, info = picasso.io.load_locs`` is used to read both the HDF5 file and the metadata. The localization table is stored as a dataset of the HDF5 file in the path ``/locs``. This table can be explored by opening the HDF5 file with ``Picasso: Filter``. The localization table can have an unlimited number of columns. Table 1 explains the main column names in Picasso.
+Picasso's localization HDF5 files carry their metadata in two places: embedded
+in the HDF5 file itself under the path ``/metadata``, and (by default) in a
+YAML metadata file with the same filename, but with the extension .yaml. See
+:ref:`files-metadata-settings` and :ref:`files-yaml` below for more details.
+``locs, info = picasso.io.load_locs`` is used to read both the HDF5 file and
+the metadata.
+
+The localization table is stored as a dataset of the HDF5 file in the path
+``/locs``. This table can be explored by opening the HDF5 file with
+:doc:`filter`. The localization table can have an unlimited number of columns.
+Table 1 explains the main column names in Picasso.
 
 .. csv-table:: Table 1: Name, description and data type for the main columns used in Picasso.
    :file: table01.csv
-   :widths: 20, 20, 20
+   :widths: 15, 65, 20
    :header-rows: 1
 
-The minimum required columns are: ``x``, ``y``, ``frame``, ``lpx`` and ``lpy``. For 3D data, the column ``z`` is also required. Since v0.9.5, Picasso supports the ``lpz`` column but it is not necessary for rendering (although recommended for accurate rendering in 3D).
+The minimum required columns are: ``x``, ``y``, ``frame``, ``lpx`` and
+``lpy``. For 3D data, the column ``z`` is also required. Since v0.9.5, Picasso
+supports the ``lpz`` column but it is not necessary for rendering (although
+recommended for accurate rendering in 3D).
+
+.. _files-molecular-maps:
 
 Molecular maps (cluster centers) HDF5 Files
 -------------------------------------------
 
-Molecular maps generated with RESI or by single-protein resolution imaging (i.e., generated by SMLM clusterer or G5M) can be opened in Picasso: Render just like localizations. The column names change slightly to reflect the different data type. Table 2 explains the main column names in molecular maps.
+Molecular maps generated with RESI or by single-protein resolution imaging
+(i.e., generated by SMLM clusterer or G5M) can be opened in
+``Picasso: Render`` just like localizations. The column names change slightly
+to reflect the different data type. Table 2 explains the main column names in
+molecular maps.
 
 .. csv-table:: Table 2: Name, description and data type for the main columns used in molecular maps in Picasso.
    :file: table02.csv
-   :widths: 20, 20, 20
+   :widths: 15, 65, 20
    :header-rows: 1
+
+.. _files-pick-properties:
 
 HDF5 Pick Property Files
 ------------------------
 
-When selecting ``File > Save pick properties`` in ``Picasso: Render``, the properties of picked regions are stored in an HDF5 file. Within the HDF5 file, the data table is stored in the path ``/groups``.
-Each row in the “groups” table corresponds to one picked region. For each localization property (see Table 1), two columns are generated in the ``groups`` table: the mean and standard deviation of the respective column over the localizations in a pick region. For example, if the localization table contains a column ``len``, the “groups” table will contain a column ``len_mean`` and ``len_std``.
+When selecting ``File > Save pick properties`` in ``Picasso: Render``, the
+properties of picked regions are stored in an HDF5 file. Within the HDF5 file,
+the data table is stored in the path ``/groups``.
+
+Each row in the ``groups`` table corresponds to one picked region. For each
+localization property (see Table 1), two columns are generated in the
+``groups`` table: the mean and standard deviation of the respective column
+over the localizations in a pick region. For example, if the localization
+table contains a column ``len``, the ``groups`` table will contain a column
+``len_mean`` and ``len_std``.
 
 Furthermore, the following columns are included: 
 
@@ -69,30 +162,89 @@ Furthermore, the following columns are included:
 - ``len_mean`` and ``dark_mean``: mean bright and dark times, respectively, obtained by averaging over all binding events, rather than fitting to the CDF. Units: frames;
 - ``len_std`` and ``dark_std``: standard deviation of bright and dark times, respectively;
 
-Bright and dark times are counted in frames. The bright time (``len``) of a binding event runs from its first to its last frame, both included. The dark time is the number of frames without signal between the end of one binding event and the start of the next one in the same pick. Dark times are only measured between binding events: the frames before the first and after the last binding event in a pick are not counted, and a pick with a single binding event has no dark time.
+Bright and dark times are counted in frames:
 
-**Note:** before Picasso 0.11.3, the dark time was the difference between the first frame of a binding event and the last frame of the previous one, i.e., one frame longer than now. Dark times, qPAINT influx rates and numbers of units calculated with earlier versions are therefore not directly comparable; recalibrate the influx rate with the current version. See ``picasso.postprocess.dark_times`` for the details.
+- The bright time (``len``) of a binding event runs from its first to its last
+  frame, both included.
+- The dark time is the number of frames without signal between the end of one
+  binding event and the start of the next one in the same pick.
+- Dark times are only measured between binding events: the frames before the
+  first and after the last binding event in a pick are not counted, and a pick
+  with a single binding event has no dark time.
+
+.. important::
+
+   Before Picasso 0.11.3, the dark time was the difference between the first
+   frame of a binding event and the last frame of the previous one, i.e., one
+   frame longer than now. Dark times, qPAINT influx rates and numbers of units
+   calculated with earlier versions are therefore not directly comparable;
+   recalibrate the influx rate with the current version. See
+   ``picasso.postprocess.dark_times`` for the details.
 
 .. _spatial-index:
 
 Spatial index
 -------------
-Since v0.12, ``picasso.io.save_locs`` also stores the spatial index that ``Picasso: Render`` uses for fast zooming, rotating and picking (a multi-resolution grid over the localizations, see ``picasso.spatial_index``) in the HDF5 group ``/render_index``, for files of 100,000 localizations or more (``render_index=True`` or ``False`` overrides this). When such a file is opened in Render, the stored index is read instead of built, which saves about a second per million localizations. Before it is used, the index is checked against the localizations (every entry must cover exactly one row and every grid cell must hold only the rows that fall in it), so a file whose ``/locs`` table was rewritten by other software or by a script without ``save_locs`` is simply re-indexed; the check cannot be fooled by a stale index. Older Picasso versions and other software ignore the group.
+Since v0.12, ``picasso.io.save_locs`` also stores the spatial index that
+``Picasso: Render`` uses for fast zooming, rotating and picking (a
+multi-resolution grid over the localizations, see ``picasso.spatial_index``)
+in the HDF5 group ``/render_index``, for files of 100,000 localizations or
+more (``render_index=True`` or ``False`` overrides this).
 
-Localizations are stored with float32 floating-point columns and a uint32 ``frame`` column, whatever dtypes a pipeline produced in memory (``picasso.lib.standardize_dtypes``, applied when loading, saving and by most processing functions). float32 resolvesfar below any localization precision, and halves memory and file size compared to float64.
+When such a file is opened in Render, the stored index is read instead of
+built, which saves about a second per million localizations.
+
+Before it is used, the index is checked against the localizations (every
+entry must cover exactly one row and every grid cell must hold only the rows
+that fall in it), so a file whose ``/locs`` table was rewritten by other
+software or by a script without ``save_locs`` is simply re-indexed; the check
+cannot be fooled by a stale index. Older Picasso versions and other software
+ignore the group.
+
+.. _files-dtypes:
+
+Data types
+----------
+
+Localizations are stored with float32 floating-point columns and a uint32
+``frame`` column, whatever dtypes a pipeline produced in memory
+(``picasso.lib.standardize_dtypes``, applied when loading, saving and by most
+processing functions). float32 resolves far below any localization precision,
+and halves memory and file size compared to float64.
 
 .. _files-metadata-settings:
 
 Metadata
 --------
 
-Metadata describes a localization (or identification) dataset: the size of the field of view, the number of frames, the pixel size, the processing history, etc. In Picasso, metadata is represented internally as a list of dictionaries (``info``) where each step of analysis appends a new dictionary to the list.
+Metadata describes a localization (or identification) dataset: the size of
+the field of view, the number of frames, the pixel size, the processing
+history, etc. In Picasso, metadata is represented internally as a list of
+dictionaries (``info``) where each step of analysis appends a new dictionary
+to the list.
 
-Since v0.11, Picasso embeds this metadata directly inside the HDF5 file as a JSON string in the dataset ``/metadata``. This makes the HDF5 file self-contained, so the metadata is preserved even if the file is moved or renamed without its accompanying YAML file.
+Since v0.11, Picasso embeds this metadata directly inside the HDF5 file as a
+JSON string in the dataset ``/metadata``. This makes the HDF5 file
+self-contained, so the metadata is preserved even if the file is moved or
+renamed without its accompanying YAML file.
 
-For convenience and backward compatibility, the metadata is, by default, also written to a separate YAML file (see "YAML Metadata Files" below). Whether this YAML copy is written is controlled by the user setting ``Save metadata in .yaml`` in ``~/.picasso/settings.yaml`` (default: ``True``). Picasso settings are also available under Files > Picasso settings in any module. Set ``Save metadata in .yaml`` to ``False`` to save only the embedded ``/metadata`` dataset.
+Two user settings in ``~/.picasso/settings.yaml`` (see
+:ref:`user-settings-file`; also available under ``File > Picasso settings`` in
+any module) control what is written:
 
-Movies acquired with MicroManager carry a large block of microscope properties, which Picasso reads from the movie (as ``Micro-Manager Metadata``) and copies into the metadata of the localizations fitted from it. Set the user setting ``Save Micro-Manager metadata`` to ``false`` in ``~/.picasso/settings.yaml`` to leave it out (default: ``true``, i.e., the block is kept). This applies when localizing only - the block is dropped as the movie metadata is carried over into the localizations (and identifications/spots).
+``Save metadata in .yaml`` (default: ``True``)
+   For convenience and backward compatibility, the metadata is, by default,
+   also written to a separate YAML file (see :ref:`files-yaml` below). Set
+   ``Save metadata in .yaml`` to ``False`` to save only the embedded
+   ``/metadata`` dataset.
+``Save Micro-Manager metadata`` (default: ``true``, i.e., the block is kept)
+   Movies acquired with MicroManager carry a large block of microscope
+   properties, which Picasso reads from the movie (as
+   ``Micro-Manager Metadata``) and copies into the metadata of the
+   localizations fitted from it. Set this setting to ``false`` to leave it
+   out. This applies when localizing only - the block is dropped as the movie
+   metadata is carried over into the localizations (and
+   identifications/spots).
 
 When loading metadata (``picasso.io.load_info``, used by ``load_locs``), Picasso looks for the metadata in the following order:
 
@@ -100,12 +252,46 @@ When loading metadata (``picasso.io.load_info``, used by ``load_locs``), Picasso
 2. The embedded ``/metadata`` dataset in the HDF5 file;
 3. Otherwise, a ``NoMetadataFileError`` is raised.
 
+.. _files-yaml:
+
 YAML Metadata Files
 -------------------
 
-YAML files are document-oriented text files that can be opened and changed with any text editor. In Picasso, YAML files are used to store metadata of movie or localization files.
-By default, each localization HDF5 file is accompanied by a YAML file of the same filename, except for the extension, which is ``.yaml``. Since v0.11 the metadata is also embedded in the HDF5 file itself (see "Metadata" above), so deleting the YAML file no longer breaks loading as long as the HDF5 file contains the embedded ``/metadata`` dataset. For older Picasso files (or movie files such as ``.raw``) that have no embedded metadata, deleting the YAML metadata file will result in an error.
+YAML files are document-oriented text files that can be opened and changed
+with any text editor. In Picasso, YAML files are used to store metadata of
+movie or localization files.
 
-The metadata file must contain the keys: ``Width``, ``Height`` (size of the field of view in camera pixels), ``Frames`` (number of frames in the movie), and ``Pixelsize`` (effective camera pixel size after magnification in nm). Example files can be found `here <https://github.com/jungmannlab/picasso/tree/master/samples/data>`_
+By default, each localization HDF5 file is accompanied by a YAML file of the
+same filename, except for the extension, which is ``.yaml``. Since v0.11 the
+metadata is also embedded in the HDF5 file itself (see
+:ref:`files-metadata-settings` above), so deleting the YAML file no longer
+breaks loading as long as the HDF5 file contains the embedded ``/metadata``
+dataset.
 
-Raw binary files (i.e., with extension ``.raw``) may be accompanied by a YAML metadata file to store data about the movie dimensions, etc. While the metadata file, in this case, is not required, it reduces the effort of typing in this metadata each time the movie is loaded with ``Picasso: Localize``. To generate such a YAML metadata file, load the raw movie into ``Picasso: Localize``, then enter all required information in the appearing dialog. Check the checkbox ``Save info to yaml file`` and click ok. The movie will be loaded and the metadata saved in a YAML file. This file will be detected the next time this raw movie is loaded, and the metadata does not need to be entered again.
+.. warning::
+
+   For older Picasso files (or movie files such as ``.raw``) that have no
+   embedded metadata, deleting the YAML metadata file will result in an error.
+
+The metadata file must contain the keys:
+
+- ``Width``, ``Height``: size of the field of view in camera pixels;
+- ``Frames``: number of frames in the movie;
+- ``Pixelsize``: effective camera pixel size after magnification in nm.
+
+Example files can be found in the
+`samples/data folder <https://github.com/jungmannlab/picasso/tree/master/samples/data>`_.
+
+Raw binary files (i.e., with extension ``.raw``) may be accompanied by a YAML
+metadata file to store data about the movie dimensions, etc. While the
+metadata file, in this case, is not required, it reduces the effort of typing
+in this metadata each time the movie is loaded with ``Picasso: Localize``. To
+generate such a YAML metadata file:
+
+1. Load the raw movie into ``Picasso: Localize``.
+2. Enter all required information in the appearing dialog.
+3. Check the checkbox ``Save info to yaml file`` and click OK.
+
+The movie will be loaded and the metadata saved in a YAML file. This file will
+be detected the next time this raw movie is loaded, and the metadata does not
+need to be entered again.

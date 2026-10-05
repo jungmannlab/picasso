@@ -96,5 +96,6 @@ Credits
 -  Average icon based on “Layers" by Creative Stall from the Noun Project
 -  Server icon based on “Database" by Nimal Raj from the Noun Project
 -  SPINNA icon based on "Spinner" by Viktor Ostrovsky from the Noun Project
+-  Toolbar and menu icons from Lucide (https://lucide.dev) (ISC license). License can be found here (https://github.com/jungmannlab/picasso/blob/master/LICENSES/Lucide-LICENSE.txt).
 
 .. SYNC-END: credits

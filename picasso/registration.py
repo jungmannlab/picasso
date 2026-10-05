@@ -27,14 +27,14 @@ The matching machinery underneath is shared with :mod:`picasso.spline`, which
 registers the channels of its own multichannel PSF calibration the same way.
 That shared part is public API rather than module-private:
 
-===============================  =============================================
-:func:`match_points`             nearest-neighbor pairing of two point clouds
-:func:`ransac_match`             robust pairing with no prior estimate
-:func:`fit_registration`         one ICP iteration's transform
-:func:`register_from_point_sets` the whole bootstrap + ICP + trim loop
-:func:`resolve_model`            the transform model a calibration implies
-:func:`frames_in_bounds`         the frame indices a bound allows
-===============================  =============================================
+================================  =============================================
+:func:`match_points`              nearest-neighbor pairing of two point clouds
+:func:`ransac_match`              robust pairing with no prior estimate
+:func:`fit_registration`          one ICP iteration's transform
+:func:`register_from_point_sets`  the whole bootstrap + ICP + trim loop
+:func:`resolve_model`             the transform model a calibration implies
+:func:`frames_in_bounds`          the frame indices a bound allows
+================================  =============================================
 
 :authors: Rafal Kowalewski
 :copyright: Copyright (c) 2026 Jungmann Lab, MPI of Biochemistry

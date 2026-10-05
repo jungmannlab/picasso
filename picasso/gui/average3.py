@@ -26,6 +26,7 @@ from PyQt6 import QtCore, QtGui, QtWidgets
 
 from .. import io, lib, render, __version__
 from .app import run_gui
+from . import theme
 
 from cmath import rect, phase
 
@@ -214,6 +215,8 @@ class Window(QtWidgets.QMainWindow):
         save_action.setShortcut(QtGui.QKeySequence.StandardKey.Save)
         save_action.triggered.connect(self.save)
         file_menu.addAction(save_action)
+        file_menu.addSeparator()
+        theme.add_menu_action(file_menu)
         process_menu = menu_bar.addMenu("Process")
         parameters_action = process_menu.addAction("Parameters")
         parameters_action.setShortcut("Ctrl+P")

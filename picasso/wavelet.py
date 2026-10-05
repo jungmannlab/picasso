@@ -299,6 +299,17 @@ def _watershed_regions(
     neighbor. The sort is stable, so ties are broken in raster order and
     the result is deterministic.
     """
+    ys, xs, values = _pixels_above(w2, level)
+    labels, n_labels = _flood_labels(w2, ys, xs, values)
+    return _region_centroids(labels, n_labels, ys, xs, values, min_area)
+
+
+@numba.jit(nopython=True, nogil=True, cache=False)
+def _pixels_above(
+    w2: lib.FloatArray2D, level: float
+) -> tuple[lib.IntArray1D, lib.IntArray1D, lib.FloatArray1D]:
+    """Coordinates (y, x) and values of the pixels of ``w2`` above
+    ``level``, in raster order."""
     n_y, n_x = w2.shape
     n = 0
     for y in range(n_y):
@@ -316,34 +327,72 @@ def _watershed_regions(
                 xs[i] = x
                 values[i] = w2[y, x]
                 i += 1
+    return ys, xs, values
+
+
+@numba.jit(nopython=True, nogil=True, cache=False)
+def _flood_labels(
+    w2: lib.FloatArray2D,
+    ys: lib.IntArray1D,
+    xs: lib.IntArray1D,
+    values: lib.FloatArray1D,
+) -> tuple[lib.IntArray2D, int]:
+    """Watershed labels (1, 2, ...; 0: not flooded) of the pixels
+    ``(ys, xs)``, flooded in order of decreasing ``values``, see
+    ``_watershed_regions``. Returns the labels and their number."""
     order = np.argsort(-values, kind="mergesort")
-    labels = np.zeros((n_y, n_x), dtype=np.int64)  # 0: not flooded
+    labels = np.zeros(w2.shape, dtype=np.int64)  # 0: not flooded
     n_labels = 0
     for index in order:
         y = ys[index]
         x = xs[index]
-        label = 0
-        highest = -np.inf
-        for dy in range(-1, 2):
-            yy = y + dy
-            if yy < 0 or yy >= n_y:
-                continue
-            for dx in range(-1, 2):
-                xx = x + dx
-                if (dy == 0 and dx == 0) or xx < 0 or xx >= n_x:
-                    continue
-                if labels[yy, xx] > 0 and w2[yy, xx] > highest:
-                    highest = w2[yy, xx]
-                    label = labels[yy, xx]
+        label = _highest_neighbor_label(w2, labels, y, x)
         if label == 0:
             n_labels += 1
             label = n_labels
         labels[y, x] = label
+    return labels, n_labels
+
+
+@numba.jit(nopython=True, nogil=True, cache=False)
+def _highest_neighbor_label(
+    w2: lib.FloatArray2D, labels: lib.IntArray2D, y: int, x: int
+) -> int:
+    """Label of the highest flooded of the 8 neighbors of ``(y, x)``,
+    or 0 if none is flooded."""
+    n_y, n_x = w2.shape
+    label = 0
+    highest = -np.inf
+    for dy in range(-1, 2):
+        yy = y + dy
+        if yy < 0 or yy >= n_y:
+            continue
+        for dx in range(-1, 2):
+            xx = x + dx
+            if (dy == 0 and dx == 0) or xx < 0 or xx >= n_x:
+                continue
+            if labels[yy, xx] > 0 and w2[yy, xx] > highest:
+                highest = w2[yy, xx]
+                label = labels[yy, xx]
+    return label
+
+
+@numba.jit(nopython=True, nogil=True, cache=False)
+def _region_centroids(
+    labels: lib.IntArray2D,
+    n_labels: int,
+    ys: lib.IntArray1D,
+    xs: lib.IntArray1D,
+    values: lib.FloatArray1D,
+    min_area: int,
+) -> tuple[lib.FloatArray1D, lib.FloatArray1D, lib.IntArray1D]:
+    """Value-weighted centroid (y, x) and area of every labeled region
+    of at least ``min_area`` pixels, see ``_watershed_regions``."""
     area = np.zeros(n_labels + 1, dtype=np.int64)
     weight = np.zeros(n_labels + 1, dtype=np.float64)
     sum_y = np.zeros(n_labels + 1, dtype=np.float64)
     sum_x = np.zeros(n_labels + 1, dtype=np.float64)
-    for i in range(n):
+    for i in range(len(values)):
         label = labels[ys[i], xs[i]]
         area[label] += 1
         weight[label] += values[i]

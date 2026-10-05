@@ -42,6 +42,27 @@ def _load_plugins(window: QtWidgets.QWidget, name: str) -> None:
         sys.excepthook(*sys.exc_info())
 
 
+def _apply_theme(app: QtWidgets.QApplication) -> None:
+    """Apply the appearance saved in the user settings, before the
+    main window is built so that it is laid out in the theme's fonts
+    and spacing.
+
+    A failure here is reported and swallowed: Picasso then starts in the
+    platform's own look.
+
+    Parameters
+    ----------
+    app : QtWidgets.QApplication
+        The application.
+    """
+    from . import theme
+
+    try:
+        theme.apply(app, theme.current())
+    except Exception:  # noqa: BLE001 - the look must not block startup
+        sys.excepthook(*sys.exc_info())
+
+
 def run_gui(
     window_factory: Callable[[], QtWidgets.QWidget],
     name: str | None = None,
@@ -82,6 +103,8 @@ def run_gui(
     # window is being built; it is reinstalled below to parent the box on
     # the window once there is one
     lib.install_excepthook()
+
+    _apply_theme(app)
 
     try:
         window = window_factory()

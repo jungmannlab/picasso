@@ -126,7 +126,9 @@ def status():  # noqa: C901
                         file_hdf=file_hdf,
                     )
                     st.write(summary)
-                    if st.button("Add to database"):
+                    if st.button(
+                        "Add to database", icon=":material/database:"
+                    ):
                         engine = create_engine(
                             "sqlite:///" + localize.db_filename(), echo=False
                         )
@@ -154,7 +156,7 @@ def status():  # noqa: C901
 
             pbar = st.progress(0)
 
-            if st.button("Add files"):
+            if st.button("Add files", icon=":material/add:"):
                 current_file = st.empty()
                 all_df = []
                 for idx, file in enumerate(files):
