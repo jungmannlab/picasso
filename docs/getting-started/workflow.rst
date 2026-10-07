@@ -3,8 +3,9 @@ First Steps
 
 Picasso is a set of modules, each in its own window, that pass files from one
 step of a DNA-PAINT experiment to the next. Start them from their shortcuts
-(created by the one-click installer), or from a terminal with ``picasso
-<module>`` (for example ``picasso render``).
+or from a terminal with ``picasso <module>`` (for example ``picasso
+render``), depending on how you installed Picasso (see
+:doc:`installation`).
 
 A typical analysis
 ------------------
@@ -12,14 +13,15 @@ A typical analysis
 .. grid:: 1
    :gutter: 2
 
-   .. grid-item-card:: :octicon:`pencil;1.2em;sd-mr-1` 1 · Plan the experiment (optional)
+   .. grid-item-card:: :octicon:`pencil;1.2em;sd-mr-1` 1 · Plan a DNA origami experiment (optional)
       :link: /design
       :link-type: doc
       :class-card: sd-card-hover
 
       Design a DNA origami in :doc:`/design` and test whether your imaging
-      conditions can resolve it with :doc:`/simulate`, which writes a
-      ``.raw`` movie just like a microscope would.
+      conditions can resolve it with :doc:`/simulate`, to get a movie
+      file like from a microscope. *Note: only applicable if you are
+      interested in imaging DNA origamis*.
 
    .. grid-item-card:: :octicon:`location;1.2em;sd-mr-1` 2 · Localize
       :link: /localize
@@ -50,10 +52,11 @@ A typical analysis
       image. Correct the drift, pick structures of interest and analyze
       them, for example by clustering, RESI or G5M.
 
-      **Output:** for example ``_undrift.hdf5`` (drift-corrected),
-      ``_picked.hdf5`` (picked localizations), exported images.
+      **Output:** for example ``<locs>_render.hdf5`` (localizations saved
+      after drift correction), ``<locs>_picked.hdf5`` (picked
+      localizations), exported images.
 
-   .. grid-item-card:: :octicon:`stack;1.2em;sd-mr-1` 5 · Go further (optional)
+   .. grid-item-card:: :octicon:`stack;1.2em;sd-mr-1` 5 · Further analysis (optional)
       :link: /average
       :link-type: doc
       :class-card: sd-card-hover
@@ -62,25 +65,17 @@ A typical analysis
       oligomerization with :doc:`/spinna` or classify structures with
       :doc:`/nanotron`.
 
-Each localization file carries metadata on the steps that produced it, see
-:doc:`/files`.
+In most windows, the :octicon:`book` buttons and ``File > Help`` open the
+matching section of this documentation. The meaning of the localization
+columns (``x``, ``photons``, ``lpx``, ...) is explained in
+:ref:`files-localization-hdf5`, and the information saved with each file
+(pixel size, processing history, ...) in :ref:`files-metadata-settings`.
 
-Tips for getting around
------------------------
+Picasso as a package
+--------------------
 
-- **Drag and drop** files into any Picasso window to open them.
-- **Help** (the :octicon:`question` buttons and the *Help* menu) opens the
-  matching section of this documentation.
-- Picasso remembers your settings, for example the last folder you opened,
-  in ``~/.picasso/settings.yaml``, see :ref:`user-settings-file`.
-- Picasso's windows follow the light or dark mode of your system. Change the
-  look in ``File > Appearance...``, see :ref:`appearance`.
-
-Prefer scripting?
------------------
-
-Everything the windows do is available in Python as well. For example, link
-localizations into binding events and compute their dark times:
+Everything the GUI does is available in Python as well. For example,
+link localizations into binding events and compute their dark times:
 
 .. code-block:: python
 
@@ -96,4 +91,4 @@ localizations into binding events and compute their dark times:
    print(f"Average dark time {linked_locs['dark'].mean():.2f} frames")
 
 More examples are in the :doc:`/postprocessing` notebooks and the
-:doc:`/api/index`. Many steps also run in batch from the :doc:`/cmd`.
+:doc:`/api/index`. Some steps also run in batch from the :doc:`/cmd`.

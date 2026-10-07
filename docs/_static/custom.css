@@ -86,6 +86,13 @@ section:has(> .hero) > h1 {
   color: var(--pst-color-text-muted);
 }
 
+/* A linked card is covered by its stretched link (z-index 1), which swallows
+   clicks on links in the card text; lift those above it. */
+.sd-card-body a:not(.sd-stretched-link) {
+  position: relative;
+  z-index: 2;
+}
+
 /* ---- Content ----------------------------------------------------------- */
 
 /* Screenshots: a subtle frame so that light GUI captures stand out from a
