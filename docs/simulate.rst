@@ -9,11 +9,10 @@ influence the imaging quality and whether the target structure can be resolved
 with DNA-PAINT.
 
 By default, ``Picasso: Simulate`` starts with preset parameters that are
-typical for a DNA-PAINT experiment. Thus, meaningful raw DNA-PAINT data can be
-readily simulated for a given input structure without the need of a
-super-resolution microscope. The simulation output is a movie file in .raw
-format, as it would be generated during an in vitro DNA-PAINT experiment on a
-microscope.
+typical for a DNA-PAINT experiment. The simulation output is a movie file in .raw
+format, similar to one generated during a DNA-PAINT experiment on a
+microscope. Sample drift is not simulated, so the structures stay in place
+for the whole movie.
 
 .. figure:: /images/simulate.png
    :width: 360px
@@ -30,7 +29,9 @@ Simulate DNA-PAINT image acquisitions
    group ``Structure`` (see :ref:`simulate-structure` below).
 3. The group ``PAINT parameters`` allows adjustment of the duty cycle of the
    DNA-PAINT imaging system. The mean dark time is calculated by
-   τd = 1/(kon·c). The mean ON time in a DNA-PAINT system is dependent on the
+   :math:`\tau_d = 1/(k_\mathrm{on} \cdot c)`, where :math:`k_\mathrm{on}`
+   is the association rate and :math:`c` the imager concentration. The mean
+   ON time in a DNA-PAINT system is dependent on the
    DNA duplex properties. For typical 7-bp imager strands, the ON time is
    ~200-300 ms.
 4. In ``Imager parameters``, fluorophore characteristics such as PSF width and
@@ -91,9 +92,17 @@ randomly.
 
 Selecting the button ``Generate positions`` (``Simulation > Generate
 positions``, :kbd:`Ctrl+G`) will generate a list of positions with the current
-settings and update the preview panels. A preview of the arrangement of all
-structures is shown in ``Positions``, whereas an individual structure is shown
-in ``Structure preview``.
+settings and update the two preview panels:
+
+- ``Positions`` shows the whole simulated field of view in camera pixels.
+  Each cross is one handle (binding site) that will be simulated, so a
+  structure appears as a small cluster of crosses. Handles dropped by
+  ``Incorporation`` are not shown. The dashed square marks the ``Frame``
+  margin: structures are placed inside it, and handles outside it are not
+  simulated.
+- ``Structure preview`` zooms in on the first structure, in nm. Each circle
+  is one of its handles, colored by imaging round when multiplexing (see
+  :ref:`simulate-multiplexing` below).
 
 .. _simulate-run:
 
@@ -107,7 +116,8 @@ file, ready for subsequent localization.
 - All simulation settings are saved and can be loaded at a later time with
   ``File > Load settings from previous simulation...``.
 - For 3D data, check ``Simulate 3D`` and load the 3D calibration with
-  ``File > Load 3D calibration...``.
+  ``File > Load 3D calibration...`` (see :ref:`localize-3d-calibration` for
+  how to create one).
 
 .. _simulate-multiplexing:
 
@@ -122,14 +132,3 @@ The different imaging rounds can be visually identified by color in the
 By default, the simulation software detects the number of exchange rounds
 based on the structure definition and will simulate all multiplexing rounds
 with the same imaging parameters.
-
-It is possible to have different imaging parameters for each round, e.g., when
-using imagers with different ON-times. To do so, simulate the multiplexing
-rounds individually:
-
-1. In the ``Exchange rounds`` field of the ``Simulation`` group, enter only the
-   rounds that should be simulated with the current set of parameters.
-2. Simulate the data.
-3. Change the set parameters and the multiplexing round and simulate the next
-   data sets.
-4. Repeat until all multiplexing rounds are simulated.

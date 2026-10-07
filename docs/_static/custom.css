@@ -95,6 +95,14 @@ section:has(> .hero) > h1 {
 
 /* ---- Content ----------------------------------------------------------- */
 
+/* The theme tightens only the first paragraph of a list item, so a last
+   paragraph keeps the full paragraph margin and leaves a gap before the
+   next item. */
+ol li > p:last-child,
+ul li > p:last-child {
+  margin-bottom: 0.25rem;
+}
+
 /* Screenshots: a subtle frame so that light GUI captures stand out from a
    light page. */
 img.screenshot {
