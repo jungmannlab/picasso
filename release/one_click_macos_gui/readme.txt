@@ -39,8 +39,8 @@ To see all changes introduced across releases, see: https://github.com/jungmannl
 Contributions & Copyright
 -------------------------
 
-Contributors: Joerg Schnitzbauer, Maximilian Strauss, Rafal Kowalewski, Adrian Przybylski, Andrey Aristov, Hiroshi Sasaki, Alexander Auer, Johanna Rahm
-Copyright (c) 2015-2025 Jungmann Lab, Max Planck Institute of Biochemistry
+Contributors: Rafal Kowalewski, Maximilian Strauss, Joerg Schnitzbauer, Heinrich Grabmayr, Adrian Przybylski, Alexander Auer and others (https://github.com/jungmannlab/picasso/graphs/contributors) 
+Copyright (c) 2015-2026 Jungmann Lab, Max Planck Institute of Biochemistry
 
 .. SYNC-END: contributions
 
@@ -55,7 +55,7 @@ J. Schnitzbauer*, M.T. Strauss*, T. Schlichthaerle, F. Schueder, R. Jungmann
 Super-Resolution Microscopy with DNA-PAINT
 Nature Protocols (2017). 12: 1198-1228 DOI: 10.1038/nprot.2017.024 (https://doi.org/10.1038/nprot.2017.024)
 
-If you use some of the functionalities provided by Picasso, please also cite the respective publications:
+Many of the functionalities provided by Picasso were published elsewhere, please also cite the respective publications:
 
 - All fitting methods are ports of Gpufit. DOI: 10.1038/s41598-017-15313-9 (https://doi.org/10.1038/s41598-017-15313-9). License can be found here (https://github.com/jungmannlab/picasso/blob/master/LICENSES/Gpufit-LICENSE.txt).
 - Experimental PSF (cubic-spline) fitting. DOIs: 10.1038/nmeth.4661 (https://doi.org/10.1038/nmeth.4661) (Li et al., experimental-PSF localization and bead alignment) and 10.1038/s41598-017-00622-w (https://doi.org/10.1038/s41598-017-00622-w) (Babcock & Zhuang, cubic-spline PSF model). The spline calibration follows the coefficient scheme of Gpuspline; license can be found here (https://github.com/jungmannlab/picasso/blob/master/LICENSES/Gpuspline-LICENSE.txt).
