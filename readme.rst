@@ -78,12 +78,7 @@ If you wish to use your local version of Picasso with your own modifications:
 7. To create a *local* Picasso package to use it in other Python scripts, run ``pip install -e ".[dev]"``. When you change the code in the ``picasso`` directory, the changes will be reflected in the package.
 8. You can install other extensions, such as ``".[gpu]"``, etc. The whole list of optional dependencies can be found in ``pyproject.toml``.
 9. You can now run any Picasso module directly from the console/terminal by running: ``picasso render``, ``picasso localize``, etc, or import Picasso functions in your own Python scripts.
-
-Creating shortcuts on Windows (*optional*)
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-This applies only to the users who installed Picasso via PyPI or through the editable, developer version and want to use desktop shortcuts. If you installed Picasso from the one-click installer on the `Release page <https://github.com/jungmannlab/picasso/releases/>`__, you can ignore this section. Run the PowerShell script “createShortcuts.ps1” in the ``gui`` directory. This should be doable by right-clicking on the script and choosing “Run with PowerShell”. Alternatively, run the command
-``powershell ./createShortcuts.ps1`` in the command line. Use the generated shortcuts in the top level directory to start GUI components. Users can drag these shortcuts to their Desktop, Start Menu or Task Bar.
+10. *Optional, Windows only:* to create shortcuts for the modules, run ``powershell -ExecutionPolicy Bypass -File picasso\gui\createShortcuts.ps1`` from the repository with the environment activated. The shortcuts appear in the repository folder and can be dragged to the Desktop, Start Menu or Task Bar.
 
 Example Usage
 -------------

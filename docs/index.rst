@@ -9,9 +9,9 @@ Picasso
      <img src="_static/picasso-logo.png" alt="Picasso"
           onerror="this.outerHTML='&lt;p class=&quot;hero-name&quot;&gt;Picasso&lt;/p&gt;'">
      <p class="tagline">
-       A collection of tools for painting super-resolution images, from
-       designing DNA-PAINT experiments to localizing, rendering and
-       analyzing single molecules.
+       A collection of tools for painting super-resolution images, covering
+       single-molecule localization microscopy (SMLM) analysis from raw
+       movies to localization, rendering and quantification.
      </p>
    </div>
 
