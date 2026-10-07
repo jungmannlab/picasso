@@ -41,7 +41,7 @@ Localize and filter
       :link-type: doc
       :class-card: sd-card-hover
 
-      Spot identification and fitting, calibrations, GPU fitting.
+      Spot identification and fitting.
 
    .. grid-item-card:: Filter
       :link: filter
@@ -61,7 +61,7 @@ Render and analyze
       :link-type: doc
       :class-card: sd-card-hover
 
-      Super-resolution images, drift correction, picks, 3D and analysis.
+      Explore SMLM data, drift correction and other analysis.
 
    .. grid-item-card:: Average
       :link: average
