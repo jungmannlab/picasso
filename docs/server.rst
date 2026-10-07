@@ -41,7 +41,8 @@ Localize
    ``Sample Quality`` in Localize.
 
 The integration within :doc:`localize` is by pressing the ``Estimate`` button
-in the ``Sample Quality`` field in ``Parameters``. The button can be pressed
+in the ``Sample Quality`` field in ``Parameters`` (see the figure on the
+right). The button can be pressed
 once the image stack has been localized.
 
 It calculates localizations per frame, NeNA, drift and bright time based on a
@@ -218,7 +219,7 @@ then be:
 - ``picasso undrift $FILENAME`` for drift correction;
 - ``picasso link $FILENAME`` for linking localizations;
 - ``picasso dbscan $FILENAME 0.1 2`` for performing DBSCAN cluster analysis
-  with 0.1 / 2.
+  with clustering radius 0.1 and density 2.
 
 Preview
 ~~~~~~~
