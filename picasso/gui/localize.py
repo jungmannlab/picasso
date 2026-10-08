@@ -607,6 +607,10 @@ def _format_threshold(parameters: dict) -> str:
     if settings is None:
         mng = _format_mng(parameters["Min. Net Gradient"])
         return f"Min. Net Gradient: {mng}"
+    if isinstance(settings, list):
+        # split-FOV: one threshold per region, shown as ``ref/ch1/...``
+        thresholds = "/".join(f"{_.threshold:g}" for _ in settings)
+        return f"Wavelet threshold: {thresholds} x noise"
     return f"Wavelet threshold: {settings.threshold:g} x noise"
 
 
@@ -820,6 +824,11 @@ class View(QtWidgets.QGraphicsView):
         different optics, so each gets its own detection threshold. Kept
         in step with ``rois`` by ``Window.region_mngs``; empty (and
         ignored) whenever ``split_fov_mode`` is off.
+    roi_wavelets : list
+        Split-FOV only: the wavelet identification settings of each
+        region (``wavelet.WaveletParameters``), parallel to ``rois``, for
+        the same reason. Kept in step with ``rois`` by
+        ``Window.region_wavelets``.
     roi_params : list
         Split-FOV only: the fit settings of each region (model, optimizer,
         convergence, calibrations), parallel to ``rois``. A region fitted on
@@ -846,6 +855,8 @@ class View(QtWidgets.QGraphicsView):
         self.selected_roi = None
         # per-region min. net gradient in split-FOV mode, see roi_mngs above
         self.roi_mngs = []
+        # per-region wavelet settings in split-FOV mode, see roi_wavelets
+        self.roi_wavelets = []
         # per-region fit settings in split-FOV mode, see roi_params above
         self.roi_params = []
         # Split-FOV region mode: ROIs are equal-size rectangular channels of
@@ -1099,10 +1110,13 @@ class View(QtWidgets.QGraphicsView):
             event.ignore()
             return
         self.window.region_mngs()  # align the thresholds before deleting
+        self.window.region_wavelets()
         self.window.region_params()  # ... and the per-region fit settings
         del self.rois[idx]
         if idx < len(self.roi_mngs):
             del self.roi_mngs[idx]
+        if idx < len(self.roi_wavelets):
+            del self.roi_wavelets[idx]
         if idx < len(self.roi_params):
             del self.roi_params[idx]
         self.selected_roi = None
@@ -2872,12 +2886,16 @@ class ROIDialog(lib.Dialog):
         return bool(self.window.view.split_fov_mode)
 
     def _region_thresholds(self) -> bool:
-        """Whether the ROIs get a per-region minimum net gradient column:
-        split-FOV channels identified by their net gradient (the wavelet
-        threshold is relative to the noise and shared by all regions)."""
-        return self._split_fov() and (
+        """Whether the ROIs get a per-region threshold column: the minimum
+        net gradient, or the wavelet threshold, of split-FOV channels."""
+        return self._split_fov()
+
+    def _wavelet_method(self) -> bool:
+        """Whether the regions are identified by wavelet segmentation, so
+        the threshold column holds the wavelet threshold."""
+        return (
             self.window.parameters_dialog.identification_method()
-            == localize.IDENTIFY_METHOD_NET_GRADIENT
+            == localize.IDENTIFY_METHOD_WAVELET
         )
 
     def _commit(self, rois: list) -> None:
@@ -2891,8 +2909,10 @@ class ROIDialog(lib.Dialog):
         """Repopulate the table from the view's ROIs."""
         view = self.window.view
         mngs = self.window.region_mngs()
+        wavelets = self.window.region_wavelets()
         split_fov = self._split_fov()
         thresholds = self._region_thresholds()
+        wavelet_method = self._wavelet_method()
         # the fit settings are per region only when the regions are fitted
         # one at a time; the joint fit uses one calibration for all of them
         per_region_fit = (
@@ -2911,8 +2931,14 @@ class ROIDialog(lib.Dialog):
             "list to analyze the whole frame."
             + (
                 " In split-FOV mode each region is a channel with its own "
-                "min. net gradient; selecting a row also puts "
-                "its value on the slider in the parameters dialog."
+                + (
+                    "wavelet settings; selecting a row also puts them on "
+                    "the wavelet settings in the parameters dialog (the "
+                    "column shows the threshold)."
+                    if wavelet_method
+                    else "min. net gradient; selecting a row also puts "
+                    "its value on the slider in the parameters dialog."
+                )
                 if thresholds
                 else ""
             )
@@ -2929,16 +2955,27 @@ class ROIDialog(lib.Dialog):
         )
         self.table.setHorizontalHeaderLabels(
             ["y_min", "x_min", "y_max", "x_max"]
-            + (["min_ng"] if thresholds else [])
+            + (
+                ["wavelet thr." if wavelet_method else "min_ng"]
+                if thresholds
+                else []
+            )
             + (["model", "PSF calib."] if per_region_fit else [])
         )
         self.table.setRowCount(len(view.rois))
         for row, ((y_min, x_min), (y_max, x_max)) in enumerate(view.rois):
             values = [y_min, x_min, y_max, x_max]
             if thresholds:
-                values.append(mngs[row])
+                values.append(
+                    wavelets[row].threshold if wavelet_method else mngs[row]
+                )
             for col, val in enumerate(values):
-                item = QtWidgets.QTableWidgetItem(str(int(val)))
+                # the wavelet threshold is fractional (in units of the noise)
+                if col == 4 and wavelet_method:
+                    text = f"{val:g}"
+                else:
+                    text = str(int(val))
+                item = QtWidgets.QTableWidgetItem(text)
                 item.setTextAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
                 self.table.setItem(row, col, item)
             if per_region_fit:
@@ -2966,13 +3003,15 @@ class ROIDialog(lib.Dialog):
         if self._updating:
             return
         thresholds = self._region_thresholds()
+        wavelet_method = self._wavelet_method()
         rois = []
         mngs = []
         for row in range(self.table.rowCount()):
             try:
                 vals = [int(self.table.item(row, c).text()) for c in range(4)]
                 if thresholds:
-                    mngs.append(int(self.table.item(row, 4).text()))
+                    text = self.table.item(row, 4).text()
+                    mngs.append(float(text) if wavelet_method else int(text))
             except (AttributeError, ValueError):
                 return  # incomplete row, wait for the user to finish
             y_min, x_min, y_max, x_max = vals
@@ -2981,7 +3020,23 @@ class ROIDialog(lib.Dialog):
         # clipping can drop or split rectangles, so only adopt the edited
         # thresholds when the rows still line up with the stored regions
         if thresholds and len(mngs) == len(self.window.view.rois):
-            self.window.view.roi_mngs = mngs
+            view = self.window.view
+            if wavelet_method:
+                try:
+                    view.roi_wavelets = [
+                        wavelet.WaveletParameters(
+                            threshold=value,
+                            noise=settings.noise,
+                            min_area=settings.min_area,
+                        )
+                        for settings, value in zip(
+                            self.window.region_wavelets(), mngs
+                        )
+                    ]
+                except ValueError:
+                    pass  # a negative threshold; the table is reset below
+            else:
+                view.roi_mngs = mngs
             self.window.parameters_dialog.sync_mng_to_selected_region()
             self.window.draw_frame()
         self.update_table()
@@ -3007,12 +3062,15 @@ class ROIDialog(lib.Dialog):
             reverse=True,
         )
         self.window.region_mngs()  # align the thresholds before deleting
+        self.window.region_wavelets()
         self.window.region_params()  # ... and the per-region fit settings
         for row in rows:
             if 0 <= row < len(view.rois):
                 del view.rois[row]
                 if row < len(view.roi_mngs):
                     del view.roi_mngs[row]
+                if row < len(view.roi_wavelets):
+                    del view.roi_wavelets[row]
                 if row < len(view.roi_params):
                     del view.roi_params[row]
         view.selected_roi = None
@@ -3862,11 +3920,10 @@ class ParametersDialog(lib.Dialog):
             "keys) to fine-tune its registration. 'Calibrate spline PSF'\n"
             "and the spline fit then use these regions as channels of\n"
             "this movie.\n\n"
-            "With the net gradient identification, each region also carries\n"
-            "its own min. net gradient, since the channels need not share a\n"
-            "brightness scale: select a region and the slider above tunes\n"
-            "that region alone. The wavelet threshold is relative to the\n"
-            "noise and shared by all regions."
+            "Each region also carries its own min. net gradient (or wavelet\n"
+            "settings), since the channels need not share a brightness scale\n"
+            "or noise: select a region and the identification settings above\n"
+            "tune that region alone."
         )
         self.split_fov_checkbox.setTristate(False)
         self.split_fov_checkbox.stateChanged.connect(self.on_split_fov_changed)
@@ -4617,6 +4674,7 @@ class ParametersDialog(lib.Dialog):
         # split-FOV: keep the per-region thresholds aligned with the regions
         # and put the selected region's on the slider
         self.window.region_mngs()
+        self._region_wavelets()
         self.sync_mng_to_selected_region()
         # ... and the selected region's own fit settings on the fit widgets
         self.window.sync_region_fit_params()
@@ -5561,8 +5619,8 @@ class ParametersDialog(lib.Dialog):
         """Show the widgets that belong to the selected identification
         method and hide those of the other one: the threshold settings, the
         'Same across channels' threshold link and, in split-FOV mode, the
-        per-region minimum net gradients of the ROI table (the regions on
-        the image are relabeled by the next redraw)."""
+        per-region threshold column of the ROI table (the regions on the
+        image are relabeled by the next redraw)."""
         is_wavelet = (
             self.identification_method() == localize.IDENTIFY_METHOD_WAVELET
         )
@@ -5593,9 +5651,35 @@ class ParametersDialog(lib.Dialog):
             )
 
     def on_wavelet_changed(self, _value: float = 0.0) -> None:
-        """Refresh the preview after a wavelet setting changed."""
+        """Store a changed wavelet setting in the split-FOV regions it
+        belongs to and refresh the preview."""
+        # as for the min. net gradient: in split-FOV mode the widgets edit
+        # the selected region's own settings, unless they are only being
+        # synced to a region or hold the channel sum's own settings
+        if not self._syncing_mng and not self._sum_settings_on_dialog():
+            self._store_wavelet_for_regions()
         if self.identification_method() == localize.IDENTIFY_METHOD_WAVELET:
             self.window.on_parameters_changed()
+
+    def _store_wavelet_for_regions(self) -> None:
+        """Write the dialog's wavelet settings into the split-FOV region
+        they belong to: the selected one, or every region with none
+        selected (see ``_store_mng_for_regions``). A no-op outside
+        split-FOV mode."""
+        window = self.window
+        settings = self._region_wavelets()
+        if not settings:
+            return
+        current = self.wavelet_settings()
+        index = window.view.selected_roi
+        if index is None or index >= len(settings):
+            window.view.roi_wavelets = [current] * len(settings)
+        else:
+            window.view.roi_wavelets[index] = current
+        if self.roi_dialog is not None:
+            self.roi_dialog.update_table()
+        if not self.preview_checkbox.isChecked():
+            window.draw_frame()  # the region labels carry the threshold
 
     def identification_method(self) -> str:
         """The selected identification method, one of
@@ -5618,6 +5702,22 @@ class ParametersDialog(lib.Dialog):
         """The selected wavelet noise estimate, one of
         ``wavelet.NOISE_ESTIMATES``."""
         return WAVELET_NOISE_ESTIMATES[self.wavelet_noise_combo.currentText()]
+
+    def wavelet_settings(self) -> wavelet.WaveletParameters:
+        """The wavelet settings currently on the dialog."""
+        return wavelet.WaveletParameters(
+            threshold=self.wavelet_threshold_spinbox.value(),
+            noise=self.wavelet_noise(),
+            min_area=self.wavelet_min_area_spinbox.value(),
+        )
+
+    def set_wavelet_settings(
+        self, settings: wavelet.WaveletParameters
+    ) -> None:
+        """Put wavelet settings on the dialog's widgets."""
+        self.wavelet_threshold_spinbox.setValue(settings.threshold)
+        self.set_wavelet_noise(settings.noise)
+        self.wavelet_min_area_spinbox.setValue(settings.min_area)
 
     def set_wavelet_noise(self, noise: str) -> None:
         """Select a wavelet noise estimate (one of
@@ -5723,6 +5823,13 @@ class ParametersDialog(lib.Dialog):
             # redraw comes from on_parameters_changed instead
             window.draw_frame()
 
+    def _region_wavelets(self) -> list:
+        """The window's per-region wavelet settings (see
+        ``Window.region_wavelets``); empty for a window that has no
+        split-FOV regions at all, such as the dialog's own tests."""
+        region_wavelets = getattr(self.window, "region_wavelets", None)
+        return region_wavelets() if region_wavelets is not None else []
+
     def _sum_settings_on_dialog(self) -> bool:
         """Whether the dialog holds the channel sum's identification settings
         (see ``Window.show_sum_settings``). The dialog is also built for
@@ -5733,11 +5840,13 @@ class ParametersDialog(lib.Dialog):
 
     def sync_mng_to_selected_region(self) -> None:
         """Show the selected split-FOV region's own threshold on the min.
-        net gradient slider/spinbox, so selecting a region tunes that
-        region. A no-op outside split-FOV mode, with nothing selected or
-        while the slider holds the channel sum's own threshold."""
+        net gradient slider/spinbox, and its own wavelet settings on the
+        wavelet widgets, so selecting a region tunes that region. A no-op
+        outside split-FOV mode, with nothing selected or while the dialog
+        holds the channel sum's own settings."""
         if self._syncing_mng or self._sum_settings_on_dialog():
             return
+        self._sync_wavelet_to_selected_region()
         window = self.window
         mngs = window.region_mngs()
         index = window.view.selected_roi
@@ -5751,6 +5860,25 @@ class ParametersDialog(lib.Dialog):
             # via the spinbox: its handler widens the slider range when the
             # region's value falls outside it
             self.mng_spinbox.setValue(value)
+        finally:
+            self._syncing_mng = False
+
+    def _sync_wavelet_to_selected_region(self) -> None:
+        """Put the selected split-FOV region's wavelet settings on the
+        wavelet widgets (see ``sync_mng_to_selected_region``)."""
+        window = self.window
+        settings = self._region_wavelets()
+        if not settings:
+            return
+        index = window.view.selected_roi
+        if index is None or index >= len(settings):
+            return
+        if settings[index] == self.wavelet_settings():
+            return
+        # the widgets' own handlers refresh the preview
+        self._syncing_mng = True
+        try:
+            self.set_wavelet_settings(settings[index])
         finally:
             self._syncing_mng = False
 
@@ -7069,7 +7197,14 @@ class Window(QtWidgets.QMainWindow):
             minimum_ng=self.parameters_dialog.mng_slider.value(),
             prompt_for_path=self._prompt_for_path,
             pixelsize_prompt=_pixelsize_prompt,
-            wavelet=localize.wavelet_from_parameters(self.parameters),
+            # the bead images are no split-FOV regions: like the threshold
+            # above, the wavelet settings are the dialog's single set
+            wavelet=(
+                self.parameters_dialog.wavelet_settings()
+                if self.parameters["Identification Method"]
+                == localize.IDENTIFY_METHOD_WAVELET
+                else None
+            ),
         )
         worker.statusChanged.connect(self.status_bar.showMessage)
         worker.promptRequested.connect(self._on_affine_prompt_requested)
@@ -8938,12 +9073,23 @@ class Window(QtWidgets.QMainWindow):
                 if value is not None:
                     stored[key] = value
             try:
-                settings = wavelet.WaveletParameters.from_info(stored)
+                settings = localize.wavelet_from_parameters(
+                    {"Identification Method": method, **stored}
+                )
             except ValueError:
                 settings = wavelet.WaveletParameters()
-            dialog.wavelet_threshold_spinbox.setValue(settings.threshold)
-            dialog.set_wavelet_noise(settings.noise)
-            dialog.wavelet_min_area_spinbox.setValue(settings.min_area)
+            per_region = settings if isinstance(settings, list) else None
+            # split-FOV identifications carry one set of settings per region;
+            # the widgets take the reference region's and the rest go back
+            # onto the regions (when they are still drawn) - as for the
+            # per-region min. net gradient. Widgets first: editing them
+            # writes into the regions.
+            dialog.set_wavelet_settings(
+                per_region[0] if per_region else settings
+            )
+            if per_region and len(per_region) == len(self.view.rois):
+                self.view.roi_wavelets = list(per_region)
+                dialog.update_roi_display()
         dialog.set_identification_method(method)
 
     def _clean_up_external_ids(self) -> None:
@@ -9176,7 +9322,9 @@ class Window(QtWidgets.QMainWindow):
         finally:
             self._drawing_frame = False
 
-    def _draw_rois(self, split_fov: bool, region_mngs: list) -> None:
+    def _draw_rois(
+        self, split_fov: bool, region_mngs: list, region_wavelets: list
+    ) -> None:
         """Draw the ROI rectangles (in scene/pixel coordinates) and, in
         split-FOV mode, label each with its channel index and threshold."""
         for i, ((y_min, x_min), (y_max, x_max)) in enumerate(self.view.rois):
@@ -9197,13 +9345,15 @@ class Window(QtWidgets.QMainWindow):
             )
             if split_fov:
                 # label each region by its channel index (0 = reference)
-                # and the threshold it is identified with, which only the net
-                # gradient has per region
+                # and the threshold it is identified with
                 label = localize.region_label(i)
-                if i < len(region_mngs) and (
+                wavelet_method = (
                     self.parameters_dialog.identification_method()
-                    == localize.IDENTIFY_METHOD_NET_GRADIENT
-                ):
+                    == localize.IDENTIFY_METHOD_WAVELET
+                )
+                if wavelet_method and i < len(region_wavelets):
+                    label += f" ({region_wavelets[i].threshold:g}x)"
+                elif not wavelet_method and i < len(region_mngs):
                     label += f" ({region_mngs[i]:,})"
                 text = self.scene.addSimpleText(label)
                 text.setBrush(QtGui.QBrush(color))
@@ -9286,10 +9436,12 @@ class Window(QtWidgets.QMainWindow):
             self.view.setScene(self.scene)
             # the sum has one threshold, on the slider; the regions' own
             # are not in use
-            region_mngs = (
-                [] if self.sum_settings_on_dialog() else self.region_mngs()
+            sum_shown = self.sum_settings_on_dialog()
+            region_mngs = [] if sum_shown else self.region_mngs()
+            region_wavelets = [] if sum_shown else self.region_wavelets()
+            self._draw_rois(
+                self.view.split_fov_mode, region_mngs, region_wavelets
             )
-            self._draw_rois(self.view.split_fov_mode, region_mngs)
             self._draw_frame_spots()
             locs_frame = self._current_frame_locs()
             if locs_frame is not None:
@@ -10331,6 +10483,39 @@ class Window(QtWidgets.QMainWindow):
         view.roi_mngs = mngs
         return mngs
 
+    def _region_wavelet_info(self) -> dict:
+        """The wavelet settings under the identification parameter keys: one
+        list per key in split-FOV mode (one value per region, see
+        ``localize.wavelet_info``), the dialog's settings otherwise."""
+        settings = self.region_wavelets()
+        if not settings:
+            return self.parameters_dialog.wavelet_settings().to_info()
+        return localize.wavelet_info(settings)
+
+    def region_wavelets(self) -> list[wavelet.WaveletParameters]:
+        """Per-region wavelet identification settings in split-FOV mode,
+        kept in step with ``view.rois``; the wavelet counterpart of
+        ``region_mngs``.
+
+        The threshold is relative to the noise, but the regions still
+        differ in their spots and background, so each gets its own
+        settings. Regions added since the last call inherit the settings
+        on the dialog; removed ones drop out. Returns an empty list
+        whenever split-FOV mode is off or no region is drawn.
+        """
+        try:
+            view = self.view
+            if not view.split_fov_mode or not view.rois:
+                view.roi_wavelets = []
+                return []
+            default = self.parameters_dialog.wavelet_settings()
+        except (AttributeError, RuntimeError):
+            return []
+        settings = list(view.roi_wavelets[: len(view.rois)])
+        settings += [default] * (len(view.rois) - len(settings))
+        view.roi_wavelets = settings
+        return settings
+
     def region_params(self) -> list[dict]:
         """Per-region fit settings in split-FOV mode, kept in step with
         ``view.rois``.
@@ -10511,10 +10696,12 @@ class Window(QtWidgets.QMainWindow):
         takes.
 
         In split-FOV mode "Min. Net Gradient" is the list of per-region
-        thresholds (see ``region_mngs``) rather than a single number; every
-        consumer passes it straight to ``localize.identify``, which accepts
-        one threshold per ROI. Identifying on the channel sum searches one
-        image, so it takes the single shared threshold instead.
+        thresholds (see ``region_mngs``) rather than a single number, and
+        each wavelet setting a list of per-region values (see
+        ``region_wavelets``); every consumer passes them straight to
+        ``localize.identify``, which accepts one threshold (and one set of
+        wavelet settings) per ROI. Identifying on the channel sum searches
+        one image, so it takes the single shared settings instead.
 
         Every key is compared in ``identifications_outdated`` and stored
         in ``last_identification_info``, so adding one here is enough for
@@ -10530,9 +10717,11 @@ class Window(QtWidgets.QMainWindow):
                 if mode in IDENTIFY_SUM_MODES
                 else (self.region_mngs() or dialog.mng_slider.value())
             ),
-            "Wavelet Threshold": dialog.wavelet_threshold_spinbox.value(),
-            "Wavelet Noise Estimate": dialog.wavelet_noise(),
-            "Wavelet Min. Area": dialog.wavelet_min_area_spinbox.value(),
+            **(
+                dialog.wavelet_settings().to_info()
+                if mode in IDENTIFY_SUM_MODES
+                else self._region_wavelet_info()
+            ),
             "Identification Mode": mode,
             "Temporal Median Window": (
                 dialog.temporal_median_spinbox.value()
@@ -11451,6 +11640,7 @@ class Window(QtWidgets.QMainWindow):
         parameters["Min. Net Gradient"] = (
             self.region_mngs() or self.parameters_dialog.mng_slider.value()
         )
+        parameters.update(self._region_wavelet_info())
         worker = IdentificationWorker(
             self,
             False,

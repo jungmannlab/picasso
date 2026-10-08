@@ -1843,7 +1843,7 @@ def _estimate_all_channel_transforms(
     coarse_shifts: list | None,
     model: str,
     fov_of_frame: np.ndarray,
-    wavelet: wavelets.WaveletParameters | None = None,
+    wavelet: wavelets.WaveletParameters | list | None = None,
 ) -> tuple[list, list]:
     """Estimate the reference -> channel transform for every other channel.
 
@@ -1869,7 +1869,7 @@ def _estimate_all_channel_transforms(
             return_matches=True,
             model=model,
             fov_of_frame=fov_of_frame,
-            wavelet=wavelet,
+            wavelet=localize.wavelet_for(wavelet, c),
         )
         transforms.append(transform)
         reg_info.append(
@@ -2143,7 +2143,7 @@ def calibrate_spline_multichannel(
     progress_callback: Callable[[int], None] | None = None,
     return_diagnostics: bool = False,
     model: str = "affine",
-    wavelet: wavelets.WaveletParameters | None = None,
+    wavelet: wavelets.WaveletParameters | list | None = None,
     z_binning: int = 1,
 ) -> dict | tuple[dict, list]:
     """Generate a multichannel cubic-spline PSF calibration from registered
@@ -2245,10 +2245,11 @@ def calibrate_spline_multichannel(
     model : str, optional
         Transform model for the channel registration, one of
         ``picasso.transforms.MODELS``. Default "affine".
-    wavelet : wavelet.WaveletParameters, optional
+    wavelet : wavelet.WaveletParameters or list of them, optional
         Detect the beads by wavelet segmentation with these settings
         instead of by their net gradient, in which case ``minimum_ng`` is
-        ignored (and may be None). Default is None.
+        ignored (and may be None). A list gives one per channel (region),
+        like ``minimum_ng``. Default is None.
     z_binning : int, optional
         Number of consecutive z (stage) steps averaged into one slice of every
         channel's PSF template (see ``build_psf_template``). The axial knots
@@ -2291,6 +2292,9 @@ def calibrate_spline_multichannel(
     # channels) see different dyes through different optics, so their beads
     # need not share a brightness scale. A scalar applies to all channels.
     minimum_ngs = localize._as_ng_list(minimum_ng, n_channels)
+    # likewise one set of wavelet settings per channel (None for the net
+    # gradient identification)
+    wavelet_settings = localize._as_wavelet_list(wavelet, n_channels)
 
     # Split-FOV: the channels are rectangular sub-regions of one movie. Put the
     # reference region first (channel 0), require all regions to share a size,
@@ -2305,6 +2309,9 @@ def calibrate_spline_multichannel(
                 regions, n_channels, reference, minimum_ngs
             )
         )
+        # the wavelet settings belong to the regions too
+        order = [reference] + [c for c in range(n_channels) if c != reference]
+        wavelet_settings = [wavelet_settings[c] for c in order]
 
     _report_progress(progress_callback, 0)
 
@@ -2325,7 +2332,7 @@ def calibrate_spline_multichannel(
         ref_bounds,
         roi=ref_roi,
         fov_of_frame=fov_of_frame,
-        wavelet=wavelet,
+        wavelet=wavelet_settings[0],
     )
 
     # channel transforms (channel 0 is the identity reference)
@@ -2343,7 +2350,7 @@ def calibrate_spline_multichannel(
         coarse_shifts,
         model,
         fov_of_frame,
-        wavelet=wavelet,
+        wavelet=wavelet_settings,
     )
 
     _report_progress(progress_callback, 1)
@@ -2905,7 +2912,7 @@ def calibrate_spline_split_fov(
     progress_callback: Callable[[int], None] | None = None,
     return_diagnostics: bool = False,
     model: str = "affine",
-    wavelet: wavelets.WaveletParameters | None = None,
+    wavelet: wavelets.WaveletParameters | list | None = None,
     z_binning: int = 1,
 ) -> dict | tuple[dict, list]:
     """Build a multichannel spline calibration from a *single* bead z-stack in
@@ -2980,10 +2987,11 @@ def calibrate_spline_split_fov(
     model : str, optional
         Transform model for the channel registration, one of
         ``picasso.transforms.MODELS``. Default "affine".
-    wavelet : wavelet.WaveletParameters, optional
+    wavelet : wavelet.WaveletParameters or list of them, optional
         Detect the beads by wavelet segmentation with these settings
         instead of by their net gradient, in which case ``minimum_ng`` is
-        ignored (and may be None). Default is None.
+        ignored (and may be None). A list gives one per channel (region),
+        like ``minimum_ng``. Default is None.
     z_binning : int, optional
         Number of consecutive z (stage) steps averaged into one slice of every
         channel's PSF template, see :func:`calibrate_spline_multichannel`.
@@ -3595,7 +3603,7 @@ def refine_split_fov_transforms_from_signal(
     min_pairs: int = 20,
     update: bool = True,
     model: str | None = None,
-    wavelet: wavelets.WaveletParameters | None = None,
+    wavelet: wavelets.WaveletParameters | list | None = None,
 ) -> tuple[dict, list]:
     """Re-register a split-FOV spline calibration from the experimental
     (blinking) data.
@@ -3663,10 +3671,11 @@ def refine_split_fov_transforms_from_signal(
         default) uses the one the calibration was registered with, so a plain
         re-registration keeps it. Only the final ICP iteration fits that model
         - see :func:`_fit_registration`.
-    wavelet : wavelet.WaveletParameters, optional
+    wavelet : wavelet.WaveletParameters or list of them, optional
         Detect the single molecules by wavelet segmentation with these
         settings instead of by their net gradient, in which case
-        ``minimum_ng`` is ignored (and may be None). Default is None.
+        ``minimum_ng`` is ignored (and may be None). A list gives one per
+        region, like ``minimum_ng``. Default is None.
 
     Returns
     -------
@@ -3698,6 +3707,10 @@ def refine_split_fov_transforms_from_signal(
             calibration, regions, reference, minimum_ng, n_channels
         )
     )
+    # one set of wavelet settings per region, reordered with the regions
+    order = [reference] + [c for c in range(n_channels) if c != reference]
+    wavelet_settings = localize._as_wavelet_list(wavelet, n_channels)
+    wavelet_settings = [wavelet_settings[c] for c in order]
 
     # coarse seed = only the flip the calibration applied placed at the
     # drawn regions
@@ -3715,7 +3728,11 @@ def refine_split_fov_transforms_from_signal(
     # per-region, per-frame detections (absolute coords) on the sampled
     # frames
     ref_by_frame = _region_detections_by_frame(
-        movie_sub, minimum_ngs[0], box, region_rects[0], wavelet=wavelet
+        movie_sub,
+        minimum_ngs[0],
+        box,
+        region_rects[0],
+        wavelet=wavelet_settings[0],
     )
     if not ref_by_frame:
         raise ValueError(
@@ -3736,7 +3753,11 @@ def refine_split_fov_transforms_from_signal(
     reg_info = []
     for c in range(1, n_channels):
         chan_by_frame = _region_detections_by_frame(
-            movie_sub, minimum_ngs[c], box, region_rects[c], wavelet=wavelet
+            movie_sub,
+            minimum_ngs[c],
+            box,
+            region_rects[c],
+            wavelet=wavelet_settings[c],
         )
         transform, reg_entry = _register_split_fov_channel_by_signal(
             c,
