@@ -68,9 +68,13 @@ Picasso runs on Windows, macOS and Linux. Several installation modes are availab
            - Reading Zeiss ``.czi`` files.
          * - ``pip install picassosr[lif]``
            - Reading Leica ``.lif`` files.
+         * - ``pip install picassosr[wgpu]``
+           - :ref:`GPU rendering <render-gpu-rendering>` in Render (``wgpu``:
+             Metal on macOS, Direct3D 12 on Windows, Vulkan on Linux; any
+             recent graphics card).
          * - ``pip install picassosr[gpu]``
-           - GPU-accelerated (``numba.cuda``) code for CUDA toolkit 12.x.
-             Needs an NVIDIA (CUDA-capable) GPU.
+           - GPU rendering plus GPU-accelerated (``numba.cuda``) code for CUDA
+             toolkit 12.x. Needs an NVIDIA (CUDA-capable) GPU.
          * - ``pip install picassosr[cuda11]`` / ``[cuda13]``
            - The same for CUDA toolkit 11.x or 13.x.
 

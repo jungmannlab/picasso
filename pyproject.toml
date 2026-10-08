@@ -54,26 +54,29 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-cuda11 = [
-    "numba-cuda[cu11]"
-]
-cuda12 = [
-    "numba-cuda[cu12]"
-]
-cuda13 = [
-    "numba-cuda[cu13]"
-]
 # GPU rendering in Render (WebGPU via wgpu: Metal, Direct3D 12 or
 # Vulkan; any vendor). Pinned to a minor version: the shader and API
 # surface are validated against it.
 wgpu = [
     "wgpu>=0.32,<0.33"
 ]
-# Convenience alias for all GPU features with the most common CUDA
-# toolkit (12.x). For other toolkits install picassosr[cuda11,wgpu] or
-# picassosr[cuda13,wgpu] instead.
+# All GPU features: CUDA fitting and tools (numba-cuda) for the given
+# CUDA toolkit, plus GPU rendering (wgpu).
+cuda11 = [
+    "numba-cuda[cu11]",
+    "picassosr[wgpu]"
+]
+cuda12 = [
+    "numba-cuda[cu12]",
+    "picassosr[wgpu]"
+]
+cuda13 = [
+    "numba-cuda[cu13]",
+    "picassosr[wgpu]"
+]
+# Alias for the most common CUDA toolkit (12.x).
 gpu = [
-    "picassosr[cuda12,wgpu]"
+    "picassosr[cuda12]"
 ]
 dev = [
     "build",

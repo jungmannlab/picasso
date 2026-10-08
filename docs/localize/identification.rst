@@ -26,7 +26,10 @@ Identification and fitting of single-molecule spots
 
 4. **Set the identification parameters** in the ``Identification`` group.
 
+   .. _localize-box-size:
+
    - Set the ``Box side length`` to the rounded integer value of 6 × σ + 1, where σ is the standard deviation of the PSF. In an optimized microscope setup, σ is below one pixel (roughly 0.9 pixels) and the respective ``Box side length`` should be set to 7.
+   - The box must contain the entire single-emitter image, since the fit only sees the pixels inside it. A cut-off spot biases the fitted photons, PSF width and localization precision.
    - The value of ``Min. net gradient`` specifies a minimum threshold above which spots should be considered for fitting. The net gradient sums, over the box, how steeply the intensity rises towards the spot's center. It is proportional to the spot's brightness above the background (in camera counts) and also grows with sharper spots and larger boxes.
    - By checking ``Preview``, the spots identified with the current settings will be marked in the displayed frame. Adjust ``Min. net gradient`` to a value at which only spots are detected (no background).
    - Alternatively, select ``B-spline wavelet`` as the ``Method`` to identify spots by wavelet segmentation, with a threshold in units of the noise instead of the net gradient; see :ref:`localize-wavelet`.

@@ -23,7 +23,7 @@ all picks share one size or each pick carries its own extent:
    * - ``Circle``
      - A single left click at its center.
      - ``Diameter``, shared by all picks.
-     - The default. Compact, roughly round structures.
+     - The default. Compact, roughly round structures. The only shape that ``Pick fiducials`` and ``Subtract pick regions`` work with.
    * - ``Square``
      - A single left click at its center.
      - ``Side length``, shared by all picks.
@@ -31,7 +31,7 @@ all picks share one size or each pick carries its own extent:
    * - ``Rectangle``
      - Dragging from one end of its center axis to the other, so it can take any orientation and length. A drag shorter than 5 screen pixels, e.g., a stray click, creates no pick.
      - ``Width`` (across the axis) shared by all picks; the length is per pick.
-     - Elongated structures - filaments, nanorulers, edges - and the only shape that can be projected onto its own axes, see ``Plot pick profile`` below.
+     - Elongated structures - filaments, nanorulers, edges. The only shape for ``Plot pick profile`` and the ``x_pick_rot`` / ``y_pick_rot`` columns (see :ref:`Table 1 <files-localization-columns>` of the file formats).
    * - ``Polygon``
      - One left click per vertex; click the first vertex again to close the outline. A right click removes the last vertex.
      - None; each polygon carries its own extent.
@@ -108,19 +108,13 @@ Picking
    to which pick each localization is assigned.
 7. (Optional) Statistics about each pick region can be saved by selecting
    ``File > Save pick properties``. The resulting HDF5 file is not a
-   localization file. Instead, it holds a data set called ``groups`` in which
-   the rows show statistical values for each pick region.
-8. (Optional) The picked positions and diameter itself can be saved by
+   localization file. Instead, it holds a dataset called ``groups`` in which
+   the rows show statistical values for each pick region. This can also be
+   inspected in :doc:`/filter`.
+8. (Optional) The picked positions can be saved by
    selecting ``File > Save pick regions``. Such saved pick information can
    also be loaded into ``Picasso: Render`` by selecting
-   ``File > Load pick regions``.
+   ``File > Load pick regions`` or by drag-and-dropping it into the Render
+   window.
 
-See :doc:`menu-file` for the file formats of these commands and
-:doc:`menu-tools` for the other pick utilities.
-
-.. note::
-
-   ``Plot pick profile`` (and the ``x_pick_rot``/``y_pick_rot`` columns it
-   relies on) is available for rectangular picks only, since they are the only
-   shape with an unambiguous long axis. ``Pick fiducials`` and
-   ``Subtract pick regions`` are likewise restricted to circular picks.
+See :doc:`menu-tools` for the other pick utilities.

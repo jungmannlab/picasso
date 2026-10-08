@@ -197,7 +197,7 @@ Opens the slicer dialog which allows for slicing through 3D datasets.
 
 Shortcut: :kbd:`Ctrl+Shift+R`
 
-Opens/updates the rotation window, see :doc:`3d`: with a single picked region
+Opens/updates the 3D view, see :doc:`3d`: with a single picked region
 of interest it shows that pick, otherwise the current field of view. Requires
 localizations with z coordinates.
 

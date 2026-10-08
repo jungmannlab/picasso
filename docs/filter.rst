@@ -66,6 +66,8 @@ each column are intersected, so the strictest limits of all steps apply, and
 the removed columns of every step are removed. Steps on columns that the
 current localizations do not have are listed and skipped.
 
+.. _filter-test-subclustering:
+
 Test subclustering
 ~~~~~~~~~~~~~~~~~~
 

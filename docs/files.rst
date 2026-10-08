@@ -111,6 +111,7 @@ The localization table is stored as a dataset of the HDF5 file in the path
 Table 1 explains the main column names in Picasso.
 
 .. csv-table:: Table 1: Name, description and data type for the main columns used in Picasso.
+   :name: files-localization-columns
    :file: table01.csv
    :widths: 15, 65, 20
    :header-rows: 1
