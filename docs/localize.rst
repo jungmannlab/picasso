@@ -7,10 +7,12 @@ Localize
 
    Picasso Localize with identified spots in a movie frame.
 
-Localize performs the super-resolution reconstruction of image stacks: it identifies single-molecule spots in every frame and fits them to obtain their positions.
+Localize performs the super-resolution reconstruction of image stacks in two steps:
 
-- **Spot detection** uses a gradient-based approach by default. A B-spline wavelet segmentation is available as an alternative (see :ref:`localize-wavelet`).
-- **Fitting** combines a **PSF model** with an independently chosen **optimizer**: least squares (LQ) or maximum likelihood (MLE, Poisson). Every PSF model can be fitted with either optimizer, on the CPU or on the GPU (see :doc:`localize/gpu`).
+- **Identification** finds the single-molecule spots in every frame and places a box around each, at a whole-pixel position. By default, spots are found by their net gradient; a B-spline wavelet segmentation is available as an alternative (see :ref:`localize-wavelet`).
+- **Fitting** fits a **PSF model** to the pixels in each box, with an independently chosen **optimizer**: least squares (LQ) or maximum likelihood (MLE, Poisson). Every PSF model can be fitted with either optimizer, on the CPU or on the GPU (see :doc:`localize/gpu`). This gives the sub-pixel position of each molecule, its photons, background and localization precision.
+
+Together, the two steps are referred to here as **localization** (``Analyze`` > ``Localize (Identify & Fit)``). The steps can also be run on their own (``Analyze`` > ``Identify`` and ``Analyze`` > ``Fit``), for example to fit loaded identifications.
 
 To get started, open a movie and follow the steps in :ref:`localize-identification`.
 

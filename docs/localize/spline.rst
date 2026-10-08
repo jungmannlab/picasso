@@ -228,7 +228,7 @@ In split field of view mode, each region also carries its **own identification s
 Calibrating
 ~~~~~~~~~~~
 
-Run ``Calibration`` > ``Calibrate spline PSF`` as for a single channel. The dialog is the same, with an additional option:
+Run ``Calibration`` > ``Calibrate spline PSF`` as for a single channel (see :ref:`localize-spline-building`). The dialog is the same, with an additional option:
 
 **Link photon counts across channels**
    On by default, so all channels share one photon count and background. Turn it off (2 to 6 channels) to fit per-channel photons and background instead, with only ``x``, ``y`` and ``z`` shared.
@@ -247,28 +247,28 @@ Picasso builds a PSF for every channel and registers each non-reference channel 
 The registration is only as good as the bead stack it comes from:
 
 - image **sparse beads**, so that a bead can only be paired with its own image in the other channel;
-- image **several fields of view**, so that the correspondences cover the whole sensor rather than one part of it;
-- acquire the stack **on the same day as the measurement**, ideally directly before or after it to minimize the effect of drift.
+- image **several fields of view**, so that the correspondences cover the whole sensor;
+- acquire the stack **on the same day as the measurement**, ideally directly before or after it to minimize the effect of drift. Registration from SMLM signal (not beads) is not straight-forward and difficult to control.
 
 .. _localize-multichannel-spline-fitting:
 
 Fitting
 ~~~~~~~
 
-To fit, load the same channels, load the multichannel calibration under **Experimental PSF (spline)**, and run the fit with the ``Experimental PSF (cubic spline)`` model. Only spots detected in *every* channel are fitted, so identify each channel first.
+To fit, load the same channels, load the multichannel calibration under **Experimental PSF (spline)**, and run the fit with the ``Experimental PSF (cubic spline)`` model. Only spots detected in *every* channel are fitted, so identify each channel first, or identify once on the sum of the channels, which helps when brightness differs between channels (see :ref:`localize-identify-on-sum` below).
 
 .. _localize-realign-channels:
 
 Re-aligning the channels
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
-Multichannel spline fitting benefits greatly from re-aligning the channels on the data that is actually being fitted: the joint fit assumes each molecule maps onto the same ``x``, ``y``, ``z`` in every channel, so even a sub-pixel error in the transforms degrades the fit.
+Multichannel spline fitting can benefit from re-aligning the channels on the data that is actually being fitted: the joint fit assumes each molecule maps onto the same ``x``, ``y``, ``z`` in every channel, so even a sub-pixel error in the transforms degrades the fit. If the calibration was taken right before or after the measurement, re-alignment is not required.
 
 After identifying the channels, run ``Calibration`` > ``Re-align channels (current signal)`` to re-estimate the transforms from the blinking data itself. **This is strongly recommended whenever the bead stack and the measurement were not acquired directly one after another** (e.g. calibration from a previous day or session).
 
 - Because the correction is derived by pairing the shared single-molecule signal frame by frame, a dialog first asks for the frame window to use and how many frames are evenly sampled from it.
 - The result is reported per channel as the number of paired signals and the residual RMS (in camera pixels).
-- We recommend using bright spots for the re-alignment (simply select a higher min. net gradient).
+- We recommend using bright spots for the re-alignment: select a higher min. net gradient, or a higher wavelet threshold.
 
 .. important::
 
@@ -279,25 +279,25 @@ After identifying the channels, run ``Calibration`` > ``Re-align channels (curre
 Identifying on the sum of the channels
 --------------------------------------
 
-When one channel carries very little signal, identifying the channels separately loses most molecules: the dim channel detects only a few of them, and the joint fit keeps only the spots found in *every* channel. The ``Identify on`` setting in the ``Parameters`` dialog (shown for multichannel and split-FOV data) offers two more modes for exactly this case:
+When one channel carries dimmer signal, identifying the channels separately may lose many molecules: the joint fit keeps only the spots found in *every* channel. The ``Identify on`` setting in the ``Parameters`` dialog (shown for multichannel and split-FOV data) offers two more modes for exactly this case:
 
 **Each channel separately**
    The default described above.
 
 **Sum of registered channels**
-   Every channel is mapped onto the reference channel and added up in photons, and the spots are identified in that sum. A molecule that is too faint to detect in any single channel can still stand out in the combined signal.
+   Every channel is mapped onto the reference channel (see :ref:`localize-registering-channels`) and added up **in photons**, and the spots are identified in that sum. A molecule that is too faint to detect in any single channel can still stand out in the combined signal.
 
 **Sum of unregistered channels**
    The channels are added up in photons pixel for pixel, as they are, without any registration (alignment). See :ref:`localize-summing-without-registration` below.
 
-The sum mode also works for the multichannel 2D Gaussian fit, from a loaded channel registration exactly as it does from a spline calibration (see :ref:`localize-multichannel-gaussian`).
+The sum modes also works for the multichannel 2D Gaussian fit, from a loaded channel registration exactly as it does from a spline calibration (see :ref:`localize-multichannel-gaussian`).
 
 .. _localize-sum-registration:
 
 Registration for the sum
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
-The channels have to be (re)registered *before* they can be summed:
+This section describes the identification on the registered sum, for which the channels have to be (re)registered *before* they can be summed (to add them up as they are, see :ref:`localize-summing-without-registration` below):
 
 - **With a calibration loaded**, the registration comes from the loaded multichannel / split-FOV spline calibration — the sum is then built with exactly the transforms the fit will use.
 - **Without a calibration**, Picasso first identifies every channel (or region) as usual and estimates the transforms from those detections, and only then builds the sum. This needs enough detections in every channel, so lower the minimum net gradient of the dim channel until spots appear in it.
@@ -314,10 +314,10 @@ Things to be aware of
   - Every channel keeps its own settings underneath: they come back when ``Identify on`` is set to ``Each channel separately``, and they are the ones the channels are identified with to register them for the sum.
   - The first time a sum is selected, it starts from the settings then shown. Both sum modes share the one set.
 
-- **The minimum net gradient has to be re-tuned.** The sum is in photons and over all channels, so its net gradients are on a different scale than a single channel's raw counts. In split-FOV mode the sum's single threshold applies (there is one summed image), and the per-region thresholds are left as they are.
+- **The threshold has to be re-tuned.** The sum is in photons and over all channels, so its net gradients are on a different scale than a single channel's raw counts. The wavelet threshold is relative to the noise of the sum, so it depends less on that scale, but the sum's noise and spots differ from a single channel's, so check it with ``Preview`` as well. In split-FOV mode the sum's single threshold (or set of wavelet settings) applies, as there is one summed image, and the per-region ones are left as they are.
 - **The image on screen is the sum.** The display and ``Preview`` run on the summed movie, exactly as the identification does, so the threshold can be swept on what is actually being searched.
 
-  - The summed view appears as soon as ``Sum of registered channels`` is selected, wherever the channels can be registered without identifying them first (a loaded calibration, or per-channel identifications already made) — so the minimum net gradient can be tuned with ``Preview`` before running ``Identify``.
+  - The summed view appears as soon as ``Sum of registered channels`` is selected, wherever the channels can be registered without identifying them first (a loaded calibration, or per-channel identifications already made) — so the minimum net gradient (or the wavelet settings) can be tuned with ``Preview`` before running ``Identify``.
   - If neither is available, the status bar says so and the summed view appears once ``Identify`` has identified the channels to register them.
   - For split-FOV data only the reference region is filled — the other regions have been mapped into it.
 

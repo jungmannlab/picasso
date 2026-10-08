@@ -9,7 +9,7 @@ Picasso offers three ways to fit data with several channels, either loaded as se
 - **Multichannel spline PSF** — the channels are fitted jointly with one measured PSF per channel; see :ref:`localize-multichannel-spline`.
 - **Each channel on its own** — every channel is fitted independently, with any model and without a registration (below).
 
-When one channel is very dim, spots can be identified on the sum of the channels; see :ref:`localize-identify-on-sum`.
+By default (``Identify on`` > ``Each channel separately``), the spots are identified in every channel on its own, with that channel's identification settings. The joint fits then pair the spots across the channels through the registration and fit only those found in *every* channel; fitting each channel on its own fits all of them. When one channel is dimmer, so that many of its spots go undetected, identify on the sum of the channels instead; see :ref:`localize-identify-on-sum`.
 
 .. _localize-multichannel-gaussian:
 
@@ -20,7 +20,7 @@ Several spatially-registered channels can also be fitted jointly with a **spheri
 
 This is the same global-fitting idea as the :ref:`localize-multichannel-spline` (globLoc, `Li et al., Nature Communications 13, 3133 (2022) <https://doi.org/10.1038/s41467-022-30719-4>`_), but it needs **no measured PSF** — only a *channel registration*, which says where each channel sits relative to the first.
 
-It is available for the ``2D spherical Gaussian`` model only: a joint fit ties the channels together through one shared width, which the elliptical and rotated models do not have.
+It is available for the ``2D spherical Gaussian`` model only.
 
 .. note::
 
@@ -34,7 +34,7 @@ Registering the channels
 Load the channels first, in either of the two layouts:
 
 - **Separate movies** — ``File`` > ``Open channels from several movies``, or ``Open one multichannel movie`` for a single file holding several. **The first channel loaded is the reference channel.**
-- **Split field of view** — if the channels are imaged side by side on one sensor, load the single movie, tick **Regions = channels** in the ``Parameters`` dialog and drag one ROI onto each channel. **The first region is the reference channel**; all regions are kept the same size.
+- **Split field of view** — if the channels are imaged side by side on one sensor, load the single movie, tick **Regions = channels** in the ``Parameters`` dialog and drag one ROI onto each channel. **The first region is the reference channel**; all further regions have the same size.
 
 Either way the localizations come out in the reference channel's coordinates.
 
@@ -44,7 +44,7 @@ Then build a registration with ``Calibration`` > ``Register channels (2D)``, whi
 
    **Beads are the recommended way to measure the registration.** They are bright, static and present in every channel, so the correspondences are unambiguous and the transform is fitted from far more pairs than blinking data provides. The registration is best when:
 
-   - **several fields of view are imaged with sparse beads** — sparse, so that neighboring beads cannot be mismatched, and several fields, so that the pairs cover the whole sensor instead of one corner of it;
+   - **several fields of view are imaged with sparse beads** — sparse, so that neighboring beads cannot be mismatched, and several fields, so that the pairs cover the whole sensor;
    - the bead stack is acquired **on the same day as the measurement**, ideally directly before or after it to minimize the effect of drift.
 
 **From bead data...**
@@ -75,9 +75,9 @@ Fitting
 
 1. Open ``Analyze`` > ``Parameters`` and set **Model** to ``2D spherical Gaussian``.
 2. In the **Multichannel: channel registration** box, click ``Load registration`` and choose the ``.yaml`` (``Clear`` drops it again).
-3. Choose the **Optimizer** — ``Least squares`` or ``MLE``. ``MLE`` is recommended.
+3. Choose the **Optimizer** — ``Least squares`` or ``MLE``.
 4. Decide whether to link the photon counts (see :ref:`localize-linking-photon-counts`).
-5. Tick **Use GPU** to fit on the GPU; leave it unticked for the CPU.
+5. Tick **Use GPU** to fit on the GPU; leave it unticked for the CPU. The check box is only visible if a CUDA-capable GPU is present and the required numba package is installed (see :doc:`/getting-started/installation`).
 6. Identify the channels, then run ``Analyze`` > ``Fit`` (or ``Localize (Identify & Fit)``).
 
 Only molecules detected in *every* channel are fitted, so identify each channel first:
@@ -155,7 +155,7 @@ Running it
       2. Open ``Analyze`` > ``Parameters`` and set **Fit** to ``Each channel separately``.
       3. Set up each channel: select it (the channel selector below the image, or the region in the image) and choose its ``Model``, ``Optimizer``, ``Min. net gradient`` and calibrations. See :ref:`localize-each-channel-settings` below.
       4. Run ``Analyze`` > ``Identify`` (:kbd:`Ctrl+I`), which analyzes every channel in turn, and then ``Analyze`` > ``Fit`` — or ``Localize (Identify & Fit)`` for both at once.
-      5. The status bar reports each channel as it is fitted and, at the end, how many spots were fitted in how many channels. ``Analyze`` > ``Abort`` stops the whole batch.
+      5. The status bar reports each channel as it is fitted and, at the end, how many spots were fitted in how many channels.
 
    .. tab-item:: Command line
 
