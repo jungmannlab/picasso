@@ -19,9 +19,9 @@ PSF models
 
 The following PSF models are implemented:
 
-- **Elliptical Gaussian.** Fits independent widths ``sx`` and ``sy``.
+- **Elliptical Gaussian.** Fits a 2D Gaussian distribution independent widths ``sx`` and ``sy``.
 - **Spherical (isotropic) Gaussian.** Fits a single shared width, so ``sx`` and ``sy`` are always equal. The ``ellipticity`` column is not saved for this model. Supports multichannel fitting as well, see :ref:`localize-multichannel-gaussian`.
-- **Rotated elliptical Gaussian.** The fitted in-plane rotation angle is saved in the ``angle`` column, in degrees.
+- **Rotated elliptical Gaussian.** Same as *Elliptical Gaussian*, however, an in-plane rotation angle is also fitted and saved in the ``angle`` column, in degrees.
 - **Experimental PSF (cubic spline).** Fits an experimentally measured PSF; a 3D calibration recovers ``z`` directly; see :doc:`localize/spline`. Supports multichannel fitting as well, see :ref:`localize-multichannel-spline`.
 
 In addition, ``Average of ROI`` is available as a non-fitting option that simply sums the intensity of each spot.
@@ -71,7 +71,7 @@ Picasso Localize reads the following movie formats:
      - Supported only on Windows. For files with several channels, a dialog asks which channel to load.
    * - Nikon ND2
      - ``.nd2``
-     - Either a time series or a z-stack (``T`` or ``Z`` axis).
+     - Either a time series (e.g., SMLM measurement) or a z-stack (e.g., calibration) (``T`` or ``Z`` axis).
    * - MetaMorph STK
      - ``.stk``
      - For consecutive files (e.g. ``name_001.stk``, ``name_002.stk``, …), open the first file of the desired range; all subsequent files with a higher numeric suffix are included automatically.
@@ -124,13 +124,19 @@ Topics
       :link: localize/3d-calibration
       :link-type: doc
 
-      Astigmatic z calibration and fitting, and lateral (astigmatism / chromatic) corrections.
+      Astigmatic z calibration and fitting.
 
    .. grid-item-card:: :octicon:`graph;1.5em;sd-mr-1` Experimental PSF (cubic spline)
       :link: localize/spline
       :link-type: doc
 
       Building and checking a spline PSF calibration, fitting with it, and multichannel (e.g. biplane) spline fitting.
+
+   .. grid-item-card:: :octicon:`git-compare;1.5em;sd-mr-1` Lateral corrections
+      :link: localize/lateral-correction
+      :link-type: doc
+
+      Correcting ``x`` and ``y`` for the cylindrical lens and for chromatic aberration, in 2D and 3D.
 
    .. grid-item-card:: :octicon:`columns;1.5em;sd-mr-1` Multichannel fitting
       :link: localize/multichannel
@@ -146,4 +152,5 @@ Topics
    localize/camera
    localize/3d-calibration
    localize/spline
+   localize/lateral-correction
    localize/multichannel

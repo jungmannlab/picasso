@@ -6,10 +6,6 @@ Cameras:
   Andor Zyla 4.2 Plus:
     Pixelsize: 130
     Baseline: 100
-    Quantum Efficiency:
-      525: 0.8
-      595: 0.82
-      700: 0.74
     Sensitivity Categories:
       - PixelReadoutRate
       - Sensitivity/DynamicRange
@@ -74,17 +70,8 @@ Cameras:
         1-R640: 700
         2-G561: 595
         3-B489: 525
-    Quantum Efficiency:
-      # Emission wavelength
-      525: 0.95
-      595: 0.96
-      700: 0.9
   Andor Zyla VSC-01223:
     Baseline: 100
-    Quantum Efficiency:
-      525: 0.7
-      595: 0.72
-      700: 0.64
     Sensitivity Categories:
       - PixelReadoutRate
       - Sensitivity/DynamicRange
@@ -106,10 +93,6 @@ Cameras:
         3-B489: 525
   HamamatsuHam_DCAM:
     Baseline: 100
-    Quantum Efficiency:
-      525: 0.81
-      595: 0.83
-      700: 0.72
     Channel Device:
       # This information is used to automatically set the emission wavelength based on MicroManager metadata
       Name: TIFilterBlock1-Label
@@ -122,7 +105,6 @@ Cameras:
     Pixelsize: 130
     Baseline: 0
     Sensitivity: 1.0
-    Quantum Efficiency: 1.0
 z-calibrations: # This information is used to automatically set the z calibration file based on MicroManager metadata
   HamamatsuHam_DCAM:
     525: C:/path/to/your_3d_calib_525nm.yaml

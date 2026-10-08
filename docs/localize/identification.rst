@@ -26,8 +26,8 @@ Identification and fitting of single-molecule spots
 
 4. **Set the identification parameters** in the ``Identification`` group.
 
-   - Set the ``Box side length`` to the rounded integer value of 6 × σ + 1, where σ is the standard deviation of the PSF. In an optimized microscope setup, σ is one pixel, and the respective ``Box side length`` should be set to 7.
-   - The value of ``Min. net gradient`` specifies a minimum threshold above which spots should be considered for fitting. The net gradient value of a spot is roughly proportional to its intensity, independent of its local background.
+   - Set the ``Box side length`` to the rounded integer value of 6 × σ + 1, where σ is the standard deviation of the PSF. In an optimized microscope setup, σ is below one pixel (roughly 0.9 pixels) and the respective ``Box side length`` should be set to 7.
+   - The value of ``Min. net gradient`` specifies a minimum threshold above which spots should be considered for fitting. The net gradient sums, over the box, how steeply the intensity rises towards the spot's center. It is proportional to the spot's brightness above the background (in camera counts) and also grows with sharper spots and larger boxes.
    - By checking ``Preview``, the spots identified with the current settings will be marked in the displayed frame. Adjust ``Min. net gradient`` to a value at which only spots are detected (no background).
    - Alternatively, select ``B-spline wavelet`` as the ``Method`` to identify spots by wavelet segmentation, with a threshold in units of the noise instead of the net gradient; see :ref:`localize-wavelet`.
 
@@ -37,14 +37,13 @@ Identification and fitting of single-molecule spots
 
 7. (Optional) Restrict the analysis to one or more regions of interest (ROIs) instead of the whole frame; see :ref:`localize-rois`.
 
-8. **Set the photon conversion** in the ``Photon conversion`` group: adjust ``EM Gain``, ``Baseline``, ``Sensitivity`` and ``Quantum Efficiency`` according to your camera specifications and the experimental conditions.
+8. **Set the photon conversion** in the ``Photon conversion`` group: adjust ``EM Gain``, ``Baseline`` and ``Sensitivity`` according to your camera specifications and the experimental conditions.
 
    - Set ``EM Gain`` to 1 for conventional output amplification.
    - ``Baseline`` is the average dark camera count.
    - ``Sensitivity`` is the conversion factor (electrons per analog-to-digital (A/D) count).
-   - ``Quantum Efficiency`` is not used since version 0.6.0 and is kept for backward compatibility only.
 
-   These parameters are critical to converting camera counts to photons correctly. The quality of the upcoming maximum likelihood fit strongly depends on a Poisson photon noise model, and thus on the absolute photon count.
+   These parameters convert camera counts to photons. The fitted positions may depend on them, but the reported photon counts, background and localization precisions depend directly on them. The maximum-likelihood fit also assumes Poisson photon noise, so it works best with correct absolute photon counts.
 
    - For simulated data, generated with ``Picasso: Simulate``, set the parameters as follows: ``EM Gain`` = 1, ``Baseline`` = 0, ``Sensitivity`` = 1.
    - If you use an sCMOS camera, consider loading a per-pixel camera calibration instead of relying on the two scalars; see :ref:`localize-scmos-calibration`.
@@ -71,19 +70,6 @@ The following values entered in the ``Parameters`` dialog are all remembered acr
 
 The same section also stores the last directory used in the file dialogs (``PWD``) and which columns are ticked in the ``File`` > ``Select columns to save...`` dialog when saving fit results.
 
-.. _localize-frames-from-memory:
-
-In-memory or streaming input
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. tip::
-
-   For **in-memory or streaming input** — frames already held as a NumPy array, or arriving batch by batch from a running acquisition rather than read from a file — :func:`picasso.localize.localize_frames` runs the same identification and fit on a frame stack and returns the localization table.
-
-   - Its ``start_frame`` argument offsets the ``frame`` column, so successive batches carry absolute, contiguous frame numbers and concatenate into one growing table.
-   - It imports and runs with no display (no Qt).
-   - The result is identical to :func:`picasso.localize.localize` on the same frames and parameters.
-
 .. _localize-temporal-median-filter:
 
 Temporal median filter
@@ -98,7 +84,9 @@ Ticking ``Temporal median filter`` in the ``Identification`` group subtracts tha
 Two things are worth keeping in mind:
 
 - **The filter applies to identification only.** Spots are always cut out of, and fitted on, the *raw* movie, so photon counts, background estimates and the reported localization precisions are unaffected. It changes which spots are found, not how well they are localized.
-- **The net gradient scale changes.** Subtracting a background removes its contribution to the local gradients, so ``Min. net gradient`` has to be re-tuned after switching the filter on or off. Turn on ``Preview`` and sweep the value again — while the filter is active the displayed frame is the filtered one, so what you see is what the spot detection sees.
+- **The detection threshold needs re-tuning.** For the net gradient, subtracting the background removes its contribution to the local gradients. For wavelet identification, the noise level the threshold is measured against drops, especially with the default noise estimate from the frame's standard deviation. Turn on ``Preview`` and sweep the value again — while the filter is active the displayed frame is the filtered one, so what you see is what the spot detection sees.
+
+
 
 .. important::
 
@@ -115,14 +103,12 @@ Spot identification looks for a *single* local maximum per spot. A non-Gaussian 
 
 Setting ``Gaussian filter sigma`` in the ``Identification`` group smooths each frame with a Gaussian of that standard deviation (in camera pixels) before spots are identified, which merges those maxima back into one.
 
-A sigma of 0 (the default, shown as ``Off``) disables the filter. Adapt the value until the multiple detections on a single spot collapse into one. Values that are much larger than the distance between neighboring emitters will merge genuinely distinct spots into one, so raise it only as far as needed.
+A sigma of 0 (the default, shown as ``Off``) disables the filter. Enable ``Preview`` and adapt the value of the filter until the expected regions are outlined successfully.
 
 The same two caveats as for the temporal median filter apply:
 
 - **The filter applies to identification only.** Spots are always cut out of, and fitted on, the *raw* movie, so photon counts, background estimates and the reported localization precisions are unaffected. It changes which spots are found, not how well they are localized.
-- **The net gradient scale changes.** Smoothing spreads each spot over more pixels and thereby lowers the gradients around it, so ``Min. net gradient`` has to be re-tuned after changing sigma — expect to need a considerably lower value.
-
-  Turn on ``Preview`` and sweep the value again; while the filter is active the displayed frame is the smoothed one, so what you see is what the spot detection sees.
+- **The detection threshold needs re-tuning.** Turn on ``Preview`` and sweep the value again — while the filter is active the displayed frame is the smoothed one, so what you see is what the spot detection sees.
 
 The two filters can be used together: the temporal median background is subtracted first, and the result is then smoothed.
 
@@ -133,11 +119,11 @@ Unlike the temporal median filter, the Gaussian filter *is applied when calibrat
 B-spline wavelet identification
 -------------------------------
 
-As an alternative to the net gradient, spots can be identified by the B-spline wavelet segmentation of Izeddin et al. (Izeddin I, Boulanger J, Racine V, Specht CG, Kechkar A, Nair D, Triller A, Choquet D, Dahan M, Sibarita JB, `Wavelet analysis for single molecule localization microscopy <https://doi.org/10.1364/OE.20.002081>`_, *Optics Express* 20, 2081–2095 (2012)).
+As an alternative to the net gradient, spots can be identified by the B-spline wavelet segmentation of Izeddin et al. (Izeddin I, Boulanger J, Racine V, Specht CG, Kechkar A, Nair D, Triller A, Choquet D, Dahan M, Sibarita JB, `Wavelet analysis for single molecule localization microscopy <https://doi.org/10.1364/OE.20.002081>`_, *Optics Express* 20, 2081–2095 (2012)). Please refer to the paper for the explanation of the mechanism. It can separate spots closer together than net gradient thresholding and deals with background better.
 
 Select ``B-spline wavelet`` as the ``Method`` in the ``Identification`` group.
 
-Each frame is decomposed with the undecimated ("à trous") wavelet transform, using a third-order B-spline. The second wavelet plane keeps structures of about the size of a diffraction-limited spot, while the pixel noise and the background end up in the other planes. Then:
+Each frame is decomposed with the undecimated wavelet transform, using a third-order B-spline. The second wavelet plane keeps structures of about the size of a diffraction-limited spot, while the pixel noise and the background end up in the other planes. Then:
 
 1. the second plane is thresholded,
 2. a watershed splits regions that contain several overlapping spots,
@@ -173,7 +159,6 @@ Things to keep in mind:
 - **Calibrations** — 3D and spline PSF calibration, lateral calibration and channel registration — detect the beads with the selected method, too.
 - The border of a frame is extended by mirroring, a detail the paper does not specify.
 
-On the command line, pass ``--identification-method wavelet`` (see :doc:`/cmd`).
 
 .. _localize-rois:
 
@@ -208,7 +193,7 @@ All ROIs are fitted together into one localization file. To keep them apart afte
 
 The ids are computed before drift correction, so they still name the ROI a localization was detected in even after the coordinates have been shifted.
 
-Split-FOV mode (``Regions = channels``) adds no ``roi_id``: there each region is a channel of its own and is saved to its own file anyway. The command line and ``picasso.localize.localize`` behave the same way.
+Split-FOV mode (``Regions = channels``) adds no ``roi_id``: there each region is a channel of its own and is saved to its own file anyway.
 
 .. _localize-extra-features:
 
@@ -228,7 +213,7 @@ Opening several channels
 ``File`` > ``Open channels from several movies``
    Opens several separate movie files and loads each as one channel. The channel name is taken from the file's metadata where available, otherwise from the file name.
 
-When more than one channel is loaded (by either of the two actions above), a channel selector appears below the image so you can switch between channels; identification, fitting and saving then operate on the currently active channel.
+When more than one channel is loaded (by either of the two actions above), a channel selector appears below the image so you can switch between channels; identification, fitting and saving then operate on the currently active channel. Up and down arrow keys can be used to navigate across the channels.
 
 .. _localize-micromanager-folder:
 
@@ -240,8 +225,6 @@ Open MicroManager image folder
 - Select the acquisition folder and Picasso assembles the whole sequence into one movie, ordered by frame index.
 - Channel, position and z are held fixed at the first frame's values, so a multi-channel or multi-position acquisition is **not** interleaved into a single movie.
 - Only the first frame is read when the movie is opened (the rest are read on demand during localization), so even acquisitions of tens of thousands of files open quickly.
-
-You can also reach the same result through ``File`` > ``Open movie`` by selecting any one ``img_*.tif`` file in the folder — Picasso detects the remaining frames automatically, exactly as it does for split μManager stacks.
 
 .. _localize-concatenate-movies:
 
@@ -278,7 +261,11 @@ Saving and loading identifications
    Loads identifications previously saved with ``Save identifications``. The identifications are clipped to the current movie's bounds (using the current ``Box Size``), and the identification parameters stored in the YAML sidecar (``Box Size``, the identification method and its threshold, ``Temporal Median Window``, ``Gaussian Filter Sigma``) are restored.
 
 ``File`` > ``Load picks as identifications``
-   Allows the user to load circular picks (from Picasso Render) as identifications. Additionally, the drift correction file (.txt) can be loaded to adjust the positions of the identifications throughout acquisition. The current box size will be used to make the identification, however, min. net gradient will **not** be applied to the identifications.
+   Allows the user to load circular picks (from Picasso Render) as identifications. Additionally, the drift correction file (.txt) can be loaded to adjust the positions of the identifications throughout acquisition.
+   
+   The current box size will be used to make the identification, however, min. net gradient will **not** be applied to the identifications.
+   
+   This can be used to backtrack the raw signal from given pick regions.
 
 ``File`` > ``Load locs as identifications``
    Similar to loading picks as identifications (see above) but uses localizations as input.
@@ -286,6 +273,8 @@ Saving and loading identifications
    The user is asked to provide the number of frames around localizations to be used for the identifications, i.e., how many frames before and after the frame of the localization should be included in the identifications.
 
    For each localization, 2 * n_frames + 1 identifications will be assigned, thus if localizations are close together the identifications may overlap.
+
+   This can be used to backtrack the raw signal from given localizations.
 
 .. important::
 
@@ -307,5 +296,3 @@ Loading runs in the background, so the window stays responsive while the files a
 
 - Canceling stops before the next file begins (a file already being read is finished first).
 - This also applies to opening a single movie.
-
-Because the load no longer blocks the interface, large or multi-file datasets can be opened without freezing Picasso.

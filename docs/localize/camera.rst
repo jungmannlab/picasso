@@ -1,7 +1,7 @@
 Camera Configuration
 ====================
 
-Converting camera counts to photons correctly is critical for fitting (see step 8 of :ref:`localize-identification`). This page describes how Picasso can remember camera parameters in a config file, and how to measure and use a per-pixel calibration of an sCMOS camera.
+Converting camera counts to photons correctly is needed for accurate photon counts, background and localization precisions, and for the noise model of the maximum-likelihood fit (see step 8 of :ref:`localize-identification`). This page describes how Picasso can remember camera parameters in a config file, and how to measure and use a per-pixel calibration of an sCMOS camera.
 
 .. _localize-camera-config:
 
@@ -22,13 +22,24 @@ This is the same folder that already holds ``settings.yaml``, so the config no l
 
    To locate the folder quickly, open ``Picasso: Localize`` and select ``File`` > ``Open camera config file location...``; this opens ``~/.picasso`` in your file browser (creating the folder if needed), where you place your ``config.yaml``. If a config is already in use, the same menu entry reveals wherever it actually lives.
 
-To start with a template, copy ``config_template.yaml`` (bundled inside the ``picasso`` package, next to ``__init__.py``) into ``~/.picasso``, rename it to ``config.yaml``, and edit it.
+To start with a template, copy ``config_template.yaml`` into ``~/.picasso``, rename it to ``config.yaml``, and edit it. The template is bundled inside the ``picasso`` package folder (see :ref:`localize-camera-config-legacy` for where to find it for each type of installation) and is also available `on GitHub <https://github.com/jungmannlab/picasso/blob/master/picasso/config_template.yaml>`__.
 
-- Picasso will compare the entries with Micro-Manager-Metadata and match the sensitivity values.
-- If no matching entries can be found (e.g., if the file was not created with Micro-Manager), the config file will still be used to create a dropdown menu to select the different categories.
-- The camera config can also be used to define a default camera that will always be used.
+Indentations are used for definitions; see `config_template.yaml <https://github.com/jungmannlab/picasso/blob/master/picasso/config_template.yaml>`__ for the expected structure.
 
-Indentations are used for definitions.
+.. _localize-camera-config-matching:
+
+How cameras and settings are matched
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+When a movie is opened, Picasso selects the camera and its settings automatically from the movie's Micro-Manager metadata. Micro-Manager does not need any calibration for this; the config only has to use the same names that Micro-Manager writes into every movie, **character for character**:
+
+- **Camera:** the keys under ``Cameras`` are compared with the camera's device label from your Micro-Manager hardware configuration (e.g. ``HamamatsuHam_DCAM``), saved as ``Camera`` in the metadata.
+- **Settings:** Micro-Manager saves every device property as ``<camera>-<property>``. The entries of ``Sensitivity Categories``, ``Gain Property Name`` and ``EM Switch Property`` are property names (e.g. ``PixelReadoutRate``), and the keys under ``Sensitivity`` are the property values exactly as saved (e.g. ``540 MHz - fastest readout``).
+- **Emission wavelength:** ``Channel Device`` > ``Name`` is the full metadata key, device and property (e.g. ``FilterTurret1-Label``), and its saved value (e.g. ``3-TIRF 640``) is looked up in ``Emission Wavelengths``.
+
+To find the exact names, open a movie recorded with Micro-Manager and select ``File`` > ``Show metadata...``, or look at the Micro-Manager metadata in the ``.yaml`` file saved next to the localizations.
+
+``.nd2`` files from Nikon NIS-Elements are matched the same way, using the camera name stored in the file. For other files, nothing is matched; the config then only fills the dropdown menus, and the camera and its settings are selected by hand.
 
 .. _localize-camera-config-legacy:
 
@@ -42,7 +53,7 @@ Older Picasso versions read ``config.yaml`` from inside the installed ``picasso`
 
 For reference, the legacy in-package location per install type is:
 
-- **One-click installer (Windows):** the installation folder (by default ``C:/Picasso``; *before version 0.8.3,* ``C:/Program Files/Picasso``), then ``_internal/picasso``.
+- **One-click installer (Windows):** the installation folder (by default ``C:/Picasso``), then ``_internal/picasso``.
 - **One-click installer (macOS):** right-click the picasso app in Applications, "Show Package Contents", then ``Contents/Frameworks/picasso``.
 - **PyPI:** run ``pip show picassosr`` and look at the ``Location:`` line; the folder is ``<Location>/picasso``.
 - **GitHub:** ``picasso/picasso/`` inside your cloned repository.
@@ -58,7 +69,6 @@ Example: default camera
      Camera1:
        Baseline: 100
        Sensitivity: 0.5
-       Quantum Efficiency: 1.0
 
 If there is only one camera entry, Picasso will create a dropdown menu that has always selected this camera.
 
@@ -81,8 +91,6 @@ If the string ``Sensitivity Categories`` can be found in the config, Picasso wil
    Cameras:
      Camera1:
        Baseline: 100
-       Quantum Efficiency:
-         525: 0.5
        Sensitivity Categories:
          - PixelReadoutRate
          - Sensitivity/DynamicRange
@@ -131,7 +139,7 @@ Several cameras
      Camera2:
      Camera3:
 
-Once there are several cameras present, Picasso will select the camera whose name matches the Micro-Manager Metadata. If no camera is found, the first one is automatically selected. In the dropdown menu, the configured cameras are displayed in alphabetical order.
+Once there are several cameras present, Picasso will select the camera whose name matches the Micro-Manager Metadata. If no camera is found, the first one is automatically selected. In the dropdown menu, the configured cameras are displayed in alphabetical order by default. To show selected cameras first, see below.
 
 .. _localize-camera-config-priorities:
 
@@ -154,7 +162,7 @@ If many cameras are configured, the dropdown can become cluttered. For that reas
 Incorporating calibrations in config file
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-The calibration depends on the microscope, camera, and emission wavelength used. It can become tedious to navigate to and select the correct calibration yaml file. Therefore, the config file can include a field to map camera and emission wavelength to the path of the z calibration yaml file (see :doc:`3d-calibration`):
+The astigmatism calibration depends on the microscope, camera, and emission wavelength used. It can become tedious to navigate to and select the correct calibration yaml file. Therefore, the config file can include a field to map camera and emission wavelength to the path of the z calibration yaml file (see :doc:`3d-calibration`):
 
 .. code-block:: yaml
 
@@ -189,6 +197,10 @@ Picasso implements the pixel-dependent noise model of Huang et al. (`Nat. Method
 
 Given per-pixel maps, the readout variance ``var_k`` (converted to photoelectrons²) is added to both the measured value and the model mean, which makes the sum approximately Poisson again and lets the established maximum-likelihood machinery carry over unchanged.
 
+.. tip::
+
+   **For sCMOS data, use the maximum-likelihood optimizer (MLE) .** The per-pixel noise model only enters the maximum-likelihood fit. Its Cramér-Rao bound is evaluated pixel by pixel and is exact under the model, whereas the closed-form precision used by the least-squares methods assumes a spatially uniform background and can only take the *mean* readout variance over the fitting box. See :ref:`localize-scmos-per-method` for details.
+
 .. _localize-scmos-measuring:
 
 Measuring the maps
@@ -210,8 +222,9 @@ Two acquisitions feed it:
    - Picasso warns below 10,000 frames and refuses below 100.
 
 **Bright series** (optional)
-   Several movies at different quasi-uniform illumination levels, taken with exactly the same camera settings.
+   Several movies of floating fluorophores at different quasi-uniform illumination levels with stable signal across the acquisitions (i.e., without photobleaching effects), taken with  the same camera settings. They are used to measure the per-pixel gain (sensitivity) map, which replaces the scalar ``Sensitivity``.
 
+   - The illumination level can be varied with either the laser power or the exposure time. Varying the exposure time tends to be more stable.
    - A pixel's output mean is ``g·u + o`` and its output variance ``g²·u + var``, so the pair ``(mean − o, variance − var)`` traces a photon-transfer curve whose slope is that pixel's gain.
    - Huang et al. used 15 levels of 20,000 frames spanning roughly 20 to 200 photons per pixel.
    - Without a bright series there is no gain map and the scalar ``Sensitivity`` keeps being used.
@@ -285,13 +298,6 @@ A calibration can also be selected automatically through a ``camera-calibrations
        525: C:/path/to/your_scmos_calib_525.hdf5
        595: C:/path/to/your_scmos_calib_595.hdf5
 
-If one set of maps covers every wavelength, give the camera a single path instead of the mapping and it is used for all of them:
-
-.. code-block:: yaml
-
-   camera-calibrations:
-     HamamatsuHam_DCAM: C:/path/to/your_scmos_calib.hdf5
-
 .. _localize-scmos-per-method:
 
 What it changes, per fitting method
@@ -303,13 +309,9 @@ What it changes, per fitting method
   - Its reported uncertainty does grow, because readout noise is a genuine part of the residual scatter and pretending otherwise makes the error bars optimistic.
   - If the calibration carries offset or gain maps, the least-squares fit does move slightly — but through the improved counts-to-photons conversion, not through the noise model.
 
-.. tip::
-
-   **For sCMOS data, prefer a maximum-likelihood method.** Its Cramér-Rao bound is evaluated pixel by pixel and is exact under the model, whereas the closed-form precision used by the least-squares methods assumes a spatially uniform background and can only take the *mean* readout variance over the fitting box.
-
 Two further caveats:
 
-- Set ``EM Gain`` to 1. An sCMOS sensor does not multiply, and combining an EM gain with a camera calibration applies the EMCCD excess-noise factor on top of the readout variance, double-counting the noise. Picasso warns if you do.
+- Set ``EM Gain`` to 1. This settings should be used only for the EMCCD cameras. An sCMOS sensor does not multiply, and combining an EM gain with a camera calibration applies the EMCCD excess-noise factor on top of the readout variance, double-counting the noise. Picasso warns if you do.
 - The reported ``log_likelihood`` is evaluated on the shifted data, so its values are not comparable between runs with and without a calibration.
 
 .. _localize-scmos-checking:

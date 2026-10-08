@@ -184,27 +184,25 @@ Running it
 What each channel carries
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Fitted separately, a channel is a dataset of its own, so these settings are kept per channel and swapped in when the channel is selected:
+Fitted separately, a channel is a dataset of its own.
 
-**Model and optimizer**
-   Every model is available, together with its convergence criterion, maximum iterations and the ``Use GPU`` choice.
+**Separate movies**
+   Every channel keeps its own ``Parameters`` settings, which are swapped in when the channel is selected. To use the same values for all channels instead, tick them under ``Same settings across channels`` (shown once several movies are loaded); the current values are then copied to every channel:
 
-**Min. net gradient**
-   As before: per channel for separate movies, and per region in split-FOV mode (select a region and the slider tunes that region alone).
+   - ``Box size`` (off by default),
+   - ``Min. net gradient``, or ``Wavelet settings`` with the wavelet identification; this also shares the identification method (off by default),
+   - ``Camera settings``: camera, baseline, EM gain, sensitivity and pixel size (off by default),
+   - ``PSF calibration``: the experimental PSF (spline) calibration (**on** by default, which is what the joint fit needs). The PSF is measured per channel, so for fitting each channel separately, untick it and load one calibration per channel.
 
-**Experimental PSF (spline) calibration**
-   The PSF is measured per channel, so each channel usually needs its own.
+   The model and optimizer (with the convergence criterion, maximum iterations and ``Use GPU``), the astigmatism z calibration and ``Fit Z``, the lateral corrections and the identification filters (temporal median, Gaussian filter) are always kept per channel. The frame range is always shared.
 
-   - For separate movies, untick **PSF calibration** under ``Same settings across channels`` and load one calibration per channel; ticked (the default), one calibration is shared, which is what the joint fit needs.
-   - In split-FOV mode each region always keeps its own.
+**Split field of view**
+   The regions are channels of one movie, so they share one set of settings, except:
 
-**3D via astigmatism**
-   The z calibration and the ``Fit Z`` checkbox, likewise per channel: astigmatism is calibrated per optical path.
+   - ``Min. net gradient``, or the wavelet settings with the wavelet identification, kept per region (select a region and the identification settings tune that region alone).
+   - The model and the PSF calibration, kept per region when the regions are fitted separately.
 
-**Camera settings**
-   Baseline, sensitivity, gain and pixel size, unless ``Camera settings`` is ticked under ``Same settings across channels``.
-
-The box size, the frame range and the identification filters (temporal median, Gaussian filter) stay shared: they describe the acquisition rather than the channel. In split-FOV mode the ``Edit ROIs...`` table lists each region's model and PSF calibration alongside its coordinates and threshold, so the whole setup can be checked at a glance.
+   The ``Edit ROIs...`` table lists each region's model and PSF calibration alongside its coordinates and threshold, so the whole setup can be checked at a glance.
 
 .. important::
 

@@ -9,11 +9,7 @@ Picasso can fit an **experimentally measured PSF** to every spot. The measured P
 - A 3D calibration recovers the axial position ``z`` directly: a single fit returns ``x``, ``y``, ``z``, photons and background, with no separate astigmatism z-calibration step.
 - A 2D calibration models a single focal plane (no ``z``).
 
-.. note::
-
-   This feature is experimental — please report any unexpected behavior on our `GitHub issues page <https://github.com/jungmannlab/picasso/issues>`_.
-
-Fitting runs on the CPU, or on any CUDA-capable GPU — see :doc:`gpu`; the kernels are compiled at run time by Numba, so no platform-specific binary is involved. *Building* a calibration follows the scheme of `Gpuspline <https://github.com/gpufit/Gpuspline>`_, its license is reproduced in ``LICENSES/Gpuspline-LICENSE.txt``.
+Building a calibration follows the scheme of `Gpuspline <https://github.com/gpufit/Gpuspline>`_, its license is reproduced in `LICENSES/Gpuspline-LICENSE.txt <https://github.com/jungmannlab/picasso/blob/master/LICENSES/Gpuspline-LICENSE.txt>`__.
 
 **Localization precision.** The fit returns the fitted parameters but no uncertainties, so Picasso evaluates the Cramer-Rao lower bound separately to fill ``lpx``, ``lpy``, ``lpz``, ``photons_unc`` and ``bg_unc``. GPU with CUDA is used if detected, otherwise the process runs on the CPU.
 
@@ -30,16 +26,58 @@ The multichannel variant (see :ref:`localize-multichannel-spline` below) additio
 Building a spline calibration
 -----------------------------
 
-A calibration is built from a **bead z-stack**: image a sample of sparse, bright, sub-diffraction beads while scanning the stage through focus in even steps. Picasso then:
+A calibration is built from a **bead z-stack**: image a sample of sparse, bright, sub-diffraction beads while scanning the stage through focus in even steps. This is the workflow described in `Li et al., Nature Methods 15, 367–369 (2018) <https://doi.org/10.1038/nmeth.4661>`_, however, PSF scaling was adapted to fit Gpufit's workflow.
 
-1. detects the beads (once, near focus — they are static in x/y),
-2. cuts a box around each,
-3. averages them across all beads and fields of view,
-4. registers them in 3D,
-5. normalizes the result to a clean PSF volume,
-6. computes the cubic-spline coefficients.
+.. dropdown:: 1 · Detect the beads
+   :icon: search
 
-This is the workflow described in `Li et al., Nature Methods 15, 367–369 (2018) <https://doi.org/10.1038/nmeth.4661>`_, however, PSF scaling was adapted to fit Gpufit's workflow.
+   The beads are detected once and their positions are reused for every z step.
+
+   - Detection runs on the middle third of the scan, where the beads should be closest to focus and brightest, with the identification settings of the ``Parameters`` dialog (net gradient or wavelet).
+   - The temporal median filter is never applied here: the beads are static, so it would subtract them.
+   - Each detection is rounded to the pixel grid. Detections closer than one box size are merged into one.
+   - Beads whose box would reach past the frame edge are dropped.
+   - With several fields of view per z step, beads are detected and merged within each field of view separately.
+
+.. dropdown:: 2 · Cut out a volume per bead
+   :icon: package
+
+   For every bead, a box is cut out of every frame and converted to photons with the camera parameters, which gives one ``box × box × z`` volume per bead.
+
+   With ``Z binning``, that many consecutive z steps are then averaged into one slice (see ``Z binning`` in the ``Calibrate spline PSF`` dialog, described in the ``GUI`` tab below).
+
+.. dropdown:: 3 · Register the beads in 3D and reject outliers
+   :icon: git-compare
+
+   Beads may reach focus at slightly different stage positions due to coverslip tilt and sit at slightly different sub-pixel positions, so they are aligned to each other before averaging.
+
+   - **Focus.** The sharpest slice of the mean of all beads, the one with the smallest fitted Gaussian width, marks the focus.
+   - **Alignment.** Each bead is aligned to a reference by 3D cross-correlation. Only the slices around focus are correlated. The correlation peak is located with sub-voxel precision by upsampling it 20-fold with cubic-spline interpolation, and the bead volume is shifted there by cubic-spline interpolation.
+   - **Iteration.** The first reference is the brightest bead at focus. In two further rounds, all beads are realigned to the average of the beads kept so far.
+   - **Outliers.** In every round, a bead is rejected if its normalized cross-correlation with the average is unusually low or its mean-square difference from the (brightness-matched) average is unusually high, i.e. more than 2.5 robust standard deviations from the median of all beads. At least half of the beads, and never fewer than three, are always kept. The bead gallery written next to the calibration shows which beads were kept and why the others were rejected (see :ref:`localize-spline-beads`).
+   - **Centering.** The average is finally shifted laterally so that its center at focus sits exactly on the box center, where a fitted shift of zero places the emitter.
+
+.. dropdown:: 4 · Smooth along z
+   :icon: pulse
+
+   Each pixel's intensity-vs-z profile is smoothed with a cubic smoothing spline, as in Li et al. (2018). The amount of smoothing is chosen automatically by generalized cross-validation, so noise is removed without washing out the axial changes that encode ``z``. At least five z slices (after binning) are needed for this.
+
+.. dropdown:: 5 · Normalize the PSF
+   :icon: dash
+
+   - The focus is located again on the smoothed volume.
+   - The background, the minimum of the volume, is subtracted, and the volume is divided by the peak of the in-focus slice, so the PSF model has a peak of 1.
+   - The sum of the in-focus slice is stored as well; it converts the fitted amplitude into the number of photons.
+
+   Li et al. (2018) instead normalize the in-focus slice to a sum of 1; the unit peak used here keeps the fit's starting values valid.
+
+.. dropdown:: 6 · Compute the spline coefficients
+   :icon: graph
+
+   The normalized volume is interpolated by a cubic spline in x, y and z (natural boundary conditions, i.e. zero curvature at the edges of the volume), following the coefficient layout of Gpuspline. The spline passes exactly through every voxel.
+
+   - A ``2D (single plane)`` calibration uses only the in-focus slice.
+   - ``z = 0`` is placed at the center of the stage scan, or at the axial intensity peak with ``Set z = 0 at max. intensity`` checked.
 
 .. tab-set::
 
@@ -51,7 +89,7 @@ This is the workflow described in `Li et al., Nature Methods 15, 367–369 (2018
          The axial stage step between consecutive frames (or z-positions).
 
       **Number of frames per step size** and **Frame order**
-         For multi-FOV stacks that image several fields of view at each z-position (as in the 3D astigmatism dialog).
+         For movies that image several fields of view (FOVs) to collect more beads: the number of FOVs, and whether all FOVs are imaged at each z position before the stage moves (``Different FOVs first``) or each FOV gets its own full z-stack (``Different z positions first``). Each FOV should show different beads.
 
       **Z binning (steps per bin)** (default 1)
          Averages that many consecutive z-positions into one slice of the PSF model, so the spline's axial knots are *binning × step size* apart (the dialog shows the resulting bin size).
@@ -65,10 +103,10 @@ This is the workflow described in `Li et al., Nature Methods 15, 367–369 (2018
          ``3D (recovers z)`` or ``2D (single plane)``.
 
       **Magnification factor** (default 0.79)
-         Scales the fitted ``z`` to correct for the refractive-index mismatch, as in the astigmatism fit (Huang et al., 2008). It is stored in the calibration and applied at fit time, not during calibration.
+         Scales the fitted ``z`` to correct for the refractive-index mismatch, as in the astigmatism fit (`Huang et al., Science 319, 810–813 (2008) <https://doi.org/10.1126/science.1153529>`__). It is stored in the calibration and applied at fit time, not during calibration.
 
       **Set z = 0 at max. intensity**
-         Define ``z = 0`` at the axial intensity peak of the averaged PSF instead of the center of the stage scan. Only meaningful for a PSF with a single, well-defined focus (e.g. astigmatism); off by default. This will impact the behavior of the magnification factor if the measured calibration data is offset.
+         Define ``z = 0`` at the axial intensity peak of the averaged PSF instead of the center of the stage scan. Only meaningful for a PSF with a single, well-defined focus (e.g. astigmatism); off by default. This will impact the effect of the magnification factor if the measured calibration data is offset.
 
       The box size and minimum net gradient are taken from the main ``Parameters`` dialog. You are then asked where to save the calibration ``.hdf5``. Written next to it are:
 
@@ -95,7 +133,7 @@ This is the workflow described in `Li et al., Nature Methods 15, 367–369 (2018
 
 .. important::
 
-   **The fit box size must not be larger than the box size the calibration was built with.** If they differ, Picasso Localize shows a dialog and offers to set the box size to the calibration's value (you then re-run identification before fitting).
+   **The fit box size must not be larger than the box size the calibration was built with.** If it is larger, Picasso Localize shows a dialog and offers to set the box size to the calibration's value (you then re-run identification before fitting).
 
 .. _localize-spline-plot:
 
@@ -105,15 +143,15 @@ Reading the calibration plot
 The diagnostic ``.png`` summarizes the averaged PSF and lets you judge the calibration at a glance. Its title reports the number of beads, the z range, the box and pixel size, and — when available — the model-vs-data agreement (median R² and NRMSE). Every image panel shares one intensity scale, and one camera pixel is drawn at the same physical size in all panels.
 
 **xy slices (across z)**
-   The PSF seen face-on at evenly spaced z-planes; the in-focus (sharpest) slice is outlined. A good calibration shows a compact, symmetric spot at focus that changes smoothly and symmetrically with defocus (for astigmatism, orthogonal elongation on either side of focus).
+   The PSF seen face-on at evenly spaced z-planes; the in-focus (sharpest) slice is outlined.
 
 **xz and yz cross-sections**
-   Side views with z on the vertical axis; a cyan line marks the sharpest slice. Look for a smooth, symmetric hourglass shape, without double-lobing or abrupt jumps between z-steps.
+   Side views with z on the vertical axis; a cyan line marks the sharpest slice.
 
-**Axial intensity profile** (always shown)
-   The brightest normalized pixel per slice versus stage position. Expect a single clean peak, ≈ 1 at focus, decaying smoothly with defocus.
+**Axial intensity profile**
+   The brightest normalized pixel per slice versus stage position.
 
-For a 3D calibration, Picasso also re-fits the individual beads through the new spline model (on the GPU when one is present, otherwise on the CPU) and adds three panels:
+For a 3D calibration, Picasso also re-fits the individual beads using the spline model and adds three panels:
 
 **Estimated z vs stage**
    Recovered z against the known stage position, with the identity line. Points should be found around the diagonal across the whole z range.
@@ -135,7 +173,7 @@ This aims to remove doublets, aggregates, and beads sitting at a different heigh
 
 To look at the filtering, click ``Inspect beads...`` in the message shown when a calibration finishes, or use ``Calibration`` > ``Inspect calibration beads``; the same gallery is written next to the calibration as ``<base>_beads.png``.
 
-Each channel of a multichannel or split-FOV calibration builds its own PSF from its own beads and therefore filters independently: the inspector has a channel selector, and one gallery per channel is saved as ``<base>_ch{c}_beads.png``.
+For multichannel data (see :ref:`localize-multichannel-spline` below), each channel (or split-FOV) calibration builds its own PSF model from its own beads and therefore filters independently: the inspector has a channel selector, and one gallery per channel is saved as ``<base>_ch{c}_beads.png``.
 
 A healthy calibration rejects a few clearly odd beads. Rejected beads that look just like the kept ones — or rejections concentrated in one corner of the field of view — mean the PSF is field-dependent, and a smaller ROI will describe the data better.
 
@@ -154,7 +192,8 @@ In addition to the usual columns, spline fits report:
 
 - per-localization precisions (``lpx``, ``lpy``, and ``lpz`` for 3D, in nm),
 - ``photons`` and ``bg`` with their uncertainties (``photons_unc``, ``bg_unc``),
-- for MLE, ``log_likelihood`` and ``iterations``.
+- the fit quality: ``log_likelihood`` for MLE or ``chi_square`` (the sum of squared residuals) for least squares, plus ``reduced_chi_square``, normalized for the box size and the photon counts so it can be compared between spots,
+- the number of ``iterations`` each fit took.
 
 A 3D calibration adds the recovered ``z`` (and ``lpz``). The accompanying ``_locs.yaml`` records the spline calibration model and file path used, and which device performed the fit.
 
@@ -177,11 +216,11 @@ To build the calibration in the GUI, first load the channels:
 - **Separate movies** — ``File`` > ``Open channels from several movies`` (or ``Open one multichannel movie`` for a single file holding several channels). The first movie loaded is the **reference channel**.
 - **Split field of view** — if the channels are imaged side by side on one camera, load the single movie, tick **Regions = channels** in the ``Parameters`` dialog and drag the ROIs onto the channels. The first region is the reference channel. All regions are kept the same size: drag once to set the size, click to drop more, drag a region or use the arrow keys to fine-tune it.
 
-In split field of view mode, each region also carries its **own minimum net gradient**:
+In split field of view mode, each region also carries its **own identification settings**:
 
-- Select a region (click it in the image, or its row in ``Edit ROIs...``) and the ``Min. net gradient`` slider shows and tunes *that* region alone — turn on ``Preview`` and sweep it as usual.
-- With no region selected, the slider still sets every region at once.
-- The current value is drawn next to each region's ``ref`` / ``ch1`` label and listed in the ``min_ng`` column of the ``Edit ROIs...`` table, where it can also be typed in directly.
+- Select a region (click it in the image, or its row in ``Edit ROIs...``) and the ``Min. net gradient`` slider, or the wavelet settings, show and tune *that* region alone — turn on ``Preview`` and sweep them as usual.
+- With no region selected, they still set every region at once.
+- The current threshold is drawn next to each region's ``ref`` / ``ch1`` label and listed in the ``min_ng`` (or ``wavelet thr.``) column of the ``Edit ROIs...`` table, where it can also be typed in directly.
 - The per-region values are used for identification, for ``Calibrate spline PSF`` and for ``Re-align channels (current signal)``.
 
 .. _localize-multichannel-spline-calibrating:

@@ -3052,7 +3052,7 @@ class CalibrateAffineDialog(lib.Dialog):
     """
 
     LATERAL_URL = docs_url(
-        "localize/3d-calibration.html#localize-lateral-corrections"
+        "localize/lateral-correction.html#localize-lateral-corrections"
     )
 
     # Emitted when "Calibrate" is pressed. Not ``accepted``: the dialog
@@ -5038,7 +5038,7 @@ class ParametersDialog(lib.Dialog):
             self.affine_calib_label.setToolTip("")
             return
 
-        transforms, loaded, empty, already = [], [], [], []
+        transforms, loaded, empty, already, repeated = [], [], [], [], []
         for path in paths:
             try:
                 calibration = io.load_any_calibration(path)
@@ -5063,6 +5063,12 @@ class ParametersDialog(lib.Dialog):
                 found, self._calibration_lateral_transforms()
             )
             already.extend(duplicates)
+            # the same correction picked twice (the same file or a copy of
+            # it) counts once, as with a repeated --affine-calibration
+            found, duplicates = lib.drop_duplicate_lateral_transforms(
+                found, transforms
+            )
+            repeated.extend(duplicates)
             if not found:
                 continue
             transforms.extend(found)
@@ -5084,6 +5090,16 @@ class ParametersDialog(lib.Dialog):
                 + ".\n\nThe loaded 3D / spline calibration already carries "
                 "this correction and applies it during the fit. Loading it "
                 "here as well would correct the coordinates twice.",
+            )
+        if repeated:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Load lateral correction",
+                "Loaded once: "
+                + ", ".join(lib.describe_lateral_transforms(repeated))
+                + ".\n\nThe same correction was selected more than once "
+                "(the same file or a copy of it). Applying it twice would "
+                "correct the coordinates twice.",
             )
         if not transforms:
             self.update_affine_calib(None)
