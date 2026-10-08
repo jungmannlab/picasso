@@ -26,10 +26,15 @@ Filtering of localizations
    select multiple columns) and then selecting ``Plot > 2D Histogram``
    (:kbd:`Ctrl+D`).
 3. Left-click and hold the mouse button down to drag a selection area in a 1D
-   or 2D histogram. The selected area will be shaded in green. Each
-   localization event with histogram properties outside the selected area is
-   immediately removed from the localization list.
+   or 2D histogram. The selected area will be shaded (in orange by default).
+   Each localization event with histogram properties outside the selected area
+   is immediately removed from the localization list.
 4. Save the filtered localization table by selecting ``File > Save``.
+
+The look of the histograms is set in ``Plot > Plot settings...``, or with the
+*Plot settings* button in the toolbar of each histogram window: for example
+the font sizes, the colors, the gridlines, etc. Changes are remembered across
+Picasso apps.
 
 The columns are explained in :doc:`files` for
 :ref:`localizations <files-localization-hdf5>`,
@@ -43,11 +48,9 @@ the :ref:`user settings file <user-settings-file>`).
 Numerical filtering
 ~~~~~~~~~~~~~~~~~~~
 
-In Picasso 0.5.0, an alternative approach was introduced: in the menu bar,
-click ``Filter > Filter numerically...`` (:kbd:`Ctrl+F`). A dialog is
-displayed where the user can numerically filter values for any of the columns.
-Click the ``Filter`` button in the dialog to remove localizations which do not
-fit in the input parameters.
+In the menu bar, click ``Filter > Filter numerically...`` (:kbd:`Ctrl+F`). A dialog is displayed where the user can numerically filter values for any of the columns. Click the ``Filter`` button in the dialog to remove localizations which do not fit in the input parameters.
+
+The limits are inclusive: localizations with values equal to ``min`` or ``max`` are kept. Localizations with non-finite values (NaN, infinity) in the column are always removed.
 
 Filters from metadata
 ~~~~~~~~~~~~~~~~~~~~~
@@ -57,12 +60,17 @@ The filtering information is stored in the metadata .yaml file.
 filtered data by clicking ``Filter > Apply filters from metadata...``. The
 extracted information is displayed to the user before approval.
 
+All filter steps found in the metadata are applied: if
+the file was filtered several times (in several Filter sessions), the ranges of
+each column are intersected, so the strictest limits of all steps apply, and
+the removed columns of every step are removed. Steps on columns that the
+current localizations do not have are listed and skipped.
+
 Test subclustering
 ~~~~~~~~~~~~~~~~~~
 
-In Picasso 0.9.5, a new plot was added to test for "subclustering". It can be
-applied to molecular maps/cluster centers which save the column ``n_events``,
-i.e., the number of binding events detected per molecule.
+This function can be applied to molecular maps/cluster centers which save the
+column ``n_events``, i.e., the number of binding events detected per molecule.
 
 The premise is the following: a single molecule is expected to give rise to a
 certain distribution of the number of binding events. If extra molecules are
