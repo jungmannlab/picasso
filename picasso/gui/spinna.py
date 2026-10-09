@@ -4904,7 +4904,7 @@ class SimulationsTab(lib.Dialog):
                 message = (
                     "Please enter depth for the homogeneously distributed"
                     " simulation. To do this, please click the"
-                    ' "Depth (nm)" button above.'
+                    ' "Z range (nm)" button above.'
                 )
                 QtWidgets.QMessageBox.information(self, "Warning", message)
                 return fail_return
