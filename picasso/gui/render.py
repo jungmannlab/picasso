@@ -6250,7 +6250,7 @@ class MaskSettingsDialog(lib.Dialog):
         self.H = H / H.max()
         self.plots[0].setPixmap(
             self.render_to_pixmap(self.H),
-            title="Histogramed localizations",
+            title="Histogrammed localizations",
         )
 
     def blur_image(self) -> None:

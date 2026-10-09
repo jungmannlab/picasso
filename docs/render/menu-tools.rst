@@ -24,9 +24,11 @@ Pick similar
 Shortcut: :kbd:`Ctrl+Shift+P`
 
 Automatically identifies picks that are similar to the current picks.
-Available for circular, square, rectangular and box picks. For rectangular
-picks, the new picks take the median length of the current picks and are
-oriented along the localizations they contain. See
+Available for circular, square, rectangular and box picks. New circular and
+square picks take the current size. For rectangular picks, the new picks take
+the median length of the current picks and are oriented along the
+localizations they contain. New box picks take the median width and height of
+the current picks; the boxes you drew yourself are kept as drawn. See
 :ref:`render-picking-steps` for the similarity measures.
 
 .. _render-remove-locs-in-picks:
@@ -49,10 +51,31 @@ Changes FoV to display a pick region specified by the user.
 Pick fiducials
 --------------
 
-Automatically picks fiducials. To do so, the whole FOV image is rendered at
-one-pixel-blur. Then, such image pixel intensities are histogrammed and the
-99th is used as a threshold for selecting image maxima using Localize's
-identification.
+Automatically picks fiducial markers, e.g., for
+:ref:`marker-based drift correction <render-marker-drift>`. Fiducials are
+bright spots that are visible in nearly every frame, so they appear as the
+densest spots of the image. Requires no existing picks.
+
+1. The whole image is rendered with one pixel per camera pixel and
+   ``One-Pixel-Blur``.
+2. Spots are detected as in Localize's net gradient identification
+   (see :ref:`localize-identification`), with a box of about 900 nm and the
+   99th percentile of the pixel values as the minimum net gradient.
+3. Only spots with more localizations than 80% of the number of frames are
+   kept, and each gets a circular pick with a diameter of the box size.
+
+.. _render-plot-pick-profile:
+
+Plot pick profile
+-----------------
+
+Plots the distribution of the localizations along a single rectangular pick, as a histogram of their
+positions along the pick's axis in nm. Requires exactly one rectangular pick
+(see :ref:`render-pick-shapes`). With several channels, they can be plotted
+together, each in its own color.
+
+- ``Bin width`` in the toolbar sets the histogram bin width.
+- ``Export (*.csv)`` saves the positions (nm), one column per channel.
 
 .. _render-show-trace:
 
@@ -63,15 +86,29 @@ Show trace
 
 Shortcut: :kbd:`Ctrl+R`
 
-Shows the time trace of the currently selected pick(s).
+Plots the localizations of the picks against time, e.g., to check binding
+kinetics or to tell repeated binding from a single sticking event. With
+several picks, their localizations are combined into one trace. The window
+has four panels, all over the frames of the movie:
+
+- ``X-pos vs frame`` and ``Y-pos vs frame``: the x and y coordinates (camera
+  pixels) of each localization;
+- ``Localizations``: 1 in frames with a localization, 0 otherwise;
+- ``Photons``: the photon count in each frame.
+
+``Export (*.csv)`` in the toolbar saves the trace as ``<name>.trace.csv`` with
+three columns: frame, on/off (1 or 0) and photons (as integers).
 
 .. _render-select-picks-trace:
 
 Select picks (trace)
 --------------------
 
-Opens a dialog that goes through all picks, displays its trace and asks to
-keep or discard it.
+Goes through the picks one by one, shows the trace of each (the same panels
+as in :ref:`render-show-trace`) and asks whether to keep it: ``Accept`` keeps
+the pick, ``Reject`` removes it, ``Back`` returns to the previous pick and
+``Cancel`` stops. The dialog shows the progress, the number of kept and
+removed picks and the time per pick.
 
 .. _render-select-picks-xy:
 
@@ -80,18 +117,6 @@ Select picks (XY scatter)
 
 Opens a dialog that goes through all picks, displays a xy-scatterplot and asks
 to keep or discard it.
-
-.. _render-plot-pick-xyz:
-
-Plot pick (XYZ scatter)
------------------------
-
-.. rst-class:: shortcut
-
-Shortcut: :kbd:`Ctrl+3`
-
-Displays a 3D scatterplot of the localizations of the currently selected
-pick(s).
 
 .. _render-select-picks-xyz:
 
@@ -154,10 +179,34 @@ saved.
 Mask image
 ----------
 
-Opens a dialog that allows the user to specify a mask for filtering
-localizations within and outside it. The user can adjust the histogram bin
-size, blur thereof and the threshold applied.
+Splits the localizations into those inside and outside a mask, e.g., to keep
+the localizations in a cell and remove the background. The mask is computed
+from the density of the localizations of the selected channel:
 
-The images can be zoomed in/out (:kbd:`Ctrl`/:kbd:`Cmd` + scrolling) and
-panned (dragging with the right mouse button, or with :kbd:`Ctrl`/:kbd:`Cmd` +
-the left mouse button). Double clicking resets the zoom.
+1. The localizations are histogrammed with ``Display pixel size (nm)``
+   (300 nm by default) over the whole image and normalized to a maximum of 1
+   (panel *Histogrammed localizations*).
+2. The histogram is blurred with a Gaussian of :math:`\sigma` =
+   ``Blur (nm)`` (500 nm by default) and normalized again (panel *Blur*).
+   ``Show histogram`` plots the pixel values of the blurred image, which helps
+   to choose a threshold.
+3. Pixels above the threshold form the mask (panel *Mask*). ``Custom`` uses the
+   ``Threshold`` typed in (0 to 1, 0.5 by default). The other methods find it
+   automatically with the scikit-image functions of the same name: global
+   thresholds (``Isodata``, ``Li``, ``Mean``, ``Minimum``, ``Otsu``,
+   ``Triangle``, ``Yen``) or local ones that vary across the image
+   (``Local Gaussian``, ``Local mean``, ``Local median``).
+4. ``Mask`` applies the mask to the localizations and shows those inside it
+   (panel *Masked*). Tick ``Mask all channels`` to apply the same mask to every
+   loaded channel.
+5. ``Save localizations`` saves the localizations inside and outside the mask
+   as two files (``_mask_in.hdf5`` and ``_mask_out.hdf5``; with all channels,
+   you choose the suffixes). The loaded localizations are not changed.
+
+``Save Mask`` saves the mask as a ``.npy`` array (plus a ``.png`` image) and
+``Load Mask`` loads one, e.g., to apply the same mask to another dataset.
+``Save Blurred`` saves the blurred image as a ``.png``.
+
+The panels zoom and pan together: :kbd:`Ctrl`/:kbd:`Cmd` + scrolling zooms,
+dragging with the right mouse button (or :kbd:`Ctrl`/:kbd:`Cmd` + the left
+button) pans, and a double click resets the zoom.

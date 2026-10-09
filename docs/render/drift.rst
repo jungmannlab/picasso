@@ -81,11 +81,11 @@ the picks are interpolated linearly. For an example, see Fig. 4 of
 
 .. _render-rcc:
 
-Redundant cross-correlation drift correction
---------------------------------------------
+Redundant cross-correlation (RCC) drift correction
+--------------------------------------------------
 
 Please refer to `Wang et al., Optics Express, 2014 <https://doi.org/10.1364/OE.22.015982>`_ for detail on the mechanism of RCC. It's a lot slower than AIM, however, it does not
-tend to diverge.
+tend to diverge. RCC can only correct x and y coordinates (not 3D).
 
 1. In ``Picasso: Render``, select ``Postprocess > Undrift by RCC``.
 2. A dialog will appear asking for the segmentation parameter.

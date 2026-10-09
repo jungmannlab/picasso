@@ -615,7 +615,7 @@ def plot_NN(  # noqa: C901
         ignored. Default is None.
     mode : {'hist', 'plot'}, optional
         Mode of plotting. If 'hist', histogram is plotted. If 'plot'
-        NNDs are histogramed and a line is plotted. Default is 'hist'.
+        NNDs are histogrammed and a line is plotted. Default is 'hist'.
     fig : plt.Figure or None, optional
         Figure to be used for plotting. If None (or ``ax`` is None), a
         new figure and axes are created. Default is None.

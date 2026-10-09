@@ -131,11 +131,19 @@ Shortcut: :kbd:`Ctrl+T`
 
 Define the settings of the tools:
 
-- The **Pick** section sets the pick shape and its size (``Diameter``,
-  ``Width``, ``Side length`` or ``Stroke width``, see
-  :ref:`render-pick-shapes`), the range of *Pick similar*, whether the picks
-  are annotated with their indices and whether circular picks are displayed as
-  points.
+- The **Pick** section sets:
+
+  - the pick shape and its size (``Diameter``, ``Width``, ``Side length`` or
+    ``Stroke width``, see :ref:`render-pick-shapes`);
+  - ``Pick similar +/- range (std)`` (2 by default), the tolerance of
+    :ref:`Pick similar <render-pick-similar>`. That tool computes the number of
+    localizations and their RMSD from the center of mass in each of your
+    picks, and accepts a new region only if both lie within the mean ± this
+    many standard deviations of your picks. Larger values find more, less
+    similar structures. For rectangular picks, the RMSD along and across the
+    pick's axis are checked separately;
+  - ``Annotate picks``, which shows the index of each pick next to it;
+  - ``Display circular picks as points``.
 - The **Move** section selects the channels dragged with the move tool and
   undoes the last move, see :ref:`render-move`.
 

@@ -31,7 +31,7 @@ all picks share one size or each pick carries its own extent:
    * - ``Rectangle``
      - Dragging from one end of its center axis to the other, so it can take any orientation and length. A drag shorter than 5 screen pixels, e.g., a stray click, creates no pick.
      - ``Width`` (across the axis) shared by all picks; the length is per pick.
-     - Elongated structures - filaments, nanorulers, edges. The only shape for ``Plot pick profile`` and the ``x_pick_rot`` / ``y_pick_rot`` columns (see :ref:`Table 1 <files-localization-columns>` of the file formats).
+     - Elongated structures - filaments, nanorulers, edges. The only shape for :ref:`Plot pick profile <render-plot-pick-profile>` and the ``x_pick_rot`` / ``y_pick_rot`` columns (see :ref:`Table 1 <files-localization-columns>` of the file formats).
    * - ``Polygon``
      - One left click per vertex; click the first vertex again to close the outline. A right click removes the last vertex.
      - None; each polygon carries its own extent.

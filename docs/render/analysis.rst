@@ -322,8 +322,8 @@ Basic frame analysis
 
 .. _render-test-clusterer:
 
-Test clusterer
-~~~~~~~~~~~~~~
+Test clustering
+~~~~~~~~~~~~~~~
 
 ``Postprocess > Clustering > Test clustering...`` tries clustering
 parameters on a small region before the whole dataset is clustered:

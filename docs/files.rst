@@ -148,29 +148,14 @@ the data table is stored in the path ``/groups``.
 
 Each row in the ``groups`` table corresponds to one picked region (see
 :ref:`render-save-pick-properties` for how it is calculated). The
-localizations of a pick are first linked into binding events. For each column
-of the linked table (see Table 1), two columns are generated in the ``groups``
-table: the mean and standard deviation of the respective column over the
-binding events of the pick. For example, the column ``len`` (bright time) gives
-``len_mean`` and ``len_std``.
+localizations of a pick are first linked into binding events; Table 3 lists
+the columns.
 
-Furthermore, the following columns are included:
-
-- ``group``: the pick (or group) identifier;
-- ``n_events``: the number of binding events in the pick that have a measured
-  dark time (the first event of a pick has none);
-- ``len_mean`` and ``dark_mean``: mean bright and dark times, averaged over the
-  binding events. Units: frames;
-- ``length_cdf`` and ``dark_cdf``: mean bright and dark times estimated by
-  fitting their distributions with the CDF of the exponential distribution.
-  Units: frames;
-- ``qpaint_idx`` and ``qpaint_idx_cdf``: the qPAINT index, i.e., the inverse
-  of ``dark_mean`` and ``dark_cdf``, respectively. Units: 1/frames;
-- ``n_units``: the number of binding sites from qPAINT,
-  :math:`1 / (\text{influx rate} \cdot \text{dark\_cdf})`; the influx rate is
-  stored in the metadata;
-- ``locs``: the number of localizations in the pick (before linking);
-- ``pick_area_um2``: the area of the pick in µm² (only when saved from picks).
+.. csv-table:: Table 3: Name, description and data type for the columns of pick property files.
+   :name: files-pick-property-columns
+   :file: table03.csv
+   :widths: 15, 65, 20
+   :header-rows: 1
 
 Bright and dark times are counted in frames:
 

@@ -73,13 +73,48 @@ the key ``Save picks in metadata`` to ``True`` in the
 :ref:`user settings file <user-settings-file>` (``~/.picasso/settings.yaml``,
 also editable via ``File > Picasso settings`` in any module).
 
+.. _render-save-picked-separately:
+
+Save picked localizations separately
+------------------------------------
+
+Like *Save picked localizations*, but saves each pick to its own file
+(``<name>_0.hdf5``, ``<name>_1.hdf5``, ...), e.g., to process single
+structures individually. With more than 10 picks, Render asks for
+confirmation first. With several channels, all channels can be saved one by
+one (with a suffix you enter) or combined into one file per pick.
+
 .. _render-save-pick-properties:
 
-Save pick properties
---------------------
+Save pick/group properties
+--------------------------
 
-Calculates the properties of each pick (i.e., mean frame, mean x mean y as
-well as kinetic information) and saves it as an hdf5 file.
+Calculates the properties and the binding kinetics of each pick, including
+the qPAINT number of binding sites, and saves them as a ``.hdf5`` file with
+one row per pick (``postprocess.pick_properties``). The file can be inspected
+and plotted in :doc:`/filter`, like a localization file.
+
+For each pick:
+
+1. The localizations are linked into binding events: localizations separated
+   by at most ``Ignore dark times <=`` frames (set in the
+   :ref:`Info dialog <render-info-picks>`) form one event.
+2. The bright time of each event and the dark time before it are measured.
+   Picks without at least two binding events are left out.
+3. The mean bright and dark times are fitted to their cumulative
+   distributions, and the number of binding sites is
+   :math:`1 / (\text{influx rate} \cdot \tau_d)`, with the
+   ``Influx rate`` from the Info dialog.
+
+The columns include ``group`` (the pick number), ``locs`` (number of localizations) and
+``n_events`` (number of binding events) per pick, the mean and standard
+deviation of every localization column over the binding events
+(``x_mean``, ``photons_std``, ...), the fitted ``length_cdf`` and
+``dark_cdf``, ``qpaint_idx_cdf`` and ``n_units``; see
+:ref:`Table 3 <files-pick-property-columns>` for all of them.
+
+Without picks, the localizations are grouped by their ``group`` column
+instead (e.g., after clustering).
 
 .. _render-save-pick-regions:
 
@@ -133,7 +168,7 @@ Load pick regions
 -----------------
 
 Resets the current picked regions and loads regions from a .yaml file that
-contains pick regions.
+contains pick regions. The ``.yaml`` file can also be dropped in the Render window.
 
 .. _render-export-roi-imaris:
 
@@ -141,7 +176,7 @@ Export ROI for Imaris
 ---------------------
 
 This function allows to export the current ROI for Imaris. Note that this is
-currently only implemented for Windows.
+only implemented for Windows.
 
 1. Click on File / Export ROI for imaris and enter a filename for export.
    Picasso will export the current region of interest with the current display
@@ -153,44 +188,77 @@ currently only implemented for Windows.
 3. The resulting file can be opened e.g. with ImarisViewer or Imaris. Note that
    the orientation is the same as in Picasso.
 
+.. _render-export-images:
+
+Export images
+-------------
+
+The rendered image can be saved as ``.png``, ``.tif``, ``.pdf`` or ``.svg``
+(``.pdf`` asks for the resolution in DPI). Next to every image, a ``.yaml``
+file records the field of view, the zoom, the display pixel size, the blur
+method, the contrast, the colormap and the scale bar length. When rendering by property, the color bar is saved
+as well (see :ref:`render-colorbar-format`).
+
+``Export current view...`` (:kbd:`Ctrl+E`)
+   Saves the image as shown, including picks, measurements, scale bar and
+   overlays. Without a scale bar shown, a second image with a scale bar
+   (``_scalebar``) is saved as well.
+``Export complete image...`` (:kbd:`Ctrl+Shift+E`)
+   Renders and saves the whole field of view at the current display pixel
+   size.
+``Export view manually...``
+   Renders a region typed in (top-left corner, width and height in camera
+   pixels) with a chosen display pixel size, minimum blur and blur method,
+   independent of the window. The contrast is scaled to the new pixel size.
+``Export channels in grayscale...``
+   Saves the current view of every channel as a separate grayscale image,
+   named after the channel's file plus a suffix you enter (default
+   ``_grayscale.png``).
+
 .. _render-export-localizations:
 
 Export localizations
 --------------------
 
 Select export for various other programs. Note that some exporters only work
-for 3D files (with z coordinates). For additional file converters check out
-the convert folder at Picasso's GitHub page.
+for 3D files (with z coordinates).
 
 .. _render-export-thunderstorm:
 
 Export as .csv for ThunderSTORM
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-This will export the dataset in a .csv file to use with ThunderSTORM.
+Exports the localizations as a ``.csv`` file for ThunderSTORM, with the
+following columns, in this order (lengths converted from camera pixels to nm):
 
-Note that for large datasets the writing of the file may take some time.
+.. list-table::
+   :header-rows: 1
+   :widths: 30 70
 
-Note that the pixel size value that is set in Display Settings will be used
-for exporting.
-
-The following columns will be exported:
-
-3D
-   id, frame, x [nm], y [nm], z [nm], sigma1 [nm], sigma2 [nm],
-   intensity[photon], offset[photon], uncertainty_xy [nm]
-2D
-   id, frame, x [nm], y [nm], sigma [nm], intensity [photon], offset
-   [photon], uncertainty_xy [nm]
-
-The uncertainty_xy is calculated as the mean of lpx and lpy. For 2D, sigma is
-calculated as the mean of sx and sy.
-
-For the case of linked localizations, a column named ``detections`` will be
-added, which contains the len parameter - that's the duration of a blinking
-event and not the number n of linked localizations. This is meant to be better
-for downstream kinetic analysis. For a gradient that is well-chosen n ~ len
-and for a gap size of 0 len = n.
+   * - ThunderSTORM column
+     - Picasso source
+   * - ``id``
+     - Running index of the localization.
+   * - ``frame``
+     - ``frame``
+   * - ``x [nm]``, ``y [nm]``
+     - ``x``, ``y``
+   * - ``z [nm]`` (3D only)
+     - ``z``
+   * - ``sigma1 [nm]``, ``sigma2 [nm]`` (3D); ``sigma [nm]`` (2D)
+     - ``sx``, ``sy``; in 2D, ``sx`` only
+   * - ``intensity [photon]``
+     - ``photons``, rounded down to an integer
+   * - ``offset [photon]``
+     - ``bg``, rounded down to an integer
+   * - ``bkgstd [photon]``
+     - Always 0 (not calculated by Picasso).
+   * - ``uncertainty_xy [nm]``
+     - Mean of ``lpx`` and ``lpy``.
+   * - ``detections`` (linked localizations only)
+     - ``len``, the duration of the binding event in frames, rather than the
+       number ``n`` of linked localizations, which suits kinetic analysis
+       better. Without gaps in the event, the two are equal.
 
 .. _render-export-frc:
 
@@ -234,4 +302,15 @@ are written in nm; frames are made 1-based (SMAP convention). ``lpx`` and
 Remove all localizations
 ------------------------
 
-Removes all .hdf5 files loaded, restarts the render window.
+Removes all localizations loaded, restarts the Render window.
+
+.. _render-file-other:
+
+Sound notifications, Picasso settings and Help
+----------------------------------------------
+
+- ``Sound notifications`` selects the sound played when a long task finishes,
+  see :ref:`sound-notifications`.
+- ``Picasso settings...`` opens the user settings file in an editor, see
+  :ref:`user-settings-file`.
+- ``Help`` opens this documentation.
