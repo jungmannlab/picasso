@@ -90,5 +90,5 @@ link localizations into binding events and compute their dark times:
    print(f"Average bright time {linked_locs['n'].mean():.2f} frames")
    print(f"Average dark time {linked_locs['dark'].mean():.2f} frames")
 
-More examples are in the :doc:`/postprocessing` notebooks and the
+More examples are in the :doc:`/notebooks` and the
 :doc:`/api/index`. Some steps also run in batch from the :doc:`/cmd`.

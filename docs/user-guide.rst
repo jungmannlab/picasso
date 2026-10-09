@@ -84,13 +84,6 @@ Render and analyze
 
       Neural-network classification of nanostructures.
 
-   .. grid-item-card:: Postprocessing in Python
-      :link: postprocessing
-      :link-type: doc
-      :class-card: sd-card-hover
-
-      Sample notebooks for scripted analyses.
-
 All modules
 -----------
 
@@ -134,7 +127,6 @@ All modules
    average
    spinna
    nanotron
-   postprocessing
 
 .. toctree::
    :hidden:

@@ -1,7 +1,7 @@
 Reference
 =========
 
-.. grid:: 1 1 3 3
+.. grid:: 1 2 2 2
    :gutter: 3
 
    .. grid-item-card:: :octicon:`file;1.5em;sd-mr-1` File formats
@@ -26,9 +26,17 @@ Reference
 
       Functions and classes of the ``picasso`` package.
 
+   .. grid-item-card:: :octicon:`book;1.5em;sd-mr-1` Example notebooks
+      :link: notebooks
+      :link-type: doc
+      :class-card: sd-card-hover
+
+      Jupyter notebooks that script analyses with the Python API.
+
 .. toctree::
    :hidden:
 
    files
    cmd
    api/index
+   notebooks

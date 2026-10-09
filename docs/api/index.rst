@@ -12,7 +12,7 @@ you can use in your own scripts and notebooks once Picasso is installed with
    locs, info = io.load_locs("my_locs.hdf5")
    linked = postprocess.link(locs, info)
 
-The :doc:`/postprocessing` notebooks walk through complete analyses.
+The :doc:`/notebooks` walk through complete analyses.
 
 Input and output
 ----------------

@@ -125,6 +125,8 @@ def setup(app):
 html_theme = "pydata_sphinx_theme"
 html_title = "Picasso"
 html_static_path = ["_static"]
+# pages copied as they are, e.g. redirects from renamed pages
+html_extra_path = ["_extra"]
 html_css_files = ["custom.css"]
 html_js_files = ["anchor-redirects.js"]
 html_show_sourcelink = False

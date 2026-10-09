@@ -70,10 +70,15 @@
     "other": "others.html#settings-and-customization",
     "pypi": "others.html#custom-notifications",
   },
-  "postprocessing.html": {
-    "samplenotebook": "postprocessing.html#jupyter-notebooks",
-    "samplenotebook1": "postprocessing.html#postprocessing-notebook-localize",
-    "samplenotebook2": "postprocessing.html#postprocessing-notebook-clustering",
+  "notebooks.html": {
+    "jupyter-notebooks": "notebooks.html#example-notebooks",
+    "postprocessing-notebook-basic-analysis": "notebooks.html#notebook-basic-analysis",
+    "postprocessing-notebook-clustering": "notebooks.html#notebook-clustering",
+    "postprocessing-notebook-localize": "notebooks.html#notebook-localize",
+    "postprocessing-notebook-spinna": "notebooks.html#notebook-spinna",
+    "samplenotebook": "notebooks.html#example-notebooks",
+    "samplenotebook1": "notebooks.html#notebook-localize",
+    "samplenotebook2": "notebooks.html#notebook-clustering",
   },
   "render.html": {
     "New-linked-window": "render/menu-view.html#render-new-linked-window",

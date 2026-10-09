@@ -437,7 +437,7 @@ script directly.
 
       SPINNA functions can also be run in a Python script directly. Examples
       are presented in ``samples/sample_notebook_4_spinna.ipynb`` (see
-      :ref:`postprocessing-notebook-spinna`).
+      :ref:`notebook-spinna`).
 
 .. _spinna-batch-columns:
 
