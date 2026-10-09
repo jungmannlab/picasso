@@ -146,22 +146,31 @@ When selecting ``File > Save pick properties`` in ``Picasso: Render``, the
 properties of picked regions are stored in an HDF5 file. Within the HDF5 file,
 the data table is stored in the path ``/groups``.
 
-Each row in the ``groups`` table corresponds to one picked region. For each
-localization property (see Table 1), two columns are generated in the
-``groups`` table: the mean and standard deviation of the respective column
-over the localizations in a pick region. For example, if the localization
-table contains a column ``len``, the ``groups`` table will contain a column
+Each row in the ``groups`` table corresponds to one picked region (see
+:ref:`render-save-pick-properties` for how it is calculated). The
+localizations of a pick are first linked into binding events. For each column
+of the linked table (see Table 1), two columns are generated in the ``groups``
+table: the mean and standard deviation of the respective column over the
+binding events of the pick. For example, the column ``len`` (bright time) gives
 ``len_mean`` and ``len_std``.
 
-Furthermore, the following columns are included: 
+Furthermore, the following columns are included:
 
-- ``group``: the group identifier;
-- ``n_events``: the number of binding events in the region;
-- ``n_units``: the number of units from a qPAINT measurement;
-- ``len_cdf`` and ``dark_cdf``: estimates of mean bright and dark times, respectively, obtained by fitting the distributions to the CDF of the exponential distribution. Units: frames;
-- ``locs``: the number of localizations in the region;
-- ``len_mean`` and ``dark_mean``: mean bright and dark times, respectively, obtained by averaging over all binding events, rather than fitting to the CDF. Units: frames;
-- ``len_std`` and ``dark_std``: standard deviation of bright and dark times, respectively;
+- ``group``: the pick (or group) identifier;
+- ``n_events``: the number of binding events in the pick that have a measured
+  dark time (the first event of a pick has none);
+- ``len_mean`` and ``dark_mean``: mean bright and dark times, averaged over the
+  binding events. Units: frames;
+- ``length_cdf`` and ``dark_cdf``: mean bright and dark times estimated by
+  fitting their distributions with the CDF of the exponential distribution.
+  Units: frames;
+- ``qpaint_idx`` and ``qpaint_idx_cdf``: the qPAINT index, i.e., the inverse
+  of ``dark_mean`` and ``dark_cdf``, respectively. Units: 1/frames;
+- ``n_units``: the number of binding sites from qPAINT,
+  :math:`1 / (\text{influx rate} \cdot \text{dark\_cdf})`; the influx rate is
+  stored in the metadata;
+- ``locs``: the number of localizations in the pick (before linking);
+- ``pick_area_um2``: the area of the pick in µm² (only when saved from picks).
 
 Bright and dark times are counted in frames:
 
