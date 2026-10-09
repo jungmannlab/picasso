@@ -140,6 +140,22 @@ Picasso runs on Windows, macOS and Linux. Several installation modes are availab
 
       See :doc:`/development` for how to contribute your changes.
 
+.. _error-log:
+
+Reporting problems
+------------------
+
+When an error occurs, Picasso shows it in a message box (click
+*Show Details...* for the full traceback) and appends the traceback to the
+log file ``~/.picasso/logs/picasso.log`` (i.e.,
+``C:\Users\<you>\.picasso\logs\picasso.log`` on Windows), together with
+the tracebacks of failing background threads. The file rotates to
+``picasso.log.1`` once it exceeds 5 MB. The one-click installers have no
+console, so everything Picasso prints goes to this file as well.
+
+Please report problems on `GitHub
+<https://github.com/jungmannlab/picasso/issues>`__ and attach the log file.
+
 Next steps
 ----------
 

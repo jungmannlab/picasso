@@ -6,7 +6,7 @@ Settings and Customization
 Sound notifications
 -------------------
 Picasso supports sound notifications for processes running longer than 1
-minute. In Render and SPINNA, these can be selected in the ``File`` menu in
+minute. In Localize, Render and SPINNA, these can be selected in the ``File`` menu in
 the menu bar.
 
 - The available files are read from ``~/.picasso/notification_sounds``.
@@ -32,9 +32,9 @@ Appearance
 ----------
 ``File > Appearance...`` in any module sets the look of the Picasso windows:
 
-- **Theme**: *System* (default) is light or dark like the operating system and follows it when it changes; *Light* and *Dark* fix it; *Native* is the platform's own style, the look of Picasso before version 0.12.
+- **Theme**: *System* (default) is light or dark like the operating system and follows it when it changes; *Light* and *Dark* fix it; *Native* is the platform's own PyQt style, the look of Picasso before version 0.12.
 - **Accent color**: the color of selections, checked and default buttons, sliders and focus frames; a preset or any color (*Custom...*).
-- **Font size**: the size of the text in percent of the system's. Open windows keep their size; reopen them to fit.
+- **Font size**: the size of the text in percent of the system's.
 - **Density**: *Compact* reduces the spacing of the controls, e.g., for small laptop screens.
 - **Toolbar**: how the toolbars of ``Picasso: Render``, ``Picasso: Localize``, ``Picasso: Filter`` and ``Picasso: Average`` show their buttons: *Icons and text* (default), *Icons*, *Text* or *Hidden*. Which actions they hold is set in :ref:`toolbars`.
 - **Menus**: *Show icons in menus* (default on) shows the icons next to the actions of the menus.
@@ -162,7 +162,7 @@ Top level
      - Description
    * - ``filename``
      - ``None`` (no sound)
-     - The sound file (from ``~/.picasso/notification_sounds``) played on long-running jobs in Render and SPINNA. See :ref:`sound-notifications` above.
+     - The sound file (from ``~/.picasso/notification_sounds``) played on long-running jobs in Localize, Render and SPINNA. See :ref:`sound-notifications` above.
 
 ``Appearance``
 ^^^^^^^^^^^^^^
@@ -182,7 +182,7 @@ Top level
      - Accent color as a hexadecimal code.
    * - ``font_scale``
      - ``100``
-     - Font size in percent of the system's, 80 to 150.
+     - Font size in percent of the system's, 30 to 300.
    * - ``density``
      - ``Comfortable``
      - Spacing of the controls: ``Comfortable`` or ``Compact``.
@@ -297,6 +297,18 @@ Top level
    * - ``gaussian_filter_sigma``
      - *(last used)*
      - Remembered last value: the Gaussian pre-filter sigma.
+   * - ``identification_method``
+     - *(last used)*
+     - Remembered last value: the identification ``Method`` (net gradient or B-spline wavelet).
+   * - ``wavelet_threshold``
+     - *(last used)*
+     - Remembered last value: the ``Wavelet threshold``. See :ref:`localize-wavelet`.
+   * - ``wavelet_noise``
+     - *(last used)*
+     - Remembered last value: the wavelet ``Noise estimate``.
+   * - ``wavelet_min_area``
+     - *(last used)*
+     - Remembered last value: the wavelet ``Min. region area``.
    * - ``fit_model``
      - *(last used)*
      - Remembered last value: the PSF fit **Model**.
@@ -309,8 +321,6 @@ Top level
    * - ``Columns to save``
      - *(all columns)*
      - Which localization columns are ticked in ``File`` > ``Select columns to save...`` when saving fit results.
-
-All ``Localize`` keys above are documented together in :doc:`localize`.
 
 ``Filter``
 ^^^^^^^^^^
@@ -369,20 +379,3 @@ Written and read only by the update-notification feature, not by any module's ow
    * - ``Disabled``
      - ``False``
      - Update checks are switched off entirely.
-
-.. _error-log:
-
-Error log
----------
-Every uncaught error is appended to ``~/.picasso/logs/picasso.log`` (i.e. ``C:\Users\<you>\.picasso\logs\picasso.log`` on Windows), together with the tracebacks of failing background threads. The file rotates to ``picasso.log.1`` once it exceeds 5 MB.
-
-This matters most for the one-click installers: their GUIs are started from
-a windowed executable with no console attached, so anything the program
-prints has nowhere to go. Picasso therefore redirects its output to that log
-file.
-
-When an error occurs, Picasso shows it in a message box (click
-*Show Details...* for the full traceback) and writes the same traceback to the
-log.
-
-When reporting a problem on `GitHub <https://github.com/jungmannlab/picasso/issues>`__, please attach the log file - it contains the traceback of the failure.

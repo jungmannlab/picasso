@@ -64,6 +64,7 @@
     "what-it-changes-per-fitting-method": "localize/camera.html#localize-scmos-per-method",
   },
   "others.html": {
+    "error-log": "getting-started/installation.html#error-log",
     "github": "others.html#custom-notifications",
     "one-click-installer-macos": "others.html#custom-notifications",
     "one-click-installer-windows": "others.html#custom-notifications",

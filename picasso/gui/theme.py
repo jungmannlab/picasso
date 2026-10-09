@@ -89,7 +89,7 @@ ACCENTS = {
     "Gray": "#6E6D68",
 }
 #: Range of the font size in percent of the system's.
-FONT_SCALE_RANGE = (80, 150)
+FONT_SCALE_RANGE = (30, 300)
 
 #: Colors of the light and the dark theme, warm grays like those of the
 #: "Light" and "Dark" chart themes (``plot_style.THEMES``), so that
