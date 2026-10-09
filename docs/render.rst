@@ -8,7 +8,8 @@ Render
 ``Picasso: Render`` displays the super-resolution image reconstructed from
 localization files. It also provides a plethora of tools to process
 localizations, for example: correct drift, pick and inspect regions of
-interest, cluster localizations and map molecules. This page
+interest, count binding sites with qPAINT, cluster localizations and map
+molecules. This page
 covers opening files and moving around the image; the cards below lead to the
 individual topics and to a reference of every menu.
 
@@ -105,6 +106,21 @@ The shortcuts for moving and zooming with the keyboard work anywhere in the wind
 
 The 3D view uses the same controls, plus rotation; see
 :ref:`render-3d-navigation`.
+
+.. _render-qpaint:
+
+qPAINT
+------
+
+qPAINT counts the binding sites in a pick from the frequency of its binding
+events (`Jungmann et al., Nature Methods, 2016 <https://doi.org/10.1038/nmeth.3804>`__). In Render:
+
+1. Pick structures with a known number of binding sites and calibrate the
+   influx rate in ``View > Show info`` (see :ref:`render-info-picks`).
+2. Pick the structures to count. The Info dialog shows the number of units as
+   mean and standard deviation over the picks, and
+   ``File > Save pick properties`` saves it for every pick (see
+   :ref:`render-save-pick-properties`).
 
 .. _render-topics:
 

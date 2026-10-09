@@ -116,6 +116,12 @@ deviation of every localization column over the binding events
 Without picks, the localizations are grouped by their ``group`` column
 instead (e.g., after clustering).
 
+This is the per-pick output of qPAINT: calibrate the influx rate in the
+:ref:`Info dialog <render-info-picks>` first (it also shows the mean and
+standard deviation of the bright and dark times and of the number of units
+over the picks), then save the pick properties to get ``n_units`` for every
+pick, e.g., to plot its distribution in :doc:`/filter`.
+
 .. _render-save-pick-regions:
 
 Save pick regions

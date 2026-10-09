@@ -180,6 +180,13 @@ Each row in the ``groups`` table corresponds to one picked region (see
 localizations of a pick are first linked into binding events; Table 3 lists
 the columns.
 
+These files are the basis for qPAINT, which counts binding sites from the
+binding kinetics (`Jungmann et al., Nature Methods, 2016 <https://doi.org/10.1038/nmeth.3804>`__): each row holds the pick's mean dark time, its qPAINT
+index (``qpaint_idx_cdf``) and the number of binding sites (``n_units``). The
+influx rate that ``n_units`` is computed from is calibrated in Render's Info
+dialog, which also shows these values averaged over the picks (see
+:ref:`render-info-picks`).
+
 .. csv-table:: Table 3: Name, description and data type for the columns of pick property files.
    :name: files-pick-property-columns
    :file: table03.csv
