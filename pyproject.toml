@@ -148,8 +148,10 @@ installer_cuda = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/jungmannlab/picasso"
-Documentation = "https://picassosr.readthedocs.io/en/latest/index.html"
+Homepage = "https://picassosr.readthedocs.io/en/latest/"
+Documentation = "https://picassosr.readthedocs.io/en/latest/"
+Source = "https://github.com/jungmannlab/picasso"
+Issues = "https://github.com/jungmannlab/picasso/issues"
 Changelog = "https://github.com/jungmannlab/picasso/blob/master/changelog.md"
 Publications = "https://doi.org/10.1038/nprot.2017.024"
 

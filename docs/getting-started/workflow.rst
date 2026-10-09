@@ -69,7 +69,7 @@ In most windows, the :octicon:`book` buttons and ``File > Help`` open the
 matching section of this documentation. The meaning of the localization
 columns (``x``, ``photons``, ``lpx``, ...) is explained in
 :ref:`files-localization-hdf5`, and the information saved with each file
-(pixel size, processing history, ...) in :ref:`files-metadata-settings`.
+(pixel size, processing history, etc) in :ref:`files-metadata-settings`.
 
 Picasso as a package
 --------------------
@@ -91,4 +91,4 @@ link localizations into binding events and compute their dark times:
    print(f"Average dark time {linked_locs['dark'].mean():.2f} frames")
 
 More examples are in the :doc:`/notebooks` and the
-:doc:`/api/index`. Some steps also run in batch from the :doc:`/cmd`.
+:doc:`/api/index`. Some steps also run from the :doc:`/cmd`.
