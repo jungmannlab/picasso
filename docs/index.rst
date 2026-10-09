@@ -15,6 +15,10 @@ Picasso
      </p>
    </div>
 
+.. div:: sd-text-center sd-text-muted
+
+   Documentation for Picasso |release|
+
 .. div:: sd-text-center sd-mb-5 hero-buttons
 
    .. button-ref:: getting-started/installation
