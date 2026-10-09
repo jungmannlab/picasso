@@ -1,7 +1,8 @@
 Average
 =======
 
-``Picasso: Average`` aligns picked structures onto each other and displays
+``Picasso: Average`` aligns picked structures (see :ref:`render-picking`)
+onto each other and displays
 their average image. The averaging module uses 2D cross-correlation to
 determine the rotational and translational offset.
 
@@ -48,6 +49,11 @@ Particle averaging
    selecting ``File > Save``. The resulting HDF5 localization file contains the
    aligned localizations in the center of the movie dimensions. It can be
    loaded like any other HDF5 localization file into ``Picasso: Render``.
+
+   The metadata of the saved file record the averaging: every
+   ``Process > Average`` run since the file was opened is listed under
+   ``Rounds`` with its ``Display pixel size (nm)`` and ``Iterations``, so the
+   whole sequence of steps can be reproduced (see :ref:`files-yaml`).
 
 .. tip::
 
