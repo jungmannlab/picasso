@@ -128,9 +128,10 @@ FIT_MODE_TOOLTIP = (
     "With no calibration loaded the active channel is fitted alone.\n\n"
     f"'{FIT_MODE_SEPARATE}': every channel is fitted on its own,\n"
     "with its own model, optimizer and calibrations, and saved to its own\n"
-    "file. No registration (i.e., matching of signal across channels) is\n"
-    "needed and every detection is fitted; the channels can be connected\n"
-    "afterwards."
+    "file. No channel registration (the transform that maps a position in\n"
+    "the reference channel to where the same molecule appears in each\n"
+    "other channel) is needed and every detection is fitted; the channels\n"
+    "can be connected afterwards."
 )
 IMAGE_FILTER = (
     "All supported formats ("
@@ -2324,6 +2325,12 @@ class CalibrateSplineDialog(lib.Dialog):
         # How the channels are registered to the reference. Multichannel only:
         # a single-channel calibration has nothing to register.
         self.registration_label = QtWidgets.QLabel("Channel registration:")
+        self.registration_label.setToolTip(
+            "The transform model of the channel registration: one coordinate\n"
+            "transform per channel that maps a position in the reference\n"
+            "(first) channel to where the same molecule appears in that\n"
+            "channel, estimated from matching beads."
+        )
         self.registration_model = _transform_model_combo()
         self.registration_label.setVisible(multichannel)
         self.registration_model.setVisible(multichannel)
@@ -4426,8 +4433,10 @@ class ParametersDialog(lib.Dialog):
             "Fit all loaded channels at once with one shared position and\n"
             "width (a global fit, as in globLoc), instead of fitting the\n"
             "active channel alone.\n\n"
-            "Needs a channel registration built with\n"
-            "Calibration > Register channels, from beads or from the\n"
+            "Needs a channel registration: one coordinate transform per\n"
+            "channel that maps a position in the reference (first) channel\n"
+            "to where the same molecule appears in that channel. Build it\n"
+            "with Calibration > Register channels, from beads or from the\n"
             "blinking signal itself. Without one the fit stays\n"
             "single-channel.\n\n"
             "Li, Y., Shi, W., Liu, S. et al. Global fitting for "
@@ -7014,9 +7023,11 @@ class Window(QtWidgets.QMainWindow):
 
         register_menu = threed_menu.addMenu("Register channels (2D)")
         register_menu.setToolTip(
-            "Measure where each loaded channel sits relative to the first,\n"
-            "and save it as a standalone registration for the multichannel\n"
-            "2D spherical Gaussian fit."
+            "Measure the channel registration - one coordinate transform per\n"
+            "channel that maps a position in the reference (first) channel to\n"
+            "where the same molecule appears in that channel - and save it as\n"
+            "a standalone registration for the multichannel 2D spherical\n"
+            "Gaussian fit."
         )
         register_beads_action = register_menu.addAction("From bead data...")
         register_beads_action.setToolTip(

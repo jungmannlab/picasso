@@ -6,11 +6,11 @@ Registering the channels of a multichannel acquisition onto one reference
 channel, and the standalone calibration file that stores the result.
 
 A multichannel fit needs to know where a molecule seen at ``x`` in the
-reference channel lands in every other channel. That mapping is a plain
-geometric transform per channel, independent of the PSF model fitted
-afterwards: :mod:`picasso.spline` bakes one into its multichannel PSF
-calibration, and the 2D Gaussian multichannel fit reads one from the
-standalone calibration built here.
+reference channel lands in every other channel. That mapping, the *channel
+registration*, is one coordinate transform per channel (reference ->
+channel), independent of the PSF model fitted afterwards: :mod:`picasso.spline`
+bakes one into its multichannel PSF calibration, and the 2D Gaussian
+multichannel fit reads one from the standalone calibration built here.
 
 Two ways to measure it, both producing the same file:
 

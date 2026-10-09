@@ -5,9 +5,22 @@ Multichannel Fitting
 
 Picasso offers three ways to fit data with several channels, either loaded as separate movies or imaged side by side on one sensor (split field of view):
 
-- **Multichannel 2D Gaussian fitting** — the channels are fitted jointly with a spherical Gaussian, sharing one position and width per molecule; needs only a channel registration (below).
+- **Multichannel 2D Gaussian fitting** — the channels are fitted jointly with a spherical Gaussian, sharing one position and width per molecule; needs only a :ref:`channel registration <localize-channel-registration>`.
 - **Multichannel spline PSF** — the channels are fitted jointly with one measured PSF per channel; see :ref:`localize-multichannel-spline`.
-- **Each channel on its own** — every channel is fitted independently, with any model and without a registration (below).
+- **Each channel on its own** — every channel is fitted independently, with any model and without a registration.
+
+.. _localize-channel-registration:
+
+.. admonition:: Channel registration
+
+   A channel registration is one coordinate transform per channel that maps a
+   position in the reference (first) channel to where the same molecule
+   appears in that channel. It is measured from spots seen in every channel
+   (beads or the blinking signal itself) and is either part of a multichannel
+   spline calibration (see :ref:`localize-multichannel-spline`) or saved on its
+   own as a ``.yaml`` for the multichannel 2D Gaussian fit (see
+   :ref:`localize-registering-channels`). The available transform models are
+   described in :ref:`localize-lateral-transform-models`.
 
 By default (``Identify on`` > ``Each channel separately``), the spots are identified in every channel on its own, with that channel's identification settings. The joint fits then pair the spots across the channels through the registration and fit only those found in *every* channel; fitting each channel on its own fits all of them. When one channel is dimmer, so that many of its spots go undetected, identify on the sum of the channels instead; see :ref:`localize-identify-on-sum`.
 
@@ -18,7 +31,7 @@ Multichannel 2D Gaussian fitting
 
 Several spatially-registered channels can also be fitted jointly with a **spherical Gaussian**, sharing one ``x``, ``y`` and width per molecule.
 
-This is the same global-fitting idea as the :ref:`localize-multichannel-spline` (globLoc, `Li et al., Nature Communications 13, 3133 (2022) <https://doi.org/10.1038/s41467-022-30719-4>`_), but it needs **no measured PSF** — only a *channel registration*, which says where each channel sits relative to the first.
+This is the same global-fitting idea as the :ref:`localize-multichannel-spline` (globLoc, `Li et al., Nature Communications, 2022 <https://doi.org/10.1038/s41467-022-30719-4>`_), but it needs **no measured PSF** — only a :ref:`channel registration <localize-channel-registration>`.
 
 It is available for the ``2D spherical Gaussian`` model only.
 

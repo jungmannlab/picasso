@@ -202,7 +202,7 @@ A 3D calibration adds the recovered ``z`` (and ``lpz``). The accompanying ``_loc
 Multichannel spline PSF (e.g. biplane)
 --------------------------------------
 
-Several spatially-registered channels (e.g. biplane setups) can be fit simultaneously, sharing one ``x``, ``y`` and ``z`` per molecule. (To fit the channels one at a time instead, each with its own PSF, see :ref:`localize-analyzing-each-channel`.) The calibration needs one bead z-stack per channel, all scanned over the same z range with the same number of frames.
+Several :ref:`registered <localize-channel-registration>` channels (e.g. biplane setups) can be fit simultaneously, sharing one ``x``, ``y`` and ``z`` per molecule. (To fit the channels one at a time instead, each with its own PSF, see :ref:`localize-analyzing-each-channel`.) The calibration needs one bead z-stack per channel, all scanned over the same z range with the same number of frames.
 
 This implements the global-fitting (globLoc) approach of `Li et al., Nature Communications 13, 3133 (2022) <https://doi.org/10.1038/s41467-022-30719-4>`_ — one experimental PSF per channel, the channels registered to a reference channel, and all channels fitted jointly with linked parameters. Please cite that work when using multichannel spline fitting.
 
@@ -240,7 +240,7 @@ If photon counts are not linked, the resulting localizations contain per-channel
 
 Picasso builds a PSF for every channel and registers each non-reference channel to the reference by a transform estimated from matching beads; the per-channel PSFs and transforms are stored in one calibration ``.hdf5``.
 
-- ``Channel registration`` in the calibration dialog chooses the model — ``translation`` (a pure xy shift), ``affine`` (the default), ``projective``, ``polynomial2`` or ``polynomial3`` — with the same trade-offs as the lateral corrections (see :ref:`localize-lateral-transform-models`).
+- ``Channel registration`` in the calibration dialog chooses the transform model of the :ref:`channel registration <localize-channel-registration>` — ``translation`` (a pure xy shift), ``affine`` (the default), ``projective``, ``polynomial2`` or ``polynomial3`` — with the same trade-offs as the lateral corrections (see :ref:`localize-lateral-transform-models`).
 - The choice is recorded in the calibration and used automatically at fit time, where each spot is linearized about its own position.
 - Alongside the usual diagnostic plot, a ``<base>_registration.png`` is written showing how well the channels align (residuals and the decomposed shift / rotation / scale / mirror) — check it before fitting.
 
@@ -297,7 +297,7 @@ The sum modes also works for the multichannel 2D Gaussian fit, from a loaded cha
 Registration for the sum
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
-This section describes the identification on the registered sum, for which the channels have to be (re)registered *before* they can be summed (to add them up as they are, see :ref:`localize-summing-without-registration` below):
+This section describes the identification on the registered sum, for which the channels have to be (re)registered (see :ref:`channel registration <localize-channel-registration>`) *before* they can be summed (to add them up as they are, see :ref:`localize-summing-without-registration` below):
 
 - **With a calibration loaded**, the registration comes from the loaded multichannel / split-FOV spline calibration — the sum is then built with exactly the transforms the fit will use.
 - **Without a calibration**, Picasso first identifies every channel (or region) as usual and estimates the transforms from those detections, and only then builds the sum. This needs enough detections in every channel, so lower the minimum net gradient of the dim channel until spots appear in it.

@@ -159,7 +159,7 @@ Things to keep in mind:
 - **No net gradient.** Spots found by wavelet segmentation have no net gradient, so neither the identifications nor the localizations fitted from them have a ``net_gradient`` column. When localizations with and without the column are combined (e.g., with ``picasso join``), the column is dropped with a warning.
 - **The box.** ``Box side length`` still sets the size of the fitted box, and spots whose box does not fit into the frame are skipped. Unlike the net gradient identification, which finds at most one spot per box, the watershed can separate spots that are closer than one box.
 - **Filters and ROIs** work as for the net gradient identification. With ROIs, each ROI (plus a margin) is segmented on its own, including the noise estimate.
-- **Calibrations** — 3D and spline PSF calibration, lateral calibration and channel registration — detect the beads with the selected method, too.
+- **Calibrations** — 3D and spline PSF calibration, lateral calibration and :ref:`channel registration <localize-channel-registration>` — detect the beads with the selected method, too.
 - The border of a frame is extended by mirroring, a detail the paper does not specify.
 
 

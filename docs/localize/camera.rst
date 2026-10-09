@@ -338,7 +338,7 @@ The multichannel spline workflows (see :ref:`localize-multichannel-spline`) take
 
 Entries may individually be ``None`` when only some channels sit on a characterized camera; such a channel keeps the plain Poisson model.
 
-Each channel's maps are cut at *that channel's* mapped and rounded box origin, the same origin its spot is cut at, so a calibration follows its channel through the affine registration. This matters as soon as the channels are registered more than a pixel apart: reading a non-reference channel's noise at the reference position would sample the wrong pixels.
+Each channel's maps are cut at *that channel's* mapped and rounded box origin so a calibration follows its channel through the :ref:`channel registration <localize-channel-registration>`. This matters as soon as the channels are registered more than a pixel apart: reading a non-reference channel's noise at the reference position would sample the wrong pixels.
 
 Split field of view is one physical sensor whose sub-regions are the channels, so ``localize.fit_spline_split_fov`` takes a single ``camera_calibration`` and applies the same full-frame maps to every region. The maps are indexed by absolute frame coordinates, so each region reads its own pixels without further bookkeeping.
 
