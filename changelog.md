@@ -1,13 +1,13 @@
 # Changelog
 
-Last change: 09-OCT-2026 CEST
+Last change: 10-OCT-2026 CEST
 
 ## 0.12.0
 
 **TODO**: Describe the general overview - fast render, etc.
 
 ### General
-- New [documentation](https://picassosr.readthedocs.io/en/latest).
+- New [documentation](https://picassosr.readthedocs.io/en/latest) that is user-friendly, intuitive and thoroughly explains every Picasso functionality. Python API can now be found by a simple browser search.
 - New appearance of all Picasso windows: a light and a dark theme that follow the operating system, with a selectable accent color, font size and density (`File > Appearance...`); the platform's own style remains available as *Native*. See the [documentation](https://picassosr.readthedocs.io/en/latest/others.html#appearance).
 - Toolbars in Render, Localize, Filter and Average with the most used actions of the menus, see the [documentation](https://picassosr.readthedocs.io/en/latest/others.html#toolbars).
 - Icons added to menu actions and buttons.

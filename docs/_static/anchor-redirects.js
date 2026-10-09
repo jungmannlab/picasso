@@ -9,6 +9,7 @@
   },
   "files.html": {
     "filetypes": "files.html#file-formats",
+    "yaml-metadata-files": "files.html#files-yaml",
   },
   "localize.html": {
     "analyzing-each-channel-on-its-own": "localize/multichannel.html#localize-analyzing-each-channel",

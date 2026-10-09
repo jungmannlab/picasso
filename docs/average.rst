@@ -53,7 +53,7 @@ Particle averaging
    The metadata of the saved file record the averaging: every
    ``Process > Average`` run since the file was opened is listed under
    ``Rounds`` with its ``Display pixel size (nm)`` and ``Iterations``, so the
-   whole sequence of steps can be reproduced (see :ref:`files-yaml`).
+   whole sequence of steps can be reproduced (see :ref:`files-metadata-settings`).
 
 .. tip::
 
