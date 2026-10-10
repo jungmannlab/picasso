@@ -71,26 +71,99 @@ current localizations do not have are listed and skipped.
 Test subclustering
 ~~~~~~~~~~~~~~~~~~
 
-This function can be applied to molecular maps/cluster centers which save the
-column ``n_events``, i.e., the number of binding events detected per molecule.
+This test checks molecular maps, e.g., from G5M (see :ref:`render-g5m`), for
+subclustering, i.e., for single molecules that were falsely split into several. It
+needs the column ``n_events``, the number of binding events assigned to each
+molecule. It was introduced in `Kowalewski, Reinhardt, et al., Nature
+Communications, 2026 <https://doi.org/10.1038/s41467-026-70198-5>`__.
 
-The premise is the following: a single molecule is expected to give rise to a
-certain distribution of the number of binding events. If extra molecules are
-assigned, the number of binding events per molecule will on average be lower
-than the distribution would predict.
+The premise is the following: a single molecule gives rise to a certain
+distribution of the number of binding events. If it is split into several
+molecules, its binding events are shared between them, so each gets fewer.
+Split molecules lie close to each other, so subclustering shows up as
+molecules with close neighbors having fewer binding events than isolated
+ones.
 
-Thus, by comparing the distribution of
-the number of binding events per molecule for two populations (clustered vs.
-sparse), one can assess whether subclustering has occurred.
+The test compares two populations:
 
-To plot the two distributions, use ``Plot > Test subclustering...``. The dialog
-allows the user to set:
+- **Clustered** molecules, whose nearest neighbor is closer than
+  ``Max. dist. between clustered molecules (nm)`` (default 25 nm).
+- **Sparse** molecules, whose nearest neighbor is at least
+  ``Min. dist. between sparse molecules (nm)`` away (default 80 nm). This
+  distance must be larger than the clustered one.
 
-- the maximum nearest neighbors distance between molecules to be considered as
-  clustered (``Max. dist. between clustered molecules (nm)``);
-- the minimum nearest neighbor distance for sparse molecules
-  (``Min. dist. between sparse molecules (nm)``).
+Molecules in between belong to neither population and are left out. The
+distance is to the first nearest neighbor, in 3D if the molecules have a ``z``
+column.
 
-The numbers of events for the two populations can be saved to a CSV file by
-checking the ``Save histogram values`` checkbox before clicking the
-``Test subclustering`` button.
+To run the test, use ``Plot > Test subclustering...``, set the two distances
+and click ``Test subclustering``. To also save the numbers of events of both
+populations, check ``Save histogram values`` first: they are saved as the
+columns ``clustered_nevents`` and ``sparse_nevents`` of a CSV file
+(``<file>_subcluster_test.csv`` by default), the shorter column padded with
+empty values.
+
+The plot shows a histogram of the number of events for each population, its
+mean as a dashed line and the mean ± standard deviation in the legend. The
+x axis spans the 2.5th to the 97.5th percentile of all values. The title
+reports a two-sample Kolmogorov-Smirnov (KS) test between the two
+populations:
+
+``stat``
+   The KS statistic.
+``permutation p_value``
+   The clustered and sparse molecules are pooled and their labels shuffled
+   1,000 times, keeping the sizes of the two populations; no molecules are
+   drawn or left out. The p value is the fraction of shuffles whose KS
+   statistic is at least as large as the observed one, counting the observed
+   arrangement as one of them (`Phipson and Smyth, 2010
+   <https://doi.org/10.2202/1544-6115.1585>`__), i.e.,
+   (count + 1) / 1,001. The smallest possible value is therefore about 0.001.
+   The shuffles use a fixed random seed, so the same data always give the
+   same p value.
+``theoretical p_value``
+   The p value of the KS test, from ``scipy.stats.ks_2samp``.
+
+The test is two-sided: it detects any difference between the two
+distributions, also if the clustered molecules have *more* events. Check in
+the plot that a significant result comes from the clustered population being
+shifted towards fewer events.
+
+.. figure:: /images/filter-subclustering.png
+   :width: 100%
+   :class: only-light
+   :alt: Two subclustering test plots; left, a well-behaved dataset whose clustered and sparse molecules have the same distribution of binding events, p value 0.93; right, a subclustered dataset whose clustered molecules have fewer binding events, p value 0.001
+
+   **Left:** a well-behaved molecular map. Clustered and sparse molecules
+   have the same distribution of binding events (means 12.8 and 13.0,
+   permutation p value 0.93). **Right:** a subclustered molecular map. The
+   clustered molecules have fewer binding events than the sparse ones (means
+   10.3 and 13.2, permutation p value 0.001, the smallest possible).
+
+.. figure:: /images/filter-subclustering-dark.png
+   :width: 100%
+   :class: only-dark
+   :alt: Two subclustering test plots; left, a well-behaved dataset whose clustered and sparse molecules have the same distribution of binding events, p value 0.93; right, a subclustered dataset whose clustered molecules have fewer binding events, p value 0.001
+
+   **Left:** a well-behaved molecular map. Clustered and sparse molecules
+   have the same distribution of binding events (means 12.8 and 13.0,
+   permutation p value 0.93). **Right:** a subclustered molecular map. The
+   clustered molecules have fewer binding events than the sparse ones (means
+   10.3 and 13.2, permutation p value 0.001, the smallest possible).
+
+The same test runs automatically after G5M, see
+:ref:`render-g5m-overfitting`. In Python:
+
+.. code-block:: python
+
+   from picasso import io, clusterer, lib
+
+   mols, info = io.load_locs("molecules.hdf5")
+   clustered, sparse = clusterer.test_subclustering(
+       mols, info, clustering_dist=25, sparse_dist=80
+   )
+   lib.plot_subclustering_check(
+       clustered, sparse, "subclustering.png",
+       clustering_dist=25, sparse_dist=80,
+       one_sided=False,  # True: test only for fewer events when clustered
+   )

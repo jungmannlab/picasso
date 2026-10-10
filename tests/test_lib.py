@@ -1806,3 +1806,49 @@ class TestBinZSteps:
     def test_rejects_impossible_binning(self, z_binning):
         with pytest.raises(ValueError, match="z binning"):
             lib.bin_z_steps(np.arange(8.0), z_binning)
+
+
+# ---------------------------------------------------------------------------
+# Subclustering permutation test
+# ---------------------------------------------------------------------------
+
+
+class TestPermutationTest:
+    @staticmethod
+    def _fewer_and_more():
+        rng = np.random.default_rng(1)
+        return rng.poisson(8, 300), rng.poisson(10, 400)
+
+    def test_is_reproducible_with_the_default_seed(self):
+        fewer, more = self._fewer_and_more()
+        assert lib.permutation_test(fewer, more) == lib.permutation_test(
+            fewer, more
+        )
+
+    def test_p_value_is_never_zero(self):
+        fewer, more = self._fewer_and_more()
+        _, p_perm, _ = lib.permutation_test(fewer, more, iterations=99)
+        assert p_perm == pytest.approx(1 / 100)
+
+    def test_one_sided_detects_fewer_events_only(self):
+        fewer, more = self._fewer_and_more()
+        _, p_fewer, _ = lib.permutation_test(
+            fewer, more, alternative="greater"
+        )
+        _, p_more, _ = lib.permutation_test(more, fewer, alternative="greater")
+        assert p_fewer < 0.01
+        assert p_more > 0.5
+
+    def test_same_distribution_is_not_significant(self):
+        rng = np.random.default_rng(2)
+        _, p_perm, _ = lib.permutation_test(
+            rng.poisson(10, 300), rng.poisson(10, 400)
+        )
+        assert p_perm > 0.05
+
+    def test_title_names_the_one_sided_test(self):
+        fewer, more = self._fewer_and_more()
+        title = lib._subclustering_title(
+            True, True, fewer, more, one_sided=True
+        )
+        assert title.startswith("one-sided KS test")

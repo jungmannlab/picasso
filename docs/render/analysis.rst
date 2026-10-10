@@ -148,9 +148,8 @@ saves the following automatically:
 - **KS 2 sample test**, comparing the two
   distributions. The output test statistic and theoretical p value correspond
   to the KS test, while the permutation p value is calculated by randomly
-  permuting the labels of clustered and sparse molecules 1,000 times and
-  calculating the fraction of permutations that result in a KS test statistic
-  as extreme as the one observed with the original labels.
+  permuting the labels of clustered and sparse molecules 1,000 times; see
+  :ref:`filter-test-subclustering` for the details.
 
 .. _render-g5m-troubleshooting:
 
