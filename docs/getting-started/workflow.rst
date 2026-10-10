@@ -125,6 +125,7 @@ Picasso localizes in two steps:
 
 .. figure:: /images/first-steps-localization.png
    :width: 100%
+   :class: dark-light
    :alt: Left, one frame of a DNA-PAINT movie with a yellow box around each identified spot, as drawn in Localize; right, the 7 by 7 pixels of one box with the dashed outline of the fitted Gaussian and a green cross at the fitted position, which lies between pixels
 
    **Left: identification.** Each spot found in the frame gets a yellow box,

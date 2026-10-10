@@ -111,6 +111,24 @@ img.screenshot {
   box-shadow: 0 1px 6px rgba(0, 0, 0, 0.08);
 }
 
+/* In dark mode the theme puts a white background behind every image. The
+   screenshots are opaque windows with a transparent shadow, so without it
+   they sit on the dark page instead of in a white box. The theme's slight
+   dimming of images stays. Images with dark content on a transparent
+   background need an ``only-dark`` variant instead. */
+html[data-theme="dark"] .bd-content img:not(.only-dark):not(.dark-light) {
+  background-color: transparent;
+}
+
+/* Figures with a light and a dark version: the theme hides the image and
+   caption of the other mode, this also hides its (otherwise empty) figure
+   and its margins. */
+html[data-theme="light"] figure:has(> .only-dark),
+html:not([data-theme]) figure:has(> .only-dark),
+html[data-theme="dark"] figure:has(> .only-light) {
+  display: none;
+}
+
 figure figcaption {
   color: var(--pst-color-text-muted);
   font-size: 0.9rem;
