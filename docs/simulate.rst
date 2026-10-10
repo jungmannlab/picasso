@@ -119,6 +119,57 @@ file, ready for subsequent localization.
   ``File > Load 3D calibration...`` (see :ref:`localize-3d-calibration` for
   how to create one).
 
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
+
+   The same steps as the GUI: define a structure (handle coordinates in
+   nm), place copies of it, draw the blinking of every handle, render the
+   frames and save the ``.raw`` movie with its ``.yaml``.
+
+   .. code-block:: python
+
+      import numpy as np
+      from picasso import simulate
+
+      pixelsize, imagesize, frames, itime = 130, 32, 5000, 100   # nm, px, -, ms
+
+      # 3 x 2 grid of handles, 20 nm apart; one exchange round, z = 0
+      structure = simulate.defineStructure(
+          np.array([0, 20, 40, 0, 20, 40]), np.array([0, 0, 0, 20, 20, 20]),
+          np.ones(6), np.zeros(6), pixelsize,
+      )
+      positions = simulate.generatePositions(9, imagesize, 6, 0)     # 9 copies, 6 px margin, grid
+      handles = simulate.prepareStructures(
+          structure, positions, orientation=0, number=9, incorporation=0.85, exchange=0
+      )
+
+      # Blinking of every handle: photons per frame
+      n_handles = handles.shape[1]
+      photons = np.zeros((n_handles, frames), dtype=int)
+      for i in range(n_handles):
+          photons[i], _, _ = simulate.distphotons(
+              handles, itime, frames, taud=54054, taub=280,          # ms
+              photonrate=53, photonratestd=29, photonbudget=1.5e6,
+          )
+
+      # Frames, background and camera noise
+      movie = np.zeros((frames, imagesize, imagesize))
+      for f in range(frames):
+          movie[f] = simulate.convertMovie(
+              f, photons, handles, imagesize, frames, psf=0.82,
+              photonrate=53, background=4, noise=2, mode3Dstate=False, cx=[], cy=[],
+          )
+      movie = simulate.check_type(simulate.noisy_p(movie, 4))
+
+      info = {
+          "Byte Order": "<", "Data Type": "uint16", "Frames": frames,
+          "Height": imagesize, "Width": imagesize, "Camera": "Simulation",
+          "Camera.Pixelsize": pixelsize,
+      }
+      simulate.saveMovie("simulated.raw", movie, info)
+
+
 .. _simulate-multiplexing:
 
 Multiplexing

@@ -76,6 +76,15 @@ columns (``frame``, ``x``, ``y``, ``lpx``, ``lpy`` and, for 3D data, ``z`` and
 ``lpz``) cannot be removed. The removed columns are recorded in the metadata;
 save the localizations to keep the change.
 
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
+
+   .. code-block:: python
+
+      locs = locs.drop(columns=["group"])
+
+
 .. _render-sync-groups:
 
 Synchronize groups across channels
@@ -86,6 +95,17 @@ across the channels whose *group* field is not present in all channels. This
 is useful for removing, for example, clustered localizations after their
 cluster centers were filtered with frame analysis.
 
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
+
+   .. code-block:: python
+
+      from picasso import lib
+
+      locs_ch1, locs_ch2 = lib.sync_groups([locs_ch1, locs_ch2])
+
+
 .. _render-unfold-groups-square:
 
 Unfold groups/picks (square grid)
@@ -94,6 +114,19 @@ Unfold groups/picks (square grid)
 Arranges the groups (or picks) side by side on a square grid, so that many
 structures can be viewed and compared at once. The user selects the number of elements per column and the
 distance between them (250 nm by default).
+
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
+
+   ``spacing`` is in camera pixels.
+
+   .. code-block:: python
+
+      locs, info = lib.unfold_localizations_square(
+          locs, info, n_square=10, spacing=250 / pixelsize
+      )
+
 
 .. _render-link-localizations:
 
@@ -118,6 +151,25 @@ localizations from different groups always stay separate events.
 With several channels loaded, choose *Apply to all sequentially* to link every
 channel with the same parameters. Channels that are already linked are skipped.
 
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
+
+   ``r_max`` is in camera pixels. ``compute_dark_times`` adds the ``dark``
+   column to linked localizations.
+
+   .. code-block:: python
+
+      from picasso import io, lib, postprocess
+
+      locs, info = io.load_locs("movie_locs.hdf5")
+      pixelsize = lib.get_from_metadata(info, "Pixelsize")
+
+      linked = postprocess.link(locs, info, r_max=10 / pixelsize, max_dark_time=3)
+      linked = postprocess.compute_dark_times(linked)
+      print(linked["len"].mean(), linked["dark"].mean())   # frames
+
+
 .. _render-select-central-frames:
 
 Select central frames localizations
@@ -138,6 +190,17 @@ The retained localizations of each binding event get the same value in the
 into an event: two nearby localizations from different picks or clusters
 always end up in separate events.
 
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
+
+   .. code-block:: python
+
+      cores = postprocess.select_binding_event_cores(
+          locs, r_max=10 / pixelsize, max_dark_time=3, min_n_locs=3
+      )
+
+
 .. _render-align-channels:
 
 Align channels (RCC or from picked)
@@ -148,6 +211,21 @@ selected, the alignment will be via the center of mass of the picks;
 otherwise, redundant cross-correlation (RCC, see :ref:`render-rcc`) will be
 used (always 2D only).
 
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
+
+   The circle size of ``align_from_picked`` is the diameter.
+
+   .. code-block:: python
+
+      aligned = postprocess.align([locs_ch1, locs_ch2], [info_ch1, info_ch2])   # RCC
+      aligned = postprocess.align_from_picked(
+          [locs_ch1, locs_ch2], [info_ch1, info_ch2],
+          picks=picks, pick_shape="Circle", pick_size=2 * radius,
+      )
+
+
 .. _render-combine-locs-in-picks:
 
 Combine localizations in picks
@@ -155,6 +233,19 @@ Combine localizations in picks
 
 Replaces the localizations of each pick with a single localization. Internally, all localizations of a pick are linked into one event, as in :ref:`render-link-localizations` but without any
 distance or dark-time limit.
+
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
+
+   The circle size is the diameter.
+
+   .. code-block:: python
+
+      combined = postprocess.combine_locs_in_picks(
+          locs, info, picks=picks, pick_shape="Circle", pick_size=2 * radius
+      )
+
 
 .. _render-apply-expressions:
 
@@ -184,6 +275,20 @@ Localizations moved outside the image by an expression are kept: the canvas is
 fitted to them as described for the Move tool (see :ref:`render-move`).
 Invalid localizations (e.g., NaN or negative localization precision) are
 removed.
+
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
+
+   Expressions are plain column arithmetic on the DataFrame. ``z`` is in nm
+   while ``x`` and ``y`` are in camera pixels, so a flip converts.
+
+   .. code-block:: python
+
+      locs["x"] += 1
+      locs["y"] += 1
+      locs["x"], locs["z"] = locs["z"] / pixelsize, locs["x"] * pixelsize   # flip x z
+
 
 .. _render-menu-clustering:
 

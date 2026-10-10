@@ -243,6 +243,29 @@ Optionally, record the illumination each bright movie was taken at — the laser
 
 Nothing in the gain fit uses these numbers; they only label the x-axis of the linearity plot described below, which is what makes that plot readable when the levels are not evenly spaced. Give one per bright movie or none at all.
 
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
+
+   Without bright movies only the offset and variance maps are measured.
+   ``bright_levels`` labels the bright movies (e.g., the laser power).
+
+   .. code-block:: python
+
+      from picasso import io, scmos
+
+      dark, _ = io.load_movie("dark.raw")
+      bright = [io.load_movie(p)[0] for p in ("bright_20mW.raw", "bright_100mW.raw")]
+      calibration = scmos.calibrate_scmos(
+          dark, bright, bright_levels=[20, 100], level_unit="mW",
+          progress_callback="console",
+      )
+      io.save_camera_calibration("mycam_scmos_calib.hdf5", calibration)
+      scmos.save_calibration_plot(
+          calibration, scmos.plot_path("mycam_scmos_calib.hdf5")
+      )
+
+
 .. _localize-scmos-plot:
 
 Reading the sCMOS calibration plot
@@ -298,6 +321,27 @@ A calibration can also be selected automatically through a ``camera-calibrations
        525: C:/path/to/your_scmos_calib_525.hdf5
        595: C:/path/to/your_scmos_calib_595.hdf5
 
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
+
+   ``camera_calibration`` replaces the scalar ``Baseline`` and
+   ``Sensitivity`` by the maps; ``localize.fit`` and ``localize.get_spots``
+   take it as well.
+
+   .. code-block:: python
+
+      camera_calibration = io.load_camera_calibration("mycam_scmos_calib.hdf5")
+      locs, info = localize.localize(
+          movie,
+          camera_info=camera_info,
+          identification_parameters={"Box Size": 7, "Min. Net Gradient": 5000},
+          movie_info=info,
+          fitting_method="gaussmle",
+          camera_calibration=camera_calibration,
+      )
+
+
 .. _localize-scmos-per-method:
 
 What it changes, per fitting method
@@ -328,6 +372,19 @@ The maps drift with the sensor: Huang et al. report that switching their camera 
    picasso camera-validate mycam_scmos_calib.hdf5 fresh_dark.raw
 
 If the camera still behaves as characterized, the per-pixel p-values are uniform and their mean sits at 0.5. A mean outside 0.5 ± 0.1 means the camera has drifted and should be re-characterized.
+
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
+
+   .. code-block:: python
+
+      fresh_dark, _ = io.load_movie("fresh_dark.raw")
+      result = scmos.validate_calibration(
+          calibration, fresh_dark, progress_callback="console"
+      )
+      print(result["mean p-value"], result["valid"])
+
 
 .. _localize-scmos-multichannel:
 

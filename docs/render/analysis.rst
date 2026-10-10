@@ -40,6 +40,31 @@ To use RESI:
    clustered, cluster centers are extracted and combined from all RESI
    channels to create the final RESI file under the name specified by the user.
 
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
+
+   The channels must be aligned already. Radii are in camera pixels and may
+   be given per channel as lists.
+
+   .. code-block:: python
+
+      from picasso import io, lib, postprocess
+
+      paths = ["round1_locs.hdf5", "round2_locs.hdf5"]
+      locs, infos = zip(*[io.load_locs(p) for p in paths])
+      pixelsize = lib.get_from_metadata(infos[0], "Pixelsize")
+
+      resi_locs, resi_info = postprocess.resi(
+          list(locs), list(infos),
+          radius_xy=10 / pixelsize,       # e.g., 2 x NeNA
+          min_locs=10,
+          apply_fa=True,                  # basic frame analysis
+          progress_callback="console",
+      )
+      io.save_locs("resi.hdf5", resi_locs, resi_info)
+
+
 .. _render-g5m:
 
 G5M
@@ -53,6 +78,31 @@ technicalities as well as the user guide of the method are explained in the
 publication mentioned and its Supplementary Information. Please refer to
 :mod:`picasso.g5m` for the details of the implementation. Below is a brief
 summary of the user guide.
+
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
+
+   G5M needs clustered localizations (a ``group`` column), e.g., from the
+   DBSCAN. For 3D astigmatism data pass
+   ``calibration=io.load_calibration(...)``; the other keyword arguments
+   are the dialog's settings.
+
+   .. code-block:: python
+
+      from picasso import clusterer, g5m, io, lib
+
+      locs, info = io.load_locs("movie_locs.hdf5")
+      pixelsize = lib.get_from_metadata(info, "Pixelsize")
+
+      clustered, _ = clusterer.dbscan(
+          locs, radius=20 / pixelsize, min_samples=4,
+      )
+      molecules, clustered, info = g5m.g5m(
+          clustered, info, min_locs=10, callback_parent="console"
+      )
+      io.save_locs("movie_molmap.hdf5", molecules, info)
+
 
 .. _render-g5m-preprocessing:
 
@@ -242,6 +292,25 @@ are removed.
      - none
      - Clusters with fewer localizations are removed afterwards.
 
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
+
+   Radii are in camera pixels; ``pixelsize`` is only needed for 3D data.
+
+   .. code-block:: python
+
+      from picasso import clusterer, io, lib
+
+      locs, info = io.load_locs("movie_locs.hdf5")
+      pixelsize = lib.get_from_metadata(info, "Pixelsize")
+
+      clustered, cluster_info = clusterer.dbscan(
+          locs, radius=20 / pixelsize, min_samples=10, min_locs=10, pixelsize=pixelsize
+      )
+      io.save_locs("movie_locs_dbscan.hdf5", clustered, info + [cluster_info])
+
+
 .. _render-hdbscan:
 
 HDBSCAN
@@ -274,6 +343,18 @@ z are treated alike (no separate z radius).
      - ``cluster_selection_epsilon``
      - Clusters closer than this distance are merged; 0 (the default) turns
        merging off.
+
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
+
+   .. code-block:: python
+
+      clustered, cluster_info = clusterer.hdbscan(
+          locs, min_cluster_size=10, min_samples=10, pixelsize=pixelsize
+      )
+      io.save_locs("movie_locs_hdbscan.hdf5", clustered, info + [cluster_info])
+
 
 .. _render-smlm-clusterer:
 
@@ -318,6 +399,25 @@ Basic frame analysis
    few frames, while repetitive binding to a molecule is spread over the whole
    acquisition. G5M, for example, removes molecules with ``std_frame`` below
    10% of the number of frames.
+
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
+
+   ``radius_xy`` and ``radius_z`` are in camera pixels (z needs
+   ``pixelsize``); ``frame_analysis`` is the basic frame analysis.
+   ``find_cluster_centers`` gives one localization per cluster.
+
+   .. code-block:: python
+
+      clustered, cluster_info = clusterer.cluster(
+          locs, radius_xy=20 / pixelsize, min_locs=10, frame_analysis=True,
+          radius_z=None, pixelsize=pixelsize, progress="console",
+      )
+      centers = clusterer.find_cluster_centers(clustered, pixelsize, progress="console")
+      io.save_locs("movie_locs_clusters.hdf5", clustered, info + [cluster_info])
+      io.save_locs("movie_locs_cluster_centers.hdf5", centers, info + [cluster_info])
+
 
 .. _render-test-clusterer:
 
@@ -375,3 +475,28 @@ Calculates distances to the ``k``-th nearest neighbors between two channels
 stored in nm as a .hdf5 localizations file with new columns ``nnd_1``,
 ``nnd_2``, ..., ``nnd_k`` for each localization in channel 1. The distances
 are calculated in 3D if both datasets have z information.
+
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
+
+   ``nn_analysis`` works on coordinate arrays in nm, so convert ``x`` and
+   ``y``; ``z`` is in nm already.
+
+   .. code-block:: python
+
+      import numpy as np
+      from picasso import io, lib, postprocess
+
+      locs1, info1 = io.load_locs("channel1_locs.hdf5")
+      locs2, info2 = io.load_locs("channel2_locs.hdf5")
+      pixelsize = lib.get_from_metadata(info1, "Pixelsize")
+
+      X1 = locs1[["x", "y"]].to_numpy() * pixelsize
+      X2 = locs2[["x", "y"]].to_numpy() * pixelsize
+      # 3D: X = np.column_stack([locs[["x", "y"]].to_numpy() * pixelsize, locs["z"]])
+
+      nnd = postprocess.nn_analysis(X1, X2, nn_count=3)      # (N1, 3)
+      for k in range(nnd.shape[1]):
+          locs1[f"nnd_{k + 1}"] = nnd[:, k]
+      io.save_locs("channel1_locs_nnd.hdf5", locs1, info1)

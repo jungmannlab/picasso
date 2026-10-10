@@ -55,6 +55,30 @@ Particle averaging
    ``Rounds`` with its ``Display pixel size (nm)`` and ``Iterations``, so the
    whole sequence of steps can be reproduced (see :ref:`files-metadata-settings`).
 
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
+
+   ``average`` needs the ``group`` column of picked localizations. It
+   starts worker processes, so in a script keep the call inside ``if
+   __name__ == "__main__":``.
+
+   .. code-block:: python
+
+      from picasso import average, io
+
+      if __name__ == "__main__":
+          locs, info = io.load_locs("movie_locs_picked.hdf5")
+          avg_locs, avg_info = average.average(
+              locs, info,
+              display_pixel_size=5.0,
+              iterations=10,
+              return_shifted_locs=True,
+              progress_callback="console",
+          )
+          io.save_locs("movie_locs_picked_avg.hdf5", avg_locs, avg_info)
+
+
 .. tip::
 
    If you experience that one localization spot is overemphasized, try again

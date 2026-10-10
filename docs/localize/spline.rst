@@ -131,6 +131,28 @@ A calibration is built from a **bead z-stack**: image a sample of sparse, bright
       - the camera parameters ``-bl`` / ``-se`` / ``-ga`` / ``-px`` (baseline, sensitivity, gain, pixel size),
       - ``-o`` for the output path (default ``<movie>_spline_calib.hdf5``).
 
+
+   .. tab-item:: Python
+
+      .. code-block:: python
+
+         from picasso import io, spline
+
+         movie, info = io.load_movie("beads_zstack.tif")
+         camera_info = {"Baseline": 100, "Sensitivity": 0.53, "Gain": 1, "Pixelsize": 130}
+         calibration = spline.calibrate_spline(
+             movie, info, camera_info,
+             box=13, minimum_ng=5000,
+             d=10,                               # z step in nm
+             z_binning=5,
+             model="spline-3d",
+             magnification_factor=0.79,
+             path="beads_spline_calib.hdf5",     # also writes the diagnostic plots
+         )
+
+      ``frames_per_step`` and ``frame_order`` (``"fov"`` or ``"z"``) take the values of the dialog. ``calibrate_spline_multichannel`` and ``calibrate_spline_split_fov`` are the multichannel variants (see below).
+
+
 .. important::
 
    **The fit box size must not be larger than the box size the calibration was built with.** If it is larger, Picasso Localize shows a dialog and offers to set the box size to the calibration's value (you then re-run identification before fitting).
@@ -196,6 +218,25 @@ In addition to the usual columns, spline fits report:
 - the number of ``iterations`` each fit took.
 
 A 3D calibration adds the recovered ``z`` (and ``lpz``). The accompanying ``_locs.yaml`` records the spline calibration model and file path used, and which device performed the fit.
+
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
+
+   .. code-block:: python
+
+      from picasso import io, localize
+
+      spline_calibration = io.load_spline_calibration("beads_spline_calib.hdf5")
+      locs, info = localize.localize(
+          movie,
+          camera_info=camera_info,
+          identification_parameters={"Box Size": 13, "Min. Net Gradient": 5000},
+          movie_info=info,
+          fitting_method="spline-mle",      # "spline", "spline-mle-gpu", "spline-gpu"
+          spline_calibration=spline_calibration,
+      )
+
 
 .. _localize-multichannel-spline:
 

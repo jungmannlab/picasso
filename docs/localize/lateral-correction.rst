@@ -27,6 +27,31 @@ The transform is then fitted as follows:
 3. A transform mapping the second image onto the reference is fitted by least squares.
 4. Bead pairs whose residual is far from the median are dropped and the transform is refitted, so a single mismatched bead cannot warp the result.
 
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
+
+   ``fit_lateral_transform`` appends the transform to a calibration
+   dictionary: a loaded 3D calibration, or ``{}`` for a standalone file.
+   ``transform_type`` is ``"astigmatism"`` or ``"chromatic"``.
+
+   .. code-block:: python
+
+      from picasso import io, localize
+
+      movie_ref, _ = io.load_movie("beads_without_lens.tif")
+      movie_target, _ = io.load_movie("beads_with_lens.tif")
+
+      calibration = io.load_calibration("beads_3d_calib.yaml")   # or {}
+      calibration, qc = localize.fit_lateral_transform(
+          movie_ref, movie_target, calibration,
+          box=7, minimum_ng=5000, pixelsize=130,
+          transform_type="astigmatism", model="affine",
+      )
+      localize.plot_lateral_calibration(qc, save_path="lateral_check.png")
+      io.save_any_calibration("beads_3d_calib.yaml", calibration)
+
+
 .. _localize-lateral-transform-models:
 
 Transform models

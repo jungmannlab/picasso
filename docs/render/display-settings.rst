@@ -145,6 +145,25 @@ Jittered Triangulation
      and it counts all localizations loaded into the 3D view, not only those
      in view (see :ref:`render-3d-display-settings`).
 
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
+
+   The blur methods are the ``blur_method`` of ``render.render``;
+   ``min_blur_width`` is in camera pixels.
+
+   .. code-block:: python
+
+      from picasso import io, render
+
+      locs, info = io.load_locs("movie_locs.hdf5")
+      n_locs, image = render.render(
+          locs, info, disp_px_size=10,
+          blur_method="gaussian",       # None, "gaussian", "gaussian_iso", "smooth", "convolve"
+          min_blur_width=0.0,
+      )
+
+
 .. _render-camera:
 
 Camera
@@ -252,6 +271,24 @@ its fit (`Endesfelder et al., Histochemistry and Cell Biology, 2014
 <https://doi.org/10.1007/s00418-014-1192-3>`__). The NeNA value is added to
 the metadata of the channel, so it is saved with the localizations.
 
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
+
+   NeNA is returned in camera pixels.
+
+   .. code-block:: python
+
+      from picasso import io, lib, postprocess
+
+      locs, info = io.load_locs("movie_locs.hdf5")
+      pixelsize = lib.get_from_metadata(info, "Pixelsize")
+
+      result, nena_px = postprocess.nena(locs, info)
+      print(f"NeNA: {nena_px * pixelsize:.1f} nm")
+      fig = postprocess.plot_nena(result)
+
+
 .. _render-info-frc:
 
 FRC
@@ -286,6 +323,26 @@ the FRC resolution:
   green, excluded: gray, selected: red) and the FRC curve of the selected
   ROI. Untick an ROI, e.g., one on a cell edge or background, to exclude it
   from the mean.
+
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
+
+   ``frc`` works on one viewport (``((y_min, x_min), (y_max, x_max))`` in
+   camera pixels), ``frc_rois`` on random ROIs over the whole image.
+
+   .. code-block:: python
+
+      frc = postprocess.frc(locs, info, viewport=((0, 0), (64, 64)))
+      print(frc["resolution"])                        # nm
+      fig = postprocess.plot_frc(frc)
+
+      rois = postprocess.frc_rois(
+          locs, info, viewport=((0, 0), (512, 512)),
+          n_rois=30, roi_size=5000.0, min_locs=1000,  # roi_size in nm
+      )
+      print(rois["resolutions"].mean(), rois["resolutions"].std())
+
 
 .. _render-info-fov:
 

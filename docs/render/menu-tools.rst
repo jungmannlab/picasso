@@ -31,6 +31,22 @@ localizations they contain. New box picks take the median width and height of
 the current picks; the boxes you drew yourself are kept as drawn. See
 :ref:`render-picking-steps` for the similarity measures.
 
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
+
+   ``pick_size`` is the radius for circles; ``std_range`` is ``Pick similar
+   ± range``.
+
+   .. code-block:: python
+
+      from picasso import postprocess
+
+      new_picks = postprocess.pick_similar(
+          locs, info, picks, "Circle", pick_size=radius, std_range=2.0
+      )
+
+
 .. _render-remove-locs-in-picks:
 
 Remove localizations in picks
@@ -38,6 +54,19 @@ Remove localizations in picks
 
 Remove localizations found in picked region(s) of interest. Can be applied to
 separate or all channels simultaneously.
+
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
+
+   The circle size is the diameter here.
+
+   .. code-block:: python
+
+      locs = postprocess.remove_locs_in_picks(
+          locs, info, picks=picks, pick_shape="Circle", pick_size=2 * radius
+      )
+
 
 .. _render-move-to-pick:
 
@@ -63,6 +92,22 @@ densest spots of the image. Requires no existing picks.
    99th percentile of the pixel values as the minimum net gradient.
 3. Only spots with more localizations than 80% of the number of frames are
    kept, and each gets a circular pick with a diameter of the box size.
+
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
+
+   ``find_fiducials`` returns the centers and the box size (the pick
+   diameter), both in camera pixels. ``undrift_from_fiducials`` picks and
+   undrifts in one go.
+
+   .. code-block:: python
+
+      from picasso import imageprocess, postprocess
+
+      picks, box = imageprocess.find_fiducials(locs, info)
+      locs, info, drift = postprocess.undrift_from_fiducials(locs, info)
+
 
 .. _render-plot-pick-profile:
 
@@ -98,6 +143,19 @@ has four panels, all over the frames of the movie:
 
 ``Export (*.csv)`` in the toolbar saves the trace as ``<name>.trace.csv`` with
 three columns: frame, on/off (1 or 0) and photons (as integers).
+
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
+
+   .. code-block:: python
+
+      import pandas as pd
+      from picasso import lib, postprocess
+
+      picked = postprocess.picked_locs(locs, info, picks, "Circle", pick_size=radius)
+      fig = lib.plot_trace(pd.concat(picked, ignore_index=True), info)
+
 
 .. _render-select-picks-trace:
 
@@ -210,3 +268,24 @@ from the density of the localizations of the selected channel:
 The panels zoom and pan together: :kbd:`Ctrl`/:kbd:`Cmd` + scrolling zooms,
 dragging with the right mouse button (or :kbd:`Ctrl`/:kbd:`Cmd` + the left
 button) pans, and a double click resets the zoom.
+
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
+
+   ``mask_image`` takes a method name or a threshold between 0 and 1
+   (``Custom``). The mask spans the whole field of view.
+
+   .. code-block:: python
+
+      import numpy as np
+      from picasso import io, masking
+
+      locs, info = io.load_locs("movie_locs.hdf5")
+      image = masking.generate_image(locs, info, disp_px_size=300, blur=500)   # nm
+      mask, threshold = masking.mask_image(image, "otsu")   # or 0.5, "li", "local_mean", ...
+      locs_in, locs_out = masking.mask_locs(locs, info, mask)
+
+      io.save_locs("movie_locs_mask_in.hdf5", locs_in, info)
+      io.save_locs("movie_locs_mask_out.hdf5", locs_out, info)
+      np.save("movie_locs_mask.npy", mask)

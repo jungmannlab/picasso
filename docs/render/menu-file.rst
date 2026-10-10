@@ -40,6 +40,17 @@ Shortcut: :kbd:`Ctrl+S`
 
 Save the localizations that are currently loaded in render to an hdf5 file.
 
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
+
+   .. code-block:: python
+
+      from picasso import io
+
+      io.save_locs("movie_locs_render.hdf5", locs, info)
+
+
 .. _render-save-picked-localizations:
 .. _render-save-picks-in-metadata:
 
@@ -73,6 +84,21 @@ the key ``Save picks in metadata`` to ``True`` in the
 :ref:`user settings file <user-settings-file>` (``~/.picasso/settings.yaml``,
 also editable via ``File > Picasso settings`` in any module).
 
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
+
+   ``picked_locs`` adds the ``group`` column (``add_group=True``).
+
+   .. code-block:: python
+
+      import pandas as pd
+      from picasso import postprocess
+
+      picked = postprocess.picked_locs(locs, info, picks, "Circle", pick_size=radius)
+      io.save_locs("movie_locs_picked.hdf5", pd.concat(picked, ignore_index=True), info)
+
+
 .. _render-save-picked-separately:
 
 Save picked localizations separately
@@ -83,6 +109,16 @@ Like *Save picked localizations*, but saves each pick to its own file
 structures individually. With more than 10 picks, Render asks for
 confirmation first. With several channels, all channels can be saved one by
 one (with a suffix you enter) or combined into one file per pick.
+
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
+
+   .. code-block:: python
+
+      for i, locs_in_pick in enumerate(picked):
+          io.save_locs(f"movie_locs_pick{i}.hdf5", locs_in_pick, info)
+
 
 .. _render-save-pick-properties:
 
@@ -121,6 +157,25 @@ This is the per-pick output of qPAINT: calibrate the influx rate in the
 standard deviation of the bright and dark times and of the number of units
 over the picks), then save the pick properties to get ``n_units`` for every
 pick, e.g., to plot its distribution in :doc:`/filter`.
+
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
+
+   ``pick_areas`` (in µm²) are needed for the density columns; the circle
+   size is the diameter here.
+
+   .. code-block:: python
+
+      from picasso import io, lib, postprocess
+
+      areas = lib.pick_areas(picks, "Circle", 2 * radius) * (pixelsize / 1000) ** 2
+      props = postprocess.pick_properties(
+          picked, info, max_dark_time=3, influx_rate=0.03, pick_areas=areas
+      )
+      io.save_datasets("movie_locs_pickprops.hdf5", info, groups=props)
+      props = pd.read_hdf("movie_locs_pickprops.hdf5", key="groups")
+
 
 .. _render-save-pick-regions:
 
@@ -168,6 +223,19 @@ For example:
       Path:
       - [15.0, 25.0]
 
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
+
+   .. code-block:: python
+
+      import yaml
+
+      regions = {"Diameter (nm)": 100.0, "Centers": [list(map(float, p)) for p in picks]}
+      with open("movie_locs_picks.yaml", "w") as f:
+          yaml.dump(regions, f)
+
+
 .. _render-load-pick-regions:
 
 Load pick regions
@@ -175,6 +243,18 @@ Load pick regions
 
 Resets the current picked regions and loads regions from a .yaml file that
 contains pick regions. The ``.yaml`` file can also be dropped in the Render window.
+
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
+
+   With ``pixelsize``, the size comes back in camera pixels (a diameter for
+   circles).
+
+   .. code-block:: python
+
+      picks, shape, size = io.load_picks("movie_locs_picks.yaml", pixelsize=pixelsize)
+
 
 .. _render-export-roi-imaris:
 
@@ -221,6 +301,23 @@ as well (see :ref:`render-colorbar-format`).
    named after the channel's file plus a suffix you enter (default
    ``_grayscale.png``).
 
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
+
+   See :ref:`render-opening-files` for the rendering options.
+
+   .. code-block:: python
+
+      import matplotlib.pyplot as plt
+      from picasso import render
+
+      n_locs, image = render.render(
+          locs, info, disp_px_size=10, viewport=viewport, blur_method="gaussian"
+      )
+      plt.imsave("movie.png", image, vmin=0, vmax=0.2 * image.max(), cmap="magma")
+
+
 .. _render-export-localizations:
 
 Export localizations
@@ -228,6 +325,15 @@ Export localizations
 
 Select export for various other programs. Note that some exporters only work
 for 3D files (with z coordinates).
+
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
+
+   .. code-block:: python
+
+      locs.to_csv("movie_locs.csv", index=False)
+
 
 .. _render-export-thunderstorm:
 
@@ -266,6 +372,19 @@ following columns, in this order (lengths converted from camera pixels to nm):
        number ``n`` of linked localizations, which suits kinetic analysis
        better. Without gaps in the event, the two are equal.
 
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
+
+   ``io.import_ts`` reads a ThunderSTORM file (and saves it as
+   ``_locs.hdf5``).
+
+   .. code-block:: python
+
+      io.export_thunderstorm("movie_locs.csv", locs, info)
+      locs, info = io.import_ts("thunderstorm.csv", pixelsize=130)
+
+
 .. _render-export-frc:
 
 Export as .txt for FRC
@@ -274,6 +393,15 @@ Export as .txt for FRC
 Export as .txt file to be used for the fourier ring correlation plugin in
 ImageJ.
 
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
+
+   .. code-block:: python
+
+      io.export_txt_imagej("movie_locs.txt", locs, info)
+
+
 .. _render-export-chimera:
 
 Export as .xyz for Chimera
@@ -281,12 +409,30 @@ Export as .xyz for Chimera
 
 Export as .txt file to be used for Chimera import.
 
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
+
+   .. code-block:: python
+
+      io.export_xyz_chimera("movie_locs.chi.xyz", locs, info)
+
+
 .. _render-export-visp:
 
 Export as .3d for ViSP
 ~~~~~~~~~~~~~~~~~~~~~~
 
 Export as .3d file to be used ViSP.
+
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
+
+   .. code-block:: python
+
+      io.export_3d_visp("movie_locs.visp.3d", locs, info)
+
 
 .. _render-export-smap:
 
@@ -302,6 +448,16 @@ Coordinates and localization precision are converted from camera pixels to nm
 using the pixel size set in Display Settings; z and its precision (``lpz``)
 are written in nm; frames are made 1-based (SMAP convention). ``lpx`` and
 ``lpy`` are combined into SMAP's single ``locprecnm`` field as their mean.
+
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
+
+   .. code-block:: python
+
+      io.export_smap("movie_locs_sml.mat", locs, info)
+      locs, info = io.import_smap("smap_sml.mat", pixelsize=130)
+
 
 .. _render-remove-all-localizations:
 

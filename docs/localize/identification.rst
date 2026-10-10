@@ -60,6 +60,43 @@ Identification and fitting of single-molecule spots
 
 Hovering the mouse cursor over a fit marker or over an identification box shows a tooltip listing the properties of that localization — all columns produced by the fit (e.g. ``x``, ``y``, ``photons``, ``bg``, ``sx``, ``sy``).
 
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
+
+   The two steps also run one after the other, with the settings of the
+   dialog as arguments. ``identify_by_frame_number`` is the ``Preview``:
+   the spots of one frame with the current settings.
+
+   .. code-block:: python
+
+      from picasso import io, localize
+
+      movie, info = io.load_movie("movie.tif")
+      camera_info = {
+          "Baseline": 100, "Sensitivity": 0.53, "Gain": 1, "Qe": 1, "Pixelsize": 130
+      }
+
+      # Preview: the spots of frame 100 with a box of 7 and a min. net gradient of 5000
+      spots = localize.identify_by_frame_number(movie, 5000, 7, 100)
+
+      # Identification of the whole movie
+      identifications, id_info = localize.identify(
+          movie, 5000, 7, progress_callback="console"
+      )
+
+      # Fitting
+      locs, fit_info = localize.fit(
+          movie,
+          camera_info=camera_info,
+          identifications=identifications,
+          box=7,
+          fitting_method="gaussmle",
+          progress_callback="console",
+      )
+      io.save_locs("movie_locs.hdf5", locs, info + [id_info, fit_info])
+
+
 .. _localize-remembered-parameters:
 
 Remembered parameters
@@ -97,6 +134,31 @@ Two things are worth keeping in mind:
 
 For a description of temporal median filtering in the wider context of SMLM analysis, see Martens KJA, Turkowyd B, Endesfelder U, `Raw data to results: a hands-on introduction and overview of computational analysis for single-molecule localization microscopy <https://doi.org/10.3389/fbinf.2021.817254>`_, *Frontiers in Bioinformatics* 1, 817254 (2022).
 
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
+
+   ``temporal_median_window`` (``Window (frames)``) switches the filter on.
+   As in the GUI, it changes which spots are found, not how they are
+   fitted.
+
+   .. code-block:: python
+
+      identifications, id_info = localize.identify(
+          movie, 3000, 7, temporal_median_window=51
+      )
+
+      # or for the whole pipeline
+      locs, info = localize.localize(
+          movie,
+          camera_info=camera_info,
+          identification_parameters={
+              "Box Size": 7, "Min. Net Gradient": 3000, "Temporal Median Window": 51
+          },
+          movie_info=info,
+      )
+
+
 .. _localize-gaussian-filter:
 
 Gaussian filter
@@ -116,6 +178,21 @@ The same two caveats as for the temporal median filter apply:
 The two filters can be used together: the temporal median background is subtracted first, and the result is then smoothed.
 
 Unlike the temporal median filter, the Gaussian filter *is applied when calibrating* a 3D or an experimental (cubic-spline) PSF — smoothing does not erase static beads, and defocused beads are exactly the kind of multi-peaked PSF the filter helps with.
+
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
+
+   ``gaussian_filter_sigma`` is the ``Gaussian filter sigma`` of the
+   dialog, in camera pixels (``"Gaussian Filter Sigma"`` in
+   ``identification_parameters``).
+
+   .. code-block:: python
+
+      identifications, id_info = localize.identify(
+          movie, 5000, 7, gaussian_filter_sigma=1.0
+      )
+
 
 .. _localize-wavelet:
 
@@ -162,6 +239,21 @@ Things to keep in mind:
 - **Calibrations** — 3D and spline PSF calibration, lateral calibration and :ref:`channel registration <localize-channel-registration>` — detect the beads with the selected method, too.
 - The border of a frame is extended by mirroring, a detail the paper does not specify.
 
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
+
+   ``noise`` is ``"image_std"`` or ``"w1_mad"``. The net gradient argument
+   is not used by the wavelet method and can be ``None``.
+
+   .. code-block:: python
+
+      from picasso import localize, wavelet
+
+      params = wavelet.WaveletParameters(threshold=0.5, noise="image_std", min_area=4)
+      identifications, id_info = localize.identify(movie, None, 7, wavelet=params)
+
+
 
 .. _localize-rois:
 
@@ -183,6 +275,31 @@ By default, Picasso analyzes the whole frame. If you are only interested in cert
 To go back to analyzing the whole frame, simply remove all ROIs (double-click them, empty the single-ROI field, or use ``Clear`` in the ``Edit ROIs...`` dialog).
 
 If ROIs overlap, Picasso automatically trims them so that no spot is detected twice, so you do not need to draw them precisely. As with the rest of the identification settings, turn on ``Preview`` to check which spots fall inside your ROIs before running the full analysis.
+
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
+
+   ROIs are given as ``[[y_min, x_min], [y_max, x_max]]`` in camera pixels;
+   ``clip_rois`` trims overlapping ones like the GUI does.
+
+   .. code-block:: python
+
+      rois = [[[0, 0], [256, 256]], [[0, 256], [256, 512]]]
+      rois = localize.clip_rois(rois, min_size=7)
+
+      identifications, id_info = localize.identify(movie, 5000, 7, roi=rois)
+
+      # or for the whole pipeline; the localizations get the roi_id column
+      locs, info = localize.localize(
+          movie,
+          camera_info=camera_info,
+          identification_parameters={"Box Size": 7, "Min. Net Gradient": 5000},
+          roi=rois,
+          movie_info=info,
+      )
+      print(locs["roi_id"].unique())
+
 
 .. _localize-roi-id:
 
@@ -218,6 +335,20 @@ Opening several channels
 
 When more than one channel is loaded (by either of the two actions above), a channel selector appears below the image so you can switch between channels; identification, fitting and saving then operate on the currently active channel. Up and down arrow keys can be used to navigate across the channels.
 
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
+
+   ``io.load_movie_all`` returns one movie and one metadata list per
+   channel.
+
+   .. code-block:: python
+
+      movies, infos = io.load_movie_all("movie.nd2")
+      for movie, info in zip(movies, infos):
+          print(movie.shape)
+
+
 .. _localize-micromanager-folder:
 
 Open MicroManager image folder
@@ -245,6 +376,17 @@ Each entry is one whole movie: the continuation files of a split OME-TIFF stack 
 All files must have the same frame size and data type; if one does not, Picasso names it and the movie is not opened.
 
 The metadata is taken from the first file, with the frame count set to the total. The concatenated file paths and their frame counts are stored in the localization metadata (``Concatenated Files`` and ``Frames per File``), so it stays traceable which frame range came from which file.
+
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
+
+   The files are concatenated in the order given.
+
+   .. code-block:: python
+
+      movie, info = io.load_tif_concatenated(["run_1.ome.tif", "run_2.ome.tif"])
+
 
 .. _localize-saving-loading-identifications:
 
@@ -283,12 +425,39 @@ Saving and loading identifications
 
    For all three loading actions above, changing any identification parameter (box size, min. net gradient, etc.) will reset the loaded identifications. Use ``Analyze`` > ``Fit``, rather than ``Analyze`` > ``Localize (Identify & Fit)``, to fit the loaded identifications without resetting them.
 
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
+
+   .. code-block:: python
+
+      io.save_identifications(
+          "movie_identifications.hdf5", identifications, info + [id_info]
+      )
+      identifications, info = io.load_identifications("movie_identifications.hdf5")
+
+
 .. _localize-save-spots:
 
 Save spots
 ~~~~~~~~~~
 
 ``File`` > ``Save spots`` cuts out and saves the identified spots (NxBxB array, with N spots and B being the box side length). The spots can be saved as a ``.npy`` file or as a ``.tif`` file.
+
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
+
+   ``get_spots`` cuts the boxes out of the movie and converts them to
+   photons.
+
+   .. code-block:: python
+
+      import numpy as np
+
+      spots = localize.get_spots(movie, identifications, 7, camera_info)  # (N, 7, 7)
+      np.save("movie_spots.npy", spots)
+
 
 .. _localize-background-loading:
 

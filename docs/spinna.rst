@@ -78,6 +78,26 @@ list, and each structure has a *Delete* button.
    molecular targets, since SPINNA will interpret these as separate molecular
    target species.
 
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
+
+   The structures of the GUI's ``Structures`` tab, with coordinates in nm.
+   The steps on this page build on each other, as in the `SPINNA sample
+   notebook <https://github.com/jungmannlab/picasso/blob/master/samples/sample_notebook_4_spinna.ipynb>`__.
+
+   .. code-block:: python
+
+      from picasso import io, spinna
+      import numpy as np
+      import matplotlib.pyplot as plt
+
+      monomer = spinna.Structure(title="Monomer")
+      monomer.define_coordinates(target="EGFR", x=[0], y=[0], z=[0])
+      dimer = spinna.Structure(title="Dimer")
+      dimer.define_coordinates(target="EGFR", x=[-10.5, 10.5], y=[0, 0], z=[0, 0])
+      structures = [monomer, dimer]
+
 .. _spinna-simulate-tab:
 
 Simulate tab
@@ -182,6 +202,55 @@ Within the *Fitting* box:
    simulation* box and the NND histograms are shown in the *Plotting* box, see
    the image in :ref:`spinna-fitting-modes` below.
 
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
+
+   The experimental molecules are given in nm. ``generate_N_structures``
+   builds the search space of stoichiometries, ``fit_stoichiometry`` tests
+   them; ``bootstrap=True`` adds the uncertainty of the result.
+
+   .. code-block:: python
+
+      PIXELSIZE = 130      # camera pixel size, nm
+      LABEL_UNC = 6.0      # label uncertainty, nm
+      LE = 0.375           # labeling efficiency
+      ROI = 10_000         # simulated region of interest, nm
+      GRANULARITY = 34
+      N_SIM = 30           # simulations per tested stoichiometry
+
+      egfr_mols, info = io.load_locs("egfr_mols.hdf5")
+      egfr_coords = egfr_mols[["x", "y"]].to_numpy() * PIXELSIZE
+      n_egfr = int(egfr_coords.shape[0] / LE)     # number of molecules to simulate
+
+      mixer = spinna.StructureMixer(
+          structures=structures,
+          label_unc={"EGFR": LABEL_UNC},
+          le={"EGFR": LE},
+          width=ROI, height=ROI,
+      )
+      search_space = spinna.generate_N_structures(
+          structures=structures,
+          N_total={"EGFR": n_egfr},
+          granularity=GRANULARITY,
+      )
+      spinner = spinna.SPINNA(
+          mixer=mixer, gt_coords={"EGFR": egfr_coords}, N_sim=N_SIM
+      )
+      best_proportions, best_score = spinner.fit_stoichiometry(
+          N_structures=search_space,
+          fitting_mode="bayesian",    # or "coarse-to-fine", "brute-force"
+          asynch=True,
+          callback="console",
+      )
+      best_N_structures = mixer.convert_props_to_counts(best_proportions, n_egfr)
+      print(f"Best proportions (m/d/t): {best_proportions}")
+
+      # Fit uncertainty
+      (props_mean, props_sd), (score, score_sd) = spinner.fit_stoichiometry(
+          N_structures=search_space, asynch=True, callback="console", bootstrap=True
+      )
+
 .. _spinna-compare-models:
 
 Compare models
@@ -204,6 +273,25 @@ models with different spacings between the structures or different shape.
   targets as the loaded data); click a model to remove it.
 - It needs a generated search space (a loaded one is not accepted). The best
   model is loaded into the tab afterwards.
+
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
+
+   Each model is a list of structures; the label uncertainty is given as
+   a list of candidate values per target.
+
+   .. code-block:: python
+
+      best_score, best_index, label_unc, best_mixer, best_props = spinna.compare_models(
+          models=[[monomer, dimer], [monomer, dimer, tetramer]],
+          exp_data={"EGFR": egfr_coords},
+          granularity=GRANULARITY,
+          label_unc={"EGFR": [LABEL_UNC]},
+          le={"EGFR": LE},
+          N_sim=N_SIM,
+          width=ROI, height=ROI,
+      )
 
 .. _spinna-le-fitting:
 
@@ -241,6 +329,26 @@ After the fit, the fitted LEs, distance and label uncertainties are shown
 below the button and the label uncertainties are set in the *Load data* box.
 The LEs in the *Load data* box are set to 100%. A summary can be saved as
 a .txt file.
+
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
+
+   Needs two targets imaged with different sequences, see above;
+   ``distances`` are the candidate distances between them in nm. See
+   ``help(spinna.fit_le)`` for all arguments.
+
+   .. code-block:: python
+
+      le_values, label_unc, best_distance, best_score, best_props, best_mixer = spinna.fit_le(
+          "EGFR_R1", "EGFR_R2",
+          exp_data={"EGFR_R1": coords_r1, "EGFR_R2": coords_r2},
+          granularity=GRANULARITY,
+          label_unc={"EGFR_R1": [LABEL_UNC], "EGFR_R2": [LABEL_UNC]},
+          distances=[8.0, 10.0, 12.0],
+          N_sim=N_SIM,
+          width=ROI, height=ROI,
+      )
 
 .. _spinna-fitting-modes:
 
@@ -298,6 +406,19 @@ model structures and simulation parameters in the *Load data* box are defined:
    combination of proportions of structures by clicking *Best fitting
    combination* in the bottom of the *Input proportions of structures* box.
 
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
+
+   ``run_simulation`` takes the number of each structure; with ``path``
+   the simulated molecules are also saved as localizations, one file per
+   target.
+
+   .. code-block:: python
+
+      coords = mixer.run_simulation(best_N_structures, path="egfr_simulated.hdf5")
+      print(coords["EGFR"].shape)    # (N, 2) in nm
+
 .. _spinna-plotting:
 
 Plotting
@@ -334,6 +455,29 @@ bars).
 If the loaded structures include several molecular target species, several NND
 histograms are plotted, one for each pair of molecular target species, which
 can be explored by clicking left and right arrows in the *Plotting* box.
+
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
+
+   The experimental NND histogram with the best fit on top; the more
+   simulations, the smoother the simulated curve.
+
+   .. code-block:: python
+
+      dists_sim = spinna.get_NN_dist_simulated(
+          N_str=best_N_structures, N_sim=N_SIM * 10, mixer=mixer
+      )[0]
+      fig, ax = spinna.plot_NN(
+          data1=egfr_coords, data2=egfr_coords, n_neighbors=3,
+          figsize=(4.5, 3), mode="hist", binsize=7, xlim=(0, 300), return_fig=True,
+      )  # experimental data
+      spinna.plot_NN(
+          dist=dists_sim, mode="plot", binsize=2, xlim=(0, 300),
+          title=f"Best fit (m/d/t): {best_proportions.round(1)}",
+          fig=fig, ax=ax, alpha=1,
+      )
+      plt.show()
 
 .. _spinna-mask-generation-tab:
 
@@ -383,6 +527,27 @@ the heterogeneous density distribution present in the experimental data.
    .npy format (the thresholded mask if *Apply threshold* is ticked) and a
    .yaml file with its metadata next to it. For 3D masks with *Show z-slice*
    ticked, a .png of every z-slice can be saved as well.
+
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
+
+   ``binsize`` and ``sigma`` are in nm. A mask replaces ``width`` and
+   ``height`` of the mixer.
+
+   .. code-block:: python
+
+      generator = spinna.MaskGenerator("egfr_mols.hdf5", binsize=130, sigma=500)
+      generator.generate_mask(mode="loc_den")          # or "binary"
+      generator.save_mask("egfr_mols_mask.npy")        # plus a .yaml
+
+      mask, mask_info = io.load_mask("egfr_mols_mask.npy")
+      mixer = spinna.StructureMixer(
+          structures=structures,
+          label_unc={"EGFR": LABEL_UNC},
+          le={"EGFR": LE},
+          mask_dict={"mask": {"EGFR": mask}, "info": {"EGFR": mask_info}},
+      )
 
 .. _spinna-batch-analysis:
 

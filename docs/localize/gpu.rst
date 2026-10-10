@@ -18,6 +18,28 @@ When a CUDA GPU is detected, the **Use GPU** checkbox becomes available in the `
 
 GPU fitting is entirely optional; it is typically one to two orders of magnitude faster than a serial CPU fit.
 
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
+
+   Append ``-gpu`` to any fitting method. ``localize.CUDA_AVAILABLE`` tells
+   whether a CUDA GPU (and numba's CUDA support) was found.
+
+   .. code-block:: python
+
+      from picasso import localize
+
+      print(localize.CUDA_AVAILABLE)
+
+      locs, info = localize.localize(
+          movie,
+          camera_info=camera_info,
+          identification_parameters={"Box Size": 7, "Min. Net Gradient": 5000},
+          movie_info=info,
+          fitting_method="gaussmle-gpu",
+      )
+
+
 .. _localize-cpu-fitting:
 
 CPU fitting

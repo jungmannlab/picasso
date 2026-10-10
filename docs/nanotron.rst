@@ -58,6 +58,40 @@ Train a MLP model for nanopattern prediction using nanoTRON.
 11. A summary of the achieved train and test accuracies is given at the bottom of the ``Train Model`` window.
 12. Save the model for later use via ``Save Model``.
 
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
+
+   Training uses scikit-learn directly: each pick of the training files
+   (picked localizations, one ``group`` per structure) is rendered with
+   ``roi_to_img`` and flattened with ``prepare_img``.
+
+   .. code-block:: python
+
+      import joblib
+      import numpy as np
+      from sklearn.neural_network import MLPClassifier
+      from picasso import io, lib, nanotron
+
+      disp_px_size = 2.6          # nm
+      X, y = [], []
+      for label, path in enumerate(["class0_picked.hdf5", "class1_picked.hdf5"]):
+          locs, info = io.load_locs(path)
+          pixelsize = lib.get_from_metadata(info, "Pixelsize")
+          pick_radius = lib.get_from_metadata(info, "Pick Diameter (nm)") / pixelsize / 2
+          for group in locs["group"].unique():
+              img = nanotron.roi_to_img(
+                  locs, info, pick=int(group), radius=pick_radius, disp_px_size=disp_px_size
+              )
+              X.append(nanotron.prepare_img(img, img_shape=img.shape[0], alpha=10, bg=1))
+              y.append(label)
+
+      mlp = MLPClassifier(
+          hidden_layer_sizes=(500,), solver="adam", activation="relu", max_iter=400
+      ).fit(np.array(X), y)
+      joblib.dump(mlp, "model.sav")
+
+
 nanoTRON Predict
 ----------------
 Use a trained nanoTRON model to classify nanopatterns on new data.
@@ -78,3 +112,24 @@ Use a trained nanoTRON model to classify nanopatterns on new data.
      nanopatterns, should be regrouped via the check button
      ``Regroup Export Files``. Note, the group id in every exported file then
      starts with 0. Identification of picks in the original file will be lost.
+
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
+
+   ``predict_structure`` returns the class and the probabilities of one
+   pick.
+
+   .. code-block:: python
+
+      import joblib
+      from picasso import io, nanotron
+
+      mlp = joblib.load("model.sav")
+      locs, info = io.load_locs("movie_locs_picked.hdf5")
+      for group in locs["group"].unique():
+          pred, proba = nanotron.predict_structure(
+              mlp, locs, info, pick=int(group),
+              pick_radius=pick_radius, disp_px_size=disp_px_size,
+          )
+          print(group, pred[0], proba.max())

@@ -227,3 +227,36 @@ is added: the angle turned since the previous position divided by the speed.
 The suggested durations can be edited, and every transition style takes
 exactly the durations listed; the style only changes how the speed varies
 within each of them, not how long they take.
+
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
+
+   Each position is a ``scipy.spatial.transform.Rotation`` and a viewport
+   (``((y_min, x_min), (y_max, x_max))`` in camera pixels). ``transition``
+   is ``"ease"`` (*Stop at each position*), ``"smooth"`` or ``"linear"``
+   (*Constant speed*).
+
+   .. code-block:: python
+
+      from scipy.spatial.transform import Rotation
+      from picasso import io, render
+
+      locs, info = io.load_locs("movie_locs_3d.hdf5")
+      viewport = ((100, 100), (164, 164))
+      positions = [
+          (Rotation.identity(), viewport),
+          (Rotation.from_euler("xyz", [0, 90, 0], degrees=True), viewport),
+          (Rotation.from_euler("xyz", [60, 90, 0], degrees=True), viewport),
+      ]
+      render.build_animation(
+          "movie.mp4", locs, info,
+          positions=positions,
+          durations=[3.0, 3.0],          # seconds, one per transition
+          disp_px_size=5,                # nm
+          image_size=(1280, 1280),
+          transition="ease",
+          blur_method="gaussian",
+          fps=30,
+          progress_callback="console",
+      )

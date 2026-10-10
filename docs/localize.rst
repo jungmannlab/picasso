@@ -30,6 +30,36 @@ In addition, ``Average of ROI`` is available as a non-fitting option that simply
 
 Fitting can run on a CUDA-capable GPU (see :doc:`localize/gpu`). The kernels are compiled at run time by Numba, so there is no library to build or install beyond the CUDA runtime (``pip install picassosr[gpu]``), on Windows and Linux alike. When no CUDA GPU is available, the GPU fitting option simply does not appear and Picasso uses the CPU algorithms.
 
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
+
+   Identify and fit a movie in one call and save the localizations.
+   ``identification_parameters`` takes the keys of the ``Parameters``
+   dialog; ``fitting_method`` names the PSF model and the optimizer
+   (``gausslq``, ``gaussmle``, ``gausslq-spherical``, ``gaussmle-rotated``,
+   ``spline``, ``spline-mle``, ...), with ``-gpu`` appended to fit on the
+   GPU.
+
+   .. code-block:: python
+
+      from picasso import io, localize
+
+      movie, info = io.load_movie("movie.tif")
+      camera_info = {
+          "Baseline": 100, "Sensitivity": 0.53, "Gain": 1, "Qe": 1, "Pixelsize": 130
+      }
+
+      locs, info = localize.localize(
+          movie,
+          camera_info=camera_info,
+          identification_parameters={"Box Size": 7, "Min. Net Gradient": 5000},
+          movie_info=info,
+          fitting_method="gaussmle",
+      )
+      io.save_locs("movie_locs.hdf5", locs, info)
+
+
 .. _localize-file-formats:
 
 Supported file formats
@@ -97,6 +127,24 @@ Picasso Localize reads the following movie formats:
    To load every channel of a multichannel file at once, see :ref:`localize-opening-channels`.
 
 We are open to feature requests regarding support for other file formats, please visit our `GitHub page <https://github.com/jungmannlab/picasso>`_.
+
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
+
+   ``io.load_movie`` opens every format in the table, chosen by the file
+   extension, and returns the movie with its metadata. Frames are read on
+   demand, so large movies open quickly. A ``.raw`` movie needs its
+   ``.yaml`` next to it.
+
+   .. code-block:: python
+
+      from picasso import io
+
+      movie, info = io.load_movie("movie.nd2")
+      frame = movie[100]      # one frame as a NumPy array
+      print(info[0]["Frames"], info[0]["Height"], info[0]["Width"])
+
 
 Topics
 ------

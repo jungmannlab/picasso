@@ -81,6 +81,26 @@ Then build a registration with ``Calibration`` > ``Register channels (2D)``, whi
 
 The registration is saved as a small ``.yaml`` (by default ``<movie>_channel_reg.yaml``) and loaded straight away. Picasso reports, per channel, how many correspondences were paired and the residual RMS in camera pixels — check those before fitting: a registration built from too few pairs, or with an RMS approaching a pixel, will hold the channels together at the wrong place.
 
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
+
+   From bead movies, one per channel with the reference first;
+   ``multi_fov=True`` is *Each frame is a different field of view*.
+   ``calibrate_channel_registration_from_signal`` is the *From current
+   signal* route.
+
+   .. code-block:: python
+
+      from picasso import io, registration
+
+      movies = [io.load_movie(p)[0] for p in ("beads_ch0.tif", "beads_ch1.tif")]
+      calibration = registration.calibrate_channel_registration_from_beads(
+          movies, box=7, minimum_ng=5000, model="affine", multi_fov=True,
+          path="beads_channel_reg.yaml",
+      )
+
+
 .. _localize-multichannel-gaussian-fitting:
 
 Fitting
@@ -102,6 +122,30 @@ Only molecules detected in *every* channel are fitted, so identify each channel 
 **With no registration loaded, nothing changes:** the spherical Gaussian fits the active channel alone, as before. The joint fit runs only when a registration is loaded *and* the data actually has several channels — either several movies open, or ``Regions = channels`` with a split-FOV registration.
 
 To fit every channel on its own instead — with any model, and without a registration — set ``Fit`` to ``Each channel separately``; see :ref:`localize-analyzing-each-channel` below.
+
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
+
+   The spots are identified in the reference channel and fitted jointly in
+   all channels; the localizations come out in the reference channel's
+   coordinates.
+
+   .. code-block:: python
+
+      from picasso import io, localize
+
+      movies, infos = zip(*[io.load_movie(p) for p in ("movie_ch0.tif", "movie_ch1.tif")])
+      camera_infos = [camera_info_ch0, camera_info_ch1]
+      registration = io.load_any_calibration("beads_channel_reg.yaml")
+
+      identifications, id_info = localize.identify(movies[0], 5000, 7)
+      locs = localize.fit_gauss_multichannel(
+          list(movies), camera_infos, identifications, box=7,
+          channel_registration=registration, mle=True, link_photons=False,
+      )
+      io.save_locs("movie_locs.hdf5", locs, list(infos[0]) + [id_info])
+
 
 .. _localize-linking-photon-counts:
 

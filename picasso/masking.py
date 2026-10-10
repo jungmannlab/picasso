@@ -88,7 +88,7 @@ def generate_image(
         blur_method=None,
     )
     blur_px = blur / disp_px_size
-    image_blur = ndi.filter.gaussian_filter(image, blur_px)
+    image_blur = ndi.gaussian_filter(image, blur_px)
     image_blur /= image_blur.max()
     return image_blur
 

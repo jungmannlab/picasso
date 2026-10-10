@@ -35,6 +35,30 @@ Opening Files
 3. (Optional) For multiplexed image acquisition, open HDF5 localization files
    from other channels subsequently. Alternatively, drag and drop all HDF5 files to be displayed simultaneously.
 
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
+
+   ``render.render`` returns the image the window shows, as an array of
+   localizations per display pixel; ``vmin``/``vmax`` are the Min. and Max.
+   density. ``render.render_scene`` renders several channels in color.
+
+   .. code-block:: python
+
+      import matplotlib.pyplot as plt
+      from picasso import io, render
+
+      locs, info = io.load_locs("movie_locs.hdf5")
+      n_locs, image = render.render(
+          locs, info,
+          disp_px_size=10,               # nm
+          viewport=((0, 0), (64, 64)),   # ((y_min, x_min), (y_max, x_max)) in camera px; None: whole FOV
+          blur_method="gaussian",        # None, "gaussian", "gaussian_iso", "smooth" or "convolve"
+          min_blur_width=0.0,            # camera pixels
+      )
+      plt.imsave("movie.png", image, vmin=0, vmax=0.2 * image.max(), cmap="magma")
+
+
 .. _render-coloring:
 
 How localizations are colored
@@ -121,6 +145,35 @@ events (`Jungmann et al., Nature Methods, 2016 <https://doi.org/10.1038/nmeth.38
    mean and standard deviation over the picks, and
    ``File > Save pick properties`` saves it for every pick (see
    :ref:`render-save-pick-properties`).
+
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
+
+   ``pick_properties`` computes the kinetics of each pick. The influx rate
+   follows from picks with a known number of binding sites, since ``n_units
+   = 1 / (influx_rate * dark_mean)``.
+
+   .. code-block:: python
+
+      from picasso import io, lib, postprocess
+
+      locs, info = io.load_locs("movie_locs.hdf5")
+      pixelsize = lib.get_from_metadata(info, "Pixelsize")
+      radius = 100 / pixelsize / 2              # 100 nm picks
+
+      # Calibration on picks of structures with n_sites binding sites
+      calib = postprocess.picked_locs(locs, info, calib_picks, "Circle", pick_size=radius)
+      props = postprocess.pick_properties(calib, info, max_dark_time=3, influx_rate=1.0)
+      influx_rate = (1 / (props["dark_mean"] * n_sites)).mean()
+
+      # Counting
+      picked = postprocess.picked_locs(locs, info, picks, "Circle", pick_size=radius)
+      props = postprocess.pick_properties(
+          picked, info, max_dark_time=3, influx_rate=influx_rate
+      )
+      print(props["n_units"].mean(), props["n_units"].std())
+
 
 .. _render-topics:
 

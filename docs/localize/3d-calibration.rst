@@ -29,6 +29,44 @@ Calibrating in the GUI
 
 To fit z, load the calibration with ``Load calibration`` in the ``3D via Astigmatism`` group of the ``Parameters`` dialog; ``Fit Z`` is then ticked. The ``Magnification factor`` (default 0.79) scales the fitted ``z`` to correct for the refractive-index mismatch between the immersion medium and the sample (`Huang et al., Science, 2008 <https://doi.org/10.1126/science.1153529>`__).
 
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
+
+   The calibration is fitted from the 2D-fitted bead localizations.
+   ``calibrate_z`` saves the ``.yaml`` and the check plot (and opens the
+   plot). ``zfit.zfit`` then adds ``z``, ``lpz`` and ``d_zcalib`` to a
+   measurement; ``filter=2`` (the default) discards fits far from the
+   calibration curves, ``filter=0`` keeps all. ``localize.localize`` fits z
+   right after the 2D fit when given ``calibration_3d=``.
+
+   .. code-block:: python
+
+      from picasso import io, localize, zfit
+
+      # Calibration: fit the bead z-stack in 2D first
+      movie, info = io.load_movie("beads_zstack.tif")
+      camera_info = {
+          "Baseline": 100, "Sensitivity": 0.53, "Gain": 1, "Qe": 1, "Pixelsize": 130
+      }
+      locs, info = localize.localize(
+          movie,
+          camera_info=camera_info,
+          identification_parameters={"Box Size": 7, "Min. Net Gradient": 5000},
+          movie_info=info,
+          fitting_method="gausslq",
+      )
+      calibration = zfit.calibrate_z(
+          locs, info, d=10, magnification_factor=0.79, path="beads_3d_calib.yaml"
+      )  # d: step size in nm
+
+      # Fitting z for a measurement
+      locs, info = io.load_locs("movie_locs.hdf5")
+      calibration = io.load_calibration("beads_3d_calib.yaml")
+      locs, info = zfit.zfit(locs, info, calibration=calibration)
+      io.save_locs("movie_locs_3d.hdf5", locs, info)
+
+
 .. _localize-3d-theory:
 
 Theory
