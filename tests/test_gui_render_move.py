@@ -67,6 +67,9 @@ class _Event:
     def button(self):
         return self._button
 
+    def buttons(self):
+        return self._button
+
     def modifiers(self):
         return QtCore.Qt.KeyboardModifier.NoModifier
 

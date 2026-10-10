@@ -192,4 +192,4 @@ def test_transition_choice_reaches_the_build(dialog, qapp, monkeypatch):
 def test_help_button_links_to_the_animation_docs(dialog):
     buttons = dialog.findChildren(lib.HelpButton)
     assert [b.help_url for b in buttons] == [dialog.DOCS_URL]
-    assert dialog.DOCS_URL.endswith("render.html#build-an-animation")
+    assert dialog.DOCS_URL.endswith("render/3d.html#render-animation")
