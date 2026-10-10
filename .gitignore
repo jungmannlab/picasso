@@ -130,3 +130,6 @@ dist_gpu/
 
 # Generated GitHub release notes
 release/release_notes.txt
+
+# Windows shortcuts from picasso/gui/createShortcuts.ps1
+/*.lnk

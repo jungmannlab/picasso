@@ -5,7 +5,7 @@ import pandas as pd
 import os
 import numpy as np
 from picasso import io, render
-import matplotlib.pyplot as plt
+from matplotlib.figure import Figure
 
 
 @st.cache_data
@@ -114,7 +114,7 @@ def preview():
 
                         disp_px_size = c1.number_input(
                             "Display pixel size",
-                            value=50,
+                            value=50.0,
                             min_value=1.0,
                             max_value=40000.0,
                         )
@@ -124,14 +124,17 @@ def preview():
                         )
 
                         vmin = c2.number_input(
-                            "Min density", value=np.min(image.flatten())
+                            "Min density", value=float(np.min(image))
                         )
                         vmax = c3.number_input(
-                            "Max density", value=np.max(image.flatten())
+                            "Max density", value=float(np.max(image))
                         )
 
                         # plt.imshow(image, cmap='hot', vmax=10)
-                        fig, ax = plt.subplots()
+                        # Figure directly, not pyplot: Streamlit runs this off
+                        # the main thread, where GUI backends fail on macOS
+                        fig = Figure()
+                        ax = fig.subplots()
                         st.write(f"Image with dimensions {image.shape}")
                         ax.imshow(image, cmap="hot", vmin=vmin, vmax=vmax)
                         # Hide grid lines

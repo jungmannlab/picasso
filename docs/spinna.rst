@@ -6,8 +6,7 @@ super-resolution microscopy data. For more information, please refer to the
 publication
 `L. A. Masullo, R. Kowalewski, et al. Nature Comm, 2025 <https://doi.org/10.1038/s41467-025-59500-z>`_.
 
-As of Picasso 0.8.4, SPINNA supports labeling efficiency fitting as described
-in
+SPINNA supports labeling efficiency fitting as described in
 `J. Hellmeier, S. Strauss, et al. Nature Methods, 2024 <https://doi.org/10.1038/s41592-024-02242-5>`_.
 See :ref:`spinna-le-fitting` below for instructions.
 
@@ -16,13 +15,13 @@ Overview of the GUI
 
 The GUI consists of three tabs that can be navigated at the top of the screen:
 
-1. :ref:`Structures <spinna-structures-tab>`: to define the structures used in
+1. :ref:`Structures <spinna-structures-tab>`: to define the structures (oligomers) used in
    simulations.
 2. :ref:`Simulate <spinna-simulate-tab>`: to simulate any combination of
    structures with user-defined parameters as well as to fit the proportions of
    structures to experimental data.
 3. :ref:`Mask generation <spinna-mask-generation-tab>`: to generate masks for
-   simulations with heterogeneous densities of molecular targets.
+   simulations with heterogeneous densities of the molecular targets.
 
 .. _spinna-structures-tab:
 
@@ -54,25 +53,50 @@ structures:
    will be rotated around the origin (i.e., x = y = z = 0 nm) during
    simulations.
 6. It is possible to delete each molecular target by clicking its
-   corresponding delete button (*x* in the *Molecular targets* box).
+   corresponding delete button (the trash icon in the *Molecular targets*
+   box).
 7. The user can navigate between structures by clicking on their names in the
    *Structures summary* box.
 8. The *Preview* box allows the user to see the currently loaded structure,
-   rotate it in 3D, show/hide legend and scale bar (whose length is adjustable)
-   as well as save the current view as a .png file.
+   rotate it in 3D (drag with the left mouse button; with :kbd:`Ctrl`, around
+   the z axis; *Reset rotation* undoes it), show/hide legend and scale bar
+   (whose length is adjustable) as well as save the current view as a .png or
+   .tif file.
 9. Once at least two molecular targets are defined for the given structure, it
    is possible to add a new molecular target by clicking with the right mouse
    button on the structure view.
 
 The image above illustrates the example structures generated for simulations
-of EGFR described in the main text. Once the structures are ready to use, save
+of EGFR described in the `SPINNA publication <https://doi.org/10.1038/s41467-025-59500-z>`_. Once the structures are ready to use, save
 them by clicking *Save all structures* in the *Structures summary* box.
+*Load structures* adds the structures of a saved .yaml file to the current
+list, and each structure has a *Delete* button.
 
 .. important::
 
    The user must ensure that no typos are introduced in the names of the
    molecular targets, since SPINNA will interpret these as separate molecular
    target species.
+
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
+
+   The structures of the GUI's ``Structures`` tab, with coordinates in nm.
+   The steps on this page build on each other, as in the `SPINNA sample
+   notebook <https://github.com/jungmannlab/picasso/blob/master/samples/sample_notebook_4_spinna.ipynb>`__.
+
+   .. code-block:: python
+
+      from picasso import io, spinna
+      import numpy as np
+      import matplotlib.pyplot as plt
+
+      monomer = spinna.Structure(title="Monomer")
+      monomer.define_coordinates(target="EGFR", x=[0], y=[0], z=[0])
+      dimer = spinna.Structure(title="Dimer")
+      dimer.define_coordinates(target="EGFR", x=[-10.5, 10.5], y=[0, 0], z=[0, 0])
+      structures = [monomer, dimer]
 
 .. _spinna-simulate-tab:
 
@@ -113,17 +137,34 @@ Load data and parameters
    *Z range*.
 5. In the "Optional settings" dialog, the user can change:
 
-   - the mode of rotations (random rotations around z axis (2D), random
-     rotations around 3 axes or no rotations);
-   - the fitting mode - one of "bayesian", "coarse to fine" or "brute force".
-     The chosen fitting mode applies to all fitting workflows (*Find best
-     fitting combination*, *Compare models* and *Fit LE*). For more
+   - the mode of rotations of the simulated structures: *random 2D
+     rotations* (around the z axis, the default), *random 3D rotations*
+     (around all three axes) or *No rotations*;
+   - the fitting mode: *Bayesian* (the default), *Coarse to fine* or *Brute
+     force*. The chosen fitting mode applies to all fitting workflows (*Find
+     best fitting combination*, *Compare models* and *Fit LE*). For more
      information about the fitting modes, see :ref:`spinna-fitting-modes`
-     below.
+     below;
+   - *Use multiprocessing* (on by default), which runs the simulations on
+     several CPU cores. The Bayesian fitting mode always runs on a single
+     core;
+   - *Auto set # of NNs for fitting* (on by default): how many nearest
+     neighbors are compared between each pair of molecular targets when
+     fitting. Automatically, this is the largest number of neighbors of that
+     pair within any of the loaded structures (e.g., 3 for tetramers of one
+     target). Untick it to set the number for each pair (``NN A → B``)
+     yourself.
 
    The fitting mode chosen here is remembered across sessions, under
    ``Fitting mode`` in the ``SPINNA`` section of ``~/.picasso/settings.yaml``
    (see :ref:`user-settings-file`).
+
+The defaults in the *Load data* box are a label uncertainty of 5 nm, an LE of
+50% and an observed density of 100 μm⁻² (μm⁻³ in 3D). If the experimental
+data were saved from picks, the density is filled in from the pick area in
+their metadata. *Homogeneous distribution* (the default) and *Masks* switch
+between the two ways of placing the structures: evenly at the observed
+density, or following a density mask (see :ref:`spinna-mask-generation-tab`).
 
 .. _spinna-fitting:
 
@@ -134,19 +175,24 @@ Within the *Fitting* box:
 
 1. To generate the search space, i.e., the set of stoichiometries tested in
    SPINNA, click the button *Generate parameter search space* and define the
-   number of simulation repeats and granularity. For more information, see
+   number of simulation repeats (``# simulations``, 10 by default) and
+   ``Granularity`` (21 by default); *Save as .csv* saves the search space,
+   which *Load parameter search space* loads again later. For more information, see
    Supplementary Figure 2 in the
    `SPINNA publication <https://doi.org/10.1038/s41467-025-59500-z>`_.
-2. To save the fitting scores for each tested stoichiometry, tick *Save
-   fitting scores*. The user will be asked to input the name of the resulting
+2. To save the fitting scores (Kolmogorov-Smirnov test statistics) for each
+   tested stoichiometry, tick *Save fitting scores*. The user will be asked to input the name of the resulting
    .csv file.
 3. To obtain the result's uncertainty, check the *Bootstrap* box, which will
    resample from the best fitting model 20 times and rerun SPINNA on the
    resampled datasets. Note that this will increase the computation time.
 4. To test different SPINNA models, click *Compare models* (see
    :ref:`spinna-compare-models` below).
-5. To run SPINNA, click *Find best fitting combination*. The progress dialog
-   will be displayed.
+5. To run SPINNA, click *Find best fitting stoichiometry*. Once a search
+   space is generated or loaded, the button shows the number of tested
+   combinations and the estimated time. The progress dialog will be
+   displayed. Changing the data, the masks or the densities resets the search
+   space, which then has to be generated again.
 6. After the fitting is finished, specify the name for saving a fit summary
    file (.txt). This file includes all the information about the fitting, the
    parameters and the results. The user may also choose not to save the file
@@ -155,6 +201,55 @@ Within the *Fitting* box:
    Additionally, the fitted stoichiometry is displayed in the *Single
    simulation* box and the NND histograms are shown in the *Plotting* box, see
    the image in :ref:`spinna-fitting-modes` below.
+
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
+
+   The experimental molecules are given in nm. ``generate_N_structures``
+   builds the search space of stoichiometries, ``fit_stoichiometry`` tests
+   them; ``bootstrap=True`` adds the uncertainty of the result.
+
+   .. code-block:: python
+
+      PIXELSIZE = 130      # camera pixel size, nm
+      LABEL_UNC = 6.0      # label uncertainty, nm
+      LE = 0.375           # labeling efficiency
+      ROI = 10_000         # simulated region of interest, nm
+      GRANULARITY = 34
+      N_SIM = 30           # simulations per tested stoichiometry
+
+      egfr_mols, info = io.load_locs("egfr_mols.hdf5")
+      egfr_coords = egfr_mols[["x", "y"]].to_numpy() * PIXELSIZE
+      n_egfr = int(egfr_coords.shape[0] / LE)     # number of molecules to simulate
+
+      mixer = spinna.StructureMixer(
+          structures=structures,
+          label_unc={"EGFR": LABEL_UNC},
+          le={"EGFR": LE},
+          width=ROI, height=ROI,
+      )
+      search_space = spinna.generate_N_structures(
+          structures=structures,
+          N_total={"EGFR": n_egfr},
+          granularity=GRANULARITY,
+      )
+      spinner = spinna.SPINNA(
+          mixer=mixer, gt_coords={"EGFR": egfr_coords}, N_sim=N_SIM
+      )
+      best_proportions, best_score = spinner.fit_stoichiometry(
+          N_structures=search_space,
+          fitting_mode="bayesian",    # or "coarse-to-fine", "brute-force"
+          asynch=True,
+          callback="console",
+      )
+      best_N_structures = mixer.convert_props_to_counts(best_proportions, n_egfr)
+      print(f"Best proportions (m/d/t): {best_proportions}")
+
+      # Fit uncertainty
+      (props_mean, props_sd), (score, score_sd) = spinner.fit_stoichiometry(
+          N_structures=search_space, asynch=True, callback="console", bootstrap=True
+      )
 
 .. _spinna-compare-models:
 
@@ -172,19 +267,48 @@ models with different spacings between the structures or different shape.
   shows the current round number (``[Round X/Y]``) so the user knows how many
   SPINNA rounds remain.
 - The fitting mode selected in *Optional settings* is honored.
+- Tick *Label uncertainties* to test a range per target (*From* / *To* /
+  *Step*, 3 / 8 / 1 nm by default); otherwise the values from the *Load data*
+  box are used. *Add a model* adds .yaml structure files (each with the same
+  targets as the loaded data); click a model to remove it.
+- It needs a generated search space (a loaded one is not accepted). The best
+  model is loaded into the tab afterwards.
+
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
+
+   Each model is a list of structures; the label uncertainty is given as
+   a list of candidate values per target.
+
+   .. code-block:: python
+
+      best_score, best_index, label_unc, best_mixer, best_props = spinna.compare_models(
+          models=[[monomer, dimer], [monomer, dimer, tetramer]],
+          exp_data={"EGFR": egfr_coords},
+          granularity=GRANULARITY,
+          label_unc={"EGFR": [LABEL_UNC]},
+          le={"EGFR": LE},
+          N_sim=N_SIM,
+          width=ROI, height=ROI,
+      )
 
 .. _spinna-le-fitting:
 
 Fitting labeling efficiency
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Since v0.10.1 the labeling efficiency (LE) fit has its own workflow. Whenever
-exactly two molecular targets are loaded, a *Fit labeling efficiencies* button
-is shown in the *Fitting* box. The user no longer needs to load the three
-"monomer A / monomer B / heterodimer AB" structures manually - SPINNA
-constructs them internally from the two target names alone.
+Fitting the labeling efficiency (LE), as described in `Hellmeier, Strauss,
+et al., Nature Methods, 2024 <https://doi.org/10.1038/s41592-024-02242-5>`__,
+has its own workflow. When the
+loaded structures contain exactly two molecular targets, a *Fit labeling
+efficiency* button is shown in the *Fitting* box. The user does not need to
+build the "monomer A / monomer B / heterodimer AB" structures: SPINNA
+constructs them internally from the two target names. Before fitting, load
+the experimental data of both targets and *generate* the search space (a
+loaded search space is not accepted).
 
-Clicking *Fit labeling efficiencies* opens a small dialog with three sections:
+Clicking *Fit labeling efficiency* opens a small dialog with three sections:
 
 1. **Fit label uncertainty** (checkbox) - when checked, the dialog exposes a
    *From / To / Step* row per target so SPINNA can search for the best label
@@ -192,7 +316,8 @@ Clicking *Fit labeling efficiencies* opens a small dialog with three sections:
    used as a fixed input for that target.
 2. **Fit heterodimer distance** (checkbox) - when checked, the dialog exposes
    a *From / To / Step* row in nm. When unchecked, a single fixed distance is
-   used (entered in the *Distance (nm)* field).
+   used (entered in the *Distance (nm)* field; by default the distance in a
+   loaded heterodimer structure, otherwise 10 nm).
 3. **Save fit scores** (checkbox) - when checked, the user selects a folder
    where SPINNA saves the fit scores for every candidate.
 
@@ -200,14 +325,39 @@ The dialog also displays a live "Estimated SPINNA rounds" preview that updates
 as the spin boxes change, so the user can gauge how long the fit will take
 before starting it.
 
+After the fit, the fitted LEs, distance and label uncertainties are shown
+below the button and the label uncertainties are set in the *Load data* box.
+The LEs in the *Load data* box are set to 100%. A summary can be saved as
+a .txt file.
+
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
+
+   Needs two targets imaged with different sequences, see above;
+   ``distances`` are the candidate distances between them in nm. See
+   ``help(spinna.fit_le)`` for all arguments.
+
+   .. code-block:: python
+
+      le_values, label_unc, best_distance, best_score, best_props, best_mixer = spinna.fit_le(
+          "EGFR_R1", "EGFR_R2",
+          exp_data={"EGFR_R1": coords_r1, "EGFR_R2": coords_r2},
+          granularity=GRANULARITY,
+          label_unc={"EGFR_R1": [LABEL_UNC], "EGFR_R2": [LABEL_UNC]},
+          distances=[8.0, 10.0, 12.0],
+          N_sim=N_SIM,
+          width=ROI, height=ROI,
+      )
+
 .. _spinna-fitting-modes:
 
 Fitting modes
 ~~~~~~~~~~~~~
 
 Since v0.10.0, in the "Optional settings", the user can choose between three
-fitting modes. The chosen mode is honored by *Find best fitting combination*,
-*Compare models* and *Fit LE...*. Previously, only brute force mode was
+fitting modes. The chosen mode is honored by *Find best fitting
+stoichiometry*, *Compare models* and *Fit labeling efficiency*. Previously, only brute force mode was
 available.
 
 bayesian
@@ -241,18 +391,33 @@ for a specific set of proportions of structures as well as to save the
 positions of the simulated molecular targets in an .hdf5 format. Once the
 model structures and simulation parameters in the *Load data* box are defined:
 
-1. Specify area/volume (in the case of homogeneous distribution of structures,
-   i.e., no masking) - it should equal the area/volume of the experimental
-   data.
+1. Enter the proportions of the structures (%) in the *Input proportions of
+   structures* box; they must add up to 100%. The simulated area is set by the
+   observed density and the number of molecules of the experimental data
+   (10,000 molecules if no data are loaded). With masks, experimental data are
+   required.
 2. To save the positions of molecules from a simulation, tick *Save positions
    of simulated molecules*. The user will be asked to enter the name of the
    resulting file.
-3. Click *Run a single simulation*. This will generate and display NND
+3. Click *Run single simulation*. This will generate and display NND
    histogram(s) of the simulated molecular targets (solid lines) and (if
    loaded) of the experimental data (histogram bars).
 4. If fitting was completed before, the user can retrieve the best fitting
    combination of proportions of structures by clicking *Best fitting
    combination* in the bottom of the *Input proportions of structures* box.
+
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
+
+   ``run_simulation`` takes the number of each structure; with ``path``
+   the simulated molecules are also saved as localizations, one file per
+   target.
+
+   .. code-block:: python
+
+      coords = mixer.run_simulation(best_N_structures, path="egfr_simulated.hdf5")
+      print(coords["EGFR"].shape)    # (N, 2) in nm
 
 .. _spinna-plotting:
 
@@ -265,7 +430,7 @@ Plotting
    :align: right
    :alt: Nearest neighbors plots dialog of Picasso SPINNA with the legend, bin size, distance range, labels and colors of the nearest neighbor histograms
 
-   The NND *Plot settings* dialog.
+   The *Nearest neighbors plots* dialog.
 
 The *Plotting* box, located in the top right corner of the GUI, displays the
 NND histograms for simulated (solid lines) and experimental data (histogram
@@ -276,9 +441,12 @@ bars).
 - *# simulations* controls how many simulation results are accumulated to draw
   NND histograms. The higher the value, the smoother the histograms will be
   obtained.
-- *Plot settings* opens a new dialog that allows the user to show/hide plot
-  legend, adjust the histogram bin size and min. and max. plotted distances,
-  among others, see the dialog on the right.
+- *Plot settings* opens the *Nearest neighbors plots* dialog: legend, bin
+  sizes for the simulated and experimental data (4 nm by default), the plotted
+  distance range (0 to 200 nm), the y-axis maximum (0 for automatic), title,
+  axis labels, transparency, the colors of the 1st to 10th nearest neighbors
+  and how many neighbors are plotted per pair of targets. *Update plot(s)*
+  applies the changes.
 
   The font family and size chosen there for the title, axis labels and ticks are remembered across sessions,
   under ``NND fonts`` in the ``SPINNA`` section of ``~/.picasso/settings.yaml``
@@ -287,6 +455,29 @@ bars).
 If the loaded structures include several molecular target species, several NND
 histograms are plotted, one for each pair of molecular target species, which
 can be explored by clicking left and right arrows in the *Plotting* box.
+
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
+
+   The experimental NND histogram with the best fit on top; the more
+   simulations, the smoother the simulated curve.
+
+   .. code-block:: python
+
+      dists_sim = spinna.get_NN_dist_simulated(
+          N_str=best_N_structures, N_sim=N_SIM * 10, mixer=mixer
+      )[0]
+      fig, ax = spinna.plot_NN(
+          data1=egfr_coords, data2=egfr_coords, n_neighbors=3,
+          figsize=(4.5, 3), mode="hist", binsize=7, xlim=(0, 300), return_fig=True,
+      )  # experimental data
+      spinna.plot_NN(
+          dist=dists_sim, mode="plot", binsize=2, xlim=(0, 300),
+          title=f"Best fit (m/d/t): {best_proportions.round(1)}",
+          fig=fig, ax=ax, alpha=1,
+      )
+      plt.show()
 
 .. _spinna-mask-generation-tab:
 
@@ -305,15 +496,20 @@ the heterogeneous density distribution present in the experimental data.
 
 1. Click *Load molecules* to open the .hdf5 file with molecules/localizations
    that will be used to generate the mask.
-2. Adjust bin size and Gaussian blur to be applied to the mask. Since v0.9.6,
-   the user can choose anisotropic bin size and Gaussian blur with one value in
+2. Adjust ``Pixel/voxel size (nm)`` (50 nm by default) and ``Gaussian blur
+   (nm)`` (500 nm by default) to be applied to the mask. The user can choose anisotropic bin size and Gaussian blur with one value in
    the xy plane and another value in the z direction.
-3. The mask can be generated in 3D and/or converted to a binary mask.
+3. The mask can be generated in 3D (if the molecules have z coordinates;
+   *Isotropic mask* keeps the z values equal to the xy ones) and/or converted
+   to a binary mask (*Mask type*).
 4. Click *Generate mask*. This may take a while, especially for a 3D mask. The
    mask will be displayed automatically. The legend in the *Display* box
    displays the probability of finding a molecular target per pixel/voxel.
-5. The density mask can be thresholded at any user-defined probability value.
-   By default, the Otsu threshold is used (Otsu. *Automatica*, 1975).
+5. Tick *Apply threshold* to threshold the density mask at a probability
+   value (off by default). The value is pre-filled with the Otsu threshold
+   (`Otsu, IEEE Transactions on Systems, Man, and Cybernetics, 1979
+   <https://doi.org/10.1109/TSMC.1979.4310076>`__) after *Generate mask*. With the mask type
+   *Binary*, the thresholded mask contains only 0 and 1.
 6. To explore the mask:
 
    - scroll (or pinch on a trackpad) over the preview to zoom at the cursor,
@@ -322,10 +518,36 @@ the heterogeneous density distribution present in the experimental data.
      :kbd:`0` fits the whole mask.
 
    The position and probability of the pixel under the cursor are shown below
-   the preview. For 3D masks, the user can slice through individual z planes
-   using the slider in the *Display* box.
+   the preview, and *Fit* shows the whole mask. For 3D masks, tick *Show
+   z-slice* in the *Display* box to slice through individual z planes with the
+   slider. A scale bar can be shown (*Scale bar (nm)*, 1000 nm by default),
+   and *Save view* saves the image. The *Mask information* box shows the area
+   (volume in 3D) and the dimensions of the mask.
 7. Once the mask is ready, click *Save mask*. This saves a numpy array in the
-   .npy format.
+   .npy format (the thresholded mask if *Apply threshold* is ticked) and a
+   .yaml file with its metadata next to it. For 3D masks with *Show z-slice*
+   ticked, a .png of every z-slice can be saved as well.
+
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
+
+   ``binsize`` and ``sigma`` are in nm. A mask replaces ``width`` and
+   ``height`` of the mixer.
+
+   .. code-block:: python
+
+      generator = spinna.MaskGenerator("egfr_mols.hdf5", binsize=130, sigma=500)
+      generator.generate_mask(mode="loc_den")          # or "binary"
+      generator.save_mask("egfr_mols_mask.npy")        # plus a .yaml
+
+      mask, mask_info = io.load_mask("egfr_mols_mask.npy")
+      mixer = spinna.StructureMixer(
+          structures=structures,
+          label_unc={"EGFR": LABEL_UNC},
+          le={"EGFR": LE},
+          mask_dict={"mask": {"EGFR": mask}, "info": {"EGFR": mask_info}},
+      )
 
 .. _spinna-batch-analysis:
 
@@ -380,7 +602,7 @@ script directly.
 
       SPINNA functions can also be run in a Python script directly. Examples
       are presented in ``samples/sample_notebook_4_spinna.ipynb`` (see
-      :ref:`postprocessing-notebook-spinna`).
+      :ref:`notebook-spinna`).
 
 .. _spinna-batch-columns:
 

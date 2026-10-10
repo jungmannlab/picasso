@@ -23,7 +23,7 @@ all picks share one size or each pick carries its own extent:
    * - ``Circle``
      - A single left click at its center.
      - ``Diameter``, shared by all picks.
-     - The default. Compact, roughly round structures.
+     - The default. Compact, roughly round structures. The only shape that ``Pick fiducials`` and ``Subtract pick regions`` work with.
    * - ``Square``
      - A single left click at its center.
      - ``Side length``, shared by all picks.
@@ -31,7 +31,7 @@ all picks share one size or each pick carries its own extent:
    * - ``Rectangle``
      - Dragging from one end of its center axis to the other, so it can take any orientation and length. A drag shorter than 5 screen pixels, e.g., a stray click, creates no pick.
      - ``Width`` (across the axis) shared by all picks; the length is per pick.
-     - Elongated structures - filaments, nanorulers, edges - and the only shape that can be projected onto its own axes, see ``Plot pick profile`` below.
+     - Elongated structures - filaments, nanorulers, edges. The only shape for :ref:`Plot pick profile <render-plot-pick-profile>` and the ``x_pick_rot`` / ``y_pick_rot`` columns (see :ref:`Table 1 <files-localization-columns>` of the file formats).
    * - ``Polygon``
      - One left click per vertex; click the first vertex again to close the outline. A right click removes the last vertex.
      - None; each polygon carries its own extent.
@@ -108,19 +108,50 @@ Picking
    to which pick each localization is assigned.
 7. (Optional) Statistics about each pick region can be saved by selecting
    ``File > Save pick properties``. The resulting HDF5 file is not a
-   localization file. Instead, it holds a data set called ``groups`` in which
-   the rows show statistical values for each pick region.
-8. (Optional) The picked positions and diameter itself can be saved by
+   localization file. Instead, it holds a dataset called ``groups`` in which
+   the rows show statistical values for each pick region. This can also be
+   inspected in :doc:`/filter`.
+8. (Optional) The picked positions can be saved by
    selecting ``File > Save pick regions``. Such saved pick information can
    also be loaded into ``Picasso: Render`` by selecting
-   ``File > Load pick regions``.
+   ``File > Load pick regions`` or by drag-and-dropping it into the Render
+   window.
 
-See :doc:`menu-file` for the file formats of these commands and
-:doc:`menu-tools` for the other pick utilities.
+See :doc:`menu-tools` for the other pick utilities.
 
-.. note::
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
 
-   ``Plot pick profile`` (and the ``x_pick_rot``/``y_pick_rot`` columns it
-   relies on) is available for rectangular picks only, since they are the only
-   shape with an unambiguous long axis. ``Pick fiducials`` and
-   ``Subtract pick regions`` are likewise restricted to circular picks.
+   Picks are lists of centers in camera pixels (for rectangles, pairs of
+   end points), and ``picked_locs`` returns one DataFrame per pick. Note
+   the size conventions: ``picked_locs`` and ``pick_similar`` take the
+   *radius* of a circular pick, ``lib.pick_areas`` and the pick-region
+   files its *diameter* (the width for rectangles).
+
+   .. code-block:: python
+
+      import pandas as pd
+      import yaml
+      from picasso import io, lib, postprocess
+
+      locs, info = io.load_locs("movie_locs.hdf5")
+      pixelsize = lib.get_from_metadata(info, "Pixelsize")
+
+      picks = [(120.3, 88.1), (131.0, 92.7)]             # centers, camera pixels
+      radius = 100 / pixelsize / 2                       # 100 nm diameter
+      picked = postprocess.picked_locs(locs, info, picks, "Circle", pick_size=radius)
+
+      # Pick similar
+      picks += postprocess.pick_similar(
+          locs, info, picks, "Circle", pick_size=radius, std_range=2.0
+      )
+
+      # Save picked localizations (one "group" per pick) and the pick regions
+      io.save_locs("movie_locs_picked.hdf5", pd.concat(picked, ignore_index=True), info)
+      regions = {"Diameter (nm)": 100.0, "Centers": [list(map(float, p)) for p in picks]}
+      with open("movie_locs_picks.yaml", "w") as f:
+          yaml.dump(regions, f)
+
+      # Load pick regions saved by Render (size in camera pixels)
+      picks, shape, diameter = io.load_picks("movie_locs_picks.yaml", pixelsize=pixelsize)

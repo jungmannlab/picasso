@@ -18,12 +18,6 @@ the respective arguments for that command.
    picasso -h           # the list of commands
    picasso command -h   # the arguments of one command
 
-.. tip::
-
-   That help text is generated from the code, so it is the authoritative and
-   always up-to-date list of what each command accepts; the sections below
-   describe behavior that does not fit into a one-line help string.
-
 If you wish to open a module (GUI), simply type ``picasso module_name``, for
 example:
 
@@ -47,11 +41,9 @@ folder or a file pattern.
 Finding out which arguments exist
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 ``picasso localize -h`` prints every argument with its short and long name,
-its type, its default value and a one-line description. That text is
-generated from the code itself, so it is always complete and up to date - use
-it as the reference for what can be set. Arguments that are not given keep
+its type, its default value and a one-line description. Arguments that are not given keep
 their defaults, so the shortest possible run is just
-``picasso localize foldername``.
+``picasso localize filename``.
 
 The arguments fall into a few groups:
 
@@ -90,11 +82,6 @@ Picasso will analyze the folder and process all ``*.ome.tif`` files in it. If
 the files have consecutive names (e.g., ``File.ome.tif``, ``File_1.ome.tif``,
 ``File_2.ome.tif``), they will be treated as one.
 
-If you want to analyze ``*.raw`` files, Picasso will check whether a ``*.raw``
-file has a corresponding ``*.yaml`` file. If none is found, you can enter the
-specifications for each raw file. It is possible to use the same
-specifications for all ``*.raw`` files in that run.
-
 Drift correction
 ~~~~~~~~~~~~~~~~
 Localize will automatically try to perform an RCC drift correction on the
@@ -105,33 +92,30 @@ will be created.
 
 Camera settings
 ~~~~~~~~~~~~~~~
-Make sure to set the camera settings correctly; otherwise photon counts are
-wrong plus the MLE might have problems.
+Set the camera parameters (``--baseline``, ``--sensitivity`` and ``--gain``) to match your camera (see :ref:`localize-camera-config`). They convert
+the camera counts to photons, so wrong values give wrong photon counts and
+localization precisions. They also bias the maximum likelihood fits
+(``-a mle``, the default, and the other ``mle`` methods), which assume
+Poisson-distributed photon counts.
 
 Pre-filters
 ~~~~~~~~~~~
 ``--temporal-median``
    Subtracts a rolling per-pixel median background before spots are
    identified, which suppresses uneven background and static structures. It
-   affects identification only. See Martens KJA, Turkowyd B, Endesfelder U,
-   `Raw data to results: a hands-on introduction and overview of computational analysis for single-molecule localization microscopy <https://doi.org/10.3389/fbinf.2021.817254>`_,
-   *Frontiers in Bioinformatics* 1, 817254 (2022).
+   affects identification only. See :ref:`localize-temporal-median-filter`.
 ``--gaussian-filter``
    Smooths each frame with a Gaussian of the given standard deviation before
-   spots are identified. Spot identification looks for a single local maximum
-   per spot, so a PSF that is not Gaussian-shaped may break into several
-   maxima and is detected several times; smoothing merges them into one.
-
-   It affects identification only - fitting always uses the raw movie - and
-   since smoothing lowers gradient magnitudes, the minimum net gradient needs
+   spots are identified. It affects identification only. The minimum net gradient needs
    re-tuning when it is changed. It can be combined with
-   ``--temporal-median``, which is applied first.
+   ``--temporal-median``, which is applied first. See
+   :ref:`localize-gaussian-filter`.
 
 B-spline wavelet identification
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 ``--identification-method wavelet`` (``-im wavelet``) identifies spots by the
-B-spline wavelet segmentation of Izeddin et al., *Optics Express* 20, 2081
-(2012), instead of by their net gradient; ``--gradient`` is then ignored.
+B-spline wavelet segmentation of `Izeddin et al., Optics Express, 2012 <https://doi.org/10.1364/OE.20.002081>`__, instead of by their net
+gradient; ``--gradient`` is then ignored. See :ref:`localize-wavelet`.
 
 ``--wavelet-threshold``
    The threshold in units of the noise standard deviation (default 0.5).
@@ -320,14 +304,6 @@ CSV structure).
      - Perform bootstrapping.
    * - ``-v``, ``--verbose``
      - Display progress bar for each row.
-
-average3
---------
-Start the 3D averaging module (GUI) (to be deprecated in 1.0).
-
-.. code-block:: bash
-
-   picasso average3
 
 .. _cmd-conversion:
 

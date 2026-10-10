@@ -1,13 +1,13 @@
 # Changelog
 
-Last change: 05-OCT-2026 CEST
+Last change: 10-OCT-2026 CEST
 
 ## 0.12.0
 
 **TODO**: Describe the general overview - fast render, etc.
 
 ### General
-- New [documentation](https://picassosr.readthedocs.io/en/latest).
+- New [documentation](https://picassosr.readthedocs.io/en/latest) that is user-friendly, intuitive and thoroughly explains every Picasso functionality. Quick start page was added with minimal introduction to Picasso. Python API can now be found by a simple browser search in the documentation.
 - New appearance of all Picasso windows: a light and a dark theme that follow the operating system, with a selectable accent color, font size and density (`File > Appearance...`); the platform's own style remains available as *Native*. See the [documentation](https://picassosr.readthedocs.io/en/latest/others.html#appearance).
 - Toolbars in Render, Localize, Filter and Average with the most used actions of the menus, see the [documentation](https://picassosr.readthedocs.io/en/latest/others.html#toolbars).
 - Icons added to menu actions and buttons.
@@ -39,6 +39,7 @@ Last change: 05-OCT-2026 CEST
 - Fixed NeNA (and FRC) overwriting group columns of localizations.
 - Fixed: DBSCAN, HDBSCAN and SMLM clusterer saved the cluster areas as `*_centers_areas.csv` instead of `*_areas.csv` when the cluster centers were saved, too.
 - Fixed: *Export FOV as .ims* ignored the image extents of the loaded metadata and used only the last channel's metadata.
+- Fixed: the `locs` column of saved pick properties held the number of binding events (the same as `n_events`) instead of the number of localizations in the pick (`picasso.postprocess.pick_kinetics`, `pick_properties`).
 
 ### Localize
 - New spot identification method: B-spline wavelet segmentation (Izeddin et al., *Opt. Express* 2012), see the [documentation](https://picassosr.readthedocs.io/en/latest/localize/identification.html#localize-wavelet).

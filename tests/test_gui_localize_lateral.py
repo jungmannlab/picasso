@@ -269,6 +269,30 @@ class TestLoadingACorrectionSeparately:
         assert dialog.affine_calibration_paths == []
         assert seen and "correct the coordinates twice" in seen[0]
 
+    def test_the_same_correction_picked_twice_loads_once(self, monkeypatch):
+        """Two files carrying the same transform (the file and a copy of
+        it) are applied once, with a warning, as on the command line."""
+        dialog = _dialog()
+        seen = []
+        _load(
+            dialog,
+            {
+                "chromatic.yaml": lib.append_lateral_transform(
+                    {}, _entry("chromatic", CHROMATIC)
+                ),
+                "chromatic_copy.yaml": lib.append_lateral_transform(
+                    {}, _entry("chromatic", CHROMATIC, **{"Bead pairs": 99})
+                ),
+            },
+            monkeypatch,
+            warnings_seen=seen,
+        )
+        assert lib.describe_lateral_transforms(dialog.lateral_transforms) == [
+            "chromatic, affine"
+        ]
+        assert dialog.affine_calibration_paths == ["chromatic.yaml"]
+        assert seen and "selected more than once" in seen[0]
+
     def test_without_a_3d_calibration_anything_loads(self, monkeypatch):
         dialog = _dialog()
         _load(

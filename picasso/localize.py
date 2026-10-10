@@ -528,6 +528,96 @@ def _as_ng_list(
     return ngs
 
 
+def _as_wavelet_list(
+    wavelet: wavelets.WaveletParameters | list | None,
+    n_rois: int,
+) -> list:
+    """Normalize ``wavelet`` into one set of wavelet settings per ROI.
+
+    The wavelet counterpart of :func:`_as_ng_list`: one
+    ``WaveletParameters`` applies to every ROI, a sequence gives each ROI
+    its own (split-FOV regions are separate channels, whose noise and
+    spots need not look alike). A one-element sequence is treated as a
+    single setting.
+
+    Parameters
+    ----------
+    wavelet : wavelet.WaveletParameters, sequence of them or None
+        Wavelet settings, shared or one per ROI. None (the net gradient
+        identification) gives None for every ROI.
+    n_rois : int
+        Number of ROIs the settings have to cover.
+
+    Returns
+    -------
+    list of wavelet.WaveletParameters or None
+        ``n_rois`` settings.
+
+    Raises
+    ------
+    ValueError
+        If a sequence is given whose length is neither 1 nor ``n_rois``.
+    """
+    if wavelet is None or isinstance(wavelet, wavelets.WaveletParameters):
+        return [wavelet] * n_rois
+    settings = list(wavelet)
+    if len(settings) == 1:
+        return settings * n_rois
+    if len(settings) != n_rois:
+        raise ValueError(
+            f"wavelet has {len(settings)} settings but there are {n_rois} "
+            "ROI(s); give one per ROI or a single shared one."
+        )
+    return settings
+
+
+def wavelet_for(
+    wavelet: wavelets.WaveletParameters | list | None, index: int
+) -> wavelets.WaveletParameters | None:
+    """The wavelet settings of one ROI (or channel), from shared settings
+    or a per-ROI list; None stays None (net gradient identification).
+
+    Parameters
+    ----------
+    wavelet : wavelet.WaveletParameters, sequence of them or None
+        Wavelet settings, shared or one per ROI.
+    index : int
+        Index of the ROI.
+
+    Returns
+    -------
+    wavelet.WaveletParameters or None
+        The settings of ROI ``index``.
+    """
+    if wavelet is None or isinstance(wavelet, wavelets.WaveletParameters):
+        return wavelet
+    settings = list(wavelet)
+    return settings[0] if len(settings) == 1 else settings[index]
+
+
+def wavelet_info(
+    wavelet: wavelets.WaveletParameters | list,
+) -> dict:
+    """The wavelet settings under the keys of the identification metadata;
+    per-ROI settings give one list per key, in ROI order (see
+    :func:`wavelet_from_parameters`, which reads them back).
+
+    Parameters
+    ----------
+    wavelet : wavelet.WaveletParameters or sequence of them
+        Wavelet settings, shared or one per ROI.
+
+    Returns
+    -------
+    info : dict
+        The settings, or lists of the per-ROI settings.
+    """
+    if isinstance(wavelet, wavelets.WaveletParameters):
+        return wavelet.to_info()
+    infos = [_.to_info() for _ in wavelet]
+    return {key: [info[key] for info in infos] for key in infos[0]}
+
+
 def add_roi_id(
     locs: pd.DataFrame,
     roi: tuple[tuple[int, int], tuple[int, int]] | list | None = None,
@@ -1734,11 +1824,12 @@ def identify_in_frame(
         several (disjoint) regions. If None, the entire frame is used.
         Note that the origin of the image is in the top-left corner.
         Default is None.
-    wavelet : wavelet.WaveletParameters, optional
+    wavelet : wavelet.WaveletParameters or sequence of them, optional
         Settings of the wavelet identification. Each ROI, grown by
         ``int(box / 2) + 1 + wavelet.WAVELET_RADIUS`` pixels, is segmented
-        on its own, with the noise estimated inside it. Default is None,
-        i.e. the net gradient identification.
+        on its own, with the noise estimated inside it. A sequence gives
+        each ROI in ``roi`` its own settings, like ``minimum_ng``. Default
+        is None, i.e. the net gradient identification.
 
     Returns
     -------
@@ -1756,9 +1847,13 @@ def identify_in_frame(
     if rois is None:
         image = np.float32(frame)  # otherwise numba goes crazy
         return _identify_in_crop(
-            image, _as_ng_list(minimum_ng, 1)[0], box, wavelet
+            image,
+            _as_ng_list(minimum_ng, 1)[0],
+            box,
+            _as_wavelet_list(wavelet, 1)[0],
         )
     minimum_ngs = _as_ng_list(minimum_ng, len(rois))
+    wavelet_settings = _as_wavelet_list(wavelet, len(rois))
     height, width = frame.shape
     # pad each ROI to identify at the border
     pad = _identification_crop_pad(box, wavelet)
@@ -1768,7 +1863,7 @@ def identify_in_frame(
         py1, px1 = min(y1 + pad, height), min(x1 + pad, width)
         image = np.float32(frame[py0:py1, px0:px1])  # numba needs float32!
         y, x, net_gradient = _identify_in_crop(
-            image, minimum_ngs[roi_index], box, wavelet
+            image, minimum_ngs[roi_index], box, wavelet_settings[roi_index]
         )
         y += py0  # offset back to global frame coordinates
         x += px0
@@ -1855,9 +1950,10 @@ def identify_by_frame_number(
         If provided, this lock will be used to ensure thread safety when
         accessing the movie data. This is useful in a multithreaded
         environment. Default is None.
-    wavelet : wavelet.WaveletParameters, optional
-        Settings of the wavelet identification. Default is None, i.e.
-        the net gradient identification.
+    wavelet : wavelet.WaveletParameters or sequence of them, optional
+        Settings of the wavelet identification, shared or one per ROI
+        (see :func:`identify_in_frame`). Default is None, i.e. the net
+        gradient identification.
 
     Returns
     -------
@@ -2011,9 +2107,10 @@ def identify_async(
         specified, the other is to be set to None, for example,
         ``(5, None)`` sets minimum frame to 5 without maximum frame.
         Default is None.
-    wavelet : wavelet.WaveletParameters, optional
-        Settings of the wavelet identification. Default is None, i.e.
-        the net gradient identification.
+    wavelet : wavelet.WaveletParameters or sequence of them, optional
+        Settings of the wavelet identification, shared or one per ROI
+        (see :func:`identify_in_frame`). Default is None, i.e. the net
+        gradient identification.
 
     Returns
     -------
@@ -2233,9 +2330,10 @@ def identify(
         on. Note that ``minimum_ng`` has to be re-tuned when this is
         changed, since smoothing lowers gradient magnitudes. Default is
         None (no filtering).
-    wavelet : wavelet.WaveletParameters, optional
-        Settings of the wavelet identification. Default is None, i.e.
-        the net gradient identification.
+    wavelet : wavelet.WaveletParameters or sequence of them, optional
+        Settings of the wavelet identification, shared or one per ROI
+        (see :func:`identify_in_frame`). Default is None, i.e. the net
+        gradient identification.
     progress_callback : callable, "console" or None, optional
         A callback function to report the progress of the identification
         process. If "console", progress will be printed to the console.
@@ -2338,7 +2436,7 @@ def _identification_method_info(
         }
     return {
         "Identification Method": IDENTIFY_METHOD_WAVELET,
-        **wavelet.to_info(),
+        **wavelet_info(wavelet),
     }
 
 
@@ -2360,14 +2458,17 @@ def wavelet_from_parameters(
 
     Returns
     -------
-    wavelet.WaveletParameters or None
+    wavelet.WaveletParameters, list of them or None
         The wavelet settings, or None for the net gradient
-        identification.
+        identification. Split-FOV parameters store a list per setting,
+        one value per region, and give one ``WaveletParameters`` per
+        region (see :func:`wavelet_info`).
 
     Raises
     ------
     ValueError
-        If the identification method is unknown.
+        If the identification method is unknown, or the per-region
+        settings differ in length.
     """
     method = parameters.get(
         "Identification Method", IDENTIFY_METHOD_NET_GRADIENT
@@ -2375,7 +2476,33 @@ def wavelet_from_parameters(
     if method == IDENTIFY_METHOD_NET_GRADIENT:
         return None
     if method == IDENTIFY_METHOD_WAVELET:
-        return wavelets.WaveletParameters.from_info(parameters)
+        keys = list(wavelets.WaveletParameters().to_info())
+        stored = {key: parameters[key] for key in keys if key in parameters}
+        lengths = {
+            len(value)
+            for value in stored.values()
+            if isinstance(value, (list, tuple))
+        }
+        if not lengths:
+            return wavelets.WaveletParameters.from_info(stored)
+        # split-FOV: one setting per region (a scalar applies to all)
+        if len(lengths) > 1:
+            raise ValueError(
+                "The per-region wavelet settings differ in length: "
+                f"{stored}."
+            )
+        n_regions = lengths.pop()
+        return [
+            wavelets.WaveletParameters.from_info(
+                {
+                    key: (
+                        value[i] if isinstance(value, (list, tuple)) else value
+                    )
+                    for key, value in stored.items()
+                }
+            )
+            for i in range(n_regions)
+        ]
     raise ValueError(
         f"Unknown identification method {method!r}; use one of "
         f"{', '.join(IDENTIFY_METHODS)}."

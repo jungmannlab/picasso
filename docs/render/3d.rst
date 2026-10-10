@@ -1,36 +1,36 @@
 .. _render-3d:
 
-3D Rotation Window
-==================
+3D View
+=======
 
-The 3D rotation window allows the user to render 3D localization data. Open it
+The 3D view allows the user to render 3D localization data. Open it
 with ``View > 3D view`` (:kbd:`Ctrl+Shift+R`):
 
-- With a single pick region selected (``Tools > Pick``) it shows that pick, as
-  before.
+- With a single pick region selected (``Tools > Pick``) it shows that pick.
 - Without a pick (or with several) it shows the current field of view of the
   main window, rotated about its center - so any region can be looked at in 3D
   by zooming to it and pressing the shortcut.
 - Pressed again with nothing changed, it only brings the window to the front,
   keeping the rotation; a new pick or a new field of view reloads it.
 
-Some of the display settings (colors, blur method, etc.) are automatically
-uploaded to the rotation window. In the field-of-view mode the arrow keys move
-the shown region (there is no pick to move), and *Save rotated localizations*
-records the field of view instead of a pick.
+Some of the display settings (blur method, colormap, etc.) are taken
+over from the main window, see :ref:`render-3d-display-settings`.
 
-The user may perform multiple actions in the rotation window, including:
+The arrow keys move the shown region. In the pick mode, they move the pick
+itself, in the main window too.
+
+The user may perform multiple actions in the 3D view, including:
 saving rotated localizations, building animations (.mp4 format), rotating by a
-specified angle, etc.
+specified angle, see below.
 
-Rendering in the rotation window runs in the background, as in the main
+Rendering in the 3D view runs in the background, as in the main
 window:
 
 - Rotating and panning never block the interface, and a burst of mouse
   movements renders only the newest orientation.
-- Large picks are previewed with a subset of the localizations while you drag
-  (``interaction_subsample``, see :ref:`render-cpu-usage`, counted over the
-  localizations in view) and sharpened as soon as the drag pauses.
+- Fields of view with many localizations are previewed as a subset while dragging
+  (``interaction_subsample``, see :ref:`render-cpu-usage`) and sharpened as
+  soon as the drag pauses.
 - The renders use the GPU when it is enabled (see :ref:`render-gpu-rendering`).
 
 When rotating by a specified angle, the dialog offers a ``Rotate around``
@@ -48,8 +48,10 @@ Navigating the 3D window
 The zoom and pan controls match the main window's, see
 :ref:`render-navigation`.
 
-- **Rotate**: drag with the left mouse button (trackball). Hold :kbd:`S` while
-  dragging to rotate in steps of 15 degrees.
+- **Rotate**: with the Rotate tool (``Tools > Rotate``, :kbd:`Ctrl+R`, active
+  when the window opens), drag with the left mouse button (trackball). Hold
+  :kbd:`S` while dragging to rotate in steps of 15 degrees. The other tool,
+  ``Tools > Measure`` (:kbd:`Ctrl+M`), measures distances instead.
 - **Zoom**:
 
   - :kbd:`Ctrl` (:kbd:`Cmd` on macOS) + the mouse wheel (or trackpad scroll; a
@@ -60,19 +62,26 @@ The zoom and pan controls match the main window's, see
   - :kbd:`Ctrl` +/- zoom about the center.
 
 - **Pan**: drag with the right or the middle mouse button, or with :kbd:`Alt`
-  (:kbd:`Option` on macOS) + the left button; the arrow keys move the view
-  too. With the Measure tool the right button keeps freezing and deleting
-  measurements (as in the main window), so pan with the middle button or
-  :kbd:`Alt` + the left button there.
+  (:kbd:`Option` on macOS) + the left button. This moves the view over the
+  loaded localizations. With the Measure tool pan with the middle
+  button or :kbd:`Alt` + the left button there.
+- **Arrow keys**: unlike panning, they move the shown region itself - the pick
+  (also in the main window) or the field of view - and load the localizations
+  of the moved region.
 - **Reset**: triple click fits the loaded region into the window (:kbd:`Home`
   does the same); :kbd:`Shift` + triple click also resets the rotation.
   :kbd:`1`, :kbd:`2` and :kbd:`3` select the XY, XZ and YZ projections.
 
-Rotations turn the data about the point at the center of the view, at the
-depth of the localizations shown there, so zooming in and panning to a
-structure lets you rotate around it. Further rotation controls:
+Rotations turn the data about a point at the center of the view. Its depth
+follows the data: after every pan or zoom, it is set to the median depth of
+the localizations visible in the view, so zooming in and panning to a
+structure lets you rotate around it. Further rotation controls, all with the
+Rotate tool:
 
-- Rotation around the z-axis is available by pressing :kbd:`Ctrl`/:kbd:`Cmd`.
+- Holding :kbd:`Ctrl`/:kbd:`Cmd` makes a vertical drag spin the data around
+  the screen z-axis (in the screen plane) instead of tilting it; a horizontal
+  drag still turns it around the screen y-axis. To rotate around z only, lock
+  the z-axis (see below).
 - The rotation axis can be frozen by pressing :kbd:`X`/:kbd:`Y`/:kbd:`Z` to
   freeze around the corresponding axis. By default the frozen rotation is
   around the data's own axes (Localizations frame); holding
@@ -83,6 +92,97 @@ structure lets you rotate around it. Further rotation controls:
   you want to rotate it in the World frame, or to spin around the screen
   z-axis when no axis is frozen.
 
+.. _render-3d-menus:
+
+Menus
+-----
+
+The 3D view has its own ``File``, ``View`` and ``Tools`` menus.
+
+.. _render-3d-file-menu:
+
+File
+~~~~
+
+``Save rotated localizations...`` (:kbd:`Ctrl+S`)
+   Saves the localizations shown, of one channel or all of them, together
+   with the rotation (angles and quaternion) and the pick or field of view in
+   the metadata. Open them rotated again with ``File > Open rotated
+   localizations`` in the main window, see :ref:`render-open-rotated`.
+
+``Export current view...`` (:kbd:`Ctrl+E`)
+   Saves the rendered image as ``.png`` or ``.tif``. The file name carries the
+   rotation angles, and a ``.yaml`` file next to it records the rotation, the
+   field of view, the display pixel size and the contrast. Without a scale bar
+   shown, a second image with a scale bar is saved as ``_scalebar.png``.
+
+``Build an animation...`` (:kbd:`Ctrl+Shift+E`)
+   See :ref:`render-animation` below.
+
+``Help``
+   Opens this page.
+
+.. _render-3d-view-menu:
+
+View
+~~~~
+
+``Display settings...`` (:kbd:`Ctrl+D`)
+   Opens the display settings of the 3D view, see
+   :ref:`render-3d-display-settings` below.
+
+``Show/hide legend`` (:kbd:`Ctrl+L`), ``Show/hide rotation`` (:kbd:`Ctrl+P`), ``Show/hide rotation angles``
+   Toggle the overlays: the channel legend of multichannel data, the axes icon
+   that shows the current orientation, and the rotation angles in degrees.
+
+``Rotate by angle...`` (:kbd:`Ctrl+Shift+R`)
+   Rotates by angles typed in, around the data's own axes or the fixed screen
+   axes (see ``Rotate around`` above).
+
+``Reset rotation`` (:kbd:`Ctrl+Shift+W`)
+   Returns to the unrotated view.
+
+``Fit image to window`` (:kbd:`Ctrl+W`)
+   Fits the loaded region into the window, like :kbd:`Home`.
+
+``XY projection``, ``XZ projection``, ``YZ projection``
+   Show the data along one of the three axes, like :kbd:`1`, :kbd:`2` and
+   :kbd:`3`.
+
+.. _render-3d-tools-menu:
+
+Tools
+~~~~~
+
+``Rotate`` (:kbd:`Ctrl+R`)
+   Left dragging rotates the data, see :ref:`render-3d-navigation`. Active when
+   the window opens.
+
+``Measure`` (:kbd:`Ctrl+M`)
+   Measures distances as in the main window (see :ref:`render-measure`): a left
+   click adds a point, a right click finishes the current measurement or, clicked
+   again, deletes the last one. The distances are measured in the screen plane,
+   i.e., in the current projection of the data.
+
+.. _render-3d-display-settings:
+
+Display settings
+~~~~~~~~~~~~~~~~
+
+The display settings of the 3D view are separate from the main window's, so
+the 3D view can be tuned without changing the main image. When the 3D view is
+opened or reloaded, the blur method, the colormap and the settings of the
+adaptive histogram and of the jittered triangulation are taken over from the
+main window; everything else is set here:
+
+- the display pixel size (with ``dynamic``) and the contrast (``Min. density``,
+  ``Max. density``) and colormap;
+- the blur method, with ``Min. Blur (nm)``, the adaptive histogram's
+  ``Leaf capacity`` and the jittered triangulation's ``Passes``, ``Jitter``
+  and ``Max. localizations`` (see :ref:`render-display-settings`);
+- the scale bar: its length, ``Automatic length`` and ``Print scale bar
+  length``.
+
 .. _render-animation:
 
 Build an animation
@@ -92,20 +192,22 @@ Build an animation
 
 Shortcut: :kbd:`Ctrl+Shift+E`
 
-Build an animation with ``File > Build an animation...`` in the rotation
-window:
+Build an animation with ``File > Build an animation...`` in the 3D view:
 
 1. Rotate, zoom and pan to each view the video should show and click
-   ``Add this position`` (``Stay in the position`` adds a pause).
-2. Set the durations of the transitions.
+   ``Add this position`` (``Stay in the position`` adds a pause,
+   ``Remove last position`` removes the last one). Each listed position has a
+   ``Show position`` button that returns the view to it.
+2. Set the durations of the transitions and the frame rate (``FPS``, 30 by
+   default).
 3. Click ``Build animation``.
 
 The frames are rendered in the background, at the resolution set in the
-animation dialog (``Resolution (px)``, by default the window's size, e.g. 1920
-x 1080 for a full-HD video whatever the window's size), so the windows stay
-usable while the video is built. A progress dialog shows the frames done and
-lets you cancel, in which case no partial video is left behind. The frames use
-the GPU when it is enabled.
+animation dialog (``Resolution (px)``, by default the window's size), so the
+windows stay usable while the video is built.
+
+While the video is built, a progress dialog shows how many frames have been
+rendered. ``Cancel`` stops the build and deletes the unfinished video file.
 
 ``Transition`` sets how the motion is timed between the positions:
 
@@ -120,5 +222,41 @@ the GPU when it is enabled.
    Moves at a constant speed between every two positions, with sharp turns at
    the positions.
 
-The durations are kept in each case, so the rotation speed only sets the
-average speed.
+``Rotation speed (deg/s)`` is only used to suggest a duration when a position
+is added: the angle turned since the previous position divided by the speed.
+The suggested durations can be edited, and every transition style takes
+exactly the durations listed; the style only changes how the speed varies
+within each of them, not how long they take.
+
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
+
+   Each position is a ``scipy.spatial.transform.Rotation`` and a viewport
+   (``((y_min, x_min), (y_max, x_max))`` in camera pixels). ``transition``
+   is ``"ease"`` (*Stop at each position*), ``"smooth"`` or ``"linear"``
+   (*Constant speed*).
+
+   .. code-block:: python
+
+      from scipy.spatial.transform import Rotation
+      from picasso import io, render
+
+      locs, info = io.load_locs("movie_locs_3d.hdf5")
+      viewport = ((100, 100), (164, 164))
+      positions = [
+          (Rotation.identity(), viewport),
+          (Rotation.from_euler("xyz", [0, 90, 0], degrees=True), viewport),
+          (Rotation.from_euler("xyz", [60, 90, 0], degrees=True), viewport),
+      ]
+      render.build_animation(
+          "movie.mp4", locs, info,
+          positions=positions,
+          durations=[3.0, 3.0],          # seconds, one per transition
+          disp_px_size=5,                # nm
+          image_size=(1280, 1280),
+          transition="ease",
+          blur_method="gaussian",
+          fps=30,
+          progress_callback="console",
+      )

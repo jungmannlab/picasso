@@ -1,9 +1,9 @@
 Installation
 ============
 
-Picasso runs on Windows, macOS and Linux. Pick the route that fits you:
+Picasso runs on Windows, macOS and Linux. Several installation modes are available:
 
-- **One-click installer** if you only want to use the Picasso windows.
+- **One-click installer** if you only want to use the Picasso GUI.
 - **PyPI** if you also want to use Picasso in your own Python scripts.
 - **Developer installation** if you want to change Picasso's code.
 
@@ -14,8 +14,7 @@ Picasso runs on Windows, macOS and Linux. Pick the route that fits you:
 
       Download the latest installer for Windows or macOS from the `Picasso
       release page <https://github.com/jungmannlab/picasso/releases/>`__ and
-      run it. The macOS installer is experimental, and feedback is welcome.
-      The release page also hosts the Nature Protocols legacy version
+      run it. The release page also hosts the Nature Protocols legacy version
       (v0.1.0).
 
       .. rubric:: Windows: default or CUDA build?
@@ -30,8 +29,8 @@ Picasso runs on Windows, macOS and Linux. Pick the route that fits you:
 
       Both builds render on the graphics card in Render (via ``wgpu``, any
       vendor). Choose the CUDA build only if you have a compatible NVIDIA GPU
-      and want the accelerated fitting tools. On machines without one,
-      CUDA-only options are hidden.
+      and want the accelerated tools. On machines without one, CUDA-only
+      options are hidden.
 
    .. tab-item:: PyPI
       :sync: pypi
@@ -40,8 +39,8 @@ Picasso runs on Windows, macOS and Linux. Pick the route that fits you:
       ``picassosr``. It provides the GUI and access to Picasso's routines in
       your own Python programs.
 
-      1. Create and activate a new conda environment (other Python versions
-         work as well):
+      1. Create and activate a new conda environment. Picasso supports Python
+         3.11 to 3.14:
 
          .. code-block:: bash
 
@@ -69,9 +68,13 @@ Picasso runs on Windows, macOS and Linux. Pick the route that fits you:
            - Reading Zeiss ``.czi`` files.
          * - ``pip install picassosr[lif]``
            - Reading Leica ``.lif`` files.
+         * - ``pip install picassosr[wgpu]``
+           - :ref:`GPU rendering <render-gpu-rendering>` in Render (``wgpu``:
+             Metal on macOS, Direct3D 12 on Windows, Vulkan on Linux; any
+             recent graphics card).
          * - ``pip install picassosr[gpu]``
-           - GPU-accelerated (``numba.cuda``) code for CUDA toolkit 12.x.
-             Needs an NVIDIA (CUDA-capable) GPU.
+           - GPU rendering plus GPU-accelerated (``numba.cuda``) code for CUDA
+             toolkit 12.x. Needs an NVIDIA (CUDA-capable) GPU.
          * - ``pip install picassosr[cuda11]`` / ``[cuda13]``
            - The same for CUDA toolkit 11.x or 13.x.
 
@@ -117,27 +120,41 @@ Picasso runs on Windows, macOS and Linux. Pick the route that fits you:
             pip install -e ".[dev]"
 
          Other extras, such as ``".[gpu]"``, can be added the same way; the
-         full list is in ``pyproject.toml``.
+         full list is in `pyproject.toml
+         <https://github.com/jungmannlab/picasso/blob/master/pyproject.toml>`__.
 
       4. Start any module from the terminal, for example ``picasso render``,
          or import Picasso in your scripts.
 
+      .. tip::
+
+         On Windows, you can create shortcuts for the modules by running
+         this from the repository with the environment activated:
+
+         .. code-block:: bash
+
+            powershell -ExecutionPolicy Bypass -File picasso\gui\createShortcuts.ps1
+
+         The shortcuts appear in the repository folder; drag them to the
+         Desktop, Start menu or taskbar.
+
       See :doc:`/development` for how to contribute your changes.
 
-Desktop shortcuts on Windows
-----------------------------
+.. _error-log:
 
-The one-click installer creates shortcuts for you. For a PyPI or developer
-installation, run the PowerShell script ``createShortcuts.ps1`` in the
-``picasso/gui`` directory, either by right-clicking it and choosing *Run with
-PowerShell*, or with:
+Reporting problems
+------------------
 
-.. code-block:: bash
+When an error occurs, Picasso shows it in a message box (click
+*Show Details...* for the full traceback) and appends the traceback to the
+log file ``~/.picasso/logs/picasso.log`` (i.e.,
+``C:\Users\<you>\.picasso\logs\picasso.log`` on Windows), together with
+the tracebacks of failing background threads. The file rotates to
+``picasso.log.1`` once it exceeds 5 MB. The one-click installers have no
+console, so everything Picasso prints goes to this file as well.
 
-   powershell ./createShortcuts.ps1
-
-Use the generated shortcuts in the top-level directory to start the modules.
-You can drag them to the Desktop, Start menu or taskbar.
+Please report problems on `GitHub
+<https://github.com/jungmannlab/picasso/issues>`__ and attach the log file.
 
 Next steps
 ----------

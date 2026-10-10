@@ -3,179 +3,16 @@
 Tools Menu
 ==========
 
-.. _render-zoom:
+The first four entries select the active tool, and ``Tools settings...``
+(:kbd:`Ctrl+T`) sets how the tools behave and look; see :doc:`tools`:
 
-Zoom
-----
+- ``Zoom`` (:kbd:`Ctrl+Z`), see :ref:`render-zoom`;
+- ``Pick`` (:kbd:`Ctrl+P`), see :ref:`render-pick`;
+- ``Measure`` (:kbd:`Ctrl+M`), see :ref:`render-measure`;
+- ``Move`` (:kbd:`Ctrl+G`), see :ref:`render-move`;
+- ``Tools settings...`` (:kbd:`Ctrl+T`), see :ref:`render-tools-settings`.
 
-.. rst-class:: shortcut
-
-Shortcut: :kbd:`Ctrl+Z`
-
-Selects the zoom tool. Dragging a rectangle with the left mouse button zooms
-into it; dragging with the right mouse button pans. Panning is also available
-in every tool by dragging with the left mouse button while holding
-:kbd:`Ctrl` (:kbd:`Cmd` on macOS). See :ref:`render-navigation` for all
-controls.
-
-.. _render-pick:
-
-Pick
-----
-
-.. rst-class:: shortcut
-
-Shortcut: :kbd:`Ctrl+P`
-
-Selects the pick tool. The mouse can now be used for picking localizations.
-The user can set the pick shape in the ``Tools settings`` (:kbd:`Ctrl+T`)
-dialog; see :ref:`render-pick-shapes` for all shapes.
-
-- The default shape is Circle with the diameter to be set.
-- For rectangles, the user draws the length, while the width is controlled via
-  a parameter for all drawn rectangles, similar to the diameter for circular
-  picks.
-- For a polygonal pick, the user clicks with the left button to draw the
-  desired polygon. The right button deletes the last selected vertex. The
-  polygon can be closed by clicking with the left button on the starting
-  vertex.
-
-.. _render-measure:
-
-Measure
--------
-
-.. rst-class:: shortcut
-
-Shortcut: :kbd:`Ctrl+M`
-
-Selects the measure tool, which is used to measure distances on the rendered
-image.
-
-While the tool is active, the cursor is shown as a crosshair that follows the
-mouse. **Left click** drops a measurement point: each new point is connected
-to the previous one by a line, and the running total distance (in nm) is
-displayed live next to the line as you move the mouse, before the next point
-is even placed. Chaining several left clicks measures a multi-segment path.
-
-**Right click** has two functions:
-
-* The **first** right click *freezes* the current measurement set: the
-  crosshair stops following the mouse and the measured path stays drawn on the
-  image. A new, independent set of measurements can then be started simply by
-  left-clicking again.
-* While in this frozen state, a **further** right click *deletes* the most
-  recently finalized set. Repeating it removes the previous sets one by one.
-
-Distances and lines are only drawn within a set, never across sets, so
-multiple independent measurements can be displayed at the same time.
-
-.. _render-move:
-
-Move
-----
-
-.. rst-class:: shortcut
-
-Shortcut: :kbd:`Ctrl+G`
-
-Selects the move tool, which changes the x and y coordinates of localizations
-by dragging them with the left mouse button, e.g., to register channels by
-eye.
-
-- The channels that are dragged together are selected in the
-  ``Tools settings`` (:kbd:`Ctrl+T`) dialog: *Select...* opens a list of the
-  loaded channels with a checkbox each. By default, the first channel is
-  dragged.
-- *Undo last move* in the ``Tools settings`` dialog reverses the moves one by
-  one.
-
-Normally, localizations outside the image (x or y at or beyond ``Width`` or
-``Height`` in the metadata, or negative) would be removed when saving.
-Instead, the image (the canvas) is fitted to the localizations after every
-move:
-
-* Dragging beyond the right or bottom edge increases ``Width`` or ``Height``.
-* Dragging beyond the left or top edge translates all channels, picks and
-  measured points by the same whole number of camera pixels, so that no
-  coordinate is negative and the channels stay registered. ``Width`` and
-  ``Height`` grow by the same amount, so the camera field of view stays inside
-  the canvas. The translation is saved in the metadata as
-  ``Canvas offset x (cam. px)`` and ``Canvas offset y (cam. px)``; subtract it
-  to return to the camera coordinates, e.g., for picks saved before the
-  translation.
-* The canvas shrinks again when the localizations are moved back, but it is
-  never smaller than the camera image, whose size is saved as
-  ``Camera Width`` and ``Camera Height``. For example, dragging a channel
-  beyond the left edge and back to where it was restores the original canvas
-  and coordinates.
-
-A channel loaded later, or saved with a different canvas offset, is brought
-into the same frame as the loaded channels.
-
-The shift of each channel done with the move tool is saved in its metadata as
-``Manual shift x (cam. px)`` and ``Manual shift y (cam. px)``.
-
-.. _render-tools-settings:
-
-Tools settings
---------------
-
-.. rst-class:: shortcut
-
-Shortcut: :kbd:`Ctrl+T`
-
-Define the settings of the tools:
-
-- The **Pick** section sets the pick shape and its size (``Diameter``,
-  ``Width``, ``Side length`` or ``Stroke width``, see
-  :ref:`render-pick-shapes`), the range of *Pick similar*, whether the picks
-  are annotated with their indices and whether circular picks are displayed as
-  points.
-- The **Move** section selects the channels dragged with the move tool and
-  undoes the last move, see :ref:`render-move`.
-
-.. _render-tool-appearance:
-
-Appearance
-~~~~~~~~~~
-
-How the tools are drawn is set in the **Appearance** section at the bottom,
-hidden by default; click its title to show it. It has one tab per tool:
-**Pick**, **Measure** and **Move** (the label showing the shift while
-dragging). The settings apply to the main window, to exported images and, for
-the Measure tool, to the 3D window. If the dialog does not fit on the screen,
-it scrolls.
-
-*Color*
-   *Auto* is yellow on a black and red on a white background. You can choose a
-   preset color, or *Custom...* to pick any color.
-*Line*
-   Solid, dashed, dotted or dash-dot lines. The crosses of the Measure tool
-   are always solid.
-*Width*
-   Line width in screen pixels. Lines wider than one pixel are smoothed
-   (antialiased).
-*Opacity*
-   Opacity of the lines and labels.
-*Fill* (picks only)
-   Opacity of the fill of closed picks, in the line color; 0% draws outlines
-   only. *Default* fills only brush picks. A polygon is filled once it is
-   closed.
-*Label size*
-   Size of the pick indices (see *Annotate picks*), the measured distances and
-   the shift label, in screen pixels.
-*While drawing* (picks only)
-   Color of a rectangle, box or brush stroke that is still being dragged.
-*Center line* (picks only)
-   Draws the line along the center of rectangular picks, from the start to the
-   end point. On by default.
-*Marker size* (Measure only)
-   Size of the crosses marking the measured points.
-
-*Reset* restores the default appearance. The appearance is saved when Render
-is closed and restored at the next start (``ToolStyles`` in the ``Render``
-section of the :ref:`user-settings-file`).
+The remaining entries work on the picks and the localizations:
 
 .. _render-pick-similar:
 
@@ -187,10 +24,28 @@ Pick similar
 Shortcut: :kbd:`Ctrl+Shift+P`
 
 Automatically identifies picks that are similar to the current picks.
-Available for circular, square, rectangular and box picks. For rectangular
-picks, the new picks take the median length of the current picks and are
-oriented along the localizations they contain. See
+Available for circular, square, rectangular and box picks. New circular and
+square picks take the current size. For rectangular picks, the new picks take
+the median length of the current picks and are oriented along the
+localizations they contain. New box picks take the median width and height of
+the current picks; the boxes you drew yourself are kept as drawn. See
 :ref:`render-picking-steps` for the similarity measures.
+
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
+
+   ``pick_size`` is the radius for circles; ``std_range`` is ``Pick similar
+   ± range``.
+
+   .. code-block:: python
+
+      from picasso import postprocess
+
+      new_picks = postprocess.pick_similar(
+          locs, info, picks, "Circle", pick_size=radius, std_range=2.0
+      )
+
 
 .. _render-remove-locs-in-picks:
 
@@ -199,6 +54,19 @@ Remove localizations in picks
 
 Remove localizations found in picked region(s) of interest. Can be applied to
 separate or all channels simultaneously.
+
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
+
+   The circle size is the diameter here.
+
+   .. code-block:: python
+
+      locs = postprocess.remove_locs_in_picks(
+          locs, info, picks=picks, pick_shape="Circle", pick_size=2 * radius
+      )
+
 
 .. _render-move-to-pick:
 
@@ -212,10 +80,47 @@ Changes FoV to display a pick region specified by the user.
 Pick fiducials
 --------------
 
-Automatically picks fiducials. To do so, the whole FOV image is rendered at
-one-pixel-blur. Then, such image pixel intensities are histogrammed and the
-99th is used as a threshold for selecting image maxima using Localize's
-identification.
+Automatically picks fiducial markers, e.g., for
+:ref:`marker-based drift correction <render-marker-drift>`. Fiducials are
+bright spots that are visible in nearly every frame, so they appear as the
+densest spots of the image. Requires no existing picks.
+
+1. The whole image is rendered with one pixel per camera pixel and
+   ``One-Pixel-Blur``.
+2. Spots are detected as in Localize's net gradient identification
+   (see :ref:`localize-identification`), with a box of about 900 nm and the
+   99th percentile of the pixel values as the minimum net gradient.
+3. Only spots with more localizations than 80% of the number of frames are
+   kept, and each gets a circular pick with a diameter of the box size.
+
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
+
+   ``find_fiducials`` returns the centers and the box size (the pick
+   diameter), both in camera pixels. ``undrift_from_fiducials`` picks and
+   undrifts in one go.
+
+   .. code-block:: python
+
+      from picasso import imageprocess, postprocess
+
+      picks, box = imageprocess.find_fiducials(locs, info)
+      locs, info, drift = postprocess.undrift_from_fiducials(locs, info)
+
+
+.. _render-plot-pick-profile:
+
+Plot pick profile
+-----------------
+
+Plots the distribution of the localizations along a single rectangular pick, as a histogram of their
+positions along the pick's axis in nm. Requires exactly one rectangular pick
+(see :ref:`render-pick-shapes`). With several channels, they can be plotted
+together, each in its own color.
+
+- ``Bin width`` in the toolbar sets the histogram bin width.
+- ``Export (*.csv)`` saves the positions (nm), one column per channel.
 
 .. _render-show-trace:
 
@@ -226,15 +131,42 @@ Show trace
 
 Shortcut: :kbd:`Ctrl+R`
 
-Shows the time trace of the currently selected pick(s).
+Plots the localizations of the picks against time, e.g., to check binding
+kinetics or to tell repeated binding from a single sticking event. With
+several picks, their localizations are combined into one trace. The window
+has four panels, all over the frames of the movie:
+
+- ``X-pos vs frame`` and ``Y-pos vs frame``: the x and y coordinates (camera
+  pixels) of each localization;
+- ``Localizations``: 1 in frames with a localization, 0 otherwise;
+- ``Photons``: the photon count in each frame.
+
+``Export (*.csv)`` in the toolbar saves the trace as ``<name>.trace.csv`` with
+three columns: frame, on/off (1 or 0) and photons (as integers).
+
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
+
+   .. code-block:: python
+
+      import pandas as pd
+      from picasso import lib, postprocess
+
+      picked = postprocess.picked_locs(locs, info, picks, "Circle", pick_size=radius)
+      fig = lib.plot_trace(pd.concat(picked, ignore_index=True), info)
+
 
 .. _render-select-picks-trace:
 
 Select picks (trace)
 --------------------
 
-Opens a dialog that goes through all picks, displays its trace and asks to
-keep or discard it.
+Goes through the picks one by one, shows the trace of each (the same panels
+as in :ref:`render-show-trace`) and asks whether to keep it: ``Accept`` keeps
+the pick, ``Reject`` removes it, ``Back`` returns to the previous pick and
+``Cancel`` stops. The dialog shows the progress, the number of kept and
+removed picks and the time per pick.
 
 .. _render-select-picks-xy:
 
@@ -243,18 +175,6 @@ Select picks (XY scatter)
 
 Opens a dialog that goes through all picks, displays a xy-scatterplot and asks
 to keep or discard it.
-
-.. _render-plot-pick-xyz:
-
-Plot pick (XYZ scatter)
------------------------
-
-.. rst-class:: shortcut
-
-Shortcut: :kbd:`Ctrl+3`
-
-Displays a 3D scatterplot of the localizations of the currently selected
-pick(s).
 
 .. _render-select-picks-xyz:
 
@@ -317,10 +237,55 @@ saved.
 Mask image
 ----------
 
-Opens a dialog that allows the user to specify a mask for filtering
-localizations within and outside it. The user can adjust the histogram bin
-size, blur thereof and the threshold applied.
+Splits the localizations into those inside and outside a mask, e.g., to keep
+the localizations in a cell and remove the background. The mask is computed
+from the density of the localizations of the selected channel:
 
-The images can be zoomed in/out (:kbd:`Ctrl`/:kbd:`Cmd` + scrolling) and
-panned (dragging with the right mouse button, or with :kbd:`Ctrl`/:kbd:`Cmd` +
-the left mouse button). Double clicking resets the zoom.
+1. The localizations are histogrammed with ``Display pixel size (nm)``
+   (300 nm by default) over the whole image and normalized to a maximum of 1
+   (panel *Histogrammed localizations*).
+2. The histogram is blurred with a Gaussian of :math:`\sigma` =
+   ``Blur (nm)`` (500 nm by default) and normalized again (panel *Blur*).
+   ``Show histogram`` plots the pixel values of the blurred image, which helps
+   to choose a threshold.
+3. Pixels above the threshold form the mask (panel *Mask*). ``Custom`` uses the
+   ``Threshold`` typed in (0 to 1, 0.5 by default). The other methods find it
+   automatically with the scikit-image functions of the same name: global
+   thresholds (``Isodata``, ``Li``, ``Mean``, ``Minimum``, ``Otsu``,
+   ``Triangle``, ``Yen``) or local ones that vary across the image
+   (``Local Gaussian``, ``Local mean``, ``Local median``).
+4. ``Mask`` applies the mask to the localizations and shows those inside it
+   (panel *Masked*). Tick ``Mask all channels`` to apply the same mask to every
+   loaded channel.
+5. ``Save localizations`` saves the localizations inside and outside the mask
+   as two files (``_mask_in.hdf5`` and ``_mask_out.hdf5``; with all channels,
+   you choose the suffixes). The loaded localizations are not changed.
+
+``Save Mask`` saves the mask as a ``.npy`` array (plus a ``.png`` image) and
+``Load Mask`` loads one, e.g., to apply the same mask to another dataset.
+``Save Blurred`` saves the blurred image as a ``.png``.
+
+The panels zoom and pan together: :kbd:`Ctrl`/:kbd:`Cmd` + scrolling zooms,
+dragging with the right mouse button (or :kbd:`Ctrl`/:kbd:`Cmd` + the left
+button) pans, and a double click resets the zoom.
+
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
+
+   ``mask_image`` takes a method name or a threshold between 0 and 1
+   (``Custom``). The mask spans the whole field of view.
+
+   .. code-block:: python
+
+      import numpy as np
+      from picasso import io, masking
+
+      locs, info = io.load_locs("movie_locs.hdf5")
+      image = masking.generate_image(locs, info, disp_px_size=300, blur=500)   # nm
+      mask, threshold = masking.mask_image(image, "otsu")   # or 0.5, "li", "local_mean", ...
+      locs_in, locs_out = masking.mask_locs(locs, info, mask)
+
+      io.save_locs("movie_locs_mask_in.hdf5", locs_in, info)
+      io.save_locs("movie_locs_mask_out.hdf5", locs_out, info)
+      np.save("movie_locs_mask.npy", mask)

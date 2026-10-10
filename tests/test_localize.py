@@ -7762,6 +7762,86 @@ class TestPerRoiMinNetGradient:
         assert sorted(set(ids["x"])) == [30, 94]
 
 
+class TestPerRoiWaveletSettings:
+    """``identify_in_frame`` with one set of wavelet settings per ROI, the
+    wavelet counterpart of ``TestPerRoiMinNetGradient``."""
+
+    LOW = wavelet.WaveletParameters(threshold=0.5)
+    # high enough that nothing passes
+    HIGH = wavelet.WaveletParameters(threshold=1e6)
+
+    def test_each_roi_uses_its_own_settings(self):
+        frame = _two_region_frame()
+        _, x, _ = localize.identify_in_frame(
+            frame, None, 7, TWO_REGIONS, wavelet=self.LOW
+        )
+        assert sorted(x.tolist()) == [30, 94]
+        _, x, _ = localize.identify_in_frame(
+            frame, None, 7, TWO_REGIONS, wavelet=[self.LOW, self.HIGH]
+        )
+        assert x.tolist() == [30]
+        _, x, _ = localize.identify_in_frame(
+            frame, None, 7, TWO_REGIONS, wavelet=[self.HIGH, self.LOW]
+        )
+        assert x.tolist() == [94]
+
+    def test_length_must_match_the_rois(self):
+        frame = _two_region_frame()
+        with pytest.raises(ValueError, match="one per ROI"):
+            localize.identify_in_frame(
+                frame, None, 7, TWO_REGIONS, wavelet=[self.LOW] * 3
+            )
+        with pytest.raises(ValueError, match="one per ROI"):
+            localize.identify_in_frame(
+                frame, None, 7, None, wavelet=[self.LOW, self.HIGH]
+            )
+
+    def test_single_element_sequence_is_shared(self):
+        frame = _two_region_frame()
+        _, x, _ = localize.identify_in_frame(
+            frame, None, 7, TWO_REGIONS, wavelet=[self.LOW]
+        )
+        assert sorted(x.tolist()) == [30, 94]
+
+    def test_metadata_round_trip(self):
+        movie = np.stack([_two_region_frame()] * 3)
+        settings = [self.LOW, wavelet.WaveletParameters(1.0, "w1_mad", 6)]
+        ids, info = localize.identify(
+            movie, None, 7, roi=TWO_REGIONS, threaded=False, wavelet=settings
+        )
+        assert info["Wavelet Threshold"] == [0.5, 1.0]
+        assert info["Wavelet Noise Estimate"] == ["image_std", "w1_mad"]
+        assert info["Wavelet Min. Area"] == [4, 6]
+        assert localize.wavelet_from_parameters(info) == settings
+
+    def test_wavelet_from_parameters_broadcasts_scalars(self):
+        settings = localize.wavelet_from_parameters(
+            {
+                "Identification Method": "wavelet",
+                "Wavelet Threshold": [0.5, 2.0],
+                "Wavelet Min. Area": 6,
+            }
+        )
+        assert settings == [
+            wavelet.WaveletParameters(0.5, min_area=6),
+            wavelet.WaveletParameters(2.0, min_area=6),
+        ]
+        with pytest.raises(ValueError, match="differ in length"):
+            localize.wavelet_from_parameters(
+                {
+                    "Identification Method": "wavelet",
+                    "Wavelet Threshold": [0.5, 2.0],
+                    "Wavelet Min. Area": [4, 4, 4],
+                }
+            )
+
+    def test_wavelet_for(self):
+        assert localize.wavelet_for(None, 1) is None
+        assert localize.wavelet_for(self.LOW, 1) == self.LOW
+        assert localize.wavelet_for([self.LOW, self.HIGH], 1) == self.HIGH
+        assert localize.wavelet_for([self.LOW], 1) == self.LOW
+
+
 @pytest.mark.gui
 class TestPerRegionMinNetGradientGui:
     """The split-FOV region <-> min. net gradient slider binding.
@@ -7780,12 +7860,15 @@ class TestPerRegionMinNetGradientGui:
             def __init__(self):
                 self.rois = []
                 self.roi_mngs = []
+                self.roi_wavelets = []
                 self.selected_roi = None
                 self.split_fov_mode = False
 
         class _StubWindow(QtWidgets.QMainWindow):
             movie = None
             region_mngs = localize_gui.Window.region_mngs
+            region_wavelets = localize_gui.Window.region_wavelets
+            _region_wavelet_info = localize_gui.Window._region_wavelet_info
             parameters = localize_gui.Window.parameters
             identify_mode = localize_gui.Window.identify_mode
 
@@ -7940,6 +8023,49 @@ class TestPerRegionMinNetGradientGui:
             assert window.view.roi_mngs == [5000, 500]
             assert window.parameters["Min. Net Gradient"] == [5000, 500]
         finally:
+            window.close()
+
+    def test_wavelet_settings_per_region(self):
+        """The wavelet widgets edit the selected region's own settings, or
+        every region's with none selected, and selecting a region shows its
+        own - as the slider does for the min. net gradient."""
+        window = self._window()
+        dialog = window.parameters_dialog
+        try:
+            dialog.set_identification_method(localize.IDENTIFY_METHOD_WAVELET)
+            dialog.wavelet_threshold_spinbox.setValue(0.5)
+            window.view.split_fov_mode = True
+            window.view.rois = [r[:] for r in TWO_REGIONS]
+            assert [_.threshold for _ in window.region_wavelets()] == [
+                0.5,
+                0.5,
+            ]
+            window.view.selected_roi = 1
+            dialog.wavelet_threshold_spinbox.setValue(2.0)
+            dialog.set_wavelet_noise("w1_mad")
+            settings = window.region_wavelets()
+            assert settings[0] == wavelet.WaveletParameters(0.5)
+            assert settings[1] == wavelet.WaveletParameters(2.0, "w1_mad")
+            parameters = window.parameters
+            assert parameters["Wavelet Threshold"] == [0.5, 2.0]
+            assert parameters["Wavelet Noise Estimate"] == [
+                "image_std",
+                "w1_mad",
+            ]
+            # selecting the other region shows its settings, untouched
+            window.view.selected_roi = 0
+            dialog.sync_mng_to_selected_region()
+            assert dialog.wavelet_settings() == wavelet.WaveletParameters(0.5)
+            assert window.region_wavelets()[1].threshold == 2.0
+            # with none selected the widgets set every region
+            window.view.selected_roi = None
+            dialog.wavelet_threshold_spinbox.setValue(1.5)
+            assert [_.threshold for _ in window.region_wavelets()] == [
+                1.5,
+                1.5,
+            ]
+        finally:
+            dialog.close()
             window.close()
 
     def test_a_region_threshold_outside_the_slider_range_widens_it(self):
@@ -14912,18 +15038,21 @@ class TestWaveletGui:
         finally:
             dialog.close()
 
-    def test_split_fov_thresholds_only_for_the_net_gradient(
-        self, qt_offscreen
-    ):
-        """The per-region minimum net gradients of split-FOV data are shown
-        (ROI table column, region labels on the image) only while the net
-        gradient identification is selected."""
+    def test_split_fov_thresholds_follow_the_method(self, qt_offscreen):
+        """The per-region thresholds of split-FOV data (ROI table column,
+        region labels on the image) are those of the selected
+        identification method: the minimum net gradient, or the wavelet
+        threshold."""
         window = localize_gui.Window()
         dialog = window.parameters_dialog
         try:
             window.view.rois = [[[0, 0], [32, 16]], [[0, 16], [32, 32]]]
             window.view.split_fov_mode = True
             window.view.roi_mngs = [5000, 6000]
+            window.view.roi_wavelets = [
+                wavelet.WaveletParameters(0.5),
+                wavelet.WaveletParameters(1.25),
+            ]
             dialog.set_identification_method("net gradient")
             dialog.on_edit_rois()
             table = dialog.roi_dialog.table
@@ -14936,7 +15065,9 @@ class TestWaveletGui:
 
             def labels():
                 window.scene = QtWidgets.QGraphicsScene()
-                window._draw_rois(True, window.region_mngs())
+                window._draw_rois(
+                    True, window.region_mngs(), window.region_wavelets()
+                )
                 return sorted(
                     item.text()
                     for item in window.scene.items()
@@ -14946,11 +15077,19 @@ class TestWaveletGui:
             assert headers()[-1] == "min_ng"
             assert labels() == ["ch1 (6,000)", "ref (5,000)"]
             self._select_wavelet(dialog)
-            assert "min_ng" not in headers()
-            assert labels() == ["ch1", "ref"]
-            # editing the table keeps the thresholds of the regions
+            assert headers()[-1] == "wavelet thr."
+            assert table.item(1, 4).text() == "1.25"
+            assert labels() == ["ch1 (1.25x)", "ref (0.5x)"]
+            # editing the table keeps the settings of both methods
             table.item(0, 2).setText("30")
             assert window.view.roi_mngs == [5000, 6000]
+            assert [_.threshold for _ in window.region_wavelets()] == [
+                0.5,
+                1.25,
+            ]
+            # and the threshold column edits the wavelet threshold
+            table.item(1, 4).setText("2")
+            assert window.region_wavelets()[1].threshold == 2.0
         finally:
             window.view.split_fov_mode = False
             dialog.roi_dialog.close()

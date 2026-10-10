@@ -51,7 +51,9 @@ def test_info_dialog_renderer_row_has_help_and_wraps(qt_offscreen):
         "GPU (NVIDIA GeForce RTX 4090 Laptop GPU with Max-Q Design via Vulkan)"
     )
     assert dialog.sizeHint().width() == width
-    assert dialog.renderer_help.help_url.endswith("#gpu-rendering")
+    assert dialog.renderer_help.help_url.endswith(
+        "render/performance.html#render-gpu-rendering"
+    )
     assert "GPU" in dialog.renderer_help.toolTip()
     window.view.stop_render_worker()
 

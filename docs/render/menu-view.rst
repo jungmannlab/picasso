@@ -38,7 +38,7 @@ Each channel's *Color* dropdown is organized into three sections:
 * **Solid colors** — the 14 default named colors (``red``, ``cyan``,
   ``green``, …). You can also type a hexadecimal code such as ``#FF5733``
   directly into the dropdown. Solid colors are rendered as a black → color
-  ramp, exactly matching the previous "intensity × RGB" behavior.
+  ramp.
 * **Built-in colormaps** — one 3-stop *black → color → white* gradient per
   default solid color, named ``<color>_gradient`` (e.g. ``blue_gradient``,
   ``red_gradient``).
@@ -69,36 +69,13 @@ position in [0, 1] and an RGB color. Stops are linearly interpolated into the
   row to pick the stop color from a standard color dialog.
 - Use ``Add stop`` / ``Remove stop`` to grow or shrink the gradient.
 
-.. _render-colormaps-programmatic:
-
-Programmatic use
-~~~~~~~~~~~~~~~~
-
-The underlying conversion from solid colors or stops to a ``(256, 3)`` LUT is
-also exposed as part of ``picasso.render``:
-
-.. code-block:: python
-
-    from picasso import render
-    lut_red   = render.solid_to_lut((1.0, 0.0, 0.0))     # black → red
-    lut_fire  = render.stops_to_lut([(0, 0, 0, 0),
-                                     (0.5, 1, 0, 0),
-                                     (1, 1, 1, 0)])      # black → red → yellow
-    qimage, *_ = render.render_scene(
-        locs=..., info=..., colors=[lut_red, lut_fire], ...
-    )
-
-Passing a list of LUTs to ``render_scene`` selects the per-channel colormap
-path; passing a list of plain RGB triplets (legacy) still works and is
-equivalent to ``solid_to_lut`` per channel.
-
 .. _render-overlay-image:
 
 Overlay image
 -------------
 
 Overlays a PNG or TIFF image (``.png``, ``.tif``, ``.tiff``), e.g., a
-widefield or brightfield image of the same field of view, on the rendered
+widefield or a bright-field image of the same field of view, on the rendered
 localizations.
 
 - Grayscale images of any data type (e.g., 8- or 16-bit integers or 32-bit
@@ -158,17 +135,12 @@ blending with the localizations is chosen:
    the color at the maximum contrast, both given by the colormap, the
    background color and whether the background is white.
 *Multiply*
-   Multiplies them (for a white background).
+   Multiplies the colors of image and localizations, like two overlapping
+   prints: white leaves the other layer unchanged, dark colors darken it.
 
 A grayscale image is shown in the chosen color between the minimum and maximum
 intensity (by default, the image's full range; *Reset contrast* restores it).
 RGB images are shown with their own colors.
-
-.. tip::
-
-   The API functions are available as
-   ``picasso.render.load_overlay_image``, ``overlay_extent``,
-   ``overlay_to_qimage`` and ``draw_image_overlay``.
 
 .. _render-fit-image:
 
@@ -186,7 +158,22 @@ Fits the reconstructed image to be fully displayed in the window.
 Slice (3D)
 ----------
 
-Opens the slicer dialog which allows for slicing through 3D datasets.
+Shows only the localizations within a range of z, e.g., to look through the image layer by layer. Requires localizations with z coordinates.
+
+- ``Slice thickness (nm)`` sets the z range of a slice (50 nm by default); the
+  data are divided into slices of this thickness, starting at the lowest z.
+- The slider selects the slice. The histogram shows the number of
+  localizations per slice for each channel, with the current slice in black. The color of the plotted histograms correspond to individual channels' colors.
+- ``Slice Dataset`` (ticked when the dialog opens) renders only the selected
+  slice in the main window. Closing the dialog shows all localizations again.
+- ``Export Slices`` saves every slice as a ``.tif`` image
+  (``<name>_Z000_CH001.tif``, ...), rendered with the current display
+  settings. ``Export full image`` saves the whole field of view instead of the
+  current view, and ``Export channels separate`` saves one image per channel.
+
+Slicing only changes what is rendered; picking, saving and the analyses use
+all localizations. Linked windows can share the slice position, see
+:ref:`render-link-settings`.
 
 .. _render-3d-view:
 
@@ -197,7 +184,7 @@ Opens the slicer dialog which allows for slicing through 3D datasets.
 
 Shortcut: :kbd:`Ctrl+Shift+R`
 
-Opens/updates the rotation window, see :doc:`3d`: with a single picked region
+Opens/updates the 3D view, see :doc:`3d`: with a single picked region
 of interest it shows that pick, otherwise the current field of view. Requires
 localizations with z coordinates.
 
@@ -206,7 +193,24 @@ localizations with z coordinates.
 Show info
 ---------
 
+.. rst-class:: shortcut
+
+Shortcut: :kbd:`Ctrl+I`
+
 Shows info for the current dataset. See :ref:`render-show-info`.
+
+.. _render-show-metadata:
+
+Show metadata
+-------------
+
+.. rst-class:: shortcut
+
+Shortcut: :kbd:`Ctrl+Shift+M`
+
+Shows the metadata of the loaded files: the camera, the localization
+parameters and every processing step since. With several files, select the
+file in the drop-down list. See :ref:`files-metadata-settings`.
 
 .. _render-new-linked-window:
 

@@ -6,14 +6,19 @@ Picasso
 .. raw:: html
 
    <div class="hero">
-     <img src="_static/picasso-logo.png" alt="Picasso"
+     <img class="only-light" src="_static/picasso-logo.png" alt="Picasso"
           onerror="this.outerHTML='&lt;p class=&quot;hero-name&quot;&gt;Picasso&lt;/p&gt;'">
+     <img class="only-dark" src="_static/picasso-logo-dark.png" alt="Picasso">
      <p class="tagline">
-       A collection of tools for painting super-resolution images, from
-       designing DNA-PAINT experiments to localizing, rendering and
-       analyzing single molecules.
+       A collection of tools for painting super-resolution images, covering
+       single-molecule localization microscopy (SMLM) analysis from raw
+       movies to localization, rendering and quantification.
      </p>
    </div>
+
+.. div:: sd-text-center sd-text-muted
+
+   Documentation for Picasso |release|
 
 .. div:: sd-text-center sd-mb-5 hero-buttons
 
@@ -58,8 +63,8 @@ Each module opens as its own window, either from its shortcut or with
       :link-type: doc
       :class-card: sd-card-hover
 
-      .. image:: _static/icons/design.png
-         :class: module-icon
+      .. image:: _static/icons/design.svg
+         :class: module-icon dark-light
          :alt:
 
       **Design**
@@ -72,8 +77,8 @@ Each module opens as its own window, either from its shortcut or with
       :link-type: doc
       :class-card: sd-card-hover
 
-      .. image:: _static/icons/simulate.png
-         :class: module-icon
+      .. image:: _static/icons/simulate.svg
+         :class: module-icon dark-light
          :alt:
 
       **Simulate**
@@ -86,8 +91,8 @@ Each module opens as its own window, either from its shortcut or with
       :link-type: doc
       :class-card: sd-card-hover
 
-      .. image:: _static/icons/localize.png
-         :class: module-icon
+      .. image:: _static/icons/localize.svg
+         :class: module-icon dark-light
          :alt:
 
       **Localize**
@@ -100,8 +105,8 @@ Each module opens as its own window, either from its shortcut or with
       :link-type: doc
       :class-card: sd-card-hover
 
-      .. image:: _static/icons/filter.png
-         :class: module-icon
+      .. image:: _static/icons/filter.svg
+         :class: module-icon dark-light
          :alt:
 
       **Filter**
@@ -114,8 +119,8 @@ Each module opens as its own window, either from its shortcut or with
       :link-type: doc
       :class-card: sd-card-hover
 
-      .. image:: _static/icons/render.png
-         :class: module-icon
+      .. image:: _static/icons/render.svg
+         :class: module-icon dark-light
          :alt:
 
       **Render**
@@ -128,8 +133,8 @@ Each module opens as its own window, either from its shortcut or with
       :link-type: doc
       :class-card: sd-card-hover
 
-      .. image:: _static/icons/average.png
-         :class: module-icon
+      .. image:: _static/icons/average.svg
+         :class: module-icon dark-light
          :alt:
 
       **Average**
@@ -142,8 +147,8 @@ Each module opens as its own window, either from its shortcut or with
       :link-type: doc
       :class-card: sd-card-hover
 
-      .. image:: _static/icons/spinna.png
-         :class: module-icon
+      .. image:: _static/icons/spinna.svg
+         :class: module-icon dark-light
          :alt:
 
       **SPINNA**
@@ -157,7 +162,7 @@ Each module opens as its own window, either from its shortcut or with
       :class-card: sd-card-hover
 
       .. image:: _static/icons/nanotron.png
-         :class: module-icon
+         :class: module-icon dark-light
          :alt:
 
       **nanoTRON**
@@ -170,8 +175,8 @@ Each module opens as its own window, either from its shortcut or with
       :link-type: doc
       :class-card: sd-card-hover
 
-      .. image:: _static/icons/server.png
-         :class: module-icon
+      .. image:: _static/icons/server.svg
+         :class: module-icon dark-light
          :alt:
 
       **Server**

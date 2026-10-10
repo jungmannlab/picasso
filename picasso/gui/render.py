@@ -4829,7 +4829,7 @@ class InfoDialog(lib.Dialog):
     max_dark_time : QSpinBox
         Contains the maximum gap between localizations (frames) to be
         considered as belonging to the same group of linked locs.
-    movie_grid : QGridLayout
+    precision_grid : QGridLayout
         Contains all the info about the fit precision.
     nena_button : QPushButton
         Calculates nearest neighbor based analysis fit precision.
@@ -4983,34 +4983,34 @@ class InfoDialog(lib.Dialog):
         fov_buttons_layout.addWidget(self.load_fov_button)
         self.load_fov_button.clicked.connect(self.change_fov.load_fov)
 
-        # Movie
-        movie_groupbox = QtWidgets.QGroupBox("Precision")
-        vbox.addWidget(movie_groupbox)
-        self.movie_grid = QtWidgets.QGridLayout(movie_groupbox)
+        # Precision
+        precision_groupbox = QtWidgets.QGroupBox("Precision")
+        vbox.addWidget(precision_groupbox)
+        self.precision_grid = QtWidgets.QGridLayout(precision_groupbox)
         med_lp_label = QtWidgets.QLabel("Median localization precision:")
         med_lp_label.setToolTip(
             "Median localization precision of the first channel."
         )
-        self.movie_grid.addWidget(med_lp_label, 0, 0)
+        self.precision_grid.addWidget(med_lp_label, 0, 0)
         self.fit_precision = QtWidgets.QLabel("-")
-        self.movie_grid.addWidget(self.fit_precision, 0, 1)
+        self.precision_grid.addWidget(self.fit_precision, 0, 1)
         nena_label = QtWidgets.QLabel("NeNA precision:")
         nena_label.setToolTip(
             "Experimental estimate of the average localization precision.\n"
             "See Endesfelder et al. Histochemistry and cell biology, 2014."
         )
-        self.movie_grid.addWidget(nena_label, 1, 0)
+        self.precision_grid.addWidget(nena_label, 1, 0)
         self.nena_label = QtWidgets.QLabel("-")
-        self.movie_grid.addWidget(self.nena_label, 1, 1)
+        self.precision_grid.addWidget(self.nena_label, 1, 1)
         self.nena_button = QtWidgets.QPushButton("Calculate NeNA")
         self.nena_button.setToolTip("Click to calculate NeNA precision.")
         # clicked passes its checked state, which is not an on_done
         self.nena_button.clicked.connect(lambda: self.calculate_nena_lp())
-        self.movie_grid.addWidget(self.nena_button, 2, 0)
+        self.precision_grid.addWidget(self.nena_button, 2, 0)
         show_nena_plot_button = QtWidgets.QPushButton("Show NeNA plot")
         show_nena_plot_button.setToolTip("Display NeNA fit.")
         show_nena_plot_button.clicked.connect(self.show_nena_plot)
-        self.movie_grid.addWidget(show_nena_plot_button, 2, 1)
+        self.precision_grid.addWidget(show_nena_plot_button, 2, 1)
 
         # FRC
         frc_groupbox = QtWidgets.QGroupBox("FRC (uses current FOV)")
@@ -6250,7 +6250,7 @@ class MaskSettingsDialog(lib.Dialog):
         self.H = H / H.max()
         self.plots[0].setPixmap(
             self.render_to_pixmap(self.H),
-            title="Histogramed localizations",
+            title="Histogrammed localizations",
         )
 
     def blur_image(self) -> None:
@@ -6730,7 +6730,7 @@ class MoveChannelsDialog(lib.Dialog):
         dragged.
     """
 
-    DOCS_URL = docs_url("render/menu-tools.html#render-move")
+    DOCS_URL = docs_url("render/tools.html#render-move")
 
     def __init__(
         self,

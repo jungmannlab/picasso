@@ -16,7 +16,7 @@ functions importable from your own scripts, or any combination of the three.
    use the network, start other programs. Picasso cannot sandbox plugins.
 
 - Plugins are **not loaded until you enable them**, so copying a file into the
-  plugins folder is never enough to make it run;
+  plugins folder is not enough to make it run;
 - Downloads from the online registry are **checked against the SHA-256 hash
   published in the registry**, so the code behind a plugin cannot change
   without a visible, reviewed change to the registry;

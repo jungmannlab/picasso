@@ -1508,15 +1508,43 @@ class TestPickKinetics:
         # positive whenever they exist.
         assert (length > 0).all()
         assert (dark > 0).all()
-        # ``no_locs`` counts events per pick after linking and dark-time
-        # computation; must be positive.
-        assert (no_locs > 0).all()
+        # ``no_locs`` counts the localizations of each surviving pick,
+        # before linking.
+        assert np.array_equal(no_locs, [len(pl[i]) for i in kept])
         # Returned per-loc dataframe carries the kinetics columns.
         for col in ("len", "n", "dark"):
             assert col in out_locs.columns
-        # The number of binding events across surviving picks equals the
-        # sum of per-pick counts.
-        assert len(out_locs) == int(no_locs.sum())
+        # Linking merges localizations into fewer binding events (and
+        # the first event of a pick, without a dark time, is dropped).
+        assert len(out_locs) < int(no_locs.sum())
+
+    def test_pick_properties_locs_counts_localizations(self, info):
+        # three picks with 60, 80 and 100 isolated localizations: ``locs``
+        # is the number of localizations, ``n_events`` the number of
+        # binding events with a measured dark time
+        rng = np.random.default_rng(0)
+        picks = []
+        for g, n in enumerate((60, 80, 100)):
+            frames = np.sort(rng.choice(5000, n, replace=False))
+            picks.append(
+                pd.DataFrame(
+                    {
+                        "frame": frames.astype(np.uint32),
+                        "x": rng.normal(10, 0.05, n).astype(np.float32),
+                        "y": rng.normal(10, 0.05, n).astype(np.float32),
+                        "photons": np.full(n, 1000, np.float32),
+                        "sx": np.ones(n, np.float32),
+                        "sy": np.ones(n, np.float32),
+                        "bg": np.ones(n, np.float32),
+                        "lpx": np.full(n, 0.05, np.float32),
+                        "lpy": np.full(n, 0.05, np.float32),
+                        "group": np.full(n, g, np.int32),
+                    }
+                )
+            )
+        props = postprocess.pick_properties(picks, info, max_dark_time=3)
+        assert props["locs"].tolist() == [60, 80, 100]
+        assert (props["n_events"] < props["locs"]).all()
 
 
 # ---------------------------------------------------------------------------

@@ -3,30 +3,90 @@
 3D Calibration (Astigmatism)
 ============================
 
-In astigmatic 3D imaging, a cylindrical lens makes the fitted spot widths ``sx`` and ``sy`` depend on the axial position. Picasso calibrates this dependence from a bead z-stack and uses it to recover ``z`` from the spot widths. This page also covers the lateral corrections of ``x`` and ``y`` for astigmatism and chromatic aberration.
+In astigmatic 3D imaging, a cylindrical lens makes the fitted spot widths ``sx`` and ``sy`` (i.e., the standard deviations :math:`\sigma` of the fitted Gaussians) depend on the axial position. Picasso calibrates this dependence from a bead z-stack and uses it to recover ``z`` from the spot widths. The cylindrical lens also shifts and distorts ``x`` and ``y``; see :doc:`lateral-correction` for how to correct this.
 
-For an experimentally measured PSF that recovers ``z`` directly in the fit, see :doc:`spline`.
+For better accuracy, use an experimentally measured PSF instead (see :doc:`spline`). A real astigmatic PSF is not an elliptical Gaussian and the spline model fits its actual shape and recovers ``z`` directly in the same fit as ``x`` and ``y``, rather than from the fitted widths afterwards.
+
+.. _localize-3d-calibration-gui:
+
+Calibrating in the GUI
+----------------------
+
+1. Record a z-stack of fluorescent beads: move the stage through the focus in steps of known size (e.g., 10 nm).
+2. Open the stack in ``Picasso: Localize`` and set ``Box side length`` and ``Min. net gradient`` in ``Analyze`` > ``Parameters...`` so that the beads are identified over the whole stack (check with ``Preview``). The temporal median filter is not applied during calibration, see :ref:`localize-temporal-median-filter`.
+3. Select ``Calibration`` > ``Calibrate astigmatism (Gaussian)``. A dialog collects:
+
+   **Calibration step size (nm)**
+      The axial stage step between consecutive z positions.
+
+   **Number of frames per step size** and **Frame order**
+      For movies that image several fields of view (FOVs) to collect more beads: the number of FOVs, and whether all FOVs are imaged at each z position before the stage moves (``Different FOVs first``) or each FOV gets its own full z-stack (``Different z positions first``).
+
+   **Z binning (steps per bin)** (default 1)
+      See :ref:`localize-calibrating-z` below.
+
+4. Choose where to save the calibration (``<movie>_3d_calib.yaml`` by default). The diagnostic plot is saved next to it, see :ref:`localize-3d-calibration-plot`.
+
+To fit z, load the calibration with ``Load calibration`` in the ``3D via Astigmatism`` group of the ``Parameters`` dialog; ``Fit Z`` is then ticked. The ``Magnification factor`` (default 0.79) scales the fitted ``z`` to correct for the refractive-index mismatch between the immersion medium and the sample (`Huang et al., Science, 2008 <https://doi.org/10.1126/science.1153529>`__).
+
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
+
+   The calibration is fitted from the 2D-fitted bead localizations.
+   ``calibrate_z`` saves the ``.yaml`` and the check plot (and opens the
+   plot). ``zfit.zfit`` then adds ``z``, ``lpz`` and ``d_zcalib`` to a
+   measurement; ``filter=2`` (the default) discards fits far from the
+   calibration curves, ``filter=0`` keeps all. ``localize.localize`` fits z
+   right after the 2D fit when given ``calibration_3d=``.
+
+   .. code-block:: python
+
+      from picasso import io, localize, zfit
+
+      # Calibration: fit the bead z-stack in 2D first
+      movie, info = io.load_movie("beads_zstack.tif")
+      camera_info = {
+          "Baseline": 100, "Sensitivity": 0.53, "Gain": 1, "Qe": 1, "Pixelsize": 130
+      }
+      locs, info = localize.localize(
+          movie,
+          camera_info=camera_info,
+          identification_parameters={"Box Size": 7, "Min. Net Gradient": 5000},
+          movie_info=info,
+          fitting_method="gausslq",
+      )
+      calibration = zfit.calibrate_z(
+          locs, info, d=10, magnification_factor=0.79, path="beads_3d_calib.yaml"
+      )  # d: step size in nm
+
+      # Fitting z for a measurement
+      locs, info = io.load_locs("movie_locs.hdf5")
+      calibration = io.load_calibration("beads_3d_calib.yaml")
+      locs, info = zfit.zfit(locs, info, calibration=calibration)
+      io.save_locs("movie_locs_3d.hdf5", locs, info)
+
 
 .. _localize-3d-theory:
 
 Theory
 ------
 
-3D Calibration is performed by an adapted version of `Huang et al., 2008 <https://www.ncbi.nlm.nih.gov/pubmed/18174397/>`_.
+3D Calibration is performed by an adapted version of `Huang et al., 2008 <https://doi.org/10.1126/science.1153529>`_.
 
 .. _localize-calibrating-z:
 
 Calibrating z
 -------------
 
-After entering the step size, Picasso will calculate the mean and the variance for sigma_x and sigma_y for each z position. Localizations that are not within one standard deviation are discarded. A six-degree polynomial is fitted to the mean values of x and y:
+After entering the step size, Picasso will calculate the mean and the variance of the spot widths :math:`s_x` and :math:`s_y` (``sx`` and ``sy``) for each z position. Localizations that are not within one standard deviation are discarded. A sixth-degree polynomial is fitted to the mean values of :math:`s_x` and :math:`s_y` (this deviates from the original publication slightly):
 
 .. math::
 
-   \mathrm{mean\_sx} &= c_x[6]\,z^0 + c_x[5]\,z^1 + \dots + c_x[0]\,z^6 \\
-   \mathrm{mean\_sy} &= c_y[6]\,z^0 + c_y[5]\,z^1 + \dots + c_y[0]\,z^6
+   \bar{s}_x(z) &= c_x[6]\,z^0 + c_x[5]\,z^1 + \dots + c_x[0]\,z^6 \\
+   \bar{s}_y(z) &= c_y[6]\,z^0 + c_y[5]\,z^1 + \dots + c_y[0]\,z^6
 
-The calibration coefficients are stored in the YAML file and contain the parameters of cx and cy. The first entry being c[0], the last being c[6].
+The calibration coefficients are stored in the YAML file and contain the coefficients :math:`c_x` and :math:`c_y`, the first entry being :math:`c[0]` and the last :math:`c[6]`.
 
 **Z binning** (default 1) merges that many consecutive z positions into one axial bin before the polynomials are fitted:
 
@@ -46,7 +106,7 @@ When the calibration finishes, Picasso shows a six-panel diagnostic figure and s
 The first three panels show how well the polynomial describes the beads; the last three show how well the resulting calibration recovers a known z. Spot widths and heights are in camera pixels, z and stage positions in nm.
 
 **Mean spot width/height vs stage position**
-   The measured mean ``sx`` and ``sy`` per z step with the two fitted six-degree polynomials on top. Picasso shifts the stage axis such that the two polynomial fits meet at ``z = 0``.
+   The measured mean ``sx`` and ``sy`` per z step with the two fitted sixth-degree polynomials on top. Picasso shifts the stage axis such that the two polynomial fits meet at ``z = 0``.
 
 **Spot width vs spot height**
    Every kept localization (i.e., each bead at each z position) as a scatter, with the calibration curve through it. The cloud should follow the curve as a narrow band. A wide cloud means the beads disagree with each other (for example, field-dependent PSF or a tilted stage), and points far off the curve will be assigned a wrong z at fit time.
@@ -65,158 +125,17 @@ The first three panels show how well the polynomial describes the beads; the las
 
 .. note::
 
-   These panels are computed from the calibration beads themselves, so they report how self-consistent the calibration is — not how it performs on dim single molecules, which will likely be worse.
+   These panels are computed from the calibration beads themselves, so they report how self-consistent the calibration is and may not reflect how it performs on dim single molecules.
 
 .. _localize-fitting-z:
 
 Fitting z
 ---------
 
-For each localization, sigma_x and sigma_y is determined. Similar to the Science paper, the following equation is used to minimize the distance D:
+For each localization, the spot widths :math:`s_x` and :math:`s_y` are fitted. As in Huang et al., ``z`` is then found by minimizing the distance :math:`D` between the measured widths and the calibration curves:
 
 .. math::
 
-   D = \left(s_x^{0.5} - w_x^{0.5}\right)^2 + \left(s_y^{0.5} - w_y^{0.5}\right)^2
+   D(z) = \left(\sqrt{s_x} - \sqrt{w_x(z)}\right)^2 + \left(\sqrt{s_y} - \sqrt{w_y(z)}\right)^2
 
-with w being :math:`c[6]\,z^0 + c[5]\,z^1 + \dots + c[0]\,z^6`.
-
-.. _localize-lateral-corrections:
-
-Lateral corrections of x and y
-------------------------------
-
-Two things distort the lateral coordinates of a measurement:
-
-- a cylindrical lens inserted for astigmatic 3D imaging shifts, rotates and stretches the image relative to the unmodified light path;
-- chromatic aberration displaces one color channel relative to another.
-
-Both are corrected the same way, by a geometric transform fitted from two bead images and applied to ``x`` / ``y`` after fitting.
-
-.. _localize-lateral-calibrating:
-
-Calibrating a lateral transform
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Open ``3D`` > ``Calibrate lateral transform (astigmatism / chromatic)`` and choose what to correct:
-
-- **Astigmatism (cylindrical lens)** — a reference image of in-focus beads *without* the cylindrical lens, and an image of the same beads *with* it.
-- **Chromatic aberration** — an image of in-focus beads in the reference color channel, and an image of the same beads in the channel to be corrected.
-
-The transform is then fitted as follows:
-
-1. Beads are detected with the current ``Box side length`` and ``Min. net gradient`` (use ``Show`` to tune them on either image with a live preview).
-2. The beads are refined by a 2D Gaussian fit and matched by mutual nearest neighbor.
-3. A transform mapping the second image onto the reference is fitted by least squares.
-4. Bead pairs whose residual is far from the median are dropped and the transform is refitted, so a single mismatched bead cannot warp the result.
-
-.. _localize-lateral-transform-models:
-
-Transform models
-~~~~~~~~~~~~~~~~
-
-``Transform model`` chooses how the two frames are related:
-
-**Translation** (2 DOF, at least 1 bead pair)
-   A shift in x and y and nothing else. The right choice when the two frames are known to differ only by an offset: with one free parameter per axis it is the least noise-prone of the models, and a rotation or scale it cannot absorb shows up in the residual instead of being fitted away.
-
-**Affine** (6 DOF, at least 3 bead pairs)
-   Translation, rotation, scale and shear. The default, and what a well-aligned optical path does to first order.
-
-**Projective** (8 DOF, at least 4 pairs)
-   Adds the perspective (keystone) term that a tilted dichroic or an unequal path length introduces. The residual an affine leaves grows towards the edges of the field, which is exactly what this removes.
-
-**Polynomial2 / Polynomial3** (at least 6 / 10 pairs)
-   A smooth warp of that degree that follows genuine field distortion.
-
-   - This is not an optical model, and it extrapolates badly outside the region the beads span, so use it only with many, well-spread beads.
-   - Its reverse map is fitted independently rather than inverted algebraically, so round-tripping a coordinate is accurate only to the round-trip RMS reported with the calibration; no fitted coordinate depends on that reverse map.
-
-The stated minima are hard requirements — fitting fails below them — but about three times as many pairs are wanted, otherwise the transform interpolates the noise in the bead positions instead of averaging it out.
-
-.. _localize-lateral-diagnostics:
-
-Checking the result
-~~~~~~~~~~~~~~~~~~~
-
-A diagnostic figure is shown and saved next to the calibration as ``<base>_lateral_<type>.png``: overlays before and after the correction, and the mean per-bead cross-correlation before and after, whose peak should sit at the origin once the correction is applied.
-
-After the fit, the bead pairing is drawn in the main window as color-coded identification boxes:
-
-- Load either bead image (the ``Show`` buttons in the calibration dialog) and every detected bead is boxed.
-- A bead and the bead it was matched with carry the **same color** in the reference and in the target image, while detections that stayed unmatched are gray.
-- Hovering a box says which pair it belongs to.
-
-This is the same reading as the cross-channel link colors used for multichannel data, and it makes a wrong or missing match visible on the data itself.
-
-.. _localize-lateral-storage:
-
-Where the transform is stored
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-The transform is stored as one entry of an ordered ``Lateral transforms`` list in the calibration file you select, which can be:
-
-- an existing Gaussian 3D calibration (``.yaml``) or spline PSF calibration (``.hdf5``) — the transform is appended to it and applied automatically whenever that calibration is used to fit, whether the fit is Gaussian astigmatism or cubic spline;
-- a standalone lateral calibration (``New``, a ``.yaml`` holding only lateral corrections) — loaded separately at fit time, and the only route for 2D data, where there is no 3D calibration to append to.
-
-Corrections accumulate: calibrating both an astigmatism and a chromatic transform into the same file stores them as a list, and they are applied one after another in that order. Re-running a calibration of the same type replaces its entry rather than adding a second copy.
-
-.. _localize-appending-or-loading-separately:
-
-Appending or loading separately
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Both routes give the **same coordinates**, so which one to use is a matter of bookkeeping:
-
-- **Appended to the 3D or spline calibration** (recommended) — the correction travels with the calibration it belongs to and is applied automatically whenever that calibration is used to fit. There is nothing to load and nothing to forget.
-- **Loaded separately** — the standalone ``.yaml`` is loaded at fit time (see :ref:`localize-lateral-applying` below).
-
-The two mix. With astigmatic 3D fitting, the separately loaded corrections are applied after the z fit, on top of whatever the 3D calibration carries. So a 3D calibration holding the astigmatism correction plus a separately loaded chromatic one applies the astigmatism first and the chromatic second, exactly as if both had been appended to the same file.
-
-The same correction is never applied twice:
-
-- A file whose transform the loaded 3D or spline calibration already carries is refused at load time.
-- One that slips through as a copy saved under another name is skipped at fit time — the transforms themselves are compared, not the file names.
-- Every correction that *was* applied is named in the saved metadata under ``Lateral corrections applied``.
-
-.. important::
-
-   **Lateral corrections apply to single-channel data only.** The multichannel (global) spline fit is a different mechanism: it fits all channels jointly and registers them itself from the per-channel transforms in its own calibration, so a lateral correction on top of that would be applied twice.
-
-   Picasso therefore refuses to append a lateral transform to a multichannel spline calibration, and ignores loaded lateral corrections when a multichannel fit runs.
-
-.. _localize-lateral-applying:
-
-Loading a separate correction
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. tab-set::
-
-   .. tab-item:: GUI
-
-      Load the standalone ``.yaml`` through the ``Lateral correction (x, y)`` box in the ``Parameters`` dialog:
-
-      - ``Load correction`` takes one or more files (applied in the order listed);
-      - ``Clear`` drops them.
-
-      The setting belongs to the loaded movie, so several movies opened side by side can each carry their own correction.
-
-   .. tab-item:: Command line
-
-      ``picasso localize`` takes ``--affine-calibration <file>`` (repeat the flag to chain several); whichever model the file stores is used as saved. It combines with ``--zc`` the same way the GUI does:
-
-      .. code-block:: bash
-
-         picasso localize movie.tif -zc astig_3d_calib.yaml -ac chromatic.yaml
-
-   .. tab-item:: Python
-
-      ``localize.localize`` takes ``affine_calibration`` alongside ``calibration_3d``, and ``zfit.zfit`` takes ``lateral_transforms`` for localizations that are already fitted. Both accept a calibration dictionary, a list of entries or a path, and both skip (with a ``DuplicateLateralTransformWarning``) a correction the 3D calibration already carries:
-
-      .. code-block:: python
-
-         locs, info = zfit.zfit(
-             locs,
-             info,
-             calibration=z_calibration,
-             lateral_transforms="chromatic.yaml",
-         )
+where :math:`w_x(z)` and :math:`w_y(z)` are the calibration polynomials :math:`\bar{s}_x(z)` and :math:`\bar{s}_y(z)` from above.

@@ -3,31 +3,42 @@
 GPU Fitting
 ===========
 
-Picasso can run all of its Gaussian and cubic-spline fitting on a CUDA-capable NVIDIA GPU. The fitting kernels are written in Python and compiled for the GPU at run time by numba.
+Picasso can run all of its Gaussian and cubic-spline fitting on a CUDA-capable NVIDIA GPU. The fitting kernels are written in Python and compiled for the GPU at run time by numba. This needs Picasso installed with CUDA support, see :doc:`/getting-started/installation`.
 
-The fitting algorithm — the Levenberg-Marquardt driver, its damping rule, its estimators and its PSF models — is a port of `Gpufit <https://github.com/gpufit/Gpufit>`_ (Przybylski et al., *Scientific Reports* **7**, 15722, 2017), which earlier versions of Picasso used as a compiled dependency.
+The fitting algorithm — the Levenberg-Marquardt driver, its damping rule, its estimators and its PSF models — is a port of `Gpufit <https://github.com/gpufit/Gpufit>`_ (Przybylski et al., *Scientific Reports* **7**, 15722, 2017).
 
-Picasso no longer ships or links against the Gpufit binary; its license is reproduced in ``LICENSES/Gpufit-LICENSE.txt``.
-
-.. _localize-gpu-installation:
-
-Installation
-------------
-
-The GPU kernels need the CUDA runtime, which is pulled in as an optional dependency:
-
-.. code-block:: bash
-
-   pip install picassosr[gpu]
+Gpufit's license is reproduced in `LICENSES/Gpufit-LICENSE.txt <https://github.com/jungmannlab/picasso/blob/master/LICENSES/Gpufit-LICENSE.txt>`__.
 
 .. _localize-gpu-usage:
 
 Using it
 --------
 
-When a CUDA GPU is detected, the **Use GPU** checkbox becomes available in the ``Parameters`` dialog for both optimizers, since Picasso implements a least-squares and a maximum-likelihood estimator on the GPU. Otherwise the checkbox stays hidden and the CPU implementations are used.
+When a CUDA GPU is detected, the **Use GPU** checkbox becomes available in the ``Parameters`` dialog. Otherwise the checkbox stays hidden and the CPU implementations are used.
 
 GPU fitting is entirely optional; it is typically one to two orders of magnitude faster than a serial CPU fit.
+
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
+
+   Append ``-gpu`` to any fitting method. ``localize.CUDA_AVAILABLE`` tells
+   whether a CUDA GPU (and numba's CUDA support) was found.
+
+   .. code-block:: python
+
+      from picasso import localize
+
+      print(localize.CUDA_AVAILABLE)
+
+      locs, info = localize.localize(
+          movie,
+          camera_info=camera_info,
+          identification_parameters={"Box Size": 7, "Min. Net Gradient": 5000},
+          movie_info=info,
+          fitting_method="gaussmle-gpu",
+      )
+
 
 .. _localize-cpu-fitting:
 

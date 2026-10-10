@@ -9,11 +9,10 @@ influence the imaging quality and whether the target structure can be resolved
 with DNA-PAINT.
 
 By default, ``Picasso: Simulate`` starts with preset parameters that are
-typical for a DNA-PAINT experiment. Thus, meaningful raw DNA-PAINT data can be
-readily simulated for a given input structure without the need of a
-super-resolution microscope. The simulation output is a movie file in .raw
-format, as it would be generated during an in vitro DNA-PAINT experiment on a
-microscope.
+typical for a DNA-PAINT experiment. The simulation output is a movie file in .raw
+format, similar to one generated during a DNA-PAINT experiment on a
+microscope. Sample drift is not simulated, so the structures stay in place
+for the whole movie.
 
 .. figure:: /images/simulate.png
    :width: 360px
@@ -30,7 +29,9 @@ Simulate DNA-PAINT image acquisitions
    group ``Structure`` (see :ref:`simulate-structure` below).
 3. The group ``PAINT parameters`` allows adjustment of the duty cycle of the
    DNA-PAINT imaging system. The mean dark time is calculated by
-   τd = 1/(kon·c). The mean ON time in a DNA-PAINT system is dependent on the
+   :math:`\tau_d = 1/(k_\mathrm{on} \cdot c)`, where :math:`k_\mathrm{on}`
+   is the association rate and :math:`c` the imager concentration. The mean
+   ON time in a DNA-PAINT system is dependent on the
    DNA duplex properties. For typical 7-bp imager strands, the ON time is
    ~200-300 ms.
 4. In ``Imager parameters``, fluorophore characteristics such as PSF width and
@@ -91,9 +92,17 @@ randomly.
 
 Selecting the button ``Generate positions`` (``Simulation > Generate
 positions``, :kbd:`Ctrl+G`) will generate a list of positions with the current
-settings and update the preview panels. A preview of the arrangement of all
-structures is shown in ``Positions``, whereas an individual structure is shown
-in ``Structure preview``.
+settings and update the two preview panels:
+
+- ``Positions`` shows the whole simulated field of view in camera pixels.
+  Each cross is one handle (binding site) that will be simulated, so a
+  structure appears as a small cluster of crosses. Handles dropped by
+  ``Incorporation`` are not shown. The dashed square marks the ``Frame``
+  margin: structures are placed inside it, and handles outside it are not
+  simulated.
+- ``Structure preview`` zooms in on the first structure, in nm. Each circle
+  is one of its handles, colored by imaging round when multiplexing (see
+  :ref:`simulate-multiplexing` below).
 
 .. _simulate-run:
 
@@ -107,7 +116,59 @@ file, ready for subsequent localization.
 - All simulation settings are saved and can be loaded at a later time with
   ``File > Load settings from previous simulation...``.
 - For 3D data, check ``Simulate 3D`` and load the 3D calibration with
-  ``File > Load 3D calibration...``.
+  ``File > Load 3D calibration...`` (see :ref:`localize-3d-calibration` for
+  how to create one).
+
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
+
+   The same steps as the GUI: define a structure (handle coordinates in
+   nm), place copies of it, draw the blinking of every handle, render the
+   frames and save the ``.raw`` movie with its ``.yaml``.
+
+   .. code-block:: python
+
+      import numpy as np
+      from picasso import simulate
+
+      pixelsize, imagesize, frames, itime = 130, 32, 5000, 100   # nm, px, -, ms
+
+      # 3 x 2 grid of handles, 20 nm apart; one exchange round, z = 0
+      structure = simulate.defineStructure(
+          np.array([0, 20, 40, 0, 20, 40]), np.array([0, 0, 0, 20, 20, 20]),
+          np.ones(6), np.zeros(6), pixelsize,
+      )
+      positions = simulate.generatePositions(9, imagesize, 6, 0)     # 9 copies, 6 px margin, grid
+      handles = simulate.prepareStructures(
+          structure, positions, orientation=0, number=9, incorporation=0.85, exchange=0
+      )
+
+      # Blinking of every handle: photons per frame
+      n_handles = handles.shape[1]
+      photons = np.zeros((n_handles, frames), dtype=int)
+      for i in range(n_handles):
+          photons[i], _, _ = simulate.distphotons(
+              handles, itime, frames, taud=54054, taub=280,          # ms
+              photonrate=53, photonratestd=29, photonbudget=1.5e6,
+          )
+
+      # Frames, background and camera noise
+      movie = np.zeros((frames, imagesize, imagesize))
+      for f in range(frames):
+          movie[f] = simulate.convertMovie(
+              f, photons, handles, imagesize, frames, psf=0.82,
+              photonrate=53, background=4, noise=2, mode3Dstate=False, cx=[], cy=[],
+          )
+      movie = simulate.check_type(simulate.noisy_p(movie, 4))
+
+      info = {
+          "Byte Order": "<", "Data Type": "uint16", "Frames": frames,
+          "Height": imagesize, "Width": imagesize, "Camera": "Simulation",
+          "Camera.Pixelsize": pixelsize,
+      }
+      simulate.saveMovie("simulated.raw", movie, info)
+
 
 .. _simulate-multiplexing:
 
@@ -122,14 +183,3 @@ The different imaging rounds can be visually identified by color in the
 By default, the simulation software detects the number of exchange rounds
 based on the structure definition and will simulate all multiplexing rounds
 with the same imaging parameters.
-
-It is possible to have different imaging parameters for each round, e.g., when
-using imagers with different ON-times. To do so, simulate the multiplexing
-rounds individually:
-
-1. In the ``Exchange rounds`` field of the ``Simulation`` group, enter only the
-   rounds that should be simulated with the current set of parameters.
-2. Simulate the data.
-3. Change the set parameters and the multiplexing round and simulate the next
-   data sets.
-4. Repeat until all multiplexing rounds are simulated.

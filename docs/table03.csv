@@ -1,0 +1,10 @@
+Column Name,Description,C Data Type
+group,The pick (or group) identifier.,int
+n_events,"The number of binding events in the pick that have a measured dark time (the first event of a pick has none).",int
+locs,The number of localizations in the pick (before linking).,long
+<column>_mean / <column>_std,"Mean and standard deviation of a column of the linked localizations (see Table 1) over the binding events of the pick, e.g., x_mean or photons_std.",float
+len_mean / dark_mean,"Mean bright and dark times, averaged over the binding events. Units: frames.",float
+length_cdf / dark_cdf,"Mean bright and dark times estimated by fitting their distributions with the CDF of the exponential distribution. Units: frames.",double
+qpaint_idx / qpaint_idx_cdf,"The qPAINT index, i.e., the inverse of dark_mean and dark_cdf, respectively. Units: 1/frames.",float / double
+n_units,"The number of binding sites from qPAINT: 1 / (influx rate × dark_cdf). The influx rate is stored in the metadata.",double
+pick_area_um2,The area of the pick in µm² (only when saved from picks).,double

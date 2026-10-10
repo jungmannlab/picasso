@@ -1,38 +1,38 @@
 ﻿Column Name,Description,C Data Type
-"frame ","The frame in which the localization occurred, starting with zero for the first frame. ","unsigned long "
-"x ",The subpixel x coordinate in camera pixels.,"float "
-"y ",The subpixel y coordinate in camera pixels.,"float "
+**frame**,"(Required) The frame in which the localization occurred, starting with zero for the first frame. ","unsigned long "
+**x**,(Required) The subpixel x coordinate in camera pixels.,"float "
+**y**,(Required) The subpixel y coordinate in camera pixels.,"float "
 "photons ","The total number of detected photons from this event, not including background or camera offset.","float "
-"sx ",The Point Spread Function width in camera pixels.,"float "
-"sy ",The Point Spread Function height in camera pixels.,"float "
-"angle ","(Optional) The in-plane rotation angle of the elliptical Gaussian PSF, in degrees. Only available when fitting a rotated elliptical Gaussian. Used by the ""gaussian"" render blur to orient each localization's precision ellipse.","float "
+"sx ",The Point Spread Function width in camera pixels. Not available for cubic-spline PSF fitting.,"float "
+"sy ",The Point Spread Function height in camera pixels. Not available for cubic-spline PSF fitting.,"float "
+"angle ","The in-plane rotation angle of the elliptical Gaussian PSF, in degrees. Only available when fitting a rotated elliptical Gaussian. Used by the ""gaussian"" render blur to orient each localization's precision ellipse.","float "
 "bg ","The number of background photons per pixel, not including the camera offset.","float "
-"lpx ","The localization precision in x direction, in camera pixels. ","float "
-"lpy ","The localization precision in y direction, in camera pixels. ","float "
-ellipticity,"The ellipticity of the fitted PSF, defined as (a - b) / a, where a and b are the larger and the smaller of ""sx"" and ""sy"". Not saved for the spherical (isotropic) Gaussian, where it is always zero.","float "
-"net_gradient ","The net gradient of this spot which is defined by the sum of gradient vector magnitudes within the fitting box, projected to the spot center. ","float "
-z,(Optional) The z coordinate fitted in 3D in nm. Please note the units are different for x and y coordinates.,"float "
-lpz,(Optional) The localization precision in z direction in nm.,float
-d_zcalib,"(Optional) The value of the D function used for z fitting with astigmatism, see the supplement to Huang et al. 2008.","float "
-log_likelihood,"(Optional) The log-likelihood of the fit. Only available for MLE fitting. Before v0.11.0, this column might be “likelihood”.","float "
-"iterations ",(Optional) The number of iterations of the fit procedure. Only available for MLE fitting.,"long "
-chi_square,"(Optional) The chi-square of the fit, i.e. the sum of squared residuals between the spot and the fitted model at the fit optimum, in photons squared. Only available for least-squares fitting, where it is the counterpart of the “log_likelihood” column of MLE fits.","float "
-reduced_chi_square,"(Optional) The goodness of fit normalized for the box size and the photon counts: the deviance (twice the negative log-likelihood) of MLE fits or the chi-square of least-squares fits, divided by the value expected from the noise alone. About 1 for a good fit and larger where the model does not describe the spot, e.g., overlapping emitters. Comparable between spots of different brightness and between fits with different box sizes.","float "
-"group ","(Optional) An identifier to assign multiple localizations to groups, for example by picking regions of interest or clustering. ","long "
-group_input," ""(Optional) Assigned after clustering if the input localizations had a “group” column. This allows to trace back which input group a clustered group originated from.""",long
-"len ","(Optional) The length of the event in frames, if localizations from consecutive frames have been linked, counted from the first to the last frame of the event (both included).","long "
-"n ","(Optional) The number of localizations in this event, if localizations from consecutive frames have been linked, potentially diverging from the “len” column due to a transient dark time tolerance.","long "
-"dark ","(Optional) The dark time preceding the event in frames, i.e., the number of frames without signal since the end of the previous event in the same group. Only available after computing dark times (e.g., “picasso dark”). Events without a preceding event are removed. Before Picasso 0.11.3, dark times were one frame longer.","long "
-"photon_rate ","(Optional) The mean number of photons per frame, if localizations from consecutive frames have been linked. The total number of photons is set in the “photons” column. ","float "
-"x_pick_rot ","(Optional) Projection of localizations onto the axis of the rectangular pick in camera pixels. Only available after saving rectangular pick(s). ",float
-"y_pick_rot ","(Optional) Projection of localizations against the axis of the rectangular pick in camera pixels. Can be used to plot profile along the pick. Only available after saving rectangular pick(s). ",float
-"photons_unc ","(Optional) The uncertainty of the photons estimation as estimated by the Cramer-Rao Lower Bound of the Maximum Likelihood fit. ",float
-"bg_unc ","(Optional) The uncertainty of the background estimation as estimated by the Cramer-Rao Lower Bound of the Maximum Likelihood fit. ",float
-"sx_unc ","(Optional) The uncertainty of the sx estimation (camera pixels) as estimated by the Cramer-Rao Lower Bound of the Maximum Likelihood fit. ",float
-"sy_unc ","(Optional) The uncertainty of the sy estimation (camera pixels) as estimated by the Cramer-Rao Lower Bound of the Maximum Likelihood fit. ",float
-angle_unc,"(Optional) The uncertainty of the angle estimation (degrees) as estimated by the Cramer-Rao Lower Bound of the Maximum Likelihood fit. Only available when fitting a rotated elliptical Gaussian with MLE. ",float
-n_id,"(Optional) The index of the pick or of the input localization that this spot was extracted from, when fitting picked spots (identifications generated from picks or from a localization file). ",unsigned long
-roi_id,"(Optional) The index of the region of interest (ROI) this localization was found in (0, 1, ...), when several ROIs of one movie are fitted together. The ROIs are listed in the same order in the “ROI” entry of the metadata; -1 marks a localization that falls inside none of them, which a sub-pixel fitted position right at a ROI’s edge can be.",long
-photons_ch<c>,"(Optional) The number of detected photons in channel c (c = 0, 1, ...), for a multichannel spline fit with photon counts not linked across channels. The “photons” column holds their sum.",float
-bg_ch<c>,"(Optional) The number of background photons per pixel in channel c (c = 0, 1, ...), for a multichannel spline fit with photon counts not linked across channels. The “bg” column holds their sum.",float
-rel_photons_ch<c>,"(Optional) The share of the total photons emitted in channel c (c = 0, 1, ...), for a multichannel spline fit with photon counts not linked across channels. The values sum to 1 per localization and provide the continuous ratiometric readout used for color assignment.",float
+**lpx**,"(Required) The localization precision in x direction, in camera pixels. ","float "
+**lpy**,"(Required) The localization precision in y direction, in camera pixels. ","float "
+ellipticity,"The ellipticity of the fitted PSF, defined as (a - b) / a, where a and b are the larger and the smaller of ""sx"" and ""sy"". Not saved for the spherical (isotropic) Gaussian, where it is always zero, nor for cubic-spline PSF fitting.","float "
+"net_gradient ","The net gradient of this spot which is defined by the sum of gradient vector magnitudes within the fitting box, projected to the spot center. Not available for spots identified by wavelet segmentation.","float "
+**z**,(Required for 3D data) The z coordinate fitted in 3D in nm. Please note the units are different for x and y coordinates.,"float "
+lpz,"The localization precision in z direction in nm. Recommended for 3D rendering.",float
+d_zcalib,"The value of the D function used for z fitting with astigmatism, see the supplement to Huang et al. 2008.","float "
+log_likelihood,"The log-likelihood of the fit. Only available for MLE fitting. Before v0.11.0, this column might be “likelihood”.","float "
+"iterations ",The number of iterations of the fit procedure. Only available for MLE fitting.,"long "
+chi_square,"The chi-square of the fit, i.e. the sum of squared residuals between the spot and the fitted model at the fit optimum, in photons squared. Only available for least-squares fitting, where it is the counterpart of the “log_likelihood” column of MLE fits.","float "
+reduced_chi_square,"The goodness of fit normalized for the box size and the photon counts: the deviance (twice the negative log-likelihood) of MLE fits or the chi-square of least-squares fits, divided by the value expected from the noise alone. About 1 for a good fit and larger where the model does not describe the spot, e.g., overlapping emitters. Comparable between spots of different brightness and between fits with different box sizes.","float "
+"group ","An identifier to assign multiple localizations to groups, for example by picking regions of interest or clustering. ","long "
+group_input,"The original ``group`` value of each localization, kept when a step that assigns new groups (picking, clustering or *Select central frames localizations*) is applied to localizations that already had a ``group`` column. This allows tracing back which input group a new group originated from.",long
+"len ","The length of the event in frames, if localizations from consecutive frames have been linked, counted from the first to the last frame of the event (both included).","long "
+"n ","The number of localizations in this event, if localizations from consecutive frames have been linked, potentially diverging from the “len” column due to a transient dark time tolerance.","long "
+"dark ","The dark time preceding the event in frames, i.e., the number of frames without signal since the end of the previous event in the same group. Only available after computing dark times (e.g., “picasso dark”). Events without a preceding event are removed. Before Picasso 0.11.3, dark times were one frame longer.","long "
+"photon_rate ","The mean number of photons per frame, if localizations from consecutive frames have been linked. The total number of photons is set in the “photons” column. ","float "
+"x_pick_rot ","Position of the localization across the axis of the rectangular pick (perpendicular distance from it), in camera pixels. Only available after saving rectangular pick(s). ",float
+"y_pick_rot ","Position of the localization along the axis of the rectangular pick, measured from its start point, in camera pixels. Used for the pick profile. Only available after saving rectangular pick(s). ",float
+"photons_unc ","The uncertainty of the photons estimation as estimated by the Cramer-Rao Lower Bound of the Maximum Likelihood fit. ",float
+"bg_unc ","The uncertainty of the background estimation as estimated by the Cramer-Rao Lower Bound of the Maximum Likelihood fit. ",float
+"sx_unc ","The uncertainty of the sx estimation (camera pixels) as estimated by the Cramer-Rao Lower Bound of the Maximum Likelihood fit. ",float
+"sy_unc ","The uncertainty of the sy estimation (camera pixels) as estimated by the Cramer-Rao Lower Bound of the Maximum Likelihood fit. ",float
+angle_unc,"The uncertainty of the angle estimation (degrees) as estimated by the Cramer-Rao Lower Bound of the Maximum Likelihood fit. Only available when fitting a rotated elliptical Gaussian with MLE. ",float
+n_id,"The index of the pick or of the input localization that this spot was extracted from, when fitting picked spots (identifications generated from picks or from a localization file). ",unsigned long
+roi_id,"The index of the region of interest (ROI) this localization was found in (0, 1, ...), when several ROIs of one movie are fitted together. The ROIs are listed in the same order in the “ROI” entry of the metadata; -1 marks a localization that falls inside none of them, which a sub-pixel fitted position right at a ROI’s edge can be.",long
+photons_ch<c>,"The number of detected photons in channel c (c = 0, 1, ...), for a multichannel spline fit with photon counts not linked across channels. The “photons” column holds their sum.",float
+bg_ch<c>,"The number of background photons per pixel in channel c (c = 0, 1, ...), for a multichannel spline fit with photon counts not linked across channels. The “bg” column holds their sum.",float
+rel_photons_ch<c>,"The share of the total photons emitted in channel c (c = 0, 1, ...), for a multichannel spline fit with photon counts not linked across channels. The values sum to 1 per localization and provide the continuous ratiometric readout used for color assignment.",float

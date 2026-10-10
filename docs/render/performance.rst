@@ -3,9 +3,10 @@
 Performance
 ===========
 
-How much of the computer ``Picasso: Render`` uses, and whether it renders on
-the CPU or the graphics card, is set in the ``Render`` section of the user
-settings file (see :ref:`user-settings-file`).
+Two settings in the ``Render`` section of the user settings file (see
+:ref:`user-settings-file`) control the speed of ``Picasso: Render``: how many
+CPU threads it may use (:ref:`render-cpu-usage`) and whether it renders on the
+graphics card (:ref:`render-gpu-rendering`).
 
 .. _render-cpu-usage:
 
@@ -29,11 +30,7 @@ time. The budget is set in the user settings file ``~/.picasso/settings.yaml``
 
 ``cpu_utilization``
    The fraction of CPU cores that rendering may use, a number between 0 and 1
-   (exclusive). The default is 0.5 — lower than the 0.8 that
-   ``Picasso: Localize`` uses for fitting (``Localize: cpu_utilization``):
-   localization is a one-off batch job, whereas rendering runs continuously
-   while you pan, zoom and adjust the display, often for many users at once on
-   a shared machine. Invalid values silently fall back to the default.
+   (exclusive). The default is 0.5. Invalid values silently fall back to the default.
 ``max_workers`` (optional)
    An absolute cap on the number of worker threads; it wins over
    ``cpu_utilization``. For example, set it to 4 on a 64-core workstation to
@@ -45,9 +42,11 @@ time. The budget is set in the user settings file ``~/.picasso/settings.yaml``
    so brightness does not change) and follows up with the full-quality image a
    moment after the gesture pauses.
 
-   - ``auto`` (the default) renders at least 500,000 localizations per preview
-     and at least a tenth of those in the visible field of view, whichever is
-     more, so the faint structures of large datasets stay visible while you
+   - ``auto`` (the default): a preview shows 500,000 localizations or a tenth
+     of the localizations in view, whichever is larger. For example, with
+     20 million localizations in view, the preview shows 2 million. Fields of
+     view with fewer than 500,000 localizations are always rendered in full.
+     The tenth keeps faint structures of large datasets visible while you
      move.
    - An integer sets a fixed target instead.
    - ``0`` or ``off`` disables previews so every frame renders at full
@@ -58,7 +57,7 @@ time. The budget is set in the user settings file ``~/.picasso/settings.yaml``
    ``lpx`` or ``lpy`` exceeds this value are **not rendered** at all.
 
    - Unfiltered data occasionally contains localizations with absurd
-     precisions of hundreds of pixels — their Gaussian would spread a
+     precisions of hundreds of screen pixels — their Gaussian would spread a
      negligible intensity over a large FOV, yet drawing one is
      computationally expensive.
    - The default is 100 nm. ``0`` or ``off`` renders everything regardless of
@@ -74,8 +73,10 @@ Python's process handling).
 
 Picasso: Render writes the ``Render`` keys it does not find in the file with
 their defaults when it starts (``max_workers`` excepted, as it is optional), so
-every setting is visible and editable. How the settings file is kept safe from
-editing mistakes is described under :ref:`user-settings-file`.
+every setting is visible and editable. If an edit breaks the file (e.g., a
+stray tab), Picasso keeps the broken copy, warns you and uses the defaults;
+the previous version is always kept as ``settings.yaml.bak``. See
+:ref:`user-settings-file`.
 
 .. _render-gpu-rendering:
 
@@ -88,11 +89,9 @@ the GPU once and every view afterwards is computed there, typically several
 times faster than the CPU worker threads, with the sharp image arriving where
 the CPU path shows a preview.
 
-It works on any recent graphics card — Metal on macOS, Direct3D 12 on Windows,
-Vulkan on Linux — through the ``wgpu`` package: it is included in the
-one-click installers, and pip users install it with
-``pip install picassosr[wgpu]`` (or ``[gpu]`` for all GPU features, including
-CUDA).
+It works on any recent graphics card through the ``wgpu`` package, which the
+one-click installers include; for ``pip`` installations, see
+:doc:`/getting-started/installation`.
 
 The rendering is controlled by the ``gpu`` section of the ``Render`` settings
 shown above:
@@ -108,19 +107,19 @@ shown above:
 ``enabled``
    - ``auto`` (the default) renders on the GPU whenever one can be initialized
      and silently uses the CPU otherwise.
-   - ``on`` does the same but records a warning in the log
-     (``~/.picasso/logs/picasso.log``) when the GPU cannot be used, for
+   - ``on`` does the same but records a warning in the
+     :ref:`error log <error-log>` when the GPU cannot be used, for
      troubleshooting.
    - ``off`` never touches the GPU.
 
    Whatever the setting, a problem on the GPU never interrupts your work: the
-   affected image is simply rendered on the CPU. Very small renders (fewer
-   than 20,000 localizations) always use the CPU, which is faster for them; a
-   rotated 3D render counts twenty-fold, as it costs the CPU that much more,
-   so the rotation window uses the GPU from about a thousand localizations on.
-   ``View > Show info`` shows which renderer is in use, and when the last
-   render was handed from the GPU to the CPU it names the reason (the full
-   traceback is in the log).
+   affected image is simply rendered on the CPU. Renders of fewer than
+   20,000 localizations always use the CPU, which is faster for them. In the
+   3D view the threshold is 1,000 localizations.
+   ``View > Show info`` shows which renderer is in use (see
+   :ref:`render-info-display`), and when the last render was handed from the
+   GPU to the CPU it names the reason (the full traceback is in the
+   :ref:`error log <error-log>`).
 ``adapter``
    Which graphics card to use on computers with several, e.g. laptops with an
    integrated and a dedicated GPU. ``high-performance`` (the default) asks the
@@ -144,14 +143,14 @@ shown above:
 Requirements
 ~~~~~~~~~~~~
 
-- A graphics card with a current driver that supports Metal (macOS 10.13 or
-  later, all Apple silicon Macs), Direct3D 12 (Windows 10 or later) or Vulkan
-  (Linux, with the vendor's Vulkan driver installed).
+- A graphics card from any manufacturer (NVIDIA, AMD, Intel or Apple), with
+  a current driver that supports Metal (macOS 10.13 or later, all Apple
+  silicon Macs), Direct3D 12 (Windows 10 or later) or Vulkan (Linux, with the
+  vendor's Vulkan driver installed). Unlike other GPU functionalities in Picasso, GPU
+  rendering does not strictly require an NVIDIA card or CUDA. Integrated graphics work
+  as well, but dedicated cards are faster.
 - The ``wgpu`` package: the one-click installers ship it, pip users install
   ``picassosr[wgpu]``.
-
-Any vendor works (NVIDIA, AMD, Intel, Apple); integrated GPUs work too,
-discrete cards are faster. No CUDA is needed for rendering.
 
 .. _render-gpu-troubleshooting:
 
@@ -163,25 +162,25 @@ When ``View > Show info`` says CPU, check in this order:
 1. ``Render: gpu: enabled`` in ``File > Picasso settings`` is not set to
    ``off``.
 2. The dataset is not too small: renders of fewer than 20,000 localizations
-   always use the CPU, and the info dialog reports the renderer of the last
+   (1,000 in the 3D view) always use the CPU, and the info dialog reports the renderer of the last
    render.
 3. ``wgpu`` is installed in the environment that runs Picasso
    (``pip install picassosr[wgpu]``); the one-click installers include it.
 4. Set ``enabled: on``, restart Picasso, open the data again and read
-   ``~/.picasso/logs/picasso.log``: the line *GPU rendering unavailable* names
+   the :ref:`error log <error-log>`: the line *GPU rendering unavailable* names
    the reason (no adapter found, a driver too old for Direct3D 12 or Vulkan, a
    name given under ``adapter`` that matches no card).
 5. On a computer with several GPUs, set ``adapter`` to (part of) the name of
    the card you want, e.g. ``NVIDIA``.
-6. Remote desktop sessions and virtual machines may expose no usable GPU at
-   all; run Picasso locally on such machines or accept the CPU renderer there.
 
 .. _render-gpu-details:
 
 How the GPU path compares to the CPU
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-- Every blur method renders on the GPU, in 2D and in the 3D rotation window.
+- All blur methods render on the GPU, in 2D and in the 3D view, except the
+  :ref:`adaptive histogram and the jittered triangulation <render-blur>`,
+  which always render on the CPU.
 - Zoomed-in views use the same spatial index as the CPU path: once the field
   of view covers less than a tenth of the image, only the localizations around
   it are handed to the GPU, so rendering cost follows what is visible.
@@ -194,12 +193,6 @@ How the GPU path compares to the CPU
   match to about a thousandth of the image maximum, and histogram counts are
   exact save for a localization that sits within floating-point rounding of a
   pixel edge.
-
-.. important::
-
-   The GPU sums the contributions to a pixel in a hardware-dependent order, so
-   repeated GPU renders can differ in the last decimal places of the raw
-   intensities; the CPU renderer sums in a fixed order and reproduces its
-   images exactly. Quantitative exports and the Python API
-   (``picasso.render``) use whichever renderer the settings select, so set
-   ``enabled: off`` if bit-for-bit reproducible CPU images are required.
+- Repeated GPU renders can differ in the last decimal places, since the GPU
+  sums in a hardware-dependent order. Set ``enabled: off`` if you need
+  bit-for-bit reproducible images (this also applies to ``picasso.render``).

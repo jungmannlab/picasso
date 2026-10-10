@@ -3743,10 +3743,20 @@ def point_in_pick(
 
 
 def permutation_test(
-    arr1: FloatArray1D, arr2: FloatArray1D, iterations: int = 1000
+    arr1: FloatArray1D,
+    arr2: FloatArray1D,
+    iterations: int = 1000,
+    alternative: Literal["two-sided", "less", "greater"] = "two-sided",
+    seed: int | None = 0,
 ) -> tuple[float, float, float]:
     """Perform a permutation test to compare two arrays. The test
     statistic is the Kolmogorov-Smirnov statistic.
+
+    The two arrays are pooled, and their labels are shuffled
+    ``iterations`` times, keeping the sizes of the two groups. The
+    p-value is the fraction of shuffles with a statistic at least as
+    large as the observed one, with the observed arrangement counted as
+    one of them, so that it is never 0.
 
     Parameters
     ----------
@@ -3754,30 +3764,43 @@ def permutation_test(
         Arrays to be compared.
     iterations : int, optional
         Number of permutations to perform. Default is 1000.
+    alternative : {"two-sided", "less", "greater"}, optional
+        Alternative hypothesis of the KS test, see
+        ``scipy.stats.ks_2samp``. "greater" tests whether the values of
+        ``arr1`` tend to be smaller than those of ``arr2`` (the CDF of
+        ``arr1`` lies above that of ``arr2``). Default is "two-sided".
+    seed : int or None, optional
+        Seed of the random number generator used for the shuffles, so
+        that the permutation p-value is reproducible. None gives a
+        different result on each call. Default is 0.
 
     Returns
     -------
     obs_d : float
         Observed KS statistic.
     p_perm : float
-        Permutation p-value.
+        Permutation p-value, at least ``1 / (iterations + 1)``.
     ks_pval : float
         KS test theoretical p-value.
     """
+    rng = np.random.default_rng(seed)
     combined = np.concatenate([arr1, arr2])
     n1 = len(arr1)
 
     # observe the real difference
-    obs_d, ks_pval = stats.ks_2samp(arr1, arr2)
+    obs_d, ks_pval = stats.ks_2samp(arr1, arr2, alternative=alternative)
 
     # build null distribution by shuffling
-    null_dist = []
-    for _ in range(iterations):
-        shuffled = np.random.permutation(combined)
-        d_perm, _ = stats.ks_2samp(shuffled[:n1], shuffled[n1:])
-        null_dist.append(d_perm)
+    null_dist = np.empty(iterations)
+    for i in range(iterations):
+        shuffled = rng.permutation(combined)
+        null_dist[i], _ = stats.ks_2samp(
+            shuffled[:n1], shuffled[n1:], alternative=alternative
+        )
 
-    p_perm = np.sum(np.array(null_dist) >= obs_d) / iterations
+    # the observed arrangement is one of the possible ones (Phipson and
+    # Smyth, 2010), which also keeps p from being exactly 0
+    p_perm = (np.sum(null_dist >= obs_d) + 1) / (iterations + 1)
     return obs_d, p_perm, ks_pval
 
 
@@ -3819,13 +3842,23 @@ def _subclustering_title(
     has_sparse: bool,
     clustered_n_events: IntArray1D,
     sparse_n_events: IntArray1D,
+    one_sided: bool = False,
 ) -> str:
-    """Plot title: KS-test summary, or why no test was performed."""
+    """Plot title: KS-test summary, or why no test was performed.
+
+    With ``one_sided``, the test is whether the clustered molecules have
+    fewer events than the sparse ones, i.e., whether the CDF of the
+    clustered population lies above that of the sparse one.
+    """
     if has_clustered and has_sparse:
-        stat, p_perm, p = permutation_test(clustered_n_events, sparse_n_events)
+        alternative = "greater" if one_sided else "two-sided"
+        stat, p_perm, p = permutation_test(
+            clustered_n_events, sparse_n_events, alternative=alternative
+        )
         p_value_str = r"$p_{value}$"
+        test = "one-sided KS test" if one_sided else "KS test"
         return (
-            f"KS test: stat={stat:.4f}\n"
+            f"{test}: stat={stat:.4f}\n"
             f"permutation {p_value_str}={p_perm:.4f}\n"
             f"theoretical {p_value_str}={p:.4f}"
         )
@@ -3862,9 +3895,15 @@ def plot_subclustering_check(
     fig: plt.Figure | None = None,
     fill: bool = True,
     outline: bool = False,
+    one_sided: bool = False,
 ) -> tuple[plt.Figure, plt.Axes] | tuple[None, None]:
     """Plot the results of subclustering analysis, see
     ``picasso.clusterer.test_subclustering``.
+
+    The title reports a Kolmogorov-Smirnov test between the numbers of
+    events of the two populations, with a permutation p-value from 1000
+    shuffles of the population labels (see ``permutation_test``) and
+    the theoretical p-value.
 
     Parameters
     ----------
@@ -3887,6 +3926,11 @@ def plot_subclustering_check(
     fill, outline : bool, optional
         Whether the bars are filled and/or outlined, see
         ``histogram_style``. Default is filled without an outline.
+    one_sided : bool, optional
+        If True, test only whether the clustered molecules have fewer
+        events than the sparse ones, which is what subclustering
+        predicts. Otherwise, test for any difference between the two
+        distributions. Default is False.
 
     Returns
     -------
@@ -3933,7 +3977,11 @@ def plot_subclustering_check(
         ax1.legend()
 
     title = _subclustering_title(
-        has_clustered, has_sparse, clustered_n_events, sparse_n_events
+        has_clustered,
+        has_sparse,
+        clustered_n_events,
+        sparse_n_events,
+        one_sided=one_sided,
     )
     ax1.set_title(title, fontsize=10)
     _save_subclustering_plot(fig, plot_path)

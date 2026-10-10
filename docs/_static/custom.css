@@ -86,7 +86,22 @@ section:has(> .hero) > h1 {
   color: var(--pst-color-text-muted);
 }
 
+/* A linked card is covered by its stretched link (z-index 1), which swallows
+   clicks on links in the card text; lift those above it. */
+.sd-card-body a:not(.sd-stretched-link) {
+  position: relative;
+  z-index: 2;
+}
+
 /* ---- Content ----------------------------------------------------------- */
+
+/* The theme tightens only the first paragraph of a list item, so a last
+   paragraph keeps the full paragraph margin and leaves a gap before the
+   next item. */
+ol li > p:last-child,
+ul li > p:last-child {
+  margin-bottom: 0.25rem;
+}
 
 /* Screenshots: a subtle frame so that light GUI captures stand out from a
    light page. */
@@ -94,6 +109,41 @@ img.screenshot {
   border: 1px solid var(--pst-color-border);
   border-radius: 0.4rem;
   box-shadow: 0 1px 6px rgba(0, 0, 0, 0.08);
+}
+
+/* In dark mode the theme puts a white background behind every image. The
+   screenshots are opaque windows with a transparent shadow, so without it
+   they sit on the dark page instead of in a white box. The theme's slight
+   dimming of images stays. Images with dark content on a transparent
+   background need an ``only-dark`` variant instead. */
+html[data-theme="dark"] .bd-content img:not(.only-dark):not(.dark-light) {
+  background-color: transparent;
+}
+
+/* Figures with a light and a dark version: the theme hides the image and
+   caption of the other mode, this also hides its (otherwise empty) figure
+   and its margins. */
+html[data-theme="light"] figure:has(> .only-dark),
+html:not([data-theme]) figure:has(> .only-dark),
+html[data-theme="dark"] figure:has(> .only-light) {
+  display: none;
+}
+
+/* Collapsed Python examples at the end of sections (sphinx-design
+   dropdowns with the api-example class): compact, and closed by default
+   so that they do not get in the way of GUI users. */
+details.api-example {
+  margin: 0.75rem 0 1.25rem;
+}
+
+details.api-example > summary {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--pst-color-primary);
+}
+
+details.api-example .highlight {
+  margin-bottom: 0;
 }
 
 figure figcaption {

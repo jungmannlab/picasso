@@ -1,7 +1,8 @@
 Average
 =======
 
-``Picasso: Average`` aligns picked structures onto each other and displays
+``Picasso: Average`` aligns picked structures (see :ref:`render-picking`)
+onto each other and displays
 their average image. The averaging module uses 2D cross-correlation to
 determine the rotational and translational offset.
 
@@ -48,6 +49,35 @@ Particle averaging
    selecting ``File > Save``. The resulting HDF5 localization file contains the
    aligned localizations in the center of the movie dimensions. It can be
    loaded like any other HDF5 localization file into ``Picasso: Render``.
+
+   The metadata of the saved file record the averaging: every
+   ``Process > Average`` run since the file was opened is listed under
+   ``Rounds`` with its ``Display pixel size (nm)`` and ``Iterations``, so the
+   whole sequence of steps can be reproduced (see :ref:`files-metadata-settings`).
+
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
+
+   ``average`` needs the ``group`` column of picked localizations. It
+   starts worker processes, so in a script keep the call inside ``if
+   __name__ == "__main__":``.
+
+   .. code-block:: python
+
+      from picasso import average, io
+
+      if __name__ == "__main__":
+          locs, info = io.load_locs("movie_locs_picked.hdf5")
+          avg_locs, avg_info = average.average(
+              locs, info,
+              display_pixel_size=5.0,
+              iterations=10,
+              return_shifted_locs=True,
+              progress_callback="console",
+          )
+          io.save_locs("movie_locs_picked_avg.hdf5", avg_locs, avg_info)
+
 
 .. tip::
 

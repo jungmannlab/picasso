@@ -7,10 +7,12 @@ Localize
 
    Picasso Localize with identified spots in a movie frame.
 
-Localize performs the super-resolution reconstruction of image stacks: it identifies single-molecule spots in every frame and fits them to obtain their positions.
+Localize performs the super-resolution reconstruction of image stacks in two steps:
 
-- **Spot detection** uses a gradient-based approach by default. A B-spline wavelet segmentation is available as an alternative (see :ref:`localize-wavelet`).
-- **Fitting** combines a **PSF model** with an independently chosen **optimizer**: least squares (LQ) or maximum likelihood (MLE, Poisson). Every PSF model can be fitted with either optimizer, on the CPU or on the GPU (see :doc:`localize/gpu`).
+- **Identification** finds the single-molecule spots in every frame and places a box around each, at a whole-pixel position. By default, spots are found by their net gradient; a B-spline wavelet segmentation is available as an alternative (see :ref:`localize-wavelet`).
+- **Fitting** fits a **PSF model** to the pixels in each box, with an independently chosen **optimizer**: least squares (LQ) or maximum likelihood (MLE, Poisson). Every PSF model can be fitted with either optimizer, on the CPU or on the GPU (see :doc:`localize/gpu`). This gives the sub-pixel position of each molecule, its photons, background and localization precision.
+
+Together, the two steps are referred to here as **localization** (``Analyze`` > ``Localize (Identify & Fit)``). The steps can also be run on their own (``Analyze`` > ``Identify`` and ``Analyze`` > ``Fit``), for example to fit loaded identifications.
 
 To get started, open a movie and follow the steps in :ref:`localize-identification`.
 
@@ -19,14 +21,44 @@ PSF models
 
 The following PSF models are implemented:
 
-- **Elliptical Gaussian.** Fits independent widths ``sx`` and ``sy``.
+- **Elliptical Gaussian.** Fits a 2D Gaussian distribution independent widths ``sx`` and ``sy``.
 - **Spherical (isotropic) Gaussian.** Fits a single shared width, so ``sx`` and ``sy`` are always equal. The ``ellipticity`` column is not saved for this model. Supports multichannel fitting as well, see :ref:`localize-multichannel-gaussian`.
-- **Rotated elliptical Gaussian.** The fitted in-plane rotation angle is saved in the ``angle`` column, in degrees.
+- **Rotated elliptical Gaussian.** Same as *Elliptical Gaussian*, however, an in-plane rotation angle is also fitted and saved in the ``angle`` column, in degrees.
 - **Experimental PSF (cubic spline).** Fits an experimentally measured PSF; a 3D calibration recovers ``z`` directly; see :doc:`localize/spline`. Supports multichannel fitting as well, see :ref:`localize-multichannel-spline`.
 
 In addition, ``Average of ROI`` is available as a non-fitting option that simply sums the intensity of each spot.
 
 Fitting can run on a CUDA-capable GPU (see :doc:`localize/gpu`). The kernels are compiled at run time by Numba, so there is no library to build or install beyond the CUDA runtime (``pip install picassosr[gpu]``), on Windows and Linux alike. When no CUDA GPU is available, the GPU fitting option simply does not appear and Picasso uses the CPU algorithms.
+
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
+
+   Identify and fit a movie in one call and save the localizations.
+   ``identification_parameters`` takes the keys of the ``Parameters``
+   dialog; ``fitting_method`` names the PSF model and the optimizer
+   (``gausslq``, ``gaussmle``, ``gausslq-spherical``, ``gaussmle-rotated``,
+   ``spline``, ``spline-mle``, ...), with ``-gpu`` appended to fit on the
+   GPU.
+
+   .. code-block:: python
+
+      from picasso import io, localize
+
+      movie, info = io.load_movie("movie.tif")
+      camera_info = {
+          "Baseline": 100, "Sensitivity": 0.53, "Gain": 1, "Qe": 1, "Pixelsize": 130
+      }
+
+      locs, info = localize.localize(
+          movie,
+          camera_info=camera_info,
+          identification_parameters={"Box Size": 7, "Min. Net Gradient": 5000},
+          movie_info=info,
+          fitting_method="gaussmle",
+      )
+      io.save_locs("movie_locs.hdf5", locs, info)
+
 
 .. _localize-file-formats:
 
@@ -71,7 +103,7 @@ Picasso Localize reads the following movie formats:
      - Supported only on Windows. For files with several channels, a dialog asks which channel to load.
    * - Nikon ND2
      - ``.nd2``
-     - Either a time series or a z-stack (``T`` or ``Z`` axis).
+     - Either a time series (e.g., SMLM measurement) or a z-stack (e.g., calibration) (``T`` or ``Z`` axis).
    * - MetaMorph STK
      - ``.stk``
      - For consecutive files (e.g. ``name_001.stk``, ``name_002.stk``, …), open the first file of the desired range; all subsequent files with a higher numeric suffix are included automatically.
@@ -95,6 +127,24 @@ Picasso Localize reads the following movie formats:
    To load every channel of a multichannel file at once, see :ref:`localize-opening-channels`.
 
 We are open to feature requests regarding support for other file formats, please visit our `GitHub page <https://github.com/jungmannlab/picasso>`_.
+
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
+
+   ``io.load_movie`` opens every format in the table, chosen by the file
+   extension, and returns the movie with its metadata. Frames are read on
+   demand, so large movies open quickly. A ``.raw`` movie needs its
+   ``.yaml`` next to it.
+
+   .. code-block:: python
+
+      from picasso import io
+
+      movie, info = io.load_movie("movie.nd2")
+      frame = movie[100]      # one frame as a NumPy array
+      print(info[0]["Frames"], info[0]["Height"], info[0]["Width"])
+
 
 Topics
 ------
@@ -124,13 +174,19 @@ Topics
       :link: localize/3d-calibration
       :link-type: doc
 
-      Astigmatic z calibration and fitting, and lateral (astigmatism / chromatic) corrections.
+      Astigmatic z calibration and fitting.
 
    .. grid-item-card:: :octicon:`graph;1.5em;sd-mr-1` Experimental PSF (cubic spline)
       :link: localize/spline
       :link-type: doc
 
       Building and checking a spline PSF calibration, fitting with it, and multichannel (e.g. biplane) spline fitting.
+
+   .. grid-item-card:: :octicon:`git-compare;1.5em;sd-mr-1` Lateral corrections
+      :link: localize/lateral-correction
+      :link-type: doc
+
+      Correcting ``x`` and ``y`` for the cylindrical lens and for chromatic aberration, in 2D and 3D.
 
    .. grid-item-card:: :octicon:`columns;1.5em;sd-mr-1` Multichannel fitting
       :link: localize/multichannel
@@ -146,4 +202,5 @@ Topics
    localize/camera
    localize/3d-calibration
    localize/spline
+   localize/lateral-correction
    localize/multichannel

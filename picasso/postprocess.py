@@ -3294,8 +3294,8 @@ def pick_kinetics(
         Array of dark times between binding events in each picked region
         in units of frames.
     no_locs : lib.IntArray1D
-        Array of number of localizations in each binding event in each
-        picked region.
+        Array of number of localizations in each picked region (before
+        linking into binding events).
     out_locs : pd.DataFrame
         Dataframe containing the localizations in all picked regions with
         added 'length', 'dark' and 'n' fields/columns. Pick regions
@@ -3328,7 +3328,7 @@ def pick_kinetics(
         pick_locs, l_, d_ = result
         length.append(l_)
         dark.append(d_)
-        no_locs.append(len(pick_locs))
+        no_locs.append(len(picked_locs[i]))
         out_locs.append(pick_locs)
         kept_indices.append(i)
     if callable(progress_callback):

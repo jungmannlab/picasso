@@ -28,6 +28,22 @@ directory. The path is also displayed in the ``Getting started`` tab in the
 ``Status`` page. To directly access the database, the tool
 `DB Browser for SQLite <https://sqlitebrowser.org>`_ is recommended.
 
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
+
+   The database is SQLite; its tables are ``files`` and ``watcher``.
+
+   .. code-block:: python
+
+      import sqlite3
+      import pandas as pd
+      from picasso import localize
+
+      with sqlite3.connect(localize.db_filename()) as con:
+          files = pd.read_sql("SELECT * FROM files", con)
+
+
 .. _server-localize:
 
 Localize
@@ -41,12 +57,37 @@ Localize
    ``Sample Quality`` in Localize.
 
 The integration within :doc:`localize` is by pressing the ``Estimate`` button
-in the ``Sample Quality`` field in ``Parameters``. The button can be pressed
+in the ``Sample Quality`` field in ``Parameters`` (see the figure on the
+right). The button can be pressed
 once the image stack has been localized.
 
 It calculates localizations per frame, NeNA, drift and bright time based on a
 subset of the data (i.e., max. 1 million localizations). The estimate and
 additional summary statistics will then be stored in the local database.
+
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
+
+   The same estimates are available as functions, and ``add_file_to_db``
+   stores them.
+
+   .. code-block:: python
+
+      from picasso import io, localize
+
+      locs, info = io.load_locs("movie_locs.hdf5")
+      nena_px = localize.check_nena(locs, info)              # camera pixels
+      mean_len = localize.check_kinetics(locs, info)         # mean bright time, frames
+      drift = localize.check_drift(locs, info)               # (x, y), camera pixels
+
+      summary = localize.get_file_summary(
+          "movie.tif", "movie_locs.hdf5", drift=drift, len_mean=mean_len, nena=nena_px
+      )
+      localize.add_file_to_db(
+          "movie.tif", "movie_locs.hdf5", drift=drift, len_mean=mean_len, nena=nena_px
+      )
+
 
 .. _server-browser-app:
 
@@ -218,7 +259,7 @@ then be:
 - ``picasso undrift $FILENAME`` for drift correction;
 - ``picasso link $FILENAME`` for linking localizations;
 - ``picasso dbscan $FILENAME 0.1 2`` for performing DBSCAN cluster analysis
-  with 0.1 / 2.
+  with clustering radius 0.1 and density 2.
 
 Preview
 ~~~~~~~
