@@ -9110,6 +9110,9 @@ class LocsLoadWorker(QtCore.QObject):
     progress = QtCore.pyqtSignal(int, str)  # index, filename
     # progress within the current file: (done, total) localizations
     subprogress = QtCore.pyqtSignal(int, int)
+    # the current file has been read and its spatial index is being
+    # built (no saved one to reuse); the build reports no progress
+    indexing = QtCore.pyqtSignal(str)  # filename
     # path, locs, info, render index
     loaded = QtCore.pyqtSignal(str, object, object, object)
     failed = QtCore.pyqtSignal(str, str)  # path, error message
@@ -9166,14 +9169,14 @@ class LocsLoadWorker(QtCore.QObject):
             self.failed.emit(path, str(e))
             return None
 
-    @staticmethod
-    def _load_render_index(path: str, locs, info):
+    def _load_render_index(self, path: str, locs, info):
         """Render index for ``locs``, loaded from ``path`` if it
         still describes them, else built from scratch; None on any
         failure to load or build one."""
         try:
             render_index = spatial_index.load_render_index(path, locs, info)
             if render_index is None:
+                self.indexing.emit(os.path.basename(path))
                 render_index = spatial_index.build_render_index(locs, info)
         except Exception:
             render_index = None
@@ -9421,6 +9424,7 @@ class View(QtWidgets.QLabel):
         self._load_callback = None
         self._load_fit_in_view = True
         self._load_index = 0  # file currently being read
+        self._load_n_steps = 0  # range of the loading progress bar
         # asynchronous rendering (see ``RenderWorker``): completed
         # renders are matched against the newest request id, so stale
         # results from superseded requests are dropped
@@ -9748,6 +9752,7 @@ class View(QtWidgets.QLabel):
         self._load_fit_in_view = len(self.locs) == 0
         self._load_callback = on_finished
         self._load_index = 0
+        self._load_n_steps = len(jobs) * LOAD_PROGRESS_RESOLUTION
 
         # each file spans LOAD_PROGRESS_RESOLUTION steps, such that the
         # bar also advances *within* a file, from the worker's reports
@@ -9755,7 +9760,7 @@ class View(QtWidgets.QLabel):
             "Loading localizations...",
             "Cancel",
             0,
-            len(jobs) * LOAD_PROGRESS_RESOLUTION,
+            self._load_n_steps,
             self,
         )
         progress.setWindowTitle("Loading channels")
@@ -9775,6 +9780,7 @@ class View(QtWidgets.QLabel):
         thread.started.connect(worker.run)
         worker.progress.connect(self._on_load_progress)
         worker.subprogress.connect(self._on_load_subprogress)
+        worker.indexing.connect(self._on_load_indexing)
         worker.loaded.connect(self._on_locs_loaded)
         worker.failed.connect(self._on_load_failed)
         worker.finished.connect(self._on_load_finished)
@@ -9800,7 +9806,19 @@ class View(QtWidgets.QLabel):
         self._load_index = index
         if self._load_progress is not None:
             self._load_progress.setLabelText(f"Loading {filename}...")
+            # leave the busy state of a previous file's indexing
+            self._load_progress.setRange(0, self._load_n_steps)
             self._load_progress.setValue(index * LOAD_PROGRESS_RESOLUTION)
+
+    def _on_load_indexing(self, filename: str) -> None:
+        """Show that the current file is being indexed. The build
+        reports no progress, so the bar turns into a busy indicator
+        until the next file starts."""
+        if self._load_progress is not None:
+            self._load_progress.setLabelText(
+                f"Building spatial index for {filename}..."
+            )
+            self._load_progress.setRange(0, 0)
 
     def _on_load_subprogress(self, done: int, total: int) -> None:
         """Advance the bar within the current file, from the worker's
