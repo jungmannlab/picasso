@@ -7,12 +7,34 @@ In astigmatic 3D imaging, a cylindrical lens makes the fitted spot widths ``sx``
 
 For better accuracy, use an experimentally measured PSF instead (see :doc:`spline`). A real astigmatic PSF is not an elliptical Gaussian and the spline model fits its actual shape and recovers ``z`` directly in the same fit as ``x`` and ``y``, rather than from the fitted widths afterwards.
 
+.. _localize-3d-calibration-gui:
+
+Calibrating in the GUI
+----------------------
+
+1. Record a z-stack of fluorescent beads: move the stage through the focus in steps of known size (e.g., 10 nm).
+2. Open the stack in ``Picasso: Localize`` and set ``Box side length`` and ``Min. net gradient`` in ``Analyze`` > ``Parameters...`` so that the beads are identified over the whole stack (check with ``Preview``). The temporal median filter is not applied during calibration, see :ref:`localize-temporal-median-filter`.
+3. Select ``Calibration`` > ``Calibrate astigmatism (Gaussian)``. A dialog collects:
+
+   **Calibration step size (nm)**
+      The axial stage step between consecutive z positions.
+
+   **Number of frames per step size** and **Frame order**
+      For movies that image several fields of view (FOVs) to collect more beads: the number of FOVs, and whether all FOVs are imaged at each z position before the stage moves (``Different FOVs first``) or each FOV gets its own full z-stack (``Different z positions first``).
+
+   **Z binning (steps per bin)** (default 1)
+      See :ref:`localize-calibrating-z` below.
+
+4. Choose where to save the calibration (``<movie>_3d_calib.yaml`` by default). The diagnostic plot is saved next to it, see :ref:`localize-3d-calibration-plot`.
+
+To fit z, load the calibration with ``Load calibration`` in the ``3D via Astigmatism`` group of the ``Parameters`` dialog; ``Fit Z`` is then ticked. The ``Magnification factor`` (default 0.79) scales the fitted ``z`` to correct for the refractive-index mismatch between the immersion medium and the sample (`Huang et al., Science, 2008 <https://doi.org/10.1126/science.1153529>`__).
+
 .. _localize-3d-theory:
 
 Theory
 ------
 
-3D Calibration is performed by an adapted version of `Huang et al., 2008 <https://www.ncbi.nlm.nih.gov/pubmed/18174397/>`_.
+3D Calibration is performed by an adapted version of `Huang et al., 2008 <https://doi.org/10.1126/science.1153529>`_.
 
 .. _localize-calibrating-z:
 

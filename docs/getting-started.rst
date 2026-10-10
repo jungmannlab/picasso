@@ -20,7 +20,8 @@ movie to final image.
       :link-type: doc
       :class-card: sd-card-hover
 
-      How the modules fit together in a typical experiment.
+      A step-by-step first analysis, from raw movie to super-resolution
+      image.
 
    .. grid-item-card:: :octicon:`mortar-board;1.5em;sd-mr-1` Citing and credits
       :link: getting-started/citing
