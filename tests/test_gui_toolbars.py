@@ -263,6 +263,7 @@ def test_filter_toolbar(qt_offscreen):
             "2D histogram",
             "Subclustering",
             "Filter",
+            "Expression",
             "From metadata",
             "Plot settings",
         ]

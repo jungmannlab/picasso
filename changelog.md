@@ -56,6 +56,11 @@ Last change: 11-OCT-2026 CEST
 - Fixed: `Height` and `Width` were swapped in the metadata of non-square `.ims` movies.
 - Fixed drift estimation when adding to database + database building.
 
+### Filter
+- Filtering by expression: `Filter > Filter by expression...` for universal filtering with comparisons, logic, arithmetic, functions and statistics over the shown localizations. See the [documentation](https://picassosr.readthedocs.io/en/latest/filter.html#filter-expression).
+- The metadata of a filtered file lists its filter steps in the order they were applied.
+- Filter shows 1D histograms of both variablies in the 2D histogram filtering.
+
 ### **Backward incompatible changes:**
 - *Tools > Fast rendering* is removed: with GPU rendering and other speed improvements it no longer serves a purpose.
 - The relative intensity of channels is replaced by the per-channel contrast:
@@ -70,7 +75,6 @@ Last change: 11-OCT-2026 CEST
     - `picasso.render.build_animation` no longer accepts positions given as Euler angles `(angle_x, angle_y, angle_z, viewport)`; pass `(rotation, viewport)` with a `scipy.spatial.transform.Rotation` (`picasso.render.rotation_matrix` converts the old angles).
 
 ### Others
-- Filter shows 1D histograms of both variablies in the 2D histogram filtering.
 - Many plots are not customizable.
 - Code readability clean ups (flake8).
 - The spatial index stored in localization .hdf5 files (`/render_index`). See the [documentation](https://picassosr.readthedocs.io/en/latest/files.html#spatial-index).

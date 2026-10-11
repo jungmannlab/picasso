@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import os.path
 import sys
+from collections.abc import Iterator, Mapping
 
 import numpy as np
 import pandas as pd
@@ -27,7 +28,7 @@ from matplotlib.backends.backend_qt5agg import (
 )
 from matplotlib.widgets import SpanSelector, RectangleSelector
 
-from .. import io, lib, clusterer, __version__, docs_url
+from .. import io, lib, clusterer, expression, __version__, docs_url
 from .app import run_gui
 from . import theme
 from . import toolbars
@@ -558,6 +559,155 @@ class FilterNum(lib.Dialog):
             self.attributes.addItem(name)
 
 
+EXPRESSION_TOOLTIP = (
+    "Condition that the kept localizations satisfy, e.g.,\n"
+    "  photons > 500 and 0.8 < sx < 1.2\n"
+    "  lpx * pixelsize < 10    (pixelsize: nm per camera pixel)\n"
+    "  photons > median(photons)\n\n"
+    "Comparisons: < <= > >= == != (also chained: 0.8 < sx < 1.2)\n"
+    "Logic: and, or, not\n"
+    "Arithmetic: + - * / // % **\n"
+    "Functions: abs, sqrt, log, log10, exp, floor, ceil, isfinite\n"
+    "Statistics: mean, median, std, min, max, sum, percentile(values, q)\n"
+    "Statistics are computed over the localizations currently shown,\n"
+    "ignoring non-finite values. Press Enter to filter."
+)
+
+
+class FilterExpression(lib.Dialog):
+    """Dialog for filtering localizations with a condition on their
+    columns, see :mod:`picasso.expression`.
+
+    ...
+
+    Attributes
+    ----------
+    columns_label : QtWidgets.QLabel
+        Names the condition may use.
+    expression : QtWidgets.QLineEdit
+        Condition to filter by.
+    status : QtWidgets.QLabel
+        Syntax errors while typing, or the result of the last filter.
+    window : QtWidgets.QMainWindow
+        Main window.
+
+    Parameters
+    ----------
+    window : QtWidgets.QMainWindow
+        Main window.
+    """
+
+    DOCS_URL = docs_url("filter.html#filter-expression")
+
+    def __init__(self, window: QtWidgets.QMainWindow) -> None:
+        super().__init__(window)
+        self.window = window
+        self.setWindowTitle("Filter by expression")
+        this_directory = os.path.dirname(os.path.realpath(__file__))
+        icon_path = os.path.join(this_directory, "icons", "filter.ico")
+        self.setWindowIcon(QtGui.QIcon(icon_path))
+        self.setMinimumWidth(480)
+
+        layout = QtWidgets.QGridLayout(self)
+        layout.addWidget(lib.HelpButton(self.DOCS_URL), 0, 0)
+        label = QtWidgets.QLabel("Keep localizations where:")
+        label.setToolTip(EXPRESSION_TOOLTIP)
+        layout.addWidget(label, 0, 1)
+
+        self.expression = QtWidgets.QLineEdit()
+        self.expression.setPlaceholderText("photons > 500 and 0.8 < sx < 1.2")
+        self.expression.setToolTip(EXPRESSION_TOOLTIP)
+        self.expression.textChanged.connect(self.check)
+        self.expression.returnPressed.connect(self.filter)
+        layout.addWidget(self.expression, 1, 0, 1, 2)
+
+        self.columns_label = QtWidgets.QLabel()
+        self.columns_label.setWordWrap(True)
+        self.columns_label.setTextInteractionFlags(
+            QtCore.Qt.TextInteractionFlag.TextSelectableByMouse
+        )
+        layout.addWidget(self.columns_label, 2, 0, 1, 2)
+
+        self.status = QtWidgets.QLabel()
+        self.status.setWordWrap(True)
+        layout.addWidget(self.status, 3, 0, 1, 2)
+
+        filter_button = QtWidgets.QPushButton("Filter")
+        filter_button.setIcon(theme.icon("filter"))
+        filter_button.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
+        filter_button.clicked.connect(self.filter)
+        layout.addWidget(filter_button, 4, 0, 1, 2)
+
+    def _available_names(self) -> list[str]:
+        """Columns of the loaded file and metadata variables."""
+        if self.window.locs_full is None:
+            return []
+        variables = expression.variables_from_info(self.window.info)
+        return list(self.window.locs_full.columns) + list(variables)
+
+    def check(self) -> None:
+        """Report syntax errors and unknown names while typing."""
+        text = self.expression.text()
+        if not text.strip() or self.window.locs_full is None:
+            self.status.clear()
+            return
+        try:
+            unknown = sorted(
+                expression.names(text) - set(self._available_names())
+            )
+        except expression.ExpressionError as e:
+            self.status.setText(str(e))
+            return
+        if unknown:
+            self.status.setText(f"Unknown name(s): {', '.join(unknown)}.")
+        else:
+            self.status.clear()
+
+    def filter(self) -> None:
+        """Filter the shown localizations by the condition."""
+        if self.window.no_locs_warning("Filter by expression"):
+            return
+        n_before = self.window.n_filtered
+        try:
+            self.window.apply_expression(self.expression.text())
+        except expression.ExpressionError as e:
+            self.status.setText(str(e))
+            return
+        self.status.setText(
+            f"Kept {self.window.n_filtered:,} of {n_before:,}"
+            " localizations."
+        )
+
+    def on_locs_loaded(self) -> None:
+        """List the names a condition may use for the loaded file."""
+        self.columns_label.setText(
+            "Columns: " + ", ".join(self._available_names())
+        )
+        self.check()
+
+
+class _ShownColumns(Mapping):
+    """Columns of the localizations shown in the Filter window, read
+    on demand (see ``Window.get_column``)."""
+
+    def __init__(self, window: QtWidgets.QMainWindow) -> None:
+        self.window = window
+
+    def __getitem__(self, name: str) -> np.ndarray:
+        if name not in self:
+            raise KeyError(name)
+        return self.window.get_column(name)
+
+    def __contains__(self, name: object) -> bool:
+        return name in self.window.locs_full.columns
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self.window.locs_full.columns)
+
+    def __len__(self) -> int:
+        return len(self.window.locs_full.columns)
+
+
 class SubclusterNum(lib.Dialog):
     """Input dialog for specifying the distances used for testing
     for subclustering.
@@ -695,9 +845,12 @@ class Window(QtWidgets.QMainWindow):
 
     Attributes
     ----------
+    filter_expression : FilterExpression
+        Filter dialog for conditions on the columns.
     filter_log : dict
         Dictionary of filter logs, i.e., data on what attribute/field
-        was filtered and the corresponding min/max values.
+        was filtered and the corresponding min/max values, plus the
+        conditions applied, in order, under ``lib.FILTER_STEPS_KEY``.
     filter_num : FilterNum
         Filter dialog for numeric values.
     hist_windows : dict
@@ -730,6 +883,7 @@ class Window(QtWidgets.QMainWindow):
         self.table_model = TableModel(self)
         self.table_view.setModel(self.table_model)
         self.filter_num = FilterNum(self)
+        self.filter_expression = FilterExpression(self)
         self.metadata_dialog = lib.MetadataDialog(self)
         self.user_settings_dialog = lib.UserSettingsDialog(self)
         menu_bar = self.menuBar()
@@ -775,6 +929,11 @@ class Window(QtWidgets.QMainWindow):
         filter_action = filter_menu.addAction("Filter numerically...")
         filter_action.setShortcut("Ctrl+F")
         filter_action.triggered.connect(self.filter_num.show)
+        filter_expression_action = filter_menu.addAction(
+            "Filter by expression..."
+        )
+        filter_expression_action.setShortcut("Ctrl+E")
+        filter_expression_action.triggered.connect(self.filter_expression.show)
         apply_from_metadata_action = filter_menu.addAction(
             "Apply filters from metadata..."
         )
@@ -828,6 +987,11 @@ class Window(QtWidgets.QMainWindow):
                 (test_subcluster_action, "subclustering", "Subclustering"),
                 None,
                 (filter_action, "filter", "Filter"),
+                (
+                    filter_expression_action,
+                    "filter-expression",
+                    "Expression",
+                ),
                 (
                     apply_from_metadata_action,
                     "filter-metadata",
@@ -909,13 +1073,11 @@ class Window(QtWidgets.QMainWindow):
             keep = (col > xmin) & (col < xmax)
         if col.dtype.kind == "f":
             keep &= np.isfinite(col)
-        if self.filtered_idx is None:
-            self.filtered_idx = np.flatnonzero(keep).astype(
-                self._idx_dtype(len(self.locs_full)), copy=False
-            )
-        else:
-            self.filtered_idx = self.filtered_idx[keep]
+        self._keep(keep)
         self.log_filter(field, xmin, xmax)
+        self._log_step(
+            expression.range_expression(field, xmin, xmax, inclusive)
+        )
         self.refresh()
 
     def apply_range2d(
@@ -934,15 +1096,48 @@ class Window(QtWidgets.QMainWindow):
             keep &= np.isfinite(cx)
         if cy.dtype.kind == "f":
             keep &= np.isfinite(cy)
+        self._keep(keep)
+        self.log_filter(field_x, xmin, xmax)
+        self.log_filter(field_y, ymin, ymax)
+        self._log_step(expression.range_expression(field_x, xmin, xmax))
+        self._log_step(expression.range_expression(field_y, ymin, ymax))
+        self.refresh()
+
+    def apply_expression(self, condition: str) -> None:
+        """Filter the active index to rows that satisfy a condition,
+        e.g. ``"photons > median(photons)"``.
+
+        Statistics in the condition are computed over the rows shown
+        before this filter. ``pixelsize`` comes from the metadata.
+
+        Raises
+        ------
+        expression.ExpressionError
+            If the condition is invalid; nothing is filtered then.
+        """
+        keep = expression.condition(
+            condition,
+            _ShownColumns(self),
+            expression.variables_from_info(self.info),
+        )
+        self._keep(keep)
+        if (column_range := expression.parse_range(condition)) is not None:
+            self.log_filter(*column_range)
+        self._log_step(condition.strip())
+        self.refresh()
+
+    def _keep(self, keep: lib.BoolArray1D) -> None:
+        """Narrow the active index to the shown rows where ``keep``."""
         if self.filtered_idx is None:
             self.filtered_idx = np.flatnonzero(keep).astype(
                 self._idx_dtype(len(self.locs_full)), copy=False
             )
         else:
             self.filtered_idx = self.filtered_idx[keep]
-        self.log_filter(field_x, xmin, xmax)
-        self.log_filter(field_y, ymin, ymax)
-        self.refresh()
+
+    def _log_step(self, condition: str) -> None:
+        """Record a filter condition, in the order applied."""
+        self.filter_log.setdefault(lib.FILTER_STEPS_KEY, []).append(condition)
 
     def refresh(self) -> None:
         """Refresh the table view and any open histogram windows."""
@@ -1008,7 +1203,9 @@ class Window(QtWidgets.QMainWindow):
             for column_y in self.locs_full.columns:
                 self.hist2d_windows[column][column_y] = None
             self.filter_log[column] = None
+        self.filter_log[lib.FILTER_STEPS_KEY] = []
         self.filter_num.on_locs_loaded()
+        self.filter_expression.on_locs_loaded()
         self.refresh()
 
         self.setWindowTitle(
@@ -1135,13 +1332,15 @@ class Window(QtWidgets.QMainWindow):
             self.filter_log["Removed columns"].extend(to_remove)
         else:
             self.filter_log["Removed columns"] = to_remove
+        self.filter_num.on_locs_loaded()
+        self.filter_expression.on_locs_loaded()
 
-    def _build_filter_summary(self, ranges, to_remove, missing) -> str:
+    def _build_filter_summary(self, steps, to_remove, missing) -> str:
         lines = []
-        if ranges:
-            lines.append("Filters to apply:")
-            for field, (xmin, xmax) in ranges.items():
-                lines.append(f"  {field}: [{xmin}, {xmax}]")
+        if steps:
+            lines.append("Filters to apply, in this order:")
+            for step in steps:
+                lines.append(f"  {step}")
         if to_remove:
             if lines:
                 lines.append("")
@@ -1186,40 +1385,56 @@ class Window(QtWidgets.QMainWindow):
         if info is None:
             return
 
-        ranges, to_remove, missing = lib.extract_filter_steps(
-            info, self.locs_full.columns
-        )
+        title = "Apply filters from metadata"
+        try:
+            steps, to_remove, missing = lib.extract_filter_recipe(
+                info, self.locs_full.columns
+            )
+        except expression.ExpressionError as e:
+            QtWidgets.QMessageBox.warning(
+                self, title, f"The metadata has an invalid filter:\n{e}"
+            )
+            return
 
-        if not ranges and not to_remove:
+        if not steps and not to_remove:
             msg = "No applicable filter steps found in metadata."
             if missing:
                 msg += (
                     "\n\nReferenced columns not found in current data:\n  "
                     + "\n  ".join(missing)
                 )
-            QtWidgets.QMessageBox.information(
-                self, "Apply filters from metadata", msg
-            )
+            QtWidgets.QMessageBox.information(self, title, msg)
             return
 
         reply = QtWidgets.QMessageBox.question(
             self,
-            "Apply filters from metadata",
-            self._build_filter_summary(ranges, to_remove, missing),
+            title,
+            self._build_filter_summary(steps, to_remove, missing),
             QtWidgets.QMessageBox.StandardButton.Yes
             | QtWidgets.QMessageBox.StandardButton.Cancel,
         )
         if reply != QtWidgets.QMessageBox.StandardButton.Yes:
             return
 
-        for field, (xmin, xmax) in ranges.items():
-            self.apply_range(field, xmin, xmax)
+        for step in steps:
+            try:
+                self.apply_expression(step)
+            except expression.ExpressionError as e:
+                QtWidgets.QMessageBox.warning(
+                    self,
+                    title,
+                    f"Could not apply\n  {step}\n{e}\n\n"
+                    "The steps before it were applied; the rest were not.",
+                )
+                return
         if to_remove:
             self.locs_full.drop(columns=list(to_remove), inplace=True)
             if "Removed columns" in self.filter_log:
                 self.filter_log["Removed columns"].extend(to_remove)
             else:
                 self.filter_log["Removed columns"] = list(to_remove)
+            self.filter_num.on_locs_loaded()
+            self.filter_expression.on_locs_loaded()
             self.refresh()
 
     def export_csv_dialog(self) -> None:
@@ -1250,7 +1465,11 @@ class Window(QtWidgets.QMainWindow):
                 check_ext=".yaml",
             )
             if path:
-                filter_info = self.filter_log.copy()
+                filter_info = {
+                    key: value
+                    for key, value in self.filter_log.items()
+                    if key != lib.FILTER_STEPS_KEY or value
+                }
                 filter_info.update(
                     {"Generated by": f"Picasso v{__version__} Filter"}
                 )

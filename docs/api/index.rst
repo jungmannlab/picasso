@@ -62,6 +62,7 @@ Postprocessing
    picasso.registration
    picasso.transforms
    picasso.masking
+   picasso.expression
 
 Rendering
 ---------

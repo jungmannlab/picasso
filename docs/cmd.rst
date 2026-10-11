@@ -237,13 +237,33 @@ rendered to image files.
      -
      - Do not open the rendered image file.
 
+.. _cmd-filter:
+
 filter
 ------
-Start the filter module (GUI).
+Start the filter module (GUI) or filter from the command line. With no
+arguments the GUI opens; with a ``files`` path and one or more conditions on
+the columns, written as in :ref:`Filter <filter-expression>`, the
+localizations that satisfy them are kept. Several conditions are applied in
+the given order. The result is saved as ``*_filter.hdf5`` with the conditions
+in its metadata, so that Filter can :ref:`reapply them <filter-metadata>`.
 
 .. code-block:: bash
 
-   picasso filter
+   picasso filter [files conditions [conditions ...]]
+
+For example:
+
+.. code-block:: bash
+
+   picasso filter "data/*_locs.hdf5" "0.8 < sx < 1.2" "lpx * pixelsize < 10"
+
+Positional arguments:
+
+``files``
+   One or more hdf5 localization files (a unix style path pattern).
+``conditions``
+   One or more conditions; quote each one.
 
 design
 ------
