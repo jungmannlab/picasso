@@ -24,7 +24,7 @@ Files
 Shortcut: :kbd:`Ctrl+F`
 
 Opens the **Datasets** dialog, which lists every loaded channel and lets you
-control its title, visibility, color (or colormap), and relative intensity. A
+control its title, visibility, color (or colormap), and contrast. A
 small horizontal gradient next to each channel previews what that channel will
 look like at intensity 0 → intensity 1.
 
@@ -50,6 +50,29 @@ Channels are blended additively in the final image and clipped to 1.0, so
 overlapping high-intensity regions saturate toward the sum of the channel
 colors.
 
+.. _render-channel-contrast:
+
+The *Contrast (% of global)* column balances the channels against each other.
+Each channel has a lower and an upper contrast limit, set with the two spin
+boxes or dragged on the slider between them. The limits are given in percent
+of the global contrast window, i.e., of ``Min. density`` and ``Max. density``
+in :ref:`Display settings <render-colormap-setting>`: 0% is the minimum and
+100% the maximum density. For example, with a global contrast of 0 to 10
+localizations per display pixel:
+
+- 0–100% (the default) uses the global contrast, 0 to 10;
+- 0–40% brightens the channel, which saturates at 4 already;
+- 0–200% dims the channel, which saturates only at 20;
+- 10–100% hides the channel's faintest pixels, those below 1.
+
+The global contrast stays in charge: changing ``Min. density`` or ``Max.
+density`` moves every channel's window along, so the balance between the
+channels is kept. ``Reset`` sets all channels back to 0–100%. The 3D window
+(see :ref:`render-3d`) applies the same percentages to its own minimum and
+maximum density. The per-channel contrast is saved in the ``.yaml`` file
+written with exported images and restored when such a file is dropped onto
+Render.
+
 The ``Automatic coloring`` checkbox overrides per-channel selections with
 HSV-spaced colors for as long as it's ticked. ``Save colors`` /
 ``Load colors`` write / read a one-identifier-per-line ``.txt`` file — any
@@ -60,7 +83,7 @@ multichannel images (black by default). ``Invert colors / white background``
 gives multichannel images a white background and inverts the colormap of a
 single channel.
 
-The color, relative intensity and automatic coloring apply only when several
+The color, contrast and automatic coloring apply only when several
 channels are loaded. With a single channel they are grayed out, and a note at
 the bottom of the dialog says how the channel is rendered instead:
 

@@ -957,7 +957,7 @@ class AnimationDialog(lib.Dialog):
             locs = view._apply_pan_z(locs)
         n_frames = int(self.fps.value() * sum(durations))
         adjust_display_pixel = disp_dlg.dynamic_disp_px.isChecked()
-        intensities = self.window.window.view.read_relative_intensities()
+        channel_contrast = self.window.window.view.read_channel_contrast()
         positions = [(p["R"], p["viewport"]) for p in self.positions]
         segment_rotations = [p["segment_rotvec"] for p in self.positions[1:]]
         # the frames are rendered at the output resolution: the display
@@ -981,7 +981,7 @@ class AnimationDialog(lib.Dialog):
             invert_colors=data_dlg.wbackground.isChecked(),
             single_channel_colormap=disp_dlg.colormap.currentText(),
             colors=self.window.window.view.read_colors(),
-            relative_intensities=intensities,
+            channel_contrast=channel_contrast,
             fps=self.fps.value(),
             adjust_pixel_size=adjust_display_pixel,
             scalebar_length_nm=(
@@ -1726,15 +1726,15 @@ class ViewRotation(QtWidgets.QLabel):
         cmap = self.window.display_settings_dlg.colormap.currentText()
         contrast = None if autoscale else (vmin, vmax)
         raw_image = self.image if use_cache else None
-        intensities = self.window.window.view.read_relative_intensities()
+        channel_contrast = self.window.window.view.read_channel_contrast()
         colors = self.window.window.view.read_colors()
         invert = self.window.dataset_dialog.wbackground.isChecked()
         self._color_range = render.color_range(
             None if isinstance(locs, pd.DataFrame) else len(locs),
             colors=colors,
-            relative_intensities=intensities,
             invert_colors=invert,
             single_channel_colormap=cmap,
+            channel_contrast=channel_contrast,
         )
         return dict(
             locs=locs,
@@ -1748,7 +1748,7 @@ class ViewRotation(QtWidgets.QLabel):
             invert_colors=invert,
             single_channel_colormap=cmap,
             colors=colors,
-            relative_intensities=intensities,
+            channel_contrast=channel_contrast,
             raw_image_cache=raw_image,
             return_contrast_limits=True,
             return_raw_image=True,
@@ -2926,6 +2926,7 @@ class ViewRotation(QtWidgets.QLabel):
             "Min. blur (nm)": d.min_blur_width.value() / pixelsize,
             "Localizations loaded": self.paths,
             "Colors": colors,
+            **self.window.dataset_dialog.export_channel_contrast(),
         }
         if self.x_render_state:  # rendering by property
             info["Render property"] = self.x_property

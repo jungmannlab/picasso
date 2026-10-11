@@ -90,6 +90,12 @@ INITIAL_REL_MAXIMUM = 0.5
 ZOOM = 9 / 7
 WHEEL_ZOOM = 1.2  # zoom factor per mouse wheel notch
 N_GROUP_COLORS = render.N_GROUP_COLORS  # 8
+# per-channel contrast (Files dialog), in percent of the global contrast
+# window: the largest allowed value and the top of the slider track
+CHANNEL_CONTRAST_MAX = 1000.0
+CHANNEL_CONTRAST_TRACK = 200.0
+# key of the per-channel contrast in the .yaml saved with exported images
+CHANNEL_CONTRAST_KEY = "Channel contrast (% of global)"
 POLYGON_POINTER_SIZE = 16  # must be even
 # shortest drag (display pixels, in x and y) that still yields a box
 # pick, so that a stray click does not create one of zero area
@@ -446,7 +452,7 @@ class ApplyDialog(lib.Dialog):
 
 class DatasetDialog(lib.Dialog):
     """Show legend, show white background, tick and untick, change title
-    of, set color, set relative intensity and close each channel.
+    of, set color, set contrast and close each channel.
 
     ...
 
@@ -472,11 +478,21 @@ class DatasetDialog(lib.Dialog):
     colorselection : list
         List of QComboBoxes specifying the color displayed for each
         channel.
+    contrast_high : list
+        List of QDoubleSpinBoxes with the upper contrast limit of each
+        channel, in percent of the global contrast window (Display
+        settings).
+    contrast_low : list
+        List of QDoubleSpinBoxes with the lower contrast limit of each
+        channel, in percent of the global contrast window.
+    contrast_sliders : list
+        List of SpinBoxRangeSliders bound to ``contrast_low`` and
+        ``contrast_high``.
+    contrast_widgets : list
+        List of QWidgets holding the contrast spin boxes and slider of
+        each channel.
     default_colors : list
         List of strings specifying the default 14 colors.
-    intensitysettings : list
-        List of QDoubleSpinBoxes specifying relative intensity of each
-        channel.
     legend : QCheckBox
         Used to show/hide legend.
     rgb : list
@@ -508,7 +524,10 @@ class DatasetDialog(lib.Dialog):
         self.colordisp_all = []
         self.colorpickers = []
         self.colorpreviews = []
-        self.intensitysettings = []
+        self.contrast_low = []
+        self.contrast_high = []
+        self.contrast_sliders = []
+        self.contrast_widgets = []
         self._next_channel_id = 0
         # Per-channel resolved LUTs (each shape (256, 3) float32) and
         # caches for the built-in and user-defined cmap LUTs.
@@ -623,22 +642,44 @@ class DatasetDialog(lib.Dialog):
         self.colordisp_all = []
         self.colorpickers = []
         self.colorpreviews = []
-        self.intensitysettings = []
+        self.contrast_low = []
+        self.contrast_high = []
+        self.contrast_sliders = []
+        self.contrast_widgets = []
         files_label = QtWidgets.QLabel("Files")
         files_label.setToolTip("Names of the loaded datasets.")
         self.scroll_area.addWidget(files_label, 0, 0)
-        title_label = QtWidgets.QLabel("Change title")
+        title_label = QtWidgets.QLabel("Change\ntitle")
         title_label.setToolTip("Change the displayed name of each dataset.")
         self.scroll_area.addWidget(title_label, 0, 1)
         color_label = QtWidgets.QLabel("Color")
         color_label.setToolTip("Select the color for each dataset.")
         self.scroll_area.addWidget(color_label, 0, 2)
         self.scroll_area.addWidget(QtWidgets.QLabel(""), 0, 3)
-        intensity_label = QtWidgets.QLabel("Rel. Intensity")
-        intensity_label.setToolTip(
-            "Set the relative intensity for each dataset."
+        contrast_header = QtWidgets.QWidget()
+        contrast_header_layout = QtWidgets.QHBoxLayout(contrast_header)
+        contrast_header_layout.setContentsMargins(0, 0, 0, 0)
+        contrast_label = QtWidgets.QLabel("Contrast (% of global)")
+        contrast_label.setToolTip(
+            "Contrast of each dataset relative to the minimum and\n"
+            "maximum density set in Display settings (Ctrl+D): 0% is\n"
+            "the minimum and 100% the maximum density. Lower the\n"
+            "maximum to brighten a dataset, raise it to dim it.\n"
+            "The 3D window applies the same values to its own\n"
+            "minimum and maximum density."
         )
-        self.scroll_area.addWidget(intensity_label, 0, 4)
+        contrast_header_layout.addWidget(contrast_label)
+        contrast_header_layout.addStretch()
+        reset_contrast_button = QtWidgets.QToolButton()
+        reset_contrast_button.setText("Reset")
+        reset_contrast_button.setToolTip(
+            "Reset the contrast of all datasets to 0-100%,\n"
+            "i.e., to the global contrast."
+        )
+        reset_contrast_button.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
+        reset_contrast_button.clicked.connect(self.reset_channel_contrast)
+        contrast_header_layout.addWidget(reset_contrast_button)
+        self.scroll_area.addWidget(contrast_header, 0, 4)
 
         self.default_colors = [
             "red",
@@ -801,14 +842,55 @@ class DatasetDialog(lib.Dialog):
         preview_layout.addWidget(picker)
         self.colorpreviews.append(preview_widget)
 
-        # create the relative intensity widget
-        intensity = QtWidgets.QDoubleSpinBox(self)
-        intensity.setToolTip("Set the relative intensity for this dataset.")
-        intensity.setKeyboardTracking(False)
-        intensity.setDecimals(2)
-        intensity.setValue(1.00)
-        self.intensitysettings.append(intensity)
-        self.intensitysettings[-1].valueChanged.connect(self.update_viewport)
+        # create the contrast widgets: lower and upper limit in percent
+        # of the global contrast window, and a slider bound to them
+        contrast_low = QtWidgets.QDoubleSpinBox()
+        contrast_low.setToolTip(
+            "Lower contrast limit of this dataset, in percent of the\n"
+            "global contrast window (0% is the minimum density in\n"
+            "Display settings)."
+        )
+        contrast_high = QtWidgets.QDoubleSpinBox()
+        contrast_high.setToolTip(
+            "Upper contrast limit of this dataset, in percent of the\n"
+            "global contrast window (100% is the maximum density in\n"
+            "Display settings). Lower it to brighten the dataset,\n"
+            "raise it to dim it."
+        )
+        for box in (contrast_low, contrast_high):
+            box.setKeyboardTracking(False)
+            box.setDecimals(1)
+            box.setSuffix(" %")
+            box.setRange(0.0, CHANNEL_CONTRAST_MAX)
+            self._fit_contrast_box_width(box)
+        contrast_high.setValue(100.0)
+        self._apply_contrast_bounds(contrast_low, contrast_high)
+        contrast_slider = lib.SpinBoxRangeSlider(
+            contrast_low,
+            contrast_high,
+            upper=lambda: CHANNEL_CONTRAST_TRACK,
+        )
+        contrast_slider.setValueLabels(
+            "Min. (% of global)", "Max. (% of global)"
+        )
+        contrast_slider.setMinimumWidth(120)
+        for box in (contrast_low, contrast_high):
+            box.valueChanged.connect(
+                partial(
+                    self._apply_contrast_bounds, contrast_low, contrast_high
+                )
+            )
+            box.valueChanged.connect(self.update_channel_contrast)
+        contrast_widget = QtWidgets.QWidget()
+        contrast_layout = QtWidgets.QHBoxLayout(contrast_widget)
+        contrast_layout.setContentsMargins(0, 0, 0, 0)
+        contrast_layout.addWidget(contrast_low)
+        contrast_layout.addWidget(contrast_slider)
+        contrast_layout.addWidget(contrast_high)
+        self.contrast_low.append(contrast_low)
+        self.contrast_high.append(contrast_high)
+        self.contrast_sliders.append(contrast_slider)
+        self.contrast_widgets.append(contrast_widget)
 
         # add all the widgets to the Dataset Dialog (row 0 holds the
         # column headers, so channel i lives in row i + 1)
@@ -817,7 +899,7 @@ class DatasetDialog(lib.Dialog):
         self.scroll_area.addWidget(t, currentline, 1)
         self.scroll_area.addWidget(colordrop, currentline, 2)
         self.scroll_area.addWidget(preview_widget, currentline, 3)
-        self.scroll_area.addWidget(intensity, currentline, 4)
+        self.scroll_area.addWidget(contrast_widget, currentline, 4)
         self.scroll_area.addWidget(p, currentline, 5)
 
         self._fit_scroll_width()
@@ -827,8 +909,8 @@ class DatasetDialog(lib.Dialog):
         channel ignores and show a note saying why; enable them again
         when several channels are loaded.
 
-        A single channel never uses the per-channel color, relative
-        intensity or automatic coloring. Without groups or rendering
+        A single channel never uses the per-channel color, contrast or
+        automatic coloring. Without groups or rendering
         by property it is drawn with the Display settings colormap, so
         the background color is ignored as well.
 
@@ -842,7 +924,7 @@ class DatasetDialog(lib.Dialog):
         if mode == self._single_channel_mode:
             return
         self._single_channel_mode = mode
-        unused = " Color, relative intensity and automatic coloring "
+        unused = " Color, contrast and automatic coloring "
         notes = {
             "colormap": (
                 "A single channel is rendered with the colormap from "
@@ -867,7 +949,7 @@ class DatasetDialog(lib.Dialog):
             self.auto_colors,
             *self.colorselection,
             *self.colorpreviews,
-            *self.intensitysettings,
+            *self.contrast_widgets,
         ]:
             widget.setEnabled(multichannel)
         for widget in [self.background_button, self.background_swatch]:
@@ -884,7 +966,7 @@ class DatasetDialog(lib.Dialog):
             self.scroll_area.addWidget(self.title[i], row, 1)
             self.scroll_area.addWidget(self.colorselection[i], row, 2)
             self.scroll_area.addWidget(self.colorpreviews[i], row, 3)
-            self.scroll_area.addWidget(self.intensitysettings[i], row, 4)
+            self.scroll_area.addWidget(self.contrast_widgets[i], row, 4)
             self.scroll_area.addWidget(self.closebuttons[i], row, 5)
 
     def _fit_scroll_width(self) -> None:
@@ -938,7 +1020,7 @@ class DatasetDialog(lib.Dialog):
             self.title[i],
             self.colorselection[i],
             self.colorpreviews[i],
-            self.intensitysettings[i],
+            self.contrast_widgets[i],
             self.closebuttons[i],
         ):
             self.scroll_area.removeWidget(widget)
@@ -951,7 +1033,10 @@ class DatasetDialog(lib.Dialog):
         del self.colordisp_all[i]
         del self.colorpickers[i]
         del self.colorpreviews[i]
-        del self.intensitysettings[i]
+        del self.contrast_low[i]
+        del self.contrast_high[i]
+        del self.contrast_sliders[i]
+        del self.contrast_widgets[i]
         del self.closebuttons[i]
         del self._channel_luts[i]
 
@@ -1100,6 +1185,138 @@ class DatasetDialog(lib.Dialog):
                     return  # nothing to reload from
                 view_rot.load_locs(update_window=True)
             view_rot.update_scene()
+
+    @staticmethod
+    def _fit_contrast_box_width(box: QtWidgets.QDoubleSpinBox) -> None:
+        """Fix the width of a contrast spin box to its widest value.
+
+        The size hint follows the range, which
+        ``_apply_contrast_bounds`` narrows on every change, so the box
+        would change its width while the slider is dragged. Qt's hint
+        also reserves room for an extra space; the fixed width fits
+        the widest value exactly, plus the frame and the arrows.
+
+        Parameters
+        ----------
+        box : QDoubleSpinBox
+            The spin box, with its full range set.
+        """
+        option = QtWidgets.QStyleOptionSpinBox()
+        box.initStyleOption(option)
+        option.rect = QtCore.QRect(QtCore.QPoint(0, 0), box.sizeHint())
+        edit_field = box.style().subControlRect(
+            QtWidgets.QStyle.ComplexControl.CC_SpinBox,
+            option,
+            QtWidgets.QStyle.SubControl.SC_SpinBoxEditField,
+            box,
+        )
+        overhead = option.rect.width() - edit_field.width()
+        text = box.textFromValue(box.maximum()) + box.suffix()
+        text_width = box.fontMetrics().horizontalAdvance(text)
+        box.setFixedWidth(overhead + text_width + 4)  # 4: cursor, margin
+
+    @staticmethod
+    def _apply_contrast_bounds(
+        low_box: QtWidgets.QDoubleSpinBox,
+        high_box: QtWidgets.QDoubleSpinBox,
+        *args,
+    ) -> None:
+        """Keep a channel's lower contrast limit below its upper one by
+        bounding each spin box with the other's value.
+
+        Parameters
+        ----------
+        low_box, high_box : QDoubleSpinBox
+            The lower and upper contrast limit of the channel.
+        *args
+            Ignored; lets the method be connected to value signals.
+        """
+        step = 10 ** -high_box.decimals()
+        low_box.setMaximum(high_box.value() - step)
+        high_box.setMinimum(low_box.value() + step)
+
+    def update_channel_contrast(self) -> None:
+        """Re-color the main and the 3D window with the new per-channel
+        contrast. Only the compositing changes, so the cached renders
+        are reused."""
+        if not self.auto_display.isChecked():
+            return
+        if self.window.view.viewport:
+            self.window.view.update_scene(use_cache=True)
+        window_rot = getattr(self.window, "window_rot", None)
+        if window_rot is None or not window_rot.isVisible():
+            return
+        view_rot = window_rot.view_rot
+        if (
+            view_rot.locs
+            and getattr(view_rot, "viewport", None)
+            # with a different number of channels the 3D window has to
+            # reload first, see update_rotation_window
+            and len(view_rot.locs) == len(self.window.view.locs)
+        ):
+            view_rot.update_scene(use_cache=True)
+
+    def set_channel_contrast(
+        self, i: int, low: float, high: float, update: bool = True
+    ) -> None:
+        """Set the contrast of channel ``i``.
+
+        Parameters
+        ----------
+        i : int
+            Index of the channel.
+        low, high : float
+            Lower and upper contrast limit in percent of the global
+            contrast window, ``0 <= low < high``.
+        update : bool, optional
+            If True, the main and the 3D window are re-colored. Default
+            is True.
+        """
+        low_box = self.contrast_low[i]
+        high_box = self.contrast_high[i]
+        low = min(max(float(low), 0.0), CHANNEL_CONTRAST_MAX)
+        high = min(max(float(high), 0.0), CHANNEL_CONTRAST_MAX)
+        if not low < high:
+            return
+        for box in (low_box, high_box):
+            box.blockSignals(True)
+        try:
+            low_box.setRange(0.0, CHANNEL_CONTRAST_MAX)
+            high_box.setRange(0.0, CHANNEL_CONTRAST_MAX)
+            low_box.setValue(low)
+            high_box.setValue(high)
+            self._apply_contrast_bounds(low_box, high_box)
+        finally:
+            for box in (low_box, high_box):
+                box.blockSignals(False)
+        self.contrast_sliders[i].sync()
+        if update:
+            self.update_channel_contrast()
+
+    def export_channel_contrast(self) -> dict:
+        """The contrast of every channel, ticked or not, as saved in the
+        .yaml file with exported images (see ``View.load_screenshot``).
+
+        Returns
+        -------
+        info : dict
+            Maps ``CHANNEL_CONTRAST_KEY`` to the ``[low, high]``
+            contrast limits of each channel in percent of the global
+            contrast window.
+        """
+        return {
+            CHANNEL_CONTRAST_KEY: [
+                [low.value(), high.value()]
+                for low, high in zip(self.contrast_low, self.contrast_high)
+            ]
+        }
+
+    def reset_channel_contrast(self) -> None:
+        """Reset the contrast of all channels to the global contrast
+        (0-100%)."""
+        for i in range(len(self.contrast_low)):
+            self.set_channel_contrast(i, 0.0, 100.0, update=False)
+        self.update_channel_contrast()
 
     def select_background_color(self) -> None:
         """Open a color picker to choose the multichannel background
@@ -11736,8 +11953,8 @@ class View(QtWidgets.QLabel):
         vmax = self.window.display_settings_dlg.maximum.value()
         contrast = None if autoscale else (vmin, vmax)
         colors = self.read_colors()
-        relative_intensities = self.read_relative_intensities()
-        self._remember_color_range(locs, colors, relative_intensities, cmap)
+        channel_contrast = self.read_channel_contrast()
+        self._remember_color_range(locs, colors, channel_contrast, cmap)
         return (
             dict(
                 locs=locs,
@@ -11755,7 +11972,7 @@ class View(QtWidgets.QLabel):
                 background_color=self.window.dataset_dialog.background_color,
                 single_channel_colormap=cmap,
                 colors=colors,
-                relative_intensities=relative_intensities,
+                channel_contrast=channel_contrast,
                 return_contrast_limits=True,
                 return_raw_image=True,
             ),
@@ -11766,7 +11983,7 @@ class View(QtWidgets.QLabel):
         self,
         locs: pd.DataFrame | list[pd.DataFrame],
         colors: list,
-        relative_intensities: list[float],
+        channel_contrast: list[tuple[float, float]],
         cmap: str | np.ndarray,
     ) -> None:
         """Store the colors of pixels without localizations and at the
@@ -11777,10 +11994,10 @@ class View(QtWidgets.QLabel):
         self._color_range = render.color_range(
             None if isinstance(locs, pd.DataFrame) else len(locs),
             colors=colors,
-            relative_intensities=relative_intensities,
             invert_colors=dataset_dialog.wbackground.isChecked(),
             background_color=dataset_dialog.background_color,
             single_channel_colormap=cmap,
+            channel_contrast=channel_contrast,
         )
 
     def _user_settings(self) -> dict:
@@ -12202,16 +12419,23 @@ class View(QtWidgets.QLabel):
         """Export grayscale rendering of the current viewport for each
         channel separately."""
         kwargs = self.get_render_kwargs()
+        dataset_dialog = self.window.dataset_dialog
         for i in range(len(self.locs)):
             locs = self._display_locs(i)
             path = os.path.splitext(self.locs_paths[i])[0] + suffix
-            # render like in self.render_scene
+            # render like in self.render_scene, with the channel's own
+            # contrast window (in percent of the global one)
             vmin = self.window.display_settings_dlg.minimum.value()
             vmax = self.window.display_settings_dlg.maximum.value()
+            if len(self.locs) > 1:
+                span = vmax - vmin
+                low = dataset_dialog.contrast_low[i].value() / 100
+                high = dataset_dialog.contrast_high[i].value() / 100
+                vmin, vmax = vmin + low * span, vmin + high * span
             locs_ = (
                 locs.drop(columns="group") if "group" in locs.columns else locs
             )
-            invert_colors = self.window.dataset_dialog.wbackground.isChecked()
+            invert_colors = dataset_dialog.wbackground.isChecked()
             qimage = render.render_scene(
                 locs_,
                 self.infos[i],
@@ -12219,9 +12443,6 @@ class View(QtWidgets.QLabel):
                 contrast=(vmin, vmax),
                 invert_colors=invert_colors,
                 single_channel_colormap="gray",
-                relative_intensities=[
-                    self.window.dataset_dialog.intensitysettings[i].value()
-                ],
             )[0]
             # modify qimage like in self.draw_scene
             qimage = qimage.scaled(
@@ -12681,6 +12902,14 @@ class View(QtWidgets.QLabel):
             disp_dlg.scalebar.setValue(file["Scalebar length (nm)"])
         elif "Scale bar length (nm)" in file:
             disp_dlg.scalebar.setValue(file["Scale bar length (nm)"])
+        channel_contrast = file.get(CHANNEL_CONTRAST_KEY)
+        if channel_contrast is not None and len(channel_contrast) == len(
+            self.locs
+        ):
+            dataset_dialog = self.window.dataset_dialog
+            for i, (low, high) in enumerate(channel_contrast):
+                dataset_dialog.set_channel_contrast(i, low, high, update=False)
+            dataset_dialog.update_channel_contrast()
 
     @check_picks
     @check_circular_picks
@@ -14941,8 +15170,8 @@ class View(QtWidgets.QLabel):
         contrast = None if autoscale else (vmin, vmax)
         raw_image = self.image if use_cache else None
         colors = self.read_colors()
-        relative_intensities = self.read_relative_intensities()
-        self._remember_color_range(locs, colors, relative_intensities, cmap)
+        channel_contrast = self.read_channel_contrast()
+        self._remember_color_range(locs, colors, channel_contrast, cmap)
 
         qimage, n_locs, (vmin, vmax), raw_image = render.render_scene(
             locs=locs,
@@ -14957,7 +15186,7 @@ class View(QtWidgets.QLabel):
             background_color=self.window.dataset_dialog.background_color,
             single_channel_colormap=cmap,
             colors=colors,
-            relative_intensities=relative_intensities,
+            channel_contrast=channel_contrast,
             raw_image_cache=raw_image,
             return_contrast_limits=True,
             return_raw_image=True,
@@ -15049,32 +15278,37 @@ class View(QtWidgets.QLabel):
 
         return colors
 
-    def read_relative_intensities(self) -> list[float]:
-        """Find currently selected relative intensities for multicolor
-        rendering.
+    def read_channel_contrast(self) -> list[tuple[float, float]]:
+        """Find the currently selected per-channel contrast for
+        multicolor rendering.
 
-        If multiple channels are loaded, ensure that only the ones which
-        are checked in the Dataset Dialog are rendered with their selected
-        relative intensities.
+        Only the channels which are checked in the Dataset Dialog are
+        included, each as a ``(low, high)`` fraction of the global
+        contrast window (see ``render.render_scene``).
 
-        If render by property is selected, the relative intensities are
-        set to 1 for all 'channels', i.e., colors.
+        If render by property is selected or a single channel is split
+        by its groups, every 'channel', i.e., color, uses the global
+        contrast.
 
         Returns
         -------
-        relative_intensities : list
-            List of relative intensities for each channel.
+        channel_contrast : list of tuple of float
+            ``(low, high)`` contrast window of each rendered channel.
         """
-        relative_intensities = [
-            self.window.dataset_dialog.intensitysettings[i].value()
+        dataset_dialog = self.window.dataset_dialog
+        channel_contrast = [
+            (
+                dataset_dialog.contrast_low[i].value() / 100,
+                dataset_dialog.contrast_high[i].value() / 100,
+            )
             for i in range(len(self.locs))
-            if self.window.dataset_dialog.checks[i].isChecked()
+            if dataset_dialog.checks[i].isChecked()
         ]
         if self.x_render_state:
-            relative_intensities = [1.0] * len(self.property_locs())
+            channel_contrast = [(0.0, 1.0)] * len(self.property_locs())
         elif len(self.locs) == 1 and "group" in self.locs[0].columns:
-            relative_intensities = [1.0] * N_GROUP_COLORS
-        return relative_intensities
+            channel_contrast = [(0.0, 1.0)] * N_GROUP_COLORS
+        return channel_contrast
 
     def _render_by_property_locs(
         self,
@@ -17341,6 +17575,7 @@ class Window(QtWidgets.QMainWindow):
             "Scale bar length (nm)": d.scalebar.value(),
             "Localizations loaded": self.view.locs_paths,
             "Colors": colors,
+            **self.dataset_dialog.export_channel_contrast(),
             "Min. blur (nm)": (
                 d.min_blur_width.value()
                 if min_blur_width is None

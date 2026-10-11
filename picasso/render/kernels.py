@@ -876,12 +876,13 @@ def _lut_pixel_rgb(
     i: int,
     j: int,
     n_channels: int,
-    vmin32: np.float32,
-    rng32: np.float32,
+    vmin32: lib.FloatArray1D,
+    rng32: lib.FloatArray1D,
     rel: lib.FloatArray1D,
 ) -> tuple[np.float32, np.float32, np.float32, np.float32]:
     """Additive RGB (and total coverage) of pixel ``(i, j)`` over all
-    channels: contrast scale, clip, LUT gather, blend."""
+    channels: contrast scale (with each channel's own limits), clip,
+    LUT gather, blend."""
     one = np.float32(1.0)
     zero = np.float32(0.0)
     r = zero
@@ -889,7 +890,7 @@ def _lut_pixel_rgb(
     b = zero
     coverage = zero
     for c in range(n_channels):
-        v = (raw[c, i, j] - vmin32) / rng32
+        v = (raw[c, i, j] - vmin32[c]) / rng32[c]
         if not np.isfinite(v):
             v = zero
         if v < zero:
@@ -948,8 +949,8 @@ def _composite_bg(
 def _compose_multi_lut(
     raw: lib.FloatArray3D,
     luts: lib.FloatArray3D,
-    vmin: float,
-    vmax: float,
+    vmin32: lib.FloatArray1D,
+    rng32: lib.FloatArray1D,
     rel: lib.FloatArray1D,
     bg: lib.FloatArray1D,
     has_bg: bool,
@@ -958,6 +959,10 @@ def _compose_multi_lut(
     chain (contrast scale -> intensity scale -> LUT gather -> additive
     blend -> background compositing), reading the raw stack once.
 
+    ``vmin32`` and ``rng32`` hold each channel's lower contrast limit
+    and contrast range (``vmax - vmin``) as float32 arrays of shape
+    ``(n_channels,)``.
+
     Reproduces the chain's float32 arithmetic step for step (subtract
     then divide, non-finite to zero, clip, truncating int cast for the
     LUT index) so results match the legacy path bit-for-bit up to
@@ -965,8 +970,6 @@ def _compose_multi_lut(
     which ``_quantize_rgb`` needs for ``to_8bit``'s renormalization.
     """
     n_channels, n_y, n_x = raw.shape
-    vmin32 = np.float32(vmin)
-    rng32 = np.float32(vmax - vmin)
     zero = np.float32(0.0)
     rgb = np.empty((n_y, n_x, 3), dtype=np.float32)
     max_value = zero

@@ -184,6 +184,10 @@ main window; everything else is set here:
   length``;
 - the grid, see below.
 
+The per-channel contrast is shared with the main window: it is set in the main
+window's ``View > Files...`` (see :ref:`render-channel-contrast`) and applied
+to the 3D view's own minimum and maximum density.
+
 .. _render-3d-grid:
 
 Grid

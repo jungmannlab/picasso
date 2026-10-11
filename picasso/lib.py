@@ -122,6 +122,7 @@ _QT_NAMES = (
     "LogDoubleSpinBox",
     "WrappingLabel",
     "RangeSlider",
+    "SpinBoxRangeSlider",
     "DensityContrastSlider",
     "GenericPlotWindow",
     "RemoveColumnsDialog",

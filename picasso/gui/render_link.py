@@ -41,7 +41,7 @@ Slicing
     Slicing on/off, slice thickness and slice position; the position is
     matched in nm, since the slice bins depend on each window's data.
 
-Channel colors, visibility and intensities are never linked.
+Channel colors, visibility and per-channel contrast are never linked.
 
 A change is mirrored by applying it to the other windows' widgets as if
 the user had edited them there, so each window runs its own update

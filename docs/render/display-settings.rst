@@ -50,6 +50,10 @@ colormap; they can also be dragged on the slider below them. ``Colormap``
 offers over 100 colormaps. The last option, ``Custom``, loads a ``.npy`` file
 with a numpy array of shape (256, 4) and values between 0 and 1.
 
+With several channels loaded, the contrast of each channel can be adjusted
+relative to this one in ``View > Files...``, see
+:ref:`render-channel-contrast`.
+
 The selected colormap will be saved when closing render, under ``Colormap`` in
 the ``Render`` section of ``~/.picasso/settings.yaml`` (see
 :ref:`user-settings-file`), and restored the next time Render starts.

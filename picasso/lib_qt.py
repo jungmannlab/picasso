@@ -2461,7 +2461,109 @@ class RangeSlider(QtWidgets.QWidget):
         return f"{value:,.4g}"
 
 
-class DensityContrastSlider(RangeSlider):
+class SpinBoxRangeSlider(RangeSlider):
+    """Two-handle slider bound to a pair of spin boxes.
+
+    The spin boxes stay the single source of truth: the slider writes
+    into them (so their usual signals fire) and is moved back onto their
+    values by ``sync``. The track runs from zero to ``upper()``, raised
+    to the spin box values if needed so that a set value is never cut
+    off.
+
+    Attributes
+    ----------
+    minimum_box, maximum_box : QDoubleSpinBox
+        The spin boxes holding the low and the high value.
+    """
+
+    def __init__(
+        self,
+        minimum_box: QtWidgets.QDoubleSpinBox,
+        maximum_box: QtWidgets.QDoubleSpinBox,
+        upper: Callable[[], float] | None = None,
+        log_scale: bool = False,
+        parent: QtWidgets.QWidget | None = None,
+    ) -> None:
+        """Bind the slider to the minimum and maximum spin boxes.
+
+        Parameters
+        ----------
+        minimum_box, maximum_box : QDoubleSpinBox
+            The spin boxes the slider is bound to.
+        upper : callable, optional
+            Returns the top of the track (before it is raised to the
+            spin box values). Called on every ``sync``. Default is None,
+            which sizes the track from the spin box values alone.
+        log_scale : bool, optional
+            If True, the track is logarithmic, see ``setLogScale``.
+            Default is False.
+        parent : QWidget, optional
+            The parent widget. Default is None.
+        """
+        super().__init__(parent)
+        self.minimum_box = minimum_box
+        self.maximum_box = maximum_box
+        self._upper = upper
+        # guards the two-way binding: while the slider writes into the
+        # spin boxes, their signals must not move the slider back
+        self._updating = False
+        self.setLogScale(log_scale)
+        # the spin boxes quantize the values, so the handles must not be
+        # able to collapse onto each other
+        self.setMinimumGap(10 ** -maximum_box.decimals())
+        self.setMaximumHeight(15)
+        self.valuesChanged.connect(self._on_values_changed)
+        minimum_box.valueChanged.connect(self.sync)
+        maximum_box.valueChanged.connect(self.sync)
+        self.sync()
+
+    def sync(self, *args) -> None:
+        """Re-derive the track and move the handles onto the spin box
+        values, without emitting ``valuesChanged``.
+
+        Parameters
+        ----------
+        *args
+            Ignored; lets the method be connected to value signals.
+        """
+        if self._updating:  # the slider itself is driving the change
+            return
+        low = self.minimum_box.value()
+        high = self.maximum_box.value()
+        # never cut off a value the user (or autoscaling) has set
+        upper = self._upper() if self._upper is not None else 0.0
+        upper = max(upper, low, high)
+        if upper <= 0:
+            upper = 1.0
+        self.blockSignals(True)
+        try:
+            self.setRange(0.0, upper)
+            self.setValues(low, high)
+        finally:
+            self.blockSignals(False)
+        self.update()
+
+    def _on_values_changed(self, low: float, high: float) -> None:
+        """Write a dragged handle into its spin box.
+
+        Parameters
+        ----------
+        low, high : float
+            The new handle positions.
+        """
+        self._updating = True
+        try:
+            # only the handle that actually moved, so that a drag
+            # triggers a single update
+            if low != self.minimum_box.value():
+                self.minimum_box.setValue(low)
+            if high != self.maximum_box.value():
+                self.maximum_box.setValue(high)
+        finally:
+            self._updating = False
+
+
+class DensityContrastSlider(SpinBoxRangeSlider):
     """Log-scale two-handle slider bound to a pair of density spin boxes.
 
     Used by the Display Settings dialogs of Picasso: Render and of the
@@ -2502,53 +2604,19 @@ class DensityContrastSlider(RangeSlider):
         parent : QWidget, optional
             The parent widget. Default is None.
         """
-        super().__init__(parent)
-        self.minimum_box = minimum_box
-        self.maximum_box = maximum_box
         self._image = image
-        # guards the two-way binding: while the slider writes into the
-        # spin boxes, their signals must not move the slider back
-        self._updating = False
         # the last image the track was sized from, and its maximum, so
         # that dragging does not scan the image on every mouse move
         self._last_image = None
         self._last_upper = 0.0
-        self.setLogScale(True)
+        super().__init__(
+            minimum_box,
+            maximum_box,
+            upper=self._image_maximum,
+            log_scale=True,
+            parent=parent,
+        )
         self.setValueLabels("Min. density", "Max. density")
-        # the spin boxes quantize the values, so the handles must not be
-        # able to collapse onto each other
-        self.setMinimumGap(10 ** -maximum_box.decimals())
-        self.setMaximumHeight(15)
-        self.valuesChanged.connect(self._on_values_changed)
-        minimum_box.valueChanged.connect(self.sync)
-        maximum_box.valueChanged.connect(self.sync)
-        self.sync()
-
-    def sync(self, *args) -> None:
-        """Re-derive the track from the rendered image and move the
-        handles onto the spin box values, without emitting
-        ``valuesChanged``.
-
-        Parameters
-        ----------
-        *args
-            Ignored; lets the method be connected to value signals.
-        """
-        if self._updating:  # the slider itself is driving the change
-            return
-        low = self.minimum_box.value()
-        high = self.maximum_box.value()
-        # never cut off a value the user (or autoscaling) has set
-        upper = max(self._image_maximum(), low, high)
-        if upper <= 0:
-            upper = 1.0
-        self.blockSignals(True)
-        try:
-            self.setRange(0.0, upper)
-            self.setValues(low, high)
-        finally:
-            self.blockSignals(False)
-        self.update()
 
     def _image_maximum(self) -> float:
         """The brightest pixel of the rendered image, or 0 if there is
@@ -2562,25 +2630,6 @@ class DensityContrastSlider(RangeSlider):
             self._last_image = image
             self._last_upper = float(image.max())
         return self._last_upper
-
-    def _on_values_changed(self, low: float, high: float) -> None:
-        """Write a dragged handle into its spin box, which re-renders.
-
-        Parameters
-        ----------
-        low, high : float
-            The new handle positions.
-        """
-        self._updating = True
-        try:
-            # only the handle that actually moved, so that a drag
-            # triggers a single re-render
-            if low != self.minimum_box.value():
-                self.minimum_box.setValue(low)
-            if high != self.maximum_box.value():
-                self.maximum_box.setValue(high)
-        finally:
-            self._updating = False
 
 
 class GenericPlotWindow(QtWidgets.QTabWidget):

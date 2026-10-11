@@ -25,6 +25,7 @@ Last change: 11-OCT-2026 CEST
 - Apply expression to localizations expands the canvas (metadata's `Height` and `Width`) if x and y positions are out of range.
 - Overlay of image files (`.png` and `.tif`), see the [documentation](https://picassosr.readthedocs.io/en/latest/render/menu-view.html#render-overlay-image).
 - Editable appearance of the tools (e.g., picks), see the [documentation](https://picassosr.readthedocs.io/en/latest/render/menu-tools.html#render-tools-settings).
+- Per-channel contrast for multichannel data in `View > Files...`, replacing the relative intensity. See the [documentation](https://picassosr.readthedocs.io/en/latest/render/menu-view.html#render-channel-contrast).
 - Smooth transitions in 3D animations: the motion eases in and out and passes through the positions without sharp turns, see the [documentation](https://picassosr.readthedocs.io/en/latest/render/3d.html#render-animation).
 - Faster circular picking of localizations.
 - Undrifting from picked localizations is fast and memory-efficient for many picks.

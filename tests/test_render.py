@@ -3362,6 +3362,206 @@ class TestFusedCompose:
             )
 
 
+class TestChannelContrast:
+    """Per-channel contrast windows relative to the global contrast."""
+
+    @pytest.fixture(scope="class")
+    def raw_stack(self):
+        rng = np.random.default_rng(11)
+        raw = rng.exponential(2.0, size=(3, 40, 50)).astype(np.float32)
+        raw[:, ::7, ::5] = 0.0
+        return raw
+
+    def _render(self, raw, info, colors, **kwargs):
+        _, rgb, limits, _ = render._render_multi_channel(
+            [None] * raw.shape[0],
+            [info] * raw.shape[0],
+            disp_px_size=10.0,
+            colors=colors,
+            raw_image_cache=raw,
+            **kwargs,
+        )
+        return rgb, limits
+
+    @pytest.mark.parametrize("lut", [True, False])
+    @pytest.mark.parametrize("contrast", [(0.5, 5.0), None])
+    def test_global_window_is_unchanged(self, raw_stack, info, lut, contrast):
+        colors = lib.get_colors(3)
+        if lut:
+            colors = [render.solid_to_lut(c) for c in colors]
+        expected, expected_limits = self._render(
+            raw_stack, info, colors, contrast=contrast
+        )
+        rgb, limits = self._render(
+            raw_stack,
+            info,
+            colors,
+            contrast=contrast,
+            channel_contrast=[(0.0, 1.0)] * 3,
+        )
+        np.testing.assert_array_equal(rgb, expected)
+        # the global limits are returned, not the per-channel ones
+        assert limits == expected_limits
+
+    @pytest.mark.parametrize("lut", [True, False])
+    def test_lower_high_equals_relative_intensity(self, raw_stack, info, lut):
+        """For relative intensities >= 1, the old relative intensity is
+        a lower upper limit: (0, 1 / rel)."""
+        colors = lib.get_colors(3)
+        if lut:
+            colors = [render.solid_to_lut(c) for c in colors]
+        expected, _ = self._render(
+            raw_stack,
+            info,
+            colors,
+            contrast=(0.0, 4.0),
+            relative_intensities=[1.0, 2.0, 4.0],
+        )
+        rgb, _ = self._render(
+            raw_stack,
+            info,
+            colors,
+            contrast=(0.0, 4.0),
+            channel_contrast=[(0.0, 1.0), (0.0, 0.5), (0.0, 0.25)],
+        )
+        diff = np.abs(rgb.astype(np.int16) - expected.astype(np.int16))
+        assert diff.max() <= 1
+
+    def test_window_maps_onto_global_limits(self, raw_stack, info):
+        """A channel's window equals rendering it alone with the
+        absolute limits vmin + (low, high) * (vmax - vmin)."""
+        colors = [render.solid_to_lut(c) for c in lib.get_colors(3)]
+        vmin, vmax = 1.0, 5.0
+        low, high = 0.25, 1.5
+        black = np.zeros((256, 3), dtype=np.float32)
+        only_first = [colors[0], black, black]
+        rgb, _ = self._render(
+            raw_stack,
+            info,
+            only_first,
+            contrast=(vmin, vmax),
+            channel_contrast=[(low, high), (0.0, 1.0), (0.0, 1.0)],
+        )
+        span = vmax - vmin
+        expected, _ = self._render(
+            raw_stack,
+            info,
+            only_first,
+            contrast=(vmin + low * span, vmin + high * span),
+        )
+        diff = np.abs(rgb.astype(np.int16) - expected.astype(np.int16))
+        assert diff.max() <= 1
+        # low > 0 hides the channel's faintest pixels
+        faint = raw_stack[0] < vmin + low * span
+        assert not rgb[faint].any()
+
+    def test_follows_autoscale(self, raw_stack, info):
+        colors = [render.solid_to_lut(c) for c in lib.get_colors(3)]
+        auto, limits = self._render(raw_stack, info, colors, contrast=None)
+        rgb, auto_limits = self._render(
+            raw_stack,
+            info,
+            colors,
+            contrast=None,
+            channel_contrast=[(0.0, 0.5)] * 3,
+        )
+        assert auto_limits == limits
+        halved, _ = self._render(
+            raw_stack,
+            info,
+            colors,
+            contrast=(limits[0], limits[0] + 0.5 * (limits[1] - limits[0])),
+        )
+        diff = np.abs(rgb.astype(np.int16) - halved.astype(np.int16))
+        assert diff.max() <= 1
+        assert not np.array_equal(rgb, auto)
+
+    @pytest.mark.parametrize(
+        "channel_contrast",
+        [
+            [(0.0, 1.0)] * 2,  # wrong number of channels
+            [(0.5, 0.5)] * 3,  # empty window
+            [(-0.1, 1.0)] * 3,  # negative lower limit
+        ],
+    )
+    def test_invalid_windows_raise(self, raw_stack, info, channel_contrast):
+        colors = [render.solid_to_lut(c) for c in lib.get_colors(3)]
+        with pytest.raises(AssertionError):
+            self._render(
+                raw_stack,
+                info,
+                colors,
+                contrast=(0.0, 1.0),
+                channel_contrast=channel_contrast,
+            )
+
+    def test_render_scene_and_color_range(self, locs, info):
+        colors = [render.solid_to_lut(c) for c in lib.get_colors(2)]
+        kwargs = dict(
+            disp_px_size=PIXELSIZE / 4,
+            colors=colors,
+            return_raw_image=True,
+        )
+        raw = render.render_scene([locs, locs], [info, info], **kwargs)[2]
+        # unsaturated, so that brightening a channel shows
+        kwargs["contrast"] = (0.0, float(raw.max()))
+        default = render.render_scene([locs, locs], [info, info], **kwargs)
+        brighter = render.render_scene(
+            [locs, locs],
+            [info, info],
+            channel_contrast=[(0.0, 0.2), (0.0, 1.0)],
+            **kwargs,
+        )
+        np.testing.assert_array_equal(default[2], brighter[2])
+        assert default[0] != brighter[0]
+        # the full color is renormalized by its maximum, so dim only
+        # the first channel (red), next to the second one (cyan)
+        empty, full = render.color_range(
+            2, colors=colors, channel_contrast=[(0.0, 2.0), (0.0, 1.0)]
+        )
+        empty_ref, full_ref = render.color_range(2, colors=colors)
+        np.testing.assert_array_equal(empty, empty_ref)
+        assert full[0] < full_ref[0]
+        np.testing.assert_array_equal(full[1:], full_ref[1:])
+        # a single channel ignores it
+        single = render.render_scene(
+            locs, info, **kwargs, channel_contrast=[(0.0, 0.2)]
+        )
+        reference = render.render_scene(locs, info, **kwargs)
+        assert single[0] == reference[0]
+
+    def test_build_animation_validates(self, locs_3d, info, tmp_path):
+        positions = [
+            (Rotation.identity(), FULL_VIEWPORT),
+            (Rotation.from_rotvec([0.1, 0.0, 0.0]), FULL_VIEWPORT),
+        ]
+        kwargs = dict(
+            positions=positions,
+            durations=[1.0],
+            disp_px_size=PIXELSIZE,
+            image_size=(32, 32),
+            fps=2,
+            contrast=(0.0, 1.0),
+        )
+        out_path = tmp_path / "anim.mp4"
+        assert render.build_animation(
+            str(out_path),
+            [locs_3d, locs_3d],
+            [info, info],
+            channel_contrast=[(0.0, 0.5), (0.1, 2.0)],
+            **kwargs,
+        )
+        assert out_path.exists()
+        with pytest.raises(AssertionError):
+            render.build_animation(
+                str(tmp_path / "bad.mp4"),
+                [locs_3d, locs_3d],
+                [info, info],
+                channel_contrast=[(0.0, 0.5)],
+                **kwargs,
+            )
+
+
 class TestChunkMemory:
     """The chunked CPU path bounds its memory: chunk images are summed
     as they arrive (at most one per worker plus one alive) and the

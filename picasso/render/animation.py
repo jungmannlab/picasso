@@ -378,6 +378,7 @@ def build_animation(
     single_channel_colormap: str | lib.FloatArray2D = "magma",
     colors: list | None = None,
     relative_intensities: list[float] | None = None,
+    channel_contrast: list[tuple[float, float]] | None = None,
     fps: int = 30,
     adjust_pixel_size: bool = True,
     scalebar_length_nm: int | float | None = None,
@@ -496,6 +497,11 @@ def build_animation(
         List of relative intensities for each channel. Only needs to be
         specified for multi-channel data. Default is None, in which
         case all channels are rendered with the same intensity.
+    channel_contrast : list of tuple of float, optional
+        Contrast window of each channel relative to the global contrast
+        limits, one ``(low, high)`` pair per channel, as in
+        ``render_scene``. Unlike `contrast`, it is not rescaled with
+        the zoom. Only used for multi-channel data. Default is None.
     fps : int, optional
         Frames per second of the animation. Default is 30.
     adjust_pixel_size : bool, optional
@@ -629,6 +635,15 @@ def build_animation(
         assert all(
             v >= 0 for v in relative_intensities
         ), "All relative_intensities must be non-negative."
+    if channel_contrast is not None:
+        n_channels = len(locs) if isinstance(locs, list) else 1
+        assert (
+            len(channel_contrast) == n_channels
+        ), "channel_contrast must have one entry per channel."
+        assert all(
+            len(pair) == 2 and 0 <= pair[0] < pair[1]
+            for pair in channel_contrast
+        ), "Each channel_contrast pair must satisfy 0 <= low < high."
     assert isinstance(fps, int) and fps > 0, "fps must be a positive integer."
     assert isinstance(
         adjust_pixel_size, bool
@@ -677,6 +692,7 @@ def build_animation(
         single_channel_colormap=single_channel_colormap,
         colors=colors,
         relative_intensities=relative_intensities,
+        channel_contrast=channel_contrast,
         fps=fps,
         adjust_pixel_size=adjust_pixel_size,
         scalebar_length_nm=scalebar_length_nm,
@@ -717,6 +733,7 @@ def _build_animation(
     scalebar_display_length: bool,
     progress_callback: Callable[[int], None] | Literal["console"] | None,
     cancel: Callable[[], bool] | None = None,
+    channel_contrast: list[tuple[float, float]] | None = None,
     grid: GridOverlay | None = None,
     grid_bounds: tuple | None = None,
     grid_origin: tuple[float, float, float] = (0.0, 0.0, 0.0),
@@ -760,6 +777,7 @@ def _build_animation(
             relative_intensities=relative_intensities,
             invert_colors=invert_colors,
             single_channel_colormap=single_channel_colormap,
+            channel_contrast=channel_contrast,
         )
 
     # render all frames and save in RAM
@@ -806,6 +824,7 @@ def _build_animation(
             single_channel_colormap=single_channel_colormap,
             colors=colors,
             relative_intensities=relative_intensities,
+            channel_contrast=channel_contrast,
         )[0]
         qimage = qimage.scaled(
             width,
