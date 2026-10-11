@@ -72,11 +72,17 @@ class Dialog(QtWidgets.QDialog):
 
 
 class UserSettingsDialog(Dialog):
-    """Dialog for inspecting and editing the user settings YAML file."""
+    """Dialog for inspecting and editing the user settings YAML file.
+
+    ``saved`` is emitted after the edited settings were written, so
+    that windows can apply settings that take effect immediately.
+    """
 
     #: Reference listing every settings key, its default and what it
     #: does, grouped by section - see docs/others.rst.
     DOCS_URL = docs_url("others.html#user-settings-file")
+
+    saved = QtCore.pyqtSignal()
 
     def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
         super().__init__(parent)
@@ -379,6 +385,7 @@ class UserSettingsDialog(Dialog):
             return
         io.save_user_settings(parsed)
         self.editor.document().setModified(False)
+        self.saved.emit()
         QtWidgets.QMessageBox.information(
             self, "Saved", "User settings saved successfully."
         )
@@ -408,6 +415,39 @@ def notify_settings_load_error(parent=None) -> bool:
     QtWidgets.QMessageBox.warning(parent, "Settings could not be read", text)
     io.dismiss_settings_load_error()
     return True
+
+
+def contrast_slider_setting(section: str, default: bool) -> bool:
+    """Whether a module shows the contrast slider below its image.
+
+    Reads ``contrast_slider`` from the module's section of the user
+    settings; a missing key is written with ``default`` (as the other
+    settings are, so that it is visible in the file), unless the file
+    on disk could not be read.
+
+    Parameters
+    ----------
+    section : str
+        The module's section of the settings, e.g., ``"Render"``.
+    default : bool
+        Used if the key is missing or not a boolean.
+
+    Returns
+    -------
+    show : bool
+        True if the slider is shown.
+    """
+    settings = io.load_user_settings()
+    module_settings = settings[section]
+    if not isinstance(module_settings, dict):
+        return default
+    value = module_settings.get("contrast_slider")
+    if isinstance(value, bool):
+        return value
+    if value is None and not io.settings_file_is_broken():
+        module_settings["contrast_slider"] = default
+        io.save_user_settings(settings)
+    return default
 
 
 class MetadataDialog(Dialog):

@@ -6350,6 +6350,9 @@ class Window(QtWidgets.QMainWindow):
         self.columns_dialog = LocColumnSelectionDialog(self)
         self.metadata_dialog = lib.MetadataDialog(self)
         self.user_settings_dialog = lib.UserSettingsDialog(self)
+        self.user_settings_dialog.saved.connect(
+            self.apply_contrast_slider_setting
+        )
         self.init_menu_bar()
         self.view = View(self)
         self.scene = Scene(self)
@@ -6448,7 +6451,10 @@ class Window(QtWidgets.QMainWindow):
         self.contrast_dialog.auto_checkbox.toggled.connect(
             self.contrast_auto_button.setChecked
         )
-        contrast_layout = QtWidgets.QHBoxLayout()
+        # in a widget of their own so that the user settings can hide
+        # them (``contrast_slider``, see ``apply_contrast_slider_setting``)
+        self.contrast_bar = QtWidgets.QWidget()
+        contrast_layout = QtWidgets.QHBoxLayout(self.contrast_bar)
         contrast_layout.setContentsMargins(0, 0, 0, 0)
         contrast_layout.setSpacing(4)
         contrast_layout.addWidget(self.contrast_slider)
@@ -6466,7 +6472,7 @@ class Window(QtWidgets.QMainWindow):
         central_layout.addWidget(self.channel_combo)
         central_layout.addWidget(self.view)
         central_layout.addWidget(self.frame_slider)
-        central_layout.addLayout(contrast_layout)
+        central_layout.addWidget(self.contrast_bar)
         self.setCentralWidget(central_widget)
         self.status_bar = self.statusBar()
         self.status_bar_frame_indicator = QtWidgets.QLabel()
@@ -6702,6 +6708,14 @@ class Window(QtWidgets.QMainWindow):
         self._load_filter_settings(settings)
         self._load_fit_settings(settings)
         self.pwd = pwd
+        self.apply_contrast_slider_setting()
+
+    def apply_contrast_slider_setting(self) -> None:
+        """Show or hide the contrast slider below the movie, as set by
+        ``contrast_slider`` in the user settings (shown by default)."""
+        self.contrast_bar.setVisible(
+            lib.contrast_slider_setting("Localize", True)
+        )
 
     def closeEvent(self, event: QtGui.QCloseEvent) -> None:
         """Close the application, save user settings."""

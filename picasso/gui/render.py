@@ -8440,8 +8440,8 @@ class DisplaySettingsDialog(lib.Dialog):
         self.minimum.blockSignals(True)
         self.minimum.setValue(value)
         self.minimum.blockSignals(False)
-        # the spin box' signals are blocked, so the slider is moved here
-        self.contrast_slider.sync()
+        # the spin box' signals are blocked, so the sliders are moved here
+        self.sync_contrast_sliders()
 
     def silent_pixelsize_update(self, value: float) -> None:
         """Change the value of self.pixelsize in the background."""
@@ -8454,7 +8454,16 @@ class DisplaySettingsDialog(lib.Dialog):
         self.maximum.blockSignals(True)
         self.maximum.setValue(value)
         self.maximum.blockSignals(False)
+        self.sync_contrast_sliders()
+
+    def sync_contrast_sliders(self) -> None:
+        """Move the contrast sliders of the dialog and of the main
+        window onto the spin box values."""
         self.contrast_slider.sync()
+        # built after this dialog, see ``Window._build_contrast_bar``
+        window_slider = getattr(self.window, "contrast_slider", None)
+        if window_slider is not None:
+            window_slider.sync()
 
     def render_scene(self, *args, **kwargs) -> None:
         """Update scene in the main window."""
@@ -11890,6 +11899,10 @@ class View(QtWidgets.QLabel):
         thread, directly for synchronous renders or from
         ``_on_render_finished``."""
         self._set_blit_source(qimage, rendered_viewport)
+        # the contrast bar below continues the image's background
+        style_contrast_bar = getattr(self.window, "style_contrast_bar", None)
+        if style_contrast_bar is not None:
+            style_contrast_bar(self._color_range[0])
         # adjust zoom in Display Settings Dialog
         dppvp = self.display_pixels_per_viewport_pixels()
         self.window.display_settings_dlg.set_zoom_silently(dppvp)
@@ -16768,6 +16781,12 @@ class Window(QtWidgets.QMainWindow):
     ----------
     actions_3d : list
         Specifies actions that are displayed for 3D data only.
+    contrast_bar : QWidget
+        Holds ``contrast_slider`` and its Auto button below the view;
+        shown if ``contrast_slider`` is on in the user settings.
+    contrast_slider : DensityContrastSlider
+        Slider for the minimum and maximum density, bound to the spin
+        boxes of ``display_settings_dlg``.
     data_actions : list of QAction
         Actions of the View, Tools and Postprocess menus, which the
         toolbar may show, enabled once a file is loaded.
@@ -16830,6 +16849,147 @@ class Window(QtWidgets.QMainWindow):
         if link_group is not None:
             link_group.add(self)
 
+    def _build_contrast_bar(self) -> QtWidgets.QWidget:
+        """Build the contrast slider shown below the view (if the user
+        settings ask for it, see ``apply_contrast_slider_setting``).
+
+        The slider is a second view onto the minimum and maximum density
+        of the display settings dialog, like the slider in the dialog;
+        the Auto button next to it autoscales the contrast once. Its
+        colors follow the image's background, see
+        ``style_contrast_bar``.
+
+        Returns
+        -------
+        contrast_bar : QWidget
+            The slider and the Auto button, hidden until
+            ``apply_contrast_slider_setting`` runs.
+        """
+        dialog = self.display_settings_dlg
+        self.contrast_slider = lib.DensityContrastSlider(
+            dialog.minimum,
+            dialog.maximum,
+            image=lambda: getattr(self.view, "image", None),
+        )
+        self.contrast_slider.setToolTip(
+            "Drag the minimum and maximum density rendered (localizations"
+            " per display pixel)."
+        )
+        self._contrast_auto_button = QtWidgets.QToolButton()
+        auto_button = self._contrast_auto_button
+        auto_button.setText("Auto")
+        auto_button.setToolTip("Set the contrast automatically.")
+        font = auto_button.font()
+        font.setPointSizeF(font.pointSizeF() * 0.8)
+        auto_button.setFont(font)
+        auto_button.setFixedHeight(
+            max(15, auto_button.fontMetrics().height() + 2)
+        )
+        auto_button.clicked.connect(self._autoscale_contrast)
+        contrast_bar = QtWidgets.QWidget()
+        contrast_bar.setObjectName("contrastBar")
+        # paints the background of its style sheet (a plain QWidget
+        # does not), see ``style_contrast_bar``
+        contrast_bar.setAttribute(
+            QtCore.Qt.WidgetAttribute.WA_StyledBackground, True
+        )
+        layout = QtWidgets.QHBoxLayout(contrast_bar)
+        layout.setContentsMargins(4, 2, 4, 2)
+        layout.setSpacing(4)
+        layout.addWidget(self.contrast_slider)
+        layout.addWidget(auto_button)
+        contrast_bar.setVisible(False)
+        return contrast_bar
+
+    def style_contrast_bar(self, background: np.ndarray | None) -> None:
+        """Color the contrast bar like the background of the rendered
+        image, so that it continues the image instead of the window.
+
+        The groove, the outline and the text of the Auto button are
+        light on a dark background and dark on a light one; the handles
+        keep the accent color.
+
+        Parameters
+        ----------
+        background : np.ndarray or None
+            RGB color (uint8) of shape ``(3,)`` of pixels without
+            localizations, see ``render.color_range``. None restores the
+            colors of the theme, e.g., while nothing is rendered.
+        """
+        if background is None:
+            self._contrast_bar_color = None
+            self.contrast_bar.setStyleSheet("")
+            self.contrast_slider.setPalette(QtGui.QPalette())
+            self._contrast_auto_button.setStyleSheet(
+                """
+                QToolButton {
+                    border: 1px solid palette(mid);
+                    border-radius: 3px;
+                    padding: 0px 4px;
+                    background: transparent;
+                }
+                QToolButton:pressed {
+                    border-color: palette(highlight);
+                    background: palette(highlight);
+                    color: palette(highlighted-text);
+                }
+                """
+            )
+            return
+        r, g, b = (int(c) for c in background[:3])
+        if getattr(self, "_contrast_bar_color", None) == (r, g, b):
+            return
+        self._contrast_bar_color = (r, g, b)
+        # perceived lightness (Rec. 709 luma) decides light or dark text
+        light = 0.2126 * r + 0.7152 * g + 0.0722 * b > 127.5
+        fg = (0, 0, 0) if light else (255, 255, 255)
+        # the groove and the outline: the text color, blended into the
+        # background
+        mid = tuple(round(0.65 * c + 0.35 * f) for c, f in zip((r, g, b), fg))
+        dim = tuple(round(0.8 * c + 0.2 * f) for c, f in zip((r, g, b), fg))
+        bg_css = f"rgb({r}, {g}, {b})"
+        fg_css = "rgb({}, {}, {})".format(*fg)
+        mid_css = "rgb({}, {}, {})".format(*mid)
+        self.contrast_bar.setStyleSheet(
+            f"#contrastBar {{ background: {bg_css}; }}"
+        )
+        palette = self.contrast_slider.palette()
+        palette.setColor(QtGui.QPalette.ColorRole.Mid, QtGui.QColor(*mid))
+        palette.setColor(
+            QtGui.QPalette.ColorGroup.Disabled,
+            QtGui.QPalette.ColorRole.Midlight,
+            QtGui.QColor(*dim),
+        )
+        self.contrast_slider.setPalette(palette)
+        self._contrast_auto_button.setStyleSheet(
+            f"""
+            QToolButton {{
+                border: 1px solid {mid_css};
+                border-radius: 3px;
+                padding: 0px 4px;
+                background: transparent;
+                color: {fg_css};
+            }}
+            QToolButton:pressed {{
+                border-color: palette(highlight);
+                background: palette(highlight);
+                color: palette(highlighted-text);
+            }}
+            """
+        )
+
+    def _autoscale_contrast(self) -> None:
+        """Re-render with the contrast set automatically."""
+        if self.view.locs:
+            self.view.update_scene(autoscale=True)
+
+    def apply_contrast_slider_setting(self) -> None:
+        """Show or hide the contrast slider below the view, as set by
+        ``contrast_slider`` in the user settings (hidden by default)."""
+        self.contrast_bar.setVisible(
+            lib.contrast_slider_setting("Render", False)
+        )
+
     def setWindowTitle(self, title: str) -> None:
         """Set the window title; linked windows are numbered.
 
@@ -16860,7 +17020,14 @@ class Window(QtWidgets.QMainWindow):
         self.setWindowIcon(icon)
         self.view = View(self)  # displays rendered locs
         self.view.setMinimumSize(1, 1)
-        self.setCentralWidget(self.view)
+        # the contrast slider is added below the view once the display
+        # settings dialog, whose spin boxes it is bound to, exists
+        central_widget = QtWidgets.QWidget()
+        central_layout = QtWidgets.QVBoxLayout(central_widget)
+        central_layout.setContentsMargins(0, 0, 0, 0)
+        central_layout.setSpacing(0)
+        central_layout.addWidget(self.view)
+        self.setCentralWidget(central_widget)
 
         # User-defined colormaps, keyed by name, each a list of
         # [position, R, G, B] stops in [0, 1]. Populated from
@@ -16872,6 +17039,11 @@ class Window(QtWidgets.QMainWindow):
 
         # set up dialogs
         self.display_settings_dlg = DisplaySettingsDialog(self)
+        self.contrast_bar = self._build_contrast_bar()
+        # in the colors of the theme until the first render
+        self._contrast_bar_color = None
+        self.style_contrast_bar(None)
+        central_layout.addWidget(self.contrast_bar)
         self.tools_settings_dialog = ToolsSettingsDialog(self)
         self.view._pick_shape = (
             self.tools_settings_dialog.pick_shape.currentText()
@@ -16888,6 +17060,9 @@ class Window(QtWidgets.QMainWindow):
         self.window_rot = RotationWindow(self)
         self.test_clusterer_dialog = TestClustererDialog(self)
         self.user_settings_dialog = lib.UserSettingsDialog(self)
+        self.user_settings_dialog.saved.connect(
+            self.apply_contrast_slider_setting
+        )
 
         self.dialogs = [
             self.display_settings_dlg,
@@ -18003,8 +18178,9 @@ class Window(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.information(self, "Warning", warning)
 
     def load_user_settings(self) -> None:  # noqa: C901
-        """Load user settings (colormaps, current directory and the
-        appearance of the tools)."""
+        """Load user settings (colormaps, current directory, the
+        appearance of the tools and whether the contrast slider is
+        shown)."""
         settings = io.load_user_settings()
         # the section may be absent, or present without these keys (the
         # file names only what the user or a persisted default set)
@@ -18062,6 +18238,7 @@ class Window(QtWidgets.QMainWindow):
         self.window_rot.display_settings_dlg.grid_box.load_settings(
             render_settings.get("Grid3D")
         )
+        self.apply_contrast_slider_setting()
 
     def open_apply_dialog(self) -> None:
         """Load expression and apply it to locs."""

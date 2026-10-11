@@ -19,7 +19,7 @@ Identification and fitting of single-molecule spots
 
 2. **Adjust the image contrast** so that the single-molecule spots are clearly visible.
 
-   - The quickest way is the two-handle slider at the bottom of the window, below the frame slider.
+   - The quickest way is the two-handle slider at the bottom of the window, below the frame slider. It can be hidden with ``contrast_slider: false`` in the ``Localize`` section of the user settings (see :ref:`user-settings-file`).
    - Alternatively, select ``View`` > ``Contrast`` to type in the black and white points, or to re-enable ``Auto``, which re-scales every frame to its own minimum and maximum.
 
 3. **Open the** ``Parameters`` **dialog** (select ``Analyze`` > ``Parameters``) to adjust spot identification and fit parameters.

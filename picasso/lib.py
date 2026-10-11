@@ -128,6 +128,7 @@ _QT_NAMES = (
     "RemoveColumnsDialog",
     "HelpButton",
     "confirm_restore_defaults",
+    "contrast_slider_setting",
     "cancel_dialogs",
     "install_excepthook",
     "adjust_widget_size",

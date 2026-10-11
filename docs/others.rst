@@ -238,6 +238,9 @@ Top level
    * - ``PWD``
      - *(last used)*
      - Remembered last value: the directory used in Render's file dialogs.
+   * - ``contrast_slider``
+     - ``False``
+     - Show the contrast slider at the bottom of the main window, below the image. See :ref:`render-contrast-slider`.
    * - ``Colorbar format``
      - ``.png``
      - Format of the exported colorbar/LUT image next to a "render by property" export - ``.png`` or ``.svg``. See :ref:`render-colorbar-format`.
@@ -282,6 +285,9 @@ Top level
    * - Key
      - Default
      - Description
+   * - ``contrast_slider``
+     - ``True``
+     - Show the contrast slider at the bottom of the window, below the frame slider. See :ref:`localize-identification`.
    * - ``cpu_utilization``
      - ``0.8``
      - Fraction of CPU cores used by the spot identification/fitting worker pool. See :ref:`localize-cpu-fitting`.

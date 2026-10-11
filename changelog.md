@@ -78,6 +78,7 @@ Last change: 11-OCT-2026 CEST
 - Fixed Nanotron's PyQt6 information dialogs.
 - Picasso: Simulate has a new cleaner layout.
 - Text search in the user settings dialog (`File > Picasso settings`).
+- Contrast slider at the bottom of the Render window, like the one in Localize. Whether Render and Localize show it is set by `contrast_slider` in the user settings (off in Render, on in Localize by default). See the [documentation](https://picassosr.readthedocs.io/en/latest/render/display-settings.html#render-contrast-slider).
 - Improved navigation in the SPINNA mask tab.
 - Improved status dialog.
 

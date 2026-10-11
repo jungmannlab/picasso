@@ -54,6 +54,18 @@ With several channels loaded, the contrast of each channel can be adjusted
 relative to this one in ``View > Files...``, see
 :ref:`render-channel-contrast`.
 
+.. _render-contrast-slider:
+
+The same slider can be shown at the bottom of the main window, below the
+image, so that the contrast can be dragged without opening the dialog. It
+takes the background color of the image (e.g., black, or white with
+inverted colors), so it continues the image. Its ``Auto`` button sets the
+contrast automatically, as when a file is opened.
+It is hidden by default; to show it, set ``contrast_slider: true`` in the
+``Render`` section of ``~/.picasso/settings.yaml``, e.g., via
+``File > Picasso settings`` (see :ref:`user-settings-file`). The change
+applies as soon as the settings are saved.
+
 The selected colormap will be saved when closing render, under ``Colormap`` in
 the ``Render`` section of ``~/.picasso/settings.yaml`` (see
 :ref:`user-settings-file`), and restored the next time Render starts.
