@@ -52,7 +52,7 @@ with a numpy array of shape (256, 4) and values between 0 and 1.
 
 With several channels loaded, the contrast of each channel can be adjusted
 relative to this one in ``View > Files...``, see
-:ref:`render-channel-contrast`.
+:ref:`Per-channel contrast <render-channel-contrast>`.
 
 .. _render-contrast-slider:
 

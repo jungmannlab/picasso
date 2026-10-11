@@ -237,13 +237,13 @@ Top level
      - User-defined colormaps created with the custom colormap editor, keyed by name; each is a list of color stops. See :ref:`render-colormap-setting`.
    * - ``Channel colors``
      - ``red``, ``cyan``, ``green``, … (the 14 solid colors)
-     - Colors given to newly loaded channels, in order: names, hexadecimal codes or colormaps from the *Color* dropdown of ``View > Files``. Channels beyond the list get the remaining built-in colors. See :ref:`render-default-colors`.
+     - Colors given to newly loaded channels, in order: names, hexadecimal codes or colormaps from the *Color* dropdown of ``View > Files``. Channels beyond the list get the remaining built-in colors. See :ref:`Default colors <render-default-colors>`.
    * - ``PWD``
      - *(last used)*
      - Remembered last value: the directory used in Render's file dialogs.
    * - ``contrast_slider``
      - ``False``
-     - Show the contrast slider at the bottom of the main window, below the image. See :ref:`render-contrast-slider`.
+     - Show the contrast slider at the bottom of the main window, below the image. See :ref:`Contrast slider <render-contrast-slider>`.
    * - ``Colorbar format``
      - ``.png``
      - Format of the exported colorbar/LUT image next to a "render by property" export - ``.png`` or ``.svg``. See :ref:`render-colorbar-format`.

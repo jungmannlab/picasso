@@ -309,7 +309,7 @@ Chooses which attributes the linked windows share:
   mouse is in,
 - the active tool,
 - render settings, contrast, per-channel contrast (see
-  :ref:`render-channel-contrast`; a channel takes the contrast of the channel
+  :ref:`Per-channel contrast <render-channel-contrast>`; a channel takes the contrast of the channel
   of the same file in the other windows), colormap, render by property, scale
   bar, grid, minimap, background and legend, camera pixel size,
 - pick shape and size, and the picks themselves,
