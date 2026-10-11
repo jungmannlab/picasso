@@ -174,8 +174,9 @@ Filters from metadata
 
 The filtering information is stored in the metadata .yaml file.
 ``Picasso: Filter`` allows the user to load the filtering steps from previously
-filtered data by clicking ``Filter > Apply filters from metadata...``. The
-extracted information is displayed to the user before approval.
+filtered data by clicking ``Filter > Apply filters from metadata...`` or by
+dragging the .yaml file into the main window (with localizations already
+open). The extracted information is displayed to the user before approval.
 
 All filter steps found in the metadata are applied in the order they were
 applied originally, also over several Filter sessions: histogram selections,

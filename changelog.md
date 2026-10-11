@@ -59,6 +59,7 @@ Last change: 11-OCT-2026 CEST
 ### Filter
 - Filtering by expression: `Filter > Filter by expression...` for universal filtering with comparisons, logic, arithmetic, functions and statistics over the shown localizations. See the [documentation](https://picassosr.readthedocs.io/en/latest/filter.html#filter-expression).
 - The metadata of a filtered file lists its filter steps in the order they were applied.
+- Filters from metadata can also be applied by dragging the .yaml file into the Filter window.
 - Filter shows 1D histograms of both variablies in the 2D histogram filtering.
 
 ### **Backward incompatible changes:**

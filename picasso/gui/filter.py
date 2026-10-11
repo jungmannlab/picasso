@@ -153,6 +153,8 @@ class TableView(QtWidgets.QTableView):
         extension = os.path.splitext(path)[1].lower()
         if extension == ".hdf5":
             self.window.open(path)
+        elif extension == ".yaml":
+            self.window.apply_filters_from_metadata(path)
 
 
 class PlotWindow(QtWidgets.QWidget):
@@ -938,7 +940,7 @@ class Window(QtWidgets.QMainWindow):
             "Apply filters from metadata..."
         )
         apply_from_metadata_action.triggered.connect(
-            self.apply_filters_from_metadata
+            lambda: self.apply_filters_from_metadata()
         )
         remove_columns_action = filter_menu.addAction("Remove columns...")
         remove_columns_action.triggered.connect(self.remove_columns)
@@ -1357,14 +1359,15 @@ class Window(QtWidgets.QMainWindow):
         lines.append("Apply these steps?")
         return "\n".join(lines)
 
-    def _load_filter_metadata(self):
-        directory = self.pwd if self.pwd else ""
-        path, _ = QtWidgets.QFileDialog.getOpenFileName(
-            self,
-            "Open metadata",
-            directory=directory,
-            filter="*.yaml",
-        )
+    def _load_filter_metadata(self, path: str | None = None):
+        if path is None:
+            directory = self.pwd if self.pwd else ""
+            path, _ = QtWidgets.QFileDialog.getOpenFileName(
+                self,
+                "Open metadata",
+                directory=directory,
+                filter="*.yaml",
+            )
         if not path:
             return None
         try:
@@ -1372,16 +1375,23 @@ class Window(QtWidgets.QMainWindow):
         except io.NoMetadataFileError:
             return None
 
-    def apply_filters_from_metadata(self) -> None:
+    def apply_filters_from_metadata(self, path: str | None = None) -> None:
         """Replay filter steps recorded in another file's .yaml metadata
-        onto the currently loaded localizations."""
+        onto the currently loaded localizations.
+
+        Parameters
+        ----------
+        path : str, optional
+            Path to the .yaml metadata, e.g., dropped into the window.
+            If None, a file dialog asks for it.
+        """
         if self.locs_full is None:
             QtWidgets.QMessageBox.information(
                 self, "Apply filters from metadata", "No file loaded."
             )
             return
 
-        info = self._load_filter_metadata()
+        info = self._load_filter_metadata(path)
         if info is None:
             return
 
