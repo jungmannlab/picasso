@@ -32,8 +32,8 @@ Rendering
     size), contrast (including automatic contrast adjustments),
     colormap and render by property.
 Display
-    Scale bar, minimap, background color and legend, camera pixel
-    size.
+    Scale bar, grid, minimap, background color and legend, camera
+    pixel size.
 Picks
     Pick shape and size, or the picks themselves (which include their
     shape and size).
@@ -72,6 +72,7 @@ import numpy as np
 from PyQt6 import QtCore, QtWidgets
 
 from .. import io, lib, render
+from .grid_settings import GridGroupBox
 
 
 @dataclass(frozen=True)
@@ -172,6 +173,12 @@ CATEGORIES = (
         "Scale bar visibility, length and label.",
     ),
     LinkCategory(
+        "grid",
+        "Grid",
+        "Display",
+        "Grid visibility, spacing and appearance.",
+    ),
+    LinkCategory(
         "minimap",
         "Minimap",
         "Display",
@@ -259,6 +266,7 @@ WATCHED_WIDGETS = {
             "optimal_scalebar_check",
         ),
     ),
+    "grid": ("display_settings_dlg", ("grid_box",)),
     "background_legend": ("dataset_dialog", ("wbackground", "legend")),
     "slicer": (
         "slicer_dialog",
@@ -282,14 +290,16 @@ def widget_signal(widget: QtCore.QObject):
     Parameters
     ----------
     widget : QObject
-        A checkbox, group box, spin box, combo box, slider or button
-        group.
+        A checkbox, group box, spin box, combo box, slider, button
+        group or grid group box.
 
     Returns
     -------
     signal : pyqtBoundSignal
         The widget's change signal.
     """
+    if isinstance(widget, GridGroupBox):
+        return widget.changed
     if isinstance(widget, QtWidgets.QButtonGroup):
         return widget.buttonToggled
     if isinstance(widget, QtWidgets.QGroupBox):
@@ -628,6 +638,7 @@ class LinkGroup(QtCore.QObject):
             "colormap": self._apply_colormap,
             "render_property": self._apply_render_property,
             "scalebar": self._apply_scalebar,
+            "grid": self._apply_grid,
             "background_legend": self._apply_background_legend,
             "picks": self._apply_picks,
             "slicer": self._apply_slicer,
@@ -750,6 +761,14 @@ class LinkGroup(QtCore.QObject):
         if not s.optimal_scalebar_check.isChecked():
             mirror_widget(s.scalebar, d.scalebar)
         mirror_widget(s.optimal_scalebar_check, d.optimal_scalebar_check)
+
+    @staticmethod
+    def _apply_grid(src, dst) -> None:
+        s = src.display_settings_dlg.grid_box
+        d = dst.display_settings_dlg.grid_box
+        # an automatic spacing follows each window's own zoom
+        d.load_settings(s.settings())
+        d.setChecked(s.isChecked())
 
     @staticmethod
     def _apply_background_legend(src, dst) -> None:

@@ -262,7 +262,7 @@ Chooses which attributes the linked windows share:
   mouse is in,
 - the active tool,
 - render settings, contrast, colormap, render by property, scale bar,
-  minimap, background and legend, camera pixel size,
+  grid, minimap, background and legend, camera pixel size,
 - pick shape and size, and the picks themselves,
 - slicing (the slice position is matched in nm).
 

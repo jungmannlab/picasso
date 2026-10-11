@@ -185,6 +185,46 @@ the ``Camera pixel size``. ``Automatic length`` keeps it at roughly 1/8 of the
 window width as you zoom, and ``Print scale bar length`` prints the length
 next to it.
 
+.. _render-grid:
+
+Grid
+~~~~
+
+Tick ``Grid`` to draw a reference grid fixed to the data; its settings are
+grayed out while it is unticked. The lines sit at whole multiples of ``Spacing (nm)``
+in the localizations' coordinates, so they stay in place as you pan and zoom.
+``Automatic`` keeps the spacing at roughly 1/8 of the window width, like the
+automatic scale bar length; typing a spacing switches it off.
+
+``Draw`` places the grid ``Behind localizations`` (the default): it shows
+where there are no localizations and is covered the more, the brighter they
+are, so it never dims the data. ``Over localizations`` draws it on top.
+``Color`` (``Auto``: white on a dark, black on a light background), ``Line``,
+``Width`` and ``Opacity`` set the look of the lines; ``Reset`` restores the
+defaults. Lines closer together than 4 screen pixels are not drawn.
+
+The grid is part of ``Export current view``, ``Export complete image`` and
+``Export view manually``, and its spacing is saved in the exported ``.yaml``
+file. Its settings, except whether it is shown, are saved under ``Grid`` in
+the ``Render`` section of ``~/.picasso/settings.yaml`` (see
+:ref:`user-settings-file`).
+
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
+
+   .. code-block:: python
+
+      from picasso import render
+
+      grid = render.GridOverlay(
+          spacing_nm=500,
+          style=render.OverlayStyle(color="gray", opacity=0.5),
+          blend="Behind localizations",
+      )
+      # qimage shows the rendered viewport ((y_min, x_min), (y_max, x_max))
+      qimage = render.draw_grid(qimage, viewport, grid, pixelsize=130)
+
 .. _render-properties:
 
 Render properties

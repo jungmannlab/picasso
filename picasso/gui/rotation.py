@@ -23,6 +23,7 @@ from scipy.spatial.transform import Rotation
 
 from .. import io, render, lib, lib_qt, __version__, docs_url
 from . import theme
+from .grid_settings import GridGroupBox
 from .render_worker import (
     RenderWorker,
     global_precisions_for,
@@ -76,6 +77,8 @@ class DisplaySettingsRotationDialog(lib.Dialog):
     dynamic_disp_px : QCheckBox
         Tick to automatically adjust to current window size when
         zooming.
+    grid_box : GridGroupBox
+        Grid planes rotating with the data, tick to display.
     maximum : QDoubleSpinBox
         Defines at which number of localizations per super-resolution
         pixel the maximum color of the colormap should be applied.
@@ -404,6 +407,14 @@ class DisplaySettingsRotationDialog(lib.Dialog):
             self.window.view_rot.set_optimal_scalebar
         )
         scalebar_grid.addWidget(self.optimal_scalebar_check, 1, 1)
+
+        # grid planes rotating with the data
+        self.grid_box = GridGroupBox(
+            three_d=True,
+            optimal_spacing=self.window.view_rot.optimal_grid_spacing,
+        )
+        self.grid_box.changed.connect(self.render_scene)
+        vbox.addWidget(self.grid_box)
 
         self._silent_disp_px_update = False
 
@@ -968,6 +979,10 @@ class AnimationDialog(lib.Dialog):
             ),
             scalebar_display_length=disp_dlg.scalebar_text.isChecked(),
         )
+        grid = disp_dlg.grid_box.grid()
+        if grid is not None and view._grid_bounds is not None:
+            bounds, origin = view.grid_geometry()
+            kwargs.update(grid=grid, grid_bounds=bounds, grid_origin=origin)
         self._start_build(path, locs, infos, kwargs, n_frames)
 
     def _start_build(self, path, locs, infos, kwargs, n_frames) -> None:
@@ -1288,6 +1303,12 @@ class ViewRotation(QtWidgets.QLabel):
         self.x_render_state = False
         self.x_locs = []
         self._z_shift = 0.0
+        # bounding box of the loaded localizations (camera pixels, the
+        # loaded frame), spanned by the grid planes
+        self._grid_bounds = None
+        # colors of empty and full pixels of the last render, to draw
+        # the grid behind the localizations
+        self._color_range = ((0, 0, 0), (255, 255, 255))
         self._size_hint = (512, 512)
         self._mode = "Rotate"
         self._points = []  # active measurement set being drawn
@@ -1618,6 +1639,16 @@ class ViewRotation(QtWidgets.QLabel):
         self._z_shift = z_shift
         for i in range(len(self.locs)):
             self.locs[i]["z"] -= z_shift
+        xyz = [
+            locs[["x", "y", "z"]].to_numpy(dtype=float)
+            for locs in self.locs
+            if len(locs)
+        ]
+        if xyz:
+            xyz = np.concatenate(xyz)
+            self._grid_bounds = (xyz.min(axis=0), xyz.max(axis=0))
+        else:
+            self._grid_bounds = None
 
         # assign self.group_color if single channel and group info present
         if len(self.locs) == 1 and "group" in self.locs[0].columns:
@@ -1684,6 +1715,15 @@ class ViewRotation(QtWidgets.QLabel):
         contrast = None if autoscale else (vmin, vmax)
         raw_image = self.image if use_cache else None
         intensities = self.window.window.view.read_relative_intensities()
+        colors = self.window.window.view.read_colors()
+        invert = self.window.dataset_dialog.wbackground.isChecked()
+        self._color_range = render.color_range(
+            None if isinstance(locs, pd.DataFrame) else len(locs),
+            colors=colors,
+            relative_intensities=intensities,
+            invert_colors=invert,
+            single_channel_colormap=cmap,
+        )
         return dict(
             locs=locs,
             info=infos,
@@ -1693,9 +1733,9 @@ class ViewRotation(QtWidgets.QLabel):
             **kwargs,
             ang=self._R,
             contrast=contrast,
-            invert_colors=self.window.dataset_dialog.wbackground.isChecked(),
+            invert_colors=invert,
             single_channel_colormap=cmap,
-            colors=self.window.window.view.read_colors(),
+            colors=colors,
             relative_intensities=intensities,
             raw_image_cache=raw_image,
             return_contrast_limits=True,
@@ -1826,6 +1866,7 @@ class ViewRotation(QtWidgets.QLabel):
         self.viewport = self.adjust_viewport_to_view(viewport)
         if not use_cache:
             self.set_optimal_scalebar(silent=True)
+            self.set_optimal_grid_spacing()
         if use_cache or synchronous or not self.async_rendering:
             # cache redraws (contrast, colormap, the live measuring
             # cross) are cheap and stay synchronous for instant feedback
@@ -1851,7 +1892,8 @@ class ViewRotation(QtWidgets.QLabel):
             self.height(),
             QtCore.Qt.AspectRatioMode.KeepAspectRatioByExpanding,
         )
-        # draw scalebar, legend, rotation and measuring points
+        # draw grid, scalebar, legend, rotation and measuring points
+        self.qimage = self.draw_grid(self.qimage)
         self.qimage = self.draw_scalebar(self.qimage)
         self.qimage = self.draw_legend(self.qimage)
         self.qimage = self.draw_rotation(self.qimage)
@@ -1997,6 +2039,65 @@ class ViewRotation(QtWidgets.QLabel):
                 color=color,
             )
         return image
+
+    def grid_geometry(
+        self,
+    ) -> tuple[tuple[np.ndarray, np.ndarray], tuple[float, float, float]]:
+        """Bounding box spanned by the grid and a point on the grid,
+        in the frame of the rendered localizations (camera pixels, z
+        shifted by the mean z and ``_pan_z``). The point keeps the grid
+        lines at whole multiples of the spacing in the original
+        coordinates, so z = 0 nm is on the grid."""
+        lower, upper = self._grid_bounds
+        shift = np.array([0.0, 0.0, self._pan_z])
+        origin = (0.0, 0.0, -self._z_shift - self._pan_z)
+        return (lower - shift, upper - shift), origin
+
+    def draw_grid(self, image: QtGui.QImage) -> QtGui.QImage:
+        """Draw the grid planes, rotated with the localizations.
+
+        Parameters
+        ----------
+        image : QImage
+            Image containing rendered localizations.
+
+        Returns
+        -------
+        image : QImage
+            Image with the drawn grid.
+        """
+        grid = self.window.display_settings_dlg.grid_box.grid()
+        if grid is None or self._grid_bounds is None:
+            return image
+        bounds, origin = self.grid_geometry()
+        return render.draw_grid_3d(
+            image,
+            self.viewport,
+            grid,
+            self.window.window.view.pixelsize,
+            self._R,
+            bounds,
+            origin=origin,
+            color_range=self._color_range,
+        )
+
+    def optimal_grid_spacing(self) -> int | None:
+        """Automatic grid spacing (nm): approx. 1/8 of the current
+        viewport's width, like the scale bar; None without a view."""
+        if self.viewport is None:
+            return None
+        width = render.viewport_width(self.viewport)
+        spacing = render.optimal_scalebar_length(
+            self.window.window.view.pixelsize, width
+        )
+        return spacing if spacing > 0 else None
+
+    def set_optimal_grid_spacing(self) -> None:
+        """Set the grid spacing to ``optimal_grid_spacing`` if the
+        spacing is automatic."""
+        spacing = self.optimal_grid_spacing()
+        if spacing is not None:
+            self.window.display_settings_dlg.grid_box.set_auto_spacing(spacing)
 
     def draw_legend(self, image: QtGui.QImage) -> QtGui.QImage:
         """Draw a legend for multichannel data.
@@ -2806,6 +2907,7 @@ class ViewRotation(QtWidgets.QLabel):
             "Colormap": d.colormap.currentText(),
             "Blur method": d.blur_method(),
             "Scale bar length (nm)": d.scalebar.value(),
+            **d.grid_box.export_info(),
             "Min. blur (nm)": d.min_blur_width.value() / pixelsize,
             "Localizations loaded": self.paths,
             "Colors": colors,

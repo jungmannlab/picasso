@@ -21,8 +21,9 @@ from tqdm import tqdm
 
 from .. import io, lib, __version__
 from .geometry import viewport_width
+from .grid import GridOverlay, draw_grid_3d
 from .overlays_qt import draw_scalebar
-from .scene import render_scene
+from .scene import color_range, render_scene
 
 if TYPE_CHECKING:
     from PyQt6 import QtCore, QtGui
@@ -381,6 +382,9 @@ def build_animation(
     adjust_pixel_size: bool = True,
     scalebar_length_nm: int | float | None = None,
     scalebar_display_length: bool = True,
+    grid: GridOverlay | None = None,
+    grid_bounds: tuple | None = None,
+    grid_origin: tuple[float, float, float] = (0.0, 0.0, 0.0),
     progress_callback: (
         Callable[[int], None] | Literal["console"] | None
     ) = None,
@@ -507,6 +511,19 @@ def build_animation(
     scalebar_display_length : bool, optional
         If True, the scale bar's length is printed above it. Only used
         if 'scalebar_length_nm' is given. Default is True.
+    grid : GridOverlay, optional
+        Grid planes drawn into every frame, rotating with the
+        localizations, see ``picasso.render.draw_grid_3d``. If None, no
+        grid is drawn. Default is None.
+    grid_bounds : tuple, optional
+        ``((x_min, y_min, z_min), (x_max, y_max, z_max))`` spanned by
+        the grid, in camera pixels (z included) in the frame of 'locs'.
+        If None, the bounding box of all localizations. Only used if
+        'grid' is given. Default is None.
+    grid_origin : tuple of float, optional
+        A point on the grid in the frame of 'locs' (camera pixels), see
+        ``picasso.render.draw_grid_3d``. Only used if 'grid' is given.
+        Default is the origin.
     progress_callback : callable, "console", or None, optional
         If a callable, it is called with the current frame number as an
         argument after each frame is rendered. If "console", a progress
@@ -624,6 +641,15 @@ def build_animation(
     assert isinstance(
         scalebar_display_length, bool
     ), "scalebar_display_length must be a bool."
+    assert grid is None or isinstance(
+        grid, GridOverlay
+    ), "grid must be a GridOverlay or None."
+    if grid is not None and grid_bounds is not None:
+        assert np.shape(grid_bounds) == (2, 3), (
+            "grid_bounds must be ((x_min, y_min, z_min), "
+            "(x_max, y_max, z_max))."
+        )
+    assert np.shape(grid_origin) == (3,), "grid_origin must have 3 values."
     assert (
         progress_callback is None
         or progress_callback == "console"
@@ -655,6 +681,9 @@ def build_animation(
         adjust_pixel_size=adjust_pixel_size,
         scalebar_length_nm=scalebar_length_nm,
         scalebar_display_length=scalebar_display_length,
+        grid=grid,
+        grid_bounds=grid_bounds,
+        grid_origin=grid_origin,
         progress_callback=progress_callback,
         cancel=cancel,
     )
@@ -688,6 +717,9 @@ def _build_animation(
     scalebar_display_length: bool,
     progress_callback: Callable[[int], None] | Literal["console"] | None,
     cancel: Callable[[], bool] | None = None,
+    grid: GridOverlay | None = None,
+    grid_bounds: tuple | None = None,
+    grid_origin: tuple[float, float, float] = (0.0, 0.0, 0.0),
 ) -> bool:
     """Internal function to build an animation of rendered localizations
     given the checkpoints. See ``build_animation`` for more details."""
@@ -705,13 +737,30 @@ def _build_animation(
     width = ((width + 15) // 16) * 16
     height = ((height + 15) // 16) * 16
 
-    if scalebar_length_nm is not None:
-        # camera pixel size (nm) maps the bar's length onto the viewport
+    if scalebar_length_nm is not None or grid is not None:
+        # camera pixel size (nm) maps lengths in nm onto the viewport
         channel_info = info[0] if isinstance(info[0], list) else info
         pixelsize = lib.get_from_metadata(
             channel_info, "Pixelsize", raise_error=True
         )
+    if scalebar_length_nm is not None:
         scalebar_color = QtGui.QColor("black" if invert_colors else "white")
+    if grid is not None:
+        channels = locs if isinstance(locs, list) else [locs]
+        if grid_bounds is None:
+            xyz = np.concatenate(
+                [c[["x", "y", "z"]].to_numpy(dtype=float) for c in channels]
+            )
+            grid_bounds = (xyz.min(axis=0), xyz.max(axis=0))
+        # the colors of empty and full pixels, to draw behind the
+        # localizations
+        grid_color_range = color_range(
+            None if isinstance(locs, pd.DataFrame) else len(locs),
+            colors=colors,
+            relative_intensities=relative_intensities,
+            invert_colors=invert_colors,
+            single_channel_colormap=single_channel_colormap,
+        )
 
     # render all frames and save in RAM
     video_writer = imageio.get_writer(path, fps=fps)
@@ -763,6 +812,19 @@ def _build_animation(
             height,
             QtCore.Qt.AspectRatioMode.IgnoreAspectRatio,
         )
+        if grid is not None:
+            # the frame is stretched to the output size, so it spans
+            # the viewport in both directions
+            qimage = draw_grid_3d(
+                qimage,
+                viewports[i],
+                grid,
+                pixelsize,
+                rotations[i],
+                grid_bounds,
+                origin=grid_origin,
+                color_range=grid_color_range,
+            )
         if scalebar_length_nm is not None:
             # the frame is stretched to the output size, so its width
             # spans the viewport's width; match the aspect ratio so that
@@ -820,6 +882,12 @@ def _build_animation(
     }
     if scalebar_length_nm is not None:
         anim_settings["Scale bar length displayed"] = scalebar_display_length
+    anim_settings["Grid spacing (nm)"] = (
+        None if grid is None else float(grid.spacing_nm)
+    )
+    if grid is not None:
+        anim_settings["Grid planes"] = list(grid.planes)
+        anim_settings["Grid position"] = grid.position
     info_path = os.path.splitext(path)[0] + ".yaml"
     io.save_info(info_path, [anim_settings])
     return True

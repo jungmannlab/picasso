@@ -12,7 +12,8 @@ This package splits the former single-module implementation into
 math), ``backend`` (splat backend contract), ``splat`` (raw splat
 stage and the CPU backend), ``overlays_qt`` (Qt overlay drawing and
 export), ``scene`` (multi-channel composition), ``image_overlay`` (overlay
-of an image, e.g., a widefield PNG or TIFF) and ``animation``.
+of an image, e.g., a widefield PNG or TIFF), ``grid`` (reference grid
+in 2D and 3D) and ``animation``.
 ``picasso.render`` re-exports the full former surface, so
 ``render.<name>`` keeps working unchanged.
 
@@ -123,6 +124,18 @@ from .image_overlay import (
     overlay_to_qimage,
     draw_image_overlay,
     composite_behind,
+)
+from .grid import (
+    GRID_BLEND_MODES,
+    GRID_PLANES,
+    GRID_POSITIONS,
+    GridOverlay,
+    grid_levels,
+    grid_box,
+    grid_segments_3d,
+    project_points,
+    draw_grid,
+    draw_grid_3d,
 )
 from .scene import (
     N_GROUP_COLORS,
@@ -255,6 +268,17 @@ __all__ = [
     "overlay_to_qimage",
     "draw_image_overlay",
     "composite_behind",
+    # grid
+    "GRID_BLEND_MODES",
+    "GRID_PLANES",
+    "GRID_POSITIONS",
+    "GridOverlay",
+    "grid_levels",
+    "grid_box",
+    "grid_segments_3d",
+    "project_points",
+    "draw_grid",
+    "draw_grid_3d",
     # scene
     "N_GROUP_COLORS",
     "solid_to_lut",

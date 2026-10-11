@@ -64,6 +64,7 @@ from .render_worker import (  # noqa: F401
     subsample_request,
 )
 from . import render_link
+from .grid_settings import GridGroupBox
 from .overlay_style import OverlayStyleWidget
 from .rotation import RotationWindow, source_key
 from .app import run_gui
@@ -7609,6 +7610,8 @@ class DisplaySettingsDialog(lib.Dialog):
     dynamic_disp_px : QCheckBox
         Tick to automatically adjust to current window size when
         zooming.
+    grid_box : GridGroupBox
+        Grid fixed to the data, tick to display.
     maximum : QDoubleSpinBox
         Defines at which number of localizations per super-resolution
         pixel the maximum color of the colormap should be applied.
@@ -7987,6 +7990,13 @@ class DisplaySettingsDialog(lib.Dialog):
             self.window.view.set_optimal_scalebar
         )
         scalebar_grid.addWidget(self.optimal_scalebar_check, 1, 1)
+
+        # Grid
+        self.grid_box = GridGroupBox(
+            optimal_spacing=self.window.view.optimal_grid_spacing
+        )
+        self.grid_box.changed.connect(self.update_scene)
+        vbox.addWidget(self.grid_box)
 
         # Render
         self.render_groupbox = QtWidgets.QGroupBox(
@@ -11326,6 +11336,53 @@ class View(QtWidgets.QLabel):
             )
         return image
 
+    def draw_grid(
+        self,
+        image: QtGui.QImage,
+        viewport: tuple | None = None,
+    ) -> QtGui.QImage:
+        """Draw the grid set in the Display Settings, if shown.
+
+        Parameters
+        ----------
+        image : QImage
+            Image containing rendered localizations.
+        viewport : tuple, optional
+            Field of view shown in ``image``. Default is the current
+            viewport.
+
+        Returns
+        -------
+        image : QImage
+            Image with the drawn grid.
+        """
+        grid = self.window.display_settings_dlg.grid_box.grid()
+        if grid is None:
+            return image
+        return render.draw_grid(
+            image,
+            self.viewport if viewport is None else viewport,
+            grid,
+            self.pixelsize,
+            color_range=self._color_range,
+        )
+
+    def optimal_grid_spacing(self) -> int | None:
+        """Automatic grid spacing (nm): approx. 1/8 of the current
+        viewport's width, like the scale bar; None without a view."""
+        if getattr(self, "viewport", None) is None:
+            return None
+        width = render.viewport_width(self.viewport)
+        spacing = render.optimal_scalebar_length(self.pixelsize, width)
+        return spacing if spacing > 0 else None
+
+    def set_optimal_grid_spacing(self) -> None:
+        """Set the grid spacing to ``optimal_grid_spacing`` if the
+        spacing is automatic."""
+        spacing = self.optimal_grid_spacing()
+        if spacing is not None:
+            self.window.display_settings_dlg.grid_box.set_auto_spacing(spacing)
+
     def draw_legend(self, image: QtGui.QImage) -> QtGui.QImage:
         """
         Draw a legend for multichannel data in the top left corner.
@@ -11498,6 +11555,7 @@ class View(QtWidgets.QLabel):
             self.viewport = self.adjust_viewport_to_view(viewport)
             if not use_cache:
                 self.set_optimal_scalebar(silent=True)
+                self.set_optimal_grid_spacing()
             if use_cache or not self.async_rendering:
                 # cache redraws (contrast/colormap tweaks) are ~40 ms
                 # since the fused post-processing and stay synchronous
@@ -11585,6 +11643,7 @@ class View(QtWidgets.QLabel):
         target = self.window.image_overlay_dialog.draw(
             target, self._viewport_key()
         )
+        target = self.draw_grid(target)
         # overlays go on the visible crop, so they keep their corner
         # positions regardless of the render margin
         target = self.draw_scalebar(target)
@@ -12167,6 +12226,7 @@ class View(QtWidgets.QLabel):
                 self.height(),
                 QtCore.Qt.AspectRatioMode.KeepAspectRatioByExpanding,
             )
+            qimage = self.draw_grid(qimage)
             qimage = self.draw_scalebar(qimage)
             qimage = self.draw_minimap(qimage)
             qimage = self.draw_legend(qimage)
@@ -17122,6 +17182,12 @@ class Window(QtWidgets.QMainWindow):
         settings["Render"][
             "ToolStyles"
         ] = self.tools_settings_dialog.overlay_style_settings()
+        settings["Render"][
+            "Grid"
+        ] = self.display_settings_dlg.grid_box.settings()
+        settings["Render"][
+            "Grid3D"
+        ] = self.window_rot.display_settings_dlg.grid_box.settings()
         io.save_user_settings(settings)
         QtWidgets.QApplication.instance().closeAllWindows()
 
@@ -17281,6 +17347,7 @@ class Window(QtWidgets.QMainWindow):
             info["Render property colors"] = d.color_step.value()
             info["Colormap property"] = d.colormap_prop.currentText()
         info.update(self.image_overlay_dialog.export_info())
+        info.update(self.display_settings_dlg.grid_box.export_info())
         if path is not None:
             path, ext = os.path.splitext(path)
             path = path + ".yaml"
@@ -17312,6 +17379,7 @@ class Window(QtWidgets.QMainWindow):
             viewport = [(0, 0), (movie_height, movie_width)]
             qimage = self.view.render_scene(cache=False, viewport=viewport)
             qimage = self.image_overlay_dialog.draw(qimage, viewport)
+            qimage = self.view.draw_grid(qimage, viewport)
             dpi = None
             if path.endswith(".pdf"):
                 dpi, ok = QtWidgets.QInputDialog.getInt(
@@ -17368,6 +17436,7 @@ class Window(QtWidgets.QMainWindow):
 
         qimage = self.view.render_scene(cache=False, **kwargs)
         qimage = self.image_overlay_dialog.draw(qimage, kwargs["viewport"])
+        qimage = self.view.draw_grid(qimage, kwargs["viewport"])
         dpi = None
         if path.endswith(".pdf"):
             dpi, ok = QtWidgets.QInputDialog.getInt(
@@ -17739,6 +17808,13 @@ class Window(QtWidgets.QMainWindow):
         # appearance of picks, measured points and the Move tool
         self.tools_settings_dialog.load_overlay_style_settings(
             render_settings.get("ToolStyles")
+        )
+        # the grids of the 2D and 3D windows
+        self.display_settings_dlg.grid_box.load_settings(
+            render_settings.get("Grid")
+        )
+        self.window_rot.display_settings_dlg.grid_box.load_settings(
+            render_settings.get("Grid3D")
         )
 
     def open_apply_dialog(self) -> None:

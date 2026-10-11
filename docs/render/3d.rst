@@ -181,7 +181,31 @@ main window; everything else is set here:
   ``Leaf capacity`` and the jittered triangulation's ``Passes``, ``Jitter``
   and ``Max. localizations`` (see :ref:`render-display-settings`);
 - the scale bar: its length, ``Automatic length`` and ``Print scale bar
-  length``.
+  length``;
+- the grid, see below.
+
+.. _render-3d-grid:
+
+Grid
+^^^^
+
+Tick ``Grid`` to draw grid planes that rotate with the data, which makes the
+orientation easy to follow. The planes span the data's bounding box, enlarged
+to the next grid lines, and the lines sit at whole multiples of
+``Spacing (nm)`` in the original coordinates (so z = 0 nm lies on a line).
+``Planes`` chooses which of the ``XY``, ``XZ`` and ``YZ`` planes are drawn and
+``Position`` where:
+
+``Back of the data`` (default)
+   Each plane lies on the side of the bounding box facing away from you, so
+   the planes form the back walls of a box around the data and swap sides as
+   it rotates.
+``Through the center``
+   Each plane passes through the center of the bounding box.
+
+``Spacing``, ``Automatic``, ``Draw`` and the line settings work as in the
+main window (see :ref:`render-grid`); the 3D grid keeps its own settings,
+saved under ``Grid3D`` in ``~/.picasso/settings.yaml``.
 
 .. _render-animation:
 
@@ -210,7 +234,9 @@ If the scale bar is shown in the display settings, it is drawn into every
 frame with the length set there. The length stays fixed in nm, so the bar
 grows and shrinks as the animation zooms in and out. The ``.yaml`` file saved
 next to the video records the positions, durations, transition and the scale
-bar's length (if drawn).
+bar's length (if drawn). Likewise, the grid planes, if shown, rotate with the
+data in every frame, with the spacing set when the build starts; the ``.yaml``
+file records the spacing, planes and position.
 
 While the video is built, a progress dialog shows how many frames have been
 rendered. ``Cancel`` stops the build and deletes the unfinished video file.
@@ -264,5 +290,6 @@ within each of them, not how long they take.
           transition="ease",
           blur_method="gaussian",
           fps=30,
+          grid=render.GridOverlay(spacing_nm=200),  # optional grid planes
           progress_callback="console",
       )
