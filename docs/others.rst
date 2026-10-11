@@ -235,6 +235,9 @@ Top level
    * - ``CustomColormaps``
      - *(none)*
      - User-defined colormaps created with the custom colormap editor, keyed by name; each is a list of color stops. See :ref:`render-colormap-setting`.
+   * - ``Channel colors``
+     - ``red``, ``cyan``, ``green``, … (the 14 solid colors)
+     - Colors given to newly loaded channels, in order: names, hexadecimal codes or colormaps from the *Color* dropdown of ``View > Files``. Channels beyond the list get the remaining built-in colors. See :ref:`render-default-colors`.
    * - ``PWD``
      - *(last used)*
      - Remembered last value: the directory used in Render's file dialogs.

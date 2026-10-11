@@ -120,6 +120,9 @@ CHANNEL_PREVIEW_WIDTH = 48
 # color names of up to this many characters and hexadecimal codes;
 # longer names (e.g., "forestgreen_gradient") show in full in the popup
 CHANNEL_COLOR_CHARS = 9
+# key (in the Render section of the user settings) of the colors given
+# to newly loaded channels, in order
+CHANNEL_COLORS_KEY = "Channel colors"
 POLYGON_POINTER_SIZE = 16  # must be even
 # shortest drag (display pixels, in x and y) that still yields a box
 # pick, so that a stray click does not create one of zero area
@@ -623,6 +626,7 @@ class DatasetDialog(lib.Dialog):
             "Automatically assign colors to each channel (using hsv colormap)?"
         )
         self.auto_colors.stateChanged.connect(self.update_colors)
+        self.auto_colors.stateChanged.connect(self._update_color_selection)
         layout.addWidget(self.auto_colors, 3, 0)
 
         # add buttons to save/load colors - right side
@@ -645,12 +649,24 @@ class DatasetDialog(lib.Dialog):
         )
         layout.addWidget(edit_cmaps_button, 2, 2)
         edit_cmaps_button.clicked.connect(self.open_custom_cmap_editor)
-        layout.addWidget(
-            lib.HelpButton(self.DOCS_URL),
-            3,
-            2,
-            alignment=QtCore.Qt.AlignmentFlag.AlignRight,
+        default_colors_button = QtWidgets.QPushButton("Default colors")
+        default_colors_button.setToolTip(
+            "The colors given to newly loaded channels, in order\n"
+            "(saved in the user settings)."
         )
+        default_colors_menu = QtWidgets.QMenu(default_colors_button)
+        default_colors_menu.addAction(
+            "Save current colors as default", self.save_default_colors
+        )
+        default_colors_menu.addAction(
+            "Restore built-in default colors", self.restore_default_colors
+        )
+        default_colors_button.setMenu(default_colors_menu)
+        help_layout = QtWidgets.QHBoxLayout()
+        help_layout.addWidget(default_colors_button)
+        help_layout.addStretch()
+        help_layout.addWidget(lib.HelpButton(self.DOCS_URL))
+        layout.addLayout(help_layout, 3, 2)
 
         # add the table listing all channels, one row per channel, below
         # the non-scrollable elements; the row header shows the channel
@@ -692,7 +708,21 @@ class DatasetDialog(lib.Dialog):
         row_header.setDefaultAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
         row_header.setMinimumWidth(24)
         row_header.setHighlightSections(False)
-        row_header.setToolTip("Channel index (1 is the first loaded dataset).")
+        row_header.setToolTip(
+            "Channel index (1 is the first loaded dataset).\n"
+            "Drag an index to reorder the datasets, or right click\n"
+            "it to move its dataset up or down."
+        )
+        # dragging a section reorders the channels (see
+        # _on_row_header_moved)
+        row_header.setSectionsMovable(True)
+        row_header.sectionMoved.connect(self._on_row_header_moved)
+        row_header.setContextMenuPolicy(
+            QtCore.Qt.ContextMenuPolicy.CustomContextMenu
+        )
+        row_header.customContextMenuRequested.connect(
+            self._show_row_header_menu
+        )
         layout.addWidget(self.table, 4, 0, 1, 3)
 
         # explains the grayed-out widgets when a single channel is
@@ -829,8 +859,8 @@ class DatasetDialog(lib.Dialog):
         colordrop.lineEdit().setMaxLength(40)
         self._populate_color_combo(colordrop)
         colordrop.setFixedWidth(self._color_combo_width(colordrop))
-        index = np.min([len(self.checks) - 1, len(self.rgb) - 1])
-        colordrop.setCurrentText(self.default_colors[index])
+        default_color = self.default_channel_color(len(self.checks) - 1)
+        colordrop.setCurrentText(default_color)
         _show_text_start(colordrop)
         colordrop.currentIndexChanged.connect(
             partial(_show_text_start, colordrop)
@@ -849,12 +879,7 @@ class DatasetDialog(lib.Dialog):
             colors = lib.get_colors(len(self.checks) + 1)
             initial_lut = render.solid_to_lut(colors[-1])
         else:
-            try:
-                initial_lut = self.resolve_color_identifier(
-                    self.default_colors[index]
-                )
-            except ValueError:
-                initial_lut = render.solid_to_lut(self.rgb[index])
+            initial_lut = self.resolve_color_identifier(default_color)
         self._channel_luts.append(initial_lut)
 
         # create the gradient preview widget
@@ -943,20 +968,145 @@ class DatasetDialog(lib.Dialog):
         self.contrast_sliders.append(contrast_slider)
         self.contrast_widgets.append(contrast_widget)
 
-        # add all the widgets to a new row of the channel table, each
-        # wrapped with a small margin so that the rows do not touch
+        # add all the widgets to a new row of the channel table
         row = self.table.rowCount()
         self.table.insertRow(row)
-        for column, widget in enumerate(
-            [c, t, colordrop, preview_widget, contrast_widget, p]
-        ):
+        self._set_table_row(row)
+        self._update_color_selection()
+
+        self._fit_scroll_width()
+
+    def _set_table_row(self, i: int) -> None:
+        """Put the widgets of channel ``i`` into row ``i`` of the
+        channel table, each wrapped with a small margin so that the
+        rows do not touch. Replaces the cells of the row, if any (the
+        table deletes them, but not the widgets moved out of them)."""
+        widgets = [
+            self.checks[i],
+            self.title[i],
+            self.colorselection[i],
+            self.colorpreviews[i],
+            self.contrast_widgets[i],
+            self.closebuttons[i],
+        ]
+        for column, widget in enumerate(widgets):
             cell = QtWidgets.QWidget()
             cell_layout = QtWidgets.QHBoxLayout(cell)
             cell_layout.setContentsMargins(4, 2, 4, 2)
             cell_layout.addWidget(widget)
-            self.table.setCellWidget(row, column, cell)
+            self.table.setCellWidget(i, column, cell)
 
-        self._fit_scroll_width()
+    def _on_row_header_moved(
+        self, logical: int, old_visual: int, new_visual: int
+    ) -> None:
+        """Reorder the channels after a row was dragged by its index.
+
+        The header only moves the row on screen; it is moved back and
+        the channels are reordered instead, so that the rows and the
+        channel indices always agree."""
+        header = self.table.verticalHeader()
+        header.blockSignals(True)
+        header.moveSection(new_visual, old_visual)
+        header.blockSignals(False)
+        self.move_channel(old_visual, new_visual)
+
+    def _show_row_header_menu(self, position: QtCore.QPoint) -> None:
+        """Right click menu of the channel index: move the channel up,
+        down, to the top or to the bottom."""
+        header = self.table.verticalHeader()
+        i = header.logicalIndexAt(position)
+        n_channels = len(self.checks)
+        if i < 0 or n_channels < 2:
+            return
+        menu = QtWidgets.QMenu(self)
+        for text, j in (
+            ("Move to top", 0),
+            ("Move up", i - 1),
+            ("Move down", i + 1),
+            ("Move to bottom", n_channels - 1),
+        ):
+            action = menu.addAction(text, partial(self.move_channel, i, j))
+            action.setEnabled(0 <= j < n_channels and j != i)
+        menu.exec(header.viewport().mapToGlobal(position))
+
+    def move_channel(self, i: int, j: int) -> None:
+        """Move channel ``i`` to index ``j``; the channels in between
+        move by one.
+
+        Parameters
+        ----------
+        i : int
+            Index of the channel to be moved.
+        j : int
+            Its new index.
+        """
+        order = list(range(len(self.checks)))
+        order.insert(j, order.pop(i))
+        self.reorder_channels(order)
+
+    def reorder_channels(self, order: list[int]) -> None:
+        """Reorder the loaded channels: the rows of the channel table
+        and everything in Render that refers to the channels by their
+        index (see ``View.reorder_channels``).
+
+        Parameters
+        ----------
+        order : list of ints
+            The channel indices in the new order, i.e., the channel at
+            index ``order[k]`` moves to index ``k``.
+        """
+        order = [int(i) for i in order]
+        if sorted(order) != list(range(len(self.checks))):
+            raise ValueError(
+                f"{order} is not a reordering of the {len(self.checks)} "
+                "loaded channels."
+            )
+        if order == sorted(order):
+            return
+        view = self.window.view
+        if view._move_channels:
+            return  # the Move tool is dragging channels
+        resi_dialogs = [
+            dialog
+            for dialog in self.window.dialogs
+            if isinstance(dialog, RESIDialog) and dialog.isVisible()
+        ]
+        if resi_dialogs:
+            QtWidgets.QMessageBox.information(
+                self,
+                "Reorder channels",
+                "Close the RESI dialog before reordering the channels.",
+            )
+            return
+        for items in (
+            self.checks,
+            self.title,
+            self.closebuttons,
+            self.colorselection,
+            self.colordisp_all,
+            self.colorpickers,
+            self.colorpreviews,
+            self.contrast_low,
+            self.contrast_high,
+            self.contrast_sliders,
+            self.contrast_widgets,
+            self._channel_luts,
+        ):
+            items[:] = [items[old] for old in order]
+        for i in range(len(self.checks)):
+            self._set_table_row(i)
+        view.reorder_channels(order)
+        # automatic coloring colors the channels by their index
+        if self.auto_colors.isChecked():
+            for i in range(len(self.checks)):
+                self.set_color(i)
+        self.window.setWindowTitle(
+            f"Picasso v{__version__}: Render. File: "
+            f"{os.path.basename(view.locs_paths[-1])}"
+        )
+        self.channel_contrast_changed.emit()
+        self.update_viewport()
+        self.update_rotation_window()
 
     def set_single_channel_mode(self, mode: str | None) -> None:
         """Gray out the widgets that the rendering of a single loaded
@@ -1001,16 +1151,27 @@ class DatasetDialog(lib.Dialog):
         multichannel = mode is None
         for widget in [
             self.auto_colors,
-            *self.colorselection,
             *self.colorpreviews,
             *self.contrast_widgets,
             self.reset_contrast_button,
         ]:
             widget.setEnabled(multichannel)
+        self._update_color_selection()
         for widget in [self.background_button, self.background_swatch]:
             widget.setEnabled(mode != "colormap")
         self.single_channel_note.setText(notes.get(mode, ""))
         self.single_channel_note.setVisible(not multichannel)
+
+    def _update_color_selection(self) -> None:
+        """Gray out the color selection of the channels (combobox and
+        color picker) while automatic coloring overrides it or a single
+        channel is loaded."""
+        manual = (
+            self._single_channel_mode is None
+            and not self.auto_colors.isChecked()
+        )
+        for widget in [*self.colorselection, *self.colorpickers]:
+            widget.setEnabled(manual)
 
     def _fit_scroll_width(self) -> None:
         """Ensure the dialog is wide enough that the channel table fits
@@ -1104,12 +1265,10 @@ class DatasetDialog(lib.Dialog):
     def _delete_channel_drift_data(self, i: int) -> None:
         """Delete the drift-correction data of channel ``i``, if
         any was provided."""
-        try:
-            del self._drift[i]
-            del self._driftfiles[i]
-            del self.currentdrift[i]
-        except Exception:
-            pass
+        view = self.window.view
+        for items in (view._drift, view._driftfiles, view.currentdrift):
+            if i < len(items):
+                del items[i]
 
     def _update_render_by_property_dialog(self) -> None:
         """Enable render-by-property only when a single channel is
@@ -1552,8 +1711,7 @@ class DatasetDialog(lib.Dialog):
                 self.resolve_color_identifier(previous)
                 combo.setCurrentText(previous)
             except ValueError:
-                fallback_idx = min(i, len(self.default_colors) - 1)
-                combo.setCurrentText(self.default_colors[fallback_idx])
+                combo.setCurrentText(self.default_channel_color(i))
             combo.blockSignals(False)
             _show_text_start(combo)
             self.set_color(i)
@@ -1577,8 +1735,88 @@ class DatasetDialog(lib.Dialog):
         """8-bit variant of :meth:`legend_color` (each component 0–255)."""
         return tuple(int(round(v * 255)) for v in self.legend_color(n))
 
+    def default_channel_colors(self) -> list[str]:
+        """The colors given to newly loaded channels, in order.
+
+        Read from ``CHANNEL_COLORS_KEY`` in the Render section of the
+        user settings, followed by the built-in default colors that it
+        does not name; entries that are not valid colors are skipped.
+        A missing key is written with the built-in default colors (so
+        that it is visible in the file), unless the file on disk could
+        not be read.
+
+        Returns
+        -------
+        colors : list of str
+            Color identifiers (names, hexadecimal codes or colormaps).
+        """
+        settings = io.load_user_settings()
+        render_settings = settings["Render"]
+        stored = None
+        if isinstance(render_settings, dict):
+            stored = render_settings.get(CHANNEL_COLORS_KEY)
+            if stored is None and not io.settings_file_is_broken():
+                render_settings[CHANNEL_COLORS_KEY] = list(self.default_colors)
+                io.save_user_settings(settings)
+        colors = []
+        if isinstance(stored, list):
+            for color in stored:
+                try:
+                    self.resolve_color_identifier(str(color))
+                except ValueError:
+                    continue
+                colors.append(str(color))
+        colors += [c for c in self.default_colors if c not in colors]
+        return colors
+
+    def default_channel_color(self, i: int) -> str:
+        """The color given to the ``i``-th loaded channel (0-based);
+        channels beyond the list of default colors get the last one."""
+        colors = self.default_channel_colors()
+        return colors[min(i, len(colors) - 1)]
+
+    def save_default_colors(self) -> None:
+        """Save the colors of the loaded channels as the colors given
+        to newly loaded channels, followed by the built-in default
+        colors that they do not use."""
+        colors = []
+        for i, combo in enumerate(self.colorselection):
+            color = combo.currentText()
+            try:
+                self.resolve_color_identifier(color)
+            except ValueError:
+                QtWidgets.QMessageBox.warning(
+                    self,
+                    "Default colors",
+                    f"The color '{color}' of channel {i + 1} is not valid.",
+                )
+                return
+            colors.append(color)
+        if not colors:
+            QtWidgets.QMessageBox.information(
+                self,
+                "Default colors",
+                "Load channels and set their colors first.",
+            )
+            return
+        colors += [c for c in self.default_colors if c not in colors]
+        self._write_default_colors(colors)
+
+    def restore_default_colors(self) -> None:
+        """Give newly loaded channels the built-in default colors."""
+        self._write_default_colors(list(self.default_colors))
+
+    def _write_default_colors(self, colors: list[str]) -> None:
+        """Write the colors given to newly loaded channels to the user
+        settings."""
+        settings = io.load_user_settings()
+        if not isinstance(settings["Render"], dict):
+            settings["Render"] = {}
+        settings["Render"][CHANNEL_COLORS_KEY] = colors
+        io.save_user_settings(settings)
+
     def save_colors(self) -> None:
-        """Save the list of colors as a .yaml file."""
+        """Save the list of colors as a .txt file."""
         colornames = [_.currentText() for _ in self.colorselection]
         out_path = (
             os.path.splitext(self.window.view.locs_paths[0])[0] + "_colors.txt"
@@ -1605,11 +1843,9 @@ class DatasetDialog(lib.Dialog):
                 colors = file.readlines()
                 colornames = [color.rstrip() for color in colors]
 
-            # check that the number of channels is smaller than
-            # or equal to the number of color names in the .txt
-            if len(self.checks) > len(colornames):
-                raise ValueError("Txt file contains too few names")
-
+            # the names are given to the channels in order; extra names
+            # are ignored and extra channels keep their colors
+            colornames = [name for name in colornames if name]
             # check that all the names resolve through the same lookup
             # used by the renderer (default colors, hex codes, curated
             # matplotlib cmaps, or known user-defined custom cmaps).
@@ -1621,9 +1857,9 @@ class DatasetDialog(lib.Dialog):
                         f"'{color}' at position {i+1} is invalid."
                     ) from e
 
-            # add the names to the 'Color' column (self.colorseletion)
-            for i, color_ in enumerate(self.colorselection):
-                color_.setCurrentText(colornames[i])
+            # add the names to the 'Color' column (self.colorselection)
+            for color_, name in zip(self.colorselection, colornames):
+                color_.setCurrentText(name)
             self.update_colors()
 
     def sizeHint(self) -> QtCore.QSize:
@@ -10293,6 +10529,102 @@ class View(QtWidgets.QLabel):
         self.infos[channel] = copy.deepcopy(self.infos[channel])
         self._copy_drift(channel)
 
+    def reorder_channels(self, order: list[int]) -> None:
+        """Reorder the loaded channels, together with everything that
+        refers to them by their index. The widgets of the Files dialog
+        are reordered by ``DatasetDialog.reorder_channels``, which calls
+        this method.
+
+        The lists are permuted in place, since several dialogs keep
+        references to them.
+
+        Parameters
+        ----------
+        order : list of ints
+            The channel indices in the new order, i.e., the channel at
+            index ``order[k]`` moves to index ``k``.
+        """
+        new_index = {old: new for new, old in enumerate(order)}
+
+        def permute(items: list) -> None:
+            if len(items) == len(order):
+                items[:] = [items[old] for old in order]
+
+        for items in (
+            self.locs,
+            self.infos,
+            self.locs_paths,
+            self.index_blocks,
+            self.render_index,
+            self._drift,
+            self._driftfiles,
+            self.currentdrift,
+        ):
+            permute(items)
+        # the cached image holds one plane per channel; render again
+        self.image = None
+        self.median_lp = np.mean(
+            [np.median(self.locs[0]["lpx"]), np.median(self.locs[0]["lpy"])]
+        )
+        self._move_undo = [
+            (tuple(new_index[i] for i in channels), dx, dy)
+            for channels, dx, dy in self._move_undo
+        ]
+        if getattr(self, "profile_channels", None) is not None:
+            self.profile_channels = [
+                new_index[i] for i in self.profile_channels
+            ]
+        if isinstance(getattr(self, "channel", None), int):
+            self.channel = new_index.get(self.channel, self.channel)
+
+        window = self.window
+        permute(window.slicer_dialog.zcoord)
+        if window.slicer_dialog.isVisible():
+            window.slicer_dialog.calculate_histogram()
+        tools_dialog = window.tools_settings_dialog
+        permute(tools_dialog._move_selection)
+        tools_dialog._update_move_channels_label()
+        tools_dialog.update_move_undo()
+        clusterer = window.test_clusterer_dialog
+        current = clusterer.channels.currentIndex()
+        clusterer.channels.blockSignals(True)
+        clusterer.channels.clear()
+        clusterer.channels.addItems(
+            [os.path.basename(path) for path in self.locs_paths]
+        )
+        if current >= 0:
+            clusterer.channels.setCurrentIndex(new_index[current])
+        clusterer.channels.blockSignals(False)
+        if isinstance(getattr(clusterer, "channel", None), int):
+            clusterer.channel = new_index.get(
+                clusterer.channel, clusterer.channel
+            )
+        mask_dialog = window.mask_settings_dialog
+        if isinstance(mask_dialog.channel, int):
+            mask_dialog.channel = new_index.get(
+                mask_dialog.channel, mask_dialog.channel
+            )
+        if mask_dialog.save_all.isChecked():
+            permute(mask_dialog.index_locs)
+            permute(mask_dialog.index_locs_out)
+        for spiral in (window.x_spiral, window.y_spiral):
+            moved = {new_index[i]: v for i, v in spiral.items()}
+            spiral.clear()
+            spiral.update(moved)
+        if window.metadata_dialog.isVisible():
+            window.show_metadata()
+        # linked windows compare the channels position by position to
+        # find replaced ones; a reorder replaces none
+        if window.link_group is not None:
+            window.link_group.channels_reordered(window)
+        # the 3D window keeps its own copies of the channels, in order
+        window_rot = getattr(window, "window_rot", None)
+        if window_rot is not None:
+            view_rot = window_rot.view_rot
+            permute(view_rot.locs)
+            permute(view_rot.infos)
+            view_rot.image = None
+
     def _finish_load(self) -> None:
         """Tear down the worker thread and the progress dialog."""
         if self._load_progress is not None:
@@ -12969,9 +13301,7 @@ class View(QtWidgets.QLabel):
                     dataset_dialog.resolve_color_identifier(color)
                 except ValueError:
                     missing.append(color)
-                    fallback = dataset_dialog.default_colors[
-                        min(i, len(dataset_dialog.default_colors) - 1)
-                    ]
+                    fallback = dataset_dialog.default_channel_color(i)
                     dataset_dialog.colorselection[i].setCurrentText(fallback)
                     continue
                 dataset_dialog.colorselection[i].setCurrentText(color)

@@ -29,6 +29,12 @@ number on the left of each row is the channel index (1 is the first loaded
 channel). A small horizontal gradient next to each channel previews what that
 channel will look like at intensity 0 → intensity 1.
 
+To **reorder the channels**, drag a channel's index up or down, or right click
+the index and choose ``Move to top``, ``Move up``, ``Move down`` or ``Move to
+bottom``. The channel keeps its title, color, contrast and visibility, and
+everything that refers to channels by their index follows, e.g., the legend,
+the channel lists in the other dialogs and the 3D window.
+
 **Left click** on a channel's checkbox ticks/unticks it, i.e., shows or hides
 that channel. **Right click** on a checkbox displays that channel only - it is
 ticked and all other channels are unticked at once, which is convenient for
@@ -76,9 +82,25 @@ maximum density. Linked windows can share the per-channel contrast, see
 dropped onto Render.
 
 The ``Automatic coloring`` checkbox overrides per-channel selections with
-HSV-spaced colors for as long as it's ticked. ``Save colors`` /
+HSV-spaced colors for as long as it's ticked; meanwhile, the color dropdowns
+and color pickers are grayed out. ``Save colors`` /
 ``Load colors`` write / read a one-identifier-per-line ``.txt`` file — any
-name from the three dropdown sections (or a hex code) is valid.
+name from the three dropdown sections (or a hex code) is valid. The colors
+are given to the channels in order; extra names in the file are ignored, and
+channels beyond the names in the file keep their colors.
+
+.. _render-default-colors:
+
+Newly loaded channels are colored in the order of the *default colors*:
+``red``, ``cyan``, ``green``, ``yellow``, and so on, unless you change it.
+Click ``Default colors`` > ``Save current colors as default`` to use the
+colors of the loaded channels, in their order, for the next channels you load
+(also after restarting Picasso); the remaining built-in colors follow. For
+example, with three channels colored ``blue``, ``yellow`` and ``magenta``, the
+next files you load are blue, yellow, magenta, red, cyan, green, and so on.
+``Default colors`` > ``Restore built-in default colors`` goes back to the
+original order. The default colors are saved as ``Channel colors`` in the
+user settings (see :ref:`user-settings-file`), where you can also edit them.
 
 ``Background color`` sets the color of pixels without localizations in
 multichannel images (black by default). ``Invert colors / white background``

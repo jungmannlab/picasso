@@ -496,6 +496,17 @@ def test_replaced_channels_are_adopted_both_ways(shared, monkeypatch):
     assert primary.view.locs[0] is own_a
 
 
+def test_reordered_channels_are_not_adopted(shared):
+    _, primary, secondary = shared
+    own_a, b = primary.view.locs
+    own_c = secondary.view.locs[1]
+    primary.dataset_dialog.reorder_channels([1, 0])
+    assert primary.view.locs[0] is b and primary.view.locs[1] is own_a
+    # the linked window keeps its channels: nothing was replaced
+    assert secondary.view.locs[0] is b
+    assert secondary.view.locs[1] is own_c
+
+
 def test_drift_applied_in_place_is_adopted(shared, monkeypatch):
     _, primary, secondary = shared
     calls = _count_calls(monkeypatch, primary.view, "update_scene")

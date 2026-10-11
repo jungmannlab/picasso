@@ -177,6 +177,7 @@ _EXEMPT = {
     ("View", "__init__"),  # creates the empty lists
     ("View", "add"),  # appends a fresh entry to every cache
     ("DatasetDialog", "_close_one_channel"),  # drops the entry everywhere
+    ("View", "reorder_channels"),  # permutes the entries together
     # takes a linked window's channel together with its (valid) index
     ("View", "adopt_shared_channels"),
     ("View", "detach_channel"),  # a row-for-row copy: indices stay valid

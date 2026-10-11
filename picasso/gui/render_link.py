@@ -974,6 +974,13 @@ class LinkGroup(QtCore.QObject):
         if window in self._seen_locs:
             self._seen_locs[window] = list(window.view.locs)
 
+    def channels_reordered(self, window) -> None:
+        """Take note that ``window`` reordered its channels, so that the
+        next redraw does not mistake the moved channels for replaced
+        ones (see ``_on_scene_requested``)."""
+        if window in self._seen_locs:
+            self._seen_locs[window] = list(window.view.locs)
+
     # --- enabling categories and adopting windows ---------------------
 
     def set_enabled(self, key: str, enabled: bool) -> None:
