@@ -16897,6 +16897,10 @@ class Window(QtWidgets.QMainWindow):
         clear_picks_action.triggered.connect(self.view.clear_picks)
         clear_picks_action.setShortcut("Ctrl+C")
 
+        clear_measure_action = tools_menu.addAction("Clear measurements")
+        clear_measure_action.triggered.connect(self.view.remove_points)
+        clear_measure_action.setShortcut("Ctrl+Shift+C")
+
         remove_locs_picks_action = tools_menu.addAction(
             "Remove localizations in picks"
         )

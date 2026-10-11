@@ -3371,6 +3371,11 @@ class RotationWindow(QtWidgets.QMainWindow):
         rotate_tool_action.setIcon(theme.icon("view-3d"))
         tools_menu.addAction(rotate_tool_action)
 
+        tools_menu.addSeparator()
+        clear_measure_action = tools_menu.addAction("Clear measurements")
+        clear_measure_action.triggered.connect(self.view_rot.remove_points)
+        clear_measure_action.setShortcut("Ctrl+Shift+C")
+
         self.menus = [file_menu, view_menu, tools_menu]
         # the window is built here but shown only on demand; see
         # ``hideEvent`` for why its shortcuts must stay inert
