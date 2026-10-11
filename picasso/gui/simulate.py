@@ -29,7 +29,7 @@ from matplotlib.backends.backend_qt5agg import FigureCanvas
 from scipy.optimize import curve_fit
 from scipy.stats import norm
 
-from .. import io, lib, simulate, __version__, docs_url
+from .. import io, lib, notifications, simulate, __version__, docs_url
 from .app import run_gui
 from . import plot_style, theme
 
@@ -316,6 +316,7 @@ class Window(QtWidgets.QMainWindow):
             self.user_settings_dialog.show
         )
         theme.add_menu_action(file_menu)
+        lib.add_sound_notifications_menu(file_menu)
         plot_settings_action = file_menu.addAction("Plot settings...")
         plot_settings_action.setIcon(theme.icon("plot-settings"))
         plot_settings_action.setToolTip("Appearance of all chart windows")
@@ -1793,6 +1794,7 @@ class Window(QtWidgets.QMainWindow):
                 self._process_singleround_movie(
                     movie, fileName, info, timetrace, t0, params
                 )
+        notifications.notify_finished(time.time() - t0)
 
     def loadSettings(self) -> None:  # TODO: re-write exceptions, check key
         """Load simulation settings from a YAML file."""

@@ -19,7 +19,7 @@ import os
 import sys
 import warnings
 from copy import deepcopy
-from typing import Any, TypeAlias, Literal, TYPE_CHECKING
+from typing import Any, TypeAlias, Literal
 from collections.abc import Callable
 from asyncio import Future
 
@@ -30,22 +30,14 @@ import matplotlib.colors as mcolors
 import matplotlib.pyplot as plt
 from numpy.lib.recfunctions import append_fields, drop_fields
 from scipy import stats, optimize
-from playsound3 import playsound
 from tqdm import tqdm
 
 from picasso import io
-
-if TYPE_CHECKING:
-    from PyQt6 import QtGui
 
 # A global variable where we store all open progress and status dialogs.
 # In case of an exception, we close them all,
 # so that the GUI remains responsive.
 _dialogs = []
-
-# Min. time to use sound notification when ProcessDialog or
-# StatusDialog is finished
-SOUND_NOTIFICATION_DURATION = 60  # seconds
 
 # Columns that are required for Picasso
 REQUIRED_COLUMNS = ["frame", "x", "y", "z", "lpx", "lpy", "lpz"]
@@ -133,6 +125,7 @@ _QT_NAMES = (
     "install_excepthook",
     "adjust_widget_size",
     "get_save_filename_ext_dialog",
+    "add_sound_notifications_menu",
 )
 
 
@@ -693,90 +686,6 @@ def deprecation_warning(message: str) -> None:
         The deprecation warning message to be displayed.
     """
     warnings.warn(message, DeprecationWarning, stacklevel=2)
-
-
-def get_sound_notification_path() -> str | None:
-    """Return the path to the sound notification file from the user
-    settings file. If the file is not found or not specified, return
-    None.
-
-    Returns
-    -------
-    path : str or None
-        Path to the sound notification file or None if not found or not
-        specified.
-    """
-    settings = io.load_user_settings()
-    if "Sound_notification" not in settings:  # add default settings (no sound)
-        settings["Sound_notification"]["filename"] = None
-        io.save_user_settings(settings)
-    filename = settings["Sound_notification"]["filename"]
-    sounds_dir = _sound_notification_dir()
-    if filename is not None and os.path.isfile(
-        os.path.join(sounds_dir, filename)
-    ):
-        ext = os.path.splitext(filename)[1].lower()
-        if ext not in [".mp3", ".wav"]:
-            path = None
-        else:
-            path = os.path.join(sounds_dir, filename)
-    else:
-        path = None
-    return path
-
-
-def get_available_sound_notifications() -> list[str | None]:
-    """Get a list of file names of the available sound notifications in
-    the folder ``~/.picasso/notification_sounds``.
-
-    Returns
-    -------
-    filenames : list of strs
-        List of file names of the available sound notifications.
-    """
-    sounds_dir = _sound_notification_dir()
-    filenames = [
-        _
-        for _ in os.listdir(sounds_dir)
-        if os.path.isfile(os.path.join(sounds_dir, _))
-        and os.path.splitext(_)[1].lower() in [".mp3", ".wav"]
-    ]
-    filenames = ["None"] + filenames
-    return filenames
-
-
-def set_sound_notification(action: QtGui.QAction) -> None:
-    """Save the selected sound notification in the user settings
-    file.
-
-    Parameters
-    ----------
-    action : QtGui.QAction
-        The action representing the selected sound notification.
-    """
-    settings = io.load_user_settings()
-    selected_sound = action.objectName()  # file name with extension
-    settings["Sound_notification"]["filename"] = selected_sound
-    io.save_user_settings(settings)
-    # play selected sound as a preview
-    play_path = get_sound_notification_path()
-    playsound(play_path, block=False) if play_path is not None else None
-
-
-def _sound_notification_dir() -> str:
-    """Return the path to the user sound notification folder
-    (``~/.picasso/notification_sounds``)."""
-    return io.notification_sounds_directory()
-
-
-def open_sound_notifications_folder() -> None:
-    """Open the user sound notification folder
-    (``~/.picasso/notification_sounds``) in the system file browser."""
-    from PyQt6 import QtCore, QtGui
-
-    QtGui.QDesktopServices.openUrl(
-        QtCore.QUrl.fromLocalFile(_sound_notification_dir())
-    )
 
 
 def get_from_metadata(

@@ -28,17 +28,14 @@ import yaml
 import matplotlib.pyplot as plt
 
 from PyQt6 import QtCore, QtWidgets, QtGui, sip
-from playsound3 import playsound
 
-from picasso import diagnostics, docs_url, io
+from picasso import diagnostics, docs_url, io, notifications
 from picasso.lib import (
     _dialogs,
-    SOUND_NOTIFICATION_DURATION,
     REQUIRED_COLUMNS,
     MockProgress,
     OperationCanceled,
     TqdmProgress,
-    get_sound_notification_path,
     is_path_available,
 )
 
@@ -622,8 +619,6 @@ class ProgressDialog(QtWidgets.QProgressDialog):
         self.initalized = True
         self.count_started = False
         self.finished = False
-        # sound notification
-        self.sound_notification_path = get_sound_notification_path()
 
     def set_value(self, value):
         """Advance the bar, arming the dialog and the time estimate as needed.
@@ -721,23 +716,11 @@ class ProgressDialog(QtWidgets.QProgressDialog):
         self.set_value(0)
 
     def play_sound_notification(self):
-        """Play a sound notification if a sound file is specified and
-        at least a minute has passed since the dialog was opened.
-
-        A missing or broken audio backend (which happens in the one-click
-        builds) is logged, not raised: closing a dialog must always
-        succeed, especially while an error is being reported.
+        """Play the selected notification sound if the dialog has been
+        open long enough, see :func:`picasso.notifications.notify_finished`.
         """
-        if self.sound_notification_path is not None:
-            if time.time() - self.t0 > SOUND_NOTIFICATION_DURATION:
-                try:
-                    playsound(self.sound_notification_path, block=False)
-                except Exception:  # noqa: BLE001 - notification only
-                    diagnostics.log_message(
-                        "Could not play the sound notification"
-                        f" {self.sound_notification_path}:\n"
-                        f"{traceback.format_exc()}"
-                    )
+        if self.initalized:
+            notifications.notify_finished(time.time() - self.t0)
 
     def get_iterator(self, start=None, end=None):
         """Get an iterator that spans the dialog's remaining progress.
@@ -780,7 +763,6 @@ class StatusDialog(Dialog):
         bar.setTextVisible(False)
         bar.setMinimumWidth(250)
         vbox.addWidget(bar)
-        self.sound_notification_path = get_sound_notification_path()
         self.t0 = time.time()
         self.show()
         self.raise_()
@@ -806,16 +788,7 @@ class StatusDialog(Dialog):
         """
         if self in _dialogs:  # closed twice
             _dialogs.remove(self)
-        if self.sound_notification_path is not None:
-            if time.time() - self.t0 > SOUND_NOTIFICATION_DURATION:
-                try:
-                    playsound(self.sound_notification_path, block=False)
-                except Exception:  # noqa: BLE001 - notification only
-                    diagnostics.log_message(
-                        "Could not play the sound notification"
-                        f" {self.sound_notification_path}:\n"
-                        f"{traceback.format_exc()}"
-                    )
+        notifications.notify_finished(time.time() - self.t0)
 
 
 class TaskProgressDialog(ProgressDialog):
@@ -3150,3 +3123,70 @@ def get_save_filename_ext_dialog(
     if selected_path.endswith(".yml"):
         selected_path = selected_path[:-4] + ".yaml"
     return selected_path, selected_filter
+
+
+def add_sound_notifications_menu(menu: QtWidgets.QMenu) -> QtWidgets.QMenu:
+    """Add the ``Sound notifications`` submenu to a menu.
+
+    The submenu lists "None" and the sound files in the notification
+    sounds directory, with the selected one checked; choosing one saves
+    it (see :mod:`picasso.notifications`) and plays it as a preview.
+    The entries are updated each time the submenu opens, so sounds
+    added to the folder, or a choice made in another window, show up
+    without a restart. Entries are never deleted (a toolbar may hold
+    them); a sound removed from the folder is disabled instead.
+
+    Parameters
+    ----------
+    menu : QtWidgets.QMenu
+        The menu (usually ``File``) to add the submenu to.
+
+    Returns
+    -------
+    sounds_menu : QtWidgets.QMenu
+        The added submenu.
+    """
+    # imported here: picasso.gui.theme imports picasso.lib
+    from picasso.gui import theme
+
+    sounds_menu = menu.addMenu("Sound notifications")
+    sounds_menu.setIcon(theme.icon("sound"))
+    group = QtGui.QActionGroup(sounds_menu)
+    actions = {}  # file name (None for no sound) -> action
+
+    def select(action: QtGui.QAction) -> None:
+        filename = action.data()
+        notifications.select_sound(filename)
+        notifications.play(filename)
+
+    def update() -> None:
+        available = notifications.available_sounds()
+        for filename in [None] + available:
+            if filename in actions:
+                continue
+            if filename is None:
+                name = "None"
+            else:
+                name = os.path.splitext(filename)[0].replace("_", " ")
+            action = QtGui.QAction(name, sounds_menu, checkable=True)
+            action.setData(filename)
+            group.addAction(action)
+            sounds_menu.insertAction(separator, action)
+            actions[filename] = action
+        selected = notifications.selected_sound()
+        for filename, action in actions.items():
+            action.setEnabled(filename is None or filename in available)
+            action.setChecked(filename == selected)
+
+    separator = sounds_menu.addSeparator()
+    open_action = sounds_menu.addAction("Open notification sounds folder...")
+    open_action.setIcon(theme.icon("open"))
+    open_action.triggered.connect(
+        lambda: QtGui.QDesktopServices.openUrl(
+            QtCore.QUrl.fromLocalFile(notifications.sounds_directory())
+        )
+    )
+    group.triggered.connect(select)
+    sounds_menu.aboutToShow.connect(update)
+    update()
+    return sounds_menu

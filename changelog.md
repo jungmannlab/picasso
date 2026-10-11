@@ -74,6 +74,7 @@ Last change: 11-OCT-2026 CEST
     - `picasso.localize.localize` accepts only the movie positionally; `camera_info` and `identification_parameters` are keyword-only. Its `parameters` (renamed to `identification_parameters`) and `mle_method` arguments are removed.
     - The `return_info` argument is removed from `picasso.localize.identify`, `picasso.localize.localize`, `picasso.clusterer.cluster`, `picasso.clusterer.dbscan` and `picasso.clusterer.hdbscan`; they always return `(locs, info)`.
     - `picasso.render.build_animation` no longer accepts positions given as Euler angles `(angle_x, angle_y, angle_z, viewport)`; pass `(rotation, viewport)` with a `scipy.spatial.transform.Rotation` (`picasso.render.rotation_matrix` converts the old angles).
+- The sound notification functions of `picasso.lib` (`get_sound_notification_path`, `get_available_sound_notifications`, `set_sound_notification`, `open_sound_notifications_folder` and `SOUND_NOTIFICATION_DURATION`) are replaced by the module `picasso.notifications`.
 
 ### Others
 - Many plots are not customizable.
@@ -88,6 +89,7 @@ Last change: 11-OCT-2026 CEST
 - Contrast slider at the bottom of the Render window, like the one in Localize. Whether Render and Localize show it is set by `contrast_slider` in the user settings (off in Render, on in Localize by default). See the [documentation](https://picassosr.readthedocs.io/en/latest/render/display-settings.html#render-contrast-slider).
 - Improved navigation in the SPINNA mask tab.
 - Improved status dialog.
+- Sound notifications in Average and Simulate (`File > Sound notifications`).
 
 ### Technical details on Render update
 - **Multi-threaded CPU rendering**: the render kernels release the GIL and channels are rendered in parallel by a thread pool; a single large channel is split into row chunks rendered in parallel and summed in a fixed order.

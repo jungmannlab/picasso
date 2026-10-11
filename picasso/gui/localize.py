@@ -32,6 +32,7 @@ from .. import (
     io,
     localize,
     lib,
+    notifications,
     postprocess,
     registration,
     scmos,
@@ -50,7 +51,6 @@ from .app import run_gui
 from . import theme
 from . import toolbars
 from PyQt6 import QtCore, QtGui, QtWidgets
-from playsound3 import playsound
 
 CUDA_AVAILABLE = localize.CUDA_AVAILABLE
 CMAP_GRAYSCALE = [QtGui.qRgb(_, _, _) for _ in range(256)]
@@ -6858,29 +6858,7 @@ class Window(QtWidgets.QMainWindow):
         file_menu.addAction(metadata_action)
 
         file_menu.addSeparator()
-        sounds_menu = file_menu.addMenu("Sound notifications")
-        sounds_menu.setIcon(theme.icon("sound"))
-        sounds_actiongroup = QtGui.QActionGroup(file_menu)
-        default_sound_path = lib.get_sound_notification_path()  # last used
-        default_sound_name = os.path.basename(str(default_sound_path))
-        for sound in lib.get_available_sound_notifications():
-            sound_name = os.path.splitext(str(sound))[0].replace("_", " ")
-            action = sounds_actiongroup.addAction(
-                QtGui.QAction(sound_name, sounds_menu, checkable=True)
-            )
-            action.setObjectName(sound)  # store full name
-            if default_sound_name == sound:
-                action.setChecked(True)
-            sounds_menu.addAction(action)
-        sounds_actiongroup.triggered.connect(lib.set_sound_notification)
-        sounds_menu.addSeparator()
-        open_sounds_action = sounds_menu.addAction(
-            "Open notification sounds folder..."
-        )
-        open_sounds_action.setIcon(theme.icon("open"))
-        open_sounds_action.triggered.connect(
-            lib.open_sound_notifications_folder
-        )
+        lib.add_sound_notifications_menu(file_menu)
         picasso_settings_action = file_menu.addAction("Picasso settings...")
         picasso_settings_action.setIcon(theme.icon("picasso-settings"))
         picasso_settings_action.triggered.connect(
@@ -11277,11 +11255,7 @@ class Window(QtWidgets.QMainWindow):
             )
             self.status_bar.showMessage(message)
             self.draw_frame()
-            # sound notification
-            if elapsed_time > lib.SOUND_NOTIFICATION_DURATION:
-                sound_path = lib.get_sound_notification_path()
-                if sound_path is not None:
-                    playsound(sound_path, block=False)
+            notifications.notify_finished(elapsed_time)
             if calibrate_spline:
                 self.build_spline_calibration()
             elif fit_afterwards:
@@ -11880,10 +11854,7 @@ class Window(QtWidgets.QMainWindow):
             f"{box}; {threshold}). Ready for fit."
         )
         self.draw_frame()
-        if elapsed_time > lib.SOUND_NOTIFICATION_DURATION:
-            sound_path = lib.get_sound_notification_path()
-            if sound_path is not None:
-                playsound(sound_path, block=False)
+        notifications.notify_finished(elapsed_time)
         if state.get("fit_afterwards"):
             self.fit()
 
@@ -13192,11 +13163,7 @@ class Window(QtWidgets.QMainWindow):
         self.locs_display = locs
         self._distribute_multichannel_fit(locs)
         self.draw_frame()
-        # sound notification
-        if elapsed_time > lib.SOUND_NOTIFICATION_DURATION:
-            sound_path = lib.get_sound_notification_path()
-            if sound_path is not None:
-                playsound(sound_path, block=False)
+        notifications.notify_finished(elapsed_time)
         base = self.channel_output_base()
         if calibrate_z:
             # restore the GPU checkbox state for the selected model
@@ -13224,10 +13191,7 @@ class Window(QtWidgets.QMainWindow):
                         z_binning=z_binning,
                     )
                     dt = time.time() - t0
-                    if dt > lib.SOUND_NOTIFICATION_DURATION:
-                        sound_path = lib.get_sound_notification_path()
-                        if sound_path is not None:
-                            playsound(sound_path, block=False)
+                    notifications.notify_finished(dt)
                     self.status_bar.showMessage(
                         f"3D calibrated in {dt:.2f} seconds."
                     )
@@ -13324,11 +13288,7 @@ class Window(QtWidgets.QMainWindow):
         )
         self.locs = locs
         self.save_locs_after_fit()
-        # sound notification
-        if elapsed_time > lib.SOUND_NOTIFICATION_DURATION:
-            sound_path = lib.get_sound_notification_path()
-            if sound_path is not None:
-                playsound(sound_path, block=False)
+        notifications.notify_finished(elapsed_time)
 
     def attach_roi_id(self) -> None:
         """Name the ROI each localization was found in, adding a

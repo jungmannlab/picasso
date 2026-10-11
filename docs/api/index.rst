@@ -95,4 +95,5 @@ Utilities
    :nosignatures:
 
    picasso.lib
+   picasso.notifications
    picasso.plugins

@@ -12,13 +12,14 @@ from __future__ import annotations
 
 import os.path
 import sys
+import time
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from PyQt6 import QtCore, QtGui, QtWidgets
 
-from .. import io, lib, average, render, __version__, docs_url
+from .. import io, lib, average, notifications, render, __version__, docs_url
 from .app import run_gui
 from . import theme
 from . import toolbars
@@ -253,6 +254,7 @@ class View(QtWidgets.QLabel):
             self.thread.aborted.connect(self.on_aborted)
             self.thread.finished.connect(self.on_finished)
             self.window.abort_action.setEnabled(True)
+            self.t0 = time.time()
             self.thread.start()
 
     def abort(self) -> None:
@@ -302,6 +304,7 @@ class View(QtWidgets.QLabel):
                     }
                 )
             self.window.statusBar().showMessage("Done!")
+            notifications.notify_finished(time.time() - self.t0)
         self.running = False
         self.window.abort_action.setEnabled(False)
         if self.pool is not None and self.pool.closed:
@@ -561,6 +564,7 @@ class Window(QtWidgets.QMainWindow):
             self.user_settings_dialog.show
         )
         theme.add_menu_action(file_menu)
+        lib.add_sound_notifications_menu(file_menu)
         help_action = file_menu.addAction("Help")
         help_action.setIcon(theme.icon("help"))
         help_action.triggered.connect(

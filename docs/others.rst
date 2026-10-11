@@ -6,8 +6,9 @@ Settings and Customization
 Sound notifications
 -------------------
 Picasso supports sound notifications for processes running longer than 1
-minute. In Localize, Render and SPINNA, these can be selected in the ``File`` menu in
-the menu bar.
+minute. In Localize, Render, SPINNA, Average and Simulate, the sound is
+selected in ``File > Sound notifications``; the choice applies to all of them.
+Sounds added to the folder appear in the menu the next time it is opened.
 
 - The available files are read from ``~/.picasso/notification_sounds``.
   ``.mp3`` and ``.wav`` files are supported.
@@ -162,7 +163,7 @@ Top level
      - Description
    * - ``filename``
      - ``None`` (no sound)
-     - The sound file (from ``~/.picasso/notification_sounds``) played on long-running jobs in Localize, Render and SPINNA. See :ref:`sound-notifications` above.
+     - The sound file (from ``~/.picasso/notification_sounds``) played on long-running jobs, e.g., in Localize, Render, SPINNA, Average and Simulate. See :ref:`sound-notifications` above.
 
 ``Appearance``
 ^^^^^^^^^^^^^^
