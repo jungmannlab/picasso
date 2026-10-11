@@ -39,6 +39,7 @@ Last change: 11-OCT-2026 CEST
 - Link localizations can be run on all channels sequentially.
 - Clear measurements added (similar to Clear picks)
 - Files dialogs widgets are grayed out if they do not apply at the given moment.
+- Faster G5M.
 - Fixed: 3D histogram rendering scaled z unnecessarily.
 - Fixed NeNA (and FRC) overwriting group columns of localizations.
 - Fixed: DBSCAN, HDBSCAN and SMLM clusterer saved the cluster areas as `*_centers_areas.csv` instead of `*_areas.csv` when the cluster centers were saved, too.
