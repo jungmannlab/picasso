@@ -22,7 +22,7 @@ from PyQt6 import QtCore, QtGui, QtWidgets
 from scipy.spatial.transform import Rotation
 
 from .. import io, render, lib, lib_qt, __version__, docs_url
-from . import theme
+from . import theme, toolbars
 from .grid_settings import GridGroupBox
 from .render_worker import (
     RenderWorker,
@@ -3239,6 +3239,9 @@ class RotationWindow(QtWidgets.QMainWindow):
         Contains File, View and Tools menus, used for plugins.
     rotation_action : QtGui.QAction
         Action to toggle the display of reference axes.
+    toolbar : toolbars.ToolBar
+        The most used actions of the menus, see
+        ``toolbars.add_toolbar``.
     view_rot : ViewRotation
         Instance of the class for displaying rendered localizations.
     window : QMainWindow
@@ -3370,6 +3373,7 @@ class RotationWindow(QtWidgets.QMainWindow):
         )
         rotate_tool_action.setShortcut("Ctrl+R")
         rotate_tool_action.setIcon(theme.icon("view-3d"))
+        rotate_tool_action.setChecked(True)  # ``ViewRotation._mode``
         tools_menu.addAction(rotate_tool_action)
 
         tools_menu.addSeparator()
@@ -3378,6 +3382,29 @@ class RotationWindow(QtWidgets.QMainWindow):
         clear_measure_action.setShortcut("Ctrl+Shift+C")
 
         self.menus = [file_menu, view_menu, tools_menu]
+
+        # toolbar of the most used actions, shared with the menus
+        self.toolbar = toolbars.add_toolbar(
+            self,
+            "Render 3D toolbar",
+            [
+                (save_action, "save", "Save"),
+                (export_view, "export-view", "Export view"),
+                (animation, "animation", "Animation"),
+                None,
+                (rotate_tool_action, "view-3d"),
+                (measure_tool_action, "tool-measure"),
+                (clear_measure_action, "clear", "Clear"),
+                None,
+                (xy_proj_action, "projection-xy", "XY"),
+                (xz_proj_action, "projection-xz", "XZ"),
+                (yz_proj_action, "projection-yz", "YZ"),
+                (delete_rotation_action, "reload", "Reset"),
+                (fit_in_view_action, "fit-view", "Fit view"),
+                None,
+                (display_settings_action, "display-settings", "Display"),
+            ],
+        )
         # the window is built here but shown only on demand; see
         # ``hideEvent`` for why its shortcuts must stay inert
         self.menu_bar.setEnabled(False)

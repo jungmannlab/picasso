@@ -23,6 +23,9 @@ The user may perform multiple actions in the 3D view, including:
 saving rotated localizations, building animations (.mp4 format), rotating by a
 specified angle, see below.
 
+The toolbar holds the most used actions. Right-click it to choose other actions of the menus, see
+:ref:`toolbars`.
+
 Rendering in the 3D view runs in the background, as in the main
 window:
 

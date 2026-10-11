@@ -201,8 +201,12 @@ def add_plugins_menu_actions(window, app_name: str) -> None:
     reload_action.setIcon(theme.icon("reload"))
     reload_action.triggered.connect(lambda: reload_plugins(window, app_name))
 
-    # show the plugins' actions on a toolbar customized to have them
+    # show the plugins' actions on a toolbar customized to have them,
+    # also Render's 3D window, which is built before the plugins load
     toolbars.refresh(window)
+    window_rot = getattr(window, "window_rot", None)
+    if window_rot is not None:
+        toolbars.refresh(window_rot)
 
 
 def _open_store(window, app_name: str) -> None:

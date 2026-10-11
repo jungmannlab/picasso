@@ -36,7 +36,7 @@ Appearance
 - **Accent color**: the color of selections, checked and default buttons, sliders and focus frames; a preset or any color (*Custom...*).
 - **Font size**: the size of the text in percent of the system's.
 - **Density**: *Compact* reduces the spacing of the controls, e.g., for small laptop screens.
-- **Toolbar**: how the toolbars of ``Picasso: Render``, ``Picasso: Localize``, ``Picasso: Filter`` and ``Picasso: Average`` show their buttons: *Icons and text* (default), *Icons*, *Text* or *Hidden*. Which actions they hold is set in :ref:`toolbars`.
+- **Toolbar**: how the toolbars of ``Picasso: Render`` (also its 3D view), ``Picasso: Localize``, ``Picasso: Filter`` and ``Picasso: Average`` show their buttons: *Icons and text* (default), *Icons*, *Text* or *Hidden*. Which actions they hold is set in :ref:`toolbars`.
 - **Menus**: *Show icons in menus* (default on) shows the icons next to the actions of the menus.
 
 Changes apply immediately to the module that is open and are saved in the
@@ -54,10 +54,10 @@ their plot settings.
 
 Toolbars
 --------
-The toolbars of ``Picasso: Render``, ``Picasso: Localize``,
-``Picasso: Filter`` and ``Picasso: Average`` hold actions of the menus, by
-default the most used ones, e.g., opening and saving, the tools of Render and
-identifying and fitting in Localize. They can be dragged by their handle to
+The toolbars of ``Picasso: Render`` and its 3D view (see :ref:`render-3d`),
+``Picasso: Localize``, ``Picasso: Filter`` and ``Picasso: Average`` hold
+actions of the menus, by default the most used ones, e.g., opening and saving,
+the tools of Render and identifying and fitting in Localize. They can be dragged by their handle to
 any side of the window; the side is remembered for the next start.
 
 *Customize toolbar...* in ``File > Appearance...``, or a right-click on the
@@ -188,7 +188,7 @@ Top level
      - Spacing of the controls: ``Comfortable`` or ``Compact``.
    * - ``toolbar``
      - ``Icons and text``
-     - Buttons of the toolbars of Render, Localize, Filter and Average: ``Icons``, ``Icons and text``, ``Text`` or ``Hidden``.
+     - Buttons of the toolbars of Render (also its 3D view), Localize, Filter and Average: ``Icons``, ``Icons and text``, ``Text`` or ``Hidden``.
    * - ``menu_icons``
      - ``True``
      - Show the icons of the actions in the menus.
@@ -203,7 +203,7 @@ Top level
    * - Key
      - Default
      - Description
-   * - ``Render toolbar``, ``Localize toolbar``, ``Filter toolbar``, ``Average toolbar``
+   * - ``Render toolbar``, ``Render 3D toolbar``, ``Localize toolbar``, ``Filter toolbar``, ``Average toolbar``
      - not set (the default buttons, on top)
      - The toolbar of the module (see :ref:`toolbars`), with the keys:
 

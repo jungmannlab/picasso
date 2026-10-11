@@ -396,3 +396,29 @@ def test_3d_window_icons_and_navigation_shortcuts(qt_offscreen):
         rot.view_rot.stop_render_worker()
         window.view.stop_render_worker()
         window.close()
+
+
+def test_3d_window_toolbar(qt_offscreen):
+    """The 3D window has its own toolbar; the Rotate tool, active when
+    the window opens, shows checked."""
+    window = gui_render.Window(plugins_loaded=True)
+    rot = window.window_rot
+    try:
+        toolbar = rot.toolbar
+        assert toolbar.objectName() == "Render 3D toolbar"
+        buttons = {
+            action.iconText(): action
+            for action in toolbar.actions()
+            if not action.isSeparator()
+        }
+        assert {"Save", "Rotate", "Measure", "XY", "XZ", "YZ"} <= set(buttons)
+        assert all(not a.icon().isNull() for a in buttons.values())
+        assert buttons["Rotate"].isChecked()
+        assert rot.view_rot._mode == "Rotate"
+        buttons["Measure"].trigger()
+        assert rot.view_rot._mode == "Measure"
+        assert not buttons["Rotate"].isChecked()
+    finally:
+        rot.view_rot.stop_render_worker()
+        window.view.stop_render_worker()
+        window.close()

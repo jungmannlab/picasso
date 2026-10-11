@@ -206,10 +206,10 @@ def test_alt_left_and_middle_button_pan_like_the_right_button(view):
     assert right != start
     view.viewport = [tuple(v) for v in start]
     _drag(view, 200, 150, 260, 190, modifiers=Mod.AltModifier)
-    assert [tuple(v) for v in view.viewport] == pytest.approx(right)
+    assert np.ravel(view.viewport) == pytest.approx(np.ravel(right))
     view.viewport = [tuple(v) for v in start]
     _drag(view, 200, 150, 260, 190, button=Btn.MiddleButton)
-    assert [tuple(v) for v in view.viewport] == pytest.approx(right)
+    assert np.ravel(view.viewport) == pytest.approx(np.ravel(right))
     assert not view._pan
 
 
@@ -246,7 +246,7 @@ def test_triple_click_fits_and_shift_resets_rotation(view):
     assert view.rotation.as_quat()[3] != pytest.approx(1.0)  # rotation kept
     _triple_click(view, 10, 10, modifiers=Mod.ShiftModifier)
     assert view.rotation.as_quat()[3] == pytest.approx(1.0)  # reset
-    assert [tuple(v) for v in view.viewport] == pytest.approx(fitted)
+    assert np.ravel(view.viewport) == pytest.approx(np.ravel(fitted))
     assert not view.rubberband.isVisible()  # Shift + press started none
 
 
@@ -254,7 +254,7 @@ def test_home_and_number_keys(view):
     fitted = [tuple(v) for v in view.viewport]
     view.zoom_in()
     view.keyPressEvent(_Key(QtCore.Qt.Key.Key_Home))
-    assert [tuple(v) for v in view.viewport] == pytest.approx(fitted)
+    assert np.ravel(view.viewport) == pytest.approx(np.ravel(fitted))
     view.keyPressEvent(_Key(QtCore.Qt.Key.Key_2))
     assert view.angx == pytest.approx(np.pi / 2)
     view.keyPressEvent(_Key(QtCore.Qt.Key.Key_3))
