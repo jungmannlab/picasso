@@ -246,7 +246,7 @@ Top level
      - Remembered last value: the appearance of the picks, the Measure tool and the Move tool's shift label, set in Render's ``Tools > Tools Settings``. Saved when Render is closed.
    * - ``Grid``
      - *(last used)*
-     - Remembered last value: the grid of the main window (spacing, automatic spacing, drawn behind or over the localizations, line appearance), not whether it is shown. Saved when Render is closed. See :ref:`render-grid`.
+     - Remembered last value: the grid of the main window (spacing, automatic spacing, drawn behind or over the localizations, labels, line and label appearance), not whether it is shown. Saved when Render is closed. See :ref:`render-grid`.
    * - ``Grid3D``
      - *(last used)*
      - Remembered last value: the grid of the 3D view, as ``Grid`` plus its planes and position. See :ref:`render-3d-grid`.

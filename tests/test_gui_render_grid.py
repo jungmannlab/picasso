@@ -73,6 +73,7 @@ def test_2d_grid_is_drawn_at_multiples_of_the_spacing(window):
     view.update_scene()
     plain = _rgb(view.qimage)
     box = window.display_settings_dlg.grid_box
+    box.labels.setChecked(False)
     # one line every 8 camera pixels = 32 display pixels
     _show_grid(box, 8 * PIXELSIZE)
     grid = _rgb(view.qimage)
@@ -81,6 +82,34 @@ def test_2d_grid_is_drawn_at_multiples_of_the_spacing(window):
     assert list(np.flatnonzero(row)) == [0, 32, 64, 96, 128, 160, 192, 224]
     box.setChecked(False)
     assert (_rgb(view.qimage) == plain).all()
+
+
+def test_2d_labels_are_printed_along_the_top_and_left_edges(window):
+    view = window.view
+    box = window.display_settings_dlg.grid_box
+    _show_grid(box, 8 * PIXELSIZE)
+    box.labels.setChecked(False)
+    without = _rgb(view.qimage).astype(int)
+    box.labels.setChecked(True)
+    assert box.grid().labels
+    labeled = np.abs(_rgb(view.qimage).astype(int) - without).sum(axis=2)
+    rows, cols = np.nonzero(labeled)
+    # only in the bands along the top and the left edge
+    assert len(rows)
+    assert np.all((rows < 30) | (cols < 80))
+    # and not in the corner both bands share
+    assert not labeled[:10, :10].any()
+
+
+def test_3d_dialog_scrolls_like_the_main_one(view_rot):
+    dialog = view_rot.window.display_settings_dlg
+    assert (
+        dialog.scroll_area.widget().findChild(type(dialog.grid_box))
+        is dialog.grid_box
+    )
+    screen = QtWidgets.QApplication.primaryScreen()
+    if screen is not None:
+        assert dialog.height() <= screen.size().height() - 200
 
 
 def test_settings_are_grayed_out_while_the_grid_is_off(window):
@@ -98,7 +127,9 @@ def test_automatic_spacing_follows_the_zoom_until_edited(window):
     box = window.display_settings_dlg.grid_box
     box.setChecked(True)
     view.update_scene()
-    expected = render.optimal_scalebar_length(PIXELSIZE, WIDTH)
+    expected = render.optimal_scalebar_length(
+        PIXELSIZE, WIDTH, fraction=1 / 10
+    )
     assert box.spacing.value() == expected
     view.zoom(2.0)
     zoomed = box.spacing.value()
@@ -241,6 +272,8 @@ def test_grid_settings_are_saved_on_close_and_loaded_on_start(
     box_3d = window.window_rot.display_settings_dlg.grid_box
     _show_grid(box_2d, 750)
     box_2d.blend.setCurrentText("Over localizations")
+    box_2d.labels.setChecked(False)
+    box_2d.style_widget.set_value("font_size", 16)
     box_2d.style_widget.color.set_value("#ABCDEF")
     box_3d.planes["xz"].setChecked(False)
     box_3d.position.setCurrentText("Through the center")
@@ -252,6 +285,8 @@ def test_grid_settings_are_saved_on_close_and_loaded_on_start(
     assert grid["Spacing (nm)"] == 750
     assert grid["Automatic spacing"] is False
     assert grid["Draw"] == "Over localizations"
+    assert grid["Labels"] is False
+    assert grid["Label size (px)"] == 16
     assert grid["Color"] == "#ABCDEF"
     assert "Planes" not in grid
     grid_3d = saved["Render"]["Grid3D"]
@@ -267,6 +302,8 @@ def test_grid_settings_are_saved_on_close_and_loaded_on_start(
     grid = box_2d.grid()
     assert grid.spacing_nm == 750
     assert grid.blend == "Over localizations"
+    assert not grid.labels
+    assert grid.style.font_size == 16
     assert grid.style.color == QtGui.QColor("#ABCDEF")
     grid_3d = box_3d.grid()
     assert grid_3d.planes == ("xy", "yz")

@@ -126,6 +126,7 @@ from .image_overlay import (
     composite_behind,
 )
 from .grid import (
+    AUTO_GRID_FRACTION,
     GRID_BLEND_MODES,
     GRID_PLANES,
     GRID_POSITIONS,
@@ -133,6 +134,7 @@ from .grid import (
     grid_levels,
     grid_box,
     grid_segments_3d,
+    format_grid_labels,
     project_points,
     draw_grid,
     draw_grid_3d,
@@ -269,6 +271,7 @@ __all__ = [
     "draw_image_overlay",
     "composite_behind",
     # grid
+    "AUTO_GRID_FRACTION",
     "GRID_BLEND_MODES",
     "GRID_PLANES",
     "GRID_POSITIONS",
@@ -276,6 +279,7 @@ __all__ = [
     "grid_levels",
     "grid_box",
     "grid_segments_3d",
+    "format_grid_labels",
     "project_points",
     "draw_grid",
     "draw_grid_3d",

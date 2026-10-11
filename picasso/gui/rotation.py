@@ -104,9 +104,18 @@ class DisplaySettingsRotationDialog(lib.Dialog):
         self.first_update = True
         self.window = window
         self.setWindowTitle("Display Settings - Rotation Window")
-        self.resize(200, 0)
         self.setModal(False)
-        vbox = QtWidgets.QVBoxLayout(self)
+        # the settings scroll once the dialog is taller than the screen
+        # allows, like the main window's display settings
+        self.scroll_area = QtWidgets.QScrollArea()
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setFrameShape(QtWidgets.QFrame.Shape.NoFrame)
+        container = QtWidgets.QWidget()
+        vbox = QtWidgets.QVBoxLayout(container)
+        self.scroll_area.setWidget(container)
+        main_layout = QtWidgets.QVBoxLayout(self)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.addWidget(self.scroll_area)
         # general
         general_groupbox = QtWidgets.QGroupBox("General")
         vbox.addWidget(general_groupbox)
@@ -418,6 +427,9 @@ class DisplaySettingsRotationDialog(lib.Dialog):
 
         self._silent_disp_px_update = False
 
+        # adjust the size of the dialog to fit its contents
+        lib.adjust_widget_size(self, container.sizeHint())
+
     def blur_method(self) -> str | None:
         """The selected blur method (``render`` name)."""
         return self.blur_methods[self.blur_buttongroup.checkedButton()]
@@ -448,7 +460,7 @@ class DisplaySettingsRotationDialog(lib.Dialog):
         change of its content (``_follow_content_height``), so it keeps
         the size the user gave it and shows no empty space."""
         method = self.blur_methods[self.blur_buttongroup.checkedButton()]
-        content = self
+        content = self.scroll_area.widget()
         if getattr(self, "_content_height", None) is None:
             self._content_height = content.sizeHint().height()
         self.min_blur_widgets.setVisible(
@@ -462,7 +474,7 @@ class DisplaySettingsRotationDialog(lib.Dialog):
     def _follow_content_height(self) -> None:
         """Resize the dialog by the change of its content's height since
         the last measurement (see ``_toggle_blur_widgets``)."""
-        content = self
+        content = self.scroll_area.widget()
         height = content.sizeHint().height()
         previous = self._content_height
         self._content_height = height
@@ -2082,13 +2094,16 @@ class ViewRotation(QtWidgets.QLabel):
         )
 
     def optimal_grid_spacing(self) -> int | None:
-        """Automatic grid spacing (nm): approx. 1/8 of the current
-        viewport's width, like the scale bar; None without a view."""
+        """Automatic grid spacing (nm): approx. 1/10 of the current
+        viewport's width, rounded like the scale bar; None without a
+        view."""
         if self.viewport is None:
             return None
         width = render.viewport_width(self.viewport)
         spacing = render.optimal_scalebar_length(
-            self.window.window.view.pixelsize, width
+            self.window.window.view.pixelsize,
+            width,
+            fraction=render.AUTO_GRID_FRACTION,
         )
         return spacing if spacing > 0 else None
 

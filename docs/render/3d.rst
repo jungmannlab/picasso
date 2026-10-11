@@ -203,9 +203,13 @@ to the next grid lines, and the lines sit at whole multiples of
 ``Through the center``
    Each plane passes through the center of the bounding box.
 
-``Spacing``, ``Automatic``, ``Draw`` and the line settings work as in the
-main window (see :ref:`render-grid`); the 3D grid keeps its own settings,
-saved under ``Grid3D`` in ``~/.picasso/settings.yaml``.
+``Labels`` prints the coordinates of the lines along one edge of the planes
+per axis - the edge farthest out on screen - with the axis name next to them. An axis pointing at the user gets no labels, and
+the labels that would overlap others or reach past the window are left out.
+
+``Spacing``, ``Automatic``, ``Draw``, ``Labels`` and the line settings work as
+in the main window (see :ref:`render-grid`); the 3D grid keeps its own
+settings, saved under ``Grid3D`` in ``~/.picasso/settings.yaml``.
 
 .. _render-animation:
 
@@ -290,6 +294,6 @@ within each of them, not how long they take.
           transition="ease",
           blur_method="gaussian",
           fps=30,
-          grid=render.GridOverlay(spacing_nm=200),  # optional grid planes
+          grid=render.GridOverlay(spacing_nm=200, labels=True),  # optional
           progress_callback="console",
       )

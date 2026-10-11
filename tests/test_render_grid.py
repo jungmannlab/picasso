@@ -218,6 +218,173 @@ def test_3d_grid_rotates_with_the_view(qapp):
     ).any()
 
 
+def test_label_texts_use_nm_or_um_with_the_spacing_s_decimals():
+    assert render.format_grid_labels([0, 500, 1000], 500) == [
+        "0 nm",
+        "500 nm",
+        "1000 nm",
+    ]
+    assert render.format_grid_labels([-1500, 0, 1500], 1500) == [
+        "-1.5 \u00b5m",
+        "0.0 \u00b5m",
+        "1.5 \u00b5m",
+    ]
+    # large coordinates switch to µm even for a fine spacing
+    assert render.format_grid_labels([12_250, 12_500], 250) == [
+        "12.25 \u00b5m",
+        "12.50 \u00b5m",
+    ]
+    assert render.format_grid_labels([-0.0001], 100) == ["0 nm"]
+    assert render.format_grid_labels([-200], 100, axis="z") == ["z = -200 nm"]
+
+
+def test_2d_labels_sit_by_their_lines_and_are_thinned_out(qapp):
+    from picasso.render import grid as grid_module
+
+    grid = _grid(labels=True)
+    levels = np.arange(0, 21, 10.0)
+    xs = levels * 10  # 10 display px per camera px
+    labels = grid_module._grid_labels_2d(
+        grid, levels, levels[:2], xs, xs[:2], 10.0, PIXELSIZE
+    )
+    texts = [text for text, _ in labels]
+    # x = 0 runs into the corner of the left labels
+    assert texts == ["100 nm", "200 nm", "100 nm"]
+    top = [rect for _, rect in labels[:2]]
+    assert top[0].left() > 100 and top[0].top() < 10
+    # one line every 2 display pixels: labels on every n-th line only
+    fine = np.arange(0, 200, 1.0)
+    labels = grid_module._grid_labels_2d(
+        grid, fine, fine[:0], fine * 2, fine[:0], 1.0, PIXELSIZE
+    )
+    rects = [rect for _, rect in labels]
+    assert 1 < len(rects) < 50
+    assert not any(a.intersects(b) for a, b in zip(rects, rects[1:]))
+
+
+def test_labels_that_overlap_or_leave_the_image_are_dropped(qapp):
+    from PyQt6 import QtCore
+
+    from picasso.render import grid as grid_module
+
+    rect = QtCore.QRectF
+    labels = [
+        ("a", rect(10, 10, 30, 12)),
+        ("b", rect(20, 15, 30, 12)),  # overlaps a
+        ("c", rect(190, 10, 30, 12)),  # past the right edge
+        ("d", rect(100, 10, 30, 12)),
+    ]
+    placed = grid_module._place_labels(labels, rect(0, 0, 200, 100))
+    assert [text for text, _ in placed] == ["a", "d"]
+
+
+def _labels_3d(R, grid, image_size=(2000, 2000), axes=(0, 1, 2)):
+    """3D labels of ``grid`` over the box ((2, 2, -3), (18, 8, 3)),
+    viewed with rotation R, 10 display px per camera px; only the lines
+    of ``axes`` are labeled."""
+    from PyQt6 import QtCore
+
+    from picasso.render import grid as grid_module
+
+    bounds = ((2, 2, -3), (18, 8, 3))
+    families = grid_module._line_families(
+        bounds, 10.0, R, grid.planes, grid.position, (0.0, 0.0, 0.0)
+    )
+    families = [family for family in families if family[0] in axes]
+
+    def to_display(points):
+        # centered in a large image, so no label leaves it
+        rotated = render.project_points(points, VIEWPORT, R)
+        return rotated[..., :2] * 10 + 900
+
+    return grid_module._grid_labels_3d(
+        grid,
+        families,
+        10.0,
+        (0.0, 0.0, 0.0),
+        PIXELSIZE,
+        to_display,
+        QtCore.QRectF(0, 0, *image_size),
+    )
+
+
+@pytest.mark.parametrize("seed", range(4))
+def test_3d_labels_name_their_axis_once_each(qapp, seed):
+    R = Rotation.random(random_state=seed)
+    labels = _labels_3d(R, _grid(labels=True))
+    axes = [text.split(" = ")[0] for text, _ in labels]
+    assert set(axes) <= {"x", "y", "z"}
+    assert all(text.endswith("nm") for text, _ in labels)
+    # z comes first, so it wins where labels collide
+    if "z" in axes:
+        assert axes[0] == "z"
+    # each axis on one family: its labels line up along the ends of
+    # its lines (within a label's size, which shifts each center)
+    for axis in set(axes):
+        rects = [rect for (text, rect) in labels if text.startswith(axis)]
+        if len(rects) > 2:
+            centers = np.array(
+                [(r.center().x(), r.center().y()) for r in rects]
+            )
+            size = max(max(r.width(), r.height()) for r in rects)
+            offsets = centers - centers.mean(axis=0)
+            _, _, axes_ = np.linalg.svd(offsets)
+            across = offsets @ axes_[-1]  # off the best-fitting line
+            assert np.abs(across).max() <= size
+
+
+@pytest.mark.parametrize("seed", range(8))
+def test_z_lines_are_preferred_for_labels(qapp, seed):
+    """The z lines get the labels they would get if x and y were not
+    labeled at all: x and y take only the space z leaves."""
+    R = Rotation.random(random_state=seed)
+    grid = _grid(labels=True)
+    z_only = _labels_3d(R, grid, axes=(2,))
+    all_axes = _labels_3d(R, grid)
+    z_labels = [(t, r) for t, r in all_axes if t.startswith("z")]
+    assert [t for t, _ in z_labels] == [t for t, _ in z_only]
+    assert [r for _, r in z_labels] == [r for _, r in z_only]
+    assert len(all_axes) > len(z_only)  # x and y are labeled too
+
+
+def test_3d_labels_sit_just_past_the_ends_of_their_lines(qapp):
+    """Seen from above (no rotation), the planes' lines are those of a
+    2D grid, and the labels sit past their outer ends."""
+    grid = _grid(labels=True, planes=("xy",))
+    labels = _labels_3d(Rotation.identity(), grid)
+    # x lines run along y (from y = 0 to 10 camera px = 900..1000 px):
+    # labeled past one end, outside the grid
+    x_labels = [rect for text, rect in labels if text.startswith("x")]
+    assert x_labels
+    assert all(r.bottom() < 900 or r.top() > 1000 for r in x_labels)
+    y_labels = [rect for text, rect in labels if text.startswith("y")]
+    assert all(r.right() < 900 or r.left() > 1100 for r in y_labels)
+    # no z lines in the xy plane
+    assert not any(text.startswith("z") for text, _ in labels)
+
+
+def test_3d_labels_stay_off_the_grid(qapp):
+    R = Rotation.from_euler("xyz", [-60, 0, 30], degrees=True)
+    labels = _labels_3d(R, _grid(labels=True))
+    from picasso.render import grid as grid_module
+
+    bounds = ((2, 2, -3), (18, 8, 3))
+    segments = render.grid_segments_3d(bounds, 10.0, R, origin=(0.0, 0.0, 0.0))
+    ends = render.project_points(segments, VIEWPORT, R)[..., :2] * 10 + 900
+    outline = grid_module._outline(ends)
+    assert labels
+    for _, rect in labels:
+        assert not outline.intersects(grid_module.QtGui.QPolygonF(rect))
+
+
+def test_labels_are_drawn_only_when_asked(qapp):
+    plain = _rgb(render.draw_grid(_image(), VIEWPORT, _grid(), PIXELSIZE))
+    labeled = _rgb(
+        render.draw_grid(_image(), VIEWPORT, _grid(labels=True), PIXELSIZE)
+    )
+    assert (labeled != plain).any()
+
+
 @pytest.mark.parametrize(
     "kwargs",
     [

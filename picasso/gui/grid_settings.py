@@ -29,7 +29,7 @@ POSITIONS = {
     "Through the center": "center",
 }
 #: Fields of the line appearance, see ``OverlayStyleWidget``.
-STYLE_FIELDS = ("color", "line_style", "line_width", "opacity")
+STYLE_FIELDS = ("color", "line_style", "line_width", "opacity", "font_size")
 #: Appearance that differs from the ``OverlayStyleWidget`` defaults.
 STYLE_DEFAULTS = {"opacity": 40}
 DEFAULT_SPACING = 500  # nm
@@ -67,6 +67,8 @@ class GridGroupBox(QtWidgets.QGroupBox):
         3D only: where the planes are placed, see ``POSITIONS``.
     blend : QComboBox
         Whether the grid is drawn behind or over the localizations.
+    labels : QCheckBox
+        Whether the coordinates of the grid lines are printed.
     style_widget : OverlayStyleWidget
         Color, line style, line width and opacity of the lines.
     """
@@ -105,8 +107,8 @@ class GridGroupBox(QtWidgets.QGroupBox):
         self.auto_spacing = QtWidgets.QCheckBox("Automatic")
         self.auto_spacing.setChecked(True)
         self.auto_spacing.setToolTip(
-            "Set the spacing to approximately 1/8 of the viewport width,\n"
-            "like the automatic scale bar length."
+            "Set the spacing to approximately 1/10 of the viewport width,\n"
+            "rounded like the automatic scale bar length."
         )
         self.auto_spacing.toggled.connect(self._on_auto_spacing_toggled)
         grid.addWidget(self.auto_spacing, row, 2, 1, 2)
@@ -164,6 +166,21 @@ class GridGroupBox(QtWidgets.QGroupBox):
         grid.addWidget(self.blend, row, 1, 1, 3)
         row += 1
 
+        self.labels = QtWidgets.QCheckBox("Labels")
+        self.labels.setChecked(True)
+        self.labels.setToolTip(
+            "Print the coordinates of the grid lines"
+            + (
+                " along one edge of the\nplanes per axis."
+                if three_d
+                else " along the top\nand left edges."
+            )
+            + "\nLabels that would overlap are thinned out."
+        )
+        self.labels.toggled.connect(self.changed)
+        grid.addWidget(self.labels, row, 0, 1, 4)
+        row += 1
+
         self.style_widget = OverlayStyleWidget(
             STYLE_FIELDS,
             defaults=STYLE_DEFAULTS,
@@ -219,6 +236,7 @@ class GridGroupBox(QtWidgets.QGroupBox):
             spacing_nm=float(self.spacing.value()),
             style=style,
             blend=self.blend.currentText(),
+            labels=self.labels.isChecked(),
             **kwargs,
         )
 
@@ -238,6 +256,7 @@ class GridGroupBox(QtWidgets.QGroupBox):
             "Spacing (nm)": self.spacing.value(),
             "Automatic spacing": self.auto_spacing.isChecked(),
             "Draw": self.blend.currentText(),
+            "Labels": self.labels.isChecked(),
             **self.style_widget.settings(),
         }
         if self.three_d:
@@ -254,7 +273,7 @@ class GridGroupBox(QtWidgets.QGroupBox):
         values keep the current ones. Emits ``changed`` once."""
         if not isinstance(settings, dict):
             return
-        widgets = [self.spacing, self.auto_spacing, self.blend]
+        widgets = [self.spacing, self.auto_spacing, self.blend, self.labels]
         widgets += list(self.planes.values())
         if self.three_d:
             widgets.append(self.position)
@@ -269,6 +288,8 @@ class GridGroupBox(QtWidgets.QGroupBox):
                 self.auto_spacing.setChecked(auto)
             if settings.get("Draw") in render.GRID_BLEND_MODES:
                 self.blend.setCurrentText(settings["Draw"])
+            if isinstance(settings.get("Labels"), bool):
+                self.labels.setChecked(settings["Labels"])
             planes = settings.get("Planes")
             if self.three_d and isinstance(planes, list):
                 for plane, check in self.planes.items():

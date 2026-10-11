@@ -1665,7 +1665,11 @@ def rgb_to_qimage(
     return qimage
 
 
-def optimal_scalebar_length(pixelsize: int | float, width: int | float) -> int:
+def optimal_scalebar_length(
+    pixelsize: int | float,
+    width: int | float,
+    fraction: float = 1 / 8,
+) -> int:
     """Calculate optimal scale bar length in nm based on the image
     width.
 
@@ -1675,6 +1679,9 @@ def optimal_scalebar_length(pixelsize: int | float, width: int | float) -> int:
         Camera pixel size in nm.
     width : int or float
         Image width in camera pixels.
+    fraction : float, optional
+        Approximate length relative to the image width, before rounding
+        to a round number. Default is 1/8.
 
     Returns
     -------
@@ -1682,7 +1689,7 @@ def optimal_scalebar_length(pixelsize: int | float, width: int | float) -> int:
         Suggested scale bar length in nm.
     """
     width_nm = width * pixelsize
-    optimal_scalebar = width_nm / 8
+    optimal_scalebar = width_nm * fraction
     # approximate to the nearest thousands, hundreds, tens or ones
     if optimal_scalebar > 10_000:
         scalebar = 10_000

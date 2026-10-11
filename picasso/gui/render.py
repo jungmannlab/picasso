@@ -11368,12 +11368,15 @@ class View(QtWidgets.QLabel):
         )
 
     def optimal_grid_spacing(self) -> int | None:
-        """Automatic grid spacing (nm): approx. 1/8 of the current
-        viewport's width, like the scale bar; None without a view."""
+        """Automatic grid spacing (nm): approx. 1/10 of the current
+        viewport's width, rounded like the scale bar; None without a
+        view."""
         if getattr(self, "viewport", None) is None:
             return None
         width = render.viewport_width(self.viewport)
-        spacing = render.optimal_scalebar_length(self.pixelsize, width)
+        spacing = render.optimal_scalebar_length(
+            self.pixelsize, width, fraction=render.AUTO_GRID_FRACTION
+        )
         return spacing if spacing > 0 else None
 
     def set_optimal_grid_spacing(self) -> None:
