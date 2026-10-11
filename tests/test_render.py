@@ -922,20 +922,6 @@ class TestImageProcessing:
         assert out.shape == (16, 16, 3)
         assert out.dtype == np.uint8
 
-    def test_scale_intensities_default_no_op(self):
-        images = np.ones((3, 5, 5), dtype=np.float32)
-        out = render.scale_intensities(images.copy())
-        assert np.array_equal(out, images)
-
-    def test_scale_intensities_relative(self):
-        images = np.ones((3, 5, 5), dtype=np.float32)
-        out = render.scale_intensities(
-            images.copy(), relative_intensities=[0.5, 1.0, 2.0]
-        )
-        assert np.allclose(out[0], 0.5)
-        assert np.allclose(out[1], 1.0)
-        assert np.allclose(out[2], 2.0)
-
 
 # ---------------------------------------------------------------------------
 # Color helpers
@@ -3231,17 +3217,30 @@ class TestMaxBlurWidth:
 
 
 def _legacy_multi_lut(
-    raw, luts, contrast, relative_intensities, background_color, invert
+    raw, luts, contrast, channel_contrast, background_color, invert
 ):
     """The pre-fusion numpy post-processing chain, kept as the reference
     the fused kernels are compared against (built from the public
     helpers plus the removed inline steps)."""
     vmin, vmax = contrast if contrast is not None else (None, None)
-    images = render.scale_contrast(
-        raw.copy(), vmin, vmax, autoscale=contrast is None
+    _, (vmin, vmax) = render.scale_contrast(
+        raw.copy(),
+        vmin,
+        vmax,
+        autoscale=contrast is None,
+        return_contrast_limits=True,
     )
-    images = render.scale_intensities(
-        images, relative_intensities=relative_intensities
+    # each channel's window placed on the global contrast limits
+    if channel_contrast is None:
+        channel_contrast = [(0.0, 1.0)] * raw.shape[0]
+    span = vmax - vmin
+    images = np.array(
+        [
+            render.scale_contrast(
+                image.copy(), vmin + low * span, vmin + high * span
+            )
+            for image, (low, high) in zip(raw, channel_contrast)
+        ]
     )
     colors_arr = np.asarray(luts, dtype=np.float32)
     images_f32 = np.ascontiguousarray(images, dtype=np.float32)
@@ -3293,20 +3292,26 @@ class TestFusedCompose:
         return [render.solid_to_lut(rgb) for rgb in lib.get_colors(3)]
 
     @pytest.mark.parametrize(
-        "contrast,rel,bg,invert",
+        "contrast,windows,bg,invert",
         [
             ((0.0, 5.0), None, None, False),
-            ((0.0, 5.0), [1.0, 0.7, 1.3], None, False),
+            ((0.0, 5.0), [(0.0, 1.0), (0.1, 1.4), (0.0, 0.8)], None, False),
             ((0.0, 5.0), None, (0.08, 0.08, 0.12), False),
-            ((0.5, 3.0), [1.0, 0.7, 1.3], (0.1, 0.0, 0.2), True),
+            (
+                (0.5, 3.0),
+                [(0.0, 1.0), (0.1, 1.4), (0.0, 0.8)],
+                (0.1, 0.0, 0.2),
+                True,
+            ),
             (None, None, None, False),  # autoscale
+            (None, [(0.2, 0.5), (0.0, 1.0), (0.0, 3.0)], None, False),
         ],
     )
     def test_multi_lut_matches_legacy(
-        self, raw_stack, luts, info, contrast, rel, bg, invert
+        self, raw_stack, luts, info, contrast, windows, bg, invert
     ):
         expected = _legacy_multi_lut(
-            raw_stack, luts, contrast, rel, bg, invert
+            raw_stack, luts, contrast, windows, bg, invert
         )
         _, rgb, _, _ = render._render_multi_channel(
             [None] * 3,
@@ -3314,7 +3319,7 @@ class TestFusedCompose:
             disp_px_size=10.0,
             colors=luts,
             contrast=contrast,
-            relative_intensities=rel,
+            channel_contrast=windows,
             invert_colors=invert,
             background_color=bg,
             raw_image_cache=raw_stack,
@@ -3404,36 +3409,16 @@ class TestChannelContrast:
         assert limits == expected_limits
 
     @pytest.mark.parametrize("lut", [True, False])
-    def test_lower_high_equals_relative_intensity(self, raw_stack, info, lut):
-        """For relative intensities >= 1, the old relative intensity is
-        a lower upper limit: (0, 1 / rel)."""
-        colors = lib.get_colors(3)
-        if lut:
-            colors = [render.solid_to_lut(c) for c in colors]
-        expected, _ = self._render(
-            raw_stack,
-            info,
-            colors,
-            contrast=(0.0, 4.0),
-            relative_intensities=[1.0, 2.0, 4.0],
-        )
-        rgb, _ = self._render(
-            raw_stack,
-            info,
-            colors,
-            contrast=(0.0, 4.0),
-            channel_contrast=[(0.0, 1.0), (0.0, 0.5), (0.0, 0.25)],
-        )
-        diff = np.abs(rgb.astype(np.int16) - expected.astype(np.int16))
-        assert diff.max() <= 1
-
-    def test_window_maps_onto_global_limits(self, raw_stack, info):
+    def test_window_maps_onto_global_limits(self, raw_stack, info, lut):
         """A channel's window equals rendering it alone with the
         absolute limits vmin + (low, high) * (vmax - vmin)."""
-        colors = [render.solid_to_lut(c) for c in lib.get_colors(3)]
+        colors = lib.get_colors(3)
+        black = (0.0, 0.0, 0.0)
+        if lut:
+            colors = [render.solid_to_lut(c) for c in colors]
+            black = np.zeros((256, 3), dtype=np.float32)
         vmin, vmax = 1.0, 5.0
         low, high = 0.25, 1.5
-        black = np.zeros((256, 3), dtype=np.float32)
         only_first = [colors[0], black, black]
         rgb, _ = self._render(
             raw_stack,

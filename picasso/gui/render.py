@@ -512,6 +512,9 @@ class DatasetDialog(lib.Dialog):
 
     DOCS_URL = docs_url("render/menu-view.html#render-files")
 
+    # emitted when the per-channel contrast changes (linked windows)
+    channel_contrast_changed = QtCore.pyqtSignal()
+
     def __init__(self, window: QtWidgets.QMainWindow) -> None:
         super().__init__(window)
         self.window = window
@@ -1239,6 +1242,7 @@ class DatasetDialog(lib.Dialog):
         """Re-color the main and the 3D window with the new per-channel
         contrast. Only the compositing changes, so the cached renders
         are reused."""
+        self.channel_contrast_changed.emit()
         if not self.auto_display.isChecked():
             return
         if self.window.view.viewport:

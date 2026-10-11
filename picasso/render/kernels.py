@@ -878,7 +878,6 @@ def _lut_pixel_rgb(
     n_channels: int,
     vmin32: lib.FloatArray1D,
     rng32: lib.FloatArray1D,
-    rel: lib.FloatArray1D,
 ) -> tuple[np.float32, np.float32, np.float32, np.float32]:
     """Additive RGB (and total coverage) of pixel ``(i, j)`` over all
     channels: contrast scale (with each channel's own limits), clip,
@@ -897,7 +896,6 @@ def _lut_pixel_rgb(
             v = zero
         elif v > one:
             v = one
-        v = v * rel[c]
         idx = np.int32(v * np.float32(255.0))
         if idx < 0:
             idx = 0
@@ -951,13 +949,12 @@ def _compose_multi_lut(
     luts: lib.FloatArray3D,
     vmin32: lib.FloatArray1D,
     rng32: lib.FloatArray1D,
-    rel: lib.FloatArray1D,
     bg: lib.FloatArray1D,
     has_bg: bool,
 ) -> tuple[lib.FloatArray3D, np.float32]:
     """Fused replacement for the multi-channel numpy post-processing
-    chain (contrast scale -> intensity scale -> LUT gather -> additive
-    blend -> background compositing), reading the raw stack once.
+    chain (contrast scale -> LUT gather -> additive blend -> background
+    compositing), reading the raw stack once.
 
     ``vmin32`` and ``rng32`` hold each channel's lower contrast limit
     and contrast range (``vmax - vmin``) as float32 arrays of shape
@@ -976,7 +973,7 @@ def _compose_multi_lut(
     for i in range(n_y):
         for j in range(n_x):
             r, g, b, coverage = _lut_pixel_rgb(
-                raw, luts, i, j, n_channels, vmin32, rng32, rel
+                raw, luts, i, j, n_channels, vmin32, rng32
             )
             if has_bg:
                 r, g, b = _composite_bg(r, g, b, coverage, bg)

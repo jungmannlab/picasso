@@ -585,3 +585,71 @@ def test_channels_taken_without_sharing_are_copies(shared, tmp_path):
             )
     finally:
         _close(third)
+
+
+def test_matching_channels_pairs_files_in_order():
+    pairs = render_link.matching_channels(
+        ["a", "b", "a", "c"], ["b", "a", "d", "a", "a"]
+    )
+    assert pairs == [(0, 1), (1, 0), (2, 3)]
+    assert render_link.matching_channels(["a"], ["b"]) == []
+
+
+@pytest.fixture
+def linked_shared_channel(qt_offscreen, tmp_path):
+    """Two linked windows: the first holds files a and b, the second
+    holds b (taken from the first) and its own file c."""
+    primary = gui_render.Window(plugins_loaded=True)
+    _load(primary, tmp_path, "a", (128, 128), seed=0)
+    _load(primary, tmp_path, "b", (128, 128), seed=1)
+    group = render_link.LinkGroup(primary)
+    secondary = gui_render.Window(plugins_loaded=True, link_group=group)
+    secondary.view.add_channels_from(primary.view, [1], share=True)
+    _load(secondary, tmp_path, "c", (200, 100), seed=2)
+    yield group, primary, secondary
+    for window in (primary, secondary):
+        _close(window)
+
+
+def _channel_contrast(window):
+    dialog = window.dataset_dialog
+    return [
+        (low.value(), high.value())
+        for low, high in zip(dialog.contrast_low, dialog.contrast_high)
+    ]
+
+
+def test_channel_contrast_is_not_linked_by_default(linked_shared_channel):
+    group, primary, secondary = linked_shared_channel
+    assert "channel_contrast" not in group.enabled
+    primary.dataset_dialog.contrast_high[1].setValue(40.0)
+    assert _channel_contrast(secondary) == [(0.0, 100.0), (0.0, 100.0)]
+
+
+def test_channel_contrast_follows_the_same_file(linked_shared_channel):
+    group, primary, secondary = linked_shared_channel
+    group.set_enabled("channel_contrast", True)
+    primary.dataset_dialog.contrast_high[1].setValue(40.0)
+    primary.dataset_dialog.contrast_low[0].setValue(20.0)
+    # b got the contrast of b; a has no counterpart, c keeps its own
+    assert _channel_contrast(secondary) == [(0.0, 40.0), (0.0, 100.0)]
+    # and the other way round
+    secondary.dataset_dialog.contrast_sliders[0].setValues(5.0, 60.0)
+    assert _channel_contrast(primary) == [(20.0, 100.0), (5.0, 60.0)]
+    secondary.dataset_dialog.contrast_high[1].setValue(300.0)
+    assert _channel_contrast(primary) == [(20.0, 100.0), (5.0, 60.0)]
+    # a reset is mirrored too
+    primary.dataset_dialog.reset_channel_contrast()
+    assert _channel_contrast(secondary) == [(0.0, 100.0), (0.0, 300.0)]
+
+
+def test_linking_channel_contrast_copies_it_once(
+    linked_shared_channel, monkeypatch
+):
+    group, primary, secondary = linked_shared_channel
+    primary.dataset_dialog.set_channel_contrast(1, 10.0, 50.0, update=False)
+    calls = _count_calls(monkeypatch, secondary.view, "update_scene")
+    group.set_enabled("channel_contrast", True)
+    assert _channel_contrast(secondary)[0] == (10.0, 50.0)
+    # re-colored once, from the cached render
+    assert [kwargs for _, kwargs in calls] == [{"use_cache": True}]

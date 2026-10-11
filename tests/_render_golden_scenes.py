@@ -164,7 +164,7 @@ SCENES = [
         viewport=FULL_VIEWPORT,
         contrast=(0.0, 4.0),
         colors="lut",
-        relative_intensities=[1.0, 0.7, 1.3],
+        channel_contrast=[(0.0, 1.0), (0.1, 1.4), (0.0, 0.8)],
         background=(0.08, 0.08, 0.12),
     ),
     dict(
@@ -277,7 +277,7 @@ def run_scene_counted(scene, inputs, info, via_backend=False):
             min_blur_width=scene.get("min_blur_width", 0.0),
             ang=scene.get("ang"),
             contrast=scene["contrast"],
-            relative_intensities=scene.get("relative_intensities"),
+            channel_contrast=scene.get("channel_contrast"),
             invert_colors=scene.get("invert", False),
             background_color=scene.get("background"),
         )

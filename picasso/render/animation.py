@@ -377,7 +377,6 @@ def build_animation(
     invert_colors: bool = False,
     single_channel_colormap: str | lib.FloatArray2D = "magma",
     colors: list | None = None,
-    relative_intensities: list[float] | None = None,
     channel_contrast: list[tuple[float, float]] | None = None,
     fps: int = 30,
     adjust_pixel_size: bool = True,
@@ -493,10 +492,6 @@ def build_animation(
         blended additively. Only needs to be specified for
         multi-channel data. Default is None, in which case colors are
         taken from ``lib.get_colors``.
-    relative_intensities : list of float, optional
-        List of relative intensities for each channel. Only needs to be
-        specified for multi-channel data. Default is None, in which
-        case all channels are rendered with the same intensity.
     channel_contrast : list of tuple of float, optional
         Contrast window of each channel relative to the global contrast
         limits, one ``(low, high)`` pair per channel, as in
@@ -627,14 +622,6 @@ def build_animation(
         assert (
             len(colors) == n_channels
         ), "colors must have one entry per channel."
-    if relative_intensities is not None:
-        n_channels = len(locs) if isinstance(locs, list) else 1
-        assert (
-            len(relative_intensities) == n_channels
-        ), "relative_intensities must have one entry per channel."
-        assert all(
-            v >= 0 for v in relative_intensities
-        ), "All relative_intensities must be non-negative."
     if channel_contrast is not None:
         n_channels = len(locs) if isinstance(locs, list) else 1
         assert (
@@ -691,7 +678,6 @@ def build_animation(
         invert_colors=invert_colors,
         single_channel_colormap=single_channel_colormap,
         colors=colors,
-        relative_intensities=relative_intensities,
         channel_contrast=channel_contrast,
         fps=fps,
         adjust_pixel_size=adjust_pixel_size,
@@ -726,14 +712,13 @@ def _build_animation(
     invert_colors: bool,
     single_channel_colormap: str | lib.FloatArray2D,
     colors: list | None,
-    relative_intensities: list[float] | None,
+    channel_contrast: list[tuple[float, float]] | None,
     fps: int,
     adjust_pixel_size: bool,
     scalebar_length_nm: int | float | None,
     scalebar_display_length: bool,
     progress_callback: Callable[[int], None] | Literal["console"] | None,
     cancel: Callable[[], bool] | None = None,
-    channel_contrast: list[tuple[float, float]] | None = None,
     grid: GridOverlay | None = None,
     grid_bounds: tuple | None = None,
     grid_origin: tuple[float, float, float] = (0.0, 0.0, 0.0),
@@ -774,7 +759,6 @@ def _build_animation(
         grid_color_range = color_range(
             None if isinstance(locs, pd.DataFrame) else len(locs),
             colors=colors,
-            relative_intensities=relative_intensities,
             invert_colors=invert_colors,
             single_channel_colormap=single_channel_colormap,
             channel_contrast=channel_contrast,
@@ -823,7 +807,6 @@ def _build_animation(
             invert_colors=invert_colors,
             single_channel_colormap=single_channel_colormap,
             colors=colors,
-            relative_intensities=relative_intensities,
             channel_contrast=channel_contrast,
         )[0]
         qimage = qimage.scaled(

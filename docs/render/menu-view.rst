@@ -69,9 +69,10 @@ The global contrast stays in charge: changing ``Min. density`` or ``Max.
 density`` moves every channel's window along, so the balance between the
 channels is kept. ``Reset`` sets all channels back to 0–100%. The 3D window
 (see :ref:`render-3d`) applies the same percentages to its own minimum and
-maximum density. The per-channel contrast is saved in the ``.yaml`` file
-written with exported images and restored when such a file is dropped onto
-Render.
+maximum density. Linked windows can share the per-channel contrast, see
+:ref:`render-link-settings`. The per-channel contrast is saved in the
+``.yaml`` file written with exported images and restored when such a file is
+dropped onto Render.
 
 The ``Automatic coloring`` checkbox overrides per-channel selections with
 HSV-spaced colors for as long as it's ticked. ``Save colors`` /
@@ -284,8 +285,10 @@ Chooses which attributes the linked windows share:
 - pan, zoom, and a crosshair marking the cursor position of the window the
   mouse is in,
 - the active tool,
-- render settings, contrast, colormap, render by property, scale bar,
-  grid, minimap, background and legend, camera pixel size,
+- render settings, contrast, per-channel contrast (see
+  :ref:`render-channel-contrast`; a channel takes the contrast of the channel
+  of the same file in the other windows), colormap, render by property, scale
+  bar, grid, minimap, background and legend, camera pixel size,
 - pick shape and size, and the picks themselves,
 - slicing (the slice position is matched in nm).
 

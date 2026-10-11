@@ -30,7 +30,9 @@ Navigation
 Rendering
     Render settings (render method and its parameters, display pixel
     size), contrast (including automatic contrast adjustments),
-    colormap and render by property.
+    per-channel contrast, colormap and render by property. The
+    per-channel contrast is matched by file: a channel takes the
+    contrast of the channel of the same file in the other window.
 Display
     Scale bar, grid, minimap, background color and legend, camera
     pixel size.
@@ -41,7 +43,7 @@ Slicing
     Slicing on/off, slice thickness and slice position; the position is
     matched in nm, since the slice bins depend on each window's data.
 
-Channel colors, visibility and per-channel contrast are never linked.
+Channel colors and visibility are never linked.
 
 A change is mirrored by applying it to the other windows' widgets as if
 the user had edited them there, so each window runs its own update
@@ -152,6 +154,13 @@ CATEGORIES = (
         "Rendering",
         "Minimum and maximum density, including automatic contrast\n"
         "adjustments.",
+    ),
+    LinkCategory(
+        "channel_contrast",
+        "Per-channel contrast",
+        "Rendering",
+        "Contrast of each channel (View > Files...), applied to the\n"
+        "channel of the same file in the other windows.",
     ),
     LinkCategory(
         "colormap",
@@ -355,6 +364,40 @@ def mirror_widget(
         dst.setValue(src.value())
 
 
+def matching_channels(
+    src_paths: list[str], dst_paths: list[str]
+) -> list[tuple[int, int]]:
+    """Pair the channels of two windows that hold the same file.
+
+    A file loaded several times is paired in order: its k-th channel
+    in one window with its k-th channel in the other.
+
+    Parameters
+    ----------
+    src_paths, dst_paths : list of str
+        Paths of the channels of the two windows, see
+        ``View.locs_paths``.
+
+    Returns
+    -------
+    pairs : list of tuple of int
+        ``(i, j)`` per pair: channel ``i`` of the first window holds
+        the same file as channel ``j`` of the second.
+    """
+    dst_channels = {}
+    for j, path in enumerate(dst_paths):
+        dst_channels.setdefault(path, []).append(j)
+    occurrences = {}
+    pairs = []
+    for i, path in enumerate(src_paths):
+        k = occurrences.get(path, 0)
+        occurrences[path] = k + 1
+        channels = dst_channels.get(path, [])
+        if k < len(channels):
+            pairs.append((i, channels[k]))
+    return pairs
+
+
 def picks_signature(view) -> tuple:
     """Cheap fingerprint of a view's picks that changes whenever picks
     are added, removed, replaced or (polygons) extended in place.
@@ -525,6 +568,10 @@ class LinkGroup(QtCore.QObject):
         window.tools_actiongroup.triggered.connect(
             partial(self._on_changed, window, "tool_mode")
         )
+        # the per-channel contrast widgets come and go with the channels
+        window.dataset_dialog.channel_contrast_changed.connect(
+            partial(self._on_changed, window, "channel_contrast")
+        )
         for key, (dialog_name, names) in WATCHED_WIDGETS.items():
             dialog = getattr(window, dialog_name)
             for name in names:
@@ -635,6 +682,7 @@ class LinkGroup(QtCore.QObject):
             "tool_mode": self._apply_tool_mode,
             "render_settings": self._apply_render_settings,
             "contrast": self._apply_contrast,
+            "channel_contrast": self._apply_channel_contrast,
             "colormap": self._apply_colormap,
             "render_property": self._apply_render_property,
             "scalebar": self._apply_scalebar,
@@ -712,6 +760,27 @@ class LinkGroup(QtCore.QObject):
         else:
             d.minimum.setValue(s.minimum.value())
             d.maximum.setValue(s.maximum.value())
+
+    @staticmethod
+    def _apply_channel_contrast(src, dst) -> None:
+        s = src.dataset_dialog
+        d = dst.dataset_dialog
+
+        def contrast(dialog, channel: int) -> tuple[float, float]:
+            return (
+                dialog.contrast_low[channel].value(),
+                dialog.contrast_high[channel].value(),
+            )
+
+        changed = False
+        for i, j in matching_channels(
+            src.view.locs_paths, dst.view.locs_paths
+        ):
+            if contrast(s, i) != contrast(d, j):
+                d.set_channel_contrast(j, *contrast(s, i), update=False)
+                changed = True
+        if changed:
+            d.update_channel_contrast()
 
     @staticmethod
     def _apply_colormap(src, dst) -> None:

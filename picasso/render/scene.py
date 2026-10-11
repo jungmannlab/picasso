@@ -197,7 +197,6 @@ def render_scene(
     invert_colors: bool = False,
     single_channel_colormap: str | lib.FloatArray2D = "magma",
     colors: list | None = None,
-    relative_intensities: list[float] | None = None,
     channel_contrast: list[tuple[float, float]] | None = None,
     background_color: tuple[float, float, float] | None = None,
     raw_image_cache: lib.FloatArray2D | lib.FloatArray3D | None = None,
@@ -319,10 +318,6 @@ def render_scene(
         blended additively. Only needs to be specified for
         multi-channel data. Default is None, in which case colors are
         taken from ``lib.get_colors``.
-    relative_intensities : list of float, optional
-        List of relative intensities for each channel. Only needs to be
-        specified for multi-channel data. Default is None, in which
-        case all channels are rendered with the same intensity.
     channel_contrast : list of tuple of float, optional
         Contrast window of each channel relative to the global contrast
         limits ``(vmin, vmax)`` (given by `contrast` or found
@@ -424,7 +419,6 @@ def render_scene(
             triangulation_jitter=triangulation_jitter,
             render_index=render_index,
             contrast=contrast,
-            relative_intensities=relative_intensities,
             channel_contrast=channel_contrast,
             invert_colors=invert_colors,
             background_color=background_color,
@@ -673,7 +667,6 @@ def _render_multi_channel(
     triangulation_jitter: float | None = None,
     render_index: list | None = None,
     contrast: tuple[float, float] | None = None,
-    relative_intensities: list[float] | None = None,
     channel_contrast: list[tuple[float, float]] | None = None,
     invert_colors: bool = False,
     background_color: tuple[float, float, float] | None = None,
@@ -721,21 +714,13 @@ def _render_multi_channel(
 
     if colors_arr.ndim == 3:
         # LUT path (the GUI's path): one fused kernel does contrast ->
-        # intensities -> LUT gather -> blend -> background -> 8 bit in
+        # LUT gather -> blend -> background -> 8 bit in
         # two passes over the stack instead of the ~10-pass numpy chain
         n_channels = raw_image.shape[0]
         contrast_limits = _contrast_limits(raw_image, vmin, vmax, autoscale)
         vmins, ranges = _channel_limits(
             contrast_limits, channel_contrast, n_channels
         )
-        if relative_intensities is None:
-            rel = np.ones(n_channels, dtype=np.float32)
-        else:
-            assert len(relative_intensities) == n_channels, (
-                "Length of relative_intensities must match number of "
-                "channels in images."
-            )
-            rel = np.asarray(relative_intensities, dtype=np.float32)
         has_bg = background_color is not None and any(
             c > 0 for c in background_color
         )
@@ -747,7 +732,6 @@ def _render_multi_channel(
             np.ascontiguousarray(colors_arr),
             vmins.astype(np.float32),
             ranges.astype(np.float32),
-            rel,
             bg,
             has_bg,
         )
@@ -771,9 +755,6 @@ def _render_multi_channel(
         )
         images[~np.isfinite(images)] = 0.0
         images = np.clip(images, 0.0, 1.0)
-        images = scale_intensities(
-            images, relative_intensities=relative_intensities
-        )
         images_f32 = np.ascontiguousarray(images, dtype=np.float32)
         rgb = np.tensordot(images_f32, colors_arr, axes=([0], [0]))
         # clip to max value of 1 (preserves relative brightness)
@@ -874,7 +855,6 @@ def _render_single_channel(
 def color_range(
     n_channels: int | None,
     colors: list | None = None,
-    relative_intensities: list[float] | None = None,
     invert_colors: bool = False,
     background_color: tuple[float, float, float] | None = None,
     single_channel_colormap: str | lib.FloatArray2D = "magma",
@@ -898,9 +878,6 @@ def color_range(
     colors : list of tuples or list of lib.FloatArray2D, optional
         Colors of the channels, as in ``render_scene``. Default is
         None.
-    relative_intensities : list of float, optional
-        Relative intensity of each channel, as in ``render_scene``.
-        Default is None.
     invert_colors : bool, optional
         If True, colors are inverted, as in ``render_scene``. Default
         is False.
@@ -946,7 +923,6 @@ def color_range(
             disp_px_size=1.0,
             colors=colors,
             contrast=(0.0, 1.0),
-            relative_intensities=relative_intensities,
             channel_contrast=channel_contrast,
             invert_colors=invert_colors,
             background_color=background_color,
@@ -1002,35 +978,6 @@ def scale_contrast(
     if return_contrast_limits:
         return scaled_image, (vmin, vmax)
     return scaled_image
-
-
-def scale_intensities(
-    images: lib.FloatArray3D,
-    relative_intensities: list[float] | None = None,
-) -> lib.FloatArray3D:
-    """Scale intensities across images.
-
-    Parameters
-    ----------
-    images : FloatArray3D
-        Images to be intensity scaled, one per channel. Scaled in place.
-    relative_intensities : list of float, optional
-        List of relative intensities for each channel. If None, all
-        channels are rendered with the same intensity. Default is None.
-
-    Returns
-    -------
-    scaled_images : FloatArray3D
-        Intensity scaled images.
-    """
-    if relative_intensities is not None:
-        assert len(relative_intensities) == images.shape[0], (
-            "Length of relative_intensities must match number of channels "
-            "in images."
-        )
-        for i in range(images.shape[0]):
-            images[i] *= relative_intensities[i]
-    return images
 
 
 def to_8bit(

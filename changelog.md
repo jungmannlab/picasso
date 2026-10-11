@@ -55,6 +55,10 @@ Last change: 11-OCT-2026 CEST
 
 ### **Backward incompatible changes:**
 - *Tools > Fast rendering* is removed: with GPU rendering and other speed improvements it no longer serves a purpose.
+- The relative intensity of channels is replaced by the per-channel contrast:
+    - The `relative_intensities` argument is removed from `picasso.render.render_scene`, `picasso.render.color_range` and `picasso.render.build_animation`; use `channel_contrast`, one `(low, high)` window per channel relative to the global contrast limits. A relative intensity `r >= 1` corresponds to `(0, 1 / r)`; intensities below 1, which capped the brightest color of a channel, have no equivalent (`(0, 1 / r)` dims the channel instead).
+    - `picasso.render.scale_intensities` is removed.
+    - For plugins: `DatasetDialog.intensitysettings` in Render is replaced by `contrast_low` and `contrast_high` (in percent of the global contrast) and `View.read_relative_intensities` by `View.read_channel_contrast`.
 - The API deprecated in v0.11 is removed:
     - `picasso.localize.fit2D` is removed, use `picasso.localize.fit` (without the `movie_info` and `mle_method` arguments, which had no effect).
     - `picasso.localize.localize_3D` is removed, use `picasso.localize.localize` with its `calibration_3d` argument.
