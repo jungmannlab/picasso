@@ -432,6 +432,9 @@ QPushButton:default:hover {{
 QPushButton:default:pressed {{
     background-color: {accent_pressed};
 }}
+QPushButton[compact="true"] {{
+    padding: {pad_v}px {pad_v + 2}px;
+}}
 QPushButton:flat {{
     background-color: transparent;
     border-color: transparent;
@@ -897,6 +900,22 @@ def set_button_state(
     style.unpolish(button)
     style.polish(button)
     button.update()
+
+
+def set_button_compact(button: QtWidgets.QPushButton) -> None:
+    """Give ``button`` less horizontal padding, e.g., for buttons in
+    the rows of a table. The "Native" mode keeps the platform look.
+
+    Parameters
+    ----------
+    button : QtWidgets.QPushButton
+        The button.
+    """
+    button.setProperty("compact", True)
+    # dynamic properties are matched when the widget is polished
+    style = button.style()
+    style.unpolish(button)
+    style.polish(button)
 
 
 def current() -> Appearance:

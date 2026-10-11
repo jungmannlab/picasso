@@ -96,6 +96,30 @@ CHANNEL_CONTRAST_MAX = 1000.0
 CHANNEL_CONTRAST_TRACK = 200.0
 # key of the per-channel contrast in the .yaml saved with exported images
 CHANNEL_CONTRAST_KEY = "Channel contrast (% of global)"
+# columns of the channel table in the Files dialog: (header, tooltip)
+DATASET_COLUMNS = [
+    ("File", "Names of the loaded datasets."),
+    ("Title", "Change the displayed name of each dataset."),
+    ("Color", "Select the color for each dataset."),
+    ("", "Gradient preview and color picker of each dataset."),
+    (
+        "Contrast (% of global)",
+        "Contrast of each dataset relative to the minimum and\n"
+        "maximum density set in Display settings (Ctrl+D): 0% is\n"
+        "the minimum and 100% the maximum density. Lower the\n"
+        "maximum to brighten a dataset, raise it to dim it.\n"
+        "The 3D window applies the same values to its own\n"
+        "minimum and maximum density.",
+    ),
+    ("", "Close each dataset."),
+]
+DATASET_COLUMN_CONTRAST = 4
+# width (pixels) of the per-channel gradient preview in the Files dialog
+CHANNEL_PREVIEW_WIDTH = 48
+# the per-channel color combobox of the Files dialog fits the solid
+# color names of up to this many characters and hexadecimal codes;
+# longer names (e.g., "forestgreen_gradient") show in full in the popup
+CHANNEL_COLOR_CHARS = 9
 POLYGON_POINTER_SIZE = 16  # must be even
 # shortest drag (display pixels, in x and y) that still yields a box
 # pick, so that a stray click does not create one of zero area
@@ -141,6 +165,12 @@ PROPERTY_UNITS = {"z": "nm", "lpz": "nm"}
 # Suffix of the color bar saved next to an image exported while
 # rendering by property
 COLORBAR_SUFFIX = "_colorbar"
+
+
+def _show_text_start(combobox: QtWidgets.QComboBox, *args) -> None:
+    """Scroll an editable combobox narrower than its text to the start
+    of the text (the line edit otherwise shows the end)."""
+    combobox.lineEdit().setCursorPosition(0)
 
 
 def _gradient_pixmap(
@@ -495,9 +525,14 @@ class DatasetDialog(lib.Dialog):
         List of strings specifying the default 14 colors.
     legend : QCheckBox
         Used to show/hide legend.
+    reset_contrast_button : QPushButton
+        Resets the contrast of all channels to the global contrast.
     rgb : list
         List of lists of 3 elements specifying the corresponding colors
         as RGB channels.
+    table : QTableWidget
+        Table with one row per channel; the row header shows the
+        channel index.
     title : list
         List of QPushButtons to change the title of each channel.
     warning : bool
@@ -617,18 +652,48 @@ class DatasetDialog(lib.Dialog):
             alignment=QtCore.Qt.AlignmentFlag.AlignRight,
         )
 
-        # add scrollable area which will display all channels, below
-        # the non-scrollable elements
-        self._scroll = QtWidgets.QScrollArea(self)
-        self._scroll.setWidgetResizable(True)
-        self._scroll.setHorizontalScrollBarPolicy(
+        # add the table listing all channels, one row per channel, below
+        # the non-scrollable elements; the row header shows the channel
+        # index
+        self.table = QtWidgets.QTableWidget(0, len(DATASET_COLUMNS), self)
+        self.table.setHorizontalScrollBarPolicy(
             QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOff
         )
-        self.container = QtWidgets.QWidget()
-        self._scroll.setWidget(self.container)
-        self.scroll_area = QtWidgets.QGridLayout(self.container)
-        self.scroll_area.setAlignment(QtCore.Qt.AlignmentFlag.AlignTop)
-        layout.addWidget(self._scroll, 4, 0, 1, 3)
+        self.table.setEditTriggers(
+            QtWidgets.QAbstractItemView.EditTrigger.NoEditTriggers
+        )
+        self.table.setSelectionMode(
+            QtWidgets.QAbstractItemView.SelectionMode.NoSelection
+        )
+        self.table.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
+        self.table.setAlternatingRowColors(True)
+        self.table.setShowGrid(False)
+        self.table.setWordWrap(False)
+        for column, (name, tooltip) in enumerate(DATASET_COLUMNS):
+            item = QtWidgets.QTableWidgetItem(name)
+            item.setToolTip(tooltip)
+            self.table.setHorizontalHeaderItem(column, item)
+        header = self.table.horizontalHeader()
+        header.setSectionResizeMode(
+            QtWidgets.QHeaderView.ResizeMode.ResizeToContents
+        )
+        header.setSectionResizeMode(
+            DATASET_COLUMN_CONTRAST, QtWidgets.QHeaderView.ResizeMode.Stretch
+        )
+        header.setDefaultAlignment(
+            QtCore.Qt.AlignmentFlag.AlignLeft
+            | QtCore.Qt.AlignmentFlag.AlignVCenter
+        )
+        header.setHighlightSections(False)
+        row_header = self.table.verticalHeader()
+        row_header.setSectionResizeMode(
+            QtWidgets.QHeaderView.ResizeMode.ResizeToContents
+        )
+        row_header.setDefaultAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+        row_header.setMinimumWidth(24)
+        row_header.setHighlightSections(False)
+        row_header.setToolTip("Channel index (1 is the first loaded dataset).")
+        layout.addWidget(self.table, 4, 0, 1, 3)
 
         # explains the grayed-out widgets when a single channel is
         # loaded (see set_single_channel_mode)
@@ -638,51 +703,21 @@ class DatasetDialog(lib.Dialog):
         self.single_channel_note.setVisible(False)
         layout.addWidget(self.single_channel_note, 5, 0, 1, 3)
 
-        self.checks = []
-        self.title = []
-        self.closebuttons = []
-        self.colorselection = []
-        self.colordisp_all = []
-        self.colorpickers = []
-        self.colorpreviews = []
-        self.contrast_low = []
-        self.contrast_high = []
-        self.contrast_sliders = []
-        self.contrast_widgets = []
-        files_label = QtWidgets.QLabel("Files")
-        files_label.setToolTip("Names of the loaded datasets.")
-        self.scroll_area.addWidget(files_label, 0, 0)
-        title_label = QtWidgets.QLabel("Change\ntitle")
-        title_label.setToolTip("Change the displayed name of each dataset.")
-        self.scroll_area.addWidget(title_label, 0, 1)
-        color_label = QtWidgets.QLabel("Color")
-        color_label.setToolTip("Select the color for each dataset.")
-        self.scroll_area.addWidget(color_label, 0, 2)
-        self.scroll_area.addWidget(QtWidgets.QLabel(""), 0, 3)
-        contrast_header = QtWidgets.QWidget()
-        contrast_header_layout = QtWidgets.QHBoxLayout(contrast_header)
-        contrast_header_layout.setContentsMargins(0, 0, 0, 0)
-        contrast_label = QtWidgets.QLabel("Contrast (% of global)")
-        contrast_label.setToolTip(
-            "Contrast of each dataset relative to the minimum and\n"
-            "maximum density set in Display settings (Ctrl+D): 0% is\n"
-            "the minimum and 100% the maximum density. Lower the\n"
-            "maximum to brighten a dataset, raise it to dim it.\n"
-            "The 3D window applies the same values to its own\n"
-            "minimum and maximum density."
-        )
-        contrast_header_layout.addWidget(contrast_label)
-        contrast_header_layout.addStretch()
-        reset_contrast_button = QtWidgets.QToolButton()
-        reset_contrast_button.setText("Reset")
-        reset_contrast_button.setToolTip(
+        self.reset_contrast_button = QtWidgets.QPushButton("Reset contrast")
+        self.reset_contrast_button.setToolTip(
             "Reset the contrast of all datasets to 0-100%,\n"
             "i.e., to the global contrast."
         )
-        reset_contrast_button.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
-        reset_contrast_button.clicked.connect(self.reset_channel_contrast)
-        contrast_header_layout.addWidget(reset_contrast_button)
-        self.scroll_area.addWidget(contrast_header, 0, 4)
+        self.reset_contrast_button.setFocusPolicy(
+            QtCore.Qt.FocusPolicy.NoFocus
+        )
+        self.reset_contrast_button.clicked.connect(self.reset_channel_contrast)
+        layout.addWidget(
+            self.reset_contrast_button,
+            3,
+            1,
+            alignment=QtCore.Qt.AlignmentFlag.AlignLeft,
+        )
 
         self.default_colors = [
             "red",
@@ -751,11 +786,14 @@ class DatasetDialog(lib.Dialog):
         # change when channels are closed and the rows shift up
         channel_id = str(self._next_channel_id)
         self._next_channel_id += 1
-        t = QtWidgets.QPushButton("#")
+        t = QtWidgets.QPushButton()
+        t.setIcon(theme.icon("rename"))
+        theme.set_button_compact(t)
         t.setToolTip("Change the displayed name of this dataset.")
         t.setObjectName(channel_id)
         p = QtWidgets.QPushButton()
         p.setIcon(theme.icon("delete"))
+        theme.set_button_compact(p)
         p.setToolTip("Close this dataset.")
         p.setObjectName(channel_id)
 
@@ -790,8 +828,16 @@ class DatasetDialog(lib.Dialog):
         colordrop.setEditable(True)
         colordrop.lineEdit().setMaxLength(40)
         self._populate_color_combo(colordrop)
+        colordrop.setFixedWidth(self._color_combo_width(colordrop))
         index = np.min([len(self.checks) - 1, len(self.rgb) - 1])
         colordrop.setCurrentText(self.default_colors[index])
+        _show_text_start(colordrop)
+        colordrop.currentIndexChanged.connect(
+            partial(_show_text_start, colordrop)
+        )
+        colordrop.lineEdit().editingFinished.connect(
+            partial(_show_text_start, colordrop)
+        )
         colordrop.activated.connect(self.update_colors)
         self.colorselection.append(colordrop)
         self.colorselection[-1].currentIndexChanged.connect(
@@ -816,20 +862,22 @@ class DatasetDialog(lib.Dialog):
         colordisp.setToolTip(
             "Gradient preview: intensity 0 (left) → intensity 1 (right)."
         )
-        colordisp.setFixedSize(80, 14)
+        colordisp.setFixedSize(CHANNEL_PREVIEW_WIDTH, 14)
         colordisp.setFrameShape(QtWidgets.QFrame.Shape.Box)
-        colordisp.setPixmap(_gradient_pixmap(initial_lut))
+        colordisp.setPixmap(
+            _gradient_pixmap(initial_lut, width=CHANNEL_PREVIEW_WIDTH)
+        )
         self.colordisp_all.append(colordisp)
 
         # create the color picker button (writes a hex code into the
         # combobox above), shown next to the gradient preview
         picker = QtWidgets.QPushButton("...")
+        theme.set_button_compact(picker)
+        picker.setAutoDefault(False)
         picker.setToolTip(
             "Pick a solid color for this dataset from a color dialog.\n"
             "The chosen color is entered as a hexadecimal code."
         )
-        picker.setAutoDefault(False)
-        picker.setFixedWidth(28)
         picker.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
         picker.setObjectName(channel_id)
         picker.clicked.connect(
@@ -895,15 +943,18 @@ class DatasetDialog(lib.Dialog):
         self.contrast_sliders.append(contrast_slider)
         self.contrast_widgets.append(contrast_widget)
 
-        # add all the widgets to the Dataset Dialog (row 0 holds the
-        # column headers, so channel i lives in row i + 1)
-        currentline = len(self.checks)
-        self.scroll_area.addWidget(c, currentline, 0)
-        self.scroll_area.addWidget(t, currentline, 1)
-        self.scroll_area.addWidget(colordrop, currentline, 2)
-        self.scroll_area.addWidget(preview_widget, currentline, 3)
-        self.scroll_area.addWidget(contrast_widget, currentline, 4)
-        self.scroll_area.addWidget(p, currentline, 5)
+        # add all the widgets to a new row of the channel table, each
+        # wrapped with a small margin so that the rows do not touch
+        row = self.table.rowCount()
+        self.table.insertRow(row)
+        for column, widget in enumerate(
+            [c, t, colordrop, preview_widget, contrast_widget, p]
+        ):
+            cell = QtWidgets.QWidget()
+            cell_layout = QtWidgets.QHBoxLayout(cell)
+            cell_layout.setContentsMargins(4, 2, 4, 2)
+            cell_layout.addWidget(widget)
+            self.table.setCellWidget(row, column, cell)
 
         self._fit_scroll_width()
 
@@ -953,6 +1004,7 @@ class DatasetDialog(lib.Dialog):
             *self.colorselection,
             *self.colorpreviews,
             *self.contrast_widgets,
+            self.reset_contrast_button,
         ]:
             widget.setEnabled(multichannel)
         for widget in [self.background_button, self.background_swatch]:
@@ -960,26 +1012,23 @@ class DatasetDialog(lib.Dialog):
         self.single_channel_note.setText(notes.get(mode, ""))
         self.single_channel_note.setVisible(not multichannel)
 
-    def _relayout_channels(self) -> None:
-        """Re-add all channel widgets to the scroll area so that the
-        rows are contiguous after a channel has been closed."""
-        for i in range(len(self.checks)):
-            row = i + 1
-            self.scroll_area.addWidget(self.checks[i], row, 0)
-            self.scroll_area.addWidget(self.title[i], row, 1)
-            self.scroll_area.addWidget(self.colorselection[i], row, 2)
-            self.scroll_area.addWidget(self.colorpreviews[i], row, 3)
-            self.scroll_area.addWidget(self.contrast_widgets[i], row, 4)
-            self.scroll_area.addWidget(self.closebuttons[i], row, 5)
-
     def _fit_scroll_width(self) -> None:
-        """Ensure the dialog is wide enough that the scroll area's
-        contents fit horizontally without a scrollbar. Only ever grows
-        the minimum width; never shrinks the dialog."""
-        self.container.adjustSize()
-        needed = self.container.sizeHint().width()
-        frame = 2 * self._scroll.frameWidth()
-        self._scroll.setMinimumWidth(needed + frame)
+        """Ensure the dialog is wide enough that the channel table fits
+        horizontally without a scrollbar. Only ever grows the minimum
+        width; never shrinks the dialog."""
+        table = self.table
+        header = table.horizontalHeader()
+        needed = table.verticalHeader().sizeHint().width()
+        for column in range(table.columnCount()):
+            needed += max(
+                table.sizeHintForColumn(column),
+                header.sectionSizeHint(column),
+            )
+        needed += 2 * table.frameWidth()
+        needed += table.style().pixelMetric(
+            QtWidgets.QStyle.PixelMetric.PM_ScrollBarExtent
+        )
+        table.setMinimumWidth(max(table.minimumWidth(), needed))
 
     def update_colors(self) -> None:
         """Change colors in self.colordisp_all and updates the scene in
@@ -1015,20 +1064,9 @@ class DatasetDialog(lib.Dialog):
     def _remove_channel_widgets(self, i: int) -> None:
         """Remove and delete the Dataset Dialog widgets of channel
         ``i``, and drop them from the per-channel widget lists."""
-        # they must be reparented and scheduled for deletion,
-        # otherwise they stay visible in the scroll area and overlap
-        # the rows that move up
-        for widget in (
-            self.checks[i],
-            self.title[i],
-            self.colorselection[i],
-            self.colorpreviews[i],
-            self.contrast_widgets[i],
-            self.closebuttons[i],
-        ):
-            self.scroll_area.removeWidget(widget)
-            widget.setParent(None)
-            widget.deleteLater()
+        # the table deletes the cell widgets of the removed row and
+        # moves the rows below up
+        self.table.removeRow(i)
 
         del self.checks[i]
         del self.title[i]
@@ -1121,10 +1159,6 @@ class DatasetDialog(lib.Dialog):
         self.window.test_clusterer_dialog.channels.removeItem(i)
         self.window.tools_settings_dialog.remove_move_channel(i)
         self.window.view.clear_move_undo()
-
-        # move the remaining channels up so that there is no empty row
-        self._relayout_channels()
-        self._fit_scroll_width()
 
     def close_file(self, i: int | str, render=True) -> None:
         """Close a given channel (defined by its index of name) and
@@ -1405,7 +1439,9 @@ class DatasetDialog(lib.Dialog):
                 # read_colors will raise the user-facing warning.
                 lut = self._channel_luts[n]
         self._channel_luts[n] = lut
-        self.colordisp_all[n].setPixmap(_gradient_pixmap(lut))
+        self.colordisp_all[n].setPixmap(
+            _gradient_pixmap(lut, width=CHANNEL_PREVIEW_WIDTH)
+        )
 
     def resolve_color_identifier(self, name: str) -> lib.FloatArray2D:
         """Resolve a free-text identifier from a channel combobox into
@@ -1437,6 +1473,30 @@ class DatasetDialog(lib.Dialog):
             return cached
         raise ValueError(f"Unknown color identifier: '{name}'")
 
+    def _color_combo_width(self, combobox: QtWidgets.QComboBox) -> int:
+        """Width of a per-channel color combobox that fits the solid
+        color names of up to ``CHANNEL_COLOR_CHARS`` characters and
+        hexadecimal codes, including the frame and the arrow."""
+        texts = [
+            name
+            for name in self.default_colors
+            if len(name) <= CHANNEL_COLOR_CHARS
+        ] + ["#FF5733"]
+        metrics = combobox.fontMetrics()
+        contents = QtCore.QSize(
+            max(metrics.horizontalAdvance(text) for text in texts),
+            metrics.height(),
+        )
+        option = QtWidgets.QStyleOptionComboBox()
+        combobox.initStyleOption(option)
+        size = combobox.style().sizeFromContents(
+            QtWidgets.QStyle.ContentsType.CT_ComboBox,
+            option,
+            contents,
+            combobox,
+        )
+        return size.width()
+
     def _populate_color_combo(self, combobox: QtWidgets.QComboBox) -> None:
         """Fill a per-channel combobox with solid colors, curated
         matplotlib colormaps, and any user-defined custom colormaps."""
@@ -1465,6 +1525,13 @@ class DatasetDialog(lib.Dialog):
             for c in sorted(user_cmaps.keys()):
                 add_item(c)
         combobox.setModel(model)
+        # the combobox is narrower than the longest names, so widen the
+        # popup list to show them in full
+        view = combobox.view()
+        view.setMinimumWidth(
+            view.sizeHintForColumn(0)
+            + view.verticalScrollBar().sizeHint().width()
+        )
 
     def refresh_color_lists(self) -> None:
         """Rebuild every channel combobox to reflect changes in the
@@ -1488,6 +1555,7 @@ class DatasetDialog(lib.Dialog):
                 fallback_idx = min(i, len(self.default_colors) - 1)
                 combo.setCurrentText(self.default_colors[fallback_idx])
             combo.blockSignals(False)
+            _show_text_start(combo)
             self.set_color(i)
 
     def open_custom_cmap_editor(self) -> None:

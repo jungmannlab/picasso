@@ -23,10 +23,11 @@ Files
 
 Shortcut: :kbd:`Ctrl+F`
 
-Opens the **Datasets** dialog, which lists every loaded channel and lets you
-control its title, visibility, color (or colormap), and contrast. A
-small horizontal gradient next to each channel previews what that channel will
-look like at intensity 0 → intensity 1.
+Opens the **Datasets** dialog, which lists every loaded channel in a table and
+lets you control its title, visibility, color (or colormap), and contrast. The
+number on the left of each row is the channel index (1 is the first loaded
+channel). A small horizontal gradient next to each channel previews what that
+channel will look like at intensity 0 → intensity 1.
 
 **Left click** on a channel's checkbox ticks/unticks it, i.e., shows or hides
 that channel. **Right click** on a checkbox displays that channel only - it is
@@ -67,8 +68,8 @@ localizations per display pixel:
 
 The global contrast stays in charge: changing ``Min. density`` or ``Max.
 density`` moves every channel's window along, so the balance between the
-channels is kept. ``Reset`` sets all channels back to 0–100%. The 3D window
-(see :ref:`render-3d`) applies the same percentages to its own minimum and
+channels is kept. ``Reset contrast`` sets all channels back to 0–100%. The 3D
+window (see :ref:`render-3d`) applies the same percentages to its own minimum and
 maximum density. Linked windows can share the per-channel contrast, see
 :ref:`render-link-settings`. The per-channel contrast is saved in the
 ``.yaml`` file written with exported images and restored when such a file is
