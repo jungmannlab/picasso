@@ -375,8 +375,8 @@ MODEL_TOOLTIP = (
     "Runs on the CPU; tick Use GPU to run it on the GPU instead\n"
     "(much faster).\n\n"
     "Average of ROI:\n"
-    "Reports the spot's center of mass and integrated intensity\n"
-    "in the fit box."
+    "No fit: reports the summed intensity of the box (photons).\n"
+    "x/y stay at the identified pixel (no sub-pixel position)."
 )
 
 CAMERA_CALIB_TOOLTIP = (
