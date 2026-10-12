@@ -13,7 +13,7 @@ their shortcuts or from a terminal with ``picasso <module>`` (for example
 
 .. tip::
 
-   We provide an example dataset showing 20 nm grid DNA origami. It's a cropped movie from `Strauss and Jungmann. Nature Methods, 2020 <https://doi.org/10.1038/s41592-020-0869-x>`_ (Fig 2b, R6). You can practice all the steps listed below on this experimental dataset. Download the file from this `link <website>`_. Use ``EM Gain = 1``, ``Sensitivity = 0.53``, ``Baseline = 100`` and ``Pixel size = 130``.
+   We provide an example dataset showing 20 nm grid DNA origami. It's a cropped movie from `Strauss and Jungmann. Nature Methods, 2020 <https://doi.org/10.1038/s41592-020-0869-x>`_ (Fig 2b, R6). You can practice all the steps listed below on this experimental dataset. Download the file from this `link <https://zenodo.org/records/23318677>`_. Use ``EM Gain = 1``, ``Sensitivity = 0.53``, ``Baseline = 100`` and ``Pixel size = 130``.
 
 .. rubric:: Key words used on this page
 
