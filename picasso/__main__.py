@@ -1030,6 +1030,85 @@ def _join(files: list[str], keep_index: bool = True) -> None:
     save_locs(base + "_join.hdf5", all_locs, info)
 
 
+def _stitch(
+    files: list[str],
+    output: str | None = None,
+    search_radius: float = 10.0,
+    orientation: str = "auto",
+    use_2d: bool = False,
+    keep_overlaps: bool = False,
+    keep_frames: bool = False,
+) -> None:
+    """Stitch localization files of tiles recorded at different stage
+    positions. Files at the same stage position form one tile and are
+    different targets (in the order given); the tiles of each target are
+    saved as one file. See ``stitch.stitch`` for details."""
+    import warnings
+    from glob import glob
+    from itertools import chain
+    from . import io, stitch
+
+    paths = list(chain(*[sorted(glob(_)) for _ in files]))
+    if len(paths) < 2:
+        raise SystemExit("Stitching requires at least two files.")
+    locs_infos = [io.load_locs(path) for path in paths]
+    locs = [locs_ for locs_, _ in locs_infos]
+    infos = [info for _, info in locs_infos]
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        try:
+            out_locs, out_infos, report = stitch.stitch(
+                locs,
+                infos,
+                orientation=orientation,
+                search_radius_um=search_radius,
+                align_z=not use_2d,
+                cut_seams=not keep_overlaps,
+                offset_frames=not keep_frames,
+                paths=paths,
+                progress="console",
+            )
+        except ValueError as e:
+            raise SystemExit(str(e))
+    for warning in caught:
+        print(f"WARNING: {warning.message}")
+
+    tiles = report["tiles"]
+    print(f"Stitched {tiles.max() + 1} tiles:")
+    for t in range(tiles.max() + 1):
+        x, y = report["positions"][t]
+        print(
+            f"  Tile {t + 1} at ({x:.2f}, {y:.2f}) cam. px, z offset "
+            f"{report['z_offsets'][t]:.1f} nm:"
+        )
+        for i in (i for i, tile in enumerate(tiles) if tile == t):
+            print(f"    {paths[i]}")
+    if report["orientation"] is not None:
+        print(f"Stage orientation: {report['orientation']}")
+    print("Overlaps:")
+    for pair in report["pairs"]:
+        a, b = (t + 1 for t in pair["tiles"])
+        if pair["used"]:
+            print(
+                f"  Tiles {a} and {b}: {100 * pair['fraction']:.0f}% matched,"
+                f" residual {pair['residual']:.2f} px"
+            )
+        else:
+            print(f"  Tiles {a} and {b}: not used ({pair['status']})")
+
+    for k, (locs_, info) in enumerate(zip(out_locs, out_infos)):
+        if output is None:
+            base = os.path.splitext(info[-1]["Stitched files"][0])[0]
+            path = base + "_stitched.hdf5"
+        elif len(out_locs) == 1:
+            path = output
+        else:
+            base, ext = os.path.splitext(output)
+            path = f"{base}_target{k + 1}{ext or '.hdf5'}"
+        io.save_locs(path, locs_, info)
+        print(f"Saved {path}")
+
+
 def _groupprops(files: str) -> None:
     """Calculate group properties for localizations in HDF5 files.
     See ``postprocess.groupprops`` for details."""
@@ -5381,6 +5460,71 @@ def main():  # noqa: C901
         action="store_true",
     )
 
+    # stitch
+    stitch_parser = subparsers.add_parser(
+        "stitch",
+        help=(
+            "stitch localization files of tiles recorded at different"
+            " stage positions (Micro-Manager metadata) into one file per"
+            " target"
+        ),
+    )
+    stitch_parser.add_argument(
+        "files",
+        nargs="+",
+        help=(
+            "hdf5 localization files of the tiles (unix style path"
+            " patterns); files at the same stage position are different"
+            " targets, matched across tiles in the order given"
+        ),
+    )
+    stitch_parser.add_argument(
+        "-o",
+        "--output",
+        help=(
+            "output file (default: <first file>_stitched.hdf5); with"
+            " several targets, _target<n> is appended"
+        ),
+    )
+    stitch_parser.add_argument(
+        "-r",
+        "--search-radius",
+        type=float,
+        default=10.0,
+        help=(
+            "how far the true offset of two tiles may be from the one"
+            " given by the stage positions, in um (default=10)"
+        ),
+    )
+    stitch_parser.add_argument(
+        "--orientation",
+        default="auto",
+        help=(
+            "image x and y axes in terms of the stage X and Y axes, e.g.,"
+            " '-x, -y' or 'y, x', or 'auto' to find the best one"
+            " (default=auto)"
+        ),
+    )
+    stitch_parser.add_argument(
+        "--2d",
+        dest="use_2d",
+        action="store_true",
+        help="do not correct the z offsets of the tiles",
+    )
+    stitch_parser.add_argument(
+        "--keep-overlaps",
+        action="store_true",
+        help=(
+            "keep the localizations of all tiles in the overlaps instead"
+            " of cutting them at the seams"
+        ),
+    )
+    stitch_parser.add_argument(
+        "--keep-frames",
+        action="store_true",
+        help="do not offset the frames of consecutive tiles",
+    )
+
     # group properties
     groupprops_parser = subparsers.add_parser(
         "groupprops",
@@ -5780,6 +5924,16 @@ def main():  # noqa: C901
             _align(args.file, args.display)
         elif args.command == "join":
             _join(args.file, args.keepindex)
+        elif args.command == "stitch":
+            _stitch(
+                args.files,
+                args.output,
+                args.search_radius,
+                args.orientation,
+                args.use_2d,
+                args.keep_overlaps,
+                args.keep_frames,
+            )
         elif args.command == "groupprops":
             _groupprops(args.files)
         elif args.command == "pc":

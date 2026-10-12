@@ -5010,9 +5010,25 @@ def align(
     """
     images = []
     disp_px_size = 100  # nm
+    # one canvas for all channels, so that the images have the same
+    # shape even if the channels' canvases differ (e.g., after moving
+    # a channel in Render, see lib.fit_canvas)
+    height = max(
+        lib.get_from_metadata(info_, "Height", raise_error=True)
+        for info_ in infos
+    )
+    width = max(
+        lib.get_from_metadata(info_, "Width", raise_error=True)
+        for info_ in infos
+    )
+    viewport = ((0, 0), (height, width))
     for locs_, info_ in zip(locs, infos):
         _, image = render.render(
-            locs_, info_, disp_px_size=disp_px_size, blur_method="smooth"
+            locs_,
+            info_,
+            disp_px_size=disp_px_size,
+            viewport=viewport,
+            blur_method="smooth",
         )
         images.append(image)
     shift_y, shift_x = imageprocess.rcc(

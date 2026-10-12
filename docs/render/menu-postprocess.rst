@@ -226,6 +226,90 @@ used (always 2D only).
       )
 
 
+.. _render-stitch-tiles:
+
+Stitch tiles
+------------
+
+Stitches tiles recorded at different stage positions into one dataset. A
+large field of view is often imaged as a grid of tiles, all with the same
+camera, so the localizations of every tile are in the same camera frame: loaded
+together, the tiles lie on top of each other, although neighboring tiles only
+share a few microns. Stitching translates each tile to its place and merges
+the tiles.
+
+#. Load the tiles (one file per tile and target) and run ``Postprocess`` >
+   ``Stitch tiles...``.
+#. The table lists the loaded channels with their stage positions, read from
+   the Micro-Manager metadata (``XPositionUm`` and ``YPositionUm``). Channels
+   recorded at the same stage position, e.g., the targets of an
+   Exchange-PAINT experiment, get the same **Tile** number and are aligned
+   together. The **Target** number says which channels of different tiles
+   are merged into one channel (by default, the n-th channel of each tile).
+   Untick **Align** to leave a channel out of the alignment, e.g., a sparse
+   target.
+#. Choose the **Initial positions**:
+
+   - *Stage positions*: from the metadata. The stage axes may be flipped or
+     swapped relative to the camera axes; *Automatic* **Stage orientation**
+     tries all eight possibilities and takes the one whose overlaps match
+     best.
+   - *Current positions*: where the channels are now, e.g., after placing
+     them roughly with the :ref:`Move tool <render-move>`. **Use this if the
+     files contain no stage positions.**
+
+#. Click ``OK``. Each pair of overlapping tiles is matched by
+   cross-correlating the overlap within the **Search radius** (the stage
+   positions are typically off by a few microns) and refined to sub-pixel
+   precision by pairing nearest neighbors. The offsets of all pairs are
+   combined, and pairs that disagree with the others are dropped.
+
+The tiles are replaced by one stitched channel per target, named
+``<first tile>_stitched.hdf5``; save them with ``File`` > ``Save
+localizations``. A summary lists the stage orientation found and, for each
+pair of overlapping tiles, whether it was used and how well it agrees with
+the final positions (residual, camera pixels).
+
+Options:
+
+- **Correct z offsets** (3D data): each tile is also shifted in z to match
+  its neighbors in the overlaps.
+- **Cut overlaps at the seams**: each overlap keeps the localizations of only
+  the tile whose center is closest, so no molecule is counted twice.
+  Otherwise, overlaps contain the localizations of all tiles at double
+  density.
+- **Offset frames per tile**: the frames of each tile are offset by the
+  frames of the tiles acquired before it (in the order of the Micro-Manager
+  acquisition times), so frames stay unique.
+
+.. note::
+
+   Stitching assumes that the tiles are only translated relative to each
+   other, which holds for one camera at different stage positions. Undrift
+   the tiles before stitching.
+
+Also available as the command :ref:`picasso stitch <cmd-stitch>`.
+
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
+
+   ``stitch.stitch`` returns one localization table and metadata per target,
+   and a report with the tile positions and the pairwise offsets.
+
+   .. code-block:: python
+
+      from picasso import io, stitch
+
+      paths = ["tile1.hdf5", "tile2.hdf5", "tile3.hdf5", "tile4.hdf5"]
+      locs, infos = zip(*[io.load_locs(path) for path in paths])
+      stitched, stitched_infos, report = stitch.stitch(
+          list(locs), list(infos), search_radius_um=10, paths=paths
+      )
+      io.save_locs("stitched.hdf5", stitched[0], stitched_infos[0])
+      print(report["orientation"], report["positions"])
+
+
 .. _render-combine-locs-in-picks:
 
 Combine localizations in picks

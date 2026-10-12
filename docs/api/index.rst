@@ -60,6 +60,7 @@ Postprocessing
    picasso.clusterer
    picasso.g5m
    picasso.registration
+   picasso.stitch
    picasso.transforms
    picasso.masking
    picasso.expression

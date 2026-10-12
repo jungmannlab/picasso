@@ -172,8 +172,8 @@ def rcc(
         List of image segments to be correlated. Each segment should be
         a 2D numpy array representing an image.
     max_shift : float, optional
-        Maximum allowed shift in pixels. If None, the default value is
-        set to 5 pixels.
+        Maximum allowed shift in pixels. If None (default), the shift
+        is not limited.
     callback : Callable[[int], None], optional
         A callback function that takes an integer argument and is called
         after processing each pair of segments. This can be used to

@@ -8,6 +8,7 @@ Most fixtures (``locs``, ``info``) live in ``tests/conftest.py``.
 
 from __future__ import annotations
 
+import copy
 import warnings
 
 import numpy as np
@@ -1788,6 +1789,20 @@ class TestAlign:
         b = a.copy()
         b["x"] += 2.0
         aligned = postprocess.align_rcc([a, b], [info, info])
+        residual = aligned[1]["x"].mean() - aligned[0]["x"].mean()
+        assert abs(residual) < 0.05
+
+    def test_align_rcc_channels_with_different_canvases(self, locs_copy, info):
+        """Channels whose canvases differ (e.g., one was moved in Render
+        and lib.fit_canvas enlarged only its Width/Height) are rendered
+        on one canvas instead of failing with mismatched image shapes."""
+        a = locs_copy
+        b = a.copy()
+        b["x"] += 2.0
+        info_b = copy.deepcopy(info)
+        info_b[0]["Height"] = 2 * info[0]["Height"]
+        info_b[0]["Width"] = info[0]["Width"] + 3
+        aligned = postprocess.align_rcc([a, b], [info, info_b])
         residual = aligned[1]["x"].mean() - aligned[0]["x"].mean()
         assert abs(residual) < 0.05
 

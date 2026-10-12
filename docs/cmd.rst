@@ -459,6 +459,53 @@ Columns that not all files have (e.g., ``z`` when joining 2D and 3D files, or
 ``net_gradient`` when only some were identified by their net gradient) are
 dropped with a warning, so that no localizations are lost.
 
+.. _cmd-stitch:
+
+stitch
+------
+Stitch hdf5 localization files of tiles recorded at different stage
+positions into one file, see :ref:`render-stitch-tiles`. The tiles are placed
+by the stage positions in the Micro-Manager metadata and aligned by matching
+their overlaps. Files at the same stage position (e.g., the targets of an
+Exchange-PAINT experiment) are aligned together, and the tiles of each target
+(the n-th file of each position, in the order given) are saved as one file,
+``<first file>_stitched.hdf5``. The tile positions and the offsets between
+overlapping tiles are printed.
+
+.. code-block:: bash
+
+   picasso stitch files [-o output] [-r search_radius] [--orientation auto] [--2d] [--keep-overlaps] [--keep-frames]
+
+.. list-table::
+   :header-rows: 1
+   :widths: 25 15 60
+
+   * - Option
+     - Default
+     - Description
+   * - ``-o``, ``--output`` (str)
+     - ``<first file>_stitched.hdf5``
+     - The output file. With several targets, ``_target<n>`` is appended.
+   * - ``-r``, ``--search-radius`` (float)
+     - ``10``
+     - How far the true offset of two tiles may be from the one given by the
+       stage positions (µm).
+   * - ``--orientation`` (str)
+     - ``auto``
+     - The image x and y axes in terms of the stage X and Y axes, e.g.,
+       ``"-x, -y"`` or ``"y, x"``, or ``auto`` to find the one whose overlaps
+       match best.
+   * - ``--2d``
+     - off
+     - Do not correct the z offsets of the tiles.
+   * - ``--keep-overlaps``
+     - off
+     - Keep the localizations of all tiles in the overlaps instead of cutting
+       them at the seams.
+   * - ``--keep-frames``
+     - off
+     - Do not offset the frames of consecutive tiles.
+
 link
 ----
 Link localizations in consecutive frames.

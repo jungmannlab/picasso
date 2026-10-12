@@ -51,6 +51,7 @@ from .. import (
     postprocess,
     render,
     spatial_index,
+    stitch,
     __version__,
     docs_url,
 )
@@ -8107,6 +8108,277 @@ class CBCDialog(lib.Dialog):
         return params, result == QtWidgets.QDialog.DialogCode.Accepted
 
 
+class StitchDialog(lib.Dialog):
+    """Choose the tiles, targets and parameters for stitching the
+    loaded channels, see ``picasso.stitch``.
+
+    Each channel is one file. Files recorded at the same stage position
+    form a tile; the files of a tile are different targets, and the
+    tiles of each target are merged into one channel.
+
+    ...
+
+    Attributes
+    ----------
+    align : list of QCheckBoxes
+        Whether each channel is used to match the overlaps.
+    cut_seams : QCheckBox
+        If checked, each overlap keeps the localizations of one tile.
+    initial : QComboBox
+        Where the initial tile positions come from: the stage positions
+        in the metadata or the current positions of the channels.
+    offset_frames : QCheckBox
+        If checked, the frames of consecutive tiles are offset.
+    orientation : QComboBox
+        Orientation of the camera relative to the stage, or automatic.
+    search_radius : QDoubleSpinBox
+        Search radius in micrometers.
+    targets : list of QSpinBoxes
+        Target number of each channel.
+    tiles : list of QSpinBoxes
+        Tile number of each channel.
+    use_z : QCheckBox
+        If checked, the tiles' z offsets are corrected. Only enabled if
+        all channels contain z.
+    """
+
+    DOCS_URL = docs_url("render/menu-postprocess.html#render-stitch-tiles")
+
+    def __init__(self, window: QtWidgets.QMainWindow) -> None:
+        super().__init__(window)
+        self.window = window
+        self.setWindowTitle("Stitch tiles")
+        view = window.view
+        titles = [check.text() for check in window.dataset_dialog.checks]
+        n = len(titles)
+        self.stage = stitch.stage_positions(view.infos)
+        tiles = stitch.group_tiles(self.stage, n)
+        vbox = QtWidgets.QVBoxLayout(self)
+        grid = QtWidgets.QGridLayout()
+        grid.addWidget(lib.HelpButton(self.DOCS_URL), 0, 0)
+
+        table_box = QtWidgets.QGroupBox("Tiles")
+        table_box.setToolTip(
+            "Channels with the same tile number were recorded at the\n"
+            "same stage position (e.g., several targets) and are\n"
+            "aligned together. The tiles of each target are merged\n"
+            "into one channel."
+        )
+        table_layout = QtWidgets.QVBoxLayout(table_box)
+        self.table = QtWidgets.QTableWidget(n, 6)
+        self.table.setHorizontalHeaderLabels(
+            [
+                "Channel",
+                "Stage x (µm)",
+                "Stage y (µm)",
+                "Tile",
+                "Target",
+                "Align",
+            ]
+        )
+        self.table.verticalHeader().setVisible(False)
+        header = self.table.horizontalHeader()
+        header.setSectionResizeMode(
+            0, QtWidgets.QHeaderView.ResizeMode.Stretch
+        )
+        for column in range(1, 6):
+            header.setSectionResizeMode(
+                column, QtWidgets.QHeaderView.ResizeMode.ResizeToContents
+            )
+        headers = {
+            3: "Tile number; channels recorded at the same stage\n"
+            "position share it.",
+            4: "Target number; the tiles of each target are merged into\n"
+            "one channel. Each tile contains a target at most once.",
+            5: "Use the channel to match the overlaps of the tiles.",
+        }
+        for column, tip in headers.items():
+            self.table.horizontalHeaderItem(column).setToolTip(tip)
+        self.tiles = []
+        self.targets = []
+        self.align = []
+        for i, (title, path) in enumerate(zip(titles, view.locs_paths)):
+            item = QtWidgets.QTableWidgetItem(title)
+            item.setToolTip(path)
+            item.setFlags(item.flags() & ~QtCore.Qt.ItemFlag.ItemIsEditable)
+            self.table.setItem(i, 0, item)
+            for column in (1, 2):
+                value = (
+                    "-"
+                    if self.stage is None
+                    else f"{self.stage[i, column - 1]:.1f}"
+                )
+                item = QtWidgets.QTableWidgetItem(value)
+                item.setFlags(
+                    item.flags() & ~QtCore.Qt.ItemFlag.ItemIsEditable
+                )
+                item.setTextAlignment(
+                    QtCore.Qt.AlignmentFlag.AlignRight
+                    | QtCore.Qt.AlignmentFlag.AlignVCenter
+                )
+                self.table.setItem(i, column, item)
+            tile = QtWidgets.QSpinBox()
+            tile.setRange(1, n)
+            tile.setValue(int(tiles[i]) + 1)
+            self.table.setCellWidget(i, 3, tile)
+            self.tiles.append(tile)
+            target = QtWidgets.QSpinBox()
+            target.setRange(1, n)
+            target.setValue(int(np.sum(tiles[:i] == tiles[i])) + 1)
+            self.table.setCellWidget(i, 4, target)
+            self.targets.append(target)
+            align = QtWidgets.QCheckBox()
+            align.setChecked(True)
+            cell = QtWidgets.QWidget()
+            cell_layout = QtWidgets.QHBoxLayout(cell)
+            cell_layout.setContentsMargins(0, 0, 0, 0)
+            cell_layout.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+            cell_layout.addWidget(align)
+            self.table.setCellWidget(i, 5, cell)
+            self.align.append(align)
+        self.table.setMinimumWidth(560)
+        table_layout.addWidget(self.table)
+        grid.addWidget(table_box, 1, 0, 1, 2)
+
+        initial_label = QtWidgets.QLabel("Initial positions:")
+        initial_label.setToolTip(
+            "Stage positions: from the Micro-Manager metadata of the\n"
+            "files (XPositionUm and YPositionUm).\n"
+            "Current positions: where the channels are now, e.g.,\n"
+            "placed roughly with the Move tool."
+        )
+        grid.addWidget(initial_label, 2, 0)
+        self.initial = QtWidgets.QComboBox()
+        self.initial.addItems(["Stage positions", "Current positions"])
+        if self.stage is None:
+            self.initial.model().item(0).setEnabled(False)
+            self.initial.setCurrentIndex(1)
+            self.initial.setToolTip(
+                "The files contain no stage positions (Micro-Manager\n"
+                "metadata)."
+            )
+        grid.addWidget(self.initial, 2, 1)
+        orientation_label = QtWidgets.QLabel("Stage orientation:")
+        orientation_label.setToolTip(
+            "Image x and y axes in terms of the stage X and Y axes,\n"
+            "e.g., '-x, -y' if moving the stage along +X and +Y moves\n"
+            "the sample along -x and -y in the image. Automatic tries\n"
+            "all and takes the one whose overlaps match best."
+        )
+        grid.addWidget(orientation_label, 3, 0)
+        self.orientation = QtWidgets.QComboBox()
+        self.orientation.addItems(["Automatic", *stitch.ORIENTATIONS])
+        grid.addWidget(self.orientation, 3, 1)
+        search_label = QtWidgets.QLabel("Search radius (µm):")
+        search_label.setToolTip(
+            "How far the true offset of two tiles may be from the one\n"
+            "given by the initial positions."
+        )
+        grid.addWidget(search_label, 4, 0)
+        self.search_radius = QtWidgets.QDoubleSpinBox()
+        self.search_radius.setRange(0.1, 10_000)
+        self.search_radius.setDecimals(1)
+        self.search_radius.setValue(10.0)
+        self.search_radius.setSingleStep(1.0)
+        grid.addWidget(self.search_radius, 4, 1)
+        self.use_z = QtWidgets.QCheckBox("Correct z offsets")
+        self.use_z.setToolTip(
+            "Shift each tile in z to match its neighbors in the\n"
+            "overlaps. Requires z in all channels used for the\n"
+            "alignment."
+        )
+        has_z = all("z" in locs_.columns for locs_ in view.locs)
+        self.use_z.setChecked(has_z)
+        self.use_z.setEnabled(has_z)
+        grid.addWidget(self.use_z, 5, 0, 1, 2)
+        self.cut_seams = QtWidgets.QCheckBox("Cut overlaps at the seams")
+        self.cut_seams.setToolTip(
+            "Keep the localizations of only one tile in each overlap\n"
+            "(the tile whose center is closest), so that no molecule\n"
+            "is counted twice. Otherwise, overlaps contain the\n"
+            "localizations of all tiles."
+        )
+        self.cut_seams.setChecked(True)
+        grid.addWidget(self.cut_seams, 6, 0, 1, 2)
+        self.offset_frames = QtWidgets.QCheckBox("Offset frames per tile")
+        self.offset_frames.setToolTip(
+            "Offset the frames of each tile by the frames of the tiles\n"
+            "acquired before it, so that frames stay unique."
+        )
+        self.offset_frames.setChecked(True)
+        grid.addWidget(self.offset_frames, 7, 0, 1, 2)
+        vbox.addLayout(grid)
+
+        self.initial.currentIndexChanged.connect(self.update_widgets)
+        self.buttons = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.StandardButton.Ok
+            | QtWidgets.QDialogButtonBox.StandardButton.Cancel,
+            QtCore.Qt.Orientation.Horizontal,
+            self,
+        )
+        vbox.addWidget(self.buttons)
+        self.buttons.accepted.connect(self.accept)
+        self.buttons.rejected.connect(self.reject)
+        self.update_widgets()
+
+    def update_widgets(self) -> None:
+        """Enable the stage orientation only for stage positions."""
+        self.orientation.setEnabled(self.initial.currentIndex() == 0)
+
+    def tile_indices(self) -> np.ndarray:
+        """Tile of each channel, renumbered 0, 1, ... in the order of
+        the tile numbers."""
+        numbers = [tile.value() for tile in self.tiles]
+        unique = sorted(set(numbers))
+        return np.array([unique.index(number) for number in numbers])
+
+    def accept(self) -> None:
+        tiles = self.tile_indices()
+        if tiles.max() < 1:
+            QtWidgets.QMessageBox.information(
+                self, "Stitch tiles", "Please assign at least two tiles."
+            )
+            return
+        targets = [target.value() for target in self.targets]
+        for t in range(tiles.max() + 1):
+            labels = [targets[i] for i in np.flatnonzero(tiles == t)]
+            if len(set(labels)) < len(labels):
+                QtWidgets.QMessageBox.information(
+                    self,
+                    "Stitch tiles",
+                    "Each tile may contain each target only once; tile "
+                    f"{sorted(set(tile.value() for tile in self.tiles))[t]}"
+                    " contains a target twice.",
+                )
+                return
+        super().accept()
+
+    @staticmethod
+    def getParams(
+        parent: QtWidgets.QMainWindow,
+    ) -> tuple[dict, bool]:
+        """Create the dialog and return the requested stitching
+        parameters."""
+        dialog = StitchDialog(parent)
+        result = dialog.exec()
+        orientation = dialog.orientation.currentText()
+        params = {
+            "tiles": dialog.tile_indices(),
+            "tile_numbers": sorted({tile.value() for tile in dialog.tiles}),
+            "targets": [target.value() for target in dialog.targets],
+            "use_for_alignment": [align.isChecked() for align in dialog.align],
+            "stage": dialog.initial.currentIndex() == 0,
+            "orientation": (
+                "auto" if orientation == "Automatic" else orientation
+            ),
+            "search_radius_um": dialog.search_radius.value(),
+            "align_z": dialog.use_z.isEnabled() and dialog.use_z.isChecked(),
+            "cut_seams": dialog.cut_seams.isChecked(),
+            "offset_frames": dialog.offset_frames.isChecked(),
+        }
+        return params, result == QtWidgets.QDialog.DialogCode.Accepted
+
+
 class RESIDialog(lib.Dialog):
     """Choose RESI parameters.
 
@@ -14605,6 +14877,156 @@ class View(QtWidgets.QLabel):
             title="CBC",
         )
 
+    def _camera_origin(self, channel: int) -> tuple[float, float]:
+        """Where the camera frame of ``channel`` starts in the displayed
+        coordinates (camera pixels): the canvas offset (see
+        ``lib.fit_canvas``) plus the shifts done with the Move tool."""
+        info = self.infos[channel]
+        return tuple(
+            float(lib.get_from_metadata(info, offset_key, 0))
+            + float(lib.get_from_metadata(info, shift_key, 0.0))
+            for offset_key, shift_key in zip(
+                lib.CANVAS_OFFSET_KEYS, MANUAL_SHIFT_KEYS
+            )
+        )
+
+    def stitch(self) -> None:
+        """Ask for the tiles and parameters, stitch the channels on a
+        worker thread and replace them with one stitched channel per
+        target, see ``picasso.stitch``."""
+        if len(self.locs_paths) < 2:
+            QtWidgets.QMessageBox.information(
+                self,
+                "Stitch tiles",
+                "Stitching requires at least two channels (tiles).",
+            )
+            return
+        params, ok = StitchDialog.getParams(self.window)
+        if not ok:
+            return
+        tiles = params["tiles"]
+        tile_numbers = params["tile_numbers"]
+
+        # snapshot the inputs for the worker thread: the localizations
+        # in their camera frame, i.e., without the canvas offset and the
+        # shifts of the Move tool
+        origins = [self._camera_origin(i) for i in range(len(self.locs))]
+        locs = []
+        for locs_, (x0, y0) in zip(self.locs, origins):
+            camera = locs_.copy()
+            camera["x"] = camera["x"] - np.float32(x0)
+            camera["y"] = camera["y"] - np.float32(y0)
+            locs.append(camera)
+        infos = list(self.infos)
+        paths = list(self.locs_paths)
+        positions = None
+        if not params["stage"]:
+            positions = np.array(
+                [
+                    origins[np.flatnonzero(tiles == t)[0]]
+                    for t in range(tiles.max() + 1)
+                ]
+            )
+        kwargs = {
+            key: params[key]
+            for key in (
+                "targets",
+                "use_for_alignment",
+                "orientation",
+                "search_radius_um",
+                "align_z",
+                "cut_seams",
+                "offset_frames",
+            )
+        }
+
+        def compute(progress: lib.TaskProgress) -> tuple:
+            with warnings.catch_warnings(record=True) as caught:
+                warnings.simplefilter("always")
+                result = stitch.stitch(
+                    locs,
+                    infos,
+                    tiles=tiles,
+                    positions=positions,
+                    paths=paths,
+                    progress=progress,
+                    **kwargs,
+                )
+            return result, [str(warning.message) for warning in caught]
+
+        def apply(output: tuple) -> None:
+            (new_locs, new_infos, report), messages = output
+            n_old = len(self.locs)
+            for label, locs_, info in zip(
+                report["targets"], new_locs, new_infos
+            ):
+                first = next(
+                    i
+                    for i, target in enumerate(params["targets"])
+                    if target == label
+                )
+                path = os.path.splitext(paths[first])[0] + "_stitched.hdf5"
+                self.add(path, locs_, info, render_=False)
+            # the tiles go once the stitched channels are in, so the
+            # window is never empty
+            for i in reversed(range(n_old)):
+                self.window.dataset_dialog._close_one_channel(i, False)
+            self._reconcile_pixelsizes()
+            self.fit_in_view(autoscale=True)
+            self._show_stitch_report(report, tile_numbers, messages)
+
+        lib.run_task(
+            compute,
+            "Stitching tiles...",
+            self.window,
+            apply,
+            title="Stitch tiles",
+        )
+
+    def _show_stitch_report(
+        self, report: dict, tile_numbers: list[int], messages: list[str]
+    ) -> None:
+        """Summarize the result of ``stitch`` in a message box.
+
+        Parameters
+        ----------
+        report : dict
+            Report returned by ``stitch.stitch``.
+        tile_numbers : list of ints
+            Tile number shown in the dialog for each tile index.
+        messages : list of str
+            Warnings raised while stitching.
+        """
+        status = {
+            "empty": "no localizations in the overlap",
+            "weak": "overlaps did not match",
+            "inconsistent": "dropped, disagrees with the other overlaps",
+        }
+        lines = [
+            f"Stitched {len(tile_numbers)} tiles into "
+            f"{len(report['targets'])} channel(s)."
+        ]
+        if report["orientation"] is not None:
+            lines.append(f"Stage orientation: {report['orientation']}")
+        lines += ["", "Overlaps:"]
+        for pair in report["pairs"]:
+            a, b = (tile_numbers[t] for t in pair["tiles"])
+            if pair["used"]:
+                text = (
+                    f"{100 * pair['fraction']:.0f}% matched, residual "
+                    f"{pair['residual']:.2f} px"
+                )
+            else:
+                text = status[pair["status"]]
+            lines.append(f"  Tiles {a} and {b}: {text}")
+        lines += [""] + messages
+        lines.append(
+            "Save the stitched channels with File > Save localizations."
+        )
+        QtWidgets.QMessageBox.information(
+            self, "Stitch tiles", "\n".join(lines)
+        )
+
     def display_pixels_per_viewport_pixels(self) -> float:
         """Return optimal oversampling given viewport size."""
         v_height, v_width = render.viewport_size(self.viewport)
@@ -18247,6 +18669,9 @@ class Window(QtWidgets.QMainWindow):
         )
         align_action.setIcon(theme.icon("align"))
         align_action.triggered.connect(self.view.align)
+        stitch_action = postprocess_menu.addAction("Stitch tiles...")
+        stitch_action.setIcon(theme.icon("stitch"))
+        stitch_action.triggered.connect(self.view.stitch)
         combine_action = postprocess_menu.addAction(
             "Combine localizations in picks"
         )

@@ -40,6 +40,7 @@ Last change: 12-OCT-2026 CEST
 - Long operations run in the background and can be canceled: undrifting (AIM, RCC, from picked), DBSCAN, HDBSCAN, SMLM clusterer, G5M, RESI, NeNA, FRC in ROIs, pick statistics and saving pick properties. The windows keep repainting while they run.
 - Link localizations can be run on all channels sequentially.
 - Coordinate-based colocalization (CBC, Malkusch, et al., *Histochem Cell Biol* 2012). See the [documentation](https://picassosr.readthedocs.io/en/latest/render/analysis.html#render-cbc).
+- Stitching of tiles recorded at different stage positions into one dataset. See the [documentation](https://picassosr.readthedocs.io/en/latest/render/menu-postprocess.html#render-stitch-tiles).
 - Clear measurements added (similar to Clear picks)
 - Files dialogs widgets are grayed out if they do not apply at the given moment.
 - Faster G5M.
@@ -51,6 +52,7 @@ Last change: 12-OCT-2026 CEST
 - Fixed: *Export FOV as .ims* ignored the image extents of the loaded metadata and used only the last channel's metadata.
 - Fixed: the `locs` column of saved pick properties held the number of binding events (the same as `n_events`) instead of the number of localizations in the pick (`picasso.postprocess.pick_kinetics`, `pick_properties`).
 - Fixed: scale bar in 3D animations.
+- Fixed: *Align channels* (RCC) failed for channels with different image sizes.
 
 ### Localize
 - New spot identification method: B-spline wavelet segmentation (Izeddin et al., *Opt. Express* 2012), see the [documentation](https://picassosr.readthedocs.io/en/latest/localize/identification.html#localize-wavelet).
