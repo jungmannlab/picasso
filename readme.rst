@@ -93,58 +93,83 @@ If you use Picasso in your research, please cite our Nature Protocols publicatio
 Many of the functionalities provided by Picasso were published independently, please also cite the respective publications:
 
 .. list-table::
-   :widths: 35 65
+   :widths: 40 30 30
    :header-rows: 1
 
    * - Feature
-     - Reference
-   * - Fitting (all methods are ports of Gpufit)
-     - `10.1038/s41598-017-15313-9 <https://doi.org/10.1038/s41598-017-15313-9>`__; `license <https://github.com/jungmannlab/picasso/blob/master/LICENSES/Gpufit-LICENSE.txt>`__
-   * - Experimental PSF (cubic-spline) fitting
-     - `10.1038/nmeth.4661 <https://doi.org/10.1038/nmeth.4661>`__ (Li et al., experimental-PSF localization and bead alignment) and `10.1038/s41598-017-00622-w <https://doi.org/10.1038/s41598-017-00622-w>`__ (Babcock & Zhuang, cubic-spline PSF model). The spline calibration follows the coefficient scheme of Gpuspline; `license <https://github.com/jungmannlab/picasso/blob/master/LICENSES/Gpuspline-LICENSE.txt>`__
-   * - Multichannel (global) experimental-PSF fitting
-     - `10.1038/s41467-022-30719-4 <https://doi.org/10.1038/s41467-022-30719-4>`__ (Li et al., globLoc)
+     - Citation
+     - DOI
+   * - Fitting. All methods are ports of Gpufit, see the `Gpufit license <https://github.com/jungmannlab/picasso/blob/master/LICENSES/Gpufit-LICENSE.txt>`__
+     - Przybylski et al., Sci. Rep., 2017
+     - `10.1038/s41598-017-15313-9 <https://doi.org/10.1038/s41598-017-15313-9>`__
+   * - Experimental PSF (cubic-spline) fitting. The calibration follows the coefficient scheme of Gpuspline, see the `Gpuspline license <https://github.com/jungmannlab/picasso/blob/master/LICENSES/Gpuspline-LICENSE.txt>`__
+     - Li et al., Nat. Methods, 2018; Babcock & Zhuang, Sci. Rep., 2017
+     - `10.1038/nmeth.4661 <https://doi.org/10.1038/nmeth.4661>`__, `10.1038/s41598-017-00622-w <https://doi.org/10.1038/s41598-017-00622-w>`__
+   * - Multichannel (global) experimental-PSF fitting (globLoc)
+     - Li et al., Nat. Commun., 2022
+     - `10.1038/s41467-022-30719-4 <https://doi.org/10.1038/s41467-022-30719-4>`__
    * - 3D fitting via astigmatism
+     - Huang et al., Science, 2008
      - `10.1126/science.1153529 <https://www.science.org/doi/10.1126/science.1153529>`__
    * - B-spline wavelet spot identification
-     - `10.1364/OE.20.002081 <https://doi.org/10.1364/OE.20.002081>`__ (Izeddin et al., Opt. Express 2012)
+     - Izeddin et al., Opt. Express, 2012
+     - `10.1364/OE.20.002081 <https://doi.org/10.1364/OE.20.002081>`__
    * - sCMOS pixel-dependent noise modeling
+     - Huang et al., Nat. Methods, 2013
      - `10.1038/nmeth.2488 <https://doi.org/10.1038/nmeth.2488>`__
    * - NeNA
+     - Endesfelder et al., Histochem. Cell Biol., 2014
      - `10.1007/s00418-014-1192-3 <https://doi.org/10.1007/s00418-014-1192-3>`__
    * - FRC
+     - Nieuwenhuizen et al., Nat. Methods, 2013
      - `10.1038/nmeth.2448 <https://doi.org/10.1038/nmeth.2448>`__
    * - Theoretical lateral localization precision (``lpx`` / ``lpy``, Gaussian least-squares)
+     - Mortensen et al., Nat. Methods, 2010
      - `10.1038/nmeth.1447 <https://doi.org/10.1038/nmeth.1447>`__
    * - Theoretical axial localization precision (``lpz``, Gaussian)
+     - Kowalewski et al., Nat. Commun., 2026
      - `10.1038/s41467-026-70198-5 <https://doi.org/10.1038/s41467-026-70198-5>`__
    * - Quad-tree adaptive histogram rendering
-     - `10.1017/S143192760999122X <https://doi.org/10.1017/S143192760999122X>`__ (Baddeley, Cannell & Soeller, Microsc. Microanal. 2010)
+     - Baddeley et al., Microsc. Microanal., 2010
+     - `10.1017/S143192760999122X <https://doi.org/10.1017/S143192760999122X>`__
    * - RCC undrifting
+     - Wang et al., Opt. Express, 2014
      - `10.1364/OE.22.015982 <https://doi.org/10.1364/OE.22.015982>`__
    * - AIM undrifting
+     - Ma et al., Sci. Adv., 2024
      - `10.1126/sciadv.adm7765 <https://www.science.org/doi/10.1126/sciadv.adm7765>`__
    * - SMLM clusterer
-     - `10.1038/s41467-021-22606-1 <https://doi.org/10.1038/s41467-021-22606-1>`__ and `10.1038/s41586-023-05925-9 <https://doi.org/10.1038/s41586-023-05925-9>`__
+     - Schlichthaerle et al., Nat. Commun., 2021; Reinhardt et al., Nature, 2023
+     - `10.1038/s41467-021-22606-1 <https://doi.org/10.1038/s41467-021-22606-1>`__, `10.1038/s41586-023-05925-9 <https://doi.org/10.1038/s41586-023-05925-9>`__
    * - DBSCAN
-     - Ester et al., Proc. KDD 1996, Vol. 96, No. 34, pp. 226-231
-   * - Anisotropic DBSCAN
-     - Inspired by `10.1021/acs.jpcb.4c02030 <https://doi.org/10.1021/acs.jpcb.4c02030>`__
+     - Ester et al., KDD, 1996 (Vol. 96, No. 34, pp. 226-231)
+     - -
+   * - Anisotropic DBSCAN (inspired by)
+     - Lörzing et al., J. Phys. Chem. B, 2024
+     - `10.1021/acs.jpcb.4c02030 <https://doi.org/10.1021/acs.jpcb.4c02030>`__
    * - HDBSCAN
+     - Campello et al., PAKDD, 2013
      - `10.1007/978-3-642-37456-2_14 <https://doi.org/10.1007/978-3-642-37456-2_14>`__
    * - RESI
+     - Reinhardt et al., Nature, 2023
      - `10.1038/s41586-023-05925-9 <https://doi.org/10.1038/s41586-023-05925-9>`__
    * - Nanotron
+     - Auer et al., Bioinformatics, 2020
      - `10.1093/bioinformatics/btaa154 <https://doi.org/10.1093/bioinformatics/btaa154>`__
-   * - Picasso: Server
+   * - Picasso Server
+     - Strauss, Commun. Biol., 2022
      - `10.1038/s42003-022-03909-5 <https://doi.org/10.1038/s42003-022-03909-5>`__
    * - SPINNA
+     - Masullo et al., Nat. Commun., 2025
      - `10.1038/s41467-025-59500-z <https://doi.org/10.1038/s41467-025-59500-z>`__
-   * - SPINNA for LE fitting
+   * - SPINNA for labeling efficiency (LE) fitting
+     - Hellmeier et al., Nat. Methods, 2024
      - `10.1038/s41592-024-02242-5 <https://doi.org/10.1038/s41592-024-02242-5>`__
    * - G5M
+     - Kowalewski et al., Nat. Commun., 2026
      - `10.1038/s41467-026-70198-5 <https://doi.org/10.1038/s41467-026-70198-5>`__
    * - Coordinate-based colocalization (CBC)
+     - Malkusch et al., Histochem. Cell Biol., 2012
      - `10.1007/s00418-011-0880-5 <https://doi.org/10.1007/s00418-011-0880-5>`__
 
 .. SYNC-END: citing

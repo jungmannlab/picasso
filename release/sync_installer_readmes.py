@@ -55,7 +55,8 @@ def list_table_to_text(match: re.Match) -> str:
     """Flatten a list-table into "- first: rest" bullets.
 
     The header row (``:header-rows: 1``) is dropped; the remaining cells
-    of each row are joined with "; ".
+    of each row are joined with "; ", skipping cells that are empty or
+    only "-" (placeholder for a missing value).
     """
     content = match.group("content")
     header_rows = re.search(r":header-rows:\s*(\d+)", content)
@@ -70,10 +71,12 @@ def list_table_to_text(match: re.Match) -> str:
         elif stripped and rows and not stripped.startswith(":"):
             # continuation line of the last cell
             rows[-1][-1] += " " + stripped
-    bullets = [
-        f"- {row[0]}: {'; '.join(row[1:])}" if len(row) > 1 else f"- {row[0]}"
-        for row in rows[n_header:]
-    ]
+    bullets = []
+    for row in rows[n_header:]:
+        rest = [cell for cell in row[1:] if cell.strip() not in ("", "-")]
+        bullets.append(
+            f"- {row[0]}: {'; '.join(rest)}" if rest else f"- {row[0]}"
+        )
     return "\n".join(bullets) + "\n"
 
 
