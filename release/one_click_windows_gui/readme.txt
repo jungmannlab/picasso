@@ -29,7 +29,7 @@ There are two editions of the installer:
 Adding camera configuration and plugins
 ---------------------------------------
 
-Since version 0.11, both the camera configuration and plugins live in your Picasso user folder, C:\Users\<your user name>\.picasso. This is the same folder that already holds settings.yaml and the log file, and it is the same for every installation type (one-click installer, PyPI, conda, source). Because it sits outside the installation folder, it survives updating or uninstalling Picasso, it is writable without administrator rights, and it is shared by the standard and GPU editions.
+Since version 0.11, both the camera configuration and plugins live in your Picasso user folder, C:\Users\<your user name>\.picasso. This is the same folder that already holds settings.yaml and the log file, and it is the same for every installation type (one-click installer, PyPI, conda, source). Because it sits outside the installation folder, it survives updating or uninstalling Picasso, it is writable without administrator rights, and it is shared by the standard and CUDA editions.
 
 Camera configuration is essential for correct photon conversion and thus correct localization precision calculation. Put your config file at C:\Users\<your user name>\.picasso\config.yaml. The file is never created for you - you have to create it yourself. The quickest way to get there is to open Picasso: Localize and select File > "Open camera config file location", which opens the folder in Explorer (creating it if needed) or reveals wherever a config already in use actually lives. To start from a template, copy config_template.yaml (bundled inside the picasso package, next to __init__.py) into that folder and rename it to config.yaml. For more details, see documentation: https://picassosr.readthedocs.io/en/latest/localize.html#camera-config
 
@@ -109,11 +109,7 @@ Credits
 
 .. SYNC-END: credits
 
-Creating your own installer
----------------------------
+Third-party licenses
+--------------------
 
-You can create the exe file yourself by cloning our GitHub repo and running the script picasso/release/one_click_windows_gui/create_installer_windows.bat from the Command Prompt. Note that you must have conda installed on your computer.
-
-There are two editions of the installer:
-- create_installer_windows.bat builds the standard (CPU) installer (Picasso-Windows-64bit-<version>.exe, installs to C:\Picasso).
-- create_installer_windows_gpu.bat builds the GPU edition (Picasso-Windows-64bit-GPU-<version>.exe, installs to C:\Picasso-GPU). It additionally bundles the CUDA runtime (numba-cuda[cu12]) so GPU-accelerated (numba.cuda) code can run. It requires an NVIDIA (CUDA-capable) GPU and produces a noticeably larger installer. The two editions install to separate folders and can coexist.
+The installer bundles Python, Qt (PyQt6) and many other open-source libraries. Their licenses and copyright notices are collected in THIRD-PARTY-LICENSES.txt, in the installation folder (C:\Picasso, or C:\Picasso-CUDA for the CUDA edition).

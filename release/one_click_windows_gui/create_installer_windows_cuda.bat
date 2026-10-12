@@ -101,6 +101,13 @@ call pyinstaller "../pyinstaller/picasso_pyinstaller.py" ^
     --icon "../../logos/picasso.ico" ^
     --noconfirm
 
+REM The installer redistributes Python, PyQt6/Qt, the CUDA runtime and every
+REM other bundled library, whose licenses require shipping their notices with
+REM it. Collect them while the build environment is still active so the list
+REM matches the frozen packages; the file lands in the installation folder.
+call python ..\collect_third_party_licenses.py dist_cuda\picasso\THIRD-PARTY-LICENSES.txt
+if errorlevel 1 exit /b 1
+
 REM Spec files were written to build_cuda (via --specpath); they are removed with
 REM the build_cuda tree below, so no separate *.spec deletion is needed here.
 

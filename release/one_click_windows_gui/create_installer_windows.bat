@@ -49,6 +49,13 @@ call pyinstaller "../pyinstaller/picasso_pyinstaller.py" ^
     --icon "../logos/picasso.ico" ^
     --noconfirm
 
+REM The installer redistributes Python, PyQt6/Qt and every other bundled
+REM library, whose licenses require shipping their notices with it. Collect
+REM them while the build environment is still active so the list matches the
+REM frozen packages; the file lands in the installation folder (C:\Picasso).
+call python ..\collect_third_party_licenses.py dist\picasso\THIRD-PARTY-LICENSES.txt
+if errorlevel 1 exit /b 1
+
 call DEL /F/Q picasso.spec
 call DEL /F/Q picassow.spec
 

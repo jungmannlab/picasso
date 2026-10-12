@@ -141,7 +141,19 @@ if [ -d "$H5PY_DYLIBS" ]; then
 fi
 
 # ---------------------------------------------------------------------------
-# Step 1c: Re-sign the main bundle (ad-hoc). PyInstaller signs the bundle
+# Step 1c: Third-party license notices. The app redistributes Python,
+# PyQt6/Qt and every other bundled library, whose licenses require shipping
+# their notices with it. Collected while the build environment is still
+# active so the list matches the frozen packages, and written before the
+# re-signing below, which seals the bundle's resources. A copy also goes
+# next to the apps in the DMG (Step 3).
+# ---------------------------------------------------------------------------
+LICENSES_FILE="$MAIN_RESOURCES/THIRD-PARTY-LICENSES.txt"
+echo ">>> Collecting third-party licenses..."
+python ../collect_third_party_licenses.py "$LICENSES_FILE"
+
+# ---------------------------------------------------------------------------
+# Step 1d: Re-sign the main bundle (ad-hoc). PyInstaller signs the bundle
 # when it builds, but the HDF5 dylib swap above invalidates that signature.
 # An invalid signature on Apple Silicon triggers PAC/codesigning faults at
 # load time, including crashes inside CoreFoundation. --deep --force resigns
@@ -269,6 +281,9 @@ for tool_def in "${TOOLS[@]}"; do
     app_name="Picasso ${display_name}.app"
     cp -r "$DIST_DIR/$app_name" "$STAGING_DIR/$app_name"
 done
+
+# Third-party licenses, visible without opening the bundle
+cp "$LICENSES_FILE" "$STAGING_DIR/THIRD-PARTY-LICENSES.txt"
 
 # Note: Applications symlink is created automatically by create-dmg via --app-drop-link
 

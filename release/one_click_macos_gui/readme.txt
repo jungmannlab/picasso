@@ -101,3 +101,8 @@ Credits
 -  Toolbar and menu icons from Lucide (https://lucide.dev) (ISC license). License can be found here (https://github.com/jungmannlab/picasso/blob/master/LICENSES/Lucide-LICENSE.txt).
 
 .. SYNC-END: credits
+
+Third-party licenses
+--------------------
+
+The installer bundles Python, Qt (PyQt6) and many other open-source libraries. Their licenses and copyright notices are collected in THIRD-PARTY-LICENSES.txt, on the disk image and inside Picasso.app (Contents/Resources/THIRD-PARTY-LICENSES.txt).
