@@ -240,8 +240,10 @@ the tiles.
 
 #. Load the tiles (one file per tile and target) and run ``Postprocess`` >
    ``Stitch tiles...``.
-#. The table lists the loaded channels with their stage positions, read from
-   the Micro-Manager metadata (``XPositionUm`` and ``YPositionUm``). Channels
+#. The table lists the loaded channels with their stage positions (µm), read
+   from the Micro-Manager metadata (``XPositionUm`` and ``YPositionUm``) by
+   default. If you know the positions, e.g., for data acquired with other
+   software, you can enter or correct them in the table. Channels
    recorded at the same stage position, e.g., the targets of an
    Exchange-PAINT experiment, get the same **Tile** number and are aligned
    together. The **Target** number says which channels of different tiles
@@ -250,13 +252,16 @@ the tiles.
    target.
 #. Choose the **Initial positions**:
 
-   - *Stage positions*: from the metadata. The stage axes may be flipped or
-     swapped relative to the camera axes; *Automatic* **Stage orientation**
-     tries all eight possibilities and takes the one whose overlaps match
-     best.
+   - *Stage positions*: from the metadata. The **Stage orientation** says
+     how the stage axes run in the image, see
+     :ref:`render-stitch-stage-orientation`; *Automatic* tries all eight
+     possibilities and takes the one whose overlaps match best. Moves made
+     with the Move tool are undone, i.e., the stage positions alone place
+     the tiles.
    - *Current positions*: where the channels are now, e.g., after placing
      them roughly with the :ref:`Move tool <render-move>`. **Use this if the
-     files contain no stage positions.**
+     files contain no stage positions from Micro-Manager**, see
+     :ref:`render-stitch-without-stage-positions`.
 
 #. Click ``OK``. Each pair of overlapping tiles is matched by
    cross-correlating the overlap within the **Search radius** (the stage
@@ -269,6 +274,85 @@ The tiles are replaced by one stitched channel per target, named
 localizations``. A summary lists the stage orientation found and, for each
 pair of overlapping tiles, whether it was used and how well it agrees with
 the final positions (residual, camera pixels).
+
+.. _render-stitch-without-stage-positions:
+
+.. rubric:: Without stage positions
+
+If the files contain no stage positions, *Stage positions* cannot be chosen
+in the dialog. This happens when the data were not acquired with
+Micro-Manager, or when the Micro-Manager metadata were not saved with the
+localizations (see the user setting *Save Micro-Manager metadata*).
+
+If you know the stage positions (e.g., from the acquisition software), you
+use them rather than relying on the manual pre-alignment. Enter the stage
+positions in the **Stage x** and **Stage y** columns of the table (µm). Once every
+channel has one, *Stage positions* is chosen and stitching works as with
+Micro-Manager data.
+
+Otherwise, the tiles lie on top of each other. Stitching only searches within
+the **Search radius** around the current positions, so it cannot find the
+tiles' places on its own. Place the tiles by hand first:
+
+#. Select the :ref:`Move tool <render-move>` (:kbd:`Ctrl+G`).
+#. In ``Tools settings`` (:kbd:`Ctrl+T`), select the channels of one tile.
+   With several targets per tile, select all of them so that they move
+   together.
+#. Drag the tile to its approximate place next to its neighbors. An accuracy
+   of a few microns is enough, as long as it is within the search radius.
+   Repeat for every tile except one, which stays where it is.
+#. Run ``Postprocess`` > ``Stitch tiles...`` with *Current positions*. Check
+   the **Tile** numbers in the table: without stage positions, every channel
+   is its own tile, so give the channels of one tile the same number.
+
+.. note::
+
+   Only moves made with the Move tool count as the current positions. Shifts
+   applied otherwise, e.g., by ``Apply expression to localizations`` or
+   ``Align channels``, are not taken into account.
+
+
+.. _render-stitch-stage-orientation:
+
+.. rubric:: Stage orientation
+
+The stage reports its position in its own X and Y axes, while the tiles are
+placed in the image's x and y axes (x to the right, y down). How the two
+relate depends on how the camera is mounted: the image may be mirrored or
+rotated by 90° relative to the stage. The orientation tells in which
+direction of the image a tile lies whose stage X (or Y) position is larger
+than its neighbor's. For example, with *stage X → left, stage Y → up*, of two
+tiles side by side the one at the larger stage X is the left one, and of two
+tiles above each other the one at the larger stage Y is the upper one.
+
+*Automatic* (the default) tries all eight orientations and takes the one
+whose overlaps match best; the summary after stitching shows the one found.
+Choose one only if this fails, e.g., when the tiles overlap little or contain
+few localizations, and keep it for later data from the same microscope.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 40 20
+
+   * - Orientation in Render
+     - ``picasso stitch --orientation``
+   * - stage X → right, stage Y → down
+     - ``"x, y"``
+   * - stage X → left, stage Y → down
+     - ``"-x, y"``
+   * - stage X → right, stage Y → up
+     - ``"x, -y"``
+   * - stage X → left, stage Y → up
+     - ``"-x, -y"``
+   * - stage X → down, stage Y → right
+     - ``"y, x"``
+   * - stage X → down, stage Y → left
+     - ``"-y, x"``
+   * - stage X → up, stage Y → right
+     - ``"y, -x"``
+   * - stage X → up, stage Y → left
+     - ``"-y, -x"``
+
 
 Options:
 

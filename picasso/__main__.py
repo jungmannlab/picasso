@@ -1084,7 +1084,11 @@ def _stitch(
         for i in (i for i, tile in enumerate(tiles) if tile == t):
             print(f"    {paths[i]}")
     if report["orientation"] is not None:
-        print(f"Stage orientation: {report['orientation']}")
+        print(
+            f"Stage orientation: {report['orientation']} ("
+            + stitch.describe_orientation(report["orientation"])
+            + ")"
+        )
     print("Overlaps:")
     for pair in report["pairs"]:
         a, b = (t + 1 for t in pair["tiles"])
@@ -5500,9 +5504,13 @@ def main():  # noqa: C901
         "--orientation",
         default="auto",
         help=(
-            "image x and y axes in terms of the stage X and Y axes, e.g.,"
-            " '-x, -y' or 'y, x', or 'auto' to find the best one"
-            " (default=auto)"
+            "image x and y axes in terms of the stage X and Y axes, i.e.,"
+            " where a tile at a larger stage position lies in the image:"
+            " e.g., '-x, -y' if a larger stage X is to the left and a"
+            " larger stage Y above (the image y axis points down), 'y, x'"
+            " if the stage X axis runs along the image y axis; one of"
+            " 'x, y', '-x, y', 'x, -y', '-x, -y', 'y, x', '-y, x', 'y, -x',"
+            " '-y, -x', or 'auto' to find the best one (default=auto)"
         ),
     )
     stitch_parser.add_argument(

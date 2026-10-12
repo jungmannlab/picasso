@@ -59,11 +59,15 @@ from scipy.spatial import KDTree
 
 from . import lib, __version__
 
-#: Orientations of the camera relative to the stage: the image x and y
-#: axes in terms of the stage X and Y axes. For example, ``"-x, -y"``
-#: means that moving the stage along +X moves a tile along -x in the
-#: image, and ``"y, x"`` that the stage X axis maps onto the image y
-#: axis. Each value is the matrix that maps stage to image coordinates.
+#: Orientations of the camera relative to the stage, which depend on
+#: how the camera is mounted: in which direction of the image a tile
+#: lies whose stage X (or Y) position is larger. The keys give the image
+#: x and y axes in terms of the stage X and Y axes; e.g., ``"-x, -y"``
+#: means that a tile at a larger stage X lies to the left (-x) in the
+#: image and one at a larger stage Y lies above it (-y; the image y
+#: axis points down), and ``"y, x"`` that the stage X axis runs along
+#: the image y axis. :func:`describe_orientation` says it in words. Each
+#: value is the matrix that maps stage to image coordinates.
 ORIENTATIONS = {
     "x, y": ((1, 0), (0, 1)),
     "-x, y": ((-1, 0), (0, 1)),
@@ -74,6 +78,31 @@ ORIENTATIONS = {
     "y, -x": ((0, 1), (-1, 0)),
     "-y, -x": ((0, -1), (-1, 0)),
 }
+
+# image direction of each unit vector (the image y axis points down)
+_DIRECTIONS = {(1, 0): "right", (-1, 0): "left", (0, 1): "down", (0, -1): "up"}
+
+
+def describe_orientation(orientation: str) -> str:
+    """Say in words where tiles at larger stage positions lie in the
+    image.
+
+    Parameters
+    ----------
+    orientation : str
+        Key of :data:`ORIENTATIONS`.
+
+    Returns
+    -------
+    description : str
+        E.g., "stage X → left, stage Y → up" for ``"-x, -y"``: a tile
+        at a larger stage X lies to the left in the image, one at a
+        larger stage Y above.
+    """
+    matrix = np.array(ORIENTATIONS[orientation], dtype=int)
+    x, y = (_DIRECTIONS[tuple(matrix[:, k])] for k in range(2))
+    return f"stage X → {x}, stage Y → {y}"
+
 
 #: Keys of the Micro-Manager stage position (micrometers).
 STAGE_KEYS = ("XPositionUm", "YPositionUm")
@@ -1054,6 +1083,7 @@ def stitch(
     targets: list[Hashable] | None = None,
     use_for_alignment: list[bool] | np.ndarray | None = None,
     positions: np.ndarray | None = None,
+    stage_um: np.ndarray | None = None,
     orientation: str = "auto",
     search_radius_um: float = 10.0,
     min_overlap_um: float = 1.0,
@@ -1091,7 +1121,13 @@ def stitch(
         Position of each tile, i.e., where its camera frame starts in
         the stitched dataset, in camera pixels, shape ``(n_tiles, 2)``.
         It only has to be accurate within ``search_radius_um``. Default
-        None reads the stage positions from the Micro-Manager metadata.
+        None places the tiles by their stage positions.
+    stage_um : np.ndarray, optional
+        Stage position ``(X, Y)`` of each file in micrometers, shape
+        ``(n_files, 2)``, e.g., if the files do not contain them.
+        Default None reads them from the Micro-Manager metadata (see
+        :func:`stage_positions`). Ignored if ``positions`` is given,
+        except for grouping the files into tiles.
     orientation : str, optional
         Orientation of the camera relative to the stage, a key of
         :data:`ORIENTATIONS`, or ``"auto"`` (default) to find the one
@@ -1157,7 +1193,12 @@ def stitch(
     if len(infos) != n_files:
         raise ValueError("locs and infos must have the same length.")
     pixelsize = _pixelsize(infos)
-    stage = stage_positions(infos)
+    if stage_um is None:
+        stage = stage_positions(infos)
+    else:
+        stage = np.asarray(stage_um, dtype=float).reshape(-1, 2)
+        if len(stage) != n_files:
+            raise ValueError("stage_um must give one position per file.")
     if tiles is None:
         tiles = group_tiles(stage, n_files)
     tiles = np.asarray(tiles, dtype=int)
@@ -1213,7 +1254,7 @@ def stitch(
             raise ValueError(
                 "The stage positions are missing from the metadata "
                 "(Micro-Manager XPositionUm and YPositionUm); please give "
-                "the tile positions."
+                "them (stage_um) or the tile positions (positions)."
             )
         tile_stage = np.array(
             [stage[np.flatnonzero(tiles == t)[0]] for t in range(n_tiles)]

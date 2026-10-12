@@ -307,6 +307,22 @@ class TestStitch:
         with pytest.raises(ValueError, match="different pixel sizes"):
             stitch.stitch(locs, infos)
 
+    def test_stage_positions_given(self):
+        """Stage positions given directly instead of the metadata."""
+        rng = np.random.default_rng(10)
+        locs, infos, origins, _ = _grid(rng, n_cols=2, n_rows=2)
+        stage = []
+        for info in infos:
+            mm = info[0].pop("Micro-Manager Metadata")
+            stage.append((mm["XPositionUm"], mm["YPositionUm"]))
+        _, _, report = stitch.stitch(locs, infos, stage_um=stage)
+        assert report["orientation"] == "-x, y"
+        np.testing.assert_allclose(
+            _relative(report["positions"]), _relative(origins), atol=0.05
+        )
+        with pytest.raises(ValueError, match="one position per file"):
+            stitch.stitch(locs, infos, stage_um=stage[:3])
+
     def test_missing_stage_positions_raise(self):
         rng = np.random.default_rng(8)
         locs, infos, _, _ = _grid(rng, n_cols=2, n_rows=1)
@@ -330,6 +346,22 @@ class TestHelpers:
         positions = np.array([[10.0, 20.0], [10.13, 20.0], [10.0, 20.26]])
         camera = stitch.stage_to_camera(positions, 130.0, "-y, x")
         np.testing.assert_allclose(camera, [[0, 0], [0, 1], [-2, 0]])
+
+    def test_describe_orientation(self):
+        # the test data: a larger stage X lies left, a larger Y above
+        assert (
+            stitch.describe_orientation("-x, -y")
+            == "stage X → left, stage Y → up"
+        )
+        # swapped axes: the stage X axis runs along the image y axis
+        assert (
+            stitch.describe_orientation("-y, x")
+            == "stage X → down, stage Y → left"
+        )
+        descriptions = {
+            stitch.describe_orientation(key) for key in stitch.ORIENTATIONS
+        }
+        assert len(descriptions) == 8
 
     def test_solve_positions_drops_inconsistent_pair(self):
         truth = np.array([[0.0, 0.0], [100.0, 0.0], [0.0, 100.0]])

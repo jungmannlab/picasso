@@ -8185,7 +8185,19 @@ class StitchDialog(lib.Dialog):
             header.setSectionResizeMode(
                 column, QtWidgets.QHeaderView.ResizeMode.ResizeToContents
             )
+        stage_tip = (
+            "Stage position in µm, by default from the Micro-Manager\n"
+            "metadata of the file (XPositionUm and YPositionUm). If you\n"
+            "know the positions, e.g., for data acquired with other\n"
+            "software, you can enter or correct them here; all channels\n"
+            "need one to use the stage positions.\n"
+            "Without stage positions, leave these empty and instead\n"
+            "move the tiles roughly to their places with the Move tool,\n"
+            "then stitch from the current positions."
+        )
         headers = {
+            1: stage_tip,
+            2: stage_tip,
             3: "Tile number; channels recorded at the same stage\n"
             "position share it.",
             4: "Target number; the tiles of each target are merged into\n"
@@ -8204,14 +8216,12 @@ class StitchDialog(lib.Dialog):
             self.table.setItem(i, 0, item)
             for column in (1, 2):
                 value = (
-                    "-"
+                    ""
                     if self.stage is None
-                    else f"{self.stage[i, column - 1]:.1f}"
+                    else f"{self.stage[i, column - 1]:.10g}"
                 )
                 item = QtWidgets.QTableWidgetItem(value)
-                item.setFlags(
-                    item.flags() & ~QtCore.Qt.ItemFlag.ItemIsEditable
-                )
+                item.setToolTip(stage_tip)
                 item.setTextAlignment(
                     QtCore.Qt.AlignmentFlag.AlignRight
                     | QtCore.Qt.AlignmentFlag.AlignVCenter
@@ -8238,36 +8248,39 @@ class StitchDialog(lib.Dialog):
             self.align.append(align)
         self.table.setMinimumWidth(560)
         table_layout.addWidget(self.table)
-        grid.addWidget(table_box, 1, 0, 1, 2)
+        grid.addWidget(table_box, 1, 0, 1, 3)
 
         initial_label = QtWidgets.QLabel("Initial positions:")
         initial_label.setToolTip(
-            "Stage positions: from the Micro-Manager metadata of the\n"
-            "files (XPositionUm and YPositionUm).\n"
+            "Stage positions: as in the table, by default from the\n"
+            "Micro-Manager metadata of the files (XPositionUm and\n"
+            "YPositionUm). Moves made with the Move tool are undone.\n"
             "Current positions: where the channels are now, e.g.,\n"
             "placed roughly with the Move tool."
         )
         grid.addWidget(initial_label, 2, 0)
         self.initial = QtWidgets.QComboBox()
         self.initial.addItems(["Stage positions", "Current positions"])
-        if self.stage is None:
-            self.initial.model().item(0).setEnabled(False)
-            self.initial.setCurrentIndex(1)
-            self.initial.setToolTip(
-                "The files contain no stage positions (Micro-Manager\n"
-                "metadata)."
-            )
         grid.addWidget(self.initial, 2, 1)
         orientation_label = QtWidgets.QLabel("Stage orientation:")
-        orientation_label.setToolTip(
-            "Image x and y axes in terms of the stage X and Y axes,\n"
-            "e.g., '-x, -y' if moving the stage along +X and +Y moves\n"
-            "the sample along -x and -y in the image. Automatic tries\n"
-            "all and takes the one whose overlaps match best."
+        orientation_tip = (
+            "How the stage axes run in the image, which depends on how\n"
+            "the camera is mounted: in which direction of the image a\n"
+            "tile lies whose stage X (or Y) position is larger. E.g.,\n"
+            "'stage X → left, stage Y → up': a tile at a larger stage X\n"
+            "lies to the left of its neighbor, one at a larger stage Y\n"
+            "above it.\n"
+            "Automatic tries all eight and takes the one whose overlaps\n"
+            "match best; choose one only if it fails, e.g., when tiles\n"
+            "overlap too little or contain too few localizations."
         )
+        orientation_label.setToolTip(orientation_tip)
         grid.addWidget(orientation_label, 3, 0)
         self.orientation = QtWidgets.QComboBox()
-        self.orientation.addItems(["Automatic", *stitch.ORIENTATIONS])
+        self.orientation.addItem("Automatic", "auto")
+        for key in stitch.ORIENTATIONS:
+            self.orientation.addItem(stitch.describe_orientation(key), key)
+        self.orientation.setToolTip(orientation_tip)
         grid.addWidget(self.orientation, 3, 1)
         search_label = QtWidgets.QLabel("Search radius (µm):")
         search_label.setToolTip(
@@ -8290,7 +8303,7 @@ class StitchDialog(lib.Dialog):
         has_z = all("z" in locs_.columns for locs_ in view.locs)
         self.use_z.setChecked(has_z)
         self.use_z.setEnabled(has_z)
-        grid.addWidget(self.use_z, 5, 0, 1, 2)
+        grid.addWidget(self.use_z, 2, 2)
         self.cut_seams = QtWidgets.QCheckBox("Cut overlaps at the seams")
         self.cut_seams.setToolTip(
             "Keep the localizations of only one tile in each overlap\n"
@@ -8299,17 +8312,45 @@ class StitchDialog(lib.Dialog):
             "localizations of all tiles."
         )
         self.cut_seams.setChecked(True)
-        grid.addWidget(self.cut_seams, 6, 0, 1, 2)
+        grid.addWidget(self.cut_seams, 3, 2)
         self.offset_frames = QtWidgets.QCheckBox("Offset frames per tile")
         self.offset_frames.setToolTip(
             "Offset the frames of each tile by the frames of the tiles\n"
             "acquired before it, so that frames stay unique."
         )
         self.offset_frames.setChecked(True)
-        grid.addWidget(self.offset_frames, 7, 0, 1, 2)
+        grid.addWidget(self.offset_frames, 4, 2)
         vbox.addLayout(grid)
+        # without stage positions, they must be entered or the tiles
+        # placed by hand before stitching, which the user must not miss
+        self.no_stage_note = QtWidgets.QLabel(
+            "<b>No stage positions found</b> (Micro-Manager metadata)."
+            " Enter them in the table or first place the tiles roughly"
+            " with the Move tool; see the help button for instructions."
+        )
+        self.no_stage_note.setWordWrap(True)
+        vbox.addWidget(self.no_stage_note)
+        # tiles moved by hand lose their moves with the stage positions,
+        # which must not come as a surprise
+        moved = any(
+            lib.get_from_metadata(info, key, 0)
+            for info in view.infos
+            for key in MANUAL_SHIFT_KEYS
+        )
+        self.moves_note = QtWidgets.QLabel(
+            "Moves made with the Move tool are undone: the stage positions"
+            " place the tiles. Choose <i>Current positions</i> to start"
+            " from the moved tiles."
+        )
+        self.moves_note.setWordWrap(True)
+        self.moves_note.setVisible(False)
+        self._moved = moved
+        vbox.addWidget(self.moves_note)
 
         self.initial.currentIndexChanged.connect(self.update_widgets)
+        self._has_stage = None
+        self.update_stage()
+        self.table.itemChanged.connect(self.update_stage)
         self.buttons = QtWidgets.QDialogButtonBox(
             QtWidgets.QDialogButtonBox.StandardButton.Ok
             | QtWidgets.QDialogButtonBox.StandardButton.Cancel,
@@ -8321,9 +8362,36 @@ class StitchDialog(lib.Dialog):
         self.buttons.rejected.connect(self.reject)
         self.update_widgets()
 
+    def stage_positions(self) -> np.ndarray | None:
+        """Stage position ``(x, y)`` of each channel in µm as entered in
+        the table, or None if any is missing or not a number."""
+        positions = []
+        for row in range(self.table.rowCount()):
+            try:
+                positions.append(
+                    [float(self.table.item(row, c).text()) for c in (1, 2)]
+                )
+            except ValueError:
+                return None
+        return np.array(positions)
+
+    def update_stage(self, *args) -> None:
+        """Offer the stage positions only once every channel has one,
+        and choose them once they are complete."""
+        has_stage = self.stage_positions() is not None
+        if has_stage == self._has_stage:
+            return
+        self._has_stage = has_stage
+        self.initial.model().item(0).setEnabled(has_stage)
+        self.initial.setCurrentIndex(0 if has_stage else 1)
+        self.no_stage_note.setVisible(not has_stage)
+
     def update_widgets(self) -> None:
-        """Enable the stage orientation only for stage positions."""
-        self.orientation.setEnabled(self.initial.currentIndex() == 0)
+        """Enable the stage orientation only for stage positions, and
+        say that these undo the moves of the Move tool."""
+        stage = self.initial.currentIndex() == 0
+        self.orientation.setEnabled(stage)
+        self.moves_note.setVisible(stage and self._moved)
 
     def tile_indices(self) -> np.ndarray:
         """Tile of each channel, renumbered 0, 1, ... in the order of
@@ -8361,16 +8429,14 @@ class StitchDialog(lib.Dialog):
         parameters."""
         dialog = StitchDialog(parent)
         result = dialog.exec()
-        orientation = dialog.orientation.currentText()
         params = {
             "tiles": dialog.tile_indices(),
             "tile_numbers": sorted({tile.value() for tile in dialog.tiles}),
             "targets": [target.value() for target in dialog.targets],
             "use_for_alignment": [align.isChecked() for align in dialog.align],
             "stage": dialog.initial.currentIndex() == 0,
-            "orientation": (
-                "auto" if orientation == "Automatic" else orientation
-            ),
+            "stage_um": dialog.stage_positions(),
+            "orientation": dialog.orientation.currentData(),
             "search_radius_um": dialog.search_radius.value(),
             "align_z": dialog.use_z.isEnabled() and dialog.use_z.isChecked(),
             "cut_seams": dialog.cut_seams.isChecked(),
@@ -10659,6 +10725,7 @@ class View(QtWidgets.QLabel):
         info: list[dict],
         render_index=None,
         render_: bool = True,
+        fit_canvas_: bool = True,
     ) -> None:
         """Add localizations that have been read from disk (by
         ``LocsLoadWorker``) as a new channel.
@@ -10687,6 +10754,11 @@ class View(QtWidgets.QLabel):
         render_ : bool, optional
             Specifies if the loaded files should be rendered
             (default True).
+        fit_canvas_ : bool, optional
+            If True (default), the canvas of the channels is fitted when
+            any channel's canvas was translated (see ``fit_canvas``).
+            False for channels that replace the loaded ones, which are
+            in a frame of their own (e.g., stitched tiles).
         """
         # update pixelsize (credits to Boyd Peters #602)
         pixelsize = self._metadata_pixelsize(path, info)
@@ -10705,7 +10777,7 @@ class View(QtWidgets.QLabel):
         # a channel whose canvas was translated (e.g., by moving it
         # beyond the top left edge and saving) is brought into the same
         # frame as the loaded channels (see lib.fit_canvas)
-        if any(
+        if fit_canvas_ and any(
             lib.get_from_metadata(inf, key) is not None
             for inf in self.infos
             for key in lib.CANVAS_OFFSET_KEYS
@@ -14240,7 +14312,8 @@ class View(QtWidgets.QLabel):
             dx, dy = shifts[0]
             if dx or dy:
                 self._translate_overlays(dx, dy)
-                if self.viewport:
+                # no viewport yet while the first file is being added
+                if getattr(self, "viewport", None):
                     self.viewport = render.shift_viewport(
                         self.viewport, dx, dy
                     )
@@ -14920,6 +14993,8 @@ class View(QtWidgets.QLabel):
         infos = list(self.infos)
         paths = list(self.locs_paths)
         positions = None
+        # as shown (and possibly entered) in the dialog
+        stage_um = params["stage_um"] if params["stage"] else None
         if not params["stage"]:
             positions = np.array(
                 [
@@ -14948,6 +15023,7 @@ class View(QtWidgets.QLabel):
                     infos,
                     tiles=tiles,
                     positions=positions,
+                    stage_um=stage_um,
                     paths=paths,
                     progress=progress,
                     **kwargs,
@@ -14966,7 +15042,8 @@ class View(QtWidgets.QLabel):
                     if target == label
                 )
                 path = os.path.splitext(paths[first])[0] + "_stitched.hdf5"
-                self.add(path, locs_, info, render_=False)
+                # not in the (moved) frame of the tiles, which go below
+                self.add(path, locs_, info, render_=False, fit_canvas_=False)
             # the tiles go once the stitched channels are in, so the
             # window is never empty
             for i in reversed(range(n_old)):
@@ -15007,7 +15084,10 @@ class View(QtWidgets.QLabel):
             f"{len(report['targets'])} channel(s)."
         ]
         if report["orientation"] is not None:
-            lines.append(f"Stage orientation: {report['orientation']}")
+            lines.append(
+                "Stage orientation: "
+                + stitch.describe_orientation(report["orientation"])
+            )
         lines += ["", "Overlaps:"]
         for pair in report["pairs"]:
             a, b = (tile_numbers[t] for t in pair["tiles"])
@@ -18670,7 +18750,6 @@ class Window(QtWidgets.QMainWindow):
         align_action.setIcon(theme.icon("align"))
         align_action.triggered.connect(self.view.align)
         stitch_action = postprocess_menu.addAction("Stitch tiles...")
-        stitch_action.setIcon(theme.icon("stitch"))
         stitch_action.triggered.connect(self.view.stitch)
         combine_action = postprocess_menu.addAction(
             "Combine localizations in picks"

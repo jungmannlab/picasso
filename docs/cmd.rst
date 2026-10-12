@@ -472,6 +472,11 @@ Exchange-PAINT experiment) are aligned together, and the tiles of each target
 ``<first file>_stitched.hdf5``. The tile positions and the offsets between
 overlapping tiles are printed.
 
+The stage positions are required. Files without them (e.g., not acquired with
+Micro-Manager) can be stitched in Render after placing the tiles with the
+Move tool, see :ref:`render-stitch-without-stage-positions`, or with
+``stitch.stitch`` and its ``positions`` argument in Python.
+
 .. code-block:: bash
 
    picasso stitch files [-o output] [-r search_radius] [--orientation auto] [--2d] [--keep-overlaps] [--keep-frames]
@@ -492,9 +497,11 @@ overlapping tiles are printed.
        stage positions (µm).
    * - ``--orientation`` (str)
      - ``auto``
-     - The image x and y axes in terms of the stage X and Y axes, e.g.,
-       ``"-x, -y"`` or ``"y, x"``, or ``auto`` to find the one whose overlaps
-       match best.
+     - How the stage axes run in the image, i.e., where a tile at a larger
+       stage position lies: e.g., ``"-x, -y"`` if a larger stage X is to the
+       left and a larger stage Y above (the image y axis points down). All
+       eight are listed in :ref:`render-stitch-stage-orientation`. ``auto``
+       finds the one whose overlaps match best.
    * - ``--2d``
      - off
      - Do not correct the z offsets of the tiles.

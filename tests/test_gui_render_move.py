@@ -292,6 +292,24 @@ def test_adding_a_channel_joins_the_translated_frame(window, tmp_path):
     assert window.tools_settings_dialog.move_channels() == (0,)
 
 
+def test_translated_file_opens_in_a_new_window(qt_offscreen, tmp_path):
+    """A file saved with a canvas offset is the first one opened: the
+    canvas is fitted before the view has a viewport."""
+    locs = _locs()
+    info = _info()
+    info[-1][lib.CANVAS_OFFSET_KEYS[0]] = 40
+    locs["x"] += np.float32(40)
+    window = gui_render.Window(plugins_loaded=True)
+    # as the file loader does
+    window.view.add(str(tmp_path / "moved.hdf5"), locs, info, render_=False)
+    window.view._show_added_channels(True)
+    assert len(window.view.locs) == 1
+    # back in the camera frame, as nothing else is loaded
+    assert window.view.locs[0]["x"].min() < 40
+    assert lib.get_from_metadata(window.view.infos[0], "Width") == WIDTH
+    window.close()
+
+
 def test_apply_expression_grows_the_canvas(window, tmp_path):
     view = window.view
     n = len(view.locs[0])

@@ -7,11 +7,13 @@ and the replacement of the tile channels by the stitched ones.
 
 from __future__ import annotations
 
+import copy
 import os
 
 import numpy as np
 import pytest
 
+from picasso import lib
 from picasso.gui import render as gui_render
 from tests.test_gui_render_tasks import _wait_for_tasks
 from tests.test_stitch import _grid
@@ -75,6 +77,24 @@ def test_dialog_defaults(window):
     assert not dialog.orientation.isEnabled()
 
 
+def _note_shown(dialog) -> bool:
+    return any(
+        "No stage positions" in label.text() and not label.isHidden()
+        for label in dialog.findChildren(gui_render.QtWidgets.QLabel)
+    )
+
+
+def test_dialog_without_stage_positions(window):
+    """The user is told to place the tiles with the Move tool first."""
+    assert not _note_shown(gui_render.StitchDialog(window))
+    for info in window.view.infos:
+        info[0].pop("Micro-Manager Metadata")
+    dialog = gui_render.StitchDialog(window)
+    assert _note_shown(dialog)
+    assert dialog.initial.currentIndex() == 1  # current positions
+    assert not dialog.initial.model().item(0).isEnabled()
+
+
 def test_dialog_rejects_target_twice_in_a_tile(window, monkeypatch):
     messages = _messages(monkeypatch)
     dialog = gui_render.StitchDialog(window)
@@ -113,7 +133,7 @@ def test_stitch_replaces_tiles(window, qt_offscreen, monkeypatch, tiles):
         offsets - offsets[0], origins - origins[0], atol=0.05
     )
     assert "Stitched 4 tiles into 1 channel(s)" in messages[-1]
-    assert "Stage orientation: -x, y" in messages[-1]
+    assert "Stage orientation: stage X → left, stage Y → down" in messages[-1]
 
 
 def test_stitch_from_current_positions(
@@ -143,3 +163,127 @@ def test_stitch_from_current_positions(
     entry = view.infos[0][-1]
     assert entry["Initial positions"] == "given"
     assert entry["Stage orientation"] is None
+
+
+def test_stitch_moved_tiles_from_stage_positions(
+    window, qt_offscreen, monkeypatch, tiles
+):
+    """Tiles moved beyond the left edge before stitching (a canvas
+    offset): the stitched channel does not inherit their canvas."""
+    view = window.view
+    paths = list(view.locs_paths)
+    view._set_channel_xy(
+        1, view.locs[1]["x"] - np.float32(40), view.locs[1]["y"]
+    )
+    view._record_manual_shift(1, -40.0, 0.0)
+    view.fit_canvas()
+    assert lib.get_from_metadata(view.infos[0], lib.CANVAS_OFFSET_KEYS[0])
+    _run(window, qt_offscreen, monkeypatch)
+    info = view.infos[0]
+    for key in (*lib.CANVAS_OFFSET_KEYS, *lib.CAMERA_SIZE_KEYS):
+        assert lib.get_from_metadata(info, key) is None
+    offsets = _tile_offsets(info, paths)
+    origins = tiles[2]
+    np.testing.assert_allclose(
+        offsets - offsets[0], origins - origins[0], atol=0.05
+    )
+    # all localizations inside the stitched canvas
+    assert view.locs[0]["x"].min() >= 0
+    assert view.locs[0]["x"].max() < lib.get_from_metadata(info, "Width")
+
+
+def test_dialog_stage_positions_entered_by_hand(window):
+    """Without stage positions in the metadata, they can be entered in
+    the table, which offers (and chooses) the stage positions."""
+    stage = []
+    for info in window.view.infos:
+        mm = info[0].pop("Micro-Manager Metadata")
+        stage.append((mm["XPositionUm"], mm["YPositionUm"]))
+    dialog = gui_render.StitchDialog(window)
+    assert dialog.stage_positions() is None
+    assert not dialog.initial.model().item(0).isEnabled()
+    for row, (x, y) in enumerate(stage):
+        dialog.table.item(row, 1).setText(str(x))
+        assert dialog.initial.currentIndex() == 1  # still incomplete
+        dialog.table.item(row, 2).setText(str(y))
+    assert dialog.initial.model().item(0).isEnabled()
+    assert dialog.initial.currentIndex() == 0
+    assert not _note_shown(dialog)
+    np.testing.assert_allclose(dialog.stage_positions(), stage)
+    # an invalid entry takes the stage positions away again
+    dialog.table.item(0, 1).setText("abc")
+    assert dialog.initial.currentIndex() == 1
+    assert _note_shown(dialog)
+
+
+def test_stitch_with_stage_positions_entered_by_hand(
+    window, qt_offscreen, monkeypatch, tiles
+):
+    view = window.view
+    paths = list(view.locs_paths)
+    stage = []
+    for info in view.infos:
+        mm = info[0].pop("Micro-Manager Metadata")
+        stage.append((mm["XPositionUm"], mm["YPositionUm"]))
+    _run(
+        window,
+        qt_offscreen,
+        monkeypatch,
+        stage=True,
+        stage_um=np.array(stage),
+    )
+    offsets = _tile_offsets(view.infos[0], paths)
+    origins = tiles[2]
+    np.testing.assert_allclose(
+        offsets - offsets[0], origins - origins[0], atol=0.05
+    )
+    assert view.infos[0][-1]["Initial positions"] == "stage"
+
+
+def test_stage_and_current_positions_agree(
+    qt_offscreen, tmp_path, monkeypatch, tiles
+):
+    """The same tiles stitched from their stage positions and from rough
+    positions set with the Move tool give the same result."""
+
+    def stitched(move):
+        window = gui_render.Window(plugins_loaded=True)
+        view = window.view
+        for t, (locs, info) in enumerate(zip(*tiles[:2])):
+            path = str(tmp_path / f"tile{t}.hdf5")
+            view.add(path, locs.copy(), copy.deepcopy(info), render_=False)
+        paths = list(view.locs_paths)
+        if move:
+            # off by up to 15 camera pixels, as placed by eye
+            rng = np.random.default_rng(2)
+            rough = tiles[2] + rng.uniform(-15, 15, tiles[2].shape)
+            for i, (dx, dy) in enumerate(rough):
+                view._set_channel_xy(
+                    i,
+                    view.locs[i]["x"] + np.float32(dx),
+                    view.locs[i]["y"] + np.float32(dy),
+                )
+                view._record_manual_shift(i, dx, dy)
+            view.fit_canvas()
+        _run(window, qt_offscreen, monkeypatch, stage=not move)
+        result = (
+            view.locs[0].copy(),
+            _tile_offsets(view.infos[0], paths),
+            np.array(view.infos[0][-1]["Tile offsets z (nm)"]),
+        )
+        _wait_for_tasks(qt_offscreen)
+        window.close()
+        return result
+
+    locs_stage, xy_stage, z_stage = stitched(move=False)
+    locs_current, xy_current, z_current = stitched(move=True)
+    np.testing.assert_allclose(xy_current, xy_stage, atol=0.01)
+    np.testing.assert_allclose(z_current, z_stage, atol=0.5)
+    # the same localizations kept at the seams, at the same places
+    assert len(locs_current) == len(locs_stage)
+    for column in ("x", "y"):
+        np.testing.assert_allclose(
+            np.sort(locs_current[column]),
+            np.sort(locs_stage[column]),
+            atol=0.01,
+        )

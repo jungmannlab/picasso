@@ -171,6 +171,9 @@ Many of the functionalities provided by Picasso were published independently, pl
    * - Coordinate-based colocalization (CBC)
      - Malkusch et al., Histochem. Cell Biol., 2012
      - `10.1007/s00418-011-0880-5 <https://doi.org/10.1007/s00418-011-0880-5>`__
+   * - Stitching tiles (global tile positions, inspired by)
+     - Preibisch et al., Bioinformatics, 2009
+     - `10.1093/bioinformatics/btp184 <https://doi.org/10.1093/bioinformatics/btp184>`__
 
 .. SYNC-END: citing
 
