@@ -55,32 +55,32 @@ J. Schnitzbauer*, M.T. Strauss*, T. Schlichthaerle, F. Schueder, R. Jungmann
 Super-Resolution Microscopy with DNA-PAINT
 Nature Protocols (2017). 12: 1198-1228 DOI: 10.1038/nprot.2017.024 (https://doi.org/10.1038/nprot.2017.024)
 
-Many of the functionalities provided by Picasso were published elsewhere, please also cite the respective publications:
+Many of the functionalities provided by Picasso were published independently, please also cite the respective publications:
 
-- All fitting methods are ports of Gpufit. DOI: 10.1038/s41598-017-15313-9 (https://doi.org/10.1038/s41598-017-15313-9). License can be found here (https://github.com/jungmannlab/picasso/blob/master/LICENSES/Gpufit-LICENSE.txt).
-- Experimental PSF (cubic-spline) fitting. DOIs: 10.1038/nmeth.4661 (https://doi.org/10.1038/nmeth.4661) (Li et al., experimental-PSF localization and bead alignment) and 10.1038/s41598-017-00622-w (https://doi.org/10.1038/s41598-017-00622-w) (Babcock & Zhuang, cubic-spline PSF model). The spline calibration follows the coefficient scheme of Gpuspline; license can be found here (https://github.com/jungmannlab/picasso/blob/master/LICENSES/Gpuspline-LICENSE.txt).
-- Multichannel (global) experimental-PSF fitting. DOI: 10.1038/s41467-022-30719-4 (https://doi.org/10.1038/s41467-022-30719-4) (Li et al., globLoc).
-- 3D fitting via astigmatism. DOI: 10.1126/science.1153529 (https://www.science.org/doi/10.1126/science.1153529).
-- B-spline wavelet spot identification. DOI: 10.1364/OE.20.002081 (https://doi.org/10.1364/OE.20.002081) (Izeddin et al., Opt. Express 2012)
-- sCMOS pixel-dependent noise modeling. DOI: 10.1038/nmeth.2488 (https://doi.org/10.1038/nmeth.2488).
-- NeNA. DOI: 10.1007/s00418-014-1192-3 (https://doi.org/10.1007/s00418-014-1192-3)
-- FRC. DOI: 10.1038/nmeth.2448 (https://doi.org/10.1038/nmeth.2448)
-- Theoretical lateral localization precision (lpx / lpy, Gaussian least-squares). DOI: 10.1038/nmeth.1447 (https://doi.org/10.1038/nmeth.1447)
-- Theoretical axial localization precision (lpz values, Gaussian). DOI: 10.1038/s41467-026-70198-5 (https://doi.org/10.1038/s41467-026-70198-5)
-- Quad-tree adaptive histogram rendering. DOI: 10.1017/S143192760999122X (https://doi.org/10.1017/S143192760999122X) (Baddeley, Cannell & Soeller, Microsc. Microanal. 2010)
-- RCC undrifting: DOI: 10.1364/OE.22.015982 (https://doi.org/10.1364/OE.22.015982)
-- AIM undrifting. DOI: 10.1126/sciadv.adm776 (https://www.science.org/doi/10.1126/sciadv.adm7765)
-- SMLM clusterer. DOIs: 10.1038/s41467-021-22606-1 (https://doi.org/10.1038/s41467-021-22606-1) and 10.1038/s41586-023-05925-9 (https://doi.org/10.1038/s41586-023-05925-9)
-- DBSCAN: Ester, et al. Inkdd, 1996. (Vol. 96, No. 34, pp. 226-231).
-- Anisotropic DBSCAN inspired by: 10.1021/acs.jpcb.4c02030 (https://doi.org/10.1021/acs.jpcb.4c02030)
-- HDBSCAN. DOI: 10.1007/978-3-642-37456-2_14 (https://doi.org/10.1007/978-3-642-37456-2_14)
-- RESI. DOI: 10.1038/s41586-023-05925-9 (https://doi.org/10.1038/s41586-023-05925-9)
-- Nanotron. DOI: 10.1093/bioinformatics/btaa154 (https://doi.org/10.1093/bioinformatics/btaa154)
-- Picasso: Server. DOI: 10.1038/s42003-022-03909-5 (https://doi.org/10.1038/s42003-022-03909-5)
-- SPINNA. DOI: 10.1038/s41467-025-59500-z (https://doi.org/10.1038/s41467-025-59500-z)
-- SPINNA for LE fitting. DOI: 10.1038/s41592-024-02242-5 (https://doi.org/10.1038/s41592-024-02242-5)
-- G5M. DOI: 10.1038/s41467-026-70198-5 (https://doi.org/10.1038/s41467-026-70198-5)
-- Coordinate-based colocalization (CBC). DOI: 10.1007/s00418-011-0880-5 (https://doi.org/10.1007/s00418-011-0880-5)
+- Fitting (all methods are ports of Gpufit): 10.1038/s41598-017-15313-9 (https://doi.org/10.1038/s41598-017-15313-9); license (https://github.com/jungmannlab/picasso/blob/master/LICENSES/Gpufit-LICENSE.txt)
+- Experimental PSF (cubic-spline) fitting: 10.1038/nmeth.4661 (https://doi.org/10.1038/nmeth.4661) (Li et al., experimental-PSF localization and bead alignment) and 10.1038/s41598-017-00622-w (https://doi.org/10.1038/s41598-017-00622-w) (Babcock & Zhuang, cubic-spline PSF model). The spline calibration follows the coefficient scheme of Gpuspline; license (https://github.com/jungmannlab/picasso/blob/master/LICENSES/Gpuspline-LICENSE.txt)
+- Multichannel (global) experimental-PSF fitting: 10.1038/s41467-022-30719-4 (https://doi.org/10.1038/s41467-022-30719-4) (Li et al., globLoc)
+- 3D fitting via astigmatism: 10.1126/science.1153529 (https://www.science.org/doi/10.1126/science.1153529)
+- B-spline wavelet spot identification: 10.1364/OE.20.002081 (https://doi.org/10.1364/OE.20.002081) (Izeddin et al., Opt. Express 2012)
+- sCMOS pixel-dependent noise modeling: 10.1038/nmeth.2488 (https://doi.org/10.1038/nmeth.2488)
+- NeNA: 10.1007/s00418-014-1192-3 (https://doi.org/10.1007/s00418-014-1192-3)
+- FRC: 10.1038/nmeth.2448 (https://doi.org/10.1038/nmeth.2448)
+- Theoretical lateral localization precision (lpx / lpy, Gaussian least-squares): 10.1038/nmeth.1447 (https://doi.org/10.1038/nmeth.1447)
+- Theoretical axial localization precision (lpz, Gaussian): 10.1038/s41467-026-70198-5 (https://doi.org/10.1038/s41467-026-70198-5)
+- Quad-tree adaptive histogram rendering: 10.1017/S143192760999122X (https://doi.org/10.1017/S143192760999122X) (Baddeley, Cannell & Soeller, Microsc. Microanal. 2010)
+- RCC undrifting: 10.1364/OE.22.015982 (https://doi.org/10.1364/OE.22.015982)
+- AIM undrifting: 10.1126/sciadv.adm7765 (https://www.science.org/doi/10.1126/sciadv.adm7765)
+- SMLM clusterer: 10.1038/s41467-021-22606-1 (https://doi.org/10.1038/s41467-021-22606-1) and 10.1038/s41586-023-05925-9 (https://doi.org/10.1038/s41586-023-05925-9)
+- DBSCAN: Ester et al., Proc. KDD 1996, Vol. 96, No. 34, pp. 226-231
+- Anisotropic DBSCAN: Inspired by 10.1021/acs.jpcb.4c02030 (https://doi.org/10.1021/acs.jpcb.4c02030)
+- HDBSCAN: 10.1007/978-3-642-37456-2_14 (https://doi.org/10.1007/978-3-642-37456-2_14)
+- RESI: 10.1038/s41586-023-05925-9 (https://doi.org/10.1038/s41586-023-05925-9)
+- Nanotron: 10.1093/bioinformatics/btaa154 (https://doi.org/10.1093/bioinformatics/btaa154)
+- Picasso: Server: 10.1038/s42003-022-03909-5 (https://doi.org/10.1038/s42003-022-03909-5)
+- SPINNA: 10.1038/s41467-025-59500-z (https://doi.org/10.1038/s41467-025-59500-z)
+- SPINNA for LE fitting: 10.1038/s41592-024-02242-5 (https://doi.org/10.1038/s41592-024-02242-5)
+- G5M: 10.1038/s41467-026-70198-5 (https://doi.org/10.1038/s41467-026-70198-5)
+- Coordinate-based colocalization (CBC): 10.1007/s00418-011-0880-5 (https://doi.org/10.1007/s00418-011-0880-5)
 
 .. SYNC-END: citing
 
