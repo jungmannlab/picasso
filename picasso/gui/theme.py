@@ -1047,6 +1047,7 @@ class AppearanceDialog(lib.Dialog):
 
         super().__init__(parent)
         self.setWindowTitle("Appearance")
+        self.setWindowIcon(QtGui.QIcon(os.path.join(ICONS_DIR, "picasso.ico")))
         self._timer = QtCore.QTimer(self)
         self._timer.setSingleShot(True)
         self._timer.setInterval(self.DELAY)

@@ -84,6 +84,13 @@ class UserSettingsDialog(Dialog):
     def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
         super().__init__(parent)
         self.setWindowTitle("User Settings")
+        self.setWindowIcon(
+            QtGui.QIcon(
+                os.path.join(
+                    os.path.dirname(__file__), "gui", "icons", "picasso.ico"
+                )
+            )
+        )
         self.setModal(False)
         self.resize(600, 500)
 
