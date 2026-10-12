@@ -165,7 +165,7 @@ Last change: 12-OCT-2026 CEST
 
 ### Render
 - New pick shape in Render: **Box**, an axis-aligned rectangle dragged out to any size with the left mouse button. See the [documentation](https://picassosr.readthedocs.io/en/latest/render/picking.html#render-picking).
-- New pick shape in Render: **Brush**, painted freehand with the left mouse button. Strokes whose painted areas touch merge into one pick, a right click undoes the last stroke, and each stroke keeps the width it was painted with. See the [documentation](https://picassosr.readthedocs.io/en/latest/render/picking.html#render-picking).
+- New pick shape in Render: **Brush**, painted freehand with the left mouse button. See the [documentation](https://picassosr.readthedocs.io/en/latest/render/picking.html#render-picking).
 - Pick statistics (`View > Show info > Calculate info below`), `Filter picks by number of localizations` and `Select picks (XY scatter)` now work with every pick shape; they used to refuse anything but circles.
 - Log-scale contrast sliders in Render: in the Display Settings dialogs of the main and of the 3D (rotation) window, and in the Test Clustering dialog.
 - Render asks for the camera pixel size when loading `.hdf5` files whose metadata does not contain `Pixelsize` (e.g. saved by old Picasso versions), instead of raising an error at rendering.

@@ -47,11 +47,11 @@ all picks share one size or each pick carries its own extent:
 
 Removing picks:
 
-- Clicking the right mouse button inside a pick removes that pick.
-- Two shapes are drawn incrementally and undo their last step instead:
-  ``Polygon`` removes the last vertex, and ``Brush`` removes the last stroke,
-  wherever you click. Undoing a brush stroke that was joining two painted
-  regions leaves them as two separate picks again.
+- Clicking the right mouse button inside a pick removes that pick. For
+  ``Brush``, this removes the whole painted region under the cursor, i.e.,
+  all of the strokes merged into it.
+- ``Polygon`` is drawn incrementally and undoes its last step instead: a right
+  click removes the last vertex, wherever you click.
 - ``Tools > Clear picks`` (:kbd:`Ctrl+C`) removes all of them.
 
 .. warning::

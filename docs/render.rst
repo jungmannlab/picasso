@@ -91,8 +91,8 @@ tool, selected in the ``Tools`` menu:
   button to zoom into a rectangle, drag with the right button to pan.
 - :ref:`Pick <render-pick>` (:kbd:`Ctrl+P`) selects regions of localizations
   for further analysis (see :doc:`render/picking`): the left button draws a
-  pick, the right button removes the pick under the cursor (for polygon and
-  brush picks, it undoes the last vertex or stroke instead).
+  pick, the right button removes the pick under the cursor (for polygon
+  picks, it removes the last vertex instead).
 - :ref:`Measure <render-measure>` (:kbd:`Ctrl+M`) measures distances on the
   image: the left button adds a point, the right button finishes the current
   measurement or, clicked again, deletes the last one.

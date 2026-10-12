@@ -11358,9 +11358,8 @@ class View(QtWidgets.QLabel):
         picks.
 
         The strokes of every pick the new one touches are pulled into a
-        single pick, which is appended last so that the newest stroke is
-        always ``self._picks[-1][-1]``. A press and release without a
-        drag paints a dot.
+        single pick, which is appended last. A press and release without
+        a drag paints a dot.
 
         Parameters
         ----------
@@ -11392,20 +11391,6 @@ class View(QtWidgets.QLabel):
         kept.append(merged)
         self._picks = kept
 
-        self.update_pick_info_short()
-        self.update_scene(picks_only=True)
-
-    def remove_last_brush_stroke(self) -> None:
-        """Remove the brush stroke painted last.
-
-        Dropping a stroke can break a pick apart again - it may have
-        been the only thing joining two painted regions - so the
-        remaining strokes are re-merged from scratch.
-        """
-        if not len(self._picks):
-            return
-        strokes = self._picks.pop()[:-1]
-        self._picks.extend(lib.merge_brush_strokes(strokes))
         self.update_pick_info_short()
         self.update_scene(picks_only=True)
 
@@ -14649,14 +14634,15 @@ class View(QtWidgets.QLabel):
 
     def _mouse_release_pick_brush(self, event: QtCore.QEvent) -> None:
         """Finish and merge the in-progress brush stroke (left
-        click), or undo the last stroke (right click)."""
+        click), or remove the pick under the cursor (right click)."""
         # finish painting the stroke and merge it into the picks
         if event.button() == QtCore.Qt.MouseButton.LeftButton:
             self.add_brush_stroke(event.pos())
             event.accept()
-        # undo the last stroke, like the polygon's last vertex
+        # remove pick
         elif event.button() == QtCore.Qt.MouseButton.RightButton:
-            self.remove_last_brush_stroke()
+            x, y = self.map_to_movie(event.pos())
+            self.remove_picks((x, y))
             event.accept()
         else:
             event.ignore()

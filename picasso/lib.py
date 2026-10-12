@@ -3029,8 +3029,7 @@ def merge_brush_strokes(
     interest, and merging is transitive: a stroke bridging two picks
     joins all three into one. Picks are returned in the order of their
     newest stroke, so the stroke drawn last always ends up as
-    ``picks[-1][-1]`` - which is what makes "remove the last stroke"
-    well defined after adding, undoing or loading alike.
+    ``picks[-1][-1]``.
 
     Parameters
     ----------
