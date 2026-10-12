@@ -340,7 +340,10 @@ Precision
 
 .. _render-nena:
 
-``Median localization precision`` shows the median of the first channel.
+``Median localization precision`` shows the mean of the medians of ``lpx``
+and ``lpy`` (in nm). With several channels loaded, the menu below it chooses
+which channel is shown.
+
 ``Calculate NeNA`` estimates the average localization precision via the NeNA
 (nearest neighbor based analysis) approach, and ``Show NeNA plot`` displays
 its fit (`Endesfelder et al., Histochemistry and Cell Biology, 2014

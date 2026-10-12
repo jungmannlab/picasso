@@ -46,6 +46,7 @@ Last change: 12-OCT-2026 CEST
 - Files dialogs widgets are grayed out if they do not apply at the given moment.
 - Faster G5M.
 - Files dialog is now shown as a table with indices for easier navigation. Channels can be reordered and the default ordering of colors can be adjusted. `Load colors` works with any number of channels.
+- The Info dialog shows the median localization precision of any loaded channel.
 - Fixed: closing a channel in Render did not remove its drift data, so the drift of the channels after it was misaligned.
 - Fixed: 3D histogram rendering scaled z unnecessarily.
 - Fixed NeNA (and FRC) overwriting group columns of localizations.

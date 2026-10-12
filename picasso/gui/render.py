@@ -5400,7 +5400,11 @@ class InfoDialog(lib.Dialog):
     dark_std : QLabel
         Shows the std dark time (frames) in all picks.
     fit_precision : QLabel
-        Shows median fit precision of the first channel (camera pixels).
+        Shows median localization precision (nm) of the channel chosen
+        in self.fit_precision_channel.
+    fit_precision_channel : QComboBox
+        Chooses the channel for self.fit_precision; hidden with a
+        single channel.
     frc_plot_window : FRCPlotWindow(QDialog)
         Window displaying the FRC curve.
     frc_result : dict
@@ -5576,28 +5580,40 @@ class InfoDialog(lib.Dialog):
         self.precision_grid = QtWidgets.QGridLayout(precision_groupbox.content)
         med_lp_label = QtWidgets.QLabel("Median localization precision:")
         med_lp_label.setToolTip(
-            "Median localization precision of the first channel."
+            "Median localization precision (mean of the medians of lpx\n"
+            "and lpy) of the channel selected below."
         )
         self.precision_grid.addWidget(med_lp_label, 0, 0)
         self.fit_precision = QtWidgets.QLabel("-")
         self.precision_grid.addWidget(self.fit_precision, 0, 1)
+        # the channel selector is shown only with several channels
+        self.fit_precision_channel = QtWidgets.QComboBox()
+        self.fit_precision_channel.setToolTip(
+            "Channel whose median localization precision is shown."
+        )
+        self.fit_precision_channel.currentIndexChanged.connect(
+            self.update_fit_precision
+        )
+        self.fit_precision_channel.setVisible(False)
+        self.precision_grid.addWidget(self.fit_precision_channel, 1, 0, 1, 2)
+        self._fit_precision_cache = {}
         nena_label = QtWidgets.QLabel("NeNA precision:")
         nena_label.setToolTip(
             "Experimental estimate of the average localization precision.\n"
             "See Endesfelder et al. Histochemistry and cell biology, 2014."
         )
-        self.precision_grid.addWidget(nena_label, 1, 0)
+        self.precision_grid.addWidget(nena_label, 2, 0)
         self.nena_label = QtWidgets.QLabel("-")
-        self.precision_grid.addWidget(self.nena_label, 1, 1)
+        self.precision_grid.addWidget(self.nena_label, 2, 1)
         self.nena_button = QtWidgets.QPushButton("Calculate NeNA")
         self.nena_button.setToolTip("Click to calculate NeNA precision.")
         # clicked passes its checked state, which is not an on_done
         self.nena_button.clicked.connect(lambda: self.calculate_nena_lp())
-        self.precision_grid.addWidget(self.nena_button, 2, 0)
+        self.precision_grid.addWidget(self.nena_button, 3, 0)
         show_nena_plot_button = QtWidgets.QPushButton("Show NeNA plot")
         show_nena_plot_button.setToolTip("Display NeNA fit.")
         show_nena_plot_button.clicked.connect(self.show_nena_plot)
-        self.precision_grid.addWidget(show_nena_plot_button, 2, 1)
+        self.precision_grid.addWidget(show_nena_plot_button, 3, 1)
 
         # FRC
         frc_groupbox = lib.CollapsibleGroupBox("FRC (uses current FOV)")
@@ -6026,6 +6042,55 @@ class InfoDialog(lib.Dialog):
         else:
             self.frc_rois_window.show()
             self.frc_rois_window.raise_()
+
+    def update_fit_precision(self) -> None:
+        """Sync the channel selector with the loaded channels and show
+        the median localization precision of the selected channel.
+
+        Medians are cached per localizations object, so redraws do not
+        recompute them.
+        """
+        view = self.window.view
+        checks = self.window.dataset_dialog.checks
+        names = [
+            checks[i].text() if i < len(checks) else os.path.basename(path)
+            for i, path in enumerate(view.locs_paths)
+        ]
+        combo = self.fit_precision_channel
+        current_names = [combo.itemText(i) for i in range(combo.count())]
+        if names != current_names:
+            # keep the selected channel across reordering and closing
+            current = combo.currentText()
+            combo.blockSignals(True)
+            combo.clear()
+            combo.addItems(names)
+            if current in names:
+                combo.setCurrentIndex(names.index(current))
+            combo.blockSignals(False)
+        combo.setVisible(len(names) > 1)
+
+        channel = combo.currentIndex()
+        if channel < 0 or channel >= len(view.locs):
+            self.fit_precision.setText("-")
+            return
+        locs = view.locs[channel]
+        key = (id(locs), len(locs))
+        # drop entries of channels that are gone or were replaced
+        alive = {(id(locs_), len(locs_)) for locs_ in view.locs}
+        self._fit_precision_cache = {
+            k: v for k, v in self._fit_precision_cache.items() if k in alive
+        }
+        if key not in self._fit_precision_cache:
+            if len(locs) and {"lpx", "lpy"} <= set(locs.columns):
+                lp = np.mean([np.median(locs["lpx"]), np.median(locs["lpy"])])
+            else:
+                lp = np.nan
+            self._fit_precision_cache[key] = lp
+        lp = self._fit_precision_cache[key] * view.pixelsize
+        if np.isfinite(lp):
+            self.fit_precision.setText(f"{lp:.2f} nm")
+        else:
+            self.fit_precision.setText("-")
 
     def calculate_nena_lp(
         self, on_done: Callable[[], None] | None = None
@@ -20278,11 +20343,7 @@ class Window(QtWidgets.QMainWindow):
             )
         except AttributeError:
             pass
-        try:
-            lp = self.view.median_lp * self.view.pixelsize
-            self.info_dialog.fit_precision.setText(f"{lp:.2f} nm")
-        except AttributeError:
-            pass
+        self.info_dialog.update_fit_precision()
 
     def open_resi_dialog(self) -> None:
         """Open the RESI dialog."""
