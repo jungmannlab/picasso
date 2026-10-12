@@ -161,10 +161,10 @@ def rcc(
     segments: list[lib.FloatArray2D],
     max_shift: float | None = None,
     callback: Callable[[int], None] | None = None,
-) -> tuple[lib.FloatArray2D, lib.FloatArray2D]:
+) -> tuple[lib.FloatArray1D, lib.FloatArray1D]:
     """Compute RCC, see Wang, Schnitzbauer, et al. Optics Express,
-    2014. Return the shifts in x and y directions for each pair of
-    segments.
+    2014. Return the shift of each segment in y and x relative to the
+    first segment.
 
     Parameters
     ----------
@@ -182,11 +182,12 @@ def rcc(
 
     Returns
     -------
-    shifts_x, shifts_y : lib.FloatArray2D
-        2D numpy arrays containing the shifts in x and y directions for
-        each pair of segments. The shape of the arrays is
-        (n_segments, n_segments), where n_segments is the number of
-        segments provided.
+    shift_y, shift_x : lib.FloatArray1D
+        Shifts of each segment in y and x (in pixels of the segment
+        images), shape (n_segments,), found by least-squares
+        minimization of the pairwise shifts (see
+        ``lib.minimize_shifts``). The first segment is the reference,
+        i.e., ``shift_y[0] == shift_x[0] == 0``.
     """
     n_segments = len(segments)
     shifts_x = np.zeros((n_segments, n_segments))

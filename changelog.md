@@ -97,6 +97,7 @@ Last change: 12-OCT-2026 CEST
 - Sound notifications in Average and Simulate (`File > Sound notifications`).
 - Added import and export of [PyME](https://python-microscopy.org) (python-microscopy, PYMEVisualize) localizations: raw fit results (`.h5r`) and saved localizations (`.hdf`) are imported, `.hdf` files are exported. See the [documentation](https://picassosr.readthedocs.io/en/latest/render/menu-file.html#render-export-pyme).
 - The one-click installers ship the licenses of all bundled third-party software (Python, Qt, NumPy, ...) in `THIRD-PARTY-LICENSES.txt`.
+- Fixed the docstring of `picasso.imageprocess.rcc` ([#716](https://github.com/jungmannlab/picasso/issues/716)).
 
 ### Technical details on Render update
 - **Multi-threaded CPU rendering**: the render kernels release the GIL and channels are rendered in parallel by a thread pool; a single large channel is split into row chunks rendered in parallel and summed in a fixed order.
