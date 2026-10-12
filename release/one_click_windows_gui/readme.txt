@@ -87,6 +87,7 @@ Many of the functionalities provided by Picasso were published elsewhere, please
 - SPINNA. DOI: 10.1038/s41467-025-59500-z (https://doi.org/10.1038/s41467-025-59500-z)
 - SPINNA for LE fitting. DOI: 10.1038/s41592-024-02242-5 (https://doi.org/10.1038/s41592-024-02242-5)
 - G5M. DOI: 10.1038/s41467-026-70198-5 (https://doi.org/10.1038/s41467-026-70198-5)
+- Coordinate-based colocalization (CBC). DOI: 10.1007/s00418-011-0880-5 (https://doi.org/10.1007/s00418-011-0880-5)
 
 .. SYNC-END: citing
 

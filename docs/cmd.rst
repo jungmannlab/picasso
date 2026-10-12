@@ -733,6 +733,60 @@ Calculate the nearest neighbor within a clustered dataset.
 
    picasso nneighbor files
 
+cbc
+---
+Coordinate-based colocalization (CBC) of localizations with other
+localization files (Malkusch, et al., Histochem Cell Biol, 2012, DOI:
+`10.1007/s00418-011-0880-5 <https://doi.org/10.1007/s00418-011-0880-5>`__).
+Takes two or more hdf5 localization files (unix style path patterns). The
+first file is scored against all others; with ``-a``, every file is scored
+against every other file, i.e., both directions of every pair (also for two
+files). The CBC is not symmetric, so both directions of a pair differ. Each
+scored file is saved as ``<file name>_cbc.hdf5`` with a column
+``cbc_<name>`` per partner, where the names are the file names or those given
+with ``-n``. z is used if all files contain it.
+The files should be linked first (see `link`_); a warning lists the ones
+that are not.
+
+.. code-block:: bash
+
+   picasso cbc files [-r rmax] [-s steps] [-u undefined] [-a] [--2d] [-n names]
+
+For example, both directions for two files with short names:
+
+.. code-block:: bash
+
+   picasso cbc long_name_bassoon_locs.hdf5 long_name_psd95_locs.hdf5 -a -n Bassoon PSD95
+
+.. list-table::
+   :header-rows: 1
+   :widths: 25 15 60
+
+   * - Option
+     - Default
+     - Description
+   * - ``-r``, ``--rmax`` (float)
+     - ``200``
+     - The maximum radius (nm).
+   * - ``-s``, ``--steps`` (int)
+     - ``100``
+     - The number of radii up to the maximum radius.
+   * - ``-u``, ``--undefined`` (float or ``remove``)
+     - ``0``
+     - The CBC given to localizations without neighbors within the maximum
+       radius, between -1 and 1, or ``remove`` to remove them (if they
+       have no neighbors for at least one partner).
+   * - ``-a``, ``--all-pairs``
+     - off
+     - Score every file against every other file (both directions).
+   * - ``-n``, ``--names`` (str)
+     - file names
+     - Short names of the files in the order given, used for the column
+       names ``cbc_<name>``.
+   * - ``--2d``
+     - off
+     - Ignore z and compute the CBC in 2D.
+
 cluster_combine
 ---------------
 Combines the localizations in each cluster of a group (to be deprecated in

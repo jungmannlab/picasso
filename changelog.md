@@ -1,6 +1,6 @@
 # Changelog
 
-Last change: 11-OCT-2026 CEST
+Last change: 12-OCT-2026 CEST
 
 ## 1.0.0
 
@@ -37,6 +37,7 @@ Last change: 11-OCT-2026 CEST
 - The View menu no longer lists Left/Right/Up/Down and Zoom in/out (their keyboard shortcuts still work); *Filter picks by number of localizations* is now *Filter picks by count*.
 - Long operations run in the background and can be canceled: undrifting (AIM, RCC, from picked), DBSCAN, HDBSCAN, SMLM clusterer, G5M, RESI, NeNA, FRC in ROIs, pick statistics and saving pick properties. The windows keep repainting while they run.
 - Link localizations can be run on all channels sequentially.
+- Coordinate-based colocalization (CBC, Malkusch, et al., *Histochem Cell Biol* 2012). See the [documentation](https://picassosr.readthedocs.io/en/latest/render/analysis.html#render-cbc).
 - Clear measurements added (similar to Clear picks)
 - Files dialogs widgets are grayed out if they do not apply at the given moment.
 - Faster G5M.

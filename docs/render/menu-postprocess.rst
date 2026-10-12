@@ -328,6 +328,12 @@ Calculate nearest neighbor distances
 Calculates distances to the ``k``-th nearest neighbors between two channels,
 see :ref:`render-nearest-neighbor-analysis`.
 
+Coordinate-based colocalization (CBC)
+-------------------------------------
+
+Scores the colocalization of each localization of one channel with another
+channel, for one pair or all pairs of channels, see :ref:`render-cbc`.
+
 RESI
 ----
 

@@ -36,3 +36,4 @@ roi_id,"The index of the region of interest (ROI) this localization was found in
 photons_ch<c>,"The number of detected photons in channel c (c = 0, 1, ...), for a multichannel spline fit with photon counts not linked across channels. The “photons” column holds their sum.",float
 bg_ch<c>,"The number of background photons per pixel in channel c (c = 0, 1, ...), for a multichannel spline fit with photon counts not linked across channels. The “bg” column holds their sum.",float
 rel_photons_ch<c>,"The share of the total photons emitted in channel c (c = 0, 1, ...), for a multichannel spline fit with photon counts not linked across channels. The values sum to 1 per localization and provide the continuous ratiometric readout used for color assignment.",float
+cbc_<name>,"The coordinate-based colocalization (CBC, Malkusch et al. 2012) of this localization with the channel called <name>, from -1 (anticorrelated) through 0 (uncorrelated) to 1 (colocalized).",float

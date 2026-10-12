@@ -3,8 +3,7 @@
 Clustering and Molecular Mapping
 ================================
 
-This page describes RESI and G5M for resolving and mapping individual molecules, several clustering algorithms and a nearest neighbor analysis. All
-of them are found in the ``Postprocess`` menu (see :doc:`menu-postprocess`).
+This page describes RESI and G5M for resolving and mapping individual molecules, several clustering algorithms, a nearest neighbor analysis and coordinate-based colocalization. All of them are found in the ``Postprocess`` menu (see :doc:`menu-postprocess`).
 
 .. _render-resi:
 
@@ -500,3 +499,98 @@ are calculated in 3D if both datasets have z information.
       for k in range(nnd.shape[1]):
           locs1[f"nnd_{k + 1}"] = nnd[:, k]
       io.save_locs("channel1_locs_nnd.hdf5", locs1, info1)
+
+.. _render-cbc:
+
+Coordinate-Based Colocalization (CBC)
+-------------------------------------
+
+Scores how strongly each localization of one channel colocalizes with
+another channel (`Malkusch, et al., Histochem Cell
+Biol, 2012 <https://doi.org/10.1007/s00418-011-0880-5>`__). For every
+localization, the numbers of localizations of its own channel and of the
+partner channel within radii up to ``Max. radius`` are normalized by the
+area (2D) or volume (3D) searched and compared with the Spearman rank
+correlation. The result is weighted by ``exp(-E / Max. radius)``, where ``E``
+is the distance to the nearest partner localization. CBC values range from
+-1 (anticorrelated) through 0 (uncorrelated) to 1 (colocalized).
+Localizations without any partner localization, or without another
+localization of their own channel, within ``Max. radius`` get the value set
+in ``CBC without neighbors`` (0 by default), or are removed
+if ``Remove localizations without neighbors`` is ticked. With several
+partners, a localization is removed if it has no neighbors for at least one
+of them.
+
+The CBC is **not symmetric**: the values of channel A's localizations
+against channel B differ from those of B's localizations against A. For
+example, if B labels only half of A's structures, all of B is colocalized
+with A, but only half of A is colocalized with B.
+
+.. note::
+
+   Link the localizations first (``Postprocess > Link localizations``, see
+   :ref:`render-link-localizations`). Unlinked localizations count each binding event several times, which inflates the neighbor counts. Picasso warns about unlinked channels but lets you continue if requested.
+
+To use CBC, load at least two channels and open
+``Postprocess > Coordinate-based colocalization (CBC)...``:
+
+1. Under ``Channel names``, give each channel a short name. It is used for
+   the column names (``cbc_<name>``), so that long file names do not end up
+   in them. The names are remembered while Render is open.
+2. Choose the ``Scored channel``, whose localizations get the CBC values,
+   and the ``Partner channel`` they are scored against.
+3. ``All pairs of channels (both directions)`` scores every channel against
+   every other channel instead, i.e., both directions of every pair. With
+   two channels loaded, this gives both directions of the pair.
+4. Set ``Max. radius (nm)``, the number of ``Radius steps`` up to it and the
+   value given to localizations without neighbors (``CBC without
+   neighbors``), or tick ``Remove localizations without neighbors`` to remove
+   them instead. ``3D`` uses z if all channels involved contain it.
+5. Click ``OK`` and choose where to save. A single pair is saved under the
+   file name given; with all pairs, each channel is saved as
+   ``<name>_cbc.hdf5`` in the chosen folder.
+
+The saved localizations of the scored channel have a new column
+``cbc_<name>`` per partner channel, named after the partner's name (e.g.,
+``cbc_PSD95``). Characters other than letters, digits and underscores are
+replaced by underscores (e.g., ``Cav2.1`` gives ``cbc_Cav2_1``). They can be filtered and rendered like any other
+column, for example in Filter or by rendering by property (see
+:ref:`render-properties`).
+
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
+
+   ``cbc`` works on localizations directly (x and y in camera pixels, z in
+   nm) and returns a copy with the new column and the updated metadata.
+   Several partners can be passed at once. Swap the channels to get the other
+   direction, or use ``cbc_all_pairs`` to score every channel against every
+   other one. ``undefined`` sets the value for localizations without
+   neighbors; ``remove_undefined=True`` removes them instead.
+
+   .. code-block:: python
+
+      from picasso import io, postprocess
+
+      locs_a, info_a = io.load_locs("channelA_locs.hdf5")
+      locs_b, info_b = io.load_locs("channelB_locs.hdf5")
+
+      locs_a, info_a = postprocess.cbc(
+          locs_a, info_a, locs_b, partner_names="B", r_max=200, steps=100
+      )  # new column "cbc_B"
+      io.save_locs("channelA_locs_cbc.hdf5", locs_a, info_a)
+
+      # the other direction differs
+      locs_b, info_b = postprocess.cbc(locs_b, info_b, locs_a, partner_names="A")
+
+      # all pairs of channels, both directions; channel i gets a column
+      # "cbc_<name>" for every other channel
+      locs_c, info_c = io.load_locs("channelC_locs.hdf5")
+      all_locs, all_infos = postprocess.cbc_all_pairs(
+          [locs_a, locs_b, locs_c],
+          [info_a, info_b, info_c],
+          names=["A", "B", "C"],
+          undefined=0,
+      )
+      for locs, info, name in zip(all_locs, all_infos, "ABC"):
+          io.save_locs(f"channel{name}_locs_cbc.hdf5", locs, info)

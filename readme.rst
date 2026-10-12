@@ -115,6 +115,7 @@ If you use Picasso in your research, please cite our Nature Protocols publicatio
 - SPINNA. DOI: `10.1038/s41467-025-59500-z <https://doi.org/10.1038/s41467-025-59500-z>`__
 - SPINNA for LE fitting. DOI: `10.1038/s41592-024-02242-5 <https://doi.org/10.1038/s41592-024-02242-5>`__
 - G5M. DOI: `10.1038/s41467-026-70198-5 <https://doi.org/10.1038/s41467-026-70198-5>`__
+- Coordinate-based colocalization (CBC). DOI: `10.1007/s00418-011-0880-5 <https://doi.org/10.1007/s00418-011-0880-5>`__
 
 .. SYNC-END: citing
 

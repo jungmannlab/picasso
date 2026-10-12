@@ -316,3 +316,176 @@ def test_link_all_channels_skips_linked_ones(
     assert "len" in view.locs[0].columns
     assert view.locs[1] is linked
     assert len(messages) == 1 and "linked.hdf5" in messages[0]
+
+
+def _cbc_params(pair, names) -> dict:
+    return {
+        "pair": pair,
+        "names": names,
+        "r_max": 200.0,
+        "steps": 50,
+        "undefined": -0.5,
+        "remove_undefined": False,
+        "use_z": False,
+    }
+
+
+def _answer_unlinked_warning(monkeypatch, answer) -> list[str]:
+    """Answer the warning about unlinked channels; return its texts."""
+    texts = []
+
+    def warning(parent, title, text, *args, **kwargs):
+        texts.append(text)
+        return answer
+
+    monkeypatch.setattr(QtWidgets.QMessageBox, "warning", warning)
+    return texts
+
+
+def test_cbc_unlinked_warning_can_abort(
+    window, qt_offscreen, tmp_path, monkeypatch
+):
+    view = window.view
+    view.add(str(tmp_path / "partner.hdf5"), _locs(1), _info(), render_=False)
+    monkeypatch.setattr(
+        gui_render.CBCDialog,
+        "getParams",
+        lambda *a, **k: (_cbc_params((1, 0), ["A", "B"]), True),
+    )
+    saved = []
+    monkeypatch.setattr(
+        gui_render.lib,
+        "get_save_filename_ext_dialog",
+        lambda *a, **k: saved.append(1) or ("", ""),
+    )
+    texts = _answer_unlinked_warning(
+        monkeypatch, QtWidgets.QMessageBox.StandardButton.No
+    )
+    view.cbc()
+    assert len(texts) == 1 and "Link localizations" in texts[0]
+    assert not saved  # aborted before asking where to save
+
+
+def test_cbc_single_pair_saves_scored_channel(
+    window, qt_offscreen, tmp_path, monkeypatch
+):
+    _answer_unlinked_warning(
+        monkeypatch, QtWidgets.QMessageBox.StandardButton.Yes
+    )
+    view = window.view
+    view.add(str(tmp_path / "partner.hdf5"), _locs(1), _info(), render_=False)
+    out = str(tmp_path / "scored_cbc.hdf5")
+    monkeypatch.setattr(
+        gui_render.CBCDialog,
+        "getParams",
+        lambda *a, **k: (_cbc_params((1, 0), ["Bassoon", "x"]), True),
+    )
+    monkeypatch.setattr(
+        gui_render.lib,
+        "get_save_filename_ext_dialog",
+        lambda *a, **k: (out, ""),
+    )
+    view.cbc()
+    _wait_for_tasks(qt_offscreen)
+    locs, info = gui_render.io.load_locs(out)
+    assert len(locs) == len(view.locs[1])
+    assert "cbc_Bassoon" in locs.columns
+    assert info[-1]["Scored channel"] == view.locs_paths[1]
+    assert info[-1]["Partner channels"] == [view.locs_paths[0]]
+    assert info[-1]["Undefined CBC value"] == -0.5
+
+
+@pytest.mark.parametrize("n_channels", [2, 3])
+def test_cbc_all_pairs_one_column_per_partner(
+    window, qt_offscreen, tmp_path, monkeypatch, n_channels
+):
+    """Both directions, also with only two channels. Linked channels:
+    no warning."""
+    texts = _answer_unlinked_warning(
+        monkeypatch, QtWidgets.QMessageBox.StandardButton.No
+    )
+    view = window.view
+    view.locs[0] = view.locs[0].assign(len=np.int32(1))
+    for i in range(1, n_channels):
+        locs = _locs(i).assign(len=np.int32(1))
+        view.add(str(tmp_path / f"ch{i}.hdf5"), locs, _info(), render_=False)
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    names = ["A", "B", "C"][:n_channels]
+    monkeypatch.setattr(
+        gui_render.CBCDialog,
+        "getParams",
+        lambda *a, **k: (_cbc_params(None, names), True),
+    )
+    monkeypatch.setattr(
+        QtWidgets.QFileDialog,
+        "getExistingDirectory",
+        lambda *a, **k: str(out_dir),
+    )
+    view.cbc()
+    _wait_for_tasks(qt_offscreen)
+    files = ["locs", "ch1", "ch2"][:n_channels]
+    for file, name in zip(files, names):
+        locs, _ = gui_render.io.load_locs(str(out_dir / f"{file}_cbc.hdf5"))
+        expected = {f"cbc_{other}" for other in names if other != name}
+        assert set(locs.columns) & {f"cbc_{n}" for n in names} == expected
+    assert not texts
+
+
+def test_cbc_dialog_options(window, qt_offscreen, tmp_path, monkeypatch):
+    view = window.view
+    view.add(str(tmp_path / "ch1.hdf5"), _locs(1), _info(), render_=False)
+    dialog = gui_render.CBCDialog(window)
+    assert not dialog.all_pairs.isHidden()  # both directions of 2
+    assert not dialog.use_z.isEnabled()  # no z in the test data
+    assert [n.text() for n in dialog.names] == ["locs", "ch1"]
+    dialog.undefined.setValue(5.0)
+    assert dialog.undefined.value() == 1.0  # CBC range
+    dialog.remove_undefined.setChecked(True)
+    assert not dialog.undefined.isEnabled()
+    dialog.all_pairs.setChecked(True)
+    assert not dialog.scored.isEnabled()
+    # names giving the same column are refused
+    messages = []
+    monkeypatch.setattr(
+        QtWidgets.QMessageBox,
+        "information",
+        lambda parent, title, text, *a, **k: messages.append(text),
+    )
+    dialog.names[0].setText("PSD.95")
+    dialog.names[1].setText("PSD 95")
+    dialog.accept()
+    assert messages and "distinct" in messages[0]
+    assert dialog.result() != QtWidgets.QDialog.DialogCode.Accepted
+    # names are remembered for the session
+    dialog.names[1].setText("Rim1")
+    dialog.accept()
+    assert gui_render.CBCDialog(window).names[1].text() == "Rim1"
+
+
+def test_cbc_remove_undefined(window, qt_offscreen, tmp_path, monkeypatch):
+    _answer_unlinked_warning(
+        monkeypatch, QtWidgets.QMessageBox.StandardButton.Yes
+    )
+    view = window.view
+    # a partner covering only part of the field of view
+    partner = _locs(1)
+    partner = partner[partner["x"] < WIDTH / 2]
+    view.add(str(tmp_path / "half.hdf5"), partner, _info(), render_=False)
+    out = str(tmp_path / "scored_cbc.hdf5")
+    params = _cbc_params((0, 1), ["A", "B"])
+    params["remove_undefined"] = True
+    monkeypatch.setattr(
+        gui_render.CBCDialog, "getParams", lambda *a, **k: (params, True)
+    )
+    monkeypatch.setattr(
+        gui_render.lib,
+        "get_save_filename_ext_dialog",
+        lambda *a, **k: (out, ""),
+    )
+    view.cbc()
+    _wait_for_tasks(qt_offscreen)
+    locs, info = gui_render.io.load_locs(out)
+    n_removed = info[-1]["Localizations without neighbors removed"]
+    assert 0 < n_removed < len(view.locs[0])
+    assert len(locs) == len(view.locs[0]) - n_removed

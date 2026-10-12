@@ -8,6 +8,8 @@ Most fixtures (``locs``, ``info``) live in ``tests/conftest.py``.
 
 from __future__ import annotations
 
+import warnings
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -2053,6 +2055,216 @@ class TestNnAnalysis:
         Y = np.zeros((5, 3))
         with pytest.raises(ValueError):
             postprocess.nn_analysis(X, Y, nn_count=1)
+
+
+# ---------------------------------------------------------------------------
+# Coordinate-based colocalization (CBC)
+# ---------------------------------------------------------------------------
+
+
+def _cbc_locs(centers, n, seed, sigma=0.2, z=False):
+    """Localizations scattered around the given centers (camera
+    pixels)."""
+    rng = np.random.default_rng(seed)
+    xy = centers[rng.integers(len(centers), size=n)]
+    xy = xy + rng.normal(0.0, sigma, size=xy.shape)
+    locs = pd.DataFrame(
+        {
+            "frame": np.arange(n, dtype=np.uint32),
+            "x": xy[:, 0].astype(np.float32),
+            "y": xy[:, 1].astype(np.float32),
+        }
+    )
+    if z:
+        locs["z"] = rng.normal(0.0, 30.0, size=n).astype(np.float32)
+    return locs
+
+
+@pytest.mark.filterwarnings("ignore:.*not linked")
+class TestCbc:
+    INFO = [{"Pixelsize": 130.0}]
+
+    @pytest.fixture
+    def channels(self):
+        rng = np.random.default_rng(0)
+        centers = rng.uniform(0, 100, size=(100, 2))
+        a = _cbc_locs(centers, 4000, 1)
+        b = _cbc_locs(centers[:50], 2000, 2)  # half of a's clusters
+        c = _cbc_locs(rng.uniform(0, 100, size=(30, 2)), 1000, 3)
+        return a, b, c
+
+    def test_colocalized_above_uncorrelated(self, channels):
+        a, b, c = channels
+        out, _ = postprocess.cbc(
+            a, self.INFO, [b, c], partner_names=["b", "c"]
+        )
+        assert out["cbc_b"].mean() > out["cbc_c"].mean() + 0.2
+        assert abs(out["cbc_c"].median()) < 0.05
+        assert out["cbc_b"].dtype == np.float32
+        assert out["cbc_b"].between(-1, 1).all()
+
+    def test_not_symmetric(self, channels):
+        """b sits on half of a's clusters: every b localization is
+        colocalized with a, but only half of a's with b."""
+        a, b, _ = channels
+        ab, _ = postprocess.cbc(a, self.INFO, b)
+        ba, _ = postprocess.cbc(b, self.INFO, a)
+        assert ba["cbc"].median() > ab["cbc"].median() + 0.2
+
+    def test_returns_copy_and_metadata(self, channels):
+        a, b, _ = channels
+        info = list(self.INFO)
+        out, new_info = postprocess.cbc(a, info, b, r_max=150, steps=50)
+        assert "cbc" not in a.columns
+        assert list(out.columns) == list(a.columns) + ["cbc"]
+        assert len(info) == 1 and len(new_info) == 2
+        entry = new_info[-1]
+        assert entry["CBC columns"] == ["cbc"]
+        assert entry["Max. radius (nm)"] == 150
+        assert entry["Radius steps"] == 50
+        assert entry["Dimensions"] == 2
+
+    def test_default_columns_for_partner_list(self, channels):
+        a, b, c = channels
+        out, _ = postprocess.cbc(a, self.INFO, [b, c])
+        assert {"cbc_0", "cbc_1"} <= set(out.columns)
+
+    def test_partners_and_chunks_do_not_change_values(self, channels):
+        """Shared self-counts and chunking are only optimizations."""
+        a, b, c = channels
+        both, _ = postprocess.cbc(
+            a, self.INFO, [b, c], partner_names=["b", "c"], chunk_size=777
+        )
+        single, _ = postprocess.cbc(a, self.INFO, c)
+        np.testing.assert_array_equal(both["cbc_c"], single["cbc"])
+
+    def test_3d_used_when_all_have_z(self):
+        rng = np.random.default_rng(4)
+        centers = rng.uniform(0, 50, size=(40, 2))
+        a = _cbc_locs(centers, 1000, 5, z=True)
+        b = _cbc_locs(centers, 1000, 6, z=True)
+        _, info3 = postprocess.cbc(a, self.INFO, b)
+        assert info3[-1]["Dimensions"] == 3
+        _, info2 = postprocess.cbc(a, self.INFO, b, use_z=False)
+        assert info2[-1]["Dimensions"] == 2
+        with pytest.raises(ValueError):
+            postprocess.cbc(a, self.INFO, b.drop(columns="z"), use_z=True)
+
+    def test_partner_names_give_short_columns(self, channels):
+        a, b, c = channels
+        out, info = postprocess.cbc(
+            a, self.INFO, [b, c], partner_names=["Cav2.1", "PSD 95"]
+        )
+        assert {"cbc_Cav2_1", "cbc_PSD_95"} <= set(out.columns)
+        assert info[-1]["CBC partner names"] == ["Cav2.1", "PSD 95"]
+        assert info[-1]["CBC columns"] == ["cbc_Cav2_1", "cbc_PSD_95"]
+
+    def test_cbc_column(self):
+        assert postprocess._cbc_column("Cav2.1") == "cbc_Cav2_1"
+        assert postprocess._cbc_column(" a--b ") == "cbc_a_b"
+        with pytest.raises(ValueError):
+            postprocess._cbc_column(".")
+
+    def test_all_pairs_matches_single_calls(self, channels):
+        """Both directions of every pair, identical to ``cbc``."""
+        a, b, c = channels
+        progress = []
+        out, infos = postprocess.cbc_all_pairs(
+            [a, b, c],
+            [self.INFO] * 3,
+            names=["A", "B", "C"],
+            undefined=-2.0,
+            progress_callback=progress.append,
+        )
+        assert len(out) == len(infos) == 3
+        assert set(out[0].columns) - set(a.columns) == {"cbc_B", "cbc_C"}
+        assert set(out[1].columns) - set(b.columns) == {"cbc_A", "cbc_C"}
+        assert infos[1][-1]["CBC name"] == "B"
+        assert infos[1][-1]["Undefined CBC value"] == -2.0
+        single, _ = postprocess.cbc(
+            b, self.INFO, [a, c], partner_names=["A", "C"], undefined=-2.0
+        )
+        for column in ("cbc_A", "cbc_C"):
+            np.testing.assert_array_equal(out[1][column], single[column])
+        # both directions differ (not symmetric)
+        assert out[1]["cbc_A"].median() > out[0]["cbc_B"].median() + 0.2
+        # cumulative progress over all channels
+        assert progress == sorted(progress)
+        assert progress[-1] == len(a) + len(b) + len(c)
+
+    def test_all_pairs_invalid_arguments(self, channels):
+        a, b, _ = channels
+        with pytest.raises(ValueError):
+            postprocess.cbc_all_pairs([a], [self.INFO])
+        with pytest.raises(ValueError):
+            postprocess.cbc_all_pairs([a, b], [self.INFO])
+        with pytest.raises(ValueError):
+            postprocess.cbc_all_pairs([a, b], [self.INFO] * 2, names=["x"])
+        with pytest.raises(ValueError):
+            postprocess.cbc_all_pairs(
+                [a, b], [self.INFO] * 2, names=["x", "x"]
+            )
+
+    def test_undefined_without_neighbors(self):
+        a = pd.DataFrame({"x": [0.0, 0.01, 50.0], "y": [0.0, 0.0, 50.0]})
+        b = pd.DataFrame({"x": [0.02, 0.03], "y": [0.0, 0.01]})
+        out, _ = postprocess.cbc(a, self.INFO, b, undefined=np.nan)
+        assert np.isnan(out["cbc"].iloc[2])  # isolated localization
+        assert np.isfinite(out["cbc"].iloc[:2]).all()
+        out, _ = postprocess.cbc(a, self.INFO, b.iloc[:0])
+        assert (out["cbc"] == 0).all()  # empty partner
+        out, _ = postprocess.cbc(a, self.INFO, b, undefined=-1.5)
+        assert out["cbc"].iloc[2] == -1.5
+
+    def test_remove_undefined(self):
+        a = pd.DataFrame(
+            {"x": [0.0, 0.01, 50.0, 0.02], "y": [0.0, 0.0, 50.0, 0.01]}
+        )
+        b = pd.DataFrame({"x": [0.02, 0.03], "y": [0.0, 0.01]})
+        c = pd.DataFrame({"x": [0.0], "y": [0.02]})
+        kept, info = postprocess.cbc(a, self.INFO, b, remove_undefined=True)
+        assert len(kept) == 3  # the isolated localization is removed
+        assert 50.0 not in kept["x"].to_numpy()
+        assert list(kept.index) == [0, 1, 2]
+        assert info[-1]["Localizations without neighbors removed"] == 1
+        assert "Undefined CBC value" not in info[-1]
+        # removed if undefined against any partner
+        kept, _ = postprocess.cbc(
+            a, self.INFO, [b, c.iloc[:0]], remove_undefined=True
+        )
+        assert len(kept) == 0
+        all_locs, all_infos = postprocess.cbc_all_pairs(
+            [a, b, c], [self.INFO] * 3, remove_undefined=True
+        )
+        assert len(all_locs[0]) == 3
+        assert all_infos[0][-1]["Localizations without neighbors removed"] == 1
+
+    def test_warns_if_not_linked(self, channels):
+        a, b, _ = channels
+        with pytest.warns(UserWarning, match="not linked"):
+            postprocess.cbc(a, self.INFO, b)
+        linked_a = a.assign(len=np.ones(len(a), dtype=np.int32))
+        linked_b = b.assign(len=np.ones(len(b), dtype=np.int32))
+        with pytest.warns(UserWarning, match="not linked"):
+            postprocess.cbc(linked_a, self.INFO, b)  # partner unlinked
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            postprocess.cbc(linked_a, self.INFO, linked_b)
+        with pytest.warns(UserWarning, match="not linked"):
+            postprocess.cbc_all_pairs([linked_a, b], [self.INFO] * 2)
+
+    def test_invalid_arguments(self, channels):
+        a, b, c = channels
+        with pytest.raises(ValueError):
+            postprocess.cbc(a, self.INFO, [b, c], partner_names=["x"])
+        with pytest.raises(ValueError):  # same column cbc_x_y
+            postprocess.cbc(a, self.INFO, [b, c], partner_names=["x.y", "x y"])
+        with pytest.raises(ValueError):
+            postprocess.cbc(a, self.INFO, b, partner_names="...")
+        with pytest.raises(ValueError):
+            postprocess.cbc(a, self.INFO, b, steps=1)
+        with pytest.raises(ValueError):
+            postprocess.cbc(a, self.INFO, [])
 
 
 # ---------------------------------------------------------------------------

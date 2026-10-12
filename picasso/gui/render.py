@@ -15,6 +15,7 @@ import os
 import sys
 import copy
 import time
+import warnings
 import os.path
 from math import ceil
 from collections import Counter
@@ -7854,6 +7855,258 @@ class ToolsSettingsDialog(lib.Dialog):
         self.window.view.update_scene(use_cache=True)
 
 
+class CBCDialog(lib.Dialog):
+    """Choose the channels and parameters for coordinate-based
+    colocalization (CBC, Malkusch, et al. Histochem Cell Biol, 2012.
+    DOI: 10.1007/s00418-011-0880-5).
+
+    The CBC is not symmetric, so the channel whose localizations are
+    scored and the partner channel are chosen separately, or all pairs
+    of channels are computed in both directions.
+
+    ...
+
+    Attributes
+    ----------
+    all_pairs : QCheckBox
+        If checked, every channel is scored against every other
+        channel.
+    names : list of QLineEdits
+        Short name of each channel, used for the CBC column names
+        (``cbc_<name>``).
+    partner : QComboBox
+        Channel that the localizations are scored against.
+    r_max : QDoubleSpinBox
+        Maximum radius in nm.
+    scored : QComboBox
+        Channel whose localizations get the CBC values.
+    steps : QSpinBox
+        Number of radii up to the maximum radius.
+    remove_undefined : QCheckBox
+        If checked, localizations without neighbors within the maximum
+        radius are removed.
+    undefined : QDoubleSpinBox
+        CBC given to localizations without neighbors within the maximum
+        radius, between -1 and 1.
+    use_z : QCheckBox
+        If checked, the CBC is computed in 3D. Only enabled if all
+        channels involved contain z.
+    """
+
+    DOCS_URL = docs_url("render/analysis.html#render-cbc")
+
+    def __init__(self, window: QtWidgets.QMainWindow) -> None:
+        super().__init__(window)
+        self.window = window
+        self.setWindowTitle("Coordinate-based colocalization (CBC)")
+        view = window.view
+        self._has_z = ["z" in locs_.columns for locs_ in view.locs]
+        titles = [check.text() for check in window.dataset_dialog.checks]
+        vbox = QtWidgets.QVBoxLayout(self)
+        grid = QtWidgets.QGridLayout()
+        grid.addWidget(lib.HelpButton(self.DOCS_URL), 0, 0)
+
+        # short channel names for the column names
+        names_box = QtWidgets.QGroupBox("Channel names")
+        names_box.setToolTip(
+            "Short name of each channel. The CBC values against a\n"
+            "channel are saved in the column cbc_<name>."
+        )
+        names_grid = QtWidgets.QGridLayout(names_box)
+        self.names = []
+        for i, (title, path) in enumerate(zip(titles, view.locs_paths)):
+            label = QtWidgets.QLabel(title)
+            label.setToolTip(path)
+            names_grid.addWidget(label, i, 0)
+            name = QtWidgets.QLineEdit(view._cbc_names.get(path, ""))
+            if not name.text():
+                name.setText(os.path.splitext(os.path.basename(title))[0])
+            names_grid.addWidget(name, i, 1)
+            self.names.append(name)
+        grid.addWidget(names_box, 1, 0, 1, 2)
+
+        scored_label = QtWidgets.QLabel("Scored channel:")
+        scored_label.setToolTip(
+            "Channel whose localizations get the CBC values."
+        )
+        grid.addWidget(scored_label, 2, 0)
+        self.scored = QtWidgets.QComboBox()
+        self.scored.addItems(titles)
+        grid.addWidget(self.scored, 2, 1)
+        partner_label = QtWidgets.QLabel("Partner channel:")
+        partner_label.setToolTip(
+            "Channel that the localizations are scored against.\n"
+            "The CBC is not symmetric: swapping the channels gives\n"
+            "different values."
+        )
+        grid.addWidget(partner_label, 3, 0)
+        self.partner = QtWidgets.QComboBox()
+        self.partner.addItems(titles)
+        self.partner.setCurrentIndex(1)
+        grid.addWidget(self.partner, 3, 1)
+
+        self.all_pairs = QtWidgets.QCheckBox(
+            "All pairs of channels (both directions)"
+        )
+        self.all_pairs.setToolTip(
+            "Score every channel against every other channel, i.e.,\n"
+            "both directions of each pair. Each channel is saved with\n"
+            "one CBC column per partner."
+        )
+        grid.addWidget(self.all_pairs, 4, 0, 1, 2)
+
+        r_label = QtWidgets.QLabel("Max. radius (nm):")
+        r_label.setToolTip(
+            "Largest radius of the neighbor counts compared and the\n"
+            "length scale of the nearest neighbor weighting."
+        )
+        grid.addWidget(r_label, 5, 0)
+        self.r_max = QtWidgets.QDoubleSpinBox()
+        self.r_max.setRange(0.1, 1e6)
+        self.r_max.setDecimals(1)
+        self.r_max.setValue(200.0)
+        self.r_max.setSingleStep(10)
+        grid.addWidget(self.r_max, 5, 1)
+        steps_label = QtWidgets.QLabel("Radius steps:")
+        steps_label.setToolTip("Number of radii up to the max. radius.")
+        grid.addWidget(steps_label, 6, 0)
+        self.steps = QtWidgets.QSpinBox()
+        self.steps.setRange(2, 10_000)
+        self.steps.setValue(100)
+        grid.addWidget(self.steps, 6, 1)
+        undefined_label = QtWidgets.QLabel("CBC without neighbors:")
+        undefined_label.setToolTip(
+            "CBC given to localizations without any partner\n"
+            "localization, or without another localization of their\n"
+            "own channel, within the max. radius, where the CBC is\n"
+            "not defined."
+        )
+        grid.addWidget(undefined_label, 7, 0)
+        self.undefined = QtWidgets.QDoubleSpinBox()
+        self.undefined.setRange(-1.0, 1.0)
+        self.undefined.setDecimals(2)
+        self.undefined.setValue(0.0)
+        self.undefined.setSingleStep(0.1)
+        grid.addWidget(self.undefined, 7, 1)
+        self.remove_undefined = QtWidgets.QCheckBox(
+            "Remove localizations without neighbors"
+        )
+        self.remove_undefined.setToolTip(
+            "Remove the localizations where the CBC is not defined\n"
+            "(against at least one partner) instead of giving them\n"
+            "the value above."
+        )
+        self.remove_undefined.toggled.connect(
+            lambda checked: self.undefined.setEnabled(not checked)
+        )
+        grid.addWidget(self.remove_undefined, 8, 0, 1, 2)
+        self.use_z = QtWidgets.QCheckBox("3D (x, y and z)")
+        self.use_z.setToolTip(
+            "Compute the CBC in 3D. Requires z in all channels involved."
+        )
+        self.use_z.setChecked(True)
+        grid.addWidget(self.use_z, 9, 0, 1, 2)
+        vbox.addLayout(grid)
+
+        self.scored.currentIndexChanged.connect(self.update_widgets)
+        self.partner.currentIndexChanged.connect(self.update_widgets)
+        self.all_pairs.toggled.connect(self.update_widgets)
+
+        self.buttons = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.StandardButton.Ok
+            | QtWidgets.QDialogButtonBox.StandardButton.Cancel,
+            QtCore.Qt.Orientation.Horizontal,
+            self,
+        )
+        vbox.addWidget(self.buttons)
+        self.buttons.accepted.connect(self.accept)
+        self.buttons.rejected.connect(self.reject)
+        self.update_widgets()
+
+    def update_widgets(self) -> None:
+        """Enable the channel selection and 3D option according to the
+        current choice."""
+        all_pairs = self.all_pairs.isChecked()
+        self.scored.setEnabled(not all_pairs)
+        self.partner.setEnabled(not all_pairs)
+        has_z = all(self._has_z[i] for i in self.channels())
+        self.use_z.setEnabled(has_z)
+        if not has_z:
+            self.use_z.setChecked(False)
+
+    def channels(self) -> list[int]:
+        """Indices of the channels used with the current choice."""
+        if self.all_pairs.isChecked():
+            return list(range(len(self.names)))
+        return [self.scored.currentIndex(), self.partner.currentIndex()]
+
+    def accept(self) -> None:
+        if (
+            not self.all_pairs.isChecked()
+            and self.scored.currentIndex() == self.partner.currentIndex()
+        ):
+            QtWidgets.QMessageBox.information(
+                self, "CBC", "Please choose two different channels."
+            )
+            return
+        # the names that end up in columns must give distinct columns
+        if self.all_pairs.isChecked():
+            used = self.channels()
+        else:
+            used = [self.partner.currentIndex()]
+        try:
+            columns = [
+                postprocess._cbc_column(self.names[i].text()) for i in used
+            ]
+        except ValueError:
+            QtWidgets.QMessageBox.information(
+                self,
+                "CBC",
+                "Please give every channel a name containing letters or "
+                "digits.",
+            )
+            return
+        if len(set(columns)) < len(columns):
+            QtWidgets.QMessageBox.information(
+                self,
+                "CBC",
+                "Please give the channels distinct names; these give the "
+                "same column:\n" + ", ".join(sorted(columns)),
+            )
+            return
+        view = self.window.view
+        for path, name in zip(view.locs_paths, self.names):
+            view._cbc_names[path] = name.text()
+        super().accept()
+
+    @staticmethod
+    def getParams(
+        parent: QtWidgets.QMainWindow,
+    ) -> tuple[dict, bool]:
+        """Create the dialog and return the requested CBC parameters.
+        ``"pairs"`` is None for all pairs of channels, or the (scored
+        channel, partner channel) indices."""
+        dialog = CBCDialog(parent)
+        result = dialog.exec()
+        if dialog.all_pairs.isChecked():
+            pair = None
+        else:
+            pair = (
+                dialog.scored.currentIndex(),
+                dialog.partner.currentIndex(),
+            )
+        params = {
+            "pair": pair,
+            "names": [name.text() for name in dialog.names],
+            "r_max": dialog.r_max.value(),
+            "steps": dialog.steps.value(),
+            "undefined": dialog.undefined.value(),
+            "remove_undefined": dialog.remove_undefined.isChecked(),
+            "use_z": dialog.use_z.isEnabled() and dialog.use_z.isChecked(),
+        }
+        return params, result == QtWidgets.QDialog.DialogCode.Accepted
+
+
 class RESIDialog(lib.Dialog):
     """Choose RESI parameters.
 
@@ -9942,6 +10195,8 @@ class View(QtWidgets.QLabel):
         self._point_sets = []  # finalized measurement sets
         self._measure_following = True  # cursor followed live while True
         self._measure_cursor = None  # live cursor position in Measure mode
+        # CBC channel names typed in this session, by channel path
+        self._cbc_names: dict[str, str] = {}
         # Move tool: the channels being dragged, the press position and
         # the coordinates at the press (camera pixels), the current
         # shift and the finished moves, (channels, dx, dy), for undo
@@ -14169,6 +14424,142 @@ class View(QtWidgets.QLabel):
         }
         io.save_locs(path, new_locs, self.infos[channel1] + [new_info])
 
+    def cbc(self) -> None:
+        """Ask for the channels and parameters of coordinate-based
+        colocalization (CBC), compute it on a worker thread and save
+        the scored channels with the new CBC column(s), see
+        ``postprocess.cbc`` and ``postprocess.cbc_all_pairs``."""
+        n_channels = len(self.locs_paths)
+        if n_channels < 2:
+            QtWidgets.QMessageBox.information(
+                self,
+                "CBC",
+                "Coordinate-based colocalization requires at least two "
+                "channels.",
+            )
+            return
+        params, ok = CBCDialog.getParams(self.window)
+        if not ok:
+            return
+        pair = params["pair"]
+        names = params["names"]
+        used = list(range(n_channels)) if pair is None else list(pair)
+
+        # unlinked localizations count each binding event several times
+        unlinked = [i for i in used if "len" not in self.locs[i].columns]
+        if unlinked:
+            reply = QtWidgets.QMessageBox.warning(
+                self,
+                "CBC",
+                "These channels are not linked (no 'len' column), so each "
+                "binding event is counted several times in the CBC:\n\n"
+                + "\n".join(
+                    self.window.dataset_dialog.checks[i].text()
+                    for i in unlinked
+                )
+                + "\n\nConsider linking them first (Postprocess > Link "
+                "localizations).\n\nContinue anyway?",
+                QtWidgets.QMessageBox.StandardButton.Yes
+                | QtWidgets.QMessageBox.StandardButton.No,
+                QtWidgets.QMessageBox.StandardButton.No,
+            )
+            if reply != QtWidgets.QMessageBox.StandardButton.Yes:
+                return
+
+        # where to save
+        if pair is not None:
+            path, ext = lib.get_save_filename_ext_dialog(
+                self,
+                "Save localizations with CBC",
+                os.path.splitext(self.locs_paths[pair[0]])[0] + "_cbc.hdf5",
+                filter="*.hdf5",
+                check_ext=".yaml",
+            )
+            if not path:
+                return
+            out_paths = [path]
+        else:
+            folder = QtWidgets.QFileDialog.getExistingDirectory(
+                self,
+                "Folder to save the localizations with CBC",
+                os.path.dirname(self.locs_paths[0]),
+            )
+            if not folder:
+                return
+            out_paths = [
+                os.path.join(
+                    folder,
+                    os.path.splitext(os.path.basename(path))[0] + "_cbc.hdf5",
+                )
+                for path in self.locs_paths
+            ]
+            existing = [p for p in out_paths if os.path.exists(p)]
+            if existing:
+                reply = QtWidgets.QMessageBox.question(
+                    self,
+                    "CBC",
+                    "These files exist already and will be overwritten:\n"
+                    + "\n".join(os.path.basename(p) for p in existing),
+                )
+                if reply != QtWidgets.QMessageBox.StandardButton.Yes:
+                    return
+
+        # snapshot the inputs for the worker thread
+        locs = [self.locs[i] for i in used]
+        infos = [self.infos[i] for i in used]
+        paths = [self.locs_paths[i] for i in used]
+        kwargs = dict(
+            r_max=params["r_max"],
+            steps=params["steps"],
+            use_z=params["use_z"],
+            undefined=params["undefined"],
+            remove_undefined=params["remove_undefined"],
+        )
+
+        def compute(progress: lib.TaskProgress) -> None:
+            with warnings.catch_warnings():  # the user was asked
+                warnings.filterwarnings("ignore", message=".*not linked")
+                if pair is None:
+                    progress.phase(
+                        "Calculating CBC...", sum(len(_) for _ in locs)
+                    )
+                    all_locs, all_infos = postprocess.cbc_all_pairs(
+                        locs,
+                        infos,
+                        names=names,
+                        progress_callback=progress.set_value,
+                        **kwargs,
+                    )
+                else:
+                    progress.phase("Calculating CBC...", len(locs[0]))
+                    new_locs, new_info = postprocess.cbc(
+                        locs[0],
+                        infos[0],
+                        locs[1],
+                        partner_names=names[pair[1]],
+                        progress_callback=progress.set_value,
+                        **kwargs,
+                    )
+                    all_locs, all_infos = [new_locs], [new_info]
+            progress.check_canceled()
+            for i, (new_locs, new_info) in enumerate(zip(all_locs, all_infos)):
+                if i >= len(out_paths):
+                    break  # single pair: only the scored channel
+                entry = new_info[-1]
+                entry["Generated by"] = f"Picasso v{__version__} Render CBC"
+                entry["Scored channel"] = paths[i]
+                entry["Partner channels"] = [
+                    p for j, p in enumerate(paths) if j != i
+                ]
+                io.save_locs(out_paths[i], new_locs, new_info)
+
+        lib.run_task(
+            compute,
+            "Calculating CBC...",
+            self.window,
+            title="CBC",
+        )
+
     def display_pixels_per_viewport_pixels(self) -> float:
         """Return optimal oversampling given viewport size."""
         v_height, v_width = render.viewport_size(self.viewport)
@@ -17840,6 +18231,10 @@ class Window(QtWidgets.QMainWindow):
             "Calculate nearest neighbor distances..."
         )
         nn_action.triggered.connect(self.view.nearest_neighbor)
+        cbc_action = postprocess_menu.addAction(
+            "Coordinate-based colocalization (CBC)..."
+        )
+        cbc_action.triggered.connect(self.view.cbc)
 
         postprocess_menu.addSeparator()
         resi_action = postprocess_menu.addAction("RESI...")

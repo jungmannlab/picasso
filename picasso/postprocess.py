@@ -13,10 +13,12 @@ from __future__ import annotations
 
 import itertools
 import os
+import re
 import warnings
 from collections import OrderedDict
 from collections.abc import Callable
 from copy import deepcopy
+from functools import partial
 from typing import Literal
 from concurrent.futures import ThreadPoolExecutor as _ThreadPoolExecutor
 from threading import Thread
@@ -28,6 +30,7 @@ import matplotlib.pyplot as plt
 from scipy import interpolate
 from scipy.optimize import curve_fit, OptimizeWarning
 from scipy.spatial import distance, KDTree
+from scipy.stats import rankdata
 from tqdm import tqdm, trange
 
 from . import (
@@ -5447,6 +5450,547 @@ def nn_analysis(
         nn = distances
     nn.reshape(-1, nn_count)  # ensure the shape is (N, nn_count)
     return nn
+
+
+def _cbc_column(name: str) -> str:
+    """Name of the column holding CBC values against a partner called
+    ``name``: ``"cbc_"`` followed by the name with every run of
+    characters other than letters, digits and underscores replaced by
+    one underscore (e.g., ``"Cav2.1"`` gives ``"cbc_Cav2_1"``), so that
+    it can be used in filter expressions. Raises ValueError if ``name``
+    contains no letter, digit or underscore."""
+    clean = re.sub(r"\W+", "_", str(name)).strip("_")
+    if not clean:
+        raise ValueError(f"Invalid CBC partner name: {name!r}.")
+    return f"cbc_{clean}"
+
+
+def cbc(
+    locs: pd.DataFrame,
+    info: list[dict],
+    partner_locs: pd.DataFrame | list[pd.DataFrame],
+    partner_names: str | list[str] | None = None,
+    r_max: float = 200.0,
+    steps: int = 100,
+    use_z: bool | None = None,
+    undefined: float = 0.0,
+    remove_undefined: bool = False,
+    chunk_size: int = 20_000,
+    progress_callback: (
+        Callable[[int], None] | Literal["console"] | None
+    ) = None,
+) -> tuple[pd.DataFrame, list[dict]]:
+    """Coordinate-based colocalization (CBC) of localizations with one
+    or more partner localization lists, following Malkusch, et al.
+    (2012), see References.
+
+    Every localization of ``locs`` gets a CBC value against each
+    partner, from -1 (anticorrelated) through 0 (uncorrelated) to 1
+    (colocalized). For a localization, the numbers of its own channel's
+    and of the partner's localizations within radii r up to ``r_max``
+    are normalized by the area (2D) or volume (3D) searched, the two
+    distributions are compared with the Spearman rank correlation and
+    the result is weighted by ``exp(-E / r_max)``, where E is the
+    distance to the nearest partner localization.
+
+    The CBC is not symmetric: the values of ``locs`` against a partner
+    differ from the values of the partner against ``locs``. To get both
+    directions, call the function with the roles swapped, or use
+    ``cbc_all_pairs`` to score every channel against every other one.
+
+    Parameters
+    ----------
+    locs : pd.DataFrame
+        Localizations that are scored.
+    info : list of dicts
+        Metadata of ``locs``, must contain the camera pixel size.
+    partner_locs : pd.DataFrame or list of pd.DataFrames
+        Partner localizations that ``locs`` are scored against, in the
+        same coordinate system (camera pixels, z in nm) as ``locs``.
+        The neighbor counts of ``locs`` within their own channel are
+        shared between the partners, so passing several partners at
+        once is faster than one call per partner.
+    partner_names : str, list of str or None, optional
+        Short names of the partners, one per partner. The CBC values
+        against a partner are saved in the column ``cbc_<name>``, where
+        characters other than letters, digits and underscores are
+        replaced by underscores (e.g., ``"Cav2.1"`` gives
+        ``"cbc_Cav2_1"``). If None, the column is called ``"cbc"`` for a
+        single partner and ``"cbc_0"``, ``"cbc_1"``, ... for a list of
+        partners. Existing columns of the same name are overwritten.
+        Default is None.
+    r_max : float, optional
+        Maximum radius in nm. Default is 200.
+    steps : int, optional
+        Number of radii between 0 (excluded) and ``r_max``, at least
+        2. Default is 100.
+    use_z : bool or None, optional
+        Whether to compute the CBC in 3D (x, y, z). If None, 3D is used
+        when ``locs`` and all partners contain z. Default is None.
+    undefined : float, optional
+        CBC given to localizations without any partner localization, or
+        without any localization of their own channel other than
+        themselves, within ``r_max``, where the CBC is not defined.
+        Default is 0. ``np.nan`` marks them as missing, but
+        ``io.save_locs`` removes localizations with NaN values.
+    remove_undefined : bool, optional
+        If True, localizations where the CBC is not defined against at
+        least one partner are removed instead of getting ``undefined``.
+        Default is False.
+    chunk_size : int, optional
+        Number of localizations processed at once, limits memory usage.
+        Default is 20,000.
+    progress_callback : {callable, "console", None}, optional
+        Called with the number of localizations of ``locs`` processed
+        so far (up to ``len(locs)``). If "console", a progress bar is
+        printed. If None, no progress is reported. Default is None.
+
+    Returns
+    -------
+    locs : pd.DataFrame
+        Copy of the input localizations with the new CBC column(s)
+        (float32), without the localizations where the CBC is not
+        defined if ``remove_undefined``.
+    info : list of dicts
+        Metadata of the input localizations with a new entry describing
+        the CBC parameters.
+
+    Raises
+    ------
+    ValueError
+        If the parameters are invalid, the number of partner names does
+        not match the number of partners, two partner names give the
+        same column, or 3D is requested for localizations without z.
+
+    Warns
+    -----
+    UserWarning
+        If ``locs`` or any partner is not linked (no ``len`` column).
+        Unlinked localizations count every binding event several times
+        and inflate the neighbor counts; link them first with
+        ``postprocess.link``.
+
+    See Also
+    --------
+    cbc_all_pairs : CBC of every channel against every other channel.
+
+    References
+    ----------
+    Malkusch, S., Endesfelder, U., Mondry, J. et al. Coordinate-based
+    colocalization analysis of single-molecule localization microscopy
+    data. Histochem Cell Biol 137, 1-10 (2012).
+    https://doi.org/10.1007/s00418-011-0880-5
+    """
+    single = isinstance(partner_locs, pd.DataFrame)
+    partners = [partner_locs] if single else list(partner_locs)
+    if not partners:
+        raise ValueError("At least one partner is required.")
+    if partner_names is None:
+        columns = (
+            ["cbc"] if single else [f"cbc_{i}" for i in range(len(partners))]
+        )
+    else:
+        if isinstance(partner_names, str):
+            partner_names = [partner_names]
+        partner_names = list(partner_names)
+        if len(partner_names) != len(partners):
+            raise ValueError(
+                f"{len(partner_names)} partner names given for "
+                f"{len(partners)} partners."
+            )
+        columns = [_cbc_column(name) for name in partner_names]
+    use_z = _validate_cbc_args([locs] + partners, columns, r_max, steps, use_z)
+    _warn_if_not_linked([locs] + partners)
+    callback, close = _cbc_progress(progress_callback, len(locs))
+    try:
+        new_locs, new_info = _cbc_channel(
+            locs,
+            info,
+            partners,
+            partner_names,
+            columns,
+            r_max,
+            steps,
+            use_z,
+            undefined,
+            remove_undefined,
+            chunk_size,
+            callback,
+        )
+    finally:
+        close()
+    return new_locs, new_info
+
+
+def cbc_all_pairs(
+    locs: list[pd.DataFrame],
+    infos: list[list[dict]],
+    names: list[str] | None = None,
+    r_max: float = 200.0,
+    steps: int = 100,
+    use_z: bool | None = None,
+    undefined: float = 0.0,
+    remove_undefined: bool = False,
+    chunk_size: int = 20_000,
+    progress_callback: (
+        Callable[[int], None] | Literal["console"] | None
+    ) = None,
+) -> tuple[list[pd.DataFrame], list[list[dict]]]:
+    """Coordinate-based colocalization (CBC) of every channel against
+    every other channel, following Malkusch, et al. (2012), see
+    References.
+
+    The CBC is not symmetric, so both directions of each pair are
+    computed: channel i gets one column ``cbc_<name of j>`` for every
+    other channel j. See ``cbc`` for the method.
+
+    Parameters
+    ----------
+    locs : list of pd.DataFrames
+        Localizations of at least two channels, in the same coordinate
+        system (camera pixels, z in nm).
+    infos : list of list of dicts
+        Metadata of each channel, must contain the camera pixel size.
+    names : list of str or None, optional
+        Short names of the channels, used for the column names
+        ``cbc_<name>`` (see ``cbc``). If None, the channels are called ``"0"``,
+        ``"1"``, ... Default is None.
+    r_max : float, optional
+        Maximum radius in nm. Default is 200.
+    steps : int, optional
+        Number of radii between 0 (excluded) and ``r_max``, at least
+        2. Default is 100.
+    use_z : bool or None, optional
+        Whether to compute the CBC in 3D (x, y, z). If None, 3D is used
+        when all channels contain z. Default is None.
+    undefined : float, optional
+        CBC given to localizations without any partner localization, or
+        without any localization of their own channel other than
+        themselves, within ``r_max``. Default is 0. See ``cbc``.
+    remove_undefined : bool, optional
+        If True, localizations where the CBC is not defined against at
+        least one other channel are removed instead of getting
+        ``undefined``. Default is False.
+    chunk_size : int, optional
+        Number of localizations processed at once, limits memory usage.
+        Default is 20,000.
+    progress_callback : {callable, "console", None}, optional
+        Called with the number of localizations of all channels
+        processed so far (up to the total number of localizations). If
+        "console", a progress bar is printed. If None, no progress is
+        reported. Default is None.
+
+    Returns
+    -------
+    locs : list of pd.DataFrames
+        Copy of each channel's localizations with one CBC column per
+        other channel (float32), without the localizations where the
+        CBC is not defined if ``remove_undefined``.
+    infos : list of list of dicts
+        Metadata of each channel with a new entry describing the CBC
+        parameters.
+
+    Raises
+    ------
+    ValueError
+        If fewer than two channels are given, the numbers of channels,
+        metadata and names differ, two names give the same column, or
+        the parameters are invalid.
+
+    Warns
+    -----
+    UserWarning
+        If any channel is not linked (no ``len`` column), see ``cbc``.
+
+    See Also
+    --------
+    cbc : CBC of one channel against one or more partners.
+
+    References
+    ----------
+    Malkusch, S., Endesfelder, U., Mondry, J. et al. Coordinate-based
+    colocalization analysis of single-molecule localization microscopy
+    data. Histochem Cell Biol 137, 1-10 (2012).
+    https://doi.org/10.1007/s00418-011-0880-5
+    """
+    n_channels = len(locs)
+    if n_channels < 2:
+        raise ValueError("CBC of all pairs requires at least two channels.")
+    if len(infos) != n_channels:
+        raise ValueError(
+            f"{len(infos)} metadata given for {n_channels} channels."
+        )
+    if names is None:
+        names = [str(i) for i in range(n_channels)]
+    names = list(names)
+    if len(names) != n_channels:
+        raise ValueError(
+            f"{len(names)} names given for {n_channels} channels."
+        )
+    columns = [_cbc_column(name) for name in names]
+    use_z = _validate_cbc_args(locs, columns, r_max, steps, use_z)
+    _warn_if_not_linked(locs)
+
+    total = sum(len(locs_) for locs_ in locs)
+    callback, close = _cbc_progress(progress_callback, total)
+    out_locs, out_infos = [], []
+    offset = 0
+    try:
+        for i in range(n_channels):
+            others = [j for j in range(n_channels) if j != i]
+            channel_callback = None
+            if callback is not None:
+                channel_callback = partial(_offset_callback, callback, offset)
+            new_locs, new_info = _cbc_channel(
+                locs[i],
+                infos[i],
+                [locs[j] for j in others],
+                [names[j] for j in others],
+                [columns[j] for j in others],
+                r_max,
+                steps,
+                use_z,
+                undefined,
+                remove_undefined,
+                chunk_size,
+                channel_callback,
+            )
+            new_info[-1]["CBC name"] = names[i]
+            out_locs.append(new_locs)
+            out_infos.append(new_info)
+            offset += len(locs[i])
+    finally:
+        close()
+    return out_locs, out_infos
+
+
+def _offset_callback(callback: Callable[[int], None], offset: int, value):
+    """Report ``value`` shifted by ``offset`` to ``callback``."""
+    callback(offset + value)
+
+
+def _validate_cbc_args(
+    all_locs: list[pd.DataFrame],
+    columns: list[str],
+    r_max: float,
+    steps: int,
+    use_z: bool | None,
+) -> bool:
+    """Check the CBC parameters shared by ``cbc`` and
+    ``cbc_all_pairs`` and return whether to use z."""
+    if len(set(columns)) != len(columns):
+        raise ValueError(
+            f"The CBC column names {columns} are not unique; please use "
+            "distinct names."
+        )
+    if r_max <= 0:
+        raise ValueError("r_max must be positive.")
+    if steps < 2:
+        raise ValueError("steps must be at least 2.")
+    has_z = all("z" in locs_.columns for locs_ in all_locs)
+    if use_z is None:
+        return has_z
+    if use_z and not has_z:
+        raise ValueError("3D CBC requires z in all localizations.")
+    return bool(use_z)
+
+
+def _warn_if_not_linked(all_locs: list[pd.DataFrame]) -> None:
+    """Warn if any of the localizations is not linked (no ``len``
+    column); the warning points at the caller of the public function."""
+    if not all("len" in locs_.columns for locs_ in all_locs):
+        warnings.warn(
+            "The localizations are not linked (no 'len' column), so each "
+            "binding event is counted several times in the CBC. Consider "
+            "linking them first with picasso.postprocess.link.",
+            UserWarning,
+            stacklevel=3,
+        )
+
+
+def _cbc_progress(
+    progress_callback: Callable[[int], None] | Literal["console"] | None,
+    total: int,
+) -> tuple[Callable[[int], None] | None, Callable[[], None]]:
+    """A progress callback taking the cumulative number of processed
+    localizations, and a function that closes it. "console" prints a
+    progress bar."""
+    if progress_callback != "console":
+        return progress_callback, lambda: None
+    pbar = tqdm(total=total, desc="CBC", unit="loc", unit_scale=True)
+
+    def callback(value: int) -> None:
+        pbar.update(value - pbar.n)
+
+    return callback, pbar.close
+
+
+def _cbc_channel(
+    locs: pd.DataFrame,
+    info: list[dict],
+    partners: list[pd.DataFrame],
+    partner_names: list[str] | None,
+    columns: list[str],
+    r_max: float,
+    steps: int,
+    use_z: bool,
+    undefined: float,
+    remove_undefined: bool,
+    chunk_size: int,
+    progress_callback: Callable[[int], None] | None,
+) -> tuple[pd.DataFrame, list[dict]]:
+    """CBC of one channel against its partners, with validated
+    parameters. See ``cbc``."""
+    pixelsize = lib.get_from_metadata(info, "Pixelsize", raise_error=True)
+    coords = _cbc_coords(locs, pixelsize, use_z)
+    partner_coords = [_cbc_coords(p, pixelsize, use_z) for p in partners]
+    values, defined = _cbc(
+        coords,
+        partner_coords,
+        r_max,
+        steps,
+        undefined,
+        chunk_size,
+        progress_callback,
+    )
+    locs = locs.copy()
+    for column, cbc_values in zip(columns, values):
+        locs[column] = cbc_values.astype(np.float32)
+    n_removed = 0
+    if remove_undefined:
+        keep = np.logical_and.reduce(defined)
+        n_removed = int(len(locs) - keep.sum())
+        locs = locs[keep].reset_index(drop=True)
+    new_info = {
+        "Generated by": f"Picasso v{__version__} CBC",
+        "CBC columns": list(columns),
+    }
+    if partner_names is not None:
+        new_info["CBC partner names"] = list(partner_names)
+    new_info.update(
+        {
+            "Max. radius (nm)": float(r_max),
+            "Radius steps": int(steps),
+            "Dimensions": 3 if use_z else 2,
+        }
+    )
+    if remove_undefined:
+        new_info["Localizations without neighbors removed"] = n_removed
+    else:
+        new_info["Undefined CBC value"] = float(undefined)
+    new_info = info + [new_info]
+    return locs, new_info
+
+
+def _cbc_coords(
+    locs: pd.DataFrame, pixelsize: float, use_z: bool
+) -> lib.FloatArray2D:
+    """Coordinates of localizations in nm, (N, 2) or (N, 3) if
+    ``use_z``; x and y are converted from camera pixels, z is in nm
+    already."""
+    xy = locs[["x", "y"]].to_numpy(np.float64) * pixelsize
+    if use_z:
+        return np.column_stack([xy, locs["z"].to_numpy(np.float64)])
+    return xy
+
+
+def _cbc(
+    coords: lib.FloatArray2D,
+    partner_coords: list[lib.FloatArray2D],
+    r_max: float,
+    steps: int,
+    undefined: float,
+    chunk_size: int,
+    progress_callback: Callable[[int], None] | None,
+) -> tuple[list[lib.FloatArray1D], list[lib.BoolArray1D]]:
+    """CBC values of ``coords`` against each array in
+    ``partner_coords`` (all in nm), and whether they are defined (the
+    localization has neighbors of both channels within ``r_max``), see
+    ``cbc`` for details. The localizations are processed in chunks; the
+    neighbor counts within the own channel are computed once per chunk
+    for all partners."""
+    n = len(coords)
+    radii = np.linspace(r_max / steps, r_max, steps)  # 0 excluded
+    # D(r) normalizes N(r) by the area (2D) or volume (3D) searched:
+    # D(r) = [N(r) / N(r_max)] * [r_max / r]^n_dims, with r = (i + 1) *
+    # r_max / steps. The Spearman correlation only uses the order of D(r)
+    # within each localization, so the constant factors are left out and
+    # D(r) is taken as N(r) / (i + 1)^n_dims: one correctly rounded
+    # division of integers, which keeps radii with exactly equal D(r)
+    # tied (several roundings break such ties at random)
+    shells = np.arange(1, steps + 1, dtype=np.float64) ** coords.shape[1]
+
+    values = [np.full(n, undefined, dtype=np.float64) for _ in partner_coords]
+    defined = [np.zeros(n, dtype=bool) for _ in partner_coords]
+    if n == 0:
+        return values, defined
+    tree = KDTree(coords)
+    partner_trees = [KDTree(c) if len(c) else None for c in partner_coords]
+
+    for start in range(0, n, chunk_size):
+        stop = min(start + chunk_size, n)
+        chunk_tree = KDTree(coords[start:stop])
+        # A-A counts, excluding the localization itself
+        n_a_r = _cbc_cumulative_counts(chunk_tree, tree, radii) - 1
+        for partner_tree, cbc_values, cbc_defined in zip(
+            partner_trees, values, defined
+        ):
+            if partner_tree is None:
+                continue  # no partner localizations, CBC undefined
+            n_b_r = _cbc_cumulative_counts(chunk_tree, partner_tree, radii)
+            # localizations without neighbors within r_max are undefined
+            valid = (n_a_r[:, -1] > 0) & (n_b_r[:, -1] > 0)
+            if not valid.any():
+                continue
+            s = _rowwise_spearman(n_a_r[valid] / shells, n_b_r[valid] / shells)
+            # weighting by the distance to the nearest partner
+            idx = start + np.flatnonzero(valid)
+            e_ab, _ = partner_tree.query(coords[idx], k=1)
+            cbc_values[idx] = s * np.exp(-e_ab / r_max)
+            cbc_defined[idx] = True
+        if progress_callback is not None:
+            progress_callback(stop)
+    return values, defined
+
+
+def _cbc_cumulative_counts(
+    chunk_tree: KDTree,
+    other_tree: KDTree,
+    radii: lib.FloatArray1D,
+) -> lib.IntArray2D:
+    """Number of points of ``other_tree`` within each radius (<= r) of
+    each point of ``chunk_tree``, as an (n_chunk, len(radii)) array.
+    The neighbors within the largest radius are queried once and binned
+    into all radii."""
+    n_chunk = chunk_tree.n
+    steps = len(radii)
+    pairs = chunk_tree.sparse_distance_matrix(
+        other_tree, radii[-1], output_type="ndarray"
+    )
+    # first radius at which each neighbor is counted (d <= r)
+    bins = np.searchsorted(radii, pairs["v"], side="left")
+    counts = np.bincount(
+        pairs["i"] * steps + bins, minlength=n_chunk * steps
+    ).reshape(n_chunk, steps)
+    return np.cumsum(counts, axis=1, dtype=np.int32)
+
+
+def _rowwise_spearman(
+    x: lib.FloatArray2D, y: lib.FloatArray2D
+) -> lib.FloatArray1D:
+    """Spearman rank correlation between the corresponding rows of
+    ``x`` and ``y``. Rows with constant values (undefined correlation)
+    give 0."""
+    rx = rankdata(x, axis=1)
+    ry = rankdata(y, axis=1)
+    rx -= rx.mean(axis=1, keepdims=True)
+    ry -= ry.mean(axis=1, keepdims=True)
+    num = np.sum(rx * ry, axis=1)
+    den = np.sqrt(np.sum(rx**2, axis=1) * np.sum(ry**2, axis=1))
+    s = np.zeros(len(x))
+    valid = den > 0
+    s[valid] = num[valid] / den[valid]
+    return s
 
 
 def resi(
