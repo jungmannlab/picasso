@@ -242,6 +242,60 @@ def _hdf2smap(path: str) -> None:
     print("Complete.")
 
 
+def _pyme2hdf(path: str, pixelsize: float | None = None) -> None:
+    """Convert PyME (python-microscopy) .h5r/.hdf localization files to
+    HDF5 format. A file with several channels (``probe`` values) is
+    saved as one file per channel, ``<base>_probe<k>_locs.hdf5``.
+
+    Parameters
+    ----------
+    path : str
+        Path (unix style pattern) to the PyME .h5r/.hdf files.
+    pixelsize : float or None, optional
+        Camera pixel size in nanometers, used for files that do not
+        store it. Default is None.
+    """
+    from glob import glob
+    from tqdm import tqdm as _tqdm
+
+    paths = glob(path)
+    if paths:
+        import os.path
+        from .io import import_pyme, save_locs, split_pyme_channels
+
+        for path in _tqdm(paths, desc="Converting from PyME"):
+            locs, info = import_pyme(path, pixelsize)
+            channels = split_pyme_channels(path, locs, info)
+            for channel_path, locs, info in channels:
+                base, ext = os.path.splitext(channel_path)
+                save_locs(base + "_locs.hdf5", locs, info)
+    print("Complete.")
+
+
+def _hdf2pyme(path: str) -> None:
+    """Convert HDF5 localization files to PyME (python-microscopy)
+    .hdf format, one file per input file."""
+    from glob import glob
+    from os.path import isdir
+
+    if isdir(path):
+        paths = glob(path + "/*.hdf5")
+    else:
+        paths = glob(path)
+    if paths:
+        import os.path
+        from .io import load_locs, export_pyme
+
+        for path in paths:
+            base, ext = os.path.splitext(path)
+            if ext == ".hdf5":
+                print(f"Converting {path}")
+                out_path = base + ".hdf"
+                locs, info = load_locs(path)
+                export_pyme(out_path, locs, info)
+    print("Complete.")
+
+
 def _link(files: str, d_max: float, tolerance: float) -> None:
     """Link localizations in HDF5 files, see ``postprocess.link`` for
     details."""
@@ -5431,6 +5485,25 @@ def main():  # noqa: C901
     )
     hdf2smap_parser.add_argument("files", help="one or multiple hdf5 files")
 
+    pyme2hdf_parser = subparsers.add_parser(
+        "pyme2hdf", help="convert PyME .h5r/.hdf to hdf5 format"
+    )
+    pyme2hdf_parser.add_argument(
+        "files", help="one or multiple PyME .h5r/.hdf files"
+    )
+    pyme2hdf_parser.add_argument(
+        "-p",
+        "--pixelsize",
+        help="camera pixel size in nm, used for files that do not store it",
+        type=float,
+        default=None,
+    )
+
+    hdf2pyme_parser = subparsers.add_parser(
+        "hdf2pyme", help="convert hdf5 to PyME .hdf format"
+    )
+    hdf2pyme_parser.add_argument("files", help="one or multiple hdf5 files")
+
     cluster_combine_parser = subparsers.add_parser(
         "cluster_combine",
         help=(
@@ -5729,6 +5802,10 @@ def main():  # noqa: C901
             _smap2hdf(args.files, args.pixelsize)
         elif args.command == "hdf2smap":
             _hdf2smap(args.files)
+        elif args.command == "pyme2hdf":
+            _pyme2hdf(args.files, args.pixelsize)
+        elif args.command == "hdf2pyme":
+            _hdf2pyme(args.files)
         elif args.command == "cluster_combine":
             _cluster_combine(args.files)
         elif args.command == "cluster_combine_dist":

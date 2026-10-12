@@ -14,6 +14,8 @@ strokes and the undo of the last one.
 
 from __future__ import annotations
 
+import os
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -328,6 +330,41 @@ class TestLoaderUsesTheStoredIndex:
         _, locs, info, render_index = self._load(path)
         assert render_index is not None
         assert spatial_index.validate_render_index(render_index, locs, info)
+
+
+class TestLoaderSplitsPyMEChannels:
+    """A PyME file holds several channels (``probe`` column); the loader
+    emits each as its own channel."""
+
+    def test_two_channels(self, qt_offscreen, tmp_path):
+        from picasso import io
+
+        path = str(tmp_path / "two.hdf")
+        io.export_pyme_multi(
+            path, [_locs(seed=0), _locs(seed=1)], [_info(), _info()]
+        )
+        worker = gui_render.LocsLoadWorker([(path, None)])
+        results = []
+        worker.loaded.connect(lambda *args: results.append(args))
+        worker.failed.connect(lambda *args: pytest.fail(str(args)))
+        worker.run()
+        assert [os.path.basename(r[0]) for r in results] == [
+            "two_probe0.hdf",
+            "two_probe1.hdf",
+        ]
+
+        window = gui_render.Window(plugins_loaded=True)
+        for channel_path, locs, info, render_index in results:
+            window.view.add(
+                channel_path,
+                locs,
+                info,
+                render_index=render_index,
+                render_=False,
+            )
+        assert len(window.view.locs) == 2
+        assert all(len(locs) == 2000 for locs in window.view.locs)
+        assert window.view.infos[1][0]["Pixelsize"] == PIXELSIZE
 
 
 class TestCircularPicksUseThePyramid:

@@ -13,9 +13,7 @@ Open
 Shortcut: :kbd:`Ctrl+O`
 
 Open a localization file in render. Picasso ``.hdf5`` files are loaded
-directly; ThunderSTORM ``.csv`` and SMAP ``_sml.mat`` files are imported (you
-will be asked for the camera pixel size in nm). Localization files can also be
-imported by dragging and dropping them onto the render window.
+directly; ThunderSTORM ``.csv``, SMAP ``_sml.mat`` and PyME ``.h5r`` and ``.hdf`` files are imported (you may be asked for the camera pixel size in nm). Localization files can also be imported by dragging and dropping them onto the render window. A PyME file with several channels (``probe`` column) opens as one channel per probe, named ``<file>_probe<k>``. See :ref:`render-export-pyme` for how the columns are converted.
 
 .. _render-open-rotated:
 
@@ -457,6 +455,83 @@ are written in nm; frames are made 1-based (SMAP convention). ``lpx`` and
 
       io.export_smap("movie_locs_sml.mat", locs, info)
       locs, info = io.import_smap("smap_sml.mat", pixelsize=130)
+
+
+.. _render-export-pyme:
+
+Export as .hdf for PyME
+~~~~~~~~~~~~~~~~~~~~~~~
+
+Export the dataset as a PyME (`python-microscopy
+<https://python-microscopy.org>`_) ``.hdf`` file that can be opened in
+PYMEVisualize. It has the format of PYMEVisualize's "Save filtered
+localizations", i.e., a table ``Localizations`` with lengths in nm. When
+exporting all channels, they are saved in one file and told apart by PyME's
+``probe`` column (PYMEVisualize shows them as ``chan0``, ``chan1``, etc.). The
+channels must have the same camera pixel size.
+
+The columns are converted as follows:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 30 40
+
+   * - Picasso
+     - PyME
+     - Note
+   * - ``x``, ``y``
+     - ``x``, ``y``
+     - camera pixels to nm
+   * - ``frame``
+     - ``t``
+     -
+   * - ``z``, ``lpz``
+     - ``z``, ``error_z``
+     - nm in both
+   * - ``lpx``, ``lpy``
+     - ``error_x``, ``error_y``
+     - camera pixels to nm
+   * - ``sx``, ``sy``
+     - ``sigx``, ``sigy``
+     - camera pixels to nm
+   * - ``photons``
+     - ``nPhotons``
+     -
+   * - ``bg``
+     - ``bg``
+     - photons per pixel
+   * - channel index
+     - ``probe``
+     -
+
+Other numeric columns (e.g., ``group``) are copied as they are. With several
+channels, only the columns present in all of them are kept. The pixel size is
+stored as ``voxelsize`` (in µm, as in PyME), and the Picasso metadata of each
+channel is stored, too, so that importing the file back into Picasso restores
+it.
+
+.. note::
+
+   PYMEVisualize filters the localizations by ``error_x`` and ``error_y``
+   (below 30 nm) by default, i.e., localizations with a worse precision are
+   hidden until the filter is changed. The PyME columns ``A`` and ``sig`` are
+   not written, since PYMEVisualize's default filters on them (e.g., ``sig``
+   between 95 and 200 nm) would hide localizations, too.
+
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
+
+   .. code-block:: python
+
+      io.export_pyme("movie_locs.hdf", locs, info)
+      # several channels in one file
+      io.export_pyme_multi("channels.hdf", [locs1, locs2], [info1, info2])
+
+      # pixelsize is used only if the file does not store it
+      locs, info = io.import_pyme("pyme.hdf", pixelsize=130)
+      # one (path, locs, info) per probe value
+      channels = io.split_pyme_channels("pyme.hdf", locs, info)
 
 
 .. _render-remove-all-localizations:

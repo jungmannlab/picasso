@@ -1139,6 +1139,338 @@ class TestSMAPRoundtrip:
 
 
 # ---------------------------------------------------------------------------
+# PyME (python-microscopy) round-trip
+# ---------------------------------------------------------------------------
+
+
+def _write_pyme_file(path, table_name, records, metadata=None):
+    """Write a localization table and ``/MetaData`` the way PyME does
+    (PyTables, metadata as attributes of nested groups)."""
+    import tables
+
+    with tables.open_file(str(path), "w") as h5file:
+        h5file.create_table("/", table_name, obj=records)
+        h5file.create_group("/", "MetaData")
+        for key, value in (metadata or {}).items():
+            *groups, name = key.split(".")
+            where = "/MetaData"
+            for group in groups:
+                if f"{where}/{group}" not in h5file:
+                    h5file.create_group(where, group)
+                where = f"{where}/{group}"
+            h5file.get_node(where)._f_setattr(name, value)
+
+
+class TestPyMERoundtrip:
+    def _locs_2d(self):
+        return pd.DataFrame(
+            {
+                "frame": np.array([0, 1, 2], dtype=np.uint32),
+                "x": np.array([5.0, 10.0, 15.0], dtype=np.float32),
+                "y": np.array([6.0, 11.0, 16.0], dtype=np.float32),
+                "sx": np.array([1.1, 1.2, 1.3], dtype=np.float32),
+                "sy": np.array([1.4, 1.5, 1.6], dtype=np.float32),
+                "photons": np.array(
+                    [1000.0, 2000.0, 3000.0], dtype=np.float32
+                ),
+                "bg": np.array([10.0, 20.0, 30.0], dtype=np.float32),
+                "lpx": np.array([0.05, 0.06, 0.07], dtype=np.float32),
+                "lpy": np.array([0.07, 0.08, 0.09], dtype=np.float32),
+            }
+        )
+
+    def _info(self):
+        return [
+            {"Pixelsize": PIXELSIZE, "Width": 64, "Height": 64, "Frames": 3}
+        ]
+
+    def test_export_import_2d(self, tmp_path):
+        locs = self._locs_2d()
+        # the .hdf extension is enforced, PyME does not open .hdf5
+        io.export_pyme(str(tmp_path / "data.hdf5"), locs, self._info())
+        path = tmp_path / "data.hdf"
+        assert path.exists()
+        assert io.is_pyme_file(str(path))
+        assert not io.is_pyme_file(str(tmp_path / "data.hdf5"))
+        assert io.pyme_pixelsize(str(path)) == pytest.approx(PIXELSIZE)
+
+        out_locs, out_info = io.import_pyme(str(path))
+        for column in locs.columns:
+            np.testing.assert_allclose(
+                out_locs[column].to_numpy(),
+                locs[column].to_numpy(),
+                rtol=1e-5,
+                err_msg=column,
+            )
+        assert "z" not in out_locs.columns
+        # the Picasso metadata is restored
+        assert out_info[0]["Width"] == 64
+        assert out_info[0]["Height"] == 64
+        assert out_info[0]["Frames"] == 3
+        assert lib.get_from_metadata(out_info, "Pixelsize") == PIXELSIZE
+
+    def test_file_structure(self, tmp_path):
+        import tables
+
+        locs = self._locs_2d()
+        locs["group"] = np.array([0, 0, 1], dtype=np.int32)
+        path = tmp_path / "data.hdf"
+        io.export_pyme(str(path), locs, self._info())
+        with tables.open_file(str(path)) as h5file:
+            table = h5file.root.Localizations
+            names = set(table.colnames)
+            x = table.col("x")
+            error_x = table.col("error_x")
+            voxelsize = h5file.root.MetaData.voxelsize._v_attrs
+            camera = h5file.root.MetaData.Camera._v_attrs
+            assert voxelsize.x == pytest.approx(PIXELSIZE / 1000)
+            assert camera.ROIWidth == 64
+        assert {"x", "y", "t", "error_x", "nPhotons", "probe"} <= names
+        assert "group" in names
+        # avoided, PYMEVisualize filters by them by default
+        assert "sig" not in names and "A" not in names
+        np.testing.assert_allclose(x, locs["x"] * PIXELSIZE, rtol=1e-5)
+        np.testing.assert_allclose(error_x, locs["lpx"] * PIXELSIZE, rtol=1e-5)
+
+    def test_export_import_3d(self, tmp_path):
+        locs = self._locs_2d()
+        locs["z"] = np.array([-100.0, 0.0, 100.0], dtype=np.float32)
+        locs["lpz"] = np.array([3.0, 4.0, 5.0], dtype=np.float32)
+        path = tmp_path / "data3d.hdf"
+        io.export_pyme(str(path), locs, self._info())
+
+        out_locs, _ = io.import_pyme(str(path))
+        np.testing.assert_allclose(
+            out_locs["z"].to_numpy(), locs["z"].to_numpy(), atol=1e-3
+        )
+        np.testing.assert_allclose(
+            out_locs["lpz"].to_numpy(), locs["lpz"].to_numpy(), atol=1e-3
+        )
+
+    def test_multichannel_split(self, tmp_path):
+        locs_a = self._locs_2d()
+        locs_a["group"] = np.array([0, 0, 1], dtype=np.int32)
+        locs_b = self._locs_2d().iloc[:2].copy()
+        locs_b["x"] += 1
+        info_a = self._info() + [{"Channel tag": "a"}]
+        info_b = self._info() + [{"Channel tag": "b"}]
+        path = tmp_path / "two.hdf"
+        io.export_pyme_multi(
+            str(path), [locs_a, locs_b], [info_a, info_b], ["a", "b"]
+        )
+
+        locs, info = io.import_pyme(str(path))
+        assert len(locs) == 5
+        assert sorted(np.unique(locs["probe"])) == [0, 1]
+        # only the columns present in all channels are exported
+        assert "group" not in locs.columns
+
+        channels = io.split_pyme_channels(str(path), locs, info)
+        assert [os.path.basename(p) for p, _, _ in channels] == [
+            "two_probe0.hdf",
+            "two_probe1.hdf",
+        ]
+        for (_, channel_locs, channel_info), original, tag in zip(
+            channels, [locs_a, locs_b], ["a", "b"]
+        ):
+            assert "probe" not in channel_locs.columns
+            np.testing.assert_allclose(
+                np.sort(channel_locs["x"].to_numpy()),
+                np.sort(original["x"].to_numpy()),
+                rtol=1e-5,
+            )
+            assert lib.get_from_metadata(channel_info, "Channel tag") == tag
+            assert channel_info[0]["Width"] == 64
+
+    def test_single_channel_split_drops_probe(self, tmp_path):
+        path = tmp_path / "one.hdf"
+        io.export_pyme(str(path), self._locs_2d(), self._info())
+        locs, info = io.import_pyme(str(path))
+        channels = io.split_pyme_channels(str(path), locs, info)
+        assert len(channels) == 1
+        assert channels[0][0] == str(path)
+        assert "probe" not in channels[0][1].columns
+
+    def test_different_pixelsizes_raise(self, tmp_path):
+        info_b = [dict(self._info()[0], Pixelsize=PIXELSIZE + 10)]
+        with pytest.raises(ValueError, match="pixel size"):
+            io.export_pyme_multi(
+                str(tmp_path / "bad.hdf"),
+                [self._locs_2d(), self._locs_2d()],
+                [self._info(), info_b],
+            )
+
+    def test_canvas_offset(self, tmp_path):
+        # a localization left of the camera image (e.g., after drift
+        # correction) and one exactly at an integer maximum are kept
+        n = 3
+        records = np.zeros(n, dtype=[("x", "<f4"), ("y", "<f4"), ("t", "<f4")])
+        records["x"] = [-150.0, 100.0, 1000.0]
+        records["y"] = [100.0, 200.0, 300.0]
+        records["t"] = [0, 1, 2]
+        path = tmp_path / "offset.hdf"
+        _write_pyme_file(path, "Localizations", records, {"voxelsize.x": 0.1})
+
+        locs, info = io.import_pyme(str(path))
+        assert len(lib.ensure_sanity(locs, info)) == n
+        assert lib.get_from_metadata(info, lib.CANVAS_OFFSET_KEYS[0]) == 2
+
+        # exported coordinates refer to the camera image again
+        out = tmp_path / "offset_export.hdf"
+        io.export_pyme(str(out), locs, info)
+        out_locs, out_info = io.import_pyme(str(out))
+        np.testing.assert_allclose(
+            np.sort(out_locs["x"].to_numpy()), np.sort(locs["x"].to_numpy())
+        )
+        import tables
+
+        with tables.open_file(str(out)) as h5file:
+            x = np.sort(h5file.root.Localizations.col("x"))
+        np.testing.assert_allclose(x, np.sort(records["x"]), rtol=1e-5)
+
+    def test_import_pyme_hdf(self, tmp_path):
+        # as saved by PYMEVisualize: flat columns in nm, z = 0 for 2D
+        # data, an empty /MetaData group
+        n = 4
+        records = np.zeros(
+            n,
+            dtype=[
+                ("x", "<f4"),
+                ("y", "<f4"),
+                ("t", "<f4"),
+                ("A", "<f4"),
+                ("sig", "<f4"),
+                ("error_x", "<f4"),
+                ("z", "<f4"),
+                ("clumpIndex", "<i4"),
+            ],
+        )
+        records["x"] = np.linspace(130, 1300, n)
+        records["y"] = np.linspace(260, 2600, n)
+        records["t"] = [3, 1, 2, 0]
+        records["A"] = 100.0
+        records["sig"] = 130.0
+        records["error_x"] = 13.0
+        records["clumpIndex"] = [1, 2, 3, 4]
+        path = tmp_path / "pyme.hdf"
+        _write_pyme_file(path, "Localizations", records)
+
+        assert io.pyme_pixelsize(str(path)) is None
+        with pytest.raises(ValueError, match="pixel size"):
+            io.import_pyme(str(path))
+
+        locs, info = io.import_pyme(str(path), pixelsize=PIXELSIZE)
+        assert len(locs) == n
+        assert info[0]["Pixelsize"] == PIXELSIZE
+        # sorted by frame
+        np.testing.assert_array_equal(locs["frame"], [0, 1, 2, 3])
+        # all-zero z means 2D data
+        assert "z" not in locs.columns
+        np.testing.assert_allclose(locs["lpx"], 13.0 / PIXELSIZE, rtol=1e-5)
+        np.testing.assert_allclose(locs["lpy"], 13.0 / PIXELSIZE, rtol=1e-5)
+        np.testing.assert_allclose(locs["sx"], 1.0, rtol=1e-5)
+        # no camera conversion: integrated Gaussian in camera counts
+        np.testing.assert_allclose(
+            locs["photons"], 100.0 * 2 * np.pi, rtol=1e-5
+        )
+        assert "A" in locs.columns
+        assert "clumpIndex" in locs.columns
+
+    def test_import_h5r(self, tmp_path):
+        # raw fit results of PyME's LatGaussFitFR: nested fields
+        fit_fields = [
+            ("A", "<f4"),
+            ("x0", "<f4"),
+            ("y0", "<f4"),
+            ("sigma", "<f4"),
+            ("background", "<f4"),
+            ("bx", "<f4"),
+            ("by", "<f4"),
+        ]
+        slice_fields = [("start", "<i4"), ("stop", "<i4"), ("step", "<i4")]
+        dtype = [
+            ("tIndex", "<i4"),
+            ("fitResults", fit_fields),
+            ("fitError", fit_fields),
+            ("resultCode", "<i4"),
+            ("slicesUsed", [(a, slice_fields) for a in "xyz"]),
+            ("subtractedBackground", "<f4"),
+            ("nchi2", "<f4"),
+        ]
+        n = 3
+        records = np.zeros(n, dtype=dtype)
+        records["tIndex"] = [0, 5, 9]
+        records["fitResults"]["A"] = 50.0
+        records["fitResults"]["x0"] = [200.0, 400.0, 600.0]
+        records["fitResults"]["y0"] = [300.0, 500.0, 700.0]
+        records["fitResults"]["sigma"] = 200.0
+        records["fitResults"]["background"] = 1.0
+        records["fitError"]["x0"] = 10.0
+        records["fitError"]["y0"] = 20.0
+        records["subtractedBackground"] = 4.0
+        path = tmp_path / "raw.h5r"
+        _write_pyme_file(
+            path,
+            "FitResults",
+            records,
+            {
+                "voxelsize.x": 0.1,
+                "voxelsize.y": 0.1,
+                "Camera.ElectronsPerCount": 2.0,
+                "Camera.TrueEMGain": 10.0,
+                "Camera.ROIWidth": 64,
+                "Camera.ROIHeight": 32,
+                "Analysis.FitModule": "LatGaussFitFR",
+            },
+        )
+
+        # the pixel size stored in the file is used
+        locs, info = io.import_pyme(str(path), pixelsize=PIXELSIZE)
+        assert info[0]["Pixelsize"] == pytest.approx(100.0)
+        assert info[0]["Width"] == 64
+        assert info[0]["Height"] == 32
+        assert info[0]["Frames"] == 10
+        pyme_metadata = info[0]["PyME metadata"]
+        assert pyme_metadata["Analysis.FitModule"] == "LatGaussFitFR"
+        np.testing.assert_allclose(locs["x"], [2.0, 4.0, 6.0], rtol=1e-5)
+        np.testing.assert_allclose(locs["lpx"], 0.1, rtol=1e-5)
+        np.testing.assert_allclose(locs["lpy"], 0.2, rtol=1e-5)
+        np.testing.assert_allclose(locs["sx"], 2.0, rtol=1e-5)
+        per_count = 2.0 / 10.0
+        np.testing.assert_allclose(
+            locs["photons"],
+            50.0 * 2 * np.pi * 2.0 * 2.0 * per_count,
+            rtol=1e-5,
+        )
+        np.testing.assert_allclose(locs["bg"], 5.0 * per_count, rtol=1e-5)
+        assert "resultCode" in locs.columns
+        assert "nchi2" in locs.columns
+        assert not any(c.startswith("slicesUsed") for c in locs.columns)
+
+    def test_no_localizations_raises(self, tmp_path):
+        records = np.zeros(2, dtype=[("EventName", "S32"), ("Time", "<f8")])
+        path = tmp_path / "events.hdf"
+        _write_pyme_file(path, "Events", records, {"voxelsize.x": 0.1})
+        with pytest.raises(ValueError, match="localizations"):
+            io.import_pyme(str(path))
+
+    def test_cli(self, tmp_path):
+        from picasso.__main__ import _hdf2pyme, _pyme2hdf
+
+        locs_path = tmp_path / "data_locs.hdf5"
+        io.save_locs(str(locs_path), self._locs_2d(), self._info())
+        _hdf2pyme(str(locs_path))
+        pyme_path = tmp_path / "data_locs.hdf"
+        assert pyme_path.exists()
+
+        _pyme2hdf(str(pyme_path))
+        locs, info = io.load_locs(str(tmp_path / "data_locs_locs.hdf5"))
+        np.testing.assert_allclose(
+            locs["x"].to_numpy(), self._locs_2d()["x"].to_numpy(), rtol=1e-5
+        )
+
+
+# ---------------------------------------------------------------------------
 # TIFF loading — TiffMap / TiffMultiMap / load_tif
 #
 # Picasso reads TIFFs via ``tifffile`` (see picasso.io.TiffMap). Real

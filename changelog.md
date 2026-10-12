@@ -92,6 +92,8 @@ Last change: 12-OCT-2026 CEST
 - Improved navigation in the SPINNA mask tab.
 - Improved status dialog.
 - Sound notifications in Average and Simulate (`File > Sound notifications`).
+- Added import and export of [PyME](https://python-microscopy.org) (python-microscopy, PYMEVisualize) localizations: raw fit results (`.h5r`) and saved localizations (`.hdf`) are imported, `.hdf` files are exported. See the [documentation](https://picassosr.readthedocs.io/en/latest/render/menu-file.html#render-export-pyme).
+
 
 ### Technical details on Render update
 - **Multi-threaded CPU rendering**: the render kernels release the GIL and channels are rendered in parallel by a thread pool; a single large channel is split into row chunks rendered in parallel and summed in a fixed order.

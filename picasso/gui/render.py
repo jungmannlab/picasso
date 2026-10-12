@@ -9846,7 +9846,8 @@ def _read_locs_file(
     path: str, pixelsize: float | None = None, progress=None
 ) -> tuple[pd.DataFrame, list[dict]]:
     """Read localizations and metadata from a given path, either Picasso
-    (.hdf5), ThunderSTORM (.csv) or SMAP (_sml.mat) format.
+    (.hdf5), ThunderSTORM (.csv), SMAP (_sml.mat) or PyME (.h5r, .hdf)
+    format.
 
     Contains no GUI code, so it can run on a background thread, see
     ``LocsLoadWorker``.
@@ -9857,7 +9858,8 @@ def _read_locs_file(
         Path to the localization file.
     pixelsize : float or None, optional
         Camera pixel size (nm), required for the .csv and _sml.mat
-        formats, which do not store it.
+        formats, which do not store it, and for PyME files that do not
+        store it.
     progress : callable or None, optional
         Called as ``progress(done, total)`` while the localizations are
         read (.hdf5 only, which is read in blocks); raising inside it
@@ -9876,10 +9878,31 @@ def _read_locs_file(
         return io.import_ts(path, pixelsize)
     elif path.endswith(".mat"):  # SMAP localization file
         return io.import_smap(path, pixelsize)
+    elif io.is_pyme_file(path):  # PyME localization file
+        return io.import_pyme(path, pixelsize)
     raise ValueError(
         "Unsupported file format. Please load a .hdf5 (Picasso), "
-        ".csv (ThunderSTORM) or _sml.mat (SMAP) file."
+        ".csv (ThunderSTORM), _sml.mat (SMAP) or .h5r/.hdf (PyME) file."
     )
+
+
+def _read_locs_channels(
+    path: str, pixelsize: float | None = None, progress=None
+) -> list[tuple[str, pd.DataFrame, list[dict]]]:
+    """Read the channel(s) stored in a localization file, see
+    ``_read_locs_file``. A PyME file holds one channel per ``probe``
+    value (see ``io.split_pyme_channels``), any other file one channel.
+
+    Returns
+    -------
+    channels : list of tuples
+        ``(path, locs, info)`` per channel; the path of a channel split
+        from a PyME file is ``<base>_probe<k><ext>``.
+    """
+    locs, info = _read_locs_file(path, pixelsize, progress=progress)
+    if io.is_pyme_file(path):
+        return io.split_pyme_channels(path, locs, info)
+    return [(path, locs, info)]
 
 
 class LocsLoadWorker(QtCore.QObject):
@@ -9901,7 +9924,9 @@ class LocsLoadWorker(QtCore.QObject):
     ----------
     jobs : list of tuple
         One ``(path, pixelsize)`` tuple per file to load; ``pixelsize``
-        is None for formats that store it themselves (.hdf5).
+        is None for formats that store it themselves (.hdf5, most PyME
+        files). A PyME file may hold several channels, each emitted via
+        ``loaded``.
     """
 
     progress = QtCore.pyqtSignal(int, str)  # index, filename
@@ -9934,13 +9959,14 @@ class LocsLoadWorker(QtCore.QObject):
         self.subprogress.emit(done, total)
 
     def _try_load_file(self, path: str, pixelsize):
-        """Load one file's locs and info.
+        """Load one file's channel(s), see ``_read_locs_channels``.
 
         Returns
         -------
-        tuple or None
-            ``(locs, info)``, or None if a handled error was emitted
-            to ``self.failed`` and the caller should skip this file.
+        list of tuples or None
+            ``(path, locs, info)`` per channel, or None if a handled
+            error was emitted to ``self.failed`` and the caller should
+            skip this file.
 
         Raises
         ------
@@ -9948,7 +9974,7 @@ class LocsLoadWorker(QtCore.QObject):
             Propagated so the caller can stop the whole run.
         """
         try:
-            return _read_locs_file(path, pixelsize, progress=self._report)
+            return _read_locs_channels(path, pixelsize, progress=self._report)
         except _LoadCanceledError:
             raise
         except io.NoMetadataFileError:
@@ -9991,13 +10017,15 @@ class LocsLoadWorker(QtCore.QObject):
                 break
             if result is None:
                 continue
-            locs, info = result
-            if self._canceled:
-                break
-            render_index = self._load_render_index(path, locs, info)
-            if self._canceled:
-                break
-            self.loaded.emit(path, locs, info, render_index)
+            for channel_path, locs, info in result:
+                if self._canceled:
+                    break
+                render_index = self._load_render_index(
+                    channel_path, locs, info
+                )
+                if self._canceled:
+                    break
+                self.loaded.emit(channel_path, locs, info, render_index)
         self.finished.emit()
 
 
@@ -10275,8 +10303,9 @@ class View(QtWidgets.QLabel):
 
     def _prompt_pixelsize(self, path: str) -> float | None:
         """Ask for the camera pixel size of a file that does not store
-        it (ThunderSTORM .csv, SMAP _sml.mat, .hdf5 files saved by old
-        Picasso versions). None if canceled."""
+        it (ThunderSTORM .csv, SMAP _sml.mat, PyME files without
+        ``voxelsize``, .hdf5 files saved by old Picasso versions). None
+        if canceled."""
         pixelsize, ok = QtWidgets.QInputDialog.getDouble(
             self,
             "Camera pixel size",
@@ -10373,6 +10402,8 @@ class View(QtWidgets.QLabel):
         New in v0.11.0: Can read a SMAP _sml.mat file.
         New in v0.11.0: Files are read on a background thread, see
         ``LocsLoadWorker``.
+        New in v1.0.0: Can read a PyME .h5r/.hdf file, one channel per
+        ``probe`` value.
 
         Parameters
         ----------
@@ -10526,7 +10557,9 @@ class View(QtWidgets.QLabel):
         # before loading starts, i.e. while still on the GUI thread
         jobs = []
         for path in sorted(paths):
-            if path.endswith((".csv", ".mat")):
+            if path.endswith((".csv", ".mat")) or (
+                io.is_pyme_file(path) and io.pyme_pixelsize(path) is None
+            ):
                 pixelsize = self._prompt_pixelsize(path)
                 if pixelsize is None:  # canceled by the user
                     continue
@@ -13030,10 +13063,11 @@ class View(QtWidgets.QLabel):
 
     def dropEvent(self, event: QtGui.QDropEvent) -> None:
         """When a file is dropped onto the window, if the file ends with
-        ``.hdf5``, try loading localizations. If it ends with ``.txt``,
-        try loading a fov file. If it ends with ``.yaml``, try loading
-        pick regions. If it is a single ``.png`` or ``.tif`` image,
-        overlay it (see ``ImageOverlayDialog``)."""
+        ``.hdf5`` (or is a PyME ``.h5r``/``.hdf`` file), try loading
+        localizations. If it ends with ``.txt``, try loading a fov file.
+        If it ends with ``.yaml``, try loading pick regions. If it is a
+        single ``.png`` or ``.tif`` image, overlay it (see
+        ``ImageOverlayDialog``)."""
         urls = event.mimeData().urls()
         paths = [_.toLocalFile() for _ in urls]
         extensions = [os.path.splitext(_)[1].lower() for _ in paths]
@@ -13062,7 +13096,9 @@ class View(QtWidgets.QLabel):
             self.add_multiple(paths)
         else:
             paths = [
-                path for path, ext in zip(paths, extensions) if ext == ".hdf5"
+                path
+                for path, ext in zip(paths, extensions)
+                if ext == ".hdf5" or ext in io.PYME_EXTENSIONS
             ]
             self.add_multiple(paths)
 
@@ -18717,6 +18753,7 @@ class Window(QtWidgets.QMainWindow):
             ".3d for ViSP",
             ".csv for ThunderSTORM",
             ".mat for SMAP",
+            ".hdf for PyME",
         ]
         item, ok = QtWidgets.QInputDialog.getItem(
             self, "Select Export", "Formats", items, 0, False
@@ -18727,7 +18764,10 @@ class Window(QtWidgets.QMainWindow):
         ext = item.split()[0]
 
         # get save file name
-        if channel is len(self.view.locs_paths):  # all channels
+        if channel is len(self.view.locs_paths) and item == ".hdf for PyME":
+            # PyME stores all channels in one file (probe column)
+            self.export_pyme_all_channels()
+        elif channel is len(self.view.locs_paths):  # all channels
             base, _ = os.path.splitext(self.view.locs_paths[0])
             suffix, ok = QtWidgets.QInputDialog.getText(
                 self,
@@ -18769,6 +18809,32 @@ class Window(QtWidgets.QMainWindow):
             io.export_thunderstorm(path, locs, info)
         elif item == ".mat for SMAP":
             io.export_smap(path, locs, info)
+        elif item == ".hdf for PyME":
+            io.export_pyme(path, locs, info)
+
+    def export_pyme_all_channels(self) -> None:
+        """Export all channels as one PyME .hdf file, in which the
+        channels are told apart by the ``probe`` column."""
+        base, _ = os.path.splitext(self.view.locs_paths[0])
+        path, _ = lib.get_save_filename_ext_dialog(
+            self,
+            "Export localizations",
+            base + "_export.hdf",
+            filter="*.hdf",
+        )
+        if not path:
+            return
+        try:
+            io.export_pyme_multi(
+                path,
+                self.view.locs,
+                self.view.infos,
+                channel_names=[
+                    os.path.basename(p) for p in self.view.locs_paths
+                ],
+            )
+        except ValueError as e:  # e.g., different pixel sizes
+            QtWidgets.QMessageBox.warning(self, "Export localizations", str(e))
 
     def export_fov_ims(self) -> None:  # noqa: C901
         """Export current FOV to .ims."""
@@ -19103,8 +19169,8 @@ class Window(QtWidgets.QMainWindow):
 
     def open_file_dialog(self) -> None:
         """Open localizations file(s): Picasso (.hdf5), ThunderSTORM
-        (.csv) or SMAP (_sml.mat)."""
-        file_filter = "Localizations (*.hdf5 *.csv *.mat)"
+        (.csv), SMAP (_sml.mat) or PyME (.h5r, .hdf)."""
+        file_filter = "Localizations (*.hdf5 *.csv *.mat *.h5r *.hdf)"
         if self.pwd == []:
             paths, ext = QtWidgets.QFileDialog.getOpenFileNames(
                 self, "Add localizations", filter=file_filter

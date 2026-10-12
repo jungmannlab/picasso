@@ -12,6 +12,7 @@ General purpose library for handling input and output of files.
 from __future__ import annotations
 
 import abc
+import copy
 import datetime
 import logging
 import re
@@ -5553,3 +5554,772 @@ def export_smap(path: str, locs: pd.DataFrame, info: list[dict]) -> None:
         "fileformat": {"name": "sml"},
     }
     savemat(path, out, do_compression=True)
+
+
+# PyME (python-microscopy, PYMEVisualize) localization files
+
+#: Extensions of PyME localization files: ``.h5r`` holds the raw fit
+#: results of PyME's localization, ``.hdf`` the (processed) localizations
+#: saved by PYMEVisualize. PyME recognizes HDF5 files only by these.
+PYME_EXTENSIONS = (".h5r", ".hdf")
+
+#: Nested fields of PyME's raw fit results that describe the fit itself
+#: (ROI slices, starting parameters) rather than the localization.
+_PYME_SKIPPED_PREFIXES = ("slicesUsed_", "startParams_")
+
+#: Picasso columns that ``export_pyme_multi`` converts to PyME columns,
+#: i.e., which are not copied as they are.
+_PYME_EXPORTED_COLUMNS = (
+    "frame",
+    "x",
+    "y",
+    "z",
+    "lpx",
+    "lpy",
+    "lpz",
+    "sx",
+    "sy",
+    "photons",
+    "bg",
+)
+
+
+def is_pyme_file(path: str) -> bool:
+    """Whether ``path`` names a PyME localization file (``.h5r`` or
+    ``.hdf``; a Picasso ``.hdf5`` file is not one).
+
+    Parameters
+    ----------
+    path : str
+        Path to a file.
+
+    Returns
+    -------
+    bool
+        True for the ``.h5r`` and ``.hdf`` extensions.
+    """
+    return os.path.splitext(path)[1].lower() in PYME_EXTENSIONS
+
+
+def _pyme_flatten(records: np.ndarray) -> dict[str, np.ndarray]:
+    """Flatten a (nested) structured array into columns named the way
+    PyME does, i.e., ``fitResults.x0`` becomes ``fitResults_x0``.
+
+    Fields that hold arrays rather than one value per localization are
+    skipped.
+    """
+    columns = {}
+
+    def visit(values: np.ndarray, prefix: str) -> None:
+        names = values.dtype.names
+        if names is None:
+            if values.ndim == 1:
+                columns[prefix] = values
+            return
+        for name in names:
+            visit(values[name], f"{prefix}_{name}" if prefix else name)
+
+    visit(records, "")
+    return columns
+
+
+def _pyme_table_columns(table) -> set[str]:
+    """Flattened column names of a PyTables table."""
+    return {name.replace("/", "_") for name in table.colpathnames}
+
+
+def _pyme_find_table(h5file, path: str):
+    """The table of a PyME file holding the localizations.
+
+    Like PYMEVisualize, the first table with ``x`` and ``y`` columns is
+    used, preferring ``FitResults`` in ``.h5r`` and ``Localizations``
+    in ``.hdf`` files. The fiducials (``DriftResults``) are used only if
+    there is no other table.
+    """
+    tables_ = h5file.list_nodes("/", classname="Table")
+    is_h5r = path.lower().endswith(".h5r")
+    preferred = "FitResults" if is_h5r else "Localizations"
+    order = {preferred: 0, "DriftResults": 2}
+    tables_ = sorted(tables_, key=lambda t: order.get(t._v_name, 1))
+    for table in tables_:
+        names = _pyme_table_columns(table)
+        if {"x", "y"} <= names or {"fitResults_x0", "fitResults_y0"} <= names:
+            return table
+    raise ValueError(
+        f"PyME file {path} does not contain a table of localizations "
+        "(no table with x and y columns). Found tables: "
+        f"{[t._v_name for t in tables_]}."
+    )
+
+
+def _pyme_metadata_value(value):
+    """Convert a PyME metadata value into a JSON-serializable Python
+    object, or None if it cannot be represented."""
+    if isinstance(value, bytes):
+        value = value.decode("utf-8", errors="replace")
+    elif isinstance(value, np.generic):
+        value = value.item()
+    elif isinstance(value, np.ndarray):
+        value = value.tolist()
+    try:
+        json.dumps(value, default=_json_default)
+    except (TypeError, ValueError):
+        return None
+    return value
+
+
+def _pyme_read_metadata(h5file) -> dict:
+    """Read PyME metadata (attributes of the groups under ``/MetaData``)
+    into a flat dictionary with keys such as ``"voxelsize.x"``."""
+    metadata = {}
+    if "/MetaData" not in h5file:
+        return metadata
+    for group in h5file.walk_groups("/MetaData"):
+        prefix = group._v_pathname[len("/MetaData") :].strip("/")
+        prefix = prefix.replace("/", ".")
+        attrs = group._v_attrs
+        for name in attrs._f_list("user"):
+            try:
+                value = getattr(attrs, name)
+            except Exception:  # noqa: BLE001 - e.g., unreadable pickles
+                continue
+            value = _pyme_metadata_value(value)
+            if value is not None:
+                metadata[f"{prefix}.{name}" if prefix else name] = value
+    return metadata
+
+
+def _pyme_read(path: str) -> tuple[dict[str, np.ndarray], dict]:
+    """Read the localizations and metadata of a PyME file.
+
+    Returns
+    -------
+    columns : dict
+        Flattened localization columns, see ``_pyme_flatten``.
+    metadata : dict
+        Flat PyME metadata, see ``_pyme_read_metadata``.
+    """
+    import tables
+
+    with tables.open_file(path, "r") as h5file:
+        records = _pyme_find_table(h5file, path).read()
+        metadata = _pyme_read_metadata(h5file)
+    columns = {
+        name: values
+        for name, values in _pyme_flatten(records).items()
+        if not name.startswith(_PYME_SKIPPED_PREFIXES)
+    }
+    return columns, metadata
+
+
+def _pyme_pixelsize_from_metadata(metadata: dict) -> float | None:
+    """Camera pixel size (nm) from PyME metadata, which stores it in um
+    as ``voxelsize.x``; None if it is missing or invalid."""
+    value = metadata.get("voxelsize.x")
+    if isinstance(value, (int, float)) and value > 0:
+        return 1000.0 * float(value)
+    return None
+
+
+def pyme_pixelsize(path: str) -> float | None:
+    """Read the camera pixel size stored in a PyME localization file.
+
+    Parameters
+    ----------
+    path : str
+        Path to the PyME ``.h5r`` or ``.hdf`` file.
+
+    Returns
+    -------
+    pixelsize : float or None
+        Camera pixel size in nm (PyME stores ``voxelsize.x`` in um), or
+        None if the file does not store it or cannot be read.
+    """
+    import tables
+
+    try:
+        with tables.open_file(path, "r") as h5file:
+            if "/MetaData/voxelsize" not in h5file:
+                return None
+            attrs = h5file.get_node("/MetaData/voxelsize")._v_attrs
+            value = _pyme_metadata_value(getattr(attrs, "x", None))
+    except Exception:  # noqa: BLE001 - not a readable HDF5 file
+        return None
+    return _pyme_pixelsize_from_metadata({"voxelsize.x": value})
+
+
+def _pyme_photons_per_count(metadata: dict) -> float | None:
+    """Photons per camera count, ``Camera.ElectronsPerCount /
+    Camera.TrueEMGain``, from PyME metadata; None if unknown."""
+    per_count = metadata.get("Camera.ElectronsPerCount")
+    gain = metadata.get("Camera.TrueEMGain", 1)
+    if not isinstance(per_count, (int, float)) or per_count <= 0:
+        return None
+    if not isinstance(gain, (int, float)) or gain <= 0:
+        return None
+    return float(per_count) / float(gain)
+
+
+def _pyme_picasso_infos(metadata: dict) -> list[list[dict]] | None:
+    """Picasso metadata of each channel stored by ``export_pyme_multi``
+    (``Picasso.Info``), or None if there is none."""
+    raw = metadata.get("Picasso.Info")
+    if not isinstance(raw, str):
+        return None
+    try:
+        infos = json.loads(raw)
+    except ValueError:
+        return None
+    if not isinstance(infos, list) or not all(
+        isinstance(info, list) and info and isinstance(info[0], dict)
+        for info in infos
+    ):
+        return None
+    return infos
+
+
+def _pyme_restore_info(
+    restored: list[dict], imported: list[dict], probe: int | None = None
+) -> list[dict]:
+    """Picasso metadata of a channel exported by ``export_pyme_multi``,
+    updated with the canvas (and its offset, see ``lib.fit_canvas``) of
+    the imported localizations.
+
+    Parameters
+    ----------
+    restored : list of dicts
+        Picasso metadata stored in the PyME file.
+    imported : list of dicts
+        Metadata created by ``import_pyme``.
+    probe : int or None, optional
+        PyME channel (``probe``) of the localizations, if split.
+
+    Returns
+    -------
+    info : list of dicts
+        ``restored`` with the imported canvas and a dictionary on the
+        import appended.
+    """
+    canvas_keys = (*lib.CANVAS_OFFSET_KEYS, *lib.CAMERA_SIZE_KEYS)
+    info = copy.deepcopy(restored)
+    for inf in info:
+        for key in canvas_keys:
+            inf.pop(key, None)
+        for key in ("Width", "Height"):
+            if key in inf:
+                inf[key] = imported[0][key]
+    # Render reads the canvas from the first dictionary
+    info[0]["Width"] = imported[0]["Width"]
+    info[0]["Height"] = imported[0]["Height"]
+    added = {
+        key: value
+        for key, value in imported[0].items()
+        if key in ("Generated by", "PyME metadata", *canvas_keys)
+    }
+    if probe is not None:
+        added["PyME probe"] = probe
+    info.append(added)
+    return info
+
+
+def import_pyme(
+    path: str, pixelsize: float | None = None
+) -> tuple[pd.DataFrame, list[dict]]:
+    """Import localization data from a PyME (python-microscopy,
+    PYMEVisualize) file.
+
+    Reads both the raw fit results of PyME's localization (``.h5r``,
+    table ``FitResults`` with nested ``fitResults``/``fitError``
+    fields) and the localizations saved by PYMEVisualize (``.hdf``,
+    usually table ``Localizations``). PyME stores x, y, z, the PSF
+    widths and the localization precisions in nm and frames as ``t``
+    (``tIndex`` in ``.h5r``), starting at 0. The columns are converted
+    as follows (the first column found is used):
+
+    - ``frame``: ``t``, ``tIndex``.
+    - ``x``, ``y``: ``x``/``fitResults_x0``, ``y``/``fitResults_y0``,
+      converted to camera pixels.
+    - ``z``: ``z``, ``fitResults_z0`` (nm). Omitted if all values are
+      zero, i.e., for 2D data, for which PYMEVisualize adds ``z = 0``.
+    - ``lpx``, ``lpy``: ``error_x``/``fitError_x0``,
+      ``error_y``/``fitError_y0`` (camera pixels; one is used for both
+      if only one is present, 0 if neither is).
+    - ``lpz``: ``error_z``, ``fitError_z0`` (nm), 3D data only.
+    - ``sx``, ``sy``: ``sigx``/``fitResults_sigmax``,
+      ``sigy``/``fitResults_sigmay``, otherwise ``sig``/
+      ``fitResults_sigma`` for both (camera pixels; 1 if absent).
+    - ``photons``: ``nPhotons``. Otherwise the integral of the fitted
+      Gaussian, ``2 pi A sx sy`` (``A``/``fitResults_A`` is the peak
+      amplitude in camera counts), converted to photons with
+      ``Camera.ElectronsPerCount / Camera.TrueEMGain`` from the
+      metadata. **If the metadata does not store the camera
+      conversion, the photons are given in camera counts.** 1 if there
+      is no amplitude or PSF width.
+    - ``bg``: ``bg`` (files exported by Picasso), otherwise
+      ``fitResults_background + subtractedBackground`` (camera counts
+      per pixel, converted to photons as above), otherwise 0.
+
+    All other numeric columns (e.g., ``A``, ``probe``, ``nchi2``,
+    ``clumpIndex``, ``dbscanClumpID``) are kept as extra columns, with
+    their names sanitized. Several channels stored in one file (PyME's
+    ``probe`` column) can be split with ``split_pyme_channels``.
+
+    If a localization lies left of or above the camera image, e.g.,
+    after drift correction, the canvas is extended with
+    ``lib.fit_canvas`` rather than removing the localization. Files
+    exported by Picasso (``export_pyme_multi``) with a single channel
+    get their Picasso metadata back.
+
+    Parameters
+    ----------
+    path : str
+        The path to the PyME ``.h5r`` or ``.hdf`` file.
+    pixelsize : float or None, optional
+        Camera pixel size in nm, used only if the file does not store
+        it (``voxelsize.x``). Default is None.
+
+    Returns
+    -------
+    locs : pd.DataFrame
+        The localization data imported from the file.
+    info : list of dicts
+        Minimal metadata information, including the PyME metadata
+        (``"PyME metadata"``).
+
+    Raises
+    ------
+    ValueError
+        If the file contains no localizations or stores no pixel size
+        and ``pixelsize`` is not given.
+    """
+    columns, metadata = _pyme_read(path)
+    file_pixelsize = _pyme_pixelsize_from_metadata(metadata)
+    if file_pixelsize is not None:
+        pixelsize = file_pixelsize
+    elif pixelsize is None:
+        raise ValueError(
+            f"PyME file {path} does not store the camera pixel size "
+            "(voxelsize.x); please provide it."
+        )
+    pixelsize = float(pixelsize)
+
+    used = set()
+
+    def take(*names: str) -> np.ndarray | None:
+        """The first of the given columns present (as float64), marked
+        as converted, i.e., not copied as an extra column."""
+        for name in names:
+            if name in columns:
+                used.add(name)
+                return columns[name].astype(np.float64)
+        return None
+
+    x = take("x", "fitResults_x0")
+    y = take("y", "fitResults_y0")
+    if x is None or y is None:
+        raise ValueError(f"PyME file {path} has no x and y columns.")
+    n = len(x)
+
+    t = take("t", "tIndex")
+    if t is None:
+        frames = np.zeros(n, dtype=np.int64)
+    else:
+        frames = np.rint(np.nan_to_num(t)).astype(np.int64)
+        if n and frames.min() < 0:
+            frames -= frames.min()
+
+    data = {
+        "frame": frames.astype(np.uint32),
+        "x": (x / pixelsize).astype(np.float32),
+        "y": (y / pixelsize).astype(np.float32),
+    }
+
+    z = take("z", "fitResults_z0")
+    is_3d = z is not None and bool(np.any(np.nan_to_num(z) != 0))
+    if is_3d:
+        data["z"] = z.astype(np.float32)  # nm in both PyME and Picasso
+
+    lpx = take("error_x", "fitError_x0")
+    lpy = take("error_y", "fitError_y0")
+    if lpx is None:
+        lpx = lpy
+    if lpy is None:
+        lpy = lpx
+    if lpx is None:
+        lpx = lpy = np.zeros(n)
+    data["lpx"] = (lpx / pixelsize).astype(np.float32)
+    data["lpy"] = (lpy / pixelsize).astype(np.float32)
+    if is_3d:
+        lpz = take("error_z", "fitError_z0")
+        if lpz is not None:
+            data["lpz"] = lpz.astype(np.float32)
+
+    sx = take("sigx", "fitResults_sigmax")
+    sy = take("sigy", "fitResults_sigmay")
+    if sx is None or sy is None:
+        sigma = take("sig", "fitResults_sigma")
+        sx = sigma if sx is None else sx
+        sy = sigma if sy is None else sy
+    if sx is None:
+        sx = sy
+    if sy is None:
+        sy = sx
+    has_sigma = sx is not None
+    if has_sigma:
+        sx = sx / pixelsize
+        sy = sy / pixelsize
+    else:
+        sx = sy = np.ones(n)
+
+    per_count = _pyme_photons_per_count(metadata)
+    to_photons = 1.0 if per_count is None else per_count
+    photons = take("nPhotons")
+    if photons is None:
+        # the amplitude is kept as an extra column, too
+        amplitude = columns.get("A", columns.get("fitResults_A"))
+        if amplitude is not None and has_sigma:
+            photons = (
+                amplitude.astype(np.float64) * 2 * np.pi * sx * sy * to_photons
+            )
+        else:
+            photons = np.ones(n)
+    data["photons"] = photons.astype(np.float32)
+    data["sx"] = sx.astype(np.float32)
+    data["sy"] = sy.astype(np.float32)
+
+    bg = take("bg")
+    if bg is None:
+        bg = take("fitResults_background")
+        if bg is not None:
+            subtracted = take("subtractedBackground")
+            if subtracted is not None:
+                bg = bg + subtracted
+            bg = bg * to_photons
+        else:
+            bg = np.zeros(n)
+    data["bg"] = bg.astype(np.float32)
+
+    for name, values in columns.items():
+        if name in used or values.dtype.kind not in "biuf":
+            continue
+        name = _sanitize_column_name(name)
+        if name in data:
+            continue
+        if values.dtype.kind == "f":
+            values = values.astype(np.float32)
+        data[name] = values
+
+    locs = pd.DataFrame(data)
+    locs.sort_values(kind="quicksort", by="frame", inplace=True)
+    locs.reset_index(drop=True, inplace=True)
+
+    # the canvas covers the camera ROI and every localization
+    width = metadata.get("Camera.ROIWidth")
+    height = metadata.get("Camera.ROIHeight")
+    width = int(width) if isinstance(width, (int, float)) else 0
+    height = int(height) if isinstance(height, (int, float)) else 0
+    finite_x = data["x"][np.isfinite(data["x"])]
+    finite_y = data["y"][np.isfinite(data["y"])]
+    if len(finite_x):
+        width = max(width, int(np.floor(finite_x.max())) + 1)
+    if len(finite_y):
+        height = max(height, int(np.floor(finite_y.max())) + 1)
+
+    img_info = {}
+    img_info["Generated by"] = f"Picasso v{__version__} pyme2hdf"
+    img_info["Frames"] = int(np.max(frames)) + 1 if n else 1
+    img_info["Height"] = max(height, 1)
+    img_info["Width"] = max(width, 1)
+    img_info["Pixelsize"] = pixelsize
+    img_info["PyME metadata"] = {
+        key: value
+        for key, value in metadata.items()
+        if not key.startswith("Picasso.")
+    }
+    info = [img_info]
+    # localizations left of or above the camera image are kept
+    lib.fit_canvas([locs], [info])
+
+    restored = _pyme_picasso_infos(metadata)
+    if restored is not None and len(restored) == 1:
+        info = _pyme_restore_info(restored[0], info)
+    return locs, info
+
+
+def split_pyme_channels(
+    path: str, locs: pd.DataFrame, info: list[dict]
+) -> list[tuple[str, pd.DataFrame, list[dict]]]:
+    """Split localizations imported with ``import_pyme`` into one
+    channel per PyME ``probe`` value.
+
+    PyME stores several channels in one file with an integer ``probe``
+    column, Picasso one channel per file.
+
+    Parameters
+    ----------
+    path : str
+        The path to the PyME file the localizations were imported from.
+    locs : pd.DataFrame
+        Localizations returned by ``import_pyme``.
+    info : list of dicts
+        Metadata returned by ``import_pyme``.
+
+    Returns
+    -------
+    channels : list of tuples
+        ``(path, locs, info)`` per channel, sorted by ``probe``. With a
+        single channel, the input is returned (without a constant
+        ``probe`` column). Otherwise, each channel's path is
+        ``<base>_probe<k><ext>``, its localizations do not contain the
+        ``probe`` column and its metadata is the Picasso metadata stored
+        by ``export_pyme_multi`` (if present) or a copy of ``info``,
+        with the probe value added (``"PyME probe"``).
+    """
+    if "probe" not in locs.columns:
+        return [(path, locs, info)]
+    probes = np.rint(locs["probe"].to_numpy(dtype=np.float64))
+    values = np.unique(probes[np.isfinite(probes)]).astype(np.int64)
+    if len(values) <= 1:
+        return [(path, locs.drop(columns="probe"), info)]
+
+    restored = None
+    try:
+        import tables
+
+        with tables.open_file(path, "r") as h5file:
+            restored = _pyme_picasso_infos(_pyme_read_metadata(h5file))
+    except Exception:  # noqa: BLE001 - restoring the metadata is optional
+        restored = None
+    if restored is not None and list(values) != list(range(len(restored))):
+        restored = None
+
+    base, ext = os.path.splitext(path)
+    channels = []
+    for value in values:
+        channel_locs = locs[probes == value].drop(columns="probe")
+        channel_locs = channel_locs.reset_index(drop=True)
+        if restored is not None:
+            channel_info = _pyme_restore_info(
+                restored[value], info, int(value)
+            )
+        else:
+            channel_info = copy.deepcopy(info)
+            channel_info[-1]["PyME probe"] = int(value)
+        channels.append(
+            (f"{base}_probe{value}{ext}", channel_locs, channel_info)
+        )
+    return channels
+
+
+def _pyme_channel_table(
+    locs: pd.DataFrame, info: list[dict], pixelsize: float, probe: int
+) -> pd.DataFrame:
+    """PyME columns of one channel, see ``export_pyme_multi``."""
+    n = len(locs)
+    # PyME's coordinates refer to the camera image, i.e., without the
+    # translation of the canvas (see lib.fit_canvas)
+    offset_x, offset_y = (
+        lib.get_from_metadata(info, key, 0) for key in lib.CANVAS_OFFSET_KEYS
+    )
+
+    def column(name: str, default: float = 0.0) -> np.ndarray:
+        """A Picasso column as float64, or a default-filled one if the
+        column is absent."""
+        if name in locs.columns:
+            return locs[name].to_numpy(dtype=np.float64)
+        return np.full(n, default, dtype=np.float64)
+
+    table = {
+        "x": (column("x") - offset_x) * pixelsize,
+        "y": (column("y") - offset_y) * pixelsize,
+        "t": column("frame").astype(np.int32),
+        "error_x": column("lpx") * pixelsize,
+        "error_y": column("lpy") * pixelsize,
+        "nPhotons": column("photons"),
+        "sigx": column("sx", 1.0) * pixelsize,
+        "sigy": column("sy", 1.0) * pixelsize,
+        "bg": column("bg"),
+    }
+    if "z" in locs.columns:
+        table["z"] = column("z")  # nm in both PyME and Picasso
+        if "lpz" in locs.columns:
+            table["error_z"] = column("lpz")
+    for key, values in table.items():
+        if values.dtype.kind == "f":
+            table[key] = values.astype(np.float32)
+    table["probe"] = np.full(n, probe, dtype=np.int32)
+
+    for name in locs.columns:
+        if name in _PYME_EXPORTED_COLUMNS:
+            continue
+        values = locs[name].to_numpy()
+        if values.dtype.kind not in "biuf":
+            continue
+        name = _sanitize_column_name(name)
+        if name not in table:
+            table[name] = values
+    return pd.DataFrame(table)
+
+
+def _pyme_write_metadata(h5file, entries: dict) -> None:
+    """Write PyME metadata, i.e., ``"a.b.c": value`` as the attribute
+    ``c`` of the group ``/MetaData/a/b``."""
+    for key, value in entries.items():
+        *groups, name = key.split(".")
+        where = "/".join(["", "MetaData", *groups])
+        if where in h5file:
+            group = h5file.get_node(where)
+        else:
+            parent, child = where.rsplit("/", 1)
+            group = h5file.create_group(
+                parent or "/", child, createparents=True
+            )
+        group._f_setattr(name, value)
+
+
+def export_pyme(path: str, locs: pd.DataFrame, info: list[dict]) -> None:
+    """Export localizations as a PyME ``.hdf`` file that PYMEVisualize
+    opens, see ``export_pyme_multi``.
+
+    Parameters
+    ----------
+    path : str
+        The path where the file will be saved. The ``.hdf`` extension
+        is enforced.
+    locs : pd.DataFrame
+        The localization data to be exported.
+    info : list of dicts
+        Metadata dictionaries.
+    """
+    export_pyme_multi(path, [locs], [info])
+
+
+def export_pyme_multi(
+    path: str,
+    locs_list: list[pd.DataFrame],
+    info_list: list[list[dict]],
+    channel_names: list[str] | None = None,
+) -> None:
+    """Export one or more channels as a single PyME ``.hdf`` file that
+    PYMEVisualize opens (the format of its "Save filtered
+    localizations").
+
+    The localizations are stored in the table ``Localizations`` with
+    the PyME columns (lengths in nm):
+
+    - ``x``, ``y``: ``x``, ``y`` converted to nm.
+    - ``t``: ``frame``.
+    - ``z``, ``error_z``: ``z``, ``lpz`` (3D data only).
+    - ``error_x``, ``error_y``: ``lpx``, ``lpy`` converted to nm.
+    - ``nPhotons``: ``photons``.
+    - ``sigx``, ``sigy``: ``sx``, ``sy`` converted to nm.
+    - ``bg``: ``bg`` (photons per pixel).
+    - ``probe``: the index of the channel, i.e., PyME shows the
+      channels as ``chan0``, ``chan1``, etc.
+
+    All other numeric columns (e.g., ``group``, ``net_gradient``) are
+    copied as they are. With several channels, only the columns present
+    in all of them are stored.
+
+    Note that the PyME columns ``A`` (peak amplitude in camera counts)
+    and ``sig`` are not written: PYMEVisualize filters the
+    localizations by these by default (``sig`` between 95 and 200 nm),
+    which would hide localizations without notice. Its default filter
+    of ``error_x`` and ``error_y`` (below 30 nm) applies, though, and
+    may need to be changed in PYMEVisualize.
+
+    Like in PyME, the coordinates refer to the camera image, i.e., a
+    translation of the canvas (``lib.fit_canvas``, e.g., after moving a
+    channel beyond the top left edge) is undone.
+
+    The metadata stores the pixel size (``voxelsize.x``/``.y`` in um),
+    the camera image size (``Camera.ROIWidth``/``ROIHeight``) and
+    Picasso's metadata of each channel (``Picasso.Info``, a JSON
+    string), which ``import_pyme`` and ``split_pyme_channels`` restore.
+
+    Parameters
+    ----------
+    path : str
+        The path where the file will be saved. The ``.hdf`` extension
+        is enforced, as PyME does not recognize ``.hdf5`` files.
+    locs_list : list of pd.DataFrames
+        The localizations of each channel.
+    info_list : list of lists of dicts
+        Metadata of each channel.
+    channel_names : list of strs or None, optional
+        Names of the channels, stored as ``Picasso.ChannelNames``.
+        Default is None, i.e., not stored.
+
+    Raises
+    ------
+    ValueError
+        If no channel is given or the channels' pixel sizes differ.
+    """
+    import tables
+
+    if not len(locs_list) or len(locs_list) != len(info_list):
+        raise ValueError(
+            "Provide the localizations and the metadata of each channel."
+        )
+    pixelsizes = [
+        float(lib.get_from_metadata(info, "Pixelsize", raise_error=True))
+        for info in info_list
+    ]
+    if not np.allclose(pixelsizes, pixelsizes[0]):
+        raise ValueError(
+            "All channels exported to one PyME file need the same pixel "
+            f"size; found {pixelsizes} nm."
+        )
+    pixelsize = pixelsizes[0]
+
+    path = os.path.splitext(path)[0] + ".hdf"
+    tables_ = [
+        _pyme_channel_table(locs, info, pixelsize, probe)
+        for probe, (locs, info) in enumerate(zip(locs_list, info_list))
+    ]
+    # only the columns present in all channels
+    records = pd.concat(tables_, join="inner", ignore_index=True)
+    records = records.to_records(index=False)
+
+    def camera_size(axis: int) -> int:
+        """Size of the camera image along x (0) or y (1), i.e., the
+        canvas without its translation (see lib.fit_canvas)."""
+        sizes = []
+        for info in info_list:
+            size = lib.get_from_metadata(info, lib.CAMERA_SIZE_KEYS[axis])
+            if size is None:
+                size = lib.get_from_metadata(info, ("Width", "Height")[axis])
+            if size is not None:
+                sizes.append(int(size))
+        return max(sizes, default=0)
+
+    metadata = {
+        "voxelsize.x": pixelsize / 1000,
+        "voxelsize.y": pixelsize / 1000,
+        "voxelsize.units": "um",
+    }
+    width, height = camera_size(0), camera_size(1)
+    if width and height:
+        metadata["Camera.ROIWidth"] = width
+        metadata["Camera.ROIHeight"] = height
+    try:
+        metadata["Picasso.Info"] = json.dumps(
+            [list(info) for info in info_list],
+            default=_json_default,
+            ensure_ascii=True,
+        )
+    except (TypeError, ValueError) as e:
+        warnings.warn(
+            "Could not store the Picasso metadata in the PyME file "
+            f"({type(e).__name__}: {e}).",
+            stacklevel=2,
+        )
+    if channel_names is not None:
+        metadata["Picasso.ChannelNames"] = json.dumps(
+            list(channel_names), ensure_ascii=True
+        )
+
+    filters = tables.Filters(complevel=5, complib="zlib", shuffle=True)
+    with tables.open_file(path, "w") as h5file:
+        h5file.create_table("/", "Localizations", obj=records, filters=filters)
+        _pyme_write_metadata(h5file, metadata)

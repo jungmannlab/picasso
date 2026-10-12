@@ -416,6 +416,29 @@ file) and can be loaded directly in SMAP via ``File > Load``.
 
    picasso hdf2smap files
 
+pyme2hdf
+--------
+Convert PyME (`python-microscopy <https://python-microscopy.org>`_) ``.h5r``
+(raw fit results) and ``.hdf`` (saved in PYMEVisualize) files to ``.hdf5``.
+The camera pixel size is read from the file; ``-p/--pixelsize`` in nm is used
+for files that do not store it. A file with several channels (PyME's ``probe``
+column) is saved as one file per channel, ``<file>_probe<k>_locs.hdf5``. See
+:ref:`render-export-pyme` for how the columns are converted.
+
+.. code-block:: bash
+
+   picasso pyme2hdf filepath [-p pixelsize]
+
+hdf2pyme
+--------
+Convert hdf5 files to PyME ``.hdf`` files, which can be opened in
+PYMEVisualize. The output is named ``<file>.hdf`` (PyME does not recognize the
+``.hdf5`` extension).
+
+.. code-block:: bash
+
+   picasso hdf2pyme files
+
 join
 ----
 Combine two hdf5 localization files. A new joined file will be created.
