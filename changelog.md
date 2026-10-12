@@ -32,7 +32,8 @@ Last change: 12-OCT-2026 CEST
 - Faster FRC.
 - FRC in several random ROIs (*Info* dialog, *FRC in several ROIs*).
 - `picasso.render` is distributed as a package (`kernels`, `geometry`, `splat`, `scene`, `overlays_qt`, `animation`, `backend`, `gpu`); every former `picasso.render.*` name is still importable from `picasso.render`.
-- 2D/3D grid available for reference.
+- 2D/3D grid available for reference, either as the full grid or as axes with ticks and labels only.
+- The axes icon in the bottom left corner of the 3D view was removed (along with `View > Show/hide rotation`).
 - Rectangular pick minimum length set to 5 display pixels.
 - The View menu no longer lists Left/Right/Up/Down and Zoom in/out (their keyboard shortcuts still work); *Filter picks by number of localizations* is now *Filter picks by count*.
 - Long operations run in the background and can be canceled: undrifting (AIM, RCC, from picked), DBSCAN, HDBSCAN, SMLM clusterer, G5M, RESI, NeNA, FRC in ROIs, pick statistics and saving pick properties. The windows keep repainting while they run.

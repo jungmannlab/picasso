@@ -4,7 +4,8 @@ The 2D grid sits at whole multiples of the spacing in the data's
 coordinates; the 3D grid planes span the data's bounding box, are
 projected exactly like the localizations and, at the back of the box,
 always lie on the side facing away from the viewer. Drawn behind the
-localizations, the grid never dims them.
+localizations, the grid never dims them. Axes, instead of the full grid,
+run along the edges of the view (2D) or of the bounding box (3D).
 
 :author: Rafal Kowalewski, 2026
 :copyright: Copyright (c) 2026 Jungmann Lab, MPI of Biochemistry
@@ -392,8 +393,142 @@ def test_labels_are_drawn_only_when_asked(qapp):
         dict(spacing_nm=10, blend="Additive"),
         dict(spacing_nm=10, planes=("xw",)),
         dict(spacing_nm=10, position="front"),
+        dict(spacing_nm=10, kind="ticks"),
     ],
 )
 def test_invalid_settings_raise(kwargs):
     with pytest.raises(ValueError):
         render.GridOverlay(**kwargs)
+
+
+def test_label_texts_can_leave_out_the_unit():
+    assert render.format_grid_labels([0, 500], 500, unit=False) == [
+        "0",
+        "500",
+    ]
+    assert render.format_grid_labels([0, 2000], 1000, unit=False) == [
+        "0",
+        "2",
+    ]
+    assert render.grid_label_unit([0, 500], 500) == "nm"
+    assert render.grid_label_unit([0, 2000], 1000) == "\u00b5m"
+
+
+def test_2d_axes_run_along_the_bottom_and_left_edges(qapp):
+    grid = _grid(
+        kind="axes",
+        blend="Over localizations",
+        style=render.OverlayStyle(opacity=1.0),
+    )
+    drawn = _rgb(render.draw_grid(_image(), VIEWPORT, grid, PIXELSIZE))
+    rows, cols = np.nonzero(drawn.sum(axis=2))
+    height, width = SIZE[1], SIZE[0]
+    assert len(rows)
+    # the axes and their ticks only (ticks are 6 display px long)
+    assert np.all((rows >= height - 8) | (cols <= 7))
+    # the whole bottom and left edges
+    assert drawn[height - 1].sum(axis=1).all()
+    assert drawn[:, 0].sum(axis=1).all()
+    # a tick at each grid line (every 100 display px), pointing inwards
+    tick_row = drawn[height - 5].sum(axis=1)
+    assert set(np.flatnonzero(tick_row)) >= {100}
+
+
+def test_2d_axes_are_named_and_their_ticks_labeled(qapp):
+    from picasso.render import grid as grid_module
+
+    grid = _grid(kind="axes", labels=True)
+    image = _image()
+    levels_x = render.grid_levels(0, 20, 10.0)
+    levels_y = render.grid_levels(0, 10, 10.0)
+    _, labels = grid_module._axes_2d(
+        grid,
+        levels_x,
+        levels_y,
+        levels_x * 10,
+        levels_y * 10,
+        10.0,
+        PIXELSIZE,
+        image,
+    )
+    texts = [text for text, _ in labels]
+    # the names come first, so they are kept
+    assert texts[:2] == ["x (nm)", "y (nm)"]
+    assert "100" in texts and "200" in texts
+    assert not any(t.endswith("nm") for t in texts[2:])
+    # no label in the corner both axes share
+    for text, rect in labels[2:]:
+        assert not (rect.left() < 10 and rect.bottom() > SIZE[1] - 10)
+
+
+def _axes_3d(R, grid, bounds=((2, 2, -3), (18, 8, 3))):
+    from picasso.render import grid as grid_module
+
+    def to_display(points):
+        return render.project_points(points, VIEWPORT, R)[..., :2] * 10 + 900
+
+    return grid_module._axes_3d(
+        grid, bounds, 10.0, (0.0, 0.0, 0.0), PIXELSIZE, to_display
+    )
+
+
+def test_unrotated_3d_axes_lie_at_the_bottom_and_left(qapp):
+    lines, labels = _axes_3d(Rotation.identity(), _grid(kind="axes"))
+    names = [text for text, _ in labels if "(" in text]
+    # z points at the viewer
+    assert names == ["x (nm)", "y (nm)"]
+    x_axis = lines[0]
+    # along the bottom of the box (y = 10 camera px -> 1000 display px)
+    assert x_axis.y1() == pytest.approx(1000) == x_axis.y2()
+    y_axis = [line for line in lines if line.length() > 50][1]
+    assert y_axis.x1() == pytest.approx(900) == y_axis.x2()
+
+
+@pytest.mark.parametrize("seed", range(12))
+def test_3d_axes_start_from_one_corner_on_the_outline(qapp, seed):
+    from picasso.render import grid as grid_module
+
+    R = Rotation.random(random_state=seed)
+    lines, _ = _axes_3d(R, _grid(kind="axes", labels=True))
+    axes = [line for line in lines if line.length() > 6.5]
+    assert len(axes) == 3
+    ends = [
+        np.array([[line.x1(), line.y1()], [line.x2(), line.y2()]])
+        for line in axes
+    ]
+    # one end point shared by all three axes
+    shared = [
+        p for p in ends[0] if all(np.isclose(e, p).all(1).any() for e in ends)
+    ]
+    assert len(shared) == 1
+    # the axes leave it in different directions
+    directions = [
+        (e[1] - e[0] if np.isclose(e[0], shared[0]).all() else e[0] - e[1])
+        for e in ends
+    ]
+    directions = [d / np.linalg.norm(d) for d in directions]
+    for i in range(3):
+        for j in range(i + 1, 3):
+            assert np.dot(directions[i], directions[j]) < np.cos(
+                np.radians(grid_module._MIN_AXES_ANGLE)
+            )
+    # the corner lies on the outline of the box
+    bounds = ((2, 2, -3), (18, 8, 3))
+    segments = render.grid_segments_3d(bounds, 10.0, R)
+    projected = render.project_points(segments, VIEWPORT, R)[..., :2]
+    hull = grid_module.ConvexHull(projected.reshape(-1, 2) * 10 + 900)
+    vertices = hull.points[hull.vertices]
+    assert np.isclose(vertices, shared[0], atol=1e-6).all(1).any()
+
+
+def test_3d_axes_are_drawn(qapp):
+    R = Rotation.from_euler("xyz", [-60, 0, 30], degrees=True)
+    bounds = ((2, 2, -3), (18, 8, 3))
+    images = {}
+    for kind in ("grid", "axes"):
+        grid = _grid(kind=kind, blend="Over localizations")
+        images[kind] = _rgb(
+            render.draw_grid_3d(_image(), VIEWPORT, grid, PIXELSIZE, R, bounds)
+        )
+    assert images["axes"].any()
+    assert (images["axes"] != images["grid"]).any()

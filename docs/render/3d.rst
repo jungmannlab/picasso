@@ -38,8 +38,8 @@ window:
 
 When rotating by a specified angle, the dialog offers a ``Rotate around``
 choice between **Localizations** (the default) and **World**.
-``Localizations`` rotates around the data's own axes - the axes shown by the
-axes icon, which rotate together with the data - so each entered angle changes
+``Localizations`` rotates around the data's own axes - the axes that rotate
+together with the data - so each entered angle changes
 the corresponding displayed angle by exactly that amount. ``World`` rotates
 around the fixed screen/camera axes instead.
 
@@ -134,9 +134,9 @@ View
    Opens the display settings of the 3D view, see
    :ref:`render-3d-display-settings` below.
 
-``Show/hide legend`` (:kbd:`Ctrl+L`), ``Show/hide rotation`` (:kbd:`Ctrl+P`), ``Show/hide rotation angles``
-   Toggle the overlays: the channel legend of multichannel data, the axes icon
-   that shows the current orientation, and the rotation angles in degrees.
+``Show/hide legend`` (:kbd:`Ctrl+L`), ``Show/hide rotation angles``
+   Toggle the overlays: the channel legend of multichannel data and the
+   rotation angles in degrees.
 
 ``Rotate by angle...`` (:kbd:`Ctrl+Shift+R`)
    Rotates by angles typed in, around the data's own axes or the fixed screen
@@ -201,7 +201,7 @@ orientation easy to follow. The planes span the data's bounding box, enlarged
 to the next grid lines, and the lines sit at whole multiples of
 ``Spacing (nm)`` in the original coordinates (so z = 0 nm lies on a line).
 ``Planes`` chooses which of the ``XY``, ``XZ`` and ``YZ`` planes are drawn and
-``Position`` where:
+``Position`` where (both are grayed out for ``Axes only``, see below):
 
 ``Back of the data`` (default)
    Each plane lies on the side of the bounding box facing away from you, so
@@ -210,9 +210,18 @@ to the next grid lines, and the lines sit at whole multiples of
 ``Through the center``
    Each plane passes through the center of the bounding box.
 
-``Labels`` prints the coordinates of the lines along one edge of the planes
-per axis - the edge farthest out on screen - with the axis name next to them. An axis pointing at the user gets no labels, and
-the labels that would overlap others or reach past the window are left out.
+``Show`` set to ``Axes only`` draws, instead of the planes, the three axes
+from one corner of the bounding box along its edges, with a tick mark at each
+grid line, like the axes of a 3D plot. The corner is chosen anew as the data
+rotate: one where no two axes overlap on screen, on the outline of the box and
+preferably at the bottom left. An axis pointing at you is left out.
+
+``Labels`` prints the coordinates of the lines, e.g., ``z = 200 nm``, just
+past one end of the lines of each axis, where they keep clear of the grid; z
+is labeled first. With ``Axes only``, the labels sit past the ticks and each
+axis is named with its unit, e.g., ``x (µm)``. An axis pointing at you gets no
+labels, and the labels that would overlap others or reach past the window are
+left out.
 
 ``Spacing``, ``Automatic``, ``Draw``, ``Labels`` and the line settings work as
 in the main window (see :ref:`render-grid`); the 3D grid keeps its own

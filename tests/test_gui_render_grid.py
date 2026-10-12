@@ -193,6 +193,24 @@ def test_3d_grid_planes_rotate_with_the_data(view_rot):
     assert (_rgb(view_rot.qimage) == unrotated_without).all()
 
 
+def test_3d_axes_replace_the_planes(view_rot):
+    box = view_rot.window.display_settings_dlg.grid_box
+    _show_grid(box, 2 * PIXELSIZE)
+    grid_image = _rgb(view_rot.qimage)
+    assert all(check.isEnabled() for check in box.planes.values())
+    box.kind.setCurrentText("Axes only")
+    assert box.grid().kind == "axes"
+    # the planes and their position are not used by the axes
+    assert not any(check.isEnabled() for check in box.planes.values())
+    assert not box.position.isEnabled()
+    assert (_rgb(view_rot.qimage) != grid_image).any()
+    assert box.settings()["Show"] == "Axes only"
+    box.kind.setCurrentText("Full grid")
+    box.load_settings({"Show": "Axes only"})
+    assert box.grid().kind == "axes"
+    assert not box.position.isEnabled()
+
+
 def test_3d_grid_keeps_z_0_nm_on_a_grid_line(view_rot):
     view_rot._pan_z = 0.7
     bounds, origin = view_rot.grid_geometry()

@@ -1904,11 +1904,10 @@ class ViewRotation(QtWidgets.QLabel):
             self.height(),
             QtCore.Qt.AspectRatioMode.KeepAspectRatioByExpanding,
         )
-        # draw grid, scalebar, legend, rotation and measuring points
+        # draw grid, scalebar, legend, rotation angles and measuring points
         self.qimage = self.draw_grid(self.qimage)
         self.qimage = self.draw_scalebar(self.qimage)
         self.qimage = self.draw_legend(self.qimage)
-        self.qimage = self.draw_rotation(self.qimage)
         self.qimage = self.draw_rotation_angles(self.qimage)
         self.qimage = self.draw_points(self.qimage)
 
@@ -2147,25 +2146,6 @@ class ViewRotation(QtWidgets.QLabel):
             channel_names=channel_names,
             channel_colors=channel_colors,
         )
-        return image
-
-    def draw_rotation(self, image: QtGui.QImage) -> QtGui.QImage:
-        """Draw a small 3 axes icon that rotates with locs.
-
-        Displayed in the bottom left corner.
-
-        Parameters
-        ----------
-        image : QImage
-            Image containing rendered localizations.
-
-        Returns
-        -------
-        image : QImage
-            Image with the drawn rotation axes icon.
-        """
-        if self.window.rotation_action.isChecked():
-            image = render.draw_rotation(image=image, ang=self._R)
         return image
 
     def draw_rotation_angles(self, image: QtGui.QImage) -> QtGui.QImage:
@@ -3237,8 +3217,6 @@ class RotationWindow(QtWidgets.QMainWindow):
         Menu bar with menus: File, View, Tools.
     menus : list
         Contains File, View and Tools menus, used for plugins.
-    rotation_action : QtGui.QAction
-        Action to toggle the display of reference axes.
     toolbar : toolbars.ToolBar
         The most used actions of the menus, see
         ``toolbars.add_toolbar``.
@@ -3304,11 +3282,6 @@ class RotationWindow(QtWidgets.QMainWindow):
         self.legend_action.setChecked(False)
         self.legend_action.setShortcut("Ctrl+L")
         self.legend_action.triggered.connect(self.update_scene)
-        self.rotation_action = view_menu.addAction("Show/hide rotation")
-        self.rotation_action.setCheckable(True)
-        self.rotation_action.setChecked(True)
-        self.rotation_action.setShortcut("Ctrl+P")
-        self.rotation_action.triggered.connect(self.update_scene)
         self.angles_action = view_menu.addAction("Show/hide rotation angles")
         self.angles_action.setCheckable(True)
         self.angles_action.setChecked(False)

@@ -12,12 +12,17 @@ the data, enlarged to the next grid lines, and are projected exactly
 like the localizations (``picasso.render.locs_rotation``): rotated about
 the viewport's center, orthographically.
 
+Instead of the full grid, only axes can be drawn: lines along two edges
+of the view in 2D and along three edges of the bounding box in 3D, with
+tick marks at the grid lines, like the axes of a plot.
+
 Optional labels print the coordinates of the lines, each just past one
 end of its line: the top end of vertical and the left end of horizontal
 lines in 2D, and in 3D one end of the lines of each axis, chosen to
 keep the labels off the grid. The axial extent of SMLM data is usually
 smaller than the lateral one, so the few z lines are preferred when
-labels compete for space.
+labels compete for space. With axes, the labels sit next to the ticks
+and each axis is named, with its unit.
 
 :author: Rafal Kowalewski, 2026
 :copyright: Copyright (c) 2026 Jungmann Lab, MPI of Biochemistry
@@ -55,6 +60,8 @@ AUTO_GRID_FRACTION = 1 / 10
 GRID_PLANES = ("xy", "xz", "yz")
 #: Where the 3D grid planes are placed, see ``GridOverlay``.
 GRID_POSITIONS = ("back", "center")
+#: What is drawn, see ``GridOverlay``.
+GRID_KINDS = ("grid", "axes")
 #: Lines closer together than this (display pixels) are not drawn, they
 #: would only tint the image.
 MIN_GRID_SPACING_PX = 4
@@ -64,6 +71,11 @@ MAX_GRID_LINES = 2000
 DEFAULT_LABEL_SIZE = 12
 # gap (display pixels) between a label and its line, edge or neighbor
 _LABEL_GAP = 4
+# length (display pixels) of the tick marks of the axes
+_TICK_LENGTH = 6
+# smallest angle (degrees) on screen between two 3D axes leaving their
+# common corner, see ``_axes_3d``
+_MIN_AXES_ANGLE = 25
 # opacity of the background behind each label, in the empty color
 _LABEL_BACKGROUND_ALPHA = 160
 # axis normal to each grid plane (0: x, 1: y, 2: z)
@@ -105,13 +117,22 @@ class GridOverlay:
         ``"z = 200 nm"``, and each axis is labeled once, on the plane
         where its lines are seen best. Labels that would overlap are
         thinned out; z lines are labeled first, so their labels are
-        kept where they would collide with others. Default is False.
+        kept where they would collide with others.
+        Default is False.
+    kind : {"grid", "axes"}, optional
+        "grid" draws the full grid. "axes" draws only axes with a tick
+        mark at each grid line: along the bottom and left edges of the
+        view in 2D and, in 3D, along the edges of the bounding box that
+        meet at one corner, preferably at the bottom left (``planes``
+        and ``position`` are not used). Their
+        labels print the bare coordinates next to the ticks and the
+        axis names with the unit, e.g., ``"x (µm)"``. Default is "grid".
 
     Raises
     ------
     ValueError
-        If ``spacing_nm`` is not positive or ``blend``, ``planes`` or
-        ``position`` is unknown.
+        If ``spacing_nm`` is not positive or ``blend``, ``planes``,
+        ``position`` or ``kind`` is unknown.
     """
 
     spacing_nm: float
@@ -124,6 +145,7 @@ class GridOverlay:
     planes: tuple[str, ...] = GRID_PLANES
     position: Literal["back", "center"] = "back"
     labels: bool = False
+    kind: Literal["grid", "axes"] = "grid"
 
     def __post_init__(self) -> None:
         if not self.spacing_nm > 0:
@@ -143,6 +165,10 @@ class GridOverlay:
             raise ValueError(
                 f"Unknown position {self.position!r}; choose one of "
                 f"{GRID_POSITIONS}."
+            )
+        if self.kind not in GRID_KINDS:
+            raise ValueError(
+                f"Unknown kind {self.kind!r}; choose one of {GRID_KINDS}."
             )
         # a list would make the frozen dataclass unhashable
         object.__setattr__(self, "planes", tuple(self.planes))
@@ -322,6 +348,7 @@ def format_grid_labels(
     values_nm: np.ndarray | list[float],
     spacing_nm: float,
     axis: str | None = None,
+    unit: bool = True,
 ) -> list[str]:
     """Label texts of grid lines.
 
@@ -338,6 +365,9 @@ def format_grid_labels(
     axis : str or None, optional
         Name of the axis put in front, e.g., ``"z"`` gives
         ``"z = 200 nm"``. Default is None.
+    unit : bool, optional
+        If False, the unit is left out (see ``grid_label_unit``), e.g.,
+        for axes named with their unit. Default is True.
 
     Returns
     -------
@@ -346,11 +376,8 @@ def format_grid_labels(
     """
     prefix = "" if axis is None else f"{axis} = "
     values = np.asarray(values_nm, dtype=float)
-    largest = float(np.abs(values).max()) if values.size else 0.0
-    if spacing_nm >= 1000 or largest >= 10_000:
-        unit, scale = "\u00b5m", 1e-3
-    else:
-        unit, scale = "nm", 1.0
+    unit_name, scale = _label_unit(values, spacing_nm)
+    suffix = f" {unit_name}" if unit else ""
     spacing = spacing_nm * scale
     decimals = 0
     while decimals < 3 and abs(round(spacing, decimals) - spacing) > (
@@ -362,8 +389,36 @@ def format_grid_labels(
         text = f"{value:.{decimals}f}"
         if float(text) == 0:
             text = f"{0.0:.{decimals}f}"  # no "-0"
-        texts.append(f"{prefix}{text} {unit}")
+        texts.append(f"{prefix}{text}{suffix}")
     return texts
+
+
+def grid_label_unit(
+    values_nm: np.ndarray | list[float], spacing_nm: float
+) -> str:
+    """Unit of the labels of grid lines, see ``format_grid_labels``.
+
+    Parameters
+    ----------
+    values_nm : array-like of float
+        Coordinates of the lines in nm.
+    spacing_nm : float
+        Grid spacing in nm.
+
+    Returns
+    -------
+    unit : str
+        ``"µm"`` or ``"nm"``.
+    """
+    return _label_unit(np.asarray(values_nm, dtype=float), spacing_nm)[0]
+
+
+def _label_unit(values: np.ndarray, spacing_nm: float) -> tuple[str, float]:
+    """Unit of the labels and the factor converting nm into it."""
+    largest = float(np.abs(values).max()) if values.size else 0.0
+    if spacing_nm >= 1000 or largest >= 10_000:
+        return "\u00b5m", 1e-3
+    return "nm", 1.0
 
 
 def project_points(
@@ -420,7 +475,7 @@ def draw_grid(
         Field of view shown in ``image``, ``((y_min, x_min), (y_max,
         x_max))`` in camera pixels.
     grid : GridOverlay
-        The grid; ``planes`` and ``position`` are not used.
+        The grid or axes; ``planes`` and ``position`` are not used.
     pixelsize : float
         Camera pixel size in nm.
     color_range : tuple, optional
@@ -450,6 +505,14 @@ def draw_grid(
     levels_y = grid_levels(y_min, y_max, step)
     xs = (levels_x - x_min) * px_x
     ys = (levels_y - y_min) * px_y
+    if grid.kind == "axes":
+        lines, labels = _axes_2d(
+            grid, levels_x, levels_y, xs, ys, step, pixelsize, image
+        )
+        image = _paint_lines(image, lines, grid, color_range, antialias=True)
+        if grid.labels:
+            image = _paint_labels(image, labels, grid, color_range)
+        return image
     lines = [QtCore.QLineF(x, 0.0, x, image.height()) for x in xs] + [
         QtCore.QLineF(0.0, y, image.width(), y) for y in ys
     ]
@@ -477,8 +540,8 @@ def draw_grid_3d(
         (255, 255, 255),
     ),
 ) -> QtGui.QImage:
-    """Draw 3D grid planes, rotated with the localizations, onto a
-    rendering of rotated localizations.
+    """Draw 3D grid planes or axes, rotated with the localizations,
+    onto a rendering of rotated localizations.
 
     Parameters
     ----------
@@ -489,7 +552,7 @@ def draw_grid_3d(
         Field of view shown in ``image``, ``((y_min, x_min), (y_max,
         x_max))`` in camera pixels.
     grid : GridOverlay
-        The grid.
+        The grid or axes.
     pixelsize : float
         Camera pixel size in nm.
     ang : tuple of float or scipy.spatial.transform.Rotation
@@ -523,12 +586,6 @@ def draw_grid_3d(
     px_y = image.height() / v_height
     if step * min(px_x, px_y) < MIN_GRID_SPACING_PX:
         return image
-    families = _line_families(
-        bounds, step, ang, grid.planes, grid.position, origin
-    )
-    if not families:
-        return image
-    segments = np.concatenate([seg for _, _, seg in families])
 
     def to_display(points: np.ndarray) -> np.ndarray:
         rotated = project_points(points, viewport, ang)
@@ -540,6 +597,20 @@ def draw_grid_3d(
             axis=-1,
         )
 
+    if grid.kind == "axes":
+        lines, labels = _axes_3d(
+            grid, bounds, step, origin, pixelsize, to_display
+        )
+        image = _paint_lines(image, lines, grid, color_range, antialias=True)
+        if grid.labels:
+            image = _paint_labels(image, labels, grid, color_range)
+        return image
+    families = _line_families(
+        bounds, step, ang, grid.planes, grid.position, origin
+    )
+    if not families:
+        return image
+    segments = np.concatenate([seg for _, _, seg in families])
     display = to_display(segments)
     lines = [
         QtCore.QLineF(x0, y0, x1, y1)
@@ -742,6 +813,218 @@ def _grid_labels_3d(
                     best = (score, candidate)
         labels += best[1]
     return labels
+
+
+def _axes_2d(
+    grid: GridOverlay,
+    levels_x: np.ndarray,
+    levels_y: np.ndarray,
+    xs: np.ndarray,
+    ys: np.ndarray,
+    step: float,
+    pixelsize: float,
+    image: QtGui.QImage,
+) -> tuple[list[QtCore.QLineF], list[tuple[str, QtCore.QRectF]]]:
+    """Lines and labels of 2D axes: x along the bottom and y along the
+    left edge, with ticks pointing into the image and their labels
+    past the ticks. Each axis is named at its far end (the right end of
+    x, the bottom end of y, as y grows downwards), and the names are
+    placed before the tick labels so they are kept."""
+    width, height_px = image.width(), image.height()
+    # keep the whole line width inside the image
+    inset = max(grid.style.line_width, 1) / 2
+    left, bottom = inset, height_px - inset
+    lines = [
+        QtCore.QLineF(0.0, bottom, width, bottom),
+        QtCore.QLineF(left, 0.0, left, height_px),
+    ]
+    lines += [QtCore.QLineF(x, bottom, x, bottom - _TICK_LENGTH) for x in xs]
+    lines += [QtCore.QLineF(left, y, left + _TICK_LENGTH, y) for y in ys]
+
+    metrics = QtGui.QFontMetricsF(_label_font(grid))
+    height = metrics.height()
+    row_y = bottom - _TICK_LENGTH - _LABEL_GAP - height  # x labels
+    column_x = left + _TICK_LENGTH + _LABEL_GAP  # y labels
+    labels = []
+    x_name, y_name = (
+        f"{axis} ({grid_label_unit(levels * pixelsize, grid.spacing_nm)})"
+        for axis, levels in (("x", levels_x), ("y", levels_y))
+    )
+    x_name_width = metrics.horizontalAdvance(x_name)
+    labels.append(
+        (
+            x_name,
+            QtCore.QRectF(
+                width - _LABEL_GAP - x_name_width, row_y, x_name_width, height
+            ),
+        )
+    )
+    labels.append(
+        (
+            y_name,
+            QtCore.QRectF(
+                column_x,
+                row_y - _LABEL_GAP - height,
+                metrics.horizontalAdvance(y_name),
+                height,
+            ),
+        )
+    )
+    texts_x = format_grid_labels(
+        levels_x * pixelsize, grid.spacing_nm, unit=False
+    )
+    texts_y = format_grid_labels(
+        levels_y * pixelsize, grid.spacing_nm, unit=False
+    )
+    widths_x = [metrics.horizontalAdvance(t) for t in texts_x]
+    spacing_x = xs[1] - xs[0] if len(xs) > 1 else np.inf
+    spacing_y = ys[1] - ys[0] if len(ys) > 1 else np.inf
+    stride_x = _label_stride(max(widths_x, default=0), spacing_x)
+    stride_y = _label_stride(height, spacing_y)
+    # the corner: tick labels stay out of the other axis' label column
+    # (x) and row (y)
+    corner_x = column_x + max(
+        (metrics.horizontalAdvance(t) for t in texts_y), default=0
+    )
+    for level, x, text, w in zip(levels_x, xs, texts_x, widths_x):
+        if round(level / step) % stride_x or x - w / 2 < corner_x:
+            continue
+        labels.append((text, QtCore.QRectF(x - w / 2, row_y, w, height)))
+    for level, y, text in zip(levels_y, ys, texts_y):
+        if round(level / step) % stride_y or y + height / 2 > row_y:
+            continue
+        w = metrics.horizontalAdvance(text)
+        labels.append(
+            (text, QtCore.QRectF(column_x, y - height / 2, w, height))
+        )
+    return lines, labels
+
+
+def _axes_3d(
+    grid: GridOverlay,
+    bounds: tuple,
+    step: float,
+    origin: tuple[float, float, float],
+    pixelsize: float,
+    to_display,
+) -> tuple[list[QtCore.QLineF], list[tuple[str, QtCore.QRectF]]]:
+    """Lines and labels of 3D axes along edges of the bounding box,
+    enlarged to the next grid lines (``grid_box``).
+
+    All three axes start from one corner of the box, along its edges,
+    like the axes of a 3D plot. The corner is chosen so that no two
+    axes leave it in nearly the same direction on screen (where they
+    would cover each other), then so that as many axes as possible run
+    along the outline of the box, then at the bottom left. The ticks point away from the
+    box, with the labels past them and the axis name past the labels,
+    at the middle of the edge. An axis pointing at the viewer is not
+    drawn.
+
+    ``to_display`` maps points ``(..., 3)`` to display pixels
+    ``(..., 2)``."""
+    lower, upper = grid_box(bounds, step, origin)
+    corners = np.array(
+        [
+            [(lower, upper)[(k >> axis) & 1][axis] for axis in range(3)]
+            for k in range(8)
+        ]
+    )
+    corners_display = to_display(corners)
+    center = corners_display.mean(axis=0)
+
+    def axis_edge(corner: np.ndarray, axis: int):
+        """The edge of ``axis`` through ``corner``: its 3D start and
+        display end points, direction and outward normal on screen and
+        whether it lies on the outline; None if it points at the
+        viewer."""
+        start, end = corner.copy(), corner.copy()
+        start[axis], end[axis] = lower[axis], upper[axis]
+        d0, d1 = to_display(np.stack((start, end)))
+        length = float(np.linalg.norm(d1 - d0))
+        if length < 1:
+            return None
+        along = (d1 - d0) / length
+        normal = np.array([-along[1], along[0]])
+        sides = (corners_display - d0) @ normal
+        # on the outline, all corners lie on one side of the edge
+        if sides.max() <= 0.5:
+            return start, d0, d1, along, normal, True
+        if sides.min() >= -0.5:
+            return start, d0, d1, along, -normal, True
+        # inside the outline: away from the center of the box
+        if np.dot((d0 + d1) / 2 - center, normal) < 0:
+            normal = -normal
+        return start, d0, d1, along, normal, False
+
+    best = None
+    for corner, point in zip(corners, corners_display):
+        edges = [axis_edge(corner, axis) for axis in range(3)]
+        # the directions in which the axes leave the corner on screen
+        directions = [
+            e[3] if np.allclose(e[1], point) else -e[3]
+            for e in edges
+            if e is not None
+        ]
+        apart = all(
+            np.dot(a, b) < np.cos(np.radians(_MIN_AXES_ANGLE))
+            for i, a in enumerate(directions)
+            for b in directions[i + 1 :]
+        )
+        on_outline = sum(e is not None and e[-1] for e in edges)
+        score = (apart, on_outline, point[1] - point[0])  # y points down
+        if best is None or score > best[0]:
+            best = (score, edges)
+    metrics = QtGui.QFontMetricsF(_label_font(grid))
+    height = metrics.height()
+    lines, names, ticks = [], [], []
+    for axis, edge in enumerate(best[1]):
+        if edge is None:
+            continue
+        start, d0, d1, along, outward, _ = edge
+        lines.append(QtCore.QLineF(*d0, *d1))
+        levels = grid_levels(lower[axis], upper[axis], step, origin[axis])
+        points = np.repeat(start[None], len(levels), axis=0)
+        points[:, axis] = levels
+        positions = to_display(points)
+        tips = positions + outward * _TICK_LENGTH
+        lines += [QtCore.QLineF(*p, *t) for p, t in zip(positions, tips)]
+
+        values = (levels - origin[axis]) * pixelsize
+        texts = format_grid_labels(values, grid.spacing_nm, unit=False)
+        widths = [metrics.horizontalAdvance(t) for t in texts]
+        extents = [
+            abs(outward[0]) * w + abs(outward[1]) * height for w in widths
+        ]
+        spacing = (
+            float(np.linalg.norm(positions[1] - positions[0]))
+            if len(positions) > 1
+            else np.inf
+        )
+        stride = _label_stride(
+            max(
+                (abs(along[0]) * w + abs(along[1]) * height for w in widths),
+                default=0,
+            ),
+            spacing,
+        )
+        for index, tip, text, w, extent in zip(
+            (levels - origin[axis]) / step, tips, texts, widths, extents
+        ):
+            if round(index) % stride:
+                continue
+            middle = tip + outward * (_LABEL_GAP + extent / 2)
+            ticks.append((text, _centered_rect(middle, w, height)))
+        name = f"{'xyz'[axis]} ({grid_label_unit(values, grid.spacing_nm)})"
+        name_width = metrics.horizontalAdvance(name)
+        name_extent = abs(outward[0]) * name_width + abs(outward[1]) * height
+        middle = (d0 + d1) / 2 + outward * (
+            _TICK_LENGTH
+            + 2 * _LABEL_GAP
+            + max(extents, default=0)
+            + name_extent / 2
+        )
+        names.append((name, _centered_rect(middle, name_width, height)))
+    return lines, names + ticks
 
 
 def _outline(ends: np.ndarray) -> QtGui.QPolygonF | None:

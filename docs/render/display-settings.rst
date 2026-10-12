@@ -207,7 +207,9 @@ Grid
 ~~~~
 
 Tick ``Grid`` to draw a reference grid fixed to the data; its settings are
-grayed out while it is unticked. The lines sit at whole multiples of ``Spacing (nm)``
+grayed out while it is unticked. ``Show`` draws the ``Full grid`` (default)
+or ``Axes only``: an x axis along the bottom and a y axis along the left edge
+of the window, with a tick mark at each grid line, like the axes of a plot. The lines sit at whole multiples of ``Spacing (nm)``
 in the localizations' coordinates, so they stay in place as you pan and zoom.
 ``Automatic`` keeps the spacing at roughly 1/10 of the window width, rounded
 like the automatic scale bar length; typing a spacing switches it off.
@@ -225,7 +227,8 @@ coordinates beyond 10 µm. They are drawn in the line color, fully opaque and
 over the localizations, on a translucent background; ``Label size`` sets their
 size. When the labels of neighboring lines would overlap, only every second
 (third, ...) line is labeled, counted from the coordinate origin so the labels
-stay put as you pan.
+stay put as you pan. With ``Axes only``, the labels sit next to the ticks and
+the axes are named with their unit, e.g., ``x (µm)``.
 
 The grid is part of ``Export current view``, ``Export complete image`` and
 ``Export view manually``, and its spacing is saved in the exported ``.yaml``
@@ -246,6 +249,7 @@ the ``Render`` section of ``~/.picasso/settings.yaml`` (see
           style=render.OverlayStyle(color="gray", opacity=0.5),
           blend="Behind localizations",
           labels=True,                  # print the coordinates
+          kind="grid",                  # or "axes" for axes with ticks
       )
       # qimage shows the rendered viewport ((y_min, x_min), (y_max, x_max))
       qimage = render.draw_grid(qimage, viewport, grid, pixelsize=130)

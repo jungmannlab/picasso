@@ -513,7 +513,7 @@ def build_animation(
         If True, the scale bar's length is printed above it. Only used
         if 'scalebar_length_nm' is given. Default is True.
     grid : GridOverlay, optional
-        Grid planes drawn into every frame, rotating with the
+        Grid planes or axes drawn into every frame, rotating with the
         localizations, see ``picasso.render.draw_grid_3d``. If None, no
         grid is drawn. Default is None.
     grid_bounds : tuple, optional
@@ -888,6 +888,8 @@ def _build_animation(
         None if grid is None else float(grid.spacing_nm)
     )
     if grid is not None:
+        anim_settings["Grid kind"] = grid.kind
+    if grid is not None and grid.kind == "grid":
         anim_settings["Grid planes"] = list(grid.planes)
         anim_settings["Grid position"] = grid.position
     info_path = os.path.splitext(path)[0] + ".yaml"

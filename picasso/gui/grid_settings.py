@@ -3,7 +3,7 @@ picasso.gui.grid_settings
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Group box with the settings of the reference grid of Picasso: Render's
-2D and 3D windows: spacing, the planes and their placement (3D only),
+2D and 3D windows: the full grid or only axes, spacing, the planes and their placement (3D only),
 whether the grid is drawn behind or over the localizations, and the
 look of its lines. The settings are turned into a
 ``picasso.render.GridOverlay`` for the drawing functions and saved in
@@ -23,6 +23,11 @@ from PyQt6 import QtCore, QtWidgets
 from .. import render
 from .overlay_style import AUTO_COLOR, OverlayStyleWidget
 
+#: Labels of what is drawn -> ``GridOverlay.kind``.
+KINDS = {
+    "Full grid": "grid",
+    "Axes only": "axes",
+}
 #: Labels of the 3D grid positions -> ``GridOverlay.position``.
 POSITIONS = {
     "Back of the data": "back",
@@ -57,6 +62,9 @@ class GridGroupBox(QtWidgets.QGroupBox):
     changed : pyqtSignal
         Emitted when the grid is shown or hidden or any setting changes,
         except for automatic spacing updates (``set_auto_spacing``).
+    kind : QComboBox
+        Whether the full grid or only axes with ticks are drawn, see
+        ``KINDS``.
     spacing : QSpinBox
         Distance between the grid lines in nm.
     auto_spacing : QCheckBox
@@ -94,6 +102,25 @@ class GridGroupBox(QtWidgets.QGroupBox):
         grid = QtWidgets.QGridLayout(self)
         row = 0
 
+        kind_label = QtWidgets.QLabel("Show:")
+        kind_label.setToolTip(
+            "Full grid: grid lines across the "
+            + ("planes." if three_d else "view.")
+            + "\nAxes only: axes with a tick mark at each grid line, "
+            + (
+                "along\nthe outer edges of the data's bounding box."
+                if three_d
+                else "along\nthe bottom and left edges."
+            )
+        )
+        grid.addWidget(kind_label, row, 0)
+        self.kind = QtWidgets.QComboBox()
+        self.kind.addItems(KINDS)
+        self.kind.setToolTip(kind_label.toolTip())
+        self.kind.currentIndexChanged.connect(self._on_kind_changed)
+        grid.addWidget(self.kind, row, 1, 1, 3)
+        row += 1
+
         spacing_label = QtWidgets.QLabel("Spacing (nm):")
         spacing_label.setToolTip("Distance between neighboring grid lines.")
         grid.addWidget(spacing_label, row, 0)
@@ -115,6 +142,8 @@ class GridGroupBox(QtWidgets.QGroupBox):
         row += 1
 
         self.planes = {}
+        # the widgets of the planes, unused by axes
+        self._plane_widgets = []
         if three_d:
             planes_label = QtWidgets.QLabel("Planes:")
             planes_label.setToolTip("Grid planes drawn.")
@@ -150,6 +179,12 @@ class GridGroupBox(QtWidgets.QGroupBox):
             self.position.currentIndexChanged.connect(self.changed)
             grid.addWidget(self.position, row, 1, 1, 3)
             row += 1
+            self._plane_widgets = [
+                planes_label,
+                *self.planes.values(),
+                position_label,
+                self.position,
+            ]
 
         blend_label = QtWidgets.QLabel("Draw:")
         blend_label.setToolTip(
@@ -171,10 +206,11 @@ class GridGroupBox(QtWidgets.QGroupBox):
         self.labels.setToolTip(
             "Print the coordinates of the grid lines"
             + (
-                " along one edge of the\nplanes per axis."
+                " along one edge of the\nplanes per axis"
                 if three_d
-                else " along the top\nand left edges."
+                else " along the top\nand left edges"
             )
+            + ", or next to the ticks\nof the axes, with the axis names."
             + "\nLabels that would overlap are thinned out."
         )
         self.labels.toggled.connect(self.changed)
@@ -190,6 +226,17 @@ class GridGroupBox(QtWidgets.QGroupBox):
         grid.addWidget(self.style_widget, row, 0, 1, 4)
 
         self.toggled.connect(self.changed)
+
+    def _on_kind_changed(self, *args) -> None:
+        self._update_plane_widgets()
+        self.changed.emit()
+
+    def _update_plane_widgets(self) -> None:
+        """Gray out the planes and their position, which axes do not
+        use."""
+        enabled = KINDS[self.kind.currentText()] == "grid"
+        for widget in self._plane_widgets:
+            widget.setEnabled(enabled)
 
     def _on_spacing_changed(self, *args) -> None:
         """A spacing typed by the user ends the automatic spacing."""
@@ -237,6 +284,7 @@ class GridGroupBox(QtWidgets.QGroupBox):
             style=style,
             blend=self.blend.currentText(),
             labels=self.labels.isChecked(),
+            kind=KINDS[self.kind.currentText()],
             **kwargs,
         )
 
@@ -244,7 +292,9 @@ class GridGroupBox(QtWidgets.QGroupBox):
         """Grid settings saved with exported images."""
         grid = self.grid()
         info = {"Grid spacing (nm)": None if grid is None else grid.spacing_nm}
-        if grid is not None and self.three_d:
+        if grid is not None:
+            info["Grid kind"] = grid.kind
+        if grid is not None and self.three_d and grid.kind == "grid":
             info["Grid planes"] = list(grid.planes)
             info["Grid position"] = grid.position
         return info
@@ -253,6 +303,7 @@ class GridGroupBox(QtWidgets.QGroupBox):
         """All settings except whether the grid is shown, keyed as in
         the user settings."""
         settings = {
+            "Show": self.kind.currentText(),
             "Spacing (nm)": self.spacing.value(),
             "Automatic spacing": self.auto_spacing.isChecked(),
             "Draw": self.blend.currentText(),
@@ -273,13 +324,21 @@ class GridGroupBox(QtWidgets.QGroupBox):
         values keep the current ones. Emits ``changed`` once."""
         if not isinstance(settings, dict):
             return
-        widgets = [self.spacing, self.auto_spacing, self.blend, self.labels]
+        widgets = [
+            self.kind,
+            self.spacing,
+            self.auto_spacing,
+            self.blend,
+            self.labels,
+        ]
         widgets += list(self.planes.values())
         if self.three_d:
             widgets.append(self.position)
         for widget in widgets:
             widget.blockSignals(True)
         try:
+            if settings.get("Show") in KINDS:
+                self.kind.setCurrentText(settings["Show"])
             spacing = settings.get("Spacing (nm)")
             if isinstance(spacing, (int, float)) and spacing >= 1:
                 self.spacing.setValue(int(round(spacing)))
@@ -299,6 +358,7 @@ class GridGroupBox(QtWidgets.QGroupBox):
         finally:
             for widget in widgets:
                 widget.blockSignals(False)
+        self._update_plane_widgets()
         self.style_widget.blockSignals(True)
         self.style_widget.load_settings(settings)
         self.style_widget.blockSignals(False)
