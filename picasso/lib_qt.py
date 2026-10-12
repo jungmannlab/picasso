@@ -2899,6 +2899,146 @@ class TripleClick:
         )
 
 
+class ZoomRectangle(QtCore.QObject):
+    """The zoom-in rectangle dragged over a view with the left mouse
+    button, shared by Render's main and 3D windows.
+
+    The rectangle can be dragged from its start in any direction.
+    Pressing another mouse button (e.g., the right one) or Esc while
+    dragging cancels it; the releases of the buttons involved are then
+    swallowed (see ``swallows_release``) so they do not act as clicks
+    of the active tool, e.g., add a pick.
+
+    A view calls ``press`` first in its ``mousePressEvent``,
+    ``swallows_release`` first in its ``mouseReleaseEvent``, ``start``,
+    ``move`` and ``finish`` to drag the rectangle and ``drop`` to end
+    one whose release was lost.
+
+    Parameters
+    ----------
+    parent : QtWidgets.QWidget
+        The view the rectangle is drawn over.
+
+    Attributes
+    ----------
+    band : QtWidgets.QRubberBand
+        The rectangle's outline, shown while dragging.
+    """
+
+    #: a smaller rectangle (display pixels, either side) comes from a
+    #: stray click rather than a drag and zooms nowhere
+    MIN_SIZE = 5
+
+    def __init__(self, parent: QtWidgets.QWidget) -> None:
+        super().__init__(parent)
+        self.band = QtWidgets.QRubberBand(
+            QtWidgets.QRubberBand.Shape.Rectangle, parent
+        )
+        self.band.setStyleSheet("selection-background-color: white")
+        self._origin = QtCore.QPoint()
+        # buttons whose next release belongs to a canceled rectangle
+        self._swallowed = set()
+
+    @property
+    def active(self) -> bool:
+        """True while the rectangle is being dragged."""
+        return self.band.isVisible()
+
+    def start(self, pos: QtCore.QPoint) -> None:
+        """Begin dragging the rectangle at ``pos`` (widget pixels);
+        nothing happens if one is being dragged already."""
+        if self.active:
+            return
+        self._origin = QtCore.QPoint(pos)
+        self.band.setGeometry(QtCore.QRect(self._origin, QtCore.QSize()))
+        self.band.show()
+        app = QtWidgets.QApplication.instance()
+        if app is not None:  # Esc cancels, whichever widget has focus
+            app.installEventFilter(self)
+
+    def move(self, pos: QtCore.QPoint) -> None:
+        """Stretch the rectangle from its start to ``pos``."""
+        self.band.setGeometry(self._rect(pos))
+
+    def finish(self, pos: QtCore.QPoint) -> QtCore.QRect | None:
+        """End the drag at ``pos`` and return the rectangle (widget
+        pixels; its corners ``topLeft`` and ``bottomRight`` are the
+        start and the end of the drag), or None if it is smaller than
+        ``MIN_SIZE``."""
+        rect = self._rect(pos)
+        self._hide()
+        width = rect.right() - rect.left()
+        height = rect.bottom() - rect.top()
+        if width < self.MIN_SIZE or height < self.MIN_SIZE:
+            return None
+        return rect
+
+    def drop(self) -> None:
+        """End the drag without zooming, e.g., if its release was
+        lost."""
+        self._hide()
+
+    def press(self, button: QtCore.Qt.MouseButton) -> bool:
+        """Handle a mouse press; return True if it canceled the
+        rectangle (any button but the left one, while dragging), in
+        which case the view ignores the press otherwise."""
+        # a new press of a button means its swallowed release was lost
+        self._swallowed.discard(button)
+        if self.active and button != QtCore.Qt.MouseButton.LeftButton:
+            self._cancel(button)
+            return True
+        return False
+
+    def swallows_release(self, button: QtCore.Qt.MouseButton) -> bool:
+        """Return True if the release of ``button`` belongs to a
+        canceled rectangle; the view then ignores it."""
+        if button in self._swallowed:
+            self._swallowed.discard(button)
+            return True
+        return False
+
+    def eventFilter(self, obj: QtCore.QObject, event: QtCore.QEvent) -> bool:
+        """Cancel the rectangle on Esc; while dragging, Esc triggers no
+        shortcut (e.g., closing a dialog)."""
+        Type = QtCore.QEvent.Type
+        if (
+            event.type() in (Type.KeyPress, Type.ShortcutOverride)
+            and event.key() == QtCore.Qt.Key.Key_Escape
+            and self.active
+        ):
+            if event.type() == Type.ShortcutOverride:
+                event.accept()  # deliver Esc as a key press, below
+                return False
+            self._cancel()
+            return True
+        return False
+
+    def _cancel(self, button: QtCore.Qt.MouseButton | None = None) -> None:
+        """Hide the rectangle and swallow the releases of the left
+        button and, if given, ``button``."""
+        self._hide()
+        self._swallowed.add(QtCore.Qt.MouseButton.LeftButton)
+        if button is not None:
+            self._swallowed.add(button)
+
+    def _hide(self) -> None:
+        self.band.hide()
+        app = QtWidgets.QApplication.instance()
+        if app is not None:
+            app.removeEventFilter(self)
+
+    def _rect(self, pos: QtCore.QPoint) -> QtCore.QRect:
+        """The rectangle spanned by the start and ``pos``, whichever
+        way it was dragged."""
+        # not QRect.normalized, which shifts a reversed rectangle by a
+        # pixel
+        x0, y0, x1, y1 = self._origin.x(), self._origin.y(), pos.x(), pos.y()
+        return QtCore.QRect(
+            QtCore.QPoint(min(x0, x1), min(y0, y1)),
+            QtCore.QPoint(max(x0, x1), max(y0, y1)),
+        )
+
+
 def confirm_restore_defaults(
     parent: QtWidgets.QWidget | None = None,
     what: str = "all settings in this dialog",

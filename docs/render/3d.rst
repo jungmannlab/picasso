@@ -59,9 +59,9 @@ The zoom and pan controls match the main window's, see
 
   - :kbd:`Ctrl` (:kbd:`Cmd` on macOS) + the mouse wheel (or trackpad scroll; a
     pinch works too) zooms about the cursor.
-  - Drag a rectangle with :kbd:`Shift` + the left button to zoom to it (as in
-    the main window, the rectangle stretches towards the bottom right and
-    releasing above or left of the start cancels).
+  - Drag a rectangle with :kbd:`Shift` + the left button to zoom to it. As in
+    the main window, it can be dragged in any direction, and a right click
+    (or :kbd:`Esc`) before releasing the left button cancels it.
   - :kbd:`Ctrl` +/- zoom about the center.
 
 - **Pan**: drag with the right or the middle mouse button, or with :kbd:`Alt`

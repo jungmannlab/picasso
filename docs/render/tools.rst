@@ -16,8 +16,9 @@ Zoom
 
 Shortcut: :kbd:`Ctrl+Z`
 
-Selects the zoom tool. Dragging a rectangle with the left mouse button zooms
-into it; dragging with the right mouse button pans. Panning is also available
+Selects the zoom tool. Dragging a rectangle with the left mouse button (in any
+direction) zooms into it; a right click (or :kbd:`Esc`) while dragging cancels
+it. Dragging with the right mouse button pans. Panning is also available
 in every tool by dragging with the left mouse button while holding
 :kbd:`Ctrl` (:kbd:`Cmd` on macOS). See :ref:`render-navigation` for all
 controls.

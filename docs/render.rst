@@ -110,8 +110,9 @@ while picking or measuring, so the tool need not be changed to look around.
 - **Zoom**:
 
   - With the Zoom tool, drag a rectangle with the left mouse button to zoom
-    to it. The rectangle stretches towards the bottom right; releasing above
-    or left of the start cancels.
+    to it. The rectangle can be dragged in any direction. To cancel it,
+    click the right mouse button (or press :kbd:`Esc`) before releasing the
+    left one.
   - :kbd:`Shift` + the left button drags the same rectangle in *every tool*.
   - :kbd:`Ctrl` (:kbd:`Cmd` on macOS) + the mouse wheel (or trackpad scroll)
     and a trackpad pinch zoom about the cursor; :kbd:`Ctrl` +/- zoom about

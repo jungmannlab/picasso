@@ -10101,8 +10101,6 @@ class View(QtWidgets.QLabel):
     n_locs : int
         Number of localizations loaded; if multichannel, the sum is
         given.
-    origin : QPoint
-        Position of the origin of the zoom-in rectangle.
     _pan : bool
         Indicates if image is currently panned.
     pan_start_x, pan_start_y : float
@@ -10157,8 +10155,6 @@ class View(QtWidgets.QLabel):
         For each loaded localization's channel, stores the z-order
         (Morton code) indices of localizations for efficient indexing
         of zoomed-in FOVs.
-    rubberband : QRubberBand
-        Draws a rectangle used in zooming in.
     _size_hint : tuple
         Used for size adjustment.
     _link_crosshair : tuple or None
@@ -10169,6 +10165,9 @@ class View(QtWidgets.QLabel):
         passed on to linked windows.
     window : QMainWindow
         Instance of the main window.
+    zoom_rectangle : lib_qt.ZoomRectangle
+        The zoom-in rectangle dragged with the left button (Zoom tool)
+        or Shift + left button (every tool).
     x_locs : list of pd.DataFrames or None
         Contains pd.DataFrames with locs to be rendered by property; one
         per color. None when the localizations changed since the split,
@@ -10197,10 +10196,7 @@ class View(QtWidgets.QLabel):
             QtWidgets.QSizePolicy.Policy.Expanding,
             QtWidgets.QSizePolicy.Policy.Expanding,
         )
-        self.rubberband = QtWidgets.QRubberBand(
-            QtWidgets.QRubberBand.Shape.Rectangle, self
-        )
-        self.rubberband.setStyleSheet("selection-background-color: white")
+        self.zoom_rectangle = lib_qt.ZoomRectangle(self)
         self._triple_click = lib_qt.TripleClick()
         self.window = window
         self._pixmap = None
@@ -13725,9 +13721,9 @@ class View(QtWidgets.QLabel):
             return
 
         # dragging the zoom-in rectangle (Zoom tool, or Shift + left in
-        # every tool); it only stretches towards the bottom right
-        if self.rubberband.isVisible():
-            self.rubberband.setGeometry(QtCore.QRect(self.origin, event.pos()))
+        # every tool), in any direction
+        if self.zoom_rectangle.active:
+            self.zoom_rectangle.move(event.pos())
             return
 
         # if drawing a rectangular or box pick
@@ -13762,10 +13758,10 @@ class View(QtWidgets.QLabel):
         """
         if self._pan and not buttons & self._pan_button:
             self._stop_pan()
-        if self.rubberband.isVisible() and not (
+        if self.zoom_rectangle.active and not (
             buttons & QtCore.Qt.MouseButton.LeftButton
         ):
-            self.rubberband.hide()
+            self.zoom_rectangle.drop()
 
     def _start_pan(self, event: QtCore.QEvent) -> None:
         """Begin dragging the view; ``_pan_button`` remembers which
@@ -14172,10 +14168,15 @@ class View(QtWidgets.QLabel):
         left = button == QtCore.Qt.MouseButton.LeftButton
         # the pressed button is not held yet in a stale drag's state
         self._drop_stale_drags(event.buttons() & ~button)
+        # the right (or any other) button cancels a zoom-in rectangle
+        # being dragged
+        if self.zoom_rectangle.press(button):
+            event.accept()
+            return
         # a triple click with the Zoom tool fits the image to the window
         # (like Ctrl + W); Pick and Measure keep their clicks
         if self._triple_click.is_third(event) and self._mode == "Zoom":
-            self.rubberband.hide()  # the double click's press started one
+            self.zoom_rectangle.drop()  # the double click's press started one
             self.fit_in_view()
             event.accept()
             return
@@ -14201,12 +14202,7 @@ class View(QtWidgets.QLabel):
     def _start_zoom_rectangle(self, event: QtCore.QEvent) -> None:
         """Begin dragging the zoom-in rectangle (rubber band) from the
         cursor; the release zooms to it (see ``_mouse_release_zoom``)."""
-        if not self.rubberband.isVisible():
-            self.origin = QtCore.QPoint(event.pos())
-            self.rubberband.setGeometry(
-                QtCore.QRect(self.origin, QtCore.QSize())
-            )
-            self.rubberband.show()
+        self.zoom_rectangle.start(event.pos())
         event.accept()
 
     def _mouse_release_zoom(self, event: QtCore.QEvent) -> None:
@@ -14214,14 +14210,14 @@ class View(QtWidgets.QLabel):
         (panning ends in ``mouseReleaseEvent``, for every tool)."""
         if (
             event.button() == QtCore.Qt.MouseButton.LeftButton
-            and self.rubberband.isVisible()
+            and self.zoom_rectangle.active
         ):  # zoom in if the zoom-in rectangle is visible
-            end = QtCore.QPoint(event.pos())
-            if end.x() > self.origin.x() and end.y() > self.origin.y():
-                x_min_rel = self.origin.x() / self.width()
-                x_max_rel = end.x() / self.width()
-                y_min_rel = self.origin.y() / self.height()
-                y_max_rel = end.y() / self.height()
+            rect = self.zoom_rectangle.finish(event.pos())
+            if rect is not None:
+                x_min_rel = rect.left() / self.width()
+                x_max_rel = rect.right() / self.width()
+                y_min_rel = rect.top() / self.height()
+                y_max_rel = rect.bottom() / self.height()
                 viewport_height, viewport_width = render.viewport_size(
                     self.viewport
                 )
@@ -14231,7 +14227,6 @@ class View(QtWidgets.QLabel):
                 y_max = self.viewport[0][0] + y_max_rel * viewport_height
                 viewport = [(y_min, x_min), (y_max, x_max)]
                 self.update_scene(viewport)
-            self.rubberband.hide()
         else:
             event.ignore()
 
@@ -14371,10 +14366,16 @@ class View(QtWidgets.QLabel):
             event.accept()
             return
 
+        # the releases ending a canceled zoom-in rectangle add no pick
+        # or measure point
+        if self.zoom_rectangle.swallows_release(event.button()):
+            event.accept()
+            return
+
         # releasing a dragged zoom-in rectangle zooms in whatever the
         # tool (Shift + left starts one in every tool); the release is
         # consumed so it adds no pick or measure point
-        if self.rubberband.isVisible():
+        if self.zoom_rectangle.active:
             self._mouse_release_zoom(event)
             event.accept()
             return

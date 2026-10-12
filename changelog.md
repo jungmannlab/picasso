@@ -35,6 +35,7 @@ Last change: 12-OCT-2026 CEST
 - 2D/3D grid available for reference, either as the full grid or as axes with ticks and labels only.
 - The axes icon in the bottom left corner of the 3D view was removed (along with `View > Show/hide rotation`).
 - Rectangular pick minimum length set to 5 display pixels.
+- The zoom-in rectangle (main and 3D window) can be dragged in any direction and canceled with a right click or Esc. See the [documentation](https://picassosr.readthedocs.io/en/latest/render.html#render-navigation).
 - The View menu no longer lists Left/Right/Up/Down and Zoom in/out (their keyboard shortcuts still work); *Filter picks by number of localizations* is now *Filter picks by count*.
 - Long operations run in the background and can be canceled: undrifting (AIM, RCC, from picked), DBSCAN, HDBSCAN, SMLM clusterer, G5M, RESI, NeNA, FRC in ROIs, pick statistics and saving pick properties. The windows keep repainting while they run.
 - Link localizations can be run on all channels sequentially.
@@ -79,7 +80,7 @@ Last change: 12-OCT-2026 CEST
 - The sound notification functions of `picasso.lib` (`get_sound_notification_path`, `get_available_sound_notifications`, `set_sound_notification`, `open_sound_notifications_folder` and `SOUND_NOTIFICATION_DURATION`) are replaced by the module `picasso.notifications`.
 
 ### Others
-- Many plots are not customizable.
+- Many plots are now customizable.
 - Code readability clean ups (flake8).
 - The spatial index stored in localization .hdf5 files (`/render_index`). See the [documentation](https://picassosr.readthedocs.io/en/latest/files.html#spatial-index).
 - The user settings file (`~/.picasso/settings.yaml`) is no longer lost when it cannot be read. Also, the [documentation](https://picassosr.readthedocs.io/en/latest/others.html#user-settings-file) has been added.

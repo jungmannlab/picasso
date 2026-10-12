@@ -1262,6 +1262,8 @@ class ViewRotation(QtWidgets.QLabel):
         loaded.
     window : QMainWindow
         Instance of the rotation window.
+    zoom_rectangle : lib_qt.ZoomRectangle
+        The zoom rectangle dragged with Shift + left button.
     async_rendering : bool
         Class attribute: full renders run on a worker thread
         (``render_worker.RenderWorker``, latest request wins) and the
@@ -1331,15 +1333,11 @@ class ViewRotation(QtWidgets.QLabel):
         self.block_x = False
         self.block_y = False
         self.block_z = False
-        # navigation gestures: the zoom rectangle being dragged (start
-        # and current position in widget pixels), and snapped rotation
-        # while S is held (rotation accumulates until a step is due)
-        self._zoom_rect = None
-        # the rectangle's outline, the same widget the 2D window uses
-        self.rubberband = QtWidgets.QRubberBand(
-            QtWidgets.QRubberBand.Shape.Rectangle, self
-        )
-        self.rubberband.setStyleSheet("selection-background-color: white")
+        # navigation gestures: the zoom rectangle dragged with Shift +
+        # left button (the same as the 2D window's), and snapped
+        # rotation while S is held (rotation accumulates until a step
+        # is due)
+        self.zoom_rectangle = lib_qt.ZoomRectangle(self)
         self._triple_click = lib_qt.TripleClick()
         self._snap = False
         self._snap_accum = np.zeros(3)
@@ -2413,18 +2411,12 @@ class ViewRotation(QtWidgets.QLabel):
     def mouseMoveEvent(self, event: QtGui.QMouseEvent) -> None:
         """Define actions taken when moving mouse, for example, rotating
         locs, panning or live updating the measuring cross."""
-        if self._zoom_rect is not None:
-            (x0, y0), _ = self._zoom_rect
-            self._zoom_rect = (
-                self._zoom_rect[0],
-                (event.pos().x(), event.pos().y()),
-            )
-            # like the 2D window: the rectangle only stretches towards
-            # the bottom right; dragging the other way collapses it
-            self.rubberband.setGeometry(
-                QtCore.QRect(QtCore.QPoint(x0, y0), event.pos())
-            )
-            return
+        if self.zoom_rectangle.active:
+            if event.buttons() & QtCore.Qt.MouseButton.LeftButton:
+                self.zoom_rectangle.move(event.pos())
+                return
+            # its release was lost (e.g., another app took the mouse)
+            self.zoom_rectangle.drop()
         if self._pan:
             self._pan_drag(event)
             return
@@ -2600,16 +2592,14 @@ class ViewRotation(QtWidgets.QLabel):
         self.fit_in_view_rotated()
         event.accept()
 
-    def _finish_zoom_rectangle(self) -> None:
-        """Zoom to the rectangle dragged with Shift + left button (a
-        drag too small to be one is ignored)."""
-        (x0, y0), (x1, y1) = self._zoom_rect
-        self._zoom_rect = None
-        self.rubberband.hide()
-        # releasing above or left of the start cancels (as in 2D)
-        w_pix, h_pix = x1 - x0, y1 - y0
-        if w_pix < 5 or h_pix < 5 or not len(self.locs):
+    def _finish_zoom_rectangle(self, pos: QtCore.QPoint) -> None:
+        """Zoom to the rectangle dragged with Shift + left button and
+        released at ``pos`` (a drag too small to be one is ignored)."""
+        rect = self.zoom_rectangle.finish(pos)
+        if rect is None or not len(self.locs):
             return
+        x0, y0, x1, y1 = rect.left(), rect.top(), rect.right(), rect.bottom()
+        w_pix, h_pix = x1 - x0, y1 - y0
         vh, vw = render.viewport_size(self.viewport)
         # the rectangle's center becomes the view target, its extent
         # (widened to the window's aspect by draw_scene) the field
@@ -2650,7 +2640,8 @@ class ViewRotation(QtWidgets.QLabel):
         example, starting rotating locs or panning.
 
         Navigation works in every mode: Shift + left button drags a
-        zoom rectangle; the right button, the middle button or Alt
+        zoom rectangle (in any direction; any other button or Esc
+        cancels it); the right button, the middle button or Alt
         (Option) + left button pan. In Rotate mode a plain left drag
         rotates. In Measure mode the right button keeps its measuring
         role (freeze a set, delete the last set, see
@@ -2660,18 +2651,16 @@ class ViewRotation(QtWidgets.QLabel):
         right = event.button() == QtCore.Qt.MouseButton.RightButton
         middle = event.button() == QtCore.Qt.MouseButton.MiddleButton
         modifiers = event.modifiers()
+        # the right (or any other) button cancels a zoom rectangle
+        # being dragged
+        if self.zoom_rectangle.press(event.button()):
+            event.accept()
+            return
         if self._triple_click.is_third(event) and len(self.locs):
             self._triple_clicked(event)
             return
         if left and modifiers & QtCore.Qt.KeyboardModifier.ShiftModifier:
-            self._zoom_rect = (
-                (event.pos().x(), event.pos().y()),
-                (event.pos().x(), event.pos().y()),
-            )
-            self.rubberband.setGeometry(
-                QtCore.QRect(event.pos(), QtCore.QSize())
-            )
-            self.rubberband.show()
+            self.zoom_rectangle.start(event.pos())
             event.accept()
             return
         if (
@@ -2696,12 +2685,13 @@ class ViewRotation(QtWidgets.QLabel):
         """Define actions taken when releasing mouse buttons, for
         example, stopping rotating locs or panning, add or delete a measure
         point."""
-        if self._zoom_rect is not None:
-            self._zoom_rect = (
-                self._zoom_rect[0],
-                (event.pos().x(), event.pos().y()),
-            )
-            self._finish_zoom_rectangle()
+        # the releases ending a canceled zoom rectangle add no measure
+        # point
+        if self.zoom_rectangle.swallows_release(event.button()):
+            event.accept()
+            return
+        if self.zoom_rectangle.active:
+            self._finish_zoom_rectangle(event.pos())
             event.accept()
             return
         if self._pan:
