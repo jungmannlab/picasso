@@ -110,6 +110,8 @@ _QT_NAMES = (
     "ProgressType",
     "CollapsibleHeader",
     "CollapsibleGroupBox",
+    "remember_expanded_sections",
+    "resize_with_sections",
     "ScrollableGroupBox",
     "LogDoubleSpinBox",
     "WrappingLabel",

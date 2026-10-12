@@ -257,6 +257,9 @@ Top level
    * - ``Grid3D``
      - *(last used)*
      - Remembered last value: the grid of the 3D view, as ``Grid`` plus its planes and position. See :ref:`render-3d-grid`.
+   * - ``Expanded sections``
+     - all expanded, except *FRC in several ROIs* and the tools' *Appearance*
+     - Which sections of ``Display Settings``, ``3D Display Settings`` (the 3D window's), ``Info`` and ``Tools Settings`` are expanded (``true``) or collapsed (``false``), keyed by the dialog and the section title. Saved whenever a section is expanded or collapsed by clicking its header.
    * - ``cpu_utilization``
      - ``0.5``
      - Fraction of CPU cores rendering's worker pool may use. See :ref:`render-cpu-usage`.
@@ -337,6 +340,9 @@ Top level
    * - ``Columns to save``
      - *(all columns)*
      - Which localization columns are ticked in ``File`` > ``Select columns to save...`` when saving fit results.
+   * - ``Expanded sections``
+     - all expanded
+     - Which sections of the ``Parameters`` dialog are expanded (``true``) or collapsed (``false``), keyed by the section title. Saved whenever a section is expanded or collapsed by clicking its header.
 
 ``Filter``
 ^^^^^^^^^^

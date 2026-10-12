@@ -12,6 +12,11 @@ This page describes two dialogs of the ``View`` menu:
   the current field of view, the localization precision and NeNA, the FRC
   resolution and statistics of the picks.
 
+Click the header of a section to collapse or expand it. Picasso remembers
+which sections are open, also in the 3D view's display settings, in
+``Tools Settings``, so the dialogs keep the layout you set up (``Expanded sections`` in the :ref:`user-settings-file`). The checkbox in the header of ``Scale bar`` and
+``Grid`` turns them on or off.
+
 .. _render-display-settings:
 
 Display Settings

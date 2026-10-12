@@ -1530,6 +1530,13 @@ class CollapsibleHeader(QtWidgets.QAbstractButton):
         collapsed. Default "".
     parent : QWidget or None, optional
         Parent widget. Default None.
+
+    Attributes
+    ----------
+    checkbox : QCheckBox or None
+        Shown between the chevron and the title for a checkable
+        ``CollapsibleGroupBox``, see ``set_checkbox``. Clicking it does
+        not expand or collapse the contents.
     """
 
     #: Duration of the chevron's turn in ms.
@@ -1547,6 +1554,7 @@ class CollapsibleHeader(QtWidgets.QAbstractButton):
         self.setText(title)
         self.setAccessibleName(title)
         self._summary = summary
+        self.checkbox = None
         # fraction of the turn, 0 when collapsed and 1 when expanded
         self._progress = 0.0
         self._animation = QtCore.QVariantAnimation(self)
@@ -1588,6 +1596,43 @@ class CollapsibleHeader(QtWidgets.QAbstractButton):
         else:
             self._set_progress(end)
 
+    def set_checkbox(self, checkbox: QtWidgets.QCheckBox) -> None:
+        """Show a checkbox between the chevron and the title.
+
+        Parameters
+        ----------
+        checkbox : QCheckBox
+            The checkbox, without text; it is reparented to the header.
+        """
+        self.checkbox = checkbox
+        checkbox.setParent(self)
+        checkbox.setAccessibleName(self.text())
+        checkbox.show()
+        self._place_checkbox()
+        self.updateGeometry()
+        self.update()
+
+    def _place_checkbox(self) -> None:
+        if self.checkbox is None:
+            return
+        size = self.checkbox.sizeHint()
+        self.checkbox.setGeometry(
+            1 + 2 * self._PADDING + 2 * self._CHEVRON,
+            (self.height() - size.height()) // 2,
+            size.width(),
+            size.height(),
+        )
+
+    def _checkbox_width(self) -> int:
+        """Width taken by the checkbox, including the gap to the title."""
+        if self.checkbox is None:
+            return 0
+        return self.checkbox.sizeHint().width() + self._PADDING // 2
+
+    def resizeEvent(self, event: QtGui.QResizeEvent) -> None:
+        super().resizeEvent(event)
+        self._place_checkbox()
+
     def _set_progress(self, value: float) -> None:
         self._progress = float(value)
         self.update()
@@ -1602,6 +1647,7 @@ class CollapsibleHeader(QtWidgets.QAbstractButton):
         width = (
             3 * self._PADDING
             + 2 * self._CHEVRON
+            + self._checkbox_width()
             + metrics.horizontalAdvance(self.text())
         )
         return QtCore.QSize(width, max(metrics.height() + 12, 28))
@@ -1700,6 +1746,7 @@ class CollapsibleHeader(QtWidgets.QAbstractButton):
 
         # title
         text_left = rect.left() + 2 * self._PADDING + 2 * c
+        text_left += self._checkbox_width()
         text_rect = QtCore.QRectF(
             text_left, rect.top(), rect.right() - text_left, rect.height()
         )
@@ -1743,6 +1790,13 @@ class CollapsibleGroupBox(QtWidgets.QGroupBox):
     Lay out the contents on ``content``, e.g.,
     ``QtWidgets.QGridLayout(box.content)``.
 
+    Like a QGroupBox, the box can be checkable (``setCheckable``): a
+    checkbox in the header then turns what the section controls on or
+    off, and the contents are grayed out while it is unchecked.
+    ``isChecked``, ``setChecked`` and ``toggled`` work as for a
+    QGroupBox. The box keeps the width of its contents while collapsed,
+    so that a dialog does not change its width when a section opens.
+
     Parameters
     ----------
     title : str
@@ -1764,9 +1818,13 @@ class CollapsibleGroupBox(QtWidgets.QGroupBox):
         hidden.
     toggle_button : CollapsibleHeader
         The header.
+    toggled : pyqtSignal
+        Emitted with the new state when a checkable box is checked or
+        unchecked (replaces QGroupBox's signal of the same name).
     """
 
     expandedChanged = QtCore.pyqtSignal(bool)
+    toggled = QtCore.pyqtSignal(bool)
 
     def __init__(
         self,
@@ -1791,6 +1849,16 @@ class CollapsibleGroupBox(QtWidgets.QGroupBox):
         self.setExpanded(expanded)
         self.toggle_button.set_expanded(expanded, animate=False)
 
+    def title(self) -> str:
+        """Title shown in the header."""
+        return self.toggle_button.text()
+
+    def setTitle(self, title: str) -> None:
+        """Change the title shown in the header."""
+        self.toggle_button.setText(title)
+        self.toggle_button.setAccessibleName(title)
+        self.toggle_button.updateGeometry()
+
     def isExpanded(self) -> bool:
         """Whether the contents are shown."""
         return self._expanded
@@ -1804,6 +1872,210 @@ class CollapsibleGroupBox(QtWidgets.QGroupBox):
         self.toggle_button.set_expanded(expanded)
         self.content.setVisible(expanded)
         self.expandedChanged.emit(expanded)
+
+    def isCheckable(self) -> bool:
+        """Whether the header has a checkbox."""
+        return self.toggle_button.checkbox is not None
+
+    def setCheckable(self, checkable: bool) -> None:
+        """Add a checkbox to the header, checked at first; a checkable
+        box cannot be made uncheckable again.
+
+        Parameters
+        ----------
+        checkable : bool
+            Whether the header has a checkbox.
+        """
+        if not checkable or self.isCheckable():
+            return
+        checkbox = QtWidgets.QCheckBox()
+        checkbox.setChecked(True)
+        checkbox.setToolTip(f"Tick to turn the {self.title()} on.")
+        checkbox.toggled.connect(self._on_checkbox_toggled)
+        self.toggle_button.set_checkbox(checkbox)
+
+    def isChecked(self) -> bool:
+        """Whether the header's checkbox is ticked; False if the box is
+        not checkable, as for a QGroupBox."""
+        checkbox = self.toggle_button.checkbox
+        return checkbox is not None and checkbox.isChecked()
+
+    def setChecked(self, checked: bool) -> None:
+        """Tick or untick the header's checkbox; ignored if the box is
+        not checkable."""
+        checkbox = self.toggle_button.checkbox
+        if checkbox is not None:
+            checkbox.setChecked(bool(checked))
+
+    def _on_checkbox_toggled(self, checked: bool) -> None:
+        self.content.setEnabled(checked)
+        self.toggled.emit(checked)
+
+    def _with_content_width(
+        self, hint: QtCore.QSize, content_hint: QtCore.QSize
+    ) -> QtCore.QSize:
+        if not self._expanded:
+            # the layout's margins and the frame's
+            margins = self.layout().contentsMargins()
+            frame = self.contentsMargins()
+            hint.setWidth(
+                max(
+                    hint.width(),
+                    content_hint.width()
+                    + margins.left()
+                    + margins.right()
+                    + frame.left()
+                    + frame.right(),
+                )
+            )
+        return hint
+
+    def sizeHint(self) -> QtCore.QSize:
+        return self._with_content_width(
+            super().sizeHint(), self.content.sizeHint()
+        )
+
+    def minimumSizeHint(self) -> QtCore.QSize:
+        return self._with_content_width(
+            super().minimumSizeHint(), self.content.minimumSizeHint()
+        )
+
+
+#: Key of the user settings sections (``Render``, ``Localize``, ...)
+#: that records which sections of each dialog are expanded, see
+#: ``remember_expanded_sections``.
+EXPANDED_SECTIONS_KEY = "Expanded sections"
+
+
+def remember_expanded_sections(
+    dialog: QtWidgets.QWidget,
+    module: str,
+    name: str,
+) -> None:
+    """Restore which ``CollapsibleGroupBox`` sections of a dialog are
+    expanded from the user settings and save every change there, so
+    that users keep the layout they set up across sessions.
+
+    The states are kept under
+    ``settings[module]["Expanded sections"][name]``, keyed by the
+    section titles. Sections missing there are written with their
+    current (default) state, unless the settings file could not be
+    read. Call this once all sections are built and before the dialog
+    is sized to its contents.
+
+    Parameters
+    ----------
+    dialog : QWidget
+        Dialog whose ``CollapsibleGroupBox`` children are remembered,
+        nested ones included.
+    module : str
+        Section of the settings file, e.g., "Render".
+    name : str
+        Name of the dialog in the settings file, e.g.,
+        "Display Settings".
+    """
+    settings = io.load_user_settings()
+    states = _expanded_section_states(settings, module, name)
+    missing = False
+    for box in dialog.findChildren(CollapsibleGroupBox):
+        title = box.title()
+        stored = states.get(title)
+        if isinstance(stored, bool):
+            box.setExpanded(stored)
+        else:
+            states[title] = box.isExpanded()
+            missing = True
+        box.expandedChanged.connect(
+            lambda expanded, title=title: _save_expanded_section(
+                module, name, title, expanded
+            )
+        )
+    if missing and not io.settings_file_is_broken():
+        io.save_user_settings(settings)
+
+
+def _expanded_section_states(settings: dict, module: str, name: str) -> dict:
+    """The expanded states of the sections of one dialog in
+    ``settings``, created (empty) where missing or not a mapping."""
+    node = settings
+    for key in (module, EXPANDED_SECTIONS_KEY, name):
+        if not isinstance(node.get(key), dict):
+            node[key] = {}
+        node = node[key]
+    return node
+
+
+def _save_expanded_section(
+    module: str, name: str, title: str, expanded: bool
+) -> None:
+    """Write whether one section of a dialog is expanded to the user
+    settings, see ``remember_expanded_sections``."""
+    if io.settings_file_is_broken():
+        return
+    settings = io.load_user_settings()
+    _expanded_section_states(settings, module, name)[title] = expanded
+    io.save_user_settings(settings)
+
+
+def resize_with_sections(
+    dialog: QtWidgets.QWidget, scroll_area: QtWidgets.QScrollArea
+) -> None:
+    """Grow or shrink a dialog whose contents scroll when one of its
+    ``CollapsibleGroupBox`` sections is expanded or collapsed.
+
+    The dialog changes its height by that of the section's contents,
+    so that it keeps any room the user gave it: an expanded section
+    is shown in full up to the height of the screen, and a collapsed
+    one leaves no empty space behind. A dialog the user made too short
+    for its contents keeps its height when a section collapses, unless
+    the remaining contents fit into less.
+
+    Parameters
+    ----------
+    dialog : QWidget
+        Dialog to resize.
+    scroll_area : QScrollArea
+        Holds the dialog's contents, including the sections.
+    """
+
+    def on_expanded_changed(box: CollapsibleGroupBox, expanded: bool):
+        if not dialog.isVisible():
+            return
+        # the layouts settle in the event loop (until then, the height
+        # of contents just shown can be out of date); resize afterwards
+        QtCore.QTimer.singleShot(
+            0, lambda: _resize_by(dialog, scroll_area, box, expanded)
+        )
+
+    for box in dialog.findChildren(CollapsibleGroupBox):
+        box.expandedChanged.connect(
+            lambda expanded, box=box: on_expanded_changed(box, expanded)
+        )
+
+
+def _resize_by(
+    dialog: QtWidgets.QWidget,
+    scroll_area: QtWidgets.QScrollArea,
+    box: CollapsibleGroupBox,
+    expanded: bool,
+) -> None:
+    """Resize ``dialog`` after ``box`` was expanded or collapsed, see
+    ``resize_with_sections``."""
+    if sip.isdeleted(dialog) or not dialog.isVisible():
+        return
+    delta = box.content.sizeHint().height() + box.layout().spacing()
+    height = dialog.height()
+    if expanded:
+        screen = dialog.screen()
+        cap = 1000 if screen is None else screen.size().height() - 200
+        target = min(height + delta, max(cap, height))
+    else:
+        # height at which the remaining contents fit without scrolling
+        frame = height - scroll_area.viewport().height()
+        needed = scroll_area.widget().sizeHint().height() + frame
+        target = max(height - delta, min(height, needed))
+    if target != height:
+        dialog.resize(dialog.width(), max(target, 1))
 
 
 class ScrollableGroupBox(QtWidgets.QGroupBox):

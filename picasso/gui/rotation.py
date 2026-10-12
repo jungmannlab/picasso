@@ -91,7 +91,7 @@ class DisplaySettingsRotationDialog(lib.Dialog):
         Contains the size of super-resolution pixels in nm.
     scalebar : QSpinBox
         Contains the scale bar's length (nm).
-    scalebar_groupbox : QGroupBox
+    scalebar_groupbox : CollapsibleGroupBox
         Group with options for customizing scale bar, tick to display.
     scalebar_text : QCheckBox
         Tick to display scale bar's length (nm).
@@ -117,9 +117,9 @@ class DisplaySettingsRotationDialog(lib.Dialog):
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.addWidget(self.scroll_area)
         # general
-        general_groupbox = QtWidgets.QGroupBox("General")
+        general_groupbox = lib.CollapsibleGroupBox("General")
         vbox.addWidget(general_groupbox)
-        general_grid = QtWidgets.QGridLayout(general_groupbox)
+        general_grid = QtWidgets.QGridLayout(general_groupbox.content)
         disp_px_label = QtWidgets.QLabel("Display pixel size (nm):")
         disp_px_label.setToolTip("Size of the pixels in the rendered image.")
         general_grid.addWidget(disp_px_label, 1, 0)
@@ -138,9 +138,9 @@ class DisplaySettingsRotationDialog(lib.Dialog):
         general_grid.addWidget(self.dynamic_disp_px, 2, 1)
 
         # contrast
-        contrast_groupbox = QtWidgets.QGroupBox("Contrast")
+        contrast_groupbox = lib.CollapsibleGroupBox("Contrast")
         vbox.addWidget(contrast_groupbox)
-        contrast_grid = QtWidgets.QGridLayout(contrast_groupbox)
+        contrast_grid = QtWidgets.QGridLayout(contrast_groupbox.content)
         minimum_label = QtWidgets.QLabel("Min. density:")
         minimum_label.setToolTip(
             "Minimum density (localizations per super-resolution pixel)"
@@ -188,8 +188,8 @@ class DisplaySettingsRotationDialog(lib.Dialog):
         self.colormap.currentIndexChanged.connect(self.render_scene)
 
         # blur
-        blur_groupbox = QtWidgets.QGroupBox("Render method")
-        blur_grid = QtWidgets.QGridLayout(blur_groupbox)
+        blur_groupbox = lib.CollapsibleGroupBox("Render method")
+        blur_grid = QtWidgets.QGridLayout(blur_groupbox.content)
         self.blur_buttongroup = QtWidgets.QButtonGroup()
         points_button = QtWidgets.QRadioButton("None")
         points_button.setToolTip(
@@ -386,12 +386,12 @@ class DisplaySettingsRotationDialog(lib.Dialog):
         }
 
         # scalebar
-        self.scalebar_groupbox = QtWidgets.QGroupBox("Scale bar")
+        self.scalebar_groupbox = lib.CollapsibleGroupBox("Scale bar")
         self.scalebar_groupbox.setCheckable(True)
         self.scalebar_groupbox.setChecked(False)
         self.scalebar_groupbox.toggled.connect(self.render_scene)
         vbox.addWidget(self.scalebar_groupbox)
-        scalebar_grid = QtWidgets.QGridLayout(self.scalebar_groupbox)
+        scalebar_grid = QtWidgets.QGridLayout(self.scalebar_groupbox.content)
         scalebar_length_label = QtWidgets.QLabel("Scale bar length (nm):")
         scalebar_length_label.setToolTip("Set the length of the scale bar.")
         scalebar_grid.addWidget(scalebar_length_label, 0, 0)
@@ -424,8 +424,13 @@ class DisplaySettingsRotationDialog(lib.Dialog):
         )
         self.grid_box.changed.connect(self.render_scene)
         vbox.addWidget(self.grid_box)
+        # collapsed sections stay at the top
+        vbox.addStretch(1)
 
         self._silent_disp_px_update = False
+
+        lib.remember_expanded_sections(self, "Render", "3D Display Settings")
+        lib.resize_with_sections(self, self.scroll_area)
 
         # adjust the size of the dialog to fit its contents
         lib.adjust_widget_size(self, container.sizeHint())

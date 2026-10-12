@@ -20,7 +20,7 @@ from typing import Callable
 
 from PyQt6 import QtCore, QtWidgets
 
-from .. import render
+from .. import lib, render
 from .overlay_style import AUTO_COLOR, OverlayStyleWidget
 
 #: Labels of what is drawn -> ``GridOverlay.kind``.
@@ -40,8 +40,9 @@ STYLE_DEFAULTS = {"opacity": 40}
 DEFAULT_SPACING = 500  # nm
 
 
-class GridGroupBox(QtWidgets.QGroupBox):
-    """Checkable group box that shows a reference grid and sets it up.
+class GridGroupBox(lib.CollapsibleGroupBox):
+    """Checkable, collapsible group box that shows a reference grid and
+    sets it up.
 
     Its settings are grayed out while it is unchecked.
 
@@ -89,7 +90,7 @@ class GridGroupBox(QtWidgets.QGroupBox):
         optimal_spacing: Callable[[], float | None] | None = None,
         parent: QtWidgets.QWidget | None = None,
     ) -> None:
-        super().__init__("Grid", parent)
+        super().__init__("Grid", parent=parent)
         self.three_d = three_d
         self._optimal_spacing = optimal_spacing
         self.setCheckable(True)
@@ -99,7 +100,7 @@ class GridGroupBox(QtWidgets.QGroupBox):
             + (", rotating with it." if three_d else ".")
         )
         # an unchecked group box disables (grays out) its widgets
-        grid = QtWidgets.QGridLayout(self)
+        grid = QtWidgets.QGridLayout(self.content)
         row = 0
 
         kind_label = QtWidgets.QLabel("Show:")

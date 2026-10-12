@@ -1278,13 +1278,13 @@ class DatasetDialog(lib.Dialog):
         disp_sett_dlg = self.window.display_settings_dlg
         disp_sett_dlg.render_check.setChecked(False)
         if len(self.checks) == 1:
-            disp_sett_dlg.render_groupbox.setEnabled(True)
+            disp_sett_dlg.render_groupbox.content.setEnabled(True)
             disp_sett_dlg.parameter.clear()
             disp_sett_dlg.parameter.addItems(
                 self.window.view.locs[0].columns.to_list()
             )
         else:
-            disp_sett_dlg.render_groupbox.setEnabled(False)
+            disp_sett_dlg.render_groupbox.content.setEnabled(False)
 
     def _close_one_channel(self, i: int, render_=True) -> None:
         """Close the channel with the given index and delete all
@@ -5486,9 +5486,9 @@ class InfoDialog(lib.Dialog):
         main_layout.addWidget(self.scroll_area)
 
         # Display
-        display_groupbox = QtWidgets.QGroupBox("Display")
+        display_groupbox = lib.CollapsibleGroupBox("Display")
         vbox.addWidget(display_groupbox)
-        display_grid = QtWidgets.QGridLayout(display_groupbox)
+        display_grid = QtWidgets.QGridLayout(display_groupbox.content)
         width_label = QtWidgets.QLabel("Image width:")
         width_label.setToolTip("Width of the current FOV (display pixels).")
         display_grid.addWidget(width_label, 0, 0)
@@ -5571,9 +5571,9 @@ class InfoDialog(lib.Dialog):
         self.load_fov_button.clicked.connect(self.change_fov.load_fov)
 
         # Precision
-        precision_groupbox = QtWidgets.QGroupBox("Precision")
+        precision_groupbox = lib.CollapsibleGroupBox("Precision")
         vbox.addWidget(precision_groupbox)
-        self.precision_grid = QtWidgets.QGridLayout(precision_groupbox)
+        self.precision_grid = QtWidgets.QGridLayout(precision_groupbox.content)
         med_lp_label = QtWidgets.QLabel("Median localization precision:")
         med_lp_label.setToolTip(
             "Median localization precision of the first channel."
@@ -5600,9 +5600,9 @@ class InfoDialog(lib.Dialog):
         self.precision_grid.addWidget(show_nena_plot_button, 2, 1)
 
         # FRC
-        frc_groupbox = QtWidgets.QGroupBox("FRC (uses current FOV)")
+        frc_groupbox = lib.CollapsibleGroupBox("FRC (uses current FOV)")
         vbox.addWidget(frc_groupbox)
-        self.frc_grid = QtWidgets.QGridLayout(frc_groupbox)
+        self.frc_grid = QtWidgets.QGridLayout(frc_groupbox.content)
         frc_label = QtWidgets.QLabel("FRC resolution (nm):")
         frc_label.setToolTip(
             "Experimental resolution estimate using Fourier Ring "
@@ -5688,9 +5688,9 @@ class InfoDialog(lib.Dialog):
         rois_grid.addWidget(review_frc_rois_button, 4, 1)
 
         # FOV
-        fov_groupbox = QtWidgets.QGroupBox("Field of view")
+        fov_groupbox = lib.CollapsibleGroupBox("Field of view")
         vbox.addWidget(fov_groupbox)
-        fov_grid = QtWidgets.QGridLayout(fov_groupbox)
+        fov_grid = QtWidgets.QGridLayout(fov_groupbox.content)
         nlocs_label = QtWidgets.QLabel("No. of localizations in FOV:")
         nlocs_label.setToolTip(
             "Number of localizations currently displayed\n"
@@ -5701,9 +5701,9 @@ class InfoDialog(lib.Dialog):
         fov_grid.addWidget(self.locs_label, 0, 1)
 
         # Picks
-        picks_groupbox = QtWidgets.QGroupBox("Picks, kinetics and qPAINT")
+        picks_groupbox = lib.CollapsibleGroupBox("Picks, kinetics and qPAINT")
         vbox.addWidget(picks_groupbox)
-        self.picks_grid = QtWidgets.QGridLayout(picks_groupbox)
+        self.picks_grid = QtWidgets.QGridLayout(picks_groupbox.content)
         npicks_label = QtWidgets.QLabel("Number of picks:")
         npicks_label.setToolTip("Number of picks loaded.")
         self.picks_grid.addWidget(npicks_label, 0, 0)
@@ -5853,6 +5853,11 @@ class InfoDialog(lib.Dialog):
         self.picks_grid.addWidget(
             pick_hists, self.picks_grid.rowCount(), 0, 1, 3
         )
+        # collapsed sections stay at the top
+        vbox.addStretch(1)
+
+        lib.remember_expanded_sections(self, "Render", "Info")
+        lib.resize_with_sections(self, self.scroll_area)
 
         # adjust the size of the dialog to fit its contents
         hint = self.container.sizeHint()
@@ -7463,9 +7468,9 @@ class ToolsSettingsDialog(lib.Dialog):
         main_layout.addWidget(self.scroll_area)
         self._fitted = False  # sized to the contents on the first show
 
-        self.pick_groupbox = QtWidgets.QGroupBox("Pick")
+        self.pick_groupbox = lib.CollapsibleGroupBox("Pick")
         self.vbox.addWidget(self.pick_groupbox)
-        pick_grid = QtWidgets.QGridLayout(self.pick_groupbox)
+        pick_grid = QtWidgets.QGridLayout(self.pick_groupbox.content)
 
         first_row = QtWidgets.QHBoxLayout()
         pick_grid.addLayout(first_row, 0, 0, 1, 2)
@@ -7557,9 +7562,9 @@ class ToolsSettingsDialog(lib.Dialog):
         pick_grid.addWidget(self.point_picks, 4, 0)
 
         # Move tool - drags the localizations of one or all channels
-        self.move_groupbox = QtWidgets.QGroupBox("Move")
+        self.move_groupbox = lib.CollapsibleGroupBox("Move")
         self.vbox.addWidget(self.move_groupbox)
-        move_grid = QtWidgets.QGridLayout(self.move_groupbox)
+        move_grid = QtWidgets.QGridLayout(self.move_groupbox.content)
         move_label = QtWidgets.QLabel("Channels:")
         move_label.setToolTip(
             "Channels whose localizations are dragged with the Move tool."
@@ -7663,12 +7668,18 @@ class ToolsSettingsDialog(lib.Dialog):
             index = self.appearance_tabs.addTab(page, name)
             self.appearance_tabs.setTabToolTip(index, tooltip)
 
-        # a collapsed section stays at the top
+        # collapsed sections stay at the top
         self.vbox.addStretch()
+        lib.remember_expanded_sections(self, "Render", "Tools Settings")
         # resize once the layout has taken the change into account
-        self.appearance_groupbox.expandedChanged.connect(
-            lambda _: QtCore.QTimer.singleShot(0, self.fit_to_contents)
-        )
+        for groupbox in (
+            self.pick_groupbox,
+            self.move_groupbox,
+            self.appearance_groupbox,
+        ):
+            groupbox.expandedChanged.connect(
+                lambda _: QtCore.QTimer.singleShot(0, self.fit_to_contents)
+            )
 
     def showEvent(self, event: QtGui.QShowEvent) -> None:
         super().showEvent(event)
@@ -7677,9 +7688,9 @@ class ToolsSettingsDialog(lib.Dialog):
             self.fit_to_contents()
 
     def fit_to_contents(self, *args) -> None:
-        """Resize the dialog to its contents after the appearance section
-        is expanded or collapsed, at most to 85% of the screen height;
-        beyond that, the contents scroll."""
+        """Resize the dialog to its contents after a section is expanded
+        or collapsed, at most to 85% of the screen height; beyond that,
+        the contents scroll."""
         container = self.scroll_area.widget()
         container.adjustSize()
         hint = container.sizeHint()
@@ -8750,7 +8761,7 @@ class DisplaySettingsDialog(lib.Dialog):
         Tick to activate parameter rendering.
     scalebar : QSpinBox
         Contains the scale bar's length (nm).
-    scalebar_groupbox : QGroupBox
+    scalebar_groupbox : CollapsibleGroupBox
         Group with options for customizing scale bar, tick to display.
     scalebar_text : QCheckBox
         Tick to display scale bar's length (nm).
@@ -8780,9 +8791,9 @@ class DisplaySettingsDialog(lib.Dialog):
         main_layout.addWidget(self.scroll_area)
 
         # General
-        general_groupbox = QtWidgets.QGroupBox("General")
+        general_groupbox = lib.CollapsibleGroupBox("General")
         vbox.addWidget(general_groupbox)
-        general_grid = QtWidgets.QGridLayout(general_groupbox)
+        general_grid = QtWidgets.QGridLayout(general_groupbox.content)
         general_grid.addWidget(lib.HelpButton(self.DOCS_URL), 0, 0)
         zoom_label = QtWidgets.QLabel("Zoom:")
         zoom_label.setToolTip("Zoom factor for display.")
@@ -8813,9 +8824,9 @@ class DisplaySettingsDialog(lib.Dialog):
         self.minimap.stateChanged.connect(self.update_scene)
 
         # Contrast
-        contrast_groupbox = QtWidgets.QGroupBox("Contrast")
+        contrast_groupbox = lib.CollapsibleGroupBox("Contrast")
         vbox.addWidget(contrast_groupbox)
-        contrast_grid = QtWidgets.QGridLayout(contrast_groupbox)
+        contrast_grid = QtWidgets.QGridLayout(contrast_groupbox.content)
         minimum_label = QtWidgets.QLabel("Min. Density:")
         minimum_label.setToolTip(
             "Minimum density (localizations per super-resolution pixel)"
@@ -8862,8 +8873,8 @@ class DisplaySettingsDialog(lib.Dialog):
         self.colormap.currentIndexChanged.connect(self.on_cmap_changed)
 
         # Blur
-        blur_groupbox = QtWidgets.QGroupBox("Render method")
-        blur_grid = QtWidgets.QGridLayout(blur_groupbox)
+        blur_groupbox = lib.CollapsibleGroupBox("Render method")
+        blur_grid = QtWidgets.QGridLayout(blur_groupbox.content)
         self.blur_buttongroup = QtWidgets.QButtonGroup()
         points_button = QtWidgets.QRadioButton("None")
         points_button.setToolTip(
@@ -9061,8 +9072,8 @@ class DisplaySettingsDialog(lib.Dialog):
         }
 
         # Camera_parameters
-        camera_groupbox = QtWidgets.QGroupBox("Camera")
-        self.camera_grid = QtWidgets.QGridLayout(camera_groupbox)
+        camera_groupbox = lib.CollapsibleGroupBox("Camera")
+        self.camera_grid = QtWidgets.QGridLayout(camera_groupbox.content)
         pixelsize_label = QtWidgets.QLabel("Camera pixel size (nm):")
         pixelsize_label.setToolTip(
             "Effective camera pixel size in nm (after magnification)."
@@ -9077,12 +9088,12 @@ class DisplaySettingsDialog(lib.Dialog):
         vbox.addWidget(camera_groupbox)
 
         # Scalebar
-        self.scalebar_groupbox = QtWidgets.QGroupBox("Scale bar")
+        self.scalebar_groupbox = lib.CollapsibleGroupBox("Scale bar")
         self.scalebar_groupbox.setCheckable(True)
         self.scalebar_groupbox.setChecked(False)
         self.scalebar_groupbox.toggled.connect(self.update_scene)
         vbox.addWidget(self.scalebar_groupbox)
-        scalebar_grid = QtWidgets.QGridLayout(self.scalebar_groupbox)
+        scalebar_grid = QtWidgets.QGridLayout(self.scalebar_groupbox.content)
         scalebar_length_label = QtWidgets.QLabel("Scale bar length (nm):")
         scalebar_length_label.setToolTip("Set the length of the scale bar.")
         scalebar_grid.addWidget(scalebar_length_label, 0, 0)
@@ -9115,12 +9126,12 @@ class DisplaySettingsDialog(lib.Dialog):
         vbox.addWidget(self.grid_box)
 
         # Render
-        self.render_groupbox = QtWidgets.QGroupBox(
+        self.render_groupbox = lib.CollapsibleGroupBox(
             "Render properties (only single-channel data)"
         )
 
         vbox.addWidget(self.render_groupbox)
-        render_grid = QtWidgets.QGridLayout(self.render_groupbox)
+        render_grid = QtWidgets.QGridLayout(self.render_groupbox.content)
         param_label = QtWidgets.QLabel("Parameter:")
         param_label.setToolTip(
             "Color-coded property, e.g. localization precision."
@@ -9216,7 +9227,13 @@ class DisplaySettingsDialog(lib.Dialog):
         self.canvas_prop.setMinimumSize(QtCore.QSize(fw * dpi, fh * dpi))
         render_grid.addWidget(self.canvas_prop, 6, 0, 6, 2)
 
-        self.render_groupbox.setEnabled(False)
+        # the header stays enabled, so that the section can be collapsed
+        self.render_groupbox.content.setEnabled(False)
+        # collapsed sections stay at the top
+        vbox.addStretch(1)
+
+        lib.remember_expanded_sections(self, "Render", "Display Settings")
+        lib.resize_with_sections(self, self.scroll_area)
 
         # adjust the size of the dialog to fit its contents
         hint = container.sizeHint()
@@ -10865,9 +10882,9 @@ class View(QtWidgets.QLabel):
                     self.group_color = render.get_group_color(self.locs[0])
             disp_sett_dlg.parameter.clear()
             disp_sett_dlg.parameter.addItems(locs.columns.to_list())
-            disp_sett_dlg.render_groupbox.setEnabled(True)
+            disp_sett_dlg.render_groupbox.content.setEnabled(True)
         else:
-            disp_sett_dlg.render_groupbox.setEnabled(False)
+            disp_sett_dlg.render_groupbox.content.setEnabled(False)
             self.x_render_state = False
 
     def add_multiple(

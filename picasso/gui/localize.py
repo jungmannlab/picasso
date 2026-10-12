@@ -3539,9 +3539,11 @@ class ParametersDialog(lib.Dialog):
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.addWidget(self.scroll_area)
 
-        identification_groupbox = QtWidgets.QGroupBox("Identification")
+        identification_groupbox = lib.CollapsibleGroupBox("Identification")
         vbox.addWidget(identification_groupbox)
-        identification_grid = QtWidgets.QGridLayout(identification_groupbox)
+        identification_grid = QtWidgets.QGridLayout(
+            identification_groupbox.content
+        )
 
         # Box Size
         first_row = QtWidgets.QHBoxLayout()
@@ -3980,11 +3982,11 @@ class ParametersDialog(lib.Dialog):
         # Shown only when more than one channel is loaded (see the Window's
         # _populate_channel_combo). Checking a box makes that group shared, so
         # switching channels no longer overwrites it.
-        self.link_groupbox = QtWidgets.QGroupBox(
+        self.link_groupbox = lib.CollapsibleGroupBox(
             "Same settings across channels"
         )
         vbox.addWidget(self.link_groupbox)
-        link_layout = QtWidgets.QHBoxLayout(self.link_groupbox)
+        link_layout = QtWidgets.QHBoxLayout(self.link_groupbox.content)
         self.link_box_checkbox = QtWidgets.QCheckBox("Box size")
         self.link_box_checkbox.setToolTip(
             "Use the same box size for every channel."
@@ -4020,9 +4022,9 @@ class ParametersDialog(lib.Dialog):
         # Camera:
         if "Cameras" in CONFIG:
             # Experiment settings
-            exp_groupbox = QtWidgets.QGroupBox("Experiment Settings")
+            exp_groupbox = lib.CollapsibleGroupBox("Experiment Settings")
             vbox.addWidget(exp_groupbox)
-            exp_grid = QtWidgets.QGridLayout(exp_groupbox)
+            exp_grid = QtWidgets.QGridLayout(exp_groupbox.content)
             exp_grid.addWidget(QtWidgets.QLabel("Camera:"), 0, 0)
             self.camera = QtWidgets.QComboBox()
             exp_grid.addWidget(self.camera, 0, 1)
@@ -4107,9 +4109,9 @@ class ParametersDialog(lib.Dialog):
                 cam_grid.addWidget(spacer, cam_grid.rowCount(), 0)
 
         # Photon conversion
-        photon_groupbox = QtWidgets.QGroupBox("Photon Conversion")
+        photon_groupbox = lib.CollapsibleGroupBox("Photon Conversion")
         vbox.addWidget(photon_groupbox)
-        photon_grid = QtWidgets.QGridLayout(photon_groupbox)
+        photon_grid = QtWidgets.QGridLayout(photon_groupbox.content)
 
         # EM Gain
         em_label = QtWidgets.QLabel("EM gain:")
@@ -4207,9 +4209,9 @@ class ParametersDialog(lib.Dialog):
         photon_grid.addLayout(camera_calib_buttons, 6, 1)
 
         # Fit Settings
-        fit_groupbox = QtWidgets.QGroupBox("Fit Settings")
+        fit_groupbox = lib.CollapsibleGroupBox("Fit Settings")
         vbox.addWidget(fit_groupbox)
-        fit_grid = QtWidgets.QGridLayout(fit_groupbox)
+        fit_grid = QtWidgets.QGridLayout(fit_groupbox.content)
 
         model_label = QtWidgets.QLabel("Model:")
         model_label.setToolTip(MODEL_TOOLTIP)
@@ -4315,12 +4317,12 @@ class ParametersDialog(lib.Dialog):
         self.on_fit_model_changed()
 
         # 3D via astigmatism (Gaussian models); shown for non-spline fits
-        self.z_groupbox = z_groupbox = QtWidgets.QGroupBox(
+        self.z_groupbox = z_groupbox = lib.CollapsibleGroupBox(
             "3D via Astigmatism"
         )
         vbox.addWidget(z_groupbox)
 
-        z_grid = QtWidgets.QGridLayout(z_groupbox)
+        z_grid = QtWidgets.QGridLayout(z_groupbox.content)
         load_z_calib = QtWidgets.QPushButton("Load calibration")
         load_z_calib.setToolTip(
             "Load a 3D calibration file (.yaml).\n"
@@ -4365,7 +4367,7 @@ class ParametersDialog(lib.Dialog):
         # is chosen. Always available: the fit runs on the CPU
         # (picasso.fitting.splinefit) and, with a CUDA GPU, on the GPU
         # (picasso.fitting.splinefit_cuda).
-        self.spline_groupbox = spline_groupbox = QtWidgets.QGroupBox(
+        self.spline_groupbox = spline_groupbox = lib.CollapsibleGroupBox(
             "Experimental PSF (spline)"
         )
         spline_groupbox.setToolTip(
@@ -4391,7 +4393,7 @@ class ParametersDialog(lib.Dialog):
             "https://doi.org/10.1038/s41467-022-30719-4"
         )
         vbox.addWidget(spline_groupbox)
-        spline_grid = QtWidgets.QGridLayout(spline_groupbox)
+        spline_grid = QtWidgets.QGridLayout(spline_groupbox.content)
         load_spline_calib = QtWidgets.QPushButton("Load calibration")
         load_spline_calib.setToolTip(
             "Load a cubic-spline PSF calibration (.hdf5), built via\n"
@@ -4427,7 +4429,7 @@ class ParametersDialog(lib.Dialog):
         # Gaussian fit. Shown only for that model; unlike the spline path this
         # needs no measured PSF, only where each channel sits.
         self.channel_registration_groupbox = reg_groupbox = (
-            QtWidgets.QGroupBox("Multichannel: channel registration")
+            lib.CollapsibleGroupBox("Multichannel: channel registration")
         )
         reg_groupbox.setToolTip(
             "Fit all loaded channels at once with one shared position and\n"
@@ -4445,7 +4447,7 @@ class ParametersDialog(lib.Dialog):
             "https://doi.org/10.1038/s41467-022-30719-4"
         )
         vbox.addWidget(reg_groupbox)
-        reg_grid = QtWidgets.QGridLayout(reg_groupbox)
+        reg_grid = QtWidgets.QGridLayout(reg_groupbox.content)
         load_registration = QtWidgets.QPushButton("Load registration")
         load_registration.setToolTip(
             "Load a channel registration (.yaml) built via\n"
@@ -4488,7 +4490,7 @@ class ParametersDialog(lib.Dialog):
         # fitting, applied after it. For 2D data this is the only route;
         # for 3D it is the alternative to appending the correction to the
         # 3D / spline calibration, and gives the same coordinates.
-        affine_groupbox = QtWidgets.QGroupBox("Lateral correction (x, y)")
+        affine_groupbox = lib.CollapsibleGroupBox("Lateral correction (x, y)")
         affine_groupbox.setToolTip(
             "Corrections applied to the fitted x/y, typically a\n"
             "chromatic-aberration correction. Build one with\n"
@@ -4507,7 +4509,7 @@ class ParametersDialog(lib.Dialog):
             "channels itself and ignores these."
         )
         vbox.addWidget(affine_groupbox)
-        affine_grid = QtWidgets.QGridLayout(affine_groupbox)
+        affine_grid = QtWidgets.QGridLayout(affine_groupbox.content)
         load_affine_calib = QtWidgets.QPushButton("Load correction")
         load_affine_calib.setToolTip(
             "Load a standalone lateral calibration (.yaml) to apply to\n"
@@ -4549,14 +4551,14 @@ class ParametersDialog(lib.Dialog):
                     self.update_sensitivity()
 
         # Sample quality
-        quality_groupbox = QtWidgets.QGroupBox(
+        quality_groupbox = lib.CollapsibleGroupBox(
             "Postprocessing and Sample Quality"
         )
         quality_groupbox.setToolTip(
             "Drift correction + drift, bright time and NeNA estimates."
         )
         vbox.addWidget(quality_groupbox)
-        quality_grid = QtWidgets.QGridLayout(quality_groupbox)
+        quality_grid = QtWidgets.QGridLayout(quality_groupbox.content)
 
         # drift correction
         self.aim_undrift_checkbox = QtWidgets.QCheckBox("Apply AIM")
@@ -4621,6 +4623,9 @@ class ParametersDialog(lib.Dialog):
 
         self.reset_quality_check()
         vbox.addStretch(1)
+
+        lib.remember_expanded_sections(self, "Localize", "Parameters")
+        lib.resize_with_sections(self, self.scroll_area)
 
         # adjust the size of the dialog to fit its contents, but cap the
         # height so the dialog stays a reasonable size even on very tall
