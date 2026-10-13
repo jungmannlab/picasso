@@ -478,7 +478,10 @@ def load_ims(
     path : str
         The path to the IMS movie file.
     prompt_info : Callable, optional
-        A function to call for additional information if needed.
+        Called with the channel names of a multi-channel file; returns
+        the channel to load. Without it (e.g. command-line batch
+        processing), or if it returns None (canceled), the first channel
+        is loaded.
 
     Returns
     -------
@@ -486,21 +489,23 @@ def load_ims(
         Custom wrapper around IMS file(s).
     info : list of dicts
         A list containing a dictionary with metadata about the movie.
+
+    Raises
+    ------
+    ValueError
+        If ``prompt_info`` returns a channel the file does not have.
     """
     if not bitplane.IMSWRITER:
         raise ImportError(".ims files are only supported on Windows machines.")
     file = IMSFile(path)
 
-    if len(file.channels) > 1:
-        # Default to Channel 0 when causing localizer
-        if prompt_info is None:
-            channel = "Channel 0"
-        else:
-            channel = prompt_info(file.channels)
-        file.set_channel(channel)
-
-    else:
-        channel = "Channel 0"
+    channel = file.channels[0]
+    if len(file.channels) > 1 and prompt_info is not None:
+        choice = prompt_info(file.channels)
+        # Canceling the prompt keeps the first channel, as for .czi/.lif.
+        if choice is not None:
+            file.set_channel(choice)
+            channel = choice
 
     file.read_movie()
 

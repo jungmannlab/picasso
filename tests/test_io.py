@@ -7,8 +7,8 @@ are reused for round-trip checks against real Picasso data.
 TIFF loading (``load_tif`` / ``TiffMap`` / ``TiffMultiMap``) is covered
 with synthetic ``tifffile``-written stacks generated per test.
 
-Skipped functions (need fixtures we don't have bundled): ``load_ims*``,
-``load_nd2``, ``load_stk``.
+Skipped functions (need fixtures we don't have bundled): ``load_ims_all``,
+``load_nd2``, ``load_stk``. ``load_ims`` is covered in ``test_bitplane.py``.
 
 :author: Rafal Kowalewski, 2026
 :copyright: Copyright (c) 2026 Jungmann Lab, MPI of Biochemistry

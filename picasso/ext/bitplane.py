@@ -102,10 +102,6 @@ if IMSWRITER:
         This class is assuming the following:
             * ResolutionLevel 0 is the default.
             * The image size doesn't change from one channel to another.
-
-        TODO:
-            * check if channel exists..
-
         """
 
         RL = "ResolutionLevel 0"
@@ -139,7 +135,17 @@ if IMSWRITER:
             channel : str
                 Name of the channel group in the IMS file, e.g.
                 ``"Channel 0"``.
+
+            Raises
+            ------
+            ValueError
+                If the file has no channel named ``channel``.
             """
+            if channel not in self.channels:
+                raise ValueError(
+                    f"No channel {channel!r} in {self.path}. Available "
+                    f"channels: {', '.join(self.channels)}."
+                )
             self.channel = channel
             data = self.file["DataSet"][self.RL][self.frames[0]][self.channel][
                 "Data"
