@@ -607,3 +607,61 @@ class TestAdapterSelection:
             assert " via " in backend.describe()
         finally:
             backend.close()
+
+
+class TestIdleClose:
+    """Releasing the GPU while the GUI is idle (``picasso.gui.idle``):
+    never under a render in progress, and the next render starts a new
+    device that renders the same."""
+
+    def test_close_without_waiting_skips_a_render_in_progress(self, locs):
+        from picasso.render.gpu import WgpuBackend
+
+        backend = WgpuBackend()
+        try:
+            _gpu(backend, locs, "gaussian")
+            assert backend.resident_bytes > 0
+            with backend._lock:  # as held by a render on another thread
+                assert backend.close(wait=False) is False
+            assert backend.resident_bytes > 0  # nothing was released
+            assert backend.close(wait=False) is True
+            assert backend.resident_bytes == 0 and not backend._scratch
+            # a caller that fetched the backend before it was closed
+            # gets the error that sends its render to the CPU
+            with pytest.raises(SplatBackendError):
+                _gpu(backend, locs, "gaussian")
+            assert backend.close() is True  # closing twice is harmless
+        finally:
+            backend.close()
+
+    def test_the_next_render_starts_a_new_device(self, locs, monkeypatch):
+        from picasso import lib
+        from picasso.render.gpu import WgpuBackend
+
+        monkeypatch.setattr(
+            lib.io,
+            "load_user_settings",
+            lambda: {"Render": {"gpu": {"enabled": "on"}}},
+        )
+        monkeypatch.setattr(backend_mod, "_gpu_singleton", None)
+        monkeypatch.setattr(backend_mod, "_gpu_adapter", None)
+        monkeypatch.setattr(backend_mod, "_gpu_unavailable", False)
+        first = backend_mod._get_backend()
+        assert isinstance(first, WgpuBackend)
+        ((n, image),) = render._render_channels(
+            [locs], [INFO], blur_method="gaussian", **KWARGS
+        )
+        try:
+            assert backend_mod.close(wait=False) is True
+            assert backend_mod._gpu_singleton is None
+            assert backend_mod.close(wait=False) is True  # nothing to close
+            second = backend_mod._get_backend()
+            assert isinstance(second, WgpuBackend) and second is not first
+            ((n_again, image_again),) = render._render_channels(
+                [locs], [INFO], blur_method="gaussian", **KWARGS
+            )
+            assert backend_mod.last_fallback() is None  # on the GPU
+            assert n_again == n
+            _assert_parity(image_again, image)  # float atomics
+        finally:
+            backend_mod.close()

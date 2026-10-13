@@ -19,8 +19,10 @@ import re
 import json
 import os
 import shutil
+import tempfile
 import threading
 import warnings
+import weakref
 from typing import Callable, TYPE_CHECKING
 
 import tifffile
@@ -157,6 +159,214 @@ def notification_sounds_directory() -> str:
     directory = os.path.join(home, ".picasso", "notification_sounds")
     os.makedirs(directory, exist_ok=True)
     return directory
+
+
+class SpillError(OSError):
+    """Raised when a table cannot be moved to disk or read back, see
+    ``SpilledFrame``."""
+
+
+def _spill_root() -> str:
+    return os.path.join(os.path.expanduser("~"), ".picasso", "spill")
+
+
+def spill_directory() -> str:
+    """Return the folder of the tables moved to disk while a GUI is idle
+    (``~/.picasso/spill``), see ``SpilledFrame``.
+
+    The directory is created if it does not yet exist. It sits next to
+    ``~/.picasso/settings.yaml`` rather than in the system's temporary
+    folder, which the operating system may clean up (e.g., Windows
+    Storage Sense) while the data is still needed.
+
+    Returns
+    -------
+    directory : str
+        ``~/.picasso/spill``.
+    """
+    directory = _spill_root()
+    os.makedirs(directory, exist_ok=True)
+    return directory
+
+
+def remove_stale_spills(directory: str | None = None) -> None:
+    """Remove the folders of ``SpilledFrame`` left behind by processes
+    that no longer run, e.g., after a crash.
+
+    Parameters
+    ----------
+    directory : str, optional
+        Folder to clean up. Default is ``~/.picasso/spill``.
+    """
+    import psutil
+
+    directory = _spill_root() if directory is None else directory
+    if not os.path.isdir(directory):
+        return
+    for name in os.listdir(directory):
+        pid = name.split("-", 1)[0]
+        if pid.isdigit() and not psutil.pid_exists(int(pid)):
+            shutil.rmtree(os.path.join(directory, name), ignore_errors=True)
+
+
+class SpilledFrame:
+    """A ``pd.DataFrame`` moved to disk to free its memory, to be read
+    back with ``load``.
+
+    Each column is written to its own ``.npy`` file in a new, private
+    folder of ``spill_directory()``, straight from the column's memory,
+    i.e., without a second copy of the table at a time when memory is
+    short. What was written is checked before the constructor returns,
+    so the caller can then drop the table. The column names, ``attrs``
+    and the index's name stay in memory. The folder is removed by
+    ``discard``, or once nothing references this object any more, or
+    when the interpreter exits; its name starts with the process ID,
+    so that a crashed process' folders are removed later
+    (``remove_stale_spills``).
+
+    Only numeric and boolean columns (and indices) can be moved.
+
+    Parameters
+    ----------
+    frame : pd.DataFrame
+        The table to move to disk.
+    directory : str, optional
+        Folder to create the table's folder in. Default is
+        ``spill_directory()``.
+
+    Attributes
+    ----------
+    path : str
+        The table's folder.
+    n_rows : int
+        Number of rows of the table.
+    nbytes : int
+        Size of the table's columns in bytes.
+
+    Raises
+    ------
+    SpillError
+        If the table cannot be moved: a column that is not numeric
+        (e.g., text), too little free disk space (``nbytes`` plus
+        ``SPILL_DISK_RESERVE``) or a failed write. Nothing is left on
+        disk then.
+    """
+
+    #: Free disk space (bytes) left over after a table was moved to
+    #: disk, so that moving it never fills the disk.
+    SPILL_DISK_RESERVE = 2**30
+
+    def __init__(
+        self, frame: pd.DataFrame, directory: str | None = None
+    ) -> None:
+        index = frame.index
+        self._default_index = (
+            isinstance(index, pd.RangeIndex)
+            and index.start == 0
+            and index.step == 1
+        )
+        dtypes = list(frame.dtypes)
+        if not self._default_index:
+            dtypes.append(index.dtype)
+        for dtype in dtypes:
+            if not isinstance(dtype, np.dtype) or dtype.kind not in "biufcmM":
+                raise SpillError(f"{dtype} data cannot be moved to disk")
+        self.columns = frame.columns
+        self.attrs = dict(frame.attrs)
+        self._index_name = index.name
+        self.n_rows = len(frame)
+        arrays = [frame.iloc[:, i].to_numpy() for i in range(frame.shape[1])]
+        if not self._default_index:
+            arrays.append(index.to_numpy())
+        self.nbytes = sum(array.nbytes for array in arrays)
+        if directory is None:
+            directory = spill_directory()
+        free = shutil.disk_usage(directory).free
+        if free < self.nbytes + self.SPILL_DISK_RESERVE:
+            raise SpillError(
+                f"{self.nbytes / 1e6:.0f} MB do not fit on the disk of"
+                f" {directory} ({free / 1e6:.0f} MB free)"
+            )
+        # private to the user (mode 0700)
+        self.path = tempfile.mkdtemp(prefix=f"{os.getpid()}-", dir=directory)
+        try:
+            for i, array in enumerate(arrays):
+                np.save(self._file(i), array, allow_pickle=False)
+            for i, array in enumerate(arrays):
+                written = np.load(self._file(i), mmap_mode="r")
+                if (
+                    written.shape != array.shape
+                    or written.dtype != array.dtype
+                ):
+                    raise SpillError(f"{self._file(i)} was not written")
+                del written  # closes the file (Windows)
+        except Exception as error:
+            shutil.rmtree(self.path, ignore_errors=True)
+            if isinstance(error, SpillError):
+                raise
+            raise SpillError(f"writing to {self.path} failed: {error}") from (
+                error
+            )
+        self._remove = weakref.finalize(
+            self, shutil.rmtree, self.path, ignore_errors=True
+        )
+        self._loaded = None  # weak reference to the table read back
+
+    def _file(self, i: int) -> str:
+        return os.path.join(self.path, f"{i}.npy")
+
+    def load(self) -> pd.DataFrame:
+        """Read the table back. The folder stays, see ``discard``.
+
+        While the table read back is in use, loading again returns that
+        same table (see ``loaded``), so that holders of a shared table
+        that read it back one after the other share it again.
+
+        Returns
+        -------
+        frame : pd.DataFrame
+            The table as it was moved to disk.
+
+        Raises
+        ------
+        SpillError
+            If the table cannot be read back, e.g., because its folder
+            was deleted.
+        """
+        frame = self.loaded()
+        if frame is not None:
+            return frame
+        n_arrays = len(self.columns) + (not self._default_index)
+        try:
+            arrays = [
+                np.load(self._file(i), allow_pickle=False)
+                for i in range(n_arrays)
+            ]
+        except Exception as error:
+            raise SpillError(
+                f"reading the table moved to {self.path} failed: {error}"
+            ) from error
+        if any(len(array) != self.n_rows for array in arrays):
+            raise SpillError(f"the table moved to {self.path} is incomplete")
+        if self._default_index:
+            index = pd.RangeIndex(self.n_rows)
+        else:
+            index = pd.Index(arrays.pop(), name=self._index_name)
+        # by position, as column names may repeat; no copies
+        frame = pd.DataFrame(dict(enumerate(arrays)), index=index, copy=False)
+        frame.columns = self.columns
+        frame.attrs = self.attrs
+        self._loaded = weakref.ref(frame)
+        return frame
+
+    def loaded(self) -> pd.DataFrame | None:
+        """The table read back by ``load``, while it is in use, else
+        None."""
+        return None if self._loaded is None else self._loaded()
+
+    def discard(self) -> None:
+        """Remove the table's folder from the disk."""
+        self._remove()
 
 
 def load_raw(

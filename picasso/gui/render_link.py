@@ -889,8 +889,18 @@ class LinkGroup(QtCore.QObject):
     def _on_scene_requested(self, window) -> None:
         # a channel replaced since the last redraw (filtering, linking,
         # undrifting, etc. assign a new DataFrame) is passed on
+        if window.view.has_spilled_locs:
+            # moved to disk while idle (idle.spill_channels): replacing
+            # a channel would have read them back first
+            return
         current = list(window.view.locs)
         seen = self._seen_locs.get(window)
+        if seen is not None:
+            # channels moved to disk are seen as their placeholders
+            seen = [
+                item.loaded() if isinstance(item, io.SpilledFrame) else item
+                for item in seen
+            ]
         self._seen_locs[window] = current
         if seen is None or len(seen) != len(current):
             return  # channels added or closed: nothing is replaced

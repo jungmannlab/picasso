@@ -2540,3 +2540,110 @@ class TestCZILIFAvailabilityAndDispatch:
             assert isinstance(movie, io.LIFMovie)
         finally:
             movie.close()
+
+
+class TestSpilledFrame:
+    """Tables moved to disk while a GUI is idle (``io.SpilledFrame``)
+    come back exactly as they were, and nothing is left behind."""
+
+    @staticmethod
+    def _frame(n: int = 1000) -> pd.DataFrame:
+        rng = np.random.default_rng(0)
+        frame = pd.DataFrame(
+            {
+                "x": rng.random(n).astype(np.float32),
+                "photons": rng.random(n),
+                "frame": np.arange(n, dtype=np.uint32),
+                "group": rng.integers(0, 5, n),
+                "keep": rng.random(n) > 0.5,
+            }
+        )
+        frame.attrs["source"] = "test"
+        return frame
+
+    def test_round_trip(self, tmp_path):
+        frame = self._frame()
+        spilled = io.SpilledFrame(frame, directory=str(tmp_path))
+        assert spilled.n_rows == len(frame)
+        assert spilled.nbytes == sum(
+            frame[c].to_numpy().nbytes for c in frame.columns
+        )
+        assert os.path.basename(spilled.path).startswith(f"{os.getpid()}-")
+        restored = spilled.load()
+        pd.testing.assert_frame_equal(restored, frame)
+        assert restored.attrs == {"source": "test"}
+        spilled.discard()
+        assert os.listdir(tmp_path) == []
+
+    def test_index_and_repeated_names_are_kept(self, tmp_path):
+        frame = self._frame(10)
+        frame.index = pd.Index(np.arange(10, 30, 2), name="id")
+        frame.columns = ["x", "x", "frame", "group", "keep"]
+        spilled = io.SpilledFrame(frame, directory=str(tmp_path))
+        pd.testing.assert_frame_equal(spilled.load(), frame)
+        spilled.discard()
+
+    def test_text_columns_are_refused(self, tmp_path):
+        frame = self._frame(10)
+        frame["name"] = "spot"
+        with pytest.raises(io.SpillError):
+            io.SpilledFrame(frame, directory=str(tmp_path))
+        assert os.listdir(tmp_path) == []
+
+    def test_a_full_disk_is_refused(self, tmp_path, monkeypatch):
+        usage = types.SimpleNamespace(total=0, used=0, free=2**20)
+        monkeypatch.setattr(io.shutil, "disk_usage", lambda path: usage)
+        with pytest.raises(io.SpillError, match="do not fit"):
+            io.SpilledFrame(self._frame(), directory=str(tmp_path))
+        assert os.listdir(tmp_path) == []
+
+    def test_a_failed_write_leaves_nothing(self, tmp_path, monkeypatch):
+        save = np.save
+        calls = []
+
+        def failing_save(path, array, **kwargs):
+            calls.append(path)
+            if len(calls) == 3:
+                raise OSError("disk unplugged")
+            save(path, array, **kwargs)
+
+        monkeypatch.setattr(io.np, "save", failing_save)
+        with pytest.raises(io.SpillError, match="disk unplugged"):
+            io.SpilledFrame(self._frame(), directory=str(tmp_path))
+        assert os.listdir(tmp_path) == []
+
+    def test_a_deleted_folder_is_reported(self, tmp_path):
+        spilled = io.SpilledFrame(self._frame(), directory=str(tmp_path))
+        spilled.discard()
+        with pytest.raises(io.SpillError):
+            spilled.load()
+
+    def test_loading_again_returns_the_table_in_use(self, tmp_path):
+        # holders of a shared table, reading it back one after the
+        # other, share it again
+        spilled = io.SpilledFrame(self._frame(), directory=str(tmp_path))
+        first = spilled.load()
+        assert spilled.load() is first and spilled.loaded() is first
+        del first
+        assert spilled.loaded() is None
+        spilled.discard()
+
+    def test_the_folder_goes_with_the_last_reference(self, tmp_path):
+        import gc
+
+        spilled = io.SpilledFrame(self._frame(), directory=str(tmp_path))
+        assert len(os.listdir(tmp_path)) == 1
+        del spilled
+        gc.collect()
+        assert os.listdir(tmp_path) == []
+
+    def test_only_folders_of_ended_processes_are_removed(self, tmp_path):
+        own = tmp_path / f"{os.getpid()}-abc"
+        ended = tmp_path / "999999999-abc"  # no such process
+        other = tmp_path / "notes"
+        for folder in (own, ended, other):
+            folder.mkdir()
+        io.remove_stale_spills(str(tmp_path))
+        assert sorted(p.name for p in tmp_path.iterdir()) == sorted(
+            [own.name, other.name]
+        )

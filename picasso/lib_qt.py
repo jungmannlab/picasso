@@ -1245,6 +1245,12 @@ def _acquire_input_blocker() -> None:
     _input_blocker.acquire()
 
 
+def gui_busy() -> bool:
+    """Whether a task (``run_task``) or a status step
+    (``run_with_status``) is running, i.e., user input is blocked."""
+    return _input_blocker is not None and _input_blocker._count > 0
+
+
 class Task(QtCore.QObject):
     """A function running on a worker thread behind a cancelable progress
     dialog. Created and started by :func:`run_task`, which describes the
@@ -2901,6 +2907,8 @@ class DensityContrastSlider(SpinBoxRangeSlider):
         # that dragging does not scan the image on every mouse move
         self._last_image = None
         self._last_upper = 0.0
+        # see release_image
+        self._keep_upper = False
         super().__init__(
             minimum_box,
             maximum_box,
@@ -2917,11 +2925,19 @@ class DensityContrastSlider(SpinBoxRangeSlider):
             return 0.0
         image = self._image()
         if image is None or not getattr(image, "size", 0):
-            return 0.0
+            return self._last_upper if self._keep_upper else 0.0
         if image is not self._last_image:
             self._last_image = image
             self._last_upper = float(image.max())
+            self._keep_upper = False
         return self._last_upper
+
+    def release_image(self) -> None:
+        """Let go of the last image, so that its memory can be freed
+        once its owner drops it too (see ``picasso.gui.idle``). Its
+        maximum still sizes the track until the next image."""
+        self._last_image = None
+        self._keep_upper = True
 
 
 class GenericPlotWindow(QtWidgets.QTabWidget):

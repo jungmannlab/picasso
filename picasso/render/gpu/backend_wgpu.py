@@ -788,6 +788,10 @@ class WgpuBackend(SplatBackend):
         # one render at a time per device queue; the seam allows
         # concurrent callers (async worker + synchronous renders)
         self._lock = threading.Lock()
+        # set by close(): a caller that fetched this backend before it
+        # was closed gets a SplatBackendError (i.e., a CPU render)
+        # rather than a call into the destroyed device
+        self._closed = False
         # scratch buffers, reused across calls and grown as needed
         self._scratch = {}  # name -> (buffer, size)
         self._scatter_group0 = None
@@ -928,6 +932,8 @@ class WgpuBackend(SplatBackend):
         self._validate_render_request(columns, blur_method, viewport, ang)
         try:
             with self._lock:
+                if self._closed:
+                    raise SplatBackendError("the GPU backend was closed")
                 return self._render(
                     columns,
                     info,
@@ -1605,6 +1611,11 @@ class WgpuBackend(SplatBackend):
 
     def clear_cache(self) -> None:
         """Drop resident column uploads (frees GPU memory)."""
+        with self._lock:
+            self._clear_cache()
+
+    def _clear_cache(self) -> None:
+        """``clear_cache`` with ``_lock`` held."""
         self._groups.clear()
         for _, buffer, _ in self._arrays.values():
             buffer.destroy()
@@ -1615,10 +1626,27 @@ class WgpuBackend(SplatBackend):
         """Drop resident uploads (a dataset was closed)."""
         self.clear_cache()
 
-    def close(self) -> None:
-        """Release the device and all cached resources."""
-        self.clear_cache()
-        self._scratch.clear()
-        self._scatter_group0 = None
-        self._tiled_group0 = None
-        self._device.destroy()
+    def close(self, wait: bool = True) -> bool:
+        """Release the device and all cached resources; a render in
+        progress finishes first, unless ``wait`` is False.
+
+        Returns
+        -------
+        closed : bool
+            False if ``wait`` is False and a render is in progress,
+            in which case nothing was released.
+        """
+        if not self._lock.acquire(blocking=wait):
+            return False
+        try:
+            if self._closed:
+                return True
+            self._clear_cache()
+            self._scratch.clear()
+            self._scatter_group0 = None
+            self._tiled_group0 = None
+            self._device.destroy()
+            self._closed = True
+        finally:
+            self._lock.release()
+        return True

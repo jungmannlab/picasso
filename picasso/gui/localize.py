@@ -9783,6 +9783,21 @@ class Window(QtWidgets.QMainWindow):
         self._preview_ids_cache = {}
         self._channel_filter_cache = {}
 
+    def release_idle_memory(self) -> bool:
+        """Drop the frames cached by the temporal median filter of the
+        identification preview, while the GUI is idle (see
+        ``picasso.gui.idle``); they are computed again when shown. The
+        filter stacks themselves stay, so nothing else is invalidated.
+        Returns False, releasing nothing, while a worker runs."""
+        if self._active_worker is not None:
+            return False
+        stacks = [self._temporal_movie]
+        stacks += [cache[0] for cache in self._channel_filter_cache.values()]
+        for temporal in stacks:
+            if temporal is not None:
+                temporal.clear_cache()
+        return True
+
     def _current_frame_locs(self) -> pd.DataFrame | None:
         """Fitted localizations in the currently displayed frame, or
         None if no localizations are available."""

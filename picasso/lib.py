@@ -255,6 +255,42 @@ def n_workers(
     return n
 
 
+def release_free_memory() -> None:
+    """Collect garbage and hand the memory the process has freed back
+    to the operating system.
+
+    Freeing an array does not always shrink the process: the C
+    allocator keeps freed blocks for reuse, so the memory stays
+    reserved for Picasso while other programs could use it. This asks
+    the allocator to return it - ``malloc_trim`` on Linux,
+    ``malloc_zone_pressure_relief`` on macOS and ``HeapCompact`` of the
+    process heap on Windows. Only memory nothing references is
+    affected, so this is always safe, if not free: the garbage
+    collection and the trim take up to about a second for a large
+    process. Picasso's GUIs call it after a period of inactivity (see
+    ``picasso.gui.idle``).
+    """
+    import ctypes
+    import gc
+
+    # cycles, e.g., closed windows referenced by their own callbacks,
+    # are only freed by the cyclic garbage collector
+    gc.collect()
+    try:
+        if sys.platform.startswith("linux"):
+            ctypes.CDLL("libc.so.6").malloc_trim(0)
+        elif sys.platform == "darwin":
+            libc = ctypes.CDLL("/usr/lib/libSystem.B.dylib")
+            libc.malloc_zone_pressure_relief(None, ctypes.c_size_t(0))
+        elif sys.platform == "win32":
+            kernel32 = ctypes.windll.kernel32
+            kernel32.GetProcessHeap.restype = ctypes.c_void_p
+            kernel32.HeapCompact.argtypes = [ctypes.c_void_p, ctypes.c_uint]
+            kernel32.HeapCompact(kernel32.GetProcessHeap(), 0)
+    except Exception:  # noqa: BLE001 - e.g., another C library (musl)
+        pass
+
+
 def normalize_frame_bounds(frame_bounds, n_frames):
     """Normalize ``frame_bounds`` to a list of concrete, inclusive,
     0-indexed ``(lo, hi)`` segments.

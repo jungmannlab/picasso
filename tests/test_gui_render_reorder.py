@@ -119,13 +119,20 @@ def test_reorder_keeps_the_lists_shared_by_other_dialogs(window):
     )
 
 
+def test_slicer_z_follows_the_channels(window):
+    for i, locs in enumerate(window.view.locs):
+        locs["z"] = float(i)
+    window.dataset_dialog.move_channel(2, 0)
+    zcoord = window.slicer_dialog.zcoord
+    assert [z.iloc[0] for z in zcoord] == [2.0, 0.0, 1.0]
+
+
 def test_reorder_updates_channel_indices_elsewhere(window):
     view = window.view
     tools = window.tools_settings_dialog
     tools.set_move_channels((2,))
     view._drift = ["d0", "d1", "d2"]
     view._move_undo = [((0, 2), 1.0, 2.0)]
-    window.slicer_dialog.zcoord = ["z0", "z1", "z2"]
     window.test_clusterer_dialog.channels.setCurrentIndex(2)
 
     window.dataset_dialog.move_channel(2, 0)
@@ -133,7 +140,6 @@ def test_reorder_updates_channel_indices_elsewhere(window):
     assert tools.move_channels() == (0,)
     assert view._drift == ["d2", "d0", "d1"]
     assert view._move_undo == [((1, 0), 1.0, 2.0)]
-    assert window.slicer_dialog.zcoord == ["z2", "z0", "z1"]
     combo = window.test_clusterer_dialog.channels
     assert [combo.itemText(i) for i in range(3)] == [
         "locs_2.hdf5",

@@ -22,7 +22,7 @@ from PyQt6 import QtCore, QtGui, QtWidgets
 from scipy.spatial.transform import Rotation
 
 from .. import io, render, lib, lib_qt, __version__, docs_url
-from . import theme, toolbars
+from . import idle, theme, toolbars
 from .grid_settings import GridGroupBox
 from .render_worker import (
     RenderWorker,
@@ -1191,7 +1191,7 @@ class RotateByAngleDialog(lib.Dialog):
         )
 
 
-class ViewRotation(QtWidgets.QLabel):
+class ViewRotation(QtWidgets.QLabel, idle.SpillableChannels):
     """Display rotated super-resolution datasets.
 
     Most functions were taken from ``picasso.gui.render.View``.
@@ -2022,6 +2022,33 @@ class ViewRotation(QtWidgets.QLabel):
             self._render_thread.wait()
             self._render_thread = None
             self._render_worker = None
+
+    def idle_busy(self) -> bool:
+        """Whether an animation is built or a render is due, when
+        nothing is to be released (``picasso.gui.idle``)."""
+        return (
+            self._refine_timer.isActive()
+            or self.window.animation_dialog._build_thread is not None
+        )
+
+    def release_idle_memory(self) -> bool:
+        """Drop what is rebuilt on demand, while the GUI is idle (see
+        ``picasso.gui.idle``): the raw image of the last render and, if
+        the window is closed, its copies of the localizations, which
+        opening it loads again (see ``Window.open_3d_view``). The
+        rotation and the viewport stay. Returns False, releasing
+        nothing, while busy."""
+        if self.idle_busy():
+            return False
+        self.image = None
+        self.window.display_settings_dlg.contrast_slider.release_image()
+        if not self.window.isVisible():
+            self.stop_render_worker()
+            self.locs = []
+            self.infos = []
+            self.x_locs = []
+            self.group_color = []
+        return True
 
     def draw_scalebar(self, image: QtGui.QImage) -> QtGui.QImage:
         """Draw a scalebar.

@@ -14,6 +14,7 @@ from __future__ import annotations
 import os
 import sys
 import copy
+import logging
 import time
 import warnings
 import os.path
@@ -28,7 +29,7 @@ import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from PyQt6 import QtCore, QtGui, QtWidgets
+from PyQt6 import QtCore, QtGui, QtWidgets, sip
 
 # must come after the PyQt6 import so that matplotlib's qt_compat
 # selects the PyQt6 binding (picasso core no longer imports PyQt6)
@@ -65,6 +66,7 @@ from .render_worker import (  # noqa: F401
     global_precisions_for,
     subsample_request,
 )
+from . import idle
 from . import render_link
 from .grid_settings import GridGroupBox
 from .overlay_style import OverlayStyleWidget
@@ -86,6 +88,7 @@ if sys.platform == "darwin":  # plots do not work on mac os
     matplotlib.use("Qt5Agg")
 matplotlib.rcParams.update({"axes.titlesize": "large"})
 
+_log = logging.getLogger(__name__)
 
 DEFAULT_OVERSAMPLING = 1.0  # number of display pixels per camera pixel
 INITIAL_REL_MAXIMUM = 0.5
@@ -1247,12 +1250,6 @@ class DatasetDialog(lib.Dialog):
     def _update_after_channel_deleted(self, i: int) -> None:
         """Update the state that depends on the remaining channels
         once channel ``i``'s View-side attributes have been deleted."""
-        try:
-            self.window.slicer_dialog.zcoord[i]
-        except Exception:
-            pass
-        self.window.slicer_dialog.zcoord.pop(i)
-
         # hide the 3D-only actions if no remaining channel has z data
         if not any("z" in locs.columns for locs in self.window.view.locs):
             for action in self.window.actions_3d:
@@ -2449,6 +2446,8 @@ class PlotDialog(lib.Dialog):
             ax.zaxis.pane.set_facecolor((0, 0, 0, 1.0))
 
         dialog.exec()
+        # pyplot keeps every figure it made until it is closed
+        plt.close(dialog.figure)
         return dialog.result
 
 
@@ -2683,6 +2682,8 @@ class PlotDialogIso(lib.Dialog):
             ax4.set_facecolor("black")
 
         dialog.exec()
+        # pyplot keeps every figure it made until it is closed
+        plt.close(dialog.figure)
         return dialog.result
 
 
@@ -2858,6 +2859,8 @@ class ClsDlg3D(lib.Dialog):
         plt.gca().patch.set_facecolor("black")
 
         dialog.exec()
+        # pyplot keeps every figure it made until it is closed
+        plt.close(dialog.figure)
 
         checks = [not _.isChecked() for _ in dialog.checks]
         checks = np.asarray(np.where(checks)) + 1
@@ -3046,6 +3049,8 @@ class ClsDlg2D(lib.Dialog):
         ax2.set_ylabel("Y [nm]")
 
         dialog.exec()
+        # pyplot keeps every figure it made until it is closed
+        plt.close(dialog.figure)
 
         checks = [not _.isChecked() for _ in dialog.checks]
         checks = np.asarray(np.where(checks)) + 1
@@ -6069,6 +6074,8 @@ class InfoDialog(lib.Dialog):
             combo.blockSignals(False)
         combo.setVisible(len(names) > 1)
 
+        if view.has_spilled_locs:
+            return  # moved to disk while idle: unchanged since shown
         channel = combo.currentIndex()
         if channel < 0 or channel >= len(view.locs):
             self.fit_precision.setText("-")
@@ -6873,10 +6880,15 @@ class MaskSettingsDialog(lib.Dialog):
         self.cached_thresh = 0
         self.pixelsize = 130
 
+    @property
+    def locs(self) -> list[pd.DataFrame]:
+        """The localizations of the main window's channels (always the
+        current ones, also after they were moved to disk while idle)."""
+        return self.window.view.locs
+
     def init_dialog(self) -> None:
         """Initialize dialog when called from the main window. Load
         localizations and metadata, updates plots."""
-        self.locs = self.window.view.locs
         self.paths = self.window.view.locs_paths
         self.infos = self.window.view.infos
         self.pixelsize = self.window.view.pixelsize
@@ -8566,6 +8578,12 @@ class RESIDialog(lib.Dialog):
 
     DOCS_URL = docs_url("render/analysis.html#render-resi")
 
+    @property
+    def locs(self) -> list[pd.DataFrame]:
+        """The localizations of the main window's channels (always the
+        current ones, also after they were moved to disk while idle)."""
+        return self.window.view.locs
+
     def __init__(self, window: QtWidgets.QMainWindow) -> None:
         super().__init__()
         self.setWindowTitle("RESI")
@@ -8575,7 +8593,6 @@ class RESIDialog(lib.Dialog):
         self.setWindowIcon(icon)
 
         self.window = window
-        self.locs = window.view.locs
         self.n_channels = len(self.locs)
         self.paths = window.view.locs_paths
         self.ndim = 2
@@ -10088,7 +10105,6 @@ class SlicerDialog(lib.Dialog):
         self.export_button.clicked.connect(self.export_stack)
         slicer_grid.addWidget(self.export_button, 6, 0)
 
-        self.zcoord = []
         # slice bounds are set in on_slice_position_changed; until then
         # slicing keeps all localizations
         self.bins = np.array([])
@@ -10097,6 +10113,15 @@ class SlicerDialog(lib.Dialog):
         self.slicermin = -np.inf
         self.slicermax = np.inf
         self.slicerposition = None
+
+    @property
+    def zcoord(self) -> list:
+        """z coordinates of each channel of the main window (an empty
+        list for a channel without z)."""
+        return [
+            locs["z"] if "z" in locs.columns else []
+            for locs in self.window.view.locs
+        ]
 
     def initialize(self) -> None:
         """Called when the dialog is open, calculate the histograms and
@@ -10477,7 +10502,7 @@ def _expand_viewport(
     return ((y_min - dy, x_min - dx), (y_max + dy, x_max + dx))
 
 
-class View(QtWidgets.QLabel):
+class View(QtWidgets.QLabel, idle.SpillableChannels):
     """Display localization datasets. Render localizations and draw
     objects on top, such as scale bar, legend, etc.
 
@@ -10880,15 +10905,9 @@ class View(QtWidgets.QLabel):
             self.update_scene()
 
         if "z" in locs.columns:
-            # append z coordinates for slicing
-            self.window.slicer_dialog.zcoord.append(locs["z"])
             # unlock 3D settings
             for action in self.window.actions_3d:
                 action.setVisible(True)
-        else:
-            self.window.slicer_dialog.zcoord.append(
-                []
-            )  # empty list for 2D data
 
         # allow using View, Tools and Postprocess menus
         for menu in self.window.menus:
@@ -11213,9 +11232,6 @@ class View(QtWidgets.QLabel):
             # change back to the linked windows
             self.index_blocks[j] = None
             self.render_index[j] = source.render_index[i]
-            self.window.slicer_dialog.zcoord[j] = (
-                locs["z"] if "z" in locs.columns else []
-            )
         if (
             len(self.locs) == 1
             and "group" in self.locs[0].columns
@@ -11288,7 +11304,6 @@ class View(QtWidgets.QLabel):
             self.channel = new_index.get(self.channel, self.channel)
 
         window = self.window
-        permute(window.slicer_dialog.zcoord)
         if window.slicer_dialog.isVisible():
             window.slicer_dialog.calculate_histogram()
         tools_dialog = window.tools_settings_dialog
@@ -14116,7 +14131,7 @@ class View(QtWidgets.QLabel):
     def mouseMoveEvent(self, event: QtCore.QEvent) -> None:
         """Drawing zoom-in rectangle, panning or drawing a rectangular
         pick."""
-        if not len(self.locs):
+        if not self.n_channels:  # not locs: hovering reads nothing back
             return
         if self.window.link_group is not None:
             self.cursor_moved.emit(self.map_to_movie(event.pos()))
@@ -14152,7 +14167,7 @@ class View(QtWidgets.QLabel):
         crosshairs when the cursor leaves the canvas."""
         if self._mode == "Measure" and self._measure_cursor is not None:
             self._measure_cursor = None
-            if len(self.locs):
+            if self.n_channels:
                 self.update_scene(picks_only=True)
         if self.window.link_group is not None:
             self.cursor_moved.emit(None)
@@ -15532,10 +15547,10 @@ class View(QtWidgets.QLabel):
                     removelist, i = self._handle_pick_selection_reply(
                         reply, pick, removelist, i
                     )
+                    plt.close(fig)
                     if i is None:  # cancel
                         break
                     i += 1
-                    plt.close()
         for pick in removelist:
             self._picks.remove(pick)
         self.n_picks = len(self._picks)
@@ -16040,6 +16055,37 @@ class View(QtWidgets.QLabel):
         self.window.link_channels_changed(
             [(self.locs[i], i) for i in channels]
         )
+
+    def idle_busy(self) -> bool:
+        """Whether localizations load, channels are moved or a render
+        is due, when nothing is to be released (``picasso.gui.idle``)."""
+        return (
+            self._load_thread is not None
+            or bool(self._move_channels)
+            or self._refine_timer.isActive()
+        )
+
+    def release_idle_memory(self) -> bool:
+        """Drop the caches that are rebuilt on demand, while the GUI is
+        idle (see ``picasso.gui.idle``): the raw image of the last
+        render (the next contrast change renders anew), the first
+        channel split by property and the pick index blocks of channels
+        without a render index. The shown frame and the render index
+        stay. Returns False, releasing nothing, while busy."""
+        if self.idle_busy():
+            return False
+        self.image = None
+        # the next cache redraw renders the tight viewport, not the
+        # margin of the dropped asynchronous render
+        self._image_viewport = None
+        self.x_locs = None
+        # not invalidate_locs_index: linked windows would take that for
+        # changed localizations. n_channels, not locs: a linked window
+        # may have moved them to disk in this release already, and
+        # reading them back here would write them out a second time,
+        # leaving the windows with separate copies of shared channels
+        self.index_blocks = [None] * self.n_channels
+        return True
 
     @check_pick
     def pick_areas(self) -> FloatArray1D:
@@ -18062,7 +18108,7 @@ class View(QtWidgets.QLabel):
         self.scene_requested.emit()
         # Clear slicer cache
         self.window.slicer_dialog.slicer_cache = {}
-        if len(self.locs):
+        if self.n_channels:  # a redraw of the picks reads nothing back
             if resample_locs:
                 self.invalidate_locs_index()
             viewport = viewport or self.viewport
@@ -20230,6 +20276,31 @@ class Window(QtWidgets.QMainWindow):
             dialog.close()
         self.initUI(plugins_loaded=True)
 
+    def release_idle_memory(self) -> bool:
+        """Drop the memory that is rebuilt on demand, while the GUI is
+        idle (see ``picasso.gui.idle``): the caches of the view and of
+        the 3D view (see their ``release_idle_memory``), the frames
+        cached by the slicer, and the GPU device with the localizations
+        uploaded to it, which the next render starts again. Then the
+        localizations of all windows are moved to disk, to be read back
+        on the next action that needs them (``spill_idle_channels``).
+        The picks and everything on screen stay. Linked windows release
+        their own caches. Returns False while busy, to be asked again
+        later."""
+        if not self.view.release_idle_memory():
+            return False
+        if not self.window_rot.view_rot.release_idle_memory():
+            return False
+        contrast_bar_slider = getattr(self, "contrast_slider", None)
+        if contrast_bar_slider is not None:
+            contrast_bar_slider.release_image()
+        self.display_settings_dlg.contrast_slider.release_image()
+        self.slicer_dialog.slicer_cache = {}
+        # before the localizations: the GPU holds uploaded columns
+        if not render.backend.close(wait=False):
+            return False
+        return spill_idle_channels(self)
+
     def open_image_overlay(self) -> None:
         """Open the image overlay dialog; ask for an image right away if
         none is loaded."""
@@ -20350,6 +20421,54 @@ class Window(QtWidgets.QMainWindow):
         resi_dialog = RESIDialog(self)
         self.dialogs.append(resi_dialog)
         resi_dialog.show()
+
+
+def spill_idle_channels(window: Window) -> bool:
+    """Move the localizations of ``window`` and of all windows linked
+    to it to disk while the GUI is idle, together with those of their
+    open 3D views, see ``picasso.gui.idle.spill_channels``.
+
+    All windows at once: linked windows share channels, which are only
+    freed if no window holds them any more. The channels are read back
+    by each window on its next access to ``View.locs``.
+
+    Parameters
+    ----------
+    window : Window
+        The window that releases its memory; it and the windows opened
+        with ``View > New linked window`` are moved to disk.
+
+    Returns
+    -------
+    spilled : bool
+        False, nothing moved, while a window is busy.
+    """
+    windows = [window, *Window._secondary_windows]
+    if window.link_group is not None:
+        windows += window.link_group.windows
+    windows = list(
+        {id(w): w for w in windows if not sip.isdeleted(w)}.values()
+    )
+    views = [window.view for window in windows]
+    views += [window.window_rot.view_rot for window in windows]
+    if any(view.idle_busy() for view in views):
+        return False
+    groups = {
+        id(window.link_group): window.link_group
+        for window in windows
+        if window.link_group is not None
+    }
+    # the channels each linked window saw last, compared at its next
+    # redraw (render_link.LinkGroup._on_scene_requested)
+    seen = [
+        channels
+        for group in groups.values()
+        for channels in group._seen_locs.values()
+    ]
+    nbytes = idle.spill_channels(views, seen)
+    if nbytes:
+        _log.info("Moved %.0f MB of localizations to disk", nbytes / 1e6)
+    return True
 
 
 def main() -> None:

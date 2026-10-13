@@ -1,6 +1,6 @@
 # Changelog
 
-Last change: 12-OCT-2026 CEST
+Last change: 13-OCT-2026 CEST
 
 ## 1.0.0
 
@@ -12,6 +12,7 @@ Last change: 12-OCT-2026 CEST
 - Toolbars in Render (also its 3D view), Localize, Filter and Average with the most used actions of the menus, see the [documentation](https://picassosr.readthedocs.io/en/latest/others.html#toolbars).
 - Icons added to menu actions and buttons.
 - The sections of the long dialogs collapse and expand by clicking their header, and each dialog remembers which sections are open across sessions (`Expanded sections` in the [user settings](https://picassosr.readthedocs.io/en/latest/others.html#user-settings-file)).
+- A Picasso window left open but unused releases its memory after 30 minutes without input. Set the time with `Release memory after idle (min)` in the [user settings](https://picassosr.readthedocs.io/en/latest/others.html#user-settings-file) where more details are explained.
 - Removed support for Python 3.10 (Python 3.11–3.14 are supported).
 - All docstrings of public functions have been improved to match the NumPy style.
 - Test version documentation online.

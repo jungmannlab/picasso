@@ -150,6 +150,9 @@ Top level
    * - ``Save Micro-Manager metadata``
      - ``True``
      - Keep the (often large) MicroManager property block when copying a movie's metadata into the localizations fitted from it. See :ref:`files-metadata-settings`.
+   * - ``Release memory after idle (min)``
+     - ``30``
+     - Minutes without input (clicks, keys, scrolling) after which an open module releases the memory it rebuilds on demand - in Render the cached renders and the GPU memory, in Localize the frames cached for the identification preview - and hands freed memory back to the operating system. Render and Filter also move their localizations (200 MB or more) to ``~/.picasso/spill`` and read them back on the next action that needs them, while the rendered image and the rows of Filter's table stay on screen; linked Render windows keep sharing their channels. Nothing closes or changes on screen; the first action afterwards may take a moment longer (e.g., the first render starts the GPU again). A running task, such as clustering, counts as activity. ``0`` never releases memory.
 
 ``Sound_notification``
 ^^^^^^^^^^^^^^^^^^^^^^

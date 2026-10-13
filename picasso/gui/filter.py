@@ -11,6 +11,7 @@ Graphical user interface for filtering localization lists.
 
 from __future__ import annotations
 
+import logging
 import os.path
 import sys
 from collections.abc import Iterator, Mapping
@@ -30,6 +31,7 @@ from matplotlib.widgets import SpanSelector, RectangleSelector
 
 from .. import io, lib, clusterer, expression, __version__, docs_url
 from .app import run_gui
+from . import idle
 from . import theme
 from . import toolbars
 from . import plot_style
@@ -38,6 +40,8 @@ from .plot_style import PlotStyle
 plt.style.use("ggplot")
 
 ROW_HEIGHT = 30
+
+_log = logging.getLogger(__name__)
 
 
 class TableModel(QtCore.QAbstractTableModel):
@@ -642,7 +646,7 @@ class FilterExpression(lib.Dialog):
 
     def _available_names(self) -> list[str]:
         """Columns of the loaded file and metadata variables."""
-        if self.window.locs_full is None:
+        if not self.window.has_locs:
             return []
         variables = expression.variables_from_info(self.window.info)
         return list(self.window.locs_full.columns) + list(variables)
@@ -650,7 +654,7 @@ class FilterExpression(lib.Dialog):
     def check(self) -> None:
         """Report syntax errors and unknown names while typing."""
         text = self.expression.text()
-        if not text.strip() or self.window.locs_full is None:
+        if not text.strip() or not self.window.has_locs:
             self.status.clear()
             return
         try:
@@ -860,7 +864,9 @@ class Window(QtWidgets.QMainWindow):
     hist2d_windows : dict
         Dictionary of 2D histogram windows.
     locs_full : pd.DataFrame
-        Master localizations table, set on load.
+        Master localizations table, set on load. Moved to disk while
+        the GUI is idle and read back on the next access, see
+        ``release_idle_memory``.
     filtered_idx : np.ndarray
         Integer indices into ``locs_full`` of the currently-visible
         rows.
@@ -955,7 +961,9 @@ class Window(QtWidgets.QMainWindow):
         hbox.addWidget(self.vertical_scrollbar)
         self.hist_windows = {}
         self.hist2d_windows = {}
+        self.subcluster_num = None  # "Test subclustering" dialog
         self.filter_log = {}
+        self._spilled = None  # io.SpilledFrame while moved to disk
         self.locs_full = None
         self.filtered_idx = None
 
@@ -1008,7 +1016,7 @@ class Window(QtWidgets.QMainWindow):
 
     @property
     def locs(self) -> pd.DataFrame:
-        """Materialise the currently-filtered localizations.
+        """Materialize the currently-filtered localizations.
 
         Provided for backward compatibility (e.g. plugins). This
         allocates a fresh DataFrame on every access — prefer
@@ -1017,12 +1025,99 @@ class Window(QtWidgets.QMainWindow):
         return self.materialize_filtered()
 
     @property
+    def locs_full(self) -> pd.DataFrame | None:
+        """Master localizations table, None if no file is loaded. Read
+        back from the disk first if it was moved there while the GUI
+        was idle, see ``release_idle_memory``."""
+        if self._spilled is not None:
+            self._restore_locs()
+        return self._locs_full
+
+    @locs_full.setter
+    def locs_full(self, locs: pd.DataFrame | None) -> None:
+        self._discard_spill()
+        self._locs_full = locs
+
+    @property
+    def has_locs(self) -> bool:
+        """Whether a file is loaded, also while its localizations are
+        moved to disk (which this does not read back)."""
+        return self._locs_full is not None or self._spilled is not None
+
+    def release_idle_memory(self) -> bool:
+        """Move the localizations to disk while the GUI is idle (see
+        ``picasso.gui.idle``), if they take at least
+        ``idle.SPILL_MIN_BYTES``; the next access to ``locs_full`` reads
+        them back. The rows shown in the table stay on screen, and the
+        filters applied are kept. If the localizations cannot be moved,
+        e.g., for lack of disk space, they stay in memory.
+
+        Returns
+        -------
+        released : bool
+            Always True: Filter is never busy.
+        """
+        locs = self._locs_full
+        if locs is None:
+            return True
+        if locs.memory_usage(index=False).sum() < idle.SPILL_MIN_BYTES:
+            return True
+        try:
+            spilled = io.SpilledFrame(locs)
+        except io.SpillError as error:
+            _log.warning("Localizations kept in memory: %s", error)
+            return True
+        # the table shows its own copy of the visible rows, as a slice
+        # of the table would keep all of it in memory; replaced without
+        # resetting the model, which would clear the selected columns
+        self.table_model.locs = self.table_model.locs.copy()
+        self._spilled = spilled
+        self._locs_full = None
+        return True
+
+    def _restore_locs(self) -> None:
+        """Read back the localizations moved to disk while idle.
+
+        Raises
+        ------
+        io.SpillError
+            If they cannot be read back; no file is loaded then, and
+            the folder on the disk is kept.
+        """
+        spilled, self._spilled = self._spilled, None
+        QtWidgets.QApplication.setOverrideCursor(
+            QtCore.Qt.CursorShape.WaitCursor
+        )
+        try:
+            self._locs_full = spilled.load()
+        except io.SpillError as error:
+            self._locs_full = None
+            self.filtered_idx = None
+            self.table_model.set_data(pd.DataFrame(), 0)
+            raise io.SpillError(
+                f"The localizations moved to disk while Filter was idle"
+                f" could not be read back ({error}). Please open the file"
+                f" again."
+            ) from error
+        finally:
+            QtWidgets.QApplication.restoreOverrideCursor()
+        spilled.discard()
+
+    def _discard_spill(self) -> None:
+        """Delete the localizations moved to disk, if any, unread."""
+        if self._spilled is not None:
+            self._spilled.discard()
+            self._spilled = None
+
+    @property
     def n_filtered(self) -> int:
         """Number of currently-visible rows."""
-        if self.locs_full is None:
+        if not self.has_locs:
             return 0
         if self.filtered_idx is None:
-            return len(self.locs_full)
+            if self._spilled is not None:
+                return self._spilled.n_rows
+            return len(self._locs_full)
         return len(self.filtered_idx)
 
     def get_column(self, field: str) -> np.ndarray:
@@ -1156,7 +1251,7 @@ class Window(QtWidgets.QMainWindow):
 
     def show_metadata(self) -> None:
         """Open the metadata dialog."""
-        if self.locs_full is None:
+        if not self.has_locs:
             QtWidgets.QMessageBox.information(
                 self, "Metadata", "No file loaded."
             )
@@ -1184,13 +1279,13 @@ class Window(QtWidgets.QMainWindow):
             locs, self.info = io.load_filter(path, qt_parent=self)
         except io.NoMetadataFileError:
             return
-        if self.locs_full is not None:
-            for column in self.locs_full.columns:
-                if self.hist_windows.get(column):
-                    self.hist_windows[column].close()
-                for column_y in self.locs_full.columns:
-                    if self.hist2d_windows.get(column, {}).get(column_y):
-                        self.hist2d_windows[column][column_y].close()
+        # the windows of the previous file (not read back if on disk)
+        windows = list(self.hist_windows.values())
+        for by_y in self.hist2d_windows.values():
+            windows.extend(by_y.values())
+        for window in windows:
+            if window:
+                window.close()
         self.locs_path = path
         self.locs_full = locs
         # No filter applied yet — filtered_idx stays None so that we
@@ -1230,7 +1325,7 @@ class Window(QtWidgets.QMainWindow):
             True if no localizations are loaded (the action should
             stop), False otherwise.
         """
-        if self.locs_full is not None:
+        if self.has_locs:
             return False
         QtWidgets.QMessageBox.information(self, title, "No file loaded.")
         return True
@@ -1295,12 +1390,18 @@ class Window(QtWidgets.QMainWindow):
     def plot_subclustering(self) -> None:
         if self.no_locs_warning("Test subclustering"):
             return
-        self.subcluster_num = SubclusterNum(self)
+        # one dialog, shown again: a dialog parented to the window lives
+        # as long as the window, with the last plot it made
+        if self.subcluster_num is None:
+            self.subcluster_num = SubclusterNum(self)
         self.subcluster_num.show()
+        self.subcluster_num.raise_()
 
     def display_locs(self, index: int) -> None:
-        if self.locs_full is None:
+        if not self.has_locs:
             return
+        if self._spilled is not None and index == self.table_model.index:
+            return  # e.g., resized while idle: the shown rows stay
         view_height = self.table_view.viewport().height()
         n_rows = int(view_height / ROW_HEIGHT) + 2
         end = min(index + n_rows, self.n_filtered)
@@ -1385,7 +1486,7 @@ class Window(QtWidgets.QMainWindow):
             Path to the .yaml metadata, e.g., dropped into the window.
             If None, a file dialog asks for it.
         """
-        if self.locs_full is None:
+        if not self.has_locs:
             QtWidgets.QMessageBox.information(
                 self, "Apply filters from metadata", "No file loaded."
             )
@@ -1499,9 +1600,10 @@ class Window(QtWidgets.QMainWindow):
 
     def closeEvent(self, event: QtGui.QCloseEvent) -> None:
         settings = io.load_user_settings()
-        if self.locs_full is not None:
+        if self.has_locs:
             settings["Filter"]["PWD"] = self.pwd
             io.save_user_settings(settings)
+        self._discard_spill()
         QtWidgets.QApplication.instance().closeAllWindows()
 
 

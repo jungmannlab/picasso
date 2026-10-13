@@ -124,4 +124,12 @@ def run_gui(
 
     setup_gui_update_check(window)
 
-    return app.exec()
+    # release memory while the GUI is left open but unused
+    from . import idle
+
+    watcher = idle.install(app)
+    try:
+        return app.exec()
+    finally:
+        if watcher is not None:
+            watcher.stop()
