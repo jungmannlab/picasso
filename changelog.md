@@ -43,6 +43,7 @@ Last change: 13-OCT-2026 CEST
 - Link localizations can be run on all channels sequentially.
 - Coordinate-based colocalization (CBC, Malkusch, et al., *Histochem Cell Biol* 2012). See the [documentation](https://picassosr.readthedocs.io/en/latest/render/analysis.html#render-cbc).
 - Stitching of tiles recorded at different stage positions into one dataset. See the [documentation](https://picassosr.readthedocs.io/en/latest/render/menu-postprocess.html#render-stitch-tiles).
+- Basic single-particle tracking (SPT), following Martens, et al., *Front. Bioinform.* 2021: nearest-neighbor tracking of localizations (`Postprocess > Single-particle tracking`), tracks drawn as lines (`Display settings > Tracks`) and diffusion analysis by the mean squared displacement and the jump distances, with a summary of every track. See the [documentation](https://picassosr.readthedocs.io/en/latest/render/tracking.html). *Note: this is an experimental feature, feedback is welcome*.
 - Clear measurements added (similar to Clear picks)
 - Files dialogs widgets are grayed out if they do not apply at the given moment.
 - Faster G5M.

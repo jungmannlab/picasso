@@ -61,6 +61,7 @@ Postprocessing
    picasso.g5m
    picasso.registration
    picasso.stitch
+   picasso.spt
    picasso.transforms
    picasso.masking
    picasso.expression

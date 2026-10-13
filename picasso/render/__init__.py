@@ -13,7 +13,7 @@ math), ``backend`` (splat backend contract), ``splat`` (raw splat
 stage and the CPU backend), ``overlays_qt`` (Qt overlay drawing and
 export), ``scene`` (multi-channel composition), ``image_overlay`` (overlay
 of an image, e.g., a widefield PNG or TIFF), ``grid`` (reference grid
-in 2D and 3D) and ``animation``.
+in 2D and 3D), ``tracks`` (single-particle tracks) and ``animation``.
 ``picasso.render`` re-exports the full former surface, so
 ``render.<name>`` keeps working unchanged.
 
@@ -140,6 +140,11 @@ from .grid import (
     project_points,
     draw_grid,
     draw_grid_3d,
+)
+from .tracks import (
+    MAX_TRACKS_DEFAULT,
+    select_track_segments,
+    draw_tracks,
 )
 from .scene import (
     N_GROUP_COLORS,
@@ -286,6 +291,10 @@ __all__ = [
     "project_points",
     "draw_grid",
     "draw_grid_3d",
+    # tracks
+    "MAX_TRACKS_DEFAULT",
+    "select_track_segments",
+    "draw_tracks",
     # scene
     "N_GROUP_COLORS",
     "solid_to_lut",

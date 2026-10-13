@@ -259,6 +259,17 @@ the ``Render`` section of ``~/.picasso/settings.yaml`` (see
       # qimage shows the rendered viewport ((y_min, x_min), (y_max, x_max))
       qimage = render.draw_grid(qimage, viewport, grid, pixelsize=130)
 
+.. _render-tracks:
+
+Tracks
+~~~~~~
+
+Tick ``Tracks`` to draw the tracks of channels tracked with
+``Postprocess > Single-particle tracking > Track particles`` as lines
+through their localizations. ``Max. tracks drawn`` limits the number of tracks
+drawn in one view, and ``Color``, ``Line``, ``Width`` and ``Opacity`` set the
+look of the lines; see :ref:`render-spt-overlay`.
+
 .. _render-properties:
 
 Render properties

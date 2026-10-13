@@ -260,9 +260,15 @@ Top level
    * - ``Grid3D``
      - *(last used)*
      - Remembered last value: the grid of the 3D view, as ``Grid`` plus its planes and position. See :ref:`render-3d-grid`.
+   * - ``Tracks``
+     - *(last used)*
+     - Remembered last value: the maximum number of tracks drawn and the look of the lines of single-particle tracks (``Display Settings > Tracks``), not whether they are shown. See :ref:`render-spt-overlay`.
+   * - ``SPT``
+     - *(last used)*
+     - Remembered last values of the single-particle tracking dialogs: max. jump, max. gap, min. track length, frame time, MSD lags and fit points, localization error and the max. jump correction. See :ref:`render-spt`.
    * - ``Expanded sections``
      - all expanded, except *FRC in several ROIs* and the tools' *Appearance*
-     - Which sections of ``Display Settings``, ``3D Display Settings`` (the 3D window's), ``Info`` and ``Tools Settings`` are expanded (``true``) or collapsed (``false``), keyed by the dialog and the section title. Saved whenever a section is expanded or collapsed by clicking its header.
+     - Which sections of ``Display Settings``, ``3D Display Settings`` (the 3D window's), ``Info``, ``Tools Settings`` and ``Track analysis`` are expanded (``true``) or collapsed (``false``), keyed by the dialog and the section title. Saved whenever a section is expanded or collapsed by clicking its header.
    * - ``cpu_utilization``
      - ``0.5``
      - Fraction of CPU cores rendering's worker pool may use. See :ref:`render-cpu-usage`.

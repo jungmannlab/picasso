@@ -68,6 +68,7 @@ from .render_worker import (  # noqa: F401
 )
 from . import idle
 from . import render_link
+from . import render_spt
 from .grid_settings import GridGroupBox
 from .overlay_style import OverlayStyleWidget
 from .rotation import RotationWindow, source_key
@@ -9207,6 +9208,11 @@ class DisplaySettingsDialog(lib.Dialog):
         self.grid_box.changed.connect(self.update_scene)
         vbox.addWidget(self.grid_box)
 
+        # Tracks of single-particle tracking
+        self.tracks_box = render_spt.TracksGroupBox()
+        self.tracks_box.changed.connect(self.update_scene)
+        vbox.addWidget(self.tracks_box)
+
         # Render
         self.render_groupbox = lib.CollapsibleGroupBox(
             "Render properties (only single-channel data)"
@@ -10730,6 +10736,8 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         # linked windows
         self._link_crosshair = None
         self._link_interactive = False
+        # single-particle tracking: tracking, analysis and drawn tracks
+        self.spt = render_spt.SPTController(self)
 
     def _load_drift(self, info: list[dict]) -> pd.DataFrame | None:
         drift = None
@@ -12995,6 +13003,7 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             target, self._viewport_key()
         )
         target = self.draw_grid(target)
+        target = self.spt.draw_tracks(target)
         # overlays go on the visible crop, so they keep their corner
         # positions regardless of the render margin
         target = self.draw_scalebar(target)
@@ -13589,6 +13598,7 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
                 QtCore.Qt.AspectRatioMode.KeepAspectRatioByExpanding,
             )
             qimage = self.draw_grid(qimage)
+            qimage = self.spt.draw_tracks(qimage, channels=[i])
             qimage = self.draw_scalebar(qimage)
             qimage = self.draw_minimap(qimage)
             qimage = self.draw_legend(qimage)
@@ -16051,6 +16061,7 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             channels = [channel]
         if 0 in channels:  # render by property splits the first channel
             self.x_locs = None
+        self.spt.invalidate(channel)
         # linked windows sharing a changed channel update theirs
         self.window.link_channels_changed(
             [(self.locs[i], i) for i in channels]
@@ -16085,6 +16096,7 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         # reading them back here would write them out a second time,
         # leaving the windows with separate copies of shared channels
         self.index_blocks = [None] * self.n_channels
+        self.spt.invalidate()  # the track segments, rebuilt when drawn
         return True
 
     @check_pick
@@ -18888,6 +18900,15 @@ class Window(QtWidgets.QMainWindow):
         clusterer_action.triggered.connect(self.view.smlm_clusterer)
         test_cluster_action = clustering_menu.addAction("Test clustering...")
         test_cluster_action.triggered.connect(self.test_clusterer_dialog.show)
+        spt_menu = postprocess_menu.addMenu("Single-particle tracking")
+        track_action = spt_menu.addAction("Track particles...")
+        track_action.triggered.connect(lambda: self.view.spt.track())
+        analyze_tracks_action = spt_menu.addAction(
+            "Analyze tracks (MSD, jump distances)..."
+        )
+        analyze_tracks_action.triggered.connect(
+            lambda: self.view.spt.analyze()
+        )
 
         postprocess_menu.addSeparator()
         nn_action = postprocess_menu.addAction(
@@ -19042,6 +19063,9 @@ class Window(QtWidgets.QMainWindow):
         settings["Render"][
             "Grid3D"
         ] = self.window_rot.display_settings_dlg.grid_box.settings()
+        settings["Render"][
+            "Tracks"
+        ] = self.display_settings_dlg.tracks_box.settings()
         io.save_user_settings(settings)
         QtWidgets.QApplication.instance().closeAllWindows()
 
@@ -19235,6 +19259,7 @@ class Window(QtWidgets.QMainWindow):
             qimage = self.view.render_scene(cache=False, viewport=viewport)
             qimage = self.image_overlay_dialog.draw(qimage, viewport)
             qimage = self.view.draw_grid(qimage, viewport)
+            qimage = self.view.spt.draw_tracks(qimage, viewport)
             dpi = None
             if path.endswith(".pdf"):
                 dpi, ok = QtWidgets.QInputDialog.getInt(
@@ -19292,6 +19317,7 @@ class Window(QtWidgets.QMainWindow):
         qimage = self.view.render_scene(cache=False, **kwargs)
         qimage = self.image_overlay_dialog.draw(qimage, kwargs["viewport"])
         qimage = self.view.draw_grid(qimage, kwargs["viewport"])
+        qimage = self.view.spt.draw_tracks(qimage, kwargs["viewport"])
         dpi = None
         if path.endswith(".pdf"):
             dpi, ok = QtWidgets.QInputDialog.getInt(
@@ -19701,6 +19727,10 @@ class Window(QtWidgets.QMainWindow):
         )
         self.window_rot.display_settings_dlg.grid_box.load_settings(
             render_settings.get("Grid3D")
+        )
+        # the look of the tracks of single-particle tracking
+        self.display_settings_dlg.tracks_box.load_settings(
+            render_settings.get("Tracks")
         )
         self.apply_contrast_slider_setting()
 

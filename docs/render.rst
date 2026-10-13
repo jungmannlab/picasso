@@ -222,6 +222,13 @@ Topics
 
       RESI, G5M molecular mapping, clustering, nearest neighbor analysis.
 
+   .. grid-item-card:: :octicon:`pulse;1.5em;sd-mr-1` Single-particle tracking
+      :link: render/tracking
+      :link-type: doc
+
+      Linking localizations into tracks, displaying them, and MSD and jump
+      distance analysis.
+
    .. grid-item-card:: :octicon:`file;1.5em;sd-mr-1` File menu
       :link: render/menu-file
       :link-type: doc
@@ -262,6 +269,7 @@ Topics
    render/drift
    render/3d
    render/analysis
+   render/tracking
    render/menu-file
    render/menu-view
    render/menu-tools

@@ -537,6 +537,102 @@ Link localizations in consecutive frames.
      - Maximum dark time between localizations to still consider them the
        same binding event.
 
+.. _cmd-track:
+
+track
+-----
+Link localizations into tracks by nearest-neighbor tracking (single-particle
+tracking, see :ref:`render-spt-track`). Takes one or more hdf5 localization
+files (unix style path patterns). Each is saved as
+``<file name>_tracks.hdf5``, with the track id of every localization in the
+``group`` column; a previous ``group`` column is kept as ``group_input``.
+Linked localizations (see `link`_) are skipped.
+
+.. code-block:: bash
+
+   picasso track files [-d max-jump] [-g max-gap] [-m min-length] [-t frame-time] [--pixelsize pixelsize]
+
+.. list-table::
+   :header-rows: 1
+   :widths: 25 15 60
+
+   * - Option
+     - Default
+     - Description
+   * - ``-d``, ``--max-jump`` (float)
+     - ``500``
+     - Maximum distance between consecutive localizations of a track (nm).
+   * - ``-g``, ``--max-gap`` (int)
+     - ``1``
+     - Maximum number of frames a track may skip.
+   * - ``-m``, ``--min-length`` (int)
+     - ``2``
+     - Minimum number of localizations of a track.
+   * - ``-t``, ``--frame-time`` (float)
+     - none
+     - Time between two consecutive frames (ms), stored in the metadata for
+       ``picasso diffusion``.
+   * - ``--pixelsize`` (float)
+     - from the metadata
+     - Camera pixel size (nm).
+
+.. _cmd-diffusion:
+
+diffusion
+---------
+Diffusion analysis of tracked localizations (see `track`_ and
+:ref:`render-spt-analysis`): the mean squared displacement, the fits of the
+jump distances and a summary of every track. For each file, saves
+``<file name>_track_stats.csv``, ``<file name>_msd.csv`` and
+``<file name>_diffusion.yaml``, and prints the diffusion coefficients.
+
+.. code-block:: bash
+
+   picasso diffusion files [-t frame-time] [-l max-lag] [-n n-fit] [-k populations] [-s sigma] [--truncate] [--plot]
+
+For example, fits of one and two populations with the localization error set
+to the median localization precision, saving the plots:
+
+.. code-block:: bash
+
+   picasso diffusion movie_locs_tracks.hdf5 -k 1 2 -s lp --plot
+
+.. list-table::
+   :header-rows: 1
+   :widths: 25 15 60
+
+   * - Option
+     - Default
+     - Description
+   * - ``-t``, ``--frame-time`` (float)
+     - from the metadata
+     - Time between two consecutive frames (ms).
+   * - ``-l``, ``--max-lag`` (int)
+     - ``10``
+     - Largest time lag of the MSD (frames).
+   * - ``-n``, ``--n-fit`` (int)
+     - ``4``
+     - Number of time lags fitted in the MSD analysis.
+   * - ``-k``, ``--populations`` (int)
+     - ``1 2 3``
+     - Number(s) of diffusing populations fitted to the jump distances.
+   * - ``-s``, ``--sigma`` (float or ``lp``)
+     - ``0``
+     - Localization error for the jump distance fit (nm), or ``lp`` for the
+       median localization precision. 0 gives apparent diffusion
+       coefficients.
+   * - ``--truncate``
+     - off
+     - Correct the jump distance fit for the maximum jump distance of the
+       tracking.
+   * - ``--plot``
+     - off
+     - Save the plots of the MSD, the jump distances and the track lengths
+       as ``.png`` files.
+   * - ``--pixelsize`` (float)
+     - from the metadata
+     - Camera pixel size (nm).
+
 clusterfilter
 -------------
 Filter localizations by properties of their clusters.

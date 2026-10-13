@@ -490,6 +490,26 @@ Test clustering
 Checks different clustering parameters on a single pick, see
 :ref:`render-test-clusterer`.
 
+.. _render-menu-spt:
+
+Single-particle tracking
+------------------------
+
+The ``Single-particle tracking`` submenu links localizations into tracks and
+analyzes them, see :doc:`tracking`.
+
+Track particles
+~~~~~~~~~~~~~~~
+
+Links the localizations of consecutive frames into tracks by nearest-neighbor
+tracking, see :ref:`render-spt-track`.
+
+Analyze tracks (MSD, jump distances)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Measures diffusion coefficients from the mean squared displacement and the
+jump distances of a tracked channel, see :ref:`render-spt-analysis`.
+
 Calculate nearest neighbor distances
 ------------------------------------
 

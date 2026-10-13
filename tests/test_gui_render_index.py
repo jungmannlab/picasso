@@ -23,6 +23,7 @@ import pandas as pd
 import pytest
 
 from picasso.gui import render as gui_render
+from picasso.gui import render_spt
 
 WIDTH = HEIGHT = 256.0
 
@@ -78,6 +79,7 @@ class _ViewStub:
         self.render_index = [None]
         self._move_channels = ()  # no channel dragged by the Move tool
         self.window = _WindowStub()
+        self.spt = render_spt.SPTController(self)  # caches track segments
 
 
 def _brute_force(locs: pd.DataFrame, viewport) -> pd.DataFrame:

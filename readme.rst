@@ -174,6 +174,9 @@ Many of the functionalities provided by Picasso were published independently, pl
    * - Stitching tiles (global tile positions, inspired by)
      - Preibisch et al., Bioinformatics, 2009
      - `10.1093/bioinformatics/btp184 <https://doi.org/10.1093/bioinformatics/btp184>`__
+   * - Single-particle tracking (nearest-neighbor tracking, jump distance and MSD analysis)
+     - Martens et al., Front. Bioinform., 2021
+     - `10.3389/fbinf.2021.817254 <https://doi.org/10.3389/fbinf.2021.817254>`__
 
 .. SYNC-END: citing
 
