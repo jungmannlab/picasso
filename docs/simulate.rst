@@ -80,7 +80,10 @@ Structures can also be imported:
 - When a structure has been previously designed with :doc:`design`, it can be
   imported with ``File > Import structure from Picasso: Design...``.
 - Docking strand positions of a .yaml or .hdf5 file can be used with
-  ``File > Import handles...``.
+  ``File > Import handles...``: the structure of a Simulate or Design .yaml
+  file, or the cluster centers of a clusterer .hdf5 file (keeping the
+  orientation they have in Render). The imported structure is placed once,
+  in the center of the field of view.
 
 A probability for the presence of a handle can be set with ``Incorporation``.
 

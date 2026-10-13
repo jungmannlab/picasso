@@ -1974,17 +1974,27 @@ class Window(QtWidgets.QMainWindow):
                     ex = np.ones_like(x)
 
                 try:
-                    z = self.readLine(info[0]["Structure.Structure3D"])
+                    z = self.readLine(
+                        info[0]["Structure.Structure3D"],
+                        textmode=False,
+                    )
                 except Exception as e:
                     print(e)
                     z = np.zeros_like(x)
 
                 minlen = min(len(x), len(y), len(ex), len(z))
 
-                x = x[0:minlen]
-                y = y[0:minlen]
+                x = np.asarray(x[0:minlen])
+                y = np.asarray(y[0:minlen])
                 ex = ex[0:minlen]
                 z = z[0:minlen]
+
+                # The structure is stored relative to its own origin (nm,
+                # y up as in Simulate); align it in the center of window.
+                center = self.camerasizeEdit.value() / 2
+                center *= self.pixelsizeEdit.value()
+                x = x - np.mean(x) + center
+                y = y - np.mean(y) + center
 
             else:
 
@@ -1996,7 +2006,10 @@ class Window(QtWidgets.QMainWindow):
                 x = clusters["com_x"]
                 y = clusters["com_y"]
 
-                # Align in the center of window:
+                # Align in the center of window. Simulate's coordinates
+                # point y up (simulate.convertMovie flips the frame), the
+                # clusters' y points down as in Render, so y is negated to
+                # keep the structure's orientation in the simulated movie.
                 x = x - np.mean(x) + imagesize / 2
                 y = -(y - np.mean(y)) + imagesize / 2
 
@@ -2017,7 +2030,6 @@ class Window(QtWidgets.QMainWindow):
             self.handles["z"] = z
             self.handles["ex"] = ex
 
-            # TODO: Check axis orientation
             exchangecolors = list(set(self.handles["ex"]))
             exchangecolorsList = ",".join(map(str, exchangecolors))
             # UPDATE THE EXCHANGE COLORS IN BUTTON TO BE simulated
