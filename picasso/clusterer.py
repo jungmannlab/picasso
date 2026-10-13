@@ -33,6 +33,15 @@ from sklearn.cluster import DBSCAN, HDBSCAN
 
 from . import lib, masking, __version__
 
+__all__ = [
+    "cluster",
+    "dbscan",
+    "hdbscan",
+    "find_cluster_centers",
+    "cluster_areas",
+    "test_subclustering",
+]
+
 
 def _frame_analysis(frame: pd.SeriesGroupBy, n_frames: int) -> int:
     """Verify which clusters pass basic frame analysis. Reject clusters

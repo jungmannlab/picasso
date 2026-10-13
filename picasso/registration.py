@@ -60,6 +60,11 @@ from . import wavelet as wavelets
 # transforms throughout this module
 from . import transforms as tform
 
+__all__ = [
+    "calibrate_channel_registration_from_beads",
+    "calibrate_channel_registration_from_signal",
+]
+
 #: ``model`` of the standalone channel-registration calibration, so it can be
 #: told apart from a spline PSF calibration that also carries channel
 #: transforms.

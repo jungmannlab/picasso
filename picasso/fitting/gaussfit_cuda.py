@@ -75,6 +75,8 @@ from picasso.fitting.lmfit_cuda import (
     make_lm_driver,
 )
 
+__all__ = ["fit_spots", "fit_spots_multichannel"]
+
 
 def _make_accumulate_spherical(ftype):
     """Isotropic Gaussian, ``[photons, x, y, s, bg]`` (Gpufit's

@@ -79,6 +79,58 @@ from .fitting import (
     splinefit_cuda,
 )
 
+__all__ = [
+    "FIT_METHODS",
+    "IDENTIFY_METHODS",
+    # one channel
+    "localize",
+    "localize_frames",
+    "identify",
+    "identify_in_frame",
+    "identify_by_frame_number",
+    "clip_rois",
+    "add_roi_id",
+    "get_spots",
+    "fit",
+    "fit_spots_gauss",
+    "gauss_schedule",
+    "locs_from_fits_gauss",
+    "fit_spots_spline",
+    "fit_spots_splinefit",
+    "locs_from_fits_spline",
+    "reduced_chi_square",
+    "picks_to_identifications",
+    "locs_to_identifications",
+    # several channels or regions
+    "SummedChannelsMovie",
+    "unregistered_sum_transforms",
+    "identify_multichannel_sum",
+    "fit_gauss_multichannel",
+    "fit_spots_gauss_multichannel",
+    "locs_from_fits_gauss_multichannel",
+    "fit_gauss_split_fov",
+    "fit_spline_multichannel",
+    "fit_spline_multichannel_ratiometric",
+    "channel_roi_geometry",
+    "channel_roi_residuals",
+    "fit_spline_split_fov",
+    "fit_independent",
+    "fit_split_fov_independent",
+    "split_locs_by_region",
+    "locs_to_region_coordinates",
+    # lateral corrections
+    "calibrate_lateral_transform",
+    "fit_lateral_transform",
+    "plot_lateral_calibration",
+    # quality checks and the summary database (Picasso: Server)
+    "check_nena",
+    "check_kinetics",
+    "check_drift",
+    "get_file_summary",
+    "db_filename",
+    "add_file_to_db",
+]
+
 # Check for CUDA availability of the *fitting* backends. Otherwise, CPU is
 # used. The CRLB kernels have their own probe in picasso.fitting.precision.
 try:

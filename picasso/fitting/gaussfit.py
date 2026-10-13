@@ -67,6 +67,20 @@ from picasso.fitting.splinefit import (  # noqa: F401  (re-exported)
     resolve_variance,
 )
 
+__all__ = [
+    "SPHERICAL",
+    "ELLIPTIC",
+    "ROTATED",
+    "MULTI_KIND_SHARED",
+    "MULTI_KIND_DECOUPLED",
+    "n_parameters",
+    "n_parameters_multichannel",
+    "fit_spots",
+    "fit_spots_async",
+    "fit_spots_multichannel",
+    "fit_spots_multichannel_async",
+]
+
 # Model identifiers. Defined here and imported by ``gaussfit_cuda`` so the two
 # devices cannot disagree about what model 1 is, exactly as ``lmfit_cuda``
 # imports its constants from ``splinefit``.

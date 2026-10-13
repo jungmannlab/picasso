@@ -11,6 +11,7 @@ rotation helpers.
 
 from __future__ import annotations
 
+import functools
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -367,6 +368,7 @@ def adjust_viewport_decorator(func):
         Wrapped function with automatic viewport adjustment.
     """
 
+    @functools.wraps(func)
     def wrapper(image, viewport, *args, **kwargs):
         adjusted_viewport = adjust_viewport_to_aspect_ratio(image, viewport)
         return func(image, adjusted_viewport, *args, **kwargs)

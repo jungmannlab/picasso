@@ -23,6 +23,8 @@ from tqdm import tqdm
 
 from . import lib, render, __version__
 
+__all__ = ["average", "AveragePool"]
+
 
 def compute_xcorr(
     CF_image_avg: np.ndarray, image: lib.FloatArray2D

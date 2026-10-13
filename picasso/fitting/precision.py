@@ -79,6 +79,12 @@ from picasso import lib
 # transforms in this package
 from picasso import transforms as _tf
 
+__all__ = [
+    "localization_precision",
+    "sigma_uncertainty_lsq",
+    "sigma_uncertainty_mle",
+]
+
 # Check for CUDA availability for the spline CRLB kernels. Otherwise, CPU is
 # used. ``picasso.localize`` keeps its own probe for the *fitting* path.
 try:

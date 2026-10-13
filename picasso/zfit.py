@@ -29,6 +29,13 @@ from scipy.optimize import minimize_scalar
 from . import io, lib, __version__
 from .fitting import precision
 
+__all__ = [
+    "calibrate_z",
+    "zfit",
+    "axial_localization_precision",
+    "axial_localization_precision_astig",
+]
+
 plt.style.use("ggplot")
 
 

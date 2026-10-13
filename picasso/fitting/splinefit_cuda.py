@@ -107,6 +107,8 @@ from picasso.fitting.lmfit_cuda import (
     make_lm_driver,
 )
 
+__all__ = ["n_parameters", "fit_spots"]
+
 # Parameter counts per model. The lateral and axial models are fixed; the
 # photon-decoupled model has ``3 + 2 * n_channels``.
 _N_PARAMS_2D = 4

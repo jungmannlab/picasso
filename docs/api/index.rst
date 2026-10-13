@@ -14,6 +14,13 @@ you can use in your own scripts and notebooks once Picasso is installed with
 
 The :doc:`/notebooks` walk through complete analyses.
 
+.. note::
+
+   These pages do not list every function in the package, only those that
+   are useful in your own scripts. Helpers that serve the Picasso windows or
+   other modules internally are left out. Each module lists its documented
+   functions and classes in its ``__all__``.
+
 Input and output
 ----------------
 
@@ -22,7 +29,6 @@ Input and output
    :nosignatures:
 
    picasso.io
-   picasso.spatial_index
 
 Localization
 ------------
@@ -32,9 +38,6 @@ Localization
    :nosignatures:
 
    picasso.localize
-   picasso.gausslq
-   picasso.gaussmle
-   picasso.avgroi
    picasso.zfit
    picasso.spline
    picasso.wavelet
@@ -72,19 +75,17 @@ Rendering
 .. autosummary::
    :toctree: generated
    :nosignatures:
-   :recursive:
 
    picasso.render
 
-Simulation, design and analysis
--------------------------------
+Simulation and analysis
+-----------------------
 
 .. autosummary::
    :toctree: generated
    :nosignatures:
 
    picasso.simulate
-   picasso.design
    picasso.average
    picasso.spinna
    picasso.nanotron
@@ -97,5 +98,4 @@ Utilities
    :nosignatures:
 
    picasso.lib
-   picasso.notifications
    picasso.plugins

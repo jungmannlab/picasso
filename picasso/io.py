@@ -57,6 +57,55 @@ try:
 except ImportError:
     liffile = None
 
+__all__ = [
+    # localizations
+    "load_locs",
+    "save_locs",
+    "load_info",
+    "save_info",
+    "save_datasets",
+    "load_clusters",
+    # movies
+    "load_movie",
+    "load_movie_all",
+    "load_tif_concatenated",
+    "find_tif_movies",
+    "save_raw",
+    "AbstractPicassoMovie",
+    "ConcatenatedTiffMovie",
+    # calibrations
+    "load_any_calibration",
+    "save_any_calibration",
+    "load_calibration",
+    "save_calibration",
+    "load_spline_calibration",
+    "save_spline_calibration",
+    "load_camera_calibration",
+    "save_camera_calibration",
+    # identifications, picks, drift and masks
+    "load_identifications",
+    "save_identifications",
+    "load_picks",
+    "load_drift",
+    "save_drift",
+    "load_mask",
+    # other software
+    "import_ts",
+    "export_thunderstorm",
+    "import_smap",
+    "export_smap",
+    "import_pyme",
+    "split_pyme_channels",
+    "export_pyme",
+    "export_pyme_multi",
+    "export_txt_imagej",
+    "export_txt_nis",
+    "export_xyz_chimera",
+    "export_3d_visp",
+    # errors
+    "NoMetadataFileError",
+]
+
 
 # MicroManager OME-TIFF files make tifffile log a couple of benign
 # messages that are unused by Picasso (frames and the metadata we read
