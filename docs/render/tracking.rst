@@ -3,6 +3,12 @@
 Single-Particle Tracking
 ========================
 
+.. note::
+
+   Single-particle tracking is an experimental feature. Bug reports and
+   suggestions for improvement are much appreciated on our `GitHub issues
+   page <https://github.com/jungmannlab/picasso/issues>`__.
+
 Single-particle tracking (SPT) follows individual molecules over time to
 measure how they move. Picasso provides a basic SPT workflow, following
 Module 7 of `Martens, Turkowyd and Endesfelder, Frontiers in Bioinformatics,
