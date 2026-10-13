@@ -1961,6 +1961,33 @@ class TestConcatenatedTiffMovies:
         finally:
             movie.close()
 
+    def test_negative_indices_count_from_the_end(self, tmp_path):
+        rng = np.random.default_rng(33)
+        parts = [
+            rng.integers(0, 60000, size=(n, 8, 8), dtype="<u2") for n in (3, 2)
+        ]
+        paths = [
+            self._write_movie(tmp_path / f"run_{i}", "movie.tif", part)
+            for i, part in enumerate(parts)
+        ]
+        expected = np.concatenate(parts)
+
+        movie, _ = io.load_tif_concatenated(paths)
+        try:
+            np.testing.assert_array_equal(movie[-1], expected[-1])
+            # -3 is the last frame of the first file.
+            np.testing.assert_array_equal(movie[-3], expected[-3])
+            np.testing.assert_array_equal(movie[-5], expected[0])
+            np.testing.assert_array_equal(
+                movie[-2, 1:4, 2:6], expected[-2, 1:4, 2:6]
+            )
+            with pytest.raises(IndexError, match="out of range"):
+                movie[-6]
+            with pytest.raises(IndexError, match="out of range"):
+                movie[5]
+        finally:
+            movie.close()
+
     def test_order_follows_the_given_list(self, tmp_path):
         rng = np.random.default_rng(31)
         parts = [
@@ -2099,6 +2126,38 @@ class TestConcatenatedTiffMovies:
             "acq.ome.tif",
             "other.tif",
         ]
+
+
+class TestSTKMultiMovieIndexing:
+    """``tifffile`` cannot write STK files, so the per-file
+    ``STKMovie`` maps are stood in for by in-memory arrays; only the
+    dispatch across files is under test."""
+
+    def _movie(self, parts):
+        movie = io.STKMultiMovie.__new__(io.STKMultiMovie)
+        movie.maps = parts
+        movie.n_maps = len(parts)
+        movie.n_frames = sum(len(_) for _ in parts)
+        movie.cum_n_frames = np.insert(
+            np.cumsum([len(_) for _ in parts]), 0, 0
+        )
+        return movie
+
+    def test_negative_indices_count_from_the_end(self):
+        rng = np.random.default_rng(34)
+        parts = [
+            rng.integers(0, 60000, size=(n, 4, 4), dtype="<u2") for n in (2, 3)
+        ]
+        expected = np.concatenate(parts)
+        movie = self._movie(parts)
+
+        for index in range(-5, 5):
+            np.testing.assert_array_equal(
+                movie.get_frame(index), expected[index]
+            )
+        for index in (-6, 5):
+            with pytest.raises(IndexError, match="out of range"):
+                movie.get_frame(index)
 
 
 # ---------------------------------------------------------------------------

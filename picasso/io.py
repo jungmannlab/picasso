@@ -4008,11 +4008,33 @@ class STKMultiMovie(AbstractPicassoMovie):
         return self._dtype
 
     def get_frame(self, index: int) -> lib.IntArray2D:
+        """Load one frame from the STK file that holds it.
+
+        Parameters
+        ----------
+        index : int
+            Frame index in the combined movie; negative values count
+            from the end.
+
+        Returns
+        -------
+        frame : lib.IntArray2D
+            ``(height, width)`` raw camera counts.
+
+        Raises
+        ------
+        IndexError
+            If ``index`` is out of range.
+        """
+        if index < 0:
+            index += self.n_frames
         for i in range(self.n_maps):
             if self.cum_n_frames[i] <= index < self.cum_n_frames[i + 1]:
                 break
         else:
-            raise IndexError
+            raise IndexError(
+                f"Frame {index} out of range for {self.n_frames} frames."
+            )
         return self.maps[i][index - self.cum_n_frames[i]]
 
     def info(self) -> dict:
@@ -4172,12 +4194,33 @@ class TiffMultiMap(AbstractPicassoMovie):
         return self._dtype
 
     def get_frame(self, index: int) -> lib.IntArray2D:
-        # TODO deal with negative numbers
+        """Load one frame from the file that holds it.
+
+        Parameters
+        ----------
+        index : int
+            Frame index in the combined movie; negative values count
+            from the end.
+
+        Returns
+        -------
+        frame : lib.IntArray2D
+            ``(height, width)`` raw camera counts.
+
+        Raises
+        ------
+        IndexError
+            If ``index`` is out of range.
+        """
+        if index < 0:
+            index += self.n_frames
         for i in range(self.n_maps):
             if self.cum_n_frames[i] <= index < self.cum_n_frames[i + 1]:
                 break
         else:
-            raise IndexError
+            raise IndexError(
+                f"Frame {index} out of range for {self.n_frames} frames."
+            )
         return self.maps[i][index - self.cum_n_frames[i]]
 
     def info(self):
