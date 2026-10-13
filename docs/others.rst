@@ -248,6 +248,9 @@ Top level
    * - ``contrast_slider``
      - ``False``
      - Show the contrast slider at the bottom of the main window, below the image. See :ref:`Contrast slider <render-contrast-slider>`.
+   * - ``Keep non-overlapping after alignment``
+     - ``True``
+     - Keep all localizations after ``Postprocess > Align channels``. ``False`` removes the localizations outside the region where all aligned channels overlap. See :ref:`render-align-non-overlapping`.
    * - ``Colorbar format``
      - ``.png``
      - Format of the exported colorbar/LUT image next to a "render by property" export - ``.png`` or ``.svg``. See :ref:`render-colorbar-format`.

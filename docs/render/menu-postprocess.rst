@@ -211,11 +211,28 @@ selected, the alignment will be via the center of mass of the picks;
 otherwise, redundant cross-correlation (RCC, see :ref:`render-rcc`) will be
 used (always 2D only).
 
+.. _render-align-non-overlapping:
+
+.. rubric:: Localizations outside the overlap
+
+Large shifts can move parts of a channel to where the other channels have no
+localizations By default, all localizations are kept. To remove the localizations
+outside the region where all aligned channels overlap, set ``Keep
+non-overlapping after alignment`` to ``False`` in the ``Render`` section of
+the :ref:`user settings <user-settings-file>`. The overlap is the
+intersection of the rectangles spanned by the x and y coordinates of each
+channel's localizations; z is not considered. If the aligned channels do not
+overlap at all, all localizations are kept and a warning is shown.
+
 .. dropdown:: Python
    :icon: code
    :class-container: api-example
 
-   The circle size of ``align_from_picked`` is the diameter.
+   The circle size of ``align_from_picked`` is the diameter. Pass
+   ``keep_non_overlapping=False`` to remove the localizations outside the
+   overlap of the aligned channels; ``remove_non_overlapping_locs`` does the
+   same for channels aligned otherwise, and ``overlap_region`` returns the
+   overlap.
 
    .. code-block:: python
 
@@ -223,6 +240,11 @@ used (always 2D only).
       aligned = postprocess.align_from_picked(
           [locs_ch1, locs_ch2], [info_ch1, info_ch2],
           picks=picks, pick_shape="Circle", pick_size=2 * radius,
+      )
+      # remove the localizations outside the overlap of the channels
+      aligned = postprocess.align_rcc(
+          [locs_ch1, locs_ch2], [info_ch1, info_ch2],
+          keep_non_overlapping=False,
       )
 
 

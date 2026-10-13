@@ -17,7 +17,6 @@ import pytest
 
 from picasso import clusterer, io, lib, postprocess
 
-
 # Reused parameters
 PICK_SIZE = 1.5  # camera pixels
 
@@ -1880,6 +1879,102 @@ class TestAlign:
                 pick_shape="Hexagon",
                 pick_size=1.0,
             )
+
+    @staticmethod
+    def _with_stray_locs(locs: pd.DataFrame, x: float) -> pd.DataFrame:
+        """``locs`` plus three localizations at ``x``, beyond the x range
+        of the test data (about 5 to 26 camera pixels)."""
+        stray = locs.iloc[:3].copy()
+        stray["x"] = x
+        return pd.concat([locs, stray], ignore_index=True)
+
+    @pytest.mark.parametrize("keep", [True, False])
+    def test_align_rcc_non_overlapping_locs(self, locs_copy, info, keep):
+        """Localizations of one channel that lie beyond the other
+        channel after alignment are kept by default and removed with
+        keep_non_overlapping=False."""
+        a = locs_copy
+        b = a.copy()
+        b["x"] += 2.0
+        b = self._with_stray_locs(b, 30.5)
+        aligned = postprocess.align_rcc(
+            [a, b], [info, info], keep_non_overlapping=keep
+        )
+        if keep:
+            assert [len(_) for _ in aligned] == [len(a), len(b)]
+        else:
+            assert len(aligned[0]) <= len(a)
+            assert len(aligned[1]) <= len(b) - 3
+            assert aligned[1]["x"].max() <= aligned[0]["x"].max()
+            assert aligned[1].index.equals(pd.RangeIndex(len(aligned[1])))
+
+    @pytest.mark.parametrize("keep", [True, False])
+    def test_align_from_picked_non_overlapping_locs(
+        self, locs_copy, info, origami_picks, keep
+    ):
+        a = locs_copy
+        b = a.copy()
+        b["x"] += 0.1
+        b = self._with_stray_locs(b, 29.0)
+        n_a, n_b = len(a), len(b)
+        aligned = postprocess.align_from_picked(
+            [a, b],
+            [info, info],
+            picks=origami_picks,
+            pick_shape="Circle",
+            pick_size=PICK_SIZE,
+            keep_non_overlapping=keep,
+        )
+        if keep:
+            assert [len(_) for _ in aligned] == [n_a, n_b]
+        else:
+            assert len(aligned[1]) <= n_b - 3
+            assert aligned[1]["x"].max() <= aligned[0]["x"].max()
+
+    def test_align_non_overlapping_locs(self, locs_copy, info):
+        a = locs_copy
+        b = self._with_stray_locs(a.copy(), 30.5)
+        n_b = len(b)
+        aligned = postprocess.align(
+            [a, b], [info, info], keep_non_overlapping=False
+        )
+        assert len(aligned[1]) <= n_b - 3
+
+
+class TestOverlap:
+    @staticmethod
+    def _locs(x_min: float, x_max: float, y_min: float, y_max: float):
+        return pd.DataFrame(
+            {"x": [x_min, x_max, x_min], "y": [y_min, y_max, y_max]}
+        )
+
+    def test_overlap_region_is_the_intersection(self):
+        locs = [self._locs(0, 10, 0, 8), self._locs(5, 15, 2, 20)]
+        assert postprocess.overlap_region(locs) == ((5, 10), (2, 8))
+
+    def test_overlap_region_none_if_disjoint(self):
+        locs = [self._locs(0, 4, 0, 4), self._locs(5, 9, 0, 4)]
+        assert postprocess.overlap_region(locs) is None
+
+    def test_overlap_region_none_if_a_channel_is_empty(self):
+        locs = [self._locs(0, 4, 0, 4), self._locs(0, 4, 0, 4).iloc[:0]]
+        assert postprocess.overlap_region(locs) is None
+
+    def test_remove_non_overlapping_locs(self):
+        a = pd.DataFrame({"x": [0.0, 5.0, 10.0], "y": [0.0, 5.0, 10.0]})
+        b = pd.DataFrame({"x": [4.0, 6.0, 14.0], "y": [4.0, 6.0, 14.0]})
+        out = postprocess.remove_non_overlapping_locs([a, b])
+        # overlap is x, y in [4, 10] (borders included)
+        assert out[0]["x"].tolist() == [5.0, 10.0]
+        assert out[1]["x"].tolist() == [4.0, 6.0]
+        assert out[0].index.tolist() == [0, 1]
+        # the input is not modified
+        assert len(a) == 3 and len(b) == 3
+
+    def test_remove_non_overlapping_locs_raises_if_disjoint(self):
+        locs = [self._locs(0, 4, 0, 4), self._locs(5, 9, 0, 4)]
+        with pytest.raises(ValueError):
+            postprocess.remove_non_overlapping_locs(locs)
 
 
 # ---------------------------------------------------------------------------

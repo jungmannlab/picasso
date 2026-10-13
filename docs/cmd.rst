@@ -861,12 +861,16 @@ Compute the dark time for grouped localizations.
 
 align
 -----
-Align one localization file to another via RCC (two or more files). Pass
-``-d/--display`` to display the correlation.
+Align one localization file to another via RCC, 2D only (two or more files). Pass
+``-d/--display`` to display the correlation. All localizations are kept by
+default; pass ``-r/--remove-non-overlapping`` to remove the localizations
+outside the region where all aligned files overlap (see
+:ref:`render-align-non-overlapping`).
 
 .. code-block:: bash
 
    picasso align file1 file2 [...]
+   picasso align file1 file2 --remove-non-overlapping
 
 groupprops
 ----------

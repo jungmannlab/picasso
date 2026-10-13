@@ -129,6 +129,9 @@ CHANNEL_COLOR_CHARS = 9
 # key (in the Render section of the user settings) of the colors given
 # to newly loaded channels, in order
 CHANNEL_COLORS_KEY = "Channel colors"
+# key (in the Render section of the user settings) of whether Align
+# channels keeps the localizations outside the overlap of the channels
+KEEP_NON_OVERLAPPING_KEY = "Keep non-overlapping after alignment"
 POLYGON_POINTER_SIZE = 16  # must be even
 # shortest drag (display pixels, in x and y) that still yields a box
 # pick, so that a stray click does not create one of zero area
@@ -200,6 +203,33 @@ def _gradient_pixmap(
         QtGui.QImage.Format.Format_RGBA8888,
     )
     return QtGui.QPixmap.fromImage(image.copy())
+
+
+def keep_non_overlapping_setting() -> bool:
+    """Whether Align channels keeps the localizations that lie outside
+    the region where all aligned channels overlap.
+
+    Reads ``Keep non-overlapping after alignment`` from the ``Render``
+    section of the user settings; a missing key is written with the
+    default (True, all localizations are kept), so that it is visible
+    in the file, unless the file on disk could not be read.
+
+    Returns
+    -------
+    keep : bool
+        True if all localizations are kept after alignment.
+    """
+    settings = io.load_user_settings()
+    render_settings = settings["Render"]
+    if not isinstance(render_settings, dict):
+        return True
+    value = render_settings.get(KEEP_NON_OVERLAPPING_KEY)
+    if isinstance(value, bool):
+        return value
+    if value is None and not io.settings_file_is_broken():
+        render_settings[KEEP_NON_OVERLAPPING_KEY] = True
+        io.save_user_settings(settings)
+    return True
 
 
 def check_pick(f: Callable) -> Callable:
@@ -11599,6 +11629,16 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
                 return postprocess.align_rcc(locs, infos)
 
         self.locs = lib.run_with_status(align, "Aligning channels...", self)
+        if not keep_non_overlapping_setting():
+            try:
+                self.locs = postprocess.remove_non_overlapping_locs(self.locs)
+            except ValueError:
+                QtWidgets.QMessageBox.warning(
+                    self,
+                    "Align channels",
+                    "The aligned channels do not overlap, so all"
+                    " localizations were kept.",
+                )
         self.update_scene(resample_locs=True)
 
     @check_pick
@@ -19733,6 +19773,8 @@ class Window(QtWidgets.QMainWindow):
             render_settings.get("Tracks")
         )
         self.apply_contrast_slider_setting()
+        # written to the file with its default if missing
+        keep_non_overlapping_setting()
 
     def open_apply_dialog(self) -> None:
         """Load expression and apply it to locs."""

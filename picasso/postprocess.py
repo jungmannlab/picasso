@@ -4974,6 +4974,7 @@ def align(
     *,
     apply_shifts: bool = True,
     return_shifts: bool = False,
+    keep_non_overlapping: bool = True,
 ) -> pd.DataFrame:
     """Align localizations from multiple channels (one per each element
     in `locs`) by calculating the shifts between the rendered images
@@ -4998,6 +4999,11 @@ def align(
         localizations without applying the shifts. Default is True.
     return_shifts : bool, optional
         If True, also returns the calculated shifts for each channel.
+    keep_non_overlapping : bool, optional
+        If False, localizations outside the region where all aligned
+        channels overlap are removed, see
+        ``remove_non_overlapping_locs``. Ignored if ``apply_shifts`` is
+        False. Default is True (all localizations are kept).
 
     Returns
     -------
@@ -5007,6 +5013,12 @@ def align(
     shifts : tuple
         ``(shift_x, shift_y)`` per channel, in camera pixels. Returned only
         if ``return_shifts`` is True.
+
+    Raises
+    ------
+    ValueError
+        If ``keep_non_overlapping`` is False and the aligned channels
+        do not overlap.
     """
     images = []
     disp_px_size = 100  # nm
@@ -5049,6 +5061,8 @@ def align(
         for locs_, dx, dy in zip(locs, shift_x, shift_y):
             locs_["y"] -= dy
             locs_["x"] -= dx
+        if not keep_non_overlapping:
+            locs = remove_non_overlapping_locs(locs)
     if return_shifts:
         shifts = (shift_x, shift_y)
         return locs, shifts
@@ -5061,6 +5075,8 @@ def align_rcc(
     infos: list[list[dict]],
     display: bool = False,
     return_shifts: bool = False,
+    *,
+    keep_non_overlapping: bool = True,
 ) -> pd.DataFrame:
     """Align localizations from multiple channels (one per each element
     in `locs`) by calculating the shifts between the rendered images
@@ -5078,6 +5094,11 @@ def align_rcc(
     return_shifts : bool, optional
         If True, also returns the calculated shifts for each channel.
         Default is False.
+    keep_non_overlapping : bool, optional
+        If False, localizations outside the region where all aligned
+        channels overlap are removed, see
+        ``remove_non_overlapping_locs``. Default is True (all
+        localizations are kept).
 
     Returns
     -------
@@ -5087,6 +5108,12 @@ def align_rcc(
     shifts : tuple
         ``(shift_x, shift_y)`` per channel, in camera pixels. Returned only
         if ``return_shifts`` is True.
+
+    Raises
+    ------
+    ValueError
+        If ``keep_non_overlapping`` is False and the aligned channels
+        do not overlap.
     """
     locs = deepcopy(locs)
     max_iterations = 5
@@ -5144,6 +5171,8 @@ def align_rcc(
         plt.legend(loc="best")
         fig1.show()
 
+    if not keep_non_overlapping:
+        locs = remove_non_overlapping_locs(locs)
     if return_shifts:
         shifts = list(zip(shift_x, shift_y))
         if len(shift) == 3:
@@ -5164,6 +5193,7 @@ def align_from_picked(
     pick_size: float | None = None,
     return_shifts: bool = False,
     index_blocks: list[tuple | None] | None = None,
+    keep_non_overlapping: bool = True,
 ):
     """Align picked localizations from multiple channels using picked
     localizations.
@@ -5195,6 +5225,11 @@ def align_from_picked(
         for that channel. Used to skip re-indexing inside circular
         ``picked_locs``. Ignored for non-circular pick shapes. Default
         is None (all channels recompute on demand).
+    keep_non_overlapping : bool, optional
+        If False, localizations outside the region where all aligned
+        channels overlap are removed, see
+        ``remove_non_overlapping_locs``. Default is True (all
+        localizations are kept).
 
     Returns
     -------
@@ -5206,6 +5241,12 @@ def align_from_picked(
         List of (dx, dy) shifts applied to each localization dataset in
         `all_locs`, calculated as the average shift from the picked
         localizations. Returned only if `return_shifts` is True.
+
+    Raises
+    ------
+    ValueError
+        If ``keep_non_overlapping`` is False and the aligned channels
+        do not overlap.
     """
     assert (
         pick_shape in lib.PICK_SHAPES
@@ -5239,11 +5280,86 @@ def align_from_picked(
         if len(shift) == 3:
             locs_.z -= shift[2][i]
         aligned_locs.append(locs_.copy())
+    if not keep_non_overlapping:
+        aligned_locs = remove_non_overlapping_locs(aligned_locs)
 
     if return_shifts:
         return aligned_locs, shift
     else:
         return aligned_locs
+
+
+def overlap_region(
+    locs: list[pd.DataFrame],
+) -> tuple[tuple[float, float], tuple[float, float]] | None:
+    """Find the region in which all channels overlap, i.e., the
+    intersection of the rectangles spanned by the x and y coordinates of
+    the localizations of each channel.
+
+    Parameters
+    ----------
+    locs : list of pd.DataFrames
+        Localizations of each channel, e.g., after alignment (see
+        ``align_rcc`` and ``align_from_picked``).
+
+    Returns
+    -------
+    region : tuple or None
+        ``((x_min, x_max), (y_min, y_max))`` of the overlap in camera
+        pixels, or None if the channels do not overlap (or any channel
+        has no localizations).
+    """
+    if any(len(locs_) == 0 for locs_ in locs):
+        return None
+    x_min = max(locs_["x"].min() for locs_ in locs)
+    x_max = min(locs_["x"].max() for locs_ in locs)
+    y_min = max(locs_["y"].min() for locs_ in locs)
+    y_max = min(locs_["y"].max() for locs_ in locs)
+    if x_min > x_max or y_min > y_max:
+        return None
+    return (x_min, x_max), (y_min, y_max)
+
+
+def remove_non_overlapping_locs(
+    locs: list[pd.DataFrame],
+) -> list[pd.DataFrame]:
+    """Remove the localizations that lie outside the region in which
+    all channels overlap, see ``overlap_region``.
+
+    After aligning channels (``align_rcc`` and ``align_from_picked``),
+    large shifts can move parts of a channel to where the other channels
+    have no localizations, for example, when the channels were imaged
+    over shifted fields of view. Only x and y are considered.
+
+    Parameters
+    ----------
+    locs : list of pd.DataFrames
+        Localizations of each channel.
+
+    Returns
+    -------
+    locs : list of pd.DataFrames
+        Copies of the localizations of each channel inside the overlap
+        region, with a reset index.
+
+    Raises
+    ------
+    ValueError
+        If the channels do not overlap.
+    """
+    region = overlap_region(locs)
+    if region is None:
+        raise ValueError(
+            "The channels do not overlap, so no localizations would be"
+            " kept."
+        )
+    (x_min, x_max), (y_min, y_max) = region
+    return [
+        locs_[
+            locs_["x"].between(x_min, x_max) & locs_["y"].between(y_min, y_max)
+        ].reset_index(drop=True)
+        for locs_ in locs
+    ]
 
 
 def _shifts_from_picked_coordinate(
