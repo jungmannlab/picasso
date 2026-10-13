@@ -44,6 +44,45 @@ from . import (
     __version__,
 )
 
+__all__ = [
+    # picks
+    "picked_locs",
+    "pick_similar",
+    "remove_locs_in_picks",
+    "pick_properties",
+    # binding events
+    "link",
+    "compute_dark_times",
+    "dark_times",
+    "select_binding_event_cores",
+    "combine_locs_in_picks",
+    "cluster_combine",
+    "cluster_combine_dist",
+    "groupprops",
+    # drift and alignment
+    "undrift",
+    "undrift_from_fiducials",
+    "undrift_from_picked",
+    "apply_drift",
+    "plot_drift",
+    "align",
+    "align_from_picked",
+    # resolution
+    "nena",
+    "plot_nena",
+    "frc",
+    "frc_rois",
+    "plot_frc",
+    # spatial analysis
+    "nn_analysis",
+    "pair_correlation",
+    "distance_histogram",
+    "compute_local_density",
+    "cbc",
+    "cbc_all_pairs",
+    "resi",
+]
+
 
 def _is_pyramid(index_blocks) -> bool:
     """Whether a pick index is a ``spatial_index.RenderIndexPyramid``

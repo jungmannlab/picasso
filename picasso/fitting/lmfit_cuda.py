@@ -82,6 +82,8 @@ from picasso.fitting.splinefit import (  # noqa: F401  (re-exported below)
     resolve_schedule,
 )
 
+__all__ = []
+
 try:
     CUDA_AVAILABLE = bool(cuda.is_available())
 except Exception:  # pragma: no cover - depends on the driver install

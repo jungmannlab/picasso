@@ -56,6 +56,9 @@ suppress_warnings = ["myst.header"]
 
 autosummary_generate = True
 autosummary_imported_members = False
+# Document exactly the names in each module's __all__, in that order
+# (modules without __all__ still list all their public members).
+autosummary_ignore_module_all = False
 # Members are listed by the autosummary module template
 # (_templates/autosummary/module.rst), not by automodule.
 autodoc_default_options = {"member-order": "bysource"}

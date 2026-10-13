@@ -72,6 +72,13 @@ from tqdm import tqdm
 from picasso import lib
 from picasso.version import __version__
 
+__all__ = [
+    "calibrate_scmos",
+    "validate_calibration",
+    "save_calibration_plot",
+    "plot_path",
+]
+
 # Below this many dark frames a calibration is refused outright: the variance
 # estimate is worth less than the scalar it would replace.
 MIN_DARK_FRAMES = 100

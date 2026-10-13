@@ -77,6 +77,8 @@ from typing import Any
 from . import io
 from .version import __version__ as PICASSO_VERSION
 
+__all__ = ["api", "load_api_plugins"]
+
 
 # =============================================================================
 # Safety helpers: identifiers, paths and integrity

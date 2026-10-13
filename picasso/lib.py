@@ -34,6 +34,47 @@ from tqdm import tqdm
 
 from picasso import io
 
+__all__ = [
+    # metadata
+    "get_from_metadata",
+    "overwrite_metadata",
+    "extract_filter_recipe",
+    "extract_filter_steps",
+    "apply_filter_steps",
+    # localization tables
+    "ensure_sanity",
+    "standardize_dtypes",
+    "concat_locs",
+    "merge_locs",
+    "locs_glob_map",
+    "fit_canvas",
+    "sync_groups",
+    "unfold_localizations_square",
+    # regions
+    "PICK_SHAPES",
+    "pick_areas",
+    "locs_at",
+    "locs_in_rectangle",
+    "locs_in_polygon",
+    # kinetics
+    "cumulative_exponential",
+    "fit_cum_exp",
+    "estimate_kinetic_rate",
+    "plot_cumulative_exponential_fit",
+    # plots
+    "calculate_optimal_bins",
+    "plot_trace",
+    "plot_subclustering_check",
+    "plot_rel_sigma_check",
+    # lateral corrections
+    "lateral_transforms",
+    "describe_lateral_transforms",
+    "apply_lateral_transforms",
+    "DuplicateLateralTransformWarning",
+    # other
+    "append_group",
+]
+
 # A global variable where we store all open progress and status dialogs.
 # In case of an exception, we close them all,
 # so that the GUI remains responsive.

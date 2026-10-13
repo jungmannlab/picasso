@@ -35,6 +35,22 @@ from sklearn.exceptions import ConvergenceWarning
 
 from . import io, lib, masking, render, __version__
 
+__all__ = [
+    "Structure",
+    "StructureMixer",
+    "SPINNA",
+    "MaskGenerator",
+    "load_structures",
+    "generate_N_structures",
+    "get_NN_dist",
+    "get_NN_dist_experimental",
+    "get_NN_dist_simulated",
+    "NND_score",
+    "plot_NN",
+    "compare_models",
+    "fit_le",
+]
+
 
 NN_COLORS = ["#2880C4", "#97D8C4", "#F4B942", "#363636"]
 N_TASKS = 100

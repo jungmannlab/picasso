@@ -59,6 +59,15 @@ from scipy.spatial import KDTree
 
 from . import lib, __version__
 
+__all__ = [
+    "ORIENTATIONS",
+    "stitch",
+    "stage_positions",
+    "group_tiles",
+    "solve_positions",
+    "seam_mask",
+]
+
 #: Orientations of the camera relative to the stage, which depend on
 #: how the camera is mounted: in which direction of the image a tile
 #: lies whose stage X (or Y) position is larger. The keys give the image

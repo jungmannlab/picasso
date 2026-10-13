@@ -23,6 +23,8 @@ from scipy.interpolate import InterpolatedUnivariateSpline
 
 from . import lib, __version__
 
+__all__ = ["aim", "intersection_max", "intersection_max_z"]
+
 
 @numba.njit(cache=True, nogil=True)
 def _count_intersections(

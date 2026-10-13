@@ -12,6 +12,17 @@ import numpy as np
 from . import io, lib
 from numba import njit
 
+__all__ = [
+    "defineStructure",
+    "generatePositions",
+    "prepareStructures",
+    "distphotons",
+    "convertMovie",
+    "noisy_p",
+    "check_type",
+    "saveMovie",
+]
+
 magfac = 0.79
 
 

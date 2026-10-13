@@ -50,6 +50,14 @@ import pandas as pd
 
 from . import lib
 
+__all__ = [
+    "ExpressionError",
+    "filter_locs",
+    "condition",
+    "evaluate",
+    "variables_from_info",
+]
+
 #: Constants available in every expression.
 CONSTANTS = {"pi": np.pi, "inf": np.inf, "nan": np.nan}
 

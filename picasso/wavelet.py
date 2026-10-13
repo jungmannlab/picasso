@@ -78,6 +78,8 @@ import numpy as np
 
 from . import lib
 
+__all__ = ["WaveletParameters", "identify_in_image"]
+
 #: Low-pass taps of the third-order B-spline, ``[H2, H1, H0, H1, H2]`` with
 #: ``H0 = 3/8``, ``H1 = 1/4`` and ``H2 = 1/16``.
 B3_KERNEL = np.array([1 / 16, 1 / 4, 3 / 8, 1 / 4, 1 / 16], dtype=np.float32)

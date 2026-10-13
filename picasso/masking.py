@@ -22,6 +22,8 @@ from statsmodels.nonparametric.smoothers_lowess import lowess as loess
 
 from . import lib, render
 
+__all__ = ["mask_locs", "generate_image", "mask_image", "binary_mask"]
+
 
 def mask_locs(
     locs: pd.DataFrame,

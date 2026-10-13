@@ -34,6 +34,8 @@ from . import lib, zfit, __version__, docs_url
 if TYPE_CHECKING:
     from PyQt6 import QtWidgets  # only used in type annotations
 
+__all__ = ["g5m", "sum_G5Ms"]
+
 # default min. number of localizations per molecule
 MIN_LOCS = 10
 # default number of rounds without BIC improvement to terminate the

@@ -73,6 +73,21 @@ from tqdm import tqdm
 
 from picasso import lib
 
+__all__ = [
+    "KIND_2D",
+    "KIND_3D",
+    "KIND_LINK_XYZ",
+    "FIT_STATE_CONVERGED",
+    "FIT_STATE_MAX_ITERATION",
+    "FIT_STATE_SINGULAR_HESSIAN",
+    "FIT_STATE_NEG_CURVATURE_MLE",
+    "AsyncFit",
+    "fit_spots",
+    "fit_spots_async",
+    "convergence_schedule",
+    "n_workers",
+]
+
 # Model kinds. The lateral (2D) and axial (3D) models need separate kernels
 # because numba types an array by its number of dimensions, so a
 # ``(C, niy, nix, 4, 4)`` and a ``(C, niz, niy, nix, 4, 4, 4)`` coefficient

@@ -20,6 +20,8 @@ from tqdm import tqdm
 
 from . import lib, render, localize, postprocess
 
+__all__ = ["find_fiducials", "get_image_shift", "rcc"]
+
 
 plt.style.use("ggplot")
 

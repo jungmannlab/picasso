@@ -17,6 +17,8 @@ from sklearn.neural_network import MLPClassifier
 
 from . import render, lib
 
+__all__ = ["predict_structure", "roi_to_img", "prepare_img"]
+
 
 def prepare_img(
     img: lib.FloatArray2D,

@@ -82,6 +82,17 @@ from .registration import (
     resolve_model,
 )
 
+__all__ = [
+    "calibrate_spline",
+    "calibrate_spline_multichannel",
+    "calibrate_spline_split_fov",
+    "refine_multichannel_transforms_from_signal",
+    "refine_split_fov_transforms_from_signal",
+    "bead_inspection_data",
+    "plot_bead_gallery",
+    "spline_coefficients",
+]
+
 
 def _natural_spline_operator(n: int) -> np.ndarray:
     """The 1D natural cubic interpolating spline on the unit grid as a linear
