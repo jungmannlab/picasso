@@ -270,7 +270,9 @@ only implemented for Windows.
 2. Depending on the size of the ROI, the export will take a couple of seconds.
    Once exporting is finished, the file will be saved at the set location.
 3. The resulting file can be opened e.g. with ImarisViewer or Imaris. Note that
-   the orientation is the same as in Picasso.
+   the orientation is the same as in Picasso. If the localizations come from an
+   ``.ims`` movie, the export is placed at the movie's position (including its
+   focal plane in z), so it overlays the movie in Imaris.
 
 .. _render-export-images:
 

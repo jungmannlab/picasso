@@ -58,6 +58,7 @@ Last change: 13-OCT-2026 CEST
 - Fixed: the `locs` column of saved pick properties held the number of binding events (the same as `n_events`) instead of the number of localizations in the pick (`picasso.postprocess.pick_kinetics`, `pick_properties`).
 - Fixed: scale bar in 3D animations.
 - Fixed: *Align channels* (RCC) failed for channels with different image sizes.
+- Fixed: Render's `Export ROI for Imaris` ignored the position of the .ims movie that localizations were loaded from with `File > Open movie` (single channel), placing the export at the origin instead of over the movie.
 
 ### Localize
 - New spot identification method: B-spline wavelet segmentation (Izeddin et al., *Opt. Express* 2012), see the [documentation](https://picassosr.readthedocs.io/en/latest/localize/identification.html#localize-wavelet).
@@ -65,6 +66,7 @@ Last change: 13-OCT-2026 CEST
 - Fixed: ratiometric multichannel spline fitting ignored the per-pixel sCMOS variance of the camera calibration.
 - Fixed: `Height` and `Width` were swapped in the metadata of non-square `.ims` movies.
 - Fixed drift estimation when adding to database + database building.
+- Fixed: canceling the channel selection when opening a multi-channel IMARIS .ims movie raised an error instead of loading the first channel, as for .czi and .lif.
 
 ### Filter
 - Filtering by expression: `Filter > Filter by expression...` for universal filtering with comparisons, logic, arithmetic, functions and statistics over the shown localizations. See the [documentation](https://picassosr.readthedocs.io/en/latest/filter.html#filter-expression).
@@ -103,7 +105,6 @@ Last change: 13-OCT-2026 CEST
 - Sound notifications in Average and Simulate (`File > Sound notifications`).
 - Added import and export of [PyME](https://python-microscopy.org) (python-microscopy, PYMEVisualize) localizations: raw fit results (`.h5r`) and saved localizations (`.hdf`) are imported, `.hdf` files are exported. See the [documentation](https://picassosr.readthedocs.io/en/latest/render/menu-file.html#render-export-pyme).
 - The one-click installers ship the licenses of all bundled third-party software (Python, Qt, NumPy, ...) in `THIRD-PARTY-LICENSES.txt`.
-- Fixed: canceling the channel selection when opening a multi-channel IMARIS .ims movie raised an error instead of loading the first channel, as for .czi and .lif.
 - Fixed: negative frame indices (e.g. `movie[-1]`) raised an `IndexError` for movies split across several files.
 - Fixed the docstring of `picasso.imageprocess.rcc` ([#716](https://github.com/jungmannlab/picasso/issues/716)).
 

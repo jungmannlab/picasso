@@ -77,7 +77,10 @@ from . import theme
 from . import toolbars
 
 # Optional modules with external/hardware dependencies live in ext
-from ..ext.bitplane import IMSWRITER  # PyImarisWrite works on Windows only
+from ..ext.bitplane import (  # PyImarisWrite works on Windows only
+    IMSWRITER,
+    image_extents,
+)
 
 if IMSWRITER:
     from ..ext.bitplane import numpy_to_imaris
@@ -19554,15 +19557,6 @@ class Window(QtWidgets.QMainWindow):
             colors = self.view.read_colors()
 
             def export():  # noqa: C901
-                # defaults for the image extents, used where the loaded
-                # metadata (e.g. of an .ims movie) does not provide them
-                ims_fields = {
-                    "ExtMin0": 0,
-                    "ExtMin1": 0,
-                    "ExtMin2": -0.5,
-                    "ExtMax2": 0.5,
-                }
-
                 (y_min, x_min), (y_max, x_max) = viewport
 
                 z_mins = []
@@ -19587,11 +19581,12 @@ class Window(QtWidgets.QMainWindow):
                             f"Picasso v{__version__} Render (IMS Export)"
                         )
 
-                        for k, v in ims_fields.items():
-                            if not any(
-                                k in d for d in self.view.infos[channel]
-                            ):
-                                add_dict[k] = v
+                        # the extents of the .ims movie the localizations
+                        # come from (defaults for other movies), so that
+                        # the exported files overlay it in Imaris
+                        add_dict.update(
+                            image_extents(self.view.infos[channel])
+                        )
 
                         info = self.view.infos[channel] + [add_dict]
                         if not to_render:

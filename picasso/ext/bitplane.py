@@ -21,6 +21,96 @@ try:
 except ModuleNotFoundError:
     IMSWRITER = False
 
+# Image extents (um) of localizations without IMS metadata: the camera
+# frame starts at the origin and the focal plane is at z = 0.
+DEFAULT_EXTENTS = {
+    "ExtMin0": 0.0,
+    "ExtMin1": 0.0,
+    "ExtMin2": -0.5,
+    "ExtMax2": 0.5,
+}
+
+
+def image_extents(info):
+    """Return the Imaris image extents of the movie that localizations
+    come from.
+
+    ``picasso.io.load_ims_all`` stores the extents as ``ExtMin0``, ...,
+    ``picasso.io.load_ims`` as ``GlobalExtMin0``, ...; either is used,
+    and :data:`DEFAULT_EXTENTS` for movies of other formats.
+
+    Parameters
+    ----------
+    info : list of dicts
+        Metadata of the localizations; the extents may be stored in any
+        entry.
+
+    Returns
+    -------
+    extents : dict
+        ``ExtMin0``, ``ExtMin1`` (the x and y of the movie's corner),
+        ``ExtMin2`` and ``ExtMax2`` (its axial range), all in um.
+    """
+    meta = {}
+    for entry in info:
+        meta.update(entry)
+    extents = {}
+    for key, default in DEFAULT_EXTENTS.items():
+        for name in (key, "Global" + key):
+            if name in meta:
+                extents[key] = float(meta[name])
+                break
+        else:
+            extents[key] = default
+    return extents
+
+
+def export_extents(viewport, info, z_min, z_max, pixelsize, oversampling, n_z):
+    """Return the extents of an image rendered from localizations, in
+    the coordinates of the Imaris movie they come from.
+
+    Parameters
+    ----------
+    viewport : tuple
+        Rendered field of view as ``((y_min, x_min), (y_max, x_max))``
+        in camera pixels.
+    info : list of dicts
+        Metadata of the localizations, see :func:`image_extents`.
+    z_min, z_max : float
+        Axial range of the image (nm) relative to the focal plane. If
+        both are 0, the image is ``n_z`` display pixels deep around the
+        focal plane.
+    pixelsize : float
+        Camera pixel size (nm).
+    oversampling : float
+        Number of display pixels per camera pixel.
+    n_z : int
+        Number of z planes of the image.
+
+    Returns
+    -------
+    extents : tuple
+        ``(x_0, y_0, z_0, x_1, y_1, z_1)`` in um.
+    """
+    (y_min, x_min), (y_max, x_max) = viewport
+    extents = image_extents(info)
+    x_0 = extents["ExtMin0"] + x_min * pixelsize / 1000
+    y_0 = extents["ExtMin1"] + y_min * pixelsize / 1000
+    x_1 = extents["ExtMin0"] + x_max * pixelsize / 1000
+    y_1 = extents["ExtMin1"] + y_max * pixelsize / 1000
+    # Picasso's z is relative to the focal plane, the middle of the
+    # movie's axial range.
+    z_base = (extents["ExtMin2"] + extents["ExtMax2"]) / 2
+    if z_min == z_max == 0:
+        half_depth = n_z / 2 * pixelsize / 1000 / oversampling
+        z_0 = z_base - half_depth
+        z_1 = z_base + half_depth
+    else:
+        z_0 = z_base + z_min / 1000
+        z_1 = z_base + z_max / 1000
+    return x_0, y_0, z_0, x_1, y_1, z_1
+
+
 if IMSWRITER:
 
     class MovieMapper:
@@ -417,9 +507,9 @@ if IMSWRITER:
             Rendered field of view as ``((y_min, x_min), (y_max,
             x_max))`` in camera pixels.
         info : list of dicts
-            Metadata of the localizations; the ``ExtMin0``,
-            ``ExtMin1``, ``ExtMin2`` and ``ExtMax2`` fields, if present
-            in any entry, offset the image extents.
+            Metadata of the localizations; the extents of the Imaris
+            movie they come from, if present in any entry, offset the
+            image extents (see :func:`image_extents`).
         z_min, z_max : float
             Axial range of the image (nm). If both are 0, the z extent
             is derived from the number of z planes.
@@ -437,11 +527,6 @@ if IMSWRITER:
         y = array.shape[2]
         z = array.shape[1]
         c = array.shape[0]
-
-        x_min = viewport[0][1]
-        x_max = viewport[1][1]
-        y_min = viewport[0][0]
-        y_max = viewport[1][0]
 
         np_data = array.copy()
 
@@ -491,41 +576,15 @@ if IMSWRITER:
 
         adjust_color_range = True
 
-        x_0 = (x_min) * pixelsize / 1000
-        y_0 = (y_min) * pixelsize / 1000
-
-        x_1 = (x_max) * pixelsize / 1000
-        y_1 = (y_max) * pixelsize / 1000
-
-        # the extents may be stored in any entry of the metadata
-        meta = {}
-        for entry in info:
-            meta.update(entry)
-
-        # TODO: Later use GlobalExtMin to add
-        # Todo: Check for z
-        try:
-            x_0 += meta["ExtMin0"]
-            y_0 += meta["ExtMin1"]
-
-            x_1 += meta["ExtMin0"]
-            y_1 += meta["ExtMin1"]
-
-        except KeyError as e:
-            print(f"Exception: {e}")
-
-        try:
-            z_base = (meta["ExtMin2"] + meta["ExtMax2"]) / 2
-        except KeyError as e:
-            print(f"Exception: {e}")
-            z_base = 0
-
-        if z_min == z_max == 0:
-            z_0 = z_base - (image_size.z / 2) * pixelsize / 1000 / oversampling
-            z_1 = z_base + (image_size.z / 2) * pixelsize / 1000 / oversampling
-        else:
-            z_0 = z_base + z_min / 1000
-            z_1 = z_base + z_max / 1000
+        x_0, y_0, z_0, x_1, y_1, z_1 = export_extents(
+            viewport,
+            info,
+            z_min,
+            z_max,
+            pixelsize,
+            oversampling,
+            image_size.z,
+        )
 
         # The image extends are not for multiple z-stacks.
         image_extents = PW.ImageExtents(x_0, y_0, z_0, x_1, y_1, z_1)
