@@ -10409,10 +10409,17 @@ class SlicerDialog(lib.Dialog):
         )
         if path:
             base, ext = os.path.splitext(path)
-            if self.separate_check.isChecked():  # each channel individually
-                self._export_stack_individually(base)
-            else:  # all channels at once
-                self._export_stacks_together(base)
+            # the slices are exported with the text sizes they always
+            # had, not those of the windows; the cache holds slices
+            # drawn for the screen
+            self.slicer_cache = {}
+            with theme.unscaled_text():
+                if self.separate_check.isChecked():  # each channel alone
+                    self._export_stack_individually(base)
+                else:  # all channels at once
+                    self._export_stacks_together(base)
+            self.slicer_cache = {}
+            self.window.view.update_scene()
 
     def closeEvent(self, event: QtCore.QCloseEvent):
         """Unslice data."""
@@ -12834,6 +12841,11 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
                 pixelsize=self.pixelsize,
                 display_length=d_dialog.scalebar_text.isChecked(),
                 color=color,
+                # as large as the windows' text on screen, see
+                # theme.unscaled_text for exports
+                text_fontsize=theme.scaled_text_size(
+                    render.SCALEBAR_FONT_SIZE
+                ),
             )
         return image
 
@@ -12917,6 +12929,7 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
                 image=image,
                 channel_names=channel_names,
                 channel_colors=channel_colors,
+                text_fontsize=theme.scaled_text_size(render.LEGEND_FONT_SIZE),
             )
         return image
 
@@ -13714,68 +13727,74 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
     def export_grayscale(self, suffix: str, dpi: int = 96) -> None:
         """Export grayscale rendering of the current viewport for each
         channel separately."""
-        kwargs = self.get_render_kwargs()
-        dataset_dialog = self.window.dataset_dialog
-        for i in range(len(self.locs)):
-            locs = self._display_locs(i)
-            path = os.path.splitext(self.locs_paths[i])[0] + suffix
-            # render like in self.render_scene, with the channel's own
-            # contrast window (in percent of the global one)
-            vmin = self.window.display_settings_dlg.minimum.value()
-            vmax = self.window.display_settings_dlg.maximum.value()
-            if len(self.locs) > 1:
-                span = vmax - vmin
-                low = dataset_dialog.contrast_low[i].value() / 100
-                high = dataset_dialog.contrast_high[i].value() / 100
-                vmin, vmax = vmin + low * span, vmin + high * span
-            locs_ = (
-                locs.drop(columns="group") if "group" in locs.columns else locs
-            )
-            invert_colors = dataset_dialog.wbackground.isChecked()
-            qimage = render.render_scene(
-                locs_,
-                self.infos[i],
-                **kwargs,
-                contrast=(vmin, vmax),
-                invert_colors=invert_colors,
-                single_channel_colormap="gray",
-            )[0]
-            # modify qimage like in self.draw_scene
-            qimage = qimage.scaled(
-                self.width(),
-                self.height(),
-                QtCore.Qt.AspectRatioMode.KeepAspectRatioByExpanding,
-            )
-            qimage = self.draw_grid(qimage)
-            qimage = self.spt.draw_tracks(qimage, channels=[i])
-            qimage = self.draw_scalebar(qimage)
-            qimage = self.draw_minimap(qimage)
-            qimage = self.draw_legend(qimage)
-            qimage = self.draw_picks(qimage)
-            qimage = self.draw_points(qimage)
-            # save image
-            if path.endswith(".pdf"):
-                render.export_qimage_to_pdf(qimage, path)
-            elif path.endswith(".svg"):
-                render.export_qimage_to_svg(qimage, path)
-            else:
-                qimage.save(path)
+        # exported with the text sizes they always had, not those of
+        # the windows
+        with theme.unscaled_text():
+            kwargs = self.get_render_kwargs()
+            dataset_dialog = self.window.dataset_dialog
+            for i in range(len(self.locs)):
+                locs = self._display_locs(i)
+                path = os.path.splitext(self.locs_paths[i])[0] + suffix
+                # render like in self.render_scene, with the channel's own
+                # contrast window (in percent of the global one)
+                vmin = self.window.display_settings_dlg.minimum.value()
+                vmax = self.window.display_settings_dlg.maximum.value()
+                if len(self.locs) > 1:
+                    span = vmax - vmin
+                    low = dataset_dialog.contrast_low[i].value() / 100
+                    high = dataset_dialog.contrast_high[i].value() / 100
+                    vmin, vmax = vmin + low * span, vmin + high * span
+                locs_ = (
+                    locs.drop(columns="group")
+                    if "group" in locs.columns
+                    else locs
+                )
+                invert_colors = dataset_dialog.wbackground.isChecked()
+                qimage = render.render_scene(
+                    locs_,
+                    self.infos[i],
+                    **kwargs,
+                    contrast=(vmin, vmax),
+                    invert_colors=invert_colors,
+                    single_channel_colormap="gray",
+                )[0]
+                # modify qimage like in self.draw_scene
+                qimage = qimage.scaled(
+                    self.width(),
+                    self.height(),
+                    QtCore.Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+                )
+                qimage = self.draw_grid(qimage)
+                qimage = self.spt.draw_tracks(qimage, channels=[i])
+                qimage = self.draw_scalebar(qimage)
+                qimage = self.draw_minimap(qimage)
+                qimage = self.draw_legend(qimage)
+                qimage = self.draw_picks(qimage)
+                qimage = self.draw_points(qimage)
+                # save image
+                if path.endswith(".pdf"):
+                    render.export_qimage_to_pdf(qimage, path)
+                elif path.endswith(".svg"):
+                    render.export_qimage_to_svg(qimage, path)
+                else:
+                    qimage.save(path)
 
-            # save metadata
-            info = self.window.export_current_info(path=None)
-            info["Colormap"] = "gray"
-            io.save_info(os.path.splitext(path)[0] + ".yaml", [info])
+                # save metadata
+                info = self.window.export_current_info(path=None)
+                info["Colormap"] = "gray"
+                io.save_info(os.path.splitext(path)[0] + ".yaml", [info])
 
-            # save a copy with scale bar if not present
-            scalebar_box = self.window.display_settings_dlg.scalebar_groupbox
-            scalebar = scalebar_box.isChecked()
-            if not scalebar:
-                spath = os.path.splitext(path)[0] + "_scalebar.png"
-                scalebar_box.setChecked(True)
-                self.set_optimal_scalebar(force=True)
-                qimage_scale = self.draw_scalebar(qimage)
-                qimage_scale.save(spath)
-                scalebar_box.setChecked(False)
+                # save a copy with scale bar if not present
+                display_settings = self.window.display_settings_dlg
+                scalebar_box = display_settings.scalebar_groupbox
+                scalebar = scalebar_box.isChecked()
+                if not scalebar:
+                    spath = os.path.splitext(path)[0] + "_scalebar.png"
+                    scalebar_box.setChecked(True)
+                    self.set_optimal_scalebar(force=True)
+                    qimage_scale = self.draw_scalebar(qimage)
+                    qimage_scale.save(spath)
+                    scalebar_box.setChecked(False)
 
     def get_channel(self, title: str = "Choose a channel") -> int | None:
         """Open an input dialog to ask for a channel. Return the channel
@@ -19262,23 +19281,33 @@ class Window(QtWidgets.QMainWindow):
                 )
                 if not ok:
                     return
-            if not scalebar:
-                self.display_settings_dlg.scalebar_groupbox.setChecked(True)
-                self.view.set_optimal_scalebar(force=True)
-                qimage_scale = self.view.draw_scalebar(self.view.qimage)
-                new_path, ext = os.path.splitext(path)
-                new_path = new_path + "_scalebar" + ext
-                if path.endswith(".pdf"):
-                    render.export_qimage_to_pdf(
-                        qimage_scale, new_path, dpi=dpi
-                    )
-                else:
-                    qimage_scale.save(new_path)
-                self.display_settings_dlg.scalebar_groupbox.setChecked(False)
-            self.save_qimage_to_path(path, self.view.qimage, dpi=dpi)
+            # exported with the text sizes they always had, not those of
+            # the windows: compose the view again for the export
+            with theme.unscaled_text():
+                self.view._compose_visible()
+                self._export_current_images(path, scalebar, dpi)
+            self.view._compose_visible()
             self.view.save_property_colorbar(path)
             self.export_current_info(path)
         self.view.setMinimumSize(1, 1)
+
+    def _export_current_images(
+        self, path: str, scalebar: bool, dpi: int | None
+    ) -> None:
+        """Save the current view to ``path`` and, without a scale bar
+        shown, a copy with a scale bar (see ``export_current``)."""
+        if not scalebar:
+            self.display_settings_dlg.scalebar_groupbox.setChecked(True)
+            self.view.set_optimal_scalebar(force=True)
+            qimage_scale = self.view.draw_scalebar(self.view.qimage)
+            new_path, ext = os.path.splitext(path)
+            new_path = new_path + "_scalebar" + ext
+            if path.endswith(".pdf"):
+                render.export_qimage_to_pdf(qimage_scale, new_path, dpi=dpi)
+            else:
+                qimage_scale.save(new_path)
+            self.display_settings_dlg.scalebar_groupbox.setChecked(False)
+        self.save_qimage_to_path(path, self.view.qimage, dpi=dpi)
 
     def save_qimage_to_path(
         self,

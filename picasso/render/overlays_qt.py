@@ -42,6 +42,11 @@ POLYGON_POINTER_SIZE = 16  # must be even
 BRUSH_FILL_ALPHA = 70
 # line styles of the tool overlays, see ``OverlayStyle``
 LINE_STYLES = ("Solid", "Dashed", "Dotted", "Dash-dot")
+# default pixel sizes of the text of the scale bar, the legend and the
+# rotation angles (the GUIs scale them with the font size on screen)
+SCALEBAR_FONT_SIZE = 20
+LEGEND_FONT_SIZE = 16
+ROTATION_ANGLES_FONT_SIZE = 12
 
 
 @dataclass(frozen=True)
@@ -888,7 +893,7 @@ def draw_scalebar(
     display_height: int = 10,
     margin: tuple[int, int] = (35, 20),
     text_spacer: int = 40,
-    text_fontsize: int = 20,
+    text_fontsize: int = SCALEBAR_FONT_SIZE,
 ) -> QtGui.QImage:
     """Draw a scalebar into rendered localizations (QImage).
 
@@ -941,22 +946,30 @@ def draw_scalebar(
     y = image.height() - display_height - margin[1]
     painter.drawRect(x, y, length_displaypxl, display_height)
 
-    # display scalebar's length
+    # display scalebar's length, centered above the bar; the offsets
+    # are for the default font size and grow with larger text
     if display_length:
         font = painter.font()
         font.setPixelSize(text_fontsize)
         painter.setFont(font)
         painter.setPen(color)
-        text_width = length_displaypxl + 2 * text_spacer
-        text_height = text_spacer
-        painter.drawText(
-            x - text_spacer,
-            y - 25,
-            text_width,
-            text_height,
-            QtCore.Qt.AlignmentFlag.AlignHCenter,
-            f"{str(scalebar_length_nm)} nm",
+        text = f"{str(scalebar_length_nm)} nm"
+        ratio = text_fontsize / SCALEBAR_FONT_SIZE
+        text_advance = QtGui.QFontMetrics(font).horizontalAdvance(text)
+        text_width = max(length_displaypxl + 2 * text_spacer, text_advance)
+        # keep long text inside the right edge of the image
+        center = min(
+            x + length_displaypxl / 2, image.width() - 2 - text_advance / 2
         )
+        painter.drawText(
+            int(round(center - text_width / 2)),
+            y - int(round(25 * ratio)),
+            text_width,
+            int(round(text_spacer * ratio)),
+            QtCore.Qt.AlignmentFlag.AlignHCenter,
+            text,
+        )
+    painter.end()
     return image
 
 
@@ -964,10 +977,10 @@ def draw_legend(
     image: QtGui.QImage,
     channel_names: list[str],
     channel_colors: list[tuple[int, int, int]],
-    init_pos: tuple[int, int] = (12, 26),
-    dy: int = 24,
+    init_pos: tuple[int, int] | None = None,
+    dy: int | None = None,
     padding: int = 4,
-    text_fontsize: int = 16,
+    text_fontsize: int = LEGEND_FONT_SIZE,
 ) -> QtGui.QImage:
     """Draw a legend for multichannel data in the top left corner over
     rendered localizations (QImage).
@@ -981,11 +994,13 @@ def draw_legend(
     channel_colors : list of tuples
         List of RGB tuples corresponding to the colors of the channels.
         Must range between 0 and 255.
-    init_pos : tuple of int, optional
+    init_pos : tuple of int or None, optional
         Initial position (x, y) of the first channel name in display
-        pixels. Default is (12, 26).
-    dy : int, optional
-        Space between channel names in display pixels. Default is 24.
+        pixels. Default None: (12, 26) for the default font size, y
+        growing with larger text.
+    dy : int or None, optional
+        Space between channel names in display pixels. Default None:
+        24 for the default font size, growing with larger text.
     padding : int, optional
         Padding around the text in display pixels. Default is 4.
     text_fontsize : int, optional
@@ -1000,6 +1015,11 @@ def draw_legend(
         "Length of channel_names must match number of channels in " "dataset."
     )
     n_channels = len(channel_names)
+    ratio = text_fontsize / LEGEND_FONT_SIZE
+    if init_pos is None:
+        init_pos = (12, int(round(26 * ratio)))
+    if dy is None:
+        dy = int(round(24 * ratio))
     painter = QtGui.QPainter(image)
     # initial positions
     x, y = init_pos
@@ -1026,6 +1046,7 @@ def draw_legend(
         painter.setPen(QtGui.QPen(color))
         painter.drawText(QtCore.QPoint(x, y), text)
         y += dy
+    painter.end()
     return image
 
 
@@ -1597,6 +1618,7 @@ def draw_rotation_angles(
     image: QtGui.QImage,
     ang: tuple[float, float, float],
     color: QtGui.QColor | None = None,  # default: white
+    text_fontsize: int = ROTATION_ANGLES_FONT_SIZE,
 ) -> QtGui.QImage:
     """Draw rotation angles (numbers in degrees) on the image.
 
@@ -1609,6 +1631,8 @@ def draw_rotation_angles(
         and z axes in radians, used only for the displayed text.
     color : QColor, optional
         Color of the text. Default is white.
+    text_fontsize : int, optional
+        Pixel size of the text. Default ``ROTATION_ANGLES_FONT_SIZE``.
 
     Returns
     -------
@@ -1619,14 +1643,16 @@ def draw_rotation_angles(
         color = QtGui.QColor("white")
     angx, angy, angz = [int(np.round(_ * 180 / np.pi, 0)) for _ in ang]
     text = f"{angx} {angy} {angz}"
-    x = image.width() - len(text) * 8 - 10
-    y = image.height() - 20
     painter = QtGui.QPainter(image)
     font = painter.font()
-    font.setPixelSize(12)
+    font.setPixelSize(text_fontsize)
     painter.setFont(font)
+    width = painter.fontMetrics().horizontalAdvance(text)
+    x = image.width() - width - 10
+    y = image.height() - 20
     painter.setPen(color)
     painter.drawText(QtCore.QPoint(x, y), text)
+    painter.end()
     return image
 
 

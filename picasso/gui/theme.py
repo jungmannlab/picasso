@@ -25,7 +25,10 @@ The user chooses in ``AppearanceDialog`` (File > Appearance...):
   while Picasso runs;
 - the accent color of selections, checked and default buttons, sliders
   and focus frames;
-- the font size, in percent of the system's;
+- the font size, in percent of the system's; it also scales the text
+  that Picasso draws itself on screen (``text_scale``): charts, and the
+  scale bar, legend and rotation angles on rendered images, but not in
+  saved charts and exported images (``unscaled_text``);
 - the density, i.e., the spacing of controls;
 - how the toolbars show their buttons; which actions they hold is set
   in ``picasso.gui.toolbars``.
@@ -60,6 +63,7 @@ does not rely on color alone.
 
 from __future__ import annotations
 
+import contextlib
 import os
 import re
 from dataclasses import asdict, dataclass, fields, replace
@@ -906,6 +910,46 @@ def applied() -> Appearance | None:
     return _state["applied"]
 
 
+#: Depth of nested ``unscaled_text`` contexts.
+_unscaled_depth = 0
+
+
+def text_scale() -> float:
+    """Factor of the text that Picasso draws itself on screen (charts,
+    and the scale bar and legend on rendered images): the font size of
+    the applied appearance (1 in the "Native" mode, before any
+    appearance is applied and inside ``unscaled_text``).
+
+    Returns
+    -------
+    scale : float
+        E.g., 1.5 for a font size of 150 %.
+    """
+    appearance = _state["applied"]
+    if _unscaled_depth or appearance is None or appearance.mode == "Native":
+        return 1.0
+    return appearance.font_scale / 100
+
+
+def scaled_text_size(size: float) -> int:
+    """``size`` (e.g., in pixels) times ``text_scale``, rounded; at
+    least 1."""
+    return max(1, round(size * text_scale()))
+
+
+@contextlib.contextmanager
+def unscaled_text():
+    """Context in which ``text_scale`` is 1, to draw saved and exported
+    images and charts with the text sizes they always had, whatever the
+    font size of the windows."""
+    global _unscaled_depth
+    _unscaled_depth += 1
+    try:
+        yield
+    finally:
+        _unscaled_depth -= 1
+
+
 class _TintedIconEngine(QtGui.QIconEngine):
     """Draws a single-color icon in the colors of the palette: the text
     color, dimmed when disabled, and the accent color when checked
@@ -1366,7 +1410,9 @@ class AppearanceDialog(lib.Dialog):
         self.font_scale.setSingleStep(5)
         self.font_scale.setSuffix(" %")
         self.font_scale.setToolTip(
-            "Size of the text in percent of the system's.\n"
+            "Size of the text in percent of the system's, also of the\n"
+            "charts and of the scale bar and legend on rendered images.\n"
+            "Saved charts and exported images keep their usual sizes.\n"
             "Open windows keep their size; reopen them to fit."
         )
         self.form.addRow("Font size:", self.font_scale)

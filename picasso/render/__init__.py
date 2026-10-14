@@ -88,6 +88,9 @@ from .splat import (  # noqa: F401
 )
 from .overlays_qt import (  # noqa: F401
     POLYGON_POINTER_SIZE,
+    SCALEBAR_FONT_SIZE,
+    LEGEND_FONT_SIZE,
+    ROTATION_ANGLES_FONT_SIZE,
     BRUSH_FILL_ALPHA,
     LINE_STYLES,
     OverlayStyle,

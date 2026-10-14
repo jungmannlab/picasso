@@ -2087,6 +2087,9 @@ class ViewRotation(QtWidgets.QLabel, idle.SpillableChannels):
                 pixelsize=self.window.window.view.pixelsize,
                 display_length=d_dialog.scalebar_text.isChecked(),
                 color=color,
+                text_fontsize=theme.scaled_text_size(
+                    render.SCALEBAR_FONT_SIZE
+                ),
             )
         return image
 
@@ -2184,6 +2187,7 @@ class ViewRotation(QtWidgets.QLabel, idle.SpillableChannels):
             image=image,
             channel_names=channel_names,
             channel_colors=channel_colors,
+            text_fontsize=theme.scaled_text_size(render.LEGEND_FONT_SIZE),
         )
         return image
 
@@ -2196,7 +2200,12 @@ class ViewRotation(QtWidgets.QLabel, idle.SpillableChannels):
         )
         if self.window.angles_action.isChecked():
             image = render.draw_rotation_angles(
-                image=image, ang=(self.angx, self.angy, self.angz), color=color
+                image=image,
+                ang=(self.angx, self.angy, self.angz),
+                color=color,
+                text_fontsize=theme.scaled_text_size(
+                    render.ROTATION_ANGLES_FONT_SIZE
+                ),
             )
         return image
 
@@ -2878,16 +2887,22 @@ class ViewRotation(QtWidgets.QLabel, idle.SpillableChannels):
             check_ext=check_ext,
         )
         if path:
-            self.qimage.save(path)
-            self.save_property_colorbar(path)
-            self.export_current_view_info(path)
-            if not scalebar:
-                self.set_optimal_scalebar(force=True)
-                scalebar_box.setChecked(True)
+            # exported with the text sizes they always had, not those of
+            # the windows: draw the view again for the export
+            with theme.unscaled_text():
                 self.update_scene(synchronous=True)
-                self.qimage.save(os.path.splitext(path)[0] + "_scalebar.png")
-                scalebar_box.setChecked(False)
-                self.update_scene(synchronous=True)
+                self.qimage.save(path)
+                self.save_property_colorbar(path)
+                self.export_current_view_info(path)
+                if not scalebar:
+                    self.set_optimal_scalebar(force=True)
+                    scalebar_box.setChecked(True)
+                    self.update_scene(synchronous=True)
+                    self.qimage.save(
+                        os.path.splitext(path)[0] + "_scalebar.png"
+                    )
+                    scalebar_box.setChecked(False)
+            self.update_scene(synchronous=True)
 
     def save_property_colorbar(self, path: str) -> None:
         """Save the color bar (LUT) of the rendered property next to an
