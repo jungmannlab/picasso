@@ -51,7 +51,7 @@ dependencies = [
     "tifffile>=2024.7.24,<2027",
     "wgpu>=0.32,<0.33",
     "PyImarisWriter==0.7.0; sys_platform=='win32'",
-    "hdf5plugin; sys_platform=='win32'"
+    "hdf5plugin"
 ]
 
 [project.optional-dependencies]
@@ -123,7 +123,7 @@ installer = [
     "wgpu==0.32.0",
     "pyinstaller==6.19.0",
     "PyImarisWriter==0.7.0; sys_platform=='win32'",
-    "hdf5plugin==6.0.0; sys_platform=='win32'"
+    "hdf5plugin==6.0.0"
 ]
 # CUDA build: identical to the CPU installer plus the CUDA runtime
 # (GPU rendering via wgpu is in both; this one adds CUDA fitting).

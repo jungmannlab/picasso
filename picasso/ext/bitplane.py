@@ -13,9 +13,17 @@ import h5py
 import datetime
 
 try:
+    # Registers HDF5 compression filters (e.g., LZ4) that some .ims
+    # files use; gzip-compressed files are read by h5py alone.
+    import hdf5plugin  # noqa: F401
+except ModuleNotFoundError:
+    pass
+
+# Reading .ims files needs only h5py; writing them (Render's Export
+# ROI for Imaris) needs PyImarisWriter, which is Windows only.
+try:
     # from PyImarisWriter.ImarisWriterCtypes import *
     from PyImarisWriter import PyImarisWriter as PW
-    import hdf5plugin  # noqa: F401
 
     IMSWRITER = True
 except ModuleNotFoundError:
@@ -111,344 +119,327 @@ def export_extents(viewport, info, z_min, z_max, pixelsize, oversampling, n_z):
     return x_0, y_0, z_0, x_1, y_1, z_1
 
 
-if IMSWRITER:
+class MovieMapper:
+    """
+    MovieMapper class to map ims files.
+    """
 
-    class MovieMapper:
-        """
-        MovieMapper class to map ims files.
-        """
+    def __init__(self, file, RL, lookup_dict, channel, frames, x, y, dtype):
+        self.file = file
+        self.RL = RL
+        self.lookup_dict = lookup_dict
+        self.channel = channel
+        self.x = x
+        self.y = y
+        self.frames = frames
+        self.dtype = dtype
 
-        def __init__(
-            self, file, RL, lookup_dict, channel, frames, x, y, dtype
-        ):
-            self.file = file
-            self.RL = RL
-            self.lookup_dict = lookup_dict
-            self.channel = channel
-            self.x = x
-            self.y = y
-            self.frames = frames
-            self.dtype = dtype
+    def __getitem__(self, item):
+        return self.file["DataSet"][self.RL][self.lookup_dict[item]][
+            self.channel
+        ]["Data"][0][: self.y, : self.x]
 
-        def __getitem__(self, item):
-            return self.file["DataSet"][self.RL][self.lookup_dict[item]][
+    def __len__(self):
+        return len(self.frames)
+
+    @property
+    def shape(self):
+        """Movie shape as a tuple ``(n_frames, y, x)``."""
+        return (len(self.frames), self.y, self.x)
+
+    def __iter__(self):
+        for item in range(len(self.frames)):
+            yield self.file["DataSet"][self.RL][self.lookup_dict[item]][
                 self.channel
             ]["Data"][0][: self.y, : self.x]
 
-        def __len__(self):
-            return len(self.frames)
 
-        @property
-        def shape(self):
-            """Movie shape as a tuple ``(n_frames, y, x)``."""
-            return (len(self.frames), self.y, self.x)
+class MovieMapperStack:
+    """
+    MovieMapperStack class to map ims files. This class is for z-stacks.
+    """
 
-        def __iter__(self):
-            for item in range(len(self.frames)):
-                yield self.file["DataSet"][self.RL][self.lookup_dict[item]][
-                    self.channel
-                ]["Data"][0][: self.y, : self.x]
+    def __init__(self, file, RL, channel, frames, dtype, n_frames):
+        super().__init__()
+        self.file = file
+        self.RL = RL
+        self.channel = channel
+        self.frames = frames
+        self.dtype = dtype
+        self.n_frames = n_frames
 
-    class MovieMapperStack:
-        """
-        MovieMapperStack class to map ims files. This class is for z-stacks.
-        """
+    def __getitem__(self, item):
+        return self.file["DataSet"][self.RL][self.frames[0]][self.channel][
+            "Data"
+        ][item, :, :]
 
-        def __init__(self, file, RL, channel, frames, dtype, n_frames):
-            super().__init__()
-            self.file = file
-            self.RL = RL
-            self.channel = channel
-            self.frames = frames
-            self.dtype = dtype
-            self.n_frames = n_frames
+    def __len__(self):
+        return self.n_frames
 
-        def __getitem__(self, item):
-            return self.file["DataSet"][self.RL][self.frames[0]][self.channel][
+    @property
+    def shape(self):
+        """Stack shape as a tuple ``(n_frames, y, x)``."""
+        data_shape = self.file["DataSet"][self.RL][self.frames[0]][
+            self.channel
+        ]["Data"].shape
+        return (self.n_frames, data_shape[1], data_shape[2])
+
+    def __iter__(self):
+        for item in range(self.n_frames):
+            yield self.file["DataSet"][self.RL][self.frames[0]][self.channel][
                 "Data"
             ][item, :, :]
 
-        def __len__(self):
-            return self.n_frames
 
-        @property
-        def shape(self):
-            """Stack shape as a tuple ``(n_frames, y, x)``."""
-            data_shape = self.file["DataSet"][self.RL][self.frames[0]][
-                self.channel
-            ]["Data"].shape
-            return (self.n_frames, data_shape[1], data_shape[2])
+class IMSFile:
+    """
+    Class for handling IMS files.
 
-        def __iter__(self):
-            for item in range(self.n_frames):
-                yield self.file["DataSet"][self.RL][self.frames[0]][
-                    self.channel
-                ]["Data"][item, :, :]
+    This class is assuming the following:
+        * ResolutionLevel 0 is the default.
+        * The image size doesn't change from one channel to another.
+    """
 
-    class IMSFile:
+    RL = "ResolutionLevel 0"
+
+    def __init__(self, path, verbose=False):
+        if verbose:
+            print("Reading info from {}".format(path))
+        self.path = _ospath.abspath(path)
+        self.file = h5py.File(path, "r")
+
+        self.frames = list(self.file["DataSet"][self.RL].keys())
+        self.n_frames = len(self.frames)
+        self.channels = list(
+            self.file["DataSet"][self.RL][self.frames[0]].keys()
+        )
+
+        self.set_channel(self.channels[0])
+
+        self.frames_read = False
+        self.lookup_dict = None
+
+    def set_channel(self, channel):
+        """Select the channel to read and load its metadata.
+
+        Updates the image size, dtype, z extent, x/y size, pixel
+        size (estimated from the image extents, in nm) and the
+        image extents stored on the instance.
+
+        Parameters
+        ----------
+        channel : str
+            Name of the channel group in the IMS file, e.g.
+            ``"Channel 0"``.
+
+        Raises
+        ------
+        ValueError
+            If the file has no channel named ``channel``.
         """
-        Class for handling IMS files.
+        if channel not in self.channels:
+            raise ValueError(
+                f"No channel {channel!r} in {self.path}. Available "
+                f"channels: {', '.join(self.channels)}."
+            )
+        self.channel = channel
+        data = self.file["DataSet"][self.RL][self.frames[0]][self.channel][
+            "Data"
+        ]
+        self.img_size = data.shape
+        self.dtype = data.dtype
 
-        This class is assuming the following:
-            * ResolutionLevel 0 is the default.
-            * The image size doesn't change from one channel to another.
+        try:
+            z = int(
+                "".join(
+                    [
+                        _.decode()
+                        for _ in self.file["DataSetInfo"]["Image"].attrs["Z"]
+                    ]
+                )
+            )
+        except KeyError:
+            z = self.img_size[0]
+        self.z = z
+
+        try:
+            self.x = int(
+                "".join(
+                    [
+                        _.decode()
+                        for _ in self.file["DataSetInfo"]["Image"].attrs["X"]
+                    ]
+                )
+            )
+            self.y = int(
+                "".join(
+                    [
+                        _.decode()
+                        for _ in self.file["DataSetInfo"]["Image"].attrs["Y"]
+                    ]
+                )
+            )
+        except KeyError:
+            # Data is laid out (z, y, x)
+            self.x = self.img_size[2]
+            self.y = self.img_size[1]
+
+        # The pixelsize is being estimated on the image dimensions
+
+        ext_max0 = float(
+            "".join(
+                [
+                    _.decode()
+                    for _ in self.file["DataSetInfo"]["Image"].attrs["ExtMax0"]
+                ]
+            )
+        )
+        ext_min0 = float(
+            "".join(
+                [
+                    _.decode()
+                    for _ in self.file["DataSetInfo"]["Image"].attrs["ExtMin0"]
+                ]
+            )
+        )
+
+        ext_max1 = float(
+            "".join(
+                [
+                    _.decode()
+                    for _ in self.file["DataSetInfo"]["Image"].attrs["ExtMax1"]
+                ]
+            )
+        )
+        ext_min1 = float(
+            "".join(
+                [
+                    _.decode()
+                    for _ in self.file["DataSetInfo"]["Image"].attrs["ExtMin1"]
+                ]
+            )
+        )
+
+        ext_max2 = float(
+            "".join(
+                [
+                    _.decode()
+                    for _ in self.file["DataSetInfo"]["Image"].attrs["ExtMax2"]
+                ]
+            )
+        )
+        ext_min2 = float(
+            "".join(
+                [
+                    _.decode()
+                    for _ in self.file["DataSetInfo"]["Image"].attrs["ExtMin2"]
+                ]
+            )
+        )
+
+        delta_x = ext_max0 - ext_min0
+        delta_y = ext_max1 - ext_min1
+
+        px_x = delta_x / self.x * 1000
+        px_y = delta_y / self.y * 1000
+
+        px_nm = (px_x + px_y) / 2
+
+        self.pixelsize = px_nm
+
+        self.ext_max0 = ext_max0
+        self.ext_max1 = ext_max1
+        self.ext_max2 = ext_max2
+
+        self.ext_min0 = ext_min0
+        self.ext_min1 = ext_min1
+        self.ext_min2 = ext_min2
+
+    def read_frames(self):
+        """Build the lookup from frame index to time point group.
+
+        Only runs once; subsequent calls are no-ops.
+        """
+        if not self.frames_read:
+            self.frames_int = np.array(
+                [int(_.split("TimePoint ")[1]) for _ in self.frames]
+            )
+            self.lookup_dict = dict(zip(self.frames_int, self.frames))
+
+            self.frames_read = True
+
+    def read_frame(self, frame):
+        """Read a single frame of the current channel.
+
+        Parameters
+        ----------
+        frame : int
+            Frame (time point) index.
+
+        Returns
+        -------
+        h5py.Dataset
+            The first z plane of the requested frame.
+        """
+        if not self.lookup_dict:
+            self.read_frames()
+        return self.file["DataSet"][self.RL][self.lookup_dict[frame]][
+            self.channel
+        ]["Data"][0]
+
+    def read_z_stack(self):
+        """Map the current channel as a z-stack.
+
+        Sets ``self.movie`` to a :class:`MovieMapperStack` whose
+        frames are the z planes.
+        """
+        print("Reading stack")
+        self.n_frames = self.z
+        self.movie = MovieMapperStack(
+            self.file,
+            self.RL,
+            self.channel,
+            self.frames,
+            self.dtype,
+            self.n_frames,
+        )
+
+    def read_stack(self):
+        """Map the current channel as a time series.
+
+        Sets ``self.movie`` to a :class:`MovieMapper` whose frames
+        are the time points.
+        """
+        print("Reading movie")
+        if not self.lookup_dict:
+            self.read_frames()
+
+        self.movie = MovieMapper(
+            self.file,
+            self.RL,
+            self.lookup_dict,
+            self.channel,
+            self.frames,
+            self.x,
+            self.y,
+            self.dtype,
+        )
+
+    def read_movie(self):
+        """Map the current channel as a movie.
+
+        Uses :meth:`read_z_stack` if the image has more than one z
+        plane and :meth:`read_stack` otherwise; the result is
+        stored in ``self.movie``.
         """
 
-        RL = "ResolutionLevel 0"
+        if self.z > 1:
+            self.read_z_stack()
+        else:
+            self.read_stack()
 
-        def __init__(self, path, verbose=False):
-            if verbose:
-                print("Reading info from {}".format(path))
-            self.path = _ospath.abspath(path)
-            self.file = h5py.File(path, "r")
 
-            self.frames = list(self.file["DataSet"][self.RL].keys())
-            self.n_frames = len(self.frames)
-            self.channels = list(
-                self.file["DataSet"][self.RL][self.frames[0]].keys()
-            )
-
-            self.set_channel(self.channels[0])
-
-            self.frames_read = False
-            self.lookup_dict = None
-
-        def set_channel(self, channel):
-            """Select the channel to read and load its metadata.
-
-            Updates the image size, dtype, z extent, x/y size, pixel
-            size (estimated from the image extents, in nm) and the
-            image extents stored on the instance.
-
-            Parameters
-            ----------
-            channel : str
-                Name of the channel group in the IMS file, e.g.
-                ``"Channel 0"``.
-
-            Raises
-            ------
-            ValueError
-                If the file has no channel named ``channel``.
-            """
-            if channel not in self.channels:
-                raise ValueError(
-                    f"No channel {channel!r} in {self.path}. Available "
-                    f"channels: {', '.join(self.channels)}."
-                )
-            self.channel = channel
-            data = self.file["DataSet"][self.RL][self.frames[0]][self.channel][
-                "Data"
-            ]
-            self.img_size = data.shape
-            self.dtype = data.dtype
-
-            try:
-                z = int(
-                    "".join(
-                        [
-                            _.decode()
-                            for _ in self.file["DataSetInfo"]["Image"].attrs[
-                                "Z"
-                            ]
-                        ]
-                    )
-                )
-            except KeyError:
-                z = self.img_size[0]
-            self.z = z
-
-            try:
-                self.x = int(
-                    "".join(
-                        [
-                            _.decode()
-                            for _ in self.file["DataSetInfo"]["Image"].attrs[
-                                "X"
-                            ]
-                        ]
-                    )
-                )
-                self.y = int(
-                    "".join(
-                        [
-                            _.decode()
-                            for _ in self.file["DataSetInfo"]["Image"].attrs[
-                                "Y"
-                            ]
-                        ]
-                    )
-                )
-            except KeyError:
-                # Data is laid out (z, y, x)
-                self.x = self.img_size[2]
-                self.y = self.img_size[1]
-
-            # The pixelsize is being estimated on the image dimensions
-
-            ext_max0 = float(
-                "".join(
-                    [
-                        _.decode()
-                        for _ in self.file["DataSetInfo"]["Image"].attrs[
-                            "ExtMax0"
-                        ]
-                    ]
-                )
-            )
-            ext_min0 = float(
-                "".join(
-                    [
-                        _.decode()
-                        for _ in self.file["DataSetInfo"]["Image"].attrs[
-                            "ExtMin0"
-                        ]
-                    ]
-                )
-            )
-
-            ext_max1 = float(
-                "".join(
-                    [
-                        _.decode()
-                        for _ in self.file["DataSetInfo"]["Image"].attrs[
-                            "ExtMax1"
-                        ]
-                    ]
-                )
-            )
-            ext_min1 = float(
-                "".join(
-                    [
-                        _.decode()
-                        for _ in self.file["DataSetInfo"]["Image"].attrs[
-                            "ExtMin1"
-                        ]
-                    ]
-                )
-            )
-
-            ext_max2 = float(
-                "".join(
-                    [
-                        _.decode()
-                        for _ in self.file["DataSetInfo"]["Image"].attrs[
-                            "ExtMax2"
-                        ]
-                    ]
-                )
-            )
-            ext_min2 = float(
-                "".join(
-                    [
-                        _.decode()
-                        for _ in self.file["DataSetInfo"]["Image"].attrs[
-                            "ExtMin2"
-                        ]
-                    ]
-                )
-            )
-
-            delta_x = ext_max0 - ext_min0
-            delta_y = ext_max1 - ext_min1
-
-            px_x = delta_x / self.x * 1000
-            px_y = delta_y / self.y * 1000
-
-            px_nm = (px_x + px_y) / 2
-
-            self.pixelsize = px_nm
-
-            self.ext_max0 = ext_max0
-            self.ext_max1 = ext_max1
-            self.ext_max2 = ext_max2
-
-            self.ext_min0 = ext_min0
-            self.ext_min1 = ext_min1
-            self.ext_min2 = ext_min2
-
-        def read_frames(self):
-            """Build the lookup from frame index to time point group.
-
-            Only runs once; subsequent calls are no-ops.
-            """
-            if not self.frames_read:
-                self.frames_int = np.array(
-                    [int(_.split("TimePoint ")[1]) for _ in self.frames]
-                )
-                self.lookup_dict = dict(zip(self.frames_int, self.frames))
-
-                self.frames_read = True
-
-        def read_frame(self, frame):
-            """Read a single frame of the current channel.
-
-            Parameters
-            ----------
-            frame : int
-                Frame (time point) index.
-
-            Returns
-            -------
-            h5py.Dataset
-                The first z plane of the requested frame.
-            """
-            if not self.lookup_dict:
-                self.read_frames()
-            return self.file["DataSet"][self.RL][self.lookup_dict[frame]][
-                self.channel
-            ]["Data"][0]
-
-        def read_z_stack(self):
-            """Map the current channel as a z-stack.
-
-            Sets ``self.movie`` to a :class:`MovieMapperStack` whose
-            frames are the z planes.
-            """
-            print("Reading stack")
-            self.n_frames = self.z
-            self.movie = MovieMapperStack(
-                self.file,
-                self.RL,
-                self.channel,
-                self.frames,
-                self.dtype,
-                self.n_frames,
-            )
-
-        def read_stack(self):
-            """Map the current channel as a time series.
-
-            Sets ``self.movie`` to a :class:`MovieMapper` whose frames
-            are the time points.
-            """
-            print("Reading movie")
-            if not self.lookup_dict:
-                self.read_frames()
-
-            self.movie = MovieMapper(
-                self.file,
-                self.RL,
-                self.lookup_dict,
-                self.channel,
-                self.frames,
-                self.x,
-                self.y,
-                self.dtype,
-            )
-
-        def read_movie(self):
-            """Map the current channel as a movie.
-
-            Uses :meth:`read_z_stack` if the image has more than one z
-            plane and :meth:`read_stack` otherwise; the result is
-            stored in ``self.movie``.
-            """
-
-            if self.z > 1:
-                self.read_z_stack()
-            else:
-                self.read_stack()
+if IMSWRITER:
 
     class ImsCallback(PW.CallbackClass):
         """Progress callback for the PyImarisWriter image converter.

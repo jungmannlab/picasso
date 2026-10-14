@@ -40,16 +40,13 @@ if TYPE_CHECKING:
 from . import lib, __version__
 
 from .ext import bitplane
-
-if bitplane.IMSWRITER:
-    from .ext.bitplane import IMSFile
+from .ext.bitplane import IMSFile
 
 # Optional vendor readers for Zeiss .czi and Leica .lif movies. Both are
 # Christoph Gohlke's BSD-licensed libraries (same author as tifffile)
 # and require Python >= 3.12, so they are optional dependencies (extras
 # ``czi`` / ``lif``). When absent, the corresponding extensions are
-# simply not advertised and the loaders raise a helpful ImportError,
-# mirroring how ``.ims`` is gated on ``bitplane.IMSWRITER``.
+# simply not advertised and the loaders raise a helpful ImportError.
 try:
     import czifile
 except ImportError:
@@ -498,8 +495,6 @@ def load_ims(
     ValueError
         If ``prompt_info`` returns a channel the file does not have.
     """
-    if not bitplane.IMSWRITER:
-        raise ImportError(".ims files are only supported on Windows machines.")
     file = IMSFile(path)
 
     channel = file.channels[0]

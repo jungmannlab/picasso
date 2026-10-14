@@ -1,12 +1,11 @@
 """Test reading Bitplane Imaris ``.ims`` movies (``picasso.ext.bitplane``
 and ``picasso.io.load_ims``).
 
-The reader is only defined when PyImarisWriter (Windows only) can be
-imported, although reading needs nothing but ``h5py``. The tests load
-``bitplane.py`` with stand-ins for PyImarisWriter and hdf5plugin so they
-run on every platform, and read small ``.ims`` files written with
-``h5py`` in the Imaris layout. The stand-in writer records the image
-extents that the export hands to it.
+Reading needs nothing but ``h5py`` and works on every platform; the
+tests read small ``.ims`` files written with ``h5py`` in the Imaris
+layout. The writer is only defined when PyImarisWriter (Windows only)
+can be imported, so the export tests load ``bitplane.py`` with a
+stand-in for it that records the image extents the export hands to it.
 
 :author: Rafal Kowalewski, 2026
 :copyright: Copyright (c) 2026 Jungmann Lab, MPI of Biochemistry
@@ -80,9 +79,6 @@ def ims(monkeypatch):
     writer = types.ModuleType("PyImarisWriter")
     writer.PyImarisWriter = _fake_writer()
     monkeypatch.setitem(sys.modules, "PyImarisWriter", writer)
-    monkeypatch.setitem(
-        sys.modules, "hdf5plugin", types.ModuleType("hdf5plugin")
-    )
     spec = importlib.util.spec_from_file_location(
         "_bitplane_with_writer", bitplane.__file__
     )
@@ -136,9 +132,9 @@ def two_channels(tmp_path):
 
 
 class TestIMSFile:
-    def test_set_channel_selects_the_channel(self, ims, two_channels):
+    def test_set_channel_selects_the_channel(self, two_channels):
         path, movies = two_channels
-        file = ims.IMSFile(path)
+        file = bitplane.IMSFile(path)
         assert file.channels == ["Channel 0", "Channel 1"]
         file.set_channel("Channel 1")
         file.read_movie()
@@ -148,9 +144,9 @@ class TestIMSFile:
         assert file.pixelsize == pytest.approx(130)
 
     @pytest.mark.parametrize("channel", ["Channel 2", None])
-    def test_missing_channel_is_reported(self, ims, two_channels, channel):
+    def test_missing_channel_is_reported(self, two_channels, channel):
         path, _ = two_channels
-        file = ims.IMSFile(path)
+        file = bitplane.IMSFile(path)
         with pytest.raises(ValueError, match="Available channels: Channel 0"):
             file.set_channel(channel)
         # The previous channel stays selected.
@@ -158,11 +154,6 @@ class TestIMSFile:
 
 
 class TestLoadIMS:
-    @pytest.fixture(autouse=True)
-    def reader(self, ims, monkeypatch):
-        monkeypatch.setattr(io.bitplane, "IMSWRITER", True)
-        monkeypatch.setattr(io, "IMSFile", ims.IMSFile, raising=False)
-
     def test_prompted_channel_is_loaded(self, two_channels):
         path, movies = two_channels
         movie, info = io.load_ims(path, prompt_info=lambda names: names[1])

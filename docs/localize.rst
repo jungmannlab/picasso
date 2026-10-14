@@ -100,7 +100,7 @@ Picasso Localize reads the following movie formats:
      - A dialog asks for the file specifications when the file is opened.
    * - Imaris
      - ``.ims``
-     - Supported only on Windows. For files with several channels, a dialog asks which channel to load.
+     - For files with several channels, a dialog asks which channel to load.
    * - Nikon ND2
      - ``.nd2``
      - Either a time series (e.g., SMLM measurement) or a z-stack (e.g., calibration) (``T`` or ``Z`` axis).

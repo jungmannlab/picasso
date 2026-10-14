@@ -3906,12 +3906,12 @@ def _validate_fit_args(
     Mutates ``camera_info`` in place (fills in "Pixelsize" if missing), as
     ``fit`` relies on that side effect.
     """
-    accepted_movie_types = (io.AbstractPicassoMovie, np.memmap)
-    if bitplane.IMSWRITER:
-        accepted_movie_types += (
-            bitplane.MovieMapper,
-            bitplane.MovieMapperStack,
-        )
+    accepted_movie_types = (
+        io.AbstractPicassoMovie,
+        np.memmap,
+        bitplane.MovieMapper,
+        bitplane.MovieMapperStack,
+    )
     assert isinstance(
         movie, accepted_movie_types
     ), "movie must be a movie loaded by picasso.io.load_movie"

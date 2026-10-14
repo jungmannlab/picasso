@@ -70,6 +70,7 @@ Last change: 14-OCT-2026 CEST
 - Fixed: `Height` and `Width` were swapped in the metadata of non-square `.ims` movies.
 - Fixed drift estimation when adding to database + database building.
 - Fixed: canceling the channel selection when opening a multi-channel IMARIS .ims movie raised an error instead of loading the first channel, as for .czi and .lif.
+- Imaris `.ims` movies can now be opened on macOS and Linux, not only Windows. Exporting `.ims` files (Render's `Export ROI for Imaris`) remains Windows only. `hdf5plugin` is now installed on all platforms.
 
 ### Filter
 - Filtering by expression: `Filter > Filter by expression...` for universal filtering with comparisons, logic, arithmetic, functions and statistics over the shown localizations. See the [documentation](https://picassosr.readthedocs.io/en/latest/filter.html#filter-expression).
