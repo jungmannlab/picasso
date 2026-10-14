@@ -4,7 +4,7 @@ Last change: 14-OCT-2026 CEST
 
 ## 1.0.0
 
-**TODO**: Describe the general overview - fast render, documentation etc. Highlight that there's a lot of backward incompatible changes for `picassosr` users.
+**TODO**: Describe the general overview - fast render, documentation etc. Highlight that there's a lot of backward incompatible changes for `picassosr` users. Accessibility? 
 
 ### General
 - New [documentation](https://picassosr.readthedocs.io/en/latest) that is user-friendly, intuitive and thoroughly explains every Picasso functionality. Quick start page was added with minimal introduction to Picasso. Python API can now be found by a simple browser search in the documentation.
@@ -48,6 +48,7 @@ Last change: 14-OCT-2026 CEST
 - Files dialogs widgets are grayed out if they do not apply at the given moment.
 - Faster G5M.
 - Files dialog is now shown as a table with indices for easier navigation. Channels can be reordered and the default ordering of colors can be adjusted. `Load colors` works with any number of channels.
+- `Colorblind-safe colors` checkbox in the Files dialog colors the channels magenta, green, cyan, blue, and so on, which people with red-green color blindness can tell apart. See the [documentation](https://picassosr.readthedocs.io/en/latest/render/menu-view.html#render-default-colors).
 - The Info dialog shows the median localization precision of any loaded channel.
 - *Align channels* can remove the localizations that lie outside the overlap of the aligned channels. See the [documentation](https://picassosr.readthedocs.io/en/latest/render/menu-postprocess.html#render-align-non-overlapping).
 - Fixed: closing a channel in Render did not remove its drift data, so the drift of the channels after it was misaligned.

@@ -132,6 +132,9 @@ CHANNEL_COLOR_CHARS = 9
 # key (in the Render section of the user settings) of the colors given
 # to newly loaded channels, in order
 CHANNEL_COLORS_KEY = "Channel colors"
+# key (in the Render section of the user settings) of whether newly
+# loaded channels get the colorblind-safe colors instead
+COLORBLIND_SAFE_KEY = "Colorblind-safe colors"
 # key (in the Render section of the user settings) of whether Align
 # channels keeps the localizations outside the overlap of the channels
 KEEP_NON_OVERLAPPING_KEY = "Keep non-overlapping after alignment"
@@ -540,6 +543,11 @@ class DatasetDialog(lib.Dialog):
         List with QPushButtons for ticking/unticking each channel.
     closebuttons : list
         List of QPushButtons to close each channel
+    colorblind_safe : QCheckBox
+        Tick to color the channels with ``colorblind_safe_colors``
+        instead of the default colors.
+    colorblind_safe_colors : list
+        The 14 default colors ordered for colorblind viewers.
     colordisp_all : list
         List of QLabels showing the color selected for each channel.
     colorpickers : list
@@ -667,6 +675,21 @@ class DatasetDialog(lib.Dialog):
         self.auto_colors.stateChanged.connect(self.update_colors)
         self.auto_colors.stateChanged.connect(self._update_color_selection)
         layout.addWidget(self.auto_colors, 3, 0)
+        self.colorblind_safe = QtWidgets.QCheckBox("Colorblind-safe colors")
+        self.colorblind_safe.setToolTip(
+            "Color the channels in an order that people with red-green\n"
+            "color blindness can tell apart (magenta, green, cyan, blue,\n"
+            "...)? Recolors the loaded channels and applies to the\n"
+            "channels loaded next. Beyond four channels, some colors\n"
+            "look alike to colorblind viewers."
+        )
+        render_settings = io.load_user_settings()["Render"]
+        self.colorblind_safe.setChecked(
+            isinstance(render_settings, dict)
+            and render_settings.get(COLORBLIND_SAFE_KEY) is True
+        )
+        self.colorblind_safe.toggled.connect(self.set_colorblind_safe)
+        layout.addWidget(self.colorblind_safe, 0, 1)
 
         # add buttons to save/load colors - right side
         save_button = QtWidgets.QPushButton("Save colors")
@@ -803,6 +826,28 @@ class DatasetDialog(lib.Dialog):
             "sage",
             "jade",
             "azure",
+        ]
+        # the default colors ordered so that the first ones stay apart
+        # for protanopes and deuteranopes (simulated after Machado et
+        # al., IEEE TVCG 2009): magenta/green is the usual colorblind-
+        # safe pair, and blue tells the fourth channel from the others
+        # better than yellow does; the rest follow greedily by the
+        # largest smallest color difference to the colors before them
+        self.colorblind_safe_colors = [
+            "magenta",
+            "green",
+            "cyan",
+            "blue",
+            "carmine",
+            "jade",
+            "red",
+            "orange",
+            "amethyst",
+            "sage",
+            "yellow",
+            "purple",
+            "azure",
+            "forestgreen",
         ]
         self.rgb = [
             [1, 0, 0],
@@ -1771,18 +1816,21 @@ class DatasetDialog(lib.Dialog):
     def default_channel_colors(self) -> list[str]:
         """The colors given to newly loaded channels, in order.
 
-        Read from ``CHANNEL_COLORS_KEY`` in the Render section of the
-        user settings, followed by the built-in default colors that it
-        does not name; entries that are not valid colors are skipped.
-        A missing key is written with the built-in default colors (so
-        that it is visible in the file), unless the file on disk could
-        not be read.
+        ``colorblind_safe_colors`` while ``colorblind_safe`` is ticked.
+        Otherwise read from ``CHANNEL_COLORS_KEY`` in the Render
+        section of the user settings, followed by the built-in default
+        colors that it does not name; entries that are not valid colors
+        are skipped. A missing key is written with the built-in default
+        colors (so that it is visible in the file), unless the file on
+        disk could not be read.
 
         Returns
         -------
         colors : list of str
             Color identifiers (names, hexadecimal codes or colormaps).
         """
+        if self.colorblind_safe.isChecked():
+            return list(self.colorblind_safe_colors)
         settings = io.load_user_settings()
         render_settings = settings["Render"]
         stored = None
@@ -1841,12 +1889,38 @@ class DatasetDialog(lib.Dialog):
 
     def _write_default_colors(self, colors: list[str]) -> None:
         """Write the colors given to newly loaded channels to the user
-        settings."""
+        settings and untick ``colorblind_safe`` (which would otherwise
+        replace them), leaving the loaded channels as they are."""
         settings = io.load_user_settings()
         if not isinstance(settings["Render"], dict):
             settings["Render"] = {}
         settings["Render"][CHANNEL_COLORS_KEY] = colors
+        settings["Render"][COLORBLIND_SAFE_KEY] = False
         io.save_user_settings(settings)
+        self.colorblind_safe.blockSignals(True)
+        self.colorblind_safe.setChecked(False)
+        self.colorblind_safe.blockSignals(False)
+
+    def set_colorblind_safe(self, checked: bool) -> None:
+        """Save whether the channels get the colorblind-safe colors and
+        recolor the loaded channels with the colors that newly loaded
+        channels get (unticking ``auto_colors``, which would hide
+        them)."""
+        settings = io.load_user_settings()
+        if not isinstance(settings["Render"], dict):
+            settings["Render"] = {}
+        settings["Render"][COLORBLIND_SAFE_KEY] = checked
+        io.save_user_settings(settings)
+        for i, combo in enumerate(self.colorselection):
+            combo.blockSignals(True)
+            combo.setCurrentText(self.default_channel_color(i))
+            combo.blockSignals(False)
+            _show_text_start(combo)
+        if self.auto_colors.isChecked():
+            # its stateChanged handlers update the colors
+            self.auto_colors.setChecked(False)
+        else:
+            self.update_colors()
 
     def save_colors(self) -> None:
         """Save the list of colors as a .txt file."""

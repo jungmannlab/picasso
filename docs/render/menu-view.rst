@@ -102,6 +102,16 @@ next files you load are blue, yellow, magenta, red, cyan, green, and so on.
 original order. The default colors are saved as ``Channel colors`` in the
 user settings (see :ref:`user-settings-file`), where you can also edit them.
 
+Tick ``Colorblind-safe colors`` to color the channels in an order that people
+with red-green color blindness (protanopia and deuteranopia) can tell apart:
+``magenta``, ``green``, ``cyan``, ``blue``, followed by the remaining built-in
+colors. Unticking it recolors the loaded channels with the default
+colors. Up to four channels stay distinguishable; beyond that, no set of
+colors does, so show fewer channels at a time where colors matter. Clicking
+``Default colors`` > ``Save current colors as default`` or ``Restore built-in
+default colors`` unticks the checkbox so that the new default colors take
+effect; the loaded channels keep their colors.
+
 ``Background color`` sets the color of pixels without localizations in
 multichannel images (black by default). ``Invert colors / white background``
 gives multichannel images a white background and inverts the colormap of a

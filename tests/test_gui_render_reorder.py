@@ -249,6 +249,48 @@ def test_restore_default_colors(window):
     assert dialog.default_channel_colors() == list(dialog.default_colors)
 
 
+def test_colorblind_safe_colors(window, tmp_path):
+    dialog = window.dataset_dialog
+    dialog.auto_colors.setChecked(True)
+    dialog.colorblind_safe.setChecked(True)
+    assert not dialog.auto_colors.isChecked()
+    assert [c.currentText() for c in dialog.colorselection] == [
+        "magenta",
+        "green",
+        "cyan",
+    ]
+    assert np.array_equal(
+        dialog._channel_luts[0], dialog.resolve_color_identifier("magenta")
+    )
+    assert io.load_user_settings()["Render"][gui_render.COLORBLIND_SAFE_KEY]
+
+    second = gui_render.Window(plugins_loaded=True)
+    for i in range(4):
+        _add(second, tmp_path, i)
+    assert second.dataset_dialog.colorblind_safe.isChecked()
+    assert second.dataset_dialog.colorselection[3].currentText() == "blue"
+
+    dialog.colorblind_safe.setChecked(False)
+    assert [c.currentText() for c in dialog.colorselection] == [
+        "red",
+        "cyan",
+        "green",
+    ]
+    stored = io.load_user_settings()["Render"]
+    assert stored[gui_render.COLORBLIND_SAFE_KEY] is False
+
+
+def test_saving_default_colors_unticks_colorblind_safe(window):
+    dialog = window.dataset_dialog
+    dialog.colorblind_safe.setChecked(True)
+    dialog.colorselection[0].setCurrentText("blue")
+    dialog.save_default_colors()
+    assert not dialog.colorblind_safe.isChecked()
+    # the loaded channels keep their colors
+    assert dialog.colorselection[0].currentText() == "blue"
+    assert dialog.default_channel_colors()[:3] == ["blue", "green", "cyan"]
+
+
 def test_load_colors_with_fewer_names(window, tmp_path, monkeypatch):
     path = tmp_path / "colors.txt"
     path.write_text("blue\nyellow\n")

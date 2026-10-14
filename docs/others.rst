@@ -242,6 +242,9 @@ Top level
    * - ``Channel colors``
      - ``red``, ``cyan``, ``green``, … (the 14 solid colors)
      - Colors given to newly loaded channels, in order: names, hexadecimal codes or colormaps from the *Color* dropdown of ``View > Files``. Channels beyond the list get the remaining built-in colors. See :ref:`Default colors <render-default-colors>`.
+   * - ``Colorblind-safe colors``
+     - ``False``
+     - Color the channels in an order that people with red-green color blindness can tell apart, instead of ``Channel colors``. See :ref:`Default colors <render-default-colors>`.
    * - ``PWD``
      - *(last used)*
      - Remembered last value: the directory used in Render's file dialogs.
