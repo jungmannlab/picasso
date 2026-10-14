@@ -46,7 +46,8 @@ next.
 Widgets that paint themselves take their colors from their palette and
 their stylesheets refer to it (e.g., ``palette(mid)``), so that they
 follow the theme. ``set_button_state`` marks a button, e.g., as done
-("ok"), in the colors of the theme.
+("ok"), in the colors of the theme and with an icon, so that the state
+does not rely on color alone.
 
 :author: Rafal Kowalewski
 :copyright: Copyright (c) 2026 Jungmann Lab, MPI of Biochemistry
@@ -139,6 +140,16 @@ NEUTRALS = {
 }
 #: Button states of ``set_button_state`` -> color of ``NEUTRALS``.
 BUTTON_STATES = {"ok": "success", "warning": "warning", "danger": "danger"}
+#: Button states of ``set_button_state`` -> icon (see ``icon``) and the
+#: description read out by screen readers.
+BUTTON_STATE_ICONS = {
+    "ok": ("state-ok", "Done"),
+    "warning": ("state-warning", "Warning"),
+    "danger": ("state-danger", "Error"),
+}
+#: Dynamic property holding a button's own icon while
+#: ``set_button_state`` shows a state icon instead.
+_ICON_WITHOUT_STATE = "picassoIconWithoutState"
 
 #: Per density: layout margins of windows and of other widgets, layout
 #: spacing, padding of push buttons (vertical, horizontal) and of tool
@@ -878,8 +889,11 @@ def _stripped(text: str) -> str:
 def set_button_state(
     button: QtWidgets.QPushButton, state: str | None = None
 ) -> None:
-    """Show ``button`` in the color of a state, e.g., green once the
-    file it loads was loaded.
+    """Show ``button`` in the color and with the icon of a state, e.g.,
+    green with a check mark once the file it loads was loaded. The icon
+    (``BUTTON_STATE_ICONS``) replaces the button's own icon, which comes
+    back with the normal look, so that the state does not rely on color
+    alone; screen readers read the state out.
 
     Parameters
     ----------
@@ -894,6 +908,18 @@ def set_button_state(
             f"Unknown button state {state!r}, expected one of "
             f"{tuple(BUTTON_STATES)} or None."
         )
+    own_icon = button.property(_ICON_WITHOUT_STATE)
+    if state is None:
+        if own_icon is not None:
+            button.setIcon(own_icon)
+            button.setProperty(_ICON_WITHOUT_STATE, None)
+        button.setAccessibleDescription("")
+    else:
+        if own_icon is None:
+            button.setProperty(_ICON_WITHOUT_STATE, button.icon())
+        name, description = BUTTON_STATE_ICONS[state]
+        button.setIcon(icon(name))
+        button.setAccessibleDescription(description)
     button.setProperty("state", state or "")
     # dynamic properties are matched when the widget is polished
     style = button.style()

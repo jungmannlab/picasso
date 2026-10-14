@@ -277,6 +277,38 @@ def test_set_button_state(qt_offscreen, restore_theme):
         theme.set_button_state(button, "great")
 
 
+def _icon_image(icon: QtGui.QIcon) -> QtGui.QImage:
+    return icon.pixmap(16, 16).toImage()
+
+
+def test_button_states_have_icons(qt_offscreen, restore_theme):
+    """The state does not rely on color alone: each state shows its own
+    icon and is read out by screen readers."""
+    theme.apply(restore_theme, Appearance(mode="Light"))
+    own = theme.icon("open")
+    button = QtWidgets.QPushButton("Load")
+    button.setIcon(own)
+    images = []
+    for state, (name, description) in theme.BUTTON_STATE_ICONS.items():
+        assert not theme.icon(name).isNull()
+        theme.set_button_state(button, state)
+        assert button.accessibleDescription() == description
+        images.append(_icon_image(button.icon()))
+    # all state icons differ from each other and from the own icon
+    images.append(_icon_image(own))
+    for i, image in enumerate(images):
+        assert all(image != other for other in images[i + 1 :])
+    # the normal look brings the button's own icon back
+    theme.set_button_state(button, None)
+    assert _icon_image(button.icon()) == _icon_image(own)
+    assert button.accessibleDescription() == ""
+    # a button without an icon gets none back
+    plain = QtWidgets.QPushButton("Load")
+    theme.set_button_state(plain, "ok")
+    theme.set_button_state(plain, None)
+    assert plain.icon().isNull()
+
+
 # -- dialog -----------------------------------------------------------
 
 

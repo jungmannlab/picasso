@@ -94,6 +94,7 @@ Last change: 14-OCT-2026 CEST
 
 ### Others
 - Many plots are now customizable.
+- Buttons that show a state (e.g., a loaded file in SPINNA) show an icon besides their color, so that the state does not rely on color alone; screen readers read it out.
 - Code readability clean ups (flake8).
 - The spatial index stored in localization .hdf5 files (`/render_index`). See the [documentation](https://picassosr.readthedocs.io/en/latest/files.html#spatial-index).
 - The user settings file (`~/.picasso/settings.yaml`) is no longer lost when it cannot be read. Also, the [documentation](https://picassosr.readthedocs.io/en/latest/others.html#user-settings-file) has been added.
