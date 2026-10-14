@@ -4,8 +4,9 @@
 light or dark palette and an accent color, a stylesheet for buttons and
 group boxes, a font size and a density. These tests cover reading the
 appearance from the user settings (including invalid values), the
-contrast of the palettes, applying the theme and returning to the
-platform's look, the button states and the appearance dialog.
+contrast of the palettes (also in high contrast), applying the theme and
+returning to the platform's look, following the operating system's
+contrast, the button states and the appearance dialog.
 
 :author: Rafal Kowalewski, 2026
 :copyright: Copyright (c) 2026 Jungmann Lab, MPI of Biochemistry
@@ -158,6 +159,127 @@ def test_every_color_group_is_set():
             NEUTRALS["Dark"]["window"]
         )
     assert palette.color(Role.Highlight).name().upper() == ACCENTS["Blue"]
+
+
+@pytest.mark.parametrize("dark", [False, True])
+@pytest.mark.parametrize("accent", list(ACCENTS.values()) + ["#FFFF00"])
+def test_high_contrast_palettes(dark, accent):
+    """Text reaches 7:1 (WCAG AAA) and disabled text 4.5:1; the accent
+    reaches 3:1 against the window and text on it 4.5:1, also for
+    accents that are too light or too dark for the theme."""
+    palette = theme.build_palette(
+        Appearance(accent=accent), dark, high_contrast=True
+    )
+
+    def ratio(fg, bg, group=Group.Active):
+        return theme.contrast_ratio(
+            palette.color(group, fg), palette.color(group, bg)
+        )
+
+    for fg, bg in (
+        (Role.Text, Role.Base),
+        (Role.WindowText, Role.Window),
+        (Role.ButtonText, Role.Button),
+        (Role.PlaceholderText, Role.Base),
+        (Role.ToolTipText, Role.ToolTipBase),
+    ):
+        assert ratio(fg, bg) >= 7
+    assert ratio(Role.WindowText, Role.Window) == pytest.approx(21)
+    assert ratio(Role.WindowText, Role.Window, Group.Disabled) >= 4.5
+    assert ratio(Role.Highlight, Role.Window) >= 3
+    assert ratio(Role.HighlightedText, Role.Highlight) >= 4.5
+    # the frames that the style draws in high contrast and the grid
+    # lines of tables (mid) stand out from the window
+    assert ratio(Role.Mid, Role.Window) >= 3
+
+
+@pytest.mark.parametrize("dark", [False, True])
+def test_high_contrast_stylesheet_and_states(dark):
+    colors = NEUTRALS["Dark high contrast" if dark else "Light high contrast"]
+    sheet = theme.stylesheet(Appearance(), dark, high_contrast=True)
+    assert f"border: 1px solid {colors['border']}" in sheet
+    assert theme.contrast_ratio(colors["border"], colors["window"]) == (
+        pytest.approx(21)
+    )
+    # the state borders stand out from the window as well
+    for key in theme.BUTTON_STATES.values():
+        assert theme.contrast_ratio(colors[key], colors["window"]) >= 4.5
+    assert sheet != theme.stylesheet(Appearance(), dark)
+
+
+def test_contrast_setting(qapp):
+    assert Appearance().contrast == "System"
+    assert Appearance.from_settings({"contrast": "High"}).contrast == "High"
+    assert Appearance.from_settings({"contrast": "Max"}).contrast == "System"
+    assert theme.is_high_contrast(Appearance(contrast="High"), qapp)
+    assert not theme.is_high_contrast(Appearance(contrast="Normal"), qapp)
+    # "System" follows the operating system
+    preference = qapp.styleHints().accessibility().contrastPreference()
+    assert theme.is_high_contrast(Appearance(), qapp) == (
+        preference == QtCore.Qt.ContrastPreference.HighContrast
+    )
+
+
+def _edge_ratio(widget: QtWidgets.QWidget) -> float:
+    """Contrast of the left edge of ``widget`` against the window."""
+    image = widget.grab().toImage()
+    window = widget.palette().color(Role.Window)
+    y = image.height() // 2
+    return max(
+        theme.contrast_ratio(image.pixelColor(x, y), window) for x in range(3)
+    )
+
+
+@pytest.mark.parametrize("mode", ["Light", "Dark"])
+def test_high_contrast_frames_input_fields(qt_offscreen, restore_theme, mode):
+    """Fusion's frames of input fields are faint; in high contrast the
+    style draws them in the color of the text."""
+    ratios = {}
+    for contrast in ("Normal", "High"):
+        theme.apply(restore_theme, Appearance(mode=mode, contrast=contrast))
+        assert theme._state["high_contrast"] == (contrast == "High")
+        widgets = [
+            QtWidgets.QLineEdit(),
+            QtWidgets.QSpinBox(),
+            QtWidgets.QComboBox(),
+        ]
+        ratios[contrast] = []
+        for widget in widgets:
+            widget.resize(120, 26)
+            ratios[contrast].append(_edge_ratio(widget))
+            widget.deleteLater()
+    assert all(ratio < 3 for ratio in ratios["Normal"])
+    assert all(ratio >= 7 for ratio in ratios["High"])
+
+
+def test_follows_the_operating_systems_contrast(
+    qt_offscreen, restore_theme, monkeypatch
+):
+    theme.apply(restore_theme, Appearance(mode="Light"))
+    assert not theme._state["high_contrast"]
+    applied = []
+    theme.hub().changed.connect(applied.append)
+    widget = QtWidgets.QWidget()
+    # the platform sends theme change events when its contrast changes
+    monkeypatch.setattr(theme, "is_high_contrast", lambda *args: True)
+    QtWidgets.QApplication.sendEvent(
+        widget, QtCore.QEvent(QtCore.QEvent.Type(theme._THEME_CHANGE))
+    )
+    assert theme._state["high_contrast"]
+    assert len(applied) == 1
+    # other theme changes do not apply the appearance again
+    QtWidgets.QApplication.sendEvent(
+        widget, QtCore.QEvent(QtCore.QEvent.Type(theme._THEME_CHANGE))
+    )
+    assert len(applied) == 1
+    # a fixed contrast does not follow
+    theme.apply(restore_theme, Appearance(mode="Light", contrast="Normal"))
+    applied.clear()
+    QtWidgets.QApplication.sendEvent(
+        widget, QtCore.QEvent(QtCore.QEvent.Type(theme._THEME_CHANGE))
+    )
+    assert applied == []
+    widget.deleteLater()
 
 
 def test_dark_mode_is_resolved_from_the_mode(qapp):
@@ -315,6 +437,7 @@ def test_button_states_have_icons(qt_offscreen, restore_theme):
 def test_dialog_shows_and_returns_the_appearance(qt_offscreen):
     appearance = Appearance(
         mode="Dark",
+        contrast="High",
         accent=ACCENTS["Purple"],
         font_scale=110,
         density="Compact",
@@ -341,10 +464,16 @@ def test_dialog_links_to_its_documentation(qt_offscreen):
 
 def test_dialog_hides_settings_native_does_not_use(qt_offscreen):
     dialog = theme.AppearanceDialog(Appearance(mode="Native"))
-    for widget in (dialog.accent, dialog.font_scale, dialog.density):
+    themed = (
+        dialog.contrast,
+        dialog.accent,
+        dialog.font_scale,
+        dialog.density,
+    )
+    for widget in themed:
         assert not dialog.form.isRowVisible(widget)
     dialog.mode.setCurrentText("Light")
-    for widget in (dialog.accent, dialog.font_scale, dialog.density):
+    for widget in themed:
         assert dialog.form.isRowVisible(widget)
 
 

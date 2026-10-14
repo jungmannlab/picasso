@@ -195,6 +195,9 @@ def restore_theme(qapp):
         qapp.styleHints().colorSchemeChanged.disconnect(
             theme._on_color_scheme_changed
         )
+        for watcher in qapp.findChildren(theme._ContrastWatcher):
+            qapp.removeEventFilter(watcher)
+            watcher.deleteLater()
     theme._state.clear()
     theme._state.update(state)
     qapp.setStyleSheet(stylesheet)

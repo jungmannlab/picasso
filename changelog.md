@@ -94,6 +94,7 @@ Last change: 14-OCT-2026 CEST
 
 ### Others
 - Many plots are now customizable.
+- High contrast (`File > Appearance... > Contrast`): black and white text and backgrounds, and frames in the color of the text around buttons, input fields and tables. By default it follows macOS's *Increase contrast* and Windows' contrast themes. See the [documentation](https://picassosr.readthedocs.io/en/latest/others.html#appearance).
 - Screen readers (VoiceOver, Narrator, Orca) announce the input fields of all Picasso windows by their labels, fields in tables by their column and icon-only buttons by their tooltip. See the [documentation](https://picassosr.readthedocs.io/en/latest/others.html#accessibility). Note this is an experimental feature, if there is room for improvement, please raise a [GitHub issue](https://github.com/jungmannlab/picasso/issues)
 - Buttons that show a state (e.g., a loaded file in SPINNA) show an icon besides their color, so that the state does not rely on color alone; screen readers read it out.
 - Code readability clean ups (flake8).
