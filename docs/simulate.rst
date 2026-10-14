@@ -36,7 +36,9 @@ Simulate DNA-PAINT image acquisitions
    ~200-300 ms.
 4. In ``Imager parameters``, fluorophore characteristics such as PSF width and
    photon budget can be set. Adjusting the ``Power density`` field affects the
-   simulation analogously to changing the laser power in an experiment.
+   simulation analogously to changing the laser power in an experiment: the
+   photon rate is the power density times the ``Photon detection rate``, shown
+   as photons per frame.
 5. The ``Camera parameters`` group allows the user to set the number of
    acquisition frames and integration time. Values calculated from the
    settings, such as the total acquisition time, the mean dark time or the
@@ -117,7 +119,10 @@ every structure and then converting it to a movie that will be saved as a .raw
 file, ready for subsequent localization.
 
 - All simulation settings are saved and can be loaded at a later time with
-  ``File > Load settings from previous simulation...``.
+  ``File > Load settings from previous simulation...``: select the .yaml file
+  next to the simulated movie. This restores the settings and the simulated
+  docking strand positions; a file that does not contain them is reported and
+  changes nothing.
 - For 3D data, check ``Simulate 3D`` and load the 3D calibration with
   ``File > Load 3D calibration...`` (see :ref:`localize-3d-calibration` for
   how to create one).

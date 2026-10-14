@@ -1,6 +1,6 @@
 # Changelog
 
-Last change: 13-OCT-2026 CEST
+Last change: 14-OCT-2026 CEST
 
 ## 1.0.0
 
@@ -97,6 +97,8 @@ Last change: 13-OCT-2026 CEST
 - Fixed: combining localizations whose columns differ (e.g. with and without `net_gradient`, spherical and elliptical, least-squares and MLE fits, or 2D and 3D data) silently deleted all localizations of the files lacking a column when saving. `picasso join`, RESI, and the multi-channel saves of Render (picked localizations, also per pick) and its 3D window now drop the columns not all of them have, with a warning.
 - Fixed Nanotron's PyQt6 information dialogs.
 - Picasso: Simulate has a new cleaner layout.
+- Fixed: Simulate simulated a different photon rate than it showed. Until the power density or the photon detection rate was changed, a new window simulated 5,300 photons per frame (an outdated default) while showing 22,750, and photon rates above 1,000 photons per ms were capped. **Simulations with the default settings are therefore about 4x brighter than before**; set the `Photon detection rate` to ~300 for the previous brightness.
+- Fixed: Simulate's `File > Load settings from previous simulation...` failed with an error, leaving the settings half loaded, when the selected .yaml file was not written by Simulate. Such files are now reported and change nothing.
 - Fixed: Simulate's `File > Import handles...` crashed for .yaml files (the structure landed in the corner of the field of view, outside the frame) and ignored their z coordinates.
 - Text search in the user settings dialog (`File > Picasso settings`).
 - Contrast slider at the bottom of the Render window, like the one in Localize. Whether Render and Localize show it is set by `contrast_slider` in the user settings (off in Render, on in Localize by default). See the [documentation](https://picassosr.readthedocs.io/en/latest/render/display-settings.html#render-contrast-slider).

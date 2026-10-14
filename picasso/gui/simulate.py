@@ -517,13 +517,17 @@ class Window(QtWidgets.QMainWindow):
         self.psfEdit.setRange(0, 3)
         self.psfEdit.setSingleStep(0.01)
         self.psf_fwhmEdit = QtWidgets.QLabel()
+        # The photon rate and its std follow from the power density and
+        # the photon detection rate (changeImager); their ranges and
+        # decimals hold any product so that the simulation uses the
+        # photons per frame shown.
         self.photonrateEdit = QtWidgets.QDoubleSpinBox()
-        self.photonrateEdit.setRange(0, 1000)
-        self.photonrateEdit.setDecimals(0)
+        self.photonrateEdit.setRange(0, 1e6)
+        self.photonrateEdit.setDecimals(2)
         self.photonsframeEdit = QtWidgets.QLabel()
         self.photonratestdEdit = QtWidgets.QDoubleSpinBox()
-        self.photonratestdEdit.setRange(0, 1000)
-        self.photonratestdEdit.setDecimals(0)
+        self.photonratestdEdit.setRange(0, 1e6)
+        self.photonratestdEdit.setDecimals(2)
         self.photonstdframeEdit = QtWidgets.QLabel()
         self.photonbudgetEdit = QtWidgets.QDoubleSpinBox()
         self.photonbudgetEdit.setRange(0, 100000000)
@@ -533,6 +537,7 @@ class Window(QtWidgets.QMainWindow):
         self.photonslopeEdit = QtWidgets.QDoubleSpinBox()
         self.photonslopeEdit.setRange(0, 10000)
         self.photonslopeStdEdit = QtWidgets.QDoubleSpinBox()
+        self.photonslopeStdEdit.setRange(0, 10000)
 
         self.laserpowerEdit.setValue(LASERPOWER_DEFAULT)
         self.psfEdit.setValue(PSF_DEFAULT)
@@ -967,6 +972,7 @@ class Window(QtWidgets.QMainWindow):
         simgrid.addWidget(self.exportkinetics, 3, 0, 1, 2)
 
         self.changeTime()
+        self.changeImager()  # the photon rate of the defaults
         self.changePSF()
         self.changeNoise()
         self.changePaint()
@@ -1796,111 +1802,130 @@ class Window(QtWidgets.QMainWindow):
                 )
         notifications.notify_finished(time.time() - t0)
 
-    def loadSettings(self) -> None:  # TODO: re-write exceptions, check key
-        """Load simulation settings from a YAML file."""
+    def loadSettings(self) -> None:
+        """Load the settings of a simulation from its .yaml file,
+        including the simulated docking strand positions.
+
+        A file without the settings is reported and changes nothing. The
+        3D, constant photon rate std, background and noise model settings
+        are applied only if the file has them.
+        """
         path, exe = QtWidgets.QFileDialog.getOpenFileName(
             self, "Open yaml", filter="*.yaml"
         )
-        if path:
-            info = io.load_info(path)
-            self.framesEdit.setValue(info[0]["Frames"])
-
-            self.structureframeEdit.setValue(info[0]["Structure.Frame"])
-            self.structurenoEdit.setValue(info[0]["Structure.Number"])
-            self.structurexxEdit.setText(info[0]["Structure.StructureX"])
-            self.structureyyEdit.setText(info[0]["Structure.StructureY"])
-            self.structureexEdit.setText(info[0]["Structure.StructureEx"])
-            try:
-                self.structure3DEdit.setText(info[0]["Structure.Structure3D"])
-                self.mode3DEdit.setChecked(info[0]["Structure.3D"])
-                self.cx = info[0]["Structure.CX"]
-                self.cy = info[0]["Structure.CY"]
-            except Exception as e:
-                print(e)
-                pass
-            try:
-                self.photonslopemodeEdit.setChecked(
-                    info[0]["Imager.Constant Photonrate Std"]
-                )
-            except Exception as e:
-                print(e)
-                pass
-
-            try:
-                self.backgroundlevelEdit.setValue(
-                    info[0]["Imager.BackgroundLevel"]
-                )
-            except Exception as e:
-                print(e)
-                pass
-            self.structureIncorporationEdit.setValue(
-                info[0]["Structure.Incorporation"]
+        if not path:
+            return
+        title = "Load settings"
+        try:
+            documents = io.load_info(path)
+        except Exception as error:  # e.g., not valid YAML
+            QtWidgets.QMessageBox.warning(
+                self, title, f"Could not read {path}:\n{error}"
             )
+            return
+        info = documents[0] if documents else None
+        if not isinstance(info, dict):
+            info = {}
 
-            self.structurerandomEdit.setChecked(
-                info[0]["Structure.Arrangement"]
+        def check(widget):
+            return lambda value: widget.setChecked(bool(value))
+
+        required = {
+            "Structure.Frame": self.structureframeEdit.setValue,
+            "Structure.Number": self.structurenoEdit.setValue,
+            "Structure.StructureX": self.structurexxEdit.setText,
+            "Structure.StructureY": self.structureyyEdit.setText,
+            "Structure.StructureEx": self.structureexEdit.setText,
+            "Structure.Incorporation": (
+                self.structureIncorporationEdit.setValue
+            ),
+            "Structure.Arrangement": check(self.structurerandomEdit),
+            "Structure.Orientation": check(
+                self.structurerandomOrientationEdit
+            ),
+            "PAINT.k_on": self.konEdit.setValue,
+            "PAINT.imager": self.imagerconcentrationEdit.setValue,
+            "PAINT.taub": self.taubEdit.setValue,
+            "Imager.PSF": self.psfEdit.setValue,
+            "Imager.Photonrate": self.photonrateEdit.setValue,
+            "Imager.Photonrate Std": self.photonratestdEdit.setValue,
+            "Imager.Photonbudget": self.photonbudgetEdit.setValue,
+            "Imager.Laserpower": self.laserpowerEdit.setValue,
+            "Imager.Photonslope": self.photonslopeEdit.setValue,
+            "Imager.PhotonslopeStd": self.photonslopeStdEdit.setValue,
+            "Camera.Image Size": self.camerasizeEdit.setValue,
+            "Camera.Integration Time": self.integrationtimeEdit.setValue,
+            "Camera.Frames": self.framesEdit.setValue,
+            "Camera.Pixelsize": self.pixelsizeEdit.setValue,
+        }
+        optional = {
+            "Structure.Structure3D": self.structure3DEdit.setText,
+            "Structure.3D": check(self.mode3DEdit),
+            "Imager.Constant Photonrate Std": check(self.photonslopemodeEdit),
+            "Imager.BackgroundLevel": self.backgroundlevelEdit.setValue,
+        }
+        if ADVANCEDMODE:
+            optional.update(
+                {
+                    "Noise.Lasercoefficient": self.lasercEdit.setValue,
+                    "Noise.Imagercoefficient": self.imagercEdit.setValue,
+                    "Noise.BackgroundOff": self.BgoffsetEdit.setValue,
+                    "Noise.EquationA": self.EquationAEdit.setValue,
+                    "Noise.EquationB": self.EquationBEdit.setValue,
+                    "Noise.EquationC": self.EquationCEdit.setValue,
+                    "Noise.BackgroundStdOff": self.BgStdoffsetEdit.setValue,
+                }
             )
-            self.structurerandomOrientationEdit.setChecked(
-                info[0]["Structure.Orientation"]
+        # the simulated positions, in the rows of ``self.newstruct``
+        handle_keys = [
+            "Structure.HandleX",
+            "Structure.HandleY",
+            "Structure.HandleEx",
+            "Structure.HandleStruct",
+            "Structure.Handle3d",
+        ]
+
+        missing = [key for key in [*required, *handle_keys] if key not in info]
+        if missing:
+            listed = ", ".join(missing[:5])
+            if len(missing) > 5:
+                listed += f" and {len(missing) - 5} more"
+            QtWidgets.QMessageBox.warning(
+                self,
+                title,
+                f"{path} does not contain the settings of a Picasso: "
+                f"Simulate simulation.\nMissing: {listed}.",
             )
-
-            self.konEdit.setValue(info[0]["PAINT.k_on"])
-            self.imagerconcentrationEdit.setValue(info[0]["PAINT.imager"])
-            self.taubEdit.setValue(info[0]["PAINT.taub"])
-
-            self.psfEdit.setValue(info[0]["Imager.PSF"])
-            self.photonrateEdit.setValue(info[0]["Imager.Photonrate"])
-            self.photonratestdEdit.setValue(info[0]["Imager.Photonrate Std"])
-            self.photonbudgetEdit.setValue(info[0]["Imager.Photonbudget"])
-            self.laserpowerEdit.setValue(info[0]["Imager.Laserpower"])
-            self.photonslopeEdit.setValue(info[0]["Imager.Photonslope"])
-            self.photonslopeStdEdit.setValue(info[0]["Imager.PhotonslopeStd"])
-
-            self.structurecombo.setCurrentIndex(2)
-            self.camerasizeEdit.setValue(info[0]["Camera.Image Size"])
-            self.integrationtimeEdit.setValue(
-                info[0]["Camera.Integration Time"]
+            return
+        try:
+            handles = np.array(
+                [
+                    np.asarray(str(info[key]).split(","), dtype=float)
+                    for key in handle_keys
+                ]
             )
-            self.framesEdit.setValue(info[0]["Camera.Frames"])
-            self.pixelsizeEdit.setValue(info[0]["Camera.Pixelsize"])
-
-            if ADVANCEDMODE:
-                self.lasercEdit.setValue(info[0]["Noise.Lasercoefficient"])
-                self.imagercEdit.setValue(info[0]["Noise.Imagercoefficient"])
-                self.BgoffsetEdit.setValue(info[0]["Noise.BackgroundOff"])
-
-                self.EquationAEdit.setValue(info[0]["Noise.EquationA"])
-                self.EquationBEdit.setValue(info[0]["Noise.EquationB"])
-                self.EquationCEdit.setValue(info[0]["Noise.EquationC"])
-                self.BgStdoffsetEdit.setValue(
-                    info[0]["Noise.BackgroundStdOff"]
-                )
-
-            # SET POSITIONS
-            handlexx = np.asarray((info[0]["Structure.HandleX"]).split(","))
-            handleyy = np.asarray((info[0]["Structure.HandleY"]).split(","))
-            handleex = np.asarray((info[0]["Structure.HandleEx"]).split(","))
-            handless = np.asarray(
-                (info[0]["Structure.HandleStruct"]).split(",")
+        except ValueError as error:
+            QtWidgets.QMessageBox.warning(
+                self,
+                title,
+                f"Could not read the docking strand positions in {path}:"
+                f"\n{error}",
             )
+            return
 
-            handlexx = handlexx.astype(float)
-            handleyy = handleyy.astype(float)
-            handleex = handleex.astype(float)
-            handless = handless.astype(float)
+        for key, apply in required.items():
+            apply(info[key])
+        for key, apply in optional.items():
+            if key in info:
+                apply(info[key])
+        if "Structure.CX" in info and "Structure.CY" in info:
+            self.cx = info["Structure.CX"]
+            self.cy = info["Structure.CY"]
+        self.structurecombo.setCurrentIndex(2)  # Custom
 
-            handleex = handleex.astype(int)
-            handless = handless.astype(int)
-
-            handle3d = np.asarray((info[0]["Structure.Handle3d"]).split(","))
-            handle3d = handle3d.astype(float)
-            structure = np.array(
-                [handlexx, handleyy, handleex, handless, handle3d]
-            )
-
-            self.newstruct = structure
-            self.plotPositions()
-            self.statusBar().showMessage("Settings loaded from: " + path)
+        self.newstruct = handles
+        self.plotPositions()
+        self.statusBar().showMessage("Settings loaded from: " + path)
 
     def importDesign(self) -> None:
         """Import DNA origami design generated by Picasso: Design."""
