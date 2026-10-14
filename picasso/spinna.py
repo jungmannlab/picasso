@@ -40,7 +40,6 @@ __all__ = [
     "StructureMixer",
     "SPINNA",
     "MaskGenerator",
-    "load_structures",
     "generate_N_structures",
     "get_NN_dist",
     "get_NN_dist_experimental",
@@ -1001,50 +1000,6 @@ def NND_score(
         return 1.0
     score = np.sum(scores) / norm
     return score
-
-
-def load_structures(path: str) -> tuple[list[Structure], list[str]]:
-    """Load structures (``Structure``'s) saved in a .yaml file.
-
-    Parameters
-    ----------
-    path : str
-        Path to the .yaml file with structures.
-
-    Returns
-    -------
-    structures : list of Structure's
-        List of structures loaded from the file.
-    targets : list of strs
-        List of all unique molecular targets in the structures.
-    """
-    with open(path, "r") as file:
-        try:
-            info = list(yaml.load_all(file, Loader=yaml.FullLoader))
-        except TypeError:
-            raise TypeError(
-                "Incorrect file. Please choose a file that was created"
-                " that was created with Picasso SPINNA."
-            )
-        if "Structure title" not in info[0]:
-            raise TypeError(
-                "Incorrect file. Please choose a file that was created"
-                " that was created with Picasso SPINNA."
-            )
-        # continue if the correct file is loaded
-        structures = []
-        targets = []
-        for m_info in info:
-            structure = Structure(m_info["Structure title"])
-            for target in m_info["Molecular targets"]:
-                x = m_info[f"{target}_x"]
-                y = m_info[f"{target}_y"]
-                z = m_info[f"{target}_z"]
-                structure.define_coordinates(target, x, y, z)
-                if target not in targets:
-                    targets.append(target)
-            structures.append(structure)
-    return structures, targets
 
 
 class MaskGenerator:

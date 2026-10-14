@@ -24,7 +24,6 @@ from math import isclose
 from typing import Callable, Literal
 from PIL import Image
 
-import yaml
 import numpy as np
 import pandas as pd
 import matplotlib
@@ -1784,28 +1783,8 @@ class StructuresTab(lib.Dialog):
         )
         if path:
             self.window.pwd = os.path.dirname(path)
-            with open(path, "r") as file:
-                try:
-                    info = list(yaml.load_all(file, Loader=yaml.FullLoader))
-                except TypeError:
-                    raise TypeError(
-                        "Incorrect file. Please choose a file that was created"
-                        " by SPINNA."
-                    )
-            if "Structure title" not in info[0]:
-                raise TypeError(
-                    "Incorrect file. Please choose a file that was created"
-                    " by SPINNA."
-                )
-            # continue if the correct file is loaded
-            for m_info in info:
-                structure = spinna.Structure(m_info["Structure title"])
-                for target in m_info["Molecular targets"]:
-                    x = m_info[f"{target}_x"]
-                    y = m_info[f"{target}_y"]
-                    z = m_info[f"{target}_z"]
-                    structure.define_coordinates(target, x, y, z)
-                self.structures.append(structure)
+            structures, _ = io.load_structures(path)
+            self.structures.extend(structures)
 
             self.current_structure = self.structures[0].title
             self.update_structure_box()
@@ -2242,7 +2221,7 @@ class CompareModelsDialog(lib.Dialog):
             return
         self.sim_tab.window.pwd = os.path.dirname(paths[0])
         for path in paths:
-            structures, targets = spinna.load_structures(path)
+            structures, targets = io.load_structures(path)
             # check that the loaded targets match the exp. data's targets
             if not set(targets) == set(self.sim_tab.targets):
                 QtWidgets.QMessageBox.warning(
@@ -3578,7 +3557,7 @@ class SimulationsTab(lib.Dialog):
         )
         if path:
             self.window.pwd = os.path.dirname(path)
-            self.structures, targets = spinna.load_structures(path)
+            self.structures, targets = io.load_structures(path)
             # reset exp data-related widgets if new/different targets
             # are present
             if set(targets) != set(self.targets):

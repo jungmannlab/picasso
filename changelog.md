@@ -4,7 +4,7 @@ Last change: 14-OCT-2026 CEST
 
 ## 1.0.0
 
-**TODO**: Describe the general overview - fast render, documentation etc.
+**TODO**: Describe the general overview - fast render, documentation etc. Highlight that there's a lot of backward incompatible changes for `picassosr` users.
 
 ### General
 - New [documentation](https://picassosr.readthedocs.io/en/latest) that is user-friendly, intuitive and thoroughly explains every Picasso functionality. Quick start page was added with minimal introduction to Picasso. Python API can now be found by a simple browser search in the documentation.
@@ -86,6 +86,7 @@ Last change: 14-OCT-2026 CEST
     - `picasso.localize.localize` accepts only the movie positionally; `camera_info` and `identification_parameters` are keyword-only. Its `parameters` (renamed to `identification_parameters`) and `mle_method` arguments are removed.
     - The `return_info` argument is removed from `picasso.localize.identify`, `picasso.localize.localize`, `picasso.clusterer.cluster`, `picasso.clusterer.dbscan` and `picasso.clusterer.hdbscan`; they always return `(locs, info)`.
     - `picasso.render.build_animation` no longer accepts positions given as Euler angles `(angle_x, angle_y, angle_z, viewport)`; pass `(rotation, viewport)` with a `scipy.spatial.transform.Rotation` (`picasso.render.rotation_matrix` converts the old angles).
+- `picasso.spinna.load_structures` moved to `picasso.io.load_structures`, next to `picasso.io.load_mask`.
 - The sound notification functions of `picasso.lib` (`get_sound_notification_path`, `get_available_sound_notifications`, `set_sound_notification`, `open_sound_notifications_folder` and `SOUND_NOTIFICATION_DURATION`) are replaced by the module `picasso.notifications`.
 
 ### Others

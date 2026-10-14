@@ -35,6 +35,8 @@ import pandas as pd
 if TYPE_CHECKING:
     from PyQt6 import QtWidgets
 
+    from . import spinna
+
 from . import lib, __version__
 
 from .ext import bitplane
@@ -82,13 +84,14 @@ __all__ = [
     "save_spline_calibration",
     "load_camera_calibration",
     "save_camera_calibration",
-    # identifications, picks, drift and masks
+    # identifications, picks, drift, masks and structures
     "load_identifications",
     "save_identifications",
     "load_picks",
     "load_drift",
     "save_drift",
     "load_mask",
+    "load_structures",
     # other software
     "import_ts",
     "export_thunderstorm",
@@ -1518,6 +1521,60 @@ def load_mask(
     if "SPINNA" not in value:
         raise TypeError("Please load a mask provided by Picasso SPINNA")
     return mask, info
+
+
+def load_structures(path: str) -> tuple[list[spinna.Structure], list[str]]:
+    """Load structures (``spinna.Structure``'s) saved in a .yaml file,
+    e.g., with ``spinna.Structure.save`` or the SPINNA GUI.
+
+    Parameters
+    ----------
+    path : str
+        Path to the .yaml file with structures.
+
+    Returns
+    -------
+    structures : list of spinna.Structure's
+        List of structures loaded from the file.
+    targets : list of strs
+        List of all unique molecular targets in the structures.
+
+    Raises
+    ------
+    TypeError
+        If the file does not hold structures saved by Picasso SPINNA.
+    """
+    # imported here as picasso.spinna imports this module
+    from .spinna import Structure
+
+    message = (
+        "Incorrect file. Please choose a file that was created with Picasso"
+        " SPINNA."
+    )
+    with open(path, "r") as file:
+        try:
+            info = list(yaml.load_all(file, Loader=yaml.FullLoader))
+        except TypeError:
+            raise TypeError(message)
+    if (
+        not info
+        or not isinstance(info[0], dict)
+        or "Structure title" not in info[0]
+    ):
+        raise TypeError(message)
+    structures = []
+    targets = []
+    for m_info in info:
+        structure = Structure(m_info["Structure title"])
+        for target in m_info["Molecular targets"]:
+            x = m_info[f"{target}_x"]
+            y = m_info[f"{target}_y"]
+            z = m_info[f"{target}_z"]
+            structure.define_coordinates(target, x, y, z)
+            if target not in targets:
+                targets.append(target)
+        structures.append(structure)
+    return structures, targets
 
 
 def load_picks(  # noqa: C901

@@ -3585,7 +3585,7 @@ def _spinna_row_fitting_mode(row) -> str | None:
 
 
 def _spinna_row_targets_and_structures(
-    index: int, row, spinna, le_fitting: bool
+    index: int, row, le_fitting: bool
 ) -> tuple:
     """Resolve ``(structures, targets)`` for a row.
 
@@ -3593,6 +3593,8 @@ def _spinna_row_targets_and_structures(
     does not use a structures file.
     """
     import pandas as pd
+
+    from . import io
 
     if le_fitting:
         return None, _spinna_targets_from_row(row)
@@ -3603,7 +3605,7 @@ def _spinna_row_targets_and_structures(
             f"Row {index}: structures_filename is required when "
             "le_fitting != 1."
         )
-    return spinna.load_structures(row["structures_filename"])
+    return io.load_structures(row["structures_filename"])
 
 
 def _spinna_process_row(
@@ -3641,7 +3643,7 @@ def _spinna_process_row(
     fitting_mode = _spinna_row_fitting_mode(row)
 
     structures, targets = _spinna_row_targets_and_structures(
-        index, row, spinna, le_fitting
+        index, row, le_fitting
     )
 
     label_unc, le, exp_data, n_simulated, dim, infos = (

@@ -530,7 +530,7 @@ def test_structure_save_and_load_round_trip(
     # save_info appends — write each structure to its own file then merge
     info = [s.get_info() for s in monomer_dimer_structures]
     io.save_info(str(out), info)
-    structures, targets = spinna.load_structures(str(out))
+    structures, targets = io.load_structures(str(out))
     assert targets == ["target"]
     assert [s.title for s in structures] == ["Monomer", "Dimer"]
     assert structures[1].x["target"] == [-10.5, 10.5]
@@ -555,7 +555,7 @@ def test_load_structures_bad_path_raises_TypeError(tmp_path):
     with open(bad, "w") as f:
         yaml.dump({"unrelated": "data"}, f)
     with pytest.raises(TypeError):
-        spinna.load_structures(str(bad))
+        io.load_structures(str(bad))
 
 
 # ---------------------------------------------------------------------
