@@ -135,6 +135,14 @@ CHANNEL_COLORS_KEY = "Channel colors"
 # key (in the Render section of the user settings) of whether newly
 # loaded channels get the colorblind-safe colors instead
 COLORBLIND_SAFE_KEY = "Colorblind-safe colors"
+# the View > Color vision preview options: deficiency (a key of
+# render.COLOR_VISION_DEFICIENCIES, None for normal vision) and label
+COLOR_VISION_OPTIONS = (
+    (None, "Normal vision"),
+    ("deuteranopia", "Deuteranopia (red-green)"),
+    ("protanopia", "Protanopia (red-green)"),
+    ("tritanopia", "Tritanopia (blue-yellow)"),
+)
 # key (in the Render section of the user settings) of whether Align
 # channels keeps the localizations outside the overlap of the channels
 KEEP_NON_OVERLAPPING_KEY = "Keep non-overlapping after alignment"
@@ -13174,8 +13182,12 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         self.qimage = self.draw_move_shift(self.qimage)
         self.qimage = self.draw_link_crosshair(self.qimage)
 
-        # convert to pixmap
-        self.pixmap = QtGui.QPixmap.fromImage(self.qimage)
+        # convert to pixmap, as people with color blindness see it if
+        # View > Color vision preview is on (self.qimage, which saving
+        # and exporting use, keeps its colors)
+        self.pixmap = QtGui.QPixmap.fromImage(
+            self.window.color_vision_image(self.qimage)
+        )
         self.setPixmap(self.pixmap)
         self.window.update_info()
         self.picks_drawn.emit()
@@ -18360,6 +18372,9 @@ class Window(QtWidgets.QMainWindow):
     ----------
     actions_3d : list
         Specifies actions that are displayed for 3D data only.
+    color_vision : str or None
+        Color vision deficiency simulated on screen (main and 3D
+        window), see ``set_color_vision``; None for normal vision.
     contrast_bar : QWidget
         Holds ``contrast_slider`` and its Auto button below the view;
         shown if ``contrast_slider`` is on in the user settings.
@@ -18424,6 +18439,7 @@ class Window(QtWidgets.QMainWindow):
         # windows opened as linked windows never close the application
         self._is_secondary = link_group is not None
         self.link_group = None
+        self.color_vision = None
         self.initUI(plugins_loaded)
         if link_group is not None:
             link_group.add(self)
@@ -18759,6 +18775,7 @@ class Window(QtWidgets.QMainWindow):
         dataset_action.triggered.connect(self.dataset_dialog.show)
         overlay_action = view_menu.addAction("Overlay image...")
         overlay_action.triggered.connect(self.open_image_overlay)
+        self.add_color_vision_menu(view_menu)
 
         # moving and zooming are not in the menu (the mouse does them),
         # but their shortcuts work in the whole window; a rebuilt UI
@@ -20449,6 +20466,102 @@ class Window(QtWidgets.QMainWindow):
         self.image_overlay_dialog.raise_()
         if self.image_overlay_dialog.data is None:
             self.image_overlay_dialog.open_image_dialog()
+
+    def add_color_vision_menu(self, menu: QtWidgets.QMenu) -> QtWidgets.QMenu:
+        """Add the Color vision preview submenu to ``menu`` (View menu
+        of this window or of its 3D window); its ticks follow
+        ``color_vision`` whenever it opens.
+
+        Parameters
+        ----------
+        menu : QMenu
+            Menu to add the submenu to.
+
+        Returns
+        -------
+        submenu : QMenu
+            The submenu, one exclusive action per option of
+            ``COLOR_VISION_OPTIONS``.
+        """
+        submenu = menu.addMenu("Color vision preview")
+        submenu.setToolTipsVisible(True)
+        submenu.menuAction().setToolTip(
+            "Show the image as people with color blindness see it.\n"
+            "Saved and exported images keep their colors."
+        )
+        group = QtGui.QActionGroup(submenu)
+        for deficiency, label in COLOR_VISION_OPTIONS:
+            action = submenu.addAction(label)
+            action.setCheckable(True)
+            action.setData(deficiency)
+            action.triggered.connect(
+                lambda _=False, d=deficiency: self.set_color_vision(d)
+            )
+            group.addAction(action)
+
+        def tick_current() -> None:
+            for action in group.actions():
+                action.setChecked(action.data() == self.color_vision)
+
+        submenu.aboutToShow.connect(tick_current)
+        tick_current()
+        return submenu
+
+    def set_color_vision(self, deficiency: str | None) -> None:
+        """Simulate a color vision deficiency on screen in this window
+        and its 3D window (only the display; saved and exported images
+        keep their colors).
+
+        Parameters
+        ----------
+        deficiency : str or None
+            Key of ``render.COLOR_VISION_DEFICIENCIES``, or None for
+            normal vision.
+        """
+        if deficiency not in dict(COLOR_VISION_OPTIONS):
+            raise ValueError(
+                f"Unknown color vision deficiency '{deficiency}'."
+            )
+        if deficiency == self.color_vision:
+            return
+        self.color_vision = deficiency
+        # the slicer caches the displayed pixmaps
+        self.slicer_dialog.slicer_cache = {}
+        if getattr(self.view, "qimage_no_picks", None) is not None:
+            self.view._draw_picks_and_show()
+        self.window_rot.view_rot.show_qimage()
+
+    def color_vision_image(self, image: QtGui.QImage) -> QtGui.QImage:
+        """The image to display for ``image``: as is for normal vision,
+        else simulated for ``color_vision`` and labeled at the top.
+
+        Parameters
+        ----------
+        image : QImage
+            Image with the rendered localizations and overlays.
+
+        Returns
+        -------
+        image : QImage
+            ``image`` itself or its simulated copy.
+        """
+        if self.color_vision is None:
+            return image
+        image = render.simulate_color_vision_qimage(image, self.color_vision)
+        label = dict(COLOR_VISION_OPTIONS)[self.color_vision]
+        text = f"{label.split(' (')[0]} preview"
+        painter = QtGui.QPainter(image)
+        metrics = painter.fontMetrics()
+        pad = 4
+        width = metrics.horizontalAdvance(text) + 2 * pad
+        height = metrics.height() + 2 * pad
+        width_logical = image.width() / image.devicePixelRatio()
+        rect = QtCore.QRectF((width_logical - width) / 2, 6, width, height)
+        painter.fillRect(rect, QtGui.QColor(0, 0, 0, 160))
+        painter.setPen(QtGui.QColor(255, 255, 255))
+        painter.drawText(rect, QtCore.Qt.AlignmentFlag.AlignCenter, text)
+        painter.end()
+        return image
 
     def no_locs_warning(self, title: str) -> bool:
         """Tell the user that no localizations are loaded, if so.

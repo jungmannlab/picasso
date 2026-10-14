@@ -216,6 +216,51 @@ A grayscale image is shown in the chosen color between the minimum and maximum
 intensity (by default, the image's full range; *Reset contrast* restores it).
 RGB images are shown with their own colors.
 
+.. _render-color-vision-preview:
+
+Color vision preview
+--------------------
+
+Shows the image as people with color blindness see it, to check that the
+channels of a figure stay apart for them:
+
+*Deuteranopia (red-green)*
+   No green-sensitive cones; the most common form.
+*Protanopia (red-green)*
+   No red-sensitive cones; reds also look darker.
+*Tritanopia (blue-yellow)*
+   No blue-sensitive cones; rare.
+
+*Normal vision* turns the preview off. The whole window is simulated,
+including the legend, picks and other overlays, and a label at the top shows
+that the preview is on. The 3D window (see :ref:`render-3d`) follows the same
+setting, which can be changed from its ``View`` menu, too. The preview is not
+saved: saved and exported images keep their colors, and Render starts with
+normal vision.
+
+The simulation shows the complete forms of these deficiencies (Machado,
+Oliveira & Fernandes, *IEEE Trans. Vis. Comput. Graph.* 2009), so it marks the
+colors that the most affected viewers confuse; people with the milder forms
+see more of the difference. Grays are unchanged. To color the multichannel data
+so they stay apart, see ``Colorblind-safe colors`` under :ref:`render-default-colors`.
+
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
+
+   ``render.simulate_color_vision`` simulates an RGB image, e.g., a saved
+   figure; ``render.COLOR_VISION_DEFICIENCIES`` lists the deficiencies.
+
+   .. code-block:: python
+
+      import imageio.v2 as imageio
+      from picasso import render
+
+      image = imageio.imread("figure.png")[..., :3]  # drop alpha, if any
+      for deficiency in render.COLOR_VISION_DEFICIENCIES:
+          simulated = render.simulate_color_vision(image, deficiency)
+          imageio.imwrite(f"figure_{deficiency}.png", simulated)
+
 .. _render-fit-image:
 
 Fit image to window

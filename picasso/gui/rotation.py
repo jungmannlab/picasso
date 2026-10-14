@@ -1913,9 +1913,18 @@ class ViewRotation(QtWidgets.QLabel, idle.SpillableChannels):
         self.qimage = self.draw_legend(self.qimage)
         self.qimage = self.draw_rotation_angles(self.qimage)
         self.qimage = self.draw_points(self.qimage)
+        self.show_qimage()
 
-        # convert to pixmap
-        self.pixmap = QtGui.QPixmap.fromImage(self.qimage)
+    def show_qimage(self) -> None:
+        """Display ``qimage``, as people with color blindness see it if
+        the main window's View > Color vision preview is on (``qimage``,
+        which saving uses, keeps its colors)."""
+        qimage = getattr(self, "qimage", None)
+        if qimage is None:
+            return
+        self.pixmap = QtGui.QPixmap.fromImage(
+            self.window.window.color_vision_image(qimage)
+        )
         self.setPixmap(self.pixmap)
 
     # --- asynchronous rendering --- #
@@ -3308,6 +3317,7 @@ class RotationWindow(QtWidgets.QMainWindow):
         self.angles_action.setCheckable(True)
         self.angles_action.setChecked(False)
         self.angles_action.triggered.connect(self.update_scene)
+        self.window.add_color_vision_menu(view_menu)
 
         view_menu.addSeparator()
         rotation_action = view_menu.addAction("Rotate by angle...")

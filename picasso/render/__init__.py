@@ -13,7 +13,8 @@ math), ``backend`` (splat backend contract), ``splat`` (raw splat
 stage and the CPU backend), ``overlays_qt`` (Qt overlay drawing and
 export), ``scene`` (multi-channel composition), ``image_overlay`` (overlay
 of an image, e.g., a widefield PNG or TIFF), ``grid`` (reference grid
-in 2D and 3D), ``tracks`` (single-particle tracks) and ``animation``.
+in 2D and 3D), ``tracks`` (single-particle tracks), ``color_vision``
+(simulation of color blindness) and ``animation``.
 ``picasso.render`` re-exports the full former surface, so
 ``render.<name>`` keeps working unchanged.
 
@@ -144,6 +145,11 @@ from .grid import (  # noqa: F401
     draw_grid,
     draw_grid_3d,
 )
+from .color_vision import (  # noqa: F401
+    COLOR_VISION_DEFICIENCIES,
+    simulate_color_vision,
+    simulate_color_vision_qimage,
+)
 from .tracks import (  # noqa: F401
     MAX_TRACKS_DEFAULT,
     select_track_segments,
@@ -200,6 +206,9 @@ __all__ = [
     "split_locs_by_property",
     "split_locs_by_group",
     "rgb_to_qimage",
+    "COLOR_VISION_DEFICIENCIES",
+    "simulate_color_vision",
+    "simulate_color_vision_qimage",
     # viewport
     "viewport_center",
     "viewport_size",

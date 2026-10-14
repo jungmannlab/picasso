@@ -138,6 +138,10 @@ View
    Toggle the overlays: the channel legend of multichannel data and the
    rotation angles in degrees.
 
+``Color vision preview``
+   Shows the main and the 3D window as people with color blindness see them,
+   see :ref:`render-color-vision-preview`.
+
 ``Rotate by angle...`` (:kbd:`Ctrl+Shift+R`)
    Rotates by angles typed in, around the data's own axes or the fixed screen
    axes (see ``Rotate around`` above).
