@@ -105,6 +105,10 @@ def run_gui(
     lib.install_excepthook()
 
     _apply_theme(app)
+    # name inputs and icon-only buttons for screen readers
+    from . import accessibility
+
+    accessibility.install(app)
 
     try:
         window = window_factory()

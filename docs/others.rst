@@ -90,6 +90,26 @@ Plugin actions (see :doc:`plugins`) can be on the toolbar too; a button whose
 action is not in the menus, e.g., of a plugin that is disabled, is kept and
 shown in italics in the dialog, and returns with its plugin.
 
+.. _accessibility:
+
+Accessibility
+-------------
+- **Screen readers** (VoiceOver, Narrator, Orca) announce the input fields of
+  all Picasso windows by the label next to them, the fields in tables (e.g.,
+  ``View > Files`` in Render) by their column, and buttons that show only an
+  icon by their tooltip.
+- **Color blindness**: ``Colorblind-safe colors`` in Render's ``View > Files``
+  colors the channels so that people with red-green color blindness can tell
+  them apart (see :ref:`render-default-colors`), and ``View > Color vision
+  preview`` shows the image as people with color blindness see it (see
+  :ref:`render-color-vision-preview`). Buttons that show a state, e.g., a
+  loaded file, carry an icon besides their color.
+- **Text size and contrast**: the font size and the light or dark theme are
+  set in :ref:`appearance`.
+- **Keyboard**: Render's view is moved with the arrow keys (or :kbd:`W`,
+  :kbd:`A`, :kbd:`S`, :kbd:`D`), zoomed with :kbd:`Ctrl` +/- and fitted
+  to the window with :kbd:`Home`, see :ref:`render-navigation`.
+
 .. _user-settings-file:
 
 User settings file

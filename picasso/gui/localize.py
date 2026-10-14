@@ -6368,6 +6368,7 @@ class Window(QtWidgets.QMainWindow):
         self.frame_slider.setMaximum(0)
         self.frame_slider.setEnabled(False)
         self.frame_slider.setMaximumHeight(15)
+        self.frame_slider.setToolTip("Frame of the movie shown above.")
         # lay out by the widget's full rect: macOS insets a QSlider's
         # layout rect, which let the contrast row below overlap (and the
         # Auto button paint over) the bottom of the handle
@@ -6466,6 +6467,7 @@ class Window(QtWidgets.QMainWindow):
         contrast_layout.addWidget(self.contrast_auto_button)
         # Channel selector (hidden unless several channels are loaded).
         self.channel_combo = QtWidgets.QComboBox()
+        self.channel_combo.setToolTip("Channel of the movie shown below.")
         self.channel_combo.setVisible(False)
         self.channel_combo.currentIndexChanged.connect(
             self.on_channel_combo_changed

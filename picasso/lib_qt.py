@@ -148,6 +148,7 @@ class UserSettingsDialog(Dialog):
         self._current_match = -1
 
         self.editor = QtWidgets.QPlainTextEdit()
+        self.editor.setAccessibleName("User settings")
         # fixed width for the YAML indentation, in the size of the
         # application's font
         font = QtGui.QFontDatabase.systemFont(

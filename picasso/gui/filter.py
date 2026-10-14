@@ -517,6 +517,7 @@ class FilterNum(lib.Dialog):
         self.layout.addWidget(lib.HelpButton(self.DOCS_URL), 0, 0)
         self.attributes = QtWidgets.QComboBox(self)
         self.attributes.setEditable(False)
+        self.attributes.setToolTip("Column to filter by.")
         self.layout.addWidget(self.attributes, 0, 1)
 
         # lower value
