@@ -135,6 +135,10 @@ CHANNEL_COLORS_KEY = "Channel colors"
 # key (in the Render section of the user settings) of whether newly
 # loaded channels get the colorblind-safe colors instead
 COLORBLIND_SAFE_KEY = "Colorblind-safe colors"
+# colormap of z in the scatter plots of picks (Select picks), on black;
+# perceptually uniform and readable with color blindness, and unlike
+# viridis, its low end stays visible on black
+Z_SCATTER_CMAP = "plasma"
 # the View > Color vision preview options: deficiency (a key of
 # render.COLOR_VISION_DEFICIENCIES, None for normal vision) and label
 COLOR_VISION_OPTIONS = (
@@ -2512,7 +2516,12 @@ class PlotDialog(lib.Dialog):
                 locs["z"].mean() - 3 * locs["z"].std()
             )
             ax.scatter(
-                locs["x"], locs["y"], locs["z"], c=colors, cmap="jet", s=2
+                locs["x"],
+                locs["y"],
+                locs["z"],
+                c=colors,
+                cmap=Z_SCATTER_CMAP,
+                s=2,
             )
             ax.set_xlabel("X [Px]")
             ax.set_ylabel("Y [Px]")
@@ -2657,7 +2666,12 @@ class PlotDialogIso(lib.Dialog):
             )
 
             ax.scatter(
-                locs["x"], locs["y"], locs["z"], c=colors, cmap="jet", s=2
+                locs["x"],
+                locs["y"],
+                locs["z"],
+                c=colors,
+                cmap=Z_SCATTER_CMAP,
+                s=2,
             )
             ax.set_xlabel("X [Px]")
             ax.set_ylabel("Y [Px]")
@@ -2681,7 +2695,9 @@ class PlotDialogIso(lib.Dialog):
             ax.zaxis.pane.set_facecolor((0, 0, 0, 1.0))
 
             # AXES 2
-            ax2.scatter(locs["x"], locs["y"], c=colors, cmap="jet", s=2)
+            ax2.scatter(
+                locs["x"], locs["y"], c=colors, cmap=Z_SCATTER_CMAP, s=2
+            )
             ax2.set_xlabel("X [Px]")
             ax2.set_ylabel("Y [Px]")
             ax2.set_xlim(
@@ -2696,7 +2712,9 @@ class PlotDialogIso(lib.Dialog):
             ax2.set_facecolor("black")
 
             # AXES 3
-            ax3.scatter(locs["x"], locs["z"], c=colors, cmap="jet", s=2)
+            ax3.scatter(
+                locs["x"], locs["z"], c=colors, cmap=Z_SCATTER_CMAP, s=2
+            )
             ax3.set_xlabel("X [Px]")
             ax3.set_ylabel("Z [nm]")
             ax3.set_xlim(
@@ -2711,7 +2729,9 @@ class PlotDialogIso(lib.Dialog):
             ax3.set_facecolor("black")
 
             # AXES 4
-            ax4.scatter(locs["y"], locs["z"], c=colors, cmap="jet", s=2)
+            ax4.scatter(
+                locs["y"], locs["z"], c=colors, cmap=Z_SCATTER_CMAP, s=2
+            )
             ax4.set_xlabel("Y [Px]")
             ax4.set_ylabel("Z [nm]")
             ax4.set_xlim(
