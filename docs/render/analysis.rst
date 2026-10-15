@@ -635,13 +635,15 @@ since the neighbors outside of it are not seen.
 
 To use it, open ``Postprocess > Spatial statistics > Ripley's H function...``:
 
-1. Choose the ``Channel`` (with several channels loaded).
+1. Choose the ``Channel`` (with several channels loaded). Leave ``Partner
+   channel`` at ``None (one channel)``; choose a second channel for the cross
+   function between two channels, see :ref:`render-cross-functions`.
 2. Choose the ``Regions``: the ``Picks`` (any pick shape; ``H`` is computed
    in each pick and averaged over the picks with at least two localizations),
    the ``Current view`` or the ``Whole field of view``.
 3. Set ``Max. radius (nm)``, which should be well below the size of the
    regions, and the number of ``Radius steps`` up to it.
-4. Set the number of ``CSR simulations``. Each region is filled with as many
+4. Set the number of ``Simulations``. Each region is filled with as many
    uniformly random points as it holds localizations, and ``H`` is computed
    the same way; the lowest and highest simulated mean ``H`` at each radius
    give the CSR envelope. A mean ``H`` above the envelope indicates
@@ -798,3 +800,92 @@ range and volume).
 
       fig = postprocess.plot_rdf(result)
       fig.savefig("rdf.png")
+
+.. _render-cross-functions:
+
+Two Channels (Cross Functions)
+------------------------------
+
+Ripley's H function and the radial distribution function can also be computed
+between two channels, e.g., two proteins, to show whether they are found
+together (colocalization), independently of each other, or apart
+(segregation), and on which length scales. Instead of the neighbors of the
+same channel, the cross functions count the molecules of the partner channel
+around each molecule of the first channel, relative to the density of the
+partner (`Lotwick and Silverman, J R Stat Soc B, 1982
+<https://doi.org/10.1111/j.2517-6161.1982.tb01221.x>`__):
+
+* ``H > 0`` and ``g > 1``: the channels are found together at the scale
+  ``r``,
+* ``H = 0`` and ``g = 1``: the channels are independent,
+* ``H < 0`` and ``g < 1``: the channels avoid each other.
+
+The edge correction centers on the molecule of the first channel, so swapping
+the channels gives slightly different counts near the edges; both directions
+are combined into one symmetric function, so the order of the channels does
+not matter.
+
+.. note::
+
+   Align the channels first (``Postprocess > Align channels``). An offset
+   between the channels moves and blurs the peak of the cross functions at
+   short distances.
+
+To use it, choose a ``Partner channel`` in the dialog of either function. The
+``Envelope`` sets how the two channels are simulated:
+
+- ``Random shifts (independence)`` shifts the partner channel by a random
+  offset, wrapping around the region (toroidal shift); in circular picks, it
+  rotates it by a random angle about the center, and in 3D it also shifts z.
+  Each channel keeps its own arrangement, e.g., its clusters, so the envelope
+  is the range expected for two independent channels. This answers the usual
+  question of colocalization: are the molecules of the two channels found
+  together more often than by chance? The partner can only be wrapped around
+  rectangular regions (box, square and rectangle picks, rectangular polygons,
+  the current view and the field of view) and circular picks; for other
+  polygon picks and brush picks, only random labels are available.
+- ``Random labels (same distribution)`` pools the molecules of both channels
+  and shuffles which channel each belongs to. It works in any region, but it
+  answers a different question: do both channels follow the same
+  distribution? Two channels that are clustered independently of each other
+  fall below this envelope, since the pooled molecules are more clustered than
+  the pairs of different channels, so do not read it as segregation.
+
+The plot is titled *Ripley's cross H function* or *Cross radial distribution
+function*. The saved summary of each region also lists the number and density
+of the partner's molecules. In 3D, both channels need z; by default, each
+region extends over the z range of the molecules of both channels.
+
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
+
+   Pass the partner channel as ``partner_locs`` to ``ripley_h`` or ``rdf``;
+   ``cross_null`` is ``"shift"`` (random shifts, default) or ``"labels"``
+   (random labels).
+
+   .. code-block:: python
+
+      from picasso import io, lib, postprocess
+
+      locs_a, info_a = io.load_locs("protein_a_molecules.hdf5")
+      locs_b, info_b = io.load_locs("protein_b_molecules.hdf5")
+      pixelsize = lib.get_from_metadata(info_a, "Pixelsize")
+      picks, shape, size = io.load_picks("picks.yaml", pixelsize)
+
+      result = postprocess.rdf(
+          locs_a,
+          info_a,
+          picks,
+          shape,
+          size,
+          partner_locs=locs_b,
+          cross_null="shift",
+          r_max=300,
+          steps=30,
+      )
+      result["g_mean"]  # mean cross g(r) over the picks
+      result["n_locs_partner"]  # molecules of the partner in each pick
+
+      fig = postprocess.plot_rdf(result)
+      fig.savefig("cross_rdf.png")

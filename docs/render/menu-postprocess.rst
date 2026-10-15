@@ -560,7 +560,8 @@ Spatial statistics
 ------------------
 
 The ``Spatial statistics`` submenu analyzes how the molecules of one channel
-are distributed in space.
+are distributed in space, or how those of two channels are distributed with
+respect to each other (see :ref:`render-cross-functions`).
 
 Ripley's H function
 ~~~~~~~~~~~~~~~~~~~

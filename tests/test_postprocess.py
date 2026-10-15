@@ -2941,3 +2941,207 @@ class TestRdf:
         ]
         assert "h_max_nm" not in regions.columns
         assert list(regions["n_locs"]) == list(result["n_locs"])
+
+
+class TestCrossPairStatistics:
+    INFO = TestRipleyH.INFO
+    SIZE = 10_000.0
+
+    def _random(self, n, seed, z=False):
+        rng = np.random.default_rng(seed)
+        locs = _ripley_locs(*rng.uniform(0, self.SIZE, size=(2, n)))
+        if z:
+            locs["z"] = rng.uniform(-500, 500, n)
+        return locs
+
+    def _clustered(self, seed):
+        """10 molecules within 50 nm of each of 300 random centers."""
+        rng = np.random.default_rng(seed)
+        centers = rng.uniform(0, self.SIZE, size=(300, 2))
+        r = 50 * np.sqrt(rng.uniform(0, 1, 3000))
+        angle = rng.uniform(0, 2 * np.pi, 3000)
+        x = np.repeat(centers[:, 0], 10) + r * np.cos(angle)
+        y = np.repeat(centers[:, 1], 10) + r * np.sin(angle)
+        inside = (x > 0) & (x < self.SIZE) & (y > 0) & (y < self.SIZE)
+        return _ripley_locs(x[inside], y[inside])
+
+    @pytest.mark.parametrize("cross_null", ["shift", "labels"])
+    def test_independent_random_channels(self, cross_null):
+        a, b = self._random(5000, 0), self._random(4000, 1)
+        h = postprocess.ripley_h(
+            a,
+            self.INFO,
+            partner_locs=b,
+            cross_null=cross_null,
+            steps=50,
+            n_simulations=9,
+        )
+        g = postprocess.rdf(a, self.INFO, partner_locs=b, n_simulations=0)
+        assert np.abs(h["h_mean"]).max() < 2
+        assert np.abs(g["g_mean"][5:] - 1).max() < 0.1
+        assert h["cross_null"] == cross_null
+        assert list(h["n_locs"]) == [5000]
+        assert list(h["n_locs_partner"]) == [4000]
+        assert h["simulated_z"] is None
+
+    def test_symmetric_in_the_channels(self):
+        a, b = self._random(3000, 0), self._random(2000, 1)
+        picks = [(30, 30), (70, 70)]
+        kwargs = dict(n_simulations=0, steps=20)
+        ab = postprocess.ripley_h(
+            a, self.INFO, picks, "Circle", 40, partner_locs=b, **kwargs
+        )
+        ba = postprocess.ripley_h(
+            b, self.INFO, picks, "Circle", 40, partner_locs=a, **kwargs
+        )
+        np.testing.assert_allclose(ab["h"], ba["h"], atol=1e-9)
+
+    def test_colocalized_channels(self):
+        rng = np.random.default_rng(2)
+        a = self._random(3000, 0)
+        b = a.copy()
+        b[["x", "y"]] += rng.normal(0, 0.1, size=(len(b), 2))  # 10 nm
+        result = postprocess.rdf(
+            a, self.INFO, partner_locs=b, r_max=200, steps=20, n_simulations=5
+        )
+        assert result["g_mean"][0] > 10
+        assert (result["g_mean"][:2] > result["envelope_high"][:2]).all()
+
+    def test_null_models_of_independent_clustered_channels(self):
+        # independent, but each clustered: random shifts keep each
+        # channel's clusters, random labels pool them
+        a, b = self._clustered(1), self._clustered(2)
+        kwargs = dict(partner_locs=b, steps=25, n_simulations=19)
+        shift = postprocess.ripley_h(a, self.INFO, **kwargs)
+        inside = (shift["h_mean"] >= shift["envelope_low"]) & (
+            shift["h_mean"] <= shift["envelope_high"]
+        )
+        assert inside.mean() > 0.9
+        labels = postprocess.ripley_h(
+            a, self.INFO, cross_null="labels", **kwargs
+        )
+        assert (labels["h_mean"] < labels["envelope_low"]).all()
+
+    @pytest.mark.parametrize(
+        "pick, shape, size",
+        [
+            (((20, 30), (80, 70)), "Rectangle", 30),
+            (((10, 20), (60, 90)), "Box", None),
+            ((50, 50), "Square", 40),
+            ((50, 50), "Circle", 40),
+            (
+                [(10, 10), (60, 10), (60, 40), (10, 40), (10, 10)],
+                "Polygon",
+                None,
+            ),
+        ],
+    )
+    def test_random_shift_stays_in_the_region(self, pick, shape, size):
+        region = postprocess._pick_region(pick, shape, size, 100.0)
+        assert region.rectangle is not None or shape == "Circle"
+        rng = np.random.default_rng(0)
+        x, y = postprocess._uniform_in_region(500, region, rng)
+        z = rng.uniform(-100, 100, 500)
+        x2, y2, z2 = postprocess._random_shift(
+            x, y, z, region, (-100, 100), rng
+        )
+        geometry = (region.kind, region.circle, region.segments)
+        assert postprocess._in_region_many(x2, y2, *geometry).mean() > 0.99
+        assert z2.min() >= -100 and z2.max() <= 100
+        assert not np.allclose(x2, x)
+
+    def test_random_shift_needs_rectangles_or_circles(self):
+        a, b = self._random(2000, 0), self._random(2000, 1)
+        picks = [[(10, 10), (90, 15), (60, 50), (10, 10)]]
+        with pytest.raises(ValueError, match="cross_null='labels'"):
+            postprocess.ripley_h(
+                a, self.INFO, picks, "Polygon", partner_locs=b
+            )
+        result = postprocess.ripley_h(
+            a,
+            self.INFO,
+            picks,
+            "Polygon",
+            partner_locs=b,
+            cross_null="labels",
+            n_simulations=2,
+        )
+        assert result["envelope_low"] is not None
+
+    def test_cross_in_3d(self):
+        a = self._random(8000, 0, z=True)
+        b = self._random(8000, 1, z=True)
+        result = postprocess.rdf(
+            a,
+            self.INFO,
+            partner_locs=b,
+            use_z=True,
+            r_max=300,
+            steps=15,
+            n_simulations=3,
+        )
+        assert np.abs(result["g_mean"][2:] - 1).max() < 0.1
+        z = np.concatenate([a["z"], b["z"]])
+        np.testing.assert_allclose(result["z_ranges"], [[z.min(), z.max()]])
+        with pytest.raises(ValueError, match="requires z"):
+            postprocess.rdf(
+                a, self.INFO, partner_locs=b.drop(columns="z"), use_z=True
+            )
+
+    def test_regions_need_both_channels(self):
+        a, b = self._random(2000, 0), self._random(2000, 1)
+        b = b[b["x"] > 50]  # the right half only
+        result = postprocess.ripley_h(
+            a,
+            self.INFO,
+            [(25, 50), (75, 50)],
+            "Circle",
+            30,
+            partner_locs=b,
+            n_simulations=0,
+        )
+        assert np.isnan(result["h"][0]).all()
+        assert not np.isnan(result["h"][1]).any()
+        assert result["n_locs_partner"][0] == 0
+
+    def test_partner_without_molecules_warns(self):
+        a, b = self._random(500, 0), self._random(500, 1)
+        with pytest.warns(UserWarning, match="partner are not molecules"):
+            postprocess.ripley_h(
+                a,
+                self.INFO,
+                partner_locs=b.drop(columns="n_events"),
+                steps=5,
+                n_simulations=0,
+            )
+
+    def test_plot_and_tables(self):
+        a, b = self._random(2000, 0), self._random(2000, 1)
+        result = postprocess.rdf(
+            a,
+            self.INFO,
+            partner_locs=b,
+            cross_null="labels",
+            n_simulations=2,
+        )
+        ax = postprocess.plot_rdf(result).axes[0]
+        assert ax.get_title() == "Cross radial distribution function"
+        labels = ax.get_legend_handles_labels()[1]
+        assert "Random labeling envelope (2 simulations)" in labels
+        _, regions = postprocess._rdf_tables(result)
+        assert {"n_locs_partner", "partner_density_per_um2"} <= set(
+            regions.columns
+        )
+        h = postprocess.ripley_h(a, self.INFO, partner_locs=b, n_simulations=2)
+        ax = postprocess.plot_ripley_h(h).axes[0]
+        assert ax.get_title() == "Ripley's cross H function"
+        assert "Independence envelope (2 random shifts)" in (
+            ax.get_legend_handles_labels()[1]
+        )
+
+    def test_invalid_cross_null(self):
+        a, b = self._random(500, 0), self._random(500, 1)
+        with pytest.raises(ValueError, match="cross_null"):
+            postprocess.ripley_h(
+                a, self.INFO, partner_locs=b, cross_null="toroidal"
+            )

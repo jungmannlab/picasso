@@ -502,6 +502,8 @@ def _ripley_params(region: str, **kwargs) -> dict:
         "use_z": False,
         "z_range": None,
         "simulated_z": "uniform",
+        "partner": None,
+        "cross_null": "shift",
     }
     params.update(kwargs)
     return params
@@ -690,3 +692,51 @@ def test_spatial_statistic_dialogs_default_steps(window, qt_offscreen):
         assert dialog.steps.value() == steps
         title = gui_render.SPATIAL_STATISTICS[statistic]["title"]
         assert dialog.windowTitle() == title
+
+
+def test_spatial_statistic_dialog_partner_settings(window, qt_offscreen):
+    dialog = gui_render.SpatialStatisticDialog(window, "rdf")
+    assert dialog.partner.isHidden()  # one channel
+    view = window.view
+    view.add(
+        view.locs_paths[0][:-5] + "_b.hdf5", _locs(1), _info(), render_=False
+    )
+    dialog = gui_render.SpatialStatisticDialog(window, "rdf")
+    assert not dialog.partner.isHidden()
+    assert dialog.partner.currentData() is None
+    assert dialog.cross_null.isHidden()
+    dialog.partner.setCurrentIndex(2)  # the second channel
+    assert not dialog.cross_null.isHidden()
+    assert dialog.cross_null.currentData() == "shift"
+    dialog.simulations.setValue(0)
+    assert dialog.cross_null.isHidden()
+    # random shifts need rectangular or circular picks
+    view._pick_shape = "Polygon"
+    view._picks = [[(5, 5), (30, 8), (20, 40), (5, 5)]]
+    dialog = gui_render.SpatialStatisticDialog(window, "rdf")
+    dialog.partner.setCurrentIndex(2)
+    assert dialog.region.currentData() == "picks"
+    assert not dialog.cross_null.model().item(0).isEnabled()
+    assert dialog.cross_null.currentData() == "labels"
+    dialog.region.setCurrentIndex(1)  # current view
+    assert dialog.cross_null.model().item(0).isEnabled()
+
+
+def test_cross_ripley_h_of_two_channels(window, qt_offscreen, monkeypatch):
+    texts = _answer_unlinked_warning(
+        monkeypatch, QtWidgets.QMessageBox.StandardButton.Yes
+    )
+    view = window.view
+    view.add(
+        view.locs_paths[0][:-5] + "_b.hdf5", _locs(0), _info(), render_=False
+    )
+    params = _ripley_params("fov", partner=1, cross_null="labels")
+    result = _run_spatial_statistic(view, qt_offscreen, monkeypatch, params)
+    # neither channel holds molecules
+    assert "and" in texts[0] and "do not contain molecules" in texts[0]
+    assert result["cross_null"] == "labels"
+    assert list(result["n_locs_partner"]) == [len(view.locs[1])]
+    assert result["h_mean"][0] > 0  # the same clusters in both
+    plot_window = view.spatial_statistic_windows["ripley_h"]
+    assert " and " in plot_window.windowTitle()
+    plot_window.close()

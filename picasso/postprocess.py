@@ -6217,13 +6217,16 @@ class _Region(NamedTuple):
     edge ``x0, y0, x1, y1``, the fifth column is unused) or
     ``_REGION_BRUSH`` (each row of ``segments`` is a segment of a stroke
     path with the stroke's radius in the fifth column). ``bounds`` is
-    ``(x_min, x_max, y_min, y_max)``."""
+    ``(x_min, x_max, y_min, y_max)``. For a rectangular polygon,
+    ``rectangle`` holds a corner and the two edges leaving it, ``x0,
+    y0, e1x, e1y, e2x, e2y``, otherwise it is None."""
 
     kind: int
     circle: lib.FloatArray1D
     segments: lib.FloatArray2D
     bounds: tuple[float, float, float, float]
     area: float
+    rectangle: lib.FloatArray1D | None = None
 
 
 def _polygon_region(X: lib.FloatArray1D, Y: lib.FloatArray1D) -> _Region:
@@ -6236,12 +6239,25 @@ def _polygon_region(X: lib.FloatArray1D, Y: lib.FloatArray1D) -> _Region:
     segments = np.column_stack(
         [X, Y, np.roll(X, -1), np.roll(Y, -1), np.zeros(len(X))]
     )
+    rectangle = None
+    if len(X) == 4:
+        e1 = np.array([X[1] - X[0], Y[1] - Y[0]])
+        e2 = np.array([X[3] - X[0], Y[3] - Y[0]])
+        scale = np.dot(e1, e1) + np.dot(e2, e2)
+        opposite = np.array([X[2] - X[0], Y[2] - Y[0]]) - e1 - e2
+        if (
+            scale > 0
+            and abs(np.dot(e1, e2)) <= 1e-9 * scale
+            and np.dot(opposite, opposite) <= 1e-18 * scale
+        ):
+            rectangle = np.array([X[0], Y[0], *e1, *e2])
     return _Region(
         _REGION_POLYGON,
         np.zeros(3),
         segments,
         (X.min(), X.max(), Y.min(), Y.max()),
         lib.polygon_area(X, Y),
+        rectangle,
     )
 
 
@@ -6560,6 +6576,9 @@ def _pair_counts(
     boundary_xy: lib.FloatArray1D,
     cell_x: lib.IntArray1D,
     cell_y: lib.IntArray1D,
+    tx: lib.FloatArray1D,
+    ty: lib.FloatArray1D,
+    tz: lib.FloatArray1D,
     cell_starts: lib.IntArray1D,
     n_cells_x: int,
     n_cells_y: int,
@@ -6572,17 +6591,22 @@ def _pair_counts(
     kind: int,
     circle: lib.FloatArray1D,
     segments: lib.FloatArray2D,
+    exclude_self: bool,
     start: int,
     end: int,
 ) -> lib.FloatArray1D:
-    """Edge-corrected counts of the ordered pairs (i, j), i in
-    ``[start, end)``, by distance (3D if ``use_z``, the region then
-    extends from ``z_min`` to ``z_max``): element k sums the weights
-    of the pairs at distances in ``(k, k + 1] * r_max / steps``. The
-    points are sorted by grid cell in xy (side at least ``r_max``) and
-    ``cell_starts`` holds the first point of each cell. ``boundary``
-    is the distance of each point to the region's boundary (in 3D
-    including the z planes), ``boundary_xy`` that in xy only."""
+    """Edge-corrected counts of the pairs of a center i in ``[start,
+    end)`` (``x``, ``y``, ``z``) and a target j (``tx``, ``ty``,
+    ``tz``) by distance (3D if ``use_z``, the region then extends from
+    ``z_min`` to ``z_max``): element k sums the weights of the pairs at
+    distances in ``(k, k + 1] * r_max / steps``, the weight being
+    centered on i. The targets are sorted by grid cell in xy (side at
+    least ``r_max``), ``cell_starts`` holds the first target of each
+    cell and ``cell_x``, ``cell_y`` the cell of each center.
+    ``boundary`` is the distance of each center to the region's
+    boundary (in 3D including the z planes), ``boundary_xy`` that in
+    xy only. If ``exclude_self``, the centers are the targets and the
+    pairs (i, i) are skipped."""
     counts = np.zeros(steps)
     dr = r_max / steps
     r_max2 = r_max * r_max
@@ -6602,11 +6626,11 @@ def _pair_counts(
             ):
                 cell = cy * n_cells_x + cx
                 for j in range(cell_starts[cell], cell_starts[cell + 1]):
-                    if j == i:
+                    if exclude_self and j == i:
                         continue
-                    d2 = (x[j] - xi) ** 2 + (y[j] - yi) ** 2
+                    d2 = (tx[j] - xi) ** 2 + (ty[j] - yi) ** 2
                     if use_z:
-                        d2 += (z[j] - zi) ** 2
+                        d2 += (tz[j] - zi) ** 2
                     if d2 > r_max2:
                         continue
                     d = np.sqrt(d2)
@@ -6648,30 +6672,40 @@ def _pair_counts(
     return counts
 
 
-def _pair_statistic_region(
+class _GridPoints(NamedTuple):
+    """Points of a region in nm sorted by the cell of a grid in xy,
+    see ``_grid_points``."""
+
+    x: lib.FloatArray1D
+    y: lib.FloatArray1D
+    z: lib.FloatArray1D
+    cell_x: lib.IntArray1D
+    cell_y: lib.IntArray1D
+    cell_starts: lib.IntArray1D
+    n_cells_x: int
+    n_cells_y: int
+    boundary: lib.FloatArray1D
+    boundary_xy: lib.FloatArray1D
+
+
+def _grid_points(
     x: lib.FloatArray1D,
     y: lib.FloatArray1D,
     z: lib.FloatArray1D | None,
     region: _Region,
     z_range: tuple[float, float] | None,
     r_max: float,
-    steps: int,
-    edge_correction: bool,
-    statistic: Literal["h", "g"],
-) -> lib.FloatArray1D:
-    """Ripley's H function (``statistic="h"``) at the radii ``(1, ...,
-    steps) * r_max / steps`` or the radial distribution function
-    (``"g"``) in the ``steps`` shells between them of the points
-    ``(x, y)`` (nm, at least two, all inside ``region``); in 3D if
-    ``z`` is given, the region then extends over ``z_range`` (nm),
-    which contains all ``z``."""
-    n = len(x)
+) -> _GridPoints:
+    """Sort the points ``(x, y, z)`` (nm, inside ``region``; z None in
+    2D) by the cell of a grid over the region with cells of at least
+    ``r_max``, so that the neighbors within ``r_max`` of a point are in
+    the adjacent cells, and find their distances to the boundary of
+    the region (in 3D extended over ``z_range``)."""
     use_z = z is not None
     if not use_z:
-        z = np.zeros(n)
+        z = np.zeros(len(x))
     x_min, x_max, y_min, y_max = region.bounds
-    # grid cells of at least r_max, so that the neighbors within r_max
-    # are in the adjacent cells; at most ~1000 cells per side
+    # at most ~1000 cells per side
     cell_size = max(r_max, (x_max - x_min) / 1024, (y_max - y_min) / 1024)
     n_cells_x = int((x_max - x_min) // cell_size) + 1
     n_cells_y = int((y_max - y_min) // cell_size) + 1
@@ -6686,37 +6720,73 @@ def _pair_statistic_region(
     x = np.ascontiguousarray(x[order], dtype=np.float64)
     y = np.ascontiguousarray(y[order], dtype=np.float64)
     z = np.ascontiguousarray(z[order], dtype=np.float64)
-    cell_x = cell_x[order]
-    cell_y = cell_y[order]
     cell_starts = np.searchsorted(
         cell[order], np.arange(n_cells_x * n_cells_y + 1)
     )
-    geometry = (region.kind, region.circle, region.segments)
-    boundary_xy = _boundary_distances(x, y, *geometry)
-    z_min, z_max = z_range if use_z else (0.0, 0.0)
+    boundary_xy = _boundary_distances(
+        x, y, region.kind, region.circle, region.segments
+    )
     if use_z:
+        z_min, z_max = z_range
         boundary = np.minimum(boundary_xy, np.minimum(z - z_min, z_max - z))
     else:
         boundary = boundary_xy
-    args = (
+    return _GridPoints(
         x,
         y,
         z,
-        boundary,
-        boundary_xy,
-        cell_x,
-        cell_y,
+        cell_x[order],
+        cell_y[order],
         cell_starts,
         n_cells_x,
         n_cells_y,
+        boundary,
+        boundary_xy,
+    )
+
+
+def _weighted_pair_counts(
+    centers: _GridPoints,
+    targets: _GridPoints,
+    region: _Region,
+    z_range: tuple[float, float] | None,
+    r_max: float,
+    steps: int,
+    edge_correction: bool,
+    exclude_self: bool,
+) -> lib.FloatArray1D:
+    """Edge-corrected counts of the pairs of ``centers`` and
+    ``targets`` (the same object if ``exclude_self``) in the ``steps``
+    shells up to ``r_max``, see ``_pair_counts``; in 3D if
+    ``z_range`` is given."""
+    use_z = z_range is not None
+    z_min, z_max = z_range if use_z else (0.0, 0.0)
+    args = (
+        centers.x,
+        centers.y,
+        centers.z,
+        centers.boundary,
+        centers.boundary_xy,
+        centers.cell_x,
+        centers.cell_y,
+        targets.x,
+        targets.y,
+        targets.z,
+        targets.cell_starts,
+        targets.n_cells_x,
+        targets.n_cells_y,
         float(r_max),
         int(steps),
         bool(edge_correction),
         use_z,
         float(z_min),
         float(z_max),
-        *geometry,
+        region.kind,
+        region.circle,
+        region.segments,
+        exclude_self,
     )
+    n = len(centers.x)
     n_threads = lib.n_workers() if n > 1_000 else 1
     if n_threads > 1:
         bounds = np.linspace(0, n, n_threads + 1).astype(int)
@@ -6725,13 +6795,64 @@ def _pair_statistic_region(
                 executor.submit(_pair_counts, *args, start, end)
                 for start, end in zip(bounds[:-1], bounds[1:])
             ]
-            counts = np.sum([f.result() for f in futures], axis=0)
+            return np.sum([f.result() for f in futures], axis=0)
+    return _pair_counts(*args, 0, n)
+
+
+def _pair_statistic_region(
+    x: lib.FloatArray1D,
+    y: lib.FloatArray1D,
+    z: lib.FloatArray1D | None,
+    region: _Region,
+    z_range: tuple[float, float] | None,
+    r_max: float,
+    steps: int,
+    edge_correction: bool,
+    statistic: Literal["h", "g"],
+    partner: tuple | None = None,
+) -> lib.FloatArray1D:
+    """Ripley's H function (``statistic="h"``) at the radii ``(1, ...,
+    steps) * r_max / steps`` or the radial distribution function
+    (``"g"``) in the ``steps`` shells between them of the points
+    ``(x, y)`` (nm, all inside ``region``); in 3D if ``z`` is given,
+    the region then extends over ``z_range`` (nm), which contains all
+    ``z``. With ``partner`` points ``(x, y, z)``, the cross function
+    between both sets of points, combining both directions (Lotwick
+    and Silverman, 1982); otherwise at least two points are needed."""
+    use_z = z is not None
+    z_range = tuple(z_range) if use_z else None
+    first = _grid_points(x, y, z, region, z_range, r_max)
+    kwargs = dict(
+        region=region,
+        z_range=z_range,
+        r_max=r_max,
+        steps=steps,
+        edge_correction=edge_correction,
+    )
+    size = region.area * (z_range[1] - z_range[0]) if use_z else region.area
+    n1 = len(x)
+    if partner is None:
+        counts = _weighted_pair_counts(
+            first, first, exclude_self=True, **kwargs
+        )
+        # counts per pair of localizations, relative to the density
+        counts *= size / (n1 * (n1 - 1))
     else:
-        counts = _pair_counts(*args, 0, n)
+        second = _grid_points(*partner, region, z_range, r_max)
+        n2 = len(partner[0])
+        counts_12 = _weighted_pair_counts(
+            first, second, exclude_self=False, **kwargs
+        )
+        counts_21 = _weighted_pair_counts(
+            second, first, exclude_self=False, **kwargs
+        )
+        # the edge correction centers on the first point of a pair, so
+        # both directions differ slightly; weighted by the number of
+        # points of the other set (Lotwick and Silverman, 1982)
+        counts = (
+            size * (n2 * counts_12 + n1 * counts_21) / ((n1 + n2) * n1 * n2)
+        )
     r = np.arange(steps + 1) * (r_max / steps)  # shell edges
-    size = region.area * (z_max - z_min) if use_z else region.area
-    # counts per pair of localizations, relative to the density
-    counts *= size / (n * (n - 1))
     if statistic == "g":
         if use_z:
             shells = 4 / 3 * np.pi * np.diff(r**3)
@@ -6787,6 +6908,54 @@ def _uniform_in_region(
     return np.concatenate(xs)[:n], np.concatenate(ys)[:n]
 
 
+def _random_shift(
+    x: lib.FloatArray1D,
+    y: lib.FloatArray1D,
+    z: lib.FloatArray1D | None,
+    region: _Region,
+    z_range: tuple[float, float] | None,
+    rng: np.random.Generator,
+) -> tuple[lib.FloatArray1D, lib.FloatArray1D, lib.FloatArray1D | None]:
+    """Shift the points ``(x, y, z)`` (nm) inside ``region`` by a random
+    offset, wrapping around a rectangular region (toroidal shift), or
+    rotate them by a random angle around the center of a circular one;
+    in 3D, also shift z by a random offset, wrapping around
+    ``z_range``. Keeps the arrangement of the points among themselves,
+    so that two channels are made independent of each other."""
+    if region.rectangle is not None:
+        x0, y0, e1x, e1y, e2x, e2y = region.rectangle
+        dx, dy = x - x0, y - y0
+        a = (dx * e1x + dy * e1y) / (e1x**2 + e1y**2)
+        b = (dx * e2x + dy * e2y) / (e2x**2 + e2y**2)
+        a = (a + rng.uniform()) % 1.0
+        b = (b + rng.uniform()) % 1.0
+        x = x0 + a * e1x + b * e2x
+        y = y0 + a * e1y + b * e2y
+    elif region.kind == _REGION_CIRCLE:
+        cx, cy, _ = region.circle
+        angle = rng.uniform(0, 2 * np.pi)
+        cos, sin = np.cos(angle), np.sin(angle)
+        dx, dy = x - cx, y - cy
+        x = cx + cos * dx - sin * dy
+        y = cy + sin * dx + cos * dy
+    else:
+        raise ValueError(_SHIFT_REGIONS_ERROR)
+    if z is not None:
+        z_min, z_max = z_range
+        depth = z_max - z_min
+        z = z_min + (z - z_min + rng.uniform(0, depth)) % depth
+    return x, y, z
+
+
+#: Error for random shifts in regions that cannot be wrapped around
+_SHIFT_REGIONS_ERROR = (
+    "Random shifts of the partner need rectangular regions (box, square "
+    "or rectangle picks, rectangular polygons, the current view or the "
+    "field of view) or circular picks; use cross_null='labels' for other "
+    "polygon picks and brush picks."
+)
+
+
 def _pair_statistic(
     locs: pd.DataFrame,
     info: list[dict],
@@ -6802,27 +6971,38 @@ def _pair_statistic(
     use_z: bool,
     z_range: tuple[float, float] | None,
     simulated_z: Literal["uniform", "observed"],
+    partner_locs: pd.DataFrame | None,
+    cross_null: Literal["shift", "labels"],
     random_seed: int | None,
     progress_callback: Callable[[int], None] | Literal["console"] | None,
 ) -> dict:
     """Ripley's H function (``statistic="h"``) or the radial
     distribution function (``"g"``) of localizations in regions of
-    interest, with the CSR envelope; shared by ``ripley_h`` and
-    ``rdf``, see there for the parameters. Returns the radii ("r"),
-    the function of each region ("values") and their mean ("mean")
-    along with the keys common to both results."""
+    interest, or the cross function with ``partner_locs``, with the
+    envelope of the simulations; shared by ``ripley_h`` and ``rdf``,
+    see there for the parameters. Returns the radii ("r"), the
+    function of each region ("values") and their mean ("mean") along
+    with the keys common to both results."""
+    cross = partner_locs is not None
     if r_max <= 0:
         raise ValueError("r_max must be positive.")
     if steps < 2:
         raise ValueError("steps must be at least 2.")
     if n_simulations < 0:
         raise ValueError("n_simulations must not be negative.")
+    if cross and cross_null not in ("shift", "labels"):
+        raise ValueError(
+            f"Invalid cross_null: {cross_null!r}; choose 'shift' or "
+            "'labels'."
+        )
     if use_z:
-        if "z" not in locs.columns:
+        if "z" not in locs.columns or (
+            cross and "z" not in partner_locs.columns
+        ):
             raise ValueError("3D requires z in the localizations.")
         if z_range is not None and not z_range[0] < z_range[1]:
             raise ValueError("z_range must be (z_min, z_max), z_min < z_max.")
-        if simulated_z not in ("uniform", "observed"):
+        if not cross and simulated_z not in ("uniform", "observed"):
             raise ValueError(
                 f"Invalid simulated_z: {simulated_z!r}; choose 'uniform' "
                 "or 'observed'."
@@ -6849,20 +7029,37 @@ def _pair_statistic(
             _pick_region(pick, pick_shape, pick_size, pixelsize)
             for pick in picks
         ]
-    if not _are_molecules(locs):
-        warnings.warn(
-            "The localizations are not molecules (no 'n_events' or "
-            "'std_frame' column), so each molecule is counted as many "
-            "times as it was localized, which appears as clustering at "
-            "short distances. Consider finding the molecules first, e.g., "
-            "with picasso.g5m.g5m or picasso.clusterer.find_cluster_centers.",
-            UserWarning,
-            stacklevel=3,
-        )
+    if cross and cross_null == "shift":
+        for region in regions:
+            if (
+                region is not None
+                and region.rectangle is None
+                and region.kind != _REGION_CIRCLE
+            ):
+                raise ValueError(_SHIFT_REGIONS_ERROR)
+    for locs_, which in ((locs, "localizations"), (partner_locs, "partner")):
+        if locs_ is not None and not _are_molecules(locs_):
+            warnings.warn(
+                f"The {which} are not molecules (no 'n_events' or "
+                "'std_frame' column), so each molecule is counted as many "
+                "times as it was localized, which appears as clustering "
+                "at short distances. Consider finding the molecules first, "
+                "e.g., with picasso.g5m.g5m or "
+                "picasso.clusterer.find_cluster_centers.",
+                UserWarning,
+                stacklevel=3,
+            )
 
-    x_all = locs["x"].to_numpy(dtype=np.float64) * pixelsize
-    y_all = locs["y"].to_numpy(dtype=np.float64) * pixelsize
-    z_all = locs["z"].to_numpy(dtype=np.float64) if use_z else None
+    # coordinates in nm, z None in 2D, of each channel
+    channels = [locs] + ([partner_locs] if cross else [])
+    coordinates = [
+        (
+            locs_["x"].to_numpy(dtype=np.float64) * pixelsize,
+            locs_["y"].to_numpy(dtype=np.float64) * pixelsize,
+            locs_["z"].to_numpy(dtype=np.float64) if use_z else None,
+        )
+        for locs_ in channels
+    ]
     dr = r_max / steps
     if statistic == "h":
         r = np.arange(1, steps + 1) * dr
@@ -6870,10 +7067,11 @@ def _pair_statistic(
         r = (np.arange(steps) + 0.5) * dr
     n_regions = len(regions)
     values = np.full((n_regions, steps), np.nan)
-    n_locs = np.zeros(n_regions, dtype=int)
+    n_locs = np.zeros((len(channels), n_regions), dtype=int)
     areas = np.zeros(n_regions)
     z_ranges = np.full((n_regions, 2), np.nan)
-    region_z = [None] * n_regions  # z of the localizations in 3D
+    # coordinates of each channel's localizations in each region
+    region_points = [None] * n_regions
     callback, close = _progress_counter(
         progress_callback,
         n_regions * (n_simulations + 1),
@@ -6885,30 +7083,41 @@ def _pair_statistic(
         for k, region in enumerate(regions):
             if region is not None:
                 areas[k] = region.area
-                inside = _locs_in_region(x_all, y_all, region)
-                if use_z:
-                    z = z_all[inside]
-                    if z_range is not None:
-                        inside = inside[(z >= z_range[0]) & (z <= z_range[1])]
+                points = []
+                for x_all, y_all, z_all in coordinates:
+                    inside = _locs_in_region(x_all, y_all, region)
+                    if use_z and z_range is not None:
                         z = z_all[inside]
-                        z_ranges[k] = z_range
-                    elif len(z):
-                        z_ranges[k] = z.min(), z.max()
-                    region_z[k] = z
-                n_locs[k] = len(inside)
+                        inside = inside[(z >= z_range[0]) & (z <= z_range[1])]
+                    points.append(
+                        (
+                            x_all[inside],
+                            y_all[inside],
+                            z_all[inside] if use_z else None,
+                        )
+                    )
+                n_locs[:, k] = [len(x) for x, _, _ in points]
+                if use_z and z_range is not None:
+                    z_ranges[k] = z_range
+                elif use_z and n_locs[:, k].sum():
+                    z = np.concatenate([z for _, _, z in points])
+                    z_ranges[k] = z.min(), z.max()
+                region_points[k] = points
                 # in 3D, the region needs a depth
                 has_size = not use_z or z_ranges[k, 1] > z_ranges[k, 0]
-                if len(inside) >= 2 and has_size:
+                enough = (
+                    n_locs[:, k].min() >= 1 if cross else n_locs[0, k] >= 2
+                )
+                if enough and has_size:
                     values[k] = _pair_statistic_region(
-                        x_all[inside],
-                        y_all[inside],
-                        region_z[k],
+                        *points[0],
                         region,
                         tuple(z_ranges[k]),
                         r_max,
                         steps,
                         edge_correction,
                         statistic,
+                        points[1] if cross else None,
                     )
             done += 1
             if callback is not None:
@@ -6916,7 +7125,11 @@ def _pair_statistic(
         valid = np.flatnonzero(~np.isnan(values[:, 0]))
         if not len(valid):
             raise ValueError(
-                "No region contains at least two localizations"
+                (
+                    "No region contains localizations of both channels"
+                    if cross
+                    else "No region contains at least two localizations"
+                )
                 + (" at different z." if use_z else ".")
             )
         mean = values[valid].mean(axis=0)
@@ -6940,22 +7153,26 @@ def _pair_statistic(
             simulated = np.zeros((n_simulations, steps))
             for s in range(n_simulations):
                 for k in valid:
-                    x, y = _uniform_in_region(n_locs[k], regions[k], rng)
-                    z = None
-                    if use_z and simulated_z == "uniform":
-                        z = rng.uniform(*z_ranges[k], n_locs[k])
-                    elif use_z:
-                        z = rng.permutation(region_z[k])
+                    region = regions[k]
+                    z_range_k = tuple(z_ranges[k])
+                    points = _simulated_points(
+                        region_points[k],
+                        region,
+                        z_range_k,
+                        cross,
+                        cross_null,
+                        simulated_z,
+                        rng,
+                    )
                     simulated[s] += _pair_statistic_region(
-                        x,
-                        y,
-                        z,
-                        regions[k],
-                        tuple(z_ranges[k]),
+                        *points[0],
+                        region,
+                        z_range_k,
                         r_max,
                         steps,
                         edge_correction,
                         statistic,
+                        points[1] if cross else None,
                     )
                 simulated[s] /= len(valid)
                 done += n_regions
@@ -6972,14 +7189,55 @@ def _pair_statistic(
         "mean": mean,
         "envelope_low": envelope_low,
         "envelope_high": envelope_high,
-        "n_locs": n_locs,
+        "n_locs": n_locs[0],
+        "n_locs_partner": n_locs[1] if cross else None,
         "areas": areas,
         "z_ranges": z_ranges if use_z else None,
         "volumes": (
             areas * (z_ranges[:, 1] - z_ranges[:, 0]) if use_z else None
         ),
-        "simulated_z": simulated_z if use_z else None,
+        "simulated_z": simulated_z if use_z and not cross else None,
+        "cross_null": cross_null if cross else None,
     }
+
+
+def _simulated_points(
+    points: list[tuple],
+    region: _Region,
+    z_range: tuple[float, float],
+    cross: bool,
+    cross_null: Literal["shift", "labels"],
+    simulated_z: Literal["uniform", "observed"],
+    rng: np.random.Generator,
+) -> list[tuple]:
+    """The points ``(x, y, z)`` (z None in 2D) of each channel in a
+    region for one simulation: as many uniformly random points as
+    localizations (complete spatial randomness) for one channel; for
+    two channels, the partner (second channel) shifted at random
+    (``cross_null="shift"``) or the channels of all points shuffled
+    (``"labels"``)."""
+    x, y, z = points[0]
+    if not cross:
+        x_new, y_new = _uniform_in_region(len(x), region, rng)
+        z_new = None
+        if z is not None and simulated_z == "uniform":
+            z_new = rng.uniform(*z_range, len(x))
+        elif z is not None:
+            z_new = rng.permutation(z)
+        return [(x_new, y_new, z_new)]
+    if cross_null == "shift":
+        return [points[0], _random_shift(*points[1], region, z_range, rng)]
+    # random labels: the same points, channels shuffled
+    n1 = len(x)
+    order = rng.permutation(n1 + len(points[1][0]))
+    pooled = [
+        (None if values[0] is None else np.concatenate(values)[order])
+        for values in zip(points[0], points[1])
+    ]
+    return [
+        tuple(None if v is None else v[:n1] for v in pooled),
+        tuple(None if v is None else v[n1:] for v in pooled),
+    ]
 
 
 def ripley_h(
@@ -6999,6 +7257,8 @@ def ripley_h(
     use_z: bool = False,
     z_range: tuple[float, float] | None = None,
     simulated_z: Literal["uniform", "observed"] = "uniform",
+    partner_locs: pd.DataFrame | None = None,
+    cross_null: Literal["shift", "labels"] = "shift",
     random_seed: int | None = 0,
     progress_callback: (
         Callable[[int], None] | Literal["console"] | None
@@ -7031,6 +7291,15 @@ def ripley_h(
     ``n_simulations`` times with as many uniformly random points as it
     holds localizations; the lowest and highest mean H of the
     simulations at each radius give the CSR envelope.
+
+    With ``partner_locs``, the cross H function between two channels
+    is computed instead (Lotwick and Silverman, 1982): K counts the
+    partner localizations around each localization, normalized by both
+    densities (A / (n1 n2) instead of A / (n (n - 1))), and both
+    directions are combined into one symmetric estimate. The cross H
+    function is positive if the channels are found near each other
+    (colocalization), 0 if they are independent and negative if they
+    avoid each other (segregation). The channels must be aligned.
 
     Parameters
     ----------
@@ -7098,8 +7367,25 @@ def ripley_h(
         clustering. "observed" shuffles the z values of the
         localizations in the region instead, which tests for clustering
         beyond the z distribution but also hides real clustering in z
-        (e.g., a layer of molecules). Only used in 3D. Default is
-        "uniform".
+        (e.g., a layer of molecules). Only used in 3D without
+        ``partner_locs``. Default is "uniform".
+    partner_locs : pd.DataFrame or None, optional
+        Molecules of a second channel, in the same coordinates as
+        ``locs`` (aligned). If given, the cross function between both
+        channels is computed in the same regions. Default is None.
+    cross_null : {"shift", "labels"}, optional
+        How the envelope is simulated with ``partner_locs``. "shift"
+        shifts the partner by a random offset, wrapping around the
+        region (toroidal shift; in circles, a random rotation; in 3D,
+        also a random shift in z), which keeps the arrangement of each
+        channel and tests whether the channels are independent. It
+        requires rectangular regions (box, square or rectangle picks,
+        rectangular polygons, the current view or the field of view)
+        or circular picks. "labels" shuffles which channel each
+        localization belongs to, which works in any region and tests
+        whether both channels follow the same distribution; a channel
+        whose molecules are clustered more strongly than the other's
+        then also differs from it. Default is "shift".
     random_seed : int or None, optional
         Seed of the CSR simulations. None gives a different envelope
         on each call. Default is 0.
@@ -7123,6 +7409,8 @@ def ripley_h(
         - "envelope_low", "envelope_high": CSR envelope of the mean H
           function in nm, or None without simulations.
         - "n_locs": number of localizations in each region.
+        - "n_locs_partner": number of partner localizations in each
+          region, None without ``partner_locs``.
         - "areas": area of each region in nm^2.
         - "z_ranges": z range of each region in nm, shape (n_regions,
           2), NaN for regions without localizations; None in 2D.
@@ -7132,22 +7420,28 @@ def ripley_h(
         - "n_simulations": number of CSR simulations.
         - "edge_correction": whether the edge correction was applied.
         - "use_z": whether H was computed in 3D.
-        - "simulated_z": z of the simulated points in 3D, None in 2D.
+        - "simulated_z": z of the simulated points in 3D, None in 2D
+          and with ``partner_locs``.
+        - "cross_null": how the envelope was simulated with
+          ``partner_locs``, None without.
 
     Raises
     ------
     ValueError
-        If the parameters are invalid, z is missing in 3D or no region
-        contains at least two localizations (in 3D, at different z).
+        If the parameters are invalid, z is missing in 3D, no region
+        contains at least two localizations (in 3D, at different z; with
+        ``partner_locs``, localizations of both channels) or random
+        shifts are requested in regions other than rectangles and
+        circles.
 
     Warns
     -----
     UserWarning
-        If ``locs`` are not molecules (no ``n_events`` or ``std_frame``
-        column). Each molecule is then counted as many times as it was
-        localized, which appears as clustering at short distances. In
-        3D, also if ``r_max`` exceeds a third of the z range of a
-        region.
+        If ``locs`` or ``partner_locs`` are not molecules (no
+        ``n_events`` or ``std_frame`` column). Each molecule is then
+        counted as many times as it was localized, which appears as
+        clustering at short distances. In 3D, also if ``r_max`` exceeds
+        a third of the z range of a region.
 
     See Also
     --------
@@ -7157,6 +7451,10 @@ def ripley_h(
     ----------
     Ripley, B. D. Modelling spatial patterns. J R Stat Soc B 39,
     172-192 (1977). https://doi.org/10.1111/j.2517-6161.1977.tb01615.x
+
+    Lotwick, H. W., Silverman, B. W. Methods for analysing spatial
+    processes of several types of points. J R Stat Soc B 44, 406-413
+    (1982). https://doi.org/10.1111/j.2517-6161.1982.tb01221.x
     """
     result = _pair_statistic(
         locs,
@@ -7172,6 +7470,8 @@ def ripley_h(
         use_z=use_z,
         z_range=z_range,
         simulated_z=simulated_z,
+        partner_locs=partner_locs,
+        cross_null=cross_null,
         random_seed=random_seed,
         progress_callback=progress_callback,
     )
@@ -7186,6 +7486,7 @@ def ripley_h(
         "envelope_low": result["envelope_low"],
         "envelope_high": result["envelope_high"],
         "n_locs": result["n_locs"],
+        "n_locs_partner": result["n_locs_partner"],
         "areas": result["areas"],
         "z_ranges": result["z_ranges"],
         "volumes": result["volumes"],
@@ -7194,6 +7495,7 @@ def ripley_h(
         "edge_correction": edge_correction,
         "use_z": use_z,
         "simulated_z": result["simulated_z"],
+        "cross_null": result["cross_null"],
     }
 
 
@@ -7214,6 +7516,8 @@ def rdf(
     use_z: bool = False,
     z_range: tuple[float, float] | None = None,
     simulated_z: Literal["uniform", "observed"] = "uniform",
+    partner_locs: pd.DataFrame | None = None,
+    cross_null: Literal["shift", "labels"] = "shift",
     random_seed: int | None = 0,
     progress_callback: (
         Callable[[int], None] | Literal["console"] | None
@@ -7239,10 +7543,15 @@ def rdf(
     correction weight w_ij and the ring width dr = ``r_max / steps``.
     The ring area is 2 pi r dr (in 3D, the shell volume 4 pi r^2 dr).
 
-    The regions, the edge correction, 3D and the CSR envelope are the
-    same as for ``ripley_h``. Since each ring holds fewer pairs than
-    the disk of Ripley's K function, g(r) is noisier; widen the rings
-    (fewer ``steps``) for regions with few localizations.
+    The regions, the edge correction, 3D, the CSR envelope and the
+    cross function between two channels (``partner_locs``) are the
+    same as for ``ripley_h``. The cross g(r) is the density of partner
+    localizations at the distance r from a localization, relative to
+    the mean density of the partner: above 1 at the distances where
+    the channels are found together, 1 if they are independent. Since
+    each ring holds fewer pairs than the disk of Ripley's K function,
+    g(r) is noisier; widen the rings (fewer ``steps``) for regions
+    with few localizations.
 
     Parameters
     ----------
@@ -7288,7 +7597,16 @@ def rdf(
         localizations. Only used in 3D. Default is None.
     simulated_z : {"uniform", "observed"}, optional
         z of the simulated points in 3D, see ``ripley_h``. Only used in
-        3D. Default is "uniform".
+        3D without ``partner_locs``. Default is "uniform".
+    partner_locs : pd.DataFrame or None, optional
+        Molecules of a second channel, in the same coordinates as
+        ``locs`` (aligned). If given, the cross function between both
+        channels is computed, see ``ripley_h``. Default is None.
+    cross_null : {"shift", "labels"}, optional
+        How the envelope is simulated with ``partner_locs``: random
+        shifts of the partner (independent channels; rectangular and
+        circular regions only) or random labels (both channels follow
+        the same distribution), see ``ripley_h``. Default is "shift".
     random_seed : int or None, optional
         Seed of the CSR simulations. None gives a different envelope
         on each call. Default is 0.
@@ -7311,22 +7629,23 @@ def rdf(
           localizations.
         - "envelope_low", "envelope_high": CSR envelope of the mean,
           or None without simulations.
-        - "n_locs", "areas", "z_ranges", "volumes", "n_simulations",
-          "edge_correction", "use_z", "simulated_z": as in
-          ``ripley_h``.
+        - "n_locs", "n_locs_partner", "areas", "z_ranges", "volumes",
+          "n_simulations", "edge_correction", "use_z", "simulated_z",
+          "cross_null": as in ``ripley_h``.
 
     Raises
     ------
     ValueError
-        If the parameters are invalid, z is missing in 3D or no region
-        contains at least two localizations (in 3D, at different z).
+        If the parameters are invalid, z is missing in 3D, no region
+        contains enough localizations or random shifts are requested in
+        regions other than rectangles and circles, see ``ripley_h``.
 
     Warns
     -----
     UserWarning
-        If ``locs`` are not molecules (no ``n_events`` or ``std_frame``
-        column), and in 3D if ``r_max`` exceeds a third of the z range
-        of a region.
+        If ``locs`` or ``partner_locs`` are not molecules (no
+        ``n_events`` or ``std_frame`` column), and in 3D if ``r_max``
+        exceeds a third of the z range of a region.
 
     See Also
     --------
@@ -7337,6 +7656,10 @@ def rdf(
     ----------
     Ripley, B. D. Modelling spatial patterns. J R Stat Soc B 39,
     172-192 (1977). https://doi.org/10.1111/j.2517-6161.1977.tb01615.x
+
+    Lotwick, H. W., Silverman, B. W. Methods for analysing spatial
+    processes of several types of points. J R Stat Soc B 44, 406-413
+    (1982). https://doi.org/10.1111/j.2517-6161.1982.tb01221.x
     """
     result = _pair_statistic(
         locs,
@@ -7352,6 +7675,8 @@ def rdf(
         use_z=use_z,
         z_range=z_range,
         simulated_z=simulated_z,
+        partner_locs=partner_locs,
+        cross_null=cross_null,
         random_seed=random_seed,
         progress_callback=progress_callback,
     )
@@ -7362,6 +7687,7 @@ def rdf(
         "envelope_low": result["envelope_low"],
         "envelope_high": result["envelope_high"],
         "n_locs": result["n_locs"],
+        "n_locs_partner": result["n_locs_partner"],
         "areas": result["areas"],
         "z_ranges": result["z_ranges"],
         "volumes": result["volumes"],
@@ -7369,6 +7695,7 @@ def rdf(
         "edge_correction": edge_correction,
         "use_z": use_z,
         "simulated_z": result["simulated_z"],
+        "cross_null": result["cross_null"],
     }
 
 
@@ -7399,7 +7726,11 @@ def plot_rdf(
         rdf_result["g"],
         rdf_result["g_mean"],
         fig,
-        title="Radial distribution function",
+        title=(
+            "Cross radial distribution function"
+            if rdf_result["cross_null"]
+            else "Radial distribution function"
+        ),
         ylabel="g(r)",
         label="g(r)",
         random_value=1.0,
@@ -7432,12 +7763,24 @@ def plot_ripley_h(
         ripley_result["h"],
         ripley_result["h_mean"],
         fig,
-        title="Ripley's H function",
+        title=(
+            "Ripley's cross H function"
+            if ripley_result["cross_null"]
+            else "Ripley's H function"
+        ),
         ylabel="H(r) (nm)",
         label="H(r)",
         random_value=0.0,
         x_max=ripley_result["r"][-1],
     )
+
+
+#: Legend of the envelope by how it was simulated (``cross_null``)
+_ENVELOPE_LABELS = {
+    None: "CSR envelope ({n} simulations)",
+    "shift": "Independence envelope ({n} random shifts)",
+    "labels": "Random labeling envelope ({n} simulations)",
+}
 
 
 def _plot_pair_statistic(
@@ -7487,7 +7830,9 @@ def _plot_pair_statistic(
             color=envelope_color,
             alpha=0.3,
             linewidth=0,
-            label=f"CSR envelope ({result['n_simulations']} simulations)",
+            label=_ENVELOPE_LABELS[result["cross_null"]].format(
+                n=result["n_simulations"]
+            ),
         )
     ax.plot(
         r,
@@ -7563,11 +7908,14 @@ def _pair_statistic_regions(result: dict) -> dict:
     localizations, area and density (per area in 2D, per volume with
     the z range and volume in 3D)."""
     n_locs = result["n_locs"]
+    n_locs_partner = result["n_locs_partner"]
     regions = {
         "region": np.arange(len(n_locs)),
         "n_locs": n_locs,
-        "area_um2": result["areas"] / 1e6,
     }
+    if n_locs_partner is not None:
+        regions["n_locs_partner"] = n_locs_partner
+    regions["area_um2"] = result["areas"] / 1e6
     if result["use_z"]:
         regions["z_min_nm"] = result["z_ranges"][:, 0]
         regions["z_max_nm"] = result["z_ranges"][:, 1]
@@ -7579,6 +7927,10 @@ def _pair_statistic_regions(result: dict) -> dict:
         regions[f"density_per_{unit}"] = np.where(
             size > 0, n_locs / size, np.nan
         )
+        if n_locs_partner is not None:
+            regions[f"partner_density_per_{unit}"] = np.where(
+                size > 0, n_locs_partner / size, np.nan
+            )
     return regions
 
 

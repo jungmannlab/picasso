@@ -988,7 +988,7 @@ name>_ripley_h.png``.
 
 .. code-block:: bash
 
-   picasso ripley_h files [-p picks] [-r rmax] [-s steps] [-n simulations] [--no-edge-correction] [--3d] [--zrange zmin zmax] [--observed-z]
+   picasso ripley_h files [-p picks] [-r rmax] [-s steps] [-n simulations] [--no-edge-correction] [--3d] [--zrange zmin zmax] [--observed-z] [--partner file] [--cross-null shift|labels]
 
 For example, in the picks saved in Render, and in 3D between z = -300 and 300
 nm:
@@ -997,6 +997,12 @@ nm:
 
    picasso ripley_h molecules.hdf5 -p picks.yaml -r 300
    picasso ripley_h molecules.hdf5 -p picks.yaml -r 200 --3d --zrange -300 300
+
+and between two channels, with random shifts of the second one:
+
+.. code-block:: bash
+
+   picasso ripley_h protein_a_molecules.hdf5 --partner protein_b_molecules.hdf5 -r 300
 
 .. list-table::
    :header-rows: 1
@@ -1033,6 +1039,17 @@ nm:
      - off
      - In 3D, give the simulated points the observed z values (shuffled)
        instead of spreading them uniformly over the z range.
+   * - ``--partner`` (str)
+     - none
+     - A localization file of a second channel (aligned). The cross function
+       of each file with it is computed and saved as
+       ``<file name>_ripley_h_cross.csv``, etc. See
+       :ref:`render-cross-functions`.
+   * - ``--cross-null`` (``shift`` or ``labels``)
+     - ``shift``
+     - With ``--partner``, how the envelope is simulated: random shifts of
+       the partner (independent channels; rectangular or circular regions
+       only) or random labels (both channels follow the same distribution).
 
 rdf
 ---
@@ -1047,7 +1064,7 @@ radius steps are rings of ``rmax / steps`` and the default number of steps is
 
 .. code-block:: bash
 
-   picasso rdf files [-p picks] [-r rmax] [-s steps] [-n simulations] [--no-edge-correction] [--3d] [--zrange zmin zmax] [--observed-z]
+   picasso rdf files [-p picks] [-r rmax] [-s steps] [-n simulations] [--no-edge-correction] [--3d] [--zrange zmin zmax] [--observed-z] [--partner file] [--cross-null shift|labels]
 
 For example, in the picks saved in Render with rings of 5 nm:
 

@@ -973,17 +973,21 @@ def _pair_statistic(
     use_3d: bool = False,
     z_range: tuple[float, float] | None = None,
     observed_z: bool = False,
+    partner_path: str | None = None,
+    cross_null: Literal["shift", "labels"] = "shift",
 ) -> None:
     """Ripley's H function (``statistic="ripley_h"``) or the radial
     distribution function (``"rdf"``) of localizations, in the picks
     of ``picks_path`` or in the whole field of view, in 2D or, with
     ``use_3d``, in 3D over ``z_range`` (nm; None for the z range of
     each region's localizations) with the simulated z uniform or, with
-    ``observed_z``, shuffled from the localizations. Saves the
-    functions (``<file>_<statistic>.csv``), the summary of each region
-    (``<file>_<statistic>_regions.csv``) and a plot
-    (``<file>_<statistic>.png``) next to each file. See
-    ``postprocess.ripley_h`` and ``postprocess.rdf`` for details."""
+    ``observed_z``, shuffled from the localizations. With
+    ``partner_path``, the cross function of each file with the
+    localizations in that file, simulated by ``cross_null``. Saves the
+    functions (``<file>_<statistic>[_cross].csv``), the summary of
+    each region (``..._regions.csv``) and a plot (``.png``) next to
+    each file. See ``postprocess.ripley_h`` and ``postprocess.rdf``
+    for details."""
     import warnings
     from glob import glob
     from itertools import chain
@@ -1007,25 +1011,29 @@ def _pair_statistic(
         ),
     }[statistic]
     paths = list(chain(*[sorted(glob(_)) for _ in files]))
+    partner_locs = None
+    if partner_path is not None:
+        partner_locs, _ = io.load_locs(partner_path)
+        _warn_if_not_molecules(partner_path, partner_locs)
+        # a file matching both is not paired with itself
+        paths = [
+            p
+            for p in paths
+            if os.path.abspath(p) != os.path.abspath(partner_path)
+        ]
     if not paths:
         raise SystemExit("No localization files found.")
     for path in paths:
         locs, info = io.load_locs(path)
-        if not postprocess._are_molecules(locs):
-            print(
-                f"WARNING: {path} does not contain molecules (no"
-                " 'n_events' or 'std_frame' column), so each molecule is"
-                " counted as many times as it was localized, which appears"
-                " as clustering at short distances. Consider finding the"
-                " molecules first, e.g., with 'picasso g5m' or as the"
-                " cluster centers saved by 'picasso dbscan', 'hdbscan' or"
-                " 'smlm_cluster'."
-            )
+        _warn_if_not_molecules(path, locs)
         picks, shape, size = None, None, None
         if picks_path is not None:
             pixelsize = lib.get_from_metadata(info, "Pixelsize", 130.0)
             picks, shape, size = io.load_picks(picks_path, pixelsize)
-        print(f"{title} of {path}:")
+        if partner_locs is None:
+            print(f"{title} of {path}:")
+        else:
+            print(f"{title} of {path} and {partner_path}:")
         try:
             with warnings.catch_warnings(record=True) as caught:
                 warnings.simplefilter("always")
@@ -1042,6 +1050,8 @@ def _pair_statistic(
                     use_z=use_3d,
                     z_range=z_range,
                     simulated_z="observed" if observed_z else "uniform",
+                    partner_locs=partner_locs,
+                    cross_null=cross_null,
                     progress_callback="console",
                 )
         except ValueError as e:
@@ -1059,12 +1069,31 @@ def _pair_statistic(
             )
         print(summary)
         base = os.path.splitext(path)[0] + "_" + statistic
+        if partner_locs is not None:
+            base += "_cross"
         curves, regions = tables(result)
         curves.to_csv(base + ".csv", index=False)
         regions.to_csv(base + "_regions.csv", index=False)
         plot(result).savefig(base + ".png", dpi=150)
         for suffix in (".csv", "_regions.csv", ".png"):
             print(f"  saved {base + suffix}")
+
+
+def _warn_if_not_molecules(path: str, locs: pd.DataFrame) -> None:
+    """Print a warning if the localizations in ``path`` are not
+    molecules, see ``postprocess._are_molecules``."""
+    from . import postprocess
+
+    if not postprocess._are_molecules(locs):
+        print(
+            f"WARNING: {path} does not contain molecules (no"
+            " 'n_events' or 'std_frame' column), so each molecule is"
+            " counted as many times as it was localized, which appears"
+            " as clustering at short distances. Consider finding the"
+            " molecules first, e.g., with 'picasso g5m' or as the"
+            " cluster centers saved by 'picasso dbscan', 'hdbscan' or"
+            " 'smlm_cluster'."
+        )
 
 
 def _add_pair_statistic_arguments(
@@ -1141,6 +1170,25 @@ def _add_pair_statistic_arguments(
         help=(
             "in 3D, shuffle the observed z values for the simulated"
             " points instead of spreading them uniformly over the z range"
+        ),
+    )
+    parser.add_argument(
+        "--partner",
+        default=None,
+        help=(
+            "hdf5 localization file of a second channel (aligned); the"
+            " cross function of each file with it is computed"
+        ),
+    )
+    parser.add_argument(
+        "--cross-null",
+        choices=["shift", "labels"],
+        default="shift",
+        help=(
+            "with --partner, how the envelope is simulated: random shifts"
+            " of the partner (independent channels; rectangular or"
+            " circular regions only) or random labels (both channels"
+            " follow the same distribution) (default=shift)"
         ),
     )
 
@@ -6466,6 +6514,8 @@ def main():  # noqa: C901
                 args.use_3d,
                 None if args.zrange is None else tuple(args.zrange),
                 args.observed_z,
+                args.partner,
+                args.cross_null,
             )
         elif args.command == "dark":
             _dark(args.files)

@@ -8370,8 +8370,13 @@ class SpatialStatisticDialog(lib.Dialog):
     ----------
     channel : QComboBox
         Channel whose localizations are analyzed.
+    cross_null : QComboBox
+        How the envelope is simulated with a partner channel: random
+        shifts of the partner or random labels.
     edge_correction : QCheckBox
         If checked, Ripley's isotropic edge correction is applied.
+    partner : QComboBox
+        Second channel for the cross function, or none (data None).
     r_max : QDoubleSpinBox
         Maximum radius in nm.
     region : QComboBox
@@ -8381,13 +8386,12 @@ class SpatialStatisticDialog(lib.Dialog):
         z of the simulated points in 3D: uniform over the z range or
         the observed z values, shuffled.
     simulations : QSpinBox
-        Number of simulations of complete spatial randomness for the
-        envelope.
+        Number of simulations for the envelope.
     steps : QSpinBox
         Number of radii up to the maximum radius.
     use_z : QCheckBox
-        If checked, the function is computed in 3D. Only enabled if the channel
-        contains z.
+        If checked, the function is computed in 3D. Only enabled if the
+        channel (and the partner) contain z.
     z_limits : QComboBox
         Whether the regions extend over the z range of their
         localizations or over ``z_min`` to ``z_max`` in 3D.
@@ -8420,9 +8424,26 @@ class SpatialStatisticDialog(lib.Dialog):
             [check.text() for check in window.dataset_dialog.checks]
         )
         grid.addWidget(self.channel, 1, 1)
+        partner_label = QtWidgets.QLabel("Partner channel:")
+        partner_label.setToolTip(
+            "Second channel for the cross function between two\n"
+            "channels: positive H (g above 1) where the channels are\n"
+            "found together. The channels must be aligned."
+        )
+        grid.addWidget(partner_label, 2, 0)
+        self.partner = QtWidgets.QComboBox()
+        self.partner.addItem("None (one channel)", None)
+        for i, check in enumerate(window.dataset_dialog.checks):
+            self.partner.addItem(check.text(), i)
+        grid.addWidget(self.partner, 2, 1)
         if len(view.locs_paths) < 2:
-            channel_label.hide()
-            self.channel.hide()
+            for widget in (
+                channel_label,
+                self.channel,
+                partner_label,
+                self.partner,
+            ):
+                widget.hide()
 
         region_label = QtWidgets.QLabel("Regions:")
         region_label.setToolTip(
@@ -8433,7 +8454,7 @@ class SpatialStatisticDialog(lib.Dialog):
             "(e.g., the cell): empty parts of a region appear as\n"
             "clustering."
         )
-        grid.addWidget(region_label, 2, 0)
+        grid.addWidget(region_label, 3, 0)
         self.region = QtWidgets.QComboBox()
         n_picks = len(view._picks)
         for key, text in self.REGIONS.items():
@@ -8442,44 +8463,73 @@ class SpatialStatisticDialog(lib.Dialog):
                     continue
                 text = f"{text} ({n_picks})"
             self.region.addItem(text, key)
-        grid.addWidget(self.region, 2, 1)
+        grid.addWidget(self.region, 3, 1)
+        # random shifts work in rectangles and circles only
+        self._picks_shiftable = bool(view._picks) and all(
+            region is None
+            or region.rectangle is not None
+            or region.kind == postprocess._REGION_CIRCLE
+            for region in (
+                postprocess._pick_region(
+                    pick, view._pick_shape, view._pick_size, 1.0
+                )
+                for pick in view._picks
+            )
+        )
 
         r_label = QtWidgets.QLabel("Max. radius (nm):")
         r_label.setToolTip(
             "Largest radius. It should be well below the size of the\n"
             "regions."
         )
-        grid.addWidget(r_label, 3, 0)
+        grid.addWidget(r_label, 4, 0)
         self.r_max = QtWidgets.QDoubleSpinBox()
         self.r_max.setRange(0.1, 1e6)
         self.r_max.setDecimals(1)
         self.r_max.setValue(500.0)
         self.r_max.setSingleStep(10)
-        grid.addWidget(self.r_max, 3, 1)
+        grid.addWidget(self.r_max, 4, 1)
         steps_label = QtWidgets.QLabel("Radius steps:")
         steps_label.setToolTip(
             "Number of radius steps up to the max. radius (for the\n"
             "radial distribution function, the number of rings)."
         )
-        grid.addWidget(steps_label, 4, 0)
+        grid.addWidget(steps_label, 5, 0)
         self.steps = QtWidgets.QSpinBox()
         self.steps.setRange(2, 10_000)
         self.steps.setValue(self.statistic["steps"])
-        grid.addWidget(self.steps, 4, 1)
-        simulations_label = QtWidgets.QLabel("CSR simulations:")
+        grid.addWidget(self.steps, 5, 1)
+        simulations_label = QtWidgets.QLabel("Simulations:")
         simulations_label.setToolTip(
-            "Number of simulations of complete spatial randomness\n"
-            "(CSR) for the envelope: uniformly random points in the\n"
-            "same regions, as many as there are localizations. A mean\n"
-            "function outside the envelope is significant at the\n"
-            "pointwise level 2 / (simulations + 1). 0 skips the\n"
-            "simulations."
+            "Number of simulations for the envelope. For one channel,\n"
+            "uniformly random points in the same regions, as many as\n"
+            "there are localizations (complete spatial randomness,\n"
+            "CSR); for two channels, see the envelope. A mean function\n"
+            "outside the envelope is significant at the pointwise\n"
+            "level 2 / (simulations + 1). 0 skips the simulations."
         )
-        grid.addWidget(simulations_label, 5, 0)
+        grid.addWidget(simulations_label, 6, 0)
         self.simulations = QtWidgets.QSpinBox()
         self.simulations.setRange(0, 9_999)
         self.simulations.setValue(99)
-        grid.addWidget(self.simulations, 5, 1)
+        grid.addWidget(self.simulations, 6, 1)
+        self.cross_null_label = QtWidgets.QLabel("Envelope:")
+        self.cross_null_label.setToolTip(
+            "How the two channels are simulated. Random shifts: the\n"
+            "partner is shifted at random, wrapping around the region\n"
+            "(rotated in circles); each channel keeps its own\n"
+            "arrangement, so the envelope shows independent channels.\n"
+            "Needs rectangular or circular regions. Random labels: the\n"
+            "channel of each localization is shuffled; the envelope\n"
+            "shows two channels with the same distribution, so a\n"
+            "channel clustered more strongly than the other also\n"
+            "falls outside of it."
+        )
+        grid.addWidget(self.cross_null_label, 7, 0)
+        self.cross_null = QtWidgets.QComboBox()
+        self.cross_null.addItem("Random shifts (independence)", "shift")
+        self.cross_null.addItem("Random labels (same distribution)", "labels")
+        grid.addWidget(self.cross_null, 7, 1)
         self.edge_correction = QtWidgets.QCheckBox("Edge correction")
         self.edge_correction.setToolTip(
             "Ripley's isotropic edge correction: weight each pair by\n"
@@ -8488,7 +8538,7 @@ class SpatialStatisticDialog(lib.Dialog):
             "neighbors outside of it are not seen."
         )
         self.edge_correction.setChecked(True)
-        grid.addWidget(self.edge_correction, 6, 0, 1, 2)
+        grid.addWidget(self.edge_correction, 8, 0, 1, 2)
 
         # 3D
         self.use_z = QtWidgets.QCheckBox("3D (x, y and z)")
@@ -8498,19 +8548,19 @@ class SpatialStatisticDialog(lib.Dialog):
             "of the z range: larger spheres mostly reach the top or\n"
             "bottom of the region and the function gets noisy."
         )
-        grid.addWidget(self.use_z, 7, 0, 1, 2)
+        grid.addWidget(self.use_z, 9, 0, 1, 2)
         self.z_limits_label = QtWidgets.QLabel("z range:")
         self.z_limits_label.setToolTip(
             "z range over which the regions extend. The volume, and\n"
             "thus the density, depends on it."
         )
-        grid.addWidget(self.z_limits_label, 8, 0)
+        grid.addWidget(self.z_limits_label, 10, 0)
         self.z_limits = QtWidgets.QComboBox()
         self.z_limits.addItem("Localizations in each region", "data")
         self.z_limits.addItem("Manual", "manual")
-        grid.addWidget(self.z_limits, 8, 1)
+        grid.addWidget(self.z_limits, 10, 1)
         self.z_min_label = QtWidgets.QLabel("z min / max (nm):")
-        grid.addWidget(self.z_min_label, 9, 0)
+        grid.addWidget(self.z_min_label, 11, 0)
         z_box = QtWidgets.QHBoxLayout()
         self.z_min = QtWidgets.QDoubleSpinBox()
         self.z_max = QtWidgets.QDoubleSpinBox()
@@ -8521,7 +8571,7 @@ class SpatialStatisticDialog(lib.Dialog):
             z_box.addWidget(spin)
         self.z_min.setToolTip("Bottom of the regions; lower z is ignored.")
         self.z_max.setToolTip("Top of the regions; higher z is ignored.")
-        grid.addLayout(z_box, 9, 1)
+        grid.addLayout(z_box, 11, 1)
         self.simulated_z_label = QtWidgets.QLabel("Simulated z:")
         self.simulated_z_label.setToolTip(
             "z of the simulated points. Uniform: complete spatial\n"
@@ -8532,14 +8582,16 @@ class SpatialStatisticDialog(lib.Dialog):
             "the z distribution, but hides real clustering in z (e.g.,\n"
             "a layer of molecules)."
         )
-        grid.addWidget(self.simulated_z_label, 10, 0)
+        grid.addWidget(self.simulated_z_label, 12, 0)
         self.simulated_z = QtWidgets.QComboBox()
         self.simulated_z.addItem("Uniform over the z range", "uniform")
         self.simulated_z.addItem("Observed z values, shuffled", "observed")
-        grid.addWidget(self.simulated_z, 10, 1)
+        grid.addWidget(self.simulated_z, 12, 1)
         vbox.addLayout(grid)
 
         self.channel.currentIndexChanged.connect(self.on_channel_changed)
+        self.partner.currentIndexChanged.connect(self.on_channel_changed)
+        self.region.currentIndexChanged.connect(self.update_widgets)
         self.use_z.toggled.connect(self.update_widgets)
         self.z_limits.currentIndexChanged.connect(self.update_widgets)
         self.simulations.valueChanged.connect(self.update_widgets)
@@ -8555,34 +8607,65 @@ class SpatialStatisticDialog(lib.Dialog):
         self.buttons.accepted.connect(self.accept)
         self.buttons.rejected.connect(self.reject)
 
+    def channels(self) -> list[int]:
+        """Indices of the channel and, if chosen, the partner."""
+        partner = self.partner.currentData()
+        channel = self.channel.currentIndex()
+        return [channel] if partner is None else [channel, partner]
+
     def on_channel_changed(self) -> None:
-        """Allow 3D only for a channel with z and set the manual z range
-        to that of its localizations."""
-        locs = self.window.view.locs[self.channel.currentIndex()]
-        has_z = "z" in locs.columns
+        """Allow 3D only for channels with z and set the manual z range
+        to that of their localizations."""
+        all_locs = [self.window.view.locs[i] for i in self.channels()]
+        has_z = all("z" in locs.columns for locs in all_locs)
         self.use_z.setEnabled(has_z)
         if not has_z:
             self.use_z.setChecked(False)
-        elif len(locs):
-            self.z_min.setValue(np.floor(locs["z"].min()))
-            self.z_max.setValue(np.ceil(locs["z"].max()))
+        elif sum(len(locs) for locs in all_locs):
+            z = np.concatenate([locs["z"].to_numpy() for locs in all_locs])
+            self.z_min.setValue(np.floor(z.min()))
+            self.z_max.setValue(np.ceil(z.max()))
         self.update_widgets()
 
     def update_widgets(self) -> None:
         """Show the 3D settings only in 3D, the manual z range only if
-        chosen and the simulated z only with simulations."""
+        chosen, the simulated z only with simulations of one channel and
+        the envelope only with simulations of two channels; offer random
+        shifts only in regions that can be shifted."""
         use_z = self.use_z.isChecked()
         manual = self.z_limits.currentData() == "manual"
         simulate = self.simulations.value() > 0
+        cross = self.partner.currentData() is not None
         for widget in (self.z_limits_label, self.z_limits):
             widget.setVisible(use_z)
         for widget in (self.z_min_label, self.z_min, self.z_max):
             widget.setVisible(use_z and manual)
         for widget in (self.simulated_z_label, self.simulated_z):
-            widget.setVisible(use_z and simulate)
+            widget.setVisible(use_z and simulate and not cross)
+        for widget in (self.cross_null_label, self.cross_null):
+            widget.setVisible(cross and simulate)
+        shiftable = (
+            self.region.currentData() != "picks" or self._picks_shiftable
+        )
+        shift_item = self.cross_null.model().item(0)
+        shift_item.setEnabled(shiftable)
+        shift_item.setToolTip(
+            ""
+            if shiftable
+            else "Random shifts need rectangular or circular picks."
+        )
+        if not shiftable:
+            self.cross_null.setCurrentIndex(1)
         self.adjustSize()
 
     def accept(self) -> None:
+        if self.partner.currentData() == self.channel.currentIndex():
+            QtWidgets.QMessageBox.information(
+                self,
+                self.statistic["title"],
+                "Please choose a partner channel other than the channel.",
+            )
+            return
         if (
             self.use_z.isChecked()
             and self.z_limits.currentData() == "manual"
@@ -8604,8 +8687,8 @@ class SpatialStatisticDialog(lib.Dialog):
         """Create the dialog and return the requested parameters of the
         spatial statistic ``statistic`` (a key of
         ``SPATIAL_STATISTICS``). ``"region"`` is one of the keys of
-        ``REGIONS``; ``"z_range"`` is None unless set manually in
-        3D."""
+        ``REGIONS``; ``"partner"`` is the index of the partner channel
+        or None; ``"z_range"`` is None unless set manually in 3D."""
         dialog = SpatialStatisticDialog(parent, statistic)
         result = dialog.exec()
         params = {
@@ -8618,6 +8701,8 @@ class SpatialStatisticDialog(lib.Dialog):
             "use_z": dialog.use_z.isChecked(),
             "z_range": None,
             "simulated_z": "uniform",
+            "partner": dialog.partner.currentData(),
+            "cross_null": dialog.cross_null.currentData(),
         }
         if params["use_z"]:
             if dialog.z_limits.currentData() == "manual":
@@ -8625,7 +8710,8 @@ class SpatialStatisticDialog(lib.Dialog):
                     dialog.z_min.value(),
                     dialog.z_max.value(),
                 )
-            params["simulated_z"] = dialog.simulated_z.currentData()
+            if params["partner"] is None:
+                params["simulated_z"] = dialog.simulated_z.currentData()
         return params, result == QtWidgets.QDialog.DialogCode.Accepted
 
 
@@ -8666,6 +8752,7 @@ class SpatialStatisticPlotWindow(lib.GenericPlotWindow):
             f"Save {self.statistic['title']}",
             os.path.splitext(self.locs_path)[0]
             + self.statistic["suffix"]
+            + ("_cross" if self.result["cross_null"] else "")
             + ".csv",
             filter="*.csv",
         )
@@ -15578,21 +15665,30 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         spec = SPATIAL_STATISTICS[statistic]
         name = spec["title"]
         channel = params["channel"]
-        title = self.window.dataset_dialog.checks[channel].text()
+        partner = params["partner"]
+        used = [channel] if partner is None else [channel, partner]
+        titles = [self.window.dataset_dialog.checks[i].text() for i in used]
+        title = " and ".join(titles)
 
         # each molecule of localizations counts as many times as it was
         # localized, which looks like clustering
-        if not postprocess._are_molecules(self.locs[channel]):
+        not_molecules = [
+            t
+            for i, t in zip(used, titles)
+            if not postprocess._are_molecules(self.locs[i])
+        ]
+        if not_molecules:
             reply = QtWidgets.QMessageBox.warning(
                 self,
                 name,
-                f"{title} does not contain molecules (no 'n_events' or "
-                "'std_frame' column), so each molecule is counted as many "
-                "times as it was localized, which appears as clustering "
-                "at short distances.\n\nConsider finding the molecules "
-                "first, e.g., with Postprocess > Molecular mapping (G5M) "
-                "or by clustering with 'Save cluster centers'.\n\n"
-                "Continue anyway?",
+                f"{' and '.join(not_molecules)} "
+                f"{'do' if len(not_molecules) > 1 else 'does'} not contain "
+                "molecules (no 'n_events' or 'std_frame' column), so each "
+                "molecule is counted as many times as it was localized, "
+                "which appears as clustering at short distances.\n\n"
+                "Consider finding the molecules first, e.g., with "
+                "Postprocess > Molecular mapping (G5M) or by clustering "
+                "with 'Save cluster centers'.\n\nContinue anyway?",
                 QtWidgets.QMessageBox.StandardButton.Yes
                 | QtWidgets.QMessageBox.StandardButton.No,
                 QtWidgets.QMessageBox.StandardButton.No,
@@ -15621,6 +15717,8 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             use_z=params["use_z"],
             z_range=params["z_range"],
             simulated_z=params["simulated_z"],
+            partner_locs=None if partner is None else self.locs[partner],
+            cross_null=params["cross_null"],
         )
 
         def compute(progress: lib.TaskProgress) -> tuple[dict, list[str]]:

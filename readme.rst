@@ -174,6 +174,9 @@ Many of the functionalities provided by Picasso were published independently, pl
    * - Ripley's K and H functions
      - Ripley, J. R. Stat. Soc. B, 1977
      - `10.1111/j.2517-6161.1977.tb01615.x <https://doi.org/10.1111/j.2517-6161.1977.tb01615.x>`__
+   * - Two-channel (cross) Ripley's H and radial distribution functions
+     - Lotwick and Silverman, J. R. Stat. Soc. B, 1982
+     - `10.1111/j.2517-6161.1982.tb01221.x <https://doi.org/10.1111/j.2517-6161.1982.tb01221.x>`__
    * - Stitching tiles (global tile positions, inspired by)
      - Preibisch et al., Bioinformatics, 2009
      - `10.1093/bioinformatics/btp184 <https://doi.org/10.1093/bioinformatics/btp184>`__
