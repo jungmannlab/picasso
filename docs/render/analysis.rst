@@ -737,3 +737,64 @@ The dialog shows these settings when ``3D (x, y and z)`` is ticked:
           simulated_z="observed",
       )
       result_3d["volumes"]  # volume of each pick (nm^3)
+
+.. _render-rdf:
+
+Radial Distribution Function (RDF)
+----------------------------------
+
+The radial distribution function ``g(r)``, also called pair correlation
+function, is the density of neighbors at the distance ``r`` from a molecule,
+relative to the mean density. It is:
+
+* 1 for complete spatial randomness (CSR),
+* above 1 at the distances where molecules are more likely to be found than at
+  random, e.g., within clusters or at a regular spacing between molecules,
+* below 1 at the distances where they are depleted.
+
+While Ripley's H function (see :ref:`render-ripley-h`) accumulates all
+neighbors up to ``r``, ``g(r)`` counts the neighbors in a thin ring at ``r``
+(in 3D, a spherical shell). It therefore shows at which distances molecules are
+found, e.g., the spacing of a regular arrangement, rather than up to which
+distance they are clustered. Each ring holds fewer pairs, so ``g(r)`` is
+noisier than ``H``: use wider rings (fewer ``Radius steps``) for regions with
+few molecules.
+
+``g(r)`` is computed like Ripley's H function, with the same regions, edge
+correction, 3D option (:ref:`render-ripley-h-3d`) and CSR envelope, and the
+same note on molecules applies. Open ``Postprocess > Spatial statistics >
+Radial distribution function (RDF)...``; the dialog is the same as for Ripley's
+H function, with rings of 10 nm (50 ``Radius steps`` up to 500 nm) by default.
+
+The plot shows the mean ``g(r)`` at the ring centers with the CSR envelope
+and, for several picks, the function of each pick. ``Save data`` saves the
+functions by radius (``r_nm``, ``g_mean``, ``envelope_low``,
+``envelope_high`` and ``g_region_<i>``) and, as ``<name>_regions.csv``, the
+number of localizations, area and density of every region (in 3D also its z
+range and volume).
+
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
+
+   ``rdf`` takes the same arguments as ``ripley_h`` and returns the ring
+   centers, the function of each region, their mean and the CSR envelope, see
+   :func:`picasso.postprocess.rdf`.
+
+   .. code-block:: python
+
+      from picasso import io, lib, postprocess
+
+      locs, info = io.load_locs("molecules.hdf5")
+      pixelsize = lib.get_from_metadata(info, "Pixelsize")
+      picks, shape, size = io.load_picks("picks.yaml", pixelsize)
+
+      result = postprocess.rdf(
+          locs, info, picks, shape, size, r_max=500, steps=50, n_simulations=99
+      )
+      result["r"]  # ring centers (nm)
+      result["g_mean"]  # mean g(r) over the picks
+      result["envelope_low"], result["envelope_high"]  # CSR envelope
+
+      fig = postprocess.plot_rdf(result)
+      fig.savefig("rdf.png")

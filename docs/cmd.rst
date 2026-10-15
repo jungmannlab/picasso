@@ -1034,6 +1034,27 @@ nm:
      - In 3D, give the simulated points the observed z values (shuffled)
        instead of spreading them uniformly over the z range.
 
+rdf
+---
+Radial distribution function g(r) of localizations: the density of neighbors
+at the distance r from a molecule, relative to the mean density (1 for
+complete spatial randomness, above 1 at the distances where molecules are more
+likely to be found than at random, below 1 where they are depleted). Computed
+like `ripley_h`_, with the same options and outputs (``<file name>_rdf.csv``,
+``<file name>_rdf_regions.csv`` and ``<file name>_rdf.png``), except that the
+radius steps are rings of ``rmax / steps`` and the default number of steps is
+50. See :ref:`render-rdf` for details.
+
+.. code-block:: bash
+
+   picasso rdf files [-p picks] [-r rmax] [-s steps] [-n simulations] [--no-edge-correction] [--3d] [--zrange zmin zmax] [--observed-z]
+
+For example, in the picks saved in Render with rings of 5 nm:
+
+.. code-block:: bash
+
+   picasso rdf molecules.hdf5 -p picks.yaml -r 300 -s 60
+
 cluster_combine
 ---------------
 Combines the localizations in each cluster of a group (to be deprecated in

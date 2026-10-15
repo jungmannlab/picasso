@@ -8332,9 +8332,37 @@ class CBCDialog(lib.Dialog):
         return params, result == QtWidgets.QDialog.DialogCode.Accepted
 
 
-class RipleyHDialog(lib.Dialog):
-    """Choose the channel, regions and parameters of Ripley's H
-    function, see ``postprocess.ripley_h``.
+#: Statistics of ``Postprocess > Spatial statistics``, by key: the
+#: window title, the functions of ``postprocess`` that compute, plot
+#: and tabulate them, the documentation, the suffix of the saved file
+#: and the default number of radius steps
+SPATIAL_STATISTICS = {
+    "ripley_h": {
+        "title": "Ripley's H function",
+        "compute": postprocess.ripley_h,
+        "plot": postprocess.plot_ripley_h,
+        "tables": postprocess._ripley_h_tables,
+        "docs": docs_url("render/analysis.html#render-ripley-h"),
+        "suffix": "_ripley_h",
+        "steps": 100,
+    },
+    "rdf": {
+        "title": "Radial distribution function",
+        "compute": postprocess.rdf,
+        "plot": postprocess.plot_rdf,
+        "tables": postprocess._rdf_tables,
+        "docs": docs_url("render/analysis.html#render-rdf"),
+        "suffix": "_rdf",
+        "steps": 50,
+    },
+}
+
+
+class SpatialStatisticDialog(lib.Dialog):
+    """Choose the channel, regions and parameters of a spatial
+    statistic of ``SPATIAL_STATISTICS``, e.g., Ripley's H function
+    (``postprocess.ripley_h``) or the radial distribution function
+    (``postprocess.rdf``).
 
     ...
 
@@ -8347,8 +8375,8 @@ class RipleyHDialog(lib.Dialog):
     r_max : QDoubleSpinBox
         Maximum radius in nm.
     region : QComboBox
-        Regions in which H is computed: the picks (if any), the current
-        view or the whole field of view.
+        Regions in which the function is computed: the picks (if any),
+        the current view or the whole field of view.
     simulated_z : QComboBox
         z of the simulated points in 3D: uniform over the z range or
         the observed z values, shuffled.
@@ -8358,7 +8386,7 @@ class RipleyHDialog(lib.Dialog):
     steps : QSpinBox
         Number of radii up to the maximum radius.
     use_z : QCheckBox
-        If checked, H is computed in 3D. Only enabled if the channel
+        If checked, the function is computed in 3D. Only enabled if the channel
         contains z.
     z_limits : QComboBox
         Whether the regions extend over the z range of their
@@ -8366,8 +8394,6 @@ class RipleyHDialog(lib.Dialog):
     z_min, z_max : QDoubleSpinBox
         z range of the regions in nm in 3D, if set manually.
     """
-
-    DOCS_URL = docs_url("render/analysis.html#render-ripley-h")
 
     #: Region choices, in the order of the combo box (picks only when
     #: there are any)
@@ -8377,14 +8403,15 @@ class RipleyHDialog(lib.Dialog):
         "fov": "Whole field of view",
     }
 
-    def __init__(self, window: QtWidgets.QMainWindow) -> None:
+    def __init__(self, window: QtWidgets.QMainWindow, statistic: str) -> None:
         super().__init__(window)
         self.window = window
-        self.setWindowTitle("Ripley's H function")
+        self.statistic = SPATIAL_STATISTICS[statistic]
+        self.setWindowTitle(self.statistic["title"])
         view = window.view
         vbox = QtWidgets.QVBoxLayout(self)
         grid = QtWidgets.QGridLayout()
-        grid.addWidget(lib.HelpButton(self.DOCS_URL), 0, 0)
+        grid.addWidget(lib.HelpButton(self.statistic["docs"]), 0, 0)
 
         channel_label = QtWidgets.QLabel("Channel:")
         grid.addWidget(channel_label, 1, 0)
@@ -8399,11 +8426,12 @@ class RipleyHDialog(lib.Dialog):
 
         region_label = QtWidgets.QLabel("Regions:")
         region_label.setToolTip(
-            "Regions of interest in which H is computed. With picks,\n"
-            "H is computed in each pick and averaged. The density is\n"
-            "the number of localizations divided by the region's\n"
-            "area, so the regions should lie within the sample (e.g.,\n"
-            "the cell): empty parts of a region appear as clustering."
+            "Regions of interest in which the function is computed.\n"
+            "With picks, it is computed in each pick and averaged. The\n"
+            "density is the number of localizations divided by the\n"
+            "region's area, so the regions should lie within the sample\n"
+            "(e.g., the cell): empty parts of a region appear as\n"
+            "clustering."
         )
         grid.addWidget(region_label, 2, 0)
         self.region = QtWidgets.QComboBox()
@@ -8429,19 +8457,23 @@ class RipleyHDialog(lib.Dialog):
         self.r_max.setSingleStep(10)
         grid.addWidget(self.r_max, 3, 1)
         steps_label = QtWidgets.QLabel("Radius steps:")
-        steps_label.setToolTip("Number of radii up to the max. radius.")
+        steps_label.setToolTip(
+            "Number of radius steps up to the max. radius (for the\n"
+            "radial distribution function, the number of rings)."
+        )
         grid.addWidget(steps_label, 4, 0)
         self.steps = QtWidgets.QSpinBox()
         self.steps.setRange(2, 10_000)
-        self.steps.setValue(100)
+        self.steps.setValue(self.statistic["steps"])
         grid.addWidget(self.steps, 4, 1)
         simulations_label = QtWidgets.QLabel("CSR simulations:")
         simulations_label.setToolTip(
             "Number of simulations of complete spatial randomness\n"
             "(CSR) for the envelope: uniformly random points in the\n"
             "same regions, as many as there are localizations. A mean\n"
-            "H outside the envelope is significant at the pointwise\n"
-            "level 2 / (simulations + 1). 0 skips the simulations."
+            "function outside the envelope is significant at the\n"
+            "pointwise level 2 / (simulations + 1). 0 skips the\n"
+            "simulations."
         )
         grid.addWidget(simulations_label, 5, 0)
         self.simulations = QtWidgets.QSpinBox()
@@ -8461,10 +8493,10 @@ class RipleyHDialog(lib.Dialog):
         # 3D
         self.use_z = QtWidgets.QCheckBox("3D (x, y and z)")
         self.use_z.setToolTip(
-            "Compute H in 3D. Requires z. 3D samples are usually thin,\n"
-            "so keep the max. radius below about a third of the z\n"
-            "range: larger spheres mostly reach the top or bottom of\n"
-            "the region and H gets noisy."
+            "Compute the function in 3D. Requires z. 3D samples are\n"
+            "usually thin, so keep the max. radius below about a third\n"
+            "of the z range: larger spheres mostly reach the top or\n"
+            "bottom of the region and the function gets noisy."
         )
         grid.addWidget(self.use_z, 7, 0, 1, 2)
         self.z_limits_label = QtWidgets.QLabel("z range:")
@@ -8558,7 +8590,7 @@ class RipleyHDialog(lib.Dialog):
         ):
             QtWidgets.QMessageBox.information(
                 self,
-                "Ripley's H function",
+                self.statistic["title"],
                 "Please choose a z min below the z max.",
             )
             return
@@ -8567,12 +8599,14 @@ class RipleyHDialog(lib.Dialog):
     @staticmethod
     def getParams(
         parent: QtWidgets.QMainWindow,
+        statistic: str,
     ) -> tuple[dict, bool]:
-        """Create the dialog and return the requested parameters of
-        Ripley's H function. ``"region"`` is one of the keys of
+        """Create the dialog and return the requested parameters of the
+        spatial statistic ``statistic`` (a key of
+        ``SPATIAL_STATISTICS``). ``"region"`` is one of the keys of
         ``REGIONS``; ``"z_range"`` is None unless set manually in
         3D."""
-        dialog = RipleyHDialog(parent)
+        dialog = SpatialStatisticDialog(parent, statistic)
         result = dialog.exec()
         params = {
             "channel": dialog.channel.currentIndex(),
@@ -8595,18 +8629,22 @@ class RipleyHDialog(lib.Dialog):
         return params, result == QtWidgets.QDialog.DialogCode.Accepted
 
 
-class RipleyHPlotWindow(lib.GenericPlotWindow):
-    """Plot Ripley's H function and save it as .csv files."""
+class SpatialStatisticPlotWindow(lib.GenericPlotWindow):
+    """Plot a spatial statistic of ``SPATIAL_STATISTICS`` and save it
+    as .csv files."""
 
-    def __init__(self, result: dict, locs_path: str, title: str) -> None:
-        super().__init__(f"Ripley's H function - {title}", "render")
+    def __init__(
+        self, result: dict, locs_path: str, title: str, statistic: str
+    ) -> None:
+        self.statistic = SPATIAL_STATISTICS[statistic]
+        super().__init__(f"{self.statistic['title']} - {title}", "render")
         self.result = result
         self.locs_path = locs_path
         self.toolbar.addSeparator()
         save_action = self.toolbar.addAction("Save data")
         save_action.setIcon(theme.icon("export-csv"))
         save_action.setToolTip(
-            "Save the H functions and the summary of each region as\n"
+            "Save the functions and the summary of each region as\n"
             ".csv files."
         )
         save_action.triggered.connect(self.save_data)
@@ -8614,28 +8652,30 @@ class RipleyHPlotWindow(lib.GenericPlotWindow):
 
         def draw() -> None:
             with self.plot_context():
-                postprocess.plot_ripley_h(self.result, self.figure)
+                self.statistic["plot"](self.result, self.figure)
 
         draw()
         self.redraw = draw
         self.canvas.draw()
 
     def save_data(self) -> None:
-        """Ask for a path and save the H functions there and the
-        summary of each region next to it (``_regions.csv``)."""
+        """Ask for a path and save the functions there and the summary
+        of each region next to it (``_regions.csv``)."""
         path, _ = QtWidgets.QFileDialog.getSaveFileName(
             self,
-            "Save Ripley's H function",
-            os.path.splitext(self.locs_path)[0] + "_ripley_h.csv",
+            f"Save {self.statistic['title']}",
+            os.path.splitext(self.locs_path)[0]
+            + self.statistic["suffix"]
+            + ".csv",
             filter="*.csv",
         )
         if path:
             self.write_data(path)
 
     def write_data(self, path: str) -> list[str]:
-        """Save the H functions to ``path`` and the summary of each
-        region to ``<path stem>_regions.csv``; return both paths."""
-        curves, regions = postprocess._ripley_h_tables(self.result)
+        """Save the functions to ``path`` and the summary of each region
+        to ``<path stem>_regions.csv``; return both paths."""
+        curves, regions = self.statistic["tables"](self.result)
         regions_path = os.path.splitext(path)[0] + "_regions.csv"
         curves.to_csv(path, index=False)
         regions.to_csv(regions_path, index=False)
@@ -11124,6 +11164,9 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         self._measure_cursor = None  # live cursor position in Measure mode
         # CBC channel names typed in this session, by channel path
         self._cbc_names: dict[str, str] = {}
+        # the last plot of each spatial statistic, kept from garbage
+        # collection
+        self.spatial_statistic_windows: dict[str, QtWidgets.QWidget] = {}
         # Move tool: the channels being dragged, the press position and
         # the coordinates at the press (camera pixels), the current
         # shift and the finished moves, (channels, dx, dy), for undo
@@ -15521,15 +15564,19 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             title="CBC",
         )
 
-    def ripley_h(self) -> None:
-        """Ask for the channel, regions and parameters of Ripley's H
-        function, compute it on a worker thread and plot it, see
-        ``postprocess.ripley_h``."""
+    def spatial_statistic(self, statistic: str) -> None:
+        """Ask for the channel, regions and parameters of a spatial
+        statistic (a key of ``SPATIAL_STATISTICS``, e.g., Ripley's H
+        function or the radial distribution function), compute it on a
+        worker thread and plot it, see ``postprocess.ripley_h`` and
+        ``postprocess.rdf``."""
         if not self.locs_paths:
             return
-        params, ok = RipleyHDialog.getParams(self.window)
+        params, ok = SpatialStatisticDialog.getParams(self.window, statistic)
         if not ok:
             return
+        spec = SPATIAL_STATISTICS[statistic]
+        name = spec["title"]
         channel = params["channel"]
         title = self.window.dataset_dialog.checks[channel].text()
 
@@ -15538,7 +15585,7 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         if not postprocess._are_molecules(self.locs[channel]):
             reply = QtWidgets.QMessageBox.warning(
                 self,
-                "Ripley's H function",
+                name,
                 f"{title} does not contain molecules (no 'n_events' or "
                 "'std_frame' column), so each molecule is counted as many "
                 "times as it was localized, which appears as clustering "
@@ -15578,12 +15625,12 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
 
         def compute(progress: lib.TaskProgress) -> tuple[dict, list[str]]:
             progress.phase(
-                "Calculating Ripley's H function...",
+                f"Calculating {name}...",
                 n_regions * (params["n_simulations"] + 1),
             )
             with warnings.catch_warnings(record=True) as caught:
                 warnings.simplefilter("always")
-                result = postprocess.ripley_h(
+                result = spec["compute"](
                     locs,
                     info,
                     picks,
@@ -15603,32 +15650,31 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         def show(output: tuple[dict, list[str]]) -> None:
             result, messages = output
             # keep a reference to the window to prevent garbage collection
-            self.ripley_h_window = RipleyHPlotWindow(
-                result, self.locs_paths[channel], title
+            window = SpatialStatisticPlotWindow(
+                result, self.locs_paths[channel], title, statistic
             )
-            self.ripley_h_window.show()
+            self.spatial_statistic_windows[statistic] = window
+            window.show()
             if messages:  # e.g., a max. radius too large for the z range
                 QtWidgets.QMessageBox.warning(
-                    self.ripley_h_window,
-                    "Ripley's H function",
+                    window,
+                    name,
                     "\n\n".join(messages),
                 )
 
         def failed(error: Exception) -> None:
             if isinstance(error, ValueError):  # e.g., empty picks
-                QtWidgets.QMessageBox.warning(
-                    self, "Ripley's H function", str(error)
-                )
+                QtWidgets.QMessageBox.warning(self, name, str(error))
             else:  # unexpected, report as usual
                 sys.excepthook(type(error), error, error.__traceback__)
 
         lib.run_task(
             compute,
-            "Calculating Ripley's H function...",
+            f"Calculating {name}...",
             self.window,
             show,
             on_failed=failed,
-            title="Ripley's H function",
+            title=name,
         )
 
     def _camera_origin(self, channel: int) -> tuple[float, float]:
@@ -19524,7 +19570,19 @@ class Window(QtWidgets.QMainWindow):
             "Whether the localizations are clustered, randomly"
             " distributed or dispersed, and on which length scales."
         )
-        ripley_h_action.triggered.connect(self.view.ripley_h)
+        ripley_h_action.triggered.connect(
+            lambda: self.view.spatial_statistic("ripley_h")
+        )
+        rdf_action = spatial_menu.addAction(
+            "Radial distribution function (RDF)..."
+        )
+        rdf_action.setToolTip(
+            "Density of neighbors at each distance from a localization,"
+            " relative to the mean density."
+        )
+        rdf_action.triggered.connect(
+            lambda: self.view.spatial_statistic("rdf")
+        )
 
         self.load_user_settings()
         # the Render keys the settings file does not name yet are

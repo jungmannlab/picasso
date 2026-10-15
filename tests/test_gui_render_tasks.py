@@ -507,23 +507,27 @@ def _ripley_params(region: str, **kwargs) -> dict:
     return params
 
 
-def _run_ripley_h(view, qapp, monkeypatch, params) -> dict | None:
+def _run_spatial_statistic(
+    view, qapp, monkeypatch, params, statistic="ripley_h"
+) -> dict | None:
     monkeypatch.setattr(
-        gui_render.RipleyHDialog, "getParams", lambda *a, **k: (params, True)
+        gui_render.SpatialStatisticDialog,
+        "getParams",
+        lambda *a, **k: (params, True),
     )
-    view.ripley_h()
+    view.spatial_statistic(statistic)
     _wait_for_tasks(qapp)
-    window = getattr(view, "ripley_h_window", None)
+    window = view.spatial_statistic_windows.get(statistic)
     return None if window is None else window.result
 
 
 def test_ripley_h_dialog_offers_picks_only_with_picks(window, qt_offscreen):
-    dialog = gui_render.RipleyHDialog(window)
+    dialog = gui_render.SpatialStatisticDialog(window, "ripley_h")
     regions = [dialog.region.itemData(i) for i in range(dialog.region.count())]
     assert regions == ["view", "fov"]
     assert dialog.channel.isHidden()  # one channel
     _pick_clusters(window.view)
-    dialog = gui_render.RipleyHDialog(window)
+    dialog = gui_render.SpatialStatisticDialog(window, "ripley_h")
     assert dialog.region.itemData(0) == "picks"
     assert f"({N_CLUSTERS})" in dialog.region.itemText(0)
 
@@ -534,7 +538,7 @@ def test_ripley_h_warning_without_molecules_can_abort(
     texts = _answer_unlinked_warning(
         monkeypatch, QtWidgets.QMessageBox.StandardButton.No
     )
-    result = _run_ripley_h(
+    result = _run_spatial_statistic(
         window.view, qt_offscreen, monkeypatch, _ripley_params("fov")
     )
     assert len(texts) == 1 and "does not contain molecules" in texts[0]
@@ -549,12 +553,12 @@ def test_ripley_h_does_not_warn_for_molecules(
     )
     view = window.view
     view.locs[0]["n_events"] = np.int32(1)
-    result = _run_ripley_h(
+    result = _run_spatial_statistic(
         view, qt_offscreen, monkeypatch, _ripley_params("fov")
     )
     assert not texts
     assert result is not None
-    view.ripley_h_window.close()
+    view.spatial_statistic_windows["ripley_h"].close()
 
 
 def test_ripley_h_in_picks_plots_and_saves(
@@ -565,13 +569,13 @@ def test_ripley_h_in_picks_plots_and_saves(
     )
     view = window.view
     _pick_clusters(view)
-    result = _run_ripley_h(
+    result = _run_spatial_statistic(
         view, qt_offscreen, monkeypatch, _ripley_params("picks")
     )
     assert len(result["n_locs"]) == N_CLUSTERS
     assert (result["n_locs"] > 0.9 * LOCS_PER_CLUSTER).all()
     assert result["envelope_low"] is not None
-    plot_window = view.ripley_h_window
+    plot_window = view.spatial_statistic_windows["ripley_h"]
     assert plot_window.figure.axes[0].get_xlabel() == "r (nm)"
     paths = plot_window.write_data(str(tmp_path / "ripley.csv"))
     assert paths[1] == str(tmp_path / "ripley_regions.csv")
@@ -588,14 +592,14 @@ def test_ripley_h_view_and_field_of_view(
         monkeypatch, QtWidgets.QMessageBox.StandardButton.Yes
     )
     view = window.view
-    result = _run_ripley_h(
+    result = _run_spatial_statistic(
         view, qt_offscreen, monkeypatch, _ripley_params(region)
     )
     # the view covers the whole field of view
     assert list(result["n_locs"]) == [len(view.locs[0])]
     assert result["areas"][0] == pytest.approx((WIDTH * PIXELSIZE) ** 2)
     assert result["h_mean"][0] > 0  # dense clusters
-    view.ripley_h_window.close()
+    view.spatial_statistic_windows["ripley_h"].close()
 
 
 def test_ripley_h_reports_picks_without_localizations(
@@ -609,7 +613,7 @@ def test_ripley_h_reports_picks_without_localizations(
     view.window.tools_settings_dialog.pick_diameter.setValue(PIXELSIZE)
     view._picks = []
     view.add_picks([(1.0, 1.0)])  # clusters start 5 pixels in
-    result = _run_ripley_h(
+    result = _run_spatial_statistic(
         view, qt_offscreen, monkeypatch, _ripley_params("picks")
     )
     assert result is None
@@ -617,11 +621,11 @@ def test_ripley_h_reports_picks_without_localizations(
 
 
 def test_ripley_h_dialog_shows_3d_settings_only_in_3d(window, qt_offscreen):
-    dialog = gui_render.RipleyHDialog(window)
+    dialog = gui_render.SpatialStatisticDialog(window, "ripley_h")
     assert not dialog.use_z.isEnabled()  # no z
     locs = window.view.locs[0]
     locs["z"] = np.linspace(-200.4, 300.6, len(locs))
-    dialog = gui_render.RipleyHDialog(window)
+    dialog = gui_render.SpatialStatisticDialog(window, "ripley_h")
     assert dialog.use_z.isEnabled() and not dialog.use_z.isChecked()
     assert dialog.z_limits.isHidden() and dialog.simulated_z.isHidden()
     assert (dialog.z_min.value(), dialog.z_max.value()) == (-201, 301)
@@ -647,8 +651,42 @@ def test_ripley_h_in_3d_warns_about_a_thin_z_range(
     params = _ripley_params(
         "fov", use_z=True, z_range=(-60.0, 60.0), simulated_z="observed"
     )
-    result = _run_ripley_h(view, qt_offscreen, monkeypatch, params)
+    result = _run_spatial_statistic(view, qt_offscreen, monkeypatch, params)
     assert result["use_z"] and result["simulated_z"] == "observed"
     np.testing.assert_array_equal(result["z_ranges"], [[-60, 60]])
     assert "third of the z range" in texts[-1]
-    view.ripley_h_window.close()
+    view.spatial_statistic_windows["ripley_h"].close()
+
+
+def test_rdf_plots_and_saves(window, qt_offscreen, tmp_path, monkeypatch):
+    _answer_unlinked_warning(
+        monkeypatch, QtWidgets.QMessageBox.StandardButton.Yes
+    )
+    view = window.view
+    _pick_clusters(view)
+    result = _run_spatial_statistic(
+        view, qt_offscreen, monkeypatch, _ripley_params("picks"), "rdf"
+    )
+    assert len(result["n_locs"]) == N_CLUSTERS
+    assert result["g"].shape == (N_CLUSTERS, 10)
+    plot_window = view.spatial_statistic_windows["rdf"]
+    assert plot_window.windowTitle().startswith("Radial distribution")
+    assert plot_window.figure.axes[0].get_ylabel() == "g(r)"
+    paths = plot_window.write_data(str(tmp_path / "rdf.csv"))
+    assert "g_mean" in pd.read_csv(paths[0]).columns
+    assert len(pd.read_csv(paths[1])) == N_CLUSTERS
+    # both statistics keep their own window
+    _run_spatial_statistic(
+        view, qt_offscreen, monkeypatch, _ripley_params("picks")
+    )
+    assert set(view.spatial_statistic_windows) == {"ripley_h", "rdf"}
+    for plot_window in view.spatial_statistic_windows.values():
+        plot_window.close()
+
+
+def test_spatial_statistic_dialogs_default_steps(window, qt_offscreen):
+    for statistic, steps in (("ripley_h", 100), ("rdf", 50)):
+        dialog = gui_render.SpatialStatisticDialog(window, statistic)
+        assert dialog.steps.value() == steps
+        title = gui_render.SPATIAL_STATISTICS[statistic]["title"]
+        assert dialog.windowTitle() == title

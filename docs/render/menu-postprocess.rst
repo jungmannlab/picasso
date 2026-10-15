@@ -568,3 +568,10 @@ Ripley's H function
 Shows whether the molecules are clustered, randomly distributed or dispersed,
 and on which length scales, in picks, the current view or the whole field of
 view, see :ref:`render-ripley-h`.
+
+Radial distribution function (RDF)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The density of neighbors at each distance from a molecule, relative to the
+mean density, in picks, the current view or the whole field of view, see
+:ref:`render-rdf`.

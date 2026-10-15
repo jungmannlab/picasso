@@ -962,7 +962,8 @@ def _cbc_undefined(value: str) -> float | Literal["remove"]:
     return number
 
 
-def _ripley_h(
+def _pair_statistic(
+    statistic: Literal["ripley_h", "rdf"],
     files: list[str],
     picks_path: str | None,
     r_max: float,
@@ -973,21 +974,38 @@ def _ripley_h(
     z_range: tuple[float, float] | None = None,
     observed_z: bool = False,
 ) -> None:
-    """Ripley's H function of localizations, in the picks of
-    ``picks_path`` or in the whole field of view, in 2D or, with
+    """Ripley's H function (``statistic="ripley_h"``) or the radial
+    distribution function (``"rdf"``) of localizations, in the picks
+    of ``picks_path`` or in the whole field of view, in 2D or, with
     ``use_3d``, in 3D over ``z_range`` (nm; None for the z range of
     each region's localizations) with the simulated z uniform or, with
-    ``observed_z``, shuffled from the localizations. Saves the H functions
-    (``<file>_ripley_h.csv``), the summary of each region
-    (``<file>_ripley_h_regions.csv``) and a plot
-    (``<file>_ripley_h.png``) next to each file. See
-    ``postprocess.ripley_h`` for details."""
+    ``observed_z``, shuffled from the localizations. Saves the
+    functions (``<file>_<statistic>.csv``), the summary of each region
+    (``<file>_<statistic>_regions.csv``) and a plot
+    (``<file>_<statistic>.png``) next to each file. See
+    ``postprocess.ripley_h`` and ``postprocess.rdf`` for details."""
     import warnings
     from glob import glob
     from itertools import chain
     import numpy as np
     from . import io, lib, postprocess
 
+    title, compute, plot, tables, key = {
+        "ripley_h": (
+            "Ripley's H function",
+            postprocess.ripley_h,
+            postprocess.plot_ripley_h,
+            postprocess._ripley_h_tables,
+            "h",
+        ),
+        "rdf": (
+            "Radial distribution function",
+            postprocess.rdf,
+            postprocess.plot_rdf,
+            postprocess._rdf_tables,
+            "g",
+        ),
+    }[statistic]
     paths = list(chain(*[sorted(glob(_)) for _ in files]))
     if not paths:
         raise SystemExit("No localization files found.")
@@ -1007,11 +1025,11 @@ def _ripley_h(
         if picks_path is not None:
             pixelsize = lib.get_from_metadata(info, "Pixelsize", 130.0)
             picks, shape, size = io.load_picks(picks_path, pixelsize)
-        print(f"Ripley's H function of {path}:")
+        print(f"{title} of {path}:")
         try:
             with warnings.catch_warnings(record=True) as caught:
                 warnings.simplefilter("always")
-                result = postprocess.ripley_h(
+                result = compute(
                     locs,
                     info,
                     picks,
@@ -1031,26 +1049,100 @@ def _ripley_h(
         for warning in caught:
             if "not molecules" not in str(warning.message):  # see above
                 print(f"WARNING: {warning.message}")
-        n_used = int((~np.isnan(result["h"][:, 0])).sum())
-        k_max = int(np.argmax(result["h_mean"]))
-        print(
-            f"  {n_used} of {len(result['n_locs'])} regions used, maximum"
-            f" of the mean H = {result['h_mean'][k_max]:.1f} nm at r ="
-            f" {result['r'][k_max]:.0f} nm"
-        )
-        base = os.path.splitext(path)[0]
-        curves, regions = postprocess._ripley_h_tables(result)
-        curves.to_csv(base + "_ripley_h.csv", index=False)
-        regions.to_csv(base + "_ripley_h_regions.csv", index=False)
-        postprocess.plot_ripley_h(result).savefig(
-            base + "_ripley_h.png", dpi=150
-        )
-        for suffix in (
-            "_ripley_h.csv",
-            "_ripley_h_regions.csv",
-            "_ripley_h.png",
-        ):
+        n_used = int((~np.isnan(result[key][:, 0])).sum())
+        summary = f"  {n_used} of {len(result['n_locs'])} regions used"
+        if statistic == "ripley_h":
+            k_max = int(np.argmax(result["h_mean"]))
+            summary += (
+                f", maximum of the mean H = {result['h_mean'][k_max]:.1f}"
+                f" nm at r = {result['r'][k_max]:.0f} nm"
+            )
+        print(summary)
+        base = os.path.splitext(path)[0] + "_" + statistic
+        curves, regions = tables(result)
+        curves.to_csv(base + ".csv", index=False)
+        regions.to_csv(base + "_regions.csv", index=False)
+        plot(result).savefig(base + ".png", dpi=150)
+        for suffix in (".csv", "_regions.csv", ".png"):
             print(f"  saved {base + suffix}")
+
+
+def _add_pair_statistic_arguments(
+    parser: argparse.ArgumentParser, steps: int
+) -> None:
+    """Add the arguments shared by ``picasso ripley_h`` and ``picasso
+    rdf`` to ``parser``, with ``steps`` radius steps by default."""
+    parser.add_argument(
+        "files",
+        nargs="+",
+        help="hdf5 localization files (unix style path patterns)",
+    )
+    parser.add_argument(
+        "-p",
+        "--picks",
+        default=None,
+        help=(
+            "picks (.yaml) saved in Render; the regions of interest in"
+            " which the function is computed (default: the whole field"
+            " of view)"
+        ),
+    )
+    parser.add_argument(
+        "-r",
+        "--rmax",
+        type=float,
+        default=500.0,
+        help="maximum radius in nm (default=500)",
+    )
+    parser.add_argument(
+        "-s",
+        "--steps",
+        type=int,
+        default=steps,
+        help=f"number of radius steps up to the maximum radius"
+        f" (default={steps})",
+    )
+    parser.add_argument(
+        "-n",
+        "--simulations",
+        type=int,
+        default=99,
+        help=(
+            "number of simulations of complete spatial randomness for"
+            " the envelope, 0 to skip (default=99)"
+        ),
+    )
+    parser.add_argument(
+        "--no-edge-correction",
+        dest="edge_correction",
+        action="store_false",
+        help="do not apply Ripley's isotropic edge correction",
+    )
+    parser.add_argument(
+        "--3d",
+        dest="use_3d",
+        action="store_true",
+        help="compute the function in 3D (x, y and z), requires z",
+    )
+    parser.add_argument(
+        "--zrange",
+        nargs=2,
+        type=float,
+        metavar=("ZMIN", "ZMAX"),
+        default=None,
+        help=(
+            "z range in nm over which the regions extend in 3D (default:"
+            " the z range of the localizations in each region)"
+        ),
+    )
+    parser.add_argument(
+        "--observed-z",
+        action="store_true",
+        help=(
+            "in 3D, shuffle the observed z values for the simulated"
+            " points instead of spreading them uniformly over the z range"
+        ),
+    )
 
 
 def _spt_paths(files: list[str]) -> list[str]:
@@ -5515,7 +5607,7 @@ def main():  # noqa: C901
         ),
     )
 
-    # Ripley's H function
+    # Ripley's H function and radial distribution function
     ripley_h_parser = subparsers.add_parser(
         "ripley_h",
         help=(
@@ -5523,75 +5615,15 @@ def main():  # noqa: C901
             " random or dispersed"
         ),
     )
-    ripley_h_parser.add_argument(
-        "files",
-        nargs="+",
-        help="hdf5 localization files (unix style path patterns)",
-    )
-    ripley_h_parser.add_argument(
-        "-p",
-        "--picks",
-        default=None,
+    _add_pair_statistic_arguments(ripley_h_parser, steps=100)
+    rdf_parser = subparsers.add_parser(
+        "rdf",
         help=(
-            "picks (.yaml) saved in Render; the regions of interest in"
-            " which H is computed (default: the whole field of view)"
+            "radial distribution function of localizations: density of"
+            " neighbors at each distance, relative to the mean density"
         ),
     )
-    ripley_h_parser.add_argument(
-        "-r",
-        "--rmax",
-        type=float,
-        default=500.0,
-        help="maximum radius in nm (default=500)",
-    )
-    ripley_h_parser.add_argument(
-        "-s",
-        "--steps",
-        type=int,
-        default=100,
-        help="number of radii up to the maximum radius (default=100)",
-    )
-    ripley_h_parser.add_argument(
-        "-n",
-        "--simulations",
-        type=int,
-        default=99,
-        help=(
-            "number of simulations of complete spatial randomness for"
-            " the envelope, 0 to skip (default=99)"
-        ),
-    )
-    ripley_h_parser.add_argument(
-        "--no-edge-correction",
-        dest="edge_correction",
-        action="store_false",
-        help="do not apply Ripley's isotropic edge correction",
-    )
-    ripley_h_parser.add_argument(
-        "--3d",
-        dest="use_3d",
-        action="store_true",
-        help="compute H in 3D (x, y and z), requires z",
-    )
-    ripley_h_parser.add_argument(
-        "--zrange",
-        nargs=2,
-        type=float,
-        metavar=("ZMIN", "ZMAX"),
-        default=None,
-        help=(
-            "z range in nm over which the regions extend in 3D (default:"
-            " the z range of the localizations in each region)"
-        ),
-    )
-    ripley_h_parser.add_argument(
-        "--observed-z",
-        action="store_true",
-        help=(
-            "in 3D, shuffle the observed z values for the simulated"
-            " points instead of spreading them uniformly over the z range"
-        ),
-    )
+    _add_pair_statistic_arguments(rdf_parser, steps=50)
 
     clusterfilter_parser = subparsers.add_parser(
         "clusterfilter",
@@ -6422,8 +6454,9 @@ def main():  # noqa: C901
                 args.names,
                 args.undefined,
             )
-        elif args.command == "ripley_h":
-            _ripley_h(
+        elif args.command in ("ripley_h", "rdf"):
+            _pair_statistic(
+                args.command,
                 args.files,
                 args.picks,
                 args.rmax,

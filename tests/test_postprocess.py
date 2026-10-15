@@ -2856,3 +2856,88 @@ class TestRipleyH3D:
             postprocess.ripley_h(
                 random_locs.drop(columns="z"), self.INFO, use_z=True
             )
+
+
+@pytest.mark.filterwarnings("ignore:r_max.*third of the z range")
+class TestRdf:
+    INFO = TestRipleyH.INFO
+
+    @pytest.fixture
+    def random_locs(self):
+        rng = np.random.default_rng(0)
+        x, y = rng.uniform(0, 10_000, size=(2, 20_000))
+        locs = _ripley_locs(x, y)
+        locs["z"] = rng.uniform(-500, 500, len(locs))
+        return locs
+
+    def test_random_is_one(self, random_locs):
+        result = postprocess.rdf(random_locs, self.INFO, n_simulations=9)
+        # ring centers of 10 nm wide rings
+        np.testing.assert_allclose(result["r"][[0, -1]], [5, 495])
+        assert np.abs(result["g_mean"] - 1).max() < 0.05
+        assert (result["envelope_low"] < 1).all()
+        assert (result["envelope_high"] > 1).all()
+        raw = postprocess.rdf(
+            random_locs, self.INFO, n_simulations=0, edge_correction=False
+        )
+        assert raw["g_mean"][-1] < 0.96
+
+    def test_random_is_one_in_3d(self, random_locs):
+        result = postprocess.rdf(
+            random_locs,
+            self.INFO,
+            r_max=300,
+            steps=30,
+            n_simulations=0,
+            use_z=True,
+        )
+        assert np.abs(result["g_mean"][5:] - 1).max() < 0.05
+        assert result["use_z"] and result["volumes"] is not None
+
+    @pytest.mark.parametrize("use_z", [False, True])
+    def test_integrates_to_ripleys_k(self, random_locs, use_z):
+        kwargs = dict(r_max=300, steps=30, n_simulations=0, use_z=use_z)
+        h = postprocess.ripley_h(random_locs, self.INFO, **kwargs)["h"][0]
+        g = postprocess.rdf(random_locs, self.INFO, **kwargs)["g"][0]
+        edges = np.arange(31) * 10.0
+        if use_z:
+            k = np.cumsum(g * 4 / 3 * np.pi * np.diff(edges**3))
+            h_from_g = np.cbrt(3 * k / (4 * np.pi)) - edges[1:]
+        else:
+            k = np.cumsum(g * np.pi * np.diff(edges**2))
+            h_from_g = np.sqrt(k / np.pi) - edges[1:]
+        np.testing.assert_allclose(h_from_g, h, atol=1e-9)
+
+    def test_clusters_raise_g_at_short_distances(self):
+        rng = np.random.default_rng(1)
+        centers = rng.uniform(500, 9500, size=(200, 2))
+        r = 50 * np.sqrt(rng.uniform(0, 1, 2000))
+        angle = rng.uniform(0, 2 * np.pi, 2000)
+        x = np.repeat(centers[:, 0], 10) + r * np.cos(angle)
+        y = np.repeat(centers[:, 1], 10) + r * np.sin(angle)
+        result = postprocess.rdf(
+            _ripley_locs(x, y), self.INFO, n_simulations=3
+        )
+        # within the clusters (diameter 100 nm), far above random
+        assert (result["g_mean"][:5] > 10).all()
+        assert (result["g_mean"][:5] > result["envelope_high"][:5]).all()
+
+    def test_plot_and_tables(self, random_locs):
+        picks = [(30, 30), (70, 70)]
+        result = postprocess.rdf(
+            random_locs, self.INFO, picks, "Circle", 40, n_simulations=2
+        )
+        ax = postprocess.plot_rdf(result).axes[0]
+        assert ax.get_ylabel() == "g(r)"
+        assert ax.get_xlim() == (0, 500)
+        curves, regions = postprocess._rdf_tables(result)
+        assert list(curves.columns) == [
+            "r_nm",
+            "g_mean",
+            "envelope_low",
+            "envelope_high",
+            "g_region_0",
+            "g_region_1",
+        ]
+        assert "h_max_nm" not in regions.columns
+        assert list(regions["n_locs"]) == list(result["n_locs"])
