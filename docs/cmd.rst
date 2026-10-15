@@ -964,6 +964,76 @@ For example, both directions for two files with short names:
      - off
      - Ignore z and compute the CBC in 2D.
 
+ripley_h
+--------
+Ripley's H function of localizations (Ripley, J R Stat Soc B, 1977, DOI:
+`10.1111/j.2517-6161.1977.tb01615.x
+<https://doi.org/10.1111/j.2517-6161.1977.tb01615.x>`__): whether the
+molecules are clustered (H > 0), randomly distributed (H = 0) or dispersed
+(H < 0), and on which length scales. Computed in 2D or, with ``--3d``, in 3D
+in the picks given with ``-p`` (averaged over the picks) or in the whole field
+of view, with Ripley's
+isotropic edge correction and an envelope of complete spatial randomness
+(CSR) from simulations. The files should contain molecules, i.e., one
+localization per molecule, such as those found by `g5m`_ or the cluster
+centers saved by `dbscan`_, `hdbscan`_ or `smlm_cluster`_; a warning lists the
+files without molecules (no ``n_events`` or ``std_frame`` column). See
+:ref:`render-ripley-h` for details.
+
+Saves next to each file ``<file name>_ripley_h.csv`` (the functions by
+radius: mean, CSR envelope and each region), ``<file
+name>_ripley_h_regions.csv`` (number of localizations, area, density, maximum
+of H and its radius in each region) and the plot ``<file
+name>_ripley_h.png``.
+
+.. code-block:: bash
+
+   picasso ripley_h files [-p picks] [-r rmax] [-s steps] [-n simulations] [--no-edge-correction] [--3d] [--zrange zmin zmax] [--observed-z]
+
+For example, in the picks saved in Render, and in 3D between z = -300 and 300
+nm:
+
+.. code-block:: bash
+
+   picasso ripley_h molecules.hdf5 -p picks.yaml -r 300
+   picasso ripley_h molecules.hdf5 -p picks.yaml -r 200 --3d --zrange -300 300
+
+.. list-table::
+   :header-rows: 1
+   :widths: 25 15 60
+
+   * - Option
+     - Default
+     - Description
+   * - ``-p``, ``--picks`` (str)
+     - whole field of view
+     - Picks (.yaml) saved in Render; the regions of interest in which H is
+       computed.
+   * - ``-r``, ``--rmax`` (float)
+     - ``500``
+     - The maximum radius (nm).
+   * - ``-s``, ``--steps`` (int)
+     - ``100``
+     - The number of radii up to the maximum radius.
+   * - ``-n``, ``--simulations`` (int)
+     - ``99``
+     - The number of CSR simulations for the envelope, ``0`` to skip them.
+   * - ``--no-edge-correction``
+     - off
+     - Do not apply Ripley's isotropic edge correction.
+   * - ``--3d``
+     - off
+     - Compute H in 3D (x, y and z); requires z. See
+       :ref:`render-ripley-h-3d`.
+   * - ``--zrange`` (float float)
+     - z of each region
+     - The z range (nm) over which the regions extend in 3D. By default, each
+       region extends over the z range of its localizations.
+   * - ``--observed-z``
+     - off
+     - In 3D, give the simulated points the observed z values (shuffled)
+       instead of spreading them uniformly over the z range.
+
 cluster_combine
 ---------------
 Combines the localizations in each cluster of a group (to be deprecated in

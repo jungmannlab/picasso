@@ -3,7 +3,7 @@
 Clustering and Molecular Mapping
 ================================
 
-This page describes RESI and G5M for resolving and mapping individual molecules, several clustering algorithms, a nearest neighbor analysis and coordinate-based colocalization. All of them are found in the ``Postprocess`` menu (see :doc:`menu-postprocess`).
+This page describes RESI and G5M for resolving and mapping individual molecules, several clustering algorithms, a nearest neighbor analysis, coordinate-based colocalization and spatial statistics functions. All of them are found in the ``Postprocess`` menu (see :doc:`menu-postprocess`).
 
 .. _render-resi:
 
@@ -594,3 +594,146 @@ column, for example in Filter or by rendering by property (see
       )
       for locs, info, name in zip(all_locs, all_infos, "ABC"):
           io.save_locs(f"channel{name}_locs_cbc.hdf5", locs, info)
+
+.. _render-ripley-h:
+
+Ripley's H Function
+-------------------
+
+Shows whether the molecules of one channel are clustered, randomly
+distributed or dispersed, and on which length scales. Ripley's K function
+counts the neighbors within a distance ``r`` of each localization, normalized
+by the density (`Ripley, J R Stat Soc B, 1977
+<https://doi.org/10.1111/j.2517-6161.1977.tb01615.x>`__). Its transform, the H
+function, ``H(r) = sqrt(K(r) / pi) - r``, is:
+
+* 0 for complete spatial randomness (CSR),
+* positive if the molecules are clustered at the scale ``r``,
+* negative if they are dispersed (regularly spaced) at the scale ``r``.
+
+By default, ``H`` is computed in 2D (x and y); it can also be computed in
+3D, see :ref:`render-ripley-h-3d`.
+
+.. note::
+
+   Ripley's H describes how points are distributed, the case of SMLM this
+   usually refers to *molecules*, so it should be computed on them, i.e., one localization per molecule, such as the
+   molecules found by :ref:`G5M <render-g5m>` or the cluster centers saved by
+   :ref:`DBSCAN <render-dbscan>`, :ref:`HDBSCAN <render-hdbscan>` or the
+   :ref:`SMLM clusterer <render-smlm-clusterer>`. Otherwise, the repeated
+   localizations of each molecule appear as clustering at the scale of the
+   localization precision. Picasso recognizes molecules by their
+   ``n_events`` or ``std_frame`` column and warns about channels without
+   them, but lets you continue if requested.
+
+``H`` is computed within regions of interest whose area gives the density, so
+the regions should lie within the sample (e.g., inside the cell): the empty
+parts of a region appear as clustering. Pairs near the edge of a region are
+weighted by Ripley's isotropic edge correction, i.e., by the inverse of the
+fraction of the circle around the localization that lies inside the region,
+since the neighbors outside of it are not seen.
+
+To use it, open ``Postprocess > Spatial statistics > Ripley's H function...``:
+
+1. Choose the ``Channel`` (with several channels loaded).
+2. Choose the ``Regions``: the ``Picks`` (any pick shape; ``H`` is computed
+   in each pick and averaged over the picks with at least two localizations),
+   the ``Current view`` or the ``Whole field of view``.
+3. Set ``Max. radius (nm)``, which should be well below the size of the
+   regions, and the number of ``Radius steps`` up to it.
+4. Set the number of ``CSR simulations``. Each region is filled with as many
+   uniformly random points as it holds localizations, and ``H`` is computed
+   the same way; the lowest and highest simulated mean ``H`` at each radius
+   give the CSR envelope. A mean ``H`` above the envelope indicates
+   significant clustering, below it significant dispersion, at a pointwise
+   significance level of ``2 / (simulations + 1)``, i.e., 0.02 for 99
+   simulations. 0 skips the simulations.
+5. ``Edge correction`` is on by default. Without it, ``H`` is biased
+   downwards, increasingly with the radius.
+6. Tick ``3D (x, y and z)`` to compute ``H`` in 3D (only for channels with
+   z), see :ref:`render-ripley-h-3d`.
+7. Click ``OK``.
+
+The plot shows the mean ``H`` with the CSR envelope and, for several picks,
+the function of each pick. ``Save data`` in the toolbar saves two .csv files:
+the functions by radius (``r_nm``, ``h_mean_nm``, ``envelope_low_nm``,
+``envelope_high_nm`` and ``h_region_<i>_nm`` for every region, numbered like
+the picks) and, as ``<name>_regions.csv``, the number of localizations, area,
+density, maximum of ``H`` and its radius of every region (in 3D also its z
+range and volume, with the density per volume).
+
+.. _render-ripley-h-3d:
+
+3D
+~~
+
+In 3D, each region is the pick (or the view or field of view) extended over
+a z range, the volume replaces the area and ``H(r) = (3 K(r) / (4 pi))^(1/3)
+- r``. The edge correction weights each pair by the inverse of the fraction
+of the sphere's surface around the localization that lies inside the region.
+The dialog shows these settings when ``3D (x, y and z)`` is ticked:
+
+- ``z range``: ``Localizations in each region`` extends each region from the
+  lowest to the highest z of its localizations. ``Manual`` sets one range
+  (``z min / max (nm)``) for all regions; localizations outside of it are
+  ignored. The volume, and thus the density, depends on this range.
+- ``Simulated z``: ``Uniform over the z range`` spreads the simulated points
+  evenly in z, i.e., complete spatial randomness in 3D. Localizations are
+  rarely uniform in z (the detection falls off away from focus, cells have a
+  limited thickness), and such an uneven z distribution appears as
+  clustering. ``Observed z values, shuffled`` gives the simulated points the
+  z values of the localizations instead, which tests for clustering beyond
+  the z distribution but also hides real clustering in z (e.g., a layer of
+  molecules).
+
+.. note::
+
+   3D samples are usually thin (about 1 µm), so spheres larger than about a
+   third of the z range mostly reach the top or bottom of the region and
+   ``H`` relies on large edge correction weights, which makes it noisy.
+   Picasso warns if ``Max. radius`` exceeds a third of the z range of any
+   region. The poorer axial localization precision also stretches clusters in
+   z, which raises ``H`` at short distances.
+
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
+
+   ``ripley_h`` takes picks in camera pixels with the pick shape and size as
+   saved by Render (``io.load_picks``; the size of circular picks is the
+   diameter) or, without picks, uses the whole field of view. It returns a
+   dictionary with the radii, the function of each region, their mean and the
+   CSR envelope, see :func:`picasso.postprocess.ripley_h`.
+
+   .. code-block:: python
+
+      from picasso import io, lib, postprocess
+
+      locs, info = io.load_locs("molecules.hdf5")
+      pixelsize = lib.get_from_metadata(info, "Pixelsize")
+      picks, shape, size = io.load_picks("picks.yaml", pixelsize)
+
+      result = postprocess.ripley_h(
+          locs, info, picks, shape, size, r_max=500, steps=100, n_simulations=99
+      )
+      result["r"]  # radii (nm)
+      result["h_mean"]  # mean H over the picks (nm)
+      result["envelope_low"], result["envelope_high"]  # CSR envelope (nm)
+      result["r_h_max"]  # radius of maximum H in each pick (nm)
+
+      fig = postprocess.plot_ripley_h(result)
+      fig.savefig("ripley_h.png")
+
+      # 3D between z = -300 and 300 nm, simulated z shuffled from the data
+      result_3d = postprocess.ripley_h(
+          locs,
+          info,
+          picks,
+          shape,
+          size,
+          r_max=200,
+          use_z=True,
+          z_range=(-300, 300),
+          simulated_z="observed",
+      )
+      result_3d["volumes"]  # volume of each pick (nm^3)

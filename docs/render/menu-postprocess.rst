@@ -553,3 +553,18 @@ Molecular mapping (G5M)
 -----------------------
 
 Molecular mapping with G5M, see :ref:`render-g5m`.
+
+.. _render-menu-spatial-statistics:
+
+Spatial statistics
+------------------
+
+The ``Spatial statistics`` submenu analyzes how the molecules of one channel
+are distributed in space.
+
+Ripley's H function
+~~~~~~~~~~~~~~~~~~~
+
+Shows whether the molecules are clustered, randomly distributed or dispersed,
+and on which length scales, in picks, the current view or the whole field of
+view, see :ref:`render-ripley-h`.

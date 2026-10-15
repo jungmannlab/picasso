@@ -88,6 +88,7 @@ Many of the functionalities provided by Picasso were published independently, pl
 - SPINNA for labeling efficiency (LE) fitting: Hellmeier et al., Nat. Methods, 2024; 10.1038/s41592-024-02242-5 (https://doi.org/10.1038/s41592-024-02242-5)
 - G5M: Kowalewski et al., Nat. Commun., 2026; 10.1038/s41467-026-70198-5 (https://doi.org/10.1038/s41467-026-70198-5)
 - Coordinate-based colocalization (CBC): Malkusch et al., Histochem. Cell Biol., 2012; 10.1007/s00418-011-0880-5 (https://doi.org/10.1007/s00418-011-0880-5)
+- Ripley's K and H functions: Ripley, J. R. Stat. Soc. B, 1977; 10.1111/j.2517-6161.1977.tb01615.x (https://doi.org/10.1111/j.2517-6161.1977.tb01615.x)
 - Stitching tiles (global tile positions, inspired by): Preibisch et al., Bioinformatics, 2009; 10.1093/bioinformatics/btp184 (https://doi.org/10.1093/bioinformatics/btp184)
 - Single-particle tracking (nearest-neighbor tracking, jump distance and MSD analysis): Martens et al., Front. Bioinform., 2021; 10.3389/fbinf.2021.817254 (https://doi.org/10.3389/fbinf.2021.817254)
 

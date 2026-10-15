@@ -489,3 +489,166 @@ def test_cbc_remove_undefined(window, qt_offscreen, tmp_path, monkeypatch):
     n_removed = info[-1]["Localizations without neighbors removed"]
     assert 0 < n_removed < len(view.locs[0])
     assert len(locs) == len(view.locs[0]) - n_removed
+
+
+def _ripley_params(region: str, **kwargs) -> dict:
+    params = {
+        "channel": 0,
+        "region": region,
+        "r_max": 50.0,
+        "steps": 10,
+        "n_simulations": 2,
+        "edge_correction": True,
+        "use_z": False,
+        "z_range": None,
+        "simulated_z": "uniform",
+    }
+    params.update(kwargs)
+    return params
+
+
+def _run_ripley_h(view, qapp, monkeypatch, params) -> dict | None:
+    monkeypatch.setattr(
+        gui_render.RipleyHDialog, "getParams", lambda *a, **k: (params, True)
+    )
+    view.ripley_h()
+    _wait_for_tasks(qapp)
+    window = getattr(view, "ripley_h_window", None)
+    return None if window is None else window.result
+
+
+def test_ripley_h_dialog_offers_picks_only_with_picks(window, qt_offscreen):
+    dialog = gui_render.RipleyHDialog(window)
+    regions = [dialog.region.itemData(i) for i in range(dialog.region.count())]
+    assert regions == ["view", "fov"]
+    assert dialog.channel.isHidden()  # one channel
+    _pick_clusters(window.view)
+    dialog = gui_render.RipleyHDialog(window)
+    assert dialog.region.itemData(0) == "picks"
+    assert f"({N_CLUSTERS})" in dialog.region.itemText(0)
+
+
+def test_ripley_h_warning_without_molecules_can_abort(
+    window, qt_offscreen, monkeypatch
+):
+    texts = _answer_unlinked_warning(
+        monkeypatch, QtWidgets.QMessageBox.StandardButton.No
+    )
+    result = _run_ripley_h(
+        window.view, qt_offscreen, monkeypatch, _ripley_params("fov")
+    )
+    assert len(texts) == 1 and "does not contain molecules" in texts[0]
+    assert result is None
+
+
+def test_ripley_h_does_not_warn_for_molecules(
+    window, qt_offscreen, monkeypatch
+):
+    texts = _answer_unlinked_warning(
+        monkeypatch, QtWidgets.QMessageBox.StandardButton.No
+    )
+    view = window.view
+    view.locs[0]["n_events"] = np.int32(1)
+    result = _run_ripley_h(
+        view, qt_offscreen, monkeypatch, _ripley_params("fov")
+    )
+    assert not texts
+    assert result is not None
+    view.ripley_h_window.close()
+
+
+def test_ripley_h_in_picks_plots_and_saves(
+    window, qt_offscreen, tmp_path, monkeypatch
+):
+    _answer_unlinked_warning(
+        monkeypatch, QtWidgets.QMessageBox.StandardButton.Yes
+    )
+    view = window.view
+    _pick_clusters(view)
+    result = _run_ripley_h(
+        view, qt_offscreen, monkeypatch, _ripley_params("picks")
+    )
+    assert len(result["n_locs"]) == N_CLUSTERS
+    assert (result["n_locs"] > 0.9 * LOCS_PER_CLUSTER).all()
+    assert result["envelope_low"] is not None
+    plot_window = view.ripley_h_window
+    assert plot_window.figure.axes[0].get_xlabel() == "r (nm)"
+    paths = plot_window.write_data(str(tmp_path / "ripley.csv"))
+    assert paths[1] == str(tmp_path / "ripley_regions.csv")
+    assert len(pd.read_csv(paths[0])) == 10
+    assert len(pd.read_csv(paths[1])) == N_CLUSTERS
+    plot_window.close()
+
+
+@pytest.mark.parametrize("region", ["view", "fov"])
+def test_ripley_h_view_and_field_of_view(
+    window, qt_offscreen, monkeypatch, region
+):
+    _answer_unlinked_warning(
+        monkeypatch, QtWidgets.QMessageBox.StandardButton.Yes
+    )
+    view = window.view
+    result = _run_ripley_h(
+        view, qt_offscreen, monkeypatch, _ripley_params(region)
+    )
+    # the view covers the whole field of view
+    assert list(result["n_locs"]) == [len(view.locs[0])]
+    assert result["areas"][0] == pytest.approx((WIDTH * PIXELSIZE) ** 2)
+    assert result["h_mean"][0] > 0  # dense clusters
+    view.ripley_h_window.close()
+
+
+def test_ripley_h_reports_picks_without_localizations(
+    window, qt_offscreen, monkeypatch
+):
+    texts = _answer_unlinked_warning(
+        monkeypatch, QtWidgets.QMessageBox.StandardButton.Yes
+    )
+    view = window.view
+    view._pick_shape = "Circle"
+    view.window.tools_settings_dialog.pick_diameter.setValue(PIXELSIZE)
+    view._picks = []
+    view.add_picks([(1.0, 1.0)])  # clusters start 5 pixels in
+    result = _run_ripley_h(
+        view, qt_offscreen, monkeypatch, _ripley_params("picks")
+    )
+    assert result is None
+    assert "at least two localizations" in texts[-1]
+
+
+def test_ripley_h_dialog_shows_3d_settings_only_in_3d(window, qt_offscreen):
+    dialog = gui_render.RipleyHDialog(window)
+    assert not dialog.use_z.isEnabled()  # no z
+    locs = window.view.locs[0]
+    locs["z"] = np.linspace(-200.4, 300.6, len(locs))
+    dialog = gui_render.RipleyHDialog(window)
+    assert dialog.use_z.isEnabled() and not dialog.use_z.isChecked()
+    assert dialog.z_limits.isHidden() and dialog.simulated_z.isHidden()
+    assert (dialog.z_min.value(), dialog.z_max.value()) == (-201, 301)
+    dialog.use_z.setChecked(True)
+    assert not dialog.z_limits.isHidden()
+    assert not dialog.simulated_z.isHidden()
+    assert dialog.z_min.isHidden()  # z range from the localizations
+    dialog.z_limits.setCurrentIndex(1)  # manual
+    assert not dialog.z_min.isHidden()
+    dialog.simulations.setValue(0)
+    assert dialog.simulated_z.isHidden()
+
+
+def test_ripley_h_in_3d_warns_about_a_thin_z_range(
+    window, qt_offscreen, monkeypatch
+):
+    texts = _answer_unlinked_warning(
+        monkeypatch, QtWidgets.QMessageBox.StandardButton.Yes
+    )
+    view = window.view
+    rng = np.random.default_rng(0)
+    view.locs[0]["z"] = rng.uniform(-50, 50, len(view.locs[0]))
+    params = _ripley_params(
+        "fov", use_z=True, z_range=(-60.0, 60.0), simulated_z="observed"
+    )
+    result = _run_ripley_h(view, qt_offscreen, monkeypatch, params)
+    assert result["use_z"] and result["simulated_z"] == "observed"
+    np.testing.assert_array_equal(result["z_ranges"], [[-60, 60]])
+    assert "third of the z range" in texts[-1]
+    view.ripley_h_window.close()

@@ -8332,6 +8332,316 @@ class CBCDialog(lib.Dialog):
         return params, result == QtWidgets.QDialog.DialogCode.Accepted
 
 
+class RipleyHDialog(lib.Dialog):
+    """Choose the channel, regions and parameters of Ripley's H
+    function, see ``postprocess.ripley_h``.
+
+    ...
+
+    Attributes
+    ----------
+    channel : QComboBox
+        Channel whose localizations are analyzed.
+    edge_correction : QCheckBox
+        If checked, Ripley's isotropic edge correction is applied.
+    r_max : QDoubleSpinBox
+        Maximum radius in nm.
+    region : QComboBox
+        Regions in which H is computed: the picks (if any), the current
+        view or the whole field of view.
+    simulated_z : QComboBox
+        z of the simulated points in 3D: uniform over the z range or
+        the observed z values, shuffled.
+    simulations : QSpinBox
+        Number of simulations of complete spatial randomness for the
+        envelope.
+    steps : QSpinBox
+        Number of radii up to the maximum radius.
+    use_z : QCheckBox
+        If checked, H is computed in 3D. Only enabled if the channel
+        contains z.
+    z_limits : QComboBox
+        Whether the regions extend over the z range of their
+        localizations or over ``z_min`` to ``z_max`` in 3D.
+    z_min, z_max : QDoubleSpinBox
+        z range of the regions in nm in 3D, if set manually.
+    """
+
+    DOCS_URL = docs_url("render/analysis.html#render-ripley-h")
+
+    #: Region choices, in the order of the combo box (picks only when
+    #: there are any)
+    REGIONS = {
+        "picks": "Picks",
+        "view": "Current view",
+        "fov": "Whole field of view",
+    }
+
+    def __init__(self, window: QtWidgets.QMainWindow) -> None:
+        super().__init__(window)
+        self.window = window
+        self.setWindowTitle("Ripley's H function")
+        view = window.view
+        vbox = QtWidgets.QVBoxLayout(self)
+        grid = QtWidgets.QGridLayout()
+        grid.addWidget(lib.HelpButton(self.DOCS_URL), 0, 0)
+
+        channel_label = QtWidgets.QLabel("Channel:")
+        grid.addWidget(channel_label, 1, 0)
+        self.channel = QtWidgets.QComboBox()
+        self.channel.addItems(
+            [check.text() for check in window.dataset_dialog.checks]
+        )
+        grid.addWidget(self.channel, 1, 1)
+        if len(view.locs_paths) < 2:
+            channel_label.hide()
+            self.channel.hide()
+
+        region_label = QtWidgets.QLabel("Regions:")
+        region_label.setToolTip(
+            "Regions of interest in which H is computed. With picks,\n"
+            "H is computed in each pick and averaged. The density is\n"
+            "the number of localizations divided by the region's\n"
+            "area, so the regions should lie within the sample (e.g.,\n"
+            "the cell): empty parts of a region appear as clustering."
+        )
+        grid.addWidget(region_label, 2, 0)
+        self.region = QtWidgets.QComboBox()
+        n_picks = len(view._picks)
+        for key, text in self.REGIONS.items():
+            if key == "picks":
+                if not n_picks:
+                    continue
+                text = f"{text} ({n_picks})"
+            self.region.addItem(text, key)
+        grid.addWidget(self.region, 2, 1)
+
+        r_label = QtWidgets.QLabel("Max. radius (nm):")
+        r_label.setToolTip(
+            "Largest radius. It should be well below the size of the\n"
+            "regions."
+        )
+        grid.addWidget(r_label, 3, 0)
+        self.r_max = QtWidgets.QDoubleSpinBox()
+        self.r_max.setRange(0.1, 1e6)
+        self.r_max.setDecimals(1)
+        self.r_max.setValue(500.0)
+        self.r_max.setSingleStep(10)
+        grid.addWidget(self.r_max, 3, 1)
+        steps_label = QtWidgets.QLabel("Radius steps:")
+        steps_label.setToolTip("Number of radii up to the max. radius.")
+        grid.addWidget(steps_label, 4, 0)
+        self.steps = QtWidgets.QSpinBox()
+        self.steps.setRange(2, 10_000)
+        self.steps.setValue(100)
+        grid.addWidget(self.steps, 4, 1)
+        simulations_label = QtWidgets.QLabel("CSR simulations:")
+        simulations_label.setToolTip(
+            "Number of simulations of complete spatial randomness\n"
+            "(CSR) for the envelope: uniformly random points in the\n"
+            "same regions, as many as there are localizations. A mean\n"
+            "H outside the envelope is significant at the pointwise\n"
+            "level 2 / (simulations + 1). 0 skips the simulations."
+        )
+        grid.addWidget(simulations_label, 5, 0)
+        self.simulations = QtWidgets.QSpinBox()
+        self.simulations.setRange(0, 9_999)
+        self.simulations.setValue(99)
+        grid.addWidget(self.simulations, 5, 1)
+        self.edge_correction = QtWidgets.QCheckBox("Edge correction")
+        self.edge_correction.setToolTip(
+            "Ripley's isotropic edge correction: weight each pair by\n"
+            "the inverse of the fraction of the circle around the\n"
+            "localization that lies inside the region, since the\n"
+            "neighbors outside of it are not seen."
+        )
+        self.edge_correction.setChecked(True)
+        grid.addWidget(self.edge_correction, 6, 0, 1, 2)
+
+        # 3D
+        self.use_z = QtWidgets.QCheckBox("3D (x, y and z)")
+        self.use_z.setToolTip(
+            "Compute H in 3D. Requires z. 3D samples are usually thin,\n"
+            "so keep the max. radius below about a third of the z\n"
+            "range: larger spheres mostly reach the top or bottom of\n"
+            "the region and H gets noisy."
+        )
+        grid.addWidget(self.use_z, 7, 0, 1, 2)
+        self.z_limits_label = QtWidgets.QLabel("z range:")
+        self.z_limits_label.setToolTip(
+            "z range over which the regions extend. The volume, and\n"
+            "thus the density, depends on it."
+        )
+        grid.addWidget(self.z_limits_label, 8, 0)
+        self.z_limits = QtWidgets.QComboBox()
+        self.z_limits.addItem("Localizations in each region", "data")
+        self.z_limits.addItem("Manual", "manual")
+        grid.addWidget(self.z_limits, 8, 1)
+        self.z_min_label = QtWidgets.QLabel("z min / max (nm):")
+        grid.addWidget(self.z_min_label, 9, 0)
+        z_box = QtWidgets.QHBoxLayout()
+        self.z_min = QtWidgets.QDoubleSpinBox()
+        self.z_max = QtWidgets.QDoubleSpinBox()
+        for spin in (self.z_min, self.z_max):
+            spin.setRange(-1e5, 1e5)
+            spin.setDecimals(0)
+            spin.setSingleStep(50)
+            z_box.addWidget(spin)
+        self.z_min.setToolTip("Bottom of the regions; lower z is ignored.")
+        self.z_max.setToolTip("Top of the regions; higher z is ignored.")
+        grid.addLayout(z_box, 9, 1)
+        self.simulated_z_label = QtWidgets.QLabel("Simulated z:")
+        self.simulated_z_label.setToolTip(
+            "z of the simulated points. Uniform: complete spatial\n"
+            "randomness in 3D; an uneven z distribution of the\n"
+            "localizations (e.g., detection falling off away from\n"
+            "focus) appears as clustering. Observed: the z values of\n"
+            "the localizations, shuffled; tests for clustering beyond\n"
+            "the z distribution, but hides real clustering in z (e.g.,\n"
+            "a layer of molecules)."
+        )
+        grid.addWidget(self.simulated_z_label, 10, 0)
+        self.simulated_z = QtWidgets.QComboBox()
+        self.simulated_z.addItem("Uniform over the z range", "uniform")
+        self.simulated_z.addItem("Observed z values, shuffled", "observed")
+        grid.addWidget(self.simulated_z, 10, 1)
+        vbox.addLayout(grid)
+
+        self.channel.currentIndexChanged.connect(self.on_channel_changed)
+        self.use_z.toggled.connect(self.update_widgets)
+        self.z_limits.currentIndexChanged.connect(self.update_widgets)
+        self.simulations.valueChanged.connect(self.update_widgets)
+        self.on_channel_changed()
+
+        self.buttons = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.StandardButton.Ok
+            | QtWidgets.QDialogButtonBox.StandardButton.Cancel,
+            QtCore.Qt.Orientation.Horizontal,
+            self,
+        )
+        vbox.addWidget(self.buttons)
+        self.buttons.accepted.connect(self.accept)
+        self.buttons.rejected.connect(self.reject)
+
+    def on_channel_changed(self) -> None:
+        """Allow 3D only for a channel with z and set the manual z range
+        to that of its localizations."""
+        locs = self.window.view.locs[self.channel.currentIndex()]
+        has_z = "z" in locs.columns
+        self.use_z.setEnabled(has_z)
+        if not has_z:
+            self.use_z.setChecked(False)
+        elif len(locs):
+            self.z_min.setValue(np.floor(locs["z"].min()))
+            self.z_max.setValue(np.ceil(locs["z"].max()))
+        self.update_widgets()
+
+    def update_widgets(self) -> None:
+        """Show the 3D settings only in 3D, the manual z range only if
+        chosen and the simulated z only with simulations."""
+        use_z = self.use_z.isChecked()
+        manual = self.z_limits.currentData() == "manual"
+        simulate = self.simulations.value() > 0
+        for widget in (self.z_limits_label, self.z_limits):
+            widget.setVisible(use_z)
+        for widget in (self.z_min_label, self.z_min, self.z_max):
+            widget.setVisible(use_z and manual)
+        for widget in (self.simulated_z_label, self.simulated_z):
+            widget.setVisible(use_z and simulate)
+        self.adjustSize()
+
+    def accept(self) -> None:
+        if (
+            self.use_z.isChecked()
+            and self.z_limits.currentData() == "manual"
+            and not self.z_min.value() < self.z_max.value()
+        ):
+            QtWidgets.QMessageBox.information(
+                self,
+                "Ripley's H function",
+                "Please choose a z min below the z max.",
+            )
+            return
+        super().accept()
+
+    @staticmethod
+    def getParams(
+        parent: QtWidgets.QMainWindow,
+    ) -> tuple[dict, bool]:
+        """Create the dialog and return the requested parameters of
+        Ripley's H function. ``"region"`` is one of the keys of
+        ``REGIONS``; ``"z_range"`` is None unless set manually in
+        3D."""
+        dialog = RipleyHDialog(parent)
+        result = dialog.exec()
+        params = {
+            "channel": dialog.channel.currentIndex(),
+            "region": dialog.region.currentData(),
+            "r_max": dialog.r_max.value(),
+            "steps": dialog.steps.value(),
+            "n_simulations": dialog.simulations.value(),
+            "edge_correction": dialog.edge_correction.isChecked(),
+            "use_z": dialog.use_z.isChecked(),
+            "z_range": None,
+            "simulated_z": "uniform",
+        }
+        if params["use_z"]:
+            if dialog.z_limits.currentData() == "manual":
+                params["z_range"] = (
+                    dialog.z_min.value(),
+                    dialog.z_max.value(),
+                )
+            params["simulated_z"] = dialog.simulated_z.currentData()
+        return params, result == QtWidgets.QDialog.DialogCode.Accepted
+
+
+class RipleyHPlotWindow(lib.GenericPlotWindow):
+    """Plot Ripley's H function and save it as .csv files."""
+
+    def __init__(self, result: dict, locs_path: str, title: str) -> None:
+        super().__init__(f"Ripley's H function - {title}", "render")
+        self.result = result
+        self.locs_path = locs_path
+        self.toolbar.addSeparator()
+        save_action = self.toolbar.addAction("Save data")
+        save_action.setIcon(theme.icon("export-csv"))
+        save_action.setToolTip(
+            "Save the H functions and the summary of each region as\n"
+            ".csv files."
+        )
+        save_action.triggered.connect(self.save_data)
+        theme.follow_toolbar_style(self.toolbar, save_action)
+
+        def draw() -> None:
+            with self.plot_context():
+                postprocess.plot_ripley_h(self.result, self.figure)
+
+        draw()
+        self.redraw = draw
+        self.canvas.draw()
+
+    def save_data(self) -> None:
+        """Ask for a path and save the H functions there and the
+        summary of each region next to it (``_regions.csv``)."""
+        path, _ = QtWidgets.QFileDialog.getSaveFileName(
+            self,
+            "Save Ripley's H function",
+            os.path.splitext(self.locs_path)[0] + "_ripley_h.csv",
+            filter="*.csv",
+        )
+        if path:
+            self.write_data(path)
+
+    def write_data(self, path: str) -> list[str]:
+        """Save the H functions to ``path`` and the summary of each
+        region to ``<path stem>_regions.csv``; return both paths."""
+        curves, regions = postprocess._ripley_h_tables(self.result)
+        regions_path = os.path.splitext(path)[0] + "_regions.csv"
+        curves.to_csv(path, index=False)
+        regions.to_csv(regions_path, index=False)
+        return [path, regions_path]
+
+
 class StitchDialog(lib.Dialog):
     """Choose the tiles, targets and parameters for stitching the
     loaded channels, see ``picasso.stitch``.
@@ -15211,6 +15521,116 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             title="CBC",
         )
 
+    def ripley_h(self) -> None:
+        """Ask for the channel, regions and parameters of Ripley's H
+        function, compute it on a worker thread and plot it, see
+        ``postprocess.ripley_h``."""
+        if not self.locs_paths:
+            return
+        params, ok = RipleyHDialog.getParams(self.window)
+        if not ok:
+            return
+        channel = params["channel"]
+        title = self.window.dataset_dialog.checks[channel].text()
+
+        # each molecule of localizations counts as many times as it was
+        # localized, which looks like clustering
+        if not postprocess._are_molecules(self.locs[channel]):
+            reply = QtWidgets.QMessageBox.warning(
+                self,
+                "Ripley's H function",
+                f"{title} does not contain molecules (no 'n_events' or "
+                "'std_frame' column), so each molecule is counted as many "
+                "times as it was localized, which appears as clustering "
+                "at short distances.\n\nConsider finding the molecules "
+                "first, e.g., with Postprocess > Molecular mapping (G5M) "
+                "or by clustering with 'Save cluster centers'.\n\n"
+                "Continue anyway?",
+                QtWidgets.QMessageBox.StandardButton.Yes
+                | QtWidgets.QMessageBox.StandardButton.No,
+                QtWidgets.QMessageBox.StandardButton.No,
+            )
+            if reply != QtWidgets.QMessageBox.StandardButton.Yes:
+                return
+
+        # snapshot the inputs for the worker thread
+        locs = self.locs[channel]
+        info = self.infos[channel]
+        if params["region"] == "picks":
+            picks = list(self._picks)
+            pick_shape, pick_size = self._pick_shape, self._pick_size
+        elif params["region"] == "view":
+            (y_min, x_min), (y_max, x_max) = self.viewport
+            picks = [((x_min, y_min), (x_max, y_max))]
+            pick_shape, pick_size = "Box", None
+        else:
+            picks, pick_shape, pick_size = None, None, None
+        n_regions = 1 if picks is None else len(picks)
+        kwargs = dict(
+            r_max=params["r_max"],
+            steps=params["steps"],
+            edge_correction=params["edge_correction"],
+            n_simulations=params["n_simulations"],
+            use_z=params["use_z"],
+            z_range=params["z_range"],
+            simulated_z=params["simulated_z"],
+        )
+
+        def compute(progress: lib.TaskProgress) -> tuple[dict, list[str]]:
+            progress.phase(
+                "Calculating Ripley's H function...",
+                n_regions * (params["n_simulations"] + 1),
+            )
+            with warnings.catch_warnings(record=True) as caught:
+                warnings.simplefilter("always")
+                result = postprocess.ripley_h(
+                    locs,
+                    info,
+                    picks,
+                    pick_shape,
+                    pick_size,
+                    progress_callback=progress.set_value,
+                    **kwargs,
+                )
+            # the user was asked about the molecules already
+            messages = [
+                str(w.message)
+                for w in caught
+                if "not molecules" not in str(w.message)
+            ]
+            return result, messages
+
+        def show(output: tuple[dict, list[str]]) -> None:
+            result, messages = output
+            # keep a reference to the window to prevent garbage collection
+            self.ripley_h_window = RipleyHPlotWindow(
+                result, self.locs_paths[channel], title
+            )
+            self.ripley_h_window.show()
+            if messages:  # e.g., a max. radius too large for the z range
+                QtWidgets.QMessageBox.warning(
+                    self.ripley_h_window,
+                    "Ripley's H function",
+                    "\n\n".join(messages),
+                )
+
+        def failed(error: Exception) -> None:
+            if isinstance(error, ValueError):  # e.g., empty picks
+                QtWidgets.QMessageBox.warning(
+                    self, "Ripley's H function", str(error)
+                )
+            else:  # unexpected, report as usual
+                sys.excepthook(type(error), error, error.__traceback__)
+
+        lib.run_task(
+            compute,
+            "Calculating Ripley's H function...",
+            self.window,
+            show,
+            on_failed=failed,
+            title="Ripley's H function",
+        )
+
     def _camera_origin(self, channel: int) -> tuple[float, float]:
         """Where the camera frame of ``channel`` starts in the displayed
         coordinates (camera pixels): the canvas offset (see
@@ -19096,10 +19516,15 @@ class Window(QtWidgets.QMainWindow):
         postprocess_menu.addSeparator()
         resi_action = postprocess_menu.addAction("RESI...")
         resi_action.triggered.connect(self.open_resi_dialog)
-
-        postprocess_menu.addSeparator()
         g5m_action = postprocess_menu.addAction("Molecular mapping (G5M)...")
         g5m_action.triggered.connect(self.view.g5m)
+        spatial_menu = postprocess_menu.addMenu("Spatial statistics")
+        ripley_h_action = spatial_menu.addAction("Ripley's H function...")
+        ripley_h_action.setToolTip(
+            "Whether the localizations are clustered, randomly"
+            " distributed or dispersed, and on which length scales."
+        )
+        ripley_h_action.triggered.connect(self.view.ripley_h)
 
         self.load_user_settings()
         # the Render keys the settings file does not name yet are

@@ -962,6 +962,97 @@ def _cbc_undefined(value: str) -> float | Literal["remove"]:
     return number
 
 
+def _ripley_h(
+    files: list[str],
+    picks_path: str | None,
+    r_max: float,
+    steps: int,
+    n_simulations: int,
+    edge_correction: bool,
+    use_3d: bool = False,
+    z_range: tuple[float, float] | None = None,
+    observed_z: bool = False,
+) -> None:
+    """Ripley's H function of localizations, in the picks of
+    ``picks_path`` or in the whole field of view, in 2D or, with
+    ``use_3d``, in 3D over ``z_range`` (nm; None for the z range of
+    each region's localizations) with the simulated z uniform or, with
+    ``observed_z``, shuffled from the localizations. Saves the H functions
+    (``<file>_ripley_h.csv``), the summary of each region
+    (``<file>_ripley_h_regions.csv``) and a plot
+    (``<file>_ripley_h.png``) next to each file. See
+    ``postprocess.ripley_h`` for details."""
+    import warnings
+    from glob import glob
+    from itertools import chain
+    import numpy as np
+    from . import io, lib, postprocess
+
+    paths = list(chain(*[sorted(glob(_)) for _ in files]))
+    if not paths:
+        raise SystemExit("No localization files found.")
+    for path in paths:
+        locs, info = io.load_locs(path)
+        if not postprocess._are_molecules(locs):
+            print(
+                f"WARNING: {path} does not contain molecules (no"
+                " 'n_events' or 'std_frame' column), so each molecule is"
+                " counted as many times as it was localized, which appears"
+                " as clustering at short distances. Consider finding the"
+                " molecules first, e.g., with 'picasso g5m' or as the"
+                " cluster centers saved by 'picasso dbscan', 'hdbscan' or"
+                " 'smlm_cluster'."
+            )
+        picks, shape, size = None, None, None
+        if picks_path is not None:
+            pixelsize = lib.get_from_metadata(info, "Pixelsize", 130.0)
+            picks, shape, size = io.load_picks(picks_path, pixelsize)
+        print(f"Ripley's H function of {path}:")
+        try:
+            with warnings.catch_warnings(record=True) as caught:
+                warnings.simplefilter("always")
+                result = postprocess.ripley_h(
+                    locs,
+                    info,
+                    picks,
+                    shape,
+                    size,
+                    r_max=r_max,
+                    steps=steps,
+                    edge_correction=edge_correction,
+                    n_simulations=n_simulations,
+                    use_z=use_3d,
+                    z_range=z_range,
+                    simulated_z="observed" if observed_z else "uniform",
+                    progress_callback="console",
+                )
+        except ValueError as e:
+            raise SystemExit(f"{path}: {e}")
+        for warning in caught:
+            if "not molecules" not in str(warning.message):  # see above
+                print(f"WARNING: {warning.message}")
+        n_used = int((~np.isnan(result["h"][:, 0])).sum())
+        k_max = int(np.argmax(result["h_mean"]))
+        print(
+            f"  {n_used} of {len(result['n_locs'])} regions used, maximum"
+            f" of the mean H = {result['h_mean'][k_max]:.1f} nm at r ="
+            f" {result['r'][k_max]:.0f} nm"
+        )
+        base = os.path.splitext(path)[0]
+        curves, regions = postprocess._ripley_h_tables(result)
+        curves.to_csv(base + "_ripley_h.csv", index=False)
+        regions.to_csv(base + "_ripley_h_regions.csv", index=False)
+        postprocess.plot_ripley_h(result).savefig(
+            base + "_ripley_h.png", dpi=150
+        )
+        for suffix in (
+            "_ripley_h.csv",
+            "_ripley_h_regions.csv",
+            "_ripley_h.png",
+        ):
+            print(f"  saved {base + suffix}")
+
+
 def _spt_paths(files: list[str]) -> list[str]:
     """Paths matching the unix style patterns ``files``."""
     from glob import glob
@@ -5424,6 +5515,84 @@ def main():  # noqa: C901
         ),
     )
 
+    # Ripley's H function
+    ripley_h_parser = subparsers.add_parser(
+        "ripley_h",
+        help=(
+            "Ripley's H function of localizations: are they clustered,"
+            " random or dispersed"
+        ),
+    )
+    ripley_h_parser.add_argument(
+        "files",
+        nargs="+",
+        help="hdf5 localization files (unix style path patterns)",
+    )
+    ripley_h_parser.add_argument(
+        "-p",
+        "--picks",
+        default=None,
+        help=(
+            "picks (.yaml) saved in Render; the regions of interest in"
+            " which H is computed (default: the whole field of view)"
+        ),
+    )
+    ripley_h_parser.add_argument(
+        "-r",
+        "--rmax",
+        type=float,
+        default=500.0,
+        help="maximum radius in nm (default=500)",
+    )
+    ripley_h_parser.add_argument(
+        "-s",
+        "--steps",
+        type=int,
+        default=100,
+        help="number of radii up to the maximum radius (default=100)",
+    )
+    ripley_h_parser.add_argument(
+        "-n",
+        "--simulations",
+        type=int,
+        default=99,
+        help=(
+            "number of simulations of complete spatial randomness for"
+            " the envelope, 0 to skip (default=99)"
+        ),
+    )
+    ripley_h_parser.add_argument(
+        "--no-edge-correction",
+        dest="edge_correction",
+        action="store_false",
+        help="do not apply Ripley's isotropic edge correction",
+    )
+    ripley_h_parser.add_argument(
+        "--3d",
+        dest="use_3d",
+        action="store_true",
+        help="compute H in 3D (x, y and z), requires z",
+    )
+    ripley_h_parser.add_argument(
+        "--zrange",
+        nargs=2,
+        type=float,
+        metavar=("ZMIN", "ZMAX"),
+        default=None,
+        help=(
+            "z range in nm over which the regions extend in 3D (default:"
+            " the z range of the localizations in each region)"
+        ),
+    )
+    ripley_h_parser.add_argument(
+        "--observed-z",
+        action="store_true",
+        help=(
+            "in 3D, shuffle the observed z values for the simulated"
+            " points instead of spreading them uniformly over the z range"
+        ),
+    )
+
     clusterfilter_parser = subparsers.add_parser(
         "clusterfilter",
         help="filter localizations by properties of their clusters",
@@ -6252,6 +6421,18 @@ def main():  # noqa: C901
                 args.use_2d,
                 args.names,
                 args.undefined,
+            )
+        elif args.command == "ripley_h":
+            _ripley_h(
+                args.files,
+                args.picks,
+                args.rmax,
+                args.steps,
+                args.simulations,
+                args.edge_correction,
+                args.use_3d,
+                None if args.zrange is None else tuple(args.zrange),
+                args.observed_z,
             )
         elif args.command == "dark":
             _dark(args.files)

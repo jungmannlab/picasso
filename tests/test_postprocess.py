@@ -2448,3 +2448,411 @@ class TestResi:
                 radius_xy=2 / 130,
                 min_locs=[2, 3, 4],
             )
+
+
+# ---------------------------------------------------------------------------
+# Ripley's H function
+# ---------------------------------------------------------------------------
+
+
+def _ripley_locs(x_nm, y_nm, pixelsize=100.0):
+    """Molecules at the given positions in nm."""
+    return pd.DataFrame(
+        {
+            "frame": np.zeros(len(x_nm), dtype=np.uint32),
+            "x": np.asarray(x_nm) / pixelsize,
+            "y": np.asarray(y_nm) / pixelsize,
+            "n_events": np.ones(len(x_nm), dtype=np.int32),
+        }
+    )
+
+
+class TestRipleyH:
+    PIXELSIZE = 100.0
+    SIZE = 10_000.0  # nm, field of view
+    INFO = [{"Pixelsize": 100.0, "Width": 100, "Height": 100, "Frames": 1}]
+
+    @pytest.fixture
+    def random_locs(self):
+        rng = np.random.default_rng(0)
+        x, y = rng.uniform(0, self.SIZE, size=(2, 20_000))
+        return _ripley_locs(x, y)
+
+    @pytest.fixture
+    def clustered_locs(self):
+        """10 molecules within 50 nm of each of 200 random centers."""
+        rng = np.random.default_rng(1)
+        centers = rng.uniform(500, self.SIZE - 500, size=(200, 2))
+        r = 50 * np.sqrt(rng.uniform(0, 1, 2000))
+        angle = rng.uniform(0, 2 * np.pi, 2000)
+        x = np.repeat(centers[:, 0], 10) + r * np.cos(angle)
+        y = np.repeat(centers[:, 1], 10) + r * np.sin(angle)
+        return _ripley_locs(x, y)
+
+    def test_random_is_zero_within_envelope(self, random_locs):
+        result = postprocess.ripley_h(
+            random_locs, self.INFO, r_max=1000, steps=50, n_simulations=19
+        )
+        assert result["r"][0] == 20 and result["r"][-1] == 1000
+        assert np.abs(result["h_mean"]).max() < 5  # nm
+        # the envelope brackets 0 and is narrow for 20,000 points
+        assert (result["envelope_low"] < 0.5).all()
+        assert (result["envelope_high"] > -0.5).all()
+        assert (result["envelope_high"] - result["envelope_low"]).max() < 10
+
+    def test_edge_correction_removes_the_downward_bias(self, random_locs):
+        kwargs = dict(r_max=1000, steps=10, n_simulations=0)
+        corrected = postprocess.ripley_h(random_locs, self.INFO, **kwargs)
+        raw = postprocess.ripley_h(
+            random_locs, self.INFO, edge_correction=False, **kwargs
+        )
+        assert raw["h_mean"][-1] < -30
+        assert abs(corrected["h_mean"][-1]) < 5
+        assert corrected["edge_correction"] and not raw["edge_correction"]
+
+    def test_clusters_peak_between_radius_and_diameter(self, clustered_locs):
+        result = postprocess.ripley_h(
+            clustered_locs, self.INFO, r_max=500, steps=50, n_simulations=5
+        )
+        assert 50 <= result["r_h_max"][0] <= 100
+        assert result["h_mean"].max() > 100
+        assert (result["h_mean"][:10] > result["envelope_high"][:10]).all()
+
+    @pytest.mark.parametrize(
+        "picks, shape, size",
+        [
+            ([(50, 50), (30, 30)], "Circle", 40),
+            ([(50, 50)], "Square", 40),
+            ([((20, 30), (80, 70))], "Rectangle", 30),
+            ([((10, 20), (60, 90))], "Box", None),
+            (
+                [[(10, 10), (90, 15), (60, 50), (85, 90), (15, 80), (10, 10)]],
+                "Polygon",
+                None,
+            ),
+            (
+                [[(20.0, [(20, 20), (50, 60), (80, 30)]), (15.0, [(50, 80)])]],
+                "Brush",
+                None,
+            ),
+        ],
+    )
+    def test_random_is_zero_in_every_pick_shape(
+        self, random_locs, picks, shape, size
+    ):
+        result = postprocess.ripley_h(
+            random_locs,
+            self.INFO,
+            picks,
+            shape,
+            size,
+            r_max=1000,
+            steps=10,
+            n_simulations=0,
+        )
+        areas_px = lib.pick_areas(picks, shape, size)
+        np.testing.assert_allclose(
+            result["areas"], areas_px * self.PIXELSIZE**2, rtol=0.02
+        )
+        # the localizations counted are the picked ones
+        radius = None if size is None else size / 2
+        picked = postprocess.picked_locs(
+            random_locs,
+            self.INFO,
+            picks,
+            shape,
+            radius if shape == "Circle" else size,
+            add_group=False,
+        )
+        np.testing.assert_allclose(
+            result["n_locs"], [len(p) for p in picked], atol=2
+        )
+        assert np.abs(result["h_mean"]).max() < 10
+
+    def test_regions_without_locs_or_area_are_skipped(self, random_locs):
+        picks = [
+            [(10, 10), (40, 10), (40, 40), (10, 10)],
+            [(1, 1), (2, 2)],  # open polygon
+            [(200, 200), (210, 200), (210, 210), (200, 200)],  # outside
+        ]
+        result = postprocess.ripley_h(
+            random_locs, self.INFO, picks, "Polygon", n_simulations=2
+        )
+        assert result["n_locs"][0] > 0
+        assert list(result["n_locs"][1:]) == [0, 0]
+        assert np.isnan(result["h"][1:]).all()
+        assert np.isnan(result["r_h_max"][1:]).all()
+        np.testing.assert_array_equal(result["h_mean"], result["h"][0])
+        with pytest.raises(ValueError, match="at least two"):
+            postprocess.ripley_h(random_locs, self.INFO, picks[1:], "Polygon")
+
+    def test_mean_over_picks(self, random_locs):
+        picks = [(30, 30), (70, 70)]
+        result = postprocess.ripley_h(
+            random_locs, self.INFO, picks, "Circle", 30, n_simulations=0
+        )
+        np.testing.assert_allclose(result["h_mean"], result["h"].mean(axis=0))
+        assert result["envelope_low"] is None
+        assert result["h"].shape == (2, 100)
+
+    def test_envelope_is_reproducible(self, clustered_locs):
+        kwargs = dict(r_max=300, steps=10, n_simulations=3)
+        a = postprocess.ripley_h(clustered_locs, self.INFO, **kwargs)
+        b = postprocess.ripley_h(clustered_locs, self.INFO, **kwargs)
+        c = postprocess.ripley_h(
+            clustered_locs, self.INFO, random_seed=1, **kwargs
+        )
+        np.testing.assert_array_equal(a["envelope_low"], b["envelope_low"])
+        assert not np.array_equal(a["envelope_low"], c["envelope_low"])
+
+    def test_polygon_edge_fraction_is_exact(self):
+        # unit square [0, 1000]^2, circle of radius 300 around a point
+        # 100 nm from the left edge: arccos(100 / 300) / pi outside
+        region = postprocess._polygon_region(
+            np.array([0, 1000, 1000, 0.0]), np.array([0, 0, 1000, 1000.0])
+        )
+        geometry = (region.kind, region.circle, region.segments)
+        fraction = postprocess._circle_fraction_inside(
+            100.0, 500.0, 300.0, *geometry
+        )
+        assert fraction == pytest.approx(1 - np.arccos(1 / 3) / np.pi)
+        # corner: a quarter of the circle inside
+        fraction = postprocess._circle_fraction_inside(
+            0.0, 0.0, 300.0, *geometry
+        )
+        assert fraction == pytest.approx(0.25)
+        assert postprocess._circle_fraction_inside(
+            500.0, 500.0, 300.0, *geometry
+        ) == pytest.approx(1.0)
+
+    def test_localizations_that_are_not_molecules_warn(self, random_locs):
+        locs = random_locs.drop(columns="n_events")
+        locs["len"] = 1  # linked localizations are still not molecules
+        with pytest.warns(UserWarning, match="not molecules"):
+            postprocess.ripley_h(locs, self.INFO, steps=5, n_simulations=0)
+        # cluster centers, G5M molecules and combined clusters pass
+        for column in ("n_events", "std_frame"):
+            locs = random_locs.drop(columns="n_events")
+            locs[column] = 1
+            with warnings.catch_warnings():
+                warnings.simplefilter("error")
+                postprocess.ripley_h(locs, self.INFO, steps=5, n_simulations=0)
+
+    @pytest.mark.parametrize(
+        "kwargs",
+        [
+            dict(r_max=0),
+            dict(steps=1),
+            dict(n_simulations=-1),
+            dict(picks=[(1, 1)], pick_shape="Hexagon"),
+            dict(picks=[(1, 1)], pick_shape="Circle"),  # no size
+        ],
+    )
+    def test_invalid_parameters(self, random_locs, kwargs):
+        with pytest.raises(ValueError):
+            postprocess.ripley_h(random_locs, self.INFO, **kwargs)
+
+    def test_plot_and_tables(self, clustered_locs):
+        picks = [(30, 30), (70, 70), (500, 500)]
+        result = postprocess.ripley_h(
+            clustered_locs,
+            self.INFO,
+            picks,
+            "Circle",
+            40,
+            r_max=300,
+            steps=30,
+            n_simulations=2,
+        )
+        fig = postprocess.plot_ripley_h(result)
+        ax = fig.axes[0]
+        assert ax.get_xlabel() == "r (nm)"
+        labels = ax.get_legend_handles_labels()[1]
+        assert "Regions (2)" in labels and "Mean" in labels
+        curves, regions = postprocess._ripley_h_tables(result)
+        assert list(curves.columns) == [
+            "r_nm",
+            "h_mean_nm",
+            "envelope_low_nm",
+            "envelope_high_nm",
+            "h_region_0_nm",
+            "h_region_1_nm",
+            "h_region_2_nm",
+        ]
+        assert len(curves) == 30
+        assert list(regions["n_locs"]) == list(result["n_locs"])
+        # 40 camera pixels of 100 nm = 4 um diameter
+        assert regions["area_um2"].iloc[0] == pytest.approx(np.pi * 2**2)
+
+
+@pytest.mark.filterwarnings("ignore:r_max.*third of the z range")
+class TestRipleyH3D:
+    INFO = TestRipleyH.INFO
+    DEPTH = 1000.0  # nm
+
+    @pytest.fixture
+    def random_locs(self):
+        rng = np.random.default_rng(0)
+        x, y = rng.uniform(0, 10_000, size=(2, 20_000))
+        locs = _ripley_locs(x, y)
+        locs["z"] = rng.uniform(-self.DEPTH / 2, self.DEPTH / 2, len(locs))
+        return locs
+
+    def test_sphere_fraction_follows_archimedes(self):
+        region = postprocess._polygon_region(
+            np.array([0, 1e4, 1e4, 0.0]), np.array([0, 0, 1e4, 1e4])
+        )
+        geometry = (region.kind, region.circle, region.segments)
+        # between two planes 300 nm above and below: 300 / 400 inside
+        fraction = postprocess._sphere_fraction_inside(
+            5e3, 5e3, 0.0, 400.0, -300.0, 300.0, 5e3, *geometry
+        )
+        assert fraction == pytest.approx(0.75)
+        # corner of the box on the bottom plane: 1/4 in xy, 1/2 in z
+        fraction = postprocess._sphere_fraction_inside(
+            0.0, 0.0, -300.0, 200.0, -300.0, 300.0, 0.0, *geometry
+        )
+        assert fraction == pytest.approx(0.125)
+
+    def test_random_is_zero_and_needs_the_edge_correction(self, random_locs):
+        kwargs = dict(r_max=300, steps=30, use_z=True)
+        result = postprocess.ripley_h(
+            random_locs, self.INFO, n_simulations=5, **kwargs
+        )
+        # few pairs at the shortest radii, so they are noisier
+        assert np.abs(result["h_mean"][:3]).max() < 5
+        assert np.abs(result["h_mean"][3:]).max() < 1
+        assert result["use_z"] and result["simulated_z"] == "uniform"
+        z = random_locs["z"]
+        np.testing.assert_allclose(result["z_ranges"], [[z.min(), z.max()]])
+        np.testing.assert_allclose(
+            result["volumes"], result["areas"] * (z.max() - z.min())
+        )
+        raw = postprocess.ripley_h(
+            random_locs,
+            self.INFO,
+            n_simulations=0,
+            edge_correction=False,
+            **kwargs,
+        )
+        assert raw["h_mean"][-1] < -10
+
+    def test_3d_clusters_peak(self):
+        rng = np.random.default_rng(3)
+        centers = np.column_stack(
+            [
+                rng.uniform(500, 9500, size=(300, 2)),
+                rng.uniform(-300, 300, size=300),
+            ]
+        )
+        offsets = rng.normal(size=(3000, 3))
+        offsets *= (
+            50
+            * np.cbrt(rng.uniform(0, 1, 3000))
+            / np.linalg.norm(offsets, axis=1)
+        )[:, None]
+        xyz = np.repeat(centers, 10, axis=0) + offsets
+        locs = _ripley_locs(xyz[:, 0], xyz[:, 1])
+        locs["z"] = xyz[:, 2]
+        with pytest.warns(UserWarning, match="third of the z range"):
+            result = postprocess.ripley_h(
+                locs,
+                self.INFO,
+                r_max=300,
+                steps=30,
+                n_simulations=0,
+                use_z=True,
+            )
+        assert 50 <= result["r_h_max"][0] <= 100
+        # in 2D, the clusters are smeared out by the projection
+        flat = postprocess.ripley_h(
+            locs, self.INFO, r_max=300, steps=30, n_simulations=0
+        )
+        assert result["h_mean"].max() > flat["h_mean"].max()
+
+    @pytest.mark.parametrize("simulated_z", ["uniform", "observed"])
+    @pytest.mark.parametrize(
+        "picks, shape, size",
+        [
+            ([(50, 50), (30, 30)], "Circle", 40),
+            ([((20, 30), (80, 70))], "Rectangle", 30),
+            (
+                [[(10, 10), (90, 15), (60, 50), (85, 90), (15, 80), (10, 10)]],
+                "Polygon",
+                None,
+            ),
+            (
+                [[(20.0, [(20, 20), (50, 60), (80, 30)]), (15.0, [(50, 80)])]],
+                "Brush",
+                None,
+            ),
+        ],
+    )
+    def test_random_is_zero_in_picks_with_a_manual_z_range(
+        self, random_locs, picks, shape, size, simulated_z
+    ):
+        result = postprocess.ripley_h(
+            random_locs,
+            self.INFO,
+            picks,
+            shape,
+            size,
+            r_max=300,
+            steps=10,
+            n_simulations=3,
+            use_z=True,
+            z_range=(-400, 400),
+            simulated_z=simulated_z,
+        )
+        np.testing.assert_array_equal(
+            result["z_ranges"], [[-400, 400]] * len(picks)
+        )
+        assert np.abs(result["h_mean"]).max() < 5
+        assert (result["envelope_low"] < result["envelope_high"]).all()
+
+    def test_manual_z_range_ignores_localizations_outside(self, random_locs):
+        result = postprocess.ripley_h(
+            random_locs,
+            self.INFO,
+            n_simulations=0,
+            steps=5,
+            use_z=True,
+            z_range=(0, 400),
+        )
+        z = random_locs["z"]
+        assert result["n_locs"][0] == ((z >= 0) & (z <= 400)).sum()
+
+    def test_tables_and_plot_in_3d(self, random_locs):
+        result = postprocess.ripley_h(
+            random_locs, self.INFO, n_simulations=0, steps=5, use_z=True
+        )
+        _, regions = postprocess._ripley_h_tables(result)
+        columns = {"z_min_nm", "z_max_nm", "volume_um3", "density_per_um3"}
+        assert columns <= set(regions.columns)
+        assert "density_per_um2" not in regions.columns
+        assert regions["density_per_um3"].iloc[0] == pytest.approx(
+            len(random_locs) / regions["volume_um3"].iloc[0]
+        )
+        title = postprocess.plot_ripley_h(result).axes[0].get_title()
+        assert title.endswith("(3D)")
+
+    def test_regions_without_depth_are_skipped(self, random_locs):
+        locs = random_locs.copy()
+        locs["z"] = 0.0
+        with pytest.raises(ValueError, match="different z"):
+            postprocess.ripley_h(locs, self.INFO, use_z=True)
+
+    @pytest.mark.parametrize(
+        "kwargs",
+        [
+            dict(z_range=(100, 100)),
+            dict(simulated_z="gaussian"),
+        ],
+    )
+    def test_invalid_3d_parameters(self, random_locs, kwargs):
+        with pytest.raises(ValueError):
+            postprocess.ripley_h(random_locs, self.INFO, use_z=True, **kwargs)
+        with pytest.raises(ValueError, match="requires z"):
+            postprocess.ripley_h(
+                random_locs.drop(columns="z"), self.INFO, use_z=True
+            )

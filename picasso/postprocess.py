@@ -19,7 +19,7 @@ from collections import OrderedDict
 from collections.abc import Callable
 from copy import deepcopy
 from functools import partial
-from typing import Literal
+from typing import Literal, NamedTuple
 from concurrent.futures import ThreadPoolExecutor as _ThreadPoolExecutor
 from threading import Thread
 
@@ -81,6 +81,9 @@ __all__ = [
     "cbc",
     "cbc_all_pairs",
     "resi",
+    # spatial statistics
+    "ripley_h",
+    "plot_ripley_h",
 ]
 
 
@@ -5772,7 +5775,7 @@ def cbc(
         columns = [_cbc_column(name) for name in partner_names]
     use_z = _validate_cbc_args([locs] + partners, columns, r_max, steps, use_z)
     _warn_if_not_linked([locs] + partners)
-    callback, close = _cbc_progress(progress_callback, len(locs))
+    callback, close = _progress_counter(progress_callback, len(locs))
     try:
         new_locs, new_info = _cbc_channel(
             locs,
@@ -5903,7 +5906,7 @@ def cbc_all_pairs(
     _warn_if_not_linked(locs)
 
     total = sum(len(locs_) for locs_ in locs)
-    callback, close = _cbc_progress(progress_callback, total)
+    callback, close = _progress_counter(progress_callback, total)
     out_locs, out_infos = [], []
     offset = 0
     try:
@@ -5979,16 +5982,18 @@ def _warn_if_not_linked(all_locs: list[pd.DataFrame]) -> None:
         )
 
 
-def _cbc_progress(
+def _progress_counter(
     progress_callback: Callable[[int], None] | Literal["console"] | None,
     total: int,
+    desc: str = "CBC",
+    unit: str = "loc",
 ) -> tuple[Callable[[int], None] | None, Callable[[], None]]:
     """A progress callback taking the cumulative number of processed
-    localizations, and a function that closes it. "console" prints a
-    progress bar."""
+    items (localizations by default), and a function that closes it.
+    "console" prints a progress bar labeled ``desc``."""
     if progress_callback != "console":
         return progress_callback, lambda: None
-    pbar = tqdm(total=total, desc="CBC", unit="loc", unit_scale=True)
+    pbar = tqdm(total=total, desc=desc, unit=unit, unit_scale=True)
 
     def callback(value: int) -> None:
         pbar.update(value - pbar.n)
@@ -6162,6 +6167,1067 @@ def _rowwise_spearman(
     valid = den > 0
     s[valid] = num[valid] / den[valid]
     return s
+
+
+# Spatial statistics: how the molecules of one species are distributed
+# (clustered, random or dispersed) within regions of interest
+
+#: Largest weight of Ripley's isotropic edge correction, as in
+#: spatstat's ``edge.Ripley``. Caps the influence of a pair whose circle
+#: lies almost entirely outside the region, e.g., close to a corner.
+_RIPLEY_MAX_WEIGHT = 100.0
+
+#: Number of angles sampled on a circle to measure the fraction of it
+#: inside a brush pick (exact for the other pick shapes).
+_RIPLEY_BRUSH_ANGLES = 72
+
+#: Gauss-Legendre nodes and weights on [-1, 1] of the integration over
+#: heights in the 3D edge correction, see ``_sphere_fraction_inside``
+_SPHERE_NODES, _SPHERE_WEIGHTS = np.polynomial.legendre.leggauss(16)
+
+# kinds of regions of interest, see ``_RipleyRegion``
+_REGION_CIRCLE = 0
+_REGION_POLYGON = 1
+_REGION_BRUSH = 2
+
+_point_segment_distance_sq = lib._point_segment_distance_sq
+
+#: Columns that molecules (one localization per molecule) have and
+#: localizations do not: written by ``clusterer.find_cluster_centers``,
+#: ``g5m.g5m`` and ``cluster_combine`` (``std_frame`` only)
+_MOLECULE_COLUMNS = ("n_events", "std_frame")
+
+
+def _are_molecules(locs: pd.DataFrame) -> bool:
+    """Whether ``locs`` are molecules rather than localizations, i.e.,
+    contain any of ``_MOLECULE_COLUMNS``."""
+    return any(column in locs.columns for column in _MOLECULE_COLUMNS)
+
+
+class _RipleyRegion(NamedTuple):
+    """Geometry of a region of interest, in nm.
+
+    ``kind`` is ``_REGION_CIRCLE`` (``circle`` holds the center x, y
+    and the radius), ``_REGION_POLYGON`` (each row of ``segments`` is an
+    edge ``x0, y0, x1, y1``, the fifth column is unused) or
+    ``_REGION_BRUSH`` (each row of ``segments`` is a segment of a stroke
+    path with the stroke's radius in the fifth column). ``bounds`` is
+    ``(x_min, x_max, y_min, y_max)``."""
+
+    kind: int
+    circle: lib.FloatArray1D
+    segments: lib.FloatArray2D
+    bounds: tuple[float, float, float, float]
+    area: float
+
+
+def _polygon_region(X: lib.FloatArray1D, Y: lib.FloatArray1D) -> _RipleyRegion:
+    """Region enclosed by the polygon with corners ``(X, Y)`` in nm,
+    given open or closed (first corner repeated at the end)."""
+    X = np.asarray(X, dtype=np.float64)
+    Y = np.asarray(Y, dtype=np.float64)
+    if len(X) > 1 and X[0] == X[-1] and Y[0] == Y[-1]:
+        X, Y = X[:-1], Y[:-1]
+    segments = np.column_stack(
+        [X, Y, np.roll(X, -1), np.roll(Y, -1), np.zeros(len(X))]
+    )
+    return _RipleyRegion(
+        _REGION_POLYGON,
+        np.zeros(3),
+        segments,
+        (X.min(), X.max(), Y.min(), Y.max()),
+        lib.polygon_area(X, Y),
+    )
+
+
+def _ripley_region(
+    pick: tuple,
+    pick_shape: str,
+    pick_size: float | None,
+    pixelsize: float,
+) -> _RipleyRegion | None:
+    """Geometry of a pick (camera pixels) in nm, or None for a pick
+    without area (open polygon, empty brush pick, zero-length
+    rectangle)."""
+    if pick_shape == "Circle":
+        x, y = pick
+        radius = pick_size / 2 * pixelsize
+        x, y = x * pixelsize, y * pixelsize
+        region = _RipleyRegion(
+            _REGION_CIRCLE,
+            np.array([x, y, radius], dtype=np.float64),
+            np.zeros((0, 5)),
+            (x - radius, x + radius, y - radius, y + radius),
+            np.pi * radius**2,
+        )
+    elif pick_shape == "Brush":
+        if not len(pick):
+            return None
+        segments = []
+        for stroke in pick:
+            width, X, Y = lib.brush_stroke_arrays(stroke)
+            radius = width / 2 * pixelsize
+            X, Y = X * pixelsize, Y * pixelsize
+            if len(X) == 1:  # a dot
+                segments.append([X[0], Y[0], X[0], Y[0], radius])
+            for k in range(len(X) - 1):
+                segments.append([X[k], Y[k], X[k + 1], Y[k + 1], radius])
+        x_min, x_max, y_min, y_max = lib._brush_bounds(pick)
+        region = _RipleyRegion(
+            _REGION_BRUSH,
+            np.zeros(3),
+            np.array(segments, dtype=np.float64),
+            (
+                x_min * pixelsize,
+                x_max * pixelsize,
+                y_min * pixelsize,
+                y_max * pixelsize,
+            ),
+            lib.pick_areas([pick], "Brush", None)[0] * pixelsize**2,
+        )
+    else:
+        if pick_shape == "Square":
+            x, y = pick
+            half = pick_size / 2
+            X = [x - half, x + half, x + half, x - half]
+            Y = [y - half, y - half, y + half, y + half]
+        elif pick_shape == "Rectangle":
+            (xs, ys), (xe, ye) = pick
+            X, Y = lib.get_pick_rectangle_corners(xs, ys, xe, ye, pick_size)
+        elif pick_shape == "Box":
+            X, Y = lib.get_pick_box_corners(pick)
+        elif pick_shape == "Polygon":
+            X, Y = lib.get_pick_polygon_corners(pick)
+            if X is None:  # not closed
+                return None
+        else:
+            raise ValueError(f"Unknown pick shape: {pick_shape}")
+        region = _polygon_region(
+            np.asarray(X, dtype=np.float64) * pixelsize,
+            np.asarray(Y, dtype=np.float64) * pixelsize,
+        )
+    if not region.area > 0:
+        return None
+    return region
+
+
+@numba.jit(nopython=True, nogil=True, cache=True)
+def _in_ripley_region(
+    x: float,
+    y: float,
+    kind: int,
+    circle: lib.FloatArray1D,
+    segments: lib.FloatArray2D,
+) -> bool:
+    """Whether the point ``(x, y)`` lies inside the region, see
+    ``_RipleyRegion``."""
+    if kind == _REGION_CIRCLE:
+        dx = x - circle[0]
+        dy = y - circle[1]
+        return dx * dx + dy * dy < circle[2] * circle[2]
+    if kind == _REGION_POLYGON:  # ray casting
+        inside = False
+        for k in range(segments.shape[0]):
+            x0 = segments[k, 0]
+            y0 = segments[k, 1]
+            x1 = segments[k, 2]
+            y1 = segments[k, 3]
+            if (y0 > y) != (y1 > y):
+                if x < x0 + (x1 - x0) * (y - y0) / (y1 - y0):
+                    inside = not inside
+        return inside
+    for k in range(segments.shape[0]):
+        d2 = _point_segment_distance_sq(
+            x,
+            y,
+            segments[k, 0],
+            segments[k, 1],
+            segments[k, 2],
+            segments[k, 3],
+        )
+        if d2 <= segments[k, 4] ** 2:
+            return True
+    return False
+
+
+@numba.jit(nopython=True, nogil=True, cache=True)
+def _in_ripley_region_many(
+    x: lib.FloatArray1D,
+    y: lib.FloatArray1D,
+    kind: int,
+    circle: lib.FloatArray1D,
+    segments: lib.FloatArray2D,
+) -> lib.BoolArray1D:
+    """Which of the points ``(x, y)`` lie inside the region."""
+    inside = np.zeros(len(x), dtype=np.bool_)
+    for i in range(len(x)):
+        inside[i] = _in_ripley_region(x[i], y[i], kind, circle, segments)
+    return inside
+
+
+@numba.jit(nopython=True, nogil=True, cache=True)
+def _boundary_distances(
+    x: lib.FloatArray1D,
+    y: lib.FloatArray1D,
+    kind: int,
+    circle: lib.FloatArray1D,
+    segments: lib.FloatArray2D,
+) -> lib.FloatArray1D:
+    """Distance from each point inside the region to its boundary, or
+    a lower bound of it for brush picks. Circles up to this radius
+    around the point lie entirely inside the region."""
+    distances = np.zeros(len(x))
+    for i in range(len(x)):
+        if kind == _REGION_CIRCLE:
+            distances[i] = circle[2] - np.sqrt(
+                (x[i] - circle[0]) ** 2 + (y[i] - circle[1]) ** 2
+            )
+        elif kind == _REGION_POLYGON:
+            best = np.inf
+            for k in range(segments.shape[0]):
+                d2 = _point_segment_distance_sq(
+                    x[i],
+                    y[i],
+                    segments[k, 0],
+                    segments[k, 1],
+                    segments[k, 2],
+                    segments[k, 3],
+                )
+                if d2 < best:
+                    best = d2
+            distances[i] = np.sqrt(best)
+        else:
+            # depth inside the deepest stroke segment; the union of
+            # the strokes reaches at least as far
+            best = 0.0
+            for k in range(segments.shape[0]):
+                d2 = _point_segment_distance_sq(
+                    x[i],
+                    y[i],
+                    segments[k, 0],
+                    segments[k, 1],
+                    segments[k, 2],
+                    segments[k, 3],
+                )
+                depth = segments[k, 4] - np.sqrt(d2)
+                if depth > best:
+                    best = depth
+            distances[i] = best
+    return distances
+
+
+@numba.jit(nopython=True, nogil=True, cache=True)
+def _circle_fraction_inside(
+    px: float,
+    py: float,
+    d: float,
+    kind: int,
+    circle: lib.FloatArray1D,
+    segments: lib.FloatArray2D,
+) -> float:
+    """Fraction of the circumference of the circle of radius ``d``
+    around ``(px, py)`` that lies inside the region. Exact for circles
+    and polygons (from the intersections of the circle with the edges),
+    sampled at ``_RIPLEY_BRUSH_ANGLES`` angles for brush picks."""
+    if kind == _REGION_CIRCLE:
+        R = circle[2]
+        s = np.sqrt((px - circle[0]) ** 2 + (py - circle[1]) ** 2)
+        if d <= R - s:
+            return 1.0
+        if s == 0.0:
+            return 0.0
+        c = (s * s + d * d - R * R) / (2 * s * d)
+        if c >= 1.0:
+            return 0.0
+        if c <= -1.0:
+            return 1.0
+        return np.arccos(c) / np.pi
+    if kind == _REGION_POLYGON:
+        n_edges = segments.shape[0]
+        angles = np.empty(2 * n_edges)
+        m = 0
+        for k in range(n_edges):
+            fx = segments[k, 0] - px
+            fy = segments[k, 1] - py
+            ex = segments[k, 2] - segments[k, 0]
+            ey = segments[k, 3] - segments[k, 1]
+            a = ex * ex + ey * ey
+            if a == 0.0:
+                continue
+            b = 2 * (fx * ex + fy * ey)
+            c = fx * fx + fy * fy - d * d
+            disc = b * b - 4 * a * c
+            if disc < 0.0:
+                continue
+            sq = np.sqrt(disc)
+            t = (-b - sq) / (2 * a)
+            if 0.0 <= t <= 1.0:
+                angles[m] = np.arctan2(fy + t * ey, fx + t * ex)
+                m += 1
+            t = (-b + sq) / (2 * a)
+            if sq > 0.0 and 0.0 <= t <= 1.0:
+                angles[m] = np.arctan2(fy + t * ey, fx + t * ex)
+                m += 1
+        if m == 0:  # entirely inside or outside
+            if _in_ripley_region(px + d, py, kind, circle, segments):
+                return 1.0
+            return 0.0
+        angles = np.sort(angles[:m])
+        inside = 0.0
+        for k in range(m):
+            a0 = angles[k]
+            a1 = angles[k + 1] if k + 1 < m else angles[0] + 2 * np.pi
+            if a1 <= a0:
+                continue
+            mid = 0.5 * (a0 + a1)
+            if _in_ripley_region(
+                px + d * np.cos(mid),
+                py + d * np.sin(mid),
+                kind,
+                circle,
+                segments,
+            ):
+                inside += a1 - a0
+        return inside / (2 * np.pi)
+    n_inside = 0
+    for k in range(_RIPLEY_BRUSH_ANGLES):
+        angle = (k + 0.5) * 2 * np.pi / _RIPLEY_BRUSH_ANGLES
+        if _in_ripley_region(
+            px + d * np.cos(angle),
+            py + d * np.sin(angle),
+            kind,
+            circle,
+            segments,
+        ):
+            n_inside += 1
+    return n_inside / _RIPLEY_BRUSH_ANGLES
+
+
+@numba.jit(nopython=True, nogil=True, cache=True)
+def _sphere_fraction_inside(
+    px: float,
+    py: float,
+    pz: float,
+    d: float,
+    z_min: float,
+    z_max: float,
+    boundary_xy: float,
+    kind: int,
+    circle: lib.FloatArray1D,
+    segments: lib.FloatArray2D,
+) -> float:
+    """Fraction of the surface of the sphere of radius ``d`` around
+    ``(px, py, pz)`` that lies inside the region extended from
+    ``z_min`` to ``z_max``. The surface of a sphere is spread evenly
+    over its height (Archimedes), so the fraction is the mean over the
+    heights t inside the z range of the fraction of the circle of
+    radius ``sqrt(d**2 - t**2)`` inside the region in xy, integrated
+    by Gauss-Legendre quadrature. Circles up to ``boundary_xy`` lie
+    entirely inside the region in xy."""
+    t_low = max(-d, z_min - pz)
+    t_high = min(d, z_max - pz)
+    if t_high <= t_low:
+        return 0.0
+    if d <= boundary_xy:  # only the z planes cut the sphere
+        return (t_high - t_low) / (2 * d)
+    half = 0.5 * (t_high - t_low)
+    middle = 0.5 * (t_high + t_low)
+    total = 0.0
+    for k in range(len(_SPHERE_NODES)):
+        t = middle + half * _SPHERE_NODES[k]
+        radius = np.sqrt(max(d * d - t * t, 0.0))
+        if radius <= boundary_xy:
+            fraction = 1.0
+        else:
+            fraction = _circle_fraction_inside(
+                px, py, radius, kind, circle, segments
+            )
+        total += _SPHERE_WEIGHTS[k] * fraction
+    return total * half / (2 * d)
+
+
+@numba.jit(nopython=True, nogil=True, cache=True)
+def _ripley_pair_counts(
+    x: lib.FloatArray1D,
+    y: lib.FloatArray1D,
+    z: lib.FloatArray1D,
+    boundary: lib.FloatArray1D,
+    boundary_xy: lib.FloatArray1D,
+    cell_x: lib.IntArray1D,
+    cell_y: lib.IntArray1D,
+    cell_starts: lib.IntArray1D,
+    n_cells_x: int,
+    n_cells_y: int,
+    r_max: float,
+    steps: int,
+    edge_correction: bool,
+    use_z: bool,
+    z_min: float,
+    z_max: float,
+    kind: int,
+    circle: lib.FloatArray1D,
+    segments: lib.FloatArray2D,
+    start: int,
+    end: int,
+) -> lib.FloatArray1D:
+    """Edge-corrected counts of the ordered pairs (i, j), i in
+    ``[start, end)``, by distance (3D if ``use_z``, the region then
+    extends from ``z_min`` to ``z_max``): element k sums the weights
+    of the pairs at distances in ``(k, k + 1] * r_max / steps``. The
+    points are sorted by grid cell in xy (side at least ``r_max``) and
+    ``cell_starts`` holds the first point of each cell. ``boundary``
+    is the distance of each point to the region's boundary (in 3D
+    including the z planes), ``boundary_xy`` that in xy only."""
+    counts = np.zeros(steps)
+    dr = r_max / steps
+    r_max2 = r_max * r_max
+    # brush picks: the sampled fraction is computed once per radius
+    # step (at its center) and localization, not for every pair
+    sampled = kind == _REGION_BRUSH
+    fractions = np.empty(steps)
+    for i in range(start, end):
+        xi = x[i]
+        yi = y[i]
+        zi = z[i]
+        if sampled:
+            fractions[:] = -1.0
+        for cy in range(max(cell_y[i] - 1, 0), min(cell_y[i] + 2, n_cells_y)):
+            for cx in range(
+                max(cell_x[i] - 1, 0), min(cell_x[i] + 2, n_cells_x)
+            ):
+                cell = cy * n_cells_x + cx
+                for j in range(cell_starts[cell], cell_starts[cell + 1]):
+                    if j == i:
+                        continue
+                    d2 = (x[j] - xi) ** 2 + (y[j] - yi) ** 2
+                    if use_z:
+                        d2 += (z[j] - zi) ** 2
+                    if d2 > r_max2:
+                        continue
+                    d = np.sqrt(d2)
+                    k = int(np.ceil(d / dr)) - 1
+                    if k < 0:
+                        k = 0
+                    elif k >= steps:
+                        k = steps - 1
+                    weight = 1.0
+                    if edge_correction and d > boundary[i]:
+                        if sampled and fractions[k] >= 0.0:
+                            fraction = fractions[k]
+                        else:
+                            radius = (k + 0.5) * dr if sampled else d
+                            if use_z:
+                                fraction = _sphere_fraction_inside(
+                                    xi,
+                                    yi,
+                                    zi,
+                                    radius,
+                                    z_min,
+                                    z_max,
+                                    boundary_xy[i],
+                                    kind,
+                                    circle,
+                                    segments,
+                                )
+                            else:
+                                fraction = _circle_fraction_inside(
+                                    xi, yi, radius, kind, circle, segments
+                                )
+                            if sampled:
+                                fractions[k] = fraction
+                        if fraction * _RIPLEY_MAX_WEIGHT <= 1.0:
+                            weight = _RIPLEY_MAX_WEIGHT
+                        else:
+                            weight = 1.0 / fraction
+                    counts[k] += weight
+    return counts
+
+
+def _ripley_h_region(
+    x: lib.FloatArray1D,
+    y: lib.FloatArray1D,
+    z: lib.FloatArray1D | None,
+    region: _RipleyRegion,
+    z_range: tuple[float, float] | None,
+    r_max: float,
+    steps: int,
+    edge_correction: bool,
+) -> lib.FloatArray1D:
+    """Ripley's H function of the points ``(x, y)`` (nm, at least two,
+    all inside ``region``) at the radii ``(1, ..., steps) * r_max /
+    steps``; in 3D if ``z`` is given, the region then extends over
+    ``z_range`` (nm), which contains all ``z``."""
+    n = len(x)
+    use_z = z is not None
+    if not use_z:
+        z = np.zeros(n)
+    x_min, x_max, y_min, y_max = region.bounds
+    # grid cells of at least r_max, so that the neighbors within r_max
+    # are in the adjacent cells; at most ~1000 cells per side
+    cell_size = max(r_max, (x_max - x_min) / 1024, (y_max - y_min) / 1024)
+    n_cells_x = int((x_max - x_min) // cell_size) + 1
+    n_cells_y = int((y_max - y_min) // cell_size) + 1
+    cell_x = np.clip(
+        ((x - x_min) // cell_size).astype(np.int64), 0, n_cells_x - 1
+    )
+    cell_y = np.clip(
+        ((y - y_min) // cell_size).astype(np.int64), 0, n_cells_y - 1
+    )
+    cell = cell_y * n_cells_x + cell_x
+    order = np.argsort(cell, kind="stable")
+    x = np.ascontiguousarray(x[order], dtype=np.float64)
+    y = np.ascontiguousarray(y[order], dtype=np.float64)
+    z = np.ascontiguousarray(z[order], dtype=np.float64)
+    cell_x = cell_x[order]
+    cell_y = cell_y[order]
+    cell_starts = np.searchsorted(
+        cell[order], np.arange(n_cells_x * n_cells_y + 1)
+    )
+    geometry = (region.kind, region.circle, region.segments)
+    boundary_xy = _boundary_distances(x, y, *geometry)
+    z_min, z_max = z_range if use_z else (0.0, 0.0)
+    if use_z:
+        boundary = np.minimum(boundary_xy, np.minimum(z - z_min, z_max - z))
+    else:
+        boundary = boundary_xy
+    args = (
+        x,
+        y,
+        z,
+        boundary,
+        boundary_xy,
+        cell_x,
+        cell_y,
+        cell_starts,
+        n_cells_x,
+        n_cells_y,
+        float(r_max),
+        int(steps),
+        bool(edge_correction),
+        use_z,
+        float(z_min),
+        float(z_max),
+        *geometry,
+    )
+    n_threads = lib.n_workers() if n > 1_000 else 1
+    if n_threads > 1:
+        bounds = np.linspace(0, n, n_threads + 1).astype(int)
+        with _ThreadPoolExecutor(n_threads) as executor:
+            futures = [
+                executor.submit(_ripley_pair_counts, *args, start, end)
+                for start, end in zip(bounds[:-1], bounds[1:])
+            ]
+            counts = np.sum([f.result() for f in futures], axis=0)
+    else:
+        counts = _ripley_pair_counts(*args, 0, n)
+    r = np.arange(1, steps + 1) * (r_max / steps)
+    size = region.area * (z_max - z_min) if use_z else region.area
+    k_function = size * np.cumsum(counts) / (n * (n - 1))
+    if use_z:
+        return np.cbrt(3 * k_function / (4 * np.pi)) - r
+    return np.sqrt(k_function / np.pi) - r
+
+
+def _locs_in_ripley_region(
+    x: lib.FloatArray1D,
+    y: lib.FloatArray1D,
+    region: _RipleyRegion,
+) -> lib.IntArray1D:
+    """Indices of the points ``(x, y)`` (nm) that lie inside
+    ``region``."""
+    x_min, x_max, y_min, y_max = region.bounds
+    near = np.flatnonzero(
+        (x >= x_min) & (x <= x_max) & (y >= y_min) & (y <= y_max)
+    )
+    inside = _in_ripley_region_many(
+        x[near], y[near], region.kind, region.circle, region.segments
+    )
+    return near[inside]
+
+
+def _uniform_in_region(
+    n: int,
+    region: _RipleyRegion,
+    rng: np.random.Generator,
+) -> tuple[lib.FloatArray1D, lib.FloatArray1D]:
+    """``n`` points drawn uniformly at random inside ``region``
+    (complete spatial randomness), by rejection from the bounding
+    box."""
+    x_min, x_max, y_min, y_max = region.bounds
+    box_area = (x_max - x_min) * (y_max - y_min)
+    acceptance = min(max(region.area / box_area, 1e-3), 1.0)
+    xs, ys = [], []
+    n_found = 0
+    while n_found < n:
+        m = int((n - n_found) / acceptance * 1.1) + 16
+        x = rng.uniform(x_min, x_max, m)
+        y = rng.uniform(y_min, y_max, m)
+        inside = _in_ripley_region_many(
+            x, y, region.kind, region.circle, region.segments
+        )
+        xs.append(x[inside])
+        ys.append(y[inside])
+        n_found += int(inside.sum())
+    return np.concatenate(xs)[:n], np.concatenate(ys)[:n]
+
+
+def ripley_h(
+    locs: pd.DataFrame,
+    info: list[dict],
+    picks: list[tuple] | None = None,
+    pick_shape: (
+        Literal["Circle", "Rectangle", "Polygon", "Square", "Box", "Brush"]
+        | None
+    ) = None,
+    pick_size: float | None = None,
+    *,
+    r_max: float = 500.0,
+    steps: int = 100,
+    edge_correction: bool = True,
+    n_simulations: int = 99,
+    use_z: bool = False,
+    z_range: tuple[float, float] | None = None,
+    simulated_z: Literal["uniform", "observed"] = "uniform",
+    random_seed: int | None = 0,
+    progress_callback: (
+        Callable[[int], None] | Literal["console"] | None
+    ) = None,
+) -> dict:
+    """Ripley's H function of localizations in regions of interest,
+    which shows whether molecules are clustered, randomly distributed
+    or dispersed, and on which length scales.
+
+    Ripley's K function counts the neighbors within a distance r of
+    each localization, normalized by the density (Ripley, 1977, see
+    References)::
+
+        K(r) = A / (n (n - 1)) * sum_i sum_(j != i) w_ij * 1(d_ij <= r)
+
+    where A is the area of the region, n the number of localizations
+    in it, d_ij the distance between localizations i and j and w_ij the
+    edge correction weight. The H function, H(r) = sqrt(K(r) / pi) - r,
+    is 0 for complete spatial randomness (CSR), positive for clustering
+    and negative for dispersion at the scale r.
+
+    By default, the function is computed in 2D (x and y). With
+    ``use_z``, it is computed in 3D: each region extends over a z range
+    (by default that of its localizations), A is replaced by the
+    volume and H(r) = (3 K(r) / (4 pi))^(1/3) - r.
+
+    The function is computed in each region separately, and the mean
+    over the regions with at least two localizations (in 3D, at
+    different z) is reported. Each region is simulated
+    ``n_simulations`` times with as many uniformly random points as it
+    holds localizations; the lowest and highest mean H of the
+    simulations at each radius give the CSR envelope.
+
+    Parameters
+    ----------
+    locs : pd.DataFrame
+        Molecules, i.e., one localization per molecule, such as the
+        molecules found by ``g5m.g5m`` or the cluster centers of
+        ``clusterer.find_cluster_centers``, since H measures how the
+        molecules are distributed.
+    info : list of dicts
+        Metadata of the localizations, must contain the camera pixel
+        size and, if ``picks`` is None, the image size.
+    picks : list of tuples or None, optional
+        Regions of interest in camera pixels, in the format of
+        ``pick_shape`` (see ``picked_locs``). Regions should be well
+        inside the area covered by the sample (e.g., the cell): the
+        density is the number of localizations divided by the area of
+        the region, so empty parts of a region appear as clustering. If
+        None, the whole field of view (``Width`` x ``Height`` in the
+        metadata) is used. Default is None.
+    pick_shape : {"Circle", "Rectangle", "Polygon", "Square", "Box", \
+"Brush"} or None, optional
+        Shape of the picks. Required if ``picks`` is given. Default is
+        None.
+    pick_size : float or None, optional
+        Size of the picks in camera pixels: diameter for circles, width
+        for rectangles, side length for squares, None for polygons,
+        boxes and brush picks. Default is None.
+    r_max : float, optional
+        Largest radius in nm. It should be well below the size of the
+        regions; the edge correction is less reliable for radii
+        approaching the region size. Default is 500.
+    steps : int, optional
+        Number of radii between 0 (excluded) and ``r_max``, at least 2.
+        Default is 100.
+    edge_correction : bool, optional
+        If True, Ripley's isotropic edge correction is applied: a pair
+        at distance d is weighted by the inverse of the fraction of the
+        circle (in 3D, the sphere surface) of radius d around the first
+        localization that lies inside the region (at most 100), since
+        neighbors outside the region are not seen. Without it, H is
+        biased downwards near the region edges. Default is True.
+    n_simulations : int, optional
+        Number of CSR simulations for the envelope. With the lowest
+        and highest simulated values as the envelope, a mean H outside
+        of it is significant at a pointwise level of
+        ``2 / (n_simulations + 1)``, i.e., 0.02 for 99 simulations. 0
+        skips the simulations. Default is 99.
+    use_z : bool, optional
+        If True, H is computed in 3D (x, y and z in nm), which requires
+        a ``z`` column. 3D samples are usually thin (about 1 um), so
+        most spheres reach the top or bottom of the region and H relies
+        on large edge correction weights; keep ``r_max`` below about a
+        third of the z range (a warning is given otherwise). The poorer
+        axial precision also stretches clusters in z. Default is False.
+    z_range : tuple of floats or None, optional
+        ``(z_min, z_max)`` in nm over which every region extends in 3D;
+        localizations outside of it are ignored. If None, each region
+        extends over the z range of its localizations. Only used in 3D.
+        Default is None.
+    simulated_z : {"uniform", "observed"}, optional
+        z of the simulated points in 3D. "uniform" spreads them evenly
+        over the z range, which is complete spatial randomness in 3D;
+        an uneven z distribution of the localizations (e.g., from the
+        detection falling off away from focus) then appears as
+        clustering. "observed" shuffles the z values of the
+        localizations in the region instead, which tests for clustering
+        beyond the z distribution but also hides real clustering in z
+        (e.g., a layer of molecules). Only used in 3D. Default is
+        "uniform".
+    random_seed : int or None, optional
+        Seed of the CSR simulations. None gives a different envelope
+        on each call. Default is 0.
+    progress_callback : {callable, "console", None}, optional
+        Called with the number of H functions computed so far, up to
+        ``n_regions * (n_simulations + 1)``. If "console", a progress
+        bar is printed. If None, no progress is reported. Default is
+        None.
+
+    Returns
+    -------
+    result : dict
+        Dictionary with the keys:
+
+        - "r": radii in nm, shape (steps,).
+        - "h": H function of each region in nm, shape (n_regions,
+          steps); NaN for regions with fewer than two localizations or
+          without area (e.g., open polygons).
+        - "h_mean": mean H function over the regions with at least two
+          localizations, in nm.
+        - "envelope_low", "envelope_high": CSR envelope of the mean H
+          function in nm, or None without simulations.
+        - "n_locs": number of localizations in each region.
+        - "areas": area of each region in nm^2.
+        - "z_ranges": z range of each region in nm, shape (n_regions,
+          2), NaN for regions without localizations; None in 2D.
+        - "volumes": volume of each region in nm^3; None in 2D.
+        - "r_h_max": radius of maximum H of each region in nm (NaN
+          where H is NaN).
+        - "n_simulations": number of CSR simulations.
+        - "edge_correction": whether the edge correction was applied.
+        - "use_z": whether H was computed in 3D.
+        - "simulated_z": z of the simulated points in 3D, None in 2D.
+
+    Raises
+    ------
+    ValueError
+        If the parameters are invalid, z is missing in 3D or no region
+        contains at least two localizations (in 3D, at different z).
+
+    Warns
+    -----
+    UserWarning
+        If ``locs`` are not molecules (no ``n_events`` or ``std_frame``
+        column). Each molecule is then counted as many times as it was
+        localized, which appears as clustering at short distances. In
+        3D, also if ``r_max`` exceeds a third of the z range of a
+        region.
+
+    See Also
+    --------
+    plot_ripley_h : Plot the result.
+
+    References
+    ----------
+    Ripley, B. D. Modelling spatial patterns. J R Stat Soc B 39,
+    172-192 (1977). https://doi.org/10.1111/j.2517-6161.1977.tb01615.x
+    """
+    if r_max <= 0:
+        raise ValueError("r_max must be positive.")
+    if steps < 2:
+        raise ValueError("steps must be at least 2.")
+    if n_simulations < 0:
+        raise ValueError("n_simulations must not be negative.")
+    if use_z:
+        if "z" not in locs.columns:
+            raise ValueError("3D requires z in the localizations.")
+        if z_range is not None and not z_range[0] < z_range[1]:
+            raise ValueError("z_range must be (z_min, z_max), z_min < z_max.")
+        if simulated_z not in ("uniform", "observed"):
+            raise ValueError(
+                f"Invalid simulated_z: {simulated_z!r}; choose 'uniform' "
+                "or 'observed'."
+            )
+    pixelsize = lib.get_from_metadata(info, "Pixelsize", raise_error=True)
+    if picks is None:
+        width = lib.get_from_metadata(info, "Width", raise_error=True)
+        height = lib.get_from_metadata(info, "Height", raise_error=True)
+        regions = [
+            _polygon_region(
+                np.array([0, width, width, 0]) * pixelsize,
+                np.array([0, 0, height, height]) * pixelsize,
+            )
+        ]
+    else:
+        if pick_shape not in lib.PICK_SHAPES:
+            raise ValueError(
+                f"Invalid pick shape: {pick_shape}. Choose one of "
+                f"{lib.PICK_SHAPES}."
+            )
+        if pick_shape not in lib.PICK_SHAPES_WITHOUT_SIZE and not pick_size:
+            raise ValueError(f"{pick_shape} picks require a pick size.")
+        regions = [
+            _ripley_region(pick, pick_shape, pick_size, pixelsize)
+            for pick in picks
+        ]
+    if not _are_molecules(locs):
+        warnings.warn(
+            "The localizations are not molecules (no 'n_events' or "
+            "'std_frame' column), so each molecule is counted as many "
+            "times as it was localized, which appears as clustering at "
+            "short distances. Consider finding the molecules first, e.g., "
+            "with picasso.g5m.g5m or picasso.clusterer.find_cluster_centers.",
+            UserWarning,
+            stacklevel=2,
+        )
+
+    x_all = locs["x"].to_numpy(dtype=np.float64) * pixelsize
+    y_all = locs["y"].to_numpy(dtype=np.float64) * pixelsize
+    z_all = locs["z"].to_numpy(dtype=np.float64) if use_z else None
+    r = np.arange(1, steps + 1) * (r_max / steps)
+    n_regions = len(regions)
+    h = np.full((n_regions, steps), np.nan)
+    n_locs = np.zeros(n_regions, dtype=int)
+    areas = np.zeros(n_regions)
+    z_ranges = np.full((n_regions, 2), np.nan)
+    region_z = [None] * n_regions  # z of the localizations in 3D
+    callback, close = _progress_counter(
+        progress_callback,
+        n_regions * (n_simulations + 1),
+        desc="Ripley's H",
+        unit="function",
+    )
+    done = 0
+    try:
+        for k, region in enumerate(regions):
+            if region is not None:
+                areas[k] = region.area
+                inside = _locs_in_ripley_region(x_all, y_all, region)
+                if use_z:
+                    z = z_all[inside]
+                    if z_range is not None:
+                        inside = inside[(z >= z_range[0]) & (z <= z_range[1])]
+                        z = z_all[inside]
+                        z_ranges[k] = z_range
+                    elif len(z):
+                        z_ranges[k] = z.min(), z.max()
+                    region_z[k] = z
+                n_locs[k] = len(inside)
+                # in 3D, the region needs a depth
+                has_size = not use_z or z_ranges[k, 1] > z_ranges[k, 0]
+                if len(inside) >= 2 and has_size:
+                    h[k] = _ripley_h_region(
+                        x_all[inside],
+                        y_all[inside],
+                        region_z[k],
+                        region,
+                        tuple(z_ranges[k]),
+                        r_max,
+                        steps,
+                        edge_correction,
+                    )
+            done += 1
+            if callback is not None:
+                callback(done)
+        valid = np.flatnonzero(~np.isnan(h[:, 0]))
+        if not len(valid):
+            raise ValueError(
+                "No region contains at least two localizations"
+                + (" at different z." if use_z else ".")
+            )
+        h_mean = h[valid].mean(axis=0)
+        if use_z:
+            depths = z_ranges[valid, 1] - z_ranges[valid, 0]
+            n_thin = int((3 * r_max > depths).sum())
+            if n_thin:
+                warnings.warn(
+                    f"r_max ({r_max:g} nm) exceeds a third of the z range "
+                    f"of {n_thin} of {len(valid)} regions (smallest z "
+                    f"range: {depths.min():.0f} nm); H at large radii "
+                    "relies on large edge correction weights and is noisy.",
+                    UserWarning,
+                    stacklevel=2,
+                )
+
+        envelope_low = envelope_high = None
+        if n_simulations:
+            rng = np.random.default_rng(random_seed)
+            simulated = np.zeros((n_simulations, steps))
+            for s in range(n_simulations):
+                for k in valid:
+                    x, y = _uniform_in_region(n_locs[k], regions[k], rng)
+                    z = None
+                    if use_z and simulated_z == "uniform":
+                        z = rng.uniform(*z_ranges[k], n_locs[k])
+                    elif use_z:
+                        z = rng.permutation(region_z[k])
+                    simulated[s] += _ripley_h_region(
+                        x,
+                        y,
+                        z,
+                        regions[k],
+                        tuple(z_ranges[k]),
+                        r_max,
+                        steps,
+                        edge_correction,
+                    )
+                simulated[s] /= len(valid)
+                done += n_regions
+                if callback is not None:
+                    callback(done)
+            envelope_low = simulated.min(axis=0)
+            envelope_high = simulated.max(axis=0)
+    finally:
+        close()
+
+    r_h_max = np.full(n_regions, np.nan)
+    r_h_max[valid] = r[np.argmax(h[valid], axis=1)]
+    return {
+        "r": r,
+        "h": h,
+        "h_mean": h_mean,
+        "envelope_low": envelope_low,
+        "envelope_high": envelope_high,
+        "n_locs": n_locs,
+        "areas": areas,
+        "z_ranges": z_ranges if use_z else None,
+        "volumes": (
+            areas * (z_ranges[:, 1] - z_ranges[:, 0]) if use_z else None
+        ),
+        "r_h_max": r_h_max,
+        "n_simulations": n_simulations,
+        "edge_correction": edge_correction,
+        "use_z": use_z,
+        "simulated_z": simulated_z if use_z else None,
+    }
+
+
+def plot_ripley_h(
+    ripley_result: dict,
+    fig: plt.Figure | None = None,
+) -> plt.Figure:
+    """Plot Ripley's H function: the mean over the regions, the CSR
+    envelope and, for several regions, each region's function.
+
+    Parameters
+    ----------
+    ripley_result : dict
+        Result of ``ripley_h``.
+    fig : plt.Figure or None, optional
+        Figure to plot on, cleared first. If None, a new figure is
+        created. Default is None.
+
+    Returns
+    -------
+    fig : plt.Figure
+        Figure containing the plot.
+    """
+    if fig is None:
+        fig = plt.Figure(constrained_layout=True)
+    else:
+        fig.clear()
+    ax = fig.add_subplot(111)
+    r = ripley_result["r"]
+    h_mean = ripley_result["h_mean"]
+    valid = ~np.isnan(ripley_result["h"][:, 0])
+    n_valid = int(valid.sum())
+    # colors of the active style, resolved now (lines look "CN" colors
+    # up only when drawn)
+    data_color, envelope_color = plt.rcParams["axes.prop_cycle"].by_key()[
+        "color"
+    ][:2]
+    if n_valid > 1:
+        for k, h in enumerate(ripley_result["h"][valid]):
+            ax.plot(
+                r,
+                h,
+                color=data_color,
+                alpha=0.25,
+                linewidth=0.8,
+                label=f"Regions ({n_valid})" if k == 0 else None,
+            )
+    if ripley_result["envelope_low"] is not None:
+        ax.fill_between(
+            r,
+            ripley_result["envelope_low"],
+            ripley_result["envelope_high"],
+            color=envelope_color,
+            alpha=0.3,
+            linewidth=0,
+            label=(
+                f"CSR envelope ({ripley_result['n_simulations']} "
+                "simulations)"
+            ),
+        )
+    ax.plot(
+        r,
+        h_mean,
+        color=data_color,
+        linewidth=2,
+        label="Mean" if n_valid > 1 else "H(r)",
+    )
+    ax.axhline(
+        0, color=plt.rcParams["text.color"], linewidth=0.8, linestyle="--"
+    )
+    ax.set_title(
+        "Ripley's H function" + (" (3D)" if ripley_result["use_z"] else "")
+    )
+    ax.set_xlim(0, r[-1])
+    ax.set_xlabel("r (nm)")
+    ax.set_ylabel("H(r) (nm)")
+    ax.legend(loc="best")
+    return fig
+
+
+def _ripley_h_tables(
+    ripley_result: dict,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """The result of ``ripley_h`` as two tables: the H functions by
+    radius (mean, CSR envelope and each region) and the summary of each
+    region (number of localizations, area, density, maximum of H and
+    its radius). Used for saving the result as .csv files."""
+    r = ripley_result["r"]
+    curves = {"r_nm": r, "h_mean_nm": ripley_result["h_mean"]}
+    if ripley_result["envelope_low"] is not None:
+        curves["envelope_low_nm"] = ripley_result["envelope_low"]
+        curves["envelope_high_nm"] = ripley_result["envelope_high"]
+    for k, h in enumerate(ripley_result["h"]):
+        curves[f"h_region_{k}_nm"] = h
+    n_locs = ripley_result["n_locs"]
+    regions = {
+        "region": np.arange(len(n_locs)),
+        "n_locs": n_locs,
+        "area_um2": ripley_result["areas"] / 1e6,
+    }
+    if ripley_result["use_z"]:
+        regions["z_min_nm"] = ripley_result["z_ranges"][:, 0]
+        regions["z_max_nm"] = ripley_result["z_ranges"][:, 1]
+        regions["volume_um3"] = ripley_result["volumes"] / 1e9
+        size, unit = regions["volume_um3"], "um3"
+    else:
+        size, unit = regions["area_um2"], "um2"
+    with np.errstate(invalid="ignore", divide="ignore"):
+        regions[f"density_per_{unit}"] = np.where(
+            size > 0, n_locs / size, np.nan
+        )
+    regions["h_max_nm"] = np.max(ripley_result["h"], axis=1)
+    regions["r_at_h_max_nm"] = ripley_result["r_h_max"]
+    return pd.DataFrame(curves), pd.DataFrame(regions)
 
 
 def resi(
