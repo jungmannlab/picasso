@@ -576,6 +576,9 @@ def _render_quadtree(
                 root_px,
                 total_bits,
                 int(capacity),
+                # the rows lie within the viewport, projected
+                float(oversampling * (x_max - x_min)),
+                float(oversampling * (y_max - y_min)),
             )
         return n, image
     pyramid = columns.pyramid
@@ -605,6 +608,8 @@ def _render_quadtree(
             root_px,
             total_bits,
             int(capacity),
+            float(pyramid.width),
+            float(pyramid.height),
         )
     in_view = (x > x_min) & (y > y_min) & (x < x_max) & (y < y_max)
     return int(in_view.sum()), image

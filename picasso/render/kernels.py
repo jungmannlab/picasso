@@ -1052,7 +1052,6 @@ def _compose_single(
 def _quadtree_spread_leaf(
     image: lib.FloatArray2D,
     count: int,
-    side: float,
     x0: float,
     y0: float,
     x1: float,
@@ -1064,9 +1063,12 @@ def _quadtree_spread_leaf(
     n_px: int,
     n_py: int,
 ) -> None:
-    """Spread a leaf's count over the display pixels its cell overlaps,
-    in proportion to the pixel/cell overlap area."""
-    rho = count / (side * side)
+    """Spread a leaf's count uniformly over the rectangle ``x0``-``x1``,
+    ``y0``-``y1`` (its cell within the field), i.e., over the display
+    pixels the rectangle overlaps in proportion to the overlap area."""
+    if x1 <= x0 or y1 <= y0:
+        return
+    rho = count / ((x1 - x0) * (y1 - y0))
     j0 = max(int(np.floor((x0 - x_min) * oversampling)), 0)
     j1 = min(int(np.floor((x1 - x_min) * oversampling)), n_px - 1)
     i0 = max(int(np.floor((y0 - y_min) * oversampling)), 0)
@@ -1200,6 +1202,8 @@ def _quadtree_fill(
     root_px: float,
     total_bits: int,
     capacity: int,
+    field_width: float,
+    field_height: float,
 ) -> None:
     """Paint the quad-tree adaptive histogram (Baddeley, Cannell &
     Soeller 2010) of the viewport into ``image``.
@@ -1217,6 +1221,13 @@ def _quadtree_fill(
     wider than a pixel (or at the finest cell) bins its rows one by
     one, exactly as ``_fill`` does, so a capacity of 0 gives the
     histogram.
+
+    The root square is a power of two of base blocks, so it reaches
+    beyond the field (``field_width`` x ``field_height``, from the
+    origin, in the units of ``x`` and ``y``) where no rows can lie: a
+    leaf's density is its count over the part of its cell within the
+    field, so that the counts of the leaves along the field's right
+    and bottom edges are not spread into the empty margin.
     """
     n = perm.shape[0]
     n_py, n_px = image.shape
@@ -1273,14 +1284,14 @@ def _quadtree_fill(
             )
         elif side > px:
             # a leaf wider than a pixel: its density over its area
+            # within the field
             _quadtree_spread_leaf(
                 image,
                 count,
-                side,
                 x0,
                 y0,
-                x1,
-                y1,
+                min(x1, field_width),
+                min(y1, field_height),
                 x_min,
                 y_min,
                 oversampling,

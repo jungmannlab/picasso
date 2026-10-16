@@ -90,8 +90,14 @@ class _RefNode:
                 yield from child.leaves()
 
 
-def _reference_quadtree(x, y, root, capacity, oversampling, viewport):
+def _reference_quadtree(
+    x, y, root, capacity, oversampling, viewport, field=None
+):
+    """The image of the reference tree; a leaf's density is its count
+    over its part within the ``field`` (width, height; default: the
+    root square), where the points lie."""
     (y_min, x_min), (y_max, x_max) = viewport
+    field_width, field_height = (root, root) if field is None else field
     tree = _RefNode((0.0, root, 0.0, root), capacity)
     for point in zip(x, y):
         tree.insert(point)
@@ -101,6 +107,8 @@ def _reference_quadtree(x, y, root, capacity, oversampling, viewport):
     px = 1.0 / oversampling
     for leaf in tree.leaves():
         x0, x1, y0, y1 = leaf.bbox
+        x1 = min(x1, field_width)
+        y1 = min(y1, field_height)
         rho = len(leaf.points) / ((x1 - x0) * (y1 - y0))
         for i in range(n_py):
             py0 = y_min + i * px
@@ -148,6 +156,37 @@ class TestQuadTree:
         assert n == len(x)
         np.testing.assert_allclose(image, reference, rtol=1e-5, atol=1e-5)
         assert image.sum() == pytest.approx(len(x), rel=1e-5)  # linearity
+
+    @pytest.mark.parametrize("width,height", [(100.0, 100.0), (90.0, 50.0)])
+    def test_counts_are_kept_on_any_field_size(self, width, height):
+        # the root square is a power of two of base blocks and reaches
+        # past the field; the leaves along the field's right and bottom
+        # edges spread their count over their part within the field only
+        x, y = _clustered_locs(width=width, height=height)
+        pyramid = spatial_index.build_render_index_arrays(x, y, width, height)
+        root = pyramid.block_sizes[0] * (1 << pyramid.root_bits)
+        assert root > max(width, height)
+        viewport = ((0.0, 0.0), (height, width))
+        n, image = _quadtree(pyramid, x, y, 2.0, viewport, 10)
+        reference = _reference_quadtree(
+            x, y, root, 10, 2.0, viewport, field=(width, height)
+        )
+        np.testing.assert_allclose(image, reference, rtol=1e-5, atol=1e-5)
+        assert image.sum() == pytest.approx(n, rel=1e-5)
+
+    def test_density_holds_up_to_the_field_edge(self):
+        rng = np.random.default_rng(7)
+        width = height = 100.0
+        n = 40_000
+        x = rng.uniform(0, width, n).astype(np.float32)
+        y = rng.uniform(0, height, n).astype(np.float32)
+        pyramid = spatial_index.build_render_index_arrays(x, y, width, height)
+        viewport = ((0.0, 0.0), (height, width))
+        _, image = _quadtree(pyramid, x, y, 4.0, viewport, 2000)
+        density = n / (width * height) / 16  # per display pixel
+        # the last two camera pixels of either edge
+        assert image[:, -8:].mean() == pytest.approx(density, rel=0.05)
+        assert image[-8:, :].mean() == pytest.approx(density, rel=0.05)
 
     def test_capacity_zero_is_the_histogram(self):
         x, y = _clustered_locs()
