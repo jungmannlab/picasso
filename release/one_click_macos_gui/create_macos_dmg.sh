@@ -16,6 +16,8 @@ APP_NAME="Picasso"
 VERSION=$(python3 -c "exec(open('../../picasso/version.py').read()); print(__version__)")
 MAIN_BUNDLE_NAME="Picasso.app"
 DMG_NAME="Picasso-v$VERSION-macOS-Apple-Silicon"
+# the DMG with readme.txt, for the GitHub release
+ZIP_NAME="Picasso-Apple-Silicon-$VERSION"
 PYINSTALLER_FILE="../pyinstaller/picasso_pyinstaller.py"
 DIST_DIR="../pyinstaller/dist"
 BUILD_DIR="../pyinstaller/build"
@@ -329,6 +331,13 @@ create-dmg \
     "$STAGING_DIR"
 
 # -----------------------------------------------------------------------------
+# Step 4b: Zip the DMG with readme.txt, for the GitHub release
+# -----------------------------------------------------------------------------
+echo ">>> Zipping ${DMG_NAME}.dmg with readme.txt..."
+rm -f "${ZIP_NAME}.zip"
+zip "${ZIP_NAME}.zip" "${DMG_NAME}.dmg" readme.txt
+
+# -----------------------------------------------------------------------------
 # Step 5: Cleanup staging directory
 # -----------------------------------------------------------------------------
 echo ">>> Cleaning up staging directory..."
@@ -338,6 +347,7 @@ echo ""
 echo "============================================="
 echo " Build complete!"
 echo " Output: ${DMG_NAME}.dmg"
+echo "         ${ZIP_NAME}.zip (with readme.txt, for the GitHub release)"
 echo ""
 echo " The DMG contains:"
 echo "   - Picasso.app (main bundle)"

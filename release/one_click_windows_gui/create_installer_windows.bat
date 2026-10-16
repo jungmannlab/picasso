@@ -71,3 +71,11 @@ call conda env remove -n picasso_installer -y
 
 copy dist\picassow\picassow.exe dist\picasso\picassow.exe
 call "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DAPP_VERSION=%PICASSO_VERSION% picasso_innoinstaller.iss
+if errorlevel 1 exit /b 1
+
+REM Zip the installer (Inno Setup writes it to Output\) with readme.txt, for
+REM the GitHub release
+set INSTALLER=Output\Picasso-Windows-64bit-%PICASSO_VERSION%
+powershell -NoProfile -Command "$ErrorActionPreference = 'Stop'; Compress-Archive -Path '%INSTALLER%.exe', 'readme.txt' -DestinationPath '%INSTALLER%.zip' -Force"
+if errorlevel 1 exit /b 1
+echo Created %INSTALLER%.zip

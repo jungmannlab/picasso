@@ -26,7 +26,7 @@ There are two editions of the installer:
 - create_installer_windows.bat builds the standard (CPU) installer (Picasso-Windows-64bit-<version>.exe, installs to C:\Picasso).
 - create_installer_windows_cuda.bat builds the CUDA edition (Picasso-Windows-64bit-CUDA-<version>.exe, installs to C:\Picasso-CUDA). It additionally bundles the CUDA runtime (numba-cuda[cu12]) so GPU-accelerated (numba.cuda) code can run. It requires an NVIDIA (CUDA-capable) GPU and produces a noticeably larger installer. The two editions install to separate folders and can coexist. GPU rendering in Picasso: Render (via wgpu, any graphics card) is included in both editions; the CUDA edition is only needed for CUDA-accelerated fitting.
 
-The two scripts can run at the same time, e.g., in two Command Prompts.
+Both scripts write the installer, and a zip of it with this readme, to release\one_click_windows_gui\Output. The two scripts can run at the same time, e.g., in two Command Prompts.
 
 Adding camera configuration and plugins
 ---------------------------------------
