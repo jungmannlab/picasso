@@ -106,15 +106,24 @@ def roi_to_img(
     -------
     pick_img : lib.FloatArray2D
         Image of the picked localizations.
+
+    Raises
+    ------
+    ValueError
+        If the pick holds no localizations.
     """
     # Isolate locs from pick
-    pick_locs = []
     if picks is None:
         pick_locs = locs[locs["group"] == pick]
+        where = f"group {pick}"
     else:
         x, y = picks
-        pick_locs = lib.locs_at(x, y, locs, radius)
-        pick_locs.sort_values(by="frame", kind="quicksort", inplace=True)
+        pick_locs = lib.locs_at(x, y, locs, radius).sort_values(
+            by="frame", kind="quicksort"
+        )
+        where = f"the radius {radius} around ({x}, {y})"
+    if not len(pick_locs):
+        raise ValueError(f"No localizations in {where}.")
     # dirty method to avoid floating point errors with render
     radius -= 0.001
 
@@ -129,16 +138,13 @@ def roi_to_img(
     viewport = (y_min, x_min), (y_max, x_max)
 
     # Render locs with Picasso render function
-    try:
-        len_x, pick_img = render.render(
-            pick_locs,
-            info,
-            disp_px_size=disp_px_size,
-            viewport=viewport,
-            blur_method="smooth",
-        )
-    except Exception:
-        pass
+    _, pick_img = render.render(
+        pick_locs,
+        info,
+        disp_px_size=disp_px_size,
+        viewport=viewport,
+        blur_method="smooth",
+    )
     return pick_img
 
 
@@ -186,7 +192,8 @@ def prepare_data(
     data = []
     labels = []
 
-    for pick in tqdm(range(locs["group"].max()), desc="Prepare " + str(label)):
+    groups = np.unique(locs["group"])
+    for pick in tqdm(groups, desc="Prepare " + str(label)):
 
         pick_img = roi_to_img(
             locs, info, pick, radius=pick_radius, disp_px_size=disp_px_size

@@ -754,7 +754,10 @@ def isolated_user_settings(tmp_path, monkeypatch):
     """Every test reads and writes its own, initially absent, settings
     file: the GUIs persist defaults on start and save on close, and the
     developer's ``~/.picasso/settings.yaml`` must never be touched by
-    the suite. Tests that need a specific file patch the same name."""
+    the suite. Tests that need a specific file patch the same name.
+    Neither does the developer's camera configuration report an error
+    (a broken one would stop every Localize window at a message box)."""
+    import picasso
     from picasso import io
 
     monkeypatch.setattr(
@@ -762,6 +765,7 @@ def isolated_user_settings(tmp_path, monkeypatch):
     )
     monkeypatch.setattr(io, "_settings_load_error", None)
     monkeypatch.setattr(io, "_settings_load_error_dismissed", False)
+    monkeypatch.setattr(picasso, "CONFIG_LOAD_ERROR", None)
 
 
 @pytest.fixture(autouse=True)

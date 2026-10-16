@@ -24,7 +24,7 @@ This is the same folder that already holds ``settings.yaml``, so the config no l
 
 To start with a template, copy ``config_template.yaml`` into ``~/.picasso``, rename it to ``config.yaml``, and edit it. The template is bundled inside the ``picasso`` package folder (see :ref:`localize-camera-config-legacy` for where to find it for each type of installation) and is also available `on GitHub <https://github.com/jungmannlab/picasso/blob/master/picasso/config_template.yaml>`__.
 
-Indentations are used for definitions; see `config_template.yaml <https://github.com/jungmannlab/picasso/blob/master/picasso/config_template.yaml>`__ for the expected structure.
+Indentations are used for definitions; see `config_template.yaml <https://github.com/jungmannlab/picasso/blob/master/picasso/config_template.yaml>`__ for the expected structure. If Picasso cannot read the file, e.g., because of a wrong indentation, it starts without any camera configured: ``Picasso: Localize`` shows why when it opens, and the command line prints a warning.
 
 .. _localize-camera-config-matching:
 

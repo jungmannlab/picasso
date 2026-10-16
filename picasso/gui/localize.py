@@ -6606,6 +6606,7 @@ class Window(QtWidgets.QMainWindow):
             app.aboutToQuit.connect(self._stop_movie_load)
 
         self.load_user_settings()
+        lib.notify_config_load_error(self)
 
     def _load_pwd_box_gradient(self, settings: dict) -> list:
         """Restore the last-used working directory, box size and gradient.

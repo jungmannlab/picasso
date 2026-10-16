@@ -170,6 +170,7 @@ _QT_NAMES = (
     "adjust_widget_size",
     "get_save_filename_ext_dialog",
     "show_load_error",
+    "notify_config_load_error",
     "FILE_LOAD_ERRORS",
     "add_sound_notifications_menu",
 )

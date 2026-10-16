@@ -422,6 +422,29 @@ def notify_settings_load_error(parent=None) -> bool:
     return True
 
 
+_config_load_error_notified = False
+
+
+def notify_config_load_error(parent=None) -> bool:
+    """Tell the user, once per process, when the camera configuration
+    could not be read (see ``picasso.load_config``), so no camera is
+    configured. Returns whether a message was shown."""
+    global _config_load_error_notified
+    import picasso
+
+    if picasso.CONFIG_LOAD_ERROR is None or _config_load_error_notified:
+        return False
+    _config_load_error_notified = True
+    QtWidgets.QMessageBox.warning(
+        parent,
+        "Camera configuration could not be read",
+        f"{picasso.CONFIG_LOAD_ERROR}\n\nFix the file and restart Picasso, "
+        "see "
+        f"{picasso.docs_url('localize/camera.html#localize-camera-config')}",
+    )
+    return True
+
+
 def contrast_slider_setting(section: str, default: bool) -> bool:
     """Whether a module shows the contrast slider below its image.
 

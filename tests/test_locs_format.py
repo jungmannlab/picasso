@@ -416,8 +416,9 @@ class TestYaml:
             "Cameras: !!python/object/new:collections.Counter []\n"
         )
         monkeypatch.setattr(picasso, "resolve_config_path", lambda: str(path))
-        with pytest.raises(yaml.YAMLError):
-            picasso.load_config()
+        # refused, and Picasso starts without cameras (see test_config.py)
+        with pytest.warns(UserWarning, match="not valid YAML"):
+            assert picasso.load_config() == {}
 
     def test_no_unsafe_yaml_loader_in_picasso(self):
         # every .yaml Picasso opens may come from someone else; read it
