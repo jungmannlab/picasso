@@ -14,6 +14,7 @@ import sys
 import threading
 
 import pytest
+from PyQt6 import sip
 
 from picasso import diagnostics, lib_qt
 from picasso.gui import app as gui_app
@@ -138,7 +139,8 @@ def test_the_gui_starts_and_the_hook_is_parented(isolated, qapp, monkeypatch):
     assert loaded == ["render"]
     assert seen["visible"]
     assert seen["signaler"] is not None  # the excepthook survived startup
-    windows[0].close()
+    # deleted once the event loop is over, not at interpreter exit
+    assert sip.isdeleted(windows[0])
 
 
 def test_a_broken_plugin_does_not_stop_the_gui(
@@ -167,7 +169,7 @@ def test_a_broken_plugin_does_not_stop_the_gui(
     assert seen["visible"]  # started anyway
     assert "no module named 'my_plugin'" in _log_text()
     assert len(shown_errors) == 1  # and the user was told
-    window.close()
+    assert sip.isdeleted(window)
 
 
 def test_the_saved_theme_is_applied_before_the_window_is_built(
@@ -215,4 +217,37 @@ def test_a_failing_theme_does_not_stop_the_gui(
     assert gui_app.run_gui(lambda: window, "render") == 0
     assert "the theme broke" in _log_text()
     assert len(shown_errors) == 1
-    window.close()
+    assert sip.isdeleted(window)
+
+
+@pytest.mark.slow
+def test_render_quits_without_crashing(tmp_path):
+    """Started and quit at once (``PICASSO_QUIT_AFTER_START``, as by
+    ``release/smoke_test.py``), Render used to crash at interpreter exit
+    in most runs: PyQt deleted its windows there in no fixed order. They
+    are now deleted when the event loop ends."""
+    import os
+    import subprocess
+
+    os.makedirs(tmp_path / ".picasso")
+    (tmp_path / ".picasso" / "settings.yaml").write_text(
+        "Updates:\n  Disabled: true\n"
+    )
+    env = dict(
+        os.environ,
+        HOME=str(tmp_path),
+        USERPROFILE=str(tmp_path),
+        QT_QPA_PLATFORM="offscreen",
+        PICASSO_QUIT_AFTER_START="1",
+    )
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    for _ in range(2):
+        result = subprocess.run(
+            [sys.executable, "-m", "picasso", "render"],
+            cwd=root,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
+        assert result.returncode == 0, result.stderr[-2000:]

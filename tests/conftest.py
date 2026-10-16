@@ -164,11 +164,43 @@ def qt_offscreen(qapp):
     """
     before = set(qapp.topLevelWidgets())
     yield qapp
+    from picasso.gui import toolbars
+
     for widget in qapp.topLevelWidgets():
         if widget not in before:
             widget.close()
+            toolbars.clear_toolbars(widget)
             widget.deleteLater()
     qapp.processEvents()
+    _delete_now()
+
+
+def _delete_now() -> None:
+    """Delete the widgets scheduled with ``deleteLater`` now.
+
+    ``processEvents`` does not delete them; left alone, they are deleted
+    by the next event loop that runs, e.g., the nested one of a status
+    dialog in a later test, while that test's own widgets receive events
+    - which crashed the interpreter (in ``QToolBar::event``) when the
+    whole suite ran in one process."""
+    from PyQt6 import QtCore
+
+    QtCore.QCoreApplication.sendPostedEvents(
+        None, QtCore.QEvent.Type.DeferredDelete.value
+    )
+
+
+@pytest.fixture(autouse=True)
+def delete_scheduled_widgets():
+    """``_delete_now`` after every test that started Qt, also for the
+    windows that fixtures other than ``qt_offscreen`` built."""
+    yield
+    if "PyQt6.QtWidgets" not in sys.modules:
+        return
+    from PyQt6 import QtWidgets
+
+    if QtWidgets.QApplication.instance() is not None:
+        _delete_now()
 
 
 @pytest.fixture

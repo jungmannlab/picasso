@@ -59,7 +59,7 @@ from matplotlib.colors import (
     to_hex,
 )
 from matplotlib.figure import Figure
-from PyQt6 import QtCore, QtGui, QtWidgets
+from PyQt6 import QtCore, QtGui, QtWidgets, sip
 
 from .. import io, lib
 from .overlay_style import PRESET_COLORS, ColorComboBox
@@ -828,7 +828,7 @@ def show_dialog(filter_options: bool = False) -> PlotStyleDialog:
         The dialog.
     """
     global _dialog
-    if _dialog is None:
+    if _dialog is None or sip.isdeleted(_dialog):
         _dialog = PlotStyleDialog(current())
         # an open dialog must not keep the app running after the last
         # main window closed

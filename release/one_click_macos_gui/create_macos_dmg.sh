@@ -3,9 +3,7 @@
 # create_macos_dmg.sh
 # Builds a macOS DMG installer for Picasso
 # Requirements: conda, create-dmg >= 1.3.0 (brew install create-dmg)
-# Usage: bash create_macos_dmg.sh, from an environment in which
-#        "import picasso" works (the version is read before the build
-#        environment exists)
+# Usage: bash create_macos_dmg.sh, from this folder
 # =============================================================================
 
 set -e  # Exit immediately on any error
@@ -14,7 +12,8 @@ set -e  # Exit immediately on any error
 eval "$(conda shell.bash hook)"
 
 APP_NAME="Picasso"
-VERSION=$(python3 -c "from picasso.version import __version__; print(__version__)")
+# read without importing picasso, as the build environment does not exist yet
+VERSION=$(python3 -c "exec(open('../../picasso/version.py').read()); print(__version__)")
 MAIN_BUNDLE_NAME="Picasso.app"
 DMG_NAME="Picasso-v$VERSION-macOS-Apple-Silicon"
 PYINSTALLER_FILE="../pyinstaller/picasso_pyinstaller.py"
@@ -161,6 +160,17 @@ python ../collect_third_party_licenses.py "$LICENSES_FILE"
 # ---------------------------------------------------------------------------
 echo ">>> Re-signing $MAIN_APP_PATH (ad-hoc)..."
 codesign --force --deep --sign - "$MAIN_APP_PATH"
+
+# ---------------------------------------------------------------------------
+# Step 1e: Test the app before packaging it (../smoke_test.py): a short
+# analysis on the command line and every GUI opened offscreen. A failure
+# stops the build (set -e), so a broken app never goes into a DMG. Set
+# PICASSO_SKIP_SMOKE_TEST=1 to skip the test.
+# ---------------------------------------------------------------------------
+if [ -z "$PICASSO_SKIP_SMOKE_TEST" ]; then
+    echo ">>> Testing $MAIN_APP_PATH..."
+    python ../smoke_test.py --frozen "$MAIN_EXECUTABLE"
+fi
 
 # -----------------------------------------------------------------------------
 # Step 2: Create separate .app bundles for each tool

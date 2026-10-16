@@ -3129,9 +3129,10 @@ def _render(args: argparse.Namespace) -> None:
     settings = load_user_settings()
     cmap = args.cmap
     if cmap is None:
-        try:
-            cmap = settings["Render"]["Colormap"]
-        except KeyError:
+        # .get: indexing the settings creates a missing entry (an empty
+        # dict) instead of raising, e.g., without a settings file
+        cmap = settings["Render"].get("Colormap")
+        if not isinstance(cmap, str):
             cmap = "viridis"
     settings["Render"]["Colormap"] = cmap
     save_user_settings(settings)

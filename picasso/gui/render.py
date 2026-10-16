@@ -19996,6 +19996,7 @@ class Window(QtWidgets.QMainWindow):
                 self.link_group.remove(self, detach_data=False)
             if self in Window._secondary_windows:
                 Window._secondary_windows.remove(self)
+            toolbars.clear_toolbars(self)
             self.deleteLater()
             event.accept()
             return

@@ -2,7 +2,7 @@
 #
 # Publishing a GitHub release builds the wheel and the sdist from the
 # release tag, installs the wheel on Linux, macOS and Windows, runs
-# release/pypi/smoke_test.py and only then publishes on PyPI. Finally, the
+# release/smoke_test.py and only then publishes on PyPI. Finally, the
 # published version is installed from PyPI and tested again.
 #
 # Running the workflow by hand (Actions > Publish on PyPI > Run workflow)
@@ -88,7 +88,7 @@ jobs:
     env:
       QT_QPA_PLATFORM: offscreen
     steps:
-      - uses: actions/checkout@v7  # for release/pypi/smoke_test.py
+      - uses: actions/checkout@v7  # for release/smoke_test.py
         with:
           persist-credentials: false
       - uses: actions/setup-python@v7
@@ -110,7 +110,7 @@ jobs:
         shell: bash
         # outside the checkout, so that the installed package is tested
         working-directory: ${{ runner.temp }}
-        run: python "${{ github.workspace }}/release/pypi/smoke_test.py"
+        run: python "${{ github.workspace }}/release/smoke_test.py"
 
   publish-testpypi:
     name: Publish on TestPyPI
@@ -163,7 +163,7 @@ jobs:
       QT_QPA_PLATFORM: offscreen
       VERSION: ${{ needs.build.outputs.version }}
     steps:
-      - uses: actions/checkout@v7  # for release/pypi/smoke_test.py
+      - uses: actions/checkout@v7  # for release/smoke_test.py
         with:
           persist-credentials: false
       - uses: actions/setup-python@v7
@@ -186,4 +186,4 @@ jobs:
       - name: Smoke test
         shell: bash
         working-directory: ${{ runner.temp }}
-        run: python "${{ github.workspace }}/release/pypi/smoke_test.py"
+        run: python "${{ github.workspace }}/release/smoke_test.py"

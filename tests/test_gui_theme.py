@@ -15,7 +15,7 @@ contrast, the button states and the appearance dialog.
 from __future__ import annotations
 
 import pytest
-from PyQt6 import QtCore, QtGui, QtWidgets
+from PyQt6 import QtCore, QtGui, QtWidgets, sip
 
 from picasso import io
 from picasso.gui import theme
@@ -39,8 +39,9 @@ def fresh_hub(monkeypatch):
     monkeypatch.setattr(theme, "_hub", None)
     monkeypatch.setattr(theme, "_dialog", None)
     yield
-    if theme._dialog is not None:
-        theme._dialog.close()
+    dialog = theme._dialog
+    if dialog is not None and not sip.isdeleted(dialog):
+        dialog.close()
 
 
 # -- settings ---------------------------------------------------------

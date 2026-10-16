@@ -1286,7 +1286,7 @@ def show_dialog(
         The dialog.
     """
     global _dialog
-    if _dialog is None:
+    if _dialog is None or sip.isdeleted(_dialog):
         _dialog = AppearanceDialog(current())
         # an open dialog must not keep the app running after the last
         # main window closed

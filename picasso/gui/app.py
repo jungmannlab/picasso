@@ -10,10 +10,11 @@ The shared startup sequence of every Picasso GUI.
 
 from __future__ import annotations
 
+import os
 import sys
 from collections.abc import Callable
 
-from PyQt6 import QtGui, QtWidgets
+from PyQt6 import QtCore, QtGui, QtWidgets
 
 from picasso import diagnostics, lib
 
@@ -123,6 +124,10 @@ def run_gui(
         _load_plugins(window, name)
 
     window.show()
+    # the smoke test of the packages and installers (release/smoke_test.py)
+    # starts each GUI with this set: a clean exit means the window opened
+    if os.environ.get("PICASSO_QUIT_AFTER_START"):
+        QtCore.QTimer.singleShot(0, app.quit)
 
     from ..updater import setup_gui_update_check
 
@@ -137,3 +142,19 @@ def run_gui(
     finally:
         if watcher is not None:
             watcher.stop()
+        _delete_windows(app)
+
+
+def _delete_windows(app: QtWidgets.QApplication) -> None:
+    """Delete the windows once the event loop is over, while Qt and
+    Python are intact. Left to PyQt's clean-up at interpreter exit, they
+    are deleted in no fixed order, which crashed Picasso on quitting
+    (seen on macOS)."""
+    from . import toolbars
+
+    for widget in app.topLevelWidgets():
+        toolbars.clear_toolbars(widget)
+        widget.deleteLater()
+    QtCore.QCoreApplication.sendPostedEvents(
+        None, QtCore.QEvent.Type.DeferredDelete.value
+    )

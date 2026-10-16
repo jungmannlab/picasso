@@ -108,6 +108,17 @@ REM matches the frozen packages; the file lands in the installation folder.
 call python ..\collect_third_party_licenses.py dist_cuda\picasso\THIRD-PARTY-LICENSES.txt
 if errorlevel 1 exit /b 1
 
+REM Test the frozen app before packaging it (..\smoke_test.py): a short
+REM analysis on the command line and every GUI opened offscreen, also from
+REM the windowed build. A failure stops here, so a broken build never becomes
+REM an installer. Set PICASSO_SKIP_SMOKE_TEST=1 to skip the test.
+if not defined PICASSO_SKIP_SMOKE_TEST (
+    call python ..\smoke_test.py --frozen dist_cuda\picasso\picasso.exe
+    if errorlevel 1 exit /b 1
+    call python ..\smoke_test.py --frozen dist_cuda\picassow\picassow.exe --gui-only
+    if errorlevel 1 exit /b 1
+)
+
 REM Spec files were written to build_cuda (via --specpath); they are removed with
 REM the build_cuda tree below, so no separate *.spec deletion is needed here.
 
