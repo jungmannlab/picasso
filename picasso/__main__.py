@@ -1689,6 +1689,9 @@ def _start_server(network: bool = False) -> None:
         "--global.developmentMode=false",
         "--server.port=8501",
         "--browser.gatherUsageStats=False",
+        # no reloading when the source files change, which only helps while
+        # editing them (and would need watchdog, or poll the files instead)
+        "--server.fileWatcherType=none",
     ]
     if network:
         print(
