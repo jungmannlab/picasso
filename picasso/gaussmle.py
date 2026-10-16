@@ -40,7 +40,7 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm
 
-from picasso import lib
+from picasso import deprecation, lib
 from picasso.fitting import precision
 
 # The whole module is deprecated. Every public name is a thin wrapper that
@@ -55,6 +55,12 @@ _DEPRECATION_MESSAGE = (
     "picasso.fitting.precision._gauss_crlb for the Cramer-Rao bound, and "
     "picasso.fitting.precision.sigma_uncertainty_mle for the width "
     "uncertainty."
+)
+_DEPRECATION = deprecation.register(
+    "picasso.gaussmle",
+    since="0.11",
+    remove_in="1.0",
+    message=_DEPRECATION_MESSAGE,
 )
 
 
@@ -477,7 +483,7 @@ def gaussmle(
     iterations : lib.IntArray1D
         The number of iterations taken for each spot, shape (N,).
     """
-    lib.deprecation_warning(_DEPRECATION_MESSAGE)
+    _DEPRECATION.warn()
     return _gaussmle(spots, eps, max_it, method, progress_callback)
 
 
@@ -597,7 +603,7 @@ def gaussmle_async(
     iterations : lib.IntArray1D
         The number of iterations per spot, filled in place.
     """
-    lib.deprecation_warning(_DEPRECATION_MESSAGE)
+    _DEPRECATION.warn()
     return _gaussmle_async(spots, eps, max_it, method)
 
 
@@ -1137,7 +1143,7 @@ def locs_from_fits(
         Data frame containing the fitted parameters, precisions and
         uncertainties for each spot.
     """
-    lib.deprecation_warning(_DEPRECATION_MESSAGE)
+    _DEPRECATION.warn()
     return _locs_from_fits(
         identifications,
         theta,
@@ -1275,5 +1281,5 @@ def sigma_uncertainty(
     se_sigma : lib.FloatArray1D
         Standard error of fitted sigma values in camera pixels.
     """
-    lib.deprecation_warning(_DEPRECATION_MESSAGE)
+    _DEPRECATION.warn()
     return precision.sigma_uncertainty_mle(sigma, sigma_orth, photons, bg)

@@ -464,14 +464,14 @@ class TestDeprecation:
             warnings.simplefilter("always")
             gaussmle.gaussmle(spots, EPS, MAX_IT, method="sigmaxy")
         deprecations = [
-            w for w in caught if issubclass(w.category, DeprecationWarning)
+            w for w in caught if issubclass(w.category, FutureWarning)
         ]
         assert len(deprecations) == 1
         assert "picasso.fitting.gaussfit" in str(deprecations[0].message)
 
     def test_gaussmle_async_warns(self, synthetic_spots):
         spots, _ = synthetic_spots
-        with pytest.warns(DeprecationWarning, match="Picasso 1.0"):
+        with pytest.warns(FutureWarning, match="Picasso 1.0"):
             current, *_ = gaussmle.gaussmle_async(spots, EPS, MAX_IT)
         while current[0] < len(spots):
             pass
@@ -482,14 +482,12 @@ class TestDeprecation:
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always")
             gaussmle._gaussmle(spots, EPS, MAX_IT, method="sigmaxy")
-        assert not [
-            w for w in caught if issubclass(w.category, DeprecationWarning)
-        ]
+        assert not [w for w in caught if issubclass(w.category, FutureWarning)]
 
     def test_public_and_private_agree(self, synthetic_spots):
         spots, _ = synthetic_spots
         with warnings.catch_warnings():
-            warnings.simplefilter("ignore", DeprecationWarning)
+            warnings.simplefilter("ignore", FutureWarning)
             public = gaussmle.gaussmle(spots, EPS, MAX_IT, method="sigmaxy")
         private = gaussmle._gaussmle(spots, EPS, MAX_IT, method="sigmaxy")
         for a, b in zip(public, private):
@@ -536,7 +534,7 @@ class TestDeprecation:
         photons = np.array([500.0, 1200.0, 8000.0])
         bg = np.array([5.0, 12.0, 2.0])
         with warnings.catch_warnings():
-            warnings.simplefilter("ignore", DeprecationWarning)
+            warnings.simplefilter("ignore", FutureWarning)
             np.testing.assert_array_equal(
                 gaussmle.sigma_uncertainty(sigma, sigma_orth, photons, bg),
                 precision.sigma_uncertainty_mle(

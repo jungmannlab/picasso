@@ -44,7 +44,7 @@ import pandas as pd
 from scipy import optimize
 from tqdm import tqdm
 
-from picasso import lib
+from picasso import deprecation, lib
 from picasso.fitting import precision
 
 # Convergence schedule. ``TOLERANCE`` is MINPACK's relative reduction in both
@@ -63,6 +63,23 @@ _DEPRECATION_MESSAGE = (
     "picasso.localize.locs_from_fits_gauss to build the localizations, "
     "and picasso.fitting.precision.localization_precision / "
     "sigma_uncertainty_lsq for the analytic precisions."
+)
+_FIT_SPOTS_GAUSS_GPU_DEPRECATION = deprecation.register(
+    "picasso.gausslq.fit_spots_gauss_gpu",
+    since="0.11",
+    remove_in="1.0",
+    message=(
+        "picasso.gausslq.fit_spots_gauss_gpu is deprecated and will "
+        "be removed in Picasso 1.0. Use "
+        "picasso.localize.fit_spots_gauss_gpu, or "
+        "picasso.fitting.gaussfit_cuda.fit_spots directly."
+    ),
+)
+_DEPRECATION = deprecation.register(
+    "picasso.gausslq",
+    since="0.11",
+    remove_in="1.0",
+    message=_DEPRECATION_MESSAGE,
 )
 
 
@@ -395,7 +412,7 @@ def fit_spot(
         radians if ``rotated``, and the chi-square if
         ``return_chi_square``).
     """
-    lib.deprecation_warning(_DEPRECATION_MESSAGE)
+    _DEPRECATION.warn()
     return _fit_spot(
         spot,
         spherical=spherical,
@@ -578,7 +595,7 @@ def fit_spots(
         (plus the angle in radians if ``rotated``, and the chi-square if
         ``return_chi_square``).
     """
-    lib.deprecation_warning(_DEPRECATION_MESSAGE)
+    _DEPRECATION.warn()
     return _fit_spots(
         spots,
         progress_callback,
@@ -721,7 +738,7 @@ def fit_spots_parallel(
         The stacked parameters (as in :func:`fit_spots`) if ``asynch`` is
         False, else the list of futures.
     """
-    lib.deprecation_warning(_DEPRECATION_MESSAGE)
+    _DEPRECATION.warn()
     return _fit_spots_parallel(
         spots,
         asynch=asynch,
@@ -846,12 +863,7 @@ def fit_spots_gauss_gpu(spots: lib.FloatArray3D) -> lib.FloatArray2D:
     """
     from picasso import localize
 
-    lib.deprecation_warning(
-        "picasso.gausslq.fit_spots_gauss_gpu is deprecated and will "
-        "be removed in Picasso 1.0. Use "
-        "picasso.localize.fit_spots_gauss_gpu, or "
-        "picasso.fitting.gaussfit_cuda.fit_spots directly."
-    )
+    _FIT_SPOTS_GAUSS_GPU_DEPRECATION.warn()
     return localize.fit_spots_gauss_gpu(spots)
 
 
@@ -874,7 +886,7 @@ def fits_from_futures(futures: list[futures.Future]) -> lib.FloatArray2D:
     lib.FloatArray2D
         The per-task parameter arrays, stacked row-wise.
     """
-    lib.deprecation_warning(_DEPRECATION_MESSAGE)
+    _DEPRECATION.warn()
     return _fits_from_futures(futures)
 
 
@@ -924,7 +936,7 @@ def locs_from_fits(
     locs : pd.DataFrame
         Data frame containing the localized spots.
     """
-    lib.deprecation_warning(_DEPRECATION_MESSAGE)
+    _DEPRECATION.warn()
     return _locs_from_fits(
         identifications, theta, box, em, spherical, chi_square
     )
@@ -1061,7 +1073,7 @@ def locs_from_fits_gauss_gpu(
     """
     from picasso import localize
 
-    lib.deprecation_warning(_DEPRECATION_MESSAGE)
+    _DEPRECATION.warn()
     return localize.locs_from_fits_gauss(identifications, theta, box, em)
 
 
@@ -1101,7 +1113,7 @@ def localization_precision(
         Cramer-Rao lower bound for localization precision for each
         localization.
     """
-    lib.deprecation_warning(_DEPRECATION_MESSAGE)
+    _DEPRECATION.warn()
     return precision.localization_precision(photons, s, s_orth, bg, em)
 
 
@@ -1136,5 +1148,5 @@ def sigma_uncertainty(
     se_sigma : lib.FloatArray1D
         Standard error of fitted sigma values in camera pixels.
     """
-    lib.deprecation_warning(_DEPRECATION_MESSAGE)
+    _DEPRECATION.warn()
     return precision.sigma_uncertainty_lsq(sigma, sigma_orth, photons, bg)

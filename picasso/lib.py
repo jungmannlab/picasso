@@ -32,7 +32,7 @@ from numpy.lib.recfunctions import append_fields, drop_fields
 from scipy import stats, optimize
 from tqdm import tqdm
 
-from picasso import io, __version__
+from picasso import deprecation, io, __version__
 
 __all__ = [
     # metadata
@@ -760,12 +760,19 @@ class AutoDict(collections.defaultdict):
 def deprecation_warning(message: str) -> None:
     """Display a deprecation warning message.
 
+    Issued as a ``FutureWarning``, which Python shows by default, at the
+    line that called the deprecated function. New deprecations are
+    declared with ``picasso.deprecation.deprecated`` or
+    ``picasso.deprecation.register`` instead, which also record when
+    the name may be removed.
+
     Parameters
     ----------
     message : str
         The deprecation warning message to be displayed.
     """
-    warnings.warn(message, DeprecationWarning, stacklevel=2)
+    # 3: this function, the deprecated function, its caller
+    warnings.warn(message, FutureWarning, stacklevel=3)
 
 
 def get_from_metadata(
@@ -1988,6 +1995,19 @@ def select_frc_rois(
     return rois
 
 
+_APPEND_TO_REC_DEPRECATION = deprecation.register(
+    "picasso.lib.append_to_rec",
+    since="0.11",
+    remove_in="1.0",
+    message=(
+        "Appending to recarrays is deprecated and will be removed in Picasso"
+        " 1.0. Since 0.9.0, Picasso uses pandas DataFrames instead of"
+        " recarrays. Simply use locs['new_column'] = data to add a new column"
+        " to the DataFrame."
+    ),
+)
+
+
 def append_to_rec(
     rec_array: np.recarray,
     data: FloatArray1D | IntArray1D,
@@ -2009,12 +2029,7 @@ def append_to_rec(
     rec_array : np.recarray
         Recarray with the new column.
     """
-    deprecation_warning(
-        "Appending to recarrays is deprecated and will be removed in Picasso"
-        " 1.0. Since 0.9.0, Picasso uses pandas DataFrames instead of"
-        " recarrays. Simply use locs['new_column'] = data to add a new column"
-        " to the DataFrame."
-    )
+    _APPEND_TO_REC_DEPRECATION.warn()
     if hasattr(rec_array, name):
         rec_array = remove_from_rec(rec_array, name)
     rec_array = append_fields(
@@ -3336,6 +3351,19 @@ def n_futures_done(futures: list[Future]) -> int:
     return sum([_.done() for _ in futures])
 
 
+_REMOVE_FROM_REC_DEPRECATION = deprecation.register(
+    "picasso.lib.remove_from_rec",
+    since="0.11",
+    remove_in="1.0",
+    message=(
+        "Removing columns from recarrays is deprecated and will be removed in"
+        " Picasso 1.0. Since 0.9.0, Picasso uses pandas DataFrames instead of"
+        " recarrays. Simply use locs.drop('new_column', axis=1) to remove a"
+        " column from the DataFrame."
+    ),
+)
+
+
 def remove_from_rec(rec_array: np.recarray, name: str) -> np.recarray:
     """Remove a column from the existing recarray.
 
@@ -3351,12 +3379,7 @@ def remove_from_rec(rec_array: np.recarray, name: str) -> np.recarray:
     rec_array : np.recarray
         Recarray without the column.
     """
-    deprecation_warning(
-        "Removing columns from recarrays is deprecated and will be removed in "
-        " Picasso 1.0. Since 0.9.0, Picasso uses pandas DataFrames instead of"
-        " recarrays. Simply use locs.drop('new_column', axis=1) to remove a"
-        " column from the DataFrame."
-    )
+    _REMOVE_FROM_REC_DEPRECATION.warn()
     rec_array = drop_fields(rec_array, name, usemask=False, asrecarray=True)
     return rec_array
 

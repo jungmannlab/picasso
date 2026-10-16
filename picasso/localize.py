@@ -55,6 +55,7 @@ from scipy.spatial.distance import cdist
 from .ext import bitplane
 
 from . import (
+    deprecation,
     io,
     lib,
     avgroi,
@@ -3629,6 +3630,17 @@ def get_spots(
     return spots
 
 
+_LOCS_FROM_FITS_DEPRECATION = deprecation.register(
+    "picasso.localize.locs_from_fits",
+    since="0.11",
+    remove_in="1.0",
+    message=(
+        "picasso.localize.locs_from_fits is deprecated and will be removed "
+        "in Picasso 1.0. Use picasso.localize.locs_from_fits_gauss."
+    ),
+)
+
+
 def locs_from_fits(
     identifications: pd.DataFrame,
     theta: lib.FloatArray2D,
@@ -3670,10 +3682,7 @@ def locs_from_fits(
         `frame`, `x`, `y`, `photons`, `sx`, `sy`, `bg`, `lpx`, `lpy`,
         `net_gradient`, `log_likelihood`, and `iterations`.
     """
-    lib.deprecation_warning(
-        "picasso.localize.locs_from_fits is deprecated and will be removed "
-        "in Picasso 1.0. Use picasso.localize.locs_from_fits_gauss."
-    )
+    _LOCS_FROM_FITS_DEPRECATION.warn()
     # box_offset = int(box / 2)
     y = theta[:, 0] + identifications["y"]  # - box_offset
     x = theta[:, 1] + identifications["x"]  # - box_offset
@@ -4654,6 +4663,18 @@ def locs_from_fits_gauss(
     return locs
 
 
+_LOCS_FROM_FITS_GAUSS_GPU_DEPRECATION = deprecation.register(
+    "picasso.localize.locs_from_fits_gauss_gpu",
+    since="0.11",
+    remove_in="1.0",
+    message=(
+        "picasso.localize.locs_from_fits_gauss_gpu is deprecated and will "
+        "be removed in Picasso 1.0. It handles CPU and GPU fits alike and "
+        "was renamed to picasso.localize.locs_from_fits_gauss."
+    ),
+)
+
+
 def locs_from_fits_gauss_gpu(*args, **kwargs) -> pd.DataFrame:
     """Convert the fit results from a Gaussian fit into a data frame of
     localizations.
@@ -4673,11 +4694,7 @@ def locs_from_fits_gauss_gpu(*args, **kwargs) -> pd.DataFrame:
     locs : pd.DataFrame
         Data frame containing the localized spots.
     """
-    lib.deprecation_warning(
-        "picasso.localize.locs_from_fits_gauss_gpu is deprecated and will "
-        "be removed in Picasso 1.0. It handles CPU and GPU fits alike and "
-        "was renamed to picasso.localize.locs_from_fits_gauss."
-    )
+    _LOCS_FROM_FITS_GAUSS_GPU_DEPRECATION.warn()
     return locs_from_fits_gauss(*args, **kwargs)
 
 

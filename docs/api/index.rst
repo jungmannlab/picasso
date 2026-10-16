@@ -19,7 +19,8 @@ The :doc:`/notebooks` walk through complete analyses.
    These pages do not list every function in the package, only those that
    are useful in your own scripts. Helpers that serve the Picasso windows or
    other modules internally are left out. Each module lists its documented
-   functions and classes in its ``__all__``.
+   functions and classes in its ``__all__``. These names are the public API,
+   which stays compatible within a major version, see :doc:`/versioning`.
 
 Input and output
 ----------------

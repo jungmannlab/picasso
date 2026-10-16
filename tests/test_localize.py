@@ -2447,7 +2447,7 @@ class TestLocsFromFitsGpufit:
         backend-agnostic), so it warns but must still return the same frame."""
         theta = np.array([[500.0, 3.2, 3.7, 1.3, 1.1, 5.0]], dtype=np.float32)
         ids = self._ids(1)
-        with pytest.warns(DeprecationWarning, match="locs_from_fits_gauss"):
+        with pytest.warns(FutureWarning, match="locs_from_fits_gauss"):
             old = localize.locs_from_fits_gauss_gpu(ids, theta, BOX, em=False)
         new = localize.locs_from_fits_gauss(ids, theta, BOX, em=False)
         pd.testing.assert_frame_equal(old, new)
@@ -2455,7 +2455,7 @@ class TestLocsFromFitsGpufit:
     def test_legacy_locs_from_fits_is_deprecated(self):
         """The leftover ``gaussmle``-GPU converter goes in 1.0."""
         theta = np.zeros((1, 6), dtype=np.float32)
-        with pytest.warns(DeprecationWarning, match="locs_from_fits_gauss"):
+        with pytest.warns(FutureWarning, match="locs_from_fits_gauss"):
             localize.locs_from_fits(
                 self._ids(1),
                 theta,
@@ -4211,7 +4211,7 @@ class TestNoSelfDeprecation:
         offenders = [
             str(w.message)
             for w in caught
-            if issubclass(w.category, DeprecationWarning)
+            if issubclass(w.category, FutureWarning)
             and ("gausslq" in str(w.message) or "gaussmle" in str(w.message))
         ]
         assert offenders == []
@@ -4233,7 +4233,7 @@ class TestNoSelfDeprecation:
         offenders = [
             str(w.message)
             for w in caught
-            if issubclass(w.category, DeprecationWarning)
+            if issubclass(w.category, FutureWarning)
             and "gausslq" in str(w.message)
         ]
         assert offenders == []

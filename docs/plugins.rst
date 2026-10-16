@@ -170,6 +170,11 @@ any subset of them:
    * - a ``register_cli`` function
      - the ``picasso`` command line
 
+These three hooks and the public Python API stay compatible within a major
+version of Picasso. The other attributes of the Picasso windows that a GUI
+plugin may reach (e.g., ``window.view``) are not public and can change in a
+minor release, see :doc:`versioning`.
+
 .. _plugins-extending-gui:
 
 Extending a GUI

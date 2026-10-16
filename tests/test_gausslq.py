@@ -792,7 +792,7 @@ class TestDeprecation:
 
     def test_fit_spot_warns(self, synthetic_spots):
         spots, _ = synthetic_spots
-        with pytest.warns(DeprecationWarning, match="Picasso 1.0"):
+        with pytest.warns(FutureWarning, match="Picasso 1.0"):
             gausslq.fit_spot(spots[0])
 
     def test_fit_spots_warns_once_not_per_spot(self, synthetic_spots):
@@ -801,7 +801,7 @@ class TestDeprecation:
             warnings.simplefilter("always")
             gausslq.fit_spots(spots)
         deprecations = [
-            w for w in caught if issubclass(w.category, DeprecationWarning)
+            w for w in caught if issubclass(w.category, FutureWarning)
         ]
         assert len(deprecations) == 1
 
@@ -818,9 +818,7 @@ class TestDeprecation:
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always")
             private(spots[0] if name == "fit_spot" else spots)
-        assert not [
-            w for w in caught if issubclass(w.category, DeprecationWarning)
-        ]
+        assert not [w for w in caught if issubclass(w.category, FutureWarning)]
 
     @pytest.mark.parametrize("name", ENTRY_POINTS)
     def test_public_and_private_agree(self, name, synthetic_spots):
@@ -835,7 +833,7 @@ class TestDeprecation:
         else:
             pytest.skip("fit_spots_parallel needs subprocesses")
         with warnings.catch_warnings():
-            warnings.simplefilter("ignore", DeprecationWarning)
+            warnings.simplefilter("ignore", FutureWarning)
             np.testing.assert_array_equal(public(*args), private(*args))
 
     def test_private_locs_from_fits_is_silent(self, synthetic_spots):
@@ -856,9 +854,7 @@ class TestDeprecation:
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always")
             gausslq._locs_from_fits(identifications, theta, BOX, em=False)
-        assert not [
-            w for w in caught if issubclass(w.category, DeprecationWarning)
-        ]
+        assert not [w for w in caught if issubclass(w.category, FutureWarning)]
 
     def test_replacement_is_named(self):
         """A deprecation without a migration path is just an annoyance."""
@@ -909,7 +905,7 @@ class TestDeprecation:
         s_orth = np.array([1.1, 1.5, 1.3])
         bg = np.array([5.0, 12.0, 2.0])
         with warnings.catch_warnings():
-            warnings.simplefilter("ignore", DeprecationWarning)
+            warnings.simplefilter("ignore", FutureWarning)
             for em in (False, True):
                 np.testing.assert_array_equal(
                     gausslq.localization_precision(photons, s, s_orth, bg, em),
@@ -940,6 +936,4 @@ class TestDeprecation:
                 np.array([500.0]),
                 np.array([5.0]),
             )
-        assert not [
-            w for w in caught if issubclass(w.category, DeprecationWarning)
-        ]
+        assert not [w for w in caught if issubclass(w.category, FutureWarning)]

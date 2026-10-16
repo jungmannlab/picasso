@@ -15,7 +15,7 @@ import os.path
 import argparse
 from typing import TYPE_CHECKING, Literal
 import pandas as pd
-from . import docs_url
+from . import deprecation, docs_url
 from .transforms import MODELS as TRANSFORM_MODELS
 
 if TYPE_CHECKING:  # imported lazily, like every analysis module here
@@ -1196,7 +1196,7 @@ def _add_pair_statistic_arguments(
     )
     parser.add_argument(
         "-r",
-        "--rmax",
+        "--r-max",
         type=float,
         default=500.0,
         help="maximum radius in nm (default=500)",
@@ -1232,7 +1232,7 @@ def _add_pair_statistic_arguments(
         help="compute the function in 3D (x, y and z), requires z",
     )
     parser.add_argument(
-        "--zrange",
+        "--z-range",
         nargs=2,
         type=float,
         metavar=("ZMIN", "ZMAX"),
@@ -4637,23 +4637,126 @@ def _plugins(args) -> None:
         print(f"Online registry: {plugins.REPO_URL}")
 
 
-def main():  # noqa: C901
-    """Entry point of the ``picasso`` command line interface.
+#: Commands renamed in Picasso 1.0 to the style of the other commands
+#: (words joined by hyphens); the old names keep working, with a
+#: warning, until Picasso 2.0. See docs/versioning.rst.
+_RENAMED_COMMANDS = {
+    old: (
+        new,
+        deprecation.register(
+            f"picasso {old}",
+            since="1.0",
+            remove_in="2.0",
+            alternative=f"picasso {new}",
+        ),
+    )
+    for old, new in {
+        "undrift_fiducials": "undrift-fiducials",
+        "nneighbor": "nearest-neighbor",
+        "ripley_h": "ripley-h",
+        "clusterfilter": "cluster-filter",
+        "smlm_cluster": "smlm-cluster",
+        "groupprops": "group-properties",
+        "pc": "pair-correlation",
+    }.items()
+}
 
-    Builds the argument parser for every subcommand - the GUIs, the
-    calibrations, ``localize``, ``render``, the undrift, clustering and
-    file-conversion tools - parses ``sys.argv`` and dispatches to the matching
-    handler. Called by the ``picasso`` console script and by
-    ``python -m picasso``. Run ``picasso -h`` for the full list.
+#: Options renamed in Picasso 1.0, per (current) command name: words
+#: joined by hyphens, named after the Python parameter they set where
+#: there is one (e.g., ``--r-max`` for ``r_max``). The old names keep
+#: working, with a warning, until Picasso 2.0.
+_RENAMED_OPTIONS = {
+    command: {
+        old: (
+            new,
+            deprecation.register(
+                f"picasso {command} {old}",
+                since="1.0",
+                remove_in="2.0",
+                alternative=new,
+            ),
+        )
+        for old, new in options.items()
+    }
+    for command, options in {
+        "localize": {
+            "--zc": "--z-calibration",
+            "--mf": "--magnification-factor",
+        },
+        "undrift": {"--fromfile": "--from-file"},
+        "aim": {
+            "--intersectdist": "--intersect-distance",
+            "--roiradius": "--roi-radius",
+        },
+        "cbc": {"--rmax": "--r-max"},
+        "ripley-h": {"--rmax": "--r-max", "--zrange": "--z-range"},
+        "rdf": {"--rmax": "--r-max", "--zrange": "--z-range"},
+        "nnd": {"--rmax": "--r-max", "--zrange": "--z-range"},
+        "cluster-filter": {
+            "--clusterfile": "--cluster-file",
+            "--minval": "--min-value",
+            "--maxval": "--max-value",
+        },
+        "dbscan": {"--radius_z": "--radius-z"},
+        "join": {"--keepindex": "--keep-index"},
+        "pair-correlation": {"--binsize": "--bin-size", "--rmax": "--r-max"},
+    }.items()
+}
+
+
+def _current_names(argv: list[str]) -> list[str]:
+    """``argv`` (without the program name) with the command and option
+    names renamed in Picasso 1.0 replaced by the current ones.
+
+    A notice is printed for every old name. Arguments after ``--`` are
+    left alone.
+
+    Parameters
+    ----------
+    argv : list of str
+        The command line arguments, e.g. ``sys.argv[1:]``.
+
+    Returns
+    -------
+    argv : list of str
+        The arguments with the current names.
     """
-    from .diagnostics import ensure_std_streams, install_excepthooks
+    argv = list(argv)
+    if not argv:
+        return argv
+    command = argv[0]
+    if command in _RENAMED_COMMANDS:
+        command, notice = _RENAMED_COMMANDS[command]
+        _print_deprecation(notice)
+        argv[0] = command
+    renamed = _RENAMED_OPTIONS.get(command, {})
+    for i in range(1, len(argv)):
+        if argv[i] == "--":
+            break
+        name, equals, value = argv[i].partition("=")
+        if name in renamed:
+            new, notice = renamed[name]
+            _print_deprecation(notice)
+            argv[i] = new + equals + value
+    return argv
 
-    # in the windowed one-click build there is no console: give the
-    # process usable streams and log uncaught exceptions to
-    # ~/.picasso/logs/picasso.log instead of dropping them
-    ensure_std_streams()
-    install_excepthooks()
 
+def _print_deprecation(notice: deprecation.Deprecation) -> None:
+    """Print the notice of a deprecated command line name."""
+    import sys
+
+    print(f"Warning: {notice.text()}", file=sys.stderr)
+
+
+def _build_parser() -> (
+    tuple[argparse.ArgumentParser, argparse._SubParsersAction]
+):
+    """The parser of the ``picasso`` command line and its subcommands
+    (the action plugins add their commands to, see ``main``).
+
+    Built apart from ``main`` so that tests can inspect the commands
+    and options, see ``tests/test_stability.py``.
+    """
     # Main parser
     parser = argparse.ArgumentParser("picasso")
     subparsers = parser.add_subparsers(dest="command")
@@ -4895,7 +4998,8 @@ def main():  # noqa: C901
     )
     localize_parser.add_argument(
         "-mf",
-        "--mf",
+        "--magnification-factor",
+        dest="mf",
         type=float,
         default=0,
         help="magnification factor (3D only)",
@@ -4905,7 +5009,8 @@ def main():  # noqa: C901
     )
     localize_parser.add_argument(
         "-zc",
-        "--zc",
+        "--z-calibration",
+        dest="zc",
         type=str,
         default="",
         help="path to 3D calibration file (3D only)",
@@ -5426,7 +5531,7 @@ def main():  # noqa: C901
     )
     undrift_rcc_parser.add_argument(
         "-f",
-        "--fromfile",
+        "--from-file",
         type=str,
         help="apply drift from specified file instead of computing it",
     )
@@ -5460,7 +5565,7 @@ def main():  # noqa: C901
     )
     undrift_aim_parser.add_argument(
         "-i",
-        "--intersectdist",
+        "--intersect-distance",
         type=float,
         default=20 / 130,
         help=(
@@ -5470,7 +5575,7 @@ def main():  # noqa: C901
     )
     undrift_aim_parser.add_argument(
         "-r",
-        "--roiradius",
+        "--roi-radius",
         type=float,
         default=60 / 130,
         help="max. drift (cam. pixels) between two consecutive segments",
@@ -5478,7 +5583,7 @@ def main():  # noqa: C901
 
     # undrift by fiducials parser
     undrift_fiducial_parser = subparsers.add_parser(
-        "undrift_fiducials",
+        "undrift-fiducials",
         help="correct localization coordinates for drift with fiducials",
     )
     undrift_fiducial_parser.add_argument(
@@ -5657,7 +5762,8 @@ def main():  # noqa: C901
 
     # nneighbors
     nneighbor_parser = subparsers.add_parser(
-        "nneighbor", help="calculate nearest neighbor of a clustered dataset"
+        "nearest-neighbor",
+        help="calculate nearest neighbor of a clustered dataset",
     )
     nneighbor_parser.add_argument(
         "files",
@@ -5686,7 +5792,7 @@ def main():  # noqa: C901
     )
     cbc_parser.add_argument(
         "-r",
-        "--rmax",
+        "--r-max",
         type=float,
         default=200.0,
         help="maximum radius in nm (default=200)",
@@ -5737,7 +5843,7 @@ def main():  # noqa: C901
 
     # Ripley's H function and radial distribution function
     ripley_h_parser = subparsers.add_parser(
-        "ripley_h",
+        "ripley-h",
         help=(
             "Ripley's H function of localizations: are they clustered,"
             " random or dispersed"
@@ -5785,7 +5891,7 @@ def main():  # noqa: C901
     )
     nnd_parser.add_argument(
         "-r",
-        "--rmax",
+        "--r-max",
         type=float,
         default=200.0,
         help="largest distance of the histograms in nm (default=200)",
@@ -5811,7 +5917,7 @@ def main():  # noqa: C901
         help="compute the distances in 3D (x, y and z), requires z",
     )
     nnd_parser.add_argument(
-        "--zrange",
+        "--z-range",
         nargs=2,
         type=float,
         metavar=("ZMIN", "ZMAX"),
@@ -5842,7 +5948,7 @@ def main():  # noqa: C901
     )
 
     clusterfilter_parser = subparsers.add_parser(
-        "clusterfilter",
+        "cluster-filter",
         help="filter localizations by properties of their clusters",
     )
     clusterfilter_parser.add_argument(
@@ -5853,18 +5959,18 @@ def main():  # noqa: C901
         ),
     )
     clusterfilter_parser.add_argument(
-        "-c", "--clusterfile", help="a hdf5 clusterfile"
+        "-c", "--cluster-file", help="a hdf5 clusterfile"
     )
     clusterfilter_parser.add_argument(
         "-p", "--parameter", type=str, help="parameter to be filtered"
     )
     clusterfilter_parser.add_argument(
-        "--minval",
+        "--min-value",
         type=float,
         help="lower boundary",
     )
     clusterfilter_parser.add_argument(
-        "--maxval",
+        "--max-value",
         type=float,
         help="upper boundary",
     )
@@ -5924,7 +6030,7 @@ def main():  # noqa: C901
         default=None,
     )
     dbscan_parser.add_argument(
-        "--radius_z",
+        "--radius-z",
         type=float,
         help=(
             "DBSCAN epsilon in z (camera pixels). If set, enables "
@@ -5964,7 +6070,7 @@ def main():  # noqa: C901
 
     # SMLM clusterer
     smlm_cluster_parser = subparsers.add_parser(
-        "smlm_cluster",
+        "smlm-cluster",
         help="cluster localizations with the custom SMLM clustering algorithm",
     )
     smlm_cluster_parser.add_argument(
@@ -6182,7 +6288,7 @@ def main():  # noqa: C901
     )
     join_parser.add_argument(
         "-k",
-        "--keepindex",
+        "--keep-index",
         help="do not change frame numbers",
         action="store_true",
     )
@@ -6258,7 +6364,7 @@ def main():  # noqa: C901
 
     # group properties
     groupprops_parser = subparsers.add_parser(
-        "groupprops",
+        "group-properties",
         help=(
             "calculate kinetics "
             "and various properties of localization groups"
@@ -6274,18 +6380,19 @@ def main():  # noqa: C901
 
     # Pair correlation
     pc_parser = subparsers.add_parser(
-        "pc", help="calculate the pair-correlation of localizations"
+        "pair-correlation",
+        help="calculate the pair-correlation of localizations",
     )
     pc_parser.add_argument(
         "-b",
-        "--binsize",
+        "--bin-size",
         type=float,
         default=0.1,
         help="the bin size (camera pixels)",
     )
     pc_parser.add_argument(
         "-r",
-        "--rmax",
+        "--r-max",
         type=float,
         default=10,
         help="The maximum distance to calculate the pair-correlation",
@@ -6453,6 +6560,27 @@ def main():  # noqa: C901
             action="store_true",
             help="skip the confirmation prompt",
         )
+    return parser, subparsers
+
+
+def main():  # noqa: C901
+    """Entry point of the ``picasso`` command line interface.
+
+    Builds the argument parser for every subcommand - the GUIs, the
+    calibrations, ``localize``, ``render``, the undrift, clustering and
+    file-conversion tools - parses ``sys.argv`` and dispatches to the matching
+    handler. Called by the ``picasso`` console script and by
+    ``python -m picasso``. Run ``picasso -h`` for the full list.
+    """
+    from .diagnostics import ensure_std_streams, install_excepthooks
+
+    # in the windowed one-click build there is no console: give the
+    # process usable streams and log uncaught exceptions to
+    # ~/.picasso/logs/picasso.log instead of dropping them
+    ensure_std_streams()
+    install_excepthooks()
+
+    parser, subparsers = _build_parser()
 
     # Plugins may add their own subcommands. Done last so that a plugin can
     # never shadow a built-in command, and skipped entirely when no plugin is
@@ -6470,8 +6598,8 @@ def main():  # noqa: C901
 
         plugin_commands = register_cli_plugins(subparsers)
 
-    # Parse
-    args = parser.parse_args()
+    # Parse (the names renamed in Picasso 1.0 still work, with a notice)
+    args = parser.parse_args(_current_names(sys.argv[1:]))
     if args.command:
         # check for updates and print in the console if available
         from .updater import cli_notify_update, check_and_notify
@@ -6591,29 +6719,29 @@ def main():  # noqa: C901
                 args.plot,
                 args.pixelsize,
             )
-        elif args.command == "clusterfilter":
+        elif args.command == "cluster-filter":
             _clusterfilter(
                 args.files,
-                args.clusterfile,
+                args.cluster_file,
                 args.parameter,
-                args.minval,
-                args.maxval,
+                args.min_value,
+                args.max_value,
             )
         elif args.command == "undrift":
             _undrift_rcc(
                 args.files,
                 args.segmentation,
                 args.display,
-                args.fromfile,
+                args.from_file,
             )
         elif args.command == "aim":
             _undrift_aim(
                 args.files,
                 args.segmentation,
-                args.intersectdist,
-                args.roiradius,
+                args.intersect_distance,
+                args.roi_radius,
             )
-        elif args.command == "undrift_fiducials":
+        elif args.command == "undrift-fiducials":
             _undrift_fiducials(args.files)
         elif args.command == "density":
             _density(args.files, args.radius)
@@ -6632,7 +6760,7 @@ def main():  # noqa: C901
                 args.min_samples,
                 args.pixelsize,
             )
-        elif args.command == "smlm_cluster":
+        elif args.command == "smlm-cluster":
             _smlm_clusterer(
                 args.files,
                 args.radius,
@@ -6658,12 +6786,12 @@ def main():  # noqa: C901
                 args.asynch,
                 args.group_column,
             )
-        elif args.command == "nneighbor":
+        elif args.command == "nearest-neighbor":
             _nneighbor(args.files)
         elif args.command == "cbc":
             _cbc(
                 args.files,
-                args.rmax,
+                args.r_max,
                 args.steps,
                 args.all_pairs,
                 args.use_2d,
@@ -6675,25 +6803,25 @@ def main():  # noqa: C901
                 args.files,
                 args.names,
                 args.picks,
-                args.rmax,
+                args.r_max,
                 args.steps,
                 args.simulations,
                 args.use_3d,
-                None if args.zrange is None else tuple(args.zrange),
+                None if args.z_range is None else tuple(args.z_range),
                 args.observed_z,
                 args.cross_null,
             )
-        elif args.command in ("ripley_h", "rdf"):
+        elif args.command in ("ripley-h", "rdf"):
             _pair_statistic(
-                args.command,
+                "ripley_h" if args.command == "ripley-h" else "rdf",
                 args.files,
                 args.picks,
-                args.rmax,
+                args.r_max,
                 args.steps,
                 args.simulations,
                 args.edge_correction,
                 args.use_3d,
-                None if args.zrange is None else tuple(args.zrange),
+                None if args.z_range is None else tuple(args.z_range),
                 args.observed_z,
                 args.partner,
                 args.cross_null,
@@ -6703,7 +6831,7 @@ def main():  # noqa: C901
         elif args.command == "align":
             _align(args.file, args.display, args.remove_non_overlapping)
         elif args.command == "join":
-            _join(args.file, args.keepindex)
+            _join(args.file, args.keep_index)
         elif args.command == "stitch":
             _stitch(
                 args.files,
@@ -6714,10 +6842,10 @@ def main():  # noqa: C901
                 args.keep_overlaps,
                 args.keep_frames,
             )
-        elif args.command == "groupprops":
+        elif args.command == "group-properties":
             _groupprops(args.files)
-        elif args.command == "pc":
-            _pair_correlation(args.files, args.binsize, args.rmax)
+        elif args.command == "pair-correlation":
+            _pair_correlation(args.files, args.bin_size, args.r_max)
         elif args.command == "csv2hdf":
             _csv2hdf(args.files, args.pixelsize)
         elif args.command == "hdf2csv":

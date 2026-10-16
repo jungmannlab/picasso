@@ -33,6 +33,14 @@ Reference
 
       Jupyter notebooks that script analyses with the Python API.
 
+   .. grid-item-card:: :octicon:`shield-check;1.5em;sd-mr-1` Stability and versioning
+      :link: versioning
+      :link-type: doc
+      :class-card: sd-card-hover
+
+      What stays the same within a major version, and how long deprecated
+      names keep working.
+
 .. toctree::
    :hidden:
 
@@ -40,3 +48,4 @@ Reference
    cmd
    api/index
    notebooks
+   versioning

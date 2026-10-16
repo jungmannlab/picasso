@@ -25,6 +25,52 @@ example:
 
    picasso render
 
+.. _cmd-renamed:
+
+Renamed commands and options
+----------------------------
+In Picasso 1.0, the commands and options got one style: words joined by
+hyphens, as in ``camera-calibrate``, and named after the Python parameter
+they set where there is one (``--r-max`` for ``r_max``). The old names keep
+working until Picasso 2.0; each use prints a warning with the new name. The
+format converters (``csv2hdf``, ``hdf2ts``, ...) keep their names. See
+:doc:`versioning` for how long deprecated names keep working.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 40 60
+
+   * - Old name
+     - New name
+   * - ``undrift_fiducials``
+     - `undrift-fiducials`_
+   * - ``nneighbor``
+     - `nearest-neighbor`_
+   * - ``ripley_h``
+     - `ripley-h`_
+   * - ``clusterfilter``
+     - `cluster-filter`_, with ``--cluster-file``, ``--min-value`` and
+       ``--max-value`` (were ``--clusterfile``, ``--minval``, ``--maxval``)
+   * - ``smlm_cluster``
+     - `smlm-cluster`_
+   * - ``groupprops``
+     - `group-properties`_
+   * - ``pc``
+     - `pair-correlation`_, with ``--bin-size`` and ``--r-max`` (were
+       ``--binsize``, ``--rmax``)
+   * - ``localize --zc``, ``--mf``
+     - ``--z-calibration``, ``--magnification-factor``
+   * - ``undrift --fromfile``
+     - ``--from-file``
+   * - ``aim --intersectdist``, ``--roiradius``
+     - ``--intersect-distance``, ``--roi-radius``
+   * - ``cbc``, ``ripley-h``, ``rdf``, ``nnd``: ``--rmax``, ``--zrange``
+     - ``--r-max``, ``--z-range``
+   * - ``dbscan --radius_z``
+     - ``--radius-z``
+   * - ``join --keepindex``
+     - ``--keep-index``
+
 .. _cmd-localize:
 
 localize
@@ -452,7 +498,7 @@ Combine two hdf5 localization files. A new joined file will be created.
    The frame information of consecutive files is reindexed, i.e., frame 1 now
    can contain localizations from file 1 and file 2. Therefore, do not perform
    kinetic analysis and drift correction on joined files. Pass
-   ``-k/--keepindex`` to keep the original frame numbers instead of
+   ``-k/--keep-index`` to keep the original frame numbers instead of
    reindexing.
 
 Columns that not all files have (e.g., ``z`` when joining 2D and 3D files, or
@@ -633,13 +679,13 @@ to the median localization precision, saving the plots:
      - from the metadata
      - Camera pixel size (nm).
 
-clusterfilter
--------------
+cluster-filter
+--------------
 Filter localizations by properties of their clusters.
 
 .. code-block:: bash
 
-   picasso clusterfilter files -c clusterfile -p parameter --minval min --maxval max
+   picasso cluster-filter files -c cluster_file -p parameter --min-value min --max-value max
 
 .. list-table::
    :header-rows: 1
@@ -647,13 +693,13 @@ Filter localizations by properties of their clusters.
 
    * - Option
      - Description
-   * - ``-c``, ``--clusterfile`` (str)
+   * - ``-c``, ``--cluster-file`` (str)
      - A hdf5 clusterfile.
    * - ``-p``, ``--parameter`` (str)
      - Parameter to be filtered.
-   * - ``--minval`` (float)
+   * - ``--min-value`` (float)
      - Lower boundary.
-   * - ``--maxval`` (float)
+   * - ``--max-value`` (float)
      - Upper boundary.
 
 undrift
@@ -674,7 +720,7 @@ Correct localization coordinates for drift with RCC.
    * - ``-s``, ``--segmentation`` (float)
      - ``1000``
      - The number of frames to be combined for one temporal segment.
-   * - ``-f``, ``--fromfile`` (str)
+   * - ``-f``, ``--from-file`` (str)
      -
      - Apply drift from specified file instead of computing it.
    * - ``-d``, ``--display``
@@ -699,15 +745,15 @@ Correct localization coordinates for drift with AIM.
    * - ``-s``, ``--segmentation`` (float)
      - ``100``
      - The number of frames to be combined for one temporal segment.
-   * - ``-i``, ``--intersectdist`` (float)
+   * - ``-i``, ``--intersect-distance`` (float)
      - ``20/130``
      - Max. distance (camera pixels) between localizations in consecutive
        segments to be considered as intersecting.
-   * - ``-r``, ``--roiradius`` (float)
+   * - ``-r``, ``--roi-radius`` (float)
      - ``60/130``
      - Max. drift (camera pixels) between two consecutive segments.
 
-undrift_fiducials
+undrift-fiducials
 -----------------
 Correct localization coordinates for drift using fiducial markers
 (automatically picked). Takes one or more hdf5 localization files as
@@ -715,7 +761,7 @@ positional arguments.
 
 .. code-block:: bash
 
-   picasso undrift_fiducials files
+   picasso undrift-fiducials files
 
 density
 -------
@@ -766,7 +812,7 @@ Positional arguments:
 ``pixelsize`` (int)
    Camera pixel size in nm (required for 3D localizations only).
 
-smlm_cluster
+smlm-cluster
 ------------
 Cluster localizations with the custom SMLM clustering algorithm. The algorithm
 finds localizations with the most neighbors within a specified radius and
@@ -774,7 +820,7 @@ finds clusters based on such "local maxima".
 
 .. code-block:: bash
 
-   picasso smlm_cluster files radius min_locs [pixelsize] [basic_fa] [radius_z]
+   picasso smlm-cluster files radius min_locs [pixelsize] [basic_fa] [radius_z]
 
 Positional arguments:
 
@@ -872,21 +918,21 @@ outside the region where all aligned files overlap (see
    picasso align file1 file2 [...]
    picasso align file1 file2 --remove-non-overlapping
 
-groupprops
-----------
+group-properties
+----------------
 Calculate the properties of localization groups.
 
 .. code-block:: bash
 
-   picasso groupprops files
+   picasso group-properties files
 
-pc
---
+pair-correlation
+----------------
 Calculate the pair-correlation of localizations.
 
 .. code-block:: bash
 
-   picasso pc files [-b binsize] [-r rmax]
+   picasso pair-correlation files [-b bin_size] [-r r_max]
 
 .. list-table::
    :header-rows: 1
@@ -895,20 +941,20 @@ Calculate the pair-correlation of localizations.
    * - Option
      - Default
      - Description
-   * - ``-b``, ``--binsize`` (float)
+   * - ``-b``, ``--bin-size`` (float)
      - ``0.1``
      - The bin size (camera pixels).
-   * - ``-r``, ``--rmax`` (float)
+   * - ``-r``, ``--r-max`` (float)
      - ``10``
      - The maximum distance to calculate the pair-correlation.
 
-nneighbor
----------
+nearest-neighbor
+----------------
 Calculate the nearest neighbor within a clustered dataset.
 
 .. code-block:: bash
 
-   picasso nneighbor files
+   picasso nearest-neighbor files
 
 cbc
 ---
@@ -927,7 +973,7 @@ that are not.
 
 .. code-block:: bash
 
-   picasso cbc files [-r rmax] [-s steps] [-u undefined] [-a] [--2d] [-n names]
+   picasso cbc files [-r r_max] [-s steps] [-u undefined] [-a] [--2d] [-n names]
 
 For example, both directions for two files with short names:
 
@@ -942,7 +988,7 @@ For example, both directions for two files with short names:
    * - Option
      - Default
      - Description
-   * - ``-r``, ``--rmax`` (float)
+   * - ``-r``, ``--r-max`` (float)
      - ``200``
      - The maximum radius (nm).
    * - ``-s``, ``--steps`` (int)
@@ -964,7 +1010,7 @@ For example, both directions for two files with short names:
      - off
      - Ignore z and compute the CBC in 2D.
 
-ripley_h
+ripley-h
 --------
 Ripley's H function of localizations (Ripley, J R Stat Soc B, 1977, DOI:
 `10.1111/j.2517-6161.1977.tb01615.x
@@ -976,7 +1022,7 @@ of view, with Ripley's
 isotropic edge correction and an envelope of complete spatial randomness
 (CSR) from simulations. The files should contain molecules, i.e., one
 localization per molecule, such as those found by `g5m`_ or the cluster
-centers saved by `dbscan`_, `hdbscan`_ or `smlm_cluster`_; a warning lists the
+centers saved by `dbscan`_, `hdbscan`_ or `smlm-cluster`_; a warning lists the
 files without molecules (no ``n_events`` or ``std_frame`` column). See
 :ref:`render-ripley-h` for details.
 
@@ -988,21 +1034,21 @@ name>_ripley_h.png``.
 
 .. code-block:: bash
 
-   picasso ripley_h files [-p picks] [-r rmax] [-s steps] [-n simulations] [--no-edge-correction] [--3d] [--zrange zmin zmax] [--observed-z] [--partner file] [--cross-null shift|labels]
+   picasso ripley-h files [-p picks] [-r r_max] [-s steps] [-n simulations] [--no-edge-correction] [--3d] [--z-range zmin zmax] [--observed-z] [--partner file] [--cross-null shift|labels]
 
 For example, in the picks saved in Render, and in 3D between z = -300 and 300
 nm:
 
 .. code-block:: bash
 
-   picasso ripley_h molecules.hdf5 -p picks.yaml -r 300
-   picasso ripley_h molecules.hdf5 -p picks.yaml -r 200 --3d --zrange -300 300
+   picasso ripley-h molecules.hdf5 -p picks.yaml -r 300
+   picasso ripley-h molecules.hdf5 -p picks.yaml -r 200 --3d --z-range -300 300
 
 and between two channels, with random shifts of the second one:
 
 .. code-block:: bash
 
-   picasso ripley_h protein_a_molecules.hdf5 --partner protein_b_molecules.hdf5 -r 300
+   picasso ripley-h protein_a_molecules.hdf5 --partner protein_b_molecules.hdf5 -r 300
 
 .. list-table::
    :header-rows: 1
@@ -1015,7 +1061,7 @@ and between two channels, with random shifts of the second one:
      - whole field of view
      - Picks (.yaml) saved in Render; the regions of interest in which H is
        computed.
-   * - ``-r``, ``--rmax`` (float)
+   * - ``-r``, ``--r-max`` (float)
      - ``500``
      - The maximum radius (nm).
    * - ``-s``, ``--steps`` (int)
@@ -1031,7 +1077,7 @@ and between two channels, with random shifts of the second one:
      - off
      - Compute H in 3D (x, y and z); requires z. See
        :ref:`render-ripley-h-3d`.
-   * - ``--zrange`` (float float)
+   * - ``--z-range`` (float float)
      - z of each region
      - The z range (nm) over which the regions extend in 3D. By default, each
        region extends over the z range of its localizations.
@@ -1057,14 +1103,14 @@ Radial distribution function g(r) of localizations: the density of neighbors
 at the distance r from a molecule, relative to the mean density (1 for
 complete spatial randomness, above 1 at the distances where molecules are more
 likely to be found than at random, below 1 where they are depleted). Computed
-like `ripley_h`_, with the same options and outputs (``<file name>_rdf.csv``,
+like `ripley-h`_, with the same options and outputs (``<file name>_rdf.csv``,
 ``<file name>_rdf_regions.csv`` and ``<file name>_rdf.png``), except that the
 radius steps are rings of ``rmax / steps`` and the default number of steps is
 50. See :ref:`render-rdf` for details.
 
 .. code-block:: bash
 
-   picasso rdf files [-p picks] [-r rmax] [-s steps] [-n simulations] [--no-edge-correction] [--3d] [--zrange zmin zmax] [--observed-z] [--partner file] [--cross-null shift|labels]
+   picasso rdf files [-p picks] [-r r_max] [-s steps] [-n simulations] [--no-edge-correction] [--3d] [--z-range zmin zmax] [--observed-z] [--partner file] [--cross-null shift|labels]
 
 For example, in the picks saved in Render with rings of 5 nm:
 
@@ -1087,7 +1133,7 @@ molecules and median NND, measured and simulated, of every pair) and the plot
 
 .. code-block:: bash
 
-   picasso nnd files [--names names] [-p picks] [-r rmax] [-s steps] [-n simulations] [--3d] [--zrange zmin zmax] [--observed-z] [--cross-null shift|labels]
+   picasso nnd files [--names names] [-p picks] [-r r_max] [-s steps] [-n simulations] [--3d] [--z-range zmin zmax] [--observed-z] [--cross-null shift|labels]
 
 For example, two channels with short names:
 
@@ -1108,7 +1154,7 @@ For example, two channels with short names:
    * - ``-p``, ``--picks`` (str)
      - whole field of view
      - Picks (.yaml) saved in Render; the regions of interest.
-   * - ``-r``, ``--rmax`` (float)
+   * - ``-r``, ``--r-max`` (float)
      - ``200``
      - The largest distance of the histograms (nm).
    * - ``-s``, ``--steps`` (int)
@@ -1120,7 +1166,7 @@ For example, two channels with short names:
    * - ``--3d``
      - off
      - Compute the distances in 3D (x, y and z); requires z.
-   * - ``--zrange`` (float float)
+   * - ``--z-range`` (float float)
      - z of each region
      - The z range (nm) over which the regions extend in 3D.
    * - ``--observed-z``

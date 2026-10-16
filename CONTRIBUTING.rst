@@ -120,6 +120,13 @@ Committing & Pushing
 
 5. Update the changelog (``changelog.md``) with a brief summary of your changes under the appropriate section.
 
+Changing Public Names
+^^^^^^^^^^^^^^^^^^^^^
+
+The functions and classes on the Python API pages (each module's ``__all__``), the commands and options of the command line and the file formats are public: see the stability policy in ``docs/versioning.rst``. Do not remove or rename them; deprecate them with ``picasso.deprecation`` instead, so that they keep working for two more minor releases. ``tests/test_stability.py`` compares the public names with snapshots in ``tests/data/stability``; after a deliberate change, record it with::
+
+    $ python tests/regen_stability_snapshots.py
+
 6. Submit a pull request through the GitHub website. See below for guidelines!
 
 Pull Request Guidelines
