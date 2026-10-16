@@ -13465,7 +13465,13 @@ class TestSlotsSurviveAStaleWindow:
             window._set_channels([movie], [_info()], ["a.tif"], ["Channel 0"])
             window.last_identification_info = None
             window.locs = pd.DataFrame(
-                {"frame": [0], "x": [10.0], "y": [10.0]}
+                {
+                    "frame": [0],
+                    "x": [10.0],
+                    "y": [10.0],
+                    "lpx": [0.1],
+                    "lpy": [0.1],
+                }
             )
             path = str(tmp_path / "locs.hdf5")
             window.save_locs(path)  # must not raise

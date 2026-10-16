@@ -37,7 +37,7 @@ if TYPE_CHECKING:
 
     from . import spinna
 
-from . import lib, __version__
+from . import lib, __version__, docs_url
 
 from .ext import bitplane
 from .ext.bitplane import IMSFile
@@ -60,6 +60,11 @@ __all__ = [
     # localizations
     "load_locs",
     "save_locs",
+    "validate_locs",
+    "get_format_version",
+    "LOCS_FORMAT_VERSION",
+    "MINIMUM_COLUMNS",
+    "MINIMUM_METADATA_KEYS",
     "load_info",
     "save_info",
     "save_datasets",
@@ -104,6 +109,7 @@ __all__ = [
     "export_3d_visp",
     # errors
     "NoMetadataFileError",
+    "LocsFormatError",
 ]
 
 
@@ -141,9 +147,34 @@ MOVIE_EXTENSIONS = (
 # abortable; smaller blocks report more often but read more slowly.
 LOCS_BLOCK_SIZE = 1_000_000
 
+#: Version of the localization file format written by ``save_locs``, as
+#: ``"MAJOR.MINOR"``. The minor version grows with additions that older
+#: readers can ignore (e.g., a new optional column, group or attribute),
+#: the major version when the meaning of existing content changes, so
+#: ``load_locs`` refuses files of a newer major version. Files without a
+#: version were written before Picasso 1.0. See ``docs/files.rst``.
+LOCS_FORMAT_VERSION = "1.0"
+#: Root attributes of an .hdf5 localization file that hold the format
+#: version and the version of Picasso that wrote the file.
+FORMAT_VERSION_ATTR = "picasso_format"
+PICASSO_VERSION_ATTR = "picasso_version"
+#: Columns and metadata keys every localization file needs, see
+#: ``validate_locs``. ``Pixelsize`` is not among the keys: Render asks
+#: for it when it is missing.
+MINIMUM_COLUMNS = ("frame", "x", "y", "lpx", "lpy")
+MINIMUM_METADATA_KEYS = ("Width", "Height", "Frames")
+
+_log = logging.getLogger(__name__)
+
 
 class NoMetadataFileError(FileNotFoundError):
     """Raised when a movie or localizations file has no metadata sidecar."""
+
+
+class LocsFormatError(ValueError):
+    """Raised when a localization file does not follow the Picasso
+    format: it lacks required columns or metadata keys, holds invalid
+    values, or was written in a newer, incompatible format version."""
 
 
 def _user_settings_filename() -> str:
@@ -632,7 +663,7 @@ def save_calibration(path: str, calibration: dict) -> None:
         The calibration to save.
     """
     with open(path, "w") as f:
-        yaml.dump(calibration, f, default_flow_style=False)
+        _dump_yaml(calibration, f, default_flow_style=False)
 
 
 def load_calibration(path: str) -> dict:
@@ -650,7 +681,7 @@ def load_calibration(path: str) -> dict:
     """
     with open(path, "r") as calibration_file:
         try:
-            calibration = yaml.full_load(calibration_file)
+            calibration = _load_yaml(calibration_file)
         except yaml.composer.ComposerError:
             raise ValueError(
                 "Invalid calibration file: expected a single-document YAML "
@@ -780,7 +811,7 @@ def load_any_calibration(path: str) -> dict:
         return load_spline_calibration(path)
     with open(path, "r") as calibration_file:
         try:
-            calibration = yaml.full_load(calibration_file)
+            calibration = _load_yaml(calibration_file)
         except yaml.composer.ComposerError:
             raise ValueError(
                 "Invalid calibration file: expected a single-document YAML "
@@ -1436,11 +1467,287 @@ def load_movie_all(
         return [movie], [info]
 
 
+_PYTHON_TAG = "tag:yaml.org,2002:python/"
+#: Dict subclasses PyYAML's default dumper tagged in Picasso's .yaml
+#: files; read back as plain dicts without a warning.
+_YAML_DICT_TYPES = (
+    "collections.OrderedDict",
+    "collections.defaultdict",
+    "picasso.lib.AutoDict",
+)
+
+
+class _MetadataLoader(yaml.SafeLoader):
+    """YAML loader for Picasso's .yaml files (metadata, calibrations,
+    picks, structures) that never runs code from the file.
+
+    Reads what ``yaml.SafeLoader`` reads plus the Python-specific tags
+    that PyYAML's default dumper wrote into Picasso's .yaml files before
+    Picasso 1.0: numpy scalars, dtypes and arrays, tuples and dict
+    subclasses. Their values are rebuilt from the data in the file; the
+    Python callables a tag names are never imported or called. Any other
+    Python object is read as its plain data (its arguments or state) and
+    its tag is collected in ``unknown_tags``.
+    """
+
+    def __init__(self, stream) -> None:
+        super().__init__(stream)
+        self.unknown_tags = set()
+
+
+def _yaml_args(loader: _MetadataLoader, node: yaml.Node) -> list:
+    """Arguments of a ``!!python/object/apply`` node, which is either the
+    sequence of arguments or a mapping with an ``args`` entry."""
+    if isinstance(node, yaml.SequenceNode):
+        return loader.construct_sequence(node, deep=True)
+    if isinstance(node, yaml.MappingNode):
+        args = loader.construct_mapping(node, deep=True).get("args")
+        return list(args) if args else []
+    return []
+
+
+def _yaml_numpy_dtype(loader: _MetadataLoader, node: yaml.Node) -> np.dtype:
+    """``!!python/object/apply:numpy.dtype``, e.g. ``args: [f8, ...]``
+    with the byte order in the second entry of ``state``."""
+    args = _yaml_args(loader, node)
+    dtype = np.dtype(str(args[0]))
+    if isinstance(node, yaml.MappingNode):
+        state = loader.construct_mapping(node, deep=True).get("state")
+        if isinstance(state, (list, tuple)) and len(state) > 1:
+            if state[1] in ("<", ">"):
+                dtype = dtype.newbyteorder(state[1])
+    return dtype
+
+
+def _yaml_numpy_scalar(loader: _MetadataLoader, node: yaml.Node):
+    """``!!python/object/apply:numpy...multiarray.scalar``: a dtype and
+    the raw bytes of the value, read back as a plain Python value."""
+    args = _yaml_args(loader, node)
+    if (
+        len(args) == 2
+        and isinstance(args[0], np.dtype)
+        and not args[0].hasobject
+        and isinstance(args[1], bytes)
+    ):
+        return np.frombuffer(args[1], dtype=args[0], count=1)[0].item()
+    loader.unknown_tags.add(node.tag)
+    return args
+
+
+def _yaml_numpy_array(loader: _MetadataLoader, node: yaml.Node):
+    """``!!python/object/apply:numpy...multiarray._reconstruct``: an
+    array whose ``state`` holds its shape, dtype, memory order and raw
+    bytes, read back as a (nested) list."""
+    state = None
+    if isinstance(node, yaml.MappingNode):
+        state = loader.construct_mapping(node, deep=True).get("state")
+    if isinstance(state, (list, tuple)) and len(state) == 5:
+        _, shape, dtype, fortran, data = state
+        if (
+            isinstance(dtype, np.dtype)
+            and not dtype.hasobject
+            and isinstance(data, bytes)
+        ):
+            array = np.frombuffer(data, dtype=dtype).reshape(
+                tuple(shape), order="F" if fortran else "C"
+            )
+            return array.tolist()
+        if isinstance(data, list):  # object arrays list their items
+            return data
+    loader.unknown_tags.add(node.tag)
+    return state
+
+
+def _yaml_python_object(loader: _MetadataLoader, suffix: str, node):
+    """Any other ``!!python/object...`` tag, read as its plain data: the
+    items of dict and list subclasses, else the object's state, else its
+    arguments. Nothing named in the tag is imported."""
+    name = suffix.split(":", 1)[-1]
+    if name not in _YAML_DICT_TYPES:
+        loader.unknown_tags.add(node.tag)
+    if isinstance(node, yaml.MappingNode):
+        value = loader.construct_mapping(node, deep=True)
+        if node.tag.startswith(_PYTHON_TAG + "object:"):
+            return value  # the object's __dict__
+        if "dictitems" in value:
+            return dict(value["dictitems"])
+        if "listitems" in value:
+            return list(value["listitems"])
+        if isinstance(value.get("state"), dict):
+            return value["state"]
+        args = value.get("args") or []
+    elif isinstance(node, yaml.SequenceNode):
+        args = loader.construct_sequence(node, deep=True)
+    else:
+        return loader.construct_scalar(node)
+    if name in _YAML_DICT_TYPES:
+        # OrderedDict([(key, value), ...]); defaultdict(factory)
+        pairs = args[0] if args and isinstance(args[0], list) else []
+        return {key: value for key, value in pairs}
+    return list(args)
+
+
+def _yaml_python_name(loader: _MetadataLoader, suffix: str, node) -> str:
+    """``!!python/name:module.attribute``, read as the name itself."""
+    return suffix
+
+
+for _numpy in ("numpy.core", "numpy._core"):
+    _MetadataLoader.add_constructor(
+        f"{_PYTHON_TAG}object/apply:{_numpy}.multiarray.scalar",
+        _yaml_numpy_scalar,
+    )
+    _MetadataLoader.add_constructor(
+        f"{_PYTHON_TAG}object/apply:{_numpy}.multiarray._reconstruct",
+        _yaml_numpy_array,
+    )
+_MetadataLoader.add_constructor(
+    f"{_PYTHON_TAG}object/apply:numpy.dtype", _yaml_numpy_dtype
+)
+_MetadataLoader.add_constructor(
+    f"{_PYTHON_TAG}tuple",
+    lambda loader, node: tuple(loader.construct_sequence(node, deep=True)),
+)
+_MetadataLoader.add_constructor(
+    f"{_PYTHON_TAG}list",
+    lambda loader, node: loader.construct_sequence(node, deep=True),
+)
+_MetadataLoader.add_constructor(
+    f"{_PYTHON_TAG}dict",
+    lambda loader, node: loader.construct_mapping(node, deep=True),
+)
+for _name, _type in (
+    ("str", str),
+    ("unicode", str),
+    ("int", int),
+    ("long", int),
+    ("float", float),
+    ("complex", complex),
+):
+    _MetadataLoader.add_constructor(
+        f"{_PYTHON_TAG}{_name}",
+        lambda loader, node, _type=_type: _type(loader.construct_scalar(node)),
+    )
+_MetadataLoader.add_constructor(
+    f"{_PYTHON_TAG}bool", yaml.SafeLoader.construct_yaml_bool
+)
+_MetadataLoader.add_constructor(
+    f"{_PYTHON_TAG}none", yaml.SafeLoader.construct_yaml_null
+)
+_MetadataLoader.add_constructor(
+    f"{_PYTHON_TAG}bytes", yaml.SafeLoader.construct_yaml_binary
+)
+_MetadataLoader.add_multi_constructor(f"{_PYTHON_TAG}name:", _yaml_python_name)
+_MetadataLoader.add_multi_constructor(
+    f"{_PYTHON_TAG}object", _yaml_python_object
+)
+
+
+def _load_yaml(stream, *, all_documents: bool = False):
+    """Read a Picasso .yaml file safely, see ``_MetadataLoader``.
+
+    Parameters
+    ----------
+    stream : file-like or str
+        The open file, or the YAML text.
+    all_documents : bool, optional
+        If True, return the list of all documents of a multi-document
+        file (the metadata of localizations); else the single document.
+        Default is False.
+
+    Returns
+    -------
+    data : Any
+        The document, or the list of documents.
+    """
+    loader = _MetadataLoader(stream)
+    try:
+        if all_documents:
+            data = []
+            while loader.check_data():
+                data.append(loader.get_data())
+        else:
+            data = loader.get_single_data()
+    finally:
+        loader.dispose()
+    if loader.unknown_tags:
+        _log.warning(
+            "%s holds values of Python types that Picasso does not read "
+            "(%s); their data was kept as plain values.",
+            getattr(stream, "name", "The YAML text"),
+            ", ".join(sorted(loader.unknown_tags)),
+        )
+    return data
+
+
+def _plain_yaml_value(value):
+    """``value`` with numpy values, tuples, sets and dict subclasses
+    replaced by the plain types ``yaml.safe_dump`` writes without
+    Python-specific tags, as in the metadata embedded as JSON."""
+    if isinstance(value, dict):
+        return {
+            _plain_yaml_value(key): _plain_yaml_value(item)
+            for key, item in value.items()
+        }
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return [_plain_yaml_value(item) for item in value]
+    if isinstance(value, np.ndarray):
+        return _plain_yaml_value(value.tolist())
+    if isinstance(value, np.generic):
+        return value.item()
+    return value
+
+
+def _dump_yaml(data, stream, *, all_documents: bool = False, **kwargs):
+    """Write ``data`` as plain YAML that ``_load_yaml`` and any other
+    YAML reader read without Python-specific tags.
+
+    Values of types plain YAML cannot hold (e.g., arbitrary objects) fall
+    back to PyYAML's default dumper, as Picasso wrote them before 1.0,
+    with a warning.
+
+    Parameters
+    ----------
+    data : Any
+        The document, or the list of documents if ``all_documents``.
+    stream : file-like
+        The file opened for writing.
+    all_documents : bool, optional
+        If True, ``data`` is a list of documents, written as a
+        multi-document file. Default is False.
+    **kwargs
+        Passed on to ``yaml.safe_dump`` (or ``yaml.safe_dump_all``),
+        e.g. ``default_flow_style``.
+    """
+    if all_documents:
+        plain = [_plain_yaml_value(document) for document in data]
+        safe_dump, dump = yaml.safe_dump_all, yaml.dump_all
+    else:
+        plain = _plain_yaml_value(data)
+        safe_dump, dump = yaml.safe_dump, yaml.dump
+    try:
+        text = safe_dump(plain, **kwargs)
+    except yaml.representer.RepresenterError as error:
+        _log.warning(
+            "%s: %s. Wrote it with Python-specific tags instead.",
+            getattr(stream, "name", "YAML"),
+            error,
+        )
+        text = dump(data, **kwargs)
+    stream.write(text)
+
+
 def load_info(
     path: str,
     qt_parent: QtWidgets.QWidget | None = None,
 ) -> list[dict]:
     """Load metadata from a YAML file associated with the movie file.
+
+    The .yaml file next to ``path`` takes precedence; without one, the
+    metadata embedded in the HDF5 file ``path`` is read. The .yaml file
+    is read safely: values written with Python-specific tags (as Picasso
+    did before 1.0, e.g., for numpy numbers) are rebuilt from their data
+    and no code named in the file is run.
 
     Parameters
     ----------
@@ -1458,10 +1765,11 @@ def load_info(
     """
     path_base, path_extension = os.path.splitext(path)
     filename = path_base + ".yaml"
-    # First, try the sidecar .yaml metadata file.
+    # The sidecar .yaml file comes first: it takes precedence over the
+    # metadata embedded in the HDF5 file, so it can be edited by hand.
     try:
         with open(filename, "r") as info_file:
-            return list(yaml.load_all(info_file, Loader=yaml.UnsafeLoader))
+            return _load_yaml(info_file, all_documents=True)
     except FileNotFoundError:
         pass
     # If absent, fall back to metadata embedded in the HDF5 file itself.
@@ -1548,7 +1856,7 @@ def load_structures(path: str) -> tuple[list[spinna.Structure], list[str]]:
     )
     with open(path, "r") as file:
         try:
-            info = list(yaml.load_all(file, Loader=yaml.FullLoader))
+            info = _load_yaml(file, all_documents=True)
         except TypeError:
             raise TypeError(message)
     if (
@@ -1610,7 +1918,7 @@ def load_picks(  # noqa: C901
 
     # load the file
     with open(path, "r") as f:
-        regions = yaml.full_load(f)
+        regions = _load_yaml(f)
 
     # Backwards compatibility for old picked region files
     if "Shape" in regions:
@@ -1860,7 +2168,7 @@ def load_user_settings() -> lib.AutoDict:
         return lib.AutoDict()
     try:
         with settings_file:
-            settings = yaml.load(settings_file, Loader=yaml.FullLoader)
+            settings = _load_yaml(settings_file)
     except Exception as error:
         _record_broken_settings(settings_filename, error)
         return lib.AutoDict()
@@ -1899,6 +2207,10 @@ def save_info(
 ) -> None:
     """Save metadata to a YAML file.
 
+    Written as plain YAML, one document per dict: numpy values, tuples
+    and sets are stored as plain numbers and lists, as in the metadata
+    embedded in HDF5 files, so any YAML reader can read the file.
+
     Parameters
     ----------
     path : str
@@ -1910,7 +2222,12 @@ def save_info(
         will be written in block style.
     """
     with open(path, "w") as file:
-        yaml.dump_all(info, file, default_flow_style=default_flow_style)
+        _dump_yaml(
+            info,
+            file,
+            all_documents=True,
+            default_flow_style=default_flow_style,
+        )
 
 
 def _to_dict_walk(node: dict) -> dict:
@@ -4843,10 +5160,7 @@ def save_datasets(path: str, info: dict, **kwargs) -> None:
             rec_locs = val.to_records(index=False)
             locs_file.create_dataset(key, data=rec_locs)
         embedded = _write_metadata_dataset(locs_file, info)
-    if _save_metadata_in_yaml() or not embedded:
-        base, ext = os.path.splitext(path)
-        info_path = base + ".yaml"
-        save_info(info_path, info)
+    _write_sidecar(path, info, embedded)
 
 
 def save_locs(
@@ -4858,7 +5172,13 @@ def save_locs(
     """Save localization data to an HDF5 file.
 
     The localizations are written with float32 floating-point columns
-    and a uint32 ``frame`` (see ``lib.ensure_sanity``).
+    and a uint32 ``frame`` (see ``lib.ensure_sanity``). The file records
+    the format version (``LOCS_FORMAT_VERSION``) and the Picasso version
+    in its root attributes, see ``get_format_version``. The metadata is
+    embedded in the file and, depending on the user settings, also saved
+    as a .yaml file next to it; an existing .yaml file there is always
+    overwritten, since it takes precedence when loading (see
+    ``load_info``).
 
     Parameters
     ----------
@@ -4885,16 +5205,307 @@ def save_locs(
     # cannot use to_hdf for backward compatibility with older Picasso
     rec_locs = locs.to_records(index=False)
     with h5py.File(path, "w") as locs_file:
+        _write_format_attrs(locs_file)
         locs_file.create_dataset("locs", data=rec_locs)
         embedded = _write_metadata_dataset(locs_file, info)
         if pyramid is not None:
             from . import spatial_index
 
             spatial_index.save_render_index(locs_file, pyramid)
-    if _save_metadata_in_yaml() or not embedded:
-        base, ext = os.path.splitext(path)
-        info_path = base + ".yaml"
+    _write_sidecar(path, info, embedded)
+
+
+def _write_sidecar(path: str, info: list[dict], embedded: bool) -> None:
+    """Write the .yaml metadata file next to the HDF5 file ``path``.
+
+    Written if the user settings ask for it (``Save metadata in .yaml``),
+    if the metadata could not be embedded in the HDF5 file, or if a .yaml
+    file is already there: it takes precedence over the embedded
+    metadata when loading (see ``load_info``), so a stale one would hide
+    the metadata just saved.
+    """
+    info_path = os.path.splitext(path)[0] + ".yaml"
+    if _save_metadata_in_yaml() or not embedded or os.path.exists(info_path):
         save_info(info_path, info)
+
+
+def _write_format_attrs(hdf_file: h5py.File) -> None:
+    """Record the format version and the Picasso version in the root
+    attributes of an open localization file, see
+    ``get_format_version``."""
+    hdf_file.attrs[FORMAT_VERSION_ATTR] = LOCS_FORMAT_VERSION
+    hdf_file.attrs[PICASSO_VERSION_ATTR] = __version__
+
+
+def _read_root_attrs(path: str, names: tuple[str, ...]) -> dict:
+    """The root attributes ``names`` of an HDF5 file that has them; an
+    empty dict if the file cannot be opened (the caller reports that
+    when reading the localizations)."""
+
+    def read(**kwargs) -> dict:
+        with h5py.File(path, "r", **kwargs) as hdf_file:
+            return {
+                name: hdf_file.attrs[name]
+                for name in names
+                if name in hdf_file.attrs
+            }
+
+    try:
+        return read()
+    except OSError:
+        # HDF5 files on network storage can fail to open with the default
+        # file locking, see _load_info_from_hdf5
+        try:
+            return read(locking=False)
+        except OSError:
+            return {}
+
+
+def _parse_format_version(value, path: str = "") -> tuple[int, int]:
+    """``(major, minor)`` of a format version ``"MAJOR.MINOR"``."""
+    if isinstance(value, bytes):
+        value = value.decode("utf-8", errors="replace")
+    match = re.fullmatch(r"\s*(\d+)\.(\d+)\s*", str(value))
+    if match is None:
+        raise LocsFormatError(
+            f"{path or 'The file'} records the format version {value!r}, "
+            "which is not of the form MAJOR.MINOR."
+        )
+    return int(match.group(1)), int(match.group(2))
+
+
+def get_format_version(path: str) -> tuple[int, int] | None:
+    """Version of the format of a localization file.
+
+    The version is stored by ``save_locs`` as the root attribute
+    ``picasso_format`` (``FORMAT_VERSION_ATTR``), next to
+    ``picasso_version``, the version of Picasso that wrote the file. See
+    ``LOCS_FORMAT_VERSION`` for what the major and minor versions mean.
+
+    Parameters
+    ----------
+    path : str
+        Path to the .hdf5 localization file.
+
+    Returns
+    -------
+    version : tuple of int or None
+        ``(major, minor)``, e.g. ``(1, 0)``. None for files that record
+        no version: those written before Picasso 1.0 and by other
+        software.
+
+    Raises
+    ------
+    LocsFormatError
+        If the recorded version is not of the form ``"MAJOR.MINOR"``.
+
+    Examples
+    --------
+    >>> from picasso import io
+    >>> io.get_format_version("movie_locs.hdf5")
+    (1, 0)
+    """
+    value = _read_root_attrs(path, (FORMAT_VERSION_ATTR,)).get(
+        FORMAT_VERSION_ATTR
+    )
+    if value is None:
+        return None
+    return _parse_format_version(value, path)
+
+
+def _check_format_version(path: str) -> tuple[int, int] | None:
+    """Format version of the localization file ``path`` (None for files
+    written before Picasso 1.0), refusing a newer major version.
+
+    Raises
+    ------
+    LocsFormatError
+        If the file is in a format of a newer major version than
+        ``LOCS_FORMAT_VERSION``, i.e., written by a newer Picasso that
+        changed the meaning of its content.
+    """
+    attrs = _read_root_attrs(path, (FORMAT_VERSION_ATTR, PICASSO_VERSION_ATTR))
+    if FORMAT_VERSION_ATTR not in attrs:
+        return None
+    version = _parse_format_version(attrs[FORMAT_VERSION_ATTR], path)
+    supported = _parse_format_version(LOCS_FORMAT_VERSION)
+    if version[0] > supported[0]:
+        writer = attrs.get(PICASSO_VERSION_ATTR)
+        if isinstance(writer, bytes):
+            writer = writer.decode("utf-8", errors="replace")
+        written_by = f", written by Picasso {writer}" if writer else ""
+        raise LocsFormatError(
+            f"{path} is in the localization file format "
+            f"{version[0]}.{version[1]}{written_by}. This version of "
+            f"Picasso ({__version__}) reads the formats up to "
+            f"{supported[0]}.x. Please update Picasso to open the file. "
+            f"See {docs_url('files.html#files-format-versions')}"
+        )
+    return version
+
+
+def _upgrade_legacy_locs(locs: pd.DataFrame) -> pd.DataFrame:
+    """Localizations from a file written before Picasso 1.0 in the
+    current format: the column ``likelihood`` (the name of the
+    log-likelihood column before Picasso 0.11) becomes ``log_likelihood``.
+    """
+    if "likelihood" in locs.columns and "log_likelihood" not in locs.columns:
+        locs = locs.rename(columns={"likelihood": "log_likelihood"})
+    return locs
+
+
+#: Picasso version since which a dark time counts the frames without
+#: signal, one frame fewer than before (see ``postprocess.dark_times``)
+_DARK_TIMES_CHANGED = (0, 11, 3)
+
+
+def _version_tuple(text) -> tuple[int, int, int] | None:
+    """``(major, minor, patch)`` of the first version number in ``text``,
+    e.g. ``"Picasso v0.9.6 Dark"``; None if there is none."""
+    match = re.search(r"(\d+)\.(\d+)(?:\.(\d+))?", str(text))
+    if match is None:
+        return None
+    return tuple(int(part or 0) for part in match.groups())
+
+
+def _dark_times_version(info: list[dict]) -> tuple[int, int, int] | None:
+    """Picasso version of the newest metadata entry recording that dark
+    times were computed (``picasso dark``), or None if there is none or
+    it names no version."""
+    for entry in reversed(info):
+        if not isinstance(entry, dict):
+            continue
+        step = entry.get("Step")
+        generated_by = str(entry.get("Generated by", ""))
+        if step == "Dark" or (
+            step is None and re.search(r"\bDark\b", generated_by)
+        ):
+            return _version_tuple(entry.get("Picasso version", generated_by))
+    return None
+
+
+def _check_dark_times(
+    locs: pd.DataFrame,
+    info: list[dict],
+    format_version: tuple[int, int] | None,
+    path: str,
+) -> None:
+    """Warn if the dark times of ``locs`` may follow the convention of
+    Picasso before 0.11.3, when they were one frame longer: the metadata
+    records them as computed by such a version, or the file was written
+    before Picasso 1.0 and does not say."""
+    if "dark" not in locs.columns:
+        return
+    version = _dark_times_version(info)
+    if version is None and format_version is not None:
+        return  # computed by other software, which Picasso cannot judge
+    if version is None or version < _DARK_TIMES_CHANGED:
+        _log.warning(
+            "%s: the dark times (column 'dark') may have been computed "
+            "before Picasso 0.11.3, when dark times were one frame longer "
+            "than now. Compute them again (e.g., picasso dark) before "
+            "comparing them with dark times computed now.",
+            path,
+        )
+
+
+def validate_locs(
+    locs: pd.DataFrame,
+    info: list[dict] | dict,
+    path: str | None = None,
+) -> None:
+    """Check that localizations and their metadata meet the minimum
+    requirements of the Picasso format.
+
+    The localizations need the columns ``MINIMUM_COLUMNS`` (``frame``,
+    ``x``, ``y``, ``lpx`` and ``lpy``) and the metadata the keys
+    ``MINIMUM_METADATA_KEYS`` (``Width``, ``Height`` and ``Frames``);
+    frames count from 0. Called by ``load_locs``, so files of other
+    software can be checked before they are opened in Picasso.
+
+    Parameters
+    ----------
+    locs : pd.DataFrame
+        Localizations.
+    info : list of dict or dict
+        Their metadata.
+    path : str or None, optional
+        The file the localizations come from, named in the error
+        message. Default is None.
+
+    Raises
+    ------
+    LocsFormatError
+        If a column or a metadata key is missing, or if frames are
+        negative.
+    """
+    source = path if path is not None else "The localizations"
+    missing_columns = [c for c in MINIMUM_COLUMNS if c not in locs.columns]
+    missing_keys = [
+        key
+        for key in MINIMUM_METADATA_KEYS
+        if lib.get_from_metadata(info, key) is None
+    ]
+    problems = []
+    if missing_columns:
+        names = ", ".join(f"'{c}'" for c in missing_columns)
+        noun = "column" if len(missing_columns) == 1 else "columns"
+        problems.append(f"the {noun} {names}")
+    if missing_keys:
+        names = ", ".join(f"'{key}'" for key in missing_keys)
+        noun = "key" if len(missing_keys) == 1 else "keys"
+        problems.append(f"the metadata {noun} {names}")
+    if problems:
+        raise LocsFormatError(
+            f"{source} lacks {' and '.join(problems)}. Localization files "
+            "need the columns frame, x, y, lpx and lpy (positions and "
+            "precisions in camera pixels) and the metadata keys Width, "
+            "Height and Frames. See "
+            f"{docs_url('files.html#files-minimum-requirements')}"
+        )
+    frame = locs["frame"].to_numpy()
+    # unsigned frames, as Picasso writes them, need no check
+    n_negative = 0 if frame.dtype.kind == "u" else np.count_nonzero(frame < 0)
+    if n_negative:
+        raise LocsFormatError(
+            f"{source} holds {n_negative:,} localizations with negative "
+            "frame numbers; frames count from 0 for the first frame."
+        )
+
+
+def _report_dropped_locs(
+    locs: pd.DataFrame,
+    kept: pd.DataFrame,
+    info: list[dict],
+    path: str,
+) -> None:
+    """Warn if ``lib.ensure_sanity`` dropped localizations of the file
+    ``path`` while loading it (``locs`` as read, ``kept`` as returned),
+    hinting at coordinates in nm if most lie beyond the field of view."""
+    n_dropped = len(locs) - len(kept)
+    if n_dropped == 0:
+        return
+    width = lib.get_from_metadata(info, "Width")
+    height = lib.get_from_metadata(info, "Height")
+    message = (
+        f"{n_dropped:,} of {len(locs):,} localizations in {path} were not "
+        "loaded: they have missing or infinite values, lie outside the "
+        f"field of view ({width} x {height} camera pixels) or have "
+        "negative values (e.g., coordinates or precisions)."
+    )
+    x = locs["x"].to_numpy()
+    y = locs["y"].to_numpy()
+    with np.errstate(invalid="ignore"):
+        n_outside = int(np.count_nonzero((x >= width) | (y >= height)))
+    if n_outside > len(locs) / 2:
+        message += (
+            f" Most of them lie beyond the field of view: x reaches "
+            f"{np.nanmax(x):,.1f} and y {np.nanmax(y):,.1f}. Picasso "
+            "expects x and y in camera pixels, i.e., coordinates in nm "
+            "divided by the pixel size; else Width and Height in the "
+            "metadata are too small."
+        )
+    _log.warning(message)
 
 
 def _render_index_to_save(locs: pd.DataFrame, info: list[dict], render_index):
@@ -5021,6 +5632,19 @@ def load_locs(
 ) -> tuple[pd.DataFrame, list[dict]]:
     """Load localization data from an HDF5 file.
 
+    The file is checked against the Picasso format: a file of a newer,
+    incompatible format version (see ``get_format_version``) and a file
+    without the required columns or metadata keys (see
+    ``validate_locs``) raise ``LocsFormatError``. Files written before
+    Picasso 1.0 are brought to the current format (the column
+    ``likelihood`` becomes ``log_likelihood``). Localizations with
+    missing or infinite values, outside the field of view or with
+    negative values are dropped (see ``lib.ensure_sanity``) with a
+    warning logged by the ``picasso.io`` logger.
+
+    The metadata is read from the .yaml file next to the HDF5 file if
+    there is one, else from the HDF5 file itself, see ``load_info``.
+
     Parameters
     ----------
     path : str
@@ -5049,12 +5673,17 @@ def load_locs(
     KeyError
         If the "locs" dataset is not found in the HDF5 file, indicating
         that the file does not contain the expected localization data.
+    LocsFormatError
+        If the file is of a newer major format version, lacks required
+        columns or metadata keys, or holds negative frame numbers.
     """
     if path.endswith(".csv"):
         raise ValueError(
             "If you wish to load a ThunderSTORM .csv file, use "
             "picasso.io.import_ts instead."
         )
+    # checked first, so a file of a newer format is not read in full
+    format_version = _check_format_version(path)
     try:
         locs = _read_locs_dataset(path, progress=progress)
     except KeyError as e:  # if "locs" key not found
@@ -5072,8 +5701,13 @@ def load_locs(
             )
         raise KeyError(e)
     info = load_info(path, qt_parent=qt_parent)
-    locs = lib.ensure_sanity(locs, info)
-    return locs, info
+    if format_version is None:
+        locs = _upgrade_legacy_locs(locs)
+    validate_locs(locs, info, path)
+    _check_dark_times(locs, info, format_version, path)
+    kept = lib.ensure_sanity(locs, info)
+    _report_dropped_locs(locs, kept, info, path)
+    return kept, info
 
 
 def save_identifications(
@@ -5097,10 +5731,7 @@ def save_identifications(
     with h5py.File(path, "w") as ids_file:
         ids_file.create_dataset("identifications", data=rec_ids)
         embedded = _write_metadata_dataset(ids_file, info)
-    if _save_metadata_in_yaml() or not embedded:
-        base, ext = os.path.splitext(path)
-        info_path = base + ".yaml"
-        save_info(info_path, info)
+    _write_sidecar(path, info, embedded)
 
 
 def load_identifications(
@@ -5177,6 +5808,11 @@ def load_filter(
     handle files that may contain localization data under different
     keys such as 'locs', 'groups', or 'clusters'.
 
+    Localizations ('locs') of a newer, incompatible format version are
+    refused and those written before Picasso 1.0 are brought to the
+    current format, as in ``load_locs``. Unlike there, the columns are
+    not checked, so tables of any kind can be opened.
+
     Parameters
     ----------
     path : str
@@ -5191,10 +5827,17 @@ def load_filter(
     info : list[dict]
         Metadata information loaded from the file, typically a list of
         dictionaries containing various metadata fields.
+
+    Raises
+    ------
+    LocsFormatError
+        If the localizations are of a newer major format version.
     """
     try:
         locs = pd.read_hdf(path, key="locs")
         info = load_info(path, qt_parent=qt_parent)
+        if _check_format_version(path) is None:
+            locs = _upgrade_legacy_locs(locs)
     except KeyError:
         try:
             locs = pd.read_hdf(path, key="groups")
@@ -5587,8 +6230,7 @@ def import_ts(path: str, pixelsize: float) -> tuple[pd.DataFrame, list[dict]]:
 
     locs.sort_values(kind="quicksort", by="frame", inplace=True)
 
-    img_info = {}
-    img_info["Generated by"] = f"Picasso v{__version__} csv2hdf"
+    img_info = lib.step_info("csv2hdf")
     img_info["Frames"] = int(np.max(frames)) + 1
     img_info["Height"] = int(np.ceil(np.max(y)))
     img_info["Width"] = int(np.ceil(np.max(x)))
@@ -5827,8 +6469,7 @@ def import_smap(
     locs = pd.DataFrame(data)
     locs.sort_values(kind="quicksort", by="frame", inplace=True)
 
-    img_info = {}
-    img_info["Generated by"] = f"Picasso v{__version__} smap2hdf"
+    img_info = lib.step_info("smap2hdf")
     img_info["Frames"] = int(np.max(frames)) + 1
     img_info["Height"] = int(np.ceil(np.max(y)))
     img_info["Width"] = int(np.ceil(np.max(x)))
@@ -6384,8 +7025,7 @@ def import_pyme(
     if len(finite_y):
         height = max(height, int(np.floor(finite_y.max())) + 1)
 
-    img_info = {}
-    img_info["Generated by"] = f"Picasso v{__version__} pyme2hdf"
+    img_info = lib.step_info("pyme2hdf")
     img_info["Frames"] = int(np.max(frames)) + 1 if n else 1
     img_info["Height"] = max(height, 1)
     img_info["Width"] = max(width, 1)

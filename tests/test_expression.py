@@ -323,8 +323,10 @@ def test_extract_filter_steps_ignores_recorded_steps(locs):
 
 @pytest.fixture
 def locs_path(locs, tmp_path):
-    """``locs`` saved with positions and finite photons."""
-    locs = locs.assign(photons=locs["photons"].fillna(300), x=1.0, y=2.0)
+    """``locs`` saved with positions, precisions and finite photons."""
+    locs = locs.assign(
+        photons=locs["photons"].fillna(300), x=1.0, y=2.0, lpy=locs["lpx"]
+    )
     path = tmp_path / "movie_locs.hdf5"
     info = [
         {

@@ -144,10 +144,11 @@ def test_removed_columns_leave_the_dialog(window, monkeypatch):
     monkeypatch.setattr(
         lib.RemoveColumnsDialog,
         "getParams",
-        staticmethod(lambda parent, columns: (["likelihood"], True)),
+        staticmethod(lambda parent, columns: (["log_likelihood"], True)),
     )
     window.remove_columns()
-    assert "likelihood" not in window.filter_expression.columns_label.text()
+    label = window.filter_expression.columns_label.text()
+    assert "log_likelihood" not in label
 
 
 def _save(window, path, monkeypatch):
