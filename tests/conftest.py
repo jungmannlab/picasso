@@ -765,6 +765,19 @@ def isolated_user_settings(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def no_update_check(request, monkeypatch):
+    """No test asks GitHub for the latest release: the command line and
+    the GUIs check for updates when they start, and with the fresh
+    settings file of every test a check is due. ``tests/test_updater.py``
+    tests the checks themselves."""
+    if request.node.fspath.basename == "test_updater.py":
+        return
+    from picasso import updater
+
+    monkeypatch.setattr(updater, "update_check_due", lambda: False)
+
+
+@pytest.fixture(autouse=True)
 def cpu_render_backend(request, monkeypatch):
     """Rendering tests compare against CPU references, and the GPU
     backend is selected by default wherever a GPU initializes, so every

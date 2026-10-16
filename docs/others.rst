@@ -420,7 +420,7 @@ Top level
 
 ``Updates``
 ^^^^^^^^^^^
-Written and read only by the update-notification feature, not by any module's own GUI.
+Written and read only by the update-notification feature, not by any module's own GUI. Picasso checks for a new version at most once a day, also when a check fails, e.g., without an internet connection.
 
 .. list-table::
    :widths: 22 10 68
@@ -440,4 +440,4 @@ Written and read only by the update-notification feature, not by any module's ow
      - Timestamp (ISO format) until which "remind me later" suppresses notifications.
    * - ``Disabled``
      - ``False``
-     - Update checks are switched off entirely.
+     - Update checks are switched off entirely, e.g., for batch jobs on a computing cluster.

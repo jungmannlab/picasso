@@ -256,9 +256,6 @@ class TestRenamedCommandLine:
             "sys.argv",
             ["picasso", "pc", "f.hdf5", "--binsize", "2", "--rmax", "50"],
         )
-        monkeypatch.setattr(
-            "picasso.updater.check_and_notify", lambda *args: None
-        )
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             cli.main()

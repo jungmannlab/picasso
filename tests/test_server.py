@@ -56,7 +56,6 @@ def test_network_listens_on_all_interfaces(streamlit_argv, capsys):
 def test_command_line_passes_the_flag(monkeypatch):
     called = []
     monkeypatch.setattr(cli, "_start_server", called.append)
-    monkeypatch.setattr("picasso.updater.check_and_notify", lambda *args: None)
     for argv, network in (
         (["picasso", "server"], False),
         (["picasso", "server", "--network"], True),

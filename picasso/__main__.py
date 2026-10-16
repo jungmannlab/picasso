@@ -6653,11 +6653,11 @@ def main():  # noqa: C901
     # Parse (the names renamed in Picasso 1.0 still work, with a notice)
     args = parser.parse_args(_current_names(sys.argv[1:]))
     if args.command:
-        # check for updates and print in the console if available
-        from .updater import cli_notify_update, check_and_notify
+        # check for updates while the command runs, see CliUpdateCheck
+        from .updater import CliUpdateCheck
 
         cli_update_check = True
-        update_thread = None
+        update_check = None
         gui_apps = [
             "localize",
             "filter",
@@ -6673,7 +6673,7 @@ def main():  # noqa: C901
             if len(sys.argv) == 2:  # only the gui is opened
                 cli_update_check = False
         if cli_update_check:
-            update_thread = check_and_notify(cli_notify_update)
+            update_check = CliUpdateCheck()
 
         if args.command in plugin_commands:
             _run_plugin_command(args)
@@ -6928,9 +6928,9 @@ def main():  # noqa: C901
         parser.print_help()
         return
 
-    # wait for the update check to finish before exiting
-    if update_thread is not None:
-        update_thread.join(timeout=6)
+    # tell about an update once the command is done
+    if update_check is not None:
+        update_check.finish()
 
 
 if __name__ == "__main__":

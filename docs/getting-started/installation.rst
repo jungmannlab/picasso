@@ -81,8 +81,12 @@ Picasso runs on Windows, macOS and Linux. Several installation modes are availab
 
       .. rubric:: Updating
 
-      Picasso notifies you about new versions (since v0.10.0). To update,
-      run:
+      Picasso notifies you about new versions (since v0.10.0), at most once
+      a day. In the command line, the notification comes after the command
+      has finished, and Picasso asks what to do about it only in a
+      terminal, so scripts and batch jobs never wait for an answer. To
+      switch the checks off, e.g., on a computing cluster, set ``Disabled``
+      in the :ref:`user settings <user-settings-file>`. To update, run:
 
       .. code-block:: bash
 

@@ -16,7 +16,6 @@ from datetime import datetime, timedelta
 from packaging.version import Version
 from . import io, __version__
 
-
 URL_LATEST_RELEASE_API = (
     "https://api.github.com/repos/jungmannlab/picasso/releases/latest"
 )
@@ -110,11 +109,12 @@ def should_check_today() -> bool:
     """
     try:
         settings = io.load_user_settings()
-        if settings["Updates"].get("Last update check", False):
-            last = datetime.fromisoformat(
-                settings["Updates"]["Last update check"]
-            )
-            return datetime.now() - last > timedelta(hours=24)
+        last = settings["Updates"].get("Last update check", False)
+        if not last:
+            return True
+        return datetime.now() - datetime.fromisoformat(last) > timedelta(
+            hours=24
+        )
     except Exception:
         return True
 
@@ -155,8 +155,29 @@ def disable_updates() -> None:
     io.save_user_settings(settings)
 
 
-def should_notify(latest_version: str) -> bool:
-    """Check user settings to decide whether to show an update notification.
+def update_check_due() -> bool:
+    """Whether to check for updates now, decided before any request.
+
+    Returns
+    -------
+    due : bool
+        False if update checks are disabled, the "remind me later"
+        window is still open or a check ran in the last 24 hours.
+    """
+    try:
+        updates = io.load_user_settings()["Updates"]
+        if updates.get("Disabled", False):
+            return False
+        snoozed = updates.get("Snoozed until")
+        if snoozed and datetime.now() < datetime.fromisoformat(snoozed):
+            return False
+    except Exception:
+        pass
+    return should_check_today()
+
+
+def is_skipped(latest_version: str) -> bool:
+    """Whether the user chose "skip this version" for this version.
 
     Parameters
     ----------
@@ -165,22 +186,14 @@ def should_notify(latest_version: str) -> bool:
 
     Returns
     -------
-    should_notify : bool
-        False if update checks are disabled, this version was skipped, the
-        snooze window is still open, or a check already ran today.
+    skipped : bool
+        True if notifications about this version are switched off.
     """
-    settings = io.load_user_settings()
-    if settings["Updates"].get("Disabled", False):
+    try:
+        updates = io.load_user_settings()["Updates"]
+        return updates.get("Skipped version") == latest_version
+    except Exception:
         return False
-
-    if settings["Updates"].get("Skipped version") == latest_version:
-        return False
-
-    snoozed = settings["Updates"].get("Snoozed until")
-    if snoozed and datetime.now() < datetime.fromisoformat(snoozed):
-        return False  # still within snooze window
-
-    return should_check_today()
 
 
 def mark_checked():
@@ -190,37 +203,68 @@ def mark_checked():
     io.save_user_settings(settings)
 
 
-def check_and_notify(notify_callback):
-    """Run an update check in a background thread.
+class CliUpdateCheck:
+    """Check for updates while a command runs and tell about an update
+    once the command is done.
 
-    Parameters
-    ----------
-    notify_callback : callable
-        Invoked with the latest version string if an update is available and
-        the user's settings allow notifying.
-
-    Returns
-    -------
-    thread : threading.Thread
-        The running daemon thread, so callers can join it.
+    The check starts on creation if one is due (``update_check_due``).
+    Only the request runs in a background thread; the user settings are
+    read and written, and the user is asked, in the calling thread, by
+    ``finish``, so the notification neither interrupts the output of the
+    command nor answers the questions it asks.
     """
 
-    def _check():
-        available, latest = is_update_available()
-        if not should_notify(latest):
-            return
-        mark_checked()
-        if available:
-            notify_callback(latest)
+    def __init__(self) -> None:
+        self._result = None
+        self._thread = None
+        if update_check_due():
+            self._thread = threading.Thread(target=self._fetch, daemon=True)
+            self._thread.start()
 
-    t = threading.Thread(target=_check, daemon=True)
-    t.start()
-    return t
+    def _fetch(self) -> None:
+        self._result = is_update_available()
+
+    def finish(self, timeout: float = 6) -> None:
+        """Wait for the check and tell about an update, see
+        ``cli_notify_update``.
+
+        Parameters
+        ----------
+        timeout : float, optional
+            How long to wait for the release server, in seconds. Default
+            is 6.
+        """
+        if self._thread is None:
+            return
+        self._thread.join(timeout)
+        # also without an answer, e.g., offline: the next check waits a
+        # day instead of slowing down every command
+        try:
+            mark_checked()
+        except OSError:  # e.g., a read-only home folder
+            pass
+        if self._result is None:
+            return
+        available, latest = self._result
+        if available and not is_skipped(latest):
+            cli_notify_update(latest)
+
+
+def _interactive() -> bool:
+    """Whether someone can answer at the terminal: stdin and stderr are
+    a terminal, unlike in scripts, pipes and batch jobs."""
+    try:
+        return sys.stdin.isatty() and sys.stderr.isatty()
+    except (AttributeError, ValueError):  # None or closed
+        return False
 
 
 def cli_notify_update(latest_version):
-    """Tell the user about an update on stderr and offer to silence future
-    notifications.
+    """Tell the user about an update on stderr and, in a terminal, offer
+    to silence future notifications.
+
+    Without a terminal, e.g., in a batch job, it only says how to switch
+    the checks off and does not wait for an answer.
 
     Parameters
     ----------
@@ -232,6 +276,13 @@ def cli_notify_update(latest_version):
         f"\n⚡ Picasso update available: v{latest_version}\n\n{url}",
         file=sys.stderr,
     )
+    if not _interactive():
+        print(
+            "   To switch off update checks, set Disabled: true in the "
+            f"Updates section of {io._user_settings_filename()}.\n",
+            file=sys.stderr,
+        )
+        return
     print(
         "   Would you like to silence update notifications?", file=sys.stderr
     )
@@ -240,7 +291,11 @@ def cli_notify_update(latest_version):
     print("   [9] Disable update checks", file=sys.stderr)
     print("   [Enter] Do nothing for now (remind tomorrow)\n", file=sys.stderr)
 
-    choice = input("   Choice: ").strip()
+    try:
+        choice = input("   Choice: ").strip()
+    except (EOFError, KeyboardInterrupt):
+        print(file=sys.stderr)
+        return
     if choice == "1":
         snooze_until(days=7)
     elif choice == "2":
@@ -262,20 +317,25 @@ def setup_gui_update_check(parent=None):  # noqa: C901
     parent : QtWidgets.QWidget, optional
         Parent of the message box. Default None.
     """
-    if not should_check_today():
+    if not update_check_due():
         return
 
     from PyQt6 import QtCore, QtWidgets
 
     class _Notifier(QtCore.QObject):
-        update_found = QtCore.pyqtSignal(str)
+        checked = QtCore.pyqtSignal(bool, str)
 
     notifier = _Notifier()
+
+    def _on_checked(available, latest_version):
+        # in the main thread, like all access to the user settings
+        mark_checked()
+        if available and not is_skipped(latest_version):
+            _show_dialog(latest_version)
 
     def _show_dialog(latest_version):
         import webbrowser
 
-        mark_checked()
         msg = get_update_url()
         # if one-click-installer is used, allow the user to open the release
         # page
@@ -319,12 +379,11 @@ def setup_gui_update_check(parent=None):  # noqa: C901
                 f"Picasso v{latest_version} is available!\n\n{msg}",
             )
 
-    notifier.update_found.connect(_show_dialog)
+    notifier.checked.connect(_on_checked)
 
     def _check():
         available, latest = is_update_available()
-        if available:
-            notifier.update_found.emit(latest)
+        notifier.checked.emit(available, latest or "")
 
     threading.Thread(target=_check, daemon=True).start()
 
