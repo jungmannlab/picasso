@@ -86,6 +86,8 @@ __all__ = [
     "plot_ripley_h",
     "rdf",
     "plot_rdf",
+    "nnd_distributions",
+    "plot_nnd_distributions",
 ]
 
 
@@ -6956,6 +6958,68 @@ _SHIFT_REGIONS_ERROR = (
 )
 
 
+def _statistic_regions(
+    info: list[dict],
+    picks: list[tuple] | None,
+    pick_shape: str | None,
+    pick_size: float | None,
+    shift: bool,
+) -> list[_Region | None]:
+    """The regions of interest in nm: the picks (None for those
+    without area) or, if ``picks`` is None, the field of view. Raises
+    ValueError for invalid picks and, if ``shift`` (random shifts of a
+    channel are requested), for regions other than rectangles and
+    circles."""
+    pixelsize = lib.get_from_metadata(info, "Pixelsize", raise_error=True)
+    if picks is None:
+        width = lib.get_from_metadata(info, "Width", raise_error=True)
+        height = lib.get_from_metadata(info, "Height", raise_error=True)
+        regions = [
+            _polygon_region(
+                np.array([0, width, width, 0]) * pixelsize,
+                np.array([0, 0, height, height]) * pixelsize,
+            )
+        ]
+    else:
+        if pick_shape not in lib.PICK_SHAPES:
+            raise ValueError(
+                f"Invalid pick shape: {pick_shape}. Choose one of "
+                f"{lib.PICK_SHAPES}."
+            )
+        if pick_shape not in lib.PICK_SHAPES_WITHOUT_SIZE and not pick_size:
+            raise ValueError(f"{pick_shape} picks require a pick size.")
+        regions = [
+            _pick_region(pick, pick_shape, pick_size, pixelsize)
+            for pick in picks
+        ]
+    if shift:
+        for region in regions:
+            if (
+                region is not None
+                and region.rectangle is None
+                and region.kind != _REGION_CIRCLE
+            ):
+                raise ValueError(_SHIFT_REGIONS_ERROR)
+    return regions
+
+
+def _warn_if_not_molecules(
+    locs: pd.DataFrame, subject: str, stacklevel: int
+) -> None:
+    """Warn if ``locs`` are not molecules; ``subject`` starts the
+    message (e.g., "The localizations are")."""
+    if not _are_molecules(locs):
+        warnings.warn(
+            f"{subject} not molecules (no 'n_events' or 'std_frame' "
+            "column), so each molecule is counted as many times as it was "
+            "localized, which appears as clustering at short distances. "
+            "Consider finding the molecules first, e.g., with "
+            "picasso.g5m.g5m or picasso.clusterer.find_cluster_centers.",
+            UserWarning,
+            stacklevel=stacklevel,
+        )
+
+
 def _pair_statistic(
     locs: pd.DataFrame,
     info: list[dict],
@@ -7008,47 +7072,12 @@ def _pair_statistic(
                 "or 'observed'."
             )
     pixelsize = lib.get_from_metadata(info, "Pixelsize", raise_error=True)
-    if picks is None:
-        width = lib.get_from_metadata(info, "Width", raise_error=True)
-        height = lib.get_from_metadata(info, "Height", raise_error=True)
-        regions = [
-            _polygon_region(
-                np.array([0, width, width, 0]) * pixelsize,
-                np.array([0, 0, height, height]) * pixelsize,
-            )
-        ]
-    else:
-        if pick_shape not in lib.PICK_SHAPES:
-            raise ValueError(
-                f"Invalid pick shape: {pick_shape}. Choose one of "
-                f"{lib.PICK_SHAPES}."
-            )
-        if pick_shape not in lib.PICK_SHAPES_WITHOUT_SIZE and not pick_size:
-            raise ValueError(f"{pick_shape} picks require a pick size.")
-        regions = [
-            _pick_region(pick, pick_shape, pick_size, pixelsize)
-            for pick in picks
-        ]
-    if cross and cross_null == "shift":
-        for region in regions:
-            if (
-                region is not None
-                and region.rectangle is None
-                and region.kind != _REGION_CIRCLE
-            ):
-                raise ValueError(_SHIFT_REGIONS_ERROR)
+    regions = _statistic_regions(
+        info, picks, pick_shape, pick_size, cross and cross_null == "shift"
+    )
     for locs_, which in ((locs, "localizations"), (partner_locs, "partner")):
-        if locs_ is not None and not _are_molecules(locs_):
-            warnings.warn(
-                f"The {which} are not molecules (no 'n_events' or "
-                "'std_frame' column), so each molecule is counted as many "
-                "times as it was localized, which appears as clustering "
-                "at short distances. Consider finding the molecules first, "
-                "e.g., with picasso.g5m.g5m or "
-                "picasso.clusterer.find_cluster_centers.",
-                UserWarning,
-                stacklevel=3,
-            )
+        if locs_ is not None:
+            _warn_if_not_molecules(locs_, f"The {which} are", stacklevel=4)
 
     # coordinates in nm, z None in 2D, of each channel
     channels = [locs] + ([partner_locs] if cross else [])
@@ -7932,6 +7961,498 @@ def _pair_statistic_regions(result: dict) -> dict:
                 size > 0, n_locs_partner / size, np.nan
             )
     return regions
+
+
+def nnd_distributions(
+    locs: pd.DataFrame | list[pd.DataFrame],
+    info: list[dict],
+    picks: list[tuple] | None = None,
+    pick_shape: (
+        Literal["Circle", "Rectangle", "Polygon", "Square", "Box", "Brush"]
+        | None
+    ) = None,
+    pick_size: float | None = None,
+    *,
+    names: list[str] | None = None,
+    r_max: float = 200.0,
+    steps: int = 40,
+    n_simulations: int = 99,
+    use_z: bool = False,
+    z_range: tuple[float, float] | None = None,
+    simulated_z: Literal["uniform", "observed"] = "uniform",
+    cross_null: Literal["shift", "labels"] = "shift",
+    random_seed: int | None = 0,
+    progress_callback: (
+        Callable[[int], None] | Literal["console"] | None
+    ) = None,
+) -> dict:
+    """Distributions of the first nearest neighbor distances (NNDs)
+    within and between channels in regions of interest, with the
+    distributions expected without interaction from simulations.
+
+    For every ordered pair of channels (A, B), the distance from each
+    molecule of A to the nearest molecule of B in the same region is
+    histogrammed (within a channel, to the nearest other molecule). NNDs
+    are not symmetric: A to B differs from B to A, e.g., if B labels
+    only some of A's structures. Molecules of a region without a
+    molecule of B (within a channel, without another molecule) have no
+    NND. The NNDs of all regions are pooled.
+
+    Each region is simulated ``n_simulations`` times. Within a channel,
+    its molecules are replaced by as many uniformly random points
+    (complete spatial randomness, CSR). Between channels, B is shifted
+    at random, wrapping around the region, which keeps the arrangement
+    of each channel (``cross_null="shift"``, independent channels), or
+    the channel of each molecule of A and B is shuffled (``"labels"``,
+    both channels follow the same distribution); see ``ripley_h``. The
+    mean of the simulated histograms is the distribution expected
+    without interaction, and their lowest and highest values give the
+    envelope. The simulations are in the same regions as the data, so
+    NNDs that are longer near the edges of a region (where neighbors
+    outside are not seen) are expected; no edge correction is needed.
+
+    Parameters
+    ----------
+    locs : pd.DataFrame or list of pd.DataFrames
+        Molecules of one or more channels in the same coordinates
+        (aligned), one localization per molecule, such as the molecules
+        found by ``g5m.g5m`` or the cluster centers of
+        ``clusterer.find_cluster_centers``.
+    info : list of dicts
+        Metadata of the localizations (e.g., of the first channel), must
+        contain the camera pixel size and, if ``picks`` is None, the
+        image size.
+    picks : list of tuples or None, optional
+        Regions of interest in camera pixels, in the format of
+        ``pick_shape``. If None, the whole field of view is used. See
+        ``ripley_h``. Default is None.
+    pick_shape : {"Circle", "Rectangle", "Polygon", "Square", "Box", \
+"Brush"} or None, optional
+        Shape of the picks. Required if ``picks`` is given. Default is
+        None.
+    pick_size : float or None, optional
+        Size of the picks in camera pixels: diameter for circles, width
+        for rectangles, side length for squares, None for polygons,
+        boxes and brush picks. Default is None.
+    names : list of str or None, optional
+        Names of the channels for the plot and the saved tables. If
+        None, the channels are called "0", "1", ... Default is None.
+    r_max : float, optional
+        Largest NND of the histograms in nm; longer NNDs are counted in
+        the totals, not in the histograms. Default is 200.
+    steps : int, optional
+        Number of histogram bins up to ``r_max``. Default is 40, i.e.,
+        bins of 5 nm.
+    n_simulations : int, optional
+        Number of simulations. 0 skips them. Default is 99.
+    use_z : bool, optional
+        If True, the NNDs are computed in 3D (x, y and z in nm), which
+        requires a ``z`` column in all channels. Default is False.
+    z_range : tuple of floats or None, optional
+        ``(z_min, z_max)`` in nm over which every region extends in 3D;
+        localizations outside of it are ignored. If None, each region
+        extends over the z range of the molecules of all channels in
+        it. Only used in 3D. Default is None.
+    simulated_z : {"uniform", "observed"}, optional
+        z of the simulated points within a channel in 3D, see
+        ``ripley_h``. Only used in 3D. Default is "uniform".
+    cross_null : {"shift", "labels"}, optional
+        How two channels are simulated: random shifts of the second
+        channel (independent channels; rectangular and circular regions
+        only) or random labels (both channels follow the same
+        distribution), see ``ripley_h``. Only used with several
+        channels. Default is "shift".
+    random_seed : int or None, optional
+        Seed of the simulations. None gives different simulations on
+        each call. Default is 0.
+    progress_callback : {callable, "console", None}, optional
+        Called with the number of regions processed so far, up to
+        ``n_regions * (n_simulations + 1)``. If "console", a progress
+        bar is printed. If None, no progress is reported. Default is
+        None.
+
+    Returns
+    -------
+    result : dict
+        Dictionary with the keys:
+
+        - "names": names of the channels.
+        - "edges": edges of the histogram bins in nm, shape (steps + 1,).
+        - "histograms": fraction of the molecules of channel A (first
+          axis) whose NND to channel B (second axis) falls in each bin,
+          shape (n_channels, n_channels, steps); NaN for pairs without
+          any NND.
+        - "simulated_mean", "envelope_low", "envelope_high": mean,
+          lowest and highest simulated fractions, same shape, or None
+          without simulations.
+        - "n_molecules": number of NNDs of each pair, i.e., of molecules
+          of A with a molecule of B in their region.
+        - "medians": median NND of each pair in nm.
+        - "simulated_medians": mean over the simulations of the median
+          NND of each pair in nm, or None without simulations.
+        - "n_regions", "n_simulations", "use_z", "simulated_z" (None in
+          2D), "cross_null" (None for one channel).
+
+    Raises
+    ------
+    ValueError
+        If the parameters are invalid, z is missing in 3D, no pair of
+        channels has an NND or random shifts are requested in regions
+        other than rectangles and circles.
+
+    Warns
+    -----
+    UserWarning
+        If a channel is not molecules (no ``n_events`` or ``std_frame``
+        column).
+
+    See Also
+    --------
+    plot_nnd_distributions : Plot the result.
+    nn_analysis : NNDs of each localization.
+    """
+    if isinstance(locs, pd.DataFrame):
+        locs = [locs]
+    n_channels = len(locs)
+    if not n_channels:
+        raise ValueError("At least one channel is required.")
+    if names is None:
+        names = [str(i) for i in range(n_channels)]
+    names = [str(name) for name in names]
+    if len(names) != n_channels:
+        raise ValueError(
+            f"{len(names)} names given for {n_channels} channels."
+        )
+    if r_max <= 0:
+        raise ValueError("r_max must be positive.")
+    if steps < 1:
+        raise ValueError("steps must be at least 1.")
+    if n_simulations < 0:
+        raise ValueError("n_simulations must not be negative.")
+    cross = n_channels > 1
+    if cross and cross_null not in ("shift", "labels"):
+        raise ValueError(
+            f"Invalid cross_null: {cross_null!r}; choose 'shift' or "
+            "'labels'."
+        )
+    if use_z:
+        if not all("z" in locs_.columns for locs_ in locs):
+            raise ValueError("3D requires z in all channels.")
+        if z_range is not None and not z_range[0] < z_range[1]:
+            raise ValueError("z_range must be (z_min, z_max), z_min < z_max.")
+        if simulated_z not in ("uniform", "observed"):
+            raise ValueError(
+                f"Invalid simulated_z: {simulated_z!r}; choose 'uniform' "
+                "or 'observed'."
+            )
+    pixelsize = lib.get_from_metadata(info, "Pixelsize", raise_error=True)
+    regions = _statistic_regions(
+        info, picks, pick_shape, pick_size, cross and cross_null == "shift"
+    )
+    for locs_, name in zip(locs, names):
+        _warn_if_not_molecules(locs_, f"Channel {name} is", stacklevel=3)
+
+    coordinates = [
+        (
+            locs_["x"].to_numpy(dtype=np.float64) * pixelsize,
+            locs_["y"].to_numpy(dtype=np.float64) * pixelsize,
+            locs_["z"].to_numpy(dtype=np.float64) if use_z else None,
+        )
+        for locs_ in locs
+    ]
+    edges = np.arange(steps + 1) * (r_max / steps)
+    pairs = [(a, b) for a in range(n_channels) for b in range(n_channels)]
+    counts = np.zeros((n_channels, n_channels, steps))
+    n_molecules = np.zeros((n_channels, n_channels), dtype=int)
+    nnds = {pair: [] for pair in pairs}
+    region_points = []  # (region, z range, points of each channel)
+    n_regions = len(regions)
+    callback, close = _progress_counter(
+        progress_callback,
+        n_regions * (n_simulations + 1),
+        desc="NNDs",
+        unit="region",
+    )
+    done = 0
+    try:
+        for region in regions:
+            data = _nnd_region_points(region, coordinates, use_z, z_range)
+            if data is not None:
+                points = data[1]
+                for a, b in pairs:
+                    region_nnds = _first_nnds(points[a], points[b], a == b)
+                    nnds[a, b].append(region_nnds)
+                    counts[a, b] += np.histogram(region_nnds, edges)[0]
+                    n_molecules[a, b] += len(region_nnds)
+                region_points.append((region, *data))
+            done += 1
+            if callback is not None:
+                callback(done)
+        if not n_molecules.any():
+            raise ValueError(
+                "No region contains two molecules of a channel or "
+                "molecules of two channels."
+            )
+        with np.errstate(invalid="ignore", divide="ignore"):
+            histograms = counts / n_molecules[:, :, None]
+        medians = np.full((n_channels, n_channels), np.nan)
+        for a, b in pairs:
+            if n_molecules[a, b]:
+                medians[a, b] = np.median(np.concatenate(nnds[a, b]))
+
+        simulated_mean = envelope_low = envelope_high = None
+        simulated_medians = None
+        if n_simulations:
+            rng = np.random.default_rng(random_seed)
+            simulated = np.zeros(
+                (n_simulations, n_channels, n_channels, steps)
+            )
+            medians_sim = np.full(
+                (n_simulations, n_channels, n_channels), np.nan
+            )
+            for s in range(n_simulations):
+                sim_counts = np.zeros((n_channels, n_channels, steps))
+                sim_nnds = {pair: [] for pair in pairs}
+                for region, region_z, points in region_points:
+                    for a, b in pairs:
+                        if a == b:
+                            simulated_points = _simulated_points(
+                                [points[a]],
+                                region,
+                                region_z,
+                                False,
+                                cross_null,
+                                simulated_z,
+                                rng,
+                            )
+                            source = target = simulated_points[0]
+                        else:
+                            source, target = _simulated_points(
+                                [points[a], points[b]],
+                                region,
+                                region_z,
+                                True,
+                                cross_null,
+                                simulated_z,
+                                rng,
+                            )
+                        region_nnds = _first_nnds(source, target, a == b)
+                        sim_nnds[a, b].append(region_nnds)
+                        sim_counts[a, b] += np.histogram(region_nnds, edges)[0]
+                    done += 1
+                    if callback is not None:
+                        callback(done)
+                done += n_regions - len(region_points)
+                with np.errstate(invalid="ignore", divide="ignore"):
+                    simulated[s] = sim_counts / n_molecules[:, :, None]
+                for a, b in pairs:
+                    if n_molecules[a, b]:
+                        medians_sim[s, a, b] = np.median(
+                            np.concatenate(sim_nnds[a, b])
+                        )
+            simulated_mean = simulated.mean(axis=0)
+            envelope_low = simulated.min(axis=0)
+            envelope_high = simulated.max(axis=0)
+            simulated_medians = medians_sim.mean(axis=0)
+    finally:
+        close()
+
+    return {
+        "names": names,
+        "edges": edges,
+        "histograms": histograms,
+        "simulated_mean": simulated_mean,
+        "envelope_low": envelope_low,
+        "envelope_high": envelope_high,
+        "n_molecules": n_molecules,
+        "medians": medians,
+        "simulated_medians": simulated_medians,
+        "n_regions": n_regions,
+        "n_simulations": n_simulations,
+        "use_z": use_z,
+        "simulated_z": simulated_z if use_z else None,
+        "cross_null": cross_null if cross else None,
+    }
+
+
+def _nnd_region_points(
+    region: _Region | None,
+    coordinates: list[tuple],
+    use_z: bool,
+    z_range: tuple[float, float] | None,
+) -> tuple[tuple[float, float] | None, list[tuple]] | None:
+    """The z range of a region (None in 2D) and the points ``(x, y,
+    z)`` of each channel (``coordinates``, nm) inside it, or None for a
+    region without area or, in 3D, without depth."""
+    if region is None:
+        return None
+    points = []
+    for x_all, y_all, z_all in coordinates:
+        inside = _locs_in_region(x_all, y_all, region)
+        if use_z and z_range is not None:
+            z = z_all[inside]
+            inside = inside[(z >= z_range[0]) & (z <= z_range[1])]
+        points.append(
+            (x_all[inside], y_all[inside], z_all[inside] if use_z else None)
+        )
+    region_z = None
+    if use_z:
+        if z_range is not None:
+            region_z = tuple(z_range)
+        elif sum(len(x) for x, _, _ in points):
+            z = np.concatenate([z for _, _, z in points])
+            region_z = (z.min(), z.max())
+        if region_z is None or region_z[1] <= region_z[0]:
+            return None
+    return region_z, points
+
+
+def _first_nnds(source: tuple, target: tuple, same: bool) -> lib.FloatArray1D:
+    """Distances (nm) from each of the ``source`` points ``(x, y, z)``
+    (z None in 2D) to the nearest ``target`` point; if ``same``, the
+    source and target are the same points and the nearest other point
+    is used. Empty if there is no such point."""
+    n_targets = len(target[0])
+    if not len(source[0]) or n_targets < (2 if same else 1):
+        return np.zeros(0)
+    columns = [c for c in source if c is not None]
+    tree = KDTree(np.column_stack([c for c in target if c is not None]))
+    distances, _ = tree.query(np.column_stack(columns), k=2 if same else 1)
+    return distances[:, 1] if same else distances
+
+
+def plot_nnd_distributions(
+    nnd_result: dict,
+    fig: plt.Figure | None = None,
+) -> plt.Figure:
+    """Plot the first nearest neighbor distance (NND) distributions of
+    every ordered pair of channels in a grid (rows: from, columns: to),
+    with the mean and the range of the simulations.
+
+    Parameters
+    ----------
+    nnd_result : dict
+        Result of ``nnd_distributions``.
+    fig : plt.Figure or None, optional
+        Figure to plot on, cleared first. If None, a new figure is
+        created. Default is None.
+
+    Returns
+    -------
+    fig : plt.Figure
+        Figure containing the plot.
+    """
+    if fig is None:
+        fig = plt.Figure(constrained_layout=True)
+    else:
+        fig.clear()
+    names = nnd_result["names"]
+    n_channels = len(names)
+    edges = nnd_result["edges"]
+    simulated = nnd_result["simulated_mean"] is not None
+    # colors of the active style, resolved now (lines look "CN" colors
+    # up only when drawn)
+    data_color, simulation_color = plt.rcParams["axes.prop_cycle"].by_key()[
+        "color"
+    ][:2]
+    axes = fig.subplots(n_channels, n_channels, sharex=True, squeeze=False)
+    for a in range(n_channels):
+        for b in range(n_channels):
+            ax = axes[a, b]
+            ax.set_title(f"{names[a]} → {names[b]}" if n_channels > 1 else "")
+            histogram = nnd_result["histograms"][a, b]
+            if np.isnan(histogram).all():
+                ax.text(
+                    0.5,
+                    0.5,
+                    "No NNDs",
+                    ha="center",
+                    va="center",
+                    transform=ax.transAxes,
+                )
+                continue
+            if simulated:
+                ax.fill_between(
+                    edges,
+                    np.append(nnd_result["envelope_low"][a, b], np.nan),
+                    np.append(nnd_result["envelope_high"][a, b], np.nan),
+                    step="post",
+                    color=simulation_color,
+                    alpha=0.3,
+                    linewidth=0,
+                    label="Simulations (range)",
+                )
+                ax.stairs(
+                    nnd_result["simulated_mean"][a, b],
+                    edges,
+                    color=simulation_color,
+                    linewidth=1.2,
+                    linestyle="--",
+                    label="Simulations (mean)",
+                )
+            # the data on top of the simulations
+            ax.stairs(
+                histogram, edges, color=data_color, linewidth=1.5, label="Data"
+            )
+            ax.set_xlim(0, edges[-1])
+            ax.set_ylim(bottom=0)
+            if a == n_channels - 1:
+                ax.set_xlabel("1st NND (nm)")
+            if b == 0:
+                ax.set_ylabel("Fraction of molecules")
+    title = "Nearest neighbor distances" + (
+        " (3D)" if nnd_result["use_z"] else ""
+    )
+    if simulated:
+        axes[0, 0].legend(loc="best")
+        null = {
+            None: "random positions",
+            "shift": "random positions within channels,\nrandom shifts "
+            "between channels",
+            "labels": "random positions within channels,\nrandom labels "
+            "between channels",
+        }[nnd_result["cross_null"]]
+        title += f"\n{nnd_result['n_simulations']} simulations: {null}"
+    fig.suptitle(title)
+    return fig
+
+
+def _nnd_tables(nnd_result: dict) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """The result of ``nnd_distributions`` as two tables: the
+    histograms by bin (data, simulated mean and range of each ordered
+    pair of channels, as fractions of molecules) and the summary of
+    each pair (number of molecules and median NND, measured and
+    simulated). Used for saving the result as .csv files."""
+    names = nnd_result["names"]
+    edges = nnd_result["edges"]
+    curves = {"bin_start_nm": edges[:-1], "bin_end_nm": edges[1:]}
+    summary = []
+    for a, name_a in enumerate(names):
+        for b, name_b in enumerate(names):
+            pair = f"{name_a}_to_{name_b}"
+            curves[pair] = nnd_result["histograms"][a, b]
+            if nnd_result["simulated_mean"] is not None:
+                curves[f"{pair}_simulated_mean"] = nnd_result[
+                    "simulated_mean"
+                ][a, b]
+                curves[f"{pair}_envelope_low"] = nnd_result["envelope_low"][
+                    a, b
+                ]
+                curves[f"{pair}_envelope_high"] = nnd_result["envelope_high"][
+                    a, b
+                ]
+            row = {
+                "from": name_a,
+                "to": name_b,
+                "n_molecules": nnd_result["n_molecules"][a, b],
+                "median_nnd_nm": nnd_result["medians"][a, b],
+            }
+            if nnd_result["simulated_medians"] is not None:
+                row["simulated_median_nnd_nm"] = nnd_result[
+                    "simulated_medians"
+                ][a, b]
+            summary.append(row)
+    return pd.DataFrame(curves), pd.DataFrame(summary)
 
 
 def resi(

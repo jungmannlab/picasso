@@ -3145,3 +3145,141 @@ class TestCrossPairStatistics:
             postprocess.ripley_h(
                 a, self.INFO, partner_locs=b, cross_null="toroidal"
             )
+
+
+class TestNndDistributions:
+    INFO = TestRipleyH.INFO
+    SIZE = 10_000.0
+
+    def _random(self, n, seed, z=False):
+        rng = np.random.default_rng(seed)
+        locs = _ripley_locs(*rng.uniform(0, self.SIZE, size=(2, n)))
+        if z:
+            locs["z"] = rng.uniform(-400, 400, n)
+        return locs
+
+    def test_random_channel_matches_the_csr_distribution(self):
+        locs = self._random(10_000, 0)
+        result = postprocess.nnd_distributions(
+            locs, self.INFO, n_simulations=5
+        )
+        assert result["histograms"].shape == (1, 1, 40)
+        assert result["names"] == ["0"] and result["cross_null"] is None
+        # P(r_1 < NND <= r_2) = exp(-pi lambda r_1^2) - exp(-pi lambda r_2^2)
+        density = 10_000 / self.SIZE**2
+        edges = result["edges"]
+        expected = np.exp(-np.pi * density * edges[:-1] ** 2) - np.exp(
+            -np.pi * density * edges[1:] ** 2
+        )
+        np.testing.assert_allclose(
+            result["histograms"][0, 0], expected, atol=0.01
+        )
+        np.testing.assert_allclose(
+            result["simulated_mean"][0, 0], expected, atol=0.005
+        )
+        assert result["medians"][0, 0] == pytest.approx(
+            np.sqrt(np.log(2) / (np.pi * density)), rel=0.05
+        )
+
+    @pytest.mark.parametrize("cross_null", ["shift", "labels"])
+    def test_independent_channels_match_the_simulations(self, cross_null):
+        a, b = self._random(5000, 0), self._random(3000, 1)
+        result = postprocess.nnd_distributions(
+            [a, b],
+            self.INFO,
+            names=["A", "B"],
+            n_simulations=19,
+            cross_null=cross_null,
+        )
+        assert result["histograms"].shape == (2, 2, 40)
+        np.testing.assert_array_equal(
+            result["n_molecules"], [[5000, 5000], [3000, 3000]]
+        )
+        np.testing.assert_allclose(
+            result["medians"], result["simulated_medians"], rtol=0.05
+        )
+        inside = (result["histograms"] >= result["envelope_low"]) & (
+            result["histograms"] <= result["envelope_high"]
+        )
+        assert inside.mean() > 0.8
+
+    def test_colocalized_channels_have_short_cross_nnds(self):
+        rng = np.random.default_rng(2)
+        a = self._random(3000, 0)
+        b = a.copy()
+        b[["x", "y"]] += rng.normal(0, 0.1, size=(len(b), 2))  # 10 nm
+        result = postprocess.nnd_distributions(
+            [a, b], self.INFO, n_simulations=3
+        )
+        assert result["medians"][0, 1] < 20
+        assert result["simulated_medians"][0, 1] > 50
+        assert result["histograms"][0, 1, :3].sum() > 0.5
+
+    def test_nnds_are_within_regions(self):
+        a, b = self._random(4000, 0), self._random(4000, 1)
+        b = b[b["x"] > 50]  # the right half only
+        result = postprocess.nnd_distributions(
+            [a, b],
+            self.INFO,
+            [(25, 50), (75, 50)],
+            "Circle",
+            30,
+            n_simulations=0,
+        )
+        n_a = postprocess.picked_locs(
+            a, self.INFO, [(25, 50), (75, 50)], "Circle", 15
+        )
+        # molecules of a in the left pick have no b to point to
+        assert result["n_molecules"][0, 1] == len(n_a[1])
+        assert result["n_molecules"][0, 0] == len(n_a[0]) + len(n_a[1])
+        assert result["simulated_mean"] is None
+
+    def test_3d(self):
+        a, b = self._random(8000, 0, z=True), self._random(8000, 1, z=True)
+        result = postprocess.nnd_distributions(
+            [a, b], self.INFO, use_z=True, n_simulations=5
+        )
+        np.testing.assert_allclose(
+            result["medians"], result["simulated_medians"], rtol=0.05
+        )
+        flat = postprocess.nnd_distributions(
+            [a, b], self.INFO, n_simulations=0
+        )
+        assert (result["medians"] > flat["medians"]).all()
+        with pytest.raises(ValueError, match="requires z"):
+            postprocess.nnd_distributions(
+                [a, b.drop(columns="z")], self.INFO, use_z=True
+            )
+
+    def test_random_shifts_need_rectangles_or_circles(self):
+        a, b = self._random(1000, 0), self._random(1000, 1)
+        picks = [[(10, 10), (90, 15), (60, 50), (10, 10)]]
+        with pytest.raises(ValueError, match="cross_null='labels'"):
+            postprocess.nnd_distributions([a, b], self.INFO, picks, "Polygon")
+        # one channel needs no shifts
+        postprocess.nnd_distributions(a, self.INFO, picks, "Polygon")
+
+    def test_plot_and_tables(self):
+        a, b = self._random(2000, 0), self._random(2000, 1)
+        result = postprocess.nnd_distributions(
+            [a, b], self.INFO, names=["A", "B"], n_simulations=2
+        )
+        fig = postprocess.plot_nnd_distributions(result)
+        assert len(fig.axes) == 4
+        assert fig.axes[1].get_title() == "A → B"
+        curves, summary = postprocess._nnd_tables(result)
+        assert {"A_to_B", "A_to_B_simulated_mean"} <= set(curves.columns)
+        assert len(curves) == 40
+        assert list(summary["from"]) == ["A", "A", "B", "B"]
+        assert list(summary["to"]) == ["A", "B", "A", "B"]
+
+    def test_invalid_parameters(self):
+        a = self._random(500, 0)
+        with pytest.raises(ValueError, match="names"):
+            postprocess.nnd_distributions([a, a], self.INFO, names=["A"])
+        with pytest.raises(ValueError, match="cross_null"):
+            postprocess.nnd_distributions(
+                [a, a], self.INFO, cross_null="toroidal"
+            )
+        with pytest.raises(ValueError, match="r_max"):
+            postprocess.nnd_distributions(a, self.INFO, r_max=0)

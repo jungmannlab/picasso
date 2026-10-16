@@ -889,3 +889,90 @@ region extends over the z range of the molecules of both channels.
 
       fig = postprocess.plot_rdf(result)
       fig.savefig("cross_rdf.png")
+
+.. _render-nnd-distributions:
+
+Nearest Neighbor Distances (All Channels)
+-----------------------------------------
+
+Plots the distributions of the first nearest neighbor distances (NNDs) of the
+molecules within and between channels, together with the distributions
+expected if the molecules do not interact, from random simulations. For every
+ordered pair of channels (A, B), it histograms the distance from each molecule
+of A to the nearest molecule of B in the same region; within a channel (A, A),
+to the nearest other molecule. The plot is a grid with one panel per pair:
+rows are the channel the distances start from, columns the channel of the
+nearest neighbor. NNDs are not symmetric.
+
+Unlike :ref:`render-nearest-neighbor-analysis`, which saves the distances of
+each localization, this compares their distributions with random simulations.
+As for Ripley's H function, it should be computed on molecules (see the note
+in :ref:`render-ripley-h`), and the channels must be aligned.
+
+Each region is simulated as many times as set in ``Simulations``:
+
+- Within a channel (diagonal panels), its molecules are replaced by as many
+  uniformly random points (complete spatial randomness).
+- Between channels, as set in ``Envelope`` (see
+  :ref:`render-cross-functions`): ``Random shifts (independence)`` shifts B
+  at random, wrapping around the region, so that each channel keeps its own
+  arrangement; ``Random labels (same distribution)`` shuffles the channels of
+  the molecules of A and B.
+
+The dashed line is the mean of the simulated histograms, the expected
+distribution without interaction, and the shaded band is their range (lowest
+to highest). The simulations are in the same regions as the data, so the
+longer NNDs near the edges of a region, whose neighbors outside of it are not
+seen, are expected as well; no edge correction is applied. NNDs shorter than
+expected indicate clustering within a channel or colocalization between
+channels, longer ones dispersion or segregation.
+
+To use it, open ``Postprocess > Spatial statistics > Nearest neighbor
+distances (all channels)...``:
+
+1. Check the ``Channels`` to compare (with several channels loaded).
+2. Choose the ``Regions`` (picks, current view or whole field of view).
+3. Set ``Max. NND (nm)``, the largest distance shown, and the number of
+   histogram ``Bins``. Longer NNDs are not shown but count in the fractions.
+4. Set the number of ``Simulations`` and, with several channels, the
+   ``Envelope``.
+5. ``3D (x, y and z)`` computes the distances in 3D (all channels need z),
+   with the same z settings as in :ref:`render-ripley-h-3d`; the simulated z
+   applies within channels.
+6. Click ``OK``.
+
+``Save data`` saves the histograms (fraction of the molecules of A per bin;
+columns ``<A>_to_<B>``, ``<A>_to_<B>_simulated_mean``,
+``<A>_to_<B>_envelope_low`` and ``<A>_to_<B>_envelope_high``) and, as
+``<name>_summary.csv``, the number of molecules and the median NND, measured
+and simulated, of every pair.
+
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
+
+   ``nnd_distributions`` takes the molecules of one or more channels and the
+   regions like ``ripley_h``; the histograms are indexed by (from, to)
+   channel, see :func:`picasso.postprocess.nnd_distributions`.
+
+   .. code-block:: python
+
+      from picasso import io, postprocess
+
+      locs_a, info_a = io.load_locs("protein_a_molecules.hdf5")
+      locs_b, info_b = io.load_locs("protein_b_molecules.hdf5")
+
+      result = postprocess.nnd_distributions(
+          [locs_a, locs_b],
+          info_a,  # whole field of view
+          names=["A", "B"],
+          r_max=200,
+          steps=40,
+          n_simulations=99,
+      )
+      result["histograms"][0, 1]  # A -> B, fraction of A's molecules per bin
+      result["medians"]  # median NND of each pair (nm)
+      result["simulated_medians"]  # expected without interaction (nm)
+
+      fig = postprocess.plot_nnd_distributions(result)
+      fig.savefig("nnd.png")

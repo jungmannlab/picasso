@@ -8334,8 +8334,11 @@ class CBCDialog(lib.Dialog):
 
 #: Statistics of ``Postprocess > Spatial statistics``, by key: the
 #: window title, the functions of ``postprocess`` that compute, plot
-#: and tabulate them, the documentation, the suffix of the saved file
-#: and the default number of radius steps
+#: and tabulate them, the documentation, the suffixes of the saved files
+#: (the functions, and the summary next to them),
+#: the default maximum radius and number of steps, and whether the
+#: statistic takes several channels at once ("multichannel"; otherwise
+#: one channel or a channel and a partner)
 SPATIAL_STATISTICS = {
     "ripley_h": {
         "title": "Ripley's H function",
@@ -8344,7 +8347,10 @@ SPATIAL_STATISTICS = {
         "tables": postprocess._ripley_h_tables,
         "docs": docs_url("render/analysis.html#render-ripley-h"),
         "suffix": "_ripley_h",
+        "summary_suffix": "_regions",
+        "r_max": 500.0,
         "steps": 100,
+        "multichannel": False,
     },
     "rdf": {
         "title": "Radial distribution function",
@@ -8353,7 +8359,22 @@ SPATIAL_STATISTICS = {
         "tables": postprocess._rdf_tables,
         "docs": docs_url("render/analysis.html#render-rdf"),
         "suffix": "_rdf",
+        "summary_suffix": "_regions",
+        "r_max": 500.0,
         "steps": 50,
+        "multichannel": False,
+    },
+    "nnd": {
+        "title": "Nearest neighbor distances",
+        "compute": postprocess.nnd_distributions,
+        "plot": postprocess.plot_nnd_distributions,
+        "tables": postprocess._nnd_tables,
+        "docs": docs_url("render/analysis.html#render-nnd-distributions"),
+        "suffix": "_nnd",
+        "summary_suffix": "_summary",
+        "r_max": 200.0,
+        "steps": 40,
+        "multichannel": True,
     },
 }
 
@@ -8370,6 +8391,9 @@ class SpatialStatisticDialog(lib.Dialog):
     ----------
     channel : QComboBox
         Channel whose localizations are analyzed.
+    channels : QListWidget
+        Checkable channels for a multichannel statistic (e.g., nearest
+        neighbor distances), which replace the channel and partner.
     cross_null : QComboBox
         How the envelope is simulated with a partner channel: random
         shifts of the partner or random labels.
@@ -8436,14 +8460,37 @@ class SpatialStatisticDialog(lib.Dialog):
         for i, check in enumerate(window.dataset_dialog.checks):
             self.partner.addItem(check.text(), i)
         grid.addWidget(self.partner, 2, 1)
-        if len(view.locs_paths) < 2:
-            for widget in (
-                channel_label,
-                self.channel,
-                partner_label,
-                self.partner,
-            ):
-                widget.hide()
+        self.multichannel = self.statistic["multichannel"]
+        channels_label = QtWidgets.QLabel("Channels:")
+        channels_label.setToolTip(
+            "Channels whose nearest neighbor distances are compared;\n"
+            "every ordered pair of them is plotted."
+        )
+        grid.addWidget(channels_label, 1, 0, 2, 1)
+        self.channels_list = QtWidgets.QListWidget()
+        for check in window.dataset_dialog.checks:
+            item = QtWidgets.QListWidgetItem(check.text())
+            item.setFlags(
+                item.flags() | QtCore.Qt.ItemFlag.ItemIsUserCheckable
+            )
+            item.setCheckState(QtCore.Qt.CheckState.Checked)
+            self.channels_list.addItem(item)
+        self.channels_list.setMaximumHeight(
+            self.channels_list.sizeHintForRow(0) * min(len(view.locs_paths), 6)
+            + 2 * self.channels_list.frameWidth()
+        )
+        grid.addWidget(self.channels_list, 1, 1, 2, 1)
+        if self.multichannel:
+            hidden = [channel_label, self.channel, partner_label, self.partner]
+            if len(view.locs_paths) < 2:
+                hidden += [channels_label, self.channels_list]
+        else:
+            hidden = [channels_label, self.channels_list]
+            if len(view.locs_paths) < 2:
+                hidden += [channel_label, self.channel]
+                hidden += [partner_label, self.partner]
+        for widget in hidden:
+            widget.hide()
 
         region_label = QtWidgets.QLabel("Regions:")
         region_label.setToolTip(
@@ -8477,21 +8524,30 @@ class SpatialStatisticDialog(lib.Dialog):
             )
         )
 
-        r_label = QtWidgets.QLabel("Max. radius (nm):")
+        r_label = QtWidgets.QLabel(
+            "Max. NND (nm):" if self.multichannel else "Max. radius (nm):"
+        )
         r_label.setToolTip(
-            "Largest radius. It should be well below the size of the\n"
+            "Largest nearest neighbor distance in the histograms; longer\n"
+            "ones count only in the totals."
+            if self.multichannel
+            else "Largest radius. It should be well below the size of the\n"
             "regions."
         )
         grid.addWidget(r_label, 4, 0)
         self.r_max = QtWidgets.QDoubleSpinBox()
         self.r_max.setRange(0.1, 1e6)
         self.r_max.setDecimals(1)
-        self.r_max.setValue(500.0)
+        self.r_max.setValue(self.statistic["r_max"])
         self.r_max.setSingleStep(10)
         grid.addWidget(self.r_max, 4, 1)
-        steps_label = QtWidgets.QLabel("Radius steps:")
+        steps_label = QtWidgets.QLabel(
+            "Bins:" if self.multichannel else "Radius steps:"
+        )
         steps_label.setToolTip(
-            "Number of radius steps up to the max. radius (for the\n"
+            "Number of histogram bins up to the max. NND."
+            if self.multichannel
+            else "Number of radius steps up to the max. radius (for the\n"
             "radial distribution function, the number of rings)."
         )
         grid.addWidget(steps_label, 5, 0)
@@ -8539,6 +8595,8 @@ class SpatialStatisticDialog(lib.Dialog):
         )
         self.edge_correction.setChecked(True)
         grid.addWidget(self.edge_correction, 8, 0, 1, 2)
+        # NNDs are compared with simulations in the same regions instead
+        self.edge_correction.setVisible(not self.multichannel)
 
         # 3D
         self.use_z = QtWidgets.QCheckBox("3D (x, y and z)")
@@ -8591,6 +8649,7 @@ class SpatialStatisticDialog(lib.Dialog):
 
         self.channel.currentIndexChanged.connect(self.on_channel_changed)
         self.partner.currentIndexChanged.connect(self.on_channel_changed)
+        self.channels_list.itemChanged.connect(self.on_channel_changed)
         self.region.currentIndexChanged.connect(self.update_widgets)
         self.use_z.toggled.connect(self.update_widgets)
         self.z_limits.currentIndexChanged.connect(self.update_widgets)
@@ -8608,7 +8667,15 @@ class SpatialStatisticDialog(lib.Dialog):
         self.buttons.rejected.connect(self.reject)
 
     def channels(self) -> list[int]:
-        """Indices of the channel and, if chosen, the partner."""
+        """Indices of the checked channels (multichannel statistics) or
+        of the channel and, if chosen, the partner."""
+        if self.multichannel:
+            return [
+                i
+                for i in range(self.channels_list.count())
+                if self.channels_list.item(i).checkState()
+                == QtCore.Qt.CheckState.Checked
+            ]
         partner = self.partner.currentData()
         channel = self.channel.currentIndex()
         return [channel] if partner is None else [channel, partner]
@@ -8617,7 +8684,9 @@ class SpatialStatisticDialog(lib.Dialog):
         """Allow 3D only for channels with z and set the manual z range
         to that of their localizations."""
         all_locs = [self.window.view.locs[i] for i in self.channels()]
-        has_z = all("z" in locs.columns for locs in all_locs)
+        has_z = bool(all_locs) and all(
+            "z" in locs.columns for locs in all_locs
+        )
         self.use_z.setEnabled(has_z)
         if not has_z:
             self.use_z.setChecked(False)
@@ -8635,13 +8704,19 @@ class SpatialStatisticDialog(lib.Dialog):
         use_z = self.use_z.isChecked()
         manual = self.z_limits.currentData() == "manual"
         simulate = self.simulations.value() > 0
-        cross = self.partner.currentData() is not None
+        if self.multichannel:
+            cross = len(self.channels()) > 1
+        else:
+            cross = self.partner.currentData() is not None
         for widget in (self.z_limits_label, self.z_limits):
             widget.setVisible(use_z)
         for widget in (self.z_min_label, self.z_min, self.z_max):
             widget.setVisible(use_z and manual)
+        # within a channel, multichannel statistics simulate z, too
         for widget in (self.simulated_z_label, self.simulated_z):
-            widget.setVisible(use_z and simulate and not cross)
+            widget.setVisible(
+                use_z and simulate and (self.multichannel or not cross)
+            )
         for widget in (self.cross_null_label, self.cross_null):
             widget.setVisible(cross and simulate)
         shiftable = (
@@ -8659,7 +8734,17 @@ class SpatialStatisticDialog(lib.Dialog):
         self.adjustSize()
 
     def accept(self) -> None:
-        if self.partner.currentData() == self.channel.currentIndex():
+        if self.multichannel and not self.channels():
+            QtWidgets.QMessageBox.information(
+                self,
+                self.statistic["title"],
+                "Please check at least one channel.",
+            )
+            return
+        if (
+            not self.multichannel
+            and self.partner.currentData() == self.channel.currentIndex()
+        ):
             QtWidgets.QMessageBox.information(
                 self,
                 self.statistic["title"],
@@ -8703,14 +8788,17 @@ class SpatialStatisticDialog(lib.Dialog):
             "simulated_z": "uniform",
             "partner": dialog.partner.currentData(),
             "cross_null": dialog.cross_null.currentData(),
+            "channels": dialog.channels(),
         }
+        if dialog.multichannel:
+            params["partner"] = None
         if params["use_z"]:
             if dialog.z_limits.currentData() == "manual":
                 params["z_range"] = (
                     dialog.z_min.value(),
                     dialog.z_max.value(),
                 )
-            if params["partner"] is None:
+            if params["partner"] is None:  # within a channel
                 params["simulated_z"] = dialog.simulated_z.currentData()
         return params, result == QtWidgets.QDialog.DialogCode.Accepted
 
@@ -8726,12 +8814,18 @@ class SpatialStatisticPlotWindow(lib.GenericPlotWindow):
         super().__init__(f"{self.statistic['title']} - {title}", "render")
         self.result = result
         self.locs_path = locs_path
+        if self.statistic["multichannel"]:  # a grid of channel pairs
+            n_channels = len(result["names"])
+            self.resize(
+                min(400 + 300 * n_channels, 1600),
+                min(250 + 250 * n_channels, 1200),
+            )
         self.toolbar.addSeparator()
         save_action = self.toolbar.addAction("Save data")
         save_action.setIcon(theme.icon("export-csv"))
         save_action.setToolTip(
-            "Save the functions and the summary of each region as\n"
-            ".csv files."
+            "Save the data and its summary (of each region, or of each\n"
+            "pair of channels) as .csv files."
         )
         save_action.triggered.connect(self.save_data)
         theme.follow_toolbar_style(self.toolbar, save_action)
@@ -8745,14 +8839,19 @@ class SpatialStatisticPlotWindow(lib.GenericPlotWindow):
         self.canvas.draw()
 
     def save_data(self) -> None:
-        """Ask for a path and save the functions there and the summary
-        of each region next to it (``_regions.csv``)."""
+        """Ask for a path and save the data there and its summary next
+        to it (e.g., ``_regions.csv``)."""
         path, _ = QtWidgets.QFileDialog.getSaveFileName(
             self,
             f"Save {self.statistic['title']}",
             os.path.splitext(self.locs_path)[0]
             + self.statistic["suffix"]
-            + ("_cross" if self.result["cross_null"] else "")
+            + (
+                "_cross"
+                if self.result["cross_null"]
+                and not self.statistic["multichannel"]
+                else ""
+            )
             + ".csv",
             filter="*.csv",
         )
@@ -8760,13 +8859,18 @@ class SpatialStatisticPlotWindow(lib.GenericPlotWindow):
             self.write_data(path)
 
     def write_data(self, path: str) -> list[str]:
-        """Save the functions to ``path`` and the summary of each region
-        to ``<path stem>_regions.csv``; return both paths."""
-        curves, regions = self.statistic["tables"](self.result)
-        regions_path = os.path.splitext(path)[0] + "_regions.csv"
+        """Save the data to ``path`` and its summary (of each region or
+        pair of channels) next to it, ``<path stem>_regions.csv`` or
+        ``<path stem>_summary.csv``; return both paths."""
+        curves, summary = self.statistic["tables"](self.result)
+        summary_path = (
+            os.path.splitext(path)[0]
+            + self.statistic["summary_suffix"]
+            + ".csv"
+        )
         curves.to_csv(path, index=False)
-        regions.to_csv(regions_path, index=False)
-        return [path, regions_path]
+        summary.to_csv(summary_path, index=False)
+        return [path, summary_path]
 
 
 class StitchDialog(lib.Dialog):
@@ -15664,11 +15768,19 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             return
         spec = SPATIAL_STATISTICS[statistic]
         name = spec["title"]
-        channel = params["channel"]
         partner = params["partner"]
-        used = [channel] if partner is None else [channel, partner]
+        if spec["multichannel"]:
+            used = params["channels"]
+        elif partner is None:
+            used = [params["channel"]]
+        else:
+            used = [params["channel"], partner]
+        channel = used[0]
         titles = [self.window.dataset_dialog.checks[i].text() for i in used]
-        title = " and ".join(titles)
+        if len(titles) > 2:
+            title = ", ".join(titles[:-1]) + " and " + titles[-1]
+        else:
+            title = " and ".join(titles)
 
         # each molecule of localizations counts as many times as it was
         # localized, which looks like clustering
@@ -15712,14 +15824,20 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         kwargs = dict(
             r_max=params["r_max"],
             steps=params["steps"],
-            edge_correction=params["edge_correction"],
             n_simulations=params["n_simulations"],
             use_z=params["use_z"],
             z_range=params["z_range"],
             simulated_z=params["simulated_z"],
-            partner_locs=None if partner is None else self.locs[partner],
             cross_null=params["cross_null"],
         )
+        if spec["multichannel"]:
+            locs = [self.locs[i] for i in used]
+            kwargs["names"] = titles
+        else:
+            kwargs["edge_correction"] = params["edge_correction"]
+            kwargs["partner_locs"] = (
+                None if partner is None else self.locs[partner]
+            )
 
         def compute(progress: lib.TaskProgress) -> tuple[dict, list[str]]:
             progress.phase(
@@ -19680,6 +19798,16 @@ class Window(QtWidgets.QMainWindow):
         )
         rdf_action.triggered.connect(
             lambda: self.view.spatial_statistic("rdf")
+        )
+        nnd_action = spatial_menu.addAction(
+            "Nearest neighbor distances (all channels)..."
+        )
+        nnd_action.setToolTip(
+            "Distributions of the 1st nearest neighbor distances within"
+            " and between channels, compared with random simulations."
+        )
+        nnd_action.triggered.connect(
+            lambda: self.view.spatial_statistic("nnd")
         )
 
         self.load_user_settings()

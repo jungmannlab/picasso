@@ -1072,6 +1072,66 @@ For example, in the picks saved in Render with rings of 5 nm:
 
    picasso rdf molecules.hdf5 -p picks.yaml -r 300 -s 60
 
+nnd
+---
+Distributions of the first nearest neighbor distances (NNDs) within and
+between channels, compared with random simulations (complete spatial
+randomness within channels; random shifts or random labels between channels).
+Takes the localization files of the channels (aligned molecules, unix style
+path patterns), in the picks given with ``-p`` or in the whole field of view.
+Saves next to the first file ``<file name>_nnd.csv`` (the histograms of every
+ordered pair of channels), ``<file name>_nnd_summary.csv`` (number of
+molecules and median NND, measured and simulated, of every pair) and the plot
+``<file name>_nnd.png``, and prints the summary. See
+:ref:`render-nnd-distributions` for details.
+
+.. code-block:: bash
+
+   picasso nnd files [--names names] [-p picks] [-r rmax] [-s steps] [-n simulations] [--3d] [--zrange zmin zmax] [--observed-z] [--cross-null shift|labels]
+
+For example, two channels with short names:
+
+.. code-block:: bash
+
+   picasso nnd protein_a_molecules.hdf5 protein_b_molecules.hdf5 --names A B
+
+.. list-table::
+   :header-rows: 1
+   :widths: 25 15 60
+
+   * - Option
+     - Default
+     - Description
+   * - ``--names`` (str)
+     - file names
+     - Names of the channels in the order of the files.
+   * - ``-p``, ``--picks`` (str)
+     - whole field of view
+     - Picks (.yaml) saved in Render; the regions of interest.
+   * - ``-r``, ``--rmax`` (float)
+     - ``200``
+     - The largest distance of the histograms (nm).
+   * - ``-s``, ``--steps`` (int)
+     - ``40``
+     - The number of histogram bins up to the largest distance.
+   * - ``-n``, ``--simulations`` (int)
+     - ``99``
+     - The number of random simulations, ``0`` to skip them.
+   * - ``--3d``
+     - off
+     - Compute the distances in 3D (x, y and z); requires z.
+   * - ``--zrange`` (float float)
+     - z of each region
+     - The z range (nm) over which the regions extend in 3D.
+   * - ``--observed-z``
+     - off
+     - In 3D, give the simulated points within a channel the observed z
+       values (shuffled) instead of spreading them uniformly.
+   * - ``--cross-null`` (``shift`` or ``labels``)
+     - ``shift``
+     - How pairs of channels are simulated: random shifts of the second
+       channel (rectangular or circular regions only) or random labels.
+
 cluster_combine
 ---------------
 Combines the localizations in each cluster of a group (to be deprecated in

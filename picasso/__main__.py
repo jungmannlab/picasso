@@ -1079,6 +1079,86 @@ def _pair_statistic(
             print(f"  saved {base + suffix}")
 
 
+def _nnd(
+    files: list[str],
+    names: list[str] | None,
+    picks_path: str | None,
+    r_max: float,
+    steps: int,
+    n_simulations: int,
+    use_3d: bool = False,
+    z_range: tuple[float, float] | None = None,
+    observed_z: bool = False,
+    cross_null: Literal["shift", "labels"] = "shift",
+) -> None:
+    """Distributions of the first nearest neighbor distances within and
+    between the channels in ``files`` (in the picks of ``picks_path``
+    or the whole field of view), with random simulations. Saves the
+    histograms (``<first file>_nnd.csv``), the summary of each pair of
+    channels (``<first file>_nnd_summary.csv``) and a plot
+    (``<first file>_nnd.png``). See ``postprocess.nnd_distributions``
+    for details."""
+    import warnings
+    from glob import glob
+    from itertools import chain
+    from . import io, lib, postprocess
+
+    paths = list(chain(*[sorted(glob(_)) for _ in files]))
+    if not paths:
+        raise SystemExit("No localization files found.")
+    if names is None:
+        names = [os.path.splitext(os.path.basename(p))[0] for p in paths]
+    elif len(names) != len(paths):
+        raise SystemExit(
+            f"{len(names)} names given for {len(paths)} files:\n"
+            + "\n".join(f"  {p}" for p in paths)
+        )
+    all_locs, infos = zip(*[io.load_locs(path) for path in paths])
+    for path, locs in zip(paths, all_locs):
+        _warn_if_not_molecules(path, locs)
+    picks, shape, size = None, None, None
+    if picks_path is not None:
+        pixelsize = lib.get_from_metadata(infos[0], "Pixelsize", 130.0)
+        picks, shape, size = io.load_picks(picks_path, pixelsize)
+    print("Nearest neighbor distances of:")
+    for path, name in zip(paths, names):
+        print(f"  {path} ({name})")
+    try:
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            result = postprocess.nnd_distributions(
+                list(all_locs),
+                infos[0],
+                picks,
+                shape,
+                size,
+                names=names,
+                r_max=r_max,
+                steps=steps,
+                n_simulations=n_simulations,
+                use_z=use_3d,
+                z_range=z_range,
+                simulated_z="observed" if observed_z else "uniform",
+                cross_null=cross_null,
+                progress_callback="console",
+            )
+    except ValueError as e:
+        raise SystemExit(str(e))
+    for warning in caught:
+        if "not molecules" not in str(warning.message):  # see above
+            print(f"WARNING: {warning.message}")
+    curves, summary = postprocess._nnd_tables(result)
+    print(summary.to_string(index=False))
+    base = os.path.splitext(paths[0])[0] + "_nnd"
+    curves.to_csv(base + ".csv", index=False)
+    summary.to_csv(base + "_summary.csv", index=False)
+    figure = postprocess.plot_nnd_distributions(result)
+    figure.set_size_inches(3 + 3 * len(paths), 2.5 + 2.5 * len(paths))
+    figure.savefig(base + ".png", dpi=150)
+    for suffix in (".csv", "_summary.csv", ".png"):
+        print(f"saved {base + suffix}")
+
+
 def _warn_if_not_molecules(path: str, locs: pd.DataFrame) -> None:
     """Print a warning if the localizations in ``path`` are not
     molecules, see ``postprocess._are_molecules``."""
@@ -5673,6 +5753,94 @@ def main():  # noqa: C901
     )
     _add_pair_statistic_arguments(rdf_parser, steps=50)
 
+    # nearest neighbor distance distributions
+    nnd_parser = subparsers.add_parser(
+        "nnd",
+        help=(
+            "distributions of the 1st nearest neighbor distances within"
+            " and between channels, with random simulations"
+        ),
+    )
+    nnd_parser.add_argument(
+        "files",
+        nargs="+",
+        help="hdf5 localization files of the channels (unix style path"
+        " patterns), aligned",
+    )
+    nnd_parser.add_argument(
+        "--names",
+        nargs="+",
+        help="names of the channels in the order of the files (default:"
+        " the file names)",
+    )
+    nnd_parser.add_argument(
+        "-p",
+        "--picks",
+        default=None,
+        help=(
+            "picks (.yaml) saved in Render; the regions of interest in"
+            " which the distances are computed (default: the whole field"
+            " of view)"
+        ),
+    )
+    nnd_parser.add_argument(
+        "-r",
+        "--rmax",
+        type=float,
+        default=200.0,
+        help="largest distance of the histograms in nm (default=200)",
+    )
+    nnd_parser.add_argument(
+        "-s",
+        "--steps",
+        type=int,
+        default=40,
+        help="number of histogram bins up to rmax (default=40)",
+    )
+    nnd_parser.add_argument(
+        "-n",
+        "--simulations",
+        type=int,
+        default=99,
+        help="number of random simulations, 0 to skip (default=99)",
+    )
+    nnd_parser.add_argument(
+        "--3d",
+        dest="use_3d",
+        action="store_true",
+        help="compute the distances in 3D (x, y and z), requires z",
+    )
+    nnd_parser.add_argument(
+        "--zrange",
+        nargs=2,
+        type=float,
+        metavar=("ZMIN", "ZMAX"),
+        default=None,
+        help=(
+            "z range in nm over which the regions extend in 3D (default:"
+            " the z range of the localizations in each region)"
+        ),
+    )
+    nnd_parser.add_argument(
+        "--observed-z",
+        action="store_true",
+        help=(
+            "in 3D, shuffle the observed z values for the simulated"
+            " points within a channel instead of spreading them uniformly"
+        ),
+    )
+    nnd_parser.add_argument(
+        "--cross-null",
+        choices=["shift", "labels"],
+        default="shift",
+        help=(
+            "how pairs of channels are simulated: random shifts of the"
+            " second channel (independent channels; rectangular or"
+            " circular regions only) or random labels (both channels"
+            " follow the same distribution) (default=shift)"
+        ),
+    )
+
     clusterfilter_parser = subparsers.add_parser(
         "clusterfilter",
         help="filter localizations by properties of their clusters",
@@ -6501,6 +6669,19 @@ def main():  # noqa: C901
                 args.use_2d,
                 args.names,
                 args.undefined,
+            )
+        elif args.command == "nnd":
+            _nnd(
+                args.files,
+                args.names,
+                args.picks,
+                args.rmax,
+                args.steps,
+                args.simulations,
+                args.use_3d,
+                None if args.zrange is None else tuple(args.zrange),
+                args.observed_z,
+                args.cross_null,
             )
         elif args.command in ("ripley_h", "rdf"):
             _pair_statistic(

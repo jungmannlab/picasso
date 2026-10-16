@@ -576,3 +576,10 @@ Radial distribution function (RDF)
 The density of neighbors at each distance from a molecule, relative to the
 mean density, in picks, the current view or the whole field of view, see
 :ref:`render-rdf`.
+
+Nearest neighbor distances (all channels)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The distributions of the first nearest neighbor distances within and between
+channels, compared with random simulations, see
+:ref:`render-nnd-distributions`.

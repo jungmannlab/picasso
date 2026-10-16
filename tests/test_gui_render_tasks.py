@@ -740,3 +740,53 @@ def test_cross_ripley_h_of_two_channels(window, qt_offscreen, monkeypatch):
     plot_window = view.spatial_statistic_windows["ripley_h"]
     assert " and " in plot_window.windowTitle()
     plot_window.close()
+
+
+def test_nnd_dialog_lists_the_channels(window, qt_offscreen):
+    view = window.view
+    dialog = gui_render.SpatialStatisticDialog(window, "nnd")
+    assert dialog.channels_list.isHidden()  # one channel
+    assert dialog.edge_correction.isHidden()
+    assert dialog.r_max.value() == 200 and dialog.steps.value() == 40
+    view.add(
+        view.locs_paths[0][:-5] + "_b.hdf5", _locs(1), _info(), render_=False
+    )
+    dialog = gui_render.SpatialStatisticDialog(window, "nnd")
+    assert not dialog.channels_list.isHidden()
+    assert dialog.channel.isHidden() and dialog.partner.isHidden()
+    assert dialog.channels() == [0, 1]
+    assert not dialog.cross_null.isHidden()  # two channels checked
+    dialog.channels_list.item(1).setCheckState(
+        gui_render.QtCore.Qt.CheckState.Unchecked
+    )
+    assert dialog.channels() == [0]
+    assert dialog.cross_null.isHidden()
+
+
+def test_nnd_of_two_channels(window, qt_offscreen, tmp_path, monkeypatch):
+    texts = _answer_unlinked_warning(
+        monkeypatch, QtWidgets.QMessageBox.StandardButton.Yes
+    )
+    view = window.view
+    view.add(
+        view.locs_paths[0][:-5] + "_b.hdf5", _locs(1), _info(), render_=False
+    )
+    params = _ripley_params(
+        "fov", channels=[0, 1], r_max=100.0, steps=20, cross_null="labels"
+    )
+    result = _run_spatial_statistic(
+        view, qt_offscreen, monkeypatch, params, "nnd"
+    )
+    assert "do not contain molecules" in texts[0]
+    titles = [check.text() for check in window.dataset_dialog.checks]
+    assert result["names"] == titles
+    assert result["histograms"].shape == (2, 2, 20)
+    assert result["cross_null"] == "labels"
+    # dense clusters: short NNDs within each channel
+    assert result["medians"][0, 0] < result["simulated_medians"][0, 0]
+    plot_window = view.spatial_statistic_windows["nnd"]
+    assert len(plot_window.figure.axes) == 4
+    paths = plot_window.write_data(str(tmp_path / "nnd.csv"))
+    assert paths[1] == str(tmp_path / "nnd_summary.csv")
+    assert len(pd.read_csv(paths[1])) == 4
+    plot_window.close()
