@@ -543,6 +543,10 @@ Remove all localizations
 
 Removes all localizations loaded, restarts the Render window.
 
+To be asked for confirmation first, set ``Confirm removing all
+localizations`` to ``true`` in the :ref:`user settings <user-settings-file>`;
+ticking *Don't ask again* in the question sets it back to ``false``.
+
 .. _render-file-other:
 
 Sound notifications, Picasso settings and Help

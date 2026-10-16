@@ -150,6 +150,9 @@ COLOR_VISION_OPTIONS = (
 # key (in the Render section of the user settings) of whether Align
 # channels keeps the localizations outside the overlap of the channels
 KEEP_NON_OVERLAPPING_KEY = "Keep non-overlapping after alignment"
+# key (in the Render section of the user settings) of whether File >
+# Remove all localizations asks for confirmation first
+CONFIRM_REMOVE_LOCS_KEY = "Confirm removing all localizations"
 POLYGON_POINTER_SIZE = 16  # must be even
 # shortest drag (display pixels, in x and y) that still yields a box
 # pick, so that a stray click does not create one of zero area
@@ -223,6 +226,38 @@ def _gradient_pixmap(
     return QtGui.QPixmap.fromImage(image.copy())
 
 
+def _render_bool_setting(key: str, default: bool) -> bool:
+    """Read a boolean from the ``Render`` section of the user settings.
+
+    A missing key is written with ``default``, so that it is visible in
+    the file, unless the file on disk could not be read. Values that
+    are not booleans are left in the file and ``default`` is returned.
+
+    Parameters
+    ----------
+    key : str
+        Key in the ``Render`` section.
+    default : bool
+        Value used when the key is missing or invalid.
+
+    Returns
+    -------
+    value : bool
+        The stored value, or ``default``.
+    """
+    settings = io.load_user_settings()
+    render_settings = settings["Render"]
+    if not isinstance(render_settings, dict):
+        return default
+    value = render_settings.get(key)
+    if isinstance(value, bool):
+        return value
+    if value is None and not io.settings_file_is_broken():
+        render_settings[key] = default
+        io.save_user_settings(settings)
+    return default
+
+
 def keep_non_overlapping_setting() -> bool:
     """Whether Align channels keeps the localizations that lie outside
     the region where all aligned channels overlap.
@@ -237,17 +272,23 @@ def keep_non_overlapping_setting() -> bool:
     keep : bool
         True if all localizations are kept after alignment.
     """
-    settings = io.load_user_settings()
-    render_settings = settings["Render"]
-    if not isinstance(render_settings, dict):
-        return True
-    value = render_settings.get(KEEP_NON_OVERLAPPING_KEY)
-    if isinstance(value, bool):
-        return value
-    if value is None and not io.settings_file_is_broken():
-        render_settings[KEEP_NON_OVERLAPPING_KEY] = True
-        io.save_user_settings(settings)
-    return True
+    return _render_bool_setting(KEEP_NON_OVERLAPPING_KEY, True)
+
+
+def confirm_remove_locs_setting() -> bool:
+    """Whether File > Remove all localizations asks for confirmation.
+
+    Reads ``Confirm removing all localizations`` from the ``Render``
+    section of the user settings; a missing key is written with the
+    default (False, remove right away), so that it is visible in the
+    file, unless the file on disk could not be read.
+
+    Returns
+    -------
+    confirm : bool
+        True if the user is asked before all localizations are removed.
+    """
+    return _render_bool_setting(CONFIRM_REMOVE_LOCS_KEY, False)
 
 
 def check_pick(f: Callable) -> Callable:
@@ -19469,7 +19510,7 @@ class Window(QtWidgets.QMainWindow):
         delete_action.setShortcuts(
             ["Ctrl+Shift+Backspace", "Ctrl+Shift+Delete"]
         )
-        delete_action.triggered.connect(self.remove_locs)
+        delete_action.triggered.connect(self.ask_remove_locs)
 
         picasso_settings_action = file_menu.addAction("Picasso settings...")
         picasso_settings_action.setIcon(theme.icon("picasso-settings"))
@@ -20617,8 +20658,9 @@ class Window(QtWidgets.QMainWindow):
             render_settings.get("Tracks")
         )
         self.apply_contrast_slider_setting()
-        # written to the file with its default if missing
+        # written to the file with their defaults if missing
         keep_non_overlapping_setting()
+        confirm_remove_locs_setting()
 
     def open_apply_dialog(self) -> None:
         """Load expression and apply it to locs."""
@@ -21179,6 +21221,36 @@ class Window(QtWidgets.QMainWindow):
             )
             return
         self.link_group.show_settings(self)
+
+    def ask_remove_locs(self) -> None:
+        """Remove all localizations (``remove_locs``) after asking for
+        confirmation if ``Confirm removing all localizations`` is True
+        in the user settings (False by default) and something is
+        loaded. Ticking
+        "Don't ask again" in the question turns the setting off."""
+        if self.view.locs_paths and confirm_remove_locs_setting():
+            box = QtWidgets.QMessageBox(self)
+            box.setIcon(QtWidgets.QMessageBox.Icon.Question)
+            box.setWindowTitle("Remove all localizations")
+            box.setText(
+                "Remove all loaded localizations? Unsaved changes are lost."
+            )
+            box.setStandardButtons(
+                QtWidgets.QMessageBox.StandardButton.Yes
+                | QtWidgets.QMessageBox.StandardButton.Cancel
+            )
+            box.setDefaultButton(QtWidgets.QMessageBox.StandardButton.Yes)
+            dont_ask = QtWidgets.QCheckBox("Don't ask again")
+            box.setCheckBox(dont_ask)
+            answer = box.exec()
+            if answer != QtWidgets.QMessageBox.StandardButton.Yes:
+                return
+            if dont_ask.isChecked():
+                settings = io.load_user_settings()
+                if isinstance(settings["Render"], dict):
+                    settings["Render"][CONFIRM_REMOVE_LOCS_KEY] = False
+                    io.save_user_settings(settings)
+        self.remove_locs()
 
     def remove_locs(self) -> None:
         """Remove all localizations and reset the window to its initial

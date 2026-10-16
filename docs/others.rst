@@ -276,6 +276,9 @@ Top level
    * - ``Keep non-overlapping after alignment``
      - ``True``
      - Keep all localizations after ``Postprocess > Align channels``. ``False`` removes the localizations outside the region where all aligned channels overlap. See :ref:`render-align-non-overlapping`.
+   * - ``Confirm removing all localizations``
+     - ``False``
+     - ``True`` asks for confirmation before ``File > Remove all localizations``. Ticking *Don't ask again* in the question sets it to ``False``. See :ref:`render-remove-all-localizations`.
    * - ``Colorbar format``
      - ``.png``
      - Format of the exported colorbar/LUT image next to a "render by property" export - ``.png`` or ``.svg``. See :ref:`render-colorbar-format`.

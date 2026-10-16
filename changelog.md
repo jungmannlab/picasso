@@ -1,6 +1,6 @@
 # Changelog
 
-Last change: 15-OCT-2026 CEST
+Last change: 16-OCT-2026 CEST
 
 ## 1.0.0
 
@@ -54,6 +54,7 @@ Last change: 15-OCT-2026 CEST
 - `Colorblind-safe colors` checkbox in the Files dialog colors the channels magenta, green, cyan, blue, and so on, which people with red-green color blindness can tell apart. See the [documentation](https://picassosr.readthedocs.io/en/latest/render/menu-view.html#render-default-colors).
 - The Info dialog shows the median localization precision of any loaded channel.
 - *Align channels* can remove the localizations that lie outside the overlap of the aligned channels. See the [documentation](https://picassosr.readthedocs.io/en/latest/render/menu-postprocess.html#render-align-non-overlapping).
+- Optional confirmation before `File > Remove all localizations`, turned on with the user setting `Confirm removing all localizations` (off by default). See the [documentation](https://picassosr.readthedocs.io/en/latest/render/menu-file.html#render-remove-all-localizations).
 - Fixed: closing a channel in Render did not remove its drift data, so the drift of the channels after it was misaligned.
 - Fixed: 3D histogram rendering scaled z unnecessarily.
 - Fixed NeNA (and FRC) overwriting group columns of localizations.
