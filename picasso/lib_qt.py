@@ -3504,6 +3504,59 @@ def adjust_widget_size(
     widget.resize(intended_width, intended_height)
 
 
+def _confirm_overwrite(parent: QtWidgets.QWidget | None, path: str) -> bool:
+    """Ask whether to overwrite the existing file or folder ``path``."""
+    box = QtWidgets.QMessageBox(parent)
+    box.setIcon(QtWidgets.QMessageBox.Icon.Warning)
+    box.setWindowTitle("File or folder already exists")
+    box.setText(
+        f"The path '{path}' already exists.\nDo you wish to overwrite it?"
+    )
+    box.setStandardButtons(
+        QtWidgets.QMessageBox.StandardButton.Yes
+        | QtWidgets.QMessageBox.StandardButton.No
+    )
+    return box.exec() == QtWidgets.QMessageBox.StandardButton.Yes
+
+
+#: What ``picasso.io``'s loaders raise for a file that cannot be opened:
+#: a missing file or metadata (``io.NoMetadataFileError``), a missing
+#: dataset (KeyError) and a file of the wrong kind or format
+#: (``io.LocsFormatError`` and other ValueErrors), see
+#: ``show_load_error``.
+FILE_LOAD_ERRORS = (OSError, KeyError, ValueError)
+
+
+def show_load_error(
+    parent: QtWidgets.QWidget | None, path: str, error: BaseException
+) -> None:
+    """Tell the user why a file could not be opened.
+
+    The I/O functions of ``picasso.io`` raise errors whose messages say
+    what is wrong and show no dialogs themselves; a window catches
+    ``FILE_LOAD_ERRORS`` around a loader and passes the error here.
+
+    Parameters
+    ----------
+    parent : QWidget or None
+        The window the message box belongs to.
+    path : str
+        The file that could not be opened.
+    error : BaseException
+        The error raised by the loader.
+    """
+    # a KeyError's str() quotes its message
+    if isinstance(error, KeyError) and error.args:
+        reason = str(error.args[0])
+    else:
+        reason = str(error)
+    QtWidgets.QMessageBox.critical(
+        parent,
+        "Could not open the file",
+        f"{os.path.basename(path)} could not be opened:\n\n{reason}",
+    )
+
+
 def get_save_filename_ext_dialog(
     parent: QtWidgets.QWidget,
     caption: str = "",
@@ -3549,11 +3602,12 @@ def get_save_filename_ext_dialog(
     # check for the existence of files with other extensions and ask the
     # user if they want to overwrite them
     if selected_path and check_ext:
-        paths_available = is_path_available(
-            selected_path, check_ext=check_ext, parent=parent
-        )
-        if not all(paths_available):
-            return "", ""
+        extensions = [check_ext] if isinstance(check_ext, str) else check_ext
+        available = is_path_available(selected_path, check_ext=extensions)
+        base = os.path.splitext(selected_path)[0]
+        for extension, free in zip(extensions, available):
+            if not free and not _confirm_overwrite(parent, base + extension):
+                return "", ""
     # if the user selected a .yml file, change the extension to .yaml
     # for consistency
     if selected_path.endswith(".yml"):

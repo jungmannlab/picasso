@@ -98,7 +98,7 @@ def test_experiment_statistics_window(qt_offscreen, monkeypatch):
             "bg": rng.normal(200, 20, n),
         }
     )
-    monkeypatch.setattr(io, "load_locs", lambda path, qt_parent: (locs, [{}]))
+    monkeypatch.setattr(io, "load_locs", lambda path: (locs, [{}]))
     answers = iter(["100", "5", "50", "100"])
     monkeypatch.setattr(
         QtWidgets.QInputDialog,

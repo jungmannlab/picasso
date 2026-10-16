@@ -8974,16 +8974,17 @@ class Window(QtWidgets.QMainWindow):
         identifications."""
         try:
             locs, _ = io.load_locs(path)
-            n_frames, ok = QtWidgets.QInputDialog.getInt(
-                self,
-                "Input Dialog",
-                "Enter number of frames around localization event:",
-                10,
-                min=0,
-            )
-            if not ok:
-                return
-        except io.NoMetadataFileError:
+        except lib.FILE_LOAD_ERRORS as error:
+            lib.show_load_error(self, path, error)
+            return
+        n_frames, ok = QtWidgets.QInputDialog.getInt(
+            self,
+            "Input Dialog",
+            "Enter number of frames around localization event:",
+            10,
+            min=0,
+        )
+        if not ok:
             return
 
         self.identifications = localize.locs_to_identifications(
@@ -9018,12 +9019,9 @@ class Window(QtWidgets.QMainWindow):
     def load_identifications(self, path: str) -> None:
         """Load identifications from a HDF5 file."""
         try:
-            identifications, info = io.load_identifications(
-                path, qt_parent=self
-            )
-        except io.NoMetadataFileError:
-            return
-        except KeyError:
+            identifications, info = io.load_identifications(path)
+        except lib.FILE_LOAD_ERRORS as error:
+            lib.show_load_error(self, path, error)
             return
         self.identifications = identifications
         box = lib.get_from_metadata(info, "Box Size")

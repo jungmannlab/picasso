@@ -355,8 +355,9 @@ class View(QtWidgets.QLabel):
             Path to the localization file.
         """
         try:
-            locs, info = io.load_locs(path, qt_parent=self)
-        except io.NoMetadataFileError:
+            locs, info = io.load_locs(path)
+        except lib.FILE_LOAD_ERRORS as error:
+            lib.show_load_error(self, path, error)
             return
         if "group" not in locs.columns:
             # not kept: averaging needs the groups

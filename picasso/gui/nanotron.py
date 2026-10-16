@@ -837,11 +837,12 @@ class train_dialog(lib.Dialog):
         )
         if path:
             try:
-                locs, info = io.load_locs(path, qt_parent=self)
-                self.pick_radii[file] = self.parse_pick_radius(info)
-                self.training_files_path[file] = path
-            except io.NoMetadataFileError:
+                locs, info = io.load_locs(path)
+            except lib.FILE_LOAD_ERRORS as error:
+                lib.show_load_error(self, path, error)
                 return
+            self.pick_radii[file] = self.parse_pick_radius(info)
+            self.training_files_path[file] = path
 
         if "group" not in locs.columns:
             msgBox = QtWidgets.QMessageBox(self)
@@ -1325,10 +1326,11 @@ class Window(QtWidgets.QMainWindow):
         self.path = path
 
         try:
-            self.locs, self.info = io.load_locs(path, qt_parent=self)
-            self.view.locs = self.locs
-        except io.NoMetadataFileError:
+            self.locs, self.info = io.load_locs(path)
+        except lib.FILE_LOAD_ERRORS as error:
+            lib.show_load_error(self, path, error)
             return
+        self.view.locs = self.locs
 
         if "group" not in self.locs.columns:
             msgBox = QtWidgets.QMessageBox(self)

@@ -2337,8 +2337,9 @@ class Window(QtWidgets.QMainWindow):
     def readhdf5(self, path: str) -> None:
         """Read HDF5 localizations from a file."""
         try:
-            locs, self.info = io.load_locs(path, qt_parent=self)
-        except io.NoMetadataFileError:
+            locs, self.info = io.load_locs(path)
+        except lib.FILE_LOAD_ERRORS as error:
+            lib.show_load_error(self, path, error)
             return
         integrationtime, ok1 = QtWidgets.QInputDialog.getText(
             self, "Input Dialog", "Enter integration time in ms:"

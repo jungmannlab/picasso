@@ -524,8 +524,9 @@ class Window(QtWidgets.QMainWindow):
 
     def add(self, path, rendermode=True):
         try:
-            locs, info = io.load_locs(path, qt_parent=self)
-        except io.NoMetadataFileError:
+            locs, info = io.load_locs(path)
+        except lib.FILE_LOAD_ERRORS as error:
+            lib.show_load_error(self, path, error)
             return
 
         if len(self.locs) == 0:

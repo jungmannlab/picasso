@@ -1277,8 +1277,9 @@ class Window(QtWidgets.QMainWindow):
 
     def open(self, path: str) -> None:
         try:
-            locs, self.info = io.load_filter(path, qt_parent=self)
-        except io.NoMetadataFileError:
+            locs, self.info = io.load_filter(path)
+        except lib.FILE_LOAD_ERRORS as error:
+            lib.show_load_error(self, path, error)
             return
         # the windows of the previous file (not read back if on disk)
         windows = list(self.hist_windows.values())
@@ -1473,8 +1474,9 @@ class Window(QtWidgets.QMainWindow):
         if not path:
             return None
         try:
-            return io.load_info(path, qt_parent=self)
-        except io.NoMetadataFileError:
+            return io.load_info(path)
+        except lib.FILE_LOAD_ERRORS as error:
+            lib.show_load_error(self, path, error)
             return None
 
     def apply_filters_from_metadata(self, path: str | None = None) -> None:

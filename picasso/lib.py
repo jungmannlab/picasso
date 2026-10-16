@@ -169,6 +169,8 @@ _QT_NAMES = (
     "install_excepthook",
     "adjust_widget_size",
     "get_save_filename_ext_dialog",
+    "show_load_error",
+    "FILE_LOAD_ERRORS",
     "add_sound_notifications_menu",
 )
 
@@ -1388,8 +1390,8 @@ def is_hexadecimal(text):
 
 
 def is_path_available(
-    path: str, *, check_ext: str | list[str] = "", parent=None
-) -> bool:
+    path: str, *, check_ext: str | list[str] = ""
+) -> list[bool]:
     """Check if a file or folder exists at the given path. Returns True
     if there is not such path. Returns False if the path already exists.
     Allows to easily change the extension of the path.
@@ -1401,11 +1403,6 @@ def is_path_available(
     check_ext : str or list of str, optional
         Other extension(s) to be checked if they're available. Default
         is "".
-    parent : QWidget, optional
-        Parent widget for the error message box if raise_error is True.
-        A message box will be displayed showing asking if the user wants
-        to continue without the file or folder if the path does not
-        exist.
 
     Returns
     -------
@@ -1424,33 +1421,7 @@ def is_path_available(
         paths = [os.path.splitext(path)[0] + ext for ext in check_ext]
     else:
         paths = [path]
-    paths_available = []
-    for path in paths:
-        if os.path.exists(path):
-            if parent is not None:
-                from PyQt6 import QtWidgets
-
-                box = QtWidgets.QMessageBox(parent)
-                box.setIcon(QtWidgets.QMessageBox.Icon.Warning)
-                box.setWindowTitle("File or folder already exists")
-                box.setText(
-                    f"The path '{path}' already exists."
-                    "\nDo you wish to overwrite it?"
-                )
-                box.setStandardButtons(
-                    QtWidgets.QMessageBox.StandardButton.Yes
-                    | QtWidgets.QMessageBox.StandardButton.No
-                )
-                result = box.exec()
-                if result != QtWidgets.QMessageBox.StandardButton.Yes:
-                    paths_available.append(False)
-                else:
-                    paths_available.append(True)
-            else:
-                paths_available.append(False)
-        else:
-            paths_available.append(True)
-    return paths_available
+    return [not os.path.exists(path) for path in paths]
 
 
 @numba.njit

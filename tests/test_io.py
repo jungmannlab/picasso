@@ -53,6 +53,45 @@ class TestNoMetadataFileError:
         assert issubclass(io.NoMetadataFileError, FileNotFoundError)
 
 
+class TestLoadErrorsSayWhatIsWrong:
+    """The loaders raise errors whose messages name the file and the
+    problem, print nothing and open no dialog: a GUI shows the message
+    (``lib_qt.show_load_error``)."""
+
+    def test_no_metadata(self, tmp_path, capsys):
+        path = str(tmp_path / "movie_locs.hdf5")
+        with h5py.File(path, "w") as f:
+            f.create_dataset(
+                "locs", data=np.zeros(3, dtype=[("frame", "u4"), ("x", "f4")])
+            )
+        with pytest.raises(io.NoMetadataFileError) as error:
+            io.load_locs(path)
+        assert path in str(error.value)
+        assert "neither the metadata file" in str(error.value)
+        assert capsys.readouterr().out == ""
+
+    def test_no_localizations(self, tmp_path, capsys):
+        path = str(tmp_path / "other.hdf5")
+        with h5py.File(path, "w") as f:
+            f.create_dataset("groups", data=np.zeros(3))
+        with pytest.raises(KeyError, match="does not contain a 'locs'"):
+            io.load_locs(path)
+        assert capsys.readouterr().out == ""
+
+    def test_no_identifications(self, tmp_path, capsys):
+        path = str(tmp_path / "ids.hdf5")
+        pd.DataFrame({"x": [1.0]}).to_hdf(path, key="spots")
+        with pytest.raises(KeyError, match="'identifications' dataset"):
+            io.load_identifications(path)
+        assert capsys.readouterr().out == ""
+
+    def test_progress_is_keyword_only(self, tmp_path):
+        # an old load_locs(path, window) call fails instead of passing
+        # the window on as the progress callback
+        with pytest.raises(TypeError):
+            io.load_locs(str(tmp_path / "f.hdf5"), object())
+
+
 # ---------------------------------------------------------------------------
 # save_info / load_info / _to_dict_walk
 # ---------------------------------------------------------------------------
