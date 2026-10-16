@@ -392,7 +392,7 @@ class PipettingDialog(lib.Dialog):
             sequencelist = []
             for element in csvFiles:
                 os.chdir(path)
-                data = design.readPlate(element)
+                data = design.read_plate(element)
                 for i in range(0, len(data)):
                     platelist.append(data[i][0])
                     sequencelist.append(data[i][3])
@@ -675,7 +675,7 @@ class FoldingDialog(lib.Dialog):
                 self, "Export folding table to.", filter="*.csv"
             )
         if path:
-            design.savePlate(path, table)
+            design.save_plate(path, table)
 
     def clcExcess(self) -> None:
         """Calculate and update volumes to match desired
@@ -1226,7 +1226,7 @@ class Scene(QtWidgets.QGraphicsScene):
             "Structure.StructureY": structurey,
             "Structure.StructureEx": structureex,
         }
-        design.saveInfo(path, info)
+        design.save_info(path, info)
 
     def loadCanvas(self, path: str) -> None:
         """Load the origami design from the given path."""
@@ -1289,7 +1289,7 @@ class Scene(QtWidgets.QGraphicsScene):
                     canvascolors[i],
                 ]
 
-        allplates[0] = design.convertPlateIndexColor(ExportPlate, "CUSTOM")
+        allplates[0] = design.convert_plate_index_color(ExportPlate, "CUSTOM")
         return allplates
 
     def preparePlate(self, mode: int) -> dict:
@@ -1307,7 +1307,7 @@ class Scene(QtWidgets.QGraphicsScene):
             noplates = len(set(canvascolors))
             for j in range(0, noplates):
                 if colors[j] == 0:
-                    allplates[j] = design.convertPlateIndex(
+                    allplates[j] = design.convert_plate_index(
                         deepcopy(BASE_SEQUENCES), "BLK"
                     )
                 else:
@@ -1322,7 +1322,7 @@ class Scene(QtWidgets.QGraphicsScene):
                             ExportPlate[1 + i][1][:-3]
                             + self.tableshort[colors[j] - 1]
                         )
-                    allplates[j] = design.convertPlateIndex(
+                    allplates[j] = design.convert_plate_index(
                         ExportPlate, self.tableshort[colors[j] - 1]
                     )
 
@@ -1342,7 +1342,7 @@ class Scene(QtWidgets.QGraphicsScene):
                         + self.tableshort[canvascolors[i] - 1]
                     )
 
-            allplates[0] = design.convertPlateIndex(ExportPlate, "CUSTOM")
+            allplates[0] = design.convert_plate_index(ExportPlate, "CUSTOM")
 
         return allplates
 
@@ -1619,7 +1619,7 @@ class Window(QtWidgets.QMainWindow):
                             self, "Save csv files to.", filter="*.csv"
                         )
                     if path:
-                        design.savePlate(path, allplates)
+                        design.save_plate(path, allplates)
                         self.statusBar().showMessage(
                             "Plates saved to : " + path
                         )

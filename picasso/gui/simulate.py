@@ -1492,7 +1492,7 @@ class Window(QtWidgets.QMainWindow):
         timetrace = {}
 
         for i in range(nsites):
-            p_temp, t_temp, k_temp = simulate.distphotons(
+            p_temp, t_temp, k_temp = simulate.distribute_photons(
                 partstruct,
                 itime,
                 frames,
@@ -1533,7 +1533,7 @@ class Window(QtWidgets.QMainWindow):
         movie = np.zeros(shape=(frames, imagesize, imagesize))
         app = QtCore.QCoreApplication.instance()
         for runner in range(frames):
-            movie[runner, :, :] = simulate.convertMovie(
+            movie[runner, :, :] = simulate.convert_movie(
                 runner,
                 photondist,
                 partstruct,
@@ -1587,7 +1587,7 @@ class Window(QtWidgets.QMainWindow):
             movie = simulate.noisy_p(movie, params["background"])
             movie = simulate.check_type(movie)
             self.statusBar().showMessage("Saving movie ...")
-            simulate.saveMovie(fileName, movie, info)
+            simulate.save_movie(fileName, movie, info)
             self.statusBar().showMessage("Movie saved to: " + fileName)
             dt = time.time() - t0
             self.statusBar().showMessage(
@@ -1629,7 +1629,7 @@ class Window(QtWidgets.QMainWindow):
         self.mainpbar.setValue(100)
         self.statusBar().showMessage("Converting to image ... complete.")
         self.statusBar().showMessage("Saving movie ...")
-        simulate.saveMovie(fileName, movie, info)
+        simulate.save_movie(fileName, movie, info)
         if self.exportkinetics.isChecked():
             kinfo_path = os.path.splitext(fileName)[0] + "_kinetics.yaml"
             io.save_info(kinfo_path, [timetrace])
@@ -2032,7 +2032,7 @@ class Window(QtWidgets.QMainWindow):
                 y = clusters["com_y"]
 
                 # Align in the center of window. Simulate's coordinates
-                # point y up (simulate.convertMovie flips the frame), the
+                # point y up (simulate.convert_movie flips the frame), the
                 # clusters' y points down as in Render, so y is negated to
                 # keep the structure's orientation in the simulated movie.
                 x = x - np.mean(x) + imagesize / 2
@@ -2110,7 +2110,7 @@ class Window(QtWidgets.QMainWindow):
             (structurexx, structureyy, structureex, structure3d) = (
                 self.readStructure()
             )
-            structure = simulate.defineStructure(
+            structure = simulate.define_structure(
                 structurexx, structureyy, structureex, structure3d, pixelsize
             )
         else:
@@ -2118,7 +2118,7 @@ class Window(QtWidgets.QMainWindow):
             structureyy = self.handles["y"]
             structureex = self.handles["ex"]
             structure3d = self.handles["z"]
-            structure = simulate.defineStructure(
+            structure = simulate.define_structure(
                 structurexx,
                 structureyy,
                 structureex,
@@ -2131,7 +2131,7 @@ class Window(QtWidgets.QMainWindow):
         imageSize = self.camerasizeEdit.value()
         frame = self.structureframeEdit.value()
         arrangement = int(self.structurerandomEdit.isChecked())
-        gridpos = simulate.generatePositions(
+        gridpos = simulate.generate_positions(
             number, imageSize, frame, arrangement
         )
 
@@ -2140,7 +2140,7 @@ class Window(QtWidgets.QMainWindow):
         exchange = 0
 
         if self.structureMode:
-            self.newstruct = simulate.prepareStructures(
+            self.newstruct = simulate.prepare_structures(
                 structure,
                 gridpos,
                 orientation,
@@ -2149,7 +2149,7 @@ class Window(QtWidgets.QMainWindow):
                 exchange,
             )
         else:
-            self.newstruct = simulate.prepareStructures(
+            self.newstruct = simulate.prepare_structures(
                 structure,
                 np.array([[0, 0]]),
                 orientation,

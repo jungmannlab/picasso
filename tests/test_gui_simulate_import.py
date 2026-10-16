@@ -61,7 +61,7 @@ def test_imported_clusters_keep_their_orientation(window, monkeypatch):
     positions = window.newstruct
     assert positions.shape[1] == len(com_x)
     photons = np.full((positions.shape[1], 1), 20_000)
-    frame = simulate.convertMovie(
+    frame = simulate.convert_movie(
         0,
         photons,
         positions,
@@ -112,7 +112,7 @@ def test_imported_yaml_structure_is_centered(window, monkeypatch):
     image_size = window.camerasizeEdit.value()
     np.testing.assert_allclose(positions[:2].mean(axis=1), image_size / 2)
     photons = np.full((positions.shape[1], 1), 20_000)
-    frame = simulate.convertMovie(
+    frame = simulate.convert_movie(
         0, photons, positions, image_size, 1, 0.3, 0, 0, 0, False, [], []
     )
     spots = _spot_centers(frame)

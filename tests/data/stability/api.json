@@ -327,14 +327,14 @@
   "plot_path"
  ],
  "picasso.simulate": [
-  "defineStructure",
-  "generatePositions",
-  "prepareStructures",
-  "distphotons",
-  "convertMovie",
+  "define_structure",
+  "generate_positions",
+  "prepare_structures",
+  "distribute_photons",
+  "convert_movie",
   "noisy_p",
   "check_type",
-  "saveMovie"
+  "save_movie"
  ],
  "picasso.spinna": [
   "Structure",

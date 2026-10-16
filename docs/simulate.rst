@@ -143,12 +143,12 @@ file, ready for subsequent localization.
       pixelsize, imagesize, frames, itime = 130, 32, 5000, 100   # nm, px, -, ms
 
       # 3 x 2 grid of handles, 20 nm apart; one exchange round, z = 0
-      structure = simulate.defineStructure(
+      structure = simulate.define_structure(
           np.array([0, 20, 40, 0, 20, 40]), np.array([0, 0, 0, 20, 20, 20]),
           np.ones(6), np.zeros(6), pixelsize,
       )
-      positions = simulate.generatePositions(9, imagesize, 6, 0)     # 9 copies, 6 px margin, grid
-      handles = simulate.prepareStructures(
+      positions = simulate.generate_positions(9, imagesize, 6, 0)     # 9 copies, 6 px margin, grid
+      handles = simulate.prepare_structures(
           structure, positions, orientation=0, number=9, incorporation=0.85, exchange=0
       )
 
@@ -156,7 +156,7 @@ file, ready for subsequent localization.
       n_handles = handles.shape[1]
       photons = np.zeros((n_handles, frames), dtype=int)
       for i in range(n_handles):
-          photons[i], _, _ = simulate.distphotons(
+          photons[i], _, _ = simulate.distribute_photons(
               handles, itime, frames, taud=54054, taub=280,          # ms
               photonrate=53, photonratestd=29, photonbudget=1.5e6,
           )
@@ -164,7 +164,7 @@ file, ready for subsequent localization.
       # Frames, background and camera noise
       movie = np.zeros((frames, imagesize, imagesize))
       for f in range(frames):
-          movie[f] = simulate.convertMovie(
+          movie[f] = simulate.convert_movie(
               f, photons, handles, imagesize, frames, psf=0.82,
               photonrate=53, background=4, noise=2, mode3Dstate=False, cx=[], cy=[],
           )
@@ -175,7 +175,7 @@ file, ready for subsequent localization.
           "Height": imagesize, "Width": imagesize, "Camera": "Simulation",
           "Camera.Pixelsize": pixelsize,
       }
-      simulate.saveMovie("simulated.raw", movie, info)
+      simulate.save_movie("simulated.raw", movie, info)
 
 
 .. _simulate-multiplexing:

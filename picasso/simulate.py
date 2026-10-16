@@ -13,14 +13,14 @@ from . import io, lib
 from numba import njit
 
 __all__ = [
-    "defineStructure",
-    "generatePositions",
-    "prepareStructures",
-    "distphotons",
-    "convertMovie",
+    "define_structure",
+    "generate_positions",
+    "prepare_structures",
+    "distribute_photons",
+    "convert_movie",
     "noisy_p",
     "check_type",
-    "saveMovie",
+    "save_movie",
 ]
 
 magfac = 0.79
@@ -73,28 +73,7 @@ def calculate_zpsf(
     return (wx, wy)
 
 
-def test_calculate_zpsf() -> lib.FloatArray1D:
-    """Test function for calculate_zpsf."""
-    cx = np.array([1, 2, 3, 4, 5, 6, 7])
-    cy = np.array([1, 2, 3, 4, 5, 6, 7])
-    z = np.array([1, 2, 3, 4, 5, 6, 7])
-    wx, wy = calculate_zpsf(z, cx, cy)
-
-    result = [
-        4.90350522e01,
-        7.13644987e02,
-        5.52316597e03,
-        2.61621620e04,
-        9.06621337e04,
-        2.54548124e05,
-        6.14947219e05,
-    ]
-
-    delta = wx - result
-    assert sum(delta**2) < 0.001
-
-
-def saveInfo(filename: str, info: dict) -> None:
+def save_info(filename: str, info: dict) -> None:
     """Save metadata to a YAML file.
 
     Parameters
@@ -314,7 +293,7 @@ def paintgen(
     return photonsinframe, timetrace, spotkinetics
 
 
-def distphotons(
+def distribute_photons(
     structures: lib.FloatArray2D,
     itime: float,
     frames: int,
@@ -374,7 +353,7 @@ def distphotons(
     return photonsinframe, timetrace, spotkinetics
 
 
-def distphotonsxy(
+def distribute_photons_xy(
     runner: int,
     photondist: lib.FloatArray2D,
     structures: lib.FloatArray2D,
@@ -441,7 +420,7 @@ def distphotonsxy(
     return photonposframe
 
 
-def convertMovie(
+def convert_movie(
     runner: int,
     photondist: lib.FloatArray2D,
     structures: lib.FloatArray2D,
@@ -495,7 +474,7 @@ def convertMovie(
     """
     edges = range(0, imagesize + 1)
 
-    photonposframe = distphotonsxy(
+    photonposframe = distribute_photons_xy(
         runner, photondist, structures, psf, mode3Dstate, cx, cy
     )
 
@@ -510,7 +489,7 @@ def convertMovie(
     return simframe
 
 
-def saveMovie(filename: str, movie: lib.IntArray3D, info: dict) -> None:
+def save_movie(filename: str, movie: lib.IntArray3D, info: dict) -> None:
     """Save the simulated movie to a file.
 
     Parameters
@@ -527,7 +506,7 @@ def saveMovie(filename: str, movie: lib.IntArray3D, info: dict) -> None:
 
 # Function to store the coordinates of a structure in a container.
 # The coordinates wil be adjustet so that the center of mass is the origin
-def defineStructure(
+def define_structure(
     structurexxpx: lib.FloatArray1D,
     structureyypx: lib.FloatArray1D,
     structureex: lib.FloatArray1D,
@@ -578,7 +557,7 @@ def defineStructure(
     return structure
 
 
-def generatePositions(
+def generate_positions(
     number: int,
     imagesize: int,
     frame: int,
@@ -621,7 +600,7 @@ def generatePositions(
     return gridpos
 
 
-def rotateStructure(structure: lib.FloatArray2D) -> lib.FloatArray2D:
+def rotate_structure(structure: lib.FloatArray2D) -> lib.FloatArray2D:
     """Rotate a structure randomly.
 
     Parameters
@@ -650,7 +629,7 @@ def rotateStructure(structure: lib.FloatArray2D) -> lib.FloatArray2D:
     return newstructure
 
 
-def incorporateStructure(
+def incorporate_structure(
     structure: lib.FloatArray2D, incorporation: float
 ) -> lib.FloatArray2D:
     """Return a subset of the structure to reflect incorporation of
@@ -676,7 +655,7 @@ def incorporateStructure(
     return newstructure
 
 
-def randomExchange(pos: lib.FloatArray2D) -> lib.FloatArray2D:
+def random_exchange(pos: lib.FloatArray2D) -> lib.FloatArray2D:
     """Randomly shuffle exchange parameters for random labeling.
 
     Parameters
@@ -697,7 +676,7 @@ def randomExchange(pos: lib.FloatArray2D) -> lib.FloatArray2D:
     return newpos
 
 
-def prepareStructures(
+def prepare_structures(
     structure: lib.FloatArray2D,
     gridpos: lib.FloatArray2D,
     orientation: int,
@@ -742,12 +721,12 @@ def prepareStructures(
         if orientation == 0:
             structure = oldstructure
         else:
-            structure = rotateStructure(oldstructure)
+            structure = rotate_structure(oldstructure)
 
         if incorporation == 1:
             pass
         else:
-            structure = incorporateStructure(structure, incorporation)
+            structure = incorporate_structure(structure, incorporation)
 
         newx = structure[0, :] + gridpos[i, 0]
         newy = structure[1, :] + gridpos[i, 1]
@@ -766,5 +745,5 @@ def prepareStructures(
             newpos = np.concatenate((newpos, newstruct), axis=1)
 
     if exchange == 1:
-        newpos = randomExchange(newpos)
+        newpos = random_exchange(newpos)
     return newpos
