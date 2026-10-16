@@ -1983,7 +1983,7 @@ def _localize_process_file(
     camera_calibration: dict | None = None,
     lateral_transforms: list | None = None,
     region_fit: dict | None = None,
-) -> None:
+) -> list[str]:
     """Identify, fit, save and optionally undrift one movie.
 
     Parameters
@@ -2036,6 +2036,12 @@ def _localize_process_file(
         Set by ``--regions-separately``: fit each ``--roi`` region on its
         own and write one file per region. Holds the per-region fitting
         methods and spline calibrations (see ``_localize_regions``).
+
+    Returns
+    -------
+    saved : list of str
+        Paths of the localization files written: one, or one per region
+        with ``region_fit``.
     """
     from .io import load_movie, load_tif_concatenated
     from .localize import localize
@@ -2065,7 +2071,7 @@ def _localize_process_file(
     cam_info = dict(camera_info)
     cam_info["Pixelsize"] = args.pixelsize
     if region_fit is not None:
-        _localize_regions(
+        return _localize_regions(
             movie,
             info,
             path,
@@ -2082,7 +2088,6 @@ def _localize_process_file(
             camera_calibration=camera_calibration,
             lateral_transforms=lateral_transforms,
         )
-        return
     parameters = {
         "Min. Net Gradient": min_net_gradient,
         "Box Size": box,
@@ -2113,7 +2118,7 @@ def _localize_process_file(
         fit_progress_callback="console",
     )
 
-    _localize_finish(
+    saved = _localize_finish(
         locs,
         info,
         path,
@@ -2122,6 +2127,7 @@ def _localize_process_file(
         lateral_transforms,
         spline_calibration,
     )
+    return [saved]
 
 
 def _localize_region_fit(
@@ -2180,7 +2186,7 @@ def _localize_regions(
     region_fit: dict,
     camera_calibration: dict | None = None,
     lateral_transforms: list | None = None,
-) -> None:
+) -> list[str]:
     """Fit each ``--roi`` region of one movie on its own
     (``--regions-separately``).
 
@@ -2190,6 +2196,12 @@ def _localize_regions(
     saved to its own file, in its own coordinates. Nothing is registered or
     linked across the regions; they are connected afterwards (e.g. by
     aligning them in Picasso: Render).
+
+    Returns
+    -------
+    saved : list of str
+        Paths of the localization files written, one per region with
+        localizations.
     """
     from .localize import (
         fit_split_fov_independent,
@@ -2228,6 +2240,7 @@ def _localize_regions(
         multiprocess=True,
         progress_callback="console",
     )
+    saved = []
     for c, (locs, region_info) in enumerate(results):
         label = region_label(c)
         print("------------------------------------------")
@@ -2243,17 +2256,20 @@ def _localize_regions(
         # as ``localize`` builds it: the movie's metadata, then the
         # identification, then the fit
         region_info = region_info[:-1] + [identify_info] + [region_info[-1]]
-        _localize_finish(
-            locs,
-            region_info,
-            path,
-            args,
-            z_params,
-            lateral_transforms,
-            region_fit["spline_calibrations"][c],
-            suffix=f"_{label}",
-            fitting_method=region_fit["methods"][c],
+        saved.append(
+            _localize_finish(
+                locs,
+                region_info,
+                path,
+                args,
+                z_params,
+                lateral_transforms,
+                region_fit["spline_calibrations"][c],
+                suffix=f"_{label}",
+                fitting_method=region_fit["methods"][c],
+            )
         )
+    return saved
 
 
 def _print_lateral_report(
@@ -2282,7 +2298,7 @@ def _localize_finish(
     spline_calibration: dict | None,
     suffix: str = "",
     fitting_method: str | None = None,
-) -> None:
+) -> str:
     """Everything that happens to one set of localizations once it is
     fitted: the astigmatic z fit, the separately loaded lateral
     corrections, saving, the quality database and the drift correction.
@@ -2316,6 +2332,11 @@ def _localize_finish(
     fitting_method : str or None, optional
         The method this set was fitted with, which decides the noise model
         of the astigmatic z fit. None (the default) uses ``args.fit_method``.
+
+    Returns
+    -------
+    out_path : str
+        Path of the localization file written.
     """
     import warnings
     from os.path import splitext
@@ -2412,9 +2433,10 @@ def _localize_finish(
             print("Drift correction failed for {}".format(out_path))
 
     print("                                          ")
+    return out_path
 
 
-def _localize(args: argparse.Namespace) -> None:  # noqa: C901
+def _localize(args: argparse.Namespace) -> list[str]:  # noqa: C901
     """Localize molecules in microscopy images.
 
     Parameters
@@ -2439,6 +2461,12 @@ def _localize(args: argparse.Namespace) -> None:  # noqa: C901
         - ``baseline``, ``sensitivity``, ``gain`` (float): camera
           parameters.
         - ``qe`` (float): not used in the calculations.
+
+    Returns
+    -------
+    saved : list of str
+        Paths of the localization files written, in order, e.g., for the
+        custom command of the server's watcher (``$LOCS``).
     """
     from . import localize
     from .io import save_info
@@ -2629,8 +2657,9 @@ def _localize(args: argparse.Namespace) -> None:  # noqa: C901
     # Normally one movie per file; with --concat all files together are
     # one movie, so there is a single job.
     jobs = [paths] if concat else [[_] for _ in paths]
+    saved = []
     for i, job in enumerate(jobs):
-        _localize_process_file(
+        saved += _localize_process_file(
             job,
             i,
             len(jobs),
@@ -2648,6 +2677,7 @@ def _localize(args: argparse.Namespace) -> None:  # noqa: C901
             camera_calibration=camera_calibration,
             region_fit=region_fit,
         )
+    return saved
 
 
 def _camera_calibrate(args: argparse.Namespace) -> None:

@@ -7,11 +7,16 @@ from sqlalchemy import create_engine
 from picasso import localize
 from helper import fetch_watcher, fetch_db
 import psutil
+import re
+import shlex
 import subprocess
+import sys
 from datetime import datetime
 from picasso.__main__ import _localize
 
 DEFAULT_UPDATE_TIME = 1
+#: the placeholders of the custom command
+_PLACEHOLDERS = re.compile(r"\$(FILENAME|LOCS)")
 
 FILETYPES = (".raw", ".ome.tif", ".ims")
 
@@ -72,11 +77,9 @@ def check_new(path: str, processed: dict, logfile: str):
 
     print_to_file(
         logfile,
-        (
-            f"{datetime.now()} Checking: {len(all_)} files, {len(new)} "
-            f"unprocessed with valid ending and {len(locs)} `_locs.hdf5` "
-            " files in {path}.",
-        ),
+        f"{datetime.now()} Checking: {len(all_)} files, {len(new)} "
+        f"unprocessed with valid ending and {len(locs)} `_locs.hdf5` "
+        f"files in {path}.",
     )
 
     for _ in new:
@@ -201,6 +204,60 @@ def print_to_file(path, text):
         f.write("\n")
 
 
+def custom_commands(
+    command: str, movie: str, locs: list[str]
+) -> list[str | list[str]]:
+    """The custom commands of the watcher for one processed movie, ready
+    for ``subprocess.run`` (without a shell).
+
+    ``$FILENAME`` is replaced with the path of the movie and ``$LOCS``
+    with the path of a localization file Localize saved from it. With
+    ``$LOCS``, the command runs once per localization file, e.g., once per
+    parameter group. The paths may contain spaces or quotes. On Windows,
+    the command line is passed on as text and split by the program it
+    starts, as usual there; elsewhere, it is split like a shell would,
+    e.g., ``python "my script.py" $LOCS``.
+
+    Parameters
+    ----------
+    command : str
+        The custom command, e.g., ``picasso undrift $LOCS``.
+    movie : str
+        Path of the processed movie.
+    locs : list of str
+        Paths of the localization files saved from the movie.
+
+    Returns
+    -------
+    commands : list of str or list of list of str
+        The command lines (Windows) or their arguments (elsewhere): one
+        command, one per localization file with ``$LOCS``, or none with
+        ``$LOCS`` but no localization file.
+    """
+    windows = sys.platform == "win32"
+    commands = []
+    for loc in locs if "$LOCS" in command else [None]:
+        values = {"$FILENAME": movie, "$LOCS": loc}
+        if windows:
+            # Windows splits the command line itself; quote the paths its
+            # way
+            commands.append(
+                _fill_in(
+                    command, values, lambda x: subprocess.list2cmdline([x])
+                )
+            )
+        else:
+            commands.append(
+                [_fill_in(arg, values, str) for arg in shlex.split(command)]
+            )
+    return commands
+
+
+def _fill_in(text: str, values: dict, quote) -> str:
+    """``text`` with each placeholder replaced by ``quote`` of its value."""
+    return _PLACEHOLDERS.sub(lambda match: quote(values[match.group(0)]), text)
+
+
 def check_new_and_process(  # noqa: C901
     settings_list: dict,
     path: str,
@@ -246,37 +303,45 @@ def check_new_and_process(  # noqa: C901
             children = wait_for_completion(file)
             print_to_file(logfile, f"{datetime.now()} Children {children}")
             try:
+                saved = []  # the localization files, for $LOCS
                 for settings in settings_list:
 
                     if len(settings_list) > 1:
                         print_to_file(
                             logfile,
-                            (
-                                f"{datetime.now()} Processing group "
-                                f"{settings['suffix']}",
-                            ),
+                            f"{datetime.now()} Processing group "
+                            f"{settings['suffix']}",
                         )
 
                     settings["files"] = file
 
                     args_ = aclass(**settings)
-                    _localize(args_)
+                    saved += _localize(args_)
 
                 if command != "":
-
-                    if "$FILENAME" in command:
-                        to_execute = command[:]
-                        to_execute = to_execute.replace(
-                            "$FILENAME",
-                            f'"{file}"',
+                    to_run = custom_commands(command, file, saved)
+                    if not to_run:
+                        print_to_file(
+                            logfile,
+                            f"{datetime.now()} No localization file saved, "
+                            f"so {command} was not executed.",
                         )
-
-                    print_to_file(
-                        logfile,
-                        f"{datetime.now()} Executing {to_execute}.",
-                    )
-
-                    subprocess.run(to_execute)
+                    for to_execute in to_run:
+                        if not isinstance(to_execute, str):
+                            executed = shlex.join(to_execute)
+                        else:
+                            executed = to_execute
+                        print_to_file(
+                            logfile,
+                            f"{datetime.now()} Executing {executed}.",
+                        )
+                        result = subprocess.run(to_execute)
+                        if result.returncode != 0:
+                            print_to_file(
+                                logfile,
+                                f"{datetime.now()} {executed} exited with "
+                                f"code {result.returncode}.",
+                            )
 
             except KeyboardInterrupt:
                 raise
@@ -459,8 +524,18 @@ def watcher():  # noqa: C901
                     settings[i]["magnification_factor"] = None
 
             if st.checkbox("Chain Custom command"):
-                st.text("Allows to execute a custom command via shell.")
-                st.text("You can pass the filename with $FILENAME.")
+                st.text(
+                    "Runs a program after each file, e.g., a Python script "
+                    "(not a shell: no pipes or shell variables)."
+                )
+                st.text(
+                    "Pass the movie with $FILENAME and its localization file "
+                    "with $LOCS;"
+                )
+                st.text(
+                    "with $LOCS, the command runs once per localization "
+                    "file, e.g., per parameter group."
+                )
                 command = st.text_input("Command", "")
             else:
                 command = ""

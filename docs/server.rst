@@ -263,13 +263,30 @@ Picasso Server would be:
 
    C:\ProgramData\Miniconda3\python.exe C:\Users\Maximilian\Desktop\test.py $FILENAME
 
+The command can hold two placeholders:
+
+``$FILENAME``
+   The path of the processed movie. The command runs once per movie.
+``$LOCS``
+   The path of a localization file (``_locs.hdf5``) the watcher saved from the
+   movie. The command runs once per localization file, e.g., twice for
+   ``testfile_pg_1_locs.hdf5`` and ``testfile_pg_2_locs.hdf5`` of two parameter
+   groups, and not at all if none was saved.
+
+Each path reaches the program as one argument, also if it contains spaces. The
+command runs without a shell, so pipes (``|``), redirections (``>``) and shell
+variables do not work; put them in a script and call the script instead. On
+macOS and Linux, put paths with spaces in quotes, as in a terminal, e.g.,
+``python "/Users/me/my scripts/test.py" $FILENAME``. If the command fails, the
+watcher's logfile shows its exit code.
+
 When having an existing Picasso one-click installation, Picasso can directly
 be called via the command line (see :doc:`cmd`). Some example commands would
 then be:
 
-- ``picasso undrift $FILENAME`` for drift correction;
-- ``picasso link $FILENAME`` for linking localizations;
-- ``picasso dbscan $FILENAME 0.1 2`` for performing DBSCAN cluster analysis
+- ``picasso undrift $LOCS`` for drift correction;
+- ``picasso link $LOCS`` for linking localizations;
+- ``picasso dbscan $LOCS 0.1 2`` for performing DBSCAN cluster analysis
   with clustering radius 0.1 and density 2.
 
 Preview

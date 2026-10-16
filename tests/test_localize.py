@@ -14015,6 +14015,23 @@ class TestLocalizeCliRegionsSeparately:
         cli.main()
         return path
 
+    @pytest.mark.parametrize("separately", [False, True])
+    def test_returns_the_saved_files(self, tmp_path, separately):
+        """The server's watcher passes them to its custom command
+        (``$LOCS``)."""
+        from picasso import __main__ as cli
+
+        path = self._movie_path(tmp_path)
+        argv = ["localize", path, "-b", "7", "-d", "0", "-g", "100"]
+        if separately:
+            for region in self.REGIONS:
+                argv += ["-r", *region]
+            argv.append("--regions-separately")
+        parser, _ = cli._build_parser()
+        saved = cli._localize(parser.parse_args(argv + ["-a", "lq"]))
+        names = ["split_ref", "split_ch1"] if separately else ["split"]
+        assert saved == [str(tmp_path / f"{_}_locs.hdf5") for _ in names]
+
     def test_each_region_is_saved_on_its_own(self, tmp_path, monkeypatch):
         self._run(tmp_path, monkeypatch, "-g", "100", "-a", "lq")
         ref = tmp_path / "split_ref_locs.hdf5"
