@@ -942,8 +942,8 @@ def _readable_movie_dims(movie: AbstractPicassoMovie) -> dict:
     dims = {}
     try:
         dims["Frames"] = int(len(movie))
-    except Exception:
-        pass
+    except Exception as error:
+        _log.debug("The number of frames is unknown: %s", error)
     height = getattr(movie, "height", None)
     width = getattr(movie, "width", None)
     if height is None or width is None:
@@ -2667,7 +2667,13 @@ class ND2Movie(AbstractPicassoMovie):
         # entered metadata (info() then returns None).
         try:
             self.meta = self.get_metadata(self.nd2file)
-        except Exception:
+        except Exception as error:
+            _log.warning(
+                "The metadata of %s could not be read (%s); the movie can "
+                "be loaded with metadata entered by hand.",
+                path,
+                error,
+            )
             self.meta = None
         self._shape = [
             self.nd2file.sizes[self.frame_axis],
@@ -2727,8 +2733,8 @@ class ND2Movie(AbstractPicassoMovie):
             names = [c.channel.name for c in self.nd2file.metadata.channels]
             if len(names) == self.n_channels and all(names):
                 self.channels = [str(n) for n in names]
-        except Exception:
-            pass
+        except Exception as error:
+            _log.debug("Channel names of %s not read: %s", self.path, error)
 
     def info(self) -> dict:
         if self.meta is None:
@@ -2847,22 +2853,22 @@ class ND2Movie(AbstractPicassoMovie):
             mmmeta["capturing"] = self.nikontext_to_dict(
                 text_info["capturing"]
             )
-        except Exception:
-            pass
+        except Exception as error:
+            _log.debug("ND2 text info 'capturing' not read: %s", error)
         try:
             mmmeta["AcquisitionDate"] = text_info["date"]
-        except Exception:
-            pass
+        except Exception as error:
+            _log.debug("ND2 text info 'date' not read: %s", error)
         try:
             mmmeta["description"] = self.nikontext_to_dict(
                 text_info["description"]
             )
-        except Exception:
-            pass
+        except Exception as error:
+            _log.debug("ND2 text info 'description' not read: %s", error)
         try:
             mmmeta["optics"] = self.nikontext_to_dict(text_info["optics"])
-        except Exception:
-            pass
+        except Exception as error:
+            _log.debug("ND2 text info 'optics' not read: %s", error)
 
         mmmeta["custom_data"] = nd2file.custom_data
         mmmeta["attributes"] = nd2file.attributes._asdict()
@@ -3070,26 +3076,27 @@ class ND2Movie(AbstractPicassoMovie):
         parameters = {}
         info = self.meta
 
-        try:
-            assert "Cameras" in config.keys() and "Camera" in info.keys()
-        except Exception:
+        if "Cameras" not in config or "Camera" not in info:
             raise KeyError("'camera' key not found in metadata or config.")
 
         cameras = config["Cameras"]
         camera = info["Camera"]
 
-        try:
-            assert camera in cameras.keys()
-        except Exception:
+        if camera not in cameras:
             raise KeyError("camera from metadata not found in config.")
 
         index = sorted(list(cameras.keys())).index(camera)
         parameters["cam_index"] = index
         parameters["camera"] = camera
 
-        try:
-            assert "Picasso Metadata" in info
-        except Exception:
+        if "Picasso Metadata" not in info:
+            _log.warning(
+                "The metadata of %s do not hold the camera settings that "
+                "select the parameters of the camera %r in the camera "
+                "configuration; gain 1 and quantum efficiency 1 are used.",
+                self.path,
+                camera,
+            )
             return {"gain": [1], "qe": [1], "wavelength": [0], "cam_index": 0}
 
         pm_info = info["Picasso Metadata"]
@@ -3287,8 +3294,8 @@ class CZIMovie(_MultiDimMovie):
             names = list(self._image.channels.keys())
             if len(names) == n_channels:
                 channels = [str(n) for n in names]
-        except Exception:
-            pass
+        except Exception as error:
+            _log.debug("Channel names of %s not read: %s", path, error)
         self._select_channel(channels, prompt_info, channel)
 
     def _read_plane(self, index: int) -> np.ndarray:
@@ -3320,8 +3327,13 @@ class CZIMovie(_MultiDimMovie):
             info["Pixelsize"] = round(float(self._mpp[0]) * 1000, 3)
         try:
             info["CZI Metadata"] = _yaml_safe(self._image.attrs)
-        except Exception:
-            pass
+        except Exception as error:
+            _log.warning(
+                "The CZI metadata of %s could not be read (%s) and are "
+                "left out of the metadata.",
+                self.path,
+                error,
+            )
         return info
 
     def close(self):
@@ -3381,8 +3393,8 @@ class LIFMovie(_MultiDimMovie):
             names = self._image.coords.get("C")
             if names is not None and len(names) == n_channels:
                 channels = [str(n) for n in list(names)]
-        except Exception:
-            pass
+        except Exception as error:
+            _log.debug("Channel names of %s not read: %s", path, error)
         self._select_channel(channels, prompt_info, channel)
 
     def _read_plane(self, index: int) -> np.ndarray:
@@ -3412,8 +3424,13 @@ class LIFMovie(_MultiDimMovie):
             info["Pixelsize"] = pixelsize
         try:
             info["LIF Metadata"] = _yaml_safe(self._image.attrs)
-        except Exception:
-            pass
+        except Exception as error:
+            _log.warning(
+                "The LIF metadata of %s could not be read (%s) and are "
+                "left out of the metadata.",
+                self.path,
+                error,
+            )
         return info
 
     def _pixelsize_nm(self) -> float | None:
@@ -3429,8 +3446,8 @@ class LIFMovie(_MultiDimMovie):
             spacing_nm = abs(float(xs[1]) - float(xs[0])) * 1e9
             if 1.0 <= spacing_nm <= 100000.0:
                 return round(spacing_nm, 3)
-        except Exception:
-            pass
+        except Exception as error:
+            _log.debug("Pixel size of %s not read: %s", self.path, error)
         return None
 
     def close(self):
@@ -3446,7 +3463,8 @@ def _yaml_safe(obj):
     ``_locs.yaml``)."""
     try:
         return json.loads(json.dumps(obj, default=str))
-    except Exception:
+    except Exception as error:
+        _log.debug("Metadata kept as text: %s", error)
         return str(obj)
 
 
@@ -3505,8 +3523,13 @@ def _mm_per_image_metadata_from_tifffile(tif: "tifffile.TiffFile") -> dict:
                     mm_info[key] = val
             out["Micro-Manager Metadata"] = mm_info
             out["Camera"] = mm_info.get("Camera", "None")
-    except Exception:
-        pass
+    except Exception as error:
+        _log.warning(
+            "The Micro-Manager metadata of %s could not be read (%s) and "
+            "are left out of the metadata, so its camera is not known.",
+            getattr(tif, "filename", "the TIFF file"),
+            error,
+        )
     return out
 
 
@@ -3536,8 +3559,13 @@ def _mm_acquisition_comments_from_tifffile(tif: "tifffile.TiffFile") -> dict:
             # key is left out if the comments is empty
             if isinstance(summary, str) and summary.strip():
                 out["Micro-Manager Acquisition Comments"] = summary.split("\n")
-    except Exception:
-        pass
+    except Exception as error:
+        _log.warning(
+            "The Micro-Manager acquisition comments of %s could not be read "
+            "(%s) and are left out of the metadata.",
+            getattr(tif, "filename", "the TIFF file"),
+            error,
+        )
     return out
 
 
@@ -4649,33 +4677,43 @@ class TiffMultiMap(AbstractPicassoMovie):
             Keys: gain, qe, wavelength, cam_index, camera. Values are
             lists.
         """
-        # return {'gain': [1], 'qe': [1], 'wavelength': [0], 'cam_index': 0}
         parameters = {}
         info = self.meta
+        default = {"gain": [1], "qe": [1], "wavelength": [0], "cam_index": 0}
 
-        try:
-            assert "Cameras" in config and "Camera" in info
-        except Exception:
-            return {"gain": [1], "qe": [1], "wavelength": [0], "cam_index": 0}
-            # raise KeyError("'camera' key not found in metadata or config.")
+        if "Cameras" not in config or "Camera" not in info:
+            _log.debug(
+                "No camera configuration or no camera in the metadata of %s.",
+                self.path,
+            )
+            return default
 
         cameras = config["Cameras"]
         camera = info["Camera"]
 
-        try:
-            assert camera in list(cameras.keys())
-        except Exception:
-            return {"gain": [1], "qe": [1], "wavelength": [0], "cam_index": 0}
-            # raise KeyError('camera from metadata not found in config.')
+        if camera not in cameras:
+            _log.warning(
+                "The camera %r of %s is not in the camera configuration "
+                "(%s); gain 1 and quantum efficiency 1 are used.",
+                camera,
+                self.path,
+                ", ".join(map(repr, cameras)),
+            )
+            return default
 
         index = sorted(list(cameras.keys())).index(camera)
         parameters["cam_index"] = index
         parameters["camera"] = camera
 
-        try:
-            assert "Micro-Manager Metadata" in info
-        except Exception:
-            return {"gain": [1], "qe": [1], "wavelength": [0], "cam_index": 0}
+        if "Micro-Manager Metadata" not in info:
+            _log.warning(
+                "The metadata of %s do not hold the Micro-Manager settings "
+                "that select the parameters of the camera %r in the camera "
+                "configuration; gain 1 and quantum efficiency 1 are used.",
+                self.path,
+                camera,
+            )
+            return default
 
         mm_info = info["Micro-Manager Metadata"]
         cam_config = config["Cameras"][camera]
@@ -6666,7 +6704,8 @@ def _pyme_read_metadata(h5file) -> dict:
         for name in attrs._f_list("user"):
             try:
                 value = getattr(attrs, name)
-            except Exception:  # noqa: BLE001 - e.g., unreadable pickles
+            except Exception as error:  # noqa: BLE001 - unreadable pickles
+                _log.debug("PyME metadata %s not read: %s", name, error)
                 continue
             value = _pyme_metadata_value(value)
             if value is not None:
@@ -6728,7 +6767,8 @@ def pyme_pixelsize(path: str) -> float | None:
                 return None
             attrs = h5file.get_node("/MetaData/voxelsize")._v_attrs
             value = _pyme_metadata_value(getattr(attrs, "x", None))
-    except Exception:  # noqa: BLE001 - not a readable HDF5 file
+    except Exception as error:  # noqa: BLE001 - not a readable HDF5 file
+        _log.debug("PyME pixel size of %s not read: %s", path, error)
         return None
     return _pyme_pixelsize_from_metadata({"voxelsize.x": value})
 
@@ -7072,7 +7112,8 @@ def split_pyme_channels(
 
         with tables.open_file(path, "r") as h5file:
             restored = _pyme_picasso_infos(_pyme_read_metadata(h5file))
-    except Exception:  # noqa: BLE001 - restoring the metadata is optional
+    except Exception as error:  # noqa: BLE001 - restoring is optional
+        _log.debug("Picasso metadata of %s not restored: %s", path, error)
         restored = None
     if restored is not None and list(values) != list(range(len(restored))):
         restored = None

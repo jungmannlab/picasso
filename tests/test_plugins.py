@@ -196,7 +196,7 @@ class TestApiPlugins:
         ],
     )
     def test_malformed_exports_are_skipped(
-        self, _isolated_plugins_dir, body, capsys
+        self, _isolated_plugins_dir, body, caplog
     ):
         _write(_isolated_plugins_dir, "bad.py", body)
         _write(_isolated_plugins_dir, "good.py", API_PLUGIN)
@@ -206,10 +206,10 @@ class TestApiPlugins:
         exports = plugins.load_api_plugins()
 
         assert sorted(exports) == ["double"]
-        assert "bad.py" in capsys.readouterr().out
+        assert "bad.py" in caplog.text
 
     def test_broken_plugin_does_not_stop_the_others(
-        self, _isolated_plugins_dir, capsys
+        self, _isolated_plugins_dir, caplog
     ):
         _write(_isolated_plugins_dir, "boom.py", "raise RuntimeError('boom')")
         _write(_isolated_plugins_dir, "good.py", API_PLUGIN)
@@ -217,7 +217,7 @@ class TestApiPlugins:
         _enable("good.py")
 
         assert sorted(plugins.load_api_plugins()) == ["double"]
-        assert "boom.py" in capsys.readouterr().err
+        assert "boom.py" in caplog.text
 
     def test_api_namespace_resolves_and_refreshes(self, _isolated_plugins_dir):
         _write(_isolated_plugins_dir, "api.py", API_PLUGIN)
@@ -261,7 +261,7 @@ class TestCliPlugins:
         assert callable(args.func)
 
     def test_builtin_commands_cannot_be_shadowed(
-        self, _isolated_plugins_dir, capsys
+        self, _isolated_plugins_dir, caplog
     ):
         _write(
             _isolated_plugins_dir,
@@ -278,11 +278,11 @@ class TestCliPlugins:
 
         # The built-in survives, the well-behaved plugin still registers.
         assert plugins.register_cli_plugins(subparsers) == {"demo-cmd"}
-        assert "already exists" in capsys.readouterr().err
+        assert "already exists" in caplog.text
         assert parser.parse_args(["localize"]).command == "localize"
 
     def test_a_failing_plugin_leaves_no_half_command(
-        self, _isolated_plugins_dir, capsys
+        self, _isolated_plugins_dir, caplog
     ):
         _write(
             _isolated_plugins_dir,
@@ -300,13 +300,13 @@ class TestCliPlugins:
 
         assert plugins.register_cli_plugins(subparsers) == {"demo-cmd"}
         assert "half-done" not in subparsers.choices
-        assert "boom" in capsys.readouterr().err
+        assert "boom" in caplog.text
 
     @pytest.mark.parametrize(
         "name", ["Bad-Name", "--flag", "has space", "", "/etc/passwd"]
     )
     def test_implausible_command_names_are_rejected(
-        self, _isolated_plugins_dir, name, capsys
+        self, _isolated_plugins_dir, name, caplog
     ):
         _write(
             _isolated_plugins_dir,
@@ -320,7 +320,7 @@ class TestCliPlugins:
         _, subparsers = _parser()
 
         assert plugins.register_cli_plugins(subparsers) == set()
-        assert "odd.py" in capsys.readouterr().out
+        assert "odd.py" in caplog.text
 
     def test_plugin_without_register_cli_is_fine(self, _isolated_plugins_dir):
         _write(_isolated_plugins_dir, "api.py", API_PLUGIN)
@@ -349,8 +349,8 @@ class TestCliPlugins:
 class TestFailureReporting:
     """A broken plugin must not bury every command's output in a traceback."""
 
-    def test_default_is_one_line_on_stderr(
-        self, _isolated_plugins_dir, capsys
+    def test_default_is_one_warning(
+        self, _isolated_plugins_dir, capsys, caplog
     ):
         _write(_isolated_plugins_dir, "boom.py", "raise RuntimeError('boom')")
         _enable("boom.py")
@@ -359,22 +359,24 @@ class TestFailureReporting:
 
         captured = capsys.readouterr()
         assert captured.out == ""  # stdout stays clean for piping
-        assert len(captured.err.strip().splitlines()) == 1
-        assert "boom.py" in captured.err
-        assert "RuntimeError: boom" in captured.err
-        assert "picasso plugins list" in captured.err
-        assert "Traceback" not in captured.err
+        (record,) = caplog.records
+        assert record.levelname == "WARNING"
+        message = record.getMessage()
+        assert "boom.py" in message
+        assert "RuntimeError: boom" in message
+        assert "picasso plugins list" in message
+        assert record.exc_info is None  # no traceback
 
-    def test_reported_once_per_process(self, _isolated_plugins_dir, capsys):
+    def test_reported_once_per_process(self, _isolated_plugins_dir, caplog):
         """A failed import is not cached, so the report must dedup itself."""
         _write(_isolated_plugins_dir, "boom.py", "raise RuntimeError('boom')")
         _enable("boom.py")
 
         plugins.load_enabled_modules()
-        capsys.readouterr()
+        caplog.clear()
         plugins.load_enabled_modules()
 
-        assert capsys.readouterr().err == ""
+        assert caplog.records == []
 
     def test_verbose_prints_the_traceback(self, _isolated_plugins_dir, capsys):
         _write(_isolated_plugins_dir, "boom.py", "raise RuntimeError('boom')")
@@ -386,16 +388,16 @@ class TestFailureReporting:
         assert "Failed to load plugin" in captured.out
         assert "Traceback" in captured.err
 
-    def test_a_reload_reports_again(self, _isolated_plugins_dir, capsys):
+    def test_a_reload_reports_again(self, _isolated_plugins_dir, caplog):
         _write(_isolated_plugins_dir, "boom.py", "raise RuntimeError('boom')")
         _enable("boom.py")
         plugins.load_enabled_modules()
-        capsys.readouterr()
+        caplog.clear()
 
         plugins.clear_module_cache()
         plugins.load_enabled_modules()
 
-        assert "boom.py" in capsys.readouterr().err
+        assert "boom.py" in caplog.text
 
 
 # ---------------------------------------------------------------------------

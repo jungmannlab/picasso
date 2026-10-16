@@ -3233,40 +3233,42 @@ def evaluate_picks(
     has_z = "z" in picked_locs[0].columns
     rmsd_z = np.empty(n_picks)
     new_locs = []  # linked locs in each pick
-    warnings.simplefilter("ignore", category=RuntimeWarning)
-    for i in iter_range:
-        if callable(progress_callback):
-            progress_callback(i)
-        pick_locs = picked_locs[i]
-        if not len(pick_locs):
-            continue
+    # e.g., the statistics of one-localization picks; scoped, so that
+    # the warning filters of the caller are kept
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", category=RuntimeWarning)
+        for i in iter_range:
+            if callable(progress_callback):
+                progress_callback(i)
+            pick_locs = picked_locs[i]
+            if not len(pick_locs):
+                continue
 
-        N[i] = len(pick_locs)
-        com_x = pick_locs["x"].mean()
-        com_y = pick_locs["y"].mean()
-        rmsd[i] = (
-            np.sqrt(
-                np.mean(
-                    (pick_locs["x"] - com_x) ** 2
-                    + (pick_locs["y"] - com_y) ** 2
+            N[i] = len(pick_locs)
+            com_x = pick_locs["x"].mean()
+            com_y = pick_locs["y"].mean()
+            rmsd[i] = (
+                np.sqrt(
+                    np.mean(
+                        (pick_locs["x"] - com_x) ** 2
+                        + (pick_locs["y"] - com_y) ** 2
+                    )
                 )
+                * pixelsize
             )
-            * pixelsize
-        )
-        if has_z:
-            rmsd_z[i] = np.sqrt(
-                np.mean((pick_locs["z"] - pick_locs["z"].mean()) ** 2)
-            )
-        if "len" not in pick_locs.columns:
-            pick_locs = link(
-                pick_locs, info, r_max=999999, max_dark_time=max_dark_time
-            )
-        pick_locs = compute_dark_times(pick_locs)
-        n_events[i] = len(pick_locs)  # linked locs are binding events
-        length[i] = lib.estimate_kinetic_rate(pick_locs["len"].to_numpy())
-        dark[i] = lib.estimate_kinetic_rate(pick_locs["dark"].to_numpy())
-        new_locs.append(pick_locs)
-    warnings.simplefilter("default", category=RuntimeWarning)
+            if has_z:
+                rmsd_z[i] = np.sqrt(
+                    np.mean((pick_locs["z"] - pick_locs["z"].mean()) ** 2)
+                )
+            if "len" not in pick_locs.columns:
+                pick_locs = link(
+                    pick_locs, info, r_max=999999, max_dark_time=max_dark_time
+                )
+            pick_locs = compute_dark_times(pick_locs)
+            n_events[i] = len(pick_locs)  # linked locs are binding events
+            length[i] = lib.estimate_kinetic_rate(pick_locs["len"].to_numpy())
+            dark[i] = lib.estimate_kinetic_rate(pick_locs["dark"].to_numpy())
+            new_locs.append(pick_locs)
     if callable(progress_callback):
         progress_callback(n_picks)
     new_locs = pd.concat(new_locs, ignore_index=True)

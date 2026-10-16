@@ -14,6 +14,19 @@ you can use in your own scripts and notebooks once Picasso is installed with
 
 The :doc:`/notebooks` walk through complete analyses.
 
+Picasso reports what it does through Python's :mod:`logging`, with one
+logger per module (``picasso.io``, ``picasso.localize``, ...). Warnings,
+e.g., about localizations dropped on loading or metadata that could not be
+read, are shown without any setup; to see the information messages too, or
+to send them to a file, configure logging:
+
+.. code-block:: python
+
+   import logging
+
+   logging.basicConfig(level=logging.INFO)
+   logging.getLogger("picasso").setLevel(logging.INFO)
+
 .. note::
 
    These pages do not list every function in the package, only those that

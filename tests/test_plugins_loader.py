@@ -284,7 +284,7 @@ class TestValidation:
                 plugins_loader.plugin_path(name)
 
     def test_manifest_drops_unsafe_entries(
-        self, tmp_path, monkeypatch, capsys
+        self, tmp_path, monkeypatch, caplog
     ):
         _point_loader_at(monkeypatch, str(tmp_path))
         good = {"id": "good", "file": "good.py", "sha256": "a" * 64}
@@ -304,7 +304,7 @@ class TestValidation:
         )
 
         assert plugins_loader.fetch_manifest() == [good]
-        assert "unsafe id or file path" in capsys.readouterr().out
+        assert "unsafe id or file path" in caplog.text
 
     def test_uninstall_ignores_unsafe_recorded_filename(
         self, tmp_path, monkeypatch

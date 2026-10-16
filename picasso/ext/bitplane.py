@@ -7,10 +7,13 @@ Author: Maximilian T Strauss, 2021-2022.
 Copyright (c) 2021-2022 Maximilian T Strauss.
 """
 
+import logging
 import os.path as _ospath
 import numpy as np
 import h5py
 import datetime
+
+_log = logging.getLogger(__name__)
 
 try:
     # Registers HDF5 compression filters (e.g., LZ4) that some .ims
@@ -393,7 +396,7 @@ class IMSFile:
         Sets ``self.movie`` to a :class:`MovieMapperStack` whose
         frames are the z planes.
         """
-        print("Reading stack")
+        _log.info("Reading the z stack of %s", self.path)
         self.n_frames = self.z
         self.movie = MovieMapperStack(
             self.file,
@@ -410,7 +413,7 @@ class IMSFile:
         Sets ``self.movie`` to a :class:`MovieMapper` whose frames
         are the time points.
         """
-        print("Reading movie")
+        _log.info("Reading the movie of %s", self.path)
         if not self.lookup_dict:
             self.read_frames()
 
@@ -580,7 +583,7 @@ if IMSWRITER:
         # The image extends are not for multiple z-stacks.
         image_extents = PW.ImageExtents(x_0, y_0, z_0, x_1, y_1, z_1)
 
-        print(f"Image dimensions {x_0, y_0, z_0, x_1, y_1, z_1}\n")
+        _log.debug("Image extents %s", (x_0, y_0, z_0, x_1, y_1, z_1))
 
         parameters = PW.Parameters()
         parameters.set_value("Image", "Info", "PicassoExport")
@@ -601,4 +604,4 @@ if IMSWRITER:
             adjust_color_range,
         )
         converter.Destroy()
-        print("Wrote {} to {}".format("Minimal Example", output_filename))
+        _log.info("Wrote %s", output_filename)

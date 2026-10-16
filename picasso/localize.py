@@ -26,6 +26,7 @@ License (MIT): ``LICENSES/Gpufit-LICENSE.txt``.
 
 from __future__ import annotations
 
+import logging
 import os
 import multiprocessing
 import threading
@@ -78,6 +79,8 @@ from .fitting import (
     splinefit,
     splinefit_cuda,
 )
+
+_log = logging.getLogger(__name__)
 
 __all__ = [
     "FIT_METHODS",
@@ -2185,7 +2188,7 @@ def identify_async(
         if cpu_utilization >= 1:
             cpu_utilization = 0.8
     else:
-        print("CPU utilization was not set. Setting to 0.8")
+        _log.info("CPU utilization was not set; it is set to 0.8.")
         cpu_utilization = 0.8
     settings["Localize"]["cpu_utilization"] = cpu_utilization
     io.save_user_settings(settings)
@@ -9323,14 +9326,13 @@ def check_nena(
         The NeNA value in pixels, representing the experimental
         localization precision.
     """
-    print("Calculating NeNA.. ", end="")
     locs = locs[0:MAX_LOCS]
     try:
         result, nena_px = postprocess.nena(locs, info, callback=callback)
-    except Exception as e:
-        print(e)
+    except Exception as error:
+        _log.warning("NeNA could not be calculated: %s", error)
         nena_px = float("nan")
-    print(f"{nena_px:.2f} px.")
+    _log.info("NeNA: %.2f px.", nena_px)
     return nena_px
 
 
@@ -9349,11 +9351,10 @@ def check_kinetics(locs: pd.DataFrame, info: list[dict]) -> float:
     len_mean : float
         The mean length of binding events in frames.
     """
-    print("Linking.. ", end="")
     locs = locs.iloc[0:MAX_LOCS]
     locs = postprocess.link(locs, info=info)
     len_mean = locs.len.mean()
-    print(f"Mean length {len_mean:.2f} frames.")
+    _log.info("Mean length of the binding events: %.2f frames.", len_mean)
     return len_mean
 
 
@@ -9389,7 +9390,7 @@ def check_drift(
     n_frames = lib.get_from_metadata(info, "Frames", raise_error=True)
     segmentation = max(1, int(n_frames // 10))
 
-    print(f"Estimating drift with segmentation {segmentation}")
+    _log.info("Estimating drift with segmentation %d.", segmentation)
     drift, locs = postprocess.undrift(
         locs,
         info,
@@ -9400,7 +9401,7 @@ def check_drift(
     drift_x = float(drift["x"].mean())
     drift_y = float(drift["y"].mean())
 
-    print(f"Drift is X: {drift_x:.2f}, Y: {drift_y:.2f}.")
+    _log.info("Drift: X %.2f, Y %.2f.", drift_x, drift_y)
 
     return (drift_x, drift_y)
 

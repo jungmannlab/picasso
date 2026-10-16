@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import os.path
 import argparse
+import logging
+import sys
 from typing import TYPE_CHECKING, Literal
 import pandas as pd
 from . import deprecation, docs_url
@@ -6615,6 +6617,41 @@ def _build_parser() -> (
     return parser, subparsers
 
 
+class _ConsoleLogHandler(logging.StreamHandler):
+    """Write the messages of Picasso's loggers to the current
+    ``sys.stderr``: information as it is, warnings and errors after
+    their level, e.g., ``Warning: ...``."""
+
+    def __init__(self) -> None:
+        super().__init__(sys.stderr)
+
+    @property
+    def stream(self):
+        # the current stream, also after it was replaced
+        return sys.stderr
+
+    @stream.setter
+    def stream(self, value) -> None:
+        pass
+
+    def format(self, record: logging.LogRecord) -> str:
+        text = super().format(record)
+        if record.levelno >= logging.WARNING:
+            text = f"{record.levelname.capitalize()}: {text}"
+        return text
+
+
+def _log_to_console() -> None:
+    """Show the messages of Picasso's loggers (``picasso.*``) from
+    information on in the console, unless logging is set up already,
+    e.g., by a program that runs ``main``."""
+    logger = logging.getLogger("picasso")
+    if logger.handlers or logging.getLogger().handlers:
+        return
+    logger.addHandler(_ConsoleLogHandler())
+    logger.setLevel(logging.INFO)
+
+
 def main():  # noqa: C901
     """Entry point of the ``picasso`` command line interface.
 
@@ -6673,6 +6710,8 @@ def main():  # noqa: C901
             if len(sys.argv) == 2:  # only the gui is opened
                 cli_update_check = False
         if cli_update_check:
+            # a command, not a GUI: its messages go to the console
+            _log_to_console()
             update_check = CliUpdateCheck()
 
         if args.command in plugin_commands:
