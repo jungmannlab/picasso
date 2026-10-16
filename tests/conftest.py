@@ -761,6 +761,7 @@ def isolated_user_settings(tmp_path, monkeypatch):
         io, "_user_settings_filename", lambda: str(tmp_path / "settings.yaml")
     )
     monkeypatch.setattr(io, "_settings_load_error", None)
+    monkeypatch.setattr(io, "_settings_load_error_dismissed", False)
 
 
 @pytest.fixture(autouse=True)

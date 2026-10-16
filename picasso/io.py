@@ -2063,6 +2063,9 @@ SETTINGS_BACKUP_SUFFIX = ".bak"
 # settings file that could not be read; sticky for the process so a GUI
 # can report it once (``dismiss_settings_load_error``)
 _settings_load_error: tuple[str, str | None, tuple | None] | None = None
+# whether that error was reported; the record itself is kept, so that
+# the same file is neither reported again nor taken as readable
+_settings_load_error_dismissed = False
 
 
 def _file_signature(path: str) -> tuple | None:
@@ -2081,14 +2084,14 @@ def _record_broken_settings(path: str, error: BaseException) -> None:
     writes the whole file back, so a file that cannot be read would
     otherwise be silently replaced by the next save, losing every other
     section."""
-    global _settings_load_error
+    global _settings_load_error, _settings_load_error_dismissed
     signature = _file_signature(path)
     if (
         _settings_load_error is not None
         and signature is not None
         and _settings_load_error[2] == signature
     ):
-        return  # this very file was already reported
+        return  # this very file was already recorded (maybe reported)
     kept: str | None = path + SETTINGS_BROKEN_SUFFIX
     try:
         shutil.copy2(path, kept)
@@ -2102,30 +2105,35 @@ def _record_broken_settings(path: str, error: BaseException) -> None:
         f" and a copy of the file was kept as {kept}" if kept else "",
     )
     _settings_load_error = (str(error), kept, signature)
+    _settings_load_error_dismissed = False
 
 
 def settings_load_error() -> tuple[str, str | None] | None:
     """Return the settings load error recorded in this process, if any.
 
     An error is recorded when a settings file could not be read (see
-    ``load_user_settings``) and kept until
-    ``dismiss_settings_load_error`` is called.
+    ``load_user_settings``) and returned until
+    ``dismiss_settings_load_error`` is called; a file that is broken in
+    another way is recorded (and returned) anew.
 
     Returns
     -------
     error : tuple or None
         ``(message, path of the kept copy or None)`` if an error is
-        recorded, None otherwise.
+        recorded and not dismissed, None otherwise.
     """
-    if _settings_load_error is None:
+    if _settings_load_error is None or _settings_load_error_dismissed:
         return None
     return _settings_load_error[:2]
 
 
 def dismiss_settings_load_error() -> None:
-    """Forget a recorded settings load error (after reporting it)."""
-    global _settings_load_error
-    _settings_load_error = None
+    """Mark the recorded settings load error as reported, so that
+    ``settings_load_error`` no longer returns it. The broken file stays
+    recorded: reading it again does not report it again, and
+    ``settings_file_is_broken`` still tells it from a readable one."""
+    global _settings_load_error_dismissed
+    _settings_load_error_dismissed = True
 
 
 def settings_file_is_broken() -> bool:

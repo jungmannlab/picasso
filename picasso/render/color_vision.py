@@ -19,11 +19,16 @@ the simulation shows.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import numba
 import numpy as np
-from PyQt6 import QtGui
 
 from .image_overlay import _as_rgb32, _bgra_view
+
+if TYPE_CHECKING:
+    # annotations only: importing picasso.render must not require PyQt6
+    from PyQt6 import QtGui
 
 #: Simulation matrices of the color vision deficiencies, applied to
 #: linear RGB column vectors (Machado et al. 2009, severity 1.0).
