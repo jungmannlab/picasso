@@ -97,20 +97,29 @@ Server is a tool to interactively explore the database and to enable
 continuous processing workflows.
 
 When launching the server, i.e., clicking on the shortcut or executing the
-command ``picasso server``, the command line will start and show you the local
-IP address on which the server is running. It should open your default browser
-automatically and redirect to the Picasso Server page.
+command ``picasso server``, the command line will start and show you the URL
+on which the server is running, ``http://localhost:8501``. It should open your
+default browser automatically and redirect to the Picasso Server page. Only
+this computer can open the server.
 
-You can also use this IP to, e.g., connect to ``Picasso Server`` from within a
-network. For this, take the ``Network URL`` that is displayed in the command
-line and access it via browser.
+To connect to ``Picasso Server`` from other computers in your network, start it
+with ``picasso server --network``. The command line then also shows the
+``Network URL``; open it in the browser of the other computer.
+
+.. warning::
+
+   Picasso Server has no login. With ``--network``, anyone who can reach the
+   computer over the network can use it, including running any program on
+   this computer as you with the :ref:`custom command <server-custom-commands>`
+   of the watcher. Use ``--network`` only in a network you trust.
 
 .. figure:: /images/server_cmd.png
    :width: 560px
    :class: screenshot
    :alt: Command line window after starting Picasso Server, showing the local and network URLs
 
-   The command line shows the local and network URLs of the server.
+   The command line shows the local and network URLs of the server, started
+   with ``--network``.
 
 In case you close the website tab or the browser, ``Picasso Server`` will run
 in the background until the command line window is closed. You can go back to
@@ -224,6 +233,8 @@ The file ending will be different according to the parameter group used.
 E.g., if you have two parameter groups, file ``testfile.raw`` will be
 processed as ``testfile_pg_1_locs.hdf5`` and ``testfile_pg_2_locs.hdf5``.
 
+.. _server-custom-commands:
+
 Custom commands
 ^^^^^^^^^^^^^^^
 You can use the ``Custom command`` to execute a custom script after a file was
@@ -292,13 +303,18 @@ provided dockerfile might be useful for installation.
 
 2. Run the docker image (interactive mode, port forwarding and with a mounted
    drive). Note that you need to replace the respective paths.
+   ``127.0.0.1:`` makes the server reachable from the host computer only; with
+   ``-p 8501:8501``, other computers can reach it, too (see the warning in
+   :ref:`server-browser-app`).
 
    .. code-block:: bash
 
-      docker run -it -p 8501:8501 --volume "C:/Users/Maximilian/Desktop/data:/home/picasso/data" picasso
+      docker run -it -p 127.0.0.1:8501:8501 --volume "C:/Users/Maximilian/Desktop/data:/home/picasso/data" picasso
 
-3. Launch Picasso Server in the docker image:
+3. Launch Picasso Server in the docker image. ``--network`` is needed
+   because the port forwarding reaches the container from outside, which
+   ``localhost`` inside the container does not accept:
 
    .. code-block:: bash
 
-      python3 -m picasso server
+      python3 -m picasso server --network

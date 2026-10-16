@@ -337,11 +337,26 @@ Start the 2D averaging module (GUI).
 
 server
 ------
-Start the Picasso server (web browser GUI), see :doc:`server`.
+Start the Picasso server (web browser GUI), see :doc:`server`. By default,
+only this computer can open it, at ``http://localhost:8501``.
 
 .. code-block:: bash
 
-   picasso server
+   picasso server [options]
+
+.. list-table::
+   :header-rows: 1
+   :widths: 25 20 55
+
+   * - Option
+     - Default
+     - Description
+   * - ``--network``
+     -
+     - Listen on all network interfaces, so that other computers can open
+       the server. The server has no login, so anyone who can reach this
+       computer can then use it, including the custom commands of the
+       watcher, see :ref:`server-browser-app`.
 
 .. _cmd-spinna:
 

@@ -283,7 +283,9 @@
   "-r",
   "-s"
  ],
- "server": [],
+ "server": [
+  "--network"
+ ],
  "simulate": [],
  "smap2hdf": [
   "--pixelsize",

@@ -1632,8 +1632,17 @@ def _pair_correlation(files: str, bin_size: float, r_max: float) -> None:
             show()
 
 
-def _start_server() -> None:
-    """Start the Streamlit server for the Picasso GUI."""
+def _start_server(network: bool = False) -> None:
+    """Start the Streamlit server for the Picasso GUI.
+
+    Parameters
+    ----------
+    network : bool, optional
+        If True, listen on all network interfaces, so that other
+        computers can open the server. Default is False, i.e., only this
+        computer (``localhost``) can, because the server has no login
+        and its watcher runs custom commands.
+    """
     import os
     import sys
     from streamlit.web import cli as stcli
@@ -1679,6 +1688,14 @@ def _start_server() -> None:
         "--server.port=8501",
         "--browser.gatherUsageStats=False",
     ]
+    if network:
+        print(
+            "Listening on all network interfaces: anyone who can reach this "
+            "computer can use Picasso Server, including the custom commands "
+            "of the watcher.\n"
+        )
+    else:
+        args.append("--server.address=localhost")
 
     # args.extend(theme)
 
@@ -5440,8 +5457,18 @@ def _build_parser() -> (
     )
 
     # server
-    subparsers.add_parser(
+    server_parser = subparsers.add_parser(
         "server", help="picasso server workflow management system"
+    )
+    server_parser.add_argument(
+        "--network",
+        action="store_true",
+        help=(
+            "listen on all network interfaces, so that other computers can "
+            "open the server; anyone who can reach this computer can then "
+            "use it, including the custom commands of the watcher (default: "
+            "only this computer)"
+        ),
     )
 
     # spinna
@@ -6674,7 +6701,7 @@ def main():  # noqa: C901
 
             design.main()
         elif args.command == "server":
-            _start_server()
+            _start_server(args.network)
         elif args.command == "spinna":
             if args.columns:
                 import inspect
