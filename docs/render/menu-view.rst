@@ -242,7 +242,7 @@ The simulation shows the complete forms of these deficiencies (Machado,
 Oliveira & Fernandes, *IEEE Trans. Vis. Comput. Graph.* 2009), so it marks the
 colors that the most affected viewers confuse; people with the milder forms
 see more of the difference. Grays are unchanged. To color the multichannel data
-so they stay apart, see ``Colorblind-safe colors`` under :ref:`render-default-colors`.
+so they stay apart, see ``Colorblind-safe colors`` under :ref:`Default colors <render-default-colors>`.
 
 .. dropdown:: Python
    :icon: code

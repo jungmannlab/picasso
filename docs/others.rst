@@ -101,10 +101,10 @@ Accessibility
   icon by their tooltip.
 - **Color blindness**: ``Colorblind-safe colors`` in Render's ``View > Files``
   colors the channels so that people with red-green color blindness can tell
-  them apart (see :ref:`render-default-colors`), and ``View > Color vision
-  preview`` shows the image as people with color blindness see it (see
-  :ref:`render-color-vision-preview`). Buttons that show a state, e.g., a
-  loaded file, carry an icon besides their color.
+  them apart (see :ref:`Default colors <render-default-colors>`), and
+  ``View > Color vision preview`` shows the image as people with color
+  blindness see it (see :ref:`render-color-vision-preview`). Buttons that
+  show a state, e.g., a loaded file, carry an icon besides their color.
 - **Text size and contrast**: the font size, the light or dark theme and high
   contrast are set in :ref:`appearance`; high contrast also follows macOS's
   *Increase contrast* and Windows' contrast themes.
