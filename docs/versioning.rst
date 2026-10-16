@@ -174,3 +174,9 @@ Before each release:
 3. If the localization files changed, bump ``LOCS_FORMAT_VERSION`` (minor for
    additions, major for changes of meaning) and add a row to the table in
    :ref:`files-format-versions`.
+4. Publish the release on GitHub, with a tag ``v`` plus the version in
+   ``picasso/version.py`` (e.g., ``v1.1.0``).
+   ``.github/workflows/pypi_release.yml`` then builds the package, tests the
+   wheel on Linux, macOS and Windows (``release/pypi/smoke_test.py``) and
+   publishes it on PyPI. To try a release candidate first, run the workflow
+   by hand, which publishes on TestPyPI.
