@@ -474,12 +474,13 @@ with any text editor. Picasso uses them for:
   and Nanotron models (:doc:`nanotron`);
 - the user settings (see :ref:`user-settings-file`).
 
-Picasso reads the YAML files of metadata, calibrations, picks and SPINNA
-structures safely: no code named in a file is run. Before version 1.0, Picasso
-wrote numpy numbers, tuples and arrays with Python-specific tags (e.g.,
-``!!python/object/apply:numpy...``); their values are rebuilt from the data in
-the file. Since 1.0, metadata and calibrations are written as plain YAML that
-any YAML reader can read.
+Picasso reads every YAML file safely: no code named in a file is run. Before
+version 1.0, Picasso wrote numpy numbers, tuples and arrays with
+Python-specific tags (e.g., ``!!python/object/apply:numpy...``); their values
+are rebuilt from the data in the file. Since 1.0, metadata and calibrations are
+written as plain YAML that any YAML reader can read. To read a Picasso YAML
+file in a script, use ``picasso.io.load_yaml``, which also reads the files
+written before 1.0; ``yaml.safe_load`` refuses their Python-specific tags.
 
 .. dropdown:: Python
    :icon: code
@@ -492,3 +493,4 @@ any YAML reader can read.
       info = io.load_info("movie_locs.yaml")
       picks, shape, size = io.load_picks("movie_locs_picks.yaml", pixelsize=130)
       calibration = io.load_calibration("beads_3d_calib.yaml")
+      mask_info = io.load_yaml("mask.yaml")  # any other Picasso YAML file

@@ -470,6 +470,17 @@ class TestPickRemovalAcrossShapes:
         view.remove_picks((5.5, 10.0))
         assert view._picks == []
 
+    def test_subtract_picks_of_a_file(self, window, tmp_path):
+        view = window.view
+        window.tools_settings_dialog.pick_shape.setCurrentText("Circle")
+        view._picks = [(5.0, 5.0), (20.0, 20.0)]
+        path = tmp_path / "subtract.yaml"
+        path.write_text(
+            "Shape: Circle\nDiameter (nm): 260.0\nCenters: [[5.1, 5.0]]\n"
+        )
+        view.subtract_picks(str(path))
+        assert [tuple(pick) for pick in view._picks] == [(20.0, 20.0)]
+
 
 class TestRotationWindowShapes:
     """The 3D window frames and moves a pick of any shape."""

@@ -3473,7 +3473,7 @@ def _spinna_compute_roi(
     """
     import os
     import numpy as np
-    from .io import _load_yaml
+    from .io import load_yaml
 
     if apply_mask:
         masks: dict = {}
@@ -3482,8 +3482,7 @@ def _spinna_compute_roi(
         for target in targets:
             masks[target] = np.load(mask_paths[target])
             mask_path = os.path.splitext(mask_paths[target])[0] + ".yaml"
-            with open(mask_path, "r") as mask_file:
-                mask_info[target] = _load_yaml(mask_file)
+            mask_info[target] = load_yaml(mask_path)
         mask_dict = {"mask": masks, "info": mask_info}
     else:
         mask_dict = None

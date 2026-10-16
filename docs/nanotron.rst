@@ -96,6 +96,16 @@ nanoTRON Predict
 ----------------
 Use a trained nanoTRON model to classify nanopatterns on new data.
 
+.. warning::
+
+   A nanoTRON model (``.sav``) is a scikit-learn model saved with ``joblib``,
+   which uses Python's ``pickle``. Loading a model runs code stored in the
+   file, and that code can do anything Picasso itself can do: read and write
+   your files, use the network, start other programs. Only load models whose
+   authors you trust, e.g., the default model that comes with Picasso and
+   models you trained yourself. The ``.yaml`` file next to a model is read
+   safely.
+
 1. Load the model via ``Tools`` > ``Train Model``. The different classes should now be listed on the right side.
 2. Drag and drop the Picasso localization table file (HDF5) that should be used for prediction into the large gray box. If the file was loaded correctly, the box displays the image.
 3. Start the classification via the button ``Predict``.

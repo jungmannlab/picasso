@@ -375,7 +375,7 @@ class TestYaml:
         text = yaml.dump({"Value": np.float64(2.5)}).replace(
             "numpy._core.", "numpy.core."
         )
-        assert io._load_yaml(text) == {"Value": 2.5}
+        assert io._parse_yaml(text) == {"Value": 2.5}
 
     def test_never_runs_code_from_the_file(self, tmp_path, caplog):
         marker = tmp_path / "ran"
@@ -421,7 +421,7 @@ class TestYaml:
 
     def test_no_unsafe_yaml_loader_in_picasso(self):
         # every .yaml Picasso opens may come from someone else; read it
-        # with yaml.safe_load or io._load_yaml
+        # with yaml.safe_load or io.load_yaml
         unsafe = re.compile(
             r"yaml\.(load|load_all|full_load|full_load_all|unsafe_load"
             r"|unsafe_load_all)\(|FullLoader|UnsafeLoader|yaml\.Loader\b"

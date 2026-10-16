@@ -65,5 +65,5 @@ def test_save_info(tmp_path):
     path = str(tmp_path / "design.yaml")
     design.save_info(path, {"Structure": 1, "Extensions Short": [1, 2]})
     with open(path) as file:
-        saved = io._load_yaml(file, all_documents=True)
+        saved = io._parse_yaml(file, all_documents=True)
     assert saved == [{"Structure": 1, "Extensions Short": [1, 2]}]

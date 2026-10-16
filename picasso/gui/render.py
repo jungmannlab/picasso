@@ -14297,8 +14297,7 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             self.window.image_overlay_dialog.load_image(paths[0])
             return
         if extensions == [".yaml"]:  # just one yaml dropped
-            with open(paths[0], "r") as f:
-                file = io._load_yaml(f)
+            file = io.load_yaml(paths[0])
             if not isinstance(file, dict):
                 return
             # try loading a screenshot
@@ -14850,52 +14849,54 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
                 dataset_dialog.set_channel_contrast(i, low, high, update=False)
             dataset_dialog.update_channel_contrast()
 
-    @check_picks
-    @check_circular_picks
     def subtract_picks(self, path: str) -> None:
         """Clear selected picks that cover the picks loaded from path.
+        Only circular picks can be subtracted; for other shapes, a
+        warning is shown.
 
         Parameters
         ----------
         path : str
             Path specifying .yaml file with picks.
-
-        Raises
-        ------
-        ValueError
-            If .yaml file is not recognized.
-        NotImplementedError
-            Non-circular picks have not been implemented yet.
         """
+        # not with the check_circular_picks decorator, which would drop
+        # the path
+        if self._pick_shape != "Circle":
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Pick Error",
+                "This operation is only implemented for these pick "
+                "shapes: Circle.",
+            )
+            return
         oldpicks = self._picks.copy()
 
         # load .yaml
-        with open(path, "r") as f:
-            regions = io._load_yaml(f)
-            self._picks = regions["Centers"]
-            if "Diameter (nm)" in regions:
-                diameter = regions["Diameter (nm)"] / self.pixelsize
-            elif "Diameter" in regions:
-                diameter = regions["Diameter"]
+        regions = io.load_yaml(path)
+        self._picks = regions["Centers"]
+        if "Diameter (nm)" in regions:
+            diameter = regions["Diameter (nm)"] / self.pixelsize
+        elif "Diameter" in regions:
+            diameter = regions["Diameter"]
 
-            # calculate which picks are to stay
-            distances = (
-                np.sum(
-                    (euclidean_distances(oldpicks, self._picks) < diameter / 2)
-                    * 1,
-                    axis=1,
-                )
-                >= 1
+        # calculate which picks are to stay
+        distances = (
+            np.sum(
+                (euclidean_distances(oldpicks, self._picks) < diameter / 2)
+                * 1,
+                axis=1,
             )
-            filtered_list = [i for (i, v) in zip(oldpicks, distances) if not v]
+            >= 1
+        )
+        filtered_list = [i for (i, v) in zip(oldpicks, distances) if not v]
 
-            self._picks = filtered_list
+        self._picks = filtered_list
 
-            self.update_pick_info_short()
-            self.window.tools_settings_dialog.pick_diameter.setValue(
-                regions["Diameter (nm)"]
-            )
-            self.update_scene(picks_only=True)
+        self.update_pick_info_short()
+        self.window.tools_settings_dialog.pick_diameter.setValue(
+            regions["Diameter (nm)"]
+        )
+        self.update_scene(picks_only=True)
 
     def map_to_movie(self, position: QtCore.QPoint) -> QtCore.QPoint:
         """Convert coordinates from display units to camera units."""

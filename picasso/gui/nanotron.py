@@ -1388,11 +1388,10 @@ class Window(QtWidgets.QMainWindow):
 
         try:
             base, ext = os.path.splitext(path)
-            with open(base + ".yaml", "r") as f:
-                self.model_info = io._load_yaml(f)
-                self.classes.clear()
-                self.classes = self.model_info["Classes"]
-                self.model_loaded = True
+            self.model_info = io.load_yaml(base + ".yaml")
+            self.classes.clear()
+            self.classes = self.model_info["Classes"]
+            self.model_loaded = True
         except io.NoMetadataFileError:
             return
 
@@ -1411,12 +1410,11 @@ class Window(QtWidgets.QMainWindow):
 
             try:
                 base, ext = os.path.splitext(path)
-                with open(base + ".yaml", "r") as f:
-                    self.model_info = io._load_yaml(f)
-                    self.classes.clear()
-                    self.classes = self.model_info["Classes"]
-                    self.model_loaded = True
-                    self.update_class_buttons()
+                self.model_info = io.load_yaml(base + ".yaml")
+                self.classes.clear()
+                self.classes = self.model_info["Classes"]
+                self.model_loaded = True
+                self.update_class_buttons()
 
                 if self.locs_loaded is True:
                     self.predict_btn.setDisabled(False)

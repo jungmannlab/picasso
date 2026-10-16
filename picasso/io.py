@@ -679,7 +679,7 @@ def load_calibration(path: str) -> dict:
     """
     with open(path, "r") as calibration_file:
         try:
-            calibration = _load_yaml(calibration_file)
+            calibration = _parse_yaml(calibration_file)
         except yaml.composer.ComposerError:
             raise ValueError(
                 "Invalid calibration file: expected a single-document YAML "
@@ -809,7 +809,7 @@ def load_any_calibration(path: str) -> dict:
         return load_spline_calibration(path)
     with open(path, "r") as calibration_file:
         try:
-            calibration = _load_yaml(calibration_file)
+            calibration = _parse_yaml(calibration_file)
         except yaml.composer.ComposerError:
             raise ValueError(
                 "Invalid calibration file: expected a single-document YAML "
@@ -1641,8 +1641,37 @@ _MetadataLoader.add_multi_constructor(
 )
 
 
-def _load_yaml(stream, *, all_documents: bool = False):
-    """Read a Picasso .yaml file safely, see ``_MetadataLoader``.
+def load_yaml(path: str, *, all_documents: bool = False):
+    """Read a .yaml file written by Picasso, e.g., metadata, picks,
+    calibrations or masks, safely.
+
+    Unlike ``yaml.safe_load``, it also reads the values that Picasso
+    before 1.0 wrote with Python-specific tags, e.g., numpy numbers, which
+    are read as plain Python values. No code named in the file is run, so
+    files from others can be opened.
+
+    Parameters
+    ----------
+    path : str
+        Path to the .yaml file.
+    all_documents : bool, optional
+        If True, return the list of all documents of a multi-document
+        file, e.g., the metadata of localizations, with one document per
+        processing step. Default is False, i.e., the file holds one
+        document.
+
+    Returns
+    -------
+    data : Any
+        The document (usually a dict), or the list of documents if
+        ``all_documents``.
+    """
+    with open(path, "r") as file:
+        return _parse_yaml(file, all_documents=all_documents)
+
+
+def _parse_yaml(stream, *, all_documents: bool = False):
+    """Parse Picasso YAML safely, see ``_MetadataLoader``.
 
     Parameters
     ----------
@@ -1697,7 +1726,7 @@ def _plain_yaml_value(value):
 
 
 def _dump_yaml(data, stream, *, all_documents: bool = False, **kwargs):
-    """Write ``data`` as plain YAML that ``_load_yaml`` and any other
+    """Write ``data`` as plain YAML that ``load_yaml`` and any other
     YAML reader read without Python-specific tags.
 
     Values of types plain YAML cannot hold (e.g., arbitrary objects) fall
@@ -1766,7 +1795,7 @@ def load_info(path: str) -> list[dict]:
     # metadata embedded in the HDF5 file, so it can be edited by hand.
     try:
         with open(filename, "r") as info_file:
-            return _load_yaml(info_file, all_documents=True)
+            return _parse_yaml(info_file, all_documents=True)
     except FileNotFoundError:
         pass
     # If absent, fall back to metadata embedded in the HDF5 file itself.
@@ -1841,7 +1870,7 @@ def load_structures(path: str) -> tuple[list[spinna.Structure], list[str]]:
     )
     with open(path, "r") as file:
         try:
-            info = _load_yaml(file, all_documents=True)
+            info = _parse_yaml(file, all_documents=True)
         except TypeError:
             raise TypeError(message)
     if (
@@ -1903,7 +1932,7 @@ def load_picks(  # noqa: C901
 
     # load the file
     with open(path, "r") as f:
-        regions = _load_yaml(f)
+        regions = _parse_yaml(f)
 
     # Backwards compatibility for old picked region files
     if "Shape" in regions:
@@ -2161,7 +2190,7 @@ def load_user_settings() -> lib.AutoDict:
         return lib.AutoDict()
     try:
         with settings_file:
-            settings = _load_yaml(settings_file)
+            settings = _parse_yaml(settings_file)
     except Exception as error:
         _record_broken_settings(settings_filename, error)
         return lib.AutoDict()
