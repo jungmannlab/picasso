@@ -15,7 +15,6 @@ import glob as _glob
 import os
 import sys
 import time
-import yaml
 from typing import Literal
 
 import numpy as np
@@ -1118,13 +1117,10 @@ class Window(QtWidgets.QMainWindow):
             self, "Load 3d calibration", directory=dir, filter="*.yaml"
         )
         if path:
-            with open(path, "r") as f:
-                z_calibration = yaml.full_load(f)
-                self.cx = [_ for _ in z_calibration["X Coefficients"]]
-                self.cy = [_ for _ in z_calibration["Y Coefficients"]]
-                self.statusBar().showMessage(
-                    "Calibration loaded from: " + path
-                )
+            z_calibration = io.load_calibration(path)
+            self.cx = [_ for _ in z_calibration["X Coefficients"]]
+            self.cy = [_ for _ in z_calibration["Y Coefficients"]]
+            self.statusBar().showMessage("Calibration loaded from: " + path)
 
     def changeTime(self) -> None:
         """Update the total acquisition time based on the current

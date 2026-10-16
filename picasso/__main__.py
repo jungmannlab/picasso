@@ -3472,8 +3472,8 @@ def _spinna_compute_roi(
         ``(mask_dict, width, height, depth)``
     """
     import os
-    import yaml
     import numpy as np
+    from .io import _load_yaml
 
     if apply_mask:
         masks: dict = {}
@@ -3482,10 +3482,8 @@ def _spinna_compute_roi(
         for target in targets:
             masks[target] = np.load(mask_paths[target])
             mask_path = os.path.splitext(mask_paths[target])[0] + ".yaml"
-            mask_info[target] = yaml.load(
-                open(mask_path, "r"),
-                Loader=yaml.FullLoader,
-            )
+            with open(mask_path, "r") as mask_file:
+                mask_info[target] = _load_yaml(mask_file)
         mask_dict = {"mask": masks, "info": mask_info}
     else:
         mask_dict = None
@@ -4343,8 +4341,7 @@ def _g5m(
     for details on the parameters."""
     from glob import glob
     from os.path import isdir, splitext
-    import yaml
-    from .io import load_locs, save_locs
+    from .io import load_calibration, load_locs, save_locs
     from .g5m import g5m
 
     if isdir(files):
@@ -4368,8 +4365,7 @@ def _g5m(
                     "A calibration file (-c/--calibration) is required "
                     "for astigmatism 3D data."
                 )
-            with open(calibration, "r") as f:
-                calib = yaml.full_load(f)
+            calib = load_calibration(calibration)
         mols, _, g5m_info = g5m(
             locs,
             info,

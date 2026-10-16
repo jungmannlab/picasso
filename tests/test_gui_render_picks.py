@@ -209,7 +209,7 @@ class TestBoxPickTool:
         path = str(tmp_path / "picks.yaml")
         box_view.save_picks(path)
 
-        regions = yaml.full_load(open(path))
+        regions = yaml.safe_load(open(path))
         assert regions["Shape"] == "Box"
         assert "Corners" in regions
         # a box has no global size to store
@@ -721,7 +721,7 @@ class TestBrushPickTool:
         path = str(tmp_path / "picks.yaml")
         brush_view.save_picks(path)
 
-        regions = yaml.full_load(open(path))
+        regions = yaml.safe_load(open(path))
         assert regions["Shape"] == "Brush"
         # a flat, ordered stroke list, each with its own width
         assert len(regions["Strokes"]) == 3

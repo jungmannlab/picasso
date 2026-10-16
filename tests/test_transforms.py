@@ -467,7 +467,7 @@ class TestSerialization:
 
     def test_yaml_round_trip(self, model):
         _, src, _, t = model
-        restored = transforms.from_dict(yaml.full_load(yaml.dump(t.to_dict())))
+        restored = transforms.from_dict(yaml.safe_load(yaml.dump(t.to_dict())))
         assert np.array_equal(restored.apply(src), t.apply(src))
 
     def test_to_dict_holds_builtins_only(self, model):

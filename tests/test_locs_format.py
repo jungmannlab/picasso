@@ -13,6 +13,7 @@ import collections
 import json
 import logging
 import os
+import re
 
 import h5py
 import numpy as np
@@ -406,6 +407,39 @@ class TestYaml:
         picks, shape, size = io.load_picks(str(path))
         assert shape == "Circle"
         assert not marker.exists()
+
+    def test_camera_config_read_safely(self, tmp_path, monkeypatch):
+        import picasso
+
+        path = tmp_path / "config.yaml"
+        path.write_text(
+            "Cameras: !!python/object/new:collections.Counter []\n"
+        )
+        monkeypatch.setattr(picasso, "resolve_config_path", lambda: str(path))
+        with pytest.raises(yaml.YAMLError):
+            picasso.load_config()
+
+    def test_no_unsafe_yaml_loader_in_picasso(self):
+        # every .yaml Picasso opens may come from someone else; read it
+        # with yaml.safe_load or io._load_yaml
+        unsafe = re.compile(
+            r"yaml\.(load|load_all|full_load|full_load_all|unsafe_load"
+            r"|unsafe_load_all)\(|FullLoader|UnsafeLoader|yaml\.Loader\b"
+        )
+        package = os.path.dirname(io.__file__)
+        found = []
+        for folder, _, files in os.walk(package):
+            for name in files:
+                if not name.endswith(".py"):
+                    continue
+                path = os.path.join(folder, name)
+                with open(path, encoding="utf-8") as file:
+                    for number, line in enumerate(file, 1):
+                        if unsafe.search(line):
+                            found.append(
+                                f"{os.path.relpath(path, package)}:{number}"
+                            )
+        assert not found, "Unsafe YAML loading in:\n  " + "\n  ".join(found)
 
 
 class TestStepInfo:

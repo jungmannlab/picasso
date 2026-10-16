@@ -1389,7 +1389,7 @@ class Window(QtWidgets.QMainWindow):
         try:
             base, ext = os.path.splitext(path)
             with open(base + ".yaml", "r") as f:
-                self.model_info = yaml.full_load(f)
+                self.model_info = io._load_yaml(f)
                 self.classes.clear()
                 self.classes = self.model_info["Classes"]
                 self.model_loaded = True
@@ -1412,7 +1412,7 @@ class Window(QtWidgets.QMainWindow):
             try:
                 base, ext = os.path.splitext(path)
                 with open(base + ".yaml", "r") as f:
-                    self.model_info = yaml.full_load(f)
+                    self.model_info = io._load_yaml(f)
                     self.classes.clear()
                     self.classes = self.model_info["Classes"]
                     self.model_loaded = True

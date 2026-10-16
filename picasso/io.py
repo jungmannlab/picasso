@@ -630,7 +630,7 @@ def save_config(CONFIG: dict) -> None:
 
     os.makedirs(user_config_dir(), exist_ok=True)
     with open(config_filename(), "w") as config_file:
-        yaml.dump(CONFIG, config_file, width=1000)
+        _dump_yaml(CONFIG, config_file, width=1000)
 
 
 def save_raw(path: str, movie: lib.IntArray3D, info: dict) -> None:

@@ -148,7 +148,7 @@ def load_config() -> dict:
         return {}
     try:
         with open(path, "r") as config_file:
-            config = yaml.full_load(config_file)
+            config = yaml.safe_load(config_file)
     except (FileNotFoundError, OSError):
         return {}
     return config if config is not None else {}

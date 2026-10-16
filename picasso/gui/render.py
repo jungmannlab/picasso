@@ -14298,7 +14298,7 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             return
         if extensions == [".yaml"]:  # just one yaml dropped
             with open(paths[0], "r") as f:
-                file = yaml.full_load(f)
+                file = io._load_yaml(f)
             if not isinstance(file, dict):
                 return
             # try loading a screenshot
@@ -14871,7 +14871,7 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
 
         # load .yaml
         with open(path, "r") as f:
-            regions = yaml.full_load(f)
+            regions = io._load_yaml(f)
             self._picks = regions["Centers"]
             if "Diameter (nm)" in regions:
                 diameter = regions["Diameter (nm)"] / self.pixelsize
