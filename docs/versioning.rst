@@ -160,28 +160,38 @@ level and warn where the old name is used:
 - it compares the public names (``__all__`` of the modules on the API pages)
   and the commands and options with snapshots in ``tests/data/stability``, so
   a change of them fails until it is recorded with
-  ``python tests/regen_stability_snapshots.py``;
+  ``python tests/regen_stability_snapshots.py``. The script refuses to
+  record the removal of a public name (a rename removes the old name) unless
+  the name is deprecated and this version may remove it (``remove_in``, its
+  pre-releases, or later). ``--allow-breaking`` records any removal, for a
+  major release or a name that was public by mistake;
 - it fails once a registered deprecation is due for removal (from the final
   release ``remove_in``; its pre-releases may still contain the name), and
   ``register`` refuses a removal sooner than the policy allows.
 
 Before each release:
 
-1. Remove the deprecated names due in this version (the test lists them) and
+1. Update the version in ``picasso/version.py``.
+2. Clean up the changelog section of this version in ``changelog.md``. Its
+   heading must be the new version, or ``release/make_release_notes.py``
+   refuses to write the release notes.
+3. Run the tests locally (``python -m pytest``).
+4. Remove the deprecated names due in this version (the test lists them) and
    list the removals in the changelog.
-2. Check that no public name was removed or renamed without a deprecation
-   (the snapshot diff).
-3. If the localization files changed, bump ``LOCS_FORMAT_VERSION`` (minor for
+5. If the localization files changed, bump ``LOCS_FORMAT_VERSION`` (minor for
    additions, major for changes of meaning) and add a row to the table in
    :ref:`files-format-versions`.
-4. Build the one-click installers with the scripts in ``release`` on Windows
+6. Build the one-click installers with the scripts in ``release`` on Windows
    and macOS. Each script tests the frozen app (``release/smoke_test.py``)
    before packaging it and stops if the test fails, and zips the installer
    with its ``readme.txt``. The standard and the CUDA Windows installers can
    be built at the same time.
-5. Publish the release on GitHub, with a tag ``v`` plus the version in
+7. Publish the release on GitHub, with a tag ``v`` plus the version in
    ``picasso/version.py`` (e.g., ``v1.1.0``) and the three zips attached.
-   ``.github/workflows/pypi_release.yml`` then builds the package, tests the
-   wheel on Linux, macOS and Windows (``release/smoke_test.py``) and
+   ``python release/make_release_notes.py`` writes its description, from the
+   changelog section of this version, to ``release/release_notes.txt``, to
+   paste into the release.
+   ``.github/workflows/pypi_release.yml`` then builds the package automatically,
+   tests the wheel on Linux, macOS and Windows (``release/smoke_test.py``) and
    publishes it on PyPI. To try a release candidate first, run the workflow
    by hand, which publishes on TestPyPI.

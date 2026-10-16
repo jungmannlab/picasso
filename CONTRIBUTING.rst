@@ -123,7 +123,7 @@ Committing & Pushing
 Changing Public Names
 ^^^^^^^^^^^^^^^^^^^^^
 
-The functions and classes on the Python API pages (each module's ``__all__``), the commands and options of the command line and the file formats are public: see the stability policy in ``docs/versioning.rst``. Do not remove or rename them; deprecate them with ``picasso.deprecation`` instead, so that they keep working for two more minor releases. ``tests/test_stability.py`` compares the public names with snapshots in ``tests/data/stability``; after a deliberate change, record it with::
+The functions and classes on the Python API pages (each module's ``__all__``), the commands and options of the command line and the file formats are public: see the stability policy in ``docs/versioning.rst``. Do not remove or rename them; deprecate them with ``picasso.deprecation`` instead, so that they keep working for two more minor releases. ``tests/test_stability.py`` compares the public names with snapshots in ``tests/data/stability``; after a deliberate change, record it with the command below, which refuses to record the removal of a name that was not deprecated first::
 
     $ python tests/regen_stability_snapshots.py
 

@@ -5,7 +5,8 @@ of ``picasso.deprecation`` and the names renamed in Picasso 1.0.
 A failing snapshot test means a public name was added, renamed or
 removed. Removing or renaming one needs a deprecation cycle first; once
 the change is deliberate, record it with
-``python tests/regen_stability_snapshots.py``.
+``python tests/regen_stability_snapshots.py``, which refuses to record
+a removal that skipped the cycle.
 
 :author: Rafal Kowalewski, 2026
 :copyright: Copyright (c) 2026 Jungmann Lab, MPI of Biochemistry
@@ -14,6 +15,8 @@ the change is deliberate, record it with
 from __future__ import annotations
 
 import json
+import sys
+import types
 import warnings
 
 import numpy as np
@@ -23,10 +26,13 @@ import pytest
 from picasso import __version__, deprecation, lib
 from picasso import __main__ as cli
 
+from tests import regen_stability_snapshots as regen
 from tests.regen_stability_snapshots import (
     API_SNAPSHOT,
     CLI_SNAPSHOT,
+    DEPRECATED_SNAPSHOT,
     command_line,
+    deprecated_names,
     public_api,
 )
 
@@ -76,6 +82,126 @@ class TestSnapshots:
         assert "picasso.io" in recorded
         assert "picasso.fitting.gaussfit" in recorded  # recursive
         assert "load_locs" in recorded["picasso.io"]
+
+    def test_deprecations_are_recorded(self):
+        # the snapshot of the deprecated names is what lets
+        # regen_stability_snapshots record their removal later
+        recorded = json.loads(DEPRECATED_SNAPSHOT.read_text())
+        current = deprecated_names(public_api(), command_line())
+        assert recorded == current, (
+            "The deprecated public names changed: recorded "
+            f"{recorded}, now {current}.\nRun {REGEN}."
+        )
+
+
+class TestRecordingRemovals:
+    """``regen_stability_snapshots`` records the removal of a public
+    name only once its deprecation cycle is over."""
+
+    RECORDED = {
+        "api": {
+            "picasso.io": ["load_locs", "old_function"],
+            "picasso.old": ["f"],
+        },
+        "cli": {"render": ["--old", "-s"], "old-command": ["-x"]},
+        "deprecated": {
+            "picasso.io.old_function": "1.3",
+            "picasso render --old": "1.3",
+        },
+    }
+
+    def refused(self, version, api=None, cli=None):
+        recorded = self.RECORDED
+        return regen.refused_removals(
+            recorded,
+            recorded["api"] if api is None else api,
+            recorded["cli"] if cli is None else cli,
+            version,
+        )
+
+    def test_additions_are_recorded(self):
+        api = dict(self.RECORDED["api"], **{"picasso.new": ["g"]})
+        cli = dict(self.RECORDED["cli"], **{"new-command": []})
+        assert self.refused("1.1.0", api, cli) == []
+
+    def test_removal_without_deprecation_is_refused(self):
+        api = dict(self.RECORDED["api"], **{"picasso.io": ["old_function"]})
+        assert self.refused("1.3.0", api) == [
+            "picasso.io.load_locs was removed without a deprecation"
+        ]
+
+    @pytest.mark.parametrize(
+        "version,allowed",
+        [
+            ("1.2.4", False),
+            ("1.3.0a1", True),  # during the release cycle of 1.3
+            ("1.3.0", True),
+            ("2.0.0", True),
+        ],
+    )
+    def test_deprecated_name_waits_for_its_version(self, version, allowed):
+        api = dict(self.RECORDED["api"], **{"picasso.io": ["load_locs"]})
+        refused = self.refused(version, api)
+        if allowed:
+            assert refused == []
+        else:
+            assert refused == [
+                "picasso.io.old_function is deprecated, but may be removed "
+                f"in Picasso 1.3, not {version}"
+            ]
+
+    def test_renamed_option(self):
+        cli = dict(self.RECORDED["cli"], render=["--new", "-s"])
+        assert self.refused("1.3.0", cli=cli) == []
+        assert len(self.refused("1.2.0", cli=cli)) == 1
+
+    def test_removed_module_or_command_is_one_removal(self):
+        api = {"picasso.io": self.RECORDED["api"]["picasso.io"]}
+        cli = {"render": self.RECORDED["cli"]["render"]}
+        assert self.refused("1.3.0", api, cli) == [
+            "picasso.old was removed without a deprecation",
+            "picasso old-command was removed without a deprecation",
+        ]
+
+    def test_deprecations_are_found_by_public_name(self, monkeypatch):
+        monkeypatch.setattr(deprecation, "REGISTRY", [])
+
+        @deprecation.deprecated(since="1.1", remove_in="1.3")
+        def old_function():
+            pass
+
+        deprecation.register(
+            "picasso render --old", since="1.1", remove_in="1.3"
+        )
+        # public in another module than the one defining it, as the
+        # functions of picasso.render's submodules
+        package = types.ModuleType("picasso_test_package")
+        package.old_function = old_function
+        monkeypatch.setitem(sys.modules, "picasso_test_package", package)
+        api = {"picasso_test_package": ["old_function"]}
+        cli = {"render": ["--old", "-s"]}
+        assert deprecated_names(api, cli) == {
+            "picasso_test_package.old_function": "1.3",
+            "picasso render --old": "1.3",
+        }
+
+    def test_refused_removal_records_nothing(self, tmp_path, monkeypatch):
+        api, cli = public_api(), command_line()
+        api["picasso.io"] = api["picasso.io"] + ["gone"]
+        paths = {
+            "API_SNAPSHOT": tmp_path / "api.json",
+            "CLI_SNAPSHOT": tmp_path / "cli.json",
+            "DEPRECATED_SNAPSHOT": tmp_path / "deprecated.json",
+        }
+        for (name, path), data in zip(paths.items(), (api, cli, {})):
+            path.write_text(json.dumps(data))
+            monkeypatch.setattr(regen, name, path)
+        monkeypatch.setattr(regen, "SNAPSHOTS", tmp_path)
+        recorded = {path: path.read_text() for path in paths.values()}
+        monkeypatch.setattr(sys, "argv", ["regen_stability_snapshots.py"])
+        with pytest.raises(SystemExit, match="picasso.io.gone was removed"):
+            regen.main()
+        assert {path: path.read_text() for path in paths.values()} == recorded
 
 
 class TestDeprecationCycle:
