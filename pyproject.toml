@@ -41,6 +41,9 @@ dependencies = [
     "tqdm>=4.67.1,<5",
     "streamlit>=1.50.0,<2",
     "nd2>=0.10.4,<1",
+    "dask>=2024.8.0",  # calendar versions, no major release to stop at
+    "statsmodels>=0.14.2,<1",  # 0.14.2: NumPy 2
+    "requests>=2.31.0,<3",
     "sqlalchemy>=2.0.44,<3",
     "plotly-express>=0.4.1,<1",
     "watchdog>=6.0.0,<7",
@@ -48,7 +51,7 @@ dependencies = [
     "playsound3>=3.2.8,<4",
     "imageio>=2.37.0,<3",
     "imageio-ffmpeg>=0.6.0,<1",
-    "tifffile>=2024.7.24,<2027",
+    "tifffile>=2024.7.24",
     "wgpu>=0.32,<0.33",
     "PyImarisWriter==0.7.0; sys_platform=='win32'",
     "hdf5plugin"
@@ -109,6 +112,9 @@ installer = [
     "tqdm==4.67.3",
     "streamlit==1.56.0",
     "nd2==0.11.3",
+    "dask==2026.3.0",
+    "statsmodels==0.14.6",
+    "requests==2.33.1",
     "sqlalchemy==2.0.49",
     "plotly-express==0.4.1",
     "watchdog==6.0.0",
