@@ -627,24 +627,36 @@ class TestBrushPickTool:
             brush_view.map_to_movie(QtCore.QPoint(*BRIDGE[0]))
         )
 
-    def test_right_click_undoes_the_last_stroke(self, brush_view):
+    def test_right_click_removes_the_pick_under_the_cursor(self, brush_view):
+        _paint(brush_view, STROKE_A)
+        _paint(brush_view, STROKE_B)
+        brush_view.mouseReleaseEvent(
+            _Event(*STROKE_B[1], QtCore.Qt.MouseButton.RightButton)
+        )
+        assert len(brush_view._picks) == 1
+        first_point = brush_view._picks[0][0][1][0]
+        assert first_point == pytest.approx(
+            brush_view.map_to_movie(QtCore.QPoint(*STROKE_A[0]))
+        )
+
+    def test_right_click_outside_the_picks_keeps_them(self, brush_view):
         _paint(brush_view, STROKE_A)
         _paint(brush_view, STROKE_B)
         brush_view.mouseReleaseEvent(
             _Event(300, 300, QtCore.Qt.MouseButton.RightButton)
         )
-        assert len(brush_view._picks) == 1
+        assert len(brush_view._picks) == 2
 
-    def test_undoing_a_bridge_splits_the_pick_again(self, brush_view):
+    def test_right_click_removes_all_merged_strokes(self, brush_view):
         _paint(brush_view, STROKE_A)
         _paint(brush_view, STROKE_B)
         _paint(brush_view, BRIDGE)
         assert len(brush_view._picks) == 1
-        # the position of the right click does not matter for the brush
+        # a click on one stroke removes the whole painted region
         brush_view.mouseReleaseEvent(
-            _Event(500, 500, QtCore.Qt.MouseButton.RightButton)
+            _Event(*STROKE_A[0], QtCore.Qt.MouseButton.RightButton)
         )
-        assert len(brush_view._picks) == 2
+        assert brush_view._picks == []
 
     def test_right_click_with_no_picks_is_harmless(self, brush_view):
         brush_view.mouseReleaseEvent(
