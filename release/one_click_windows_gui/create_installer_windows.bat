@@ -7,18 +7,14 @@ call cd %~dp0\..\..
 
 call conda create -n picasso_installer python=3.14.4 -y
 call conda activate picasso_installer
-call pip install build
 
 for /f %%i in ('python -c "exec(open('picasso/version.py').read()); print(__version__)"') do set PICASSO_VERSION=%%i
-REM The CPU and CUDA installers share the repo-level dist/ folder. If both are
-REM created at the same time, the second "python -m build" run fails because the
-REM sdist/wheel already exist, so only build when they are missing.
-if exist "dist\picassosr-%PICASSO_VERSION%-py3-none-any.whl" (
-    echo Reusing existing dist/picassosr-%PICASSO_VERSION%-py3-none-any.whl
-) else (
-    call python -m build
-)
-call pip install "dist/picassosr-%PICASSO_VERSION%-py3-none-any.whl[installer]"
+REM Picasso is built from a temporary copy of the repository
+REM (..\install_picasso.py): a build in the repository itself writes build\,
+REM dist\ and picassosr.egg-info there, which create_installer_windows_cuda.bat,
+REM if it runs at the same time, would overwrite.
+call python release\install_picasso.py installer
+if errorlevel 1 exit /b 1
 call cd release/one_click_windows_gui
 
 call pyinstaller "../pyinstaller/picasso_pyinstaller.py" ^

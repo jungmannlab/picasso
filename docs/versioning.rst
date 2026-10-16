@@ -176,7 +176,8 @@ Before each release:
    :ref:`files-format-versions`.
 4. Build the one-click installers with the scripts in ``release`` on Windows
    and macOS. Each script tests the frozen app (``release/smoke_test.py``)
-   before packaging it and stops if the test fails.
+   before packaging it and stops if the test fails. The standard and the
+   CUDA Windows installers can be built at the same time.
 5. Publish the release on GitHub, with a tag ``v`` plus the version in
    ``picasso/version.py`` (e.g., ``v1.1.0``).
    ``.github/workflows/pypi_release.yml`` then builds the package, tests the
