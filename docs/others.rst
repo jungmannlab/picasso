@@ -33,7 +33,7 @@ Appearance
 ----------
 ``File > Appearance...`` in any module sets the look of the Picasso windows:
 
-- **Theme**: *System* (default) is light or dark like the operating system and follows it when it changes; *Light* and *Dark* fix it; *Native* is the platform's own PyQt style, the look of Picasso before version 0.12.
+- **Theme**: *System* (default) is light or dark like the operating system and follows it when it changes; *Light* and *Dark* fix it; *Native* is the platform's own PyQt style, the look of Picasso before version 1.0.
 - **Contrast**: *High* shows black text on white (or white on black in the dark theme) and draws the frames of buttons, input fields, check boxes and tables in the color of the text; the accent color is darkened or lightened where needed to stand out. *System* (default) is high when the operating system asks for it (macOS: *Increase contrast* in the Accessibility settings; Windows: a contrast theme) and follows it when it changes; *Normal* never is.
 - **Accent color**: the color of selections, checked and default buttons, sliders and focus frames; a preset or any color (*Custom...*).
 - **Font size**: the size of the text in percent of the system's (30–300 %). It also enlarges, on screen, the text of the charts (axis and tick labels, titles, legends) and the scale bar, legend and rotation angles on rendered images in Render and its 3D view. Saved charts and exported images keep the sizes set in the plot settings and the usual sizes of the scale bar and legend, whatever the font size.

@@ -1552,7 +1552,7 @@ class TestLocalize:
 
 
 # ---------------------------------------------------------------------------
-# The API removed in v0.12.0: ``fit2D`` (now ``fit``), ``localize_3D`` (now
+# The API removed in v1.0.0: ``fit2D`` (now ``fit``), ``localize_3D`` (now
 # ``localize(calibration_3d=...)``), ``localize``'s positional
 # ``camera_info``/``identification_parameters``, its ``parameters`` and
 # ``mle_method`` arguments, and ``return_info`` everywhere.

@@ -34,8 +34,8 @@ def docs_version(version: str = __version__) -> str:
 
     Final releases read the default documentation (``latest``, built
     from ``master``). Pre-releases (``a``, ``b``, ``rc`` or ``.dev``,
-    e.g. ``0.12.0a2``) read the documentation built from their
-    development branch ``vX.Y`` (e.g. ``v0.12``), which describes
+    e.g. ``1.0.0a2``) read the documentation built from their
+    development branch ``vX.Y`` (e.g. ``v1.0``), which describes
     features not yet merged into ``master``.
 
     Parameters

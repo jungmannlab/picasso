@@ -2360,7 +2360,7 @@ class TestAnimationSequence:
         assert np.allclose(viewports[-1], vp2)
 
     def test_normalize_legacy_positions_raise(self):
-        """Legacy Euler positions were removed in v0.12.0; the error
+        """Legacy Euler positions were removed in v1.0.0; the error
         names the replacement."""
         legacy = [(0.1, 0.2, 0.3, FULL_VIEWPORT)]
         with pytest.raises(ValueError, match="rotation_matrix"):

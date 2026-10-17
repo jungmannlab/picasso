@@ -3750,7 +3750,7 @@ def fit(
     """Fit 2D localizations to a movie, given positions of the detected
     spots (identifications).
 
-    Since v0.11.0: renamed from ``fit2D`` (removed in v0.12.0). Only the
+    Since v0.11.0: renamed from ``fit2D`` (removed in v1.0.0). Only the
     movie is accepted positionally.
 
     Parameters
@@ -8802,9 +8802,9 @@ def localize(
     all fitting methods.
 
     Since v0.11.0: astigmatic 3D fitting via ``calibration_3d``, which
-    replaces ``localize_3D`` (removed in v0.12.0).
+    replaces ``localize_3D`` (removed in v1.0.0).
 
-    Since v0.12.0: only the movie is accepted positionally.
+    Since v1.0.0: only the movie is accepted positionally.
 
     Parameters
     ----------

@@ -41,7 +41,7 @@ def _normalize_animation_positions(
 
     Each position must be (rotation, viewport) with rotation being a
     scipy Rotation. The legacy format (angle_x, angle_y, angle_z,
-    viewport) with Euler angles was removed in v0.12.0; convert such
+    viewport) with Euler angles was removed in v1.0.0; convert such
     angles with ``rotation_matrix``.
     """
     normalized = []
@@ -52,7 +52,7 @@ def _normalize_animation_positions(
             raise ValueError(
                 "Animation positions given as Euler angles (angle_x, "
                 "angle_y, angle_z, viewport) are no longer supported since "
-                "v0.12.0. Pass (rotation, viewport) with rotation being a "
+                "v1.0.0. Pass (rotation, viewport) with rotation being a "
                 "scipy.spatial.transform.Rotation instead, e.g. "
                 "picasso.render.rotation_matrix(angle_x, angle_y, angle_z)."
             )
@@ -409,7 +409,7 @@ def build_animation(
         ``scipy.spatial.transform.Rotation`` defining the orientation
         of the localizations at the checkpoint. Viewport is given as
         ((y_min, x_min), (y_max, x_max)) in camera pixels. Since
-        v0.12.0, the legacy format (angle_x, angle_y, angle_z, viewport)
+        v1.0.0, the legacy format (angle_x, angle_y, angle_z, viewport)
         with Euler angles is no longer accepted; convert the angles with
         ``rotation_matrix``.
     durations : list

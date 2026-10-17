@@ -1,5 +1,5 @@
 // Redirect links to sections that moved when the Render and Localize pages
-// were split into several pages (Picasso 0.12), e.g. old bookmarks or links
+// were split into several pages (Picasso 1.0), e.g. old bookmarks or links
 // from papers: render.html#gpu-rendering -> render/performance.html#...
 // Targets are relative to the documentation root, where the old pages are.
 (function () {
