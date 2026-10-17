@@ -102,6 +102,9 @@ on which the server is running, ``http://localhost:8501``. It should open your
 default browser automatically and redirect to the Picasso Server page. Only
 this computer can open the server.
 
+The one-click installers include Picasso Server. With pip, it is an extra:
+``pip install "picassosr[server]"``.
+
 To connect to ``Picasso Server`` from other computers in your network, start it
 with ``picasso server --network``. The command line then also shows the
 ``Network URL``; open it in the browser of the other computer.

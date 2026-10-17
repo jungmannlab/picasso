@@ -89,6 +89,7 @@ Last change: 16-OCT-2026 CEST
 - Filter shows 1D histograms of both variablies in the 2D histogram filtering.
 
 ### **Backward incompatible changes:**
+- Picasso Server is an optional extra of the Python package: `pip install "picassosr[server]"` installs Streamlit and plotly, which only the server uses. The one-click installers include it as before. Without it, `picasso server` says how to install it.
 - *Tools > Fast rendering* is removed: with GPU rendering and other speed improvements it no longer serves a purpose.
 - The relative intensity of channels is replaced by the per-channel contrast:
     - The `relative_intensities` argument is removed from `picasso.render.render_scene`, `picasso.render.color_range` and `picasso.render.build_animation`; use `channel_contrast`, one `(low, high)` window per channel relative to the global contrast limits. A relative intensity `r >= 1` corresponds to `(0, 1 / r)`; intensities below 1, which capped the brightest color of a channel, have no equivalent (`(0, 1 / r)` dims the channel instead).
@@ -143,6 +144,7 @@ Last change: 16-OCT-2026 CEST
 - Improved status dialog.
 - Sound notifications in Average and Simulate (`File > Sound notifications`).
 - Added import and export of [PyME](https://python-microscopy.org) (python-microscopy, PYMEVisualize) localizations: raw fit results (`.h5r`) and saved localizations (`.hdf`) are imported, `.hdf` files are exported. See the [documentation](https://picassosr.readthedocs.io/en/latest/render/menu-file.html#render-export-pyme).
+- `sqlalchemy` is no longer a dependency: the database of localized files (`~/.picasso/app_0410.db`), which Localize writes to and Picasso Server reads, uses Python's built-in `sqlite3`. Existing databases keep working.
 - `watchdog` is no longer a dependency: Picasso Server starts Streamlit without its file watcher, which only reloads the app when its source files are edited.
 - `dask`, `statsmodels` and `requests`, which Picasso imports, are declared dependencies. Before, they were only installed because other dependencies (`nd2`, `plotly-express`, `streamlit`) need them.
 - The one-click installers ship the licenses of all bundled third-party software (Python, Qt, NumPy, ...) in `THIRD-PARTY-LICENSES.txt`.

@@ -1,8 +1,66 @@
-from sqlalchemy import create_engine
+import sqlite3
+from contextlib import closing
+
 import pandas as pd
 import streamlit as st
 import time
 from picasso.localize import db_filename
+
+#: the columns of the tables of the database that hold dates and times
+#: (SQLite stores them as text)
+DATE_COLUMNS = {
+    "files": ["file_created", "entry_created"],
+    "watcher": ["started"],
+}
+
+
+def read_table(name: str) -> pd.DataFrame:
+    """Read a table of the local database (see ``db_filename``).
+
+    Parameters
+    ----------
+    name : str
+        ``"files"`` or ``"watcher"``.
+
+    Returns
+    -------
+    df : pd.DataFrame
+        The table, with its dates and times as datetimes; empty if it
+        does not exist yet.
+    """
+    with closing(sqlite3.connect(db_filename())) as connection:
+        exists = connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+            (name,),
+        ).fetchone()
+        if exists is None:
+            return pd.DataFrame()
+        return pd.read_sql_query(
+            f'SELECT * FROM "{name}"',
+            connection,
+            # with or without fractions of a second
+            parse_dates={
+                column: {"format": "ISO8601"}
+                for column in DATE_COLUMNS.get(name, [])
+            },
+        )
+
+
+def write_table(df: pd.DataFrame, name: str, if_exists: str) -> None:
+    """Write ``df`` to a table of the local database (see
+    ``db_filename``).
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        The rows.
+    name : str
+        The table.
+    if_exists : {"append", "replace"}
+        Add the rows to the table or replace it.
+    """
+    with closing(sqlite3.connect(db_filename())) as connection, connection:
+        df.to_sql(name, con=connection, if_exists=if_exists, index=False)
 
 
 def fetch_db():
@@ -14,15 +72,9 @@ def fetch_db():
         The ``files`` table, sorted by acquisition date; empty if the table
         does not exist yet.
     """
-    try:
-        DB_PATH = "sqlite:///" + db_filename()
-        engine = create_engine(DB_PATH, echo=False)
-        df = pd.read_sql_table("files", con=engine)
-
+    df = read_table("files")
+    if len(df):
         df = df.sort_values("file_created")
-    except ValueError:
-        df = pd.DataFrame()
-
     return df
 
 
@@ -34,14 +86,7 @@ def fetch_watcher():
     df : pd.DataFrame
         The ``watcher`` table; empty if it does not exist yet.
     """
-    try:
-        engine = create_engine("sqlite:///" + db_filename(), echo=False)
-        df = pd.read_sql_table("watcher", con=engine)
-    except ValueError as e:
-        print(e)
-        df = pd.DataFrame()
-
-    return df
+    return read_table("watcher")
 
 
 def refresh(to_wait: int):

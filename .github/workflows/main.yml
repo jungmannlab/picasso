@@ -52,7 +52,8 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install .
+        # the server extra too, so that the tests of Picasso Server run
+        pip install ".[server]"
     - name: Lint with flake8
       if: runner.os == 'Linux'
       run: |
@@ -92,7 +93,7 @@ jobs:
           grep -oE '"[A-Za-z0-9_.\-]+>=[^",]+' pyproject.toml | tr -d '"' | sed 's/>=/==/' > constraints-minimum.txt
           cat constraints-minimum.txt
           python -m pip install --upgrade pip
-          pip install . --constraint constraints-minimum.txt
+          pip install ".[server]" --constraint constraints-minimum.txt
           pip install pytest
           pytest --capture=tee-sys
       - name: Show the crash log

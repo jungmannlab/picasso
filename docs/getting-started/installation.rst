@@ -64,6 +64,9 @@ Picasso runs on Windows, macOS and Linux. Several installation modes are availab
 
          * - Command
            - Adds
+         * - ``pip install picassosr[server]``
+           - :doc:`Picasso Server <../server>` (``picasso server``), the
+             browser app.
          * - ``pip install picassosr[czi]``
            - Reading Zeiss ``.czi`` files.
          * - ``pip install picassosr[lif]``

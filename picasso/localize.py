@@ -29,10 +29,12 @@ from __future__ import annotations
 import logging
 import os
 import multiprocessing
+import sqlite3
 import threading
 import time
 import warnings
 from collections import OrderedDict
+from contextlib import closing
 from concurrent.futures import ThreadPoolExecutor, Future
 from functools import partial
 from itertools import chain
@@ -46,7 +48,6 @@ import dask.array as da
 import pandas as pd
 import matplotlib.pyplot as plt
 from tqdm import tqdm
-from sqlalchemy import create_engine, inspect, text
 import matplotlib.gridspec as gridspec
 from scipy.ndimage import gaussian_filter
 from scipy.optimize import curve_fit
@@ -9525,11 +9526,12 @@ def save_file_summaries(summaries: pd.DataFrame) -> None:
         One row per file, with the keys of :func:`get_file_summary` as
         columns.
     """
-    engine = create_engine("sqlite:///" + db_filename(), echo=False)
-    with engine.begin() as connection:
-        inspector = inspect(connection)
-        if inspector.has_table("files"):
-            existing = {c["name"] for c in inspector.get_columns("files")}
+    with closing(sqlite3.connect(db_filename())) as connection, connection:
+        # the names of the columns, if the table exists
+        existing = {
+            row[1] for row in connection.execute("PRAGMA table_info(files)")
+        }
+        if existing:
             for column, values in summaries.items():
                 if column in existing:
                     continue
@@ -9550,7 +9552,7 @@ def save_file_summaries(summaries: pd.DataFrame) -> None:
                     sql_type = "TEXT"
                 name = column.replace('"', '""')
                 connection.execute(
-                    text(f'ALTER TABLE files ADD COLUMN "{name}" {sql_type}')
+                    f'ALTER TABLE files ADD COLUMN "{name}" {sql_type}'
                 )
         summaries.to_sql(
             "files", con=connection, if_exists="append", index=False

@@ -1645,8 +1645,20 @@ def _start_server(network: bool = False) -> None:
         computer (``localhost``) can, because the server has no login
         and its watcher runs custom commands.
     """
+    import importlib.util
     import os
     import sys
+
+    missing = [
+        name
+        for name in ("streamlit", "plotly")
+        if importlib.util.find_spec(name) is None
+    ]
+    if missing:
+        sys.exit(
+            f"Picasso Server needs {' and '.join(missing)}, which are not "
+            'installed. Install them with: pip install "picassosr[server]"'
+        )
     from streamlit.web import cli as stcli
 
     print("                                          ")

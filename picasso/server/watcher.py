@@ -3,9 +3,8 @@ import os
 import pandas as pd
 from multiprocessing import Process
 import time
-from sqlalchemy import create_engine
 from picasso import localize
-from helper import fetch_watcher, fetch_db
+from helper import fetch_watcher, fetch_db, write_table
 import psutil
 import re
 import shlex
@@ -395,15 +394,7 @@ def watcher():  # noqa: C901
                 "Remove non-running watchers", icon=":material/delete_sweep:"
             ):
                 df = df[df["running"]]
-                engine = create_engine(
-                    "sqlite:///" + localize.db_filename(), echo=False
-                )
-                df.to_sql(
-                    "watcher",
-                    con=engine,
-                    if_exists="replace",
-                    index=False,
-                )
+                write_table(df, "watcher", if_exists="replace")
 
                 st.success("Removed. Please refresh this page.")
 
@@ -617,15 +608,7 @@ def watcher():  # noqa: C901
                     }
                 )
 
-                engine = create_engine(
-                    "sqlite:///" + localize.db_filename(), echo=False
-                )
-                df.to_sql(
-                    "watcher",
-                    con=engine,
-                    if_exists="append",
-                    index=False,
-                )
+                write_table(df, "watcher", if_exists="append")
 
                 for reset in range(3):
                     display.success(f"Restarting in {3-reset}.")

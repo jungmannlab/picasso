@@ -1,6 +1,5 @@
 import streamlit as st
-from helper import db_filename
-from sqlalchemy import create_engine
+from helper import fetch_db
 import pandas as pd
 import os
 import numpy as np
@@ -71,10 +70,11 @@ def preview():
         "Select a movie from the database. All hdf files with the same base "
         "path as the movie will be selectable."
     )
-    engine = create_engine("sqlite:///" + db_filename(), echo=False)
 
     try:
-        df = pd.read_sql_table("files", con=engine)
+        df = fetch_db()
+        if df.empty:
+            raise ValueError("no files in the database")
 
         file = st.selectbox("Select file", df["filename"].unique())
         # Find files in familiy
