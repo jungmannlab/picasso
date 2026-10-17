@@ -5,7 +5,9 @@ picasso.aim
 Picasso implementation of Adaptive Intersection Maximization (AIM)
 for fast undrifting in 2D and 3D.
 
-Adapted from: Ma, H., et al. Science Advances. 2024.
+Adapted from: Ma, H., et al. Science Advances. 2024. Translated from
+the authors' MATLAB code to Python and numba, and modified. License
+(Apache-2.0): ``LICENSES/AIM-LICENSE.txt``.
 
 :authors: Hongqiang Ma, Maomao Chen, Phuong Nguyen, Yang Liu,
     Rafal Kowalewski

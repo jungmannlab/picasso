@@ -10,7 +10,7 @@ and its Gaussian and cubic-spline PSF models were ported to Python/numba in
                                        machinery
 
 Picasso no longer links against or redistributes the Gpufit binary, but those
-modules remain derivative works of its source, so its licence is reproduced
+modules remain derivative works of its source, so its license is reproduced
 below in full.
 
 Cite: Przybylski, A., Thiel, B., Keller-Findeisen, J., Stock, B. & Bates, M.

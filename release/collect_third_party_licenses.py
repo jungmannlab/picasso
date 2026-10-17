@@ -18,8 +18,9 @@ build environment into one plain-text file:
   the native libraries (OpenSSL, libffi, zlib, ...). Their license
   texts are read from the conda package cache (``info/licenses``).
 
-Build-only tools (pip, build, PyInstaller and its helpers) are left
-out. Run it in the installer environment, after PyInstaller and before
+Build-only tools (pip, build and PyInstaller's helpers) are left out;
+PyInstaller itself is listed, as parts of it are frozen into the app.
+Run it in the installer environment, after PyInstaller and before
 the environment is removed, so the list matches the frozen packages.
 
 Usage:
@@ -33,19 +34,21 @@ import importlib.metadata as metadata
 import json
 import re
 import sys
+import textwrap
 from dataclasses import dataclass, field
 from pathlib import Path
 
 #: Packages installed into the build environment only to build the
-#: installer; PyInstaller does not freeze them into the app.
+#: installer; PyInstaller does not freeze them into the app. PyInstaller
+#: and pyinstaller-hooks-contrib are not among them: the app contains
+#: their bootloader (GPL with an exception that allows this) and their
+#: run-time hooks (Apache-2.0, which requires the notice).
 BUILD_ONLY = {
     "altgraph",
     "build",
     "macholib",
     "pefile",
     "pip",
-    "pyinstaller",
-    "pyinstaller-hooks-contrib",
     "pyproject-hooks",
     "pywin32-ctypes",
     "wheel",
@@ -255,6 +258,32 @@ def collect(prefix: Path | None = None) -> list[Package]:
     return ([picasso] if picasso else []) + others
 
 
+def _gpl_statement(packages: list[Package], picasso_version: str) -> list[str]:
+    """What PyQt6's GPL means for the installation, if it bundles PyQt6:
+    the license of the whole and where its source code is."""
+    versions = {canonical(p.name): p.version for p in packages}
+    if "pyqt6" not in versions:
+        return []
+    qt = versions.get("pyqt6-qt6")
+    text = (
+        "Picasso itself is licensed under the MIT license. Its graphical "
+        f"user interface uses PyQt6 {versions['pyqt6']}, which is licensed "
+        "under the GNU General Public License version 3 (GPL-3.0), and Qt"
+        + (f" {qt}" if qt else "")
+        + ", which is licensed under the GNU Lesser General Public License "
+        "version 3 (LGPL-3.0); both license texts are reproduced below. "
+        "Because of PyQt6, this installation as a whole is distributed "
+        "under the terms of the GPL-3.0. The source code of each part is "
+        "available: Picasso's at https://github.com/jungmannlab/picasso "
+        f"(tag v{picasso_version}), PyQt6's and that of the other Python "
+        "packages at https://pypi.org (the versions listed below), and "
+        "Qt's at https://download.qt.io. The Qt libraries are separate "
+        "files in the installation folder, so they can be replaced with "
+        "other builds of the same version."
+    )
+    return [*textwrap.wrap(text, 70), ""]
+
+
 def render(packages: list[Package], picasso_version: str) -> str:
     """Format the notices as plain text.
 
@@ -279,6 +308,9 @@ def render(packages: list[Package], picasso_version: str) -> str:
         "listed below. Each entry gives the package, its version, its",
         "license and the license and copyright notices the package ships.",
         "",
+    ]
+    out += _gpl_statement(packages, picasso_version)
+    out += [
         "Packages",
         "--------",
         "",

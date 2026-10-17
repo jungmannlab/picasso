@@ -151,7 +151,8 @@ Last change: 16-OCT-2026 CEST
 - CI builds the documentation, failing on warnings, as does Read the Docs, and reports the test coverage of each module.
 - `CITATION.cff` describes how to cite Picasso: GitHub shows it as *Cite this repository*.
 - `dask`, `statsmodels` and `requests`, which Picasso imports, are declared dependencies. Before, they were only installed because other dependencies (`nd2`, `plotly-express`, `streamlit`) need them.
-- The one-click installers ship the licenses of all bundled third-party software (Python, Qt, NumPy, ...) in `THIRD-PARTY-LICENSES.txt`.
+- The one-click installers ship the licenses of all bundled third-party software (Python, Qt, NumPy, ...) in `THIRD-PARTY-LICENSES.txt`. It also lists PyInstaller, whose bootloader and run-time hooks are part of the app, and states that, because of PyQt6 (GPL-3.0), the installation as a whole is distributed under the GPL-3.0, with where the source code of each part is.
+- `LICENSES` holds the licenses of all code adapted from other projects: besides Gpufit, Gpuspline and Lucide, also scikit-image (thresholds in `picasso.masking`), SciPy (the bounded minimizer of GPU z fitting), scikit-learn (G5M) and AIM.
 - Fixed: negative frame indices (e.g. `movie[-1]`) raised an `IndexError` for movies split across several files.
 - Fixed the docstring of `picasso.imageprocess.rcc` ([#716](https://github.com/jungmannlab/picasso/issues/716)).
 - Fixed: with `Save metadata in .yaml` off, saving over a file that had a .yaml file kept the outdated .yaml file, which then took precedence over the new metadata on loading. An existing .yaml file is now always overwritten.

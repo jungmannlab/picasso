@@ -135,7 +135,7 @@ Many of the functionalities provided by Picasso were published independently, pl
    * - RCC undrifting
      - Wang et al., Opt. Express, 2014
      - `10.1364/OE.22.015982 <https://doi.org/10.1364/OE.22.015982>`__
-   * - AIM undrifting
+   * - AIM undrifting. Adapted from the authors' code, see the `AIM license <https://github.com/jungmannlab/picasso/blob/master/LICENSES/AIM-LICENSE.txt>`__
      - Ma et al., Sci. Adv., 2024
      - `10.1126/sciadv.adm7765 <https://www.science.org/doi/10.1126/sciadv.adm7765>`__
    * - SMLM clusterer

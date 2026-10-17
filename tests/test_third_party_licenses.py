@@ -146,3 +146,38 @@ def test_collect_lists_picasso_first(licenses):
     assert not set(names) & licenses.BUILD_ONLY
     numpy = packages[names.index("numpy")]
     assert numpy.texts, "numpy ships its license in its dist-info"
+
+
+def test_pyinstaller_notices_are_kept(licenses):
+    # the app contains PyInstaller's bootloader and run-time hooks
+    assert "pyinstaller" not in licenses.BUILD_ONLY
+    assert "pyinstaller-hooks-contrib" not in licenses.BUILD_ONLY
+
+
+def test_each_license_of_adapted_code_is_referenced():
+    # every file in LICENSES covers code in Picasso, which names it
+    root = Path(__file__).resolve().parent.parent
+    sources = "\n".join(
+        path.read_text("utf-8")
+        for path in [root / "readme.rst", *(root / "picasso").rglob("*.py")]
+    )
+    for license_file in (root / "LICENSES").glob("*.txt"):
+        assert f"LICENSES/{license_file.name}" in sources, license_file.name
+
+
+def test_gpl_statement_names_the_versions_and_sources(licenses):
+    packages = [
+        licenses.Package("picassosr", "1.0", "MIT"),
+        licenses.Package("PyQt6", "6.11.0", "GPL-3.0-only"),
+        licenses.Package("PyQt6-Qt6", "6.11.1", "LGPL-3.0-only"),
+    ]
+    text = " ".join(licenses.render(packages, "1.0").split())
+    assert "PyQt6 6.11.0, which is licensed under the GNU General" in text
+    assert "and Qt 6.11.1, which is licensed under the GNU Lesser" in text
+    assert "as a whole is distributed under the terms of the GPL-3.0" in text
+    assert "github.com/jungmannlab/picasso (tag v1.0)" in text
+
+
+def test_no_gpl_statement_without_pyqt6(licenses):
+    packages = [licenses.Package("picassosr", "1.0", "MIT")]
+    assert "GPL" not in licenses.render(packages, "1.0")

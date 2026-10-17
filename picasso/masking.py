@@ -6,7 +6,8 @@ Functions for masking localizations based on binary masks or
 thresholding of images, as well as curve smoothing.
 
 Thresholding functions are adapted from scikit-image. The package is
-not used directly to avoid extra dependencies.
+not used directly to avoid extra dependencies. License (BSD-2-Clause):
+``LICENSES/scikit-image-LICENSE.txt``.
 
 :authors: Rafal Kowalewski
 :copyright: Copyright (c) 2016-2026 Jungmann Lab, MPI of Biochemistry

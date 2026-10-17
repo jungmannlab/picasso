@@ -9,7 +9,9 @@ DOI: https://doi.org/10.1038/s41467-026-70198-5.
 G5M is based on the sklearn implementation of Gaussian Mixture Modeling
 (GMM) with numba optimizations for fitting, as well as for kmeans++
 initialization. Several modifications for molecular mapping in DNA-PAINT
-are added, for example, localization cloud shape modeling.
+are added, for example, localization cloud shape modeling. License of
+the parts adapted from scikit-learn (BSD-3-Clause):
+``LICENSES/scikit-learn-LICENSE.txt``.
 
 :authors: Rafal Kowalewski
 :copyright: Copyright (c) 2023-2026 Jungmann Lab, MPI of Biochemistry

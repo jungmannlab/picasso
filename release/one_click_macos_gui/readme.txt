@@ -69,7 +69,7 @@ Many of the functionalities provided by Picasso were published independently, pl
 - Theoretical axial localization precision (lpz, Gaussian): Kowalewski et al., Nat. Commun., 2026; 10.1038/s41467-026-70198-5 (https://doi.org/10.1038/s41467-026-70198-5)
 - Quad-tree adaptive histogram rendering: Baddeley et al., Microsc. Microanal., 2010; 10.1017/S143192760999122X (https://doi.org/10.1017/S143192760999122X)
 - RCC undrifting: Wang et al., Opt. Express, 2014; 10.1364/OE.22.015982 (https://doi.org/10.1364/OE.22.015982)
-- AIM undrifting: Ma et al., Sci. Adv., 2024; 10.1126/sciadv.adm7765 (https://www.science.org/doi/10.1126/sciadv.adm7765)
+- AIM undrifting. Adapted from the authors' code, see the AIM license (https://github.com/jungmannlab/picasso/blob/master/LICENSES/AIM-LICENSE.txt): Ma et al., Sci. Adv., 2024; 10.1126/sciadv.adm7765 (https://www.science.org/doi/10.1126/sciadv.adm7765)
 - SMLM clusterer: Schlichthaerle et al., Nat. Commun., 2021; Reinhardt et al., Nature, 2023; 10.1038/s41467-021-22606-1 (https://doi.org/10.1038/s41467-021-22606-1), 10.1038/s41586-023-05925-9 (https://doi.org/10.1038/s41586-023-05925-9)
 - DBSCAN: Ester et al., KDD, 1996 (Vol. 96, No. 34, pp. 226-231)
 - Anisotropic DBSCAN (inspired by): Lörzing et al., J. Phys. Chem. B, 2024; 10.1021/acs.jpcb.4c02030 (https://doi.org/10.1021/acs.jpcb.4c02030)

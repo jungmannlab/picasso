@@ -634,7 +634,8 @@ def _minimize_z_device(
     (Brent's method with golden-section fallback, the algorithm used by
     ``scipy.optimize.minimize_scalar`` when ``bounds`` are given), so the
     GPU fit reproduces the CPU (``_fit_z``) result. Returns the minimizer
-    ``xf`` and the objective value ``fx`` at that point."""
+    ``xf`` and the objective value ``fx`` at that point. License
+    (BSD-3-Clause): ``LICENSES/SciPy-LICENSE.txt``."""
     xatol = 1e-5
     maxfun = 500
     sqrt_eps = 1.4901161193847656e-08  # sqrt(2.2e-16)
