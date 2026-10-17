@@ -147,6 +147,7 @@ Last change: 16-OCT-2026 CEST
 - `sqlalchemy` is no longer a dependency: the database of localized files (`~/.picasso/app_0410.db`), which Localize writes to and Picasso Server reads, uses Python's built-in `sqlite3`. Existing databases keep working.
 - Fixed: HDBSCAN with a cluster selection epsilon above 0 could fail with `TypeError: only 0-dimensional arrays can be converted to Python scalars`, a bug of scikit-learn with NumPy 2.4 and later ([scikit-learn #33219](https://github.com/scikit-learn/scikit-learn/issues/33219)). The one-click installers ship NumPy 2.3, which avoids it. With NumPy 2.4 and later, Picasso explains the error and how to avoid it. scikit-learn 1.8 and later can be installed again.
 - `watchdog` is no longer a dependency: Picasso Server starts Streamlit without its file watcher, which only reloads the app when its source files are edited.
+- The MATLAB script in `convert` is replaced by a shorter and corrected one in the [documentation](https://picassosr.readthedocs.io/en/latest/files.html#files-matlab-export).
 - CI builds the documentation, failing on warnings, as does Read the Docs, and reports the test coverage of each module.
 - `CITATION.cff` describes how to cite Picasso: GitHub shows it as *Cite this repository*.
 - `dask`, `statsmodels` and `requests`, which Picasso imports, are declared dependencies. Before, they were only installed because other dependencies (`nd2`, `plotly-express`, `streamlit`) need them.
