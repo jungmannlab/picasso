@@ -172,9 +172,10 @@ level and warn where the old name is used:
 Before each release:
 
 1. Update the version in ``picasso/version.py``.
-2. Clean up the changelog section of this version in ``changelog.md``. Its
-   heading must be the new version, or ``release/make_release_notes.py``
-   refuses to write the release notes.
+2. Clean up the changelog section of this version in ``changelog.md`` and
+   update its "Last change" date. The section's heading must be the new
+   version, or ``release/make_release_notes.py`` refuses to write the
+   release notes.
 3. Run the tests locally (``python -m pytest``).
 4. Remove the deprecated names due in this version (the test lists them) and
    list the removals in the changelog.
