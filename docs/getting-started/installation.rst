@@ -56,6 +56,29 @@ Picasso runs on Windows, macOS and Linux. Several installation modes are availab
       3. Start any module from the terminal, for example ``picasso render``
          or ``picasso localize``, or import Picasso in your scripts.
 
+      .. rubric:: Menu entries on Linux
+
+      The script ``create_linux_shortcuts.py`` adds Picasso's modules to the
+      application menu of a Linux desktop (GNOME, KDE, Xfce, ...), and adds
+      a ``picasso`` command that works without activating the environment.
+      Download it and run it with the Python of the environment Picasso is
+      installed in:
+
+      .. code-block:: bash
+
+         conda activate picasso
+         curl -O https://raw.githubusercontent.com/jungmannlab/picasso/master/release/create_linux_shortcuts.py
+         python create_linux_shortcuts.py
+
+      The menu entries are written to ``~/.local/share/applications`` and
+      the command to ``~/.local/bin``. Run as root, with
+      ``sudo "$(which python)" create_linux_shortcuts.py``, the script adds
+      them for all users (to ``/usr/share/applications`` and
+      ``/usr/local/bin``). Run it again after installing Picasso in another
+      environment, and ``python create_linux_shortcuts.py --remove`` to
+      delete the entries. The Server entry is added with the ``server``
+      extra installed.
+
       .. rubric:: Optional extras
 
       .. list-table::
