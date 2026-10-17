@@ -28,11 +28,10 @@ import numpy as np
 import pandas as pd
 import matplotlib.colors as mcolors
 import matplotlib.pyplot as plt
-from numpy.lib.recfunctions import append_fields, drop_fields
 from scipy import stats, optimize
 from tqdm import tqdm
 
-from picasso import deprecation, io, __version__
+from picasso import io, __version__
 
 __all__ = [
     # metadata
@@ -1967,54 +1966,6 @@ def select_frc_rois(
     return rois
 
 
-_APPEND_TO_REC_DEPRECATION = deprecation.register(
-    "picasso.lib.append_to_rec",
-    since="0.11",
-    remove_in="1.0",
-    message=(
-        "Appending to recarrays is deprecated and will be removed in Picasso"
-        " 1.0. Since 0.9.0, Picasso uses pandas DataFrames instead of"
-        " recarrays. Simply use locs['new_column'] = data to add a new column"
-        " to the DataFrame."
-    ),
-)
-
-
-def append_to_rec(
-    rec_array: np.recarray,
-    data: FloatArray1D | IntArray1D,
-    name: str,
-) -> np.recarray:
-    """Append a new column to the existing np.recarray.
-
-    Parameters
-    ----------
-    rec_array : np.recarray
-        Recarray to which the new column is appended.
-    data : FloatArray1D | IntArray1D
-        1D data to be appended.
-    name : str
-        Name of the new column.
-
-    Returns
-    -------
-    rec_array : np.recarray
-        Recarray with the new column.
-    """
-    _APPEND_TO_REC_DEPRECATION.warn()
-    if hasattr(rec_array, name):
-        rec_array = remove_from_rec(rec_array, name)
-    rec_array = append_fields(
-        rec_array,
-        name,
-        data,
-        dtypes=data.dtype,
-        usemask=False,
-        asrecarray=True,
-    )
-    return rec_array
-
-
 def merge_locs(
     locs_list: list[pd.DataFrame],
     increment_frames: bool | list[int] = True,
@@ -3321,39 +3272,6 @@ def n_futures_done(futures: list[Future]) -> int:
         How many of them have completed.
     """
     return sum([_.done() for _ in futures])
-
-
-_REMOVE_FROM_REC_DEPRECATION = deprecation.register(
-    "picasso.lib.remove_from_rec",
-    since="0.11",
-    remove_in="1.0",
-    message=(
-        "Removing columns from recarrays is deprecated and will be removed in"
-        " Picasso 1.0. Since 0.9.0, Picasso uses pandas DataFrames instead of"
-        " recarrays. Simply use locs.drop('new_column', axis=1) to remove a"
-        " column from the DataFrame."
-    ),
-)
-
-
-def remove_from_rec(rec_array: np.recarray, name: str) -> np.recarray:
-    """Remove a column from the existing recarray.
-
-    Parameters
-    ----------
-    rec_array : np.recarray
-        Recarray from which the column is removed.
-    name : str
-        Name of the column to be removed.
-
-    Returns
-    -------
-    rec_array : np.recarray
-        Recarray without the column.
-    """
-    _REMOVE_FROM_REC_DEPRECATION.warn()
-    rec_array = drop_fields(rec_array, name, usemask=False, asrecarray=True)
-    return rec_array
 
 
 def locs_glob_map(

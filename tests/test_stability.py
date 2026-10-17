@@ -19,8 +19,6 @@ import sys
 import types
 import warnings
 
-import numpy as np
-import pandas as pd
 import pytest
 
 from picasso import __version__, deprecation, lib
@@ -315,9 +313,15 @@ class TestExistingDeprecations:
     def test_shown_to_scripts_at_the_caller(self):
         # a FutureWarning, which Python shows by default (unlike a
         # DeprecationWarning raised inside a library)
-        rec = pd.DataFrame({"x": [0.0, 1.0]}).to_records(index=False)
+        old_helper_deprecation = deprecation.register(
+            "picasso.lib.old_helper", since="1.1", remove_in="1.3"
+        )
+
+        def old_helper():
+            old_helper_deprecation.warn()
+
         with pytest.warns(FutureWarning) as caught:
-            lib.append_to_rec(rec, np.array([1.0, 2.0]), "y")
+            old_helper()
         assert caught[0].filename == __file__
 
     def test_legacy_helper_warns_at_the_caller(self):

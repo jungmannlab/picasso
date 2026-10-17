@@ -41,7 +41,7 @@ class Deprecation:
     Parameters
     ----------
     name : str
-        The deprecated name, e.g. ``"picasso.lib.append_to_rec"`` or
+        The deprecated name, e.g. ``"picasso.localize.locs_from_fits"`` or
         ``"picasso undrift_fiducials"`` for a command.
     since : str
         Version that deprecated it, ``"MAJOR.MINOR"``.

@@ -451,34 +451,6 @@ class TestRmsdAtCom:
 
 
 # ---------------------------------------------------------------------------
-# Recarray manipulation (deprecated path — explicit warnings expected)
-# ---------------------------------------------------------------------------
-
-
-class TestRecarrayHelpers:
-    def _toy_rec(self):
-        return pd.DataFrame(
-            {"x": [0.0, 1.0, 2.0], "y": [3.0, 4.0, 5.0]}
-        ).to_records(index=False)
-
-    def test_append_to_rec_adds_column(self):
-        rec = self._toy_rec()
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", FutureWarning)
-            out = lib.append_to_rec(rec, np.array([10.0, 11.0, 12.0]), "z")
-        assert "z" in out.dtype.names
-        np.testing.assert_array_equal(out["z"], [10.0, 11.0, 12.0])
-
-    def test_remove_from_rec_drops_column(self):
-        rec = self._toy_rec()
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", FutureWarning)
-            out = lib.remove_from_rec(rec, "y")
-        assert "y" not in out.dtype.names
-        assert "x" in out.dtype.names
-
-
-# ---------------------------------------------------------------------------
 # Localization merging / sanitizing
 # ---------------------------------------------------------------------------
 

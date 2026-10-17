@@ -100,6 +100,7 @@ Last change: 16-OCT-2026 CEST
 - The API deprecated in v0.11 is removed:
     - `picasso.localize.fit2D` is removed, use `picasso.localize.fit` (without the `movie_info` and `mle_method` arguments, which had no effect).
     - `picasso.localize.localize_3D` is removed, use `picasso.localize.localize` with its `calibration_3d` argument.
+    - `picasso.lib.append_to_rec` and `picasso.lib.remove_from_rec` are removed: localizations are pandas DataFrames, so use `locs["name"] = data` and `locs.drop(columns="name")`.
     - `picasso.localize.localize` accepts only the movie positionally; `camera_info` and `identification_parameters` are keyword-only. Its `parameters` (renamed to `identification_parameters`) and `mle_method` arguments are removed.
     - The `return_info` argument is removed from `picasso.localize.identify`, `picasso.localize.localize`, `picasso.clusterer.cluster`, `picasso.clusterer.dbscan` and `picasso.clusterer.hdbscan`; they always return `(locs, info)`.
     - `picasso.render.build_animation` no longer accepts positions given as Euler angles `(angle_x, angle_y, angle_z, viewport)`; pass `(rotation, viewport)` with a `scipy.spatial.transform.Rotation` (`picasso.render.rotation_matrix` converts the old angles).
