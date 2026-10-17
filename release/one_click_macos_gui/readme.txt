@@ -3,7 +3,7 @@ One-click installer for macOS
 
 This is the one-click installer for Picasso on macOS. Please visit our Github repository (https://github.com/jungmannlab/picasso) for details.
 
-The Picasso software is complemented by our Nature Protocols publication (https://www.nature.com/nprot/journal/v12/n6/abs/nprot.2017.024.html).
+The Picasso software is complemented by our Nature Protocols publication (https://doi.org/10.1038/nprot.2017.024).
 
 A comprehensive documentation can be found here: https://picassosr.readthedocs.io/en/latest/
 
