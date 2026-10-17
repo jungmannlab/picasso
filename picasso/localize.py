@@ -57,7 +57,6 @@ from scipy.spatial.distance import cdist
 from .ext import bitplane
 
 from . import (
-    deprecation,
     io,
     lib,
     avgroi,
@@ -3634,84 +3633,6 @@ def get_spots(
     return spots
 
 
-_LOCS_FROM_FITS_DEPRECATION = deprecation.register(
-    "picasso.localize.locs_from_fits",
-    since="0.11",
-    remove_in="1.0",
-    message=(
-        "picasso.localize.locs_from_fits is deprecated and will be removed "
-        "in Picasso 1.0. Use picasso.localize.locs_from_fits_gauss."
-    ),
-)
-
-
-def locs_from_fits(
-    identifications: pd.DataFrame,
-    theta: lib.FloatArray2D,
-    CRLBs: lib.FloatArray2D,
-    likelihoods: lib.FloatArray1D,
-    iterations: lib.FloatArray1D,
-    box: int,
-) -> pd.DataFrame:
-    """Convert the resulting localizations from the list of Futures
-    into a data frame.
-
-    .. deprecated:: 0.11
-        Removed in Picasso 1.0. Left over from the old ``gaussmle`` GPU
-        pipeline and unused since; use :func:`locs_from_fits_gauss`,
-        which takes the fitters' ``theta`` layout directly.
-
-    Parameters
-    ----------
-    identifications : pd.DataFrame
-        Data frame containing the identified spots. Contains fields
-        `frame`, `x`, `y`, and `net_gradient`.
-    theta : lib.FloatArray2D
-        The fitted Gaussian parameters for each spot (x, y positions,
-        photon counts, background, single-emitter image size in x and
-        y).
-    CRLBs : lib.FloatArray2D
-        The Cramer-Rao Lower Bounds for each fitted parameter.
-    likelihoods : lib.FloatArray1D
-        The log-likelihoods of the fitted models.
-    iterations : lib.FloatArray1D
-        The number of iterations taken to converge for each spot.
-    box : int
-        Size of the box used for fitting. Should be an odd integer.
-
-    Returns
-    -------
-    locs : pd.DataFrame
-        Data frame containing the localized spots. The fields include
-        `frame`, `x`, `y`, `photons`, `sx`, `sy`, `bg`, `lpx`, `lpy`,
-        `net_gradient`, `log_likelihood`, and `iterations`.
-    """
-    _LOCS_FROM_FITS_DEPRECATION.warn()
-    # box_offset = int(box / 2)
-    y = theta[:, 0] + identifications["y"]  # - box_offset
-    x = theta[:, 1] + identifications["x"]  # - box_offset
-    lpy = np.sqrt(CRLBs[:, 0])
-    lpx = np.sqrt(CRLBs[:, 1])
-    locs = pd.DataFrame(
-        {
-            "frame": identifications["frame"].astype(np.uint32),
-            "x": x.astype(np.float32),
-            "y": y.astype(np.float32),
-            "photons": theta[:, 2].astype(np.float32),
-            "sx": theta[:, 5].astype(np.float32),
-            "sy": theta[:, 4].astype(np.float32),
-            "bg": theta[:, 3].astype(np.float32),
-            "lpx": lpx.astype(np.float32),
-            "lpy": lpy.astype(np.float32),
-            **lib.net_gradient_column(identifications),
-            "log_likelihood": likelihoods.astype(np.float32),
-            "iterations": iterations.astype(np.int32),
-        }
-    )
-    locs.sort_values(by="frame", kind="quicksort", inplace=True)
-    return locs
-
-
 def fit(
     movie: LoadedMovie,
     *,
@@ -4665,41 +4586,6 @@ def locs_from_fits_gauss(
     else:
         locs.sort_values(by="frame", kind="quicksort", inplace=True)
     return locs
-
-
-_LOCS_FROM_FITS_GAUSS_GPU_DEPRECATION = deprecation.register(
-    "picasso.localize.locs_from_fits_gauss_gpu",
-    since="0.11",
-    remove_in="1.0",
-    message=(
-        "picasso.localize.locs_from_fits_gauss_gpu is deprecated and will "
-        "be removed in Picasso 1.0. It handles CPU and GPU fits alike and "
-        "was renamed to picasso.localize.locs_from_fits_gauss."
-    ),
-)
-
-
-def locs_from_fits_gauss_gpu(*args, **kwargs) -> pd.DataFrame:
-    """Convert the fit results from a Gaussian fit into a data frame of
-    localizations.
-
-    .. deprecated:: 0.11
-        Renamed to :func:`locs_from_fits_gauss` and removed under this
-        name in Picasso 1.0. The function never was GPU-specific: it
-        converts CPU and GPU Gaussian fits alike.
-
-    Parameters
-    ----------
-    *args, **kwargs
-        Forwarded verbatim to :func:`locs_from_fits_gauss`.
-
-    Returns
-    -------
-    locs : pd.DataFrame
-        Data frame containing the localized spots.
-    """
-    _LOCS_FROM_FITS_GAUSS_GPU_DEPRECATION.warn()
-    return locs_from_fits_gauss(*args, **kwargs)
 
 
 def _fit2d_gauss(

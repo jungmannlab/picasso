@@ -230,10 +230,8 @@ class TestDeprecationCycle:
         assert deprecation.removal_due(entry, version) is due
 
     def test_no_removal_is_overdue(self):
-        # the modules that register deprecations, imported so that their
-        # entries are in the registry
-        from picasso import localize  # noqa: F401
-
+        # the registry holds the entries of the imported modules; the
+        # command line (``cli``, imported above) registers its renames
         overdue = [
             f"{entry.name} (deprecated in {entry.since}, removed in "
             f"{entry.remove_in})"
@@ -247,8 +245,6 @@ class TestDeprecationCycle:
         )
 
     def test_every_deprecation_follows_the_cycle(self):
-        from picasso import localize  # noqa: F401
-
         assert deprecation.REGISTRY
         for entry in deprecation.REGISTRY:
             assert deprecation.removal_allowed(entry.since, entry.remove_in)

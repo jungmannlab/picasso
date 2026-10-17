@@ -41,7 +41,7 @@ class Deprecation:
     Parameters
     ----------
     name : str
-        The deprecated name, e.g. ``"picasso.localize.locs_from_fits"`` or
+        The deprecated name, e.g. ``"picasso.io.old_function"`` or
         ``"picasso undrift_fiducials"`` for a command.
     since : str
         Version that deprecated it, ``"MAJOR.MINOR"``.

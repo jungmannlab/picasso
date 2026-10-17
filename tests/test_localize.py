@@ -2600,29 +2600,6 @@ class TestLocsFromFitsGpufit:
             em["lpx"] / no_em["lpx"], np.sqrt(2.0), rtol=1e-5
         )
 
-    def test_gpu_suffixed_alias_warns_and_forwards(self):
-        """The old ``_gpu``-suffixed name was a misnomer (the converter is
-        backend-agnostic), so it warns but must still return the same frame."""
-        theta = np.array([[500.0, 3.2, 3.7, 1.3, 1.1, 5.0]], dtype=np.float32)
-        ids = self._ids(1)
-        with pytest.warns(FutureWarning, match="locs_from_fits_gauss"):
-            old = localize.locs_from_fits_gauss_gpu(ids, theta, BOX, em=False)
-        new = localize.locs_from_fits_gauss(ids, theta, BOX, em=False)
-        pd.testing.assert_frame_equal(old, new)
-
-    def test_legacy_locs_from_fits_is_deprecated(self):
-        """The leftover ``gaussmle``-GPU converter goes in 1.0."""
-        theta = np.zeros((1, 6), dtype=np.float32)
-        with pytest.warns(FutureWarning, match="locs_from_fits_gauss"):
-            localize.locs_from_fits(
-                self._ids(1),
-                theta,
-                np.ones((1, 6), dtype=np.float32),
-                np.zeros(1, dtype=np.float32),
-                np.ones(1, dtype=np.int32),
-                BOX,
-            )
-
 
 # ---------------------------------------------------------------------------
 # Cubic-spline PSF fitting (Gpufit SPLINE_2D / SPLINE_3D)
