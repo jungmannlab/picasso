@@ -4,8 +4,8 @@ Provides:
 - ``synthetic_spot_factory``: callable that builds a single Gaussian spot
   with known ground-truth parameters (with or without Poisson noise).
 - ``synthetic_spots``: a batch of Gaussian spots with their ground truth,
-  used by gausslq / gaussmle tests to assert numerical correctness rather
-  than just shapes.
+  used by the Gaussian fitting tests to assert numerical correctness
+  rather than just shapes.
 - ``locs_data`` / ``locs`` / ``info`` / ``movie_data`` / ``movie`` /
   ``movie_info``: shared loaders for the bundled test data, so individual
   test files don't reload the same files.
@@ -342,9 +342,7 @@ def _make_gaussian_spot(
     """Build a noiseless 2D Gaussian spot on a (box, box) grid.
 
     The center of the box is at index ``box // 2`` so ``x0 = y0 = 0``
-    places the spot exactly in the middle pixel — matching the convention
-    used by ``picasso.gausslq.fit_spot`` (which returns offsets from the
-    box center).
+    places the spot exactly in the middle pixel.
     """
     half = box // 2
     grid = np.arange(-half, half + 1, dtype=np.float64)
@@ -504,8 +502,9 @@ def make_rotated_gaussian_spot(
 ) -> np.ndarray:
     """Point-sampled rotated elliptical Gaussian spot.
 
-    Matches the model both ``gausslq._compute_model_rotated`` (CPU) and
-    Gpufit's ``GAUSS_2D_ROTATED`` (GPU) optimize::
+    Matches the rotated model of ``picasso.fitting.gaussfit`` (CPU) and
+    Gpufit's ``GAUSS_2D_ROTATED`` (GPU), with the photon count in place of
+    their peak height::
 
         mu = photons / (2 pi sx sy) * exp(-0.5 (u^2/sx^2 + w^2/sy^2)) + bg
         u = dx cos(a) - dy sin(a),  w = dx sin(a) + dy cos(a)
@@ -572,7 +571,7 @@ def synthetic_spots_rotated():
 
 # ---------------------------------------------------------------------------
 # Convenience: identifications + spots extracted from the bundled movie
-# (used by both test_localize and test_gausslq / test_gaussmle).
+# (used by test_localize and the Gaussian fitting tests).
 # ---------------------------------------------------------------------------
 
 

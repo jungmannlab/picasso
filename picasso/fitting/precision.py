@@ -40,7 +40,7 @@ and fall back to the numba CPU kernels otherwise; both compute the same thing,
 so the choice is invisible to the caller.
 
 The closed forms lived in ``picasso.gausslq`` and ``picasso.gaussmle`` until
-0.11 (those modules are deprecated and go in Picasso 1.0); the Fisher-matrix
+0.11 (those modules were removed in Picasso 1.0); the Fisher-matrix
 estimators lived in ``picasso.localize`` and moved here in 0.11, where
 ``picasso.localize`` still re-exports them under their old names.
 
@@ -494,7 +494,7 @@ def _gauss_crlb(
     the Gaussian model that was actually optimized and returns the diagonal of
     its inverse — the variance an efficient maximum-likelihood estimator
     attains. Evaluated at the fitted parameters; the spot data is not needed.
-    Mirrors :func:`_spline_crlb` and ``gaussmle._mlefit_sigmaxy_crlb``.
+    Mirrors :func:`_spline_crlb`.
 
     Model (photon units, spots are gain-converted before fitting)::
 
@@ -3287,8 +3287,7 @@ def _spline_crlb(
 
     With ``mle`` True the result is the Cramer-Rao lower bound: the diagonal of
     the inverse Poisson Fisher-information matrix ``I = Σ g gᵀ / μ`` (``g =
-    ∂μ/∂θ``), which an efficient maximum-likelihood estimator attains. Mirrors
-    ``gaussmle._mlefit_sigmaxy_crlb``.
+    ∂μ/∂θ``), which an efficient maximum-likelihood estimator attains.
 
     With ``mle`` False the result is the covariance of the *unweighted*
     least-squares estimator (the ``spline-gpu`` LSE mode), the Huber

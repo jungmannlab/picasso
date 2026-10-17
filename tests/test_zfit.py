@@ -688,7 +688,8 @@ class TestAxialLocalizationPrecision:
         self, fitted_locs, info
     ):
         """When sx_unc / sy_unc columns exist, the gaussmle path should
-        use them instead of recomputing from gaussmle.sigma_uncertainty."""
+        use them instead of recomputing from
+        precision.sigma_uncertainty_mle."""
         locs2 = fitted_locs.copy()
         # Make the per-loc precomputed uncertainties artificially huge —
         # the resulting lpz must reflect that change.

@@ -2,8 +2,9 @@
 high-level ``fit``/``fit_async`` MLE wrapper, plus the diagnostic
 helpers.
 
-Tests for ``gausslq``, ``gaussmle`` and ``zfit`` live in their own files
-(``test_gausslq.py``, ``test_gaussmle.py``, ``test_zfit.py``).
+Tests for the fitting backends and ``zfit`` live in their own files
+(``test_gaussfit.py``, ``test_splinefit.py``, ``test_precision.py``,
+``test_zfit.py`` and others).
 
 :author: Rafal Kowalewski, 2025-2026
 :copyright: Copyright (c) 2025-2026 Jungmann Lab, MPI of Biochemistry
@@ -25,10 +26,16 @@ from scipy import ndimage
 from scipy.interpolate import CubicSpline
 from PyQt6 import QtCore, QtWidgets
 
-from picasso import gaussmle, gausslq, io, lib, localize, spline, transforms
+from picasso import io, lib, localize, spline, transforms
 from picasso import wavelet
 from picasso import transforms as transforms_mod
-from picasso.fitting import gaussfit_cuda, precision, seeds, splinefit
+from picasso.fitting import (
+    gaussfit,
+    gaussfit_cuda,
+    precision,
+    seeds,
+    splinefit,
+)
 from picasso.gui import localize as localize_gui
 
 from tests.conftest import (
@@ -1899,6 +1906,130 @@ def _make_rotated_spot(box, x0, y0, sx, sy, photons, bg, angle):
     return (photons / (2 * np.pi * sx * sy) * e + bg).astype(np.float32)
 
 
+class TestFitSpotsGaussCpu:
+    """``localize.fit_spots_gauss`` on the CPU, the default device. Covers
+    what ``test_gaussfit.py`` (the raw backend) does not see: the default
+    schedule, the conversion of the peak height to photons and the expansion
+    of the spherical fit to the elliptical layout.
+
+    Parameter order is ``[photons, x, y, sx, sy, bg]`` and, for the rotated
+    model, ``[photons, x, y, sx, sy, bg, angle]``. ``x``/``y`` are box-pixel
+    coordinates, so the ground-truth center offset is ``x - box // 2``."""
+
+    @staticmethod
+    def _ids(n):
+        return pd.DataFrame(
+            {
+                "frame": np.arange(n, dtype=np.uint32),
+                "x": np.full(n, 50, dtype=np.int64),
+                "y": np.full(n, 70, dtype=np.int64),
+                "net_gradient": np.full(n, 5000.0, dtype=np.float32),
+            }
+        )
+
+    @staticmethod
+    def _precision_matrix(sx, sy, angle):
+        """Inverse covariance of a rotated Gaussian. ``(sx, sy, angle)`` and
+        ``(sy, sx, angle +/- pi/2)`` are the same ellipse and the fit may
+        return either; this matrix is the same for both."""
+        c, s = np.cos(angle), np.sin(angle)
+        rotation = np.array([[c, -s], [s, c]])
+        return rotation.T @ np.diag([1.0 / sx**2, 1.0 / sy**2]) @ rotation
+
+    def test_shape_dtype_finite(self, synthetic_spots):
+        spots, _ = synthetic_spots
+        theta = localize.fit_spots_gauss(spots)
+        assert theta.shape == (len(spots), 6)
+        assert theta.dtype == np.float32
+        assert np.all(np.isfinite(theta))
+
+    def test_lse_recovers_all_parameters_noiseless(self, synthetic_spots):
+        spots, gt = synthetic_spots
+        theta = localize.fit_spots_gauss(spots)
+        half = spots.shape[1] // 2
+        np.testing.assert_allclose(theta[:, 0], gt.photons.values, rtol=1e-3)
+        np.testing.assert_allclose(theta[:, 1] - half, gt.x.values, atol=2e-3)
+        np.testing.assert_allclose(theta[:, 2] - half, gt.y.values, atol=2e-3)
+        np.testing.assert_allclose(theta[:, 3], gt.sx.values, atol=2e-3)
+        np.testing.assert_allclose(theta[:, 4], gt.sy.values, atol=2e-3)
+        np.testing.assert_allclose(theta[:, 5], gt.bg.values, atol=1e-2)
+
+    def test_defaults_match_passing_none(self, synthetic_spots):
+        """Least squares on the CPU keeps its own schedule, not the 20
+        iterations of ``gaussfit``'s defaults."""
+        spots, _ = synthetic_spots
+        np.testing.assert_array_equal(
+            localize.fit_spots_gauss(spots),
+            localize.fit_spots_gauss(
+                spots,
+                tolerance=gaussfit.TOLERANCE_LSQ_CPU,
+                max_iterations=gaussfit.MAX_ITERATIONS_LSQ_CPU,
+            ),
+        )
+
+    def test_spherical_lse_recovers_isotropic(self, synthetic_spots_isotropic):
+        spots, gt = synthetic_spots_isotropic
+        theta = localize.fit_spots_gauss(spots, spherical=True)
+        assert theta.shape == (len(spots), 6)
+        np.testing.assert_array_equal(theta[:, 3], theta[:, 4])
+        half = spots.shape[1] // 2
+        np.testing.assert_allclose(theta[:, 0], gt.photons.values, rtol=2e-3)
+        np.testing.assert_allclose(theta[:, 1] - half, gt.x.values, atol=3e-3)
+        np.testing.assert_allclose(theta[:, 2] - half, gt.y.values, atol=3e-3)
+        np.testing.assert_allclose(theta[:, 3], gt.sx.values, atol=3e-3)
+
+    def test_spherical_width_lies_between_the_true_widths(
+        self, synthetic_spot_factory
+    ):
+        """A single width cannot represent sx != sy, so it lands between
+        them."""
+        spot = synthetic_spot_factory(sx=1.4, sy=0.9)
+        theta = localize.fit_spots_gauss(spot[None], spherical=True)
+        assert theta[0, 3] == theta[0, 4]
+        assert 0.9 < theta[0, 3] < 1.4
+
+    def test_rotated_recovers_each_ellipse(self, synthetic_spots_rotated):
+        spots, gt = synthetic_spots_rotated
+        theta = localize.fit_spots_gauss(spots, rotated=True)
+        assert theta.shape == (len(spots), 7)
+        half = spots.shape[1] // 2
+        np.testing.assert_allclose(theta[:, 0], gt.photons.values, rtol=1e-2)
+        np.testing.assert_allclose(theta[:, 1] - half, gt.x.values, atol=1e-2)
+        np.testing.assert_allclose(theta[:, 2] - half, gt.y.values, atol=1e-2)
+        for i in range(len(spots)):
+            np.testing.assert_allclose(
+                self._precision_matrix(*theta[i, [3, 4, 6]]),
+                self._precision_matrix(gt.sx[i], gt.sy[i], gt.angle[i]),
+                atol=1e-2,
+            )
+
+    def test_mle_recovers_noisy_spots(self, synthetic_spots_noisy):
+        """With Poisson noise, the maximum-likelihood fit still recovers
+        the ground truth to within about one localization precision."""
+        spots, gt = synthetic_spots_noisy
+        theta = localize.fit_spots_gauss(spots, mle=True)
+        half = spots.shape[1] // 2
+        np.testing.assert_allclose(theta[:, 1] - half, gt.x.values, atol=0.2)
+        np.testing.assert_allclose(theta[:, 2] - half, gt.y.values, atol=0.2)
+        np.testing.assert_allclose(theta[:, 0], gt.photons.values, rtol=0.1)
+        np.testing.assert_allclose(theta[:, 3], gt.sx.values, atol=0.1)
+        np.testing.assert_allclose(theta[:, 4], gt.sy.values, atol=0.1)
+
+    @pytest.mark.parametrize("mle", [False, True], ids=["lsq", "mle"])
+    def test_uncertainties_strictly_positive(self, synthetic_spots_noisy, mle):
+        spots, _ = synthetic_spots_noisy
+        locs = localize._fit2d_gauss(
+            spots, self._ids(len(spots)), spots.shape[1], em=False, mle=mle
+        )
+        columns = ["lpx", "lpy"]
+        if mle:
+            columns += ["photons_unc", "bg_unc", "sx_unc", "sy_unc"]
+        for column in columns:
+            values = locs[column].to_numpy()
+            assert np.all(np.isfinite(values)), column
+            assert (values > 0).all(), column
+
+
 @pytest.mark.skipif(not localize.CUDA_AVAILABLE, reason="no CUDA device")
 class TestGpufit:
     """Thorough tests for the Gpufit Gaussian codepath (``fit_spots_gauss_gpu``).
@@ -2350,10 +2481,10 @@ class TestLocsFromFitsGpufit:
         locs = localize.locs_from_fits_gauss(
             self._ids(1), theta, BOX, em=False, mle=False
         )
-        expected_lpx = gausslq.localization_precision(
+        expected_lpx = precision.localization_precision(
             theta[:, 0], theta[:, 3], theta[:, 4], theta[:, 5], em=False
         )
-        expected_lpy = gausslq.localization_precision(
+        expected_lpy = precision.localization_precision(
             theta[:, 0], theta[:, 4], theta[:, 3], theta[:, 5], em=False
         )
         np.testing.assert_allclose(locs["lpx"], expected_lpx, rtol=1e-6)
@@ -2416,6 +2547,7 @@ class TestLocsFromFitsGpufit:
         )
         assert "log_likelihood" not in locs.columns
         assert "iterations" not in locs.columns
+        assert "chi_square" not in locs.columns
         # with stats they appear, correctly typed
         locs = localize.locs_from_fits_gauss(
             self._ids(1),
@@ -2429,6 +2561,32 @@ class TestLocsFromFitsGpufit:
         assert locs["log_likelihood"].dtype == np.float32
         assert locs["iterations"].dtype == np.int32
         assert locs["iterations"].iloc[0] == 7
+
+    def test_chi_square_passes_through(self):
+        theta = np.tile(
+            np.array([500.0, 3.0, 3.0, 1.2, 1.2, 5.0], dtype=np.float32),
+            (2, 1),
+        )
+        chi_square = np.array([120.0, 95.0])
+        locs = localize.locs_from_fits_gauss(
+            self._ids(2), theta, BOX, em=False, chi_square=chi_square
+        )
+        assert locs["chi_square"].dtype == np.float32
+        np.testing.assert_allclose(locs["chi_square"], chi_square, rtol=1e-6)
+
+    def test_sorted_by_n_id_when_present(self):
+        """The cross-channel link index takes precedence over the frame."""
+        n = 4
+        theta = np.tile(
+            np.array([500.0, 3.0, 3.0, 1.2, 1.2, 5.0], dtype=np.float32),
+            (n, 1),
+        )
+        ids = self._ids(n)
+        ids["n_id"] = np.arange(n - 1, -1, -1, dtype=np.uint32)
+        locs = localize.locs_from_fits_gauss(ids, theta, BOX, em=False)
+        assert locs["n_id"].dtype == np.uint32
+        assert list(locs["n_id"]) == list(range(n))
+        assert list(locs["frame"]) == list(range(n - 1, -1, -1))
 
     def test_em_scales_lse_precision_by_sqrt2(self):
         theta = np.array([[500.0, 3.2, 3.7, 1.3, 1.1, 5.0]], dtype=np.float32)
@@ -4172,88 +4330,6 @@ class TestSplineFit:
         np.testing.assert_allclose(locs["photons"], amp, rtol=1e-3)
 
 
-class TestNoSelfDeprecation:
-    """Picasso must not warn about its own use of the deprecated fitters.
-
-    ``picasso.gausslq`` and ``picasso.gaussmle`` are deprecated as of 0.11
-    and go in 1.0, but ``localize`` and ``spline`` still call them until the
-    method codes are rerouted. They call the *private* implementations for
-    exactly this reason: a deprecation notice a user cannot act on - because
-    it is Picasso's own internals that triggered it - is noise, and it would
-    train people to ignore the ones that do matter."""
-
-    CAMERA_INFO = {**CAMERA_INFO, "Pixelsize": PIXELSIZE}
-
-    @pytest.mark.parametrize(
-        "method",
-        [
-            "gausslq",
-            "gausslq-spherical",
-            "gausslq-rotated",
-            "gaussmle",
-            "gaussmle-spherical",
-            "avg",
-        ],
-    )
-    def test_fit_raises_no_deprecation_warning(
-        self, picasso_movie, movie_info, real_identifications, method
-    ):
-        with warnings.catch_warnings(record=True) as caught:
-            warnings.simplefilter("always")
-            localize.fit(
-                picasso_movie,
-                camera_info=self.CAMERA_INFO,
-                identifications=real_identifications[:20],
-                box=BOX,
-                fitting_method=method,
-                multiprocess=False,
-            )
-        offenders = [
-            str(w.message)
-            for w in caught
-            if issubclass(w.category, FutureWarning)
-            and ("gausslq" in str(w.message) or "gaussmle" in str(w.message))
-        ]
-        assert offenders == []
-
-    def test_multiprocessed_gausslq_is_silent(
-        self, picasso_movie, movie_info, real_identifications
-    ):
-        """The process-pool path goes through ``_fit_spots_parallel``."""
-        with warnings.catch_warnings(record=True) as caught:
-            warnings.simplefilter("always")
-            localize.fit(
-                picasso_movie,
-                camera_info=self.CAMERA_INFO,
-                identifications=real_identifications[:20],
-                box=BOX,
-                fitting_method="gausslq",
-                multiprocess=True,
-            )
-        offenders = [
-            str(w.message)
-            for w in caught
-            if issubclass(w.category, FutureWarning)
-            and "gausslq" in str(w.message)
-        ]
-        assert offenders == []
-
-    def test_internal_callers_use_the_private_names(self):
-        """Belt and braces: reading the source, so a future edit that
-        reintroduces a public call is caught even if the warning filter
-        configuration changes."""
-        for module in (localize, spline):
-            source = inspect.getsource(module)
-            for public in (
-                "gausslq.fit_spot(",
-                "gausslq.fit_spots(",
-                "gausslq.fit_spots_parallel(",
-                "gaussmle.gaussmle(",
-                "gaussmle.gaussmle_async(",
-            ):
-                assert public not in source, (module.__name__, public)
-
-
 class TestConvergenceSchedulePlumbing:
     """The convergence criterion and the iteration cap must reach *every*
     fitting method, on either device, and be recorded as what the fit actually
@@ -4266,9 +4342,9 @@ class TestConvergenceSchedulePlumbing:
     @pytest.mark.parametrize(
         "method,default",
         [
-            ("gausslq", (gausslq.TOLERANCE, gausslq.MAX_ITERATIONS)),
-            ("gausslq-spherical", (gausslq.TOLERANCE, gausslq.MAX_ITERATIONS)),
-            ("gausslq-rotated", (gausslq.TOLERANCE, gausslq.MAX_ITERATIONS)),
+            ("gausslq", localize.gauss_schedule(False, False)),
+            ("gausslq-spherical", localize.gauss_schedule(False, False)),
+            ("gausslq-rotated", localize.gauss_schedule(False, False)),
             ("gaussmle", localize.gauss_schedule(True, False)),
             ("gaussmle-spherical", localize.gauss_schedule(True, False)),
             (
@@ -4534,9 +4610,10 @@ class TestGuiConvergenceDefaults:
         repeated - this pins that it still resolves to the right values."""
         table = localize_gui._CONVERGENCE_DEFAULTS
         assert table["gausslq"] == (
-            gausslq.TOLERANCE,
-            gausslq.MAX_ITERATIONS,
+            gaussfit.TOLERANCE_LSQ_CPU,
+            gaussfit.MAX_ITERATIONS_LSQ_CPU,
         )
+        assert table["gausslq"] == (1e-2, 200)
         assert table["gausslq-gpu"] == (
             gaussfit_cuda.TOLERANCE,
             gaussfit_cuda.MAX_ITERATIONS,
@@ -5156,7 +5233,7 @@ class TestSplineCRLBEMCCD:
     multiplication doubles every pixel's variance on top of the Poisson term,
     so every reported variance has to double with it - for both estimators,
     since that is a property of the detector and not of the fit. Matches
-    ``gausslq.localization_precision`` and ``_gauss_crlb``."""
+    ``precision.localization_precision`` and ``_gauss_crlb``."""
 
     @pytest.mark.parametrize("mle", [True, False])
     @pytest.mark.parametrize(
@@ -5809,7 +5886,7 @@ class TestSaveableColumns:
         )
         frames = {}
 
-        # gpufit Gaussian, [photons, x, y, sx, sy, bg] (+ angle if rotated)
+        # Gaussian (CPU and GPU), [photons, x, y, sx, sy, bg, (angle)]
         theta_e = np.array(
             [
                 [500.0, 3.2, 3.7, 1.3, 1.1, 5.0],
@@ -5835,17 +5912,6 @@ class TestSaveableColumns:
         )
         frames["gpufit-lse-rotated"] = localize.locs_from_fits_gauss(
             ids, theta_r, BOX, em=False, mle=False, **lsq_stats
-        )
-
-        # CPU least-squares Gaussian, [x, y, photons, bg, sx, sy]
-        theta_lq = np.array(
-            [
-                [3.0, 3.0, 500.0, 5.0, 1.2, 1.1],
-                [3.1, 2.9, 600.0, 4.0, 1.0, 1.3],
-            ]
-        )
-        frames["gausslq-cpu"] = gausslq.locs_from_fits(
-            ids, theta_lq, BOX, em=False, chi_square=lsq_stats["chi_square"]
         )
 
         # spline PSF, [amplitude, x_shift, y_shift, (z_shift,) offset]
@@ -5876,22 +5942,6 @@ class TestSaveableColumns:
             **stats,
         )
 
-        # CPU MLE Gaussian, [x, y, photons, bg, sx, sy] with its 6-col CRLB
-        theta_cpu = np.array(
-            [
-                [3.0, 3.0, 500.0, 5.0, 1.2, 1.1],
-                [3.1, 2.9, 600.0, 4.0, 1.0, 1.3],
-            ]
-        )
-        crlbs = np.full((2, 6), 0.01)
-        frames["gaussmle-cpu"] = gaussmle.locs_from_fits(
-            ids,
-            theta_cpu,
-            crlbs,
-            stats["log_likelihood"],
-            stats["iterations"],
-            BOX,
-        )
         # Photon-decoupled (link-XYZ) multichannel spline, at the largest
         # channel count there is a fit model for - it emits the widest set of
         # per-channel columns.

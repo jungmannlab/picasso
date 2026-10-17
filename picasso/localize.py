@@ -5594,10 +5594,10 @@ def _run_splinefit(
     byte-identical inputs. That is what makes a CPU/GPU comparison meaningful
     rather than a test of two translation layers agreeing.
 
-    ``multiprocess`` keeps ``fit``'s argument name, but as for ``gaussmle``
-    it selects a **thread** pool: the CPU kernels are ``nogil``, so the workers
-    run concurrently while sharing the spots and the coefficient table rather
-    than pickling a copy of each into a subprocess. False runs the fit serially
+    ``multiprocess`` keeps ``fit``'s argument name, but as for the Gaussian
+    fits it selects a **thread** pool: the CPU kernels are ``nogil``, so the
+    workers run concurrently while sharing the spots and the coefficient
+    table rather than pickling a copy of each into a subprocess. False runs the fit serially
     in the calling thread, which is what the tests use for reproducibility. It
     is ignored on the GPU, where one launch fits every spot.
     """

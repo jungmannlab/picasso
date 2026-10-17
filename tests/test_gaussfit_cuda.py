@@ -4,10 +4,8 @@ test_gaussfit_cuda
 
 Tests for ``picasso.fitting.gaussfit_cuda``, the GPU Gaussian PSF fitter.
 
-Unlike the spline backend, these models have no CPU twin to compare against -
-``gausslq`` fits a normalized Gaussian with SciPy and ``gaussmle`` an
-erf-integrated one with a bespoke Newton solver, so neither is the same
-estimator. The ground truth here is therefore the closed form itself: a
+The CPU twin, ``picasso.fitting.gaussfit``, is compared against these kernels
+in ``test_gaussfit.py``. The ground truth here is the closed form itself: a
 noiseless spot built from the model must be recovered to near machine
 precision, and the analytic derivatives must match finite differences. Parity
 against the ``Gpufit.dll`` these replace lives in ``test_gpufit_parity.py``.

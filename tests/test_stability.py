@@ -232,7 +232,7 @@ class TestDeprecationCycle:
     def test_no_removal_is_overdue(self):
         # the modules that register deprecations, imported so that their
         # entries are in the registry
-        from picasso import gausslq, gaussmle, localize  # noqa: F401
+        from picasso import localize  # noqa: F401
 
         overdue = [
             f"{entry.name} (deprecated in {entry.since}, removed in "
@@ -247,7 +247,7 @@ class TestDeprecationCycle:
         )
 
     def test_every_deprecation_follows_the_cycle(self):
-        from picasso import gausslq, gaussmle, localize  # noqa: F401
+        from picasso import localize  # noqa: F401
 
         assert deprecation.REGISTRY
         for entry in deprecation.REGISTRY:

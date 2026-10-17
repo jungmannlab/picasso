@@ -1287,8 +1287,8 @@ def fit_spots_async(
     for worker errors while the fit runs.
 
     The kernels are ``nogil``, so this is *threads*, not processes - unlike
-    the ``gausslq.fit_spots_parallel`` it replaces, which forked up to 60
-    worker processes and pickled the spots into each of them.
+    the ``picasso.gausslq.fit_spots_parallel`` it replaced, which forked up
+    to 60 worker processes and pickled the spots into each of them.
 
     Parameters
     ----------

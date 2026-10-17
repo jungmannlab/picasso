@@ -26,7 +26,7 @@ calibration model                    kind  parameters
 
 The per-spot kernels are ``nogil=True`` (not ``parallel=True``) so that a
 plain thread pool can run them concurrently while a shared counter reports
-per-spot progress - the same arrangement as ``picasso.gaussmle``.
+per-spot progress - the same arrangement as ``picasso.fitting.gaussfit``.
 
 This module deliberately knows nothing about calibration dicts: it takes
 plain arrays only, so that ``picasso.localize`` can import it without a
@@ -132,15 +132,13 @@ FIT_STATE_NEG_CURVATURE_MLE = 3
 # meant for.
 #
 # Instead such a pixel is floored, which is what Picasso's own
-# maximum-likelihood code already does elsewhere: ``gaussmle._mlefit_sigma``
-# drops a pixel whose model is below ``10e-3`` from its Newton update, and
-# ``precision._spline_crlb`` floors the Fisher weight at
-# ``_SPLINE_CRLB_MU_FLOOR``. The pixel still contributes a (bounded) penalty to
-# the likelihood, so multi-start seeds stay comparable and solutions that need
-# a negative model are disfavoured, but it contributes nothing to the gradient
-# or the Hessian: its ``1 / mu`` weight would otherwise be enormous and, since
-# Gpufit's scaling vector is a running maximum, would damp every parameter to a
-# standstill for the rest of the fit. Well-behaved fits never reach the floor,
+# maximum-likelihood code already does elsewhere: ``precision._spline_crlb``
+# floors the Fisher weight at ``_SPLINE_CRLB_MU_FLOOR``. The pixel still
+# contributes a (bounded) penalty to the likelihood, so multi-start seeds stay
+# comparable and solutions that need a negative model are disfavored, but it
+# contributes nothing to the gradient or the Hessian: its ``1 / mu`` weight
+# would otherwise be enormous and, since Gpufit's scaling vector is a running
+# maximum, would damp every parameter to a standstill for the rest of the fit. Well-behaved fits never reach the floor,
 # so this does not change their result.
 MU_FLOOR = 1e-3
 
@@ -575,7 +573,7 @@ def _lm_solve_step(
 # Per-spot Levenberg-Marquardt kernels
 #
 # All three take the same 15 arguments so that one worker can drive any of
-# them (as ``gaussmle._worker`` takes its kernel as an argument).
+# them.
 #
 # ``spots`` is float32 ``(n_spots, n_channels, box, box)``, channel-major, and
 # indexed ``[spot, channel, row = y, column = x]``: Gpufit's fast pixel axis is
@@ -1001,7 +999,7 @@ def _fit_spline_spot(  # noqa: C901
     z_col = 2 if kind == KIND_LINK_XYZ else 3
     # All scratch is allocated once per spot, outside the seed and iteration
     # loops - allocating inside them dominates the runtime of a threaded numba
-    # kernel (the same reason gaussmle._mlefit_sigma hoists its buffers).
+    # kernel.
     theta = np.empty(n_params)
     theta_previous = np.empty(n_params)
     best = np.empty(n_params)
@@ -1253,7 +1251,7 @@ def _fit_spline_spot(  # noqa: C901
 # The kernels are ``nogil``, so real threads run them concurrently. Each worker
 # claims the next spot index under a lock and bumps a shared counter; the
 # caller polls that counter to report progress. This is the arrangement of
-# ``gaussmle.gaussmle_async`` / ``gaussmle._worker``.
+# ``gaussfit.fit_spots_async`` / ``gaussfit._worker``.
 # ----------------------------------------------------------------------
 
 
