@@ -33,6 +33,15 @@ from sklearn.cluster import DBSCAN, HDBSCAN
 
 from . import lib, masking
 
+#: scikit-learn's HDBSCAN fails with a TypeError for cluster_eps > 0 on
+#: some data with NumPy 2.4 and later, which no longer converts a
+#: one-element array to a number (scikit-learn issue 33219, unfixed in
+#: scikit-learn 1.9.1). The one-click installers ship NumPy 2.3.
+_HDBSCAN_EPSILON_BUG = np.lib.NumpyVersion(np.__version__) >= "2.4.0"
+_HDBSCAN_EPSILON_ISSUE = (
+    "https://github.com/scikit-learn/scikit-learn/issues/33219"
+)
+
 __all__ = [
     "cluster",
     "dbscan",
@@ -694,13 +703,30 @@ def _hdbscan(
     labels : lib.IntArray1D
         Cluster labels for each point. Shape: (N,). -1 means no cluster
         assigned.
+
+    Raises
+    ------
+    RuntimeError
+        If ``cluster_eps`` > 0 runs into scikit-learn's HDBSCAN bug with
+        NumPy 2.4 and later (scikit-learn issue 33219).
     """
-    hdb = HDBSCAN(
-        min_samples=min_samples,
-        min_cluster_size=min_cluster_size,
-        cluster_selection_epsilon=cluster_eps,
-        copy=False,
-    ).fit(X)
+    try:
+        hdb = HDBSCAN(
+            min_samples=min_samples,
+            min_cluster_size=min_cluster_size,
+            cluster_selection_epsilon=cluster_eps,
+            copy=False,
+        ).fit(X)
+    except TypeError as error:
+        if cluster_eps > 0 and _HDBSCAN_EPSILON_BUG:
+            raise RuntimeError(
+                "HDBSCAN with a cluster selection epsilon above 0 fails "
+                f"with NumPy {np.__version__} because of a bug in "
+                f"scikit-learn ({_HDBSCAN_EPSILON_ISSUE}). Set the epsilon "
+                "to 0, or use NumPy older than 2.4, e.g., "
+                '"pip install numpy<2.4".'
+            ) from error
+        raise
     return hdb.labels_.astype(np.int32)
 
 
@@ -737,6 +763,14 @@ def hdbscan(
         is removed.
     info : dict
         Dictionary containing clustering information.
+
+    Raises
+    ------
+    RuntimeError
+        If ``cluster_eps`` > 0 runs into scikit-learn's HDBSCAN bug with
+        NumPy 2.4 and later (scikit-learn issue 33219).
+    ValueError
+        If the localizations are 3D and ``pixelsize`` is not given.
     """
     locs = locs.copy()
     n_raw = len(locs)

@@ -37,7 +37,7 @@ dependencies = [
     "pandas>=2.3.3,<3",
     "tables>=3.10.1,<4",
     "pyyaml>=6.0.3,<7",
-    "scikit-learn>=1.5.0,<1.8",  # HDBSCAN with cluster_selection_epsilon > 0
+    "scikit-learn>=1.5.0,<2",
     "tqdm>=4.67.1,<5",
     "nd2>=0.10.4,<1",
     "dask>=2024.8.0",  # calendar versions, no major release to stop at
@@ -102,7 +102,7 @@ formats = [
 # 'installer' uses python 3.14, see, e.g., create_installer_windows.bat
 installer = [
     "PyQt6==6.11.0",
-    "numpy==2.4.4",
+    "numpy==2.3.5",  # 2.4 breaks HDBSCAN, see picasso/clusterer.py
     "matplotlib==3.10.8",
     "h5py==3.16.0",
     "numba==0.65.0",

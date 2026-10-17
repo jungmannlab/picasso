@@ -186,12 +186,17 @@ def _run_smlm_3d(locs):
     )[0]
 
 
-# sklearn>=1.8 raises TypeError inside cluster_selection_epsilon on this real
-# dataset; clears on synthetic data, so HDBSCAN's correctness is still covered.
+# With NumPy >= 2.4, scikit-learn's HDBSCAN fails for
+# cluster_selection_epsilon > 0 on this real dataset (scikit-learn issue
+# 33219, see picasso/clusterer.py); synthetic data passes, so HDBSCAN's
+# correctness is still covered. Strict: once a scikit-learn release fixes
+# the bug, this test fails as a reminder to remove the workaround (the
+# NumPy pin of the installers and the error in clusterer._hdbscan).
 _HDBSCAN_REAL_DATA_XFAIL = pytest.mark.xfail(
-    reason="sklearn>=1.8 bug in HDBSCAN cluster_selection_epsilon path",
-    raises=TypeError,
-    strict=False,
+    clusterer._HDBSCAN_EPSILON_BUG,
+    reason="scikit-learn issue 33219: HDBSCAN epsilon with NumPy >= 2.4",
+    raises=RuntimeError,
+    strict=True,
 )
 
 CLUSTERERS_2D = [
@@ -290,6 +295,45 @@ def test_recovers_known_clusters_3d_offset(
 # ---------------------------------------------------------------------
 # Error paths: 3D without required parameters
 # ---------------------------------------------------------------------
+
+
+class _FailingHDBSCAN:
+    """Fails like scikit-learn's HDBSCAN with NumPy >= 2.4."""
+
+    def __init__(self, **kwargs):
+        pass
+
+    def fit(self, X):
+        raise TypeError(
+            "only 0-dimensional arrays can be converted to Python scalars"
+        )
+
+
+@pytest.mark.parametrize(
+    "bug,cluster_eps,expected",
+    [
+        (True, 0.1, RuntimeError),  # explained
+        (True, 0.0, TypeError),  # another TypeError: unchanged
+        (False, 0.1, TypeError),  # NumPy < 2.4: unchanged
+    ],
+)
+def test_hdbscan_epsilon_bug_is_explained(
+    monkeypatch, synth_locs_2d, bug, cluster_eps, expected
+):
+    monkeypatch.setattr(clusterer, "HDBSCAN", _FailingHDBSCAN)
+    monkeypatch.setattr(clusterer, "_HDBSCAN_EPSILON_BUG", bug)
+    with pytest.raises(expected) as caught:
+        clusterer.hdbscan(
+            synth_locs_2d,
+            min_cluster_size=HDBSCAN_MIN_CLUSTER_SIZE,
+            min_samples=HDBSCAN_MIN_SAMPLES,
+            cluster_eps=cluster_eps,
+        )
+    if expected is RuntimeError:
+        message = str(caught.value)
+        assert "issues/33219" in message
+        assert "epsilon to 0" in message
+        assert isinstance(caught.value.__cause__, TypeError)
 
 
 def test_dbscan_3d_requires_pixelsize(synth_locs_3d):
