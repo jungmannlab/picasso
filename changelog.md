@@ -109,7 +109,7 @@ Last change: 16-OCT-2026 CEST
 - Metadata read from .yaml files holds plain Python values, as the metadata embedded in .hdf5 files already did: e.g., `float` instead of `numpy.float64` and lists instead of numpy arrays.
 - The localizations simulated by SPINNA keep the pixel size in their SPINNA metadata entry instead of an entry labeled `Picasso Localize`.
 - The sound notification functions of `picasso.lib` (`get_sound_notification_path`, `get_available_sound_notifications`, `set_sound_notification`, `open_sound_notifications_folder` and `SOUND_NOTIFICATION_DURATION`) are replaced by the module `picasso.notifications`.
-- Picasso Server (`picasso server`) only accepts connections from the computer it runs on (`localhost`). Previously, it listened on all network interfaces, so anyone who could reach the computer could use it, including running programs with the watcher's custom command, since the server has no login. To connect from other computers, start it with `picasso server --network`, which also the Docker image needs. See the [documentation](https://picassosr.readthedocs.io/en/latest/server.html#server-browser-app).
+- Picasso Server (`picasso server`) only accepts connections from the computer it runs on (`localhost`). Previously, it listened on all network interfaces, so anyone who could reach the computer could use it, including running programs with the watcher's custom command, since the server has no login. To connect from other computers, start it with `picasso server --network`. See the [documentation](https://picassosr.readthedocs.io/en/latest/server.html#server-browser-app).
 
 ### Others
 - Many plots are now customizable.

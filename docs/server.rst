@@ -307,34 +307,3 @@ Preview will render the super-resolution data in the browser.
 
    The database will store the file path when it is localized. If the file is
    moved, it will not be selectable.
-
-.. _server-docker:
-
-Docker
-~~~~~~
-If you want to install Picasso Server in a headless Linux or Mac system, the
-provided dockerfile might be useful for installation.
-
-1. Build the docker image from the dockerfile (clone the GitHub repository):
-
-   .. code-block:: bash
-
-      docker build -t picasso .
-
-2. Run the docker image (interactive mode, port forwarding and with a mounted
-   drive). Note that you need to replace the respective paths.
-   ``127.0.0.1:`` makes the server reachable from the host computer only; with
-   ``-p 8501:8501``, other computers can reach it, too (see the warning in
-   :ref:`server-browser-app`).
-
-   .. code-block:: bash
-
-      docker run -it -p 127.0.0.1:8501:8501 --volume "C:/Users/Maximilian/Desktop/data:/home/picasso/data" picasso
-
-3. Launch Picasso Server in the docker image. ``--network`` is needed
-   because the port forwarding reaches the container from outside, which
-   ``localhost`` inside the container does not accept:
-
-   .. code-block:: bash
-
-      python3 -m picasso server --network
