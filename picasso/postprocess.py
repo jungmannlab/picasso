@@ -29,7 +29,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from scipy import interpolate
 from scipy.optimize import curve_fit, OptimizeWarning
-from scipy.spatial import distance, KDTree
+from scipy.spatial import KDTree
 from scipy.stats import rankdata
 from tqdm import tqdm, trange
 
@@ -55,8 +55,6 @@ __all__ = [
     "dark_times",
     "select_binding_event_cores",
     "combine_locs_in_picks",
-    "cluster_combine",
-    "cluster_combine_dist",
     "groupprops",
     # drift and alignment
     "undrift",
@@ -3826,255 +3824,6 @@ def combine_locs_in_picks(
     return out_locs
 
 
-# Combine localizations: calculate the properties of the group
-def cluster_combine(locs: pd.DataFrame) -> pd.DataFrame:
-    """Combine localizations into clusters and calculate their
-    properties such as center of mass, standard deviation, and number
-    of localizations in each cluster.
-
-    Parameters
-    ----------
-    locs : pd.DataFrame
-        Localizations with 'group' and 'cluster' columns.
-
-    Returns
-    -------
-    combined_locs : pd.DataFrame
-        Combined localizations with calculated properties for each
-        cluster.
-    """
-    combined_locs = []
-    if "z" in locs.columns:
-        for group in tqdm(np.unique(locs["group"])):
-            temp = locs[locs["group"] == group]
-            cluster = np.unique(temp["cluster"].to_numpy())
-            n_cluster = len(cluster)
-            mean_frame = np.zeros(n_cluster)
-            std_frame = np.zeros(n_cluster)
-            com_x = np.zeros(n_cluster)
-            com_y = np.zeros(n_cluster)
-            com_z = np.zeros(n_cluster)
-            std_x = np.zeros(n_cluster)
-            std_y = np.zeros(n_cluster)
-            std_z = np.zeros(n_cluster)
-            group_id = np.zeros(n_cluster)
-            n = np.zeros(n_cluster, dtype=np.int32)
-            for i, clusterval in enumerate(cluster):
-                cluster_locs = temp[temp["cluster"] == clusterval]
-                mean_frame[i] = cluster_locs["frame"].mean()
-                com_x[i] = np.average(
-                    cluster_locs["x"].to_numpy(),
-                    weights=cluster_locs["photons"].to_numpy(),
-                )
-                com_y[i] = np.average(
-                    cluster_locs["y"].to_numpy(),
-                    weights=cluster_locs["photons"].to_numpy(),
-                )
-                com_z[i] = np.average(
-                    cluster_locs["z"].to_numpy(),
-                    weights=cluster_locs["photons"].to_numpy(),
-                )
-                std_frame[i] = cluster_locs["frame"].std()
-                std_x[i] = cluster_locs["x"].std() / np.sqrt(len(cluster_locs))
-                std_y[i] = cluster_locs["y"].std() / np.sqrt(len(cluster_locs))
-                std_z[i] = cluster_locs["z"].std() / np.sqrt(len(cluster_locs))
-                n[i] = len(cluster_locs)
-                group_id[i] = group
-            clusters = pd.DataFrame(
-                {
-                    "group": group_id,
-                    "cluster": cluster,
-                    "mean_frame": mean_frame.astype(np.float32),
-                    "x": com_x.astype(np.float32),
-                    "y": com_y.astype(np.float32),
-                    "z": com_z.astype(np.float32),
-                    "std_frame": std_frame.astype(np.float32),
-                    "lpx": std_x.astype(np.float32),
-                    "lpy": std_y.astype(np.float32),
-                    "lpz": std_z.astype(np.float32),
-                    "n": n.astype(np.int32),
-                }
-            )
-            combined_locs.append(clusters)
-    else:
-        for group in tqdm(np.unique(locs["group"])):
-            temp = locs[locs["group"] == group]
-            cluster = np.unique(temp["cluster"].to_numpy())
-            n_cluster = len(cluster)
-            mean_frame = np.zeros(n_cluster)
-            std_frame = np.zeros(n_cluster)
-            com_x = np.zeros(n_cluster)
-            com_y = np.zeros(n_cluster)
-            std_x = np.zeros(n_cluster)
-            std_y = np.zeros(n_cluster)
-            group_id = np.zeros(n_cluster)
-            n = np.zeros(n_cluster, dtype=np.int32)
-            for i, clusterval in enumerate(cluster):
-                cluster_locs = temp[temp["cluster"] == clusterval]
-                mean_frame[i] = cluster_locs["frame"].mean()
-                com_x[i] = np.average(
-                    cluster_locs["x"].to_numpy(),
-                    weights=cluster_locs["photons"].to_numpy(),
-                )
-                com_y[i] = np.average(
-                    cluster_locs["y"].to_numpy(),
-                    weights=cluster_locs["photons"].to_numpy(),
-                )
-                std_frame[i] = cluster_locs["frame"].std()
-                std_x[i] = cluster_locs["x"].std() / np.sqrt(len(cluster_locs))
-                std_y[i] = cluster_locs["y"].std() / np.sqrt(len(cluster_locs))
-                n[i] = len(cluster_locs)
-                group_id[i] = group
-            clusters = pd.DataFrame(
-                {
-                    "group": group_id,
-                    "cluster": cluster,
-                    "mean_frame": mean_frame.astype(np.float32),
-                    "x": com_x.astype(np.float32),
-                    "y": com_y.astype(np.float32),
-                    "std_frame": std_frame.astype(np.float32),
-                    "lpx": std_x.astype(np.float32),
-                    "lpy": std_y.astype(np.float32),
-                    "n": n.astype(np.int32),
-                }
-            )
-            combined_locs.append(clusters)
-
-    combined_locs = pd.concat(combined_locs, ignore_index=True)
-    return combined_locs
-
-
-def cluster_combine_dist(
-    locs: pd.DataFrame, pixelsize: float | None = None
-) -> pd.DataFrame:
-    """Similar to ``cluster_combine``, but also calculates the distance
-    to the nearest neighbor in the same group and the distance to the
-    nearest neighbor in the same cluster in the same group.
-
-    Parameters
-    ----------
-    locs : pd.DataFrame
-        Localizations with 'group' and 'cluster' fields.
-    pixelsize : float or None, optional
-        Pixel size in nm for z-scaling. If None, defaults to 130 nm.
-
-    Returns
-    -------
-    combined_locs : pd.DataFrame
-        Combined localizations with calculated properties for each
-        cluster, including distances to nearest neighbors.
-    """
-    if "z" in locs.columns:
-        pixelsize = 130 if pixelsize is None else pixelsize
-        combined_locs = []
-        for group in tqdm(np.unique(locs["group"])):
-            temp = locs[locs["group"] == group]
-            cluster = np.unique(temp["cluster"])
-            n_cluster = len(cluster)
-            mean_frame = temp["mean_frame"].to_numpy()
-            std_frame = temp["std_frame"].to_numpy()
-            com_x = temp["x"].to_numpy()
-            com_y = temp["y"].to_numpy()
-            com_z = temp["z"].to_numpy()
-            std_x = temp["lpx"].to_numpy()
-            std_y = temp["lpy"].to_numpy()
-            std_z = temp["lpz"].to_numpy()
-            group_id = temp["group"].to_numpy()
-            n = temp["n"].to_numpy()
-            min_dist = np.zeros(n_cluster)
-            min_dist_xy = np.zeros(n_cluster)
-            for i, clusterval in enumerate(cluster):
-                # find nearest neighbor in xyz
-                group_locs = temp[temp["cluster"] != clusterval]
-                cluster_locs = temp[temp["cluster"] == clusterval]
-                ref_point = np.stack(
-                    (
-                        cluster_locs["x"].to_numpy(),
-                        cluster_locs["y"].to_numpy(),
-                        cluster_locs["z"].to_numpy() / pixelsize,
-                    ),
-                    axis=1,
-                )
-                all_points = np.stack(
-                    (
-                        group_locs["x"].to_numpy(),
-                        group_locs["y"].to_numpy(),
-                        group_locs["z"].to_numpy() / pixelsize,
-                    ),
-                    axis=1,
-                )
-                distances = distance.cdist(ref_point, all_points)
-                min_dist[i] = np.amin(distances)
-                # find nearest neighbor in xy
-                ref_point_xy = np.array(cluster_locs[["x", "y"]])
-                all_points_xy = np.array(group_locs[["x", "y"]])
-                distances_xy = distance.cdist(ref_point_xy, all_points_xy)
-                min_dist_xy[i] = np.amin(distances_xy)
-
-            clusters = pd.DataFrame(
-                {
-                    "group": group_id,
-                    "cluster": cluster,
-                    "mean_frame": mean_frame.astype(np.float32),
-                    "x": com_x.astype(np.float32),
-                    "y": com_y.astype(np.float32),
-                    "z": com_z.astype(np.float32),
-                    "std_frame": std_frame.astype(np.float32),
-                    "lpx": std_x.astype(np.float32),
-                    "lpy": std_y.astype(np.float32),
-                    "lpz": std_z.astype(np.float32),
-                    "n": n.astype(np.int32),
-                    "min_dist": min_dist.astype(np.float32),
-                    "mind_dist_xy": min_dist_xy.astype(np.float32),
-                }
-            )
-            combined_locs.append(clusters)
-
-    else:  # 2D case
-        combined_locs = []
-        for group in tqdm(np.unique(locs["group"])):
-            temp = locs[locs["group"] == group]
-            cluster = np.unique(temp["cluster"])
-            n_cluster = len(cluster)
-            mean_frame = temp["mean_frame"].to_numpy()
-            std_frame = temp["std_frame"].to_numpy()
-            com_x = temp["x"].to_numpy()
-            com_y = temp["y"].to_numpy()
-            std_x = temp["lpx"].to_numpy()
-            std_y = temp["lpy"].to_numpy()
-            group_id = temp["group"].to_numpy()
-            n = temp["n"].to_numpy()
-            min_dist = np.zeros(n_cluster)
-
-            for i, clusterval in enumerate(cluster):
-                # find nearest neighbor in xyz
-                group_locs = temp[temp["cluster"] != clusterval]
-                cluster_locs = temp[temp["cluster"] == clusterval]
-                ref_point_xy = np.array(cluster_locs[["x", "y"]])
-                all_points_xy = np.array(group_locs[["x", "y"]])
-                distances_xy = distance.cdist(ref_point_xy, all_points_xy)
-                min_dist[i] = np.amin(distances_xy)
-
-            clusters = pd.DataFrame(
-                {
-                    "group": group_id,
-                    "cluster": cluster,
-                    "mean_frame": mean_frame.astype(np.float32),
-                    "x": com_x.astype(np.float32),
-                    "y": com_y.astype(np.float32),
-                    "std_frame": std_frame.astype(np.float32),
-                    "lpx": std_x.astype(np.float32),
-                    "lpy": std_y.astype(np.float32),
-                    "n": n.astype(np.int32),
-                    "min_dist": min_dist.astype(np.float32),
-                }
-            )
-            combined_locs.append(clusters)
-
-    combined_locs = pd.concat(combined_locs, ignore_index=True)
-    return combined_locs
-
-
 @numba.jit(nopython=True)
 def _get_link_groups(
     frame: lib.IntArray1D,
@@ -6201,8 +5950,8 @@ _REGION_BRUSH = 2
 _point_segment_distance_sq = lib._point_segment_distance_sq
 
 #: Columns that molecules (one localization per molecule) have and
-#: localizations do not: written by ``clusterer.find_cluster_centers``,
-#: ``g5m.g5m`` and ``cluster_combine`` (``std_frame`` only)
+#: localizations do not: written by ``clusterer.find_cluster_centers``
+#: and ``g5m.g5m``
 _MOLECULE_COLUMNS = ("n_events", "std_frame")
 
 

@@ -45,8 +45,6 @@
   "-c",
   "-p"
  ],
- "cluster_combine": [],
- "cluster_combine_dist": [],
  "csv2hdf": [
   "--pixelsize",
   "-p"

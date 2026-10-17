@@ -15,7 +15,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from picasso import clusterer, io, lib, postprocess
+from picasso import io, lib, postprocess
 
 # Reused parameters
 PICK_SIZE = 1.5  # camera pixels
@@ -2031,71 +2031,6 @@ class TestGroupprops:
             finite["qpaint_idx"].to_numpy(),
             1.0 / finite["dark_mean"].to_numpy(),
             rtol=1e-5,
-        )
-
-
-# ---------------------------------------------------------------------------
-# Cluster combination
-# ---------------------------------------------------------------------------
-
-
-class TestClusterCombine:
-    @pytest.fixture
-    def clustered(self, locs):
-        """Run dbscan to assign per-loc cluster ids (in the 'cluster'
-        column) but lump every loc into a single group, so that
-        ``cluster_combine_dist`` can compute inter-cluster distances
-        within that group."""
-        out = clusterer.dbscan(locs, radius=2 / 130, min_samples=2)[0]
-        out = out.copy()
-        out["cluster"] = out["group"].to_numpy()
-        out["group"] = 0
-        return out
-
-    def test_cluster_combine_one_row_per_cluster(self, clustered):
-        combined = postprocess.cluster_combine(clustered)
-        n_clusters = len(np.unique(clustered["cluster"]))
-        assert len(combined) == n_clusters
-        for col in ("group", "cluster", "x", "y", "n", "lpx", "lpy"):
-            assert col in combined.columns
-        assert (combined["n"] > 0).all()
-        # Per-cluster ``n`` totals must equal the input row count
-        assert combined["n"].sum() == len(clustered)
-
-    def test_cluster_combine_dist_2d_min_dist(self, clustered):
-        combined = postprocess.cluster_combine(clustered)
-        if len(combined) < 2:
-            pytest.skip("Need at least 2 clusters in the group for cdist")
-        out = postprocess.cluster_combine_dist(combined)
-        assert "min_dist" in out.columns
-        assert (out["min_dist"] >= 0).all()
-        # Brute-force the nearest-neighbor distance per cluster and
-        # confirm it matches the function's output.
-        xy = combined[["x", "y"]].to_numpy()
-        for i in range(len(combined)):
-            others = np.delete(xy, i, axis=0)
-            expected = float(np.min(np.linalg.norm(others - xy[i], axis=1)))
-            assert out["min_dist"].iloc[i] == pytest.approx(expected, rel=1e-4)
-
-    def test_cluster_combine_dist_3d_min_dist_xy(self, clustered):
-        # Add a synthetic z column so the 3D branch is exercised. The
-        # 3D output also reports an xy nearest-neighbor distance under
-        # the (existing) 'mind_dist_xy' column name.
-        clustered = clustered.copy()
-        clustered["z"] = 0.0  # dummy z; xy distance is what we verify
-        combined = postprocess.cluster_combine(clustered)
-        if len(combined) < 2:
-            pytest.skip("Need at least 2 clusters in the group for cdist")
-        out = postprocess.cluster_combine_dist(combined)
-        assert "min_dist" in out.columns
-        assert "mind_dist_xy" in out.columns  # existing typo in the API
-        assert (out["min_dist"] >= 0).all()
-        assert (out["mind_dist_xy"] >= 0).all()
-        # With z=0 everywhere, 3D and xy distances must agree.
-        np.testing.assert_allclose(
-            out["min_dist"].to_numpy(),
-            out["mind_dist_xy"].to_numpy(),
-            rtol=1e-4,
         )
 
 

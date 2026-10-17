@@ -1193,24 +1193,6 @@ For example, two channels with short names:
      - How pairs of channels are simulated: random shifts of the second
        channel (rectangular or circular regions only) or random labels.
 
-cluster_combine
----------------
-Combines the localizations in each cluster of a group (to be deprecated in
-1.0).
-
-.. code-block:: bash
-
-   picasso cluster_combine files
-
-cluster_combine_dist
---------------------
-Calculate the nearest neighbor for each combined cluster (to be deprecated in
-1.0).
-
-.. code-block:: bash
-
-   picasso cluster_combine_dist files
-
 .. _cmd-plugins:
 
 plugins

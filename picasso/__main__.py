@@ -367,49 +367,6 @@ def _link(files: str, d_max: float, tolerance: float) -> None:
                 continue
 
 
-def _cluster_combine(files: str) -> None:
-    """Combine clusters in HDF5 files. See
-    ``postprocess.cluster_combine`` for details."""
-    import glob
-
-    paths = glob.glob(files)
-    if paths:
-        from . import io, lib, postprocess
-
-        for path in paths:
-            try:
-                locs, info = io.load_locs(path)
-            except io.NoMetadataFileError:
-                continue
-            combined_locs = postprocess.cluster_combine(locs)
-            base, ext = os.path.splitext(path)
-            combined_info = lib.step_info("Combine")
-            info.append(combined_info)
-            io.save_locs(base + "_comb.hdf5", combined_locs, info)
-
-
-def _cluster_combine_dist(files: str) -> None:
-    """Combine clusters in HDF5 files based on distance. See
-    ``postprocess.cluster_combine_dist`` for details."""
-    import glob
-
-    paths = glob.glob(files)
-    if paths:
-        from . import io, lib, postprocess
-
-        for path in paths:
-            try:
-                locs, info = io.load_locs(path)
-            except io.NoMetadataFileError:
-                continue
-            px = lib.get_from_metadata(info, "Pixelsize")
-            combinedist_locs = postprocess.cluster_combine_dist(locs, px)
-            base, ext = os.path.splitext(path)
-            cluster_combine_dist_info = lib.step_info("CombineDist")
-            info.append(cluster_combine_dist_info)
-            io.save_locs(base + "_cdist.hdf5", combinedist_locs, info)
-
-
 def _clusterfilter(
     files: str,
     clusterfile: str,
@@ -6552,36 +6509,6 @@ def _build_parser() -> (
     )
     hdf2pyme_parser.add_argument("files", help="one or multiple hdf5 files")
 
-    cluster_combine_parser = subparsers.add_parser(
-        "cluster_combine",
-        help=(
-            "combine localization in each cluster of a group "
-            "(to be deprecated in 1.0)"
-        ),
-    )
-    cluster_combine_parser.add_argument(
-        "files",
-        help=(
-            "one or multiple hdf5 localization files"
-            " specified by a unix style path pattern"
-        ),
-    )
-
-    cluster_combine_dist_parser = subparsers.add_parser(
-        "cluster_combine_dist",
-        help=(
-            "calculate the nearest neighbor for each combined cluster "
-            "(to be deprecated in 1.0)"
-        ),
-    )
-    cluster_combine_dist_parser.add_argument(
-        "files",
-        help=(
-            "one or multiple hdf5 localization files"
-            " specified by a unix style path pattern"
-        ),
-    )
-
     # plugins
     plugins_parser = subparsers.add_parser(
         "plugins", help="manage Picasso plugins"
@@ -6966,10 +6893,6 @@ def main():  # noqa: C901
             _pyme2hdf(args.files, args.pixelsize)
         elif args.command == "hdf2pyme":
             _hdf2pyme(args.files)
-        elif args.command == "cluster_combine":
-            _cluster_combine(args.files)
-        elif args.command == "cluster_combine_dist":
-            _cluster_combine_dist(args.files)
     else:
         parser.print_help()
         return

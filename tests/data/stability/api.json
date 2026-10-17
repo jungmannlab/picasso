@@ -234,8 +234,6 @@
   "dark_times",
   "select_binding_event_cores",
   "combine_locs_in_picks",
-  "cluster_combine",
-  "cluster_combine_dist",
   "groupprops",
   "undrift",
   "undrift_from_fiducials",
