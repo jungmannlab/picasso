@@ -177,6 +177,15 @@ markers = [
     "gpu_backend: tests that exercise the real GPU render backend selection (every other test renders on the CPU reference, whatever the machine has)",
 ]
 
+# pytest --cov (pytest-cov) measures which code of Picasso the tests run
+[tool.coverage.run]
+source = ["picasso"]
+
+[tool.coverage.report]
+# least covered first
+sort = "Cover"
+skip_empty = true
+
 [tool.black]
 line-length = 79
 include = "\\.pyi?$"

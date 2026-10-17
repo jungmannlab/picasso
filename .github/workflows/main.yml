@@ -63,15 +63,50 @@ jobs:
         # exit-zero treats all errors as warnings. Line length and E203 match black configuration
         flake8 . --count --exit-zero --max-complexity=10 --max-line-length=79 --extend-ignore=E203 --statistics --exclude=tests,picasso/ext,dist,release
     - name: Test with pytest
+      env:
+        # one job measures which code the tests run (pyproject.toml,
+        # [tool.coverage]); the others are not slowed down by it
+        MEASURE_COVERAGE: ${{ runner.os == 'Linux' && matrix.python-version == '3.14' }}
       run: |
-        pip install pytest
+        pip install pytest pytest-cov
         # tee-sys: a crash in a GUI test kills the process before pytest can
         # report the captured output, so the Qt/Python messages that explain
         # it have to reach the log as they are written.
-        pytest --capture=tee-sys
+        if [ "$MEASURE_COVERAGE" = true ]; then
+          pytest --capture=tee-sys --cov --cov-report=
+        else
+          pytest --capture=tee-sys
+        fi
+    - name: Coverage report
+      # in the job's summary page, least covered modules first; also when
+      # tests failed. Numba-compiled functions count as not run.
+      if: ${{ !cancelled() && runner.os == 'Linux' && matrix.python-version == '3.14' }}
+      run: |
+        echo "## Test coverage" >> "$GITHUB_STEP_SUMMARY"
+        coverage report --format=markdown >> "$GITHUB_STEP_SUMMARY"
     - name: Show the crash log
       if: always()
       run: cat "$PICASSO_CRASH_LOG" || echo "no crash log"
+
+  docs:
+    name: Documentation
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+    - uses: actions/checkout@v7
+      with:
+        persist-credentials: false
+    - uses: actions/setup-python@v7
+      with:
+        python-version: "3.12"  # as on Read the Docs (.readthedocs.yaml)
+    - name: Install Sphinx and Picasso
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r docs/requirements.txt .
+    - name: Build the documentation, failing on warnings
+      # like fail_on_warning on Read the Docs, but shown on the commit;
+      # --keep-going lists all warnings, not only the first
+      run: python -m sphinx -W --keep-going -b html docs docs/_build/html
 
   test-minimum-versions:
       runs-on: ubuntu-latest

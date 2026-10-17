@@ -109,6 +109,10 @@ Testing
 
     $ pytest tests/test_render.py
 
+   To see which code the tests run (with ``pytest-cov`` installed; CI shows the same table on the summary page of the Linux, Python 3.14 job)::
+
+    $ pytest --cov --cov-report=term-missing
+
 Committing & Pushing
 ^^^^^^^^^^^^^^^^^^^^^
 
