@@ -148,9 +148,9 @@ plugin browser is the same act, recorded in the same place.
 
 For developers
 --------------
-To create a plugin, you can use the template provided in
-`picasso/plugin_template.py <https://github.com/jungmannlab/picasso/blob/master/plugin_template.py>`_,
-which shows all three hooks; delete the ones you do not need. For more
+To create a plugin, you can use the template
+`plugin_template.py <https://github.com/jungmannlab/picasso/blob/master/plugin_template.py>`_
+at the top of the Picasso repository, which shows all three hooks; delete the ones you do not need. For more
 examples of plugins, please see the
 `GitHub repo <https://github.com/jungmannlab/picasso_plugins>`_.
 
