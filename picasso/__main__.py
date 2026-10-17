@@ -5573,10 +5573,6 @@ def _build_parser() -> (
 
     # average
     subparsers.add_parser("average", help="particle averaging (GUI)")
-    subparsers.add_parser(
-        "average3",
-        help="three-dimensional particle averaging (to be deprecated in 1.0)",
-    )  # TODO: deprecate in 1.0
 
     # undrift RCC
     undrift_rcc_parser = subparsers.add_parser(
@@ -6717,7 +6713,6 @@ def main():  # noqa: C901
             "render",
             "average",
             "nanotron",
-            "average3",
             "simulate",
             "design",
             "spinna",
@@ -6773,10 +6768,6 @@ def main():  # noqa: C901
             from .gui import nanotron
 
             nanotron.main()
-        elif args.command == "average3":
-            from .gui import average3
-
-            average3.main()
         elif args.command == "simulate":
             from .gui import simulate
 
