@@ -16578,31 +16578,6 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         self.update_pick_info_short()
         self.update_scene()
 
-    def _analyze_cluster_combined(
-        self,
-        all_picked_locs: list,
-        pixelsize: float,
-    ) -> list:
-        """Iterate over picks for combined-channel k-means clustering.
-        Return list of picks to remove."""
-        removelist = []
-        for i, pick in enumerate(self._picks):
-            if "z" in all_picked_locs[0].columns:
-                reply = ClsDlg3D.getParams(
-                    all_picked_locs, i, len(self._picks), 0, pixelsize
-                )
-            else:
-                reply = ClsDlg2D.getParams(
-                    all_picked_locs, i, len(self._picks), 0
-                )
-            if reply == 1:
-                pass  # accepted
-            elif reply == 2:
-                break  # canceled
-            else:
-                removelist.append(pick)  # discard
-        return removelist
-
     def _analyze_cluster_single(
         self,
         all_picked_locs: list,
@@ -16726,29 +16701,15 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
     @check_pick
     def analyze_cluster(self) -> None:
         """Clusters picked localizations using k-means clustering."""
-        channel = self.get_channel3d("Show Pick 3D")
+        channel = self.get_channel("Cluster in pick")
         removelist = []
         saved_locs = []
         clustered_locs = []
-        pixelsize = self.pixelsize
-        if channel is not None:
-            if channel is len(self.locs_paths):
-                all_picked_locs = [
-                    self.picked_locs(k) for k in range(len(self.locs_paths))
-                ]
-                if self._picks:
-                    removelist = self._analyze_cluster_combined(
-                        all_picked_locs, pixelsize
-                    )
-            else:
-                all_picked_locs = self.picked_locs(channel)
-                if self._picks:
-                    removelist, saved_locs, clustered_locs = (
-                        self._analyze_cluster_single(
-                            all_picked_locs,
-                            pixelsize,
-                        )
-                    )
+        if channel is not None and self._picks:
+            all_picked_locs = self.picked_locs(channel)
+            removelist, saved_locs, clustered_locs = (
+                self._analyze_cluster_single(all_picked_locs, self.pixelsize)
+            )
         if saved_locs:
             self._save_cluster_results(saved_locs, clustered_locs, channel)
         for pick in removelist:
