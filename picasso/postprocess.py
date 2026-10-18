@@ -63,6 +63,7 @@ __all__ = [
     "apply_drift",
     "plot_drift",
     "align",
+    "align_rcc",
     "align_from_picked",
     # resolution
     "nena",
@@ -4768,56 +4769,135 @@ def plot_drift(
 
 def align(
     locs: list[pd.DataFrame],
-    infos: list[dict],
-    display: bool = False,
+    infos: list[list[dict]],
     *,
-    apply_shifts: bool = True,
+    method: Literal["rcc", "picked"] = "rcc",
+    picks: list[tuple] | None = None,
+    pick_shape: Literal[
+        "Circle", "Rectangle", "Polygon", "Square", "Box", "Brush"
+    ] = "Circle",
+    pick_size: float | None = None,
+    index_blocks: list[tuple | None] | None = None,
+    display: bool = False,
     return_shifts: bool = False,
     keep_non_overlapping: bool = True,
-) -> pd.DataFrame:
-    """Align localizations from multiple channels (one per each element
-    in `locs`) by calculating the shifts between the rendered images
-    using RCC.
+) -> list[pd.DataFrame] | tuple[list[pd.DataFrame], tuple]:
+    """Align localizations from multiple channels (one per element in
+    ``locs``).
 
-    TODO: v1.0: This should be the main function that uses align_rcc or
-        align_from_picked.
+    The shifts between the channels are found either by RCC of the
+    rendered images (``method="rcc"``, see ``align_rcc``) or from the
+    localizations in picked regions (``method="picked"``, see
+    ``align_from_picked``). The input DataFrames are not modified.
 
     Parameters
     ----------
     locs : list of pd.DataFrames
-        List of localization datasets, where each element is a
-        DataFrame of localizations for a single image.
-    infos : list of dicts
-        List of metadata dictionaries corresponding to each
-        localization array in `locs`.
+        Localizations of each channel.
+    infos : list of list of dicts
+        Metadata of each channel in ``locs``.
+    method : {"rcc", "picked"}, optional
+        How the shifts are found. Default is "rcc".
+    picks : list or None, optional
+        Picked regions, in the format required by ``pick_shape``, see
+        ``io.load_picks``. Required for ``method="picked"`` and not
+        accepted otherwise. Default is None.
+    pick_shape : str, optional
+        Shape of the picks, one of ``lib.PICK_SHAPES``. Only used for
+        ``method="picked"``. Default is "Circle".
+    pick_size : float or None, optional
+        Size of the picks: the diameter of circular picks, the side
+        length of square picks and the width of rectangular picks. None
+        for polygon, box and brush picks. Only used for
+        ``method="picked"``. Default is None.
+    index_blocks : list of tuple or None, optional
+        Per-channel precomputed spatial indices for circular picks, see
+        ``align_from_picked``. Only used for ``method="picked"``.
+        Default is None.
     display : bool, optional
-        Not used.
-    apply_shifts : bool, optional
-        If True, applies the calculated shifts to the 'x' and 'y'
-        coordinates of the localizations. If False, returns the original
-        localizations without applying the shifts. Default is True.
+        If True, plots the mean shift per RCC iteration. Only used for
+        ``method="rcc"``. Default is False.
     return_shifts : bool, optional
-        If True, also returns the calculated shifts for each channel.
+        If True, also returns the shifts that were subtracted from each
+        channel. Default is False.
     keep_non_overlapping : bool, optional
         If False, localizations outside the region where all aligned
         channels overlap are removed, see
-        ``remove_non_overlapping_locs``. Ignored if ``apply_shifts`` is
-        False. Default is True (all localizations are kept).
+        ``remove_non_overlapping_locs``. Default is True (all
+        localizations are kept).
 
     Returns
     -------
     locs : list of pd.DataFrames
-        Aligned localizations with the shifts applied to the 'x' and
-        'y' coordinates.
-    shifts : tuple
-        ``(shift_x, shift_y)`` per channel, in camera pixels. Returned only
-        if ``return_shifts`` is True.
+        Aligned localizations of each channel.
+    shifts : tuple of np.ndarrays
+        ``(shift_x, shift_y)``, or ``(shift_x, shift_y, shift_z)`` if
+        z is aligned too (picked regions only). Each
+        array holds the shift subtracted from each channel, in the units
+        of the respective coordinate (camera pixels for x and y).
+        Returned only if ``return_shifts`` is True.
 
     Raises
     ------
     ValueError
-        If ``keep_non_overlapping`` is False and the aligned channels
-        do not overlap.
+        If ``method`` is unknown, if ``picks`` are missing for
+        ``method="picked"`` or given for ``method="rcc"``, or if
+        ``keep_non_overlapping`` is False and the aligned channels do
+        not overlap.
+    """
+    if method == "rcc":
+        if picks is not None:
+            raise ValueError(
+                "picks are only used with method='picked', not 'rcc'."
+            )
+        locs, shifts = align_rcc(
+            locs,
+            infos,
+            display=display,
+            return_shifts=True,
+            keep_non_overlapping=keep_non_overlapping,
+        )
+    elif method == "picked":
+        if picks is None:
+            raise ValueError("method='picked' requires picks.")
+        locs, shifts = align_from_picked(
+            locs,
+            infos,
+            picks=picks,
+            pick_shape=pick_shape,
+            pick_size=pick_size,
+            index_blocks=index_blocks,
+            return_shifts=True,
+            keep_non_overlapping=keep_non_overlapping,
+        )
+    else:
+        raise ValueError(
+            f"Unknown alignment method {method!r}, use 'rcc' or 'picked'."
+        )
+    if return_shifts:
+        return locs, shifts
+    return locs
+
+
+def _rcc_shifts(
+    locs: list[pd.DataFrame],
+    infos: list[list[dict]],
+) -> tuple[np.ndarray, np.ndarray]:
+    """One RCC pass over the rendered images of all channels, see
+    ``align_rcc``.
+
+    Parameters
+    ----------
+    locs : list of pd.DataFrames
+        Localizations of each channel.
+    infos : list of list of dicts
+        Metadata of each channel in ``locs``.
+
+    Returns
+    -------
+    shift_x, shift_y : np.ndarrays
+        Shift of each channel in camera pixels, to be subtracted from
+        its 'x' and 'y' coordinates.
     """
     images = []
     disp_px_size = 100  # nm
@@ -4846,9 +4926,8 @@ def align(
         images, callback=lib.MockProgress().set_value
     )
     # `rcc` returns shifts in rendered-image pixels (disp_px_size = 100 nm
-    # per pixel). Convert them to camera pixels so that both the applied
-    # and the returned shifts are in the same units as the localizations'
-    # 'x' and 'y' coordinates.
+    # per pixel). Convert them to camera pixels, the units of the
+    # localizations' 'x' and 'y' coordinates.
     shift_x = np.asarray(shift_x, dtype=float)
     shift_y = np.asarray(shift_y, dtype=float)
     for i, info_ in enumerate(infos):
@@ -4856,17 +4935,7 @@ def align(
         oversampling = pixelsize / disp_px_size
         shift_x[i] /= oversampling
         shift_y[i] /= oversampling
-    if apply_shifts:
-        for locs_, dx, dy in zip(locs, shift_x, shift_y):
-            locs_["y"] -= dy
-            locs_["x"] -= dx
-        if not keep_non_overlapping:
-            locs = remove_non_overlapping_locs(locs)
-    if return_shifts:
-        shifts = (shift_x, shift_y)
-        return locs, shifts
-    else:
-        return locs
+    return shift_x, shift_y
 
 
 def align_rcc(
@@ -4876,10 +4945,11 @@ def align_rcc(
     return_shifts: bool = False,
     *,
     keep_non_overlapping: bool = True,
-) -> pd.DataFrame:
+) -> list[pd.DataFrame] | tuple[list[pd.DataFrame], tuple]:
     """Align localizations from multiple channels (one per each element
     in `locs`) by calculating the shifts between the rendered images
-    using RCC. This is a wrapper around `align` for backward compatibility.
+    using RCC. The RCC is repeated until the shifts converge (at most
+    five times). The input DataFrames are not modified.
 
     Parameters
     ----------
@@ -4889,7 +4959,7 @@ def align_rcc(
         List of metadata dictionaries corresponding to each
         localization DataFrame in `locs`.
     display : bool, optional
-        If True, displays the estimated shifts. Default is False.
+        If True, plots the mean shift per iteration. Default is False.
     return_shifts : bool, optional
         If True, also returns the calculated shifts for each channel.
         Default is False.
@@ -4904,9 +4974,10 @@ def align_rcc(
     locs : list of pd.DataFrames
         Aligned localizations with the shifts applied to the 'x' and
         'y' coordinates.
-    shifts : tuple
-        ``(shift_x, shift_y)`` per channel, in camera pixels. Returned only
-        if ``return_shifts`` is True.
+    shifts : tuple of np.ndarrays
+        ``(shift_x, shift_y)``. Each array holds the
+        total shift subtracted from each channel, in camera pixels.
+        Returned only if ``return_shifts`` is True.
 
     Raises
     ------
@@ -4914,57 +4985,32 @@ def align_rcc(
         If ``keep_non_overlapping`` is False and the aligned channels
         do not overlap.
     """
-    locs = deepcopy(locs)
+    locs = [locs_.copy() for locs_ in locs]
     max_iterations = 5
-    iteration = 0
     convergence = 0.001  # (camera pixels), around 0.1 nm
-    shift_x = []
-    shift_y = []
-    shift_z = []
-    for iteration in range(max_iterations):
-        completed = True
-
-        # find shift between channels
-        shift = align(
-            locs, infos, display=False, apply_shifts=False, return_shifts=True
-        )[1]
-        temp_shift_x = []
-        temp_shift_y = []
-        temp_shift_z = []
-        for i, locs_ in enumerate(locs):
-            if (
-                np.absolute(shift[0][i]) + np.absolute(shift[1][i])
-                > convergence
-            ):
-                completed = False
-
-            # shift each channel
-            locs_["x"] -= shift[0][i]
-            locs_["y"] -= shift[1][i]
-
-            temp_shift_x.append(shift[0][i])
-            temp_shift_y.append(shift[1][i])
-
-            if len(shift) == 3:
-                locs_["z"] -= shift[2][i]
-                temp_shift_z.append(shift[2][i])
-        shift_x.append(np.mean(temp_shift_x))
-        shift_y.append(np.mean(temp_shift_y))
-        if len(shift) == 3:
-            shift_z.append(np.mean(temp_shift_z))
-        iteration += 1
-
-        # Skip when converged:
-        if completed:
+    total_x = np.zeros(len(locs))
+    total_y = np.zeros(len(locs))
+    mean_x = []
+    mean_y = []
+    for _ in range(max_iterations):
+        shift_x, shift_y = _rcc_shifts(locs, infos)
+        for locs_, dx, dy in zip(locs, shift_x, shift_y):
+            locs_["x"] -= dx
+            locs_["y"] -= dy
+        total_x += shift_x
+        total_y += shift_y
+        mean_x.append(np.mean(shift_x))
+        mean_y.append(np.mean(shift_y))
+        # skip when converged
+        if np.all(np.abs(shift_x) + np.abs(shift_y) <= convergence):
             break
 
-    # Plot shift
     if display:
         fig1 = plt.figure(figsize=(8, 8), constrained_layout=True)
         plt.suptitle("Shift")
         plt.subplot(1, 1, 1)
-        plt.plot(shift_x, "o-", label="x shift")
-        plt.plot(shift_y, "o-", label="y shift")
+        plt.plot(mean_x, "o-", label="x shift")
+        plt.plot(mean_y, "o-", label="y shift")
         plt.xlabel("Iteration")
         plt.ylabel("Mean Shift per Iteration (Px)")
         plt.legend(loc="best")
@@ -4973,10 +5019,7 @@ def align_rcc(
     if not keep_non_overlapping:
         locs = remove_non_overlapping_locs(locs)
     if return_shifts:
-        shifts = list(zip(shift_x, shift_y))
-        if len(shift) == 3:
-            shifts = list(zip(shift_x, shift_y, shift_z))
-        return locs, shifts
+        return locs, (total_x, total_y)
     else:
         return locs
 
@@ -4994,8 +5037,8 @@ def align_from_picked(
     index_blocks: list[tuple | None] | None = None,
     keep_non_overlapping: bool = True,
 ):
-    """Align picked localizations from multiple channels using picked
-    localizations.
+    """Align localizations from multiple channels using picked
+    localizations. The input DataFrames are not modified.
 
     Parameters
     ----------
@@ -5036,10 +5079,13 @@ def align_from_picked(
         List of aligned localization datasets, where the localizations
         have been shifted according to the average shift calculated from
         the picked localizations.
-    shifts : list of tuples
-        List of (dx, dy) shifts applied to each localization dataset in
-        `all_locs`, calculated as the average shift from the picked
-        localizations. Returned only if `return_shifts` is True.
+    shifts : tuple of np.ndarrays
+        ``(shift_x, shift_y)``, or ``(shift_x, shift_y, shift_z)`` if
+        all channels have z. Each array holds the shift
+        subtracted from each dataset in ``all_locs``, calculated as the
+        average shift from the picked localizations, in the units of the
+        respective coordinate (camera pixels for x and y). Returned only
+        if ``return_shifts`` is True.
 
     Raises
     ------
@@ -5069,21 +5115,27 @@ def align_from_picked(
         dz = _shifts_from_picked_coordinate(pl, coordinate="z")
     else:
         dz = None
-    shift = lib.minimize_shifts(dx, dy, shifts_z=dz)
+    # minimize_shifts returns (y, x[, z]); the shifts are returned
+    # x first, like those of align and align_rcc
+    shift_y, shift_x, *shift_z = lib.minimize_shifts(dx, dy, shifts_z=dz)
+    shifts = tuple(
+        np.asarray(_, dtype=float) for _ in (shift_x, shift_y, *shift_z)
+    )
 
     # align each channel
     aligned_locs = []
     for i, locs_ in enumerate(all_locs):
-        locs_.y -= shift[0][i]
-        locs_.x -= shift[1][i]
-        if len(shift) == 3:
-            locs_.z -= shift[2][i]
-        aligned_locs.append(locs_.copy())
+        locs_ = locs_.copy()
+        locs_["x"] -= shifts[0][i]
+        locs_["y"] -= shifts[1][i]
+        if len(shifts) == 3:
+            locs_["z"] -= shifts[2][i]
+        aligned_locs.append(locs_)
     if not keep_non_overlapping:
         aligned_locs = remove_non_overlapping_locs(aligned_locs)
 
     if return_shifts:
-        return aligned_locs, shift
+        return aligned_locs, shifts
     else:
         return aligned_locs
 

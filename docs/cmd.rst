@@ -922,8 +922,9 @@ Compute the dark time for grouped localizations.
 
 align
 -----
-Align one localization file to another via RCC, 2D only (two or more files). Pass
-``-d/--display`` to display the correlation. All localizations are kept by
+Align one localization file to another via RCC, 2D only (two or more files). The
+RCC is repeated until the shifts converge, as in Render. Pass ``-d/--display``
+to plot the mean shift per iteration. All localizations are kept by
 default; pass ``-r/--remove-non-overlapping`` to remove the localizations
 outside the region where all aligned files overlap (see
 :ref:`render-align-non-overlapping`).

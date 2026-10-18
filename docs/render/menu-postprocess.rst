@@ -228,23 +228,25 @@ overlap at all, all localizations are kept and a warning is shown.
    :icon: code
    :class-container: api-example
 
-   The circle size of ``align_from_picked`` is the diameter. Pass
-   ``keep_non_overlapping=False`` to remove the localizations outside the
-   overlap of the aligned channels; ``remove_non_overlapping_locs`` does the
-   same for channels aligned otherwise, and ``overlap_region`` returns the
-   overlap.
+   ``align`` finds the shifts by RCC (``method="rcc"``, the default) or
+   from picked localizations (``method="picked"``), like the menu entry; the
+   circle size is the diameter. Pass ``keep_non_overlapping=False`` to remove
+   the localizations outside the overlap of the aligned channels;
+   ``remove_non_overlapping_locs`` does the same for channels aligned
+   otherwise, and ``overlap_region`` returns the overlap.
 
    .. code-block:: python
 
       aligned = postprocess.align([locs_ch1, locs_ch2], [info_ch1, info_ch2])   # RCC
-      aligned = postprocess.align_from_picked(
+      aligned = postprocess.align(
           [locs_ch1, locs_ch2], [info_ch1, info_ch2],
-          picks=picks, pick_shape="Circle", pick_size=2 * radius,
+          method="picked", picks=picks, pick_shape="Circle", pick_size=2 * radius,
       )
-      # remove the localizations outside the overlap of the channels
-      aligned = postprocess.align_rcc(
+      # remove the localizations outside the overlap of the channels and
+      # get the shift of each channel (camera pixels)
+      aligned, (shift_x, shift_y) = postprocess.align(
           [locs_ch1, locs_ch2], [info_ch1, info_ch2],
-          keep_non_overlapping=False,
+          keep_non_overlapping=False, return_shifts=True,
       )
 
 

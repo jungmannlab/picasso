@@ -131,8 +131,11 @@ def test_align_keeps_all_if_the_channels_do_not_overlap(window, monkeypatch):
     )
     monkeypatch.setattr(
         gui_render.postprocess,
-        "align_rcc",
-        lambda locs, infos: [_locs(10.0), _locs(28.0).query("x > 20")],
+        "align",
+        lambda *args, **kwargs: [
+            _locs(10.0),
+            _locs(28.0).query("x > 20"),
+        ],
     )
     window.view.align()
     assert len(warnings) == 1

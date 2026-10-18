@@ -1,6 +1,6 @@
 # Changelog
 
-Last change: 16-OCT-2026 CEST
+Last change: 18-OCT-2026 CEST
 
 ## 1.0.0
 
@@ -106,6 +106,9 @@ Last change: 16-OCT-2026 CEST
     - `picasso.localize.localize` accepts only the movie positionally; `camera_info` and `identification_parameters` are keyword-only. Its `parameters` (renamed to `identification_parameters`) and `mle_method` arguments are removed.
     - The `return_info` argument is removed from `picasso.localize.identify`, `picasso.localize.localize`, `picasso.clusterer.cluster`, `picasso.clusterer.dbscan` and `picasso.clusterer.hdbscan`; they always return `(locs, info)`.
     - `picasso.render.build_animation` no longer accepts positions given as Euler angles `(angle_x, angle_y, angle_z, viewport)`; pass `(rotation, viewport)` with a `scipy.spatial.transform.Rotation` (`picasso.render.rotation_matrix` converts the old angles).
+- `picasso.postprocess.align` is the main alignment function: `method="rcc"` (default, see `align_rcc`) or `method="picked"` with `picks`, `pick_shape` and `pick_size` (see `align_from_picked`). Previously, `align` ran a single RCC pass (now repeated until the shifts converge, as in Render, also in `picasso align`), and its `apply_shifts` argument is removed. `display` and the other arguments after `infos` are keyword-only.
+- The shifts returned by `picasso.postprocess.align`, `align_rcc` and `align_from_picked` (with `return_shifts=True`) are ordered x first: `(shift_x, shift_y)`, or `(shift_x, shift_y, shift_z)`. `align_from_picked` returned them y first, `(shift_y, shift_x[, shift_z])`, so scripts that unpack its shifts must swap x and y. `align_rcc` returned the mean shift per iteration instead of the shift of each channel.
+- `picasso.postprocess.align_from_picked` no longer shifts the input DataFrames in place.
 - `picasso.spinna.load_structures` moved to `picasso.io.load_structures`, next to `picasso.io.load_mask`.
 - The functions of `picasso.simulate` have snake_case names, like the rest of the API: `defineStructure` → `define_structure`, `generatePositions` → `generate_positions`, `prepareStructures` → `prepare_structures`, `distphotons` → `distribute_photons`, `convertMovie` → `convert_movie` and `saveMovie` → `save_movie`. So do the plate helpers of `picasso.design`: `convertPlateIndex` → `convert_plate_index`, `convertPlateIndexColor` → `convert_plate_index_color`, `readPlate` → `read_plate`, `savePlate` → `save_plate` and `saveInfo` → `save_info`.
 - `picasso.io.load_locs`, `load_info`, `load_filter`, `load_identifications` and `load_mask` no longer take `qt_parent`: the I/O functions open no dialogs and print nothing, their errors say what is wrong, and the Picasso windows show these messages themselves. `progress` of `load_locs` is keyword-only.

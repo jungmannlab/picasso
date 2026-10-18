@@ -1403,7 +1403,7 @@ def _dark(files: str) -> None:
 def _align(
     files: str, display: bool, remove_non_overlapping: bool = False
 ) -> None:
-    """Align localization files using RCC, see ``postprocess.align``
+    """Align localization files using RCC, see ``postprocess.align_rcc``
     for details. If ``remove_non_overlapping``, the localizations
     outside the region where all aligned files overlap are removed."""
     from glob import glob
@@ -1423,6 +1423,7 @@ def _align(
     aligned_locs = align(
         locs,
         infos,
+        method="rcc",
         display=display,
         keep_non_overlapping=not remove_non_overlapping,
     )
@@ -6280,7 +6281,10 @@ def _build_parser() -> (
         "align", help="align one localization file to another"
     )
     align_parser.add_argument(
-        "-d", "--display", help="display correlation", action="store_true"
+        "-d",
+        "--display",
+        help="display the mean shift per RCC iteration",
+        action="store_true",
     )
     align_parser.add_argument(
         "-r",

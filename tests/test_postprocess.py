@@ -1763,33 +1763,74 @@ class TestAlign:
         residual = aligned[1]["x"].mean() - aligned[0]["x"].mean()
         assert abs(residual) < 0.1
 
-    def test_apply_shifts_false_does_not_modify_locs(self, locs_copy, info):
+    def test_align_does_not_modify_locs(self, locs_copy, info):
         a = locs_copy
         b = a.copy()
         b["x"] += 3.0
         x_before_a = a["x"].copy()
         x_before_b = b["x"].copy()
         out, shifts = postprocess.align(
-            [a, b],
-            [info, info],
-            apply_shifts=False,
-            return_shifts=True,
+            [a, b], [info, info], return_shifts=True
         )
-        # No mutation when apply_shifts is False
-        np.testing.assert_array_equal(out[0]["x"].to_numpy(), x_before_a)
-        np.testing.assert_array_equal(out[1]["x"].to_numpy(), x_before_b)
-        # Shifts is a 2-tuple of arrays of length n_channels
+        np.testing.assert_array_equal(a["x"].to_numpy(), x_before_a)
+        np.testing.assert_array_equal(b["x"].to_numpy(), x_before_b)
+        # shifts is (shift_x, shift_y), one value per channel, and the
+        # returned locs are the inputs minus the shifts
         shift_x, shift_y = shifts
         assert len(shift_x) == 2
         assert len(shift_y) == 2
+        np.testing.assert_allclose(
+            out[1]["x"].to_numpy(), x_before_b.to_numpy() - shift_x[1]
+        )
+        assert abs((shift_x[1] - shift_x[0]) - 3.0) < 0.05
+
+    def test_align_picked_matches_align_from_picked(
+        self, locs_copy, info, origami_picks
+    ):
+        """method="picked" gives the result of align_from_picked."""
+        a = locs_copy
+        b = a.copy()
+        b["x"] += 0.1
+        kwargs = dict(
+            picks=origami_picks, pick_shape="Circle", pick_size=PICK_SIZE
+        )
+        aligned, shifts = postprocess.align(
+            [a, b], [info, info], method="picked", return_shifts=True, **kwargs
+        )
+        expected, expected_shifts = postprocess.align_from_picked(
+            [a, b], [info, info], return_shifts=True, **kwargs
+        )
+        for out, exp in zip(aligned, expected):
+            pd.testing.assert_frame_equal(out, exp)
+        for shift, exp in zip(shifts, expected_shifts, strict=True):
+            np.testing.assert_array_equal(shift, exp)
+        assert abs(shifts[0][1] - 0.1) < 0.05
+
+    def test_align_invalid_arguments_raise(
+        self, locs_copy, info, origami_picks
+    ):
+        locs = [locs_copy, locs_copy.copy()]
+        infos = [info, info]
+        with pytest.raises(ValueError, match="Unknown alignment method"):
+            postprocess.align(locs, infos, method="affine")
+        with pytest.raises(ValueError, match="requires picks"):
+            postprocess.align(locs, infos, method="picked")
+        with pytest.raises(ValueError, match="only used with"):
+            postprocess.align(locs, infos, picks=origami_picks)
 
     def test_align_rcc_converges(self, locs_copy, info):
         a = locs_copy
         b = a.copy()
         b["x"] += 2.0
-        aligned = postprocess.align_rcc([a, b], [info, info])
+        aligned, (shift_x, shift_y) = postprocess.align_rcc(
+            [a, b], [info, info], return_shifts=True
+        )
         residual = aligned[1]["x"].mean() - aligned[0]["x"].mean()
         assert abs(residual) < 0.05
+        # the returned shifts are the per-channel totals over all
+        # iterations
+        assert len(shift_x) == len(shift_y) == 2
+        assert abs((shift_x[1] - shift_x[0]) - 2.0) < 0.05
 
     def test_align_rcc_channels_with_different_canvases(self, locs_copy, info):
         """Channels whose canvases differ (e.g., one was moved in Render
@@ -1819,13 +1860,14 @@ class TestAlign:
             pick_size=PICK_SIZE,
             return_shifts=True,
         )
-        # shifts is (shift_y, shift_x) where each is per-channel
-        # The second channel should have ~0.1 in the x-shift slot
-        # (sign convention: shift to subtract from x).
-        assert abs(shifts[1][1] - 0.1) < 0.05
+        # shifts is (shift_x, shift_y), one value per channel. The
+        # second channel should have ~0.1 in the x shift (sign
+        # convention: shift to subtract from x).
+        shift_x, shift_y = shifts
+        assert abs(shift_x[1] - 0.1) < 0.05
         # First channel is the reference: ~0 shift
-        assert abs(shifts[0][0]) < 1e-6
-        assert abs(shifts[1][0]) < 1e-6
+        assert abs(shift_x[0]) < 1e-6
+        assert abs(shift_y[0]) < 1e-6
 
     def test_align_from_picked_box_recovers_known_shift(
         self, locs_copy, info, origami_picks
@@ -1847,7 +1889,7 @@ class TestAlign:
             pick_shape="Box",
             return_shifts=True,
         )
-        assert abs(shifts[1][1] - 0.1) < 0.05
+        assert abs(shifts[0][1] - 0.1) < 0.05  # x shift of channel 2
 
     def test_align_from_picked_brush_recovers_known_shift(
         self, locs_copy, info, origami_picks
@@ -1866,7 +1908,7 @@ class TestAlign:
             pick_shape="Brush",
             return_shifts=True,
         )
-        assert abs(shifts[1][1] - 0.1) < 0.05
+        assert abs(shifts[0][1] - 0.1) < 0.05  # x shift of channel 2
 
     def test_align_from_picked_invalid_shape_raises(
         self, locs_copy, info, origami_picks

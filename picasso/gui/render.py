@@ -12353,9 +12353,10 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             pick_shape, pick_size = self._pick_shape, self._pick_size
 
             def align():
-                return postprocess.align_from_picked(
+                return postprocess.align(
                     locs,
                     infos,
+                    method="picked",
                     picks=picks,
                     pick_shape=pick_shape,
                     pick_size=pick_size,
@@ -12365,7 +12366,7 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         else:  # align using whole images
 
             def align():
-                return postprocess.align_rcc(locs, infos)
+                return postprocess.align(locs, infos, method="rcc")
 
         self.locs = lib.run_with_status(align, "Aligning channels...", self)
         if not keep_non_overlapping_setting():

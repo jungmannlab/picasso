@@ -241,6 +241,7 @@
   "apply_drift",
   "plot_drift",
   "align",
+  "align_rcc",
   "align_from_picked",
   "nena",
   "plot_nena",
