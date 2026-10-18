@@ -3254,8 +3254,6 @@ def _to_photons(
     baseline = camera_info["Baseline"] if offset is None else offset
     sensitivity = _sensitivity(camera_info, gain_patch)
     gain = camera_info["Gain"]
-    # since v0.6.0: remove quantum efficiency to better reflect precision
-    # qe = camera_info["Qe"]
     return (spots - baseline) * sensitivity / (gain)
 
 

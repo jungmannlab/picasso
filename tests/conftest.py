@@ -664,7 +664,6 @@ class _MemmapPicassoMovie(io.AbstractPicassoMovie):
     def camera_parameters(self, config):
         return {
             "gain": [1],
-            "qe": [1],
             "wavelength": [0],
             "cam_index": 0,
             "camera": "None",

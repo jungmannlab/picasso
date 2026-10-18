@@ -1093,7 +1093,6 @@ class TestFit2DIntegration:
             "Sensitivity": 1.0,
             "Gain": 1,
             "Pixelsize": 130,
-            "Qe": 1.0,
         }
         return calibration, movie, info, camera_info, identifications, truth
 
@@ -1318,7 +1317,6 @@ class TestMultichannelIntegration:
                 "Sensitivity": 1.0,
                 "Gain": 1,
                 "Pixelsize": 130,
-                "Qe": 1.0,
             }
             for _ in range(2)
         ]

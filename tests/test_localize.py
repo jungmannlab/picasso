@@ -6139,7 +6139,7 @@ class TestSplineRatiometric:
     def test_entry_point_colors_and_photons(self):
         calib, base = self._calib_and_base()
         box = calib["n_data"][0]
-        cam = {"Baseline": 0, "Sensitivity": 1.0, "Gain": 1, "Qe": 1.0}
+        cam = {"Baseline": 0, "Sensitivity": 1.0, "Gain": 1}
         r_true = self.CANDS[self.TRUE_IDX]
         rng = np.random.default_rng(1)
         n = 80
@@ -6180,7 +6180,7 @@ class TestSplineRatiometric:
         calib, base = self._calib_and_base()
         calib["photon_ratios"] = self.CANDS.tolist()
         box = calib["n_data"][0]
-        cam = {"Baseline": 0, "Sensitivity": 1.0, "Gain": 1, "Qe": 1.0}
+        cam = {"Baseline": 0, "Sensitivity": 1.0, "Gain": 1}
         r_true = self.CANDS[self.TRUE_IDX]
         rng = np.random.default_rng(2)
         n = 40
@@ -9586,7 +9586,6 @@ def scmos_scene():
         "Baseline": float(np.median(offset)),
         "Sensitivity": 1 / 2.13,
         "Gain": 1,
-        "Qe": 1.0,
         "Pixelsize": 130,
     }
     return {
@@ -9778,7 +9777,6 @@ class TestScmosSplineIntegration:
                 "Baseline": float(np.median(offset)),
                 "Sensitivity": 1 / 2.13,
                 "Gain": 1,
-                "Qe": 1.0,
                 "Pixelsize": 130,
             },
             "x0": float(cx),
@@ -10670,7 +10668,7 @@ class TestCameraCalibrationDialogs:
 # ---------------------------------------------------------------------------
 
 IDENTITY_AFFINE = affine(np.eye(3))
-UNIT_CAMERA = {"Baseline": 0.0, "Sensitivity": 1.0, "Gain": 1.0, "Qe": 1.0}
+UNIT_CAMERA = {"Baseline": 0.0, "Sensitivity": 1.0, "Gain": 1.0}
 
 
 def _spots_frame(shape, spots, sigma=1.2, background=0.0):
@@ -10770,8 +10768,8 @@ class TestSummedChannelsMovie:
         )
         # channel 1 records twice the counts per photon and sits on an offset
         camera_infos = [
-            {"Baseline": 0.0, "Sensitivity": 1.0, "Gain": 1.0, "Qe": 1.0},
-            {"Baseline": 500.0, "Sensitivity": 0.5, "Gain": 1.0, "Qe": 1.0},
+            {"Baseline": 0.0, "Sensitivity": 1.0, "Gain": 1.0},
+            {"Baseline": 500.0, "Sensitivity": 0.5, "Gain": 1.0},
         ]
         summed = localize.SummedChannelsMovie(
             [reference, channel + 500.0],

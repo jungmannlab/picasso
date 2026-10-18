@@ -1400,9 +1400,7 @@ def _camera_wavelengths(camera: str, cam_config: dict) -> list[str]:
     """Emission wavelengths the config knows for one camera.
 
     They are the values of ``Channel Device`` > ``Emission Wavelengths``
-    and the wavelength keys of the calibration sections. A
-    ``Quantum Efficiency`` entry is ignored (QE has not been used since
-    Picasso 0.6.0).
+    and the wavelength keys of the calibration sections.
 
     Parameters
     ----------

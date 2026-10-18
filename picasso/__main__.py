@@ -5016,7 +5016,7 @@ def _build_parser() -> (
         default=1,
         # accepted so that existing scripts keep working, but ignored: the
         # quantum efficiency has not been used since Picasso 0.6.0 and was
-        # finally completely remove in Picasso 1.0.0
+        # finally completely removed in Picasso 1.0.0
         help=argparse.SUPPRESS,
     )
     localize_parser.add_argument(

@@ -102,7 +102,7 @@ class TestMovieCameraParameters:
         parameters = io.TiffMultiMap.camera_parameters(movie, CONFIG)
 
         assert parameters["wavelength"] == ["700"]
-        assert parameters["qe"] == [1]
+        assert "qe" not in parameters
 
 
 class TestCommandLine:

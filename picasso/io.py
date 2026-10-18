@@ -2579,13 +2579,11 @@ class AbstractPicassoMovie(abc.ABC):
         Returns
         -------
         parameters : dict
-            Keys: gain, qe, wavelength, cam_index, camera. Values are
-            lists. ``qe`` is always 1: the quantum efficiency is not used
-            and only kept for backward compatibility.
+            Keys: gain, wavelength, cam_index, camera. Values are
+            lists.
         """
         return {
             "gain": [1],
-            "qe": [1],
             "wavelength": [0],
             "cam_index": 0,
             "camera": "None",
@@ -3067,9 +3065,8 @@ class ND2Movie(AbstractPicassoMovie):
         Returns
         -------
         parameters : dict
-            Keys: gain, qe, wavelength, cam_index, camera. Values are
-            lists. ``qe`` is always 1: the quantum efficiency is not used
-            and only kept for backward compatibility.
+            Keys: gain, wavelength, cam_index, camera. Values are
+            lists.
         """
         parameters = {}
         info = self.meta
@@ -3095,7 +3092,7 @@ class ND2Movie(AbstractPicassoMovie):
                 self.path,
                 camera,
             )
-            return {"gain": [1], "qe": [1], "wavelength": [0], "cam_index": 0}
+            return {"gain": [1], "wavelength": [0], "cam_index": 0}
 
         pm_info = info["Picasso Metadata"]
         # mm_info = info["nd2 Metadata"]
@@ -3117,8 +3114,6 @@ class ND2Movie(AbstractPicassoMovie):
             channels = cam_config["Filter Wavelengths"]
             if channel in channels:
                 parameters["wavelength"] = str(channels[channel])
-        # the quantum efficiency is not used (since Picasso 0.6.0)
-        parameters["qe"] = [1]
         if "wavelength" not in parameters.keys():
             parameters["wavelength"] = [0]
         return parameters
@@ -3230,7 +3225,6 @@ class _MultiDimMovie(AbstractPicassoMovie):
         the parameters set in the GUI."""
         return {
             "gain": [1],
-            "qe": [1],
             "wavelength": [0],
             "cam_index": 0,
             "camera": "None",
@@ -4261,7 +4255,6 @@ class STKMovie(AbstractPicassoMovie, _PerThreadFileHandles):
     def camera_parameters(self, config: dict) -> dict:
         return {
             "gain": [1],
-            "qe": [1],
             "wavelength": [0],
             "cam_index": 0,
             "camera": "None",
@@ -4463,7 +4456,6 @@ class STKMultiMovie(AbstractPicassoMovie):
     def camera_parameters(self, config: dict) -> dict:
         return {
             "gain": [1],
-            "qe": [1],
             "wavelength": [0],
             "cam_index": 0,
             "camera": "None",
@@ -4667,13 +4659,12 @@ class TiffMultiMap(AbstractPicassoMovie):
         Returns
         -------
         parameters : dict
-            Keys: gain, qe, wavelength, cam_index, camera. Values are
-            lists. ``qe`` is always 1: the quantum efficiency is not used
-            and only kept for backward compatibility.
+            Keys: gain, wavelength, cam_index, camera. Values are
+            lists.
         """
         parameters = {}
         info = self.meta
-        default = {"gain": [1], "qe": [1], "wavelength": [0], "cam_index": 0}
+        default = {"gain": [1], "wavelength": [0], "cam_index": 0}
 
         if "Cameras" not in config or "Camera" not in info:
             _log.debug(
@@ -4744,8 +4735,6 @@ class TiffMultiMap(AbstractPicassoMovie):
             channel = mm_info.get(channel_device_name)
             if channel in channels:
                 parameters["wavelength"] = [str(channels[channel])]
-        # the quantum efficiency is not used (since Picasso 0.6.0)
-        parameters["qe"] = [1]
         if "wavelength" not in parameters.keys():
             parameters["wavelength"] = [0]
         return parameters
