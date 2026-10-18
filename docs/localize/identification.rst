@@ -74,7 +74,7 @@ Hovering the mouse cursor over a fit marker or over an identification box shows 
 
       movie, info = io.load_movie("movie.tif")
       camera_info = {
-          "Baseline": 100, "Sensitivity": 0.53, "Gain": 1, "Qe": 1, "Pixelsize": 130
+          "Baseline": 100, "Sensitivity": 0.53, "Gain": 1, "Pixelsize": 130
       }
 
       # Preview: the spots of frame 100 with a box of 7 and a min. net gradient of 5000

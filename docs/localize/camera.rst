@@ -122,11 +122,6 @@ The dropdown menus can be further nested, e.g., when considering Gain modes:
 
 .. _localize-camera-config-qe:
 
-Quantum Efficiency
-~~~~~~~~~~~~~~~~~~
-
-This feature is not used since Picasso 0.6.0. It is kept for backward compatibility only.
-
 .. _localize-camera-config-several:
 
 Several cameras
@@ -171,7 +166,7 @@ The astigmatism calibration depends on the microscope, camera, and emission wave
        525: /path/to/Camera1-GFP-zcalibration.yaml
        595: /path/to/Camera1-Cy3B-zcalibration.yaml
 
-If the camera names and emission wavelengths match the settings in Micromanager, the correct z-calibration is automatically loaded. In any case an alternative calibration yaml file can be loaded by button.
+If the camera names and emission wavelengths match the settings in Micromanager, the correct z-calibration is automatically loaded. In any case an alternative calibration yaml file can be loaded by button. The ``Emission Wavelength`` dropdown in the Parameters dialog lists the wavelengths found under ``Channel Device`` > ``Emission Wavelengths`` and in the calibration fields of the selected camera.
 
 The same mechanism is available for the experimental PSF (cubic spline) calibration (see :doc:`spline`), using a ``spline-calibrations`` field that maps camera and emission wavelength to the path of the spline calibration ``.hdf5`` file:
 

@@ -76,11 +76,12 @@ Last change: 18-OCT-2026 CEST
 ### Localize
 - New spot identification method: B-spline wavelet segmentation (Izeddin et al., *Opt. Express* 2012), see the [documentation](https://picassosr.readthedocs.io/en/latest/localize/identification.html#localize-wavelet).
 - New column `reduced_chi_square` for MLE and least-squares fits: the goodness of fit normalized for the box size and the photon counts, about 1 for a good fit (`picasso.localize.reduced_chi_square`).
+- The quantum efficiency is no longer shown in the Parameters dialog. A `Quantum Efficiency` entry in the camera config, `--qe` in `picasso localize` and a `Qe` key in `camera_info` are still accepted and ignored. The `Emission Wavelength` dropdown now lists the wavelengths of `Channel Device` > `Emission Wavelengths` and of the wavelength-keyed calibrations in the config (it appeared only when the config had a `Quantum Efficiency` mapping before, so wavelength-keyed calibrations were not selected with the template config).
+- Imaris `.ims` movies can now be opened on macOS and Linux, not only Windows. Exporting `.ims` files (Render's `Export ROI for Imaris`) remains Windows only. `hdf5plugin` is now installed on all platforms.
 - Fixed: ratiometric multichannel spline fitting ignored the per-pixel sCMOS variance of the camera calibration.
 - Fixed: `Height` and `Width` were swapped in the metadata of non-square `.ims` movies.
 - Fixed drift estimation when adding to database + database building.
 - Fixed: canceling the channel selection when opening a multi-channel IMARIS .ims movie raised an error instead of loading the first channel, as for .czi and .lif.
-- Imaris `.ims` movies can now be opened on macOS and Linux, not only Windows. Exporting `.ims` files (Render's `Export ROI for Imaris`) remains Windows only. `hdf5plugin` is now installed on all platforms.
 
 ### Filter
 - Filtering by expression: `Filter > Filter by expression...` for universal filtering with comparisons, logic, arithmetic, functions and statistics over the shown localizations. See the [documentation](https://picassosr.readthedocs.io/en/latest/filter.html#filter-expression).

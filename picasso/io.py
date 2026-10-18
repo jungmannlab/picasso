@@ -2563,7 +2563,7 @@ class AbstractPicassoMovie(abc.ABC):
     def camera_parameters(self, config: dict) -> dict:
         """Get the camera specific parameters.
 
-        These are the gain, the quantum efficiency and the wavelength. They
+        These are the gain and the emission wavelength. They
         depend on camera settings (as described in metadata)
         but the values themselves are given in the config.yaml file.
         Each filetype (nd2, ome-tiff, ..) has their own structure of metadata,
@@ -2580,7 +2580,8 @@ class AbstractPicassoMovie(abc.ABC):
         -------
         parameters : dict
             Keys: gain, qe, wavelength, cam_index, camera. Values are
-            lists.
+            lists. ``qe`` is always 1: the quantum efficiency is not used
+            and only kept for backward compatibility.
         """
         return {
             "gain": [1],
@@ -3032,7 +3033,7 @@ class ND2Movie(AbstractPicassoMovie):
     def camera_parameters(self, config):  # noqa: C901
         """Get the camera specific parameters.
 
-        These are the gain, the quantum efficiency and the wavelength. They
+        These are the gain and the emission wavelength. They
         depend on camera settings (as described in metadata)
         but the values themselves are given in the config.yaml file.
         Each filetype (nd2, ome-tiff, ..) has their own structure of metadata,
@@ -3044,10 +3045,6 @@ class ND2Movie(AbstractPicassoMovie):
           Zyla 4.2:
             Pixelsize: 130
             Baseline: 100
-            Quantum Efficiency:
-              525: 0.7
-              595: 0.72
-              700: 0.64
             Sensitivity Categories:
               - PixelReadoutRate
               - ReadoutMode
@@ -3071,7 +3068,8 @@ class ND2Movie(AbstractPicassoMovie):
         -------
         parameters : dict
             Keys: gain, qe, wavelength, cam_index, camera. Values are
-            lists.
+            lists. ``qe`` is always 1: the quantum efficiency is not used
+            and only kept for backward compatibility.
         """
         parameters = {}
         info = self.meta
@@ -3093,7 +3091,7 @@ class ND2Movie(AbstractPicassoMovie):
             _log.warning(
                 "The metadata of %s do not hold the camera settings that "
                 "select the parameters of the camera %r in the camera "
-                "configuration; gain 1 and quantum efficiency 1 are used.",
+                "configuration; gain 1 is used.",
                 self.path,
                 camera,
             )
@@ -3114,18 +3112,13 @@ class ND2Movie(AbstractPicassoMovie):
             categories = cam_config["Sensitivity Categories"]
             for _, category in enumerate(categories):
                 parameters["Sensitivity"][category] = pm_info[category]
-        if "Quantum Efficiency" in cam_config:
-            if "Filter Wavelengths" in cam_config:
-                channel = pm_info["Filter"]
-                channels = cam_config["Filter Wavelengths"]
-                if channel in channels:
-                    wavelength = channels[channel]
-                    parameters["wavelength"] = str(wavelength)
-                    parameters["qe"] = cam_config["Quantum Efficiency"][
-                        wavelength
-                    ]
-        if "qe" not in parameters.keys():
-            parameters["qe"] = [1]
+        if "Filter Wavelengths" in cam_config:
+            channel = pm_info.get("Filter")
+            channels = cam_config["Filter Wavelengths"]
+            if channel in channels:
+                parameters["wavelength"] = str(channels[channel])
+        # the quantum efficiency is not used (since Picasso 0.6.0)
+        parameters["qe"] = [1]
         if "wavelength" not in parameters.keys():
             parameters["wavelength"] = [0]
         return parameters
@@ -4656,7 +4649,7 @@ class TiffMultiMap(AbstractPicassoMovie):
     def camera_parameters(self, config: dict) -> dict:  # noqa: C901
         """Get the camera specific parameters.
 
-        These are the gain, the quantum efficiency and the wavelength. They
+        These are the gain and the emission wavelength. They
         depend on camera settings (as described in metadata)
         but the values themselves are given in the config.yaml file.
         Each filetype (nd2, ome-tiff, ..) has their own structure of metadata,
@@ -4675,7 +4668,8 @@ class TiffMultiMap(AbstractPicassoMovie):
         -------
         parameters : dict
             Keys: gain, qe, wavelength, cam_index, camera. Values are
-            lists.
+            lists. ``qe`` is always 1: the quantum efficiency is not used
+            and only kept for backward compatibility.
         """
         parameters = {}
         info = self.meta
@@ -4694,7 +4688,7 @@ class TiffMultiMap(AbstractPicassoMovie):
         if camera not in cameras:
             _log.warning(
                 "The camera %r of %s is not in the camera configuration "
-                "(%s); gain 1 and quantum efficiency 1 are used.",
+                "(%s); gain 1 is used.",
                 camera,
                 self.path,
                 ", ".join(map(repr, cameras)),
@@ -4709,7 +4703,7 @@ class TiffMultiMap(AbstractPicassoMovie):
             _log.warning(
                 "The metadata of %s do not hold the Micro-Manager settings "
                 "that select the parameters of the camera %r in the camera "
-                "configuration; gain 1 and quantum efficiency 1 are used.",
+                "configuration; gain 1 is used.",
                 self.path,
                 camera,
             )
@@ -4743,20 +4737,15 @@ class TiffMultiMap(AbstractPicassoMovie):
                 if property_name in mm_info:
                     exp_setting = mm_info[camera + "-" + category]
                     parameters["Sensitivity"][category] = exp_setting
-        if "Quantum Efficiency" in cam_config:
-            if "Channel Device" in cam_config:
-                channel_device = cam_config["Channel Device"]
-                channel_device_name = channel_device["Name"]
-                channels = channel_device["Emission Wavelengths"]
-                channel = mm_info.get(channel_device_name)
-                if channel in channels:
-                    wavelength = channels[channel]
-                    parameters["wavelength"] = [str(wavelength)]
-                    parameters["qe"] = [
-                        cam_config["Quantum Efficiency"][wavelength]
-                    ]
-        if "qe" not in parameters.keys():
-            parameters["qe"] = [1]
+        if "Channel Device" in cam_config:
+            channel_device = cam_config["Channel Device"]
+            channel_device_name = channel_device["Name"]
+            channels = channel_device["Emission Wavelengths"]
+            channel = mm_info.get(channel_device_name)
+            if channel in channels:
+                parameters["wavelength"] = [str(channels[channel])]
+        # the quantum efficiency is not used (since Picasso 0.6.0)
+        parameters["qe"] = [1]
         if "wavelength" not in parameters.keys():
             parameters["wavelength"] = [0]
         return parameters

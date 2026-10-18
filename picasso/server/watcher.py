@@ -466,13 +466,6 @@ def watcher():  # noqa: C901
                 settings[i]["sensitivity"] = col.number_input(
                     label="Sensitivity:", value=1.00, key=f"sensitivity_{i}"
                 )
-                settings[i]["qe"] = col.number_input(
-                    label="Quantum Efficiency:",
-                    value=0.9,
-                    min_value=0.01,
-                    max_value=1.0,
-                    key=f"qe_{i}",
-                )
                 settings[i]["pixelsize"] = col.number_input(
                     label="Pixelsize (nm):",
                     value=130,
@@ -555,7 +548,6 @@ def watcher():  # noqa: C901
                     settings_selected["sensitivity"] = settings[i][
                         "sensitivity"
                     ]
-                    settings_selected["qe"] = settings[i]["qe"]
                     settings_selected["pixelsize"] = settings[i]["pixelsize"]
                     settings_selected["fit_method"] = settings[i]["methods"]
                     settings_selected["drift"] = settings[i]["undrift"]

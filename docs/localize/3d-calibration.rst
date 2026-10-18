@@ -47,7 +47,7 @@ To fit z, load the calibration with ``Load calibration`` in the ``3D via Astigma
       # Calibration: fit the bead z-stack in 2D first
       movie, info = io.load_movie("beads_zstack.tif")
       camera_info = {
-          "Baseline": 100, "Sensitivity": 0.53, "Gain": 1, "Qe": 1, "Pixelsize": 130
+          "Baseline": 100, "Sensitivity": 0.53, "Gain": 1, "Pixelsize": 130
       }
       locs, info = localize.localize(
           movie,

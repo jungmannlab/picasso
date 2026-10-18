@@ -47,7 +47,7 @@ Fitting can run on a CUDA-capable GPU (see :doc:`localize/gpu`). The kernels are
 
       movie, info = io.load_movie("movie.tif")
       camera_info = {
-          "Baseline": 100, "Sensitivity": 0.53, "Gain": 1, "Qe": 1, "Pixelsize": 130
+          "Baseline": 100, "Sensitivity": 0.53, "Gain": 1, "Pixelsize": 130
       }
 
       locs, info = localize.localize(

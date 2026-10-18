@@ -1985,7 +1985,7 @@ def _localize_process_file(
         Frame segments ``[start, end]`` (0-indexed, inclusive) to
         analyze, or None for all frames.
     camera_info : dict
-        Camera parameters (baseline, sensitivity, gain, QE).
+        Camera parameters (baseline, sensitivity, gain).
     convergence : float
         Fit convergence criterion; 0 uses the fitting method's default.
     max_iterations : int
@@ -2435,7 +2435,6 @@ def _localize(args: argparse.Namespace) -> list[str]:  # noqa: C901
           (disjoint) frame ranges.
         - ``baseline``, ``sensitivity``, ``gain`` (float): camera
           parameters.
-        - ``qe`` (float): not used in the calculations.
 
     Returns
     -------
@@ -2527,7 +2526,6 @@ def _localize(args: argparse.Namespace) -> list[str]:  # noqa: C901
         "Baseline": args.baseline,
         "Sensitivity": args.sensitivity,
         "Gain": args.gain,
-        "Qe": args.qe,
     }
 
     # 0 means "let the fitting method use its own default", which differs
@@ -5012,7 +5010,14 @@ def _build_parser() -> (
         "-ga", "--gain", type=int, default=1, help="camera gain"
     )
     localize_parser.add_argument(
-        "-qe", "--qe", type=float, default=1, help="camera quantum efficiency"
+        "-qe",
+        "--qe",
+        type=float,
+        default=1,
+        # accepted so that existing scripts keep working, but ignored: the
+        # quantum efficiency has not been used since Picasso 0.6.0 and was
+        # finally completely remove in Picasso 1.0.0
+        help=argparse.SUPPRESS,
     )
     localize_parser.add_argument(
         "-mf",

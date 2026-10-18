@@ -1388,11 +1388,62 @@ class CamSettingComboBoxDict(UserDict):
                         break
 
 
+#: Config sections keyed by camera and then by emission wavelength.
+_WAVELENGTH_CALIB_SECTIONS = (
+    "z-calibrations",
+    "spline-calibrations",
+    "camera-calibrations",
+)
+
+
+def _camera_wavelengths(camera: str, cam_config: dict) -> list[str]:
+    """Emission wavelengths the config knows for one camera.
+
+    They are the values of ``Channel Device`` > ``Emission Wavelengths``
+    and the wavelength keys of the calibration sections. A
+    ``Quantum Efficiency`` entry is ignored (QE has not been used since
+    Picasso 0.6.0).
+
+    Parameters
+    ----------
+    camera : str
+        Camera name, as under ``Cameras`` in the config.
+    cam_config : dict
+        That camera's config.
+
+    Returns
+    -------
+    wavelengths : list of str
+        Wavelengths, sorted numerically where possible; empty when
+        nothing in the config depends on the wavelength.
+    """
+    wavelengths = set()
+    channel_device = cam_config.get("Channel Device")
+    if isinstance(channel_device, dict):
+        emission = channel_device.get("Emission Wavelengths")
+        if isinstance(emission, dict):
+            wavelengths.update(str(_) for _ in emission.values())
+    for section in _WAVELENGTH_CALIB_SECTIONS:
+        section_config = CONFIG.get(section)
+        if isinstance(section_config, dict):
+            entry = section_config.get(camera)
+            if isinstance(entry, dict):
+                wavelengths.update(str(_) for _ in entry.keys())
+
+    def key(wavelength: str) -> tuple:
+        try:
+            return (0, float(wavelength), wavelength)
+        except ValueError:
+            return (1, 0.0, wavelength)
+
+    return sorted(wavelengths, key=key)
+
+
 class EmissionComboBoxDict(UserDict):
     """Dictionary holding ``QComboBox``'s for different cameras,
     each having the potential emission wavelengths as options.
-    The ComboBox is only shown if the quantum efficiency is
-    given in the CONFIG, otherwise it is irrelevant for localizing.
+    The ComboBox is only shown if the config has something that depends
+    on the wavelength (see ``_camera_wavelengths``).
 
     keys: str
         Camera names.
@@ -3454,10 +3505,6 @@ class ParametersDialog(lib.Dialog):
         Sub-dialog (lazily created) for managing several ROIs in a table.
     sensitivity : QtWidgets.QDoubleSpinBox
         Spin box for setting camera sensitivity.
-    qe : QtWidgets.QDoubleSpinBox
-        Spin box for setting camera quantum efficiency (QE). **Note**:
-        QE value is not used in the analysis, only present for
-        backward compatibility.
     quality_check : QtWidgets.QCheckBox
         Checkbox for enabling/disabling quality check (mean bright time,
         drift and NeNA estimation).
@@ -3998,7 +4045,7 @@ class ParametersDialog(lib.Dialog):
         self.link_camera_checkbox = QtWidgets.QCheckBox("Camera settings")
         self.link_camera_checkbox.setToolTip(
             "Use the same camera and photon-conversion settings (camera,\n"
-            "baseline, EM gain, sensitivity, QE, pixel size) for every "
+            "baseline, EM gain, sensitivity, pixel size) for every "
             "channel."
         )
         self.link_calib_checkbox = QtWidgets.QCheckBox("PSF calibration")
@@ -4081,26 +4128,21 @@ class ParametersDialog(lib.Dialog):
                         self.cam_combos[cam][-1].currentIndexChanged.connect(
                             self.update_sensitivity
                         )
-                if "Quantum Efficiency" in cam_config:
-                    try:
-                        qes = cam_config["Quantum Efficiency"].keys()
-                    except AttributeError:
-                        pass
-                    else:
-                        row_count = cam_grid.rowCount()
-                        cam_grid.addWidget(
-                            QtWidgets.QLabel("Emission Wavelength:"),
-                            row_count,
-                            0,
-                        )
-                        emission_combo = QtWidgets.QComboBox()
-                        cam_grid.addWidget(emission_combo, row_count, 1)
-                        wavelengths = sorted([str(_) for _ in qes])
-                        emission_combo.addItems(wavelengths)
-                        emission_combo.currentIndexChanged.connect(
-                            self.on_emission_changed
-                        )
-                        self.emission_combos[cam] = emission_combo
+                wavelengths = _camera_wavelengths(cam, cam_config)
+                if wavelengths:
+                    row_count = cam_grid.rowCount()
+                    cam_grid.addWidget(
+                        QtWidgets.QLabel("Emission Wavelength:"),
+                        row_count,
+                        0,
+                    )
+                    emission_combo = QtWidgets.QComboBox()
+                    cam_grid.addWidget(emission_combo, row_count, 1)
+                    emission_combo.addItems(wavelengths)
+                    emission_combo.currentIndexChanged.connect(
+                        self.on_emission_changed
+                    )
+                    self.emission_combos[cam] = emission_combo
                 spacer = QtWidgets.QWidget()
                 spacer.setSizePolicy(
                     QtWidgets.QSizePolicy.Policy.Preferred,
@@ -4153,36 +4195,23 @@ class ParametersDialog(lib.Dialog):
         self.sensitivity.setSingleStep(0.01)
         photon_grid.addWidget(self.sensitivity, 2, 1)
 
-        # QE
-        qe_label = QtWidgets.QLabel("Quantum efficiency:")
-        qe_label.setToolTip(
-            "To be deprecated in v1.0; not used in the analysis."
-        )
-        photon_grid.addWidget(qe_label, 3, 0)
-        self.qe = QtWidgets.QDoubleSpinBox()
-        self.qe.setRange(0, 1)
-        self.qe.setValue(1)
-        self.qe.setDecimals(2)
-        self.qe.setSingleStep(0.1)
-        photon_grid.addWidget(self.qe, 3, 1)
-
         # Camera pixel size
         px_label = QtWidgets.QLabel("Pixel size (nm):")
         px_label.setToolTip(
             "Effective camera pixel size in nm (after magnification)."
         )
-        photon_grid.addWidget(px_label, 4, 0)
+        photon_grid.addWidget(px_label, 3, 0)
         self.pixelsize = QtWidgets.QSpinBox()
         self.pixelsize.setRange(0, 10000)
         self.pixelsize.setValue(130)
         self.pixelsize.setSingleStep(1)
         self.pixelsize.valueChanged.connect(self.on_pixelsize_changed)
-        photon_grid.addWidget(self.pixelsize, 4, 1)
+        photon_grid.addWidget(self.pixelsize, 3, 1)
 
         # sCMOS per-pixel camera calibration
         camera_calib_label = QtWidgets.QLabel("sCMOS noise maps:")
         camera_calib_label.setToolTip(CAMERA_CALIB_TOOLTIP)
-        photon_grid.addWidget(camera_calib_label, 5, 0)
+        photon_grid.addWidget(camera_calib_label, 4, 0)
         self.camera_calib_label = QtWidgets.QLabel(
             "-- no calibration loaded --"
         )
@@ -4190,7 +4219,7 @@ class ParametersDialog(lib.Dialog):
         self.camera_calib_label.setAlignment(
             QtCore.Qt.AlignmentFlag.AlignCenter
         )
-        photon_grid.addWidget(self.camera_calib_label, 5, 1)
+        photon_grid.addWidget(self.camera_calib_label, 4, 1)
         # The buttons sit in the value column only, under the path label, and
         # take their natural width - spanning both columns made two small
         # buttons as wide as the whole group box.
@@ -4206,7 +4235,7 @@ class ParametersDialog(lib.Dialog):
             lambda: self.update_camera_calib(None)
         )
         camera_calib_buttons.addWidget(clear_camera_calib_button)
-        photon_grid.addLayout(camera_calib_buttons, 6, 1)
+        photon_grid.addLayout(camera_calib_buttons, 5, 1)
 
         # Fit Settings
         fit_groupbox = lib.CollapsibleGroupBox("Fit Settings")
@@ -4898,7 +4927,7 @@ class ParametersDialog(lib.Dialog):
             em_combo = self.emission_combos.get(camera)
             if em_combo is None:
                 # wavelength-keyed, but this camera has no emission combo
-                # (no Quantum Efficiency mapping): nothing selects an entry
+                # (no known wavelengths): nothing selects an entry
                 return None
             text = em_combo.currentText()
             try:
@@ -5755,7 +5784,6 @@ class ParametersDialog(lib.Dialog):
         if "Pixelsize" in cam_config:
             self.pixelsize.setValue(cam_config["Pixelsize"])
         self.update_sensitivity()
-        self.update_qe()
 
         # load 3D calibration
         self.update_z_calib_with_config_path()
@@ -5764,25 +5792,9 @@ class ParametersDialog(lib.Dialog):
         # load the per-pixel sCMOS calibration
         self.update_camera_calib_with_config_path()
 
-    def update_qe(self) -> None:
-        """Update QE. Note that QE is not used in the analysis, the
-        method is kept for backward compatibility."""
-        camera = self.camera.currentText()
-        cam_config = CONFIG["Cameras"][camera]
-        if "Quantum Efficiency" in cam_config:
-            qe = cam_config["Quantum Efficiency"]
-            try:
-                self.qe.setValue(qe)
-            except TypeError:
-                # qe is not a number
-                em_combo = self.emission_combos[camera]
-                wavelength = float(em_combo.currentText())
-                qe = cam_config["Quantum Efficiency"][wavelength]
-                self.qe.setValue(qe)
-
     def on_emission_changed(self) -> None:
-        """Update QE due to change in emission wavelength."""
-        self.update_qe()
+        """Load the calibrations configured for the new emission
+        wavelength."""
         self.update_z_calib_with_config_path()
         self.update_spline_calib_with_config_path()
         self.update_camera_calib_with_config_path()
@@ -6052,7 +6064,7 @@ class ParametersDialog(lib.Dialog):
                 return
             channel = mm_info[channel_device_name]
             channels = cam_config["Channel Device"]["Emission Wavelengths"]
-            if channel in channels:
+            if channel in channels and camera in self.emission_combos:
                 wavelength = str(channels[channel])
                 em_combo = self.emission_combos[camera]
                 for index in range(em_combo.count()):
@@ -7125,12 +7137,12 @@ class Window(QtWidgets.QMainWindow):
 
     @property
     def camera_info(self) -> dict[str, float]:
-        """Camera information, baseline, EM gain, sensitivity and QE."""
+        """Camera information, baseline, EM gain, sensitivity and pixel
+        size."""
         camera_info = {}
         camera_info["Baseline"] = self.parameters_dialog.baseline.value()
         camera_info["Gain"] = self.parameters_dialog.gain.value()
         camera_info["Sensitivity"] = self.parameters_dialog.sensitivity.value()
-        camera_info["Qe"] = self.parameters_dialog.qe.value()
         camera_info["Pixelsize"] = self.parameters_dialog.pixelsize.value()
         return camera_info
 
@@ -8623,7 +8635,6 @@ class Window(QtWidgets.QMainWindow):
             "baseline": pd.baseline.value(),
             "gain": pd.gain.value(),
             "sensitivity": pd.sensitivity.value(),
-            "qe": pd.qe.value(),
             "pixelsize": pd.pixelsize.value(),
             "convergence": pd.convergence_criterion.value(),
             "max_it": pd.max_it.value(),
@@ -8683,7 +8694,6 @@ class Window(QtWidgets.QMainWindow):
             pd.baseline.setValue(params["baseline"])
             pd.gain.setValue(params["gain"])
             pd.sensitivity.setValue(params["sensitivity"])
-            pd.qe.setValue(params["qe"])
             pd.pixelsize.setValue(params["pixelsize"])
         pd.convergence_criterion.setValue(params["convergence"])
         pd.max_it.setValue(params["max_it"])
@@ -8867,7 +8877,6 @@ class Window(QtWidgets.QMainWindow):
                 "baseline",
                 "gain",
                 "sensitivity",
-                "qe",
                 "pixelsize",
             ]
         return keys
@@ -11641,7 +11650,6 @@ class Window(QtWidgets.QMainWindow):
             "Baseline": "baseline",
             "Gain": "gain",
             "Sensitivity": "sensitivity",
-            "Qe": "qe",
             "Pixelsize": "pixelsize",
         }
         if not all(key in params for key in keys.values()):

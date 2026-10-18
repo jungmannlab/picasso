@@ -8916,7 +8916,7 @@ def localize(
 #: ``_sensitivity``); the rest of a picasso info list is movie metadata.
 #: Pulled out of the info list-of-dicts by ``localize_frames`` when no
 #: ``camera_info`` is passed explicitly.
-_CAMERA_INFO_KEYS = ("Baseline", "Sensitivity", "Gain", "Qe", "Pixelsize")
+_CAMERA_INFO_KEYS = ("Baseline", "Sensitivity", "Gain", "Pixelsize")
 
 
 def _camera_info_from_info(info: list[dict] | None) -> dict:
@@ -8925,7 +8925,7 @@ def _camera_info_from_info(info: list[dict] | None) -> dict:
     The streaming contract (S0B-2, contract 3) carries the camera info inside
     ``info`` rather than as a separate argument, so ``localize_frames`` pulls
     the keys ``fit`` needs (``Baseline``, ``Sensitivity``, ``Gain`` and,
-    optionally, ``Qe``/``Pixelsize``) out of it. Later dicts win, so a
+    optionally, ``Pixelsize``) out of it. Later dicts win, so a
     fit/identify block appended to a raw-movie block can override it.
     """
     camera_info: dict = {}
@@ -9039,7 +9039,7 @@ def localize_frames(
     info : list of dict or None
         Picasso info list-of-dicts: movie metadata and, unless
         ``camera_info`` is passed, the camera parameters (``Baseline``,
-        ``Sensitivity``, ``Gain`` and, optionally, ``Qe``/``Pixelsize``),
+        ``Sensitivity``, ``Gain`` and, optionally, ``Pixelsize``),
         which are read out of it (see :func:`_camera_info_from_info`).
     params : dict
         Identification parameters, at least ``"Min. Net Gradient"`` and
