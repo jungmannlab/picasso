@@ -1817,7 +1817,7 @@ def calculate_optimal_bins(
 
 
 @numba.njit(parallel=True, nogil=True)
-def hist2d_numba(
+def hist2d(
     x: FloatArray1D,
     y: FloatArray1D,
     x_min: float,
@@ -2298,13 +2298,16 @@ def locs_at(x: float, y: float, locs: pd.DataFrame, r: float) -> pd.DataFrame:
 
 
 @numba.jit(nopython=True, nogil=True, cache=True)
-def is_loc_at_numba(
+def is_loc_in_circle(
     x: float,
     y: float,
     locs_xy: FloatArray2D,
     r: float,
 ) -> BoolArray1D:
-    """Numba implementation of ``is_loc_at``.
+    """Check which localizations are within radius ``r`` from position
+    ``(x, y)``.
+
+    Array analogue of ``is_loc_at``, usable in numba-compiled code.
 
     Parameters
     ----------
@@ -2328,13 +2331,15 @@ def is_loc_at_numba(
 
 
 @numba.jit(nopython=True, nogil=True, cache=True)
-def locs_at_numba(
+def locs_in_circle(
     x: float,
     y: float,
     locs_xy: FloatArray2D,
     r: float,
 ) -> FloatArray2D:
-    """Numba implementation of ``locs_at``.
+    """Return localizations within radius ``r`` from position ``(x, y)``.
+
+    Array analogue of ``locs_at``, usable in numba-compiled code.
 
     Parameters
     ----------
@@ -2350,7 +2355,7 @@ def locs_at_numba(
     picked_xy : FloatArray2D
         ``(2, n_picked)`` coordinates within ``r`` of ``(x, y)``.
     """
-    is_picked = is_loc_at_numba(x, y, locs_xy, r)
+    is_picked = is_loc_in_circle(x, y, locs_xy, r)
     return locs_xy[:, is_picked]
 
 
@@ -2376,7 +2381,7 @@ def rmsd_at_com(locs_xy: FloatArray2D) -> float:
 
 
 @numba.jit(nopython=True, nogil=True, cache=True)
-def is_loc_in_square_numba(
+def is_loc_in_square(
     x: float,
     y: float,
     locs_xy: FloatArray2D,
@@ -2385,7 +2390,7 @@ def is_loc_in_square_numba(
     """Check which localizations are within the axis-aligned square of
     side length ``a`` centered at ``(x, y)``.
 
-    Square analogue of ``is_loc_at_numba``. The bounds are exclusive,
+    Square analogue of ``is_loc_in_circle``. The bounds are exclusive,
     matching ``postprocess._picked_square_locs``.
 
     Parameters
@@ -2410,7 +2415,7 @@ def is_loc_in_square_numba(
 
 
 @numba.jit(nopython=True, nogil=True, cache=True)
-def locs_in_square_numba(
+def locs_in_square(
     x: float,
     y: float,
     locs_xy: FloatArray2D,
@@ -2432,14 +2437,14 @@ def locs_in_square_numba(
     -------
     picked_xy : FloatArray2D
         ``(2, n_picked)`` coordinates inside the square. See
-        ``is_loc_in_square_numba``.
+        ``is_loc_in_square``.
     """
-    is_picked = is_loc_in_square_numba(x, y, locs_xy, a)
+    is_picked = is_loc_in_square(x, y, locs_xy, a)
     return locs_xy[:, is_picked]
 
 
 @numba.jit(nopython=True, nogil=True, cache=True)
-def is_loc_in_box_numba(
+def is_loc_in_box(
     x: float,
     y: float,
     locs_xy: FloatArray2D,
@@ -2449,9 +2454,8 @@ def is_loc_in_box_numba(
     """Check which localizations are within the axis-aligned box of
     width ``w`` and height ``h`` centered at ``(x, y)``.
 
-    Generalization of ``is_loc_in_square_numba`` to independent side
-    lengths. The bounds are exclusive, matching
-    ``postprocess._picked_box_locs``.
+    Generalization of ``is_loc_in_square`` to independent side lengths.
+    The bounds are exclusive, matching ``postprocess._picked_box_locs``.
 
     Parameters
     ----------
@@ -2474,7 +2478,7 @@ def is_loc_in_box_numba(
 
 
 @numba.jit(nopython=True, nogil=True, cache=True)
-def locs_in_box_numba(
+def locs_in_box(
     x: float,
     y: float,
     locs_xy: FloatArray2D,
@@ -2497,14 +2501,14 @@ def locs_in_box_numba(
     -------
     picked_xy : FloatArray2D
         ``(2, n_picked)`` coordinates inside the box. See
-        ``is_loc_in_box_numba``.
+        ``is_loc_in_box``.
     """
-    is_picked = is_loc_in_box_numba(x, y, locs_xy, w, h)
+    is_picked = is_loc_in_box(x, y, locs_xy, w, h)
     return locs_xy[:, is_picked]
 
 
 @numba.jit(nopython=True, nogil=True, cache=True)
-def is_loc_in_rectangle_numba(
+def is_loc_in_oriented_rectangle(
     xc: float,
     yc: float,
     theta: float,
@@ -2555,7 +2559,7 @@ def is_loc_in_rectangle_numba(
 
 
 @numba.jit(nopython=True, nogil=True, cache=True)
-def locs_in_rectangle_numba(
+def locs_in_oriented_rectangle(
     xc: float,
     yc: float,
     theta: float,
@@ -2582,9 +2586,9 @@ def locs_in_rectangle_numba(
     -------
     picked_xy : FloatArray2D
         ``(2, n_picked)`` coordinates inside the rectangle. See
-        ``is_loc_in_rectangle_numba``.
+        ``is_loc_in_oriented_rectangle``.
     """
-    is_picked = is_loc_in_rectangle_numba(
+    is_picked = is_loc_in_oriented_rectangle(
         xc, yc, theta, length, width, locs_xy
     )
     return locs_xy[:, is_picked]
@@ -3746,16 +3750,14 @@ def point_in_pick(
         r = pick_size / 2
         return bool((x - pick[0]) ** 2 + (y - pick[1]) ** 2 < r**2)
     elif pick_shape == "Square":
-        return bool(
-            is_loc_in_square_numba(pick[0], pick[1], point_xy, pick_size)[0]
-        )
+        return bool(is_loc_in_square(pick[0], pick[1], point_xy, pick_size)[0])
     elif pick_shape == "Rectangle":
         (xs, ys), (xe, ye) = pick
         # the oriented test rotates the point into the rectangle's
         # frame, which - unlike ray casting over the corners - is well
         # defined for axis-aligned rectangles
         return bool(
-            is_loc_in_rectangle_numba(
+            is_loc_in_oriented_rectangle(
                 0.5 * (xs + xe),
                 0.5 * (ys + ye),
                 np.arctan2(ye - ys, xe - xs),
@@ -3776,7 +3778,7 @@ def point_in_pick(
     elif pick_shape == "Box":
         (x0, y0), (x1, y1) = pick
         return bool(
-            is_loc_in_box_numba(
+            is_loc_in_box(
                 0.5 * (x0 + x1),
                 0.5 * (y0 + y1),
                 point_xy,

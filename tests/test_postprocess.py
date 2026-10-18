@@ -146,7 +146,7 @@ class TestIndexBlocks:
         locs_sorted, size, _, _, block_starts, block_ends, K, L = index_blocks
         locs_xy = locs_sorted[["x", "y"]].to_numpy().T
         x, y = 15.5, 15.5
-        locs_at = postprocess.get_block_locs_at_numba(
+        locs_at = postprocess.get_block_locs_at(
             int(x / r), int(y / r), locs_xy, block_starts, block_ends, K, L
         )
         assert locs_at.shape[1] > 0

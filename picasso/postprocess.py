@@ -248,7 +248,7 @@ def _picked_circular_locs(
             group_locs = locs.iloc[idx].copy()
         else:
             x_, y_ = int(x / pick_size), int(y / pick_size)
-            block_locs_idx = _get_block_locs_at_numba(
+            block_locs_idx = _get_block_locs_at(
                 x_,
                 y_,
                 index_blocks[4],
@@ -257,7 +257,7 @@ def _picked_circular_locs(
                 index_blocks[7],
             )
             block_locs = index_blocks[0].iloc[block_locs_idx]
-            group_locs_idx = lib.is_loc_at_numba(
+            group_locs_idx = lib.is_loc_in_circle(
                 x, y, locs_xy[:, block_locs_idx], pick_size
             )
             group_locs = block_locs.iloc[group_locs_idx].copy()
@@ -780,7 +780,7 @@ def _pick_similar_circular(
             idx = spatial_index.query_circle(pyramid, xs, ys, x, y, r)
             pick_locs_xy = np.stack((xs[idx], ys[idx]))
         else:
-            block_locs_xy = get_block_locs_at_numba(
+            block_locs_xy = get_block_locs_at(
                 int(x / r),
                 int(y / r),
                 locs_xy,
@@ -789,7 +789,7 @@ def _pick_similar_circular(
                 index_blocks[6],
                 index_blocks[7],
             )
-            pick_locs_xy = lib.locs_at_numba(x, y, block_locs_xy, r)
+            pick_locs_xy = lib.locs_in_circle(x, y, block_locs_xy, r)
         n_locs.append(pick_locs_xy.shape[1])
         rmsd.append(lib.rmsd_at_com(pick_locs_xy))
 
@@ -932,7 +932,7 @@ def _pick_similar(  # noqa: C901
                 block_ends,
             )
             if n_block_locs >= min_n_locs:
-                block_locs_xy = get_block_locs_at_numba(
+                block_locs_xy = get_block_locs_at(
                     x_range,
                     y_range,
                     locs_xy,
@@ -941,7 +941,7 @@ def _pick_similar(  # noqa: C901
                     K,
                     L,
                 )
-                picked_locs_xy = lib.locs_at_numba(
+                picked_locs_xy = lib.locs_in_circle(
                     x_grid, y_grid, block_locs_xy, r
                 )
                 if picked_locs_xy.shape[1] > 1:
@@ -961,7 +961,7 @@ def _pick_similar(  # noqa: C901
                             break
                         x_test_old = x_test
                         y_test_old = y_test
-                        picked_locs_xy = lib.locs_at_numba(
+                        picked_locs_xy = lib.locs_in_circle(
                             x_test, y_test, block_locs_xy, r
                         )
                         if picked_locs_xy.shape[1] > 1:
@@ -1061,7 +1061,7 @@ def _circle_moments_at(
     to avoid loss of precision in the second moments.
 
     Note that the block bounds are inclusive of the first row and
-    column (``0 <= k < K``), like ``_get_block_locs_at_numba`` and
+    column (``0 <= k < K``), like ``_get_block_locs_at`` and
     unlike ``_n_block_locs_at``.
 
     Parameters
@@ -1769,7 +1769,7 @@ def _pick_similar_rectangular(
         length_similar.append(drawn_length)
         # initialize from the pick as drawn, using all localizations
         # because a long pick may reach outside its block neighborhood
-        drawn_locs_xy = lib.locs_in_rectangle_numba(
+        drawn_locs_xy = lib.locs_in_oriented_rectangle(
             xc, yc, theta, drawn_length, width, locs_xy
         )
         if drawn_locs_xy.shape[1] < 3:
@@ -2244,7 +2244,7 @@ def _n_block_locs_at(
 
 
 @numba.jit(nopython=True, nogil=True, cache=True)
-def _get_block_locs_at_numba(
+def _get_block_locs_at(
     x_index: int,
     y_index: int,
     block_starts: lib.IntArray2D,
@@ -2285,7 +2285,7 @@ def _get_block_locs_at_numba(
 
 
 @numba.jit(nopython=True, nogil=True, cache=True)
-def get_block_locs_at_numba(
+def get_block_locs_at(
     x_index: int,
     y_index: int,
     locs_xy: lib.FloatArray2D,
@@ -2314,7 +2314,7 @@ def get_block_locs_at_numba(
         ``(2, n_neighbors)`` coordinates of the localizations in the
         neighborhood.
     """
-    indices = _get_block_locs_at_numba(
+    indices = _get_block_locs_at(
         x_index,
         y_index,
         block_starts,

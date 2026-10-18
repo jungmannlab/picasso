@@ -54,9 +54,7 @@ class TestAlignGroupCore:
 
     @staticmethod
     def _avg_image_inputs(x, y, oversampling, t_min, t_max):
-        _, image_avg = render.render_hist_numba(
-            x, y, oversampling, t_min, t_max
-        )
+        _, image_avg = render.render_hist(x, y, oversampling, t_min, t_max)
         CF_image_avg = np.conj(np.fft.fft2(image_avg))
         image_half = image_avg.shape[0] / 2
         return CF_image_avg, image_half

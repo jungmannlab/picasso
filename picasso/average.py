@@ -99,9 +99,7 @@ def align_group_core(
         x_rot = np.cos(angle) * x_original - np.sin(angle) * y_original
         y_rot = np.sin(angle) * x_original + np.cos(angle) * y_original
         # render group image
-        N, image = render.render_hist_numba(
-            x_rot, y_rot, oversampling, t_min, t_max
-        )
+        N, image = render.render_hist(x_rot, y_rot, oversampling, t_min, t_max)
         # calculate cross-correlation
         xcorr = compute_xcorr(CF_image_avg, image)
         # find the brightest pixel
@@ -588,7 +586,7 @@ def average(
                 group_pbar.set_description(f"Iteration {it + 1}/{iterations}")
 
             # Render average image
-            N_avg, image_avg = render.render_hist_numba(
+            N_avg, image_avg = render.render_hist(
                 np.ctypeslib.as_array(x),
                 np.ctypeslib.as_array(y),
                 oversampling,

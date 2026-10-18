@@ -832,15 +832,17 @@ def determinant_3x3(a: lib.Array3x3) -> np.float32:
 
 
 @numba.jit(nopython=True, nogil=True)
-def render_hist_numba(
+def render_hist(
     x: lib.FloatArray1D,
     y: lib.FloatArray1D,
     oversampling: float,
     t_min: float,
     t_max: float,
 ) -> tuple[int, lib.FloatArray2D]:
-    """Calculate 2D histogram of xy coordinates. Similar to
-    ``_render_hist`` but modified to work with numba.
+    """Calculate 2D histogram of xy coordinates in the square field
+    ``[t_min, t_max]`` in x and y.
+
+    Array analogue of ``_render_hist``, usable in numba-compiled code.
 
     Parameters
     ----------

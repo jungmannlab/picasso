@@ -414,7 +414,7 @@ class TestHist2DNumba:
         inside = (x > x_min) & (x < x_max) & (y > y_min) & (y < y_max)
         x = x[inside]
         y = y[inside]
-        counts = lib.hist2d_numba(x, y, x_min, x_max, y_min, y_max, nx, ny)
+        counts = lib.hist2d(x, y, x_min, x_max, y_min, y_max, nx, ny)
         x_edges = np.linspace(x_min, x_max, nx + 1)
         y_edges = np.linspace(y_min, y_max, ny + 1)
         expected, _, _ = np.histogram2d(x, y, bins=[x_edges, y_edges])
@@ -429,7 +429,7 @@ class TestHist2DNumba:
     def test_skips_non_finite(self):
         x = np.array([0.0, 1.0, np.nan, 2.0, np.inf], dtype=np.float64)
         y = np.array([0.0, 1.0, 1.0, np.nan, 2.0], dtype=np.float64)
-        counts = lib.hist2d_numba(x, y, 0.0, 3.0, 0.0, 3.0, 3, 3)
+        counts = lib.hist2d(x, y, 0.0, 3.0, 0.0, 3.0, 3, 3)
         # only two points are fully finite and inside the range
         assert counts.sum() == 2
 
@@ -678,12 +678,12 @@ class TestSquareContainment:
         locs_xy = np.array(
             [[10.0, 10.9, 11.0, 10.0], [10.0, 10.0, 10.0, 12.0]]
         )
-        mask = lib.is_loc_in_square_numba(10.0, 10.0, locs_xy, 2.0)
+        mask = lib.is_loc_in_square(10.0, 10.0, locs_xy, 2.0)
         assert mask.tolist() == [True, True, False, False]
 
     def test_locs_in_square_filters(self):
         locs_xy = np.array([[10.0, 20.0], [10.0, 20.0]])
-        out = lib.locs_in_square_numba(10.0, 10.0, locs_xy, 2.0)
+        out = lib.locs_in_square(10.0, 10.0, locs_xy, 2.0)
         assert out.shape == (2, 1)
         assert out[0, 0] == 10.0
 
@@ -704,7 +704,7 @@ class TestOrientedRectangleContainment:
             reference = lib.check_if_in_rectangle(
                 x, y, np.array(X), np.array(Y)
             )
-            mask = lib.is_loc_in_rectangle_numba(
+            mask = lib.is_loc_in_oriented_rectangle(
                 xc, yc, theta, length, width, locs_xy
             )
             # points right at the boundary may be classified either way
@@ -717,7 +717,7 @@ class TestOrientedRectangleContainment:
 
     def test_locs_in_rectangle_numba_filters(self):
         locs_xy = np.array([[0.0, 0.0, 3.0, 5.0], [0.0, 2.0, 0.0, 0.0]])
-        out = lib.locs_in_rectangle_numba(0.0, 0.0, 0.0, 8.0, 1.0, locs_xy)
+        out = lib.locs_in_oriented_rectangle(0.0, 0.0, 0.0, 8.0, 1.0, locs_xy)
         assert out.shape == (2, 2)
         assert out[0].tolist() == [0.0, 3.0]
 
@@ -799,7 +799,7 @@ def _rectangles_overlap_brute_force(rect_a, rect_b, rng, n=20000):
     y = ya + u * np.sin(ta) + v * np.cos(ta)
     xb, yb, tb, lb, wb = rect_b
     return bool(
-        lib.is_loc_in_rectangle_numba(
+        lib.is_loc_in_oriented_rectangle(
             xb, yb, tb, lb, wb, np.stack((x, y))
         ).any()
     )
@@ -986,27 +986,27 @@ class TestBoxContainment:
     PICK = ((1.0, 2.0), (5.0, 4.0))  # 4 wide, 2 high, centered (3, 3)
 
     def test_inside(self):
-        assert lib.is_loc_in_box_numba(
-            3.0, 3.0, np.array([[3.0], [3.0]]), 4.0, 2.0
-        )[0]
+        assert lib.is_loc_in_box(3.0, 3.0, np.array([[3.0], [3.0]]), 4.0, 2.0)[
+            0
+        ]
 
     def test_outside_in_y_only(self):
         # inside the 4-wide extent (1..5) but outside the 2-high one
         # (2..4), so a square test of the longer side would wrongly
         # accept it
-        assert not lib.is_loc_in_box_numba(
+        assert not lib.is_loc_in_box(
             3.0, 3.0, np.array([[3.0], [4.5]]), 4.0, 2.0
         )[0]
 
     def test_bounds_are_exclusive(self):
         # matches postprocess._picked_box_locs
-        assert not lib.is_loc_in_box_numba(
+        assert not lib.is_loc_in_box(
             3.0, 3.0, np.array([[5.0], [3.0]]), 4.0, 2.0
         )[0]
 
     def test_locs_in_box_numba_filters(self):
         locs_xy = np.array([[3.0, 9.0, 2.0], [3.0, 9.0, 2.5]])
-        out = lib.locs_in_box_numba(3.0, 3.0, locs_xy, 4.0, 2.0)
+        out = lib.locs_in_box(3.0, 3.0, locs_xy, 4.0, 2.0)
         assert out.shape == (2, 2)
 
 

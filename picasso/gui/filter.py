@@ -336,7 +336,7 @@ class Hist2DWindow(PlotWindow):
         ny = len(bins_y) - 1
         x_min, x_max = float(bins_x[0]), float(bins_x[-1])
         y_min, y_max = float(bins_y[0]), float(bins_y[-1])
-        counts = lib.hist2d_numba(
+        counts = lib.hist2d(
             np.ascontiguousarray(x),
             np.ascontiguousarray(y),
             x_min,

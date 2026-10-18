@@ -16866,7 +16866,7 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         for i, pick in enumerate(self._picks):
             x, y = pick
             # extract locs at a given region - numba version
-            block_locs_xy = postprocess.get_block_locs_at_numba(
+            block_locs_xy = postprocess.get_block_locs_at(
                 int(x / r),
                 int(y / r),
                 locs_xy,
@@ -16875,7 +16875,7 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
                 index_blocks[6],
                 index_blocks[7],
             )
-            pick_locs_xy = lib.locs_at_numba(x, y, block_locs_xy, r)
+            pick_locs_xy = lib.locs_in_circle(x, y, block_locs_xy, r)
             loccount[i] = pick_locs_xy.shape[1]
             progress.set_value(i)
         progress.close()

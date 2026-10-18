@@ -44,7 +44,7 @@ from .kernels import (  # noqa: F401
     _fill_gaussian_rot_theta,
     inverse_3x3,
     determinant_3x3,
-    render_hist_numba,
+    render_hist,
     _compose_multi_lut,
     _quantize_rgb,
     _compose_single,

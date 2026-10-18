@@ -619,7 +619,7 @@ def _filter_circle(
     r2: float,
 ) -> lib.IntArray1D:
     """Keep the indices whose coordinates lie strictly within the
-    circle (squared radius ``r2``), as ``lib.is_loc_at_numba`` does."""
+    circle (squared radius ``r2``), as ``lib.is_loc_in_circle`` does."""
     keep = np.empty(indices.shape[0], dtype=np.uint32)
     n = 0
     for k in range(indices.shape[0]):
