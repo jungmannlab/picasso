@@ -45,7 +45,7 @@ The transform is then fitted as follows:
       calibration = io.load_calibration("beads_3d_calib.yaml")   # or {}
       calibration, qc = localize.fit_lateral_transform(
           movie_ref, movie_target, calibration,
-          box=7, minimum_ng=5000, pixelsize=130,
+          box=7, identification_method=localize.NetGradient(5000), pixelsize=130,
           transform_type="astigmatism", model="affine",
       )
       localize.plot_lateral_calibration(qc, save_path="lateral_check.png")

@@ -53,6 +53,30 @@ from tests.conftest import (
 )
 
 CAMERA_INFO_WITH_PIXELSIZE = {**CAMERA_INFO, "Pixelsize": PIXELSIZE}
+NET_GRADIENT = localize.NetGradient(MIN_NG)
+
+
+def _params(
+    minimum_ng: float | list = MIN_NG, box: int = BOX, **kwargs
+) -> localize.IdentificationParameters:
+    """Net gradient identification parameters; a list of thresholds gives
+    one per ROI. ``kwargs`` are the filter settings."""
+    if isinstance(minimum_ng, (list, tuple)):
+        method = [localize.NetGradient(_) for _ in minimum_ng]
+    else:
+        method = localize.NetGradient(minimum_ng)
+    return localize.IdentificationParameters(method=method, box=box, **kwargs)
+
+
+def _wavelet_params(
+    settings: wavelet.WaveletParameters | list, box: int = BOX, **kwargs
+) -> localize.IdentificationParameters:
+    """Wavelet identification parameters (``settings`` may be one per
+    ROI). ``kwargs`` are the filter settings."""
+    return localize.IdentificationParameters(
+        method=settings, box=box, **kwargs
+    )
+
 
 # Devices a spline-CRLB test can be pinned to (see ``_crlb``). The GPU variant
 # needs a real CUDA device; ``NUMBA_ENABLE_CUDASIM=1`` also satisfies it, which
@@ -286,7 +310,9 @@ class TestIdentifyInFrame:
 
     def test_no_roi_matches_identify_in_image(self):
         frame = _gaussian_frame((20, 20), (10, 10)).astype(np.int32)
-        y_a, x_a, ng_a = localize.identify_in_frame(frame, 1.0, BOX)
+        y_a, x_a, ng_a = localize.identify_in_frame(
+            frame, localize.NetGradient(1.0), BOX
+        )
         y_b, x_b, ng_b = localize.identify_in_image(
             np.float32(frame), 1.0, BOX
         )
@@ -300,7 +326,9 @@ class TestIdentifyInFrame:
         # Peak at global (15, 17); ROI starts at (10, 12)
         frame = _gaussian_frame((30, 30), (15, 17)).astype(np.int32)
         roi = ((10, 12), (25, 28))
-        y, x, _ = localize.identify_in_frame(frame, 1.0, BOX, roi=roi)
+        y, x, _ = localize.identify_in_frame(
+            frame, localize.NetGradient(1.0), BOX, roi=roi
+        )
         assert len(y) == 1
         assert (int(y[0]), int(x[0])) == (15, 17)
 
@@ -308,7 +336,9 @@ class TestIdentifyInFrame:
         """A peak outside the ROI window is not seen at all."""
         frame = _gaussian_frame((30, 30), (5, 5)).astype(np.int32)
         roi = ((15, 15), (28, 28))
-        y, x, ng = localize.identify_in_frame(frame, 1.0, BOX, roi=roi)
+        y, x, ng = localize.identify_in_frame(
+            frame, localize.NetGradient(1.0), BOX, roi=roi
+        )
         assert len(y) == 0 and len(x) == 0 and len(ng) == 0
 
     def test_multiple_rois_find_all_peaks(self):
@@ -318,7 +348,9 @@ class TestIdentifyInFrame:
         frame += (_gaussian_frame((40, 40), (30, 30)) - 100).astype(np.int32)
         frame += (_gaussian_frame((40, 40), (8, 30)) - 100).astype(np.int32)
         rois = [((0, 0), (16, 16)), ((24, 24), (38, 38))]
-        y, x, _ = localize.identify_in_frame(frame, 1.0, BOX, roi=rois)
+        y, x, _ = localize.identify_in_frame(
+            frame, localize.NetGradient(1.0), BOX, roi=rois
+        )
         found = {(int(yi), int(xi)) for yi, xi in zip(y, x)}
         assert (8, 8) in found  # first ROI
         assert (30, 30) in found  # second ROI
@@ -329,7 +361,9 @@ class TestIdentifyInFrame:
         frame = _gaussian_frame((40, 40), (8, 8)).astype(np.int32)
         frame += (_gaussian_frame((40, 40), (30, 30)) - 100).astype(np.int32)
         rois = [((0, 0), (16, 16)), ((24, 24), (38, 38))]
-        y, x, _ = localize.identify_in_frame(frame, 1.0, BOX, roi=rois)
+        y, x, _ = localize.identify_in_frame(
+            frame, localize.NetGradient(1.0), BOX, roi=rois
+        )
         coords = list(zip([int(v) for v in y], [int(v) for v in x]))
         assert len(coords) == len(set(coords))
 
@@ -339,7 +373,9 @@ class TestIdentifyInFrame:
         # Peak two pixels inside the bottom-right corner of the ROI.
         frame = _gaussian_frame((40, 40), (18, 18)).astype(np.int32)
         roi = ((5, 5), (20, 20))
-        y, x, _ = localize.identify_in_frame(frame, 1.0, BOX, roi=roi)
+        y, x, _ = localize.identify_in_frame(
+            frame, localize.NetGradient(1.0), BOX, roi=roi
+        )
         found = {(int(yi), int(xi)) for yi, xi in zip(y, x)}
         assert (18, 18) in found
 
@@ -358,8 +394,12 @@ class TestIdentifyInFrame:
             )
         whole = ((8, 8), (32, 32))
         split = [((8, 8), (20, 32)), ((20, 8), (32, 32))]
-        y_w, x_w, _ = localize.identify_in_frame(frame, 1.0, BOX, roi=whole)
-        y_s, x_s, _ = localize.identify_in_frame(frame, 1.0, BOX, roi=split)
+        y_w, x_w, _ = localize.identify_in_frame(
+            frame, localize.NetGradient(1.0), BOX, roi=whole
+        )
+        y_s, x_s, _ = localize.identify_in_frame(
+            frame, localize.NetGradient(1.0), BOX, roi=split
+        )
         found_whole = {(int(a), int(b)) for a, b in zip(y_w, x_w)}
         found_split = {(int(a), int(b)) for a, b in zip(y_s, x_s)}
         # every seeded peak is found in both cases ...
@@ -570,12 +610,7 @@ class TestIdentify:
     def test_roi_is_strict_subset(self, movie, real_identifications):
         """ROI restricts identifications to that pixel window only."""
         roi = ((0, 0), (16, 16))  # ((y_start, x_start), (y_end, x_end))
-        ids_roi, _ = localize.identify(
-            movie,
-            MIN_NG,
-            BOX,
-            roi=roi,
-        )
+        ids_roi, _ = localize.identify(movie, parameters=_params(), roi=roi)
         if len(ids_roi):
             assert (ids_roi["x"] < 16).all()
             assert (ids_roi["y"] < 16).all()
@@ -586,16 +621,10 @@ class TestIdentify:
         """The (frame, y, x) sets identified threaded vs. serial must
         match exactly (order-independent)."""
         ids_t, _ = localize.identify(
-            movie,
-            MIN_NG,
-            BOX,
-            threaded=True,
+            movie, parameters=_params(), threaded=True
         )
         ids_s, _ = localize.identify(
-            movie,
-            MIN_NG,
-            BOX,
-            threaded=False,
+            movie, parameters=_params(), threaded=False
         )
         # Compare as set of (frame, y, x) tuples — same spots, possibly
         # different row order
@@ -607,10 +636,7 @@ class TestIdentify:
         """Setting ``frame_bounds`` confines identifications to that
         range of frame indices."""
         ids, _ = localize.identify(
-            movie,
-            MIN_NG,
-            BOX,
-            frame_bounds=(20, 50),
+            movie, parameters=_params(), frame_bounds=(20, 50)
         )
         if len(ids):
             assert (ids["frame"] >= 20).all()
@@ -621,10 +647,7 @@ class TestIdentify:
         the union of those (disjoint) frame ranges."""
         segments = [(10, 20), (40, 50)]
         ids, _ = localize.identify(
-            movie,
-            MIN_NG,
-            BOX,
-            frame_bounds=segments,
+            movie, parameters=_params(), frame_bounds=segments
         )
         if len(ids):
             in_any = ((ids["frame"] >= 10) & (ids["frame"] <= 20)) | (
@@ -638,16 +661,10 @@ class TestIdentify:
         """A single-segment list behaves identically to the flat
         ``(min, max)`` tuple form."""
         flat, _ = localize.identify(
-            movie,
-            MIN_NG,
-            BOX,
-            frame_bounds=(20, 50),
+            movie, parameters=_params(), frame_bounds=(20, 50)
         )
         listed, _ = localize.identify(
-            movie,
-            MIN_NG,
-            BOX,
-            frame_bounds=[(20, 50)],
+            movie, parameters=_params(), frame_bounds=[(20, 50)]
         )
         flat_set = set(zip(flat["frame"], flat["y"], flat["x"]))
         listed_set = set(zip(listed["frame"], listed["y"], listed["x"]))
@@ -655,10 +672,7 @@ class TestIdentify:
 
     def test_returns_metadata_dict(self, movie):
         ids, info = localize.identify(
-            movie,
-            MIN_NG,
-            BOX,
-            threaded=False,
+            movie, parameters=_params(), threaded=False
         )
         assert isinstance(info, dict)
         for key in [
@@ -680,7 +694,7 @@ class TestIdentifyAsync:
 
     @pytest.mark.slow
     def test_async_finishes_and_matches_serial(self, movie):
-        current, fs = localize.identify_async(movie, MIN_NG, BOX)
+        current, fs = localize.identify_async(movie, NET_GRADIENT, BOX)
         n_frames = len(movie)
         # Wait for completion
         t0 = time.time()
@@ -689,10 +703,7 @@ class TestIdentifyAsync:
             time.sleep(0.05)
         ids_async = localize.identifications_from_futures(fs)
         ids_serial, _ = localize.identify(
-            movie,
-            MIN_NG,
-            BOX,
-            threaded=False,
+            movie, parameters=_params(), threaded=False
         )
         set_a = set(zip(ids_async["frame"], ids_async["y"], ids_async["x"]))
         set_s = set(zip(ids_serial["frame"], ids_serial["y"], ids_serial["x"]))
@@ -707,7 +718,7 @@ class TestIdentifyByFrameNumber:
         frame, no more, no less."""
         for frame in [10, 30, 60]:
             single = localize.identify_by_frame_number(
-                movie, MIN_NG, BOX, frame
+                movie, NET_GRADIENT, BOX, frame
             )
             full_subset = real_identifications[
                 real_identifications["frame"] == frame
@@ -720,7 +731,7 @@ class TestIdentifyByFrameNumber:
 
     def test_frame_outside_bounds_returns_empty(self, movie):
         out = localize.identify_by_frame_number(
-            movie, MIN_NG, BOX, 5, frame_bounds=(20, 30)
+            movie, NET_GRADIENT, BOX, 5, frame_bounds=(20, 30)
         )
         assert isinstance(out, pd.DataFrame)
         assert len(out) == 0
@@ -730,18 +741,230 @@ class TestIdentifyByFrameNumber:
         in the gap between segments returns empty."""
         segments = [(0, 4), (20, 30)]
         inside = localize.identify_by_frame_number(
-            movie, MIN_NG, BOX, 25, frame_bounds=segments
+            movie, NET_GRADIENT, BOX, 25, frame_bounds=segments
         )
         gap = localize.identify_by_frame_number(
-            movie, MIN_NG, BOX, 10, frame_bounds=segments
+            movie, NET_GRADIENT, BOX, 10, frame_bounds=segments
         )
         # frame 25 matches the full per-frame identification...
-        full = localize.identify_by_frame_number(movie, MIN_NG, BOX, 25)
+        full = localize.identify_by_frame_number(movie, NET_GRADIENT, BOX, 25)
         assert set(zip(inside["y"], inside["x"])) == set(
             zip(full["y"], full["x"])
         )
         # ...while frame 10 (in the gap) yields nothing
         assert len(gap) == 0
+
+
+# ---------------------------------------------------------------------------
+# IdentificationParameters / NetGradient
+# ---------------------------------------------------------------------------
+
+
+class TestIdentificationParameters:
+    """Validation and metadata round trip of the identification settings."""
+
+    LOW = wavelet.WaveletParameters(threshold=0.5)
+    HIGH = wavelet.WaveletParameters(1.5, "w1_mad", 6)
+
+    @pytest.mark.parametrize(
+        "method",
+        [
+            5000,
+            None,
+            [localize.NetGradient(5000), wavelet.WaveletParameters()],
+            [5000, 500],
+        ],
+    )
+    def test_invalid_method_type(self, method):
+        with pytest.raises(TypeError):
+            localize.IdentificationParameters(method=method, box=BOX)
+
+    def test_empty_method_list(self):
+        with pytest.raises(ValueError, match="empty"):
+            localize.IdentificationParameters(method=[], box=BOX)
+
+    @pytest.mark.parametrize(
+        "kwargs",
+        [
+            {"box": 0},
+            {"box": -3},
+            {"box": 2.5},
+            {"temporal_median_window": -1},
+            {"temporal_median_window": 2.5},
+            {"temporal_median_stride": 0},
+            {"gaussian_filter_sigma": -0.5},
+            {"gaussian_filter_sigma": np.inf},
+        ],
+    )
+    def test_invalid_values(self, kwargs):
+        with pytest.raises(ValueError):
+            _params(**kwargs)
+
+    def test_keyword_only_and_frozen(self):
+        with pytest.raises(TypeError):
+            localize.IdentificationParameters(NET_GRADIENT, BOX)
+        parameters = _params()
+        with pytest.raises(AttributeError):
+            parameters.box = 9
+
+    def test_values_are_normalized(self):
+        parameters = _params(
+            box=np.int64(7),
+            temporal_median_window=np.int64(10),
+            temporal_median_stride=5.0,
+            gaussian_filter_sigma=1,
+        )
+        assert type(parameters.box) is int
+        assert type(parameters.temporal_median_window) is int
+        assert type(parameters.temporal_median_stride) is int
+        assert type(parameters.gaussian_filter_sigma) is float
+        # per-ROI methods are stored as a tuple
+        assert _params([5000, 500]).method == tuple(_net_gradients(5000, 500))
+
+    @pytest.mark.parametrize("minimum", [[1, 2], np.array([1.0]), "5000"])
+    def test_net_gradient_takes_a_single_number(self, minimum):
+        with pytest.raises(ValueError, match="single number"):
+            localize.NetGradient(minimum)
+
+    @pytest.mark.parametrize("minimum", [np.nan, np.inf, -np.inf])
+    def test_net_gradient_must_be_finite(self, minimum):
+        with pytest.raises(ValueError, match="finite"):
+            localize.NetGradient(minimum)
+
+    def test_net_gradient_keeps_ints_as_ints(self):
+        assert type(localize.NetGradient(5000).minimum) is int
+        assert type(localize.NetGradient(np.int32(5000)).minimum) is int
+        assert localize.NetGradient(2500.5).minimum == 2500.5
+
+    def test_to_info_net_gradient(self):
+        assert _params(5000, 7).to_info() == {
+            "Identification Method": "net gradient",
+            "Min. Net Gradient": 5000,
+            "Box Size": 7,
+            "Temporal Median Window": 0,
+            "Gaussian Filter Sigma": 0.0,
+        }
+
+    def test_to_info_wavelet(self):
+        info = _wavelet_params(self.HIGH).to_info()
+        assert info["Identification Method"] == "wavelet"
+        assert info["Wavelet Threshold"] == 1.5
+        assert info["Wavelet Noise Estimate"] == "w1_mad"
+        assert info["Wavelet Min. Area"] == 6
+        assert "Min. Net Gradient" not in info
+
+    @pytest.mark.parametrize(
+        "parameters",
+        [
+            _params(5000),
+            _params(2500.5, 9, gaussian_filter_sigma=1.5),
+            _params([5000, 500], temporal_median_window=100),
+            _wavelet_params(HIGH),
+            _wavelet_params([LOW, HIGH], 9, temporal_median_window=20),
+            _params(
+                temporal_median_window=100,
+                temporal_median_stride=10,
+                gaussian_filter_sigma=1.0,
+            ),
+        ],
+        ids=[
+            "net-gradient",
+            "net-gradient-float",
+            "per-roi-net-gradient",
+            "wavelet",
+            "per-roi-wavelet",
+            "stride",
+        ],
+    )
+    def test_info_round_trip(self, parameters):
+        info = parameters.to_info()
+        assert localize.IdentificationParameters.from_info(info) == parameters
+
+    def test_stride_is_only_recorded_when_set(self):
+        assert "Temporal Median Stride" not in _params().to_info()
+        info = _params(
+            temporal_median_window=100, temporal_median_stride=10
+        ).to_info()
+        assert info["Temporal Median Stride"] == 10
+
+    def test_from_info_of_old_metadata(self):
+        """Files written before the wavelet identification and the filters
+        name no method and no filter settings."""
+        parameters = localize.IdentificationParameters.from_info(
+            {"Box Size": 7, "Min. Net Gradient": 5000}
+        )
+        assert parameters == _params(5000, 7)
+        assert parameters.temporal_median_stride is None
+
+    def test_from_info_of_identify_metadata(self, movie):
+        """The metadata ``identify`` writes reads back as its parameters,
+        the ROI and frame bounds notwithstanding."""
+        parameters = _params(gaussian_filter_sigma=1.0)
+        _, info = localize.identify(
+            movie,
+            parameters=parameters,
+            frame_bounds=(0, 2),
+            threaded=False,
+        )
+        assert localize.IdentificationParameters.from_info(info) == parameters
+
+    @pytest.mark.parametrize(
+        "info",
+        [
+            {"Min. Net Gradient": 5000},
+            {"Box Size": 7},
+            {"Box Size": 7, "Min. Net Gradient": None},
+            {"Identification Method": "net gradient", "Box Size": 7},
+            {"Identification Method": "wavelet"},
+        ],
+    )
+    def test_from_info_missing_keys(self, info):
+        with pytest.raises(ValueError):
+            localize.IdentificationParameters.from_info(info)
+
+    def test_as_method_list(self):
+        single = localize.NetGradient(5000)
+        assert localize._as_method_list(single, 3) == [single] * 3
+        assert localize._as_method_list([single], 2) == [single] * 2
+        per_roi = _net_gradients(5000, 500)
+        assert localize._as_method_list(per_roi, 2) == per_roi
+        assert localize._as_method_list(tuple(per_roi), 2) == per_roi
+        assert localize._as_method_list([self.LOW, self.HIGH], 2) == [
+            self.LOW,
+            self.HIGH,
+        ]
+
+    def test_as_method_list_rejects_a_length_mismatch(self):
+        with pytest.raises(ValueError, match="one per ROI"):
+            localize._as_method_list(_net_gradients(1, 2, 3), 2)
+        with pytest.raises(ValueError, match="one per ROI"):
+            localize._as_method_list([self.LOW, self.HIGH], 1)
+
+    def test_as_method_list_rejects_mixed_kinds(self):
+        with pytest.raises(TypeError):
+            localize._as_method_list([NET_GRADIENT, self.LOW], 2)
+        with pytest.raises(TypeError):
+            localize._as_method_list(5000, 1)
+
+    def test_identify_rejects_a_dict(self, movie):
+        with pytest.raises(TypeError, match="IdentificationParameters"):
+            localize.identify(
+                movie,
+                parameters={"Min. Net Gradient": MIN_NG, "Box Size": BOX},
+            )
+
+    def test_localize_rejects_a_dict(self, picasso_movie, movie_info):
+        with pytest.raises(TypeError, match="IdentificationParameters"):
+            localize.localize(
+                picasso_movie,
+                camera_info=CAMERA_INFO_WITH_PIXELSIZE,
+                identification_parameters={
+                    "Min. Net Gradient": MIN_NG,
+                    "Box Size": BOX,
+                },
+                movie_info=movie_info,
+                threaded=False,
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -1437,10 +1660,7 @@ class TestLocalize:
         locs, _ = localize.localize(
             picasso_movie,
             camera_info=CAMERA_INFO_WITH_PIXELSIZE,
-            identification_parameters={
-                "Min. Net Gradient": MIN_NG,
-                "Box Size": BOX,
-            },
+            identification_parameters=_params(),
             movie_info=movie_info,
             fitting_method="gausslq",
             threaded=False,
@@ -1457,10 +1677,7 @@ class TestLocalize:
         locs, info = localize.localize(
             picasso_movie,
             camera_info=CAMERA_INFO_WITH_PIXELSIZE,
-            identification_parameters={
-                "Min. Net Gradient": MIN_NG,
-                "Box Size": BOX,
-            },
+            identification_parameters=_params(),
             movie_info=movie_info,
             fitting_method="gausslq",
             threaded=False,
@@ -1482,10 +1699,7 @@ class TestLocalize:
         ] + list(movie_info[1:])
         kwargs = dict(
             camera_info=CAMERA_INFO_WITH_PIXELSIZE,
-            identification_parameters={
-                "Min. Net Gradient": MIN_NG,
-                "Box Size": BOX,
-            },
+            identification_parameters=_params(),
             movie_info=mm_info,
             fitting_method="gausslq",
             threaded=False,
@@ -1520,10 +1734,7 @@ class TestLocalize:
         locs_high, _ = localize.localize(
             picasso_movie,
             camera_info=CAMERA_INFO_WITH_PIXELSIZE,
-            identification_parameters={
-                "Min. Net Gradient": MIN_NG,
-                "Box Size": BOX,
-            },
+            identification_parameters=_params(),
             movie_info=movie_info,
             fitting_method="gausslq",
             threaded=False,
@@ -1543,10 +1754,7 @@ class TestLocalize:
         locs, _ = localize.localize(
             picasso_movie,
             camera_info=CAMERA_INFO_WITH_PIXELSIZE,
-            identification_parameters={
-                "Min. Net Gradient": MIN_NG,
-                "Box Size": BOX,
-            },
+            identification_parameters=_params(),
             movie_info=movie_info,
             roi=roi,
             fitting_method="gausslq",
@@ -1578,7 +1786,7 @@ class TestRemovedLocalizeAPI:
             localize.localize(
                 picasso_movie,
                 CAMERA_INFO_WITH_PIXELSIZE,
-                {"Min. Net Gradient": MIN_NG, "Box Size": BOX},
+                _params(),
             )
 
     @pytest.mark.parametrize(
@@ -1594,16 +1802,13 @@ class TestRemovedLocalizeAPI:
             localize.localize(
                 picasso_movie,
                 camera_info=CAMERA_INFO_WITH_PIXELSIZE,
-                identification_parameters={
-                    "Min. Net Gradient": MIN_NG,
-                    "Box Size": BOX,
-                },
+                identification_parameters=_params(),
                 **kwarg,
             )
 
     def test_identify_return_info_rejected(self, movie):
         with pytest.raises(TypeError):
-            localize.identify(movie, MIN_NG, BOX, return_info=False)
+            localize.identify(movie, parameters=_params(), return_info=False)
 
 
 class TestLocalizeAstigmatism3D:
@@ -1614,10 +1819,7 @@ class TestLocalizeAstigmatism3D:
         return localize.localize(
             movie,
             camera_info=CAMERA_INFO_WITH_PIXELSIZE,
-            identification_parameters={
-                "Min. Net Gradient": MIN_NG,
-                "Box Size": BOX,
-            },
+            identification_parameters=_params(),
             movie_info=movie_info,
             fitting_method="gausslq",
             threaded=False,
@@ -1652,10 +1854,7 @@ class TestLocalizeAstigmatism3D:
             localize.localize(
                 picasso_movie,
                 camera_info=CAMERA_INFO_WITH_PIXELSIZE,
-                identification_parameters={
-                    "Min. Net Gradient": MIN_NG,
-                    "Box Size": BOX,
-                },
+                identification_parameters=_params(),
                 movie_info=movie_info,
                 fitting_method=fitting_method,
                 calibration_3d=dict(CALIB_3D),
@@ -6329,7 +6528,7 @@ class TestFitSplineSplitFov:
             info=info,
             camera_info=CAMERA_INFO,
             box=BOX,
-            minimum_ng=2000.0,
+            identification_method=localize.NetGradient(2000.0),
             d=20.0,
             regions=regions,
         )
@@ -6340,8 +6539,7 @@ class TestFitSplineSplitFov:
         # detect the reference-region beads on the in-focus frames
         ids, _ = localize.identify(
             movie,
-            2000.0,
-            BOX,
+            parameters=_params(2000.0),
             roi=calib["regions"][0],
             frame_bounds=(focus - 1, focus + 1),
         )
@@ -6363,7 +6561,7 @@ class TestFitSplineSplitFov:
         movie, calib, bead_xy, focus = self._movie_and_calib()
         # identify over the WHOLE frame -> detections in both halves
         ids, _ = localize.identify(
-            movie, 2000.0, BOX, frame_bounds=(focus, focus)
+            movie, parameters=_params(2000.0), frame_bounds=(focus, focus)
         )
         assert (ids["x"] >= 48).any()  # some detections are in region 1
         locs = localize.fit_spline_split_fov(
@@ -6393,8 +6591,7 @@ class TestFitSplineSplitFov:
 
         ids, _ = localize.identify(
             big,
-            2000.0,
-            BOX,
+            parameters=_params(2000.0),
             roi=ref_region,
             frame_bounds=(focus - 1, focus + 1),
         )
@@ -6411,7 +6608,7 @@ class TestFitSplineSplitFov:
         # control: without fit-time regions, the calibration's original
         # positions no longer match the data -> nothing in the reference region
         ids_all, _ = localize.identify(
-            big, 2000.0, BOX, frame_bounds=(focus, focus)
+            big, parameters=_params(2000.0), frame_bounds=(focus, focus)
         )
         locs_orig = localize.fit_spline_split_fov(
             big, CAMERA_INFO, ids_all, BOX, calib
@@ -6819,18 +7016,12 @@ class TestTemporalMedian:
 
     def test_threaded_matches_serial(self, movie):
         ids_t, _ = localize.identify(
-            movie,
-            MIN_NG,
-            BOX,
-            threaded=True,
-            temporal_median_window=11,
+            movie, parameters=_params(temporal_median_window=11), threaded=True
         )
         ids_s, _ = localize.identify(
             movie,
-            MIN_NG,
-            BOX,
+            parameters=_params(temporal_median_window=11),
             threaded=False,
-            temporal_median_window=11,
         )
         as_set = lambda ids: set(  # noqa: E731
             map(tuple, ids[["frame", "y", "x"]].to_numpy())
@@ -6839,19 +7030,22 @@ class TestTemporalMedian:
 
     def test_identify_argument_matches_explicit_wrapper(self, movie):
         ids_arg, info = localize.identify(
-            movie, MIN_NG, BOX, threaded=False, temporal_median_window=11
+            movie,
+            parameters=_params(temporal_median_window=11),
+            threaded=False,
         )
         ids_wrapped, _ = localize.identify(
             localize.TemporalMedianMovie(movie, 11, roi_pad=int(BOX / 2) + 1),
-            MIN_NG,
-            BOX,
+            parameters=_params(),
             threaded=False,
         )
         pd.testing.assert_frame_equal(ids_arg, ids_wrapped)
         assert info["Temporal Median Window"] == 11
 
     def test_info_records_zero_when_disabled(self, movie):
-        _, info = localize.identify(movie, MIN_NG, BOX, threaded=False)
+        _, info = localize.identify(
+            movie, parameters=_params(), threaded=False
+        )
         assert info["Temporal Median Window"] == 0
 
     def test_static_structure_is_removed_but_blinking_spots_survive(self):
@@ -6876,20 +7070,15 @@ class TestTemporalMedian:
         ).any()
 
         raw_ids, _ = localize.identify(
-            movie,
-            500,
-            BOX,
-            threaded=False,
+            movie, parameters=_params(500), threaded=False
         )
         assert found(raw_ids, 8, 8)
         assert found(raw_ids, 24, 24)
 
         filtered_ids, _ = localize.identify(
             movie,
-            500,
-            BOX,
+            parameters=_params(500, temporal_median_window=11),
             threaded=False,
-            temporal_median_window=11,
         )
         assert not found(filtered_ids, 8, 8)
         assert found(filtered_ids, 24, 24)
@@ -6901,7 +7090,7 @@ class TestTemporalMedian:
         filtered movie compute a whole window for nothing."""
         counting = _CountingMovie(self._movie(n_frames=10))
         ids = localize.identify_by_frame_number(
-            counting, MIN_NG, BOX, 0, frame_bounds=(5, 8)
+            counting, NET_GRADIENT, BOX, 0, frame_bounds=(5, 8)
         )
         assert len(ids) == 0
         assert counting.reads == 0
@@ -7218,42 +7407,40 @@ class TestGaussianFilter:
         as_set = lambda ids: set(  # noqa: E731
             map(tuple, ids[["frame", "y", "x"]].to_numpy())
         )
-        common = dict(gaussian_filter_sigma=1.0)
+        parameters = _params(gaussian_filter_sigma=1.0)
         ids_t, _ = localize.identify(
-            movie, MIN_NG, BOX, threaded=True, **common
+            movie, parameters=parameters, threaded=True
         )
         ids_s, _ = localize.identify(
-            movie, MIN_NG, BOX, threaded=False, **common
+            movie, parameters=parameters, threaded=False
         )
         assert as_set(ids_t) == as_set(ids_s)
 
     def test_identify_argument_matches_explicit_wrapper(self, movie):
         ids_arg, info = localize.identify(
-            movie, MIN_NG, BOX, threaded=False, gaussian_filter_sigma=1.0
+            movie,
+            parameters=_params(gaussian_filter_sigma=1.0),
+            threaded=False,
         )
         ids_wrapped, _ = localize.identify(
             localize.GaussianFilteredMovie(movie, 1.0),
-            MIN_NG,
-            BOX,
+            parameters=_params(),
             threaded=False,
         )
         pd.testing.assert_frame_equal(ids_arg, ids_wrapped)
         assert info["Gaussian Filter Sigma"] == 1.0
 
     def test_info_records_zero_when_disabled(self, movie):
-        _, info = localize.identify(movie, MIN_NG, BOX, threaded=False)
+        _, info = localize.identify(
+            movie, parameters=_params(), threaded=False
+        )
         assert info["Gaussian Filter Sigma"] == 0.0
 
     def test_fit_rejects_the_filtered_view(self, movie, movie_info):
         """The class deliberately does not implement the movie interface,
         so a filtered view reaching the fit is a loud error rather than
         silently wrong photon numbers."""
-        ids, _ = localize.identify(
-            movie,
-            MIN_NG,
-            BOX,
-            threaded=False,
-        )
+        ids, _ = localize.identify(movie, parameters=_params(), threaded=False)
         with pytest.raises(AssertionError):
             localize.fit(
                 movie=localize.GaussianFilteredMovie(movie, 1.0),
@@ -7316,11 +7503,10 @@ class TestGaussianFilter:
         def gradients(**kwargs):
             ids, _ = localize.identify(
                 movie,
-                200,
-                BOX,
+                parameters=_params(
+                    200, temporal_median_window=5, gaussian_filter_sigma=sigma
+                ),
                 threaded=False,
-                temporal_median_window=5,
-                gaussian_filter_sigma=sigma,
                 **kwargs,
             )
             return ids[ids["x"].between(29, 32)]["net_gradient"].to_numpy()
@@ -7340,11 +7526,7 @@ class TestGaussianFilter:
             sigma,
         )
         ids, _ = localize.identify(
-            too_small,
-            200,
-            BOX,
-            roi=[roi],
-            threaded=False,
+            too_small, parameters=_params(200), roi=[roi], threaded=False
         )
         starved = ids[ids["x"].between(29, 32)]["net_gradient"].to_numpy()
         assert not np.allclose(starved, whole_frame, rtol=1e-4)
@@ -7359,10 +7541,7 @@ class TestGaussianFilter:
         center = movie.shape[-1] // 2
 
         raw_ids, _ = localize.identify(
-            movie,
-            500,
-            BOX,
-            threaded=False,
+            movie, parameters=_params(500), threaded=False
         )
         assert len(raw_ids) == 2 * len(movie)
 
@@ -7370,10 +7549,8 @@ class TestGaussianFilter:
         # that re-tuning is exactly what the tooltip and docs warn about
         smoothed_ids, _ = localize.identify(
             movie,
-            50,
-            BOX,
+            parameters=_params(50, gaussian_filter_sigma=2.0),
             threaded=False,
-            gaussian_filter_sigma=2.0,
         )
         assert len(smoothed_ids) == len(movie)
         assert (smoothed_ids["x"] - center).abs().max() <= 1
@@ -7523,16 +7700,17 @@ class TestGaussianFilterGui:
                 # ... and identification still agrees with the batch run,
                 # which restricts the median to the ROI
                 preview = localize.identify_by_frame_number(
-                    filtered, 200, BOX, 3, roi=rois
+                    filtered, localize.NetGradient(200), BOX, 3, roi=rois
                 )
                 batch, _ = localize.identify(
                     movie,
-                    200,
-                    BOX,
+                    parameters=_params(
+                        200,
+                        temporal_median_window=5,
+                        gaussian_filter_sigma=sigma,
+                    ),
                     roi=rois,
                     threaded=False,
-                    temporal_median_window=5,
-                    gaussian_filter_sigma=sigma,
                 )
                 batch = batch[batch["frame"] == 3]
                 assert len(preview) == len(batch) == 1
@@ -7651,10 +7829,8 @@ class TestGaussianFilterGui:
             dialog.gaussian_filter_spinbox.setValue(1.5)
             window.identifications = localize.identify(
                 movie,
-                MIN_NG,
-                BOX,
+                parameters=_params(gaussian_filter_sigma=1.5),
                 threaded=False,
-                gaussian_filter_sigma=1.5,
             )[0]
             path = str(tmp_path / "ids.hdf5")
             window.save_identifications(path)
@@ -7746,44 +7922,60 @@ def _two_region_frame() -> np.ndarray:
 TWO_REGIONS = [[[0, 0], [64, 64]], [[0, 64], [64, 128]]]
 
 
+def _net_gradients(*minima: float) -> list[localize.NetGradient]:
+    """One net gradient identification method per ROI."""
+    return [localize.NetGradient(_) for _ in minima]
+
+
 class TestPerRoiMinNetGradient:
     """``identify_in_frame`` with one threshold per ROI (split-FOV: the
     regions are separate channels and need not share a brightness scale)."""
 
     def test_scalar_applies_to_every_roi(self):
         frame = _two_region_frame()
-        _, x, _ = localize.identify_in_frame(frame, 500, 7, TWO_REGIONS)
+        _, x, _ = localize.identify_in_frame(
+            frame, localize.NetGradient(500), 7, TWO_REGIONS
+        )
         assert sorted(x.tolist()) == [30, 94]
-        _, x, _ = localize.identify_in_frame(frame, 5000, 7, TWO_REGIONS)
+        _, x, _ = localize.identify_in_frame(
+            frame, localize.NetGradient(5000), 7, TWO_REGIONS
+        )
         assert x.tolist() == [30]  # the dim region drops out
 
     def test_each_roi_uses_its_own_threshold(self):
         frame = _two_region_frame()
         _, x, _ = localize.identify_in_frame(
-            frame, [5000, 500], 7, TWO_REGIONS
+            frame, _net_gradients(5000, 500), 7, TWO_REGIONS
         )
         assert sorted(x.tolist()) == [30, 94]
         # swapping the thresholds keeps only the bright spot: the dim one is
         # now below its region's threshold
         _, x, _ = localize.identify_in_frame(
-            frame, [500, 5000], 7, TWO_REGIONS
+            frame, _net_gradients(500, 5000), 7, TWO_REGIONS
         )
         assert x.tolist() == [30]
 
     def test_length_must_match_the_rois(self):
         frame = _two_region_frame()
-        with pytest.raises(ValueError, match="one threshold per ROI"):
-            localize.identify_in_frame(frame, [1, 2, 3], 7, TWO_REGIONS)
+        with pytest.raises(ValueError, match="one per ROI"):
+            localize.identify_in_frame(
+                frame, _net_gradients(1, 2, 3), 7, TWO_REGIONS
+            )
 
     def test_single_element_sequence_is_shared(self):
         frame = _two_region_frame()
-        _, x, _ = localize.identify_in_frame(frame, [500], 7, TWO_REGIONS)
+        _, x, _ = localize.identify_in_frame(
+            frame, _net_gradients(500), 7, TWO_REGIONS
+        )
         assert sorted(x.tolist()) == [30, 94]
 
     def test_identify_carries_the_thresholds_into_the_metadata(self):
         movie = np.stack([_two_region_frame()] * 3)
         ids, info = localize.identify(
-            movie, [5000, 500], 7, roi=TWO_REGIONS, threaded=False
+            movie,
+            parameters=_params([5000, 500], 7),
+            roi=TWO_REGIONS,
+            threaded=False,
         )
         assert info["Min. Net Gradient"] == [5000, 500]
         assert sorted(set(ids["x"])) == [30, 94]
@@ -7799,42 +7991,37 @@ class TestPerRoiWaveletSettings:
 
     def test_each_roi_uses_its_own_settings(self):
         frame = _two_region_frame()
-        _, x, _ = localize.identify_in_frame(
-            frame, None, 7, TWO_REGIONS, wavelet=self.LOW
-        )
+        _, x, _ = localize.identify_in_frame(frame, self.LOW, 7, TWO_REGIONS)
         assert sorted(x.tolist()) == [30, 94]
         _, x, _ = localize.identify_in_frame(
-            frame, None, 7, TWO_REGIONS, wavelet=[self.LOW, self.HIGH]
+            frame, [self.LOW, self.HIGH], 7, TWO_REGIONS
         )
         assert x.tolist() == [30]
         _, x, _ = localize.identify_in_frame(
-            frame, None, 7, TWO_REGIONS, wavelet=[self.HIGH, self.LOW]
+            frame, [self.HIGH, self.LOW], 7, TWO_REGIONS
         )
         assert x.tolist() == [94]
 
     def test_length_must_match_the_rois(self):
         frame = _two_region_frame()
         with pytest.raises(ValueError, match="one per ROI"):
-            localize.identify_in_frame(
-                frame, None, 7, TWO_REGIONS, wavelet=[self.LOW] * 3
-            )
+            localize.identify_in_frame(frame, [self.LOW] * 3, 7, TWO_REGIONS)
         with pytest.raises(ValueError, match="one per ROI"):
-            localize.identify_in_frame(
-                frame, None, 7, None, wavelet=[self.LOW, self.HIGH]
-            )
+            localize.identify_in_frame(frame, [self.LOW, self.HIGH], 7, None)
 
     def test_single_element_sequence_is_shared(self):
         frame = _two_region_frame()
-        _, x, _ = localize.identify_in_frame(
-            frame, None, 7, TWO_REGIONS, wavelet=[self.LOW]
-        )
+        _, x, _ = localize.identify_in_frame(frame, [self.LOW], 7, TWO_REGIONS)
         assert sorted(x.tolist()) == [30, 94]
 
     def test_metadata_round_trip(self):
         movie = np.stack([_two_region_frame()] * 3)
         settings = [self.LOW, wavelet.WaveletParameters(1.0, "w1_mad", 6)]
         ids, info = localize.identify(
-            movie, None, 7, roi=TWO_REGIONS, threaded=False, wavelet=settings
+            movie,
+            parameters=_wavelet_params(settings, box=7),
+            roi=TWO_REGIONS,
+            threaded=False,
         )
         assert info["Wavelet Threshold"] == [0.5, 1.0]
         assert info["Wavelet Noise Estimate"] == ["image_std", "w1_mad"]
@@ -7861,12 +8048,6 @@ class TestPerRoiWaveletSettings:
                     "Wavelet Min. Area": [4, 4, 4],
                 }
             )
-
-    def test_wavelet_for(self):
-        assert localize.wavelet_for(None, 1) is None
-        assert localize.wavelet_for(self.LOW, 1) == self.LOW
-        assert localize.wavelet_for([self.LOW, self.HIGH], 1) == self.HIGH
-        assert localize.wavelet_for([self.LOW], 1) == self.LOW
 
 
 @pytest.mark.gui
@@ -8037,8 +8218,7 @@ class TestPerRegionMinNetGradientGui:
             assert window.parameters["Min. Net Gradient"] == [5000, 500]
             window.identifications = localize.identify(
                 movie,
-                [5000, 500],
-                BOX,
+                parameters=_params([5000, 500]),
                 roi=TWO_REGIONS,
                 threaded=False,
             )[0]
@@ -8153,6 +8333,10 @@ def _affine_bead_grid(
     return grid + rng.uniform(-0.4, 0.4, size=grid.shape)
 
 
+# the bead detection threshold of the lateral calibrations
+LATERAL_NG = localize.NetGradient(1000)
+
+
 def _apply_homogeneous(matrix: np.ndarray, xy: np.ndarray) -> np.ndarray:
     """Apply a 3x3 homogeneous (x, y) transform to ``(n, 2)`` points."""
     return xy @ np.asarray(matrix)[:2, :2].T + np.asarray(matrix)[:2, 2]
@@ -8242,7 +8426,7 @@ class TestFitAffineTransform:
             movie_cyl,
             {},
             box=BOX,
-            minimum_ng=1000,
+            identification_method=LATERAL_NG,
             model=model,
         )
         (entry,) = lib.lateral_transforms(calibration)
@@ -8264,7 +8448,7 @@ class TestFitAffineTransform:
             movie_shifted,
             {},
             box=BOX,
-            minimum_ng=1000,
+            identification_method=LATERAL_NG,
             model="translation",
         )
         (entry,) = lib.lateral_transforms(calibration)
@@ -8282,7 +8466,7 @@ class TestFitAffineTransform:
         movie_cyl = _affine_bead_image(cyl_xy)
         # an affine (needs 3) is fine on the same data
         localize.fit_lateral_transform(
-            movie_ref, movie_cyl, {}, box=BOX, minimum_ng=1000
+            movie_ref, movie_cyl, {}, box=BOX, identification_method=LATERAL_NG
         )
         with pytest.raises(ValueError, match="polynomial3"):
             localize.fit_lateral_transform(
@@ -8290,7 +8474,7 @@ class TestFitAffineTransform:
                 movie_cyl,
                 {},
                 box=BOX,
-                minimum_ng=1000,
+                identification_method=LATERAL_NG,
                 model="polynomial3",
             )
 
@@ -8317,7 +8501,7 @@ class TestFitAffineTransform:
     def test_recovers_the_applied_transform(self, bead_movies):
         movie_ref, movie_cyl, ref_xy = bead_movies
         calibration, qc = localize.fit_lateral_transform(
-            movie_ref, movie_cyl, {}, box=BOX, minimum_ng=1000
+            movie_ref, movie_cyl, {}, box=BOX, identification_method=LATERAL_NG
         )
         (entry,) = lib.lateral_transforms(calibration)
         matrix = affine_matrix_3x3(entry["Transform"])
@@ -8337,7 +8521,7 @@ class TestFitAffineTransform:
             movie_cyl,
             calibration,
             box=BOX,
-            minimum_ng=1000,
+            identification_method=LATERAL_NG,
             pixelsize=PIXELSIZE,
             ref_path="ref.tif",
             target_path="cyl.tif",
@@ -8363,7 +8547,7 @@ class TestFitAffineTransform:
     def test_identical_movies_give_identity(self, bead_movies):
         movie_ref, _, ref_xy = bead_movies
         calibration, _ = localize.fit_lateral_transform(
-            movie_ref, movie_ref, {}, box=BOX, minimum_ng=1000
+            movie_ref, movie_ref, {}, box=BOX, identification_method=LATERAL_NG
         )
         matrix = affine_matrix_3x3(
             lib.lateral_transforms(calibration)[0]["Transform"]
@@ -8378,7 +8562,7 @@ class TestFitAffineTransform:
             movie_cyl,
             dict(CALIB_3D),  # io.load_calibration validates the 3D entries
             box=BOX,
-            minimum_ng=1000,
+            identification_method=LATERAL_NG,
             pixelsize=PIXELSIZE,
         )
         path = str(tmp_path / "calib.yaml")
@@ -8399,14 +8583,23 @@ class TestFitAffineTransform:
                     movie_target,
                     {"model": model, "n_channels": 2},
                     box=BOX,
-                    minimum_ng=1000,
+                    identification_method=LATERAL_NG,
                 )
+
+    def test_a_bare_number_is_rejected(self, bead_movies):
+        """The threshold must come as ``NetGradient(...)``: a plain number
+        does not say which identification method it belongs to."""
+        movie_ref, movie_cyl, _ = bead_movies
+        with pytest.raises(TypeError, match="NetGradient"):
+            localize.fit_lateral_transform(
+                movie_ref, movie_cyl, {}, box=BOX, identification_method=1000
+            )
 
     def test_too_few_beads_raises(self):
         movie = _affine_bead_image(np.array([[40.0, 40.0], [140.0, 140.0]]))
         with pytest.raises(ValueError, match="matched bead pair"):
             localize.fit_lateral_transform(
-                movie, movie, {}, box=BOX, minimum_ng=1000
+                movie, movie, {}, box=BOX, identification_method=LATERAL_NG
             )
 
     def test_qc_carries_the_plot_inputs(self, bead_movies):
@@ -8416,7 +8609,7 @@ class TestFitAffineTransform:
             movie_cyl,
             {},
             box=BOX,
-            minimum_ng=1000,
+            identification_method=LATERAL_NG,
             pixelsize=PIXELSIZE,
         )
         assert set(qc) == {
@@ -8467,7 +8660,7 @@ class TestFitAffineTransform:
         monkeypatch.setattr(localize.plt, "figure", _fail)
         monkeypatch.setattr(localize.plt, "show", _fail)
         localize.fit_lateral_transform(
-            movie_ref, movie_cyl, {}, box=BOX, minimum_ng=1000
+            movie_ref, movie_cyl, {}, box=BOX, identification_method=LATERAL_NG
         )
 
     def test_calibrate_wrapper_fits_and_plots(self, bead_movies, monkeypatch):
@@ -8486,7 +8679,7 @@ class TestFitAffineTransform:
             movie_cyl,
             {},
             box=BOX,
-            minimum_ng=1000,
+            identification_method=LATERAL_NG,
             pixelsize=PIXELSIZE,
             plot_path="figure.png",
         )
@@ -8687,7 +8880,7 @@ class TestCalibrateAffineDialogGUI:
             target_path="target.tif",
             calibration_path="calib.yaml",
             box=7,
-            minimum_ng=1000,
+            identification_method=LATERAL_NG,
             prompt_for_path=lambda path: (lambda *a, **k: None),
             pixelsize_prompt=lambda: None,
             transform_type="chromatic",
@@ -8738,7 +8931,7 @@ class TestAffineCalibrationWorkerGUI:
             target_path=str(tmp_path / "target.tif"),
             calibration_path=calib_path,
             box=BOX,
-            minimum_ng=1000,
+            identification_method=LATERAL_NG,
             prompt_for_path=lambda path: None,
             pixelsize_prompt=lambda: PIXELSIZE,
             transform_type=transform_type,
@@ -10880,16 +11073,15 @@ class TestUnregisteredSumTransforms:
         reference, channel = _channel_pair(
             positions, IDENTITY_AFFINE, amplitudes=(300.0, 300.0), n_frames=4
         )
-        minimum_ng = 7000
+        parameters = _params(7000)
         alone, _ = localize.identify(
-            reference, minimum_ng, BOX, threaded=False
+            reference, parameters=parameters, threaded=False
         )
         assert len(alone) == 0
         ids, _ = localize.identify_multichannel_sum(
             [reference, channel],
-            minimum_ng,
-            BOX,
             localize.unregistered_sum_transforms(2),
+            parameters=parameters,
             camera_infos=[UNIT_CAMERA] * 2,
             threaded=False,
         )
@@ -10910,16 +11102,15 @@ class TestIdentifyMultichannelSum:
         )
         # a threshold no single channel reaches (one channel's spot has a net
         # gradient of ~5000 here, the sum's ~10000)
-        minimum_ng = 7000
+        parameters = _params(7000)
         alone, _ = localize.identify(
-            reference, minimum_ng, BOX, threaded=False
+            reference, parameters=parameters, threaded=False
         )
         assert len(alone) == 0
         ids, info = localize.identify_multichannel_sum(
             [reference, channel],
-            minimum_ng,
-            BOX,
             [IDENTITY_AFFINE, transform],
+            parameters=parameters,
             camera_infos=[UNIT_CAMERA] * 2,
             threaded=False,
         )
@@ -10946,9 +11137,8 @@ class TestIdentifyMultichannelSum:
         movie = np.stack(frames)
         ids, info = localize.identify_multichannel_sum(
             [movie, movie],
-            800,
-            BOX,
             [IDENTITY_AFFINE, transform],
+            parameters=_params(800),
             camera_infos=[UNIT_CAMERA] * 2,
             regions=regions,
             threaded=False,
@@ -10974,16 +11164,16 @@ class TestIdentifyMultichannelSum:
             frame = _spots_frame((48, 96), spots)
             frames.append(frame + rng.poisson(100, frame.shape))
         movie = np.stack(frames).astype(np.float32)
-        wavelet_parameters = WAVELET if method == "wavelet" else None
+        parameters = (
+            _wavelet_params(WAVELET) if method == "wavelet" else _params(2000)
+        )
         ids, info = localize.identify_multichannel_sum(
             [movie, movie],
-            2000,
-            BOX,
             localize.unregistered_sum_transforms(2, regions),
+            parameters=parameters,
             camera_infos=[UNIT_CAMERA] * 2,
             regions=regions,
             threaded=False,
-            wavelet=wavelet_parameters,
         )
         found = set(zip(ids["x"].tolist(), ids["y"].tolist()))
         assert {(60, 15), (78, 22)} <= found
@@ -10995,7 +11185,9 @@ class TestIdentifyMultichannelSum:
         movie = np.zeros((3, 16, 16), np.float32)
         with pytest.raises(ValueError, match="cannot be mapped"):
             localize.identify_multichannel_sum(
-                [movie, movie], 100, BOX, [IDENTITY_AFFINE, None]
+                [movie, movie],
+                [IDENTITY_AFFINE, None],
+                parameters=_params(100),
             )
 
 
@@ -11411,14 +11603,15 @@ class TestChannelSumState:
             assert {(60, 15), (78, 22)} <= found
             assert ids["x"].min() > 48 + BOX // 2
             # the preview finds what the batch run found
-            parameters = window.parameters
+            parameters = localize.IdentificationParameters.from_info(
+                window.parameters
+            )
             preview = localize.identify_by_frame_number(
                 window.identification_movie(),
-                None,
-                parameters["Box Size"],
+                parameters.method,
+                parameters.box,
                 0,
                 roi=window.identification_rois(),
-                wavelet=localize.wavelet_from_parameters(parameters),
             )
             batch = ids[ids["frame"] == 0]
             assert sorted(zip(preview["x"], preview["y"])) == sorted(
@@ -12885,7 +13078,7 @@ class TestRegisterChannelsFlow:
             source="signal",
             movies=self._blinking_movies(),
             box=self.BOX,
-            minimum_ng=800.0,
+            identification_method=localize.NetGradient(800.0),
             path=path,
             model="affine",
         )
@@ -12912,7 +13105,7 @@ class TestRegisterChannelsFlow:
             source="signal",
             movies=blank,
             box=self.BOX,
-            minimum_ng=800.0,
+            identification_method=localize.NetGradient(800.0),
             path=str(tmp_path / "reg.yaml"),
         )
         failed = []
@@ -14702,12 +14895,13 @@ def _found(ids, frame):
 
 
 class TestWaveletIdentify:
-    """``localize.identify(..., wavelet=...)`` and its metadata."""
+    """``localize.identify`` with the wavelet identification method and
+    its metadata."""
 
     def test_finds_the_spots_and_has_no_net_gradient(self):
         movie, truth = _wavelet_movie()
         ids, _ = localize.identify(
-            movie, None, BOX, wavelet=WAVELET, threaded=False
+            movie, parameters=_wavelet_params(WAVELET), threaded=False
         )
         assert list(ids.columns) == ["frame", "x", "y"]
         assert all(ids[c].dtype.kind == "i" for c in ids.columns)
@@ -14718,47 +14912,36 @@ class TestWaveletIdentify:
     def test_threaded_matches_serial(self):
         movie, _ = _wavelet_movie(n_frames=8)
         serial, _ = localize.identify(
-            movie, None, BOX, wavelet=WAVELET, threaded=False
+            movie, parameters=_wavelet_params(WAVELET), threaded=False
         )
         threaded, _ = localize.identify(
-            movie, None, BOX, wavelet=WAVELET, threaded=True
+            movie, parameters=_wavelet_params(WAVELET), threaded=True
         )
         pd.testing.assert_frame_equal(
             serial.reset_index(drop=True), threaded.reset_index(drop=True)
         )
 
-    def test_the_minimum_net_gradient_is_ignored(self):
-        movie, _ = _wavelet_movie()
-        runs = [
-            localize.identify(
-                movie, minimum_ng, BOX, wavelet=WAVELET, threaded=False
-            )[0].reset_index(drop=True)
-            for minimum_ng in (None, 1e12, [1, 2, 3])
-        ]
-        pd.testing.assert_frame_equal(runs[0], runs[1])
-        pd.testing.assert_frame_equal(runs[0], runs[2])
-
     def test_a_higher_threshold_finds_no_more(self):
         movie, _ = _wavelet_movie(n_frames=2)
-        low, _ = localize.identify(movie, None, BOX, wavelet=WAVELET)
+        low, _ = localize.identify(movie, parameters=_wavelet_params(WAVELET))
         high, _ = localize.identify(
             movie,
-            None,
-            BOX,
-            wavelet=wavelet.WaveletParameters(threshold=5.0),
+            parameters=_wavelet_params(
+                wavelet.WaveletParameters(threshold=5.0)
+            ),
         )
         assert len(high) <= len(low)
 
     def test_info_records_the_method(self):
         movie, _ = _wavelet_movie(n_frames=2)
         params = wavelet.WaveletParameters(threshold=1.0, min_area=5)
-        _, info = localize.identify(movie, 5000, BOX, wavelet=params)
+        _, info = localize.identify(movie, parameters=_wavelet_params(params))
         assert info["Identification Method"] == "wavelet"
         assert info["Wavelet Threshold"] == 1.0
         assert info["Wavelet Noise Estimate"] == "image_std"
         assert info["Wavelet Min. Area"] == 5
         assert "Min. Net Gradient" not in info
-        _, info = localize.identify(movie, 5000, BOX)
+        _, info = localize.identify(movie, parameters=_params(5000))
         assert info["Identification Method"] == "net gradient"
         assert info["Min. Net Gradient"] == 5000
         assert "Wavelet Threshold" not in info
@@ -14766,7 +14949,7 @@ class TestWaveletIdentify:
     def test_frame_bounds_keep_the_schema(self):
         movie, _ = _wavelet_movie(n_frames=5)
         ids, _ = localize.identify(
-            movie, None, BOX, frame_bounds=(1, 2), wavelet=WAVELET
+            movie, parameters=_wavelet_params(WAVELET), frame_bounds=(1, 2)
         )
         assert set(ids["frame"]) == {1, 2}
         assert list(ids.columns) == ["frame", "x", "y"]
@@ -14776,9 +14959,9 @@ class TestWaveletIdentify:
         movie = np.random.default_rng(1).poisson(1000, (3, 32, 32))
         ids, _ = localize.identify(
             movie.astype(np.uint16),
-            None,
-            BOX,
-            wavelet=wavelet.WaveletParameters(threshold=10),
+            parameters=_wavelet_params(
+                wavelet.WaveletParameters(threshold=10)
+            ),
         )
         assert len(ids) == 0
         assert list(ids.columns) == ["frame", "x", "y"]
@@ -14799,7 +14982,7 @@ class TestWaveletIdentify:
         movie, truth = _wavelet_movie(n_frames=2)
         roi = [[0, 0], [48, 46]]
         ids, _ = localize.identify(
-            movie, None, BOX, roi=roi, wavelet=WAVELET, threaded=False
+            movie, parameters=_wavelet_params(WAVELET), roi=roi, threaded=False
         )
         for f, xy in enumerate(truth):
             expected = sorted(
@@ -14815,17 +14998,14 @@ class TestWaveletIdentify:
         roi = [[[10, 8], [40, 46]]]
         ids, _ = localize.identify(
             movie,
-            None,
-            BOX,
+            parameters=_wavelet_params(WAVELET, temporal_median_window=5),
             roi=roi,
-            temporal_median_window=5,
-            wavelet=WAVELET,
             threaded=False,
         )
         whole = localize.TemporalMedianMovie(movie, 5)
         for f in range(len(movie)):
             expected = localize.identify_by_frame_number(
-                whole, None, BOX, f, roi=roi, wavelet=WAVELET
+                whole, WAVELET, BOX, f, roi=roi
             )
             assert _found(ids, f) == _found(expected, f)
         assert len(ids)
@@ -14841,12 +15021,10 @@ class TestWaveletIdentify:
         )
         ids, info = localize.identify_multichannel_sum(
             [reference, channel],
-            None,
-            BOX,
             [IDENTITY_AFFINE, IDENTITY_AFFINE],
+            parameters=_wavelet_params(WAVELET),
             camera_infos=[UNIT_CAMERA] * 2,
             threaded=False,
-            wavelet=WAVELET,
         )
         assert list(ids.columns) == ["frame", "x", "y"]
         assert _found(ids, 0) == [(16, 21), (33, 28)]
@@ -14859,11 +15037,9 @@ class TestWaveletIdentify:
         locs, locs_info = localize.localize(
             picasso_movie_factory(movie, info),
             camera_info={**UNIT_CAMERA, "Pixelsize": 130},
-            identification_parameters={
-                "Box Size": BOX,
-                "Identification Method": "wavelet",
-                "Wavelet Threshold": 0.75,
-            },
+            identification_parameters=_wavelet_params(
+                wavelet.WaveletParameters(threshold=0.75)
+            ),
             movie_info=info,
             fitting_method="gausslq",
             threaded=False,
@@ -14887,7 +15063,9 @@ class TestWaveletIdentify:
         self, tmp_path, picasso_movie_factory
     ):
         movie, _ = _wavelet_movie(n_frames=3)
-        ids, info = localize.identify(movie, None, BOX, wavelet=WAVELET)
+        ids, info = localize.identify(
+            movie, parameters=_wavelet_params(WAVELET)
+        )
         path = str(tmp_path / "wavelet_identifications.hdf5")
         io.save_identifications(path, ids, [info])
         loaded, loaded_info = io.load_identifications(path)
@@ -14962,9 +15140,7 @@ class TestWaveletIdentify:
         image = _spots_frame(
             (64, 64), [(x, y, 3000.0) for x, y in xy], background=100.0
         )
-        coarse = localize._lateral_detect_beads(
-            image, BOX, None, wavelet=WAVELET
-        )
+        coarse = localize._lateral_detect_beads(image, BOX, WAVELET)
         assert sorted(map(tuple, coarse.tolist())) == sorted(
             (round(y), round(x)) for x, y in xy
         )
@@ -14972,15 +15148,15 @@ class TestWaveletIdentify:
     def test_fit_lateral_transform_passes_the_wavelet(self, monkeypatch):
         seen = []
 
-        def spy(image, box, minimum_ng, wavelet=None):
-            seen.append(wavelet)
+        def spy(image, box, identification_method):
+            seen.append(identification_method)
             raise RuntimeError("stop")
 
         monkeypatch.setattr(localize, "_lateral_detect_beads", spy)
         movie = np.zeros((1, 16, 16), dtype=np.uint16)
         with pytest.raises(RuntimeError, match="stop"):
             localize.fit_lateral_transform(
-                movie, movie, {}, box=BOX, minimum_ng=None, wavelet=WAVELET
+                movie, movie, {}, box=BOX, identification_method=WAVELET
             )
         assert seen == [WAVELET]
 
@@ -15020,7 +15196,7 @@ class TestFitsWithoutNetGradient:
     )
     def test_fit(self, fitting_method, picasso_movie_factory):
         movie, _ = _wavelet_movie(n_frames=2)
-        ids, _ = localize.identify(movie, None, BOX, wavelet=WAVELET)
+        ids, _ = localize.identify(movie, parameters=_wavelet_params(WAVELET))
         info = [{"Frames": 2, "Height": 48, "Width": 64}]
         locs, _ = localize.fit(
             picasso_movie_factory(movie, info),
@@ -15271,7 +15447,7 @@ class TestWaveletGui:
         window = self._window(dialog)
         seen = {}
 
-        def spy(**kwargs):
+        def spy(movie, **kwargs):
             seen.update(kwargs)
             return pd.DataFrame({"frame": [], "x": [], "y": []}), {}
 
@@ -15283,7 +15459,7 @@ class TestWaveletGui:
                 window, fit_afterwards=False, calibrate_z=True
             )
             worker.run()
-            assert seen["wavelet"] == WAVELET
+            assert seen["parameters"].method == WAVELET
         finally:
             dialog.close()
 

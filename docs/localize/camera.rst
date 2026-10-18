@@ -377,7 +377,9 @@ A calibration can also be selected automatically through a ``camera-calibrations
       locs, info = localize.localize(
           movie,
           camera_info=camera_info,
-          identification_parameters={"Box Size": 7, "Min. Net Gradient": 5000},
+          identification_parameters=localize.IdentificationParameters(
+              method=localize.NetGradient(5000), box=7
+          ),
           movie_info=info,
           fitting_method="gaussmle",
           camera_calibration=camera_calibration,

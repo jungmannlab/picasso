@@ -615,7 +615,10 @@ def real_identifications(movie):
     """Identifications from the bundled .raw — shared across test files."""
     from picasso import localize
 
-    return localize.identify(movie, MIN_NG, BOX)[0]
+    parameters = localize.IdentificationParameters(
+        method=localize.NetGradient(MIN_NG), box=BOX
+    )
+    return localize.identify(movie, parameters=parameters)[0]
 
 
 @pytest.fixture(scope="session")

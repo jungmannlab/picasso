@@ -35,8 +35,9 @@ Fitting can run on a CUDA-capable GPU (see :doc:`localize/gpu`). The kernels are
    :class-container: api-example
 
    Identify and fit a movie in one call and save the localizations.
-   ``identification_parameters`` takes the keys of the ``Parameters``
-   dialog; ``fitting_method`` names the PSF model and the optimizer
+   ``identification_parameters`` holds the identification settings of the
+   ``Parameters`` dialog (see :ref:`localize-identification`);
+   ``fitting_method`` names the PSF model and the optimizer
    (``gausslq``, ``gaussmle``, ``gausslq-spherical``, ``gaussmle-rotated``,
    ``spline``, ``spline-mle``, ...), with ``-gpu`` appended to fit on the
    GPU.
@@ -53,7 +54,9 @@ Fitting can run on a CUDA-capable GPU (see :doc:`localize/gpu`). The kernels are
       locs, info = localize.localize(
           movie,
           camera_info=camera_info,
-          identification_parameters={"Box Size": 7, "Min. Net Gradient": 5000},
+          identification_parameters=localize.IdentificationParameters(
+              method=localize.NetGradient(5000), box=7
+          ),
           movie_info=info,
           fitting_method="gaussmle",
       )

@@ -136,13 +136,13 @@ A calibration is built from a **bead z-stack**: image a sample of sparse, bright
 
       .. code-block:: python
 
-         from picasso import io, spline
+         from picasso import io, localize, spline
 
          movie, info = io.load_movie("beads_zstack.tif")
          camera_info = {"Baseline": 100, "Sensitivity": 0.53, "Gain": 1, "Pixelsize": 130}
          calibration = spline.calibrate_spline(
              movie, info, camera_info,
-             box=13, minimum_ng=5000,
+             box=13, identification_method=localize.NetGradient(5000),
              d=10,                               # z step in nm
              z_binning=5,
              model="spline-3d",
@@ -231,7 +231,9 @@ A 3D calibration adds the recovered ``z`` (and ``lpz``). The accompanying ``_loc
       locs, info = localize.localize(
           movie,
           camera_info=camera_info,
-          identification_parameters={"Box Size": 13, "Min. Net Gradient": 5000},
+          identification_parameters=localize.IdentificationParameters(
+              method=localize.NetGradient(5000), box=13
+          ),
           movie_info=info,
           fitting_method="spline-mle",      # "spline", "spline-mle-gpu", "spline-gpu"
           spline_calibration=spline_calibration,

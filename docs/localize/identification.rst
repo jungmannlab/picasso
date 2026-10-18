@@ -64,9 +64,12 @@ Hovering the mouse cursor over a fit marker or over an identification box shows 
    :icon: code
    :class-container: api-example
 
-   The two steps also run one after the other, with the settings of the
-   dialog as arguments. ``identify_by_frame_number`` is the ``Preview``:
-   the spots of one frame with the current settings.
+   The two steps also run one after the other. The identification
+   settings of the dialog make up one ``IdentificationParameters``: the
+   ``method`` (``NetGradient`` with the ``Min. net gradient``, or the
+   wavelet settings, see :ref:`localize-wavelet`), the ``box`` and the
+   filters. ``identify_by_frame_number`` is the ``Preview``: the spots of
+   one frame with the current settings.
 
    .. code-block:: python
 
@@ -77,12 +80,19 @@ Hovering the mouse cursor over a fit marker or over an identification box shows 
           "Baseline": 100, "Sensitivity": 0.53, "Gain": 1, "Pixelsize": 130
       }
 
-      # Preview: the spots of frame 100 with a box of 7 and a min. net gradient of 5000
-      spots = localize.identify_by_frame_number(movie, 5000, 7, 100)
+      # a box of 7 and a min. net gradient of 5000
+      parameters = localize.IdentificationParameters(
+          method=localize.NetGradient(5000), box=7
+      )
+
+      # Preview: the spots of frame 100
+      spots = localize.identify_by_frame_number(
+          movie, parameters.method, parameters.box, 100
+      )
 
       # Identification of the whole movie
       identifications, id_info = localize.identify(
-          movie, 5000, 7, progress_callback="console"
+          movie, parameters=parameters, progress_callback="console"
       )
 
       # Fitting
@@ -138,23 +148,22 @@ For a description of temporal median filtering in the wider context of SMLM anal
    :icon: code
    :class-container: api-example
 
-   ``temporal_median_window`` (``Window (frames)``) switches the filter on.
-   As in the GUI, it changes which spots are found, not how they are
-   fitted.
+   ``temporal_median_window`` (``Window (frames)``) of the
+   ``IdentificationParameters`` switches the filter on. As in the GUI, it
+   changes which spots are found, not how they are fitted.
 
    .. code-block:: python
 
-      identifications, id_info = localize.identify(
-          movie, 3000, 7, temporal_median_window=51
+      parameters = localize.IdentificationParameters(
+          method=localize.NetGradient(3000), box=7, temporal_median_window=51
       )
+      identifications, id_info = localize.identify(movie, parameters=parameters)
 
       # or for the whole pipeline
       locs, info = localize.localize(
           movie,
           camera_info=camera_info,
-          identification_parameters={
-              "Box Size": 7, "Min. Net Gradient": 3000, "Temporal Median Window": 51
-          },
+          identification_parameters=parameters,
           movie_info=info,
       )
 
@@ -183,15 +192,15 @@ Unlike the temporal median filter, the Gaussian filter *is applied when calibrat
    :icon: code
    :class-container: api-example
 
-   ``gaussian_filter_sigma`` is the ``Gaussian filter sigma`` of the
-   dialog, in camera pixels (``"Gaussian Filter Sigma"`` in
-   ``identification_parameters``).
+   ``gaussian_filter_sigma`` of the ``IdentificationParameters`` is the
+   ``Gaussian filter sigma`` of the dialog, in camera pixels.
 
    .. code-block:: python
 
-      identifications, id_info = localize.identify(
-          movie, 5000, 7, gaussian_filter_sigma=1.0
+      parameters = localize.IdentificationParameters(
+          method=localize.NetGradient(5000), box=7, gaussian_filter_sigma=1.0
       )
+      identifications, id_info = localize.identify(movie, parameters=parameters)
 
 
 .. _localize-wavelet:
@@ -243,15 +252,20 @@ Things to keep in mind:
    :icon: code
    :class-container: api-example
 
-   ``noise`` is ``"image_std"`` or ``"w1_mad"``. The net gradient argument
-   is not used by the wavelet method and can be ``None``.
+   The wavelet settings take the place of ``NetGradient`` as the
+   ``method``; ``noise`` is ``"image_std"`` or ``"w1_mad"``.
 
    .. code-block:: python
 
       from picasso import localize, wavelet
 
-      params = wavelet.WaveletParameters(threshold=0.5, noise="image_std", min_area=4)
-      identifications, id_info = localize.identify(movie, None, 7, wavelet=params)
+      parameters = localize.IdentificationParameters(
+          method=wavelet.WaveletParameters(
+              threshold=0.5, noise="image_std", min_area=4
+          ),
+          box=7,
+      )
+      identifications, id_info = localize.identify(movie, parameters=parameters)
 
 
 
@@ -281,20 +295,35 @@ If ROIs overlap, Picasso automatically trims them so that no spot is detected tw
    :class-container: api-example
 
    ROIs are given as ``[[y_min, x_min], [y_max, x_max]]`` in camera pixels;
-   ``clip_rois`` trims overlapping ones like the GUI does.
+   ``clip_rois`` trims overlapping ones like the GUI does. A list of
+   methods gives each ROI its own threshold.
 
    .. code-block:: python
 
       rois = [[[0, 0], [256, 256]], [[0, 256], [256, 512]]]
       rois = localize.clip_rois(rois, min_size=7)
 
-      identifications, id_info = localize.identify(movie, 5000, 7, roi=rois)
+      parameters = localize.IdentificationParameters(
+          method=localize.NetGradient(5000), box=7
+      )
+      identifications, id_info = localize.identify(
+          movie, parameters=parameters, roi=rois
+      )
+
+      # one threshold per ROI
+      per_roi = localize.IdentificationParameters(
+          method=[localize.NetGradient(5000), localize.NetGradient(3000)],
+          box=7,
+      )
+      identifications, id_info = localize.identify(
+          movie, parameters=per_roi, roi=rois
+      )
 
       # or for the whole pipeline; the localizations get the roi_id column
       locs, info = localize.localize(
           movie,
           camera_info=camera_info,
-          identification_parameters={"Box Size": 7, "Min. Net Gradient": 5000},
+          identification_parameters=parameters,
           roi=rois,
           movie_info=info,
       )

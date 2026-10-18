@@ -92,11 +92,12 @@ The registration is saved as a small ``.yaml`` (by default ``<movie>_channel_reg
 
    .. code-block:: python
 
-      from picasso import io, registration
+      from picasso import io, localize, registration
 
       movies = [io.load_movie(p)[0] for p in ("beads_ch0.tif", "beads_ch1.tif")]
       calibration = registration.calibrate_channel_registration_from_beads(
-          movies, box=7, minimum_ng=5000, model="affine", multi_fov=True,
+          movies, box=7, identification_method=localize.NetGradient(5000),
+          model="affine", multi_fov=True,
           path="beads_channel_reg.yaml",
       )
 
@@ -139,7 +140,12 @@ To fit every channel on its own instead — with any model, and without a regist
       camera_infos = [camera_info_ch0, camera_info_ch1]
       registration = io.load_any_calibration("beads_channel_reg.yaml")
 
-      identifications, id_info = localize.identify(movies[0], 5000, 7)
+      parameters = localize.IdentificationParameters(
+          method=localize.NetGradient(5000), box=7
+      )
+      identifications, id_info = localize.identify(
+          movies[0], parameters=parameters
+      )
       locs = localize.fit_gauss_multichannel(
           list(movies), camera_infos, identifications, box=7,
           channel_registration=registration, mle=True, link_photons=False,

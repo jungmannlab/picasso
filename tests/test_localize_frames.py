@@ -33,7 +33,9 @@ from picasso import localize
 BOX = 7
 MIN_NG = 5000
 CAMERA_INFO = {"Baseline": 0, "Sensitivity": 1, "Gain": 1, "Pixelsize": 130}
-PARAMS = {"Min. Net Gradient": MIN_NG, "Box Size": BOX}
+PARAMS = localize.IdentificationParameters(
+    method=localize.NetGradient(MIN_NG), box=BOX
+)
 
 
 def _assert_locs_equal(a: pd.DataFrame, b: pd.DataFrame) -> None:
@@ -219,7 +221,9 @@ def test_recovers_known_positions():
         bg=5.0,
         seed=42,
     )
-    params = {"Min. Net Gradient": 2000, "Box Size": 7}
+    params = localize.IdentificationParameters(
+        method=localize.NetGradient(2000), box=7
+    )
     locs = localize.localize_frames(
         frames,
         None,
@@ -262,7 +266,9 @@ def test_no_qt_on_call_path():
         frames = np.zeros((3, 16, 16), dtype=np.uint16)
         frames[:, 8, 8] = 500
         camera_info = {"Baseline": 0, "Sensitivity": 1, "Gain": 1}
-        params = {"Min. Net Gradient": 10, "Box Size": 7}
+        params = localize.IdentificationParameters(
+            method=localize.NetGradient(10), box=7
+        )
         locs = localize.localize_frames(frames, None, params,
                                         camera_info=camera_info)
         assert "frame" in locs.columns

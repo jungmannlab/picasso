@@ -25,6 +25,11 @@ from tests.conftest import (
     linear_part,
 )
 
+# Bead detection of the synthetic z-stacks, and of the blinking signal used
+# by the data-driven re-registration.
+NG = localize.NetGradient(2000.0)
+SIGNAL_NG = localize.NetGradient(800.0)
+
 # ---------------------------------------------------------------------------
 # Synthetic bead z-stack
 # ---------------------------------------------------------------------------
@@ -407,7 +412,7 @@ class TestBeadFiltering:
     def test_build_template_records_the_filtering(self):
         movie, _, _ = _synthetic_bead_movie()
         built = spline.build_psf_template(
-            movie, CAMERA_INFO, box=BOX, minimum_ng=2000.0, d=20.0
+            movie, CAMERA_INFO, box=BOX, identification_method=NG, d=20.0
         )
         quality = built["bead_quality"]
         assert len(quality["keep"]) == built["n_beads"]
@@ -417,7 +422,7 @@ class TestBeadFiltering:
     def test_inspection_data_and_rejection_reasons(self):
         movie, _, _ = _synthetic_bead_movie()
         built = spline.build_psf_template(
-            movie, CAMERA_INFO, box=BOX, minimum_ng=2000.0, d=20.0
+            movie, CAMERA_INFO, box=BOX, identification_method=NG, d=20.0
         )
         # pretend the last bead was rejected for both reasons
         quality = built["bead_quality"]
@@ -444,7 +449,7 @@ class TestBeadFiltering:
 
         movie, _, _ = _synthetic_bead_movie()
         built = spline.build_psf_template(
-            movie, CAMERA_INFO, box=BOX, minimum_ng=2000.0, d=20.0
+            movie, CAMERA_INFO, box=BOX, identification_method=NG, d=20.0
         )
         built["bead_quality"]["keep"][-1] = False
         data = spline.bead_inspection_data(
@@ -520,7 +525,7 @@ class TestBeadFiltering:
             infos=[info, info],
             camera_infos=[CAMERA_INFO, CAMERA_INFO],
             box=BOX,
-            minimum_ng=2000.0,
+            identification_method=NG,
             d=20.0,
             path=path,
             return_diagnostics=True,
@@ -550,7 +555,7 @@ class TestBeadFiltering:
             info=[{"Frames": int(movie.shape[0])}],
             camera_info=CAMERA_INFO,
             box=BOX,
-            minimum_ng=2000.0,
+            identification_method=NG,
             d=20.0,
             path=path,
             return_diagnostics=True,
@@ -570,7 +575,7 @@ class TestBuildPsfTemplate:
             movie,
             CAMERA_INFO,
             box=BOX,
-            minimum_ng=2000.0,
+            identification_method=NG,
             d=20.0,
         )
         template = built["template"]
@@ -585,6 +590,18 @@ class TestBuildPsfTemplate:
         )
         assert template.min() == pytest.approx(0.0, abs=0.1)
         assert built["effective_sigma"] > 0
+
+    def test_detection_needs_an_identification_method(self):
+        # only given bead positions make the identification method optional
+        movie, _, _ = _synthetic_bead_movie()
+        with pytest.raises(ValueError, match="identification method"):
+            spline.build_psf_template(
+                movie,
+                CAMERA_INFO,
+                box=BOX,
+                identification_method=None,
+                d=20.0,
+            )
 
 
 def _labeled_bead_movie(n_frames, fov_of=None, h=48, w=48):
@@ -756,7 +773,7 @@ class TestMultiFov:
         fov_of_frame = spline._fov_of_frame(n_frames, n_fov, "z")
         segments = spline._reference_frame_segments(step_of_frame, step_range)
         beads = spline._detect_bead_positions(
-            movie, 2000.0, BOX, segments, fov_of_frame=fov_of_frame
+            movie, NG, BOX, segments, fov_of_frame=fov_of_frame
         )
         assert "fov" in beads.columns
         # every field's beads are found (pooling would merge/lose some)
@@ -822,7 +839,7 @@ class TestMultiFov:
                 movie,
                 CAMERA_INFO,
                 box=BOX,
-                minimum_ng=2000.0,
+                identification_method=NG,
                 d=20.0,
                 frames_per_step=n_fov,
                 frame_order=order,
@@ -856,7 +873,7 @@ class TestZBinning:
             movie,
             CAMERA_INFO,
             box=BOX,
-            minimum_ng=2000.0,
+            identification_method=NG,
             d=self.D,
             beads=self._beads(bead_xy),
             return_spots=True,
@@ -889,7 +906,7 @@ class TestZBinning:
             movie,
             CAMERA_INFO,
             box=BOX,
-            minimum_ng=2000.0,
+            identification_method=NG,
             d=self.D,
             beads=beads,
             z_binning=3,
@@ -899,7 +916,7 @@ class TestZBinning:
             pre.mean(axis=1),
             CAMERA_INFO,
             box=BOX,
-            minimum_ng=2000.0,
+            identification_method=NG,
             d=3 * self.D,
             beads=beads,
         )
@@ -921,7 +938,7 @@ class TestZBinning:
             movie,
             CAMERA_INFO,
             box=BOX,
-            minimum_ng=2000.0,
+            identification_method=NG,
             d=self.D,
             frames_per_step=2,
             frame_order="fov",
@@ -945,7 +962,7 @@ class TestZBinning:
             info=[{"Frames": int(movie.shape[0])}],
             camera_info=CAMERA_INFO,
             box=BOX,
-            minimum_ng=2000.0,
+            identification_method=NG,
             d=self.D,
             z_binning=3,
         )
@@ -962,7 +979,7 @@ class TestZBinning:
             info=[{"Frames": int(movie.shape[0])}],
             camera_info=CAMERA_INFO,
             box=BOX,
-            minimum_ng=2000.0,
+            identification_method=NG,
             d=self.D,
         )
         assert calib["z_step_nm"] == pytest.approx(self.D)
@@ -977,7 +994,7 @@ class TestZBinning:
                 movie,
                 CAMERA_INFO,
                 box=BOX,
-                minimum_ng=2000.0,
+                identification_method=NG,
                 d=self.D,
                 z_binning=5,
             )
@@ -1017,7 +1034,7 @@ class TestCalibrateSpline:
             info=[{"Frames": int(movie.shape[0])}],
             camera_info=CAMERA_INFO,
             box=BOX,
-            minimum_ng=2000.0,
+            identification_method=NG,
             d=20.0,
             model="spline-3d",
             path=path,
@@ -1037,13 +1054,26 @@ class TestCalibrateSpline:
             info=[{"Frames": int(movie.shape[0])}],
             camera_info=CAMERA_INFO,
             box=BOX,
-            minimum_ng=2000.0,
+            identification_method=NG,
             d=20.0,
             model="spline-2d",
         )
         assert calib["model"] == "spline-2d"
         assert calib["coefficients"].shape[0] == 16
         assert list(calib["n_data"]) == [BOX, BOX]
+
+    def test_bare_number_is_not_an_identification_method(self):
+        # a minimum net gradient must be wrapped in localize.NetGradient
+        movie, _, _ = _synthetic_bead_movie()
+        with pytest.raises(TypeError, match="NetGradient"):
+            spline.calibrate_spline(
+                movie,
+                info=[{"Frames": int(movie.shape[0])}],
+                camera_info=CAMERA_INFO,
+                box=BOX,
+                identification_method=5000,
+                d=20.0,
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -1145,13 +1175,13 @@ class TestRansacMatch:
         )
         mid = spline._reference_mid_frame(step_of_frame, step_range)
         beads_ref = spline._detect_bead_positions(
-            movie_ref, 2000.0, BOX, ref_bounds
+            movie_ref, NG, BOX, ref_bounds
         )
         transform, n_matches = spline._estimate_channel_transform(
             movie_ref,
             movie_c,
             beads_ref,
-            2000.0,
+            NG,
             BOX,
             ref_bounds,
             mid,
@@ -1181,14 +1211,14 @@ class TestRansacMatch:
         )
         mid = spline._reference_mid_frame(step_of_frame, step_range)
         beads_ref = spline._detect_bead_positions(
-            movie_ref, 2000.0, BOX, ref_bounds
+            movie_ref, NG, BOX, ref_bounds
         )
         n_ref = len(beads_ref)
         transform, n_matches = spline._estimate_channel_transform(
             movie_ref,
             movie_c,
             beads_ref,
-            2000.0,
+            NG,
             BOX,
             ref_bounds,
             mid,
@@ -1236,7 +1266,7 @@ class TestCalibrateSplineMultichannel:
             infos=[info, info],
             camera_infos=[CAMERA_INFO, CAMERA_INFO],
             box=BOX,
-            minimum_ng=2000.0,
+            identification_method=NG,
             d=20.0,
             path=path,
             model=model,
@@ -1264,7 +1294,7 @@ class TestCalibrateSplineMultichannel:
             infos=[info, info],
             camera_infos=[CAMERA_INFO, CAMERA_INFO],
             box=BOX,
-            minimum_ng=2000.0,
+            identification_method=NG,
             d=20.0,
             photon_ratios=[[0.7, 0.3], [0.4, 0.6]],
             path=path,
@@ -1306,7 +1336,7 @@ class TestCalibrateSplineMultichannel:
             infos=[info, info],
             camera_infos=[CAMERA_INFO, CAMERA_INFO],
             box=BOX,
-            minimum_ng=2000.0,
+            identification_method=NG,
             d=d_nm,
             path=str(tmp_path / "biplane_spline_calib.hdf5"),
         )
@@ -1330,7 +1360,7 @@ class TestCalibrateSplineMultichannel:
             infos=[info, info],
             camera_infos=[CAMERA_INFO, CAMERA_INFO],
             box=BOX,
-            minimum_ng=2000.0,
+            identification_method=NG,
             d=20.0,
             path=str(tmp_path / "mirrored_spline_calib.hdf5"),
         )
@@ -1365,7 +1395,7 @@ class TestCalibrateSplineMultichannel:
             infos=[info, info],
             camera_infos=[CAMERA_INFO, CAMERA_INFO],
             box=BOX,
-            minimum_ng=2000.0,
+            identification_method=NG,
             d=20.0,
         )
         # rebuild each channel's per-frame spots at its (mapped) bead positions,
@@ -1376,7 +1406,7 @@ class TestCalibrateSplineMultichannel:
             movie_ref.shape[0], 20.0, 1, "fov", None
         )
         rb = spline._reference_frame_segments(step_of_frame, step_range)
-        beads_ref = spline._detect_bead_positions(movie_ref, 2000.0, BOX, rb)
+        beads_ref = spline._detect_bead_positions(movie_ref, NG, BOX, rb)
         ref_xy = beads_ref[["x", "y"]].to_numpy(float)
         per_channel = []
         for c, m in enumerate(movies):
@@ -1395,7 +1425,7 @@ class TestCalibrateSplineMultichannel:
                     m,
                     CAMERA_INFO,
                     BOX,
-                    2000.0,
+                    NG,
                     20.0,
                     beads=beads_c,
                     return_spots=True,
@@ -1502,7 +1532,7 @@ class TestChannelTransformMultiFov:
 
         beads_ref = spline._detect_bead_positions(
             movie,
-            2000.0,
+            NG,
             BOX,
             ref_bounds,
             roi=ref_roi,
@@ -1525,7 +1555,7 @@ class TestChannelTransformMultiFov:
                 movie,
                 movie,
                 beads_ref,
-                2000.0,
+                NG,
                 BOX,
                 ref_bounds,
                 mid,
@@ -1638,7 +1668,7 @@ class TestChannelTransformMultiFov:
         mid = spline._reference_mid_frame(step_of_frame, step_range)
         beads_ref = spline._detect_bead_positions(
             movie,
-            2000.0,
+            NG,
             BOX,
             ref_bounds,
             roi=spline._normalized_region(regions[0]),
@@ -1670,7 +1700,7 @@ class TestChannelTransformMultiFov:
                     movie,
                     movie,
                     beads_ref,
-                    2000.0,
+                    NG,
                     BOX,
                     ref_bounds,
                     mid,
@@ -1717,14 +1747,14 @@ class TestSplitFovTransform:
         ref_roi = spline._normalized_region(regions[0])
         chan_roi = spline._normalized_region(regions[1])
         beads_ref = spline._detect_bead_positions(
-            movie, 2000.0, BOX, ref_bounds, roi=ref_roi
+            movie, NG, BOX, ref_bounds, roi=ref_roi
         )
         # coarse shift = (x0_ref - x0_c, y0_ref - y0_c) = (0 - 48, 0 - 0)
         transform, n_matches = spline._estimate_channel_transform(
             movie,
             movie,
             beads_ref,
-            2000.0,
+            NG,
             BOX,
             ref_bounds,
             mid,
@@ -1757,14 +1787,14 @@ class TestSplitFovTransform:
         ref_roi = spline._normalized_region(regions[0])
         chan_roi = spline._normalized_region(regions[1])
         beads_ref = spline._detect_bead_positions(
-            movie, 2000.0, BOX, ref_bounds, roi=ref_roi
+            movie, NG, BOX, ref_bounds, roi=ref_roi
         )
         n_ref = len(beads_ref)
         transform, n_matches = spline._estimate_channel_transform(
             movie,
             movie,
             beads_ref,
-            2000.0,
+            NG,
             BOX,
             ref_bounds,
             mid,
@@ -1808,7 +1838,7 @@ class TestCalibrateSplitFov:
             info=info,
             camera_info=CAMERA_INFO,
             box=BOX,
-            minimum_ng=2000.0,
+            identification_method=NG,
             d=20.0,
             regions=regions,
             path=path,
@@ -1840,7 +1870,7 @@ class TestCalibrateSplitFov:
             info=info,
             camera_info=CAMERA_INFO,
             box=BOX,
-            minimum_ng=2000.0,
+            identification_method=NG,
             d=20.0,
             regions=regions,
             reference=1,
@@ -1862,7 +1892,7 @@ class TestCalibrateSplitFov:
             info=info,
             camera_info=CAMERA_INFO,
             box=BOX,
-            minimum_ng=2000.0,
+            identification_method=NG,
             d=20.0,
             regions=regions,
             path=str(path),
@@ -1884,7 +1914,7 @@ class TestCalibrateSplitFov:
                 info=info,
                 camera_info=CAMERA_INFO,
                 box=BOX,
-                minimum_ng=2000.0,
+                identification_method=NG,
                 d=20.0,
                 regions=regions,
             )
@@ -1955,7 +1985,7 @@ class TestRefineSplitFovTransformsFromSignal:
             ],
         }
         updated, reg_info = spline.refine_split_fov_transforms_from_signal(
-            movie, calib, regions, minimum_ng=800.0, box=BOX
+            movie, calib, regions, identification_method=SIGNAL_NG, box=BOX
         )
         # only ~50 frames are sampled (not all 150), so expect fewer pairs
         assert reg_info[0]["n_matches"] >= 40
@@ -1994,7 +2024,7 @@ class TestRefineSplitFovTransformsFromSignal:
             ],
         }
         updated, reg_info = spline.refine_split_fov_transforms_from_signal(
-            movie, calib, regions, minimum_ng=800.0, box=BOX
+            movie, calib, regions, identification_method=SIGNAL_NG, box=BOX
         )
         assert reg_info[0]["n_matches"] >= 40
         assert reg_info[0]["rms"] < 1.0
@@ -2036,7 +2066,7 @@ class TestRefineSplitFovTransformsFromSignal:
                 movie,
                 calib,
                 [[[0, 0], [48, 48]], [[0, 48], [48, 96]]],
-                minimum_ng=800.0,
+                identification_method=SIGNAL_NG,
                 box=BOX,
             )
 
@@ -2103,7 +2133,7 @@ class TestRefineMultichannelTransformsFromSignal:
         }
         seed = affine_matrix(calib["channel_transforms"][1])
         updated, reg_info = spline.refine_multichannel_transforms_from_signal(
-            movies, calib, minimum_ng=800.0, box=BOX
+            movies, calib, identification_method=SIGNAL_NG, box=BOX
         )
         # only ~50 frames are sampled (not all 150), so expect fewer pairs
         assert reg_info[0]["n_matches"] >= 40
@@ -2117,6 +2147,59 @@ class TestRefineMultichannelTransformsFromSignal:
             np.abs(fitted - true_transform).max()
             < 0.5 * np.abs(seed - true_transform).max()
         )
+
+    def test_per_channel_identification_methods(self, monkeypatch):
+        # each channel, the reference included, detects with its own entry
+        truth = np.array([[1.0, 0.0, 2.0], [0.0, 1.0, -1.5]])
+        movies = self._blinking_movies(truth)
+        calib = {
+            "n_channels": 2,
+            "box": BOX,
+            "n_data": [BOX, BOX, 1],
+            "channel_transforms": [
+                IDENTITY,
+                affine([[1.0, 0.0, 1.0], [0.0, 1.0, 0.0]]).to_dict(),
+            ],
+        }
+        methods = [localize.NetGradient(800.0), localize.NetGradient(850.0)]
+        used = {}
+        original = spline._movie_detections_by_frame
+
+        def spy(movie, sample_frames, identification_method, box):
+            channel = next(c for c, m in enumerate(movies) if m is movie)
+            used[channel] = identification_method
+            return original(movie, sample_frames, identification_method, box)
+
+        monkeypatch.setattr(spline, "_movie_detections_by_frame", spy)
+        updated, reg_info = spline.refine_multichannel_transforms_from_signal(
+            movies, calib, identification_method=methods, box=BOX
+        )
+        assert used == {0: methods[0], 1: methods[1]}
+        assert reg_info[0]["n_matches"] >= 40
+        np.testing.assert_allclose(
+            affine_matrix(updated["channel_transforms"][1]), truth, atol=0.35
+        )
+
+    def test_rejects_wrong_number_of_methods(self):
+        movies = self._blinking_movies(
+            np.array([[1.0, 0.0, 1.0], [0.0, 1.0, 0.0]]), n_frames=10
+        )
+        calib = {
+            "n_channels": 2,
+            "box": BOX,
+            "n_data": [BOX, BOX, 1],
+            "channel_transforms": [
+                IDENTITY,
+                affine([[1.0, 0.0, 1.0], [0.0, 1.0, 0.0]]).to_dict(),
+            ],
+        }
+        with pytest.raises(ValueError, match="identification methods"):
+            spline.refine_multichannel_transforms_from_signal(
+                movies,
+                calib,
+                identification_method=[SIGNAL_NG] * 3,
+                box=BOX,
+            )
 
     def test_rejects_split_fov_calibration(self):
         movies = self._blinking_movies(
@@ -2132,7 +2215,7 @@ class TestRefineMultichannelTransformsFromSignal:
         }
         with pytest.raises(ValueError):
             spline.refine_multichannel_transforms_from_signal(
-                movies, calib, minimum_ng=800.0, box=BOX
+                movies, calib, identification_method=SIGNAL_NG, box=BOX
             )
 
     def test_raises_without_shared_signal(self):
@@ -2159,7 +2242,10 @@ class TestRefineMultichannelTransformsFromSignal:
         }
         with pytest.raises(ValueError):
             spline.refine_multichannel_transforms_from_signal(
-                [ref_movie, c_movie], calib, minimum_ng=800.0, box=BOX
+                [ref_movie, c_movie],
+                calib,
+                identification_method=SIGNAL_NG,
+                box=BOX,
             )
 
 
@@ -2217,7 +2303,7 @@ class TestCliWiring:
             info=[{"Frames": int(movie.shape[0])}],
             camera_info=CAMERA_INFO,
             box=BOX,
-            minimum_ng=2000.0,
+            identification_method=NG,
             d=20.0,
             path=path,
         )
@@ -2326,7 +2412,7 @@ class TestGuiWiring:
 
         movie, _, _ = _synthetic_bead_movie()
         built = spline.build_psf_template(
-            movie, CAMERA_INFO, box=BOX, minimum_ng=2000.0, d=20.0
+            movie, CAMERA_INFO, box=BOX, identification_method=NG, d=20.0
         )
         built["bead_quality"]["keep"][-1] = False
         data = spline.bead_inspection_data(
@@ -2354,7 +2440,7 @@ class TestGuiWiring:
 
         movie, _, _ = _synthetic_bead_movie()
         built = spline.build_psf_template(
-            movie, CAMERA_INFO, box=BOX, minimum_ng=2000.0, d=20.0
+            movie, CAMERA_INFO, box=BOX, identification_method=NG, d=20.0
         )
         data = spline.bead_inspection_data(
             built, {"z_center": float(built["z_center"]), "pixelsize": 130.0}
@@ -2449,8 +2535,8 @@ class TestGuiWiring:
 
 class TestWaveletDetection:
     """Every calibration entry point detects by wavelet segmentation when
-    given ``wavelet`` (the method selected for the movie), and then needs no
-    minimum net gradient."""
+    its identification method is a ``wavelet.WaveletParameters`` (the method
+    selected for the movie)."""
 
     WAVELET = wavelet.WaveletParameters()
 
@@ -2461,16 +2547,15 @@ class TestWaveletDetection:
             info=[{"Frames": int(movie.shape[0])}],
             camera_info=CAMERA_INFO,
             box=BOX,
-            minimum_ng=None,
+            identification_method=self.WAVELET,
             d=20.0,
-            wavelet=self.WAVELET,
         )
         assert calib["n_beads"] == len(bead_xy)
 
     def test_detect_bead_positions(self):
         movie, bead_xy, focus = _synthetic_bead_movie()
         beads = spline._detect_bead_positions(
-            movie, None, BOX, (focus - 2, focus + 2), wavelet=self.WAVELET
+            movie, self.WAVELET, BOX, (focus - 2, focus + 2)
         )
         assert sorted(zip(beads["x"], beads["y"])) == sorted(bead_xy)
 
@@ -2483,9 +2568,8 @@ class TestWaveletDetection:
             infos=[info, info],
             camera_infos=[CAMERA_INFO, CAMERA_INFO],
             box=BOX,
-            minimum_ng=None,
+            identification_method=self.WAVELET,
             d=20.0,
-            wavelet=self.WAVELET,
         )
         probe = np.array([[20.0, 20.0]])
         shifted = transforms.from_dict(calib["channel_transforms"][1])
@@ -2506,12 +2590,11 @@ class TestWaveletDetection:
             [{}],
             CAMERA_INFO,
             BOX,
-            None,
+            self.WAVELET,
             20.0,
             regions=[[[0, 0], [16, 16]], [[0, 16], [16, 32]]],
-            wavelet=self.WAVELET,
         )
-        assert seen["wavelet"] is self.WAVELET
+        assert seen["identification_method"] is self.WAVELET
 
     def test_refine_multichannel_transforms_from_signal(self):
         truth = np.array([[1.0, 0.0, 2.0], [0.0, 1.0, -1.5]])
@@ -2528,7 +2611,7 @@ class TestWaveletDetection:
             ],
         }
         updated, reg_info = spline.refine_multichannel_transforms_from_signal(
-            movies, calib, minimum_ng=None, box=BOX, wavelet=self.WAVELET
+            movies, calib, identification_method=self.WAVELET, box=BOX
         )
         assert reg_info[0]["n_matches"] >= 40
         np.testing.assert_allclose(
@@ -2556,9 +2639,8 @@ class TestWaveletDetection:
             movie,
             calib,
             regions,
-            minimum_ng=None,
+            identification_method=self.WAVELET,
             box=BOX,
-            wavelet=self.WAVELET,
         )
         assert reg_info[0]["n_matches"] >= 40
         # the detections are integer box centers, as for the net gradient,

@@ -21,6 +21,11 @@ from . import deprecation, docs_url
 from .transforms import MODELS as TRANSFORM_MODELS
 
 if TYPE_CHECKING:  # imported lazily, like every analysis module here
+    from .localize import (
+        IdentificationMethod,
+        IdentificationParameters,
+        NetGradient,
+    )
     from .wavelet import WaveletParameters
 
 
@@ -1941,6 +1946,40 @@ def _wavelet_from_args(
     )
 
 
+def _identification_method_from_args(
+    args: argparse.Namespace,
+    min_net_gradient: float | list[float],
+) -> IdentificationMethod | list[NetGradient]:
+    """The identification method given on the command line: the wavelet
+    settings with ``--identification-method wavelet``, else the minimum
+    net gradient (one per ROI region if a list)."""
+    from .localize import NetGradient
+
+    method = _wavelet_from_args(args)
+    if method is not None:
+        return method
+    if isinstance(min_net_gradient, (list, tuple)):
+        return [NetGradient(_) for _ in min_net_gradient]
+    return NetGradient(min_net_gradient)
+
+
+def _identification_parameters_from_args(
+    args: argparse.Namespace,
+    box: int,
+    min_net_gradient: float | list[float],
+) -> IdentificationParameters:
+    """The identification settings given on the command line, see
+    ``_identification_method_from_args``."""
+    from .localize import IdentificationParameters
+
+    return IdentificationParameters(
+        method=_identification_method_from_args(args, min_net_gradient),
+        box=box,
+        temporal_median_window=args.temporal_median or 0,
+        gaussian_filter_sigma=args.gaussian_filter or 0.0,
+    )
+
+
 def _localize_process_file(
     paths: str | list[str],
     i: int,
@@ -2063,23 +2102,12 @@ def _localize_process_file(
             camera_calibration=camera_calibration,
             lateral_transforms=lateral_transforms,
         )
-    parameters = {
-        "Min. Net Gradient": min_net_gradient,
-        "Box Size": box,
-        "Temporal Median Window": args.temporal_median,
-        "Gaussian Filter Sigma": args.gaussian_filter,
-    }
-    wavelet = _wavelet_from_args(args)
-    if wavelet is not None:
-        from .localize import IDENTIFY_METHOD_WAVELET
-
-        parameters["Identification Method"] = IDENTIFY_METHOD_WAVELET
-        parameters.update(wavelet.to_info())
-
     locs, info = localize(
         movie,
         camera_info=cam_info,
-        identification_parameters=parameters,
+        identification_parameters=_identification_parameters_from_args(
+            args, box, min_net_gradient
+        ),
         roi=roi,
         frame_bounds=frame_bounds,
         movie_info=info,
@@ -2186,14 +2214,12 @@ def _localize_regions(
 
     identifications, identify_info = identify(
         movie,
-        min_net_gradient,
-        box,
+        parameters=_identification_parameters_from_args(
+            args, box, min_net_gradient
+        ),
         roi=roi,
         frame_bounds=frame_bounds,
         threaded=True,
-        temporal_median_window=args.temporal_median,
-        gaussian_filter_sigma=args.gaussian_filter,
-        wavelet=_wavelet_from_args(args),
         progress_callback="console",
     )
     print(
@@ -2838,7 +2864,9 @@ def _spline_calibrate_split_fov(
         info=info,
         camera_info=camera_info,
         box=args.box_side_length,
-        minimum_ng=args.gradient,
+        identification_method=_identification_method_from_args(
+            args, args.gradient
+        ),
         d=args.step,
         regions=regions,
         reference=getattr(args, "reference", 0) or 0,
@@ -2851,7 +2879,6 @@ def _spline_calibrate_split_fov(
         model=registration,
         path=out_path,
         progress_callback=lambda i: print(f"  step {i}/3"),
-        wavelet=_wavelet_from_args(args),
     )
 
 
@@ -2868,7 +2895,9 @@ def _spline_calibrate_single(
         info=info,
         camera_info=camera_info,
         box=args.box_side_length,
-        minimum_ng=args.gradient,
+        identification_method=_identification_method_from_args(
+            args, args.gradient
+        ),
         d=args.step,
         frames_per_step=args.frames_per_step,
         frame_order=args.frame_order,
@@ -2878,7 +2907,6 @@ def _spline_calibrate_single(
         correct_z_bias=args.correct_z_bias,
         path=out_path,
         progress_callback=lambda i: print(f"  step {i}/3"),
-        wavelet=_wavelet_from_args(args),
     )
 
 
@@ -2901,7 +2929,9 @@ def _spline_calibrate_multichannel(
         infos=infos,
         camera_infos=camera_infos,
         box=args.box_side_length,
-        minimum_ng=args.gradient,
+        identification_method=_identification_method_from_args(
+            args, args.gradient
+        ),
         d=args.step,
         frames_per_step=args.frames_per_step,
         frame_order=args.frame_order,
@@ -2912,7 +2942,6 @@ def _spline_calibrate_multichannel(
         model=registration,
         path=out_path,
         progress_callback=lambda i: print(f"  step {i}/3"),
-        wavelet=_wavelet_from_args(args),
     )
 
 
@@ -2998,13 +3027,14 @@ def _lateral_calibrate(args: argparse.Namespace) -> None:
         movie_target,
         calibration,
         box=args.box_side_length,
-        minimum_ng=args.gradient,
+        identification_method=_identification_method_from_args(
+            args, args.gradient
+        ),
         pixelsize=args.pixelsize,
         transform_type=args.type,
         ref_path=args.reference,
         target_path=args.target,
         model=args.model,
-        wavelet=_wavelet_from_args(args),
     )
     if args.plot:
         localize.plot_lateral_calibration(qc, save_path=args.plot)

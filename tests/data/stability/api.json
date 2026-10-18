@@ -165,6 +165,8 @@
  "picasso.localize": [
   "FIT_METHODS",
   "IDENTIFY_METHODS",
+  "IdentificationParameters",
+  "NetGradient",
   "localize",
   "localize_frames",
   "identify",

@@ -7215,17 +7215,11 @@ class Window(QtWidgets.QMainWindow):
             transform_type=transform_type,
             model=model,
             box=self.parameters["Box Size"],
-            minimum_ng=self.parameters_dialog.mng_slider.value(),
+            # the bead images are no split-FOV regions, so the dialog's
+            # single settings apply
+            identification_method=self._shared_identification_method(),
             prompt_for_path=self._prompt_for_path,
             pixelsize_prompt=_pixelsize_prompt,
-            # the bead images are no split-FOV regions: like the threshold
-            # above, the wavelet settings are the dialog's single set
-            wavelet=(
-                self.parameters_dialog.wavelet_settings()
-                if self.parameters["Identification Method"]
-                == localize.IDENTIFY_METHOD_WAVELET
-                else None
-            ),
         )
         worker.statusChanged.connect(self.status_bar.showMessage)
         worker.promptRequested.connect(self._on_affine_prompt_requested)
@@ -7528,11 +7522,12 @@ class Window(QtWidgets.QMainWindow):
             source=source,
             movies=movies,
             box=self.parameters["Box Size"],
-            minimum_ng=self.parameters["Min. Net Gradient"],
+            identification_method=localize.IdentificationParameters.from_info(
+                self.parameters
+            ).method,
             channel_paths=channel_paths,
             regions=regions,
             path=path,
-            wavelet=localize.wavelet_from_parameters(self.parameters),
             **kwargs,
         )
         self.registration_worker.statusChanged.connect(
@@ -7841,8 +7836,9 @@ class Window(QtWidgets.QMainWindow):
             info=self.info,
             camera_info=self.camera_info,
             box=parameters["Box Size"],
-            minimum_ng=parameters["Min. Net Gradient"],
-            wavelet=localize.wavelet_from_parameters(parameters),
+            identification_method=localize.IdentificationParameters.from_info(
+                parameters
+            ).method,
             step=step,
             frames_per_step=frames_per_step,
             frame_order=frame_order,
@@ -9406,19 +9402,20 @@ class Window(QtWidgets.QMainWindow):
                 QtCore.Qt.CursorShape.WaitCursor
             )
             try:
-                parameters = self.parameters
+                parameters = localize.IdentificationParameters.from_info(
+                    self.parameters
+                )
                 identifications_frame = localize.identify_by_frame_number(
                     self.identification_movie(),
-                    parameters["Min. Net Gradient"],
-                    parameters["Box Size"],
+                    parameters.method,
+                    parameters.box,
                     self.curr_frame_number,
                     roi=self.identification_rois(),
                     frame_bounds=self.frame_range,
-                    wavelet=localize.wavelet_from_parameters(parameters),
                 )
                 self.draw_preview_identifications(
                     identifications_frame,
-                    parameters["Box Size"],
+                    parameters.box,
                 )
             finally:
                 QtWidgets.QApplication.restoreOverrideCursor()
@@ -9690,14 +9687,16 @@ class Window(QtWidgets.QMainWindow):
         if cached is not None and cached[0] == key:
             return cached[1]
         try:
+            identification = localize.IdentificationParameters.from_info(
+                parameters
+            )
             identifications = localize.identify_by_frame_number(
                 self.channel_identification_movie(channel),
-                parameters["Min. Net Gradient"],
-                parameters["Box Size"],
+                identification.method,
+                identification.box,
                 frame_number,
                 roi=rois,
                 frame_bounds=self.frame_range,
-                wavelet=localize.wavelet_from_parameters(parameters),
             )
         except Exception:
             # another channel's movie must never break the display; without
@@ -10514,6 +10513,15 @@ class Window(QtWidgets.QMainWindow):
         view.roi_mngs = mngs
         return mngs
 
+    def _shared_identification_method(self) -> localize.IdentificationMethod:
+        """The identification method of the Parameters dialog with its
+        single (not per-region) settings: the wavelet settings, or the
+        minimum net gradient of the slider."""
+        dialog = self.parameters_dialog
+        if dialog.identification_method() == localize.IDENTIFY_METHOD_WAVELET:
+            return dialog.wavelet_settings()
+        return localize.NetGradient(dialog.mng_slider.value())
+
     def _region_wavelet_info(self) -> dict:
         """The wavelet settings under the identification parameter keys: one
         list per key in split-FOV mode (one value per region, see
@@ -10723,16 +10731,16 @@ class Window(QtWidgets.QMainWindow):
         The settings of both methods are always present; the metadata
         written to disk keeps only those of the method used (see
         ``localize.identification_info``), and ``localize.
-        wavelet_from_parameters`` turns them into what ``localize.identify``
-        takes.
+        IdentificationParameters.from_info`` turns them into what
+        ``localize.identify`` takes.
 
         In split-FOV mode "Min. Net Gradient" is the list of per-region
         thresholds (see ``region_mngs``) rather than a single number, and
         each wavelet setting a list of per-region values (see
-        ``region_wavelets``); every consumer passes them straight to
-        ``localize.identify``, which accepts one threshold (and one set of
-        wavelet settings) per ROI. Identifying on the channel sum searches
-        one image, so it takes the single shared settings instead.
+        ``region_wavelets``), which ``IdentificationParameters.from_info``
+        turns into one identification method per ROI. Identifying on the
+        channel sum searches one image, so it takes the single shared
+        settings instead.
 
         Every key is compared in ``identifications_outdated`` and stored
         in ``last_identification_info``, so adding one here is enough for
@@ -12809,21 +12817,21 @@ class Window(QtWidgets.QMainWindow):
             return None
 
         n_movie_frames = len(self.movie)
-        # per-region thresholds only apply when the regions being refined
+        # per-region settings only apply when the regions being refined
         # are the drawn ones; the calibration's own regions get the
-        # single slider value
-        minimum_ng = self.parameters["Min. Net Gradient"]
-        if not (
-            isinstance(minimum_ng, list) and len(minimum_ng) == n_channels
-        ):
-            minimum_ng = self.parameters_dialog.mng_slider.value()
-        return regions, n_movie_frames, minimum_ng
+        # dialog's single settings
+        method = localize.IdentificationParameters.from_info(
+            self.parameters
+        ).method
+        if not (isinstance(method, tuple) and len(method) == n_channels):
+            method = self._shared_identification_method()
+        return regions, n_movie_frames, method
 
     def _refine_split_fov_from_signal(
         self,
         calibration: dict,
         regions: list,
-        minimum_ng,
+        identification_method,
         frame_bounds,
         max_frames: int,
         model: str,
@@ -12834,12 +12842,11 @@ class Window(QtWidgets.QMainWindow):
             self.movie,
             calibration,
             regions,
-            minimum_ng=minimum_ng,
+            identification_method=identification_method,
             box=self.parameters["Box Size"],
             frame_bounds=frame_bounds,
             max_frames=max_frames,
             model=model,
-            wavelet=localize.wavelet_from_parameters(self.parameters),
         )
 
     def _reregister_multichannel_inputs(
@@ -12883,12 +12890,13 @@ class Window(QtWidgets.QMainWindow):
         return spline.refine_multichannel_transforms_from_signal(
             movies,
             calibration,
-            minimum_ng=self.parameters["Min. Net Gradient"],
+            identification_method=localize.IdentificationParameters.from_info(
+                self.parameters
+            ).method,
             box=self.parameters["Box Size"],
             frame_bounds=frame_bounds,
             max_frames=max_frames,
             model=model,
-            wavelet=localize.wavelet_from_parameters(self.parameters),
         )
 
     def _run_signal_refine(
@@ -12985,13 +12993,13 @@ class Window(QtWidgets.QMainWindow):
             setup = self._reregister_split_fov_inputs(calibration, title)
             if setup is None:
                 return
-            regions, n_movie_frames, minimum_ng = setup
+            regions, n_movie_frames, method = setup
 
             def _refine(frame_bounds, max_frames, model):
                 return self._refine_split_fov_from_signal(
                     calibration,
                     regions,
-                    minimum_ng,
+                    method,
                     frame_bounds,
                     max_frames,
                     model,
@@ -13832,15 +13840,13 @@ class IdentificationWorker(QtCore.QThread):
         # we ignore info since we will merge the metadata from identification
         # as well when saving localizations
         result = localize.identify(
-            movie=self.movie,
-            minimum_ng=self.parameters["Min. Net Gradient"],
-            box=self.parameters["Box Size"],
+            self.movie,
+            parameters=localize.IdentificationParameters.from_info(
+                self.parameters
+            ),
             roi=self.rois,
             frame_bounds=self.frame_range,
             threaded=True,
-            temporal_median_window=self.parameters["Temporal Median Window"],
-            gaussian_filter_sigma=self.parameters["Gaussian Filter Sigma"],
-            wavelet=localize.wavelet_from_parameters(self.parameters),
             progress_callback=self.on_progress,
             abort_callback=self.isInterruptionRequested,
         )
@@ -14585,7 +14591,7 @@ class ChannelRegistrationWorker(QtCore.QThread):
         source: str,
         movies: list,
         box: int,
-        minimum_ng: float,
+        identification_method: localize.IdentificationMethod | tuple,
         path: str,
         model: str = "affine",
         channel_paths: list | None = None,
@@ -14594,7 +14600,6 @@ class ChannelRegistrationWorker(QtCore.QThread):
         seed_transforms: list | None = None,
         regions: list | None = None,
         multi_fov: bool = False,
-        wavelet: wavelet.WaveletParameters | None = None,
     ) -> None:
         """Set up a channel-registration measurement.
 
@@ -14608,8 +14613,9 @@ class ChannelRegistrationWorker(QtCore.QThread):
             them: the bead builder takes them as the bead images.
         box : int
             Box side length (camera pixels) used to detect and fit.
-        minimum_ng : float
-            Minimum net gradient for a detection.
+        identification_method : NetGradient, WaveletParameters or tuple
+            How the spots are detected, shared or one per channel, see
+            ``localize.IdentificationParameters``.
         path : str
             Where to save the resulting registration (YAML).
         model : str, optional
@@ -14633,16 +14639,12 @@ class ChannelRegistrationWorker(QtCore.QThread):
             Beads only: each frame of the bead movie is a different field of
             view, so beads are paired within a frame rather than the frames
             being averaged. Default False.
-        wavelet : wavelet.WaveletParameters, optional
-            Detect by wavelet segmentation with these settings instead of
-            by the net gradient (``minimum_ng`` is then ignored). Default
-            None.
         """
         super().__init__()
         self.source = source
         self.movies = movies
         self.box = box
-        self.minimum_ng = minimum_ng
+        self.identification_method = identification_method
         self.path = path
         self.model = model
         self.channel_paths = channel_paths
@@ -14651,7 +14653,6 @@ class ChannelRegistrationWorker(QtCore.QThread):
         self.seed_transforms = seed_transforms
         self.regions = regions
         self.multi_fov = multi_fov
-        self.wavelet = wavelet
 
     def run(self) -> None:
         """Measure and save the registration.
@@ -14665,13 +14666,12 @@ class ChannelRegistrationWorker(QtCore.QThread):
                 registration.calibrate_channel_registration_from_beads(
                     self.movies,
                     box=self.box,
-                    minimum_ng=self.minimum_ng,
+                    identification_method=self.identification_method,
                     model=self.model,
                     regions=self.regions,
                     multi_fov=self.multi_fov,
                     channel_paths=self.channel_paths,
                     path=self.path,
-                    wavelet=self.wavelet,
                 )
             else:
                 self.statusChanged.emit(
@@ -14680,7 +14680,7 @@ class ChannelRegistrationWorker(QtCore.QThread):
                 registration.calibrate_channel_registration_from_signal(
                     self.movies,
                     box=self.box,
-                    minimum_ng=self.minimum_ng,
+                    identification_method=self.identification_method,
                     model=self.model,
                     frame_bounds=self.frame_bounds,
                     max_frames=self.max_frames,
@@ -14688,7 +14688,6 @@ class ChannelRegistrationWorker(QtCore.QThread):
                     regions=self.regions,
                     channel_paths=self.channel_paths,
                     path=self.path,
-                    wavelet=self.wavelet,
                     progress_callback=lambda n: self.statusChanged.emit(
                         f"Registered {n} channel(s)..."
                     ),
@@ -14714,7 +14713,7 @@ class SplineCalibrationWorker(QtCore.QThread):
         info: list[dict],
         camera_info: dict,
         box: int,
-        minimum_ng: float,
+        identification_method: localize.IdentificationMethod | tuple,
         step: float,
         frames_per_step: int,
         frame_order: str,
@@ -14730,7 +14729,6 @@ class SplineCalibrationWorker(QtCore.QThread):
         movies=None,
         infos=None,
         camera_infos=None,
-        wavelet: wavelet.WaveletParameters | None = None,
         z_binning: int = 1,
     ) -> None:
         super().__init__()
@@ -14739,7 +14737,9 @@ class SplineCalibrationWorker(QtCore.QThread):
         self.info = info
         self.camera_info = camera_info
         self.box = box
-        self.minimum_ng = minimum_ng
+        # the beads are detected like the spots of the movie (wavelet
+        # segmentation or net gradient), see ``Window.parameters``
+        self.identification_method = identification_method
         self.step = step
         self.frames_per_step = frames_per_step
         self.frame_order = frame_order
@@ -14761,9 +14761,6 @@ class SplineCalibrationWorker(QtCore.QThread):
         self.infos = infos
         self.camera_infos = camera_infos
         self.path = path
-        # the beads are detected like the spots of the movie (wavelet
-        # segmentation or net gradient), see ``Window.parameters``
-        self.wavelet = wavelet
 
     def run(self) -> None:
         try:
@@ -14774,7 +14771,7 @@ class SplineCalibrationWorker(QtCore.QThread):
                         infos=self.infos,
                         camera_infos=self.camera_infos,
                         box=self.box,
-                        minimum_ng=self.minimum_ng,
+                        identification_method=self.identification_method,
                         d=self.step,
                         frames_per_step=self.frames_per_step,
                         frame_bounds=self.frame_bounds,
@@ -14787,7 +14784,6 @@ class SplineCalibrationWorker(QtCore.QThread):
                         reference=0,
                         path=self.path,
                         return_diagnostics=True,
-                        wavelet=self.wavelet,
                     )
                 )
             elif self.regions:
@@ -14796,7 +14792,7 @@ class SplineCalibrationWorker(QtCore.QThread):
                     info=self.info,
                     camera_info=self.camera_info,
                     box=self.box,
-                    minimum_ng=self.minimum_ng,
+                    identification_method=self.identification_method,
                     d=self.step,
                     regions=self.regions,
                     frames_per_step=self.frames_per_step,
@@ -14809,7 +14805,6 @@ class SplineCalibrationWorker(QtCore.QThread):
                     model=self.registration_model,
                     path=self.path,
                     return_diagnostics=True,
-                    wavelet=self.wavelet,
                 )
             else:
                 calibration, diagnostics = spline.calibrate_spline(
@@ -14817,7 +14812,7 @@ class SplineCalibrationWorker(QtCore.QThread):
                     info=self.info,
                     camera_info=self.camera_info,
                     box=self.box,
-                    minimum_ng=self.minimum_ng,
+                    identification_method=self.identification_method,
                     d=self.step,
                     frames_per_step=self.frames_per_step,
                     frame_bounds=self.frame_bounds,
@@ -14829,7 +14824,6 @@ class SplineCalibrationWorker(QtCore.QThread):
                     roi=self.roi,
                     path=self.path,
                     return_diagnostics=True,
-                    wavelet=self.wavelet,
                 )
         except Exception as e:  # surface any failure to the GUI
             self.failed.emit(str(e))
@@ -14875,12 +14869,11 @@ class AffineCalibrationWorker(QtCore.QThread):
         target_path: str,
         calibration_path: str,
         box: int,
-        minimum_ng: float,
+        identification_method: localize.IdentificationMethod,
         prompt_for_path,
         pixelsize_prompt,
         transform_type: str = "astigmatism",
         model: str = "affine",
-        wavelet: wavelet.WaveletParameters | None = None,
     ) -> None:
         super().__init__()
         self.ref_path = ref_path
@@ -14889,8 +14882,7 @@ class AffineCalibrationWorker(QtCore.QThread):
         self.transform_type = transform_type
         self.model = model
         self.box = box
-        self.minimum_ng = minimum_ng
-        self.wavelet = wavelet
+        self.identification_method = identification_method
         # Window._prompt_for_path: path -> metadata prompt callback
         self._prompt_for_path = prompt_for_path
         self._pixelsize_prompt = pixelsize_prompt
@@ -14959,13 +14951,12 @@ class AffineCalibrationWorker(QtCore.QThread):
                 movie_target,
                 calibration,
                 box=self.box,
-                minimum_ng=self.minimum_ng,
+                identification_method=self.identification_method,
                 pixelsize=pixelsize,
                 transform_type=self.transform_type,
                 ref_path=self.ref_path,
                 target_path=self.target_path,
                 model=self.model,
-                wavelet=self.wavelet,
             )
             io.save_any_calibration(self.calibration_path, calibration)
         except Exception as e:  # noqa: BLE001 - reported to the GUI
