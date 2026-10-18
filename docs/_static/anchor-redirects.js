@@ -45,7 +45,7 @@
     "multichannel-2d-gaussian-fitting": "localize/multichannel.html#localize-multichannel-gaussian",
     "multichannel-and-split-field-of-view": "localize/camera.html#localize-scmos-multichannel",
     "multichannel-spline-psf-e-g-biplane": "localize/spline.html#localize-multichannel-spline",
-    "quantum-efficiency": "localize/camera.html#localize-camera-config-qe",
+    "quantum-efficiency": "localize/camera.html#localize-camera-config-wavelength",
     "reading-the-calibration-plot": "localize/3d-calibration.html#localize-3d-calibration-plot",
     "reading-the-scmos-calibration-plot": "localize/camera.html#localize-scmos-plot",
     "regions-of-interest-rois": "localize/identification.html#localize-rois",

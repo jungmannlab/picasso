@@ -19,7 +19,14 @@ Cameras:
         12-bit (low noise): 0.26
         16-bit (low noise & high well capacity): 0.45
     Channel Device:
-      # This information is used to automatically set the emission wavelength based on MicroManager metadata
+      # Optional: selects the emission wavelength automatically for
+      # Micro-Manager movies. (For any movie, the wavelength can be
+      # selected by hand in the "Emission Wavelength" dropdown of Localize's
+      # Parameters dialog, which lists the wavelengths of the calibration
+      # sections below and of this entry.) Name: the Micro-Manager metadata
+      # key (device-property) of the device that sets the emission channel.
+      # Emission Wavelengths: the values Micro-Manager saves for that key,
+      # each mapped to its emission wavelength in nm.
       Name: FilterTurret1-Label
       Emission Wavelengths:
         1-TIRF 488: 525
@@ -64,7 +71,8 @@ Cameras:
           Gain 2: 3.09
           Gain 3: 1.44
     Channel Device:
-      # This information is used to automatically set the emission wavelength based on MicroManager metadata
+      # Optional: Micro-Manager filter position -> emission wavelength
+      # in nm, see the first camera
       Name: TIFilterBlock1-Label
       Emission Wavelengths:
         1-R640: 700
@@ -85,7 +93,8 @@ Cameras:
         12-bit (low noise): 0.26
         16-bit (low noise & high well capacity): 0.45
     Channel Device:
-      # This information is used to automatically set the emission wavelength based on MicroManager metadata
+      # Optional: Micro-Manager filter position -> emission wavelength
+      # in nm, see the first camera
       Name: TIFilterBlock1-Label
       Emission Wavelengths:
         1-R640: 700
@@ -94,7 +103,8 @@ Cameras:
   HamamatsuHam_DCAM:
     Baseline: 100
     Channel Device:
-      # This information is used to automatically set the emission wavelength based on MicroManager metadata
+      # Optional: Micro-Manager filter position -> emission wavelength
+      # in nm, see the first camera
       Name: TIFilterBlock1-Label
       Emission Wavelengths:
         1-R640: 700
@@ -105,7 +115,12 @@ Cameras:
     Pixelsize: 130
     Baseline: 0
     Sensitivity: 1.0
-z-calibrations: # This information is used to automatically set the z calibration file based on MicroManager metadata
+# The calibration sections are keyed by camera and then by emission
+# wavelength in nm, which is selected in Localize's "Emission
+# Wavelength" dropdown (automatically for Micro-Manager movies with a
+# Channel Device entry above). A single path in place of the wavelengths
+# serves every wavelength of that camera.
+z-calibrations: # 3D astigmatism calibrations (.yaml)
   HamamatsuHam_DCAM:
     525: C:/path/to/your_3d_calib_525nm.yaml
     595: C:/path/to/your_3d_calib_595nm.yaml
@@ -114,7 +129,7 @@ z-calibrations: # This information is used to automatically set the z calibratio
     525: C:/path/to/your_3d_calib_525nm_another_camera.yaml
     595: C:/path/to/your_3d_calib_595nm_another_camera.yaml
     700: C:/path/to/your_3d_calib_700nm_another_camera.yaml
-spline-calibrations: # This information is used to automatically set the experimental PSF (cubic spline) calibration file based on MicroManager metadata
+spline-calibrations: # Experimental PSF (cubic spline) calibrations (.hdf5)
   HamamatsuHam_DCAM:
     525: C:/path/to/your_spline_calib_525nm.hdf5
     595: C:/path/to/your_spline_calib_595nm.hdf5
@@ -123,7 +138,7 @@ spline-calibrations: # This information is used to automatically set the experim
     525: C:/path/to/your_spline_calib_525nm_another_camera.hdf5
     595: C:/path/to/your_spline_calib_595nm_another_camera.hdf5
     700: C:/path/to/your_spline_calib_700nm_another_camera.hdf5
-camera-calibrations: # Per-pixel sCMOS offset/variance/gain maps (Huang et al. 2013)
+camera-calibrations: # Per-pixel sCMOS offset/variance/gain maps (Huang et al. 2013, .hdf5)
   HamamatsuHam_DCAM:
     525: C:/path/to/your_scmos_calib_525.hdf5
     595: C:/path/to/your_scmos_calib_595.hdf5

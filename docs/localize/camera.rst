@@ -35,7 +35,7 @@ When a movie is opened, Picasso selects the camera and its settings automaticall
 
 - **Camera:** the keys under ``Cameras`` are compared with the camera's device label from your Micro-Manager hardware configuration (e.g. ``HamamatsuHam_DCAM``), saved as ``Camera`` in the metadata.
 - **Settings:** Micro-Manager saves every device property as ``<camera>-<property>``. The entries of ``Sensitivity Categories``, ``Gain Property Name`` and ``EM Switch Property`` are property names (e.g. ``PixelReadoutRate``), and the keys under ``Sensitivity`` are the property values exactly as saved (e.g. ``540 MHz - fastest readout``).
-- **Emission wavelength:** ``Channel Device`` > ``Name`` is the full metadata key, device and property (e.g. ``FilterTurret1-Label``), and its saved value (e.g. ``3-TIRF 640``) is looked up in ``Emission Wavelengths``.
+- **Emission wavelength:** ``Channel Device`` > ``Name`` is the full metadata key, device and property (e.g. ``FilterTurret1-Label``), and its saved value (e.g. ``3-TIRF 640``) is looked up in ``Emission Wavelengths`` (see :ref:`localize-camera-config-wavelength`).
 
 To find the exact names, open a movie recorded with Micro-Manager and select ``File`` > ``Show metadata...``, or look at the Micro-Manager metadata in the ``.yaml`` file saved next to the localizations.
 
@@ -120,7 +120,47 @@ The dropdown menus can be further nested, e.g., when considering Gain modes:
          Gain 2: 9.34
          Gain 3: 5.32
 
-.. _localize-camera-config-qe:
+.. _localize-camera-config-wavelength:
+
+Emission wavelength
+~~~~~~~~~~~~~~~~~~~
+
+The emission wavelength does not enter the photon conversion. It only selects which of the calibrations stored in the config (z, spline PSF and sCMOS, see :ref:`localize-camera-config-calibrations`) is loaded, as these are keyed by camera and then by emission wavelength in nm:
+
+.. code-block:: yaml
+
+   spline-calibrations:
+     Camera1:
+       525: /path/to/Camera1-525nm-spline-calibration.hdf5
+       700: /path/to/Camera1-700nm-spline-calibration.hdf5
+
+Once a camera has calibrations per wavelength, the Parameters dialog shows an ``Emission Wavelength`` dropdown under ``Experiment Settings``, listing these wavelengths (``525`` and ``700`` above). It works for every file type: select the wavelength the movie was recorded at, and the calibrations configured for it are loaded.
+
+**Automatic selection for Micro-Manager movies.** Micro-Manager saves the position of the filter turret in every movie, so Picasso can select the wavelength itself. To enable it, map the filter positions to wavelengths in a ``Channel Device`` entry of the camera:
+
+.. code-block:: yaml
+
+   Cameras:
+     Camera1:
+       Baseline: 100
+       Sensitivity: 0.5
+       Channel Device:
+         Name: FilterTurret1-Label
+         Emission Wavelengths:
+           1-TIRF 488: 525
+           2-TIRF 560: 595
+           3-TIRF 640: 700
+
+- ``Name`` is the Micro-Manager metadata key of the device that sets the emission channel, device and property, e.g., the filter turret's ``FilterTurret1-Label``.
+- The keys under ``Emission Wavelengths`` are the values that property takes, exactly as Micro-Manager saves them (e.g. ``3-TIRF 640``). The values are the emission wavelengths in nm.
+
+When a Micro-Manager movie is opened, the wavelength its filter position maps to is then selected in the dropdown. These wavelengths are added to the dropdown, too, so it can also be used for other files.
+
+Write the wavelengths as the same whole numbers in ``Emission Wavelengths`` and in the calibration fields (e.g. ``700``, not ``700.0`` in one place and ``700`` in the other); a calibration is found only when they match.
+
+.. note::
+
+   Older configs may list a ``Quantum Efficiency`` per wavelength. The quantum efficiency has not been used since Picasso 0.6.0, and such an entry is ignored. Its wavelengths no longer fill the dropdown, which takes them from the calibration fields and ``Channel Device`` instead.
 
 .. _localize-camera-config-several:
 
@@ -163,10 +203,17 @@ The astigmatism calibration depends on the microscope, camera, and emission wave
 
    z-calibrations:
      Camera1:
-       525: /path/to/Camera1-GFP-zcalibration.yaml
-       595: /path/to/Camera1-Cy3B-zcalibration.yaml
+       525: /path/to/Camera1-525nm-zcalibration.yaml
+       595: /path/to/Camera1-595nm-zcalibration.yaml
 
-If the camera names and emission wavelengths match the settings in Micromanager, the correct z-calibration is automatically loaded. In any case an alternative calibration yaml file can be loaded by button. The ``Emission Wavelength`` dropdown in the Parameters dialog lists the wavelengths found under ``Channel Device`` > ``Emission Wavelengths`` and in the calibration fields of the selected camera.
+The keys under each camera are emission wavelengths in nm, the same numbers as in that camera's ``Channel Device`` > ``Emission Wavelengths`` (see :ref:`localize-camera-config-wavelength`). Whenever the camera or the ``Emission Wavelength`` dropdown changes, the matching z-calibration is loaded; if ``z-calibrations`` has no entry for them, the loaded one is cleared so that it is not applied to data it does not describe. In any case an alternative calibration yaml file can be loaded by button.
+
+A single path in place of the wavelengths serves every wavelength of that camera:
+
+.. code-block:: yaml
+
+   z-calibrations:
+     Camera1: /path/to/Camera1-zcalibration.yaml
 
 The same mechanism is available for the experimental PSF (cubic spline) calibration (see :doc:`spline`), using a ``spline-calibrations`` field that maps camera and emission wavelength to the path of the spline calibration ``.hdf5`` file:
 
@@ -174,8 +221,8 @@ The same mechanism is available for the experimental PSF (cubic spline) calibrat
 
    spline-calibrations:
      Camera1:
-       525: /path/to/Camera1-GFP-spline-calibration.hdf5
-       595: /path/to/Camera1-Cy3B-spline-calibration.hdf5
+       525: /path/to/Camera1-525nm-spline-calibration.hdf5
+       595: /path/to/Camera1-595nm-spline-calibration.hdf5
 
 As with the z-calibration, the matching spline calibration is loaded automatically when the camera and emission wavelength match the Micromanager settings, and an alternative calibration file can always be loaded via the ``Load calibration`` button in the ``Experimental PSF (spline)`` box.
 
