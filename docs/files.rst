@@ -273,15 +273,18 @@ is recorded as a ``Convert units`` step in the metadata, and the file is
 written in nm, with the format marker, when it is saved again. Pick regions
 and drift files are converted the same way when they are loaded.
 
-**Converting files once** saves the question and makes them readable as nm by
-other software:
+**Converting files once** rewrites files written before Picasso 1.0 (in camera
+pixels) in the units convention of Picasso 1.0 (nm, with the format marker).
+This saves the question for the pixel size and makes the files readable as nm
+by other software. Files that are in nm already are skipped.
 
-- In Render, ``File > Convert files to nm...`` takes any number of files
-  (localizations and their ``.yaml``, pick regions, drift ``.txt``, astigmatism
-  and lateral calibrations, SPINNA masks, nanoTRON models), asks for the
-  camera pixel size where a file does not record it, and writes the converted
-  files next to the originals with ``_nm`` appended to their names (or
-  replaces the originals, if you tick that option).
+- In Render, ``File > Convert files to nm...`` takes any number of pre-1.0
+  files (localizations and their ``.yaml``, pick regions, drift ``.txt``,
+  astigmatism and lateral calibrations, SPINNA masks, nanoTRON models), asks
+  for the camera pixel size where a file does not record it, and writes the
+  converted files next to the originals with ``_nm`` appended to their names
+  (or replaces the originals, if you tick that option), see
+  :ref:`render-convert-files`.
 - On the command line, ``picasso convert-units FILE [FILE ...]``
   (``--pixelsize`` for files that do not record it, ``--in-place`` to replace
   the originals), see :ref:`cmd-convert-units`.
