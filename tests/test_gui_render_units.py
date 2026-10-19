@@ -1,7 +1,7 @@
 """Nanometer units in ``picasso.gui.render``: the files the Render
 window reads and writes (pick regions, FOV .txt, screenshot .yaml,
 localization files written before Picasso 1.0), the pixel size prompt
-for legacy files, the screen pixel size replacing the zoom and the
+for legacy files, the display width replacing the zoom and the
 ``File > Convert files to nm...`` dialog.
 
 :author: Rafal Kowalewski, 2026
@@ -114,24 +114,27 @@ class TestViewUnits:
         window.tools_settings_dialog.brush_width.setValue(50.0)
         assert view._brush_width == 50.0
 
-    def test_screen_pixel_size_replaces_the_zoom(self, window):
+    def test_display_width_replaces_the_zoom(self, window):
         view = window.view
         dialog = window.display_settings_dlg
         assert not hasattr(dialog, "zoom")
-        # 4160 nm over 256 screen pixels
-        expected = FOV / view.width()
+        assert not hasattr(dialog, "screen_px_size")
+        # the whole 4160 nm field of view over 256 screen pixels
         assert view.display_pixels_per_viewport_pixels() == pytest.approx(
-            1 / expected
+            view.width() / FOV
         )
+        assert view.display_width() == pytest.approx(FOV)
         view.update_scene()
-        assert dialog.screen_px_size.value() == pytest.approx(
-            expected, rel=1e-3
+        assert dialog.display_width.decimals() == 4
+        assert dialog.display_width.value() == pytest.approx(
+            FOV / 1e3, abs=1e-4
         )
-        # halving the screen pixel size zooms in by two
-        view.set_screen_px_size(expected / 2)
+        # halving the display width zooms in by two
+        dialog.display_width.setValue(FOV / 2e3)
         assert gui_render.render.viewport_width(
             view.viewport
         ) == pytest.approx(FOV / 2)
+        assert view.display_width() == pytest.approx(FOV / 2)
 
     def test_render_kwargs_take_the_blur_in_nm(self, window):
         dialog = window.display_settings_dlg
@@ -277,16 +280,21 @@ class TestScreenshotInfo:
         info = window.export_current_info(None, viewport=viewport)
         assert info[io.FORMAT_VERSION_ATTR] == io.FORMAT_VERSION
         assert info[gui_render.FOV_KEY] == [130.0, 260.0, 1300.0, 1300.0]
-        assert "Zoom" not in info
-        assert info[gui_render.SCREEN_PX_SIZE_KEY] == pytest.approx(
-            window.display_settings_dlg.screen_px_size.value()
+        assert gui_render.LEGACY_ZOOM_KEY not in info
+        assert gui_render.LEGACY_SCREEN_PX_SIZE_KEY not in info
+        # the zoom, as nm per screen pixel
+        assert info[gui_render.ZOOM_KEY] == pytest.approx(
+            1e3
+            * window.display_settings_dlg.display_width.value()
+            / window.view.width(),
+            rel=1e-3,
         )
 
     def test_legacy_screenshot_is_converted(self, window):
         window.view.load_screenshot(
             {
                 gui_render.LEGACY_FOV_KEY: [1.0, 2.0, 10.0, 10.0],
-                "Zoom": 8.0,  # screen px per camera px
+                gui_render.LEGACY_ZOOM_KEY: 8.0,  # screen px per cam. px
                 "Min. blur (cam. px)": 0.1,
             }
         )
@@ -302,12 +310,55 @@ class TestScreenshotInfo:
             {
                 io.FORMAT_VERSION_ATTR: io.FORMAT_VERSION,
                 gui_render.FOV_KEY: [130.0, 260.0, 1300.0, 1300.0],
-                gui_render.SCREEN_PX_SIZE_KEY: 10.0,
+                gui_render.ZOOM_KEY: 10.0,
             }
         )
         (y0, x0), (y1, x1) = window.view.viewport
         assert (x0, y0) == (130.0, 260.0)
         assert x1 - x0 == pytest.approx(1300.0)
+
+    @pytest.mark.parametrize(
+        "zoom",
+        [
+            {gui_render.ZOOM_KEY: 10.0},
+            # development versions of 1.0
+            {gui_render.LEGACY_SCREEN_PX_SIZE_KEY: 10.0},
+            # before 1.0: screen pixels per camera pixel (130 nm)
+            {gui_render.LEGACY_ZOOM_KEY: 13.0},
+        ],
+        ids=["zoom", "screen pixel size", "legacy zoom factor"],
+    )
+    def test_saved_zoom_sizes_the_view(self, window, monkeypatch, zoom):
+        sizes = []
+        monkeypatch.setattr(
+            window, "resize_view", lambda w, h: sizes.append((w, h))
+        )
+        window.view.load_screenshot(
+            {
+                io.FORMAT_VERSION_ATTR: io.FORMAT_VERSION,
+                gui_render.FOV_KEY: [130.0, 260.0, 1300.0, 650.0],
+                **zoom,
+            }
+        )
+        # 10 nm per screen pixel
+        assert sizes == [(pytest.approx(130.0), pytest.approx(65.0))]
+
+    def test_saved_zoom_round_trips(self, window, monkeypatch):
+        window.view.update_scene()
+        info = window.export_current_info(None)
+        sizes = []
+        monkeypatch.setattr(
+            window, "resize_view", lambda w, h: sizes.append((w, h))
+        )
+        window.view.load_screenshot(info)
+        x, y, w, h = info[gui_render.FOV_KEY]
+        assert sizes == [
+            (
+                pytest.approx(w / info[gui_render.ZOOM_KEY]),
+                pytest.approx(h / info[gui_render.ZOOM_KEY]),
+            )
+        ]
+        assert sizes[0][0] == pytest.approx(window.view.width(), rel=1e-2)
 
 
 # ---------------------------------------------------------------------------

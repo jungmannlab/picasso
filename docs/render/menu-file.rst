@@ -290,12 +290,13 @@ Export images
 The rendered image can be saved as ``.png``, ``.tif``, ``.pdf`` or ``.svg``
 (``.pdf`` asks for the resolution in DPI). Next to every image, a ``.yaml``
 file records the field of view (``FOV (X, Y, Width, Height; nm)``), the
-screen pixel size (``Screen pixel size (nm)``), the display pixel size, the
-render method, the contrast, the colormap and the scale bar length. When
-rendering by property, the color bar is saved as well (see
-:ref:`render-colorbar-format`). Dropping such a ``.yaml`` file onto Render
-restores the view; files written before Picasso 1.0 (keys ``FOV (X, Y,
-Width, Height)`` in camera pixels and ``Zoom``) are read as well.
+zoom (``Zoom (nm per screen pixel)``, the nm covered by one screen pixel),
+the display pixel size, the render method, the contrast, the colormap and the
+scale bar length. When rendering by property, the color bar is saved as well
+(see :ref:`render-colorbar-format`). Dropping such a ``.yaml`` file onto
+Render restores the view; files written before Picasso 1.0 (keys ``FOV (X, Y,
+Width, Height)`` in camera pixels and ``Zoom`` in screen pixels per camera
+pixel) are read as well.
 
 ``Export current view...`` (:kbd:`Ctrl+E`)
    Saves the image as shown, including picks, measurements, scale bar and

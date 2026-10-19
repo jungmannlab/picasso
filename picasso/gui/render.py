@@ -105,10 +105,15 @@ TEST_CLUSTERER_MARGIN = 0.05
 FOV_FILE_HEADER = f"picasso_format {io.FORMAT_VERSION} (nm)"
 #: keys of the .yaml saved with exported images (see
 #: ``Window.export_current_info``); the legacy FOV key holds camera
-#: pixels in files without ``picasso_format``
+#: pixels in files without ``picasso_format``. The zoom is the nm
+#: covered by one screen pixel; files written before Picasso 1.0 store
+#: it as screen pixels per camera pixel (``LEGACY_ZOOM_KEY``) and
+#: development versions of 1.0 under ``LEGACY_SCREEN_PX_SIZE_KEY``
 FOV_KEY = "FOV (X, Y, Width, Height; nm)"
 LEGACY_FOV_KEY = "FOV (X, Y, Width, Height)"
-SCREEN_PX_SIZE_KEY = "Screen pixel size (nm)"
+ZOOM_KEY = "Zoom (nm per screen pixel)"
+LEGACY_SCREEN_PX_SIZE_KEY = "Screen pixel size (nm)"
+LEGACY_ZOOM_KEY = "Zoom"
 INITIAL_REL_MAXIMUM = 0.5
 ZOOM = 9 / 7
 WHEEL_ZOOM = 1.2  # zoom factor per mouse wheel notch
@@ -9537,8 +9542,9 @@ class DisplaySettingsDialog(lib.Dialog):
         nothing; it is the default offered when a file written before
         Picasso 1.0 (camera pixels) is loaded.
     render_check : QCheckBox
-    screen_px_size : QDoubleSpinBox
-        Size of one screen pixel in nm (smaller = zoomed in).
+    display_width : QDoubleSpinBox
+        Width of the region shown in the window (um); smaller values
+        zoom in.
         Tick to activate parameter rendering.
     scalebar : QSpinBox
         Contains the scale bar's length (nm).
@@ -9576,25 +9582,22 @@ class DisplaySettingsDialog(lib.Dialog):
         vbox.addWidget(general_groupbox)
         general_grid = QtWidgets.QGridLayout(general_groupbox.content)
         general_grid.addWidget(lib.HelpButton(self.DOCS_URL), 0, 0)
-        screen_px_label = QtWidgets.QLabel("Screen pixel size (nm):")
-        screen_px_label.setToolTip(
-            "Size of one screen pixel in nm, i.e., the zoom: smaller\n"
-            "values zoom in."
+        display_width_label = QtWidgets.QLabel("Display width (\u00b5m):")
+        display_width_label.setToolTip(
+            "Width of the region shown in the window, i.e., the zoom:\n"
+            "smaller values zoom in."
         )
-        general_grid.addWidget(screen_px_label, 0, 1)
-        self.screen_px_size = QtWidgets.QDoubleSpinBox()
-        self.screen_px_size.setKeyboardTracking(False)
-        self.screen_px_size.setDecimals(3)
-        self.screen_px_size.setRange(1e-3, 1e7)
-        self.screen_px_size.setValue(DEFAULT_DISP_PX_SIZE)
-        self.screen_px_size.valueChanged.connect(
-            self.on_screen_px_size_changed
-        )
-        general_grid.addWidget(self.screen_px_size, 0, 2)
+        general_grid.addWidget(display_width_label, 0, 1)
+        self.display_width = QtWidgets.QDoubleSpinBox()
+        self.display_width.setKeyboardTracking(False)
+        self.display_width.setDecimals(4)
+        self.display_width.setRange(1e-4, 1e7)
+        self.display_width.valueChanged.connect(self.on_display_width_changed)
+        general_grid.addWidget(self.display_width, 0, 2)
         disp_px_label = QtWidgets.QLabel("Display pixel size (nm):")
         disp_px_label.setToolTip(
             "Size of the pixels in the rendered image. With 'dynamic', it\n"
-            "follows the screen pixel size."
+            "follows the zoom: one rendered pixel per screen pixel."
         )
         general_grid.addWidget(disp_px_label, 1, 1)
         self._disp_px_size = DEFAULT_DISP_PX_SIZE
@@ -10081,10 +10084,10 @@ class DisplaySettingsDialog(lib.Dialog):
             self.dynamic_disp_px.setChecked(False)
             self.window.view.update_scene()
 
-    def on_screen_px_size_changed(self, value: float) -> None:
-        """Zoom the image in the main window to ``value`` nm per screen
-        pixel."""
-        self.window.view.set_screen_px_size(value)
+    def on_display_width_changed(self, value: float) -> None:
+        """Zoom the image in the main window to show a region ``value``
+        um wide."""
+        self.window.view.set_display_width(1e3 * value)
 
     def _update_quadtree_snr(self, *args) -> None:
         """Show the signal-to-noise ratio the leaf capacity implies:
@@ -10141,11 +10144,11 @@ class DisplaySettingsDialog(lib.Dialog):
         self.disp_px_size.setValue(disp_px_size)
         self._silent_disp_px_update = False
 
-    def set_screen_px_size_silently(self, value: float) -> None:
-        """Change the screen pixel size (nm) in the background."""
-        self.screen_px_size.blockSignals(True)
-        self.screen_px_size.setValue(value)
-        self.screen_px_size.blockSignals(False)
+    def set_display_width_silently(self, value: float) -> None:
+        """Change the display width (um) in the background."""
+        self.display_width.blockSignals(True)
+        self.display_width.setValue(value)
+        self.display_width.blockSignals(False)
 
     def silent_minimum_update(self, value: float) -> None:
         """Change the value of self.minimum in the background."""
@@ -13787,9 +13790,9 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         style_contrast_bar = getattr(self.window, "style_contrast_bar", None)
         if style_contrast_bar is not None:
             style_contrast_bar(self._color_range[0])
-        # show the screen pixel size in the Display Settings Dialog
-        self.window.display_settings_dlg.set_screen_px_size_silently(
-            1 / self.display_pixels_per_viewport_pixels()
+        # show the zoom in the Display Settings Dialog
+        self.window.display_settings_dlg.set_display_width_silently(
+            1e-3 * self.display_width()
         )
         self._compose_visible()
         self._update_renderer_label()
@@ -14795,7 +14798,9 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         ``Window.export_current_info``). Files written before Picasso
         1.0 (no ``picasso_format``) store the FOV in camera pixels and
         the zoom as screen pixels per camera pixel; both are converted
-        with the camera pixel size of the Display Settings."""
+        with the camera pixel size of the Display Settings. The zoom
+        of development versions of 1.0 (``Screen pixel size (nm)``) is
+        read as well."""
         disp_dlg = self.window.display_settings_dlg
         legacy_file = io.FORMAT_VERSION_ATTR not in file
         if FOV_KEY in file:
@@ -14804,12 +14809,14 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             x, y, w, h = file[LEGACY_FOV_KEY]
             if legacy_file:
                 x, y, w, h = (_ * self.pixelsize for _ in (x, y, w, h))
-        screen_px_size = file.get(SCREEN_PX_SIZE_KEY)
-        if screen_px_size is None and file.get("Zoom"):
-            screen_px_size = self.pixelsize / file["Zoom"]
-        if screen_px_size:
-            # the view shows the FOV at the saved screen pixel size
-            self.window.resize_view(w / screen_px_size, h / screen_px_size)
+        # nm per screen pixel
+        zoom = file.get(ZOOM_KEY, file.get(LEGACY_SCREEN_PX_SIZE_KEY))
+        if zoom is None and file.get(LEGACY_ZOOM_KEY):
+            # screen pixels per camera pixel
+            zoom = self.pixelsize / file[LEGACY_ZOOM_KEY]
+        if zoom:
+            # the view shows the FOV at the saved zoom
+            self.window.resize_view(w / zoom, h / zoom)
         viewport = [(y, x), (y + h, x + w)]
         self.update_scene(viewport=viewport)
         if "Max. density" in file:
@@ -18235,16 +18242,19 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         self.update_scene(picks_only=True)
         self.update_pick_info_short()
 
-    def set_screen_px_size(self, screen_px_size: float) -> None:
-        """Zoom so that one screen pixel covers ``screen_px_size`` nm.
+    def display_width(self) -> float:
+        """Return the width (nm) of the region shown in the window."""
+        return self.width() / self.display_pixels_per_viewport_pixels()
+
+    def set_display_width(self, width: float) -> None:
+        """Zoom so that the window shows a region ``width`` nm wide.
 
         Parameters
         ----------
-        screen_px_size : float
-            Size of one screen pixel in nm.
+        width : float
+            Width of the region shown in the window (nm).
         """
-        current = 1 / self.display_pixels_per_viewport_pixels()
-        self.zoom(screen_px_size / current)
+        self.zoom(width / self.display_width())
 
     def set_optimal_scalebar(
         self, force: bool = False, silent: bool = False
@@ -20085,7 +20095,7 @@ class Window(QtWidgets.QMainWindow):
         info = {
             io.FORMAT_VERSION_ATTR: io.FORMAT_VERSION,
             FOV_KEY: [float(_) for _ in fov_info],
-            SCREEN_PX_SIZE_KEY: d.screen_px_size.value(),
+            ZOOM_KEY: (1 / self.view.display_pixels_per_viewport_pixels()),
             "Display pixel size (nm)": (
                 d.disp_px_size.value()
                 if disp_px_size is None

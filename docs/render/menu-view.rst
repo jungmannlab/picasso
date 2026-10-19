@@ -365,7 +365,7 @@ Chooses which attributes the linked windows share:
 
 - the localizations of shared channels (switching this off gives each window
   its own copy of them),
-- pan, zoom (the screen pixel size), and a crosshair marking the cursor
+- pan, zoom (the nm per screen pixel), and a crosshair marking the cursor
   position of the window the mouse is in,
 - the active tool,
 - render settings, contrast, per-channel contrast (see

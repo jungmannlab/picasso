@@ -126,7 +126,7 @@ CATEGORIES = (
         "viewport_zoom",
         "Zoom",
         "Navigation",
-        "Show the same scale (screen pixel size in nm) in all windows.",
+        "Show the same scale (nm per screen pixel) in all windows.",
         default=True,
     ),
     LinkCategory(

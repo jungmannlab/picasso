@@ -33,13 +33,15 @@ General
 
 Adjust the general display settings.
 
-Screen pixel size (nm)
-   The size of one screen pixel in nm, i.e., the zoom: at 13 nm, one screen
-   pixel shows 13 nm of the sample; smaller values zoom in. The value follows
-   every zoom in the window; typing in a new one zooms to it.
+Display width (µm)
+   The width of the region of the sample shown in the window, i.e., the zoom:
+   smaller values zoom in. The value follows every zoom in the window; typing
+   in a new one zooms to it. Before Picasso 1.0, the zoom was given as a
+   factor (``Zoom``, screen pixels per camera pixel).
 Display pixel size (nm)
    Set the size of the pixel in the rendered image. Choose ``dynamic`` to
-   automatically adjust to current window size when zooming.
+   automatically adjust to current window size when zooming (one rendered
+   pixel per screen pixel).
 Minimap
    Click ``show minimap`` to display a minimap in the upper left corner to
    see where the current field of view is within the whole image.

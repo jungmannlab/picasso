@@ -27,7 +27,7 @@ Opening Files
    ``View > Display Settings`` (see :ref:`render-display-settings`):
 
    - The field 'Display pixel size (nm)' defines the size of the rendered
-     pixels of the super-resolution image. This cannot go smaller that the current screen pixel size.
+     pixels of the super-resolution image. This cannot go smaller than the size of a screen pixel at the current zoom.
    - The contrast settings ``Min. Density`` and ``Max. Density`` define at
      which number of localizations per super-resolution pixel the minimum and
      maximum color of the colormap should be applied. They can be typed in or dragged on the two-handle slider below them.
