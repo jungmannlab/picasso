@@ -359,7 +359,7 @@ def test_random_rotation_invalid_mode_raises():
 
 @pytest.mark.parametrize("lp", [1.0, 5.0])
 def test_coords_to_locs_2d_keeps_nm(lp):
-    """Localizations are in nm, like the simulated coordinates: nothing
+    """The coordinates stay in nm, as simulated: nothing
     is divided by a camera pixel size any more."""
     coords = np.array([[0.0, 0.0], [130.0, 260.0]])
     locs = spinna.coords_to_locs(coords, lp=lp)

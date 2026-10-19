@@ -20,7 +20,7 @@ RADIUS = 1.0 * PIXELSIZE
 
 
 def _locs(groups=(0,)) -> pd.DataFrame:
-    """50 localizations per group (nm), the groups 3 camera pixels apart."""
+    """50 localizations per group, the groups 3 camera pixels apart."""
     rng = np.random.default_rng(0)
     n = 50
     return pd.concat(

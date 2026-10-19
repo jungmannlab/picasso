@@ -128,7 +128,7 @@ file, ready for subsequent localization.
   a file that does not contain them is reported and changes nothing. The
   ``.yaml`` also carries the camera pixel size as the top-level ``Pixelsize``
   key (next to ``Camera.Pixelsize``), which Localize needs to save the
-  localizations in nm.
+  localization coordinates in nm.
 - For 3D data, check ``Simulate 3D`` and load the 3D calibration with
   ``File > Load 3D calibration...`` (see :ref:`localize-3d-calibration` for
   how to create one).
@@ -176,7 +176,7 @@ file, ready for subsequent localization.
           )
       movie = simulate.check_type(simulate.noisy_p(movie, 4))
 
-      # Pixelsize (nm) is what Localize needs to save the localizations in nm;
+      # Pixelsize (nm) is what Localize needs to save the coordinates in nm;
       # Camera.Pixelsize is the key Simulate reads back from its own files
       info = {
           "Byte Order": "<", "Data Type": "uint16", "Frames": frames,

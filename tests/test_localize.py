@@ -1507,7 +1507,7 @@ class TestFit2D:
     def test_missing_pixelsize_raises(
         self, picasso_movie, real_identifications, movie_info
     ):
-        """The localizations are in nm, so without ``Pixelsize`` in
+        """Coordinates are in nm, so without ``Pixelsize`` in
         camera_info there is no fit (and no silent 130 nm default)."""
         cam = {"Baseline": 0, "Sensitivity": 1, "Gain": 1}
         with pytest.raises(ValueError, match="Pixelsize"):
@@ -1833,7 +1833,7 @@ class TestLocalize:
             fitting_method="gausslq",
             threaded=False,
         )
-        # No localization outside the ROI window (localizations in nm)
+        # No localization outside the ROI window (coordinates in nm)
         if len(locs) > 0:
             assert (locs["x"] < 16 * PIXELSIZE).all()
             assert (locs["y"] < 16 * PIXELSIZE).all()
@@ -6959,7 +6959,7 @@ class TestHoverTooltips:
         ]
 
     def test_loc_near_picks_closest_within_radius(self):
-        # localizations in nm, the hovered position on the camera grid
+        # coordinates in nm, the hovered position on the camera grid
         locs = pd.DataFrame(
             {
                 "x": np.array([10.4, 12.0, 30.0]) * PIXELSIZE,
@@ -8605,7 +8605,7 @@ class TestFitAffineTransform:
         (entry,) = lib.lateral_transforms(calibration)
         assert entry["Transform"]["model"] == model
         cyl_xy = _apply_homogeneous(np.linalg.inv(self.TRUTH), ref_xy)
-        # the stored transform maps nm to nm (the unit of the localizations)
+        # the stored transform maps nm to nm (the unit of the coordinates)
         mapped = transforms.from_dict(entry["Transform"]).apply(
             cyl_xy * PIXELSIZE
         )
@@ -12789,7 +12789,7 @@ class TestFitGaussMultichannel:
 
         assert len(locs) == self.N_FRAMES
         frame = locs["frame"].to_numpy()
-        # the localizations are in nm, the truth on the camera pixel grid
+        # the coordinates are in nm, the truth on the camera pixel grid
         error_x = locs["x"].to_numpy() / PIXELSIZE - truth_x[frame]
         error_y = locs["y"].to_numpy() / PIXELSIZE - truth_y[frame]
         # the positions are in the reference channel's frame, and unbiased
@@ -12818,7 +12818,7 @@ class TestFitGaussMultichannel:
         )
 
         frame = locs["frame"].to_numpy()
-        # localizations (nm) against the truth on the camera pixel grid
+        # coordinates in nm, the truth on the camera pixel grid
         scatter = np.nanstd(locs["x"].to_numpy() - truth_x[frame] * PIXELSIZE)
         assert np.nanmedian(locs["lpx"]) == pytest.approx(scatter, rel=0.4)
 
@@ -12893,7 +12893,7 @@ class TestFitGaussMultichannel:
                 multiprocess=False,
             )
             frame = locs["frame"].to_numpy()
-            # localizations in nm, truth on the camera pixel grid
+            # coordinates in nm, truth on the camera pixel grid
             x_px = locs["x"].to_numpy() / PIXELSIZE
             return abs(np.nanmean(x_px - truth_x[frame]))
 
@@ -13247,7 +13247,7 @@ class TestMultichannelGaussianFitThroughTheWindow:
             )
             assert window.locs is not None
             frame = window.locs["frame"].to_numpy()
-            # localizations in nm, truth on the camera pixel grid
+            # coordinates in nm, truth on the camera pixel grid
             x_px = window.locs["x"].to_numpy() / _window_pixelsize(window)
             error = x_px - truth_x[frame]
             assert abs(np.nanmean(error)) < 0.1
@@ -13273,7 +13273,7 @@ class TestMultichannelGaussianFitThroughTheWindow:
 
             display = [c.locs_display for c in window.channels]
             assert all(d is not None for d in display)
-            # the displayed localizations are in nm; the registration
+            # the displayed coordinates are in nm; the registration
             # shifts the second channel by DX camera pixels
             shift = np.nanmedian(
                 display[1]["x"].to_numpy() - display[0]["x"].to_numpy()
@@ -13625,7 +13625,7 @@ class TestFitGaussSplitFov:
         # confined to the reference region, so one localization per molecule
         assert len(locs) == self.N_FRAMES
         frame = locs["frame"].to_numpy()
-        # localizations in nm, truth on the camera pixel grid
+        # coordinates in nm, truth on the camera pixel grid
         error_x = locs["x"].to_numpy() / PIXELSIZE - truth_x[frame]
         error_y = locs["y"].to_numpy() / PIXELSIZE - truth_y[frame]
         assert abs(np.nanmean(error_x)) < 0.06
@@ -13822,7 +13822,7 @@ class TestSplitFovGaussianThroughTheWindow:
             # one localization per molecule, in reference-region coordinates
             assert len(window.locs) == self.N_FRAMES
             frame = window.locs["frame"].to_numpy()
-            # localizations in nm, truth on the camera pixel grid
+            # coordinates in nm, truth on the camera pixel grid
             x_px = window.locs["x"].to_numpy() / _window_pixelsize(window)
             error = x_px - truth_x[frame]
             assert abs(np.nanmean(error)) < 0.1
@@ -14008,7 +14008,7 @@ class TestRegionCoordinates:
     REGION = [[10, 20], [40, 60]]  # camera pixels
 
     def _locs(self):
-        """Localizations in nm, at 25.5, 55 and 5 camera pixels in x."""
+        """Coordinates in nm, at 25.5, 55 and 5 camera pixels in x."""
         return pd.DataFrame(
             {
                 "frame": [0, 1, 2],
@@ -14140,7 +14140,7 @@ class TestFitIndependent:
             "gausslq",
             multiprocess=False,
         )
-        # localizations in nm; the spots sit at 12.4 and 40.2 camera pixels
+        # coordinates in nm; the spots sit at 12.4 and 40.2 camera pixels
         assert abs(results[0][0]["x"].mean() / PIXELSIZE - 12.4) < 0.3
         assert abs(results[1][0]["x"].mean() / PIXELSIZE - 40.2) < 0.3
 
@@ -14232,7 +14232,7 @@ class TestFitSplitFovIndependent:
     ):
         _, _, results = self._fit(picasso_movie_factory)
         # both regions are 32 px wide, so both spots land in the same range
-        # (localizations in nm, the spots at 12.4 and 12.7 camera pixels)
+        # (coordinates in nm, the spots at 12.4 and 12.7 camera pixels)
         assert abs(results[0][0]["x"].mean() / PIXELSIZE - 12.4) < 0.3
         assert abs(results[1][0]["x"].mean() / PIXELSIZE - 12.7) < 0.3
         assert results[1][0]["x"].max() < 32 * PIXELSIZE
@@ -15344,7 +15344,7 @@ class TestWaveletIdentify:
         assert identify_info["Identification Method"] == "wavelet"
         assert identify_info["Wavelet Threshold"] == 0.75
         # sub-pixel positions from the fit, not the rounded box centers; the
-        # localizations are in nm, the truth on the camera pixel grid
+        # coordinates are in nm, the truth on the camera pixel grid
         first = locs[locs["frame"] == 0].sort_values("x")
         np.testing.assert_allclose(
             first[["x", "y"]].to_numpy() / PIXELSIZE,

@@ -969,7 +969,7 @@ def add_roi_id(
     if pixelsize is None:
         raise ValueError(
             "add_roi_id needs the camera pixel size (nm) to compare the "
-            "localizations (nm) with the ROIs (camera pixels)."
+            "localization coordinates (nm) with the ROIs (camera pixels)."
         )
     x = np.asarray(locs["x"], dtype=np.float64) / float(pixelsize)
     y = np.asarray(locs["y"], dtype=np.float64) / float(pixelsize)
@@ -3044,7 +3044,7 @@ def locs_to_identifications(
     Parameters
     ----------
     locs : pd.DataFrame
-        Localizations (nm).
+        Localizations.
     movie_info : list of dicts
         Movie file metadata.
     n_frames : int
@@ -4046,7 +4046,7 @@ def _reference_pixelsize(camera_infos: list[dict]) -> float:
     if not isinstance(pixelsize, (int, float)) or not pixelsize > 0:
         raise ValueError(
             "The reference channel's camera_info needs 'Pixelsize', the "
-            "camera pixel size in nm, to express the localizations in nm."
+            "camera pixel size in nm, to express the coordinates in nm."
         )
     return float(pixelsize)
 
@@ -4104,7 +4104,7 @@ def _validate_fit_args(
     if not isinstance(pixelsize, (int, float)) or not pixelsize > 0:
         raise ValueError(
             "camera_info needs 'Pixelsize', the effective camera pixel size "
-            "in nm (after magnification): localizations are stored in nm, "
+            "in nm (after magnification): coordinates are stored in nm, "
             f"so the fit cannot run without it. Got {pixelsize!r}."
         )
 
@@ -10292,7 +10292,7 @@ def fit_lateral_transform(
     """Fit the target -> reference transform and append it to a calibration.
 
     The transform is fitted on the bead positions of the two images
-    (camera pixels) and stored in nm, the unit of the localizations it
+    (camera pixels) and stored in nm, the unit of the coordinates it
     corrects (``picasso.transforms.Transform.rescaled``). It is appended
     to ``calibration``'s ordered list of affine corrections. This is the
     computational half of
@@ -10531,7 +10531,7 @@ def calibrate_lateral_transform(
     refined to sub-pixel accuracy by a 2D Gaussian fit, then matched
     between the two images by mutual nearest neighbor. The transform is
     fitted by least squares (see :func:`picasso.transforms.estimate`),
-    expressed in nm (the unit of the localizations it corrects, see
+    expressed in nm (the unit of the coordinates it corrects, see
     ``picasso.transforms.Transform.rescaled``) and decomposed into
     rotation / anisotropic scale / shear.
 

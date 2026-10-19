@@ -11529,8 +11529,8 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         """Warn once if the loaded channels disagree on the camera pixel
         size.
 
-        Localizations are in nm, so channels of different camera pixel
-        sizes render together correctly; the pixel size only sets the
+        Localization coordinates are in nm, so channels of different
+        camera pixel sizes render together correctly; the pixel size only sets the
         extent of the field of view of each channel (see
         ``lib.field_of_view``) and the default for converting files
         written before Picasso 1.0. A mismatch is therefore usually a
@@ -11562,10 +11562,10 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             self,
             "Camera pixel size mismatch",
             "The loaded channels have different camera pixel sizes:\n"
-            f"{listing}\n\nLocalizations are in nm, so the channels are "
-            "rendered together correctly; the camera pixel size only sets "
-            "the extent of each channel's field of view. Check the "
-            "metadata if the files come from the same camera.",
+            f"{listing}\n\nLocalization coordinates are in nm, so the "
+            "channels are rendered together correctly; the camera pixel "
+            "size only sets the extent of each channel's field of view. "
+            "Check the metadata if the files come from the same camera.",
         )
 
     def add(
@@ -19097,7 +19097,7 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
     @property
     def pixelsizes(self) -> list[float]:
         """Camera pixel size (nm) of each channel, from its metadata
-        (``Pixelsize``). Localizations are in nm; the pixel size
+        (``Pixelsize``). Coordinates are in nm; the pixel size
         defines the camera grid (field of view, identifications) and
         converts files written before Picasso 1.0."""
         pixelsizes = []

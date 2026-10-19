@@ -40,7 +40,7 @@ def _sample(rng, width, height, density=0.05):
 
 
 def _tile_locs(rng, sites, origin, size, z_shift, per_site=4, site_ids=None):
-    """Localizations (nm) of the sites inside one tile (camera pixels),
+    """Localizations of the sites inside one tile (camera pixels),
     in its camera frame, with ``z_shift`` subtracted from z."""
     inside = (
         (sites[:, 0] >= origin[0])
@@ -314,7 +314,7 @@ class TestStitch:
         )
 
     def test_tiles_with_different_pixel_sizes(self):
-        """Localizations are in nm, so tiles recorded with different
+        """Coordinates are in nm, so tiles recorded with different
         camera pixel sizes stitch like any others; the field of view of
         each tile follows from its own pixel size."""
         rng = np.random.default_rng(7)

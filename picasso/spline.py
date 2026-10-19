@@ -1395,9 +1395,10 @@ def calibrate_spline(
         ``box``) sample the camera pixel grid, the detector geometry the
         fit works on, and are not converted to nm; the axial knots are
         ``z_step_nm`` apart; ``pixelsize`` (nm) is the camera pixel size
-        the localizations are expressed in nm with. Any lateral
-        corrections appended later (``localize.fit_lateral_transform``)
-        are in nm, the unit of the localizations.
+        the localization coordinates are expressed in nm with. Any
+        lateral corrections appended later
+        (``localize.fit_lateral_transform``) are in nm, the unit of the
+        coordinates.
     diagnostics : list
         Only if ``return_diagnostics`` is True: a one-element list holding the
         bead inspection record (see :func:`bead_inspection_data`).

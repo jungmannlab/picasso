@@ -9061,8 +9061,8 @@ class Window(QtWidgets.QMainWindow):
         if not ok:
             return
 
-        # the localizations (nm) go back onto the camera grid they were
-        # fitted on, i.e., with the pixel size of their own file
+        # the localization coordinates (nm) go back onto the camera grid
+        # they were fitted on, i.e., with the pixel size of their own file
         self.identifications = localize.locs_to_identifications(
             locs=locs,
             movie_info=self.info,
@@ -9532,7 +9532,7 @@ class Window(QtWidgets.QMainWindow):
             self._draw_frame_spots()
             locs_frame = self._current_frame_locs()
             if locs_frame is not None:
-                # the localizations are in nm, the scene is the camera image
+                # the coordinates are in nm, the scene is the camera image
                 pixelsize = self.parameters_dialog.pixelsize.value()
                 for _, loc in locs_frame.iterrows():
                     marker = FitMarker(
@@ -9907,8 +9907,8 @@ class Window(QtWidgets.QMainWindow):
         ``radius`` camera pixels of it in both coordinates, or None.
 
         ``x``, ``y`` and ``radius`` are on the camera grid (an
-        identification); the localizations (nm) are mapped onto it with
-        ``pixelsize``."""
+        identification); the localization coordinates (nm) are mapped
+        onto it with ``pixelsize``."""
         if locs_frame is None or not len(locs_frame):
             return None
         dx = locs_frame["x"] / pixelsize - x
@@ -13328,9 +13328,9 @@ class Window(QtWidgets.QMainWindow):
     def _locs_in_channel(
         self, locs: pd.DataFrame, transform: np.ndarray, channel: "Channel"
     ) -> pd.DataFrame:
-        """Map reference-channel localizations (nm) into another channel's
-        coordinates (nm) via the calibration's transform, for
-        cross-channel display.
+        """Map the coordinates (nm) of reference-channel localizations
+        into another channel's coordinates (nm) via the calibration's
+        transform, for cross-channel display.
 
         The channel transforms are detector geometry, i.e., they map
         camera pixel positions, so the localizations go through the

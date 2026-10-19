@@ -1174,7 +1174,7 @@ def _run_g5m_group_2D(
     Parameters
     ----------
     locs_group : pd.DataFrame
-        Localizations (nm).
+        Localizations.
     min_locs : int, optional
         Minimum number of localizations per component. Default is
         `MIN_LOCS`.
@@ -2076,7 +2076,7 @@ def _run_g5m_group_3D(
     Parameters
     ----------
     locs_group : pd.DataFrame
-        Localizations (nm).
+        Localizations.
     calibration : dict or None
         Astigmatism calibration dictionary with the keys "X
         Coefficients", "Y Coefficients" (spot widths in nm against z in

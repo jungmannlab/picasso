@@ -21,7 +21,7 @@ from tests.conftest import CALIB_3D, PIXELSIZE
 # Golden values, captured from the published models before the rotated
 # covariance type was added, with the localizations in camera pixels. They
 # pin the output of ``g5m.g5m`` at its defaults: since Picasso 1.0 the
-# localizations are in nm, so x and y are compared scaled by the pixel
+# coordinates are in nm, so x and y are compared scaled by the pixel
 # size; the fitted widths were in nm already, z and the p-values do not
 # depend on the unit (the widths and p-values up to the numerics of the
 # EM iterations, which rescaling shifts by a few percent). Any larger

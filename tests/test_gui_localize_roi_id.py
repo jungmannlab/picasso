@@ -31,8 +31,8 @@ ROIS = [[[0, 0], [64, 64]], [[0, 64], [64, 128]]]
 
 
 def _locs() -> pd.DataFrame:
-    """Two localizations (nm) in the left ROI, one in the right, one
-    outside both."""
+    """Two localizations in the left ROI, one in the right, one outside
+    both."""
     x = np.array([1.5, 63.4, 64.6, 200.0]) * PIXELSIZE
     y = np.array([1.5, 10.0, 10.0, 10.0]) * PIXELSIZE
     return pd.DataFrame(

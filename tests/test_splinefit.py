@@ -1108,7 +1108,7 @@ class TestFit2DIntegration:
             spline_calibration=calibration,
         )
         assert len(locs) == len(truth)
-        # the localizations are in nm, the truth on the camera pixel grid
+        # the coordinates are in nm, the truth on the camera pixel grid
         ps = camera_info["Pixelsize"]
         dx = locs.x.values / ps - np.array([t[1] for t in truth])
         dy = locs.y.values / ps - np.array([t[2] for t in truth])
@@ -1352,7 +1352,7 @@ class TestMultichannelIntegration:
         )
         assert len(locs) == len(truth)
         assert progress, "no progress was reported"
-        # the localizations are in nm, the truth on the camera pixel grid
+        # the coordinates are in nm, the truth on the camera pixel grid
         ps = camera_infos[0]["Pixelsize"]
         x_px = locs.x.values / ps
         y_px = locs.y.values / ps

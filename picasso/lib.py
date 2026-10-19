@@ -4358,7 +4358,7 @@ def lateral_transform_models(calibration: dict | list | None) -> list:
     -------
     models : list of picasso.transforms.Transform
         One transform per correction, in application order, in nm (the
-        unit of the localizations they correct).
+        unit of the coordinates they correct).
     """
     from picasso import transforms as _tf
 

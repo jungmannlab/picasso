@@ -539,7 +539,7 @@ def coords_to_locs(
     Returns
     -------
     locs : pd.DataFrame
-        Localizations, in nm.
+        Localizations.
     """
     x = coords[:, 0].astype(np.float32)
     y = coords[:, 1].astype(np.float32)
@@ -1090,7 +1090,7 @@ class MaskGenerator:
         ndim: int | None = None,
         pixelsize: float | None = None,
     ) -> None:
-        # open localizations (nm)
+        # open localizations (coordinates in nm)
         locs, info = io.load_locs(locs_path, pixelsize=pixelsize)
         if "z" in locs.columns:
             self.locs = locs[["x", "y", "z"]]
@@ -2139,7 +2139,7 @@ class StructureSimulator:
         """Save center positions, all molecular targets and the observed
         ones in .hdf5 format compatible to read with Picasso: Render.
 
-        The localizations are saved in nm, with the ROI as the field of
+        The coordinates are saved in nm, with the ROI as the field of
         view: ``Width``/``Height`` are the number of camera pixels
         covering it (``floor(extent / pixelsize) + 1``).
 
@@ -2662,7 +2662,7 @@ class StructureMixer:
     ) -> None:
         """Save observed molecules. Each molecular target is saved in
         a separate .hdf5 file. The saved files can be read in Picasso
-        Render. The localizations are in nm (see :func:`coords_to_locs`).
+        Render. Their coordinates are in nm (see :func:`coords_to_locs`).
 
         Parameters
         ----------

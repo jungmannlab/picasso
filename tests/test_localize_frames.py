@@ -232,7 +232,7 @@ def test_recovers_known_positions():
     )
     # Every frame yields all emitters (bright, well separated).
     assert set(locs["frame"].unique()) == set(range(20))
-    # The localizations are in nm; the emitters sit on the camera pixel grid.
+    # The coordinates are in nm; the emitters sit on the camera pixel grid.
     x = locs["x"].to_numpy() / camera_info["Pixelsize"]
     y = locs["y"].to_numpy() / camera_info["Pixelsize"]
     # Each ground-truth emitter has a nearby recovered localization.
