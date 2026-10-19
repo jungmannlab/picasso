@@ -292,8 +292,8 @@ other software:
 What is converted: the columns in :ref:`Table 1 <files-localization-columns>`
 and :ref:`Table 2 <files-molecular-maps>` that were in camera pixels (and
 their ``_mean``/``_std`` statistics in pick properties), the Filter ranges of
-those columns in the metadata, the canvas offsets of the Move tool, the
-positions of pick regions, the ``x`` and ``y`` drift, the polynomial
+those columns in the metadata, the positions of pick regions, the ``x`` and
+``y`` drift, the polynomial
 coefficients (spot widths) and lateral corrections of calibrations, the
 extent of SPINNA masks, and the pick diameter and rendered pixel size of
 nanoTRON models. Counts of camera pixels that are not lengths (``Width``,

@@ -1252,16 +1252,12 @@ def _track(
     max_gap: int,
     min_length: int,
     frame_time: float | None,
-    pixelsize: float | None,
 ) -> None:
     """Link localizations into tracks (single-particle tracking) and
     save them as ``<base>_tracks.hdf5``. ``max_jump`` is in nm; see
-    ``spt.link_tracks`` for details. ``pixelsize`` is ignored (the
-    localizations are in nm since Picasso 1.0)."""
+    ``spt.link_tracks`` for details."""
     from . import io, lib, spt
 
-    if pixelsize is not None:
-        _print_deprecation(_PIXELSIZE_OPTION_DEPRECATIONS["track"])
     for path in _spt_paths(files):
         locs, info = io.load_locs(path)
         if "len" in locs.columns:
@@ -1299,17 +1295,13 @@ def _diffusion(
     sigma: float | Literal["precision"],
     truncate: bool,
     plot: bool,
-    pixelsize: float | None,
 ) -> None:
     """Diffusion analysis of tracked localizations: MSD, jump distances
     and a summary of every track, see ``spt.analyze_tracks``. Saves the
     results next to each file (``spt.save_analysis``) and, with
-    ``plot``, PNG images of the plots. ``pixelsize`` is ignored (the
-    localizations are in nm since Picasso 1.0)."""
+    ``plot``, PNG images of the plots."""
     from . import io, spt
 
-    if pixelsize is not None:
-        _print_deprecation(_PIXELSIZE_OPTION_DEPRECATIONS["diffusion"])
     for path in _spt_paths(files):
         locs, info = io.load_locs(path)
         if not spt.is_tracked(locs, info):
@@ -4780,7 +4772,6 @@ _RENAMED_COMMANDS = {
     for old, new in {
         "undrift_fiducials": "undrift-fiducials",
         "nneighbor": "nearest-neighbor",
-        "ripley_h": "ripley-h",
         "clusterfilter": "cluster-filter",
         "smlm_cluster": "smlm-cluster",
         "groupprops": "group-properties",
@@ -4788,21 +4779,6 @@ _RENAMED_COMMANDS = {
     }.items()
 }
 
-#: ``--pixelsize`` of ``picasso track`` and ``picasso diffusion`` is
-#: ignored since Picasso 1.0 (localizations are in nm) and removed in
-#: Picasso 2.0.
-_PIXELSIZE_OPTION_DEPRECATIONS = {
-    command: deprecation.register(
-        f"picasso {command} --pixelsize",
-        since="1.0",
-        remove_in="2.0",
-        message=(
-            "it is ignored: localizations and the maximum jump are in nm"
-            " since Picasso 1.0"
-        ),
-    )
-    for command in ("track", "diffusion")
-}
 
 #: Options renamed in Picasso 1.0, per (current) command name: words
 #: joined by hyphens, named after the Python parameter they set where
@@ -4831,10 +4807,6 @@ _RENAMED_OPTIONS = {
             "--intersectdist": "--intersect-distance",
             "--roiradius": "--roi-radius",
         },
-        "cbc": {"--rmax": "--r-max"},
-        "ripley-h": {"--rmax": "--r-max", "--zrange": "--z-range"},
-        "rdf": {"--rmax": "--r-max", "--zrange": "--z-range"},
-        "nnd": {"--rmax": "--r-max", "--zrange": "--z-range"},
         "cluster-filter": {
             "--clusterfile": "--cluster-file",
             "--minval": "--min-value",
@@ -5846,12 +5818,6 @@ def _build_parser() -> (
             " metadata for the analysis of the tracks"
         ),
     )
-    track_parser.add_argument(
-        "--pixelsize",
-        type=float,
-        default=None,
-        help=argparse.SUPPRESS,  # ignored since 1.0 (nm), removed in 2.0
-    )
     diffusion_parser = subparsers.add_parser(
         "diffusion",
         help=(
@@ -5925,12 +5891,6 @@ def _build_parser() -> (
         "--plot",
         action="store_true",
         help="save the plots of the MSD, jump distances and track lengths",
-    )
-    diffusion_parser.add_argument(
-        "--pixelsize",
-        type=float,
-        default=None,
-        help=argparse.SUPPRESS,  # ignored since 1.0 (nm), removed in 2.0
     )
 
     # nneighbors
@@ -6902,7 +6862,6 @@ def main():  # noqa: C901
                 args.max_gap,
                 args.min_length,
                 args.frame_time,
-                args.pixelsize,
             )
         elif args.command == "diffusion":
             _diffusion(
@@ -6914,7 +6873,6 @@ def main():  # noqa: C901
                 args.sigma,
                 args.truncate,
                 args.plot,
-                args.pixelsize,
             )
         elif args.command == "cluster-filter":
             _clusterfilter(

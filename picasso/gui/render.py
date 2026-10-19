@@ -107,12 +107,10 @@ FOV_FILE_HEADER = f"picasso_format {io.FORMAT_VERSION} (nm)"
 #: ``Window.export_current_info``); the legacy FOV key holds camera
 #: pixels in files without ``picasso_format``. The zoom is the nm
 #: covered by one screen pixel; files written before Picasso 1.0 store
-#: it as screen pixels per camera pixel (``LEGACY_ZOOM_KEY``) and
-#: development versions of 1.0 under ``LEGACY_SCREEN_PX_SIZE_KEY``
+#: it as screen pixels per camera pixel (``LEGACY_ZOOM_KEY``)
 FOV_KEY = "FOV (X, Y, Width, Height; nm)"
 LEGACY_FOV_KEY = "FOV (X, Y, Width, Height)"
 ZOOM_KEY = "Zoom (nm per screen pixel)"
-LEGACY_SCREEN_PX_SIZE_KEY = "Screen pixel size (nm)"
 LEGACY_ZOOM_KEY = "Zoom"
 INITIAL_REL_MAXIMUM = 0.5
 ZOOM = 9 / 7
@@ -14798,9 +14796,7 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         ``Window.export_current_info``). Files written before Picasso
         1.0 (no ``picasso_format``) store the FOV in camera pixels and
         the zoom as screen pixels per camera pixel; both are converted
-        with the camera pixel size of the Display Settings. The zoom
-        of development versions of 1.0 (``Screen pixel size (nm)``) is
-        read as well."""
+        with the camera pixel size of the Display Settings."""
         disp_dlg = self.window.display_settings_dlg
         legacy_file = io.FORMAT_VERSION_ATTR not in file
         if FOV_KEY in file:
@@ -14810,7 +14806,7 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             if legacy_file:
                 x, y, w, h = (_ * self.pixelsize for _ in (x, y, w, h))
         # nm per screen pixel
-        zoom = file.get(ZOOM_KEY, file.get(LEGACY_SCREEN_PX_SIZE_KEY))
+        zoom = file.get(ZOOM_KEY)
         if zoom is None and file.get(LEGACY_ZOOM_KEY):
             # screen pixels per camera pixel
             zoom = self.pixelsize / file[LEGACY_ZOOM_KEY]

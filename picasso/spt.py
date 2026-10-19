@@ -415,10 +415,6 @@ def tracking_info(info: list[dict] | None) -> dict | None:
 def max_jump_nm(info: list[dict] | None) -> float | None:
     """The maximum jump distance of the tracking (nm) from the metadata.
 
-    Files written before Picasso 1.0 record it in camera pixels
-    (``"Max. jump (camera pixels)"``); it is converted with the
-    ``Pixelsize`` of the metadata.
-
     Parameters
     ----------
     info : list of dicts or None
@@ -435,10 +431,6 @@ def max_jump_nm(info: list[dict] | None) -> float | None:
         return None
     if "Max. jump (nm)" in entry:
         return float(entry["Max. jump (nm)"])
-    if "Max. jump (camera pixels)" in entry:
-        pixelsize = lib.get_from_metadata(info, "Pixelsize")
-        if pixelsize:
-            return float(entry["Max. jump (camera pixels)"]) * pixelsize
     return None
 
 

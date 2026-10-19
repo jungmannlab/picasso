@@ -135,16 +135,6 @@ FILE_KINDS = (
     "nanotron",
 )
 
-#: Metadata keys that Picasso before 1.0 wrote in camera pixels, mapped
-#: to their names in nm (the values are multiplied by the pixel size).
-LEGACY_METADATA_KEYS = {
-    "Canvas offset x (cam. px)": "Canvas offset x (nm)",
-    "Canvas offset y (cam. px)": "Canvas offset y (nm)",
-    "Manual shift x (cam. px)": "Manual shift x (nm)",
-    "Manual shift y (cam. px)": "Manual shift y (nm)",
-    "Tile offsets x (cam. px)": "Tile offsets x (nm)",
-    "Tile offsets y (cam. px)": "Tile offsets y (nm)",
-}
 
 _CONVERT_STEP = "Convert units"
 
@@ -285,8 +275,7 @@ def info_to_nm(
     to nm.
 
     The Filter ranges ``column: [min, max]`` of the columns in camera
-    pixels are scaled, the keys of :data:`LEGACY_METADATA_KEYS` are
-    renamed and scaled, and a ``Convert units`` step recording the pixel
+    pixels are scaled and a ``Convert units`` step recording the pixel
     size is appended, so ``Pixelsize`` is present afterwards.
 
     Parameters
@@ -319,10 +308,6 @@ def info_to_nm(
                 power = column_power(str(key), columns or [key])
                 if power is not None and _is_range(value):
                     entry[key] = [float(v) * pixelsize**power for v in value]
-        for old, new in LEGACY_METADATA_KEYS.items():
-            if old in entry:
-                value = entry.pop(old)
-                entry[new] = _scale_value(value, pixelsize)
         new_info.append(entry)
     new_info.append(_step(pixelsize, source))
     return new_info

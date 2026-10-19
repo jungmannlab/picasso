@@ -216,7 +216,6 @@ def test_link_keeps_input_and_records_parameters():
     entry = new_info[-1]
     assert entry[spt.TRACKING_KEY] == "nearest neighbor"
     assert entry["Max. jump (nm)"] == 300.0
-    assert "Max. jump (camera pixels)" not in entry
     assert spt.max_jump_nm(new_info) == 300.0
     assert entry["Max. gap (frames)"] == 2
     assert entry["Min. track length"] == 4
@@ -240,13 +239,11 @@ def test_link_rejects_invalid_parameters(kwargs):
         spt.link_tracks(_locs([0], [0.0]), _info(), **kwargs)
 
 
-def test_max_jump_nm_of_legacy_metadata():
-    """Files tracked before Picasso 1.0 record the maximum jump in
-    camera pixels; it is converted with the pixel size."""
+def test_max_jump_nm():
     info = _info() + [
-        {spt.TRACKING_KEY: spt.TRACKING_METHOD, "Max. jump (camera pixels)": 3}
+        {spt.TRACKING_KEY: spt.TRACKING_METHOD, "Max. jump (nm)": 250}
     ]
-    assert spt.max_jump_nm(info) == 3 * PIXELSIZE
+    assert spt.max_jump_nm(info) == 250.0
     assert spt.max_jump_nm(_info()) is None
     assert spt.max_jump_nm([{spt.TRACKING_KEY: spt.TRACKING_METHOD}]) is None
 
@@ -571,18 +568,14 @@ def test_cli_track_and_diffusion(tmp_path, capsys):
     path = str(tmp_path / "sim.hdf5")
     locs = _brownian(n_particles=100, n_frames=15).drop(columns="truth")
     io.save_locs(path, locs, _info())
-    cli._track([path], 400.0, 1, 2, FRAME_TIME, None)
+    cli._track([path], 400.0, 1, 2, FRAME_TIME)
     out = str(tmp_path / "sim_tracks.hdf5")
     tracked, info = io.load_locs(out)
     assert spt.is_tracked(tracked, info)
     assert info[-1]["Max. jump (nm)"] == 400.0
-    assert "Max. jump (camera pixels)" not in info[-1]
     assert tracked["group"].nunique() == 100
-    # --pixelsize is ignored since 1.0 (nm), with a notice
-    cli._track([path], 400.0, 1, 2, FRAME_TIME, 130.0)
-    assert "ignored" in capsys.readouterr().err
 
-    cli._diffusion([out], None, 10, 4, [1, 2], 0.0, False, True, None)
+    cli._diffusion([out], None, 10, 4, [1, 2], 0.0, False, True)
     for suffix in (
         "_track_stats.csv",
         "_msd.csv",
@@ -595,7 +588,7 @@ def test_cli_track_and_diffusion(tmp_path, capsys):
     assert "2 populations" in capsys.readouterr().out
 
     # untracked files are skipped
-    cli._diffusion([path], FRAME_TIME, 10, 4, [1], 0.0, False, False, None)
+    cli._diffusion([path], FRAME_TIME, 10, 4, [1], 0.0, False, False)
     assert "not tracked" in capsys.readouterr().out
 
 

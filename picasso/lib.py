@@ -1193,9 +1193,7 @@ def overwrite_metadata(
 
 #: Metadata keys holding the translation of the localizations from the
 #: camera frame applied by ``fit_canvas`` (nm, a whole number of camera
-#: pixels); subtract it to return to the camera coordinates. Files
-#: written before Picasso 1.0 hold it in camera pixels under
-#: ``"Canvas offset x (cam. px)"`` (see ``picasso.legacy``).
+#: pixels); subtract it to return to the camera coordinates.
 CANVAS_OFFSET_KEYS = ("Canvas offset x (nm)", "Canvas offset y (nm)")
 #: Metadata keys holding the size of the camera image (camera pixels),
 #: stored by ``fit_canvas`` once ``Width`` or ``Height`` differ from it

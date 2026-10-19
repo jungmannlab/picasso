@@ -120,9 +120,7 @@ A channel loaded later, or saved with a different canvas offset, is brought
 into the same frame as the loaded channels.
 
 The shift of each channel done with the move tool is saved in its metadata as
-``Manual shift x (nm)`` and ``Manual shift y (nm)``. (Files written before
-Picasso 1.0 hold these keys with the suffix ``(cam. px)``; they are converted
-with the file, see :ref:`files-legacy`.)
+``Manual shift x (nm)`` and ``Manual shift y (nm)``.
 
 .. _render-tools-settings:
 

@@ -281,7 +281,6 @@ class TestScreenshotInfo:
         assert info[io.FORMAT_VERSION_ATTR] == io.FORMAT_VERSION
         assert info[gui_render.FOV_KEY] == [130.0, 260.0, 1300.0, 1300.0]
         assert gui_render.LEGACY_ZOOM_KEY not in info
-        assert gui_render.LEGACY_SCREEN_PX_SIZE_KEY not in info
         # the zoom, as nm per screen pixel
         assert info[gui_render.ZOOM_KEY] == pytest.approx(
             1e3
@@ -321,12 +320,10 @@ class TestScreenshotInfo:
         "zoom",
         [
             {gui_render.ZOOM_KEY: 10.0},
-            # development versions of 1.0
-            {gui_render.LEGACY_SCREEN_PX_SIZE_KEY: 10.0},
             # before 1.0: screen pixels per camera pixel (130 nm)
             {gui_render.LEGACY_ZOOM_KEY: 13.0},
         ],
-        ids=["zoom", "screen pixel size", "legacy zoom factor"],
+        ids=["zoom", "legacy zoom factor"],
     )
     def test_saved_zoom_sizes_the_view(self, window, monkeypatch, zoom):
         sizes = []

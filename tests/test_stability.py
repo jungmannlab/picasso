@@ -339,15 +339,15 @@ class TestRenamedCommandLine:
         assert "use --bin-size instead" in err
 
     def test_option_with_equals_sign(self, capsys):
-        argv = cli._current_names(["cbc", "f.hdf5", "--rmax=300"])
-        assert argv == ["cbc", "f.hdf5", "--r-max=300"]
+        argv = cli._current_names(["pair-correlation", "f.hdf5", "--rmax=300"])
+        assert argv == ["pair-correlation", "f.hdf5", "--r-max=300"]
 
     def test_arguments_after_double_dash_are_kept(self, capsys):
-        argv = cli._current_names(["cbc", "--", "--rmax"])
-        assert argv == ["cbc", "--", "--rmax"]
+        argv = cli._current_names(["pair-correlation", "--", "--rmax"])
+        assert argv == ["pair-correlation", "--", "--rmax"]
 
     def test_current_names_print_nothing(self, capsys):
-        argv = ["cbc", "f.hdf5", "--r-max", "300"]
+        argv = ["pair-correlation", "f.hdf5", "--r-max", "300"]
         assert cli._current_names(argv) == argv
         assert capsys.readouterr().err == ""
 

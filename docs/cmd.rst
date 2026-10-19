@@ -46,8 +46,6 @@ format converters (``csv2hdf``, ``hdf2ts``, ...) keep their names. See
      - `undrift-fiducials`_
    * - ``nneighbor``
      - `nearest-neighbor`_
-   * - ``ripley_h``
-     - `ripley-h`_
    * - ``clusterfilter``
      - `cluster-filter`_, with ``--cluster-file``, ``--min-value`` and
        ``--max-value`` (were ``--clusterfile``, ``--minval``, ``--maxval``)
@@ -64,8 +62,6 @@ format converters (``csv2hdf``, ``hdf2ts``, ...) keep their names. See
      - ``--from-file``
    * - ``aim --intersectdist``, ``--roiradius``
      - ``--intersect-distance``, ``--roi-radius``
-   * - ``cbc``, ``ripley-h``, ``rdf``, ``nnd``: ``--rmax``, ``--zrange``
-     - ``--r-max``, ``--z-range``
    * - ``dbscan --radius_z``
      - ``--radius-z``
    * - ``join --keepindex``
@@ -677,11 +673,6 @@ Linked localizations (see `link`_) are skipped.
      - none
      - Time between two consecutive frames (ms), stored in the metadata for
        ``picasso diffusion``.
-   * - ``--pixelsize`` (float)
-     - ignored
-     - Deprecated: the localizations are in nm since Picasso 1.0, so no
-       conversion is needed. The option is accepted with a warning until
-       Picasso 2.0.
 
 .. _cmd-diffusion:
 
@@ -736,11 +727,6 @@ to the median localization precision, saving the plots:
      - off
      - Save the plots of the MSD, the jump distances and the track lengths
        as ``.png`` files.
-   * - ``--pixelsize`` (float)
-     - ignored
-     - Deprecated: the localizations are in nm since Picasso 1.0, so no
-       conversion is needed. The option is accepted with a warning until
-       Picasso 2.0.
 
 cluster-filter
 --------------
