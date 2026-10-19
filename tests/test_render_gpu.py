@@ -215,6 +215,180 @@ class TestWgpuParity:
         assert not img_gpu.any()
 
 
+#: the ways a shader compiler may evaluate a footprint edge
+#: ``os * x + sign * 3 * (os * lp)``: rounding every operation on its
+#: own, fusing ``3 * sx`` into the add, fusing ``os * x`` into the add
+#: (what Metal on Apple silicon does in one of the two passes) and
+#: applying the scale last
+EDGE_ORDERS = ("rounded twice", "fma 3 * sx", "fma os * x", "scale last")
+
+
+def _ambiguous_edge(rng, boundary, sign, sigma_range, os, order, reaches):
+    """A float32 position and precision (nm) whose footprint edge
+    ``xp + sign * 3 * sx`` (rendered pixels, ``xp = os * x``,
+    ``sx = os * lp``, a viewport starting at 0) lies on the pixel
+    ``boundary`` within float32 rounding, such that evaluated the
+    ``order`` way (see ``EDGE_ORDERS``) it reaches ``boundary`` if
+    ``reaches`` (falls short otherwise) while every other order does
+    the opposite: a pass compiled that way and a pass compiled any
+    other way disagree. None if no such edge is found."""
+    f = np.float32
+    os = f(os)
+    lp = (rng.uniform(*sigma_range, 4096) / os).astype(f)[:, None]
+    sx = os * lp
+    off = f(3.0) * sx
+    x0 = ((boundary - sign * off) / os).astype(f)
+    # x0 and its float32 neighbors
+    x = (x0 + np.arange(-4, 5) * np.spacing(x0).astype(np.float64)).astype(f)
+    xp = os * x
+    edges = {
+        "rounded twice": xp + f(sign) * off,
+        "fma 3 * sx": (
+            xp.astype(np.float64) + sign * 3.0 * sx.astype(np.float64)
+        ).astype(f),
+        "fma os * x": (
+            np.float64(os) * x.astype(np.float64)
+            + sign * off.astype(np.float64)
+        ).astype(f),
+        "scale last": os * (x + f(sign * 3.0) * lp),
+    }
+    found = np.ones(x.shape, bool)
+    for name, edge in edges.items():
+        found &= ((np.trunc(edge) >= boundary) == reaches) == (name == order)
+    rows, columns = np.nonzero(found)
+    if len(rows) == 0:
+        return None
+    return x[rows[0], columns[0]], lp[rows[0], 0]
+
+
+class TestTileBoundaries:
+    """The tiled Gaussian pass computes every footprint twice: once to
+    reserve slots in the tile bins (``cs_bin_count``), once to fill them
+    (``cs_bin_scatter``). The shader compiler may round a footprint
+    edge differently in the two (Metal fuses ``os * x`` into the edge's
+    add in only one of them), so an edge within rounding of a tile
+    boundary can reach one tile more or less in the fill than in the
+    count. The surplus entry used to overflow into the next tile's bin
+    and race with its entries, dropping or misplacing localizations
+    there at random (found with a single such localization among 150k
+    at 3.25 nm per rendered pixel).
+
+    The edges are built so that each evaluation order in
+    ``EDGE_ORDERS`` disagrees with all the others, in both directions,
+    as another GPU may fuse differently; combinations that cannot occur
+    at the tested widths skip. A 3.25 nm rendered pixel (``os`` != 1,
+    without which some orders agree) and a viewport starting at 0.
+    Renders repeat because the corruption was nondeterministic."""
+
+    DISP_PX_SIZE = 3.25  # nm
+    SIZE = 256  # rendered pixels = 16 x 16 tiles of 16 pixels
+    VIEW = dict(
+        viewport=((0.0, 0.0), (SIZE * DISP_PX_SIZE, SIZE * DISP_PX_SIZE)),
+        disp_px_size=DISP_PX_SIZE,
+        min_blur_width=0.0,
+    )
+    REPEATS = 5
+
+    def _filler(self, rng, n=3000):
+        """Ordinary pixel- and tile-tier localizations in every tile,
+        which an overflowing bin entry would displace."""
+        ps = self.DISP_PX_SIZE
+        return pd.DataFrame(
+            {
+                "x": rng.uniform(8 * ps, (self.SIZE - 8) * ps, n),
+                "y": rng.uniform(8 * ps, (self.SIZE - 8) * ps, n),
+                "lpx": rng.uniform(0.2 * ps, 2.5 * ps, n),
+                "lpy": rng.uniform(0.2 * ps, 2.5 * ps, n),
+            }
+        ).astype(np.float32)
+
+    def _edge(self, rng, boundary, sign, sigma_range, order, reaches):
+        return _ambiguous_edge(
+            rng,
+            boundary,
+            sign,
+            sigma_range,
+            1.0 / self.DISP_PX_SIZE,
+            order,
+            reaches,
+        )
+
+    def _assert_repeated_parity(self, gpu, locs):
+        ((n_cpu, img_cpu),) = _cpu(locs, "gaussian", **self.VIEW)
+        for _ in range(self.REPEATS):
+            ((n_gpu, img_gpu),) = _gpu(gpu, locs, "gaussian", **self.VIEW)
+            assert n_gpu == n_cpu == len(locs)
+            _assert_parity(img_gpu, img_cpu)
+
+    # One render per evaluation order and direction: mixed together,
+    # edges the count pass reaches and the fill pass does not leave
+    # spare slots that absorb the opposite case's surplus in the same
+    # tiles, which hid the overflow
+    @pytest.mark.parametrize("order", EDGE_ORDERS)
+    @pytest.mark.parametrize("reaches", [False, True])
+    def test_footprint_edges_on_tile_boundaries(self, gpu, order, reaches):
+        # every inner tile boundary, reached by the lower and the upper
+        # edge of footprints, in x and in y
+        rng = np.random.default_rng(11)
+        ps = self.DISP_PX_SIZE
+        rows = []
+        for boundary in range(16, self.SIZE, 16):
+            for sign in (-1, 1):
+                for axis, other in (("x", "y"), ("y", "x")):
+                    for _ in range(2):
+                        edge = self._edge(
+                            rng, boundary, sign, (0.5, 4.0), order, reaches
+                        )
+                        if edge is None:
+                            continue
+                        rows.append(
+                            {
+                                axis: edge[0],
+                                "lp" + axis: edge[1],
+                                other: rng.uniform(20 * ps, 236 * ps),
+                                "lp" + other: rng.uniform(0.5 * ps, 4 * ps),
+                            }
+                        )
+        if not rows:
+            pytest.skip(f"no {order} edge that {reaches=} at these widths")
+        edges = pd.DataFrame(rows)[["x", "y", "lpx", "lpy"]]
+        locs = pd.concat(
+            [self._filler(rng), edges.astype(np.float32)], ignore_index=True
+        )
+        self._assert_repeated_parity(gpu, locs)
+
+    @pytest.mark.parametrize("order", EDGE_ORDERS)
+    @pytest.mark.parametrize("reaches", [False, True])
+    def test_footprints_on_the_whale_tile_limit(self, gpu, order, reaches):
+        # 8 tiles high and 8 or 9 tiles wide depending on the rounding
+        # of the right edge: 64 tiles is the tile tier's limit, 72 is a
+        # whale, so the two passes may also disagree on the tier (the
+        # harmful case: the count sees a whale and reserves nothing,
+        # the fill scatters a tile-tier footprint). Widths keep the
+        # left edge in tile 4 (the footprint at the limit) and the
+        # height in tiles 4 to 11.
+        rng = np.random.default_rng(12)
+        ps = self.DISP_PX_SIZE
+        rows = []
+        # an overflowing wide footprint is faint itself; it shows as the
+        # filler entries it displaces, which takes several of them
+        for _ in range(12):
+            edge = self._edge(rng, 192, 1, (18.8, 21.2), order, reaches)
+            if edge is None:
+                pytest.skip(f"no {order} edge that {reaches=} at 64 tiles")
+            rows.append(
+                {
+                    "x": edge[0],
+                    "y": rng.uniform(127 * ps, 129 * ps),
+                    "lpx": edge[1],
+                    "lpy": rng.uniform(20.2 * ps, 20.6 * ps),
+                }
+            )
+        wide = pd.DataFrame(rows).astype(np.float32)
+        locs = pd.concat([self._filler(rng), wide], ignore_index=True)
+        self._assert_repeated_parity(gpu, locs)
+
+
 class TestWgpuBlurMethods:
     def test_gaussian_iso_matches_cpu(self, gpu, locs):
         ((n_cpu, img_cpu),) = _cpu(locs, "gaussian_iso")
