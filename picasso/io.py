@@ -860,6 +860,18 @@ def load_spline_calibration(path: str, pixelsize: float | None = None) -> dict:
         the ``"coefficients"`` key (float32 numpy array) and all metadata
         keys alongside it.
     """
+    calibration = _read_spline_calibration(path)
+    if FORMAT_VERSION_ATTR not in calibration:
+        if pixelsize is None:
+            pixelsize = calibration.get("pixelsize")
+        calibration = _legacy_calibration_to_nm(calibration, pixelsize, path)
+    return calibration
+
+
+def _read_spline_calibration(path: str) -> dict:
+    """The spline calibration stored in ``path`` as written, i.e.,
+    without converting a file written before Picasso 1.0 (see
+    ``load_spline_calibration``)."""
     with h5py.File(path, "r") as f:
         if "coefficients" not in f or "metadata" not in f.attrs:
             raise ValueError(
@@ -869,10 +881,6 @@ def load_spline_calibration(path: str, pixelsize: float | None = None) -> dict:
             )
         calibration = json.loads(f.attrs["metadata"])
         calibration["coefficients"] = f["coefficients"][:].astype(np.float32)
-    if FORMAT_VERSION_ATTR not in calibration:
-        if pixelsize is None:
-            pixelsize = calibration.get("pixelsize")
-        calibration = _legacy_calibration_to_nm(calibration, pixelsize, path)
     return calibration
 
 

@@ -623,7 +623,8 @@ def _has_marker(path: str, kind: str) -> bool:
             )
         return io.get_format_version(path) is not None
     if kind == "spline":
-        return io.FORMAT_VERSION_ATTR in io.load_spline_calibration(path)
+        # as written: the loader converts files without the marker
+        return io.FORMAT_VERSION_ATTR in io._read_spline_calibration(path)
     if kind == "drift":
         return io._drift_file_version(path) is not None
     data = io.load_yaml(path, all_documents=True)
@@ -800,9 +801,10 @@ def convert_file(
             drift = io.load_drift(path, pixelsize=pixelsize)
             io.save_drift(target, drift)
         elif kind == "spline":
-            calibration = io.load_spline_calibration(path)
+            # the loader converts it, with the pixel size the calibration
+            # records unless one is given
             io.save_spline_calibration(
-                target, calibration_to_nm(calibration, pixelsize)
+                target, io.load_spline_calibration(path, pixelsize=pixelsize)
             )
         else:
             _convert_yaml_file(path, kind, pixelsize, target)

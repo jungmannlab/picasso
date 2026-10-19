@@ -255,6 +255,36 @@ class TestFiles:
             for name in os.listdir(tmp_path)
         )
 
+    def test_convert_spline_file(self, tmp_path):
+        # a spline calibration written before Picasso 1.0 records the
+        # pixel size; its lateral correction is in camera pixels
+        path = str(tmp_path / "spline.hdf5")
+        transform = transforms.TranslationTransform.from_shift((1.0, -0.5))
+        metadata = {
+            "model": "spline-3d",
+            "pixelsize": PS,
+            lib.LATERAL_TRANSFORMS_KEY: [
+                {"Type": "chromatic", "Transform": transform.to_dict()}
+            ],
+        }
+        with h5py.File(path, "w") as f:
+            f.create_dataset("coefficients", data=np.zeros((2, 64), "f4"))
+            f.attrs["metadata"] = json.dumps(metadata)
+        assert legacy.file_kind(path) == "spline"
+        assert legacy.needs_conversion(path)
+        output = legacy.convert_file(path)
+        assert not legacy.needs_conversion(output)
+        written = io._read_spline_calibration(output)
+        assert written[io.FORMAT_VERSION_ATTR] == io.FORMAT_VERSION
+        # converted once: the shift is scaled by the pixel size, not its
+        # square
+        moved = lib.lateral_transform_models(written)[0]
+        np.testing.assert_allclose(
+            moved.apply([[0.0, 0.0]]), [[PS, -0.5 * PS]]
+        )
+        with pytest.raises(ValueError, match="already"):
+            legacy.convert_file(output)
+
     def test_missing_pixelsize(self, tmp_path):
         info = [{k: v for k, v in INFO[0].items() if k != "Pixelsize"}]
         path = _write_legacy(tmp_path / "old_locs.hdf5", _legacy_locs(), info)

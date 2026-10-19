@@ -30,6 +30,7 @@ from .. import (
     CONFIG,
     imageprocess,
     io,
+    legacy,
     localize,
     lib,
     lib_qt,
@@ -4698,7 +4699,10 @@ class ParametersDialog(lib.Dialog):
             _.setText("")
 
     def on_pixelsize_changed(self) -> None:
-        """If the movie is loaded and scale bar is shown, update it."""
+        """Convert the loaded calibrations written before Picasso 1.0
+        again, now with the new pixel size, and update the scale bar if
+        the movie is loaded and it is shown."""
+        self._reconvert_legacy_calibrations()
         if (
             hasattr(self.window, "movie")
             and self.window.movie is not None
@@ -4706,6 +4710,23 @@ class ParametersDialog(lib.Dialog):
             and self.window.scalebar_action.isChecked()
         ):
             self.window.draw_frame()
+
+    def _reconvert_legacy_calibrations(self) -> None:
+        """Load the 3D calibration and the lateral corrections again if
+        they were written before Picasso 1.0: their camera pixels were
+        converted to nm with the pixel size shown when they were loaded,
+        e.g., before the camera's pixel size was set."""
+        path = getattr(self, "z_calibration_path", None)
+        if path and os.path.exists(path) and legacy.needs_conversion(path):
+            fit_z = self.fit_z_checkbox.isChecked()
+            self.update_z_calib(path)
+            self.fit_z_checkbox.setChecked(fit_z)
+        paths = list(getattr(self, "affine_calibration_paths", None) or [])
+        if any(
+            os.path.exists(path) and legacy.needs_conversion(path)
+            for path in paths
+        ):
+            self.update_affine_calib(paths)
 
     def update_roi_display(self, skip_dialog: bool = False) -> None:
         """Refresh the compact ROI field (and the ROI sub-dialog) from
