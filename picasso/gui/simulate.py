@@ -1562,10 +1562,9 @@ class Window(QtWidgets.QMainWindow):
                 background,
                 noise,
                 mode3Dstate,
-                # the calibration gives spot widths in nm; the movie is
-                # rendered in camera pixels
-                [c / params["pixelsize"] for c in self.cx],
-                [c / params["pixelsize"] for c in self.cy],
+                self.cx,  # spot widths in nm
+                self.cy,
+                pixelsize=params["pixelsize"],
             )
             outputmsg = (
                 "Converting to Image ... "
