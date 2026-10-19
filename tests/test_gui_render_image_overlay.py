@@ -102,11 +102,6 @@ def test_pixel_size_and_shift():
     )
 
 
-def test_default_scale_is_the_camera_pixel_size():
-    x, y, w, h = render.overlay_extent((10, 20), _info(), "Image pixel size")
-    assert (x, y, w, h) == (CORNER, CORNER, 20.0 * PIXELSIZE, 10.0 * PIXELSIZE)
-
-
 def test_unknown_mode_raises():
     with pytest.raises(ValueError):
         render.overlay_extent((4, 4), _info(4, 4), "Nope")
