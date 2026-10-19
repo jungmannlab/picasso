@@ -27,7 +27,7 @@ Calibrating in the GUI
 
 4. Choose where to save the calibration (``<movie>_3d_calib.yaml`` by default). The diagnostic plot is saved next to it, see :ref:`localize-3d-calibration-plot`.
 
-To fit z, load the calibration with ``Load calibration`` in the ``3D via Astigmatism`` group of the ``Parameters`` dialog; ``Fit Z`` is then ticked. The ``Magnification factor`` (default 0.79) scales the fitted ``z`` to correct for the refractive-index mismatch between the immersion medium and the sample (`Huang et al., Science, 2008 <https://doi.org/10.1126/science.1153529>`__).
+To fit z, load the calibration with ``Load calibration`` in the ``3D via Astigmatism`` group of the ``Parameters`` dialog; ``Fit Z`` is then ticked. The calibration polynomials describe the spot widths in nm; a calibration written before Picasso 1.0 (no ``picasso_format`` key, widths in camera pixels) is converted when it is loaded, with the ``Pixel size (nm)`` of the ``Parameters`` dialog (``pixelsize`` of ``io.load_calibration``, or once and for all with ``picasso convert-units``, see :ref:`files-legacy`), so set the pixel size of the camera the calibration was recorded with first. The ``Magnification factor`` (default 0.79) scales the fitted ``z`` to correct for the refractive-index mismatch between the immersion medium and the sample (`Huang et al., Science, 2008 <https://doi.org/10.1126/science.1153529>`__).
 
 .. dropdown:: Python
    :icon: code
@@ -105,7 +105,7 @@ Reading the calibration plot
 
 When the calibration finishes, Picasso shows a six-panel diagnostic figure and saves it next to the calibration ``.yaml`` as a ``.png`` with the same base name.
 
-The first three panels show how well the polynomial describes the beads; the last three show how well the resulting calibration recovers a known z. Spot widths and heights are in camera pixels, z and stage positions in nm.
+The first three panels show how well the polynomial describes the beads; the last three show how well the resulting calibration recovers a known z. Spot widths and heights are in nm, as are z and the stage positions.
 
 **Mean spot width/height vs stage position**
    The measured mean ``sx`` and ``sy`` per z step with the two fitted sixth-degree polynomials on top. Picasso shifts the stage axis such that the two polynomial fits meet at ``z = 0``.

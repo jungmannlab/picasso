@@ -98,19 +98,18 @@ localizations to track them again with other parameters.
    :icon: code
    :class-container: api-example
 
-   ``max_jump`` is in camera pixels. The frame time is optional and stored in
-   the metadata for the analysis.
+   ``max_jump`` is in nm. The frame time is optional and stored in the
+   metadata for the analysis.
 
    .. code-block:: python
 
-      from picasso import io, lib, spt
+      from picasso import io, spt
 
       locs, info = io.load_locs("movie_locs.hdf5")
-      pixelsize = lib.get_from_metadata(info, "Pixelsize")
 
       tracked, info = spt.link_tracks(
           locs, info,
-          max_jump=500 / pixelsize,     # camera pixels
+          max_jump=500,                 # nm
           max_gap=1,                    # frames a track may skip
           min_length=2,                 # localizations per track
           frame_time=20,                # ms, stored in the metadata
@@ -293,7 +292,7 @@ default) and saves three files:
       * - ``duration_s``
         - Time from the first to the last localization (s).
       * - ``x_mean``, ``y_mean``
-        - Mean position (camera pixels).
+        - Mean position (nm).
       * - ``n_jumps``
         - Number of jumps between consecutive frames.
       * - ``mean_jump_nm``

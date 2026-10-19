@@ -29,9 +29,14 @@ GOLDENS_PATH = "./tests/data/render_goldens.npz"
 
 #: nontrivial rotation (radians, legacy Euler convention around x, y, z)
 ANG = (0.35, -0.6, 0.8)
-FULL_VIEWPORT = ((0.0, 0.0), (32.0, 32.0))
+#: camera pixel size of the fixture (nm); viewports are in nm
+PIXELSIZE = 130.0
+FULL_VIEWPORT = ((0.0, 0.0), (32.0 * PIXELSIZE, 32.0 * PIXELSIZE))
 #: offset sub-viewport with non-integer bounds (catches edge/rounding bugs)
-SUB_VIEWPORT = ((6.7, 4.3), (21.9, 17.2))
+SUB_VIEWPORT = (
+    (6.7 * PIXELSIZE, 4.3 * PIXELSIZE),
+    (21.9 * PIXELSIZE, 17.2 * PIXELSIZE),
+)
 
 #: keys each scene kind writes into the goldens archive
 KIND_KEYS = {
@@ -103,7 +108,7 @@ SCENES = [
         kind="render",
         input="locs",
         blur="gaussian",
-        min_blur_width=0.2,
+        min_blur_width=0.2 * PIXELSIZE,
         oversampling=10,
         viewport=FULL_VIEWPORT,
     ),
@@ -230,8 +235,10 @@ def run_scene_counted(scene, inputs, info, via_backend=False):
     the GPU golden comparison renders the whole table on a non-CPU
     backend; the scene-level kinds already go through the seam.
     """
-    pixelsize = lib.get_from_metadata(info, "Pixelsize", raise_error=True)
-    disp_px_size = pixelsize / scene["oversampling"]
+    # ``oversampling`` of the scene table is rendered pixels per camera
+    # pixel of the fixture, i.e., the rendered pixel size is
+    # PIXELSIZE / oversampling nm
+    disp_px_size = PIXELSIZE / scene["oversampling"]
     kind = scene["kind"]
 
     if kind == "render":

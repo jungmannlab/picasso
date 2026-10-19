@@ -38,7 +38,8 @@ def mask_locs(
     locs : pd.DataFrame
         Localizations to be masked.
     info : list of dict
-        Localization metadata containing 'Width' and 'Height' keys.
+        Localization metadata; the mask spans the field of view
+        (``lib.field_of_view``).
     mask : lib.BoolArray2D
         Binary mask where True indicates the area to keep.
 
@@ -49,8 +50,7 @@ def mask_locs(
     locs_out : pd.DataFrame
         Localizations outside the mask.
     """
-    width = lib.get_from_metadata(info, "Width", raise_error=True)
-    height = lib.get_from_metadata(info, "Height", raise_error=True)
+    width, height = lib.field_of_view(info)
     x_ind = np.int32(np.floor(locs["x"] / width * mask.shape[1]))
     y_ind = np.int32(np.floor(locs["y"] / height * mask.shape[0]))
 

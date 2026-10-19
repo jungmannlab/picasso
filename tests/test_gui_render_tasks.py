@@ -30,16 +30,17 @@ LOCS_PER_CLUSTER = 150
 
 
 def _cluster_centers(seed: int = 0) -> list[tuple[float, float]]:
+    """Cluster centers (nm), at least 5 camera pixels from the edges."""
     rng = np.random.default_rng(seed)
     centers = rng.uniform(5.0, WIDTH - 5.0, size=(N_CLUSTERS, 2))
-    return [tuple(c) for c in centers]
+    return [tuple(c * PIXELSIZE) for c in centers]
 
 
 def _locs(seed: int = 0) -> pd.DataFrame:
     """Dense clusters, sampled over the whole acquisition."""
     rng = np.random.default_rng(seed + 1)
     xy = np.repeat(np.array(_cluster_centers(seed)), LOCS_PER_CLUSTER, axis=0)
-    xy += rng.normal(0.0, 0.05, size=xy.shape)
+    xy += rng.normal(0.0, 6.5, size=xy.shape)  # nm
     n = len(xy)
     locs = pd.DataFrame(
         {
@@ -47,11 +48,11 @@ def _locs(seed: int = 0) -> pd.DataFrame:
             "x": xy[:, 0].astype(np.float32),
             "y": xy[:, 1].astype(np.float32),
             "photons": rng.uniform(500.0, 5000.0, size=n).astype(np.float32),
-            "sx": np.full(n, 1.0, dtype=np.float32),
-            "sy": np.full(n, 1.0, dtype=np.float32),
+            "sx": np.full(n, PIXELSIZE, dtype=np.float32),
+            "sy": np.full(n, PIXELSIZE, dtype=np.float32),
             "bg": np.full(n, 10.0, dtype=np.float32),
-            "lpx": np.full(n, 0.05, dtype=np.float32),
-            "lpy": np.full(n, 0.05, dtype=np.float32),
+            "lpx": np.full(n, 6.5, dtype=np.float32),
+            "lpy": np.full(n, 6.5, dtype=np.float32),
             "ellipticity": np.zeros(n, dtype=np.float32),
             "net_gradient": np.full(n, 5000.0, dtype=np.float32),
         }
@@ -85,7 +86,10 @@ def window(qt_offscreen, tmp_path):
     window = gui_render.Window(plugins_loaded=True)
     path = str(tmp_path / "locs.hdf5")
     window.view.add(path, _locs(), _info(), render_=False)
-    window.view.viewport = [(0.0, 0.0), (HEIGHT, WIDTH)]
+    window.view.viewport = [
+        (0.0, 0.0),
+        (HEIGHT * PIXELSIZE, WIDTH * PIXELSIZE),
+    ]
     yield window
     _wait_for_tasks(qt_offscreen)
     window.close()
@@ -117,8 +121,8 @@ def test_smlm_clusterer_saves_results(window, qt_offscreen, tmp_path):
     window.view._smlm_clusterer(
         0,
         out,
-        radius_xy=0.3,  # camera pixels
-        radius_z=0.3,
+        radius_xy=39.0,  # nm
+        radius_z=39.0,
         min_locs=10,
         frame_analysis=False,
         save_centers=True,
@@ -310,7 +314,7 @@ def test_link_all_channels_skips_linked_ones(
     window, qt_offscreen, tmp_path, monkeypatch
 ):
     view = window.view
-    linked = gui_render.postprocess.link(_locs(1), _info(), r_max=0.2)
+    linked = gui_render.postprocess.link(_locs(1), _info(), r_max=26.0)
     view.add(str(tmp_path / "linked.hdf5"), linked, _info(), render_=False)
     messages = _link_all_channels(view, qt_offscreen, monkeypatch)
     assert "len" in view.locs[0].columns
@@ -470,7 +474,7 @@ def test_cbc_remove_undefined(window, qt_offscreen, tmp_path, monkeypatch):
     view = window.view
     # a partner covering only part of the field of view
     partner = _locs(1)
-    partner = partner[partner["x"] < WIDTH / 2]
+    partner = partner[partner["x"] < WIDTH * PIXELSIZE / 2]
     view.add(str(tmp_path / "half.hdf5"), partner, _info(), render_=False)
     out = str(tmp_path / "scored_cbc.hdf5")
     params = _cbc_params((0, 1), ["A", "B"])
@@ -614,7 +618,7 @@ def test_ripley_h_reports_picks_without_localizations(
     view._pick_shape = "Circle"
     view.window.tools_settings_dialog.pick_diameter.setValue(PIXELSIZE)
     view._picks = []
-    view.add_picks([(1.0, 1.0)])  # clusters start 5 pixels in
+    view.add_picks([(PIXELSIZE, PIXELSIZE)])  # clusters start 5 px in
     result = _run_spatial_statistic(
         view, qt_offscreen, monkeypatch, _ripley_params("picks")
     )
@@ -712,7 +716,8 @@ def test_spatial_statistic_dialog_partner_settings(window, qt_offscreen):
     assert dialog.cross_null.isHidden()
     # random shifts need rectangular or circular picks
     view._pick_shape = "Polygon"
-    view._picks = [[(5, 5), (30, 8), (20, 40), (5, 5)]]
+    corners = [(5, 5), (30, 8), (20, 40), (5, 5)]  # camera pixels
+    view._picks = [[(x * PIXELSIZE, y * PIXELSIZE) for x, y in corners]]
     dialog = gui_render.SpatialStatisticDialog(window, "rdf")
     dialog.partner.setCurrentIndex(2)
     assert dialog.region.currentData() == "picks"

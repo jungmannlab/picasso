@@ -726,38 +726,46 @@ class TestCameraCalibrationRoundtrip:
 
 
 class TestLoadPicks:
+    # files written since Picasso 1.0 carry the format marker and hold
+    # positions and sizes in nm
+    CURRENT = {io.FORMAT_VERSION_ATTR: io.FORMAT_VERSION}
+
     def test_circle_picks(self, tmp_path):
         regions = {
             "Shape": "Circle",
-            "Centers": [[5.0, 5.0], [10.0, 10.0]],
+            "Centers": [[650.0, 650.0], [1300.0, 1300.0]],
             "Diameter (nm)": 130.0,
+            **self.CURRENT,
         }
         path = tmp_path / "picks.yaml"
         with open(path, "w") as f:
             yaml.dump(regions, f)
 
-        picks, shape, size = io.load_picks(str(path), pixelsize=130.0)
+        picks, shape, size = io.load_picks(str(path))
         assert shape == "Circle"
-        assert picks == [[5.0, 5.0], [10.0, 10.0]]
-        assert size == pytest.approx(1.0)
+        assert picks == [[650.0, 650.0], [1300.0, 1300.0]]
+        assert size == pytest.approx(130.0)
 
     def test_rectangle_picks(self, tmp_path):
         regions = {
             "Shape": "Rectangle",
-            "Center-Axis-Points": [[[0.0, 0.0], [10.0, 0.0]]],
-            "Width": 2.0,
+            "Center-Axis-Points": [[[0.0, 0.0], [1000.0, 0.0]]],
+            "Width (nm)": 200.0,
+            **self.CURRENT,
         }
         path = tmp_path / "picks.yaml"
         with open(path, "w") as f:
             yaml.dump(regions, f)
         picks, shape, size = io.load_picks(str(path))
         assert shape == "Rectangle"
-        assert size == 2.0
+        assert picks == [[[0.0, 0.0], [1000.0, 0.0]]]
+        assert size == 200.0
 
     def test_polygon_picks(self, tmp_path):
         regions = {
             "Shape": "Polygon",
             "Vertices": [[[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 0.0]]],
+            **self.CURRENT,
         }
         path = tmp_path / "picks.yaml"
         with open(path, "w") as f:
@@ -766,8 +774,26 @@ class TestLoadPicks:
         assert shape == "Polygon"
         assert size is None
 
+    def test_legacy_files_need_the_pixel_size(self, tmp_path):
+        # before Picasso 1.0 the positions were in camera pixels (and
+        # the sizes in nm since 0.6); the file has no format marker
+        regions = {
+            "Shape": "Circle",
+            "Centers": [[5.0, 5.0], [10.0, 10.0]],
+            "Diameter (nm)": 130.0,
+        }
+        path = tmp_path / "picks.yaml"
+        with open(path, "w") as f:
+            yaml.dump(regions, f)
+        with pytest.raises(io.MissingPixelsizeError):
+            io.load_picks(str(path))
+        picks, shape, size = io.load_picks(str(path), pixelsize=130.0)
+        assert picks == [[650.0, 650.0], [1300.0, 1300.0]]
+        assert size == pytest.approx(130.0)
+
     def test_legacy_circle_format(self, tmp_path):
-        # Old Picasso versions wrote {Centers, Diameter} without "Shape"
+        # Picasso before 0.6 wrote {Centers, Diameter} without "Shape",
+        # all in camera pixels
         regions = {
             "Centers": [[5.0, 5.0]],
             "Diameter": 1.5,
@@ -775,9 +801,10 @@ class TestLoadPicks:
         path = tmp_path / "picks.yaml"
         with open(path, "w") as f:
             yaml.dump(regions, f)
-        picks, shape, size = io.load_picks(str(path))
+        picks, shape, size = io.load_picks(str(path), pixelsize=100.0)
         assert shape == "Circle"
-        assert size == 1.5
+        assert picks == [[500.0, 500.0]]
+        assert size == 150.0
 
     def test_box_picks(self, tmp_path):
         regions = {
@@ -786,11 +813,12 @@ class TestLoadPicks:
                 [[1.0, 2.0], [4.0, 6.0]],
                 [[10.0, 10.0], [12.0, 11.0]],
             ],
+            **self.CURRENT,
         }
         path = tmp_path / "picks.yaml"
         with open(path, "w") as f:
             yaml.dump(regions, f)
-        picks, shape, size = io.load_picks(str(path), pixelsize=130.0)
+        picks, shape, size = io.load_picks(str(path))
         assert shape == "Box"
         assert picks == regions["Corners"]
         # each box carries its own extent
@@ -800,37 +828,61 @@ class TestLoadPicks:
         regions = {
             "Shape": "Brush",
             "Strokes": [
-                {"Width (nm)": 130.0, "Path": [[1.0, 1.0], [5.0, 1.0]]},
-                {"Width (nm)": 260.0, "Path": [[20.0, 20.0]]},
+                {
+                    "Width (nm)": 130.0,
+                    "Path": [[130.0, 130.0], [650.0, 130.0]],
+                },
+                {"Width (nm)": 260.0, "Path": [[2600.0, 2600.0]]},
             ],
+            **self.CURRENT,
         }
         path = tmp_path / "picks.yaml"
         with open(path, "w") as f:
             yaml.dump(regions, f)
-        picks, shape, size = io.load_picks(str(path), pixelsize=130.0)
+        picks, shape, size = io.load_picks(str(path))
         assert shape == "Brush"
         # each stroke carries its own width, so there is no pick size
         assert size is None
         assert len(picks) == 2  # the two strokes do not touch
-        assert picks[0][0][0] == pytest.approx(1.0)  # 130 nm -> 1 px
-        assert picks[1][0][0] == pytest.approx(2.0)
-        assert picks[0][0][1] == [[1.0, 1.0], [5.0, 1.0]]
+        assert picks[0][0][0] == pytest.approx(130.0)
+        assert picks[1][0][0] == pytest.approx(260.0)
+        assert picks[0][0][1] == [[130.0, 130.0], [650.0, 130.0]]
 
     def test_brush_overlapping_strokes_load_as_one_pick(self, tmp_path):
         # the file stores a flat stroke list; the grouping is re-derived
         regions = {
             "Shape": "Brush",
             "Strokes": [
-                {"Width (nm)": 130.0, "Path": [[1.0, 1.0], [5.0, 1.0]]},
-                {"Width (nm)": 130.0, "Path": [[4.0, 1.0], [9.0, 1.0]]},
+                {
+                    "Width (nm)": 130.0,
+                    "Path": [[130.0, 130.0], [650.0, 130.0]],
+                },
+                {
+                    "Width (nm)": 130.0,
+                    "Path": [[520.0, 130.0], [1170.0, 130.0]],
+                },
             ],
+            **self.CURRENT,
         }
         path = tmp_path / "picks.yaml"
         with open(path, "w") as f:
             yaml.dump(regions, f)
-        picks, _, _ = io.load_picks(str(path), pixelsize=130.0)
+        picks, _, _ = io.load_picks(str(path))
         assert len(picks) == 1
         assert len(picks[0]) == 2
+
+    def test_save_picks_round_trip(self, tmp_path):
+        path = str(tmp_path / "picks.yaml")
+        io.save_picks(path, [(650.0, 650.0)], "Circle", size=100.0)
+        regions = io.load_yaml(path)
+        assert regions[io.FORMAT_VERSION_ATTR] == io.FORMAT_VERSION
+        assert regions["Diameter (nm)"] == 100.0
+        picks, shape, size = io.load_picks(path)
+        assert (picks, shape, size) == ([[650.0, 650.0]], "Circle", 100.0)
+        with pytest.raises(ValueError, match="need a size"):
+            io.picks_dict([(1.0, 1.0)], "Circle")
+        with pytest.raises(ValueError, match="Unrecognized pick shape"):
+            io.picks_dict([], "Hexagon")
 
     def test_unrecognized_format_raises(self, tmp_path):
         path = tmp_path / "picks.yaml"
@@ -842,7 +894,10 @@ class TestLoadPicks:
     def test_unrecognized_shape_raises(self, tmp_path):
         path = tmp_path / "picks.yaml"
         with open(path, "w") as f:
-            yaml.dump({"Shape": "Hexagon", "Centers": [[1.0, 1.0]]}, f)
+            yaml.dump(
+                {"Shape": "Hexagon", "Centers": [[1.0, 1.0]], **self.CURRENT},
+                f,
+            )
         with pytest.raises(ValueError, match="Unrecognized pick shape"):
             io.load_picks(str(path))
 
@@ -850,7 +905,10 @@ class TestLoadPicks:
         # neither "Side Length (nm)" nor a legacy bare key is present
         path = tmp_path / "picks.yaml"
         with open(path, "w") as f:
-            yaml.dump({"Shape": "Square", "Centers": [[1.0, 1.0]]}, f)
+            yaml.dump(
+                {"Shape": "Square", "Centers": [[1.0, 1.0]], **self.CURRENT},
+                f,
+            )
         with pytest.raises(ValueError, match="missing the pick size"):
             io.load_picks(str(path))
 
@@ -1017,19 +1075,20 @@ class TestThunderstormRoundtrip:
 
 class TestSMAPRoundtrip:
     def _locs_2d(self):
+        # in nm
         return pd.DataFrame(
             {
                 "frame": np.array([0, 1, 2], dtype=np.uint32),
-                "x": np.array([5.0, 10.0, 15.0], dtype=np.float32),
-                "y": np.array([6.0, 11.0, 16.0], dtype=np.float32),
-                "sx": np.array([1.1, 1.2, 1.3], dtype=np.float32),
-                "sy": np.array([1.4, 1.5, 1.6], dtype=np.float32),
+                "x": np.array([650.0, 1300.0, 1950.0], dtype=np.float32),
+                "y": np.array([780.0, 1430.0, 2080.0], dtype=np.float32),
+                "sx": np.array([143.0, 156.0, 169.0], dtype=np.float32),
+                "sy": np.array([182.0, 195.0, 208.0], dtype=np.float32),
                 "photons": np.array(
                     [1000.0, 2000.0, 3000.0], dtype=np.float32
                 ),
                 "bg": np.array([10.0, 20.0, 30.0], dtype=np.float32),
-                "lpx": np.array([0.05, 0.06, 0.07], dtype=np.float32),
-                "lpy": np.array([0.07, 0.08, 0.09], dtype=np.float32),
+                "lpx": np.array([6.5, 7.8, 9.1], dtype=np.float32),
+                "lpy": np.array([9.1, 10.4, 11.7], dtype=np.float32),
             }
         )
 
@@ -1167,14 +1226,13 @@ class TestSMAPRoundtrip:
         assert "numberInGroup" in locs.columns
         # SMAP frames are 1-based; import re-zeroes them.
         assert int(locs["frame"].min()) == 0
+        # SMAP stores nm, as Picasso does
         np.testing.assert_allclose(
-            locs["x"].to_numpy(),
-            np.linspace(130, 1300, n) / PIXELSIZE,
-            atol=1e-3,
+            locs["x"].to_numpy(), np.linspace(130, 1300, n), atol=1e-3
         )
-        np.testing.assert_allclose(
-            locs["lpx"].to_numpy(), 13.0 / PIXELSIZE, atol=1e-3
-        )
+        np.testing.assert_allclose(locs["lpx"].to_numpy(), 13.0, atol=1e-3)
+        # the canvas in camera pixels holds the coordinates
+        assert info[0]["Width"] == 11 and info[0]["Height"] == 21
 
 
 # ---------------------------------------------------------------------------
@@ -1202,19 +1260,20 @@ def _write_pyme_file(path, table_name, records, metadata=None):
 
 class TestPyMERoundtrip:
     def _locs_2d(self):
+        # in nm
         return pd.DataFrame(
             {
                 "frame": np.array([0, 1, 2], dtype=np.uint32),
-                "x": np.array([5.0, 10.0, 15.0], dtype=np.float32),
-                "y": np.array([6.0, 11.0, 16.0], dtype=np.float32),
-                "sx": np.array([1.1, 1.2, 1.3], dtype=np.float32),
-                "sy": np.array([1.4, 1.5, 1.6], dtype=np.float32),
+                "x": np.array([650.0, 1300.0, 1950.0], dtype=np.float32),
+                "y": np.array([780.0, 1430.0, 2080.0], dtype=np.float32),
+                "sx": np.array([143.0, 156.0, 169.0], dtype=np.float32),
+                "sy": np.array([182.0, 195.0, 208.0], dtype=np.float32),
                 "photons": np.array(
                     [1000.0, 2000.0, 3000.0], dtype=np.float32
                 ),
                 "bg": np.array([10.0, 20.0, 30.0], dtype=np.float32),
-                "lpx": np.array([0.05, 0.06, 0.07], dtype=np.float32),
-                "lpy": np.array([0.07, 0.08, 0.09], dtype=np.float32),
+                "lpx": np.array([6.5, 7.8, 9.1], dtype=np.float32),
+                "lpy": np.array([9.1, 10.4, 11.7], dtype=np.float32),
             }
         )
 
@@ -1268,8 +1327,9 @@ class TestPyMERoundtrip:
         assert "group" in names
         # avoided, PYMEVisualize filters by them by default
         assert "sig" not in names and "A" not in names
-        np.testing.assert_allclose(x, locs["x"] * PIXELSIZE, rtol=1e-5)
-        np.testing.assert_allclose(error_x, locs["lpx"] * PIXELSIZE, rtol=1e-5)
+        # nm in both PyME and Picasso
+        np.testing.assert_allclose(x, locs["x"], rtol=1e-5)
+        np.testing.assert_allclose(error_x, locs["lpx"], rtol=1e-5)
 
     def test_export_import_3d(self, tmp_path):
         locs = self._locs_2d()
@@ -1352,7 +1412,8 @@ class TestPyMERoundtrip:
 
         locs, info = io.import_pyme(str(path))
         assert len(lib.ensure_sanity(locs, info)) == n
-        assert lib.get_from_metadata(info, lib.CANVAS_OFFSET_KEYS[0]) == 2
+        # two camera pixels of 100 nm, in nm
+        assert lib.get_from_metadata(info, lib.CANVAS_OFFSET_KEYS[0]) == 200
 
         # exported coordinates refer to the camera image again
         out = tmp_path / "offset_export.hdf"
@@ -1405,10 +1466,11 @@ class TestPyMERoundtrip:
         np.testing.assert_array_equal(locs["frame"], [0, 1, 2, 3])
         # all-zero z means 2D data
         assert "z" not in locs.columns
-        np.testing.assert_allclose(locs["lpx"], 13.0 / PIXELSIZE, rtol=1e-5)
-        np.testing.assert_allclose(locs["lpy"], 13.0 / PIXELSIZE, rtol=1e-5)
-        np.testing.assert_allclose(locs["sx"], 1.0, rtol=1e-5)
-        # no camera conversion: integrated Gaussian in camera counts
+        np.testing.assert_allclose(locs["lpx"], 13.0, rtol=1e-5)
+        np.testing.assert_allclose(locs["lpy"], 13.0, rtol=1e-5)
+        np.testing.assert_allclose(locs["sx"], 130.0, rtol=1e-5)
+        # no camera conversion: integrated Gaussian in camera counts,
+        # with the widths in camera pixels (130 nm = 1 px)
         np.testing.assert_allclose(
             locs["photons"], 100.0 * 2 * np.pi, rtol=1e-5
         )
@@ -1471,11 +1533,13 @@ class TestPyMERoundtrip:
         assert info[0]["Frames"] == 10
         pyme_metadata = info[0]["PyME metadata"]
         assert pyme_metadata["Analysis.FitModule"] == "LatGaussFitFR"
-        np.testing.assert_allclose(locs["x"], [2.0, 4.0, 6.0], rtol=1e-5)
-        np.testing.assert_allclose(locs["lpx"], 0.1, rtol=1e-5)
-        np.testing.assert_allclose(locs["lpy"], 0.2, rtol=1e-5)
-        np.testing.assert_allclose(locs["sx"], 2.0, rtol=1e-5)
+        # nm, as PyME stores them
+        np.testing.assert_allclose(locs["x"], [200.0, 400.0, 600.0], rtol=1e-5)
+        np.testing.assert_allclose(locs["lpx"], 10.0, rtol=1e-5)
+        np.testing.assert_allclose(locs["lpy"], 20.0, rtol=1e-5)
+        np.testing.assert_allclose(locs["sx"], 200.0, rtol=1e-5)
         per_count = 2.0 / 10.0
+        # the amplitude is per camera pixel: widths of 2 px of 100 nm
         np.testing.assert_allclose(
             locs["photons"],
             50.0 * 2 * np.pi * 2.0 * 2.0 * per_count,

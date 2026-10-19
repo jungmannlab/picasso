@@ -102,12 +102,12 @@ class SplatBackend(abc.ABC):
             Display pixel size in nm, see ``splat.render``.
         viewport : tuple or None
             Field of view ``((y_min, x_min), (y_max, x_max))`` in
-            camera pixels, see ``splat.render``.
+            nm, see ``splat.render``.
         blur_method : {"gaussian", "gaussian_iso", "smooth", \
                 "convolve"} or None
             Blur method, see ``splat.render``.
         min_blur_width : float
-            Minimum size of blur (camera pixels), see ``splat.render``.
+            Minimum size of blur (nm), see ``splat.render``.
         ang : tuple or scipy.spatial.transform.Rotation or None
             Rotation of the localizations, see ``splat.render``.
         quadtree_capacity : int, optional

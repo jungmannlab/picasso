@@ -141,8 +141,8 @@ def test_older_file_without_optional_settings(
     for key in (
         "Structure.Structure3D",
         "Structure.3D",
-        "Structure.CX",
-        "Structure.CY",
+        "Structure.CX (nm)",
+        "Structure.CY (nm)",
         "Imager.Constant Photonrate Std",
         "Imager.BackgroundLevel",
     ):
@@ -230,3 +230,29 @@ def test_unreadable_positions_change_nothing(
     (warning,) = warnings
     assert "docking strand positions" in warning
     assert _settings(window) == before
+
+
+def test_calibration_of_older_file_is_converted_to_nm(
+    make_window, simulated, monkeypatch, warnings
+):
+    """Before Picasso 1.0 the 3D calibration ("Structure.CX/CY") gave
+    the spot widths in camera pixels; the file's camera pixel size
+    converts it. New files record the widths in nm and the camera pixel
+    size as ``Pixelsize``, where Localize looks for it."""
+    _, _, path = simulated
+    info = io.load_info(str(path))
+    pixelsize = info[0]["Camera.Pixelsize"]
+    assert info[0]["Pixelsize"] == pixelsize
+    del info[0]["Structure.CX (nm)"]
+    del info[0]["Structure.CY (nm)"]
+    info[0]["Structure.CX"] = [1.0] * 7
+    info[0]["Structure.CY"] = [2.0] * 7
+    with open(path, "w") as file:
+        yaml.dump_all(info, file)
+    window = make_window()
+
+    _load(window, path, monkeypatch)
+
+    assert warnings == []
+    assert window.cx == [pixelsize] * 7
+    assert window.cy == [2 * pixelsize] * 7

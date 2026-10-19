@@ -93,8 +93,8 @@ def test_experiment_statistics_window(qt_offscreen, monkeypatch):
     locs = pd.DataFrame(
         {
             "photons": rng.normal(2000, 300, n),
-            "sx": rng.normal(1.0, 0.1, n),
-            "sy": rng.normal(1.0, 0.1, n),
+            "sx": rng.normal(130.0, 13.0, n),  # nm
+            "sy": rng.normal(130.0, 13.0, n),
             "bg": rng.normal(200, 20, n),
         }
     )

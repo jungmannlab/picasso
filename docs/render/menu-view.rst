@@ -166,10 +166,10 @@ Placement
 ~~~~~~~~~
 
 The dialog shows the size of the image and the size of the camera chip given
-by the localizations' metadata (``Width`` and ``Height``), states whether they
-match, and reports the resulting size of one image pixel in camera pixels and
-nm. The image is placed on the camera chip using one of the following
-scalings:
+by the localizations' metadata (``Width`` and ``Height`` camera pixels of
+``Pixelsize`` nm each), states whether they match, and reports the resulting
+size of one image pixel in nm. The image is placed on the camera chip using
+one of the following scalings:
 
 * **Fit to camera (keep aspect ratio)** (default) - the largest uniform
   scaling at which the whole image fits on the chip; the image is centered.
@@ -181,13 +181,18 @@ scalings:
 * **Image pixel size** - each image pixel is scaled to the given pixel size
   (nm); the top left corners of the image and the chip coincide.
 
-In every mode, the image can additionally be shifted by a given number of
-camera pixels in x and y, e.g., to correct a known offset between the cameras.
+In every mode, the image can additionally be shifted by a given distance
+(``Shift x/y (nm)``), e.g., to correct a known offset between the cameras.
 
 The placement follows the localization coordinates: a localization at
 ``x = 0`` lies at the center of the first camera pixel, so the chip spans from
--0.5 to ``Width`` - 0.5 camera pixels. An image acquired on the same camera
+-0.5 to ``Width`` - 0.5 camera pixels, i.e., from -0.5 × ``Pixelsize`` to
+(``Width`` - 0.5) × ``Pixelsize`` nm. An image acquired on the same camera
 region thus registers with the localizations to the sub-pixel level.
+
+The ``.yaml`` file written with exported images records the placement as
+``Overlay shift (x, y; nm)`` and ``Overlay extent (X, Y, Width, Height;
+nm)``.
 
 .. _render-overlay-display:
 
@@ -360,8 +365,8 @@ Chooses which attributes the linked windows share:
 
 - the localizations of shared channels (switching this off gives each window
   its own copy of them),
-- pan, zoom, and a crosshair marking the cursor position of the window the
-  mouse is in,
+- pan, zoom (the screen pixel size), and a crosshair marking the cursor
+  position of the window the mouse is in,
 - the active tool,
 - render settings, contrast, per-channel contrast (see
   :ref:`Per-channel contrast <render-channel-contrast>`; a channel takes the contrast of the channel

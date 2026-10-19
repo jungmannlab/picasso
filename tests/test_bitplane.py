@@ -224,8 +224,8 @@ class TestImageExtents:
 
 
 class TestExportExtents:
-    # 10 x 20 camera pixels from (x, y) = (4, 2), 100 nm pixels.
-    VIEWPORT = ((2, 4), (12, 24))
+    # 1 x 2 um from (x, y) = (400, 200) nm, rendered at 50 nm pixels.
+    VIEWPORT = ((200.0, 400.0), (1200.0, 2400.0))
 
     def test_offset_by_the_movie_corner_and_focal_plane(self):
         info = [
@@ -237,12 +237,12 @@ class TestExportExtents:
             }
         ]
         extents = bitplane.export_extents(
-            self.VIEWPORT, info, -200, 300, 100, 2, 5
+            self.VIEWPORT, info, -200, 300, 50, 5
         )
         np.testing.assert_allclose(extents, (10.4, 20.2, 3.8, 12.4, 21.2, 4.3))
 
     def test_2d_image_is_one_display_pixel_deep(self):
-        extents = bitplane.export_extents(self.VIEWPORT, [{}], 0, 0, 100, 2, 1)
+        extents = bitplane.export_extents(self.VIEWPORT, [{}], 0, 0, 50, 1)
         # 50 nm display pixels around the focal plane at z = 0.
         np.testing.assert_allclose(
             extents, (0.4, 0.2, -0.025, 2.4, 1.2, 0.025)
@@ -264,12 +264,11 @@ class TestNumpyToImaris:
             image,
             str(tmp_path / "export.ims"),
             ["red", "green"],
-            2,
-            ((2, 4), (12, 24)),
+            50,
+            ((200.0, 400.0), (1200.0, 2400.0)),
             info,
             -200,
             300,
-            100,
         )
         (extents,) = ims.PW.ImageConverter.finished
         np.testing.assert_allclose(extents, (10.4, 20.2, 3.8, 12.4, 21.2, 4.3))

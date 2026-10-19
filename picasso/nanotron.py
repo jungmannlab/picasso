@@ -4,6 +4,13 @@ picasso.nanotron
 
 Deep learning library for classification of picked localizations.
 
+A model's metadata (the .yaml next to the .sav file) records the pick
+diameter in nm ("Pick Diameter (nm)") and the rendered pixel size in nm
+("Display pixel size (nm)"), plus the format marker ``picasso_format``.
+Models trained before Picasso 1.0 recorded "Pick Diameter" in camera
+pixels and "Oversampling" (rendered pixels per camera pixel); see
+``picasso.legacy.nanotron_model_to_nm``.
+
 :authors: Alexander Auer, Maximilian Strauss
 :copyright: Copyright (c) 2020-2026 Jungmann Lab, MPI of Biochemistry
 """
@@ -93,19 +100,20 @@ def roi_to_img(
     pick : int
         The group number of the localizations to be picked.
     radius : float
-        Radius around the mean position of the localizations to define
-        the ROI.
+        Radius (nm) around the mean position of the localizations to
+        define the ROI, i.e., half the side length of the rendered image.
     disp_px_size : float
         Display pixel size used for rendering images (nm).
     picks : tuple[float, float] | None, optional
-        Specific coordinates (x, y) to isolate localizations from, by
-        default None. If None, uses the mean position of the localizations
-        in the specified group.
+        Specific coordinates (x, y) in nm to isolate localizations from,
+        by default None. If None, uses the mean position of the
+        localizations in the specified group.
 
     Returns
     -------
     pick_img : lib.FloatArray2D
-        Image of the picked localizations.
+        Image of the picked localizations, ``2 * radius / disp_px_size``
+        pixels on a side.
 
     Raises
     ------
@@ -124,7 +132,7 @@ def roi_to_img(
         where = f"the radius {radius} around ({x}, {y})"
     if not len(pick_locs):
         raise ValueError(f"No localizations in {where}.")
-    # dirty method to avoid floating point errors with render
+    # dirty method to avoid floating point errors with render (nm)
     radius -= 0.001
 
     x_mean = np.mean(pick_locs["x"])
@@ -170,8 +178,8 @@ def prepare_data(
     label : int
         Label for the data, typically the group number.
     pick_radius : float
-        Radius around the mean position of the localizations to define
-        the ROI.
+        Radius (nm) around the mean position of the localizations to
+        define the ROI.
     disp_px_size : float
         Display pixel size used for rendering images (nm).
     alpha : float, optional
@@ -247,11 +255,11 @@ def predict_structure(
     pick : int
         Index of the localizations to predict.
     pick_radius : float
-        Radius around the localizations to consider.
+        Radius (nm) around the localizations to consider.
     disp_px_size : float
         Display pixel size used for rendering images (nm).
     picks : tuple[float, float] | None, optional
-        Coordinates of the region of interest (ROI) to predict.
+        Coordinates (nm) of the region of interest (ROI) to predict.
 
     Returns
     -------

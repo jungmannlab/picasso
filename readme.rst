@@ -56,7 +56,7 @@ Besides the GUI, Picasso can be used like any other Python package::
   locs, info = io.load_locs("testdata_locs.hdf5")
 
   # Link localizations and calculate dark times
-  linked_locs = postprocess.link(locs, info, r_max=0.05, max_dark_time=1)
+  linked_locs = postprocess.link(locs, info, r_max=10, max_dark_time=1)
   linked_locs_dark = postprocess.compute_dark_times(linked_locs)
 
   print(f"Average bright time {linked_locs_dark['n'].mean():.2f} frames")

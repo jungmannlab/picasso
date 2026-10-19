@@ -408,7 +408,7 @@ def build_animation(
         is a tuple of 2 elements: (rotation, viewport). Rotation is a
         ``scipy.spatial.transform.Rotation`` defining the orientation
         of the localizations at the checkpoint. Viewport is given as
-        ((y_min, x_min), (y_max, x_max)) in camera pixels. Since
+        ((y_min, x_min), (y_max, x_max)) in nm. Since
         v1.0.0, the legacy format (angle_x, angle_y, angle_z, viewport)
         with Euler angles is no longer accepted; convert the angles with
         ``rotation_matrix``.
@@ -459,7 +459,7 @@ def build_animation(
         pixel blur. 'convolve' applies the same blur to all
         localizations which is the median localization precision.
     min_blur_width : float, optional
-        Minimum size of blur (camera pixels).
+        Minimum size of blur (nm).
     quadtree_capacity : int, optional
         Leaf capacity of the 'quadtree' blur method, see ``render``.
         Default is None (``lib.RENDER_QUADTREE_CAPACITY_DEFAULT``).
@@ -518,11 +518,11 @@ def build_animation(
         grid is drawn. Default is None.
     grid_bounds : tuple, optional
         ``((x_min, y_min, z_min), (x_max, y_max, z_max))`` spanned by
-        the grid, in camera pixels (z included) in the frame of 'locs'.
+        the grid, in nm, in the frame of 'locs'.
         If None, the bounding box of all localizations. Only used if
         'grid' is given. Default is None.
     grid_origin : tuple of float, optional
-        A point on the grid in the frame of 'locs' (camera pixels), see
+        A point on the grid in the frame of 'locs' (nm), see
         ``picasso.render.draw_grid_3d``. Only used if 'grid' is given.
         Default is the origin.
     progress_callback : callable, "console", or None, optional
@@ -739,12 +739,6 @@ def _build_animation(
     width = ((width + 15) // 16) * 16
     height = ((height + 15) // 16) * 16
 
-    if scalebar_length_nm is not None or grid is not None:
-        # camera pixel size (nm) maps lengths in nm onto the viewport
-        channel_info = info[0] if isinstance(info[0], list) else info
-        pixelsize = lib.get_from_metadata(
-            channel_info, "Pixelsize", raise_error=True
-        )
     if scalebar_length_nm is not None:
         scalebar_color = QtGui.QColor("black" if invert_colors else "white")
     if grid is not None:
@@ -821,7 +815,6 @@ def _build_animation(
                 qimage,
                 viewports[i],
                 grid,
-                pixelsize,
                 rotations[i],
                 grid_bounds,
                 origin=grid_origin,
@@ -837,7 +830,6 @@ def _build_animation(
                 image=qimage,
                 viewport=((y_min, x_min), (y_max, x_max)),
                 scalebar_length_nm=scalebar_length_nm,
-                pixelsize=pixelsize,
                 display_length=scalebar_display_length,
                 color=scalebar_color,
             )
@@ -877,7 +869,7 @@ def _build_animation(
         "FPS": fps,
         "Quaternions at checkpoints (x, y, z, w)": quaternions_yaml,
         "Rotations between checkpoints (x, y, z) (deg)": segments_yaml,
-        "Viewports at checkpoints (camera pixels)": viewports_yaml,
+        "Viewports at checkpoints (nm)": viewports_yaml,
         "Durations (s)": durations,
         "Transition": transition,
         "Scale bar length (nm)": scalebar_length_nm,

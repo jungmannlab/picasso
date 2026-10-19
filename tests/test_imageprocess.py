@@ -170,17 +170,16 @@ class TestFindFiducials:
     def test_returns_picks_and_box(self, locs, info):
         picks, box = imageprocess.find_fiducials(locs, info)
         assert isinstance(picks, list)
-        assert isinstance(box, int)
-        # box is forced to be odd (imageprocess.py:259-260)
-        assert box % 2 == 1
-        assert box > 0
+        # the box is an odd number of rendered (100 nm) pixels, about
+        # 900 nm, returned in nm
+        assert box == pytest.approx(imageprocess.FIDUCIAL_BOX_SIZE)
+        assert round(box / imageprocess.FIDUCIAL_RENDER_PIXEL_SIZE) % 2 == 1
 
     def test_picks_within_image_bounds(self, locs, info):
         from picasso import lib
 
         picks, _ = imageprocess.find_fiducials(locs, info)
-        width = lib.get_from_metadata(info, "Width")
-        height = lib.get_from_metadata(info, "Height")
+        width, height = lib.field_of_view(info)
         for x, y in picks:
             assert 0 <= x <= width
             assert 0 <= y <= height
@@ -189,25 +188,31 @@ class TestFindFiducials:
         """find_fiducials must return picks *at* the planted fiducials.
 
         Regression test for the coordinate-scaling bug where the image
-        was rendered at ``disp_px_size=100`` while the maxima were used
-        as camera-pixel coordinates without dividing by the resulting
-        ``oversampling = Pixelsize / disp_px_size``. With Pixelsize != 100
-        every detected pick was offset by that factor, so the markers
-        were missed. The earlier shape-only tests did not catch this
-        because the offset picks were still in-bounds integers.
+        was rendered at ``disp_px_size=100`` while the maxima (image
+        pixel indices) were used as localization coordinates without
+        mapping them back by the rendered pixel size, so every detected
+        pick was offset and the markers were missed. The shape-only
+        tests do not catch this because the offset picks are still
+        in-bounds numbers.
 
-        Pixelsize is deliberately 130 (!= the old hard-coded 100) so the
-        scaling factor is non-trivial.
+        Pixelsize is deliberately 130 (!= the rendered 100 nm pixel) so
+        that the field of view is not a whole number of rendered pixels.
         """
-        fov = 64
+        fov = 64  # camera pixels
+        pixelsize = 130.0
         n_frames = 200
-        centers = [(12.0, 12.0), (12.0, 48.0), (48.0, 12.0), (48.0, 48.0)]
+        centers = [
+            (12.0 * pixelsize, 12.0 * pixelsize),
+            (12.0 * pixelsize, 48.0 * pixelsize),
+            (48.0 * pixelsize, 12.0 * pixelsize),
+            (48.0 * pixelsize, 48.0 * pixelsize),
+        ]
         info = [
             {
                 "Width": fov,
                 "Height": fov,
                 "Frames": n_frames,
-                "Pixelsize": 130,
+                "Pixelsize": pixelsize,
             }
         ]
 
@@ -215,10 +220,10 @@ class TestFindFiducials:
         # one dense, persistent localization per frame per fiducial
         n_per = n_frames * len(centers)
         x = np.repeat([c[0] for c in centers], n_frames) + rng.normal(
-            0, 0.05, n_per
+            0, 6.5, n_per
         )
         y = np.repeat([c[1] for c in centers], n_frames) + rng.normal(
-            0, 0.05, n_per
+            0, 6.5, n_per
         )
         locs = pd.DataFrame(
             {
@@ -228,11 +233,11 @@ class TestFindFiducials:
                 "x": x,
                 "y": y,
                 "photons": np.full(n_per, 1000.0),
-                "sx": np.full(n_per, 1.0),
-                "sy": np.full(n_per, 1.0),
+                "sx": np.full(n_per, pixelsize),
+                "sy": np.full(n_per, pixelsize),
                 "bg": np.full(n_per, 10.0),
-                "lpx": np.full(n_per, 0.01),
-                "lpy": np.full(n_per, 0.01),
+                "lpx": np.full(n_per, 1.3),
+                "lpy": np.full(n_per, 1.3),
             }
         )
 

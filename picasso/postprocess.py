@@ -88,6 +88,19 @@ __all__ = [
     "plot_nnd_distributions",
 ]
 
+#: Convergence tolerance (nm) of the center-of-mass iterations of
+#: ``pick_similar``.
+PICK_CONVERGENCE = 0.1
+#: Pixel size (nm) of the images rendered for undrifting by RCC
+#: (``undrift``, ``segment``).
+UNDRIFT_PIXEL_SIZE = 100.0
+#: Largest shift (nm) between two segments considered by ``undrift``.
+UNDRIFT_MAX_SHIFT = 10000.0
+#: Pixel size (nm) of the images rendered by ``align_rcc``.
+ALIGN_PIXEL_SIZE = 100.0
+#: Convergence tolerance (nm) of the iterations of ``align_rcc``.
+ALIGN_CONVERGENCE = 0.1
+
 
 def _is_pyramid(index_blocks) -> bool:
     """Whether a pick index is a ``spatial_index.RenderIndexPyramid``
@@ -111,15 +124,15 @@ def get_index_blocks(
     info : list of dicts
         Metadata of the localizations list.
     size : float
-        Size of the blocks in camera pixels. For circular picks, this
-        is pick radius.
+        Size of the blocks in nm. For circular picks, this is the pick
+        radius.
 
     Returns
     -------
     locs : pd.DataFrame
         Localizations in the specified blocks.
     size : float
-        Size of the blocks in camera pixels.
+        Size of the blocks in nm.
     x_index : lib.IntArray1D
         x indices of the localizations in the blocks.
     y_index : lib.IntArray1D
@@ -165,15 +178,14 @@ def _index_blocks_shape(info: list[dict], size: float) -> tuple[int, int]:
     info : list of dicts
         Metadata of the localizations list.
     size : float
-        Size of the blocks.
+        Size of the blocks (nm).
 
     Returns
     -------
     n : tuple
         Number of blocks in y and x.
     """
-    width = lib.get_from_metadata(info, "Width", raise_error=True)
-    height = lib.get_from_metadata(info, "Height", raise_error=True)
+    width, height = lib.field_of_view(info)
     n_blocks_x = int(np.ceil(width / size))
     n_blocks_y = int(np.ceil(height / size))
     n = (n_blocks_y, n_blocks_x)
@@ -487,7 +499,7 @@ def picked_locs(
     pick_shape : {'Circle', 'Rectangle', 'Polygon', 'Square', 'Box', 'Brush'}
         Shape of the pick.
     pick_size : float, optional
-        Size of the pick in camera pixels. Radius for the circles, width
+        Size of the pick in nm. Radius for the circles, width
         for the rectangles, side length for squares, None for the
         polygons, boxes and brush picks (they carry their own extent).
         Default is None.
@@ -628,8 +640,8 @@ def pick_similar(
     pick_shape : {'Circle', 'Rectangle', 'Square', 'Box'}, optional
         Shape of the picks. Default is 'Circle'.
     pick_size : float, optional
-        Size of the pick in camera pixels. Diameter for circles, side
-        length for squares, width for rectangles. Ignored for boxes,
+        Size of the pick in nm. Diameter for circles, side length for
+        squares, width for rectangles. Ignored for boxes,
         which carry their own extent. Default is None.
     std_range : float, optional
         Standard deviation range for picking similar localizations.
@@ -640,8 +652,8 @@ def pick_similar(
         size does not match the one required by ``pick_shape``. Default
         is None.
     grid_spacing : float, optional
-        Distance between neighboring candidate positions in camera
-        pixels. Only used for rectangular picks, where the default
+        Distance between neighboring candidate positions in nm. Only
+        used for rectangular picks, where the default
         (a quarter of the median pick length) trades speed for the
         chance of missing closely spaced structures. Default is None.
 
@@ -808,8 +820,9 @@ def _pick_similar_circular(
     y_similar = np.array([_[1] for _ in picks], dtype=np.float64)
 
     # preparations for grid search
-    x_range = np.arange(d / 2, info[0]["Width"], np.sqrt(3) * d / 2)
-    y_range_base = np.arange(d / 2, info[0]["Height"] - d / 2, d)
+    fov_width, fov_height = lib.field_of_view(info)
+    x_range = np.arange(d / 2, fov_width, np.sqrt(3) * d / 2)
+    y_range_base = np.arange(d / 2, fov_height - d / 2, d)
     y_range_shift = y_range_base + d / 2
     locs_temp, size, _, _, block_starts, block_ends, K, L = index_blocks
     locs_xy = np.stack((locs_temp.x, locs_temp.y))
@@ -952,8 +965,8 @@ def _pick_similar(  # noqa: C901
                     y_test = np.mean(picked_locs_xy[1])
                     count = 0
                     while (
-                        np.abs(x_test - x_test_old) > 1e-3
-                        or np.abs(y_test - y_test_old) > 1e-3
+                        np.abs(x_test - x_test_old) > PICK_CONVERGENCE
+                        or np.abs(y_test - y_test_old) > PICK_CONVERGENCE
                     ):
                         count += 1
                         # skip the locs if the loop is too long
@@ -1000,15 +1013,14 @@ def _pick_similar_grid(
     info : list of dicts
         Metadata of the localizations.
     spacing : float
-        Distance between neighboring candidates in camera pixels.
+        Distance between neighboring candidates in nm.
 
     Returns
     -------
     grid_x, grid_y : lib.FloatArray1D
-        Coordinates of the candidate positions.
+        Coordinates of the candidate positions (nm).
     """
-    width = lib.get_from_metadata(info, "Width", raise_error=True)
-    height = lib.get_from_metadata(info, "Height", raise_error=True)
+    width, height = lib.field_of_view(info)
     x_range = np.arange(spacing / 2, width, np.sqrt(3) * spacing / 2)
     y_range = np.arange(spacing / 2, height - spacing / 2, spacing)
     n_cols = len(x_range)
@@ -1404,7 +1416,7 @@ def _pick_similar_square_kernel(
     K, L : int
         Number of blocks in y and x direction.
     block_size : float
-        Size of the index blocks in camera pixels.
+        Size of the index blocks in nm.
     a : float
         Side length of the square picks.
     min_n_locs, max_n_locs : float
@@ -1443,7 +1455,10 @@ def _pick_similar_square_kernel(
             dy = my - y_test
             x_test = mx
             y_test = my
-            if np.abs(dx) <= 1e-3 and np.abs(dy) <= 1e-3:
+            if (
+                np.abs(dx) <= PICK_CONVERGENCE
+                and np.abs(dy) <= PICK_CONVERGENCE
+            ):
                 break
         if n < 2:
             continue
@@ -1641,7 +1656,7 @@ def _pick_similar_box_kernel(
     K, L : int
         Number of blocks in y and x direction.
     block_size : float
-        Size of the index blocks in camera pixels.
+        Size of the index blocks in nm.
     w, h : float
         Width and height of the candidate boxes.
     min_n_locs, max_n_locs : float
@@ -1686,7 +1701,10 @@ def _pick_similar_box_kernel(
             dy = my - y_test
             x_test = mx
             y_test = my
-            if np.abs(dx) <= 1e-3 and np.abs(dy) <= 1e-3:
+            if (
+                np.abs(dx) <= PICK_CONVERGENCE
+                and np.abs(dy) <= PICK_CONVERGENCE
+            ):
                 break
         if n < 2:
             continue
@@ -1913,7 +1931,7 @@ def _refine_rectangle(
     theta : float
         Initial angle of the center axis (radians).
     length, width : float
-        Size of the rectangle in camera pixels.
+        Size of the rectangle in nm.
     locs_xy : lib.FloatArray2D
         Localization coordinates, shape ``(2, N)``, sorted by index
         blocks.
@@ -1922,7 +1940,7 @@ def _refine_rectangle(
     K, L : int
         Number of blocks in y and x direction.
     block_size : float
-        Size of the index blocks in camera pixels.
+        Size of the index blocks in nm.
     max_iter : int, optional
         Maximum number of iterations. Default is 100.
 
@@ -1967,8 +1985,8 @@ def _refine_rectangle(
         yc = my
         theta = theta_new
         if (
-            np.abs(dx) <= 1e-3
-            and np.abs(dy) <= 1e-3
+            np.abs(dx) <= PICK_CONVERGENCE
+            and np.abs(dy) <= PICK_CONVERGENCE
             and np.abs(d_theta) <= 1e-4
         ):
             break
@@ -2050,9 +2068,9 @@ def _pick_similar_rectangle_kernel(
     K, L : int
         Number of blocks in y and x direction.
     block_size : float
-        Size of the index blocks in camera pixels.
+        Size of the index blocks in nm.
     length, width : float
-        Size of the candidate rectangles in camera pixels.
+        Size of the candidate rectangles in nm.
     r_circ : float
         Circumscribed circle radius of the candidate rectangles.
     min_n_locs, max_n_locs : float
@@ -2175,7 +2193,7 @@ def remove_locs_in_picks(
     pick_shape : {"Circle", "Rectangle", "Polygon", "Square", "Box", "Brush"}
         Shape of picks.
     pick_size : float or None
-        Size of picks in camera pixels. For circles - diameters. For
+        Size of picks in nm. For circles - diameters. For
         rectangles - width. For squares - side length. For polygons,
         boxes and brush picks - ignored. Ignored if picks are loaded
         from a YAML file.
@@ -2383,9 +2401,9 @@ def distance_histogram(
     info : list[dict]
         Metadata of the localizations.
     bin_size : float
-        Size of the bins for the histogram.
+        Size of the bins for the histogram (nm).
     r_max : float
-        Maximum distance probed in the histogram.
+        Maximum distance probed in the histogram (nm).
 
     Returns
     -------
@@ -2444,10 +2462,10 @@ def nena(
     Returns
     -------
     result : dict
-        Data on the results, including the distances probed, best fit
-        and fitted parameters.
+        Data on the results, including the distances probed (nm), best
+        fit and fitted parameters.
     s : float
-        Estimated localization precision in camera pixels.
+        Estimated localization precision in nm.
     """
     bin_centers, dnfl = _next_frame_neighbor_distance_histogram(locs, callback)
 
@@ -2511,7 +2529,6 @@ def nena(
             "dc": popt[3],
             "sc": popt[4],
         },
-        "pixelsize": lib.get_from_metadata(info, "Pixelsize", default="N/A"),
     }
     return result, s
 
@@ -2528,9 +2545,7 @@ def plot_nena(
     ----------
     nena_result : dict
         Data on the results from function ``nena``, including the
-        distances probed, best fit and fitted parameters. If "pixelsize"
-        is included, the distances will be plotted in nm, otherwise in
-        camera pixels.
+        distances probed (nm), best fit and fitted parameters.
     fig : plt.Figure
         Figure to plot on. If None, a new figure and axes are
         created.
@@ -2549,14 +2564,9 @@ def plot_nena(
         fig.clear()
     d = deepcopy(nena_result["d"])
     ax = fig.add_subplot(111)
-    pixelsize = (
-        nena_result["pixelsize"] if nena_result["pixelsize"] != "N/A" else 1
-    )
-    unit = "nm" if nena_result["pixelsize"] != "N/A" else "pixels"
-    d *= nena_result["pixelsize"]
     ax.set_title(
         "Next frame neighbor distance histogram, "
-        f"\u03c3 = {nena_result['best_values']['s'] * pixelsize:.2f} {unit}"
+        f"\u03c3 = {nena_result['best_values']['s']:.2f} nm"
     )
     # the data is a histogram over bin centers: draw it as filled bars
     d = np.asarray(d, dtype=float)
@@ -2575,7 +2585,7 @@ def plot_nena(
     )
     ax.plot(d, nena_result["best_fit"], color=fit_color, label="Fit")
     ax.set_ylim(bottom=0)
-    ax.set_xlabel(f"Distance ({unit})")
+    ax.set_xlabel("Distance (nm)")
     ax.set_ylabel("Counts")
     ax.legend(loc="best")
     return fig
@@ -2597,7 +2607,8 @@ def _next_frame_neighbor_distance_histogram(
     Returns
     -------
     bin_centers : lib.FloatArray1D
-        Centers of the bins for the histogram.
+        Centers of the bins for the histogram (nm, 0.2 nm bins up to
+        200 nm).
     dnfl : lib.FloatArray1D
         Distance histogram of next frame neighbors.
     """
@@ -2611,8 +2622,8 @@ def _next_frame_neighbor_distance_histogram(
         group = locs["group"].to_numpy()
     else:
         group = np.zeros(len(locs), dtype=np.int32)
-    bin_size = 0.001
-    d_max = 1.0
+    bin_size = 0.2  # nm
+    d_max = 200.0  # nm
     return _nfndh(frame, x, y, group, d_max, bin_size, callback)
 
 
@@ -2747,15 +2758,15 @@ def frc(
     info : list of dicts
         Metadata of the localizations list.
     viewport : tuple of floats
-        Viewport ((y_min, x_min), (y_max, x_max)) for rendering the
-        images. Note that the origin of the image is in the top-left
+        Viewport ((y_min, x_min), (y_max, x_max)) in nm for rendering
+        the images. Note that the origin of the image is in the top-left
         corner.
     random_seed : int, optional
         Random seed for splitting the data into halves. Default is 42.
     lp : float or None, optional
-        Localization precision (camera pixels) that sets the bin size of
-        the rendered images. If None (default), NeNA of ``locs`` is
-        used.
+        Localization precision (nm) that sets the bin size of the
+        rendered images (``lp / 2``). If None (default), NeNA of
+        ``locs`` is used.
 
     Returns
     -------
@@ -2765,7 +2776,6 @@ def frc(
         "resolution" (estimated resolution in nm) and "images"
         (2 grayscale images rendered and masked).
     """
-    pixelsize = lib.get_from_metadata(info, "Pixelsize", raise_error=True)
     if lp is None:
         lp = nena(locs, info)[1]
     # correct for the viewport to be square
@@ -2799,7 +2809,7 @@ def frc(
     locs2 = locs.iloc[r_idx[len(r_idx) // 2 :]]
     # run FRC
     frc_curve, frc_curve_smooth, frequencies, resolution, images = _frc(
-        locs1, locs2, pixelsize, lp, viewport
+        locs1, locs2, info, lp, viewport
     )
     # smooth the FRC curve and summarize findings
     frc_result = {
@@ -2838,8 +2848,8 @@ def frc_rois(
     info : list of dicts
         Metadata of the localizations list.
     viewport : tuple of floats
-        Region ((y_min, x_min), (y_max, x_max)) in camera pixels in
-        which the ROIs are placed.
+        Region ((y_min, x_min), (y_max, x_max)) in nm in which the ROIs
+        are placed.
     n_rois : int, optional
         Maximum number of ROIs. Default is 30.
     roi_size : float, optional
@@ -2856,11 +2866,11 @@ def frc_rois(
     Returns
     -------
     result : dict
-        Dictionary with keys "rois" (viewports of the ROIs in camera
-        pixels), "n_locs" (localizations per ROI), "frc_results"
-        (list of ``frc`` results, one per ROI), "resolutions" (in nm,
-        NaN where the FRC curve does not cross the 1/7 threshold) and
-        "lp" (NeNA in camera pixels).
+        Dictionary with keys "rois" (viewports of the ROIs in nm),
+        "n_locs" (localizations per ROI), "frc_results" (list of
+        ``frc`` results, one per ROI), "resolutions" (in nm, NaN where
+        the FRC curve does not cross the 1/7 threshold) and "lp" (NeNA
+        in nm).
     """
     rois = lib.select_frc_rois(
         locs,
@@ -2911,7 +2921,7 @@ def frc_rois(
 def _frc(
     locs1: pd.DataFrame,
     locs2: pd.DataFrame,
-    pixelsize: float,
+    info: list[dict],
     lp: float,
     viewport: tuple[tuple[float, float], tuple[float, float]],
 ) -> tuple[
@@ -2934,14 +2944,14 @@ def _frc(
     ----------
     locs1, locs2 : pd.DataFrame
         Localization lists already split to render images.
-    pixelsize : float
-        Camera pixel size in nm.
+    info : list of dicts
+        Metadata of the localizations.
     lp : float
-        Average localization precision (NeNA), used for bin size of the
-        rendered images (binsize = lp / 2).
+        Average localization precision (NeNA, nm), used for bin size of
+        the rendered images (binsize = lp / 2).
     viewport : tuple of floats
-        Viewport ((y_min, x_min), (y_max, x_max)) for rendering the
-        images. Note that the origin of the image is in the top-left
+        Viewport ((y_min, x_min), (y_max, x_max)) in nm for rendering
+        the images. Note that the origin of the image is in the top-left
         corner.
 
     Returns
@@ -2959,9 +2969,7 @@ def _frc(
         2 grayscale images used for calculating FRC. Already masked.
     """
     # render images
-    binsize = lp / 2
-    disp_px_size = pixelsize * binsize
-    info = {"Pixelsize": pixelsize}
+    disp_px_size = lp / 2  # nm
     im1 = render.render(
         locs1,
         info,
@@ -3006,9 +3014,7 @@ def _frc(
     frc_curve_smooth = masking.loess_smooth(frc_curve, sspan)
 
     # find the frequencies (q) and resolution
-    frequencies = (
-        np.arange(len(frc_curve)) / im1.shape[0] / (pixelsize * binsize)
-    )
+    frequencies = np.arange(len(frc_curve)) / im1.shape[0] / disp_px_size
     threshold = 1 / 7  # resolution at 1/7 threshold
     resolution = None
     for i in range(1, len(frc_curve_smooth)):
@@ -3035,9 +3041,9 @@ def pair_correlation(
 ) -> tuple[lib.FloatArray1D, lib.FloatArray1D]:
     """Calculate the pair correlation function for the given
     localizations, as the histogram of their distances divided by the
-    area of each ring (camera pixels, no edge correction or
-    normalization by the density). See ``rdf`` for the normalized,
-    edge-corrected radial distribution function in nm.
+    area of each ring (1/nm^2, no edge correction or normalization by
+    the density). See ``rdf`` for the normalized, edge-corrected radial
+    distribution function.
 
     Parameters
     ----------
@@ -3046,16 +3052,16 @@ def pair_correlation(
     info : list of dicts
         Metadata of the localizations.
     bin_size : float
-        Size of the bins for the histogram.
+        Size of the bins for the histogram (nm).
     r_max : float
-        Maximum distance for the histogram.
+        Maximum distance for the histogram (nm).
 
     Returns
     -------
     bins_lower : lib.FloatArray1D
-        Lower bounds of the bins for the histogram.
+        Lower bounds of the bins for the histogram (nm).
     pc : lib.FloatArray1D
-        Pair correlation function.
+        Pair correlation function (1/nm^2).
     """
     dh = distance_histogram(locs, info, bin_size, r_max)
     # Start with r-> otherwise area will be 0
@@ -3122,7 +3128,7 @@ def compute_local_density(
     info : list of dicts
         Metadata of the localizations.
     radius : float
-        Radius for local density computation.
+        Radius for local density computation (nm).
 
     Returns
     -------
@@ -3222,7 +3228,6 @@ def evaluate_picks(
     else:
         iter_range = range(len(picked_locs))
 
-    pixelsize = lib.get_from_metadata(info, "Pixelsize", default=1.0)
     n_picks = len(picked_locs)
     N = np.empty(n_picks)  # number of locs per pick
     n_events = np.empty(n_picks)  # number of events per pick
@@ -3246,14 +3251,11 @@ def evaluate_picks(
             N[i] = len(pick_locs)
             com_x = pick_locs["x"].mean()
             com_y = pick_locs["y"].mean()
-            rmsd[i] = (
-                np.sqrt(
-                    np.mean(
-                        (pick_locs["x"] - com_x) ** 2
-                        + (pick_locs["y"] - com_y) ** 2
-                    )
+            rmsd[i] = np.sqrt(
+                np.mean(
+                    (pick_locs["x"] - com_x) ** 2
+                    + (pick_locs["y"] - com_y) ** 2
                 )
-                * pixelsize
             )
             if has_z:
                 rmsd_z[i] = np.sqrt(
@@ -3575,7 +3577,7 @@ def _dark_times(
 def link(
     locs: pd.DataFrame,
     info: list[dict],
-    r_max: float = 0.05,
+    r_max: float = 10.0,
     max_dark_time: int = 3,
     combine_mode: Literal["average", "refit"] = "average",
     remove_ambiguous_lengths: bool = True,
@@ -3590,7 +3592,7 @@ def link(
     info : list of dicts
         Metadata of the localizations.
     r_max : float, optional
-        Maximum distance for linking localizations. Default is 0.05.
+        Maximum distance (nm) for linking localizations. Default is 10.
     max_dark_time : int, optional
         Maximum number of frames without a localization between two
         localizations that are still linked into one binding event.
@@ -3674,9 +3676,8 @@ def select_binding_event_cores(
     locs : pd.DataFrame
         Localizations.
     r_max : float, optional
-        Maximum distance (camera pixels) between localizations to be
-        considered as originating from the same binding event. Default
-        is 0.1.
+        Maximum distance (nm) between localizations to be considered as
+        originating from the same binding event. Default is 10.
     max_dark_time : int, optional
         Maximum number of frames between localizations to be considered
         as originating from the same binding event. Default is 0.
@@ -3794,10 +3795,7 @@ def combine_locs_in_picks(
         index_blocks=index_blocks,
     )
     # use very large values for linking localizations
-    r_max = 2 * max(
-        lib.get_from_metadata(info, "Height"),
-        lib.get_from_metadata(info, "Width"),
-    )
+    r_max = 2 * max(lib.field_of_view(info))
     max_dark = lib.get_from_metadata(info, "Frames", default=10_000)
 
     # link every localization in each pick
@@ -4245,8 +4243,9 @@ def segment(
     segmentation : int
         Number of segments to divide the data into.
     kwargs : dict, optional
-        Additional keyword arguments for the rendering function.
-        Default is an empty dictionary.
+        Additional keyword arguments for the rendering function, e.g.,
+        ``disp_px_size`` (nm, default ``UNDRIFT_PIXEL_SIZE``) and
+        ``min_blur_width`` (nm). Default is an empty dictionary.
     callback : Callable[[int], None], optional
         Callback function to report progress. It should accept an
         integer argument representing the current segment index.
@@ -4261,12 +4260,11 @@ def segment(
         3D array of segments, where each segment is a 2D image of the
         localizations in that segment.
     """
-    Y = lib.get_from_metadata(info, "Height", raise_error=True)
-    X = lib.get_from_metadata(info, "Width", raise_error=True)
+    X, Y = lib.field_of_view(info)
     n_frames = lib.get_from_metadata(info, "Frames", raise_error=True)
-    pixelsize = lib.get_from_metadata(info, "Pixelsize", raise_error=True)
-    disp_px_size = kwargs.get("disp_px_size", pixelsize)
-    oversampling = pixelsize / disp_px_size
+    kwargs = dict(kwargs)
+    disp_px_size = kwargs.pop("disp_px_size", UNDRIFT_PIXEL_SIZE)
+    oversampling = 1 / disp_px_size  # rendered pixels per nm
     n_pixel_y = int(np.ceil(oversampling * Y))
     n_pixel_x = int(np.ceil(oversampling * X))
     n_seg = n_segments(info, segmentation)
@@ -4296,6 +4294,9 @@ def undrift(
     display: bool = True,
     segmentation_callback: Callable[[int], None] = None,
     rcc_callback: Callable[[int], None] = None,
+    *,
+    disp_px_size: float = UNDRIFT_PIXEL_SIZE,
+    max_shift: float = UNDRIFT_MAX_SHIFT,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Undrift by RCC. See Wang, Schnitzbauer, et al. Optics Express,
     2014.
@@ -4318,11 +4319,17 @@ def undrift(
         Callback function to report progress during RCC calculation.
         It should accept an integer argument representing the current
         segment index. Default is None, which means no callback is used.
+    disp_px_size : float, optional
+        Pixel size (nm) of the rendered segments, which are blurred by
+        one pixel. Default is 100.
+    max_shift : float, optional
+        Largest shift (nm) between two segments considered. Default is
+        10000.
 
     Returns
     -------
     drift : pd.DataFrame
-        Estimated drift as a DataFrame with columns 'x' and 'y'.
+        Estimated drift (nm) as a DataFrame with columns 'x' and 'y'.
     locs : pd.DataFrame
         Undrifted localization list with the drift applied to the 'x'
         and 'y' coordinates.
@@ -4332,10 +4339,19 @@ def undrift(
         locs,
         info,
         segmentation,
-        {"blur_method": "gaussian", "min_blur_width": 1},
+        {
+            "disp_px_size": disp_px_size,
+            "blur_method": "gaussian",
+            "min_blur_width": disp_px_size,  # one rendered pixel
+        },
         segmentation_callback,
     )
-    shift_y, shift_x = imageprocess.rcc(segments, 32, rcc_callback)
+    # rcc works in rendered pixels; the shifts are converted to nm
+    shift_y, shift_x = imageprocess.rcc(
+        segments, max_shift / disp_px_size, rcc_callback
+    )
+    shift_x = np.asarray(shift_x, dtype=np.float64) * disp_px_size
+    shift_y = np.asarray(shift_y, dtype=np.float64) * disp_px_size
     t = (bounds[1:] + bounds[:-1]) / 2
     drift_x_pol = interpolate.InterpolatedUnivariateSpline(t, shift_x, k=3)
     drift_y_pol = interpolate.InterpolatedUnivariateSpline(t, shift_y, k=3)
@@ -4343,8 +4359,7 @@ def undrift(
     drift_ = (drift_x_pol(t_inter), drift_y_pol(t_inter))
     drift = pd.DataFrame({"x": drift_[0], "y": drift_[1]})
     if display:
-        pixelsize = lib.get_from_metadata(info, "Pixelsize", 1.0)
-        plot_drift(drift, pixelsize)
+        plot_drift(drift)
         plt.show()
     locs = apply_drift(locs, info, drift=drift)
     return drift, locs
@@ -4376,8 +4391,8 @@ def undrift_from_fiducials(
         automatically detected using
         ``picasso.imageprocess.find_fiducials``.
     pick_size : float or None, optional
-        Size of the picks in camera pixels: the pick **radius** for
-        circles, the width for rectangles, the side length for squares.
+        Size of the picks in nm: the pick **radius** for circles, the
+        width for rectangles, the side length for squares.
         Required when ``picks`` is a list of coordinates, unless
         ``pick_shape`` carries its own extent ("Polygon", "Box").
         Ignored when ``picks`` is None (determined by
@@ -4408,7 +4423,7 @@ def undrift_from_fiducials(
     new_info : list of dicts
         Updated metadata.
     drift : pd.DataFrame
-        Drift in x and y (and optionally z) directions.
+        Drift in x and y (and optionally z) directions, in nm.
 
     Raises
     ------
@@ -4420,7 +4435,6 @@ def undrift_from_fiducials(
         pick_shape in lib.PICK_SHAPES
     ), f"pick_shape must be one of {lib.PICK_SHAPES}."
     locs = locs.copy()
-    pixelsize = lib.get_from_metadata(info, "Pixelsize", raise_error=True)
 
     if picks is None:
         # auto-detect fiducials; these are always circular
@@ -4436,7 +4450,7 @@ def undrift_from_fiducials(
         needs_size = pick_shape not in lib.PICK_SHAPES_WITHOUT_SIZE
         if pick_size is None and needs_size:
             raise ValueError(
-                "pick_size (radius in camera pixels for circular picks) "
+                "pick_size (radius in nm for circular picks) "
                 "must be provided when picks are given as a list of "
                 "coordinates."
             )
@@ -4481,9 +4495,9 @@ def undrift_from_fiducials(
         "Pick shape": pick_shape,
     }
     if pick_shape == "Circle":
-        pick_info["Pick radius (nm)"] = pick_radius * pixelsize
+        pick_info["Pick radius (nm)"] = float(pick_radius)
     elif pick_radius is not None:
-        pick_info["Pick size (nm)"] = pick_radius * pixelsize
+        pick_info["Pick size (nm)"] = float(pick_radius)
     new_info = info + [pick_info]
 
     return locs, new_info, drift
@@ -4689,7 +4703,6 @@ def apply_drift(
 
 def plot_drift(
     drift: pd.DataFrame,
-    pixelsize: int | float,
     fig: plt.Figure | None = None,
 ) -> plt.Figure:
     """Convenience function to plot 2D or 3D drift from a DataFrame.
@@ -4697,11 +4710,8 @@ def plot_drift(
     Parameters
     ----------
     drift : pd.DataFrame
-        DataFrame containing the drift to plot. Should have columns 'x'
-        and 'y', and optionally 'z'.
-    pixelsize : int or float
-        Pixel size in nm to convert drift from pixels to nm for
-        plotting.
+        DataFrame containing the drift (nm) to plot. Should have columns
+        'x' and 'y', and optionally 'z'.
     fig : plt.Figure or None, optional
         Matplotlib figure to plot on. If None (default), a new figure is
         created.
@@ -4722,15 +4732,15 @@ def plot_drift(
 
     if "z" in drift.columns:
         ax1 = fig.add_subplot(131)
-        ax1.plot(drift["x"] * pixelsize, label="x")
-        ax1.plot(drift["y"] * pixelsize, label="y")
+        ax1.plot(drift["x"], label="x")
+        ax1.plot(drift["y"], label="y")
         ax1.legend(loc="best")
         ax1.set_xlabel("Frame")
         ax1.set_ylabel("Drift (nm)")
         ax2 = fig.add_subplot(132)
         ax2.plot(
-            drift.x * pixelsize,
-            drift.y * pixelsize,
+            drift.x,
+            drift.y,
             color=list(plt.rcParams["axes.prop_cycle"])[2]["color"],
         )
         ax2.set_aspect("equal")
@@ -4749,15 +4759,15 @@ def plot_drift(
         ax3.set_ylabel("Drift (nm)")
     else:
         ax1 = fig.add_subplot(121)
-        ax1.plot(drift["x"] * pixelsize, label="x")
-        ax1.plot(drift["y"] * pixelsize, label="y")
+        ax1.plot(drift["x"], label="x")
+        ax1.plot(drift["y"], label="y")
         ax1.legend(loc="best")
         ax1.set_xlabel("Frame")
         ax1.set_ylabel("Drift (nm)")
         ax2 = fig.add_subplot(122)
         ax2.plot(
-            drift.x * pixelsize,
-            drift.y * pixelsize,
+            drift.x,
+            drift.y,
             color=list(plt.rcParams["axes.prop_cycle"])[2]["color"],
         )
         ax2.set_xlabel("x (nm)")
@@ -4833,8 +4843,7 @@ def align(
     shifts : tuple of np.ndarrays
         ``(shift_x, shift_y)``, or ``(shift_x, shift_y, shift_z)`` if
         z is aligned too (picked regions only). Each
-        array holds the shift subtracted from each channel, in the units
-        of the respective coordinate (camera pixels for x and y).
+        array holds the shift subtracted from each channel, in nm.
         Returned only if ``return_shifts`` is True.
 
     Raises
@@ -4896,22 +4905,17 @@ def _rcc_shifts(
     Returns
     -------
     shift_x, shift_y : np.ndarrays
-        Shift of each channel in camera pixels, to be subtracted from
-        its 'x' and 'y' coordinates.
+        Shift of each channel in nm, to be subtracted from its 'x' and
+        'y' coordinates.
     """
     images = []
-    disp_px_size = 100  # nm
+    disp_px_size = ALIGN_PIXEL_SIZE
     # one canvas for all channels, so that the images have the same
     # shape even if the channels' canvases differ (e.g., after moving
     # a channel in Render, see lib.fit_canvas)
-    height = max(
-        lib.get_from_metadata(info_, "Height", raise_error=True)
-        for info_ in infos
-    )
-    width = max(
-        lib.get_from_metadata(info_, "Width", raise_error=True)
-        for info_ in infos
-    )
+    fovs = [lib.field_of_view(info_) for info_ in infos]
+    width = max(fov[0] for fov in fovs)
+    height = max(fov[1] for fov in fovs)
     viewport = ((0, 0), (height, width))
     for locs_, info_ in zip(locs, infos):
         _, image = render.render(
@@ -4925,16 +4929,10 @@ def _rcc_shifts(
     shift_y, shift_x = imageprocess.rcc(
         images, callback=lib.MockProgress().set_value
     )
-    # `rcc` returns shifts in rendered-image pixels (disp_px_size = 100 nm
-    # per pixel). Convert them to camera pixels, the units of the
-    # localizations' 'x' and 'y' coordinates.
-    shift_x = np.asarray(shift_x, dtype=float)
-    shift_y = np.asarray(shift_y, dtype=float)
-    for i, info_ in enumerate(infos):
-        pixelsize = lib.get_from_metadata(info_, "Pixelsize")
-        oversampling = pixelsize / disp_px_size
-        shift_x[i] /= oversampling
-        shift_y[i] /= oversampling
+    # `rcc` returns shifts in rendered-image pixels; convert them to nm,
+    # the units of the localizations' 'x' and 'y' coordinates
+    shift_x = np.asarray(shift_x, dtype=float) * disp_px_size
+    shift_y = np.asarray(shift_y, dtype=float) * disp_px_size
     return shift_x, shift_y
 
 
@@ -4975,9 +4973,9 @@ def align_rcc(
         Aligned localizations with the shifts applied to the 'x' and
         'y' coordinates.
     shifts : tuple of np.ndarrays
-        ``(shift_x, shift_y)``. Each array holds the
-        total shift subtracted from each channel, in camera pixels.
-        Returned only if ``return_shifts`` is True.
+        ``(shift_x, shift_y)``. Each array holds the total shift
+        subtracted from each channel, in nm. Returned only if
+        ``return_shifts`` is True.
 
     Raises
     ------
@@ -4987,7 +4985,7 @@ def align_rcc(
     """
     locs = [locs_.copy() for locs_ in locs]
     max_iterations = 5
-    convergence = 0.001  # (camera pixels), around 0.1 nm
+    convergence = ALIGN_CONVERGENCE  # nm
     total_x = np.zeros(len(locs))
     total_y = np.zeros(len(locs))
     mean_x = []
@@ -5012,7 +5010,7 @@ def align_rcc(
         plt.plot(mean_x, "o-", label="x shift")
         plt.plot(mean_y, "o-", label="y shift")
         plt.xlabel("Iteration")
-        plt.ylabel("Mean Shift per Iteration (Px)")
+        plt.ylabel("Mean shift per iteration (nm)")
         plt.legend(loc="best")
         fig1.show()
 
@@ -5083,9 +5081,8 @@ def align_from_picked(
         ``(shift_x, shift_y)``, or ``(shift_x, shift_y, shift_z)`` if
         all channels have z. Each array holds the shift
         subtracted from each dataset in ``all_locs``, calculated as the
-        average shift from the picked localizations, in the units of the
-        respective coordinate (camera pixels for x and y). Returned only
-        if ``return_shifts`` is True.
+        average shift from the picked localizations, in nm. Returned
+        only if ``return_shifts`` is True.
 
     Raises
     ------
@@ -5156,9 +5153,9 @@ def overlap_region(
     Returns
     -------
     region : tuple or None
-        ``((x_min, x_max), (y_min, y_max))`` of the overlap in camera
-        pixels, or None if the channels do not overlap (or any channel
-        has no localizations).
+        ``((x_min, x_max), (y_min, y_max))`` of the overlap in nm, or
+        None if the channels do not overlap (or any channel has no
+        localizations).
     """
     if any(len(locs_) == 0 for locs_ in locs):
         return None
@@ -5486,10 +5483,10 @@ def cbc(
     locs : pd.DataFrame
         Localizations that are scored.
     info : list of dicts
-        Metadata of ``locs``, must contain the camera pixel size.
+        Metadata of ``locs``.
     partner_locs : pd.DataFrame or list of pd.DataFrames
         Partner localizations that ``locs`` are scored against, in the
-        same coordinate system (camera pixels, z in nm) as ``locs``.
+        same coordinate system (nm) as ``locs``.
         The neighbor counts of ``locs`` within their own channel are
         shared between the partners, so passing several partners at
         once is faster than one call per partner.
@@ -5631,9 +5628,9 @@ def cbc_all_pairs(
     ----------
     locs : list of pd.DataFrames
         Localizations of at least two channels, in the same coordinate
-        system (camera pixels, z in nm).
+        system (nm).
     infos : list of list of dicts
-        Metadata of each channel, must contain the camera pixel size.
+        Metadata of each channel.
     names : list of str or None, optional
         Short names of the channels, used for the column names
         ``cbc_<name>`` (see ``cbc``). If None, the channels are called ``"0"``,
@@ -5826,9 +5823,8 @@ def _cbc_channel(
 ) -> tuple[pd.DataFrame, list[dict]]:
     """CBC of one channel against its partners, with validated
     parameters. See ``cbc``."""
-    pixelsize = lib.get_from_metadata(info, "Pixelsize", raise_error=True)
-    coords = _cbc_coords(locs, pixelsize, use_z)
-    partner_coords = [_cbc_coords(p, pixelsize, use_z) for p in partners]
+    coords = _cbc_coords(locs, use_z)
+    partner_coords = [_cbc_coords(p, use_z) for p in partners]
     values, defined = _cbc(
         coords,
         partner_coords,
@@ -5867,13 +5863,10 @@ def _cbc_channel(
     return locs, new_info
 
 
-def _cbc_coords(
-    locs: pd.DataFrame, pixelsize: float, use_z: bool
-) -> lib.FloatArray2D:
+def _cbc_coords(locs: pd.DataFrame, use_z: bool) -> lib.FloatArray2D:
     """Coordinates of localizations in nm, (N, 2) or (N, 3) if
-    ``use_z``; x and y are converted from camera pixels, z is in nm
-    already."""
-    xy = locs[["x", "y"]].to_numpy(np.float64) * pixelsize
+    ``use_z``."""
+    xy = locs[["x", "y"]].to_numpy(np.float64)
     if use_z:
         return np.column_stack([xy, locs["z"].to_numpy(np.float64)])
     return xy
@@ -6069,15 +6062,12 @@ def _pick_region(
     pick: tuple,
     pick_shape: str,
     pick_size: float | None,
-    pixelsize: float,
 ) -> _Region | None:
-    """Geometry of a pick (camera pixels) in nm, or None for a pick
-    without area (open polygon, empty brush pick, zero-length
-    rectangle)."""
+    """Geometry of a pick (nm), or None for a pick without area (open
+    polygon, empty brush pick, zero-length rectangle)."""
     if pick_shape == "Circle":
         x, y = pick
-        radius = pick_size / 2 * pixelsize
-        x, y = x * pixelsize, y * pixelsize
+        radius = pick_size / 2
         region = _Region(
             _REGION_CIRCLE,
             np.array([x, y, radius], dtype=np.float64),
@@ -6091,8 +6081,7 @@ def _pick_region(
         segments = []
         for stroke in pick:
             width, X, Y = lib.brush_stroke_arrays(stroke)
-            radius = width / 2 * pixelsize
-            X, Y = X * pixelsize, Y * pixelsize
+            radius = width / 2
             if len(X) == 1:  # a dot
                 segments.append([X[0], Y[0], X[0], Y[0], radius])
             for k in range(len(X) - 1):
@@ -6102,13 +6091,8 @@ def _pick_region(
             _REGION_BRUSH,
             np.zeros(3),
             np.array(segments, dtype=np.float64),
-            (
-                x_min * pixelsize,
-                x_max * pixelsize,
-                y_min * pixelsize,
-                y_max * pixelsize,
-            ),
-            lib.pick_areas([pick], "Brush", None)[0] * pixelsize**2,
+            (x_min, x_max, y_min, y_max),
+            lib.pick_areas([pick], "Brush", None)[0],
         )
     else:
         if pick_shape == "Square":
@@ -6128,8 +6112,8 @@ def _pick_region(
         else:
             raise ValueError(f"Unknown pick shape: {pick_shape}")
         region = _polygon_region(
-            np.asarray(X, dtype=np.float64) * pixelsize,
-            np.asarray(Y, dtype=np.float64) * pixelsize,
+            np.asarray(X, dtype=np.float64),
+            np.asarray(Y, dtype=np.float64),
         )
     if not region.area > 0:
         return None
@@ -6772,14 +6756,12 @@ def _statistic_regions(
     ValueError for invalid picks and, if ``shift`` (random shifts of a
     channel are requested), for regions other than rectangles and
     circles."""
-    pixelsize = lib.get_from_metadata(info, "Pixelsize", raise_error=True)
     if picks is None:
-        width = lib.get_from_metadata(info, "Width", raise_error=True)
-        height = lib.get_from_metadata(info, "Height", raise_error=True)
+        width, height = lib.field_of_view(info)
         regions = [
             _polygon_region(
-                np.array([0, width, width, 0]) * pixelsize,
-                np.array([0, 0, height, height]) * pixelsize,
+                np.array([0, width, width, 0], dtype=np.float64),
+                np.array([0, 0, height, height], dtype=np.float64),
             )
         ]
     else:
@@ -6790,10 +6772,7 @@ def _statistic_regions(
             )
         if pick_shape not in lib.PICK_SHAPES_WITHOUT_SIZE and not pick_size:
             raise ValueError(f"{pick_shape} picks require a pick size.")
-        regions = [
-            _pick_region(pick, pick_shape, pick_size, pixelsize)
-            for pick in picks
-        ]
+        regions = [_pick_region(pick, pick_shape, pick_size) for pick in picks]
     if shift:
         for region in regions:
             if (
@@ -6873,7 +6852,6 @@ def _pair_statistic(
                 f"Invalid simulated_z: {simulated_z!r}; choose 'uniform' "
                 "or 'observed'."
             )
-    pixelsize = lib.get_from_metadata(info, "Pixelsize", raise_error=True)
     regions = _statistic_regions(
         info, picks, pick_shape, pick_size, cross and cross_null == "shift"
     )
@@ -6885,8 +6863,8 @@ def _pair_statistic(
     channels = [locs] + ([partner_locs] if cross else [])
     coordinates = [
         (
-            locs_["x"].to_numpy(dtype=np.float64) * pixelsize,
-            locs_["y"].to_numpy(dtype=np.float64) * pixelsize,
+            locs_["x"].to_numpy(dtype=np.float64),
+            locs_["y"].to_numpy(dtype=np.float64),
             locs_["z"].to_numpy(dtype=np.float64) if use_z else None,
         )
         for locs_ in channels
@@ -7140,10 +7118,10 @@ def ripley_h(
         ``clusterer.find_cluster_centers``, since H measures how the
         molecules are distributed.
     info : list of dicts
-        Metadata of the localizations, must contain the camera pixel
-        size and, if ``picks`` is None, the image size.
+        Metadata of the localizations, used for the field of view if
+        ``picks`` is None.
     picks : list of tuples or None, optional
-        Regions of interest in camera pixels, in the format of
+        Regions of interest in nm, in the format of
         ``pick_shape`` (see ``picked_locs``). Regions should be well
         inside the area covered by the sample (e.g., the cell): the
         density is the number of localizations divided by the area of
@@ -7155,9 +7133,9 @@ def ripley_h(
         Shape of the picks. Required if ``picks`` is given. Default is
         None.
     pick_size : float or None, optional
-        Size of the picks in camera pixels: diameter for circles, width
-        for rectangles, side length for squares, None for polygons,
-        boxes and brush picks. Default is None.
+        Size of the picks in nm: diameter for circles, width for
+        rectangles, side length for squares, None for polygons, boxes
+        and brush picks. Default is None.
     r_max : float, optional
         Largest radius in nm. It should be well below the size of the
         regions; the edge correction is less reliable for radii
@@ -7392,10 +7370,10 @@ def rdf(
         ``clusterer.find_cluster_centers``. Repeated localizations of
         a molecule appear as a peak at short distances.
     info : list of dicts
-        Metadata of the localizations, must contain the camera pixel
-        size and, if ``picks`` is None, the image size.
+        Metadata of the localizations, used for the field of view if
+        ``picks`` is None.
     picks : list of tuples or None, optional
-        Regions of interest in camera pixels, in the format of
+        Regions of interest in nm, in the format of
         ``pick_shape``. If None, the whole field of view is used. See
         ``ripley_h``. Default is None.
     pick_shape : {"Circle", "Rectangle", "Polygon", "Square", "Box", \
@@ -7403,9 +7381,9 @@ def rdf(
         Shape of the picks. Required if ``picks`` is given. Default is
         None.
     pick_size : float or None, optional
-        Size of the picks in camera pixels: diameter for circles, width
-        for rectangles, side length for squares, None for polygons,
-        boxes and brush picks. Default is None.
+        Size of the picks in nm: diameter for circles, width for
+        rectangles, side length for squares, None for polygons, boxes
+        and brush picks. Default is None.
     r_max : float, optional
         Largest radius in nm. It should be well below the size of the
         regions. Default is 500.
@@ -7821,11 +7799,10 @@ def nnd_distributions(
         found by ``g5m.g5m`` or the cluster centers of
         ``clusterer.find_cluster_centers``.
     info : list of dicts
-        Metadata of the localizations (e.g., of the first channel), must
-        contain the camera pixel size and, if ``picks`` is None, the
-        image size.
+        Metadata of the localizations (e.g., of the first channel), used
+        for the field of view if ``picks`` is None.
     picks : list of tuples or None, optional
-        Regions of interest in camera pixels, in the format of
+        Regions of interest in nm, in the format of
         ``pick_shape``. If None, the whole field of view is used. See
         ``ripley_h``. Default is None.
     pick_shape : {"Circle", "Rectangle", "Polygon", "Square", "Box", \
@@ -7833,9 +7810,9 @@ def nnd_distributions(
         Shape of the picks. Required if ``picks`` is given. Default is
         None.
     pick_size : float or None, optional
-        Size of the picks in camera pixels: diameter for circles, width
-        for rectangles, side length for squares, None for polygons,
-        boxes and brush picks. Default is None.
+        Size of the picks in nm: diameter for circles, width for
+        rectangles, side length for squares, None for polygons, boxes
+        and brush picks. Default is None.
     names : list of str or None, optional
         Names of the channels for the plot and the saved tables. If
         None, the channels are called "0", "1", ... Default is None.
@@ -7947,7 +7924,6 @@ def nnd_distributions(
                 f"Invalid simulated_z: {simulated_z!r}; choose 'uniform' "
                 "or 'observed'."
             )
-    pixelsize = lib.get_from_metadata(info, "Pixelsize", raise_error=True)
     regions = _statistic_regions(
         info, picks, pick_shape, pick_size, cross and cross_null == "shift"
     )
@@ -7956,8 +7932,8 @@ def nnd_distributions(
 
     coordinates = [
         (
-            locs_["x"].to_numpy(dtype=np.float64) * pixelsize,
-            locs_["y"].to_numpy(dtype=np.float64) * pixelsize,
+            locs_["x"].to_numpy(dtype=np.float64),
+            locs_["y"].to_numpy(dtype=np.float64),
             locs_["z"].to_numpy(dtype=np.float64) if use_z else None,
         )
         for locs_ in locs
@@ -8288,11 +8264,11 @@ def resi(
     infos : list of list of dicts
         List of metadata dictionaries for each channel.
     radius_xy : float or list of float
-        Clustering radius in xy (camera pixels). If a single float is
-        provided, it is applied to all channels. If a list, must have
-        length equal to the number of channels.
+        Clustering radius in xy (nm). If a single float is provided, it
+        is applied to all channels. If a list, must have length equal
+        to the number of channels.
     radius_z : float, list of float, or None, optional
-        Clustering radius in z (camera pixels). Only used for 3D data.
+        Clustering radius in z (nm). Only used for 3D data.
         If a float, applied to all channels. If a list, must have length
         equal to the number of channels. Default is None.
     min_locs : int or list of int, optional
@@ -8427,7 +8403,6 @@ def _resi(
     parameters are in the correct format and that there are at least 2
     chennels. See `resi` for details."""
     ndim = 3 if all(["z" in locs_.columns for locs_ in locs]) else 2
-    pixelsize = lib.get_from_metadata(infos[0], "Pixelsize", raise_error=True)
 
     # Process each channel
     resi_channels = []
@@ -8453,10 +8428,7 @@ def _resi(
             min_locs=min_locs_,
             frame_analysis=apply_fa,
             radius_z=r_z if ndim == 3 else None,
-            pixelsize=pixelsize,
         )
-        if ndim == 3:
-            new_info["Clustering radius z (nm)"] = r_z * pixelsize
 
         # Save clustered localizations if requested
         if save_clustered_locs and output_paths is not None:
@@ -8466,7 +8438,7 @@ def _resi(
             io.save_locs(save_path, clustered_locs, info_ + [new_info])
 
         # Extract cluster centers from clustered localizations
-        centers = clusterer.find_cluster_centers(clustered_locs, pixelsize)
+        centers = clusterer.find_cluster_centers(clustered_locs)
 
         # Save cluster centers if requested
         if save_cluster_centers and output_paths is not None:
@@ -8496,14 +8468,14 @@ def _resi(
     new_info = {
         **lib.step_info("RESI"),
         "Clustering radius xy (nm) for each channel": [
-            float(r * pixelsize) for r in radius_xy
+            float(r) for r in radius_xy
         ],
         "Min. number of locs in a cluster for each channel": list(min_locs),
         "Basic frame analysis": apply_fa,
     }
     if ndim == 3:
         new_info["Clustering radius z (nm) for each channel"] = [
-            float(r * pixelsize) for r in radius_z
+            float(r) for r in radius_z
         ]
     new_info = infos[0] + [new_info]
     # Save combined RESI results if output paths are provided

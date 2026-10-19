@@ -176,17 +176,19 @@ class TestPrepareLocsForSave:
     """Tests for prepare_locs_for_save."""
 
     def test_shifts_to_positive_coords(self):
+        """The averaged particle is moved to the center of the field of
+        view (nm)."""
         locs = pd.DataFrame({"x": [-1.0, 0.0, 1.0], "y": [-2.0, 0.0, 2.0]})
-        info = [{"Width": 100, "Height": 200}]
+        info = [{"Width": 100, "Height": 200, "Pixelsize": 10.0}]
 
         out, _ = average.prepare_locs_for_save(locs.copy(), info)
 
-        np.testing.assert_allclose(out["x"], [49.0, 50.0, 51.0])
-        np.testing.assert_allclose(out["y"], [98.0, 100.0, 102.0])
+        np.testing.assert_allclose(out["x"], [499.0, 500.0, 501.0])
+        np.testing.assert_allclose(out["y"], [998.0, 1000.0, 1002.0])
 
     def test_appends_metadata_entry(self):
         locs = pd.DataFrame({"x": [0.0], "y": [0.0]})
-        info = [{"Width": 10, "Height": 10}]
+        info = [{"Width": 10, "Height": 10, "Pixelsize": 10.0}]
 
         _, new_info = average.prepare_locs_for_save(locs.copy(), info)
 
@@ -195,7 +197,7 @@ class TestPrepareLocsForSave:
 
     def test_params_added_to_metadata(self):
         locs = pd.DataFrame({"x": [0.0], "y": [0.0]})
-        info = [{"Width": 10, "Height": 10}]
+        info = [{"Width": 10, "Height": 10, "Pixelsize": 10.0}]
         params = {"disp_px_size": 5.0, "it": 3}
 
         _, new_info = average.prepare_locs_for_save(locs.copy(), info, params)
@@ -205,7 +207,7 @@ class TestPrepareLocsForSave:
 
     def test_params_partial(self):
         locs = pd.DataFrame({"x": [0.0], "y": [0.0]})
-        info = [{"Width": 10, "Height": 10}]
+        info = [{"Width": 10, "Height": 10, "Pixelsize": 10.0}]
         params = {"disp_px_size": 2.5}
 
         _, new_info = average.prepare_locs_for_save(locs.copy(), info, params)
@@ -215,7 +217,7 @@ class TestPrepareLocsForSave:
 
     def test_params_ignores_unknown_keys(self):
         locs = pd.DataFrame({"x": [0.0], "y": [0.0]})
-        info = [{"Width": 10, "Height": 10}]
+        info = [{"Width": 10, "Height": 10, "Pixelsize": 10.0}]
         params = {"unknown_key": "value"}
 
         _, new_info = average.prepare_locs_for_save(locs.copy(), info, params)
@@ -226,7 +228,7 @@ class TestPrepareLocsForSave:
 
     def test_empty_params_default(self):
         locs = pd.DataFrame({"x": [0.0], "y": [0.0]})
-        info = [{"Width": 10, "Height": 10}]
+        info = [{"Width": 10, "Height": 10, "Pixelsize": 10.0}]
 
         _, new_info = average.prepare_locs_for_save(locs.copy(), info)
 
@@ -241,18 +243,18 @@ class TestAverageParticles:
     def sample_locs(self):
         rng = np.random.default_rng(42)
         n_locs = 100
+        # particles 65 nm wide (nm), rendered at 65 nm pixels below to
+        # keep the images small for a fast test
         return pd.DataFrame(
             {
-                "x": rng.standard_normal(n_locs).astype(np.float32) * 0.5,
-                "y": rng.standard_normal(n_locs).astype(np.float32) * 0.5,
+                "x": rng.standard_normal(n_locs).astype(np.float32) * 65.0,
+                "y": rng.standard_normal(n_locs).astype(np.float32) * 65.0,
                 "group": np.repeat(np.arange(10), 10),
             }
         )
 
     @pytest.fixture
     def sample_info(self):
-        # Pixelsize is required by average(); display_pixel_size=65 keeps
-        # oversampling=2 and the rendered image small for a fast test.
         return [{"Width": 256, "Height": 256, "Pixelsize": 130}]
 
     def test_returns_dataframe_of_same_length(self, sample_locs, sample_info):
@@ -275,8 +277,8 @@ class TestAverageParticles:
             iterations=1,
         )
 
-        assert np.abs(result["x"].mean()) < 0.1
-        assert np.abs(result["y"].mean()) < 0.1
+        assert np.abs(result["x"].mean()) < 13.0  # nm
+        assert np.abs(result["y"].mean()) < 13.0
 
     def test_iterations_reduce_per_group_spread(
         self, sample_locs, sample_info

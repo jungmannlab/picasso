@@ -17,13 +17,17 @@ from picasso.fitting import precision
 
 from tests.conftest import (
     BOX,
-    CAMERA_INFO,
     IDENTITY,
+    PIXELSIZE,
     affine,
     affine_matrix,
     apply_transform,
     linear_part,
 )
+from tests.conftest import CAMERA_INFO as _CAMERA_INFO
+
+# the calibration records the camera pixel size (nm), so it is required
+CAMERA_INFO = {**_CAMERA_INFO, "Pixelsize": PIXELSIZE}
 
 # Bead detection of the synthetic z-stacks, and of the blinking signal used
 # by the data-driven re-registration.

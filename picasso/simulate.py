@@ -37,14 +37,19 @@ def calculate_zpsf(
     Parameters
     ----------
     z : lib.FloatArray1D or number
-        The z position(s) at which to calculate the PSF.
+        The z position(s) in nm at which to calculate the PSF.
     cx, cy : lib.FloatArray1D
-        Coefficients for the x/y dimension of the PSF.
+        Coefficients for the x/y dimension of the PSF: the "X/Y
+        Coefficients" of an astigmatism calibration (see
+        ``zfit.calibrate_z``), i.e., polynomials of the spot width in nm
+        against z in nm.
 
     Returns
     -------
     wx, wy : lib.FloatArray1D
-        The calculated PSF sizes in the x and y dimensions.
+        The calculated PSF sizes in the x and y dimensions, in the unit
+        of the coefficients (nm for a Picasso 1.0 calibration; the
+        simulation divides them by the camera pixel size).
     """
     z = z / magfac
     z2 = z * z
@@ -361,6 +366,7 @@ def distribute_photons_xy(
     mode3Dstate: bool,
     cx: list,
     cy: list,
+    pixelsize: float | None = None,
 ) -> lib.FloatArray2D:
     """Distribute photons in a PSF, with an option for astigmatic PSF
     in 3D.
@@ -376,20 +382,32 @@ def distribute_photons_xy(
         Array containing the binding sites' coordinates and exchange
         information.
     psf : float
-        The point spread function (PSF) size (only for 2D).
+        The point spread function (PSF) size in camera pixels (only for
+        2D).
     mode3Dstate : bool
         If True, uses a 3D astigmatic PSF; if False, uses a 2D Gaussian
         PSF.
     cx, cy : list
-        Calibration coefficients for the x/y dimension of the PSF, used
+        Calibration coefficients for the x/y dimension of the PSF (spot
+        widths in nm against z in nm, see :func:`calculate_zpsf`), used
         if mode3Dstate is True.
+    pixelsize : float, optional
+        Camera pixel size in nm, which converts the astigmatic spot
+        widths (nm) to the camera pixel grid of the movie. Required if
+        ``mode3Dstate`` is True. Default is None.
 
     Returns
     -------
     photonposframe : lib.FloatArray2D
         Array containing the positions of the photons emitted in the
-        current frame for the specified binding site.
+        current frame for the specified binding site (camera pixels).
     """
+    if mode3Dstate and pixelsize is None:
+        raise ValueError(
+            "The 3D (astigmatic) simulation needs the camera pixel size "
+            "(pixelsize, nm) to express the calibration's spot widths (nm) "
+            "in camera pixels."
+        )
     bindingsitesx = structures[0, :]
     bindingsitesy = structures[1, :]
     bindingsitesz = structures[4, :]
@@ -406,6 +424,10 @@ def distribute_photons_xy(
         photoncount = int(photondist[i, runner])
         if mode3Dstate:
             wx, wy = calculate_zpsf(bindingsitesz[i], cx, cy)
+            # the calibration's spot widths are nm; the movie is sampled
+            # on the camera pixel grid
+            wx = wx / pixelsize
+            wy = wy / pixelsize
             cov = [[wx * wx, 0], [0, wy * wy]]
         else:
             cov = [[psf * psf, 0], [0, psf * psf]]
@@ -433,6 +455,7 @@ def convert_movie(
     mode3Dstate: bool,
     cx: list,
     cy: list,
+    pixelsize: float | None = None,
 ):
     """Convert the photon distribution into a simulated movie frame.
 
@@ -452,7 +475,7 @@ def convert_movie(
         Number of frames in the movie.
     psf : float
         The point spread function (PSF) size (sx/sy) for the binding
-        sites.
+        sites, in camera pixels.
     photonrate : float
         Mean photon rate for the binding sites (in photons per frame).
     background : float
@@ -463,8 +486,12 @@ def convert_movie(
         If True, uses a 3D astigmatic PSF; if False, uses a 2D Gaussian
         PSF.
     cx, cy : list
-        Calibration coefficients for the x/y dimension of the PSF, used
-        if mode3Dstate is True.
+        Calibration coefficients for the x/y dimension of the PSF (spot
+        widths in nm against z in nm), used if mode3Dstate is True.
+    pixelsize : float, optional
+        Camera pixel size in nm, which converts the astigmatic spot
+        widths to camera pixels. Required if ``mode3Dstate`` is True.
+        Default is None.
 
     Returns
     -------
@@ -475,7 +502,7 @@ def convert_movie(
     edges = range(0, imagesize + 1)
 
     photonposframe = distribute_photons_xy(
-        runner, photondist, structures, psf, mode3Dstate, cx, cy
+        runner, photondist, structures, psf, mode3Dstate, cx, cy, pixelsize
     )
 
     if len(photonposframe) == 0:
@@ -520,15 +547,16 @@ def define_structure(
     Parameters
     ----------
     structurexxpx : lib.FloatArray1D
-        Array containing the x-coordinates of the structure in pixels.
+        Array containing the x-coordinates of the structure in nm.
     structureyypx : lib.FloatArray1D
-        Array containing the y-coordinates of the structure in pixels.
+        Array containing the y-coordinates of the structure in nm.
     structureex : lib.FloatArray1D
         Array containing the exchange information for the structure.
     structure3d : lib.FloatArray1D
-        Array containing the 3D coordinates of the structure.
+        Array containing the z coordinates of the structure in nm.
     pixelsize : float
-        The pixel size in nanometers.
+        The camera pixel size in nm, which converts the lateral
+        coordinates to the camera pixel grid the movie is simulated on.
     mean : bool, optional
         If True, centers the structure by subtracting the mean of the
         coordinates. Default is True.
@@ -536,8 +564,8 @@ def define_structure(
     Returns
     -------
     structure : lib.FloatArray2D
-        Array containing the structure's x-positions, y-positions,
-        exchange information, and 3D coordinates.
+        Array containing the structure's x-positions and y-positions
+        (camera pixels), exchange information, and z coordinates (nm).
     """
     if mean:
         structurexxpx = structurexxpx - np.mean(structurexxpx)

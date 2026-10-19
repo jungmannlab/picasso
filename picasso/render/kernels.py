@@ -46,11 +46,11 @@ def _render_setup(
         x and y coordinates of the localizations to be rendered (1D
         arrays).
     oversampling : float
-        Number of super-resolution pixels per camera pixel.
+        Number of rendered pixels per nm.
     y_min, x_min : float
-        Minimum y and x coordinates to be rendered (camera pixels).
+        Minimum y and x coordinates to be rendered (nm).
     y_max, x_max : float
-        Maximum y and x coordinates to be rendered (camera pixels).
+        Maximum y and x coordinates to be rendered (nm).
 
     Returns
     -------
@@ -105,11 +105,11 @@ def _render_setup_anisotropic(  # used in Average
         x and y coordinates of the localizations to be rendered (1D
         arrays).
     oversampling_x, oversampling_y : float
-        Number of super-resolution pixels per camera pixel in x and y.
+        Number of rendered pixels per nm in x and y.
     y_min, x_min : float
-        Minimum y and x coordinates to be rendered (camera pixels).
+        Minimum y and x coordinates to be rendered (nm).
     y_max, x_max : float
-        Maximum y and x coordinates to be rendered (camera pixels).
+        Maximum y and x coordinates to be rendered (nm).
 
     Returns
     -------
@@ -149,7 +149,6 @@ def _render_setup3d(
     x_max: float,
     z_min: float,
     z_max: float,
-    pixelsize: float,
 ) -> tuple[
     lib.FloatArray3D,
     int,
@@ -167,19 +166,17 @@ def _render_setup3d(
     ----------
     x, y, z : lib.FloatArray1D
         x, y and z coordinates of the localizations to be rendered (1D
-        arrays).
+        arrays, nm).
     oversampling : float
-        Number of super-resolution pixels per camera pixel.
+        Number of rendered pixels per nm.
     y_min, x_min : float
-        Minimum y and x coordinate to be rendered (camera pixels).
+        Minimum y and x coordinate to be rendered (nm).
     y_max, x_max : float
-        Maximum y and x coordinate to be rendered (camera pixels).
+        Maximum y and x coordinate to be rendered (nm).
     z_min : float
         Minimum z coordinate to be rendered (nm).
     z_max : float
         Maximum z coordinate to be rendered (nm).
-    pixelsize : float
-        Camera pixel size, used for converting z coordinates.
 
     Returns
     -------
@@ -195,10 +192,6 @@ def _render_setup3d(
     n_pixel_y = int(np.ceil(oversampling * (y_max - y_min)))
     n_pixel_x = int(np.ceil(oversampling * (x_max - x_min)))
     n_pixel_z = int(np.ceil(oversampling * (z_max - z_min)))
-    # divide on a copy -- rendering must never mutate the caller's arrays
-    # (see TestRenderPurity in test_render.py)
-    z = z.copy()
-    z /= pixelsize
     in_view = (
         (x > x_min)
         & (y > y_min)
@@ -231,7 +224,6 @@ def _render_setup3d_anisotropic(
     x_max: float,
     z_min: float,
     z_max: float,
-    pixelsize: float,
 ) -> tuple[
     lib.FloatArray3D,
     int,
@@ -252,18 +244,16 @@ def _render_setup3d_anisotropic(
         x, y and z coordinates of the localizations to be rendered (1D
         arrays).
     oversampling_x, oversampling_y, oversampling_z : float
-        Number of super-resolution pixels per camera pixel in x, y and
+        Number of rendered pixels per nm in x, y and
         z.
     y_min, x_min : float
-        Minimum y and x coordinate to be rendered (camera pixels).
+        Minimum y and x coordinate to be rendered (nm).
     y_max, x_max : float
-        Maximum y and x coordinate to be rendered (camera pixels).
+        Maximum y and x coordinate to be rendered (nm).
     z_min : float
         Minimum z coordinate to be rendered (nm).
     z_max : float
         Maximum z coordinate to be rendered (nm).
-    pixelsize : float
-        Camera pixel size, used for converting z coordinates.
 
     Returns
     -------
@@ -279,10 +269,6 @@ def _render_setup3d_anisotropic(
     n_pixel_y = int(np.ceil(oversampling_y * (y_max - y_min)))
     n_pixel_x = int(np.ceil(oversampling_x * (x_max - x_min)))
     n_pixel_z = int(np.ceil(oversampling_z * (z_max - z_min)))
-    # divide on a copy -- rendering must never mutate the caller's arrays
-    # (see TestRenderPurity in test_render.py)
-    z = z.copy()
-    z /= pixelsize
     in_view = (
         (x > x_min)
         & (y > y_min)
@@ -849,7 +835,7 @@ def render_hist(
     x, y : lib.FloatArray1D
         1D arrays of xy coordinates.
     oversampling : float
-        Number of histogram pixels per camera pixel.
+        Number of histogram pixels per nm.
     t_min, t_max : float
         Minimum and maximum bounds of the histogram.
 

@@ -154,14 +154,14 @@ def _locs(n: int = 200) -> pd.DataFrame:
     return pd.DataFrame(
         {
             "frame": rng.integers(0, 100, n).astype(np.uint32),
-            "x": rng.uniform(0, 32, n).astype(np.float32),
-            "y": rng.uniform(0, 32, n).astype(np.float32),
+            "x": rng.uniform(0, 32 * 130.0, n).astype(np.float32),
+            "y": rng.uniform(0, 32 * 130.0, n).astype(np.float32),
             "photons": np.full(n, 1000, np.float32),
-            "sx": np.ones(n, np.float32),
-            "sy": np.ones(n, np.float32),
+            "sx": np.full(n, 130.0, np.float32),
+            "sy": np.full(n, 130.0, np.float32),
             "bg": np.full(n, 10, np.float32),
-            "lpx": np.full(n, 0.1, np.float32),
-            "lpy": np.full(n, 0.1, np.float32),
+            "lpx": np.full(n, 13.0, np.float32),
+            "lpy": np.full(n, 13.0, np.float32),
         }
     )
 

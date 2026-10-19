@@ -29,10 +29,10 @@ def _locs(n: int = 500, seed: int = 0) -> pd.DataFrame:
     return pd.DataFrame(
         {
             "frame": rng.integers(0, 1000, size=n).astype(np.int32),
-            "x": rng.uniform(0.0, WIDTH, size=n),
-            "y": rng.uniform(0.0, HEIGHT, size=n),
-            "lpx": np.full(n, 0.1),
-            "lpy": np.full(n, 0.1),
+            "x": rng.uniform(0.0, WIDTH, size=n) * PIXELSIZE,
+            "y": rng.uniform(0.0, HEIGHT, size=n) * PIXELSIZE,
+            "lpx": np.full(n, 13.0),
+            "lpy": np.full(n, 13.0),
             "photons": np.full(n, 1000.0),
         }
     )
@@ -64,7 +64,10 @@ def window(qt_offscreen, tmp_path):
     for i in range(2):
         path = str(tmp_path / f"locs_{i}.hdf5")
         window.view.add(path, _locs(seed=i), _info(), render_=False)
-    window.view.viewport = [(0.0, 0.0), (HEIGHT, WIDTH)]
+    window.view.viewport = [
+        (0.0, 0.0),
+        (HEIGHT * PIXELSIZE, WIDTH * PIXELSIZE),
+    ]
     window.view.resize(128, 128)
     return window
 
@@ -163,7 +166,12 @@ def test_saved_and_restored_with_exported_images(window):
     ]
     dialog.reset_channel_contrast()
     # no render happened, so the FOV boxes of the Info dialog are empty
-    info["FOV (X, Y, Width, Height)"] = [0.0, 0.0, WIDTH, HEIGHT]
+    info[gui_render.FOV_KEY] = [
+        0.0,
+        0.0,
+        WIDTH * PIXELSIZE,
+        HEIGHT * PIXELSIZE,
+    ]
     window.view.load_screenshot(info)
     assert window.view.read_channel_contrast() == [
         pytest.approx((0.1, 0.5)),

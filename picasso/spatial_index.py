@@ -43,12 +43,13 @@ RENDER_INDEX_GROUP = "render_index"
 #: of a small file.
 PERSIST_MIN_LOCS = 100_000
 #: version 2 sorts the permutation by fine Morton keys (see
-#: ``_FINE_BITS``), which the quad-tree needs; version 1 files are
-#: rebuilt
-_RENDER_INDEX_VERSION = 2
+#: ``_FINE_BITS``), which the quad-tree needs; version 3 (Picasso 1.0)
+#: measures the field of view and the blocks in nm instead of camera
+#: pixels. Files of older versions are rebuilt.
+_RENDER_INDEX_VERSION = 3
 #: Levels of the implicit quad-tree below the pyramid's base block: the
-#: finest cell is ``base / 2**_FINE_BITS`` (2 px / 256 ≈ 0.008 px, about
-#: 1 nm at 130 nm pixels, for the usual 512 px field of view).
+#: finest cell is ``base / 2**_FINE_BITS`` (about 1 nm for the usual
+#: 512 px field of view of 130 nm pixels, whose base block is 260 nm).
 _FINE_BITS = 8
 
 
@@ -76,15 +77,15 @@ class RenderIndexPyramid:
         where the sort key is the Morton code of ``(x // base, y // base)``
         at the finest level.
     block_sizes : tuple[float, ...]
-        Block side lengths in camera pixels, ascending. ``block_sizes[0]``
-        is the finest level.
+        Block side lengths in nm, ascending. ``block_sizes[0]`` is the
+        finest level.
     block_starts, block_ends : list[IntArray2D]
         Per level, a ``(K_L, L_L)`` uint32 grid where
         ``perm[block_starts[i, j]:block_ends[i, j]]`` are the
         original-locs indices in block ``(i, j)``.
     width, height : float
-        FOV size copied from ``info``, used by the query to clip block
-        rectangles.
+        Size of the field of view in nm (see ``lib.field_of_view``), used
+        by the query to clip block rectangles.
     """
 
     perm: lib.IntArray1D
@@ -106,14 +107,20 @@ class RenderIndexPyramid:
     sorted_keys: lib.IntArray1D | None = None
 
 
+#: Smallest base block (nm): smaller blocks would mostly hold a single
+#: localization each and waste grid memory.
+_MIN_BASE_BLOCK_NM = 100.0
+
+
 def _base_block_size(width: float, height: float) -> float:
-    """Pick the finest block size based on FOV.
+    """Pick the finest block size (nm) based on the FOV (nm).
 
     Targets ~256k blocks at the finest level for the common 512x512 -
-    1024x1024 SMLM FOVs. Floor of 1.0 -- sub-pixel blocks would mostly
-    hold a single loc each and waste grid memory.
+    1024x1024 pixel SMLM FOVs, with a floor of ``_MIN_BASE_BLOCK_NM``.
     """
-    return float(max(1.0, np.ceil(np.sqrt(width * height / 256_000.0))))
+    return float(
+        max(_MIN_BASE_BLOCK_NM, np.ceil(np.sqrt(width * height / 256_000.0)))
+    )
 
 
 @numba.njit(cache=True)
@@ -245,9 +252,10 @@ def build_render_index(
     Parameters
     ----------
     locs : pd.DataFrame
-        The localizations to index, with ``x`` and ``y`` columns.
+        The localizations to index, with ``x`` and ``y`` columns (nm).
     info : list of dicts
-        Localizations metadata; "Width" and "Height" are required.
+        Localizations metadata; "Width", "Height" and "Pixelsize" are
+        required (see ``lib.field_of_view``).
     n_levels : int, optional
         Number of pyramid levels, each with blocks 4x larger than the last.
         Default 3.
@@ -258,15 +266,15 @@ def build_render_index(
         ``None`` if required metadata is missing -- callers should fall back
         to the existing brute-force viewport filter in that case.
     """
-    width = lib.get_from_metadata(info, "Width")
-    height = lib.get_from_metadata(info, "Height")
-    if width is None or height is None:
+    try:
+        width, height = lib.field_of_view(info)
+    except KeyError:
         return None
     return build_render_index_arrays(
         locs["x"].to_numpy(),
         locs["y"].to_numpy(),
-        float(width),
-        float(height),
+        width,
+        height,
         n_levels=n_levels,
     )
 
@@ -280,8 +288,8 @@ def build_render_index_arrays(
 ) -> RenderIndexPyramid:
     """Build the pyramid from coordinate arrays and the FOV size.
 
-    Same as ``build_render_index`` but on coordinate arrays (camera
-    pixels) and the field of view size.
+    Same as ``build_render_index`` but on coordinate arrays (nm) and the
+    field of view size (nm).
 
     The permutation sorts the rows by their fine Morton key (the
     Morton code of the cell at ``_FINE_BITS`` levels below the base
@@ -294,9 +302,9 @@ def build_render_index_arrays(
     Parameters
     ----------
     x, y : lib.FloatArray1D
-        Coordinates of the localizations (camera pixels).
+        Coordinates of the localizations (nm).
     width, height : float
-        Size of the field of view (camera pixels).
+        Size of the field of view (nm).
     n_levels : int, optional
         Number of pyramid levels, each with blocks 4x larger than the
         last. Default 3.
@@ -430,7 +438,7 @@ def query_viewport(
     pyramid : RenderIndexPyramid
         The index built by :func:`build_render_index`.
     viewport : tuple
-        ``((y_min, x_min), (y_max, x_max))`` in camera pixels.
+        ``((y_min, x_min), (y_max, x_max))`` in nm.
 
     Returns
     -------
@@ -475,7 +483,7 @@ def query_rect(pyramid: RenderIndexPyramid, rect: tuple) -> lib.IntArray1D:
     pyramid : RenderIndexPyramid
         The index built by :func:`build_render_index`.
     rect : tuple
-        ``((y_min, x_min), (y_max, x_max))`` in camera pixels.
+        ``((y_min, x_min), (y_max, x_max))`` in nm.
 
     Returns
     -------
@@ -565,9 +573,9 @@ def count_rect(
         The index built by :func:`build_render_index` for ``x``, ``y``.
     x, y : lib.FloatArray1D
         Coordinates of all the localizations the pyramid indexes (the
-        DataFrame's columns), in camera pixels.
+        DataFrame's columns), in nm.
     rect : tuple
-        ``((y_min, x_min), (y_max, x_max))`` in camera pixels.
+        ``((y_min, x_min), (y_max, x_max))`` in nm.
 
     Returns
     -------
@@ -653,11 +661,11 @@ def query_circle(
         The index built by :func:`build_render_index` for ``x``, ``y``.
     x, y : lib.FloatArray1D
         Coordinates of all the localizations the pyramid indexes (the
-        DataFrame's columns), in camera pixels.
+        DataFrame's columns), in nm.
     cx, cy : float
-        Center of the pick in camera pixels.
+        Center of the pick in nm.
     radius : float
-        Radius of the pick in camera pixels.
+        Radius of the pick in nm.
 
     Returns
     -------
@@ -823,12 +831,14 @@ def _blocks_hold_their_locs(
 def _validate_index_dimensions(
     pyramid: RenderIndexPyramid, info: list[dict]
 ) -> bool:
-    """Whether the pyramid's field-of-view size matches ``info``."""
-    width = lib.get_from_metadata(info, "Width")
-    height = lib.get_from_metadata(info, "Height")
-    if width is None or height is None:
+    """Whether the pyramid's field-of-view size (nm) matches ``info``."""
+    try:
+        width, height = lib.field_of_view(info)
+    except KeyError:
         return False
-    return float(width) == pyramid.width and float(height) == pyramid.height
+    return bool(
+        np.isclose(width, pyramid.width) and np.isclose(height, pyramid.height)
+    )
 
 
 def _validate_index_block_shapes(
@@ -969,9 +979,8 @@ def quadtree_layout(
     perm : lib.IntArray1D
         The permutation.
     root_px : float
-        The side of the root square in camera pixels (a power-of-two
-        number of base blocks covering the field of view, anchored at
-        the origin).
+        The side of the root square in nm (a power-of-two number of base
+        blocks covering the field of view, anchored at the origin).
     total_bits : int
         The depth of the tree, i.e. the number of levels from the root
         to the finest cell.

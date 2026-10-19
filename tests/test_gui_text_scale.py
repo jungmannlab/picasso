@@ -19,7 +19,13 @@ from picasso.gui import render as gui_render
 from picasso.gui.plot_style import PlotStyle
 from picasso.gui.theme import Appearance
 
-from tests.test_gui_rotation_async import HEIGHT, WIDTH, _info, _locs
+from tests.test_gui_rotation_async import (
+    HEIGHT_NM,
+    PIXELSIZE,
+    WIDTH_NM,
+    _info,
+    _locs,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -145,7 +151,7 @@ def window(scaled, tmp_path):
             str(tmp_path / f"locs_{i}.hdf5"), _locs(), _info(), render_=False
         )
     window.view.resize(256, 256)
-    window.view.viewport = [(0.0, 0.0), (HEIGHT, WIDTH)]
+    window.view.viewport = [(0.0, 0.0), (HEIGHT_NM, WIDTH_NM)]
     yield window
     window.window_rot.view_rot.stop_render_worker()
     window.view.stop_render_worker()
@@ -241,9 +247,8 @@ def test_legend_layout_is_unchanged_at_the_default_size(qt_offscreen):
 def test_large_scale_bar_text_stays_inside_the_image(qt_offscreen):
     image = render.draw_scalebar(
         _blank(),
-        viewport=((0, 0), (64, 64)),
+        viewport=((0, 0), (64 * PIXELSIZE, 64 * PIXELSIZE)),
         scalebar_length_nm=1000,
-        pixelsize=130,
         text_fontsize=3 * render.SCALEBAR_FONT_SIZE,
     )
     lit = [

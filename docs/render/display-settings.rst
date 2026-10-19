@@ -33,10 +33,10 @@ General
 
 Adjust the general display settings.
 
-Zoom
-   The number of screen pixels per camera pixel. For example, at ``Zoom`` 10
-   with a camera pixel size of 130 nm, one screen pixel shows 13 nm. The value
-   follows every zoom in the window; typing in a new one zooms to it.
+Screen pixel size (nm)
+   The size of one screen pixel in nm, i.e., the zoom: at 13 nm, one screen
+   pixel shows 13 nm of the sample; smaller values zoom in. The value follows
+   every zoom in the window; typing in a new one zooms to it.
 Display pixel size (nm)
    Set the size of the pixel in the rendered image. Choose ``dynamic`` to
    automatically adjust to current window size when zooming.
@@ -173,7 +173,7 @@ Jittered Triangulation
    :class-container: api-example
 
    The render methods are the ``blur_method`` of ``render.render``;
-   ``min_blur_width`` is in camera pixels.
+   ``min_blur_width`` is in nm.
 
    .. code-block:: python
 
@@ -192,19 +192,35 @@ Jittered Triangulation
 Camera
 ~~~~~~
 
-``Camera pixel size (nm)`` is read from the metadata (``.yaml`` file) of the
-localizations, or set to a default value if it is missing. It converts camera
-pixels to nm, e.g., for the scale bar and the ``Display pixel size``.
+``Camera pixel size (nm)`` shows the effective pixel size (after
+magnification) of the camera the localizations were recorded with, read from
+the ``Pixelsize`` of the metadata (``.yaml`` file). Since the localizations
+are stored in nm, it rescales nothing; it only sets the extent of the field of
+view (``Width`` × ``Pixelsize`` by ``Height`` × ``Pixelsize``) and is the
+value offered when a file written before Picasso 1.0 (in camera pixels) is
+opened without a pixel size in its metadata (see :ref:`files-legacy`).
 
 .. _render-scale-bar:
 
 Scale bar
 ~~~~~~~~~
 
-Tick ``Scale bar`` to show a scale bar of ``Scale bar length (nm)``, based on
-the ``Camera pixel size``. ``Automatic length`` keeps it at roughly 1/8 of the
-window width as you zoom, and ``Print scale bar length`` prints the length
-next to it.
+Tick ``Scale bar`` to show a scale bar of ``Scale bar length (nm)``.
+``Automatic length`` keeps it at roughly 1/8 of the window width as you zoom,
+and ``Print scale bar length`` prints the length next to it.
+
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
+
+   ``render.optimal_scalebar_length`` is the rounded length (nm) that
+   ``Automatic length`` picks for a view of a given width in nm.
+
+   .. code-block:: python
+
+      from picasso import render
+
+      length_nm = render.optimal_scalebar_length(width_nm=8320)
 
 .. _render-grid:
 
@@ -256,8 +272,8 @@ the ``Render`` section of ``~/.picasso/settings.yaml`` (see
           labels=True,                  # print the coordinates
           kind="grid",                  # or "axes" for axes with ticks
       )
-      # qimage shows the rendered viewport ((y_min, x_min), (y_max, x_max))
-      qimage = render.draw_grid(qimage, viewport, grid, pixelsize=130)
+      # qimage shows the rendered viewport ((y_min, x_min), (y_max, x_max)) in nm
+      qimage = render.draw_grid(qimage, viewport, grid)
 
 .. _render-tracks:
 
@@ -331,18 +347,21 @@ Display
 ``Image width`` and ``Image height``
    The size of the image area of the window, in screen pixels.
 ``View X / Y`` and ``View width / height``
-   The top-left corner and the size of the current field of view, in camera
-   pixels.
+   The top-left corner and the size of the current field of view, in nm.
 ``Renderer``
    Whether the image is rendered on the GPU (with the GPU's name) or by CPU
    threads.
 ``Change field of view``
    Opens a dialog to type in the field of view (``X``, ``Y``, ``Width``,
-   ``Height`` in camera pixels).
+   ``Height`` in nm).
 ``Save FOV`` and ``Load FOV``
    Save the current field of view to a ``.txt`` file and restore it later,
-   e.g., to show the same region of several datasets. A saved ``.txt`` file
-   can also be dropped onto the main window.
+   e.g., to show the same region of several datasets. The file holds the
+   four values ``X``, ``Y``, ``Width``, ``Height`` in nm, one per line, after
+   the comment line ``# picasso_format 1.0 (nm)``; a file without that line
+   was saved before Picasso 1.0, in camera pixels, and is converted with the
+   camera pixel size when it is loaded. A saved ``.txt`` file can also be
+   dropped onto the main window.
 
 .. _render-info-precision:
 
@@ -365,17 +384,16 @@ the metadata of the channel, so it is saved with the localizations.
    :icon: code
    :class-container: api-example
 
-   NeNA is returned in camera pixels.
+   NeNA is returned in nm.
 
    .. code-block:: python
 
-      from picasso import io, lib, postprocess
+      from picasso import io, postprocess
 
       locs, info = io.load_locs("movie_locs.hdf5")
-      pixelsize = lib.get_from_metadata(info, "Pixelsize")
 
-      result, nena_px = postprocess.nena(locs, info)
-      print(f"NeNA: {nena_px * pixelsize:.1f} nm")
+      result, nena = postprocess.nena(locs, info)
+      print(f"NeNA: {nena:.1f} nm")
       fig = postprocess.plot_nena(result)
 
 
@@ -419,16 +437,17 @@ the FRC resolution:
    :class-container: api-example
 
    ``frc`` works on one viewport (``((y_min, x_min), (y_max, x_max))`` in
-   camera pixels), ``frc_rois`` on random ROIs over the whole image.
+   nm), ``frc_rois`` on random ROIs (``roi_size`` in nm) over the whole
+   image.
 
    .. code-block:: python
 
-      frc = postprocess.frc(locs, info, viewport=((0, 0), (64, 64)))
+      frc = postprocess.frc(locs, info, viewport=((0, 0), (8320, 8320)))
       print(frc["resolution"])                        # nm
       fig = postprocess.plot_frc(frc)
 
       rois = postprocess.frc_rois(
-          locs, info, viewport=((0, 0), (512, 512)),
+          locs, info, viewport=((0, 0), (66560, 66560)),   # nm
           n_rois=30, roi_size=5000.0, min_locs=1000,  # roi_size in nm
       )
       print(rois["resolutions"].mean(), rois["resolutions"].std())

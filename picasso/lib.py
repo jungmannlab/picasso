@@ -34,6 +34,7 @@ from tqdm import tqdm
 from picasso import io, __version__
 
 __all__ = [
+    "field_of_view",
     # metadata
     "get_from_metadata",
     "step_info",
@@ -138,6 +139,8 @@ class _LazyQtModule:
 # imports PyQt6) but stay accessible as lib.<name>; they are resolved
 # lazily below so that importing picasso.lib does not require PyQt6.
 _QT_NAMES = (
+    "ask_pixelsize",
+    "load_or_ask_pixelsize",
     "Dialog",
     "UserSettingsDialog",
     "MetadataDialog",
@@ -857,6 +860,41 @@ def step_info(step: str, **entries: Any) -> dict:
     }
 
 
+def field_of_view(info: list[dict] | dict) -> tuple[float, float]:
+    """Size of the field of view in nm.
+
+    The metadata records the movie size in camera pixels (``Width``,
+    ``Height``) and the camera pixel size in nm (``Pixelsize``); the
+    field of view spans ``[0, Width * Pixelsize)`` in x and
+    ``[0, Height * Pixelsize)`` in y, the range ``ensure_sanity`` keeps.
+
+    Parameters
+    ----------
+    info : list of dicts or dict
+        Localization metadata.
+
+    Returns
+    -------
+    width, height : float
+        Extent of the field of view in x and y, in nm.
+
+    Raises
+    ------
+    KeyError
+        If ``Width``, ``Height`` or ``Pixelsize`` is missing.
+
+    Examples
+    --------
+    >>> from picasso import lib
+    >>> lib.field_of_view([{"Width": 512, "Height": 256, "Pixelsize": 130}])
+    (66560.0, 33280.0)
+    """
+    pixelsize = float(get_from_metadata(info, "Pixelsize", raise_error=True))
+    width = get_from_metadata(info, "Width", raise_error=True)
+    height = get_from_metadata(info, "Height", raise_error=True)
+    return float(width) * pixelsize, float(height) * pixelsize
+
+
 def _is_filter_dict(entry: Any) -> bool:
     """Whether a metadata entry records a Filter step: its ``Step`` is
     ``"Filter"`` or, for entries saved before Picasso 1.0 that have no
@@ -1154,9 +1192,11 @@ def overwrite_metadata(
 
 
 #: Metadata keys holding the translation of the localizations from the
-#: camera frame applied by ``fit_canvas`` (camera pixels); subtract it to
-#: return to the camera coordinates
-CANVAS_OFFSET_KEYS = ("Canvas offset x (cam. px)", "Canvas offset y (cam. px)")
+#: camera frame applied by ``fit_canvas`` (nm, a whole number of camera
+#: pixels); subtract it to return to the camera coordinates. Files
+#: written before Picasso 1.0 hold it in camera pixels under
+#: ``"Canvas offset x (cam. px)"`` (see ``picasso.legacy``).
+CANVAS_OFFSET_KEYS = ("Canvas offset x (nm)", "Canvas offset y (nm)")
 #: Metadata keys holding the size of the camera image (camera pixels),
 #: stored by ``fit_canvas`` once ``Width`` or ``Height`` differ from it
 CAMERA_SIZE_KEYS = ("Camera Width", "Camera Height")
@@ -1174,9 +1214,9 @@ def fit_canvas(
     missing):
 
     - The offset becomes the smallest whole number of camera pixels
-      that makes every coordinate of every channel non-negative (0 if
-      none is negative). It is the same for all channels, so their
-      relative position is preserved.
+      (stored in nm) that makes every coordinate of every channel
+      non-negative (0 if none is negative). It is the same for all
+      channels, so their relative position is preserved.
     - ``Width`` and ``Height`` become the camera size
       (``CAMERA_SIZE_KEYS``, or the current ``Width`` and ``Height`` if
       missing) or the extent of the localizations, whichever is
@@ -1207,15 +1247,16 @@ def fit_canvas(
         The input localizations, translated if needed.
     infos_list : list of lists of dicts
         The input metadata with the updated canvas.
-    shifts : list of tuples of ints
+    shifts : list of tuples of floats
         Translation ``(dx, dy)`` applied to each channel in this call
-        (camera pixels), e.g., to move picks along with the
-        localizations. Channels that shared an offset share the shift.
+        (nm), e.g., to move picks along with the localizations.
+        Channels that shared an offset share the shift.
 
     Raises
     ------
     KeyError
-        If ``Width`` or ``Height`` is missing from the metadata.
+        If ``Width``, ``Height`` or ``Pixelsize`` is missing from the
+        metadata.
     """
 
     def finite(locs, column):
@@ -1224,12 +1265,18 @@ def fit_canvas(
         return values[np.isfinite(values)]
 
     extents = [(finite(locs, "x"), finite(locs, "y")) for locs in locs_list]
+    pixelsizes = [
+        float(get_from_metadata(info, "Pixelsize", raise_error=True))
+        for info in infos_list
+    ]
     offsets = [
         [get_from_metadata(info, key, 0) for key in CANVAS_OFFSET_KEYS]
         for info in infos_list
     ]
 
-    # the new offset, from the minimum in the camera frame
+    # the new offset, from the minimum in the camera frame, in whole
+    # camera pixels (of the first channel's pixel size)
+    pixelsize = pixelsizes[0] if pixelsizes else 1.0
     new_offset = []
     for axis in range(2):
         camera_min = [
@@ -1238,13 +1285,14 @@ def fit_canvas(
             if len(ext[axis])
         ]
         lowest = min(camera_min, default=0)
-        new_offset.append(int(np.ceil(-lowest)) if lowest < 0 else 0)
+        pixels = int(np.ceil(-lowest / pixelsize)) if lowest < 0 else 0
+        new_offset.append(pixels * pixelsize)
 
     shifts = []
-    for locs, ext, info, offset in zip(
-        locs_list, extents, infos_list, offsets
+    for locs, ext, info, offset, ps in zip(
+        locs_list, extents, infos_list, offsets, pixelsizes
     ):
-        shift = tuple(int(new - old) for new, old in zip(new_offset, offset))
+        shift = tuple(float(new - old) for new, old in zip(new_offset, offset))
         for column, delta in zip(("x", "y"), shift):
             if delta:
                 locs[column] = locs[column].to_numpy() + np.float32(delta)
@@ -1252,7 +1300,7 @@ def fit_canvas(
 
         for axis in range(2):
             _fit_canvas_axis(
-                info, axis, ext[axis], shift[axis], new_offset[axis]
+                info, axis, ext[axis], shift[axis], new_offset[axis], ps
             )
     return locs_list, infos_list, shifts
 
@@ -1261,8 +1309,9 @@ def _fit_canvas_axis(
     info: list[dict],
     axis: int,
     values: np.ndarray,
-    shift: int,
-    offset: int,
+    shift: float,
+    offset: float,
+    pixelsize: float,
 ) -> None:
     """Update the canvas size, camera size and offset of one channel
     along one axis in place, see ``fit_canvas``.
@@ -1275,11 +1324,14 @@ def _fit_canvas_axis(
         0 for x (``Width``), 1 for y (``Height``).
     values : np.ndarray
         Finite coordinates of the channel along ``axis`` before the
-        shift (camera pixels).
-    shift : int
-        Translation applied to the channel along ``axis``.
-    offset : int
-        The new canvas offset along ``axis``.
+        shift (nm).
+    shift : float
+        Translation applied to the channel along ``axis`` (nm).
+    offset : float
+        The new canvas offset along ``axis`` (nm).
+    pixelsize : float
+        Camera pixel size of the channel (nm); the canvas size is a
+        number of camera pixels.
     """
     size_key = ("Width", "Height")[axis]
     camera_key = CAMERA_SIZE_KEYS[axis]
@@ -1288,10 +1340,10 @@ def _fit_canvas_axis(
     camera = stored
     if camera is None:
         camera = get_from_metadata(info, size_key, raise_error=True)
-    value = camera + offset
+    value = camera + int(round(offset / pixelsize))
     if len(values):
-        # strictly x < Width is kept by ensure_sanity, hence + 1
-        top = values.max() + np.float32(shift)
+        # strictly x < Width * Pixelsize is kept by ensure_sanity, hence + 1
+        top = (values.max() + np.float32(shift)) / pixelsize
         value = max(value, int(np.floor(top)) + 1)
     # the canvas size is read from the first and from the last
     # dictionary in different places, so every occurrence is set
@@ -1301,13 +1353,13 @@ def _fit_canvas_axis(
     if value != camera or stored is not None:
         info[-1][camera_key] = int(camera)
     if offset or get_from_metadata(info, offset_key):
-        info[-1][offset_key] = offset
+        info[-1][offset_key] = float(offset)
 
 
 def translate_picks(
     picks: list, shape: str | None, dx: float, dy: float
 ) -> list:
-    """Translate picks by ``(dx, dy)`` camera pixels, e.g., to follow
+    """Translate picks by ``(dx, dy)`` nm, e.g., to follow
     localizations moved by ``fit_canvas``.
 
     Parameters
@@ -1319,7 +1371,7 @@ def translate_picks(
             "Brush"} or None
         Shape of the picks. None is allowed only with no picks.
     dx, dy : float
-        Translation in camera pixels.
+        Translation in nm.
 
     Returns
     -------
@@ -1715,12 +1767,12 @@ def plot_trace(
     ax1.scatter(locs["frame"], locs["x"], s=2)
     ax1.set_title("X-pos vs frame")
     ax1.set_xlim(0, n_frames)
-    ax1.set_ylabel("X-pos [Px]")
+    ax1.set_ylabel("X-pos [nm]")
 
     # frame vs y
     ax2.scatter(locs["frame"], locs["y"], s=2)
     ax2.set_title("Y-pos vs frame")
-    ax2.set_ylabel("Y-pos [Px]")
+    ax2.set_ylabel("Y-pos [nm]")
 
     # locs in time
     ax3.plot(xvec, yvec, linewidth=1)
@@ -1900,8 +1952,8 @@ def select_frc_rois(
     info : list of dicts
         Metadata of the localizations list.
     viewport : tuple of floats
-        Region ((y_min, x_min), (y_max, x_max)) in camera pixels in
-        which the ROIs are placed.
+        Region ((y_min, x_min), (y_max, x_max)) in nm in which the ROIs
+        are placed.
     n_rois : int, optional
         Maximum number of ROIs. Default is 30.
     roi_size : float, optional
@@ -1915,17 +1967,16 @@ def select_frc_rois(
     -------
     rois : list of tuples
         Viewports ((y_min, x_min), (y_max, x_max)) of the selected ROIs
-        in camera pixels.
+        in nm.
 
     Raises
     ------
     ValueError
         If ``viewport`` is smaller than one ROI.
     """
-    pixelsize = get_from_metadata(info, "Pixelsize", raise_error=True)
     (y_min, x_min), (y_max, x_max) = viewport
     n_sub = 10  # grid steps per ROI side
-    step = roi_size / pixelsize / n_sub
+    step = roi_size / n_sub
     ny = int((y_max - y_min) / step)
     nx = int((x_max - x_min) / step)
     if ny < n_sub or nx < n_sub:
@@ -2164,12 +2215,13 @@ def append_group(
 
 
 def ensure_sanity(locs: pd.DataFrame, info: list[dict]) -> pd.DataFrame:
-    """Ensure that localizations are within the image dimensions
-    and have positive localization precisions and other parameters.
+    """Ensure that localizations are within the field of view (see
+    ``field_of_view``) and have positive localization precisions and
+    other parameters.
 
-    v0.9.6: check that the info metadata contains the necessary
-    information for processing: Width, Height, Pixelsize and Frames.
-    Raises a KeyError if any of the required keys is missing.
+    Checks that the metadata contains the keys every localization file
+    needs (``io.MINIMUM_METADATA_KEYS``: Width, Height, Frames and
+    Pixelsize). Raises a KeyError if any of them is missing.
 
     Parameters
     ----------
@@ -2193,8 +2245,9 @@ def ensure_sanity(locs: pd.DataFrame, info: list[dict]) -> pd.DataFrame:
         if value is None:
             raise KeyError(f"Metadata is missing required key: '{key}'")
 
-    locs = locs[locs["x"] < get_from_metadata(info, "Width")]
-    locs = locs[locs["y"] < get_from_metadata(info, "Height")]
+    width, height = field_of_view(info)
+    locs = locs[locs["x"] < width]
+    locs = locs[locs["y"] < height]
     for attr in [
         "x",
         "y",
@@ -2216,8 +2269,8 @@ def standardize_dtypes(locs: pd.DataFrame) -> pd.DataFrame:
     integer ``frame`` column cast to uint32 (the dtypes Localize
     writes), leaving every other column as it is.
 
-    float32 resolves 2e-4 camera pixels at 4096 pixels and far below a
-    nanometer in z, two orders below any localization precision, while
+    float32 resolves 0.03 nm at 500 um, two orders below any
+    localization precision, while
     halving memory and file size for columns that pandas arithmetic or
     imports from other software promoted to float64, and sparing the
     GPU renderer a converted copy of such columns on every render.
@@ -3036,7 +3089,7 @@ def brush_stroke_arrays(
     """Split a brush stroke into its width and its path arrays.
 
     A brush stroke is stored as ``(width, path)``, where ``path`` is the
-    list of ``(x, y)`` positions the cursor swept, in camera pixels.
+    list of ``(x, y)`` positions the cursor swept, in nm.
     Loading a picks file yields lists rather than tuples, so the stroke
     is indexed rather than unpacked.
 
@@ -3048,7 +3101,7 @@ def brush_stroke_arrays(
     Returns
     -------
     width : float
-        Width of the stroke in camera pixels.
+        Width of the stroke in nm.
     X, Y : FloatArray1D
         x and y coordinates of the path.
     """
@@ -3360,7 +3413,7 @@ def get_pick_rectangle_corners(
     """Find the positions of corners of a rectangular pick.
 
     A rectangular pick is defined by ``[(start_x, start_y), (end_x,
-    end_y)]`` and its width, all values in camera pixels.
+    end_y)]`` and its width, all values in nm.
 
     Parameters
     ----------
@@ -3369,7 +3422,7 @@ def get_pick_rectangle_corners(
     end_x, end_y : float
         Ending point of the pick.
     width : float
-        Width of the pick in camera pixels.
+        Width of the pick in nm.
 
     Returns
     -------
@@ -3400,7 +3453,7 @@ def get_pick_box_corners(
     """Find the positions of corners of a box pick.
 
     A box pick is defined by two opposite corners,
-    ``((x0, y0), (x1, y1))``, all values in camera pixels. The corners
+    ``((x0, y0), (x1, y1))``, all values in nm. The corners
     are returned in the same order as ``get_pick_rectangle_corners``,
     i.e., counter-clockwise starting from the corner with the smaller x
     and y.
@@ -3590,7 +3643,7 @@ def _brush_bounds(
     Returns
     -------
     bounds : tuple
-        ``(x_min, x_max, y_min, y_max)`` in camera pixels.
+        ``(x_min, x_max, y_min, y_max)`` in nm.
 
     Raises
     ------
@@ -3623,18 +3676,18 @@ def pick_areas(
     Parameters
     ----------
     picks : list of tuples
-        Coordinates of picks in camera pixels.
+        Coordinates of picks in nm.
     pick_shape : {"Circle", "Rectangle", "Polygon", "Square", "Box", "Brush"}
         Shape of picks.
     pick_size : float or None
-        Size of picks in camera pixels. For circles - diameters. For
+        Size of picks in nm. For circles - diameters. For
         rectangles - width. For squares - side length. For polygons,
         boxes and brush picks - ignored.
 
     Returns
     -------
     areas : FloatArray1D
-        Pick areas in camera pixels squared.
+        Pick areas in nm squared.
     """
     if pick_shape == "Circle":
         r = pick_size / 2
@@ -3671,19 +3724,19 @@ def pick_bounds(
     Parameters
     ----------
     pick : tuple
-        Coordinates of one pick in camera pixels. Must match the format
+        Coordinates of one pick in nm. Must match the format
         of ``pick_shape``.
     pick_shape : {"Circle", "Rectangle", "Polygon", "Square", "Box", "Brush"}
         Shape of the pick.
     pick_size : float or None
-        Size of the pick in camera pixels. For circles - diameter. For
+        Size of the pick in nm. For circles - diameter. For
         rectangles - width. For squares - side length. For polygons,
         boxes and brush picks - ignored.
 
     Returns
     -------
     bounds : tuple
-        ``(x_min, x_max, y_min, y_max)`` in camera pixels. For an open
+        ``(x_min, x_max, y_min, y_max)`` in nm. For an open
         polygon (fewer than three vertices or not closed), the bounding
         box of its vertices is returned; an empty polygon or brush pick
         raises ``ValueError``.
@@ -3728,14 +3781,14 @@ def point_in_pick(
     Parameters
     ----------
     x, y : float
-        Position to test, in camera pixels.
+        Position to test, in nm.
     pick : tuple
-        Coordinates of one pick in camera pixels. Must match the format
+        Coordinates of one pick in nm. Must match the format
         of ``pick_shape``.
     pick_shape : {"Circle", "Rectangle", "Polygon", "Square", "Box", "Brush"}
         Shape of the pick.
     pick_size : float or None
-        Size of the pick in camera pixels. For circles - diameter. For
+        Size of the pick in nm. For circles - diameter. For
         rectangles - width. For squares - side length. For polygons,
         boxes and brush picks - ignored.
 
@@ -4097,7 +4150,7 @@ def unfold_localizations_square(
     info: list[dict],
     *,
     n_square: int = 10,
-    spacing: int | float = 1,
+    spacing: int | float = 250.0,
 ):
     """Shift localizations onto a square grid (tile) based on their
     group indices. The localizations must contain a 'group' column.
@@ -4111,7 +4164,7 @@ def unfold_localizations_square(
     n_square : int, optional
         Number of groups per square side. Default is 10.
     spacing : int or float, optional
-        Spacing between groups in camera pixels. Default is 1.
+        Spacing between groups in nm. Default is 250.
 
     Returns
     -------
@@ -4133,8 +4186,9 @@ def unfold_localizations_square(
 
     # shift localizations to the middle of the FOV and by the COM
     # of each group
-    cx = get_from_metadata(updated_info, "Width", raise_error=True) / 2
-    cy = get_from_metadata(updated_info, "Height", raise_error=True) / 2
+    width, height = field_of_view(updated_info)
+    cx = width / 2
+    cy = height / 2
     for group_id in np.unique(locs["group"]):
         mask = locs["group"] == group_id
         mean_x = locs.loc[mask, "x"].mean()
@@ -4151,12 +4205,13 @@ def unfold_localizations_square(
     locs["x"] += np.absolute(locs["x"].min())
     locs["y"] += np.absolute(locs["y"].min())
 
-    # Update FOV and clean up
+    # Update FOV (camera pixels) and clean up
+    pixelsize = float(get_from_metadata(updated_info, "Pixelsize"))
     updated_info = overwrite_metadata(
-        updated_info, "Width", int(np.ceil(locs["x"].max()))
+        updated_info, "Width", int(np.floor(locs["x"].max() / pixelsize)) + 1
     )
     updated_info = overwrite_metadata(
-        updated_info, "Height", int(np.ceil(locs["y"].max()))
+        updated_info, "Height", int(np.floor(locs["y"].max() / pixelsize)) + 1
     )
     return locs, updated_info
 
@@ -4245,7 +4300,9 @@ def lateral_transforms(calibration: dict | list | None) -> list[dict]:
     return list(calibration.get(LATERAL_TRANSFORMS_KEY) or [])
 
 
-def resolve_lateral_transforms(source: dict | list | str | None) -> list:
+def resolve_lateral_transforms(
+    source: dict | list | str | None, pixelsize: float | None = None
+) -> list:
     """The lateral corrections held by ``source``, reading it from disk if
     it is a path.
 
@@ -4254,23 +4311,31 @@ def resolve_lateral_transforms(source: dict | list | str | None) -> list:
     source : dict, list, str or None
         A calibration dictionary, a list of entries, the path of a
         calibration file of any kind (see ``io.load_any_calibration``), or
-        None.
+        None. Entries given in memory are taken as they are (nm).
+    pixelsize : float, optional
+        Camera pixel size in nm, used only when `source` is the path of
+        a calibration file written before Picasso 1.0 (camera pixels,
+        no format marker), whose corrections are then converted to nm
+        (see ``io.load_any_calibration``). Default is None.
 
     Returns
     -------
     transforms : list of dicts
-        The entries in the order they must be applied. Empty if `source`
-        is None or carries none.
+        The entries in the order they must be applied, in nm. Empty if
+        `source` is None or carries none.
 
     Raises
     ------
     ValueError
         If `source` is a path to a file that carries no lateral
         corrections, which would otherwise be a silent no-op.
+    io.MissingPixelsizeError
+        If `source` is the path of a file written before Picasso 1.0 and
+        `pixelsize` is None.
     """
     if not isinstance(source, str):
         return lateral_transforms(source)
-    transforms = lateral_transforms(io.load_any_calibration(source))
+    transforms = lateral_transforms(io.load_any_calibration(source, pixelsize))
     if not transforms:
         raise ValueError(
             f"No lateral corrections found in {source}. Build one with "
@@ -4287,14 +4352,15 @@ def lateral_transform_models(calibration: dict | list | None) -> list:
     Parameters
     ----------
     calibration : dict, list or None
-        A calibration carrying an ``"Affine transforms"`` list, that list
+        A calibration carrying a ``"Lateral transforms"`` list, that list
         itself, or None. Its items may be entries (dicts with a
         ``"Transform"`` key) or bare transforms.
 
     Returns
     -------
     models : list of picasso.transforms.Transform
-        One transform per correction, in application order.
+        One transform per correction, in application order, in nm (the
+        unit of the localizations they correct).
     """
     from picasso import transforms as _tf
 
@@ -4345,9 +4411,12 @@ def apply_lateral_transforms(
 ) -> pd.DataFrame:
     """Map ``locs`` x/y through a calibration's lateral corrections.
 
-    The transforms are applied in stored order, in camera-pixel
-    coordinates. Returns ``locs`` unchanged (and untouched) when there is
-    nothing to apply, so this is safe to call on every fit path.
+    The transforms are applied in stored order, in nm (the unit of the
+    localizations and of the corrections since Picasso 1.0; corrections
+    from earlier calibration files are converted when the file is
+    loaded, see ``io.load_any_calibration``). Returns ``locs`` unchanged
+    (and untouched) when there is nothing to apply, so this is safe to
+    call on every fit path.
 
     Parameters
     ----------

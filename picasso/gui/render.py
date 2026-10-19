@@ -25,7 +25,6 @@ from functools import partial
 from typing import Callable
 from PIL import Image
 
-import yaml
 import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
@@ -47,6 +46,7 @@ from .. import (
     g5m,
     imageprocess,
     io,
+    legacy,
     lib,
     lib_qt,
     masking,
@@ -70,6 +70,7 @@ from .render_worker import (  # noqa: F401
 from . import idle
 from . import render_link
 from . import render_spt
+from .convert_units import ConvertUnitsDialog
 from .grid_settings import GridGroupBox
 from .overlay_style import OverlayStyleWidget
 from .rotation import RotationWindow, source_key
@@ -95,7 +96,19 @@ matplotlib.rcParams.update({"axes.titlesize": "large"})
 
 _log = logging.getLogger(__name__)
 
-DEFAULT_OVERSAMPLING = 1.0  # number of display pixels per camera pixel
+DEFAULT_DISP_PX_SIZE = 130.0  # initial display (render) pixel size, nm
+#: margin around the picked localizations shown in the Test Clusterer
+#: window, as a fraction of their extent
+TEST_CLUSTERER_MARGIN = 0.05
+#: first line of the FOV .txt files saved by ``ChangeFOV`` (nm); files
+#: without it were written before Picasso 1.0, in camera pixels
+FOV_FILE_HEADER = f"picasso_format {io.FORMAT_VERSION} (nm)"
+#: keys of the .yaml saved with exported images (see
+#: ``Window.export_current_info``); the legacy FOV key holds camera
+#: pixels in files without ``picasso_format``
+FOV_KEY = "FOV (X, Y, Width, Height; nm)"
+LEGACY_FOV_KEY = "FOV (X, Y, Width, Height)"
+SCREEN_PX_SIZE_KEY = "Screen pixel size (nm)"
 INITIAL_REL_MAXIMUM = 0.5
 ZOOM = 9 / 7
 WHEEL_ZOOM = 1.2  # zoom factor per mouse wheel notch
@@ -481,15 +494,15 @@ class ApplyDialog(lib.Dialog):
     --------
     The examples below are to be input in self.cmd (Expression):
 
-    ``x += 10``
-        Move x coordinate 10 units to the right (camera pixels).
-    ``y -= 3``
-        Move y coordinate 3 units upwards (camera pixels).
+    ``x += 100``
+        Move x coordinate 100 nm to the right.
+    ``y -= 30``
+        Move y coordinate 30 nm upwards.
     ``flip x z``
         Exchange x- and z-axes.
-    ``spiral 2 3``
-        Plot each localization over time in a spiral with radius 2
-        pixels and 3 turns.
+    ``spiral 200 3``
+        Plot each localization over time in a spiral with radius 200
+        nm and 3 turns.
     ``uspiral``
         Undo the last spiral action.
     """
@@ -529,13 +542,12 @@ class ApplyDialog(lib.Dialog):
         exp_label = QtWidgets.QLabel("Expression:")
         exp_label.setToolTip(
             "Enter the expression here.\n"
-            "For example, 'x += 10' to move x coordinates of the\n"
-            "localizations in the selected channel 10 camera pixels to the"
-            " right.\n"
+            "For example, 'x += 100' to move x coordinates of the\n"
+            "localizations in the selected channel 100 nm to the right.\n"
             "Additionally, the following commands are supported:\n"
             "- 'flip x z' to exchange x- and z-axes.\n"
             "- 'spiral R N' to plot each localization over time in a spiral\n"
-            "  with radius R pixels and N turns.\n"
+            "  with radius R nm and N turns.\n"
             "- 'uspiral' to undo the last spiral action."
         )
         layout.addWidget(exp_label, 2, 1)
@@ -2565,8 +2577,8 @@ class PlotDialog(lib.Dialog):
                 cmap=Z_SCATTER_CMAP,
                 s=2,
             )
-            ax.set_xlabel("X [Px]")
-            ax.set_ylabel("Y [Px]")
+            ax.set_xlabel("X [nm]")
+            ax.set_ylabel("Y [nm]")
             ax.set_zlabel("Z [nm]")
             ax.set_xlim(
                 np.mean(locs["x"]) - 3 * np.std(locs["x"]),
@@ -2603,8 +2615,8 @@ class PlotDialog(lib.Dialog):
                 np.mean(locs["z"]) + 3 * np.std(locs["z"]),
             )
 
-            ax.set_xlabel("X [Px]")
-            ax.set_ylabel("Y [Px]")
+            ax.set_xlabel("X [nm]")
+            ax.set_ylabel("Y [nm]")
             ax.set_zlabel("Z [nm]")
 
             plt.gca().patch.set_facecolor("black")
@@ -2715,8 +2727,8 @@ class PlotDialogIso(lib.Dialog):
                 cmap=Z_SCATTER_CMAP,
                 s=2,
             )
-            ax.set_xlabel("X [Px]")
-            ax.set_ylabel("Y [Px]")
+            ax.set_xlabel("X [nm]")
+            ax.set_ylabel("Y [nm]")
             ax.set_zlabel("Z [nm]")
             ax.set_xlim(
                 np.mean(locs["x"]) - 3 * np.std(locs["x"]),
@@ -2740,8 +2752,8 @@ class PlotDialogIso(lib.Dialog):
             ax2.scatter(
                 locs["x"], locs["y"], c=colors, cmap=Z_SCATTER_CMAP, s=2
             )
-            ax2.set_xlabel("X [Px]")
-            ax2.set_ylabel("Y [Px]")
+            ax2.set_xlabel("X [nm]")
+            ax2.set_ylabel("Y [nm]")
             ax2.set_xlim(
                 locs["x"].mean() - 3 * locs["x"].std(),
                 locs["x"].mean() + 3 * locs["x"].std(),
@@ -2757,7 +2769,7 @@ class PlotDialogIso(lib.Dialog):
             ax3.scatter(
                 locs["x"], locs["z"], c=colors, cmap=Z_SCATTER_CMAP, s=2
             )
-            ax3.set_xlabel("X [Px]")
+            ax3.set_xlabel("X [nm]")
             ax3.set_ylabel("Z [nm]")
             ax3.set_xlim(
                 locs["x"].mean() - 3 * locs["x"].std(),
@@ -2774,7 +2786,7 @@ class PlotDialogIso(lib.Dialog):
             ax4.scatter(
                 locs["y"], locs["z"], c=colors, cmap=Z_SCATTER_CMAP, s=2
             )
-            ax4.set_xlabel("Y [Px]")
+            ax4.set_xlabel("Y [nm]")
             ax4.set_ylabel("Z [nm]")
             ax4.set_xlim(
                 np.mean(locs["y"]) - 3 * np.std(locs["y"]),
@@ -2809,8 +2821,8 @@ class PlotDialogIso(lib.Dialog):
                 locs["z"].mean() + 3 * locs["z"].std(),
             )
 
-            ax.set_xlabel("X [Px]")
-            ax.set_ylabel("Y [Px]")
+            ax.set_xlabel("X [nm]")
+            ax.set_ylabel("Y [nm]")
             ax.set_zlabel("Z [nm]")
 
             ax.xaxis.pane.set_facecolor((0, 0, 0, 1.0))
@@ -2818,8 +2830,8 @@ class PlotDialogIso(lib.Dialog):
             ax.zaxis.pane.set_facecolor((0, 0, 0, 1.0))
 
             # AXES 2
-            ax2.set_xlabel("X [Px]")
-            ax2.set_ylabel("Y [Px]")
+            ax2.set_xlabel("X [nm]")
+            ax2.set_ylabel("Y [nm]")
             ax2.set_xlim(
                 locs["x"].mean() - 3 * locs["x"].std(),
                 locs["x"].mean() + 3 * locs["x"].std(),
@@ -2832,7 +2844,7 @@ class PlotDialogIso(lib.Dialog):
             ax2.set_facecolor("black")
 
             # AXES 3
-            ax3.set_xlabel("X [Px]")
+            ax3.set_xlabel("X [nm]")
             ax3.set_ylabel("Z [nm]")
             ax3.set_xlim(
                 locs["x"].mean() - 3 * locs["x"].std(),
@@ -2846,7 +2858,7 @@ class PlotDialogIso(lib.Dialog):
             ax3.set_facecolor("black")
 
             # AXES 4
-            ax4.set_xlabel("Y [Px]")
+            ax4.set_xlabel("Y [nm]")
             ax4.set_ylabel("Z [nm]")
             ax4.set_xlim(
                 locs["y"].mean() - 3 * locs["y"].std(),
@@ -2974,10 +2986,9 @@ class ClsDlg3D(lib.Dialog):
         current: int,
         length: int,
         n_clusters: int,
-        pixelsize: float,
     ) -> tuple[int, int, pd.DataFrame, list[pd.DataFrame]]:
         """Cluster the picked locs of the given pick with k-means in
-        3D."""
+        3D (x, y and z in nm)."""
         dialog = ClsDlg3D(None)
 
         dialog.start_clusters = n_clusters
@@ -2997,10 +3008,7 @@ class ClsDlg3D(lib.Dialog):
         locs = all_picked_locs[current]
 
         est = KMeans(n_clusters=n_clusters, n_init="auto")
-        scaled_locs = locs.copy()
-        scaled_locs["x_scaled"] = locs["x"] * pixelsize
-        scaled_locs["y_scaled"] = locs["y"] * pixelsize
-        est.fit(scaled_locs[["x_scaled", "y_scaled", "z"]])
+        est.fit(locs[["x", "y", "z"]])
         labels = est.labels_
         counts = list(Counter(labels).items())
 
@@ -3023,9 +3031,9 @@ class ClsDlg3D(lib.Dialog):
             dialog.add_clusters(element, x_mean, y_mean, z_mean)
             ax2.text(x_mean, y_mean, z_mean, element[1], fontsize=12)
 
-        ax1.set_xlabel("X [Px]")
-        ax1.set_ylabel("Y [Px]")
-        ax1.set_zlabel("Z [Px]")
+        ax1.set_xlabel("X [nm]")
+        ax1.set_ylabel("Y [nm]")
+        ax1.set_zlabel("Z [nm]")
 
         ax2.set_xlabel("X [nm]")
         ax2.set_ylabel("Y [nm]")
@@ -3048,7 +3056,7 @@ class ClsDlg3D(lib.Dialog):
         labels = [0 if x in checks else x for x in labels]
         labels = np.asarray(labels)
 
-        l_locs = scaled_locs.copy()
+        l_locs = locs.copy()
         l_locs["cluster"] = labels
         l_locs_new_group = l_locs.copy()
         power = np.round(n_clusters / 10) + 1
@@ -3199,10 +3207,7 @@ class ClsDlg2D(lib.Dialog):
         locs = all_picked_locs[current]
 
         est = KMeans(n_clusters=n_clusters, n_init="auto")
-        scaled_locs = locs.copy()
-        scaled_locs["x_scaled"] = locs["x"]
-        scaled_locs["y_scaled"] = locs["y"]
-        est.fit(scaled_locs[["x_scaled", "y_scaled"]])
+        est.fit(locs[["x", "y"]])
         labels = est.labels_
         counts = list(Counter(labels).items())
 
@@ -3220,8 +3225,8 @@ class ClsDlg2D(lib.Dialog):
             dialog.add_clusters(element, x_mean, y_mean)
             ax2.text(x_mean, y_mean, element[1], fontsize=12)
 
-        ax1.set_xlabel("X [Px]")
-        ax1.set_ylabel("Y [Px]")
+        ax1.set_xlabel("X [nm]")
+        ax1.set_ylabel("Y [nm]")
 
         ax2.set_xlabel("X [nm]")
         ax2.set_ylabel("Y [nm]")
@@ -3238,7 +3243,7 @@ class ClsDlg2D(lib.Dialog):
         labels = [0 if x in checks else x for x in labels]
         labels = np.asarray(labels)
 
-        l_locs = scaled_locs.copy()
+        l_locs = locs.copy()
         l_locs["cluster"] = labels
         l_locs_new_group = l_locs.copy()
         power = np.round(n_clusters / 10) + 1
@@ -3490,10 +3495,10 @@ class ExportKwargsDialog(lib.Dialog):
     min_blur_width : QtWidgets.QDoubleSpinBox
         Minimum blur width in nm.
     width, height : QtWidgets.QDoubleSpinBox
-        Width and height of the exported image in camera pixels.
+        Width and height of the exported field of view in nm.
     x, y : QtWidgets.QDoubleSpinBox
-        X and Y coordinates of the top left corner of the exported image
-        in camera pixels.
+        X and Y coordinates of the top left corner of the exported field
+        of view in nm.
     """
 
     def __init__(self, window: QtWidgets.QMainWindow) -> None:
@@ -3506,29 +3511,29 @@ class ExportKwargsDialog(lib.Dialog):
         disp_settings = window.display_settings_dlg
 
         self.x = QtWidgets.QDoubleSpinBox()
-        self.x.setRange(-1e6, 1e6)
-        self.x.setDecimals(5)
-        self.x.setSingleStep(0.1)
+        self.x.setRange(-1e7, 1e7)
+        self.x.setDecimals(2)
+        self.x.setSingleStep(100)
         self.x.setValue(viewport[0][1])
-        layout.addRow("X, top left corner (cam. pixels)", self.x)
+        layout.addRow("X, top left corner (nm)", self.x)
         self.y = QtWidgets.QDoubleSpinBox()
-        self.y.setRange(-1e6, 1e6)
-        self.y.setDecimals(5)
-        self.y.setSingleStep(0.1)
+        self.y.setRange(-1e7, 1e7)
+        self.y.setDecimals(2)
+        self.y.setSingleStep(100)
         self.y.setValue(viewport[0][0])
-        layout.addRow("Y, top left corner (cam. pixels)", self.y)
+        layout.addRow("Y, top left corner (nm)", self.y)
         self.width = QtWidgets.QDoubleSpinBox()
-        self.width.setRange(0.01, 1e6)
-        self.width.setDecimals(5)
-        self.width.setSingleStep(0.1)
+        self.width.setRange(1, 1e7)
+        self.width.setDecimals(2)
+        self.width.setSingleStep(100)
         self.width.setValue(viewport[1][1] - viewport[0][1])
-        layout.addRow("Width (cam. pixels)", self.width)
+        layout.addRow("Width (nm)", self.width)
         self.height = QtWidgets.QDoubleSpinBox()
-        self.height.setRange(0.01, 1e6)
-        self.height.setDecimals(5)
-        self.height.setSingleStep(0.1)
+        self.height.setRange(1, 1e7)
+        self.height.setDecimals(2)
+        self.height.setSingleStep(100)
         self.height.setValue(viewport[1][0] - viewport[0][0])
-        layout.addRow("Height (cam. pixels)", self.height)
+        layout.addRow("Height (nm)", self.height)
         self.disp_px_size = QtWidgets.QDoubleSpinBox()
         self.disp_px_size.setRange(0.1, 1e6)
         self.disp_px_size.setSingleStep(1.0)
@@ -3659,8 +3664,8 @@ class HdbscanDialog(lib.Dialog):
         self.cluster_eps = QtWidgets.QDoubleSpinBox()
         self.cluster_eps.setRange(0, 1e6)
         self.cluster_eps.setValue(0.0)
-        self.cluster_eps.setDecimals(3)
-        self.cluster_eps.setSingleStep(0.001)
+        self.cluster_eps.setDecimals(1)
+        self.cluster_eps.setSingleStep(0.1)
         grid.addWidget(self.cluster_eps, 2, 1)
         vbox.addLayout(grid)
         hbox = QtWidgets.QHBoxLayout()
@@ -4171,16 +4176,11 @@ class G5MDialog(lib.Dialog):
         """Get the parameters for G5M."""
         dialog = G5MDialog(parent, channel)
         result = dialog.exec()
-        px = dialog.window.view.pixelsize
         if dialog.loc_prec_handling.currentIndex() == 0:  # local sigma
             loc_prec_handle = "local"
-            sigma_bounds = (dialog.min_sigma.value(), dialog.max_sigma.value())
-        else:  # custom bounds
+        else:  # custom bounds (nm)
             loc_prec_handle = "abs"
-            sigma_bounds = (
-                dialog.min_sigma.value() / px,
-                dialog.max_sigma.value() / px,
-            )
+        sigma_bounds = (dialog.min_sigma.value(), dialog.max_sigma.value())
         params = {
             "min_locs": dialog.min_locs.value(),
             "group_column": dialog.group_column.currentText(),
@@ -4194,7 +4194,6 @@ class G5MDialog(lib.Dialog):
         if dialog.flag_3D:
             mode = "spline" if dialog.spline_mode else "astigmatism"
             params["mode"] = mode
-            params["pixelsize"] = px
             if mode == "astigmatism":
                 params["calibration"] = dialog.calibration
                 if "Magnification factor" not in dialog.calibration.keys():
@@ -4597,9 +4596,6 @@ class TestClustererDialog(lib.Dialog):
         centers : pd.DataFrame
             The cluster centers.
         """
-        # for converting z coordinates
-        pixelsize = self.window.view.pixelsize
-        params["pixelsize"] = pixelsize
         clusterer_name = self.clusterer_name.currentText()
         if clusterer_name == "DBSCAN":
             locs, _ = clusterer.dbscan(locs, **params)
@@ -4609,41 +4605,25 @@ class TestClustererDialog(lib.Dialog):
             locs, _ = clusterer.cluster(locs, **params)
         elif clusterer_name == "G5M":
             locs, _ = clusterer.dbscan(locs, **params["DBSCAN"])
-            # in g5m, the info parameter is only for getting the pixel
-            # size
-            centers, locs, _ = g5m.g5m(
-                locs, [{"Pixelsize": pixelsize}], **params["G5M"]
-            )
-            centers["z"] /= pixelsize
+            info = self.window.view.infos[self.channels.currentIndex()]
+            centers, locs, _ = g5m.g5m(locs, info, **params["G5M"])
 
         if len(locs):
             self.view.group_color = render.get_group_color(locs)
 
-        # scale z axis if applicable
-        if "z" in locs.columns:
-            locs.z /= pixelsize
-
         # calculate cluster centers
         if clusterer_name != "G5M":  # G5M found centers already
-            centers = clusterer.find_cluster_centers(
-                locs,
-                self.window.view.pixelsize,
-            )
+            centers = clusterer.find_cluster_centers(locs)
         return locs, centers
 
     def get_cluster_params(self) -> dict:
         """Extract clustering parameters for a given clustering method
         into a dictionary."""
         params = {}
-        pixelsize = self.window.view.pixelsize
         clusterer_name = self.clusterer_name.currentText()
         if clusterer_name == "DBSCAN":
-            params["radius"] = (
-                self.test_dbscan_params.radius.value() / pixelsize
-            )
-            params["radius_z"] = (
-                self.test_dbscan_params.radius_z.value() / pixelsize
-            )
+            params["radius"] = self.test_dbscan_params.radius.value()
+            params["radius_z"] = self.test_dbscan_params.radius_z.value()
             params["min_samples"] = self.test_dbscan_params.min_samples.value()
             params["min_locs"] = self.test_dbscan_params.min_locs.value()
         elif clusterer_name == "HDBSCAN":
@@ -4657,23 +4637,18 @@ class TestClustererDialog(lib.Dialog):
                 self.test_hdbscan_params.cluster_eps.value()
             )
         elif clusterer_name == "SMLM":
-            params["radius_xy"] = (
-                self.test_smlm_params.radius_xy.value() / pixelsize
-            )
-            params["radius_z"] = (
-                self.test_smlm_params.radius_z.value() / pixelsize
-            )
+            params["radius_xy"] = self.test_smlm_params.radius_xy.value()
+            params["radius_z"] = self.test_smlm_params.radius_z.value()
             params["min_locs"] = self.test_smlm_params.min_locs.value()
             params["frame_analysis"] = self.test_smlm_params.fa.isChecked()
         elif clusterer_name == "G5M":
             params["DBSCAN"] = {}
-            params["DBSCAN"]["radius"] = (
-                self.test_g5m_params.dbscan_radius.value() / pixelsize
-            )
+            params["DBSCAN"][
+                "radius"
+            ] = self.test_g5m_params.dbscan_radius.value()
             params["DBSCAN"][
                 "min_samples"
             ] = self.test_g5m_params.dbscan_min_samples.value()
-            params["DBSCAN"]["pixelsize"] = pixelsize
             params["G5M"] = {}
             params["G5M"]["min_locs"] = self.test_g5m_params.min_locs.value()
             handle = self.test_g5m_params.loc_prec_handling.currentText()
@@ -4795,16 +4770,16 @@ class TestClustererDialog(lib.Dialog):
         ``View.run_jobs``."""
         params = self.get_cluster_params()
         locs = self.window.view.locs[channel]
-        pixelsize = self.window.view.pixelsize
+        info = self.window.view.infos[channel]
         save_centers = self.display_centers.isChecked()
         if self.clusterer_name.currentText() == "DBSCAN":
             return self.window.view._dbscan_job(
                 channel=channel,
                 path=path,
-                radius=params["radius"] * pixelsize,
+                radius=params["radius"],
                 min_density=params["min_samples"],
                 min_locs=params["min_locs"],
-                radius_z=params["radius_z"] * pixelsize,
+                radius_z=params["radius_z"],
                 save_centers=save_centers,
             )
         elif self.clusterer_name.currentText() == "HDBSCAN":
@@ -4820,14 +4795,13 @@ class TestClustererDialog(lib.Dialog):
             return self.window.view._smlm_clusterer_job(
                 channel=channel,
                 path=path,
-                radius_xy=params["radius_xy"] * pixelsize,
-                radius_z=params["radius_z"] * pixelsize,
+                radius_xy=params["radius_xy"],
+                radius_z=params["radius_z"],
                 min_locs=params["min_locs"],
                 frame_analysis=params["frame_analysis"],
                 save_centers=save_centers,
             )
         elif self.clusterer_name.currentText() == "G5M":
-            params["DBSCAN"]["radius"] *= pixelsize
             params["G5M"]["asynch"] = True
 
             def job(progress: lib.TaskProgress) -> None:
@@ -4835,7 +4809,7 @@ class TestClustererDialog(lib.Dialog):
                 clustered, _ = clusterer.dbscan(locs, **params["DBSCAN"])
                 centers, clustered_locs, new_info = g5m.g5m(
                     clustered,
-                    [{"Pixelsize": pixelsize}],
+                    info,
                     **params["G5M"],
                     callback_parent=progress,
                 )
@@ -4956,8 +4930,8 @@ class TestHDBSCANParams(QtWidgets.QWidget):
         self.cluster_eps = QtWidgets.QDoubleSpinBox()
         self.cluster_eps.setRange(0, 1e6)
         self.cluster_eps.setValue(0.0)
-        self.cluster_eps.setDecimals(3)
-        self.cluster_eps.setSingleStep(0.001)
+        self.cluster_eps.setDecimals(1)
+        self.cluster_eps.setSingleStep(0.1)
         grid.addWidget(self.cluster_eps, 2, 1)
         grid.setRowStretch(3, 1)
 
@@ -5273,9 +5247,7 @@ class TestClustererView(QtWidgets.QLabel):
         blur_method = (
             "smooth" if self.dialog.one_pixel_blur.isChecked() else "convolve"
         )
-        disp_px_size = (
-            self.dialog.window.view.pixelsize / self.get_optimal_oversampling()
-        )
+        disp_px_size = 1 / self.get_optimal_oversampling()
         colors = lib.get_colors(len(locs))
         info = [self.view.infos[self.dialog.channels.currentIndex()]] * len(
             locs
@@ -5362,8 +5334,6 @@ class TestClustererView(QtWidgets.QLabel):
         ):  # two channels, all locs and clustered locs
             channel = self.dialog.channel
             all_locs = self.dialog.window.view.picked_locs(channel)[0]
-            if "z" in all_locs.columns:
-                all_locs.z /= self.dialog.window.view.pixelsize
             locs = [
                 all_locs,
                 self.locs,
@@ -5382,8 +5352,6 @@ class TestClustererView(QtWidgets.QLabel):
         ):  # three channels, all locs, clustered locs and cluster centers
             channel = self.dialog.channel
             all_locs = self.dialog.window.view.picked_locs(channel)[0]
-            if "z" in all_locs.columns:
-                all_locs.z /= self.dialog.window.view.pixelsize
             locs = [
                 all_locs,
                 self.locs,
@@ -5397,21 +5365,24 @@ class TestClustererView(QtWidgets.QLabel):
         return locs
 
     def get_optimal_oversampling(self) -> float:
+        """Screen pixels per nm at which the viewport fills the view."""
         height, width = render.viewport_size(self.viewport)
         return (self._size / min(height, width)) / 1.05
 
     def get_full_fov(self) -> list[tuple[float, float]] | None:
         """Get viewport that contains all localizations as defined
-        by the pick."""
+        by the pick, with a margin of 5% of their extent."""
         if not len(self.locs):
             return
         # all picked locs
         locs = self.view.picked_locs(self.dialog.channel)[0]
-        x_min = locs["x"].min() - 1
-        x_max = locs["x"].max() + 1
-        y_min = locs["y"].min() - 1
-        y_max = locs["y"].max() + 1
-        return ([y_min, x_min], [y_max, x_max])
+        x_min, x_max = locs["x"].min(), locs["x"].max()
+        y_min, y_max = locs["y"].min(), locs["y"].max()
+        margin = TEST_CLUSTERER_MARGIN * max(x_max - x_min, y_max - y_min)
+        return (
+            [y_min - margin, x_min - margin],
+            [y_max + margin, x_max + margin],
+        )
 
 
 class DriftPlotWindow(lib.GenericPlotWindow):
@@ -5424,11 +5395,10 @@ class DriftPlotWindow(lib.GenericPlotWindow):
     def plot(self, drift: pd.DataFrame) -> None:
         """Plot drift in 2D or 3D depending on the columns of the input
         DataFrame."""
-        pixelsize = self.parent.pixelsize
 
         def draw() -> None:
             with self.plot_context():
-                postprocess.plot_drift(drift, pixelsize, self.figure)
+                postprocess.plot_drift(drift, self.figure)
 
         draw()
         self.redraw = draw
@@ -5443,15 +5413,13 @@ class ChangeFOV(lib.Dialog):
     Attributes
     ----------
     h_box : QDoubleSpinBox
-        Contains the height of the viewport (camera pixels).
+        Contains the height of the viewport (nm).
     w_box : QDoubleSpinBox
-        Contains the width of the viewport (camera pixels).
+        Contains the width of the viewport (nm).
     x_box : QDoubleSpinBox
-        Contains the minimum x coordinate (camera pixels) to be
-        displayed.
+        Contains the minimum x coordinate (nm) to be displayed.
     y_box : QDoubleSpinBox
-        Contains the minimum y coordinate (camera pixels) to be
-        displayed.
+        Contains the minimum y coordinate (nm) to be displayed.
     """
 
     def __init__(self, window: QtWidgets.QMainWindow) -> None:
@@ -5461,44 +5429,44 @@ class ChangeFOV(lib.Dialog):
         self.setModal(False)
         self.layout = QtWidgets.QGridLayout()
         self.setLayout(self.layout)
-        xlabel = QtWidgets.QLabel("X:")
-        xlabel.setToolTip(
-            "X coordinate of the top-left corner (camera pixels)."
-        )
+        xlabel = QtWidgets.QLabel("X (nm):")
+        xlabel.setToolTip("X coordinate of the top-left corner (nm).")
         self.layout.addWidget(xlabel, 0, 0)
         self.x_box = QtWidgets.QDoubleSpinBox()
         self.x_box.setKeyboardTracking(False)
-        self.x_box.setRange(-100, 1e6)
+        self.x_box.setRange(-1e8, 1e8)
+        self.x_box.setSingleStep(100)
         self.layout.addWidget(self.x_box, 0, 1)
-        ylabel = QtWidgets.QLabel("Y:")
-        ylabel.setToolTip(
-            "Y coordinate of the top-left corner (camera pixels)."
-        )
+        ylabel = QtWidgets.QLabel("Y (nm):")
+        ylabel.setToolTip("Y coordinate of the top-left corner (nm).")
         self.layout.addWidget(ylabel, 1, 0)
         self.y_box = QtWidgets.QDoubleSpinBox()
         self.y_box.setKeyboardTracking(False)
-        self.y_box.setRange(-100, 1e6)
+        self.y_box.setRange(-1e8, 1e8)
+        self.y_box.setSingleStep(100)
         self.layout.addWidget(self.y_box, 1, 1)
-        w_label = QtWidgets.QLabel("Width:")
-        w_label.setToolTip("Width of the FOV (camera pixels).")
+        w_label = QtWidgets.QLabel("Width (nm):")
+        w_label.setToolTip("Width of the FOV (nm).")
         self.layout.addWidget(w_label, 2, 0)
         self.w_box = QtWidgets.QDoubleSpinBox()
         self.w_box.setKeyboardTracking(False)
-        self.w_box.setRange(0, 1e3)
+        self.w_box.setRange(0, 1e8)
+        self.w_box.setSingleStep(100)
         self.layout.addWidget(self.w_box, 2, 1)
-        h_label = QtWidgets.QLabel("Height:")
-        h_label.setToolTip("Height of the FOV (camera pixels).")
+        h_label = QtWidgets.QLabel("Height (nm):")
+        h_label.setToolTip("Height of the FOV (nm).")
         self.layout.addWidget(h_label, 3, 0)
         self.h_box = QtWidgets.QDoubleSpinBox()
         self.h_box.setKeyboardTracking(False)
-        self.h_box.setRange(0, 1e3)
+        self.h_box.setRange(0, 1e8)
+        self.h_box.setSingleStep(100)
         self.layout.addWidget(self.h_box, 3, 1)
         self.apply = QtWidgets.QPushButton("Apply")
         self.apply.setToolTip("Apply new FOV.")
         self.layout.addWidget(self.apply, 4, 0)
         self.apply.clicked.connect(self.update_scene)
         self.savefov = QtWidgets.QPushButton("Save FOV")
-        self.savefov.setToolTip("Save current FOV as a .txt file.")
+        self.savefov.setToolTip("Save current FOV as a .txt file (nm).")
         self.layout.addWidget(self.savefov, 5, 0)
         self.savefov.clicked.connect(self.save_fov)
         self.loadfov = QtWidgets.QPushButton("Load FOV")
@@ -5530,16 +5498,18 @@ class ChangeFOV(lib.Dialog):
                 self.h_box.value(),
             ]
         )
-        np.savetxt(path, fov)
+        save_fov_file(path, fov)
 
     def load_fov(self) -> None:
-        """Load a FOV from a .txt file."""
+        """Load a FOV from a .txt file (nm; files written before Picasso
+        1.0 are in camera pixels and converted with the camera pixel
+        size of the Display Settings)."""
         path, ext = QtWidgets.QFileDialog.getOpenFileName(
             self, "Load FOV from", filter="*.txt"
         )
         if not path:
             return
-        [x, y, w, h] = np.loadtxt(path)
+        [x, y, w, h] = load_fov_file(path, self.window.view.pixelsize)
         self.x_box.setValue(x)
         self.y_box.setValue(y)
         self.w_box.setValue(w)
@@ -5560,8 +5530,31 @@ class ChangeFOV(lib.Dialog):
         # ratio as the requested FOV
         self.window.resize_view_to_fov(w, h)
         self.window.view.update_scene(viewport=viewport)
-        self.window.info_dialog.xy_label.setText(f"{x_min:.2f} / {y_min:.2f}")
-        self.window.info_dialog.wh_label.setText(f"{w:.2f} / {h:.2f}")
+        self.window.info_dialog.xy_label.setText(
+            f"{x_min:.1f} / {y_min:.1f} nm"
+        )
+        self.window.info_dialog.wh_label.setText(f"{w:.1f} / {h:.1f} nm")
+
+
+def save_fov_file(path: str, fov: FloatArray1D) -> None:
+    """Save a field of view ``(x, y, width, height)`` in nm as a .txt
+    file with the ``FOV_FILE_HEADER`` comment line."""
+    np.savetxt(path, np.asarray(fov, dtype=float), header=FOV_FILE_HEADER)
+
+
+def load_fov_file(path: str, pixelsize: float) -> FloatArray1D:
+    """Load a field of view ``(x, y, width, height)`` in nm from a .txt
+    file. Files without the ``FOV_FILE_HEADER`` comment line were
+    written before Picasso 1.0, in camera pixels, and are converted
+    with ``pixelsize`` (nm)."""
+    with open(path) as f:
+        first = f.readline()
+    fov = np.loadtxt(path, dtype=float)
+    if fov.shape != (4,):
+        raise ValueError(f"{path} does not hold a field of view.")
+    if not first.lstrip("# ").startswith("picasso_format"):
+        fov = fov * pixelsize
+    return fov
 
 
 class InfoDialog(lib.Dialog):
@@ -5577,7 +5570,7 @@ class InfoDialog(lib.Dialog):
     change_fov : ChangeFOV(QDialog)
         Dialog for changing field of view.
     height_label : QLabel
-        Contains the height of the window (camera pixels).
+        Contains the height of the window (screen pixels).
     dark_mean : QLabel
         Shows the mean dark time (frames) in all picks.
     dark_std : QLabel
@@ -5598,8 +5591,7 @@ class InfoDialog(lib.Dialog):
     locs_label : QLabel
         Shows the number of locs in the current FOV.
     lp : float
-        NeNA localization precision (camera pixels). None, if not
-        calculated yet.
+        NeNA localization precision (nm). None, if not calculated yet.
     max_dark_time : QSpinBox
         Contains the maximum gap between localizations (frames) to be
         considered as belonging to the same group of linked locs.
@@ -5639,13 +5631,13 @@ class InfoDialog(lib.Dialog):
     units_per_pick : QSpinBox
         Contains the number of binding sites per pick.
     wh_label : QLabel
-        Displays the width and height of FOV (camera pixels).
+        Displays the width and height of FOV (nm).
     window : Window(QMainWindow)
         Main window instance.
     width_label : QLabel
-        Contains the width of the window (camera pixels).
+        Contains the width of the window (screen pixels).
     xy_label : QLabel
-        Shows the minimum y and x coordinates in FOV (camera pixels).
+        Shows the minimum x and y coordinates in FOV (nm).
     """
 
     GPU_DOCS_URL = docs_url("render/performance.html#render-gpu-rendering")
@@ -5677,29 +5669,26 @@ class InfoDialog(lib.Dialog):
         vbox.addWidget(display_groupbox)
         display_grid = QtWidgets.QGridLayout(display_groupbox.content)
         width_label = QtWidgets.QLabel("Image width:")
-        width_label.setToolTip("Width of the current FOV (display pixels).")
+        width_label.setToolTip("Width of the view on screen (pixels).")
         display_grid.addWidget(width_label, 0, 0)
         self.width_label = QtWidgets.QLabel()
         display_grid.addWidget(self.width_label, 0, 1)
         height_label = QtWidgets.QLabel("Image height:")
-        height_label.setToolTip("Height of the current FOV (display pixels).")
+        height_label.setToolTip("Height of the view on screen (pixels).")
         display_grid.addWidget(height_label, 1, 0)
         self.height_label = QtWidgets.QLabel()
         display_grid.addWidget(self.height_label, 1, 1)
 
         view_xy_label = QtWidgets.QLabel("View X / Y:")
         view_xy_label.setToolTip(
-            "XY coordinates of the current FOV's top-left corner "
-            "(display pixels)."
+            "X and Y coordinates of the current FOV's top-left corner (nm)."
         )
         display_grid.addWidget(view_xy_label, 2, 0)
         self.xy_label = QtWidgets.QLabel()
         display_grid.addWidget(self.xy_label, 2, 1)
 
         view_wh_label = QtWidgets.QLabel("View width / height:")
-        view_wh_label.setToolTip(
-            "Width and height of the current FOV (display pixels)."
-        )
+        view_wh_label.setToolTip("Width and height of the current FOV (nm).")
         display_grid.addWidget(view_wh_label, 3, 0)
         self.wh_label = QtWidgets.QLabel()
         display_grid.addWidget(self.wh_label, 3, 1)
@@ -6146,7 +6135,8 @@ class InfoDialog(lib.Dialog):
         locs = self.window.view.locs[channel]
         info = self.window.view.infos[channel]
         # ROIs are placed across all localizations, not only the FOV
-        viewport = ((0, 0), (info[0]["Height"], info[0]["Width"]))
+        fov_width, fov_height = lib.field_of_view(info)
+        viewport = ((0, 0), (fov_height, fov_width))
         n_rois = self.frc_n_rois.value()
         # close the previous review window, so that it is not mistaken
         # for the new results while they are computed
@@ -6203,10 +6193,7 @@ class InfoDialog(lib.Dialog):
                 " localizations per ROI.",
             )
             return
-        pixelsize = lib.get_from_metadata(info, "Pixelsize")
-        self.frc_rois_window = FRCRoisWindow(
-            self, locs, viewport, pixelsize, result
-        )
+        self.frc_rois_window = FRCRoisWindow(self, locs, viewport, result)
         self.frc_rois_window.show()
         # after showing the window, so the note refers to what is shown
         if n_found < n_rois:
@@ -6271,7 +6258,7 @@ class InfoDialog(lib.Dialog):
             else:
                 lp = np.nan
             self._fit_precision_cache[key] = lp
-        lp = self._fit_precision_cache[key] * view.pixelsize
+        lp = self._fit_precision_cache[key]
         if np.isfinite(lp):
             self.fit_precision.setText(f"{lp:.2f} nm")
         else:
@@ -6293,14 +6280,12 @@ class InfoDialog(lib.Dialog):
             return
         locs = self.window.view.locs[channel]
         info = self.window.view.infos[channel]
-        pixelsize = self.window.view.pixelsize
 
         def compute(progress: lib.TaskProgress) -> tuple:
             return postprocess.nena(locs, info, progress.set_value)
 
         def apply(result: tuple) -> None:
-            self.nena_result, self.lp = result
-            self.lp *= pixelsize
+            self.nena_result, self.lp = result  # nm
             self.nena_label.setText(f"{self.lp:.3} nm")
 
             # save NeNA to metadata; a repeated calculation with no other
@@ -6432,13 +6417,11 @@ class FRCRoisWindow(QtWidgets.QWidget):
         info_dialog: InfoDialog,
         locs: pd.DataFrame,
         viewport: tuple[tuple[float, float], tuple[float, float]],
-        pixelsize: float,
         result: dict,
     ) -> None:
         super().__init__()
         self.info_dialog = info_dialog
         self.result = result
-        self.pixelsize = pixelsize
         self.setWindowTitle("FRC in ROIs")
         this_directory = os.path.dirname(os.path.realpath(__file__))
         icon_path = os.path.join(this_directory, "icons", "render.ico")
@@ -6468,7 +6451,7 @@ class FRCRoisWindow(QtWidgets.QWidget):
         self.table.setEditTriggers(
             QtWidgets.QAbstractItemView.EditTrigger.NoEditTriggers
         )
-        to_um = pixelsize / 1000
+        to_um = 1e-3  # nm to um
         for row, (((y0, x0), (y1, x1)), n, res) in enumerate(
             zip(result["rois"], result["n_locs"], resolutions)
         ):
@@ -6575,7 +6558,7 @@ class FRCRoisWindow(QtWidgets.QWidget):
                 f"median {np.median(resolutions):.2f} nm, "
                 f"{len(resolutions)} of {n_total} ROIs used, "
                 "NeNA "
-                f"{self.result['lp'] * self.pixelsize:.2f} nm"
+                f"{self.result['lp']:.2f} nm"
             )
         self.info_dialog.frc_rois_resolution.setText(text)
 
@@ -6590,7 +6573,7 @@ class FRCRoisWindow(QtWidgets.QWidget):
             interpolation="nearest",
         )
         selected = self.selected_row()
-        to_um = self.pixelsize / 1000
+        to_um = 1e-3  # nm to um
         for k, ((y0, x0), (y1, x1)) in enumerate(self.result["rois"]):
             if k == selected:
                 color, width = "red", 2.0
@@ -6645,8 +6628,8 @@ class FRCRoisWindow(QtWidgets.QWidget):
             return
         if self.canvas.toolbar is not None and self.canvas.toolbar.mode:
             return  # zooming or panning
-        to_px = 1000 / self.pixelsize
-        x, y = event.xdata * to_px, event.ydata * to_px
+        to_nm = 1000  # um to nm
+        x, y = event.xdata * to_nm, event.ydata * to_nm
         for k, ((y0, x0), (y1, x1)) in enumerate(self.result["rois"]):
             if x0 <= x < x1 and y0 <= y < y1:
                 self.table.selectRow(k)
@@ -6659,7 +6642,7 @@ class FRCRoisWindow(QtWidgets.QWidget):
         )
         if not path:
             return
-        to_um = self.pixelsize / 1000
+        to_um = 1e-3  # nm to um
         rois = np.array(self.result["rois"])  # (n, 2, 2): (min, max) x (y, x)
         pd.DataFrame(
             {
@@ -6868,8 +6851,6 @@ class MaskSettingsDialog(lib.Dialog):
     paths : list
         Contains paths to all localizations loaded when starting the
         dialog.
-    pixelsize : float
-        Camera pixel size (nm).
     plots : list of QLabel
         Used for displaying the 4 plots (histogram, blurred, mask,
         masked).
@@ -6916,8 +6897,9 @@ class MaskSettingsDialog(lib.Dialog):
         disp_label = QtWidgets.QLabel("Display pixel size (nm):")
         disp_label.setToolTip("Mask pixel size in nm.")
         settings_grid.addWidget(disp_label, 0, 0)
-        self.disp_px_size = QtWidgets.QSpinBox()
-        self.disp_px_size.setRange(10, 99999)
+        self.disp_px_size = QtWidgets.QDoubleSpinBox()
+        self.disp_px_size.setRange(1, 99999)
+        self.disp_px_size.setDecimals(1)
         self.disp_px_size.setValue(300)
         self.disp_px_size.setSingleStep(10)
         self.disp_px_size.setKeyboardTracking(False)
@@ -7056,7 +7038,6 @@ class MaskSettingsDialog(lib.Dialog):
         self.cached_oversampling = 0
         self.cached_blur = 0
         self.cached_thresh = 0
-        self.pixelsize = 130
 
     @property
     def locs(self) -> list[pd.DataFrame]:
@@ -7069,13 +7050,11 @@ class MaskSettingsDialog(lib.Dialog):
         localizations and metadata, updates plots."""
         self.paths = self.window.view.locs_paths
         self.infos = self.window.view.infos
-        self.pixelsize = self.window.view.pixelsize
         # which channel to plot
         self.channel = self.window.view.get_channel("Mask image")
         self.cmap = self.window.display_settings_dlg.colormap.currentText()
-        info = self.infos[self.channel][0]
-        self.x_max = lib.get_from_metadata(info, "Width", raise_error=True)
-        self.y_max = lib.get_from_metadata(info, "Height", raise_error=True)
+        # the field of view of the channel, in nm
+        self.x_max, self.y_max = lib.field_of_view(self.infos[self.channel])
         self.update_plots()
 
         # adjust the size of the dialog to fit its contents
@@ -7089,7 +7068,7 @@ class MaskSettingsDialog(lib.Dialog):
         viewport = ((0, 0), (self.y_max, self.x_max))
         _, H = render.render(
             locs,
-            {"Pixelsize": self.pixelsize},
+            self.infos[self.channel],
             disp_px_size=self.disp_px_size.value(),
             viewport=viewport,
             blur_method=None,
@@ -7248,7 +7227,7 @@ class MaskSettingsDialog(lib.Dialog):
         ) or not self.save_all.isChecked():
             _, self.H_new = render.render(
                 self.index_locs[-1],
-                {"Pixelsize": self.pixelsize},
+                self.infos[self.channel],
                 disp_px_size=self.disp_px_size.value(),
                 viewport=((0, 0), (self.y_max, self.x_max)),
                 blur_method=None,
@@ -7847,8 +7826,8 @@ class ToolsSettingsDialog(lib.Dialog):
             "so that none is removed when saving, and it is never\n"
             "smaller than the camera image. Dragging beyond the top or\n"
             "left edge translates all channels, picks and measured\n"
-            "points by whole camera pixels; the translation is saved in\n"
-            "the metadata."
+            "points by a whole number of camera pixels (in nm); the\n"
+            "translation is saved in the metadata."
         )
         self._update_move_channels_label()
         self.move_undo_button = QtWidgets.QPushButton("Undo last move")
@@ -8560,7 +8539,7 @@ class SpatialStatisticDialog(lib.Dialog):
             or region.kind == postprocess._REGION_CIRCLE
             for region in (
                 postprocess._pick_region(
-                    pick, view._pick_shape, view._pick_size, 1.0
+                    pick, view._pick_shape, view._pick_size
                 )
                 for pick in view._picks
             )
@@ -9432,13 +9411,9 @@ class RESIDialog(lib.Dialog):
             QtWidgets.QMessageBox.information(self, "Warning", message)
             return
 
-        # Prepare data
-        # get camera pixel size
-        pixelsize = self.window.view.pixelsize
-
-        # extract clustering parameters
-        r_xy = [_.value() / pixelsize for _ in self.radius_xy]
-        r_z = [_.value() / pixelsize for _ in self.radius_z]
+        # extract clustering parameters (nm)
+        r_xy = [_.value() for _ in self.radius_xy]
+        r_z = [_.value() for _ in self.radius_z]
         min_locs = [_.value() for _ in self.min_locs]
 
         # saving: path and info for the resi file, suffices for saving
@@ -9557,8 +9532,13 @@ class DisplaySettingsDialog(lib.Dialog):
     parameter : QComboBox
         Defines what property should be rendered, e.g.: z, photons.
     pixelsize : QDoubleSpinBox
-        Contains the camera pixel size (nm).
+        Contains the camera pixel size (nm) of the loaded localizations.
+        Information only: localizations are in nm, so it rescales
+        nothing; it is the default offered when a file written before
+        Picasso 1.0 (camera pixels) is loaded.
     render_check : QCheckBox
+    screen_px_size : QDoubleSpinBox
+        Size of one screen pixel in nm (smaller = zoomed in).
         Tick to activate parameter rendering.
     scalebar : QSpinBox
         Contains the scale bar's length (nm).
@@ -9596,18 +9576,28 @@ class DisplaySettingsDialog(lib.Dialog):
         vbox.addWidget(general_groupbox)
         general_grid = QtWidgets.QGridLayout(general_groupbox.content)
         general_grid.addWidget(lib.HelpButton(self.DOCS_URL), 0, 0)
-        zoom_label = QtWidgets.QLabel("Zoom:")
-        zoom_label.setToolTip("Zoom factor for display.")
-        general_grid.addWidget(zoom_label, 0, 1)
-        self.zoom = QtWidgets.QDoubleSpinBox()
-        self.zoom.setKeyboardTracking(False)
-        self.zoom.setRange(10 ** (-self.zoom.decimals()), 1e6)
-        self.zoom.valueChanged.connect(self.on_zoom_changed)
-        general_grid.addWidget(self.zoom, 0, 2)
+        screen_px_label = QtWidgets.QLabel("Screen pixel size (nm):")
+        screen_px_label.setToolTip(
+            "Size of one screen pixel in nm, i.e., the zoom: smaller\n"
+            "values zoom in."
+        )
+        general_grid.addWidget(screen_px_label, 0, 1)
+        self.screen_px_size = QtWidgets.QDoubleSpinBox()
+        self.screen_px_size.setKeyboardTracking(False)
+        self.screen_px_size.setDecimals(3)
+        self.screen_px_size.setRange(1e-3, 1e7)
+        self.screen_px_size.setValue(DEFAULT_DISP_PX_SIZE)
+        self.screen_px_size.valueChanged.connect(
+            self.on_screen_px_size_changed
+        )
+        general_grid.addWidget(self.screen_px_size, 0, 2)
         disp_px_label = QtWidgets.QLabel("Display pixel size (nm):")
-        disp_px_label.setToolTip("Size of the pixels in the rendered image.")
+        disp_px_label.setToolTip(
+            "Size of the pixels in the rendered image. With 'dynamic', it\n"
+            "follows the screen pixel size."
+        )
         general_grid.addWidget(disp_px_label, 1, 1)
-        self._disp_px_size = 130 / DEFAULT_OVERSAMPLING
+        self._disp_px_size = DEFAULT_DISP_PX_SIZE
         self.disp_px_size = QtWidgets.QDoubleSpinBox()
         self.disp_px_size.setRange(0.00001, 100000)
         self.disp_px_size.setSingleStep(1)
@@ -9877,14 +9867,17 @@ class DisplaySettingsDialog(lib.Dialog):
         self.camera_grid = QtWidgets.QGridLayout(camera_groupbox.content)
         pixelsize_label = QtWidgets.QLabel("Camera pixel size (nm):")
         pixelsize_label.setToolTip(
-            "Effective camera pixel size in nm (after magnification)."
+            "Effective camera pixel size in nm (after magnification) of\n"
+            "the loaded localizations, for information: localizations\n"
+            "are stored in nm, so it rescales nothing. It is the default\n"
+            "offered when a file written before Picasso 1.0 (in camera\n"
+            "pixels) is loaded without a pixel size in its metadata."
         )
         self.camera_grid.addWidget(pixelsize_label, 0, 0)
         self.pixelsize = QtWidgets.QDoubleSpinBox()
         self.pixelsize.setRange(1, 100000)
         self.pixelsize.setValue(130)
         self.pixelsize.setKeyboardTracking(False)
-        self.pixelsize.valueChanged.connect(self.update_scene)
         self.camera_grid.addWidget(self.pixelsize, 0, 1)
         vbox.addWidget(camera_groupbox)
 
@@ -10088,9 +10081,10 @@ class DisplaySettingsDialog(lib.Dialog):
             self.dynamic_disp_px.setChecked(False)
             self.window.view.update_scene()
 
-    def on_zoom_changed(self, value: float) -> None:
-        """Zoom the image in the main window."""
-        self.window.view.set_zoom(value)
+    def on_screen_px_size_changed(self, value: float) -> None:
+        """Zoom the image in the main window to ``value`` nm per screen
+        pixel."""
+        self.window.view.set_screen_px_size(value)
 
     def _update_quadtree_snr(self, *args) -> None:
         """Show the signal-to-noise ratio the leaf capacity implies:
@@ -10147,11 +10141,11 @@ class DisplaySettingsDialog(lib.Dialog):
         self.disp_px_size.setValue(disp_px_size)
         self._silent_disp_px_update = False
 
-    def set_zoom_silently(self, zoom: float) -> None:
-        """Change the value of zoom in the background."""
-        self.zoom.blockSignals(True)
-        self.zoom.setValue(zoom)
-        self.zoom.blockSignals(False)
+    def set_screen_px_size_silently(self, value: float) -> None:
+        """Change the screen pixel size (nm) in the background."""
+        self.screen_px_size.blockSignals(True)
+        self.screen_px_size.setValue(value)
+        self.screen_px_size.blockSignals(False)
 
     def silent_minimum_update(self, value: float) -> None:
         """Change the value of self.minimum in the background."""
@@ -10273,7 +10267,7 @@ class ImageOverlayDialog(lib.Dialog):
     show_check : QCheckBox
         Shows or hides the overlay without unloading it.
     shift_x, shift_y : QDoubleSpinBox
-        Shift of the image in camera pixels.
+        Shift of the image in nm.
     window : QMainWindow
         Instance of the main window.
     """
@@ -10345,16 +10339,16 @@ class ImageOverlayDialog(lib.Dialog):
         self.pixel_size.setValue(130)
         self.pixel_size.valueChanged.connect(self._on_geometry_changed)
         grid.addWidget(self.pixel_size, 2, 1)
-        grid.addWidget(QtWidgets.QLabel("Shift x (camera px):"), 3, 0)
+        grid.addWidget(QtWidgets.QLabel("Shift x (nm):"), 3, 0)
         self.shift_x = QtWidgets.QDoubleSpinBox()
         self.shift_y = QtWidgets.QDoubleSpinBox()
         for spin in (self.shift_x, self.shift_y):
-            spin.setRange(-1e6, 1e6)
-            spin.setDecimals(2)
-            spin.setSingleStep(0.1)
+            spin.setRange(-1e8, 1e8)
+            spin.setDecimals(1)
+            spin.setSingleStep(10)
             spin.valueChanged.connect(self._on_geometry_changed)
         grid.addWidget(self.shift_x, 3, 1)
-        grid.addWidget(QtWidgets.QLabel("Shift y (camera px):"), 4, 0)
+        grid.addWidget(QtWidgets.QLabel("Shift y (nm):"), 4, 0)
         grid.addWidget(self.shift_y, 4, 1)
         self.result_label = QtWidgets.QLabel()
         scaling_vbox.addWidget(self.result_label)
@@ -10557,7 +10551,7 @@ class ImageOverlayDialog(lib.Dialog):
         self._update_labels()
 
     def _movie_size(self) -> tuple[float, float] | None:
-        """Height and width of the camera chip, None if no
+        """Height and width of the field of view (nm), None if no
         localizations are loaded."""
         if not self.window.view.infos:
             return None
@@ -10587,41 +10581,45 @@ class ImageOverlayDialog(lib.Dialog):
             self.result_label.setText("")
             return
         movie_height, movie_width = movie_size
+        infos = self.window.view.infos
+        camera_width = max(info[0]["Width"] for info in infos)
+        camera_height = max(info[0]["Height"] for info in infos)
         text += (
-            f"\nCamera (localizations' metadata): {movie_width:g} x "
-            f"{movie_height:g} px."
+            f"\nCamera (localizations' metadata): {camera_width:g} x "
+            f"{camera_height:g} px ({movie_width:g} x {movie_height:g} nm)."
         )
-        if (image_width, image_height) == (movie_width, movie_height):
+        if (image_width, image_height) == (camera_width, camera_height):
             text += "\nThe sizes match."
         else:
             text += "\nThe sizes differ; choose how to scale the image."
         self.sizes_label.setText(text)
         x, y, width, height = self.extent()
-        pixelsize = self.window.view.pixelsize
         sx = width / image_width
         sy = height / image_height
+        half_px = self.window.view.pixelsize / 2
         self.result_label.setText(
-            f"One image pixel = {sx:.4g} x {sy:.4g} camera px\n"
-            f"({sx * pixelsize:.4g} x {sy * pixelsize:.4g} nm).\n"
-            f"Top left corner at x = {x:.4g}, y = {y:.4g} camera px\n"
-            "(the chip's corner is at -0.5, -0.5)."
+            f"One image pixel = {sx:.4g} x {sy:.4g} nm.\n"
+            f"Top left corner at x = {x:.4g}, y = {y:.4g} nm\n"
+            f"(the chip's corner is at {-half_px:.4g}, {-half_px:.4g})."
         )
         self.result_label.setToolTip(
             "A localization at x = 0 lies at the center of the first "
-            "camera pixel, so the camera chip starts at -0.5."
+            "camera pixel, so the camera chip starts half a camera pixel "
+            "before 0."
         )
 
     def extent(self) -> tuple[float, float, float, float] | None:
-        """``(x, y, width, height)`` of the image in camera pixels, None
-        if no image or no localizations are loaded."""
+        """``(x, y, width, height)`` of the image in nm, None if no image
+        or no localizations are loaded."""
         movie_size = self._movie_size()
         if self.data is None or movie_size is None:
             return None
+        # the chip of the first channel, whose frame is displayed
         return render.overlay_extent(
             self.data.shape,
-            movie_size,
+            self.window.view.infos[0],
             self.scaling.currentText(),
-            scale=self.pixel_size.value() / self.window.view.pixelsize,
+            scale=self.pixel_size.value(),
             shift=(self.shift_x.value(), self.shift_y.value()),
         )
 
@@ -10702,11 +10700,11 @@ class ImageOverlayDialog(lib.Dialog):
         info["Overlay scaling"] = mode
         if mode == "Image pixel size":
             info["Overlay image pixel size (nm)"] = self.pixel_size.value()
-        info["Overlay shift (x, y; camera px)"] = [
+        info["Overlay shift (x, y; nm)"] = [
             self.shift_x.value(),
             self.shift_y.value(),
         ]
-        info["Overlay extent (X, Y, Width, Height; camera px)"] = [
+        info["Overlay extent (X, Y, Width, Height; nm)"] = [
             float(_) for _ in extent
         ]
         info["Overlay opacity (%)"] = self.opacity.value()
@@ -10939,8 +10937,7 @@ class SlicerDialog(lib.Dialog):
                 self.sl.setValue(i)
                 out_path = f"{base}_Z{i:03d}_CH{j+1:03d}.tif"
                 if self.full_check.isChecked():  # full FOV
-                    movie_height, movie_width = self.window.view.movie_size()
-                    viewport = [(0, 0), (movie_height, movie_width)]
+                    viewport = self.window.view.full_fov_viewport()
                     qimage = self.window.view.render_scene(
                         cache=False, viewport=viewport
                     )
@@ -10968,8 +10965,7 @@ class SlicerDialog(lib.Dialog):
             self.sl.setValue(i)
             out_path = f"{base}_Z{i:03d}_CH001.tif"
             if self.full_check.isChecked():  # full FOV
-                movie_height, movie_width = self.window.view.movie_size()
-                viewport = [(0, 0), (movie_height, movie_width)]
+                viewport = self.window.view.full_fov_viewport()
                 qimage = self.window.view.render_scene(
                     cache=False, viewport=viewport
                 )
@@ -11034,8 +11030,10 @@ def _read_locs_file(
         Path to the localization file.
     pixelsize : float or None, optional
         Camera pixel size (nm), required for the .csv and _sml.mat
-        formats, which do not store it, and for PyME files that do not
-        store it.
+        formats, which do not store it, for PyME files that do not
+        store it, and for .hdf5 files written before Picasso 1.0 (in
+        camera pixels) whose metadata has no ``Pixelsize``; see
+        ``io.load_locs``.
     progress : callable or None, optional
         Called as ``progress(done, total)`` while the localizations are
         read (.hdf5 only, which is read in blocks); raising inside it
@@ -11049,7 +11047,7 @@ def _read_locs_file(
         Loaded metadata.
     """
     if path.endswith(".hdf5"):  # standard Picasso localization file
-        return io.load_locs(path, progress=progress)
+        return io.load_locs(path, pixelsize=pixelsize, progress=progress)
     elif path.endswith(".csv"):  # ThunderSTORM localization file
         return io.import_ts(path, pixelsize)
     elif path.endswith(".mat"):  # SMAP localization file
@@ -11060,6 +11058,22 @@ def _read_locs_file(
         "Unsupported file format. Please load a .hdf5 (Picasso), "
         ".csv (ThunderSTORM), _sml.mat (SMAP) or .h5r/.hdf (PyME) file."
     )
+
+
+def _legacy_locs_without_pixelsize(path: str) -> bool:
+    """Whether ``path`` is a localization .hdf5 file written before
+    Picasso 1.0 (in camera pixels) whose metadata has no ``Pixelsize``,
+    so that converting it to nm needs the user's input (see
+    ``io.load_locs``)."""
+    if not path.endswith(".hdf5"):
+        return False
+    try:
+        if not legacy.needs_conversion(path):
+            return False
+        info = io.load_info(path)
+    except Exception:  # unreadable: reported when the file is read
+        return False
+    return lib.get_from_metadata(info, "Pixelsize") is None
 
 
 def _read_locs_channels(
@@ -11123,9 +11137,9 @@ class LocsLoadWorker(QtCore.QObject):
     ----------
     jobs : list of tuple
         One ``(path, pixelsize)`` tuple per file to load; ``pixelsize``
-        is None for formats that store it themselves (.hdf5, most PyME
-        files). A PyME file may hold several channels, each emitted via
-        ``loaded``.
+        is None for files that store it themselves (.hdf5 with a
+        ``Pixelsize`` in the metadata, most PyME files). A PyME file may
+        hold several channels, each emitted via ``loaded``.
     """
 
     progress = QtCore.pyqtSignal(int, str)  # index, filename
@@ -11250,8 +11264,8 @@ INTERACTION_SUBSAMPLE_FRACTION = 0.1
 VIEWPORT_MARGIN = 0.15
 
 #: metadata keys accumulating the shift of a channel done with the
-#: Move tool (camera pixels), not including ``lib.CANVAS_OFFSET_KEYS``
-MANUAL_SHIFT_KEYS = ("Manual shift x (cam. px)", "Manual shift y (cam. px)")
+#: Move tool (nm), not including ``lib.CANVAS_OFFSET_KEYS``
+MANUAL_SHIFT_KEYS = ("Manual shift x (nm)", "Manual shift y (nm)")
 
 
 def _expand_viewport(
@@ -11298,13 +11312,13 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         Contains a str defining the path for each channel.
     median_lp : float
         Median theoretical lateral localization precision of the first
-        locs file (camera pixels).
+        locs file (nm).
     _mode : {'Zoom', 'Pick', 'Measure', 'Move'}
         Defines current mode (zoom, pick, measure or move), use in
         mouseEvents.
     _move_undo : list
-        Finished moves of the Move tool, ``(channels, dx, dy)`` in
-        camera pixels, most recent last.
+        Finished moves of the Move tool, ``(channels, dx, dy)`` in nm,
+        most recent last.
     n_locs : int
         Number of localizations loaded; if multichannel, the sum is
         given.
@@ -11313,7 +11327,7 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
     pan_start_x, pan_start_y : float
         x and y coordinates of panning's starting position.
     _picks : list
-        Contains the coordinates of current picks. Each pick is
+        Contains the coordinates of current picks (nm). Each pick is
         ``(x, y)`` for circles and squares, ``((x_start, y_start),
         (x_end, y_end))`` center-axis points for rectangles, a list of
         vertices for polygons, the two opposite corners
@@ -11322,13 +11336,13 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
     _pick_shape : {"Circle", "Rectangle", "Polygon", "Square", "Box", "Brush"}
         Current shape of picks.
     _pick_size : float or None
-        Size of picks in camera pixels; None for polygonal, box and
-        brush picks, which carry their own extent. Diameter for circular
-        picks, side length for square picks and width for rectangular
-        picks.
+        Size of picks in nm; None for polygonal, box and brush picks,
+        which carry their own extent. Diameter for circular picks, side
+        length for square picks and width for rectangular picks.
     pixelsize : float
-        (Property) Camera pixel size as defined in the display
-        settings dialog.
+        (Property) Camera pixel size (nm) as shown in the display
+        settings dialog. Information only (localizations are in nm):
+        the default for converting files written before Picasso 1.0.
     _pixmap : QPixMap
         Pixmap currently displayed.
     _points : list
@@ -11365,8 +11379,8 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
     _size_hint : tuple
         Used for size adjustment.
     _link_crosshair : tuple or None
-        Cursor position (camera pixels) of a linked window, drawn as a
-        crosshair; None if not shown.
+        Cursor position (nm) of a linked window, drawn as a crosshair;
+        None if not shown.
     _link_interactive : bool
         Whether the last viewport change was an interactive preview;
         passed on to linked windows.
@@ -11389,8 +11403,8 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
 
     #: signals for linked windows (``picasso.gui.render_link``): the
     #: viewport changed (argument: interactive preview), picks and
-    #: overlays were redrawn, the cursor moved (camera pixels, or None
-    #: when it left the view), a redraw was requested (before it runs)
+    #: overlays were redrawn, the cursor moved (nm, or None when it
+    #: left the view), a redraw was requested (before it runs)
     viewport_changed = QtCore.pyqtSignal(bool)
     picks_drawn = QtCore.pyqtSignal()
     cursor_moved = QtCore.pyqtSignal(object)
@@ -11417,7 +11431,7 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         self._rectangle_pick_ongoing = False
         self._box_pick_ongoing = False
         self._brush_stroke_ongoing = False
-        self._brush_stroke = []  # path being painted, in camera pixels
+        self._brush_stroke = []  # path being painted, in nm
         self._brush_last_pos = None  # last point added, in display px
         self._size_hint = (768, 768)
         self.n_locs = 0
@@ -11432,8 +11446,8 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         # collection
         self.spatial_statistic_windows: dict[str, QtWidgets.QWidget] = {}
         # Move tool: the channels being dragged, the press position and
-        # the coordinates at the press (camera pixels), the current
-        # shift and the finished moves, (channels, dx, dy), for undo
+        # the coordinates at the press (nm), the current shift and the
+        # finished moves, (channels, dx, dy), for undo
         self._move_channels = ()
         self._move_start = None
         self._move_origin = None
@@ -11503,7 +11517,12 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         driftpath = lib.get_from_metadata(info, "Last driftfile")
         if driftpath is not None:
             try:
-                drift = io.load_drift(driftpath)
+                # a drift file written before Picasso 1.0 (camera
+                # pixels) belongs to the camera pixel size of the file
+                drift = io.load_drift(
+                    driftpath,
+                    pixelsize=lib.get_from_metadata(info, "Pixelsize"),
+                )
             except Exception:
                 # drift already initialized before
                 pass
@@ -11512,8 +11531,9 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
     def _prompt_pixelsize(self, path: str) -> float | None:
         """Ask for the camera pixel size of a file that does not store
         it (ThunderSTORM .csv, SMAP _sml.mat, PyME files without
-        ``voxelsize``, .hdf5 files saved by old Picasso versions). None
-        if canceled."""
+        ``voxelsize``, files saved by Picasso before 1.0 in camera
+        pixels without a ``Pixelsize`` in the metadata). None if
+        canceled."""
         pixelsize, ok = QtWidgets.QInputDialog.getDouble(
             self,
             "Camera pixel size",
@@ -11526,16 +11546,16 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         return pixelsize if ok else None
 
     def _reconcile_pixelsizes(self) -> None:
-        """Make all loaded channels agree on the camera pixel size.
+        """Warn once if the loaded channels disagree on the camera pixel
+        size.
 
-        Rendering combines the channels on one grid, sampled at
-        ``Pixelsize / display pixel size`` per channel (see
-        ``render.render``), so channels that disagree on the camera
-        pixel size render at different shapes and cannot be combined -
-        usually a typo in one file's metadata. If they disagree, the
-        user is warned and picks the pixel size to use; it is written
-        to the metadata of every loaded channel in memory only, the
-        files on disk are not touched.
+        Localizations are in nm, so channels of different camera pixel
+        sizes render together correctly; the pixel size only sets the
+        extent of the field of view of each channel (see
+        ``lib.field_of_view``) and the default for converting files
+        written before Picasso 1.0. A mismatch is therefore usually a
+        typo in one file's metadata, which the user is told about; the
+        data is not changed.
 
         Called once per load, after every file is in (see
         ``_on_load_finished``), and never while files are still being
@@ -11551,8 +11571,6 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         if len(loaded) < 2:
             return
         sizes = [s for _, s in loaded]
-        # the pixel size of the first channel, i.e. the one the render
-        # falls back to if the user does not choose
         current = sizes[0]
         if all(np.isclose(s, current) for s in sizes):
             return
@@ -11564,33 +11582,11 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             self,
             "Camera pixel size mismatch",
             "The loaded channels have different camera pixel sizes:\n"
-            f"{listing}\n\nChannels with different camera pixel sizes "
-            "cannot be rendered together. Choose the pixel size to use for "
-            "all of them next. Only the loaded data is changed, the files "
-            "on disk are not modified.",
+            f"{listing}\n\nLocalizations are in nm, so the channels are "
+            "rendered together correctly; the camera pixel size only sets "
+            "the extent of each channel's field of view. Check the "
+            "metadata if the files come from the same camera.",
         )
-        chosen, ok = QtWidgets.QInputDialog.getDouble(
-            self,
-            "Camera pixel size",
-            "Camera pixel size in nm to use for all channels:",
-            value=current,
-            min=0.01,
-            max=10000,
-            decimals=2,
-        )
-        if not ok:  # canceled; the channels still have to be renderable
-            chosen = current
-        for info in self.infos:
-            try:
-                lib.overwrite_metadata(info, "Pixelsize", chosen)
-            except KeyError:
-                info.append(
-                    {
-                        **lib.step_info("Render"),
-                        "Pixelsize": chosen,
-                    }
-                )
-        self.window.display_settings_dlg.silent_pixelsize_update(chosen)
 
     def add(
         self,
@@ -11698,10 +11694,12 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         self.clear_move_undo()
 
     def _metadata_pixelsize(self, path: str, info: list[dict]) -> float:
-        """Camera pixel size (nm) stored in ``info``. Metadata written by
-        old Picasso versions does not store it; then the user is asked
-        for it and it is added to ``info``, such that rendering etc. work
-        as usual."""
+        """Camera pixel size (nm) stored in ``info``. Files written
+        before Picasso 1.0 are converted to nm when read, which records
+        the pixel size (see ``io.load_locs``); should it still be
+        missing (e.g., an importer without one), the user is asked for
+        it and it is added to ``info``, such that the field of view is
+        defined."""
         pixelsize = lib.get_from_metadata(info, "Pixelsize")
         if pixelsize is not None:
             return pixelsize
@@ -11761,12 +11759,14 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         """
         if not len(paths):
             return
-        # ask for the camera pixel size of formats that do not store it
+        # ask for the camera pixel size of files that do not store it
         # before loading starts, i.e. while still on the GUI thread
         jobs = []
         for path in sorted(paths):
-            if path.endswith((".csv", ".mat")) or (
-                io.is_pyme_file(path) and io.pyme_pixelsize(path) is None
+            if (
+                path.endswith((".csv", ".mat"))
+                or (io.is_pyme_file(path) and io.pyme_pixelsize(path) is None)
+                or _legacy_locs_without_pixelsize(path)
             ):
                 pixelsize = self._prompt_pixelsize(path)
                 if pixelsize is None:  # canceled by the user
@@ -12436,10 +12436,9 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             )
             return
 
-        r_max, max_dark, ok = LinkDialog.getParams()
+        r_max, max_dark, ok = LinkDialog.getParams()  # nm
         if not ok:
             return
-        r_max /= self.pixelsize  # nm to pixels
         jobs = [(c, self.locs[c], self.infos[c]) for c in channels]
 
         def compute(progress: lib.TaskProgress) -> list[tuple]:
@@ -12460,7 +12459,7 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
 
         link_info = {
             **lib.step_info("Render : Link"),
-            "Max. distance (nm)": r_max * self.pixelsize,
+            "Max. distance (nm)": r_max,
             "Max. transient dark frames": max_dark,
         }
 
@@ -12511,10 +12510,9 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             return
         # by default, do not allow transient dark frames, so that only
         # localizations in strictly consecutive frames form an event
-        r_max, max_dark, ok = LinkDialog.getParams(max_dark_time=0)
+        r_max, max_dark, ok = LinkDialog.getParams(max_dark_time=0)  # nm
         if not ok:
             return
-        r_max /= self.pixelsize  # nm to pixels
         locs = self.locs[channel]
         locs = lib.run_with_status(
             lambda: postprocess.select_binding_event_cores(
@@ -12538,7 +12536,7 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         self.infos[channel].append(
             {
                 **lib.step_info("Render : Binding event cores"),
-                "Max. distance (nm)": r_max * self.pixelsize,
+                "Max. distance (nm)": r_max,
                 "Max. transient dark frames": max_dark,
             }
         )
@@ -12648,30 +12646,25 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         """
         locs = self.locs[channel]
         info = self.infos[channel]
-        pixelsize = self.pixelsize
 
-        # Only pass radius_z for 3D data; convert nm -> camera pixels.
-        is_3d = "z" in locs.columns
-        radius_z_px = (
-            radius_z / pixelsize if (is_3d and radius_z is not None) else None
-        )
+        # only pass radius_z for 3D data
+        if not ("z" in locs.columns and radius_z is not None):
+            radius_z = None
 
         def job(progress: lib.TaskProgress) -> None:
             progress.phase("Applying DBSCAN. This may take a while.", 0)
             clustered_locs, dbscan_info = clusterer.dbscan(
                 locs,
-                radius / pixelsize,  # convert to camera pixels
+                radius,
                 min_density,
-                pixelsize=pixelsize,
                 min_locs=min_locs,
-                radius_z=radius_z_px,
+                radius_z=radius_z,
             )
             self._save_clusters(
                 progress,
                 path,
                 clustered_locs,
                 info + [dbscan_info],
-                pixelsize,
                 save_centers,
                 save_areas,
             )
@@ -12684,7 +12677,6 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
 
         # get HDBSCAN parameters
         params, ok = HdbscanDialog.getParams()
-        params["cluster_eps"] /= self.pixelsize
         if ok:
             if channel == len(self.locs_paths):  # apply to all channels
                 # get saving name suffix
@@ -12775,7 +12767,6 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         """
         locs = self.locs[channel]
         info = self.infos[channel]
-        pixelsize = self.pixelsize
 
         def job(progress: lib.TaskProgress) -> None:
             progress.phase("Applying HDBSCAN. This may take a while.", 0)
@@ -12783,7 +12774,6 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
                 locs,
                 min_cluster,
                 min_samples,
-                pixelsize=pixelsize,
                 cluster_eps=cluster_eps,
             )
             self._save_clusters(
@@ -12791,7 +12781,6 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
                 path,
                 clustered_locs,
                 info + [hdbscan_info],
-                pixelsize,
                 save_centers,
                 save_areas,
             )
@@ -12802,17 +12791,13 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         """Get a channel, parameters and path for SMLM clustering."""
         channel = self.get_channel_all_seq("SMLM clusterer")
 
-        # get clustering parameters
-        pixelsize = self.pixelsize
+        # get clustering parameters (nm)
         if channel is None or channel == len(self.locs_paths):
             # no channel selected or "apply to all"
             flag_3D = any("z" in _.columns for _ in self.locs)
         else:
             flag_3D = "z" in self.locs[channel].columns
         params, ok = SMLMDialog.getParams(flag_3D=flag_3D)
-        # convert to camera pixels
-        params["radius_xy"] = params["radius_xy"] / pixelsize
-        params["radius_z"] = params["radius_z"] / pixelsize
 
         if ok:
             if channel == len(self.locs_paths):  # apply to all
@@ -12886,10 +12871,9 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         path : str
             Path to save clustered localizations.
         radius_xy : float
-            Clustering radius in xy plane (camera pixels).
+            Clustering radius in xy plane (nm).
         radius_z : float
-            Clustering radius in z plane (camera pixels). Only used for
-            3D data.
+            Clustering radius in z plane (nm). Only used for 3D data.
         min_locs : int
             Minimum number of localizations in a cluster.
         frame_analysis : bool
@@ -12904,8 +12888,6 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         job : callable
             Takes the task's ``lib.TaskProgress``.
         """
-        # for converting z coordinates
-        pixelsize = self.pixelsize
         locs = self.locs[channel]
         info = self.infos[channel]
 
@@ -12917,7 +12899,6 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
                 min_locs,
                 frame_analysis,
                 radius_z=radius_z,
-                pixelsize=pixelsize,
                 progress=progress,
             )
             self._save_clusters(
@@ -12925,7 +12906,6 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
                 path,
                 clustered_locs,
                 info + [new_info],
-                pixelsize,
                 save_centers,
                 save_areas,
             )
@@ -12938,7 +12918,6 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         path: str,
         clustered_locs: pd.DataFrame,
         info: list[dict],
-        pixelsize: float,
         save_centers: bool,
         save_areas: bool,
     ) -> None:
@@ -12956,8 +12935,6 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             Clustered localizations.
         info : list of dicts
             Metadata of the clustered localizations.
-        pixelsize : float
-            Camera pixel size in nm.
         save_centers, save_areas : bool
             Whether to calculate and save cluster centers and areas.
         """
@@ -12968,7 +12945,7 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         if save_centers:
             progress.phase("Calculating cluster centers", 0)
             centers = clusterer.find_cluster_centers(
-                clustered_locs, pixelsize=pixelsize, progress=progress
+                clustered_locs, progress=progress
             )
             progress.check_canceled()
             io.save_locs(base + "_centers.hdf5", centers, info)
@@ -13419,7 +13396,6 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
                 image=image,
                 viewport=self.viewport,
                 points=point_set,
-                pixelsize=self.pixelsize,
                 mark_width=mark_width,
                 style=style,
             )
@@ -13434,7 +13410,6 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             image=image,
             viewport=self.viewport,
             points=self._points,
-            pixelsize=self.pixelsize,
             mark_width=mark_width,
             cursor=cursor,
             style=style,
@@ -13464,7 +13439,6 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
                 image=image,
                 viewport=self.viewport,
                 scalebar_length_nm=d_dialog.scalebar.value(),
-                pixelsize=self.pixelsize,
                 display_length=d_dialog.scalebar_text.isChecked(),
                 color=color,
                 # as large as the windows' text on screen, see
@@ -13502,7 +13476,6 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             image,
             self.viewport if viewport is None else viewport,
             grid,
-            self.pixelsize,
             color_range=self._color_range,
         )
 
@@ -13514,7 +13487,7 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             return None
         width = render.viewport_width(self.viewport)
         spacing = render.optimal_scalebar_length(
-            self.pixelsize, width, fraction=render.AUTO_GRID_FRACTION
+            width, fraction=render.AUTO_GRID_FRACTION
         )
         return spacing if spacing > 0 else None
 
@@ -13814,9 +13787,10 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         style_contrast_bar = getattr(self.window, "style_contrast_bar", None)
         if style_contrast_bar is not None:
             style_contrast_bar(self._color_range[0])
-        # adjust zoom in Display Settings Dialog
-        dppvp = self.display_pixels_per_viewport_pixels()
-        self.window.display_settings_dlg.set_zoom_silently(dppvp)
+        # show the screen pixel size in the Display Settings Dialog
+        self.window.display_settings_dlg.set_screen_px_size_silently(
+            1 / self.display_pixels_per_viewport_pixels()
+        )
         self._compose_visible()
         self._update_renderer_label()
 
@@ -13960,7 +13934,7 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
 
     def _global_precision(self, channel: int) -> tuple[float, float] | None:
         """The blur of *Global loc. prec.* for ``channel``: the median
-        ``lpx`` and ``lpy`` (camera pixels) of all its localizations,
+        ``lpx`` and ``lpy`` (nm) of all its localizations,
         computed once per loaded DataFrame and remembered, so the blur
         is the same at every zoom level and rotation and no render
         recomputes it. None when the channel has no precision columns."""
@@ -14320,11 +14294,18 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             ]
             self.add_multiple(paths)
 
+    def full_fov_viewport(self) -> list[tuple[float, float]]:
+        """The viewport covering the whole field of view of every
+        loaded channel, ``[(0, 0), (height, width)]`` in nm (see
+        ``movie_size``)."""
+        movie_height, movie_width = self.movie_size()
+        return [(0, 0), (movie_height, movie_width)]
+
     def fit_in_view(self, autoscale: bool = False) -> None:
         """Update scene with all localizations shown."""
-        movie_height, movie_width = self.movie_size()
-        viewport = [(0, 0), (movie_height, movie_width)]
-        self.update_scene(viewport=viewport, autoscale=autoscale)
+        self.update_scene(
+            viewport=self.full_fov_viewport(), autoscale=autoscale
+        )
 
     @check_pick
     def move_to_pick(self) -> None:
@@ -14567,7 +14548,6 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         """
         # blur method
         disp_dlg = self.window.display_settings_dlg
-        pixelsize = self.pixelsize
         # if self._pan:  # no blur when panning
         #     blur_method = None
         # else:  # selected method
@@ -14588,9 +14568,9 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
                 blur_method
             ]  # convert from display name to render name
 
-        # oversampling
-        optimal_oversampling = self.display_pixels_per_viewport_pixels()
-        optimal_disp_px_size = pixelsize / optimal_oversampling
+        # the display pixel size at which one rendered pixel is one
+        # screen pixel
+        optimal_disp_px_size = 1 / self.display_pixels_per_viewport_pixels()
         if disp_px_size is None:
             if disp_dlg.dynamic_disp_px.isChecked():
                 disp_dlg.set_disp_px_silently(optimal_disp_px_size)
@@ -14613,15 +14593,14 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         # viewport and min blur
         viewport = self.viewport if viewport is None else viewport
 
-        min_blur_width = (
+        min_blur_width = float(
             disp_dlg.min_blur_width.value()
             if min_blur_width is None
             else min_blur_width
         )
-        min_blur_width = float(min_blur_width / pixelsize)
         max_blur_width = self._max_blur_width()
         if max_blur_width is not None:
-            max_blur_width = float(max_blur_width / pixelsize)
+            max_blur_width = float(max_blur_width)
 
         kwargs = {
             "disp_px_size": disp_px_size,
@@ -14680,33 +14659,42 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
 
     def load_single_txt(self, path: str) -> None:
         """Tries to load a single .txt file that contains either FOV
-        coordinates or is a drift correction file."""
+        coordinates or is a drift correction file (both in nm; files
+        written before Picasso 1.0 are in camera pixels and converted
+        with the camera pixel size)."""
         try:
             data = np.loadtxt(path)
         except ValueError:
             return
         if data.shape == (4,):  # try loading FOV
-            self.load_fov_drop(data)
+            self.load_fov_drop(load_fov_file(path, self.pixelsize))
         elif data.ndim == 2 and data.shape[1] in [2, 3]:  # try loading drift
             channel = self.get_channel_all_seq(
                 "Select channel for drift correction"
             )
             if channel is None:
                 return
-            self.load_drift_drop(channel, data)
+            drift = self._read_drift_file(path)
+            if drift is not None:
+                self.load_drift_drop(channel, drift.to_numpy())
+
+    def _read_drift_file(self, path: str) -> pd.DataFrame | None:
+        """Read a drift .txt file in nm (see ``io.load_drift``); a file
+        written before Picasso 1.0 (x, y in camera pixels) is converted
+        with the camera pixel size, which the user is asked for. None if
+        canceled."""
+        return lib_qt.load_or_ask_pixelsize(self, io.load_drift, path)
 
     def load_fov_drop(self, fov: FloatArray1D) -> None:
-        """Check if path is a fov .txt file (4 coordinates) and load the
-        FOV."""
+        """Show the FOV ``(x, y, width, height)`` (nm) of a dropped FOV
+        .txt file."""
         (x, y, w, h) = fov
         if w > 0 and h > 0:
             self.window.resize_view_to_fov(w, h)
             viewport = [(y, x), (y + h, x + w)]
             self.update_scene(viewport=viewport)
-            self.window.info_dialog.xy_label.setText(f"{x:.2f} / {y:.2f} ")
-            self.window.info_dialog.wh_label.setText(
-                f"{w:.2f} / {h:.2f} pixels"
-            )
+            self.window.info_dialog.xy_label.setText(f"{x:.1f} / {y:.1f} nm")
+            self.window.info_dialog.wh_label.setText(f"{w:.1f} / {h:.1f} nm")
 
     def load_drift_drop(self, channel: int, drift: FloatArray2D) -> None:
         """Attempts to load a drift .txt file (2 or 3 columns) and apply
@@ -14762,42 +14750,66 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             drift_df["z"] = drift[:, 2]
         self._apply_drift(channel, drift_df)
 
+    def _read_picks_file(self, path: str) -> tuple | None:
+        """Read a picks .yaml file in nm (see ``io.load_picks``); a file
+        written before Picasso 1.0 (camera pixels) is converted with
+        the camera pixel size, which the user is asked for. None if
+        canceled."""
+        return lib_qt.load_or_ask_pixelsize(self, io.load_picks, path)
+
     def load_picks(self, path: str) -> None:
-        """Load picks from .yaml file.
+        """Load picks from .yaml file (nm; see ``_read_picks_file`` for
+        files written before Picasso 1.0).
 
         Raises
         ------
         ValueError
             If .yaml file is not recognized.
         """
-        pixelsize = self.pixelsize
+        loaded = self._read_picks_file(path)
+        if loaded is None:  # canceled
+            return
         tools_dlg = self.window.tools_settings_dialog
         self._picks = []
         self._pick_shape = None
-        self._picks, self._pick_shape, size = io.load_picks(
-            path, pixelsize=pixelsize
-        )
+        self._picks, self._pick_shape, size = loaded
         tools_dlg.pick_shape.setCurrentText(self._pick_shape)
         if self._pick_shape == "Circle":
-            tools_dlg.pick_diameter.setValue(size * pixelsize)
+            tools_dlg.pick_diameter.setValue(size)
         elif self._pick_shape == "Rectangle":
-            tools_dlg.pick_width.setValue(size * pixelsize)
+            tools_dlg.pick_width.setValue(size)
         elif self._pick_shape == "Square":
-            tools_dlg.pick_side_length.setValue(size * pixelsize)
+            tools_dlg.pick_side_length.setValue(size)
         elif self._pick_shape == "Brush" and len(self._picks):
             # brush strokes keep their own widths; seed the spin box
             # with the widest one so the next stroke matches the picks
             widest = max(stroke[0] for pick in self._picks for stroke in pick)
-            tools_dlg.brush_width.setValue(widest * pixelsize)
+            tools_dlg.brush_width.setValue(widest)
 
         # update Info Dialog
         self.update_pick_info_short()
         self.update_scene(picks_only=True)
 
     def load_screenshot(self, file: dict) -> None:  # noqa: C901
-        """Load screenshot settings from a .yaml file."""
+        """Load screenshot settings from a .yaml file (see
+        ``Window.export_current_info``). Files written before Picasso
+        1.0 (no ``picasso_format``) store the FOV in camera pixels and
+        the zoom as screen pixels per camera pixel; both are converted
+        with the camera pixel size of the Display Settings."""
         disp_dlg = self.window.display_settings_dlg
-        x, y, w, h = file["FOV (X, Y, Width, Height)"]
+        legacy_file = io.FORMAT_VERSION_ATTR not in file
+        if FOV_KEY in file:
+            x, y, w, h = file[FOV_KEY]
+        else:
+            x, y, w, h = file[LEGACY_FOV_KEY]
+            if legacy_file:
+                x, y, w, h = (_ * self.pixelsize for _ in (x, y, w, h))
+        screen_px_size = file.get(SCREEN_PX_SIZE_KEY)
+        if screen_px_size is None and file.get("Zoom"):
+            screen_px_size = self.pixelsize / file["Zoom"]
+        if screen_px_size:
+            # the view shows the FOV at the saved screen pixel size
+            self.window.resize_view(w / screen_px_size, h / screen_px_size)
         viewport = [(y, x), (y + h, x + w)]
         self.update_scene(viewport=viewport)
         if "Max. density" in file:
@@ -14817,6 +14829,11 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             )
         elif "Min. blur (nm)" in file:
             disp_dlg.min_blur_width.setValue(file["Min. blur (nm)"])
+        if (
+            "Display pixel size (nm)" in file
+            and not disp_dlg.dynamic_disp_px.isChecked()
+        ):
+            disp_dlg.disp_px_size.setValue(file["Display pixel size (nm)"])
         if "Colors" in file and len(file["Colors"]) == len(self.locs):
             dataset_dialog = self.window.dataset_dialog
             missing: list[str] = []
@@ -14870,37 +14887,36 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
                 "shapes: Circle.",
             )
             return
+        loaded = self._read_picks_file(path)
+        if loaded is None:  # canceled
+            return
+        picks, shape, diameter = loaded
+        if shape != "Circle":
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Pick Error",
+                "Only circular picks can be subtracted; the file holds "
+                f"{shape.lower()} picks.",
+            )
+            return
         oldpicks = self._picks.copy()
-
-        # load .yaml
-        regions = io.load_yaml(path)
-        self._picks = regions["Centers"]
-        if "Diameter (nm)" in regions:
-            diameter = regions["Diameter (nm)"] / self.pixelsize
-        elif "Diameter" in regions:
-            diameter = regions["Diameter"]
 
         # calculate which picks are to stay
         distances = (
             np.sum(
-                (euclidean_distances(oldpicks, self._picks) < diameter / 2)
-                * 1,
+                (euclidean_distances(oldpicks, picks) < diameter / 2) * 1,
                 axis=1,
             )
             >= 1
         )
-        filtered_list = [i for (i, v) in zip(oldpicks, distances) if not v]
-
-        self._picks = filtered_list
+        self._picks = [i for (i, v) in zip(oldpicks, distances) if not v]
 
         self.update_pick_info_short()
-        self.window.tools_settings_dialog.pick_diameter.setValue(
-            regions["Diameter (nm)"]
-        )
+        self.window.tools_settings_dialog.pick_diameter.setValue(diameter)
         self.update_scene(picks_only=True)
 
     def map_to_movie(self, position: QtCore.QPoint) -> QtCore.QPoint:
-        """Convert coordinates from display units to camera units."""
+        """Convert coordinates from screen pixels to nm."""
         v_height, v_width = render.viewport_size(self.viewport)
         x_rel = position.x() / self.width()
         x_movie = x_rel * v_width + self.viewport[0][1]
@@ -14909,12 +14925,14 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         return x_movie, y_movie
 
     def max_movie_height(self) -> float:
-        """Return maximum height of all loaded images."""
-        return max(info[0]["Height"] for info in self.infos)
+        """Return maximum height (nm) of the fields of view of all
+        loaded channels, see ``lib.field_of_view``."""
+        return max(lib.field_of_view(info)[1] for info in self.infos)
 
     def max_movie_width(self) -> float:
-        """Return maximum width of all loaded images."""
-        return max([info[0]["Width"] for info in self.infos])
+        """Return maximum width (nm) of the fields of view of all loaded
+        channels, see ``lib.field_of_view``."""
+        return max(lib.field_of_view(info)[0] for info in self.infos)
 
     def _mouse_move_pick(self, event: QtCore.QEvent) -> None:
         """Update the in-progress rectangular, box or brush pick
@@ -15173,7 +15191,7 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
 
     def _record_manual_shift(self, channel: int, dx: float, dy: float) -> None:
         """Accumulate the shift of ``channel`` done with the Move tool
-        (camera pixels) in its metadata."""
+        (nm) in its metadata."""
         info = self.infos[channel]
         for key, shift in zip(MANUAL_SHIFT_KEYS, (dx, dy)):
             info[-1][key] = float(
@@ -15249,8 +15267,8 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         self.update_scene()
 
     def _translate_overlays(self, dx: float, dy: float) -> None:
-        """Move picks and measured points by ``(dx, dy)`` camera pixels
-        along with the localizations."""
+        """Move picks and measured points by ``(dx, dy)`` nm along with
+        the localizations."""
         self._picks = lib.translate_picks(
             self._picks, self._pick_shape, dx, dy
         )
@@ -15277,11 +15295,7 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         if not self._move_channels or self._move_cursor is None:
             return image
         dx, dy = self._move_shift
-        pixelsize = self.pixelsize
-        text = (
-            f"Δx = {dx:.2f} px ({dx * pixelsize:.1f} nm)\n"
-            f"Δy = {dy:.2f} px ({dy * pixelsize:.1f} nm)"
-        )
+        text = f"Δx = {dx:.1f} nm\nΔy = {dy:.1f} nm"
         style = self.window.tools_settings_dialog.move_overlay_style()
         painter = style.painter(image)
         # the label grows with its font
@@ -15337,7 +15351,7 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         Parameters
         ----------
         position : tuple or None
-            (x, y) in camera pixels, or None to hide the crosshair.
+            (x, y) in nm, or None to hide the crosshair.
         """
         if position == self._link_crosshair:
             return
@@ -15361,8 +15375,7 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         Parameters
         ----------
         center : tuple
-            Viewport center (y, x) of the linked window, in camera
-            pixels.
+            Viewport center (y, x) of the linked window, in nm.
         scale : float
             Camera pixels per display pixel of the linked window.
         use_center, use_scale : bool
@@ -15629,8 +15642,9 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         self.mousePressEvent(event)
         self._triple_click.double_clicked(event)
 
-    def movie_size(self) -> tuple[int, int]:
-        """Return tuple with movie height and width."""
+    def movie_size(self) -> tuple[float, float]:
+        """Return tuple with the height and width (nm) of the field of
+        view covering all loaded channels."""
         movie_height = self.max_movie_height()
         movie_width = self.max_movie_width()
         return (movie_height, movie_width)
@@ -15673,8 +15687,7 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         localizations in channels 1 and 2. Save as localizations .hdf5
         file of channel 1. Runs on a worker thread, so it only reads the
         view's state."""
-        pixelsize = self.pixelsize
-        # extract x, y and z from both channels
+        # extract x, y and z (nm) from both channels
         if "z" in self.locs[channel1].columns:
             X1 = self.locs[channel1][["x", "y", "z"]].to_numpy()
         else:
@@ -15683,8 +15696,6 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             X2 = self.locs[channel2][["x", "y", "z"]].to_numpy()
         else:
             X2 = self.locs[channel2][["x", "y"]].to_numpy()
-        X1[:, :2] *= pixelsize  # convert x and y to nm
-        X2[:, :2] *= pixelsize
 
         # get nnd and append to locs to save
         nn = postprocess.nn_analysis(X1, X2, nn_count)
@@ -15695,7 +15706,6 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         # save new locs
         new_info = {
             **lib.step_info("Render : Nearest neighbor analysis"),
-            "Pixelsize (nm)": pixelsize,
             "Nearest neighbors": nn_count,
             "Channel 1": self.locs_paths[channel1],
             "Channel 2": self.locs_paths[channel2],
@@ -15978,8 +15988,8 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
 
     def _camera_origin(self, channel: int) -> tuple[float, float]:
         """Where the camera frame of ``channel`` starts in the displayed
-        coordinates (camera pixels): the canvas offset (see
-        ``lib.fit_canvas``) plus the shifts done with the Move tool."""
+        coordinates (nm): the canvas offset (see ``lib.fit_canvas``)
+        plus the shifts done with the Move tool."""
         info = self.infos[channel]
         return tuple(
             float(lib.get_from_metadata(info, offset_key, 0))
@@ -16120,7 +16130,7 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             if pair["used"]:
                 text = (
                     f"{100 * pair['fraction']:.0f}% matched, residual "
-                    f"{pair['residual']:.2f} px"
+                    f"{pair['residual']:.1f} nm"
                 )
             else:
                 text = status[pair["status"]]
@@ -16134,7 +16144,8 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         )
 
     def display_pixels_per_viewport_pixels(self) -> float:
-        """Return optimal oversampling given viewport size."""
+        """Return the number of screen pixels per nm of the viewport,
+        i.e., the inverse of the screen pixel size."""
         v_height, v_width = render.viewport_size(self.viewport)
         os_horizontal = self.width() / v_width
         os_vertical = self.height() / v_height
@@ -16382,33 +16393,31 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
 
     @property
     def _pick_size(self) -> float:
-        """Return the size of the pick in camera pixels. For circle this
-        is the diameter. For square this is the side length. For
-        rectangle this is the width (perpendicular to the drawing
-        direction). For polygon, box and brush this is None: they carry
-        their own extent. For the width of the next brush stroke, see
+        """Return the size of the pick in nm. For circle this is the
+        diameter. For square this is the side length. For rectangle this
+        is the width (perpendicular to the drawing direction). For
+        polygon, box and brush this is None: they carry their own
+        extent. For the width of the next brush stroke, see
         ``_brush_width``."""
         tools_dialog = self.window.tools_settings_dialog
-        pixelsize = self.pixelsize
         if self._pick_shape == "Circle":
-            pick_size = tools_dialog.pick_diameter.value() / pixelsize
+            pick_size = tools_dialog.pick_diameter.value()
         elif self._pick_shape == "Square":
-            pick_size = tools_dialog.pick_side_length.value() / pixelsize
+            pick_size = tools_dialog.pick_side_length.value()
         elif self._pick_shape == "Rectangle":
-            pick_size = tools_dialog.pick_width.value() / pixelsize
+            pick_size = tools_dialog.pick_width.value()
         else:
             pick_size = None
         return pick_size
 
     @property
     def _brush_width(self) -> float:
-        """Return the width of the next brush stroke in camera pixels.
+        """Return the width of the next brush stroke in nm.
 
         Only new strokes use it: every stroke already painted keeps the
         width it was drawn with, so this is not the size of any existing
         pick (see ``_pick_size``, which is None for brush picks)."""
-        tools_dialog = self.window.tools_settings_dialog
-        return tools_dialog.brush_width.value() / self.pixelsize
+        return self.window.tools_settings_dialog.brush_width.value()
 
     def _draw_pick_scatter(
         self,
@@ -16465,8 +16474,8 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
                     x_min, x_max, y_min, y_max = lib.pick_bounds(
                         pick, self._pick_shape, self._pick_size
                     )
-                    ax.set_xlabel("X [Px]")
-                    ax.set_ylabel("Y [Px]")
+                    ax.set_xlabel("X [nm]")
+                    ax.set_ylabel("Y [nm]")
                     ax.set_xlim([x_min, x_max])
                     ax.set_ylim([y_min, y_max])
                     plt.axis("equal")
@@ -16579,11 +16588,7 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         self.update_pick_info_short()
         self.update_scene()
 
-    def _analyze_cluster_single(
-        self,
-        all_picked_locs: list,
-        pixelsize: float,
-    ) -> tuple:
+    def _analyze_cluster_single(self, all_picked_locs: list) -> tuple:
         """Iterate over picks for single-channel k-means clustering.
         Return (removelist, saved_locs, clustered_locs)."""
         removelist = []
@@ -16604,7 +16609,6 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
                         i,
                         len(self._picks),
                         n_clusters,
-                        pixelsize,
                     )
                 else:
                     reply, nc, l_locs, c_locs = ClsDlg2D.getParams(
@@ -16655,10 +16659,7 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         # save pick properties
         base, ext = os.path.splitext(path)
         out_path = base + "_properties.hdf5"
-        r_max = 2 * max(
-            self.infos[channel][0]["Height"],
-            self.infos[channel][0]["Width"],
-        )
+        r_max = 2 * max(lib.field_of_view(self.infos[channel]))  # nm
         max_dark, ok = QtWidgets.QInputDialog.getInt(
             self, "Input Dialog", "Enter gap size:", 3
         )
@@ -16709,7 +16710,7 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         if channel is not None and self._picks:
             all_picked_locs = self.picked_locs(channel)
             removelist, saved_locs, clustered_locs = (
-                self._analyze_cluster_single(all_picked_locs, self.pixelsize)
+                self._analyze_cluster_single(all_picked_locs)
             )
         if saved_locs:
             self._save_cluster_results(saved_locs, clustered_locs, channel)
@@ -17003,10 +17004,8 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             Areas of all picks. For circular and square picks all values
             are the same.
         """
-        px = self.pixelsize
         areas = lib.pick_areas(self._picks, self._pick_shape, self._pick_size)
-        areas *= (px * 1e-3) ** 2  # convert to um^2
-        return areas
+        return areas * 1e-6  # nm^2 to um^2
 
     def pick_fiducials(self) -> None:
         """Find the circular picks centered around the fiducials and
@@ -17037,9 +17036,8 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             QtWidgets.QMessageBox.warning(self, "Warning", message)
             return
 
-        self.window.tools_settings_dialog.pick_diameter.setValue(
-            box * self.pixelsize
-        )
+        # the box (nm) found around the fiducials becomes the diameter
+        self.window.tools_settings_dialog.pick_diameter.setValue(box)
         self.add_picks(picks)
 
     def plot_profile(self) -> None:
@@ -17076,9 +17074,7 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
                 pick_shape=self._pick_shape,
                 pick_size=pick_size,
             )[0]
-            self.profiles.append(
-                picked_locs["y_pick_rot"].to_numpy() * self.pixelsize
-            )
+            self.profiles.append(picked_locs["y_pick_rot"].to_numpy())
 
         # plot profiles
         self.canvas = lib.GenericPlotWindow("Pick profile", "render")
@@ -17819,11 +17815,7 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         pick_info : dict
             Dictionary to update with shape-specific info.
         """
-        picksize_nm = (
-            self._pick_size * self.pixelsize
-            if self._pick_size is not None
-            else None
-        )
+        picksize_nm = self._pick_size  # None for polygons, boxes, brush
         if self._pick_shape == "Circle":
             pick_info["Pick Diameter (nm)"] = picksize_nm
         elif self._pick_shape == "Rectangle":
@@ -17839,8 +17831,8 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             pick_info["Number of picks"] -= 1
 
     def _picks_dict(self, picks: list | None = None) -> dict:
-        """Build the dictionary describing pick regions, in the format
-        used by ``save_picks`` and read by ``io.load_picks``.
+        """The dictionary describing pick regions (nm), in the format of
+        the picks .yaml files, see ``io.picks_dict``.
 
         Parameters
         ----------
@@ -17854,54 +17846,7 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         """
         if picks is None:
             picks = self._picks
-        regions = {}
-        pixelsize = self.pixelsize
-        if self._pick_shape == "Circle":
-            d = self._pick_size * pixelsize
-            regions["Diameter (nm)"] = float(d)
-            regions["Centers"] = [[float(_[0]), float(_[1])] for _ in picks]
-        elif self._pick_shape == "Rectangle":
-            w = self._pick_size * pixelsize
-            regions["Width (nm)"] = float(w)
-            regions["Center-Axis-Points"] = [
-                [
-                    [float(s[0]), float(s[1])],
-                    [float(e[0]), float(e[1])],
-                ]
-                for s, e in picks
-            ]
-        elif self._pick_shape == "Polygon":
-            vertices = []
-            for pick in picks:
-                if len(pick):
-                    vertices.append([[float(v[0]), float(v[1])] for v in pick])
-            regions["Vertices"] = vertices
-        elif self._pick_shape == "Square":
-            a = self._pick_size * pixelsize
-            regions["Side Length (nm)"] = float(a)
-            regions["Centers"] = [[float(_[0]), float(_[1])] for _ in picks]
-        elif self._pick_shape == "Box":
-            # each box carries its own extent, so no size is saved
-            regions["Corners"] = [
-                [
-                    [float(c0[0]), float(c0[1])],
-                    [float(c1[0]), float(c1[1])],
-                ]
-                for c0, c1 in picks
-            ]
-        elif self._pick_shape == "Brush":
-            # a flat, ordered stroke list: which strokes form one pick
-            # follows from their geometry and is re-derived on loading
-            regions["Strokes"] = [
-                {
-                    "Width (nm)": float(stroke[0] * pixelsize),
-                    "Path": [[float(x), float(y)] for x, y in stroke[1]],
-                }
-                for pick in picks
-                for stroke in pick
-            ]
-        regions["Shape"] = self._pick_shape
-        return regions
+        return io.picks_dict(picks, self._pick_shape, self._pick_size)
 
     def _add_picks_to_info(
         self, pick_info: dict, picks: list | None = None
@@ -18170,8 +18115,7 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         """
         if len(self._picks) == 0:
             return
-        with open(path, "w") as f:
-            yaml.dump(self._picks_dict(), f)
+        io.save_picks(path, self._picks, self._pick_shape, self._pick_size)
 
     def activate_render_property(self) -> None:
         """Assign localizations by color to render a chosen property."""
@@ -18291,16 +18235,16 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         self.update_scene(picks_only=True)
         self.update_pick_info_short()
 
-    def set_zoom(self, zoom: float) -> None:
-        """Zoom in/out by the given factor.
+    def set_screen_px_size(self, screen_px_size: float) -> None:
+        """Zoom so that one screen pixel covers ``screen_px_size`` nm.
 
         Parameters
         ----------
-        zoom : float
-            Zoom factor.
+        screen_px_size : float
+            Size of one screen pixel in nm.
         """
-        current_zoom = self.display_pixels_per_viewport_pixels()
-        self.zoom(current_zoom / zoom)
+        current = 1 / self.display_pixels_per_viewport_pixels()
+        self.zoom(screen_px_size / current)
 
     def set_optimal_scalebar(
         self, force: bool = False, silent: bool = False
@@ -18310,9 +18254,8 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             self.window.display_settings_dlg.optimal_scalebar_check.isChecked()
         )
         if force or optimal_scalebar_checked:
-            pixelsize = self.pixelsize
             width = render.viewport_width(self.viewport)
-            scalebar = render.optimal_scalebar_length(pixelsize, width)
+            scalebar = render.optimal_scalebar_length(width)
             scalebar_spinbox = self.window.display_settings_dlg.scalebar
             scalebar_spinbox.blockSignals(True)
             scalebar_spinbox.setValue(scalebar)
@@ -18369,11 +18312,9 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             return
 
         # get parameters for AIM
-        params, ok = AIMDialog.getParams(self.window)
+        params, ok = AIMDialog.getParams(self.window)  # nm
         if not ok:
             return
-        params["intersect_d"] = params["intersect_d"] / self.pixelsize
-        params["roi_r"] = params["roi_r"] / self.pixelsize
 
         if channel == len(self.locs_paths):  # apply to all channels
             channels = list(range(len(self.locs_paths)))
@@ -18689,7 +18630,9 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
                 directory=self.locs_paths[channel],
             )
             if path:
-                drift = io.load_drift(path)
+                drift = self._read_drift_file(path)
+                if drift is None:  # canceled
+                    return
                 self._apply_drift(channel, drift)
                 self._driftfiles[channel] = path
 
@@ -18766,7 +18709,6 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             if remove_group:
                 self.locs[0].drop(columns="group", inplace=True)
             return
-        spacing /= self.pixelsize
 
         self.locs[0], self.infos[0][0] = lib.unfold_localizations_square(
             locs=self.locs[0],
@@ -18786,8 +18728,8 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         Parameters
         ----------
         size : float
-            Diameter of the cursor in camera pixels: the pick diameter
-            for circular picks, the stroke width for brush picks.
+            Diameter of the cursor in nm: the pick diameter for circular
+            picks, the stroke width for brush picks.
         """
         diameter = int(
             self.width() * size / render.viewport_width(self.viewport)
@@ -19122,6 +19064,10 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
 
     @property
     def pixelsize(self) -> float:
+        """Camera pixel size (nm) shown in the display settings, for
+        information and as the default when converting files written
+        before Picasso 1.0; localizations are in nm, so it rescales
+        nothing."""
         if hasattr(self.window, "display_settings_dlg"):
             return self.window.display_settings_dlg.pixelsize.value()
         else:
@@ -19501,6 +19447,12 @@ class Window(QtWidgets.QMainWindow):
         if IMSWRITER:
             export_ims_action = file_menu.addAction("Export ROI for Imaris...")
             export_ims_action.triggered.connect(self.export_fov_ims)
+        file_menu.addSeparator()
+        convert_units_action = file_menu.addAction("Convert files to nm...")
+        convert_units_action.setToolTip(
+            "Convert files written before Picasso 1.0 (camera pixels) to nm."
+        )
+        convert_units_action.triggered.connect(self.convert_units)
 
         # sound notification submenu
         file_menu.addSeparator()
@@ -20131,8 +20083,9 @@ class Window(QtWidgets.QMainWindow):
         d = self.display_settings_dlg
         colors = [_.currentText() for _ in self.dataset_dialog.colorselection]
         info = {
-            "FOV (X, Y, Width, Height)": fov_info,
-            "Zoom": d.zoom.value(),
+            io.FORMAT_VERSION_ATTR: io.FORMAT_VERSION,
+            FOV_KEY: [float(_) for _ in fov_info],
+            SCREEN_PX_SIZE_KEY: d.screen_px_size.value(),
             "Display pixel size (nm)": (
                 d.disp_px_size.value()
                 if disp_px_size is None
@@ -20276,7 +20229,6 @@ class Window(QtWidgets.QMainWindow):
                 image=qimage,
                 viewport=kwargs["viewport"],
                 scalebar_length_nm=self.display_settings_dlg.scalebar.value(),
-                pixelsize=self.view.pixelsize,
             )
             new_path, ext = os.path.splitext(path)
             new_path = new_path + "_scalebar" + ext
@@ -20436,14 +20388,11 @@ class Window(QtWidgets.QMainWindow):
 
         if path:
             n_channels = len(self.view.locs_paths)
-            viewport = self.view.viewport
-            oversampling = (
-                self.view.pixelsize
-                / self.display_settings_dlg.disp_px_size.value()
-            )
+            viewport = self.view.viewport  # nm
+            disp_px_size = self.display_settings_dlg.disp_px_size.value()
+            oversampling = 1 / disp_px_size  # rendered pixels per nm
             maximum = self.display_settings_dlg.maximum.value()
 
-            pixelsize = self.view.pixelsize
             checked = [
                 self.dataset_dialog.checks[channel].isChecked()
                 for channel in range(n_channels)
@@ -20526,7 +20475,6 @@ class Window(QtWidgets.QMainWindow):
                             x_max,
                             z_min,
                             z_max,
-                            pixelsize,
                         )
                     else:
                         n, image = render._render_hist(
@@ -20561,12 +20509,11 @@ class Window(QtWidgets.QMainWindow):
                     s_image,
                     path,
                     colors_ims,
-                    oversampling,
+                    disp_px_size,
                     viewport,
                     ims_info,
                     z_min,
                     z_max,
-                    pixelsize,
                 )
 
             lib.run_with_status(export, "Exporting ROIs...", self)
@@ -20686,18 +20633,18 @@ class Window(QtWidgets.QMainWindow):
                 if var_1 == "z":
                     var_2 = "z"
                     var_1 = input[2]
-                pixelsize = self.view.pixelsize
                 templocs = self.view.locs[channel][var_1].copy()
-                movie_height, movie_width = self.view.movie_size()
+                movie_height, movie_width = self.view.movie_size()  # nm
                 if var_1 == "x":
                     dist = movie_width
                 else:
                     dist = movie_height
 
+                # z is centered on the field of view (all in nm)
                 self.view.locs[channel][var_1] = (
-                    self.view.locs[channel][var_2] / pixelsize + dist / 2
+                    self.view.locs[channel][var_2] + dist / 2
                 )  # exchange w. info
-                self.view.locs[channel][var_2] = templocs * pixelsize
+                self.view.locs[channel][var_2] = templocs
             else:
                 var_1 = input[1]
                 var_2 = input[2]
@@ -20706,7 +20653,7 @@ class Window(QtWidgets.QMainWindow):
                 self.view.locs[channel][var_2] = templocs
 
         elif input[0] == "spiral" and len(input) == 3:
-            # spiral uses radius and turns
+            # spiral uses radius (nm) and turns
             radius = float(input[1])
             turns = int(input[2])
             maxframe = self.view.infos[channel][0]["Frames"]
@@ -20745,6 +20692,16 @@ class Window(QtWidgets.QMainWindow):
         # being removed when saving; the columns are replaced with
         # copies since the expression may have changed them in place
         self.view.locs_moved(channel, sanitize=True)
+
+    def convert_units(self) -> ConvertUnitsDialog:
+        """Show the dialog converting files written before Picasso 1.0
+        (camera pixels) to nm, see ``picasso.gui.convert_units``."""
+        dialog = getattr(self, "convert_units_dialog", None)
+        if dialog is None:
+            dialog = self.convert_units_dialog = ConvertUnitsDialog(self)
+        dialog.show()
+        dialog.raise_()
+        return dialog
 
     def open_file_dialog(self) -> None:
         """Open localizations file(s): Picasso (.hdf5), ThunderSTORM
@@ -20807,10 +20764,9 @@ class Window(QtWidgets.QMainWindow):
         if self.view._pick_shape == "Brush":
             # stored as stroke dicts with widths in nm, see
             # ``RotationWindow.save_locs_rotated``
-            pixelsize = self.view.pixelsize
             self.view._picks = [
                 [
-                    (stroke["Width (nm)"] / pixelsize, stroke["Path"])
+                    (stroke["Width (nm)"], stroke["Path"])
                     for stroke in info["Pick"]
                 ]
             ]
@@ -20861,20 +20817,27 @@ class Window(QtWidgets.QMainWindow):
         else:
             new_view_h = max(view_w, view_h)
             new_view_w = new_view_h * target_aspect
+        self.resize_view(new_view_w, new_view_h)
 
+    def resize_view(self, view_w: float, view_h: float) -> None:
+        """Resize the main window so that ``view`` is ``view_w`` x
+        ``view_h`` screen pixels, or as large as fits on the screen
+        with the same aspect ratio."""
+        if view_w <= 0 or view_h <= 0:
+            return
         screen = self.screen() or QtWidgets.QApplication.primaryScreen()
         avail = screen.availableGeometry()
-        chrome_w = self.width() - view_w
-        chrome_h = self.height() - view_h
+        chrome_w = self.width() - self.view.width()
+        chrome_h = self.height() - self.view.height()
         max_view_w = max(1, avail.width() - chrome_w)
         max_view_h = max(1, avail.height() - chrome_h)
-        scale = min(1.0, max_view_w / new_view_w, max_view_h / new_view_h)
-        new_view_w *= scale
-        new_view_h *= scale
+        scale = min(1.0, max_view_w / view_w, max_view_h / view_h)
+        view_w *= scale
+        view_h *= scale
 
         self.resize(
-            int(round(new_view_w + chrome_w)),
-            int(round(new_view_h + chrome_h)),
+            int(round(view_w + chrome_w)),
+            int(round(view_h + chrome_h)),
         )
 
     def resizeEvent(self, even: QtGui.QResizeEvent) -> None:
@@ -21473,13 +21436,13 @@ class Window(QtWidgets.QMainWindow):
         self.info_dialog.locs_label.setText("{:,}".format(self.view.n_locs))
         try:
             self.info_dialog.xy_label.setText(
-                "{:.2f} / {:.2f} ".format(
+                "{:.1f} / {:.1f} nm".format(
                     self.view.viewport[0][1], self.view.viewport[0][0]
                 )
             )
             self.info_dialog.wh_label.setText(
-                f"{render.viewport_width(self.view.viewport):.2f} / "
-                f"{render.viewport_height(self.view.viewport):.2f} pixels"
+                f"{render.viewport_width(self.view.viewport):.1f} / "
+                f"{render.viewport_height(self.view.viewport):.1f} nm"
             )
         except AttributeError:
             pass

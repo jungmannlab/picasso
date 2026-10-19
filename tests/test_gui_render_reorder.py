@@ -29,10 +29,10 @@ def _locs(n: int = 300, seed: int = 0) -> pd.DataFrame:
     return pd.DataFrame(
         {
             "frame": rng.integers(0, 1000, size=n).astype(np.int32),
-            "x": rng.uniform(0.0, WIDTH, size=n),
-            "y": rng.uniform(0.0, HEIGHT, size=n),
-            "lpx": np.full(n, 0.1 + 0.01 * seed),
-            "lpy": np.full(n, 0.1 + 0.01 * seed),
+            "x": rng.uniform(0.0, WIDTH, size=n) * PIXELSIZE,
+            "y": rng.uniform(0.0, HEIGHT, size=n) * PIXELSIZE,
+            "lpx": np.full(n, (0.1 + 0.01 * seed) * PIXELSIZE),
+            "lpy": np.full(n, (0.1 + 0.01 * seed) * PIXELSIZE),
             "photons": np.full(n, 1000.0),
         }
     )
@@ -68,7 +68,10 @@ def window(qt_offscreen, tmp_path):
     window = gui_render.Window(plugins_loaded=True)
     for i in range(3):
         _add(window, tmp_path, i)
-    window.view.viewport = [(0.0, 0.0), (HEIGHT, WIDTH)]
+    window.view.viewport = [
+        (0.0, 0.0),
+        (HEIGHT * PIXELSIZE, WIDTH * PIXELSIZE),
+    ]
     window.view.resize(128, 128)
     return window
 

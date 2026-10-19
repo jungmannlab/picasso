@@ -11,13 +11,13 @@ from picasso import io, clusterer
 
 from tests.conftest import PIXELSIZE
 
-# parameters for clustering
-DBSCAN_EPS = 5 / PIXELSIZE  # in camera pixels, like localizations
+# parameters for clustering (nm, like the localizations)
+DBSCAN_EPS = 5.0
 DBSCAN_MIN_SAMPLES = 2
 HDBSCAN_MIN_CLUSTER_SIZE = 5
 HDBSCAN_MIN_SAMPLES = 2
-HDBSCAN_CLUSTER_EPS = 10 / PIXELSIZE
-GA_RADIUS = 7 / PIXELSIZE
+HDBSCAN_CLUSTER_EPS = 10.0
+GA_RADIUS = 7.0
 GA_RADIUS_Z = GA_RADIUS * 2.5
 GA_MIN_LOCS = 5
 
@@ -55,30 +55,37 @@ def db_locs(locs):
 # Synthetic ground-truth fixtures
 # ---------------------------------------------------------------------
 
-# Blobs are placed in pixels, well-separated relative to GA_RADIUS / DBSCAN_EPS
-# (~0.04-0.05 px). Inter-blob spacing of 40 px is ~1000x the cluster radius.
-BLOB_CENTERS_2D = [(10.0, 10.0), (50.0, 50.0), (10.0, 50.0)]
+# Blobs are placed in nm, well-separated relative to GA_RADIUS /
+# DBSCAN_EPS (5-7 nm). Inter-blob spacing of 40 camera pixels (5.2 um) is
+# ~1000x the cluster radius.
+BLOB_CENTERS_2D = [
+    (10.0 * PIXELSIZE, 10.0 * PIXELSIZE),
+    (50.0 * PIXELSIZE, 50.0 * PIXELSIZE),
+    (10.0 * PIXELSIZE, 50.0 * PIXELSIZE),
+]
 BLOB_CENTERS_3D = [
-    (10.0, 10.0, 0.0),
-    (50.0, 50.0, 200.0),
-    (10.0, 50.0, -200.0),
+    (10.0 * PIXELSIZE, 10.0 * PIXELSIZE, 0.0),
+    (50.0 * PIXELSIZE, 50.0 * PIXELSIZE, 200.0),
+    (10.0 * PIXELSIZE, 50.0 * PIXELSIZE, -200.0),
 ]
 # Same relative geometry as BLOB_CENTERS_3D but translated far from z=0
 # to guard against any z-offset dependence in the anisotropic scaling.
 BLOB_CENTERS_3D_OFFSET = [
-    (10.0, 10.0, 10_000.0),
-    (50.0, 50.0, 10_200.0),
-    (10.0, 50.0, 9_800.0),
+    (10.0 * PIXELSIZE, 10.0 * PIXELSIZE, 10_000.0),
+    (50.0 * PIXELSIZE, 50.0 * PIXELSIZE, 10_200.0),
+    (10.0 * PIXELSIZE, 50.0 * PIXELSIZE, 9_800.0),
 ]
 LOCS_PER_BLOB = 30
-SIGMA_XY_PX = 0.005  # ~0.65 nm
+SIGMA_XY_NM = 0.65
 SIGMA_Z_NM = 1.0
+# tolerance for recovered cluster centers (nm)
+CENTER_TOL = 0.5 * PIXELSIZE
 
 
 def _make_synthetic_locs(centers, seed=42):
     """Build a localization DataFrame with planted Gaussian blobs.
 
-    Centers are (x, y) or (x, y, z); xy in pixels, z in nm.
+    Centers are (x, y) or (x, y, z) in nm.
     """
     rng = np.random.default_rng(seed)
     is_3d = len(centers[0]) == 3
@@ -88,14 +95,14 @@ def _make_synthetic_locs(centers, seed=42):
         for _ in range(LOCS_PER_BLOB):
             row = {
                 "frame": frame,
-                "x": rng.normal(c[0], SIGMA_XY_PX),
-                "y": rng.normal(c[1], SIGMA_XY_PX),
+                "x": rng.normal(c[0], SIGMA_XY_NM),
+                "y": rng.normal(c[1], SIGMA_XY_NM),
                 "photons": 1000.0,
-                "sx": 1.0,
-                "sy": 1.0,
+                "sx": PIXELSIZE,
+                "sy": PIXELSIZE,
                 "bg": 10.0,
-                "lpx": 0.01,
-                "lpy": 0.01,
+                "lpx": 1.3,
+                "lpy": 1.3,
                 "net_gradient": 5000.0,
             }
             if is_3d:
@@ -160,7 +167,6 @@ def _run_dbscan_3d(locs):
         DBSCAN_EPS,
         DBSCAN_MIN_SAMPLES,
         min_locs=0,
-        pixelsize=PIXELSIZE,
         radius_z=DBSCAN_EPS * 2.5,
     )[0]
 
@@ -171,7 +177,6 @@ def _run_hdbscan_3d(locs):
         min_cluster_size=HDBSCAN_MIN_CLUSTER_SIZE,
         min_samples=HDBSCAN_MIN_SAMPLES,
         cluster_eps=HDBSCAN_CLUSTER_EPS,
-        pixelsize=PIXELSIZE,
     )[0]
 
 
@@ -182,7 +187,6 @@ def _run_smlm_3d(locs):
         min_locs=GA_MIN_LOCS,
         frame_analysis=False,
         radius_z=GA_RADIUS_Z,
-        pixelsize=PIXELSIZE,
     )[0]
 
 
@@ -260,7 +264,7 @@ def test_recovers_known_clusters_2d(synth_locs_2d, run_clusterer):
     out = run_clusterer(synth_locs_2d)
     assert out["group"].nunique() == len(BLOB_CENTERS_2D)
     centers = out.groupby("group")[["x", "y"]].mean().to_numpy()
-    _match_truth_to_recovered(centers, BLOB_CENTERS_2D, tol=0.5)
+    _match_truth_to_recovered(centers, BLOB_CENTERS_2D, tol=CENTER_TOL)
 
 
 @pytest.mark.parametrize("run_clusterer", CLUSTERERS_3D)
@@ -269,11 +273,7 @@ def test_recovers_known_clusters_3d(synth_locs_3d, run_clusterer):
     out = run_clusterer(synth_locs_3d)
     assert out["group"].nunique() == len(BLOB_CENTERS_3D)
     centers = out.groupby("group")[["x", "y", "z"]].mean().to_numpy()
-    # z is in nm, others in px — scale z so the tolerance is meaningful.
-    centers_scaled = centers.copy()
-    centers_scaled[:, 2] /= PIXELSIZE
-    truth_scaled = [(c[0], c[1], c[2] / PIXELSIZE) for c in BLOB_CENTERS_3D]
-    _match_truth_to_recovered(centers_scaled, truth_scaled, tol=0.5)
+    _match_truth_to_recovered(centers, BLOB_CENTERS_3D, tol=CENTER_TOL)
 
 
 @pytest.mark.parametrize("run_clusterer", CLUSTERERS_3D)
@@ -284,12 +284,7 @@ def test_recovers_known_clusters_3d_offset(
     out = run_clusterer(synth_locs_3d_offset)
     assert out["group"].nunique() == len(BLOB_CENTERS_3D_OFFSET)
     centers = out.groupby("group")[["x", "y", "z"]].mean().to_numpy()
-    centers_scaled = centers.copy()
-    centers_scaled[:, 2] /= PIXELSIZE
-    truth_scaled = [
-        (c[0], c[1], c[2] / PIXELSIZE) for c in BLOB_CENTERS_3D_OFFSET
-    ]
-    _match_truth_to_recovered(centers_scaled, truth_scaled, tol=0.5)
+    _match_truth_to_recovered(centers, BLOB_CENTERS_3D_OFFSET, tol=CENTER_TOL)
 
 
 # ---------------------------------------------------------------------
@@ -336,21 +331,15 @@ def test_hdbscan_epsilon_bug_is_explained(
         assert isinstance(caught.value.__cause__, TypeError)
 
 
-def test_dbscan_3d_requires_pixelsize(synth_locs_3d):
-    with pytest.raises(ValueError):
-        clusterer.dbscan(synth_locs_3d, DBSCAN_EPS, DBSCAN_MIN_SAMPLES)
+@pytest.mark.parametrize("run_clusterer", [_run_dbscan_2d, _run_hdbscan_2d])
+def test_dbscan_3d_without_radius_z_is_isotropic(synth_locs_3d, run_clusterer):
+    """3D localizations need no extra parameter: x, y and z are all in
+    nm, so the 2D settings cluster them isotropically."""
+    out = run_clusterer(synth_locs_3d)
+    assert out["group"].nunique() == len(BLOB_CENTERS_3D)
 
 
-def test_hdbscan_3d_requires_pixelsize(synth_locs_3d):
-    with pytest.raises(ValueError):
-        clusterer.hdbscan(
-            synth_locs_3d,
-            min_cluster_size=HDBSCAN_MIN_CLUSTER_SIZE,
-            min_samples=HDBSCAN_MIN_SAMPLES,
-        )
-
-
-def test_smlm_3d_requires_radius_z_and_pixelsize(synth_locs_3d):
+def test_smlm_3d_requires_radius_z(synth_locs_3d):
     with pytest.raises(ValueError):
         clusterer.cluster(
             synth_locs_3d,
@@ -398,6 +387,31 @@ def test_cluster_returns_info(synth_locs_2d):
     )
     assert isinstance(info_dict, dict)
     assert info_dict["Number of clusters"] == len(BLOB_CENTERS_2D)
+    assert info_dict["Clustering radius (nm)"] == GA_RADIUS
+
+
+def test_info_records_radii_in_nm(synth_locs_3d):
+    _, info_dict = clusterer.cluster(
+        synth_locs_3d,
+        radius_xy=GA_RADIUS,
+        min_locs=GA_MIN_LOCS,
+        frame_analysis=False,
+        radius_z=GA_RADIUS_Z,
+    )
+    assert info_dict["Clustering radius xy (nm)"] == GA_RADIUS
+    assert info_dict["Clustering radius z (nm)"] == GA_RADIUS_Z
+    _, info_dict = clusterer.dbscan(
+        synth_locs_3d, DBSCAN_EPS, DBSCAN_MIN_SAMPLES, radius_z=2 * DBSCAN_EPS
+    )
+    assert info_dict["Radius (nm)"] == DBSCAN_EPS
+    assert info_dict["Radius z (nm)"] == 2 * DBSCAN_EPS
+    _, info_dict = clusterer.hdbscan(
+        synth_locs_3d,
+        min_cluster_size=HDBSCAN_MIN_CLUSTER_SIZE,
+        min_samples=HDBSCAN_MIN_SAMPLES,
+        cluster_eps=HDBSCAN_CLUSTER_EPS,
+    )
+    assert info_dict["Intercluster distance (nm)"] == HDBSCAN_CLUSTER_EPS
 
 
 # ---------------------------------------------------------------------
@@ -424,19 +438,37 @@ def test_find_cluster_centers_2d(synth_locs_2d):
     assert "volume" not in centers.columns
     assert len(centers) == len(BLOB_CENTERS_2D)
     _match_truth_to_recovered(
-        centers[["x", "y"]].to_numpy(), BLOB_CENTERS_2D, tol=0.5
+        centers[["x", "y"]].to_numpy(), BLOB_CENTERS_2D, tol=CENTER_TOL
     )
+    # std_x / std_y and the precisions are in nm, like the blobs
+    np.testing.assert_allclose(centers["std_x"], SIGMA_XY_NM, rtol=0.5)
+    np.testing.assert_allclose(
+        centers["lpx"], centers["std_x"] / np.sqrt(centers["n_locs"])
+    )
+    # area (nm^2) assumes a radius of two standard deviations
+    np.testing.assert_allclose(
+        centers["area"], np.pi * (centers["std_x"] + centers["std_y"]) ** 2
+    )
+    assert (centers["convexhull"] < centers["area"]).all()
 
 
 def test_find_cluster_centers_3d(synth_locs_3d):
-    """3D centers expose volume / std_z / z columns."""
+    """3D centers expose volume / std_z / z columns, in nm."""
     db_locs = _run_dbscan_3d(synth_locs_3d)
-    centers = clusterer.find_cluster_centers(db_locs, pixelsize=PIXELSIZE)
+    centers = clusterer.find_cluster_centers(db_locs)
 
     expected_cols = {"x", "y", "z", "volume", "std_z", "convexhull", "group"}
     assert expected_cols.issubset(centers.columns)
     assert "area" not in centers.columns
     assert len(centers) == len(BLOB_CENTERS_3D)
+    np.testing.assert_allclose(centers["std_z"], SIGMA_Z_NM, rtol=0.5)
+    # volume (nm^3) of a sphere with a radius of two mean standard
+    # deviations
+    radius = 2 * (centers["std_x"] + centers["std_y"] + centers["std_z"]) / 3
+    np.testing.assert_allclose(
+        centers["volume"], 4 / 3 * np.pi * radius**3, rtol=1e-4
+    )
+    assert (centers["convexhull"] > 0).all()
 
 
 # Columns that localizations are not required to have; each maps to the
@@ -477,7 +509,7 @@ def test_find_cluster_centers_2d_minimal_columns(synth_locs_2d):
         assert col not in centers.columns
     assert len(centers) == len(BLOB_CENTERS_2D)
     _match_truth_to_recovered(
-        centers[["x", "y"]].to_numpy(), BLOB_CENTERS_2D, tol=0.5
+        centers[["x", "y"]].to_numpy(), BLOB_CENTERS_2D, tol=CENTER_TOL
     )
 
 
@@ -485,7 +517,7 @@ def test_find_cluster_centers_3d_minimal_columns(synth_locs_3d):
     """3D without lpx/lpy: z falls back to the unweighted cluster mean."""
     minimal = synth_locs_3d[["frame", "x", "y", "z"]]
     db_locs = _run_dbscan_3d(minimal)
-    centers = clusterer.find_cluster_centers(db_locs, pixelsize=PIXELSIZE)
+    centers = clusterer.find_cluster_centers(db_locs)
 
     assert (ESSENTIAL_CENTER_COLS | {"z", "lpz", "std_z", "volume"}).issubset(
         centers.columns

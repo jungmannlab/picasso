@@ -3580,6 +3580,85 @@ def show_load_error(
     )
 
 
+def ask_pixelsize(
+    parent: QtWidgets.QWidget | None, path: str, default: float = 130.0
+) -> float | None:
+    """Ask for the camera pixel size that converts a file written before
+    Picasso 1.0 (lengths in camera pixels) to nm.
+
+    Parameters
+    ----------
+    parent : QWidget or None
+        The window the dialog belongs to.
+    path : str
+        The file, named in the dialog.
+    default : float, optional
+        The pixel size (nm) the dialog starts with. Default is 130.
+
+    Returns
+    -------
+    pixelsize : float or None
+        The camera pixel size in nm, or None if the dialog was canceled.
+    """
+    value, ok = QtWidgets.QInputDialog.getDouble(
+        parent,
+        "Camera pixel size",
+        f"{os.path.basename(path)} was written before Picasso 1.0, with "
+        "lengths in camera pixels, and does not record the camera pixel "
+        "size.\nEnter the camera pixel size (nm) to convert it to nm:",
+        default,
+        0.01,
+        1e6,
+        2,
+    )
+    return float(value) if ok else None
+
+
+def load_or_ask_pixelsize(
+    parent: QtWidgets.QWidget | None,
+    loader: Callable,
+    path: str,
+    *args,
+    **kwargs,
+):
+    """Load a file, asking for the camera pixel size when the file was
+    written before Picasso 1.0 and does not record it.
+
+    Parameters
+    ----------
+    parent : QWidget or None
+        The window the pixel size dialog belongs to.
+    loader : callable
+        A loader of ``picasso.io`` taking ``(path, ..., pixelsize=None)``
+        and raising ``io.MissingPixelsizeError`` without the pixel size,
+        e.g., ``io.load_locs``, ``io.load_picks`` or ``io.load_drift``.
+    path : str
+        The file to load.
+    *args, **kwargs
+        Passed on to ``loader``.
+
+    Returns
+    -------
+    result
+        What ``loader`` returns, or None if the pixel size dialog was
+        canceled.
+
+    Raises
+    ------
+    FILE_LOAD_ERRORS
+        As ``loader`` does for any other problem (see
+        ``show_load_error``).
+    """
+    try:
+        return loader(path, *args, **kwargs)
+    except io.MissingPixelsizeError:
+        pixelsize = ask_pixelsize(parent, path)
+        if pixelsize is None:
+            return None
+        kwargs["pixelsize"] = pixelsize
+        return loader(path, *args, **kwargs)
+
+
 def get_save_filename_ext_dialog(
     parent: QtWidgets.QWidget,
     caption: str = "",

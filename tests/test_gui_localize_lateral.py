@@ -88,6 +88,8 @@ def _dialog(z_calibration=None, spline_calibration=None):
         lateral_transforms=[],
         affine_calibration_paths=[],
         affine_calib_label=_Label(),
+        # converts calibrations from before Picasso 1.0 (camera pixels)
+        pixelsize=types.SimpleNamespace(value=lambda: 130),
     )
     for name in (
         "update_affine_calib",
@@ -105,7 +107,9 @@ def _dialog(z_calibration=None, spline_calibration=None):
 def _load(dialog, files, monkeypatch, warnings_seen=None):
     """Run the real ``update_affine_calib`` on in-memory calibrations."""
     monkeypatch.setattr(
-        gui_localize.io, "load_any_calibration", lambda path: files[path]
+        gui_localize.io,
+        "load_any_calibration",
+        lambda path, pixelsize=None: files[path],
     )
     monkeypatch.setattr(
         gui_localize.QtWidgets.QMessageBox,

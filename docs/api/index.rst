@@ -43,6 +43,7 @@ Input and output
    :nosignatures:
 
    picasso.io
+   picasso.legacy
 
 Localization
 ------------

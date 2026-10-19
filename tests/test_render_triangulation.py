@@ -19,20 +19,26 @@ from picasso import render
 from picasso.render import triangulation as tri
 
 
-W = H = 64.0
+PIXELSIZE = 130.0  # camera pixel size (nm)
+W = H = 64.0 * PIXELSIZE  # 64 x 64 camera pixels, in nm
+#: rendered pixels per nm of a display pixel of PIXELSIZE / 4 nm
+OS = 4.0 / PIXELSIZE
+#: the dense cluster of ``_clustered`` (nm)
+CLUSTER = (20.0 * PIXELSIZE, 40.0 * PIXELSIZE)
 
 
 def _info():
-    return [{"Width": W, "Height": H, "Frames": 1, "Pixelsize": 130.0}]
+    return [{"Width": 64, "Height": 64, "Frames": 1, "Pixelsize": PIXELSIZE}]
 
 
 def _clustered(n=4000, seed=0):
     rng = np.random.default_rng(seed)
+    sigma = 1.5 * PIXELSIZE
     x = np.concatenate(
-        [rng.uniform(0, W, n // 2), rng.normal(20, 1.5, n // 2)]
+        [rng.uniform(0, W, n // 2), rng.normal(CLUSTER[0], sigma, n // 2)]
     )
     y = np.concatenate(
-        [rng.uniform(0, H, n // 2), rng.normal(40, 1.5, n // 2)]
+        [rng.uniform(0, H, n // 2), rng.normal(CLUSTER[1], sigma, n // 2)]
     )
     keep = (x > 0) & (x < W) & (y > 0) & (y < H)
     return x[keep].astype(np.float32), y[keep].astype(np.float32)
@@ -58,14 +64,15 @@ def test_neighbor_distance_is_the_mean_incident_edge_length():
 def test_linear_and_mass_conserving(passes):
     x, y = _clustered()
     viewport = ((0.0, 0.0), (H, W))
-    n, image = tri.render_triangulation(x, y, 4.0, viewport, passes=passes)
+    n, image = tri.render_triangulation(x, y, OS, viewport, passes=passes)
     assert n == len(x)
     # every triangle carries the same share; the border loses a little
     assert image.sum() == pytest.approx(n, rel=0.03)
     assert image.shape == (256, 256)
-    # the dense cluster is the brightest region
+    # the dense cluster is the brightest region (within 4 camera px)
     cy, cx = np.unravel_index(np.argmax(image), image.shape)
-    assert abs(cx / 4 - 20) < 4 and abs(cy / 4 - 40) < 4
+    assert abs(cx / OS - CLUSTER[0]) < 4 * PIXELSIZE
+    assert abs(cy / OS - CLUSTER[1]) < 4 * PIXELSIZE
 
 
 def test_uniform_field_is_flat():
@@ -73,30 +80,34 @@ def test_uniform_field_is_flat():
     n = 30_000
     x = rng.uniform(0, W, n).astype(np.float32)
     y = rng.uniform(0, H, n).astype(np.float32)
+    os_ = OS / 2  # display pixels of PIXELSIZE / 2 nm
     _, image = tri.render_triangulation(
-        x, y, 2.0, ((0.0, 0.0), (H, W)), passes=10
+        x, y, os_, ((0.0, 0.0), (H, W)), passes=10
     )
     inner = image[16:-16, 16:-16]  # away from the border
-    density = n / (W * H) / 4  # per display pixel
+    density = n / (W * H) / os_**2  # per display pixel
     assert inner.mean() == pytest.approx(density, rel=0.03)
     # the jittered average is far smoother than the plain triangulation
     _, plain = tri.render_triangulation(
-        x, y, 2.0, ((0.0, 0.0), (H, W)), passes=0
+        x, y, os_, ((0.0, 0.0), (H, W)), passes=0
     )
     assert inner.std() < 0.7 * plain[16:-16, 16:-16].std()
 
 
 def test_seed_makes_it_repeatable():
     x, y = _clustered()
-    viewport = ((10.0, 10.0), (50.0, 50.0))
-    a = tri.render_triangulation(x, y, 4.0, viewport, passes=3, seed=5)[1]
-    b = tri.render_triangulation(x, y, 4.0, viewport, passes=3, seed=5)[1]
-    c = tri.render_triangulation(x, y, 4.0, viewport, passes=3, seed=6)[1]
+    viewport = (
+        (10.0 * PIXELSIZE, 10.0 * PIXELSIZE),
+        (50.0 * PIXELSIZE, 50.0 * PIXELSIZE),
+    )
+    a = tri.render_triangulation(x, y, OS, viewport, passes=3, seed=5)[1]
+    b = tri.render_triangulation(x, y, OS, viewport, passes=3, seed=5)[1]
+    c = tri.render_triangulation(x, y, OS, viewport, passes=3, seed=6)[1]
     assert np.array_equal(a, b)
     assert not np.array_equal(a, c)
     # threads do not change the result
     d = tri.render_triangulation(
-        x, y, 4.0, viewport, passes=3, seed=5, workers=3
+        x, y, OS, viewport, passes=3, seed=5, workers=3
     )[1]
     assert np.array_equal(a, d)
 
@@ -106,9 +117,11 @@ def test_coarse_zoom_tends_to_the_histogram():
     viewport = ((0.0, 0.0), (H, W))
     locs = pd.DataFrame({"x": x, "y": y})
     _, hist = render.render(
-        locs, _info(), disp_px_size=130 * 8, viewport=viewport
+        locs, _info(), disp_px_size=PIXELSIZE * 8, viewport=viewport
     )
-    _, plain = tri.render_triangulation(x, y, 1 / 8, viewport, passes=0)
+    _, plain = tri.render_triangulation(
+        x, y, 1 / (8 * PIXELSIZE), viewport, passes=0
+    )
     # at 8 camera pixels per display pixel nearly every triangle is
     # within a pixel and drops its share into it: close to the counts
     assert plain.shape == hist.shape
@@ -131,11 +144,14 @@ def test_through_render_and_render_scene(monkeypatch):
 
     x, y = _clustered()
     locs = pd.DataFrame({"x": x, "y": y, "z": np.zeros_like(x)})
-    viewport = ((8.0, 8.0), (56.0, 56.0))
+    viewport = (
+        (8.0 * PIXELSIZE, 8.0 * PIXELSIZE),
+        (56.0 * PIXELSIZE, 56.0 * PIXELSIZE),
+    )
     n, image = render.render(
         locs,
         _info(),
-        disp_px_size=130 / 4,
+        disp_px_size=PIXELSIZE / 4,
         viewport=viewport,
         blur_method="triangulation",
         triangulation_passes=2,
@@ -148,7 +164,7 @@ def test_through_render_and_render_scene(monkeypatch):
     _, n2, raw = render.render_scene(
         locs,
         _info(),
-        disp_px_size=130 / 4,
+        disp_px_size=PIXELSIZE / 4,
         viewport=viewport,
         blur_method="triangulation",
         triangulation_passes=2,
@@ -161,7 +177,7 @@ def test_through_render_and_render_scene(monkeypatch):
     n3, rotated = render.render(
         locs,
         _info(),
-        disp_px_size=130 / 4,
+        disp_px_size=PIXELSIZE / 4,
         viewport=viewport,
         blur_method="triangulation",
         triangulation_passes=2,

@@ -43,20 +43,19 @@ To use RESI:
    :icon: code
    :class-container: api-example
 
-   The channels must be aligned already. Radii are in camera pixels and may
-   be given per channel as lists.
+   The channels must be aligned already. Radii are in nm and may be given
+   per channel as lists.
 
    .. code-block:: python
 
-      from picasso import io, lib, postprocess
+      from picasso import io, postprocess
 
       paths = ["round1_locs.hdf5", "round2_locs.hdf5"]
       locs, infos = zip(*[io.load_locs(p) for p in paths])
-      pixelsize = lib.get_from_metadata(infos[0], "Pixelsize")
 
       resi_locs, resi_info = postprocess.resi(
           list(locs), list(infos),
-          radius_xy=10 / pixelsize,       # e.g., 2 x NeNA
+          radius_xy=10.0,                 # nm, e.g., 2 x NeNA
           min_locs=10,
           apply_fa=True,                  # basic frame analysis
           progress_callback="console",
@@ -89,13 +88,12 @@ summary of the user guide.
 
    .. code-block:: python
 
-      from picasso import clusterer, g5m, io, lib
+      from picasso import clusterer, g5m, io
 
       locs, info = io.load_locs("movie_locs.hdf5")
-      pixelsize = lib.get_from_metadata(info, "Pixelsize")
 
       clustered, _ = clusterer.dbscan(
-          locs, radius=20 / pixelsize, min_samples=4,
+          locs, radius=20.0, min_samples=4,   # radius in nm
       )
       molecules, clustered, info = g5m.g5m(
           clustered, info, min_locs=10, callback_parent="console"
@@ -295,17 +293,16 @@ are removed.
    :icon: code
    :class-container: api-example
 
-   Radii are in camera pixels; ``pixelsize`` is only needed for 3D data.
+   Radii are in nm (``radius_z`` for 3D data).
 
    .. code-block:: python
 
-      from picasso import clusterer, io, lib
+      from picasso import clusterer, io
 
       locs, info = io.load_locs("movie_locs.hdf5")
-      pixelsize = lib.get_from_metadata(info, "Pixelsize")
 
       clustered, cluster_info = clusterer.dbscan(
-          locs, radius=20 / pixelsize, min_samples=10, min_locs=10, pixelsize=pixelsize
+          locs, radius=20.0, min_samples=10, min_locs=10
       )
       io.save_locs("movie_locs_dbscan.hdf5", clustered, info + [cluster_info])
 
@@ -350,7 +347,7 @@ z are treated alike (no separate z radius).
    .. code-block:: python
 
       clustered, cluster_info = clusterer.hdbscan(
-          locs, min_cluster_size=10, min_samples=10, pixelsize=pixelsize
+          locs, min_cluster_size=10, min_samples=10
       )
       io.save_locs("movie_locs_hdbscan.hdf5", clustered, info + [cluster_info])
 
@@ -403,17 +400,17 @@ Basic frame analysis
    :icon: code
    :class-container: api-example
 
-   ``radius_xy`` and ``radius_z`` are in camera pixels (z needs
-   ``pixelsize``); ``frame_analysis`` is the basic frame analysis.
-   ``find_cluster_centers`` gives one localization per cluster.
+   ``radius_xy`` and ``radius_z`` are in nm; ``frame_analysis`` is the
+   basic frame analysis. ``find_cluster_centers`` gives one localization per
+   cluster.
 
    .. code-block:: python
 
       clustered, cluster_info = clusterer.cluster(
-          locs, radius_xy=20 / pixelsize, min_locs=10, frame_analysis=True,
-          radius_z=None, pixelsize=pixelsize, progress="console",
+          locs, radius_xy=20.0, min_locs=10, frame_analysis=True,
+          radius_z=None, progress="console",
       )
-      centers = clusterer.find_cluster_centers(clustered, pixelsize, progress="console")
+      centers = clusterer.find_cluster_centers(clustered, progress="console")
       io.save_locs("movie_locs_clusters.hdf5", clustered, info + [cluster_info])
       io.save_locs("movie_locs_cluster_centers.hdf5", centers, info + [cluster_info])
 
@@ -485,15 +482,14 @@ are calculated in 3D if both datasets have z information.
    .. code-block:: python
 
       import numpy as np
-      from picasso import io, lib, postprocess
+      from picasso import io, postprocess
 
       locs1, info1 = io.load_locs("channel1_locs.hdf5")
       locs2, info2 = io.load_locs("channel2_locs.hdf5")
-      pixelsize = lib.get_from_metadata(info1, "Pixelsize")
 
-      X1 = locs1[["x", "y"]].to_numpy() * pixelsize
-      X2 = locs2[["x", "y"]].to_numpy() * pixelsize
-      # 3D: X = np.column_stack([locs[["x", "y"]].to_numpy() * pixelsize, locs["z"]])
+      X1 = locs1[["x", "y"]].to_numpy()                 # nm
+      X2 = locs2[["x", "y"]].to_numpy()
+      # 3D: X = locs[["x", "y", "z"]].to_numpy()
 
       nnd = postprocess.nn_analysis(X1, X2, nn_count=3)      # (N1, 3)
       for k in range(nnd.shape[1]):
@@ -561,8 +557,8 @@ column, for example in Filter or by rendering by property (see
    :icon: code
    :class-container: api-example
 
-   ``cbc`` works on localizations directly (x and y in camera pixels, z in
-   nm) and returns a copy with the new column and the updated metadata.
+   ``cbc`` works on localizations directly (``r_max`` in nm, as x, y and
+   z) and returns a copy with the new column and the updated metadata.
    Several partners can be passed at once. Swap the channels to get the other
    direction, or use ``cbc_all_pairs`` to score every channel against every
    other one. ``undefined`` sets the value for localizations without
@@ -701,19 +697,18 @@ The dialog shows these settings when ``3D (x, y and z)`` is ticked:
    :icon: code
    :class-container: api-example
 
-   ``ripley_h`` takes picks in camera pixels with the pick shape and size as
-   saved by Render (``io.load_picks``; the size of circular picks is the
-   diameter) or, without picks, uses the whole field of view. It returns a
-   dictionary with the radii, the function of each region, their mean and the
-   CSR envelope, see :func:`picasso.postprocess.ripley_h`.
+   ``ripley_h`` takes picks in nm with the pick shape and size as saved by
+   Render (``io.load_picks``; the size of circular picks is the diameter) or,
+   without picks, uses the whole field of view. It returns a dictionary with
+   the radii, the function of each region, their mean and the CSR envelope,
+   see :func:`picasso.postprocess.ripley_h`.
 
    .. code-block:: python
 
-      from picasso import io, lib, postprocess
+      from picasso import io, postprocess
 
       locs, info = io.load_locs("molecules.hdf5")
-      pixelsize = lib.get_from_metadata(info, "Pixelsize")
-      picks, shape, size = io.load_picks("picks.yaml", pixelsize)
+      picks, shape, size = io.load_picks("picks.yaml")
 
       result = postprocess.ripley_h(
           locs, info, picks, shape, size, r_max=500, steps=100, n_simulations=99
@@ -785,11 +780,10 @@ range and volume).
 
    .. code-block:: python
 
-      from picasso import io, lib, postprocess
+      from picasso import io, postprocess
 
       locs, info = io.load_locs("molecules.hdf5")
-      pixelsize = lib.get_from_metadata(info, "Pixelsize")
-      picks, shape, size = io.load_picks("picks.yaml", pixelsize)
+      picks, shape, size = io.load_picks("picks.yaml")
 
       result = postprocess.rdf(
           locs, info, picks, shape, size, r_max=500, steps=50, n_simulations=99
@@ -866,12 +860,11 @@ region extends over the z range of the molecules of both channels.
 
    .. code-block:: python
 
-      from picasso import io, lib, postprocess
+      from picasso import io, postprocess
 
       locs_a, info_a = io.load_locs("protein_a_molecules.hdf5")
       locs_b, info_b = io.load_locs("protein_b_molecules.hdf5")
-      pixelsize = lib.get_from_metadata(info_a, "Pixelsize")
-      picks, shape, size = io.load_picks("picks.yaml", pixelsize)
+      picks, shape, size = io.load_picks("picks.yaml")
 
       result = postprocess.rdf(
           locs_a,

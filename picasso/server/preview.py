@@ -40,7 +40,7 @@ def picasso_render(
     info : list of dicts
         Localizations metadata.
     viewport : tuple
-        ``((y_min, x_min), (y_max, x_max))`` in camera pixels.
+        ``((y_min, x_min), (y_max, x_max))`` in nm.
     disp_px_size : float
         Display pixel size of the rendered image in nm.
 

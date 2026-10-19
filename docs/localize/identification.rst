@@ -76,11 +76,11 @@ Hovering the mouse cursor over a fit marker or over an identification box shows 
       from picasso import io, localize
 
       movie, info = io.load_movie("movie.tif")
-      camera_info = {
+      camera_info = {   # Pixelsize (nm) is required: the localizations are saved in nm
           "Baseline": 100, "Sensitivity": 0.53, "Gain": 1, "Pixelsize": 130
       }
 
-      # a box of 7 and a min. net gradient of 5000
+      # a box of 7 (camera pixels) and a min. net gradient of 5000
       parameters = localize.IdentificationParameters(
           method=localize.NetGradient(5000), box=7
       )
@@ -175,7 +175,7 @@ Gaussian filter
 
 Spot identification looks for a *single* local maximum per spot. A non-Gaussian point spread function may break up into several local maxima, making identification challenging.
 
-Setting ``Gaussian filter sigma`` in the ``Identification`` group smooths each frame with a Gaussian of that standard deviation (in camera pixels) before spots are identified, which merges those maxima back into one.
+Setting ``Gaussian filter sigma`` in the ``Identification`` group smooths each frame with a Gaussian of that standard deviation before spots are identified, which merges those maxima back into one. Like the box size and the regions of interest, the sigma is a quantity of the raw image and is therefore given in camera pixels, not in nm.
 
 A sigma of 0 (the default, shown as ``Off``) disables the filter. Enable ``Preview`` and adapt the value of the filter until the expected regions are outlined successfully.
 

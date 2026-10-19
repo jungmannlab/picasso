@@ -32,9 +32,13 @@ Train a MLP model for nanopattern prediction using nanoTRON.
 4. Name every data set (class) with a unique name.
 5. Set up the image parameters in the box ``Image Parameter``:
 
-   - Set the oversampling factor via ``Oversampling``. This factor determines
-     the sub-pixel resolution of the training images. We recommend a lower
-     resolution than the data would provide, for better generalization.
+   - Set the size of the rendered pixels via ``Display pixel size (nm)``.
+     It determines the resolution of the training images. We recommend a
+     coarser pixel than the data would allow, for better generalization. The
+     model ``.yaml`` records it as ``Display pixel size (nm)`` and the pick
+     size as ``Pick Diameter (nm)`` (models trained before Picasso 1.0
+     recorded ``Oversampling`` and ``Pick Diameter`` in camera pixels; they
+     are converted when loaded, see :ref:`files-legacy`).
    - Augment the training data sets via the check button
      ``Expand Training Set``. Here every data set point is rotated eleven
      times.
@@ -77,8 +81,7 @@ Train a MLP model for nanopattern prediction using nanoTRON.
       X, y = [], []
       for label, path in enumerate(["class0_picked.hdf5", "class1_picked.hdf5"]):
           locs, info = io.load_locs(path)
-          pixelsize = lib.get_from_metadata(info, "Pixelsize")
-          pick_radius = lib.get_from_metadata(info, "Pick Diameter (nm)") / pixelsize / 2
+          pick_radius = lib.get_from_metadata(info, "Pick Diameter (nm)") / 2   # nm
           for group in locs["group"].unique():
               img = nanotron.roi_to_img(
                   locs, info, pick=int(group), radius=pick_radius, disp_px_size=disp_px_size

@@ -23,6 +23,14 @@ Two ways to measure it, both producing the same file:
     *same* frame; pairing those detections frame by frame registers the
     channels with no separate bead acquisition.
 
+Every position, radius and residual in this module is in camera pixels:
+a channel registration is detector geometry, used while fitting to place
+the fitting boxes on the raw images, not a correction of localizations
+(which are in nm; see ``picasso.localize.fit_lateral_transform`` for
+those). The stored ``channel_transforms`` therefore map camera pixel
+positions, and ``picasso.transforms.Transform.decompose`` reads them
+with ``unit="px"``.
+
 The matching machinery underneath is shared with :mod:`picasso.spline`, which
 registers the channels of its own multichannel PSF calibration the same way.
 That shared part is public API rather than module-private:
@@ -1096,7 +1104,9 @@ def _registration_calibration(
     ``transforms`` is one entry per channel in channel order, the reference's
     being the identity, stored in the same wire format as a multichannel spline
     calibration's ``channel_transforms`` so every consumer of those works
-    unchanged. The detection settings are recorded for traceability: the
+    unchanged. They map camera pixel positions (detector geometry), as do
+    ``box`` and the ``rms`` residuals; nothing here is in nm. The detection
+    settings are recorded for traceability: the
     minimum net gradient, or the wavelet settings as a plain dict (the file is
     YAML).
     """

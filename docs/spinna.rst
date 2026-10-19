@@ -206,13 +206,13 @@ Within the *Fitting* box:
    :icon: code
    :class-container: api-example
 
-   The experimental molecules are given in nm. ``generate_N_structures``
-   builds the search space of stoichiometries, ``fit_stoichiometry`` tests
-   them; ``bootstrap=True`` adds the uncertainty of the result.
+   The experimental molecules are given in nm, as they are in the
+   localization file. ``generate_N_structures`` builds the search space of
+   stoichiometries, ``fit_stoichiometry`` tests them; ``bootstrap=True`` adds
+   the uncertainty of the result.
 
    .. code-block:: python
 
-      PIXELSIZE = 130      # camera pixel size, nm
       LABEL_UNC = 6.0      # label uncertainty, nm
       LE = 0.375           # labeling efficiency
       ROI = 10_000         # simulated region of interest, nm
@@ -220,7 +220,7 @@ Within the *Fitting* box:
       N_SIM = 30           # simulations per tested stoichiometry
 
       egfr_mols, info = io.load_locs("egfr_mols.hdf5")
-      egfr_coords = egfr_mols[["x", "y"]].to_numpy() * PIXELSIZE
+      egfr_coords = egfr_mols[["x", "y"]].to_numpy()     # nm
       n_egfr = int(egfr_coords.shape[0] / LE)     # number of molecules to simulate
 
       mixer = spinna.StructureMixer(

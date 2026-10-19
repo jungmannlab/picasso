@@ -27,6 +27,8 @@ PIXELSIZE = 130.0
 #: the view is 256 display pixels wide and shows the whole 32 pixel
 #: FOV, i.e., 8 display pixels per camera pixel
 SCALE = 8
+#: float32 coordinates of a few thousand nm resolve about 0.001 nm
+ATOL = 1e-2
 
 
 def _locs(n: int = 500, seed: int = 0) -> pd.DataFrame:
@@ -34,10 +36,14 @@ def _locs(n: int = 500, seed: int = 0) -> pd.DataFrame:
     return pd.DataFrame(
         {
             "frame": rng.integers(0, 1000, size=n).astype(np.uint32),
-            "x": rng.uniform(0.0, WIDTH, size=n).astype(np.float32),
-            "y": rng.uniform(0.0, HEIGHT, size=n).astype(np.float32),
-            "lpx": np.full(n, 0.1, dtype=np.float32),
-            "lpy": np.full(n, 0.1, dtype=np.float32),
+            "x": (rng.uniform(0.0, WIDTH, size=n) * PIXELSIZE).astype(
+                np.float32
+            ),
+            "y": (rng.uniform(0.0, HEIGHT, size=n) * PIXELSIZE).astype(
+                np.float32
+            ),
+            "lpx": np.full(n, 0.1 * PIXELSIZE, dtype=np.float32),
+            "lpy": np.full(n, 0.1 * PIXELSIZE, dtype=np.float32),
             "photons": np.full(n, 1000.0, dtype=np.float32),
         }
     )
@@ -81,7 +87,8 @@ class _Event:
 
 
 def _drag(view, dx, dy, start=(128, 128)):
-    """Drag by ``(dx, dy)`` camera pixels."""
+    """Drag by ``(dx, dy)`` camera pixels, i.e., by ``dx * PIXELSIZE``
+    and ``dy * PIXELSIZE`` nm."""
     x0, y0 = start
     x1, y1 = x0 + dx * SCALE, y0 + dy * SCALE
     view.mousePressEvent(_Event(x0, y0))
@@ -96,7 +103,10 @@ def window(qt_offscreen, tmp_path):
     for i in range(2):
         path = str(tmp_path / f"locs{i}.hdf5")
         window.view.add(path, _locs(seed=i), _info(), render_=False)
-    window.view.viewport = [(0.0, 0.0), (HEIGHT, WIDTH)]
+    window.view.viewport = [
+        (0.0, 0.0),
+        (HEIGHT * PIXELSIZE, WIDTH * PIXELSIZE),
+    ]
     window.view.resize(256, 256)
     window.view._mode = "Move"
     return window
@@ -151,9 +161,9 @@ def test_preview_keeps_the_press_coordinates(window):
     x = view.locs[0]["x"].to_numpy().copy()
     view.mousePressEvent(_Event(128, 128))
     view.mouseMoveEvent(_Event(128 + 2 * SCALE, 128))
-    np.testing.assert_allclose(view.locs[0]["x"], x + 2, atol=1e-4)
+    np.testing.assert_allclose(view.locs[0]["x"], x + 2 * PIXELSIZE, atol=ATOL)
     view.mouseMoveEvent(_Event(128 + 3 * SCALE, 128))
-    np.testing.assert_allclose(view.locs[0]["x"], x + 3, atol=1e-4)
+    np.testing.assert_allclose(view.locs[0]["x"], x + 3 * PIXELSIZE, atol=ATOL)
     # the press coordinates were not modified in memory
     np.testing.assert_array_equal(view._move_origin[0][0], x)
     view.mouseReleaseEvent(_Event(128 + 3 * SCALE, 128))
@@ -165,15 +175,21 @@ def test_drag_within_canvas(window):
     x0 = view.locs[0]["x"].to_numpy().copy()
     x1 = view.locs[1]["x"].to_numpy().copy()
     _drag(view, 2, 0)
-    np.testing.assert_allclose(view.locs[0]["x"], x0 + 2, atol=1e-4)
+    np.testing.assert_allclose(
+        view.locs[0]["x"], x0 + 2 * PIXELSIZE, atol=ATOL
+    )
     np.testing.assert_array_equal(view.locs[1]["x"], x1)
     key_x = gui_render.MANUAL_SHIFT_KEYS[0]
-    assert view.infos[0][-1][key_x] == pytest.approx(2)
+    assert view.infos[0][-1][key_x] == pytest.approx(2 * PIXELSIZE)
     assert key_x not in view.infos[1][-1]
     # grown to contain the locs moved beyond the right edge
-    assert view.infos[0][0]["Width"] == int(np.floor(x0.max() + 2)) + 1
+    assert view.infos[0][0]["Width"] == (
+        int(np.floor(x0.max() / PIXELSIZE + 2)) + 1
+    )
     assert view.infos[1][0]["Width"] == WIDTH
-    assert view._move_undo == [((0,), pytest.approx(2), pytest.approx(0))]
+    assert view._move_undo == [
+        ((0,), pytest.approx(2 * PIXELSIZE), pytest.approx(0))
+    ]
     assert window.tools_settings_dialog.move_undo_button.isEnabled()
 
 
@@ -183,23 +199,24 @@ def test_drag_beyond_top_left_translates_everything(window, tmp_path):
     x1 = view.locs[1]["x"].to_numpy().copy()
     y1 = view.locs[1]["y"].to_numpy().copy()
     view._pick_shape = "Circle"
-    view._picks = [(5.0, 6.0)]
-    view._points = [(1.0, 1.0)]
+    view._picks = [(650.0, 780.0)]
+    view._points = [(130.0, 130.0)]
     viewport = view.viewport
     _drag(view, -10, -3)
     ox, oy = (view.infos[1][-1][key] for key in lib.CANVAS_OFFSET_KEYS)
-    assert ox == int(np.ceil(10 - x0.min()))
-    assert oy >= 1
+    # whole camera pixels, in nm
+    assert ox == int(np.ceil(10 - x0.min() / PIXELSIZE)) * PIXELSIZE
+    assert oy >= PIXELSIZE
     for locs in view.locs:
         assert locs["x"].min() >= 0 and locs["y"].min() >= 0
     # the other channel, picks and points moved along
-    np.testing.assert_allclose(view.locs[1]["x"], x1 + ox, atol=1e-4)
-    np.testing.assert_allclose(view.locs[1]["y"], y1 + oy, atol=1e-4)
-    assert view._picks == [(5.0 + ox, 6.0 + oy)]
-    assert view._points == [(1.0 + ox, 1.0 + oy)]
+    np.testing.assert_allclose(view.locs[1]["x"], x1 + ox, atol=ATOL)
+    np.testing.assert_allclose(view.locs[1]["y"], y1 + oy, atol=ATOL)
+    assert view._picks == [(650.0 + ox, 780.0 + oy)]
+    assert view._points == [(130.0 + ox, 130.0 + oy)]
     # so did the view, so the display does not jump
     assert view.viewport[0][1] > viewport[0][1]
-    assert view.infos[1][0]["Width"] == WIDTH + ox
+    assert view.infos[1][0]["Width"] == WIDTH + ox / PIXELSIZE
     assert view.infos[1][-1][lib.CAMERA_SIZE_KEYS[0]] == WIDTH
     # saving keeps every localization
     for i, (locs, info) in enumerate(zip(view.locs, view.infos)):
@@ -215,7 +232,7 @@ def test_undo_restores_the_registration(window):
     _drag(view, -10, 0)
     view.undo_move()
     np.testing.assert_allclose(
-        view.locs[0]["x"] - view.locs[1]["x"], diff, atol=1e-4
+        view.locs[0]["x"] - view.locs[1]["x"], diff, atol=ATOL
     )
     assert view.infos[0][-1][gui_render.MANUAL_SHIFT_KEYS[0]] == 0
     assert not view._move_undo
@@ -240,8 +257,8 @@ def test_dragging_back_restores_the_canvas(window):
     for info in view.infos:
         assert info[-1][lib.CANVAS_OFFSET_KEYS[0]] == 0
         assert info[0]["Width"] == WIDTH
-    np.testing.assert_allclose(view.locs[0]["x"], x0, atol=1e-4)
-    np.testing.assert_allclose(view.locs[1]["x"], x1, atol=1e-4)
+    np.testing.assert_allclose(view.locs[0]["x"], x0, atol=ATOL)
+    np.testing.assert_allclose(view.locs[1]["x"], x1, atol=ATOL)
     np.testing.assert_allclose(view.viewport, viewport)
 
 
@@ -251,14 +268,20 @@ def test_several_channels_are_dragged_together(window):
     x1 = view.locs[1]["x"].to_numpy().copy()
     window.tools_settings_dialog.set_move_channels((0, 1))
     _drag(view, 2, 1)
-    np.testing.assert_allclose(view.locs[0]["x"], x0 + 2, atol=1e-4)
-    np.testing.assert_allclose(view.locs[1]["x"], x1 + 2, atol=1e-4)
+    np.testing.assert_allclose(
+        view.locs[0]["x"], x0 + 2 * PIXELSIZE, atol=ATOL
+    )
+    np.testing.assert_allclose(
+        view.locs[1]["x"], x1 + 2 * PIXELSIZE, atol=ATOL
+    )
     for info in view.infos:
-        assert info[-1][gui_render.MANUAL_SHIFT_KEYS[1]] == pytest.approx(1)
+        assert info[-1][gui_render.MANUAL_SHIFT_KEYS[1]] == pytest.approx(
+            PIXELSIZE
+        )
     assert view._move_undo[-1][0] == (0, 1)
     view.undo_move()
-    np.testing.assert_allclose(view.locs[0]["x"], x0, atol=1e-4)
-    np.testing.assert_allclose(view.locs[1]["x"], x1, atol=1e-4)
+    np.testing.assert_allclose(view.locs[0]["x"], x0, atol=ATOL)
+    np.testing.assert_allclose(view.locs[1]["x"], x1, atol=ATOL)
     for info in view.infos:
         assert info[0]["Width"] == WIDTH and info[0]["Height"] == HEIGHT
 
@@ -287,7 +310,7 @@ def test_adding_a_channel_joins_the_translated_frame(window, tmp_path):
     locs = _locs(seed=5)
     x = locs["x"].to_numpy().copy()
     view.add(str(tmp_path / "new.hdf5"), locs, _info(), render_=False)
-    np.testing.assert_allclose(view.locs[2]["x"], x + ox, atol=1e-4)
+    np.testing.assert_allclose(view.locs[2]["x"], x + ox, atol=ATOL)
     assert view.infos[2][-1][lib.CANVAS_OFFSET_KEYS[0]] == ox
     assert window.tools_settings_dialog.move_channels() == (0,)
 
@@ -297,15 +320,15 @@ def test_translated_file_opens_in_a_new_window(qt_offscreen, tmp_path):
     canvas is fitted before the view has a viewport."""
     locs = _locs()
     info = _info()
-    info[-1][lib.CANVAS_OFFSET_KEYS[0]] = 40
-    locs["x"] += np.float32(40)
+    info[-1][lib.CANVAS_OFFSET_KEYS[0]] = 40 * PIXELSIZE
+    locs["x"] += np.float32(40 * PIXELSIZE)
     window = gui_render.Window(plugins_loaded=True)
     # as the file loader does
     window.view.add(str(tmp_path / "moved.hdf5"), locs, info, render_=False)
     window.view._show_added_channels(True)
     assert len(window.view.locs) == 1
     # back in the camera frame, as nothing else is loaded
-    assert window.view.locs[0]["x"].min() < 40
+    assert window.view.locs[0]["x"].min() < 40 * PIXELSIZE
     assert lib.get_from_metadata(window.view.infos[0], "Width") == WIDTH
     window.close()
 
@@ -314,7 +337,7 @@ def test_apply_expression_grows_the_canvas(window, tmp_path):
     view = window.view
     n = len(view.locs[0])
     before = view.locs[0]["x"].to_numpy()
-    window._apply_cmd("x -= 5", 0)
+    window._apply_cmd("x -= 650", 0)  # 5 camera pixels
     assert len(view.locs[0]) == n
     assert view.locs[0]["x"].min() >= 0
     # new memory, the GPU uploads are keyed on it

@@ -52,9 +52,9 @@ Opening Files
       n_locs, image = render.render(
           locs, info,
           disp_px_size=10,               # nm
-          viewport=((0, 0), (64, 64)),   # ((y_min, x_min), (y_max, x_max)) in camera px; None: whole FOV
+          viewport=((0, 0), (8320, 8320)),   # ((y_min, x_min), (y_max, x_max)) in nm; None: whole FOV
           blur_method="gaussian",        # None, "gaussian", "gaussian_iso", "smooth" or "convolve"
-          min_blur_width=0.0,            # camera pixels
+          min_blur_width=0.0,            # nm
       )
       plt.imsave("movie.png", image, vmin=0, vmax=0.2 * image.max(), cmap="magma")
 
@@ -157,11 +157,10 @@ events (`Jungmann et al., Nature Methods, 2016 <https://doi.org/10.1038/nmeth.38
 
    .. code-block:: python
 
-      from picasso import io, lib, postprocess
+      from picasso import io, postprocess
 
       locs, info = io.load_locs("movie_locs.hdf5")
-      pixelsize = lib.get_from_metadata(info, "Pixelsize")
-      radius = 100 / pixelsize / 2              # 100 nm picks
+      radius = 50.0                             # 100 nm picks (nm)
 
       # Calibration on picks of structures with n_sites binding sites
       calib = postprocess.picked_locs(locs, info, calib_picks, "Circle", pick_size=radius)

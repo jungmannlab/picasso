@@ -45,6 +45,12 @@
   "-c",
   "-p"
  ],
+ "convert-units": [
+  "--in-place",
+  "--pixelsize",
+  "-i",
+  "-px"
+ ],
  "csv2hdf": [
   "--pixelsize",
   "-p"

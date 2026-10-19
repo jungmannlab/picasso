@@ -111,7 +111,7 @@ class TestLocalizeChecks:
         )
         with caplog.at_level(logging.INFO, logger="picasso.localize"):
             assert localize.check_nena(locs, info) == 0.5
-        assert "NeNA: 0.50 px." in caplog.text
+        assert "NeNA: 0.50 nm." in caplog.text
 
     def test_nena_failure_is_a_warning(self, locs, info, monkeypatch, caplog):
         def fail(*args, **kwargs):

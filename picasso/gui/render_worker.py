@@ -84,7 +84,7 @@ def global_precision_of(
     locs: pd.DataFrame, cache: dict
 ) -> tuple[float, float] | None:
     """The blur of *Global loc. prec.* for one channel: the median
-    ``lpx`` and ``lpy`` (camera pixels) of all its localizations,
+    ``lpx`` and ``lpy`` (nm) of all its localizations,
     computed once per DataFrame and kept in ``cache`` (keyed on the
     DataFrame's identity and length, so a replaced channel is
     recomputed). None when the channel lacks the precision columns."""

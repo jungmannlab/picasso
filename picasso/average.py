@@ -70,9 +70,9 @@ def align_group_core(
     angles : lib.FloatArray1D
         Array of rotation angles to test.
     oversampling : float
-        Number of display pixels per camera pixel.
+        Rendered pixels per nm, i.e., 1 / display pixel size.
     t_min, t_max : float
-        Minimum and maximum bounds for the histogram.
+        Minimum and maximum bounds for the histogram (nm).
     CF_image_avg : np.ndarray
         Conjugate Fourier transform of the average image.
     image_half : float
@@ -158,9 +158,9 @@ def _align_group_worker(
     angles : lib.FloatArray1D
         Array of rotation angles.
     oversampling : float
-        Number of display pixels per camera pixel.
+        Rendered pixels per nm, i.e., 1 / display pixel size.
     t_min, t_max : float
-        Minimum and maximum bounds for the histogram.
+        Minimum and maximum bounds for the histogram (nm).
     CF_image_avg : np.ndarray
         Conjugate Fourier transform of the average image.
     image_half : float
@@ -274,8 +274,9 @@ def prepare_locs_for_save(
     new_info : list of dicts
         Updated metadata with new width and height.
     """
-    cx = lib.get_from_metadata(info, "Width") / 2
-    cy = lib.get_from_metadata(info, "Height") / 2
+    width, height = lib.field_of_view(info)
+    cx = width / 2
+    cy = height / 2
     locs["x"] += cx
     locs["y"] += cy
     avg_info = lib.step_info("Average")
@@ -555,12 +556,10 @@ def average(
     t_min = -r
     t_max = r
 
-    # Calculate angle step for rotation search
-    camera_pixelsize = lib.get_from_metadata(
-        info, "Pixelsize", raise_error=True
-    )
-    oversampling = camera_pixelsize / display_pixel_size
-    a_step = np.arcsin(1 / (oversampling * r))
+    # Calculate angle step for rotation search: one rendered pixel at
+    # the radius r (a quarter turn for particles smaller than a pixel)
+    oversampling = 1 / display_pixel_size  # rendered pixels per nm
+    a_step = np.arcsin(min(1.0, 1 / (oversampling * r)))
     angles = np.arange(0, 2 * np.pi, a_step)
 
     # Setup multiprocessing; the shared arrays are (re-)filled with the

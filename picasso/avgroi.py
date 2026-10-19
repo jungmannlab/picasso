@@ -158,8 +158,11 @@ def locs_from_fits(
     box: int,
     em: float,
     readout_variance: lib.FloatArray1D | float = 0.0,
+    *,
+    pixelsize: float,
 ) -> pd.DataFrame:
-    """Convert fit results into a data frame of localizations.
+    """Convert fit results into a data frame of localizations (lengths
+    in nm).
 
     Parameters
     ----------
@@ -175,14 +178,18 @@ def locs_from_fits(
         Mean sCMOS readout variance over each spot's box, in photoelectrons
         squared; it adds to the background term of the closed-form precision.
         See ``picasso.fitting.precision``. Default 0.
+    pixelsize : float
+        Camera pixel size in nm; the positions, widths and precisions are
+        converted to nm with it.
 
     Returns
     -------
     locs : pd.DataFrame
         The localizations, sorted by frame.
     """
-    x = theta[:, 0] + identifications["x"]
-    y = theta[:, 1] + identifications["y"]
+    pixelsize = float(pixelsize)
+    x = (theta[:, 0] + identifications["x"]) * pixelsize
+    y = (theta[:, 1] + identifications["y"]) * pixelsize
     lpx = precision.localization_precision(
         theta[:, 2],
         theta[:, 4],
@@ -209,11 +216,11 @@ def locs_from_fits(
                 "x": x.astype(np.float32),
                 "y": y.astype(np.float32),
                 "photons": theta[:, 2].astype(np.float32),
-                "sx": theta[:, 4].astype(np.float32),
-                "sy": theta[:, 5].astype(np.float32),
+                "sx": (theta[:, 4] * pixelsize).astype(np.float32),
+                "sy": (theta[:, 5] * pixelsize).astype(np.float32),
                 "bg": theta[:, 3].astype(np.float32),
-                "lpx": lpx.astype(np.float32),
-                "lpy": lpy.astype(np.float32),
+                "lpx": (lpx * pixelsize).astype(np.float32),
+                "lpy": (lpy * pixelsize).astype(np.float32),
                 "ellipticity": ellipticity.astype(np.float32),
                 **lib.net_gradient_column(identifications),
                 "n_id": identifications["n_id"].to_numpy().astype(np.uint32),
@@ -227,11 +234,11 @@ def locs_from_fits(
                 "x": x.astype(np.float32),
                 "y": y.astype(np.float32),
                 "photons": theta[:, 2].astype(np.float32),
-                "sx": theta[:, 4].astype(np.float32),
-                "sy": theta[:, 5].astype(np.float32),
+                "sx": (theta[:, 4] * pixelsize).astype(np.float32),
+                "sy": (theta[:, 5] * pixelsize).astype(np.float32),
                 "bg": theta[:, 3].astype(np.float32),
-                "lpx": lpx.astype(np.float32),
-                "lpy": lpy.astype(np.float32),
+                "lpx": (lpx * pixelsize).astype(np.float32),
+                "lpy": (lpy * pixelsize).astype(np.float32),
                 "ellipticity": ellipticity.astype(np.float32),
                 **lib.net_gradient_column(identifications),
             }

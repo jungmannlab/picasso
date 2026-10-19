@@ -976,7 +976,7 @@ class SPTController:
         params, ok = TrackDialog.getParams(view.window, frame_time=frame_time)
         if not ok:
             return
-        max_jump = params["max_jump"] / view.pixelsize  # nm to pixels
+        max_jump = params["max_jump"]  # nm
         jobs = [(c, view.locs[c], view.infos[c]) for c in channels]
 
         def compute(progress: lib.TaskProgress) -> list[tuple]:
@@ -1008,7 +1008,6 @@ class SPTController:
                     continue
                 entry = dict(new_info[-1])
                 entry.update(lib.step_info("Render : Track"))
-                # in the pixel size of the Display Settings, as used
                 entry["Max. jump (nm)"] = float(params["max_jump"])
                 view.locs[c] = tracked_locs
                 # new list, the old one may be shared with linked windows
@@ -1063,14 +1062,10 @@ class SPTController:
                 "particles.",
             )
             return
-        pixelsize = view.pixelsize
         precision = None
         if "lpx" in locs.columns and "lpy" in locs.columns:
-            precision = spt.median_precision(locs, pixelsize)
-        entry = spt.tracking_info(info)
-        max_jump = entry.get("Max. jump (camera pixels)")
-        if max_jump is not None:
-            max_jump = float(max_jump) * pixelsize
+            precision = spt.median_precision(locs)  # nm
+        max_jump = spt.max_jump_nm(info)
         params, ok = TrackAnalysisDialog.getParams(
             view.window,
             frame_time=lib.get_from_metadata(info, spt.FRAME_TIME_KEY),
@@ -1085,7 +1080,6 @@ class SPTController:
             return spt.analyze_tracks(
                 locs,
                 info,
-                pixelsize=pixelsize,
                 progress=progress,
                 **params,
             )

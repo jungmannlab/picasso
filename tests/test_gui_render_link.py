@@ -17,8 +17,9 @@ from picasso.gui import render as gui_render
 from picasso.gui import render_link
 
 from tests.test_gui_render_async import (
-    HEIGHT,
-    WIDTH,
+    HEIGHT_NM,
+    PIXELSIZE,
+    WIDTH_NM,
     _info,
     _locs,
     _wait_until,
@@ -35,7 +36,7 @@ def _load(window, tmp_path, name, size, seed=0, z=False):
     window.view.add(path, locs, _info(), render_=False)
     window.view.resize(*size)
     window.view.async_rendering = False
-    window.view.viewport = [(0.0, 0.0), (HEIGHT, WIDTH)]
+    window.view.viewport = [(0.0, 0.0), (HEIGHT_NM, WIDTH_NM)]
     window.view.update_scene()
 
 
@@ -143,10 +144,10 @@ def test_a_change_propagates_exactly_once(linked, monkeypatch):
 def test_picks_are_mirrored(linked):
     group, primary, secondary = linked
     group.set_enabled("picks", True)
-    primary.view.add_pick((10.0, 12.0))
-    assert secondary.view._picks == [(10.0, 12.0)]
-    secondary.view.add_pick((30.0, 31.0))
-    assert primary.view._picks == [(10.0, 12.0), (30.0, 31.0)]
+    primary.view.add_pick((1300.0, 1560.0))
+    assert secondary.view._picks == [(1300.0, 1560.0)]
+    secondary.view.add_pick((3900.0, 4030.0))
+    assert primary.view._picks == [(1300.0, 1560.0), (3900.0, 4030.0)]
     primary.view.clear_picks()
     assert secondary.view._picks == []
 
@@ -156,14 +157,16 @@ def test_polygons_extended_in_place_are_mirrored_as_copies(linked):
     group.set_enabled("picks", True)
     view = primary.view
     view._pick_shape = "Polygon"
-    view._picks = [[(1.0, 1.0), (5.0, 1.0)]]
+    view._picks = [[(130.0, 130.0), (650.0, 130.0)]]
     view.update_scene(picks_only=True)
     assert secondary.view._pick_shape == "Polygon"
     assert secondary.view._picks == view._picks
     assert secondary.view._picks[0] is not view._picks[0]
-    view._picks[0].append((5.0, 5.0))
+    view._picks[0].append((650.0, 650.0))
     view.update_scene(picks_only=True)
-    assert secondary.view._picks == [[(1.0, 1.0), (5.0, 1.0), (5.0, 5.0)]]
+    assert secondary.view._picks == [
+        [(130.0, 130.0), (650.0, 130.0), (650.0, 650.0)]
+    ]
 
 
 def test_pick_shape_and_size_are_mirrored(linked):
@@ -199,12 +202,12 @@ def test_display_and_render_settings_are_mirrored(linked):
     s = secondary.display_settings_dlg
     d.colormap.setCurrentText("viridis")
     d.blur_buttongroup.buttons()[0].click()
-    d.min_blur_width.setValue(0.5)
+    d.min_blur_width.setValue(65.0)
     d.scalebar_groupbox.setChecked(True)
     d.minimap.setChecked(True)
     assert s.colormap.currentText() == "viridis"
     assert s.blur_buttongroup.buttons()[0].isChecked()
-    assert s.min_blur_width.value() == pytest.approx(0.5)
+    assert s.min_blur_width.value() == pytest.approx(65.0)
     assert s.scalebar_groupbox.isChecked()
     assert s.minimap.isChecked()
 
@@ -382,11 +385,11 @@ def test_new_linked_window_from_the_menu(qt_offscreen, qapp, tmp_path):
     primary.view.zoom_in()
     # an unsaved change, which the new window must show
     source = primary.view.locs[1]
-    primary.view.locs[1] = source[source["x"] < WIDTH / 2].reset_index(
+    primary.view.locs[1] = source[source["x"] < WIDTH_NM / 2].reset_index(
         drop=True
     )
     primary.view.invalidate_locs_index(1)
-    primary.view._drift[1] = pd.DataFrame({"x": [0.5], "y": [0.25]})
+    primary.view._drift[1] = pd.DataFrame({"x": [65.0], "y": [32.5]})
 
     def accept_second(dialog):
         dialog.checks[1].setChecked(True)
@@ -448,7 +451,7 @@ def shared(qt_offscreen, tmp_path):
     _add(primary, tmp_path, "a", 0)
     _add(primary, tmp_path, "b", 1)
     primary.view.resize(128, 128)
-    primary.view.viewport = [(0.0, 0.0), (HEIGHT, WIDTH)]
+    primary.view.viewport = [(0.0, 0.0), (HEIGHT_NM, WIDTH_NM)]
     primary.view.update_scene()
     group = render_link.LinkGroup(primary)
     secondary = gui_render.Window(plugins_loaded=True, link_group=group)
@@ -463,7 +466,7 @@ def shared(qt_offscreen, tmp_path):
 
 
 def _half(locs):
-    return locs[locs["x"] < WIDTH / 2].reset_index(drop=True)
+    return locs[locs["x"] < WIDTH_NM / 2].reset_index(drop=True)
 
 
 def test_a_shared_channel_is_one_dataframe(shared):
@@ -513,12 +516,14 @@ def test_drift_applied_in_place_is_adopted(shared, monkeypatch):
     n_frames = _info()[0]["Frames"]
     # shifts towards larger x and y, such that the canvas stays put
     drift = pd.DataFrame(
-        {"x": np.full(n_frames, -0.5), "y": np.full(n_frames, -0.25)}
+        {"x": np.full(n_frames, -65.0), "y": np.full(n_frames, -32.5)}
     )
     x_before = primary.view.locs[1]["x"].to_numpy().copy()
     secondary.view._apply_drift(0, drift)
     assert primary.view.locs[1] is secondary.view.locs[0]
-    np.testing.assert_allclose(primary.view.locs[1]["x"], x_before + 0.5)
+    np.testing.assert_allclose(
+        primary.view.locs[1]["x"], x_before + 65.0, atol=1e-2
+    )
     assert primary.view._drift[1] is secondary.view._drift[0]
     assert len(calls) >= 1
 
@@ -540,17 +545,24 @@ def test_a_canvas_shift_moves_the_other_windows_channels(shared):
     own_c_x = secondary.view.locs[1]["x"].to_numpy().copy()
     own_a_x = primary.view.locs[0]["x"].to_numpy().copy()
     # move the shared channel beyond the left edge: the canvas grows by
-    # a whole number of pixels and every channel is translated with it
+    # a whole number of camera pixels and every channel is translated
+    # with it
     locs = primary.view.locs[1]
     x = locs["x"].to_numpy()
-    primary.view._set_channel_xy(1, x - x.min() - 2.5, locs["y"].to_numpy())
+    primary.view._set_channel_xy(
+        1, x - x.min() - 2.5 * PIXELSIZE, locs["y"].to_numpy()
+    )
     primary.view.locs_moved(1)
     shift = primary.view.locs[0]["x"].to_numpy() - own_a_x
-    assert shift[0] == pytest.approx(3.0)
+    assert shift[0] == pytest.approx(3.0 * PIXELSIZE, abs=1e-2)
     np.testing.assert_allclose(
-        secondary.view.locs[1]["x"].to_numpy() - own_c_x, shift[0]
+        secondary.view.locs[1]["x"].to_numpy() - own_c_x,
+        shift[0],
+        atol=1e-2,
     )
-    assert primary.view.locs[1]["x"].min() == pytest.approx(0.5)
+    assert primary.view.locs[1]["x"].min() == pytest.approx(
+        0.5 * PIXELSIZE, abs=1e-2
+    )
 
 
 def test_the_render_index_is_built_once(shared):

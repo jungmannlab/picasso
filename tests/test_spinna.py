@@ -357,26 +357,28 @@ def test_random_rotation_invalid_mode_raises():
 # ---------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("pixelsize", [130, 100])
 @pytest.mark.parametrize("lp", [1.0, 5.0])
-def test_coords_to_locs_2d_unit_conversion(pixelsize, lp):
-    coords = np.array([[0.0, 0.0], [pixelsize, 2 * pixelsize]])
-    locs = spinna.coords_to_locs(coords, lp=lp, pixelsize=pixelsize)
+def test_coords_to_locs_2d_keeps_nm(lp):
+    """Localizations are in nm, like the simulated coordinates: nothing
+    is divided by a camera pixel size any more."""
+    coords = np.array([[0.0, 0.0], [130.0, 260.0]])
+    locs = spinna.coords_to_locs(coords, lp=lp)
     assert isinstance(locs, pd.DataFrame)
     assert set(locs.columns) == {"frame", "x", "y", "lpx", "lpy"}
-    assert np.allclose(locs["x"].to_numpy(), [0.0, 1.0])
-    assert np.allclose(locs["y"].to_numpy(), [0.0, 2.0])
-    # localization precision in pixels
-    assert np.allclose(locs["lpx"].to_numpy(), lp / pixelsize)
-    assert np.allclose(locs["lpy"].to_numpy(), lp / pixelsize)
+    assert np.allclose(locs["x"].to_numpy(), [0.0, 130.0])
+    assert np.allclose(locs["y"].to_numpy(), [0.0, 260.0])
+    # localization precision in nm
+    assert np.allclose(locs["lpx"].to_numpy(), lp)
+    assert np.allclose(locs["lpy"].to_numpy(), lp)
+    assert locs["x"].dtype == np.float32
 
 
 def test_coords_to_locs_3d_keeps_z_in_nm():
     coords = np.array([[0.0, 0.0, 50.0], [130.0, 260.0, -25.0]])
-    locs = spinna.coords_to_locs(coords, lp=1.0, pixelsize=130)
+    locs = spinna.coords_to_locs(coords, lp=1.0)
     assert "z" in locs.columns
     assert np.allclose(locs["z"].to_numpy(), [50.0, -25.0])
-    assert np.allclose(locs["x"].to_numpy(), [0.0, 1.0])
+    assert np.allclose(locs["x"].to_numpy(), [0.0, 130.0])
 
 
 # ---------------------------------------------------------------------

@@ -75,15 +75,20 @@ class TestOverwriteMetadata:
             lib.overwrite_metadata({"Width": 32}, "Missing", 1)
 
 
+#: camera pixel size of the canvas tests (nm); their positions are
+#: written in camera pixels for readability and converted here
+PS = 130.0
+
+
 def _canvas_locs(x, y):
     n = len(x)
     return pd.DataFrame(
         {
             "frame": np.zeros(n, dtype=np.uint32),
-            "x": np.asarray(x, dtype=np.float32),
-            "y": np.asarray(y, dtype=np.float32),
-            "lpx": np.full(n, 0.1, dtype=np.float32),
-            "lpy": np.full(n, 0.1, dtype=np.float32),
+            "x": np.asarray(x, dtype=np.float32) * np.float32(PS),
+            "y": np.asarray(y, dtype=np.float32) * np.float32(PS),
+            "lpx": np.full(n, 10.0, dtype=np.float32),
+            "lpy": np.full(n, 10.0, dtype=np.float32),
         }
     )
 
@@ -91,8 +96,13 @@ def _canvas_locs(x, y):
 def _canvas_info(width=32, height=32):
     return [
         {"Width": width, "Height": height, "Frames": 1},
-        {"Pixelsize": 130},
+        {"Pixelsize": PS},
     ]
+
+
+def _px(values):
+    """Camera pixels -> nm, for comparisons."""
+    return [v * PS for v in values]
 
 
 class TestFitCanvas:
@@ -101,7 +111,7 @@ class TestFitCanvas:
         info = _canvas_info()
         _, _, shifts = lib.fit_canvas([locs], [info])
         assert shifts == [(0, 0)]
-        assert locs["x"].tolist() == pytest.approx([1.0, 30.5])
+        assert locs["x"].tolist() == pytest.approx(_px([1.0, 30.5]))
         assert info[0]["Width"] == 32 and info[0]["Height"] == 32
         # no new keys while the canvas is the camera image
         for key in lib.CANVAS_OFFSET_KEYS + lib.CAMERA_SIZE_KEYS:
@@ -112,14 +122,15 @@ class TestFitCanvas:
         other = _canvas_locs([0.0, 31.0], [0.0, 31.0])
         infos = [_canvas_info(), _canvas_info()]
         _, _, shifts = lib.fit_canvas([moved, other], infos)
-        assert shifts == [(3, 1), (3, 1)]  # whole camera pixels
+        # whole camera pixels, in nm
+        assert shifts == [(3 * PS, 1 * PS), (3 * PS, 1 * PS)]
         assert moved["x"].min() >= 0 and moved["y"].min() >= 0
         # the relative position of channels is kept
-        assert other["x"].tolist() == pytest.approx([3.0, 34.0])
-        assert other["y"].tolist() == pytest.approx([1.0, 32.0])
+        assert other["x"].tolist() == pytest.approx(_px([3.0, 34.0]))
+        assert other["y"].tolist() == pytest.approx(_px([1.0, 32.0]))
         for info in infos:
-            assert info[-1][lib.CANVAS_OFFSET_KEYS[0]] == 3
-            assert info[-1][lib.CANVAS_OFFSET_KEYS[1]] == 1
+            assert info[-1][lib.CANVAS_OFFSET_KEYS[0]] == 3 * PS
+            assert info[-1][lib.CANVAS_OFFSET_KEYS[1]] == 1 * PS
             assert info[-1][lib.CAMERA_SIZE_KEYS[0]] == 32
             # grown by the offset, so the camera FOV stays inside
             assert info[0]["Width"] == 35 and info[0]["Height"] == 33
@@ -130,8 +141,8 @@ class TestFitCanvas:
         lib.fit_canvas([locs], [info])
         assert info[0]["Width"] == 41 and info[0]["Height"] == 33
         # shrinks back, but not below the camera image
-        locs["x"] = np.float32([1.0])
-        locs["y"] = np.float32([1.0])
+        locs["x"] = np.float32([1.0 * PS])
+        locs["y"] = np.float32([1.0 * PS])
         lib.fit_canvas([locs], [info])
         assert info[0]["Width"] == 32 and info[0]["Height"] == 32
 
@@ -139,15 +150,15 @@ class TestFitCanvas:
         moved = _canvas_locs([0.5, 31.5], [1.0, 1.0])
         other = _canvas_locs([0.5, 31.5], [1.0, 1.0])
         infos = [_canvas_info(), _canvas_info()]
-        moved["x"] = moved["x"].to_numpy() - np.float32(10)
+        moved["x"] = moved["x"].to_numpy() - np.float32(10 * PS)
         _, _, shifts = lib.fit_canvas([moved, other], infos)
-        assert shifts[0] == (10, 0)
+        assert shifts[0] == (10 * PS, 0)
         assert infos[0][0]["Width"] == 42
-        moved["x"] = moved["x"].to_numpy() + np.float32(10)
+        moved["x"] = moved["x"].to_numpy() + np.float32(10 * PS)
         _, _, shifts = lib.fit_canvas([moved, other], infos)
-        assert shifts[0] == (-10, 0)
-        assert moved["x"].tolist() == pytest.approx([0.5, 31.5])
-        assert other["x"].tolist() == pytest.approx([0.5, 31.5])
+        assert shifts[0] == (-10 * PS, 0)
+        assert moved["x"].tolist() == pytest.approx(_px([0.5, 31.5]))
+        assert other["x"].tolist() == pytest.approx(_px([0.5, 31.5]))
         for info in infos:
             assert info[0]["Width"] == 32
             assert info[-1][lib.CANVAS_OFFSET_KEYS[0]] == 0
@@ -156,25 +167,25 @@ class TestFitCanvas:
         locs = _canvas_locs([-1.5], [1.0])
         info = _canvas_info()
         lib.fit_canvas([locs], [info])
-        assert info[-1][lib.CANVAS_OFFSET_KEYS[0]] == 2
-        locs["x"] = locs["x"].to_numpy() - np.float32(4.0)
+        assert info[-1][lib.CANVAS_OFFSET_KEYS[0]] == 2 * PS
+        locs["x"] = locs["x"].to_numpy() - np.float32(4.0 * PS)
         lib.fit_canvas([locs], [info])
-        assert info[-1][lib.CANVAS_OFFSET_KEYS[0]] == 2 + 4
+        assert info[-1][lib.CANVAS_OFFSET_KEYS[0]] == (2 + 4) * PS
         assert info[0]["Width"] == 32 + 6
 
     def test_channels_with_different_offsets_are_aligned(self):
         # e.g., a file saved after a translation, opened with a raw one
         saved = _canvas_locs([0.0, 5.0], [1.0, 1.0])
         saved_info = _canvas_info(width=37)
-        saved_info[-1][lib.CANVAS_OFFSET_KEYS[0]] = 5
+        saved_info[-1][lib.CANVAS_OFFSET_KEYS[0]] = 5 * PS
         saved_info[-1][lib.CAMERA_SIZE_KEYS[0]] = 32
         raw = _canvas_locs([2.0], [1.0])
         infos = [saved_info, _canvas_info()]
         _, _, shifts = lib.fit_canvas([saved, raw], infos)
-        assert shifts == [(0, 0), (5, 0)]
-        assert raw["x"].tolist() == pytest.approx([7.0])
+        assert shifts == [(0, 0), (5 * PS, 0)]
+        assert raw["x"].tolist() == pytest.approx(_px([7.0]))
         for info in infos:
-            assert info[-1][lib.CANVAS_OFFSET_KEYS[0]] == 5
+            assert info[-1][lib.CANVAS_OFFSET_KEYS[0]] == 5 * PS
             assert info[0]["Width"] == 37
 
     def test_replaces_column_arrays(self):
@@ -183,7 +194,7 @@ class TestFitCanvas:
         before = locs["x"].to_numpy()
         lib.fit_canvas([locs], [_canvas_info()])
         assert not np.shares_memory(before, locs["x"].to_numpy())
-        assert before[0] == -1.0
+        assert before[0] == -1.0 * PS
 
     def test_ignores_non_finite(self):
         locs = _canvas_locs([np.nan, -np.inf, 3.0], [1.0, 1.0, 1.0])
@@ -489,7 +500,7 @@ class TestConcatLocs:
     for spherical fits, no ``z`` in 2D, ...); combining them must not lose
     localizations to ``ensure_sanity``'s NaN filter."""
 
-    INFO = [{"Width": 32, "Height": 32, "Frames": 100}]
+    INFO = [{"Width": 32, "Height": 32, "Frames": 100, "Pixelsize": 130}]
 
     @staticmethod
     def _locs(n: int, net_gradient: bool = True, **extra) -> pd.DataFrame:
@@ -587,13 +598,14 @@ class TestEnsureSanity:
         locs = pd.DataFrame(
             {
                 "frame": [0, 0, 0],
-                "x": [1.0, 100.0, 5.0],  # 100 is outside Width=32
-                "y": [1.0, 5.0, 50.0],  # 50 is outside Height=32
+                # 10000 nm is outside Width = 32 px of 130 nm (4160 nm)
+                "x": [1.0, 10000.0, 5.0],
+                "y": [1.0, 5.0, 5000.0],  # 5000 is outside Height
                 "lpx": [0.1, 0.1, 0.1],
                 "lpy": [0.1, 0.1, 0.1],
             }
         )
-        info = [{"Width": 32, "Height": 32, "Frames": 100}]
+        info = [{"Width": 32, "Height": 32, "Frames": 100, "Pixelsize": 130}]
         out = lib.ensure_sanity(locs, info)
         assert len(out) == 1
 
@@ -606,13 +618,13 @@ class TestEnsureSanity:
                 "photons": [100.0, -5.0],
             }
         )
-        info = [{"Width": 32, "Height": 32, "Frames": 1}]
+        info = [{"Width": 32, "Height": 32, "Frames": 1, "Pixelsize": 130}]
         out = lib.ensure_sanity(locs, info)
         assert len(out) == 1
 
     def test_missing_key_raises(self):
         locs = pd.DataFrame({"frame": [0], "x": [1.0], "y": [1.0]})
-        info = [{"Width": 32}]  # missing Height + Frames
+        info = [{"Width": 32}]  # missing Height, Frames and Pixelsize
         with pytest.raises(KeyError):
             lib.ensure_sanity(locs, info)
 
@@ -1650,7 +1662,7 @@ class TestStandardizeDtypes:
         locs = pd.DataFrame(
             {"frame": [0, 1], "x": [1.0, 2.0], "y": [1.0, 2.0]}
         )
-        info = [{"Width": 8, "Height": 8, "Frames": 2}]
+        info = [{"Width": 8, "Height": 8, "Frames": 2, "Pixelsize": 130}]
         out = lib.ensure_sanity(locs, info)
         assert out["x"].dtype == np.float32
         assert out["frame"].dtype == np.uint32
@@ -1663,14 +1675,14 @@ class TestSelectFrcRois:
         n = 50_000
         return pd.DataFrame(
             {
-                "x": rng.uniform(0, 100, n).astype(np.float32),
-                "y": rng.uniform(0, 100, n).astype(np.float32),
+                "x": rng.uniform(0, 10_000, n).astype(np.float32),
+                "y": rng.uniform(0, 10_000, n).astype(np.float32),
             }
         )
 
-    # pixel size 100 nm, so a 1000 nm ROI is 10 camera pixels
+    # a 10 x 10 um field with 1000 nm ROIs, i.e., 100 ROI places
     info = [{"Pixelsize": 100}]
-    viewport = ((0, 0), (100, 100))
+    viewport = ((0, 0), (10_000, 10_000))
 
     def test_rois_inside_viewport_and_not_overlapping(self, uniform_locs):
         rois = lib.select_frc_rois(
@@ -1683,18 +1695,18 @@ class TestSelectFrcRois:
         )
         assert 0 < len(rois) <= 40
         for (y0, x0), (y1, x1) in rois:
-            assert y1 - y0 == pytest.approx(10)
-            assert x1 - x0 == pytest.approx(10)
-            assert y0 >= 0 and x0 >= 0 and y1 <= 100 and x1 <= 100
+            assert y1 - y0 == pytest.approx(1000)
+            assert x1 - x0 == pytest.approx(1000)
+            assert y0 >= 0 and x0 >= 0 and y1 <= 10_000 and x1 <= 10_000
         for a, ((ay0, ax0), _) in enumerate(rois):
             for (by0, bx0), _ in rois[a + 1 :]:
-                overlap_y = abs(ay0 - by0) < 10 - 1e-9
-                overlap_x = abs(ax0 - bx0) < 10 - 1e-9
+                overlap_y = abs(ay0 - by0) < 1000 - 1e-6
+                overlap_x = abs(ax0 - bx0) < 1000 - 1e-6
                 assert not (overlap_y and overlap_x)
 
     def test_min_locs_respected(self, uniform_locs):
-        # ~500 locs per 10 x 10 px ROI; the right half is emptied
-        locs = uniform_locs[uniform_locs["x"] < 50]
+        # ~500 locs per 1 x 1 um ROI; the right half is emptied
+        locs = uniform_locs[uniform_locs["x"] < 5000]
         rois = lib.select_frc_rois(
             locs,
             self.info,

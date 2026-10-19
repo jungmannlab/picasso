@@ -17,11 +17,30 @@ import pytest
 from picasso import render, spatial_index
 from picasso.render import splat
 
+# camera pixel size (nm); every length is in nm. 100 nm is the floor of
+# the spatial index's base block (``spatial_index._MIN_BASE_BLOCK_NM``),
+# so the tree's cells are the camera pixel halved again and again and
+# the render pixels below (a half, a quarter, an eighth of a camera
+# pixel) are whole cells of the tree
+PIXELSIZE = 100.0
+
 
 def _info(width: float, height: float) -> list[dict]:
+    """Metadata of a field of view of ``width`` x ``height`` nm."""
     return [
-        {"Width": width, "Height": height, "Frames": 1, "Pixelsize": 130.0}
+        {
+            "Width": int(round(width / PIXELSIZE)),
+            "Height": int(round(height / PIXELSIZE)),
+            "Frames": 1,
+            "Pixelsize": PIXELSIZE,
+        }
     ]
+
+
+def _os(per_camera_px: float) -> float:
+    """Rendered pixels per nm for ``per_camera_px`` rendered pixels
+    per camera pixel."""
+    return per_camera_px / PIXELSIZE
 
 
 def _quadtree(pyramid, x, y, oversampling, viewport, capacity):
@@ -123,32 +142,45 @@ def _reference_quadtree(
     return image
 
 
-def _clustered_locs(n=2000, width=64.0, height=64.0, seed=0):
+def _clustered_locs(
+    n=2000, width=64.0 * PIXELSIZE, height=64.0 * PIXELSIZE, seed=0
+):
+    """A uniform field over ``width`` x ``height`` nm plus a cluster."""
     rng = np.random.default_rng(seed)
+    sigma = 1.5 * PIXELSIZE
     x = np.concatenate(
-        [rng.uniform(0, width, n // 2), rng.normal(20, 1.5, n // 2)]
+        [
+            rng.uniform(0, width, n // 2),
+            rng.normal(20 * PIXELSIZE, sigma, n // 2),
+        ]
     )
     y = np.concatenate(
-        [rng.uniform(0, height, n // 2), rng.normal(40, 1.5, n // 2)]
+        [
+            rng.uniform(0, height, n // 2),
+            rng.normal(40 * PIXELSIZE, sigma, n // 2),
+        ]
     )
     keep = (x > 0) & (x < width) & (y > 0) & (y < height)
     return x[keep].astype(np.float32), y[keep].astype(np.float32)
 
 
 class TestQuadTree:
-    W = H = 64.0
+    W = H = 64.0 * PIXELSIZE
 
     @pytest.mark.parametrize(
         "capacity,oversampling", [(10, 4.0), (5, 8.0), (30, 2.0), (1, 4.0)]
     )
     def test_matches_the_reference_tree(self, capacity, oversampling):
+        oversampling = _os(oversampling)
         x, y = _clustered_locs()
         pyramid = spatial_index.build_render_index_arrays(x, y, self.W, self.H)
         root = pyramid.block_sizes[0] * (1 << pyramid.root_bits)
         viewport = ((0.0, 0.0), (self.H, self.W))
-        # at these densities no leaf is narrower than a display pixel,
-        # so the kernel's per-pixel binning never differs from the
-        # reference's area spreading
+        # the root square is the field of view and every display pixel
+        # is a whole cell of the tree (see PIXELSIZE), so the kernel's
+        # per-pixel binning never differs from the reference's area
+        # spreading
+        assert root == self.W == self.H
         n, image = _quadtree(pyramid, x, y, oversampling, viewport, capacity)
         reference = _reference_quadtree(
             x, y, root, capacity, oversampling, viewport
@@ -159,6 +191,7 @@ class TestQuadTree:
 
     @pytest.mark.parametrize("width,height", [(100.0, 100.0), (90.0, 50.0)])
     def test_counts_are_kept_on_any_field_size(self, width, height):
+        width, height = width * PIXELSIZE, height * PIXELSIZE
         # the root square is a power of two of base blocks and reaches
         # past the field; the leaves along the field's right and bottom
         # edges spread their count over their part within the field only
@@ -167,23 +200,23 @@ class TestQuadTree:
         root = pyramid.block_sizes[0] * (1 << pyramid.root_bits)
         assert root > max(width, height)
         viewport = ((0.0, 0.0), (height, width))
-        n, image = _quadtree(pyramid, x, y, 2.0, viewport, 10)
+        n, image = _quadtree(pyramid, x, y, _os(2.0), viewport, 10)
         reference = _reference_quadtree(
-            x, y, root, 10, 2.0, viewport, field=(width, height)
+            x, y, root, 10, _os(2.0), viewport, field=(width, height)
         )
         np.testing.assert_allclose(image, reference, rtol=1e-5, atol=1e-5)
         assert image.sum() == pytest.approx(n, rel=1e-5)
 
     def test_density_holds_up_to_the_field_edge(self):
         rng = np.random.default_rng(7)
-        width = height = 100.0
+        width = height = 100.0 * PIXELSIZE
         n = 40_000
         x = rng.uniform(0, width, n).astype(np.float32)
         y = rng.uniform(0, height, n).astype(np.float32)
         pyramid = spatial_index.build_render_index_arrays(x, y, width, height)
         viewport = ((0.0, 0.0), (height, width))
-        _, image = _quadtree(pyramid, x, y, 4.0, viewport, 2000)
-        density = n / (width * height) / 16  # per display pixel
+        _, image = _quadtree(pyramid, x, y, _os(4.0), viewport, 2000)
+        density = n / (width * height) / _os(4.0) ** 2  # per display px
         # the last two camera pixels of either edge
         assert image[:, -8:].mean() == pytest.approx(density, rel=0.05)
         assert image[-8:, :].mean() == pytest.approx(density, rel=0.05)
@@ -194,12 +227,12 @@ class TestQuadTree:
         info = _info(self.W, self.H)
         viewport = ((0.0, 0.0), (self.H, self.W))
         n_h, hist = render.render(
-            locs, info, disp_px_size=130 / 4, viewport=viewport
+            locs, info, disp_px_size=PIXELSIZE / 4, viewport=viewport
         )
         n_q, quad = render.render(
             locs,
             info,
-            disp_px_size=130 / 4,
+            disp_px_size=PIXELSIZE / 4,
             viewport=viewport,
             blur_method="quadtree",
             quadtree_capacity=0,
@@ -216,25 +249,26 @@ class TestQuadTree:
         viewport = ((0.0, 0.0), (self.H, self.W))
         # capacity 2000: bins of ~1000 rows, SNR ~ 30; the image is the
         # density everywhere within a few percent
-        _, image = _quadtree(pyramid, x, y, 4.0, viewport, 2000)
-        density = n / (self.W * self.H) / 16  # per display pixel
+        _, image = _quadtree(pyramid, x, y, _os(4.0), viewport, 2000)
+        density = n / (self.W * self.H) / _os(4.0) ** 2  # per display px
         assert image.mean() == pytest.approx(density, rel=1e-3)
         assert image.std() / image.mean() < 0.1
         # capacity 5: much noisier, same mean
-        _, noisy = _quadtree(pyramid, x, y, 4.0, viewport, 5)
+        _, noisy = _quadtree(pyramid, x, y, _os(4.0), viewport, 5)
         assert noisy.mean() == pytest.approx(density, rel=1e-3)
         assert noisy.std() > image.std()
 
     def test_bins_grow_where_density_falls(self):
         # the paper's Figure 4: a sparse and a dense half
         rng = np.random.default_rng(4)
+        half = self.W / 2
         x = np.concatenate(
-            [rng.uniform(0, 32, 400), rng.uniform(32, 64, 40_000)]
+            [rng.uniform(0, half, 400), rng.uniform(half, self.W, 40_000)]
         ).astype(np.float32)
-        y = rng.uniform(0, 64, len(x)).astype(np.float32)
+        y = rng.uniform(0, self.H, len(x)).astype(np.float32)
         pyramid = spatial_index.build_render_index_arrays(x, y, self.W, self.H)
         _, image = _quadtree(
-            pyramid, x, y, 8.0, ((0.0, 0.0), (self.H, self.W)), 10
+            pyramid, x, y, _os(8.0), ((0.0, 0.0), (self.H, self.W)), 10
         )
         sparse, dense = image[:, :256], image[:, 256:]
 
@@ -255,9 +289,13 @@ class TestQuadTree:
     def test_viewport_culls_and_counts(self):
         x, y = _clustered_locs()
         pyramid = spatial_index.build_render_index_arrays(x, y, self.W, self.H)
-        viewport = ((30.0, 10.0), (50.0, 30.0))
-        n, image = _quadtree(pyramid, x, y, 4.0, viewport, 10)
-        in_view = (x > 10) & (x < 30) & (y > 30) & (y < 50)
+        viewport = (
+            (30.0 * PIXELSIZE, 10.0 * PIXELSIZE),
+            (50.0 * PIXELSIZE, 30.0 * PIXELSIZE),
+        )
+        (y_min, x_min), (y_max, x_max) = viewport
+        n, image = _quadtree(pyramid, x, y, _os(4.0), viewport, 10)
+        in_view = (x > x_min) & (x < x_max) & (y > y_min) & (y < y_max)
         assert n == in_view.sum()
         assert image.shape == (80, 80)
         # the leaves overlapping the viewport edge contribute only
@@ -271,18 +309,21 @@ class TestQuadTree:
         # capacity the total is the count in view
         rng = np.random.default_rng(6)
         x, y = _clustered_locs()
-        z = rng.normal(0.0, 2.0, len(x)).astype(np.float32)
+        z = rng.normal(0.0, 2.0 * PIXELSIZE, len(x)).astype(np.float32)
         locs = pd.DataFrame({"x": x, "y": y, "z": z})
         info = _info(self.W, self.H)
-        viewport = ((8.0, 8.0), (56.0, 56.0))
+        viewport = (
+            (8.0 * PIXELSIZE, 8.0 * PIXELSIZE),
+            (56.0 * PIXELSIZE, 56.0 * PIXELSIZE),
+        )
         ang = (0.4, 0.3, 0.2)
         n_h, hist = render.render(
-            locs, info, disp_px_size=130 / 4, viewport=viewport, ang=ang
+            locs, info, disp_px_size=PIXELSIZE / 4, viewport=viewport, ang=ang
         )
         n_q, quad = render.render(
             locs,
             info,
-            disp_px_size=130 / 4,
+            disp_px_size=PIXELSIZE / 4,
             viewport=viewport,
             blur_method="quadtree",
             quadtree_capacity=capacity,
@@ -333,7 +374,7 @@ class TestQuadTree:
             _info(self.W, self.H),
             positions=[(Rotation.identity(), viewport)] * 2,
             durations=[0.1],
-            disp_px_size=130 / 4,
+            disp_px_size=PIXELSIZE / 4,
             image_size=(16, 16),
             blur_method="quadtree",
             quadtree_capacity=7,
@@ -364,7 +405,7 @@ class TestQuadTree:
         _, n, raw = render.render_scene(
             locs,
             info,
-            disp_px_size=130 / 4,
+            disp_px_size=PIXELSIZE / 4,
             viewport=viewport,
             blur_method="quadtree",
             render_index=pyramid,
@@ -374,7 +415,7 @@ class TestQuadTree:
         _, _, raw2 = render.render_scene(
             [locs, locs],
             [info, info],
-            disp_px_size=130 / 4,
+            disp_px_size=PIXELSIZE / 4,
             viewport=viewport,
             blur_method="quadtree",
             return_raw_image=True,

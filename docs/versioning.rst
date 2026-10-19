@@ -33,9 +33,11 @@ What is public
    version of Picasso, including 0.x, and an older 1.x opens the files of a
    newer 1.x, ignoring what it does not know. A new major version of the file
    format, which older versions refuse, comes only with a major release of
-   Picasso; see :ref:`files-format-versions`. The same holds for the other
-   files Picasso writes, e.g., 3D and spline calibrations, picks and SPINNA
-   structures. The metadata keys documented in :doc:`files` are public; any
+   Picasso; see :ref:`files-format-versions`. The format version is
+   ``picasso.io.FORMAT_VERSION`` (1.0 since Picasso 1.0: every length in nm;
+   files from before 1.0, in camera pixels, are converted when opened, see
+   :ref:`files-legacy`). The same holds for the other files Picasso writes,
+   e.g., 3D and spline calibrations, picks and SPINNA structures. The metadata keys documented in :doc:`files` are public; any
    other key is informational. The user settings file is not: unknown keys
    are ignored and missing ones take their defaults.
 
@@ -179,8 +181,9 @@ Before each release:
 3. Run the tests locally (``python -m pytest``).
 4. Remove the deprecated names due in this version (the test lists them) and
    list the removals in the changelog.
-5. If the localization files changed, bump ``LOCS_FORMAT_VERSION`` (minor for
-   additions, major for changes of meaning) and add a row to the table in
+5. If the file formats changed, bump ``io.FORMAT_VERSION`` (minor for
+   additions, major for changes of meaning; 1.0 is the first versioned format,
+   with every length in nm) and add a row to the table in
    :ref:`files-format-versions`.
 6. Build the one-click installers with the scripts in ``release`` on Windows
    and macOS. Each script tests the frozen app (``release/smoke_test.py``)

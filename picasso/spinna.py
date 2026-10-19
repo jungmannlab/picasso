@@ -523,7 +523,6 @@ def random_rotation_matrices(
 def coords_to_locs(
     coords: lib.FloatArray2D,
     lp: float = 1.0,
-    pixelsize: int = 130,
 ) -> pd.DataFrame:
     """Convert ``coords`` array into localization list in a form of a
     data frame.
@@ -535,21 +534,16 @@ def coords_to_locs(
         are in nm. Shape (N, 2) or (N, 3), where N is the number of
         localizations.
     lp : float (default=1)
-        Localization precision to be added to the localizations.
-    pixelsize : int (default=130)
-        Camera pixelsize in nm. Lateral coordinates are expressed in
-        units of camera pixelsize but axial coordinates are
-        expressed in nm (picasso).
+        Localization precision (nm) to be added to the localizations.
 
     Returns
     -------
     locs : pd.DataFrame
-        Localizations.
+        Localizations, in nm.
     """
-    # x, y and localization precision in Picasso are in camera pixels
-    x = (coords[:, 0] / pixelsize).astype(np.float32)
-    y = (coords[:, 1] / pixelsize).astype(np.float32)
-    lpx = (lp * np.ones(len(x)) / pixelsize).astype(np.float32)
+    x = coords[:, 0].astype(np.float32)
+    y = coords[:, 1].astype(np.float32)
+    lpx = (lp * np.ones(len(x))).astype(np.float32)
     lpy = lpx
     # dummy value to avoid errors in Picasso Render
     frame = np.ones(len(x), dtype=np.uint32)
@@ -1033,10 +1027,11 @@ class MaskGenerator:
         localizations (if z given, 3D mask is created). Otherwise,
         it can be specified that 3D localizations are used for
         generating a 2D mask.
-    pixelsize : float (default=130)
-        Camera pixel size (nm).
-    roi : float
-        ROI width/height (nm). Calculated from localizations' metadata.
+    pixelsize : float
+        Camera pixel size (nm), from the localizations' metadata.
+    roi : list of floats
+        ROI width/height (nm), i.e., the field of view of the
+        localizations (``lib.field_of_view``).
     sigma : float or tuple of floats
         Sigma used in gaussian filtering in nm, one value for each
         dimension (x and y are always equal, z can be different).
@@ -1044,15 +1039,17 @@ class MaskGenerator:
         Otsu threshold (see, scikit-image) used for masking and
         area/volume calculation.
     x_min : float
-        Starting value of localizations' x coordinate in camera pixels.
+        Starting value of localizations' x coordinate in nm.
         (default=0.0)
     x_max : float
-        Highest value of localizations' x coordinate in camera pixels.
+        Highest value of localizations' x coordinate in nm (the width of
+        the field of view).
     y_min : float
-        Starting value of localizations' y coordinate in camera pixels .
+        Starting value of localizations' y coordinate in nm.
         (default=0.0)
     y_max : float
-        Highest value of localizations' y coordinate in camera pixels.
+        Highest value of localizations' y coordinate in nm (the height
+        of the field of view).
     z_min : float
         Starting value of localizations' z coordinate in nm.
     z_max : float
@@ -1079,6 +1076,10 @@ class MaskGenerator:
         Dimensionality of the mask (2 or 3). If None, the dimensionality
         is taken from the loaded localizations/molecules. Default is
         None.
+    pixelsize : float, optional
+        Camera pixel size in nm, used only to convert a localization
+        file written before Picasso 1.0 (camera pixels) whose metadata
+        lacks it, see ``io.load_locs``. Default is None.
     """
 
     def __init__(
@@ -1087,9 +1088,10 @@ class MaskGenerator:
         binsize: int | tuple = 130,
         sigma: int | tuple = 500,
         ndim: int | None = None,
+        pixelsize: float | None = None,
     ) -> None:
-        # open localizations
-        locs, info = io.load_locs(locs_path)
+        # open localizations (nm)
+        locs, info = io.load_locs(locs_path, pixelsize=pixelsize)
         if "z" in locs.columns:
             self.locs = locs[["x", "y", "z"]]
         else:
@@ -1118,11 +1120,8 @@ class MaskGenerator:
             info, "Pixelsize", raise_error=True
         )
 
-        # deduce roi from localizations metadata
-        self.roi = [
-            info[0]["Width"] * self.pixelsize,
-            info[0]["Height"] * self.pixelsize,
-        ]
+        # deduce roi (nm) from localizations metadata
+        self.roi = list(lib.field_of_view(info))
 
     def set_binsize(self, binsize: int | tuple) -> None:
         """Convert the input binsize to a tuple of 2/3 values.
@@ -1192,12 +1191,13 @@ class MaskGenerator:
         image : lib.FloatArray2D
             The histogrammed localizations, at the mask's own bin size.
         """
-        # prepare inputs for picasso.render
-        oversampling = [self.pixelsize / _ for _ in self.binsize]
+        # prepare inputs for picasso.render: rendered pixels per nm, and
+        # the field of view in nm
+        oversampling = [1.0 / _ for _ in self.binsize]
         self.x_min = 0
-        self.x_max = self.roi[0] / self.pixelsize
+        self.x_max = self.roi[0]
         self.y_min = 0
-        self.y_max = self.roi[1] / self.pixelsize
+        self.y_max = self.roi[1]
 
         # 2D image
         if self.ndim == 2 or "z" not in self.locs.columns:
@@ -1226,7 +1226,6 @@ class MaskGenerator:
                 self.x_max,
                 self.z_min,
                 self.z_max,
-                self.pixelsize,
             )
         return image
 
@@ -1332,6 +1331,12 @@ class MaskGenerator:
     def save_mask_info(self, path: str) -> None:
         """Save info about the mask in .yaml format.
 
+        The extent of the mask (``x_min``, ``x_max``, ``y_min``, ``y_max``,
+        ``z_min``, ``z_max``) is in nm and the file carries the format
+        marker (``io.FORMAT_VERSION_ATTR``); masks written before Picasso
+        1.0 stored the lateral extent in camera pixels (see
+        ``legacy.mask_info_to_nm``).
+
         Parameters
         ----------
         path : str
@@ -1340,16 +1345,17 @@ class MaskGenerator:
         # basic info (both 2D and 3D)
         info = {
             **lib.step_info("SPINNA"),
+            io.FORMAT_VERSION_ATTR: io.FORMAT_VERSION,
             "Size (GB)": self.mask.nbytes / (1024**3),
             "File": path,
             "Binsize (nm)": [float(_) for _ in self.binsize],
             "Generated from": self.locs_path,
             "Gaussian blur (nm)": [float(_) for _ in self.sigma],
             "Camera pixelsize (nm)": self.pixelsize,
-            "x_min": self.x_min,
-            "x_max": self.x_max,
-            "y_min": self.y_min,
-            "y_max": self.y_max,
+            "x_min": float(self.x_min),
+            "x_max": float(self.x_max),
+            "y_min": float(self.y_min),
+            "y_max": float(self.y_max),
             "Number of molecules": len(self.locs),
             "Dimensionality": f"{self.mask.ndim}D",
             "Threshold value": float(self.thresh),
@@ -1793,12 +1799,16 @@ class StructureSimulator:
 
         # Mask is given #
         elif mask is not None and mask_info is not None:
-            # Load the ROI and mask attributes
-            pixelsize = mask_info["Camera pixelsize (nm)"]
-            self.x_min = mask_info["x_min"] * pixelsize
-            self.x_max = mask_info["x_max"] * pixelsize
-            self.y_min = mask_info["y_min"] * pixelsize
-            self.y_max = mask_info["y_max"] * pixelsize
+            # Load the ROI and mask attributes (nm; a mask written before
+            # Picasso 1.0 stored its lateral extent in camera pixels)
+            if io.FORMAT_VERSION_ATTR not in mask_info:
+                from . import legacy
+
+                mask_info = legacy.mask_info_to_nm(mask_info)
+            self.x_min = mask_info["x_min"]
+            self.x_max = mask_info["x_max"]
+            self.y_min = mask_info["y_min"]
+            self.y_max = mask_info["y_max"]
 
             self.width = self.x_max - self.x_min  # width in nm
             self.height = self.y_max - self.y_min  # height in nm
@@ -2124,10 +2134,14 @@ class StructureSimulator:
         centers: bool = True,
         all_mol: bool = True,
         obs_mol: bool = True,
-        pixelsize: int = 130,
+        pixelsize: float | None = None,
     ) -> None:
         """Save center positions, all molecular targets and the observed
         ones in .hdf5 format compatible to read with Picasso: Render.
+
+        The localizations are saved in nm, with the ROI as the field of
+        view: ``Width``/``Height`` are the number of camera pixels
+        covering it (``floor(extent / pixelsize) + 1``).
 
         Parameters
         ----------
@@ -2142,19 +2156,26 @@ class StructureSimulator:
         obs_mol : bool (default=True)
             Whether or not to save observed positions of molecular
             targets, i.e., after labeling efficiency correction.
-        pixelsize : int (default=130)
-            Camera pixel size to be used to save in Picasso format.
-            Should be specified if no mask is given. Otherwise, the
-            mask metadata should specify it.
+        pixelsize : float, optional
+            Camera pixel size (nm) recorded in the metadata. Required if
+            no mask is given; otherwise the mask metadata's ("Camera
+            pixelsize (nm)") is used. Default is None.
         """
         if self.mask_info is not None:
             pixelsize = self.mask_info["Camera pixelsize (nm)"]
+        if pixelsize is None:
+            raise ValueError(
+                "Pass the camera pixel size (pixelsize, nm) to record in "
+                "the metadata; without a mask there is none to take it "
+                "from."
+            )
+        pixelsize = float(pixelsize)
 
         # yaml metadata
         info = [
             {
-                "Height": int(self.height / pixelsize),
-                "Width": int(self.width / pixelsize),
+                "Height": int(self.height // pixelsize) + 1,
+                "Width": int(self.width // pixelsize) + 1,
                 "Frames": 1,  # some arbitrary number
             },
             {
@@ -2166,108 +2187,19 @@ class StructureSimulator:
         # centers
         if centers and self.c_pos is not None:
             path = f"{path_base}_centers.hdf5"
-            frame = np.ones(self.N, dtype=np.uint32)
-            lpx = (np.ones(self.N) / pixelsize).astype(np.float32)
-            lpy = lpx
-            x = (self.c_pos[:, 0] / pixelsize).astype(np.float32)
-            y = (self.c_pos[:, 1] / pixelsize).astype(np.float32)
-            if self.depth is not None:
-                # not scaled for picasso compatibility
-                z = self.c_pos[:, 2].astype(np.float32)
-                locs = pd.DataFrame(
-                    {
-                        "frame": frame,
-                        "x": x,
-                        "y": y,
-                        "z": z,
-                        "lpx": lpx,
-                        "lpy": lpy,
-                    }
-                )
-            else:
-                locs = pd.DataFrame(
-                    {
-                        "frame": frame,
-                        "x": x,
-                        "y": y,
-                        "lpx": lpx,
-                        "lpy": lpy,
-                    }
-                )
-            io.save_locs(path, locs, info)
+            io.save_locs(path, coords_to_locs(self.c_pos, lp=1.0), info)
 
         for i, name in enumerate(self.structure.targets):
             # all molecular targets
             if all_mol and self.pos is not None:
-                pos = self.pos[name]
                 path = f"{path_base}_{name}_all_mols.hdf5"
-                frame = np.ones(self.N, dtype=np.uint32)
-                lpx = (self.label_unc[i] * np.ones(self.N) / pixelsize).astype(
-                    np.float32
-                )
-                lpy = lpx
-                x = (pos[:, 0] / pixelsize).astype(np.float32)
-                y = (pos[:, 1] / pixelsize).astype(np.float32)
-                if pos.shape[1] == 3:
-                    # not scaled for picasso compatibility
-                    z = pos[:, 2].astype(np.float32)
-                    locs = pd.DataFrame(
-                        {
-                            "frame": frame,
-                            "x": x,
-                            "y": y,
-                            "z": z,
-                            "lpx": lpx,
-                            "lpy": lpy,
-                        }
-                    )
-                else:
-                    locs = pd.DataFrame(
-                        {
-                            "frame": frame,
-                            "x": x,
-                            "y": y,
-                            "lpx": lpx,
-                            "lpy": lpy,
-                        }
-                    )
+                locs = coords_to_locs(self.pos[name], lp=self.label_unc[i])
                 io.save_locs(path, locs, info)
 
             # observed molecular targets
             if obs_mol and self.pos_obs is not None:
-                pos_obs = self.pos_obs[name]
-                N = len(pos_obs)
                 path = f"{path_base}_{name}_obs_mols.hdf5"
-                frame = np.ones(N, dtype=np.uint32)
-                lpx = (self.label_unc[i] * np.ones(N) / pixelsize).astype(
-                    np.float32
-                )
-                lpy = lpx
-                x = (pos_obs[:, 0] / pixelsize).astype(np.float32)
-                y = (pos_obs[:, 1] / pixelsize).astype(np.float32)
-                if pos_obs.shape[1] == 3:
-                    # not scaled for picasso compatibility
-                    z = (pos_obs[:, 2]).astype(np.float32)
-                    locs = pd.DataFrame(
-                        {
-                            "frame": frame,
-                            "x": x,
-                            "y": y,
-                            "z": z,
-                            "lpx": lpx,
-                            "lpy": lpy,
-                        }
-                    )
-                else:
-                    locs = pd.DataFrame(
-                        {
-                            "frame": frame,
-                            "x": x,
-                            "y": y,
-                            "lpx": lpx,
-                            "lpy": lpy,
-                        }
-                    )
+                locs = coords_to_locs(self.pos_obs[name], lp=self.label_unc[i])
                 io.save_locs(path, locs, info)
 
 
@@ -2726,11 +2658,11 @@ class StructureMixer:
         path: str,
         all_locs: dict,
         lp: float = 1.0,
-        pixelsize: int | None = None,
+        pixelsize: float | None = None,
     ) -> None:
         """Save observed molecules. Each molecular target is saved in
         a separate .hdf5 file. The saved files can be read in Picasso
-        Render.
+        Render. The localizations are in nm (see :func:`coords_to_locs`).
 
         Parameters
         ----------
@@ -2746,9 +2678,11 @@ class StructureMixer:
         lp : float (default=1.0)
             Localization precision in nm to be assigned to saved
             molecules.
-        pixelsize : float (default=130.0)
-            Camera pixelsize in nm to be saved. Required for
-            compatibility with Picasso Render.
+        pixelsize : float, optional
+            Camera pixel size in nm recorded in the metadata (Picasso
+            Render needs it). Required if no mask is given; otherwise
+            the mask metadata's ("Camera pixelsize (nm)") is used.
+            Default is None.
         """
         # prepare path for saving
         if not path.endswith(".hdf5"):
@@ -2761,7 +2695,12 @@ class StructureMixer:
                     "Camera pixelsize (nm)"
                 ]
             else:
-                pixelsize = 130
+                raise ValueError(
+                    "Pass the camera pixel size (pixelsize, nm) to record "
+                    "in the metadata; without a mask there is none to take "
+                    "it from."
+                )
+        pixelsize = float(pixelsize)
 
         if self.mask is not None:
             binsize = list(self.mask_info.values())[0]["Binsize (nm)"]
@@ -2776,7 +2715,7 @@ class StructureMixer:
         for tname in self.targets:
             coords = all_locs[tname]
             if len(coords):
-                locs = coords_to_locs(coords, lp=lp, pixelsize=pixelsize)
+                locs = coords_to_locs(coords, lp=lp)
                 info = self.get_metadata(tname, width, height, pixelsize)
                 outpath = os.path.splitext(path)[0] + f"_{tname}.hdf5"
                 io.save_locs(outpath, locs, info)
@@ -2786,10 +2725,12 @@ class StructureMixer:
         target: str,
         width: float,
         height: float,
-        pixelsize: int,
+        pixelsize: float,
     ) -> list[dict]:
         """Return metadata for saving molecules in Picasso format, i.e.,
-        the data that will be saved in .yaml format.
+        the data that will be saved in .yaml format. ``Width``/``Height``
+        are the number of camera pixels covering the ROI
+        (``floor(extent / pixelsize) + 1``).
 
         Parameters
         ----------
@@ -2797,7 +2738,7 @@ class StructureMixer:
             Name of the molecular target to be saved.
         width, height : float
             Width/height of the ROI in nm.
-        pixelsize : int
+        pixelsize : float
             Camera pixel size (nm).
 
         Returns
@@ -2817,8 +2758,8 @@ class StructureMixer:
 
         info = [
             {
-                "Height": int(height / pixelsize),
-                "Width": int(width / pixelsize),
+                "Height": int(height // pixelsize) + 1,
+                "Width": int(width // pixelsize) + 1,
                 "Frames": 1,
             },  # necessary to use in Picasso Render
             {

@@ -77,12 +77,12 @@ additional summary statistics will then be stored in the local database.
       from picasso import io, localize
 
       locs, info = io.load_locs("movie_locs.hdf5")
-      nena_px = localize.check_nena(locs, info)              # camera pixels
+      nena = localize.check_nena(locs, info)                 # nm
       mean_len = localize.check_kinetics(locs, info)         # mean bright time, frames
-      drift = localize.check_drift(locs, info)               # (x, y), camera pixels
+      drift = localize.check_drift(locs, info)               # (x, y), nm
 
       summary = localize.get_file_summary(
-          "movie.tif", "movie_locs.hdf5", drift=drift, len_mean=mean_len, nena=nena_px
+          "movie.tif", "movie_locs.hdf5", drift=drift, len_mean=mean_len, nena=nena
       )
       localize.add_file_to_db(
           "movie.tif", "movie_locs.hdf5", drift=drift, len_mean=mean_len, nena=nena_px
@@ -299,7 +299,7 @@ Preview will render the super-resolution data in the browser.
 .. figure:: /images/server_preview.png
    :width: 720px
    :class: screenshot
-   :alt: File preview page of Picasso Server with oversampling and density settings above a rendered super-resolution image
+   :alt: File preview page of Picasso Server with display pixel size and density settings above a rendered super-resolution image
 
    The ``Preview`` page.
 

@@ -104,10 +104,9 @@ def test_camera_info_read_from_info(movie, movie_info):
 
 
 def test_does_not_mutate_camera_info(movie, movie_info):
-    """A caller-supplied camera_info is not mutated (fit fills a missing
-    "Pixelsize" in place; the wrapper copies first so a dict reused across
-    streaming batches is left untouched)."""
-    camera_info = {"Baseline": 0, "Sensitivity": 1, "Gain": 1}
+    """A caller-supplied camera_info is not mutated (the wrapper copies
+    first so a dict reused across streaming batches is left untouched)."""
+    camera_info = dict(CAMERA_INFO)
     before = dict(camera_info)
     localize.localize_frames(
         np.asarray(movie), movie_info, PARAMS, camera_info=camera_info
@@ -233,16 +232,19 @@ def test_recovers_known_positions():
     )
     # Every frame yields all emitters (bright, well separated).
     assert set(locs["frame"].unique()) == set(range(20))
+    # The localizations are in nm; the emitters sit on the camera pixel grid.
+    x = locs["x"].to_numpy() / camera_info["Pixelsize"]
+    y = locs["y"].to_numpy() / camera_info["Pixelsize"]
     # Each ground-truth emitter has a nearby recovered localization.
     for x0, y0 in positions:
-        d = np.hypot(locs["x"].to_numpy() - x0, locs["y"].to_numpy() - y0)
+        d = np.hypot(x - x0, y - y0)
         best = d.min()
         assert best < 0.3, f"emitter ({x0},{y0}) recovered {best:.3f} px off"
     # Averaged over frames the bias is well below a tenth of a pixel.
     for x0, y0 in positions:
-        near = locs[np.hypot(locs["x"] - x0, locs["y"] - y0) < 1.0]
-        assert abs(near["x"].mean() - x0) < 0.1
-        assert abs(near["y"].mean() - y0) < 0.1
+        near = np.hypot(x - x0, y - y0) < 1.0
+        assert abs(x[near].mean() - x0) < 0.1
+        assert abs(y[near].mean() - y0) < 0.1
 
 
 # ---------------------------------------------------------------------------
@@ -265,7 +267,9 @@ def test_no_qt_on_call_path():
 
         frames = np.zeros((3, 16, 16), dtype=np.uint16)
         frames[:, 8, 8] = 500
-        camera_info = {"Baseline": 0, "Sensitivity": 1, "Gain": 1}
+        camera_info = {
+            "Baseline": 0, "Sensitivity": 1, "Gain": 1, "Pixelsize": 130
+        }
         params = localize.IdentificationParameters(
             method=localize.NetGradient(10), box=7
         )

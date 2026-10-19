@@ -37,13 +37,13 @@ def window(qt_offscreen, tmp_path, monkeypatch):
     locs = pd.DataFrame(
         {
             "frame": np.arange(100, dtype=np.uint32),
-            "x": rng.uniform(0, 32, 100).astype(np.float32),
-            "y": rng.uniform(0, 32, 100).astype(np.float32),
+            "x": rng.uniform(0, 32 * 130.0, 100).astype(np.float32),
+            "y": rng.uniform(0, 32 * 130.0, 100).astype(np.float32),
             "photons": np.full(100, 1000, dtype=np.float32),
-            "sx": np.ones(100, dtype=np.float32),
-            "sy": np.ones(100, dtype=np.float32),
-            "lpx": np.full(100, 0.1, dtype=np.float32),
-            "lpy": np.full(100, 0.1, dtype=np.float32),
+            "sx": np.full(100, 130.0, dtype=np.float32),
+            "sy": np.full(100, 130.0, dtype=np.float32),
+            "lpx": np.full(100, 13.0, dtype=np.float32),
+            "lpy": np.full(100, 13.0, dtype=np.float32),
         }
     )
     info = [{"Frames": 100, "Width": 32, "Height": 32, "Pixelsize": 130.0}]

@@ -43,11 +43,10 @@ row (length, duration, mean position, mean jump distance and D).
 
 Units
 -----
-Linking works in camera pixels and frames, like the rest of Picasso's
-localization processing. The analysis needs the camera pixel size (nm)
-and the frame time (ms, the time between two consecutive frames, not
-the exposure time); both are read from the metadata (``"Pixelsize"``
-and ``"Frame time (ms)"``) unless given. The results are reported as
+Linking works in nm and frames, like the rest of Picasso's localization
+processing. The analysis needs the frame time (ms, the time between two
+consecutive frames, not the exposure time); it is read from the metadata
+(``"Frame time (ms)"``) unless given. The results are reported as
 diffusion coefficients in um^2/s, MSDs in um^2, time lags in s, and
 jump distances and localization errors in nm.
 
@@ -81,6 +80,7 @@ __all__ = [
     "TRACKING_KEY",
     "link_tracks",
     "tracking_info",
+    "max_jump_nm",
     "is_tracked",
     "median_precision",
     "track_segments",
@@ -145,13 +145,13 @@ def _link_tracks_kernel(
     frame : lib.IntArray1D
         Frames of the localizations (int64).
     x, y : lib.FloatArray1D
-        Coordinates of the localizations (camera pixels).
+        Coordinates of the localizations (nm).
     group : lib.IntArray1D
         Input groups; localizations of different groups are never
         linked.
     max_jump : float
         Maximum distance between consecutive localizations of a track
-        (camera pixels).
+        (nm).
     max_gap : int
         Maximum number of frames a track may skip.
 
@@ -296,7 +296,7 @@ def link_tracks(
         Metadata of ``locs``.
     max_jump : float
         Maximum distance between consecutive localizations of a track
-        (camera pixels). Should be larger than the jumps of the fastest
+        (nm). Should be larger than the jumps of the fastest
         particles (e.g., ``3 * sqrt(4 * D * dt)``) and smaller than the
         distance between particles.
     max_gap : int, optional
@@ -376,11 +376,8 @@ def link_tracks(
     entry = {
         **lib.step_info("SPT"),
         TRACKING_KEY: TRACKING_METHOD,
-        "Max. jump (camera pixels)": float(max_jump),
+        "Max. jump (nm)": float(max_jump),
     }
-    pixelsize = lib.get_from_metadata(info, "Pixelsize")
-    if pixelsize:
-        entry["Max. jump (nm)"] = float(max_jump * pixelsize)
     entry.update(
         {
             "Max. gap (frames)": max_gap,
@@ -415,6 +412,36 @@ def tracking_info(info: list[dict] | None) -> dict | None:
     return None
 
 
+def max_jump_nm(info: list[dict] | None) -> float | None:
+    """The maximum jump distance of the tracking (nm) from the metadata.
+
+    Files written before Picasso 1.0 record it in camera pixels
+    (``"Max. jump (camera pixels)"``); it is converted with the
+    ``Pixelsize`` of the metadata.
+
+    Parameters
+    ----------
+    info : list of dicts or None
+        Metadata of the localizations.
+
+    Returns
+    -------
+    max_jump : float or None
+        The maximum jump distance in nm, or None if the localizations
+        were not tracked or the entry does not record it.
+    """
+    entry = tracking_info(info)
+    if entry is None:
+        return None
+    if "Max. jump (nm)" in entry:
+        return float(entry["Max. jump (nm)"])
+    if "Max. jump (camera pixels)" in entry:
+        pixelsize = lib.get_from_metadata(info, "Pixelsize")
+        if pixelsize:
+            return float(entry["Max. jump (camera pixels)"]) * pixelsize
+    return None
+
+
 def is_tracked(locs: pd.DataFrame, info: list[dict] | None) -> bool:
     """Whether the ``group`` column of ``locs`` holds tracks.
 
@@ -438,15 +465,13 @@ def is_tracked(locs: pd.DataFrame, info: list[dict] | None) -> bool:
     return not locs.duplicated(["group", "frame"]).any()
 
 
-def median_precision(locs: pd.DataFrame, pixelsize: float) -> float:
+def median_precision(locs: pd.DataFrame) -> float:
     """Median localization precision, averaged over x and y.
 
     Parameters
     ----------
     locs : pd.DataFrame
-        Localizations with the ``lpx`` and ``lpy`` columns.
-    pixelsize : float
-        Camera pixel size (nm).
+        Localizations with the ``lpx`` and ``lpy`` columns (nm).
 
     Returns
     -------
@@ -454,7 +479,7 @@ def median_precision(locs: pd.DataFrame, pixelsize: float) -> float:
         Median localization precision (nm).
     """
     lp = np.mean([np.nanmedian(locs["lpx"]), np.nanmedian(locs["lpy"])])
-    return float(lp * pixelsize)
+    return float(lp)
 
 
 def _require_tracks(locs: pd.DataFrame) -> None:
@@ -476,7 +501,7 @@ def _sorted_tracks(locs: pd.DataFrame) -> tuple:
     group, frame : lib.IntArray1D
         Track ids and frames, sorted (int64).
     x, y : lib.FloatArray1D
-        Coordinates, sorted (float64, camera pixels).
+        Coordinates, sorted (float64, nm).
     starts : lib.IntArray1D
         Start of every track in the sorted order, followed by the
         number of localizations.
@@ -510,7 +535,7 @@ def track_segments(
     Returns
     -------
     segments : lib.FloatArray2D
-        ``(n_segments, 4)`` array of ``x0, y0, x1, y1`` (camera pixels).
+        ``(n_segments, 4)`` array of ``x0, y0, x1, y1`` (nm).
     track_id : lib.IntArray1D
         Track id of every segment.
     start_row : lib.IntArray1D
@@ -553,18 +578,6 @@ def _frame_time(frame_time: float | None, info: list[dict] | None) -> float:
     return _positive(frame_time, "frame_time")
 
 
-def _pixelsize(pixelsize: float | None, info: list[dict] | None) -> float:
-    """The camera pixel size (nm), given or from the metadata."""
-    if pixelsize is None and info is not None:
-        pixelsize = lib.get_from_metadata(info, "Pixelsize")
-    if pixelsize is None:
-        raise ValueError(
-            "The camera pixel size is unknown. Pass pixelsize (nm) or "
-            "add 'Pixelsize' to the metadata."
-        )
-    return _positive(pixelsize, "pixelsize")
-
-
 # --------------------------------------------------------------------
 # Mean squared displacement
 # --------------------------------------------------------------------
@@ -586,8 +599,7 @@ def _msd_kernel(
     Returns
     -------
     sums : lib.FloatArray2D
-        ``(n_tracks, max_lag)`` sums of squared displacements (camera
-        pixels squared).
+        ``(n_tracks, max_lag)`` sums of squared displacements (nm^2).
     counts : lib.IntArray2D
         ``(n_tracks, max_lag)`` numbers of pairs.
     """
@@ -614,7 +626,6 @@ def msd(
     info: list[dict] | None = None,
     *,
     frame_time: float | None = None,
-    pixelsize: float | None = None,
     max_lag: int = MAX_LAG,
 ) -> dict:
     """Mean squared displacement (MSD) of tracked particles.
@@ -629,13 +640,10 @@ def msd(
     locs : pd.DataFrame
         Tracked localizations (track ids in ``group``).
     info : list of dicts, optional
-        Metadata, used for ``frame_time`` and ``pixelsize`` if not
-        given. Default is None.
+        Metadata, used for ``frame_time`` if not given. Default is None.
     frame_time : float, optional
         Time between two consecutive frames (ms). Default is None (from
         the metadata).
-    pixelsize : float, optional
-        Camera pixel size (nm). Default is None (from the metadata).
     max_lag : int, optional
         Largest time lag (frames). Default is 10.
 
@@ -652,23 +660,21 @@ def msd(
         (um^2), NaN where a track has no pair.
         ``"track_n_pairs"``: ``(n_tracks, max_lag)`` numbers of pairs.
         ``"groups"``: track ids, one per row of ``"track_msd"``.
-        ``"frame_time"`` (ms) and ``"pixelsize"`` (nm).
+        ``"frame_time"`` (ms).
 
     Raises
     ------
     ValueError
         If ``max_lag`` is smaller than 1, the localizations are not
-        tracked, or the frame time or the pixel size is unknown.
+        tracked, or the frame time is unknown.
     """
     if int(max_lag) != max_lag or max_lag < 1:
         raise ValueError(f"max_lag must be a positive integer, got {max_lag}.")
     max_lag = int(max_lag)
     frame_time = _frame_time(frame_time, info)
-    pixelsize = _pixelsize(pixelsize, info)
     _, group, frame, x, y, starts = _sorted_tracks(locs)
     sums, counts = _msd_kernel(starts, frame, x, y, max_lag)
-    um2 = (pixelsize / 1000) ** 2  # camera pixels squared to um^2
-    sums *= um2
+    sums *= 1e-6  # nm^2 to um^2
     with np.errstate(invalid="ignore", divide="ignore"):
         track_msd = sums / counts
         n_pairs = counts.sum(axis=0)
@@ -692,7 +698,6 @@ def msd(
         "track_n_pairs": counts,
         "groups": group[starts[:-1]],
         "frame_time": frame_time,
-        "pixelsize": pixelsize,
     }
 
 
@@ -772,9 +777,9 @@ def fit_msd(
 
 
 def _jumps(locs: pd.DataFrame) -> tuple[lib.FloatArray1D, lib.IntArray1D]:
-    """Distances (camera pixels) between localizations of a track in
-    consecutive frames, and the index of the track (0 to n_tracks - 1)
-    of every jump."""
+    """Distances (nm) between localizations of a track in consecutive
+    frames, and the index of the track (0 to n_tracks - 1) of every
+    jump."""
     _, group, frame, x, y, starts = _sorted_tracks(locs)
     track_index = np.repeat(np.arange(len(starts) - 1), np.diff(starts))
     consecutive = (group[1:] == group[:-1]) & (frame[1:] - frame[:-1] == 1)
@@ -782,12 +787,7 @@ def _jumps(locs: pd.DataFrame) -> tuple[lib.FloatArray1D, lib.IntArray1D]:
     return d, track_index[:-1][consecutive]
 
 
-def jump_distances(
-    locs: pd.DataFrame,
-    info: list[dict] | None = None,
-    *,
-    pixelsize: float | None = None,
-) -> lib.FloatArray1D:
+def jump_distances(locs: pd.DataFrame) -> lib.FloatArray1D:
     """Distances between localizations of a track in consecutive frames.
 
     Jumps across skipped frames are left out, since they span a longer
@@ -797,18 +797,13 @@ def jump_distances(
     ----------
     locs : pd.DataFrame
         Tracked localizations (track ids in ``group``).
-    info : list of dicts, optional
-        Metadata, used for ``pixelsize`` if not given. Default is None.
-    pixelsize : float, optional
-        Camera pixel size (nm). Default is None (from the metadata).
 
     Returns
     -------
     jumps : lib.FloatArray1D
         Jump distances (nm).
     """
-    pixelsize = _pixelsize(pixelsize, info)
-    return _jumps(locs)[0] * pixelsize
+    return _jumps(locs)[0]
 
 
 def _softmax(w: lib.FloatArray1D) -> lib.FloatArray1D:
@@ -1083,7 +1078,6 @@ def track_table(
     info: list[dict] | None = None,
     *,
     frame_time: float | None = None,
-    pixelsize: float | None = None,
     n_fit: int = N_FIT,
 ) -> pd.DataFrame:
     """Summary of every track, one row per track.
@@ -1093,13 +1087,10 @@ def track_table(
     locs : pd.DataFrame
         Tracked localizations (track ids in ``group``).
     info : list of dicts, optional
-        Metadata, used for ``frame_time`` and ``pixelsize`` if not
-        given. Default is None.
+        Metadata, used for ``frame_time`` if not given. Default is None.
     frame_time : float, optional
         Time between two consecutive frames (ms). Default is None (from
         the metadata).
-    pixelsize : float, optional
-        Camera pixel size (nm). Default is None (from the metadata).
     n_fit : int, optional
         Number of time lags of the MSD fitted for the diffusion
         coefficient of every track, see :func:`fit_msd`. Default is 4.
@@ -1111,7 +1102,7 @@ def track_table(
         localizations have it), ``n_locs``, ``first_frame``,
         ``last_frame``, ``n_frames`` (from the first to the last frame,
         skipped frames included), ``duration_s``, ``x_mean`` and
-        ``y_mean`` (camera pixels), ``n_jumps`` (between consecutive
+        ``y_mean`` (nm), ``n_jumps`` (between consecutive
         frames), ``mean_jump_nm`` and ``D_um2_s`` (from the MSD of the
         track). The last two are NaN where undefined: no jump, or not
         a single pair of localizations at one of the fitted lags (a
@@ -1120,7 +1111,6 @@ def track_table(
         ``io.save_locs`` removes rows with NaN.
     """
     frame_time = _frame_time(frame_time, info)
-    pixelsize = _pixelsize(pixelsize, info)
     order, group, frame, x, y, starts = _sorted_tracks(locs)
     first = starts[:-1]
     n_locs = np.diff(starts)
@@ -1139,7 +1129,7 @@ def track_table(
         mean_jump = np.where(n_jumps > 0, sum_jumps / n_jumps, np.nan)
     sums, counts = _msd_kernel(starts, frame, x, y, int(n_fit))
     with np.errstate(invalid="ignore", divide="ignore"):
-        track_msd = sums / counts * (pixelsize / 1000) ** 2
+        track_msd = sums / counts * 1e-6  # nm^2 to um^2
     tau = np.arange(1, int(n_fit) + 1) * frame_time / 1000
     D = fit_msd(tau, track_msd.reshape(n_tracks, int(n_fit)), n_fit)["D"]
 
@@ -1157,7 +1147,7 @@ def track_table(
             "x_mean": x_mean.astype(np.float32),
             "y_mean": y_mean.astype(np.float32),
             "n_jumps": n_jumps.astype(np.int32),
-            "mean_jump_nm": mean_jump * pixelsize,
+            "mean_jump_nm": mean_jump,
             "D_um2_s": np.asarray(D, dtype=np.float64),
         }
     )
@@ -1167,7 +1157,6 @@ def track_table(
 def _resolve_sigma(
     sigma: float | Literal["precision"],
     locs: pd.DataFrame,
-    pixelsize: float,
 ) -> tuple[float, str]:
     """The localization error (nm) for the jump distance fit and its
     source ("none", "median precision" or "custom")."""
@@ -1181,7 +1170,7 @@ def _resolve_sigma(
                 "sigma='precision' needs the localization precision "
                 "(lpx and lpy columns)."
             )
-        value = median_precision(locs, pixelsize)
+        value = median_precision(locs)
         if not np.isfinite(value):
             raise ValueError(
                 "The median localization precision is not finite."
@@ -1198,7 +1187,6 @@ def analyze_tracks(
     info: list[dict] | None,
     *,
     frame_time: float | None = None,
-    pixelsize: float | None = None,
     max_lag: int = MAX_LAG,
     n_fit: int = N_FIT,
     sigma: float | Literal["precision"] = 0.0,
@@ -1214,14 +1202,11 @@ def analyze_tracks(
     locs : pd.DataFrame
         Tracked localizations (track ids in ``group``).
     info : list of dicts or None
-        Metadata of ``locs``, used for ``frame_time``, ``pixelsize``
-        and, with ``truncate``, the maximum jump distance of the
-        tracking.
+        Metadata of ``locs``, used for ``frame_time`` and, with
+        ``truncate``, the maximum jump distance of the tracking.
     frame_time : float, optional
         Time between two consecutive frames (ms). Default is None (from
         the metadata).
-    pixelsize : float, optional
-        Camera pixel size (nm). Default is None (from the metadata).
     max_lag : int, optional
         Largest time lag of the MSD (frames). Default is 10.
     n_fit : int, optional
@@ -1260,7 +1245,6 @@ def analyze_tracks(
         If the localizations are not tracked or a parameter is invalid.
     """
     frame_time = _frame_time(frame_time, info)
-    pixelsize = _pixelsize(pixelsize, info)
     if int(n_fit) != n_fit or n_fit < 2:
         raise ValueError(
             f"n_fit must be an integer of at least 2, got {n_fit}."
@@ -1272,31 +1256,26 @@ def analyze_tracks(
     if np.isscalar(n_populations):
         n_populations = [n_populations]
     n_populations = [int(k) for k in n_populations]
-    sigma_nm, sigma_source = _resolve_sigma(sigma, locs, pixelsize)
+    sigma_nm, sigma_source = _resolve_sigma(sigma, locs)
     r_max = None
     if truncate:
-        entry = tracking_info(info)
-        if entry is None or "Max. jump (camera pixels)" not in entry:
+        r_max = max_jump_nm(info)
+        if r_max is None:
             raise ValueError(
                 "truncate=True needs the maximum jump distance of the "
                 "tracking in the metadata."
             )
-        r_max = float(entry["Max. jump (camera pixels)"]) * pixelsize
 
     progress = lib.normalize_progress(progress, "Analyzing tracks")
     n_steps = 2 + len(n_populations)
     progress.setMaximum(n_steps)
     progress.zero_progress("Computing the MSD...")
     progress.set_value(0)
-    table = track_table(
-        locs, frame_time=frame_time, pixelsize=pixelsize, n_fit=n_fit
-    )
-    msd_result = msd(
-        locs, frame_time=frame_time, pixelsize=pixelsize, max_lag=max_lag
-    )
+    table = track_table(locs, frame_time=frame_time, n_fit=n_fit)
+    msd_result = msd(locs, frame_time=frame_time, max_lag=max_lag)
     msd_fit = fit_msd(msd_result["tau"], msd_result["msd"], n_fit)
     progress.set_value(1)
-    jumps = jump_distances(locs, pixelsize=pixelsize)
+    jumps = jump_distances(locs)
     progress.set_value(2)
     jd_fits = {}
     jd_errors = {}
@@ -1316,7 +1295,6 @@ def analyze_tracks(
 
     parameters = {
         FRAME_TIME_KEY: frame_time,
-        "Pixel size (nm)": pixelsize,
         "Max. lag (frames)": int(max_lag),
         "MSD fit points": int(n_fit),
         "Localization error": sigma_source,

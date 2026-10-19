@@ -1164,7 +1164,6 @@ def _run_g5m_group_2D(
     min_locs: int = MIN_LOCS,
     loc_prec_handle: Literal["local", "abs"] = "local",
     sigma_bounds: tuple[float, float] = (MIN_SIGMA_FACTOR, MAX_SIGMA_FACTOR),
-    pixelsize: float = 130.0,
     max_rounds_without_best_bic: int = MAX_ROUNDS_WITHOUT_BEST_BIC,
     bootstrap_check: bool = False,
     max_locs_per_cluster: int = np.inf,
@@ -1175,7 +1174,7 @@ def _run_g5m_group_2D(
     Parameters
     ----------
     locs_group : pd.DataFrame
-        Localizations.
+        Localizations (nm).
     min_locs : int, optional
         Minimum number of localizations per component. Default is
         `MIN_LOCS`.
@@ -1188,10 +1187,8 @@ def _run_g5m_group_2D(
         Bounds for the standard deviation (sigma) of the Gaussian
         components. If local loc. prec. is used, the bounds specify the
         margin of error in units of localization precision. Else,
-        absolute bounds on sigma. Default is (`MIN_SIGMA_FACTOR`,
+        absolute bounds on sigma in nm. Default is (`MIN_SIGMA_FACTOR`,
         `MAX_SIGMA_FACTOR`).
-    pixelsize : float, optional
-        Camera pixel size in nm. Default is 130.0.
     max_rounds_without_best_bic : int, optional
         Maximum number of rounds without BIC improvement to terminate
         the search for optimal G5M n_components. Default is
@@ -1243,7 +1240,7 @@ def _run_g5m_group_2D(
     if g5m is None or len(g5m.valid_idx) == 0:
         return None, None
 
-    return _convert_G5M_results(g5m, locs_group, pixelsize, bootstrap_check)
+    return _convert_G5M_results(g5m, locs_group, bootstrap_check)
 
 
 class G5M_2D(G5M):
@@ -2066,7 +2063,7 @@ def _run_g5m_group_3D(
     min_locs: int = MIN_LOCS,
     loc_prec_handle: Literal["local", "abs"] = "local",
     sigma_bounds: tuple[float, float] = (MIN_SIGMA_FACTOR, MAX_SIGMA_FACTOR),
-    pixelsize: float = 130.0,
+    pixelsize: float | None = None,
     mode: Literal["astigmatism", "spline"] = "astigmatism",
     covariance_type: Literal["diagonal", "rotated"] = "diagonal",
     max_rounds_without_best_bic: int = MAX_ROUNDS_WITHOUT_BEST_BIC,
@@ -2079,11 +2076,12 @@ def _run_g5m_group_3D(
     Parameters
     ----------
     locs_group : pd.DataFrame
-        Localizations.
+        Localizations (nm).
     calibration : dict or None
         Astigmatism calibration dictionary with the keys "X
-        Coefficients", "Y Coefficients" and "Magnification factor".
-        Required for ``mode="astigmatism"``, may be None for spline.
+        Coefficients", "Y Coefficients" (spot widths in nm against z in
+        nm) and "Magnification factor". Required for
+        ``mode="astigmatism"``, may be None for spline.
         See https://picassosr.readthedocs.io/en/latest/localize/3d-calibration.html#localize-3d-calibration.  # noqa: E501
     min_locs : int, optional
         Minimum number of localizations per component. Default is
@@ -2097,10 +2095,13 @@ def _run_g5m_group_3D(
         Bounds for the standard deviation (sigma) of the Gaussian
         components. If loc_prec_handle is "local", the bounds specify
         the margin of error in units of localization precision. Else,
-        the bounds specify the absolute bounds on sigma. Default is
-        (`MIN_SIGMA_FACTOR`, `MAX_SIGMA_FACTOR`).
+        the bounds specify the absolute bounds on sigma in nm. Default
+        is (`MIN_SIGMA_FACTOR`, `MAX_SIGMA_FACTOR`).
     pixelsize : float, optional
-        Camera pixel size in nm. Default is 130.0.
+        Camera pixel size in nm. Only used to derive the axial
+        localization precision (``zfit.axial_localization_precision``,
+        whose spot width uncertainty formulas work in camera pixels)
+        when the localizations lack an ``lpz`` column. Default is None.
     mode : {"astigmatism", "spline"}, optional
         Fitting mode of the input localizations. "spline" uses a plain
         diagonal 3D model and reads lpz directly from the locs. Default
@@ -2147,6 +2148,12 @@ def _run_g5m_group_3D(
                 "Spline mode requires an 'lpz' column in the "
                 "localizations (produced by the spline 3D fit)."
             )
+        if pixelsize is None:
+            raise ValueError(
+                "The localizations have no 'lpz' column; deriving it from "
+                "the calibration needs the camera pixel size (Pixelsize, "
+                "nm) in the metadata."
+            )
         locs_group = locs_group.copy()
         locs_group["lpz"] = zfit.axial_localization_precision(
             locs_group, [{"Pixelsize": pixelsize}], calibration, "gausslq"
@@ -2161,8 +2168,6 @@ def _run_g5m_group_3D(
     else:
         lp = np.ones((len(locs_group), 3))  # dummy
     X = locs_group[["x", "y", "z"]].to_numpy()
-    X[:, 2] /= pixelsize  # convert z to camera pixels
-    lp[:, 2] /= pixelsize  # convert lpz to camera pixels
 
     if covariance_type == "rotated":
         # the "angle" column is written by picasso.localize in degrees;
@@ -2186,7 +2191,7 @@ def _run_g5m_group_3D(
     if g5m is None or len(g5m.valid_idx) == 0:
         return None, None
 
-    return _convert_G5M_results(g5m, locs_group, pixelsize, bootstrap_check)
+    return _convert_G5M_results(g5m, locs_group, bootstrap_check)
 
 
 class G5M_3D(G5M):
@@ -2516,9 +2521,7 @@ def _bootstrap_sem(
     return sem
 
 
-def _select_X_and_estep(
-    g5m: G5M, locs_group: pd.DataFrame, pixelsize: float
-) -> tuple:
+def _select_X_and_estep(g5m: G5M, locs_group: pd.DataFrame) -> tuple:
     """Localization coordinates and the E-step matching the G5M's shape.
 
     Parameters
@@ -2527,21 +2530,17 @@ def _select_X_and_estep(
         Fitted G5M.
     locs_group : pd.DataFrame
         Localizations that g5m was fitted to.
-    pixelsize : float
-        Camera pixel size in nm.
 
     Returns
     -------
     X : np.ndarray
-        ``(n_locs, 2)`` or ``(n_locs, 3)`` coordinates, z converted to
-        camera pixels.
+        ``(n_locs, 2)`` or ``(n_locs, 3)`` coordinates (nm).
     e_step : callable
         ``_e_step_2D``, ``_e_step_3D`` or ``_e_step_3D_rot``, matching
         ``g5m.covariance_type``.
     """
     if "z" in locs_group.columns:
         X = locs_group[["x", "y", "z"]].to_numpy()
-        X[:, 2] /= pixelsize  # convert z to camera pixels
         if g5m.covariance_type == "rotated":
             e_step = _e_step_3D_rot
         else:
@@ -2561,34 +2560,36 @@ def _shape_columns(
     resp: np.ndarray,
     rsum: np.ndarray,
     locs_group: pd.DataFrame,
-    pixelsize: float,
 ) -> dict:
     """Fitted/relative width columns for the centers DataFrame.
 
+    The fitted widths (``fitted_sigma*``) are in nm; the relative widths
+    (``rel_sigma*``) are the fitted widths over the (responsibility-
+    weighted) mean localization precision of the component, unitless.
     Handles the 2D/3D and diagonal/rotated covariance layouts; see
     :func:`_convert_G5M_results`.
     """
     if not is_3d:
-        sigma = np.sqrt(covariances) * pixelsize
+        sigma = np.sqrt(covariances)
         lp = locs_group[["lpx", "lpy"]].mean(axis=1).to_numpy()
         weighted_lp = ((resp * lp.reshape(-1, 1)).sum(0) / rsum).reshape(-1)
-        rel_sigma = sigma / weighted_lp / pixelsize
+        rel_sigma = sigma / weighted_lp
         return {"fitted_sigma": sigma, "rel_sigma": rel_sigma}
 
-    z = means[:, 2] * pixelsize
+    z = means[:, 2]
     if rotated:
         # marginal (camera-axis) widths, so that fitted_sigma_x/y/z keep
         # the same meaning as for the diagonal model
         marginal = np.diagonal(covariances, axis1=1, axis2=2)
-        sigma_x = np.sqrt(marginal[:, 0]) * pixelsize
-        sigma_y = np.sqrt(marginal[:, 1]) * pixelsize
-        sigma_z = np.sqrt(marginal[:, 2]) * pixelsize
+        sigma_x = np.sqrt(marginal[:, 0])
+        sigma_y = np.sqrt(marginal[:, 1])
+        sigma_z = np.sqrt(marginal[:, 2])
         # principal axes of the xy block; eigh returns ascending
         # eigenvalues, so the major axis is the second one
         eigvals, eigvecs = np.linalg.eigh(covariances[:, :2, :2])
         eigvals = np.maximum(eigvals, 0.0)
-        sigma_minor = np.sqrt(eigvals[:, 0]) * pixelsize
-        sigma_major = np.sqrt(eigvals[:, 1]) * pixelsize
+        sigma_minor = np.sqrt(eigvals[:, 0])
+        sigma_major = np.sqrt(eigvals[:, 1])
         axis_ratio = sigma_major / sigma_minor
         # orientation of the major axis, in the same convention as the
         # "angle" column written by picasso.localize: degrees wrapped
@@ -2596,11 +2597,11 @@ def _shape_columns(
         angle = np.rad2deg(np.arctan2(eigvecs[:, 1, 1], eigvecs[:, 0, 1]))
         angle = np.mod(angle + 90.0, 180.0) - 90.0
     else:
-        sigma_x = np.sqrt(covariances[:, 0]) * pixelsize
-        sigma_y = np.sqrt(covariances[:, 1]) * pixelsize
-        sigma_z = np.sqrt(covariances[:, 2]) * pixelsize
+        sigma_x = np.sqrt(covariances[:, 0])
+        sigma_y = np.sqrt(covariances[:, 1])
+        sigma_z = np.sqrt(covariances[:, 2])
 
-    lpz = sem[:, 2] * pixelsize
+    lpz = sem[:, 2]
     weighted_lpx = (
         (resp * locs_group["lpx"].to_numpy().reshape(-1, 1)).sum(0) / rsum
     ).reshape(-1)
@@ -2616,8 +2617,8 @@ def _shape_columns(
         "fitted_sigma_x": sigma_x,
         "fitted_sigma_y": sigma_y,
         "fitted_sigma_z": sigma_z,
-        "rel_sigma_x": sigma_x / weighted_lpx / pixelsize,
-        "rel_sigma_y": sigma_y / weighted_lpy / pixelsize,
+        "rel_sigma_x": sigma_x / weighted_lpx,
+        "rel_sigma_y": sigma_y / weighted_lpy,
         "rel_sigma_z": sigma_z / weighted_lpz,
     }
     if rotated:
@@ -2628,8 +2629,8 @@ def _shape_columns(
         columns.update(
             fitted_sigma_major=sigma_major,
             fitted_sigma_minor=sigma_minor,
-            rel_sigma_major=sigma_major / weighted_lpxy / pixelsize,
-            rel_sigma_minor=sigma_minor / weighted_lpxy / pixelsize,
+            rel_sigma_major=sigma_major / weighted_lpxy,
+            rel_sigma_minor=sigma_minor / weighted_lpxy,
             axis_ratio=axis_ratio,
             angle=angle,
         )
@@ -2637,7 +2638,7 @@ def _shape_columns(
 
 
 def _binding_event_counts(
-    g5m: G5M, locs_group: pd.DataFrame, pixelsize: float, is_3d: bool
+    g5m: G5M, locs_group: pd.DataFrame, is_3d: bool
 ) -> np.ndarray:
     """Number of binding events assigned to each G5M component.
 
@@ -2651,8 +2652,6 @@ def _binding_event_counts(
         Fitted G5M.
     locs_group : pd.DataFrame
         Localizations of one cluster, expected in frame order.
-    pixelsize : float
-        Camera pixel size in nm, used to convert z to camera pixels.
     is_3d : bool
         Whether the localizations are 3D.
 
@@ -2670,8 +2669,7 @@ def _binding_event_counts(
     ]
     if is_3d:
         z_events = [
-            np.mean(_) / pixelsize
-            for _ in np.split(locs_group["z"].to_numpy(), split_idx)
+            np.mean(_) for _ in np.split(locs_group["z"].to_numpy(), split_idx)
         ]
         X_events = np.stack((x_events, y_events, z_events)).T
     else:
@@ -2750,13 +2748,12 @@ def _ordered_center_columns(
 def _convert_G5M_results(
     g5m: G5M,
     locs_group: pd.DataFrame,
-    pixelsize: float = 130.0,
     bootstrap: bool = False,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Extract G5M components as ``pd.DataFrame`` in the format of
     localizations - frame, spatial coordinates, standard errors of the
     means, fitted sigma and number of localizations corresponding to
-    the centers, etc.
+    the centers, etc. Every length is in nm, like the localizations.
 
     Parameters
     ----------
@@ -2764,8 +2761,6 @@ def _convert_G5M_results(
         Fitted G5M.
     locs_group : pd.DataFrame
         Localizations that g5m was fitted to.
-    pixelsize : float, optional
-        Camera pixel size in nm. Default is 130.0.
     bootstrap : bool, optional
         If True, the standard error of the means (SEM) is calculated
         using bootstrapping. If False, the standard, single Gaussian
@@ -2785,7 +2780,7 @@ def _convert_G5M_results(
     weights = g5m.weights
     # find responsibilites which are used for weighted averaging of
     # properties per component
-    X, e_step = _select_X_and_estep(g5m, locs_group, pixelsize)
+    X, e_step = _select_X_and_estep(g5m, locs_group)
     is_3d = X.shape[1] == 3
     log_prob = g5m.estimate_weighted_log_prob(X)
     sample_scores = _logsumexp_axis1(log_prob, (X.shape[0],))
@@ -2845,7 +2840,6 @@ def _convert_G5M_results(
         resp,
         rsum,
         locs_group,
-        pixelsize,
     )
 
     # extract frame info and group_input
@@ -2874,7 +2868,7 @@ def _convert_G5M_results(
     # and assign them to molecules - sticky events will likely have only
     # one or two such events associated, then find the closest G5M
     # component to each event, accounting for a component with none
-    n_events = _binding_event_counts(g5m, locs_group, pixelsize, is_3d)
+    n_events = _binding_event_counts(g5m, locs_group, is_3d)
 
     # convert to DataFrame
     base_columns = {
@@ -3230,9 +3224,10 @@ def _run_g5m_group(
         Shape of the G5M components, ignored for 2D.
     **kwargs
         Arguments shared by the 2D and 3D runners (``min_locs``,
-        ``loc_prec_handle``, ``sigma_bounds``, ``pixelsize``,
+        ``loc_prec_handle``, ``sigma_bounds``,
         ``max_rounds_without_best_bic``, ``bootstrap_check`` and
-        ``max_locs_per_cluster``).
+        ``max_locs_per_cluster``) plus the 3D runner's ``pixelsize``,
+        which the 2D one does not take.
 
     Returns
     -------
@@ -3250,6 +3245,7 @@ def _run_g5m_group(
             covariance_type=covariance_type,
             **kwargs,
         )
+    kwargs.pop("pixelsize", None)
     return _run_g5m_group_2D(locs_group, **kwargs)
 
 
@@ -3338,7 +3334,7 @@ def _g5m(
     min_locs: int,
     loc_prec_handle: Literal["local", "abs"],
     sigma_bounds: tuple[float, float],
-    pixelsize: float,
+    pixelsize: float | None,
     max_rounds_without_best_bic: int,
     bootstrap_check: bool,
     calibration: dict | None,
@@ -3565,7 +3561,6 @@ def _g5m_info(
     covariance_type: str,
     loc_prec_handle: str,
     sigma_bounds: tuple,
-    pixelsize: float,
     mode: str,
     calibration: dict | None,
 ) -> dict:
@@ -3587,10 +3582,7 @@ def _g5m_info(
         new_info["Sigma bounds (factors)"] = [float(_) for _ in sigma_bounds]
         new_info["Sigma bounds method"] = "Local"
     else:
-        new_info["Sigma bounds (nm)"] = [
-            float(sigma_bounds[0] * pixelsize),
-            float(sigma_bounds[1] * pixelsize),
-        ]
+        new_info["Sigma bounds (nm)"] = [float(_) for _ in sigma_bounds]
         new_info["Sigma bounds method"] = "Abs"
     if "z" in locs.columns:
         new_info["Fit mode"] = mode
@@ -3660,9 +3652,12 @@ def g5m(
     Parameters
     ----------
     locs : pd.DataFrame
-        Localizations.
+        Localizations, clustered (``group`` column), with every length
+        in nm.
     info : list
-        Information dictionaries.
+        Information dictionaries. The camera pixel size ("Pixelsize",
+        nm) is needed only to derive the axial localization precision
+        of 3D astigmatism localizations that lack an ``lpz`` column.
     min_locs : int, optional
         Minimum number of localizations per component. Used to filter
         out components with too few localizations that likely represent
@@ -3676,7 +3671,7 @@ def g5m(
         Bounds for the standard deviation (sigma) of the Gaussian
         components. If local loc. prec. is used, the bounds specify the
         margin of error in units of localization precision. Else,
-        absolute bounds on sigma. Default is `(MIN_SIGMA_FACTOR,
+        absolute bounds on sigma in nm. Default is `(MIN_SIGMA_FACTOR,
         MAX_SIGMA_FACTOR)`.
     max_rounds_without_best_bic : int, optional
         Maximum number of rounds without BIC improvement to terminate
@@ -3686,8 +3681,9 @@ def g5m(
         using bootstrapping. If False, the standard, single Gaussian SEM
         is used as approximation. Default is False.
     calibration : dict, optional
-        Astigmatism calibration dictionary with x and y coefficients and
-        magnification factor. Only required for 3D data fit with
+        Astigmatism calibration dictionary with x and y coefficients
+        (spot widths in nm against z in nm, see ``io.load_calibration``)
+        and magnification factor. Only required for 3D data fit with
         ``mode="astigmatism"``. Ignored for spline. Default is None.
     mode : {"astigmatism", "spline"}, optional
         Fitting mode of the input 3D localizations. "astigmatism"
@@ -3736,10 +3732,18 @@ def g5m(
     Returns
     -------
     centers : pd.DataFrame
-        Centers of the G5M components in the format of localizations.
+        Centers of the G5M components in the format of localizations:
+        ``x``, ``y``, ``z``, their standard errors ``lpx``, ``lpy``,
+        ``lpz`` and the fitted widths ``fitted_sigma*`` in nm, the
+        relative widths ``rel_sigma*`` (fitted width over the mean
+        localization precision of the component) unitless. The
+        log-likelihoods (``mol_log_likelihood``,
+        ``group_log_likelihood``) are log densities per nm (squared or
+        cubed).
     clustered_locs : pd.DataFrame
         Localizations with assigned cluster labels, based on the G5M
-        components.
+        components, and their ``log_likelihood`` under the G5M (a log
+        density per nm squared or cubed).
     info : list
         Updated information dictionaries.
     """
@@ -3750,9 +3754,8 @@ def g5m(
     # metadata) sees the concrete model that was actually used
     covariance_type = _resolve_covariance_type(covariance_type, locs, mode)
 
+    # only needed to derive lpz for astigmatism data that lack it
     pixelsize = lib.get_from_metadata(info, "Pixelsize")
-    if pixelsize is None:
-        raise ValueError("Camera pixel size must be provided in info.")
 
     # astigmatism 3D data requires a calibration; spline 3D data recovers
     # z (and lpz) directly, so no calibration is needed
@@ -3810,7 +3813,6 @@ def g5m(
         covariance_type,
         loc_prec_handle,
         sigma_bounds,
-        pixelsize,
         mode,
         calibration,
     )

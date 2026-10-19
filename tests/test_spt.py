@@ -41,20 +41,20 @@ def _brownian(
     n_frames: int = 30,
     D: float = 0.1,
     sigma: float = 0.0,
-    size: float = 500.0,
+    size: float = 50_000.0,
     seed: int = 0,
 ) -> pd.DataFrame:
-    """Freely diffusing particles (D in um^2/s, sigma in nm), each seen
-    in ``n_frames`` consecutive frames starting at a random frame; the
-    true particle is in the column ``truth``."""
+    """Freely diffusing particles (D in um^2/s, sigma in nm) in a field
+    of ``size`` nm, each seen in ``n_frames`` consecutive frames starting
+    at a random frame; the true particle is in the column ``truth``."""
     rng = np.random.default_rng(seed)
-    step = np.sqrt(2 * D * FRAME_TIME / 1000) * 1000 / PIXELSIZE  # px
+    step = np.sqrt(2 * D * FRAME_TIME / 1000) * 1000  # nm
     frames, xs, ys, truth = [], [], [], []
     for p in range(n_particles):
-        xy = rng.uniform(5, size - 5, 2) + np.cumsum(
+        xy = rng.uniform(500, size - 500, 2) + np.cumsum(
             rng.normal(0, step, (n_frames, 2)), axis=0
         )
-        xy += rng.normal(0, sigma / PIXELSIZE, xy.shape)
+        xy += rng.normal(0, sigma, xy.shape)
         first = rng.integers(0, 200)
         frames.append(np.arange(first, first + n_frames))
         xs.append(xy[:, 0])
@@ -65,8 +65,8 @@ def _brownian(
             "frame": np.concatenate(frames).astype(np.uint32),
             "x": np.concatenate(xs).astype(np.float32),
             "y": np.concatenate(ys).astype(np.float32),
-            "lpx": np.float32(0.2),
-            "lpy": np.float32(0.3),
+            "lpx": np.float32(20.0),
+            "lpy": np.float32(30.0),
             "truth": np.concatenate(truth),
         }
     )
@@ -105,8 +105,8 @@ def _jumps(D, n, frame_time=FRAME_TIME, sigma=0.0, seed=0):
 
 
 def test_link_sparse_particles_gives_pure_tracks():
-    locs = _brownian(size=2000.0)
-    tracked, info = spt.link_tracks(locs, _info(), max_jump=4.0)
+    locs = _brownian(size=200_000.0)
+    tracked, info = spt.link_tracks(locs, _info(), max_jump=400.0)
     assert len(tracked) == len(locs)
     assert tracked["group"].nunique() == locs["truth"].nunique()
     assert (tracked.groupby("group")["truth"].nunique() == 1).all()
@@ -209,14 +209,15 @@ def test_link_keeps_input_and_records_parameters():
     before = locs.copy()
     info = _info()
     tracked, new_info = spt.link_tracks(
-        locs, info, 3.0, max_gap=2, min_length=4, frame_time=FRAME_TIME
+        locs, info, 300.0, max_gap=2, min_length=4, frame_time=FRAME_TIME
     )
     pd.testing.assert_frame_equal(locs, before)
     assert len(info) == 1  # not modified either
     entry = new_info[-1]
     assert entry[spt.TRACKING_KEY] == "nearest neighbor"
-    assert entry["Max. jump (camera pixels)"] == 3.0
-    assert entry["Max. jump (nm)"] == 3.0 * PIXELSIZE
+    assert entry["Max. jump (nm)"] == 300.0
+    assert "Max. jump (camera pixels)" not in entry
+    assert spt.max_jump_nm(new_info) == 300.0
     assert entry["Max. gap (frames)"] == 2
     assert entry["Min. track length"] == 4
     assert entry[spt.FRAME_TIME_KEY] == FRAME_TIME
@@ -239,10 +240,21 @@ def test_link_rejects_invalid_parameters(kwargs):
         spt.link_tracks(_locs([0], [0.0]), _info(), **kwargs)
 
 
+def test_max_jump_nm_of_legacy_metadata():
+    """Files tracked before Picasso 1.0 record the maximum jump in
+    camera pixels; it is converted with the pixel size."""
+    info = _info() + [
+        {spt.TRACKING_KEY: spt.TRACKING_METHOD, "Max. jump (camera pixels)": 3}
+    ]
+    assert spt.max_jump_nm(info) == 3 * PIXELSIZE
+    assert spt.max_jump_nm(_info()) is None
+    assert spt.max_jump_nm([{spt.TRACKING_KEY: spt.TRACKING_METHOD}]) is None
+
+
 def test_is_tracked():
     locs = _brownian(n_particles=5)
     assert not spt.is_tracked(locs, _info())
-    tracked, info = spt.link_tracks(locs, _info(), 3.0)
+    tracked, info = spt.link_tracks(locs, _info(), 300.0)
     assert spt.is_tracked(tracked, info)
     # group overwritten, e.g., by clustering: several locs per frame
     regrouped = tracked.assign(group=np.int32(0))
@@ -268,10 +280,10 @@ def test_track_segments():
 
 
 def test_msd_of_a_track_with_a_skipped_frame():
-    """1 camera pixel = 1 um and 1 frame = 1 s: frames 0, 1, 3 at x = 0,
-    1, 3 give one pair at each lag 1, 2 and 3."""
-    locs = _locs([0, 1, 3], [0.0, 1.0, 3.0], group=np.int32(0))
-    result = spt.msd(locs, frame_time=1000.0, pixelsize=1000.0, max_lag=4)
+    """1 frame = 1 s: frames 0, 1, 3 at x = 0, 1, 3 um give one pair at
+    each lag 1, 2 and 3."""
+    locs = _locs([0, 1, 3], [0.0, 1000.0, 3000.0], group=np.int32(0))
+    result = spt.msd(locs, frame_time=1000.0, max_lag=4)
     assert result["n_pairs"].tolist() == [1, 1, 1, 0]
     np.testing.assert_allclose(result["msd"][:3], [1.0, 4.0, 9.0])
     assert np.isnan(result["msd"][3])
@@ -282,11 +294,11 @@ def test_msd_of_a_track_with_a_skipped_frame():
 def test_ensemble_msd_is_pooled_over_pairs():
     locs = pd.concat(
         [
-            _locs([0, 1, 2], [0.0, 1.0, 3.0], group=np.int32(0)),
-            _locs([0, 1], [0.0, 2.0], group=np.int32(1)),
+            _locs([0, 1, 2], [0.0, 1000.0, 3000.0], group=np.int32(0)),
+            _locs([0, 1], [0.0, 2000.0], group=np.int32(1)),
         ]
     )
-    result = spt.msd(locs, frame_time=1000.0, pixelsize=1000.0, max_lag=2)
+    result = spt.msd(locs, frame_time=1000.0, max_lag=2)
     # lag 1: (1 + 4) + 4 over 3 pairs; lag 2: 9 over 1 pair
     np.testing.assert_allclose(result["msd"], [3.0, 9.0])
     assert result["n_tracks"].tolist() == [2, 1]
@@ -296,7 +308,7 @@ def test_ensemble_msd_is_pooled_over_pairs():
 
 def test_msd_fit_recovers_D_and_sigma():
     locs = _brownian(n_particles=400, n_frames=40, D=0.1, sigma=30.0)
-    tracked, info = spt.link_tracks(locs, _info(), 4.0)
+    tracked, info = spt.link_tracks(locs, _info(), 400.0)
     result = spt.msd(tracked, info, frame_time=FRAME_TIME)
     fit = spt.fit_msd(result["tau"], result["msd"], n_fit=4)
     assert fit["D"] == pytest.approx(0.1, rel=0.05)
@@ -318,17 +330,15 @@ def test_fit_msd_rows_and_invalid_input():
         spt.fit_msd(tau, rows, n_fit=1)
 
 
-def test_msd_needs_tracks_frame_time_and_pixel_size():
-    locs = _locs([0, 1], [0.0, 1.0])
+def test_msd_needs_tracks_and_frame_time():
+    locs = _locs([0, 1], [0.0, 1000.0])
     with pytest.raises(ValueError, match="group"):
-        spt.msd(locs, frame_time=1.0, pixelsize=1.0)
+        spt.msd(locs, frame_time=1.0)
     locs["group"] = np.int32(0)
     with pytest.raises(ValueError, match="frame time"):
-        spt.msd(locs, [{}], pixelsize=1.0)
-    with pytest.raises(ValueError, match="pixel size"):
-        spt.msd(locs, [{}], frame_time=1.0)
+        spt.msd(locs, [{}])
     # from the metadata
-    result = spt.msd(locs, [{"Pixelsize": 1000.0, spt.FRAME_TIME_KEY: 1e3}])
+    result = spt.msd(locs, [{spt.FRAME_TIME_KEY: 1e3}])
     assert result["msd"][0] == pytest.approx(1.0)
 
 
@@ -338,9 +348,9 @@ def test_msd_needs_tracks_frame_time_and_pixel_size():
 
 
 def test_jump_distances_skip_gaps():
-    locs = _locs([0, 1, 3, 4], [0.0, 1.0, 2.0, 4.0], group=np.int32(0))
-    jumps = spt.jump_distances(locs, pixelsize=PIXELSIZE)
-    np.testing.assert_allclose(jumps, [PIXELSIZE, 2 * PIXELSIZE])
+    locs = _locs([0, 1, 3, 4], [0.0, 100.0, 200.0, 400.0], group=np.int32(0))
+    jumps = spt.jump_distances(locs)
+    np.testing.assert_allclose(jumps, [100.0, 200.0])
 
 
 def test_fit_one_population():
@@ -448,18 +458,20 @@ def test_jump_distance_pdf_integrates_to_one():
 def test_track_table():
     locs = pd.concat(
         [
-            _locs([0, 1, 2, 3, 4, 5], np.arange(6.0), group=np.int32(0)),
-            _locs([10, 12], [5.0, 6.0], group=np.int32(1)),
+            _locs(
+                [0, 1, 2, 3, 4, 5], 1000.0 * np.arange(6.0), group=np.int32(0)
+            ),
+            _locs([10, 12], [5000.0, 6000.0], group=np.int32(1)),
         ]
     )
     locs["group_input"] = np.int32(7)
-    table = spt.track_table(locs, frame_time=1000.0, pixelsize=1000.0)
+    table = spt.track_table(locs, frame_time=1000.0)
     assert table["group"].tolist() == [0, 1]
     assert table["group_input"].tolist() == [7, 7]
     assert table["n_locs"].tolist() == [6, 2]
     assert table["n_frames"].tolist() == [6, 3]
     assert table["duration_s"].tolist() == [5.0, 2.0]
-    assert table["x_mean"].tolist() == [2.5, 5.5]
+    assert table["x_mean"].tolist() == [2500.0, 5500.0]  # nm
     assert table["n_jumps"].tolist() == [5, 0]
     assert table["mean_jump_nm"].iloc[0] == pytest.approx(1000.0)
     assert np.isnan(table["mean_jump_nm"].iloc[1])
@@ -470,7 +482,9 @@ def test_track_table():
 
 def test_analyze_tracks_and_save(tmp_path):
     locs = _brownian(n_particles=200, n_frames=20, D=0.1, sigma=20.0)
-    tracked, info = spt.link_tracks(locs, _info(), 4.0, frame_time=FRAME_TIME)
+    tracked, info = spt.link_tracks(
+        locs, _info(), 400.0, frame_time=FRAME_TIME
+    )
     result = spt.analyze_tracks(tracked, info, n_populations=(1, 2))
     assert result["n_tracks"] == 200
     assert result["parameters"]["Localization error"] == "none"
@@ -500,7 +514,7 @@ def test_analyze_tracks_and_save(tmp_path):
 
 def test_analyze_tracks_options():
     locs = _brownian(n_particles=50, n_frames=10)
-    tracked, info = spt.link_tracks(locs, _info(), 4.0)
+    tracked, info = spt.link_tracks(locs, _info(), 400.0)
     result = spt.analyze_tracks(
         tracked,
         info,
@@ -525,7 +539,7 @@ def test_analyze_tracks_options():
             tracked, info, frame_time=FRAME_TIME, max_lag=3, n_fit=4
         )
     # too few jumps for a fit: reported, not raised
-    few, few_info = spt.link_tracks(locs.iloc[:6], _info(), 4.0)
+    few, few_info = spt.link_tracks(locs.iloc[:6], _info(), 400.0)
     result = spt.analyze_tracks(
         few, few_info, frame_time=FRAME_TIME, n_populations=3
     )
@@ -535,7 +549,7 @@ def test_analyze_tracks_options():
 
 def test_plots():
     locs = _brownian(n_particles=50, n_frames=10)
-    tracked, info = spt.link_tracks(locs, _info(), 4.0)
+    tracked, info = spt.link_tracks(locs, _info(), 400.0)
     result = spt.analyze_tracks(tracked, info, frame_time=FRAME_TIME)
     fig = spt.plot_msd(result["msd"], result["msd_fit"])
     assert "D =" in fig.axes[0].get_title()
@@ -562,7 +576,11 @@ def test_cli_track_and_diffusion(tmp_path, capsys):
     tracked, info = io.load_locs(out)
     assert spt.is_tracked(tracked, info)
     assert info[-1]["Max. jump (nm)"] == 400.0
+    assert "Max. jump (camera pixels)" not in info[-1]
     assert tracked["group"].nunique() == 100
+    # --pixelsize is ignored since 1.0 (nm), with a notice
+    cli._track([path], 400.0, 1, 2, FRAME_TIME, 130.0)
+    assert "ignored" in capsys.readouterr().err
 
     cli._diffusion([out], None, 10, 4, [1, 2], 0.0, False, True, None)
     for suffix in (

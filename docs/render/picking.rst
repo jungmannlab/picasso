@@ -123,23 +123,21 @@ See :doc:`menu-tools` for the other pick utilities.
    :icon: code
    :class-container: api-example
 
-   Picks are lists of centers in camera pixels (for rectangles, pairs of
-   end points), and ``picked_locs`` returns one DataFrame per pick. Note
-   the size conventions: ``picked_locs`` and ``pick_similar`` take the
-   *radius* of a circular pick, ``lib.pick_areas`` and the pick-region
-   files its *diameter* (the width for rectangles).
+   Picks are lists of centers in nm (for rectangles, pairs of end
+   points), and ``picked_locs`` returns one DataFrame per pick. Note the
+   size conventions: ``picked_locs`` and ``pick_similar`` take the *radius*
+   of a circular pick, ``lib.pick_areas`` and the pick-region files its
+   *diameter* (the width for rectangles), all in nm.
 
    .. code-block:: python
 
       import pandas as pd
-      import yaml
-      from picasso import io, lib, postprocess
+      from picasso import io, postprocess
 
       locs, info = io.load_locs("movie_locs.hdf5")
-      pixelsize = lib.get_from_metadata(info, "Pixelsize")
 
-      picks = [(120.3, 88.1), (131.0, 92.7)]             # centers, camera pixels
-      radius = 100 / pixelsize / 2                       # 100 nm diameter
+      picks = [(15639.0, 11453.0), (17030.0, 12051.0)]   # centers, nm
+      radius = 50.0                                      # 100 nm diameter
       picked = postprocess.picked_locs(locs, info, picks, "Circle", pick_size=radius)
 
       # Pick similar
@@ -149,9 +147,7 @@ See :doc:`menu-tools` for the other pick utilities.
 
       # Save picked localizations (one "group" per pick) and the pick regions
       io.save_locs("movie_locs_picked.hdf5", pd.concat(picked, ignore_index=True), info)
-      regions = {"Diameter (nm)": 100.0, "Centers": [list(map(float, p)) for p in picks]}
-      with open("movie_locs_picks.yaml", "w") as f:
-          yaml.dump(regions, f)
+      io.save_picks("movie_locs_picks.yaml", picks, "Circle", size=2 * radius)
 
-      # Load pick regions saved by Render (size in camera pixels)
-      picks, shape, diameter = io.load_picks("movie_locs_picks.yaml", pixelsize=pixelsize)
+      # Load pick regions saved by Render (positions and diameter in nm)
+      picks, shape, diameter = io.load_picks("movie_locs_picks.yaml")

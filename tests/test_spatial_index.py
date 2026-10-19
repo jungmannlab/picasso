@@ -19,16 +19,22 @@ import pytest
 from picasso import render, spatial_index
 
 
+#: camera pixel size (nm); the fields of view below are given in nm,
+#: as multiples of it, so that the metadata holds whole pixel counts
+PS = 130.0
+
+
 def _make_locs(
     n: int, width: float, height: float, seed: int = 0
 ) -> pd.DataFrame:
+    """Uniform localizations on a ``width`` x ``height`` nm field."""
     rng = np.random.default_rng(seed)
     return pd.DataFrame(
         {
             "x": rng.uniform(0.0, width, size=n),
             "y": rng.uniform(0.0, height, size=n),
-            "lpx": rng.uniform(0.05, 0.3, size=n),
-            "lpy": rng.uniform(0.05, 0.3, size=n),
+            "lpx": rng.uniform(5.0, 40.0, size=n),
+            "lpy": rng.uniform(5.0, 40.0, size=n),
             "photons": rng.uniform(500.0, 5000.0, size=n),
             "frame": rng.integers(0, 1000, size=n).astype(np.int32),
         }
@@ -36,12 +42,13 @@ def _make_locs(
 
 
 def _info(width: float, height: float, n_frames: int = 1000) -> list[dict]:
+    """Metadata of a ``width`` x ``height`` nm field of view."""
     return [
         {
-            "Width": width,
-            "Height": height,
+            "Width": int(round(width / PS)),
+            "Height": int(round(height / PS)),
             "Frames": n_frames,
-            "Pixelsize": 130.0,
+            "Pixelsize": PS,
         }
     ]
 
@@ -60,14 +67,18 @@ def _brute_force_in_view(locs: pd.DataFrame, viewport) -> np.ndarray:
 
 
 class TestQueryCircle:
-    @pytest.mark.parametrize("radius", [0.4, 3.0, 25.0])
+    @pytest.mark.parametrize("radius", [0.4 * PS, 3.0 * PS, 25.0 * PS])
     def test_matches_brute_force(self, radius):
-        locs = _make_locs(20_000, 128.0, 96.0, seed=3)
-        pyramid = spatial_index.build_render_index(locs, _info(128.0, 96.0))
+        W, H = 128.0 * PS, 96.0 * PS
+        locs = _make_locs(20_000, W, H, seed=3)
+        pyramid = spatial_index.build_render_index(locs, _info(W, H))
         x = locs["x"].to_numpy()
         y = locs["y"].to_numpy()
         rng = np.random.default_rng(4)
-        for cx, cy in zip(rng.uniform(-5, 133, 30), rng.uniform(-5, 101, 30)):
+        for cx, cy in zip(
+            rng.uniform(-5 * PS, W + 5 * PS, 30),
+            rng.uniform(-5 * PS, H + 5 * PS, 30),
+        ):
             got = spatial_index.query_circle(pyramid, x, y, cx, cy, radius)
             expected = np.nonzero((x - cx) ** 2 + (y - cy) ** 2 < radius**2)[0]
             assert np.array_equal(np.sort(got), expected)
@@ -75,12 +86,16 @@ class TestQueryCircle:
     def test_matches_index_block_picking(self):
         from picasso import postprocess
 
-        width, height = 64.0, 64.0
+        width, height = 64.0 * PS, 64.0 * PS
         locs = _make_locs(5_000, width, height, seed=5)
         info = _info(width, height)
         pyramid = spatial_index.build_render_index(locs, info)
-        picks = [(10.0, 12.0), (40.5, 33.2), (63.9, 0.1)]
-        radius = 2.5
+        picks = [
+            (10.0 * PS, 12.0 * PS),
+            (40.5 * PS, 33.2 * PS),
+            (63.9 * PS, 0.1 * PS),
+        ]
+        radius = 2.5 * PS
         via_blocks = postprocess.picked_locs(
             locs, info, picks, "Circle", pick_size=radius
         )
@@ -100,17 +115,18 @@ class TestQueryCircle:
             )
 
     def test_empty_pyramid_and_far_away_pick(self):
-        locs = _make_locs(1_000, 32.0, 32.0)
-        pyramid = spatial_index.build_render_index(locs, _info(32.0, 32.0))
+        W = 32.0 * PS
+        locs = _make_locs(1_000, W, W)
+        pyramid = spatial_index.build_render_index(locs, _info(W, W))
         x = locs["x"].to_numpy()
         y = locs["y"].to_numpy()
         assert (
-            len(spatial_index.query_circle(pyramid, x, y, 100.0, 100.0, 3.0))
+            len(
+                spatial_index.query_circle(pyramid, x, y, 3 * W, 3 * W, 3 * PS)
+            )
             == 0
         )
-        empty = spatial_index.build_render_index(
-            locs.iloc[:0], _info(32.0, 32.0)
-        )
+        empty = spatial_index.build_render_index(locs.iloc[:0], _info(W, W))
         if empty is not None:
             assert (
                 len(spatial_index.query_circle(empty, x[:0], y[:0], 1, 1, 3))
@@ -123,13 +139,13 @@ class TestQueryCircle:
 # ---------------------------------------------------------------------------
 
 
-def _clustered_locs(n=2000, width=64.0, height=64.0, seed=0):
+def _clustered_locs(n=2000, width=64.0 * PS, height=64.0 * PS, seed=0):
     rng = np.random.default_rng(seed)
     x = np.concatenate(
-        [rng.uniform(0, width, n // 2), rng.normal(20, 1.5, n // 2)]
+        [rng.uniform(0, width, n // 2), rng.normal(20 * PS, 1.5 * PS, n // 2)]
     )
     y = np.concatenate(
-        [rng.uniform(0, height, n // 2), rng.normal(40, 1.5, n // 2)]
+        [rng.uniform(0, height, n // 2), rng.normal(40 * PS, 1.5 * PS, n // 2)]
     )
     keep = (x > 0) & (x < width) & (y > 0) & (y < height)
     return x[keep].astype(np.float32), y[keep].astype(np.float32)
@@ -145,20 +161,24 @@ class TestCountRect:
         # locs also beyond the FOV (held by the border blocks) and on a
         # block boundary; viewports from sub-pixel to beyond the FOV
         rng = np.random.default_rng(3)
-        n, width = 50_000, 256.0
+        n, width = 50_000, 256.0 * PS
         locs = pd.DataFrame(
             {
-                "x": rng.uniform(-2.0, width + 2.0, n).astype(np.float32),
-                "y": rng.uniform(-2.0, width + 2.0, n).astype(np.float32),
+                "x": rng.uniform(-2.0 * PS, width + 2.0 * PS, n).astype(
+                    np.float32
+                ),
+                "y": rng.uniform(-2.0 * PS, width + 2.0 * PS, n).astype(
+                    np.float32
+                ),
             }
         )
-        locs.loc[:99, "x"] = np.float32(100.0)
+        locs.loc[:99, "x"] = np.float32(100.0 * PS)
         pyramid = spatial_index.build_render_index(locs, _info(width, width))
         x = locs["x"].to_numpy()
         y = locs["y"].to_numpy()
         for _ in range(500):
-            cx, cy = rng.uniform(-20.0, width + 20.0, 2)
-            half = 10 ** rng.uniform(-2.0, 2.5) / 2
+            cx, cy = rng.uniform(-20.0 * PS, width + 20.0 * PS, 2)
+            half = 10 ** rng.uniform(-2.0, 2.5) / 2 * PS
             viewport = ((cy - half, cx - half), (cy + half, cx + half))
             expected = len(_brute_force_in_view(locs, viewport))
             assert spatial_index.count_rect(pyramid, x, y, viewport) == (
@@ -167,9 +187,10 @@ class TestCountRect:
 
     def test_zoomed_in_count_excludes_edge_blocks(self):
         # the pyramid query returns whole edge blocks; the count must not
-        locs = _make_locs(200_000, 64.0, 64.0)
-        pyramid = spatial_index.build_render_index(locs, _info(64.0, 64.0))
-        viewport = ((20.3, 20.3), (20.8, 20.8))
+        W = 64.0 * PS
+        locs = _make_locs(200_000, W, W)
+        pyramid = spatial_index.build_render_index(locs, _info(W, W))
+        viewport = ((20.3 * PS, 20.3 * PS), (20.8 * PS, 20.8 * PS))
         x = locs["x"].to_numpy()
         y = locs["y"].to_numpy()
         expected = len(_brute_force_in_view(locs, viewport))
@@ -177,15 +198,16 @@ class TestCountRect:
         assert spatial_index.count_rect(pyramid, x, y, viewport) == expected
 
     def test_empty(self):
-        locs = _make_locs(0, 64.0, 64.0)
-        pyramid = spatial_index.build_render_index(locs, _info(64.0, 64.0))
+        W = 64.0 * PS
+        locs = _make_locs(0, W, W)
+        pyramid = spatial_index.build_render_index(locs, _info(W, W))
         empty = np.empty(0, dtype=np.float32)
-        viewport = ((0.0, 0.0), (10.0, 10.0))
+        viewport = ((0.0, 0.0), (10.0 * PS, 10.0 * PS))
         assert spatial_index.count_rect(pyramid, empty, empty, viewport) == 0
 
 
 class TestQuadTreeLayout:
-    W = H = 64.0
+    W = H = 64.0 * PS
 
     def test_keys_are_sorted_and_refine_the_blocks(self):
         x, y = _clustered_locs()
@@ -197,7 +219,8 @@ class TestQuadTreeLayout:
         info = _info(self.W, self.H)
         locs = pd.DataFrame({"x": x, "y": y})
         assert spatial_index.validate_render_index(pyramid, locs, info)
-        assert pyramid.root_bits == 6 and pyramid.fine_bits == 8
+        # 64 px of 130 nm = 8320 nm = 83.2 base blocks of 100 nm -> 128
+        assert pyramid.root_bits == 7 and pyramid.fine_bits == 8
 
     def test_layout_contract(self):
         x, y = _clustered_locs()
@@ -243,7 +266,7 @@ class TestQuadTreeLayout:
 
 
 class TestPersistence:
-    W, H = 96.0, 64.0
+    W, H = 96.0 * PS, 64.0 * PS
 
     def _file(self, tmp_path, n=3_000, **save_kwargs):
         from picasso import io
@@ -279,7 +302,7 @@ class TestPersistence:
         assert loaded is not None
         assert loaded.sorted_keys is not None
         # and it queries like the built one
-        vp = ((10.0, 10.0), (30.0, 40.0))
+        vp = ((10.0 * PS, 10.0 * PS), (30.0 * PS, 40.0 * PS))
         assert np.array_equal(
             np.sort(spatial_index.query_viewport(loaded, vp)),
             np.sort(spatial_index.query_viewport(built, vp)),
@@ -323,7 +346,9 @@ class TestPersistence:
         stored = spatial_index.read_render_index(path)
         edited = locs.copy()
         if edit == "move_one":
-            edited.loc[edited.index[123], "x"] = self.W - 0.5  # other block
+            edited.loc[edited.index[123], "x"] = (
+                self.W - 0.5 * PS
+            )  # other block
         elif edit == "drop_one":
             edited = edited.drop(edited.index[10]).reset_index(drop=True)
         elif edit == "append_one":
@@ -373,8 +398,8 @@ class TestPersistence:
 
 class TestBuild:
     def test_empty_locs_returns_pyramid(self):
-        locs = _make_locs(0, 512, 512)
-        pyr = spatial_index.build_render_index(locs, _info(512, 512))
+        locs = _make_locs(0, 512 * PS, 512 * PS)
+        pyr = spatial_index.build_render_index(locs, _info(512 * PS, 512 * PS))
         assert pyr is not None
         assert pyr.perm.shape == (0,)
         # Sub-threshold viewport hits the gather path and returns empty.
@@ -382,19 +407,19 @@ class TestBuild:
         assert idx is not None and idx.shape == (0,)
 
     def test_missing_metadata_returns_none(self):
-        locs = _make_locs(100, 512, 512)
+        locs = _make_locs(100, 512 * PS, 512 * PS)
         assert spatial_index.build_render_index(locs, [{}]) is None
 
     def test_perm_is_a_permutation(self):
         n = 10_000
         locs = _make_locs(n, 512, 512)
-        pyr = spatial_index.build_render_index(locs, _info(512, 512))
+        pyr = spatial_index.build_render_index(locs, _info(512 * PS, 512 * PS))
         assert pyr.perm.shape == (n,)
         assert np.array_equal(np.sort(pyr.perm), np.arange(n, dtype=np.uint32))
 
     def test_levels_partition_total_count(self):
-        locs = _make_locs(5_000, 576, 576)
-        pyr = spatial_index.build_render_index(locs, _info(576, 576))
+        locs = _make_locs(5_000, 576 * PS, 576 * PS)
+        pyr = spatial_index.build_render_index(locs, _info(576 * PS, 576 * PS))
         for bs, be in zip(pyr.block_starts, pyr.block_ends):
             # Every loc belongs to exactly one block at each level.
             assert int((be - bs).sum()) == len(locs)
@@ -404,7 +429,7 @@ class TestBuild:
 
     def test_block_sizes_geometric(self):
         pyr = spatial_index.build_render_index(
-            _make_locs(100, 512, 512), _info(512, 512)
+            _make_locs(100, 512 * PS, 512 * PS), _info(512 * PS, 512 * PS)
         )
         assert len(pyr.block_sizes) == 3
         # 4x ratio between successive levels.
@@ -421,14 +446,18 @@ class TestQuery:
     @pytest.mark.parametrize("seed", [0, 1, 2, 3, 4])
     def test_query_superset_of_strict_in_view(self, seed):
         rng = np.random.default_rng(seed)
-        W, H = 512.0, 512.0
+        W, H = 512.0 * PS, 512.0 * PS
         locs = _make_locs(20_000, W, H, seed=seed)
         pyr = spatial_index.build_render_index(locs, _info(W, H))
 
         # Random viewport inside the FOV, kept well under the bypass
         # coverage ratio so this test exercises the gather path.
-        cx, cy = rng.uniform(50, W - 50), rng.uniform(50, H - 50)
-        half_w, half_h = rng.uniform(5, 100), rng.uniform(5, 100)
+        cx, cy = rng.uniform(50 * PS, W - 50 * PS), rng.uniform(
+            50 * PS, H - 50 * PS
+        )
+        half_w, half_h = rng.uniform(5 * PS, 100 * PS), rng.uniform(
+            5 * PS, 100 * PS
+        )
         viewport = (
             (cy - half_h, cx - half_w),
             (cy + half_h, cx + half_w),
@@ -445,7 +474,7 @@ class TestQuery:
         # so the caller renders the full locs DataFrame without an
         # iloc copy -- this is what restores the pre-pyramid full-FOV
         # render speed for large N.
-        W, H = 512.0, 512.0
+        W, H = 512.0 * PS, 512.0 * PS
         locs = _make_locs(5000, W, H)
         pyr = spatial_index.build_render_index(locs, _info(W, H))
         assert spatial_index.query_viewport(pyr, ((0, 0), (H, W))) is None
@@ -454,7 +483,7 @@ class TestQuery:
         # Coverage well below the bypass threshold still returns an
         # array; coverage well above triggers the bypass. Sized off the
         # module constant so the test tracks any future re-tuning.
-        W, H = 512.0, 512.0
+        W, H = 512.0 * PS, 512.0 * PS
         locs = _make_locs(5000, W, H)
         pyr = spatial_index.build_render_index(locs, _info(W, H))
         ratio = spatial_index._BYPASS_COVERAGE_RATIO
@@ -471,12 +500,13 @@ class TestQuery:
         # Zoomed/panned out so the viewport extends past every FOV edge
         # (loc coords are always positive but the viewport isn't).
         # All locs are in view -> bypass via the full-enclose check.
-        W, H = 512.0, 512.0
+        W, H = 512.0 * PS, 512.0 * PS
         locs = _make_locs(5000, W, H)
         pyr = spatial_index.build_render_index(locs, _info(W, H))
         assert (
             spatial_index.query_viewport(
-                pyr, ((-100.0, -200.0), (H + 50.0, W + 300.0))
+                pyr,
+                ((-100.0 * PS, -200.0 * PS), (H + 50.0 * PS, W + 300.0 * PS)),
             )
             is None
         )
@@ -485,50 +515,51 @@ class TestQuery:
         # Locs are bounded in (0, W) x (0, H) but viewports aren't --
         # users can pan/zoom past the bottom-right. The clipped area
         # must drive the bypass decision, not the raw viewport extent.
-        W, H = 512.0, 512.0
+        W, H = 512.0 * PS, 512.0 * PS
         locs = _make_locs(5000, W, H)
         pyr = spatial_index.build_render_index(locs, _info(W, H))
-        # ((100, 100), (700, 700)) overhangs by 188 on each side.
+        # ((100, 100), (700, 700)) px overhangs by 188 px on each side.
         # Clipped intersection: 412x412 -> ~65% of FOV -> bypass.
-        assert (
-            spatial_index.query_viewport(pyr, ((100.0, 100.0), (700.0, 700.0)))
-            is None
-        )
+        big = ((100.0 * PS, 100.0 * PS), (700.0 * PS, 700.0 * PS))
+        assert spatial_index.query_viewport(pyr, big) is None
         # Thin overhanging strip: 412x50 -> ~7.9% of FOV -> gather.
-        idx = spatial_index.query_viewport(
-            pyr, ((100.0, 100.0), (150.0, 700.0))
-        )
+        strip = ((100.0 * PS, 100.0 * PS), (150.0 * PS, 700.0 * PS))
+        idx = spatial_index.query_viewport(pyr, strip)
         assert idx is not None
-        truth = _brute_force_in_view(locs, ((100.0, 100.0), (150.0, 700.0)))
+        truth = _brute_force_in_view(locs, strip)
         assert set(int(i) for i in truth).issubset(set(int(i) for i in idx))
 
     def test_viewport_partially_negative_below_threshold_returns_array(self):
         # Viewport overhangs the FOV on one side only; the FOV-clipped
         # area is well under the bypass threshold, so the gather path
         # still runs and returns a valid array.
-        W, H = 512.0, 512.0
+        W, H = 512.0 * PS, 512.0 * PS
         locs = _make_locs(5000, W, H)
         pyr = spatial_index.build_render_index(locs, _info(W, H))
-        idx = spatial_index.query_viewport(
-            pyr, ((-100.0, -100.0), (100.0, 100.0))
-        )
+        corner = ((-100.0 * PS, -100.0 * PS), (100.0 * PS, 100.0 * PS))
+        idx = spatial_index.query_viewport(pyr, corner)
         assert idx is not None
-        truth = _brute_force_in_view(locs, ((-100.0, -100.0), (100.0, 100.0)))
+        truth = _brute_force_in_view(locs, corner)
         assert set(int(i) for i in truth).issubset(set(int(i) for i in idx))
 
     def test_viewport_outside_fov_returns_empty(self):
-        locs = _make_locs(1000, 512, 512)
-        pyr = spatial_index.build_render_index(locs, _info(512, 512))
+        locs = _make_locs(1000, 512 * PS, 512 * PS)
+        pyr = spatial_index.build_render_index(locs, _info(512 * PS, 512 * PS))
         # Far outside the FOV in both directions.
-        idx = spatial_index.query_viewport(pyr, ((2000, 2000), (3000, 3000)))
+        idx = spatial_index.query_viewport(
+            pyr, ((2000 * PS, 2000 * PS), (3000 * PS, 3000 * PS))
+        )
         assert idx is not None and idx.shape == (0,)
 
     def test_tiny_zoomed_viewport_returns_few_locs(self):
-        W, H = 512.0, 512.0
+        W, H = 512.0 * PS, 512.0 * PS
         n = 50_000
         locs = _make_locs(n, W, H)
         pyr = spatial_index.build_render_index(locs, _info(W, H))
-        viewport = ((100.0, 100.0), (105.0, 105.0))  # 5x5 patch
+        viewport = (
+            (100.0 * PS, 100.0 * PS),
+            (105.0 * PS, 105.0 * PS),
+        )  # 5x5 px
         idx = spatial_index.query_viewport(pyr, viewport)
         # Expected ~ n * (5*5) / (W*H) = ~50_000 * 25 / 262144 ~= 4-5 locs
         # plus some overspill from the chosen block size. Cap at a
@@ -547,7 +578,7 @@ class TestQuery:
 class TestRendererParity:
     @pytest.fixture(scope="class")
     def locs_pyr(self):
-        W, H = 512.0, 512.0
+        W, H = 512.0 * PS, 512.0 * PS
         n = 30_000
         locs = _make_locs(n, W, H, seed=42)
         info = _info(W, H)
@@ -561,7 +592,7 @@ class TestRendererParity:
         locs, info, pyr = locs_pyr
         # Slightly off-center, asymmetric viewport so the chosen pyramid
         # level isn't trivially the coarsest.
-        viewport = ((40.0, 60.0), (180.0, 240.0))
+        viewport = ((40.0 * PS, 60.0 * PS), (180.0 * PS, 240.0 * PS))
 
         idx = spatial_index.query_viewport(pyr, viewport)
         filtered = locs.iloc[idx]

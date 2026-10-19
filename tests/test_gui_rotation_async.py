@@ -29,8 +29,10 @@ from picasso.gui import render as gui_render
 from picasso.gui import rotation
 
 
-WIDTH = HEIGHT = 64.0
+WIDTH = HEIGHT = 64.0  # camera pixels
 PIXELSIZE = 130.0
+WIDTH_NM = WIDTH * PIXELSIZE
+HEIGHT_NM = HEIGHT * PIXELSIZE
 N_LOCS = 4000
 
 
@@ -38,11 +40,11 @@ def _locs(n: int = N_LOCS, seed: int = 0) -> pd.DataFrame:
     rng = np.random.default_rng(seed)
     return pd.DataFrame(
         {
-            "x": rng.uniform(24.0, 40.0, size=n),
-            "y": rng.uniform(24.0, 40.0, size=n),
+            "x": rng.uniform(24.0, 40.0, size=n) * PIXELSIZE,
+            "y": rng.uniform(24.0, 40.0, size=n) * PIXELSIZE,
             "z": rng.uniform(-300.0, 300.0, size=n),  # nm
-            "lpx": rng.uniform(0.05, 0.3, size=n),
-            "lpy": rng.uniform(0.05, 0.3, size=n),
+            "lpx": rng.uniform(0.05, 0.3, size=n) * PIXELSIZE,
+            "lpy": rng.uniform(0.05, 0.3, size=n) * PIXELSIZE,
             "lpz": rng.uniform(10.0, 60.0, size=n),  # nm
             "photons": rng.uniform(500.0, 5000.0, size=n),
             "frame": rng.integers(0, 1000, size=n).astype(np.int32),
@@ -96,12 +98,12 @@ def rotation_view(qt_offscreen, tmp_path, monkeypatch):
     window = gui_render.Window(plugins_loaded=True)
     path = str(tmp_path / "locs.hdf5")
     window.view.add(path, _locs(), _info(), render_=False)
-    window.view.viewport = [(0.0, 0.0), (HEIGHT, WIDTH)]
+    window.view.viewport = [(0.0, 0.0), (HEIGHT_NM, WIDTH_NM)]
     window.view.resize(128, 128)
     window.view._pick_shape = "Circle"
     # diameter of 12 camera pixels, set in nm in the tools dialog
     window.tools_settings_dialog.pick_diameter.setValue(12.0 * PIXELSIZE)
-    window.view._picks = [(32.0, 32.0)]
+    window.view._picks = [(32.0 * PIXELSIZE, 32.0 * PIXELSIZE)]
     window.rot_win()  # loads the pick, shows the window, renders (sync)
     window.window_rot.resize(128, 128)
     view = window.window_rot.view_rot

@@ -11,9 +11,10 @@ accepted, so a typo gives a readable error instead of running code.
 Syntax
 ------
 Names
-    Column names (``x``, ``photons``, ``lpx``, ...), the constants
-    ``pi``, ``inf`` and ``nan``, and ``pixelsize`` (camera pixel size in
-    nm, from the metadata) when filtering through :func:`filter_locs`.
+    Column names (``x``, ``photons``, ``lpx``, ...; lengths in nm), the
+    constants ``pi``, ``inf`` and ``nan``, and ``pixelsize`` (camera
+    pixel size in nm, from the metadata) when filtering through
+    :func:`filter_locs`.
 Arithmetic
     ``+ - * / // % **``. Unsigned integer columns (e.g. ``frame``) are
     converted to signed integers, so differences may be negative.
@@ -460,7 +461,7 @@ def filter_locs(
     locs : pd.DataFrame
         Localizations.
     expression : str
-        Condition, e.g. ``"photons > 500 and lpx * pixelsize < 10"``.
+        Condition, e.g. ``"photons > 500 and lpx < 10"``.
         See the module docstring for the syntax.
     info : list of dicts, dict or None, optional
         Metadata of ``locs``; provides ``pixelsize``. Default None.

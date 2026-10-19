@@ -79,7 +79,7 @@ Then build a registration with ``Calibration`` > ``Register channels (2D)``, whi
 
 ``Transform model`` chooses how the channels are related — ``translation`` (a pure xy shift), ``affine`` (the default), ``projective``, ``polynomial2`` or ``polynomial3`` — with the same trade-offs as described under :ref:`localize-lateral-transform-models`.
 
-The registration is saved as a small ``.yaml`` (by default ``<movie>_channel_reg.yaml``) and loaded straight away. Picasso reports, per channel, how many correspondences were paired and the residual RMS in camera pixels — check those before fitting: a registration built from too few pairs, or with an RMS approaching a pixel, will hold the channels together at the wrong place.
+The registration is saved as a small ``.yaml`` (by default ``<movie>_channel_reg.yaml``) and loaded straight away. Picasso reports, per channel, how many correspondences were paired and the residual RMS in camera pixels (the registration maps the raw image of one channel onto the other, so it is detector geometry and stays in camera pixels even though the localizations are in nm) — check those before fitting: a registration built from too few pairs, or with an RMS approaching a pixel, will hold the channels together at the wrong place.
 
 .. dropdown:: Python
    :icon: code

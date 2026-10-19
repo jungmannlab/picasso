@@ -267,10 +267,10 @@ def _locs(n: int = 3000, seed: int = 0) -> pd.DataFrame:
     rng = np.random.default_rng(seed)
     return pd.DataFrame(
         {
-            "x": rng.uniform(0.0, WIDTH, size=n),
-            "y": rng.uniform(0.0, HEIGHT, size=n),
-            "lpx": rng.uniform(0.05, 0.3, size=n),
-            "lpy": rng.uniform(0.05, 0.3, size=n),
+            "x": rng.uniform(0.0, WIDTH, size=n) * PIXELSIZE,
+            "y": rng.uniform(0.0, HEIGHT, size=n) * PIXELSIZE,
+            "lpx": rng.uniform(0.05, 0.3, size=n) * PIXELSIZE,
+            "lpy": rng.uniform(0.05, 0.3, size=n) * PIXELSIZE,
             "photons": rng.uniform(500.0, 5000.0, size=n),
             "frame": rng.integers(0, 1000, size=n).astype(np.int32),
             "z": rng.normal(0.0, 20.0, size=n),
@@ -280,7 +280,12 @@ def _locs(n: int = 3000, seed: int = 0) -> pd.DataFrame:
 
 def _info() -> list[dict]:
     return [
-        {"Width": WIDTH, "Height": HEIGHT, "Frames": 1000, "Pixelsize": 130}
+        {
+            "Width": WIDTH,
+            "Height": HEIGHT,
+            "Frames": 1000,
+            "Pixelsize": PIXELSIZE,
+        }
     ]
 
 
@@ -294,7 +299,10 @@ def render_window(qt_offscreen, tmp_path):
             _info(),
             render_=False,
         )
-    window.view.viewport = [(0.0, 0.0), (HEIGHT, WIDTH)]
+    window.view.viewport = [
+        (0.0, 0.0),
+        (HEIGHT * PIXELSIZE, WIDTH * PIXELSIZE),
+    ]
     window.view.resize(128, 128)
     window.view.update_scene()
     yield window
@@ -499,7 +507,10 @@ def linked_windows(render_window, tmp_path):
     secondary = gui_render.Window(plugins_loaded=True, link_group=group)
     secondary.view.add_channels_from(render_window.view, [1], share=True)
     secondary.view.resize(100, 100)
-    secondary.view.viewport = [(0.0, 0.0), (HEIGHT, WIDTH)]
+    secondary.view.viewport = [
+        (0.0, 0.0),
+        (HEIGHT * PIXELSIZE, WIDTH * PIXELSIZE),
+    ]
     secondary.view.update_scene()
     render_window.view.update_scene()
     yield group, render_window, secondary

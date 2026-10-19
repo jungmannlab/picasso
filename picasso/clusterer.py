@@ -377,12 +377,9 @@ def cluster_3D(
     locs : pd.DataFrame
         Localizations to be clustered.
     radius_xy : float
-        Clustering radius in x and y directions, in the same units as
-        ``locs["x"]`` / ``locs["y"]`` (camera pixels).
+        Clustering radius in x and y directions (nm).
     radius_z : float
-        Clustering radius in z direction, in the same units as
-        ``locs["z"]`` (camera pixels after ``cluster()``'s nm-to-px
-        conversion).
+        Clustering radius in z direction (nm).
     min_locs : int
         Minimum number of localizations in a cluster.
     fa : bool
@@ -454,7 +451,6 @@ def cluster(
     min_locs: int,
     frame_analysis: bool,
     radius_z: float | None = None,
-    pixelsize: float | None = None,
     progress: lib.ProgressDialog | Literal["console"] | None = None,
 ) -> tuple[pd.DataFrame, dict]:
     """Cluster localizations from single molecules (SMLM clusterer).
@@ -483,16 +479,13 @@ def cluster(
     locs : pd.DataFrame
         Localizations to be clustered.
     radius_xy : float
-        Clustering radius in xy plane (camera pixels).
+        Clustering radius in xy plane (nm).
     min_locs : int
         Minimum number of localizations in a cluster.
     frame_analysis : bool
         If True, performs basic frame analysis.
     radius_z : float, optional
-        Clustering radius in z plane (camera pixels). Only used for
-        3D clustering.
-    pixelsize : int, optional
-        Camera pixel size in nm. Only needed for 3D clustering.
+        Clustering radius in z (nm). Required for 3D clustering.
     progress : picasso.lib.ProgressDialog or "console" or None, optional
         Tracks progress while building the neighbor graph (the main,
         O(n) step). If "console", a tqdm progress bar is shown in the
@@ -513,12 +506,11 @@ def cluster(
     n_raw = len(locs)
     progress_cb = _resolve_progress(progress, n_raw, "Clustering", unit="loc")
     if "z" in locs.columns:  # 3D
-        if pixelsize is None or radius_z is None:
+        if radius_z is None:
             raise ValueError(
-                "Camera pixel size and clustering radius in z must be"
-                " specified for 3D clustering."
+                "The clustering radius in z must be specified for 3D"
+                " clustering."
             )
-        locs["z"] /= pixelsize  # convert from nm to px
         labels = cluster_3D(
             locs,
             radius_xy,
@@ -536,8 +528,6 @@ def cluster(
             progress_cb,
         )
     locs = extract_valid_labels(locs, labels)
-    if "z" in locs.columns:
-        locs["z"] *= pixelsize  # convert back to nm
     n_clusters = len(locs)
     info = {
         **lib.step_info("SMLM clusterer"),
@@ -546,13 +536,11 @@ def cluster(
         "Performed basic frame analysis": frame_analysis,
         "Fraction of rejected locs (%)": 100 * (n_raw - n_clusters) / n_raw,
     }
-    unit = "nm" if pixelsize is not None else "px"
-    pixelsize = pixelsize if pixelsize is not None else 1
     if "z" in locs.columns:
-        info[f"Clustering radius xy ({unit})"] = radius_xy * pixelsize
-        info[f"Clustering radius z ({unit})"] = radius_z * pixelsize
+        info["Clustering radius xy (nm)"] = radius_xy
+        info["Clustering radius z (nm)"] = radius_z
     else:
-        info[f"Clustering radius ({unit})"] = radius_xy * pixelsize
+        info["Clustering radius (nm)"] = radius_xy
     return locs, info
 
 
@@ -599,7 +587,6 @@ def dbscan(
     radius: float,
     min_samples: int,
     min_locs: int = 10,
-    pixelsize: float | None = None,
     radius_z: float | None = None,
 ) -> tuple[pd.DataFrame, dict]:
     """Perform DBSCAN on localizations.
@@ -618,19 +605,16 @@ def dbscan(
     locs : pd.DataFrame
         Localizations to be clustered.
     radius : float
-        DBSCAN search radius in the xy plane, usually referred to as
-        "epsilon". Same units as ``locs["x"]`` / ``locs["y"]``
-        (camera pixels).
+        DBSCAN search radius in the xy plane (nm), usually referred to
+        as "epsilon".
     min_samples : int
         Number of localizations within radius to consider a given point
         a core sample.
     min_locs : int, optional
         Minimum number of localizations in a cluster. Clusters with
-        fewer localizations will be removed. Default is 0.
-    pixelsize : float, optional
-        Camera pixel size in nm. Only needed for 3D.
+        fewer localizations will be removed. Default is 10.
     radius_z : float, optional
-        DBSCAN search radius in z (camera pixels). If None (default),
+        DBSCAN search radius in z (nm). If None (default),
         the clustering is isotropic and uses ``radius`` in all
         dimensions. Only used for 3D.
 
@@ -646,13 +630,7 @@ def dbscan(
     locs = locs.copy()
     n_raw = len(locs)
     if "z" in locs.columns:
-        if pixelsize is None:
-            raise ValueError(
-                "Camera pixel size must be specified as an integer for 3D"
-                " clustering."
-            )
-        X = locs[["x", "y", "z"]].to_numpy()
-        X[:, 2] /= pixelsize
+        X = locs[["x", "y", "z"]].to_numpy(dtype=np.float64)
         if radius_z is not None:
             X[:, 2] *= radius / radius_z
     else:
@@ -660,18 +638,16 @@ def dbscan(
     labels = _dbscan(X, radius, min_samples, min_locs)
     locs = extract_valid_labels(locs, labels)
     n_clusters = len(locs)
-    unit = "nm" if pixelsize is not None else "px"
-    pixelsize_unit = pixelsize if pixelsize is not None else 1
     info = {
         **lib.step_info("DBSCAN"),
         "Number of clusters": len(np.unique(locs["group"])),
-        f"Radius ({unit})": radius * pixelsize_unit,
+        "Radius (nm)": radius,
         "Minimum local density": min_samples,
         "Min. localizations per cluster": min_locs,
         "Fraction of rejected locs (%)": 100 * (n_raw - n_clusters) / n_raw,
     }
     if "z" in locs.columns and radius_z is not None:
-        info[f"Radius z ({unit})"] = radius_z * pixelsize_unit
+        info["Radius z (nm)"] = radius_z
     return locs, info
 
 
@@ -734,7 +710,6 @@ def hdbscan(
     locs: pd.DataFrame,
     min_cluster_size: int,
     min_samples: int,
-    pixelsize: float | None = None,
     cluster_eps: float = 0.0,
 ) -> tuple[pd.DataFrame, dict]:
     """Perform HDBSCAN on localizations.
@@ -750,10 +725,9 @@ def hdbscan(
     min_samples : int
         Number of localizations within radius to consider a given point
         a core sample.
-    pixelsize : float, optional
-        Camera pixel size in nm. Only needed for 3D.
     cluster_eps : float, optional
-        Distance threshold. Clusters below this value will be merged.
+        Distance threshold (nm). Clusters below this value will be
+        merged. Default is 0.
 
     Returns
     -------
@@ -769,19 +743,11 @@ def hdbscan(
     RuntimeError
         If ``cluster_eps`` > 0 runs into scikit-learn's HDBSCAN bug with
         NumPy 2.4 and later (scikit-learn issue 33219).
-    ValueError
-        If the localizations are 3D and ``pixelsize`` is not given.
     """
     locs = locs.copy()
     n_raw = len(locs)
     if "z" in locs.columns:
-        if pixelsize is None:
-            raise ValueError(
-                "Camera pixel size (nm) must be specified as an integer for 3D"
-                " clustering."
-            )
         X = locs[["x", "y", "z"]].to_numpy()
-        X[:, 2] /= pixelsize
     else:
         X = locs[["x", "y"]].to_numpy()
     labels = _hdbscan(
@@ -794,7 +760,7 @@ def hdbscan(
         "Number of clusters": len(np.unique(locs["group"])),
         "Min. cluster": min_cluster_size,
         "Min. samples": min_samples,
-        "Intercluster distance": cluster_eps,
+        "Intercluster distance (nm)": cluster_eps,
         "Fraction of rejected locs (%)": 100 * (n_raw - n_clusters) / n_raw,
     }
     return locs, info
@@ -936,10 +902,9 @@ def _cluster_convex_hulls(
     group_s: lib.IntArray1D,
     unique_groups: lib.IntArray1D,
     has_z: bool,
-    pixelsize: float | None,
     progress: Callable[[int], None] | None = None,
 ) -> lib.FloatArray1D:
-    """Convex-hull area (2D) or volume (3D) per cluster.
+    """Convex-hull area (2D, nm^2) or volume (3D, nm^3) per cluster.
 
     The only per-cluster Python loop in ``find_cluster_centers``; runs
     on raw NumPy slices of a group-sorted coordinate array. For datasets
@@ -951,8 +916,6 @@ def _cluster_convex_hulls(
     coords_sorted = (
         locs[coord_cols].to_numpy()[order].astype(np.float64, copy=True)
     )
-    if has_z:
-        coords_sorted[:, 2] /= pixelsize
     group_offsets = np.searchsorted(group_s, unique_groups, side="left")
     group_offsets = np.append(group_offsets, len(group_s))
     convexhull = np.zeros(len(unique_groups), dtype=np.float64)
@@ -991,7 +954,6 @@ def _weighted_z_means(
 
 def find_cluster_centers(
     locs: pd.DataFrame,
-    pixelsize: float | None = None,
     progress: lib.ProgressDialog | Literal["console"] | None = None,
 ) -> pd.DataFrame:
     """Calculate cluster centers.
@@ -1007,9 +969,6 @@ def find_cluster_centers(
         "frame", "x", "y" and "group" (and "z" for 3D). Any other
         numeric column present is averaged per cluster. Other numeric
         columns are carried over as means.
-    pixelsize : float, optional
-        Camera pixel size (used for finding volume and 3D convex hull).
-        Only required for 3D localizations.
     progress : picasso.lib.ProgressDialog or "console" or None, optional
         Tracks progress of the per-cluster convex-hull pass (the
         run-time bottleneck for datasets with many clusters). If
@@ -1020,14 +979,13 @@ def find_cluster_centers(
     Returns
     -------
     centers : pd.DataFrame
-        Cluster centers saved in the format of localizations.
+        Cluster centers saved in the format of localizations: positions,
+        their standard deviations (``std_x``, ``std_y``, ``std_z``) and
+        precisions (``lpx``, ``lpy``, ``lpz``) in nm, ``area`` and 2D
+        ``convexhull`` in nm^2, ``volume`` and 3D ``convexhull`` in
+        nm^3.
     """
     has_z = "z" in locs.columns
-    if has_z and pixelsize is None:
-        raise ValueError(
-            "Camera pixel size must be specified as an integer for 3D"
-            " cluster centers calculation."
-        )
 
     group_arr = locs["group"].to_numpy()
     frame_arr = locs["frame"].to_numpy()
@@ -1044,7 +1002,7 @@ def find_cluster_centers(
         unit="cluster",
     )
     convexhull = _cluster_convex_hulls(
-        locs, order, group_s, s["unique_groups"], has_z, pixelsize, progress_cb
+        locs, order, group_s, s["unique_groups"], has_z, progress_cb
     )
 
     columns = {
@@ -1081,9 +1039,7 @@ def find_cluster_centers(
     )
     if has_z:
         volume = (
-            np.power(
-                (s["x_std"] + s["y_std"] + s["z_std"] / pixelsize) / 3 * 2, 3
-            )
+            np.power((s["x_std"] + s["y_std"] + s["z_std"]) / 3 * 2, 3)
             * 4.18879
         )  # assume radius = 2 * std_xyz
         columns["volume"] = volume.astype(np.float32)
@@ -1175,9 +1131,6 @@ def cluster_areas(
         "group" in locs.columns
     ), "Localizations must contain 'group' column."
 
-    # get pixel size from info
-    pixelsize = lib.get_from_metadata(info, "Pixelsize", raise_error=True)
-
     groups = np.unique(locs["group"])
     area_key = "Area (LP^2)" if "z" not in locs.columns else "Volume (LP^3)"
     areas = {
@@ -1197,7 +1150,6 @@ def cluster_areas(
             continue
         if "z" in grouplocs.columns:
             X = grouplocs[["x", "y", "z"]].to_numpy()
-            X[:, 2] /= pixelsize  # convert z to pixels
         else:
             X = grouplocs[["x", "y"]].to_numpy()
         areas[area_key][idx] = _cluster_area(X, lp)
@@ -1252,12 +1204,10 @@ def test_subclustering(
     assert sparse_dist > clustering_dist, (
         "The sparse distance must be larger than the clustering " "distance."
     )
-    pixelsize = lib.get_from_metadata(info, "Pixelsize", raise_error=True)
 
     # get 1st nearest neighbor distances
     if "z" in mols.columns:
         coords = mols[["x", "y", "z"]].to_numpy()
-        coords[:, 2] /= pixelsize
     else:
         coords = mols[["x", "y"]].to_numpy()
     tree = KDTree(coords)
@@ -1265,8 +1215,8 @@ def test_subclustering(
     nnd1 = distances[:, 1]
 
     # split molecules into clustered and monomeric
-    close_nnd_idx = np.where(nnd1 < clustering_dist / pixelsize)[0]
-    far_nnd_idx = np.where(nnd1 >= sparse_dist / pixelsize)[0]
+    close_nnd_idx = np.where(nnd1 < clustering_dist)[0]
+    far_nnd_idx = np.where(nnd1 >= sparse_dist)[0]
     close_mols = mols.iloc[close_nnd_idx]
     far_mols = mols.iloc[far_nnd_idx]
     clustered_nevents = close_mols["n_events"].to_numpy()

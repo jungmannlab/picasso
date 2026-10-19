@@ -8,13 +8,14 @@ into one dataset.
 A large field of view is often imaged as a grid of tiles: the stage
 moves between acquisitions and the same camera records each tile. The
 localizations of every tile are therefore in the same camera frame,
-``[0, Width) x [0, Height)``, and only the stage position tells where a
-tile lies in the sample. Stitching translates every tile to its place
-and merges the tiles, such that neighboring tiles overlap by the few
-microns they share:
+the field of view of the camera (``lib.field_of_view``) starting at the
+origin, and only the stage position tells where a tile lies in the
+sample. Stitching translates every tile to its place and merges the
+tiles, such that neighboring tiles overlap by the few microns they
+share. All positions are in nm:
 
 1. **Initial positions.** The Micro-Manager stage position of each file
-   (``XPositionUm`` and ``YPositionUm``) is converted to camera pixels.
+   (``XPositionUm`` and ``YPositionUm``) is converted to nm.
    The stage axes may be flipped or swapped relative to the camera axes
    (see :data:`ORIENTATIONS`); by default the orientation whose
    overlaps match best is chosen. Positions may instead be given
@@ -116,14 +117,14 @@ def describe_orientation(orientation: str) -> str:
 #: Keys of the Micro-Manager stage position (micrometers).
 STAGE_KEYS = ("XPositionUm", "YPositionUm")
 
-# rendered pixels per camera pixel for the cross-correlation
-_OVERSAMPLING = 2
+# pixel size (nm) of the images rendered for the cross-correlation
+_BIN_SIZE = 50.0
 # pairs scored when choosing the orientation (largest overlaps first)
 _MAX_ORIENTATION_PAIRS = 8
-# nearest neighbor matching radii, in rendered pixels; the last one is
-# repeated until the offset converges
-_MATCH_RADII = (3.0, 1.5, 0.75)
-_MATCH_TOLERANCE = 1e-3  # camera pixels
+# nearest neighbor matching radii (nm); the last one is repeated until
+# the offset converges
+_MATCH_RADII = (200.0, 100.0, 50.0)
+_MATCH_TOLERANCE = 0.1  # nm
 _MATCH_MAX_ITER = 20
 # correlation peaks tried per pair, each scored by the fraction of a
 # sample of localizations that find a partner in the other tile
@@ -196,43 +197,43 @@ def group_tiles(
     return tiles
 
 
-def stage_to_camera(
-    positions_um: np.ndarray, pixelsize: float, orientation: str
-) -> np.ndarray:
-    """Convert stage positions into tile positions in camera pixels.
+def stage_to_camera(positions_um: np.ndarray, orientation: str) -> np.ndarray:
+    """Convert stage positions into tile positions in the camera frame
+    (nm).
 
     Parameters
     ----------
     positions_um : np.ndarray
         Stage position of each tile in micrometers, shape
         ``(n_tiles, 2)``.
-    pixelsize : float
-        Camera pixel size in nm.
     orientation : str
         Key of :data:`ORIENTATIONS`.
 
     Returns
     -------
     positions : np.ndarray
-        Position of each tile in camera pixels, relative to the first
-        tile, shape ``(n_tiles, 2)``.
+        Position of each tile in nm, relative to the first tile, shape
+        ``(n_tiles, 2)``.
     """
     matrix = np.array(ORIENTATIONS[orientation], dtype=float)
     relative = np.asarray(positions_um, dtype=float) - positions_um[0]
-    return relative @ matrix.T * 1e3 / pixelsize
+    return relative @ matrix.T * 1e3
 
 
-def camera_size(info: list[dict]) -> tuple[int, int]:
-    """Size ``(width, height)`` of the camera image of a file in camera
-    pixels. Render stores it under ``lib.CAMERA_SIZE_KEYS`` once the
-    canvas (``Width`` and ``Height``) was fitted to moved
-    localizations, see ``lib.fit_canvas``."""
+def camera_size(info: list[dict]) -> tuple[float, float]:
+    """Size ``(width, height)`` of the camera image of a file in nm.
+    Render stores the size in camera pixels under
+    ``lib.CAMERA_SIZE_KEYS`` once the canvas (``Width`` and ``Height``)
+    was fitted to moved localizations, see ``lib.fit_canvas``."""
+    pixelsize = float(
+        lib.get_from_metadata(info, "Pixelsize", raise_error=True)
+    )
     size = []
     for camera_key, key in zip(lib.CAMERA_SIZE_KEYS, ("Width", "Height")):
         value = lib.get_from_metadata(info, camera_key)
         if value is None:
             value = lib.get_from_metadata(info, key, raise_error=True)
-        size.append(int(value))
+        size.append(float(value) * pixelsize)
     return size[0], size[1]
 
 
@@ -244,11 +245,11 @@ def overlapping_pairs(
     Parameters
     ----------
     positions : np.ndarray
-        Position of each tile in camera pixels, shape ``(n_tiles, 2)``.
+        Position of each tile in nm, shape ``(n_tiles, 2)``.
     sizes : np.ndarray
-        Size ``(width, height)`` of each tile in camera pixels.
+        Size ``(width, height)`` of each tile in nm.
     min_overlap : float
-        Minimum overlap along both axes in camera pixels.
+        Minimum overlap along both axes in nm.
 
     Returns
     -------
@@ -284,11 +285,11 @@ def _in_rect(
 def _render(
     x: np.ndarray, y: np.ndarray, x0: float, y0: float, shape: tuple
 ) -> np.ndarray:
-    """Histogram of points in camera pixels starting at ``(x0, y0)``,
-    with ``_OVERSAMPLING`` bins per camera pixel, blurred by one bin."""
+    """Histogram of points (nm) starting at ``(x0, y0)``, with bins of
+    ``_BIN_SIZE`` nm, blurred by one bin."""
     image, _, _ = np.histogram2d(
-        (y - y0) * _OVERSAMPLING,
-        (x - x0) * _OVERSAMPLING,
+        (y - y0) / _BIN_SIZE,
+        (x - x0) / _BIN_SIZE,
         bins=shape,
         range=[[0, shape[0]], [0, shape[1]]],
     )
@@ -369,11 +370,11 @@ def _coarse_offsets(
     ----------
     a, b : np.ndarray
         Coordinates of the localizations of both tiles, shape
-        ``(n, 2+)``, at their current positions (camera pixels).
+        ``(n, 2+)``, at their current positions (nm).
     rect : tuple
-        Predicted overlap ``(x0, x1, y0, y1)``.
+        Predicted overlap ``(x0, x1, y0, y1)`` in nm.
     search : float
-        Search radius in camera pixels.
+        Search radius in nm.
     n_peaks : int, optional
         Number of correlation peaks returned. Default is 1.
 
@@ -381,8 +382,8 @@ def _coarse_offsets(
     -------
     peaks : list of tuples
         ``(dx, dy, score)`` of the highest peaks, highest first:
-        correction of the position of ``b`` relative to ``a`` (camera
-        pixels) and the normalized cross-correlation (correlation
+        correction of the position of ``b`` relative to ``a`` (nm) and
+        the normalized cross-correlation (correlation
         coefficient). Empty if either tile has no localizations in the
         overlap or nothing correlates.
     """
@@ -393,22 +394,22 @@ def _coarse_offsets(
     if not in_a.any() or not in_b.any():
         return []
     shape_b = (
-        max(1, int(round((y1 - y0) * _OVERSAMPLING))),
-        max(1, int(round((x1 - x0) * _OVERSAMPLING))),
+        max(1, int(round((y1 - y0) / _BIN_SIZE))),
+        max(1, int(round((x1 - x0) / _BIN_SIZE))),
     )
-    margin = int(np.ceil(search * _OVERSAMPLING))
+    margin = int(np.ceil(search / _BIN_SIZE))
     shape_a = (shape_b[0] + 2 * margin, shape_b[1] + 2 * margin)
     image_a = _render(
         a[in_a, 0],
         a[in_a, 1],
-        x0 - margin / _OVERSAMPLING,
-        y0 - margin / _OVERSAMPLING,
+        x0 - margin * _BIN_SIZE,
+        y0 - margin * _BIN_SIZE,
         shape_a,
     )
     image_b = _render(b[in_b, 0], b[in_b, 1], x0, y0, shape_b)
     c = _normalized_xcorr(image_a, image_b)
-    # local maxima, at least a camera pixel apart
-    size = 2 * _OVERSAMPLING + 1
+    # local maxima, at least two bins apart
+    size = 5
     is_peak = (c == ndimage.maximum_filter(c, size=size)) & (c > 0)
     iys, ixs = np.nonzero(is_peak)
     order = np.argsort(c[iys, ixs])[::-1][:n_peaks]
@@ -417,8 +418,8 @@ def _coarse_offsets(
         py, px = _peak_subpixel(c, iy, ix)
         peaks.append(
             (
-                (px - margin) / _OVERSAMPLING,
-                (py - margin) / _OVERSAMPLING,
+                (px - margin) * _BIN_SIZE,
+                (py - margin) * _BIN_SIZE,
                 float(c[iy, ix]),
             )
         )
@@ -444,17 +445,16 @@ def _fine_offset(
     a, b : np.ndarray
         Coordinates of the localizations of both tiles, shape
         ``(n, 2)`` or ``(n, 3)`` with z, at their current positions
-        (camera pixels).
+        (nm).
     rect : tuple
-        Overlap ``(x0, x1, y0, y1)`` at the current positions.
+        Overlap ``(x0, x1, y0, y1)`` at the current positions (nm).
     radii : tuple of floats
-        Matching radii in camera pixels, decreasing.
+        Matching radii in nm, decreasing.
 
     Returns
     -------
     dx, dy : float
-        Correction of the position of ``b`` relative to ``a`` (camera
-        pixels).
+        Correction of the position of ``b`` relative to ``a`` (nm).
     dz : float or None
         z offset to add to ``b`` to match ``a`` (in the units of z), or
         None without z.
@@ -562,7 +562,6 @@ def match_pairs(
     points: list[np.ndarray],
     positions: np.ndarray,
     sizes: np.ndarray,
-    pixelsize: float,
     *,
     search_radius_um: float = 10.0,
     min_overlap_um: float = 1.0,
@@ -575,14 +574,11 @@ def match_pairs(
     ----------
     points : list of np.ndarray
         Localizations of each tile in its camera frame, shape ``(n, 2)``
-        (x and y in camera pixels) or ``(n, 3)`` (and z in nm).
+        (x and y in nm) or ``(n, 3)`` (and z in nm).
     positions : np.ndarray
-        Initial position of each tile in camera pixels, shape
-        ``(n_tiles, 2)``.
+        Initial position of each tile in nm, shape ``(n_tiles, 2)``.
     sizes : np.ndarray
-        Size ``(width, height)`` of each tile in camera pixels.
-    pixelsize : float
-        Camera pixel size in nm.
+        Size ``(width, height)`` of each tile in nm.
     search_radius_um : float, optional
         How far the true offset of two tiles may be from the one given
         by ``positions``, in micrometers. Default is 10.0.
@@ -600,7 +596,7 @@ def match_pairs(
     pairs : list of dicts
         One per overlapping pair, with the keys ``"tiles"`` (``(a,
         b)``), ``"offset"`` (measured position of ``b`` minus that of
-        ``a``, camera pixels), ``"dz"`` (z of ``a`` minus z of ``b`` in
+        ``a``, nm), ``"dz"`` (z of ``a`` minus z of ``b`` in
         the overlap in nm, or None), ``"score"`` (normalized
         cross-correlation of the overlap, or None if no localizations
         overlap), ``"matches"`` (localizations of ``b`` in the overlap
@@ -609,13 +605,11 @@ def match_pairs(
         ``b`` in the overlap).
     """
     progress = lib.normalize_progress(progress, "Matching overlaps")
-    pairs = overlapping_pairs(
-        positions, sizes, min_overlap_um * 1e3 / pixelsize
-    )
-    search = search_radius_um * 1e3 / pixelsize
-    radii = np.array(_MATCH_RADII) / _OVERSAMPLING
+    pairs = overlapping_pairs(positions, sizes, min_overlap_um * 1e3)
+    search = search_radius_um * 1e3
+    radii = np.array(_MATCH_RADII, dtype=float)
     if precision_nm:
-        radii = np.maximum(radii, 3 * precision_nm / pixelsize)
+        radii = np.maximum(radii, 3 * precision_nm)
     progress.setMaximum(len(pairs))
     progress.zero_progress("Matching overlaps")
     results = []
@@ -761,7 +755,7 @@ def solve_positions(
     *,
     min_fraction: float = 0.1,
     min_matches: int = 10,
-    max_residual: float = 0.25,
+    max_residual: float = 30.0,
     align_z: bool = True,
 ) -> tuple[np.ndarray, np.ndarray, list[dict], list[int]]:
     """Combine pairwise offsets into tile positions.
@@ -780,8 +774,7 @@ def solve_positions(
     pairs : list of dicts
         Output of :func:`match_pairs`.
     initial : np.ndarray
-        Initial position of each tile in camera pixels, shape
-        ``(n_tiles, 2)``.
+        Initial position of each tile in nm, shape ``(n_tiles, 2)``.
     min_fraction : float, optional
         Pairs where a smaller fraction of the localizations in the
         overlap found a partner in the other tile are not used. Default
@@ -790,8 +783,8 @@ def solve_positions(
         Pairs with fewer matched localizations are not used. Default
         is 10.
     max_residual : float, optional
-        Largest disagreement of a used pair with the solution in camera
-        pixels. Default is 0.25.
+        Largest disagreement of a used pair with the solution in nm.
+        Default is 30.
     align_z : bool, optional
         If True, the z offsets of the tiles are solved as well, from the
         pairs with a z offset. Default is True.
@@ -799,13 +792,13 @@ def solve_positions(
     Returns
     -------
     positions : np.ndarray
-        Position of each tile in camera pixels, shape ``(n_tiles, 2)``.
+        Position of each tile in nm, shape ``(n_tiles, 2)``.
     z_offsets : np.ndarray
         z offset to add to each tile in nm (zeros if ``align_z`` is
         False or no pair has a z offset).
     pairs : list of dicts
         Copies of the input pairs with the keys ``"used"`` (bool),
-        ``"residual"`` (camera pixels, None if not used) and
+        ``"residual"`` (nm, None if not used) and
         ``"status"``: ``"used"``, ``"empty"`` (no localizations in the
         overlap), ``"weak"`` (below ``min_fraction`` or
         ``min_matches``) or
@@ -903,13 +896,13 @@ def seam_mask(
     ----------
     x, y : np.ndarray
         Coordinates of the localizations of the tile at its stitched
-        position (camera pixels).
+        position (nm).
     tile : int
         Index of the tile.
     positions : np.ndarray
-        Stitched position of each tile in camera pixels.
+        Stitched position of each tile in nm.
     sizes : np.ndarray
-        Size ``(width, height)`` of each tile in camera pixels.
+        Size ``(width, height)`` of each tile in nm.
 
     Returns
     -------
@@ -966,20 +959,6 @@ def _yaml_label(label: Hashable) -> int | str:
     return str(label)
 
 
-def _pixelsize(infos: list[list[dict]]) -> float:
-    """Common camera pixel size of all files in nm."""
-    sizes = {lib.get_from_metadata(info, "Pixelsize") for info in infos}
-    if None in sizes:
-        raise ValueError("The pixel size is missing from the metadata.")
-    if len(sizes) > 1:
-        raise ValueError(
-            "The files have different pixel sizes: "
-            + ", ".join(map(str, sorted(sizes)))
-            + " nm."
-        )
-    return float(sizes.pop())
-
-
 def _tile_points(
     locs: list[pd.DataFrame],
     tiles: np.ndarray,
@@ -1008,7 +987,6 @@ def choose_orientation(
     points: list[np.ndarray],
     positions_um: np.ndarray,
     sizes: np.ndarray,
-    pixelsize: float,
     *,
     search_radius_um: float = 10.0,
     min_overlap_um: float = 1.0,
@@ -1029,9 +1007,7 @@ def choose_orientation(
     positions_um : np.ndarray
         Stage position of each tile in micrometers.
     sizes : np.ndarray
-        Size ``(width, height)`` of each tile in camera pixels.
-    pixelsize : float
-        Camera pixel size in nm.
+        Size ``(width, height)`` of each tile in nm.
     search_radius_um : float, optional
         See :func:`match_pairs`. Default is 10.0.
     min_overlap_um : float, optional
@@ -1054,13 +1030,11 @@ def choose_orientation(
     progress = lib.normalize_progress(progress, "Finding stage orientation")
     progress.setMaximum(len(ORIENTATIONS))
     progress.zero_progress("Finding the stage orientation")
-    search = search_radius_um * 1e3 / pixelsize
+    search = search_radius_um * 1e3
     scores = {}
     for i, orientation in enumerate(ORIENTATIONS):
-        positions = stage_to_camera(positions_um, pixelsize, orientation)
-        pairs = overlapping_pairs(
-            positions, sizes, min_overlap_um * 1e3 / pixelsize
-        )
+        positions = stage_to_camera(positions_um, orientation)
+        pairs = overlapping_pairs(positions, sizes, min_overlap_um * 1e3)
         pairs.sort(key=lambda p: -(p[2][1] - p[2][0]) * (p[2][3] - p[2][2]))
         pair_scores = []
         for a, b, rect in pairs[:_MAX_ORIENTATION_PAIRS]:
@@ -1096,7 +1070,7 @@ def stitch(
     orientation: str = "auto",
     search_radius_um: float = 10.0,
     min_overlap_um: float = 1.0,
-    max_residual: float = 0.25,
+    max_residual: float = 30.0,
     align_z: bool = True,
     cut_seams: bool = True,
     offset_frames: bool = True,
@@ -1128,7 +1102,7 @@ def stitch(
         uses all files.
     positions : np.ndarray, optional
         Position of each tile, i.e., where its camera frame starts in
-        the stitched dataset, in camera pixels, shape ``(n_tiles, 2)``.
+        the stitched dataset, in nm, shape ``(n_tiles, 2)``.
         It only has to be accurate within ``search_radius_um``. Default
         None places the tiles by their stage positions.
     stage_um : np.ndarray, optional
@@ -1149,8 +1123,8 @@ def stitch(
         large along both axes, in micrometers. Default is 1.0.
     max_residual : float, optional
         Pairwise offsets that disagree with the stitched positions by
-        more than this many camera pixels are dropped, see
-        :func:`solve_positions`. Default is 0.25.
+        more than this many nm are dropped, see :func:`solve_positions`.
+        Default is 30.
     align_z : bool, optional
         If True (default) and all files used for the alignment contain
         z, each tile also gets the z offset that matches its neighbors.
@@ -1185,8 +1159,8 @@ def stitch(
         ``"targets"`` (labels in output order), ``"tiles"`` (tile of
         each file), ``"orientation"`` (str or None),
         ``"orientation_scores"`` (dict or None), ``"positions"``
-        (stitched position of each tile in camera pixels, after the
-        translation that makes every coordinate non-negative),
+        (stitched position of each tile in nm, after the translation
+        that makes every coordinate non-negative),
         ``"z_offsets"`` (nm), ``"pairs"`` (see :func:`solve_positions`)
         and ``"unconnected"`` (tiles placed by their initial position
         only).
@@ -1194,14 +1168,13 @@ def stitch(
     Raises
     ------
     ValueError
-        If the files have different pixel sizes, if there are fewer
-        than two tiles or no stage positions while ``positions`` is
-        None, or if the inputs have inconsistent lengths.
+        If there are fewer than two tiles or no stage positions while
+        ``positions`` is None, or if the inputs have inconsistent
+        lengths.
     """
     n_files = len(locs)
     if len(infos) != n_files:
         raise ValueError("locs and infos must have the same length.")
-    pixelsize = _pixelsize(infos)
     if stage_um is None:
         stage = stage_positions(infos)
     else:
@@ -1253,7 +1226,7 @@ def stitch(
         )
         lp = lp[np.isfinite(lp)]
         if len(lp):
-            precision = float(np.median(lp)) * pixelsize
+            precision = float(np.median(lp))
 
     progress = lib.normalize_progress(progress, "Stitching")
     chosen = None
@@ -1273,7 +1246,6 @@ def stitch(
                 points,
                 tile_stage,
                 sizes,
-                pixelsize,
                 search_radius_um=search_radius_um,
                 min_overlap_um=min_overlap_um,
                 progress=progress,
@@ -1285,7 +1257,7 @@ def stitch(
                 f"Unknown orientation {orientation!r}; use 'auto' or one "
                 f"of {', '.join(ORIENTATIONS)}."
             )
-        initial = stage_to_camera(tile_stage, pixelsize, chosen)
+        initial = stage_to_camera(tile_stage, chosen)
     else:
         initial = np.asarray(positions, dtype=float).reshape(-1, 2)
         if len(initial) != n_tiles:
@@ -1295,7 +1267,6 @@ def stitch(
         points,
         initial,
         sizes,
-        pixelsize,
         search_radius_um=search_radius_um,
         min_overlap_um=min_overlap_um,
         precision_nm=precision,
@@ -1374,11 +1345,16 @@ def stitch(
                 "Last driftfile",
             ):
                 inf.pop(key, None)
+        # the stitched canvas in camera pixels of the first tile
+        pixelsize = float(
+            lib.get_from_metadata(info, "Pixelsize", raise_error=True)
+        )
         extent = (final[tiles[files]] + sizes[tiles[files]]).max(axis=0)
+        extent = extent / pixelsize
         if len(merged):
             # strictly x < Width is kept by lib.ensure_sanity, hence + 1
-            top = np.floor(merged[["x", "y"]].to_numpy().max(axis=0)) + 1
-            extent = np.maximum(extent, top)
+            top = merged[["x", "y"]].to_numpy().max(axis=0) / pixelsize
+            extent = np.maximum(extent, np.floor(top) + 1)
         width, height = (int(np.ceil(value)) for value in extent)
         frames = (
             frame_offset
@@ -1398,12 +1374,8 @@ def stitch(
             "Stitched files": [
                 paths[i] if paths is not None else int(i) for i in files
             ],
-            "Tile offsets x (cam. px)": [
-                float(final[tiles[i], 0]) for i in files
-            ],
-            "Tile offsets y (cam. px)": [
-                float(final[tiles[i], 1]) for i in files
-            ],
+            "Tile offsets x (nm)": [float(final[tiles[i], 0]) for i in files],
+            "Tile offsets y (nm)": [float(final[tiles[i], 1]) for i in files],
             "Tile offsets z (nm)": [float(z_offsets[tiles[i]]) for i in files],
             "Frame offsets": [int(offset) for offset in frame_offsets],
             "Initial positions": ("stage" if positions is None else "given"),

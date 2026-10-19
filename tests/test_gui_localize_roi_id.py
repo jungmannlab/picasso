@@ -22,20 +22,24 @@ import pandas as pd
 
 from picasso import localize
 from picasso.gui import localize as gui_localize
+from tests.conftest import PIXELSIZE
 
 
-# two disjoint rectangles, [[y_min, x_min], [y_max, x_max]]
+# two disjoint rectangles, [[y_min, x_min], [y_max, x_max]] in camera
+# pixels (the ROIs are drawn on the camera image)
 ROIS = [[[0, 0], [64, 64]], [[0, 64], [64, 128]]]
 
 
 def _locs() -> pd.DataFrame:
-    """Two localizations in the left ROI, one in the right, one outside
-    both."""
+    """Two localizations (nm) in the left ROI, one in the right, one
+    outside both."""
+    x = np.array([1.5, 63.4, 64.6, 200.0]) * PIXELSIZE
+    y = np.array([1.5, 10.0, 10.0, 10.0]) * PIXELSIZE
     return pd.DataFrame(
         {
             "frame": np.arange(4, dtype=np.uint32),
-            "x": np.array([1.5, 63.4, 64.6, 200.0], dtype=np.float32),
-            "y": np.array([1.5, 10.0, 10.0, 10.0], dtype=np.float32),
+            "x": x.astype(np.float32),
+            "y": y.astype(np.float32),
             "photons": np.full(4, 1000.0, dtype=np.float32),
         }
     )
@@ -56,6 +60,9 @@ def _window(
     window = types.SimpleNamespace(
         locs=locs,
         view=types.SimpleNamespace(split_fov_mode=split_fov),
+        parameters_dialog=types.SimpleNamespace(
+            pixelsize=types.SimpleNamespace(value=lambda: PIXELSIZE)
+        ),
         last_identification_info=None if rois is None else {"ROI": rois},
         columns_dialog=types.SimpleNamespace(
             column_checkboxes={column: _CheckboxStub() for column in checked}

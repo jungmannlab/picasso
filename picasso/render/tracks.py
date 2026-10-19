@@ -53,14 +53,13 @@ def select_track_segments(
     Parameters
     ----------
     segments : lib.FloatArray2D
-        ``(n_segments, 4)`` array of ``x0, y0, x1, y1`` (camera pixels),
+        ``(n_segments, 4)`` array of ``x0, y0, x1, y1`` (nm),
         see ``picasso.spt.track_segments``.
     track_id : lib.IntArray1D
         Track id of every segment, sorted (as returned by
         ``picasso.spt.track_segments``).
     viewport : tuple
-        Field of view, ``((y_min, x_min), (y_max, x_max))`` in camera
-        pixels.
+        Field of view, ``((y_min, x_min), (y_max, x_max))`` in nm.
     max_tracks : int, optional
         Maximum number of tracks drawn. If more tracks are in view,
         every k-th track id is drawn, with the smallest k that keeps
@@ -132,9 +131,9 @@ def draw_tracks(
         it is in the RGB32 or ARGB32 format.
     viewport : tuple
         Field of view shown in ``image``, ``((y_min, x_min), (y_max,
-        x_max))`` in camera pixels.
+        x_max))`` in nm.
     segments : lib.FloatArray2D
-        ``(n_segments, 4)`` array of ``x0, y0, x1, y1`` (camera pixels),
+        ``(n_segments, 4)`` array of ``x0, y0, x1, y1`` (nm),
         e.g., those selected by ``select_track_segments``.
     color_index : lib.IntArray1D, optional
         Index into ``palette`` of every segment. Default is None (all
@@ -162,7 +161,7 @@ def draw_tracks(
     style = OverlayStyle() if style is None else style
     (y_min, x_min), _ = viewport
     points = np.empty_like(segments)
-    scale_x = image.width() / width  # display pixels per camera pixel
+    scale_x = image.width() / width  # display pixels per nm
     scale_y = image.height() / height
     points[:, 0::2] = (segments[:, 0::2] - x_min) * scale_x
     points[:, 1::2] = (segments[:, 1::2] - y_min) * scale_y

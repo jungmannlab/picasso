@@ -12,12 +12,15 @@ import pandas as pd
 import pytest
 
 from picasso import nanotron
+from tests.conftest import PIXELSIZE
 
-INFO = [{"Width": 32, "Height": 32, "Frames": 50, "Pixelsize": 130}]
+INFO = [{"Width": 32, "Height": 32, "Frames": 50, "Pixelsize": PIXELSIZE}]
+#: half the side length of the rendered pick, nm (one camera pixel)
+RADIUS = 1.0 * PIXELSIZE
 
 
 def _locs(groups=(0,)) -> pd.DataFrame:
-    """50 localizations per group, the groups 3 camera pixels apart."""
+    """50 localizations per group (nm), the groups 3 camera pixels apart."""
     rng = np.random.default_rng(0)
     n = 50
     return pd.concat(
@@ -25,10 +28,10 @@ def _locs(groups=(0,)) -> pd.DataFrame:
             pd.DataFrame(
                 {
                     "frame": np.arange(n),
-                    "x": rng.normal(5 + 3 * group, 0.1, n),
-                    "y": rng.normal(5, 0.1, n),
-                    "lpx": np.full(n, 0.05),
-                    "lpy": np.full(n, 0.05),
+                    "x": rng.normal(5 + 3 * group, 0.1, n) * PIXELSIZE,
+                    "y": rng.normal(5, 0.1, n) * PIXELSIZE,
+                    "lpx": np.full(n, 0.05 * PIXELSIZE),
+                    "lpy": np.full(n, 0.05 * PIXELSIZE),
                     "group": np.full(n, group),
                 }
             )
@@ -40,11 +43,12 @@ def _locs(groups=(0,)) -> pd.DataFrame:
 
 def _image(locs, **kwargs):
     return nanotron.roi_to_img(
-        locs, INFO, radius=1.0, disp_px_size=13, **kwargs
+        locs, INFO, radius=RADIUS, disp_px_size=13, **kwargs
     )
 
 
 def test_renders_a_pick():
+    # 2 * 130 nm across at 13 nm per rendered pixel
     image = _image(_locs(), pick=0)
     assert image.shape == (20, 20)
     assert image.sum() > 0
@@ -64,7 +68,7 @@ def test_render_errors_are_not_hidden(monkeypatch):
     "kwargs, where",
     [
         ({"pick": 7}, "group 7"),
-        ({"pick": 0, "picks": (20.0, 20.0)}, "around (20.0, 20.0)"),
+        ({"pick": 0, "picks": (2600.0, 2600.0)}, "around (2600.0, 2600.0)"),
     ],
 )
 def test_an_empty_pick_is_named(kwargs, where):
@@ -80,7 +84,7 @@ def test_prepare_data_covers_every_group():
         _locs(groups=(0, 2, 3)),
         INFO,
         label=1,
-        pick_radius=1.0,
+        pick_radius=RADIUS,
         disp_px_size=13,
     )
     assert len(data) == 3

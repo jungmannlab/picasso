@@ -1270,6 +1270,34 @@ def build_psf_template(
     return result
 
 
+def _camera_pixelsize(camera_info: dict) -> float:
+    """The camera pixel size (nm) of ``camera_info``, which every
+    calibration records; raises a ValueError instead of assuming one."""
+    pixelsize = camera_info.get("Pixelsize")
+    if pixelsize is None:
+        raise ValueError(
+            "camera_info needs 'Pixelsize', the effective camera pixel size "
+            "in nm, which the spline calibration records."
+        )
+    pixelsize = float(pixelsize)
+    if not pixelsize > 0:
+        raise ValueError(
+            f"The camera pixel size must be positive, got {pixelsize} nm."
+        )
+    return pixelsize
+
+
+def _calibration_pixelsize(calibration: dict) -> float:
+    """The camera pixel size (nm) a spline calibration records."""
+    pixelsize = calibration.get("pixelsize")
+    if not pixelsize:
+        raise KeyError(
+            "The spline calibration does not record the camera pixel size "
+            "('pixelsize')."
+        )
+    return float(pixelsize)
+
+
 def calibrate_spline(
     movie: localize.LoadedMovie,
     info: list[dict],
@@ -1299,6 +1327,8 @@ def calibrate_spline(
         Movie metadata.
     camera_info : dict
         Camera information ("Baseline", "Sensitivity", "Gain", "Pixelsize").
+        "Pixelsize" (nm) is required: the calibration records it, and
+        the fit converts its camera pixel grid to nm with it.
     box : int
         Lateral ROI size (camera pixels). The resulting calibration expects
         fits with this same box size.
@@ -1361,6 +1391,13 @@ def calibrate_spline(
     calibration : dict
         The spline PSF calibration (see ``io.save_spline_calibration`` /
         ``io.load_spline_calibration`` and ``localize.fit_spots_spline``).
+        Its lateral knots (``coefficients``, ``n_data``, ``n_intervals``,
+        ``box``) sample the camera pixel grid, the detector geometry the
+        fit works on, and are not converted to nm; the axial knots are
+        ``z_step_nm`` apart; ``pixelsize`` (nm) is the camera pixel size
+        the localizations are expressed in nm with. Any lateral
+        corrections appended later (``localize.fit_lateral_transform``)
+        are in nm, the unit of the localizations.
     diagnostics : list
         Only if ``return_diagnostics`` is True: a one-element list holding the
         bead inspection record (see :func:`bead_inspection_data`).
@@ -1369,6 +1406,7 @@ def calibrate_spline(
         "spline-2d",
         "spline-3d",
     ), "model must be 'spline-2d' or 'spline-3d'"
+    pixelsize = _camera_pixelsize(camera_info)
 
     if callable(progress_callback):
         progress_callback(0)
@@ -1437,14 +1475,13 @@ def calibrate_spline(
     if callable(progress_callback):
         progress_callback(2)
 
-    pixelsize = camera_info.get("Pixelsize", 130)
     calibration = {
         "model": model,
         "coefficients": coefficients,
         "n_data": n_data,
         "n_intervals": n_intervals,
         # lateral template sampling equals the camera pixel grid, so shifts
-        # are already in camera pixels
+        # are in camera pixels (the fit converts them to nm)
         "oversampling": 1.0,
         # the template is centered on the box (see _register_and_average), so a
         # zero fitted lateral shift means "emitter at the box center"
@@ -1988,7 +2025,7 @@ def _build_multichannel_calibration_dict(
         if correct_z_bias
         else _scan_center_index(ref["z_of_step"])
     )
-    pixelsize = camera_infos[0].get("Pixelsize", 130)
+    pixelsize = _camera_pixelsize(camera_infos[0])
     return {
         "model": "spline-3d-multichannel",
         "coefficients": coefficients,
@@ -2179,7 +2216,8 @@ def calibrate_spline_multichannel(
         Movie metadata, one per channel.
     camera_infos : list of dicts
         Camera information ("Baseline", "Sensitivity", "Gain", "Pixelsize"),
-        one per channel.
+        one per channel. The reference channel's "Pixelsize" (nm) is
+        required and recorded in the calibration.
     box : int
         Lateral ROI size (camera pixels). The resulting calibration expects
         fits with this same box size.
@@ -2279,6 +2317,7 @@ def calibrate_spline_multichannel(
         raise ValueError(
             "movies, infos and camera_infos must have the same length."
         )
+    _camera_pixelsize(camera_infos[0])
     if max_match_distance is None:
         max_match_distance = float(box)
     # One identification method per channel: split-FOV regions (and separate
@@ -2784,7 +2823,7 @@ def _registration_summary_lines(
         c = r["channel"]
         po = plane_offsets[c] if c < plane_offsets.size else float("nan")
         pscale = photon_scale[c] if c < photon_scale.size else float("nan")
-        dec = tform.from_dict(r["transform"]).decompose(ps)
+        dec = tform.from_dict(r["transform"]).decompose(unit="px")
         mirror_s = f"yes ({dec['flip_axis']})" if dec["mirror"] else "no"
         fields = [
             f"ch{c}",
@@ -2818,7 +2857,7 @@ def _save_registration_diagnostic_plot(
     residual field with small RMS means the channels are well registered; a
     systematic pattern reveals a rotation/scale the affine could not absorb.
     """
-    ps = float(calibration.get("pixelsize", 130)) or 130.0  # nm / camera px
+    ps = _calibration_pixelsize(calibration)  # nm / camera px
     plane_offsets = np.asarray(
         calibration.get("plane_offsets", []), dtype=float
     ).ravel()
@@ -3369,7 +3408,7 @@ def _split_fov_seed_transforms(
     identity = tform.identity()
     seed_local_affines = [identity]
     for c in range(1, n_channels):
-        dec = affines[c].decompose(pixelsize=1.0, at=(w / 2.0, h / 2.0))
+        dec = affines[c].decompose(at=(w / 2.0, h / 2.0), unit="px")
         if dec["mirror"] and dec["flip_axis"] == "x":
             seed_local_affines.append(
                 flip_affine(-1.0, 1.0, float(w), float(h))
@@ -4573,7 +4612,7 @@ def _save_diagnostic_plot(
     )
     box, _, n_steps = template.shape
     c = box // 2
-    ps = float(calibration.get("pixelsize", 130)) or 130.0  # nm / camera px
+    ps = _calibration_pixelsize(calibration)  # nm / camera px
     vmax = float(template.max()) or 1.0
     img_kw = dict(cmap="hot", vmin=0.0, vmax=vmax)
 
@@ -4828,7 +4867,7 @@ def bead_inspection_data(
         "template_xz": np.ascontiguousarray(template[c, :, :].T),
         "template_yz": np.ascontiguousarray(template[:, c, :].T),
         "z_nm": z_of_step - z_ref,
-        "pixelsize": float(calibration.get("pixelsize", 130) or 130),
+        "pixelsize": _calibration_pixelsize(calibration),
     }
 
 

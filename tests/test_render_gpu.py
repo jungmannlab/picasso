@@ -14,11 +14,19 @@ from picasso import render  # noqa: E402
 from picasso.render import backend as backend_mod  # noqa: E402
 from picasso.render.backend import SplatBackendError  # noqa: E402
 
-INFO = [{"Height": 64, "Width": 64, "Pixelsize": 130}]
+PIXELSIZE = 130.0  # camera pixel size (nm); every length is in nm
+INFO = [{"Height": 64, "Width": 64, "Pixelsize": PIXELSIZE}]
+
+
+def _nm(viewport):
+    """A viewport given in camera pixels, in nm."""
+    return tuple(tuple(c * PIXELSIZE for c in corner) for corner in viewport)
+
+
 KWARGS = dict(
-    disp_px_size=13.0,  # oversampling 10
-    viewport=((3.0, 2.0), (61.0, 62.5)),
-    min_blur_width=0.1,
+    disp_px_size=13.0,  # 10 rendered pixels per camera pixel
+    viewport=_nm(((3.0, 2.0), (61.0, 62.5))),
+    min_blur_width=0.1 * PIXELSIZE,
     ang=None,
 )
 # f32 arithmetic vs the CPU's f64: measured ~1e-4 of the image maximum
@@ -49,12 +57,13 @@ def gpu():
 def locs():
     rng = np.random.default_rng(42)
     n = 150_000
+    ps = PIXELSIZE
     return pd.DataFrame(
         {
-            "x": rng.uniform(-2, 66, n).astype(np.float32),
-            "y": rng.uniform(-2, 66, n).astype(np.float32),
-            "lpx": rng.uniform(0.02, 0.5, n).astype(np.float32),
-            "lpy": rng.uniform(0.02, 0.5, n).astype(np.float32),
+            "x": rng.uniform(-2 * ps, 66 * ps, n).astype(np.float32),
+            "y": rng.uniform(-2 * ps, 66 * ps, n).astype(np.float32),
+            "lpx": rng.uniform(0.02 * ps, 0.5 * ps, n).astype(np.float32),
+            "lpy": rng.uniform(0.02 * ps, 0.5 * ps, n).astype(np.float32),
         }
     )
 
@@ -65,23 +74,29 @@ def tiered_locs(locs):
     sub-pixel (the bulk), tile-sized, and whole-view whales."""
     tiered = locs.copy()
     rng = np.random.default_rng(7)
+    ps = PIXELSIZE
     tiered.loc[tiered.index[:200], ["lpx", "lpy"]] = rng.uniform(
-        0.5, 2.0, (200, 2)
+        0.5 * ps, 2.0 * ps, (200, 2)
     ).astype(np.float32)
     tiered.loc[tiered.index[200:220], ["lpx", "lpy"]] = rng.uniform(
-        5.0, 40.0, (20, 2)
+        5.0 * ps, 40.0 * ps, (20, 2)
     ).astype(np.float32)
     return tiered
 
 
 @pytest.fixture(scope="module")
 def locs_3d(locs):
-    """2D locs with z (camera-pixel scale, as the rotation math
-    treats it), lpz and a per-localization ellipse angle (degrees)."""
+    """2D locs with z and lpz (nm, like x and y) and a
+    per-localization ellipse angle (degrees)."""
     rng = np.random.default_rng(3)
+    ps = PIXELSIZE
     locs_3d = locs.copy()
-    locs_3d["z"] = rng.uniform(-2.0, 2.0, len(locs)).astype(np.float32)
-    locs_3d["lpz"] = rng.uniform(0.05, 0.6, len(locs)).astype(np.float32)
+    locs_3d["z"] = rng.uniform(-2.0 * ps, 2.0 * ps, len(locs)).astype(
+        np.float32
+    )
+    locs_3d["lpz"] = rng.uniform(0.05 * ps, 0.6 * ps, len(locs)).astype(
+        np.float32
+    )
     locs_3d["angle"] = rng.uniform(0.0, 180.0, len(locs)).astype(np.float32)
     return locs_3d
 
@@ -138,8 +153,8 @@ class TestWgpuParity:
     @pytest.mark.parametrize(
         "viewport,disp_px_size",
         [
-            (((20.0, 20.0), (44.0, 44.0)), 3.25),  # oversampling 40
-            (((30.0, 30.0), (34.0, 34.0)), 0.65),  # oversampling 200
+            (_nm(((20.0, 20.0), (44.0, 44.0))), 3.25),  # 40 px per cam. px
+            (_nm(((30.0, 30.0), (34.0, 34.0))), 0.65),  # 200 px per cam. px
         ],
     )
     def test_zoomed_views(self, gpu, tiered_locs, viewport, disp_px_size):
@@ -157,12 +172,13 @@ class TestWgpuParity:
         # many localizations on one pixel center: nothing to overflow
         # in a float gather, and the count stays exact
         n = 200_000
+        ps = PIXELSIZE
         dense = pd.DataFrame(
             {
-                "x": np.full(n, 32.05, np.float32),
-                "y": np.full(n, 32.05, np.float32),
-                "lpx": np.full(n, 0.01, np.float32),
-                "lpy": np.full(n, 0.01, np.float32),
+                "x": np.full(n, 32.05 * ps, np.float32),
+                "y": np.full(n, 32.05 * ps, np.float32),
+                "lpx": np.full(n, 0.01 * ps, np.float32),
+                "lpy": np.full(n, 0.01 * ps, np.float32),
             }
         )
         ((n_cpu, img_cpu),) = _cpu(dense, "gaussian", min_blur_width=0.0)
@@ -191,7 +207,7 @@ class TestWgpuParity:
             _assert_parity(image, img_cpu)
 
     def test_empty_view(self, gpu, locs):
-        viewport = ((100.0, 100.0), (110.0, 110.0))  # no localizations
+        viewport = _nm(((100.0, 100.0), (110.0, 110.0)))  # no localizations
         ((n_cpu, img_cpu),) = _cpu(locs, "gaussian", viewport=viewport)
         ((n_gpu, img_gpu),) = _gpu(gpu, locs, "gaussian", viewport=viewport)
         assert n_gpu == n_cpu == 0
@@ -255,11 +271,12 @@ class TestWgpuBlurMethods:
         np.testing.assert_allclose(img_gpu, img_cpu, rtol=1e-4, atol=0.2)
 
     def test_global_precision_sets_the_convolve_blur(self, gpu, locs):
+        ps = PIXELSIZE
         wide = render._extract_render_columns(
-            locs, "convolve", None, global_precision=(0.6, 0.6)
+            locs, "convolve", None, global_precision=(0.6 * ps, 0.6 * ps)
         )
         narrow = render._extract_render_columns(
-            locs, "convolve", None, global_precision=(0.1, 0.1)
+            locs, "convolve", None, global_precision=(0.1 * ps, 0.1 * ps)
         )
         ((_, img_wide),) = gpu.render_channels(
             [wide], [INFO], blur_method="convolve", **KWARGS
@@ -441,13 +458,15 @@ class TestIndexedRenders:
     @pytest.fixture
     def selection(self, locs):
         # a block-like superset: rows in and around a zoomed viewport
-        x = locs["x"].to_numpy()
-        y = locs["y"].to_numpy()
+        x = locs["x"].to_numpy() / PIXELSIZE  # camera pixels
+        y = locs["y"].to_numpy() / PIXELSIZE
         return np.flatnonzero(
             (x > 15) & (x < 50) & (y > 18) & (y < 46)
         ).astype(np.uint32)
 
-    ZOOMED = dict(viewport=((20.0, 20.0), (44.0, 44.0)), disp_px_size=3.25)
+    ZOOMED = dict(
+        viewport=_nm(((20.0, 20.0), (44.0, 44.0))), disp_px_size=3.25
+    )
 
     @pytest.mark.parametrize("blur", ["gaussian", None, "smooth"])
     def test_indexed_matches_cpu(self, gpu, locs, selection, blur):

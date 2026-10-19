@@ -1108,8 +1108,10 @@ class TestFit2DIntegration:
             spline_calibration=calibration,
         )
         assert len(locs) == len(truth)
-        dx = locs.x.values - np.array([t[1] for t in truth])
-        dy = locs.y.values - np.array([t[2] for t in truth])
+        # the localizations are in nm, the truth on the camera pixel grid
+        ps = camera_info["Pixelsize"]
+        dx = locs.x.values / ps - np.array([t[1] for t in truth])
+        dy = locs.y.values / ps - np.array([t[2] for t in truth])
         dz = _native_z(locs, calibration) - np.array([t[3] for t in truth])
         assert abs(dx.mean() - DX) < 0.02
         assert abs(dy.mean() - DY) < 0.02
@@ -1350,8 +1352,12 @@ class TestMultichannelIntegration:
         )
         assert len(locs) == len(truth)
         assert progress, "no progress was reported"
-        assert np.abs(locs.x.values - [t[1] for t in truth]).max() < 0.05
-        assert np.abs(locs.y.values - [t[2] for t in truth]).max() < 0.05
+        # the localizations are in nm, the truth on the camera pixel grid
+        ps = camera_infos[0]["Pixelsize"]
+        x_px = locs.x.values / ps
+        y_px = locs.y.values / ps
+        assert np.abs(x_px - [t[1] for t in truth]).max() < 0.05
+        assert np.abs(y_px - [t[2] for t in truth]).max() < 0.05
         z_native = calibration["z_center"] - locs.z.values / (
             calibration["z_step_nm"]
         )

@@ -6,7 +6,7 @@ import datetime
 import warnings
 
 DEFAULT_PLOTS = [
-    "nena_px",
+    "nena_nm",
     "photons_mean",
     "frame_std",
     "n_locs",
@@ -15,6 +15,9 @@ DEFAULT_PLOTS = [
     "drift_x",
     "drift_y",
 ]
+
+#: Units of the plotted fields (lengths are in nm since Picasso 1.0).
+FIELD_UNITS = {"nena_nm": "nm", "drift_x": "nm", "drift_y": "nm"}
 
 
 @st.cache_data
@@ -288,6 +291,11 @@ def history():
 
                     for field in fields:
                         median_ = df[field].median()
+                        unit = (
+                            f" ({FIELD_UNITS[field]})"
+                            if field in FIELD_UNITS
+                            else ""
+                        )
 
                         if plotmode == "Scatter":
                             fig = px.scatter(
@@ -297,7 +305,7 @@ def history():
                                 color="group",
                                 hover_name="filename_hdf",
                                 hover_data=["file_created"],
-                                title=f"{field} - median {median_:.2f}",
+                                title=f"{field} - median {median_:.2f}{unit}",
                                 trendline=trendline,
                                 height=400,
                             )
@@ -318,7 +326,7 @@ def history():
                                 color="group",
                                 hover_name="filename_hdf",
                                 hover_data=["file_created"],
-                                title=f"{field} - median {median_:.2f}",
+                                title=f"{field} - median {median_:.2f}{unit}",
                                 height=400,
                             )
 

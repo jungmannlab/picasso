@@ -79,7 +79,7 @@ def status():  # noqa: C901
             st.write("Preview of the last 10 entries:")
             st.write(
                 df.iloc[-10:][
-                    ["entry_created", "filename", "nena_px", "file_created"]
+                    ["entry_created", "filename", "nena_nm", "file_created"]
                 ]
             )
         else:
@@ -87,7 +87,7 @@ def status():  # noqa: C901
                 columns=[
                     "entry_created",
                     "filename",
-                    "nena_px",
+                    "nena_nm",
                     "file_created",
                 ]
             )

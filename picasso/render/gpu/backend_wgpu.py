@@ -101,12 +101,12 @@ _MODE_INDEXED = 8  # rows come from an index list into the columns
 #: the uniform block shared by both shader modules
 _UNIFORMS_WGSL = """
 struct Uniforms {
-    os: f32,
-    x_min: f32,
+    os: f32,          // rendered pixels per nm
+    x_min: f32,       // viewport (nm)
     y_min: f32,
     x_max: f32,
     y_max: f32,
-    min_blur: f32,
+    min_blur: f32,    // minimum blur (nm)
     npx_f: f32,
     npy_f: f32,
     n_locs: u32,
@@ -122,7 +122,7 @@ struct Uniforms {
     stride: u32,      // column index = offset + i * stride (strided
     offset: u32,      // previews read the resident buffers directly)
     rot: mat3x3<f32>,     // 3D rotation (MODE_ROT)
-    center: vec2<f32>,    // rotation center (camera px)
+    center: vec2<f32>,    // rotation center (nm)
     _pad2: vec2<f32>,
 };
 @group(0) @binding(0) var<uniform> u: Uniforms;
@@ -154,8 +154,8 @@ fn src(i: u32) -> u32 {
     return k;
 }
 
-// camera-pixel position, rotated about the view center when MODE_ROT
-// (as _locs_rotation_arrays does, before the in-view mask)
+// position in nm, rotated about the view center when MODE_ROT (as
+// _locs_rotation_arrays does, before the in-view mask)
 fn position(i: u32) -> vec2<f32> {
     let k = src(i);
     var x = xs[k];
@@ -899,12 +899,12 @@ class WgpuBackend(SplatBackend):
             Display pixel size in nm, see ``splat.render``.
         viewport : tuple or None
             Field of view ``((y_min, x_min), (y_max, x_max))`` in
-            camera pixels, see ``splat.render``.
+            nm, see ``splat.render``.
         blur_method : {"gaussian", "gaussian_iso", "smooth", \
                 "convolve"} or None
             Blur method, see ``splat.render``.
         min_blur_width : float
-            Minimum size of blur (camera pixels), see ``splat.render``.
+            Minimum size of blur (nm), see ``splat.render``.
         ang : tuple or scipy.spatial.transform.Rotation or None
             Rotation of the localizations, see ``splat.render``.
         quadtree_capacity : int, optional
@@ -963,10 +963,10 @@ class WgpuBackend(SplatBackend):
         ang,
     ):
         (y_min, x_min), (y_max, x_max) = viewport
-        pixelsize = lib.get_from_metadata(
-            info[0], "Pixelsize", raise_error=True
-        )
-        oversampling = pixelsize / disp_px_size
+        # rendered pixels per nm, as in _render_arrays; the viewport,
+        # the positions and the blur widths are all nm, carried in
+        # float32 (a resolution of ~0.1 nm at a 1 mm field of view)
+        oversampling = 1.0 / float(disp_px_size)
         # image size exactly as _render_setup computes it (float64)
         n_pixel_y = int(np.ceil(oversampling * (y_max - y_min)))
         n_pixel_x = int(np.ceil(oversampling * (x_max - x_min)))
@@ -1306,7 +1306,9 @@ class WgpuBackend(SplatBackend):
         self, renderings, columns, blur_method, oversampling, min_blur_width
     ):
         """``smooth`` / ``convolve``: the CPU image filter on the GPU
-        histogram, with the CPU backend's exact blur widths."""
+        histogram, with the CPU backend's exact blur widths (the
+        precisions and ``min_blur_width`` in nm, scaled to rendered
+        pixels by ``oversampling``)."""
         from ..splat import _fftconvolve, global_blur
 
         out = []

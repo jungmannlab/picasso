@@ -146,18 +146,18 @@ def closest_rotvec(
 def viewport_height(
     viewport: list[tuple[float, float], tuple[float, float]],
 ) -> float:
-    """Calculate viewport height in camera pixels.
+    """Calculate viewport height in nm.
 
     Parameters
     ----------
     viewport : list of tuples
-        Viewport coordinates in camera pixels, [[y_min, y_max], [x_min,
+        Viewport coordinates in nm, [[y_min, y_max], [x_min,
         x_max]].
 
     Returns
     -------
     height : float
-        Viewport height in camera pixels.
+        Viewport height in nm.
     """
     return viewport[1][0] - viewport[0][0]
 
@@ -165,18 +165,18 @@ def viewport_height(
 def viewport_width(
     viewport: list[tuple[float, float], tuple[float, float]],
 ) -> float:
-    """Calculate viewport width in camera pixels.
+    """Calculate viewport width in nm.
 
     Parameters
     ----------
     viewport : list of tuples
-        Viewport coordinates in camera pixels, [[y_min, y_max], [x_min,
+        Viewport coordinates in nm, [[y_min, y_max], [x_min,
         x_max]].
 
     Returns
     -------
     width : float
-        Viewport width in camera pixels.
+        Viewport width in nm.
     """
     return viewport[1][1] - viewport[0][1]
 
@@ -184,18 +184,18 @@ def viewport_width(
 def viewport_size(
     viewport: list[tuple[float, float], tuple[float, float]],
 ) -> tuple[float, float]:
-    """Calculate viewport size in camera pixels.
+    """Calculate viewport size in nm.
 
     Parameters
     ----------
     viewport : list of tuples
-        Viewport coordinates in camera pixels, [[y_min, y_max], [x_min,
+        Viewport coordinates in nm, [[y_min, y_max], [x_min,
         x_max]].
 
     Returns
     -------
     height, width : float
-        Viewport height and width in camera pixels.
+        Viewport height and width in nm.
     """
     height = viewport_height(viewport)
     width = viewport_width(viewport)
@@ -205,18 +205,18 @@ def viewport_size(
 def viewport_center(
     viewport: list[tuple[float, float], tuple[float, float]],
 ) -> tuple[float, float]:
-    """Calculate viewport center in camera pixels.
+    """Calculate viewport center in nm.
 
     Parameters
     ----------
     viewport : list of tuples
-        Viewport coordinates in camera pixels, [[y_min, y_max], [x_min,
+        Viewport coordinates in nm, [[y_min, y_max], [x_min,
         x_max]].
 
     Returns
     -------
     center : tuple
-        Viewport center coordinates in camera pixels (y, x).
+        Viewport center coordinates in nm (y, x).
     """
     center = (
         ((viewport[1][0] + viewport[0][0]) / 2),
@@ -236,14 +236,14 @@ def shift_viewport(
     Parameters
     ----------
     viewport : tuple
-        Current viewport in camera pixels ((ymin, xmin), (ymax, xmax)).
+        Current viewport in nm ((ymin, xmin), (ymax, xmax)).
     dx, dy : float
-        Shifts in camera pixels.
+        Shifts in nm.
 
     Returns
     -------
     new_viewport : tuple
-        New viewport in camera pixels ((ymin, xmin), (ymax, xmax)).
+        New viewport in nm ((ymin, xmin), (ymax, xmax)).
     """
     (ymin, xmin), (ymax, xmax) = viewport
     new_viewport = ((ymin + dy, xmin + dx), (ymax + dy, xmax + dx))
@@ -260,7 +260,7 @@ def zoom_viewport(
     Parameters
     ----------
     viewport : tuple
-        Current viewport in camera pixels ((ymin, xmin), (ymax, xmax)).
+        Current viewport in nm ((ymin, xmin), (ymax, xmax)).
     factor : float
         Zoom factor. Values > 1 will zoom in, values < 1 will zoom out.
     cursor_position : tuple, optional
@@ -270,7 +270,7 @@ def zoom_viewport(
     Returns
     -------
     new_viewport : tuple
-        New viewport in camera pixels ((ymin, xmin), (ymax, xmax)).
+        New viewport in nm ((ymin, xmin), (ymax, xmax)).
     """
     viewport_height, viewport_width = viewport_size(viewport)
     new_viewport_height = viewport_height * factor
@@ -319,13 +319,13 @@ def adjust_viewport_to_aspect_ratio(
     image : QtGui.QImage
         Image of rendered localizations.
     viewport : list of tuples
-        Viewport coordinates in camera pixels, ((y_min, y_max), (x_min,
+        Viewport coordinates in nm, ((y_min, y_max), (x_min,
         x_max)).
 
     Returns
     -------
     viewport : list of tuples
-        Adjusted viewport coordinates in camera pixels, ((y_min, y_max),
+        Adjusted viewport coordinates in nm, ((y_min, y_max),
         (x_min, x_max)).
     """
     viewport_height, viewport_width = viewport_size(viewport)
@@ -382,16 +382,16 @@ def map_to_view(
     image_size: QtCore.QSize,
     viewport: tuple[tuple[float, float], tuple[float, float]],
 ) -> tuple[int, int]:
-    """Convert (x, y) from camera pixels to display pixels.
+    """Convert (x, y) from nm to display pixels.
 
     Parameters
     ----------
     x, y : float
-        Coordinates in camera pixels.
+        Coordinates in nm.
     image_size : QtCore.QSize
         Size of the displayed image in display pixels.
     viewport : tuple
-        ``((y_min, x_min), (y_max, x_max))`` in camera pixels.
+        ``((y_min, x_min), (y_max, x_max))`` in nm.
 
     Returns
     -------

@@ -19,11 +19,16 @@ from picasso import io, stitch
 
 PIXELSIZE = 130.0  # nm
 FRAMES = 1000
-PRECISION = 0.1  # camera pixels
+PRECISION = 0.1 * PIXELSIZE  # nm
+# tolerance of recovered tile positions (nm): a twentieth of a camera
+# pixel
+TOL = 0.05 * PIXELSIZE
 
 
 def _sample(rng, width, height, density=0.05):
-    """Random binding sites (x, y in camera pixels, z in nm)."""
+    """Random binding sites (x, y in camera pixels, z in nm); the tile
+    geometry is designed in camera pixels and converted to nm when the
+    localizations are made."""
     n = int(width * height * density)
     return np.column_stack(
         [
@@ -35,8 +40,8 @@ def _sample(rng, width, height, density=0.05):
 
 
 def _tile_locs(rng, sites, origin, size, z_shift, per_site=4, site_ids=None):
-    """Localizations of the sites inside one tile, in its camera
-    frame, with ``z_shift`` subtracted from z."""
+    """Localizations (nm) of the sites inside one tile (camera pixels),
+    in its camera frame, with ``z_shift`` subtracted from z."""
     inside = (
         (sites[:, 0] >= origin[0])
         & (sites[:, 0] < origin[0] + size[0])
@@ -47,9 +52,14 @@ def _tile_locs(rng, sites, origin, size, z_shift, per_site=4, site_ids=None):
     local = sites[inside]
     n = len(local) * per_site
     rep = np.repeat(local, per_site, axis=0)
-    x = rep[:, 0] - origin[0] + rng.normal(0, PRECISION, n)
-    y = rep[:, 1] - origin[1] + rng.normal(0, PRECISION, n)
-    keep = (x >= 0) & (x < size[0]) & (y >= 0) & (y < size[1])
+    x = (rep[:, 0] - origin[0]) * PIXELSIZE + rng.normal(0, PRECISION, n)
+    y = (rep[:, 1] - origin[1]) * PIXELSIZE + rng.normal(0, PRECISION, n)
+    keep = (
+        (x >= 0)
+        & (x < size[0] * PIXELSIZE)
+        & (y >= 0)
+        & (y < size[1] * PIXELSIZE)
+    )
     locs = pd.DataFrame(
         {
             "frame": rng.integers(0, FRAMES, n).astype(np.uint32),
@@ -106,7 +116,7 @@ def _grid(
     locs, infos : lists
         One per tile.
     origins : np.ndarray
-        True tile origins in camera pixels.
+        True tile origins in nm.
     z_shifts : np.ndarray
         z subtracted from each tile in nm.
     """
@@ -138,7 +148,7 @@ def _grid(
         locs.append(_tile_locs(rng, sites, origins[t], sizes[t], z_shifts[t]))
         received = f"2024-08-05 15:{10 + t:02d}:00.000 +0200"
         infos.append(_info(sizes[t], stage[t], received))
-    return locs, infos, origins, z_shifts
+    return locs, infos, origins * PIXELSIZE, z_shifts
 
 
 def _relative(positions):
@@ -152,7 +162,7 @@ class TestStitch:
         out, out_infos, report = stitch.stitch(locs, infos)
         assert report["orientation"] == "-x, y"
         np.testing.assert_allclose(
-            _relative(report["positions"]), _relative(origins), atol=0.05
+            _relative(report["positions"]), _relative(origins), atol=TOL
         )
         # z_shift was subtracted, so the offsets restore it (relative
         # to the first tile)
@@ -167,25 +177,26 @@ class TestStitch:
         assert entry["Stage orientation"] == "-x, y"
         # the stitched canvas holds every localization
         assert out[0]["x"].min() >= 0 and out[0]["y"].min() >= 0
-        assert out[0]["x"].max() < info[0]["Width"]
-        assert out[0]["y"].max() < info[0]["Height"]
+        assert out[0]["x"].max() < info[0]["Width"] * PIXELSIZE
+        assert out[0]["y"].max() < info[0]["Height"] * PIXELSIZE
+        assert entry["Tile offsets x (nm)"][0] == report["positions"][0, 0]
 
     def test_explicit_orientation_and_positions(self):
         rng = np.random.default_rng(1)
         locs, infos, origins, _ = _grid(rng, n_cols=2, n_rows=2)
         _, _, report = stitch.stitch(locs, infos, orientation="-x, y")
         np.testing.assert_allclose(
-            _relative(report["positions"]), _relative(origins), atol=0.05
+            _relative(report["positions"]), _relative(origins), atol=TOL
         )
         # without stage positions, from rough positions (e.g., placed
         # by hand); the error is within the search radius
         for info in infos:
             del info[0]["Micro-Manager Metadata"]
-        rough = origins + rng.uniform(-20, 20, origins.shape)
+        rough = origins + rng.uniform(-20, 20, origins.shape) * PIXELSIZE
         _, _, report = stitch.stitch(locs, infos, positions=rough)
         assert report["orientation"] is None
         np.testing.assert_allclose(
-            _relative(report["positions"]), _relative(origins), atol=0.05
+            _relative(report["positions"]), _relative(origins), atol=TOL
         )
 
     def test_tiles_of_different_sizes(self):
@@ -194,10 +205,10 @@ class TestStitch:
         locs, infos, origins, _ = _grid(rng, n_cols=2, n_rows=2, sizes=sizes)
         out, out_infos, report = stitch.stitch(locs, infos)
         np.testing.assert_allclose(
-            _relative(report["positions"]), _relative(origins), atol=0.05
+            _relative(report["positions"]), _relative(origins), atol=TOL
         )
-        assert out[0]["x"].max() < out_infos[0][0]["Width"]
-        assert out[0]["y"].max() < out_infos[0][0]["Height"]
+        assert out[0]["x"].max() < out_infos[0][0]["Width"] * PIXELSIZE
+        assert out[0]["y"].max() < out_infos[0][0]["Height"] * PIXELSIZE
 
     def test_seams_cut_each_site_from_one_tile(self):
         rng = np.random.default_rng(3)
@@ -270,7 +281,7 @@ class TestStitch:
         assert report["targets"] == [0, 1]
         assert len(out) == 2
         np.testing.assert_allclose(
-            _relative(report["positions"]), _relative(origins), atol=0.05
+            _relative(report["positions"]), _relative(origins), atol=TOL
         )
         assert out_infos[1][-1]["Stitched files"] == paths[1::2]
         # the sparse target is placed like the dense one: its sites
@@ -279,8 +290,8 @@ class TestStitch:
         shift = report["positions"][0] - origins[0]
         np.testing.assert_allclose(
             site_x.to_numpy(),
-            sites_b[site_x.index.to_numpy(), 0] + shift[0],
-            atol=0.2,
+            sites_b[site_x.index.to_numpy(), 0] * PIXELSIZE + shift[0],
+            atol=0.2 * PIXELSIZE,
         )
 
     def test_tile_without_overlap_keeps_initial_position(self):
@@ -291,7 +302,9 @@ class TestStitch:
         infos.append(_info((500, 400)))
         for info in infos:
             info[0].pop("Micro-Manager Metadata", None)
-        positions = np.vstack([origins, origins[1] + (2000.0, 0.0)])
+        positions = np.vstack(
+            [origins, origins[1] + (2000.0 * PIXELSIZE, 0.0)]
+        )
         with pytest.warns(UserWarning, match="initial position"):
             _, _, report = stitch.stitch(locs, infos, positions=positions)
         assert report["unconnected"] == [2]
@@ -300,12 +313,19 @@ class TestStitch:
             relative[2], (positions - positions[0])[2], atol=1e-6
         )
 
-    def test_mismatched_pixel_sizes_raise(self):
+    def test_tiles_with_different_pixel_sizes(self):
+        """Localizations are in nm, so tiles recorded with different
+        camera pixel sizes stitch like any others; the field of view of
+        each tile follows from its own pixel size."""
         rng = np.random.default_rng(7)
-        locs, infos, _, _ = _grid(rng, n_cols=2, n_rows=1)
+        locs, infos, origins, _ = _grid(rng, n_cols=2, n_rows=1)
+        for key in ("Width", "Height"):
+            infos[1][0][key] = int(round(infos[1][0][key] * 1.3))
         infos[1][1]["Pixelsize"] = 100.0
-        with pytest.raises(ValueError, match="different pixel sizes"):
-            stitch.stitch(locs, infos)
+        _, _, report = stitch.stitch(locs, infos)
+        np.testing.assert_allclose(
+            _relative(report["positions"]), _relative(origins), atol=TOL
+        )
 
     def test_stage_positions_given(self):
         """Stage positions given directly instead of the metadata."""
@@ -318,7 +338,7 @@ class TestStitch:
         _, _, report = stitch.stitch(locs, infos, stage_um=stage)
         assert report["orientation"] == "-x, y"
         np.testing.assert_allclose(
-            _relative(report["positions"]), _relative(origins), atol=0.05
+            _relative(report["positions"]), _relative(origins), atol=TOL
         )
         with pytest.raises(ValueError, match="one position per file"):
             stitch.stitch(locs, infos, stage_um=stage[:3])
@@ -344,8 +364,15 @@ class TestHelpers:
 
     def test_stage_to_camera(self):
         positions = np.array([[10.0, 20.0], [10.13, 20.0], [10.0, 20.26]])
-        camera = stitch.stage_to_camera(positions, 130.0, "-y, x")
-        np.testing.assert_allclose(camera, [[0, 0], [0, 1], [-2, 0]])
+        camera = stitch.stage_to_camera(positions, "-y, x")
+        np.testing.assert_allclose(camera, [[0, 0], [0, 130], [-260, 0]])
+
+    def test_camera_size_in_nm(self):
+        info = _info((500, 400))
+        assert stitch.camera_size(info) == (500 * PIXELSIZE, 400 * PIXELSIZE)
+        # Render records the camera size once the canvas was enlarged
+        info[0]["Camera Width"], info[0]["Camera Height"] = 480, 380
+        assert stitch.camera_size(info) == (480 * PIXELSIZE, 380 * PIXELSIZE)
 
     def test_describe_orientation(self):
         # the test data: a larger stage X lies left, a larger Y above
@@ -364,7 +391,7 @@ class TestHelpers:
         assert len(descriptions) == 8
 
     def test_solve_positions_drops_inconsistent_pair(self):
-        truth = np.array([[0.0, 0.0], [100.0, 0.0], [0.0, 100.0]])
+        truth = np.array([[0.0, 0.0], [10_000.0, 0.0], [0.0, 10_000.0]])
 
         def pair(a, b, error=(0.0, 0.0), matches=1000, fraction=0.6):
             offset = truth[b] - truth[a] + error
@@ -379,11 +406,15 @@ class TestHelpers:
 
         # the wrong offset has the most matches, hence the smallest
         # share of the loop's error, but the lowest fraction matched
-        pairs = [pair(0, 1), pair(0, 2), pair(1, 2, (3.0, -2.0), 2000, 0.3)]
+        pairs = [
+            pair(0, 1),
+            pair(0, 2),
+            pair(1, 2, (300.0, -200.0), 2000, 0.3),
+        ]
         positions, z_offsets, pairs, unconnected = stitch.solve_positions(
-            pairs, truth + 5.0
+            pairs, truth + 500.0
         )
-        np.testing.assert_allclose(positions, truth + 5.0, atol=1e-9)
+        np.testing.assert_allclose(positions, truth + 500.0, atol=1e-9)
         assert [p["used"] for p in pairs] == [True, True, False]
         assert pairs[2]["status"] == "inconsistent"
         assert unconnected == []
@@ -439,8 +470,8 @@ def test_cli_saves_one_file_per_target(tmp_path):
     cli._stitch([str(tmp_path / "tile*.hdf5")])
     stitched, info = io.load_locs(str(tmp_path / "tile0_stitched.hdf5"))
     assert info[-1]["Generated by"].endswith("Stitch")
-    offsets = np.array(info[-1]["Tile offsets x (cam. px)"])
+    offsets = np.array(info[-1]["Tile offsets x (nm)"])
     np.testing.assert_allclose(
-        offsets[1] - offsets[0], origins[1, 0] - origins[0, 0], atol=0.05
+        offsets[1] - offsets[0], origins[1, 0] - origins[0, 0], atol=TOL
     )
-    assert stitched["x"].max() < info[0]["Width"]
+    assert stitched["x"].max() < info[0]["Width"] * PIXELSIZE

@@ -36,7 +36,7 @@ from PyQt6 import QtCore, QtGui, QtWidgets
 from matplotlib.backends.backend_qt5agg import FigureCanvas
 from scipy.spatial.transform import Rotation
 
-from .. import io, lib, render, spinna, __version__, docs_url
+from .. import io, lib, lib_qt, render, spinna, __version__, docs_url
 from .app import run_gui
 from . import theme
 
@@ -389,11 +389,15 @@ class MaskPreview(QtWidgets.QWidget):
         painter.drawImage(QtCore.QPointF(0, 0), self.qimage)
         painter.end()
         if self.mask_tab.scalebar_check.isChecked():
+            # the viewport is in nm; (x_min, ...) are mask pixels
+            pixelsize = self.pixelsize()
             view = render.draw_scalebar(
                 view,
-                viewport=((y_min, x_min), (y_max, x_max)),
+                viewport=(
+                    (y_min * pixelsize, x_min * pixelsize),
+                    (y_max * pixelsize, x_max * pixelsize),
+                ),
                 scalebar_length_nm=self.mask_tab.scalebar_length.value(),
-                pixelsize=self.pixelsize(),
             )
         cx, cy = self.center
         origin = QtCore.QPointF(
@@ -869,7 +873,18 @@ class MaskGeneratorTab(lib.Dialog):
 
         self.window.pwd = os.path.dirname(path)
         self.locs_path = path
-        self.mask_generator = spinna.MaskGenerator(path)
+        try:
+            # molecules localized before Picasso 1.0 are in camera pixels
+            # and may not record the pixel size that converts them to nm
+            mask_generator = lib_qt.load_or_ask_pixelsize(
+                self, spinna.MaskGenerator, path
+            )
+        except lib.FILE_LOAD_ERRORS as error:
+            lib.show_load_error(self, path, error)
+            return
+        if mask_generator is None:  # the pixel size prompt was canceled
+            return
+        self.mask_generator = mask_generator
         self.clear_mask()
         self.mask_ndim.clear()
         if "z" in self.mask_generator.locs.columns:
@@ -3213,6 +3228,8 @@ class SimulationsTab(lib.Dialog):
         self.n_total = {}
         self.nnd_hist_data_exp = []
         self.nnd_hist_data_sim = []
+        # camera pixel size for saving simulated molecules without masks
+        self._sim_pixelsize = None
 
         self.load_mask_buttons = []
         self.load_exp_data_buttons = []
@@ -3634,11 +3651,15 @@ class SimulationsTab(lib.Dialog):
         )
         if path:
             self.window.pwd = os.path.dirname(path)
-            # load the data
-            locs, info = io.load_locs(path)
-            pixelsize = lib.get_from_metadata(
-                info, "Pixelsize", raise_error=True
-            )
+            # load the data (nm)
+            try:
+                loaded = lib_qt.load_or_ask_pixelsize(self, io.load_locs, path)
+            except lib.FILE_LOAD_ERRORS as error:
+                lib.show_load_error(self, path, error)
+                return
+            if loaded is None:  # the pixel size prompt was canceled
+                return
+            locs, info = loaded
             pick_area = lib.get_from_metadata(info, "Area (um^2)")
             if pick_area is not None:
                 idx = self.targets.index(target)
@@ -3653,7 +3674,6 @@ class SimulationsTab(lib.Dialog):
                 coords = locs[["x", "y", "z"]].to_numpy()
             else:
                 coords = locs[["x", "y"]].to_numpy()
-            coords[:, :2] *= pixelsize
 
             self.exp_data[target] = coords
             self.exp_data_paths[target] = path
@@ -4737,10 +4757,38 @@ class SimulationsTab(lib.Dialog):
             props = np.array([_.value() for _ in self.prop_str_input_spins])
             n_total = self.single_sim_n_total()
             n_str = self.mixer.convert_props_to_counts(props, n_total)
-            self.mixer.run_simulation(
-                N_structures=n_str,
-                path=path,
+            pixelsize = self._save_pixelsize()
+            if pixelsize is None:  # the pixel size prompt was canceled
+                return
+            all_locs = self.mixer.run_simulation(N_structures=n_str)
+            self.mixer.save(path, all_locs, pixelsize=pixelsize)
+
+    def _save_pixelsize(self) -> float | None:
+        """The camera pixel size (nm) written to the metadata of saved
+        simulated molecules: the one of the masks when the simulation
+        uses them, else the one asked for once per session. None if the
+        question was canceled."""
+        if self.mask_den_stack.currentIndex() == 0 and self.mask_infos:
+            info = next(iter(self.mask_infos.values()))
+            pixelsize = info.get("Camera pixelsize (nm)")
+            if pixelsize is not None:
+                return float(pixelsize)
+        if self._sim_pixelsize is None:
+            value, ok = QtWidgets.QInputDialog.getDouble(
+                self,
+                "Camera pixel size",
+                "Camera pixel size (nm) recorded in the metadata of the "
+                "saved molecules\n(Picasso: Render needs it to display "
+                "them):",
+                130.0,
+                0.01,
+                1e6,
+                2,
             )
+            if not ok:
+                return None
+            self._sim_pixelsize = float(value)
+        return self._sim_pixelsize
 
     @check_structures_loaded
     def sim_and_plot_NND(self) -> None:

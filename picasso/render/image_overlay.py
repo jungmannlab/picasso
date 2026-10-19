@@ -3,14 +3,16 @@ picasso.render.image_overlay
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Overlay of an image (e.g., a widefield or brightfield PNG or TIFF) on
-rendered localizations: loading, placement in camera pixels and drawing.
+rendered localizations: loading, placement in nm and drawing.
 
 Placement is anchored to the camera chip, not to the rendered field of
-view. A localization at ``x = j`` sits at the center of camera pixel
-``j``, so the chip spans ``[-0.5, width - 0.5)`` in localization
-coordinates. An image with the movie's size, stretched to the chip,
-thus puts each of its pixels exactly onto the camera pixel that
-recorded it.
+view. A localization at ``x = j * Pixelsize`` nm sits at the center of
+camera pixel ``j``, so the chip spans ``[-0.5, Width - 0.5) *
+Pixelsize`` nm in localization coordinates. An image with the movie's
+size, stretched to the chip, thus puts each of its pixels exactly onto
+the camera pixel that recorded it. The camera pixel size enters only
+there (``overlay_extent`` reads it from the metadata); everything else
+is in nm.
 
 :author: Rafal Kowalewski, 2026
 :copyright: Copyright (c) 2026 Jungmann Lab, MPI of Biochemistry
@@ -199,50 +201,60 @@ def _to_uint8(image: np.ndarray) -> np.ndarray:
 
 def overlay_extent(
     image_shape: tuple[int, ...],
-    movie_size: tuple[float, float],
+    info: list[dict] | dict,
     mode: str,
-    scale: float = 1.0,
+    scale: float | None = None,
     shift: tuple[float, float] = (0.0, 0.0),
 ) -> tuple[float, float, float, float]:
-    """Find where an image overlay lies in camera pixels.
+    """Find where an image overlay lies in nm.
 
     Parameters
     ----------
     image_shape : tuple of int
         Shape of the image, ``(height, width, ...)``.
-    movie_size : tuple of float
-        Height and width of the camera chip in camera pixels (the
-        ``"Height"`` and ``"Width"`` metadata of the localizations).
+    info : list of dict or dict
+        Metadata of the localizations. ``"Width"``, ``"Height"`` and
+        ``"Pixelsize"`` describe the camera chip, see
+        ``lib.field_of_view`` and the module documentation.
     mode : str
         One of ``SCALING_MODES``. ``"Fit to camera (keep aspect
         ratio)"`` scales the image uniformly to the largest size that
         fits on the chip and centers it; ``"Stretch to camera"`` scales
         width and height independently to cover the chip;
-        ``"Image pixel size"`` scales each image pixel to ``scale``
-        camera pixels and aligns the top left corners of the image and
-        the chip.
+        ``"Image pixel size"`` scales each image pixel to ``scale`` nm
+        and aligns the top left corners of the image and the chip.
     scale : float, optional
-        Size of one image pixel in camera pixels (image pixel size
-        divided by camera pixel size). Only used by ``"Image pixel
-        size"``. Default is 1.0.
+        Size of one image pixel in nm (the image's pixel size). Only
+        used by ``"Image pixel size"``. If None (default), the camera
+        pixel size, i.e., one image pixel per camera pixel.
     shift : tuple of float, optional
-        Shift ``(x, y)`` of the image in camera pixels, added after
-        scaling. Default is ``(0.0, 0.0)``.
+        Shift ``(x, y)`` of the image in nm, added after scaling.
+        Default is ``(0.0, 0.0)``.
 
     Returns
     -------
     extent : tuple of float
-        ``(x, y, width, height)`` of the image in camera pixels, in the
+        ``(x, y, width, height)`` of the image in nm, in the
         coordinates of the localizations.
 
     Raises
     ------
     ValueError
         If ``mode`` is not one of ``SCALING_MODES``.
+    KeyError
+        If ``info`` lacks ``"Width"``, ``"Height"`` or
+        ``"Pixelsize"``.
     """
     image_height, image_width = image_shape[:2]
-    movie_height, movie_width = movie_size
-    x0 = y0 = -0.5  # top left corner of the chip, see the module doc
+    movie_width, movie_height = lib.field_of_view(info)
+    pixelsize = float(
+        lib.get_from_metadata(info, "Pixelsize", raise_error=True)
+    )
+    if scale is None:
+        scale = pixelsize
+    # top left corner of the chip, half a camera pixel before the
+    # first localization coordinate, see the module doc
+    x0 = y0 = -0.5 * pixelsize
     if mode == "Fit to camera (keep aspect ratio)":
         factor = min(movie_width / image_width, movie_height / image_height)
         width = image_width * factor
@@ -343,11 +355,11 @@ def draw_image_overlay(
         it is in the RGB32 or ARGB32 format.
     viewport : tuple
         Field of view shown in ``image``, ``((y_min, x_min), (y_max,
-        x_max))`` in camera pixels.
+        x_max))`` in nm.
     overlay : QImage
         The overlay, see ``overlay_to_qimage``.
     extent : tuple of float
-        ``(x, y, width, height)`` of the overlay in camera pixels, see
+        ``(x, y, width, height)`` of the overlay in nm, see
         ``overlay_extent``.
     opacity : float, optional
         Opacity of the overlay in [0, 1]. Default is 1.0.
@@ -387,14 +399,14 @@ def draw_image_overlay(
     if v_width <= 0 or v_height <= 0 or opacity <= 0:
         return image
     x0, y0, width, height = extent
-    # the part of the overlay inside the viewport, in camera pixels
+    # the part of the overlay inside the viewport, in nm
     vx0, vx1 = max(x0, x_min), min(x0 + width, x_max)
     vy0, vy1 = max(y0, y_min), min(y0 + height, y_max)
     if vx1 <= vx0 or vy1 <= vy0:
         return image
-    px_x = image.width() / v_width  # display pixels per camera pixel
+    px_x = image.width() / v_width  # display pixels per nm
     px_y = image.height() / v_height
-    ov_x = overlay.width() / width  # overlay pixels per camera pixel
+    ov_x = overlay.width() / width  # overlay pixels per nm
     ov_y = overlay.height() / height
     source = QtCore.QRectF(
         (vx0 - x0) * ov_x,

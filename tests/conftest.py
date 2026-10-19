@@ -584,8 +584,10 @@ MIN_NG = 5000
 PIXELSIZE = 130  # camera pixel size, nm
 
 # Astigmatism 3D calibration shared by test_postprocess / test_zfit /
-# test_localize. Tests that mutate it should pass ``dict(CALIB_3D)``.
-CALIB_3D = {
+# test_localize, spot widths in nm (the Picasso 1.0 format; the
+# coefficients were recorded in camera pixels of 130 nm). Tests that
+# mutate it should pass ``dict(CALIB_3D)``.
+_CALIB_3D_PX = {
     "X Coefficients": [
         -1.6680708772714857e-18,
         2.4038209829154137e-15,
@@ -604,9 +606,14 @@ CALIB_3D = {
         -0.001646865504353452,
         1.2257249554338714,
     ],
+}
+CALIB_3D = {
+    "X Coefficients": [c * PIXELSIZE for c in _CALIB_3D_PX["X Coefficients"]],
+    "Y Coefficients": [c * PIXELSIZE for c in _CALIB_3D_PX["Y Coefficients"]],
     "Step size in nm": 5.0,
     "Number of frames": 201,
     "Magnification factor": 0.79,
+    "picasso_format": "1.0",
 }
 
 

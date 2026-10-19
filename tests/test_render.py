@@ -17,9 +17,15 @@ from picasso import io, lib, masking, render
 
 from tests.conftest import PIXELSIZE
 
-# parameters reused across tests
-VIEWPORT = ((15, 15), (16, 16))
-FULL_VIEWPORT = ((0, 0), (32, 32))
+# parameters reused across tests; the test data covers 32 x 32 camera
+# pixels of PIXELSIZE nm and every length (coordinates, viewports,
+# precisions, blur widths) is in nm
+FOV_NM = 32 * PIXELSIZE
+VIEWPORT = (
+    (15 * PIXELSIZE, 15 * PIXELSIZE),
+    (16 * PIXELSIZE, 16 * PIXELSIZE),
+)
+FULL_VIEWPORT = ((0, 0), (FOV_NM, FOV_NM))
 BLUR_METHODS = ["gaussian", "gaussian_iso", "smooth", "convolve"]
 LINEAR_BLUR_METHODS = ["smooth", "convolve"]  # preserve total mass
 MASKING_METHODS = [
@@ -121,7 +127,7 @@ class TestRender:
         assert n > 0, "Test data should have locs in viewport"
 
     def test_viewport_exact_shape(self, locs, info):
-        """Image shape is exactly oversampling * viewport size."""
+        """Image shape is exactly viewport size / display pixel size."""
         n, im = render.render(
             locs, info, disp_px_size=PIXELSIZE / 130, viewport=VIEWPORT
         )
@@ -187,7 +193,7 @@ class TestRender:
             disp_px_size=PIXELSIZE / 5,
             viewport=FULL_VIEWPORT,
             blur_method="gaussian",
-            min_blur_width=2.0,
+            min_blur_width=2.0 * PIXELSIZE,
         )
         assert im_wide.max() < im_narrow.max()
 
@@ -255,9 +261,11 @@ class TestRender:
 
     def test_gaussian_angle_zero_matches_unrotated(self):
         """An 'angle' column of 0 reproduces the axis-aligned render."""
+        # a 2000 x 2000 nm field of view; coordinates and precisions
+        # in nm (as in all the synthetic tests below)
         info = {"Pixelsize": 100.0, "Height": 20, "Width": 20}
         base = pd.DataFrame(
-            {"x": [10.0], "y": [10.0], "lpx": [0.6], "lpy": [0.2]}
+            {"x": [1000.0], "y": [1000.0], "lpx": [60.0], "lpy": [20.0]}
         )
         _, im_plain = render.render(
             base, info, disp_px_size=25.0, blur_method="gaussian"
@@ -275,15 +283,15 @@ class TestRender:
         info = {"Pixelsize": 100.0, "Height": 20, "Width": 20}
         rotated = pd.DataFrame(
             {
-                "x": [10.0],
-                "y": [10.0],
-                "lpx": [0.6],
-                "lpy": [0.2],
+                "x": [1000.0],
+                "y": [1000.0],
+                "lpx": [60.0],
+                "lpy": [20.0],
                 "angle": [90.0],
             }
         )
         swapped = pd.DataFrame(
-            {"x": [10.0], "y": [10.0], "lpx": [0.2], "lpy": [0.6]}
+            {"x": [1000.0], "y": [1000.0], "lpx": [20.0], "lpy": [60.0]}
         )
         _, im_rot = render.render(
             rotated, info, disp_px_size=25.0, blur_method="gaussian"
@@ -297,7 +305,7 @@ class TestRender:
         """A non-zero rotation tilts the ellipse while conserving mass."""
         info = {"Pixelsize": 100.0, "Height": 20, "Width": 20}
         base = pd.DataFrame(
-            {"x": [10.0], "y": [10.0], "lpx": [0.6], "lpy": [0.2]}
+            {"x": [1000.0], "y": [1000.0], "lpx": [60.0], "lpy": [20.0]}
         )
         _, im0 = render.render(
             base.assign(angle=[0.0]),
@@ -319,7 +327,7 @@ class TestRender:
         info = {"Pixelsize": 100.0, "Height": 20, "Width": 20}
         empty = (
             pd.DataFrame(
-                {"x": [10.0], "y": [10.0], "lpx": [0.6], "lpy": [0.2]}
+                {"x": [1000.0], "y": [1000.0], "lpx": [60.0], "lpy": [20.0]}
             )
             .assign(angle=[0.0])
             .iloc[:0]
@@ -335,12 +343,12 @@ class TestRender:
         info = {"Pixelsize": 100.0, "Height": 20, "Width": 20}
         base = pd.DataFrame(
             {
-                "x": [10.0],
-                "y": [10.0],
+                "x": [1000.0],
+                "y": [1000.0],
                 "z": [0.0],
-                "lpx": [0.6],
-                "lpy": [0.2],
-                "lpz": [0.4],
+                "lpx": [60.0],
+                "lpy": [20.0],
+                "lpz": [40.0],
             }
         )
         ang = (0.3, 0.2, 0.1)
@@ -369,12 +377,12 @@ class TestRender:
         info = {"Pixelsize": 100.0, "Height": 20, "Width": 20}
         base = pd.DataFrame(
             {
-                "x": [10.0],
-                "y": [10.0],
+                "x": [1000.0],
+                "y": [1000.0],
                 "z": [0.0],
-                "lpx": [0.6],
-                "lpy": [0.2],
-                "lpz": [0.4],
+                "lpx": [60.0],
+                "lpy": [20.0],
+                "lpz": [40.0],
                 "angle": [40.0],
             }
         )
@@ -402,7 +410,7 @@ class TestRenderHistNumba:
         x = locs["x"].to_numpy().astype(np.float32)
         y = locs["y"].to_numpy().astype(np.float32)
         n, im = render.render_hist(
-            x, y, oversampling=4.0, t_min=0.0, t_max=32.0
+            x, y, oversampling=4.0 / PIXELSIZE, t_min=0.0, t_max=FOV_NM
         )
         assert im.shape == (128, 128)
         assert im.dtype == np.float32
@@ -463,14 +471,13 @@ class TestRenderHist3D:
             locs_3d["x"].to_numpy(),
             locs_3d["y"].to_numpy(),
             locs_3d["z"].to_numpy(),
-            oversampling=2,
+            oversampling=2 / PIXELSIZE,
             y_min=0,
             x_min=0,
-            y_max=32,
-            x_max=32,
+            y_max=FOV_NM,
+            x_max=FOV_NM,
             z_min=-100,
             z_max=100,
-            pixelsize=PIXELSIZE,
         )
         assert im.ndim == 3
         assert im.dtype == np.float32
@@ -484,47 +491,46 @@ class TestRenderHist3D:
         y = locs_3d["y"].to_numpy()
         in_view = (
             (x > 0)
-            & (x < 32)
+            & (x < FOV_NM)
             & (y > 0)
-            & (y < 32)
-            & (z / PIXELSIZE > z_min / PIXELSIZE)
-            & (z / PIXELSIZE < z_max / PIXELSIZE)
+            & (y < FOV_NM)
+            & (z > z_min)
+            & (z < z_max)
         )
         expected = int(in_view.sum())
         n, _ = render.render_hist3d(
             x,
             y,
             z,
-            oversampling=2,
+            oversampling=2 / PIXELSIZE,
             y_min=0,
             x_min=0,
-            y_max=32,
-            x_max=32,
+            y_max=FOV_NM,
+            x_max=FOV_NM,
             z_min=z_min,
             z_max=z_max,
-            pixelsize=PIXELSIZE,
         )
         assert n == expected
 
     def test_anisotropic_axes(self, locs_3d):
-        """Different oversampling per axis produces matching axis sizes."""
+        """Different pixel sizes per axis produce matching axis sizes."""
         n, im = render.render_hist3d_anisotropic(
             locs_3d["x"].to_numpy(),
             locs_3d["y"].to_numpy(),
             locs_3d["z"].to_numpy(),
-            oversampling_x=2.0,
-            oversampling_y=4.0,
-            oversampling_z=1.0,
+            oversampling_x=2.0 / PIXELSIZE,
+            oversampling_y=4.0 / PIXELSIZE,
+            oversampling_z=1.0 / PIXELSIZE,
             y_min=0,
             x_min=0,
-            y_max=32,
-            x_max=32,
+            y_max=FOV_NM,
+            x_max=FOV_NM,
             z_min=-100,
             z_max=100,
-            pixelsize=PIXELSIZE,
         )
+        # rendered pixels of 130 / 2, 130 / 4 and 130 nm:
         # n_pixel_y = ceil(4 * 32) = 128, n_pixel_x = ceil(2 * 32) = 64
-        # n_pixel_z = ceil(1 * (100/130 - (-100/130))) = ceil(1.539) = 2
+        # n_pixel_z = ceil(200 / 130) = ceil(1.539) = 2
         assert im.shape == (128, 64, 2)
         assert im.sum() == n
 
@@ -648,8 +654,8 @@ class TestRotation:
         assert np.allclose(out, [0.0, 1.0, 0.0], atol=1e-6)
 
     def test_locs_rotation_zero_angle_preserves_coords(self, locs_3d):
-        x_min, x_max, y_min, y_max = 0.0, 32.0, 0.0, 32.0
-        oversampling = 5.0
+        x_min, x_max, y_min, y_max = 0.0, FOV_NM, 0.0, FOV_NM
+        oversampling = 5.0 / PIXELSIZE  # rendered pixels per nm
         x_in = locs_3d["x"].to_numpy()
         y_in = locs_3d["y"].to_numpy()
         in_view_expected = (
@@ -666,7 +672,7 @@ class TestRotation:
 
     def test_locs_rotation_in_view_consistency(self, locs_3d):
         x_out, y_out, in_view, z_out = render.locs_rotation(
-            locs_3d, 5.0, 0.0, 32.0, 0.0, 32.0, (0.1, 0.2, 0.3)
+            locs_3d, 5.0 / PIXELSIZE, 0.0, FOV_NM, 0.0, FOV_NM, (0.1, 0.2, 0.3)
         )
         n_in_view = int(in_view.sum())
         assert len(x_out) == n_in_view
@@ -688,11 +694,10 @@ class TestRotation:
 
     def test_locs_rotation_accepts_rotation_object(self, locs_3d):
         ang = (0.1, 0.2, 0.3)
-        out_tuple = render.locs_rotation(
-            locs_3d, 5.0, 0.0, 32.0, 0.0, 32.0, ang
-        )
+        args = (locs_3d, 5.0 / PIXELSIZE, 0.0, FOV_NM, 0.0, FOV_NM)
+        out_tuple = render.locs_rotation(*args, ang)
         out_rotation = render.locs_rotation(
-            locs_3d, 5.0, 0.0, 32.0, 0.0, 32.0, render.rotation_matrix(*ang)
+            *args, render.rotation_matrix(*ang)
         )
         for a, b in zip(out_tuple, out_rotation):
             assert np.allclose(a, b)
@@ -1260,17 +1265,25 @@ class TestSplitLocs:
 
 class TestOptimalScalebar:
     @pytest.mark.parametrize(
-        "pixelsize, width, expected",
+        "width_nm, expected",
         [
-            (130, 32, 500),  # 130*32/8 = 520 → nearest 100 = 500
-            (130, 320, 5000),  # 130*320/8 = 5200 → nearest 1000 = 5000
-            (130, 8000, 10000),  # > 10_000
-            (1, 240, 30),  # 240/8 = 30 → nearest 10 = 30
-            (1, 50, 6),  # 50/8 = 6.25 → 6
+            (130 * 32, 500),  # 4160/8 = 520 → nearest 100 = 500
+            (130 * 320, 5000),  # 41600/8 = 5200 → nearest 1000 = 5000
+            (130 * 8000, 10000),  # > 10_000
+            (240, 30),  # 240/8 = 30 → nearest 10 = 30
+            (50, 6),  # 50/8 = 6.25 → 6
         ],
     )
-    def test_known_answers(self, pixelsize, width, expected):
-        assert render.optimal_scalebar_length(pixelsize, width) == expected
+    def test_known_answers(self, width_nm, expected):
+        assert render.optimal_scalebar_length(width_nm) == expected
+
+    def test_fraction(self):
+        # a tenth of the width, as the automatic grid spacing uses it
+        assert render.optimal_scalebar_length(4160, fraction=0.1) == 400
+        # the camera pixel size is gone: the old (pixelsize, width)
+        # call is rejected instead of being misread
+        with pytest.raises(TypeError):
+            render.optimal_scalebar_length(130, 32)
 
 
 # ---------------------------------------------------------------------------
@@ -1656,7 +1669,7 @@ class TestDrawing:
         canvas = _fresh_canvas()
         before = _qimage_to_array(canvas)
         out = render.draw_points(
-            canvas, ((0, 0), (32, 32)), [(8, 8), (24, 24)], pixelsize=PIXELSIZE
+            canvas, ((0, 0), (32, 32)), [(8, 8), (24, 24)]
         )
         assert isinstance(out, QtGui.QImage)
         assert not np.array_equal(before, _qimage_to_array(out))
@@ -1665,13 +1678,23 @@ class TestDrawing:
         canvas = _fresh_canvas()
         before = _qimage_to_array(canvas)
         out = render.draw_scalebar(
-            canvas,
-            ((0, 0), (32, 32)),
-            scalebar_length_nm=500,
-            pixelsize=PIXELSIZE,
+            canvas, FULL_VIEWPORT, scalebar_length_nm=500
         )
         assert isinstance(out, QtGui.QImage)
         assert not np.array_equal(before, _qimage_to_array(out))
+
+    def test_draw_scalebar_length_follows_the_viewport(self):
+        # 120 display pixels show FOV_NM = 4160 nm, so a bar of 1040 nm
+        # is 30 display pixels long, whatever the camera pixel size
+        out = render.draw_scalebar(
+            _fresh_canvas(),
+            FULL_VIEWPORT,
+            scalebar_length_nm=1040,
+            display_length=False,
+        )
+        lit = _qimage_to_array(out)[..., :3].any(axis=-1)
+        assert lit[95].sum() == 30  # a row through the bar
+        assert lit.any(axis=1).sum() == 10  # the bar's thickness
 
     def test_draw_legend(self):
         canvas = _fresh_canvas()
@@ -1687,8 +1710,12 @@ class TestDrawing:
     def test_draw_minimap(self):
         canvas = _fresh_canvas()
         before = _qimage_to_array(canvas)
+        zoomed = (
+            (10 * PIXELSIZE, 10 * PIXELSIZE),
+            (20 * PIXELSIZE, 20 * PIXELSIZE),
+        )
         out = render.draw_minimap(
-            canvas, ((10, 10), (20, 20)), max_viewport_size=(32, 32)
+            canvas, zoomed, max_viewport_size=(FOV_NM, FOV_NM)
         )
         assert isinstance(out, QtGui.QImage)
         assert not np.array_equal(before, _qimage_to_array(out))
@@ -1712,7 +1739,9 @@ class TestDrawing:
 # Appearance of the tool overlays (OverlayStyle)
 # ---------------------------------------------------------------------------
 
-# 32 camera pixels drawn onto the 120 display pixels of ``_fresh_canvas``
+# a field of view of 32 nm drawn onto the 120 display pixels of
+# ``_fresh_canvas``, 3.75 display pixels per nm (the overlays depend on
+# the ratio only)
 FOV_32 = ((0, 0), (32, 32))
 
 
@@ -1854,7 +1883,6 @@ class TestOverlayStyle:
                 _fresh_canvas(),
                 FOV_32,
                 points,
-                pixelsize=PIXELSIZE,
                 style=style,
             )
             return _lit(out)
@@ -1872,15 +1900,12 @@ class TestOverlayStyle:
                 _fresh_canvas(),
                 FOV_32,
                 [(4, 4), (8, 4)],
-                pixelsize=PIXELSIZE,
                 style=render.OverlayStyle(font_size=font_size),
             )
             return _lit(out).sum()
 
         assert lit(30) > lit(10)
-        default = render.draw_points(
-            _fresh_canvas(), FOV_32, [(4, 4), (8, 4)], pixelsize=PIXELSIZE
-        )
+        default = render.draw_points(_fresh_canvas(), FOV_32, [(4, 4), (8, 4)])
         assert _lit(default).sum() == lit(20)
 
     @pytest.mark.parametrize(
@@ -2516,8 +2541,8 @@ class TestRenderPurity:
     """Rendering must never mutate its inputs, so calling it twice with
     the same data gives bit-identical images.
 
-    Before the in-place ``z /= pixelsize`` was removed from
-    ``_render_setup3d(_anisotropic)``, this held for the 3D histogram
+    Before Picasso 1.0, ``_render_setup3d(_anisotropic)`` divided z by
+    the camera pixel size in place, so this held for the 3D histogram
     renderers only if every caller defensively copied its z array.
     """
 
@@ -2555,7 +2580,7 @@ class TestRenderPurity:
         y = locs_3d["y"].to_numpy()
         z = locs_3d["z"].to_numpy()
         before = (x.copy(), y.copy(), z.copy())
-        args = (10, 0, 0, 32, 32, -100.0, 100.0, PIXELSIZE)
+        args = (10 / PIXELSIZE, 0, 0, FOV_NM, FOV_NM, -100.0, 100.0)
         n1, image1 = render.render_hist3d(x, y, z, *args)
         n2, image2 = render.render_hist3d(x, y, z, *args)
         for arr, orig in zip((x, y, z), before):
@@ -2568,7 +2593,8 @@ class TestRenderPurity:
         y = locs_3d["y"].to_numpy()
         z = locs_3d["z"].to_numpy()
         before = (x.copy(), y.copy(), z.copy())
-        args = (10, 10, 5, 0, 0, 32, 32, -100.0, 100.0, PIXELSIZE)
+        oversampling = (10 / PIXELSIZE, 10 / PIXELSIZE, 5 / PIXELSIZE)
+        args = (*oversampling, 0, 0, FOV_NM, FOV_NM, -100.0, 100.0)
         n1, image1 = render.render_hist3d_anisotropic(x, y, z, *args)
         n2, image2 = render.render_hist3d_anisotropic(x, y, z, *args)
         for arr, orig in zip((x, y, z), before):
@@ -2898,7 +2924,10 @@ class TestSplatBackend:
         """'convolve' blurs with the caller's global precision, else with
         the median precision of the rows rendered (not of those in
         view), so the blur is the same at every zoom and rotation."""
-        zoomed = ((8.0, 8.0), (20.0, 20.0))
+        zoomed = (
+            (8.0 * PIXELSIZE, 8.0 * PIXELSIZE),
+            (20.0 * PIXELSIZE, 20.0 * PIXELSIZE),
+        )
         kwargs = dict(disp_px_size=PIXELSIZE / 4, blur_method="convolve")
         n, default = render.render(locs, info, viewport=zoomed, **kwargs)
         medians = (
@@ -2909,13 +2938,16 @@ class TestSplatBackend:
             locs, info, viewport=zoomed, global_precision=medians, **kwargs
         )
         np.testing.assert_array_equal(default, explicit)
-        # an explicit blur is honored: wider blurs are flatter, and the
-        # intensity is conserved
+        # an explicit blur (nm, far wider than the data's precision) is
+        # honored: wider blurs are flatter, and the intensity is
+        # conserved
+        half_px = (0.5 * PIXELSIZE, 0.5 * PIXELSIZE)
+        two_px = (2.0 * PIXELSIZE, 2.0 * PIXELSIZE)
         _, narrow = render.render(
-            locs, info, viewport=zoomed, global_precision=(0.5, 0.5), **kwargs
+            locs, info, viewport=zoomed, global_precision=half_px, **kwargs
         )
         _, wide = render.render(
-            locs, info, viewport=zoomed, global_precision=(2.0, 2.0), **kwargs
+            locs, info, viewport=zoomed, global_precision=two_px, **kwargs
         )
         assert wide.max() < narrow.max() < default.max()
         # a wider blur spills a little more intensity over the border
@@ -2925,7 +2957,7 @@ class TestSplatBackend:
             [locs, locs],
             [info, info],
             viewport=zoomed,
-            global_precision=[(0.5, 0.5), (2.0, 2.0)],
+            global_precision=[half_px, two_px],
             return_raw_image=True,
             **kwargs,
         )
@@ -2959,7 +2991,7 @@ class TestSplatBackend:
         assert n * lib.RENDER_ROTATED_COST_FACTOR >= lib.RENDER_GPU_MIN_LOCS
         kwargs = dict(
             disp_px_size=PIXELSIZE / 4,
-            viewport=((0.0, 0.0), (32.0, 32.0)),
+            viewport=FULL_VIEWPORT,
             blur_method="gaussian",
             min_blur_width=0.0,
         )
@@ -3076,13 +3108,13 @@ class TestIndexedRender:
 
     def test_max_blur_width_applies_to_the_selection(self, locs, selection):
         whaled = locs.copy()
-        whaled.loc[whaled.index[selection[:10]], "lpx"] = 50.0
+        whaled.loc[whaled.index[selection[:10]], "lpx"] = 500.0  # nm
         columns = render._extract_render_columns(
-            whaled, "gaussian", None, max_blur_width=5.0, indices=selection
+            whaled, "gaussian", None, max_blur_width=50.0, indices=selection
         )
         assert len(columns) == len(selection) - 10
-        assert columns.lpx.max() > 5.0  # the columns stay whole...
-        assert columns.materialize().lpx.max() <= 5.0  # ...the rows do not
+        assert columns.lpx.max() > 50.0  # the columns stay whole...
+        assert columns.materialize().lpx.max() <= 50.0  # ...the rows do not
 
     def test_render_scene_takes_per_channel_indices(
         self, locs, info, selection
@@ -3136,14 +3168,14 @@ class TestMaxBlurWidth:
         min_blur_width=0.0,
         ang=None,
     )
-    LIMIT = 5.0  # camera pixels
+    LIMIT = 50.0  # nm, far above the data's precision
     N_WHALES = 8
 
     @pytest.fixture
     def whaled(self, locs):
         whaled = locs.copy()
-        whaled.loc[whaled.index[:5], "lpx"] = 50.0
-        whaled.loc[whaled.index[5:8], "lpy"] = 50.0
+        whaled.loc[whaled.index[:5], "lpx"] = 500.0
+        whaled.loc[whaled.index[5:8], "lpy"] = 500.0
         return whaled
 
     @pytest.mark.parametrize("blur", ["gaussian", "gaussian_iso"])
@@ -3552,17 +3584,22 @@ class TestChunkMemory:
 
     def _locs(self, n=400_000, seed=0):
         rng = np.random.default_rng(seed)
+        # 64 x 64 camera pixels, coordinates and precisions in nm
         return pd.DataFrame(
             {
-                "x": rng.uniform(0, 64, n),
-                "y": rng.uniform(0, 64, n),
-                "lpx": rng.uniform(0.05, 0.2, n),
-                "lpy": rng.uniform(0.05, 0.2, n),
+                "x": rng.uniform(0, 64 * PIXELSIZE, n),
+                "y": rng.uniform(0, 64 * PIXELSIZE, n),
+                "lpx": rng.uniform(0.05 * PIXELSIZE, 0.2 * PIXELSIZE, n),
+                "lpy": rng.uniform(0.05 * PIXELSIZE, 0.2 * PIXELSIZE, n),
             }
         )
 
+    FOV = ((0, 0), (64 * PIXELSIZE, 64 * PIXELSIZE))
+
     def _info(self):
-        return [{"Width": 64, "Height": 64, "Frames": 1, "Pixelsize": 130.0}]
+        return [
+            {"Width": 64, "Height": 64, "Frames": 1, "Pixelsize": PIXELSIZE}
+        ]
 
     def test_streamed_sum_equals_the_sequential_render(self, monkeypatch):
         from picasso.render import splat
@@ -3570,8 +3607,8 @@ class TestChunkMemory:
         locs = self._locs()
         info = self._info()
         kwargs = dict(
-            disp_px_size=130 / 4,
-            viewport=((0, 0), (64, 64)),
+            disp_px_size=PIXELSIZE / 4,
+            viewport=self.FOV,
             blur_method="gaussian",
         )
         monkeypatch.setattr(splat, "_render_worker_budget", lambda: 1)
@@ -3621,8 +3658,8 @@ class TestChunkMemory:
         render.render_scene(
             self._locs(300_000),  # 6 chunks for 3 workers
             self._info(),
-            disp_px_size=130 / 4,
-            viewport=((0, 0), (64, 64)),
+            disp_px_size=PIXELSIZE / 4,
+            viewport=self.FOV,
             blur_method="gaussian",
         )
         # never all kept: two in flight per worker, one being summed,
@@ -3660,8 +3697,8 @@ class TestChunkMemory:
         n, raw = render.render_scene(
             self._locs(),
             self._info(),
-            disp_px_size=130 / 4,
-            viewport=((0, 0), (64, 64)),
+            disp_px_size=PIXELSIZE / 4,
+            viewport=self.FOV,
             blur_method="gaussian",
             return_raw_image=True,
         )[1:]
@@ -3697,12 +3734,13 @@ class TestFallbackNote:
         monkeypatch.setattr(backend, "_get_backend", lambda *a, **k: fake)
         backend.note_fallback(None)
         rng = np.random.default_rng(0)
+        fov = 8 * PIXELSIZE  # 8 x 8 camera pixels, in nm
         locs = pd.DataFrame(
-            {"x": rng.uniform(0, 8, 500), "y": rng.uniform(0, 8, 500)}
+            {"x": rng.uniform(0, fov, 500), "y": rng.uniform(0, fov, 500)}
         )
-        info = [{"Width": 8, "Height": 8, "Frames": 1, "Pixelsize": 130.0}]
+        info = [{"Width": 8, "Height": 8, "Frames": 1, "Pixelsize": PIXELSIZE}]
         render.render_scene(
-            locs, info, disp_px_size=65, viewport=((0, 0), (8, 8))
+            locs, info, disp_px_size=65, viewport=((0, 0), (fov, fov))
         )
         assert backend.last_fallback() == "channel exceeds the limit"
         assert backend.describe_active() == (
@@ -3710,7 +3748,7 @@ class TestFallbackNote:
         )
         fake.fail = False
         render.render_scene(
-            locs, info, disp_px_size=65, viewport=((0, 0), (8, 8))
+            locs, info, disp_px_size=65, viewport=((0, 0), (fov, fov))
         )
         assert backend.last_fallback() is None
         assert backend.describe_active() == "GPU (Fake GPU)"

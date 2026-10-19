@@ -15,7 +15,6 @@ import sys
 import datetime
 import threading
 import joblib
-import yaml
 import concurrent.futures
 from time import sleep
 
@@ -28,7 +27,7 @@ from sklearn.metrics import confusion_matrix
 
 from PyQt6 import QtCore, QtGui, QtWidgets
 
-from .. import io, lib, render, nanotron, __version__
+from .. import io, lib, render, nanotron, legacy, __version__
 from .app import run_gui
 from . import theme
 
@@ -704,6 +703,7 @@ class train_dialog(lib.Dialog):
             fname = base + ".sav"
 
             self.train_log["Model"] = fname
+            self.train_log[io.FORMAT_VERSION_ATTR] = io.FORMAT_VERSION
             self.train_log.update(lib.step_info("nanoTRON : Train"))
             import sklearn
 
@@ -863,18 +863,18 @@ class train_dialog(lib.Dialog):
             self.f_btns[file].setEnabled(False)
 
     def parse_pick_radius(self, info):
-
-        for num, file in enumerate(info):
-            if "Pick Diameter" in file:
-                diameter = info[num]["Pick Diameter"]
-                radius = diameter / 2
-            if "Pick Diameter (nm)" in file:
-                diameter = info[num]["Pick Diameter (nm)"]
-                if "Pixel Size (nm)" in file:
-                    px_size = info[num]["Pixel Size (nm)"]
-                    radius = (diameter / px_size) / 2
-                else:
-                    radius = diameter / 2
+        """The pick radius (nm) recorded in the metadata of picked
+        localizations. Files picked before Picasso 1.0 record the
+        diameter in camera pixels ("Pick Diameter")."""
+        radius = None
+        for entry in info:
+            if "Pick Diameter (nm)" in entry:
+                radius = entry["Pick Diameter (nm)"] / 2
+            elif "Pick Diameter" in entry:
+                pixelsize = lib.get_from_metadata(
+                    info, "Pixelsize", raise_error=True
+                )
+                radius = entry["Pick Diameter"] * pixelsize / 2
         return radius
 
     def check_set(self):
@@ -958,7 +958,7 @@ class train_dialog(lib.Dialog):
             self.pick_radius = self.pick_radii[max_key]
             self.disp_px_size = self.disp_px_size_box.value()
 
-            self.train_log["Pick Diameter"] = 2 * self.pick_radius
+            self.train_log["Pick Diameter (nm)"] = 2 * self.pick_radius
             self.train_log["Display pixel size (nm)"] = self.disp_px_size
             self.train_log["Expand Training Set"] = (
                 self.expand_training.isChecked()
@@ -1041,6 +1041,7 @@ class View(QtWidgets.QLabel):
         self.setAcceptDrops(True)
         self._pixmap = None
         self.locs = None
+        self.disp_px_size = None  # set with the localizations
         self.rubberband = QtWidgets.QRubberBand(
             QtWidgets.QRubberBand.Shape.Rectangle, self
         )
@@ -1091,7 +1092,7 @@ class View(QtWidgets.QLabel):
         )
 
     def update_image(self, *args):
-        oversampling = 1
+        oversampling = 1 / self.disp_px_size  # rendered pixels per nm
         t_min = np.min([np.min(self.locs.x), np.min(self.locs.y)])
         t_max = np.max([np.max(self.locs.x), np.max(self.locs.y)])
         N, image = render._render_hist(
@@ -1224,16 +1225,18 @@ class Window(QtWidgets.QMainWindow):
             self.dist_btn.setDisabled(True)
             self.export_btn.setDisabled(True)
 
-            if "Display pixel size (nm)" in self.model_info:
-                self.disp_px_size = self.model_info["Display pixel size (nm)"]
-            else:
-                # backward compatibility with models trained with an
-                # oversampling factor instead of a display pixel size
+            if io.FORMAT_VERSION_ATTR not in self.model_info:
+                # a model trained before Picasso 1.0: pick diameter in
+                # camera pixels and an oversampling factor in place of
+                # the display pixel size
                 pixelsize = lib.get_from_metadata(
                     self.info, "Pixelsize", raise_error=True
                 )
-                self.disp_px_size = pixelsize / self.model_info["Oversampling"]
-            self.pick_diameter = self.model_info["Pick Diameter"]
+                self.model_info = legacy.nanotron_model_to_nm(
+                    self.model_info, pixelsize
+                )
+            self.disp_px_size = self.model_info["Display pixel size (nm)"]
+            self.pick_diameter = self.model_info["Pick Diameter (nm)"]
             self.pick_radius = self.pick_diameter / 2
 
             self.thread = Predictor(
@@ -1331,6 +1334,10 @@ class Window(QtWidgets.QMainWindow):
             lib.show_load_error(self, path, error)
             return
         self.view.locs = self.locs
+        # one rendered pixel per camera pixel of the data
+        self.view.disp_px_size = lib.get_from_metadata(
+            self.info, "Pixelsize", raise_error=True
+        )
 
         if "group" not in self.locs.columns:
             msgBox = QtWidgets.QMessageBox(self)
@@ -1554,15 +1561,13 @@ class Window(QtWidgets.QMainWindow):
                     ]
                 )
 
-            pick_regions["Centers"] = pick_centers
-            pick_regions["Diameter"] = self.model_info["Pick Diameter"]
-            pick_regions["Shape"] = "Circle"
             pick_out_path = (
                 f"{os.path.splitext(self.path)[0]}_{out_filename}_picks"
                 + ".yaml"
             )
-            with open(pick_out_path, "w") as f:
-                yaml.dump(pick_regions, f)
+            io.save_picks(
+                pick_out_path, pick_centers, "Circle", size=self.pick_diameter
+            )
 
 
 def main() -> None:

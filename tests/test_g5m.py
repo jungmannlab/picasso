@@ -15,13 +15,18 @@ import numpy as np
 import pytest
 
 from picasso import clusterer, g5m, zfit
-from tests.conftest import CALIB_3D
+from tests.conftest import CALIB_3D, PIXELSIZE
 
 # ---------------------------------------------------------------------------
 # Golden values, captured from the published models before the rotated
-# covariance type was added. These pin the exact float32 output of
-# ``g5m.g5m`` at its defaults; any deviation means a supposedly additive
-# change perturbed the published code path.
+# covariance type was added, with the localizations in camera pixels. They
+# pin the output of ``g5m.g5m`` at its defaults: since Picasso 1.0 the
+# localizations are in nm, so x and y are compared scaled by the pixel
+# size; the fitted widths were in nm already, z and the p-values do not
+# depend on the unit (the widths and p-values up to the numerics of the
+# EM iterations, which rescaling shifts by a few percent). Any larger
+# deviation means a supposedly additive change perturbed the published
+# code path.
 # ---------------------------------------------------------------------------
 
 GOLDEN_2D = {
@@ -173,7 +178,7 @@ GOLDEN_3D = {
 @pytest.fixture
 def dbscan_locs(locs):
     """2D clustered localizations, no ``angle`` column."""
-    out = clusterer.dbscan(locs, radius=2 / 130, min_samples=2)[0]
+    out = clusterer.dbscan(locs, radius=2.0, min_samples=2)[0]
     assert len(out) > 0
     assert "angle" not in out.columns
     return out
@@ -374,9 +379,9 @@ CALIB_ASTIG_RATIO = 2.0
 
 
 def _rotated_cluster(
-    angle_deg, sigma_u_nm=14.0, sigma_v_nm=7.0, n=400, pixelsize=130.0, seed=0
+    angle_deg, sigma_u_nm=14.0, sigma_v_nm=7.0, n=400, seed=0
 ):
-    """One simulated molecule whose xy cloud is elongated at
+    """One simulated molecule (nm) whose xy cloud is elongated at
     ``angle_deg``, in the convention of the ``angle`` column written by
     ``picasso.localize`` (degrees, wrapped to [-90, 90)).
 
@@ -386,8 +391,8 @@ def _rotated_cluster(
 
     rng = np.random.default_rng(seed)
     theta = np.deg2rad(angle_deg)
-    su = sigma_u_nm / pixelsize
-    sv = sigma_v_nm / pixelsize
+    su = sigma_u_nm
+    sv = sigma_v_nm
 
     du = rng.normal(0.0, su, size=n)
     dv = rng.normal(0.0, sv, size=n)
@@ -395,7 +400,7 @@ def _rotated_cluster(
     dx = du * np.cos(theta) - dv * np.sin(theta)
     dy = du * np.sin(theta) + dv * np.cos(theta)
 
-    lp = 8.0 / pixelsize
+    lp = 8.0  # nm
     return pd.DataFrame(
         {
             # frames spread across the movie and split into many binding
@@ -403,12 +408,12 @@ def _rotated_cluster(
             "frame": np.sort(
                 rng.choice(np.arange(2000), size=n, replace=False)
             ).astype(np.float32),
-            "x": 25.0 + dx,
-            "y": 15.0 + dy,
+            "x": 25.0 * PIXELSIZE + dx,
+            "y": 15.0 * PIXELSIZE + dy,
             "z": rng.normal(0.0, 20.0, size=n),
             "lpx": np.full(n, lp),
             "lpy": np.full(n, lp),
-            "lpz": np.full(n, 3.0 * lp * pixelsize),
+            "lpz": np.full(n, 3.0 * lp),
             "angle": np.full(n, float(angle_deg)),
             "photons": np.full(n, 1000.0),
             "group": np.zeros(n, dtype=np.int32),
@@ -944,11 +949,9 @@ class TestBootstrap:
             assert (mols[col] > 0).all()
 
     @staticmethod
-    def _fit_rotated(locs, pixelsize=130.0):
+    def _fit_rotated(locs):
         X = locs[["x", "y", "z"]].to_numpy().astype(float)
-        X[:, 2] /= pixelsize
         lp = locs[["lpx", "lpy", "lpz"]].to_numpy().astype(float)
-        lp[:, 2] /= pixelsize
         angles = np.deg2rad(locs["angle"].to_numpy())
         fit = g5m.G5M_3D(
             n_components=1,
@@ -1022,10 +1025,16 @@ class TestPublishedModelsUnchanged:
             dbscan_locs, info, min_locs=5, asynch=False, postprocess=False
         )
         assert len(mols) == GOLDEN_2D["n"]
-        for col in ["x", "y", "fitted_sigma", "p_val"]:
-            np.testing.assert_array_equal(
+        for col, scale, rtol in [
+            ("x", PIXELSIZE, 1e-6),
+            ("y", PIXELSIZE, 1e-6),
+            ("fitted_sigma", 1.0, 2e-2),
+            ("p_val", 1.0, 0.1),
+        ]:
+            np.testing.assert_allclose(
                 mols[col].to_numpy(),
-                np.array(GOLDEN_2D[col], dtype=np.float32),
+                np.array(GOLDEN_2D[col], dtype=np.float32) * scale,
+                rtol=rtol,
                 err_msg=f"published 2D spherical model moved in '{col}'",
             )
 
@@ -1039,18 +1048,19 @@ class TestPublishedModelsUnchanged:
             postprocess=False,
         )
         assert len(mols) == GOLDEN_3D["n"]
-        for col in [
-            "x",
-            "y",
-            "z",
-            "fitted_sigma_x",
-            "fitted_sigma_y",
-            "fitted_sigma_z",
-            "p_val",
+        for col, scale, rtol in [
+            ("x", PIXELSIZE, 1e-6),
+            ("y", PIXELSIZE, 1e-6),
+            ("z", 1.0, 1e-6),
+            ("fitted_sigma_x", 1.0, 2e-2),
+            ("fitted_sigma_y", 1.0, 2e-2),
+            ("fitted_sigma_z", 1.0, 2e-2),
+            ("p_val", 1.0, 0.1),
         ]:
-            np.testing.assert_array_equal(
+            np.testing.assert_allclose(
                 mols[col].to_numpy(),
-                np.array(GOLDEN_3D[col], dtype=np.float32),
+                np.array(GOLDEN_3D[col], dtype=np.float32) * scale,
+                rtol=rtol,
                 err_msg=f"published 3D diagonal model moved in '{col}'",
             )
 
@@ -1070,16 +1080,18 @@ class TestG5M:
         assert (mols["p_val"] >= 0).all() and (mols["p_val"] <= 1).all()
 
     def test_g5m_2d_global_loc_prec(self, dbscan_locs, info):
-        mols, _, _ = g5m.g5m(
+        mols, _, out_info = g5m.g5m(
             dbscan_locs,
             info,
             min_locs=5,
             bootstrap_check=False,
             loc_prec_handle="abs",
-            sigma_bounds=(1 / 130, 3 / 130),
+            sigma_bounds=(1.0, 3.0),  # nm
         )
         assert "p_val" in mols.columns
         assert len(mols) > 0
+        assert out_info[-1]["Sigma bounds (nm)"] == [1.0, 3.0]
+        assert out_info[-1]["Sigma bounds method"] == "Abs"
 
 
 class TestG5M3D:
@@ -1104,7 +1116,7 @@ class TestG5M3D:
             bootstrap_check=False,
             calibration=CALIB_3D,
             loc_prec_handle="abs",
-            sigma_bounds=(1 / 130, 3 / 130),
+            sigma_bounds=(1.0, 3.0),  # nm
         )
         assert len(mols) > 0
         assert "p_val" in mols.columns

@@ -119,12 +119,12 @@ distance between them (250 nm by default).
    :icon: code
    :class-container: api-example
 
-   ``spacing`` is in camera pixels.
+   ``spacing`` is in nm (250 nm by default).
 
    .. code-block:: python
 
       locs, info = lib.unfold_localizations_square(
-          locs, info, n_square=10, spacing=250 / pixelsize
+          locs, info, n_square=10, spacing=250.0
       )
 
 
@@ -155,17 +155,16 @@ channel with the same parameters. Channels that are already linked are skipped.
    :icon: code
    :class-container: api-example
 
-   ``r_max`` is in camera pixels. ``compute_dark_times`` adds the ``dark``
-   column to linked localizations.
+   ``r_max`` is in nm (10 nm by default). ``compute_dark_times`` adds the
+   ``dark`` column to linked localizations.
 
    .. code-block:: python
 
-      from picasso import io, lib, postprocess
+      from picasso import io, postprocess
 
       locs, info = io.load_locs("movie_locs.hdf5")
-      pixelsize = lib.get_from_metadata(info, "Pixelsize")
 
-      linked = postprocess.link(locs, info, r_max=10 / pixelsize, max_dark_time=3)
+      linked = postprocess.link(locs, info, r_max=10.0, max_dark_time=3)
       linked = postprocess.compute_dark_times(linked)
       print(linked["len"].mean(), linked["dark"].mean())   # frames
 
@@ -197,7 +196,7 @@ always end up in separate events.
    .. code-block:: python
 
       cores = postprocess.select_binding_event_cores(
-          locs, r_max=10 / pixelsize, max_dark_time=3, min_n_locs=3
+          locs, r_max=10.0, max_dark_time=3, min_n_locs=3
       )
 
 
@@ -243,7 +242,7 @@ overlap at all, all localizations are kept and a warning is shown.
           method="picked", picks=picks, pick_shape="Circle", pick_size=2 * radius,
       )
       # remove the localizations outside the overlap of the channels and
-      # get the shift of each channel (camera pixels)
+      # get the shift of each channel (nm)
       aligned, (shift_x, shift_y) = postprocess.align(
           [locs_ch1, locs_ch2], [info_ch1, info_ch2],
           keep_non_overlapping=False, return_shifts=True,
@@ -297,7 +296,7 @@ The tiles are replaced by one stitched channel per target, named
 ``<first tile>_stitched.hdf5``; save them with ``File`` > ``Save
 localizations``. A summary lists the stage orientation found and, for each
 pair of overlapping tiles, whether it was used and how well it agrees with
-the final positions (residual, camera pixels).
+the final positions (residual, nm).
 
 .. _render-stitch-without-stage-positions:
 
@@ -450,8 +449,8 @@ Shortcut: :kbd:`Ctrl+A`
 
 This tool allows you to apply expressions to localizations, for example:
 
-- ``x +=1`` will shift all localization by one camera pixel to the right
-- ``x +=1; y+=1`` will shift all localization by one camera pixel to the right and one up.
+- ``x += 100`` will shift all localizations by 100 nm to the right
+- ``x += 100; y += 100`` will shift all localizations by 100 nm to the right and 100 nm up.
 - ``flip x z`` will exchange the x-axis with y-axis if z localizations are
   present (side projection), similar for ``flip y z``.
 - ``spiral r n`` will plot each localization over the time of the movie in a
@@ -472,14 +471,14 @@ removed.
    :icon: code
    :class-container: api-example
 
-   Expressions are plain column arithmetic on the DataFrame. ``z`` is in nm
-   while ``x`` and ``y`` are in camera pixels, so a flip converts.
+   Expressions are plain column arithmetic on the DataFrame; ``x``, ``y``
+   and ``z`` are all in nm, so a flip is a plain swap.
 
    .. code-block:: python
 
-      locs["x"] += 1
-      locs["y"] += 1
-      locs["x"], locs["z"] = locs["z"] / pixelsize, locs["x"] * pixelsize   # flip x z
+      locs["x"] += 100                                     # nm
+      locs["y"] += 100
+      locs["x"], locs["z"] = locs["z"].copy(), locs["x"].copy()   # flip x z
 
 
 .. _render-menu-clustering:

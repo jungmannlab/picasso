@@ -32,6 +32,7 @@ from .. import (
     io,
     localize,
     lib,
+    lib_qt,
     notifications,
     postprocess,
     registration,
@@ -1469,6 +1470,17 @@ class EmissionComboBoxDict(UserDict):
                 break
 
 
+def _default_pixelsize(window: QtWidgets.QWidget | None) -> float:
+    """The camera pixel size (nm) set in the Parameters dialog of
+    ``window``, or 130 when there is none (e.g., a dialog opened without
+    the main window)."""
+    dialog = getattr(window, "parameters_dialog", None)
+    try:
+        return float(dialog.pixelsize.value())
+    except AttributeError:
+        return 130.0
+
+
 class PromptInfoDialog(lib.Dialog):
     """Enter movie metadata.
 
@@ -1486,6 +1498,8 @@ class PromptInfoDialog(lib.Dialog):
         Spin box for selecting the number of frames.
     movie_height, movie_width : QtWidgets.QSpinBox
         Spin boxes for selecting the height and width of the movie.
+    pixelsize : QtWidgets.QDoubleSpinBox
+        Spin box for the effective camera pixel size in nm.
     save : QtWidgets.QCheckBox
         Check box for selecting whether to save the info to a YAML file.
     window : QtWidgets.QWidget
@@ -1528,13 +1542,19 @@ class PromptInfoDialog(lib.Dialog):
         self.movie_height = QtWidgets.QSpinBox()
         self.movie_height.setRange(1, int(1e9))
         grid.addWidget(self.movie_height, 3, 1)
-        grid.addWidget(QtWidgets.QLabel("Width"), 4, 0)
+        grid.addWidget(QtWidgets.QLabel("Width:"), 4, 0)
         self.movie_width = QtWidgets.QSpinBox()
         self.movie_width.setRange(1, int(1e9))
         grid.addWidget(self.movie_width, 4, 1)
+        grid.addWidget(QtWidgets.QLabel("Pixel size (nm):"), 5, 0)
+        self.pixelsize = QtWidgets.QDoubleSpinBox()
+        self.pixelsize.setRange(0.01, 10000)
+        self.pixelsize.setDecimals(2)
+        self.pixelsize.setValue(_default_pixelsize(window))
+        grid.addWidget(self.pixelsize, 5, 1)
         self.save = QtWidgets.QCheckBox("Save info to yaml file")
         self.save.setChecked(True)
-        grid.addWidget(self.save, 5, 0, 1, 2)
+        grid.addWidget(self.save, 6, 0, 1, 2)
         vbox.addLayout(grid)
         hbox = QtWidgets.QHBoxLayout()
         vbox.addLayout(hbox)
@@ -1564,6 +1584,7 @@ class PromptInfoDialog(lib.Dialog):
         info["Frames"] = dialog.frames.value()
         info["Height"] = dialog.movie_height.value()
         info["Width"] = dialog.movie_width.value()
+        info["Pixelsize"] = dialog.pixelsize.value()
         save = dialog.save.isChecked()
         return info, save, result == QtWidgets.QDialog.DialogCode.Accepted
 
@@ -1585,7 +1606,7 @@ class PromptMovieInfoDialog(lib.Dialog):
         Spin box for the number of frames.
     movie_height, movie_width : QtWidgets.QSpinBox
         Spin boxes for the height and width of the movie.
-    pixelsize : QtWidgets.QSpinBox
+    pixelsize : QtWidgets.QDoubleSpinBox
         Spin box for the effective camera pixel size in nm.
     save : QtWidgets.QCheckBox
         Whether to save the entered metadata to a YAML file next to the
@@ -1625,9 +1646,12 @@ class PromptMovieInfoDialog(lib.Dialog):
         self.movie_width.setValue(int(partial_info.get("Width", 1)))
         grid.addWidget(self.movie_width, 2, 1)
         grid.addWidget(QtWidgets.QLabel("Pixel size (nm):"), 3, 0)
-        self.pixelsize = QtWidgets.QSpinBox()
-        self.pixelsize.setRange(1, 10000)
-        self.pixelsize.setValue(int(partial_info.get("Pixelsize", 130)))
+        self.pixelsize = QtWidgets.QDoubleSpinBox()
+        self.pixelsize.setRange(0.01, 10000)
+        self.pixelsize.setDecimals(2)
+        self.pixelsize.setValue(
+            float(partial_info.get("Pixelsize", _default_pixelsize(window)))
+        )
         grid.addWidget(self.pixelsize, 3, 1)
         self.save = QtWidgets.QCheckBox("Save info to yaml file")
         self.save.setChecked(True)
@@ -4199,8 +4223,9 @@ class ParametersDialog(lib.Dialog):
             "Effective camera pixel size in nm (after magnification)."
         )
         photon_grid.addWidget(px_label, 3, 0)
-        self.pixelsize = QtWidgets.QSpinBox()
-        self.pixelsize.setRange(0, 10000)
+        self.pixelsize = QtWidgets.QDoubleSpinBox()
+        self.pixelsize.setRange(0.01, 10000)
+        self.pixelsize.setDecimals(2)
         self.pixelsize.setValue(130)
         self.pixelsize.setSingleStep(1)
         self.pixelsize.valueChanged.connect(self.on_pixelsize_changed)
@@ -5140,7 +5165,11 @@ class ParametersDialog(lib.Dialog):
         transforms, loaded, empty, already, repeated = [], [], [], [], []
         for path in paths:
             try:
-                calibration = io.load_any_calibration(path)
+                # a calibration from before Picasso 1.0 (camera pixels) is
+                # converted to nm with the camera pixel size of this dialog
+                calibration = io.load_any_calibration(
+                    path, pixelsize=self.pixelsize.value()
+                )
             except Exception as e:
                 QtWidgets.QMessageBox.warning(
                     self,
@@ -5426,7 +5455,9 @@ class ParametersDialog(lib.Dialog):
                 )
                 return
             try:
-                calibration = io.load_any_calibration(path)
+                calibration = io.load_any_calibration(
+                    path, pixelsize=self.pixelsize.value()
+                )
             except Exception as e:
                 self.update_channel_registration(None)
                 self.channel_registration_label.setText(
@@ -5549,7 +5580,11 @@ class ParametersDialog(lib.Dialog):
         file."""
         if path:
             if os.path.exists(path):
-                self.z_calibration = io.load_calibration(path)
+                # a calibration from before Picasso 1.0 (spot widths in
+                # camera pixels) is converted to nm with this pixel size
+                self.z_calibration = io.load_calibration(
+                    path, pixelsize=self.pixelsize.value()
+                )
                 self.z_calibration_path = path
             else:
                 self.update_z_calib(None)
@@ -7199,12 +7234,14 @@ class Window(QtWidgets.QMainWindow):
         def _pixelsize_prompt() -> float | None:
             """Ask for the camera pixel size (GUI thread). ``None`` on
             cancel, which aborts the calibration."""
-            pixelsize, ok = QtWidgets.QInputDialog.getInt(
+            pixelsize, ok = QtWidgets.QInputDialog.getDouble(
                 self,
                 "Camera pixel size (nm)",
                 "Enter camera pixel size in nm:",
-                130,
-                min=0,
+                _default_pixelsize(self),
+                0.01,
+                1e6,
+                2,
             )
             return float(pixelsize) if ok else None
 
@@ -7641,7 +7678,7 @@ class Window(QtWidgets.QMainWindow):
         rms = calibration.get("rms") or []
         pairs = calibration.get("n_pairs") or []
         detail = "\n".join(
-            f"Channel {c + 1}: {n} correspondences, {r:.2f} px RMS"
+            f"Channel {c + 1}: {n} correspondences, {r:.2f} camera px RMS"
             for c, (n, r) in enumerate(zip(pairs, rms))
         )
         QtWidgets.QMessageBox.information(
@@ -8471,7 +8508,7 @@ class Window(QtWidgets.QMainWindow):
                 self.parameters_dialog.set_camera_parameters(info[0])
                 if "Pixelsize" in info[0]:
                     self.parameters_dialog.pixelsize.setValue(
-                        int(info[0]["Pixelsize"])
+                        float(info[0]["Pixelsize"])
                     )
                 channel.params = self._capture_params() | own
                 self.channels.append(channel)
@@ -8925,10 +8962,14 @@ class Window(QtWidgets.QMainWindow):
             directory=os.path.dirname(path),
             filter="*.txt",
         )
+        # picks and drift are in nm; files from before Picasso 1.0 are in
+        # camera pixels of this movie's camera and converted with its
+        # pixel size
+        pixelsize = self.parameters_dialog.pixelsize.value()
         drift = None
         if driftpath:
             try:
-                drift = io.load_drift(driftpath)
+                drift = io.load_drift(driftpath, pixelsize=pixelsize)
             except Exception as e:
                 QtWidgets.QMessageBox.warning(
                     self,
@@ -8937,7 +8978,11 @@ class Window(QtWidgets.QMainWindow):
                     "No drift correction will be applied.",
                 )
                 drift = None
-        picks, shape, _ = io.load_picks(path)
+        try:
+            picks, shape, _ = io.load_picks(path, pixelsize=pixelsize)
+        except lib.FILE_LOAD_ERRORS as error:
+            lib.show_load_error(self, path, error)
+            return
         if shape != "Circle":
             QtWidgets.QMessageBox.warning(
                 self,
@@ -8948,6 +8993,7 @@ class Window(QtWidgets.QMainWindow):
         # convert
         self.identifications = localize.picks_to_identifications(
             picks,
+            pixelsize=pixelsize,
             n_frames=lib.get_from_metadata(self.info, "Frames"),
             drift=drift,
         )
@@ -8977,10 +9023,13 @@ class Window(QtWidgets.QMainWindow):
         """Load localizations from a HDF5 file. Provide spot
         identifications."""
         try:
-            locs, _ = io.load_locs(path)
+            loaded = lib_qt.load_or_ask_pixelsize(self, io.load_locs, path)
         except lib.FILE_LOAD_ERRORS as error:
             lib.show_load_error(self, path, error)
             return
+        if loaded is None:  # the pixel size prompt was canceled
+            return
+        locs, info = loaded
         n_frames, ok = QtWidgets.QInputDialog.getInt(
             self,
             "Input Dialog",
@@ -8991,10 +9040,14 @@ class Window(QtWidgets.QMainWindow):
         if not ok:
             return
 
+        # the localizations (nm) go back onto the camera grid they were
+        # fitted on, i.e., with the pixel size of their own file
         self.identifications = localize.locs_to_identifications(
             locs=locs,
             movie_info=self.info,
             n_frames=n_frames,
+            pixelsize=lib.get_from_metadata(info, "Pixelsize", default=None)
+            or self.parameters_dialog.pixelsize.value(),
         )
         self._clean_up_external_ids()
 
@@ -9458,8 +9511,14 @@ class Window(QtWidgets.QMainWindow):
             self._draw_frame_spots()
             locs_frame = self._current_frame_locs()
             if locs_frame is not None:
+                # the localizations are in nm, the scene is the camera image
+                pixelsize = self.parameters_dialog.pixelsize.value()
                 for _, loc in locs_frame.iterrows():
-                    marker = FitMarker(loc["x"] + 0.5, loc["y"] + 0.5, 1)
+                    marker = FitMarker(
+                        loc["x"] / pixelsize + 0.5,
+                        loc["y"] / pixelsize + 0.5,
+                        1,
+                    )
                     marker.setToolTip(format_hover_tooltip(loc))
                     self.scene.addItem(marker)
             self.draw_scalebar()
@@ -9562,13 +9621,14 @@ class Window(QtWidgets.QMainWindow):
         identification itself, before fitting)."""
         box_half = int(box / 2)
         locs_frame = self._current_frame_locs()
+        pixelsize = self.parameters_dialog.pixelsize.value()
         for _, identification in identifications.iterrows():
             x = identification["x"]
             y = identification["y"]
             item = self.scene.addRect(
                 x - box_half, y - box_half, box, box, color
             )
-            loc = self._loc_near(locs_frame, x, y, box_half)
+            loc = self._loc_near(locs_frame, x, y, box_half, pixelsize)
             item.setToolTip(
                 format_hover_tooltip(identification if loc is None else loc)
             )
@@ -9820,13 +9880,18 @@ class Window(QtWidgets.QMainWindow):
         x: float,
         y: float,
         radius: float,
+        pixelsize: float,
     ) -> pd.Series | None:
         """The localization closest to (x, y) that lies within
-        ``radius`` pixels of it in both coordinates, or None."""
+        ``radius`` camera pixels of it in both coordinates, or None.
+
+        ``x``, ``y`` and ``radius`` are on the camera grid (an
+        identification); the localizations (nm) are mapped onto it with
+        ``pixelsize``."""
         if locs_frame is None or not len(locs_frame):
             return None
-        dx = locs_frame["x"] - x
-        dy = locs_frame["y"] - y
+        dx = locs_frame["x"] / pixelsize - x
+        dy = locs_frame["y"] / pixelsize - y
         inside = (dx.abs() <= radius) & (dy.abs() <= radius)
         if not inside.any():
             return None
@@ -9912,11 +9977,12 @@ class Window(QtWidgets.QMainWindow):
         )
         box_half = int(box / 2)
         locs_frame = self._current_frame_locs()
+        pixelsize = self.parameters_dialog.pixelsize.value()
         for x, y, color in boxes:
             item = self.scene.addRect(
                 x - box_half, y - box_half, box, box, color
             )
-            loc = self._loc_near(locs_frame, x, y, box_half)
+            loc = self._loc_near(locs_frame, x, y, box_half, pixelsize)
             if loc is not None:
                 item.setToolTip(format_hover_tooltip(loc))
             else:
@@ -12322,7 +12388,9 @@ class Window(QtWidgets.QMainWindow):
             f"{localize.region_label(state['current'])} in "
             f"{elapsed_time:.2f} seconds."
         )
-        self.locs = localize.locs_to_region_coordinates(locs, region)
+        self.locs = localize.locs_to_region_coordinates(
+            locs, region, self.parameters_dialog.pixelsize.value()
+        )
         self.locs_display = locs
         self.info = localize.region_movie_info(state["info"], region)
         self.draw_frame()
@@ -12946,7 +13014,7 @@ class Window(QtWidgets.QMainWindow):
         for r in reg_info:
             row = (
                 f"ch{r['channel']}: {r['n_matches']} paired signals, "
-                f"RMS {r['rms']:.2f} px, {r.get('model', 'affine')}"
+                f"RMS {r['rms']:.2f} camera px, {r.get('model', 'affine')}"
             )
             requested = r.get("model_requested")
             if requested and requested != r.get("model"):
@@ -13216,7 +13284,7 @@ class Window(QtWidgets.QMainWindow):
                     t0 = time.time()
                     zfit.calibrate_z(
                         locs,
-                        self.info,
+                        self.info + [self.camera_info],  # with Pixelsize
                         step,
                         self.parameters_dialog.magnification_factor.value(),
                         path=path,
@@ -13237,22 +13305,30 @@ class Window(QtWidgets.QMainWindow):
                 self.save_locs_after_fit()
 
     def _locs_in_channel(
-        self, locs: pd.DataFrame, transform: np.ndarray
+        self, locs: pd.DataFrame, transform: np.ndarray, channel: "Channel"
     ) -> pd.DataFrame:
-        """Map reference-channel localizations into another channel's pixel
-        coordinates via the calibration's transform, for cross-channel
-        display."""
+        """Map reference-channel localizations (nm) into another channel's
+        coordinates (nm) via the calibration's transform, for
+        cross-channel display.
+
+        The channel transforms are detector geometry, i.e., they map
+        camera pixel positions, so the localizations go through the
+        camera grids of the two channels."""
+        pixelsize_ref = self._channel_camera_info(self.channels[0])[
+            "Pixelsize"
+        ]
+        pixelsize = self._channel_camera_info(channel)["Pixelsize"]
         xy = transforms_mod.from_dict(transform).apply(
             np.column_stack(
                 [
-                    np.asarray(locs["x"], dtype=np.float64),
-                    np.asarray(locs["y"], dtype=np.float64),
+                    np.asarray(locs["x"], dtype=np.float64) / pixelsize_ref,
+                    np.asarray(locs["y"], dtype=np.float64) / pixelsize_ref,
                 ]
             )
         )
         mapped = locs.copy()
-        mapped["x"] = xy[:, 0].astype(np.float32)
-        mapped["y"] = xy[:, 1].astype(np.float32)
+        mapped["x"] = (xy[:, 0] * pixelsize).astype(np.float32)
+        mapped["y"] = (xy[:, 1] * pixelsize).astype(np.float32)
         return mapped
 
     def _distribute_multichannel_fit(self, locs: pd.DataFrame) -> bool:
@@ -13260,7 +13336,7 @@ class Window(QtWidgets.QMainWindow):
 
         The fit is in the reference channel's (channel 0) coordinates. Each
         other channel's ``locs_display`` gets the same localizations mapped
-        into its own pixel frame via the calibration's ``channel_transforms``,
+        into its own frame via the calibration's ``channel_transforms``,
         so switching channels overlays the fit on that channel's movie. The
         fit itself (saveable ``locs``) stays with the reference channel, which
         is made active so it displays and saves in reference coordinates.
@@ -13285,7 +13361,7 @@ class Window(QtWidgets.QMainWindow):
                 channel.locs_display = locs
             else:
                 channel.locs_display = self._locs_in_channel(
-                    locs, transforms[c]
+                    locs, transforms[c], channel
                 )
         self.channels[0].locs = locs
         if self.current_channel != 0:
@@ -13337,7 +13413,9 @@ class Window(QtWidgets.QMainWindow):
         if self.locs is None or self.view.split_fov_mode:
             return
         rois = (self.last_identification_info or {}).get("ROI")
-        self.locs = localize.add_roi_id(self.locs, rois)
+        self.locs = localize.add_roi_id(
+            self.locs, rois, pixelsize=self.parameters_dialog.pixelsize.value()
+        )
 
     def save_locs_after_fit(self) -> None:
         """Save localizations after fitting to an .hdf5 file, naming the
@@ -13400,8 +13478,7 @@ class Window(QtWidgets.QMainWindow):
                     # save the AIM drift-corrected localizations
                     base = self.channel_output_base()
                     self.save_locs(base + "_locs_undrifted.hdf5")
-                    # save txt drift file
-                    np.savetxt(base + "_locs_drift.txt", drift, newline="\r\n")
+                    io.save_drift(base + "_locs_drift.txt", drift)
                     self.status_bar.showMessage(
                         "Saved AIM drift-corrected localizations. No "
                         "fiducials found, only AIM drift correction "
@@ -13422,7 +13499,7 @@ class Window(QtWidgets.QMainWindow):
                     locs=self.locs,
                     info=self.extra_info,
                     picks=fiducial_picks,
-                    pick_size=box,
+                    pick_size=box / 2,  # box is the diameter (nm)
                 )
             )
             if drift is not None:
@@ -13438,8 +13515,7 @@ class Window(QtWidgets.QMainWindow):
         # save the drift-corrected localizations
         base = self.channel_output_base()
         self.save_locs(base + "_locs_undrifted.hdf5")
-        # save txt drift file
-        np.savetxt(base + "_locs_drift.txt", drift, newline="\r\n")
+        io.save_drift(base + "_locs_drift.txt", drift)
         self.status_bar.showMessage(
             "Saved drift-corrected localizations and drift file."
         )
@@ -14926,13 +15002,6 @@ class AffineCalibrationWorker(QtCore.QThread):
                 self.canceled.emit()
                 return
             movie_target, _ = loaded_target
-            # An existing calibration of any kind is appended to; a path
-            # that does not exist yet starts a standalone affine
-            # calibration (the 2D case, where there is nothing to append to).
-            if os.path.exists(self.calibration_path):
-                calibration = io.load_any_calibration(self.calibration_path)
-            else:
-                calibration = {}
         except Exception as e:  # noqa: BLE001 - reported to the GUI
             self.failed.emit(f"Could not load inputs:\n{e}")
             return
@@ -14943,6 +15012,22 @@ class AffineCalibrationWorker(QtCore.QThread):
             if pixelsize is None:  # prompt canceled
                 self.canceled.emit()
                 return
+
+        # An existing calibration of any kind is appended to; a path
+        # that does not exist yet starts a standalone affine
+        # calibration (the 2D case, where there is nothing to append to).
+        # One from before Picasso 1.0 (camera pixels) is converted to nm
+        # with the pixel size of the bead images.
+        try:
+            if os.path.exists(self.calibration_path):
+                calibration = io.load_any_calibration(
+                    self.calibration_path, pixelsize=pixelsize
+                )
+            else:
+                calibration = {}
+        except Exception as e:  # noqa: BLE001 - reported to the GUI
+            self.failed.emit(f"Could not load inputs:\n{e}")
+            return
 
         self.statusChanged.emit("Fitting affine transform ...")
         try:
@@ -15008,9 +15093,8 @@ class QualityWorker(QtCore.QThread):
                 "",
             )
 
-        nena_px = localize.check_nena(sane_locs, self.info, nena_callback)
-        nena_nm = float(self.pixelsize * nena_px)
-        self.progressMade.emit("", 1, f"{nena_px:.2f} px / {nena_nm:.2f} nm")
+        nena_nm = localize.check_nena(sane_locs, self.info, nena_callback)
+        self.progressMade.emit("", 1, f"{nena_nm:.2f} nm")
 
         # Drift
         self.progressMade.emit("Checking Quality (3/4) Drift ..", 0, "")
@@ -15028,7 +15112,7 @@ class QualityWorker(QtCore.QThread):
         self.progressMade.emit(
             "",
             2,
-            f"X: {drift_x:.3f} px / Y: {drift_y:.3f} px",
+            f"X: {drift_x:.2f} nm / Y: {drift_y:.2f} nm",
         )
 
         # Kinetics
@@ -15041,7 +15125,7 @@ class QualityWorker(QtCore.QThread):
             None,
             drift=(drift_x, drift_y),
             len_mean=len_mean,
-            nena=nena_px,
+            nena=nena_nm,
         )
         self.finished.emit("Quality parameters complete.")
 

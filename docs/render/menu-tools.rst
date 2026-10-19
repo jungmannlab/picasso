@@ -35,8 +35,8 @@ the current picks; the boxes you drew yourself are kept as drawn. See
    :icon: code
    :class-container: api-example
 
-   ``pick_size`` is the radius for circles; ``std_range`` is ``Pick similar
-   ± range``.
+   ``pick_size`` is the radius for circles, in nm; ``std_range`` is ``Pick
+   similar ± range``.
 
    .. code-block:: python
 
@@ -85,8 +85,7 @@ Automatically picks fiducial markers, e.g., for
 bright spots that are visible in nearly every frame, so they appear as the
 densest spots of the image. Requires no existing picks.
 
-1. The whole image is rendered with one pixel per camera pixel and
-   ``One-Pixel-Blur``.
+1. The whole image is rendered with 100 nm pixels and ``One-Pixel-Blur``.
 2. Spots are detected as in Localize's net gradient identification
    (see :ref:`localize-identification`), with a box of about 900 nm and the
    99th percentile of the pixel values as the minimum net gradient.
@@ -98,8 +97,8 @@ densest spots of the image. Requires no existing picks.
    :class-container: api-example
 
    ``find_fiducials`` returns the centers and the box size (the pick
-   diameter), both in camera pixels. ``undrift_from_fiducials`` picks and
-   undrifts in one go.
+   diameter), both in nm. ``undrift_from_fiducials`` picks and undrifts in
+   one go.
 
    .. code-block:: python
 
@@ -136,8 +135,8 @@ kinetics or to tell repeated binding from a single sticking event. With
 several picks, their localizations are combined into one trace. The window
 has four panels, all over the frames of the movie:
 
-- ``X-pos vs frame`` and ``Y-pos vs frame``: the x and y coordinates (camera
-  pixels) of each localization;
+- ``X-pos vs frame`` and ``Y-pos vs frame``: the x and y coordinates (nm)
+  of each localization;
 - ``Localizations``: 1 in frames with a localization, 0 otherwise;
 - ``Photons``: the photon count in each frame.
 

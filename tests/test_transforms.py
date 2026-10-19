@@ -401,23 +401,37 @@ class TestDecompose:
         matrix = np.eye(3)
         matrix[:2, :2] = rot @ np.diag([scale_x, scale_y])
         matrix[:2, 2] = [4.0, -6.0]
-        dec = transforms.AffineTransform(matrix=matrix).decompose(
-            pixelsize=130
-        )
+        dec = transforms.AffineTransform(matrix=matrix).decompose()
         assert dec["rotation_deg"] == pytest.approx(1.5, abs=1e-6)
         assert dec["scale_x"] == pytest.approx(scale_x, abs=1e-9)
         assert dec["scale_y"] == pytest.approx(scale_y, abs=1e-9)
         assert dec["shear_deg"] == pytest.approx(0.0, abs=1e-6)
-        assert dec["tx_px"] == pytest.approx(4.0)
-        assert dec["ty_px"] == pytest.approx(-6.0)
-        assert dec["tx_nm"] == pytest.approx(4.0 * 130)
-        assert dec["ty_nm"] == pytest.approx(-6.0 * 130)
+        # the translation is in the transform's own unit, nm by default
+        assert dec["unit"] == "nm"
+        assert dec["tx_nm"] == pytest.approx(4.0)
+        assert dec["ty_nm"] == pytest.approx(-6.0)
         assert dec["mirror"] is False
         assert dec["flip_axis"] is None
 
-    def test_omits_nm_without_pixelsize(self):
-        dec = transforms.identity().decompose()
-        assert "tx_nm" not in dec and "ty_nm" not in dec
+    def test_unit_names_the_translation_keys(self):
+        """A channel registration maps camera pixel positions and reports
+        ``tx_px``/``ty_px``; a lateral correction (nm) ``tx_nm``/``ty_nm``.
+        Either way only one pair is present."""
+        matrix = np.eye(3)
+        matrix[:2, 2] = [4.0, -6.0]
+        t = transforms.AffineTransform(matrix=matrix)
+        nm = t.decompose()
+        px = t.decompose(unit="px")
+        assert ("tx_nm", "ty_nm") == tuple(k for k in nm if k.startswith("t"))
+        assert ("tx_px", "ty_px") == tuple(k for k in px if k.startswith("t"))
+        assert px["tx_px"] == pytest.approx(4.0)
+        assert px["ty_px"] == pytest.approx(-6.0)
+        assert px["unit"] == "px"
+        # the rest of the decomposition does not depend on the unit
+        for key in ("rotation_deg", "scale_major", "scale_x", "shear_deg"):
+            assert nm[key] == px[key]
+        with pytest.raises(ValueError, match="unit"):
+            t.decompose(unit="um")
 
     @pytest.mark.parametrize(
         "axis, linear",
@@ -431,17 +445,15 @@ class TestDecompose:
         rebuilds its seed from `mirror` and `flip_axis`."""
         matrix = np.eye(3)
         matrix[:2, :2] = linear
-        dec = transforms.AffineTransform(matrix=matrix).decompose(
-            pixelsize=1.0
-        )
+        dec = transforms.AffineTransform(matrix=matrix).decompose(unit="px")
         assert dec["mirror"] is True
         assert dec["flip_axis"] == axis
         assert dec["rotation_deg"] == pytest.approx(0.0, abs=1e-9)
 
     def test_non_affine_decomposes_at_the_requested_point(self):
         _, _, t = _model("polynomial3")
-        near = t.decompose(pixelsize=1.0, at=(100.0, 100.0))
-        far = t.decompose(pixelsize=1.0, at=(CHIP - 100, CHIP - 100))
+        near = t.decompose(at=(100.0, 100.0), unit="px")
+        far = t.decompose(at=(CHIP - 100, CHIP - 100), unit="px")
         assert near["scale_major"] != far["scale_major"]
 
     def test_defaults_to_the_domain_center(self, model):

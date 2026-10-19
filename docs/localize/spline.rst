@@ -310,7 +310,7 @@ Multichannel spline fitting can benefit from re-aligning the channels on the dat
 After identifying the channels, run ``Calibration`` > ``Re-align channels (current signal)`` to re-estimate the transforms from the blinking data itself. **This is strongly recommended whenever the bead stack and the measurement were not acquired directly one after another** (e.g. calibration from a previous day or session).
 
 - Because the correction is derived by pairing the shared single-molecule signal frame by frame, a dialog first asks for the frame window to use and how many frames are evenly sampled from it.
-- The result is reported per channel as the number of paired signals and the residual RMS (in camera pixels).
+- The result is reported per channel as the number of paired signals and the residual RMS (in camera pixels, since the correction is fitted on the raw images).
 - We recommend using bright spots for the re-alignment: select a higher min. net gradient, or a higher wavelet threshold.
 
 .. important::

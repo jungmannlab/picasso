@@ -20,6 +20,7 @@ from picasso.gui import localize as gui_localize
 from picasso.gui import render as gui_render
 
 WIDTH = HEIGHT = 32.0
+PIXELSIZE = 130.0
 
 
 def _locs(n: int = 500) -> pd.DataFrame:
@@ -27,10 +28,10 @@ def _locs(n: int = 500) -> pd.DataFrame:
     return pd.DataFrame(
         {
             "frame": rng.integers(0, 1000, size=n).astype(np.int32),
-            "x": rng.uniform(0.0, WIDTH, size=n),
-            "y": rng.uniform(0.0, HEIGHT, size=n),
-            "lpx": np.full(n, 0.1),
-            "lpy": np.full(n, 0.1),
+            "x": rng.uniform(0.0, WIDTH, size=n) * PIXELSIZE,
+            "y": rng.uniform(0.0, HEIGHT, size=n) * PIXELSIZE,
+            "lpx": np.full(n, 13.0),
+            "lpy": np.full(n, 13.0),
             "photons": np.full(n, 1000.0),
         }
     )
@@ -38,7 +39,12 @@ def _locs(n: int = 500) -> pd.DataFrame:
 
 def _info() -> list[dict]:
     return [
-        {"Width": WIDTH, "Height": HEIGHT, "Frames": 1000, "Pixelsize": 130}
+        {
+            "Width": WIDTH,
+            "Height": HEIGHT,
+            "Frames": 1000,
+            "Pixelsize": PIXELSIZE,
+        }
     ]
 
 
@@ -54,7 +60,10 @@ def render_window(qt_offscreen, tmp_path):
     window.view.add(
         str(tmp_path / "locs.hdf5"), _locs(), _info(), render_=False
     )
-    window.view.viewport = [(0.0, 0.0), (HEIGHT, WIDTH)]
+    window.view.viewport = [
+        (0.0, 0.0),
+        (HEIGHT * PIXELSIZE, WIDTH * PIXELSIZE),
+    ]
     window.view.resize(128, 128)
     return window
 

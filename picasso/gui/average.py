@@ -137,13 +137,9 @@ class ParametersDialog(lib.Dialog):
     Attributes
     ----------
     disp_px_size : QtWidgets.QDoubleSpinBox
-        Spin box for setting the display pixel size in nm. Determines
-        oversampling, see below.
+        Spin box for setting the display pixel size in nm.
     iterations : QtWidgets.QSpinBox
         Spin box for setting the number of averaging iterations.
-    oversampling : float
-        Number of display pixels per camera pixel, calculated from the
-        display pixel size and the camera pixel size from metadata.
     window : QtWidgets.QMainWindow
         Main window instance.
     """
@@ -151,7 +147,6 @@ class ParametersDialog(lib.Dialog):
     def __init__(self, window: QtWidgets.QMainWindow) -> None:
         super().__init__(window)
         self.window = window
-        self.oversampling = 10.0  # just some value when starting the module
         self.setWindowTitle("Parameters")
         self.setModal(False)
         grid = QtWidgets.QGridLayout(self)
@@ -179,14 +174,9 @@ class ParametersDialog(lib.Dialog):
         grid.addWidget(self.iterations, 1, 1)
 
     def on_disp_px_size_changed(self) -> None:
-        """Update oversampling (number of display pixels per camera
-        pixel) when display pixel size is changed."""
+        """Redraw the image when the display pixel size is changed."""
         if not hasattr(self.window.view, "locs"):  # no file loaded yet
             return
-        camera_px = lib.get_from_metadata(
-            self.window.view.info, "Pixelsize", raise_error=True
-        )
-        self.oversampling = camera_px / self.disp_px_size.value()
         self.window.view.update_image()
 
 
@@ -372,6 +362,7 @@ class View(QtWidgets.QLabel):
         self.avg_history = []
         group_index = average.build_group_index(self.locs)
         self.locs = average.com_align(self.locs, group_index)
+        # half the side length of the rendered square (nm)
         self.r = 2 * np.sqrt(
             (self.locs["x"] ** 2 + self.locs["y"] ** 2).mean()
         )
@@ -504,7 +495,8 @@ class View(QtWidgets.QLabel):
             Ignored; accepted so the method can be wired directly to Qt
             signals that pass a value.
         """
-        oversampling = self.window.parameters_dialog.oversampling
+        # rendered pixels per nm
+        oversampling = 1 / self.window.parameters_dialog.disp_px_size.value()
         t_min = -self.r
         t_max = self.r
         N_avg, image_avg = render.render_hist(

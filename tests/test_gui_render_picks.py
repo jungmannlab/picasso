@@ -34,10 +34,10 @@ def _locs(n: int = 2000, seed: int = 0) -> pd.DataFrame:
     return pd.DataFrame(
         {
             "frame": rng.integers(0, 1000, size=n).astype(np.int32),
-            "x": rng.uniform(0.0, WIDTH, size=n),
-            "y": rng.uniform(0.0, HEIGHT, size=n),
-            "lpx": np.full(n, 0.1),
-            "lpy": np.full(n, 0.1),
+            "x": rng.uniform(0.0, WIDTH, size=n) * PIXELSIZE,
+            "y": rng.uniform(0.0, HEIGHT, size=n) * PIXELSIZE,
+            "lpx": np.full(n, 0.1 * PIXELSIZE),
+            "lpy": np.full(n, 0.1 * PIXELSIZE),
             "photons": np.full(n, 1000.0),
         }
     )
@@ -60,7 +60,10 @@ def window(qt_offscreen, tmp_path):
     window = gui_render.Window(plugins_loaded=True)
     path = str(tmp_path / "locs.hdf5")
     window.view.add(path, _locs(), _info(), render_=False)
-    window.view.viewport = [(0.0, 0.0), (HEIGHT, WIDTH)]
+    window.view.viewport = [
+        (0.0, 0.0),
+        (HEIGHT * PIXELSIZE, WIDTH * PIXELSIZE),
+    ]
     window.view.resize(256, 256)
     return window
 
@@ -377,7 +380,7 @@ class TestCircularPicksUseThePyramid:
         view = window.view
         view._pick_shape = "Circle"
         window.tools_settings_dialog.pick_diameter.setValue(6.0 * PIXELSIZE)
-        view._picks = [(20.0, 20.0), (40.0, 44.0), (58.0, 6.0)]
+        view._picks = [(2600.0, 2600.0), (5200.0, 5720.0), (7540.0, 780.0)]
         return view
 
     def test_no_index_blocks_are_built(self, circle_view, monkeypatch):
@@ -433,23 +436,35 @@ class TestPickRemovalAcrossShapes:
 
     def test_polygon_click_removes_only_the_one_clicked(self, window):
         # this used to clear every pick: remove_picks had no polygon arm
-        left = [(1.0, 1.0), (5.0, 1.0), (5.0, 5.0), (1.0, 5.0), (1.0, 1.0)]
+        left = [
+            (130.0, 130.0),
+            (650.0, 130.0),
+            (650.0, 650.0),
+            (130.0, 650.0),
+            (130.0, 130.0),
+        ]
         right = [
-            (20.0, 20.0),
-            (25.0, 20.0),
-            (25.0, 25.0),
-            (20.0, 25.0),
-            (20.0, 20.0),
+            (2600.0, 2600.0),
+            (3250.0, 2600.0),
+            (3250.0, 3250.0),
+            (2600.0, 3250.0),
+            (2600.0, 2600.0),
         ]
         view = self._polygon_view(window, [left, right])
-        view.remove_picks((3.0, 3.0))
+        view.remove_picks((390.0, 390.0))
         assert len(view._picks) == 1
         assert list(view._picks[0]) == right
 
     def test_polygon_click_outside_removes_nothing(self, window):
-        left = [(1.0, 1.0), (5.0, 1.0), (5.0, 5.0), (1.0, 5.0), (1.0, 1.0)]
+        left = [
+            (130.0, 130.0),
+            (650.0, 130.0),
+            (650.0, 650.0),
+            (130.0, 650.0),
+            (130.0, 130.0),
+        ]
         view = self._polygon_view(window, [left])
-        view.remove_picks((10.0, 10.0))
+        view.remove_picks((1300.0, 1300.0))
         assert len(view._picks) == 1
 
     def test_vertical_rectangle_survives_a_click_elsewhere(self, window):
@@ -458,28 +473,30 @@ class TestPickRemovalAcrossShapes:
         view = window.view
         window.tools_settings_dialog.pick_shape.setCurrentText("Rectangle")
         window.tools_settings_dialog.pick_width.setValue(2.0 * PIXELSIZE)
-        view._picks = [((5.0, 5.0), (5.0, 15.0))]
-        view.remove_picks((20.0, 20.0))
+        view._picks = [((650.0, 650.0), (650.0, 1950.0))]
+        view.remove_picks((2600.0, 2600.0))
         assert len(view._picks) == 1
 
     def test_vertical_rectangle_is_removed_from_inside(self, window):
         view = window.view
         window.tools_settings_dialog.pick_shape.setCurrentText("Rectangle")
         window.tools_settings_dialog.pick_width.setValue(2.0 * PIXELSIZE)
-        view._picks = [((5.0, 5.0), (5.0, 15.0))]
-        view.remove_picks((5.5, 10.0))
+        view._picks = [((650.0, 650.0), (650.0, 1950.0))]
+        view.remove_picks((715.0, 1300.0))
         assert view._picks == []
 
     def test_subtract_picks_of_a_file(self, window, tmp_path):
         view = window.view
         window.tools_settings_dialog.pick_shape.setCurrentText("Circle")
-        view._picks = [(5.0, 5.0), (20.0, 20.0)]
+        view._picks = [(650.0, 650.0), (2600.0, 2600.0)]
         path = tmp_path / "subtract.yaml"
         path.write_text(
-            "Shape: Circle\nDiameter (nm): 260.0\nCenters: [[5.1, 5.0]]\n"
+            f"{io.FORMAT_VERSION_ATTR}: '{io.FORMAT_VERSION}'\n"
+            "Shape: Circle\nDiameter (nm): 260.0\n"
+            "Centers: [[663.0, 650.0]]\n"
         )
         view.subtract_picks(str(path))
-        assert [tuple(pick) for pick in view._picks] == [(20.0, 20.0)]
+        assert [tuple(pick) for pick in view._picks] == [(2600.0, 2600.0)]
 
 
 class TestRotationWindowShapes:
@@ -536,8 +553,8 @@ class TestFilterPicksAcrossShapes:
         view = window.view
         window.tools_settings_dialog.pick_shape.setCurrentText("Box")
         view._picks = [
-            ((4.0, 4.0), (10.0, 10.0)),
-            ((20.0, 20.0), (24.0, 22.0)),
+            ((520.0, 520.0), (1300.0, 1300.0)),
+            ((2600.0, 2600.0), (3120.0, 2860.0)),
         ]
         counts = view._count_locs_in_picks(0)
         expected = [len(_) for _ in view.picked_locs(0, add_group=False)]
@@ -548,15 +565,15 @@ class TestFilterPicksAcrossShapes:
         view = window.view
         window.tools_settings_dialog.pick_shape.setCurrentText("Polygon")
         closed = [
-            (4.0, 4.0),
-            (10.0, 4.0),
-            (10.0, 10.0),
-            (4.0, 10.0),
-            (4.0, 4.0),
+            (520.0, 520.0),
+            (1300.0, 520.0),
+            (1300.0, 1300.0),
+            (520.0, 1300.0),
+            (520.0, 520.0),
         ]
         # picked_locs skips the open one, so the counts would otherwise
         # be misaligned with the picks
-        view._picks = [closed, [(20.0, 20.0), (24.0, 20.0)], closed]
+        view._picks = [closed, [(2600.0, 2600.0), (3120.0, 2600.0)], closed]
         counts = view._count_locs_in_picks(0)
         assert len(counts) == 3
         assert counts[1] == 0
@@ -594,9 +611,7 @@ class TestBrushPickTool:
 
     def test_brush_width_follows_the_spin_box(self, brush_view, window):
         window.tools_settings_dialog.brush_width.setValue(260.0)
-        assert brush_view._brush_width == pytest.approx(
-            260.0 / brush_view.pixelsize
-        )
+        assert brush_view._brush_width == pytest.approx(260.0)
 
     def test_one_stroke_makes_one_pick(self, brush_view):
         _paint(brush_view, STROKE_A)
@@ -791,13 +806,19 @@ class TestMultiChannelSavesKeepAllLocs:
     alone would fill the missing column with NaN, and ``io.save_locs``
     would then drop all of that channel's localizations."""
 
-    LEFT = [(1.0, 1.0), (12.0, 1.0), (12.0, 12.0), (1.0, 12.0), (1.0, 1.0)]
+    LEFT = [
+        (130.0, 130.0),
+        (1560.0, 130.0),
+        (1560.0, 1560.0),
+        (130.0, 1560.0),
+        (130.0, 130.0),
+    ]
     RIGHT = [
-        (18.0, 18.0),
-        (30.0, 18.0),
-        (30.0, 30.0),
-        (18.0, 30.0),
-        (18.0, 18.0),
+        (2340.0, 2340.0),
+        (3900.0, 2340.0),
+        (3900.0, 3900.0),
+        (2340.0, 3900.0),
+        (2340.0, 2340.0),
     ]
 
     @pytest.fixture

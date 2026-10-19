@@ -33,10 +33,10 @@ def _locs(n: int = 500, seed: int = 0) -> pd.DataFrame:
     return pd.DataFrame(
         {
             "frame": rng.integers(0, 1000, size=n).astype(np.int32),
-            "x": rng.uniform(0.0, WIDTH, size=n),
-            "y": rng.uniform(0.0, HEIGHT, size=n),
-            "lpx": np.full(n, 0.1),
-            "lpy": np.full(n, 0.1),
+            "x": rng.uniform(0.0, WIDTH, size=n) * PIXELSIZE,
+            "y": rng.uniform(0.0, HEIGHT, size=n) * PIXELSIZE,
+            "lpx": np.full(n, 13.0),
+            "lpy": np.full(n, 13.0),
             "photons": np.full(n, 1000.0),
         }
     )
@@ -59,7 +59,10 @@ def window(qt_offscreen, tmp_path):
     window = gui_render.Window(plugins_loaded=True)
     path = str(tmp_path / "locs.hdf5")
     window.view.add(path, _locs(), _info(), render_=False)
-    window.view.viewport = [(0.0, 0.0), (HEIGHT, WIDTH)]
+    window.view.viewport = [
+        (0.0, 0.0),
+        (HEIGHT * PIXELSIZE, WIDTH * PIXELSIZE),
+    ]
     window.view.resize(256, 256)
     yield window
     window.view.stop_render_worker()
@@ -112,7 +115,7 @@ def test_defaults_match_the_former_look(window):
 
 def test_pick_style_changes_the_drawn_picks(window):
     view = window.view
-    view._picks = [(16.0, 16.0)]
+    view._picks = [(16.0 * PIXELSIZE, 16.0 * PIXELSIZE)]
     # 10 camera pixels
     window.tools_settings_dialog.pick_diameter.setValue(10 * PIXELSIZE)
     default = _pixels(view.draw_picks(_canvas()))
@@ -163,7 +166,12 @@ def test_rectangle_center_line_is_optional(window):
     view = window.view
     view._pick_shape = "Rectangle"
     window.tools_settings_dialog.pick_width.setValue(8 * PIXELSIZE)
-    view._picks = [((4.0, 16.0), (28.0, 16.0))]
+    view._picks = [
+        (
+            (4.0 * PIXELSIZE, 16.0 * PIXELSIZE),
+            (28.0 * PIXELSIZE, 16.0 * PIXELSIZE),
+        )
+    ]
     view.rectangle_pick_start_x, view.rectangle_pick_start_y = 32, 128
     view.rectangle_pick_current_x, view.rectangle_pick_current_y = 224, 128
     style = window.tools_settings_dialog.pick_style
@@ -184,7 +192,10 @@ def test_rectangle_center_line_is_optional(window):
 
 def test_measure_style_sets_markers_and_lines(window):
     view = window.view
-    view._points = [(4.0, 16.0), (28.0, 16.0)]
+    view._points = [
+        (4.0 * PIXELSIZE, 16.0 * PIXELSIZE),
+        (28.0 * PIXELSIZE, 16.0 * PIXELSIZE),
+    ]
     style = window.tools_settings_dialog.measure_style
     style.set_value("marker_size", 40)
     style.line_style.setCurrentText("Dashed")

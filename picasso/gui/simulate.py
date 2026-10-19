@@ -28,7 +28,15 @@ from matplotlib.backends.backend_qt5agg import FigureCanvas
 from scipy.optimize import curve_fit
 from scipy.stats import norm
 
-from .. import io, lib, notifications, simulate, __version__, docs_url
+from .. import (
+    io,
+    lib,
+    lib_qt,
+    notifications,
+    simulate,
+    __version__,
+    docs_url,
+)
 from .app import run_gui
 from . import plot_style, theme
 
@@ -92,8 +100,10 @@ STRUCTURE3D_DEFAULT = "0,0,0,0,0,0,0,0,0,0,0,0"
 STRUCTURENO_DEFAULT = 9
 STRUCTUREFRAME_DEFAULT = 6
 INCORPORATION_DEFAULT = 85
-# Default 3D calibration
-CX_DEFAULT = [
+# Default 3D calibration: spot widths as polynomials in z (nm). The
+# coefficients were recorded in camera pixels of PIXELSIZE_DEFAULT nm and
+# are converted to nm below, as in the calibration files of Picasso 1.0.
+_CX_DEFAULT_PX = [
     3.1638306844743706e-17,
     -2.2103661248660896e-14,
     -9.775815406044296e-12,
@@ -102,7 +112,7 @@ CX_DEFAULT = [
     -0.0028759382006135654,
     1.1756537760039398,
 ]
-CY_DEFAULT = [
+_CY_DEFAULT_PX = [
     1.710907877866197e-17,
     -2.4986657766862576e-15,
     -8.405284979510355e-12,
@@ -111,6 +121,8 @@ CY_DEFAULT = [
     0.0018155881468011011,
     1.011468185618154,
 ]
+CX_DEFAULT = [c * PIXELSIZE_DEFAULT for c in _CX_DEFAULT_PX]
+CY_DEFAULT = [c * PIXELSIZE_DEFAULT for c in _CY_DEFAULT_PX]
 
 
 def _mark_derived(*widgets: QtWidgets.QWidget) -> None:
@@ -214,7 +226,7 @@ class Window(QtWidgets.QMainWindow):
     photonstdframeEdit : QtWidgets.QLabel
         Label displaying the standard deviation of photons per emitter
         per frame.
-    pixelsizeEdit : QtWidgets.QSpinBox
+    pixelsizeEdit : QtWidgets.QDoubleSpinBox
         Spin box for the pixel size (nm).
     psfEdit : QtWidgets.QDoubleSpinBox
         Spin box for the point spread function (PSD) width (pixels).
@@ -386,8 +398,9 @@ class Window(QtWidgets.QMainWindow):
         self.framesEdit = QtWidgets.QSpinBox()
         self.framesEdit.setRange(10, 100000000)  # 10-100.000.000 frames
         self.framesEdit.setSingleStep(1000)
-        self.pixelsizeEdit = QtWidgets.QSpinBox()
-        self.pixelsizeEdit.setRange(1, 1000)  # 1 to 1000 nm frame size
+        self.pixelsizeEdit = QtWidgets.QDoubleSpinBox()
+        self.pixelsizeEdit.setRange(0.01, 10000)  # nm
+        self.pixelsizeEdit.setDecimals(2)
         self.totaltimeEdit = QtWidgets.QLabel()
 
         # Deactivate keyboard tracking
@@ -485,7 +498,8 @@ class Window(QtWidgets.QMainWindow):
             laserpower = QtWidgets.QLabel("Laser power")
         psf = QtWidgets.QLabel("PSF")
         psf.setToolTip(
-            "Point Spread Function (PSF) width (Gaussian \u03c3) in pixels."
+            "Point Spread Function (PSF) width (Gaussian \u03c3) in camera "
+            "pixels."
         )
         psf_fwhm = QtWidgets.QLabel("PSF (FWHM)")
         psf_fwhm.setToolTip(
@@ -1117,7 +1131,15 @@ class Window(QtWidgets.QMainWindow):
             self, "Load 3d calibration", directory=dir, filter="*.yaml"
         )
         if path:
-            z_calibration = io.load_calibration(path)
+            try:
+                # spot widths in nm; a calibration from before Picasso 1.0
+                # (camera pixels) is converted with the camera pixel size
+                z_calibration = io.load_calibration(
+                    path, pixelsize=self.pixelsizeEdit.value()
+                )
+            except lib.FILE_LOAD_ERRORS as error:
+                lib.show_load_error(self, path, error)
+                return
             self.cx = [_ for _ in z_calibration["X Coefficients"]]
             self.cy = [_ for _ in z_calibration["Y Coefficients"]]
             self.statusBar().showMessage("Calibration loaded from: " + path)
@@ -1540,8 +1562,10 @@ class Window(QtWidgets.QMainWindow):
                 background,
                 noise,
                 mode3Dstate,
-                self.cx,
-                self.cy,
+                # the calibration gives spot widths in nm; the movie is
+                # rendered in camera pixels
+                [c / params["pixelsize"] for c in self.cx],
+                [c / params["pixelsize"] for c in self.cy],
             )
             outputmsg = (
                 "Converting to Image ... "
@@ -1749,8 +1773,8 @@ class Window(QtWidgets.QMainWindow):
                 "Structure.Arrangement": params["structureArrangement"],
                 "Structure.Orientation": params["structureOrientation"],
                 "Structure.3D": mode3Dstate,
-                "Structure.CX": self.cx,
-                "Structure.CY": self.cy,
+                "Structure.CX (nm)": self.cx,
+                "Structure.CY (nm)": self.cy,
                 "PAINT.k_on": params["kon"],
                 "PAINT.imager": params["imagerconcentration"],
                 "PAINT.taub": params["taub"],
@@ -1769,6 +1793,7 @@ class Window(QtWidgets.QMainWindow):
                 "Camera.Integration Time": params["itime"],
                 "Camera.Frames": params["frames"],
                 "Camera.Pixelsize": params["pixelsize"],
+                "Pixelsize": params["pixelsize"],
                 "Noise.Lasercoefficient": params["laserc"],
                 "Noise.Imagercoefficient": params["imagerc"],
                 "Noise.EquationA": params["equationA"],
@@ -1914,9 +1939,14 @@ class Window(QtWidgets.QMainWindow):
         for key, apply in optional.items():
             if key in info:
                 apply(info[key])
-        if "Structure.CX" in info and "Structure.CY" in info:
-            self.cx = info["Structure.CX"]
-            self.cy = info["Structure.CY"]
+        if "Structure.CX (nm)" in info and "Structure.CY (nm)" in info:
+            self.cx = list(info["Structure.CX (nm)"])
+            self.cy = list(info["Structure.CY (nm)"])
+        elif "Structure.CX" in info and "Structure.CY" in info:
+            # before Picasso 1.0: spot widths in camera pixels
+            pixelsize = float(info["Camera.Pixelsize"])
+            self.cx = [c * pixelsize for c in info["Structure.CX"]]
+            self.cy = [c * pixelsize for c in info["Structure.CY"]]
         self.structurecombo.setCurrentIndex(2)  # Custom
 
         self.newstruct = handles
@@ -2019,23 +2049,27 @@ class Window(QtWidgets.QMainWindow):
 
             else:
 
-                clusters = io.load_clusters(path)
+                try:
+                    clusters = lib_qt.load_or_ask_pixelsize(
+                        self, io.load_clusters, path
+                    )
+                except lib.FILE_LOAD_ERRORS as error:
+                    lib.show_load_error(self, path, error)
+                    return
+                if clusters is None:  # the pixel size prompt was canceled
+                    return
 
-                pixelsize = self.pixelsizeEdit.value()
-                imagesize = self.camerasizeEdit.value()
-
-                x = clusters["com_x"]
-                y = clusters["com_y"]
-
-                # Align in the center of window. Simulate's coordinates
-                # point y up (simulate.convert_movie flips the frame), the
-                # clusters' y points down as in Render, so y is negated to
-                # keep the structure's orientation in the simulated movie.
-                x = x - np.mean(x) + imagesize / 2
-                y = -(y - np.mean(y)) + imagesize / 2
-
-                x = x * pixelsize
-                y = y * pixelsize
+                # The cluster centers are in nm; align them in the center
+                # of the window (nm). Simulate's coordinates point y up
+                # (simulate.convert_movie flips the frame), the clusters' y
+                # points down as in Render, so y is negated to keep the
+                # structure's orientation in the simulated movie.
+                center = self.camerasizeEdit.value() / 2
+                center *= self.pixelsizeEdit.value()
+                x = clusters["com_x"].to_numpy(dtype=np.float64)
+                y = clusters["com_y"].to_numpy(dtype=np.float64)
+                x = x - np.mean(x) + center
+                y = -(y - np.mean(y)) + center
 
                 try:
                     z = clusters["com_z"]
@@ -2360,8 +2394,10 @@ class Window(QtWidgets.QMainWindow):
                     # self.le.setText(str(text))
 
                     photons = locs["photons"]
-                    sigmax = locs["sx"]
-                    sigmay = locs["sy"]
+                    # spot widths (nm) in camera pixels of the simulation
+                    pixelsize = self.pixelsizeEdit.value()
+                    sigmax = locs["sx"] / pixelsize
+                    sigmay = locs["sy"] / pixelsize
                     bg = locs["bg"]
                     bg = bg - cbaseline
 

@@ -103,7 +103,7 @@ Fitting
    spline PSF calibration for the spline fits, a magnification factor and a 3D
    calibration for the astigmatism fits).
 Camera
-   Baseline, sensitivity, gain and pixel size.
+   Baseline, sensitivity, gain and pixel size in nm.
 What is analyzed
    Region of interest, frame bounds, and the flags that change how several
    movies or several regions are grouped (``--concat``,
@@ -144,6 +144,15 @@ localization precisions. They also bias the maximum likelihood fits
 (``-a mle``, the default, and the other ``mle`` methods), which assume
 Poisson-distributed photon counts.
 
+The camera pixel size (``-px``, ``--pixelsize``, in nm) converts the fitted
+positions, spot widths and precisions from camera pixels to nm, the unit of
+every localization file (see :doc:`files`). If it is not given, Picasso takes
+the ``Pixelsize`` of the movie metadata, then the entry of the camera in the
+camera configuration (:ref:`localize-camera-config`); if none of them records
+it, ``picasso localize`` stops and asks for ``--pixelsize``. The value used is
+printed and saved as ``Pixelsize`` in the metadata. ``spline-calibrate``
+resolves it the same way; ``lateral-calibrate`` requires ``--pixelsize``.
+
 Pre-filters
 ~~~~~~~~~~~
 ``--temporal-median``
@@ -169,7 +178,8 @@ gradient; ``--gradient`` is then ignored. See :ref:`localize-wavelet`.
    How the noise is estimated: ``image-std``, the default, or ``w1-mad``,
    which is robust to dense spots and uneven background.
 ``--wavelet-min-area``
-   The smallest region kept (default 4 pixels).
+   The smallest region kept (default 4 camera pixels, i.e., an area on the
+   detector grid).
 
 The localizations have no ``net_gradient`` column. See
 :ref:`localize-wavelet`. ``spline-calibrate`` and
@@ -257,14 +267,14 @@ rendered to image files.
      - Default
      - Description
    * - ``-px``, ``--disp-px-size`` (float)
-     - ``1.0``
+     - ``10.0``
      - The size of the rendered pixel in nm.
    * - ``-b``, ``--blur-method``
      - ``convolve``
      - One of ``none``, ``convolve``, ``gaussian``.
    * - ``-w``, ``--min-blur-width`` (float)
      - ``0.0``
-     - Minimum blur width if blur is applied.
+     - Minimum blur width (nm) if blur is applied.
    * - ``--vmin`` (float)
      - ``0.0``
      - Minimum colormap level in range 0-100 or absolute value.
@@ -302,7 +312,7 @@ For example:
 
 .. code-block:: bash
 
-   picasso filter "data/*_locs.hdf5" "0.8 < sx < 1.2" "lpx * pixelsize < 10"
+   picasso filter "data/*_locs.hdf5" "100 < sx < 160" "lpx < 10"
 
 Positional arguments:
 
@@ -388,10 +398,43 @@ CSV structure).
 
 .. _cmd-conversion:
 
+.. _cmd-convert-units:
+
+convert-units
+-------------
+Convert files written before Picasso 1.0, whose lengths are in camera pixels,
+to the current format in nm (see :ref:`files-legacy`): localizations (and
+their ``.yaml`` metadata), pick regions, drift ``.txt`` files, astigmatism and
+lateral calibrations, SPINNA masks and nanoTRON models. Files that are in nm
+already are skipped.
+
+.. code-block:: bash
+
+   picasso convert-units FILE [FILE ...] [--pixelsize PS] [--in-place]
+
+.. list-table::
+   :header-rows: 1
+
+   * - Argument
+     - Description
+   * - ``files``
+     - The files to convert.
+   * - ``-px``, ``--pixelsize``
+     - Camera pixel size in nm for files that do not record it (pick regions,
+       drift files, calibrations and nanoTRON models always need it;
+       localizations use the ``Pixelsize`` of their metadata). Default: from
+       the metadata.
+   * - ``--in-place``
+     - Replace the original files. By default, the converted files are
+       written next to the originals with ``_nm`` appended to their names
+       (``movie_locs_nm.hdf5``).
+
 csv2hdf
 -------
-Convert csv files (ThunderSTORM) to ``.hdf5``. ``-p/--pixelsize`` in nm is
-required.
+Convert csv files (ThunderSTORM) to ``.hdf5``. ``-p/--pixelsize`` is the
+camera pixel size in nm, recorded in the metadata (``Pixelsize``) and used to
+derive the field of view (``Width``, ``Height``) from the coordinates; it is
+required. The coordinates stay in nm, as in ThunderSTORM.
 
 .. code-block:: bash
 
@@ -457,8 +500,9 @@ Convert hdf5 files to ViSP ``.3d`` files.
 smap2hdf
 --------
 Convert `SMAP <https://github.com/jries/SMAP>`_ ``_sml.mat`` files to
-``.hdf5``. ``-p/--pixelsize`` in nm is required, since SMAP stores coordinates
-in nm while Picasso uses camera pixels.
+``.hdf5``. ``-p/--pixelsize`` is the camera pixel size in nm, recorded in
+the metadata (``Pixelsize``) and used to derive the field of view from the
+coordinates; it is required. The coordinates stay in nm, as in SMAP.
 
 .. code-block:: bash
 
@@ -590,9 +634,9 @@ Link localizations in consecutive frames.
      - Default
      - Description
    * - ``-d``, ``--distance`` (float)
-     - ``1.0``
+     - ``10``
      - Maximum distance between localizations to consider them the same
-       binding event (camera pixels).
+       binding event (nm).
    * - ``-t``, ``--tolerance`` (int)
      - ``1``
      - Maximum dark time between localizations to still consider them the
@@ -611,7 +655,7 @@ Linked localizations (see `link`_) are skipped.
 
 .. code-block:: bash
 
-   picasso track files [-d max-jump] [-g max-gap] [-m min-length] [-t frame-time] [--pixelsize pixelsize]
+   picasso track files [-d max-jump] [-g max-gap] [-m min-length] [-t frame-time]
 
 .. list-table::
    :header-rows: 1
@@ -634,8 +678,10 @@ Linked localizations (see `link`_) are skipped.
      - Time between two consecutive frames (ms), stored in the metadata for
        ``picasso diffusion``.
    * - ``--pixelsize`` (float)
-     - from the metadata
-     - Camera pixel size (nm).
+     - ignored
+     - Deprecated: the localizations are in nm since Picasso 1.0, so no
+       conversion is needed. The option is accepted with a warning until
+       Picasso 2.0.
 
 .. _cmd-diffusion:
 
@@ -691,8 +737,10 @@ to the median localization precision, saving the plots:
      - Save the plots of the MSD, the jump distances and the track lengths
        as ``.png`` files.
    * - ``--pixelsize`` (float)
-     - from the metadata
-     - Camera pixel size (nm).
+     - ignored
+     - Deprecated: the localizations are in nm since Picasso 1.0, so no
+       conversion is needed. The option is accepted with a warning until
+       Picasso 2.0.
 
 cluster-filter
 --------------
@@ -761,12 +809,12 @@ Correct localization coordinates for drift with AIM.
      - ``100``
      - The number of frames to be combined for one temporal segment.
    * - ``-i``, ``--intersect-distance`` (float)
-     - ``20/130``
-     - Max. distance (camera pixels) between localizations in consecutive
-       segments to be considered as intersecting.
+     - ``20``
+     - Max. distance (nm) between localizations in consecutive segments to
+       be considered as intersecting.
    * - ``-r``, ``--roi-radius`` (float)
-     - ``60/130``
-     - Max. drift (camera pixels) between two consecutive segments.
+     - ``60``
+     - Max. drift (nm) between two consecutive segments.
 
 undrift-fiducials
 -----------------
@@ -781,7 +829,7 @@ positional arguments.
 density
 -------
 Compute the local density of localizations. Takes positional ``files`` and
-``radius`` (float): the maximal distance between two localizations to be
+``radius`` (float): the maximal distance (nm) between two localizations to be
 considered local.
 
 .. code-block:: bash
@@ -794,19 +842,16 @@ Cluster localizations with the DBSCAN clustering algorithm.
 
 .. code-block:: bash
 
-   picasso dbscan files radius density [pixelsize]
+   picasso dbscan files radius density
 
 Positional arguments:
 
 ``files``
    One or more hdf5 localization files.
 ``radius`` (float)
-   Maximal distance (camera pixels) between two localizations to be
-   considered local.
+   Maximal distance (nm) between two localizations to be considered local.
 ``density`` (int)
    Minimum local density for localizations to be assigned to a cluster.
-``pixelsize`` (int)
-   Camera pixel size in nm (required for 3D localizations only).
 
 hdbscan
 -------
@@ -814,7 +859,7 @@ Cluster localizations with the HDBSCAN clustering algorithm.
 
 .. code-block:: bash
 
-   picasso hdbscan files min_cluster min_samples [pixelsize]
+   picasso hdbscan files min_cluster min_samples
 
 Positional arguments:
 
@@ -824,8 +869,6 @@ Positional arguments:
    Smallest size grouping that is considered a cluster.
 ``min_samples`` (int)
    The higher, the more points are considered noise.
-``pixelsize`` (int)
-   Camera pixel size in nm (required for 3D localizations only).
 
 smlm-cluster
 ------------
@@ -835,22 +878,20 @@ finds clusters based on such "local maxima".
 
 .. code-block:: bash
 
-   picasso smlm-cluster files radius min_locs [pixelsize] [basic_fa] [radius_z]
+   picasso smlm-cluster files radius min_locs [basic_fa] [radius_z]
 
 Positional arguments:
 
 ``files``
    One or more hdf5 localization files.
 ``radius`` (float)
-   Clustering radius (in camera pixels).
+   Clustering radius (nm).
 ``min_locs`` (int)
    Minimum number of localizations in a cluster.
-``pixelsize`` (int)
-   Camera pixel size in nm (required for 3D localizations only).
 ``basic_fa`` (bool)
    Whether to perform basic frame analysis (sticking event removal).
 ``radius_z`` (float)
-   Clustering radius in axial direction (MUST BE SET FOR 3D!).
+   Clustering radius (nm) in axial direction (MUST BE SET FOR 3D!).
 
 g5m
 ---
@@ -958,11 +999,11 @@ Calculate the pair-correlation of localizations.
      - Default
      - Description
    * - ``-b``, ``--bin-size`` (float)
-     - ``0.1``
-     - The bin size (camera pixels).
-   * - ``-r``, ``--r-max`` (float)
      - ``10``
-     - The maximum distance to calculate the pair-correlation.
+     - The bin size (nm).
+   * - ``-r``, ``--r-max`` (float)
+     - ``1000``
+     - The maximum distance (nm) to calculate the pair-correlation.
 
 nearest-neighbor
 ----------------

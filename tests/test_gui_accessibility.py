@@ -19,7 +19,7 @@ from picasso import io
 from picasso.gui import accessibility
 from picasso.gui import render as gui_render
 
-from tests.test_gui_rotation_async import HEIGHT, WIDTH, _info, _locs
+from tests.test_gui_rotation_async import HEIGHT_NM, WIDTH_NM, _info, _locs
 
 
 def _name(widget: QtWidgets.QWidget) -> str:
@@ -196,7 +196,7 @@ def test_render_window_inputs_have_names(qt_offscreen, tmp_path, monkeypatch):
         window.view.add(
             str(tmp_path / f"locs_{i}.hdf5"), _locs(), _info(), render_=False
         )
-    window.view.viewport = [(0.0, 0.0), (HEIGHT, WIDTH)]
+    window.view.viewport = [(0.0, 0.0), (HEIGHT_NM, WIDTH_NM)]
     try:
         dialogs = [window.display_settings_dlg, window.dataset_dialog]
         for dialog in dialogs:

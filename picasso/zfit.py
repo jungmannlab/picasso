@@ -132,10 +132,12 @@ def calibrate_z(
     -------
     calibration : dict
         Dictionary containing the calibration coefficients (i.e.,
-        polynomial coefficients), number of frames, step size, z binning
-        and magnification factor.
+        polynomial coefficients of the spot width/height in nm against
+        z in nm), number of frames, step size, z binning, magnification
+        factor and the format marker (``io.FORMAT_VERSION_ATTR``).
     """
     n_frames = info[0]["Frames"]
+    pixelsize = lib.get_from_metadata(info, "Pixelsize", raise_error=True)
     frames_per_step = max(1, int(frames_per_step))
     # number of distinct z (stage) positions; any trailing frames that do
     # not complete a step are ignored
@@ -243,12 +245,12 @@ def calibrate_z(
         "Frames per step": int(frames_per_step),
         "Frame order": frame_order,
         "Z binning": int(z_binning),
+        io.FORMAT_VERSION_ATTR: io.FORMAT_VERSION,
     }
     if path is not None:
         io.save_calibration(path, calibration)
 
-    # pixelsize does not matter here anyway
-    locs = _fit_z(locs, info, calibration, magnification_factor, pixelsize=130)
+    locs = _fit_z(locs, info, calibration, magnification_factor, pixelsize)
     locs["z"] /= magnification_factor
     # position of each localization's z (stage) position within step_range
     locs_step = step_of_frame[locs["frame"].to_numpy()]
@@ -261,8 +263,8 @@ def calibrate_z(
     plt.plot(z_bins, mean_sy_bins, ".-", label="y")
     plt.plot(z_range, np.polyval(cx, z_range), "0.3", lw=1.5, label="x fit")
     plt.plot(z_range, np.polyval(cy, z_range), "0.3", lw=1.5, label="y fit")
-    plt.xlabel("Stage position")
-    plt.ylabel("Mean spot width/height")
+    plt.xlabel("Stage position (nm)")
+    plt.ylabel("Mean spot width/height (nm)")
     plt.xlim(z_range.min(), z_range.max())
     plt.legend(loc="best")
 
@@ -276,8 +278,8 @@ def calibrate_z(
     )
     plt.plot()
     ax.set_aspect("equal")
-    plt.xlabel("Spot width")
-    plt.ylabel("Spot height")
+    plt.xlabel("Spot width (nm)")
+    plt.ylabel("Spot height (nm)")
     plt.legend(loc="best")
 
     plt.subplot(233)
@@ -292,8 +294,8 @@ def calibrate_z(
     )
     plt.plot(z_range, np.polyval(cy, z_range), "0.3", lw=1.5)
     plt.xlim(z_range.min(), z_range.max())
-    plt.xlabel("Estimated z")
-    plt.ylabel("Spot width/height")
+    plt.xlabel("Estimated z (nm)")
+    plt.ylabel("Spot width/height (nm)")
     plt.legend(loc="best")
 
     ax = plt.subplot(234)
@@ -307,15 +309,15 @@ def calibrate_z(
     plt.xlim(z_range.min(), z_range.max())
     plt.ylim(z_range.min(), z_range.max())
     ax.set_aspect("equal")
-    plt.xlabel("Stage position")
-    plt.ylabel("Estimated z")
+    plt.xlabel("Stage position (nm)")
+    plt.ylabel("Estimated z (nm)")
     plt.legend(loc="best")
 
     ax = plt.subplot(235)
     deviation = locs["z"] - z_range[pos]
     bins = lib.calculate_optimal_bins(deviation, max_n_bins=1000)
     plt.hist(deviation, bins)
-    plt.xlabel("Deviation to true position")
+    plt.xlabel("Deviation to true position (nm)")
     plt.ylabel("Occurence")
 
     ax = plt.subplot(236)
@@ -327,8 +329,8 @@ def calibrate_z(
     plt.plot(z_range, rmsd_step, ".-", color="0.3")
     plt.xlim(z_range.min(), z_range.max())
     plt.gca().set_ylim(bottom=0)
-    plt.xlabel("Stage position")
-    plt.ylabel("Mean z precision")
+    plt.xlabel("Stage position (nm)")
+    plt.ylabel("Mean z precision (nm)")
 
     plt.tight_layout(pad=2)
 
@@ -349,11 +351,12 @@ def _fit_z_target(
     cy: lib.FloatArray1D,
 ) -> float:
     """Target function that's to be minimized for fitting the z
-    coordinates given the single-emitter image width and height as well
-    as the calibration curve coefficients. It calculates the difference
-    between the square root of the spot width/height and the polynomial
-    fit of the z-axis calibration curve. Based on Huang et al. Science,
-    2008. DOI: 10.1126/science.1153529."""
+    coordinates given the single-emitter image width and height (nm) as
+    well as the calibration curve coefficients (spot widths in nm
+    against z in nm). It calculates the difference between the square
+    root of the spot width/height and the polynomial fit of the z-axis
+    calibration curve. Based on Huang et al. Science, 2008. DOI:
+    10.1126/science.1153529."""
     z2 = z * z
     z3 = z * z2
     z4 = z * z3
@@ -393,7 +396,9 @@ def _fit_z(
     ) = None,
 ) -> pd.DataFrame:
     """Internal function for fitting z coordinates to the localizations.
-    See `zfit` for details."""
+    See `zfit` for details. ``calibration`` and the spot widths of
+    ``locs`` are in nm; ``pixelsize`` (nm) is only used to evaluate the
+    spot width uncertainties, whose formulas work in camera pixels."""
     locs = locs.copy()
     cx = np.array(calibration["X Coefficients"])
     cy = np.array(calibration["Y Coefficients"])
@@ -813,7 +818,8 @@ def zfit(
     Parameters
     ----------
     locs : pd.DataFrame
-        Localizations (2D fitted).
+        Localizations (2D fitted), with the spot widths ``sx``, ``sy``
+        in nm.
     info : list of dicts
         Localizations metadata. Should include a "Pixelsize" key with
         the effective camera pixel size in nm. If not, must be provided
@@ -822,7 +828,8 @@ def zfit(
         Calibration dictionary containing the following keys:
 
         - "X Coefficients": list of 7 floats, polynomial coefficients
-            for the x-axis calibration curve;
+            for the x-axis calibration curve (spot width in nm against
+            z in nm);
         - "Y Coefficients": list of 7 floats, polynomial coefficients
             for the y-axis calibration curve;
         - "Magnification factor": float, magnification factor of the
@@ -832,7 +839,12 @@ def zfit(
 
         Note that "Magnification factor" can be overwritten by the
         `magnification_factor` argument. See ``io.load_calibration``
-        on how to open a calibration YAML file.
+        on how to open a calibration YAML file. A calibration written
+        before Picasso 1.0 (spot widths in camera pixels, no
+        ``picasso_format`` key) is converted to nm with the camera pixel
+        size (``pixelsize`` or the metadata's "Pixelsize"), with a
+        warning; ``picasso convert-units`` converts the file once and
+        for all.
     magnification_factor : float, optional
         Magnification factor of the microscope, i.e., the ratio between
         the actual z position of the calibration sample and the
@@ -840,7 +852,10 @@ def zfit(
         value must be given in `calibration`.
     pixelsize : float, optional
         Camera pixel size in nm. If given, the value in `info` will be
-        ignored. If None, the value must be given in `info`.
+        ignored. If None, the value must be given in `info`. It is used
+        to evaluate the spot width uncertainties (whose formulas work in
+        camera pixels) and to convert a calibration written before
+        Picasso 1.0.
     fitting_method : {"gausslq", "gaussmle"}, optional
         Fitting method used to obtain 2D localization parameters. Used
         to determine axial localization precision. Default is "gausslq".
@@ -899,6 +914,19 @@ def zfit(
         calibration,
         dict,
     ), "Calibration must be a dict, see ``io.load_calibration``."
+    if pixelsize is not None:
+        assert isinstance(
+            pixelsize, (int, float)
+        ), "Pixelsize must be a number in nm."
+        pixelsize = float(pixelsize)
+    else:
+        pixelsize = lib.get_from_metadata(info, "Pixelsize")
+        if pixelsize is None:
+            raise ValueError(
+                "Camera pixel size (nm) is missing. Enter it either in the "
+                "info metadata ('Pixelsize'), or as the pixelsize argument."
+            )
+    calibration = _calibration_in_nm(calibration, pixelsize)
     if magnification_factor is not None:
         assert isinstance(
             magnification_factor, (int, float)
@@ -908,22 +936,12 @@ def zfit(
         assert (
             "Magnification factor" in calibration
         ), "Magnification factor is missing in calibration."
-    if pixelsize is not None:
-        assert isinstance(
-            pixelsize, (int, float)
-        ), "Pixelsize must be a number in nm."
-        pixelsize = float(pixelsize)
-        info.append({"Pixelsize": pixelsize})
-    else:
-        assert lib.get_from_metadata(info, "Pixelsize") is not None, (
-            "Camera pixel size (nm) is missing. Enter it either in the "
-            "info metadata, or as an argument."
-        )
 
     return _zfit(
         locs,
         info,
         calibration,
+        pixelsize,
         fitting_method,
         filter,
         lateral_transforms,
@@ -932,6 +950,39 @@ def zfit(
         progress_callback,
         abort_callback,
     )
+
+
+def _calibration_in_nm(calibration: dict, pixelsize: float | None) -> dict:
+    """A copy of ``calibration`` with its spot widths in nm.
+
+    A calibration carrying the format marker (``io.FORMAT_VERSION_ATTR``,
+    written by Picasso 1.0 or later, or loaded with
+    ``io.load_calibration``) is in nm already. One without it was
+    recorded in camera pixels and is converted with ``pixelsize`` (see
+    ``legacy.calibration_to_nm``), with a warning; without a pixel size
+    a ValueError is raised.
+    """
+    if io.FORMAT_VERSION_ATTR in calibration:
+        return dict(calibration)
+    if pixelsize is None:
+        raise ValueError(
+            "The 3D calibration has no 'picasso_format' key, i.e., it was "
+            "written before Picasso 1.0 with spot widths in camera pixels. "
+            "Pass the camera pixel size (pixelsize, nm) to convert it, or "
+            "convert the file once with 'picasso convert-units'."
+        )
+    from . import legacy
+
+    warnings.warn(
+        "The 3D calibration has no 'picasso_format' key, i.e., it was "
+        "written before Picasso 1.0 with spot widths in camera pixels; "
+        f"converting it to nm with a camera pixel size of {pixelsize:g} nm "
+        "(assumed to be the one the calibration was recorded with). "
+        "Convert the file once with 'picasso convert-units'.",
+        UserWarning,
+        stacklevel=3,
+    )
+    return legacy.calibration_to_nm(calibration, pixelsize)
 
 
 def _await_parallel_z_fit(
@@ -998,6 +1049,7 @@ def _apply_lateral_transforms_and_build_info(
     calibration: dict,
     lateral_transforms: dict | list | str | None,
     filter: int,
+    pixelsize: float | None = None,
 ) -> tuple[pd.DataFrame, list[dict]]:
     """Apply the calibration's lateral corrections plus any extra ones,
     and assemble the info dict describing the z fit.
@@ -1011,7 +1063,7 @@ def _apply_lateral_transforms_and_build_info(
     # both counts once - applying it twice would correct twice.
     own = lib.lateral_transforms(calibration)
     extra, duplicates = lib.drop_duplicate_lateral_transforms(
-        lib.resolve_lateral_transforms(lateral_transforms), own
+        lib.resolve_lateral_transforms(lateral_transforms, pixelsize), own
     )
     if duplicates:
         warnings.warn(
@@ -1036,7 +1088,11 @@ def _apply_lateral_transforms_and_build_info(
         new_info["Lateral corrections skipped"] = (
             lib.describe_lateral_transforms(duplicates)
         )
-    new_info = info + [new_info | calibration]
+    # the format marker describes the calibration file, not the metadata
+    recorded = {
+        k: v for k, v in calibration.items() if k != io.FORMAT_VERSION_ATTR
+    }
+    new_info = info + [new_info | recorded]
     return locs, new_info
 
 
@@ -1044,6 +1100,7 @@ def _zfit(
     locs: pd.DataFrame,
     info: list[dict],
     calibration: dict,
+    pixelsize: float,
     fitting_method: Literal["gausslq", "gaussmle"],
     filter: int,
     lateral_transforms: dict | list | str | None,
@@ -1053,8 +1110,7 @@ def _zfit(
     abort_callback: Callable[[], bool] | None,
 ) -> tuple[pd.DataFrame, list[dict]] | tuple[None, None]:
     """Internal function for fitting z coordinates to the localizations.
-    See `zfit` for details."""
-    pixelsize = lib.get_from_metadata(info, "Pixelsize", raise_error=True)
+    See `zfit` for details. ``calibration`` is in nm."""
     N = len(locs)
     if gpu:
         locs = _fit_z_gpu(
@@ -1095,7 +1151,7 @@ def _zfit(
             progress_callback=progress_callback,
         )
     return _apply_lateral_transforms_and_build_info(
-        locs, info, calibration, lateral_transforms, filter
+        locs, info, calibration, lateral_transforms, filter, pixelsize
     )
 
 
@@ -1170,12 +1226,13 @@ def axial_localization_precision(
     Parameters
     ----------
     locs : np.recarray
-        Localizations.
+        Localizations (spot widths in nm).
     info : list of dicts
-        Localizations metadata.
+        Localizations metadata (with the camera pixel size "Pixelsize"
+        in nm).
     calibration : dict
-        Calibration dictionary with x and y coefficients and
-        magnification factor.
+        Calibration dictionary with x and y coefficients (spot widths in
+        nm against z in nm) and magnification factor.
     fitting_method : {"gausslq", "gaussmle"}, optional
         Fitting method used to obtain 2D localization parameters (x, y,
         sx, sy). Default is "gausslq".
@@ -1214,12 +1271,14 @@ def axial_localization_precision_astig(
     Parameters
     ----------
     locs : np.recarray
-        Localizations.
+        Localizations (spot widths in nm).
     info : list of dicts
-        Localizations metadata.
+        Localizations metadata (with the camera pixel size "Pixelsize"
+        in nm).
     calibration : dict
         Calibration dictionary with the keys "X Coefficients",
-        "Y Coefficients" and "Magnification factor".
+        "Y Coefficients" (spot widths in nm against z in nm) and
+        "Magnification factor".
     fitting_method : {"gausslq", "gaussmle"}, optional
         Fitting method used to obtain 2D localization parameters (x, y,
         sx, sy). Default is "gausslq".
@@ -1273,10 +1332,11 @@ def _axial_localization_precision_astig(
     Parameters
     ----------
     locs : pd.DataFrame
-        Localizations. Must include columns 'photons', 'sx', 'sy', 'bg',
-        and 'z', see https://picassosr.readthedocs.io/en/latest/files.html#files-localization-hdf5  # noqa: E501
+        Localizations. Must include columns 'photons', 'sx', 'sy' (nm),
+        'bg', and 'z', see https://picassosr.readthedocs.io/en/latest/files.html#files-localization-hdf5  # noqa: E501
     cx : lib.FloatArray1D
-        3D calibration coefficients for x.
+        3D calibration coefficients for x (spot width in nm against z
+        in nm).
     cy : lib.FloatArray1D
         3D calibration coefficients for y.
     magnification_factor : float
@@ -1284,7 +1344,10 @@ def _axial_localization_precision_astig(
         the actual z position of the calibration sample and the
         estimated z position from the localization data.
     pixelsize : float
-        Camera pixel size in nm.
+        Camera pixel size in nm. The spot width uncertainty formulas
+        (``picasso.fitting.precision``) work in camera pixels, e.g., the
+        pixelation term; the spot widths are converted for them and the
+        uncertainties back to nm.
     fitting_method : {"gausslq", "gaussmle"}, optional
         Fitting method used to obtain 2D localization parameters (x, y,
         sx, sy). Default is "gausslq".
@@ -1294,16 +1357,18 @@ def _axial_localization_precision_astig(
     lpz : lib.FloatArray1D
         Calculated lpz values for the given localizations in nm.
     """
+    sx_px = locs["sx"] / pixelsize
+    sy_px = locs["sy"] / pixelsize
     if fitting_method == "gausslq":
         se_sx = (
             precision.sigma_uncertainty_lsq(
-                locs["sx"], locs["sy"], locs["photons"], locs["bg"]
+                sx_px, sy_px, locs["photons"], locs["bg"]
             )
             * pixelsize
         )
         se_sy = (
             precision.sigma_uncertainty_lsq(
-                locs["sy"], locs["sx"], locs["photons"], locs["bg"]
+                sy_px, sx_px, locs["photons"], locs["bg"]
             )
             * pixelsize
         )
@@ -1311,34 +1376,34 @@ def _axial_localization_precision_astig(
         if "sx_unc" not in locs.columns or "sy_unc" not in locs.columns:
             se_sx = (
                 precision.sigma_uncertainty_mle(
-                    locs["sx"], locs["sy"], locs["photons"], locs["bg"]
+                    sx_px, sy_px, locs["photons"], locs["bg"]
                 )
                 * pixelsize
             )
             se_sy = (
                 precision.sigma_uncertainty_mle(
-                    locs["sy"], locs["sx"], locs["photons"], locs["bg"]
+                    sy_px, sx_px, locs["photons"], locs["bg"]
                 )
                 * pixelsize
             )
         else:
-            se_sx = locs["sx_unc"] * pixelsize
-            se_sy = locs["sy_unc"] * pixelsize
+            se_sx = locs["sx_unc"]
+            se_sy = locs["sy_unc"]
     else:
         raise ValueError("fitting_method must be 'gausslq' or 'gaussmle'.")
 
     # to pinpoint what was the actual spot size during measurement
     z = locs["z"] / magnification_factor
-    wx_calib = _get_calib_size(cx, z) * pixelsize
-    wy_calib = _get_calib_size(cy, z) * pixelsize
-    wx_calib_prime = _get_prime_calib_size(cx, z) * pixelsize
-    wy_calib_prime = _get_prime_calib_size(cy, z) * pixelsize
+    wx_calib = _get_calib_size(cx, z)
+    wy_calib = _get_calib_size(cy, z)
+    wx_calib_prime = _get_prime_calib_size(cx, z)
+    wy_calib_prime = _get_prime_calib_size(cy, z)
     sqrt_wx_calib = np.sqrt(wx_calib)
     sqrt_wx_calib_prime = wx_calib_prime / (2 * sqrt_wx_calib)
     sqrt_wy_calib = np.sqrt(wy_calib)
     sqrt_wy_calib_prime = wy_calib_prime / (2 * sqrt_wy_calib)
-    delta_sqrt_wx = (1 / (2 * np.sqrt(locs["sx"] * pixelsize))) * se_sx
-    delta_sqrt_wy = (1 / (2 * np.sqrt(locs["sy"] * pixelsize))) * se_sy
+    delta_sqrt_wx = (1 / (2 * np.sqrt(locs["sx"]))) * se_sx
+    delta_sqrt_wy = (1 / (2 * np.sqrt(locs["sy"]))) * se_sy
     swxc2 = sqrt_wx_calib_prime**2
     swyc2 = sqrt_wy_calib_prime**2
     swx2 = delta_sqrt_wx**2

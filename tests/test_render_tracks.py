@@ -17,7 +17,7 @@ from PyQt6 import QtGui
 
 from picasso import render
 
-# 100 x 100 display pixels showing 50 x 50 camera pixels
+# 100 x 100 display pixels showing 50 x 50 nm (segments are in nm)
 VIEWPORT = ((0.0, 0.0), (50.0, 50.0))
 SIZE = (100, 100)
 
@@ -105,7 +105,7 @@ def test_tracks_are_drawn_in_their_palette_colors():
     )
     rgb = _rgb(image)
     rows = _line_rows(rgb)
-    # one sharp line each, at y = 10 and 30 camera px
+    # one sharp line each, at y = 10 and 30 nm
     assert len(rows) == 2
     assert abs(rows[0] - 20) <= 1 and abs(rows[1] - 60) <= 1
     assert tuple(rgb[rows[0], 50]) == (255, 0, 0)

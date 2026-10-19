@@ -29,7 +29,16 @@ from matplotlib.backends.backend_qt5agg import (
 )
 from matplotlib.widgets import SpanSelector, RectangleSelector
 
-from .. import io, lib, clusterer, expression, __version__, docs_url
+from .. import (
+    io,
+    lib,
+    lib_qt,
+    clusterer,
+    expression,
+    legacy,
+    __version__,
+    docs_url,
+)
 from .app import run_gui
 from . import idle
 from . import theme
@@ -217,6 +226,30 @@ class PlotWindow(QtWidgets.QWidget):
         pass
 
 
+#: Columns in nm that the legacy table does not list (they were never in
+#: camera pixels).
+_NM_COLUMNS = frozenset({"z", "lpz", "std_z", "com_z"})
+_UNITS = {1: "nm", 2: "nm^2", 3: "nm^3"}
+
+
+def _axis_label(field: str | None) -> str | None:
+    """The axis label of a column: its name, with the unit for lengths,
+    areas and volumes (``x (nm)``, ``area (nm^2)``)."""
+    if field is None:
+        return None
+    if field in _NM_COLUMNS:
+        return f"{field} (nm)"
+    base = field
+    for suffix in ("_mean", "_std", "_min", "_max"):
+        if field.endswith(suffix):
+            base = field[: -len(suffix)]
+            break
+    power = legacy.LEGACY_PIXEL_COLUMNS.get(base)
+    if power is None or (base != field and power != 1):
+        return field
+    return f"{field} ({_UNITS[power]})"
+
+
 class HistWindow(PlotWindow):
     """Window for displaying 1D histograms.
 
@@ -250,7 +283,7 @@ class HistWindow(PlotWindow):
         style.style_figure(self.figure)
         axes = self.figure.add_subplot(111)
         style.style_axes(axes)
-        style.label(axes, self.field, "Counts")
+        style.label(axes, _axis_label(self.field), "Counts")
         if len(data) == 0:
             self.canvas.draw()
             return
@@ -327,7 +360,9 @@ class Hist2DWindow(PlotWindow):
         if len(x) == 0:
             axes = self.figure.add_subplot(111)
             style.style_axes(axes)
-            style.label(axes, self.field_x, self.field_y)
+            style.label(
+                axes, _axis_label(self.field_x), _axis_label(self.field_y)
+            )
             self.canvas.draw()
             return
         bins_x = lib.calculate_optimal_bins(x, style.max_bins)
@@ -409,7 +444,7 @@ class Hist2DWindow(PlotWindow):
                 image, cax=self.figure.add_subplot(grid[-1, -1])
             )
             style.style_colorbar(colorbar)
-        style.label(axes, self.field_x, self.field_y)
+        style.label(axes, _axis_label(self.field_x), _axis_label(self.field_y))
         style.title(
             self.figure,
             f"{self.field_x} vs. {self.field_y}  ·  "
@@ -568,8 +603,8 @@ class FilterNum(lib.Dialog):
 
 EXPRESSION_TOOLTIP = (
     "Condition that the kept localizations satisfy, e.g.,\n"
-    "  photons > 500 and 0.8 < sx < 1.2\n"
-    "  lpx * pixelsize < 10    (pixelsize: nm per camera pixel)\n"
+    "  photons > 500 and 100 < sx < 160\n"
+    "  lpx < 10    (lengths in nm)\n"
     "  photons > median(photons)\n\n"
     "Comparisons: < <= > >= == != (also chained: 0.8 < sx < 1.2)\n"
     "Logic: and, or, not\n"
@@ -1277,10 +1312,13 @@ class Window(QtWidgets.QMainWindow):
 
     def open(self, path: str) -> None:
         try:
-            locs, self.info = io.load_filter(path)
+            loaded = lib_qt.load_or_ask_pixelsize(self, io.load_filter, path)
         except lib.FILE_LOAD_ERRORS as error:
             lib.show_load_error(self, path, error)
             return
+        if loaded is None:  # the pixel size prompt was canceled
+            return
+        locs, self.info = loaded
         # the windows of the previous file (not read back if on disk)
         windows = list(self.hist_windows.values())
         for by_y in self.hist2d_windows.values():

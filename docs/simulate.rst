@@ -44,9 +44,11 @@ Simulate DNA-PAINT image acquisitions
    settings, such as the total acquisition time, the mean dark time or the
    photons per frame, are shown in a muted color.
 
-   The default image size is set to 32 pixels. As the computation time
-   increases considerably with image size, it is recommended to simulate only
-   a subset of the actual camera field of view.
+   The default image size is set to 32 camera pixels (the simulation grid
+   is the camera chip itself, so image size, frame margin and positions are
+   counted in camera pixels; their size in nm follows from ``Pixel size``).
+   As the computation time increases considerably with image size, it is
+   recommended to simulate only a subset of the actual camera field of view.
 6. Select ``Simulate data`` (bottom right, or ``Simulation > Simulate data...``,
    :kbd:`Ctrl+R`) to start the simulation; a progress bar is shown while it
    runs (see :ref:`simulate-run` below).
@@ -99,7 +101,8 @@ Selecting the button ``Generate positions`` (``Simulation > Generate
 positions``, :kbd:`Ctrl+G`) will generate a list of positions with the current
 settings and update the two preview panels:
 
-- ``Positions`` shows the whole simulated field of view in camera pixels.
+- ``Positions`` shows the whole simulated field of view in camera pixels (the
+  grid the movie is simulated on).
   Each cross is one handle (binding site) that will be simulated, so a
   structure appears as a small cluster of crosses. Handles dropped by
   ``Incorporation`` are not shown. The dashed square marks the ``Frame``
@@ -121,8 +124,11 @@ file, ready for subsequent localization.
 - All simulation settings are saved and can be loaded at a later time with
   ``File > Load settings from previous simulation...``: select the .yaml file
   next to the simulated movie. This restores the settings and the simulated
-  docking strand positions; a file that does not contain them is reported and
-  changes nothing.
+  docking strand positions (``Structure.CX (nm)`` and ``Structure.CY (nm)``);
+  a file that does not contain them is reported and changes nothing. The
+  ``.yaml`` also carries the camera pixel size as the top-level ``Pixelsize``
+  key (next to ``Camera.Pixelsize``), which Localize needs to save the
+  localizations in nm.
 - For 3D data, check ``Simulate 3D`` and load the 3D calibration with
   ``File > Load 3D calibration...`` (see :ref:`localize-3d-calibration` for
   how to create one).
@@ -140,14 +146,14 @@ file, ready for subsequent localization.
       import numpy as np
       from picasso import simulate
 
-      pixelsize, imagesize, frames, itime = 130, 32, 5000, 100   # nm, px, -, ms
+      pixelsize, imagesize, frames, itime = 130, 32, 5000, 100   # nm, camera px, -, ms
 
       # 3 x 2 grid of handles, 20 nm apart; one exchange round, z = 0
       structure = simulate.define_structure(
           np.array([0, 20, 40, 0, 20, 40]), np.array([0, 0, 0, 20, 20, 20]),
           np.ones(6), np.zeros(6), pixelsize,
       )
-      positions = simulate.generate_positions(9, imagesize, 6, 0)     # 9 copies, 6 px margin, grid
+      positions = simulate.generate_positions(9, imagesize, 6, 0)     # 9 copies, 6 camera px margin, grid
       handles = simulate.prepare_structures(
           structure, positions, orientation=0, number=9, incorporation=0.85, exchange=0
       )
@@ -170,10 +176,12 @@ file, ready for subsequent localization.
           )
       movie = simulate.check_type(simulate.noisy_p(movie, 4))
 
+      # Pixelsize (nm) is what Localize needs to save the localizations in nm;
+      # Camera.Pixelsize is the key Simulate reads back from its own files
       info = {
           "Byte Order": "<", "Data Type": "uint16", "Frames": frames,
           "Height": imagesize, "Width": imagesize, "Camera": "Simulation",
-          "Camera.Pixelsize": pixelsize,
+          "Camera.Pixelsize": pixelsize, "Pixelsize": pixelsize,
       }
       simulate.save_movie("simulated.raw", movie, info)
 

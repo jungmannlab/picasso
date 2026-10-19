@@ -249,9 +249,9 @@ def render_scene(
     disp_px_size : float, optional
         Display pixel size in nm. Default is 100.0.
     viewport : tuple, optional
-        Field of view to be rendered (in camera pixels). The input is
-        ``((y_min, x_min), (y_max, x_max))``. If None, all localizations
-        are rendered.
+        Field of view to be rendered in nm,
+        ``((y_min, x_min), (y_max, x_max))``. If None, the whole field
+        of view is rendered (see ``lib.field_of_view``).
     blur_method : {"gaussian", "gaussian_iso", "smooth", "convolve"} or None, \
             optional
         Defines localizations' blur. The string has to be one of
@@ -263,10 +263,10 @@ def render_scene(
         pixel blur. 'convolve' applies the same blur to all
         localizations which is the median localization precision.
     min_blur_width : float, optional
-        Minimum size of blur (camera pixels).
+        Minimum size of blur (nm).
     max_blur_width : float, optional
-        Localizations whose ``lpx`` or ``lpy`` exceeds this (camera
-        pixels) are not rendered by 'gaussian' and 'gaussian_iso'.
+        Localizations whose ``lpx`` or ``lpy`` exceeds this (nm) are
+        not rendered by 'gaussian' and 'gaussian_iso'.
         If None (default), all localizations are rendered.
     ang : tuple or scipy.spatial.transform.Rotation, optional
         Rotation of locs; either a scipy Rotation (e.g. built from a
@@ -280,7 +280,7 @@ def render_scene(
         (default), all rows of every channel are rendered.
     global_precision : list of tuple or tuple, optional
         For each channel (a single ``(lpx, lpy)`` for a single ``locs``
-        DataFrame), the blur of the 'convolve' method in camera pixels
+        DataFrame), the blur of the 'convolve' method in nm
         (see ``render``); None entries use the median precision of the
         rows rendered.
     quadtree_capacity : int, optional
@@ -474,15 +474,15 @@ def _render_channels(
     disp_px_size : float
         Display pixel size in nm, see ``render``.
     viewport : tuple or None
-        Field of view ``((y_min, x_min), (y_max, x_max))`` in camera
-        pixels, see ``render``.
+        Field of view ``((y_min, x_min), (y_max, x_max))`` in nm, see
+        ``render``.
     blur_method : {"gaussian", "gaussian_iso", "smooth", "convolve"} or None
         Blur method, see ``render``.
     min_blur_width : float
-        Minimum size of blur (camera pixels), see ``render``.
+        Minimum size of blur (nm), see ``render``.
     max_blur_width : float, optional
         Maximum localization precision rendered by the Gaussian
-        methods (camera pixels), see ``render``. Default is None.
+        methods (nm), see ``render``. Default is None.
     ang : tuple or scipy.spatial.transform.Rotation or None
         Rotation of the localizations, see ``render``.
     indices : list of lib.IntArray1D or None, optional
@@ -900,12 +900,15 @@ def color_range(
         RGB color (uint8) of shape ``(3,)`` of pixels at the maximum
         contrast.
     """
+    # a two-pixel raw image (an empty and a full pixel) is colored
+    # like a rendering; nothing is rendered, so the display pixel size
+    # (required by the signature) is not used and any value will do
     if n_channels is None:
         raw = np.array([[0.0, 1.0]], dtype=np.float32)
         _, rgb, _, _ = _render_single_channel(
             None,
             None,
-            disp_px_size=1.0,
+            disp_px_size=1.0,  # unused, see above
             contrast=(0.0, 1.0),
             invert_colors=invert_colors,
             single_channel_colormap=single_channel_colormap,
@@ -920,7 +923,7 @@ def color_range(
         _, rgb, _, _ = _render_multi_channel(
             None,
             None,
-            disp_px_size=1.0,
+            disp_px_size=1.0,  # unused, see above
             colors=colors,
             contrast=(0.0, 1.0),
             channel_contrast=channel_contrast,

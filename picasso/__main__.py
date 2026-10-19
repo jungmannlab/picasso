@@ -511,7 +511,6 @@ def _undrift_rcc(
     undrift_info = lib.step_info("Undrift")
     if fromfile is not None:
         undrift_info["From File"] = fromfile
-        drift = io.load_drift(fromfile)
     else:
         undrift_info["Segmentation"] = segmentation
     for path in paths:
@@ -520,7 +519,11 @@ def _undrift_rcc(
         except io.NoMetadataFileError:
             continue
         if fromfile is not None:
-            # this works for mingjies drift files but not for the own ones
+            # the drift is in nm; files written before Picasso 1.0 are
+            # converted with the pixel size of the localizations
+            drift = io.load_drift(
+                fromfile, pixelsize=lib.get_from_metadata(info, "Pixelsize")
+            )
             locs.x -= drift.loc[locs.frame, "x"].to_numpy()
             locs.y -= drift.loc[locs.frame, "y"].to_numpy()
 
@@ -529,8 +532,7 @@ def _undrift_rcc(
 
                 plt.style.use("ggplot")
                 fig = plt.Figure(figsize=(10, 6), constrained_layout=True)
-                pixelsize = lib.get_from_metadata(info, "Pixelsize", 1.0)
-                postprocess.plot_drift(drift, pixelsize, fig)
+                postprocess.plot_drift(drift, fig)
                 plt.show()
         else:
             print(f"Undrifting file {path}")
@@ -553,11 +555,11 @@ def _undrift_rcc(
 def _undrift_aim(
     files: str,
     segmentation: int,
-    intersectdist: float = 20 / 130,
-    roiradius: float = 60 / 130,
+    intersectdist: float = 20.0,
+    roiradius: float = 60.0,
 ) -> None:
     """Run AIM undrifting on the given files. See ``aim.aim`` for
-    details."""
+    details. ``intersectdist`` and ``roiradius`` are in nm."""
     import glob
     from . import io, aim
 
@@ -639,7 +641,7 @@ def _density(files: str, radius: float) -> None:
             base, ext = os.path.splitext(path)
             density_info = {
                 **lib.step_info("Density"),
-                "Radius": radius,
+                "Radius (nm)": radius,
             }
             info.append(density_info)
             io.save_locs(base + "_density.hdf5", locs, info)
@@ -684,11 +686,10 @@ def _dbscan(
     files: str,
     radius: float,
     min_density: float,
-    pixelsize: float | None = None,
     radius_z: float | None = None,
 ) -> None:
     """Run DBSCAN clustering on localizations in HDF5 files. See
-    ``clusterer.dbscan`` for details."""
+    ``clusterer.dbscan`` for details. The radii are in nm."""
     import glob
 
     paths = glob.glob(files)
@@ -702,10 +703,9 @@ def _dbscan(
                 locs,
                 radius,
                 min_density,
-                pixelsize=pixelsize,
                 radius_z=radius_z,
             )
-            clusters = clusterer.find_cluster_centers(locs, pixelsize)
+            clusters = clusterer.find_cluster_centers(locs)
             base, _ = os.path.splitext(path)
             info.append(dbscan_info)
             io.save_locs(base + "_dbscan.hdf5", locs, info)
@@ -721,7 +721,6 @@ def _hdbscan(
     files: str,
     min_cluster: int,
     min_samples: int,
-    pixelsize: float | None = None,
 ) -> None:
     """Run HDBSCAN clustering on localizations in HDF5 files. See
     ``clusterer.hdbscan`` for details."""
@@ -735,9 +734,9 @@ def _hdbscan(
             print("Loading {} ...".format(path))
             locs, info = io.load_locs(path)
             locs, hdbscan_info = clusterer.hdbscan(
-                locs, min_cluster, min_samples, pixelsize
+                locs, min_cluster, min_samples
             )
-            clusters = clusterer.find_cluster_centers(locs, pixelsize)
+            clusters = clusterer.find_cluster_centers(locs)
             base, ext = os.path.splitext(path)
             info.append(hdbscan_info)
             io.save_locs(base + "_hdbscan.hdf5", locs, info)
@@ -753,12 +752,11 @@ def _smlm_clusterer(
     files: str,
     radius: float,
     min_locs: int,
-    pixelsize: float | None = None,
     basic_fa: bool = False,
     radius_z: float | None = None,
 ) -> None:
     """Run SMLM clustering on localizations in HDF5 files. See
-    ``clusterer.cluster`` for details."""
+    ``clusterer.cluster`` for details. The radii are in nm."""
     import glob
 
     paths = glob.glob(files)
@@ -775,11 +773,9 @@ def _smlm_clusterer(
             print("Loading {} ...".format(path))
             locs, info = io.load_locs(path)
             locs, smlm_cluster_info = clusterer.cluster(
-                locs, **params, pixelsize=pixelsize, progress="console"
+                locs, **params, progress="console"
             )
-            clusters = clusterer.find_cluster_centers(
-                locs, pixelsize, progress="console"
-            )
+            clusters = clusterer.find_cluster_centers(locs, progress="console")
             base, ext = os.path.splitext(path)
             info.append(smlm_cluster_info)
             io.save_locs(base + "_clusters.hdf5", locs, info)
@@ -990,8 +986,10 @@ def _pair_statistic(
         _warn_if_not_molecules(path, locs)
         picks, shape, size = None, None, None
         if picks_path is not None:
-            pixelsize = lib.get_from_metadata(info, "Pixelsize", 130.0)
-            picks, shape, size = io.load_picks(picks_path, pixelsize)
+            # the pixel size converts picks saved before Picasso 1.0
+            picks, shape, size = io.load_picks(
+                picks_path, lib.get_from_metadata(info, "Pixelsize")
+            )
         if partner_locs is None:
             print(f"{title} of {path}:")
         else:
@@ -1080,8 +1078,10 @@ def _nnd(
         _warn_if_not_molecules(path, locs)
     picks, shape, size = None, None, None
     if picks_path is not None:
-        pixelsize = lib.get_from_metadata(infos[0], "Pixelsize", 130.0)
-        picks, shape, size = io.load_picks(picks_path, pixelsize)
+        # the pixel size converts picks saved before Picasso 1.0
+        picks, shape, size = io.load_picks(
+            picks_path, lib.get_from_metadata(infos[0], "Pixelsize")
+        )
     print("Nearest neighbor distances of:")
     for path, name in zip(paths, names):
         print(f"  {path} ({name})")
@@ -1256,9 +1256,12 @@ def _track(
 ) -> None:
     """Link localizations into tracks (single-particle tracking) and
     save them as ``<base>_tracks.hdf5``. ``max_jump`` is in nm; see
-    ``spt.link_tracks`` for details."""
+    ``spt.link_tracks`` for details. ``pixelsize`` is ignored (the
+    localizations are in nm since Picasso 1.0)."""
     from . import io, lib, spt
 
+    if pixelsize is not None:
+        _print_deprecation(_PIXELSIZE_OPTION_DEPRECATIONS["track"])
     for path in _spt_paths(files):
         locs, info = io.load_locs(path)
         if "len" in locs.columns:
@@ -1267,24 +1270,17 @@ def _track(
                 "cannot be tracked."
             )
             continue
-        px = pixelsize or lib.get_from_metadata(info, "Pixelsize")
-        if not px:
-            raise SystemExit(
-                f"The camera pixel size of {path} is unknown; give it with "
-                "--pixelsize."
-            )
         try:
             tracked, new_info = spt.link_tracks(
                 locs,
                 info,
-                max_jump / px,
+                max_jump,
                 max_gap=max_gap,
                 min_length=min_length,
                 frame_time=frame_time,
             )
         except ValueError as e:
             raise SystemExit(str(e))
-        new_info[-1]["Max. jump (nm)"] = float(max_jump)
         new_info[-1].update(lib.step_info("Track"))
         out_path = os.path.splitext(path)[0] + "_tracks.hdf5"
         io.save_locs(out_path, tracked, new_info)
@@ -1308,9 +1304,12 @@ def _diffusion(
     """Diffusion analysis of tracked localizations: MSD, jump distances
     and a summary of every track, see ``spt.analyze_tracks``. Saves the
     results next to each file (``spt.save_analysis``) and, with
-    ``plot``, PNG images of the plots."""
+    ``plot``, PNG images of the plots. ``pixelsize`` is ignored (the
+    localizations are in nm since Picasso 1.0)."""
     from . import io, spt
 
+    if pixelsize is not None:
+        _print_deprecation(_PIXELSIZE_OPTION_DEPRECATIONS["diffusion"])
     for path in _spt_paths(files):
         locs, info = io.load_locs(path)
         if not spt.is_tracked(locs, info):
@@ -1324,7 +1323,6 @@ def _diffusion(
                 locs,
                 info,
                 frame_time=frame_time,
-                pixelsize=pixelsize,
                 max_lag=max_lag,
                 n_fit=n_fit,
                 sigma=sigma,
@@ -1515,7 +1513,7 @@ def _stitch(
     for t in range(tiles.max() + 1):
         x, y = report["positions"][t]
         print(
-            f"  Tile {t + 1} at ({x:.2f}, {y:.2f}) cam. px, z offset "
+            f"  Tile {t + 1} at ({x:.1f}, {y:.1f}) nm, z offset "
             f"{report['z_offsets'][t]:.1f} nm:"
         )
         for i in (i for i, tile in enumerate(tiles) if tile == t):
@@ -1532,7 +1530,7 @@ def _stitch(
         if pair["used"]:
             print(
                 f"  Tiles {a} and {b}: {100 * pair['fraction']:.0f}% matched,"
-                f" residual {pair['residual']:.2f} px"
+                f" residual {pair['residual']:.1f} nm"
             )
         else:
             print(f"  Tiles {a} and {b}: not used ({pair['status']})")
@@ -1591,9 +1589,11 @@ def _pair_correlation(files: str, bin_size: float, r_max: float) -> None:
             print("Calculating pair-correlation...")
             bins_lower, pc = pair_correlation(locs, info, bin_size, r_max)
             plot(bins_lower - bin_size / 2, pc)
-            xlabel("r (pixel)")
-            ylabel("pair-correlation (pixel^-2)")
-            title(f"Pair-correlation. Bin size: {bin_size}, R max: {r_max}")
+            xlabel("r (nm)")
+            ylabel("pair-correlation (nm^-2)")
+            title(
+                f"Pair-correlation. Bin size: {bin_size} nm, R max: {r_max} nm"
+            )
             show()
 
 
@@ -1806,6 +1806,51 @@ def _localize_ensure_raw_yaml(paths: list[str], save_info) -> None:
                 save_info(info_path, [info])
 
 
+def _resolve_camera_pixelsize(
+    pixelsize: float | None, movie, info: list[dict], path: str
+) -> float:
+    """The camera pixel size (nm) of a movie: the ``--pixelsize`` option
+    if given, else the movie metadata's ``Pixelsize``, else the entry of
+    the identified camera in the camera configuration (``Cameras`` in
+    the config file), else an error asking for ``--pixelsize``.
+
+    Parameters
+    ----------
+    pixelsize : float or None
+        The ``--pixelsize`` option.
+    movie : AbstractPicassoMovie
+        The movie, whose ``camera_parameters`` names its camera.
+    info : list of dicts
+        The movie metadata.
+    path : str
+        Path of the movie, for the error message.
+
+    Returns
+    -------
+    pixelsize : float
+        Camera pixel size in nm.
+    """
+    from . import CONFIG, lib
+
+    if pixelsize is not None:
+        return float(pixelsize)
+    value = lib.get_from_metadata(info, "Pixelsize")
+    if value:
+        return float(value)
+    try:
+        camera = movie.camera_parameters(CONFIG).get("camera")
+    except Exception:
+        camera = None
+    cameras = CONFIG.get("Cameras") or {}
+    if camera in cameras and cameras[camera].get("Pixelsize"):
+        return float(cameras[camera]["Pixelsize"])
+    raise SystemExit(
+        f"The camera pixel size of {path} is unknown: it is neither in the "
+        "movie metadata ('Pixelsize') nor in the camera configuration. "
+        "Give it in nm with --pixelsize."
+    )
+
+
 def _localize_load_3d_calibration(
     args: argparse.Namespace,
 ) -> tuple[str, float, dict]:
@@ -1843,7 +1888,9 @@ def _localize_load_3d_calibration(
         magnification_factor = args.mf
 
     try:
-        z_calibration = load_calibration(zpath)
+        # a calibration written before Picasso 1.0 (spot widths in camera
+        # pixels) is converted with --pixelsize; io says so if it is missing
+        z_calibration = load_calibration(zpath, pixelsize=args.pixelsize)
     except Exception as e:
         print(e)
         print("Error loading calibration file.")
@@ -2083,7 +2130,10 @@ def _localize_process_file(
 
     fitting_method = _FIT_METHOD_MAP[args.fit_method]
     cam_info = dict(camera_info)
-    cam_info["Pixelsize"] = args.pixelsize
+    cam_info["Pixelsize"] = _resolve_camera_pixelsize(
+        args.pixelsize, movie, info, path
+    )
+    print(f"Camera pixel size: {cam_info['Pixelsize']:g} nm")
     if region_fit is not None:
         return _localize_regions(
             movie,
@@ -2607,7 +2657,11 @@ def _localize(args: argparse.Namespace) -> list[str]:  # noqa: C901
         from . import lib
         from .io import load_any_calibration
 
-        found = lib.lateral_transforms(load_any_calibration(affine_path))
+        # a file written before Picasso 1.0 (camera pixels) is converted
+        # with --pixelsize; io says so if it is missing
+        found = lib.lateral_transforms(
+            load_any_calibration(affine_path, pixelsize=args.pixelsize)
+        )
         if not found:
             raise Exception(
                 f"No lateral corrections found in {affine_path}. Build one "
@@ -2859,6 +2913,9 @@ def _spline_calibrate_split_fov(
     regions = _parse_split_fov_regions(args.split_fov)
     print(f"Split-FOV calibration from {len(regions)} regions of one movie")
     movie, info = load_movie(files[0])
+    camera_info = _spline_calibrate_camera_info(
+        camera_info, args, movie, info, files[0]
+    )
     return spline.calibrate_spline_split_fov(
         movie,
         info=info,
@@ -2890,6 +2947,9 @@ def _spline_calibrate_single(
     from .io import load_movie
 
     movie, info = load_movie(files[0])
+    camera_info = _spline_calibrate_camera_info(
+        camera_info, args, movie, info, files[0]
+    )
     return spline.calibrate_spline(
         movie,
         info=info,
@@ -2923,7 +2983,9 @@ def _spline_calibrate_multichannel(
         movie, info = load_movie(f)
         movies.append(movie)
         infos.append(info)
-        camera_infos.append(dict(camera_info))
+        camera_infos.append(
+            _spline_calibrate_camera_info(camera_info, args, movie, info, f)
+        )
     return spline.calibrate_spline_multichannel(
         movies,
         infos=infos,
@@ -2945,6 +3007,16 @@ def _spline_calibrate_multichannel(
     )
 
 
+def _spline_calibrate_camera_info(
+    camera_info: dict, args: argparse.Namespace, movie, info, path: str
+) -> dict:
+    """``camera_info`` with the camera pixel size of ``movie`` resolved
+    as ``picasso localize`` does (see :func:`_resolve_camera_pixelsize`)."""
+    pixelsize = _resolve_camera_pixelsize(args.pixelsize, movie, info, path)
+    print(f"Camera pixel size: {pixelsize:g} nm")
+    return {**camera_info, "Pixelsize": pixelsize}
+
+
 def _spline_calibrate(args: argparse.Namespace) -> None:
     """Build a cubic-spline PSF calibration from a bead z-stack movie."""
     from os.path import splitext
@@ -2954,11 +3026,11 @@ def _spline_calibrate(args: argparse.Namespace) -> None:
     print("Spline PSF calibration")
     print("------------------------------------------")
 
+    # the camera pixel size is resolved once the movie is loaded
     camera_info = {
         "Baseline": args.baseline,
         "Sensitivity": args.sensitivity,
         "Gain": args.gain,
-        "Pixelsize": args.pixelsize,
     }
     registration = getattr(args, "registration_model", None) or "affine"
     files = args.files
@@ -3013,7 +3085,9 @@ def _lateral_calibrate(args: argparse.Namespace) -> None:
     movie_ref, _ = load_movie(args.reference)
     movie_target, _ = load_movie(args.target)
     calibration = (
-        load_any_calibration(args.calibration) if args.calibration else {}
+        load_any_calibration(args.calibration, pixelsize=args.pixelsize)
+        if args.calibration
+        else {}
     )
     out_path = args.output or args.calibration
     if not out_path:
@@ -3306,27 +3380,13 @@ def _spinna_parse_target_uncertainty(
     return float(row[f"label_unc_{target}"]), float(row[f"le_{target}"]) / 100
 
 
-def _spinna_target_pixelsize(info) -> float:
-    """Recover the pixel size (nm) from a locs info list, defaulting to
-    130 when not found."""
-    for element in info:
-        # in newer versions it's Picasso vX.Y.Z Localize
-        if "Picasso" in element.values() and "Localize" in element.values():
-            if "Pixelsize" in element:
-                return element["Pixelsize"]
-    return 130
-
-
-def _spinna_stack_exp_data(locs, pixelsize: float) -> tuple:
-    """Stack loc coordinates (scaled to nm) into an (N, dim) array."""
+def _spinna_stack_exp_data(locs) -> tuple:
+    """Stack loc coordinates (nm) into an (N, dim) array."""
     import numpy as np
 
     if "z" in locs.columns:
-        return (
-            np.stack((locs.x * pixelsize, locs.y * pixelsize, locs.z)).T,
-            3,
-        )
-    return np.stack((locs.x * pixelsize, locs.y * pixelsize)).T, 2
+        return np.stack((locs.x, locs.y, locs.z)).T, 3
+    return np.stack((locs.x, locs.y)).T, 2
 
 
 def _spinna_load_target_data(
@@ -3373,8 +3433,7 @@ def _spinna_load_target_data(
 
         locs, info = io.load_locs(str(row[f"exp_data_{target}"]))
         infos[target] = info
-        pixelsize = _spinna_target_pixelsize(info)
-        exp_data[target], dim = _spinna_stack_exp_data(locs, pixelsize)
+        exp_data[target], dim = _spinna_stack_exp_data(locs)
 
         if le_fitting:
             n_simulated[target] = len(locs)
@@ -4442,6 +4501,28 @@ def _g5m(
 # =============================================================================
 
 
+def _convert_units(
+    files: list[str], pixelsize: float | None, in_place: bool
+) -> None:
+    """Convert files written before Picasso 1.0 from camera pixels to
+    nm, see ``legacy.convert_files``. Prints one line per file: the
+    converted file, or why the file was skipped or failed."""
+    from glob import glob
+    from itertools import chain
+    from . import legacy
+
+    paths = list(chain(*[sorted(glob(_)) or [_] for _ in files]))
+    results = legacy.convert_files(paths, pixelsize, in_place=in_place)
+    n_converted = 0
+    for path, output, message in results:
+        if output is not None:
+            n_converted += 1
+            print(f"{path}: converted, saved as {output}")
+        else:
+            print(f"{path}: skipped ({message})")
+    print(f"Converted {n_converted} of {len(results)} files.")
+
+
 def _run_plugin_command(args) -> None:
     """Run the handler a plugin subcommand named via ``set_defaults``.
 
@@ -4705,6 +4786,22 @@ _RENAMED_COMMANDS = {
         "groupprops": "group-properties",
         "pc": "pair-correlation",
     }.items()
+}
+
+#: ``--pixelsize`` of ``picasso track`` and ``picasso diffusion`` is
+#: ignored since Picasso 1.0 (localizations are in nm) and removed in
+#: Picasso 2.0.
+_PIXELSIZE_OPTION_DEPRECATIONS = {
+    command: deprecation.register(
+        f"picasso {command} --pixelsize",
+        since="1.0",
+        remove_in="2.0",
+        message=(
+            "it is ignored: localizations and the maximum jump are in nm"
+            " since Picasso 1.0"
+        ),
+    )
+    for command in ("track", "diffusion")
 }
 
 #: Options renamed in Picasso 1.0, per (current) command name: words
@@ -5058,7 +5155,14 @@ def _build_parser() -> (
         help="magnification factor (3D only)",
     )
     localize_parser.add_argument(
-        "-px", "--pixelsize", type=int, default=130, help="pixelsize in nm"
+        "-px",
+        "--pixelsize",
+        type=float,
+        default=None,
+        help=(
+            "camera pixel size in nm; the localizations are saved in nm."
+            " Default: the movie metadata, else the camera configuration"
+        ),
     )
     localize_parser.add_argument(
         "-zc",
@@ -5315,7 +5419,14 @@ def _build_parser() -> (
         "-ga", "--gain", type=int, default=1, help="camera gain"
     )
     spline_calib_parser.add_argument(
-        "-px", "--pixelsize", type=int, default=130, help="pixelsize in nm"
+        "-px",
+        "--pixelsize",
+        type=float,
+        default=None,
+        help=(
+            "camera pixel size in nm, recorded in the calibration."
+            " Default: the movie metadata, else the camera configuration"
+        ),
     )
 
     lateral_parser = subparsers.add_parser(
@@ -5389,8 +5500,11 @@ def _build_parser() -> (
         "-px",
         "--pixelsize",
         type=float,
-        default=None,
-        help="camera pixel size in nm, for the reported shift in nm",
+        required=True,
+        help=(
+            "camera pixel size in nm; the correction is fitted on the bead"
+            " images (camera pixels) and stored in nm"
+        ),
     )
     lateral_parser.add_argument(
         "-p",
@@ -5626,18 +5740,18 @@ def _build_parser() -> (
         "-i",
         "--intersect-distance",
         type=float,
-        default=20 / 130,
+        default=20.0,
         help=(
-            "max. distance (cam. pixels) between localizations in"
-            " consecutive segments to be considered as intersecting"
+            "max. distance (nm) between localizations in consecutive"
+            " segments to be considered as intersecting (default=20)"
         ),
     )
     undrift_aim_parser.add_argument(
         "-r",
         "--roi-radius",
         type=float,
-        default=60 / 130,
-        help="max. drift (cam. pixels) between two consecutive segments",
+        default=60.0,
+        help="max. drift (nm) between two consecutive segments (default=60)",
     )
 
     # undrift by fiducials parser
@@ -5668,10 +5782,10 @@ def _build_parser() -> (
         "-d",
         "--distance",
         type=float,
-        default=1.0,
+        default=10.0,
         help=(
             "maximum distance between localizations to consider them the same "
-            "binding event in units of camera pixels (default=1.0)"
+            "binding event in nm (default=10)"
         ),
     )
     link_parser.add_argument(
@@ -5736,7 +5850,7 @@ def _build_parser() -> (
         "--pixelsize",
         type=float,
         default=None,
-        help="camera pixel size in nm (default: from the metadata)",
+        help=argparse.SUPPRESS,  # ignored since 1.0 (nm), removed in 2.0
     )
     diffusion_parser = subparsers.add_parser(
         "diffusion",
@@ -5816,7 +5930,7 @@ def _build_parser() -> (
         "--pixelsize",
         type=float,
         default=None,
-        help="camera pixel size in nm (default: from the metadata)",
+        help=argparse.SUPPRESS,  # ignored since 1.0 (nm), removed in 2.0
     )
 
     # nneighbors
@@ -6049,7 +6163,7 @@ def _build_parser() -> (
         "radius",
         type=float,
         help=(
-            "maximal distance between two localizations"
+            "maximal distance (nm) between two localizations"
             " to be considered local"
         ),
     )
@@ -6070,7 +6184,7 @@ def _build_parser() -> (
         "radius",
         type=float,
         help=(
-            "maximal distance (camera pixels) between two localizations"
+            "maximal distance (nm) between two localizations"
             " to be considered local"
         ),
     )
@@ -6083,17 +6197,11 @@ def _build_parser() -> (
         ),
     )
     dbscan_parser.add_argument(
-        "pixelsize",
-        type=int,
-        help=("camera pixel size in nm (required for 3D localizations only)"),
-        default=None,
-    )
-    dbscan_parser.add_argument(
         "--radius-z",
         type=float,
         help=(
-            "DBSCAN epsilon in z (camera pixels). If set, enables "
-            "anisotropic 3D clustering."
+            "DBSCAN epsilon in z (nm). If set, enables anisotropic 3D "
+            "clustering."
         ),
         default=None,
     )
@@ -6120,12 +6228,6 @@ def _build_parser() -> (
         type=int,
         help=("the higher the more points are considered noise"),
     )
-    hdbscan_parser.add_argument(
-        "pixelsize",
-        type=int,
-        help=("camera pixel size in nm (required for 3D localizations only)"),
-        default=None,
-    )
 
     # SMLM clusterer
     smlm_cluster_parser = subparsers.add_parser(
@@ -6142,18 +6244,12 @@ def _build_parser() -> (
     smlm_cluster_parser.add_argument(
         "radius",
         type=float,
-        help=("clustering radius (in camera pixels)"),
+        help=("clustering radius (nm)"),
     )
     smlm_cluster_parser.add_argument(
         "min_locs",
         type=int,
         help=("minimum number of localizations in a cluster"),
-    )
-    smlm_cluster_parser.add_argument(
-        "pixelsize",
-        type=int,
-        help=("camera pixel size in nm (required for 3D localizations only)"),
-        default=None,
     )
     smlm_cluster_parser.add_argument(
         "basic_fa",
@@ -6167,7 +6263,7 @@ def _build_parser() -> (
     smlm_cluster_parser.add_argument(
         "radius_z",
         type=float,
-        help=("clustering radius in axial direction (MUST BE SET FOR 3D!!!)"),
+        help=("clustering radius (nm) in axial direction (required for 3D)"),
         default=None,
     )
 
@@ -6449,15 +6545,18 @@ def _build_parser() -> (
         "-b",
         "--bin-size",
         type=float,
-        default=0.1,
-        help="the bin size (camera pixels)",
+        default=10.0,
+        help="the bin size in nm (default=10)",
     )
     pc_parser.add_argument(
         "-r",
         "--r-max",
         type=float,
-        default=10,
-        help="The maximum distance to calculate the pair-correlation",
+        default=1000.0,
+        help=(
+            "the maximum distance in nm to calculate the pair-correlation"
+            " (default=1000)"
+        ),
     )
     pc_parser.add_argument(
         "files",
@@ -6547,6 +6646,40 @@ def _build_parser() -> (
         "hdf2pyme", help="convert hdf5 to PyME .hdf format"
     )
     hdf2pyme_parser.add_argument("files", help="one or multiple hdf5 files")
+
+    # files written before Picasso 1.0 (camera pixels) to nm
+    convert_units_parser = subparsers.add_parser(
+        "convert-units",
+        help=(
+            "convert files written before Picasso 1.0 from camera pixels to"
+            " nm: localizations (.hdf5), picks (.yaml), drift (.txt),"
+            " calibrations and SPINNA masks (.yaml)"
+        ),
+    )
+    convert_units_parser.add_argument(
+        "files",
+        nargs="+",
+        help="the files to convert (unix style path patterns)",
+    )
+    convert_units_parser.add_argument(
+        "-px",
+        "--pixelsize",
+        type=float,
+        default=None,
+        help=(
+            "camera pixel size in nm, for files that do not record it"
+            " (default: the Pixelsize of the file's metadata)"
+        ),
+    )
+    convert_units_parser.add_argument(
+        "-i",
+        "--in-place",
+        action="store_true",
+        help=(
+            "overwrite the files (by default, the converted file is saved"
+            " next to the original with the suffix _nm)"
+        ),
+    )
 
     # plugins
     plugins_parser = subparsers.add_parser(
@@ -6814,7 +6947,6 @@ def main():  # noqa: C901
                 args.files,
                 args.radius,
                 args.density,
-                args.pixelsize,
                 args.radius_z,
             )
         elif args.command == "hdbscan":
@@ -6822,14 +6954,12 @@ def main():  # noqa: C901
                 args.files,
                 args.min_cluster,
                 args.min_samples,
-                args.pixelsize,
             )
         elif args.command == "smlm-cluster":
             _smlm_clusterer(
                 args.files,
                 args.radius,
                 args.min_locs,
-                args.pixelsize,
                 args.basic_fa,
                 args.radius_z,
             )
@@ -6932,6 +7062,8 @@ def main():  # noqa: C901
             _pyme2hdf(args.files, args.pixelsize)
         elif args.command == "hdf2pyme":
             _hdf2pyme(args.files)
+        elif args.command == "convert-units":
+            _convert_units(args.files, args.pixelsize, args.in_place)
     else:
         parser.print_help()
         return

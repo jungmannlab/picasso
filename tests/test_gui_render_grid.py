@@ -56,7 +56,10 @@ def window(qt_offscreen, tmp_path, monkeypatch):
         str(tmp_path / "locs.hdf5"), _locs(), _info(), render_=False
     )
     window.view.resize(256, 256)
-    window.view.viewport = [(0.0, 0.0), (HEIGHT, WIDTH)]
+    window.view.viewport = [
+        (0.0, 0.0),
+        (HEIGHT * PIXELSIZE, WIDTH * PIXELSIZE),
+    ]
     yield window
     window.window_rot.view_rot.stop_render_worker()
     window.view.stop_render_worker()
@@ -128,7 +131,7 @@ def test_automatic_spacing_follows_the_zoom_until_edited(window):
     box.setChecked(True)
     view.update_scene()
     expected = render.optimal_scalebar_length(
-        PIXELSIZE, WIDTH, fraction=1 / 10
+        WIDTH * PIXELSIZE, fraction=1 / 10
     )
     assert box.spacing.value() == expected
     view.zoom(2.0)
@@ -165,7 +168,7 @@ def test_grid_appears_in_the_exported_info(window):
 def view_rot(window, qt_offscreen):
     window.view._pick_shape = "Circle"
     window.tools_settings_dialog.pick_diameter.setValue(12.0 * PIXELSIZE)
-    window.view._picks = [(32.0, 32.0)]
+    window.view._picks = [(32.0 * PIXELSIZE, 32.0 * PIXELSIZE)]
     window.open_3d_view()
     window.window_rot.resize(256, 256)
     _drain(qt_offscreen, 0.2)
@@ -215,7 +218,7 @@ def test_3d_grid_keeps_z_0_nm_on_a_grid_line(view_rot):
     view_rot._pan_z = 0.7
     bounds, origin = view_rot.grid_geometry()
     # z = 0 nm in the frame of the rendered localizations
-    z0 = 0.0 / PIXELSIZE - view_rot._z_shift - view_rot._pan_z
+    z0 = 0.0 - view_rot._z_shift - view_rot._pan_z
     assert origin[2] == pytest.approx(z0)
     lower, upper = view_rot._grid_bounds
     assert bounds[0][2] == pytest.approx(lower[2] - 0.7)
@@ -254,13 +257,14 @@ def test_grid_goes_into_the_animation(view_rot, qapp, monkeypatch, tmp_path):
 def test_animation_frames_show_the_grid(qapp, tmp_path):
     rng = np.random.default_rng(0)
     locs = _locs()
-    locs["z"] = rng.uniform(-3.0, 3.0, size=len(locs))  # camera pixels
+    locs["z"] = rng.uniform(-390.0, 390.0, size=len(locs))  # nm
+    viewport = (
+        (24.0 * PIXELSIZE, 24.0 * PIXELSIZE),
+        (40.0 * PIXELSIZE, 40.0 * PIXELSIZE),
+    )
     positions = [
-        (render.to_rotation((0, 0, 0)), ((24.0, 24.0), (40.0, 40.0))),
-        (
-            render.to_rotation((0, np.pi / 4, 0)),
-            ((24.0, 24.0), (40.0, 40.0)),
-        ),
+        (render.to_rotation((0, 0, 0)), viewport),
+        (render.to_rotation((0, np.pi / 4, 0)), viewport),
     ]
     frames = {}
     for name, grid in (("plain", None), ("grid", render.GridOverlay(260))):

@@ -76,7 +76,7 @@ def image_extents(info):
     return extents
 
 
-def export_extents(viewport, info, z_min, z_max, pixelsize, oversampling, n_z):
+def export_extents(viewport, info, z_min, z_max, disp_px_size, n_z):
     """Return the extents of an image rendered from localizations, in
     the coordinates of the Imaris movie they come from.
 
@@ -84,17 +84,15 @@ def export_extents(viewport, info, z_min, z_max, pixelsize, oversampling, n_z):
     ----------
     viewport : tuple
         Rendered field of view as ``((y_min, x_min), (y_max, x_max))``
-        in camera pixels.
+        in nm.
     info : list of dicts
         Metadata of the localizations, see :func:`image_extents`.
     z_min, z_max : float
         Axial range of the image (nm) relative to the focal plane. If
         both are 0, the image is ``n_z`` display pixels deep around the
         focal plane.
-    pixelsize : float
-        Camera pixel size (nm).
-    oversampling : float
-        Number of display pixels per camera pixel.
+    disp_px_size : float
+        Display pixel size of the rendered image (nm).
     n_z : int
         Number of z planes of the image.
 
@@ -105,15 +103,15 @@ def export_extents(viewport, info, z_min, z_max, pixelsize, oversampling, n_z):
     """
     (y_min, x_min), (y_max, x_max) = viewport
     extents = image_extents(info)
-    x_0 = extents["ExtMin0"] + x_min * pixelsize / 1000
-    y_0 = extents["ExtMin1"] + y_min * pixelsize / 1000
-    x_1 = extents["ExtMin0"] + x_max * pixelsize / 1000
-    y_1 = extents["ExtMin1"] + y_max * pixelsize / 1000
+    x_0 = extents["ExtMin0"] + x_min / 1000
+    y_0 = extents["ExtMin1"] + y_min / 1000
+    x_1 = extents["ExtMin0"] + x_max / 1000
+    y_1 = extents["ExtMin1"] + y_max / 1000
     # Picasso's z is relative to the focal plane, the middle of the
     # movie's axial range.
     z_base = (extents["ExtMin2"] + extents["ExtMax2"]) / 2
     if z_min == z_max == 0:
-        half_depth = n_z / 2 * pixelsize / 1000 / oversampling
+        half_depth = n_z / 2 * disp_px_size / 1000
         z_0 = z_base - half_depth
         z_1 = z_base + half_depth
     else:
@@ -477,12 +475,11 @@ if IMSWRITER:
         array,
         filename,
         colors,
-        oversampling,
+        disp_px_size,
         viewport,
         info,
         z_min,
         z_max,
-        pixelsize,
     ):
         """Write a rendered image stack to an Imaris (.ims) file.
 
@@ -495,11 +492,11 @@ if IMSWRITER:
             Path of the output .ims file.
         colors : list of PW.Color
             Base color of each channel.
-        oversampling : float
-            Number of display pixels per camera pixel.
+        disp_px_size : float
+            Display pixel size of the rendered image (nm).
         viewport : tuple
             Rendered field of view as ``((y_min, x_min), (y_max,
-            x_max))`` in camera pixels.
+            x_max))`` in nm.
         info : list of dicts
             Metadata of the localizations; the extents of the Imaris
             movie they come from, if present in any entry, offset the
@@ -507,8 +504,6 @@ if IMSWRITER:
         z_min, z_max : float
             Axial range of the image (nm). If both are 0, the z extent
             is derived from the number of z planes.
-        pixelsize : float
-            Camera pixel size (nm).
         """
 
         if len(array.shape) == 3:
@@ -575,8 +570,7 @@ if IMSWRITER:
             info,
             z_min,
             z_max,
-            pixelsize,
-            oversampling,
+            disp_px_size,
             image_size.z,
         )
 

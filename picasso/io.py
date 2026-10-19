@@ -60,6 +60,7 @@ __all__ = [
     "save_locs",
     "validate_locs",
     "get_format_version",
+    "FORMAT_VERSION",
     "LOCS_FORMAT_VERSION",
     "MINIMUM_COLUMNS",
     "MINIMUM_METADATA_KEYS",
@@ -88,6 +89,8 @@ __all__ = [
     "load_identifications",
     "save_identifications",
     "load_picks",
+    "save_picks",
+    "picks_dict",
     "load_drift",
     "save_drift",
     "load_mask",
@@ -108,6 +111,7 @@ __all__ = [
     # errors
     "NoMetadataFileError",
     "LocsFormatError",
+    "MissingPixelsizeError",
 ]
 
 
@@ -145,22 +149,29 @@ MOVIE_EXTENSIONS = (
 # abortable; smaller blocks report more often but read more slowly.
 LOCS_BLOCK_SIZE = 1_000_000
 
-#: Version of the localization file format written by ``save_locs``, as
-#: ``"MAJOR.MINOR"``. The minor version grows with additions that older
-#: readers can ignore (e.g., a new optional column, group or attribute),
-#: the major version when the meaning of existing content changes, so
-#: ``load_locs`` refuses files of a newer major version. Files without a
-#: version were written before Picasso 1.0. See ``docs/files.rst``.
-LOCS_FORMAT_VERSION = "1.0"
-#: Root attributes of an .hdf5 localization file that hold the format
-#: version and the version of Picasso that wrote the file.
+#: Version of the file format Picasso writes, as ``"MAJOR.MINOR"``. The
+#: minor version grows with additions that older readers can ignore
+#: (e.g., a new optional column, group or attribute), the major version
+#: when the meaning of existing content changes, so ``load_locs``
+#: refuses files of a newer major version. Format 1.0 stores every
+#: length in nm. Files without a version were written before Picasso
+#: 1.0, with lengths in camera pixels; Picasso converts them when they
+#: are loaded (see ``picasso.legacy``). See ``docs/files.rst``.
+FORMAT_VERSION = "1.0"
+#: The format version of localization files; the same as
+#: ``FORMAT_VERSION``, kept under its earlier name.
+LOCS_FORMAT_VERSION = FORMAT_VERSION
+#: Name of the format marker: the root attribute of an .hdf5 file, the
+#: key of a .yaml file and the header line of a drift .txt file that
+#: hold the format version; ``PICASSO_VERSION_ATTR`` holds the version
+#: of Picasso that wrote the file.
 FORMAT_VERSION_ATTR = "picasso_format"
 PICASSO_VERSION_ATTR = "picasso_version"
 #: Columns and metadata keys every localization file needs, see
-#: ``validate_locs``. ``Pixelsize`` is not among the keys: Render asks
-#: for it when it is missing.
+#: ``validate_locs``. ``Pixelsize`` (nm) is needed because the field of
+#: view is given by ``Width`` and ``Height`` in camera pixels.
 MINIMUM_COLUMNS = ("frame", "x", "y", "lpx", "lpy")
-MINIMUM_METADATA_KEYS = ("Width", "Height", "Frames")
+MINIMUM_METADATA_KEYS = ("Width", "Height", "Frames", "Pixelsize")
 
 _log = logging.getLogger(__name__)
 
@@ -173,6 +184,35 @@ class LocsFormatError(ValueError):
     """Raised when a localization file does not follow the Picasso
     format: it lacks required columns or metadata keys, holds invalid
     values, or was written in a newer, incompatible format version."""
+
+
+class MissingPixelsizeError(LocsFormatError):
+    """Raised when a file written before Picasso 1.0 (lengths in camera
+    pixels) is loaded or converted without the camera pixel size that
+    converts it to nm: the file does not record it and none was passed.
+    GUIs catch it to ask the user for the pixel size."""
+
+
+def _legacy_pixelsize(pixelsize, info, path: str) -> float:
+    """The camera pixel size that converts a file written before Picasso
+    1.0 to nm: ``pixelsize`` if given, else ``Pixelsize`` of ``info``.
+
+    Raises
+    ------
+    MissingPixelsizeError
+        If neither is available.
+    """
+    if pixelsize is None:
+        pixelsize = lib.get_from_metadata(info, "Pixelsize")
+    if pixelsize is None:
+        raise MissingPixelsizeError(
+            f"{path} was written before Picasso 1.0, with lengths in camera "
+            "pixels, and its metadata does not record the camera pixel size "
+            "(Pixelsize). Pass pixelsize (nm) to convert it to nm, or "
+            "convert the file once with picasso convert-units. See "
+            f"{docs_url('files.html#files-legacy')}"
+        )
+    return float(pixelsize)
 
 
 def _user_settings_filename() -> str:
@@ -651,7 +691,10 @@ def save_raw(path: str, movie: lib.IntArray3D, info: dict) -> None:
 
 
 def save_calibration(path: str, calibration: dict) -> None:
-    """Save calibration file to a .yaml path.
+    """Save a calibration (astigmatism or lateral) to a .yaml path.
+
+    The file carries the format marker (``FORMAT_VERSION_ATTR``), since
+    its lengths (spot widths, lateral corrections) are in nm.
 
     Parameters
     ----------
@@ -660,22 +703,62 @@ def save_calibration(path: str, calibration: dict) -> None:
     calibration : dict
         The calibration to save.
     """
+    calibration = {**calibration, FORMAT_VERSION_ATTR: FORMAT_VERSION}
     with open(path, "w") as f:
         _dump_yaml(calibration, f, default_flow_style=False)
 
 
-def load_calibration(path: str) -> dict:
+def _legacy_calibration_to_nm(calibration: dict, pixelsize, path: str) -> dict:
+    """``calibration`` in nm: converted with ``pixelsize`` if the file
+    (``path``) was written before Picasso 1.0, i.e., lacks the format
+    marker, else unchanged. See ``picasso.legacy.calibration_to_nm``."""
+    if FORMAT_VERSION_ATTR in calibration:
+        return calibration
+    from . import legacy
+
+    if pixelsize is None:
+        raise MissingPixelsizeError(
+            f"{path} was written before Picasso 1.0, with spot widths and "
+            "lateral corrections in camera pixels. Pass pixelsize (nm) to "
+            "convert it to nm, or convert the file once with picasso "
+            f"convert-units. See {docs_url('files.html#files-legacy')}"
+        )
+    _log.info(
+        "%s was written before Picasso 1.0; converting it to nm with a "
+        "camera pixel size of %g nm.",
+        path,
+        pixelsize,
+    )
+    return legacy.calibration_to_nm(calibration, pixelsize)
+
+
+def load_calibration(path: str, pixelsize: float | None = None) -> dict:
     """Load 3D astigmatic calibration data from a YAML file.
+
+    Calibrations written before Picasso 1.0 store the spot widths of
+    their polynomials in camera pixels; they are converted to nm with
+    ``pixelsize`` (see ``picasso.legacy``).
 
     Parameters
     ----------
     path : str
         The path to the calibration YAML file.
+    pixelsize : float, optional
+        Camera pixel size in nm of the calibration movie, used only for
+        files written before Picasso 1.0. Default is None.
 
     Returns
     -------
     calibration : dict
         A dictionary containing the 3D astigmatic calibration data.
+
+    Raises
+    ------
+    ValueError
+        If the file is not a 3D calibration.
+    MissingPixelsizeError
+        If the file was written before Picasso 1.0 and ``pixelsize`` is
+        None.
     """
     with open(path, "r") as calibration_file:
         try:
@@ -695,7 +778,7 @@ def load_calibration(path: str) -> dict:
             "be a dictionary."
         )
 
-    return calibration
+    return _legacy_calibration_to_nm(calibration, pixelsize, path)
 
 
 def _json_default(obj):
@@ -746,19 +829,29 @@ def save_spline_calibration(path: str, calibration: dict) -> None:
         for key, value in calibration.items()
         if key != "coefficients"
     }
+    metadata[FORMAT_VERSION_ATTR] = FORMAT_VERSION
     with h5py.File(path, "w") as f:
         f.create_dataset("coefficients", data=coefficients)
         f.attrs["metadata"] = json.dumps(metadata, default=_json_default)
 
 
-def load_spline_calibration(path: str) -> dict:
+def load_spline_calibration(path: str, pixelsize: float | None = None) -> dict:
     """Load a cubic-spline PSF calibration saved by
     ``save_spline_calibration``.
+
+    The lateral corrections of a calibration written before Picasso 1.0
+    are in camera pixels; they are converted to nm with ``pixelsize``,
+    or else with the ``pixelsize`` the calibration records (see
+    ``picasso.legacy``). The spline knots stay on the camera pixel grid,
+    where the fit takes place.
 
     Parameters
     ----------
     path : str
         Path to the spline calibration HDF5 file.
+    pixelsize : float, optional
+        Camera pixel size in nm, used only for files written before
+        Picasso 1.0. Default is None, i.e., the calibration's own entry.
 
     Returns
     -------
@@ -776,6 +869,10 @@ def load_spline_calibration(path: str) -> dict:
             )
         calibration = json.loads(f.attrs["metadata"])
         calibration["coefficients"] = f["coefficients"][:].astype(np.float32)
+    if FORMAT_VERSION_ATTR not in calibration:
+        if pixelsize is None:
+            pixelsize = calibration.get("pixelsize")
+        calibration = _legacy_calibration_to_nm(calibration, pixelsize, path)
     return calibration
 
 
@@ -785,7 +882,7 @@ def _is_hdf5_calibration(path: str) -> bool:
     return os.path.splitext(path)[1].lower() in (".hdf5", ".h5")
 
 
-def load_any_calibration(path: str) -> dict:
+def load_any_calibration(path: str, pixelsize: float | None = None) -> dict:
     """Load a calibration of any kind: a cubic-spline PSF calibration
     (HDF5), a Gaussian astigmatism calibration or a standalone affine
     calibration (both YAML).
@@ -793,20 +890,30 @@ def load_any_calibration(path: str) -> dict:
     Used wherever a calibration is only handled as a carrier of lateral
     corrections (see ``picasso.lib.lateral_transforms``), so no format is
     assumed. Unlike ``load_calibration`` this does not require the
-    astigmatism polynomial coefficients to be present.
+    astigmatism polynomial coefficients to be present. Files written
+    before Picasso 1.0 are converted to nm, see ``load_calibration``.
 
     Parameters
     ----------
     path : str
         Path to the calibration file.
+    pixelsize : float, optional
+        Camera pixel size in nm, used only for files written before
+        Picasso 1.0. Default is None.
 
     Returns
     -------
     calibration : dict
         The calibration dictionary.
+
+    Raises
+    ------
+    MissingPixelsizeError
+        If the file was written before Picasso 1.0 and ``pixelsize`` is
+        None.
     """
     if _is_hdf5_calibration(path):
-        return load_spline_calibration(path)
+        return load_spline_calibration(path, pixelsize)
     with open(path, "r") as calibration_file:
         try:
             calibration = _parse_yaml(calibration_file)
@@ -820,7 +927,7 @@ def load_any_calibration(path: str) -> dict:
             "Invalid calibration file: expected a YAML mapping. This does "
             "not look like a Picasso calibration file."
         )
-    return calibration
+    return _legacy_calibration_to_nm(calibration, pixelsize, path)
 
 
 def save_any_calibration(path: str, calibration: dict) -> None:
@@ -1894,32 +2001,36 @@ def load_structures(path: str) -> tuple[list[spinna.Structure], list[str]]:
     return structures, targets
 
 
-def load_picks(  # noqa: C901
+def load_picks(
     path: str, pixelsize: float | None = None
-) -> tuple[list, str, float]:
-    """Load picks generated with the Picasso GUI.
+) -> tuple[list, str, float | None]:
+    """Load pick regions saved by Picasso Render.
+
+    Positions and sizes are returned in nm. Files written before Picasso
+    1.0 store the positions in camera pixels; they are converted with
+    ``pixelsize`` (see ``picasso.legacy``).
 
     Parameters
     ----------
     path : str
         The path to the picks file.
     pixelsize : float, optional
-        Camera pixel size in nm. Used to convert pick size from nm to
-        camera pixels (which are the units of localizations coordinates).
-        If None, the size will be returned in original units.
+        Camera pixel size in nm, used only for files written before
+        Picasso 1.0. Default is None.
 
     Returns
     -------
     picks : list
-        A list of picks.
+        A list of picks (positions in nm), in the format of the Render
+        window: centers for circles and squares, pairs of end points for
+        rectangles, vertex lists for polygons, corner pairs for boxes and
+        lists of ``(width, path)`` strokes for brush picks.
     shape : str
         The shape of the picks, one of ``lib.PICK_SHAPES``.
-    size : float
-        The size of the picks in camera pixels (if `pixelsize` is
-        provided, otherwise in original units). For circular picks, the
-        size is the diameter; for rectangular picks, the size is the
-        width; for square picks, the size is the side length. None for
-        polygonal, box and brush picks (size not defined).
+    size : float or None
+        The size of the picks in nm: the diameter of circles, the width
+        of rectangles, the side length of squares. None for polygonal,
+        box and brush picks (size not defined).
 
     Raises
     ------
@@ -1927,12 +2038,22 @@ def load_picks(  # noqa: C901
         If the file is not recognized as a picks file, if the pick
         shape is unknown, or if a shape that needs a size does not
         carry one.
+    MissingPixelsizeError
+        If the file was written before Picasso 1.0 and ``pixelsize`` is
+        None.
+
+    Examples
+    --------
+    >>> from picasso import io
+    >>> picks, shape, diameter = io.load_picks("movie_locs_picks.yaml")
     """
     assert path.endswith(".yaml"), "Picks should be stored in a .yaml file."
 
     # load the file
     with open(path, "r") as f:
         regions = _parse_yaml(f)
+    if not isinstance(regions, dict):
+        raise ValueError("Unrecognized picks file")
 
     # Backwards compatibility for old picked region files
     if "Shape" in regions:
@@ -1942,23 +2063,31 @@ def load_picks(  # noqa: C901
     else:
         raise ValueError("Unrecognized picks file")
 
-    pixelsize = 1 if pixelsize is None else pixelsize
+    if FORMAT_VERSION_ATTR not in regions:
+        from . import legacy
+
+        if pixelsize is None:
+            raise MissingPixelsizeError(
+                f"{path} was written before Picasso 1.0, with positions in "
+                "camera pixels. Pass pixelsize (nm) to convert it to nm, or "
+                "convert the file once with picasso convert-units. See "
+                f"{docs_url('files.html#files-legacy')}"
+            )
+        regions = legacy.picks_to_nm(regions, pixelsize)
 
     # assign loaded picks and pick size
     if shape == "Circle":
         picks = regions["Centers"]
-        # legacy files store the size in camera pixels, without "(nm)"
-        size = _pick_size_from_regions(regions, "Diameter", pixelsize)
+        size = _pick_size_from_regions(regions, "Diameter")
     elif shape == "Rectangle":
         picks = regions["Center-Axis-Points"]
-        size = _pick_size_from_regions(regions, "Width", pixelsize)
+        size = _pick_size_from_regions(regions, "Width")
     elif shape == "Polygon":
         picks = regions["Vertices"]
         size = None
     elif shape == "Square":
         picks = regions["Centers"]
-        # no backward compatibility here, always in nm
-        size = _pick_size_from_regions(regions, "Side Length", pixelsize)
+        size = _pick_size_from_regions(regions, "Side Length")
     elif shape == "Box":
         # each box carries its own extent, so there is no size
         picks = regions["Corners"]
@@ -1968,7 +2097,7 @@ def load_picks(  # noqa: C901
         # form one pick follows from their geometry, so the grouping is
         # re-derived rather than stored
         strokes = [
-            (stroke["Width (nm)"] / pixelsize, stroke["Path"])
+            (stroke["Width (nm)"], stroke["Path"])
             for stroke in regions["Strokes"]
         ]
         picks = lib.merge_brush_strokes(strokes)
@@ -1978,74 +2107,214 @@ def load_picks(  # noqa: C901
     return picks, shape, size
 
 
-def _pick_size_from_regions(
-    regions: dict, key: str, pixelsize: float
-) -> float:
-    """Return a pick size from a loaded picks file, in camera pixels.
+def _pick_size_from_regions(regions: dict, key: str) -> float:
+    """Return a pick size from a loaded picks file, in nm.
 
-    Sizes are stored in nm under ``"<key> (nm)"``; files written by
-    older versions of Picasso store them in camera pixels under the bare
-    ``key``.
+    Sizes are stored in nm under ``"<key> (nm)"`` (files written before
+    Picasso 0.6 stored them in camera pixels under the bare ``key``,
+    which ``legacy.picks_to_nm`` renames).
 
     Parameters
     ----------
     regions : dict
-        Contents of the picks .yaml file.
+        Contents of the picks .yaml file, in nm.
     key : str
         Name of the size entry, e.g., "Diameter".
-    pixelsize : float
-        Camera pixel size in nm.
 
     Returns
     -------
     size : float
-        Pick size in camera pixels.
+        Pick size in nm.
 
     Raises
     ------
     ValueError
-        If neither the nm nor the legacy entry is present.
+        If the entry is not present.
     """
     if f"{key} (nm)" in regions:
-        return regions[f"{key} (nm)"] / pixelsize
-    elif key in regions:
-        return regions[key]
+        return float(regions[f"{key} (nm)"])
     raise ValueError(
         f"Picks file is missing the pick size entry '{key} (nm)'."
     )
 
 
+def picks_dict(picks: list, shape: str, size: float | None = None) -> dict:
+    """The dictionary describing pick regions, in the format of a picks
+    .yaml file (see ``load_picks``).
+
+    Parameters
+    ----------
+    picks : list
+        Picks in the format of the Render window (positions in nm), see
+        ``load_picks``.
+    shape : str
+        The shape of the picks, one of ``lib.PICK_SHAPES``.
+    size : float, optional
+        The size of the picks in nm: the diameter of circles, the width
+        of rectangles, the side length of squares. Not needed (ignored)
+        for polygons, boxes and brush picks. Default is None.
+
+    Returns
+    -------
+    regions : dict
+        Pick shape, size (nm), positions (nm) and the format marker.
+
+    Raises
+    ------
+    ValueError
+        If the shape is unknown or a shape that needs a size has none.
+    """
+    if shape not in lib.PICK_SHAPES:
+        raise ValueError(f"Unrecognized pick shape: {shape}")
+    if shape in ("Circle", "Rectangle", "Square") and size is None:
+        raise ValueError(f"{shape} picks need a size.")
+
+    def point(p) -> list[float]:
+        return [float(p[0]), float(p[1])]
+
+    regions = {}
+    if shape == "Circle":
+        regions["Diameter (nm)"] = float(size)
+        regions["Centers"] = [point(_) for _ in picks]
+    elif shape == "Rectangle":
+        regions["Width (nm)"] = float(size)
+        regions["Center-Axis-Points"] = [
+            [point(a), point(b)] for a, b in picks
+        ]
+    elif shape == "Polygon":
+        regions["Vertices"] = [
+            [point(v) for v in pick] for pick in picks if len(pick)
+        ]
+    elif shape == "Square":
+        regions["Side Length (nm)"] = float(size)
+        regions["Centers"] = [point(_) for _ in picks]
+    elif shape == "Box":
+        # each box carries its own extent, so no size is saved
+        regions["Corners"] = [[point(a), point(b)] for a, b in picks]
+    elif shape == "Brush":
+        # a flat, ordered stroke list: which strokes form one pick
+        # follows from their geometry and is re-derived on loading
+        regions["Strokes"] = [
+            {
+                "Width (nm)": float(stroke[0]),
+                "Path": [point(_) for _ in stroke[1]],
+            }
+            for pick in picks
+            for stroke in pick
+        ]
+    regions["Shape"] = shape
+    regions[FORMAT_VERSION_ATTR] = FORMAT_VERSION
+    return regions
+
+
+def save_picks(
+    path: str, picks: list, shape: str, size: float | None = None
+) -> None:
+    """Save pick regions to a .yaml file that ``load_picks`` reads.
+
+    Parameters
+    ----------
+    path : str
+        The path to the picks file (.yaml).
+    picks : list
+        Picks in the format of the Render window (positions in nm), see
+        ``load_picks``.
+    shape : str
+        The shape of the picks, one of ``lib.PICK_SHAPES``.
+    size : float, optional
+        The size of the picks in nm (diameter, width or side length);
+        not needed for polygons, boxes and brush picks. Default is None.
+
+    Examples
+    --------
+    >>> from picasso import io
+    >>> io.save_picks("picks.yaml", [(1200.0, 850.5)], "Circle", size=100.0)
+    """
+    save_yaml(path, picks_dict(picks, shape, size))
+
+
+def save_yaml(path: str, data) -> None:
+    """Write one document (usually a dict) as plain YAML that
+    ``load_yaml`` and any other YAML reader read.
+
+    Parameters
+    ----------
+    path : str
+        Path to the .yaml file.
+    data : Any
+        The document.
+    """
+    with open(path, "w") as file:
+        _dump_yaml(data, file, default_flow_style=False)
+
+
+#: Header of a drift .txt file written since Picasso 1.0 (numbers in
+#: nm); ``np.loadtxt`` skips it, so older readers still read the numbers.
+_DRIFT_HEADER = "{attr} {version}\ncolumns: {columns} (nm per frame)"
+
+
 def save_drift(path: str, drift: pd.DataFrame) -> None:
-    """Save drift to a .txt file in the format used by the Picasso.
+    """Save drift to a .txt file in the format used by Picasso.
+
+    One row per frame with the columns ``x y`` or ``x y z`` in nm,
+    separated by spaces, after two comment lines: the format marker
+    (``picasso_format 1.0``) and the column names. Files written before
+    Picasso 1.0 have no header, with ``x`` and ``y`` in camera pixels.
 
     Parameters
     ----------
     path : str
         The path to the drift file. Must end in .txt.
     drift : pd.DataFrame
-        A DataFrame with 'x' and 'y' columns and drift values for each
-        frame.
+        A DataFrame with 'x' and 'y' (and optionally 'z') columns and
+        drift values in nm for each frame.
     """
+    columns = ["x", "y"] + (["z"] if "z" in drift.columns else [])
+    header = _DRIFT_HEADER.format(
+        attr=FORMAT_VERSION_ATTR,
+        version=FORMAT_VERSION,
+        columns=" ".join(columns),
+    )
     # Binary handle so the explicit "\r\n" is not itself newline-translated
     # (a text handle writes "\r\r\n" on Windows).
     with open(path, "wb") as f:
-        np.savetxt(f, drift, newline="\r\n")
+        np.savetxt(f, drift[columns].to_numpy(), newline="\r\n", header=header)
 
 
-def load_drift(path: str) -> pd.DataFrame | None:
-    """Load drift from a .txt file generated with the Picasso GUI.
+def _drift_file_version(path: str) -> tuple[int, int] | None:
+    """Format version in the header of a drift .txt file, None if the
+    file has none (written before Picasso 1.0)."""
+    with open(path, "r") as f:
+        for line in f:
+            if not line.startswith("#"):
+                break
+            match = re.search(
+                rf"{FORMAT_VERSION_ATTR}\s*:?\s*(\d+)\.(\d+)", line
+            )
+            if match is not None:
+                return int(match.group(1)), int(match.group(2))
+    return None
+
+
+def load_drift(path: str, pixelsize: float | None = None) -> pd.DataFrame:
+    """Load drift from a .txt file written by Picasso.
+
+    Files written before Picasso 1.0 (no header) store ``x`` and ``y`` in
+    camera pixels; they are converted to nm with ``pixelsize``.
 
     Parameters
     ----------
     path : str
         The path to the drift file. Must end in .txt.
+    pixelsize : float, optional
+        Camera pixel size in nm, used only for files written before
+        Picasso 1.0. Default is None.
 
     Returns
     -------
-    drift_df : pd.DataFrame or None
-        A DataFrame containing the drift information with columns 'frame',
-        'x', 'y', and optionally 'z'. Returns None if the file cannot be
-        loaded.
+    drift : pd.DataFrame
+        A DataFrame containing the drift per frame in nm, with columns
+        'x', 'y', and optionally 'z'.
 
     Raises
     ------
@@ -2054,10 +2323,13 @@ def load_drift(path: str) -> pd.DataFrame | None:
     AssertionError
         If the loaded drift data does not have the expected format (2D
         array with 2 or 3 columns).
+    MissingPixelsizeError
+        If the file was written before Picasso 1.0 and ``pixelsize`` is
+        None.
     """
     if not path.endswith(".txt"):
         raise ValueError("Drift file must end with .txt")
-    drift = np.loadtxt(path, delimiter=" ")
+    drift = np.loadtxt(path, ndmin=2)
     assert drift.ndim == 2 and drift.shape[1] in [2, 3], (
         "Drift must be a 2D array with 2 or 3 columns (x, y, (z)). "
         f"Loaded array has shape {drift.shape}."
@@ -2065,6 +2337,17 @@ def load_drift(path: str) -> pd.DataFrame | None:
     drift_df = pd.DataFrame(drift[:, :2], columns=["x", "y"])
     if drift.shape[1] == 3:
         drift_df["z"] = drift[:, 2]
+    if _drift_file_version(path) is None:
+        from . import legacy
+
+        if pixelsize is None:
+            raise MissingPixelsizeError(
+                f"{path} was written before Picasso 1.0, with the drift in "
+                "camera pixels. Pass pixelsize (nm) to convert it to nm, or "
+                "convert the file once with picasso convert-units. See "
+                f"{docs_url('files.html#files-legacy')}"
+            )
+        drift_df = legacy.drift_to_nm(drift_df, pixelsize)
     return drift_df
 
 
@@ -5194,6 +5477,7 @@ def save_datasets(path: str, info: dict, **kwargs) -> None:
     """
     # cannot use df.to_hdf for backward compatibility with older Picasso
     with h5py.File(path, "w") as locs_file:
+        _write_format_attrs(locs_file)
         for key, val in kwargs.items():
             rec_locs = val.to_records(index=False)
             locs_file.create_dataset(key, data=rec_locs)
@@ -5382,14 +5666,46 @@ def _check_format_version(path: str) -> tuple[int, int] | None:
     return version
 
 
-def _upgrade_legacy_locs(locs: pd.DataFrame) -> pd.DataFrame:
-    """Localizations from a file written before Picasso 1.0 in the
-    current format: the column ``likelihood`` (the name of the
-    log-likelihood column before Picasso 0.11) becomes ``log_likelihood``.
-    """
+def _rename_legacy_columns(locs: pd.DataFrame) -> pd.DataFrame:
+    """``locs`` with the column ``likelihood`` (the name of the
+    log-likelihood column before Picasso 0.11) renamed ``log_likelihood``."""
     if "likelihood" in locs.columns and "log_likelihood" not in locs.columns:
         locs = locs.rename(columns={"likelihood": "log_likelihood"})
     return locs
+
+
+def _upgrade_legacy_locs(
+    locs: pd.DataFrame,
+    info: list[dict],
+    pixelsize: float | None,
+    path: str,
+) -> tuple[pd.DataFrame, list[dict]]:
+    """A table (localizations, cluster centers, pick properties) and its
+    metadata from a file written before Picasso 1.0 in the current
+    format: lengths in camera pixels become nm (see
+    ``picasso.legacy``) and the column ``likelihood`` becomes
+    ``log_likelihood``. The conversion is logged.
+
+    Raises
+    ------
+    MissingPixelsizeError
+        If neither ``pixelsize`` nor the metadata give the pixel size.
+    """
+    from . import legacy
+
+    locs = _rename_legacy_columns(locs)
+    pixelsize = _legacy_pixelsize(pixelsize, info, path)
+    _log.info(
+        "%s was written before Picasso 1.0; its lengths are converted from "
+        "camera pixels to nm with a camera pixel size of %g nm.",
+        path,
+        pixelsize,
+    )
+    locs = legacy.locs_to_nm(locs, pixelsize, copy=False)
+    info = legacy.info_to_nm(
+        info, pixelsize, columns=locs.columns, source=path
+    )
+    return locs, info
 
 
 #: Picasso version since which a dark time counts the frames without
@@ -5456,10 +5772,12 @@ def validate_locs(
     requirements of the Picasso format.
 
     The localizations need the columns ``MINIMUM_COLUMNS`` (``frame``,
-    ``x``, ``y``, ``lpx`` and ``lpy``) and the metadata the keys
-    ``MINIMUM_METADATA_KEYS`` (``Width``, ``Height`` and ``Frames``);
-    frames count from 0. Called by ``load_locs``, so files of other
-    software can be checked before they are opened in Picasso.
+    ``x``, ``y``, ``lpx`` and ``lpy``, lengths in nm) and the metadata
+    the keys ``MINIMUM_METADATA_KEYS`` (``Width``, ``Height`` and
+    ``Frames``, the size of the movie in camera pixels and frames, and
+    ``Pixelsize``, the camera pixel size in nm); frames count from 0.
+    Called by ``load_locs``, so files of other software can be checked
+    before they are opened in Picasso.
 
     Parameters
     ----------
@@ -5475,7 +5793,8 @@ def validate_locs(
     ------
     LocsFormatError
         If a column or a metadata key is missing, or if frames are
-        negative.
+        negative. ``MissingPixelsizeError`` (a ``LocsFormatError``) if
+        ``Pixelsize`` is the only thing missing, so GUIs can ask for it.
     """
     source = path if path is not None else "The localizations"
     missing_columns = [c for c in MINIMUM_COLUMNS if c not in locs.columns]
@@ -5493,12 +5812,33 @@ def validate_locs(
         names = ", ".join(f"'{key}'" for key in missing_keys)
         noun = "key" if len(missing_keys) == 1 else "keys"
         problems.append(f"the metadata {noun} {names}")
+    if missing_keys == ["Pixelsize"] and not missing_columns:
+        # the one key a user can supply on the spot (GUIs ask for it)
+        raise MissingPixelsizeError(
+            f"{source} lacks the metadata key 'Pixelsize', the camera pixel "
+            "size in nm. Pass pixelsize (nm) or add it to the metadata. See "
+            f"{docs_url('files.html#files-minimum-requirements')}"
+        )
+    if missing_keys == ["Pixelsize"] and not missing_columns:
+        # the one key a user can supply on the spot (GUIs ask for it)
+        raise MissingPixelsizeError(
+            f"{source} lacks the metadata key 'Pixelsize', the camera pixel "
+            "size in nm. Pass pixelsize (nm) or add it to the metadata. See "
+            f"{docs_url('files.html#files-minimum-requirements')}"
+        )
+    if missing_keys == ["Pixelsize"] and not missing_columns:
+        # the one key a user can supply on the spot (GUIs ask for it)
+        raise MissingPixelsizeError(
+            f"{source} lacks the metadata key 'Pixelsize', the camera pixel "
+            "size in nm. Pass pixelsize (nm) or add it to the metadata. See "
+            f"{docs_url('files.html#files-minimum-requirements')}"
+        )
     if problems:
         raise LocsFormatError(
             f"{source} lacks {' and '.join(problems)}. Localization files "
             "need the columns frame, x, y, lpx and lpy (positions and "
-            "precisions in camera pixels) and the metadata keys Width, "
-            "Height and Frames. See "
+            "precisions in nm) and the metadata keys Width, Height and "
+            "Frames (camera pixels, frames) and Pixelsize (nm). See "
             f"{docs_url('files.html#files-minimum-requirements')}"
         )
     frame = locs["frame"].to_numpy()
@@ -5519,17 +5859,18 @@ def _report_dropped_locs(
 ) -> None:
     """Warn if ``lib.ensure_sanity`` dropped localizations of the file
     ``path`` while loading it (``locs`` as read, ``kept`` as returned),
-    hinting at coordinates in nm if most lie beyond the field of view."""
+    hinting at a wrong pixel size or canvas if most lie beyond the field
+    of view."""
     n_dropped = len(locs) - len(kept)
     if n_dropped == 0:
         return
-    width = lib.get_from_metadata(info, "Width")
-    height = lib.get_from_metadata(info, "Height")
+    width, height = lib.field_of_view(info)
     message = (
         f"{n_dropped:,} of {len(locs):,} localizations in {path} were not "
         "loaded: they have missing or infinite values, lie outside the "
-        f"field of view ({width} x {height} camera pixels) or have "
-        "negative values (e.g., coordinates or precisions)."
+        f"field of view ({width:,.0f} x {height:,.0f} nm, i.e., Width x "
+        "Height camera pixels of Pixelsize nm) or have negative values "
+        "(e.g., coordinates or precisions)."
     )
     x = locs["x"].to_numpy()
     y = locs["y"].to_numpy()
@@ -5538,10 +5879,11 @@ def _report_dropped_locs(
     if n_outside > len(locs) / 2:
         message += (
             f" Most of them lie beyond the field of view: x reaches "
-            f"{np.nanmax(x):,.1f} and y {np.nanmax(y):,.1f}. Picasso "
-            "expects x and y in camera pixels, i.e., coordinates in nm "
-            "divided by the pixel size; else Width and Height in the "
-            "metadata are too small."
+            f"{np.nanmax(x):,.1f} and y {np.nanmax(y):,.1f} nm. Since "
+            "Picasso 1.0, x and y are in nm; a file written in camera "
+            "pixels needs the picasso_format attribute removed (or "
+            "picasso convert-units), else Width, Height or Pixelsize in "
+            "the metadata are too small."
         )
     _log.warning(message)
 
@@ -5666,6 +6008,7 @@ def _read_locs_dataset(path: str, progress=None) -> pd.DataFrame:
 def load_locs(
     path: str,
     *,
+    pixelsize: float | None = None,
     progress=None,
 ) -> tuple[pd.DataFrame, list[dict]]:
     """Load localization data from an HDF5 file.
@@ -5674,8 +6017,10 @@ def load_locs(
     incompatible format version (see ``get_format_version``) and a file
     without the required columns or metadata keys (see
     ``validate_locs``) raise ``LocsFormatError``. Files written before
-    Picasso 1.0 are brought to the current format (the column
-    ``likelihood`` becomes ``log_likelihood``). Localizations with
+    Picasso 1.0 are brought to the current format: their lengths,
+    stored in camera pixels, are converted to nm with the ``Pixelsize``
+    of the metadata or ``pixelsize`` (see ``picasso.legacy``), and the
+    column ``likelihood`` becomes ``log_likelihood``. Localizations with
     missing or infinite values, outside the field of view or with
     negative values are dropped (see ``lib.ensure_sanity``) with a
     warning logged by the ``picasso.io`` logger.
@@ -5687,6 +6032,9 @@ def load_locs(
     ----------
     path : str
         The path to the HDF5 file containing localization data.
+    pixelsize : float, optional
+        Camera pixel size in nm, used only for files written before
+        Picasso 1.0 whose metadata does not record it. Default is None.
     progress : callable or None, optional
         Called as ``progress(done, total)`` while the localizations are
         read, see ``_read_locs_dataset``. Raising inside it aborts the
@@ -5712,6 +6060,15 @@ def load_locs(
     LocsFormatError
         If the file is of a newer major format version, lacks required
         columns or metadata keys, or holds negative frame numbers.
+    MissingPixelsizeError
+        If the file was written before Picasso 1.0 and neither its
+        metadata nor ``pixelsize`` give the camera pixel size.
+
+    Examples
+    --------
+    >>> from picasso import io
+    >>> locs, info = io.load_locs("movie_locs.hdf5")
+    >>> locs, info = io.load_locs("old_locs.hdf5", pixelsize=130)  # 0.x file
     """
     if path.endswith(".csv"):
         raise ValueError(
@@ -5722,9 +6079,14 @@ def load_locs(
     format_version = _check_format_version(path)
     locs = _read_locs_dataset(path, progress=progress)
     info = load_info(path)
+    # validated before the conversion, so that every missing column and
+    # key is named at once; a pixel size given for a legacy file counts
+    check_info = info
+    if format_version is None and pixelsize is not None:
+        check_info = info + [{"Pixelsize": float(pixelsize)}]
+    validate_locs(locs, check_info, path)
     if format_version is None:
-        locs = _upgrade_legacy_locs(locs)
-    validate_locs(locs, info, path)
+        locs, info = _upgrade_legacy_locs(locs, info, pixelsize, path)
     _check_dark_times(locs, info, format_version, path)
     kept = lib.ensure_sanity(locs, info)
     _report_dropped_locs(locs, kept, info, path)
@@ -5750,6 +6112,7 @@ def save_identifications(
     # cannot use df.to_hdf for backward compatibility with older Picasso
     rec_ids = identifications.to_records(index=False)
     with h5py.File(path, "w") as ids_file:
+        _write_format_attrs(ids_file)
         ids_file.create_dataset("identifications", data=rec_ids)
         embedded = _write_metadata_dataset(ids_file, info)
     _write_sidecar(path, info, embedded)
@@ -5785,41 +6148,65 @@ def load_identifications(path: str) -> tuple[pd.DataFrame, list[dict]]:
     return identifications, info
 
 
-def load_clusters(path: str) -> pd.DataFrame:
+def load_clusters(path: str, pixelsize: float | None = None) -> pd.DataFrame:
     """Load cluster data from an HDF5 file.
+
+    Files written before Picasso 1.0 are brought to nm, as in
+    ``load_locs``.
 
     Parameters
     ----------
     path : str
         The path to the HDF5 file containing cluster data.
+    pixelsize : float, optional
+        Camera pixel size in nm, used only for files written before
+        Picasso 1.0 whose metadata does not record it. Default is None.
 
     Returns
     -------
     clusters : pd.DataFrame
         The cluster data loaded from the file.
+
+    Raises
+    ------
+    MissingPixelsizeError
+        If the file was written before Picasso 1.0 and neither its
+        metadata nor ``pixelsize`` give the camera pixel size.
     """
+    format_version = _check_format_version(path)
     try:
         clusters = pd.read_hdf(path, key="clusters")
     except KeyError:
         clusters = pd.read_hdf(path, key="locs")
+    if format_version is None:
+        try:
+            info = load_info(path)
+        except NoMetadataFileError:
+            info = []
+        clusters, _ = _upgrade_legacy_locs(clusters, info, pixelsize, path)
     return clusters
 
 
-def load_filter(path: str) -> tuple[pd.DataFrame, list[dict]]:
+def load_filter(
+    path: str, pixelsize: float | None = None
+) -> tuple[pd.DataFrame, list[dict]]:
     """Load localization data from an HDF5 file, checking for different
     possible keys for the localization data. This function is used to
     handle files that may contain localization data under different
     keys such as 'locs', 'groups', or 'clusters'.
 
-    Localizations ('locs') of a newer, incompatible format version are
-    refused and those written before Picasso 1.0 are brought to the
-    current format, as in ``load_locs``. Unlike there, the columns are
+    Files of a newer, incompatible format version are refused and
+    those written before Picasso 1.0 are brought to the current format
+    (lengths in nm), as in ``load_locs``. Unlike there, the columns are
     not checked, so tables of any kind can be opened.
 
     Parameters
     ----------
     path : str
         The path to the HDF5 file containing localization data.
+    pixelsize : float, optional
+        Camera pixel size in nm, used only for files written before
+        Picasso 1.0 whose metadata does not record it. Default is None.
 
     Returns
     -------
@@ -5832,27 +6219,35 @@ def load_filter(path: str) -> tuple[pd.DataFrame, list[dict]]:
     Raises
     ------
     LocsFormatError
-        If the localizations are of a newer major format version.
+        If the file is of a newer major format version.
+    MissingPixelsizeError
+        If the file was written before Picasso 1.0 and neither its
+        metadata nor ``pixelsize`` give the camera pixel size.
     """
+    format_version = _check_format_version(path)
     try:
         locs = pd.read_hdf(path, key="locs")
         info = load_info(path)
-        if _check_format_version(path) is None:
-            locs = _upgrade_legacy_locs(locs)
     except KeyError:
         try:
             locs = pd.read_hdf(path, key="groups")
             info = load_info(path)
         except KeyError:
             locs = pd.read_hdf(path, key="clusters")
-            info = []
+            try:
+                info = load_info(path)
+            except NoMetadataFileError:
+                info = []
+    if format_version is None:
+        locs, info = _upgrade_legacy_locs(locs, info, pixelsize, path)
     return locs, info
 
 
 def export_txt_imagej(
     path: str, locs: pd.DataFrame, info: list[dict] | None = None
 ) -> None:
-    """Export localizations to a text file compatible with ImageJ.
+    """Export localizations to a text file compatible with ImageJ: the
+    columns ``frame``, ``x`` and ``y`` (nm) without a header.
 
     Parameters
     ----------
@@ -5878,7 +6273,7 @@ def export_txt_imagej(
 
 
 def export_txt_nis(path: str, locs: pd.DataFrame, info: list[dict]) -> None:
-    """Export localizations as .txt for NIS.
+    """Export localizations as .txt for NIS (lengths in nm).
 
     Parameters
     ----------
@@ -5887,7 +6282,8 @@ def export_txt_nis(path: str, locs: pd.DataFrame, info: list[dict]) -> None:
     locs : pd.DataFrame
         The localization data to be exported.
     info : list of dicts
-        Metadata dictionaries.
+        Metadata dictionaries. Ignored but kept for compatibility with
+        other export functions.
     """
     z_header = b"X\tY\tZ\tChannel\tWidth\tBG\tLength\tArea\tFrame\r\n"
     fmt_z = [
@@ -5912,7 +6308,6 @@ def export_txt_nis(path: str, locs: pd.DataFrame, info: list[dict]) -> None:
         "%.i",
         "%.i",
     ]
-    pixelsize = lib.get_from_metadata(info, "Pixelsize", raise_error=True)
     columns_original = [
         "x",
         "y",
@@ -5926,7 +6321,6 @@ def export_txt_nis(path: str, locs: pd.DataFrame, info: list[dict]) -> None:
         columns_original.remove("z")
     loctxt = locs[columns_original].copy()
     loctxt["frame"] += 1
-    loctxt[["x", "y", "sx"]] *= pixelsize
     loctxt["Channel"] = 1
     loctxt["Length"] = 1
     loctxt["bg"] = loctxt["bg"].round().astype(int)
@@ -5949,7 +6343,7 @@ def export_xyz_chimera(
     path: str, locs: pd.DataFrame, info: list[dict]
 ) -> None:
     """Export localizations as .xyz for CHIMERA. The file contains
-    only x, y, z. Raise a warning if no z coordinate found.
+    only x, y, z (nm). Raise a warning if no z coordinate found.
 
     Parameters
     ----------
@@ -5958,13 +6352,12 @@ def export_xyz_chimera(
     locs : pd.DataFrame
         The localization data to be exported.
     info : list of dicts
-        Metadata dictionaries.
+        Metadata dictionaries. Ignored but kept for compatibility with
+        other export functions.
     """
-    pixelsize = lib.get_from_metadata(info, "Pixelsize", raise_error=True)
     if "z" in locs.columns:
         loctxt = locs[["x", "y", "z"]].copy()
         loctxt["molecule"] = 1
-        loctxt[["x", "y"]] *= pixelsize
         loctxt = loctxt[["molecule", "x", "y", "z"]]
         with open(path, "wb") as f:
             f.write(b"Molecule export\r\n")
@@ -5983,8 +6376,8 @@ def export_xyz_chimera(
 
 
 def export_3d_visp(path: str, locs: pd.DataFrame, info: list[dict]) -> None:
-    """Export localizations as .3d for ViSP. Show a warning if no z
-    coordinate found.
+    """Export localizations as .3d for ViSP (lengths in nm). Show a
+    warning if no z coordinate found.
 
     Parameters
     ----------
@@ -5993,12 +6386,11 @@ def export_3d_visp(path: str, locs: pd.DataFrame, info: list[dict]) -> None:
     locs : pd.DataFrame
         The localization data to be exported.
     info : list of dicts
-        Metadata dictionaries.
+        Metadata dictionaries. Ignored but kept for compatibility with
+        other export functions.
     """
-    pixelsize = lib.get_from_metadata(info, "Pixelsize", raise_error=True)
     if "z" in locs.columns:
         loctxt = locs[["x", "y", "z", "photons", "frame"]].copy()
-        loctxt[["x", "y"]] *= pixelsize
         loctxt["frame"] = loctxt["frame"].astype(int)
         with open(path, "wb") as f:
             np.savetxt(
@@ -6017,7 +6409,8 @@ def export_3d_visp(path: str, locs: pd.DataFrame, info: list[dict]) -> None:
 def export_thunderstorm(
     path: str, locs: pd.DataFrame, info: list[dict]
 ) -> None:
-    """Export localizations as .csv for ThunderSTORM.
+    """Export localizations as .csv for ThunderSTORM (lengths in nm, as
+    in Picasso).
 
     Parameters
     ----------
@@ -6026,9 +6419,9 @@ def export_thunderstorm(
     locs : pd.DataFrame
         The localization data to be exported.
     info : list of dicts
-        Metadata dictionaries.
+        Metadata dictionaries. Ignored but kept for compatibility with
+        other export functions.
     """
-    pixelsize = lib.get_from_metadata(info, "Pixelsize", raise_error=True)
     columns_original = [
         "frame",
         "x",
@@ -6050,11 +6443,8 @@ def export_thunderstorm(
     loctxt["photons"] = loctxt["photons"].astype(np.int32)
     loctxt["bg"] = loctxt["bg"].astype(np.int32)
     loctxt["id"] = np.arange(len(loctxt), dtype=np.int32)
-    loctxt[["x", "y", "sx", "sy"]] *= pixelsize
     loctxt["bkgstd [photon]"] = 0
-    loctxt["uncertainty_xy [nm]"] = (
-        (loctxt["lpx"] + loctxt["lpy"]) / 2 * pixelsize
-    )
+    loctxt["uncertainty_xy [nm]"] = (loctxt["lpx"] + loctxt["lpy"]) / 2
     column_mapper = {
         "x": "x [nm]",
         "y": "y [nm]",
@@ -6112,6 +6502,17 @@ def _sanitize_column_name(name: str) -> str:
     return name
 
 
+def _canvas_pixels(values, pixelsize: float) -> int:
+    """The number of camera pixels that holds coordinates ``values``
+    (nm): ``floor(max / pixelsize) + 1``, since ``lib.ensure_sanity``
+    keeps coordinates strictly below the canvas size; at least 1."""
+    values = np.asarray(values, dtype=np.float64)
+    values = values[np.isfinite(values)]
+    if not len(values):
+        return 1
+    return max(1, int(np.floor(values.max() / float(pixelsize))) + 1)
+
+
 def import_ts(path: str, pixelsize: float) -> tuple[pd.DataFrame, list[dict]]:
     """Import localization data from a ThunderSTORM .csv file.
 
@@ -6124,13 +6525,15 @@ def import_ts(path: str, pixelsize: float) -> tuple[pd.DataFrame, list[dict]]:
     path : str
         The path to the ThunderSTORM .csv file.
     pixelsize : float
-        Camera pixel size in nm. Picasso saves xy coordinates in units
-        of camera pixels.
+        Camera pixel size in nm, recorded in the metadata; the field of
+        view (``Width`` and ``Height``, camera pixels) is derived from
+        the coordinates with it.
 
     Returns
     -------
     locs : pd.DataFrame
-        The localization data imported from the file.
+        The localization data imported from the file (lengths in nm, as
+        in ThunderSTORM).
     info : list of dicts
         Minimal metadata information.
     """
@@ -6170,18 +6573,18 @@ def import_ts(path: str, pixelsize: float) -> tuple[pd.DataFrame, list[dict]]:
     frames = data["frame"].astype(int)
     # make sure frames start at zero:
     frames = frames - np.min(frames)
-    x = data["x [nm]"] / pixelsize
-    y = data["y [nm]"] / pixelsize
+    x = data["x [nm]"]
+    y = data["y [nm]"]
     photons = data["intensity [photon]"].astype(int)
 
     bg = data["offset [photon]"].astype(int)
-    lpx = data["uncertainty_xy [nm]"] / pixelsize
-    lpy = data["uncertainty_xy [nm]"] / pixelsize
+    lpx = data["uncertainty_xy [nm]"]
+    lpy = data["uncertainty_xy [nm]"]
 
     if "z [nm]" in data.columns:
         z = data["z [nm]"]
-        sx = data["sigma1 [nm]"] / pixelsize
-        sy = data["sigma2 [nm]"] / pixelsize
+        sx = data["sigma1 [nm]"]
+        sy = data["sigma2 [nm]"]
         locs = pd.DataFrame(
             {
                 "frame": frames.astype(np.uint32),
@@ -6197,8 +6600,8 @@ def import_ts(path: str, pixelsize: float) -> tuple[pd.DataFrame, list[dict]]:
             }
         )
     else:
-        sx = data["sigma [nm]"] / pixelsize
-        sy = data["sigma [nm]"] / pixelsize
+        sx = data["sigma [nm]"]
+        sy = data["sigma [nm]"]
         locs = pd.DataFrame(
             {
                 "frame": frames.astype(np.uint32),
@@ -6233,8 +6636,8 @@ def import_ts(path: str, pixelsize: float) -> tuple[pd.DataFrame, list[dict]]:
 
     img_info = lib.step_info("csv2hdf")
     img_info["Frames"] = int(np.max(frames)) + 1
-    img_info["Height"] = int(np.ceil(np.max(y)))
-    img_info["Width"] = int(np.ceil(np.max(x)))
+    img_info["Height"] = _canvas_pixels(y, pixelsize)
+    img_info["Width"] = _canvas_pixels(x, pixelsize)
     img_info["Pixelsize"] = float(pixelsize)
 
     base, ext = os.path.splitext(path)
@@ -6335,36 +6738,36 @@ def _read_smap_loc(path: str) -> dict:
 
 
 def _smap_psf_widths(loc: dict, n: int, pixelsize: float):
-    """Return ``(sx, sy)`` PSF widths in px, converted from SMAP's nm.
+    """Return ``(sx, sy)`` PSF widths in nm, as SMAP stores them.
 
-    A neutral 1 px default is used when the corresponding field is
-    absent.
+    A neutral default of one camera pixel (``pixelsize`` nm) is used
+    when the corresponding field is absent.
     """
     if "PSFxnm" in loc:
-        sx = loc["PSFxnm"] / pixelsize
+        sx = loc["PSFxnm"]
     else:
-        sx = np.ones(n)
+        sx = np.full(n, float(pixelsize))
     if "PSFynm" in loc:
-        sy = loc["PSFynm"] / pixelsize
+        sy = loc["PSFynm"]
     elif "PSFxnm" in loc:
         sy = sx
     else:
-        sy = np.ones(n)
+        sy = np.full(n, float(pixelsize))
     return sx, sy
 
 
-def _smap_locprec(loc: dict, n: int, pixelsize: float):
-    """Return ``(lpx, lpy)`` localization precision in px.
+def _smap_locprec(loc: dict, n: int):
+    """Return ``(lpx, lpy)`` localization precision in nm.
 
     SMAP stores a single combined value (``locprecnm``); some files use
     separate ``locprecxnm``/``locprecynm`` instead.
     """
     if "locprecnm" in loc:
-        lpx = loc["locprecnm"] / pixelsize
-        lpy = loc["locprecnm"] / pixelsize
+        lpx = loc["locprecnm"]
+        lpy = loc["locprecnm"]
     elif "locprecxnm" in loc:
-        lpx = loc["locprecxnm"] / pixelsize
-        lpy = loc.get("locprecynm", loc["locprecxnm"]) / pixelsize
+        lpx = loc["locprecxnm"]
+        lpy = loc.get("locprecynm", loc["locprecxnm"])
     else:
         lpx = np.zeros(n)
         lpy = np.zeros(n)
@@ -6413,13 +6816,15 @@ def import_smap(
     path : str
         The path to the SMAP ``_sml.mat`` file.
     pixelsize : float
-        Camera pixel size in nm. Picasso saves xy coordinates in units
-        of camera pixels, while SMAP stores them in nm.
+        Camera pixel size in nm, recorded in the metadata; the field of
+        view (``Width`` and ``Height``, camera pixels) is derived from
+        the coordinates with it.
 
     Returns
     -------
     locs : pd.DataFrame
-        The localization data imported from the file.
+        The localization data imported from the file (lengths in nm, as
+        in SMAP).
     info : list of dicts
         Minimal metadata information.
     """
@@ -6436,8 +6841,8 @@ def import_smap(
     # offset, mirroring import_ts).
     frames = loc["frame"].astype(np.int64)
     frames = frames - np.min(frames)
-    x = loc["xnm"] / pixelsize
-    y = loc["ynm"] / pixelsize
+    x = loc["xnm"]
+    y = loc["ynm"]
 
     data = {
         "frame": frames.astype(np.uint32),
@@ -6458,7 +6863,7 @@ def import_smap(
     bg = loc["bg"] if "bg" in loc else np.zeros(n)
     data["bg"] = np.broadcast_to(bg, (n,)).astype(np.float32)
 
-    lpx, lpy = _smap_locprec(loc, n, pixelsize)
+    lpx, lpy = _smap_locprec(loc, n)
     data["lpx"] = np.asarray(lpx, dtype=np.float32)
     data["lpy"] = np.asarray(lpy, dtype=np.float32)
 
@@ -6472,8 +6877,8 @@ def import_smap(
 
     img_info = lib.step_info("smap2hdf")
     img_info["Frames"] = int(np.max(frames)) + 1
-    img_info["Height"] = int(np.ceil(np.max(y)))
-    img_info["Width"] = int(np.ceil(np.max(x)))
+    img_info["Height"] = _canvas_pixels(y, pixelsize)
+    img_info["Width"] = _canvas_pixels(x, pixelsize)
     img_info["Pixelsize"] = float(pixelsize)
 
     return locs, [img_info]
@@ -6520,15 +6925,15 @@ def export_smap(path: str, locs: pd.DataFrame, info: list[dict]) -> None:
         return values.reshape(-1, 1)
 
     loc = {
-        # SMAP frames are 1-based.
+        # SMAP frames are 1-based; lengths are in nm in both.
         "frame": column("frame") + 1,
-        "xnm": column("x") * pixelsize,
-        "ynm": column("y") * pixelsize,
+        "xnm": column("x"),
+        "ynm": column("y"),
         "phot": column("photons"),
         "bg": column("bg"),
-        "locprecnm": (column("lpx") + column("lpy")) / 2 * pixelsize,
-        "PSFxnm": column("sx") * pixelsize,
-        "PSFynm": column("sy") * pixelsize,
+        "locprecnm": (column("lpx") + column("lpy")) / 2,
+        "PSFxnm": column("sx", pixelsize),
+        "PSFynm": column("sy", pixelsize),
         "channel": np.zeros((n, 1)),
     }
     if "z" in locs.columns:
@@ -6536,12 +6941,13 @@ def export_smap(path: str, locs: pd.DataFrame, info: list[dict]) -> None:
         if "lpz" in locs.columns:
             loc["locprecznm"] = column("lpz")  # already in nm
 
+    # SMAP's field of view is in camera pixels
     width = lib.get_from_metadata(info, "Width")
     height = lib.get_from_metadata(info, "Height")
     if width is None:
-        width = int(np.ceil(locs["x"].max()))
+        width = _canvas_pixels(locs["x"], pixelsize)
     if height is None:
-        height = int(np.ceil(locs["y"].max()))
+        height = _canvas_pixels(locs["y"], pixelsize)
     px_um = float(pixelsize) / 1000.0
     smap_info = {
         "Width": float(width),
@@ -6840,17 +7246,16 @@ def import_pyme(
     as follows (the first column found is used):
 
     - ``frame``: ``t``, ``tIndex``.
-    - ``x``, ``y``: ``x``/``fitResults_x0``, ``y``/``fitResults_y0``,
-      converted to camera pixels.
+    - ``x``, ``y``: ``x``/``fitResults_x0``, ``y``/``fitResults_y0`` (nm).
     - ``z``: ``z``, ``fitResults_z0`` (nm). Omitted if all values are
       zero, i.e., for 2D data, for which PYMEVisualize adds ``z = 0``.
     - ``lpx``, ``lpy``: ``error_x``/``fitError_x0``,
-      ``error_y``/``fitError_y0`` (camera pixels; one is used for both
-      if only one is present, 0 if neither is).
+      ``error_y``/``fitError_y0`` (nm; one is used for both if only one
+      is present, 0 if neither is).
     - ``lpz``: ``error_z``, ``fitError_z0`` (nm), 3D data only.
     - ``sx``, ``sy``: ``sigx``/``fitResults_sigmax``,
       ``sigy``/``fitResults_sigmay``, otherwise ``sig``/
-      ``fitResults_sigma`` for both (camera pixels; 1 if absent).
+      ``fitResults_sigma`` for both (nm; one camera pixel if absent).
     - ``photons``: ``nPhotons``. Otherwise the integral of the fitted
       Gaussian, ``2 pi A sx sy`` (``A``/``fitResults_A`` is the peak
       amplitude in camera counts), converted to photons with
@@ -6933,8 +7338,8 @@ def import_pyme(
 
     data = {
         "frame": frames.astype(np.uint32),
-        "x": (x / pixelsize).astype(np.float32),
-        "y": (y / pixelsize).astype(np.float32),
+        "x": x.astype(np.float32),  # nm in both PyME and Picasso
+        "y": y.astype(np.float32),
     }
 
     z = take("z", "fitResults_z0")
@@ -6950,8 +7355,8 @@ def import_pyme(
         lpy = lpx
     if lpx is None:
         lpx = lpy = np.zeros(n)
-    data["lpx"] = (lpx / pixelsize).astype(np.float32)
-    data["lpy"] = (lpy / pixelsize).astype(np.float32)
+    data["lpx"] = lpx.astype(np.float32)
+    data["lpy"] = lpy.astype(np.float32)
     if is_3d:
         lpz = take("error_z", "fitError_z0")
         if lpz is not None:
@@ -6968,11 +7373,8 @@ def import_pyme(
     if sy is None:
         sy = sx
     has_sigma = sx is not None
-    if has_sigma:
-        sx = sx / pixelsize
-        sy = sy / pixelsize
-    else:
-        sx = sy = np.ones(n)
+    if not has_sigma:
+        sx = sy = np.full(n, pixelsize)  # one camera pixel
 
     per_count = _pyme_photons_per_count(metadata)
     to_photons = 1.0 if per_count is None else per_count
@@ -6981,8 +7383,15 @@ def import_pyme(
         # the amplitude is kept as an extra column, too
         amplitude = columns.get("A", columns.get("fitResults_A"))
         if amplitude is not None and has_sigma:
+            # the amplitude is per camera pixel, so the widths are taken
+            # in camera pixels
             photons = (
-                amplitude.astype(np.float64) * 2 * np.pi * sx * sy * to_photons
+                amplitude.astype(np.float64)
+                * 2
+                * np.pi
+                * (sx / pixelsize)
+                * (sy / pixelsize)
+                * to_photons
             )
         else:
             photons = np.ones(n)
@@ -7021,12 +7430,8 @@ def import_pyme(
     height = metadata.get("Camera.ROIHeight")
     width = int(width) if isinstance(width, (int, float)) else 0
     height = int(height) if isinstance(height, (int, float)) else 0
-    finite_x = data["x"][np.isfinite(data["x"])]
-    finite_y = data["y"][np.isfinite(data["y"])]
-    if len(finite_x):
-        width = max(width, int(np.floor(finite_x.max())) + 1)
-    if len(finite_y):
-        height = max(height, int(np.floor(finite_y.max())) + 1)
+    width = max(width, _canvas_pixels(data["x"], pixelsize))
+    height = max(height, _canvas_pixels(data["y"], pixelsize))
 
     img_info = lib.step_info("pyme2hdf")
     img_info["Frames"] = int(np.max(frames)) + 1 if n else 1
@@ -7133,14 +7538,14 @@ def _pyme_channel_table(
         return np.full(n, default, dtype=np.float64)
 
     table = {
-        "x": (column("x") - offset_x) * pixelsize,
-        "y": (column("y") - offset_y) * pixelsize,
+        "x": column("x") - offset_x,  # nm in both PyME and Picasso
+        "y": column("y") - offset_y,
         "t": column("frame").astype(np.int32),
-        "error_x": column("lpx") * pixelsize,
-        "error_y": column("lpy") * pixelsize,
+        "error_x": column("lpx"),
+        "error_y": column("lpy"),
         "nPhotons": column("photons"),
-        "sigx": column("sx", 1.0) * pixelsize,
-        "sigy": column("sy", 1.0) * pixelsize,
+        "sigx": column("sx", pixelsize),
+        "sigy": column("sy", pixelsize),
         "bg": column("bg"),
     }
     if "z" in locs.columns:

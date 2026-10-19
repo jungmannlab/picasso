@@ -49,7 +49,10 @@ def make_locs(n: int = 100, seed: int = 0) -> pd.DataFrame:
 
 def write_raw(path, locs: pd.DataFrame, info=INFO, attrs=None) -> str:
     """Write a localization file the way other software (or Picasso
-    before 1.0) does: no format version unless ``attrs`` give one."""
+    before 1.0) does: no format version unless ``attrs`` give one.
+    Without one, the file counts as written in camera pixels and is
+    converted to nm when loaded (the ``make_locs`` coordinates fit the
+    field of view either way)."""
     with h5py.File(path, "w") as f:
         f.create_dataset("locs", data=locs.to_records(index=False))
         f.create_dataset("metadata", data=json.dumps(info))
@@ -147,7 +150,7 @@ class TestValidation:
         message = str(error.value)
         assert path in message
         assert "the columns 'lpx', 'lpy'" in message
-        assert "the metadata keys 'Width', 'Height'" in message
+        assert "the metadata keys 'Width', 'Height', 'Pixelsize'" in message
         assert "files.html#files-minimum-requirements" in message
 
     def test_error_is_a_value_error_not_a_key_error(self):
@@ -155,11 +158,43 @@ class TestValidation:
         assert issubclass(io.LocsFormatError, ValueError)
         assert not issubclass(io.LocsFormatError, KeyError)
 
-    def test_pixelsize_is_not_required(self, tmp_path):
+    def test_pixelsize_is_required(self, tmp_path):
+        # the field of view is Width x Height camera pixels of Pixelsize
         info = [{k: v for k, v in INFO[0].items() if k != "Pixelsize"}]
         path = write_raw(tmp_path / "f.hdf5", make_locs(), info=info)
-        locs, _ = io.load_locs(path)
+        with pytest.raises(io.MissingPixelsizeError, match="Pixelsize"):
+            io.load_locs(path)
+        # a file of the current format without it asks for it as well
+        path = write_raw(
+            tmp_path / "new.hdf5",
+            make_locs(),
+            info=info,
+            attrs={"picasso_format": "1.0"},
+        )
+        with pytest.raises(io.MissingPixelsizeError):
+            io.load_locs(path)
+        # MissingPixelsizeError is a LocsFormatError, so one handler fits
+        assert issubclass(io.MissingPixelsizeError, io.LocsFormatError)
+        # the pixel size given on the spot converts the legacy file
+        locs, loaded_info = io.load_locs(
+            str(tmp_path / "f.hdf5"), pixelsize=130
+        )
         assert len(locs) == 100
+        assert lib.get_from_metadata(loaded_info, "Pixelsize") == 130
+
+    def test_legacy_files_are_converted_to_nm(self, tmp_path):
+        locs = make_locs()  # in camera pixels, see write_raw
+        path = write_raw(tmp_path / "old.hdf5", locs)
+        loaded, info = io.load_locs(path)
+        np.testing.assert_allclose(loaded["x"], locs["x"] * 130, rtol=1e-6)
+        np.testing.assert_allclose(loaded["lpx"], 0.1 * 130, rtol=1e-6)
+        assert info[-1]["Step"] == "Convert units"
+        assert info[-1]["Pixelsize"] == 130
+        # saved again, the file is in the current format: no conversion
+        out = str(tmp_path / "new.hdf5")
+        io.save_locs(out, loaded, info)
+        again, _ = io.load_locs(out)
+        np.testing.assert_allclose(again["x"], loaded["x"])
 
     def test_negative_frames_raise(self, tmp_path):
         locs = make_locs().assign(frame=lambda df: df["frame"].astype(int) - 5)
@@ -181,18 +216,25 @@ class TestValidation:
 
 
 class TestDroppedLocalizations:
-    def test_coordinates_in_nm_are_reported(self, tmp_path, caplog):
+    def test_coordinates_beyond_the_field_of_view_are_reported(
+        self, tmp_path, caplog
+    ):
+        # a file of the current format whose coordinates are far too
+        # large for its canvas, e.g., written in nm but marked with a
+        # too small Pixelsize
         locs = make_locs()
-        locs["x"] *= 130
-        locs["y"] *= 130
-        path = write_raw(tmp_path / "nm.hdf5", locs)
+        locs["x"] *= 130**2
+        locs["y"] *= 130**2
+        path = write_raw(
+            tmp_path / "nm.hdf5", locs, attrs={"picasso_format": "1.0"}
+        )
         with caplog.at_level(logging.WARNING, logger="picasso.io"):
             loaded, _ = io.load_locs(path)
         assert len(loaded) < 10
         message = caplog.text
         assert "of 100 localizations" in message
         assert "Most of them lie beyond the field of view" in message
-        assert "camera pixels" in message
+        assert "nm" in message
 
     def test_a_few_dropped_rows_are_reported_without_hint(
         self, tmp_path, caplog
@@ -404,7 +446,7 @@ class TestYaml:
             "Shape: Circle\nDiameter: 2.0\nCenters: [[1.0, 2.0]]\n"
             f"Run: !!python/object/apply:os.system ['touch {marker}']\n"
         )
-        picks, shape, size = io.load_picks(str(path))
+        picks, shape, size = io.load_picks(str(path), pixelsize=130)
         assert shape == "Circle"
         assert not marker.exists()
 
@@ -495,8 +537,10 @@ class TestRenderLoader:
 
     def test_dropped_localizations_are_shown(self, qapp, tmp_path):
         locs = make_locs()
-        locs["x"] *= 130
-        path = write_raw(tmp_path / "nm.hdf5", locs)
+        locs["x"] *= 130**2  # beyond the field of view
+        path = write_raw(
+            tmp_path / "nm.hdf5", locs, attrs={"picasso_format": "1.0"}
+        )
         loaded, failed, warned = self._run(path)
         assert loaded == [path]
         assert failed == []

@@ -220,16 +220,24 @@ def rcc(
     return lib.minimize_shifts(shifts_x, shifts_y)
 
 
+#: Pixel size (nm) of the image rendered by :func:`find_fiducials`.
+FIDUCIAL_RENDER_PIXEL_SIZE = 100.0
+#: Approximate side length (nm) of the box used to identify fiducials.
+FIDUCIAL_BOX_SIZE = 900.0
+
+
 def find_fiducials(
     locs: pd.DataFrame,
     info: list[dict],
-) -> tuple[list[tuple[int, int]], int]:
+) -> tuple[list[tuple[float, float]], float]:
     """Find the xy coordinates of regions with high density of
     localizations, likely originating from fiducial markers.
 
-    Uses ``picasso.localize.identify_in_image`` with threshold set to
-    99th percentile of the image histogram. The image is rendered using
-    one-pixel-blur, see picasso.render.render.
+    Renders the localizations at a pixel size of 100 nm (one-pixel
+    blur, see ``picasso.render.render``) and uses
+    ``picasso.localize.identify_in_image`` with the threshold set to the
+    99th percentile of the image histogram. The identified image pixels
+    are mapped back to nm (pixel centers).
 
     Parameters
     ----------
@@ -241,34 +249,35 @@ def find_fiducials(
     Returns
     -------
     picks : list of (2,) tuples
-        Coordinates of fiducial markers. Each list element corresponds
-        to (x, y) coordinates of one fiducial marker.
-    box : int
-        Size of the box used for the fiducial marker identification.
-        Can be set as the pick diameter in pixels for undrifting.
+        Coordinates of fiducial markers in nm. Each list element
+        corresponds to (x, y) coordinates of one fiducial marker.
+    box : float
+        Side length (nm) of the box used for the fiducial marker
+        identification (about 900 nm). Can be used as the pick diameter
+        for undrifting.
     """
-    # render at one display pixel per camera pixel (oversampling = 1) so
-    # that the pick coordinates returned by ``identify_in_image`` are in
-    # camera pixels and the box (computed in camera pixels) matches the
-    # image resolution
-    pixelsize = lib.get_from_metadata(info, "Pixelsize", default=130)
+    disp_px_size = FIDUCIAL_RENDER_PIXEL_SIZE
     image = render.render(
         locs=locs,
         info=info,
-        disp_px_size=pixelsize,
+        disp_px_size=disp_px_size,
         viewport=None,
         blur_method="smooth",
     )[1]
-    # hist = np.histogram(image.flatten(), bins=256)
     threshold = np.percentile(image.flatten(), 99)
-    # box size should be an odd number, corresponding to approximately
-    # 900 nm
-    box = int(np.round(900 / pixelsize))
-    box = box + 1 if box % 2 == 0 else box
+    # box size (rendered pixels) should be an odd number, corresponding
+    # to approximately 900 nm
+    box_px = int(np.round(FIDUCIAL_BOX_SIZE / disp_px_size))
+    box_px = box_px + 1 if box_px % 2 == 0 else box_px
+    box = box_px * disp_px_size
 
-    # find the local maxima and translate to pick coordinates
-    y, x, _ = localize.identify_in_image(image, threshold, box=box)
-    picks = [(xi, yi) for xi, yi in zip(x, y)]
+    # find the local maxima and translate to pick coordinates (nm); the
+    # image starts at the origin of the field of view
+    y, x, _ = localize.identify_in_image(image, threshold, box=box_px)
+    picks = [
+        ((xi + 0.5) * disp_px_size, (yi + 0.5) * disp_px_size)
+        for xi, yi in zip(x, y)
+    ]
 
     # select the picks with appropriate number of localizations
     n_frames = lib.get_from_metadata(info, "Frames", default=0)
@@ -328,13 +337,11 @@ def quick_fiducials_check(
     if len(locs) == 0:
         return 0
     n_frames = lib.get_from_metadata(info, "Frames", raise_error=True)
-    pixelsize = lib.get_from_metadata(info, "Pixelsize", raise_error=True)
-    bin_px = region_size / pixelsize
 
     x = np.asarray(locs["x"])
     y = np.asarray(locs["y"])
-    n_bins_x = max(1, int(np.ceil((x.max() - x.min()) / bin_px)))
-    n_bins_y = max(1, int(np.ceil((y.max() - y.min()) / bin_px)))
+    n_bins_x = max(1, int(np.ceil((x.max() - x.min()) / region_size)))
+    n_bins_y = max(1, int(np.ceil((y.max() - y.min()) / region_size)))
 
     hist, _, _ = np.histogram2d(x, y, bins=[n_bins_x, n_bins_y])
     return int(np.count_nonzero(hist > fraction * n_frames))

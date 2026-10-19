@@ -432,19 +432,18 @@ def project_points(
     Parameters
     ----------
     points : np.ndarray
-        Points of shape ``(..., 3)``: x and y in camera pixels, z in
-        the same units, shifted like the rendered localizations.
+        Points of shape ``(..., 3)``: x, y and z in nm, shifted like
+        the rendered localizations.
     viewport : tuple
-        ``((y_min, x_min), (y_max, x_max))`` in camera pixels.
+        ``((y_min, x_min), (y_max, x_max))`` in nm.
     ang : tuple of float or scipy.spatial.transform.Rotation
         Rotation of the view, see ``picasso.render.to_rotation``.
 
     Returns
     -------
     rotated : np.ndarray
-        Rotated points of the same shape; x and y are in camera pixels
-        of the unrotated frame, so ``viewport`` maps them onto the
-        image.
+        Rotated points of the same shape; x and y are in nm in the
+        unrotated frame, so ``viewport`` maps them onto the image.
     """
     (y_min, x_min), (y_max, x_max) = viewport
     center = np.array([(x_min + x_max) / 2, (y_min + y_max) / 2, 0.0])
@@ -458,7 +457,6 @@ def draw_grid(
     image: QtGui.QImage,
     viewport: tuple[tuple[float, float], tuple[float, float]],
     grid: GridOverlay,
-    pixelsize: float,
     color_range: tuple[tuple[int, int, int], tuple[int, int, int]] = (
         (0, 0, 0),
         (255, 255, 255),
@@ -473,11 +471,9 @@ def draw_grid(
         it is in the RGB32 or ARGB32 format.
     viewport : tuple
         Field of view shown in ``image``, ``((y_min, x_min), (y_max,
-        x_max))`` in camera pixels.
+        x_max))`` in nm.
     grid : GridOverlay
         The grid or axes; ``planes`` and ``position`` are not used.
-    pixelsize : float
-        Camera pixel size in nm.
     color_range : tuple, optional
         RGB colors (0-255) of the pixels without localizations and of
         the pixels at the maximum contrast, see
@@ -496,8 +492,8 @@ def draw_grid(
     v_height = viewport_height(viewport)
     if v_width <= 0 or v_height <= 0:
         return image
-    step = grid.spacing_nm / pixelsize
-    px_x = image.width() / v_width  # display pixels per camera pixel
+    step = grid.spacing_nm  # the coordinates are in nm
+    px_x = image.width() / v_width  # display pixels per nm
     px_y = image.height() / v_height
     if step * min(px_x, px_y) < MIN_GRID_SPACING_PX:
         return image
@@ -506,9 +502,7 @@ def draw_grid(
     xs = (levels_x - x_min) * px_x
     ys = (levels_y - y_min) * px_y
     if grid.kind == "axes":
-        lines, labels = _axes_2d(
-            grid, levels_x, levels_y, xs, ys, step, pixelsize, image
-        )
+        lines, labels = _axes_2d(grid, levels_x, levels_y, xs, ys, step, image)
         image = _paint_lines(image, lines, grid, color_range, antialias=True)
         if grid.labels:
             image = _paint_labels(image, labels, grid, color_range)
@@ -520,7 +514,7 @@ def draw_grid(
     if grid.labels:
         image = _paint_labels(
             image,
-            _grid_labels_2d(grid, levels_x, levels_y, xs, ys, step, pixelsize),
+            _grid_labels_2d(grid, levels_x, levels_y, xs, ys, step),
             grid,
             color_range,
         )
@@ -531,7 +525,6 @@ def draw_grid_3d(
     image: QtGui.QImage,
     viewport: tuple[tuple[float, float], tuple[float, float]],
     grid: GridOverlay,
-    pixelsize: float,
     ang: tuple[float, float, float] | Rotation,
     bounds: tuple[tuple[float, float, float], tuple[float, float, float]],
     origin: tuple[float, float, float] = (0.0, 0.0, 0.0),
@@ -550,18 +543,16 @@ def draw_grid_3d(
         it is in the RGB32 or ARGB32 format.
     viewport : tuple
         Field of view shown in ``image``, ``((y_min, x_min), (y_max,
-        x_max))`` in camera pixels.
+        x_max))`` in nm.
     grid : GridOverlay
         The grid or axes.
-    pixelsize : float
-        Camera pixel size in nm.
     ang : tuple of float or scipy.spatial.transform.Rotation
         Rotation the localizations were rendered with, see
         ``picasso.render.to_rotation``.
     bounds : tuple
         ``((x_min, y_min, z_min), (x_max, y_max, z_max))`` of the data
-        in camera pixels (z included), in the frame of the rendered
-        localizations (i.e., with the same z shift).
+        in nm, in the frame of the rendered localizations (i.e., with
+        the same z shift).
     origin : tuple of float, optional
         A point on the grid in that frame, see ``grid_levels``; e.g.,
         ``(0, 0, -z_shift)`` keeps the lines at whole multiples of the
@@ -581,8 +572,8 @@ def draw_grid_3d(
     v_height = viewport_height(viewport)
     if v_width <= 0 or v_height <= 0:
         return image
-    step = grid.spacing_nm / pixelsize
-    px_x = image.width() / v_width
+    step = grid.spacing_nm  # the coordinates are in nm
+    px_x = image.width() / v_width  # display pixels per nm
     px_y = image.height() / v_height
     if step * min(px_x, px_y) < MIN_GRID_SPACING_PX:
         return image
@@ -598,9 +589,7 @@ def draw_grid_3d(
         )
 
     if grid.kind == "axes":
-        lines, labels = _axes_3d(
-            grid, bounds, step, origin, pixelsize, to_display
-        )
+        lines, labels = _axes_3d(grid, bounds, step, origin, to_display)
         image = _paint_lines(image, lines, grid, color_range, antialias=True)
         if grid.labels:
             image = _paint_labels(image, labels, grid, color_range)
@@ -625,7 +614,6 @@ def draw_grid_3d(
                 families,
                 step,
                 origin,
-                pixelsize,
                 to_display,
                 QtCore.QRectF(image.rect()),
             ),
@@ -704,7 +692,6 @@ def _grid_labels_2d(
     xs: np.ndarray,
     ys: np.ndarray,
     step: float,
-    pixelsize: float,
 ) -> list[tuple[str, QtCore.QRectF]]:
     """Labels of the vertical lines along the top edge and of the
     horizontal lines along the left edge, each just past its line.
@@ -715,8 +702,8 @@ def _grid_labels_2d(
     shared by both edges are left out."""
     metrics = QtGui.QFontMetricsF(_label_font(grid))
     height = metrics.height()
-    texts_x = format_grid_labels(levels_x * pixelsize, grid.spacing_nm)
-    texts_y = format_grid_labels(levels_y * pixelsize, grid.spacing_nm)
+    texts_x = format_grid_labels(levels_x, grid.spacing_nm)
+    texts_y = format_grid_labels(levels_y, grid.spacing_nm)
     widths_x = [metrics.horizontalAdvance(t) for t in texts_x]
     widths_y = [metrics.horizontalAdvance(t) for t in texts_y]
     spacing_x = xs[1] - xs[0] if len(xs) > 1 else np.inf
@@ -745,7 +732,6 @@ def _grid_labels_3d(
     families: list[tuple[int, np.ndarray, np.ndarray]],
     step: float,
     origin: tuple[float, float, float],
-    pixelsize: float,
     to_display,
     bounds: QtCore.QRectF,
 ) -> list[tuple[str, QtCore.QRectF]]:
@@ -782,9 +768,7 @@ def _grid_labels_3d(
         best = None
         for length, levels, ends in by_axis[axis]:
             texts = format_grid_labels(
-                (levels - origin[axis]) * pixelsize,
-                grid.spacing_nm,
-                axis="xyz"[axis],
+                levels - origin[axis], grid.spacing_nm, axis="xyz"[axis]
             )
             widths = [metrics.horizontalAdvance(t) for t in texts]
             sums = ends.sum(axis=2).mean(axis=0)
@@ -822,7 +806,6 @@ def _axes_2d(
     xs: np.ndarray,
     ys: np.ndarray,
     step: float,
-    pixelsize: float,
     image: QtGui.QImage,
 ) -> tuple[list[QtCore.QLineF], list[tuple[str, QtCore.QRectF]]]:
     """Lines and labels of 2D axes: x along the bottom and y along the
@@ -847,7 +830,7 @@ def _axes_2d(
     column_x = left + _TICK_LENGTH + _LABEL_GAP  # y labels
     labels = []
     x_name, y_name = (
-        f"{axis} ({grid_label_unit(levels * pixelsize, grid.spacing_nm)})"
+        f"{axis} ({grid_label_unit(levels, grid.spacing_nm)})"
         for axis, levels in (("x", levels_x), ("y", levels_y))
     )
     x_name_width = metrics.horizontalAdvance(x_name)
@@ -870,12 +853,8 @@ def _axes_2d(
             ),
         )
     )
-    texts_x = format_grid_labels(
-        levels_x * pixelsize, grid.spacing_nm, unit=False
-    )
-    texts_y = format_grid_labels(
-        levels_y * pixelsize, grid.spacing_nm, unit=False
-    )
+    texts_x = format_grid_labels(levels_x, grid.spacing_nm, unit=False)
+    texts_y = format_grid_labels(levels_y, grid.spacing_nm, unit=False)
     widths_x = [metrics.horizontalAdvance(t) for t in texts_x]
     spacing_x = xs[1] - xs[0] if len(xs) > 1 else np.inf
     spacing_y = ys[1] - ys[0] if len(ys) > 1 else np.inf
@@ -905,7 +884,6 @@ def _axes_3d(
     bounds: tuple,
     step: float,
     origin: tuple[float, float, float],
-    pixelsize: float,
     to_display,
 ) -> tuple[list[QtCore.QLineF], list[tuple[str, QtCore.QRectF]]]:
     """Lines and labels of 3D axes along edges of the bounding box,
@@ -989,7 +967,7 @@ def _axes_3d(
         tips = positions + outward * _TICK_LENGTH
         lines += [QtCore.QLineF(*p, *t) for p, t in zip(positions, tips)]
 
-        values = (levels - origin[axis]) * pixelsize
+        values = levels - origin[axis]
         texts = format_grid_labels(values, grid.spacing_nm, unit=False)
         widths = [metrics.horizontalAdvance(t) for t in texts]
         extents = [

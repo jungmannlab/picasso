@@ -22,8 +22,9 @@ Localizations
     closing channels, their colors and visibility stay per window.
 
 Navigation
-    Pan (viewport center), zoom (camera pixels per screen pixel), a
-    crosshair showing the cursor position of the window the mouse is
+    Pan (viewport center), zoom (the screen pixel size in nm, so
+    windows showing data of different camera pixel sizes still match),
+    a crosshair showing the cursor position of the window the mouse is
     in, and the active tool (Zoom, Pick, Measure, Move). Pan and zoom
     are linked separately, and windows of different sizes show the
     same center at the same scale.
@@ -125,8 +126,7 @@ CATEGORIES = (
         "viewport_zoom",
         "Zoom",
         "Navigation",
-        "Show the same scale (camera pixels per screen pixel) in all\n"
-        "windows.",
+        "Show the same scale (screen pixel size in nm) in all windows.",
         default=True,
     ),
     LinkCategory(
@@ -203,7 +203,9 @@ CATEGORIES = (
         "pixelsize",
         "Camera pixel size",
         "Display",
-        "Camera pixel size (nm).",
+        "Camera pixel size (nm) shown in the Display Settings (for\n"
+        "information and as the default when converting files written\n"
+        "before Picasso 1.0).",
     ),
     LinkCategory(
         "pick_geometry",

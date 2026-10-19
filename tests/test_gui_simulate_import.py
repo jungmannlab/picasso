@@ -43,11 +43,15 @@ def _sorted(points: np.ndarray) -> np.ndarray:
 
 def test_imported_clusters_keep_their_orientation(window, monkeypatch):
     # An L: the long arm points down in Render (+y), the short one right.
-    # Spots are 3 px apart so that they do not merge in the movie.
+    # Spots are 3 px apart so that they do not merge in the movie; the
+    # cluster centers are in nm.
     com_x = np.array([10.0, 10.0, 10.0, 10.0, 13.0, 16.0])
     com_y = np.array([10.0, 13.0, 16.0, 19.0, 10.0, 10.0])
-    clusters = pd.DataFrame({"com_x": com_x, "com_y": com_y})
-    monkeypatch.setattr(io, "load_clusters", lambda path: clusters)
+    pixelsize = window.pixelsizeEdit.value()
+    clusters = pd.DataFrame(
+        {"com_x": com_x * pixelsize, "com_y": com_y * pixelsize}
+    )
+    monkeypatch.setattr(io, "load_clusters", lambda path, **kwargs: clusters)
     monkeypatch.setattr(
         QtWidgets.QFileDialog,
         "getOpenFileName",

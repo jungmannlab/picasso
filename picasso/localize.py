@@ -918,6 +918,8 @@ def wavelet_info(
 def add_roi_id(
     locs: pd.DataFrame,
     roi: tuple[tuple[int, int], tuple[int, int]] | list | None = None,
+    *,
+    pixelsize: float | None = None,
 ) -> pd.DataFrame:
     """Name the ROI each localization was found in.
 
@@ -939,24 +941,38 @@ def add_roi_id(
     Parameters
     ----------
     locs : pd.DataFrame
-        Localizations with ``x`` and ``y`` columns, in the coordinate
-        frame the ROIs are given in.
+        Localizations with ``x`` and ``y`` columns in nm, in the frame
+        of the camera image the ROIs are given in.
     roi : tuple or list of tuples, optional
-        Region(s) of interest the localizations were identified in, see
-        :func:`identify_in_frame`. None or an empty list means the whole
-        frame was used and no column is added. Default is None.
+        Region(s) of interest the localizations were identified in
+        (camera pixels), see :func:`identify_in_frame`. None or an empty
+        list means the whole frame was used and no column is added.
+        Default is None.
+    pixelsize : float, optional
+        Camera pixel size in nm, converting the localizations to the
+        pixel grid of the ROIs. Required when ``roi`` is given.
 
     Returns
     -------
     locs : pd.DataFrame
         A copy with an ``int32`` ``roi_id`` column appended, or ``locs``
         itself when there is no ROI to name.
+
+    Raises
+    ------
+    ValueError
+        If ``roi`` is given without ``pixelsize``.
     """
     rois = _as_roi_list(roi)
     if rois is None:
         return locs
-    x = np.asarray(locs["x"], dtype=np.float64)
-    y = np.asarray(locs["y"], dtype=np.float64)
+    if pixelsize is None:
+        raise ValueError(
+            "add_roi_id needs the camera pixel size (nm) to compare the "
+            "localizations (nm) with the ROIs (camera pixels)."
+        )
+    x = np.asarray(locs["x"], dtype=np.float64) / float(pixelsize)
+    y = np.asarray(locs["y"], dtype=np.float64) / float(pixelsize)
     roi_id = np.full(len(locs), NO_ROI_ID, dtype=np.int32)
     for c, ((y0, x0), (y1, x1)) in enumerate(rois):
         inside = (x >= x0) & (x < x1) & (y >= y0) & (y < y1)
@@ -2909,6 +2925,7 @@ def identify_multichannel_sum(
 def picks_to_identifications(
     picks: list[tuple],
     *,
+    pixelsize: float,
     n_frames: int | None = None,
     drift: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
@@ -2918,24 +2935,27 @@ def picks_to_identifications(
     Parameters
     ----------
     picks : list of tuples
-        List of circular picks positions (centers). See
+        List of circular picks positions (centers) in nm. See
         ``io.load_picks``.
+    pixelsize : float
+        Camera pixel size in nm: identifications are positions on the
+        camera pixel grid of the movie.
     n_frames : int, optional
         Number of frames in the acquisition movie. If None is given,
         it will be extracted from the drift file (if provided).
         Otherwise, an error is raised.
     drift : pd.DataFrame or None, optional
-        A data frame of length n_frames and with columns 'x' and 'y'.
-        Used to adjust the positions of identifications throughout
-        acquisition. Only x and y drift is used; if 'z' is present, it
-        is ignored.
+        A data frame of length n_frames and with columns 'x' and 'y' in
+        nm (see ``io.load_drift``). Used to adjust the positions of
+        identifications throughout acquisition. Only x and y drift is
+        used; if 'z' is present, it is ignored.
 
     Returns
     -------
     identifications : pd.DataFrame
         Data frame containing the identified spots. Contains fields
-        `frame`, `x`, `y`, and `net_gradient`. Note that `net_gradient`
-        is a dummy value.
+        `frame`, `x`, `y` (camera pixels), and `net_gradient`. Note that
+        `net_gradient` is a dummy value.
 
     Raises
     ------
@@ -2965,26 +2985,27 @@ def picks_to_identifications(
                 f"{n_frames} frames were provided but the drift suggests"
                 f" {len(drift)} frames."
             )
-    return _picks_to_identifications(picks, n_frames, drift)
+    return _picks_to_identifications(picks, n_frames, drift, float(pixelsize))
 
 
 def _picks_to_identifications(
     picks: list[tuple],
     n_frames: int,
     drift: pd.DataFrame | None,
+    pixelsize: float,
 ) -> pd.DataFrame:
-    """Convert circular picks to identifications, can be drift-corrected.
-    Assumes correct inputs. See ``picks_to_identifications`` for more
-    details."""
+    """Convert circular picks (nm) to identifications (camera pixels),
+    can be drift-corrected. Assumes correct inputs. See
+    ``picks_to_identifications`` for more details."""
     data = []
     n_id = 0
     for pick_x, pick_y in picks:
-        # drifted:
-        xloc = np.ones((n_frames,), dtype=float) * pick_x
-        yloc = np.ones((n_frames,), dtype=float) * pick_y
+        # drifted, on the camera pixel grid:
+        xloc = np.ones((n_frames,), dtype=float) * pick_x / pixelsize
+        yloc = np.ones((n_frames,), dtype=float) * pick_y / pixelsize
         if drift is not None:
-            xloc += drift["x"].to_numpy()
-            yloc += drift["y"].to_numpy()
+            xloc += drift["x"].to_numpy() / pixelsize
+            yloc += drift["y"].to_numpy() / pixelsize
 
         frames = np.arange(n_frames)
         gradient = np.ones(n_frames) + 100
@@ -3015,25 +3036,36 @@ def locs_to_identifications(
     locs: pd.DataFrame,
     movie_info: list[dict],
     n_frames: int,
+    *,
+    pixelsize: float | None = None,
 ) -> pd.DataFrame:
     """Convert localizations to identifications.
 
     Parameters
     ----------
     locs : pd.DataFrame
-        Localizations.
+        Localizations (nm).
     movie_info : list of dicts
         Movie file metadata.
     n_frames : int
         Number of frames around localizations that are to be used for
         extracting identifications.
+    pixelsize : float, optional
+        Camera pixel size in nm: identifications are positions on the
+        camera pixel grid of the movie. Default is None, i.e., the
+        ``Pixelsize`` of ``movie_info``.
 
     Returns
     -------
     identifications : pd.DataFrame
         Data frame containing the identified spots. Contains fields
-        `frame`, `x`, `y`, and `net_gradient`. Note that `net_gradient`
-        is a dummy value.
+        `frame`, `x`, `y` (camera pixels), and `net_gradient`. Note that
+        `net_gradient` is a dummy value.
+
+    Raises
+    ------
+    KeyError
+        If ``pixelsize`` is None and ``movie_info`` has no ``Pixelsize``.
     """
     assert isinstance(
         locs, pd.DataFrame
@@ -3042,13 +3074,18 @@ def locs_to_identifications(
         isinstance(n_frames, int) and n_frames >= 0
     ), "n_frames must be a non-negative integer"
     max_frames = lib.get_from_metadata(movie_info, "Frames", raise_error=True)
+    if pixelsize is None:
+        pixelsize = lib.get_from_metadata(
+            movie_info, "Pixelsize", raise_error=True
+        )
+    pixelsize = float(pixelsize)
     data = []
     n_id = 0
     for _, element in locs.iterrows():
         currframe = element["frame"]
         if currframe > n_frames and currframe < (max_frames - n_frames):
-            xloc = np.ones((2 * n_frames + 1,), dtype=float) * element["x"]
-            yloc = np.ones((2 * n_frames + 1,), dtype=float) * element["y"]
+            xloc = np.full(2 * n_frames + 1, element["x"] / pixelsize)
+            yloc = np.full(2 * n_frames + 1, element["y"] / pixelsize)
             frames = np.arange(
                 currframe - n_frames,
                 currframe + n_frames + 1,
@@ -3937,8 +3974,11 @@ def fit(
     Returns
     -------
     locs : pd.DataFrame
-        Data frame containing the localized spots. Returns None if
-        fitting was aborted.
+        Data frame containing the localized spots, with every length
+        (``x``, ``y``, ``sx``, ``sy``, ``lpx``, ``lpy``, ``z``, ``lpz``,
+        ...) in nm; ``camera_info["Pixelsize"]`` converts the fit, which
+        works on the camera pixel grid. Returns None if fitting was
+        aborted.
     new_info : dict
         New metadata.
     """
@@ -3979,6 +4019,7 @@ def fit(
         multiprocess=multiprocess,
         progress_callback=progress_callback,
         abort_callback=abort_callback,
+        pixelsize=float(camera_info["Pixelsize"]),
     )
     localize_info = _fit_localize_info(
         fitting_method,
@@ -3990,6 +4031,24 @@ def fit(
     )
     new_info = localize_info | camera_info
     return locs, new_info
+
+
+def _reference_pixelsize(camera_infos: list[dict]) -> float:
+    """Camera pixel size (nm) of the reference channel of a multichannel
+    fit, whose coordinates the localizations are expressed in.
+
+    Raises
+    ------
+    ValueError
+        If the reference channel's ``camera_info`` lacks ``Pixelsize``.
+    """
+    pixelsize = camera_infos[0].get("Pixelsize")
+    if not isinstance(pixelsize, (int, float)) or not pixelsize > 0:
+        raise ValueError(
+            "The reference channel's camera_info needs 'Pixelsize', the "
+            "camera pixel size in nm, to express the localizations in nm."
+        )
+    return float(pixelsize)
 
 
 def _validate_fit_args(
@@ -4004,10 +4063,12 @@ def _validate_fit_args(
     multiprocess: bool,
     camera_calibration: dict | None,
 ) -> None:
-    """Validate ``fit``'s arguments and fill in ``camera_info`` defaults.
+    """Validate ``fit``'s arguments.
 
-    Mutates ``camera_info`` in place (fills in "Pixelsize" if missing), as
-    ``fit`` relies on that side effect.
+    Raises
+    ------
+    ValueError
+        If ``camera_info`` lacks a positive ``Pixelsize`` (nm).
     """
     accepted_movie_types = (
         io.AbstractPicassoMovie,
@@ -4039,13 +4100,13 @@ def _validate_fit_args(
         isinstance(max_it, int) and max_it > 0
     ), "max_it must be a positive integer or None"
     assert isinstance(multiprocess, bool), "multiprocess must be a boolean"
-    if "Pixelsize" not in camera_info:
-        warnings.warn(
-            "Camera info in picasso.localize.fit does not contain "
-            "'Pixelsize', i.e., effective camera pixel size in nm. "
-            "Assuming 130."
+    pixelsize = camera_info.get("Pixelsize")
+    if not isinstance(pixelsize, (int, float)) or not pixelsize > 0:
+        raise ValueError(
+            "camera_info needs 'Pixelsize', the effective camera pixel size "
+            "in nm (after magnification): localizations are stored in nm, "
+            f"so the fit cannot run without it. Got {pixelsize!r}."
         )
-        camera_info["Pixelsize"] = 130
 
     # ``camera_info`` is merged verbatim into the saved YAML at the end, so an
     # array in it would be dumped element by element into every sidecar. The
@@ -4077,6 +4138,7 @@ def _dispatch_fit(
     multiprocess: bool,
     progress_callback: Callable[[int], None] | Literal["console"] | None,
     abort_callback: Callable[[], bool] | None,
+    pixelsize: float,
 ) -> pd.DataFrame | None:
     """Run the fitting backend selected by ``fitting_method``.
 
@@ -4110,6 +4172,8 @@ def _dispatch_fit(
         Progress reporting, as in :func:`fit`.
     abort_callback : callable or None
         Abort check, as in :func:`fit`.
+    pixelsize : float
+        Camera pixel size in nm, converting the fitted positions to nm.
 
     Returns
     -------
@@ -4131,6 +4195,7 @@ def _dispatch_fit(
                 None if gauss_flags["use_gpu"] else progress_callback
             ),
             variance=variance,
+            pixelsize=pixelsize,
             **gauss_flags,
         )
     elif fitting_method in ("spline-gpu", "spline-mle-gpu"):
@@ -4151,6 +4216,7 @@ def _dispatch_fit(
             tolerance=eps,
             max_iterations=max_it,
             variance=variance,
+            pixelsize=pixelsize,
         )
     elif fitting_method in ("spline", "spline-mle"):
         # The CPU cubic-spline fit (picasso.fitting.splinefit). Unlike the
@@ -4170,6 +4236,7 @@ def _dispatch_fit(
             progress_callback=progress_callback,
             abort_callback=abort_callback,
             variance=variance,
+            pixelsize=pixelsize,
         )
     elif fitting_method == "avg":
         locs = _fit2d_avg(
@@ -4181,6 +4248,7 @@ def _dispatch_fit(
             progress_callback,
             abort_callback,
             variance=variance,
+            pixelsize=pixelsize,
         )
     return locs
 
@@ -4581,6 +4649,39 @@ def fit_spots_gauss_gpu(
     )
 
 
+#: Columns of fitted localizations that the fit produces in camera
+#: pixels (box coordinates) and that the ``locs_from_fits_*`` builders
+#: convert to nm with the camera pixel size.
+_PIXEL_LENGTH_COLUMNS = (
+    "x",
+    "y",
+    "sx",
+    "sy",
+    "lpx",
+    "lpy",
+    "sx_unc",
+    "sy_unc",
+)
+
+
+def _lengths_to_nm(columns: dict, pixelsize: float) -> dict:
+    """Convert the lateral lengths of fitted localization ``columns``
+    (``_PIXEL_LENGTH_COLUMNS``, camera pixels) to nm in place and
+    return the dict. ``z`` and ``lpz`` are in nm already."""
+    pixelsize = float(pixelsize)
+    if not np.isfinite(pixelsize) or pixelsize <= 0:
+        raise ValueError(
+            f"The camera pixel size must be positive, got {pixelsize} nm."
+        )
+    for name in _PIXEL_LENGTH_COLUMNS:
+        if name in columns:
+            values = np.asarray(columns[name])
+            columns[name] = (values.astype(np.float64) * pixelsize).astype(
+                np.float32
+            )
+    return columns
+
+
 def locs_from_fits_gauss(
     identifications: pd.DataFrame,
     theta: lib.FloatArray2D,
@@ -4593,6 +4694,8 @@ def locs_from_fits_gauss(
     chi_square: lib.FloatArray1D | None = None,
     variance: lib.FloatArray3D | None = None,
     spots: lib.FloatArray3D | None = None,
+    *,
+    pixelsize: float,
 ) -> pd.DataFrame:
     """Convert the fit results from a Gaussian fit into a data frame of
     localizations.
@@ -4660,11 +4763,15 @@ def locs_from_fits_gauss(
         ``chi_square`` they add the ``reduced_chi_square`` column, the
         goodness of fit normalized for the box size and the photon counts
         (see :func:`reduced_chi_square`). Default is None.
+    pixelsize : float
+        Camera pixel size in nm. The fit works in camera pixels; the
+        positions, widths and precisions are converted to nm with it.
 
     Returns
     -------
     locs : pd.DataFrame
-        Data frame containing the localized spots.
+        Data frame containing the localized spots, with every length in
+        nm.
     """
     box_offset = int(box / 2)
     rotated = theta.shape[1] == 7
@@ -4746,7 +4853,7 @@ def locs_from_fits_gauss(
             variance,
         )
     )
-    locs = pd.DataFrame(columns)
+    locs = pd.DataFrame(_lengths_to_nm(columns, pixelsize))
     if "n_id" in identifications.columns:
         # The cross-channel link index. Carried through and sorted on, as
         # the spline path does - a multichannel fit needs every channel's
@@ -4773,13 +4880,16 @@ def _fit2d_gauss(
         Callable[[int], None] | Literal["console"] | None
     ) = None,
     variance: lib.FloatArray3D | None = None,
+    *,
+    pixelsize: float,
 ) -> pd.DataFrame:
     """Fit 2D Gaussians with least squares or, if ``mle``, maximum
     likelihood, on the CPU or the GPU. If ``rotated``, a rotated elliptical
     Gaussian is fitted and the resulting localizations contain the fitted
     rotation angle (in degrees) in the column ``angle``. If ``spherical``, an
     isotropic Gaussian with a single width is fitted and the resulting ``sx``
-    and ``sy`` columns are identical. See ``fit`` for more details."""
+    and ``sy`` columns are identical. ``pixelsize`` (nm) converts the result
+    to nm. See ``fit`` for more details."""
     theta, log_likelihood, iterations, chi_square = fit_spots_gauss(
         spots,
         rotated=rotated,
@@ -4804,6 +4914,7 @@ def _fit2d_gauss(
         chi_square=chi_square,
         variance=variance,
         spots=spots,
+        pixelsize=pixelsize,
     )
     return locs
 
@@ -4997,6 +5108,8 @@ def locs_from_fits_gauss_multichannel(
     chi_square: lib.FloatArray1D | None = None,
     variance: np.ndarray | None = None,
     spots: np.ndarray | None = None,
+    *,
+    pixelsize: float,
 ) -> pd.DataFrame:
     """Localizations from a multichannel spherical Gaussian fit.
 
@@ -5041,6 +5154,9 @@ def locs_from_fits_gauss_multichannel(
         ``reduced_chi_square`` column, the goodness of fit normalized for the
         box size and the photon counts (see :func:`reduced_chi_square`).
         Default is None.
+    pixelsize : float
+        Camera pixel size of the reference channel in nm; the positions,
+        widths and precisions are converted to nm with it.
 
     Returns
     -------
@@ -5152,7 +5268,7 @@ def locs_from_fits_gauss_multichannel(
             variance,
         )
     )
-    locs = pd.DataFrame(columns)
+    locs = pd.DataFrame(_lengths_to_nm(columns, pixelsize))
     if "n_id" in identifications.columns:
         locs["n_id"] = np.asarray(identifications["n_id"]).astype(np.uint32)
         locs.sort_values(by="n_id", kind="quicksort", inplace=True)
@@ -5307,6 +5423,7 @@ def fit_gauss_multichannel(
         residuals,
         link_photons=link_photons,
         mle=mle,
+        pixelsize=_reference_pixelsize(camera_infos),
         log_likelihood=log_likelihood,
         iterations=iterations,
         chi_square=chi_square,
@@ -6228,9 +6345,11 @@ def _locs_from_fits_spline_link_xyz(
     chi_square: lib.FloatArray1D | None = None,
     variance: lib.FloatArray4D | None = None,
     spots: np.ndarray | None = None,
+    *,
+    pixelsize: float,
 ) -> pd.DataFrame:
     """Localizations from a photon-decoupled (link-XYZ) multichannel spline
-    fit.
+    fit, with every length in nm (``pixelsize`` is the camera pixel size).
 
     ``theta`` columns are ``[x_shift, y_shift, z_shift, N_0..N_{c-1},
     bg_0..bg_{c-1}]``. Emits the shared ``x, y, z`` plus per-channel photon and
@@ -6328,7 +6447,7 @@ def _locs_from_fits_spline_link_xyz(
             variance,
         )
     )
-    locs = pd.DataFrame(columns)
+    locs = pd.DataFrame(_lengths_to_nm(columns, pixelsize))
     locs.sort_values(by="frame", kind="quicksort", inplace=True)
     return locs
 
@@ -6350,6 +6469,8 @@ def locs_from_fits_spline(
     chi_square: lib.FloatArray1D | None = None,
     variance: lib.FloatArray4D | None = None,
     spots: np.ndarray | None = None,
+    *,
+    pixelsize: float,
 ) -> pd.DataFrame:
     """Convert spline fit results into a localizations data frame.
 
@@ -6407,6 +6528,10 @@ def locs_from_fits_spline(
         ``chi_square`` they add the ``reduced_chi_square`` column, the
         goodness of fit normalized for the box size and the photon counts
         (see :func:`reduced_chi_square`). Default None.
+    pixelsize : float
+        Camera pixel size in nm. The fit works in camera pixels; the
+        positions and lateral precisions are converted to nm with it
+        (``z`` and ``lpz`` come in nm from the calibration's z step).
 
     Returns
     -------
@@ -6440,6 +6565,7 @@ def locs_from_fits_spline(
             chi_square=chi_square,
             variance=variance,
             spots=spots,
+            pixelsize=pixelsize,
         )
     is_3d = model != "spline-2d"
     box_offset = int(box / 2)
@@ -6522,7 +6648,7 @@ def locs_from_fits_spline(
             variance,
         )
     )
-    locs = pd.DataFrame(columns)
+    locs = pd.DataFrame(_lengths_to_nm(columns, pixelsize))
     locs.sort_values(by="frame", kind="quicksort", inplace=True)
     if precision._spline_n_channels(calibration) > 1:
         return locs
@@ -6543,6 +6669,8 @@ def _fit2d_spline_gpu(
     tolerance: float | None = None,
     max_iterations: int | None = None,
     variance: lib.FloatArray3D | None = None,
+    *,
+    pixelsize: float,
 ) -> pd.DataFrame:
     """Fit an experimentally measured cubic-spline PSF on the GPU. For a 3D
     calibration the localizations contain the fitted ``z`` directly. See
@@ -6576,6 +6704,7 @@ def _fit2d_spline_gpu(
         chi_square=chi_square,
         variance=variance,
         spots=spots,
+        pixelsize=pixelsize,
     )
     return locs
 
@@ -6596,6 +6725,8 @@ def _fit2d_spline_cpu(
     ) = None,
     abort_callback: Callable[[], bool] | None = None,
     variance: lib.FloatArray3D | None = None,
+    *,
+    pixelsize: float,
 ) -> pd.DataFrame | None:
     """Fit an experimentally measured cubic-spline PSF on the CPU. For a 3D
     calibration the localizations contain the fitted ``z`` directly. See
@@ -6640,6 +6771,7 @@ def _fit2d_spline_cpu(
         chi_square=chi_square,
         variance=variance,
         spots=spots,
+        pixelsize=pixelsize,
     )
 
 
@@ -7477,6 +7609,7 @@ def fit_spline_multichannel(
         em,
         calibration,
         mle=mle,
+        pixelsize=_reference_pixelsize(camera_infos),
         log_likelihood=log_likelihood,
         iterations=iterations,
         progress_callback=progress_callback,
@@ -7714,6 +7847,7 @@ def fit_spline_multichannel_ratiometric(
         variance,
         n_channels,
         spots,
+        _reference_pixelsize(camera_infos),
     )
 
     locs = pd.concat(parts) if parts else pd.DataFrame()
@@ -7885,6 +8019,7 @@ def _assemble_ratiometric_locs(
     variance: lib.FloatArray3D | None,
     n_channels: int,
     spots: np.ndarray,
+    pixelsize: float,
 ) -> list:
     """Build localizations per winning-hypothesis group.
 
@@ -7925,6 +8060,8 @@ def _assemble_ratiometric_locs(
         Number of channels.
     spots : np.ndarray
         Channel-stacked spots in photons.
+    pixelsize : float
+        Camera pixel size of the reference channel in nm.
 
     Returns
     -------
@@ -7957,6 +8094,7 @@ def _assemble_ratiometric_locs(
             chi_square=(None if mle else chis[k][rows]),
             variance=(None if variance is None else variance[rows]),
             spots=spots[rows],
+            pixelsize=pixelsize,
         )
         amp = pd.Series(np.asarray(theta_k[:, 0]), index=ids_k.index)
         ps = _photon_scales(calib_k, n_channels)
@@ -8438,7 +8576,7 @@ def region_movie_info(info: list[dict], region: list) -> list[dict]:
 
 
 def locs_to_region_coordinates(
-    locs: pd.DataFrame, region: list
+    locs: pd.DataFrame, region: list, pixelsize: float
 ) -> pd.DataFrame:
     """Move localizations into one region's own coordinate frame.
 
@@ -8450,17 +8588,20 @@ def locs_to_region_coordinates(
     Parameters
     ----------
     locs : pd.DataFrame
-        Localizations with ``x`` and ``y`` columns, in sensor coordinates.
+        Localizations with ``x`` and ``y`` columns (nm), in sensor
+        coordinates.
     region : list
-        A ``[[y_min, x_min], [y_max, x_max]]`` rectangle, in any corner
-        order.
+        A ``[[y_min, x_min], [y_max, x_max]]`` rectangle (camera pixels),
+        in any corner order.
+    pixelsize : float
+        Camera pixel size in nm.
 
     Returns
     -------
     locs : pd.DataFrame
         A copy with ``x`` and ``y`` shifted by the region's origin.
     """
-    x0, y0 = _region_origin_xy(region)
+    x0, y0 = _region_origin_xy(region) * float(pixelsize)
     shifted = locs.copy()
     shifted["x"] = (np.asarray(locs["x"], dtype=np.float64) - x0).astype(
         np.float32
@@ -8472,7 +8613,11 @@ def locs_to_region_coordinates(
 
 
 def split_locs_by_region(
-    locs: pd.DataFrame, regions: list, to_local: bool = True
+    locs: pd.DataFrame,
+    regions: list,
+    to_local: bool = True,
+    *,
+    pixelsize: float,
 ) -> list[pd.DataFrame]:
     """Split localizations by the region of the sensor they fall in.
 
@@ -8484,24 +8629,36 @@ def split_locs_by_region(
     Parameters
     ----------
     locs : pd.DataFrame
-        Localizations with ``x`` and ``y`` columns, in sensor coordinates.
+        Localizations with ``x`` and ``y`` columns (nm), in sensor
+        coordinates.
     regions : list
-        One ``[[y_min, x_min], [y_max, x_max]]`` rectangle per region.
+        One ``[[y_min, x_min], [y_max, x_max]]`` rectangle per region
+        (camera pixels).
     to_local : bool, optional
         Move each region's localizations into its own coordinate frame
         (default True, see :func:`locs_to_region_coordinates`). False keeps
         them in sensor coordinates.
+    pixelsize : float
+        Camera pixel size in nm.
 
     Returns
     -------
     locs_per_region : list of pd.DataFrame
         One table per region, in the order the regions were given.
     """
+    pixelsize = float(pixelsize)
     per_region = []
     for region in regions:
-        region_locs = confine_to_region(locs, region)
+        (y0, x0), (y1, x1) = _normalize_rect(region)
+        region_nm = [
+            [y0 * pixelsize, x0 * pixelsize],
+            [y1 * pixelsize, x1 * pixelsize],
+        ]
+        region_locs = confine_to_region(locs, region_nm)
         if to_local:
-            region_locs = locs_to_region_coordinates(region_locs, region)
+            region_locs = locs_to_region_coordinates(
+                region_locs, region, pixelsize
+            )
         per_region.append(region_locs)
     return per_region
 
@@ -8718,7 +8875,9 @@ def fit_split_fov_independent(
         if locs is None:  # aborted
             return None
         if to_local:
-            locs = locs_to_region_coordinates(locs, region)
+            locs = locs_to_region_coordinates(
+                locs, region, camera_info["Pixelsize"]
+            )
         fit_info = fit_info | {
             "Fit mode": FIT_MODE_INDEPENDENT,
             "Channel": c,
@@ -8744,9 +8903,12 @@ def _fit2d_avg(
     ) = None,
     abort_callback: Callable[[], bool] | None = None,
     variance: lib.FloatArray3D | None = None,
+    *,
+    pixelsize: float,
 ) -> pd.DataFrame | None:
     """Take localizations at the average value of the spots, see
-    ``fit_2D`` for more details."""
+    ``fit_2D`` for more details. ``pixelsize`` (nm) converts the result
+    to nm."""
     N = len(identifications)
     if multiprocess:
         fs = avgroi.fit_spots_parallel(spots, asynch=True)
@@ -8763,6 +8925,7 @@ def _fit2d_avg(
         box,
         em,
         readout_variance=_mean_readout_variance(variance),
+        pixelsize=pixelsize,
     )
     return locs
 
@@ -8939,7 +9102,9 @@ def localize(
         calibration kept in its own file, whether or not the fit is 3D.
         A calibration dictionary carrying a ``"Lateral transforms"``
         list, the list itself, or the path of a calibration file to read
-        them from; several are applied in list order. With
+        them from; several are applied in list order. The corrections
+        are in nm; a file written before Picasso 1.0 (camera pixels) is
+        converted with ``camera_info["Pixelsize"]`` when loaded. With
         ``calibration_3d`` these run after the corrections that
         calibration carries, so keeping one separate gives the same
         coordinates as appending it to the 3D calibration. A correction
@@ -8969,9 +9134,11 @@ def localize(
     Returns
     -------
     locs : pd.DataFrame
-        Data frame containing the localized spots. With ``roi`` given, a
-        ``roi_id`` column naming the ROI each of them came from is
-        appended, see :func:`add_roi_id`.
+        Data frame containing the localized spots, with every length
+        in nm (see :func:`fit`; the camera pixel size is
+        ``camera_info["Pixelsize"]``). With ``roi`` given, a ``roi_id``
+        column naming the ROI each of them came from is appended, see
+        :func:`add_roi_id`.
     info : list[dict]
         A list of dictionaries containing metadata about the movie and
         the fitting process.
@@ -9024,7 +9191,9 @@ def localize(
         )
     fit_z = _validate_calibration_3d(calibration_3d, fitting_method)
     if fit_z and isinstance(calibration_3d, str):
-        calibration_3d = io.load_calibration(calibration_3d)
+        calibration_3d = io.load_calibration(
+            calibration_3d, pixelsize=camera_info.get("Pixelsize")
+        )
 
     # Use empty list as default for movie_info
     if movie_info is None:
@@ -9056,7 +9225,7 @@ def localize(
     )
     # Before the z fit and the lateral corrections below: both move x/y,
     # which would blur the ROI a localization was detected in.
-    locs = add_roi_id(locs, roi)
+    locs = add_roi_id(locs, roi, pixelsize=camera_info["Pixelsize"])
     info = io.strip_mm_metadata(movie_info) + [identify_info] + [fit_info]
 
     if fit_z:
@@ -9087,7 +9256,10 @@ def localize(
     # calibration); those carried by the spline calibration were already
     # applied by the fit, so they are dropped here rather than applied twice.
     extra, duplicates = lib.drop_duplicate_lateral_transforms(
-        lib.resolve_lateral_transforms(affine_calibration), spline_calibration
+        lib.resolve_lateral_transforms(
+            affine_calibration, camera_info["Pixelsize"]
+        ),
+        spline_calibration,
     )
     _warn_duplicate_affine(duplicates)
     if extra:
@@ -9353,7 +9525,10 @@ def _apply_extra_affine(
     metadata. Corrections ``applied`` already covers are dropped instead of
     applied a second time. A no-op when there are none."""
     extra, duplicates = lib.drop_duplicate_lateral_transforms(
-        lib.resolve_lateral_transforms(affine_calibration), applied
+        lib.resolve_lateral_transforms(
+            affine_calibration, lib.get_from_metadata(info, "Pixelsize")
+        ),
+        applied,
     )
     _warn_duplicate_affine(duplicates)
     if not extra:
@@ -9391,18 +9566,18 @@ def check_nena(
 
     Returns
     -------
-    nena_px : float
-        The NeNA value in pixels, representing the experimental
+    nena : float
+        The NeNA value in nm, representing the experimental
         localization precision.
     """
     locs = locs[0:MAX_LOCS]
     try:
-        result, nena_px = postprocess.nena(locs, info, callback=callback)
+        result, nena = postprocess.nena(locs, info, callback=callback)
     except Exception as error:
         _log.warning("NeNA could not be calculated: %s", error)
-        nena_px = float("nan")
-    _log.info("NeNA: %.2f px.", nena_px)
-    return nena_px
+        nena = float("nan")
+    _log.info("NeNA: %.2f nm.", nena)
+    return nena
 
 
 def check_kinetics(locs: pd.DataFrame, info: list[dict]) -> float:
@@ -9448,9 +9623,9 @@ def check_drift(
     Returns
     -------
     drift_x : float
-        The estimated drift in the x direction.
+        The estimated mean drift in the x direction (nm).
     drift_y : float
-        The estimated drift in the y direction.
+        The estimated mean drift in the y direction (nm).
     """
     steps = int(len(locs) // (MAX_LOCS))
     steps = max(1, steps)
@@ -9498,8 +9673,8 @@ def get_file_summary(
         The mean length of binding events in frames. If None, it will
         be calculated from the localizations.
     nena : float | None, optional
-        The NeNA value in pixels. If None, it will be calculated from
-        the localizations.
+        The NeNA value in nm. If None, it will be calculated from the
+        localizations.
 
     Returns
     -------
@@ -9534,17 +9709,18 @@ def get_file_summary(
         if col_ not in summary:
             summary[col_] = float("nan")
 
-    nena_px = check_nena(locs, info) if nena is None else nena
+    nena_nm = check_nena(locs, info) if nena is None else nena
     len_mean = check_kinetics(locs, info) if len_mean is None else len_mean
     drift_x, drift_y = check_drift(locs, info) if drift is None else drift
 
     summary["len_mean"] = len_mean
     summary["n_locs"] = len(locs)
     summary["locs_frame"] = len(locs) / summary["frames"]
+    # the drift is in nm; the columns keep their names for the database
     summary["drift_x"] = drift_x
     summary["drift_y"] = drift_y
-    summary["nena_px"] = nena_px
-    summary["nena_nm"] = nena_px * summary["pixelsize"]
+    summary["nena_nm"] = nena_nm
+    summary["nena_px"] = nena_nm / summary["pixelsize"]
     summary["filename"] = os.path.normpath(file)
     summary["filename_hdf"] = file_hdf
     summary["file_created"] = datetime.fromtimestamp(os.path.getmtime(file))
@@ -9649,7 +9825,7 @@ def add_file_to_db(
         Mean length of binding events in frames. If None, it is
         calculated from the localizations.
     nena : float | None, optional
-        NeNA value in pixels. If None, it is calculated from the
+        NeNA value in nm. If None, it is calculated from the
         localizations.
 
     Notes
@@ -9749,7 +9925,8 @@ def _lateral_refine_bead_positions(
     camera_info = {"Baseline": 0, "Sensitivity": 1.0, "Gain": 1}
     spots = get_spots(image[np.newaxis], ids, box, camera_info)
     theta = fit_spots_gauss(spots.astype(np.float32))
-    locs = locs_from_fits_gauss(ids, theta, box, em=False)
+    # positions on the image grid (camera pixels), as the coarse ones
+    locs = locs_from_fits_gauss(ids, theta, box, em=False, pixelsize=1.0)
     refined = np.column_stack((locs["y"].to_numpy(), locs["x"].to_numpy()))
     return refined[np.isfinite(refined).all(axis=1)]
 
@@ -9917,7 +10094,8 @@ def _xcorr_gaussian2d(xy, x0, y0, sx, sy, amp, bg):
 
 
 def _xcorr_peak_nm(cc: np.ndarray, nm: float) -> tuple[float, float]:
-    """Sub-pixel cross-correlation peak, in ``nm`` (or px if ``nm`` is 1)."""
+    """Sub-pixel cross-correlation peak of the image-grid correlogram
+    ``cc``, in nm (``nm`` is the camera pixel size)."""
     py, px = np.unravel_index(np.argmax(cc), cc.shape)
     cy_cc, cx_cc = cc.shape[0] // 2, cc.shape[1] // 2
     r = 5
@@ -9954,16 +10132,13 @@ def _xcorr_peak_nm(cc: np.ndarray, nm: float) -> tuple[float, float]:
 def _alignment_title(
     decomp: dict,
     n_pairs: int,
-    pixelsize: float | None,
     transform_type: str,
     ref_path: str,
     target_path: str,
 ) -> str:
-    """Build the suptitle for the lateral-alignment QC figure."""
-    if pixelsize is not None:
-        trans_str = f"Tx={decomp['tx_nm']:.1f} nm  Ty={decomp['ty_nm']:.1f} nm"
-    else:
-        trans_str = f"Tx={decomp['tx_px']:.3f} px  Ty={decomp['ty_px']:.3f} px"
+    """Build the suptitle for the lateral-alignment QC figure.
+    ``decomp`` is the decomposition of the transform in nm."""
+    trans_str = f"Tx={decomp['tx_nm']:.1f} nm  Ty={decomp['ty_nm']:.1f} nm"
     title = (
         f"Alignment check  |  {n_pairs} bead pairs  |  "
         f"Scale X={decomp['scale_x']:.5f}  Y={decomp['scale_y']:.5f}  "
@@ -9985,7 +10160,7 @@ def _lateral_plot_alignment(
     pairs_ref: np.ndarray,
     decomp: dict,
     n_pairs: int,
-    pixelsize: float | None = None,
+    pixelsize: float,
     save_path: str = "",
     ref_path: str = "",
     target_path: str = "",
@@ -9994,11 +10169,12 @@ def _lateral_plot_alignment(
     """Four-panel QC figure: overlay before/after correction and mean
     per-bead cross-correlation before/after correction.
 
-    If ``pixelsize`` is None, axes are labeled in pixels; otherwise
-    they are scaled to nm and labeled accordingly.
+    The images and bead positions are on the camera pixel grid; the
+    axes are scaled with ``pixelsize`` (nm) and labeled in nm, and
+    ``decomp`` is the decomposition of the transform in nm.
     """
-    nm = pixelsize if pixelsize is not None else 1.0
-    unit = "nm" if pixelsize is not None else "px"
+    nm = float(pixelsize)
+    unit = "nm"
 
     ref_n = _normalize_img(img_ref)
     mov_n = _normalize_img(img_mov)
@@ -10014,7 +10190,7 @@ def _lateral_plot_alignment(
 
     fig = plt.figure(figsize=(11, 11))
     title = _alignment_title(
-        decomp, n_pairs, pixelsize, transform_type, ref_path, target_path
+        decomp, n_pairs, transform_type, ref_path, target_path
     )
     fig.suptitle(title, fontsize=10, fontweight="bold")
     gs = gridspec.GridSpec(2, 2, figure=fig, wspace=0.30, hspace=0.25)
@@ -10107,7 +10283,7 @@ def fit_lateral_transform(
     calibration: dict,
     box: int,
     identification_method: IdentificationMethod,
-    pixelsize: float | None = None,
+    pixelsize: float,
     transform_type: str = "astigmatism",
     ref_path: str = "",
     target_path: str = "",
@@ -10115,8 +10291,11 @@ def fit_lateral_transform(
 ) -> tuple[dict, dict]:
     """Fit the target -> reference transform and append it to a calibration.
 
-    The transform is appended to ``calibration``'s ordered list of affine
-    corrections. This is the computational half of
+    The transform is fitted on the bead positions of the two images
+    (camera pixels) and stored in nm, the unit of the localizations it
+    corrects (``picasso.transforms.Transform.rescaled``). It is appended
+    to ``calibration``'s ordered list of affine corrections. This is the
+    computational half of
     :func:`calibrate_lateral_transform`. It touches no matplotlib state, so
     it is safe to call from a worker thread; the returned ``qc`` dict
     carries everything :func:`plot_lateral_calibration` needs to draw the
@@ -10136,9 +10315,9 @@ def fit_lateral_transform(
         How the bead candidates are detected in both images: local maxima
         above a minimum net gradient (:class:`NetGradient`) or wavelet
         segmentation (see :class:`IdentificationParameters`).
-    pixelsize : float, optional
-        Camera pixel size in nm. If None (default), values are reported in
-        pixels.
+    pixelsize : float
+        Camera pixel size in nm, which expresses the transform fitted on
+        the bead images (camera pixels) in nm.
     transform_type : {"astigmatism", "chromatic"}, optional
         What the transform corrects. Default is "astigmatism".
     ref_path : str, optional
@@ -10161,13 +10340,18 @@ def fit_lateral_transform(
     -------
     calibration : dict
         The input calibration, with the transform appended to its
-        ``"Affine transforms"`` list (an existing entry of the same type is
-        replaced). Save it with ``io.save_any_calibration``.
+        ``"Lateral transforms"`` list (an existing entry of the same type
+        is replaced). The entry holds the transform in nm (``Transform``),
+        its decomposition in nm (``Decomposition``, see
+        ``picasso.transforms.Transform.decompose``), the camera pixel
+        size (``Pixelsize (nm)``) and the format marker
+        (``io.FORMAT_VERSION_ATTR``). Save it with
+        ``io.save_any_calibration``.
     qc : dict
         Inputs for :func:`plot_lateral_calibration`: the reference, target
-        and corrected images, the matched reference bead positions, the
-        decomposition, the number of pairs, the pixel size, the transform
-        type and the source paths.
+        and corrected images and the matched reference bead positions
+        (camera pixel grid), the decomposition (nm), the number of pairs,
+        the pixel size, the transform type and the source paths.
 
     Raises
     ------
@@ -10217,10 +10401,18 @@ def fit_lateral_transform(
             "or choose a simpler model."
         )
 
-    transform, keep = _estimate_lateral_transform(
+    pixelsize = float(pixelsize)
+    if not pixelsize > 0:
+        raise ValueError(
+            f"The camera pixel size must be positive, got {pixelsize} nm."
+        )
+    # fitted on the image grid (camera pixels), stored in nm: the unit of
+    # the localizations it will correct
+    transform_px, keep = _estimate_lateral_transform(
         pairs_target, pairs_ref, model
     )
-    decomp = transform.decompose(pixelsize)
+    transform = transform_px.rescaled(pixelsize)
+    decomp = transform.decompose()
 
     # What the two images are called depends on what is being corrected;
     # the fit and the way the transform is applied are identical.
@@ -10236,17 +10428,18 @@ def fit_lateral_transform(
         "Bead pairs": int(keep.sum()),
         "Bead pairs rejected": int(len(keep) - keep.sum()),
         "Decomposition": decomp,
+        "Pixelsize (nm)": pixelsize,
+        io.FORMAT_VERSION_ATTR: io.FORMAT_VERSION,
     }
-    if pixelsize is not None:
-        lateral_entry["Pixelsize (nm)"] = float(pixelsize)
     lib.append_lateral_transform(calibration, lateral_entry)
 
     qc = {
         "img_ref": img_ref,
         "img_target": img_target,
         # the warp is part of the fit's output, not of the drawing, so it
-        # is computed here and only displayed by the plotting function
-        "img_cor": tform.warp_image(img_target, transform.inverse()),
+        # is computed here and only displayed by the plotting function;
+        # the image lives on the camera pixel grid
+        "img_cor": tform.warp_image(img_target, transform_px.inverse()),
         "pairs_ref": pairs_ref,
         # Every detection in each image plus the indices of the matched
         # ones (pair k is (idx_ref[k], idx_target[k])), so the Localize
@@ -10302,7 +10495,7 @@ def calibrate_lateral_transform(
     calibration: dict,
     box: int,
     identification_method: IdentificationMethod,
-    pixelsize: float | None = None,
+    pixelsize: float,
     transform_type: str = "astigmatism",
     ref_path: str = "",
     target_path: str = "",
@@ -10321,7 +10514,7 @@ def calibrate_lateral_transform(
     - ``"chromatic"``: one color channel is mapped into the reference
       color channel, correcting chromatic aberration.
 
-    Both are stored as entries of an ordered ``"Affine transforms"`` list
+    Both are stored as entries of an ordered ``"Lateral transforms"`` list
     and applied to ``x``/``y`` in that order after fitting, so a 3D
     two-color experiment can chain the astigmatism correction and the
     chromatic one. The list is read from whatever calibration the fit uses
@@ -10333,12 +10526,14 @@ def calibrate_lateral_transform(
     reference frame. A multichannel spline calibration registers its
     channels itself, so appending a transform to one raises ``ValueError``.
 
-    The fit is performed in pixel coordinates on a per-pixel mean of
-    each movie. Bead candidates are found by Gaussian-blur + local-max,
+    The fit is performed in camera pixel coordinates on a per-pixel mean
+    of each movie. Bead candidates are found by Gaussian-blur + local-max,
     refined to sub-pixel accuracy by a 2D Gaussian fit, then matched
     between the two images by mutual nearest neighbor. The transform is
-    fitted by least squares (see :func:`picasso.transforms.estimate`) and
-    decomposed into rotation / anisotropic scale / shear.
+    fitted by least squares (see :func:`picasso.transforms.estimate`),
+    expressed in nm (the unit of the localizations it corrects, see
+    ``picasso.transforms.Transform.rescaled``) and decomposed into
+    rotation / anisotropic scale / shear.
 
     Parameters
     ----------
@@ -10361,10 +10556,10 @@ def calibrate_lateral_transform(
         How the bead candidates are detected in both images: local maxima
         above a minimum net gradient (:class:`NetGradient`) or wavelet
         segmentation (see :class:`IdentificationParameters`).
-    pixelsize : float, optional
-        Camera pixel size in nm. If given, decomposition translations
-        and the diagnostic plot are converted from pixels to nm. If
-        None (default), values are reported in pixels. Default is None.
+    pixelsize : float
+        Camera pixel size in nm. The transform is fitted on the bead
+        images (camera pixels) and stored in nm; the decomposition and
+        the diagnostic plot are in nm.
     transform_type : {"astigmatism", "chromatic"}, optional
         What the transform corrects; recorded in the entry and used to
         decide which existing entry it replaces. Default is
@@ -10384,9 +10579,10 @@ def calibrate_lateral_transform(
     Returns
     -------
     calibration : dict
-        The input calibration with the transform appended to its
-        ``"Affine transforms"`` list. Use ``io.save_any_calibration`` to
-        save the result to YAML or HDF5, whichever the calibration is.
+        The input calibration with the transform (nm) appended to its
+        ``"Lateral transforms"`` list, see :func:`fit_lateral_transform`.
+        Use ``io.save_any_calibration`` to save the result to YAML or
+        HDF5, whichever the calibration is.
 
     Notes
     -----
