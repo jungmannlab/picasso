@@ -565,10 +565,10 @@ whose lengths are in camera pixels, to the current format in nm:
 localizations (with their ``.yaml``), pick regions, drift ``.txt`` files,
 astigmatism and lateral calibrations, SPINNA masks and nanoTRON models. Add
 the files to the list, enter the camera pixel size (prefilled from the first
-file's metadata if it records it) and choose whether to replace the original
-files or to write the converted ones next to them with ``_nm`` appended to
-their names. Opening an old file converts it in memory anyway; the dialog
-saves the converted files in disk. See :ref:`files-legacy` and, for the command
+file's metadata if it records it, else from the last loaded channel) and
+choose whether to replace the original files or to write the converted ones
+next to them with ``_nm`` appended to their names. Opening an old file
+converts it in memory anyway; the dialog saves the converted files on disk. See :ref:`files-legacy` and, for the command
 line, :ref:`cmd-convert-units`.
 
 .. _render-remove-all-localizations:

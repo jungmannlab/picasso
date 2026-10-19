@@ -220,12 +220,13 @@ def test_render_dialogs_have_remembered_sections(render_window):
     # the sections that were collapsed before stay so by default
     assert saved["Info"]["FRC in several ROIs"] is False
     assert saved["Tools Settings"]["Appearance"] is False
-    assert saved["Display Settings"]["Camera"] is True
+    assert saved["Display Settings"]["Contrast"] is True
 
-    _sections(window.display_settings_dlg)["Camera"].toggle_button.click()
+    _sections(window.display_settings_dlg)["Contrast"].toggle_button.click()
     other = gui_render.Window(plugins_loaded=True)
     try:
-        assert not _sections(other.display_settings_dlg)["Camera"].isExpanded()
+        sections = _sections(other.display_settings_dlg)
+        assert not sections["Contrast"].isExpanded()
     finally:
         other.window_rot.view_rot.stop_render_worker()
         other.view.stop_render_worker()

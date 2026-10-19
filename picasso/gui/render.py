@@ -5504,15 +5504,17 @@ class ChangeFOV(lib.Dialog):
         save_fov_file(path, fov)
 
     def load_fov(self) -> None:
-        """Load a FOV from a .txt file (nm; files written before Picasso
-        1.0 are in camera pixels and converted with the camera pixel
-        size of the Display Settings)."""
+        """Load a FOV from a .txt file (nm; see ``View.read_fov_file``
+        for files written before Picasso 1.0)."""
         path, ext = QtWidgets.QFileDialog.getOpenFileName(
             self, "Load FOV from", filter="*.txt"
         )
         if not path:
             return
-        [x, y, w, h] = load_fov_file(path, self.window.view.pixelsize)
+        fov = self.window.view.read_fov_file(path)
+        if fov is None:  # canceled
+            return
+        [x, y, w, h] = fov
         self.x_box.setValue(x)
         self.y_box.setValue(y)
         self.w_box.setValue(w)
@@ -5545,17 +5547,23 @@ def save_fov_file(path: str, fov: FloatArray1D) -> None:
     np.savetxt(path, np.asarray(fov, dtype=float), header=FOV_FILE_HEADER)
 
 
-def load_fov_file(path: str, pixelsize: float) -> FloatArray1D:
+def load_fov_file(path: str, pixelsize: float | None = None) -> FloatArray1D:
     """Load a field of view ``(x, y, width, height)`` in nm from a .txt
     file. Files without the ``FOV_FILE_HEADER`` comment line were
     written before Picasso 1.0, in camera pixels, and are converted
-    with ``pixelsize`` (nm)."""
+    with ``pixelsize`` (nm); ``io.MissingPixelsizeError`` if it is not
+    given for such a file."""
     with open(path) as f:
         first = f.readline()
     fov = np.loadtxt(path, dtype=float)
     if fov.shape != (4,):
         raise ValueError(f"{path} does not hold a field of view.")
     if not first.lstrip("# ").startswith("picasso_format"):
+        if pixelsize is None:
+            raise io.MissingPixelsizeError(
+                f"{path} was written before Picasso 1.0, with the field of "
+                "view in camera pixels. Pass pixelsize (nm) to convert it."
+            )
         fov = fov * pixelsize
     return fov
 
@@ -9534,11 +9542,6 @@ class DisplaySettingsDialog(lib.Dialog):
         Contains the minimum value of the parameter to be rendered.
     parameter : QComboBox
         Defines what property should be rendered, e.g.: z, photons.
-    pixelsize : QDoubleSpinBox
-        Contains the camera pixel size (nm) of the loaded localizations.
-        Information only: localizations are in nm, so it rescales
-        nothing; it is the default offered when a file written before
-        Picasso 1.0 (camera pixels) is loaded.
     render_check : QCheckBox
     display_width : QDoubleSpinBox
         Width of the region shown in the window (um); smaller values
@@ -9863,25 +9866,6 @@ class DisplaySettingsDialog(lib.Dialog):
             triangulation_button: "triangulation",
         }
 
-        # Camera_parameters
-        camera_groupbox = lib.CollapsibleGroupBox("Camera")
-        self.camera_grid = QtWidgets.QGridLayout(camera_groupbox.content)
-        pixelsize_label = QtWidgets.QLabel("Camera pixel size (nm):")
-        pixelsize_label.setToolTip(
-            "Effective camera pixel size in nm (after magnification) of\n"
-            "the loaded localizations, for information: localizations\n"
-            "are stored in nm, so it rescales nothing. It is the default\n"
-            "offered when a file written before Picasso 1.0 (in camera\n"
-            "pixels) is loaded without a pixel size in its metadata."
-        )
-        self.camera_grid.addWidget(pixelsize_label, 0, 0)
-        self.pixelsize = QtWidgets.QDoubleSpinBox()
-        self.pixelsize.setRange(1, 100000)
-        self.pixelsize.setValue(130)
-        self.pixelsize.setKeyboardTracking(False)
-        self.camera_grid.addWidget(self.pixelsize, 0, 1)
-        vbox.addWidget(camera_groupbox)
-
         # Scalebar
         self.scalebar_groupbox = lib.CollapsibleGroupBox("Scale bar")
         self.scalebar_groupbox.setCheckable(True)
@@ -10155,12 +10139,6 @@ class DisplaySettingsDialog(lib.Dialog):
         self.minimum.blockSignals(False)
         # the spin box' signals are blocked, so the sliders are moved here
         self.sync_contrast_sliders()
-
-    def silent_pixelsize_update(self, value: float) -> None:
-        """Change the value of self.pixelsize in the background."""
-        self.pixelsize.blockSignals(True)
-        self.pixelsize.setValue(value)
-        self.pixelsize.blockSignals(False)
 
     def silent_maximum_update(self, value: float) -> None:
         """Change the value of self.maximum in the background."""
@@ -10464,9 +10442,11 @@ class ImageOverlayDialog(lib.Dialog):
         self.page.blockSignals(False)
         self.path_label.setText(os.path.basename(path))
         self.path_label.setToolTip(path)
-        self.pixel_size.blockSignals(True)
-        self.pixel_size.setValue(self.window.view.pixelsize)
-        self.pixel_size.blockSignals(False)
+        pixelsizes = self.window.view.pixelsizes
+        if pixelsizes and pixelsizes[0] is not None:  # the camera's
+            self.pixel_size.blockSignals(True)
+            self.pixel_size.setValue(pixelsizes[0])
+            self.pixel_size.blockSignals(False)
         self.show_check.blockSignals(True)
         self.show_check.setChecked(True)
         self.show_check.blockSignals(False)
@@ -10597,7 +10577,7 @@ class ImageOverlayDialog(lib.Dialog):
         x, y, width, height = self.extent()
         sx = width / image_width
         sy = height / image_height
-        half_px = self.window.view.pixelsize / 2
+        half_px = self.window.view.pixelsizes[0] / 2
         self.result_label.setText(
             f"One image pixel = {sx:.4g} x {sy:.4g} nm.\n"
             f"Top left corner at x = {x:.4g}, y = {y:.4g} nm\n"
@@ -11340,10 +11320,9 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         Size of picks in nm; None for polygonal, box and brush picks,
         which carry their own extent. Diameter for circular picks, side
         length for square picks and width for rectangular picks.
-    pixelsize : float
-        (Property) Camera pixel size (nm) as shown in the display
-        settings dialog. Information only (localizations are in nm):
-        the default for converting files written before Picasso 1.0.
+    pixelsizes : list of floats
+        (Property) Camera pixel size (nm) of each channel, from its
+        metadata (``Pixelsize``).
     _pixmap : QPixMap
         Pixmap currently displayed.
     _points : list
@@ -11539,7 +11518,7 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             self,
             "Camera pixel size",
             f"Enter camera pixel size in nm for {os.path.basename(path)}:",
-            value=self.pixelsize,
+            value=self.default_pixelsize(),
             min=0.01,
             max=10000,
             decimals=2,
@@ -11631,9 +11610,9 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             False for channels that replace the loaded ones, which are
             in a frame of their own (e.g., stitched tiles).
         """
-        # update pixelsize (credits to Boyd Peters #602)
-        pixelsize = self._metadata_pixelsize(path, info)
-        self.window.display_settings_dlg.silent_pixelsize_update(pixelsize)
+        # the field of view needs the pixel size (credits to Boyd
+        # Peters #602)
+        self._metadata_pixelsize(path, info)
 
         # the cached raw image holds one plane per channel loaded so far,
         # so it must not be reused once a channel is added
@@ -11706,7 +11685,7 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             return pixelsize
         pixelsize = self._prompt_pixelsize(path)
         if pixelsize is None:  # canceled by the user
-            pixelsize = self.pixelsize
+            pixelsize = self.default_pixelsize()
         info.append(
             {
                 **lib.step_info("Render"),
@@ -14278,7 +14257,7 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
                 return
             # try loading a screenshot
             if "Max. density" in file:
-                self.load_screenshot(file)
+                self.load_screenshot(file, paths[0])
             # load pick regions
             loaded_shape = file.get("Shape", None)
             if loaded_shape in lib.PICK_SHAPES:
@@ -14662,29 +14641,55 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         """Tries to load a single .txt file that contains either FOV
         coordinates or is a drift correction file (both in nm; files
         written before Picasso 1.0 are in camera pixels and converted
-        with the camera pixel size)."""
+        with the camera pixel size of the channels' metadata)."""
         try:
             data = np.loadtxt(path)
         except ValueError:
             return
         if data.shape == (4,):  # try loading FOV
-            self.load_fov_drop(load_fov_file(path, self.pixelsize))
+            fov = self.read_fov_file(path)
+            if fov is not None:
+                self.load_fov_drop(fov)
         elif data.ndim == 2 and data.shape[1] in [2, 3]:  # try loading drift
             channel = self.get_channel_all_seq(
                 "Select channel for drift correction"
             )
             if channel is None:
                 return
-            drift = self._read_drift_file(path)
+            drift = self._read_drift_file(path, channel)
             if drift is not None:
                 self.load_drift_drop(channel, drift.to_numpy())
 
-    def _read_drift_file(self, path: str) -> pd.DataFrame | None:
+    def _read_drift_file(
+        self, path: str, channel: int = 0
+    ) -> pd.DataFrame | None:
         """Read a drift .txt file in nm (see ``io.load_drift``); a file
         written before Picasso 1.0 (x, y in camera pixels) is converted
-        with the camera pixel size, which the user is asked for. None if
+        with the camera pixel size of ``channel`` (its metadata), which
+        the user is asked for if no channel is loaded. None if
         canceled."""
-        return lib_qt.load_or_ask_pixelsize(self, io.load_drift, path)
+        pixelsizes = self.pixelsizes
+        if channel >= len(pixelsizes):  # all channels: the first one's
+            channel = 0
+        return lib_qt.load_or_ask_pixelsize(
+            self,
+            io.load_drift,
+            path,
+            pixelsize=pixelsizes[channel] if pixelsizes else None,
+        )
+
+    def read_fov_file(self, path: str) -> FloatArray1D | None:
+        """Read a FOV .txt file in nm (see ``load_fov_file``); a file
+        written before Picasso 1.0 (camera pixels) is converted with the
+        camera pixel size of the first channel (its metadata), which the
+        user is asked for if no channel is loaded. None if canceled."""
+        pixelsizes = self.pixelsizes
+        return lib_qt.load_or_ask_pixelsize(
+            self,
+            load_fov_file,
+            path,
+            pixelsize=pixelsizes[0] if pixelsizes else None,
+        )
 
     def load_fov_drop(self, fov: FloatArray1D) -> None:
         """Show the FOV ``(x, y, width, height)`` (nm) of a dropped FOV
@@ -14754,9 +14759,16 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
     def _read_picks_file(self, path: str) -> tuple | None:
         """Read a picks .yaml file in nm (see ``io.load_picks``); a file
         written before Picasso 1.0 (camera pixels) is converted with
-        the camera pixel size, which the user is asked for. None if
+        the camera pixel size of the first channel (its metadata), which
+        the user is asked for if no channel is loaded. None if
         canceled."""
-        return lib_qt.load_or_ask_pixelsize(self, io.load_picks, path)
+        pixelsizes = self.pixelsizes
+        return lib_qt.load_or_ask_pixelsize(
+            self,
+            io.load_picks,
+            path,
+            pixelsize=pixelsizes[0] if pixelsizes else None,
+        )
 
     def load_picks(self, path: str) -> None:
         """Load picks from .yaml file (nm; see ``_read_picks_file`` for
@@ -14791,25 +14803,39 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         self.update_pick_info_short()
         self.update_scene(picks_only=True)
 
-    def load_screenshot(self, file: dict) -> None:  # noqa: C901
+    def load_screenshot(  # noqa: C901
+        self, file: dict, path: str = "The view settings file"
+    ) -> None:
         """Load screenshot settings from a .yaml file (see
-        ``Window.export_current_info``). Files written before Picasso
-        1.0 (no ``picasso_format``) store the FOV in camera pixels and
-        the zoom as screen pixels per camera pixel; both are converted
-        with the camera pixel size of the Display Settings."""
+        ``Window.export_current_info``) read from ``path``. Files
+        written before Picasso 1.0 (no ``picasso_format``) store the FOV
+        in camera pixels and the zoom as screen pixels per camera pixel;
+        both are converted with the camera pixel size of the first
+        channel (its metadata), which the user is asked for if no
+        channel is loaded."""
         disp_dlg = self.window.display_settings_dlg
         legacy_file = io.FORMAT_VERSION_ATTR not in file
+        pixelsizes = self.pixelsizes
+        pixelsize = pixelsizes[0] if pixelsizes else None
+        if pixelsize is None and (
+            (legacy_file and FOV_KEY not in file)
+            or (ZOOM_KEY not in file and file.get(LEGACY_ZOOM_KEY))
+            or "Min. blur (cam. px)" in file
+        ):
+            pixelsize = lib_qt.ask_pixelsize(self, path)
+            if pixelsize is None:  # canceled
+                return
         if FOV_KEY in file:
             x, y, w, h = file[FOV_KEY]
         else:
             x, y, w, h = file[LEGACY_FOV_KEY]
             if legacy_file:
-                x, y, w, h = (_ * self.pixelsize for _ in (x, y, w, h))
+                x, y, w, h = (_ * pixelsize for _ in (x, y, w, h))
         # nm per screen pixel
         zoom = file.get(ZOOM_KEY)
         if zoom is None and file.get(LEGACY_ZOOM_KEY):
             # screen pixels per camera pixel
-            zoom = self.pixelsize / file[LEGACY_ZOOM_KEY]
+            zoom = pixelsize / file[LEGACY_ZOOM_KEY]
         if zoom:
             # the view shows the FOV at the saved zoom
             self.window.resize_view(w / zoom, h / zoom)
@@ -14828,7 +14854,7 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
                     break
         if "Min. blur (cam. px)" in file:
             disp_dlg.min_blur_width.setValue(
-                file["Min. blur (cam. px)"] * self.pixelsize
+                file["Min. blur (cam. px)"] * pixelsize
             )
         elif "Min. blur (nm)" in file:
             disp_dlg.min_blur_width.setValue(file["Min. blur (nm)"])
@@ -18636,7 +18662,7 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
                 directory=self.locs_paths[channel],
             )
             if path:
-                drift = self._read_drift_file(path)
+                drift = self._read_drift_file(path, channel)
                 if drift is None:  # canceled
                     return
                 self._apply_drift(channel, drift)
@@ -19069,15 +19095,22 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             self.zoom(scale, cursor_position=position)
 
     @property
-    def pixelsize(self) -> float:
-        """Camera pixel size (nm) shown in the display settings, for
-        information and as the default when converting files written
-        before Picasso 1.0; localizations are in nm, so it rescales
-        nothing."""
-        if hasattr(self.window, "display_settings_dlg"):
-            return self.window.display_settings_dlg.pixelsize.value()
-        else:
-            return 100
+    def pixelsizes(self) -> list[float]:
+        """Camera pixel size (nm) of each channel, from its metadata
+        (``Pixelsize``). Localizations are in nm; the pixel size
+        defines the camera grid (field of view, identifications) and
+        converts files written before Picasso 1.0."""
+        pixelsizes = []
+        for info in self.infos:
+            pixelsize = lib.get_from_metadata(info, "Pixelsize")
+            pixelsizes.append(None if pixelsize is None else float(pixelsize))
+        return pixelsizes
+
+    def default_pixelsize(self) -> float:
+        """Camera pixel size (nm) offered when a file does not record
+        it: the last loaded channel's, else 130 nm."""
+        pixelsizes = [_ for _ in self.pixelsizes if _ is not None]
+        return pixelsizes[-1] if pixelsizes else 130.0
 
 
 class Window(QtWidgets.QMainWindow):

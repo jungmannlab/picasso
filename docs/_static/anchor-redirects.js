@@ -90,7 +90,6 @@
     "apply-expressions-to-localizations": "render/menu-postprocess.html#render-apply-expressions",
     "blur": "render/display-settings.html#render-blur",
     "build-an-animation": "render/3d.html#render-animation",
-    "camera": "render/display-settings.html#render-camera",
     "clear-picks-ctrl-c": "render/menu-tools.html#render-clear-picks",
     "cluster-in-pick-k-means": "render/menu-tools.html#render-cluster-in-pick",
     "color-bar-lut": "render/display-settings.html#render-colorbar-format",

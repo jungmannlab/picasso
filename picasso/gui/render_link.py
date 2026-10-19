@@ -35,8 +35,7 @@ Rendering
     per-channel contrast is matched by file: a channel takes the
     contrast of the channel of the same file in the other window.
 Display
-    Scale bar, grid, minimap, background color and legend, camera
-    pixel size.
+    Scale bar, grid, minimap, background color and legend.
 Picks
     Pick shape and size, or the picks themselves (which include their
     shape and size).
@@ -200,14 +199,6 @@ CATEGORIES = (
         "Background color and legend visibility.",
     ),
     LinkCategory(
-        "pixelsize",
-        "Camera pixel size",
-        "Display",
-        "Camera pixel size (nm) shown in the Display Settings (for\n"
-        "information and as the default when converting files written\n"
-        "before Picasso 1.0).",
-    ),
-    LinkCategory(
         "pick_geometry",
         "Pick shape and size",
         "Picks",
@@ -233,7 +224,6 @@ CATEGORY_KEYS = tuple(category.key for category in CATEGORIES)
 # key -> (dialog attribute of the window, widget attribute names)
 WIDGET_CATEGORIES = {
     "minimap": ("display_settings_dlg", ("minimap",)),
-    "pixelsize": ("display_settings_dlg", ("pixelsize",)),
     "pick_geometry": (
         "tools_settings_dialog",
         ("pick_shape", "pick_diameter", "pick_width", "pick_side_length"),

@@ -56,7 +56,7 @@ class ConvertUnitsDialog(lib.Dialog):
     pixelsize : QDoubleSpinBox
         Camera pixel size (nm) for files that do not record it. It is
         prefilled from the first localization file's metadata, else
-        from the Display Settings.
+        from the last channel loaded in Render.
     replace : QCheckBox
         If checked, the files are overwritten; otherwise ``_nm`` copies
         are written next to them.
@@ -117,14 +117,14 @@ class ConvertUnitsDialog(lib.Dialog):
             "Used for files that do not record the camera pixel size\n"
             "(picks, drift, calibrations, localization files without\n"
             "Pixelsize in their metadata). Prefilled from the first\n"
-            "localization file's metadata, else from the Display\n"
-            "Settings."
+            "localization file's metadata, else from the last channel\n"
+            "loaded in Render."
         )
         settings.addWidget(pixelsize_label, 0, 1)
         self.pixelsize = QtWidgets.QDoubleSpinBox()
         self.pixelsize.setRange(0.01, 100000)
         self.pixelsize.setDecimals(2)
-        self.pixelsize.setValue(window.view.pixelsize)
+        self.pixelsize.setValue(window.view.default_pixelsize())
         self.pixelsize.setKeyboardTracking(False)
         self.pixelsize.valueChanged.connect(self._on_pixelsize_edited)
         settings.addWidget(self.pixelsize, 0, 2)

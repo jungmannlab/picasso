@@ -194,7 +194,8 @@ lines: the format marker and the column names. For example:
 
 Drift files written before Picasso 1.0 have no header and hold ``x`` and
 ``y`` in camera pixels (``z`` in nm); they are converted when they are
-loaded (you are asked for the camera pixel size) or once and for all with
+loaded (with the camera pixel size of the channel's metadata) or once and
+for all with
 ``picasso convert-units``, see :ref:`files-legacy`.
 
 .. dropdown:: Python

@@ -371,7 +371,7 @@ Chooses which attributes the linked windows share:
 - render settings, contrast, per-channel contrast (see
   :ref:`Per-channel contrast <render-channel-contrast>`; a channel takes the contrast of the channel
   of the same file in the other windows), colormap, render by property, scale
-  bar, grid, minimap, background and legend, camera pixel size,
+  bar, grid, minimap, background and legend,
 - pick shape and size, and the picks themselves,
 - slicing (the slice position is matched in nm).
 

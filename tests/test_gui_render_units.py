@@ -24,6 +24,7 @@ from PyQt6 import QtWidgets
 from picasso import io, lib_qt
 from picasso.gui import convert_units
 from picasso.gui import render as gui_render
+from picasso.gui import render_link
 
 WIDTH = HEIGHT = 32  # camera pixels
 PIXELSIZE = 130.0  # nm
@@ -81,6 +82,13 @@ def window(qt_offscreen, tmp_path):
     window.view.resize(256, 256)
     yield window
     _wait(qt_offscreen, lambda: not lib_qt._running_tasks)
+    window.close()
+
+
+@pytest.fixture
+def empty_window(qt_offscreen):
+    window = gui_render.Window(plugins_loaded=True)
+    yield window
     window.close()
 
 
@@ -156,6 +164,46 @@ class TestViewUnits:
 # ---------------------------------------------------------------------------
 
 
+class TestCameraPixelSize:
+    """The camera pixel size comes from each channel's metadata; Render
+    has no setting for it."""
+
+    def test_no_camera_pixel_size_setting(self, window):
+        assert not hasattr(window.display_settings_dlg, "pixelsize")
+        assert not hasattr(window.view, "pixelsize")
+        assert "pixelsize" not in render_link.CATEGORY_KEYS
+
+    def test_one_pixel_size_per_channel(self, window, tmp_path):
+        assert window.view.pixelsizes == [PIXELSIZE]
+        path = str(tmp_path / "other_locs.hdf5")
+        window.view.add(path, _locs(seed=1), _info(108.0), render_=False)
+        assert window.view.pixelsizes == [PIXELSIZE, 108.0]
+        assert window.view.default_pixelsize() == 108.0
+
+    def test_legacy_drift_uses_its_channels_pixel_size(
+        self, window, tmp_path, prompt
+    ):
+        window.view.add(
+            str(tmp_path / "other_locs.hdf5"),
+            _locs(seed=1),
+            _info(108.0),
+            render_=False,
+        )
+        path = str(tmp_path / "old_drift.txt")
+        np.savetxt(path, np.tile([0.5, -0.25], (4, 1)))  # camera pixels
+        drift = window.view._read_drift_file(path, 1)
+        assert prompt == []
+        np.testing.assert_allclose(drift["x"], 0.5 * 108.0)
+        np.testing.assert_allclose(drift["y"], -0.25 * 108.0)
+        # all channels: the first channel's
+        drift = window.view._read_drift_file(path, 2)
+        np.testing.assert_allclose(drift["x"], 0.5 * PIXELSIZE)
+
+    def test_without_channels_no_pixel_size(self, empty_window):
+        assert empty_window.view.pixelsizes == []
+        assert empty_window.view.default_pixelsize() == 130.0
+
+
 class TestPickFiles:
     def test_saved_picks_are_nm_with_the_format_marker(self, window, tmp_path):
         view = window.view
@@ -175,7 +223,7 @@ class TestPickFiles:
         assert view._picks == [[1300.0, 2600.0], [390.0, 520.0]]
         assert window.tools_settings_dialog.pick_diameter.value() == 260.0
 
-    def test_legacy_picks_prompt_for_the_pixel_size(
+    def test_legacy_picks_use_the_channels_pixel_size(
         self, window, tmp_path, prompt
     ):
         path = str(tmp_path / "old_picks.yaml")
@@ -189,23 +237,25 @@ class TestPickFiles:
                 f,
             )
         window.view.load_picks(path)
-        assert len(prompt) == 1
+        assert prompt == []  # the channel's metadata gives it
         assert window.view._picks == [[10.0 * PIXELSIZE, 20.0 * PIXELSIZE]]
         assert window.tools_settings_dialog.pick_diameter.value() == 260.0
 
-    def test_canceled_prompt_keeps_the_current_picks(
-        self, window, tmp_path, monkeypatch
+    def test_without_channels_the_pixel_size_is_asked_for(
+        self, empty_window, tmp_path, monkeypatch
     ):
         path = str(tmp_path / "old_picks.yaml")
         with open(path, "w") as f:
             yaml.dump({"Centers": [[1.0, 1.0]], "Diameter": 2.0}, f)
-        monkeypatch.setattr(
-            QtWidgets.QInputDialog, "getDouble", lambda *a, **k: (0.0, False)
-        )
-        window.view._pick_shape = "Circle"
-        window.view._picks = [(500.0, 500.0)]
-        window.view.load_picks(path)
-        assert window.view._picks == [(500.0, 500.0)]
+        asked = []
+
+        def cancel(*args, **kwargs):
+            asked.append(args)
+            return 0.0, False
+
+        monkeypatch.setattr(QtWidgets.QInputDialog, "getDouble", cancel)
+        assert empty_window.view._read_picks_file(path) is None
+        assert len(asked) == 1
 
     def test_subtract_legacy_picks(self, window, tmp_path, prompt):
         view = window.view
@@ -223,7 +273,7 @@ class TestPickFiles:
                 f,
             )
         view.subtract_picks(path)
-        assert len(prompt) == 1
+        assert prompt == []
         assert view._picks == [(3000.0, 3000.0)]
 
 
@@ -262,6 +312,23 @@ class TestFovFiles:
         np.savetxt(path, np.array([1.0, 2.0, 10.0, 5.0]))
         fov = gui_render.load_fov_file(path, PIXELSIZE)
         assert fov.tolist() == [130.0, 260.0, 1300.0, 650.0]
+
+    def test_dropped_legacy_fov_txt_uses_the_channels_pixel_size(
+        self, window, tmp_path, prompt
+    ):
+        path = str(tmp_path / "old_fov.txt")
+        np.savetxt(path, np.array([1.0, 2.0, 10.0, 10.0]))
+        window.view.load_single_txt(path)
+        assert prompt == []
+        (y0, x0), (y1, x1) = window.view.viewport
+        assert (x0, y0) == (130.0, 260.0)
+        assert x1 - x0 == pytest.approx(1300.0)
+
+    def test_legacy_fov_txt_needs_a_pixel_size(self, tmp_path):
+        path = str(tmp_path / "old_fov.txt")
+        np.savetxt(path, np.array([1.0, 2.0, 10.0, 5.0]))
+        with pytest.raises(io.MissingPixelsizeError):
+            gui_render.load_fov_file(path)
 
     def test_dropped_fov_txt_sets_the_viewport(self, window, tmp_path):
         path = str(tmp_path / "fov.txt")
@@ -404,7 +471,7 @@ class TestConvertUnitsDialog:
         dialog = window.convert_units()
         assert isinstance(dialog, convert_units.ConvertUnitsDialog)
         assert window.convert_units() is dialog
-        assert dialog.pixelsize.value() == window.view.pixelsize
+        assert dialog.pixelsize.value() == window.view.default_pixelsize()
         assert not dialog.replace.isChecked()
         dialog.close()
 

@@ -189,19 +189,6 @@ Jittered Triangulation
       )
 
 
-.. _render-camera:
-
-Camera
-~~~~~~
-
-``Camera pixel size (nm)`` shows the effective pixel size (after
-magnification) of the camera the localizations were recorded with, read from
-the ``Pixelsize`` of the metadata (``.yaml`` file). Since the localizations
-are stored in nm, it rescales nothing; it only sets the extent of the field of
-view (``Width`` × ``Pixelsize`` by ``Height`` × ``Pixelsize``) and is the
-value offered when a file written before Picasso 1.0 (in camera pixels) is
-opened without a pixel size in its metadata (see :ref:`files-legacy`).
-
 .. _render-scale-bar:
 
 Scale bar
@@ -362,7 +349,7 @@ Display
    four values ``X``, ``Y``, ``Width``, ``Height`` in nm, one per line, after
    the comment line ``# picasso_format 1.0 (nm)``; a file without that line
    was saved before Picasso 1.0, in camera pixels, and is converted with the
-   camera pixel size when it is loaded. A saved ``.txt`` file can also be
+   pixel size of the first channel when it is loaded. A saved ``.txt`` file can also be
    dropped onto the main window.
 
 .. _render-info-precision:
