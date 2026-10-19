@@ -343,12 +343,12 @@ Two filters that are often useful:
 
 .. figure:: /images/first-steps-filter.png
    :width: 520px
-   :alt: Picasso Filter histogram of the sx column after filtering, a single peak around 113 nm with the values kept between 100 and 135 nm
+   :alt: Picasso Filter histogram of the sx column after filtering, a single peak around 113 nm with the values kept between 100 and 130 nm
 
    The ``sx`` histogram of the example data after keeping the values between
-   100 and 135 nm (the peak lies at about 113 nm, i.e., 0.87 camera pixels of
-   130 nm): the main peak stays, the widest and narrowest spots are removed.
-   The title shows how many localizations are left.
+   100 and 130 nm (the peak lies at about 113 nm): the main peak stays, the
+   widest and narrowest spots are removed. The title shows how many
+   localizations are left (here 35,413).
 
 More: :doc:`/filter`.
 
