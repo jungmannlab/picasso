@@ -875,6 +875,8 @@ class TestCalibrateZ:
         assert calib["Step size in nm"] == d
         assert calib["Magnification factor"] == 0.79
         assert calib["Path"] == "N/A"
+        # in nm, also when not saved to a file
+        assert calib[io.FORMAT_VERSION_ATTR] == io.FORMAT_VERSION
 
     def test_recovered_polynomial_resembles_truth(
         self, bead_stack, monkeypatch

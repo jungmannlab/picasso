@@ -335,7 +335,9 @@ def _link(files: str, d_max: float, tolerance: float) -> None:
                 # if yes update this file
                 cluster_path = base[:-7] + "_clusters.hdf5"
                 print(cluster_path)
-                clusters = io.load_clusters(cluster_path)
+                # as stored: the added columns have no length units, so
+                # the file keeps its units and format marker
+                clusters = pd.read_hdf(cluster_path, key="clusters")
                 print("Clusterfile detected. Updating entries.")
 
                 n_after_link = []
@@ -361,11 +363,12 @@ def _link(files: str, d_max: float, tolerance: float) -> None:
                     linked_photonrate,
                     dtype=_np.float32,
                 )
-                # clusters.to_hdf(cluster_path, "clusters", mode="a")
                 # cannot use to_hdf for backward compatibility with older
-                # Picasso
+                # Picasso; only the table is replaced, the format marker
+                # and the metadata stay
                 rec_clusters = clusters.to_records(index=False)
-                with h5py.File(cluster_path, "w") as locs_file:
+                with h5py.File(cluster_path, "r+") as locs_file:
+                    del locs_file["clusters"]
                     locs_file.create_dataset("clusters", data=rec_clusters)
             except Exception:
                 print("No clusterfile found for updating.")
@@ -795,14 +798,14 @@ def _nneighbor(files: str) -> None:
     Euclidean distance metric."""
     import glob
     import numpy as np
-    import pandas as pd
     from scipy.spatial import KDTree
+    from . import io
 
     paths = glob.glob(files)
     if paths:
         for path in paths:
             print("Loading {} ...".format(path))
-            clusters = pd.read_hdf(path, key="clusters")
+            clusters = io.load_clusters(path)  # nm, also for old files
             points = clusters[["com_x", "com_y"]].to_numpy()
             tree = KDTree(points)
             minvals, _ = tree.query(points, k=2)
