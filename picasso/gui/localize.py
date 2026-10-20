@@ -359,6 +359,10 @@ FIT_MODELS = {
     },
 }
 
+# The only model whose widths (sx, sy) an astigmatism z calibration can
+# be built from.
+ASTIGMATISM_FIT_MODEL = "2D elliptical Gaussian"
+
 
 MODEL_TOOLTIP = (
     "Model fit to each identified spot:\n\n"
@@ -14056,6 +14060,21 @@ class Window(QtWidgets.QMainWindow):
             title = "Calibrate astigmatism" if calibrate_z else "Localize"
             QtWidgets.QMessageBox.warning(
                 self, title, "Load a movie before localizing."
+            )
+            return
+        # the astigmatism calibration models the x and y widths of an
+        # axis-aligned elliptical Gaussian; other models do not report them
+        # (spline, averaging) or report them along other axes (rotated)
+        model = self.parameters_dialog.fit_model.currentText()
+        if calibrate_z and model != ASTIGMATISM_FIT_MODEL:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Calibrate astigmatism",
+                "The astigmatism calibration requires the "
+                f"'{ASTIGMATISM_FIT_MODEL}' fitting model, but "
+                f"'{model}' is selected.\n\n"
+                "Select it under Fit Settings in the Parameters dialog and "
+                "run the calibration again.",
             )
             return
         self.parameters_dialog.gpu_checkbox.setDisabled(True)
