@@ -2426,7 +2426,13 @@ class TestGpufit:
             }
         )
         locs = localize._fit2d_gauss(
-            spots, ids, spots.shape[1], em=False, spherical=True, use_gpu=True
+            spots,
+            ids,
+            spots.shape[1],
+            em=False,
+            spherical=True,
+            use_gpu=True,
+            pixelsize=PIXELSIZE,
         )
         assert "ellipticity" not in locs.columns
         assert (locs["sx"].to_numpy() == locs["sy"].to_numpy()).all()
@@ -2518,7 +2524,13 @@ class TestGpufit:
             }
         )
         locs = localize._fit2d_gauss(
-            spots, ids, spots.shape[1], em=False, mle=False, use_gpu=True
+            spots,
+            ids,
+            spots.shape[1],
+            em=False,
+            mle=False,
+            use_gpu=True,
+            pixelsize=PIXELSIZE,
         )
         assert "chi_square" in locs.columns
         assert "log_likelihood" not in locs.columns
@@ -2541,11 +2553,16 @@ class TestGpufit:
             }
         )
         theta = localize.fit_spots_gauss_gpu(spots, mle=False)
-        locs = localize.locs_from_fits_gauss(ids, theta, box, em=False)
-        box_offset = int(box / 2)
-        # x_abs = x_id + (x_fit - box_offset); x_fit - box//2 == gt.x
-        np.testing.assert_allclose(locs["x"], 50 + gt.x.values, atol=3e-3)
-        np.testing.assert_allclose(locs["y"], 70 + gt.y.values, atol=3e-3)
+        locs = localize.locs_from_fits_gauss(
+            ids, theta, box, em=False, pixelsize=PIXELSIZE
+        )
+        # x_abs = x_id + (x_fit - box_offset); x_fit - box//2 == gt.x, in nm
+        np.testing.assert_allclose(
+            locs["x"], (50 + gt.x.values) * PIXELSIZE, atol=3e-3 * PIXELSIZE
+        )
+        np.testing.assert_allclose(
+            locs["y"], (70 + gt.y.values) * PIXELSIZE, atol=3e-3 * PIXELSIZE
+        )
         np.testing.assert_allclose(
             locs["photons"], gt.photons.values, rtol=1e-3
         )
@@ -5152,7 +5169,11 @@ class TestFit2DGpu:
         )
         theta = localize.fit_spots_gauss_gpu(spots, mle=False)
         direct = localize.locs_from_fits_gauss(
-            real_identifications, theta, BOX, em=False
+            real_identifications,
+            theta,
+            BOX,
+            em=False,
+            pixelsize=self.CAMERA_INFO["Pixelsize"],
         )
         np.testing.assert_allclose(
             locs["x"].to_numpy(), direct["x"].to_numpy(), rtol=1e-5
