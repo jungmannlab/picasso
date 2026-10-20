@@ -5085,8 +5085,7 @@ def _build_parser() -> (
         help="add the run to the local database",
     )
 
-    # spline-calibrate: build a cubic-spline PSF calibration from a bead
-    # z-stack movie for later use with the 'spline' fit methods.
+    # camera-calibrate: per-pixel sCMOS offset, variance and gain maps
     camera_calib_parser = subparsers.add_parser(
         "camera-calibrate",
         help=(
@@ -5156,6 +5155,8 @@ def _build_parser() -> (
         help="short fresh dark movie; about 1,000 frames is plenty",
     )
 
+    # spline-calibrate: build a cubic-spline PSF calibration from a bead
+    # z-stack movie for later use with the 'spline' fit methods.
     spline_calib_parser = subparsers.add_parser(
         "spline-calibrate",
         help="build a cubic-spline PSF calibration from a bead z-stack",

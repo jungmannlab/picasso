@@ -243,6 +243,246 @@ a min. net gradient of 4000.
 
    picasso localize foldername -a lq -g 4000
 
+.. _cmd-camera-calibrate:
+
+camera-calibrate
+----------------
+Characterize an sCMOS camera: measure its per-pixel offset and readout
+variance maps from a dark movie and, optionally, its per-pixel gain map from
+movies at several illumination levels (see :ref:`localize-scmos-measuring`).
+The calibration is saved as ``.hdf5``, together with a diagnostic plot of the
+maps and their histograms, and is used with ``picasso localize -cm``.
+
+.. code-block:: bash
+
+   picasso camera-calibrate dark [-l light [-p power]] ... [-o output]
+
+For example:
+
+.. code-block:: bash
+
+   picasso camera-calibrate dark.raw -l light_01.raw -p 0.1 -l light_02.raw -p 1 -l light_03.raw -p 10 -o mycam_scmos_calib.hdf5
+   picasso localize movie.raw -cm mycam_scmos_calib.hdf5 -a mle
+
+.. list-table::
+   :header-rows: 1
+   :widths: 25 20 55
+
+   * - Argument
+     - Default
+     - Description
+   * - ``dark``
+     -
+     - Dark movie: frames recorded with no light on the sensor. Fewer than
+       10,000 frames give a warning.
+   * - ``-l``, ``--light`` (str)
+     - none
+     - Movie at a quasi-uniform illumination level, with the same camera
+       settings as the dark movie. Repeat for several levels to measure the
+       gain map; without it, only the offset and variance maps are measured.
+   * - ``-p``, ``--power`` (float)
+     - none
+     - The illumination each light movie was recorded at (laser power,
+       exposure time, ...), one per ``-l``, in the same order. It only labels
+       the linearity plot; the gain fit does not use it.
+   * - ``--power-unit`` (str)
+     - ``mW``
+     - The unit of ``-p``, for the plot axis.
+   * - ``-o``, ``--output`` (str)
+     - ``<dark>_scmos_calib.hdf5``
+     - The output calibration file.
+
+.. _cmd-camera-validate:
+
+camera-validate
+---------------
+Check whether an sCMOS calibration from `camera-calibrate`_ still describes
+the camera, using a short fresh dark movie (about 1,000 frames is plenty). The
+mean per-pixel p-value is printed; outside 0.5 ± 0.1 the camera has drifted
+and should be characterized again (see :ref:`localize-scmos-checking`).
+
+.. code-block:: bash
+
+   picasso camera-validate calibration movie
+
+``calibration``
+   The camera calibration (``.hdf5``).
+``movie``
+   The fresh dark movie.
+
+.. _cmd-spline-calibrate:
+
+spline-calibrate
+----------------
+Build a cubic-spline PSF calibration from a bead z-stack for the spline fit
+methods of ``picasso localize`` (``--spline-calibration``), see
+:ref:`localize-spline-building`. Pass one movie for a single-channel
+calibration, several movies (one per channel) for a multichannel
+calibration, or one movie with ``--split-fov`` when the channels are regions
+of the same movie (see :ref:`localize-multichannel-spline-calibrating`). Next
+to the calibration, a diagnostic plot and a bead gallery
+(``<base>_beads.png``) are saved.
+
+.. code-block:: bash
+
+   picasso spline-calibrate files -s step [options]
+
+For example, a z-stack with 20 nm steps:
+
+.. code-block:: bash
+
+   picasso spline-calibrate my_beads.tif -s 20
+
+The beads are identified with the same arguments as in ``picasso localize``
+(``-b``, ``-g``, ``-im`` and the ``--wavelet-*`` settings, see
+`B-spline wavelet identification`_), and the camera pixel size is resolved as
+described in `Camera settings`_.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 25 20 55
+
+   * - Option
+     - Default
+     - Description
+   * - ``-s``, ``--step`` (float)
+     - required
+     - The z step between consecutive stage positions (nm).
+   * - ``-o``, ``--output`` (str)
+     - ``<movie>_spline_calib.hdf5``
+     - The output calibration file.
+   * - ``-b``, ``--box-side-length`` (int)
+     - ``13``
+     - Box side length (camera pixels).
+   * - ``-g``, ``--gradient`` (int)
+     - ``5000``
+     - Minimum net gradient for bead detection.
+   * - ``-fps``, ``--frames-per-step`` (int)
+     - ``1``
+     - Number of frames acquired per z position (multi-FOV).
+   * - ``-fo``, ``--frame-order``
+     - ``fov``
+     - ``fov`` or ``z``: the acquisition order when ``--frames-per-step`` is
+       above 1.
+   * - ``-zb``, ``--z-binning`` (int)
+     - ``1``
+     - Number of consecutive z steps averaged into one slice of the PSF
+       model; e.g., 10 turns a 5 nm scan into 50 nm slices, which suppresses
+       stage jitter that is correlated between neighboring steps.
+   * - ``-m``, ``--model``
+     - ``spline-3d``
+     - ``spline-3d`` (recovers z) or ``spline-2d`` (single plane).
+   * - ``-mf``, ``--magnification-factor`` (float)
+     - ``0.79``
+     - Scales the fitted z for the refractive-index mismatch. It is stored in
+       the calibration and applied at fit time.
+   * - ``-cz``, ``--correct-z-bias``
+     - off
+     - Set z = 0 at the axial intensity peak of the averaged PSF instead of
+       the center of the stage scan. Only meaningful for a PSF with one
+       well-defined focus (e.g., astigmatism).
+   * - ``-rm``, ``--registration-model``
+     - ``affine``
+     - How the channels of a multichannel calibration are registered to the
+       reference: ``translation``, ``affine``, ``projective``,
+       ``polynomial2`` or ``polynomial3`` (see
+       :ref:`localize-lateral-transform-models`). Ignored for one channel.
+   * - ``-pr``, ``--photon-ratios`` (str)
+     - none
+     - Multichannel only: candidate per-channel photon ratios for
+       ratiometric color assignment, hypotheses separated by ``;`` and
+       channels by ``,`` (e.g., ``"0.7,0.3;0.4,0.6"``). Only relative values
+       matter.
+   * - ``-sf``, ``--split-fov`` (str)
+     - none
+     - Use rectangular regions of one movie as the channels, separated by
+       ``;`` and given as ``y0,x0,y1,x1`` (camera pixels, all the same size),
+       e.g., ``"0,0,512,256;0,256,512,512"``.
+   * - ``-rf``, ``--reference`` (int)
+     - ``0``
+     - ``--split-fov`` only: the index of the reference region.
+   * - ``-bl``, ``--baseline`` (float)
+     - ``0``
+     - Camera baseline.
+   * - ``-se``, ``--sensitivity`` (float)
+     - ``1``
+     - Camera sensitivity.
+   * - ``-ga``, ``--gain`` (int)
+     - ``1``
+     - Camera gain.
+   * - ``-px``, ``--pixelsize`` (float)
+     - from the metadata
+     - Camera pixel size (nm), recorded in the calibration.
+
+.. _cmd-lateral-calibrate:
+
+lateral-calibrate
+-----------------
+Fit a lateral correction of ``x`` and ``y`` from two images of the same
+in-focus beads (see :ref:`localize-lateral-calibrating`):
+
+- ``--type astigmatism``: the ``reference`` without and the ``target`` with
+  the cylindrical lens.
+- ``--type chromatic``: the ``reference`` in the reference color channel and
+  the ``target`` in the channel to be corrected.
+
+The correction is appended to an existing 3D or spline calibration
+(``--calibration``), which then applies it whenever it is used to fit, or
+written to a standalone calibration (``--output``), which is loaded at fit
+time with ``picasso localize -ac`` (see :ref:`localize-lateral-storage`).
+
+.. code-block:: bash
+
+   picasso lateral-calibrate reference target -px pixelsize (-c calibration | -o output) [options]
+
+For example:
+
+.. code-block:: bash
+
+   picasso lateral-calibrate beads_without_lens.tif beads_with_lens.tif -px 130 -c beads_3d_calib.yaml
+   picasso lateral-calibrate beads_red.tif beads_green.tif -t chromatic -px 130 -o chromatic.yaml -p chromatic_check.png
+
+The beads are identified with the same arguments as in ``picasso localize``
+(``-b``, ``-g``, ``-im`` and the ``--wavelet-*`` settings, see
+`B-spline wavelet identification`_).
+
+.. list-table::
+   :header-rows: 1
+   :widths: 25 20 55
+
+   * - Option
+     - Default
+     - Description
+   * - ``-px``, ``--pixelsize`` (float)
+     - required
+     - Camera pixel size (nm). The correction is fitted on the bead images and
+       stored in nm.
+   * - ``-t``, ``--type``
+     - ``astigmatism``
+     - ``astigmatism`` or ``chromatic``: what the correction is for.
+   * - ``-m``, ``--model``
+     - ``affine``
+     - ``translation``, ``affine``, ``projective``, ``polynomial2`` or
+       ``polynomial3``, needing at least 1, 3, 4, 6 or 10 bead pairs (see
+       :ref:`localize-lateral-transform-models`).
+   * - ``-c``, ``--calibration`` (str)
+     - none
+     - An existing calibration (``.yaml`` or ``.hdf5``) to append the
+       correction to.
+   * - ``-o``, ``--output`` (str)
+     - ``--calibration``
+     - Where to write the calibration. Without ``--calibration``, a
+       standalone lateral calibration is written here.
+   * - ``-b``, ``--box-side-length`` (int)
+     - ``7``
+     - Box side length (camera pixels).
+   * - ``-g``, ``--gradient`` (int)
+     - ``5000``
+     - Minimum net gradient for bead detection.
+   * - ``-p``, ``--plot`` (str)
+     - none
+     - Save the diagnostic figure to this path.
+
 .. _cmd-render:
 
 render
@@ -340,6 +580,14 @@ Start the 2D averaging module (GUI).
 .. code-block:: bash
 
    picasso average
+
+nanotron
+--------
+Start the nanoTRON module (GUI), see :doc:`nanotron`.
+
+.. code-block:: bash
+
+   picasso nanotron
 
 server
 ------
