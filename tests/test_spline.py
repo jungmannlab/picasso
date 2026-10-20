@@ -1050,6 +1050,10 @@ class TestCalibrateSpline:
         loaded = io.load_spline_calibration(path)
         coefficients = precision._spline_coeff_reshaped(loaded)
         assert coefficients.ndim == 7  # (C, niz, niy, nix, 4, 4, 4)
+        # and records how the beads were identified
+        assert localize.IdentificationParameters.from_info(
+            loaded["Identification"]
+        ) == localize.IdentificationParameters(method=NG, box=BOX)
 
     def test_calibrate_spline_2d(self):
         movie, _, _ = _synthetic_bead_movie()
@@ -1318,6 +1322,10 @@ class TestCalibrateSplineMultichannel:
         loaded = io.load_spline_calibration(path)
         coefficients = precision._spline_coeff_reshaped(loaded)
         assert coefficients.shape[0] == 2  # one coefficient block per channel
+        # one method shared by the channels is recorded once
+        assert localize.IdentificationParameters.from_info(
+            loaded["Identification"]
+        ) == localize.IdentificationParameters(method=NG, box=BOX)
         # co-focal channels: both planes at the same focus
         np.testing.assert_allclose(
             calib["plane_offsets"], [0.0, 0.0], atol=25.0
@@ -1874,13 +1882,15 @@ class TestCalibrateSplitFov:
             info=info,
             camera_info=CAMERA_INFO,
             box=BOX,
-            identification_method=NG,
+            identification_method=[NG, localize.NetGradient(1900.0)],
             d=20.0,
             regions=regions,
             reference=1,
         )
         # reference region stored first, transform now maps region-1 -> region-0
         assert calib["regions"][0] == [[0, 48], [48, 96]]
+        # the per-region thresholds follow the regions
+        assert calib["Identification"]["Min. Net Gradient"] == [1900.0, 2000.0]
         np.testing.assert_allclose(
             affine_matrix(calib["channel_transforms"][1]),
             [[1.0, 0.0, -(48 + dx)], [0.0, 1.0, -dy]],
@@ -1991,6 +2001,9 @@ class TestRefineSplitFovTransformsFromSignal:
         updated, reg_info = spline.refine_split_fov_transforms_from_signal(
             movie, calib, regions, identification_method=SIGNAL_NG, box=BOX
         )
+        assert localize.IdentificationParameters.from_info(
+            updated["Signal registration identification"]
+        ) == localize.IdentificationParameters(method=SIGNAL_NG, box=BOX)
         # only ~50 frames are sampled (not all 150), so expect fewer pairs
         assert reg_info[0]["n_matches"] >= 40
         assert reg_info[0]["rms"] < 1.0
@@ -2139,6 +2152,9 @@ class TestRefineMultichannelTransformsFromSignal:
         updated, reg_info = spline.refine_multichannel_transforms_from_signal(
             movies, calib, identification_method=SIGNAL_NG, box=BOX
         )
+        assert localize.IdentificationParameters.from_info(
+            updated["Signal registration identification"]
+        ) == localize.IdentificationParameters(method=SIGNAL_NG, box=BOX)
         # only ~50 frames are sampled (not all 150), so expect fewer pairs
         assert reg_info[0]["n_matches"] >= 40
         assert reg_info[0]["rms"] < 1.0

@@ -13303,9 +13303,14 @@ class Window(QtWidgets.QMainWindow):
                 )
                 if path:
                     t0 = time.time()
+                    # with the Pixelsize and the identification parameters,
+                    # which the calibration records
+                    identification = localize.identification_info(
+                        self.last_identification_info or {}
+                    )
                     zfit.calibrate_z(
                         locs,
-                        self.info + [self.camera_info],  # with Pixelsize
+                        self.info + [identification | self.camera_info],
                         step,
                         self.parameters_dialog.magnification_factor.value(),
                         path=path,

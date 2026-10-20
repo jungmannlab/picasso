@@ -712,9 +712,12 @@ class TestWaveletDetection:
         np.testing.assert_allclose(
             _matrix(calibration["channel_transforms"][1]), truth, atol=0.15
         )
-        assert calibration["identification_method"] == "wavelet"
-        assert calibration["wavelet"] == self.WAVELET.to_dict()
-        assert "minimum_ng" not in calibration
+        identification = calibration["Identification"]
+        assert identification["Identification Method"] == "wavelet"
+        assert localize.IdentificationParameters.from_info(
+            identification
+        ) == localize.IdentificationParameters(method=self.WAVELET, box=BOX)
+        assert "Min. Net Gradient" not in identification
 
     def test_signal(self):
         truth = _rotation(0.02, 4.0, -3.0)
@@ -727,9 +730,10 @@ class TestWaveletDetection:
         np.testing.assert_allclose(
             _matrix(calibration["channel_transforms"][1]), truth, atol=0.35
         )
-        assert calibration["identification_method"] == "wavelet"
+        identification = calibration["Identification"]
+        assert identification["Identification Method"] == "wavelet"
 
-    def test_net_gradient_is_recorded_as_before(self):
+    def test_net_gradient_is_recorded(self):
         grid = _bead_grid()
         movies = [_bead_image(grid, seed=1), _bead_image(grid, seed=2)]
 
@@ -737,9 +741,11 @@ class TestWaveletDetection:
             movies, box=BOX, identification_method=BEAD_NG
         )
 
-        assert calibration["identification_method"] == "net gradient"
-        assert calibration["minimum_ng"] == 2000.0
-        assert "wavelet" not in calibration
+        identification = calibration["Identification"]
+        assert identification["Identification Method"] == "net gradient"
+        assert identification["Min. Net Gradient"] == 2000.0
+        assert identification["Box Size"] == BOX
+        assert "Wavelet Threshold" not in identification
 
     def test_the_calibration_file_is_plain_yaml(self, tmp_path):
         grid = _bead_grid()
@@ -756,9 +762,10 @@ class TestWaveletDetection:
         with open(path) as f:
             text = f.read()
         assert "!!python" not in text
-        assert io.load_any_calibration(path)["wavelet"] == (
-            self.WAVELET.to_dict()
-        )
+        loaded = io.load_any_calibration(path)["Identification"]
+        assert localize.IdentificationParameters.from_info(
+            loaded
+        ) == localize.IdentificationParameters(method=self.WAVELET, box=BOX)
 
     def test_detections_by_frame(self):
         truth = _rotation(0.0, 0.0, 0.0)
@@ -787,9 +794,20 @@ class TestIdentificationMethod:
             identification_method=[BEAD_NG, localize.NetGradient(1500.0)],
         )
 
-        assert calibration["identification_method"] == "net gradient"
-        assert calibration["minimum_ng"] == [2000.0, 1500.0]
-        assert "wavelet" not in calibration
+        identification = calibration["Identification"]
+        assert identification["Identification Method"] == "net gradient"
+        assert identification["Min. Net Gradient"] == [2000.0, 1500.0]
+        assert "Wavelet Threshold" not in identification
+
+    def test_a_shared_threshold_is_recorded_once(self):
+        grid = _bead_grid()
+        movies = [_bead_image(grid, seed=1), _bead_image(grid, seed=2)]
+
+        calibration = registration.calibrate_channel_registration_from_beads(
+            movies, box=BOX, identification_method=[BEAD_NG, BEAD_NG]
+        )
+
+        assert calibration["Identification"]["Min. Net Gradient"] == 2000.0
 
     @pytest.mark.parametrize(
         "calibrate",

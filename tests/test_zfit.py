@@ -25,7 +25,7 @@ import yaml
 # Headless plotting for calibrate_z which calls plt.show()
 matplotlib.use("Agg")
 
-from picasso import io, lib, zfit  # noqa: E402
+from picasso import io, lib, localize, zfit  # noqa: E402
 
 from tests.conftest import CALIB_3D, PIXELSIZE, affine  # noqa: E402
 
@@ -877,6 +877,28 @@ class TestCalibrateZ:
         assert calib["Path"] == "N/A"
         # in nm, also when not saved to a file
         assert calib[io.FORMAT_VERSION_ATTR] == io.FORMAT_VERSION
+        # the metadata holds no identification step
+        assert "Identification" not in calib
+
+    def test_records_the_identification(self, bead_stack, monkeypatch):
+        monkeypatch.setattr("matplotlib.pyplot.show", lambda *a, **k: None)
+        locs, info, d = bead_stack
+        parameters = localize.IdentificationParameters(
+            method=localize.NetGradient(5000),
+            box=7,
+            temporal_median_window=50,
+        )
+        info = info + [
+            {
+                **parameters.to_info(),
+                "ROI": None,
+                **lib.step_info("Localize"),
+            }
+        ]
+
+        calib = zfit.calibrate_z(locs, info, d, magnification_factor=0.79)
+
+        assert calib["Identification"] == parameters.to_info()
 
     def test_recovered_polynomial_resembles_truth(
         self, bead_stack, monkeypatch

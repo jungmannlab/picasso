@@ -1106,31 +1106,10 @@ def _registration_calibration(
     calibration's ``channel_transforms`` so every consumer of those works
     unchanged. They map camera pixel positions (detector geometry), as do
     ``box`` and the ``rms`` residuals; nothing here is in nm. The detection
-    settings are recorded for traceability: the
-    minimum net gradient, or the wavelet settings as a plain dict (the file is
-    YAML).
+    settings are recorded for traceability under ``"Identification"``, in
+    the format of the identification metadata of a localization file (see
+    ``localize.IdentificationParameters.to_info``).
     """
-    method = identification_method
-    if isinstance(method, (list, tuple)) and len(method) == 1:
-        method = method[0]  # one method shared by all channels
-    per_channel = isinstance(method, (list, tuple))
-    if localize._is_wavelet(method):
-        detection = {
-            "identification_method": localize.IDENTIFY_METHOD_WAVELET,
-            # one dict per channel when each has its own settings
-            "wavelet": (
-                [_.to_dict() for _ in method]
-                if per_channel
-                else method.to_dict()
-            ),
-        }
-    else:
-        detection = {
-            "identification_method": localize.IDENTIFY_METHOD_NET_GRADIENT,
-            "minimum_ng": (
-                [_.minimum for _ in method] if per_channel else method.minimum
-            ),
-        }
     calibration = {
         "model": REGISTRATION_MODEL,
         "n_channels": len(transforms),
@@ -1139,7 +1118,9 @@ def _registration_calibration(
         "reference": int(reference),
         "source": source,
         "box": int(box),
-        **detection,
+        "Identification": localize._calibration_identification_info(
+            identification_method, box
+        ),
         # per non-reference channel, in channel order
         "n_pairs": [int(i["n_matches"]) for i in infos],
         "rms": [float(i["rms"]) for i in infos],

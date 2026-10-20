@@ -59,6 +59,23 @@ def _interpolate_nan(data: lib.FloatArray1D) -> lib.FloatArray1D:
     return data
 
 
+def _identification_from_info(info: list[dict]) -> dict | None:
+    """How the localizations were identified, read from the most recent
+    identification step of their metadata ``info`` and normalized with
+    ``localize.IdentificationParameters``; None if ``info`` holds no
+    (complete) identification parameters."""
+    from . import localize  # localize imports this module
+
+    for entry in reversed(info):
+        if isinstance(entry, dict) and "Box Size" in entry:
+            try:
+                parameters = localize.IdentificationParameters.from_info(entry)
+            except (TypeError, ValueError):
+                return None
+            return parameters.to_info()
+    return None
+
+
 def calibrate_z(
     locs: pd.DataFrame,
     info: list[dict],
@@ -85,7 +102,8 @@ def calibrate_z(
         Localizations of a calibration sample.
     info : list of dicts
         Information about the calibration sample, including the number
-        of frames.
+        of frames. The identification parameters of the localizations,
+        if ``info`` has them, are recorded in the calibration.
     d : float
         Step size in nm, i.e., the distance between the z positions of
         the calibration sample.
@@ -134,7 +152,9 @@ def calibrate_z(
         Dictionary containing the calibration coefficients (i.e.,
         polynomial coefficients of the spot width/height in nm against
         z in nm), number of frames, step size, z binning, magnification
-        factor and the format marker (``io.FORMAT_VERSION_ATTR``).
+        factor, how the beads were identified (``"Identification"``, see
+        ``localize.IdentificationParameters.from_info``; only if ``info``
+        records it) and the format marker (``io.FORMAT_VERSION_ATTR``).
     """
     n_frames = info[0]["Frames"]
     pixelsize = lib.get_from_metadata(info, "Pixelsize", raise_error=True)
@@ -248,6 +268,9 @@ def calibrate_z(
         "Z binning": int(z_binning),
         io.FORMAT_VERSION_ATTR: io.FORMAT_VERSION,
     }
+    identification = _identification_from_info(info)
+    if identification is not None:
+        calibration["Identification"] = identification
     if path is not None:
         io.save_calibration(path, calibration)
 

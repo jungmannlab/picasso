@@ -1398,7 +1398,9 @@ def calibrate_spline(
         the localization coordinates are expressed in nm with. Any
         lateral corrections appended later
         (``localize.fit_lateral_transform``) are in nm, the unit of the
-        coordinates.
+        coordinates. How the beads were identified is recorded under
+        ``Identification`` (see
+        ``localize.IdentificationParameters.from_info``).
     diagnostics : list
         Only if ``return_diagnostics`` is True: a one-element list holding the
         bead inspection record (see :func:`bead_inspection_data`).
@@ -1495,6 +1497,9 @@ def calibrate_spline(
         "effective_sigma": float(built["effective_sigma"]),
         "photon_scale": float(built["photon_scale"]),
         "box": int(box),
+        "Identification": localize._calibration_identification_info(
+            identification_method, box
+        ),
         "pixelsize": float(pixelsize),
         "n_channels": 1,
         "n_beads": int(built["n_beads"]),
@@ -2003,6 +2008,7 @@ def _build_multichannel_calibration_dict(
     transforms: list,
     camera_infos: list[dict],
     box: int,
+    methods: list,
     d: float,
     frames_per_step: int,
     frame_order: str,
@@ -2012,7 +2018,9 @@ def _build_multichannel_calibration_dict(
     link_photons: bool,
     path: str | None,
 ) -> dict:
-    """Assemble the ``spline-3d-multichannel`` calibration dict."""
+    """Assemble the ``spline-3d-multichannel`` calibration dict.
+    ``methods`` holds the identification method of each channel, in
+    channel order."""
     ref = per_channel[0]
     # axial spacing of the template slices, i.e. of the spline's z knots
     z_slice_nm = float(d) * ref["z_binning"]
@@ -2055,6 +2063,9 @@ def _build_multichannel_calibration_dict(
             for p in per_channel
         ],
         "box": int(box),
+        "Identification": localize._calibration_identification_info(
+            methods, box
+        ),
         "pixelsize": float(pixelsize),
         "n_beads": int(ref["n_beads"]),
         # per channel: the beads that survived that channel's outlier
@@ -2293,8 +2304,11 @@ def calibrate_spline_multichannel(
     calibration : dict
         The ``"spline-3d-multichannel"`` calibration (see
         ``io.save_spline_calibration`` and
-        ``localize.fit_spline_multichannel``), carrying the channel transforms
-        and, in split-FOV mode, ``split_fov``, ``regions`` and ``reference``.
+        ``localize.fit_spline_multichannel``), carrying the channel
+        transforms, how the beads were identified (``Identification``, one
+        setting per channel where they differ, see
+        ``localize.IdentificationParameters.from_info``) and, in split-FOV
+        mode, ``split_fov``, ``regions`` and ``reference``.
     diagnostics : list
         Only if ``return_diagnostics`` is True: one bead inspection record per
         channel (see :func:`bead_inspection_data`).
@@ -2410,6 +2424,7 @@ def calibrate_spline_multichannel(
         transforms,
         camera_infos,
         box,
+        methods,
         d,
         frames_per_step,
         frame_order,
@@ -3687,8 +3702,11 @@ def refine_split_fov_transforms_from_signal(
         Fewest surviving correspondences for a channel to be re-registered.
         Default 20.
     update : bool, optional
-        Whether to write the new registration into ``calibration`` (in place).
-        False only computes the transforms. Default True.
+        Whether to write the new registration into ``calibration`` (in place),
+        with how the single molecules were identified under
+        ``"Signal registration identification"`` (see
+        ``localize.IdentificationParameters.from_info``). False only computes
+        the transforms. Default True.
     model : str, optional
         The transform model (see :mod:`picasso.transforms`). None (the
         default) uses the one the calibration was registered with, so a plain
@@ -3780,6 +3798,9 @@ def refine_split_fov_transforms_from_signal(
     if update:
         _update_split_fov_calibration_registration(
             calibration, region_rects, transforms
+        )
+        calibration["Signal registration identification"] = (
+            localize._calibration_identification_info(methods, box)
         )
     return calibration, reg_info
 
@@ -3991,8 +4012,10 @@ def refine_multichannel_transforms_from_signal(
         Fewest surviving correspondences for a channel to be re-registered.
         Default 20.
     update : bool, optional
-        Whether to write the new transforms into ``calibration`` (in place).
-        Default True.
+        Whether to write the new transforms into ``calibration`` (in place),
+        with how the single molecules were identified under
+        ``"Signal registration identification"`` (see
+        ``localize.IdentificationParameters.from_info``). Default True.
     model : str, optional
         The transform model (see :mod:`picasso.transforms`). None (the
         default) uses the one the calibration was registered with.
@@ -4055,6 +4078,9 @@ def refine_multichannel_transforms_from_signal(
 
     if update:
         calibration["channel_transforms"] = [t.to_dict() for t in transforms]
+        calibration["Signal registration identification"] = (
+            localize._calibration_identification_info(methods, box)
+        )
     return calibration, reg_info
 
 

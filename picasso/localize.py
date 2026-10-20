@@ -2800,6 +2800,39 @@ def identification_info(parameters: dict) -> dict:
     return info
 
 
+def _calibration_identification_info(
+    method: IdentificationMethod | list, box: int
+) -> dict:
+    """How the spots of a calibration (beads, or single molecules for a
+    registration from the signal) were identified, for its
+    ``"Identification"`` entry.
+
+    The keys are those of :meth:`IdentificationParameters.to_info`, so
+    ``IdentificationParameters.from_info`` reads the entry back. No
+    filters are applied to calibration movies, so the filter settings are
+    always off. Per-channel methods that are all the same are recorded as
+    one.
+
+    Parameters
+    ----------
+    method : NetGradient, wavelet.WaveletParameters or list
+        The identification method, shared or one per channel in channel
+        order.
+    box : int
+        Box size used to identify the spots.
+
+    Returns
+    -------
+    info : dict
+        The identification metadata.
+    """
+    if isinstance(method, (list, tuple)) and all(
+        m == method[0] for m in method
+    ):
+        method = method[0]
+    return IdentificationParameters(method=method, box=box).to_info()
+
+
 def identify_multichannel_sum(
     movies: list,
     transforms: list,
@@ -10343,8 +10376,10 @@ def fit_lateral_transform(
         ``"Lateral transforms"`` list (an existing entry of the same type
         is replaced). The entry holds the transform in nm (``Transform``),
         its decomposition in nm (``Decomposition``, see
-        ``picasso.transforms.Transform.decompose``), the camera pixel
-        size (``Pixelsize (nm)``) and the format marker
+        ``picasso.transforms.Transform.decompose``), how the beads were
+        identified (``Identification``, see
+        ``IdentificationParameters.from_info``), the camera pixel size
+        (``Pixelsize (nm)``) and the format marker
         (``io.FORMAT_VERSION_ATTR``). Save it with
         ``io.save_any_calibration``.
     qc : dict
@@ -10427,6 +10462,9 @@ def fit_lateral_transform(
         "Target image": target_path or "N/A",
         "Bead pairs": int(keep.sum()),
         "Bead pairs rejected": int(len(keep) - keep.sum()),
+        "Identification": _calibration_identification_info(
+            identification_method, box
+        ),
         "Decomposition": decomp,
         "Pixelsize (nm)": pixelsize,
         io.FORMAT_VERSION_ATTR: io.FORMAT_VERSION,

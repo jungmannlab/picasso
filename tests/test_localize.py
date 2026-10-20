@@ -8632,6 +8632,21 @@ class TestFitAffineTransform:
         )
         assert np.allclose(mapped, ref_xy * PIXELSIZE, atol=0.3 * PIXELSIZE)
 
+    def test_the_entry_records_the_identification(self, bead_movies):
+        movie_ref, movie_cyl, _ = bead_movies
+        calibration, _ = localize.fit_lateral_transform(
+            movie_ref,
+            movie_cyl,
+            {},
+            box=BOX,
+            identification_method=LATERAL_NG,
+            pixelsize=PIXELSIZE,
+        )
+        (entry,) = lib.lateral_transforms(calibration)
+        assert localize.IdentificationParameters.from_info(
+            entry["Identification"]
+        ) == localize.IdentificationParameters(method=LATERAL_NG, box=BOX)
+
     def test_a_translation_recovers_a_pure_shift(self):
         """The 2-DOF model on the only correction it claims to fit. It is
         given its own bead pair because the class-wide ``TRUTH`` rotates and
