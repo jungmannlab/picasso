@@ -116,7 +116,7 @@ the picks are interpolated linearly. For an example, see Fig. 4 of
       from picasso import io, postprocess
 
       locs, info = io.load_locs("movie_locs_aim.hdf5")
-      picked = postprocess.picked_locs(locs, info, picks, "Circle", pick_size=radius)
+      picked = postprocess.picked_locs(locs, info, picks, "Circle", pick_size=diameter)
       drift = postprocess.undrift_from_picked(picked, info)    # columns x, y (and z)
       locs = postprocess.apply_drift(locs, info, drift=drift)
 

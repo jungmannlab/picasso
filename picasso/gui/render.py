@@ -17110,18 +17110,13 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         selected."""
         self.profiles = []
         self.profile_channels = channels
-        pick_size = (
-            self._pick_size / 2
-            if self._pick_shape == "Circle"
-            else self._pick_size
-        )
         for channel in channels:
             picked_locs = postprocess.picked_locs(
                 self.locs[channel],
                 self.infos[channel],
                 picks=self._picks,
                 pick_shape=self._pick_shape,
-                pick_size=pick_size,
+                pick_size=self._pick_size,
             )[0]
             self.profiles.append(picked_locs["y_pick_rot"].to_numpy())
 
@@ -17389,16 +17384,13 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         """
         index_blocks = None
         if self._pick_shape == "Circle":
-            pick_size = self._pick_size / 2
             index_blocks = self._pick_index(channel)
-        else:
-            pick_size = self._pick_size
         return dict(
             locs=self.locs[channel],
             info=self.infos[channel],
             picks=list(self._picks),
             pick_shape=self._pick_shape,
-            pick_size=pick_size,
+            pick_size=self._pick_size,
             add_group=add_group,
             index_blocks=index_blocks,
         )
@@ -18511,10 +18503,7 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         undrift_z : bool
             Whether to also undrift in z (ignored for 2D data).
         """
-        pick_shape = self._pick_shape
-        pick_size = (
-            self._pick_size / 2 if pick_shape == "Circle" else self._pick_size
-        )
+        pick_shape, pick_size = self._pick_shape, self._pick_size
         picks = list(self._picks)
         jobs = [  # channel, locs, info, index
             (

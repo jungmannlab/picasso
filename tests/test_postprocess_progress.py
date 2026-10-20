@@ -30,7 +30,7 @@ from picasso import aim, imageprocess, lib, postprocess  # noqa: E402
 from tests.conftest import PIXELSIZE  # noqa: E402
 
 PX = PIXELSIZE
-PICK_RADIUS = 1.5 * PX  # nm
+PICK_DIAMETER = 3.0 * PX  # nm
 #: one circular pick on each origami of the bundled test data (nm)
 PICKS = [
     (x * PX, y * PX) for x in (5.5, 15.5, 25.5) for y in (5.5, 15.5, 25.5)
@@ -116,7 +116,7 @@ def assert_phases(tracker: RecordingProgress, labels=None) -> None:
 
 def _picked(locs, info):
     return postprocess.picked_locs(
-        locs, info, PICKS, "Circle", pick_size=PICK_RADIUS
+        locs, info, PICKS, "Circle", pick_size=PICK_DIAMETER
     )
 
 
@@ -181,14 +181,14 @@ CASES = [
     (
         "picked_locs",
         lambda l, i, p: postprocess.picked_locs(
-            l, i, PICKS, "Circle", pick_size=PICK_RADIUS, progress=p
+            l, i, PICKS, "Circle", pick_size=PICK_DIAMETER, progress=p
         ),
         ["Picking localizations"],
     ),
     (
         "picked_locs_square",
         lambda l, i, p: postprocess.picked_locs(
-            l, i, PICKS, "Square", pick_size=2 * PICK_RADIUS, progress=p
+            l, i, PICKS, "Square", pick_size=PICK_DIAMETER, progress=p
         ),
         ["Picking localizations"],
     ),
@@ -227,7 +227,7 @@ CASES = [
             i,
             picks=PICKS,
             pick_shape="Circle",
-            pick_size=2 * PICK_RADIUS,
+            pick_size=PICK_DIAMETER,
             progress=p,
         ),
         ["Picking localizations", "Combining picks"],
@@ -247,7 +247,7 @@ CASES = [
     (
         "undrift_from_fiducials",
         lambda l, i, p: postprocess.undrift_from_fiducials(
-            l, i, picks=PICKS, pick_size=PICK_RADIUS, progress=p
+            l, i, picks=PICKS, pick_size=PICK_DIAMETER, progress=p
         ),
         ["Picking localizations", "Calculating drift"],
     ),
@@ -443,7 +443,7 @@ def test_tracker_sees_each_phase_end(locs, info, name, run, labels):
 def test_picked_locs_counts_picks(locs, info):
     tracker = RecordingProgress()
     postprocess.picked_locs(
-        locs, info, PICKS, "Circle", pick_size=PICK_RADIUS, progress=tracker
+        locs, info, PICKS, "Circle", pick_size=PICK_DIAMETER, progress=tracker
     )
     assert tracker.phases[0].maximum == len(PICKS)
     assert tracker.phases[0].values == list(range(len(PICKS) + 1)) + [
@@ -478,7 +478,7 @@ def test_aim_maxima(locs, info):
 def test_undrift_from_fiducials_auto_detection_phase(monkeypatch, locs, info):
     monkeypatch.setattr(
         "picasso.postprocess.imageprocess.find_fiducials",
-        lambda _locs, _info: (PICKS, 2 * PICK_RADIUS),
+        lambda _locs, _info: (PICKS, PICK_DIAMETER),
     )
     tracker = RecordingProgress()
     postprocess.undrift_from_fiducials(locs, info, progress=tracker)

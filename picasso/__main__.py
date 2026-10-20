@@ -532,7 +532,7 @@ def _undrift_fiducials(files: str) -> None:
         undrift_info["Drift X"] = float(drift["x"].mean())
         undrift_info["Drift Y"] = float(drift["y"].mean())
         undrift_info["Number of picks"] = new_info[-1]["Number of picks"]
-        undrift_info["Pick radius (nm)"] = new_info[-1]["Pick radius (nm)"]
+        undrift_info["Pick diameter (nm)"] = new_info[-1]["Pick diameter (nm)"]
 
         info.append(undrift_info)
         base, ext = os.path.splitext(path)

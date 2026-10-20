@@ -231,7 +231,7 @@ def _picked_circular_locs(
     locs: pd.DataFrame,
     info: list[dict],
     picks: list[tuple],
-    pick_size: float,
+    radius: float,
     index_blocks: tuple | None,
     add_group: bool,
     progress: lib.Progress,
@@ -247,15 +247,15 @@ def _picked_circular_locs(
     else:
         pyramid = None
         if index_blocks is None:
-            index_blocks = get_index_blocks(locs, info, pick_size)
+            index_blocks = get_index_blocks(locs, info, radius)
         locs_xy = index_blocks[0][["x", "y"]].to_numpy().T
     for i, pick in enumerate(picks):
         x, y = pick
         if pyramid is not None:
-            idx = spatial_index.query_circle(pyramid, xs, ys, x, y, pick_size)
+            idx = spatial_index.query_circle(pyramid, xs, ys, x, y, radius)
             group_locs = locs.iloc[idx].copy()
         else:
-            x_, y_ = int(x / pick_size), int(y / pick_size)
+            x_, y_ = int(x / radius), int(y / radius)
             block_locs_idx = _get_block_locs_at(
                 x_,
                 y_,
@@ -266,7 +266,7 @@ def _picked_circular_locs(
             )
             block_locs = index_blocks[0].iloc[block_locs_idx]
             group_locs_idx = lib.is_loc_in_circle(
-                x, y, locs_xy[:, block_locs_idx], pick_size
+                x, y, locs_xy[:, block_locs_idx], radius
             )
             group_locs = block_locs.iloc[group_locs_idx].copy()
 
@@ -469,7 +469,7 @@ def picked_locs(
     pick_shape : {'Circle', 'Rectangle', 'Polygon', 'Square', 'Box', 'Brush'}
         Shape of the pick.
     pick_size : float, optional
-        Size of the pick in nm. Radius for the circles, width
+        Size of the pick in nm. Diameter for the circles, width
         for the rectangles, side length for squares, None for the
         polygons, boxes and brush picks (they carry their own extent).
         Default is None.
@@ -479,7 +479,8 @@ def picked_locs(
     index_blocks : tuple or spatial_index.RenderIndexPyramid, optional
         Used only for circular picks. Precomputed index blocks for
         localizations, see ``get_index_blocks`` (built with block size
-        ``pick_size``), or the pick-size independent pyramid of
+        ``pick_size / 2``, the pick radius), or the pick-size
+        independent pyramid of
         ``spatial_index.build_render_index``. If None, index blocks
         will be calculated internally. Default is None.
     progress : lib.Progress, "console" or None, optional
@@ -512,7 +513,7 @@ def picked_locs(
                 locs=locs,
                 info=info,
                 picks=picks,
-                pick_size=pick_size,
+                radius=pick_size / 2,
                 index_blocks=index_blocks,
                 add_group=add_group,
                 progress=progress,
@@ -2177,9 +2178,7 @@ def remove_locs_in_picks(
         assert isinstance(
             pick_size, (int, float)
         ), "pick_size must be a number."
-    if pick_shape == "Circle":
-        pick_size /= 2  # convert diameter to radius
-    else:
+    if pick_shape != "Circle":
         index_blocks = None  # ignore index blocks, only used for circle picks
     all_picked_locs = picked_locs(
         locs=locs,
@@ -3770,8 +3769,6 @@ def combine_locs_in_picks(
         assert (
             pick_size is not None
         ), "Pick size must be provided for this pick shape."
-    if pick_shape == "Circle":
-        pick_size /= 2  # convert diameter to radius
     with lib.tracked_progress(
         progress, "Picking localizations", unit="pick"
     ) as progress:
@@ -4377,8 +4374,8 @@ def undrift_from_fiducials(
         automatically detected using
         ``picasso.imageprocess.find_fiducials``.
     pick_size : float or None, optional
-        Size of the picks in nm: the pick **radius** for circles, the
-        width for rectangles, the side length for squares.
+        Size of the picks in nm: the diameter for circles, the width
+        for rectangles, the side length for squares.
         Required when ``picks`` is a list of coordinates, unless
         ``pick_shape`` carries its own extent ("Polygon", "Box").
         Ignored when ``picks`` is None (determined by
@@ -4391,11 +4388,12 @@ def undrift_from_fiducials(
         localizations. Default is True.
     index_blocks : tuple or None, optional
         Precomputed spatial index over ``locs`` as returned by
-        ``get_index_blocks`` (built with block size equal to
-        ``pick_size``). When provided, used to skip re-indexing inside
-        circular ``picked_locs``. Ignored for every other pick shape,
-        and when ``picks`` is None (auto-detected fiducials use a radius
-        that may not match the precomputed index). Default is None.
+        ``get_index_blocks`` (built with block size equal to the pick
+        radius, ``pick_size / 2``). When provided, used to skip
+        re-indexing inside circular ``picked_locs``. Ignored for every
+        other pick shape, and when ``picks`` is None (auto-detected
+        fiducials use a size that may not match the precomputed index).
+        Default is None.
     progress : lib.Progress, "console" or None, optional
         Progress tracker, see ``picasso.lib.Progress``: e.g. a
         ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
@@ -4434,9 +4432,9 @@ def undrift_from_fiducials(
             picks, box = imageprocess.find_fiducials(locs, info)
             progress.set_value(0)
             pick_shape = "Circle"
-            pick_radius = box / 2
-            # passed-in index_blocks was built for a different radius;
-            # drop (the pyramid serves any radius)
+            pick_size = box
+            # passed-in index_blocks was built for a different size;
+            # drop (the pyramid serves any size)
             if not _is_pyramid(index_blocks):
                 index_blocks = None
         else:
@@ -4444,11 +4442,10 @@ def undrift_from_fiducials(
             needs_size = pick_shape not in lib.PICK_SHAPES_WITHOUT_SIZE
             if pick_size is None and needs_size:
                 raise ValueError(
-                    "pick_size (radius in nm for circular picks) "
+                    "pick_size (diameter in nm for circular picks) "
                     "must be provided when picks are given as a list of "
                     "coordinates."
                 )
-            pick_radius = pick_size
 
         if pick_shape != "Circle":
             # the index is built for circular lookups only
@@ -4463,7 +4460,7 @@ def undrift_from_fiducials(
             info,
             picks,
             pick_shape,
-            pick_size=pick_radius,
+            pick_size=pick_size,
             add_group=False,
             index_blocks=index_blocks,
             progress=progress,
@@ -4484,9 +4481,9 @@ def undrift_from_fiducials(
         "Pick shape": pick_shape,
     }
     if pick_shape == "Circle":
-        pick_info["Pick radius (nm)"] = float(pick_radius)
-    elif pick_radius is not None:
-        pick_info["Pick size (nm)"] = float(pick_radius)
+        pick_info["Pick diameter (nm)"] = float(pick_size)
+    elif pick_size is not None:
+        pick_info["Pick size (nm)"] = float(pick_size)
     new_info = info + [pick_info]
 
     return locs, new_info, drift
@@ -5084,8 +5081,6 @@ def align_from_picked(
         assert (
             pick_size is not None
         ), "pick_size must be provided when picks is a list of coordinates"
-    if pick_shape == "Circle":
-        pick_size = pick_size / 2  # convert diameter to radius
     ib_list = (
         index_blocks if index_blocks is not None else [None] * len(all_locs)
     )

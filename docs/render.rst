@@ -160,15 +160,15 @@ events (`Jungmann et al., Nature Methods, 2016 <https://doi.org/10.1038/nmeth.38
       from picasso import io, postprocess
 
       locs, info = io.load_locs("movie_locs.hdf5")
-      radius = 50.0                             # 100 nm picks (nm)
+      diameter = 100.0                          # pick diameter (nm)
 
       # Calibration on picks of structures with n_sites binding sites
-      calib = postprocess.picked_locs(locs, info, calib_picks, "Circle", pick_size=radius)
+      calib = postprocess.picked_locs(locs, info, calib_picks, "Circle", pick_size=diameter)
       props = postprocess.pick_properties(calib, info, max_dark_time=3, influx_rate=1.0)
       influx_rate = (1 / (props["dark_mean"] * n_sites)).mean()
 
       # Counting
-      picked = postprocess.picked_locs(locs, info, picks, "Circle", pick_size=radius)
+      picked = postprocess.picked_locs(locs, info, picks, "Circle", pick_size=diameter)
       props = postprocess.pick_properties(
           picked, info, max_dark_time=3, influx_rate=influx_rate
       )

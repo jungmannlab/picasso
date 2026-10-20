@@ -95,12 +95,17 @@ class TestQueryCircle:
             (40.5 * PS, 33.2 * PS),
             (63.9 * PS, 0.1 * PS),
         ]
-        radius = 2.5 * PS
+        diameter = 5.0 * PS
         via_blocks = postprocess.picked_locs(
-            locs, info, picks, "Circle", pick_size=radius
+            locs, info, picks, "Circle", pick_size=diameter
         )
         via_pyramid = postprocess.picked_locs(
-            locs, info, picks, "Circle", pick_size=radius, index_blocks=pyramid
+            locs,
+            info,
+            picks,
+            "Circle",
+            pick_size=diameter,
+            index_blocks=pyramid,
         )
         assert len(via_blocks) == len(via_pyramid) == len(picks)
         for a, b in zip(via_blocks, via_pyramid):

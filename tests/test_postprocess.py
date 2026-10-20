@@ -71,7 +71,7 @@ class TestPyramidAsPickIndex:
             info,
             origami_picks,
             "Circle",
-            pick_size=PICK_SIZE / 2,
+            pick_size=PICK_SIZE,
             index_blocks=pyramid,
         )
         assert sum(len(_) for _ in via_pyramid) > 0
@@ -190,7 +190,7 @@ class TestPickedLocs:
             info,
             origami_picks,
             pick_shape="Circle",
-            pick_size=PICK_SIZE / 2,
+            pick_size=PICK_SIZE,
         )
         assert len(picked) == len(origami_picks)
         # Each pick has at least one loc (the test data has 9 origamis,
@@ -204,7 +204,7 @@ class TestPickedLocs:
             info,
             origami_picks,
             pick_shape="Circle",
-            pick_size=PICK_SIZE / 2,
+            pick_size=PICK_SIZE,
         )
         radius = PICK_SIZE / 2
         for (cx, cy), p in zip(origami_picks, picked):
@@ -217,7 +217,7 @@ class TestPickedLocs:
             info,
             origami_picks,
             pick_shape="Circle",
-            pick_size=PICK_SIZE / 2,
+            pick_size=PICK_SIZE,
         )
         for i, p in enumerate(picked):
             assert (p["group"] == i).all()
@@ -228,7 +228,7 @@ class TestPickedLocs:
             info,
             origami_picks,
             pick_shape="Circle",
-            pick_size=PICK_SIZE / 2,
+            pick_size=PICK_SIZE,
             add_group=False,
         )
         assert "group" not in picked[0].columns
@@ -239,7 +239,7 @@ class TestPickedLocs:
             info,
             origami_picks,
             pick_shape="Circle",
-            pick_size=PICK_SIZE / 2,
+            pick_size=PICK_SIZE,
         )
         for p in picked:
             f = p["frame"].to_numpy()
@@ -251,7 +251,7 @@ class TestPickedLocs:
             info,
             [],
             pick_shape="Circle",
-            pick_size=PICK_SIZE / 2,
+            pick_size=PICK_SIZE,
         )
         assert out == []
 
@@ -268,7 +268,7 @@ class TestPickedLocs:
     def test_precomputed_index_blocks_matches_internal(
         self, locs, info, origami_picks
     ):
-        # ``_picked_circular_locs`` uses ``pick_size`` as the index-block
+        # ``_picked_circular_locs`` uses the pick radius as the index-block
         # size, so the precomputed index_blocks must use the same size for
         # the two paths to be equivalent.
         ib = postprocess.get_index_blocks(locs, info, PICK_SIZE / 2)
@@ -284,7 +284,7 @@ class TestPickedLocs:
             info,
             origami_picks,
             pick_shape="Circle",
-            pick_size=PICK_SIZE / 2,
+            pick_size=PICK_SIZE,
             index_blocks=ib,
         )
         assert len(a) == len(b)
@@ -948,7 +948,7 @@ class TestRemoveLocsInPicks:
             info,
             picks,
             pick_shape="Circle",
-            pick_size=PICK_SIZE / 2,
+            pick_size=PICK_SIZE,
         )[0]
         n_inside = len(picked)
         out = postprocess.remove_locs_in_picks(
@@ -956,7 +956,7 @@ class TestRemoveLocsInPicks:
             info,
             picks=picks,
             pick_shape="Circle",
-            pick_size=PICK_SIZE / 2,
+            pick_size=PICK_SIZE,
         )
         assert len(out) == len(locs) - n_inside
         # No remaining loc lies inside the pick
@@ -1441,7 +1441,7 @@ class TestEvaluatePicks:
             info,
             origami_picks,
             pick_shape="Circle",
-            pick_size=PICK_SIZE / 2,
+            pick_size=PICK_SIZE,
         )
         N, n_events, rmsd, rmsd_z, length, dark, new_locs = (
             postprocess.evaluate_picks(pl, info, max_dark_time=3)
@@ -1469,7 +1469,7 @@ class TestCombineLocsInPicks:
             info,
             picks=origami_picks,
             pick_shape="Circle",
-            pick_size=PICK_SIZE / 2,
+            pick_size=PICK_SIZE,
         )
         # Each origami collapses to a single linked event
         assert len(combined) == len(origami_picks)
@@ -1480,7 +1480,7 @@ class TestCombineLocsInPicks:
             info,
             origami_picks,
             pick_shape="Circle",
-            pick_size=PICK_SIZE / 2,
+            pick_size=PICK_SIZE,
         )
         assert combined["n"].sum() == sum(len(p) for p in picked)
 
@@ -1521,7 +1521,7 @@ class TestPickKinetics:
             info,
             origami_picks,
             pick_shape="Circle",
-            pick_size=PICK_SIZE / 2,
+            pick_size=PICK_SIZE,
         )
         length, dark, no_locs, out_locs, kept = postprocess.pick_kinetics(
             pl, info, max_dark_time=3
@@ -1631,7 +1631,7 @@ class TestUndrift:
             info,
             origami_picks,
             pick_shape="Circle",
-            pick_size=PICK_SIZE / 2,
+            pick_size=PICK_SIZE,
             add_group=False,
         )
         drift = postprocess.undrift_from_picked(pl, info)
@@ -1649,7 +1649,7 @@ class TestUndrift:
             locs.copy(),
             info,
             picks=origami_picks,
-            pick_size=PICK_SIZE / 2,
+            pick_size=PICK_SIZE,
             undrift_z=False,
         )
         assert len(out_locs) == len(locs)
@@ -1690,14 +1690,14 @@ class TestUndrift:
             undrift_z=False,
         )
         assert new_info[-1]["Pick shape"] == "Box"
-        # boxes carry their own extent, so no radius is reported
-        assert "Pick radius (nm)" not in new_info[-1]
+        # boxes carry their own extent, so no diameter is reported
+        assert "Pick diameter (nm)" not in new_info[-1]
 
         _, _, circle_drift = postprocess.undrift_from_fiducials(
             locs.copy(),
             info,
             picks=origami_picks,
-            pick_size=PICK_SIZE / 2,
+            pick_size=PICK_SIZE,
             undrift_z=False,
         )
         assert not np.allclose(
@@ -2064,7 +2064,7 @@ class TestGroupprops:
             info,
             origami_picks,
             pick_shape="Circle",
-            pick_size=PICK_SIZE / 2,
+            pick_size=PICK_SIZE,
         )
         merged = pd.concat(picked, ignore_index=True)
         merged = postprocess.link(merged, info)
@@ -2574,14 +2574,8 @@ class TestRipleyH:
             result["areas"], lib.pick_areas(picks, shape, size), rtol=0.02
         )
         # the localizations counted are the picked ones
-        radius = None if size is None else size / 2
         picked = postprocess.picked_locs(
-            random_locs,
-            self.INFO,
-            picks,
-            shape,
-            radius if shape == "Circle" else size,
-            add_group=False,
+            random_locs, self.INFO, picks, shape, size, add_group=False
         )
         np.testing.assert_allclose(
             result["n_locs"], [len(p) for p in picked], atol=2
@@ -3261,7 +3255,7 @@ class TestNndDistributions:
         result = postprocess.nnd_distributions(
             [a, b], self.INFO, picks, "Circle", 3000, n_simulations=0
         )
-        n_a = postprocess.picked_locs(a, self.INFO, picks, "Circle", 1500)
+        n_a = postprocess.picked_locs(a, self.INFO, picks, "Circle", 3000)
         # molecules of a in the left pick have no b to point to
         assert result["n_molecules"][0, 1] == len(n_a[1])
         assert result["n_molecules"][0, 0] == len(n_a[0]) + len(n_a[1])

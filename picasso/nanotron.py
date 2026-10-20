@@ -84,7 +84,7 @@ def roi_to_img(
     locs: pd.DataFrame,
     info: list[dict],
     pick: int,
-    radius: float,
+    pick_diameter: float,
     disp_px_size: float,
     picks: tuple[float, float] | None = None,
 ) -> lib.FloatArray2D:
@@ -99,9 +99,10 @@ def roi_to_img(
         Localization metadata.
     pick : int
         The group number of the localizations to be picked.
-    radius : float
-        Radius (nm) around the mean position of the localizations to
-        define the ROI, i.e., half the side length of the rendered image.
+    pick_diameter : float
+        Pick diameter (nm): the localizations within half of it around
+        ``picks`` are picked, and the rendered image, centered on their
+        mean position, has this side length.
     disp_px_size : float
         Display pixel size used for rendering images (nm).
     picks : tuple[float, float] | None, optional
@@ -112,14 +113,15 @@ def roi_to_img(
     Returns
     -------
     pick_img : lib.FloatArray2D
-        Image of the picked localizations, ``2 * radius / disp_px_size``
-        pixels on a side.
+        Image of the picked localizations, ``pick_diameter /
+        disp_px_size`` pixels on a side.
 
     Raises
     ------
     ValueError
         If the pick holds no localizations.
     """
+    radius = pick_diameter / 2
     # Isolate locs from pick
     if picks is None:
         pick_locs = locs[locs["group"] == pick]
@@ -129,7 +131,7 @@ def roi_to_img(
         pick_locs = lib.locs_at(x, y, locs, radius).sort_values(
             by="frame", kind="quicksort"
         )
-        where = f"the radius {radius} around ({x}, {y})"
+        where = f"the pick of diameter {pick_diameter} nm at ({x}, {y})"
     if not len(pick_locs):
         raise ValueError(f"No localizations in {where}.")
     # dirty method to avoid floating point errors with render (nm)
@@ -160,7 +162,7 @@ def prepare_data(
     locs: pd.DataFrame,
     info: list[dict],
     label: int,
-    pick_radius: float,
+    pick_diameter: float,
     disp_px_size: float,
     alpha: float = 10,
     bg: float = 1,
@@ -177,9 +179,9 @@ def prepare_data(
         Localization metadata. Must contain the camera pixel size.
     label : int
         Label for the data, typically the group number.
-    pick_radius : float
-        Radius (nm) around the mean position of the localizations to
-        define the ROI.
+    pick_diameter : float
+        Pick diameter (nm), the side length of the rendered images, see
+        ``roi_to_img``.
     disp_px_size : float
         Display pixel size used for rendering images (nm).
     alpha : float, optional
@@ -204,7 +206,11 @@ def prepare_data(
     for pick in tqdm(groups, desc="Prepare " + str(label)):
 
         pick_img = roi_to_img(
-            locs, info, pick, radius=pick_radius, disp_px_size=disp_px_size
+            locs,
+            info,
+            pick,
+            pick_diameter=pick_diameter,
+            disp_px_size=disp_px_size,
         )
 
         if export is True and pick < 10:
@@ -237,7 +243,7 @@ def predict_structure(
     locs: pd.DataFrame,
     info: list[dict],
     pick: int,
-    pick_radius: float,
+    pick_diameter: float,
     disp_px_size: float,
     picks: tuple[float, float] | None = None,
 ) -> tuple[int, lib.FloatArray1D]:
@@ -254,8 +260,8 @@ def predict_structure(
         Localization metadata. Must contain the camera pixel size.
     pick : int
         Index of the localizations to predict.
-    pick_radius : float
-        Radius (nm) around the localizations to consider.
+    pick_diameter : float
+        Pick diameter (nm), see ``roi_to_img``.
     disp_px_size : float
         Display pixel size used for rendering images (nm).
     picks : tuple[float, float] | None, optional
@@ -272,7 +278,7 @@ def predict_structure(
         locs,
         info,
         pick=pick,
-        radius=pick_radius,
+        pick_diameter=pick_diameter,
         disp_px_size=disp_px_size,
         picks=picks,
     )

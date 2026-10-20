@@ -64,8 +64,8 @@ class Generator(QtCore.QThread):
         Display pixel size used for rendering images (nm).
     infos : dict
         Localization metadata for each dataset, keyed like ``locs``.
-    pick_radius : float
-        Pick radius used for picking.
+    pick_diameter : float
+        Pick diameter (nm) used for picking.
 
     Parameters
     ----------
@@ -75,8 +75,8 @@ class Generator(QtCore.QThread):
         Localization metadata for each dataset, keyed like ``locs``.
     classes : list of str
         The class labels for the localization datasets.
-    pick_radius : float
-        Pick radius used for picking.
+    pick_diameter : float
+        Pick diameter (nm) used for picking.
     disp_px_size : float
         Display pixel size used for rendering images (nm).
     expand : bool
@@ -97,7 +97,7 @@ class Generator(QtCore.QThread):
         locs: dict,
         infos: dict,
         classes: list[str],
-        pick_radius: float,
+        pick_diameter: float,
         disp_px_size: float,
         expand: bool,
         export: bool,
@@ -107,7 +107,7 @@ class Generator(QtCore.QThread):
         super().__init__()
         self.locs_files = locs.copy()
         self.infos = infos
-        self.pick_radius = pick_radius
+        self.pick_diameter = pick_diameter
         self.expand = expand
         self.disp_px_size = disp_px_size
         self.classes = classes
@@ -150,7 +150,7 @@ class Generator(QtCore.QThread):
                     locs=locs,
                     info=info,
                     pick=pick,
-                    radius=self.pick_radius,
+                    pick_diameter=self.pick_diameter,
                     disp_px_size=self.disp_px_size,
                 )
 
@@ -326,8 +326,8 @@ class Predictor(QtCore.QThread):
         Display pixel size used for rendering images (nm).
     info : list of dicts
         Localization metadata. Must contain the camera pixel size.
-    pick_radius : float
-        The radius used for picking localizations.
+    pick_diameter : float
+        The pick diameter (nm) used for picking localizations.
     prediction : pd.DataFrame
         The predicted labels for the input localizations, one per group,
         i.e., pick.
@@ -341,8 +341,8 @@ class Predictor(QtCore.QThread):
         column.
     info : list of dicts
         Localization metadata. Must contain the camera pixel size.
-    pick_radius : float
-        The radius used for picking localizations.
+    pick_diameter : float
+        The pick diameter (nm) used for picking localizations.
     disp_px_size : float
         Display pixel size used for rendering images (nm).
     parent : QWidget, optional
@@ -357,7 +357,7 @@ class Predictor(QtCore.QThread):
         mlp: MLPClassifier,
         locs: pd.DataFrame,
         info: list[dict],
-        pick_radius: float,
+        pick_diameter: float,
         disp_px_size: float,
         parent: QtWidgets.QWidget | None = None,
     ) -> None:
@@ -365,7 +365,7 @@ class Predictor(QtCore.QThread):
         self.model = mlp
         self.locs = locs.copy()
         self.info = info
-        self.pick_radius = pick_radius
+        self.pick_diameter = pick_diameter
         self.disp_px_size = disp_px_size
         self.n_locs = len(self.locs["group"])
         self.prediction = np.zeros(
@@ -385,7 +385,7 @@ class Predictor(QtCore.QThread):
         locs: pd.DataFrame,
         info: list[dict],
         picks: lib.IntArray1D,
-        pick_radius: float,
+        pick_diameter: float,
         disp_px_size: float,
         current: list[int],
         lock: threading.Lock,
@@ -409,7 +409,7 @@ class Predictor(QtCore.QThread):
                 locs=locs,
                 info=info,
                 pick=pick,
-                pick_radius=pick_radius,
+                pick_diameter=pick_diameter,
                 disp_px_size=disp_px_size,
             )
             predictions[index] = pred[0]
@@ -424,7 +424,7 @@ class Predictor(QtCore.QThread):
         locs: pd.DataFrame,
         info: list[dict],
         picks: lib.IntArray1D,
-        pick_radius: float,
+        pick_diameter: float,
         disp_px_size: float,
     ) -> tuple[list[int], lib.FloatArray1D, lib.FloatArray1D, list[int]]:
         """Make predictions asynchronously, i.e., using
@@ -448,7 +448,7 @@ class Predictor(QtCore.QThread):
                 locs,
                 info,
                 picks,
-                pick_radius,
+                pick_diameter,
                 disp_px_size,
                 current,
                 lock,
@@ -471,7 +471,7 @@ class Predictor(QtCore.QThread):
             self.locs,
             self.info,
             picks,
-            self.pick_radius,
+            self.pick_diameter,
             self.disp_px_size,
         )
 
@@ -508,7 +508,7 @@ class train_dialog(lib.Dialog):
         self.network = {}
         self.nodes = []
         self.f_btns = []
-        self.pick_radii = {}
+        self.pick_diameters = {}
         self.X_train = []
         self.Y_train = []
         self.generator_running = False
@@ -841,7 +841,7 @@ class train_dialog(lib.Dialog):
             except lib.FILE_LOAD_ERRORS as error:
                 lib.show_load_error(self, path, error)
                 return
-            self.pick_radii[file] = self.parse_pick_radius(info)
+            self.pick_diameters[file] = self.parse_pick_diameter(info)
             self.training_files_path[file] = path
 
         if "group" not in locs.columns:
@@ -862,20 +862,20 @@ class train_dialog(lib.Dialog):
             self.f_btns[file].setText("Loaded")
             self.f_btns[file].setEnabled(False)
 
-    def parse_pick_radius(self, info):
-        """The pick radius (nm) recorded in the metadata of picked
-        localizations. Files picked before Picasso 1.0 record the
-        diameter in camera pixels ("Pick Diameter")."""
-        radius = None
+    def parse_pick_diameter(self, info):
+        """The pick diameter (nm) recorded in the metadata of picked
+        localizations. Files picked before Picasso 1.0 record it in
+        camera pixels ("Pick Diameter")."""
+        diameter = None
         for entry in info:
             if "Pick Diameter (nm)" in entry:
-                radius = entry["Pick Diameter (nm)"] / 2
+                diameter = entry["Pick Diameter (nm)"]
             elif "Pick Diameter" in entry:
                 pixelsize = lib.get_from_metadata(
                     info, "Pixelsize", raise_error=True
                 )
-                radius = entry["Pick Diameter"] * pixelsize / 2
-        return radius
+                diameter = entry["Pick Diameter"] * pixelsize
+        return diameter
 
     def check_set(self):
 
@@ -953,12 +953,12 @@ class train_dialog(lib.Dialog):
             self.generator_running = True
 
             max_key = max(
-                self.pick_radii, key=lambda x: self.pick_radii.get(x)
+                self.pick_diameters, key=lambda x: self.pick_diameters.get(x)
             )
-            self.pick_radius = self.pick_radii[max_key]
+            self.pick_diameter = self.pick_diameters[max_key]
             self.disp_px_size = self.disp_px_size_box.value()
 
-            self.train_log["Pick Diameter (nm)"] = 2 * self.pick_radius
+            self.train_log["Pick Diameter (nm)"] = self.pick_diameter
             self.train_log["Display pixel size (nm)"] = self.disp_px_size
             self.train_log["Expand Training Set"] = (
                 self.expand_training.isChecked()
@@ -968,7 +968,7 @@ class train_dialog(lib.Dialog):
                 locs=self.training_files,
                 infos=self.training_files_info,
                 classes=self.classes,
-                pick_radius=self.pick_radius,
+                pick_diameter=self.pick_diameter,
                 disp_px_size=self.disp_px_size,
                 expand=self.expand_training.isChecked(),
                 export=self.export_img.isChecked(),
@@ -1237,13 +1237,12 @@ class Window(QtWidgets.QMainWindow):
                 )
             self.disp_px_size = self.model_info["Display pixel size (nm)"]
             self.pick_diameter = self.model_info["Pick Diameter (nm)"]
-            self.pick_radius = self.pick_diameter / 2
 
             self.thread = Predictor(
                 self.model,
                 self.locs,
                 self.info,
-                self.pick_radius,
+                self.pick_diameter,
                 self.disp_px_size,
             )
             self.thread.predictions_made.connect(self.on_progress)

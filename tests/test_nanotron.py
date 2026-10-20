@@ -16,7 +16,7 @@ from tests.conftest import PIXELSIZE
 
 INFO = [{"Width": 32, "Height": 32, "Frames": 50, "Pixelsize": PIXELSIZE}]
 #: half the side length of the rendered pick, nm (one camera pixel)
-RADIUS = 1.0 * PIXELSIZE
+DIAMETER = 2.0 * PIXELSIZE
 
 
 def _locs(groups=(0,)) -> pd.DataFrame:
@@ -43,7 +43,7 @@ def _locs(groups=(0,)) -> pd.DataFrame:
 
 def _image(locs, **kwargs):
     return nanotron.roi_to_img(
-        locs, INFO, radius=RADIUS, disp_px_size=13, **kwargs
+        locs, INFO, pick_diameter=DIAMETER, disp_px_size=13, **kwargs
     )
 
 
@@ -68,7 +68,7 @@ def test_render_errors_are_not_hidden(monkeypatch):
     "kwargs, where",
     [
         ({"pick": 7}, "group 7"),
-        ({"pick": 0, "picks": (2600.0, 2600.0)}, "around (2600.0, 2600.0)"),
+        ({"pick": 0, "picks": (2600.0, 2600.0)}, "nm at (2600.0, 2600.0)"),
     ],
 )
 def test_an_empty_pick_is_named(kwargs, where):
@@ -84,7 +84,7 @@ def test_prepare_data_covers_every_group():
         _locs(groups=(0, 2, 3)),
         INFO,
         label=1,
-        pick_radius=RADIUS,
+        pick_diameter=DIAMETER,
         disp_px_size=13,
     )
     assert len(data) == 3

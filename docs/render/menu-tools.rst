@@ -35,15 +35,15 @@ the current picks; the boxes you drew yourself are kept as drawn. See
    :icon: code
    :class-container: api-example
 
-   ``pick_size`` is the radius for circles, in nm; ``std_range`` is ``Pick
-   similar ± range``.
+   ``pick_size`` is the diameter for circles, in nm; ``std_range`` is
+   ``Pick similar ± range``.
 
    .. code-block:: python
 
       from picasso import postprocess
 
       new_picks = postprocess.pick_similar(
-          locs, info, picks, "Circle", pick_size=radius, std_range=2.0
+          locs, info, picks, "Circle", pick_size=diameter, std_range=2.0
       )
 
 
@@ -59,12 +59,12 @@ separate or all channels simultaneously.
    :icon: code
    :class-container: api-example
 
-   The circle size is the diameter here.
+   The circle size is the diameter.
 
    .. code-block:: python
 
       locs = postprocess.remove_locs_in_picks(
-          locs, info, picks=picks, pick_shape="Circle", pick_size=2 * radius
+          locs, info, picks=picks, pick_shape="Circle", pick_size=diameter
       )
 
 
@@ -152,7 +152,7 @@ three columns: frame, on/off (1 or 0) and photons (as integers).
       import pandas as pd
       from picasso import lib, postprocess
 
-      picked = postprocess.picked_locs(locs, info, picks, "Circle", pick_size=radius)
+      picked = postprocess.picked_locs(locs, info, picks, "Circle", pick_size=diameter)
       fig = lib.plot_trace(pd.concat(picked, ignore_index=True), info)
 
 

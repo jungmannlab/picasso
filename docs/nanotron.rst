@@ -81,10 +81,11 @@ Train a MLP model for nanopattern prediction using nanoTRON.
       X, y = [], []
       for label, path in enumerate(["class0_picked.hdf5", "class1_picked.hdf5"]):
           locs, info = io.load_locs(path)
-          pick_radius = lib.get_from_metadata(info, "Pick Diameter (nm)") / 2   # nm
+          pick_diameter = lib.get_from_metadata(info, "Pick Diameter (nm)")   # nm
           for group in locs["group"].unique():
               img = nanotron.roi_to_img(
-                  locs, info, pick=int(group), radius=pick_radius, disp_px_size=disp_px_size
+                  locs, info, pick=int(group), pick_diameter=pick_diameter,
+                  disp_px_size=disp_px_size,
               )
               X.append(nanotron.prepare_img(img, img_shape=img.shape[0], alpha=10, bg=1))
               y.append(label)
@@ -143,6 +144,6 @@ Use a trained nanoTRON model to classify nanopatterns on new data.
       for group in locs["group"].unique():
           pred, proba = nanotron.predict_structure(
               mlp, locs, info, pick=int(group),
-              pick_radius=pick_radius, disp_px_size=disp_px_size,
+              pick_diameter=pick_diameter, disp_px_size=disp_px_size,
           )
           print(group, pred[0], proba.max())

@@ -13745,7 +13745,7 @@ class Window(QtWidgets.QMainWindow):
                     locs=self.locs,
                     info=self.extra_info,
                     picks=fiducial_picks,
-                    pick_size=box / 2,  # box is the diameter (nm)
+                    pick_size=box,  # box is the diameter (nm)
                 )
             )
             if drift is not None:

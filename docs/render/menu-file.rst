@@ -93,7 +93,7 @@ also editable via ``File > Picasso settings`` in any module).
       import pandas as pd
       from picasso import postprocess
 
-      picked = postprocess.picked_locs(locs, info, picks, "Circle", pick_size=radius)
+      picked = postprocess.picked_locs(locs, info, picks, "Circle", pick_size=diameter)
       io.save_locs("movie_locs_picked.hdf5", pd.concat(picked, ignore_index=True), info)
 
 
@@ -161,13 +161,13 @@ pick, e.g., to plot its distribution in :doc:`/filter`.
    :class-container: api-example
 
    ``pick_areas`` (in µm²) are needed for the density columns; the circle
-   size is the diameter in nm here.
+   size is the diameter in nm.
 
    .. code-block:: python
 
       from picasso import io, lib, postprocess
 
-      areas = lib.pick_areas(picks, "Circle", 2 * radius) * 1e-6  # nm² -> µm²
+      areas = lib.pick_areas(picks, "Circle", diameter) * 1e-6  # nm² -> µm²
       props = postprocess.pick_properties(
           picked, info, max_dark_time=3, influx_rate=0.03, pick_areas=areas
       )

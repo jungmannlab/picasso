@@ -124,10 +124,10 @@ See :doc:`menu-tools` for the other pick utilities.
    :class-container: api-example
 
    Picks are lists of centers in nm (for rectangles, pairs of end
-   points), and ``picked_locs`` returns one DataFrame per pick. Note the
-   size conventions: ``picked_locs`` and ``pick_similar`` take the *radius*
-   of a circular pick, ``lib.pick_areas`` and the pick-region files its
-   *diameter* (the width for rectangles), all in nm.
+   points), and ``picked_locs`` returns one DataFrame per pick. The pick
+   size is the *diameter* of a circular pick (the width for rectangles,
+   the side length for squares) in nm, in every function and in the
+   pick-region files.
 
    .. code-block:: python
 
@@ -137,17 +137,17 @@ See :doc:`menu-tools` for the other pick utilities.
       locs, info = io.load_locs("movie_locs.hdf5")
 
       picks = [(15639.0, 11453.0), (17030.0, 12051.0)]   # centers, nm
-      radius = 50.0                                      # 100 nm diameter
-      picked = postprocess.picked_locs(locs, info, picks, "Circle", pick_size=radius)
+      diameter = 100.0                                   # nm
+      picked = postprocess.picked_locs(locs, info, picks, "Circle", pick_size=diameter)
 
       # Pick similar
       picks += postprocess.pick_similar(
-          locs, info, picks, "Circle", pick_size=radius, std_range=2.0
+          locs, info, picks, "Circle", pick_size=diameter, std_range=2.0
       )
 
       # Save picked localizations (one "group" per pick) and the pick regions
       io.save_locs("movie_locs_picked.hdf5", pd.concat(picked, ignore_index=True), info)
-      io.save_picks("movie_locs_picks.yaml", picks, "Circle", size=2 * radius)
+      io.save_picks("movie_locs_picks.yaml", picks, "Circle", size=diameter)
 
       # Load pick regions saved by Render (positions and diameter in nm)
       picks, shape, diameter = io.load_picks("movie_locs_picks.yaml")

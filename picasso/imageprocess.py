@@ -282,7 +282,7 @@ def find_fiducials(
         info,
         picks,
         "Circle",
-        pick_size=box / 2,
+        pick_size=box,
         add_group=False,
     )
     picks = [
