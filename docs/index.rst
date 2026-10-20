@@ -48,6 +48,12 @@ Picasso is complemented by our `Nature Protocols publication
 <https://doi.org/10.1038/nprot.2017.024>`__. This documentation covers all
 updates since then.
 
+.. tip::
+
+   **Updating from an earlier version?** Your files keep working: Picasso 1.0
+   reads every file written by earlier versions, see
+   :ref:`updating-to-1-0`.
+
 Modules
 -------
 

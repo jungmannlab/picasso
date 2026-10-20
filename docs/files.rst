@@ -257,6 +257,17 @@ that kind, or, for files written before Picasso 1.0, does not say.
 Files written before Picasso 1.0
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+.. important::
+
+   **Updating to Picasso 1.0 needs no action for your data.** Every file
+   written by an earlier version of Picasso opens in 1.0 as before, in every
+   module, on the command line and in Python: localizations (also picked,
+   linked and clustered ones, cluster centers and pick properties), pick
+   regions, drift files, astigmatism, spline and lateral calibrations, SPINNA
+   masks, nanoTRON models, and Render's field of view and view settings
+   files. Picasso converts them to nm as it reads them, and opening a file
+   never changes it. Converting files on disk (see below) is optional.
+
 Until Picasso 1.0, the coordinates ``x`` and ``y``, the precisions ``lpx``
 and ``lpy``, the spot widths ``sx`` and ``sy`` and everything derived from
 them (pick positions, drift, cluster centers, pick properties, ...) were stored
@@ -264,14 +275,18 @@ in camera pixels, while ``z`` was in nm. Since 1.0, every length is in nm.
 Picasso tells the two apart by the format marker (see
 :ref:`files-format-versions`): a file without it was written before 1.0.
 
-**Old files keep working.** Whenever Picasso opens such a file (Render, Filter,
-Localize, the command line, ``picasso.io.load_locs``), it converts the lengths
-to nm in memory with the camera pixel size: the ``Pixelsize`` of the metadata,
-or, if the file does not record it, the value you are asked for (the GUIs ask,
-the command line and the Python functions take ``pixelsize``). The conversion
-is recorded as a ``Convert units`` step in the metadata, and the file is
-written in nm, with the format marker, when it is saved again. Pick regions
-and drift files are converted the same way when they are loaded.
+**How old files are read.** Whenever Picasso opens such a file (Render,
+Filter, Localize, the command line, ``picasso.io.load_locs``), it converts the
+lengths to nm in memory with the camera pixel size: the ``Pixelsize`` of the
+metadata, or, if the file does not record it, the value you are asked for (the
+GUIs ask, the command line and the Python functions take ``pixelsize``).
+Localize records ``Pixelsize`` in the metadata, so files localized with
+Picasso are usually converted without a question. The conversion is recorded
+as a ``Convert units`` step in the metadata, and the file is written in nm,
+with the format marker, when it is saved again. Pick regions and drift files
+are converted the same way when they are loaded. The other direction does not
+work: earlier versions of Picasso read files saved by 1.0 as camera pixels, so
+whoever opens your new files needs Picasso 1.0 or later as well.
 
 **Converting files once** rewrites files written before Picasso 1.0 (in camera
 pixels) in the units convention of Picasso 1.0 (nm, with the format marker).

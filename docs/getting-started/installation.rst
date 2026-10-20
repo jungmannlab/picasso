@@ -168,6 +168,23 @@ Picasso runs on Windows, macOS and Linux. Several installation modes are availab
 
       See :doc:`/development` for how to contribute your changes.
 
+.. _updating-to-1-0:
+
+Updating from an earlier version
+--------------------------------
+
+**Your files keep working.** Since Picasso 1.0, every length (coordinates,
+precisions, pick sizes, drift, ...) is stored in nm instead of camera pixels.
+Picasso 1.0 reads all files written by earlier versions as before and converts
+them to nm as it opens them, without changing them on disk; there is nothing
+you need to do. See :ref:`files-legacy` for details, including how to convert
+files on disk if you want to.
+
+What has changed is how lengths are entered: dialogs, command line options and
+Python functions now take nm. Scripts that pass camera pixels need updating,
+see the `changelog
+<https://github.com/jungmannlab/picasso/blob/master/changelog.md>`__.
+
 .. _error-log:
 
 Reporting problems
