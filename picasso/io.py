@@ -5876,9 +5876,8 @@ def _report_dropped_locs(
     message = (
         f"{n_dropped:,} of {len(locs):,} localizations in {path} were not "
         "loaded: they have missing or infinite values, lie outside the "
-        f"field of view ({width:,.0f} x {height:,.0f} nm, i.e., Width x "
-        "Height camera pixels of Pixelsize nm) or have negative values "
-        "(e.g., coordinates or precisions)."
+        f"field of view ({width:,.0f} x {height:,.0f} nm)"
+        "or have negative values (e.g., coordinates or precisions)."
     )
     x = locs["x"].to_numpy()
     y = locs["y"].to_numpy()
