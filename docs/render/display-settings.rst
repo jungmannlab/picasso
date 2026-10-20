@@ -41,7 +41,10 @@ Display width (µm)
 Display pixel size (nm)
    Set the size of the pixel in the rendered image. Choose ``dynamic`` to
    automatically adjust to current window size when zooming (one rendered
-   pixel per screen pixel).
+   pixel per screen pixel). A rendered pixel cannot be smaller than a screen
+   pixel: without ``dynamic``, a value below one screen pixel at the current
+   zoom is raised to that minimum, for example when you zoom out. To render
+   finer pixels, zoom in first.
 Minimap
    Click ``show minimap`` to display a minimap in the upper left corner to
    see where the current field of view is within the whole image.

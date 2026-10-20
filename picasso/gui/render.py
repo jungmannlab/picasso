@@ -9592,10 +9592,14 @@ class DisplaySettingsDialog(lib.Dialog):
         self.display_width.valueChanged.connect(self.on_display_width_changed)
         general_grid.addWidget(self.display_width, 0, 2)
         disp_px_label = QtWidgets.QLabel("Display pixel size (nm):")
-        disp_px_label.setToolTip(
+        disp_px_tooltip = (
             "Size of the pixels in the rendered image. With 'dynamic', it\n"
-            "follows the zoom: one rendered pixel per screen pixel."
+            "follows the zoom: one rendered pixel per screen pixel.\n"
+            "It cannot be smaller than one screen pixel at the current\n"
+            "zoom; smaller values are raised to that minimum. To render\n"
+            "finer pixels, zoom in first."
         )
+        disp_px_label.setToolTip(disp_px_tooltip)
         general_grid.addWidget(disp_px_label, 1, 1)
         self._disp_px_size = DEFAULT_DISP_PX_SIZE
         self.disp_px_size = QtWidgets.QDoubleSpinBox()
@@ -9604,6 +9608,11 @@ class DisplaySettingsDialog(lib.Dialog):
         self.disp_px_size.setDecimals(5)
         self.disp_px_size.setValue(self._disp_px_size)
         self.disp_px_size.setKeyboardTracking(False)
+        self.disp_px_size.setToolTip(disp_px_tooltip)
+        # a typed value below the minimum becomes the minimum
+        self.disp_px_size.setCorrectionMode(
+            QtWidgets.QAbstractSpinBox.CorrectionMode.CorrectToNearestValue
+        )
         self.disp_px_size.valueChanged.connect(self.on_disp_px_changed)
         general_grid.addWidget(self.disp_px_size, 1, 2)
         self.dynamic_disp_px = QtWidgets.QCheckBox("dynamic")
@@ -10120,6 +10129,20 @@ class DisplaySettingsDialog(lib.Dialog):
         """Change the value of self.disp_px_size in the background."""
         self._silent_disp_px_update = True
         self.disp_px_size.setValue(disp_px_size)
+        self._silent_disp_px_update = False
+
+    def set_min_disp_px_silently(self, min_disp_px_size: float) -> None:
+        """Set the smallest allowed display pixel size (one screen
+        pixel at the current zoom) in the background. A smaller value
+        is raised to it, rescaling the contrast like any other change.
+
+        Parameters
+        ----------
+        min_disp_px_size : float
+            Minimum display pixel size (nm).
+        """
+        self._silent_disp_px_update = True
+        self.disp_px_size.setMinimum(min_disp_px_size)
         self._silent_disp_px_update = False
 
     def set_display_width_silently(self, value: float) -> None:
@@ -14580,23 +14603,14 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         # screen pixel
         optimal_disp_px_size = 1 / self.display_pixels_per_viewport_pixels()
         if disp_px_size is None:
+            # a rendered pixel cannot be smaller than a screen pixel
+            disp_dlg.set_min_disp_px_silently(optimal_disp_px_size)
             if disp_dlg.dynamic_disp_px.isChecked():
                 disp_dlg.set_disp_px_silently(optimal_disp_px_size)
+                # exact, the spin box rounds to its decimals
                 disp_px_size = optimal_disp_px_size
             else:
-                if disp_dlg.disp_px_size.value() < optimal_disp_px_size:
-                    QtWidgets.QMessageBox.information(
-                        self,
-                        "Display pixel size too low",
-                        (
-                            "Display pixel size will be adjusted to"
-                            " match the display pixel density."
-                        ),
-                    )
-                    disp_dlg.set_disp_px_silently(optimal_disp_px_size)
-                    disp_px_size = optimal_disp_px_size
-                else:
-                    disp_px_size = disp_dlg.disp_px_size.value()
+                disp_px_size = disp_dlg.disp_px_size.value()
 
         # viewport and min blur
         viewport = self.viewport if viewport is None else viewport
