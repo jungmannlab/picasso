@@ -40,6 +40,7 @@ from picasso.fitting import (
     splinefit_cuda,
 )
 
+from tests._progress_tracking import RecordingProgress, assert_phases_complete
 from tests.test_splinefit import (
     BOX,
     DX,
@@ -452,14 +453,22 @@ class TestDeviceBehavior:
         assert np.isinf(chi_squares[-1])
         assert np.isfinite(thetas[0]).all()
 
-    def test_progress_callback_is_monotone_and_complete(self):
+    def test_progress_is_monotone_and_complete(self):
         calibration, spots, initial = TestConvergedFits._noisy_batch(n=32)
         args = _args(splinefit.KIND_3D, calibration, spots, initial, IDENTITY)
-        seen = []
-        splinefit_cuda.fit_spots(
-            *args, mle=False, progress_callback=seen.append
-        )
-        assert seen == sorted(seen) and seen[-1] == len(spots)
+        tracker = RecordingProgress()
+        splinefit_cuda.fit_spots(*args, mle=False, progress=tracker)
+        assert_phases_complete(tracker, ["Fitting spots"])
+        assert tracker.phases[0]["maximum"] == len(spots)
+
+    def test_progress_none_is_silent_and_console_works(self, capsys):
+        calibration, spots, initial = TestConvergedFits._noisy_batch(n=4)
+        args = _args(splinefit.KIND_3D, calibration, spots, initial, IDENTITY)
+        splinefit_cuda.fit_spots(*args, mle=False)
+        captured = capsys.readouterr()
+        assert captured.out == "" and captured.err == ""
+        splinefit_cuda.fit_spots(*args, mle=False, progress="console")
+        assert "Fitting spots" in capsys.readouterr().err
 
     def test_empty_input(self):
         calibration, spots, initial, jacobians = _build(splinefit.KIND_3D, 1)

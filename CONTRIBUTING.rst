@@ -131,6 +131,46 @@ The functions and classes on the Python API pages (each module's ``__all__``), t
 
     $ python tests/regen_stability_snapshots.py
 
+Reporting Progress
+^^^^^^^^^^^^^^^^^^
+
+A public function that takes a while reports its progress through one argument, ``progress``, which is a tracker (an object with the ``picasso.lib.Progress`` interface, e.g., the dialog of a Picasso window), ``"console"`` (a tqdm bar for each step) or None (nothing is reported or printed). Annotate and document it in the same words, and say which steps it reports::
+
+    def my_analysis(
+        locs: pd.DataFrame,
+        info: list[dict],
+        progress: lib.Progress | Literal["console"] | None = None,
+    ) -> pd.DataFrame:
+        """...
+
+        Parameters
+        ----------
+        progress : lib.Progress, "console" or None, optional
+            Progress tracker, see ``picasso.lib.Progress``: e.g. a
+            ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+            or None for no reporting. Reports "Picking localizations" over
+            the picks, then "Fitting" over the groups. Default is None.
+        """
+        with lib.tracked_progress(progress, "My analysis") as progress:
+            lib.start_phase(progress, "Picking localizations", n, unit="pick")
+            for i in range(n):
+                ...
+                progress.set_value(i + 1)
+            fit_something(..., progress=progress)  # starts its own steps
+
+The rules:
+
+- The function names and sizes each of its steps with ``lib.start_phase(progress, label, maximum, unit=...)``; callers never compute totals. A maximum of 0 means that the size is unknown (a busy indicator).
+- ``progress.set_value(n)`` reports the number of items finished in the current step, never decreases within it and ends at the step's maximum.
+- ``lib.tracked_progress`` turns ``"console"`` and None into a tracker and closes it afterwards; a tracker passed in by the caller is never closed, so pass it on to the Picasso functions you call, which add their own steps. Private helpers take the tracker as ``progress: lib.Progress``.
+- Call the tracker only from the thread that called the function. Work done in other threads or processes is counted there and reported from the calling thread, e.g., while waiting for the futures.
+- ``set_value`` may raise ``lib.OperationCanceled`` when the user presses *Cancel*: let it propagate and shut down pools and close files in ``finally``.
+- Do not use tqdm or ``print`` directly: with None, nothing is printed.
+
+In the Picasso windows, run the function in a task (``lib.run_task``) and pass it the task's ``progress``; a ``lib.ProgressDialog`` passed directly must be closed by the window when the function returns. For a worker thread with its own signals, subclass ``lib.MockProgress`` and emit them from ``set_value`` and ``zero_progress``.
+
+``tests/test_progress_api.py`` checks the signature and the docstring of every public function. To test the steps of your function, pass the ``RecordingProgress`` of ``tests/_progress_tracking.py`` and check them with ``assert_phases_complete``; ``CancelingProgress`` simulates *Cancel*.
+
 6. Submit a pull request through the GitHub website. See below for guidelines!
 
 Pull Request Guidelines

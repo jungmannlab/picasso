@@ -23,7 +23,7 @@ import time
 from abc import ABCMeta, abstractmethod
 from concurrent.futures import ProcessPoolExecutor
 from itertools import chain as itchain
-from typing import Literal, TYPE_CHECKING
+from typing import Literal
 
 import numpy as np
 import pandas as pd
@@ -32,9 +32,6 @@ from scipy.special import erf
 from sklearn.utils import check_random_state
 
 from . import lib, zfit, docs_url
-
-if TYPE_CHECKING:
-    from PyQt6 import QtWidgets  # only used in type annotations
 
 __all__ = ["g5m", "sum_G5Ms"]
 
@@ -3307,8 +3304,10 @@ def _run_g5m_parallel(
 
     Returns
     -------
+    executor : ProcessPoolExecutor
+        The executor running the tasks; the caller shuts it down.
     fs : list
-        List of futures.
+        List of futures, ``N_TASKS`` of them.
     """
     n_groups = len(bounds) - 1
     n_workers = lib.n_workers(0.35)
@@ -3323,10 +3322,16 @@ def _run_g5m_parallel(
     start_indices = np.cumsum([0] + groups_per_task)
     fs = []
     executor = ProcessPoolExecutor(n_workers)
-    for first, last in zip(start_indices[:-1], start_indices[1:]):
-        locs_task = locs.iloc[bounds[first] : bounds[last]]
-        fs.append(executor.submit(_run_g5m_in_clusters, locs_task, **kwargs))
-    return fs
+    try:
+        for first, last in zip(start_indices[:-1], start_indices[1:]):
+            locs_task = locs.iloc[bounds[first] : bounds[last]]
+            fs.append(
+                executor.submit(_run_g5m_in_clusters, locs_task, **kwargs)
+            )
+    except BaseException:
+        executor.shutdown(wait=False, cancel_futures=True)
+        raise
+    return executor, fs
 
 
 def _g5m(
@@ -3340,14 +3345,14 @@ def _g5m(
     calibration: dict | None,
     max_locs_per_cluster: int,
     asynch: bool,
-    n_steps: int,
-    progress: lib.ProgressType,
+    progress: lib.Progress,
     mode: Literal["astigmatism", "spline"] = "astigmatism",
     covariance_type: Literal["diagonal", "rotated"] = "diagonal",
 ) -> tuple[list[pd.DataFrame], list[pd.DataFrame]]:
     """Run G5M with or without multiprocessing. The function returns the
     centers of the G5M components and localizations with assigned cluster
-    labels. See ``g5m`` for parameters explanation."""
+    labels. See ``g5m`` for parameters explanation; ``progress`` is a
+    normalized tracker, see ``g5m`` for the phase it reports."""
     group_kwargs = dict(
         min_locs=min_locs,
         loc_prec_handle=loc_prec_handle,
@@ -3362,28 +3367,35 @@ def _g5m(
     )
     locs, bounds = _sort_by_group(locs)
     if asynch:  # run G5M using multiprocessing
-        fs = _run_g5m_parallel(locs, bounds, **group_kwargs)
-
-        # display progress
+        lib.start_phase(progress, "Running G5M", N_TASKS, unit="task")
+        progress.set_value(0)
+        executor, fs = _run_g5m_parallel(locs, bounds, **group_kwargs)
         try:
-            while lib.n_futures_done(fs) < n_steps:
-                n_done = lib.n_futures_done(fs)
+            # report the finished tasks until all are done
+            n_done = lib.n_futures_done(fs)
+            while n_done < len(fs):
                 progress.set_value(n_done)
                 time.sleep(0.2)
+                n_done = lib.n_futures_done(fs)
+            progress.set_value(N_TASKS)
+            results = [f.result() for f in fs]
         except BaseException:
             # e.g. canceled in the GUI (lib.OperationCanceled): drop the
             # tasks not started yet instead of running them to the end
-            for f in fs:
-                f.cancel()
+            executor.shutdown(wait=False, cancel_futures=True)
             raise
+        executor.shutdown()
 
         # extract centers from futures
-        centers = [_.result()[0] for _ in fs if len(_.result())]
+        centers = [_[0] for _ in results if len(_)]
         centers = list(itchain(*centers))
-        clustered_locs = [_.result()[1] for _ in fs if len(_.result())]
+        clustered_locs = [_[1] for _ in results if len(_)]
         clustered_locs = list(itchain(*clustered_locs))
 
     else:  # run G5M without multiprocessing
+        n_groups = len(bounds) - 1
+        lib.start_phase(progress, "Running G5M", n_groups, unit="group")
+        progress.set_value(0)
         centers = []
         clustered_locs = []
         for i, (start, stop) in enumerate(zip(bounds[:-1], bounds[1:])):
@@ -3393,12 +3405,8 @@ def _g5m(
             if centers_ is not None and len(centers_):
                 centers.append(centers_)
                 clustered_locs.append(clustered_locs_)
-
-            progress.set_value(i)
-
-    # complete and close the progress tracker
-    progress.set_value(n_steps)
-    progress.close()
+            progress.set_value(i + 1)
+        progress.set_value(n_groups)
 
     return centers, clustered_locs
 
@@ -3528,30 +3536,6 @@ def _resolve_group_column(
     return locs
 
 
-def _build_g5m_progress(callback_parent, n_steps: int):
-    """Progress tracker for :func:`g5m`, matching ``lib.normalize_progress``.
-
-    A parent widget builds a ``lib.ProgressDialog`` for it; "console" uses
-    tqdm; a ready-made tracker (anything with the ``ProgressDialog``
-    interface) is driven directly instead of being wrapped.
-    """
-    if callback_parent is None or callback_parent == "console":
-        progress = lib.normalize_progress(
-            callback_parent, description="Running G5M..."
-        )
-        progress.setMaximum(n_steps)
-    elif callable(getattr(callback_parent, "set_value", None)):
-        progress = callback_parent
-        progress.zero_progress("Running G5M...")
-        progress.setMaximum(n_steps)
-    else:  # a parent widget: build the dialog for it
-        progress = lib.ProgressDialog(
-            "Running G5M...", 0, n_steps, callback_parent
-        )
-        progress.set_value(0)
-    return progress
-
-
 def _g5m_info(
     locs: pd.DataFrame,
     centers: pd.DataFrame,
@@ -3641,9 +3625,7 @@ def g5m(
     max_locs_per_cluster: int = np.inf,
     asynch: bool = True,
     group_column: Literal["group", "group_input"] = "group",
-    callback_parent: (
-        QtWidgets.QMainWindow | Literal["console"] | None
-    ) = "console",
+    progress: lib.Progress | Literal["console"] | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame, list[dict]]:
     """Run G5M with or without multiprocessing. The function returns
     the centers of the G5M components and localizations with assigned
@@ -3721,13 +3703,12 @@ def g5m(
         prior to G5M. Use "group_input" when the "group" column has been
         overwritten but the original cluster ids are preserved in
         "group_input". Default is "group".
-    callback_parent : QMainWindow, ProgressType, "console" or None, optional
-        Where progress is reported. A parent widget builds a
-        ``lib.ProgressDialog`` for it; "console" uses tqdm; None
-        displays nothing. A ready-made progress tracker (anything with
-        the ``ProgressDialog`` interface, see
-        ``lib.normalize_progress``) can also be passed and is driven
-        directly. Default is "console".
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports "Running G5M" over the
+        ``N_TASKS`` parallel tasks if ``asynch``, else over the
+        clusters. Default is None.
 
     Returns
     -------
@@ -3767,29 +3748,22 @@ def g5m(
             + docs_url("localize/3d-calibration.html#localize-3d-calibration")
         )
 
-    # determine how many steps are displayed in the progress bar
-    n_steps = N_TASKS if asynch else len(np.unique(locs["group"]))
-    # everything below drives the same ProgressDialog-like interface (see
-    # lib.normalize_progress), so a ready-made tracker can be passed
-    # instead of a parent window.
-    progress = _build_g5m_progress(callback_parent, n_steps)
-
-    centers, clustered_locs = _g5m(
-        locs,
-        min_locs=min_locs,
-        loc_prec_handle=loc_prec_handle,
-        sigma_bounds=sigma_bounds,
-        pixelsize=pixelsize,
-        max_rounds_without_best_bic=max_rounds_without_best_bic,
-        bootstrap_check=bootstrap_check,
-        calibration=calibration,
-        max_locs_per_cluster=max_locs_per_cluster,
-        asynch=asynch,
-        n_steps=n_steps,
-        progress=progress,
-        mode=mode,
-        covariance_type=covariance_type,
-    )
+    with lib.tracked_progress(progress, "Running G5M") as progress:
+        centers, clustered_locs = _g5m(
+            locs,
+            min_locs=min_locs,
+            loc_prec_handle=loc_prec_handle,
+            sigma_bounds=sigma_bounds,
+            pixelsize=pixelsize,
+            max_rounds_without_best_bic=max_rounds_without_best_bic,
+            bootstrap_check=bootstrap_check,
+            calibration=calibration,
+            max_locs_per_cluster=max_locs_per_cluster,
+            asynch=asynch,
+            progress=progress,
+            mode=mode,
+            covariance_type=covariance_type,
+        )
     # stack centers to form a pd.DataFrame in the format of localizations
     if len(centers):
         centers = pd.concat(centers, ignore_index=True)

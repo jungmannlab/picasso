@@ -11,7 +11,7 @@ import pandas as pd
 import pytest
 import yaml
 
-from picasso import io, spinna
+from picasso import io, lib, spinna
 from picasso.spinna import (
     MaskGenerator,
     SPINNA,
@@ -1842,15 +1842,15 @@ def small_spinner(mols_real, monomer_dimer_structures):
 @pytest.mark.parametrize(
     "fitting_mode", ["brute-force", "coarse-to-fine", "bayesian"]
 )
-@pytest.mark.parametrize("callback", [None, "console"])
-def test_fit_progress_modes(small_spinner, fitting_mode, callback):
+@pytest.mark.parametrize("progress", [None, "console"])
+def test_fit_progress_modes(small_spinner, fitting_mode, progress):
     spinner, ss = small_spinner
     np.random.seed(0)
     props, score = spinner.fit_stoichiometry(
         N_structures=ss,
         fitting_mode=fitting_mode,
         asynch=False,
-        callback=callback,
+        progress=progress,
     )
     assert np.isfinite(score)
     assert props.shape == (2,)
@@ -1869,7 +1869,7 @@ def test_fit_reports_progress_to_duck_typed_tracker(
         N_structures=ss,
         fitting_mode=fitting_mode,
         asynch=False,
-        callback=tracker,
+        progress=tracker,
     )
     assert tracker.values, "no progress was reported"
     assert tracker.maxima, "progress range was never set"
@@ -1878,11 +1878,11 @@ def test_fit_reports_progress_to_duck_typed_tracker(
     assert max(tracker.values) <= max(tracker.maxima)
 
 
-def test_invalid_callback_raises(small_spinner):
+def test_invalid_progress_raises(small_spinner):
     spinner, ss = small_spinner
     with pytest.raises((TypeError, ValueError)):
         spinner.fit_stoichiometry(
-            N_structures=ss, fitting_mode="brute-force", callback="bogus"
+            N_structures=ss, fitting_mode="brute-force", progress="bogus"
         )
 
 
@@ -1894,8 +1894,283 @@ def test_coarse_to_fine_labels_both_passes(small_spinner):
         N_structures=ss,
         fitting_mode="coarse-to-fine",
         asynch=False,
-        callback=tracker,
+        progress=tracker,
     )
     titles = " | ".join(t for t in tracker.titles if t)
     assert "Coarse pass" in titles
     assert "Fine pass" in titles
+
+
+class _PhaseRecorder(lib.MockProgress):
+    """Progress tracker recording the phases it is driven through."""
+
+    def __init__(self, cancel_in=None):
+        super().__init__()
+        self.phases = []  # dicts with "label", "maximum" and "values"
+        self.cancel_in = cancel_in  # cancel in a phase with this label
+
+    def zero_progress(self, description=None, *args, **kwargs):
+        super().zero_progress(description)
+        self.phases.append({"label": description, "maximum": 0, "values": []})
+
+    def setMaximum(self, maximum, *args, **kwargs):
+        super().setMaximum(maximum)
+        assert self.phases, "setMaximum before the first phase"
+        self.phases[-1]["maximum"] = maximum
+
+    def set_value(self, value, *args, **kwargs):
+        assert self.phases, "set_value before the first phase"
+        self.phases[-1]["values"].append(value)
+        if self.cancel_in and self.cancel_in in self.phases[-1]["label"]:
+            raise lib.OperationCanceled
+
+    def labels(self):
+        return [phase["label"] for phase in self.phases]
+
+
+def _assert_phases_end_at_maximum(recorder):
+    assert recorder.phases, "no phase was reported"
+    for phase in recorder.phases:
+        values = phase["values"]
+        assert values, f"{phase['label']!r} reported nothing"
+        assert values[0] >= 0
+        assert values == sorted(values), phase
+        assert values[-1] == phase["maximum"] > 0, phase
+
+
+@pytest.mark.parametrize(
+    "fitting_mode, labels",
+    [
+        ("brute-force", ["Spinning structures"]),
+        (
+            "coarse-to-fine",
+            [
+                "Spinning structures | Coarse pass",
+                "Spinning structures | Fine pass",
+            ],
+        ),
+        # the small search space is covered by the initial sampling
+        ("bayesian", ["Spinning structures | Bayesian (initial sampling)"]),
+    ],
+)
+def test_fit_phases_end_at_maximum(small_spinner, fitting_mode, labels):
+    spinner, ss = small_spinner
+    recorder = _PhaseRecorder()
+    np.random.seed(0)
+    spinner.fit(ss, fitting_mode=fitting_mode, asynch=False, progress=recorder)
+    assert recorder.labels() == labels
+    _assert_phases_end_at_maximum(recorder)
+
+
+def test_bayesian_phases_end_at_maximum(small_spinner):
+    spinner, ss = small_spinner
+    # a search space larger than the initial sampling
+    ss = spinna.generate_N_structures(
+        spinner.mixer.structures,
+        {"target": int(ss["Monomer"].max())},
+        granularity=10,
+    )
+    recorder = _PhaseRecorder()
+    np.random.seed(0)
+    spinner.fit_bayesian(ss, 3, 5, "", False, recorder)
+    assert recorder.labels() == [
+        "Spinning structures | Bayesian (initial sampling)",
+        "Spinning structures | Bayesian (GP-guided)",
+    ]
+    assert recorder.phases[0]["maximum"] == 3
+    # at most 5, fewer if it stopped early
+    assert 0 < recorder.phases[1]["maximum"] <= 5
+    _assert_phases_end_at_maximum(recorder)
+
+
+def test_nn_scorer_reaches_maximum(small_spinner):
+    # regression: NN_scorer reported the 0-based index, ending one short
+    spinner, ss = small_spinner
+    N = spinner.mixer.convert_N_structures_to_array(ss)
+    assert len(N) == 3
+    recorder = _PhaseRecorder()
+    spinner.NN_scorer(N, progress=recorder)
+    assert recorder.phases == [
+        {"label": "Spinning structures", "maximum": 3, "values": [1, 2, 3, 3]}
+    ]
+
+
+def test_coarse_to_fine_keeps_the_title(small_spinner):
+    # regression: the pass titles accumulated in progress_title
+    spinner, ss = small_spinner
+    for _ in range(2):
+        recorder = _PhaseRecorder()
+        np.random.seed(0)
+        spinner.fit_coarse_to_fine(ss, 0.1, 30.0, "", False, False, recorder)
+        assert recorder.labels() == [
+            "Spinning structures | Coarse pass",
+            "Spinning structures | Fine pass",
+        ]
+    assert spinner.progress_title == "Spinning structures"
+
+
+def test_bootstrap_phases_keep_the_title(small_spinner):
+    # regression: bootstrapping left "Bootstrapping 20/20; ..." as title
+    spinner, ss = small_spinner
+    recorder = _PhaseRecorder()
+    np.random.seed(0)
+    spinner.fit(
+        ss,
+        fitting_mode="brute-force",
+        asynch=False,
+        bootstrap=True,
+        progress=recorder,
+    )
+    assert recorder.labels() == ["Spinning structures"] + [
+        f"Spinning structures | Bootstrapping {i}/{spinna.N_BOOTSTRAPS}"
+        for i in range(1, spinna.N_BOOTSTRAPS + 1)
+    ]
+    _assert_phases_end_at_maximum(recorder)
+    assert spinner.progress_title == "Spinning structures"
+
+
+def test_canceled_bootstrap_restores_the_data(small_spinner):
+    spinner, ss = small_spinner
+    dists_gt = [d.copy() for d in spinner.dists_gt]
+    np.random.seed(0)
+    with pytest.raises(lib.OperationCanceled):
+        spinner.fit(
+            ss,
+            fitting_mode="brute-force",
+            asynch=False,
+            bootstrap=True,
+            progress=_PhaseRecorder(cancel_in="Bootstrapping"),
+        )
+    assert len(spinner.dists_gt) == len(dists_gt)
+    for restored, original in zip(spinner.dists_gt, dists_gt):
+        np.testing.assert_array_equal(restored, original)
+
+
+def test_fit_none_is_silent_and_console_works(small_spinner, capsys):
+    spinner, ss = small_spinner
+    np.random.seed(0)
+    spinner.fit(ss, fitting_mode="coarse-to-fine", asynch=False)
+    captured = capsys.readouterr()
+    assert captured.out == "" and captured.err == ""
+    spinner.fit(
+        ss, fitting_mode="coarse-to-fine", asynch=False, progress="console"
+    )
+    err = capsys.readouterr().err
+    assert "Coarse pass" in err and "Fine pass" in err
+
+
+@pytest.fixture
+def counted_tqdm(monkeypatch):
+    """Count the console trackers created and closed."""
+    created = []
+
+    class CountedTqdmProgress(lib.TqdmProgress):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.n_closes = 0
+            created.append(self)
+
+        def close(self, *args, **kwargs):
+            self.n_closes += 1
+            super().close(*args, **kwargs)
+
+    monkeypatch.setattr(lib, "TqdmProgress", CountedTqdmProgress)
+    return created
+
+
+def test_console_tracker_is_closed(small_spinner, counted_tqdm):
+    # regression: no TqdmProgress was ever closed
+    spinner, ss = small_spinner
+    np.random.seed(0)
+    spinner.fit(ss, fitting_mode="bayesian", asynch=False, progress="console")
+    assert len(counted_tqdm) == 1
+    assert counted_tqdm[0].n_closes > 0
+    assert counted_tqdm[0].iterator is None  # the last bar ended
+
+
+def _two_models():
+    mono = Structure("Mono")
+    mono.define_coordinates("target", [0], [0], [0])
+    dimer = Structure("Dimer")
+    dimer.define_coordinates("target", [-10.5, 10.5], [0, 0], [0, 0])
+    return [[mono], [mono, dimer]]
+
+
+def test_compare_models_normalizes_once(mols_real, counted_tqdm):
+    # regression: "console" made a new tqdm tracker per candidate model
+    coords = mols_real[["x", "y"]].to_numpy()
+    np.random.seed(0)
+    spinna.compare_models_given_label_unc(
+        models=_two_models(),
+        exp_data={"target": coords},
+        granularity=3,
+        label_unc={"target": LABEL_UNC},
+        le={"target": LE},
+        width=ROI,
+        height=ROI,
+        asynch=False,
+        progress="console",
+    )
+    assert len(counted_tqdm) == 1
+    assert counted_tqdm[0].iterator is None
+
+
+def test_compare_models_phases(mols_real):
+    coords = mols_real[["x", "y"]].to_numpy()
+    recorder = _PhaseRecorder()
+    np.random.seed(0)
+    spinna.compare_models(
+        models=_two_models(),
+        exp_data={"target": coords},
+        granularity=3,
+        label_unc={"target": [3.0, 6.0]},
+        le={"target": LE},
+        width=ROI,
+        height=ROI,
+        asynch=False,
+        fitting_mode="brute-force",
+        progress=recorder,
+    )
+    labels = recorder.labels()
+    # 2 label uncertainties x 2 models, then the final comparison
+    assert len(labels) == 6
+    assert labels[0].startswith("[Round 1/6] Fitting label uncertainty")
+    assert labels[0].endswith("| model 1/2")
+    assert labels[-1].startswith("[Round 6/6] Final comparison")
+    _assert_phases_end_at_maximum(recorder)
+
+
+def test_fit_le_reports_phases(mols_real):
+    coords = mols_real[["x", "y"]].to_numpy()
+    recorder = _PhaseRecorder()
+    np.random.seed(0)
+    spinna.fit_le(
+        target_a="A",
+        target_b="B",
+        exp_data={"A": coords, "B": coords},
+        granularity=3,
+        label_unc={"A": [3.0], "B": [3.0]},
+        distances=[10.0],
+        width=ROI,
+        height=ROI,
+        asynch=False,
+        fitting_mode="brute-force",
+        progress=recorder,
+    )
+    assert recorder.labels() == [
+        "[Round 1/1] Final comparison, label_unc={'A': 3.0, 'B': 3.0} | "
+        "model 1/1"
+    ]
+    _assert_phases_end_at_maximum(recorder)
+
+
+@pytest.mark.slow
+def test_asynch_fit_reports_finished_candidates(small_spinner):
+    # regression: the parallel fit set the label directly, bypassing
+    # zero_progress, and reported estimates from the finished tasks
+    spinner, ss = small_spinner
+    recorder = _PhaseRecorder()
+    np.random.seed(0)
+    spinner.fit(ss, fitting_mode="brute-force", asynch=True, progress=recorder)
+    assert recorder.labels() == ["Spinning structures"]
+    _assert_phases_end_at_maximum(recorder)

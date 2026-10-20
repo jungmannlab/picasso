@@ -300,7 +300,7 @@ Nothing in the gain fit uses these numbers; they only label the x-axis of the li
       bright = [io.load_movie(p)[0] for p in ("bright_20mW.raw", "bright_100mW.raw")]
       calibration = scmos.calibrate_scmos(
           dark, bright, bright_levels=[20, 100], level_unit="mW",
-          progress_callback="console",
+          progress="console",
       )
       io.save_camera_calibration("mycam_scmos_calib.hdf5", calibration)
       scmos.save_calibration_plot(
@@ -425,7 +425,7 @@ If the camera still behaves as characterized, the per-pixel p-values are uniform
 
       fresh_dark, _ = io.load_movie("fresh_dark.raw")
       result = scmos.validate_calibration(
-          calibration, fresh_dark, progress_callback="console"
+          calibration, fresh_dark, progress="console"
       )
       print(result["mean p-value"], result["valid"])
 

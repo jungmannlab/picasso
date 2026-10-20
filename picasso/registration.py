@@ -53,7 +53,7 @@ from __future__ import annotations
 import datetime
 import warnings
 from itertools import combinations
-from typing import Callable
+from typing import Callable, Literal
 
 import numpy as np
 from scipy.spatial import KDTree
@@ -1426,22 +1426,32 @@ def _signal_detections(
     box: int,
     sample_frames: np.ndarray,
     split_fov: bool,
+    progress: lib.Progress,
 ) -> list[dict]:
     """Per-frame detections for every channel, in channel order.
 
     For split-FOV the single movie is detected once, with the reference
     channel's identification method, and split by region; otherwise each
-    channel's own movie is detected with its own method.
+    channel's own movie is detected with its own method. Reports the phase
+    "Detecting spots" over the movies detected on ``progress`` (a
+    normalized tracker).
     """
+    n_movies = 1 if split_fov else len(movies)
+    lib.start_phase(progress, "Detecting spots", n_movies, unit="movie")
+    progress.set_value(0)
     if split_fov:
         movie_by_frame = detections_by_frame(
             movies[0], methods[reference], box, sample_frames
         )
+        progress.set_value(1)
         return [_by_frame_in_region(movie_by_frame, r) for r in regions]
-    return [
-        detections_by_frame(m, methods[c], box, sample_frames)
-        for c, m in enumerate(movies)
-    ]
+    by_channel = []
+    for c, m in enumerate(movies):
+        by_channel.append(
+            detections_by_frame(m, methods[c], box, sample_frames)
+        )
+        progress.set_value(c + 1)
+    return by_channel
 
 
 def _signal_channel_seed(
@@ -1494,6 +1504,67 @@ def _register_signal_channel(
     return info
 
 
+def _register_signal_channels(
+    by_channel: list[dict],
+    seed_transforms: list | None,
+    regions: list | None,
+    reference: int,
+    model: str,
+    box: int,
+    n_iter: int,
+    min_pairs: int,
+    n_channels: int,
+    split_fov: bool,
+    progress: lib.Progress,
+) -> tuple[list, list[dict]]:
+    """Register every channel to the reference from its per-frame
+    detections, reporting the phase "Registering channels" over the
+    channels other than the reference on ``progress`` (a normalized
+    tracker).
+
+    Returns
+    -------
+    transforms : list
+        One transform per channel, the identity for the reference.
+    infos : list of dict
+        The registration record of each non-reference channel.
+    """
+    ref_by_frame = by_channel[reference]
+    if not ref_by_frame:
+        raise ValueError(
+            "No detections in the reference channel; lower the minimum net "
+            "gradient (or the wavelet threshold) or check the frame range."
+        )
+
+    transforms: list = [None] * n_channels
+    transforms[reference] = tform.identity(model)
+    infos = []
+    lib.start_phase(
+        progress, "Registering channels", n_channels - 1, unit="channel"
+    )
+    progress.set_value(0)
+    for c in range(n_channels):
+        if c == reference:
+            continue
+        seed = _signal_channel_seed(
+            seed_transforms, regions, reference, c, split_fov
+        )
+        info = _register_signal_channel(
+            ref_by_frame,
+            by_channel[c],
+            model,
+            box,
+            seed,
+            n_iter,
+            min_pairs,
+            c,
+        )
+        transforms[c] = info["transform"]
+        infos.append(info)
+        progress.set_value(len(infos))
+    return transforms, infos
+
+
 def calibrate_channel_registration_from_signal(
     movies: list,
     box: int,
@@ -1508,7 +1579,7 @@ def calibrate_channel_registration_from_signal(
     regions: list | None = None,
     channel_paths: list[str] | None = None,
     path: str | None = None,
-    progress_callback: Callable[[int], None] | None = None,
+    progress: lib.Progress | Literal["console"] | None = None,
 ) -> dict:
     """Register channels from the experimental (blinking) signal.
 
@@ -1556,8 +1627,13 @@ def calibrate_channel_registration_from_signal(
         Source paths, recorded for traceability.
     path : str, optional
         If given, the calibration is saved there (YAML).
-    progress_callback : callable, optional
-        Called with the number of channels registered so far.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports two phases: "Detecting spots"
+        over the movies detected (one for split field of view, else one
+        per channel), then "Registering channels" over the channels other
+        than the reference. Default is None.
 
     Returns
     -------
@@ -1572,47 +1648,32 @@ def calibrate_channel_registration_from_signal(
         )
 
     sample_frames = _sample_frames_for_signal(movies, frame_bounds, max_frames)
-    by_channel = _signal_detections(
-        movies,
-        regions,
-        reference,
-        localize._as_method_list(identification_method, n_channels),
-        box,
-        sample_frames,
-        split_fov,
-    )
-    ref_by_frame = by_channel[reference]
-    if not ref_by_frame:
-        raise ValueError(
-            "No detections in the reference channel; lower the minimum net "
-            "gradient (or the wavelet threshold) or check the frame range."
+    with lib.tracked_progress(
+        progress, "Detecting spots", unit="movie"
+    ) as progress:
+        by_channel = _signal_detections(
+            movies,
+            regions,
+            reference,
+            localize._as_method_list(identification_method, n_channels),
+            box,
+            sample_frames,
+            split_fov,
+            progress,
         )
-
-    transforms: list = [None] * n_channels
-    transforms[reference] = tform.identity(model)
-    infos = []
-    done = 0
-    for c in range(n_channels):
-        if c == reference:
-            continue
-        seed = _signal_channel_seed(
-            seed_transforms, regions, reference, c, split_fov
-        )
-        info = _register_signal_channel(
-            ref_by_frame,
-            by_channel[c],
+        transforms, infos = _register_signal_channels(
+            by_channel,
+            seed_transforms,
+            regions,
+            reference,
             model,
             box,
-            seed,
             n_iter,
             min_pairs,
-            c,
+            n_channels,
+            split_fov,
+            progress,
         )
-        transforms[c] = info["transform"]
-        infos.append(info)
-        done += 1
-        if callable(progress_callback):
-            progress_callback(done)
 
     extra = {
         "frame_bounds": frame_bounds,

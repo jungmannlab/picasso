@@ -16,9 +16,7 @@ import os
 import re
 import warnings
 from collections import OrderedDict
-from collections.abc import Callable
 from copy import deepcopy
-from functools import partial
 from typing import Literal, NamedTuple
 from concurrent.futures import ThreadPoolExecutor as _ThreadPoolExecutor
 from threading import Thread
@@ -31,7 +29,6 @@ from scipy import interpolate
 from scipy.optimize import curve_fit, OptimizeWarning
 from scipy.spatial import KDTree
 from scipy.stats import rankdata
-from tqdm import tqdm, trange
 
 from . import (
     io,
@@ -237,8 +234,7 @@ def _picked_circular_locs(
     pick_size: float,
     index_blocks: tuple | None,
     add_group: bool,
-    callback: Callable[[int], None] | Literal["console"] | None,
-    progress: tqdm | None,
+    progress: lib.Progress,
 ) -> list[pd.DataFrame]:
     """Helper function for picking localizations using circular picks.
     See ``picked_locs`` for more details."""
@@ -283,10 +279,7 @@ def _picked_circular_locs(
         )
         picked_locs.append(group_locs)
 
-        if callback == "console":
-            progress.update(1)
-        elif callback is not None:
-            callback(i + 1)
+        progress.set_value(i + 1)
     return picked_locs
 
 
@@ -295,8 +288,7 @@ def _picked_rectangular_locs(
     picks: list[tuple],
     pick_size: float,
     add_group: bool,
-    callback: Callable[[int], None] | Literal["console"] | None,
-    progress: tqdm | None,
+    progress: lib.Progress,
 ) -> list[pd.DataFrame]:
     """Helper function for picking localizations using rectangular
     picks. See ``picked_locs`` for more details."""
@@ -328,10 +320,7 @@ def _picked_rectangular_locs(
         group_locs.sort_values(by="frame", kind="quicksort", inplace=True)
         picked_locs.append(group_locs)
 
-        if callback == "console":
-            progress.update(1)
-        elif callback is not None:
-            callback(i + 1)
+        progress.set_value(i + 1)
     return picked_locs
 
 
@@ -339,8 +328,7 @@ def _picked_polygonal_locs(
     locs: pd.DataFrame,
     picks: list[tuple],
     add_group: bool,
-    callback: Callable[[int], None] | Literal["console"] | None,
-    progress: tqdm | None,
+    progress: lib.Progress,
 ):
     """Helper function for picking localizations using polygonal picks. See
     ``picked_locs`` for more details."""
@@ -348,10 +336,7 @@ def _picked_polygonal_locs(
     for i, pick in enumerate(picks):
         X, Y = lib.get_pick_polygon_corners(pick)
         if X is None:
-            if callback == "console":
-                progress.update(1)
-            elif callback is not None:
-                callback(i + 1)
+            progress.set_value(i + 1)
             continue
         mask = (
             (locs["x"] > min(X))
@@ -365,10 +350,7 @@ def _picked_polygonal_locs(
         group_locs.sort_values(by="frame", kind="quicksort", inplace=True)
         picked_locs.append(group_locs)
 
-        if callback == "console":
-            progress.update(1)
-        elif callback is not None:
-            callback(i + 1)
+        progress.set_value(i + 1)
     return picked_locs
 
 
@@ -377,8 +359,7 @@ def _picked_square_locs(
     picks: list[tuple],
     pick_size: float,
     add_group: bool,
-    callback: Callable[[int], None] | Literal["console"] | None,
-    progress: tqdm | None,
+    progress: lib.Progress,
 ) -> list[pd.DataFrame]:
     """Helper function for picking localizations using square picks. See
     ``picked_locs`` for more details."""
@@ -402,10 +383,7 @@ def _picked_square_locs(
         group_locs.sort_values(by="frame", kind="quicksort", inplace=True)
         picked_locs.append(group_locs)
 
-        if callback == "console":
-            progress.update(1)
-        elif callback is not None:
-            callback(i + 1)
+        progress.set_value(i + 1)
     return picked_locs
 
 
@@ -413,8 +391,7 @@ def _picked_box_locs(
     locs: pd.DataFrame,
     picks: list[tuple],
     add_group: bool,
-    callback: Callable[[int], None] | Literal["console"] | None,
-    progress: tqdm | None,
+    progress: lib.Progress,
 ) -> list[pd.DataFrame]:
     """Helper function for picking localizations using box picks. See
     ``picked_locs`` for more details."""
@@ -435,10 +412,7 @@ def _picked_box_locs(
         group_locs.sort_values(by="frame", kind="quicksort", inplace=True)
         picked_locs.append(group_locs)
 
-        if callback == "console":
-            progress.update(1)
-        elif callback is not None:
-            callback(i + 1)
+        progress.set_value(i + 1)
     return picked_locs
 
 
@@ -446,8 +420,7 @@ def _picked_brush_locs(
     locs: pd.DataFrame,
     picks: list[tuple],
     add_group: bool,
-    callback: Callable[[int], None] | Literal["console"] | None,
-    progress: tqdm | None,
+    progress: lib.Progress,
 ) -> list[pd.DataFrame]:
     """Helper function for picking localizations using brush picks. See
     ``picked_locs`` for more details."""
@@ -466,10 +439,7 @@ def _picked_brush_locs(
         group_locs.sort_values(by="frame", kind="quicksort", inplace=True)
         picked_locs.append(group_locs)
 
-        if callback == "console":
-            progress.update(1)
-        elif callback is not None:
-            callback(i + 1)
+        progress.set_value(i + 1)
     return picked_locs
 
 
@@ -483,7 +453,7 @@ def picked_locs(
     pick_size: float = None,
     add_group: bool = True,
     index_blocks: tuple = None,
-    callback: Callable[[int], None] | Literal["console"] | None = None,
+    progress: lib.Progress | Literal["console"] | None = None,
 ) -> list[pd.DataFrame]:
     """Find picked localizations, i.e., localizations within the given
     regions of interest.
@@ -512,10 +482,11 @@ def picked_locs(
         ``pick_size``), or the pick-size independent pyramid of
         ``spatial_index.build_render_index``. If None, index blocks
         will be calculated internally. Default is None.
-    callback : Callable[[int], None] | Literal["console"] | None, optional
-        Function to display progress. If "console", tqdm is used to
-        display the progress. If None, no progress is displayed. Default
-        is None.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports "Picking localizations" over
+        the picks. Default is None.
 
     Returns
     -------
@@ -529,69 +500,61 @@ def picked_locs(
     if len(picks) == 0:
         return []
 
-    picked_locs = []
-    if callback == "console":
-        progress = tqdm(
-            range(len(picks)),
-            desc="Picking locs",
-            unit="pick",
+    with lib.tracked_progress(
+        progress, "Picking localizations", unit="pick"
+    ) as progress:
+        lib.start_phase(
+            progress, "Picking localizations", len(picks), unit="pick"
         )
-    else:
-        progress = None
-
-    if pick_shape == "Circle":
-        picked_locs = _picked_circular_locs(
-            locs=locs,
-            info=info,
-            picks=picks,
-            pick_size=pick_size,
-            index_blocks=index_blocks,
-            add_group=add_group,
-            callback=callback,
-            progress=progress,
-        )
-    elif pick_shape == "Rectangle":
-        picked_locs = _picked_rectangular_locs(
-            locs=locs,
-            picks=picks,
-            pick_size=pick_size,
-            add_group=add_group,
-            callback=callback,
-            progress=progress,
-        )
-    elif pick_shape == "Polygon":
-        picked_locs = _picked_polygonal_locs(
-            locs=locs,
-            picks=picks,
-            add_group=add_group,
-            callback=callback,
-            progress=progress,
-        )
-    elif pick_shape == "Square":
-        picked_locs = _picked_square_locs(
-            locs=locs,
-            picks=picks,
-            pick_size=pick_size,
-            add_group=add_group,
-            callback=callback,
-            progress=progress,
-        )
-    elif pick_shape == "Box":
-        picked_locs = _picked_box_locs(
-            locs=locs,
-            picks=picks,
-            add_group=add_group,
-            callback=callback,
-            progress=progress,
-        )
-    elif pick_shape == "Brush":
-        picked_locs = _picked_brush_locs(
-            locs=locs,
-            picks=picks,
-            add_group=add_group,
-            callback=callback,
-            progress=progress,
-        )
+        progress.set_value(0)
+        if pick_shape == "Circle":
+            picked_locs = _picked_circular_locs(
+                locs=locs,
+                info=info,
+                picks=picks,
+                pick_size=pick_size,
+                index_blocks=index_blocks,
+                add_group=add_group,
+                progress=progress,
+            )
+        elif pick_shape == "Rectangle":
+            picked_locs = _picked_rectangular_locs(
+                locs=locs,
+                picks=picks,
+                pick_size=pick_size,
+                add_group=add_group,
+                progress=progress,
+            )
+        elif pick_shape == "Polygon":
+            picked_locs = _picked_polygonal_locs(
+                locs=locs,
+                picks=picks,
+                add_group=add_group,
+                progress=progress,
+            )
+        elif pick_shape == "Square":
+            picked_locs = _picked_square_locs(
+                locs=locs,
+                picks=picks,
+                pick_size=pick_size,
+                add_group=add_group,
+                progress=progress,
+            )
+        elif pick_shape == "Box":
+            picked_locs = _picked_box_locs(
+                locs=locs,
+                picks=picks,
+                add_group=add_group,
+                progress=progress,
+            )
+        elif pick_shape == "Brush":
+            picked_locs = _picked_brush_locs(
+                locs=locs,
+                picks=picks,
+                add_group=add_group,
+                progress=progress,
+            )
+        progress.set_value(len(picks))
     return picked_locs
 
 
@@ -2442,7 +2405,7 @@ def distance_histogram(
 def nena(
     locs: pd.DataFrame,
     info: any = None,
-    callback: Callable[[int], None] | None = None,
+    progress: lib.Progress | Literal["console"] | None = None,
 ) -> tuple[dict, float]:
     """Calculate NeNA - experimental estimate of localization
     precision. Please refer to the original paper for details:
@@ -2455,9 +2418,11 @@ def nena(
         Localizations.
     info : any
         Metadata of the localizations. Not used.
-    callback : function or None
-        Function to display progress (takes in an integer). If None, no
-        progress is displayed.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports "Calculating NeNA" over the
+        localizations. Default is None.
 
     Returns
     -------
@@ -2467,7 +2432,12 @@ def nena(
     s : float
         Estimated localization precision in nm.
     """
-    bin_centers, dnfl = _next_frame_neighbor_distance_histogram(locs, callback)
+    with lib.tracked_progress(
+        progress, "Calculating NeNA", unit="loc"
+    ) as progress:
+        bin_centers, dnfl = _next_frame_neighbor_distance_histogram(
+            locs, progress
+        )
 
     def func(d, delta_a, s, ac, dc, sc):
         a = ac + delta_a  # make sure a >= ac
@@ -2593,7 +2563,7 @@ def plot_nena(
 
 def _next_frame_neighbor_distance_histogram(
     locs: pd.DataFrame,
-    callback: Callable[[int], None] | None = None,
+    progress: lib.Progress,
 ) -> tuple[lib.FloatArray1D, lib.FloatArray1D]:
     """Calculate the next frame neighbor distance histogram (NFNDH).
 
@@ -2601,8 +2571,9 @@ def _next_frame_neighbor_distance_histogram(
     ----------
     locs : pd.DataFrame
         Localizations.
-    callback : function or None
-        Function to display progress. If None, no progress is displayed.
+    progress : lib.Progress
+        Normalized progress tracker; reports "Calculating NeNA" over the
+        localizations.
 
     Returns
     -------
@@ -2624,7 +2595,7 @@ def _next_frame_neighbor_distance_histogram(
         group = np.zeros(len(locs), dtype=np.int32)
     bin_size = 0.2  # nm
     d_max = 200.0  # nm
-    return _nfndh(frame, x, y, group, d_max, bin_size, callback)
+    return _nfndh(frame, x, y, group, d_max, bin_size, progress)
 
 
 def _nfndh(
@@ -2634,19 +2605,25 @@ def _nfndh(
     group: lib.IntArray1D,
     d_max: float,
     bin_size: float,
-    callback: Callable[[int], None] | None = None,
+    progress: lib.Progress,
 ) -> tuple[lib.FloatArray1D, lib.FloatArray1D]:
-    """Calculate the next frame neighbor distance histogram (NFNDH)."""
+    """Calculate the next frame neighbor distance histogram (NFNDH) of
+    localizations sorted by frame.
+
+    All localizations are processed, in up to 100 chunks; ``progress``
+    reports "Calculating NeNA" over the localizations after each chunk.
+    """
     N = len(frame)
     bins = np.arange(0, d_max, bin_size)
     dnfl = np.zeros(len(bins))
-    one_percent = int(N / 100)
-    starts = one_percent * np.arange(100)
-    for k, start in enumerate(starts):
-        for i in range(start, start + one_percent):
+    lib.start_phase(progress, "Calculating NeNA", N, unit="loc")
+    progress.set_value(0)
+    bounds = np.linspace(0, N, min(N, 100) + 1).astype(np.int64)
+    for start, stop in zip(bounds[:-1], bounds[1:]):
+        for i in range(start, stop):
             _fill_dnfl(N, frame, x, y, group, i, d_max, dnfl, bin_size)
-        if callback is not None:
-            callback(k + 1)
+        progress.set_value(int(stop))
+    progress.set_value(N)
     bin_centers = bins + bin_size / 2
     return bin_centers, dnfl
 
@@ -2669,14 +2646,14 @@ def _fill_dnfl(
     x_i = x[i]
     y_i = y[i]
     group_i = group[i]
-    min_frame = frame_i + 1
-    for min_index in range(i + 1, N):
-        if frame[min_index] >= min_frame:
-            break
-    max_frame = frame_i + 1
-    for max_index in range(min_index, N):
-        if frame[max_index] > max_frame:
-            break
+    # locs are sorted by frame: [min_index, max_index) is the next frame
+    next_frame = frame_i + 1
+    min_index = i + 1
+    while min_index < N and frame[min_index] < next_frame:
+        min_index += 1
+    max_index = min_index
+    while max_index < N and frame[max_index] <= next_frame:
+        max_index += 1
     d_max_2 = d_max**2
     for j in range(min_index, max_index):
         if group[j] == group_i:
@@ -2685,8 +2662,11 @@ def _fill_dnfl(
                 dy2 = (y_i - y[j]) ** 2
                 if dy2 <= d_max_2:
                     d = np.sqrt(dx2 + dy2)
-                    if d <= d_max:
-                        bin = int(d / bin_size)
+                    # the last bin ends below d_max; numba does not
+                    # check the index, so a distance of d_max wrote
+                    # outside the histogram
+                    bin = int(d / bin_size)
+                    if d < d_max and bin < dnfl.shape[0]:
                         dnfl[bin] += 1
 
 
@@ -2831,7 +2811,7 @@ def frc_rois(
     roi_size: float = 5000.0,
     min_locs: int = 1000,
     random_seed: int = 42,
-    callback: Callable[[int], None] | None = None,
+    progress: lib.Progress | Literal["console"] | None = None,
 ) -> dict:
     """Calculate the FRC resolution in several random ROIs.
 
@@ -2859,9 +2839,12 @@ def frc_rois(
     random_seed : int, optional
         Random seed for the ROI placement and the splitting into
         halves. Default is 42.
-    callback : function or None, optional
-        Function to display progress, called with the number of ROIs
-        processed. If None, no progress is displayed.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports "Calculating NeNA" over the
+        localizations, then "Calculating FRC" over the ROIs. Default is
+        None.
 
     Returns
     -------
@@ -2881,28 +2864,31 @@ def frc_rois(
         min_locs=min_locs,
         random_seed=random_seed,
     )
-    lp = nena(locs, info)[1]
-    x = locs["x"].to_numpy()
-    y = locs["y"].to_numpy()
-    n_locs = []
-    frc_results = []
-    for k, ((y0, x0), (y1, x1)) in enumerate(rois):
-        if callable(callback):
-            callback(k)
-        in_roi = (x > x0) & (y > y0) & (x < x1) & (y < y1)
-        n_locs.append(int(in_roi.sum()))
-        frc_result = frc(
-            locs.loc[in_roi],
-            info,
-            ((y0, x0), (y1, x1)),
-            random_seed=random_seed,
-            lp=lp,
-        )
-        # drop the rendered images: tens of ROIs would hold GBs
-        del frc_result["images"]
-        frc_results.append(frc_result)
-    if callable(callback):
-        callback(len(rois))
+    with lib.tracked_progress(
+        progress, "Calculating NeNA", unit="loc"
+    ) as progress:
+        lp = nena(locs, info, progress=progress)[1]
+        x = locs["x"].to_numpy()
+        y = locs["y"].to_numpy()
+        n_locs = []
+        frc_results = []
+        lib.start_phase(progress, "Calculating FRC", len(rois), unit="ROI")
+        progress.set_value(0)
+        for k, ((y0, x0), (y1, x1)) in enumerate(rois):
+            in_roi = (x > x0) & (y > y0) & (x < x1) & (y < y1)
+            n_locs.append(int(in_roi.sum()))
+            frc_result = frc(
+                locs.loc[in_roi],
+                info,
+                ((y0, x0), (y1, x1)),
+                random_seed=random_seed,
+                lp=lp,
+            )
+            # drop the rendered images: tens of ROIs would hold GBs
+            del frc_result["images"]
+            frc_results.append(frc_result)
+            progress.set_value(k + 1)
+        progress.set_value(len(rois))
     resolutions = np.array(
         [
             np.nan if _["resolution"] is None else _["resolution"]
@@ -3168,9 +3154,7 @@ def evaluate_picks(
     info: list[dict],
     *,
     max_dark_time: int = 3,
-    progress_callback: (
-        Callable[[int], None] | Literal["console"] | None
-    ) = None,
+    progress: lib.Progress | Literal["console"] | None = None,
 ) -> tuple[
     lib.FloatArray1D,
     lib.FloatArray1D,
@@ -3197,10 +3181,11 @@ def evaluate_picks(
         Maximum dark time (in frames) between detected localizations to
         consider them as part of the same binding event. Default is 3
         frames.
-    progress_callback : function, "console" or None
-        Function to display progress (takes in an integer). If "console",
-        progress is printed to the console. If None, no progress is
-        displayed.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports "Evaluating picks" over the
+        picks. Default is None.
 
     Returns
     -------
@@ -3220,14 +3205,6 @@ def evaluate_picks(
         Dataframe containing the localizations in all picked regions
         with added 'length' and 'dark' fields/columns.
     """
-    use_tqdm = progress_callback == "console"
-    if use_tqdm:
-        iter_range = tqdm(
-            range(len(picked_locs)), desc="Evaluating picks", unit="pick"
-        )
-    else:
-        iter_range = range(len(picked_locs))
-
     n_picks = len(picked_locs)
     N = np.empty(n_picks)  # number of locs per pick
     n_events = np.empty(n_picks)  # number of events per pick
@@ -3239,13 +3216,19 @@ def evaluate_picks(
     new_locs = []  # linked locs in each pick
     # e.g., the statistics of one-localization picks; scoped, so that
     # the warning filters of the caller are kept
-    with warnings.catch_warnings():
+    with (
+        lib.tracked_progress(
+            progress, "Evaluating picks", unit="pick"
+        ) as progress,
+        warnings.catch_warnings(),
+    ):
         warnings.simplefilter("ignore", category=RuntimeWarning)
-        for i in iter_range:
-            if callable(progress_callback):
-                progress_callback(i)
+        lib.start_phase(progress, "Evaluating picks", n_picks, unit="pick")
+        progress.set_value(0)
+        for i in range(n_picks):
             pick_locs = picked_locs[i]
             if not len(pick_locs):
+                progress.set_value(i + 1)
                 continue
 
             N[i] = len(pick_locs)
@@ -3270,8 +3253,8 @@ def evaluate_picks(
             length[i] = lib.estimate_kinetic_rate(pick_locs["len"].to_numpy())
             dark[i] = lib.estimate_kinetic_rate(pick_locs["dark"].to_numpy())
             new_locs.append(pick_locs)
-    if callable(progress_callback):
-        progress_callback(n_picks)
+            progress.set_value(i + 1)
+        progress.set_value(n_picks)
     new_locs = pd.concat(new_locs, ignore_index=True)
     return N, n_events, rmsd, rmsd_z, length, dark, new_locs
 
@@ -3310,9 +3293,7 @@ def pick_kinetics(
     info: list[dict],
     *,
     max_dark_time: int = 3,
-    progress_callback: (
-        Callable[[int], None] | Literal["console"] | None
-    ) = None,
+    progress: lib.Progress | Literal["console"] | None = None,
 ) -> tuple[
     lib.FloatArray1D,
     lib.FloatArray1D,
@@ -3334,10 +3315,11 @@ def pick_kinetics(
         Maximum dark time (in frames) between detected localizations
         to consider them as part of the same binding event. Default is 3
         frames.
-    progress_callback : function, "console" or None
-        Function to display progress (takes in an integer). If "console",
-        progress is printed to the console. If None, no progress is
-        displayed.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports "Calculating kinetics" over
+        the picks. Default is None.
 
     Returns
     -------
@@ -3360,38 +3342,39 @@ def pick_kinetics(
         i.e., those for which kinetics could be estimated. Aligns
         row-for-row with ``length``, ``dark`` and ``no_locs``.
     """
-    use_tqdm = progress_callback == "console"
-    if use_tqdm:
-        iter_range = tqdm(
-            range(len(picked_locs)), desc="Calculating kinetics", unit="pick"
-        )
-    else:
-        iter_range = range(len(picked_locs))
-
+    n_picks = len(picked_locs)
     out_locs = []
     dark = []  # estimated mean dark time
     length = []  # estimated mean bright time
     no_locs = []  # number of locs
     kept_indices = []  # picks for which kinetics could be estimated
-    for i in iter_range:
-        if callable(progress_callback):
-            progress_callback(i)
-        result = _pick_kinetics_single(picked_locs[i], info, max_dark_time)
-        if result is None:
-            continue
-        pick_locs, l_, d_ = result
-        length.append(l_)
-        dark.append(d_)
-        no_locs.append(len(picked_locs[i]))
-        out_locs.append(pick_locs)
-        kept_indices.append(i)
-    if callable(progress_callback):
-        progress_callback(i + 1)
+    with lib.tracked_progress(
+        progress, "Calculating kinetics", unit="pick"
+    ) as progress:
+        lib.start_phase(progress, "Calculating kinetics", n_picks, unit="pick")
+        progress.set_value(0)
+        for i in range(n_picks):
+            result = _pick_kinetics_single(picked_locs[i], info, max_dark_time)
+            if result is not None:
+                pick_locs, l_, d_ = result
+                length.append(l_)
+                dark.append(d_)
+                no_locs.append(len(picked_locs[i]))
+                out_locs.append(pick_locs)
+                kept_indices.append(i)
+            progress.set_value(i + 1)
+        progress.set_value(n_picks)
     length = np.array(length)
     dark = np.array(dark)
     no_locs = np.array(no_locs)
     kept_indices = np.array(kept_indices, dtype=int)
-    out_locs = pd.concat(out_locs, ignore_index=True)
+    if out_locs:
+        out_locs = pd.concat(out_locs, ignore_index=True)
+    elif n_picks:
+        # no pick survived: keep the columns of the input
+        out_locs = picked_locs[0].iloc[:0].copy()
+    else:
+        out_locs = pd.DataFrame()
     return length, dark, no_locs, out_locs, kept_indices
 
 
@@ -3402,14 +3385,9 @@ def pick_properties(
     max_dark_time: int = 3,
     influx_rate: float = 0.03,
     pick_areas: lib.FloatArray1D | None = None,
-    kinetics_progress: (
-        Callable[[int], None] | Literal["console"] | None
-    ) = None,
-    groupprops_progress: (
-        Callable[[int], None] | Literal["console"] | None
-    ) = None,
+    progress: lib.Progress | Literal["console"] | None = None,
 ) -> pd.DataFrame:
-    """Calculate pick properties and save them to ``path``.
+    """Calculate pick properties.
 
     Properties include number of localizations, mean and std of all
     localizations dtypes (x, y, photons, etc), qPAINT number of binding
@@ -3428,16 +3406,24 @@ def pick_properties(
         (``n_units = 1 / (influx_rate * dark)``).
     pick_areas : FloatArray1D or None
         Optional per-pick area in um^2 to attach to the output.
-    kinetics_progress, groupprops_progress : callable, "console" or None
-        Progress callbacks forwarded to ``pick_kinetics`` and
-        ``groupprops``, respectively.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports "Calculating kinetics" over
+        the picks, then "Calculating group properties" over the picks
+        whose kinetics could be estimated. Default is None.
 
     Returns
     -------
     pick_props : pd.DataFrame
         Each row gives the properties per pick.
     """
-    with warnings.catch_warnings():
+    with (
+        lib.tracked_progress(
+            progress, "Calculating kinetics", unit="pick"
+        ) as progress,
+        warnings.catch_warnings(),
+    ):
         warnings.simplefilter(
             "ignore", category=(OptimizeWarning, RuntimeWarning)
         )
@@ -3445,9 +3431,9 @@ def pick_properties(
             picked_locs=picked_locs,
             info=info,
             max_dark_time=max_dark_time,
-            progress_callback=kinetics_progress,
+            progress=progress,
         )
-        pick_props = groupprops(out_locs, callback=groupprops_progress)
+        pick_props = groupprops(out_locs, progress=progress)
         if pick_areas is not None:
             # only the picks that survived kinetics estimation are present
             # in pick_props, so subset the areas accordingly to avoid a
@@ -3739,9 +3725,7 @@ def combine_locs_in_picks(
     ],
     pick_size: float | None = None,
     index_blocks: tuple | None = None,
-    progress_callback: (
-        Callable[[int], None] | Literal["console"] | None
-    ) = None,
+    progress: lib.Progress | Literal["console"] | None = None,
 ) -> pd.DataFrame:
     """Combine localizations in picked regions.
 
@@ -3766,10 +3750,12 @@ def combine_locs_in_picks(
         radius). When provided, used to skip re-indexing inside circular
         ``picked_locs``. Ignored for non-circular pick shapes. Default
         is None (index is computed on demand).
-    progress_callback : callable, 'console' or None, optional
-        Function to display progress (takes in an integer, maximum is
-        the number of picks). If 'console', progress is displayed in the
-        console. If None, no progress is displayed. Default is None.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports "Picking localizations" over
+        the picks, then "Combining picks" over the picks. Default is
+        None.
 
     Returns
     -------
@@ -3786,39 +3772,38 @@ def combine_locs_in_picks(
         ), "Pick size must be provided for this pick shape."
     if pick_shape == "Circle":
         pick_size /= 2  # convert diameter to radius
-    pl = picked_locs(
-        locs=locs,
-        info=info,
-        picks=picks,
-        pick_shape=pick_shape,
-        pick_size=pick_size,
-        index_blocks=index_blocks,
-    )
-    # use very large values for linking localizations
-    r_max = 2 * max(lib.field_of_view(info))
-    max_dark = lib.get_from_metadata(info, "Frames", default=10_000)
-
-    # link every localization in each pick
-    if progress_callback == "console":
-        iter_range = tqdm(range(len(pl)), desc="Combining picks", unit="pick")
-    else:
-        iter_range = range(len(pl))
-    out_locs = []
-    for i in iter_range:
-        if callable(progress_callback):
-            progress_callback(i)
-        pick_locs = pl[i]
-        pick_locs_out = link(
-            pick_locs,
-            info,
-            r_max=r_max,
-            max_dark_time=max_dark,
-            remove_ambiguous_lengths=False,
+    with lib.tracked_progress(
+        progress, "Picking localizations", unit="pick"
+    ) as progress:
+        pl = picked_locs(
+            locs=locs,
+            info=info,
+            picks=picks,
+            pick_shape=pick_shape,
+            pick_size=pick_size,
+            index_blocks=index_blocks,
+            progress=progress,
         )
-        if len(pick_locs_out):
-            out_locs.append(pick_locs_out)
-    if callable(progress_callback):
-        progress_callback(len(pl))
+        # use very large values for linking localizations
+        r_max = 2 * max(lib.field_of_view(info))
+        max_dark = lib.get_from_metadata(info, "Frames", default=10_000)
+
+        # link every localization in each pick
+        lib.start_phase(progress, "Combining picks", len(pl), unit="pick")
+        progress.set_value(0)
+        out_locs = []
+        for i, pick_locs in enumerate(pl):
+            pick_locs_out = link(
+                pick_locs,
+                info,
+                r_max=r_max,
+                max_dark_time=max_dark,
+                remove_ambiguous_lengths=False,
+            )
+            if len(pick_locs_out):
+                out_locs.append(pick_locs_out)
+            progress.set_value(i + 1)
+        progress.set_value(len(pl))
     out_locs = pd.concat(out_locs, ignore_index=True)
     return out_locs
 
@@ -4228,7 +4213,7 @@ def segment(
     info: list[dict],
     segmentation: int,
     kwargs: dict = {},
-    callback: Callable[[int], None] = None,
+    progress: lib.Progress | Literal["console"] | None = None,
 ) -> tuple[lib.IntArray1D, lib.FloatArray3D]:
     """Split localizations into temporal segments (number of segments
     is defined by the segmentation parameter) and render each segment
@@ -4246,10 +4231,11 @@ def segment(
         Additional keyword arguments for the rendering function, e.g.,
         ``disp_px_size`` (nm, default ``UNDRIFT_PIXEL_SIZE``) and
         ``min_blur_width`` (nm). Default is an empty dictionary.
-    callback : Callable[[int], None], optional
-        Callback function to report progress. It should accept an
-        integer argument representing the current segment index.
-        Default is None, which means no callback is used.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports "Generating segments" over the
+        segments. Default is None.
 
     Returns
     -------
@@ -4270,20 +4256,20 @@ def segment(
     n_seg = n_segments(info, segmentation)
     bounds = np.linspace(0, n_frames - 1, n_seg + 1, dtype=np.uint32)
     segments = np.zeros((n_seg, n_pixel_y, n_pixel_x))
-    if callback is None:
-        it = trange(n_seg, desc="Generating segments", unit="segments")
-    else:
-        callback(0)
-        it = range(n_seg)
-    for i in it:
-        segment_locs = locs[
-            (locs["frame"] >= bounds[i]) & (locs["frame"] < bounds[i + 1])
-        ]
-        _, segments[i] = render.render(
-            segment_locs, info, disp_px_size=disp_px_size, **kwargs
-        )
-        if callback is not None:
-            callback(i + 1)
+    with lib.tracked_progress(
+        progress, "Generating segments", unit="segment"
+    ) as progress:
+        lib.start_phase(progress, "Generating segments", n_seg, unit="segment")
+        progress.set_value(0)
+        for i in range(n_seg):
+            segment_locs = locs[
+                (locs["frame"] >= bounds[i]) & (locs["frame"] < bounds[i + 1])
+            ]
+            _, segments[i] = render.render(
+                segment_locs, info, disp_px_size=disp_px_size, **kwargs
+            )
+            progress.set_value(i + 1)
+        progress.set_value(n_seg)
     return bounds, segments
 
 
@@ -4292,8 +4278,7 @@ def undrift(
     info: list[dict],
     segmentation: int,
     display: bool = True,
-    segmentation_callback: Callable[[int], None] = None,
-    rcc_callback: Callable[[int], None] = None,
+    progress: lib.Progress | Literal["console"] | None = None,
     *,
     disp_px_size: float = UNDRIFT_PIXEL_SIZE,
     max_shift: float = UNDRIFT_MAX_SHIFT,
@@ -4311,14 +4296,12 @@ def undrift(
         Number of segments to divide the data into for undrifting.
     display : bool, optional
         If True, displays the estimated drift. Default is True.
-    segmentation_callback : Callable[[int], None], optional
-        Callback function to report progress during segmentation. It
-        should accept an integer argument representing the current
-        segment index. Default is None, which means no callback is used.
-    rcc_callback : Callable[[int], None], optional
-        Callback function to report progress during RCC calculation.
-        It should accept an integer argument representing the current
-        segment index. Default is None, which means no callback is used.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports "Generating segments" over the
+        segments, then "Correlating image pairs" over the segment pairs.
+        Default is None.
     disp_px_size : float, optional
         Pixel size (nm) of the rendered segments, which are blurred by
         one pixel. Default is 100.
@@ -4335,21 +4318,24 @@ def undrift(
         and 'y' coordinates.
     """
     locs = locs.copy()
-    bounds, segments = segment(
-        locs,
-        info,
-        segmentation,
-        {
-            "disp_px_size": disp_px_size,
-            "blur_method": "gaussian",
-            "min_blur_width": disp_px_size,  # one rendered pixel
-        },
-        segmentation_callback,
-    )
-    # rcc works in rendered pixels; the shifts are converted to nm
-    shift_y, shift_x = imageprocess.rcc(
-        segments, max_shift / disp_px_size, rcc_callback
-    )
+    with lib.tracked_progress(
+        progress, "Generating segments", unit="segment"
+    ) as progress:
+        bounds, segments = segment(
+            locs,
+            info,
+            segmentation,
+            {
+                "disp_px_size": disp_px_size,
+                "blur_method": "gaussian",
+                "min_blur_width": disp_px_size,  # one rendered pixel
+            },
+            progress=progress,
+        )
+        # rcc works in rendered pixels; the shifts are converted to nm
+        shift_y, shift_x = imageprocess.rcc(
+            segments, max_shift / disp_px_size, progress=progress
+        )
     shift_x = np.asarray(shift_x, dtype=np.float64) * disp_px_size
     shift_y = np.asarray(shift_y, dtype=np.float64) * disp_px_size
     t = (bounds[1:] + bounds[:-1]) / 2
@@ -4375,7 +4361,7 @@ def undrift_from_fiducials(
     ] = "Circle",
     undrift_z: bool = True,
     index_blocks: tuple | None = None,
-    progress: lib.ProgressDialog | Literal["console"] | None = None,
+    progress: lib.Progress | Literal["console"] | None = None,
 ) -> tuple[pd.DataFrame, list[dict], pd.DataFrame]:
     """Undrift localizations based on picked regions (fiducial markers).
 
@@ -4410,11 +4396,13 @@ def undrift_from_fiducials(
         circular ``picked_locs``. Ignored for every other pick shape,
         and when ``picks`` is None (auto-detected fiducials use a radius
         that may not match the precomputed index). Default is None.
-    progress : picasso.lib.ProgressDialog or "console" or None, optional
-        Tracks progress of picking the localizations, one step per pick.
-        If "console", a tqdm progress bar is shown in the console. If a
-        ProgressDialog, a GUI progress bar is updated. If None (default),
-        no progress is displayed. Same convention as ``picasso.aim.aim``.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports "Finding fiducials" (busy
+        indicator, only when ``picks`` is None), then "Picking
+        localizations" over the picks, then "Calculating drift" (busy
+        indicator). Default is None.
 
     Returns
     -------
@@ -4436,55 +4424,56 @@ def undrift_from_fiducials(
     ), f"pick_shape must be one of {lib.PICK_SHAPES}."
     locs = locs.copy()
 
-    if picks is None:
-        # auto-detect fiducials; these are always circular
-        picks, box = imageprocess.find_fiducials(locs, info)
-        pick_shape = "Circle"
-        pick_radius = box / 2
-        # passed-in index_blocks was built for a different radius; drop
-        # (the pyramid serves any radius)
-        if not _is_pyramid(index_blocks):
+    with lib.tracked_progress(
+        progress, "Picking localizations", unit="pick"
+    ) as progress:
+        if picks is None:
+            # auto-detect fiducials; these are always circular
+            lib.start_phase(progress, "Finding fiducials", 0)
+            progress.set_value(0)
+            picks, box = imageprocess.find_fiducials(locs, info)
+            progress.set_value(0)
+            pick_shape = "Circle"
+            pick_radius = box / 2
+            # passed-in index_blocks was built for a different radius;
+            # drop (the pyramid serves any radius)
+            if not _is_pyramid(index_blocks):
+                index_blocks = None
+        else:
+            # user-provided list of pick coordinates
+            needs_size = pick_shape not in lib.PICK_SHAPES_WITHOUT_SIZE
+            if pick_size is None and needs_size:
+                raise ValueError(
+                    "pick_size (radius in nm for circular picks) "
+                    "must be provided when picks are given as a list of "
+                    "coordinates."
+                )
+            pick_radius = pick_size
+
+        if pick_shape != "Circle":
+            # the index is built for circular lookups only
             index_blocks = None
-    else:
-        # user-provided list of pick coordinates
-        needs_size = pick_shape not in lib.PICK_SHAPES_WITHOUT_SIZE
-        if pick_size is None and needs_size:
-            raise ValueError(
-                "pick_size (radius in nm for circular picks) "
-                "must be provided when picks are given as a list of "
-                "coordinates."
-            )
-        pick_radius = pick_size
 
-    if pick_shape != "Circle":
-        # the index is built for circular lookups only
-        index_blocks = None
+        if len(picks) == 0:
+            raise ValueError("No picks found for drift correction.")
 
-    if len(picks) == 0:
-        raise ValueError("No picks found for drift correction.")
+        # get picked localizations
+        pl = picked_locs(
+            locs,
+            info,
+            picks,
+            pick_shape,
+            pick_size=pick_radius,
+            add_group=False,
+            index_blocks=index_blocks,
+            progress=progress,
+        )
 
-    # get picked localizations
-    progress = lib.normalize_progress(
-        progress, description="Picking localizations", unit="pick"
-    )
-    progress.setMaximum(len(picks))
-    progress.zero_progress("Picking localizations")
-    pl = picked_locs(
-        locs,
-        info,
-        picks,
-        pick_shape,
-        pick_size=pick_radius,
-        add_group=False,
-        index_blocks=index_blocks,
-        callback=progress.set_value,
-    )
-
-    # calculate drift
-    progress.setMaximum(0)
-    progress.zero_progress("Calculating drift")
-    drift = undrift_from_picked(pl, info)
-    progress.close()
+        # calculate drift
+        lib.start_phase(progress, "Calculating drift", 0)
+        progress.set_value(0)
+        drift = undrift_from_picked(pl, info)
+        progress.set_value(0)
     if not undrift_z:
         drift = drift.drop(columns="z", errors="ignore")
     locs = apply_drift(locs, info, drift=drift)
@@ -4926,9 +4915,7 @@ def _rcc_shifts(
             blur_method="smooth",
         )
         images.append(image)
-    shift_y, shift_x = imageprocess.rcc(
-        images, callback=lib.MockProgress().set_value
-    )
+    shift_y, shift_x = imageprocess.rcc(images)
     # `rcc` returns shifts in rendered-image pixels; convert them to nm,
     # the units of the localizations' 'x' and 'y' coordinates
     shift_x = np.asarray(shift_x, dtype=float) * disp_px_size
@@ -5254,7 +5241,7 @@ def _shifts_from_picked_coordinate(
 
 def groupprops(
     locs: pd.DataFrame,
-    callback: Callable[[int], None] | Literal["console"] | None = None,
+    progress: lib.Progress | Literal["console"] | None = None,
 ) -> pd.DataFrame:
     """Calculate group statistics for localizations, such as mean and
     standard deviation.
@@ -5263,21 +5250,21 @@ def groupprops(
     ----------
     locs : pd.DataFrame
         Localizations with a 'group' field that defines the groups.
-    callback : callable, "console" or None, optional
-        Callback function to report progress. It should accept an
-        integer argument representing the current group index. If
-        "console", uses tqdm to display progress in the console.
-        Default is None, which means no progress is reported.
+        Binding events with ``dark == -1`` (no preceding event, see
+        ``compute_dark_times``) are excluded if a 'dark' column exists.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports "Calculating group properties"
+        over the groups. Default is None.
 
     Returns
     -------
     groups : pd.DataFrame
         Group statistics for each group in the localization list.
     """
-    try:
+    if "dark" in locs.columns:
         locs = locs[locs["dark"] != -1]
-    except AttributeError:
-        pass
     group_ids = np.unique(locs["group"])
     n = len(group_ids)
     names = ["group", "n_events"] + list(
@@ -5285,29 +5272,23 @@ def groupprops(
     )
     groups = pd.DataFrame(np.empty((n, len(names))), columns=names)
 
-    # progress reporting
-    use_tqdm = callback == "console"
-    if use_tqdm:
-        iter_range = tqdm(
-            total=len(group_ids),
-            desc="Calculating group statistics",
-            unit="Groups",
+    with lib.tracked_progress(
+        progress, "Calculating group properties", unit="group"
+    ) as progress:
+        lib.start_phase(
+            progress, "Calculating group properties", n, unit="group"
         )
-    else:
-        iter_range = range(len(group_ids))
-
-    for i in iter_range:
-        if callable(callback):
-            callback(i)
-        group_id = group_ids[i]
-        group_locs = locs[locs["group"] == group_id]
-        groups.loc[i, "group"] = group_id
-        groups.loc[i, "n_events"] = len(group_locs)
-        for name in locs.columns:
-            groups.loc[i, name + "_mean"] = group_locs[name].mean()
-            groups.loc[i, name + "_std"] = group_locs[name].std()
-    if callable(callback):  # close the progress dialog
-        callback(len(group_ids))
+        progress.set_value(0)
+        for i in range(n):
+            group_id = group_ids[i]
+            group_locs = locs[locs["group"] == group_id]
+            groups.loc[i, "group"] = group_id
+            groups.loc[i, "n_events"] = len(group_locs)
+            for name in locs.columns:
+                groups.loc[i, name + "_mean"] = group_locs[name].mean()
+                groups.loc[i, name + "_std"] = group_locs[name].std()
+            progress.set_value(i + 1)
+        progress.set_value(n)
 
     # set dtypes
     groups = groups.astype(
@@ -5456,9 +5437,7 @@ def cbc(
     undefined: float = 0.0,
     remove_undefined: bool = False,
     chunk_size: int = 20_000,
-    progress_callback: (
-        Callable[[int], None] | Literal["console"] | None
-    ) = None,
+    progress: lib.Progress | Literal["console"] | None = None,
 ) -> tuple[pd.DataFrame, list[dict]]:
     """Coordinate-based colocalization (CBC) of localizations with one
     or more partner localization lists, following Malkusch, et al.
@@ -5520,10 +5499,11 @@ def cbc(
     chunk_size : int, optional
         Number of localizations processed at once, limits memory usage.
         Default is 20,000.
-    progress_callback : {callable, "console", None}, optional
-        Called with the number of localizations of ``locs`` processed
-        so far (up to ``len(locs)``). If "console", a progress bar is
-        printed. If None, no progress is reported. Default is None.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports "Calculating CBC" over the
+        localizations of ``locs``. Default is None.
 
     Returns
     -------
@@ -5581,8 +5561,11 @@ def cbc(
         columns = [_cbc_column(name) for name in partner_names]
     use_z = _validate_cbc_args([locs] + partners, columns, r_max, steps, use_z)
     _warn_if_not_linked([locs] + partners)
-    callback, close = _progress_counter(progress_callback, len(locs))
-    try:
+    with lib.tracked_progress(
+        progress, "Calculating CBC", unit="loc"
+    ) as progress:
+        lib.start_phase(progress, "Calculating CBC", len(locs), unit="loc")
+        progress.set_value(0)
         new_locs, new_info = _cbc_channel(
             locs,
             info,
@@ -5595,10 +5578,9 @@ def cbc(
             undefined,
             remove_undefined,
             chunk_size,
-            callback,
+            progress,
         )
-    finally:
-        close()
+        progress.set_value(len(locs))
     return new_locs, new_info
 
 
@@ -5612,9 +5594,7 @@ def cbc_all_pairs(
     undefined: float = 0.0,
     remove_undefined: bool = False,
     chunk_size: int = 20_000,
-    progress_callback: (
-        Callable[[int], None] | Literal["console"] | None
-    ) = None,
+    progress: lib.Progress | Literal["console"] | None = None,
 ) -> tuple[list[pd.DataFrame], list[list[dict]]]:
     """Coordinate-based colocalization (CBC) of every channel against
     every other channel, following Malkusch, et al. (2012), see
@@ -5654,11 +5634,11 @@ def cbc_all_pairs(
     chunk_size : int, optional
         Number of localizations processed at once, limits memory usage.
         Default is 20,000.
-    progress_callback : {callable, "console", None}, optional
-        Called with the number of localizations of all channels
-        processed so far (up to the total number of localizations). If
-        "console", a progress bar is printed. If None, no progress is
-        reported. Default is None.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports "Calculating CBC" over the
+        localizations of all channels. Default is None.
 
     Returns
     -------
@@ -5712,15 +5692,15 @@ def cbc_all_pairs(
     _warn_if_not_linked(locs)
 
     total = sum(len(locs_) for locs_ in locs)
-    callback, close = _progress_counter(progress_callback, total)
     out_locs, out_infos = [], []
     offset = 0
-    try:
+    with lib.tracked_progress(
+        progress, "Calculating CBC", unit="loc"
+    ) as progress:
+        lib.start_phase(progress, "Calculating CBC", total, unit="loc")
+        progress.set_value(0)
         for i in range(n_channels):
             others = [j for j in range(n_channels) if j != i]
-            channel_callback = None
-            if callback is not None:
-                channel_callback = partial(_offset_callback, callback, offset)
             new_locs, new_info = _cbc_channel(
                 locs[i],
                 infos[i],
@@ -5733,20 +5713,15 @@ def cbc_all_pairs(
                 undefined,
                 remove_undefined,
                 chunk_size,
-                channel_callback,
+                progress,
+                offset,
             )
             new_info[-1]["CBC name"] = names[i]
             out_locs.append(new_locs)
             out_infos.append(new_info)
             offset += len(locs[i])
-    finally:
-        close()
+        progress.set_value(total)
     return out_locs, out_infos
-
-
-def _offset_callback(callback: Callable[[int], None], offset: int, value):
-    """Report ``value`` shifted by ``offset`` to ``callback``."""
-    callback(offset + value)
 
 
 def _validate_cbc_args(
@@ -5788,25 +5763,6 @@ def _warn_if_not_linked(all_locs: list[pd.DataFrame]) -> None:
         )
 
 
-def _progress_counter(
-    progress_callback: Callable[[int], None] | Literal["console"] | None,
-    total: int,
-    desc: str = "CBC",
-    unit: str = "loc",
-) -> tuple[Callable[[int], None] | None, Callable[[], None]]:
-    """A progress callback taking the cumulative number of processed
-    items (localizations by default), and a function that closes it.
-    "console" prints a progress bar labeled ``desc``."""
-    if progress_callback != "console":
-        return progress_callback, lambda: None
-    pbar = tqdm(total=total, desc=desc, unit=unit, unit_scale=True)
-
-    def callback(value: int) -> None:
-        pbar.update(value - pbar.n)
-
-    return callback, pbar.close
-
-
 def _cbc_channel(
     locs: pd.DataFrame,
     info: list[dict],
@@ -5819,10 +5775,12 @@ def _cbc_channel(
     undefined: float,
     remove_undefined: bool,
     chunk_size: int,
-    progress_callback: Callable[[int], None] | None,
+    progress: lib.Progress,
+    offset: int = 0,
 ) -> tuple[pd.DataFrame, list[dict]]:
     """CBC of one channel against its partners, with validated
-    parameters. See ``cbc``."""
+    parameters. See ``cbc``. ``progress`` is set to ``offset`` plus the
+    number of localizations processed after each chunk."""
     coords = _cbc_coords(locs, use_z)
     partner_coords = [_cbc_coords(p, use_z) for p in partners]
     values, defined = _cbc(
@@ -5832,7 +5790,8 @@ def _cbc_channel(
         steps,
         undefined,
         chunk_size,
-        progress_callback,
+        progress,
+        offset,
     )
     locs = locs.copy()
     for column, cbc_values in zip(columns, values):
@@ -5879,14 +5838,16 @@ def _cbc(
     steps: int,
     undefined: float,
     chunk_size: int,
-    progress_callback: Callable[[int], None] | None,
+    progress: lib.Progress,
+    offset: int = 0,
 ) -> tuple[list[lib.FloatArray1D], list[lib.BoolArray1D]]:
     """CBC values of ``coords`` against each array in
     ``partner_coords`` (all in nm), and whether they are defined (the
     localization has neighbors of both channels within ``r_max``), see
     ``cbc`` for details. The localizations are processed in chunks; the
     neighbor counts within the own channel are computed once per chunk
-    for all partners."""
+    for all partners. After each chunk, ``progress`` is set to ``offset``
+    plus the number of localizations processed."""
     n = len(coords)
     radii = np.linspace(r_max / steps, r_max, steps)  # 0 excluded
     # D(r) normalizes N(r) by the area (2D) or volume (3D) searched:
@@ -5926,8 +5887,7 @@ def _cbc(
             e_ab, _ = partner_tree.query(coords[idx], k=1)
             cbc_values[idx] = s * np.exp(-e_ab / r_max)
             cbc_defined[idx] = True
-        if progress_callback is not None:
-            progress_callback(stop)
+        progress.set_value(offset + stop)
     return values, defined
 
 
@@ -6819,7 +6779,7 @@ def _pair_statistic(
     partner_locs: pd.DataFrame | None,
     cross_null: Literal["shift", "labels"],
     random_seed: int | None,
-    progress_callback: Callable[[int], None] | Literal["console"] | None,
+    progress: lib.Progress,
 ) -> dict:
     """Ripley's H function (``statistic="h"``) or the radial
     distribution function (``"g"``) of localizations in regions of
@@ -6827,7 +6787,10 @@ def _pair_statistic(
     envelope of the simulations; shared by ``ripley_h`` and ``rdf``,
     see there for the parameters. Returns the radii ("r"), the
     function of each region ("values") and their mean ("mean") along
-    with the keys common to both results."""
+    with the keys common to both results. ``progress`` (a normalized
+    tracker) reports "Calculating Ripley's H" (or "Calculating RDF")
+    over the regions, then "Simulating envelope" over the
+    simulations."""
     cross = partner_locs is not None
     if r_max <= 0:
         raise ValueError("r_max must be positive.")
@@ -6881,116 +6844,112 @@ def _pair_statistic(
     z_ranges = np.full((n_regions, 2), np.nan)
     # coordinates of each channel's localizations in each region
     region_points = [None] * n_regions
-    callback, close = _progress_counter(
-        progress_callback,
-        n_regions * (n_simulations + 1),
-        desc="Ripley's H" if statistic == "h" else "RDF",
-        unit="function",
-    )
-    done = 0
-    try:
-        for k, region in enumerate(regions):
-            if region is not None:
-                areas[k] = region.area
-                points = []
-                for x_all, y_all, z_all in coordinates:
-                    inside = _locs_in_region(x_all, y_all, region)
-                    if use_z and z_range is not None:
-                        z = z_all[inside]
-                        inside = inside[(z >= z_range[0]) & (z <= z_range[1])]
-                    points.append(
-                        (
-                            x_all[inside],
-                            y_all[inside],
-                            z_all[inside] if use_z else None,
-                        )
-                    )
-                n_locs[:, k] = [len(x) for x, _, _ in points]
+    label = "Calculating Ripley's H" if statistic == "h" else "Calculating RDF"
+    lib.start_phase(progress, label, n_regions, unit="region")
+    progress.set_value(0)
+    for k, region in enumerate(regions):
+        if region is not None:
+            areas[k] = region.area
+            points = []
+            for x_all, y_all, z_all in coordinates:
+                inside = _locs_in_region(x_all, y_all, region)
                 if use_z and z_range is not None:
-                    z_ranges[k] = z_range
-                elif use_z and n_locs[:, k].sum():
-                    z = np.concatenate([z for _, _, z in points])
-                    z_ranges[k] = z.min(), z.max()
-                region_points[k] = points
-                # in 3D, the region needs a depth
-                has_size = not use_z or z_ranges[k, 1] > z_ranges[k, 0]
-                enough = (
-                    n_locs[:, k].min() >= 1 if cross else n_locs[0, k] >= 2
-                )
-                if enough and has_size:
-                    values[k] = _pair_statistic_region(
-                        *points[0],
-                        region,
-                        tuple(z_ranges[k]),
-                        r_max,
-                        steps,
-                        edge_correction,
-                        statistic,
-                        points[1] if cross else None,
+                    z = z_all[inside]
+                    inside = inside[(z >= z_range[0]) & (z <= z_range[1])]
+                points.append(
+                    (
+                        x_all[inside],
+                        y_all[inside],
+                        z_all[inside] if use_z else None,
                     )
-            done += 1
-            if callback is not None:
-                callback(done)
-        valid = np.flatnonzero(~np.isnan(values[:, 0]))
-        if not len(valid):
-            raise ValueError(
-                (
-                    "No region contains localizations of both channels"
-                    if cross
-                    else "No region contains at least two localizations"
                 )
-                + (" at different z." if use_z else ".")
+            n_locs[:, k] = [len(x) for x, _, _ in points]
+            if use_z and z_range is not None:
+                z_ranges[k] = z_range
+            elif use_z and n_locs[:, k].sum():
+                z = np.concatenate([z for _, _, z in points])
+                z_ranges[k] = z.min(), z.max()
+            region_points[k] = points
+            # in 3D, the region needs a depth
+            has_size = not use_z or z_ranges[k, 1] > z_ranges[k, 0]
+            enough = n_locs[:, k].min() >= 1 if cross else n_locs[0, k] >= 2
+            if enough and has_size:
+                values[k] = _pair_statistic_region(
+                    *points[0],
+                    region,
+                    tuple(z_ranges[k]),
+                    r_max,
+                    steps,
+                    edge_correction,
+                    statistic,
+                    points[1] if cross else None,
+                )
+        progress.set_value(k + 1)
+    progress.set_value(n_regions)
+    valid = np.flatnonzero(~np.isnan(values[:, 0]))
+    if not len(valid):
+        raise ValueError(
+            (
+                "No region contains localizations of both channels"
+                if cross
+                else "No region contains at least two localizations"
             )
-        mean = values[valid].mean(axis=0)
-        if use_z:
-            depths = z_ranges[valid, 1] - z_ranges[valid, 0]
-            n_thin = int((3 * r_max > depths).sum())
-            if n_thin:
-                warnings.warn(
-                    f"r_max ({r_max:g} nm) exceeds a third of the z range "
-                    f"of {n_thin} of {len(valid)} regions (smallest z "
-                    f"range: {depths.min():.0f} nm); {statistic.upper()} at "
-                    "large radii relies on large edge correction weights and "
-                    "is noisy.",
-                    UserWarning,
-                    stacklevel=3,
-                )
+            + (" at different z." if use_z else ".")
+        )
+    mean = values[valid].mean(axis=0)
+    if use_z:
+        depths = z_ranges[valid, 1] - z_ranges[valid, 0]
+        n_thin = int((3 * r_max > depths).sum())
+        if n_thin:
+            warnings.warn(
+                f"r_max ({r_max:g} nm) exceeds a third of the z range "
+                f"of {n_thin} of {len(valid)} regions (smallest z "
+                f"range: {depths.min():.0f} nm); {statistic.upper()} at "
+                "large radii relies on large edge correction weights and "
+                "is noisy.",
+                UserWarning,
+                stacklevel=3,
+            )
 
-        envelope_low = envelope_high = None
-        if n_simulations:
-            rng = np.random.default_rng(random_seed)
-            simulated = np.zeros((n_simulations, steps))
-            for s in range(n_simulations):
-                for k in valid:
-                    region = regions[k]
-                    z_range_k = tuple(z_ranges[k])
-                    points = _simulated_points(
-                        region_points[k],
-                        region,
-                        z_range_k,
-                        cross,
-                        cross_null,
-                        simulated_z,
-                        rng,
-                    )
-                    simulated[s] += _pair_statistic_region(
-                        *points[0],
-                        region,
-                        z_range_k,
-                        r_max,
-                        steps,
-                        edge_correction,
-                        statistic,
-                        points[1] if cross else None,
-                    )
-                simulated[s] /= len(valid)
-                done += n_regions
-                if callback is not None:
-                    callback(done)
-            envelope_low = simulated.min(axis=0)
-            envelope_high = simulated.max(axis=0)
-    finally:
-        close()
+    envelope_low = envelope_high = None
+    if n_simulations:
+        rng = np.random.default_rng(random_seed)
+        simulated = np.zeros((n_simulations, steps))
+        lib.start_phase(
+            progress,
+            "Simulating envelope",
+            n_simulations,
+            unit="simulation",
+        )
+        progress.set_value(0)
+        for s in range(n_simulations):
+            for k in valid:
+                region = regions[k]
+                z_range_k = tuple(z_ranges[k])
+                points = _simulated_points(
+                    region_points[k],
+                    region,
+                    z_range_k,
+                    cross,
+                    cross_null,
+                    simulated_z,
+                    rng,
+                )
+                simulated[s] += _pair_statistic_region(
+                    *points[0],
+                    region,
+                    z_range_k,
+                    r_max,
+                    steps,
+                    edge_correction,
+                    statistic,
+                    points[1] if cross else None,
+                )
+            simulated[s] /= len(valid)
+            progress.set_value(s + 1)
+        progress.set_value(n_simulations)
+        envelope_low = simulated.min(axis=0)
+        envelope_high = simulated.max(axis=0)
 
     return {
         "r": r,
@@ -7069,9 +7028,7 @@ def ripley_h(
     partner_locs: pd.DataFrame | None = None,
     cross_null: Literal["shift", "labels"] = "shift",
     random_seed: int | None = 0,
-    progress_callback: (
-        Callable[[int], None] | Literal["console"] | None
-    ) = None,
+    progress: lib.Progress | Literal["console"] | None = None,
 ) -> dict:
     """Ripley's H function of localizations in regions of interest,
     which shows whether molecules are clustered, randomly distributed
@@ -7198,11 +7155,12 @@ def ripley_h(
     random_seed : int or None, optional
         Seed of the CSR simulations. None gives a different envelope
         on each call. Default is 0.
-    progress_callback : {callable, "console", None}, optional
-        Called with the number of H functions computed so far, up to
-        ``n_regions * (n_simulations + 1)``. If "console", a progress
-        bar is printed. If None, no progress is reported. Default is
-        None.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports "Calculating Ripley's H" over
+        the regions, then (if ``n_simulations > 0``) "Simulating
+        envelope" over the simulations. Default is None.
 
     Returns
     -------
@@ -7265,25 +7223,28 @@ def ripley_h(
     processes of several types of points. J R Stat Soc B 44, 406-413
     (1982). https://doi.org/10.1111/j.2517-6161.1982.tb01221.x
     """
-    result = _pair_statistic(
-        locs,
-        info,
-        picks,
-        pick_shape,
-        pick_size,
-        "h",
-        r_max=r_max,
-        steps=steps,
-        edge_correction=edge_correction,
-        n_simulations=n_simulations,
-        use_z=use_z,
-        z_range=z_range,
-        simulated_z=simulated_z,
-        partner_locs=partner_locs,
-        cross_null=cross_null,
-        random_seed=random_seed,
-        progress_callback=progress_callback,
-    )
+    with lib.tracked_progress(
+        progress, "Calculating Ripley's H", unit="region"
+    ) as progress:
+        result = _pair_statistic(
+            locs,
+            info,
+            picks,
+            pick_shape,
+            pick_size,
+            "h",
+            r_max=r_max,
+            steps=steps,
+            edge_correction=edge_correction,
+            n_simulations=n_simulations,
+            use_z=use_z,
+            z_range=z_range,
+            simulated_z=simulated_z,
+            partner_locs=partner_locs,
+            cross_null=cross_null,
+            random_seed=random_seed,
+            progress=progress,
+        )
     h = result["values"]
     valid = ~np.isnan(h[:, 0])
     r_h_max = np.full(len(h), np.nan)
@@ -7328,9 +7289,7 @@ def rdf(
     partner_locs: pd.DataFrame | None = None,
     cross_null: Literal["shift", "labels"] = "shift",
     random_seed: int | None = 0,
-    progress_callback: (
-        Callable[[int], None] | Literal["console"] | None
-    ) = None,
+    progress: lib.Progress | Literal["console"] | None = None,
 ) -> dict:
     """Radial distribution function (RDF), also called pair
     correlation function, g(r), of localizations in regions of
@@ -7419,11 +7378,12 @@ def rdf(
     random_seed : int or None, optional
         Seed of the CSR simulations. None gives a different envelope
         on each call. Default is 0.
-    progress_callback : {callable, "console", None}, optional
-        Called with the number of functions computed so far, up to
-        ``n_regions * (n_simulations + 1)``. If "console", a progress
-        bar is printed. If None, no progress is reported. Default is
-        None.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports "Calculating RDF" over the
+        regions, then (if ``n_simulations > 0``) "Simulating envelope"
+        over the simulations. Default is None.
 
     Returns
     -------
@@ -7470,25 +7430,28 @@ def rdf(
     processes of several types of points. J R Stat Soc B 44, 406-413
     (1982). https://doi.org/10.1111/j.2517-6161.1982.tb01221.x
     """
-    result = _pair_statistic(
-        locs,
-        info,
-        picks,
-        pick_shape,
-        pick_size,
-        "g",
-        r_max=r_max,
-        steps=steps,
-        edge_correction=edge_correction,
-        n_simulations=n_simulations,
-        use_z=use_z,
-        z_range=z_range,
-        simulated_z=simulated_z,
-        partner_locs=partner_locs,
-        cross_null=cross_null,
-        random_seed=random_seed,
-        progress_callback=progress_callback,
-    )
+    with lib.tracked_progress(
+        progress, "Calculating RDF", unit="region"
+    ) as progress:
+        result = _pair_statistic(
+            locs,
+            info,
+            picks,
+            pick_shape,
+            pick_size,
+            "g",
+            r_max=r_max,
+            steps=steps,
+            edge_correction=edge_correction,
+            n_simulations=n_simulations,
+            use_z=use_z,
+            z_range=z_range,
+            simulated_z=simulated_z,
+            partner_locs=partner_locs,
+            cross_null=cross_null,
+            random_seed=random_seed,
+            progress=progress,
+        )
     return {
         "r": result["r"],
         "g": result["values"],
@@ -7762,9 +7725,7 @@ def nnd_distributions(
     simulated_z: Literal["uniform", "observed"] = "uniform",
     cross_null: Literal["shift", "labels"] = "shift",
     random_seed: int | None = 0,
-    progress_callback: (
-        Callable[[int], None] | Literal["console"] | None
-    ) = None,
+    progress: lib.Progress | Literal["console"] | None = None,
 ) -> dict:
     """Distributions of the first nearest neighbor distances (NNDs)
     within and between channels in regions of interest, with the
@@ -7844,11 +7805,12 @@ def nnd_distributions(
     random_seed : int or None, optional
         Seed of the simulations. None gives different simulations on
         each call. Default is 0.
-    progress_callback : {callable, "console", None}, optional
-        Called with the number of regions processed so far, up to
-        ``n_regions * (n_simulations + 1)``. If "console", a progress
-        bar is printed. If None, no progress is reported. Default is
-        None.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports "Calculating NNDs" over the
+        regions, then (if ``n_simulations > 0``) "Simulating envelope"
+        over the simulations. Default is None.
 
     Returns
     -------
@@ -7945,15 +7907,12 @@ def nnd_distributions(
     nnds = {pair: [] for pair in pairs}
     region_points = []  # (region, z range, points of each channel)
     n_regions = len(regions)
-    callback, close = _progress_counter(
-        progress_callback,
-        n_regions * (n_simulations + 1),
-        desc="NNDs",
-        unit="region",
-    )
-    done = 0
-    try:
-        for region in regions:
+    with lib.tracked_progress(
+        progress, "Calculating NNDs", unit="region"
+    ) as progress:
+        lib.start_phase(progress, "Calculating NNDs", n_regions, unit="region")
+        progress.set_value(0)
+        for k, region in enumerate(regions):
             data = _nnd_region_points(region, coordinates, use_z, z_range)
             if data is not None:
                 points = data[1]
@@ -7963,9 +7922,8 @@ def nnd_distributions(
                     counts[a, b] += np.histogram(region_nnds, edges)[0]
                     n_molecules[a, b] += len(region_nnds)
                 region_points.append((region, *data))
-            done += 1
-            if callback is not None:
-                callback(done)
+            progress.set_value(k + 1)
+        progress.set_value(n_regions)
         if not n_molecules.any():
             raise ValueError(
                 "No region contains two molecules of a channel or "
@@ -7988,6 +7946,13 @@ def nnd_distributions(
             medians_sim = np.full(
                 (n_simulations, n_channels, n_channels), np.nan
             )
+            lib.start_phase(
+                progress,
+                "Simulating envelope",
+                n_simulations,
+                unit="simulation",
+            )
+            progress.set_value(0)
             for s in range(n_simulations):
                 sim_counts = np.zeros((n_channels, n_channels, steps))
                 sim_nnds = {pair: [] for pair in pairs}
@@ -8017,10 +7982,6 @@ def nnd_distributions(
                         region_nnds = _first_nnds(source, target, a == b)
                         sim_nnds[a, b].append(region_nnds)
                         sim_counts[a, b] += np.histogram(region_nnds, edges)[0]
-                    done += 1
-                    if callback is not None:
-                        callback(done)
-                done += n_regions - len(region_points)
                 with np.errstate(invalid="ignore", divide="ignore"):
                     simulated[s] = sim_counts / n_molecules[:, :, None]
                 for a, b in pairs:
@@ -8028,12 +7989,12 @@ def nnd_distributions(
                         medians_sim[s, a, b] = np.median(
                             np.concatenate(sim_nnds[a, b])
                         )
+                progress.set_value(s + 1)
+            progress.set_value(n_simulations)
             simulated_mean = simulated.mean(axis=0)
             envelope_low = simulated.min(axis=0)
             envelope_high = simulated.max(axis=0)
             simulated_medians = medians_sim.mean(axis=0)
-    finally:
-        close()
 
     return {
         "names": names,
@@ -8246,9 +8207,7 @@ def resi(
     output_paths: list[str] | None = None,
     suffix_locs: str = "_clustered",
     suffix_centers: str = "_cluster_centers",
-    progress_callback: (
-        Callable[[int], None] | Literal["console"] | None
-    ) = None,
+    progress: lib.Progress | Literal["console"] | None = None,
 ) -> tuple[pd.DataFrame, list[dict]]:
     """Perform RESI (REsolution by Sequential Imaging) analysis on
     multiple channels.
@@ -8298,11 +8257,13 @@ def resi(
     suffix_centers : str, optional
         Suffix appended to output_paths for saved cluster centers from
         individual channels. Default is "_cluster_centers".
-    progress_callback : {callable, "console", None}, optional
-        Callback function to report progress where the input integer is
-        the index of the channel currently processed. If "console", uses
-        a simple console print. If None, no progress is reported.
-        Default is None.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports, for each channel in turn, the
+        phases of ``clusterer.cluster`` ("Clustering" over the
+        localizations) and ``clusterer.find_cluster_centers``
+        ("Finding cluster centers" over the clusters). Default is None.
 
     Returns
     -------
@@ -8365,21 +8326,22 @@ def resi(
             f"min_locs list length ({len(min_locs)}) must match "
             f"number of channels ({n_channels})"
         )
-    return _resi(
-        locs=locs,
-        infos=infos,
-        radius_xy=radius_xy,
-        radius_z=radius_z,
-        min_locs=min_locs,
-        apply_fa=apply_fa,
-        save_clustered_locs=save_clustered_locs,
-        save_cluster_centers=save_cluster_centers,
-        resi_path=resi_path,
-        output_paths=output_paths,
-        suffix_locs=suffix_locs,
-        suffix_centers=suffix_centers,
-        progress_callback=progress_callback,
-    )
+    with lib.tracked_progress(progress, "Clustering", unit="loc") as progress:
+        return _resi(
+            locs=locs,
+            infos=infos,
+            radius_xy=radius_xy,
+            radius_z=radius_z,
+            min_locs=min_locs,
+            apply_fa=apply_fa,
+            save_clustered_locs=save_clustered_locs,
+            save_cluster_centers=save_cluster_centers,
+            resi_path=resi_path,
+            output_paths=output_paths,
+            suffix_locs=suffix_locs,
+            suffix_centers=suffix_centers,
+            progress=progress,
+        )
 
 
 def _resi(
@@ -8395,26 +8357,17 @@ def _resi(
     output_paths: list[str] | None = None,
     suffix_locs: str = "_clustered",
     suffix_centers: str = "_cluster_centers",
-    progress_callback: (
-        Callable[[int], None] | Literal["console"] | None
-    ) = None,
+    progress: lib.Progress | None = None,
 ) -> tuple[pd.DataFrame, list[dict]]:
     """Internal function to perform RESI analysis, assumes all
     parameters are in the correct format and that there are at least 2
-    chennels. See `resi` for details."""
+    channels. See `resi` for details; ``progress`` is a normalized
+    tracker."""
     ndim = 3 if all(["z" in locs_.columns for locs_ in locs]) else 2
 
     # Process each channel
     resi_channels = []
-    if progress_callback == "console":
-        iter_range = tqdm(
-            total=len(locs), desc="Processing channels", unit="Channels"
-        )
-    else:
-        iter_range = range(len(locs))
-    for i in iter_range:
-        if callable(progress_callback):
-            progress_callback(i)
+    for i in range(len(locs)):
         locs_ = locs[i]
         info_ = infos[i]
         r_xy = radius_xy[i]
@@ -8428,6 +8381,7 @@ def _resi(
             min_locs=min_locs_,
             frame_analysis=apply_fa,
             radius_z=r_z if ndim == 3 else None,
+            progress=progress,
         )
 
         # Save clustered localizations if requested
@@ -8438,7 +8392,9 @@ def _resi(
             io.save_locs(save_path, clustered_locs, info_ + [new_info])
 
         # Extract cluster centers from clustered localizations
-        centers = clusterer.find_cluster_centers(clustered_locs)
+        centers = clusterer.find_cluster_centers(
+            clustered_locs, progress=progress
+        )
 
         # Save cluster centers if requested
         if save_cluster_centers and output_paths is not None:
@@ -8447,14 +8403,13 @@ def _resi(
             )
             io.save_locs(save_path, centers, info_ + [new_info])
 
-        # Add RESI channel ID to identify which channel this cluster belongs to
+        # Add RESI channel ID to identify which channel this cluster
+        # belongs to
         centers["resi_channel_id"] = i * np.ones(
             len(centers),
             dtype=np.int8,
         )
         resi_channels.append(centers)
-    if callable(progress_callback):  # close the progress dialog
-        progress_callback(len(locs))
 
     # Combine cluster centers from all channels; they carry the columns of
     # their channel's localizations, which need not all be the same

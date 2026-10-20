@@ -335,6 +335,50 @@ class TestLoaderUsesTheStoredIndex:
         assert spatial_index.validate_render_index(render_index, locs, info)
 
 
+class TestLoaderProgress:
+    """The loader hands ``io.load_locs`` a progress tracker that forwards
+    ``(done, total)`` via ``subprogress`` and doubles as the mid-file
+    cancellation point."""
+
+    def test_reports_the_read_up_to_the_total(self, qt_offscreen, tmp_path):
+        path = str(tmp_path / "locs.hdf5")
+        io.save_locs(path, _locs(), _info())
+        worker = gui_render.LocsLoadWorker([(path, None)])
+        reports = []
+        worker.subprogress.connect(lambda *args: reports.append(args))
+        worker.run()
+        assert reports[-1] == (2000, 2000)
+        done = [value for value, _ in reports]
+        assert done == sorted(done)
+
+    def test_canceled_tracker_aborts_the_read(self, qt_offscreen):
+        worker = gui_render.LocsLoadWorker([])
+        progress = gui_render._LoadProgress(worker)
+        progress.setMaximum(10)
+        progress.set_value(3)  # not canceled yet
+        worker.cancel()
+        with pytest.raises(gui_render._LoadCanceledError):
+            progress.set_value(4)
+
+    def test_cancel_error_is_not_caught_by_io(self):
+        # io retries a page scan that raised a RuntimeError
+        assert not issubclass(gui_render._LoadCanceledError, RuntimeError)
+
+    def test_cancel_during_the_read_loads_nothing(
+        self, qt_offscreen, tmp_path
+    ):
+        path = str(tmp_path / "locs.hdf5")
+        io.save_locs(path, _locs(), _info())
+        worker = gui_render.LocsLoadWorker([(path, None)])
+        loaded, finished = [], []
+        worker.subprogress.connect(lambda *args: worker.cancel())
+        worker.loaded.connect(lambda *args: loaded.append(args))
+        worker.finished.connect(lambda: finished.append(True))
+        worker.run()
+        assert loaded == []
+        assert finished == [True]
+
+
 class TestLoaderSplitsPyMEChannels:
     """A PyME file holds several channels (``probe`` column); the loader
     emits each as its own channel."""
@@ -412,6 +456,20 @@ class TestCircularPicksUseThePyramid:
                 check_like=True,
                 check_dtype=False,
             )
+
+    def test_progress_dialogs_are_closed(self, circle_view):
+        # functions never close a tracker passed in, so the view does
+        from picasso import lib_qt
+
+        view = circle_view
+        picked = view.picked_locs(0)
+        view.combine()
+        # one localization per non-empty pick
+        assert len(view.locs[0]) == sum(len(p) > 0 for p in picked)
+        assert not any(
+            isinstance(d, lib_qt.ProgressDialog) and d.parent() is view
+            for d in lib_qt._dialogs
+        )
 
     def test_pick_size_change_needs_no_reindexing(self, circle_view):
         view = circle_view

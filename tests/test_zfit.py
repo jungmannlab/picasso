@@ -27,6 +27,11 @@ matplotlib.use("Agg")
 
 from picasso import io, lib, localize, zfit  # noqa: E402
 
+from tests._progress_tracking import (  # noqa: E402
+    CancelingProgress,
+    RecordingProgress,
+    assert_phases_complete,
+)
 from tests.conftest import CALIB_3D, PIXELSIZE, affine  # noqa: E402
 
 # ---------------------------------------------------------------------------
@@ -340,6 +345,74 @@ class TestZfit:
             abort_callback=lambda: True,
         )
         assert out is None and info_out is None
+
+
+class TestZfitProgress:
+    """The ``progress`` argument of ``zfit``: one "Fitting z" phase over the
+    localizations, ending at their count on every path."""
+
+    N = 30
+
+    @pytest.fixture
+    def few_locs(self, locs):
+        return locs.head(self.N).reset_index(drop=True)
+
+    def test_serial_counts_fitted_locs(self, few_locs, info):
+        """Regression: the serial path reported the 0-based index of the
+        localization being fitted, so it never reached the count."""
+        tracker = RecordingProgress()
+        zfit.zfit(few_locs, info, calibration=dict(CALIB_3D), progress=tracker)
+        assert_phases_complete(tracker, ["Fitting z"])
+        phase = tracker.phases[0]
+        assert phase["maximum"] == self.N
+        assert phase["unit"] == "loc"
+        assert phase["values"][: self.N + 1] == list(range(self.N + 1))
+
+    def test_none_is_silent_and_console_works(self, few_locs, info, capsys):
+        zfit.zfit(few_locs, info, calibration=dict(CALIB_3D))
+        captured = capsys.readouterr()
+        assert captured.out == "" and captured.err == ""
+        zfit.zfit(
+            few_locs, info, calibration=dict(CALIB_3D), progress="console"
+        )
+        assert "Fitting z" in capsys.readouterr().err
+
+    @pytest.mark.slow
+    def test_multiprocess_ends_at_the_count(self, few_locs, info, capsys):
+        """Regression: the multiprocess path reported an estimate polled
+        every 0.2 s and no final value, so a tracker could stop short of
+        the count. ``progress=None`` must also not print a bar."""
+        tracker = RecordingProgress()
+        out, _ = zfit.zfit(
+            few_locs,
+            info,
+            calibration=dict(CALIB_3D),
+            multiprocess=True,
+            filter=0,
+            progress=tracker,
+        )
+        assert len(out) == self.N
+        assert_phases_complete(tracker, ["Fitting z"])
+        assert tracker.phases[0]["maximum"] == self.N
+        capsys.readouterr()
+        zfit.zfit(
+            few_locs, info, calibration=dict(CALIB_3D), multiprocess=True
+        )
+        captured = capsys.readouterr()
+        assert captured.out == "" and captured.err == ""
+
+    @pytest.mark.slow
+    def test_multiprocess_cancel_propagates(self, few_locs, info):
+        """A GUI tracker canceling the task stops the fit and the
+        exception propagates (the pool is shut down on the way)."""
+        with pytest.raises(lib.OperationCanceled):
+            zfit.zfit(
+                few_locs,
+                info,
+                calibration=dict(CALIB_3D),
+                multiprocess=True,
+                progress=CancelingProgress(after=2),
+            )
 
 
 class TestZfitAffineCorrections:
@@ -687,8 +760,17 @@ class TestZfitGPU:
             "locs = locs.head(25).reset_index(drop=True)\n"
             "s, _ = zfit.zfit(locs, info, calibration=dict(calib), "
             "filter=0, multiprocess=False)\n"
+            "from picasso import lib\n"
+            "class Rec(lib.MockProgress):\n"
+            "    values = []\n"
+            "    def set_value(self, value, *a, **k):\n"
+            "        self.values.append(value)\n"
+            "rec = Rec()\n"
             "g, _ = zfit.zfit(locs, info, calibration=dict(calib), "
-            "filter=0, gpu=True)\n"
+            "filter=0, gpu=True, progress=rec)\n"
+            "assert rec.maximum() == len(locs), rec.maximum()\n"
+            "assert rec.values[-1] == len(locs), rec.values\n"
+            "assert rec.values == sorted(rec.values), rec.values\n"
             "keys = ['frame', 'x', 'y']\n"
             "s = s.sort_values(keys).reset_index(drop=True)\n"
             "g = g.sort_values(keys).reset_index(drop=True)\n"

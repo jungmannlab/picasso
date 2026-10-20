@@ -18,6 +18,11 @@ import pytest  # noqa: E402
 
 from picasso import imageprocess  # noqa: E402
 
+from tests.test_postprocess_progress import (  # noqa: E402
+    RecordingProgress,
+    assert_phases,
+)
+
 
 # ---------------------------------------------------------------------------
 # Helpers — synthetic Gaussian-blob images for cross-correlation tests
@@ -148,17 +153,15 @@ class TestRCC:
                 abs(shift_x[i] - dx) < 0.5
             ), f"segment {i}: dx={shift_x[i]:.3f} vs {dx}"
 
-    def test_callback_invoked(self):
+    def test_progress_counts_pairs(self):
         size = 32
-        segments = [
-            _gaussian_image(size, 16, 16, sigma=2.0),
-            _gaussian_image(size, 16, 16, sigma=2.0),
-        ]
-        calls: list[int] = []
-        imageprocess.rcc(segments, max_shift=10, callback=calls.append)
-        # One init call + one per pair (n=2 → 1 pair)
-        assert calls[0] == 0
-        assert calls[-1] == 1
+        segments = [_gaussian_image(size, 16, 16, sigma=2.0)] * 3
+        tracker = RecordingProgress()
+        imageprocess.rcc(segments, max_shift=10, progress=tracker)
+        assert_phases(tracker, ["Correlating image pairs"])
+        # 3 segments -> 3 pairs, counted as they finish
+        assert tracker.phases[0].maximum == 3
+        assert tracker.phases[0].values == [0, 1, 2, 3, 3]
 
 
 # ---------------------------------------------------------------------------

@@ -51,7 +51,7 @@ from __future__ import annotations
 import copy
 import datetime
 import warnings
-from typing import Any, Hashable
+from typing import Any, Hashable, Literal
 
 import numpy as np
 import pandas as pd
@@ -566,7 +566,7 @@ def match_pairs(
     search_radius_um: float = 10.0,
     min_overlap_um: float = 1.0,
     precision_nm: float | None = None,
-    progress=None,
+    progress: lib.Progress | Literal["console"] | None = None,
 ) -> list[dict]:
     """Measure the offsets between all pairs of overlapping tiles.
 
@@ -588,8 +588,11 @@ def match_pairs(
     precision_nm : float, optional
         Typical localization precision in nm. The final matching radius
         is at least three times this. Default is None.
-    progress : None, "console" or ProgressType, optional
-        Progress tracker, see ``lib.normalize_progress``. Default None.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports "Matching overlaps" over the
+        overlapping pairs. Default is None.
 
     Returns
     -------
@@ -604,14 +607,34 @@ def match_pairs(
         ``"fraction"`` (``"matches"`` divided by the localizations of
         ``b`` in the overlap).
     """
-    progress = lib.normalize_progress(progress, "Matching overlaps")
     pairs = overlapping_pairs(positions, sizes, min_overlap_um * 1e3)
     search = search_radius_um * 1e3
     radii = np.array(_MATCH_RADII, dtype=float)
     if precision_nm:
         radii = np.maximum(radii, 3 * precision_nm)
-    progress.setMaximum(len(pairs))
-    progress.zero_progress("Matching overlaps")
+    with lib.tracked_progress(progress, unit="pair") as progress:
+        lib.start_phase(progress, "Matching overlaps", len(pairs), unit="pair")
+        results = _match_overlaps(
+            points, positions, sizes, pairs, search, radii, progress
+        )
+        # also ends a phase without pairs
+        progress.set_value(len(pairs))
+    return results
+
+
+def _match_overlaps(
+    points: list[np.ndarray],
+    positions: np.ndarray,
+    sizes: np.ndarray,
+    pairs: list[tuple],
+    search: float,
+    radii: np.ndarray,
+    progress: lib.Progress,
+) -> list[dict]:
+    """Match the overlapping ``pairs`` (see ``overlapping_pairs``) of
+    :func:`match_pairs`, with the search radius ``search`` and the
+    matching ``radii`` in nm, reporting each pair finished to the
+    current phase of the normalized tracker ``progress``."""
     results = []
     margin = search + 2 * radii[0]
     for i, (a, b, rect) in enumerate(pairs):
@@ -990,7 +1013,7 @@ def choose_orientation(
     *,
     search_radius_um: float = 10.0,
     min_overlap_um: float = 1.0,
-    progress=None,
+    progress: lib.Progress | Literal["console"] | None = None,
 ) -> tuple[str, dict[str, float]]:
     """Find the orientation of the camera relative to the stage whose
     overlaps match best.
@@ -1012,8 +1035,11 @@ def choose_orientation(
         See :func:`match_pairs`. Default is 10.0.
     min_overlap_um : float, optional
         See :func:`match_pairs`. Default is 1.0.
-    progress : None, "console" or ProgressType, optional
-        Progress tracker, see ``lib.normalize_progress``. Default None.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports "Finding the stage
+        orientation" over the 8 orientations. Default is None.
 
     Returns
     -------
@@ -1027,14 +1053,47 @@ def choose_orientation(
     ValueError
         If no orientation predicts any overlapping tiles.
     """
-    progress = lib.normalize_progress(progress, "Finding stage orientation")
-    progress.setMaximum(len(ORIENTATIONS))
-    progress.zero_progress("Finding the stage orientation")
-    search = search_radius_um * 1e3
+    with lib.tracked_progress(progress, unit="orientation") as progress:
+        lib.start_phase(
+            progress,
+            "Finding the stage orientation",
+            len(ORIENTATIONS),
+            unit="orientation",
+        )
+        scores = _orientation_scores(
+            points,
+            positions_um,
+            sizes,
+            search_radius_um * 1e3,
+            min_overlap_um * 1e3,
+            progress,
+        )
+        progress.set_value(len(ORIENTATIONS))
+    valid = {key: value for key, value in scores.items() if np.isfinite(value)}
+    if not valid:
+        raise ValueError(
+            "No tiles overlap at their stage positions. Check the pixel "
+            "size and the minimum overlap."
+        )
+    return max(valid, key=valid.get), scores
+
+
+def _orientation_scores(
+    points: list[np.ndarray],
+    positions_um: np.ndarray,
+    sizes: np.ndarray,
+    search: float,
+    min_overlap: float,
+    progress: lib.Progress,
+) -> dict[str, float]:
+    """Score of each orientation of :func:`choose_orientation` (search
+    radius and minimum overlap in nm), reporting each orientation
+    finished to the current phase of the normalized tracker
+    ``progress``."""
     scores = {}
     for i, orientation in enumerate(ORIENTATIONS):
         positions = stage_to_camera(positions_um, orientation)
-        pairs = overlapping_pairs(positions, sizes, min_overlap_um * 1e3)
+        pairs = overlapping_pairs(positions, sizes, min_overlap)
         pairs.sort(key=lambda p: -(p[2][1] - p[2][0]) * (p[2][3] - p[2][2]))
         pair_scores = []
         for a, b, rect in pairs[:_MAX_ORIENTATION_PAIRS]:
@@ -1049,13 +1108,70 @@ def choose_orientation(
             float(np.median(pair_scores)) if pair_scores else np.nan
         )
         progress.set_value(i + 1)
-    valid = {key: value for key, value in scores.items() if np.isfinite(value)}
-    if not valid:
-        raise ValueError(
-            "No tiles overlap at their stage positions. Check the pixel "
-            "size and the minimum overlap."
+    return scores
+
+
+def _initial_positions(
+    positions: np.ndarray | None,
+    stage: np.ndarray | None,
+    tiles: np.ndarray,
+    points: list[np.ndarray],
+    sizes: np.ndarray,
+    orientation: str,
+    search_radius_um: float,
+    min_overlap_um: float,
+    progress: lib.Progress,
+) -> tuple[str | None, dict[str, float] | None, np.ndarray]:
+    """Initial position of each tile in nm for :func:`stitch`: the given
+    ``positions``, or the stage positions in the given orientation or,
+    with ``orientation="auto"``, in the best one (see
+    :func:`choose_orientation`, which reports to the normalized tracker
+    ``progress``).
+
+    Returns
+    -------
+    orientation : str or None
+        The orientation used, None if ``positions`` were given.
+    orientation_scores : dict or None
+        Scores of the orientations if chosen automatically, else None.
+    initial : np.ndarray
+        Initial position of each tile in nm, shape ``(n_tiles, 2)``.
+    """
+    n_tiles = len(sizes)
+    chosen = None
+    orientation_scores = None
+    if positions is None:
+        if stage is None:
+            raise ValueError(
+                "The stage positions are missing from the metadata "
+                "(Micro-Manager XPositionUm and YPositionUm); please give "
+                "them (stage_um) or the tile positions (positions)."
+            )
+        tile_stage = np.array(
+            [stage[np.flatnonzero(tiles == t)[0]] for t in range(n_tiles)]
         )
-    return max(valid, key=valid.get), scores
+        if orientation == "auto":
+            chosen, orientation_scores = choose_orientation(
+                points,
+                tile_stage,
+                sizes,
+                search_radius_um=search_radius_um,
+                min_overlap_um=min_overlap_um,
+                progress=progress,
+            )
+        elif orientation in ORIENTATIONS:
+            chosen = orientation
+        else:
+            raise ValueError(
+                f"Unknown orientation {orientation!r}; use 'auto' or one "
+                f"of {', '.join(ORIENTATIONS)}."
+            )
+        initial = stage_to_camera(tile_stage, chosen)
+    else:
+        initial = np.asarray(positions, dtype=float).reshape(-1, 2)
+        if len(initial) != n_tiles:
+            raise ValueError("positions must give one position per tile.")
+    return chosen, orientation_scores, initial
 
 
 def stitch(
@@ -1075,7 +1191,7 @@ def stitch(
     cut_seams: bool = True,
     offset_frames: bool = True,
     paths: list[str] | None = None,
-    progress=None,
+    progress: lib.Progress | Literal["console"] | None = None,
 ) -> tuple[list[pd.DataFrame], list[list[dict]], dict[str, Any]]:
     """Stitch localizations of tiles acquired at different stage
     positions into one dataset per target.
@@ -1141,8 +1257,13 @@ def stitch(
         are kept.
     paths : list of str, optional
         Paths of the files, saved in the metadata. Default None.
-    progress : None, "console" or ProgressType, optional
-        Progress tracker, see ``lib.normalize_progress``. Default None.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports "Finding the stage
+        orientation" over the 8 orientations (only if ``orientation`` is
+        "auto" and ``positions`` is None) and "Matching overlaps" over
+        the overlapping pairs of tiles. Default is None.
 
     Returns
     -------
@@ -1228,50 +1349,27 @@ def stitch(
         if len(lp):
             precision = float(np.median(lp))
 
-    progress = lib.normalize_progress(progress, "Stitching")
-    chosen = None
-    orientation_scores = None
-    if positions is None:
-        if stage is None:
-            raise ValueError(
-                "The stage positions are missing from the metadata "
-                "(Micro-Manager XPositionUm and YPositionUm); please give "
-                "them (stage_um) or the tile positions (positions)."
-            )
-        tile_stage = np.array(
-            [stage[np.flatnonzero(tiles == t)[0]] for t in range(n_tiles)]
+    with lib.tracked_progress(progress, "Stitching", unit="pair") as progress:
+        chosen, orientation_scores, initial = _initial_positions(
+            positions,
+            stage,
+            tiles,
+            points,
+            sizes,
+            orientation,
+            search_radius_um,
+            min_overlap_um,
+            progress,
         )
-        if orientation == "auto":
-            chosen, orientation_scores = choose_orientation(
-                points,
-                tile_stage,
-                sizes,
-                search_radius_um=search_radius_um,
-                min_overlap_um=min_overlap_um,
-                progress=progress,
-            )
-        elif orientation in ORIENTATIONS:
-            chosen = orientation
-        else:
-            raise ValueError(
-                f"Unknown orientation {orientation!r}; use 'auto' or one "
-                f"of {', '.join(ORIENTATIONS)}."
-            )
-        initial = stage_to_camera(tile_stage, chosen)
-    else:
-        initial = np.asarray(positions, dtype=float).reshape(-1, 2)
-        if len(initial) != n_tiles:
-            raise ValueError("positions must give one position per tile.")
-
-    pairs = match_pairs(
-        points,
-        initial,
-        sizes,
-        search_radius_um=search_radius_um,
-        min_overlap_um=min_overlap_um,
-        precision_nm=precision,
-        progress=progress,
-    )
+        pairs = match_pairs(
+            points,
+            initial,
+            sizes,
+            search_radius_um=search_radius_um,
+            min_overlap_um=min_overlap_um,
+            precision_nm=precision,
+            progress=progress,
+        )
     final, z_offsets, pairs, unconnected = solve_positions(
         pairs, initial, max_residual=max_residual, align_z=with_z
     )

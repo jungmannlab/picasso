@@ -29,7 +29,17 @@ import numpy as np
 import pytest
 from PIL import Image
 
-from picasso import scmos
+from picasso import lib, scmos
+from tests._progress_tracking import RecordingProgress, assert_phases_complete
+
+
+def _moments(movie, progress=None, **kwargs):
+    """``scmos._streaming_moments`` with a silent tracker by default, since
+    the private helper takes a normalized one."""
+    if progress is None:
+        progress = lib.MockProgress()
+    return scmos._streaming_moments(movie, progress=progress, **kwargs)
+
 
 # ---- streaming moments ----------------------------------------------------
 
@@ -37,7 +47,7 @@ from picasso import scmos
 class TestStreamingMoments:
     def test_matches_numpy_two_pass(self, scmos_maps, dark_movie_factory):
         frames = dark_movie_factory(scmos_maps, 500, seed=1)
-        n, mean, variance = scmos._streaming_moments(frames)
+        n, mean, variance = _moments(frames)
         assert n == 500
         np.testing.assert_allclose(mean, frames.mean(axis=0), rtol=1e-12)
         np.testing.assert_allclose(
@@ -56,7 +66,7 @@ class TestStreamingMoments:
         frames = rng.normal(offset, sigma, (n, 4, 4))
         reference = frames.var(axis=0, ddof=0)
 
-        _, _, chan = scmos._streaming_moments(frames)
+        _, _, chan = _moments(frames)
         chan_ddof0 = chan * (n - 1) / n
         literal32 = (frames.astype(np.float32) ** 2).mean(
             axis=0, dtype=np.float32
@@ -74,9 +84,9 @@ class TestStreamingMoments:
         self, scmos_maps, dark_movie_factory, monkeypatch, chunk_bytes
     ):
         frames = dark_movie_factory(scmos_maps, 300, seed=2)
-        _, mean_ref, var_ref = scmos._streaming_moments(frames)
+        _, mean_ref, var_ref = _moments(frames)
         monkeypatch.setattr(scmos, "_CHUNK_BYTES", chunk_bytes)
-        _, mean, variance = scmos._streaming_moments(frames)
+        _, mean, variance = _moments(frames)
         np.testing.assert_allclose(mean, mean_ref, rtol=1e-12)
         np.testing.assert_allclose(variance, var_ref, rtol=1e-10)
 
@@ -85,28 +95,26 @@ class TestStreamingMoments:
     ):
         """The frame-by-frame path, used by every non-ndarray movie type."""
         frames = dark_movie_factory(scmos_maps, 200, seed=4, dtype=np.uint16)
-        _, mean_ref, var_ref = scmos._streaming_moments(frames)
+        _, mean_ref, var_ref = _moments(frames)
         wrapped = picasso_movie_factory(frames, [{"Frames": len(frames)}])
-        _, mean, variance = scmos._streaming_moments(wrapped)
+        _, mean, variance = _moments(wrapped)
         np.testing.assert_allclose(mean, mean_ref, rtol=1e-12)
         np.testing.assert_allclose(variance, var_ref, rtol=1e-10)
 
     def test_progress_and_abort(self, scmos_maps, dark_movie_factory):
         frames = dark_movie_factory(scmos_maps, 300, seed=5)
-        seen: list[int] = []
-        scmos._streaming_moments(frames, progress_callback=seen.append)
-        assert seen == sorted(seen) and seen[-1] == 300
+        tracker = RecordingProgress()
+        lib.start_phase(tracker, "Characterizing", len(frames), unit="frame")
+        _moments(frames, progress=tracker)
+        assert_phases_complete(tracker)
 
-        assert (
-            scmos._streaming_moments(frames, abort_callback=lambda: True)
-            is None
-        )
+        assert _moments(frames, abort_callback=lambda: True) is None
 
     def test_rejects_an_empty_or_non_2d_movie(self):
         with pytest.raises(ValueError, match="empty movie"):
-            scmos._streaming_moments(np.zeros((0, 4, 4)))
+            _moments(np.zeros((0, 4, 4)))
         with pytest.raises(ValueError, match="2D frames"):
-            scmos._streaming_moments(np.zeros((5, 4)))
+            _moments(np.zeros((5, 4)))
 
 
 # ---- offset and variance --------------------------------------------------
@@ -453,3 +461,66 @@ class TestCalibrationPlot:
                 sizes[name] = image.size
         assert sizes["one"] == sizes["bare"]
         assert sizes["levels"][1] > sizes["bare"][1]
+
+
+# ---- progress ---------------------------------------------------------------
+
+
+@pytest.mark.filterwarnings("ignore:Only .* dark frames:RuntimeWarning")
+@pytest.mark.filterwarnings("ignore:The gain map was estimated:RuntimeWarning")
+class TestProgress:
+    """``progress``: one phase per movie, each ending at its frame count."""
+
+    @pytest.fixture
+    def movies(self, scmos_maps_factory, dark_movie_factory):
+        maps = scmos_maps_factory(height=6, width=6, seed=60)
+        dark = dark_movie_factory(maps, 150, seed=61)
+        bright = [
+            dark_movie_factory(maps, n, photons=p, seed=62 + k)
+            for k, (n, p) in enumerate([(40, 50.0), (60, 150.0)])
+        ]
+        return dark, bright
+
+    def test_one_phase_per_movie(self, movies):
+        """Regression: one running count across all movies was reported, so
+        a tracker saw the dark frames' bar overrun into the bright ones."""
+        dark, bright = movies
+        tracker = RecordingProgress()
+        scmos.calibrate_scmos(dark, bright, progress=tracker)
+        assert_phases_complete(
+            tracker,
+            [
+                "Characterizing dark movie",
+                "Characterizing bright movie 1/2",
+                "Characterizing bright movie 2/2",
+            ],
+        )
+        assert [phase["maximum"] for phase in tracker.phases] == [150, 40, 60]
+        assert {phase["unit"] for phase in tracker.phases} == {"frame"}
+
+    def test_dark_movie_only(self, movies):
+        dark, _ = movies
+        tracker = RecordingProgress()
+        scmos.calibrate_scmos(dark, progress=tracker)
+        assert_phases_complete(tracker, ["Characterizing dark movie"])
+
+    def test_validation(self, movies):
+        dark, bright = movies
+        calibration = scmos.calibrate_scmos(dark)
+        tracker = RecordingProgress()
+        scmos.validate_calibration(calibration, bright[0], progress=tracker)
+        assert_phases_complete(tracker, ["Validating"])
+        assert tracker.phases[0]["maximum"] == len(bright[0])
+
+    def test_none_is_silent_and_console_works(self, movies, capsys):
+        dark, bright = movies
+        calibration = scmos.calibrate_scmos(dark, bright)
+        scmos.validate_calibration(calibration, bright[0])
+        captured = capsys.readouterr()
+        assert captured.out == "" and captured.err == ""
+        calibration = scmos.calibrate_scmos(dark, bright, progress="console")
+        err = capsys.readouterr().err
+        assert "Characterizing dark movie" in err
+        assert "Characterizing bright movie 2/2" in err
+        scmos.validate_calibration(calibration, bright[0], progress="console")
+        assert "Validating" in capsys.readouterr().err

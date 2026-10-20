@@ -181,6 +181,9 @@
   "describe_lateral_transforms",
   "apply_lateral_transforms",
   "DuplicateLateralTransformWarning",
+  "Progress",
+  "MockProgress",
+  "OperationCanceled",
   "append_group"
  ],
  "picasso.localize": [

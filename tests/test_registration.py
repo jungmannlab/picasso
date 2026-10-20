@@ -8,6 +8,7 @@ import pytest
 
 from picasso import io, localize, registration, wavelet
 from picasso import transforms as tform
+from tests._progress_tracking import RecordingProgress, assert_phases_complete
 
 BOX = 7
 # the bead and the blinking-signal detection thresholds
@@ -238,9 +239,17 @@ class TestSignalRegistration:
         truth = [_rotation(0.02, 4.0, -3.0), _rotation(-0.015, -5.0, 2.0)]
         movies = _blinking_movies(truth)
 
+        tracker = RecordingProgress()
         calibration = registration.calibrate_channel_registration_from_signal(
-            movies, box=BOX, identification_method=SIGNAL_NG
+            movies, box=BOX, identification_method=SIGNAL_NG, progress=tracker
         )
+
+        # the detection is reported too, not just the registration
+        assert_phases_complete(
+            tracker, ["Detecting spots", "Registering channels"]
+        )
+        assert [phase["maximum"] for phase in tracker.phases] == [3, 2]
+        assert tracker.phases[1]["values"] == [0, 1, 2]
 
         assert calibration["n_channels"] == 3
         for c, matrix in enumerate(truth, start=1):
@@ -437,19 +446,42 @@ class TestSplitFovRegistration:
         assert dy == pytest.approx(self.FY, abs=0.15)
 
     def test_signal_recovers_the_fine_offset(self):
+        tracker = RecordingProgress()
         calibration = registration.calibrate_channel_registration_from_signal(
             [self._blinking_movie()],
             box=BOX,
             identification_method=SIGNAL_NG,
             regions=self.REGIONS,
+            progress=tracker,
         )
 
+        # the single movie is detected once
+        assert_phases_complete(
+            tracker, ["Detecting spots", "Registering channels"]
+        )
+        assert [phase["maximum"] for phase in tracker.phases] == [1, 1]
         assert calibration["split_fov"] is True
         dx, dy = self._local_shift(calibration)
         # `identify` reports a centroid, so a sub-pixel bias remains - as for
         # the separate-movie signal path
         assert dx == pytest.approx(self.FX, abs=0.35)
         assert dy == pytest.approx(self.FY, abs=0.35)
+
+    def test_progress_none_is_silent_and_console_works(self, capsys):
+        kwargs = dict(
+            box=BOX, identification_method=SIGNAL_NG, regions=self.REGIONS
+        )
+        movies = [self._blinking_movie()]
+        registration.calibrate_channel_registration_from_signal(
+            movies, **kwargs
+        )
+        captured = capsys.readouterr()
+        assert captured.out == "" and captured.err == ""
+        registration.calibrate_channel_registration_from_signal(
+            movies, progress="console", **kwargs
+        )
+        err = capsys.readouterr().err
+        assert "Detecting spots" in err and "Registering channels" in err
 
     def test_the_registration_stores_the_region_layout(self):
         calibration = registration.calibrate_channel_registration_from_beads(

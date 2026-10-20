@@ -23,7 +23,7 @@ import tempfile
 import threading
 import warnings
 import weakref
-from typing import Callable, TYPE_CHECKING
+from typing import Callable, Literal, TYPE_CHECKING
 
 import tifffile
 import yaml
@@ -489,7 +489,6 @@ class SpilledFrame:
 def load_raw(
     path: str,
     prompt_info: Callable[[None], tuple[dict, bool]] | None = None,
-    progress: None = None,
 ) -> tuple[np.memmap, list[dict]]:
     """Load a raw movie file and its metadata.
 
@@ -499,8 +498,6 @@ def load_raw(
         The path to the raw movie file.
     prompt_info : Callable, optional
         A function to call for additional information if needed.
-    progress : None, optional
-        A placeholder for progress tracking, not used in this function.
 
     Returns
     -------
@@ -1169,7 +1166,7 @@ def _movie_info_or_prompt(
 def load_tif(
     path: str,
     prompt_info: Callable[[dict], tuple[dict, bool]] | None = None,
-    progress=None,
+    progress: lib.Progress | Literal["console"] | None = None,
 ) -> tuple[TiffMultiMap, list[dict]] | None:
     """Load a TIFF movie file and its metadata.
 
@@ -1181,10 +1178,15 @@ def load_tif(
         Called with the readable movie dimensions if the embedded
         metadata cannot be parsed, so the user can enter it manually.
         Must return ``(info, save)`` or None if canceled.
-    progress : callable, optional
-        ``callable(done, total)`` invoked as the per-page IFD scan
-        proceeds, so a smooth determinate progress bar can be shown while
-        a large movie is opened. Default is None (no reporting).
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports two phases per TIFF file:
+        "Indexing <file>" (a busy indicator while the pages are
+        counted, ending at the number of pages) and "Reading <file>"
+        over the pages. A file of a multi-file movie gets its position,
+        e.g., "Reading <file> (2/3)". MicroManager "separate image
+        files" report nothing. Default is None.
 
     Returns
     -------
@@ -1202,10 +1204,11 @@ def load_tif(
     # assemble the whole folder into a single movie instead of opening a
     # one-frame file.
     separate_paths = _mm_separate_files(path)
-    if separate_paths is not None:
-        movie = MMSeparateTiffMovie(separate_paths)
-    else:
-        movie = TiffMultiMap(path, memmap_frames=False, progress=progress)
+    with lib.tracked_progress(progress, "Opening movie", "page") as progress:
+        if separate_paths is not None:
+            movie = MMSeparateTiffMovie(separate_paths)
+        else:
+            movie = TiffMultiMap(path, memmap_frames=False, progress=progress)
     info = _movie_info_or_prompt(movie, path, prompt_info)
     if info is None:
         return None
@@ -1473,7 +1476,7 @@ def load_lif_all(path: str) -> tuple[list[LIFMovie], list[list[dict]]]:
 def load_movie(
     path: str,
     prompt_info=None,
-    progress=None,
+    progress: lib.Progress | Literal["console"] | None = None,
 ) -> tuple[AbstractPicassoMovie, list[dict]]:
     """Load a movie file based on its extension and returns the movie
     object and its metadata.
@@ -1488,10 +1491,13 @@ def load_movie(
         Format-specific callback used to obtain missing metadata
         interactively (e.g. to select a channel for multi-channel files
         or to enter movie metadata manually when it cannot be read).
-    progress : callable, optional
-        ``callable(done, total)`` forwarded to the TIFF loader to report
-        per-page progress while a movie is opened. Other formats ignore
-        it (they open effectively instantly). Default is None.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. TIFF movies report the phases of
+        ``load_tif``, "Indexing <file>" and "Reading <file>" over the
+        pages of each file; the other formats open effectively
+        instantly and report nothing. Default is None.
 
     Returns
     -------
@@ -1507,6 +1513,8 @@ def load_movie(
     """
     base, ext = os.path.splitext(path)
     ext = ext.lower()
+    # validated here, so that a bad argument fails for every format
+    lib.normalize_progress(progress)
     if ext == ".raw":
         return load_raw(path, prompt_info=prompt_info)
     elif ext in TIFF_EXTENSIONS:
@@ -1531,7 +1539,7 @@ def load_movie(
 def load_movie_all(
     path: str,
     prompt_info=None,
-    progress=None,
+    progress: lib.Progress | Literal["console"] | None = None,
 ) -> tuple[list[AbstractPicassoMovie], list[list[dict]]] | None:
     """Load every channel of a movie file as independent movies.
 
@@ -1548,8 +1556,13 @@ def load_movie_all(
         Manual-metadata fallback callback, forwarded to the formats that
         may need it (.nd2 and the single-channel formats). Channel
         selection is never prompted here - all channels are loaded.
-    progress : None
-        Placeholder for progress tracking, not used.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Forwarded to ``load_movie`` for the
+        single-channel formats, i.e., TIFF movies report "Indexing
+        <file>" and "Reading <file>" over the pages of each file; the
+        multi-channel formats report nothing. Default is None.
 
     Returns
     -------
@@ -1562,6 +1575,7 @@ def load_movie_all(
     manual-metadata fallback dialog.
     """
     ext = os.path.splitext(path)[1].lower()
+    lib.normalize_progress(progress)  # fails early on a bad argument
     if ext == ".ims":
         return load_ims_all(path)
     elif ext == ".czi":
@@ -3944,7 +3958,24 @@ class _PerThreadFileHandles:
         self._local = threading.local()
 
 
-def _index_pages(pages, progress=None) -> int:
+def _tiff_phase_name(path: str, counter: str | None) -> str:
+    """Name of a TIFF file in the progress phase labels, with its
+    position in a multi-file movie (e.g. ``"2/3"``) if given."""
+    name = os.path.basename(path)
+    return f"{name} ({counter})" if counter else name
+
+
+def _join_counters(outer: str | None, index: int, n: int) -> str | None:
+    """Position label of the ``index``-th (0-based) of ``n`` files, within
+    the position ``outer`` of an enclosing multi-file movie, e.g.
+    ``"2/3, part 1/2"``; None for a single file without ``outer``."""
+    inner = f"{index + 1}/{n}" if n > 1 else None
+    if outer and inner:
+        return f"{outer}, part {inner}"
+    return outer or inner
+
+
+def _index_pages(pages, progress: lib.Progress) -> int:
     """Return the number of IFDs in ``pages``, walking the IFD chain in
     chunks so that a long scan stays reportable and abortable.
 
@@ -3952,13 +3983,14 @@ def _index_pages(pages, progress=None) -> int:
     ible call - minutes for a movie with many frames on network storage,
     where every IFD costs a round trip. Reading a page only extends the
     chain up to that index (see ``tifffile.TiffPages._seek``), so the
-    walk is done here one chunk of pages at a time, calling
-    ``progress(done, 0)`` in between. The total is 0 because the frame
-    count is precisely what is not known yet; raising inside ``progress``
-    aborts the scan.
+    walk is done here one chunk of pages at a time, reporting the pages
+    counted so far with ``progress.set_value`` in between. The caller
+    runs this in a phase of unknown maximum (0, a busy indicator),
+    because the page count is precisely what is not known yet; a
+    tracker that raises ``lib.OperationCanceled`` aborts the scan.
     """
     CHUNK = 2000  # IFDs walked per progress report
-    if progress is None or not isinstance(pages, tifffile.TiffPages):
+    if not isinstance(pages, tifffile.TiffPages):
         return len(pages)
     if getattr(pages, "_indexed", False):  # chain already walked
         return len(pages)
@@ -3969,7 +4001,7 @@ def _index_pages(pages, progress=None) -> int:
         except IndexError:  # the chain ended within the last chunk
             break
         done += CHUNK
-        progress(done, 0)
+        progress.set_value(done)
     return len(pages)
 
 
@@ -3995,7 +4027,14 @@ class TiffMap(_PerThreadFileHandles):
     (slower to open but reads the file) and drops the stray IFD so
     ``n_frames`` matches the real number of image planes."""
 
-    def __init__(self, path: str, verbose: bool = False, progress=None):
+    def __init__(
+        self,
+        path: str,
+        verbose: bool = False,
+        progress: lib.Progress | Literal["console"] | None = None,
+        *,
+        _counter: str | None = None,
+    ):
         """Open the TIFF file and extract its frame layout.
 
         The geometry, data type and per-page layout needed for lazy
@@ -4007,16 +4046,33 @@ class TiffMap(_PerThreadFileHandles):
             Path to the TIFF file.
         verbose : bool, optional
             If True, print the path being read. Default is False.
-        progress : callable, optional
-            ``callable(done, total)`` invoked as the per-page IFD scan
-            in ``_build_offsets`` proceeds, so the GUI can show a smooth
-            determinate bar while a single large movie is opened. It is
-            throttled to at most ~200 calls per file. Default is None.
+        progress : lib.Progress, "console" or None, optional
+            Progress tracker, see ``picasso.lib.Progress``: e.g. a
+            ``lib.ProgressDialog``, "console" for a tqdm bar in the
+            console, or None for no reporting. Reports "Indexing <file>"
+            (a busy indicator while the pages are counted, ending at
+            their number) and "Reading <file>" over the pages, reported
+            at most ~200 times. If the lightweight page parsing fails
+            (see the class docstring), both phases run again. Default
+            is None.
+        _counter : str, optional
+            Position of the file in a multi-file movie (e.g. ``"2/3"``),
+            appended to the phase labels. Default is None.
         """
         if verbose:
             print("Reading info from {}".format(path))
         self.path = os.path.abspath(path)
         self._tif = tifffile.TiffFile(self.path)
+        try:
+            with lib.tracked_progress(progress, unit="page") as progress:
+                self._open(_tiff_phase_name(self.path, _counter), progress)
+        except BaseException:  # e.g. canceled: do not leak the file
+            self._tif.close()
+            raise
+
+    def _open(self, name: str, progress: lib.Progress) -> None:
+        """Read the frame layout of the opened TIFF file, see
+        ``__init__``; ``name`` labels the progress phases."""
 
         # Choose the per-frame list. Zeiss LSM interleaves a
         # reduced-size thumbnail IFD after every image, so tif.pages
@@ -4085,15 +4141,16 @@ class TiffMap(_PerThreadFileHandles):
         # the file with the right number of frames, as the pre-tifffile
         # reader did.
         try:
-            self._offsets, self.n_frames = self._build_offsets(progress)
+            self._offsets, self.n_frames = self._build_offsets(name, progress)
         except RuntimeError:
             # Flipping useframes in place is cache-safe (Picasso never
             # enables tifffile's page cache, so no stale TiffFrames are
             # held) and keeps the already-discovered IFD offset list. The
             # LSM branch above uses full TiffPages and never raises here.
+            # The retry starts its progress phases anew.
             self._tif.pages.useframes = False
             self._pages = self._tif.pages
-            self._offsets, self.n_frames = self._build_offsets(progress)
+            self._offsets, self.n_frames = self._build_offsets(name, progress)
 
         # Per-thread binary handles for the fast offset-based read path
         # (see _PerThreadFileHandles). The decode lock only guards the slow
@@ -4146,7 +4203,9 @@ class TiffMap(_PerThreadFileHandles):
             n *= dim
         return n if n > 1 else None
 
-    def _build_offsets(self, progress=None) -> tuple[list[int] | None, int]:
+    def _build_offsets(
+        self, name: str, progress: lib.Progress
+    ) -> tuple[list[int] | None, int]:
         """Return ``(offsets, n_frames)`` for the movie.
 
         ``n_frames`` is the number of genuine image planes: a stray
@@ -4163,11 +4222,25 @@ class TiffMap(_PerThreadFileHandles):
         against the keyframe, so this is also where the "incompatible
         keyframe" RuntimeError surfaces; __init__ catches it and retries
         with full-page parsing, where the stray IFD has its real shape
-        and is dropped below."""
+        and is dropped below.
+
+        Reports the phases "Indexing <name>" (unknown maximum while the
+        pages are counted, then ending at their number) and "Reading
+        <name>" over the pages, each ending at its maximum."""
         # Counting the pages walks the IFD chain, which is the whole cost
         # of opening a compressed movie (the branch below returns without
         # touching the pages again), so it is reported in chunks too.
+        lib.start_phase(progress, f"Indexing {name}", 0, unit="page")
         n_pages = _index_pages(self._pages, progress)
+        progress.setMaximum(n_pages)
+        progress.set_value(n_pages)
+
+        if self._imagej_planes is not None:
+            n_planes = self._imagej_planes
+            lib.start_phase(progress, f"Reading {name}", n_planes)
+            result = self._build_offsets_imagej()
+            progress.set_value(n_planes)
+            return result
 
         # Throttle progress reports to at most ~200 per file so a
         # multi-thousand-frame movie does not flood the GUI event queue
@@ -4175,18 +4248,19 @@ class TiffMap(_PerThreadFileHandles):
         step = max(1, n_pages // 200)
 
         def report(done: int) -> None:
-            if progress is not None and (done % step == 0 or done == n_pages):
-                progress(done, n_pages)
+            if done % step == 0:
+                progress.set_value(done)
 
-        if self._imagej_planes is not None:
-            return self._build_offsets_imagej(progress)
-
+        lib.start_phase(progress, f"Reading {name}", n_pages)
         if not self._uncompressed:
-            return self._build_offsets_compressed(n_pages, report)
+            result = self._build_offsets_compressed(n_pages, report)
+        else:
+            result = self._build_offsets_uncompressed(report)
+        # also when a stray trailing IFD ended the scan early
+        progress.set_value(n_pages)
+        return result
 
-        return self._build_offsets_uncompressed(report)
-
-    def _build_offsets_imagej(self, progress=None) -> tuple[list[int], int]:
+    def _build_offsets_imagej(self) -> tuple[list[int], int]:
         """Derive offsets for an ImageJ contiguous stack.
 
         ImageJ writes one IFD, then every plane's data laid out
@@ -4205,8 +4279,6 @@ class TiffMap(_PerThreadFileHandles):
         except OSError:
             pass
         offsets = [base + i * self._frame_nbytes for i in range(n)]
-        if progress is not None:
-            progress(n, n)
         return offsets, n
 
     def _build_offsets_compressed(
@@ -4756,40 +4828,44 @@ class STKMultiMovie(AbstractPicassoMovie):
             map_.tofile(file_handle, byte_order)
 
 
-def _scaled_progress(progress, j: int, n: int):
-    """Return a per-component progress callback that reports into the
-    ``j``-th of ``n`` equal slices of a composite progress bar.
-
-    Movies assembled from several files (a multi-file OME set, or several
-    files concatenated across folders) open one component at a time, each
-    reporting its own ``(done, total)``. Weighting the slices by frame
-    count is not possible before the components are opened, so every one
-    gets an equal share. ``SCALE`` sub-steps per component keep a
-    single-component movie animating smoothly across ``0..SCALE``.
-    Returns None when ``progress`` is None (no reporting).
-    """
-    SCALE = 1000
-    if progress is None:
-        return None
-
-    def callback(done, total):
-        if total > 0:
-            progress(int((j + done / total) * SCALE), n * SCALE)
-
-    return callback
+def _open_components(open_one, items: list, progress) -> list:
+    """Open the components of a multi-file movie in turn with
+    ``open_one(index, item, progress)``, closing those already opened if
+    one fails (e.g. because the user canceled), so no file is leaked."""
+    components = []
+    try:
+        for j, item in enumerate(items):
+            components.append(open_one(j, item, progress))
+    except BaseException:
+        for component in components:
+            try:
+                component.close()
+            except Exception:  # noqa: BLE001 - the first error matters
+                pass
+        raise
+    return components
 
 
 class TiffMultiMap(AbstractPicassoMovie):
     """Read ``.ome.tif`` files created by MicroManager. Single files are
     maxed out at 4GB, so this class orchestrates reading from single
-    files, each accessed by ``TiffMap``."""
+    files, each accessed by ``TiffMap``.
+
+    ``progress`` (a ``lib.Progress``, "console" or None, see
+    ``picasso.lib.Progress``) reports the phases of ``TiffMap`` for each
+    file, "Indexing <file> (j/n)" and "Reading <file> (j/n)" over its
+    pages. ``_counter`` is the position of this movie in an enclosing
+    multi-file movie (see ``ConcatenatedTiffMovie``), prepended to the
+    file positions in the phase labels."""
 
     def __init__(
         self,
         path: str,
         memmap_frames: bool = False,
         verbose: bool = False,
-        progress=None,
+        progress: lib.Progress | Literal["console"] | None = None,
+        *,
+        _counter: str | None = None,
     ):
         super().__init__()
         self.path = os.path.abspath(path)
@@ -4814,17 +4890,20 @@ class TiffMultiMap(AbstractPicassoMovie):
         self.paths = [self.path] + [
             path for index, path in sorted(paths_indices)
         ]
-        # A multi-file OME movie is opened as several TiffMaps; each gets
-        # an equal slice of the composite progress range.
+        # A multi-file OME movie is opened as several TiffMaps, each
+        # reporting its own phases, labeled with its position.
         n_maps = len(self.paths)
-        self.maps = [
-            TiffMap(
+
+        def open_map(j: int, path: str, progress: lib.Progress) -> TiffMap:
+            return TiffMap(
                 path,
                 verbose=verbose,
-                progress=_scaled_progress(progress, j, n_maps),
+                progress=progress,
+                _counter=_join_counters(_counter, j, n_maps),
             )
-            for j, path in enumerate(self.paths)
-        ]
+
+        with lib.tracked_progress(progress, unit="page") as progress:
+            self.maps = _open_components(open_map, self.paths, progress)
         self.n_maps = len(self.maps)
         self.n_frames_per_map = [_.n_frames for _ in self.maps]
         self.n_frames = sum(self.n_frames_per_map)
@@ -5205,16 +5284,26 @@ def find_mm_separate_first(directory: str) -> str | None:
     return None
 
 
-def _open_tif_component(path: str, verbose: bool = False, progress=None):
+def _open_tif_component(
+    path: str,
+    verbose: bool,
+    progress: lib.Progress,
+    counter: str | None,
+):
     """Open one TIFF movie for concatenation, applying the same dispatch
     as :func:`load_tif`: a MicroManager "separate image files" frame
-    opens its whole folder, anything else opens as a (possibly
-    multi-file) ``TiffMultiMap``."""
+    opens its whole folder (reporting no progress), anything else opens
+    as a (possibly multi-file) ``TiffMultiMap``, whose phase labels carry
+    ``counter``, the position of the movie (e.g. ``"2/3"``)."""
     separate_paths = _mm_separate_files(path)
     if separate_paths is not None:
         return MMSeparateTiffMovie(separate_paths, verbose=verbose)
     return TiffMultiMap(
-        path, memmap_frames=False, verbose=verbose, progress=progress
+        path,
+        memmap_frames=False,
+        verbose=verbose,
+        progress=progress,
+        _counter=counter,
     )
 
 
@@ -5238,9 +5327,29 @@ class ConcatenatedTiffMovie(TiffMultiMap):
     otherwise a ``ValueError`` names the offending file. Metadata is
     taken from the first component, with ``Frames`` set to the total and
     the source paths recorded (see :meth:`info`).
+
+    Parameters
+    ----------
+    paths : list of str
+        The TIFF movies to concatenate, in the order their frames should
+        appear.
+    verbose : bool, optional
+        If True, print each path being read. Default is False.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports two phases per file,
+        "Indexing <file> (j/n)" (a busy indicator while the pages are
+        counted, ending at their number) and "Reading <file> (j/n)"
+        over its pages. Default is None.
     """
 
-    def __init__(self, paths: list[str], verbose: bool = False, progress=None):
+    def __init__(
+        self,
+        paths: list[str],
+        verbose: bool = False,
+        progress: lib.Progress | Literal["console"] | None = None,
+    ):
         # Deliberately skip TiffMultiMap.__init__, which would discover
         # the components by name next to a single file; here they are
         # given (mirroring how MMSeparateTiffMovie builds its own state).
@@ -5251,14 +5360,13 @@ class ConcatenatedTiffMovie(TiffMultiMap):
         self.path = self.paths[0]
         self.dir = os.path.dirname(self.path)
         n_paths = len(self.paths)
-        self.maps = [
-            _open_tif_component(
-                path,
-                verbose=verbose,
-                progress=_scaled_progress(progress, j, n_paths),
-            )
-            for j, path in enumerate(self.paths)
-        ]
+
+        def open_component(j: int, path: str, progress: lib.Progress):
+            counter = _join_counters(None, j, n_paths)
+            return _open_tif_component(path, verbose, progress, counter)
+
+        with lib.tracked_progress(progress, unit="page") as progress:
+            self.maps = _open_components(open_component, self.paths, progress)
         self.n_maps = len(self.maps)
         self.n_frames_per_map = [_.n_frames for _ in self.maps]
         self.n_frames = sum(self.n_frames_per_map)
@@ -5430,7 +5538,7 @@ def find_tif_movies(
 def load_tif_concatenated(
     paths: list[str],
     prompt_info: Callable[[dict], tuple[dict, bool]] | None = None,
-    progress=None,
+    progress: lib.Progress | Literal["console"] | None = None,
 ) -> tuple[ConcatenatedTiffMovie, list[dict]] | None:
     """Load several TIFF files as one movie, concatenated along frames.
 
@@ -5447,9 +5555,13 @@ def load_tif_concatenated(
         Called with the readable movie dimensions if the first file's
         metadata cannot be parsed, so the user can enter it manually.
         Must return ``(info, save)`` or None if canceled.
-    progress : callable, optional
-        ``callable(done, total)`` invoked as the files are scanned, so a
-        determinate progress bar can be shown. Default is None.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports two phases per file,
+        "Indexing <file> (j/n)" (a busy indicator while the pages are
+        counted, ending at their number) and "Reading <file> (j/n)"
+        over its pages. Default is None.
 
     Returns
     -------
@@ -5461,7 +5573,8 @@ def load_tif_concatenated(
     Returns None if the metadata could not be read and the user
     canceled the manual-metadata fallback dialog.
     """
-    movie = ConcatenatedTiffMovie(paths, progress=progress)
+    with lib.tracked_progress(progress, "Opening movie", "page") as progress:
+        movie = ConcatenatedTiffMovie(paths, progress=progress)
     info = _movie_info_or_prompt(movie, movie.path, prompt_info)
     if info is None:
         return None
@@ -5949,24 +6062,26 @@ def _raise_if_truncated(path: str, error: OSError) -> None:
     ) from error
 
 
-def _read_locs_dataset(path: str, progress=None) -> pd.DataFrame:
+def _read_locs_dataset(path: str, progress: lib.Progress) -> pd.DataFrame:
     """Read the ``locs`` dataset of an .hdf5 file in row blocks.
 
     Picasso writes the localizations as a single h5py compound dataset
     (see ``save_locs``), which is read here one block of rows at a time
-    so that ``progress(done, total)`` can report - and, by raising,
-    abort - a long read. Files whose ``locs`` node is not such a dataset
-    (e.g. written by ``pandas.DataFrame.to_hdf``) fall back to
-    ``pandas.read_hdf``, which reads them in one go.
+    so that ``progress`` can report - and, by raising
+    ``lib.OperationCanceled``, abort - a long read. Files whose ``locs``
+    node is not such a dataset (e.g. written by
+    ``pandas.DataFrame.to_hdf``) fall back to ``pandas.read_hdf``, which
+    reads them in one go.
 
     Parameters
     ----------
     path : str
         The path to the HDF5 file containing localization data.
-    progress : callable or None, optional
-        Called as ``progress(done, total)`` after each block of rows
-        with the number of localizations read so far. Raising inside it
-        aborts the read.
+    progress : lib.Progress
+        Normalized progress tracker (see ``lib.normalize_progress``).
+        Reports the phase "Loading localizations" over the
+        localizations, after each block of rows (a busy indicator for
+        the pandas fallback, ending at the number of localizations).
 
     Returns
     -------
@@ -5992,6 +6107,9 @@ def _read_locs_dataset(path: str, progress=None) -> pd.DataFrame:
 
             if names is not None:
                 n_locs = len(dataset)
+                lib.start_phase(
+                    progress, "Loading localizations", n_locs, unit="loc"
+                )
                 # fill one contiguous array per column, such that no copy of
                 # the whole dataset is needed to build the DataFrame
                 columns = {
@@ -6003,19 +6121,22 @@ def _read_locs_dataset(path: str, progress=None) -> pd.DataFrame:
                     block = dataset[start:stop]
                     for name in names:
                         columns[name][start:stop] = block[name]
-                    if progress is not None:
-                        progress(stop, n_locs)
+                    progress.set_value(stop)
                 return pd.DataFrame(columns, copy=False)
 
     # Non-compound HDF5 layouts are handled by PyTables/pandas.
-    return pd.read_hdf(path, key="locs")
+    lib.start_phase(progress, "Loading localizations", 0, unit="loc")
+    locs = pd.read_hdf(path, key="locs")
+    progress.setMaximum(len(locs))
+    progress.set_value(len(locs))
+    return locs
 
 
 def load_locs(
     path: str,
     *,
     pixelsize: float | None = None,
-    progress=None,
+    progress: lib.Progress | Literal["console"] | None = None,
 ) -> tuple[pd.DataFrame, list[dict]]:
     """Load localization data from an HDF5 file.
 
@@ -6041,10 +6162,13 @@ def load_locs(
     pixelsize : float, optional
         Camera pixel size in nm, used only for files written before
         Picasso 1.0 whose metadata does not record it. Default is None.
-    progress : callable or None, optional
-        Called as ``progress(done, total)`` while the localizations are
-        read, see ``_read_locs_dataset``. Raising inside it aborts the
-        read.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports "Loading localizations" over
+        the localizations, after each block of a million; a tracker
+        that raises ``lib.OperationCanceled`` aborts the read. Default
+        is None.
 
     Returns
     -------
@@ -6083,7 +6207,10 @@ def load_locs(
         )
     # checked first, so a file of a newer format is not read in full
     format_version = _check_format_version(path)
-    locs = _read_locs_dataset(path, progress=progress)
+    with lib.tracked_progress(
+        progress, "Loading localizations", unit="loc"
+    ) as progress:
+        locs = _read_locs_dataset(path, progress)
     info = load_info(path)
     # validated before the conversion, so that every missing column and
     # key is named at once; a pixel size given for a legacy file counts

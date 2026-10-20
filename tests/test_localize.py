@@ -38,6 +38,7 @@ from picasso.fitting import (
 )
 from picasso.gui import localize as localize_gui
 
+from tests._progress_tracking import RecordingProgress, assert_phases_complete
 from tests.conftest import (
     BOX,
     CALIB_3D,
@@ -1258,9 +1259,6 @@ class TestDiagnostics:
     """``check_nena``, ``check_kinetics``, ``check_drift``."""
 
     def test_check_nena_returns_float(self, locs, info):
-        # ``check_nena`` currently hard-codes ``info=None`` when calling
-        # ``postprocess.nena`` and catches the resulting failure, returning
-        # NaN. The contract observable from the outside is "return a float".
         nena = localize.check_nena(locs, info)
         assert isinstance(nena, float)
         assert nena > 0
@@ -4183,17 +4181,17 @@ class TestCrossChannelLinking:
         ref = self._ids([0, 0, 1], [10, 20, 30], [10, 20, 30])
         ch1 = self._ids([0, 1], [110, 130], [10, 30])
         ch2 = self._ids([0, 1], [10, 30], [10, 30])
-        seen = []
+        tracker = RecordingProgress()
         localize.link_identifications_multichannel(
             [ref, ch1, ch2],
             [self.IDENTITY, self.SHIFT_X, self.IDENTITY],
             3.0,
-            progress_callback=seen.append,
+            progress=tracker,
         )
         # one 0 -> n_ref progression for the whole linking pass, not one per
         # channel (the GUI shows this as a single status count)
-        assert seen and seen[-1] == len(ref)
-        assert all(b >= a for a, b in zip(seen, seen[1:]))
+        assert_phases_complete(tracker, ["Linking channels"])
+        assert tracker.phases[0]["maximum"] == len(ref)
 
 
 class TestCrossRegionLinkingSplitFov:
@@ -5394,7 +5392,7 @@ class TestSplineCRLB:
             np.isfinite(precision._spline_crlb(theta, calib, BOX)[0])
         )
 
-    def test_progress_callback_and_console(self):
+    def test_progress_counts_localizations(self, capsys):
         calib, _ = _gauss_spline_calibration(model="spline-2d")
         n = 250
         rng = np.random.default_rng(0)
@@ -5402,13 +5400,17 @@ class TestSplineCRLB:
         theta[:, 0] = 3000.0
         theta[:, 1:3] = rng.uniform(-0.5, 0.5, (n, 2))
         theta[:, 3] = 15.0
-        seen = []
-        precision._spline_crlb(
-            theta, calib, BOX, progress_callback=seen.append
-        )
-        assert seen and seen[-1] == n and seen == sorted(seen)
-        # the tqdm ("console") path must not raise
-        precision._spline_crlb(theta, calib, BOX, progress_callback="console")
+        tracker = RecordingProgress()
+        precision._spline_crlb(theta, calib, BOX, progress=tracker)
+        assert_phases_complete(tracker)
+        assert tracker.phases[-1]["maximum"] == n
+        assert tracker.phases[-1]["unit"] == "loc"
+        # a console tracker drives its bar; no tracker prints nothing
+        with lib.tracked_progress("console") as console:
+            precision._spline_crlb(theta, calib, BOX, progress=console)
+        capsys.readouterr()
+        precision._spline_crlb(theta, calib, BOX)
+        assert capsys.readouterr() == ("", "")
 
 
 def _crlb(theta, calibration, box, *, gpu, **kwargs):
@@ -5558,13 +5560,15 @@ class TestSplineLinkXyzCRLB:
         assert np.all(np.isfinite(var[0]))
         assert np.all(np.isnan(var[1]))
 
-    def test_progress_callback_and_console(self):
+    def test_progress_counts_localizations(self):
         rng = np.random.default_rng(4)
         calib, theta = _link_xyz_calib_and_theta(2, 120, rng)
-        seen = []
-        _crlb(theta, calib, BOX, progress_callback=seen.append, gpu=False)
-        assert seen and seen[-1] == len(theta) and seen == sorted(seen)
-        _crlb(theta, calib, BOX, progress_callback="console", gpu=False)
+        tracker = RecordingProgress()
+        _crlb(theta, calib, BOX, progress=tracker, gpu=False)
+        assert_phases_complete(tracker, ["Computing spline CRLB"])
+        assert tracker.phases[0]["maximum"] == len(theta)
+        with lib.tracked_progress("console") as console:
+            _crlb(theta, calib, BOX, progress=console, gpu=False)
 
 
 class TestSplineCRLBEMCCD:
@@ -5699,7 +5703,7 @@ class TestSplineCRLBGPU:
             finite,
             mu_floor,
             mle,
-            progress_callback=None,
+            progress=None,
             variance=None,
         ):
             called.append(True)
@@ -5926,14 +5930,16 @@ class TestSplineCRLBGPU:
         )
 
     @requires_crlb_gpu
-    def test_progress_callback_and_console(self):
+    def test_progress_counts_localizations(self):
         calib, _ = _gauss_spline_calibration(model="spline-3d")
         rng = np.random.default_rng(8)
         theta = _shared_theta(250, rng)
-        seen = []
-        _crlb(theta, calib, BOX, progress_callback=seen.append, gpu=True)
-        assert seen and seen[-1] == len(theta) and seen == sorted(seen)
-        _crlb(theta, calib, BOX, progress_callback="console", gpu=True)
+        tracker = RecordingProgress()
+        _crlb(theta, calib, BOX, progress=tracker, gpu=True)
+        assert_phases_complete(tracker, ["Computing spline CRLB"])
+        assert tracker.phases[0]["maximum"] == len(theta)
+        with lib.tracked_progress("console") as console:
+            _crlb(theta, calib, BOX, progress=console, gpu=True)
 
     @pytest.mark.slow
     def test_simulator_matches_cpu(self):

@@ -52,7 +52,7 @@ from __future__ import annotations
 
 import os
 import warnings
-from typing import Callable, Literal
+from typing import Literal
 
 import numpy as np
 import pandas as pd
@@ -1313,7 +1313,7 @@ def calibrate_spline(
     correct_z_bias: bool = False,
     roi: tuple[tuple[int, int], tuple[int, int]] | list | None = None,
     path: str | None = None,
-    progress_callback: Callable[[int], None] | None = None,
+    progress: lib.Progress | Literal["console"] | None = None,
     return_diagnostics: bool = False,
     z_binning: int = 1,
 ) -> dict | tuple[dict, list]:
@@ -1370,8 +1370,13 @@ def calibrate_spline(
     path : str, optional
         Where to save the calibration (HDF5) and a diagnostic PNG. If None,
         nothing is written. Default is None.
-    progress_callback : callable, optional
-        Called with an integer step count (0..3) as the calibration proceeds.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports one phase, "Calibrating spline"
+        over three steps: the PSF template is built (bead detection and
+        averaging), the spline coefficients are computed, and the
+        calibration and its diagnostic plots are saved. Default is None.
     return_diagnostics : bool, optional
         If True, return ``(calibration, diagnostics)``, where ``diagnostics``
         is a one-element list holding the bead inspection record (see
@@ -1411,130 +1416,136 @@ def calibrate_spline(
     ), "model must be 'spline-2d' or 'spline-3d'"
     pixelsize = _camera_pixelsize(camera_info)
 
-    if callable(progress_callback):
-        progress_callback(0)
-    built = build_psf_template(
-        movie,
-        camera_info,
-        box,
-        identification_method,
-        d,
-        frames_per_step=frames_per_step,
-        frame_bounds=frame_bounds,
-        frame_order=frame_order,
-        roi=roi,
-        # keep the individual per-frame spots so the diagnostic PNG can measure
-        # the axial precision by fitting each spot (only needed when we plot)
-        return_spots=path is not None,
-        z_binning=z_binning,
-    )
-    # axial spacing of the template slices, i.e. of the spline's z knots
-    z_slice_nm = float(d) * built["z_binning"]
-    template = built["template"]  # (box, box, n_steps)
-    z_center = built["z_center"]
-    # Two distinct z references (see also
-    # ``picasso.fitting.seeds.initial_parameters_spline`` /
-    # ``locs_from_fits_spline``):
-    #  - z_init: the sharpest (in-focus) slice. The fit's z_shift is
-    #    initialized to -z_init. This is the numerically sound,
-    #    convention-INDEPENDENT start and must NOT depend on
-    #    ``correct_z_bias`` - otherwise the two
-    #    calibrations start the fit from different z, converge to different
-    #    (x, y, z) minima (an astigmatic PSF has flat gradients off-focus), and
-    #    the z=0 shift leaks into x/y instead of being a clean constant.
-    #  - z_origin: the z = 0 reference used only when converting the fitted
-    #    z_shift to physical z (output). Without correction it is the raw
-    #    stage-scan zero (the scan center); ``correct_z_bias`` moves it to the
-    #    axial intensity focus. The difference is the raw-scan z bias (the
-    #    focus's offset from the scan center, ~100s of nm), applied as a
-    #    constant shift of the output z and nothing else.
-    z_init = float(z_center)
-    z_origin = (
-        built["z_focus"]
-        if correct_z_bias
-        else _scan_center_index(built["z_of_step"])
-    )
+    with lib.tracked_progress(
+        progress, "Calibrating spline", unit="step"
+    ) as progress:
+        lib.start_phase(progress, "Calibrating spline", 3, unit="step")
+        progress.set_value(0)
+        built = build_psf_template(
+            movie,
+            camera_info,
+            box,
+            identification_method,
+            d,
+            frames_per_step=frames_per_step,
+            frame_bounds=frame_bounds,
+            frame_order=frame_order,
+            roi=roi,
+            # keep the individual per-frame spots so the diagnostic PNG can
+            # measure the axial precision by fitting each spot (only needed
+            # when we plot)
+            return_spots=path is not None,
+            z_binning=z_binning,
+        )
+        # axial spacing of the template slices, i.e. of the spline's z knots
+        z_slice_nm = float(d) * built["z_binning"]
+        template = built["template"]  # (box, box, n_steps)
+        z_center = built["z_center"]
+        # Two distinct z references (see also
+        # ``picasso.fitting.seeds.initial_parameters_spline`` /
+        # ``locs_from_fits_spline``):
+        #  - z_init: the sharpest (in-focus) slice. The fit's z_shift is
+        #    initialized to -z_init. This is the numerically sound,
+        #    convention-INDEPENDENT start and must NOT depend on
+        #    ``correct_z_bias`` - otherwise the two calibrations start the
+        #    fit from different z, converge to different (x, y, z) minima
+        #    (an astigmatic PSF has flat gradients off-focus), and the z=0
+        #    shift leaks into x/y instead of being a clean constant.
+        #  - z_origin: the z = 0 reference used only when converting the
+        #    fitted z_shift to physical z (output). Without correction it is
+        #    the raw stage-scan zero (the scan center); ``correct_z_bias``
+        #    moves it to the axial intensity focus. The difference is the
+        #    raw-scan z bias (the focus's offset from the scan center, ~100s
+        #    of nm), applied as a constant shift of the output z and nothing
+        #    else.
+        z_init = float(z_center)
+        z_origin = (
+            built["z_focus"]
+            if correct_z_bias
+            else _scan_center_index(built["z_of_step"])
+        )
 
-    if callable(progress_callback):
-        progress_callback(1)
+        progress.set_value(1)
 
-    # The template is (row=y, col=x, z), but at fit time spots are flattened
-    # C-order so the Gpufit spline model's fast pixel index (point_index_x) is
-    # the movie column (x). The spline's first axis must therefore be x, so we
-    # swap the lateral axes before computing coefficients. Skipping this
-    # transposes the PSF laterally, which corrupts an astigmatic PSF's z
-    # encoding (z barely recovers) and mis-fits amplitude/position. It is a
-    # no-op for a laterally symmetric PSF.
-    if model == "spline-2d":
-        slab = np.ascontiguousarray(template[:, :, z_center].T)
-        coefficients = spline_coefficients(slab)
-        n_data = [box, box]
-    else:
-        template_xyz = np.ascontiguousarray(template.transpose(1, 0, 2))
-        coefficients = spline_coefficients(template_xyz)
-        n_data = [int(s) for s in template_xyz.shape]
-    n_intervals = [int(s) for s in coefficients.shape[1:]]
+        # The template is (row=y, col=x, z), but at fit time spots are
+        # flattened C-order so the Gpufit spline model's fast pixel index
+        # (point_index_x) is the movie column (x). The spline's first axis must
+        # therefore be x, so we swap the lateral axes before computing
+        # coefficients. Skipping this transposes the PSF laterally, which
+        # corrupts an astigmatic PSF's z encoding (z barely recovers) and
+        # mis-fits amplitude/position. It is a no-op for a laterally symmetric
+        # PSF.
+        if model == "spline-2d":
+            slab = np.ascontiguousarray(template[:, :, z_center].T)
+            coefficients = spline_coefficients(slab)
+            n_data = [box, box]
+        else:
+            template_xyz = np.ascontiguousarray(template.transpose(1, 0, 2))
+            coefficients = spline_coefficients(template_xyz)
+            n_data = [int(s) for s in template_xyz.shape]
+        n_intervals = [int(s) for s in coefficients.shape[1:]]
 
-    if callable(progress_callback):
-        progress_callback(2)
+        progress.set_value(2)
 
-    calibration = {
-        "model": model,
-        "coefficients": coefficients,
-        "n_data": n_data,
-        "n_intervals": n_intervals,
-        # lateral template sampling equals the camera pixel grid, so shifts
-        # are in camera pixels (the fit converts them to nm)
-        "oversampling": 1.0,
-        # the template is centered on the box (see _register_and_average), so a
-        # zero fitted lateral shift means "emitter at the box center"
-        "lateral_centered": True,
-        "z_center": float(z_origin),
-        "z_init": float(z_init),
-        "z_step_nm": z_slice_nm,
-        "magnification_factor": float(magnification_factor),
-        "correct_z_bias": bool(correct_z_bias),
-        "effective_sigma": float(built["effective_sigma"]),
-        "photon_scale": float(built["photon_scale"]),
-        "box": int(box),
-        "Identification": localize._calibration_identification_info(
-            identification_method, box
-        ),
-        "pixelsize": float(pixelsize),
-        "n_channels": 1,
-        "n_beads": int(built["n_beads"]),
-        # beads that survived the outlier filtering and were actually averaged
-        # into the PSF (see _keep_inliers); the rest live in the diagnostics
-        "n_beads_used": int(built["n_beads_used"]),
-        "Step size in nm": float(d),
-        "Z binning": int(built["z_binning"]),
-        "Frames per step": int(frames_per_step),
-        "Frame order": frame_order,
-        "Frame bounds": frame_bounds,
-        **lib.step_info("Spline PSF calibration"),
-        "Path": path if path is not None else "N/A",
-    }
+        calibration = {
+            "model": model,
+            "coefficients": coefficients,
+            "n_data": n_data,
+            "n_intervals": n_intervals,
+            # lateral template sampling equals the camera pixel grid, so shifts
+            # are in camera pixels (the fit converts them to nm)
+            "oversampling": 1.0,
+            # the template is centered on the box (see _register_and_average),
+            # so a zero fitted lateral shift means "emitter at the box center"
+            "lateral_centered": True,
+            "z_center": float(z_origin),
+            "z_init": float(z_init),
+            "z_step_nm": z_slice_nm,
+            "magnification_factor": float(magnification_factor),
+            "correct_z_bias": bool(correct_z_bias),
+            "effective_sigma": float(built["effective_sigma"]),
+            "photon_scale": float(built["photon_scale"]),
+            "box": int(box),
+            "Identification": localize._calibration_identification_info(
+                identification_method, box
+            ),
+            "pixelsize": float(pixelsize),
+            "n_channels": 1,
+            "n_beads": int(built["n_beads"]),
+            # beads that survived the outlier filtering and were actually
+            # averaged into the PSF (see _keep_inliers); the rest live in the
+            # diagnostics
+            "n_beads_used": int(built["n_beads_used"]),
+            "Step size in nm": float(d),
+            "Z binning": int(built["z_binning"]),
+            "Frames per step": int(frames_per_step),
+            "Frame order": frame_order,
+            "Frame bounds": frame_bounds,
+            **lib.step_info("Spline PSF calibration"),
+            "Path": path if path is not None else "N/A",
+        }
 
-    if path is not None:
-        io.save_spline_calibration(path, calibration)
-        # empirical axial precision (z RMSD to the true stage position vs z)
-        # from fitting every individual per-frame bead spot through the
-        # just-built spline model; None for a 2D calibration or if the refit
-        # fails (the plot then falls back to the model-vs-data RMSE)
-        precision = _axial_precision(built, calibration)
-        _save_diagnostic_plot(built, calibration, path, precision=precision)
-        # gallery of the individual beads, showing which were averaged into the
-        # PSF and which were rejected as outliers. Never fatal.
-        try:
-            _save_bead_gallery_plot(built, calibration, path)
-        except Exception:
-            pass
+        if path is not None:
+            io.save_spline_calibration(path, calibration)
+            # empirical axial precision (z RMSD to the true stage position vs
+            # z) from fitting every individual per-frame bead spot through the
+            # just-built spline model; None for a 2D calibration or if the
+            # refit fails (the plot then falls back to the model-vs-data RMSE)
+            precision = _axial_precision(built, calibration)
+            _save_diagnostic_plot(
+                built, calibration, path, precision=precision
+            )
+            # gallery of the individual beads, showing which were averaged into
+            # the PSF and which were rejected as outliers. Never fatal.
+            try:
+                _save_bead_gallery_plot(built, calibration, path)
+            except Exception:
+                pass
 
-    if callable(progress_callback):
-        progress_callback(3)
-    if return_diagnostics:
-        return calibration, [bead_inspection_data(built, calibration)]
-    return calibration
+        progress.set_value(3)
+        if return_diagnostics:
+            return calibration, [bead_inspection_data(built, calibration)]
+        return calibration
 
 
 # ----------------------------------------------------------------------
@@ -2146,14 +2157,6 @@ def _multichannel_bead_diagnostics(
     ]
 
 
-def _report_progress(
-    progress_callback: Callable[[int], None] | None, step: int
-) -> None:
-    """Call ``progress_callback(step)`` if a callback was given."""
-    if callable(progress_callback):
-        progress_callback(step)
-
-
 def _add_photon_ratios(
     calibration: dict, photon_ratios: np.ndarray | list, n_channels: int
 ) -> None:
@@ -2186,7 +2189,7 @@ def calibrate_spline_multichannel(
     regions: list | None = None,
     reference: int = 0,
     path: str | None = None,
-    progress_callback: Callable[[int], None] | None = None,
+    progress: lib.Progress | Literal["console"] | None = None,
     return_diagnostics: bool = False,
     model: str = "affine",
     z_binning: int = 1,
@@ -2286,8 +2289,14 @@ def calibrate_spline_multichannel(
     path : str, optional
         Where to save the calibration (HDF5) and the diagnostic PNGs. If None,
         nothing is written. Default None.
-    progress_callback : callable, optional
-        Called with an integer step count as the calibration proceeds.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports one phase, "Calibrating spline"
+        over three steps: the beads are detected and the channels
+        registered, the per-channel PSF templates are built, and the
+        spline coefficients are computed and the calibration and its
+        diagnostic plots saved. Default is None.
     return_diagnostics : bool, optional
         If True, return ``(calibration, diagnostics)``. Default False.
     model : str, optional
@@ -2352,118 +2361,125 @@ def calibrate_spline_multichannel(
             _resolve_split_fov_regions(regions, n_channels, reference, methods)
         )
 
-    _report_progress(progress_callback, 0)
+    with lib.tracked_progress(
+        progress, "Calibrating spline", unit="step"
+    ) as progress:
+        lib.start_phase(progress, "Calibrating spline", 3, unit="step")
+        progress.set_value(0)
 
-    n_frames = int(movies[0].shape[0])
-    step_of_frame, _, step_range = _step_of_frame(
-        n_frames, d, frames_per_step, frame_order, frame_bounds
-    )
-    fov_of_frame = _fov_of_frame(n_frames, frames_per_step, frame_order)
-    ref_bounds = _reference_frame_segments(step_of_frame, step_range)
-    mid_frame = _reference_mid_frame(step_of_frame, step_range)
+        n_frames = int(movies[0].shape[0])
+        step_of_frame, _, step_range = _step_of_frame(
+            n_frames, d, frames_per_step, frame_order, frame_bounds
+        )
+        fov_of_frame = _fov_of_frame(n_frames, frames_per_step, frame_order)
+        ref_bounds = _reference_frame_segments(step_of_frame, step_range)
+        mid_frame = _reference_mid_frame(step_of_frame, step_range)
 
-    # reference beads tagged with their FOV: genuine multi-FOV z-stacks hold
-    # different beads per field, extracted per FOV (see _bead_volumes).
-    beads_ref = _detect_bead_positions(
-        movies[0],
-        methods[0],
-        box,
-        ref_bounds,
-        roi=ref_roi,
-        fov_of_frame=fov_of_frame,
-    )
-
-    # channel transforms (channel 0 is the identity reference)
-    transforms, reg_info = _estimate_all_channel_transforms(
-        movies,
-        beads_ref,
-        methods,
-        box,
-        ref_bounds,
-        mid_frame,
-        max_match_distance,
-        n_channels,
-        split_fov,
-        region_rects,
-        coarse_shifts,
-        model,
-        fov_of_frame,
-    )
-
-    _report_progress(progress_callback, 1)
-
-    # per-channel PSF templates from the same physical beads
-    ref_xy = beads_ref[["x", "y"]].to_numpy(dtype=np.float64)
-    per_channel = _build_per_channel_templates(
-        movies,
-        camera_infos,
-        box,
-        d,
-        frames_per_step,
-        frame_bounds,
-        frame_order,
-        beads_ref,
-        transforms,
-        ref_xy,
-        n_channels,
-        z_binning,
-    )
-
-    _report_progress(progress_callback, 2)
-
-    coefficients, n_intervals, templates = _assemble_multichannel_coefficients(
-        per_channel, n_channels
-    )
-
-    calibration = _build_multichannel_calibration_dict(
-        per_channel,
-        coefficients,
-        n_intervals,
-        templates,
-        n_channels,
-        transforms,
-        camera_infos,
-        box,
-        methods,
-        d,
-        frames_per_step,
-        frame_order,
-        frame_bounds,
-        magnification_factor,
-        correct_z_bias,
-        link_photons,
-        path,
-    )
-
-    if photon_ratios is not None:
-        _add_photon_ratios(calibration, photon_ratios, n_channels)
-
-    if split_fov:
-        # single-movie channels: the fit path rebuilds the channel stack from
-        # one movie using these regions (reference region first).
-        _add_split_fov_calibration_fields(
-            calibration, region_rects, transforms
+        # reference beads tagged with their FOV: genuine multi-FOV z-stacks
+        # hold different beads per field, extracted per FOV (see
+        # _bead_volumes).
+        beads_ref = _detect_bead_positions(
+            movies[0],
+            methods[0],
+            box,
+            ref_bounds,
+            roi=ref_roi,
+            fov_of_frame=fov_of_frame,
         )
 
-    if path is not None:
-        # diagnostic PNGs: one per-channel PSF plot (reusing the single-channel
-        # diagnostic, with its axial-precision panels) plus one
-        # channel-registration plot.
-        _save_multichannel_calibration(
-            path,
-            calibration,
+        # channel transforms (channel 0 is the identity reference)
+        transforms, reg_info = _estimate_all_channel_transforms(
+            movies,
+            beads_ref,
+            methods,
+            box,
+            ref_bounds,
+            mid_frame,
+            max_match_distance,
+            n_channels,
+            split_fov,
+            region_rects,
+            coarse_shifts,
+            model,
+            fov_of_frame,
+        )
+
+        progress.set_value(1)
+
+        # per-channel PSF templates from the same physical beads
+        ref_xy = beads_ref[["x", "y"]].to_numpy(dtype=np.float64)
+        per_channel = _build_per_channel_templates(
+            movies,
+            camera_infos,
+            box,
+            d,
+            frames_per_step,
+            frame_bounds,
+            frame_order,
+            beads_ref,
+            transforms,
+            ref_xy,
+            n_channels,
+            z_binning,
+        )
+
+        progress.set_value(2)
+
+        coefficients, n_intervals, templates = (
+            _assemble_multichannel_coefficients(per_channel, n_channels)
+        )
+
+        calibration = _build_multichannel_calibration_dict(
             per_channel,
             coefficients,
-            reg_info,
-            ref_xy,
+            n_intervals,
+            templates,
+            n_channels,
             transforms,
+            camera_infos,
+            box,
+            methods,
+            d,
+            frames_per_step,
+            frame_order,
+            frame_bounds,
+            magnification_factor,
+            correct_z_bias,
+            link_photons,
+            path,
         )
 
-    _report_progress(progress_callback, 3)
-    if return_diagnostics:
-        diagnostics = _multichannel_bead_diagnostics(per_channel, calibration)
-        return calibration, diagnostics
-    return calibration
+        if photon_ratios is not None:
+            _add_photon_ratios(calibration, photon_ratios, n_channels)
+
+        if split_fov:
+            # single-movie channels: the fit path rebuilds the channel stack
+            # from one movie using these regions (reference region first).
+            _add_split_fov_calibration_fields(
+                calibration, region_rects, transforms
+            )
+
+        if path is not None:
+            # diagnostic PNGs: one per-channel PSF plot (reusing the
+            # single-channel diagnostic, with its axial-precision panels) plus
+            # one channel-registration plot.
+            _save_multichannel_calibration(
+                path,
+                calibration,
+                per_channel,
+                coefficients,
+                reg_info,
+                ref_xy,
+                transforms,
+            )
+
+        progress.set_value(3)
+        if return_diagnostics:
+            diagnostics = _multichannel_bead_diagnostics(
+                per_channel, calibration
+            )
+            return calibration, diagnostics
+        return calibration
 
 
 # palette shared by the multichannel diagnostic figures (one color per channel)
@@ -2946,7 +2962,7 @@ def calibrate_spline_split_fov(
     photon_ratios: np.ndarray | list | None = None,
     link_photons: bool = True,
     path: str | None = None,
-    progress_callback: Callable[[int], None] | None = None,
+    progress: lib.Progress | Literal["console"] | None = None,
     return_diagnostics: bool = False,
     model: str = "affine",
     z_binning: int = 1,
@@ -3017,9 +3033,11 @@ def calibrate_spline_split_fov(
     path : str, optional
         Where to save the calibration (HDF5) and the diagnostic PNGs. If None,
         nothing is written. Default None.
-    progress_callback : callable, optional
-        Called with an integer step count as the calibration proceeds.
-        Default None.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports the phase of
+        :func:`calibrate_spline_multichannel`. Default is None.
     return_diagnostics : bool, optional
         If True, return ``(calibration, diagnostics)``. Default False.
     model : str, optional
@@ -3069,7 +3087,7 @@ def calibrate_spline_split_fov(
         regions=regions,
         reference=reference,
         path=path,
-        progress_callback=progress_callback,
+        progress=progress,
         return_diagnostics=return_diagnostics,
         model=model,
         z_binning=z_binning,

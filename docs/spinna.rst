@@ -241,14 +241,14 @@ Within the *Fitting* box:
           N_structures=search_space,
           fitting_mode="bayesian",    # or "coarse-to-fine", "brute-force"
           asynch=True,
-          callback="console",
+          progress="console",
       )
       best_N_structures = mixer.convert_props_to_counts(best_proportions, n_egfr)
       print(f"Best proportions (m/d/t): {best_proportions}")
 
       # Fit uncertainty
       (props_mean, props_sd), (score, score_sd) = spinner.fit_stoichiometry(
-          N_structures=search_space, asynch=True, callback="console", bootstrap=True
+          N_structures=search_space, asynch=True, progress="console", bootstrap=True
       )
 
 .. _spinna-compare-models:

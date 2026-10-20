@@ -302,18 +302,25 @@ class TestFiles:
         )
         other = tmp_path / "notes.txt"
         other.write_text("hello\n")
-        done = []
+        recorder = _PhaseRecorder()
         results = legacy.convert_files(
             [path, str(picks), str(other), path],
             pixelsize=PS,
-            progress=lambda i, n: done.append((i, n)),
+            progress=recorder,
         )
         assert [r[0] for r in results] == [path, str(picks), str(other), path]
         assert results[0][1] == str(tmp_path / "a_locs_nm.hdf5")
         assert results[1][1] == str(tmp_path / "a_locs_picks_nm.yaml")
         assert results[2][1] is None and "not a file" in results[2][2]
         assert results[3][1] is None and "twice" in results[3][2]
-        assert done == [(1, 4), (2, 4), (3, 4), (4, 4)]
+        # one phase over the files, skipped ones included
+        assert recorder.phases == [
+            {
+                "label": "Converting files",
+                "maximum": 4,
+                "values": [1, 2, 3, 4, 4],
+            }
+        ]
         converted, shape, size = io.load_picks(results[1][1])
         assert converted == [[1.0 * PS, 2.0 * PS]] and size == 100
 
@@ -335,3 +342,76 @@ class TestFiles:
         np.testing.assert_allclose(loaded["x_mean"], [PS, 2 * PS])
         np.testing.assert_allclose(loaded["x_std"], [0.1 * PS, 0.2 * PS])
         np.testing.assert_array_equal(loaded["n_events"], [3, 4])
+
+
+class _PhaseRecorder(lib.MockProgress):
+    """Progress tracker recording the phases it is driven through."""
+
+    def __init__(self):
+        super().__init__()
+        self.phases = []  # dicts with "label", "maximum" and "values"
+
+    def zero_progress(self, description=None, *args, **kwargs):
+        super().zero_progress(description)
+        self.phases.append({"label": description, "maximum": 0, "values": []})
+
+    def setMaximum(self, maximum, *args, **kwargs):
+        super().setMaximum(maximum)
+        self.phases[-1]["maximum"] = maximum
+
+    def set_value(self, value, *args, **kwargs):
+        self.phases[-1]["values"].append(value)
+
+
+class TestProgress:
+    def _picks(self, tmp_path):
+        picks = tmp_path / "old_picks.yaml"
+        picks.write_text(
+            "Shape: Circle\nCenters: [[1.0, 2.0]]\nDiameter (nm): 100\n"
+        )
+        return str(picks)
+
+    def test_convert_file_locs_reports_the_read(self, tmp_path):
+        path = _write_legacy(tmp_path / "old_locs.hdf5", _legacy_locs(20))
+        recorder = _PhaseRecorder()
+        legacy.convert_file(path, pixelsize=PS, progress=recorder)
+        assert recorder.phases == [
+            {"label": "Loading localizations", "maximum": 20, "values": [20]}
+        ]
+
+    @pytest.mark.parametrize("in_place", [False, True])
+    def test_convert_file_other_kinds_one_step(self, tmp_path, in_place):
+        recorder = _PhaseRecorder()
+        legacy.convert_file(
+            self._picks(tmp_path),
+            pixelsize=PS,
+            in_place=in_place,
+            progress=recorder,
+        )
+        assert recorder.phases == [
+            {"label": "Converting old_picks.yaml", "maximum": 1, "values": [1]}
+        ]
+
+    def test_none_is_silent_and_console_works(self, tmp_path, capsys):
+        path = _write_legacy(tmp_path / "a_locs.hdf5", _legacy_locs(20))
+        picks = self._picks(tmp_path)
+        legacy.convert_file(path, pixelsize=PS, in_place=True)
+        legacy.convert_files([picks], pixelsize=PS, progress=None)
+        captured = capsys.readouterr()
+        assert captured.out == "" and captured.err == ""
+        path = _write_legacy(tmp_path / "b_locs.hdf5", _legacy_locs(20))
+        legacy.convert_file(path, pixelsize=PS, progress="console")
+        assert "Loading localizations" in capsys.readouterr().err
+        legacy.convert_files([picks], pixelsize=PS, progress="console")
+        assert "Converting files" in capsys.readouterr().err
+
+    def test_cancel_stops_the_batch(self, tmp_path):
+        # a canceled tracker is not reported as an error of one file
+        picks = self._picks(tmp_path)
+
+        class Cancel(_PhaseRecorder):
+            def set_value(self, value, *args, **kwargs):
+                raise lib.OperationCanceled
+
+        with pytest.raises(lib.OperationCanceled):
+            legacy.convert_files([picks, picks], progress=Cancel())

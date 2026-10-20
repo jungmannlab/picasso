@@ -453,6 +453,7 @@ def _undrift_rcc(
                 info,
                 segmentation,
                 display=display,
+                progress="console",
             )
 
             undrift_info["Drift X"] = float(drift["x"].mean())
@@ -521,10 +522,12 @@ def _undrift_fiducials(files: str) -> None:
 
         print(f"Undrifting file {path}.")
         drift, locs = postprocess.undrift(
-            locs, info, segmentation, display=False
+            locs, info, segmentation, display=False, progress="console"
         )
         print("pre-RCC done.")
-        locs, new_info, drift = postprocess.undrift_from_fiducials(locs, info)
+        locs, new_info, drift = postprocess.undrift_from_fiducials(
+            locs, info, progress="console"
+        )
 
         undrift_info["Drift X"] = float(drift["x"].mean())
         undrift_info["Drift Y"] = float(drift["y"].mean())
@@ -617,7 +620,7 @@ def _dbscan(
                 min_density,
                 radius_z=radius_z,
             )
-            clusters = clusterer.find_cluster_centers(locs)
+            clusters = clusterer.find_cluster_centers(locs, progress="console")
             base, _ = os.path.splitext(path)
             info.append(dbscan_info)
             io.save_locs(base + "_dbscan.hdf5", locs, info)
@@ -648,7 +651,7 @@ def _hdbscan(
             locs, hdbscan_info = clusterer.hdbscan(
                 locs, min_cluster, min_samples
             )
-            clusters = clusterer.find_cluster_centers(locs)
+            clusters = clusterer.find_cluster_centers(locs, progress="console")
             base, ext = os.path.splitext(path)
             info.append(hdbscan_info)
             io.save_locs(base + "_hdbscan.hdf5", locs, info)
@@ -786,7 +789,7 @@ def _cbc(
         use_z=False if use_2d else None,
         undefined=0.0 if undefined == "remove" else undefined,
         remove_undefined=undefined == "remove",
-        progress_callback="console",
+        progress="console",
     )
     all_locs = [locs for locs, _ in locs_infos]
     all_infos = [info for _, info in locs_infos]
@@ -924,7 +927,7 @@ def _pair_statistic(
                     simulated_z="observed" if observed_z else "uniform",
                     partner_locs=partner_locs,
                     cross_null=cross_null,
-                    progress_callback="console",
+                    progress="console",
                 )
         except ValueError as e:
             raise SystemExit(f"{path}: {e}")
@@ -1014,7 +1017,7 @@ def _nnd(
                 z_range=z_range,
                 simulated_z="observed" if observed_z else "uniform",
                 cross_null=cross_null,
-                progress_callback="console",
+                progress="console",
             )
     except ValueError as e:
         raise SystemExit(str(e))
@@ -1232,6 +1235,7 @@ def _diffusion(
                 sigma=sigma,
                 n_populations=populations,
                 truncate=truncate,
+                progress="console",
             )
         except ValueError as e:
             raise SystemExit(f"{path}: {e}")
@@ -1465,7 +1469,7 @@ def _groupprops(files: str) -> None:
 
         for path in paths:
             locs, info = load_locs(path)
-            groups = groupprops(locs)
+            groups = groupprops(locs, progress="console")
             base, ext = splitext(path)
             save_datasets(
                 base + "_groupprops.hdf5",
@@ -2028,9 +2032,9 @@ def _localize_process_file(
         print(f"Processing {path}, File {i + 1} of {n_total}")
     print("------------------------------------------")
     if len(paths) > 1:
-        movie, info = load_tif_concatenated(paths)
+        movie, info = load_tif_concatenated(paths, progress="console")
     else:
-        movie, info = load_movie(path)
+        movie, info = load_movie(path, progress="console")
 
     fitting_method = _FIT_METHOD_MAP[args.fit_method]
     cam_info = dict(camera_info)
@@ -2071,8 +2075,7 @@ def _localize_process_file(
         spline_calibration=spline_calibration,
         camera_calibration=camera_calibration,
         threaded=True,
-        identification_progress_callback="console",
-        fit_progress_callback="console",
+        progress="console",
     )
 
     saved = _localize_finish(
@@ -2174,7 +2177,7 @@ def _localize_regions(
         roi=roi,
         frame_bounds=frame_bounds,
         threaded=True,
-        progress_callback="console",
+        progress="console",
     )
     print(
         f"Identified {len(identifications):,} spots in {len(roi)} regions. "
@@ -2193,7 +2196,7 @@ def _localize_regions(
         spline_calibration=region_fit["spline_calibrations"],
         camera_calibration=camera_calibration,
         multiprocess=True,
-        progress_callback="console",
+        progress="console",
     )
     saved = []
     for c, (locs, region_info) in enumerate(results):
@@ -2327,7 +2330,7 @@ def _localize_finish(
                 lateral_transforms=lateral_transforms,
                 multiprocess=not args.fit_z_gpu,
                 gpu=args.fit_z_gpu,
-                progress_callback="console",
+                progress="console",
             )
         info[-1]["Z Calibration Path"] = zpath
         print("3D fitting complete.")
@@ -2674,7 +2677,7 @@ def _camera_calibrate(args: argparse.Namespace) -> None:
     calibration = scmos.calibrate_scmos(
         dark_movie,
         bright_movies or None,
-        progress_callback="console",
+        progress="console",
         dark_path=args.dark,
         bright_paths=bright_paths,
         bright_levels=powers,
@@ -2754,7 +2757,7 @@ def _camera_validate(args: argparse.Namespace) -> None:
     calibration = load_camera_calibration(args.calibration)
     test_movie, _ = load_movie(args.movie)
     report = scmos.validate_calibration(
-        calibration, test_movie, progress_callback="console"
+        calibration, test_movie, progress="console"
     )
 
     print(f"Frames tested:     {report['Frames']}")
@@ -2839,7 +2842,7 @@ def _spline_calibrate_split_fov(
         photon_ratios=_parse_photon_ratios(args),
         model=registration,
         path=out_path,
-        progress_callback=lambda i: print(f"  step {i}/3"),
+        progress="console",
     )
 
 
@@ -2870,7 +2873,7 @@ def _spline_calibrate_single(
         magnification_factor=args.magnification_factor,
         correct_z_bias=args.correct_z_bias,
         path=out_path,
-        progress_callback=lambda i: print(f"  step {i}/3"),
+        progress="console",
     )
 
 
@@ -2907,7 +2910,7 @@ def _spline_calibrate_multichannel(
         photon_ratios=_parse_photon_ratios(args),
         model=registration,
         path=out_path,
-        progress_callback=lambda i: print(f"  step {i}/3"),
+        progress="console",
     )
 
 
@@ -4035,7 +4038,7 @@ def _spinna_process_row(
         save=f"{save_filename}_fit_scores.csv",
         asynch=asynch,
         bootstrap=bootstrap,
-        callback="console" if verbose else None,
+        progress="console" if verbose else None,
     )
 
     results = _spinna_collect_results(
@@ -4151,7 +4154,7 @@ def _spinna_process_row_le(
         random_rot_mode=random_rot_mode,
         asynch=asynch,
         savedir=os.path.dirname(save_filename),
-        callback="console" if verbose else None,
+        progress="console" if verbose else None,
         fitting_mode=(
             fitting_mode if fitting_mode is not None else "bayesian"
         ),
@@ -4394,7 +4397,7 @@ def _g5m(
             max_locs_per_cluster=max_locs,
             asynch=asynch,
             group_column=group_column,
-            callback_parent="console",
+            progress="console",
         )
         new_path = splitext(path)[0] + "_molmap.hdf5"
         save_locs(new_path, mols, g5m_info)
@@ -4416,7 +4419,9 @@ def _convert_units(
     from . import legacy
 
     paths = list(chain(*[sorted(glob(_)) or [_] for _ in files]))
-    results = legacy.convert_files(paths, pixelsize, in_place=in_place)
+    results = legacy.convert_files(
+        paths, pixelsize, in_place=in_place, progress="console"
+    )
     n_converted = 0
     for path, output, message in results:
         if output is not None:

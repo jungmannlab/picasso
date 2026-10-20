@@ -16,6 +16,7 @@ import pytest
 
 from picasso import clusterer, g5m, zfit
 from tests.conftest import CALIB_3D, PIXELSIZE
+from tests.test_postprocess_progress import RecordingProgress, assert_phases
 
 # ---------------------------------------------------------------------------
 # Golden values, captured from the published models before the rotated
@@ -1173,52 +1174,33 @@ class TestG5M3D:
 # ---------------------------------------------------------------------
 
 
-class _RecordingProgress:
-    """Duck-typed progress tracker recording the calls it receives."""
-
-    def __init__(self):
-        self.values = []
-        self.maxima = []
-        self.closed = False
-
-    def set_value(self, value):
-        self.values.append(value)
-
-    def setMaximum(self, maximum, *args, **kwargs):
-        self.maxima.append(maximum)
-
-    def maximum(self):
-        return self.maxima[-1] if self.maxima else 0
-
-    def zero_progress(self, description=None, *args, **kwargs):
-        pass
-
-    def close(self, *args, **kwargs):
-        self.closed = True
-
-
 class TestG5MProgress:
-    @pytest.mark.parametrize("callback_parent", [None, "console"])
-    def test_progress_modes(self, dbscan_locs, info, callback_parent):
+    def test_none_reports_nothing(self, capsys, dbscan_locs, info):
+        """The default is None (it used to be "console")."""
+        mols, _, _ = g5m.g5m(dbscan_locs, info, min_locs=5, asynch=False)
+        assert len(mols) > 0
+        captured = capsys.readouterr()
+        assert captured.out == captured.err == ""
+
+    def test_console(self, capsys, dbscan_locs, info):
         mols, _, _ = g5m.g5m(
-            dbscan_locs,
-            info,
-            min_locs=5,
-            asynch=False,
-            callback_parent=callback_parent,
+            dbscan_locs, info, min_locs=5, asynch=False, progress="console"
         )
         assert len(mols) > 0
+        assert "Running G5M" in capsys.readouterr().err
 
-    def test_reports_progress_to_duck_typed_tracker(self, dbscan_locs, info):
-        tracker = _RecordingProgress()
-        g5m.g5m(
-            dbscan_locs,
-            info,
-            min_locs=5,
-            asynch=False,
-            callback_parent=tracker,
-        )
-        assert tracker.values, "no progress was reported"
-        assert tracker.closed, "progress tracker was not closed"
-        # the final update fills the bar
-        assert tracker.values[-1] == max(tracker.values)
+    def test_reports_progress_to_tracker(self, dbscan_locs, info):
+        tracker = RecordingProgress()
+        g5m.g5m(dbscan_locs, info, min_locs=5, asynch=False, progress=tracker)
+        assert_phases(tracker, ["Running G5M"])
+        # one step per cluster, counted as they finish
+        n_groups = dbscan_locs["group"].nunique()
+        assert tracker.phases[0].maximum == n_groups
+        assert tracker.phases[0].values[:2] == [0, 1]
+
+    def test_parent_widget_is_rejected(self, dbscan_locs, info):
+        """A Qt parent no longer builds a dialog in the core module."""
+        with pytest.raises(TypeError):
+            g5m.g5m(
+                dbscan_locs, info, min_locs=5, asynch=False, progress=object()
+            )

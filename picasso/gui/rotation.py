@@ -1003,7 +1003,7 @@ class AnimationDialog(lib.Dialog):
 
     def _start_build(self, path, locs, infos, kwargs, n_frames) -> None:
         """Render and encode the frames on a worker thread, with a
-        cancellable, non-modal progress dialog; the windows stay
+        cancelable, non-modal progress dialog; the windows stay
         usable meanwhile."""
         self._build_cancel = threading.Event()
         progress = QtWidgets.QProgressDialog(
@@ -1024,7 +1024,7 @@ class AnimationDialog(lib.Dialog):
         )
         thread = QtCore.QThread()  # unparented, see ViewRotation
         worker.moveToThread(thread)
-        worker.progress.connect(progress.setValue)
+        worker.progress.connect(self._on_build_progress)
         worker.finished.connect(self._build_finished)
         self._build_thread = thread
         self._build_worker = worker
@@ -1033,6 +1033,16 @@ class AnimationDialog(lib.Dialog):
         # not from ``started``: a build that finished before the loop
         # began would swallow the ``quit()`` and ``wait()`` forever
         worker.start()
+
+    def _on_build_progress(self, value: int, maximum: int) -> None:
+        """Advance the progress dialog to ``value`` of ``maximum`` video
+        frames, as reported by the build (see ``AnimationBuilder``)."""
+        progress = self._build_progress
+        if progress is None:
+            return
+        if maximum > 0 and progress.maximum() != maximum:
+            progress.setMaximum(maximum)
+        progress.setValue(value)
 
     def _build_finished(self, completed: bool, error: str) -> None:
         """Wrap up a build on the GUI thread."""
@@ -1068,19 +1078,42 @@ class AnimationDialog(lib.Dialog):
         self.build.setEnabled(True)
 
 
+class _SignalProgress(lib.MockProgress):
+    """Progress tracker (see ``lib.Progress``) emitting each value with
+    the maximum of its phase through ``emit``, from the thread that runs
+    the computation."""
+
+    def __init__(self, emit) -> None:
+        super().__init__()
+        self._emit = emit
+
+    def set_value(self, value, *args, **kwargs) -> None:
+        """Emit ``(value, maximum)``.
+
+        Parameters
+        ----------
+        value : int
+            Items finished in the current phase.
+        *args, **kwargs
+            Accepted and ignored.
+        """
+        self._emit(int(value), self._maximum)
+
+
 class AnimationBuilder(QtCore.QObject):
     """Runs ``render.build_animation`` on a worker thread.
 
     Attributes
     ----------
     progress : QtCore.pyqtSignal
-        The frame number just rendered (drives the progress dialog).
+        The number of frames rendered so far and the number of frames of
+        the video (drives the progress dialog).
     finished : QtCore.pyqtSignal
         Emitted with ``(completed, error)``: ``completed`` is False when
-        cancelled, ``error`` the message of a failure (empty otherwise).
+        canceled, ``error`` the message of a failure (empty otherwise).
     """
 
-    progress = QtCore.pyqtSignal(int)
+    progress = QtCore.pyqtSignal(int, int)
     finished = QtCore.pyqtSignal(bool, str)
     _start = QtCore.pyqtSignal()
 
@@ -1105,7 +1138,7 @@ class AnimationBuilder(QtCore.QObject):
                 self._path,
                 self._locs,
                 self._infos,
-                progress_callback=self.progress.emit,
+                progress=_SignalProgress(self.progress.emit),
                 cancel=self._cancel,
                 **self._kwargs,
             )

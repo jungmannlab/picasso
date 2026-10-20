@@ -21,12 +21,11 @@ SMLM clusterer is based on:
 from __future__ import annotations
 
 import itertools
-from typing import Callable, Literal
+from typing import Literal
 
 import numpy as np
 import pandas as pd
 from pandas.api.types import is_numeric_dtype
-from tqdm import tqdm
 from scipy.spatial import ConvexHull, KDTree, QhullError
 from scipy.ndimage import gaussian_filter
 from sklearn.cluster import DBSCAN, HDBSCAN
@@ -141,7 +140,7 @@ def _build_neighbor_graph(
     tree: KDTree,
     X: lib.FloatArray2D,
     radius: float,
-    progress: Callable[[int], None] | None = None,
+    progress: lib.Progress,
 ) -> tuple[lib.IntArray1D, lib.IntArray1D]:
     """Build a compact (CSR-like) neighbor graph for all points in X.
 
@@ -166,9 +165,9 @@ def _build_neighbor_graph(
         Array of points of shape (n_points, n_dim).
     radius : float
         Clustering radius.
-    progress : callable or None, optional
-        Called with the cumulative number of points processed after
-        each batch. If None, no progress is reported.
+    progress : lib.Progress
+        Normalized progress tracker, set to the cumulative number of
+        points processed after each batch.
 
     Returns
     -------
@@ -202,8 +201,7 @@ def _build_neighbor_graph(
                     count=total,
                 )
             )
-        if progress is not None:
-            progress(end)
+        progress.set_value(end)
 
     indptr = np.zeros(n_points + 1, dtype=np.int64)
     np.cumsum(counts, out=indptr[1:])
@@ -218,8 +216,8 @@ def _cluster(
     X: lib.FloatArray2D,
     radius: float,
     min_locs: int,
-    frame: pd.Series | None = None,
-    progress: Callable[[int], None] | None = None,
+    frame: pd.Series | None,
+    progress: lib.Progress,
 ) -> lib.IntArray1D:
     """Cluster points given by X with a given clustering radius and
     minimum number of localizations within that radius using KDTree.
@@ -250,13 +248,13 @@ def _cluster(
         Clustering radius.
     min_locs : int
         Minimum number of localizations in a cluster.
-    frame : pd.Series or None, optional
+    frame : pd.Series or None
         Frame number of each localization. If None, no frame analysis
         is performed.
-    progress : callable or None, optional
-        Called with the cumulative number of localizations processed
-        while building the neighbor graph (the main, O(n) step). If
-        None, no progress is reported.
+    progress : lib.Progress
+        Normalized progress tracker (see ``lib.normalize_progress``);
+        reports "Clustering" over the localizations while building the
+        neighbor graph (the main, O(n) step).
 
     Returns
     -------
@@ -268,14 +266,17 @@ def _cluster(
 
     # build kdtree and a compact, batched neighbor graph (bounded memory)
     tree = KDTree(X)
+    lib.start_phase(progress, "Clustering", n_points, unit="loc")
+    progress.set_value(0)
     indptr, indices = _build_neighbor_graph(tree, X, radius, progress)
+    progress.set_value(n_points)
 
     # number of neighbors of each point (point is its own neighbor)
     counts = np.diff(indptr).astype(np.int32)
 
     # find local maxima, i.e., points with the most neighbors within
     # their neighborhood. ``reduceat`` computes, per point, the maximum
-    # neighbor count over that point's neighborhood in one vectorised
+    # neighbor count over that point's neighborhood in one vectorized
     # pass (no Python loop over all points).
     if n_points:
         neighbor_max = np.maximum.reduceat(counts[indices], indptr[:-1])
@@ -320,7 +321,7 @@ def cluster_2D(
     radius: float,
     min_locs: int,
     fa: bool,
-    progress: Callable[[int], None] | None = None,
+    progress: lib.Progress | Literal["console"] | None = None,
 ) -> lib.IntArray1D:
     """Prepare 2D input to be used by ``_cluster``.
 
@@ -334,10 +335,11 @@ def cluster_2D(
         Minimum number of localizations in a cluster.
     fa : bool
         True, if basic frame analysis is to be performed.
-    progress : callable or None, optional
-        Called with the cumulative number of localizations processed
-        while building the neighbor graph. If None, no progress is
-        reported.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports "Clustering" over the
+        localizations. Default is None.
 
     Returns
     -------
@@ -352,7 +354,8 @@ def cluster_2D(
     else:
         frame = locs["frame"]
 
-    labels = _cluster(X, radius, min_locs, frame, progress)
+    with lib.tracked_progress(progress, "Clustering", unit="loc") as progress:
+        labels = _cluster(X, radius, min_locs, frame, progress)
 
     return labels
 
@@ -363,7 +366,7 @@ def cluster_3D(
     radius_z: float,
     min_locs: int,
     fa: bool,
-    progress: Callable[[int], None] | None = None,
+    progress: lib.Progress | Literal["console"] | None = None,
 ) -> lib.IntArray1D:
     """Prepare 3D input to be used by ``_cluster``.
 
@@ -384,10 +387,11 @@ def cluster_3D(
         Minimum number of localizations in a cluster.
     fa : bool
         True, if basic frame analysis is to be performed.
-    progress : callable or None, optional
-        Called with the cumulative number of localizations processed
-        while building the neighbor graph. If None, no progress is
-        reported.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports "Clustering" over the
+        localizations. Default is None.
 
     Returns
     -------
@@ -404,45 +408,10 @@ def cluster_3D(
     else:
         frame = locs["frame"]
 
-    labels = _cluster(X, radius, min_locs, frame, progress)
+    with lib.tracked_progress(progress, "Clustering", unit="loc") as progress:
+        labels = _cluster(X, radius, min_locs, frame, progress)
 
     return labels
-
-
-def _resolve_progress(
-    progress: lib.ProgressDialog | Literal["console"] | None,
-    total: int,
-    description: str,
-    unit: str = "it",
-) -> Callable[[int], None] | None:
-    """Normalize a public ``progress`` argument into a ``set_value``
-    callback for the internal per-item loops.
-
-    Mirrors ``picasso.aim.aim``'s convention: ``None`` reports nothing,
-    ``"console"`` displays a tqdm progress bar, and a
-    ``lib.ProgressDialog`` drives a GUI progress bar.
-
-    Parameters
-    ----------
-    progress : lib.ProgressDialog or "console" or None
-        Public progress argument to normalize.
-    total : int
-        Number of steps the callback will count up to.
-    description : str
-        Description shown next to the progress bar.
-    unit : str, optional
-        tqdm unit label. Default is ``"it"``.
-
-    Returns
-    -------
-    callable
-        Called with the cumulative number of processed items.
-    """
-    progress = lib.normalize_progress(progress, description, unit=unit)
-    # set the range here so callers need not know the internal item
-    # count (e.g. number of KDTree batches or clusters)
-    progress.setMaximum(total)
-    return progress.set_value
 
 
 def cluster(
@@ -451,7 +420,7 @@ def cluster(
     min_locs: int,
     frame_analysis: bool,
     radius_z: float | None = None,
-    progress: lib.ProgressDialog | Literal["console"] | None = None,
+    progress: lib.Progress | Literal["console"] | None = None,
 ) -> tuple[pd.DataFrame, dict]:
     """Cluster localizations from single molecules (SMLM clusterer).
 
@@ -486,12 +455,12 @@ def cluster(
         If True, performs basic frame analysis.
     radius_z : float, optional
         Clustering radius in z (nm). Required for 3D clustering.
-    progress : picasso.lib.ProgressDialog or "console" or None, optional
-        Tracks progress while building the neighbor graph (the main,
-        O(n) step). If "console", a tqdm progress bar is shown in the
-        console. If a ProgressDialog, a GUI progress bar is updated. If
-        None (default), no progress is displayed. Same convention as
-        ``picasso.aim.aim``.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports "Clustering" over the
+        localizations while building the neighbor graph (the main, O(n)
+        step). Default is None.
 
     Returns
     -------
@@ -504,29 +473,29 @@ def cluster(
     """
     locs = locs.copy()
     n_raw = len(locs)
-    progress_cb = _resolve_progress(progress, n_raw, "Clustering", unit="loc")
-    if "z" in locs.columns:  # 3D
-        if radius_z is None:
-            raise ValueError(
-                "The clustering radius in z must be specified for 3D"
-                " clustering."
+    if "z" in locs.columns and radius_z is None:  # 3D
+        raise ValueError(
+            "The clustering radius in z must be specified for 3D"
+            " clustering."
+        )
+    with lib.tracked_progress(progress, "Clustering", unit="loc") as progress:
+        if "z" in locs.columns:  # 3D
+            labels = cluster_3D(
+                locs,
+                radius_xy,
+                radius_z,
+                min_locs,
+                frame_analysis,
+                progress,
             )
-        labels = cluster_3D(
-            locs,
-            radius_xy,
-            radius_z,
-            min_locs,
-            frame_analysis,
-            progress_cb,
-        )
-    else:
-        labels = cluster_2D(
-            locs,
-            radius_xy,
-            min_locs,
-            frame_analysis,
-            progress_cb,
-        )
+        else:
+            labels = cluster_2D(
+                locs,
+                radius_xy,
+                min_locs,
+                frame_analysis,
+                progress,
+            )
     locs = extract_valid_labels(locs, labels)
     n_clusters = len(locs)
     info = {
@@ -823,7 +792,7 @@ RESERVED_CENTER_COLUMNS = frozenset(
 def _aggregate_cluster_stats(
     locs: pd.DataFrame, has_z: bool
 ) -> tuple[pd.core.groupby.DataFrameGroupBy, dict]:
-    """One vectorised pass for per-group means, stds and sizes.
+    """One vectorized pass for per-group means, stds and sizes.
 
     Every numeric column present in ``locs`` is averaged, except the
     ones ``find_cluster_centers`` derives itself
@@ -902,15 +871,15 @@ def _cluster_convex_hulls(
     group_s: lib.IntArray1D,
     unique_groups: lib.IntArray1D,
     has_z: bool,
-    progress: Callable[[int], None] | None = None,
+    progress: lib.Progress,
 ) -> lib.FloatArray1D:
     """Convex-hull area (2D, nm^2) or volume (3D, nm^3) per cluster.
 
     The only per-cluster Python loop in ``find_cluster_centers``; runs
     on raw NumPy slices of a group-sorted coordinate array. For datasets
-    with many clusters this is the run-time bottleneck, so an optional
-    ``progress`` callable (called with the number of clusters processed)
-    can be passed for feedback.
+    with many clusters this is the run-time bottleneck, so the
+    normalized tracker ``progress`` reports "Calculating cluster
+    centers" over the clusters.
     """
     coord_cols = ["x", "y", "z"] if has_z else ["x", "y"]
     coords_sorted = (
@@ -918,15 +887,20 @@ def _cluster_convex_hulls(
     )
     group_offsets = np.searchsorted(group_s, unique_groups, side="left")
     group_offsets = np.append(group_offsets, len(group_s))
-    convexhull = np.zeros(len(unique_groups), dtype=np.float64)
-    for i in range(len(unique_groups)):
+    n_clusters = len(unique_groups)
+    convexhull = np.zeros(n_clusters, dtype=np.float64)
+    lib.start_phase(
+        progress, "Calculating cluster centers", n_clusters, unit="cluster"
+    )
+    progress.set_value(0)
+    for i in range(n_clusters):
         X = coords_sorted[group_offsets[i] : group_offsets[i + 1]]
         try:
             convexhull[i] = ConvexHull(X).volume
         except QhullError:
             convexhull[i] = 0.0
-        if progress is not None:
-            progress(i + 1)
+        progress.set_value(i + 1)
+    progress.set_value(n_clusters)
     return convexhull
 
 
@@ -954,11 +928,11 @@ def _weighted_z_means(
 
 def find_cluster_centers(
     locs: pd.DataFrame,
-    progress: lib.ProgressDialog | Literal["console"] | None = None,
+    progress: lib.Progress | Literal["console"] | None = None,
 ) -> pd.DataFrame:
     """Calculate cluster centers.
 
-    Aggregations are computed in vectorised pandas/NumPy passes; the
+    Aggregations are computed in vectorized pandas/NumPy passes; the
     only per-cluster Python loop is the convex hull, which operates on
     raw NumPy slices.
 
@@ -969,12 +943,13 @@ def find_cluster_centers(
         "frame", "x", "y" and "group" (and "z" for 3D). Any other
         numeric column present is averaged per cluster. Other numeric
         columns are carried over as means.
-    progress : picasso.lib.ProgressDialog or "console" or None, optional
-        Tracks progress of the per-cluster convex-hull pass (the
-        run-time bottleneck for datasets with many clusters). If
-        "console", a tqdm progress bar is shown in the console. If a
-        ProgressDialog, a GUI progress bar is updated. If None (default),
-        no progress is displayed. Same convention as ``picasso.aim.aim``.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports "Calculating cluster centers"
+        over the clusters (the per-cluster convex-hull pass, the
+        run-time bottleneck for datasets with many clusters). Default is
+        None.
 
     Returns
     -------
@@ -995,15 +970,12 @@ def find_cluster_centers(
     lpx = s["x_std"] / np.sqrt(s["n_locs"])
     lpy = s["y_std"] / np.sqrt(s["n_locs"])
     n_events, order, group_s = _count_binding_events(group_arr, frame_arr)
-    progress_cb = _resolve_progress(
-        progress,
-        len(s["unique_groups"]),
-        "Calculating cluster centers",
-        unit="cluster",
-    )
-    convexhull = _cluster_convex_hulls(
-        locs, order, group_s, s["unique_groups"], has_z, progress_cb
-    )
+    with lib.tracked_progress(
+        progress, "Calculating cluster centers", unit="cluster"
+    ) as progress:
+        convexhull = _cluster_convex_hulls(
+            locs, order, group_s, s["unique_groups"], has_z, progress
+        )
 
     columns = {
         "frame": s["frame_mean"].astype(np.float32),
@@ -1105,7 +1077,7 @@ def _cluster_area(X: lib.FloatArray2D, lp: float) -> float:
 def cluster_areas(
     locs: pd.DataFrame,
     info: list[dict],
-    progress: Callable[[int], None] | None = None,
+    progress: lib.Progress | Literal["console"] | None = None,
 ) -> pd.DataFrame:
     """Calculate cluster areas (2D) or volumes (3D).
 
@@ -1118,9 +1090,11 @@ def cluster_areas(
         Clustered localizations (contain group info).
     info : list of dict
         Localization metadata, see `picasso.io.load_locs`.
-    progress : callable or None, optional
-        Callable accepting an int (progress count). If None, progress
-        is displayed in the console. Default is None.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports "Calculating cluster areas"
+        over the clusters. Default is None.
 
     Returns
     -------
@@ -1137,24 +1111,26 @@ def cluster_areas(
         "group": groups.astype(np.int32),
         area_key: np.zeros(len(groups), dtype=np.float32),
     }
-    if progress is None:
-        iterator = tqdm(range(len(groups)), desc="Calculating cluster areas")
-    else:
-        iterator = range(len(groups))
-
+    n_groups = len(groups)
     lp = np.median(locs[["lpx", "lpy"]].mean(axis=1))
-    for idx in iterator:
-        group_id = groups[idx]
-        grouplocs = locs[locs["group"] == group_id]
-        if not len(grouplocs):
-            continue
-        if "z" in grouplocs.columns:
-            X = grouplocs[["x", "y", "z"]].to_numpy()
-        else:
-            X = grouplocs[["x", "y"]].to_numpy()
-        areas[area_key][idx] = _cluster_area(X, lp)
-        if progress is not None:
-            progress(idx + 1)
+    with lib.tracked_progress(
+        progress, "Calculating cluster areas", unit="cluster"
+    ) as progress:
+        lib.start_phase(
+            progress, "Calculating cluster areas", n_groups, unit="cluster"
+        )
+        progress.set_value(0)
+        for idx in range(n_groups):
+            group_id = groups[idx]
+            grouplocs = locs[locs["group"] == group_id]
+            if len(grouplocs):
+                if "z" in grouplocs.columns:
+                    X = grouplocs[["x", "y", "z"]].to_numpy()
+                else:
+                    X = grouplocs[["x", "y"]].to_numpy()
+                areas[area_key][idx] = _cluster_area(X, lp)
+            progress.set_value(idx + 1)
+        progress.set_value(n_groups)
     return pd.DataFrame(areas)
 
 

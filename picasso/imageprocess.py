@@ -10,13 +10,12 @@ Image processing functions
 
 from __future__ import annotations
 
-from typing import Callable
+from typing import Literal
 
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from scipy.optimize import curve_fit
-from tqdm import tqdm
 
 from . import lib, render, localize, postprocess
 
@@ -162,7 +161,7 @@ def get_image_shift(
 def rcc(
     segments: list[lib.FloatArray2D],
     max_shift: float | None = None,
-    callback: Callable[[int], None] | None = None,
+    progress: lib.Progress | Literal["console"] | None = None,
 ) -> tuple[lib.FloatArray1D, lib.FloatArray1D]:
     """Compute RCC, see Wang, Schnitzbauer, et al. Optics Express,
     2014. Return the shift of each segment in y and x relative to the
@@ -176,11 +175,12 @@ def rcc(
     max_shift : float, optional
         Maximum allowed shift in pixels. If None (default), the shift
         is not limited.
-    callback : Callable[[int], None], optional
-        A callback function that takes an integer argument and is called
-        after processing each pair of segments. This can be used to
-        update a progress bar or perform other actions during the
-        computation.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports "Correlating image pairs" over
+        the ``n_segments * (n_segments - 1) / 2`` segment pairs. Default
+        is None.
 
     Returns
     -------
@@ -194,28 +194,23 @@ def rcc(
     n_segments = len(segments)
     shifts_x = np.zeros((n_segments, n_segments))
     shifts_y = np.zeros((n_segments, n_segments))
-    n_pairs = int(n_segments * (n_segments - 1) / 2)
-    flag = 0
-    if callback is None:
-        with tqdm(
-            total=n_pairs, desc="Correlating image pairs", unit="pairs"
-        ) as progress_bar:
-            for i in range(n_segments - 1):
-                for j in range(i + 1, n_segments):
-                    progress_bar.update()
-                    shifts_y[i, j], shifts_x[i, j] = get_image_shift(
-                        segments[i], segments[j], 5, max_shift
-                    )
-                    flag += 1
-    else:
-        callback(0)
+    n_pairs = n_segments * (n_segments - 1) // 2
+    with lib.tracked_progress(
+        progress, "Correlating image pairs", unit="pair"
+    ) as progress:
+        lib.start_phase(
+            progress, "Correlating image pairs", n_pairs, unit="pair"
+        )
+        progress.set_value(0)
+        n_done = 0
         for i in range(n_segments - 1):
             for j in range(i + 1, n_segments):
                 shifts_y[i, j], shifts_x[i, j] = get_image_shift(
                     segments[i], segments[j], 5, max_shift
                 )
-                flag += 1
-                callback(flag)
+                n_done += 1
+                progress.set_value(n_done)
+        progress.set_value(n_pairs)
 
     return lib.minimize_shifts(shifts_x, shifts_y)
 

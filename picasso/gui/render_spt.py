@@ -987,7 +987,8 @@ class SPTController:
                     description = (
                         f"Tracking particles (channel {i + 1}/{len(jobs)})..."
                     )
-                progress.phase(description, 0)  # cancellation point
+                # cancellation point
+                lib.start_phase(progress, description, 0)
                 tracked_locs, new_info = spt.link_tracks(
                     locs,
                     info,

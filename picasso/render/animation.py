@@ -17,7 +17,6 @@ import numpy as np
 import pandas as pd
 import imageio.v2 as imageio
 from scipy.spatial.transform import Rotation
-from tqdm import tqdm
 
 from .. import io, lib
 from .geometry import viewport_width
@@ -385,9 +384,7 @@ def build_animation(
     grid: GridOverlay | None = None,
     grid_bounds: tuple | None = None,
     grid_origin: tuple[float, float, float] = (0.0, 0.0, 0.0),
-    progress_callback: (
-        Callable[[int], None] | Literal["console"] | None
-    ) = None,
+    progress: lib.Progress | Literal["console"] | None = None,
     cancel: Callable[[], bool] | None = None,
 ) -> bool:
     """Build an animation of rendered localizations given the
@@ -525,15 +522,18 @@ def build_animation(
         A point on the grid in the frame of 'locs' (nm), see
         ``picasso.render.draw_grid_3d``. Only used if 'grid' is given.
         Default is the origin.
-    progress_callback : callable, "console", or None, optional
-        If a callable, it is called with the current frame number as an
-        argument after each frame is rendered. If "console", a progress
-        bar is printed to the console. If None, no progress is reported.
-        Default is None.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports one phase, "Building animation"
+        over the frames of the video (``fps`` times the total duration),
+        advanced once a frame is rendered and written. Default is None.
     cancel : callable, optional
         Polled before each frame; when it returns True the build stops,
         the incomplete video file is removed and no settings file is
-        written. Default is None (never canceled).
+        written. Default is None (never canceled). A tracker raising
+        ``lib.OperationCanceled`` removes the incomplete video file as
+        well, and the exception propagates.
 
     Returns
     -------
@@ -652,43 +652,41 @@ def build_animation(
             "(x_max, y_max, z_max))."
         )
     assert np.shape(grid_origin) == (3,), "grid_origin must have 3 values."
-    assert (
-        progress_callback is None
-        or progress_callback == "console"
-        or callable(progress_callback)
-    ), "progress_callback must be None, 'console', or a callable."
     assert cancel is None or callable(cancel), "cancel must be a callable."
 
-    return _build_animation(
-        path=path,
-        locs=locs,
-        info=info,
-        positions=positions,
-        durations=durations,
-        segment_rotations=segment_rotations,
-        transition=transition,
-        disp_px_size=disp_px_size,
-        image_size=image_size,
-        blur_method=blur_method,
-        min_blur_width=min_blur_width,
-        quadtree_capacity=quadtree_capacity,
-        triangulation_passes=triangulation_passes,
-        triangulation_jitter=triangulation_jitter,
-        contrast=contrast,
-        invert_colors=invert_colors,
-        single_channel_colormap=single_channel_colormap,
-        colors=colors,
-        channel_contrast=channel_contrast,
-        fps=fps,
-        adjust_pixel_size=adjust_pixel_size,
-        scalebar_length_nm=scalebar_length_nm,
-        scalebar_display_length=scalebar_display_length,
-        grid=grid,
-        grid_bounds=grid_bounds,
-        grid_origin=grid_origin,
-        progress_callback=progress_callback,
-        cancel=cancel,
-    )
+    with lib.tracked_progress(
+        progress, "Building animation", unit="frame"
+    ) as progress:
+        return _build_animation(
+            path=path,
+            locs=locs,
+            info=info,
+            positions=positions,
+            durations=durations,
+            segment_rotations=segment_rotations,
+            transition=transition,
+            disp_px_size=disp_px_size,
+            image_size=image_size,
+            blur_method=blur_method,
+            min_blur_width=min_blur_width,
+            quadtree_capacity=quadtree_capacity,
+            triangulation_passes=triangulation_passes,
+            triangulation_jitter=triangulation_jitter,
+            contrast=contrast,
+            invert_colors=invert_colors,
+            single_channel_colormap=single_channel_colormap,
+            colors=colors,
+            channel_contrast=channel_contrast,
+            fps=fps,
+            adjust_pixel_size=adjust_pixel_size,
+            scalebar_length_nm=scalebar_length_nm,
+            scalebar_display_length=scalebar_display_length,
+            grid=grid,
+            grid_bounds=grid_bounds,
+            grid_origin=grid_origin,
+            progress=progress,
+            cancel=cancel,
+        )
 
 
 def _build_animation(
@@ -717,14 +715,16 @@ def _build_animation(
     adjust_pixel_size: bool,
     scalebar_length_nm: int | float | None,
     scalebar_display_length: bool,
-    progress_callback: Callable[[int], None] | Literal["console"] | None,
+    progress: lib.Progress,
     cancel: Callable[[], bool] | None = None,
     grid: GridOverlay | None = None,
     grid_bounds: tuple | None = None,
     grid_origin: tuple[float, float, float] = (0.0, 0.0, 0.0),
 ) -> bool:
     """Internal function to build an animation of rendered localizations
-    given the checkpoints. See ``build_animation`` for more details."""
+    given the checkpoints. See ``build_animation`` for more details;
+    ``progress`` is a normalized tracker, see
+    ``lib.normalize_progress``."""
     rotations, viewports = _animation_sequence(
         positions,
         durations,
@@ -758,93 +758,90 @@ def _build_animation(
             channel_contrast=channel_contrast,
         )
 
-    # render all frames and save in RAM
+    # render the frames one by one, appending each to the video
+    lib.start_phase(
+        progress, "Building animation", len(rotations), unit="frame"
+    )
+    progress.set_value(0)
     video_writer = imageio.get_writer(path, fps=fps)
-    use_tqdm = progress_callback == "console"
-    if use_tqdm:
-        iter_range = tqdm(
-            range(len(rotations)), desc="Building animation", unit="frame"
-        )
-    else:
-        iter_range = range(len(rotations))
+    completed = False
+    try:
+        for i in range(len(rotations)):
+            if cancel is not None and cancel():
+                return False
 
-    for i in iter_range:
-        if cancel is not None and cancel():
-            # leave nothing half-written behind
-            video_writer.close()
+            disp_px_size_ = (
+                _adjust_disp_px_size(disp_px_size, viewports[-1], viewports[i])
+                if adjust_pixel_size
+                else disp_px_size
+            )
+            contrast_ = _adjust_contrast(contrast, viewports[-1], viewports[i])
+            qimage = render_scene(
+                locs=locs,
+                info=info,
+                disp_px_size=disp_px_size_,
+                viewport=viewports[i],
+                ang=rotations[i],
+                blur_method=blur_method,
+                min_blur_width=min_blur_width,
+                quadtree_capacity=quadtree_capacity,
+                triangulation_passes=triangulation_passes,
+                triangulation_jitter=triangulation_jitter,
+                contrast=contrast_,
+                invert_colors=invert_colors,
+                single_channel_colormap=single_channel_colormap,
+                colors=colors,
+                channel_contrast=channel_contrast,
+            )[0]
+            qimage = qimage.scaled(
+                width,
+                height,
+                QtCore.Qt.AspectRatioMode.IgnoreAspectRatio,
+            )
+            if grid is not None:
+                # the frame is stretched to the output size, so it spans
+                # the viewport in both directions
+                qimage = draw_grid_3d(
+                    qimage,
+                    viewports[i],
+                    grid,
+                    rotations[i],
+                    grid_bounds,
+                    origin=grid_origin,
+                    color_range=grid_color_range,
+                )
+            if scalebar_length_nm is not None:
+                # the frame is stretched to the output size, so its width
+                # spans the viewport's width; match the aspect ratio so that
+                # draw_scalebar keeps that horizontal scale
+                (y_min, x_min), (_, x_max) = viewports[i]
+                y_max = y_min + (x_max - x_min) * height / width
+                qimage = draw_scalebar(
+                    image=qimage,
+                    viewport=((y_min, x_min), (y_max, x_max)),
+                    scalebar_length_nm=scalebar_length_nm,
+                    display_length=scalebar_display_length,
+                    color=scalebar_color,
+                )
+
+            # convert to a np.array and append
+            ptr = qimage.bits()
+            ptr.setsize(height * width * 4)
+            frame = np.frombuffer(ptr, np.uint8).reshape((height, width, 4))
+            frame = frame[:, :, :3]
+            frame = frame[:, :, ::-1]  # invert RGB to BGR
+            video_writer.append_data(frame)
+
+            progress.set_value(i + 1)
+        completed = True
+    finally:
+        video_writer.close()
+        if not completed:
+            # canceled or failed: leave nothing half-written behind
             try:
                 os.remove(path)
             except OSError:
                 pass
-            return False
-        if callable(progress_callback):
-            progress_callback(i)
-
-        disp_px_size_ = (
-            _adjust_disp_px_size(disp_px_size, viewports[-1], viewports[i])
-            if adjust_pixel_size
-            else disp_px_size
-        )
-        contrast_ = _adjust_contrast(contrast, viewports[-1], viewports[i])
-        qimage = render_scene(
-            locs=locs,
-            info=info,
-            disp_px_size=disp_px_size_,
-            viewport=viewports[i],
-            ang=rotations[i],
-            blur_method=blur_method,
-            min_blur_width=min_blur_width,
-            quadtree_capacity=quadtree_capacity,
-            triangulation_passes=triangulation_passes,
-            triangulation_jitter=triangulation_jitter,
-            contrast=contrast_,
-            invert_colors=invert_colors,
-            single_channel_colormap=single_channel_colormap,
-            colors=colors,
-            channel_contrast=channel_contrast,
-        )[0]
-        qimage = qimage.scaled(
-            width,
-            height,
-            QtCore.Qt.AspectRatioMode.IgnoreAspectRatio,
-        )
-        if grid is not None:
-            # the frame is stretched to the output size, so it spans
-            # the viewport in both directions
-            qimage = draw_grid_3d(
-                qimage,
-                viewports[i],
-                grid,
-                rotations[i],
-                grid_bounds,
-                origin=grid_origin,
-                color_range=grid_color_range,
-            )
-        if scalebar_length_nm is not None:
-            # the frame is stretched to the output size, so its width
-            # spans the viewport's width; match the aspect ratio so that
-            # draw_scalebar keeps that horizontal scale
-            (y_min, x_min), (_, x_max) = viewports[i]
-            y_max = y_min + (x_max - x_min) * height / width
-            qimage = draw_scalebar(
-                image=qimage,
-                viewport=((y_min, x_min), (y_max, x_max)),
-                scalebar_length_nm=scalebar_length_nm,
-                display_length=scalebar_display_length,
-                color=scalebar_color,
-            )
-
-        # convert to a np.array and append
-        ptr = qimage.bits()
-        ptr.setsize(height * width * 4)
-        frame = np.frombuffer(ptr, np.uint8).reshape((height, width, 4))
-        frame = frame[:, :, :3]
-        frame = frame[:, :, ::-1]  # invert RGB to BGR
-        video_writer.append_data(frame)
-
-    if callable(progress_callback):
-        progress_callback(len(rotations))
-    video_writer.close()
 
     # save a yaml with animation settings, note that yaml does not support
     # numpy types and arrays

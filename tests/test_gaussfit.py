@@ -39,6 +39,7 @@ from picasso.fitting import (
     seeds,
     splinefit,
 )
+from tests._progress_tracking import RecordingProgress, assert_phases_complete
 
 BOX = 7
 CENTER = (BOX - 1) / 2.0
@@ -379,6 +380,40 @@ class TestThreading:
             pass
         fit.raise_errors()
         assert fit.current[0] <= len(noisy_batch)
+        # every claimed spot was fitted before the worker exited
+        assert fit.n_done == fit.current[0]
+
+    @pytest.mark.parametrize("multichannel", [False, True])
+    def test_async_counts_finished_spots(self, noisy_batch, multichannel):
+        """``n_done`` counts the spots whose results are written, so it ends
+        at the spot count once the fit finished."""
+        if multichannel:
+            n = 40
+            spots, _ = _multi_batch(n, [400.0, 400.0], [10.0, 10.0])
+            jac, res = _multi_geometry(n)
+            fit = gaussfit.fit_spots_multichannel_async(
+                gaussfit.MULTI_KIND_SHARED,
+                spots,
+                jac,
+                res,
+                _shared_seed(spots),
+                n_threads=2,
+            )
+        else:
+            n = len(noisy_batch)
+            seed = seeds.initial_parameters_gauss(noisy_batch, BOX).astype(
+                np.float64
+            )
+            fit = gaussfit.fit_spots_async(
+                gaussfit.ELLIPTIC, noisy_batch, seed, n_threads=2
+            )
+        seen = []
+        while not fit.finished():
+            seen.append(fit.n_done)
+        fit.raise_errors()
+        assert all(0 <= v <= n for v in seen)
+        assert all(b >= a for a, b in zip(seen, seen[1:]))
+        assert fit.n_done == fit.done[0] == fit.current[0] == n
 
 
 class TestSchedule:
@@ -460,20 +495,75 @@ class TestSchedule:
 
 class TestProgress:
     @pytest.mark.parametrize("mle", [False, True], ids=["lsq", "mle"])
-    def test_callback_counts_every_spot(self, noisy_batch, mle):
-        """Called once per spot with the number of spots fitted so far."""
+    def test_tracker_counts_every_spot(self, noisy_batch, mle):
+        """One "Fitting spots" phase over the spots, reporting the number
+        of spots fitted so far after each spot."""
         seed = seeds.initial_parameters_gauss(noisy_batch, BOX).astype(
             np.float64
         )
-        calls = []
+        tracker = RecordingProgress()
         gaussfit.fit_spots(
             gaussfit.ELLIPTIC,
             noisy_batch,
             seed,
             mle=mle,
-            progress_callback=calls.append,
+            progress=tracker,
         )
-        assert calls == list(range(1, len(noisy_batch) + 1))
+        assert_phases_complete(tracker, ["Fitting spots"])
+        assert tracker.phases[0]["maximum"] == len(noisy_batch)
+        assert tracker.phases[0]["values"] == list(range(len(noisy_batch) + 1))
+
+    def test_multichannel_tracker(self):
+        n = 6
+        spots, _ = _multi_batch(n, [400.0, 400.0], [10.0, 10.0])
+        jac, res = _multi_geometry(n)
+        tracker = RecordingProgress()
+        gaussfit.fit_spots_multichannel(
+            gaussfit.MULTI_KIND_SHARED,
+            spots,
+            jac,
+            res,
+            _shared_seed(spots),
+            progress=tracker,
+        )
+        assert_phases_complete(tracker, ["Fitting spots"])
+        assert tracker.phases[0]["maximum"] == n
+
+    @pytest.mark.parametrize("multichannel", [False, True])
+    def test_none_is_silent_and_console_works(
+        self, noisy_batch, multichannel, capsys
+    ):
+        if multichannel:
+            n = 4
+            spots, _ = _multi_batch(n, [400.0, 400.0], [10.0, 10.0])
+            jac, res = _multi_geometry(n)
+            args = (
+                gaussfit.MULTI_KIND_SHARED,
+                spots,
+                jac,
+                res,
+                _shared_seed(spots),
+            )
+            fit = gaussfit.fit_spots_multichannel
+        else:
+            spots = noisy_batch[:4]
+            args = (gaussfit.ELLIPTIC, spots, _seed(gaussfit.ELLIPTIC, spots))
+            fit = gaussfit.fit_spots
+        fit(*args, progress=None)
+        captured = capsys.readouterr()
+        assert captured.out == "" and captured.err == ""
+        fit(*args, progress="console")
+        assert "Fitting spots" in capsys.readouterr().err
+
+    def test_rejects_an_invalid_progress_argument(self, noisy_batch):
+        spots = noisy_batch[:2]
+        with pytest.raises(ValueError, match="Invalid progress"):
+            gaussfit.fit_spots(
+                gaussfit.ELLIPTIC,
+                spots,
+                _seed(gaussfit.ELLIPTIC, spots),
+                progress="tqdm",
+            )
 
 
 class TestChiSquare:

@@ -58,7 +58,7 @@ To use RESI:
           radius_xy=10.0,                 # nm, e.g., 2 x NeNA
           min_locs=10,
           apply_fa=True,                  # basic frame analysis
-          progress_callback="console",
+          progress="console",
       )
       io.save_locs("resi.hdf5", resi_locs, resi_info)
 
@@ -96,7 +96,7 @@ summary of the user guide.
           locs, radius=20.0, min_samples=4,   # radius in nm
       )
       molecules, clustered, info = g5m.g5m(
-          clustered, info, min_locs=10, callback_parent="console"
+          clustered, info, min_locs=10, progress="console"
       )
       io.save_locs("movie_molmap.hdf5", molecules, info)
 

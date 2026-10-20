@@ -36,8 +36,8 @@ import warnings
 from collections import OrderedDict
 from contextlib import closing
 from dataclasses import dataclass
-from concurrent.futures import ThreadPoolExecutor, Future
-from functools import partial
+from concurrent.futures import ThreadPoolExecutor, Future, as_completed
+from concurrent.futures import wait as wait_futures
 from itertools import chain
 from typing import Literal, Callable, TypeAlias, Union
 from datetime import datetime
@@ -48,7 +48,6 @@ from numba import cuda
 import dask.array as da
 import pandas as pd
 import matplotlib.pyplot as plt
-from tqdm import tqdm
 import matplotlib.gridspec as gridspec
 from scipy.ndimage import gaussian_filter
 from scipy.optimize import curve_fit
@@ -2304,13 +2303,16 @@ def _identify_worker(
 ) -> list[pd.DataFrame]:
     """Worker function for identifying spots in a movie. This function is
     designed to be run in a separate thread and processes each frame
-    independently."""
+    independently. ``current`` is ``[claimed, finished]``: the next frame to
+    claim and the number of frames finished, both guarded by ``lock``;
+    setting ``current[0]`` to the frame count stops every worker after its
+    current frame."""
     n_frames = len(movie)
     identifications = []
     while True:
         with lock:
             index = current[0]
-            if index == n_frames:
+            if index >= n_frames:
                 return identifications
             current[0] += 1
         identifications.append(
@@ -2324,6 +2326,8 @@ def _identify_worker(
                 lock=lock,
             )
         )
+        with lock:
+            current[1] += 1
 
 
 def identifications_from_futures(
@@ -2395,10 +2399,12 @@ def identify_async(
     Returns
     -------
     current : list[int]
-        A list of frame indices representing the current processing
-        state.
+        The processing state, ``[claimed, finished]``: the number of frames
+        the threads have started on and the number they have finished.
+        The identification is complete when ``current[1]`` reaches the
+        number of frames (or all futures are done).
     f : list[multiprocessing.pool.Future]
-            A list of futures representing the asynchronous tasks.
+        A list of futures representing the asynchronous tasks.
     """
     # fail here rather than in every worker thread
     method = _validate_method(method)
@@ -2423,7 +2429,7 @@ def identify_async(
     n_workers = lib.n_workers(cpu_utilization)
 
     lock = threading.Lock()
-    current = [0]
+    current = [0, 0]
     executor = ThreadPoolExecutor(n_workers)
     f = [
         executor.submit(
@@ -2448,20 +2454,15 @@ def _identify_threaded(
     box,
     roi,
     frame_bounds,
-    progress_callback,
+    progress: lib.Progress,
     abort_callback,
 ):
-    """Run identify_async and drive its progress loop.
+    """Run identify_async and report the finished frames to ``progress``
+    (an already started phase) from the calling thread.
 
     Returns the identifications, or None if aborted.
     """
     N = len(movie)
-    use_tqdm = progress_callback == "console"
-    iter_range = (
-        tqdm(total=N, desc="Identifying spots", unit="frame")
-        if use_tqdm
-        else None
-    )
     current, futures = identify_async(
         movie,
         method,
@@ -2469,24 +2470,21 @@ def _identify_threaded(
         roi=roi,
         frame_bounds=frame_bounds,
     )
-    last = 0
-    while current[0] < N:
-        if abort_callback is not None and abort_callback():
-            for f in futures:
-                f.cancel()
-            if use_tqdm:
-                iter_range.close()
-            return None
-        if use_tqdm:
-            iter_range.update(current[0] - last)
-            last = current[0]
-        elif callable(progress_callback):
-            progress_callback(current[0])
-        time.sleep(0.2)
-    if use_tqdm:
-        iter_range.update(N - last)
-        iter_range.close()
-    return identifications_from_futures(futures)
+    try:
+        while True:
+            _, pending = wait_futures(futures, timeout=0.2)
+            if not pending:
+                break
+            if abort_callback is not None and abort_callback():
+                return None
+            progress.set_value(current[1])
+        ids = identifications_from_futures(futures)
+        progress.set_value(N)
+        return ids
+    finally:
+        # stops the workers after their current frame (no-op once done),
+        # e.g. on abort or when the tracker canceled the computation
+        current[0] = N
 
 
 def _identify_serial(
@@ -2495,18 +2493,13 @@ def _identify_serial(
     box,
     roi,
     frame_bounds,
-    progress_callback,
+    progress: lib.Progress,
 ):
-    """Identify spots frame-by-frame in the current thread."""
+    """Identify spots frame-by-frame in the current thread, reporting the
+    finished frames to ``progress`` (an already started phase)."""
     N = len(movie)
-    use_tqdm = progress_callback == "console"
-    iter_range = (
-        tqdm(range(N), desc="Identifying spots", unit="frame")
-        if use_tqdm
-        else range(N)
-    )
     identifications = []
-    for i in iter_range:
+    for i in range(N):
         identifications.append(
             identify_by_frame_number(
                 movie,
@@ -2517,8 +2510,8 @@ def _identify_serial(
                 frame_bounds=frame_bounds,
             )
         )
-        if callable(progress_callback):
-            progress_callback(i)
+        progress.set_value(i + 1)
+    progress.set_value(N)
     ids = pd.concat(identifications, ignore_index=True)
     ids.sort_values(by="frame", kind="stable", inplace=True)
     return ids
@@ -2531,9 +2524,7 @@ def identify(
     roi: tuple[tuple[int, int], tuple[int, int]] | list | None = None,
     frame_bounds: tuple[int, int] | list | None = None,
     threaded: bool = True,
-    progress_callback: (
-        Callable[[list[int]], None] | Literal["console"] | None
-    ) = None,
+    progress: lib.Progress | Literal["console"] | None = None,
     abort_callback: Callable[[], bool] | None = None,
 ) -> tuple[pd.DataFrame, dict] | None:
     """Identify spots in a movie. This function can run in a threaded or
@@ -2582,15 +2573,16 @@ def identify(
     threaded : bool, optional
         Whether to use threading for the identification process. Default
         is True.
-    progress_callback : callable, "console" or None, optional
-        A callback function to report the progress of the identification
-        process. If "console", progress will be printed to the console.
-        If None, no progress will be reported. Default is None.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports one phase, "Identifying spots",
+        over the frames of the movie. Default is None.
     abort_callback : callable, optional
         A callable for aborting multiprocessing in the GUI. If a
         callable provided, it must accept no input and return a boolean
-        indicating whether the fitting should be aborted. Default is
-        None.
+        indicating whether the identification should be aborted. Default
+        is None.
 
     Returns
     -------
@@ -2670,27 +2662,33 @@ def identify(
     # the maxima of one spot, not those of the background it sits on
     if parameters.gaussian_filter_sigma:
         movie = GaussianFilteredMovie(movie, parameters.gaussian_filter_sigma)
-    if threaded:
-        ids = _identify_threaded(
-            movie,
-            method,
-            box,
-            search_roi,
-            frame_bounds,
-            progress_callback,
-            abort_callback,
+    with lib.tracked_progress(
+        progress, "Identifying spots", unit="frame"
+    ) as progress:
+        lib.start_phase(
+            progress, "Identifying spots", len(movie), unit="frame"
         )
-        if ids is None:
-            return
-    else:
-        ids = _identify_serial(
-            movie,
-            method,
-            box,
-            search_roi,
-            frame_bounds,
-            progress_callback,
-        )
+        if threaded:
+            ids = _identify_threaded(
+                movie,
+                method,
+                box,
+                search_roi,
+                frame_bounds,
+                progress,
+                abort_callback,
+            )
+            if ids is None:
+                return
+        else:
+            ids = _identify_serial(
+                movie,
+                method,
+                box,
+                search_roi,
+                frame_bounds,
+                progress,
+            )
     if window is not None:
         # back to canvas coordinates
         (y0, x0), _ = window
@@ -2846,11 +2844,9 @@ def identify_multichannel_sum(
     frame_bounds: tuple[int, int] | list | None = None,
     threaded: bool = True,
     order: int = 1,
-    progress_callback: (
-        Callable[[list[int]], None] | Literal["console"] | None
-    ) = None,
+    progress: lib.Progress | Literal["console"] | None = None,
     abort_callback: Callable[[], bool] | None = None,
-) -> tuple[pd.DataFrame, dict]:
+) -> tuple[pd.DataFrame, dict] | None:
     """Identify spots on the *sum* of registered channels.
 
     The spots are identified on the sum rather than in each channel on its
@@ -2906,8 +2902,11 @@ def identify_multichannel_sum(
     order : int, optional
         Spline order of the resampling; see :class:`SummedChannelsMovie`.
         Default is 1.
-    progress_callback : callable, "console" or None, optional
-        Progress reporting, as in :func:`identify`. Default is None.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports one phase, "Identifying spots",
+        over the frames, as in :func:`identify`. Default is None.
     abort_callback : callable, optional
         Abort check, as in :func:`identify`. Default is None.
 
@@ -2921,6 +2920,9 @@ def identify_multichannel_sum(
         Identification metadata, with the summing recorded under
         ``"Identification Mode"``, ``"Sum Channel Transforms"`` and
         ``"Sum Regions"``.
+
+    None is returned instead if the identification was aborted via
+    ``abort_callback``.
     """
     summed = SummedChannelsMovie(
         movies,
@@ -2941,7 +2943,7 @@ def identify_multichannel_sum(
         roi=roi,
         frame_bounds=frame_bounds,
         threaded=threaded,
-        progress_callback=progress_callback,
+        progress=progress,
         abort_callback=abort_callback,
     )
     if result is None:  # aborted
@@ -3297,7 +3299,8 @@ def _cut_spots_framebyframe(
     ids_y: lib.IntArray1D,
     box: int,
     spots: lib.IntArray3D,
-    progress_callback: Callable[[int], None] | None = None,
+    progress: lib.Progress,
+    offset: int = 0,
 ):
     """Extract the spots out of a movie frame by frame.
 
@@ -3313,9 +3316,12 @@ def _cut_spots_framebyframe(
     spots : lib.IntArray3D
         3D array to store the cut spots, with shape (k, box, box),
         where k is the number of spots identified.
-    progress_callback : callable or None, optional
-        If a callable is provided, it is called after each frame with
-        the cumulative number of spots cut so far. Default is None.
+    progress : lib.Progress
+        Normalized tracker of the running phase, told ``offset`` plus the
+        cumulative number of spots cut after each frame (from the calling
+        thread).
+    offset : int, optional
+        Spots of the running phase cut before this call. Default 0.
 
     Returns
     -------
@@ -3342,8 +3348,6 @@ def _cut_spots_framebyframe(
     ends = np.append(starts[1:], N)
 
     if getattr(movie, "supports_concurrent_reads", False):
-        done = [0]
-        progress_lock = threading.Lock()
 
         def _read_and_cut(frame_number: int) -> None:
             start = int(starts[frame_number])
@@ -3352,14 +3356,24 @@ def _cut_spots_framebyframe(
             _cut_spots_single_frame_into(
                 frame, ids_x, ids_y, r, start, end, spots
             )
-            if callable(progress_callback):
-                with progress_lock:
-                    done[0] += end - start
-                    progress_callback(done[0])
 
-        with ThreadPoolExecutor(_n_io_workers()) as executor:
-            # consume the iterator so exceptions propagate
-            list(executor.map(_read_and_cut, range(n_frames)))
+        executor = ThreadPoolExecutor(_n_io_workers())
+        try:
+            pending = {
+                executor.submit(_read_and_cut, frame_number): frame_number
+                for frame_number in range(n_frames)
+            }
+            # progress is reported here, in the calling thread, never from
+            # the I/O workers
+            done = 0
+            for future in as_completed(pending):
+                future.result()  # propagate a worker's exception
+                frame_number = pending[future]
+                done += int(ends[frame_number] - starts[frame_number])
+                progress.set_value(offset + done)
+        finally:
+            # on an error or a cancellation, drop the frames not yet read
+            executor.shutdown(wait=True, cancel_futures=True)
         return spots
 
     # Serial fallback for movies whose readers are not reentrant
@@ -3371,8 +3385,7 @@ def _cut_spots_framebyframe(
         frame = movie[frame_number]
         _cut_spots_single_frame_into(frame, ids_x, ids_y, r, start, end, spots)
         cum += end - start
-        if callable(progress_callback):
-            progress_callback(cum)
+        progress.set_value(offset + cum)
     return spots
 
 
@@ -3380,20 +3393,24 @@ def _cut_spots(
     movie: MovieLike,
     ids: pd.DataFrame,
     box: int,
-    progress_callback: Callable[[int], None] | None = None,
+    progress: lib.Progress | None = None,
+    offset: int = 0,
 ) -> lib.IntArray3D:
     """Cut out spots from a movie based on the identified positions.
 
-    If a callable `progress_callback` is provided, it is called with the
-    cumulative number of spots cut so far, allowing the cutting progress
-    to be tracked.
+    ``progress`` is a normalized tracker (or None for no reporting) whose
+    running phase, started by the caller, is told ``offset`` plus the
+    cumulative number of spots cut so far. The final report is the
+    caller's.
     """
+    progress = lib.normalize_progress(progress)
     N = len(ids)
     ids_frame = ids["frame"].to_numpy()
     ids_x = ids["x"].to_numpy()
     ids_y = ids["y"].to_numpy()
     if isinstance(movie, np.ndarray):
-        if not callable(progress_callback):
+        if type(progress) is lib.MockProgress:
+            # nobody listens: one call, no chunks
             return _cut_spots_numba(movie, ids_frame, ids_x, ids_y, box)
         # cut in chunks so that progress can be reported; spots are
         # written directly into the output array to avoid an extra copy
@@ -3410,7 +3427,7 @@ def _cut_spots(
                 spots,
                 chunk_start,
             )
-            progress_callback(chunk_end)
+            progress.set_value(offset + chunk_end)
         return spots
     elif isinstance(movie, io.ND2Movie) and movie.use_dask:
         """Assumes that identifications are in order of frames!"""
@@ -3428,8 +3445,7 @@ def _cut_spots(
             output_dtypes=[movie.dtype],
             allow_rechunk=True,
         ).compute()
-        if callable(progress_callback):
-            progress_callback(N)
+        # dask runs the whole cut at once: the only report is the final one
         return spots
     else:
         """Assumes that identifications are in order of frames!"""
@@ -3441,7 +3457,8 @@ def _cut_spots(
             ids_y,
             box,
             spots,
-            progress_callback=progress_callback,
+            progress,
+            offset,
         )
         return spots
 
@@ -3808,7 +3825,7 @@ def get_spots(
     identifications: pd.DataFrame,
     box: int,
     camera_info: dict,
-    progress_callback: Callable[[int], None] | None = None,
+    progress: lib.Progress | Literal["console"] | None = None,
     camera_calibration: dict | None = None,
     return_variance: bool = False,
 ) -> lib.FloatArray3D | tuple[lib.FloatArray3D, lib.FloatArray3D | None]:
@@ -3830,10 +3847,11 @@ def get_spots(
     camera_info : dict
         A dictionary containing camera information such as
         `Baseline`, `Sensitivity`, and `Gain`.
-    progress_callback : callable or None, optional
-        If a callable is provided, it is called with the cumulative
-        number of spots cut so far, allowing the cutting progress to be
-        tracked. Default is None.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports one phase, "Cutting spots", over
+        the identifications. Default is None.
     camera_calibration : dict or None, optional
         Per-pixel sCMOS camera calibration from ``picasso.scmos``. Its
         ``offset`` map replaces the scalar ``Baseline`` and, if present, its
@@ -3851,8 +3869,38 @@ def get_spots(
     variance : lib.FloatArray3D or None
         Only if ``return_variance``.
     """
+    with lib.tracked_progress(progress, "Cutting spots", "spot") as progress:
+        lib.start_phase(
+            progress, "Cutting spots", len(identifications), unit="spot"
+        )
+        result = _get_spots(
+            movie,
+            identifications,
+            box,
+            camera_info,
+            progress,
+            camera_calibration=camera_calibration,
+            return_variance=return_variance,
+        )
+        progress.set_value(len(identifications))
+    return result
+
+
+def _get_spots(
+    movie: MovieLike,
+    identifications: pd.DataFrame,
+    box: int,
+    camera_info: dict,
+    progress: lib.Progress,
+    camera_calibration: dict | None = None,
+    return_variance: bool = False,
+    progress_offset: int = 0,
+) -> lib.FloatArray3D | tuple[lib.FloatArray3D, lib.FloatArray3D | None]:
+    """The work of :func:`get_spots`, reporting ``progress_offset`` plus the
+    spots cut so far to the running phase of ``progress`` (a normalized
+    tracker), which the caller starts and ends."""
     spots = _cut_spots(
-        movie, identifications, box, progress_callback=progress_callback
+        movie, identifications, box, progress, offset=progress_offset
     )
     offset = gain_patch = variance = None
     if camera_calibration is not None:
@@ -3902,11 +3950,8 @@ def fit(
     spline_calibration: dict | None = None,
     camera_calibration: dict | None = None,
     multiprocess: bool = True,
-    progress_callback: (
-        Callable[[int], None] | Literal["console"] | None
-    ) = None,
+    progress: lib.Progress | Literal["console"] | None = None,
     abort_callback: Callable[[], bool] | None = None,
-    cut_progress_callback: Callable[[int], None] | None = None,
 ) -> tuple[pd.DataFrame | None, dict]:
     """Fit 2D localizations to a movie, given positions of the detected
     spots (identifications).
@@ -3989,20 +4034,19 @@ def fit(
     multiprocess : bool, optional
         Whether or not to use multiprocessing. Ignored for GPU fitting.
         Default is True.
-    progress_callback : callable, "console" or None, optional
-        If a callable provided, it must accept one integer input (number
-        of localized spots). If "console", tqdm is used to display
-        progress. If None, progress is not tracked.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports the phases
+        "Cutting spots" over the identifications, "Fitting spots" over the
+        spots finished (per chunk on the GPU) and, for the "spline*"
+        methods, "Computing spline CRLB" over the localizations. Default
+        is None.
     abort_callback : callable or None, optional
         A callable for aborting multiprocessing in the GUI. If a
         callable provided, it must accept no input and return a boolean
         indicating whether the fitting should be aborted. Default is
         None.
-    cut_progress_callback : callable or None, optional
-        If a callable is provided, it is called with the cumulative
-        number of spots cut so far while extracting the spots from the
-        movie (before fitting). It must accept one integer input.
-        Default is None.
 
     Returns
     -------
@@ -4027,33 +4071,34 @@ def fit(
         multiprocess,
         camera_calibration,
     )
-    spots, variance = get_spots(
-        movie,
-        identifications,
-        box,
-        camera_info,
-        progress_callback=cut_progress_callback,
-        camera_calibration=camera_calibration,
-        return_variance=True,
-    )
-    em = camera_info["Gain"] > 1
-    gauss_flags = parse_gauss_code(fitting_method)
-    locs = _dispatch_fit(
-        fitting_method=fitting_method,
-        gauss_flags=gauss_flags,
-        spots=spots,
-        identifications=identifications,
-        box=box,
-        em=em,
-        variance=variance,
-        eps=eps,
-        max_it=max_it,
-        spline_calibration=spline_calibration,
-        multiprocess=multiprocess,
-        progress_callback=progress_callback,
-        abort_callback=abort_callback,
-        pixelsize=float(camera_info["Pixelsize"]),
-    )
+    with lib.tracked_progress(progress, "Fitting spots", "spot") as progress:
+        spots, variance = get_spots(
+            movie,
+            identifications,
+            box,
+            camera_info,
+            progress=progress,
+            camera_calibration=camera_calibration,
+            return_variance=True,
+        )
+        em = camera_info["Gain"] > 1
+        gauss_flags = parse_gauss_code(fitting_method)
+        locs = _dispatch_fit(
+            fitting_method=fitting_method,
+            gauss_flags=gauss_flags,
+            spots=spots,
+            identifications=identifications,
+            box=box,
+            em=em,
+            variance=variance,
+            eps=eps,
+            max_it=max_it,
+            spline_calibration=spline_calibration,
+            multiprocess=multiprocess,
+            progress=progress,
+            abort_callback=abort_callback,
+            pixelsize=float(camera_info["Pixelsize"]),
+        )
     localize_info = _fit_localize_info(
         fitting_method,
         gauss_flags,
@@ -4169,7 +4214,7 @@ def _dispatch_fit(
     max_it: int | None,
     spline_calibration: dict | None,
     multiprocess: bool,
-    progress_callback: Callable[[int], None] | Literal["console"] | None,
+    progress: lib.Progress,
     abort_callback: Callable[[], bool] | None,
     pixelsize: float,
 ) -> pd.DataFrame | None:
@@ -4201,8 +4246,8 @@ def _dispatch_fit(
         Cubic-spline PSF calibration for the "spline*" methods.
     multiprocess : bool
         Whether to use multiprocessing. Ignored for GPU fitting.
-    progress_callback : callable, "console" or None
-        Progress reporting, as in :func:`fit`.
+    progress : lib.Progress
+        Normalized tracker, given the fit's phases, as in :func:`fit`.
     abort_callback : callable or None
         Abort check, as in :func:`fit`.
     pixelsize : float
@@ -4215,8 +4260,6 @@ def _dispatch_fit(
         aborted.
     """
     if gauss_flags is not None:
-        if gauss_flags["use_gpu"] and callable(progress_callback):
-            progress_callback(1)
         locs = _fit2d_gauss(
             spots=spots,
             identifications=identifications,
@@ -4224,20 +4267,15 @@ def _dispatch_fit(
             em=em,
             tolerance=eps,
             max_iterations=max_it,
-            progress_callback=(
-                None if gauss_flags["use_gpu"] else progress_callback
-            ),
+            progress=progress,
             variance=variance,
             pixelsize=pixelsize,
             **gauss_flags,
         )
     elif fitting_method in ("spline-gpu", "spline-mle-gpu"):
-        if callable(progress_callback):
-            progress_callback(1)
         # "spline-mle-gpu" uses the Poisson maximum-likelihood estimator,
-        # "spline-gpu" least squares.
-        # The GPU fit itself is a single call; progress_callback then tracks
-        # the per-spot CRLB / precision computation in locs_from_fits_spline.
+        # "spline-gpu" least squares. The fit is reported per launched
+        # chunk, then the CRLB per chunk of localizations.
         locs = _fit2d_spline_gpu(
             spots=spots,
             identifications=identifications,
@@ -4245,17 +4283,16 @@ def _dispatch_fit(
             em=em,
             calibration=spline_calibration,
             mle=fitting_method == "spline-mle-gpu",
-            progress_callback=progress_callback,
+            progress=progress,
             tolerance=eps,
             max_iterations=max_it,
             variance=variance,
             pixelsize=pixelsize,
         )
     elif fitting_method in ("spline", "spline-mle"):
-        # The CPU cubic-spline fit (picasso.fitting.splinefit). Unlike the
-        # GPU path it is a per-spot loop, so progress_callback tracks the fit
-        # itself and the fit can be aborted. eps / max_it override the
-        # convergence schedule; None picks the one matching the multi-start.
+        # The CPU cubic-spline fit (picasso.fitting.splinefit), reported per
+        # spot, then the CRLB. eps / max_it override the convergence
+        # schedule; None picks the one matching the multi-start.
         locs = _fit2d_spline_cpu(
             spots=spots,
             identifications=identifications,
@@ -4266,7 +4303,7 @@ def _dispatch_fit(
             tolerance=eps,
             max_iterations=max_it,
             multiprocess=multiprocess,
-            progress_callback=progress_callback,
+            progress=progress,
             abort_callback=abort_callback,
             variance=variance,
             pixelsize=pixelsize,
@@ -4278,7 +4315,7 @@ def _dispatch_fit(
             box,
             em,
             multiprocess,
-            progress_callback,
+            progress,
             abort_callback,
             variance=variance,
             pixelsize=pixelsize,
@@ -4480,9 +4517,7 @@ def fit_spots_gauss(
     return_stats: bool = False,
     tolerance: float | None = None,
     max_iterations: int | None = None,
-    progress_callback: (
-        Callable[[int], None] | Literal["console"] | None
-    ) = None,
+    progress: lib.Progress | Literal["console"] | None = None,
     variance: lib.FloatArray3D | None = None,
 ) -> (
     lib.FloatArray2D
@@ -4524,8 +4559,12 @@ def fit_spots_gauss(
     max_iterations : int or None, optional
         Maximum number of iterations per spot. ``None`` uses the method's
         own schedule, see :func:`gauss_schedule`.
-    progress_callback : callable, "console" or None, optional
-        Reported per spot on the CPU; the GPU fit is one launch per chunk.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports one phase, "Fitting spots", over
+        the spots: per spot on the CPU, per launched chunk on the GPU.
+        Default is None.
     variance : lib.FloatArray3D, optional
         Per-pixel sCMOS readout variance in photoelectrons squared, laid out
         exactly like ``spots`` (from ``get_spots(..., return_variance=True)``).
@@ -4568,16 +4607,20 @@ def fit_spots_gauss(
     ).astype(np.float64)
 
     backend = gaussfit_cuda if use_gpu else gaussfit
-    parameters, chi_squares, _states, number_iterations = backend.fit_spots(
-        model,
-        spots,
-        initial_parameters,
-        mle=mle,
-        tolerance=tolerance,
-        max_iterations=max_iterations,
-        progress_callback=progress_callback,
-        variance=variance,
-    )
+    with lib.tracked_progress(progress, "Fitting spots", "spot") as progress:
+        # the backend starts (and ends) the "Fitting spots" phase
+        parameters, chi_squares, _states, number_iterations = (
+            backend.fit_spots(
+                model,
+                spots,
+                initial_parameters,
+                mle=mle,
+                tolerance=tolerance,
+                max_iterations=max_iterations,
+                progress=progress,
+                variance=variance,
+            )
+        )
     parameters = parameters.astype(np.float32)
     chi_squares = chi_squares.astype(np.float32)
 
@@ -4909,9 +4952,7 @@ def _fit2d_gauss(
     use_gpu: bool = False,
     tolerance: float | None = None,
     max_iterations: int | None = None,
-    progress_callback: (
-        Callable[[int], None] | Literal["console"] | None
-    ) = None,
+    progress: lib.Progress | None = None,
     variance: lib.FloatArray3D | None = None,
     *,
     pixelsize: float,
@@ -4922,7 +4963,8 @@ def _fit2d_gauss(
     rotation angle (in degrees) in the column ``angle``. If ``spherical``, an
     isotropic Gaussian with a single width is fitted and the resulting ``sx``
     and ``sy`` columns are identical. ``pixelsize`` (nm) converts the result
-    to nm. See ``fit`` for more details."""
+    to nm. ``progress`` (a normalized tracker, or None) gets the "Fitting
+    spots" phase. See ``fit`` for more details."""
     theta, log_likelihood, iterations, chi_square = fit_spots_gauss(
         spots,
         rotated=rotated,
@@ -4932,7 +4974,7 @@ def _fit2d_gauss(
         return_stats=True,
         tolerance=tolerance,
         max_iterations=max_iterations,
-        progress_callback=progress_callback,
+        progress=progress,
         variance=variance,
     )
     locs = locs_from_fits_gauss(
@@ -4973,9 +5015,7 @@ def fit_spots_gauss_multichannel(
     tolerance: float | None = None,
     max_iterations: int | None = None,
     multiprocess: bool = True,
-    progress_callback: (
-        Callable[[int], None] | Literal["console"] | None
-    ) = None,
+    progress: lib.Progress | Literal["console"] | None = None,
     abort_callback: Callable[[], bool] | None = None,
     variance: np.ndarray | None = None,
     return_stats: bool = False,
@@ -5013,9 +5053,12 @@ def fit_spots_gauss_multichannel(
     multiprocess : bool, optional
         Run the CPU kernels on a thread pool (they are ``nogil``). Ignored on
         the GPU, where one launch fits every spot.
-    progress_callback : callable, "console" or None, optional
-        Called with the cumulative number of spots fitted; ``"console"`` shows
-        a progress bar instead.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports one phase, "Fitting spots", over
+        the spots finished: per spot on the CPU, per chunk on the GPU.
+        Default is None.
     abort_callback : callable, optional
         Polled during the fit; returning True stops it.
     variance : np.ndarray, optional
@@ -5058,60 +5101,55 @@ def fit_spots_gauss_multichannel(
         link_photons=link_photons,
     ).astype(np.float64)
 
-    if use_gpu:
-        result = gaussfit_cuda.fit_spots_multichannel(
-            kind,
-            spots,
-            jacobians,
-            residuals,
-            initial_parameters,
-            mle=mle,
-            tolerance=tolerance,
-            max_iterations=max_iterations,
-            progress_callback=progress_callback,
-            abort_callback=abort_callback,
-            variance=variance,
-        )
-        if result is None:
-            return None
-    elif not multiprocess or len(spots) == 0:
-        result = gaussfit.fit_spots_multichannel(
-            kind,
-            spots,
-            jacobians,
-            residuals,
-            initial_parameters,
-            mle=mle,
-            tolerance=tolerance,
-            max_iterations=max_iterations,
-            progress_callback=progress_callback,
-            variance=variance,
-        )
-    else:
-        job = gaussfit.fit_spots_multichannel_async(
-            kind,
-            spots,
-            jacobians,
-            residuals,
-            initial_parameters,
-            mle=mle,
-            tolerance=tolerance,
-            max_iterations=max_iterations,
-            variance=variance,
-        )
-        n_spots = len(spots)
-        while not job.finished():
-            job.raise_errors()
-            if abort_callback is not None and abort_callback():
-                job.stop()
+    with lib.tracked_progress(progress, "Fitting spots", "spot") as progress:
+        if use_gpu:
+            # starts and ends its own "Fitting spots" phase
+            result = gaussfit_cuda.fit_spots_multichannel(
+                kind,
+                spots,
+                jacobians,
+                residuals,
+                initial_parameters,
+                mle=mle,
+                tolerance=tolerance,
+                max_iterations=max_iterations,
+                progress=progress,
+                abort_callback=abort_callback,
+                variance=variance,
+            )
+            if result is None:
                 return None
-            if callable(progress_callback):
-                progress_callback(min(job.current[0], n_spots))
-            time.sleep(0.1)
-        job.raise_errors()
-        if callable(progress_callback):
-            progress_callback(n_spots)
-        result = job.results()
+        elif not multiprocess or len(spots) == 0:
+            # starts and ends its own "Fitting spots" phase
+            result = gaussfit.fit_spots_multichannel(
+                kind,
+                spots,
+                jacobians,
+                residuals,
+                initial_parameters,
+                mle=mle,
+                tolerance=tolerance,
+                max_iterations=max_iterations,
+                progress=progress,
+                variance=variance,
+            )
+        else:
+            n_spots = len(spots)
+            lib.start_phase(progress, "Fitting spots", n_spots, unit="spot")
+            job = gaussfit.fit_spots_multichannel_async(
+                kind,
+                spots,
+                jacobians,
+                residuals,
+                initial_parameters,
+                mle=mle,
+                tolerance=tolerance,
+                max_iterations=max_iterations,
+                variance=variance,
+            )
+            if not _await_async_fit(job, n_spots, progress, abort_callback):
+                return None
+            result = job.results()
 
     theta, chi_squares, _states, iterations = result
     theta = theta.astype(np.float32)
@@ -5143,6 +5181,7 @@ def locs_from_fits_gauss_multichannel(
     spots: np.ndarray | None = None,
     *,
     pixelsize: float,
+    progress: lib.Progress | Literal["console"] | None = None,
 ) -> pd.DataFrame:
     """Localizations from a multichannel spherical Gaussian fit.
 
@@ -5190,6 +5229,12 @@ def locs_from_fits_gauss_multichannel(
     pixelsize : float
         Camera pixel size of the reference channel in nm; the positions,
         widths and precisions are converted to nm with it.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports one phase,
+        "Computing Gaussian CRLB", over the localizations. Default is
+        None.
 
     Returns
     -------
@@ -5229,16 +5274,21 @@ def locs_from_fits_gauss_multichannel(
             [x_shift, y_shift, sigma, photons_ch, bg_ch]
         )
 
-    crlb = precision._gauss_crlb_multichannel(
-        crlb_theta,
-        box,
-        jacobians,
-        residuals,
-        mle=mle,
-        em=em,
-        link_photons=link_photons,
-        variance=variance,
-    )
+    with lib.tracked_progress(
+        progress, "Computing Gaussian CRLB", "loc"
+    ) as progress:
+        # starts and ends its own "Computing Gaussian CRLB" phase
+        crlb = precision._gauss_crlb_multichannel(
+            crlb_theta,
+            box,
+            jacobians,
+            residuals,
+            mle=mle,
+            em=em,
+            link_photons=link_photons,
+            variance=variance,
+            progress=progress,
+        )
     # Both models put the shared parameters first and the CRLB comes back in
     # the order it was given, so x, y and sigma are always columns 0, 1, 2.
     with np.errstate(invalid="ignore"):
@@ -5322,7 +5372,7 @@ def fit_gauss_multichannel(
     tolerance: float | None = None,
     max_iterations: int | None = None,
     multiprocess: bool = True,
-    progress_callback: Callable[[int], None] | None = None,
+    progress: lib.Progress | Literal["console"] | None = None,
     abort_callback: Callable[[], bool] | None = None,
     camera_calibrations: list[dict | None] | None = None,
 ) -> pd.DataFrame | None:
@@ -5370,9 +5420,13 @@ def fit_gauss_multichannel(
     multiprocess : bool, optional
         Run the CPU kernels on a thread pool (they are ``nogil``). Ignored on
         the GPU. Default True.
-    progress_callback : callable, optional
-        Called with the cumulative number of spots processed, during both the
-        spot extraction and the fit.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports the phases
+        "Cutting spots" over the spots of all channels, "Fitting spots"
+        over the molecules and "Computing Gaussian CRLB" over the
+        localizations. Default is None.
     abort_callback : callable, optional
         Polled during the fit; returning True stops it and returns None.
     camera_calibrations : list of dict or None, optional
@@ -5416,55 +5470,57 @@ def fit_gauss_multichannel(
     identifications = multichannel_inbounds_ids(
         identifications, box, movies, transforms
     )
-    spots, residuals, variance, jacobians = get_spots_multichannel(
-        movies,
-        identifications,
-        box,
-        camera_infos,
-        transforms,
-        progress_callback=progress_callback,
-        return_residuals=True,
-        camera_calibrations=camera_calibrations,
-        return_variance=True,
-        return_jacobians=True,
-    )
-    result = fit_spots_gauss_multichannel(
-        spots,
-        residuals,
-        jacobians,
-        mle=mle,
-        link_photons=link_photons,
-        use_gpu=use_gpu,
-        tolerance=tolerance,
-        max_iterations=max_iterations,
-        multiprocess=multiprocess,
-        progress_callback=progress_callback,
-        abort_callback=abort_callback,
-        variance=variance,
-        return_stats=True,
-    )
-    if result is None:
-        return None
-    theta, log_likelihood, iterations, chi_square = result
-    em = camera_infos[0].get("Gain", 1) > 1
-    return locs_from_fits_gauss_multichannel(
-        identifications,
-        theta,
-        box,
-        em,
-        jacobians,
-        residuals,
-        link_photons=link_photons,
-        mle=mle,
-        pixelsize=_reference_pixelsize(camera_infos),
-        log_likelihood=log_likelihood,
-        iterations=iterations,
-        chi_square=chi_square,
-        variance=precision._crlb_variance_channel_major(
-            variance, len(transforms)
-        ),
-        spots=spots,
-    )
+    with lib.tracked_progress(progress, "Fitting spots", "spot") as progress:
+        spots, residuals, variance, jacobians = get_spots_multichannel(
+            movies,
+            identifications,
+            box,
+            camera_infos,
+            transforms,
+            progress=progress,
+            return_residuals=True,
+            camera_calibrations=camera_calibrations,
+            return_variance=True,
+            return_jacobians=True,
+        )
+        result = fit_spots_gauss_multichannel(
+            spots,
+            residuals,
+            jacobians,
+            mle=mle,
+            link_photons=link_photons,
+            use_gpu=use_gpu,
+            tolerance=tolerance,
+            max_iterations=max_iterations,
+            multiprocess=multiprocess,
+            progress=progress,
+            abort_callback=abort_callback,
+            variance=variance,
+            return_stats=True,
+        )
+        if result is None:
+            return None
+        theta, log_likelihood, iterations, chi_square = result
+        em = camera_infos[0].get("Gain", 1) > 1
+        return locs_from_fits_gauss_multichannel(
+            identifications,
+            theta,
+            box,
+            em,
+            jacobians,
+            residuals,
+            link_photons=link_photons,
+            mle=mle,
+            pixelsize=_reference_pixelsize(camera_infos),
+            log_likelihood=log_likelihood,
+            iterations=iterations,
+            chi_square=chi_square,
+            variance=precision._crlb_variance_channel_major(
+                variance, len(transforms)
+            ),
+            spots=spots,
+            progress=progress,
+        )
 
 
 def fit_gauss_split_fov(
@@ -5481,7 +5537,7 @@ def fit_gauss_split_fov(
     tolerance: float | None = None,
     max_iterations: int | None = None,
     multiprocess: bool = True,
-    progress_callback: Callable[[int], None] | None = None,
+    progress: lib.Progress | Literal["console"] | None = None,
     abort_callback: Callable[[], bool] | None = None,
     camera_calibration: dict | None = None,
 ) -> pd.DataFrame | None:
@@ -5535,8 +5591,11 @@ def fit_gauss_split_fov(
         :func:`fit_gauss_multichannel`.
     multiprocess : bool, optional
         Run the CPU kernels on a thread pool. Default True.
-    progress_callback : callable, optional
-        Called with the cumulative number of spots processed.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports the phases
+        of :func:`fit_gauss_multichannel`. Default is None.
     abort_callback : callable, optional
         Polled during the fit; returning True stops it and returns None.
     camera_calibration : dict, optional
@@ -5576,7 +5635,7 @@ def fit_gauss_split_fov(
         tolerance=tolerance,
         max_iterations=max_iterations,
         multiprocess=multiprocess,
-        progress_callback=progress_callback,
+        progress=progress,
         abort_callback=abort_callback,
         # one physical camera, so every region reads the same maps; _cut_map
         # indexes them with absolute frame coordinates, which is what makes one
@@ -5774,9 +5833,7 @@ def _run_splinefit(
     tolerance: float | None = None,
     max_iterations: int | None = None,
     multiprocess: bool = True,
-    progress_callback: (
-        Callable[[int], None] | Literal["console"] | None
-    ) = None,
+    progress: lib.Progress | None = None,
     abort_callback: Callable[[], bool] | None = None,
     use_gpu: bool = False,
     variance: lib.FloatArray3D | None = None,
@@ -5786,8 +5843,10 @@ def _run_splinefit(
     Returns ``(theta, chi_squares, states, iterations)``, or None if
     ``abort_callback`` asked to stop. The axial multi-start runs inside the
     per-spot kernel on both devices, so every seed is tried while that spot's
-    data is still in cache and progress is reported once per spot rather than
-    once per pass.
+    data is still in cache and progress is reported once per spot (once per
+    chunk on the GPU) rather than once per pass. ``progress`` is a
+    normalized tracker (None reports nothing); the fit is reported as one
+    phase, "Fitting spots".
 
     ``use_gpu`` selects :mod:`picasso.fitting.splinefit_cuda` over
     :mod:`picasso.fitting.splinefit`. The two backends are driven from *this*
@@ -5823,19 +5882,17 @@ def _run_splinefit(
         max_iterations,
         variance,
     )
+    progress = lib.normalize_progress(progress)
     aborted = callable(abort_callback) and abort_callback()
     if aborted:
         return None
     if use_gpu:
-        return _run_splinefit_gpu(
-            args, kwargs, progress_callback, abort_callback
-        )
+        return _run_splinefit_gpu(args, kwargs, progress, abort_callback)
     if not multiprocess or n_spots == 0:
-        return splinefit.fit_spots(
-            *args, progress_callback=progress_callback, **kwargs
-        )
+        # starts and ends its own "Fitting spots" phase
+        return splinefit.fit_spots(*args, progress=progress, **kwargs)
     return _run_splinefit_threaded(
-        args, kwargs, n_spots, progress_callback, abort_callback
+        args, kwargs, n_spots, progress, abort_callback
     )
 
 
@@ -5949,10 +6006,11 @@ def _prepare_splinefit_args(
 def _run_splinefit_gpu(
     args: tuple,
     kwargs: dict,
-    progress_callback: Callable[[int], None] | Literal["console"] | None,
+    progress: lib.Progress,
     abort_callback: Callable[[], bool] | None,
 ) -> tuple | None:
-    """Run the CUDA spline kernel, translating its abort signal to None."""
+    """Run the CUDA spline kernel, translating its abort signal to None.
+    The kernel reports its own "Fitting spots" phase to ``progress``."""
     stopped_early = False
 
     def _abort() -> bool:
@@ -5964,7 +6022,7 @@ def _run_splinefit_gpu(
 
     result = splinefit_cuda.fit_spots(
         *args,
-        progress_callback=progress_callback,
+        progress=progress,
         abort_callback=_abort if callable(abort_callback) else None,
         **kwargs,
     )
@@ -5975,94 +6033,80 @@ def _run_splinefit_threaded(
     args: tuple,
     kwargs: dict,
     n_spots: int,
-    progress_callback: Callable[[int], None] | Literal["console"] | None,
+    progress: lib.Progress,
     abort_callback: Callable[[], bool] | None,
 ) -> tuple | None:
-    """Run the CPU spline kernel's thread pool and poll it to completion."""
+    """Run the CPU spline kernel's thread pool and poll it to completion,
+    reporting the "Fitting spots" phase to ``progress``."""
+    lib.start_phase(progress, "Fitting spots", n_spots, unit="spot")
     fit = splinefit.fit_spots_async(*args, **kwargs)
-    use_tqdm = progress_callback == "console"
-    iter_range = (
-        tqdm(total=n_spots, desc="Fitting", unit="spot") if use_tqdm else None
-    )
-    aborted, last = _await_splinefit(
-        fit, n_spots, progress_callback, abort_callback, use_tqdm, iter_range
-    )
-    while not fit.finished():
-        # A spot is claimed before it is fitted, so the last few may still be
-        # in flight once the counter reaches n_spots. Aborted runs wait too, so
-        # no thread is left writing into the arrays after this returns.
-        fit.raise_errors()
-        time.sleep(0.05)
-    fit.raise_errors()
-    if use_tqdm:
-        if not aborted:
-            iter_range.update(n_spots - last)
-        iter_range.close()
-    if aborted:
+    if not _await_async_fit(fit, n_spots, progress, abort_callback):
         return None
-    if callable(progress_callback):
-        # Report completion explicitly: a fit short enough to finish before the
-        # first poll would otherwise never call back at all.
-        progress_callback(n_spots)
     return fit.results()
 
 
-def _await_splinefit(
-    fit,
+def _await_async_fit(
+    job: splinefit.AsyncFit,
     n_spots: int,
-    progress_callback: Callable[[int], None] | Literal["console"] | None,
+    progress: lib.Progress,
     abort_callback: Callable[[], bool] | None,
-    use_tqdm: bool,
-    iter_range,
-) -> tuple[bool, int]:
-    """Poll the thread pool until every spot is claimed, or an abort fires.
+) -> bool:
+    """Poll a fit running on a CPU thread pool until every worker exited.
+
+    Reports the number of spots *finished* (fitted, results written) to the
+    running phase of ``progress``, from the calling thread, and ends the
+    phase at ``n_spots``. However this returns or raises - completion, an
+    abort, a worker error or a tracker raising ``lib.OperationCanceled`` -
+    no worker writes into the result arrays afterwards.
 
     Parameters
     ----------
-    fit : object
-        The running fit, as returned by ``splinefit.fit_spots_async``.
+    job : picasso.fitting.splinefit.AsyncFit
+        The running fit, e.g. from ``splinefit.fit_spots_async`` or
+        ``gaussfit.fit_spots_multichannel_async``.
     n_spots : int
         Total number of spots.
-    progress_callback : callable, "console" or None
-        Called with the cumulative number of claimed spots, unless
-        ``use_tqdm``.
+    progress : lib.Progress
+        Normalized tracker whose phase the caller started.
     abort_callback : callable or None
         Polled on every iteration; returning True stops the fit.
-    use_tqdm : bool
-        Whether progress goes to ``iter_range`` instead of
-        ``progress_callback``.
-    iter_range : tqdm.tqdm or None
-        The progress bar, if ``use_tqdm``.
 
     Returns
     -------
-    aborted : bool
-        True if ``abort_callback`` stopped the fit.
-    last : int
-        Spot count last reported to ``iter_range``, for the caller's final
-        tqdm update.
+    completed : bool
+        False if ``abort_callback`` stopped the fit.
+
+    Raises
+    ------
+    RuntimeError
+        If the workers exited without fitting every spot.
     """
-    last = 0
-    while fit.current[0] < n_spots:
-        if callable(abort_callback) and abort_callback():
-            fit.stop()
-            return True, last
-        if use_tqdm:
-            iter_range.update(fit.current[0] - last)
-            last = fit.current[0]
-        elif callable(progress_callback):
-            progress_callback(fit.current[0])
-        # The workers write into preallocated arrays and nothing ever collects
-        # their futures, so a worker that died would leave the counter frozen
-        # and this loop spinning forever. Surface the error instead.
-        fit.raise_errors()
-        if fit.finished() and fit.current[0] < n_spots:
+    completed = False
+    try:
+        while not job.finished():
+            # The workers write into preallocated arrays and nothing ever
+            # collects their futures, so a worker that died would leave the
+            # counter frozen. Surface the error instead.
+            job.raise_errors()
+            if callable(abort_callback) and abort_callback():
+                return False
+            progress.set_value(min(job.n_done, n_spots))
+            time.sleep(0.1)
+        job.raise_errors()
+        if job.n_done < n_spots:
             raise RuntimeError(
-                "The spline fitting workers stopped after "
-                f"{fit.current[0]} of {n_spots} spots."
+                "The fitting workers stopped after "
+                f"{job.n_done} of {n_spots} spots."
             )
-        time.sleep(0.2)
-    return False, last
+        completed = True
+    finally:
+        if not completed:
+            job.stop()
+            # spots in flight run to completion; wait for them
+            while not job.finished():
+                time.sleep(0.05)
+    progress.set_value(n_spots)
+    return True
 
 
 def fit_spots_splinefit(
@@ -6076,9 +6120,7 @@ def fit_spots_splinefit(
     tolerance: float | None = None,
     max_iterations: int | None = None,
     multiprocess: bool = True,
-    progress_callback: (
-        Callable[[int], None] | Literal["console"] | None
-    ) = None,
+    progress: lib.Progress | Literal["console"] | None = None,
     abort_callback: Callable[[], bool] | None = None,
     use_gpu: bool = False,
     variance: lib.FloatArray3D | None = None,
@@ -6132,10 +6174,12 @@ def fit_spots_splinefit(
         Keeps ``fit``'s argument name, but selects a **thread** pool: the CPU
         kernels are ``nogil``. False fits serially in the calling thread.
         Ignored on the GPU. Default True.
-    progress_callback : callable, "console" or None, optional
-        ``"console"`` shows a tqdm bar; a callable is invoked with the
-        cumulative number of spots fitted - per spot on the CPU, per chunk on
-        the GPU.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports one phase, "Fitting spots", over
+        the spots finished: per spot on the CPU, per chunk on the GPU.
+        Default is None.
     abort_callback : callable or None, optional
         Polled while the fit runs; returning True stops it.
     use_gpu : bool, optional
@@ -6159,21 +6203,22 @@ def fit_spots_splinefit(
         Only if ``return_stats``. The residual sum of squares at the optimum;
         None for maximum likelihood.
     """
-    result = _run_splinefit(
-        spots,
-        calibration,
-        mle=mle,
-        n_z_starts=n_z_starts,
-        residuals=residuals,
-        jacobians=jacobians,
-        tolerance=tolerance,
-        max_iterations=max_iterations,
-        multiprocess=multiprocess,
-        progress_callback=progress_callback,
-        abort_callback=abort_callback,
-        use_gpu=use_gpu,
-        variance=variance,
-    )
+    with lib.tracked_progress(progress, "Fitting spots", "spot") as progress:
+        result = _run_splinefit(
+            spots,
+            calibration,
+            mle=mle,
+            n_z_starts=n_z_starts,
+            residuals=residuals,
+            jacobians=jacobians,
+            tolerance=tolerance,
+            max_iterations=max_iterations,
+            multiprocess=multiprocess,
+            progress=progress,
+            abort_callback=abort_callback,
+            use_gpu=use_gpu,
+            variance=variance,
+        )
     if result is None:
         return None
     theta, chi_squares, _states, iterations = result
@@ -6201,6 +6246,7 @@ def _fit_splinefit_multistart(
     tolerance: float | None = None,
     max_iterations: int | None = None,
     variance: lib.FloatArray3D | None = None,
+    progress: lib.Progress | None = None,
 ) -> tuple:
     """Axial multi-start with the numba kernels, on either device.
 
@@ -6211,7 +6257,8 @@ def _fit_splinefit_multistart(
 
     There is no separate seed loop here: both kernels run the multi-start
     per spot internally and return the winning seed, so this only has to
-    translate the fit state into the ``converged`` mask."""
+    translate the fit state into the ``converged`` mask. ``progress`` (a
+    normalized tracker, or None) gets the "Fitting spots" phase."""
     theta, chi_squares, states, iterations = _run_splinefit(
         spots,
         calibration,
@@ -6221,6 +6268,7 @@ def _fit_splinefit_multistart(
         jacobians=jacobians,
         tolerance=tolerance,
         max_iterations=max_iterations,
+        progress=progress,
         use_gpu=use_gpu,
         variance=variance,
     )
@@ -6258,9 +6306,7 @@ def fit_spots_spline(
     use_gpu: bool | None = None,
     tolerance: float | None = None,
     max_iterations: int | None = None,
-    progress_callback: (
-        Callable[[int], None] | Literal["console"] | None
-    ) = None,
+    progress: lib.Progress | Literal["console"] | None = None,
     variance: lib.FloatArray3D | None = None,
 ) -> np.ndarray | tuple | None:
     """Fit spots with a cubic-spline PSF model on the available device.
@@ -6298,8 +6344,11 @@ def fit_spots_spline(
     max_iterations : int or None, optional
         Maximum number of iterations per spot, as in
         :func:`fit_spots_splinefit`.
-    progress_callback : callable, "console" or None, optional
-        Progress reporting, as in :func:`fit_spots_splinefit`.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports one phase, "Fitting spots", over
+        the spots, as in :func:`fit_spots_splinefit`. Default is None.
     variance : lib.FloatArray3D, optional
         Per-pixel sCMOS readout variance in photoelectrons squared, laid
         out like ``spots``. Default None.
@@ -6325,7 +6374,7 @@ def fit_spots_spline(
         jacobians=jacobians,
         tolerance=tolerance,
         max_iterations=max_iterations,
-        progress_callback=progress_callback,
+        progress=progress,
         use_gpu=_spline_use_gpu(use_gpu),
         variance=variance,
     )
@@ -6342,6 +6391,7 @@ def _fit_spline_multistart(
     tolerance: float | None = None,
     max_iterations: int | None = None,
     variance: lib.FloatArray3D | None = None,
+    progress: lib.Progress | None = None,
 ) -> tuple:
     """Axial multi-start on whichever device is available.
 
@@ -6358,6 +6408,7 @@ def _fit_spline_multistart(
         max_iterations=max_iterations,
         use_gpu=_spline_use_gpu(use_gpu),
         variance=variance,
+        progress=progress,
     )
 
 
@@ -6370,9 +6421,7 @@ def _locs_from_fits_spline_link_xyz(
     em: bool = False,
     log_likelihood: lib.FloatArray1D | None = None,
     iterations: lib.FloatArray1D | None = None,
-    progress_callback: (
-        Callable[[int], None] | Literal["console"] | None
-    ) = None,
+    progress: lib.Progress | None = None,
     residuals: np.ndarray | None = None,
     jacobians: np.ndarray | None = None,
     chi_square: lib.FloatArray1D | None = None,
@@ -6390,7 +6439,8 @@ def _locs_from_fits_spline_link_xyz(
     ``photons`` / ``bg``, and ``rel_photons_ch{c}`` = that channel's share of
     the total photons (the continuous ratiometric readout that the free photon
     ratio provides; the shares sum to 1). ``calibration`` is assumed already
-    cropped to ``box``."""
+    cropped to ``box``. ``progress`` (a normalized tracker, or None) gets the
+    CRLB phase(s), see ``precision._spline_crlb``."""
     n_channels = precision._spline_n_channels(calibration)
     variance = precision._crlb_variance_channel_major(variance, n_channels)
     oversampling = float(calibration.get("oversampling", 1.0))
@@ -6422,7 +6472,7 @@ def _locs_from_fits_spline_link_xyz(
         box,
         mle=mle,
         em=em,
-        progress_callback=progress_callback,
+        progress=progress,
         residuals=residuals,
         jacobians=jacobians,
         variance=variance,
@@ -6494,9 +6544,7 @@ def locs_from_fits_spline(
     mle: bool = True,
     log_likelihood: lib.FloatArray1D | None = None,
     iterations: lib.FloatArray1D | None = None,
-    progress_callback: (
-        Callable[[int], None] | Literal["console"] | None
-    ) = None,
+    progress: lib.Progress | Literal["console"] | None = None,
     residuals: np.ndarray | None = None,
     jacobians: np.ndarray | None = None,
     chi_square: lib.FloatArray1D | None = None,
@@ -6540,9 +6588,13 @@ def locs_from_fits_spline(
         given. Default None.
     iterations : lib.FloatArray1D, optional
         Iterations each spot took; becomes a column when given. Default None.
-    progress_callback : callable, "console" or None, optional
-        Forwarded to :func:`precision._spline_crlb`, which reports the
-        per-spot CRLB computation.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports one phase, "Computing spline
+        CRLB", over the localizations; if the GPU attempt fails, the CPU
+        starts over in a new phase, "Computing spline CRLB on the CPU".
+        Default is None.
     residuals : np.ndarray, optional
         ``(n_spots, n_channels, 2)`` sub-pixel ROI offsets of a multichannel
         fit (see :func:`channel_roi_geometry`). Default None.
@@ -6577,6 +6629,47 @@ def locs_from_fits_spline(
         additionally have the calibration's lateral transforms applied
         (``lib.apply_lateral_transforms``).
     """
+    with lib.tracked_progress(
+        progress, precision._SPLINE_CRLB_LABEL, "loc"
+    ) as progress:
+        return _locs_from_fits_spline(
+            identifications,
+            theta,
+            box,
+            em,
+            calibration,
+            mle=mle,
+            log_likelihood=log_likelihood,
+            iterations=iterations,
+            progress=progress,
+            residuals=residuals,
+            jacobians=jacobians,
+            chi_square=chi_square,
+            variance=variance,
+            spots=spots,
+            pixelsize=pixelsize,
+        )
+
+
+def _locs_from_fits_spline(
+    identifications: pd.DataFrame,
+    theta: lib.FloatArray2D,
+    box: int,
+    em: bool,
+    calibration: dict,
+    mle: bool,
+    log_likelihood: lib.FloatArray1D | None,
+    iterations: lib.FloatArray1D | None,
+    progress: lib.Progress,
+    residuals: np.ndarray | None,
+    jacobians: np.ndarray | None,
+    chi_square: lib.FloatArray1D | None,
+    variance: lib.FloatArray4D | None,
+    spots: np.ndarray | None,
+    *,
+    pixelsize: float,
+) -> pd.DataFrame:
+    """:func:`locs_from_fits_spline` with a normalized tracker."""
     calibration = crop_spline_calibration(calibration, box)
     model = calibration["model"]
     if model == precision._LINK_XYZ_MODEL:
@@ -6592,7 +6685,7 @@ def locs_from_fits_spline(
             em=em,
             log_likelihood=log_likelihood,
             iterations=iterations,
-            progress_callback=progress_callback,
+            progress=progress,
             residuals=residuals,
             jacobians=jacobians,
             chi_square=chi_square,
@@ -6630,7 +6723,7 @@ def locs_from_fits_spline(
         box,
         mle=mle,
         em=em,
-        progress_callback=progress_callback,
+        progress=progress,
         residuals=residuals,
         jacobians=jacobians,
         variance=variance,
@@ -6695,9 +6788,7 @@ def _fit2d_spline_gpu(
     em: bool,
     calibration: dict,
     mle: bool = False,
-    progress_callback: (
-        Callable[[int], None] | Literal["console"] | None
-    ) = None,
+    progress: lib.Progress | None = None,
     n_z_starts: int | None = None,
     tolerance: float | None = None,
     max_iterations: int | None = None,
@@ -6707,8 +6798,9 @@ def _fit2d_spline_gpu(
 ) -> pd.DataFrame:
     """Fit an experimentally measured cubic-spline PSF on the GPU. For a 3D
     calibration the localizations contain the fitted ``z`` directly. See
-    ``fit`` for more details. ``progress_callback`` tracks the per-spot CRLB
-    computation in ``locs_from_fits_spline``.
+    ``fit`` for more details. ``progress`` (a normalized tracker) gets two
+    phases: "Fitting spots" (per chunk) and the CRLB of
+    ``locs_from_fits_spline``.
 
     ``n_z_starts`` is the axial multi-start (see
     :func:`fit_spots_splinefit`); ``None`` picks it from the calibration.
@@ -6721,6 +6813,7 @@ def _fit2d_spline_gpu(
         n_z_starts=n_z_starts,
         tolerance=tolerance,
         max_iterations=max_iterations,
+        progress=progress,
         use_gpu=True,
         variance=variance,
     )
@@ -6733,7 +6826,7 @@ def _fit2d_spline_gpu(
         mle=mle,
         log_likelihood=log_likelihood,
         iterations=iterations,
-        progress_callback=progress_callback,
+        progress=progress,
         chi_square=chi_square,
         variance=variance,
         spots=spots,
@@ -6753,9 +6846,7 @@ def _fit2d_spline_cpu(
     tolerance: float | None = None,
     max_iterations: int | None = None,
     multiprocess: bool = True,
-    progress_callback: (
-        Callable[[int], None] | Literal["console"] | None
-    ) = None,
+    progress: lib.Progress | None = None,
     abort_callback: Callable[[], bool] | None = None,
     variance: lib.FloatArray3D | None = None,
     *,
@@ -6763,14 +6854,9 @@ def _fit2d_spline_cpu(
 ) -> pd.DataFrame | None:
     """Fit an experimentally measured cubic-spline PSF on the CPU. For a 3D
     calibration the localizations contain the fitted ``z`` directly. See
-    ``fit`` for more details.
-
-    Unlike the GPU path, whose fit is one launch per chunk,
-    ``progress_callback`` here tracks the fit itself, one step per spot. The
-    per-spot CRLB pass in ``locs_from_fits_spline`` is a second sweep over the
-    same localizations, so it only gets the callback in ``"console"`` mode -
-    where it draws its own labeled progress bar - rather than rewinding a
-    GUI's counter back to zero.
+    ``fit`` for more details. ``progress`` (a normalized tracker) gets two
+    phases: "Fitting spots" (per spot) and the CRLB of
+    ``locs_from_fits_spline``.
 
     Returns None if ``abort_callback`` asked to stop."""
     result = fit_spots_splinefit(
@@ -6782,7 +6868,7 @@ def _fit2d_spline_cpu(
         tolerance=tolerance,
         max_iterations=max_iterations,
         multiprocess=multiprocess,
-        progress_callback=progress_callback,
+        progress=progress,
         abort_callback=abort_callback,
         variance=variance,
     )
@@ -6798,9 +6884,7 @@ def _fit2d_spline_cpu(
         mle=mle,
         log_likelihood=log_likelihood,
         iterations=iterations,
-        progress_callback=(
-            "console" if progress_callback == "console" else None
-        ),
+        progress=progress,
         chi_square=chi_square,
         variance=variance,
         spots=spots,
@@ -7066,7 +7150,7 @@ def link_identifications_multichannel(
     identifications_per_channel: list,
     transforms: list,
     tol: float,
-    progress_callback: Callable[[int], None] | None = None,
+    progress: lib.Progress | Literal["console"] | None = None,
 ) -> np.ndarray:
     """Boolean mask over the reference channel's detections marking those that
     are also detected in *every* other channel.
@@ -7091,8 +7175,12 @@ def link_identifications_multichannel(
         that channel (as stored in the calibration's ``channel_transforms``).
     tol : float
         Pairing radius in camera pixels (the GUI preview uses ``1.5 * box``).
-    progress_callback : callable, optional
-        Called with the cumulative number of reference detections processed.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports one phase,
+        "Linking channels", over the reference detections. Default is
+        None.
 
     Returns
     -------
@@ -7100,6 +7188,27 @@ def link_identifications_multichannel(
         Boolean mask over ``identifications_per_channel[0]`` rows. All
         ``False`` if no other channel carries identifications.
     """
+    with lib.tracked_progress(
+        progress, "Linking channels", "spot"
+    ) as progress:
+        reference = identifications_per_channel[0]
+        n_ref = 0 if reference is None else len(reference)
+        lib.start_phase(progress, "Linking channels", n_ref, unit="spot")
+        linked = _link_identifications(
+            identifications_per_channel, transforms, tol, progress
+        )
+        progress.set_value(n_ref)
+    return linked
+
+
+def _link_identifications(
+    identifications_per_channel: list,
+    transforms: list,
+    tol: float,
+    progress: lib.Progress,
+) -> np.ndarray:
+    """The work of :func:`link_identifications_multichannel`, reporting
+    to the running phase of ``progress`` (a normalized tracker)."""
     reference = identifications_per_channel[0]
     n_ref = 0 if reference is None else len(reference)
     if n_ref == 0:
@@ -7156,10 +7265,8 @@ def link_identifications_multichannel(
                 match_count[ref_order[start:stop][matched]] += 1
             done += stop - start
             # one monotone 0 -> n_ref progression across all checked channels
-            if callable(progress_callback) and (f % 2000 == 0):
-                progress_callback((i_c * n_ref + done) // n_checked)
-    if callable(progress_callback):
-        progress_callback(n_ref)
+            if f % 2000 == 0:
+                progress.set_value((i_c * n_ref + done) // n_checked)
     return match_count == n_checked
 
 
@@ -7168,7 +7275,7 @@ def filter_linked_identifications(
     transforms: list,
     box: int,
     tol: float | None = None,
-    progress_callback: Callable[[int], None] | None = None,
+    progress: lib.Progress | Literal["console"] | None = None,
 ) -> tuple[pd.DataFrame, int, int]:
     """Keep only the reference detections linked across *all* channels.
 
@@ -7192,8 +7299,12 @@ def filter_linked_identifications(
         Largest distance (camera pixels) at which a mapped reference detection
         and a channel detection count as the same molecule. None (the default)
         uses ``1.5 * box``.
-    progress_callback : callable, optional
-        Invoked with a monotone 0 -> ``n_total`` progression.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports one phase,
+        "Linking channels", over the reference detections (none if no
+        other channel has identifications). Default is None.
 
     Returns
     -------
@@ -7227,7 +7338,7 @@ def filter_linked_identifications(
         identifications_per_channel,
         transforms,
         tol,
-        progress_callback=progress_callback,
+        progress=progress,
     )
     n_kept = int(linked.sum())
     # Keeping almost nothing means the inter-channel registration (or the
@@ -7254,7 +7365,7 @@ def get_spots_multichannel(
     box: int,
     camera_infos: list[dict],
     transforms: list,
-    progress_callback: Callable[[int], None] | None = None,
+    progress: lib.Progress | Literal["console"] | None = None,
     return_residuals: bool = False,
     camera_calibrations: list[dict | None] | None = None,
     return_variance: bool = False,
@@ -7283,8 +7394,12 @@ def get_spots_multichannel(
         One reference -> channel transform per channel, each a
         ``picasso.transforms.Transform`` or a dict accepted by
         ``transforms.from_dict``; ``transforms[0]`` is the identity.
-    progress_callback : callable, optional
-        Forwarded to ``get_spots`` for the reference channel.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports one phase,
+        "Cutting spots", over the spots of all channels (identifications
+        times channels). Default is None.
     return_residuals : bool, optional
         Also return the sub-pixel ROI-placement residuals, i.e. the fractional
         part discarded when each channel's box is snapped to an integer pixel.
@@ -7340,6 +7455,48 @@ def get_spots_multichannel(
             np.asarray(identifications["y"], dtype=np.float64),
         ]
     )
+    with lib.tracked_progress(progress, "Cutting spots", "spot") as progress:
+        n_ids = len(identifications)
+        lib.start_phase(
+            progress, "Cutting spots", n_ids * n_channels, unit="spot"
+        )
+        result = _get_spots_multichannel(
+            movies,
+            identifications,
+            box,
+            camera_infos,
+            transforms,
+            progress,
+            camera_calibrations,
+            ref_xy,
+        )
+        progress.set_value(n_ids * n_channels)
+    spots, residuals, variance = result
+    result = (spots,)
+    if return_residuals:
+        result += (residuals,)
+    if return_variance:
+        result += (variance,)
+    if return_jacobians:
+        result += (tform.channel_jacobians(transforms, ref_xy),)
+    return result[0] if len(result) == 1 else result
+
+
+def _get_spots_multichannel(
+    movies: list,
+    identifications: pd.DataFrame,
+    box: int,
+    camera_infos: list[dict],
+    transforms: list,
+    progress: lib.Progress,
+    camera_calibrations: list,
+    ref_xy: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray | None]:
+    """Cut every channel's spots for :func:`get_spots_multichannel`,
+    reporting the spots of all channels cut so far to the running phase of
+    ``progress``. Returns ``(spots, residuals, variance)``."""
+    n_channels = len(movies)
+    n_ids = len(identifications)
     channel_spots = []
     channel_variance = []
     residuals = np.zeros((len(ref_xy), n_channels, 2), dtype=np.float32)
@@ -7362,14 +7519,15 @@ def get_spots_multichannel(
         # the calibration maps from it here - rather than from the reference
         # identifications - is what keeps a channel's variance patch aligned
         # with the spot it accompanies.
-        spots_c, variance_c = get_spots(
+        spots_c, variance_c = _get_spots(
             movies[c],
             ids_c,
             box,
             camera_infos[c],
-            progress_callback=progress_callback if c == 0 else None,
+            progress,
             camera_calibration=camera_calibrations[c],
             return_variance=True,
+            progress_offset=c * n_ids,
         )
         channel_spots.append(spots_c)
         if variance_c is None:
@@ -7383,14 +7541,7 @@ def get_spots_multichannel(
         if any(c is not None for c in camera_calibrations)
         else None
     )
-    result = (spots,)
-    if return_residuals:
-        result += (residuals,)
-    if return_variance:
-        result += (variance,)
-    if return_jacobians:
-        result += (tform.channel_jacobians(transforms, ref_xy),)
-    return result[0] if len(result) == 1 else result
+    return spots, residuals, variance
 
 
 def channel_roi_residuals(
@@ -7506,7 +7657,7 @@ def fit_spline_multichannel(
     calibration: dict,
     mle: bool = False,
     link_photons: bool = True,
-    progress_callback: Callable[[int], None] | None = None,
+    progress: lib.Progress | Literal["console"] | None = None,
     apply_roi_residuals: bool = True,
     n_z_starts: int | None = None,
     use_gpu: bool | None = None,
@@ -7546,9 +7697,13 @@ def fit_spline_multichannel(
         gets its own photon count and background, reported as
         ``photons_ch{c}`` / ``bg_ch{c}`` / ``rel_photons_ch{c}``.
         Available for 2 to 6 channels. See :func:`_as_link_xyz_calibration`.
-    progress_callback : callable, optional
-        Invoked with the cumulative spot count as the extraction, the fit and
-        the CRLB computation proceed.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports the phases
+        "Cutting spots" over the spots of all channels, "Fitting spots"
+        over the molecules and "Computing spline CRLB" over the
+        localizations. Default is None.
     apply_roi_residuals : bool, optional
         Hand the sub-pixel ROI-placement residuals to the fit model (default
         True), so each channel's spline is evaluated where its data actually
@@ -7608,50 +7763,51 @@ def fit_spline_multichannel(
     identifications = multichannel_inbounds_ids(
         identifications, box, movies, transforms
     )
-    spots, residuals, variance, jacobians = get_spots_multichannel(
-        movies,
-        identifications,
-        box,
-        camera_infos,
-        transforms,
-        progress_callback=progress_callback,
-        return_residuals=True,
-        camera_calibrations=camera_calibrations,
-        return_variance=True,
-        return_jacobians=True,
-    )
-    theta, log_likelihood, iterations, chi_square = fit_spots_spline(
-        spots,
-        calibration,
-        mle=mle,
-        return_stats=True,
-        residuals=residuals if apply_roi_residuals else None,
-        jacobians=jacobians,
-        n_z_starts=n_z_starts,
-        use_gpu=use_gpu,
-        tolerance=tolerance,
-        max_iterations=max_iterations,
-        progress_callback=progress_callback,
-        variance=variance,
-    )
-    em = camera_infos[0].get("Gain", 1) > 1
-    return locs_from_fits_spline(
-        identifications,
-        theta,
-        box,
-        em,
-        calibration,
-        mle=mle,
-        pixelsize=_reference_pixelsize(camera_infos),
-        log_likelihood=log_likelihood,
-        iterations=iterations,
-        progress_callback=progress_callback,
-        residuals=residuals if apply_roi_residuals else None,
-        jacobians=jacobians,
-        chi_square=chi_square,
-        variance=variance,
-        spots=spots,
-    )
+    with lib.tracked_progress(progress, "Fitting spots", "spot") as progress:
+        spots, residuals, variance, jacobians = get_spots_multichannel(
+            movies,
+            identifications,
+            box,
+            camera_infos,
+            transforms,
+            progress=progress,
+            return_residuals=True,
+            camera_calibrations=camera_calibrations,
+            return_variance=True,
+            return_jacobians=True,
+        )
+        theta, log_likelihood, iterations, chi_square = fit_spots_spline(
+            spots,
+            calibration,
+            mle=mle,
+            return_stats=True,
+            residuals=residuals if apply_roi_residuals else None,
+            jacobians=jacobians,
+            n_z_starts=n_z_starts,
+            use_gpu=use_gpu,
+            tolerance=tolerance,
+            max_iterations=max_iterations,
+            progress=progress,
+            variance=variance,
+        )
+        em = camera_infos[0].get("Gain", 1) > 1
+        return locs_from_fits_spline(
+            identifications,
+            theta,
+            box,
+            em,
+            calibration,
+            mle=mle,
+            pixelsize=_reference_pixelsize(camera_infos),
+            log_likelihood=log_likelihood,
+            iterations=iterations,
+            progress=progress,
+            residuals=residuals if apply_roi_residuals else None,
+            jacobians=jacobians,
+            chi_square=chi_square,
+            variance=variance,
+            spots=spots,
+        )
 
 
 def scale_channel_blocks(
@@ -7729,7 +7885,7 @@ def fit_spline_multichannel_ratiometric(
     calibration: dict,
     photon_ratios: lib.FloatArray2D | None = None,
     mle: bool = False,
-    progress_callback: Callable[[int], None] | None = None,
+    progress: lib.Progress | Literal["console"] | None = None,
     apply_roi_residuals: bool = True,
     n_z_starts: int | None = None,
     use_gpu: bool | None = None,
@@ -7774,8 +7930,15 @@ def fit_spline_multichannel_ratiometric(
         values matter (the shared amplitude absorbs the overall scale).
     mle : bool, optional
         Use the Poisson maximum-likelihood estimator. Default False.
-    progress_callback : callable, optional
-        Invoked with the cumulative spot count as the fit proceeds.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports the phases
+        "Cutting spots" over the spots of all channels, then, for every
+        hypothesis k of K, "Hypothesis k/K: fitting spots" over the
+        molecules, and finally "Hypothesis k/K: computing spline CRLB"
+        over the localizations assigned to each winning hypothesis.
+        Default is None.
     apply_roi_residuals : bool, optional
         As in :func:`fit_spline_multichannel`. Default True.
     n_z_starts : int, optional
@@ -7818,13 +7981,54 @@ def fit_spline_multichannel_ratiometric(
     identifications = multichannel_inbounds_ids(
         identifications, box, movies, transforms
     )
+    with lib.tracked_progress(progress, "Fitting spots", "spot") as progress:
+        return _fit_spline_multichannel_ratiometric(
+            movies,
+            camera_infos,
+            identifications,
+            box,
+            calibration,
+            photon_ratios,
+            transforms,
+            n_channels,
+            mle,
+            progress,
+            apply_roi_residuals,
+            n_z_starts,
+            use_gpu,
+            tolerance,
+            max_iterations,
+            camera_calibrations,
+        )
+
+
+def _fit_spline_multichannel_ratiometric(
+    movies: list,
+    camera_infos: list[dict],
+    identifications: pd.DataFrame,
+    box: int,
+    calibration: dict,
+    photon_ratios: lib.FloatArray2D,
+    transforms: list,
+    n_channels: int,
+    mle: bool,
+    progress: lib.Progress,
+    apply_roi_residuals: bool,
+    n_z_starts: int | None,
+    use_gpu: bool | None,
+    tolerance: float | None,
+    max_iterations: int | None,
+    camera_calibrations: list[dict | None] | None,
+) -> pd.DataFrame:
+    """The work of :func:`fit_spline_multichannel_ratiometric`, with the
+    validated inputs and a normalized tracker."""
     spots, roi_residuals, variance, jacobians = get_spots_multichannel(
         movies,
         identifications,
         box,
         camera_infos,
         transforms,
-        progress_callback=progress_callback,
+        progress=progress,
         return_residuals=True,
         camera_calibrations=camera_calibrations,
         return_variance=True,
@@ -7854,6 +8058,7 @@ def fit_spline_multichannel_ratiometric(
         max_iterations,
         use_gpu,
         variance,
+        progress,
     )
 
     # Per spot: the best VALID hypothesis (lowest residual / chi2), falling
@@ -7881,6 +8086,7 @@ def fit_spline_multichannel_ratiometric(
         n_channels,
         spots,
         _reference_pixelsize(camera_infos),
+        progress,
     )
 
     locs = pd.concat(parts) if parts else pd.DataFrame()
@@ -7962,6 +8168,7 @@ def _fit_ratiometric_hypotheses(
     max_iterations: int | None,
     use_gpu: bool | None,
     variance: lib.FloatArray3D | None,
+    progress: lib.Progress,
 ) -> tuple[list, list, np.ndarray, np.ndarray]:
     """Fit every photon-ratio hypothesis, keeping per-spot params and score.
 
@@ -7990,6 +8197,9 @@ def _fit_ratiometric_hypotheses(
         Fit on the GPU, the CPU, or (None) whichever is available.
     variance : lib.FloatArray3D or None
         Per-pixel sCMOS readout variance, laid out like ``spots``.
+    progress : lib.Progress
+        Normalized tracker; every hypothesis k of K is one phase,
+        "Hypothesis k/K: fitting spots".
 
     Returns
     -------
@@ -8025,6 +8235,9 @@ def _fit_ratiometric_hypotheses(
             max_iterations=max_iterations,
             use_gpu=use_gpu,
             variance=variance,
+            progress=_LabeledProgress(
+                progress, f"Hypothesis {k + 1}/{n_hyp}: "
+            ),
         )
         thetas.append(params)
         chis.append(np.asarray(chi_squares))
@@ -8053,6 +8266,7 @@ def _assemble_ratiometric_locs(
     n_channels: int,
     spots: np.ndarray,
     pixelsize: float,
+    progress: lib.Progress,
 ) -> list:
     """Build localizations per winning-hypothesis group.
 
@@ -8095,6 +8309,9 @@ def _assemble_ratiometric_locs(
         Channel-stacked spots in photons.
     pixelsize : float
         Camera pixel size of the reference channel in nm.
+    progress : lib.Progress
+        Normalized tracker; every non-empty group of hypothesis k of K
+        gets the phase "Hypothesis k/K: computing spline CRLB".
 
     Returns
     -------
@@ -8128,6 +8345,9 @@ def _assemble_ratiometric_locs(
             variance=(None if variance is None else variance[rows]),
             spots=spots[rows],
             pixelsize=pixelsize,
+            progress=_LabeledProgress(
+                progress, f"Hypothesis {k + 1}/{n_hyp}: "
+            ),
         )
         amp = pd.Series(np.asarray(theta_k[:, 0]), index=ids_k.index)
         ps = _photon_scales(calib_k, n_channels)
@@ -8255,7 +8475,7 @@ def filter_linked_identifications_split_fov(
     box: int,
     regions: list | None = None,
     tol: float | None = None,
-    progress_callback: Callable[[int], None] | None = None,
+    progress: lib.Progress | Literal["console"] | None = None,
 ) -> tuple[pd.DataFrame, int, int]:
     """Split-FOV counterpart of :func:`filter_linked_identifications`.
 
@@ -8280,8 +8500,12 @@ def filter_linked_identifications_split_fov(
     tol : float, optional
         Largest distance (camera pixels) at which detections in two regions
         count as the same molecule. None (the default) uses ``1.5 * box``.
-    progress_callback : callable, optional
-        Invoked with a monotone 0 -> ``n_total`` progression.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports one phase,
+        "Linking channels", over the reference-region detections, as in
+        :func:`filter_linked_identifications`. Default is None.
 
     Returns
     -------
@@ -8306,7 +8530,7 @@ def filter_linked_identifications_split_fov(
         [transforms[c] for c in order],
         box,
         tol=tol,
-        progress_callback=progress_callback,
+        progress=progress,
     )
 
 
@@ -8321,7 +8545,7 @@ def fit_spline_split_fov(
     mle: bool = False,
     link_photons: bool = True,
     confine_to_reference: bool = True,
-    progress_callback: Callable[[int], None] | None = None,
+    progress: lib.Progress | Literal["console"] | None = None,
     apply_roi_residuals: bool = True,
     n_z_starts: int | None = None,
     use_gpu: bool | None = None,
@@ -8377,8 +8601,13 @@ def fit_spline_split_fov(
     confine_to_reference : bool, optional
         Filter ``identifications`` to the reference region first. Default
         True.
-    progress_callback : callable, optional
-        Invoked with the cumulative spot count as the fit proceeds.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports the phases
+        of whichever multichannel fitter is chosen,
+        :func:`fit_spline_multichannel` or
+        :func:`fit_spline_multichannel_ratiometric`. Default is None.
     apply_roi_residuals : bool, optional
         As in :func:`fit_spline_multichannel`. Default True.
     n_z_starts : int, optional
@@ -8440,7 +8669,7 @@ def fit_spline_split_fov(
             calibration,
             mle=mle,
             link_photons=False,
-            progress_callback=progress_callback,
+            progress=progress,
             apply_roi_residuals=apply_roi_residuals,
             n_z_starts=n_z_starts,
             use_gpu=use_gpu,
@@ -8460,7 +8689,7 @@ def fit_spline_split_fov(
             calibration,
             photon_ratios=photon_ratios,
             mle=mle,
-            progress_callback=progress_callback,
+            progress=progress,
             apply_roi_residuals=apply_roi_residuals,
             n_z_starts=n_z_starts,
             use_gpu=use_gpu,
@@ -8476,7 +8705,7 @@ def fit_spline_split_fov(
         calibration,
         mle=mle,
         link_photons=link_photons,
-        progress_callback=progress_callback,
+        progress=progress,
         apply_roi_residuals=apply_roi_residuals,
         n_z_starts=n_z_starts,
         use_gpu=use_gpu,
@@ -8523,16 +8752,38 @@ def _per_channel_arg(value: object, n_channels: int, name: str) -> list:
     return [value] * n_channels
 
 
-def _channel_progress(
-    progress_callback: Callable[[int, int], None] | Literal["console"] | None,
-    channel: int,
-) -> Callable[[int], None] | Literal["console"] | None:
-    """One channel's progress callback: the caller's, told which channel is
-    reporting. ``"console"`` is passed straight through, so each channel
-    gets its own progress bar."""
-    if progress_callback is None or progress_callback == "console":
-        return progress_callback
-    return partial(progress_callback, channel)
+class _LabeledProgress:
+    """A view of a normalized progress tracker that prefixes the label of
+    every phase started through it, e.g. ``"Channel 2/3: "`` turns
+    "Fitting spots" into "Channel 2/3: fitting spots".
+
+    Implements the ``lib.Progress`` interface by delegation. :meth:`close`
+    does nothing: the wrapped tracker belongs to the caller, and so a
+    function handed this view never ends the caller's reporting.
+    """
+
+    def __init__(self, progress: lib.Progress, prefix: str) -> None:
+        self._progress = progress
+        self._prefix = prefix
+
+    def set_value(self, value: int) -> None:
+        self._progress.set_value(value)
+
+    def setMaximum(self, maximum: int) -> None:
+        self._progress.setMaximum(maximum)
+
+    def maximum(self) -> int:
+        return self._progress.maximum()
+
+    def zero_progress(self, description: str | None = None, **kwargs) -> None:
+        if description:
+            description = (
+                self._prefix + description[:1].lower() + description[1:]
+            )
+        self._progress.zero_progress(description, **kwargs)
+
+    def close(self) -> None:
+        pass
 
 
 def _check_single_channel_calibration(
@@ -8708,9 +8959,7 @@ def fit_independent(
     spline_calibration: dict | list | None = None,
     camera_calibration: dict | list | None = None,
     multiprocess: bool = True,
-    progress_callback: (
-        Callable[[int, int], None] | Literal["console"] | None
-    ) = None,
+    progress: lib.Progress | Literal["console"] | None = None,
     abort_callback: Callable[[], bool] | None = None,
 ) -> list[tuple[pd.DataFrame, dict]] | None:
     """Fit several channels independently, one single-channel fit each.
@@ -8747,9 +8996,12 @@ def fit_independent(
         must match the shape of its own movie.
     multiprocess : bool, optional
         Whether to use multiprocessing. Default True.
-    progress_callback : callable, "console" or None, optional
-        Called with ``(channel, n_spots_done)`` as each channel is fitted;
-        ``"console"`` shows one tqdm progress bar per channel.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports the phases of
+        :func:`fit` for every channel c of C, labeled "Channel c/C: ...",
+        e.g. "Channel 2/3: fitting spots". Default is None.
     abort_callback : callable or None, optional
         Called with no arguments; returning True aborts. The whole batch then
         returns None.
@@ -8776,31 +9028,37 @@ def fit_independent(
     cameras = _per_channel_arg(
         camera_calibration, n_channels, "camera_calibration"
     )
-    results = []
     for c in range(n_channels):
         _check_single_channel_calibration(splines[c], c)
-        locs, info = fit(
-            movies[c],
-            camera_info=infos[c],
-            identifications=identifications[c],
-            box=box,
-            fitting_method=methods[c],
-            eps=epss[c],
-            max_it=max_its[c],
-            spline_calibration=splines[c],
-            camera_calibration=cameras[c],
-            multiprocess=multiprocess,
-            progress_callback=_channel_progress(progress_callback, c),
-            abort_callback=abort_callback,
-        )
-        if locs is None:  # aborted
-            return None
+    results = []
+    with lib.tracked_progress(progress, "Fitting spots", "spot") as progress:
+        for c in range(n_channels):
+            locs, info = fit(
+                movies[c],
+                camera_info=infos[c],
+                identifications=identifications[c],
+                box=box,
+                fitting_method=methods[c],
+                eps=epss[c],
+                max_it=max_its[c],
+                spline_calibration=splines[c],
+                camera_calibration=cameras[c],
+                multiprocess=multiprocess,
+                progress=_LabeledProgress(
+                    progress, f"Channel {c + 1}/{n_channels}: "
+                ),
+                abort_callback=abort_callback,
+            )
+            if locs is None:  # aborted
+                return None
+            results.append((locs, info))
+    for c, (locs, info) in enumerate(results):
         info = info | {
             "Fit mode": FIT_MODE_INDEPENDENT,
             "Channel": c,
             "Channels": n_channels,
         }
-        results.append((locs, info))
+        results[c] = (locs, info)
     return results
 
 
@@ -8819,9 +9077,7 @@ def fit_split_fov_independent(
     spline_calibration: dict | list | None = None,
     camera_calibration: dict | None = None,
     multiprocess: bool = True,
-    progress_callback: (
-        Callable[[int, int], None] | Literal["console"] | None
-    ) = None,
+    progress: lib.Progress | Literal["console"] | None = None,
     abort_callback: Callable[[], bool] | None = None,
 ) -> list[tuple[pd.DataFrame, list[dict]]] | None:
     """Fit each region of a split field of view independently.
@@ -8864,9 +9120,12 @@ def fit_split_fov_independent(
         full frame. Default None.
     multiprocess : bool, optional
         Whether to use multiprocessing. Default True.
-    progress_callback : callable, "console" or None, optional
-        Called with ``(region, n_spots_done)`` as each region is fitted;
-        ``"console"`` shows one tqdm progress bar per region.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports the phases of
+        :func:`fit` for every region r of R, labeled "Region r/R: ...",
+        e.g. "Region 2/3: fitting spots". Default is None.
     abort_callback : callable or None, optional
         Called with no arguments; returning True aborts. The whole batch then
         returns None.
@@ -8888,25 +9147,32 @@ def fit_split_fov_independent(
     splines = _per_channel_arg(
         spline_calibration, n_regions, "spline_calibration"
     )
-    results = []
-    for c, region in enumerate(regions):
+    for c in range(n_regions):
         _check_single_channel_calibration(splines[c], c)
-        locs, fit_info = fit(
-            movie,
-            camera_info=camera_info,
-            identifications=confine_to_region(identifications, region),
-            box=box,
-            fitting_method=methods[c],
-            eps=epss[c],
-            max_it=max_its[c],
-            spline_calibration=splines[c],
-            camera_calibration=camera_calibration,
-            multiprocess=multiprocess,
-            progress_callback=_channel_progress(progress_callback, c),
-            abort_callback=abort_callback,
-        )
-        if locs is None:  # aborted
-            return None
+    fits = []
+    with lib.tracked_progress(progress, "Fitting spots", "spot") as progress:
+        for c, region in enumerate(regions):
+            locs, fit_info = fit(
+                movie,
+                camera_info=camera_info,
+                identifications=confine_to_region(identifications, region),
+                box=box,
+                fitting_method=methods[c],
+                eps=epss[c],
+                max_it=max_its[c],
+                spline_calibration=splines[c],
+                camera_calibration=camera_calibration,
+                multiprocess=multiprocess,
+                progress=_LabeledProgress(
+                    progress, f"Region {c + 1}/{n_regions}: "
+                ),
+                abort_callback=abort_callback,
+            )
+            if locs is None:  # aborted
+                return None
+            fits.append((locs, fit_info))
+    results = []
+    for c, (region, (locs, fit_info)) in enumerate(zip(regions, fits)):
         if to_local:
             locs = locs_to_region_coordinates(
                 locs, region, camera_info["Pixelsize"]
@@ -8931,27 +9197,27 @@ def _fit2d_avg(
     box: int,
     em: bool,
     multiprocess: bool = True,
-    progress_callback: (
-        Callable[[int], None] | Literal["console"] | None
-    ) = None,
+    progress: lib.Progress | None = None,
     abort_callback: Callable[[], bool] | None = None,
     variance: lib.FloatArray3D | None = None,
     *,
     pixelsize: float,
 ) -> pd.DataFrame | None:
     """Take localizations at the average value of the spots, see
-    ``fit_2D`` for more details. ``pixelsize`` (nm) converts the result
-    to nm."""
+    ``fit`` for more details. ``pixelsize`` (nm) converts the result
+    to nm; ``progress`` (a normalized tracker, or None) gets the "Fitting
+    spots" phase."""
+    progress = lib.normalize_progress(progress)
     N = len(identifications)
     if multiprocess:
+        lib.start_phase(progress, "Fitting spots", N, unit="spot")
         fs = avgroi.fit_spots_parallel(spots, asynch=True)
-        theta = _process_fitting_futures(
-            fs, N, progress_callback, abort_callback
-        )
+        theta = _process_fitting_futures(fs, N, progress, abort_callback)
         if theta is None:
             return
     else:
-        theta = avgroi.fit_spots(spots, progress_callback)
+        # starts and ends its own "Fitting spots" phase
+        theta = avgroi.fit_spots(spots, progress)
     locs = avgroi.locs_from_fits(
         identifications,
         theta,
@@ -8966,38 +9232,30 @@ def _fit2d_avg(
 def _process_fitting_futures(
     fs: list[Future],
     N: int,
-    progress_callback: (
-        Callable[[int], None] | Literal["console"] | None
-    ) = None,
+    progress: lib.Progress,
     abort_callback: Callable[[], bool] | None = None,
 ) -> lib.FloatArray2D | None:
-    """Convenience function for processing progress of fitting using
-    multiprocessing. See ``_fit2d_gauss``, ``_fit2d_avg``."""
-    n_tasks = len(fs)
-    use_tqdm = progress_callback == "console"
-    if use_tqdm:
-        iter_range = tqdm(total=N, desc="Fitting", unit="spot")
-
-    while lib.n_futures_done(fs) < n_tasks:
-        # check for abort
-        if callable(abort_callback) and abort_callback():
+    """Wait for the tasks of ``avgroi.fit_spots_parallel(asynch=True)``,
+    reporting the spots of the finished tasks to the running phase of
+    ``progress`` (a normalized tracker) and ending it at ``N``. Returns
+    None if ``abort_callback`` asked to stop; the pending tasks are
+    canceled then, and on any exception (e.g. ``lib.OperationCanceled``)."""
+    completed = False
+    try:
+        while True:
+            done, pending = wait_futures(fs, timeout=0.2)
+            if not pending:
+                break
+            if callable(abort_callback) and abort_callback():
+                return None
+            progress.set_value(sum(len(f.result()) for f in done))
+        theta = avgroi.fits_from_futures(fs)
+        completed = True
+    finally:
+        if not completed:
             for f in fs:
                 f.cancel()
-            if use_tqdm:
-                iter_range.close()
-            return
-
-        # update progress
-        n_finished = round(N * lib.n_futures_done(fs) / n_tasks)
-        if use_tqdm:
-            iter_range.update(n_finished - iter_range.n)
-        elif callable(progress_callback):
-            progress_callback(n_finished)
-        time.sleep(0.2)
-    if use_tqdm:
-        iter_range.update(N - iter_range.n)
-        iter_range.close()
-    theta = avgroi.fits_from_futures(fs)
+    progress.set_value(N)
     return theta
 
 
@@ -9034,15 +9292,7 @@ def localize(
     affine_calibration: dict | list | None = None,
     camera_calibration: dict | None = None,
     threaded: bool = True,
-    identification_progress_callback: (
-        Callable[[int], None] | Literal["console"] | None
-    ) = None,
-    fit_progress_callback: (
-        Callable[[int], None] | Literal["console"] | None
-    ) = None,
-    fit_z_progress_callback: (
-        Callable[[int], None] | Literal["console"] | None
-    ) = None,
+    progress: lib.Progress | Literal["console"] | None = None,
 ) -> tuple[pd.DataFrame, list[dict]]:
     """Localize (i.e., identify and fit) spots in a movie using the
     specified parameters.
@@ -9152,17 +9402,15 @@ def localize(
         ``camera_info``. Default is None.
     threaded : bool, optional
         Whether to use multithreading/multiprocessing. Default is True.
-    identification_progress_callback : callable or "console" or None
-        A callback for progress updates during identification. If
-        "console", progress will be printed to the console. If None,
-        progress is not reported. Default is None.
-    fit_progress_callback : callable or "console" or None
-        A callback for progress updates during fitting. If "console",
-        progress will be printed to the console. If None, progress is
-        not reported. Default is None.
-    fit_z_progress_callback : callable or "console" or None
-        As ``fit_progress_callback``, for the astigmatic z fitting.
-        Ignored unless ``calibration_3d`` is given. Default is None.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports the phases
+        "Identifying spots" over the frames (see :func:`identify`), then
+        those of :func:`fit` ("Cutting spots", "Fitting spots" and, for
+        the "spline*" methods, "Computing spline CRLB") and, with
+        ``calibration_3d``, those of ``picasso.zfit.zfit``. Default is
+        None.
 
     Returns
     -------
@@ -9232,53 +9480,56 @@ def localize(
     if movie_info is None:
         movie_info = []
 
-    # Identify spots
-    identifications, identify_info = identify(
-        movie,
-        parameters=identification_parameters,
-        roi=roi,
-        frame_bounds=frame_bounds,
-        threaded=threaded,
-        progress_callback=identification_progress_callback,
-    )
-
-    # Fit spots
-    locs, fit_info = fit(
-        movie=movie,
-        camera_info=camera_info,
-        identifications=identifications,
-        box=identification_parameters.box,
-        fitting_method=fitting_method,
-        eps=eps,
-        max_it=max_it,
-        spline_calibration=spline_calibration,
-        camera_calibration=camera_calibration,
-        multiprocess=threaded,
-        progress_callback=fit_progress_callback,
-    )
-    # Before the z fit and the lateral corrections below: both move x/y,
-    # which would blur the ROI a localization was detected in.
-    locs = add_roi_id(locs, roi, pixelsize=camera_info["Pixelsize"])
-    info = io.strip_mm_metadata(movie_info) + [identify_info] + [fit_info]
-
-    if fit_z:
-        # Astigmatic z fitting on top of the 2D fit, see Huang, et al.
-        # Science, 2008. zfit only knows gausslq/gaussmle; map the GPU /
-        # rotated codes to the corresponding CPU noise model.
-        locs, info = zfit.zfit(
-            locs=locs,
-            info=info,
-            calibration=calibration_3d,
-            fitting_method=(
-                "gaussmle"
-                if fitting_method.startswith("gaussmle")
-                else "gausslq"
-            ),
-            filter=0,
-            lateral_transforms=affine_calibration,
-            multiprocess=threaded,
-            progress_callback=fit_z_progress_callback,
+    with lib.tracked_progress(
+        progress, "Identifying spots", "frame"
+    ) as progress:
+        # Identify spots
+        identifications, identify_info = identify(
+            movie,
+            parameters=identification_parameters,
+            roi=roi,
+            frame_bounds=frame_bounds,
+            threaded=threaded,
+            progress=progress,
         )
+
+        # Fit spots
+        locs, fit_info = fit(
+            movie=movie,
+            camera_info=camera_info,
+            identifications=identifications,
+            box=identification_parameters.box,
+            fitting_method=fitting_method,
+            eps=eps,
+            max_it=max_it,
+            spline_calibration=spline_calibration,
+            camera_calibration=camera_calibration,
+            multiprocess=threaded,
+            progress=progress,
+        )
+        # Before the z fit and the lateral corrections below: both move x/y,
+        # which would blur the ROI a localization was detected in.
+        locs = add_roi_id(locs, roi, pixelsize=camera_info["Pixelsize"])
+        info = io.strip_mm_metadata(movie_info) + [identify_info] + [fit_info]
+
+        if fit_z:
+            # Astigmatic z fitting on top of the 2D fit, see Huang, et al.
+            # Science, 2008. zfit only knows gausslq/gaussmle; map the GPU /
+            # rotated codes to the corresponding CPU noise model.
+            locs, info = zfit.zfit(
+                locs=locs,
+                info=info,
+                calibration=calibration_3d,
+                fitting_method=(
+                    "gaussmle"
+                    if fitting_method.startswith("gaussmle")
+                    else "gausslq"
+                ),
+                filter=0,
+                lateral_transforms=affine_calibration,
+                multiprocess=threaded,
+                progress=progress,
+            )
         # zfit applies both the calibration's own lateral corrections and
         # the separately loaded ones, in that order, and records them - so
         # a correction kept in its own file gives the same coordinates as
@@ -9402,12 +9653,7 @@ def localize_frames(
     spline_calibration: dict | None = None,
     camera_calibration: dict | None = None,
     threaded: bool = True,
-    identification_progress_callback: (
-        Callable[[int], None] | Literal["console"] | None
-    ) = None,
-    fit_progress_callback: (
-        Callable[[int], None] | Literal["console"] | None
-    ) = None,
+    progress: lib.Progress | Literal["console"] | None = None,
 ) -> pd.DataFrame:
     """Localize an in-memory frame stack, GUI-free (streaming/live input).
 
@@ -9447,8 +9693,11 @@ def localize_frames(
         (GPU variants such as ``"gausslq-gpu"`` run on the GPU if available).
     eps, max_it, spline_calibration, camera_calibration, threaded
         Forwarded to :func:`localize` unchanged.
-    identification_progress_callback, fit_progress_callback
-        Progress callbacks forwarded to :func:`localize`.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports the phases
+        of :func:`localize`. Default is None.
 
     Returns
     -------
@@ -9485,8 +9734,7 @@ def localize_frames(
         spline_calibration=spline_calibration,
         camera_calibration=camera_calibration,
         threaded=threaded,
-        identification_progress_callback=identification_progress_callback,
-        fit_progress_callback=fit_progress_callback,
+        progress=progress,
     )
 
     if start_frame:
@@ -9581,7 +9829,7 @@ def _apply_extra_affine(
 def check_nena(
     locs: pd.DataFrame,
     info: None,
-    callback: Callable[[int], None] = None,
+    progress: lib.Progress | Literal["console"] | None = None,
 ) -> float:
     """Calculate the NeNA (experimental localization precision) from
     localizations.
@@ -9592,20 +9840,23 @@ def check_nena(
         Data frame containing the localized spots.
     info : None
         Not used.
-    callback : Callable[[int], None], optional
-        A callback function that can be used to report progress. It
-        should accept an integer argument representing the current
-        step or frame number. Default is None.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports the phase(s)
+        of ``picasso.postprocess.nena``. Default is None.
 
     Returns
     -------
     nena : float
         The NeNA value in nm, representing the experimental
-        localization precision.
+        localization precision; NaN if it could not be calculated.
     """
     locs = locs[0:MAX_LOCS]
     try:
-        result, nena = postprocess.nena(locs, info, callback=callback)
+        result, nena = postprocess.nena(locs, info, progress=progress)
+    except lib.OperationCanceled:
+        raise
     except Exception as error:
         _log.warning("NeNA could not be calculated: %s", error)
         nena = float("nan")
@@ -9638,7 +9889,7 @@ def check_kinetics(locs: pd.DataFrame, info: list[dict]) -> float:
 def check_drift(
     locs: pd.DataFrame,
     info: list[dict],
-    callback: Callable[[int], None] = None,
+    progress: lib.Progress | Literal["console"] | None = None,
 ) -> tuple[float, float]:
     """Estimate the drift of localizations in x and y directions.
 
@@ -9648,10 +9899,12 @@ def check_drift(
         Data frame containing the localized spots.
     info : list[dict]
         A list of dictionaries containing metadata about the movie.
-    callback : Callable[[int], None], optional
-        A callback function that can be used to report progress. It
-        should accept an integer argument representing the current
-        step or frame number. Default is None.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports the phases
+        of ``picasso.postprocess.undrift`` (segmentation, then the
+        correlation of the segment pairs). Default is None.
 
     Returns
     -------
@@ -9673,7 +9926,7 @@ def check_drift(
         info,
         segmentation,
         display=False,
-        rcc_callback=callback,
+        progress=progress,
     )
     drift_x = float(drift["x"].mean())
     drift_y = float(drift["y"].mean())
@@ -9689,6 +9942,7 @@ def get_file_summary(
     drift: tuple[float, float] | None = None,
     len_mean: float | None = None,
     nena: float | None = None,
+    progress: lib.Progress | Literal["console"] | None = None,
 ) -> dict:
     """Generate a summary of the localization file, including metadata
     and statistics about the localizations.
@@ -9708,6 +9962,12 @@ def get_file_summary(
     nena : float | None, optional
         The NeNA value in nm. If None, it will be calculated from the
         localizations.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports the phases
+        of :func:`check_nena` and :func:`check_drift` for the values that
+        are calculated. Default is None.
 
     Returns
     -------
@@ -9742,9 +10002,16 @@ def get_file_summary(
         if col_ not in summary:
             summary[col_] = float("nan")
 
-    nena_nm = check_nena(locs, info) if nena is None else nena
-    len_mean = check_kinetics(locs, info) if len_mean is None else len_mean
-    drift_x, drift_y = check_drift(locs, info) if drift is None else drift
+    with lib.tracked_progress(progress, "Calculating NeNA") as progress:
+        nena_nm = (
+            check_nena(locs, info, progress=progress) if nena is None else nena
+        )
+        len_mean = check_kinetics(locs, info) if len_mean is None else len_mean
+        drift_x, drift_y = (
+            check_drift(locs, info, progress=progress)
+            if drift is None
+            else drift
+        )
 
     summary["len_mean"] = len_mean
     summary["n_locs"] = len(locs)
@@ -9842,6 +10109,7 @@ def add_file_to_db(
     drift: tuple[float, float] | None = None,
     len_mean: float | None = None,
     nena: float | None = None,
+    progress: lib.Progress | Literal["console"] | None = None,
 ) -> None:
     """Add a localization file summary to the SQLite database.
 
@@ -9860,13 +10128,20 @@ def add_file_to_db(
     nena : float | None, optional
         NeNA value in nm. If None, it is calculated from the
         localizations.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports the phases
+        of :func:`get_file_summary`. Default is None.
 
     Notes
     -----
     The summary is built by :func:`get_file_summary` and appended to the
     ``files`` table of the database (see ``db_filename``).
     """
-    summary = get_file_summary(file, file_hdf, drift, len_mean, nena)
+    summary = get_file_summary(
+        file, file_hdf, drift, len_mean, nena, progress=progress
+    )
     _save_file_summary(summary)
 
 

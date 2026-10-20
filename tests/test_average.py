@@ -4,11 +4,18 @@
 :copyright: Copyright (c) 2026 Jungmann Lab, MPI of Biochemistry
 """
 
+import time
+
 import numpy as np
 import pandas as pd
 import pytest
 
-from picasso import average, render
+from picasso import average, lib, render
+from tests._progress_tracking import (
+    CancelingProgress,
+    RecordingProgress,
+    assert_phases_complete,
+)
 
 
 class TestComputeXcorr:
@@ -303,58 +310,130 @@ class TestAverageParticles:
 
         assert spread(result3) <= spread(result1) + 1e-6
 
-    def test_progress_callback_invoked_with_full_signature(
-        self, sample_locs, sample_info
-    ):
-        progress_calls = []
-
-        def cb(it, total_it, locs, current, total):
-            progress_calls.append((it, total_it, current, total))
-
+    def test_progress_phase_per_iteration(self, sample_locs, sample_info):
+        tracker = RecordingProgress()
         average.average(
             sample_locs,
             sample_info,
             display_pixel_size=65,
             iterations=2,
-            progress_callback=cb,
+            progress=tracker,
         )
+        assert_phases_complete(
+            tracker,
+            ["Averaging (iteration 1/2)", "Averaging (iteration 2/2)"],
+        )
+        n_groups = sample_locs["group"].nunique()
+        assert [phase["maximum"] for phase in tracker.phases] == [n_groups] * 2
+        assert {phase["unit"] for phase in tracker.phases} == {"group"}
 
-        assert len(progress_calls) >= 2
-        # Final call always reports the completed iteration count and
-        # all groups processed.
-        last_it, last_total, last_current, last_n = progress_calls[-1]
-        assert (last_it, last_total) == (2, 2)
-        assert last_current == last_n
+    def test_iteration_callback_gets_the_locs_after_each_iteration(
+        self, sample_locs, sample_info
+    ):
+        calls = []
 
-    def test_return_shifted_locs(self, sample_locs, sample_info):
-        """return_shifted_locs=True returns a (locs, info) tuple shifted
-        into positive coordinates and with appended metadata."""
-        locs_out, info_out = average.average(
+        def on_iteration(done, locs):
+            calls.append((done, locs.copy()))
+
+        result = average.average(
             sample_locs,
             sample_info,
             display_pixel_size=65,
-            iterations=1,
-            return_shifted_locs=True,
+            iterations=2,
+            iteration_callback=on_iteration,
         )
+        assert [done for done, _ in calls] == [1, 2]
+        assert all(len(locs) == len(sample_locs) for _, locs in calls)
+        # the last iteration's locs are the result
+        np.testing.assert_array_equal(calls[-1][1]["x"], result["x"])
+        # and every iteration's locs are centered
+        for _, locs in calls:
+            assert abs(locs["x"].mean()) < 1e-3
+            assert abs(locs["y"].mean()) < 1e-3
 
-        assert (locs_out["x"] > 0).all()
-        assert (locs_out["y"] > 0).all()
-        assert len(info_out) == len(sample_info) + 1
-
-    def test_missing_group_column_raises(self, sample_info):
-        locs = pd.DataFrame(
-            {
-                "x": np.zeros(3, dtype=np.float32),
-                "y": np.zeros(3, dtype=np.float32),
-            }
+    def test_progress_none_is_silent_and_console_works(
+        self, sample_locs, sample_info, capsys
+    ):
+        kwargs = dict(display_pixel_size=65, iterations=1)
+        average.average(sample_locs.copy(), sample_info, **kwargs)
+        captured = capsys.readouterr()
+        assert captured.out == "" and captured.err == ""
+        average.average(
+            sample_locs.copy(), sample_info, progress="console", **kwargs
         )
-        with pytest.raises(AssertionError):
-            average.average(
-                locs,
+        assert "Averaging (iteration 1/1)" in capsys.readouterr().err
+
+    def test_cancel_propagates_and_keeps_an_idle_pool(
+        self, sample_locs, sample_info
+    ):
+        """Canceled before any work was queued, the cancellation propagates
+        and the caller's pool stays usable (only a pool with queued work is
+        terminated)."""
+        pool = average.AveragePool(sample_locs)
+        try:
+            with pytest.raises(lib.OperationCanceled):
+                average.average(
+                    sample_locs,
+                    sample_info,
+                    display_pixel_size=65,
+                    iterations=2,
+                    progress=CancelingProgress(after=1),
+                    pool=pool,
+                )
+            assert not pool.closed
+            result = average.average(
+                sample_locs,
                 sample_info,
                 display_pixel_size=65,
                 iterations=1,
+                pool=pool,
             )
+            assert len(result) == len(sample_locs)
+        finally:
+            pool.terminate()
+
+
+class TestWaitForAlignment:
+    """Regression: the wait for a round of alignment spun on
+    ``result.ready()`` without sleeping, copying the localizations on every
+    pass."""
+
+    class _Result:
+        def __init__(self, duration):
+            self.t_done = time.monotonic() + duration
+            self.n_ready = 0
+
+        def ready(self):
+            self.n_ready += 1
+            return time.monotonic() >= self.t_done
+
+        def wait(self, timeout):
+            time.sleep(min(timeout, max(0.0, self.t_done - time.monotonic())))
+
+        def get(self):
+            return None
+
+    class _Counter:
+        value = 3
+
+    def test_polls_instead_of_spinning(self):
+        result = self._Result(0.3)
+        tracker = RecordingProgress()
+        lib.start_phase(tracker, "Averaging", 5, unit="group")
+        aborted = average._wait_for_alignment(
+            result, None, self._Counter(), 5, tracker
+        )
+        assert not aborted
+        # about 0.3 s / 0.05 s polls, not thousands
+        assert result.n_ready < 30
+        assert_phases_complete(tracker)
+
+    def test_abort(self):
+        result = self._Result(10.0)
+        aborted = average._wait_for_alignment(
+            result, lambda: True, self._Counter(), 5, lib.MockProgress()
+        )
+        assert aborted
 
 
 if __name__ == "__main__":

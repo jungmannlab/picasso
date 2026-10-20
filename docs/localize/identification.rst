@@ -92,7 +92,7 @@ Hovering the mouse cursor over a fit marker or over an identification box shows 
 
       # Identification of the whole movie
       identifications, id_info = localize.identify(
-          movie, parameters=parameters, progress_callback="console"
+          movie, parameters=parameters, progress="console"
       )
 
       # Fitting
@@ -102,7 +102,7 @@ Hovering the mouse cursor over a fit marker or over an identification box shows 
           identifications=identifications,
           box=7,
           fitting_method="gaussmle",
-          progress_callback="console",
+          progress="console",
       )
       io.save_locs("movie_locs.hdf5", locs, info + [id_info, fit_info])
 

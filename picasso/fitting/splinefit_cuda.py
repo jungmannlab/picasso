@@ -86,8 +86,8 @@ from typing import Callable, Literal
 
 import numpy as np
 from numba import cuda
-from tqdm import tqdm
 
+from picasso import lib
 from picasso.fitting import lmfit_cuda
 from picasso.fitting.splinefit import (
     KIND_2D,
@@ -784,9 +784,7 @@ def fit_spots(
     mle: bool = False,
     tolerance: float | None = None,
     max_iterations: int | None = None,
-    progress_callback: (
-        Callable[[int], None] | Literal["console"] | None
-    ) = None,
+    progress: lib.Progress | Literal["console"] | None = None,
     abort_callback: Callable[[], bool] | None = None,
     single_precision: bool = True,
     variance: np.ndarray | None = None,
@@ -825,10 +823,12 @@ def fit_spots(
         Convergence tolerance, as in ``splinefit.fit_spots``.
     max_iterations : int, optional
         Maximum number of iterations, as in ``splinefit.fit_spots``.
-    progress_callback : callable, "console" or None, optional
-        ``"console"`` shows a tqdm bar; a callable is invoked with the
-        cumulative number of spots fitted. Updated once per chunk, not once
-        per spot.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports one phase, "Fitting spots" over
+        the spots, updated once per GPU chunk (one launch fits a whole
+        chunk). Default is None.
     abort_callback : callable or None, optional
         Polled between chunks; returning True stops the fit. A launched kernel
         cannot be canceled, so chunk boundaries are the only points at which an
@@ -865,6 +865,9 @@ def fit_spots(
         n_spots, n_params
     )
     if n_spots == 0:
+        with lib.tracked_progress(progress) as progress:
+            lib.start_phase(progress, "Fitting spots", 0, unit="spot")
+            progress.set_value(0)
         return thetas, chi_squares, states, iterations
 
     # The 2D model has no axial coordinate; its parameter 3 is the background,
@@ -909,12 +912,11 @@ def fit_spots(
         lmfit_cuda.chunk_rows(bytes_per_row, n_seeds * max_iterations),
     )
 
-    use_tqdm = progress_callback == "console"
-    do_callback = callable(progress_callback)
-    pbar = (
-        tqdm(total=n_spots, desc="Fitting", unit="spot") if use_tqdm else None
-    )
-    try:
+    with lib.tracked_progress(
+        progress, "Fitting spots", unit="spot"
+    ) as progress:
+        lib.start_phase(progress, "Fitting spots", n_spots, unit="spot")
+        progress.set_value(0)
         for start in range(0, n_spots, chunk):
             if abort_callback is not None and abort_callback():
                 break
@@ -956,11 +958,5 @@ def fit_spots(
             chi_squares[start:stop] = d_chi.copy_to_host()
             states[start:stop] = d_states.copy_to_host()
             iterations[start:stop] = d_iterations.copy_to_host()
-            if use_tqdm:
-                pbar.update(n)
-            elif do_callback:
-                progress_callback(stop)
-    finally:
-        if use_tqdm:
-            pbar.close()
+            progress.set_value(stop)
     return thetas, chi_squares, states, iterations

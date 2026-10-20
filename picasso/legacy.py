@@ -66,7 +66,7 @@ import logging
 import os
 import re
 import tempfile
-from typing import Callable
+from typing import Literal
 
 import h5py
 import numpy as np
@@ -674,13 +674,15 @@ def _locs_hdf5_path(path: str) -> str:
 
 
 def _convert_locs_file(
-    path: str, pixelsize: float | None, output: str, progress
+    path: str, pixelsize: float | None, output: str, progress: lib.Progress
 ) -> None:
-    """Convert a localization-type HDF5 file (see ``_LOCS_DATASETS``)."""
+    """Convert a localization-type HDF5 file (see ``_LOCS_DATASETS``),
+    reporting the read of its localizations (if any) to the normalized
+    tracker ``progress``, see ``io._read_locs_dataset``."""
     with h5py.File(path, "r") as hdf_file:
         keys = [key for key in _LOCS_DATASETS if key in hdf_file]
     if "locs" in keys:
-        locs = io._read_locs_dataset(path, progress=progress)
+        locs = io._read_locs_dataset(path, progress)
         locs = io._rename_legacy_columns(locs)
     try:
         info = io.load_info(path)
@@ -732,7 +734,7 @@ def convert_file(
     *,
     output: str | None = None,
     in_place: bool = False,
-    progress: Callable[[int, int], None] | None = None,
+    progress: lib.Progress | Literal["console"] | None = None,
 ) -> str:
     """Convert a file written before Picasso 1.0 from camera pixels to nm.
 
@@ -755,9 +757,13 @@ def convert_file(
     in_place : bool, optional
         Whether to overwrite the input file (and its .yaml). Default is
         False.
-    progress : callable, optional
-        Called as ``progress(done, total)`` while the localizations are
-        read. Default is None.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. A localization file reports "Loading
+        localizations" over its localizations (see ``io.load_locs``);
+        any other file, which converts in an instant, reports
+        "Converting <file>" over 1 file. Default is None.
 
     Returns
     -------
@@ -795,7 +801,10 @@ def convert_file(
     def write(target: str) -> None:
         if kind == "locs":
             _convert_locs_file(path, pixelsize, target, progress)
-        elif kind == "drift":
+            return
+        name = os.path.basename(path)
+        lib.start_phase(progress, f"Converting {name}", 1, unit="file")
+        if kind == "drift":
             drift = io.load_drift(path, pixelsize=pixelsize)
             io.save_drift(target, drift)
         elif kind == "spline":
@@ -806,27 +815,29 @@ def convert_file(
             )
         else:
             _convert_yaml_file(path, kind, pixelsize, target)
+        progress.set_value(1)
 
-    if os.path.abspath(output) != os.path.abspath(path):
-        write(output)
-        return output
-    # in place: write next to the file, then replace it (and its .yaml)
-    directory = os.path.dirname(os.path.abspath(path))
-    base, ext = os.path.splitext(os.path.basename(path))
-    handle, temporary = tempfile.mkstemp(
-        prefix=base + "_", suffix=ext, dir=directory
-    )
-    os.close(handle)
-    try:
-        write(temporary)
-        os.replace(temporary, path)
+    with lib.tracked_progress(progress, unit="file") as progress:
+        if os.path.abspath(output) != os.path.abspath(path):
+            write(output)
+            return output
+        # in place: write next to the file, then replace it (and its .yaml)
+        directory = os.path.dirname(os.path.abspath(path))
+        base, ext = os.path.splitext(os.path.basename(path))
+        handle, temporary = tempfile.mkstemp(
+            prefix=base + "_", suffix=ext, dir=directory
+        )
+        os.close(handle)
         temporary_yaml = os.path.splitext(temporary)[0] + ".yaml"
-        if os.path.isfile(temporary_yaml):
-            os.replace(temporary_yaml, os.path.splitext(path)[0] + ".yaml")
-    finally:
-        for leftover in (temporary, os.path.splitext(temporary)[0] + ".yaml"):
-            if os.path.isfile(leftover):
-                os.remove(leftover)
+        try:
+            write(temporary)
+            os.replace(temporary, path)
+            if os.path.isfile(temporary_yaml):
+                os.replace(temporary_yaml, os.path.splitext(path)[0] + ".yaml")
+        finally:
+            for leftover in (temporary, temporary_yaml):
+                if os.path.isfile(leftover):
+                    os.remove(leftover)
     return output
 
 
@@ -835,7 +846,7 @@ def convert_files(
     pixelsize: float | None = None,
     *,
     in_place: bool = False,
-    progress: Callable[[int, int], None] | None = None,
+    progress: lib.Progress | Literal["console"] | None = None,
 ) -> list[tuple[str, str | None, str | None]]:
     """Convert several files, see :func:`convert_file`.
 
@@ -851,8 +862,11 @@ def convert_files(
         None.
     in_place : bool, optional
         Whether to overwrite the input files. Default is False.
-    progress : callable, optional
-        Called as ``progress(done, total)`` after each file. Default None.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports "Converting files" over the
+        files (skipped and failed ones included). Default is None.
 
     Returns
     -------
@@ -861,6 +875,21 @@ def convert_files(
         converted file or None if the file was skipped or failed, and
         ``message`` says why (None on success).
     """
+    with lib.tracked_progress(progress, unit="file") as progress:
+        lib.start_phase(progress, "Converting files", len(paths), unit="file")
+        results = _convert_each(paths, pixelsize, in_place, progress)
+        progress.set_value(len(paths))
+    return results
+
+
+def _convert_each(
+    paths: list[str],
+    pixelsize: float | None,
+    in_place: bool,
+    progress: lib.Progress,
+) -> list[tuple[str, str | None, str | None]]:
+    """Convert the files of :func:`convert_files` one by one, reporting
+    each one finished to the current phase of ``progress``."""
     results = []
     seen = set()
     for i, path in enumerate(paths):
@@ -882,6 +911,5 @@ def convert_files(
         except Exception as error:  # report, do not stop the batch
             message = f"{type(error).__name__}: {error}"
         results.append((path, output, message))
-        if progress is not None:
-            progress(i + 1, len(paths))
+        progress.set_value(i + 1)
     return results

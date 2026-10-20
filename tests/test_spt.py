@@ -19,7 +19,7 @@ import yaml
 from scipy.optimize import check_grad
 
 from picasso import __main__ as cli
-from picasso import io, spt
+from picasso import io, lib, spt
 
 PIXELSIZE = 100.0  # nm
 FRAME_TIME = 20.0  # ms
@@ -599,3 +599,54 @@ def test_cli_sigma_argument():
         cli._spt_sigma("-1")
     with pytest.raises(argparse.ArgumentTypeError):
         cli._spt_sigma("abc")
+
+
+class _PhaseRecorder(lib.MockProgress):
+    """Progress tracker recording the phases it is driven through."""
+
+    def __init__(self):
+        super().__init__()
+        self.phases = []  # dicts with "label", "maximum" and "values"
+
+    def zero_progress(self, description=None, *args, **kwargs):
+        super().zero_progress(description)
+        self.phases.append({"label": description, "maximum": 0, "values": []})
+
+    def setMaximum(self, maximum, *args, **kwargs):
+        super().setMaximum(maximum)
+        self.phases[-1]["maximum"] = maximum
+
+    def set_value(self, value, *args, **kwargs):
+        self.phases[-1]["values"].append(value)
+
+    def setLabelText(self, *args, **kwargs):
+        raise AssertionError("setLabelText is not part of the interface")
+
+
+def test_analyze_tracks_progress(capsys):
+    locs = _brownian(n_particles=50, n_frames=10)
+    tracked, info = spt.link_tracks(locs, _info(), 400.0)
+    recorder = _PhaseRecorder()
+    spt.analyze_tracks(
+        tracked,
+        info,
+        frame_time=FRAME_TIME,
+        n_populations=(1, 2),
+        progress=recorder,
+    )
+    assert recorder.phases == [
+        {
+            "label": "Computing the MSD and jump distances",
+            "maximum": 2,
+            "values": [1, 2],
+        },
+        {"label": "Fitting jump distances", "maximum": 2, "values": [1, 2, 2]},
+    ]
+    capsys.readouterr()
+    spt.analyze_tracks(tracked, info, frame_time=FRAME_TIME, progress=None)
+    captured = capsys.readouterr()
+    assert captured.out == "" and captured.err == ""
+    spt.analyze_tracks(
+        tracked, info, frame_time=FRAME_TIME, progress="console"
+    )
+    assert "Fitting jump distances" in capsys.readouterr().err

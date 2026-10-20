@@ -18,6 +18,7 @@ import pytest
 from picasso import io, lib, postprocess
 
 from tests.conftest import PIXELSIZE
+from tests.test_postprocess_progress import RecordingProgress, assert_phases
 
 # nm per camera pixel of the bundled test data; the test geometry was
 # designed in camera pixels and is expressed in nm through it
@@ -1079,7 +1080,9 @@ class TestNena:
 class TestNextFrameNeighborDistanceHistogram:
     def test_shape_and_non_negative(self, locs):
         bin_centers, dnfl = (
-            postprocess._next_frame_neighbor_distance_histogram(locs.copy())
+            postprocess._next_frame_neighbor_distance_histogram(
+                locs.copy(), lib.MockProgress()
+            )
         )
         assert bin_centers.shape == dnfl.shape
         assert (dnfl >= 0).all()
@@ -1090,7 +1093,7 @@ class TestNextFrameNeighborDistanceHistogram:
 
     def test_some_neighbors_present(self, locs):
         _, dnfl = postprocess._next_frame_neighbor_distance_histogram(
-            locs.copy()
+            locs.copy(), lib.MockProgress()
         )
         # Bundled DNA-PAINT data has many on-events lasting >1 frame, so
         # there should be at least some next-frame neighbors recorded.
@@ -1175,7 +1178,7 @@ class TestFrcRois:
     def test_results_per_roi(self, locs, info):
         viewport = ((10 * PX, 10 * PX), (20 * PX, 20 * PX))
         ref = locs.copy()
-        progress = []
+        tracker = RecordingProgress()
         result = postprocess.frc_rois(
             locs,
             info,
@@ -1183,7 +1186,7 @@ class TestFrcRois:
             n_rois=4,
             roi_size=260,  # 2 camera pixels
             min_locs=20,
-            callback=progress.append,
+            progress=tracker,
         )
         n = len(result["rois"])
         assert 0 < n <= 4
@@ -1191,7 +1194,8 @@ class TestFrcRois:
         assert result["resolutions"].shape == (n,)
         assert (result["n_locs"] >= 20).all()
         assert all("images" not in _ for _ in result["frc_results"])
-        assert progress[-1] == n
+        assert_phases(tracker, ["Calculating NeNA", "Calculating FRC"])
+        assert tracker.phases[1].maximum == n
         pd.testing.assert_frame_equal(locs, ref)
 
 
@@ -2281,13 +2285,13 @@ class TestCbc:
     def test_all_pairs_matches_single_calls(self, channels):
         """Both directions of every pair, identical to ``cbc``."""
         a, b, c = channels
-        progress = []
+        tracker = RecordingProgress()
         out, infos = postprocess.cbc_all_pairs(
             [a, b, c],
             [self.INFO] * 3,
             names=["A", "B", "C"],
             undefined=-2.0,
-            progress_callback=progress.append,
+            progress=tracker,
         )
         assert len(out) == len(infos) == 3
         assert set(out[0].columns) - set(a.columns) == {"cbc_B", "cbc_C"}
@@ -2302,8 +2306,8 @@ class TestCbc:
         # both directions differ (not symmetric)
         assert out[1]["cbc_A"].median() > out[0]["cbc_B"].median() + 0.2
         # cumulative progress over all channels
-        assert progress == sorted(progress)
-        assert progress[-1] == len(a) + len(b) + len(c)
+        assert_phases(tracker, ["Calculating CBC"])
+        assert tracker.phases[0].maximum == len(a) + len(b) + len(c)
 
     def test_all_pairs_invalid_arguments(self, channels):
         a, b, _ = channels

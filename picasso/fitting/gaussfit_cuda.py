@@ -45,8 +45,8 @@ from typing import Callable, Literal
 
 import numpy as np
 from numba import cuda
-from tqdm import tqdm
 
+from picasso import lib
 from picasso.fitting import lmfit_cuda
 from picasso.fitting.splinefit import allocate_outputs, resolve_variance
 
@@ -574,9 +574,7 @@ def fit_spots(
     mle: bool = False,
     tolerance: float | None = None,
     max_iterations: int | None = None,
-    progress_callback: (
-        Callable[[int], None] | Literal["console"] | None
-    ) = None,
+    progress: lib.Progress | Literal["console"] | None = None,
     abort_callback: Callable[[], bool] | None = None,
     single_precision: bool = True,
     variance: np.ndarray | None = None,
@@ -600,10 +598,12 @@ def fit_spots(
     max_iterations : int, optional
         Maximum number of iterations. ``None`` (the default) uses
         :data:`MAX_ITERATIONS`.
-    progress_callback : callable, "console" or None, optional
-        ``"console"`` shows a tqdm bar; a callable is invoked with the
-        cumulative number of spots fitted. As in
-        :func:`picasso.fitting.splinefit_cuda.fit_spots`.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports one phase, "Fitting spots" over
+        the spots, updated once per GPU chunk (one launch fits a whole
+        chunk). Default is None.
     abort_callback : callable or None, optional
         Polled between chunks; returning True stops the fit. As in
         :func:`picasso.fitting.splinefit_cuda.fit_spots`.
@@ -637,6 +637,9 @@ def fit_spots(
         n_spots, n_params
     )
     if n_spots == 0:
+        with lib.tracked_progress(progress) as progress:
+            lib.start_phase(progress, "Fitting spots", 0, unit="spot")
+            progress.set_value(0)
         return thetas, chi_squares, states, iterations
 
     # The shared driver and the accumulators index spots channel-major, as the
@@ -672,12 +675,11 @@ def fit_spots(
         bytes_per_row += 4 * box * box
     chunk = min(n_spots, lmfit_cuda.chunk_rows(bytes_per_row, max_iterations))
 
-    use_tqdm = progress_callback == "console"
-    do_callback = callable(progress_callback)
-    pbar = (
-        tqdm(total=n_spots, desc="Fitting", unit="spot") if use_tqdm else None
-    )
-    try:
+    with lib.tracked_progress(
+        progress, "Fitting spots", unit="spot"
+    ) as progress:
+        lib.start_phase(progress, "Fitting spots", n_spots, unit="spot")
+        progress.set_value(0)
         for start in range(0, n_spots, chunk):
             if abort_callback is not None and abort_callback():
                 break
@@ -718,13 +720,7 @@ def fit_spots(
             chi_squares[start:stop] = d_chi.copy_to_host()
             states[start:stop] = d_states.copy_to_host()
             iterations[start:stop] = d_iterations.copy_to_host()
-            if use_tqdm:
-                pbar.update(n)
-            elif do_callback:
-                progress_callback(stop)
-    finally:
-        if use_tqdm:
-            pbar.close()
+            progress.set_value(stop)
     return thetas, chi_squares, states, iterations
 
 
@@ -1097,9 +1093,7 @@ def fit_spots_multichannel(
     mle: bool = False,
     tolerance: float | None = None,
     max_iterations: int | None = None,
-    progress_callback: (
-        Callable[[int], None] | Literal["console"] | None
-    ) = None,
+    progress: lib.Progress | Literal["console"] | None = None,
     abort_callback: Callable[[], bool] | None = None,
     single_precision: bool = True,
     variance: np.ndarray | None = None,
@@ -1130,8 +1124,12 @@ def fit_spots_multichannel(
         Use the Poisson maximum-likelihood estimator instead of least squares.
     tolerance, max_iterations : optional
         ``None`` uses :data:`TOLERANCE` / :data:`MAX_ITERATIONS`.
-    progress_callback : callable, "console" or None, optional
-        Reported once per chunk, not per spot: one launch fits a whole chunk.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports one phase, "Fitting spots" over
+        the spots, updated once per GPU chunk (one launch fits a whole
+        chunk). Default is None.
     abort_callback : callable, optional
         Polled between chunks; returning True stops the fit.
     single_precision : bool, optional
@@ -1166,6 +1164,9 @@ def fit_spots_multichannel(
         n_spots, n_params
     )
     if n_spots == 0:
+        with lib.tracked_progress(progress) as progress:
+            lib.start_phase(progress, "Fitting spots", 0, unit="spot")
+            progress.set_value(0)
         return thetas, chi_squares, states, iterations
 
     spots = np.ascontiguousarray(spots, dtype=np.float32)
@@ -1193,13 +1194,12 @@ def fit_spots_multichannel(
         bytes_per_row += 4 * n_channels * box * box
     chunk = min(n_spots, lmfit_cuda.chunk_rows(bytes_per_row, max_iterations))
 
-    use_tqdm = progress_callback == "console"
-    do_callback = callable(progress_callback)
-    pbar = (
-        tqdm(total=n_spots, desc="Fitting", unit="spot") if use_tqdm else None
-    )
     aborted = False
-    try:
+    with lib.tracked_progress(
+        progress, "Fitting spots", unit="spot"
+    ) as progress:
+        lib.start_phase(progress, "Fitting spots", n_spots, unit="spot")
+        progress.set_value(0)
         for start in range(0, n_spots, chunk):
             if abort_callback is not None and abort_callback():
                 aborted = True
@@ -1242,13 +1242,7 @@ def fit_spots_multichannel(
             chi_squares[start:stop] = d_chi.copy_to_host()
             states[start:stop] = d_states.copy_to_host()
             iterations[start:stop] = d_iterations.copy_to_host()
-            if use_tqdm:
-                pbar.update(n)
-            elif do_callback:
-                progress_callback(stop)
-    finally:
-        if use_tqdm:
-            pbar.close()
+            progress.set_value(stop)
     if aborted:
         return None
     return thetas, chi_squares, states, iterations

@@ -74,7 +74,7 @@ Particle averaging
               display_pixel_size=5.0,
               iterations=10,
               return_shifted_locs=True,
-              progress_callback="console",
+              progress="console",
           )
           io.save_locs("movie_locs_picked_avg.hdf5", avg_locs, avg_info)
 

@@ -15,6 +15,11 @@ from scipy.spatial.transform import Rotation
 
 from picasso import io, lib, masking, render
 
+from tests._progress_tracking import (
+    CancelingProgress,
+    RecordingProgress,
+    assert_phases_complete,
+)
 from tests.conftest import PIXELSIZE
 
 # parameters reused across tests; the test data covers 32 x 32 camera
@@ -2426,7 +2431,9 @@ class TestBuildAnimation:
             (Rotation.identity(), FULL_VIEWPORT),
             (Rotation.from_rotvec([0.1, 0.0, 0.0]), FULL_VIEWPORT),
         ]
-        frames = []
+        # regression: a tracker object (e.g. a ProgressDialog) used to fail
+        # an assertion that demanded a callable
+        tracker = RecordingProgress()
         completed = render.build_animation(
             str(out_path),
             locs_3d,
@@ -2436,20 +2443,70 @@ class TestBuildAnimation:
             disp_px_size=PIXELSIZE,
             image_size=(64, 64),
             fps=3,
-            progress_callback=frames.append,
+            progress=tracker,
         )
         assert completed is True
-        assert frames == [0, 1, 2, 3]  # each frame, then the total
+        assert_phases_complete(tracker, ["Building animation"])
+        # the frames rendered so far, counted after each frame
+        assert tracker.phases[0]["maximum"] == 3
+        assert tracker.phases[0]["values"] == [0, 1, 2, 3]
+        assert tracker.phases[0]["unit"] == "frame"
+
+    def test_progress_none_is_silent_and_console_works(
+        self, locs_3d, info, tmp_path, capsys
+    ):
+        kwargs = dict(
+            positions=[
+                (Rotation.identity(), FULL_VIEWPORT),
+                (Rotation.from_rotvec([0.1, 0.0, 0.0]), FULL_VIEWPORT),
+            ],
+            durations=[1.0],
+            disp_px_size=PIXELSIZE,
+            image_size=(64, 64),
+            fps=2,
+        )
+        out_path = str(tmp_path / "anim.mp4")
+        render.build_animation(out_path, locs_3d, info, **kwargs)
+        captured = capsys.readouterr()
+        assert captured.out == "" and captured.err == ""
+        render.build_animation(
+            out_path, locs_3d, info, progress="console", **kwargs
+        )
+        assert "Building animation" in capsys.readouterr().err
+
+    def test_canceled_tracker_leaves_no_partial_output(
+        self, locs_3d, info, tmp_path
+    ):
+        """A GUI tracker raising ``OperationCanceled`` part-way removes the
+        incomplete video, and the cancellation propagates."""
+        out_path = tmp_path / "anim.mp4"
+        with pytest.raises(lib.OperationCanceled):
+            render.build_animation(
+                str(out_path),
+                locs_3d,
+                info,
+                positions=[
+                    (Rotation.identity(), FULL_VIEWPORT),
+                    (Rotation.from_rotvec([0.1, 0.0, 0.0]), FULL_VIEWPORT),
+                ],
+                durations=[2.0],
+                disp_px_size=PIXELSIZE,
+                image_size=(64, 64),
+                fps=5,
+                progress=CancelingProgress(after=3),
+            )
+        assert not out_path.exists()
+        assert not out_path.with_suffix(".yaml").exists()
 
     def test_cancel_leaves_no_partial_output(self, locs_3d, info, tmp_path):
-        """A build cancelled part-way removes the incomplete video and
+        """A build canceled part-way removes the incomplete video and
         never writes the sidecar, and reports that it did not finish."""
         out_path = tmp_path / "anim.mp4"
         positions = [
             (Rotation.identity(), FULL_VIEWPORT),
             (Rotation.from_rotvec([0.1, 0.0, 0.0]), FULL_VIEWPORT),
         ]
-        rendered = []
+        tracker = RecordingProgress()
         completed = render.build_animation(
             str(out_path),
             locs_3d,
@@ -2459,11 +2516,11 @@ class TestBuildAnimation:
             disp_px_size=PIXELSIZE,
             image_size=(64, 64),
             fps=5,
-            progress_callback=rendered.append,
-            cancel=lambda: len(rendered) >= 3,
+            progress=tracker,
+            cancel=lambda: len(tracker.phases[0]["values"]) >= 3,
         )
         assert completed is False
-        assert len(rendered) < 10  # stopped early
+        assert tracker.phases[0]["values"][-1] < 10  # stopped early
         assert not out_path.exists()
         assert not out_path.with_suffix(".yaml").exists()
 

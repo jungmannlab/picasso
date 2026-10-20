@@ -569,7 +569,7 @@ def intersection_max(
     width: int,
     aim_round: int = 1,
     exclude_self: bool = False,
-    progress: lib.ProgressType | None = None,
+    progress: lib.Progress | Literal["console"] | None = None,
 ) -> tuple[
     lib.FloatArray1D, lib.FloatArray1D, lib.FloatArray1D, lib.FloatArray1D
 ]:
@@ -607,9 +607,12 @@ def intersection_max(
         at zero shift, which biases the estimated shift towards zero and
         compresses exactly the large corrections the second round exists
         to make. Default is False.
-    progress : lib.ProgressType | None, optional
-        Progress dialog. If TqdmProgress, progress is displayed with tqdm.
-        If None or MockProgress, progress is not displayed. Default is None.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports "Undrifting xy by AIM (1/2)"
+        (or "(2/2)" in the second round) over the segments aligned
+        (all but the first in the first round). Default is None.
 
     Returns
     -------
@@ -619,8 +622,6 @@ def intersection_max(
         Drift in x and y directions.
     """
     assert aim_round in [1, 2], "aim_round must be 1 or 2."
-    if progress is None:
-        progress = lib.MockProgress()
 
     # number of segments
     n_segments = len(seg_bounds) - 1
@@ -670,48 +671,51 @@ def intersection_max(
     # contribution can be taken out of it again (see exclude_self)
     l0_sorted = l0[order] if exclude_self else None
 
-    # initialize progress such that if GUI is used, tqdm is omitted
-    start_idx = 1 if aim_round == 1 else 0
-    iterator = progress.get_iterator(start_idx, n_segments)
+    # the first segment is the reference of the first round
+    first = 1 if aim_round == 1 else 0
+    n_steps = max(n_segments - first, 0)
+    label = f"Undrifting xy by AIM ({aim_round}/2)"
+    with lib.tracked_progress(progress, label, unit="segment") as progress:
+        lib.start_phase(progress, label, n_steps, unit="segment")
+        progress.set_value(0)
+        # run across each segment
+        for s in range(first, n_segments):
+            # get the target localizations within the current segment
+            lo, hi = seg_idx[s], seg_idx[s + 1]
 
-    # run across each segment
-    for s in iterator:
-        # get the target localizations within the current segment
-        lo, hi = seg_idx[s], seg_idx[s + 1]
+            shift = _align_segment(
+                lo,
+                hi,
+                x_sorted,
+                y_sorted,
+                rel_drift_x,
+                rel_drift_y,
+                exclude_self,
+                l0_sorted,
+                l0_coords,
+                l0_counts,
+                intersect_d,
+                width_units,
+                shifts_xy,
+                box,
+            )
+            if shift is None:
+                # no target localizations, or (with exclude_self) nothing
+                # left to align against, e.g. a single segment
+                drift_x[s] = drift_x[s - 1]
+                drift_y[s] = drift_y[s - 1]
+                progress.set_value(s + 1 - first)
+                continue
 
-        shift = _align_segment(
-            lo,
-            hi,
-            x_sorted,
-            y_sorted,
-            rel_drift_x,
-            rel_drift_y,
-            exclude_self,
-            l0_sorted,
-            l0_coords,
-            l0_counts,
-            intersect_d,
-            width_units,
-            shifts_xy,
-            box,
-        )
-        if shift is None:
-            # no target localizations, or (with exclude_self) nothing
-            # left to align against, e.g. a single segment
-            drift_x[s] = drift_x[s - 1]
-            drift_y[s] = drift_y[s - 1]
-            continue
-
-        # update the relative drift reference for the subsequent
-        # segmented subset (interval) and save the drifts
-        px, py = shift
-        rel_drift_x += px
-        rel_drift_y += py
-        drift_x[s] = -rel_drift_x
-        drift_y[s] = -rel_drift_y
-
-        # update progress
-        progress.set_value(s)
+            # update the relative drift reference for the subsequent
+            # segmented subset (interval) and save the drifts
+            px, py = shift
+            rel_drift_x += px
+            rel_drift_y += py
+            drift_x[s] = -rel_drift_x
+            drift_y[s] = -rel_drift_y
+            progress.set_value(s + 1 - first)
+        progress.set_value(n_steps)
 
     # interpolate the drifts (cubic spline) for all frames
     drift_x, drift_y = _interpolate_drift(seg_bounds, drift_x, drift_y)
@@ -738,7 +742,7 @@ def intersection_max_z(
     height: float,
     aim_round: int = 1,
     exclude_self: bool = False,
-    progress: lib.ProgressType | None = None,
+    progress: lib.Progress | Literal["console"] | None = None,
 ) -> tuple[lib.FloatArray1D, lib.FloatArray1D]:
     """Maximize intersection (undrift) for 3D localizations.
 
@@ -773,9 +777,12 @@ def intersection_max_z(
     exclude_self : bool, optional
         Leave each segment out of the reference while that segment is
         being aligned, see :func:`intersection_max`. Default is False.
-    progress : lib.ProgressType | None, optional
-        Progress dialog. If TqdmProgress, progress is displayed with tqdm.
-        If None or MockProgress, progress is not displayed. Default is None.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports "Undrifting z by AIM (1/2)"
+        (or "(2/2)" in the second round) over the segments aligned
+        (all but the first in the first round). Default is None.
 
     Returns
     -------
@@ -790,9 +797,6 @@ def intersection_max_z(
         If ``exclude_self`` is True and the reference is not the same
         localizations as the target.
     """
-    if progress is None:
-        progress = lib.MockProgress()
-
     z = np.asarray(z, dtype=np.float64)
     ref_z = np.asarray(ref_z, dtype=np.float64)
 
@@ -854,63 +858,69 @@ def intersection_max_z(
     # with seg_bounds[s] < frame <= seg_bounds[s + 1]
     seg_idx = np.searchsorted(frame_sorted, seg_bounds, side="right")
 
-    # initialize progress such that if GUI is used, tqdm is omitted
-    start_idx = 1 if aim_round == 1 else 0
-    iterator = progress.get_iterator(start_idx, n_segments)
+    # the first segment is the reference of the first round
+    first = 1 if aim_round == 1 else 0
+    n_steps = max(n_segments - first, 0)
+    label = f"Undrifting z by AIM ({aim_round}/2)"
+    with lib.tracked_progress(progress, label, unit="segment") as progress:
+        lib.start_phase(progress, label, n_steps, unit="segment")
+        progress.set_value(0)
+        # run across each segment
+        for s in range(first, n_segments):
+            # get the target localizations within the current segment
+            lo, hi = seg_idx[s], seg_idx[s + 1]
 
-    # run across each segment
-    for s in iterator:
-        # get the target localizations within the current segment
-        lo, hi = seg_idx[s], seg_idx[s + 1]
-
-        # skip if no target localizations
-        if hi == lo:
-            drift_z[s] = drift_z[s - 1]
-            continue
-
-        x1 = x_sorted[lo:hi]
-        y1 = y_sorted[lo:hi]
-        # undrifting from the previous round (new array, not a view)
-        z1 = z_sorted[lo:hi] + rel_drift_z
-
-        # take this segment out of the reference counts (see the 2D
-        # counterpart); restored right after the intersection counting
-        if exclude_self:
-            own, own_counts = np.unique(l0_sorted[lo:hi], return_counts=True)
-            own_pos = np.searchsorted(l0_coords, own)
-            l0_counts[own_pos] -= own_counts
-
-        # count the number of intersected localizations
-        roi_cc = _point_intersect_3d(
-            l0_coords,
-            l0_counts,
-            x1,
-            y1,
-            z1,
-            intersect_d,
-            width_units,
-            height_units,
-            shifts_z,
-        )
-
-        if exclude_self:
-            l0_counts[own_pos] += own_counts
-            # nothing left to align against (e.g. a single segment)
-            if not roi_cc.any():
+            # skip if no target localizations
+            if hi == lo:
                 drift_z[s] = drift_z[s - 1]
+                progress.set_value(s + 1 - first)
                 continue
 
-        # estimate the precise sub-pixel position of the peak of roi_cc
-        # with FFT
-        pz = _get_fft_peak_z(roi_cc, intersect_d)
+            x1 = x_sorted[lo:hi]
+            y1 = y_sorted[lo:hi]
+            # undrifting from the previous round (new array, not a view)
+            z1 = z_sorted[lo:hi] + rel_drift_z
 
-        # update the relative drift reference for the subsequent
-        # segmented subset (interval) and save the drifts
-        rel_drift_z += pz
-        drift_z[s] = -rel_drift_z
+            # take this segment out of the reference counts (see the 2D
+            # counterpart); restored right after the intersection counting
+            if exclude_self:
+                own, own_counts = np.unique(
+                    l0_sorted[lo:hi], return_counts=True
+                )
+                own_pos = np.searchsorted(l0_coords, own)
+                l0_counts[own_pos] -= own_counts
 
-        # update progress
-        progress.set_value(s)
+            # count the number of intersected localizations
+            roi_cc = _point_intersect_3d(
+                l0_coords,
+                l0_counts,
+                x1,
+                y1,
+                z1,
+                intersect_d,
+                width_units,
+                height_units,
+                shifts_z,
+            )
+
+            if exclude_self:
+                l0_counts[own_pos] += own_counts
+                # nothing left to align against (e.g. a single segment)
+                if not roi_cc.any():
+                    drift_z[s] = drift_z[s - 1]
+                    progress.set_value(s + 1 - first)
+                    continue
+
+            # estimate the precise sub-pixel position of the peak of roi_cc
+            # with FFT
+            pz = _get_fft_peak_z(roi_cc, intersect_d)
+
+            # update the relative drift reference for the subsequent
+            # segmented subset (interval) and save the drifts
+            rel_drift_z += pz
+            drift_z[s] = -rel_drift_z
+            progress.set_value(s + 1 - first)
+        progress.set_value(n_steps)
 
     # interpolate the drifts (cubic spline) for all frames
     (drift_z,) = _interpolate_drift(seg_bounds, drift_z)
@@ -927,7 +937,7 @@ def aim(
     segmentation: int = 100,
     intersect_d: float = 20.0,
     roi_r: float = 60.0,
-    progress: lib.ProgressDialog | Literal["console"] | None = None,
+    progress: lib.Progress | Literal["console"] | None = None,
 ) -> tuple[pd.DataFrame, list[dict], pd.DataFrame]:
     """Apply AIM undrifting to the localizations.
 
@@ -944,9 +954,13 @@ def aim(
     roi_r : float, optional
         Radius of the local search region in nm. Should be larger than
         the maximum expected drift within segmentation. Default is 60.
-    progress : picasso.lib.ProgressDialog or "console" or None, optional
-        Progress dialog. If "console", progress is displayed in the
-        console. If None, no progress is displayed. Default is None.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports "Undrifting xy by AIM (1/2)"
+        and "(2/2)" over the segments (see ``intersection_max``) and,
+        for 3D localizations, "Undrifting z by AIM (1/2)" and "(2/2)"
+        (see ``intersection_max_z``). Default is None.
 
     Returns
     -------
@@ -957,10 +971,21 @@ def aim(
     drift : pd.DataFrame
         Drift in x and y directions (and z if applicable), in nm.
     """
-    progress = lib.normalize_progress(
-        progress, description="Undrifting by AIM (1/2)"
-    )
+    with lib.tracked_progress(
+        progress, "Undrifting xy by AIM (1/2)", unit="segment"
+    ) as progress:
+        return _aim(locs, info, segmentation, intersect_d, roi_r, progress)
 
+
+def _aim(
+    locs: pd.DataFrame,
+    info: list[dict],
+    segmentation: int,
+    intersect_d: float,
+    roi_r: float,
+    progress: lib.Progress,
+) -> tuple[pd.DataFrame, list[dict], pd.DataFrame]:
+    """AIM undrifting with a normalized progress tracker, see ``aim``."""
     locs = locs.copy()
     # extract metadata
     width, height = lib.field_of_view(info)
@@ -994,7 +1019,6 @@ def aim(
         progress=progress,
     )
     # the second run is with the entire dataset as reference
-    progress.zero_progress(description="Undrifting by AIM (2/2)")
     x_pdc, y_pdc, drift_x2, drift_y2 = intersection_max(
         x_pdc,
         y_pdc,
@@ -1024,7 +1048,6 @@ def aim(
 
     # 3D undrifting
     if "z" in locs.columns:
-        progress.zero_progress(description="Undrifting z (1/2)")
         ref_x = x_pdc[frame <= segmentation]
         ref_y = y_pdc[frame <= segmentation]
         ref_z = locs["z"][frame <= segmentation]
@@ -1044,7 +1067,6 @@ def aim(
             aim_round=1,
             progress=progress,
         )
-        progress.zero_progress(description="Undrifting z (2/2)")
         z_pdc, drift_z2 = intersection_max_z(
             x_pdc,
             y_pdc,
@@ -1086,5 +1108,4 @@ def aim(
         "Search regions radius (nm)": roi_r,
     }
     new_info = info + [new_info]
-    progress.close()
     return locs, new_info, drift

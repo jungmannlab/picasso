@@ -58,6 +58,21 @@ BOOTSTRAP_DISTANCE = 30.0
 BOOTSTRAP_DISTANCE_METRIC = 1.0
 
 
+def _task_sizes(n_candidates: int) -> list[int]:
+    """Number of candidates scored by each of the ``N_TASKS`` tasks of
+    a parallel fit (see ``SPINNA.fit_stoichiometry_parallel``)."""
+    return [
+        n_candidates // N_TASKS + (1 if i < n_candidates % N_TASKS else 0)
+        for i in range(N_TASKS)
+    ]
+
+
+def _phase_label(title: str, step: str) -> str:
+    """Progress phase label of a fitting ``step`` (e.g. "Coarse pass"),
+    prefixed with the ``progress_title`` of the fit if there is one."""
+    return f"{title} | {step}" if title else step
+
+
 def rref(M: lib.FloatArray2D | lib.IntArray2D) -> lib.FloatArray2D:
     """Convert a given matrix to its reduced row echelon form (RREF)
     using Gaussian elimination. Used for solving sets of linear
@@ -3126,8 +3141,8 @@ class SPINNA:
         Specifies how many times each simulation with the given
         structure count should be repeated. Default is 1.
     progress_title : str, optional
-        Title of the progress bar displayed during fitting simulations.
-        Default is "Spinning structures".
+        Title of the progress phases reported during fitting, see
+        :meth:`fit`. Default is "Spinning structures".
     """
 
     def __init__(
@@ -3164,7 +3179,7 @@ class SPINNA:
         asynch: bool = True,
         bootstrap: bool = False,
         return_scores: bool = False,
-        callback: lib.ProgressDialog | Literal["console"] | None = None,
+        progress: lib.Progress | Literal["console"] | None = None,
     ) -> (
         tuple[lib.IntArray1D, float]
         | tuple[tuple[lib.IntArray1D, ...], tuple[float, ...]]
@@ -3214,10 +3229,18 @@ class SPINNA:
         return_scores : bool, optional
             If True, scores for all combinations of structures are also
             returned. Default is False.
-        callback : {lib.ProgressDialog, "console", None}, optional
-            Progress bar to track fitting progress. If "console", the
-            progress bar is displayed in the console. If None, no
-            progress bar is displayed. Default is None.
+        progress : lib.Progress, "console" or None, optional
+            Progress tracker, see ``picasso.lib.Progress``: e.g. a
+            ``lib.ProgressDialog``, "console" for a tqdm bar in the
+            console, or None for no reporting. Reports one phase per
+            pass over candidate structure counts, labeled with
+            ``progress_title``: brute force reports one phase over all
+            candidates, coarse-to-fine "<title> | Coarse pass" and
+            "<title> | Fine pass", Bayesian optimization "<title> |
+            Bayesian (initial sampling)" and "<title> | Bayesian
+            (GP-guided)" over the evaluations (shortened if it stops
+            early). Bootstrapping adds "<title> | Bootstrapping i/20"
+            over the candidates near the best fit. Default is None.
 
         Returns
         -------
@@ -3237,7 +3260,7 @@ class SPINNA:
             asynch=asynch,
             bootstrap=bootstrap,
             return_scores=return_scores,
-            callback=callback,
+            progress=progress,
         )
 
     def fit_stoichiometry(
@@ -3251,7 +3274,7 @@ class SPINNA:
         asynch: bool = True,
         bootstrap: bool = False,
         return_scores: bool = False,
-        callback: lib.ProgressDialog | Literal["console"] | None = None,
+        progress: lib.Progress | Literal["console"] | None = None,
     ) -> (
         tuple[lib.IntArray1D, float]
         | tuple[tuple[lib.IntArray1D, ...], tuple[float, ...]]
@@ -3279,9 +3302,9 @@ class SPINNA:
         return_scores : bool, optional
             If True, scores for all combinations of structures are also
             returned. Default is False.
-        callback : {lib.ProgressDialog, "console", None}, optional
-            Progress bar to track fitting progress, as in :meth:`fit`.
-            Default is None.
+        progress : lib.Progress, "console" or None, optional
+            Progress tracker, see ``picasso.lib.Progress``; reports the
+            phases described in :meth:`fit`. Default is None.
 
         Returns
         -------
@@ -3293,7 +3316,6 @@ class SPINNA:
             KS2 scores of every combination tested. Only returned if
             ``return_scores``.
         """
-        callback = lib.normalize_progress(callback)
         assert fitting_mode in [
             "coarse-to-fine",
             "bayesian",
@@ -3313,24 +3335,53 @@ class SPINNA:
         if N_structures.shape[0] == 1:
             fitting_mode = "brute-force"
 
-        if fitting_mode == "coarse-to-fine":
-            return self.fit_coarse_to_fine(
+        with lib.tracked_progress(
+            progress, self.progress_title, unit="candidate"
+        ) as progress:
+            if fitting_mode == "coarse-to-fine":
+                return self.fit_coarse_to_fine(
+                    N_structures,
+                    save=save,
+                    asynch=asynch,
+                    bootstrap=bootstrap,
+                    progress=progress,
+                )
+            elif fitting_mode == "bayesian":
+                return self.fit_bayesian(
+                    N_structures,
+                    save=save,
+                    bootstrap=bootstrap,
+                    progress=progress,
+                )
+            return self._fit_brute_force(
                 N_structures,
                 save=save,
                 asynch=asynch,
                 bootstrap=bootstrap,
-                callback=callback,
-            )
-        elif fitting_mode == "bayesian":
-            return self.fit_bayesian(
-                N_structures,
-                save=save,
-                bootstrap=bootstrap,
-                callback=callback,
+                return_scores=return_scores,
+                progress=progress,
+                label=self.progress_title,
             )
 
+    def _fit_brute_force(
+        self,
+        N_structures: lib.IntArray2D,
+        *,
+        save: str,
+        asynch: bool,
+        bootstrap: bool,
+        return_scores: bool,
+        progress: lib.Progress,
+        label: str,
+    ) -> (
+        tuple[lib.IntArray1D, float]
+        | tuple[tuple[lib.IntArray1D, ...], tuple[float, ...]]
+    ):
+        """Brute-force fit of :meth:`fit_stoichiometry`, reporting one
+        phase ``label`` over ``N_structures`` to the normalized tracker
+        ``progress`` (plus the bootstrap phases)."""
         N_structures, scores = self._run_brute_force(
-            N_structures, asynch, callback
+            N_structures, asynch, progress, label
         )
 
         if save:
@@ -3358,7 +3409,7 @@ class SPINNA:
                 opt_N_structures,
                 opt_proportions,
                 score,
-                callback,
+                progress,
             )
             if return_scores:
                 return result[0], result[1], scores
@@ -3367,7 +3418,11 @@ class SPINNA:
             return opt_proportions, score, scores
         return opt_proportions, score
 
-    def fit_stoichiometry_parallel(self, N_structures: lib.IntArray2D) -> list:
+    def fit_stoichiometry_parallel(
+        self,
+        N_structures: lib.IntArray2D,
+        executor: futures.Executor | None = None,
+    ) -> list:
         """Apply multiprocessing to find best fitting combination of
         structures.
 
@@ -3378,25 +3433,24 @@ class SPINNA:
             simulated for each iteration. Shape (N, M), where N is the
             number of simulations to be tested and M is the number of
             structures in mixer.
+        executor : concurrent.futures.Executor, optional
+            Executor the tasks are submitted to; the caller shuts it
+            down. Default is None: a new ``ProcessPoolExecutor`` using
+            ``lib.n_workers()`` processes, which is not shut down.
 
         Returns
         -------
         fs : list of Futures
-            Contain the scoring for each combination of structures
+            Contain the scoring for each combination of structures, one
+            per task of ``N_TASKS`` (equal parts of ``N_structures``).
         """
-        # get number of threads and tasks
-        n_workers = lib.n_workers()
-
         # split N_structures into groups that are tested by each Process
         # separately
-        N = N_structures.shape[0]
-        structures_per_task = [
-            int(N / N_TASKS + 1) if _ < N % N_TASKS else int(N / N_TASKS)
-            for _ in range(N_TASKS)
-        ]
+        structures_per_task = _task_sizes(N_structures.shape[0])
         start_indices = np.cumsum([0] + structures_per_task[:-1])
         fs = []
-        executor = futures.ProcessPoolExecutor(n_workers)
+        if executor is None:
+            executor = futures.ProcessPoolExecutor(lib.n_workers())
         # call NN_scorer for each group of N_structures
         for i, n_neighbors_task in zip(start_indices, structures_per_task):
             fs.append(
@@ -3415,7 +3469,7 @@ class SPINNA:
         save: str = "",
         asynch: bool = True,
         bootstrap: bool = False,
-        callback: lib.ProgressDialog | Literal["console"] | None = None,
+        progress: lib.Progress | Literal["console"] | None = None,
     ) -> (
         tuple[lib.IntArray1D, float]
         | tuple[tuple[lib.IntArray1D, ...], tuple[float, ...]]
@@ -3445,9 +3499,13 @@ class SPINNA:
         bootstrap : bool, optional
             If True, bootstrapping is used to estimate the fitting
             error. Default is False.
-        callback : {lib.ProgressDialog, "console", None}, optional
-            Progress bar to track fitting progress, as in :meth:`fit`.
-            Default is None.
+        progress : lib.Progress, "console" or None, optional
+            Progress tracker, see ``picasso.lib.Progress``: e.g. a
+            ``lib.ProgressDialog``, "console" for a tqdm bar in the
+            console, or None for no reporting. Reports "<title> |
+            Coarse pass" and "<title> | Fine pass" over the candidates
+            of each pass (``progress_title`` is the title), plus the
+            bootstrap phases (see :meth:`fit`). Default is None.
 
         Returns
         -------
@@ -3456,7 +3514,33 @@ class SPINNA:
         score : float or tuple of floats
             KS2 score of that fit.
         """
-        callback = lib.normalize_progress(callback)
+        with lib.tracked_progress(
+            progress, self.progress_title, unit="candidate"
+        ) as progress:
+            return self._fit_coarse_to_fine(
+                N_structures,
+                coarse_fraction,
+                radius,
+                save,
+                asynch,
+                bootstrap,
+                progress,
+            )
+
+    def _fit_coarse_to_fine(
+        self,
+        N_structures: lib.IntArray2D | dict,
+        coarse_fraction: float,
+        radius: float,
+        save: str,
+        asynch: bool,
+        bootstrap: bool,
+        progress: lib.Progress,
+    ) -> (
+        tuple[lib.IntArray1D, float]
+        | tuple[tuple[lib.IntArray1D, ...], tuple[float, ...]]
+    ):
+        """:meth:`fit_coarse_to_fine` with a normalized tracker."""
         if isinstance(N_structures, dict):
             N_structures = self.mixer.convert_N_structures_to_array(
                 N_structures
@@ -3471,19 +3555,13 @@ class SPINNA:
         N_coarse = N_structures[coarse_idx]
 
         # keep the caller-supplied title as a prefix so that phase
-        # labels still carry round/model context
-        base_title = self.progress_title
-        coarse_title = (
-            f"{base_title} | Coarse pass" if base_title else "Coarse pass"
-        )
-        fine_title = f"{base_title} | Fine pass" if base_title else "Fine pass"
+        # labels still carry round/model context (the title itself is
+        # left as it is, so repeated calls do not stack the suffixes)
+        coarse_title = _phase_label(self.progress_title, "Coarse pass")
+        fine_title = _phase_label(self.progress_title, "Fine pass")
 
-        # adjust the progress bar
-        callback.setMaximum(n_coarse)
-        callback.zero_progress(coarse_title)
-        self.progress_title = coarse_title
         N_coarse, scores_coarse = self._run_brute_force(
-            N_coarse, asynch, callback
+            N_coarse, asynch, progress, coarse_title
         )
 
         coarse_best = N_coarse[np.argmin(scores_coarse)]
@@ -3495,17 +3573,14 @@ class SPINNA:
             radius=radius,
         )
 
-        # adjust the progress bar again
-        callback.setMaximum(len(N_fine))
-        callback.zero_progress(fine_title)
-        self.progress_title = fine_title
-        spinna_results = self.fit_stoichiometry(
+        spinna_results = self._fit_brute_force(
             N_fine,
-            fitting_mode="brute-force",
+            save="",
             asynch=asynch,
             bootstrap=bootstrap,
             return_scores=True,
-            callback=callback,
+            progress=progress,
+            label=fine_title,
         )
         if save:
             # save the results of both the coarse and fine pass
@@ -3553,7 +3628,7 @@ class SPINNA:
         n_iterations: int = 80,
         save: str = "",
         bootstrap: bool = False,
-        callback: lib.ProgressDialog | Literal["console"] | None = None,
+        progress: lib.Progress | Literal["console"] | None = None,
     ) -> (
         tuple[lib.IntArray1D, float]
         | tuple[tuple[lib.IntArray1D, ...], tuple[float, ...]]
@@ -3581,8 +3656,16 @@ class SPINNA:
         bootstrap : bool, optional
             If True, bootstrapping is used to estimate the fitting
             error. Default is False.
-        callback : {lib.ProgressDialog, "console", None}, optional
-            Progress bar. Default is None.
+        progress : lib.Progress, "console" or None, optional
+            Progress tracker, see ``picasso.lib.Progress``: e.g. a
+            ``lib.ProgressDialog``, "console" for a tqdm bar in the
+            console, or None for no reporting. Reports "<title> |
+            Bayesian (initial sampling)" over the ``n_initial``
+            evaluations and "<title> | Bayesian (GP-guided)" over the
+            ``n_iterations`` evaluations, whose maximum shrinks to the
+            evaluations run if it stops early (``progress_title`` is the
+            title), plus the bootstrap phases (see :meth:`fit`). Default
+            is None.
 
         Returns
         -------
@@ -3591,8 +3674,31 @@ class SPINNA:
         score : float or tuple of floats
             KS2 score of the best fit.
         """
+        with lib.tracked_progress(
+            progress, self.progress_title, unit="candidate"
+        ) as progress:
+            return self._fit_bayesian(
+                N_structures,
+                n_initial,
+                n_iterations,
+                save,
+                bootstrap,
+                progress,
+            )
 
-        callback = lib.normalize_progress(callback)
+    def _fit_bayesian(
+        self,
+        N_structures: lib.IntArray2D | dict,
+        n_initial: int,
+        n_iterations: int,
+        save: str,
+        bootstrap: bool,
+        progress: lib.Progress,
+    ) -> (
+        tuple[lib.IntArray1D, float]
+        | tuple[tuple[lib.IntArray1D, ...], tuple[float, ...]]
+    ):
+        """:meth:`fit_bayesian` with a normalized tracker."""
         if isinstance(N_structures, dict):
             N_structures = self.mixer.convert_N_structures_to_array(
                 N_structures
@@ -3630,7 +3736,7 @@ class SPINNA:
             evaluated=evaluated,
             scores=scores,
             n_initial=n_initial,
-            callback=callback,
+            progress=progress,
             title=init_title,
         )
 
@@ -3638,19 +3744,18 @@ class SPINNA:
         # skipped when the initial design already covered the whole
         # search space (a zero range would show as a busy indicator)
         if n_iterations > 0:
-            callback.zero_progress(gp_title)
-            callback.setMaximum(n_iterations)
+            lib.start_phase(progress, gp_title, n_iterations)
             evaluated, scores, _ = self._bayesian_gp_phase(
                 proportions=proportions,
                 N_structures=N_structures,
                 evaluated=evaluated,
                 scores=scores,
                 n_iterations=n_iterations,
-                callback=callback,
+                progress=progress,
                 eval_count=0,
             )
             # fill the bar (the maximum was shrunk on early stopping)
-            callback.set_value(callback.maximum())
+            progress.set_value(progress.maximum())
 
         # collect results for evaluated candidates only
         N_evaluated = N_structures[evaluated]
@@ -3671,7 +3776,7 @@ class SPINNA:
                 opt_N_structures,
                 opt_proportions,
                 score,
-                callback,
+                progress,
             )
         return opt_proportions, score
 
@@ -3682,21 +3787,23 @@ class SPINNA:
         evaluated: np.ndarray,
         scores: np.ndarray,
         n_initial: int,
-        callback,
+        progress: lib.Progress,
         title: str,
     ) -> None:
-        """Run Phase 1 of Bayesian optimization: farthest-point sampling.
+        """Run Phase 1 of Bayesian optimization: farthest-point sampling,
+        reported as the phase ``title`` over the ``n_initial``
+        evaluations.
 
         Modifies ``evaluated`` and ``scores`` in place.
         """
-        callback.zero_progress(title)
-        callback.setMaximum(n_initial)
+        lib.start_phase(progress, title, n_initial)
 
         init_idx = self._farthest_point_sampling(proportions, n_initial)
         for eval_count, idx in enumerate(init_idx, start=1):
             scores[idx] = self._evaluate_single(N_structures[idx])
             evaluated[idx] = True
-            callback.set_value(eval_count)
+            progress.set_value(eval_count)
+        progress.set_value(n_initial)
 
     def _save_bayesian_csv(self, N_evaluated, scores_evaluated, path):
         """Write evaluated candidates and their scores to ``path``."""
@@ -3722,7 +3829,7 @@ class SPINNA:
         evaluated: np.ndarray,
         scores: np.ndarray,
         n_iterations: int,
-        callback,
+        progress: lib.Progress,
         eval_count: int,
     ) -> tuple[np.ndarray, np.ndarray, int]:
         """Run the GP-guided acquisition phase of Bayesian optimization.
@@ -3744,8 +3851,10 @@ class SPINNA:
             Scores array (modified in-place).
         n_iterations : int
             Maximum number of GP-guided iterations.
-        callback : lib.ProgressType
-            Progress tracker (see ``lib.normalize_progress``).
+        progress : lib.Progress
+            Normalized progress tracker (see ``lib.normalize_progress``)
+            whose current phase counts the evaluations; its maximum is
+            shrunk to the evaluations run on early stopping.
         eval_count : int
             Number of evaluations already completed (for progress display).
 
@@ -3792,7 +3901,7 @@ class SPINNA:
             evaluated[best_idx] = True
             eval_count += 1
 
-            callback.set_value(eval_count)
+            progress.set_value(eval_count)
 
             # early stopping
             current_best = scores[evaluated].min()
@@ -3804,7 +3913,7 @@ class SPINNA:
             if no_improvement_count >= patience:
                 # shrink the progress target so the bar reaches 100%
                 # naturally instead of jumping at the end
-                callback.setMaximum(eval_count)
+                progress.setMaximum(eval_count)
                 break
 
         return evaluated, scores, eval_count
@@ -3813,7 +3922,8 @@ class SPINNA:
         self,
         N_structures: lib.IntArray2D,
         asynch: bool,
-        callback: lib.ProgressType,
+        progress: lib.Progress,
+        label: str,
     ) -> tuple[lib.IntArray2D, lib.FloatArray1D]:
         """Score ``N_structures`` candidates, dispatching to parallel
         or single-thread mode.
@@ -3824,8 +3934,11 @@ class SPINNA:
             Candidates to evaluate.
         asynch : bool
             If True, multiprocessing is used.
-        callback : lib.ProgressType
-            Progress tracker (see ``lib.normalize_progress``).
+        progress : lib.Progress
+            Normalized progress tracker (see ``lib.normalize_progress``).
+            Reports the phase ``label`` over the candidates scored.
+        label : str
+            Label of the progress phase.
 
         Returns
         -------
@@ -3833,20 +3946,27 @@ class SPINNA:
         scores : lib.FloatArray1D
         """
         if not asynch:
-            return self.NN_scorer(N_structures, callback=callback)
-        fs = self.fit_stoichiometry_parallel(N_structures)
-        N = len(fs)
-        N_ = N_structures.shape[0]
-        callback.description_base = self.progress_title
-        callback.setMaximum(N_)
-        while self.n_futures_done(fs) < N:
-            fd = self.n_futures_done(fs)
-            fd_ = int(fd * N_ / N)
-            if fd > 0:
-                callback.set_value(fd_)
-            time.sleep(0.1)
-        callback.set_value(N_)
-        return self.scores_from_futures(fs)
+            return self._score(N_structures, progress, label)
+        n_candidates = N_structures.shape[0]
+        lib.start_phase(progress, label, n_candidates, unit="candidate")
+        sizes = _task_sizes(n_candidates)
+        executor = futures.ProcessPoolExecutor(lib.n_workers())
+        try:
+            fs = self.fit_stoichiometry_parallel(N_structures, executor)
+            # report the candidates of the finished tasks from this
+            # (the calling) thread until all are done
+            while True:
+                n_done = sum(n for f, n in zip(fs, sizes) if f.done())
+                if n_done == n_candidates:
+                    break
+                progress.set_value(n_done)
+                time.sleep(0.1)
+            result = self.scores_from_futures(fs)
+        finally:
+            # also stops the workers if the user canceled
+            executor.shutdown(wait=False, cancel_futures=True)
+        progress.set_value(n_candidates)
+        return result
 
     def _run_bootstrap(
         self,
@@ -3854,7 +3974,7 @@ class SPINNA:
         opt_N_structures: lib.IntArray1D,
         opt_proportions: lib.FloatArray1D,
         score: float,
-        callback: lib.ProgressType,
+        progress: lib.Progress,
     ) -> tuple[tuple, tuple]:
         """Bootstrap the best-fit result to estimate uncertainty.
 
@@ -3871,8 +3991,11 @@ class SPINNA:
             Best-fit proportions.
         score : float
             Best-fit KS2 score.
-        callback : lib.ProgressType
-            Progress tracker (see ``lib.normalize_progress``).
+        progress : lib.Progress
+            Normalized progress tracker (see ``lib.normalize_progress``).
+            Reports "<title> | Bootstrapping i/N" over the candidates
+            near the best fit for each round, where the title is
+            ``progress_title``.
 
         Returns
         -------
@@ -3885,27 +4008,30 @@ class SPINNA:
         )
         bootstrap_scores = []
         boot_props = []
-        for i in range(N_BOOTSTRAPS):
-            # NN_scorer below re-arms the progress tracker (title, range
-            # and ETA baseline) for each bootstrap round
-            self.progress_title = (
-                f"Bootstrapping {i+1}/{N_BOOTSTRAPS}; spinning structures"
-            )
-            gt_coords_boot = self.mixer.run_simulation(opt_N_structures)
-            self.dists_gt = get_NN_dist_experimental(
-                gt_coords_boot, self.mixer
-            )
-            N_structures_boot, scores_boot = self.NN_scorer(
-                N_structures_subset, callback=callback
-            )
-            index_boot = np.argmin(scores_boot)
-            bootstrap_scores.append(scores_boot[index_boot])
-            boot_props.append(
-                self.mixer.convert_counts_to_props(
-                    N_structures_boot[index_boot]
+        try:
+            for i in range(N_BOOTSTRAPS):
+                # a new phase (title, range and ETA baseline) per round
+                label = _phase_label(
+                    self.progress_title,
+                    f"Bootstrapping {i + 1}/{N_BOOTSTRAPS}",
                 )
-            )
-        self.dists_gt = exp_dists_gt
+                gt_coords_boot = self.mixer.run_simulation(opt_N_structures)
+                self.dists_gt = get_NN_dist_experimental(
+                    gt_coords_boot, self.mixer
+                )
+                N_structures_boot, scores_boot = self._score(
+                    N_structures_subset, progress, label
+                )
+                index_boot = np.argmin(scores_boot)
+                bootstrap_scores.append(scores_boot[index_boot])
+                boot_props.append(
+                    self.mixer.convert_counts_to_props(
+                        N_structures_boot[index_boot]
+                    )
+                )
+        finally:
+            # also when canceled, so the instance keeps the real data
+            self.dists_gt = exp_dists_gt
         score_std = np.std(bootstrap_scores)
         props_std = np.std(boot_props, axis=0)
         return (opt_proportions, props_std), (score, score_std)
@@ -3979,7 +4105,7 @@ class SPINNA:
     def NN_scorer(
         self,
         N_structures: lib.IntArray2D,
-        callback: lib.ProgressType | Literal["console"] | None = None,
+        progress: lib.Progress | Literal["console"] | None = None,
     ) -> tuple[lib.IntArray2D, lib.FloatArray1D]:
         """Score the simulations similarity to the ground truth dataset
         based on their nearest neighbor distances distribution using
@@ -3995,10 +4121,12 @@ class SPINNA:
             simulated for each iteration. Shape (N, M), where N is the
             number of simulations to be tested and M is the number of
             structures in mixer.
-        callback : {lib.ProgressType, "console", None}, optional
-            Progress bar to track fitting progress. If "console", the
-            progress bar is displayed in the console. If None, no
-            progress bar is displayed. Default is None.
+        progress : lib.Progress, "console" or None, optional
+            Progress tracker, see ``picasso.lib.Progress``: e.g. a
+            ``lib.ProgressDialog``, "console" for a tqdm bar in the
+            console, or None for no reporting. Reports one phase,
+            labeled with ``progress_title``, over the candidates.
+            Default is None.
 
         Returns
         -------
@@ -4007,14 +4135,24 @@ class SPINNA:
         scores : lib.FloatArray1D
             1D array with fit scores for each combination of structures.
         """
-        # Run simulations for each structure count and score them #
-        callback = lib.normalize_progress(callback, self.progress_title)
-        callback.description_base = self.progress_title
-        callback.zero_progress(self.progress_title)
-        callback.setMaximum(N_structures.shape[0])
-        scores = np.zeros((N_structures.shape[0],))
+        with lib.tracked_progress(
+            progress, self.progress_title, unit="candidate"
+        ) as progress:
+            return self._score(N_structures, progress, self.progress_title)
 
-        for ii in range(N_structures.shape[0]):
+    def _score(
+        self,
+        N_structures: lib.IntArray2D,
+        progress: lib.Progress,
+        label: str,
+    ) -> tuple[lib.IntArray2D, lib.FloatArray1D]:
+        """:meth:`NN_scorer` in this process, reporting the phase
+        ``label`` over the candidates to the normalized tracker
+        ``progress``."""
+        n_candidates = N_structures.shape[0]
+        lib.start_phase(progress, label, n_candidates, unit="candidate")
+        scores = np.zeros((n_candidates,))
+        for ii in range(n_candidates):
             N = N_structures[ii]
             # calculate NNDs over self.N_sim repeated simulations
             dists_sim = get_NN_dist_simulated(
@@ -4022,7 +4160,8 @@ class SPINNA:
             )
             # score the simulation results
             scores[ii] = NND_score(dists_sim, self.dists_gt)
-            callback.set_value(ii)
+            progress.set_value(ii + 1)
+        progress.set_value(n_candidates)
         return N_structures, scores
 
     def get_subset_N_structures(
@@ -4129,7 +4268,7 @@ def _fit_label_unc_for_target(
     N_sim: int,
     asynch: bool,
     savedir: str,
-    callback,
+    progress: lib.Progress,
     fitting_mode: Literal[
         "coarse-to-fine", "bayesian", "brute-force"
     ] = "coarse-to-fine",
@@ -4176,8 +4315,9 @@ def _fit_label_unc_for_target(
     savedir : str
         Directory where the fitting scores are saved as .csv files. If
         "" is given, the files are not saved.
-    callback : {lib.ProgressDialog, "console", None}
-        Progress bar to track fitting progress.
+    progress : lib.Progress
+        Normalized progress tracker (see ``lib.normalize_progress``),
+        passed to :func:`compare_models_given_label_unc`.
     fitting_mode : {"coarse-to-fine", "bayesian", "brute-force"}, optional
         How the stoichiometry search space is explored; see
         :meth:`SPINNA.fit`. Default is "coarse-to-fine".
@@ -4235,7 +4375,7 @@ def _fit_label_unc_for_target(
             N_sim=N_sim,
             asynch=asynch,
             savedir=savedir,
-            callback=callback,
+            progress=progress,
             progress_title=progress_title,
             fitting_mode=fitting_mode,
             round_counter=round_counter,
@@ -4296,7 +4436,7 @@ def compare_models(
     random_rot_mode: Literal["2D", "3D"] | None = "2D",
     asynch: bool = True,
     savedir: str = "",
-    callback: lib.ProgressDialog | Literal["console"] | None = None,
+    progress: lib.Progress | Literal["console"] | None = None,
     fitting_mode: Literal[
         "coarse-to-fine", "bayesian", "brute-force"
     ] = "coarse-to-fine",
@@ -4350,10 +4490,16 @@ def compare_models(
         Path to the directory where the fitting scores are saved as
         .csv files. If "" is given, the files are not saved. Default
         is "".
-    callback : {lib.ProgressDialog, "console", None}, optional
-        Progress bar to track fitting progress. If "console", the
-        progress bar is displayed in the console. If None, no
-        progress bar is displayed. Default is None.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Every stoichiometry fit (one per model
+        and label uncertainty tested) reports the phases of
+        :meth:`SPINNA.fit`, titled "[Round r/R] Fitting label
+        uncertainty for <target>: <value> nm (k/K) | model m/M" while
+        the label uncertainties are fitted and "[Round r/R] Final
+        comparison, label_unc=<values> | model m/M" for the final
+        comparison of the models. Default is None.
     fitting_mode : {"coarse-to-fine", "bayesian", "brute-force"}, optional
         If "coarse-to-fine", the fitting is done in two steps: first,
         a coarse grid of structure combinations is tested, (10% of
@@ -4406,65 +4552,69 @@ def compare_models(
             total_rounds += len(label_unc[target]) * n_models
     round_counter = [0]
 
-    # First we fit label_unc for each target, where we only focus on the
-    # structures that contain the target. The fitting can be skipped if
-    # label_unc is already provided without the search space.
-    for target in targets:
-        label_unc[target] = _fit_label_unc_for_target(
-            target=target,
-            models=models,
-            label_unc=label_unc,
-            label_unc_input_=label_unc_input_,
-            nn_counts_keys=list(nn_counts.keys()),
-            exp_data=exp_data,
-            granularity=granularity,
-            le=le,
-            mask_dict=mask_dict,
-            width=width,
-            height=height,
-            depth=depth,
-            random_rot_mode=random_rot_mode,
-            N_sim=N_sim,
-            asynch=asynch,
-            savedir=savedir,
-            callback=callback,
-            fitting_mode=fitting_mode,
-            round_counter=round_counter,
-            total_rounds=total_rounds,
-        )
+    with lib.tracked_progress(
+        progress, "Spinning structures", unit="candidate"
+    ) as progress:
+        # First we fit label_unc for each target, where we only focus on
+        # the structures that contain the target. The fitting can be
+        # skipped if label_unc is already provided without the search
+        # space.
+        for target in targets:
+            label_unc[target] = _fit_label_unc_for_target(
+                target=target,
+                models=models,
+                label_unc=label_unc,
+                label_unc_input_=label_unc_input_,
+                nn_counts_keys=list(nn_counts.keys()),
+                exp_data=exp_data,
+                granularity=granularity,
+                le=le,
+                mask_dict=mask_dict,
+                width=width,
+                height=height,
+                depth=depth,
+                random_rot_mode=random_rot_mode,
+                N_sim=N_sim,
+                asynch=asynch,
+                savedir=savedir,
+                progress=progress,
+                fitting_mode=fitting_mode,
+                round_counter=round_counter,
+                total_rounds=total_rounds,
+            )
 
-    # test the models with the best fitting label uncertainties; note
-    # that here we'd like to pay the attention to the NNDs that are
-    # present in all models, i.e., if a simpler model does not contain
-    # a structure with a dimer of a certain species, it should still aim
-    # to fit the "dimer" NNDs.
-    nn_counts = _compute_nn_counts(targets, models, nn_counts)
+        # test the models with the best fitting label uncertainties; note
+        # that here we'd like to pay the attention to the NNDs that are
+        # present in all models, i.e., if a simpler model does not
+        # contain a structure with a dimer of a certain species, it
+        # should still aim to fit the "dimer" NNDs.
+        nn_counts = _compute_nn_counts(targets, models, nn_counts)
 
-    # compare the models
-    progress_title = f"Final comparison, label_unc={label_unc}"
-    (best_score, best_idx, best_mixer, best_props) = (
-        compare_models_given_label_unc(
-            models=models,
-            exp_data=exp_data,
-            granularity=granularity,
-            label_unc=label_unc,
-            le=le,
-            mask_dict=mask_dict,
-            width=width,
-            height=height,
-            depth=depth,
-            random_rot_mode=random_rot_mode,
-            nn_counts=nn_counts,
-            N_sim=N_sim,
-            asynch=asynch,
-            savedir=savedir,
-            callback=callback,
-            progress_title=progress_title,
-            fitting_mode=fitting_mode,
-            round_counter=round_counter,
-            total_rounds=total_rounds,
+        # compare the models
+        progress_title = f"Final comparison, label_unc={label_unc}"
+        (best_score, best_idx, best_mixer, best_props) = (
+            compare_models_given_label_unc(
+                models=models,
+                exp_data=exp_data,
+                granularity=granularity,
+                label_unc=label_unc,
+                le=le,
+                mask_dict=mask_dict,
+                width=width,
+                height=height,
+                depth=depth,
+                random_rot_mode=random_rot_mode,
+                nn_counts=nn_counts,
+                N_sim=N_sim,
+                asynch=asynch,
+                savedir=savedir,
+                progress=progress,
+                progress_title=progress_title,
+                fitting_mode=fitting_mode,
+                round_counter=round_counter,
+                total_rounds=total_rounds,
+            )
         )
-    )
     return best_score, best_idx, label_unc, best_mixer, best_props
 
 
@@ -4483,7 +4633,7 @@ def compare_models_given_label_unc(
     N_sim: int = 1,
     asynch: bool = True,
     savedir: str = "",
-    callback: lib.ProgressDialog | Literal["console"] | None = None,
+    progress: lib.Progress | Literal["console"] | None = None,
     progress_title: str = "Spinning structures",
     fitting_mode: Literal[
         "coarse-to-fine", "bayesian", "brute-force"
@@ -4546,13 +4696,17 @@ def compare_models_given_label_unc(
         Path to the directory where the fitting scores are saved as
         .csv files. If "" is given, the files are not saved. Default
         is "".
-    callback : {lib.ProgressDialog, "console", None}, optional
-        Progress bar to track fitting progress. If "console", the
-        progress bar is displayed in the console. If None, no
-        progress bar is displayed. Default is None.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. The stoichiometry fit of each model
+        reports the phases of :meth:`SPINNA.fit`, titled
+        "[Round r/R] <progress_title> | model m/M" (the round only if
+        ``round_counter`` and ``total_rounds`` are given). Default is
+        None.
     progress_title : str, optional
-        Title of the progress bar displayed during fitting simulations.
-        Default is "Spinning structures".
+        Title of the progress phases, see ``progress``. Default is
+        "Spinning structures".
     fitting_mode : {"coarse-to-fine", "bayesian", "brute-force"}, optional
         How the stoichiometry search space is explored; see
         :meth:`SPINNA.fit`. Default is "coarse-to-fine".
@@ -4575,8 +4729,56 @@ def compare_models_given_label_unc(
         The stoichiometry of structures that gives the best fit to the
         data.
     """
+    with lib.tracked_progress(
+        progress, progress_title, unit="candidate"
+    ) as progress:
+        return _compare_models_given_label_unc(
+            models,
+            exp_data,
+            granularity,
+            label_unc,
+            le,
+            mask_dict,
+            width,
+            height,
+            depth,
+            random_rot_mode,
+            nn_counts,
+            N_sim,
+            asynch,
+            savedir,
+            progress,
+            progress_title,
+            fitting_mode,
+            round_counter,
+            total_rounds,
+        )
+
+
+def _compare_models_given_label_unc(
+    models: list[list[Structure]],
+    exp_data: dict,
+    granularity: int,
+    label_unc: dict,
+    le: dict,
+    mask_dict: dict | None,
+    width: float | None,
+    height: float | None,
+    depth: float | None,
+    random_rot_mode: Literal["2D", "3D"] | None,
+    nn_counts: dict | str,
+    N_sim: int,
+    asynch: bool,
+    savedir: str,
+    progress: lib.Progress,
+    progress_title: str,
+    fitting_mode: Literal["coarse-to-fine", "bayesian", "brute-force"],
+    round_counter: list | None,
+    total_rounds: int | None,
+) -> tuple[float, int, StructureMixer, lib.FloatArray1D]:
+    """:func:`compare_models_given_label_unc` with a normalized
+    tracker."""
     # initialize
-    callback = lib.normalize_progress(callback)
     best_mixer = None
     best_idx = None
     best_score = np.inf
@@ -4623,16 +4825,13 @@ def compare_models_given_label_unc(
             savepath = os.path.join(
                 savedir, f"fit_scores_model_{i+1}_label_unc_{suffix}.csv"
             )
-        # adjust the progress tracker (zero_progress also resets the
-        # time-estimate baseline so the new phase gets a fresh ETA)
-        callback.setMaximum(len(list(search_space.values())[0]))
-        callback.zero_progress(spinner_title)
+        # the fit starts its own progress phases, titled spinner_title
         opt_props, score = spinner.fit_stoichiometry(
             N_structures=search_space,
             fitting_mode=fitting_mode,
             save=savepath,
             asynch=asynch,
-            callback=callback,
+            progress=progress,
         )
         if score < best_score:
             best_score = score
@@ -4657,7 +4856,7 @@ def fit_le(
     random_rot_mode: Literal["2D", "3D"] | None = "2D",
     asynch: bool = True,
     savedir: str = "",
-    callback: lib.ProgressDialog | Literal["console"] | None = None,
+    progress: lib.Progress | Literal["console"] | None = None,
     fitting_mode: Literal[
         "coarse-to-fine", "bayesian", "brute-force"
     ] = "coarse-to-fine",
@@ -4703,8 +4902,11 @@ def fit_le(
     savedir : str, optional
         Directory where the fitting scores are saved as .csv files. If
         "" is given, the files are not saved. Default is "".
-    callback : {lib.ProgressDialog, "console", None}, optional
-        Progress bar to track fitting progress. Default is None.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports the phases of
+        :func:`compare_models`. Default is None.
     fitting_mode : {"coarse-to-fine", "bayesian", "brute-force"}, optional
         How the stoichiometry search space is explored; see
         :meth:`SPINNA.fit`. Default is "coarse-to-fine".
@@ -4774,7 +4976,7 @@ def fit_le(
         random_rot_mode=random_rot_mode,
         asynch=asynch,
         savedir=savedir,
-        callback=callback,
+        progress=progress,
         fitting_mode=fitting_mode,
     )
 

@@ -4153,10 +4153,8 @@ class SimulationsTab(lib.Dialog):
             gt_coords=self.exp_data,
             N_sim=self.n_sim_fit,
         )
-        # number of stoichiometries tested
-        N = len(list(self.N_structures_fit.values())[0])
         progress = lib.ProgressDialog(
-            "Preparing fit, please wait...", 0, N, self
+            "Preparing fit, please wait...", 0, 0, self
         )
         progress.set_value(0)
         progress.show()
@@ -4165,15 +4163,17 @@ class SimulationsTab(lib.Dialog):
             "Bayesian": "bayesian",
             "Brute force": "brute-force",
         }[self.settings_dialog.fitting_mode.currentText()]
-        self.opt_props, self.current_score = spinner.fit(
-            self.N_structures_fit,
-            fitting_mode=fitting_mode,
-            save=save,
-            asynch=self.settings_dialog.asynch_check.isChecked(),
-            bootstrap=self.bootstrap_check.isChecked(),
-            callback=progress,
-        )
-        progress.close()
+        try:
+            self.opt_props, self.current_score = spinner.fit(
+                self.N_structures_fit,
+                fitting_mode=fitting_mode,
+                save=save,
+                asynch=self.settings_dialog.asynch_check.isChecked(),
+                bootstrap=self.bootstrap_check.isChecked(),
+                progress=progress,
+            )
+        finally:
+            progress.close()
         self.best_score = self.current_score
 
         # update widgets and plot the best fitting stoichiometry
@@ -4404,32 +4404,33 @@ class SimulationsTab(lib.Dialog):
         progress = lib.ProgressDialog(
             "Comparing models, please wait...", 0, 1, self
         )
-        # keep a single dialog visible across all fitting phases
-        progress.setAutoClose(False)
-        progress.setAutoReset(False)
         fitting_mode = {
             "Coarse to fine": "coarse-to-fine",
             "Bayesian": "bayesian",
             "Brute force": "brute-force",
         }[self.settings_dialog.fitting_mode.currentText()]
-        _, idx, best_label_unc, best_mixer, opt_props = spinna.compare_models(
-            models=models,
-            exp_data=self.exp_data,
-            granularity=self.granularity,
-            label_unc=label_unc,
-            le=base_mixer.le,
-            N_sim=self.n_sim_fit,
-            mask_dict=base_mixer.mask_dict,
-            width=base_mixer.roi[0],
-            height=base_mixer.roi[1],
-            depth=base_mixer.roi[2],
-            random_rot_mode=base_mixer.random_rot_mode,
-            asynch=self.settings_dialog.asynch_check.isChecked(),
-            savedir=savedir,
-            callback=progress,
-            fitting_mode=fitting_mode,
-        )
-        progress.close()
+        try:
+            _, idx, best_label_unc, best_mixer, opt_props = (
+                spinna.compare_models(
+                    models=models,
+                    exp_data=self.exp_data,
+                    granularity=self.granularity,
+                    label_unc=label_unc,
+                    le=base_mixer.le,
+                    N_sim=self.n_sim_fit,
+                    mask_dict=base_mixer.mask_dict,
+                    width=base_mixer.roi[0],
+                    height=base_mixer.roi[1],
+                    depth=base_mixer.roi[2],
+                    random_rot_mode=base_mixer.random_rot_mode,
+                    asynch=self.settings_dialog.asynch_check.isChecked(),
+                    savedir=savedir,
+                    progress=progress,
+                    fitting_mode=fitting_mode,
+                )
+            )
+        finally:
+            progress.close()
 
         # load the structures and label_unc and display in the NN plot
         # without overwriting other attributes
@@ -4490,33 +4491,35 @@ class SimulationsTab(lib.Dialog):
             return
 
         progress = lib.ProgressDialog("Fitting LE, please wait...", 0, 1, self)
-        progress.setAutoClose(False)
-        progress.setAutoReset(False)
         fitting_mode = {
             "Coarse to fine": "coarse-to-fine",
             "Bayesian": "bayesian",
             "Brute force": "brute-force",
         }[self.settings_dialog.fitting_mode.currentText()]
 
-        le_values, best_lunc, best_d, score, props, best_mixer = spinna.fit_le(
-            target_a=self.targets[0],
-            target_b=self.targets[1],
-            exp_data=self.exp_data,
-            granularity=self.granularity,
-            label_unc=label_unc,
-            distances=distances,
-            N_sim=self.n_sim_fit,
-            mask_dict=base_mixer.mask_dict,
-            width=base_mixer.roi[0],
-            height=base_mixer.roi[1],
-            depth=base_mixer.roi[2],
-            random_rot_mode=base_mixer.random_rot_mode,
-            asynch=self.settings_dialog.asynch_check.isChecked(),
-            savedir=savedir,
-            callback=progress,
-            fitting_mode=fitting_mode,
-        )
-        progress.close()
+        try:
+            le_values, best_lunc, best_d, score, props, best_mixer = (
+                spinna.fit_le(
+                    target_a=self.targets[0],
+                    target_b=self.targets[1],
+                    exp_data=self.exp_data,
+                    granularity=self.granularity,
+                    label_unc=label_unc,
+                    distances=distances,
+                    N_sim=self.n_sim_fit,
+                    mask_dict=base_mixer.mask_dict,
+                    width=base_mixer.roi[0],
+                    height=base_mixer.roi[1],
+                    depth=base_mixer.roi[2],
+                    random_rot_mode=base_mixer.random_rot_mode,
+                    asynch=self.settings_dialog.asynch_check.isChecked(),
+                    savedir=savedir,
+                    progress=progress,
+                    fitting_mode=fitting_mode,
+                )
+            )
+        finally:
+            progress.close()
 
         # push fitted label_unc back into the simulations-tab spin boxes
         for spin, l in zip(self.label_unc_spins, best_lunc.values()):

@@ -50,6 +50,55 @@ class PoolWorker(QtCore.QThread):
         self.pool = average.AveragePool(self.locs)
 
 
+class _IterationProgress(lib.MockProgress):
+    """Progress tracker of ``average.average`` (see ``lib.Progress``),
+    forwarding it as the worker's ``progressMade`` signal.
+
+    The averaging starts one phase per iteration, over the groups, so
+    the phases started so far are the number of the running iteration.
+
+    Parameters
+    ----------
+    worker : Worker
+        The worker whose signal is emitted (from its own thread).
+    """
+
+    def __init__(self, worker: Worker) -> None:
+        super().__init__()
+        self._worker = worker
+        self.iteration = 0
+
+    def zero_progress(self, description=None, *args, **kwargs) -> None:
+        """Start the next iteration.
+
+        Parameters
+        ----------
+        description : str, optional
+            Label of the phase.
+        *args, **kwargs
+            Accepted and ignored.
+        """
+        super().zero_progress(description)
+        self.iteration += 1
+
+    def set_value(self, value, *args, **kwargs) -> None:
+        """Report the groups aligned so far in the running iteration.
+
+        Parameters
+        ----------
+        value : int
+            Groups aligned so far, out of :meth:`maximum`.
+        *args, **kwargs
+            Accepted and ignored.
+        """
+        self._worker.progressMade.emit(
+            self.iteration,
+            self._worker.iterations,
+            int(value),
+            self._maximum,
+        )
+
+
 class Worker(QtCore.QThread):
     """Worker thread for processing image alignment.
 
@@ -70,7 +119,11 @@ class Worker(QtCore.QThread):
         started and shut down by the averaging function itself.
     """
 
-    progressMade = QtCore.pyqtSignal(int, int, pd.DataFrame, bool, int, int)
+    # running iteration, number of iterations, groups aligned in it,
+    # number of groups
+    progressMade = QtCore.pyqtSignal(int, int, int, int)
+    # iterations finished, number of iterations, localizations after them
+    iterationFinished = QtCore.pyqtSignal(int, int, pd.DataFrame)
     aborted = QtCore.pyqtSignal()
 
     def __init__(
@@ -89,27 +142,19 @@ class Worker(QtCore.QThread):
         self.pool = pool
         self.was_aborted = False
 
-    def on_progress(
-        self,
-        it: int,
-        total_it: int,
-        locs_current: pd.DataFrame,
-        group: int,
-        n_groups: int,
-    ) -> None:
-        """Callback for progress updates from the averaging process.
+    def on_iteration(self, it: int, locs_current: pd.DataFrame) -> None:
+        """Hand the result of a finished iteration to the window.
 
         Parameters
         ----------
-        it, total_it : int
-            Iteration just finished and the total number of iterations.
+        it : int
+            Iterations finished so far.
         locs_current : pd.DataFrame
-            The localizations as they stand after this iteration.
-        group, n_groups : int
-            Group just finished and the total number of groups.
+            The localizations as they stand after this iteration; the
+            averaging keeps working on them, so they are copied.
         """
         self.locs = locs_current.copy()
-        self.progressMade.emit(it, total_it, self.locs, True, group, n_groups)
+        self.iterationFinished.emit(it, self.iterations, self.locs)
 
     def run(self) -> None:
         """Run averaging across a number of iterations."""
@@ -118,7 +163,8 @@ class Worker(QtCore.QThread):
             self.info,
             display_pixel_size=self.display_px_size,
             iterations=self.iterations,
-            progress_callback=self.on_progress,
+            progress=_IterationProgress(self),
+            iteration_callback=self.on_iteration,
             abort_callback=self.isInterruptionRequested,
             pool=self.pool,
         )
@@ -241,6 +287,7 @@ class View(QtWidgets.QLabel):
                 self.wait_for_pool(),
             )
             self.thread.progressMade.connect(self.on_progress)
+            self.thread.iterationFinished.connect(self.on_iteration)
             self.thread.aborted.connect(self.on_aborted)
             self.thread.finished.connect(self.on_finished)
             self.window.abort_action.setEnabled(True)
@@ -311,30 +358,34 @@ class View(QtWidgets.QLabel):
         self,
         it: int,
         total_it: int,
-        locs: pd.DataFrame,
-        update_image: bool,
         group: int,
         n_groups: int,
     ) -> None:
+        """Show the progress of the running averaging iteration.
+
+        Parameters
+        ----------
+        it, total_it : int
+            Running iteration and the total number of iterations.
+        group, n_groups : int
+            Groups aligned so far in this iteration and their total.
+        """
+        self.window.statusBar().showMessage(
+            f"Iteration {it}/{total_it} — group {group}/{n_groups}"
+        )
+
+    def on_iteration(self, it: int, total_it: int, locs: pd.DataFrame) -> None:
         """Show the intermediate result of one averaging iteration.
 
         Parameters
         ----------
         it, total_it : int
-            Iteration just finished and the total number of iterations.
+            Iterations finished and the total number of iterations.
         locs : pd.DataFrame
             The localizations as they stand after this iteration.
-        update_image : bool
-            Whether to redraw the rendered average.
-        group, n_groups : int
-            Group just finished and the total number of groups.
         """
         self.locs = locs.copy()
-        if update_image:
-            self.update_image()
-        self.window.statusBar().showMessage(
-            f"Iteration {it}/{total_it} — group {group}/{n_groups}"
-        )
+        self.update_image()
 
     def open(self, path: str) -> None:
         """Load a localization file and preset the pool process.

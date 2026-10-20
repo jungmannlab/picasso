@@ -243,7 +243,7 @@ class TestSaveLoadLocs:
         with h5py.File(path, "r") as f:
             assert isinstance(f["locs"], h5py.Group)
 
-        loaded = io._read_locs_dataset(str(path))
+        loaded = io._read_locs_dataset(str(path), lib.MockProgress())
 
         assert len(loaded) == len(locs)
         assert set(loaded.columns) == set(locs.columns)
@@ -2809,3 +2809,236 @@ class TestSpilledFrame:
         assert sorted(p.name for p in tmp_path.iterdir()) == sorted(
             [own.name, other.name]
         )
+
+
+# ---------------------------------------------------------------------------
+# Progress reporting (see picasso.lib.Progress)
+# ---------------------------------------------------------------------------
+
+
+class _PhaseRecorder(lib.MockProgress):
+    """Progress tracker recording the phases it is driven through."""
+
+    def __init__(self, cancel_at=None):
+        super().__init__()
+        self.phases = []  # dicts with "label", "maximum" and "values"
+        self.cancel_at = cancel_at
+
+    def zero_progress(self, description=None, *args, **kwargs):
+        super().zero_progress(description)
+        self.phases.append({"label": description, "maximum": 0, "values": []})
+
+    def setMaximum(self, maximum, *args, **kwargs):
+        super().setMaximum(maximum)
+        assert self.phases, "setMaximum before the first phase"
+        self.phases[-1]["maximum"] = maximum
+
+    def set_value(self, value, *args, **kwargs):
+        assert self.phases, "set_value before the first phase"
+        self.phases[-1]["values"].append(value)
+        if self.cancel_at is not None and value >= self.cancel_at:
+            raise lib.OperationCanceled
+
+    def labels(self):
+        return [phase["label"] for phase in self.phases]
+
+
+def _assert_phases_end_at_maximum(recorder, phases=None):
+    """Every phase (or those given) reports monotone values from 0 on
+    and ends at its maximum."""
+    for phase in recorder.phases if phases is None else phases:
+        values = phase["values"]
+        assert values, f"{phase['label']!r} reported nothing"
+        assert values[0] >= 0
+        assert values == sorted(values), phase
+        assert values[-1] == phase["maximum"], phase
+
+
+class TestProgress:
+    def _locs_file(self, tmp_path, locs, info):
+        path = str(tmp_path / "progress_locs.hdf5")
+        io.save_locs(path, locs.iloc[:10], info)
+        return path
+
+    def _tif(self, path, n_frames=5):
+        data = np.arange(n_frames * 8 * 8, dtype="<u2").reshape(n_frames, 8, 8)
+        _write_tif_stack(path, data)
+        return str(path)
+
+    def test_load_locs_reports_blocks(self, tmp_path, locs, info, monkeypatch):
+        path = self._locs_file(tmp_path, locs, info)
+        monkeypatch.setattr(io, "LOCS_BLOCK_SIZE", 3)
+        recorder = _PhaseRecorder()
+        loaded, _ = io.load_locs(path, progress=recorder)
+        assert len(loaded) == 10
+        assert recorder.labels() == ["Loading localizations"]
+        assert recorder.phases[0]["maximum"] == 10
+        assert recorder.phases[0]["values"] == [3, 6, 9, 10]
+
+    def test_load_locs_none_is_silent_and_console_works(
+        self, tmp_path, locs, info, capsys
+    ):
+        path = self._locs_file(tmp_path, locs, info)
+        io.load_locs(path)
+        io.load_locs(path, progress=None)
+        captured = capsys.readouterr()
+        assert captured.out == "" and captured.err == ""
+        loaded, _ = io.load_locs(path, progress="console")
+        assert len(loaded) == 10
+        assert "Loading localizations" in capsys.readouterr().err
+
+    def test_load_locs_cancel_propagates(self, tmp_path, locs, info):
+        path = self._locs_file(tmp_path, locs, info)
+        with pytest.raises(lib.OperationCanceled):
+            io.load_locs(path, progress=_PhaseRecorder(cancel_at=0))
+
+    def test_load_locs_rejects_callables(self, tmp_path, locs, info):
+        # the pre-1.0 progress(done, total) callables are not trackers
+        path = self._locs_file(tmp_path, locs, info)
+        with pytest.raises(TypeError, match="Progress interface"):
+            io.load_locs(path, progress=lambda done, total: None)
+
+    def test_pandas_fallback_ends_at_maximum(self, tmp_path, locs):
+        path = tmp_path / "pandas_locs.hdf5"
+        locs.iloc[:7].to_hdf(path, key="locs", mode="w", format="fixed")
+        recorder = _PhaseRecorder()
+        loaded = io._read_locs_dataset(str(path), recorder)
+        assert len(loaded) == 7
+        assert recorder.labels() == ["Loading localizations"]
+        _assert_phases_end_at_maximum(recorder)
+
+    def test_tif_phases(self, tmp_path):
+        path = self._tif(tmp_path / "movie.tif")
+        recorder = _PhaseRecorder()
+        movie, _ = io.load_movie(path, progress=recorder)
+        movie.close()
+        assert recorder.labels() == ["Indexing movie.tif", "Reading movie.tif"]
+        assert [p["maximum"] for p in recorder.phases] == [5, 5]
+        _assert_phases_end_at_maximum(recorder)
+
+    def test_tif_none_is_silent_and_console_works(self, tmp_path, capsys):
+        path = self._tif(tmp_path / "movie.tif")
+        for progress in (None, "console"):
+            movie, _ = io.load_movie(path, progress=progress)
+            movie.close()
+            err = capsys.readouterr().err
+            if progress is None:
+                assert err == ""
+            else:
+                assert "Reading movie.tif" in err
+
+    def test_load_movie_all_forwards_progress(self, tmp_path):
+        # the docstring used to say that progress is not used
+        path = self._tif(tmp_path / "movie.tif")
+        recorder = _PhaseRecorder()
+        movies, _ = io.load_movie_all(path, progress=recorder)
+        movies[0].close()
+        assert recorder.labels() == ["Indexing movie.tif", "Reading movie.tif"]
+        _assert_phases_end_at_maximum(recorder)
+
+    def test_imagej_stack_phases(self, tmp_path):
+        data = np.zeros((6, 8, 8), dtype="<u2")
+        path = tmp_path / "ij.tif"
+        _write_imagej_contiguous_stack(path, data)
+        recorder = _PhaseRecorder()
+        movie, _ = io.load_tif(str(path), progress=recorder)
+        movie.close()
+        assert recorder.labels() == ["Indexing ij.tif", "Reading ij.tif"]
+        assert recorder.phases[1]["maximum"] == 6
+        _assert_phases_end_at_maximum(recorder)
+
+    def test_stray_ifd_ends_the_phase_and_retry_starts_anew(self, tmp_path):
+        # a stray trailing IFD makes the lightweight parsing fail (the
+        # retry restarts the phases instead of going backwards) and stops
+        # the scan one page early (the phase still ends at its maximum)
+        path = str(tmp_path / "stray.tif")
+        with tifffile.TiffWriter(path, ome=False) as tw:
+            for _ in range(3):
+                tw.write(
+                    np.ones((8, 8), "<u2"),
+                    photometric="minisblack",
+                    contiguous=True,
+                )
+            tw.write(
+                np.ones((4, 4), "<u2"),
+                photometric="minisblack",
+                contiguous=False,
+            )
+        recorder = _PhaseRecorder()
+        movie, _ = io.load_tif(path, progress=recorder)
+        assert movie.n_frames == 3
+        movie.close()
+        labels = recorder.labels()
+        assert labels[-2:] == ["Indexing stray.tif", "Reading stray.tif"]
+        for phase in recorder.phases:
+            assert phase["values"] == sorted(phase["values"])
+        _assert_phases_end_at_maximum(recorder, recorder.phases[-2:])
+        assert recorder.phases[-1]["maximum"] == 4
+
+    def test_concatenated_phases_per_file(self, tmp_path):
+        paths = [
+            self._tif(tmp_path / f"run_{i}.tif", n_frames=n)
+            for i, n in enumerate((3, 4))
+        ]
+        recorder = _PhaseRecorder()
+        movie, _ = io.load_tif_concatenated(paths, progress=recorder)
+        assert movie.n_frames == 7
+        movie.close()
+        assert recorder.labels() == [
+            "Indexing run_0.tif (1/2)",
+            "Reading run_0.tif (1/2)",
+            "Indexing run_1.tif (2/2)",
+            "Reading run_1.tif (2/2)",
+        ]
+        assert [p["maximum"] for p in recorder.phases] == [3, 3, 4, 4]
+        _assert_phases_end_at_maximum(recorder)
+
+    def test_concatenated_none_and_console(self, tmp_path, capsys):
+        paths = [self._tif(tmp_path / f"run_{i}.tif") for i in range(2)]
+        movie = io.ConcatenatedTiffMovie(paths)
+        movie.close()
+        assert capsys.readouterr().err == ""
+        movie, _ = io.load_tif_concatenated(paths, progress="console")
+        movie.close()
+        assert "(2/2)" in capsys.readouterr().err
+
+    def test_cancel_closes_opened_files(self, tmp_path, monkeypatch):
+        paths = [self._tif(tmp_path / f"run_{i}.tif") for i in range(2)]
+        closed = []
+        close = io.TiffMap.close
+
+        def recording_close(self):
+            closed.append(os.path.basename(self.path))
+            close(self)
+
+        monkeypatch.setattr(io.TiffMap, "close", recording_close)
+
+        class CancelSecondFile(_PhaseRecorder):
+            def zero_progress(self, description=None, *args, **kwargs):
+                super().zero_progress(description)
+                if "(2/2)" in description:
+                    raise lib.OperationCanceled
+
+        with pytest.raises(lib.OperationCanceled):
+            io.load_tif_concatenated(paths, progress=CancelSecondFile())
+        assert closed == ["run_0.tif"]
+
+    def test_other_formats_accept_every_progress(self, tmp_path, capsys):
+        movie = np.zeros((2, 4, 4), dtype=np.uint16)
+        info = {
+            "Byte Order": "<",
+            "Data Type": "uint16",
+            "Frames": 2,
+            "Height": 4,
+            "Width": 4,
+        }
+        path = str(tmp_path / "movie.raw")
+        io.save_raw(path, movie, [info])
+        for progress in (None, "console", _PhaseRecorder()):
+            loaded, _ = io.load_movie(path, progress=progress)
+            assert loaded.shape == (2, 4, 4)
+            loaded, _ = io.load_movie_all(path, progress=progress)
+        captured = capsys.readouterr()
+        assert captured.out == "" and captured.err == ""
+        with pytest.raises(ValueError, match="Invalid progress"):
+            io.load_movie(path, progress="bogus")

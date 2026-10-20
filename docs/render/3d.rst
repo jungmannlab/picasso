@@ -316,5 +316,5 @@ within each of them, not how long they take.
           blur_method="gaussian",
           fps=30,
           grid=render.GridOverlay(spacing_nm=200, labels=True),  # optional
-          progress_callback="console",
+          progress="console",
       )

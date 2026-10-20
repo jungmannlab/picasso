@@ -10,6 +10,7 @@ import pytest
 from picasso import io, clusterer
 
 from tests.conftest import PIXELSIZE
+from tests.test_postprocess_progress import RecordingProgress, assert_phases
 
 # parameters for clustering (nm, like the localizations)
 DBSCAN_EPS = 5.0
@@ -609,24 +610,8 @@ def test_find_cluster_centers_real_data(db_locs):
 
 
 # ---------------------------------------------------------------------
-# Progress reporting (uniform duck-typed interface, see
-# lib.normalize_progress)
+# Progress reporting (see picasso.lib.Progress)
 # ---------------------------------------------------------------------
-
-
-class _RecordingProgress:
-    """Minimal duck-typed tracker implementing the ProgressDialog
-    interface."""
-
-    def __init__(self):
-        self.maximum_set = None
-        self.values = []
-
-    def set_value(self, value):
-        self.values.append(value)
-
-    def setMaximum(self, maximum):
-        self.maximum_set = maximum
 
 
 @pytest.mark.parametrize("progress", [None, "console"])
@@ -641,15 +626,92 @@ def test_cluster_progress_modes(synth_locs_2d, progress):
     assert len(np.unique(out["group"])) == len(BLOB_CENTERS_2D)
 
 
-def test_cluster_accepts_duck_typed_progress(synth_locs_2d):
-    tracker = _RecordingProgress()
+def test_cluster_reports_progress_to_tracker(synth_locs_2d):
+    tracker = RecordingProgress()
     clusterer.cluster(
         synth_locs_2d,
         radius_xy=GA_RADIUS,
         min_locs=GA_MIN_LOCS,
         frame_analysis=False,
         progress=tracker,
+    )
+    assert_phases(tracker, ["Clustering"])
+    assert tracker.phases[0].maximum == len(synth_locs_2d)
+
+
+def _clustered(synth_locs_2d):
+    return clusterer.cluster(
+        synth_locs_2d,
+        radius_xy=GA_RADIUS,
+        min_locs=GA_MIN_LOCS,
+        frame_analysis=False,
     )[0]
-    assert tracker.maximum_set is not None and tracker.maximum_set > 0
-    assert tracker.values, "progress was never reported"
-    assert max(tracker.values) <= tracker.maximum_set
+
+
+PROGRESS_CASES = [
+    (
+        "cluster",
+        lambda locs, info, p: clusterer.cluster(
+            locs,
+            radius_xy=GA_RADIUS,
+            min_locs=GA_MIN_LOCS,
+            frame_analysis=False,
+            progress=p,
+        ),
+        ["Clustering"],
+    ),
+    (
+        "cluster_3d",
+        lambda locs, info, p: clusterer.cluster(
+            locs.assign(z=0.0),
+            radius_xy=GA_RADIUS,
+            min_locs=GA_MIN_LOCS,
+            frame_analysis=False,
+            radius_z=2 * GA_RADIUS,
+            progress=p,
+        ),
+        ["Clustering"],
+    ),
+    (
+        "find_cluster_centers",
+        lambda locs, info, p: clusterer.find_cluster_centers(
+            _clustered(locs), progress=p
+        ),
+        ["Calculating cluster centers"],
+    ),
+    (
+        "cluster_areas",
+        lambda locs, info, p: clusterer.cluster_areas(
+            _clustered(locs).assign(lpx=5.0, lpy=5.0), info, progress=p
+        ),
+        ["Calculating cluster areas"],
+    ),
+]
+PROGRESS_IDS = [case[0] for case in PROGRESS_CASES]
+
+
+@pytest.mark.parametrize("name, run, labels", PROGRESS_CASES, ids=PROGRESS_IDS)
+def test_progress_none_reports_nothing(
+    capsys, synth_locs_2d, synth_info, name, run, labels
+):
+    """``cluster_areas`` used to print a tqdm bar without a tracker."""
+    run(synth_locs_2d, synth_info, None)
+    captured = capsys.readouterr()
+    assert captured.out == captured.err == ""
+
+
+@pytest.mark.parametrize("name, run, labels", PROGRESS_CASES, ids=PROGRESS_IDS)
+def test_progress_console(
+    capsys, synth_locs_2d, synth_info, name, run, labels
+):
+    run(synth_locs_2d, synth_info, "console")
+    err = capsys.readouterr().err
+    for label in labels:
+        assert label in err
+
+
+@pytest.mark.parametrize("name, run, labels", PROGRESS_CASES, ids=PROGRESS_IDS)
+def test_progress_tracker(synth_locs_2d, synth_info, name, run, labels):
+    tracker = RecordingProgress()
+    run(synth_locs_2d, synth_info, tracker)
+    assert_phases(tracker, labels)

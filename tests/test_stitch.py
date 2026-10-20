@@ -15,7 +15,7 @@ import pandas as pd
 import pytest
 
 from picasso import __main__ as cli
-from picasso import io, stitch
+from picasso import io, lib, stitch
 
 PIXELSIZE = 130.0  # nm
 FRAMES = 1000
@@ -475,3 +475,69 @@ def test_cli_saves_one_file_per_target(tmp_path):
         offsets[1] - offsets[0], origins[1, 0] - origins[0, 0], atol=TOL
     )
     assert stitched["x"].max() < info[0]["Width"] * PIXELSIZE
+
+
+class _PhaseRecorder(lib.MockProgress):
+    """Progress tracker recording the phases it is driven through."""
+
+    def __init__(self):
+        super().__init__()
+        self.phases = []  # dicts with "label", "maximum" and "values"
+
+    def zero_progress(self, description=None, *args, **kwargs):
+        super().zero_progress(description)
+        self.phases.append({"label": description, "maximum": 0, "values": []})
+
+    def setMaximum(self, maximum, *args, **kwargs):
+        super().setMaximum(maximum)
+        self.phases[-1]["maximum"] = maximum
+
+    def set_value(self, value, *args, **kwargs):
+        self.phases[-1]["values"].append(value)
+
+
+class TestProgress:
+    def test_phases(self):
+        rng = np.random.default_rng(0)
+        locs, infos, _, _ = _grid(rng, n_cols=2, n_rows=1)
+        recorder = _PhaseRecorder()
+        stitch.stitch(locs, infos, progress=recorder)
+        assert [p["label"] for p in recorder.phases] == [
+            "Finding the stage orientation",
+            "Matching overlaps",
+        ]
+        assert [p["maximum"] for p in recorder.phases] == [8, 1]
+        for phase in recorder.phases:
+            values = phase["values"]
+            assert values == sorted(values) and values[0] >= 0
+            assert values[-1] == phase["maximum"]
+
+    def test_none_is_silent_and_console_closes(self, capsys, monkeypatch):
+        rng = np.random.default_rng(0)
+        locs, infos, _, _ = _grid(rng, n_cols=2, n_rows=1)
+        stitch.stitch(locs, infos, orientation="-x, y")
+        captured = capsys.readouterr()
+        assert captured.out == "" and captured.err == ""
+        # regression: the console tracker was never closed
+        closed = []
+
+        class Counted(lib.TqdmProgress):
+            def close(self, *args, **kwargs):
+                closed.append(self.iterator is not None)
+                super().close(*args, **kwargs)
+
+        monkeypatch.setattr(lib, "TqdmProgress", Counted)
+        stitch.stitch(locs, infos, orientation="-x, y", progress="console")
+        assert "Matching overlaps" in capsys.readouterr().err
+        assert closed[-1] is True  # the last bar was ended
+
+    def test_no_pairs_ends_the_phase(self):
+        points = [np.zeros((5, 2)), np.zeros((5, 2))]
+        positions = np.array([[0.0, 0.0], [1e6, 1e6]])
+        sizes = np.full((2, 2), 1e4)
+        recorder = _PhaseRecorder()
+        pairs = stitch.match_pairs(points, positions, sizes, progress=recorder)
+        assert pairs == []
+        assert recorder.phases == [
+            {"label": "Matching overlaps", "maximum": 0, "values": [0]}
+        ]

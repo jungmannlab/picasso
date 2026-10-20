@@ -27,6 +27,27 @@ to send them to a file, configure logging:
    logging.basicConfig(level=logging.INFO)
    logging.getLogger("picasso").setLevel(logging.INFO)
 
+Functions that take a while report their progress through one ``progress``
+argument: ``"console"`` shows a progress bar for each step in the console,
+None (the default) reports nothing, and an object with the
+:class:`picasso.lib.Progress` interface (e.g., a subclass of
+:class:`picasso.lib.MockProgress`) receives the label and size of each step
+and the number of items done:
+
+.. code-block:: python
+
+   from picasso import lib, postprocess
+
+   picked = postprocess.picked_locs(
+       locs, info, picks, "Circle", pick_size=100, progress="console"
+   )
+
+   class PrintProgress(lib.MockProgress):
+       def set_value(self, value, *args, **kwargs):
+           print(f"{self.description_base}: {value} / {self.maximum()}")
+
+   groups = postprocess.groupprops(locs, progress=PrintProgress())
+
 .. note::
 
    These pages do not list every function in the package, only those that

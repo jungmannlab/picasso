@@ -67,7 +67,6 @@ from typing import Callable, Literal, Sequence
 
 import numpy as np
 from scipy.stats import chi2
-from tqdm import tqdm
 
 from picasso import lib
 
@@ -129,12 +128,8 @@ def _frame_stack(movie, start: int, stop: int) -> lib.FloatArray3D:
 def _streaming_moments(
     movie,
     *,
-    progress_callback: (
-        Callable[[int], None] | Literal["console"] | None
-    ) = None,
+    progress: lib.Progress,
     abort_callback: Callable[[], bool] | None = None,
-    progress_offset: int = 0,
-    progress_total: int | None = None,
 ) -> tuple[int, lib.FloatArray2D, lib.FloatArray2D] | None:
     """Per-pixel temporal mean and variance of ``movie``, in one pass.
 
@@ -145,15 +140,12 @@ def _streaming_moments(
     ----------
     movie : array-like or io.AbstractPicassoMovie
         Any Picasso movie. Indexed by frame.
-    progress_callback : callable, "console" or None, optional
-        Called with the cumulative number of frames processed. ``"console"``
-        draws a tqdm bar.
+    progress : lib.Progress
+        Normalized tracker whose phase (over the frames of ``movie``) the
+        caller started; advanced to the number of frames processed.
     abort_callback : callable or None, optional
         Polled once per chunk; returning True abandons the pass and returns
         None.
-    progress_offset, progress_total : int, optional
-        Bias and total for the progress report, so several calls can share one
-        bar when a whole calibration is being computed.
 
     Returns
     -------
@@ -176,40 +168,23 @@ def _streaming_moments(
     mean = np.zeros((height, width), dtype=np.float64)
     m2 = np.zeros((height, width), dtype=np.float64)
 
-    use_tqdm = progress_callback == "console"
-    pbar = (
-        tqdm(
-            total=progress_total if progress_total else n_frames,
-            initial=progress_offset,
-            desc="Characterizing",
-            unit="frame",
-        )
-        if use_tqdm
-        else None
-    )
-    try:
-        step = _chunk_length(height, width)
-        for start in range(0, n_frames, step):
-            if abort_callback is not None and abort_callback():
-                return None
-            stop = min(start + step, n_frames)
-            chunk = _frame_stack(movie, start, stop)
-            n_c = chunk.shape[0]
-            mean_c = chunk.mean(axis=0)
-            m2_c = ((chunk - mean_c) ** 2).sum(axis=0)
-            # Chan, Golub & LeVeque (1983), the pairwise-merge update.
-            total = count + n_c
-            delta = mean_c - mean
-            m2 += m2_c + delta * delta * (count * n_c / total)
-            mean += delta * (n_c / total)
-            count = total
-            if use_tqdm:
-                pbar.update(n_c)
-            elif callable(progress_callback):
-                progress_callback(progress_offset + count)
-    finally:
-        if use_tqdm:
-            pbar.close()
+    progress.set_value(0)
+    step = _chunk_length(height, width)
+    for start in range(0, n_frames, step):
+        if abort_callback is not None and abort_callback():
+            return None
+        stop = min(start + step, n_frames)
+        chunk = _frame_stack(movie, start, stop)
+        n_c = chunk.shape[0]
+        mean_c = chunk.mean(axis=0)
+        m2_c = ((chunk - mean_c) ** 2).sum(axis=0)
+        # Chan, Golub & LeVeque (1983), the pairwise-merge update.
+        total = count + n_c
+        delta = mean_c - mean
+        m2 += m2_c + delta * delta * (count * n_c / total)
+        mean += delta * (n_c / total)
+        count = total
+        progress.set_value(count)
 
     if count < 2:
         raise ValueError(
@@ -290,9 +265,7 @@ def calibrate_scmos(
     dark_movie,
     bright_movies: Sequence | None = None,
     *,
-    progress_callback: (
-        Callable[[int], None] | Literal["console"] | None
-    ) = None,
+    progress: lib.Progress | Literal["console"] | None = None,
     abort_callback: Callable[[], bool] | None = None,
     dark_path: str | None = None,
     bright_paths: Sequence[str] | None = None,
@@ -314,9 +287,12 @@ def calibrate_scmos(
         of 20,000 frames spanning roughly 20 to 200 photons per pixel. Omitting
         them omits the gain map, and the caller then keeps using the scalar
         ``Sensitivity``.
-    progress_callback : callable, "console" or None, optional
-        Called with the cumulative number of frames processed across every
-        movie. ``"console"`` draws a tqdm bar.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports one phase per movie over its
+        frames: "Characterizing dark movie", then "Characterizing bright
+        movie k/n" for each bright movie. Default is None.
     abort_callback : callable or None, optional
         Polled once per chunk; returning True abandons the calibration and
         returns None.
@@ -361,15 +337,40 @@ def calibrate_scmos(
             f"{len(bright_movies)} bright movies. Pass one level per movie, "
             "in the same order, or none at all."
         )
-    total_frames = int(len(dark_movie)) + sum(
-        int(len(m)) for m in bright_movies
-    )
+    with lib.tracked_progress(
+        progress, "Characterizing dark movie", unit="frame"
+    ) as progress:
+        return _calibrate_scmos(
+            dark_movie,
+            bright_movies,
+            progress,
+            abort_callback,
+            dark_path,
+            bright_paths,
+            bright_levels,
+            level_unit,
+        )
 
+
+def _calibrate_scmos(
+    dark_movie,
+    bright_movies: list,
+    progress: lib.Progress,
+    abort_callback: Callable[[], bool] | None,
+    dark_path: str | None,
+    bright_paths: Sequence[str] | None,
+    bright_levels: Sequence[float] | None,
+    level_unit: str,
+) -> dict | None:
+    """:func:`calibrate_scmos` with a normalized progress tracker."""
+    lib.start_phase(
+        progress,
+        "Characterizing dark movie",
+        int(len(dark_movie)),
+        unit="frame",
+    )
     moments = _streaming_moments(
-        dark_movie,
-        progress_callback=progress_callback,
-        abort_callback=abort_callback,
-        progress_total=total_frames,
+        dark_movie, progress=progress, abort_callback=abort_callback
     )
     if moments is None:
         return None
@@ -389,7 +390,7 @@ def calibrate_scmos(
             "uncertainty per pixel. Huang et al. (2013) used 60,000 frames, "
             f"for 0.6%; {RECOMMENDED_DARK_FRAMES} frames give about 1.4%.",
             RuntimeWarning,
-            stacklevel=2,
+            stacklevel=3,  # the caller of calibrate_scmos
         )
 
     height, width = offset.shape
@@ -412,14 +413,16 @@ def calibrate_scmos(
     if bright_movies:
         means, variances, n_bright = [], [], 0
         level_signal, level_variance, level_frames = [], [], []
-        done = n_dark
+        n_movies = len(bright_movies)
         for index, movie in enumerate(bright_movies):
+            lib.start_phase(
+                progress,
+                f"Characterizing bright movie {index + 1}/{n_movies}",
+                int(len(movie)),
+                unit="frame",
+            )
             moments = _streaming_moments(
-                movie,
-                progress_callback=progress_callback,
-                abort_callback=abort_callback,
-                progress_offset=done,
-                progress_total=total_frames,
+                movie, progress=progress, abort_callback=abort_callback
             )
             if moments is None:
                 return None
@@ -441,7 +444,6 @@ def calibrate_scmos(
             level_variance.append(float(np.median(var_k - variance)))
             level_frames.append(int(n_k))
             n_bright += n_k
-            done += n_k
         if len(means) < 2:
             warnings.warn(
                 "The gain map was estimated from a single illumination level. "
@@ -449,7 +451,7 @@ def calibrate_scmos(
                 "200 photons per pixel; one level cannot separate a genuine "
                 "slope from a bad variance estimate.",
                 RuntimeWarning,
-                stacklevel=2,
+                stacklevel=3,  # the caller of calibrate_scmos
             )
         gain, n_fallback = _gain_map(offset, variance, means, variances)
         calibration["gain"] = np.ascontiguousarray(gain, dtype=np.float32)
@@ -477,9 +479,7 @@ def validate_calibration(
     calibration: dict,
     test_movie,
     *,
-    progress_callback: (
-        Callable[[int], None] | Literal["console"] | None
-    ) = None,
+    progress: lib.Progress | Literal["console"] | None = None,
     abort_callback: Callable[[], bool] | None = None,
 ) -> dict | None:
     """Check a calibration against a short fresh dark movie (Eq. 5.1).
@@ -502,9 +502,11 @@ def validate_calibration(
         ``picasso.io.load_camera_calibration``.
     test_movie : array-like or io.AbstractPicassoMovie
         A short, fresh dark movie recorded exactly as the calibration's was.
-    progress_callback : callable, "console" or None, optional
-        Called with the cumulative number of frames processed. ``"console"``
-        draws a tqdm bar. As in :func:`calibrate_scmos`.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports one phase, "Validating" over the
+        frames of ``test_movie``. Default is None.
     abort_callback : callable or None, optional
         Polled once per chunk; returning True abandons the check and returns
         None.
@@ -541,26 +543,18 @@ def validate_calibration(
     safe_variance = np.where(usable, variance, 1.0)
     height, width = offset.shape
     step = _chunk_length(height, width)
-    use_tqdm = progress_callback == "console"
-    pbar = (
-        tqdm(total=n_frames, desc="Validating", unit="frame")
-        if use_tqdm
-        else None
-    )
-    try:
+    with lib.tracked_progress(
+        progress, "Validating", unit="frame"
+    ) as progress:
+        lib.start_phase(progress, "Validating", n_frames, unit="frame")
+        progress.set_value(0)
         for start in range(0, n_frames, step):
             if abort_callback is not None and abort_callback():
                 return None
             stop = min(start + step, n_frames)
             chunk = _frame_stack(test_movie, start, stop)
             statistic += ((chunk - offset) ** 2 / safe_variance).sum(axis=0)
-            if use_tqdm:
-                pbar.update(stop - start)
-            elif callable(progress_callback):
-                progress_callback(stop)
-    finally:
-        if use_tqdm:
-            pbar.close()
+            progress.set_value(stop)
 
     p_values = chi2.sf(statistic[usable], n_frames)
     mean_p = float(p_values.mean()) if p_values.size else float("nan")

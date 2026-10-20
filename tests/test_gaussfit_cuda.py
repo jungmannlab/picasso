@@ -26,6 +26,7 @@ from picasso.fitting import (
     seeds,
     splinefit,
 )
+from tests._progress_tracking import RecordingProgress, assert_phases_complete
 
 pytestmark = pytest.mark.skipif(
     not lmfit_cuda.CUDA_AVAILABLE, reason="no CUDA device"
@@ -349,14 +350,37 @@ class TestApi:
                 99, np.zeros((1, BOX, BOX), dtype=np.float32), np.zeros((1, 6))
             )
 
-    def test_progress_callback(self):
+    def test_progress_tracker(self):
         model = gaussfit_cuda.ELLIPTIC
         spots = TestNoisyBatch._batch(model, n=32)
-        seen = []
+        tracker = RecordingProgress()
         gaussfit_cuda.fit_spots(
-            model, spots, _seed(model, spots), progress_callback=seen.append
+            model, spots, _seed(model, spots), progress=tracker
         )
-        assert seen == sorted(seen) and seen[-1] == len(spots)
+        assert_phases_complete(tracker, ["Fitting spots"])
+        assert tracker.phases[0]["maximum"] == len(spots)
+
+    def test_progress_none_is_silent_and_console_works(self, capsys):
+        model = gaussfit_cuda.ELLIPTIC
+        spots = TestNoisyBatch._batch(model, n=8)
+        gaussfit_cuda.fit_spots(model, spots, _seed(model, spots))
+        captured = capsys.readouterr()
+        assert captured.out == "" and captured.err == ""
+        gaussfit_cuda.fit_spots(
+            model, spots, _seed(model, spots), progress="console"
+        )
+        assert "Fitting spots" in capsys.readouterr().err
+
+    def test_progress_tracker_on_empty_input(self):
+        tracker = RecordingProgress()
+        gaussfit_cuda.fit_spots(
+            gaussfit_cuda.ELLIPTIC,
+            np.zeros((0, BOX, BOX), dtype=np.float32),
+            np.zeros((0, 6)),
+            progress=tracker,
+        )
+        assert_phases_complete(tracker, ["Fitting spots"])
+        assert tracker.phases[0]["maximum"] == 0
 
     def test_zero_width_is_reported_not_crashed(self):
         """A zero width divides by zero in every derivative."""
@@ -459,6 +483,20 @@ class TestMultichannelCpuGpuEquivalence:
         np.testing.assert_allclose(gpu[1], cpu[1], rtol=1e-8, atol=1e-8)
         np.testing.assert_array_equal(gpu[2], cpu[2])
         np.testing.assert_array_equal(gpu[3], cpu[3])
+
+    def test_multichannel_progress_tracker(self):
+        spots, jac, res = _multi_batch(20, [500.0, 220.0], [12.0, 6.0])
+        tracker = RecordingProgress()
+        gaussfit_cuda.fit_spots_multichannel(
+            gaussfit_cuda.MULTI_KIND_SHARED,
+            spots,
+            jac,
+            res,
+            _multi_seed(spots, True),
+            progress=tracker,
+        )
+        assert_phases_complete(tracker, ["Fitting spots"])
+        assert tracker.phases[0]["maximum"] == len(spots)
 
     def test_matches_the_cpu_backend_with_a_noise_model(self):
         spots, jac, res = _multi_batch(40, [500.0, 220.0], [12.0, 6.0])

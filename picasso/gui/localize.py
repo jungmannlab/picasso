@@ -534,6 +534,38 @@ _CONVERGENCE_CODES = frozenset(_CONVERGENCE_DEFAULTS)
 # advance smoothly within a file from the loader's per-page reports.
 PROGRESS_RESOLUTION = 1000
 
+# position of a file within a multi-file movie, appended to the loader's
+# phase labels by ``picasso.io``: "(2/3)" or "(2/3, part 1/2)"
+_LOAD_COUNTER = re.compile(r"\((\d+)/(\d+)(?:, part (\d+)/(\d+))?\)$")
+
+
+def _load_slot(label: str) -> tuple[float, float]:
+    """Start and width of a loader phase's share of one file's progress,
+    from the position of the file in a multi-file movie that ``picasso.io``
+    appends to the phase label (see ``_LOAD_COUNTER``); the whole share,
+    ``(0, 1)``, for a label without one.
+
+    Parameters
+    ----------
+    label : str
+        Label of the phase, e.g. ``"Reading a.tif (2/3, part 1/2)"``.
+
+    Returns
+    -------
+    start, width : float
+        Fractions of the file's share of the bar.
+    """
+    match = _LOAD_COUNTER.search(label)
+    if match is None:
+        return 0.0, 1.0
+    j, n, k, m = match.groups()
+    width = 1.0 / int(n)
+    start = (int(j) - 1) * width
+    if k is not None:
+        width /= int(m)
+        start += (int(k) - 1) * width
+    return start, width
+
 
 @dataclass
 class Channel:
@@ -625,9 +657,152 @@ def _sum_registration_phrase(source: str) -> str:
     return f"registered from {source}"
 
 
-class _LoadCanceledError(Exception):
-    """Raised inside the loader's progress callback to abort a canceled
-    load mid-file (the io calls are otherwise uninterruptible)."""
+class _SignalProgress(lib.MockProgress):
+    """Progress tracker (see ``lib.Progress``) that forwards the progress
+    of a computation to callables, typically a worker's Qt signals.
+
+    The core functions call the tracker on the thread that called them,
+    i.e. on the worker thread, so the callables must only emit signals
+    (queued to the GUI thread), never touch widgets.
+
+    Parameters
+    ----------
+    on_value : callable, optional
+        Called with ``(value, maximum)``: the items finished in the
+        current phase and its maximum (0 for a busy phase of unknown
+        length). Throttled to one call every ``interval`` seconds, except
+        for the first value of a phase and the one that completes it.
+    on_phase : callable, optional
+        Called with ``(label, maximum)`` when a phase starts.
+    canceled : callable, optional
+        Returns True once the user canceled; the next ``set_value`` or
+        ``zero_progress`` then raises ``lib.OperationCanceled``.
+    interval : float, optional
+        Minimum time between two ``on_value`` calls, in seconds. Default
+        0.05.
+    """
+
+    def __init__(
+        self,
+        on_value: Callable[[int, int], None] | None = None,
+        on_phase: Callable[[str, int], None] | None = None,
+        canceled: Callable[[], bool] | None = None,
+        interval: float = 0.05,
+    ) -> None:
+        super().__init__()
+        self._on_value = on_value
+        self._on_phase = on_phase
+        self._canceled = canceled
+        self._interval = interval
+        self._phase_pending = False
+        self._last_emit = None  # None: no value reported in this phase
+
+    def _check_canceled(self) -> None:
+        if self._canceled is not None and self._canceled():
+            raise lib.OperationCanceled
+
+    def _start_pending_phase(self) -> None:
+        self._phase_pending = False
+        self._last_emit = None
+        if self._on_phase is not None:
+            self._on_phase(self.description_base, self._maximum)
+
+    def zero_progress(self, description=None, *args, **kwargs) -> None:
+        """Start a new phase, announced once its maximum is set.
+
+        Parameters
+        ----------
+        description : str, optional
+            Label of the new phase. None keeps the current one.
+        *args, **kwargs
+            Accepted and ignored (e.g. the console bar's ``unit``).
+
+        Raises
+        ------
+        OperationCanceled
+            If the user canceled.
+        """
+        self._check_canceled()
+        super().zero_progress(description)
+        # ``lib.start_phase`` sets the maximum right after this
+        self._phase_pending = True
+
+    def setMaximum(self, maximum, *args, **kwargs) -> None:
+        """Set the maximum of the current phase; announces a phase just
+        started with :meth:`zero_progress`.
+
+        Parameters
+        ----------
+        maximum : int
+            Number of items of the phase; 0 means unknown.
+        *args, **kwargs
+            Accepted and ignored.
+        """
+        super().setMaximum(int(maximum))
+        if self._phase_pending:
+            self._start_pending_phase()
+
+    def set_value(self, value, *args, **kwargs) -> None:
+        """Forward the items finished in the current phase.
+
+        Parameters
+        ----------
+        value : int
+            Items finished so far in the current phase.
+        *args, **kwargs
+            Accepted and ignored.
+
+        Raises
+        ------
+        OperationCanceled
+            If the user canceled.
+        """
+        self._check_canceled()
+        if self._phase_pending:
+            self._start_pending_phase()
+        if self._on_value is None:
+            return
+        value = int(value)
+        now = time.monotonic()
+        if (
+            self._last_emit is None
+            or now - self._last_emit >= self._interval
+            or (self._maximum > 0 and value >= self._maximum)
+        ):
+            self._last_emit = now
+            self._on_value(value, self._maximum)
+
+
+def _status_progress(
+    emit: Callable[[str], None], prefix: str = ""
+) -> _SignalProgress:
+    """A tracker that reports each phase of a computation, and the progress
+    in it, as one status message, e.g. "Detecting spots 1 / 2 ...".
+
+    Parameters
+    ----------
+    emit : callable
+        Called with each message, typically a worker's ``statusChanged``
+        signal (the tracker is driven from the worker thread).
+    prefix : str, optional
+        Put before the phase label, e.g. "Checking quality (2/4): ".
+
+    Returns
+    -------
+    progress : _SignalProgress
+    """
+    tracker = None
+
+    def show(value: int, maximum: int) -> None:
+        message = prefix + tracker.description_base
+        if maximum > 0:
+            message += f" {value:,} / {maximum:,}"
+        emit(message + " ...")
+
+    tracker = _SignalProgress(
+        on_value=show, on_phase=lambda label, maximum: show(0, maximum)
+    )
+    return tracker
 
 
 class MovieLoadWorker(QtCore.QObject):
@@ -646,7 +821,10 @@ class MovieLoadWorker(QtCore.QObject):
     """
 
     progress = QtCore.pyqtSignal(int, str)  # index, filename
-    # sub-file progress within the current file: (done, total) pages
+    # a loader phase started within the current job: (label, maximum),
+    # e.g. "Indexing <file>" (maximum 0) or "Reading <file>" (pages)
+    phase = QtCore.pyqtSignal(str, int)
+    # progress within the current phase: (done, maximum) pages
     subprogress = QtCore.pyqtSignal(int, int)
     # callback, (args, kwargs), holder dict for the return value
     prompt_requested = QtCore.pyqtSignal(object, object, object)
@@ -692,21 +870,22 @@ class MovieLoadWorker(QtCore.QObject):
 
         return wrapper
 
-    def _make_report(self):
-        """Build the mid-file progress/cancellation callback for one job.
+    def _make_report(self) -> _SignalProgress:
+        """Build the progress tracker of one job.
 
-        Queued to the GUI thread as io scans a file's IFDs, so the bar
-        advances smoothly within a file. It is also the only code of ours
-        that runs *during* the otherwise-blocking io call, so it doubles
-        as the mid-file cancellation point.
+        Forwards the loader's phases and per-page progress as the
+        ``phase`` and ``subprogress`` signals (queued to the GUI thread),
+        so the bar advances smoothly within a file. It is also the only
+        code of ours that runs *during* the otherwise-blocking io call,
+        so it doubles as the mid-file cancellation point: once canceled,
+        it raises ``lib.OperationCanceled`` (not a ``RuntimeError``,
+        which io catches around page scans to retry a stray keyframe).
         """
-
-        def report(done: int, total: int) -> None:
-            if self._canceled:
-                raise _LoadCanceledError
-            self.subprogress.emit(done, total)
-
-        return report
+        return _SignalProgress(
+            on_value=self.subprogress.emit,
+            on_phase=self.phase.emit,
+            canceled=lambda: self._canceled,
+        )
 
     def _load_job(self, path: str, job: list[str], prompt, report):
         """Load one job with the loader matching the worker's mode.
@@ -6658,6 +6837,11 @@ class Window(QtWidgets.QMainWindow):
         self._load_worker = None
         self._load_progress = None
         self._load_filename = ""
+        self._load_index = 0
+        self._load_slot = (0.0, 1.0)
+        self._load_phase_busy = True
+        # label of the running fit's current phase (see ``on_fit_phase``)
+        self._fit_phase = ""
         # Canceled loads, winding down on their own (see
         # ``_on_load_canceled``); kept referenced until their thread ends.
         self._detached_loads = []
@@ -7357,15 +7541,14 @@ class Window(QtWidgets.QMainWindow):
         Returns
         -------
         tuple
-            ``(dark_movie, light_movies, total_frames)``.
+            ``(dark_movie, light_movies)``.
         """
         dark_movie, _ = io.load_movie(dark_path)
         light_movies = []
         for path in light_paths:
             movie, _ = io.load_movie(path)
             light_movies.append(movie)
-        total = len(dark_movie) + sum(len(m) for m in light_movies)
-        return dark_movie, light_movies, total
+        return dark_movie, light_movies
 
     @staticmethod
     def _camera_calibration_summary_lines(
@@ -7429,15 +7612,17 @@ class Window(QtWidgets.QMainWindow):
             return
 
         try:
-            dark_movie, light_movies, total = (
-                self._load_camera_calibration_movies(dark_path, light_paths)
+            dark_movie, light_movies = self._load_camera_calibration_movies(
+                dark_path, light_paths
             )
         except Exception as error:
             QtWidgets.QMessageBox.critical(
                 self, "Camera calibration", str(error)
             )
             return
-        progress = lib.ProgressDialog("Characterizing camera", 0, total, self)
+        # calibrate_scmos reports one phase per movie, each with its own
+        # maximum
+        progress = lib.ProgressDialog("Characterizing camera", 0, 0, self)
         progress.init()
         try:
             with warnings.catch_warnings(record=True) as caught:
@@ -7445,7 +7630,7 @@ class Window(QtWidgets.QMainWindow):
                 calibration = scmos.calibrate_scmos(
                     dark_movie,
                     light_movies or None,
-                    progress_callback=progress.set_value,
+                    progress=progress,
                     dark_path=dark_path,
                     bright_paths=light_paths,
                     bright_levels=light_levels,
@@ -7514,13 +7699,11 @@ class Window(QtWidgets.QMainWindow):
                 self, "Camera calibration", str(error)
             )
             return
-        progress = lib.ProgressDialog(
-            "Checking calibration", 0, len(movie), self
-        )
+        progress = lib.ProgressDialog("Checking calibration", 0, 0, self)
         progress.init()
         try:
             report = scmos.validate_calibration(
-                calibration, movie, progress_callback=progress.set_value
+                calibration, movie, progress=progress
             )
         except Exception as error:
             progress.close()
@@ -8189,9 +8372,11 @@ class Window(QtWidgets.QMainWindow):
         # instead of only ticking once per file.
         self._load_index = 0
         # Concatenation reads every file into one movie, so the whole
-        # load is a single step whose sub-progress already spans all
-        # files (see ``io._scaled_progress``).
+        # load is a single step, through which the loader reports one
+        # "Reading" phase per file (see ``_on_load_phase``).
         n_steps = 1 if concat else len(paths)
+        self._load_slot = (0.0, 1.0)
+        self._load_phase_busy = True
         progress = QtWidgets.QProgressDialog(
             "Loading movie...",
             "Cancel",
@@ -8215,6 +8400,7 @@ class Window(QtWidgets.QMainWindow):
 
         thread.started.connect(worker.run)
         worker.progress.connect(self._on_load_progress)
+        worker.phase.connect(self._on_load_phase)
         worker.subprogress.connect(self._on_load_subprogress)
         worker.prompt_requested.connect(self._on_load_prompt_requested)
         worker.finished.connect(self._on_load_finished)
@@ -8231,12 +8417,14 @@ class Window(QtWidgets.QMainWindow):
     def _on_load_progress(self, index: int, filename: str) -> None:
         """Update the progress dialog as each file starts loading.
 
-        The bar cannot move yet: before per-page reporting begins, the
-        loader indexes the file's frames, and their number - the total
-        the bar needs - is only known when that is done. Say so, so the
-        user does not think the load has stalled."""
+        The bar cannot move yet: before reading, the loader indexes the
+        file's frames, and their number - the total the bar needs - is
+        only known when that is done. Say so, so the user does not think
+        the load has stalled."""
         self._load_index = index
         self._load_filename = filename
+        self._load_slot = (0.0, 1.0)
+        self._load_phase_busy = True
         if self._load_progress is not None:
             self._load_progress.setLabelText(
                 f"Opening {filename}...\n"
@@ -8244,24 +8432,44 @@ class Window(QtWidgets.QMainWindow):
             )
             self._load_progress.setValue(index * PROGRESS_RESOLUTION)
 
+    def _on_load_phase(self, label: str, maximum: int) -> None:
+        """Show the loader's new phase (see ``MovieLoadWorker.phase``).
+
+        A TIFF file is opened in two phases: "Indexing <file>", with an
+        unknown maximum (0) while its frames are counted, then "Reading
+        <file>" over its pages. A movie of several files (a concatenation
+        or a multi-file OME set) reports such a pair per file, labeled
+        with the file's position, "(j/n)" or "(j/n, part k/m)", which
+        places its "Reading" phase within the bar (see ``_load_slot``);
+        a phase run again (e.g. on a retry) thus covers the same share."""
+        self._load_phase_busy = maximum == 0
+        if not self._load_phase_busy:
+            self._load_slot = _load_slot(label)
+        if self._load_progress is not None:
+            self._load_progress.setLabelText(
+                f"Opening {self._load_filename}...\n{label}"
+            )
+
     def _on_load_subprogress(self, done: int, total: int) -> None:
         """Advance the bar within the current file from the worker's
         per-page reports (see ``MovieLoadWorker.subprogress``).
 
-        A total of 0 means the frames are still being counted (see
-        ``io._index_pages``), so there is nothing to advance towards -
+        While frames are being indexed (a phase of maximum 0, see
+        ``io._index_pages``), there is nothing to advance towards -
         report the running count in the label instead."""
         if self._load_progress is None:
             return
-        if total > 0:
-            fraction = min(done / total, 1.0)
-            value = int((self._load_index + fraction) * PROGRESS_RESOLUTION)
-            self._load_progress.setValue(value)
-        else:
+        if self._load_phase_busy:
             self._load_progress.setLabelText(
                 f"Opening {self._load_filename}...\n"
-                f"Indexing frames — {done} counted so far."
+                f"Indexing frames — {done:,} counted so far."
             )
+        elif total > 0:
+            fraction = min(done / total, 1.0)
+            start, width = self._load_slot
+            within = start + fraction * width
+            value = int((self._load_index + within) * PROGRESS_RESOLUTION)
+            self._load_progress.setValue(value)
 
     def _on_load_prompt_requested(
         self, callback, args_kwargs, holder: dict
@@ -11233,16 +11441,16 @@ class Window(QtWidgets.QMainWindow):
 
     def on_identify_progress(
         self,
-        frame_number: int,
+        n_done: int,
+        n_frames: int,
         parameters: dict,
     ) -> None:
         """Update the status bar with the current identification
-        progress."""
-        n_frames = self.info[0]["Frames"]
+        progress: ``n_done`` of ``n_frames`` frames identified."""
         box = parameters["Box Size"]
         threshold = _format_threshold(parameters)
         message = (
-            f"Identifying in frame {frame_number:,} / {n_frames:,}"
+            f"Identifying spots: frame {n_done:,} / {n_frames:,}"
             f" (Box Size: {box}; {threshold}) ..."
         )
         self.status_bar.showMessage(message)
@@ -12197,8 +12405,8 @@ class Window(QtWidgets.QMainWindow):
         """Wire a ``FitWorker``'s progress/abort signals up and start it.
         Its ``finished`` signal is connected by the caller, which is what
         decides whether the result is one fit or one step of a batch."""
+        worker.phaseStarted.connect(self.on_fit_phase)
         worker.progressMade.connect(self.on_fit_progress)
-        worker.cutProgressMade.connect(self.on_cut_progress)
         worker.aborted.connect(self.on_worker_aborted)
         self._active_worker = worker
         self.abort_action.setEnabled(True)
@@ -12582,6 +12790,7 @@ class Window(QtWidgets.QMainWindow):
         )
         self.fit_worker.linkMade.connect(self.on_link_progress)
         self.fit_worker.linkFinished.connect(self.on_link_finished)
+        self.fit_worker.phaseStarted.connect(self.on_fit_phase)
         self.fit_worker.progressMade.connect(self.on_fit_progress)
         self.fit_worker.finished.connect(self.on_fit_finished)
         self.fit_worker.aborted.connect(self.on_worker_aborted)
@@ -12678,6 +12887,7 @@ class Window(QtWidgets.QMainWindow):
         )
         self.fit_worker.linkMade.connect(self.on_link_progress)
         self.fit_worker.linkFinished.connect(self.on_link_finished)
+        self.fit_worker.phaseStarted.connect(self.on_fit_phase)
         self.fit_worker.progressMade.connect(self.on_fit_progress)
         self.fit_worker.finished.connect(self.on_fit_finished)
         self.fit_worker.aborted.connect(self.on_worker_aborted)
@@ -12786,6 +12996,7 @@ class Window(QtWidgets.QMainWindow):
         )
         self.fit_worker.linkMade.connect(self.on_link_progress)
         self.fit_worker.linkFinished.connect(self.on_link_finished)
+        self.fit_worker.phaseStarted.connect(self.on_fit_phase)
         self.fit_worker.progressMade.connect(self.on_fit_progress)
         self.fit_worker.finished.connect(self.on_fit_finished)
         self.fit_worker.aborted.connect(self.on_worker_aborted)
@@ -12871,6 +13082,7 @@ class Window(QtWidgets.QMainWindow):
         )
         self.fit_worker.linkMade.connect(self.on_link_progress)
         self.fit_worker.linkFinished.connect(self.on_link_finished)
+        self.fit_worker.phaseStarted.connect(self.on_fit_phase)
         self.fit_worker.progressMade.connect(self.on_fit_progress)
         self.fit_worker.finished.connect(self.on_fit_finished)
         self.fit_worker.aborted.connect(self.on_worker_aborted)
@@ -13215,11 +13427,6 @@ class Window(QtWidgets.QMainWindow):
             )
         return extra
 
-    def on_cut_progress(self, curr: int, total: int) -> None:
-        """Update the status bar with the spot cutting progress."""
-        message = f"Extracting spot {curr:,} / {total:,} ..."
-        self.status_bar.showMessage(message)
-
     def _link_target_name(self) -> str:
         """'regions' for a split-FOV fit (the channels are regions of the one
         loaded movie), 'channels' otherwise."""
@@ -13241,31 +13448,44 @@ class Window(QtWidgets.QMainWindow):
             f"{self._link_target_name()}; fitting those ..."
         )
 
+    def on_fit_phase(self, label: str, maximum: int) -> None:
+        """Show a new phase of the fit in the status bar.
+
+        Parameters
+        ----------
+        label : str
+            The phase, as the fit labels it, e.g. "Cutting spots",
+            "Fitting spots" or "Computing spline CRLB".
+        maximum : int
+            Number of items of the phase; 0 means unknown.
+        """
+        self._fit_phase = label
+        self.on_fit_progress(0, maximum)
+
     def on_fit_progress(self, curr: int, total: int) -> None:
-        """Update the status bar with the fitting progress."""
+        """Update the status bar with the progress of the fit's current
+        phase (see :meth:`on_fit_phase`).
+
+        Parameters
+        ----------
+        curr : int
+            Items finished in the current phase.
+        total : int
+            Number of items of the phase; 0 means unknown, for which only
+            the phase is shown.
+        """
+        message = self._fit_phase or "Fitting spots"
         worker = getattr(self, "fit_worker", None)
         if isinstance(worker, _MULTICHANNEL_FIT_WORKERS):
-            # extraction, GPU fit and per-spot CRLB share this callback
             model = (
                 "spline"
                 if isinstance(worker, MultichannelSplineFitWorker)
                 else "Gaussian"
             )
-            message = f"Fitting multichannel {model}: {curr:,} / {total:,} ..."
-            self.status_bar.showMessage(message)
-        elif getattr(worker, "method", "").endswith("-gpu") and getattr(
-            worker, "method", ""
-        ).startswith("spline"):
-            # The GPU spline fit is one launch per chunk, so this callback
-            # only ever reports the per-spot CRLB pass that follows it. The
-            # CPU spline reports the fit itself and falls through to the
-            # generic per-spot message below.
-            self.status_bar.showMessage("Calculating localization precision")
-        elif self.parameters_dialog.gpu_checkbox.isChecked():
-            self.status_bar.showMessage("Fitting spots on the GPU...")
-        else:
-            message = f"Fitting spot {curr:,} / {total:,} ..."
-            self.status_bar.showMessage(message)
+            message = f"Multichannel {model} fit - {message}"
+        if total > 0:
+            message += f" {curr:,} / {total:,}"
+        self.status_bar.showMessage(message + " ...")
 
     def on_fit_finished(
         self,
@@ -13891,7 +14111,8 @@ class IdentificationWorker(QtCore.QThread):
     Loads the user parameters and updates the status bar about the
     progress."""
 
-    progressMade = QtCore.pyqtSignal(int, dict)
+    # frames identified so far, their total, the parameters
+    progressMade = QtCore.pyqtSignal(int, int, dict)
     finished = QtCore.pyqtSignal(
         dict, object, float, pd.DataFrame, bool, bool, bool
     )
@@ -13934,8 +14155,15 @@ class IdentificationWorker(QtCore.QThread):
         self.calibrate_z = calibrate_z
         self.calibrate_spline = calibrate_spline
 
-    def on_progress(self, frame_number: int) -> None:
-        self.progressMade.emit(frame_number, self.parameters)
+    def on_progress(self, n_done: int, n_frames: int) -> None:
+        """Report the identification progress to the window.
+
+        Parameters
+        ----------
+        n_done, n_frames : int
+            Frames identified so far, out of ``n_frames``.
+        """
+        self.progressMade.emit(n_done, n_frames, self.parameters)
 
     def run(self) -> None:
         t0 = time.time()
@@ -13949,7 +14177,7 @@ class IdentificationWorker(QtCore.QThread):
             roi=self.rois,
             frame_bounds=self.frame_range,
             threaded=True,
-            progress_callback=self.on_progress,
+            progress=_SignalProgress(on_value=self.on_progress),
             abort_callback=self.isInterruptionRequested,
         )
         if result is None:  # handle aborted process
@@ -13972,8 +14200,11 @@ class FitWorker(QtCore.QThread):
     """Fit single molecules to the identified spots using
     multiprocessing and update the status bar accordingly."""
 
+    # a phase of the fit started: label (e.g. "Cutting spots", "Fitting
+    # spots", "Computing spline CRLB") and maximum (0: unknown)
+    phaseStarted = QtCore.pyqtSignal(str, int)
+    # items finished in the current phase, its maximum
     progressMade = QtCore.pyqtSignal(int, int)
-    cutProgressMade = QtCore.pyqtSignal(int, int)
     finished = QtCore.pyqtSignal(pd.DataFrame, float, bool, bool)
     aborted = QtCore.pyqtSignal()
 
@@ -14027,20 +14258,29 @@ class FitWorker(QtCore.QThread):
         self.applied_lateral_transforms = []
         self.camera_calibration = camera_calibration
         self.N = len(identifications)
-        self._last_cut_emit = 0
         self.method = _effective_fit_code(method, use_gpu)
 
-    def on_progress(self, n_done: int) -> None:
-        self.progressMade.emit(n_done, self.N)
+    def on_phase(self, label: str, maximum: int) -> None:
+        """Report the start of a fit phase to the window.
 
-    def on_cut_progress(self, n_done: int) -> None:
-        # The underlying cut loop may call back very frequently (e.g. once
-        # per frame), so throttle GUI updates to ~1% increments to avoid
-        # flooding the main thread's event queue. Always emit the last one.
-        step = max(1, self.N // 1000)
-        if n_done - self._last_cut_emit >= step or n_done >= self.N:
-            self._last_cut_emit = n_done
-            self.cutProgressMade.emit(n_done, self.N)
+        Parameters
+        ----------
+        label : str
+            Label of the phase, e.g. "Fitting spots".
+        maximum : int
+            Number of items of the phase; 0 means unknown.
+        """
+        self.phaseStarted.emit(label, maximum)
+
+    def on_progress(self, n_done: int, maximum: int) -> None:
+        """Report the fit progress to the window.
+
+        Parameters
+        ----------
+        n_done, maximum : int
+            Items finished in the current phase, out of ``maximum``.
+        """
+        self.progressMade.emit(n_done, maximum)
 
     def run(self) -> None:
         t0 = time.time()
@@ -14058,9 +14298,10 @@ class FitWorker(QtCore.QThread):
                 spline_calibration=self.spline_calibration,
                 camera_calibration=self.camera_calibration,
                 multiprocess=True,
-                progress_callback=self.on_progress,
+                progress=_SignalProgress(
+                    on_value=self.on_progress, on_phase=self.on_phase
+                ),
                 abort_callback=self.isInterruptionRequested,
-                cut_progress_callback=self.on_cut_progress,
             )
         except Exception as e:
             # letting it escape run() kills the thread without a word - the
@@ -14078,7 +14319,6 @@ class FitWorker(QtCore.QThread):
             self.applied_lateral_transforms = lib.describe_lateral_transforms(
                 self.spline_calibration
             ) + lib.describe_lateral_transforms(self.lateral_transforms)
-        self.progressMade.emit(self.N + 1, self.N)
         dt = time.time() - t0
         self.finished.emit(locs, dt, self.fit_z, self.calibrate_z)
 
@@ -14088,7 +14328,11 @@ class MultichannelSplineFitWorker(QtCore.QThread):
     simultaneously. The reference channel's identifications are mapped into
     every channel via the calibration's stored affine transforms."""
 
+    # as FitWorker: a fit phase started (label, maximum), and the items
+    # finished in it (done, maximum)
+    phaseStarted = QtCore.pyqtSignal(str, int)
     progressMade = QtCore.pyqtSignal(int, int)
+    # cross-channel linking: reference detections checked (done, maximum)
     linkMade = QtCore.pyqtSignal(int, int)
     linkFinished = QtCore.pyqtSignal(int, int)
     finished = QtCore.pyqtSignal(pd.DataFrame, float, bool, bool)
@@ -14152,11 +14396,17 @@ class MultichannelSplineFitWorker(QtCore.QThread):
         self.regions = regions
         self.N = len(identifications)
 
-    def on_progress(self, n_done: int) -> None:
-        self.progressMade.emit(n_done, self.N)
+    def on_phase(self, label: str, maximum: int) -> None:
+        """Report the start of a fit phase, see ``FitWorker.on_phase``."""
+        self.phaseStarted.emit(label, maximum)
 
-    def on_link_progress(self, n_done: int) -> None:
-        self.linkMade.emit(n_done, self.N)
+    def on_progress(self, n_done: int, maximum: int) -> None:
+        """Report the fit progress, see ``FitWorker.on_progress``."""
+        self.progressMade.emit(n_done, maximum)
+
+    def on_link_progress(self, n_done: int, maximum: int) -> None:
+        """Report the cross-channel linking progress to the window."""
+        self.linkMade.emit(n_done, maximum)
 
     def _link_across_channels(self, n_channels: int) -> bool:
         """Restrict the reference detections to those found in every channel.
@@ -14183,7 +14433,7 @@ class MultichannelSplineFitWorker(QtCore.QThread):
             ids_per_channel,
             transforms,
             self.box,
-            progress_callback=self.on_link_progress,
+            progress=_SignalProgress(on_value=self.on_link_progress),
         )
         self.linkFinished.emit(n_kept, n_total)
         if n_kept == 0:
@@ -14219,7 +14469,7 @@ class MultichannelSplineFitWorker(QtCore.QThread):
                 self.calibration,
                 self.box,
                 regions=self.regions,
-                progress_callback=self.on_link_progress,
+                progress=_SignalProgress(on_value=self.on_link_progress),
             )
         )
         self.linkFinished.emit(n_kept, n_total)
@@ -14231,6 +14481,9 @@ class MultichannelSplineFitWorker(QtCore.QThread):
 
     def run(self) -> None:
         t0 = time.time()
+        progress = _SignalProgress(
+            on_value=self.on_progress, on_phase=self.on_phase
+        )
         try:
             n_channels = int(
                 self.calibration.get("n_channels", len(self.movies))
@@ -14256,7 +14509,7 @@ class MultichannelSplineFitWorker(QtCore.QThread):
                     link_photons=self.link_photons,
                     tolerance=self.eps,
                     max_iterations=self.max_it,
-                    progress_callback=self.on_progress,
+                    progress=progress,
                     camera_calibration=self.camera_calibration,
                 )
             elif not self.link_photons and (
@@ -14276,7 +14529,7 @@ class MultichannelSplineFitWorker(QtCore.QThread):
                     link_photons=False,
                     tolerance=self.eps,
                     max_iterations=self.max_it,
-                    progress_callback=self.on_progress,
+                    progress=progress,
                     camera_calibrations=self.camera_calibrations,
                 )
             elif self.calibration.get("photon_ratios") is not None:
@@ -14293,7 +14546,7 @@ class MultichannelSplineFitWorker(QtCore.QThread):
                     use_gpu=self.use_gpu,
                     tolerance=self.eps,
                     max_iterations=self.max_it,
-                    progress_callback=self.on_progress,
+                    progress=progress,
                     camera_calibrations=self.camera_calibrations,
                 )
             else:
@@ -14307,14 +14560,13 @@ class MultichannelSplineFitWorker(QtCore.QThread):
                     use_gpu=self.use_gpu,
                     tolerance=self.eps,
                     max_iterations=self.max_it,
-                    progress_callback=self.on_progress,
+                    progress=progress,
                     camera_calibrations=self.camera_calibrations,
                 )
         except Exception as e:
             print(f"Multichannel spline fit failed: {e}")
             self.aborted.emit()
             return
-        self.progressMade.emit(self.N + 1, self.N)
         dt = time.time() - t0
         # fit_z / calibrate_z are always False for the multichannel spline
         # path (z comes from the fit; there is no astigmatism step)
@@ -14329,7 +14581,11 @@ class MultichannelGaussianFitWorker(QtCore.QThread):
     it plugs into the window's existing fit slots. It needs no PSF calibration,
     only a channel registration (see :mod:`picasso.registration`)."""
 
+    # as FitWorker: a fit phase started (label, maximum), and the items
+    # finished in it (done, maximum)
+    phaseStarted = QtCore.pyqtSignal(str, int)
     progressMade = QtCore.pyqtSignal(int, int)
+    # cross-channel linking: reference detections checked (done, maximum)
     linkMade = QtCore.pyqtSignal(int, int)
     linkFinished = QtCore.pyqtSignal(int, int)
     finished = QtCore.pyqtSignal(pd.DataFrame, float, bool, bool)
@@ -14425,25 +14681,37 @@ class MultichannelGaussianFitWorker(QtCore.QThread):
         self.regions = regions
         self.N = len(identifications)
 
-    def on_progress(self, n_done: int) -> None:
+    def on_phase(self, label: str, maximum: int) -> None:
+        """Report the start of a fit phase to the window.
+
+        Parameters
+        ----------
+        label : str
+            Label of the phase, e.g. "Cutting spots".
+        maximum : int
+            Number of items of the phase; 0 means unknown.
+        """
+        self.phaseStarted.emit(label, maximum)
+
+    def on_progress(self, n_done: int, maximum: int) -> None:
         """Report fit progress to the window.
 
         Parameters
         ----------
-        n_done : int
-            Spots fitted so far, out of ``self.N``.
+        n_done, maximum : int
+            Items finished in the current phase, out of ``maximum``.
         """
-        self.progressMade.emit(n_done, self.N)
+        self.progressMade.emit(n_done, maximum)
 
-    def on_link_progress(self, n_done: int) -> None:
+    def on_link_progress(self, n_done: int, maximum: int) -> None:
         """Report cross-channel linking progress to the window.
 
         Parameters
         ----------
-        n_done : int
-            Reference detections checked so far, out of ``self.N``.
+        n_done, maximum : int
+            Reference detections checked so far, out of ``maximum``.
         """
-        self.linkMade.emit(n_done, self.N)
+        self.linkMade.emit(n_done, maximum)
 
     def _link_across_channels(self, n_channels: int) -> bool:
         """Restrict the reference detections to those found in every channel.
@@ -14477,7 +14745,7 @@ class MultichannelGaussianFitWorker(QtCore.QThread):
             ids_per_channel,
             transforms,
             self.box,
-            progress_callback=self.on_link_progress,
+            progress=_SignalProgress(on_value=self.on_link_progress),
         )
         self.linkFinished.emit(n_kept, n_total)
         if n_kept == 0:
@@ -14520,7 +14788,7 @@ class MultichannelGaussianFitWorker(QtCore.QThread):
                 self.channel_registration,
                 self.box,
                 regions=self.regions,
-                progress_callback=self.on_link_progress,
+                progress=_SignalProgress(on_value=self.on_link_progress),
             )
         )
         self.linkFinished.emit(n_kept, n_total)
@@ -14538,6 +14806,9 @@ class MultichannelGaussianFitWorker(QtCore.QThread):
         raised.
         """
         t0 = time.time()
+        progress = _SignalProgress(
+            on_value=self.on_progress, on_phase=self.on_phase
+        )
         try:
             n_channels = int(
                 self.channel_registration.get("n_channels", len(self.movies))
@@ -14563,7 +14834,7 @@ class MultichannelGaussianFitWorker(QtCore.QThread):
                     use_gpu=self.use_gpu,
                     tolerance=self.eps,
                     max_iterations=self.max_it,
-                    progress_callback=self.on_progress,
+                    progress=progress,
                     abort_callback=self.isInterruptionRequested,
                     camera_calibration=self.camera_calibration,
                 )
@@ -14579,7 +14850,7 @@ class MultichannelGaussianFitWorker(QtCore.QThread):
                     use_gpu=self.use_gpu,
                     tolerance=self.eps,
                     max_iterations=self.max_it,
-                    progress_callback=self.on_progress,
+                    progress=progress,
                     abort_callback=self.isInterruptionRequested,
                     camera_calibrations=self.camera_calibrations,
                 )
@@ -14590,7 +14861,6 @@ class MultichannelGaussianFitWorker(QtCore.QThread):
         if locs is None:
             self.aborted.emit()
             return
-        self.progressMade.emit(self.N + 1, self.N)
         dt = time.time() - t0
         # this fit has no astigmatism step: it is 2D and its width is fitted
         self.finished.emit(locs, dt, False, False)
@@ -14637,8 +14907,15 @@ class FitZWorker(QtCore.QThread):
         self.applied_lateral_transforms = []
         self.skipped_lateral_transforms = []
 
-    def on_progress(self, n_done: int) -> None:
-        self.progressMade.emit(n_done, len(self.locs))
+    def on_progress(self, n_done: int, maximum: int) -> None:
+        """Report the z-fit progress to the window.
+
+        Parameters
+        ----------
+        n_done, maximum : int
+            Localizations fitted so far, out of ``maximum``.
+        """
+        self.progressMade.emit(n_done, maximum)
 
     def run(self) -> None:
         t0 = time.time()
@@ -14665,7 +14942,7 @@ class FitZWorker(QtCore.QThread):
                 lateral_transforms=self.lateral_transforms,
                 multiprocess=not self.gpu,
                 gpu=self.gpu,
-                progress_callback=self.on_progress,
+                progress=_SignalProgress(on_value=self.on_progress),
                 abort_callback=self.isInterruptionRequested,
             )
         if info is not None:
@@ -14790,8 +15067,8 @@ class ChannelRegistrationWorker(QtCore.QThread):
                     regions=self.regions,
                     channel_paths=self.channel_paths,
                     path=self.path,
-                    progress_callback=lambda n: self.statusChanged.emit(
-                        f"Registered {n} channel(s)..."
+                    progress=_status_progress(
+                        self.statusChanged.emit, "Channel registration: "
                     ),
                 )
         except Exception as e:
@@ -14865,6 +15142,8 @@ class SplineCalibrationWorker(QtCore.QThread):
         self.path = path
 
     def run(self) -> None:
+        # "Calibrating spline" in 3 steps, in the status bar
+        progress = _status_progress(self.statusChanged.emit)
         try:
             if self.movies:
                 calibration, diagnostics = (
@@ -14886,6 +15165,7 @@ class SplineCalibrationWorker(QtCore.QThread):
                         reference=0,
                         path=self.path,
                         return_diagnostics=True,
+                        progress=progress,
                     )
                 )
             elif self.regions:
@@ -14907,6 +15187,7 @@ class SplineCalibrationWorker(QtCore.QThread):
                     model=self.registration_model,
                     path=self.path,
                     return_diagnostics=True,
+                    progress=progress,
                 )
             else:
                 calibration, diagnostics = spline.calibrate_spline(
@@ -14926,6 +15207,7 @@ class SplineCalibrationWorker(QtCore.QThread):
                     roi=self.roi,
                     path=self.path,
                     return_diagnostics=True,
+                    progress=progress,
                 )
         except Exception as e:  # surface any failure to the GUI
             self.failed.emit(str(e))
@@ -15100,6 +15382,14 @@ class QualityWorker(QtCore.QThread):
         self.path = path
         self.pixelsize = pixelsize
 
+    def _progress(self, step: str) -> _SignalProgress:
+        """A tracker showing the phases of one check in the status bar,
+        e.g. "Checking Quality (2/4) NeNA: Calculating NeNA 10 / 20 ..."."""
+        return _status_progress(
+            lambda message: self.progressMade.emit(message, 0, ""),
+            f"Checking Quality {step}: ",
+        )
+
     def run(self) -> None:
         # Sanity of locs
         sane_locs = lib.ensure_sanity(self.locs, self.info)
@@ -15112,28 +15402,15 @@ class QualityWorker(QtCore.QThread):
         # NeNA
         self.progressMade.emit("Checking Quality (2/4) NeNA ..", 0, "")
 
-        def nena_callback(x):
-            self.progressMade.emit(
-                f"Checking Quality (2/4) NeNA: {x} %",
-                0,
-                "",
-            )
-
-        nena_nm = localize.check_nena(sane_locs, self.info, nena_callback)
+        nena_nm = localize.check_nena(
+            sane_locs, self.info, progress=self._progress("(2/4) NeNA")
+        )
         self.progressMade.emit("", 1, f"{nena_nm:.2f} nm")
 
         # Drift
         self.progressMade.emit("Checking Quality (3/4) Drift ..", 0, "")
-
-        def drift_callback(x):
-            self.progressMade.emit(
-                f"Checking Quality (3/4) Drift {x} %",
-                0,
-                "",
-            )
-
         drift_x, drift_y = localize.check_drift(
-            sane_locs, self.info, callback=drift_callback
+            sane_locs, self.info, progress=self._progress("(3/4) Drift")
         )
         self.progressMade.emit(
             "",

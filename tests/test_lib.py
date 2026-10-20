@@ -1435,7 +1435,8 @@ class TestSyncGroups:
 
 
 # ---------------------------------------------------------------------------
-# Progress trackers (MockProgress / TqdmProgress / normalize_progress)
+# Progress trackers (Progress / MockProgress / TqdmProgress /
+# normalize_progress / tracked_progress / start_phase)
 # ---------------------------------------------------------------------------
 
 
@@ -1449,7 +1450,28 @@ class TestMockProgress:
         p.setLabelText("text")
         p.play_sound_notification()
         p.close()
-        assert list(p.get_iterator(0, 5)) == [0, 1, 2, 3, 4]
+        assert p.description_base == "new phase"
+
+    def test_satisfies_protocol(self):
+        assert isinstance(lib.MockProgress(), lib.Progress)
+        assert isinstance(lib.TqdmProgress(), lib.Progress)
+
+    def test_subclass_as_custom_tracker(self):
+        # the documented way to write a custom tracker
+        class Recorder(lib.MockProgress):
+            def __init__(self):
+                super().__init__()
+                self.values = []
+
+            def set_value(self, value, *args, **kwargs):
+                self.values.append((value, self.maximum()))
+
+        tracker = Recorder()
+        assert lib.normalize_progress(tracker) is tracker
+        lib.start_phase(tracker, "phase", 3)
+        tracker.set_value(3)
+        assert tracker.values == [(3, 3)]
+        assert tracker.description_base == "phase"
 
     def test_maximum_roundtrip(self):
         p = lib.MockProgress()
@@ -1497,14 +1519,21 @@ class TestTqdmProgress:
         assert p.iterator.total == 7
         p.close()
 
-    def test_get_iterator_closes_previous_bar(self):
-        p = lib.TqdmProgress(description="loop")
-        p.setMaximum(3)
+    def test_zero_progress_sets_unit(self):
+        p = lib.TqdmProgress(description="phase 1", unit="loc")
+        p.zero_progress("phase 2", unit="spot")
         p.set_value(1)
-        first_bar = p.iterator
-        iterator = p.get_iterator(0, 4)
-        assert p.iterator is not first_bar
-        assert list(iterator) == [0, 1, 2, 3]
+        assert p.iterator.unit == "spot"
+        p.close()
+
+    def test_zero_maximum_is_unknown_total(self):
+        p = lib.TqdmProgress(description="busy")
+        p.setMaximum(0)
+        p.set_value(2)
+        assert p.iterator.total is None
+        p.setMaximum(5)
+        p.setMaximum(0)
+        assert p.iterator.total is None
         p.close()
 
 
@@ -1545,6 +1574,85 @@ class TestNormalizeProgress:
         with pytest.raises(TypeError):
             lib.normalize_progress(42)
 
+    def test_plain_function_raises(self):
+        # a bare callable is not a tracker; it must not be silently ignored
+        with pytest.raises(TypeError):
+            lib.normalize_progress(lambda value: None)
+
+
+class _RecordingTracker(lib.MockProgress):
+    def __init__(self):
+        super().__init__()
+        self.calls = []
+        self.closed = False
+
+    def set_value(self, value, *args, **kwargs):
+        self.calls.append(("set_value", value))
+
+    def setMaximum(self, maximum, *args, **kwargs):
+        super().setMaximum(maximum)
+        self.calls.append(("setMaximum", maximum))
+
+    def zero_progress(self, description=None, *args, **kwargs):
+        super().zero_progress(description)
+        self.calls.append(("zero_progress", description))
+
+    def close(self, *args, **kwargs):
+        self.closed = True
+
+
+class TestTrackedProgress:
+    def test_caller_tracker_is_not_closed(self):
+        tracker = _RecordingTracker()
+        with lib.tracked_progress(tracker, "task") as progress:
+            assert progress is tracker
+        assert not tracker.closed
+
+    def test_console_tracker_is_closed(self):
+        with lib.tracked_progress("console", "task", unit="loc") as progress:
+            assert isinstance(progress, lib.TqdmProgress)
+            progress.setMaximum(2)
+            progress.set_value(1)
+            assert progress.iterator is not None
+        assert progress.iterator is None
+
+    def test_closed_on_exception(self):
+        with pytest.raises(lib.OperationCanceled):
+            with lib.tracked_progress("console") as progress:
+                progress.set_value(1)
+                raise lib.OperationCanceled
+        assert progress.iterator is None
+
+    def test_none_is_silent(self, capsys):
+        with lib.tracked_progress(None, "task") as progress:
+            lib.start_phase(progress, "phase", 3)
+            progress.set_value(3)
+        captured = capsys.readouterr()
+        assert captured.out == "" and captured.err == ""
+
+
+class TestStartPhase:
+    def test_label_then_maximum(self):
+        tracker = _RecordingTracker()
+        lib.start_phase(tracker, "phase 1", 7)
+        assert tracker.calls == [
+            ("zero_progress", "phase 1"),
+            ("setMaximum", 7),
+        ]
+        assert tracker.maximum() == 7
+
+    def test_previous_console_bar_keeps_its_total(self):
+        p = lib.TqdmProgress(description="phase 1")
+        lib.start_phase(p, "phase 1", 5)
+        p.set_value(5)
+        first_bar = p.iterator
+        lib.start_phase(p, "phase 2", 0, unit="pair")
+        assert first_bar.total == 5
+        p.set_value(1)
+        assert p.iterator.desc == "phase 2"
+        assert p.iterator.unit == "pair"
+        p.close()
+
 
 # ---------------------------------------------------------------------------
 # Lazy Qt imports (PyQt6 must not load with the core library; the Qt
@@ -1559,7 +1667,9 @@ class TestLazyQtImports:
         code = (
             "import sys\n"
             "from picasso import lib, io, render, g5m, clusterer, aim\n"
-            "lib.normalize_progress('console').set_value(0)\n"
+            "with lib.tracked_progress('console') as progress:\n"
+            "    lib.start_phase(progress, 'phase', 1)\n"
+            "    progress.set_value(1)\n"
             "assert 'PyQt6' not in sys.modules, 'PyQt6 imported eagerly'\n"
         )
         result = subprocess.run(
@@ -1573,7 +1683,7 @@ class TestLazyQtImports:
         from picasso import lib_qt
 
         assert lib.Dialog is lib_qt.Dialog
-        assert lib.ProgressType is lib_qt.ProgressType
+        assert lib.TaskProgress is lib_qt.TaskProgress
 
     def test_unknown_attribute_raises(self):
         with pytest.raises(AttributeError):

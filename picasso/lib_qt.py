@@ -22,7 +22,7 @@ import sys
 import time
 import traceback
 from collections.abc import Callable
-from typing import Any, TypeAlias
+from typing import Any
 
 import yaml
 import matplotlib.pyplot as plt
@@ -33,9 +33,7 @@ from picasso import diagnostics, docs_url, io, notifications
 from picasso.lib import (
     _dialogs,
     REQUIRED_COLUMNS,
-    MockProgress,
     OperationCanceled,
-    TqdmProgress,
     is_path_available,
 )
 
@@ -635,6 +633,11 @@ class ProgressDialog(QtWidgets.QProgressDialog):
         )
         self.description_base = description  # without time estimate
         self.initalized = None
+        # functions report several phases to one dialog: Qt's auto-reset
+        # would hide it whenever a phase reaches its maximum; the caller
+        # closes it when the function returns
+        self.setAutoReset(False)
+        self.setAutoClose(False)
 
     def init(self):
         """Arm the dialog: register it, make it modal and start the clock.
@@ -662,8 +665,8 @@ class ProgressDialog(QtWidgets.QProgressDialog):
         if not self.initalized:
             self.init()
         self.setValue(value)
-        if self.count_started:
-            # estimate time left
+        if self.count_started and self.maximum() > 0:
+            # estimate time left (none for a busy indicator)
             elapsed = time.time() - self.t0_est
             remaining = int(
                 (self.maximum() - value) * elapsed / (value + 1e-6)
@@ -686,6 +689,7 @@ class ProgressDialog(QtWidgets.QProgressDialog):
         # sound notification
         if (
             self._sound_on_maximum
+            and self.maximum() > 0  # not a busy indicator
             and value >= self.maximum()
             and self.finished is False
         ):
@@ -729,13 +733,16 @@ class ProgressDialog(QtWidgets.QProgressDialog):
             self.finished = True
             self.play_sound_notification()
 
-    def zero_progress(self, description=None):
+    def zero_progress(self, description=None, *args, **kwargs):
         """Set progress dialog to zero and change the title if given.
 
         Parameters
         ----------
         description : str, optional
             Label of the new phase. None keeps the current one.
+        *args, **kwargs
+            Accepted and ignored (e.g. the console bar's ``unit``), for
+            ``lib.Progress`` compatibility.
         """
         if description:
             self.setLabelText(description)
@@ -744,6 +751,9 @@ class ProgressDialog(QtWidgets.QProgressDialog):
             # restart the time-estimate baseline so the next non-zero
             # set_value re-arms the timer for the new phase
             self.count_started = False
+        # a function reporting phases may start another one once this one
+        # reaches its maximum, so the finish sound waits for close()
+        self._sound_on_maximum = False
         self.set_value(0)
 
     def play_sound_notification(self):
@@ -752,23 +762,6 @@ class ProgressDialog(QtWidgets.QProgressDialog):
         """
         if self.initalized:
             notifications.notify_finished(time.time() - self.t0)
-
-    def get_iterator(self, start=None, end=None):
-        """Get an iterator that spans the dialog's remaining progress.
-
-        Parameters
-        ----------
-        start, end : int, optional
-            First and one-past-last value. None uses the dialog's current
-            value and maximum.
-
-        Returns
-        -------
-        iterator : range
-        """
-        start = self.value() if start is None else start
-        end = self.maximum() if end is None else end
-        return range(start, end)
 
 
 class StatusDialog(Dialog):
@@ -930,10 +923,8 @@ class TaskProgressDialog(ProgressDialog):
 class TaskProgress(QtCore.QObject):
     """Progress tracker handed to the function run by :func:`run_task`.
 
-    Implements the ``ProgressDialog`` interface (see
-    ``lib.normalize_progress``), so analysis functions that take a
-    progress dialog, or a progress callback such as ``progress.set_value``,
-    run unchanged on the worker thread. Updates reach the dialog on the
+    Implements the ``lib.Progress`` interface, so analysis functions that
+    take a ``progress`` argument run unchanged on the worker thread. Updates reach the dialog on the
     GUI thread through queued signals, at most every ``INTERVAL`` seconds.
 
     Once the user canceled the task, the next ``set_value`` (or
@@ -1067,70 +1058,6 @@ class TaskProgress(QtCore.QObject):
         self._value = 0
         self._last_emit = time.monotonic()
         self.phase_changed.emit(self.description_base)
-
-    def phase(self, description: str, maximum: int) -> None:
-        """Start a new phase with its own label and maximum.
-
-        Parameters
-        ----------
-        description : str
-            Label of the new phase.
-        maximum : int
-            Maximum of the new phase; 0 shows a busy indicator.
-
-        Raises
-        ------
-        OperationCanceled
-            If the user canceled the task.
-        """
-        self.setMaximum(maximum)
-        self.zero_progress(description)
-
-    def callback(self, description: str, maximum: int) -> Callable:
-        """A progress callback that starts its own phase when first
-        called, for functions that report several steps through
-        separate callbacks.
-
-        Parameters
-        ----------
-        description : str
-            Label of the phase.
-        maximum : int
-            Maximum of the phase.
-
-        Returns
-        -------
-        callback : callable
-            Takes the cumulative progress of the phase, like
-            :meth:`set_value`.
-        """
-        started = False
-
-        def callback(value, *args, **kwargs):
-            nonlocal started
-            if not started:
-                started = True
-                self.phase(description, maximum)
-            self.set_value(value)
-
-        return callback
-
-    def get_iterator(self, start=None, end=None):
-        """Get an iterator that spans the remaining progress.
-
-        Parameters
-        ----------
-        start, end : int, optional
-            First and one-past-last value. None uses the current value
-            and maximum.
-
-        Returns
-        -------
-        iterator : range
-        """
-        start = self._value if start is None else start
-        end = self._maximum if end is None else end
-        return range(start, end)
 
     def init(self, *args, **kwargs) -> None:
         """Do nothing; the dialog is armed by the task."""
@@ -1536,10 +1463,6 @@ def run_with_status(
     if thread.outcome == "failed":
         raise thread.error
     return thread.result
-
-
-# type alias for the progress dialogs
-ProgressType: TypeAlias = ProgressDialog | MockProgress | TqdmProgress
 
 
 class CollapsibleHeader(QtWidgets.QAbstractButton):

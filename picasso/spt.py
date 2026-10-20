@@ -1184,7 +1184,7 @@ def analyze_tracks(
     sigma: float | Literal["precision"] = 0.0,
     n_populations: int | Sequence[int] = (1, 2, 3),
     truncate: bool = False,
-    progress: Any = None,
+    progress: lib.Progress | Literal["console"] | None = None,
 ) -> dict:
     """Diffusion analysis of tracked localizations: per-track summary,
     MSD and jump distances.
@@ -1216,9 +1216,12 @@ def analyze_tracks(
         Whether the jump distance fit corrects for the maximum jump
         distance of the tracking, see ``r_max`` in
         :func:`fit_jump_distances`. Default is False.
-    progress : {None, "console", ProgressType}, optional
-        Progress tracker, see ``lib.normalize_progress``. Default is
-        None.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports "Computing the MSD and jump
+        distances" over 2 steps and "Fitting jump distances" over the
+        numbers of populations. Default is None.
 
     Returns
     -------
@@ -1258,32 +1261,33 @@ def analyze_tracks(
                 "tracking in the metadata."
             )
 
-    progress = lib.normalize_progress(progress, "Analyzing tracks")
-    n_steps = 2 + len(n_populations)
-    progress.setMaximum(n_steps)
-    progress.zero_progress("Computing the MSD...")
-    progress.set_value(0)
-    table = track_table(locs, frame_time=frame_time, n_fit=n_fit)
-    msd_result = msd(locs, frame_time=frame_time, max_lag=max_lag)
-    msd_fit = fit_msd(msd_result["tau"], msd_result["msd"], n_fit)
-    progress.set_value(1)
-    jumps = jump_distances(locs)
-    progress.set_value(2)
-    jd_fits = {}
-    jd_errors = {}
-    for i, k in enumerate(n_populations):
-        progress.setLabelText(
-            f"Fitting {k} population{'s' if k > 1 else ''} to the jump "
-            "distances..."
+    with lib.tracked_progress(
+        progress, "Analyzing tracks", unit="step"
+    ) as progress:
+        lib.start_phase(
+            progress, "Computing the MSD and jump distances", 2, unit="step"
         )
-        try:
-            jd_fits[k] = fit_jump_distances(
-                jumps, frame_time, k, sigma=sigma_nm, r_max=r_max
-            )
-        except ValueError as error:
-            jd_fits[k] = None
-            jd_errors[k] = str(error)
-        progress.set_value(3 + i)
+        table = track_table(locs, frame_time=frame_time, n_fit=n_fit)
+        msd_result = msd(locs, frame_time=frame_time, max_lag=max_lag)
+        msd_fit = fit_msd(msd_result["tau"], msd_result["msd"], n_fit)
+        progress.set_value(1)
+        jumps = jump_distances(locs)
+        progress.set_value(2)
+        lib.start_phase(
+            progress, "Fitting jump distances", len(n_populations), unit="fit"
+        )
+        jd_fits = {}
+        jd_errors = {}
+        for i, k in enumerate(n_populations):
+            try:
+                jd_fits[k] = fit_jump_distances(
+                    jumps, frame_time, k, sigma=sigma_nm, r_max=r_max
+                )
+            except ValueError as error:
+                jd_fits[k] = None
+                jd_errors[k] = str(error)
+            progress.set_value(i + 1)
+        progress.set_value(len(n_populations))
 
     parameters = {
         FRAME_TIME_KEY: frame_time,

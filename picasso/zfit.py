@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import os
 import math
-import time
 import warnings
 from concurrent import futures
 from concurrent.futures import ProcessPoolExecutor
@@ -23,7 +22,6 @@ from numba import cuda
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-from tqdm import tqdm
 from scipy.optimize import minimize_scalar
 
 from . import io, lib
@@ -415,14 +413,17 @@ def _fit_z(
     pixelsize: float,
     fitting_method: Literal["gausslq", "gaussmle"] = "gausslq",
     filter: int = 2,
-    progress_callback: (
-        Callable[[int], None] | Literal["console"] | None
-    ) = None,
+    progress: lib.Progress | None = None,
 ) -> pd.DataFrame:
     """Internal function for fitting z coordinates to the localizations.
     See `zfit` for details. ``calibration`` and the spot widths of
     ``locs`` are in nm; ``pixelsize`` (nm) is only used to evaluate the
-    spot width uncertainties, whose formulas work in camera pixels."""
+    spot width uncertainties, whose formulas work in camera pixels.
+
+    ``progress`` is a normalized tracker whose phase the caller started;
+    it is advanced to the number of localizations fitted. None (only for
+    the worker processes of :func:`_fit_z_parallel`, which cannot report
+    to the caller's tracker) reports nothing."""
     locs = locs.copy()
     cx = np.array(calibration["X Coefficients"])
     cy = np.array(calibration["Y Coefficients"])
@@ -432,13 +433,9 @@ def _fit_z(
     z = np.zeros_like(locs["x"])
     square_d_zcalib = np.zeros_like(z)
 
-    use_tqdm = progress_callback == "console"
-    if use_tqdm:
-        iter_range = tqdm(range(len(z)), desc="Fitting z...", unit="locs")
-    else:
-        iter_range = range(len(z))
-
-    for i in iter_range:
+    if progress is None:
+        progress = lib.MockProgress()
+    for i in range(len(z)):
         # set bounds to avoid potential gaps in the calibration curve,
         # credits to Loek Andriessen
         result = minimize_scalar(
@@ -448,9 +445,7 @@ def _fit_z(
         )
         z[i] = result.x
         square_d_zcalib[i] = result.fun
-
-        if callable(progress_callback):
-            progress_callback(i)
+        progress.set_value(i + 1)
 
     locs["z"] = z * magnification_factor
     locs["d_zcalib"] = np.sqrt(square_d_zcalib)
@@ -473,12 +468,21 @@ def _fit_z_parallel(
     calibration: dict,
     magnification_factor: float,
     pixelsize: float,
-    fitting_method: Literal["gausslq", "gaussmle"] = "gausslq",
-    filter: int = 2,
-    asynch: bool = False,
-) -> pd.DataFrame | list[futures.Future]:
+    fitting_method: Literal["gausslq", "gaussmle"],
+    filter: int,
+    progress: lib.Progress,
+    abort_callback: Callable[[], bool] | None = None,
+) -> pd.DataFrame | None:
     """Internal function for fitting z coordinates to the localizations
-    using multiprocessing. See `zfit` for details."""
+    using multiprocessing. See `zfit` for details.
+
+    Submits the localizations in chunks to a process pool and waits for
+    them, advancing ``progress`` (a normalized tracker whose phase the
+    caller started) to the number of localizations whose chunk has
+    finished. ``abort_callback`` is polled while waiting; returning True
+    cancels the pending chunks and returns None. The pool is shut down
+    in any case, also when the tracker raises ``lib.OperationCanceled``.
+    """
     n_workers = lib.n_workers()
     n_locs = len(locs)
     n_tasks = 100 * n_workers
@@ -491,11 +495,12 @@ def _fit_z_parallel(
         for _ in range(n_tasks)
     ]
     start_indices = np.cumsum([0] + spots_per_task[:-1])
-    fs = []
     executor = ProcessPoolExecutor(n_workers)
-    for i, n_locs_task in zip(start_indices, spots_per_task):
-        fs.append(
-            executor.submit(
+    completed = False
+    try:
+        fs = {}
+        for i, n_locs_task in zip(start_indices, spots_per_task):
+            future = executor.submit(
                 _fit_z,
                 locs[i : i + n_locs_task],
                 info,
@@ -505,13 +510,20 @@ def _fit_z_parallel(
                 fitting_method=fitting_method,
                 filter=0,
             )
-        )
-    if asynch:
-        return fs
-    with tqdm(total=n_tasks, unit="task") as progress_bar:
-        for f in futures.as_completed(fs):
-            progress_bar.update()
-    return locs_from_futures(fs, filter=filter)
+            fs[future] = n_locs_task
+        n_finished = 0
+        pending = set(fs)
+        while pending:
+            if abort_callback is not None and abort_callback():
+                return None
+            done, pending = futures.wait(pending, timeout=0.2)
+            n_finished += sum(fs[f] for f in done)
+            progress.set_value(n_finished)
+        completed = True
+    finally:
+        # on abort, cancellation or a worker error, drop the queued chunks
+        executor.shutdown(wait=completed, cancel_futures=not completed)
+    return locs_from_futures(list(fs), filter=filter)
 
 
 @cuda.jit(device=True, inline=True)
@@ -748,13 +760,12 @@ def _fit_z_gpu(
     pixelsize: float,
     fitting_method: Literal["gausslq", "gaussmle"] = "gausslq",
     filter: int = 2,
-    progress_callback: (
-        Callable[[int], None] | Literal["console"] | None
-    ) = None,
+    progress: lib.Progress | None = None,
 ) -> pd.DataFrame:
     """GPU (numba.cuda) equivalent of ``_fit_z``. Fits the z coordinate
     of every localization in parallel on the GPU, reproducing the CPU
-    result. See ``_fit_z`` for details."""
+    result. See ``_fit_z`` for details; ``progress`` is advanced once
+    per chunk of a million localizations."""
     if not CUDA_AVAILABLE:
         raise RuntimeError(
             "GPU z fitting requested but no CUDA-capable GPU is available."
@@ -776,12 +787,8 @@ def _fit_z_gpu(
         threads_per_block = 128
         # Process in chunks to bound device memory and report progress.
         chunk = 1_000_000
-        use_tqdm = progress_callback == "console"
-        pbar = (
-            tqdm(total=N, desc="Fitting z...", unit="locs")
-            if use_tqdm
-            else None
-        )
+        if progress is None:
+            progress = lib.MockProgress()
         for start in range(0, N, chunk):
             end = min(start + chunk, N)
             n = end - start
@@ -795,12 +802,7 @@ def _fit_z_gpu(
             )
             z[start:end] = d_z.copy_to_host()
             square_d_zcalib[start:end] = d_fun.copy_to_host()
-            if use_tqdm:
-                pbar.update(n)
-            elif callable(progress_callback):
-                progress_callback(end)
-        if use_tqdm:
-            pbar.close()
+            progress.set_value(end)
 
     locs["z"] = (z * magnification_factor).astype(np.float32)
     locs["d_zcalib"] = np.sqrt(square_d_zcalib).astype(np.float32)
@@ -829,9 +831,7 @@ def zfit(
     lateral_transforms: dict | list | str | None = None,
     multiprocess: bool = False,
     gpu: bool = False,
-    progress_callback: (
-        Callable[[int], None] | Literal["console"] | None
-    ) = None,
+    progress: lib.Progress | Literal["console"] | None = None,
     abort_callback: Callable[[], bool] | None = None,
 ) -> tuple[pd.DataFrame, list[dict]] | tuple[None, None]:
     """Main function for fitting z coordinates to the localizations.
@@ -909,15 +909,18 @@ def zfit(
         (numba.cuda). Reproduces the CPU result. Requires
         ``zfit.CUDA_AVAILABLE`` to be True. Takes precedence over
         ``multiprocess``. Default is False.
-    progress_callback : callable, "console", or None, optional
-        If a callable is provided, it will be called with the current
-        progress (number of localizations processed) as an argument. If
-        "console", a progress bar will be displayed in the console. If
-        None, no progress will be reported. Default is None.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports one phase, "Fitting z" over the
+        localizations (per localization when serial, per finished chunk
+        with ``multiprocess``, per million localizations with ``gpu``).
+        Default is None.
     abort_callback : callable or None, optional
         A callable for aborting multiprocessing in the GUI. If a
         callable provided, it must accept no input and return a boolean
-        indicating whether the fitting should be aborted.
+        indicating whether the fitting should be aborted. Only polled
+        with ``multiprocess`` (and not ``gpu``).
 
     Returns
     -------
@@ -961,19 +964,20 @@ def zfit(
             "Magnification factor" in calibration
         ), "Magnification factor is missing in calibration."
 
-    return _zfit(
-        locs,
-        info,
-        calibration,
-        pixelsize,
-        fitting_method,
-        filter,
-        lateral_transforms,
-        multiprocess,
-        gpu,
-        progress_callback,
-        abort_callback,
-    )
+    with lib.tracked_progress(progress, "Fitting z", unit="loc") as progress:
+        return _zfit(
+            locs,
+            info,
+            calibration,
+            pixelsize,
+            fitting_method,
+            filter,
+            lateral_transforms,
+            multiprocess,
+            gpu,
+            progress,
+            abort_callback,
+        )
 
 
 def _calibration_in_nm(calibration: dict, pixelsize: float | None) -> dict:
@@ -1007,64 +1011,6 @@ def _calibration_in_nm(calibration: dict, pixelsize: float | None) -> dict:
         stacklevel=3,
     )
     return legacy.calibration_to_nm(calibration, pixelsize)
-
-
-def _await_parallel_z_fit(
-    fs: list,
-    N: int,
-    filter: int,
-    progress_callback: Callable[[int], None] | Literal["console"] | None,
-    abort_callback: Callable[[], bool] | None,
-) -> pd.DataFrame | None:
-    """Poll the futures submitted by ``_fit_z_parallel`` until done.
-
-    Progress is reported along the way.
-
-    Parameters
-    ----------
-    fs : list
-        Futures returned by ``_fit_z_parallel``.
-    N : int
-        Total number of localizations being fitted, for progress.
-    filter : int
-        Filter for the z fits, passed on to :func:`locs_from_futures`. If
-        set to 0, no filtering is applied; if set to 2, the z fits are
-        filtered based on the RMSD of the z calibration.
-    progress_callback : callable, "console" or None
-        A callable receives the number of localizations fitted so far;
-        "console" shows a tqdm bar; None disables progress tracking.
-    abort_callback : callable or None
-        Polled while waiting; returning True cancels the pending tasks.
-
-    Returns
-    -------
-    pd.DataFrame or None
-        The combined localizations, or None if ``abort_callback``
-        requested cancellation.
-    """
-    use_tqdm = progress_callback == "console"
-    if use_tqdm:
-        iter_range = tqdm(range(N), desc="Fitting z...", unit="locs")
-    n_tasks = len(fs)
-    while lib.n_futures_done(fs) < n_tasks:
-        # check for abort
-        if abort_callback is not None and abort_callback():
-            for f in fs:
-                f.cancel()
-            if use_tqdm:
-                iter_range.close()
-            return None
-
-        n_finished = round(N * lib.n_futures_done(fs) / n_tasks)
-        if use_tqdm:
-            iter_range.update(n_finished - iter_range.n)
-        elif callable(progress_callback):
-            progress_callback(n_finished)
-        time.sleep(0.2)
-    if use_tqdm:
-        iter_range.update(N - iter_range.n)
-        iter_range.close()
-    return locs_from_futures(fs, filter=filter)
 
 
 def _apply_lateral_transforms_and_build_info(
@@ -1130,12 +1076,15 @@ def _zfit(
     lateral_transforms: dict | list | str | None,
     multiprocess: bool,
     gpu: bool,
-    progress_callback: Callable[[int], None] | Literal["console"] | None,
+    progress: lib.Progress,
     abort_callback: Callable[[], bool] | None,
 ) -> tuple[pd.DataFrame, list[dict]] | tuple[None, None]:
     """Internal function for fitting z coordinates to the localizations.
-    See `zfit` for details. ``calibration`` is in nm."""
+    See `zfit` for details. ``calibration`` is in nm; ``progress`` is a
+    normalized tracker, see ``lib.normalize_progress``."""
     N = len(locs)
+    lib.start_phase(progress, "Fitting z", N, unit="loc")
+    progress.set_value(0)
     if gpu:
         locs = _fit_z_gpu(
             locs=locs,
@@ -1145,21 +1094,19 @@ def _zfit(
             pixelsize=pixelsize,
             fitting_method=fitting_method,
             filter=filter,
-            progress_callback=progress_callback,
+            progress=progress,
         )
     elif multiprocess:
-        fs = _fit_z_parallel(
+        locs = _fit_z_parallel(
             locs=locs,
             info=info,
             calibration=calibration,
             magnification_factor=calibration["Magnification factor"],
             pixelsize=pixelsize,
             fitting_method=fitting_method,
-            filter=0,  # will be applied later
-            asynch=True,
-        )
-        locs = _await_parallel_z_fit(
-            fs, N, filter, progress_callback, abort_callback
+            filter=filter,
+            progress=progress,
+            abort_callback=abort_callback,
         )
         if locs is None:
             return None, None
@@ -1172,8 +1119,9 @@ def _zfit(
             pixelsize=pixelsize,
             fitting_method=fitting_method,
             filter=filter,
-            progress_callback=progress_callback,
+            progress=progress,
         )
+    progress.set_value(N)
     return _apply_lateral_transforms_and_build_info(
         locs, info, calibration, lateral_transforms, filter, pixelsize
     )

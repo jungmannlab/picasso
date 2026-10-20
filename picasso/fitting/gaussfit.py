@@ -43,14 +43,12 @@ License (MIT): ``LICENSES/Gpufit-LICENSE.txt``.
 
 from __future__ import annotations
 
-import threading
-from concurrent import futures
-from typing import Callable, Literal
+from typing import Literal
 
 import numba
 import numpy as np
-from tqdm import tqdm
 
+from picasso import lib
 from picasso.fitting.splinefit import (  # noqa: F401  (re-exported)
     AsyncFit,
     FIT_STATE_CONVERGED,
@@ -63,6 +61,7 @@ from picasso.fitting.splinefit import (  # noqa: F401  (re-exported)
     _LAMBDA_UP,
     allocate_outputs,
     _lm_solve_step,
+    _start_async,
     n_workers,
     resolve_variance,
 )
@@ -1176,16 +1175,15 @@ def fit_spots(
     mle: bool = False,
     tolerance: float | None = None,
     max_iterations: int | None = None,
-    progress_callback: (
-        Callable[[int], None] | Literal["console"] | None
-    ) = None,
+    progress: lib.Progress | Literal["console"] | None = None,
     variance: np.ndarray | None = None,
 ) -> tuple:
     """Fit spots with a 2D Gaussian model on the CPU, serially.
 
-    Signature-compatible with
+    Takes the same arrays and returns the same results as
     :func:`picasso.fitting.gaussfit_cuda.fit_spots`, so the two are
-    interchangeable backends.
+    interchangeable backends; the GPU fit also takes ``abort_callback``
+    and ``single_precision``.
 
     Parameters
     ----------
@@ -1204,9 +1202,11 @@ def fit_spots(
     max_iterations : int, optional
         Maximum number of iterations. ``None`` (the default) uses
         :data:`MAX_ITERATIONS`.
-    progress_callback : callable, "console" or None, optional
-        ``"console"`` shows a tqdm bar; a callable is invoked with the
-        cumulative number of spots fitted.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports one phase, "Fitting spots" over
+        the spots. Default is None.
     variance : np.ndarray, optional
         Per-pixel sCMOS readout variance in photoelectrons squared, laid out
         exactly like ``spots``. ``None`` (the default) fits the plain Poisson
@@ -1246,29 +1246,16 @@ def fit_spots(
         max_iterations,
         outputs,
     )
-    use_tqdm = progress_callback == "console"
-    index_range = range(len(spots))
-    if use_tqdm:
-        index_range = tqdm(index_range, desc="Fitting", unit="spot")
-    for index in index_range:
-        _fit_gauss_spot(spots, index, *args)
-        if callable(progress_callback):
-            progress_callback(index + 1)
-    return outputs
-
-
-def _worker(
-    spots: np.ndarray, args: tuple, current: list, lock, stop: np.ndarray
-) -> None:
-    """Worker for asynchronous fitting: claim the next spot and fit it."""
     n_spots = len(spots)
-    while True:
-        with lock:
-            if stop[0] or current[0] == n_spots:
-                return
-            index = current[0]
-            current[0] += 1
-        _fit_gauss_spot(spots, index, *args)
+    with lib.tracked_progress(
+        progress, "Fitting spots", unit="spot"
+    ) as progress:
+        lib.start_phase(progress, "Fitting spots", n_spots, unit="spot")
+        progress.set_value(0)
+        for index in range(n_spots):
+            _fit_gauss_spot(spots, index, *args)
+            progress.set_value(index + 1)
+    return outputs
 
 
 def fit_spots_async(
@@ -1317,8 +1304,9 @@ def fit_spots_async(
     Returns
     -------
     async_fit : picasso.fitting.splinefit.AsyncFit
-        Handle on the running fit. Its result arrays are filled in place; call
-        ``finished()`` to poll, ``results()`` for
+        Handle on the running fit. Its result arrays are filled in place;
+        poll ``n_done`` for the number of spots finished, ``finished()``
+        for whether the workers are done, call ``results()`` for
         ``(thetas, chi_squares, states, iterations)`` once done,
         ``raise_errors()`` to surface worker exceptions and ``stop()`` to
         abort.
@@ -1344,20 +1332,7 @@ def fit_spots_async(
         max_iterations,
         outputs,
     )
-    n_spots = len(spots)
-    if n_threads is None:
-        n_threads = n_workers()
-    n_threads = max(1, min(int(n_threads), max(n_spots, 1)))
-    lock = threading.Lock()
-    current = [0]
-    stop = np.zeros(1, dtype=np.uint8)
-    executor = futures.ThreadPoolExecutor(n_threads)
-    fs = [
-        executor.submit(_worker, spots, args, current, lock, stop)
-        for _ in range(n_threads)
-    ]
-    executor.shutdown(wait=False)
-    return AsyncFit(current, *outputs, fs, stop)
+    return _start_async(_fit_gauss_spot, spots, args, outputs, n_threads)
 
 
 # ----------------------------------------------------------------------
@@ -2105,16 +2080,15 @@ def fit_spots_multichannel(
     mle: bool = False,
     tolerance: float | None = None,
     max_iterations: int | None = None,
-    progress_callback: (
-        Callable[[int], None] | Literal["console"] | None
-    ) = None,
+    progress: lib.Progress | Literal["console"] | None = None,
     variance: np.ndarray | None = None,
 ) -> tuple:
     """Jointly fit several registered channels with an isotropic Gaussian.
 
-    Signature-compatible with
+    Takes the same arrays and returns the same results as
     :func:`picasso.fitting.gaussfit_cuda.fit_spots_multichannel`, so the two
-    are interchangeable backends.
+    are interchangeable backends; the GPU fit also takes
+    ``abort_callback`` and ``single_precision``.
 
     Parameters
     ----------
@@ -2136,8 +2110,11 @@ def fit_spots_multichannel(
         Use the Poisson maximum-likelihood estimator instead of least squares.
     tolerance, max_iterations : optional
         ``None`` uses :data:`TOLERANCE` / :data:`MAX_ITERATIONS`.
-    progress_callback : callable, "console" or None, optional
-        Reported per spot.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports one phase, "Fitting spots" over
+        the spots. Default is None.
     variance : np.ndarray, optional
         Per-pixel sCMOS readout variance laid out exactly like ``spots``.
 
@@ -2177,29 +2154,16 @@ def fit_spots_multichannel(
         max_iterations,
         outputs,
     )
-    use_tqdm = progress_callback == "console"
-    index_range = range(len(spots))
-    if use_tqdm:
-        index_range = tqdm(index_range, desc="Fitting", unit="spot")
-    for index in index_range:
-        _fit_gauss_spot_multichannel(spots, index, *args)
-        if callable(progress_callback):
-            progress_callback(index + 1)
-    return outputs
-
-
-def _worker_multichannel(
-    spots: np.ndarray, args: tuple, current: list, lock, stop: np.ndarray
-) -> None:
-    """Worker for asynchronous multichannel fitting."""
     n_spots = len(spots)
-    while True:
-        with lock:
-            if stop[0] or current[0] == n_spots:
-                return
-            index = current[0]
-            current[0] += 1
-        _fit_gauss_spot_multichannel(spots, index, *args)
+    with lib.tracked_progress(
+        progress, "Fitting spots", unit="spot"
+    ) as progress:
+        lib.start_phase(progress, "Fitting spots", n_spots, unit="spot")
+        progress.set_value(0)
+        for index in range(n_spots):
+            _fit_gauss_spot_multichannel(spots, index, *args)
+            progress.set_value(index + 1)
+    return outputs
 
 
 def fit_spots_multichannel_async(
@@ -2250,7 +2214,8 @@ def fit_spots_multichannel_async(
     -------
     job : picasso.fitting.splinefit.AsyncFit
         Handle on the running fit. Its result arrays are filled in place, so
-        they are only meaningful once ``job.finished()`` is True.
+        they are only meaningful once ``job.finished()`` is True;
+        ``job.n_done`` counts the spots finished so far.
     """
     (
         spots,
@@ -2284,17 +2249,6 @@ def fit_spots_multichannel_async(
         max_iterations,
         outputs,
     )
-    n_spots = len(spots)
-    if n_threads is None:
-        n_threads = n_workers()
-    n_threads = max(1, min(int(n_threads), max(n_spots, 1)))
-    lock = threading.Lock()
-    current = [0]
-    stop = np.zeros(1, dtype=np.uint8)
-    executor = futures.ThreadPoolExecutor(n_threads)
-    fs = [
-        executor.submit(_worker_multichannel, spots, args, current, lock, stop)
-        for _ in range(n_threads)
-    ]
-    executor.shutdown(wait=False)
-    return AsyncFit(current, *outputs, fs, stop)
+    return _start_async(
+        _fit_gauss_spot_multichannel, spots, args, outputs, n_threads
+    )

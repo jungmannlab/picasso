@@ -177,7 +177,7 @@ def _run_fit_z(window, monkeypatch):
                 applied_lateral_transforms=[],
                 skipped_lateral_transforms=[],
                 isInterruptionRequested=lambda: False,
-                on_progress=lambda n: None,
+                on_progress=lambda n, maximum: None,
             )
             built["worker"] = worker
             for signal in ("progressMade", "finished", "aborted"):
@@ -453,8 +453,8 @@ class TestTheFitLeavesARecord:
             camera_calibration=None,
             N=len(locs),
             isInterruptionRequested=lambda: False,
-            on_progress=lambda n: None,
-            on_cut_progress=lambda n: None,
+            on_progress=lambda n, maximum: None,
+            on_phase=lambda label, maximum: None,
             progressMade=types.SimpleNamespace(emit=lambda *a: None),
             aborted=types.SimpleNamespace(emit=lambda *a: None),
             finished=types.SimpleNamespace(

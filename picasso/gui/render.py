@@ -22,7 +22,7 @@ import os.path
 from math import ceil
 from collections import Counter
 from functools import partial
-from typing import Callable
+from typing import Callable, Literal
 from PIL import Image
 
 import matplotlib
@@ -3953,7 +3953,7 @@ def _build_render_index_in_task(
 ):
     """Build the spatial index of ``locs`` inside a cancelable task.
     Returns None if it cannot be built (picking then indexes itself)."""
-    progress.phase("Indexing localizations", 0)
+    lib.start_phase(progress, "Indexing localizations", 0)
     try:
         index = spatial_index.build_render_index(locs, info)
     except Exception:  # noqa: BLE001 - picking indexes itself
@@ -4673,7 +4673,6 @@ class TestClustererDialog(lib.Dialog):
                 params["G5M"]["mode"] = "astigmatism"
                 params["G5M"]["calibration"] = self.test_g5m_params.calibration
             params["G5M"]["asynch"] = False
-            params["G5M"]["callback_parent"] = None
 
         return params
 
@@ -4808,13 +4807,13 @@ class TestClustererDialog(lib.Dialog):
             params["G5M"]["asynch"] = True
 
             def job(progress: lib.TaskProgress) -> None:
-                progress.phase("Applying DBSCAN...", 0)
+                lib.start_phase(progress, "Applying DBSCAN...", 0)
                 clustered, _ = clusterer.dbscan(locs, **params["DBSCAN"])
                 centers, clustered_locs, new_info = g5m.g5m(
                     clustered,
                     info,
                     **params["G5M"],
-                    callback_parent=progress,
+                    progress=progress,
                 )
                 progress.check_canceled()
                 # save clustered locs and centers
@@ -6165,7 +6164,7 @@ class InfoDialog(lib.Dialog):
                 n_rois=n_rois,
                 roi_size=roi_size,
                 min_locs=min_locs,
-                callback=progress.set_value,
+                progress=progress,
             )
 
         def failed(error: Exception) -> None:
@@ -6181,7 +6180,6 @@ class InfoDialog(lib.Dialog):
             lambda result: self._show_frc_rois_result(
                 locs, info, viewport, n_rois, result
             ),
-            maximum=n_rois,
             on_failed=failed,
         )
 
@@ -6293,7 +6291,7 @@ class InfoDialog(lib.Dialog):
         info = self.window.view.infos[channel]
 
         def compute(progress: lib.TaskProgress) -> tuple:
-            return postprocess.nena(locs, info, progress.set_value)
+            return postprocess.nena(locs, info, progress=progress)
 
         def apply(result: tuple) -> None:
             self.nena_result, self.lp = result  # nm
@@ -6312,9 +6310,7 @@ class InfoDialog(lib.Dialog):
             if on_done is not None:
                 on_done()
 
-        lib.run_task(
-            compute, "Calculating NeNA precision", self, apply, maximum=100
-        )
+        lib.run_task(compute, "Calculating NeNA precision", self, apply)
 
     def calibrate_influx(self) -> None:
         """Calculate influx rate (1/frames)."""
@@ -9484,7 +9480,7 @@ class RESIDialog(lib.Dialog):
                 suffix_locs=suffix_locs,
                 output_paths=paths,
                 suffix_centers=suffix_centers,
-                progress_callback=progress.set_value,
+                progress=progress,
             )
             progress.check_canceled()
             resi_info[-1]["Paths to RESI channels"] = paths
@@ -9494,7 +9490,6 @@ class RESIDialog(lib.Dialog):
             compute,
             "Performing RESI analysis...",
             self.window,
-            maximum=self.n_channels,
             title="RESI",
         )
 
@@ -10993,11 +10988,46 @@ class SlicerDialog(lib.Dialog):
 
 
 class _LoadCanceledError(Exception):
-    """Raised inside the loading worker to abort the current file."""
+    """Raised inside the loading worker to abort the current file.
+
+    Not a ``RuntimeError``, which ``picasso.io`` catches while it scans
+    a file."""
+
+
+class _LoadProgress(lib.MockProgress):
+    """Progress tracker of ``LocsLoadWorker``: forwards the read progress
+    within the current file as ``(done, total)`` and doubles as the
+    mid-file cancellation point.
+
+    Parameters
+    ----------
+    worker : LocsLoadWorker
+        The worker whose ``subprogress`` signal is emitted and whose
+        cancel flag is checked.
+    """
+
+    def __init__(self, worker: "LocsLoadWorker") -> None:
+        super().__init__()
+        self.worker = worker
+
+    def set_value(self, value, *args, **kwargs) -> None:
+        """Emit ``(value, maximum)``, or abort the read if the worker
+        was canceled.
+
+        Raises
+        ------
+        _LoadCanceledError
+            If the worker was canceled.
+        """
+        if self.worker._canceled:
+            raise _LoadCanceledError
+        self.worker.subprogress.emit(int(value), int(self.maximum()))
 
 
 def _read_locs_file(
-    path: str, pixelsize: float | None = None, progress=None
+    path: str,
+    pixelsize: float | None = None,
+    progress: lib.Progress | Literal["console"] | None = None,
 ) -> tuple[pd.DataFrame, list[dict]]:
     """Read localizations and metadata from a given path, either Picasso
     (.hdf5), ThunderSTORM (.csv), SMAP (_sml.mat) or PyME (.h5r, .hdf)
@@ -11016,10 +11046,11 @@ def _read_locs_file(
         store it, and for .hdf5 files written before Picasso 1.0 (in
         camera pixels) whose metadata has no ``Pixelsize``; see
         ``io.load_locs``.
-    progress : callable or None, optional
-        Called as ``progress(done, total)`` while the localizations are
-        read (.hdf5 only, which is read in blocks); raising inside it
-        aborts the read.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``, that reports the
+        localizations read (.hdf5 only, which is read in blocks, see
+        ``io.load_locs``); raising inside its ``set_value`` aborts the
+        read. Default is None.
 
     Returns
     -------
@@ -11059,7 +11090,9 @@ def _legacy_locs_without_pixelsize(path: str) -> bool:
 
 
 def _read_locs_channels(
-    path: str, pixelsize: float | None = None, progress=None
+    path: str,
+    pixelsize: float | None = None,
+    progress: lib.Progress | Literal["console"] | None = None,
 ) -> list[tuple[str, pd.DataFrame, list[dict]]]:
     """Read the channel(s) stored in a localization file, see
     ``_read_locs_file``. A PyME file holds one channel per ``probe``
@@ -11146,14 +11179,6 @@ class LocsLoadWorker(QtCore.QObject):
         localizations read, i.e. also within a file."""
         self._canceled = True
 
-    def _report(self, done: int, total: int) -> None:
-        """Report the read progress within the current file. Called
-        between the blocks of localizations read, so it doubles as the
-        mid-file cancellation point."""
-        if self._canceled:
-            raise _LoadCanceledError
-        self.subprogress.emit(done, total)
-
     def _try_load_file(self, path: str, pixelsize):
         """Load one file's channel(s), see ``_read_locs_channels``.
 
@@ -11173,7 +11198,9 @@ class LocsLoadWorker(QtCore.QObject):
         io_log = logging.getLogger(io.__name__)
         io_log.addHandler(records)
         try:
-            return _read_locs_channels(path, pixelsize, progress=self._report)
+            return _read_locs_channels(
+                path, pixelsize, progress=_LoadProgress(self)
+            )
         except _LoadCanceledError:
             raise
         except io.NoMetadataFileError:
@@ -12371,23 +12398,25 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
 
         See ``self.link`` for more info."""
         channel = self.get_channel()
-        progress = lib.ProgressDialog(
-            "Combining localizations in picks", 0, len(self._picks), self
-        )
         if self._pick_shape == "Circle":
             index_blocks = self._pick_index(channel)
         else:
             index_blocks = None
-        self.locs[channel] = postprocess.combine_locs_in_picks(
-            self.locs[channel],
-            self.infos[channel],
-            picks=self._picks,
-            pick_shape=self._pick_shape,
-            pick_size=self._pick_size,
-            index_blocks=index_blocks,
-            progress_callback=progress.set_value,
+        progress = lib.ProgressDialog(
+            "Combining localizations in picks", 0, 0, self
         )
-        progress.close()
+        try:
+            self.locs[channel] = postprocess.combine_locs_in_picks(
+                self.locs[channel],
+                self.infos[channel],
+                picks=self._picks,
+                pick_shape=self._pick_shape,
+                pick_size=self._pick_size,
+                index_blocks=index_blocks,
+                progress=progress,
+            )
+        finally:
+            progress.close()
 
         if "group" in self.locs[channel].columns:
             self.group_color = render.get_group_color(
@@ -12431,7 +12460,8 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
                         f"Linking localizations (channel {i + 1}/"
                         f"{len(jobs)})..."
                     )
-                progress.phase(description, 0)  # cancellation point
+                # cancellation point
+                lib.start_phase(progress, description, 0)
                 linked_locs = postprocess.link(
                     locs, info, r_max=r_max, max_dark_time=max_dark
                 )
@@ -12633,7 +12663,9 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             radius_z = None
 
         def job(progress: lib.TaskProgress) -> None:
-            progress.phase("Applying DBSCAN. This may take a while.", 0)
+            lib.start_phase(
+                progress, "Applying DBSCAN. This may take a while.", 0
+            )
             clustered_locs, dbscan_info = clusterer.dbscan(
                 locs,
                 radius,
@@ -12750,7 +12782,9 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         info = self.infos[channel]
 
         def job(progress: lib.TaskProgress) -> None:
-            progress.phase("Applying HDBSCAN. This may take a while.", 0)
+            lib.start_phase(
+                progress, "Applying HDBSCAN. This may take a while.", 0
+            )
             clustered_locs, hdbscan_info = clusterer.hdbscan(
                 locs,
                 min_cluster,
@@ -12873,7 +12907,6 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         info = self.infos[channel]
 
         def job(progress: lib.TaskProgress) -> None:
-            progress.phase("Clustering localizations", len(locs))
             clustered_locs, new_info = clusterer.cluster(
                 locs,
                 radius_xy,
@@ -12924,7 +12957,6 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         io.save_locs(path, clustered_locs, info)
         base = os.path.splitext(path)[0]
         if save_centers:
-            progress.phase("Calculating cluster centers", 0)
             centers = clusterer.find_cluster_centers(
                 clustered_locs, progress=progress
             )
@@ -12932,12 +12964,7 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             io.save_locs(base + "_centers.hdf5", centers, info)
         if save_areas:
             areas = clusterer.cluster_areas(
-                clustered_locs,
-                info,
-                progress.callback(
-                    "Calculating cluster areas",
-                    len(np.unique(clustered_locs["group"])),
-                ),
+                clustered_locs, info, progress=progress
             )
             progress.check_canceled()
             areas.to_csv(base + "_areas.csv", index=False)
@@ -13106,7 +13133,7 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
                 max_locs_per_cluster=params["max_locs_per_cluster"][channel],
                 asynch=params["multiprocessing_check"],
                 group_column=params["group_column"],
-                callback_parent=progress,
+                progress=progress,
             )
             if g5m_centers is None:
                 return None
@@ -15838,24 +15865,20 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             with warnings.catch_warnings():  # the user was asked
                 warnings.filterwarnings("ignore", message=".*not linked")
                 if pair is None:
-                    progress.phase(
-                        "Calculating CBC...", sum(len(_) for _ in locs)
-                    )
                     all_locs, all_infos = postprocess.cbc_all_pairs(
                         locs,
                         infos,
                         names=names,
-                        progress_callback=progress.set_value,
+                        progress=progress,
                         **kwargs,
                     )
                 else:
-                    progress.phase("Calculating CBC...", len(locs[0]))
                     new_locs, new_info = postprocess.cbc(
                         locs[0],
                         infos[0],
                         locs[1],
                         partner_names=names[pair[1]],
-                        progress_callback=progress.set_value,
+                        progress=progress,
                         **kwargs,
                     )
                     all_locs, all_infos = [new_locs], [new_info]
@@ -15943,7 +15966,6 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             pick_shape, pick_size = "Box", None
         else:
             picks, pick_shape, pick_size = None, None, None
-        n_regions = 1 if picks is None else len(picks)
         kwargs = dict(
             r_max=params["r_max"],
             steps=params["steps"],
@@ -15963,10 +15985,6 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             )
 
         def compute(progress: lib.TaskProgress) -> tuple[dict, list[str]]:
-            progress.phase(
-                f"Calculating {name}...",
-                n_regions * (params["n_simulations"] + 1),
-            )
             with warnings.catch_warnings(record=True) as caught:
                 warnings.simplefilter("always")
                 result = spec["compute"](
@@ -15975,7 +15993,7 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
                     picks,
                     pick_shape,
                     pick_size,
-                    progress_callback=progress.set_value,
+                    progress=progress,
                     **kwargs,
                 )
             # the user was asked about the molecules already
@@ -16711,14 +16729,15 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             dark[i] = lib.estimate_kinetic_rate(pick_locs["dark"].to_numpy())
             out_locs.append(pick_locs)
             progress.set_value(i + 1)
+        progress.close()
         out_locs = pd.concat(out_locs, ignore_index=True)
-        n_groups = len(clustered_locs)
         progress = lib.ProgressDialog(
-            "Calculating pick properties", 0, n_groups, self
+            "Calculating pick properties", 0, 0, self
         )
-        pick_props = postprocess.groupprops(
-            out_locs, callback=progress.set_value
-        )
+        try:
+            pick_props = postprocess.groupprops(out_locs, progress=progress)
+        finally:
+            progress.close()
         n_units = self.window.info_dialog.calculate_n_units(dark)
         pick_props["n_units"] = n_units
         influx = self.window.info_dialog.influx_rate.value()
@@ -17349,21 +17368,20 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             pick.
         """
         if len(self._picks):
-            # initialize progress dialog
+            kwargs = self._picked_locs_kwargs(channel, add_group)
             progress = lib.ProgressDialog(
-                "Creating localization list", 0, len(self._picks), self
+                "Creating localization list", 0, 0, self
             )
-            progress.set_value(0)
-            return postprocess.picked_locs(
-                **self._picked_locs_kwargs(channel, add_group),
-                callback=progress.set_value,
-            )
+            try:
+                return postprocess.picked_locs(**kwargs, progress=progress)
+            finally:
+                progress.close()
 
     def _picked_locs_kwargs(
         self, channel: int, add_group: bool = True
     ) -> dict:
         """Arguments of ``postprocess.picked_locs`` for the current picks
-        in ``channel``, without the callback.
+        in ``channel``, without the progress tracker.
 
         Resolving the spatial index may build it (and show a dialog), so
         this runs on the GUI thread; the picking itself can then run on
@@ -18097,30 +18115,21 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             for path, info, source in inputs:
                 if n_picks:
                     picked_locs = postprocess.picked_locs(
-                        **source,
-                        callback=progress.callback(
-                            "Creating localization list", n_picks
-                        ),
+                        **source, progress=progress
                     )
                 else:
-                    progress.phase("Grouping localizations", 0)
+                    lib.start_phase(progress, "Grouping localizations", 0)
                     picked_locs = [
                         source[source["group"] == i]
                         for i in np.unique(source["group"])
                     ]
-                n = len(picked_locs)
                 pick_props = postprocess.pick_properties(
                     picked_locs=picked_locs,
                     info=info,
                     max_dark_time=max_dark_time,
                     influx_rate=influx,
                     pick_areas=pick_areas,
-                    kinetics_progress=progress.callback(
-                        "Calculating kinetics", n
-                    ),
-                    groupprops_progress=progress.callback(
-                        "Calculating pick properties", n
-                    ),
+                    progress=progress,
                 )
                 progress.check_canceled()
                 new_info = info + [
@@ -18358,11 +18367,6 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         def compute(progress: lib.TaskProgress) -> list[tuple]:
             results = []
             for c, locs, info in jobs:
-                n_frames = lib.get_from_metadata(
-                    info, "Frames", raise_error=True
-                )
-                n_segments = int(np.ceil(n_frames / params["segmentation"]))
-                progress.phase("Undrifting by AIM (1/2)", n_segments)
                 new_locs, new_info, drift = aim.aim(
                     locs, info, **params, progress=progress
                 )
@@ -18382,7 +18386,7 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
 
         lib.run_task(
             compute,
-            "Undrifting by AIM (1/2)",
+            "Undrifting by AIM",
             self.window,
             apply,
             title="Undrift by AIM",
@@ -18409,17 +18413,14 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         def compute(progress: lib.TaskProgress) -> list[tuple]:
             results = []
             for c, locs, info in jobs:
-                n_segments = postprocess.n_segments(info, segmentation)
-                n_pairs = int(n_segments * (n_segments - 1) / 2)
                 # the undrifted locs are ignored, since _apply_drift
                 # assigns them together with the drift attributes
                 drift, _ = postprocess.undrift(
                     locs,
                     info,
                     segmentation,
-                    False,
-                    progress.callback("Generating segments", n_segments),
-                    progress.callback("Correlating image pairs", n_pairs),
+                    display=False,
+                    progress=progress,
                 )
                 results.append((c, drift))
             return results
@@ -18871,28 +18872,22 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         if channel is None:
             return
         pick_kwargs = self._picked_locs_kwargs(channel)
-        n_picks = len(self._picks)
         info = self.infos[channel]
         max_dark_time = self.window.info_dialog.max_dark_time.value()
         is_3d = "z" in self.locs[channel].columns
 
         def compute(progress: lib.TaskProgress) -> tuple:
             picked_locs = postprocess.picked_locs(
-                **pick_kwargs,
-                callback=progress.callback(
-                    "Creating localization list", n_picks
-                ),
+                **pick_kwargs, progress=progress
             )
             stats = postprocess.evaluate_picks(
                 picked_locs=picked_locs,
                 info=info,
                 max_dark_time=max_dark_time,
-                progress_callback=progress.callback(
-                    "Calculating pick statistics", n_picks
-                ),
+                progress=progress,
             )
             new_locs = stats[-1]
-            progress.phase("Fitting kinetics", 0)
+            lib.start_phase(progress, "Fitting kinetics", 0)
             fit_result_len = lib.fit_cum_exp(new_locs["len"].to_numpy())
             fit_result_dark = lib.fit_cum_exp(new_locs["dark"].to_numpy())
             return stats, fit_result_len, fit_result_dark
@@ -18902,7 +18897,6 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             "Creating localization list",
             self,
             lambda result: self._show_pick_info_long(is_3d, *result),
-            maximum=n_picks,
         )
 
     def _show_pick_info_long(

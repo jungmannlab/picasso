@@ -226,12 +226,8 @@ class ConvertUnitsDialog(lib.Dialog):
                 return
 
         def compute(progress: lib.TaskProgress) -> list[tuple]:
-            progress.phase("Converting files to nm...", len(paths))
             return legacy.convert_files(
-                paths,
-                pixelsize,
-                in_place=in_place,
-                progress=lambda done, total: progress.set_value(done),
+                paths, pixelsize, in_place=in_place, progress=progress
             )
 
         def finished(results: list[tuple]) -> None:
@@ -252,7 +248,6 @@ class ConvertUnitsDialog(lib.Dialog):
             "Converting files to nm...",
             self,
             finished,
-            maximum=len(paths),
             on_failed=failed,
             on_canceled=canceled,
             title="Convert files to nm",

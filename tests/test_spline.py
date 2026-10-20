@@ -25,6 +25,10 @@ from tests.conftest import (
     linear_part,
 )
 from tests.conftest import CAMERA_INFO as _CAMERA_INFO
+from tests._progress_tracking import (  # noqa: E402
+    RecordingProgress,
+    assert_phases_complete,
+)
 
 # the calibration records the camera pixel size (nm), so it is required
 CAMERA_INFO = {**_CAMERA_INFO, "Pixelsize": PIXELSIZE}
@@ -2671,3 +2675,69 @@ class TestWaveletDetection:
             truth,
             atol=0.35,
         )
+
+
+class TestCalibrationProgress:
+    """``progress``: one "Calibrating spline" phase over three steps.
+
+    The old step callback was silently ignored with ``"console"``."""
+
+    @staticmethod
+    def _single(progress):
+        movie, _, _ = _synthetic_bead_movie()
+        return spline.calibrate_spline(
+            movie,
+            info=[{"Frames": int(movie.shape[0])}],
+            camera_info=CAMERA_INFO,
+            box=BOX,
+            identification_method=NG,
+            d=20.0,
+            model="spline-2d",
+            progress=progress,
+        )
+
+    @staticmethod
+    def _multichannel(progress):
+        movie_ref, _, _ = _synthetic_bead_movie()
+        movie_c = np.roll(movie_ref, shift=(2, -1), axis=(1, 2))
+        info = [{"Frames": int(movie_ref.shape[0])}]
+        return spline.calibrate_spline_multichannel(
+            [movie_ref, movie_c],
+            infos=[info, info],
+            camera_infos=[CAMERA_INFO, CAMERA_INFO],
+            box=BOX,
+            identification_method=NG,
+            d=20.0,
+            progress=progress,
+        )
+
+    @staticmethod
+    def _split_fov(progress):
+        movie, regions, _ = _synthetic_split_fov_movie(2, -1)
+        return spline.calibrate_spline_split_fov(
+            movie,
+            info=[{"Frames": int(movie.shape[0])}],
+            camera_info=CAMERA_INFO,
+            box=BOX,
+            identification_method=NG,
+            d=20.0,
+            regions=regions,
+            progress=progress,
+        )
+
+    @pytest.mark.parametrize("which", ["single", "multichannel", "split_fov"])
+    def test_tracker_sees_three_steps(self, which):
+        tracker = RecordingProgress()
+        getattr(self, f"_{which}")(tracker)
+        assert_phases_complete(tracker, ["Calibrating spline"])
+        phase = tracker.phases[0]
+        assert phase["maximum"] == 3
+        assert phase["values"] == [0, 1, 2, 3]
+        assert phase["unit"] == "step"
+
+    def test_none_is_silent_and_console_works(self, capsys):
+        self._single(None)
+        captured = capsys.readouterr()
+        assert captured.out == "" and captured.err == ""
+        self._single("console")
+        assert "Calibrating spline" in capsys.readouterr().err

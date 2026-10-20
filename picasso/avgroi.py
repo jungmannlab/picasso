@@ -10,12 +10,11 @@ interest (ROI).
 """
 
 from concurrent import futures
-from typing import Callable, Literal
+from typing import Literal
 
 import numba
 import numpy as np
 import pandas as pd
-from tqdm import tqdm
 
 from . import lib
 from .fitting import precision
@@ -56,9 +55,7 @@ def fit_spot(spot: lib.FloatArray2D) -> list[float]:
 
 def fit_spots(
     spots: lib.FloatArray3D,
-    progress_callback: (
-        Callable[[int], None] | Literal["console"] | None
-    ) = None,
+    progress: lib.Progress | Literal["console"] | None = None,
 ) -> lib.FloatArray2D:
     """Fit several spots, one after another.
 
@@ -66,33 +63,33 @@ def fit_spots(
     ----------
     spots : lib.FloatArray3D
         ``(n_spots, box, box)`` photon counts.
-    progress_callback : callable, "console" or None, optional
-        ``"console"`` shows a tqdm bar; a callable is invoked with the index
-        of the spot just fitted. Default None.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports one phase, "Fitting spots", over
+        the spots. Default is None.
 
     Returns
     -------
     theta : lib.FloatArray2D
         ``(n_spots, 6)`` fit parameters, each row as :func:`fit_spot`.
     """
-    theta = np.empty((len(spots), 6), dtype=np.float32)
+    n_spots = len(spots)
+    theta = np.empty((n_spots, 6), dtype=np.float32)
     theta.fill(np.nan)
-    use_tqdm = progress_callback == "console"
-    if use_tqdm:
-        iter_range = tqdm(range(len(spots)), desc="Fitting...", unit="spot")
-    else:
-        iter_range = range(len(spots))
-    for i in iter_range:
-        spot = spots[i]
-        theta[i] = fit_spot(spot)
-        if callable(progress_callback):
-            progress_callback(i)
+    with lib.tracked_progress(progress, "Fitting spots", "spot") as progress:
+        lib.start_phase(progress, "Fitting spots", n_spots, unit="spot")
+        for i in range(n_spots):
+            theta[i] = fit_spot(spots[i])
+            progress.set_value(i + 1)
+        progress.set_value(n_spots)
     return theta
 
 
 def fit_spots_parallel(
     spots: lib.FloatArray3D,
     asynch: bool = False,
+    progress: lib.Progress | Literal["console"] | None = None,
 ) -> lib.FloatArray2D | list[futures.Future]:
     """Fit spots in a pool of worker processes.
 
@@ -103,6 +100,11 @@ def fit_spots_parallel(
     asynch : bool, optional
         If True, return the pending futures immediately instead of waiting.
         Default False.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports one phase, "Fitting spots", over
+        the spots. Unused if ``asynch``. Default is None.
 
     Returns
     -------
@@ -128,9 +130,23 @@ def fit_spots_parallel(
         fs.append(executor.submit(fit_spots, spots[i : i + n_spots_task]))
     if asynch:
         return fs
-    with tqdm(total=n_tasks, unit="task") as progress_bar:
-        for f in futures.as_completed(fs):
-            progress_bar.update()
+    try:
+        with lib.tracked_progress(
+            progress, "Fitting spots", "spot"
+        ) as progress:
+            lib.start_phase(progress, "Fitting spots", n_spots, unit="spot")
+            done = 0
+            sizes = dict(zip(fs, spots_per_task))
+            for f in futures.as_completed(fs):
+                done += sizes[f]
+                progress.set_value(done)
+            progress.set_value(n_spots)
+    except BaseException:
+        for f in fs:
+            f.cancel()
+        raise
+    finally:
+        executor.shutdown(wait=False)
     return fits_from_futures(fs)
 
 

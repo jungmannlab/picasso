@@ -13,14 +13,15 @@ from __future__ import annotations
 import glob
 import collections
 import colorsys
+import contextlib
 import importlib
 import multiprocessing
 import os
 import sys
 import warnings
 from copy import deepcopy
-from typing import Any, TypeAlias, Literal
-from collections.abc import Callable
+from typing import Any, TypeAlias, Literal, Protocol, runtime_checkable
+from collections.abc import Callable, Iterator
 from asyncio import Future
 
 import numba
@@ -72,6 +73,10 @@ __all__ = [
     "describe_lateral_transforms",
     "apply_lateral_transforms",
     "DuplicateLateralTransformWarning",
+    # progress
+    "Progress",
+    "MockProgress",
+    "OperationCanceled",
     # other
     "append_group",
 ]
@@ -151,7 +156,6 @@ _QT_NAMES = (
     "Task",
     "run_task",
     "run_with_status",
-    "ProgressType",
     "CollapsibleHeader",
     "CollapsibleGroupBox",
     "remember_expanded_sections",
@@ -475,13 +479,89 @@ class OperationCanceled(Exception):
     """
 
 
+@runtime_checkable
+class Progress(Protocol):
+    """The progress tracker interface taken by Picasso's long-running
+    functions.
+
+    Every public function that reports progress takes one ``progress``
+    argument, which is one of:
+
+    * an object implementing this interface, e.g.,
+      ``picasso.lib.ProgressDialog`` or the ``TaskProgress`` of a GUI
+      task (``picasso.lib.run_task``);
+    * ``"console"``, which shows a tqdm progress bar per phase;
+    * None, which reports nothing.
+
+    The function sets the maximum of each phase itself and reports the
+    number of items finished so far, ending each phase at its maximum, so
+    a tracker never needs to know what the function computes. A custom
+    tracker can subclass :class:`MockProgress` and override the methods
+    it needs, e.g., only :meth:`set_value`.
+
+    The methods are called from the thread that called the function.
+    ``set_value`` and ``zero_progress`` may raise
+    :class:`OperationCanceled` to cancel the computation.
+    """
+
+    def set_value(self, value: int) -> None:
+        """Report the number of items finished in the current phase.
+
+        Parameters
+        ----------
+        value : int
+            Items finished so far, from 0 up to :meth:`maximum`.
+        """
+
+    def setMaximum(self, maximum: int) -> None:
+        """Set the number of items of the current phase.
+
+        Parameters
+        ----------
+        maximum : int
+            Number of items; 0 means unknown (a busy indicator).
+        """
+
+    def maximum(self) -> int:
+        """The maximum last set.
+
+        Returns
+        -------
+        maximum : int
+        """
+
+    def zero_progress(
+        self, description: str | None = None, unit: str | None = None
+    ) -> None:
+        """Start a new phase at zero progress.
+
+        Parameters
+        ----------
+        description : str, optional
+            Label of the new phase. None keeps the current one.
+        unit : str, optional
+            Name of one item of the new phase, e.g. "loc" (shown by the
+            console bar). None keeps the current one.
+        """
+
+    def close(self) -> None:
+        """Finish reporting."""
+
+
 class MockProgress:
-    """Class to mock a progress bar or dialog, allowing for calling
-    the same methods but not displaying anything.
+    """Progress tracker that reports nothing.
+
+    Implements the :class:`Progress` interface with methods that do
+    nothing (except remembering the maximum), so that a function can drive
+    progress unconditionally; ``normalize_progress(None)`` returns one.
+    Also a convenient base class for custom trackers, e.g.::
+
+        class PrintProgress(lib.MockProgress):
+            def set_value(self, value, *args, **kwargs):
+                print(f"{value} / {self.maximum()}")
 
     Every method accepts (and ignores) whatever the ``ProgressDialog``
-    interface passes, so a caller can drive progress unconditionally. See
-    :func:`normalize_progress`.
+    interface passes.
     """
 
     def __init__(self, *args, **kwargs):
@@ -527,16 +607,17 @@ class MockProgress:
         pass
 
     def zero_progress(self, description=None, *args, **kwargs):
-        """Do nothing.
+        """Record the label of the new phase.
 
         Parameters
         ----------
         description : str, optional
-            Ignored; a real dialog would show it as the new phase's label.
+            Label of the new phase. None keeps the current one.
         *args, **kwargs
             Accepted and ignored, for ``ProgressDialog`` compatibility.
         """
-        pass
+        if description:
+            self.description_base = description
 
     def close(self, *args, **kwargs):
         """Do nothing."""
@@ -550,27 +631,13 @@ class MockProgress:
         """Do nothing."""
         pass
 
-    def get_iterator(self, start=0, end=100):
-        """A plain iterator, with no progress attached.
-
-        Parameters
-        ----------
-        start, end : int, optional
-            First and one-past-last value. Defaults 0 and 100.
-
-        Returns
-        -------
-        iterator : range
-        """
-        return range(start, end)
-
 
 class TqdmProgress:
-    """Class to absorb calls to ProgressDialog but is used to display
-    tqdm progress bar instead.
+    """Progress tracker showing a tqdm progress bar in the console, one
+    bar per phase.
 
-    Implements the same interface as ``ProgressDialog`` (see
-    ``normalize_progress``): the bar is armed lazily on the first
+    Implements the :class:`Progress` interface; ``normalize_progress``
+    returns one for ``"console"``. The bar is armed lazily on the first
     ``set_value`` call, using the description and maximum declared so
     far; ``zero_progress`` closes the current bar so that the next
     ``set_value`` starts a fresh one (a new phase)."""
@@ -581,14 +648,12 @@ class TqdmProgress:
         Parameters
         ----------
         unit : str, optional
-            Name of one iteration, shown by tqdm. Default "it".
+            Name of one item, shown by tqdm. Default "it".
         *args, **kwargs
             ``description`` (keyword) is used as the bar's label; anything
             else a real progress dialog takes is accepted and ignored.
         """
-        self.description_base = (
-            "" if "description" not in kwargs else kwargs["description"]
-        )
+        self.description_base = kwargs.get("description", "")
         self.iterator = None
         self.unit = unit
         self._maximum = 0
@@ -603,7 +668,7 @@ class TqdmProgress:
         Parameters
         ----------
         value : int
-            Cumulative progress so far.
+            Items finished so far in the current phase.
         *args, **kwargs
             Accepted and ignored, for ``ProgressDialog`` compatibility.
         """
@@ -621,13 +686,13 @@ class TqdmProgress:
         Parameters
         ----------
         maximum : int
-            The total the bar counts towards.
+            The total the bar counts towards; 0 means unknown.
         *args, **kwargs
             Accepted and ignored, for ``ProgressDialog`` compatibility.
         """
         self._maximum = maximum
         if self.iterator is not None:
-            self.iterator.total = maximum
+            self.iterator.total = maximum or None
             self.iterator.refresh()
 
     def maximum(self):
@@ -647,7 +712,7 @@ class TqdmProgress:
         """Do nothing; accepted for interface compatibility with Qt."""
         pass
 
-    def zero_progress(self, description=None, *args, **kwargs):
+    def zero_progress(self, description=None, *args, unit=None, **kwargs):
         """Close the current bar so the next :meth:`set_value` starts a fresh
         one, i.e. a new phase.
 
@@ -655,11 +720,16 @@ class TqdmProgress:
         ----------
         description : str, optional
             Label of the new phase. None keeps the current one.
+        unit : str, optional
+            Name of one item of the new phase. None keeps the current
+            one.
         *args, **kwargs
             Accepted and ignored, for ``ProgressDialog`` compatibility.
         """
         if description:
             self.description_base = description
+        if unit:
+            self.unit = unit
         self.close()
 
     def close(self, *args, **kwargs):
@@ -676,51 +746,28 @@ class TqdmProgress:
         """Do nothing; there is no console equivalent."""
         pass
 
-    def get_iterator(self, start=0, end=100, unit="segment"):
-        """Get an iterator that drives the progress bar.
-
-        Parameters
-        ----------
-        start, end : int, optional
-            First and one-past-last value of the iteration. Defaults 0 and
-            100.
-        unit : str, optional
-            Name of one iteration, shown by tqdm. Default "segment".
-
-        Returns
-        -------
-        iterator : tqdm.tqdm
-            Iterator over ``range(start, end)``, also stored on the instance.
-        """
-        self.close()
-        iterator = tqdm(
-            range(start, end),
-            desc=self.description_base,
-            unit=unit,
-        )
-        self.iterator = iterator
-        return iterator
-
 
 def normalize_progress(
-    progress: Any,
+    progress: Progress | Literal["console"] | None,
     description: str = "",
     unit: str = "it",
-) -> Any:
-    """Normalize a public ``progress``/``callback`` argument to an
-    object with the ``ProgressDialog`` interface (``set_value``,
-    ``setMaximum``, ``zero_progress``, ...), so that callers can drive
-    progress with plain method calls instead of checking which kind of
-    tracker they hold (which would also pull in Qt in headless runs):
+) -> Progress:
+    """Normalize a public ``progress`` argument to a :class:`Progress`
+    tracker, so that callers can drive progress with plain method calls
+    instead of checking which kind of tracker they hold (which would also
+    pull in Qt in headless runs):
 
     * ``None`` -> ``MockProgress`` (reports nothing),
     * ``"console"`` -> ``TqdmProgress`` (tqdm bar in the console),
     * anything else (e.g. a ``lib.ProgressDialog``) is returned
       unchanged, as long as it exposes the interface.
 
+    Public functions that create the tracker should also close it, see
+    :func:`tracked_progress`.
+
     Parameters
     ----------
-    progress : None, "console", or ProgressType
+    progress : Progress, "console" or None
         The public progress argument.
     description : str, optional
         Initial description for a newly created ``TqdmProgress``.
@@ -731,8 +778,8 @@ def normalize_progress(
 
     Returns
     -------
-    progress : ProgressType
-        Object implementing the ``ProgressDialog`` interface.
+    progress : Progress
+        Object implementing the :class:`Progress` interface.
     """
     if progress is None:
         return MockProgress()
@@ -741,15 +788,85 @@ def normalize_progress(
             return TqdmProgress(description=description, unit=unit)
         raise ValueError(
             f"Invalid progress argument: {progress!r}. Must be None, "
-            "'console', or an object with the ProgressDialog interface."
+            "'console', or an object with the Progress interface."
         )
     if not callable(getattr(progress, "set_value", None)):
         raise TypeError(
             f"Invalid progress argument: {progress!r}. Must be None, "
-            "'console', or an object with the ProgressDialog interface "
-            "(set_value, setMaximum, zero_progress, ...)."
+            "'console', or an object with the Progress interface "
+            "(set_value, setMaximum, maximum, zero_progress, close), see "
+            "picasso.lib.Progress."
         )
     return progress
+
+
+@contextlib.contextmanager
+def tracked_progress(
+    progress: Progress | Literal["console"] | None,
+    description: str = "",
+    unit: str = "it",
+) -> Iterator[Progress]:
+    """Normalize a public ``progress`` argument for the duration of a
+    ``with`` block, closing the tracker afterwards if it was created here.
+
+    A tracker passed in by the caller (e.g. a GUI dialog, or the tracker of
+    an enclosing Picasso function) is left open, since the caller may
+    report further phases with it; one created from ``"console"`` is
+    closed, so that its last bar ends.
+
+    Parameters
+    ----------
+    progress : Progress, "console" or None
+        The public progress argument.
+    description, unit : str, optional
+        Passed to :func:`normalize_progress`.
+
+    Yields
+    ------
+    progress : Progress
+        Object implementing the :class:`Progress` interface.
+    """
+    tracker = normalize_progress(progress, description, unit)
+    try:
+        yield tracker
+    finally:
+        if tracker is not progress:
+            tracker.close()
+
+
+def start_phase(
+    progress: Progress,
+    description: str,
+    maximum: int,
+    unit: str | None = None,
+) -> None:
+    """Start a new progress phase: set its maximum and label and reset the
+    progress to zero.
+
+    Parameters
+    ----------
+    progress : Progress
+        A normalized tracker, see :func:`normalize_progress`.
+    description : str
+        Label of the phase.
+    maximum : int
+        Number of items of the phase; 0 means unknown (a busy indicator).
+    unit : str, optional
+        Name of one item, shown in the console bar. None keeps the
+        current one.
+
+    Raises
+    ------
+    OperationCanceled
+        If the tracker reports that the user canceled the computation.
+    """
+    # new phase first, so a console bar of the previous phase keeps its
+    # own maximum when it closes
+    if unit is not None:
+        progress.zero_progress(description, unit=unit)
+    else:
+        progress.zero_progress(description)
+    progress.setMaximum(maximum)
 
 
 class AutoDict(collections.defaultdict):

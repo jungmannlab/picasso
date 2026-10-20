@@ -18,6 +18,10 @@ import pytest  # noqa: E402
 from picasso import aim, io, lib, postprocess  # noqa: E402
 
 from tests.conftest import PIXELSIZE  # noqa: E402
+from tests.test_postprocess_progress import (  # noqa: E402
+    RecordingProgress,
+    assert_phases,
+)
 
 # undrifting parameters
 SEGMENTATION = 100
@@ -323,11 +327,13 @@ def test_segment_shapes(locs, info):
     assert segments.sum() > 0
 
 
-def test_segment_callback_invocations(locs, info):
+def test_segment_progress(locs, info):
     n_seg = postprocess.n_segments(info, SEGMENTATION)
-    events = []
-    postprocess.segment(locs, info, SEGMENTATION, callback=events.append)
-    assert events == list(range(n_seg + 1))
+    tracker = RecordingProgress()
+    postprocess.segment(locs, info, SEGMENTATION, progress=tracker)
+    assert_phases(tracker, ["Generating segments"])
+    assert tracker.phases[0].maximum == n_seg
+    assert tracker.phases[0].values == list(range(n_seg + 1)) + [n_seg]
 
 
 def test_segment_total_count_matches_locs(synthetic_fiducials_2d):
@@ -1003,6 +1009,41 @@ def test_aim_exclude_self_survives_a_single_segment():
     assert np.allclose(drift_x, 0) and np.allclose(drift_y, 0)
 
 
+def test_aim_z_round2_moves_a_misplaced_segment_back():
+    """Regression: with ``exclude_self`` (AIM's second z round), every
+    segment skipped its alignment, so the z refinement did nothing."""
+    segmentation, n_segments, segment = 100, 8, 4
+    offset_nm = 40.0
+    frame, x, y = _static_locs_with_displaced_segment(
+        0, segment, 0.0, segmentation, n_segments
+    )
+    rng = np.random.default_rng(2)
+    z = rng.normal(0, 100, x.size)
+    displaced = (frame > segment * segmentation) & (
+        frame <= (segment + 1) * segmentation
+    )
+    z = z + displaced * offset_nm
+    seg_bounds = np.arange(0, segmentation * n_segments + 1, segmentation)
+    _, drift_z = aim.intersection_max_z(
+        x,
+        y,
+        z,
+        x,
+        y,
+        z,
+        frame,
+        seg_bounds,
+        AIM_INTERSECT_D_DEFAULT,
+        AIM_ROI_R_DEFAULT,
+        STATIC_FOV,
+        STATIC_FOV,
+        aim_round=2,
+        exclude_self=True,
+    )
+    # drift_z is per frame; skipping every segment left it flat
+    assert np.ptp(drift_z) > offset_nm / 2
+
+
 def test_aim_intersection_max_z_runs_without_progress():
     """``progress`` defaults to None, like in ``intersection_max``."""
     frame, x, y = _static_locs_with_displaced_segment(0, 1, 0.0, 100, 4)
@@ -1168,31 +1209,6 @@ def test_recovers_known_drift(
 # ---------------------------------------------------------------------
 
 
-class _RecordingProgress:
-    """Duck-typed progress tracker recording the calls it receives."""
-
-    def __init__(self):
-        self.values = []
-        self.titles = []
-        self.closed = False
-        self.description_base = ""
-
-    def set_value(self, value):
-        self.values.append(value)
-
-    def setMaximum(self, maximum, *args, **kwargs):
-        pass
-
-    def zero_progress(self, description=None, *args, **kwargs):
-        self.titles.append(description)
-
-    def get_iterator(self, start=0, end=100, unit="segment"):
-        return range(start, end)
-
-    def close(self, *args, **kwargs):
-        self.closed = True
-
-
 @pytest.mark.parametrize("progress", [None, "console"])
 def test_aim_progress_modes(locs, info, progress):
     _, _, drift = aim.aim(
@@ -1201,13 +1217,14 @@ def test_aim_progress_modes(locs, info, progress):
     assert len(drift) == lib.get_from_metadata(info, "Frames")
 
 
-def test_aim_reports_progress_to_duck_typed_tracker(locs, info):
-    tracker = _RecordingProgress()
+def test_aim_reports_progress_to_tracker(locs, info):
+    tracker = RecordingProgress()
     aim.aim(locs, info, segmentation=SEGMENTATION, progress=tracker)
-    assert tracker.values, "no progress was reported"
-    # AIM runs in two passes and relabels the tracker between them
-    assert any(t and "2/2" in t for t in tracker.titles)
-    assert tracker.closed
+    # AIM runs in two passes, each a phase ending at its maximum; the
+    # tracker passed in is left open
+    assert_phases(
+        tracker, ["Undrifting xy by AIM (1/2)", "Undrifting xy by AIM (2/2)"]
+    )
 
 
 def test_aim_invalid_progress_raises(locs, info):

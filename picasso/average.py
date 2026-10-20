@@ -19,7 +19,6 @@ import ctypes
 import numpy as np
 import pandas as pd
 import scipy.sparse
-from tqdm import tqdm
 
 from . import lib, render
 
@@ -166,15 +165,13 @@ def _align_group_worker(
     image_half : float
         Half the size of the rendered image.
     counter : multiprocessing.managers.ValueProxy
-        Shared counter for processed groups.
+        Shared counter of the groups aligned so far, incremented once the
+        group's coordinates are written.
     lock : multiprocessing.managers.AcquirerProxy
         Lock for synchronizing counter access.
     group : int
         Index of the group to align.
     """
-    with lock:
-        counter.value += 1
-
     index = group_index[group].nonzero()[1]
     x_aligned, y_aligned = align_group_core(
         index,
@@ -191,6 +188,9 @@ def _align_group_worker(
     # Update global arrays
     x[index] = x_aligned
     y[index] = y_aligned
+
+    with lock:
+        counter.value += 1
 
 
 def build_group_index(
@@ -327,7 +327,8 @@ class AveragePool:
         Shared coordinate arrays that the workers read from and write
         into.
     counter : multiprocessing.managers.ValueProxy
-        Shared counter for the number of groups processed.
+        Shared counter for the number of groups aligned in the current
+        iteration.
     lock : multiprocessing.managers.AcquirerProxy
         Lock synchronizing access to ``counter``.
     pool : multiprocessing.Pool
@@ -412,15 +413,6 @@ class AveragePool:
             self.terminate()
 
 
-def _make_pbars(use_tqdm, iterations, n_groups):
-    if use_tqdm:
-        return (
-            tqdm(total=iterations, desc="Averaging", unit="iter"),
-            tqdm(total=n_groups, desc="Groups", unit="group"),
-        )
-    return None, None
-
-
 def _finalize_average(
     locs,
     info,
@@ -438,41 +430,37 @@ def _finalize_average(
     return locs
 
 
+#: Seconds between two polls of the workers while a round of alignment
+#: runs.
+_POLL_INTERVAL = 0.05
+
+
 def _wait_for_alignment(
-    result,
-    abort_callback,
-    counter,
-    n_groups,
-    use_tqdm,
-    group_pbar,
-    progress_callback,
-    it,
-    iterations,
-    locs,
-    x,
-    y,
-):
-    last_count = 0
+    result: multiprocessing.pool.AsyncResult,
+    abort_callback: Callable[[], bool] | None,
+    counter: multiprocessing.managers.ValueProxy,
+    n_groups: int,
+    progress: lib.Progress,
+) -> bool:
+    """Wait for one round of group alignment to finish.
+
+    Polls every ``_POLL_INTERVAL`` seconds, advancing ``progress`` (a
+    normalized tracker whose phase the caller started) to the number of
+    groups aligned, and checking ``abort_callback``.
+
+    Returns
+    -------
+    aborted : bool
+        True if ``abort_callback`` asked to stop before the round
+        finished.
+    """
     while not result.ready():
         if callable(abort_callback) and abort_callback():
             return True
-        if use_tqdm:
-            current = int(counter.value)
-            group_pbar.update(current - last_count)
-            last_count = current
-        elif callable(progress_callback):
-            locs_current = locs.copy()
-            locs_current["x"] = np.ctypeslib.as_array(x)
-            locs_current["y"] = np.ctypeslib.as_array(y)
-            progress_callback(
-                it + 1,
-                iterations,
-                locs_current,
-                int(counter.value),
-                n_groups,
-            )
-    if use_tqdm:
-        group_pbar.update(n_groups - last_count)
+        progress.set_value(int(counter.value))
+        result.wait(_POLL_INTERVAL)
+    result.get()  # re-raise a worker exception
+    progress.set_value(n_groups)
     return False
 
 
@@ -483,7 +471,8 @@ def average(
     display_pixel_size: float = 5.0,
     iterations: int = 3,
     return_shifted_locs: bool = False,
-    progress_callback: callable | Literal["console"] | None = None,
+    progress: lib.Progress | Literal["console"] | None = None,
+    iteration_callback: Callable[[int, pd.DataFrame], None] | None = None,
     abort_callback: Callable[[], bool] | None = None,
     pool: AveragePool | None = None,
 ) -> pd.DataFrame | tuple[pd.DataFrame, list[dict]] | None:
@@ -508,12 +497,21 @@ def average(
         If True, return localizations shifted to positive coordinates
         and updated metadata. If False, only localizations are returned
         without shifts.
-    progress_callback : callable or "console" or None, optional
-        Controls progress reporting. Pass a callable with signature
-        ``callback(iteration, total_iterations, locs)`` to receive
-        per-iteration updates. Pass ``"console"`` to display tqdm
-        progress bars in the terminal. Pass ``None`` (default) for no
-        progress reporting.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports one phase per iteration,
+        "Averaging (iteration k/N)" over the groups aligned. Default is
+        None.
+    iteration_callback : callable or None, optional
+        Data hook, not progress reporting: called after each finished
+        iteration as ``iteration_callback(iterations_done, locs)``, with
+        the number of iterations finished so far and the localizations
+        as they stand after it (centered at (0, 0)), e.g. for a live
+        preview of the average. ``locs`` is the working DataFrame of the
+        averaging, which the next iteration overwrites; copy it to keep
+        it, and do not modify it. Called from the thread that called
+        this function. Default is None.
     abort_callback : callable or None, optional
         Callable with no arguments returning a bool. If it returns
         True, averaging is aborted, the worker pool is terminated, and
@@ -570,19 +568,25 @@ def average(
     y = pool.y
     pool.set_coordinates(locs)
 
-    use_tqdm = progress_callback == "console"
-    iter_pbar, group_pbar = _make_pbars(use_tqdm, iterations, n_groups)
-
+    # not a ``with lib.tracked_progress`` block, which would re-indent the
+    # whole loop; the same close-only-if-created semantics
+    progress_arg = progress
+    progress = lib.normalize_progress(progress, "Averaging", unit="group")
     aborted = False
+    result = None
     try:
         for it in range(iterations):
             if callable(abort_callback) and abort_callback():
                 aborted = True
                 break
             counter.value = 0
-            if use_tqdm:
-                group_pbar.reset()
-                group_pbar.set_description(f"Iteration {it + 1}/{iterations}")
+            lib.start_phase(
+                progress,
+                f"Averaging (iteration {it + 1}/{iterations})",
+                n_groups,
+                unit="group",
+            )
+            progress.set_value(0)
 
             # Render average image
             N_avg, image_avg = render.render_hist(
@@ -614,18 +618,7 @@ def average(
 
             # Wait for completion and report progress
             aborted = _wait_for_alignment(
-                result,
-                abort_callback,
-                counter,
-                n_groups,
-                use_tqdm,
-                group_pbar,
-                progress_callback,
-                it,
-                iterations,
-                locs,
-                x,
-                y,
+                result, abort_callback, counter, n_groups, progress
             )
             if aborted:
                 break
@@ -636,18 +629,16 @@ def average(
             locs["x"] -= np.mean(locs["x"])
             locs["y"] -= np.mean(locs["y"])
 
-            if use_tqdm:
-                iter_pbar.update(1)
-            if callable(progress_callback):
-                progress_callback(it + 1, iterations, locs, n_groups, n_groups)
+            if iteration_callback is not None:
+                iteration_callback(it + 1, locs)
 
     finally:
-        if use_tqdm:
-            group_pbar.close()
-            iter_pbar.close()
-        # an aborted run leaves work queued in the pool, so it is
-        # terminated even if it was provided by the caller
-        if aborted:
+        if progress is not progress_arg:
+            progress.close()
+        # an aborted (or canceled, or failed) run leaves work queued in
+        # the pool, so it is terminated even if it was provided by the
+        # caller
+        if aborted or (result is not None and not result.ready()):
             pool.terminate()
         elif own_pool:
             pool.close()
