@@ -9521,6 +9521,10 @@ class DisplaySettingsDialog(lib.Dialog):
         density spin boxes.
     disp_px_size : QDoubleSpinBox
         Contains the size of super-resolution pixels in nm.
+    display_width : LogDoubleSpinBox
+        Width of the region shown in the window (um); smaller values
+        zoom in. Each step zooms by the same factor as the zoom in/out
+        actions.
     dynamic_disp_px : QCheckBox
         Tick to automatically adjust to current window size when
         zooming.
@@ -9543,9 +9547,6 @@ class DisplaySettingsDialog(lib.Dialog):
     parameter : QComboBox
         Defines what property should be rendered, e.g.: z, photons.
     render_check : QCheckBox
-    display_width : QDoubleSpinBox
-        Width of the region shown in the window (um); smaller values
-        zoom in.
         Tick to activate parameter rendering.
     scalebar : QSpinBox
         Contains the scale bar's length (nm).
@@ -9555,8 +9556,6 @@ class DisplaySettingsDialog(lib.Dialog):
         Tick to display scale bar's length (nm).
     _silent_disp_px_update : bool
         True if update display pixel size in background.
-    zoom : QDoubleSpinBox
-        Contains zoom's magnitude.
     """
 
     DOCS_URL = docs_url("render/display-settings.html#render-display-settings")
@@ -9589,7 +9588,9 @@ class DisplaySettingsDialog(lib.Dialog):
             "smaller values zoom in."
         )
         general_grid.addWidget(display_width_label, 0, 1)
-        self.display_width = QtWidgets.QDoubleSpinBox()
+        # step by the zoom in/out factor so that scrolling and the
+        # arrows zoom evenly at any scale
+        self.display_width = lib.LogDoubleSpinBox(factor=ZOOM)
         self.display_width.setKeyboardTracking(False)
         self.display_width.setDecimals(4)
         self.display_width.setRange(1e-4, 1e7)
