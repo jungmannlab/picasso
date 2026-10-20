@@ -15,7 +15,7 @@ Picasso accepts several types of raw movie files:
 - raw binary data (file extension ``.raw``);
 - the Nikon format ``.nd2``;
 - MetaMorph ``.stk``;
-- Imaris ``.ims`` (Windows only);
+- Imaris ``.ims``;
 - with the optional ``czi``/``lif`` extras (Python ≥ 3.12), Zeiss ``.czi``
   and Leica ``.lif``.
 
