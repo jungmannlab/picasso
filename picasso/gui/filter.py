@@ -228,7 +228,7 @@ class PlotWindow(QtWidgets.QWidget):
 
 #: Columns in nm that the legacy table does not list (they were never in
 #: camera pixels).
-_NM_COLUMNS = frozenset({"z", "lpz", "std_z", "com_z"})
+_NM_COLUMNS = frozenset({"z", "lpz", "std_z"})
 _UNITS = {1: "nm", 2: "nm^2", 3: "nm^3"}
 
 

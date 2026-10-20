@@ -13,7 +13,6 @@ second time when it is loaded. Each writer is checked with
 from __future__ import annotations
 
 import json
-import os
 import pathlib
 import re
 
@@ -59,7 +58,7 @@ def _write_locs(tmp_path) -> str:
 
 def _write_pick_properties(tmp_path) -> str:
     path = str(tmp_path / "pick_props.hdf5")
-    groups = pd.DataFrame({"group": [0, 1], "com_x": [100.0, 200.0]})
+    groups = pd.DataFrame({"group": [0, 1], "x_mean": [100.0, 200.0]})
     io.save_datasets(path, INFO, groups=groups)
     return path
 
@@ -210,46 +209,51 @@ def test_converted_files_carry_the_marker(kind, tmp_path):
 
 
 class TestCommandLine:
-    def _write_clusters(self, path: str, marker: bool) -> pd.DataFrame:
-        """A file of the cluster format that ``link`` updates."""
-        clusters = pd.DataFrame(
-            {"groups": [0, 1], "com_x": [3.0, 9.0], "com_y": [4.0, 1.0]}
+    def _write_centers(self, path: str, marker: bool) -> pd.DataFrame:
+        """A cluster centers file, as ``find_cluster_centers`` saves it."""
+        centers = pd.DataFrame(
+            {
+                "frame": [50.0, 50.0],
+                "x": [3.0, 9.0],
+                "y": [4.0, 1.0],
+                "lpx": [0.1, 0.1],
+                "lpy": [0.1, 0.1],
+                "n_locs": np.array([5, 50], dtype=np.uint32),
+                "group": np.array([0, 1], dtype=np.int32),
+            }
         )
         with h5py.File(path, "w") as f:
             if marker:
                 f.attrs[io.FORMAT_VERSION_ATTR] = io.FORMAT_VERSION
-            f.create_dataset("clusters", data=clusters.to_records(index=False))
+            f.create_dataset("locs", data=centers.to_records(index=False))
             f.create_dataset("metadata", data=json.dumps(INFO))
-        return clusters
+        return centers
 
-    def _link(self, tmp_path) -> None:
-        locs = _locs(n=40)
-        locs["frame"] = np.arange(40, dtype=np.uint32)
-        locs["group"] = np.repeat([0, 1], 20).astype(np.int32)
-        path = str(tmp_path / "sample_picked.hdf5")
-        io.save_locs(path, locs, INFO)
-        cli._link(path, d_max=0.3 * PS, tolerance=1)
-        assert os.path.isfile(str(tmp_path / "sample_picked_link.hdf5"))
-
-    @pytest.mark.parametrize("marker", [True, False])
-    def test_link_keeps_the_units_of_the_clusters_file(self, marker, tmp_path):
-        path = str(tmp_path / "sample_clusters.hdf5")
-        clusters = self._write_clusters(path, marker)
-        self._link(tmp_path)
-        with h5py.File(path, "r") as f:
-            assert "linked_n" in f["clusters"].dtype.names
-            assert (io.FORMAT_VERSION_ATTR in f.attrs) == marker
-            np.testing.assert_allclose(f["clusters"]["com_x"], clusters.com_x)
-        loaded = io.load_clusters(path)
-        scale = 1.0 if marker else PS
-        np.testing.assert_allclose(loaded["com_x"], clusters["com_x"] * scale)
-
-    def test_nneighbor_of_old_clusters_is_nm(self, tmp_path):
-        path = str(tmp_path / "old_clusters.hdf5")
-        self._write_clusters(path, marker=False)
+    def test_nneighbor_of_old_centers_is_nm(self, tmp_path):
+        path = str(tmp_path / "old_cluster_centers.hdf5")
+        self._write_centers(path, marker=False)
         cli._nneighbor(path)
-        minval = np.loadtxt(str(tmp_path / "old_clusters_minval.txt"))
+        minval = np.loadtxt(str(tmp_path / "old_cluster_centers_minval.txt"))
         np.testing.assert_allclose(minval, np.hypot(6.0, 3.0) * PS)
+
+    def test_cluster_filter_splits_locs_by_their_clusters(self, tmp_path):
+        centers_path = str(tmp_path / "sample_cluster_centers.hdf5")
+        self._write_centers(centers_path, marker=True)
+        locs = _locs(n=40)
+        locs["group"] = np.repeat([0, 1], 20).astype(np.int32)
+        path = str(tmp_path / "sample.hdf5")
+        io.save_locs(path, locs, INFO)
+        cli._clusterfilter(path, centers_path, "n_locs", 10, 100)
+        for suffix, group in (("in", 1), ("out", 0)):
+            filtered, info = io.load_locs(
+                str(tmp_path / f"sample_filter_{suffix}.hdf5")
+            )
+            assert set(filtered["group"]) == {group}
+            assert len(filtered) == 20
+            assert np.all(np.diff(filtered["frame"].to_numpy()) >= 0)
+            steps = [step.get("Step") for step in info]
+            assert steps[-1] == f"Clusterfilter - {suffix}"
+            assert len(info) == len(INFO) + 1
 
 
 HDF5_WRITE = re.compile(

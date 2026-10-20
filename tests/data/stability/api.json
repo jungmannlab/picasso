@@ -91,7 +91,6 @@
   "load_info",
   "save_info",
   "save_datasets",
-  "load_clusters",
   "load_movie",
   "load_movie_all",
   "load_tif_concatenated",

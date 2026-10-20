@@ -743,7 +743,7 @@ Filter localizations by properties of their clusters.
    * - Option
      - Description
    * - ``-c``, ``--cluster-file`` (str)
-     - A hdf5 clusterfile.
+     - The cluster centers, e.g., ``_cluster_centers.hdf5``.
    * - ``-p``, ``--parameter`` (str)
      - Parameter to be filtered.
    * - ``--min-value`` (float)

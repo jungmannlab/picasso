@@ -67,7 +67,6 @@ __all__ = [
     "load_info",
     "save_info",
     "save_datasets",
-    "load_clusters",
     # movies
     "load_movie",
     "load_movie_all",
@@ -6155,52 +6154,13 @@ def load_identifications(path: str) -> tuple[pd.DataFrame, list[dict]]:
     return identifications, info
 
 
-def load_clusters(path: str, pixelsize: float | None = None) -> pd.DataFrame:
-    """Load cluster data from an HDF5 file.
-
-    Files written before Picasso 1.0 are brought to nm, as in
-    ``load_locs``.
-
-    Parameters
-    ----------
-    path : str
-        The path to the HDF5 file containing cluster data.
-    pixelsize : float, optional
-        Camera pixel size in nm, used only for files written before
-        Picasso 1.0 whose metadata does not record it. Default is None.
-
-    Returns
-    -------
-    clusters : pd.DataFrame
-        The cluster data loaded from the file.
-
-    Raises
-    ------
-    MissingPixelsizeError
-        If the file was written before Picasso 1.0 and neither its
-        metadata nor ``pixelsize`` give the camera pixel size.
-    """
-    format_version = _check_format_version(path)
-    try:
-        clusters = pd.read_hdf(path, key="clusters")
-    except KeyError:
-        clusters = pd.read_hdf(path, key="locs")
-    if format_version is None:
-        try:
-            info = load_info(path)
-        except NoMetadataFileError:
-            info = []
-        clusters, _ = _upgrade_legacy_locs(clusters, info, pixelsize, path)
-    return clusters
-
-
 def load_filter(
     path: str, pixelsize: float | None = None
 ) -> tuple[pd.DataFrame, list[dict]]:
     """Load localization data from an HDF5 file, checking for different
     possible keys for the localization data. This function is used to
-    handle files that may contain localization data under different
-    keys such as 'locs', 'groups', or 'clusters'.
+    handle files that may contain localization data under the keys
+    'locs' or 'groups'.
 
     Files of a newer, incompatible format version are refused and
     those written before Picasso 1.0 are brought to the current format
@@ -6236,15 +6196,8 @@ def load_filter(
         locs = pd.read_hdf(path, key="locs")
         info = load_info(path)
     except KeyError:
-        try:
-            locs = pd.read_hdf(path, key="groups")
-            info = load_info(path)
-        except KeyError:
-            locs = pd.read_hdf(path, key="clusters")
-            try:
-                info = load_info(path)
-            except NoMetadataFileError:
-                info = []
+        locs = pd.read_hdf(path, key="groups")
+        info = load_info(path)
     if format_version is None:
         locs, info = _upgrade_legacy_locs(locs, info, pixelsize, path)
     return locs, info

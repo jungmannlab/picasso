@@ -45,13 +45,11 @@ def test_imported_clusters_keep_their_orientation(window, monkeypatch):
     # An L: the long arm points down in Render (+y), the short one right.
     # Spots are 3 px apart so that they do not merge in the movie; the
     # cluster centers are in nm.
-    com_x = np.array([10.0, 10.0, 10.0, 10.0, 13.0, 16.0])
-    com_y = np.array([10.0, 13.0, 16.0, 19.0, 10.0, 10.0])
+    x_px = np.array([10.0, 10.0, 10.0, 10.0, 13.0, 16.0])
+    y_px = np.array([10.0, 13.0, 16.0, 19.0, 10.0, 10.0])
     pixelsize = window.pixelsizeEdit.value()
-    clusters = pd.DataFrame(
-        {"com_x": com_x * pixelsize, "com_y": com_y * pixelsize}
-    )
-    monkeypatch.setattr(io, "load_clusters", lambda path, **kwargs: clusters)
+    clusters = pd.DataFrame({"x": x_px * pixelsize, "y": y_px * pixelsize})
+    monkeypatch.setattr(io, "load_locs", lambda path, **kwargs: (clusters, []))
     monkeypatch.setattr(
         QtWidgets.QFileDialog,
         "getOpenFileName",
@@ -63,7 +61,7 @@ def test_imported_clusters_keep_their_orientation(window, monkeypatch):
     window.importHandles()
 
     positions = window.newstruct
-    assert positions.shape[1] == len(com_x)
+    assert positions.shape[1] == len(x_px)
     photons = np.full((positions.shape[1], 1), 20_000)
     frame = simulate.convert_movie(
         0,
@@ -81,7 +79,7 @@ def test_imported_clusters_keep_their_orientation(window, monkeypatch):
     )
     spots = _spot_centers(frame)
     np.testing.assert_allclose(
-        _sorted(spots), _sorted(np.c_[com_x, com_y]), atol=0.1
+        _sorted(spots), _sorted(np.c_[x_px, y_px]), atol=0.1
     )
 
 

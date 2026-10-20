@@ -307,9 +307,6 @@ def _link(files: str, d_max: float, tolerance: float) -> None:
     """Link localizations in HDF5 files, see ``postprocess.link`` for
     details."""
     import glob
-    import h5py
-    import numpy as _np
-    from tqdm import tqdm as _tqdm
 
     paths = glob.glob(files)
     if paths:
@@ -329,50 +326,6 @@ def _link(files: str, d_max: float, tolerance: float) -> None:
             }
             info.append(link_info)
             io.save_locs(base + "_link.hdf5", linked_locs, info)
-
-            try:
-                # Check if there is a _clusters.hdf5 file present
-                # if yes update this file
-                cluster_path = base[:-7] + "_clusters.hdf5"
-                print(cluster_path)
-                # as stored: the added columns have no length units, so
-                # the file keeps its units and format marker
-                clusters = pd.read_hdf(cluster_path, key="clusters")
-                print("Clusterfile detected. Updating entries.")
-
-                n_after_link = []
-                linked_len = []
-                linked_n = []
-                linked_photonrate = []
-
-                for group in _tqdm(_np.unique(clusters["groups"])):
-                    temp = linked_locs[linked_locs["group"] == group]
-                    if len(temp) > 0:
-                        n_after_link.append(len(temp))
-                        linked_len.append(_np.mean(temp["len"]))
-                        linked_n.append(_np.mean(temp["n"]))
-                        linked_photonrate.append(_np.mean(temp["photon_rate"]))
-
-                clusters["n_after_link"] = _np.array(
-                    n_after_link,
-                    dtype=_np.int32,
-                )
-                clusters["linked_len"] = _np.array(linked_len, dtype=_np.int32)
-                clusters["linked_n"] = _np.array(linked_n, dtype=_np.int32)
-                clusters["linked_photonrate"] = _np.array(
-                    linked_photonrate,
-                    dtype=_np.float32,
-                )
-                # cannot use to_hdf for backward compatibility with older
-                # Picasso; only the table is replaced, the format marker
-                # and the metadata stay
-                rec_clusters = clusters.to_records(index=False)
-                with h5py.File(cluster_path, "r+") as locs_file:
-                    del locs_file["clusters"]
-                    locs_file.create_dataset("clusters", data=rec_clusters)
-            except Exception:
-                print("No clusterfile found for updating.")
-                continue
 
 
 def _clusterfilter(
@@ -409,13 +362,13 @@ def _clusterfilter(
             except io.NoMetadataFileError:
                 continue
 
-            clusters = io.load_clusters(clusterfile)
-            try:
-                _clusterfilter_locs(
-                    clusters, locs, info, parameter, minval, maxval, path
-                )
-            except ValueError:
+            clusters, _ = io.load_locs(clusterfile)
+            if parameter not in clusters.columns:
                 print("Error: Field {} not found.".format(parameter))
+                continue
+            _clusterfilter_locs(
+                clusters, locs, info, parameter, minval, maxval, path
+            )
 
 
 def _clusterfilter_locs(
@@ -428,7 +381,6 @@ def _clusterfilter_locs(
     path: str,
 ) -> None:
     import numpy as np
-    from tqdm import tqdm
     from . import io, lib
 
     selector = (clusters[parameter] > minval) & (clusters[parameter] < maxval)
@@ -437,65 +389,22 @@ def _clusterfilter_locs(
     elif np.sum(selector) == len(selector):
         print("Error: All localizations in range. Filtering aborted.")
     else:
-        print("Isolating locs.. Step 1: in range")
-        groups = clusters["groups"][selector]
-        first = True
-        for group in tqdm(groups):
-            if first:
-                all_locs = locs[locs["group"] == group]
-                first = False
-            else:
-                all_locs = np.append(
-                    all_locs,
-                    locs[locs["group"] == group],
-                )
-
         base, ext = os.path.splitext(path)
-        clusterfilter_info = {
-            **lib.step_info("Clusterfilter - in"),
-            "Parameter": parameter,
-            "Minval": minval,
-            "Maxval": maxval,
-        }
-        info.append(clusterfilter_info)
-        all_locs.sort_values(
-            kind="quicksort",
-            by="frame",
-            inplace=True,
-        )
-        out_path = base + "_filter_in.hdf5"
-        io.save_locs(out_path, all_locs, info)
-        print("Complete. Saved to: {}".format(out_path))
-
-        print("Isolating locs.. Step 2: out of range")
-        groups = clusters["groups"][~selector]
-        first = True
-        for group in tqdm(groups):
-            if first:
-                all_locs = locs[locs["group"] == group]
-                first = False
-            else:
-                all_locs = np.append(
-                    all_locs,
-                    locs[locs["group"] == group],
-                )
-
-        base, ext = os.path.splitext(path)
-        clusterfilter_info = {
-            **lib.step_info("Clusterfilter - out"),
-            "Parameter": parameter,
-            "Minval": minval,
-            "Maxval": maxval,
-        }
-        info.append(clusterfilter_info)
-        all_locs.sort_values(
-            kind="quicksort",
-            by="frame",
-            inplace=True,
-        )
-        out_path = base + "_filter_out.hdf5"
-        io.save_locs(out_path, all_locs, info)
-        print("Complete. Saved to: {}".format(out_path))
+        steps = (("in", selector), ("out", ~selector))
+        for number, (suffix, selected) in enumerate(steps, 1):
+            print(f"Isolating locs.. Step {number}: {suffix} of range")
+            groups = clusters["group"][selected]
+            filtered = locs[locs["group"].isin(groups)]
+            filtered = filtered.sort_values(kind="quicksort", by="frame")
+            clusterfilter_info = {
+                **lib.step_info(f"Clusterfilter - {suffix}"),
+                "Parameter": parameter,
+                "Minval": minval,
+                "Maxval": maxval,
+            }
+            out_path = f"{base}_filter_{suffix}.hdf5"
+            io.save_locs(out_path, filtered, info + [clusterfilter_info])
+            print("Complete. Saved to: {}".format(out_path))
 
 
 def _undrift_rcc(
@@ -805,8 +714,8 @@ def _nneighbor(files: str) -> None:
     if paths:
         for path in paths:
             print("Loading {} ...".format(path))
-            clusters = io.load_clusters(path)  # nm, also for old files
-            points = clusters[["com_x", "com_y"]].to_numpy()
+            clusters, _ = io.load_locs(path)  # nm, also for old files
+            points = clusters[["x", "y"]].to_numpy()
             tree = KDTree(points)
             minvals, _ = tree.query(points, k=2)
             minvals = minvals[:, 1]
@@ -6095,7 +6004,7 @@ def _build_parser() -> (
         ),
     )
     clusterfilter_parser.add_argument(
-        "-c", "--cluster-file", help="a hdf5 clusterfile"
+        "-c", "--cluster-file", help="a hdf5 file of cluster centers"
     )
     clusterfilter_parser.add_argument(
         "-p", "--parameter", type=str, help="parameter to be filtered"

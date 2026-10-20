@@ -2049,14 +2049,15 @@ class Window(QtWidgets.QMainWindow):
             else:
 
                 try:
-                    clusters = lib_qt.load_or_ask_pixelsize(
-                        self, io.load_clusters, path
+                    loaded = lib_qt.load_or_ask_pixelsize(
+                        self, io.load_locs, path
                     )
                 except lib.FILE_LOAD_ERRORS as error:
                     lib.show_load_error(self, path, error)
                     return
-                if clusters is None:  # the pixel size prompt was canceled
+                if loaded is None:  # the pixel size prompt was canceled
                     return
+                clusters, _ = loaded
 
                 # The cluster centers are in nm; align them in the center
                 # of the window (nm). Simulate's coordinates point y up
@@ -2065,13 +2066,13 @@ class Window(QtWidgets.QMainWindow):
                 # structure's orientation in the simulated movie.
                 center = self.camerasizeEdit.value() / 2
                 center *= self.pixelsizeEdit.value()
-                x = clusters["com_x"].to_numpy(dtype=np.float64)
-                y = clusters["com_y"].to_numpy(dtype=np.float64)
+                x = clusters["x"].to_numpy(dtype=np.float64)
+                y = clusters["y"].to_numpy(dtype=np.float64)
                 x = x - np.mean(x) + center
                 y = -(y - np.mean(y)) + center
 
                 try:
-                    z = clusters["com_z"]
+                    z = clusters["z"]
                 except Exception as e:
                     print(e)
                     z = np.zeros_like(x)

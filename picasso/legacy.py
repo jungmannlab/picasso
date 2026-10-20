@@ -28,8 +28,8 @@ its metadata (a ``Convert units`` step) and carries the format marker.
 
 Files and what is converted:
 
-- Localizations (.hdf5 with a ``locs``, ``groups`` or ``clusters``
-  dataset, e.g., localizations, cluster centers and pick properties):
+- Localizations (.hdf5 with a ``locs`` or ``groups`` dataset, e.g.,
+  localizations, cluster centers and pick properties):
   the columns of :data:`LEGACY_PIXEL_COLUMNS` and their ``_mean``,
   ``_std``, ``_min`` and ``_max`` statistics, the Filter ranges of those
   columns in the metadata, the canvas offsets and manual shifts of the
@@ -112,8 +112,6 @@ LEGACY_PIXEL_COLUMNS: dict[str, float | None] = {
     "sy_unc": 1,
     "std_x": 1,
     "std_y": 1,
-    "com_x": 1,
-    "com_y": 1,
     "x_pick_rot": 1,
     "y_pick_rot": 1,
     "d_zcalib": 0.5,
@@ -528,7 +526,7 @@ def nanotron_model_to_nm(model_info: dict, pixelsize: float) -> dict:
 # ---------------------------------------------------------------------------
 
 _HDF5_EXTENSIONS = (".hdf5", ".h5", ".hdf")
-_LOCS_DATASETS = ("locs", "groups", "clusters")
+_LOCS_DATASETS = ("locs", "groups")
 
 
 def _hdf5_kind(path: str) -> str | None:
