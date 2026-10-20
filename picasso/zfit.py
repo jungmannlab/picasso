@@ -229,7 +229,8 @@ def calibrate_z(
     spot_width = np.poly1d(cx)
     spot_height = np.poly1d(cy)
     z_zero = z[np.argmin(np.abs(spot_width(z) - spot_height(z)))]
-    z_range -= z_zero
+    # not in place: without binning, z_bins may share z_range's data
+    z_range = z_range - z_zero
     z_bins = z_bins - z_zero
     cx = np.polyfit(z_bins, mean_sx_bins, 6, full=False)
     cy = np.polyfit(z_bins, mean_sy_bins, 6, full=False)

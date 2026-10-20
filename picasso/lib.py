@@ -419,8 +419,8 @@ def bin_z_steps(
         position of each step, the mean spot width per step, or a stack of
         bead volumes.
     z_binning : int
-        Number of consecutive steps per bin. 1 returns ``values``
-        unchanged.
+        Number of consecutive steps per bin. 1 returns a copy of
+        ``values``.
     axis : int, optional
         Axis of ``values`` that runs over the steps. Default 0.
 
@@ -442,7 +442,8 @@ def bin_z_steps(
     if z_binning < 1:
         raise ValueError(f"z binning must be at least 1, got {z_binning}.")
     if z_binning == 1:
-        return values
+        # a copy, so that callers may change either array in place
+        return values.copy()
     n_steps = values.shape[axis]
     n_bins = n_steps // z_binning
     if n_bins < 1:

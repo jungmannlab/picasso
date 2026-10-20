@@ -898,6 +898,62 @@ class TestCalibrateZ:
             1.5 * PIXELSIZE, abs=0.1 * PIXELSIZE
         )
 
+    @pytest.mark.parametrize("z_binning", [1, 2])
+    def test_curves_cross_at_zero_for_an_off_center_crossing(
+        self, monkeypatch, z_binning
+    ):
+        """Real bead scans rarely cross in the middle of the scan:
+        recentering must shift the stage positions once, so that the
+        calibration curves cross at z = 0 and follow the truth around
+        it. (With the z axis shifted twice, the curves crossed at minus
+        the offset.)"""
+        monkeypatch.setattr("matplotlib.pyplot.show", lambda *a, **k: None)
+        n_frames, d, offset = 80, 10.0, 150.0  # crossing at stage z = 150
+        z_total = (n_frames - 1) * d
+
+        def truth_x(z):
+            return 1.5 + 1e-3 * (z - offset) + 1e-5 * (z - offset) ** 2
+
+        def truth_y(z):
+            return 1.5 - 1e-3 * (z - offset) + 1e-5 * (z - offset) ** 2
+
+        rng = np.random.default_rng(0)
+        rows = []
+        for fi in range(n_frames):
+            z = -(fi * d - z_total / 2)
+            for _ in range(40):
+                rows.append(
+                    {
+                        "frame": fi,
+                        "x": 16.0 * PIXELSIZE,
+                        "y": 16.0 * PIXELSIZE,
+                        "sx": (truth_x(z) + rng.normal(0, 0.01)) * PIXELSIZE,
+                        "sy": (truth_y(z) + rng.normal(0, 0.01)) * PIXELSIZE,
+                        "photons": 5000.0,
+                        "bg": 10.0,
+                        "lpx": 0.01 * PIXELSIZE,
+                        "lpy": 0.01 * PIXELSIZE,
+                    }
+                )
+        info = [
+            {"Frames": n_frames, "Pixelsize": 130, "Width": 32, "Height": 32}
+        ]
+        calib = zfit.calibrate_z(
+            pd.DataFrame(rows), info, d, 0.79, z_binning=z_binning
+        )
+        cx = np.array(calib["X Coefficients"])
+        cy = np.array(calib["Y Coefficients"])
+        assert zfit._get_calib_size(cx, 0.0) == pytest.approx(
+            zfit._get_calib_size(cy, 0.0), abs=0.01 * PIXELSIZE
+        )
+        for z in (-200.0, 0.0, 150.0):
+            assert zfit._get_calib_size(cx, z) == pytest.approx(
+                truth_x(z + offset) * PIXELSIZE, abs=0.01 * PIXELSIZE
+            )
+            assert zfit._get_calib_size(cy, z) == pytest.approx(
+                truth_y(z + offset) * PIXELSIZE, abs=0.01 * PIXELSIZE
+            )
+
     def test_writes_yaml_and_png_when_path_given(
         self, bead_stack, monkeypatch, tmp_path
     ):

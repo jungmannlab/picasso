@@ -1752,9 +1752,13 @@ class TestSelectFrcRois:
 class TestBinZSteps:
     """``lib.bin_z_steps``: axial binning shared by the 3D calibrations."""
 
-    def test_no_binning_returns_the_input(self):
+    def test_no_binning_returns_a_copy(self):
+        # a copy: zfit.calibrate_z shifted the stage positions twice when
+        # the binned array was the input itself
         values = np.arange(7.0)
-        assert lib.bin_z_steps(values, 1) is values
+        binned = lib.bin_z_steps(values, 1)
+        np.testing.assert_array_equal(binned, values)
+        assert not np.shares_memory(binned, values)
 
     def test_averages_consecutive_groups_and_drops_the_remainder(self):
         # 7 steps in bins of 3: [0, 1, 2] and [3, 4, 5]; step 6 is dropped
