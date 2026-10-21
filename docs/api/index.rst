@@ -76,6 +76,8 @@ Localization
    picasso.localize
    picasso.zfit
    picasso.spline
+   picasso.registration
+   picasso.transforms
    picasso.wavelet
    picasso.scmos
    picasso.imageprocess
@@ -98,10 +100,7 @@ Postprocessing
    picasso.aim
    picasso.clusterer
    picasso.g5m
-   picasso.registration
-   picasso.stitch
    picasso.spt
-   picasso.transforms
    picasso.masking
    picasso.expression
 
@@ -113,6 +112,7 @@ Rendering
    :nosignatures:
 
    picasso.render
+   picasso.stitch
 
 Simulation and analysis
 -----------------------
