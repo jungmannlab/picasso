@@ -307,6 +307,29 @@ def test_n_segments_uses_last_info_entry():
     assert postprocess.n_segments(info, 100) == 10
 
 
+@pytest.mark.parametrize(
+    "segmentation, message",
+    [
+        (400, "into 2 segment.*at most 250 frames"),
+        (0, "must be a positive"),
+        (-5, "must be a positive"),
+    ],
+)
+def test_undrift_needs_four_segments(locs, info, segmentation, message):
+    """The drift between the segments is interpolated by a cubic spline,
+    which needs 4 of them; fewer used to fail deep inside RCC."""
+    assert info[0]["Frames"] == 1000
+    with pytest.raises(ValueError, match=message):
+        postprocess.undrift(locs, info, segmentation, display=False)
+
+
+def test_undrift_of_a_movie_too_short_to_segment(locs, info):
+    short = [{**info[0], "Frames": 3}, *info[1:]]
+    with pytest.raises(ValueError, match="needs at least 4") as error:
+        postprocess.undrift(locs, short, 1, display=False)
+    assert "Use a segmentation" not in str(error.value)
+
+
 # ---------------------------------------------------------------------
 # segment
 # ---------------------------------------------------------------------

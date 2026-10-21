@@ -93,6 +93,9 @@ PICK_CONVERGENCE = 0.1
 UNDRIFT_PIXEL_SIZE = 100.0
 #: Largest shift (nm) between two segments considered by ``undrift``.
 UNDRIFT_MAX_SHIFT = 10000.0
+#: Fewest segments ``undrift`` accepts: the drift between them is
+#: interpolated by a cubic spline.
+MIN_UNDRIFT_SEGMENTS = 4
 #: Pixel size (nm) of the images rendered by ``align_rcc``.
 ALIGN_PIXEL_SIZE = 100.0
 #: Convergence tolerance (nm) of the iterations of ``align_rcc``.
@@ -4313,7 +4316,32 @@ def undrift(
     locs : pd.DataFrame
         Undrifted localization list with the drift applied to the 'x'
         and 'y' coordinates.
+
+    Raises
+    ------
+    ValueError
+        If the segmentation is not positive or divides the movie into
+        fewer than 4 segments, the fewest the drift interpolation needs.
     """
+    n_frames = lib.get_from_metadata(info, "Frames", raise_error=True)
+    if not segmentation > 0:
+        raise ValueError(
+            f"The segmentation must be a positive number of frames, got "
+            f"{segmentation:g}."
+        )
+    n_segs = n_segments(info, segmentation)
+    if n_segs < MIN_UNDRIFT_SEGMENTS:
+        message = (
+            f"A segmentation of {segmentation:g} frames divides the "
+            f"{n_frames} frames into {n_segs} segment(s), but undrifting "
+            f"by RCC needs at least {MIN_UNDRIFT_SEGMENTS}."
+        )
+        if n_frames >= MIN_UNDRIFT_SEGMENTS:
+            message += (
+                " Use a segmentation of at most "
+                f"{n_frames // MIN_UNDRIFT_SEGMENTS} frames."
+            )
+        raise ValueError(message)
     locs = locs.copy()
     with lib.tracked_progress(
         progress, "Generating segments", unit="segment"

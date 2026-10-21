@@ -9644,7 +9644,10 @@ class _InMemoryMovie(io.AbstractPicassoMovie):
         return self._frames[index]
 
     def tofile(self, file_handle, byte_order=None):
-        self._frames.tofile(file_handle)
+        frames = self._frames
+        if byte_order is not None:
+            frames = frames.astype(frames.dtype.newbyteorder(byte_order))
+        frames.tofile(file_handle)
 
     @property
     def dtype(self):

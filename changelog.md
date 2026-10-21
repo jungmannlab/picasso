@@ -73,6 +73,7 @@ Last change: 21-OCT-2026 CEST
 - Fixed: scale bar in 3D animations.
 - Fixed: *Align channels* (RCC) failed for channels with different image sizes.
 - Fixed: Render's `Export ROI for Imaris` ignored the position of the .ims movie that localizations were loaded from with `File > Open movie` (single channel), placing the export at the origin instead of over the movie.
+- Fixed: *Undrift by RCC* suggested a segmentation of 1000 frames for movies of 1000 to 3500 frames, which gives fewer than the 4 segments RCC needs, so it failed. It now suggests at most a quarter of the frames, and a segmentation that leaves fewer than 4 segments (also in `picasso undrift` and `picasso.postprocess.undrift`) is explained instead of failing inside RCC.
 
 ### Localize
 - New spot identification method: B-spline wavelet segmentation (Izeddin et al., *Opt. Express* 2012), see the [documentation](https://picassosr.readthedocs.io/en/latest/localize/identification.html#localize-wavelet).
@@ -84,6 +85,9 @@ Last change: 21-OCT-2026 CEST
 - Fixed: `Height` and `Width` were swapped in the metadata of non-square `.ims` movies.
 - Fixed drift estimation when adding to database + database building.
 - Fixed: canceling the channel selection when opening a multi-channel IMARIS .ims movie raised an error instead of loading the first channel, as for .czi and .lif.
+- Fixed: indexing a TIFF movie of a single file with a tuple (e.g., `movie[2, 1]` or `movie[1:3, :, 5]`) raised a `TypeError`, as did slicing the frames of a MetaMorph .stk file with a tuple. `movie[..., x]` now indexes the last axis, as in NumPy, for all movie formats.
+- Fixed: the `shape` of non-square Nikon .nd2 movies swapped the height and width.
+- Fixed: writing TIFF and .stk movies to raw files (`tofile`) swapped the bytes of big-endian movies, and of all movies when no byte order was given.
 
 ### Filter
 - Filtering by expression: `Filter > Filter by expression...` for universal filtering with comparisons, logic, arithmetic, functions and statistics over the shown localizations. See the [documentation](https://picassosr.readthedocs.io/en/latest/filter.html#filter-expression).
@@ -124,6 +128,10 @@ The [migration guide](https://picassosr.readthedocs.io/en/latest/migration.html)
 - Opening a file whose path is too long gives a warning, see [FAQ](https://picassosr.readthedocs.io/en/latest/faq.html#picasso-says-that-the-path-is-too-long).
 - Fixed: `picasso.postprocess.evaluate_picks` changed the warning filters of the whole program, e.g., showing again the `RuntimeWarning`s a script had silenced or turned into errors.
 - Fixed: `picasso render` on the command line failed without a settings file, e.g., on a new installation, unless a colormap was given with `-c`.
+- Fixed: `picasso smlm-cluster` required `basic_fa` and `radius_z`, although they are optional, and switched the frame analysis on for any `basic_fa`, including `False`. It now takes `yes`/`no` (or `true`/`false`, `1`/`0`).
+- Fixed: `picasso undrift-fiducials` failed for movies shorter than 7000 frames: the RCC before picking the fiducials used segments of 2000 frames. It now uses at most a quarter of the frames.
+- Fixed: `picasso hdf2csv` wrote the row numbers as an extra unnamed first column.
+- Fixed: SPINNA's batch analysis (`picasso spinna -p`) read the `rotation_mode` *None* as missing and used *2D*. Also, the summary's column *File location of experimental data* was misspelled.
 - Fixed: the GUIs could crash when quitting (seen on macOS): their windows were left to Python's shutdown, which deletes them in no fixed order.
 - Fixed: a camera configuration (`~/.picasso/config.yaml`) that is not valid stopped every Picasso module and command from starting. Picasso now starts without cameras configured and warns; Localize shows why when it opens.
 - Fixed: `picasso.nanotron.roi_to_img` hid every error of rendering behind an `UnboundLocalError`, and returned an empty image for a pick without localizations, which failed later. It now raises the error of rendering, or a `ValueError` that names the empty pick.

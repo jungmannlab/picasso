@@ -82,7 +82,7 @@ def _hdf2csv(path: str) -> None:
                 out_path = base + ".csv"
                 locs = load_locs(path)[0]
                 print(f"A total of {len(locs)} rows loaded.")
-                locs.to_csv(out_path, sep=",", encoding="utf-8")
+                locs.to_csv(out_path, sep=",", encoding="utf-8", index=False)
     print("Complete.")
 
 
@@ -156,7 +156,7 @@ def _hdf2nis(path: str) -> None:
 
 
 def _hdf2chimera(path: str) -> None:
-    """Convert HDF5 localization files to NIS txt format."""
+    """Convert HDF5 localization files to Chimera .xyz format."""
     from glob import glob
     from os.path import isdir
 
@@ -448,13 +448,16 @@ def _undrift_rcc(
                 plt.show()
         else:
             print(f"Undrifting file {path}")
-            drift, locs = postprocess.undrift(
-                locs,
-                info,
-                segmentation,
-                display=display,
-                progress="console",
-            )
+            try:
+                drift, locs = postprocess.undrift(
+                    locs,
+                    info,
+                    segmentation,
+                    display=display,
+                    progress="console",
+                )
+            except ValueError as e:
+                raise SystemExit(f"{path}: {e}")
 
             undrift_info["Drift X"] = float(drift["x"].mean())
             undrift_info["Drift Y"] = float(drift["y"].mean())
@@ -496,24 +499,24 @@ def _undrift_aim(
         io.save_drift(base + "_aimdrift.txt", drift)
 
 
+#: Frames per segment of the RCC that ``picasso undrift-fiducials`` runs
+#: before finding the fiducials.
+_PRE_RCC_SEGMENTATION = 2000
+
+
 def _undrift_fiducials(files: str) -> None:
     """Automatically pick fiducials and use them for drift correction.
     See ``postprocess.undrift_from_picked`` and
     ``imageprocess.find_fiducials`` for more details.
 
-    Uses RCC with segmentation of 2000 before so that fiducials can be
-    detected.
+    Uses RCC with segments of 2000 frames (fewer for movies shorter than
+    8000 frames, so that there are at least 4 segments) before, so that
+    fiducials can be detected.
     """
     import glob
     from . import io, lib, postprocess
 
-    segmentation = 2000
-
     paths = glob.glob(files)
-    undrift_info = {
-        **lib.step_info("Undrift by fiducials"),
-        "pre-RCC segmentation": segmentation,
-    }
     for path in paths:
         try:
             locs, info = io.load_locs(path)
@@ -521,10 +524,17 @@ def _undrift_fiducials(files: str) -> None:
             continue
 
         print(f"Undrifting file {path}.")
-        drift, locs = postprocess.undrift(
-            locs, info, segmentation, display=False, progress="console"
-        )
-        print("pre-RCC done.")
+        n_frames = lib.get_from_metadata(info, "Frames", raise_error=True)
+        segmentation = min(_PRE_RCC_SEGMENTATION, n_frames // 4)
+        undrift_info = lib.step_info("Undrift by fiducials")
+        if segmentation >= 1:
+            drift, locs = postprocess.undrift(
+                locs, info, segmentation, display=False, progress="console"
+            )
+            undrift_info["pre-RCC segmentation"] = segmentation
+            print("pre-RCC done.")
+        else:  # too short to segment, and too short to drift much
+            print("pre-RCC skipped, the movie is too short.")
         locs, new_info, drift = postprocess.undrift_from_fiducials(
             locs, info, progress="console"
         )
@@ -725,7 +735,7 @@ def _nneighbor(files: str) -> None:
             base, ext = os.path.splitext(path)
             out_path = base + "_minval.txt"
             np.savetxt(out_path, minvals, newline="\r\n")
-            print("Saved filest o: {}".format(out_path))
+            print("Saved file to: {}".format(out_path))
 
 
 def _cbc(
@@ -817,6 +827,19 @@ def _cbc(
         base, ext = os.path.splitext(paths[i])
         io.save_locs(base + "_cbc.hdf5", locs, info)
         print(f"Saved {base}_cbc.hdf5")
+
+
+def _parse_bool(value: str) -> bool:
+    """Parse a yes/no command line argument: yes/no, true/false, on/off
+    or 1/0, in any case."""
+    answer = value.strip().lower()
+    if answer in ("yes", "true", "on", "1", "y"):
+        return True
+    if answer in ("no", "false", "off", "0", "n"):
+        return False
+    raise argparse.ArgumentTypeError(
+        f"expected yes or no (or true/false, 1/0), got {value!r}"
+    )
 
 
 def _cbc_undefined(value: str) -> float | Literal["remove"]:
@@ -3342,6 +3365,14 @@ def _spinna_validate_parameters(
         raise TypeError("parameters_filename must end with .csv")
 
     parameters = pd.read_csv(parameters_filename)
+    if "rotation_mode" in parameters.columns:
+        # "None" (no rotations) is a value, which pandas reads as missing
+        parameters["rotation_mode"] = pd.read_csv(
+            parameters_filename,
+            usecols=["rotation_mode"],
+            dtype=str,
+            keep_default_na=False,
+        )["rotation_mode"]
 
     path, ext = os.path.splitext(parameters_filename)
     result_dir = path + "__fitting_results"
@@ -3629,7 +3660,7 @@ def _spinna_build_mixer(
     targets: list,
     label_unc: dict,
     le: dict,
-    random_rot_mode: str,
+    random_rot_mode: str | None,
     apply_mask: bool,
     mask_paths: dict,
     dim: int,
@@ -3683,7 +3714,7 @@ def _spinna_collect_le_fit_results(
     opt_props,
     score,
     label_unc: dict,
-    random_rot_mode: str,
+    random_rot_mode: str | None,
     dim: int,
     granularity,
     sim_repeats: int,
@@ -3704,7 +3735,7 @@ def _spinna_collect_le_fit_results(
         ],
         "Parameters search space granularity": granularity,
         "Dimensionality": f"{dim}D",
-        "Rotation mode": random_rot_mode,
+        "Rotation mode": str(random_rot_mode),
         "Number of simulation repeats": sim_repeats,
     }
     if label_unc_search is not None:
@@ -3770,7 +3801,7 @@ def _spinna_collect_structure_results(
     score,
     label_unc: dict,
     le: dict,
-    random_rot_mode: str,
+    random_rot_mode: str | None,
     dim: int,
     granularity,
     N_structures: dict,
@@ -3785,12 +3816,12 @@ def _spinna_collect_structure_results(
     results: dict = {
         "File location of structures": row["structures_filename"],
         "Molecular targets": targets,
-        "File location of experimenal data": [
+        "File location of experimental data": [
             str(row[f"exp_data_{target}"]) for target in targets
         ],
         "Labeling efficiency (%)": [le[target] * 100 for target in targets],
         "Label uncertainty (nm)": list(label_unc.values()),
-        "Rotation mode": random_rot_mode,
+        "Rotation mode": str(random_rot_mode),
         "Dimensionality": f"{dim}D",
         "Parameters search space granularity": granularity,
         "Fitted structures names": list(N_structures.keys()),
@@ -3834,7 +3865,7 @@ def _spinna_collect_results(
     score,
     label_unc: dict,
     le: dict,
-    random_rot_mode: str,
+    random_rot_mode: str | None,
     dim: int,
     granularity,
     N_structures: dict,
@@ -3979,13 +4010,24 @@ def _spinna_plot_nnd(
         plt.close(fig)
 
 
-def _spinna_row_rotation_mode(row) -> str:
-    """Read ``rotation_mode`` from a row, defaulting to "2D"."""
-    if "rotation_mode" in row.index:
-        if not isinstance(row["rotation_mode"], str):
-            print("Invalid rotation_mode. Using default: 2D")
-        else:
-            return str(row["rotation_mode"])
+def _spinna_row_rotation_mode(row) -> str | None:
+    """Read ``rotation_mode`` from a row: "3D", "2D" or None for "None"
+    (no rotations), defaulting to "2D" when it is missing or empty."""
+    import pandas as pd
+
+    if "rotation_mode" not in row.index:
+        return "2D"
+    value = row["rotation_mode"]
+    mode = "" if pd.isna(value) else str(value).strip()
+    if mode in ("2D", "3D"):
+        return mode
+    if mode == "None":
+        return None
+    if mode:
+        print(
+            f"Invalid rotation_mode '{mode}'. Must be one of '3D', '2D', "
+            "'None'. Using default: 2D"
+        )
     return "2D"
 
 
@@ -4214,7 +4256,7 @@ def _spinna_process_row_le(
     area,
     volume,
     z_range,
-    random_rot_mode: str,
+    random_rot_mode: str | None,
     save_filename: str,
     asynch: bool,
     verbose: bool,
@@ -6246,15 +6288,17 @@ def _build_parser() -> (
     )
     smlm_cluster_parser.add_argument(
         "basic_fa",
-        type=bool,
+        nargs="?",
+        type=_parse_bool,
         help=(
             "whether or not perform basic frame analysis (sticking event "
-            "removal)"
+            "removal): yes/no, true/false or 1/0 (default: no)"
         ),
         default=False,
     )
     smlm_cluster_parser.add_argument(
         "radius_z",
+        nargs="?",
         type=float,
         help=("clustering radius (nm) in axial direction (required for 3D)"),
         default=None,

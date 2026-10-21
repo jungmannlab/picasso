@@ -95,7 +95,7 @@ def test_export_of_a_folder_converts_every_file(
 def test_hdf2csv_keeps_the_columns(locs, locs_path, monkeypatch):
     _picasso(monkeypatch, "hdf2csv", locs_path)
     exported = pd.read_csv(_out(locs_path, ".csv"))
-    assert set(locs.columns) <= set(exported.columns)
+    assert list(exported.columns) == list(locs.columns)  # no index column
     assert np.allclose(exported["x"], locs["x"], rtol=1e-6)
     assert np.allclose(exported["photons"], locs["photons"], rtol=1e-6)
 
@@ -206,11 +206,6 @@ def test_hdbscan_finds_the_origami(locs_path, monkeypatch):
     assert len(centers) == N_ORIGAMI
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="bug: basic_fa and radius_z are required positional arguments "
-    "despite their defaults, so 2D data cannot be clustered without them",
-)
 def test_smlm_cluster_finds_the_origami(locs_path, monkeypatch):
     _picasso(monkeypatch, "smlm-cluster", locs_path, 50, 10)
     clustered, _ = io.load_locs(_out(locs_path, "_clusters.hdf5"))
@@ -220,7 +215,7 @@ def test_smlm_cluster_finds_the_origami(locs_path, monkeypatch):
 
 
 def test_smlm_cluster_with_every_argument(locs_path, monkeypatch):
-    _picasso(monkeypatch, "smlm-cluster", locs_path, 50, 10, "True", 100)
+    _picasso(monkeypatch, "smlm-cluster", locs_path, 50, 10, "yes", 100)
     centers, _ = io.load_locs(_out(locs_path, "_cluster_centers.hdf5"))
     assert len(centers) == N_ORIGAMI
 
@@ -229,13 +224,11 @@ def test_smlm_cluster_with_every_argument(locs_path, monkeypatch):
     "value, expected",
     [
         ("True", True),
-        pytest.param(
-            "False",
-            False,
-            marks=pytest.mark.xfail(
-                strict=True, reason="bug: type=bool parses 'False' as True"
-            ),
-        ),
+        ("yes", True),
+        ("1", True),
+        ("False", False),
+        ("no", False),
+        ("0", False),
     ],
 )
 def test_smlm_cluster_reads_the_frame_analysis_switch(
@@ -251,6 +244,14 @@ def test_smlm_cluster_reads_the_frame_analysis_switch(
     with pytest.raises(SystemExit):
         _picasso(monkeypatch, "smlm-cluster", locs_path, 50, 10, value, 100)
     assert recorded["frame_analysis"] is expected
+
+
+def test_smlm_cluster_rejects_an_unclear_switch(
+    locs_path, monkeypatch, capsys
+):
+    with pytest.raises(SystemExit):
+        _picasso(monkeypatch, "smlm-cluster", locs_path, 50, 10, "maybe")
+    assert "expected yes or no" in capsys.readouterr().err
 
 
 @pytest.fixture
@@ -406,31 +407,29 @@ def test_undrift_fiducials_removes_a_linear_drift(info, tmp_path, monkeypatch):
     assert undrifted.loc[near, "x"].std() < 5
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="bug: the pre-RCC of 2000-frame segments fails with 'negative "
-    "dimensions are not allowed' on movies of fewer than 8000 frames",
-)
 def test_undrift_fiducials_of_a_short_movie(info, tmp_path, monkeypatch):
+    """Segments of 2000 frames do not fit 4 times into the 1000 frames:
+    the RCC before finding the fiducials uses segments of 250."""
     path = tmp_path / "fiducials.hdf5"
     io.save_locs(str(path), _fiducials(info[0]["Frames"], 40.0), info)
     _picasso(monkeypatch, "undrift-fiducials", path)
-    assert os.path.exists(_out(path, "_undrift_fiducials.hdf5"))
+    undrifted, undrift_info = io.load_locs(
+        _out(path, "_undrift_fiducials.hdf5")
+    )
+    assert undrift_info[-1]["pre-RCC segmentation"] == 250
+    near = (np.abs(undrifted["x"] - 1000) < 200) & (
+        np.abs(undrifted["y"] - 1000) < 200
+    )
+    assert undrifted.loc[near, "x"].std() < 5
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="bug: a segmentation that leaves fewer than 4 segments fails "
-    "inside RCC or the drift spline instead of saying what is wrong",
-    raises=AssertionError,
-)
 @pytest.mark.parametrize("segmentation", [400, 1000])
 def test_undrift_with_too_few_segments_says_why(
     segmentation, locs_path, monkeypatch
 ):
-    with pytest.raises(Exception) as error:
+    with pytest.raises(SystemExit, match="at most 250 frames"):
         _picasso(monkeypatch, "undrift", locs_path, "-s", segmentation)
-    assert "segment" in str(error.value).lower()
+    assert not os.path.exists(_out(locs_path, "_undrift.hdf5"))
 
 
 # ---------------------------------------------------------------------------
@@ -1208,6 +1207,9 @@ def test_spinna_batch(spinna_row, tmp_path, monkeypatch):
     assert len(summary) == 1
     (row,) = summary.to_dict("records")
     assert row["Fitted structures names"] == "['Monomer', 'Dimer']"
+    assert row["File location of experimental data"] == str(
+        [spinna_row["exp_data_A"]]
+    )
     assert row["Area (um^2)"] == 25.0
     assert row["Rotation mode"] == "2D"
     for name in (
@@ -1352,21 +1354,42 @@ def test_spinna_batch_of_two_targets_with_bootstrap(tmp_path, monkeypatch):
     assert "Het:" in summary["Relative proportions of A in"]
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="bug: pandas reads the documented rotation_mode 'None' as NaN, "
-    "so the default '2D' is used instead",
-)
 def test_spinna_batch_without_rotations(
     spinna_row, tmp_path, monkeypatch, capsys
 ):
+    from picasso import spinna
+
+    modes = []
+
+    class RecordingMixer(spinna.StructureMixer):
+        def __init__(self, *args, **kwargs):
+            modes.append(kwargs["random_rot_mode"])
+            super().__init__(*args, **kwargs)
+
+    monkeypatch.setattr(spinna, "StructureMixer", RecordingMixer)
     spinna_row["rotation_mode"] = "None"
     results = _spinna(monkeypatch, tmp_path, spinna_row)
     assert "Invalid rotation_mode" not in capsys.readouterr().out
+    assert modes == [None]
+    (row,) = pd.read_csv(
+        os.path.join(results, "summary_results.csv"), keep_default_na=False
+    ).to_dict("records")
+    assert row["Rotation mode"] == "None"
+
+
+@pytest.mark.parametrize(
+    "value, message", [("", False), ("4D", True)], ids=["empty", "invalid"]
+)
+def test_spinna_batch_default_rotations(
+    value, message, spinna_row, tmp_path, monkeypatch, capsys
+):
+    spinna_row["rotation_mode"] = value
+    results = _spinna(monkeypatch, tmp_path, spinna_row)
+    assert ("Invalid rotation_mode '4D'" in capsys.readouterr().out) is message
     (row,) = pd.read_csv(os.path.join(results, "summary_results.csv")).to_dict(
         "records"
     )
-    assert row["Rotation mode"] == "None"
+    assert row["Rotation mode"] == "2D"
 
 
 @pytest.mark.parametrize(

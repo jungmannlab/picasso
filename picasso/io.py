@@ -3043,8 +3043,9 @@ class AbstractPicassoMovie(abc.ABC):
         file_handle : file object
             Destination, opened in binary write mode.
         byte_order : str, optional
-            Byte order to write in (``"<"`` or ``">"``). None keeps the
-            movie's own. Default None.
+            Byte order to write in (``"<"`` or ``">"``). None writes the
+            frames as they are read, in the native byte order. Default
+            None.
         """
         pass
 
@@ -3087,11 +3088,11 @@ class ND2Movie(AbstractPicassoMovie):
                 error,
             )
             self.meta = None
-        self._shape = [
+        self._shape = (
             self.nd2file.sizes[self.frame_axis],
-            self.nd2file.sizes["X"],
             self.nd2file.sizes["Y"],
-        ]
+            self.nd2file.sizes["X"],
+        )
 
     def _validate_nd2_dimensions(self):
         """Check required dimensions and set self.frame_axis.
@@ -3526,7 +3527,7 @@ class ND2Movie(AbstractPicassoMovie):
             channel = pm_info.get("Filter")
             channels = cam_config["Filter Wavelengths"]
             if channel in channels:
-                parameters["wavelength"] = str(channels[channel])
+                parameters["wavelength"] = [str(channels[channel])]
         if "wavelength" not in parameters.keys():
             parameters["wavelength"] = [0]
         return parameters
@@ -4114,6 +4115,16 @@ def _index_pages(pages, progress: lib.Progress) -> int:
     return len(pages)
 
 
+def _frames_tofile(movie, file_handle, byte_order: str | None) -> None:
+    """Write the frames of ``movie``, which are read in the native byte
+    order, to ``file_handle`` as raw binary in ``byte_order`` (``"<"``
+    or ``">"``; None for the native one)."""
+    for image in movie:
+        if byte_order is not None:
+            image = image.astype(image.dtype.newbyteorder(byte_order))
+        image.tofile(file_handle)
+
+
 class TiffMap(_PerThreadFileHandles):
     """Read a single TIFF file and provide array-like access to its frames.
 
@@ -4456,7 +4467,7 @@ class TiffMap(_PerThreadFileHandles):
         # thread reads through its private handle, and the compressed
         # fallback takes _decode_lock), so concurrent reads can overlap.
         if isinstance(it, tuple):
-            if isinstance(it, int) or np.issubdtype(it[0], np.integer):
+            if isinstance(it[0], (int, np.integer)):
                 return self[it[0]][it[1:]]
             elif isinstance(it[0], slice):
                 indices = range(*it[0].indices(self.n_frames))
@@ -4470,14 +4481,9 @@ class TiffMap(_PerThreadFileHandles):
                         return stack[:, it[1], it[2]]
                     else:
                         raise IndexError
-            elif it[0] == Ellipsis:
-                stack = self[it[0]]
-                if len(it) == 2:
-                    return stack[:, it[1]]
-                elif len(it) == 3:
-                    return stack[:, it[1], it[2]]
-                else:
-                    raise IndexError
+            elif it[0] is Ellipsis:
+                # as in NumPy, ``...`` stands for the leading axes
+                return self[...][it]
         elif isinstance(it, slice):
             indices = range(*it.indices(self.n_frames))
             return np.array([self.get_frame(_) for _ in indices])
@@ -4567,11 +4573,7 @@ class TiffMap(_PerThreadFileHandles):
         self._tif.close()
 
     def tofile(self, file_handle, byte_order=None):
-        do_byteswap = byte_order != self._tif_byte_order
-        for image in self:
-            if do_byteswap:
-                image = image.byteswap()
-            image.tofile(file_handle)
+        _frames_tofile(self, file_handle, byte_order)
 
 
 class STKMovie(AbstractPicassoMovie, _PerThreadFileHandles):
@@ -4649,7 +4651,7 @@ class STKMovie(AbstractPicassoMovie, _PerThreadFileHandles):
         # No shared lock: get_frame reads through this thread's private
         # handle, so concurrent reads overlap instead of serializing.
         if isinstance(it, tuple):
-            if isinstance(it[0], int) or np.issubdtype(it[0], np.integer):
+            if isinstance(it[0], (int, np.integer)):
                 return self[it[0]][it[1:]]
             elif isinstance(it[0], slice):
                 indices = range(*it[0].indices(self.n_frames))
@@ -4662,14 +4664,9 @@ class STKMovie(AbstractPicassoMovie, _PerThreadFileHandles):
                     return stack[:, it[1], it[2]]
                 else:
                     raise IndexError
-            elif it[0] == Ellipsis:
-                stack = self[it[0]]
-                if len(it) == 2:
-                    return stack[:, it[1]]
-                elif len(it) == 3:
-                    return stack[:, it[1], it[2]]
-                else:
-                    raise IndexError
+            elif it[0] is Ellipsis:
+                # as in NumPy, ``...`` stands for the leading axes
+                return self[...][it]
         elif isinstance(it, slice):
             indices = range(*it.indices(self.n_frames))
             return np.array([self.get_frame(_) for _ in indices])
@@ -4772,11 +4769,7 @@ class STKMovie(AbstractPicassoMovie, _PerThreadFileHandles):
         self._close_handles()
 
     def tofile(self, file_handle, byte_order=None):
-        do_byteswap = byte_order != self._byte_order
-        for image in self:
-            if do_byteswap:
-                image = image.byteswap()
-            image.tofile(file_handle)
+        _frames_tofile(self, file_handle, byte_order)
 
     @property
     def dtype(self):
@@ -4842,14 +4835,9 @@ class STKMultiMovie(AbstractPicassoMovie):
 
     def __getitem__(self, it):  # noqa: C901
         if isinstance(it, tuple):
-            if it[0] == Ellipsis:
-                stack = self[it[0]]
-                if len(it) == 2:
-                    return stack[:, it[1]]
-                elif len(it) == 3:
-                    return stack[:, it[1], it[2]]
-                else:
-                    raise IndexError
+            if it[0] is Ellipsis:
+                # as in NumPy, ``...`` stands for the leading axes
+                return self[...][it]
             elif isinstance(it[0], slice):
                 indices = range(*it[0].indices(self.n_frames))
                 stack = np.array([self.get_frame(_) for _ in indices])
@@ -5034,14 +5022,9 @@ class TiffMultiMap(AbstractPicassoMovie):
 
     def __getitem__(self, it):  # noqa: C901
         if isinstance(it, tuple):
-            if it[0] == Ellipsis:
-                stack = self[it[0]]
-                if len(it) == 2:
-                    return stack[:, it[1]]
-                elif len(it) == 3:
-                    return stack[:, it[1], it[2]]
-                else:
-                    raise IndexError
+            if it[0] is Ellipsis:
+                # as in NumPy, ``...`` stands for the leading axes
+                return self[...][it]
             elif isinstance(it[0], slice):
                 indices = range(*it[0].indices(self.n_frames))
                 stack = np.array([self.get_frame(_) for _ in indices])

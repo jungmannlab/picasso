@@ -3280,10 +3280,6 @@ class TestND2Movie:
             pass
         assert opened[-1].closed
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="bug: ND2Movie.shape is (frames, X, Y), not (frames, Y, X)",
-    )
     def test_shape_of_a_non_square_movie(self, tmp_path, monkeypatch):
         data = np.zeros((4, 6, 9), dtype="<u2")
         _install_fake_nd2(monkeypatch, data, ("T", "Y", "X"))
@@ -3305,6 +3301,8 @@ class TestND2Movie:
             "PixelReadoutRate": "540 MHz",
             "ReadoutMode": "Rolling Shutter at 16-bit",
         }
+        # a list, as for the other movie formats
+        assert parameters["wavelength"] == ["595"]
         with pytest.raises(KeyError, match="not found in config"):
             movie.camera_parameters({"Cameras": {"Other": {}}})
 
@@ -3489,11 +3487,6 @@ class TestSTKMovie:
             with pytest.raises(IndexError, match="out of range"):
                 movie[5]
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="bug: STKMovie[slice, ...] calls np.issubdtype on the slice "
-        "before checking for one and raises TypeError",
-    )
     def test_slice_of_frames_and_rows(self, stk_movie, tmp_path):
         path = _write_stk(tmp_path / "m.stk", stk_movie)
         with io.STKMovie(path) as movie:
@@ -3511,13 +3504,16 @@ class TestSTKMovie:
         assert info["Data Type"] == "uint16"
         assert info.get("Pixelsize") == pytest.approx(pixelsize)
 
-    def test_tofile_writes_the_raw_frames(self, stk_movie, tmp_path):
+    @pytest.mark.parametrize("byte_order", ["<", ">"])
+    def test_tofile_writes_the_raw_frames(
+        self, byte_order, stk_movie, tmp_path
+    ):
         path = _write_stk(tmp_path / "m.stk", stk_movie)
         out = tmp_path / "m.raw"
         with io.STKMovie(path) as movie, open(out, "wb") as f:
-            movie.tofile(f, byte_order="<")
-        written = np.fromfile(out, dtype="<u2").reshape(stk_movie.shape)
-        np.testing.assert_array_equal(written, stk_movie)
+            movie.tofile(f, byte_order=byte_order)
+        written = np.fromfile(out, dtype=byte_order + "u2")
+        np.testing.assert_array_equal(written.reshape(-1, 6, 7), stk_movie)
 
     def test_a_plain_tiff_is_rejected(self, stk_movie, tmp_path):
         path = tmp_path / "m.tif"
@@ -3590,34 +3586,37 @@ def test_a_truncated_file_is_reported_as_incomplete(locs, info, tmp_path):
         io.load_locs(path)
 
 
-@pytest.mark.parametrize(
-    "byteorder",
-    [
-        "<",
-        pytest.param(
-            ">",
-            marks=pytest.mark.xfail(
-                strict=True,
-                reason="bug: TiffMap.tofile byteswaps frames that get_frame "
-                "already converted to the native byte order",
-            ),
-        ),
-    ],
-)
-def test_tif_tofile_writes_the_raw_frames(byteorder, tmp_path):
+@pytest.mark.parametrize("tif_order", ["<", ">"])
+@pytest.mark.parametrize("raw_order", ["<", ">", None])
+def test_tif_tofile_writes_the_raw_frames(tif_order, raw_order, tmp_path):
     rng = np.random.default_rng(17)
     data = rng.integers(0, 60000, size=(4, 5, 6), dtype="<u2")
     path = tmp_path / "m.tif"
-    _write_tif_stack(path, data, byteorder=byteorder)
+    _write_tif_stack(path, data, byteorder=tif_order)
     movie, _ = io.load_tif(str(path))
     out = tmp_path / "m.raw"
     try:
         with open(out, "wb") as f:
-            movie.tofile(f, byte_order="<")
+            movie.tofile(f, byte_order=raw_order)
     finally:
         movie.close()
-    written = np.fromfile(out, dtype="<u2").reshape(data.shape)
+    dtype = np.dtype("u2").newbyteorder(raw_order or "=")
+    written = np.fromfile(out, dtype=dtype).reshape(data.shape)
     np.testing.assert_array_equal(written, data)
+
+
+def test_tif_frames_and_rows(tmp_path):
+    """Indexing one TIFF file (``TiffMap``) like an array."""
+    rng = np.random.default_rng(18)
+    data = rng.integers(0, 60000, size=(4, 5, 6), dtype="<u2")
+    path = tmp_path / "m.tif"
+    _write_tif_stack(path, data)
+    with io.TiffMap(str(path)) as movie:
+        np.testing.assert_array_equal(movie[2, 1], data[2, 1])
+        np.testing.assert_array_equal(movie[np.int64(2), 1:3], data[2, 1:3])
+        np.testing.assert_array_equal(movie[1:3, 2], data[1:3, 2])
+        np.testing.assert_array_equal(movie[1:3, :2, 3], data[1:3, :2, 3])
+        np.testing.assert_array_equal(movie[..., 1], data[..., 1])
 
 
 def test_save_config(tmp_path, monkeypatch):

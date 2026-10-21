@@ -183,6 +183,37 @@ def test_rcc_applies_drift(window, qt_offscreen, monkeypatch):
     assert len(window.view._drift[0]) == N_FRAMES
 
 
+def test_rcc_suggests_four_segments(window, monkeypatch):
+    """RCC needs at least 4 segments; 1000 frames, suggested for movies
+    of 1000 frames and more, gave 2 of the 2000 frames here."""
+    asked = []
+
+    def get_int(parent, title, label, value, minimum, maximum, *a, **k):
+        asked.append((value, minimum, maximum))
+        return value, False  # canceled
+
+    monkeypatch.setattr(QtWidgets.QInputDialog, "getInt", get_int)
+    window.view.undrift_rcc()
+    assert asked == [(N_FRAMES // 4, 1, N_FRAMES)]
+
+
+def test_rcc_explains_too_few_segments(window, qt_offscreen, monkeypatch):
+    messages = []
+    monkeypatch.setattr(
+        QtWidgets.QInputDialog, "getInt", lambda *a, **k: (1000, True)
+    )
+    monkeypatch.setattr(
+        QtWidgets.QMessageBox,
+        "information",
+        lambda parent, title, text, *a, **k: messages.append(text),
+    )
+    window.view.undrift_rcc()
+    _wait_for_tasks(qt_offscreen)
+    (message,) = messages
+    assert "at most 500 frames" in message
+    assert window.view._drift[0] is None
+
+
 def test_aim_applies_drift(window, qt_offscreen, monkeypatch):
     params = {"segmentation": 500, "intersect_d": 20.0, "roi_r": 60.0}
     monkeypatch.setattr(

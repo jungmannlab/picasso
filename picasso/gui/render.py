@@ -18466,9 +18466,15 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         used as a reference. Returns None if canceled."""
         ref_channel = 0 if channel == len(self.locs_paths) else channel
         n_frames = self.infos[ref_channel][0]["Frames"]
-        default_segmentation = int(n_frames / 4) if n_frames < 1000 else 1000
+        # at most a quarter of the movie: RCC needs at least 4 segments
+        default_segmentation = min(1000, int(n_frames) // 4)
         segmentation, ok = QtWidgets.QInputDialog.getInt(
-            self, "Undrift by RCC", "Segmentation:", default_segmentation
+            self,
+            "Undrift by RCC",
+            "Segmentation:",
+            max(1, default_segmentation),
+            1,
+            max(1, int(n_frames)),
         )
         return segmentation if ok else None
 

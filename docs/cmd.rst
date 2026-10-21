@@ -1020,7 +1020,8 @@ Correct localization coordinates for drift with RCC.
      - Description
    * - ``-s``, ``--segmentation`` (float)
      - ``1000``
-     - The number of frames to be combined for one temporal segment.
+     - The number of frames to be combined for one temporal segment. RCC
+       needs at least 4 segments, i.e., at most a quarter of the frames.
    * - ``-f``, ``--from-file`` (str)
      -
      - Apply drift from specified file instead of computing it.
@@ -1058,7 +1059,9 @@ undrift-fiducials
 -----------------
 Correct localization coordinates for drift using fiducial markers
 (automatically picked). Takes one or more hdf5 localization files as
-positional arguments.
+positional arguments. Before the fiducials are picked, the drift is roughly
+corrected by RCC with segments of 2000 frames (a quarter of the frames for
+movies shorter than 8000 frames).
 
 .. code-block:: bash
 
@@ -1126,10 +1129,12 @@ Positional arguments:
    Clustering radius (nm).
 ``min_locs`` (int)
    Minimum number of localizations in a cluster.
-``basic_fa`` (bool)
-   Whether to perform basic frame analysis (sticking event removal).
-``radius_z`` (float)
-   Clustering radius (nm) in axial direction (MUST BE SET FOR 3D!).
+``basic_fa`` (yes/no, optional)
+   Whether to perform basic frame analysis (sticking event removal):
+   ``yes`` or ``no`` (also ``true``/``false`` or ``1``/``0``). Default: ``no``.
+``radius_z`` (float, optional)
+   Clustering radius (nm) in axial direction (MUST BE SET FOR 3D!). Give
+   ``basic_fa`` before it, e.g., ``picasso smlm-cluster locs.hdf5 20 10 no 50``.
 
 g5m
 ---
