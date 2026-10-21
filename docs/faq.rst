@@ -141,6 +141,12 @@ dictionaries; ``pandas.read_hdf(path, key="locs")`` reads the localizations
 without Picasso. In MATLAB, ``h5read(path, '/locs')``. See :ref:`files-hdf5`
 and :ref:`files-matlab-export`.
 
+To save localizations from Python, always use
+``picasso.io.save_locs(path, locs, info)``, not ``DataFrame.to_hdf`` or
+``h5py``: only ``save_locs`` writes the format marker and the metadata that
+Picasso needs to read the file correctly, see
+:ref:`files-minimum-requirements`.
+
 How do I export localizations to other software?
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 

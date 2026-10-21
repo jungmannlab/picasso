@@ -79,7 +79,9 @@ An HDF5 file can be opened with various software packages. In Picasso, we use
    locs = pandas.read_hdf(PATH_TO_LOCALIZATIONS, key="locs")
 
 The ``key`` argument can be adjusted for other datasets. The available keys
-can be verified using ``pandas.HDFStore(PATH_TO_FILE).keys()``.
+can be verified using ``pandas.HDFStore(PATH_TO_FILE).keys()``. To write
+localizations, use ``picasso.io.save_locs`` rather than pandas, see
+:ref:`files-minimum-requirements`.
 
 .. dropdown:: Python
    :icon: code
@@ -163,10 +165,24 @@ discarded (Render shows a message): if most of them lie beyond the field of
 view, ``Width``, ``Height`` or ``Pixelsize`` are too small, or the file holds
 camera pixels although it carries the format marker.
 
-The simplest way to write such a file from Python is
-``picasso.io.save_locs(path, locs, info)``, with ``locs`` a
-``pandas.DataFrame`` and ``info`` a list of dictionaries, e.g.,
-``[{"Width": 256, "Height": 256, "Frames": 10000, "Pixelsize": 130}]``.
+.. important::
+
+   **From Python, always save localizations with**
+   ``picasso.io.save_locs(path, locs, info)``, with ``locs`` a
+   ``pandas.DataFrame`` and ``info`` a list of dictionaries, e.g.,
+   ``[{"Width": 256, "Height": 256, "Frames": 10000, "Pixelsize": 130}]``.
+   It writes everything listed above in one step: the table in the layout
+   every Picasso version reads, the format marker, the embedded metadata
+   (and the YAML file, if one is there or the settings ask for it), and the
+   :ref:`spatial index <spatial-index>`. It also casts the columns to the
+   :ref:`expected data types <files-dtypes>` and drops localizations that
+   Picasso would discard on loading.
+
+   Do not write the file with ``pandas.DataFrame.to_hdf`` or ``h5py``
+   yourself. Such a file has no format marker, so Picasso takes its nm for
+   camera pixels and multiplies them by the pixel size, and its metadata
+   is easily left out or left stale.
+
 From MATLAB, see :ref:`files-matlab-export`.
 
 .. dropdown:: Python
