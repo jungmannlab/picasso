@@ -27,6 +27,7 @@ License (MIT): ``LICENSES/Gpufit-LICENSE.txt``.
 from __future__ import annotations
 
 import logging
+import numbers
 import os
 import multiprocessing
 import sqlite3
@@ -4111,6 +4112,16 @@ def fit(
     return locs, new_info
 
 
+def _is_positive_number(value) -> bool:
+    """Whether ``value`` is a positive real number, also a NumPy scalar
+    (e.g., a pixel size read from movie metadata); booleans are not."""
+    return (
+        isinstance(value, numbers.Real)
+        and not isinstance(value, bool)
+        and value > 0
+    )
+
+
 def _reference_pixelsize(camera_infos: list[dict]) -> float:
     """Camera pixel size (nm) of the reference channel of a multichannel
     fit, whose coordinates the localizations are expressed in.
@@ -4121,7 +4132,7 @@ def _reference_pixelsize(camera_infos: list[dict]) -> float:
         If the reference channel's ``camera_info`` lacks ``Pixelsize``.
     """
     pixelsize = camera_infos[0].get("Pixelsize")
-    if not isinstance(pixelsize, (int, float)) or not pixelsize > 0:
+    if not _is_positive_number(pixelsize):
         raise ValueError(
             "The reference channel's camera_info needs 'Pixelsize', the "
             "camera pixel size in nm, to express the coordinates in nm."
@@ -4179,7 +4190,7 @@ def _validate_fit_args(
     ), "max_it must be a positive integer or None"
     assert isinstance(multiprocess, bool), "multiprocess must be a boolean"
     pixelsize = camera_info.get("Pixelsize")
-    if not isinstance(pixelsize, (int, float)) or not pixelsize > 0:
+    if not _is_positive_number(pixelsize):
         raise ValueError(
             "camera_info needs 'Pixelsize', the effective camera pixel size "
             "in nm (after magnification): coordinates are stored in nm, "
@@ -9530,11 +9541,11 @@ def localize(
                 multiprocess=threaded,
                 progress=progress,
             )
-        # zfit applies both the calibration's own lateral corrections and
-        # the separately loaded ones, in that order, and records them - so
-        # a correction kept in its own file gives the same coordinates as
-        # one appended to the 3D calibration.
-        return locs, info
+            # zfit applies both the calibration's own lateral corrections
+            # and the separately loaded ones, in that order, and records
+            # them - so a correction kept in its own file gives the same
+            # coordinates as one appended to the 3D calibration.
+            return locs, info
 
     # Standalone affine corrections (e.g. a chromatic one used without a 3D
     # calibration); those carried by the spline calibration were already

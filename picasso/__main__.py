@@ -1761,22 +1761,26 @@ def _resolve_camera_pixelsize(
 
 def _localize_load_3d_calibration(
     args: argparse.Namespace,
-) -> tuple[str, float, dict]:
+) -> tuple[str, float, dict | None]:
     """Load 3D z-calibration, prompting interactively if needed.
 
     Parameters
     ----------
     args : argparse.Namespace
-        Parsed ``picasso localize`` arguments; ``zc`` (calibration path)
-        and ``mf`` (magnification factor, 0 to prompt) are read.
+        Parsed ``picasso localize`` arguments; ``zc`` (calibration path),
+        ``mf`` (magnification factor, 0 to prompt) and ``pixelsize`` are
+        read.
 
     Returns
     -------
-    tuple[str, float, dict]
-        ``(zpath, magnification_factor, z_calibration)``
+    tuple[str, float, dict or None]
+        ``(zpath, magnification_factor, z_calibration)``;
+        ``z_calibration`` is None for a calibration written before Picasso
+        1.0 when ``--pixelsize`` is not given: it is converted with the
+        pixel size of each movie instead.
     """
     import os
-    from .io import load_calibration
+    from .io import MissingPixelsizeError, load_calibration
 
     print("------------------------------------------")
     print("Fitting 3D")
@@ -1797,8 +1801,11 @@ def _localize_load_3d_calibration(
 
     try:
         # a calibration written before Picasso 1.0 (spot widths in camera
-        # pixels) is converted with --pixelsize; io says so if it is missing
+        # pixels) is converted with --pixelsize or, without it, with the
+        # pixel size of each movie (see _localize_legacy_calibrations)
         z_calibration = load_calibration(zpath, pixelsize=args.pixelsize)
+    except MissingPixelsizeError:
+        z_calibration = None
     except Exception as e:
         print(e)
         print("Error loading calibration file.")
@@ -1935,6 +1942,124 @@ def _identification_parameters_from_args(
     )
 
 
+def _localize_load_lateral_transforms(
+    paths: list[str], pixelsize: float | None
+) -> list:
+    """The lateral corrections of the ``--affine-calibration`` files, in
+    the order given, each counted once.
+
+    Parameters
+    ----------
+    paths : list of str
+        The ``--affine-calibration`` files.
+    pixelsize : float or None
+        Camera pixel size in nm, which converts files written before
+        Picasso 1.0 (camera pixels).
+
+    Returns
+    -------
+    lateral_transforms : list of dicts
+        The corrections, in nm.
+
+    Raises
+    ------
+    io.MissingPixelsizeError
+        If a file was written before Picasso 1.0 and ``pixelsize`` is
+        None.
+    """
+    from . import lib
+    from .io import load_any_calibration
+
+    lateral_transforms = []
+    for affine_path in paths:
+        found = lib.lateral_transforms(
+            load_any_calibration(affine_path, pixelsize=pixelsize)
+        )
+        if not found:
+            raise Exception(
+                f"No lateral corrections found in {affine_path}. Build one "
+                "with the 'Calibrate lateral transform' dialog in "
+                "'picasso localize'."
+            )
+        # The same correction given twice - the flag repeated, or a
+        # standalone copy of a transform another file already carries -
+        # counts once: applying it twice would correct twice.
+        found, duplicates = lib.drop_duplicate_lateral_transforms(
+            found, lateral_transforms
+        )
+        if duplicates:
+            print(
+                f"Skipping {len(duplicates)} correction(s) from "
+                f"{affine_path} already loaded from an earlier "
+                "--affine-calibration: "
+                + ", ".join(lib.describe_lateral_transforms(duplicates))
+            )
+        if found:
+            lateral_transforms.extend(found)
+            print(
+                f"Loaded {len(found)} lateral correction(s) from "
+                f"{affine_path}: "
+                + ", ".join(lib.describe_lateral_transforms(found))
+            )
+    return lateral_transforms
+
+
+def _localize_legacy_calibrations(
+    args: argparse.Namespace,
+    z_params,
+    lateral_transforms: list | None,
+    pixelsize: float,
+) -> tuple:
+    """The calibrations of a ``picasso localize`` run that were written
+    before Picasso 1.0 (camera pixels) and not converted when they were
+    loaded, as ``--pixelsize`` was not given: they are converted with the
+    camera pixel size of the movie, which is assumed to be the camera of
+    the calibration.
+
+    Parameters
+    ----------
+    args : argparse.Namespace
+        Parsed ``picasso localize`` arguments; ``affine_calibration`` is
+        read.
+    z_params : tuple or None
+        ``(zpath, magnification_factor, z_calibration)`` of an astigmatic
+        3D fit, ``z_calibration`` None if not loaded yet; None without a
+        3D fit.
+    lateral_transforms : list or None
+        The ``--affine-calibration`` corrections, None if not loaded yet.
+    pixelsize : float
+        Camera pixel size of the movie in nm.
+
+    Returns
+    -------
+    z_params : tuple or None
+        As given, with the calibration loaded.
+    lateral_transforms : list
+        The corrections, in nm.
+    """
+    from .io import load_calibration
+
+    if z_params is not None and z_params[2] is None:
+        zpath, magnification_factor, _ = z_params
+        z_calibration = load_calibration(zpath, pixelsize=pixelsize)
+        print(
+            f"Converted the 3D calibration {zpath}, written before Picasso "
+            f"1.0, with the camera pixel size {pixelsize:g} nm."
+        )
+        z_params = (zpath, magnification_factor, z_calibration)
+    if lateral_transforms is None:
+        paths = getattr(args, "affine_calibration", []) or []
+        if paths:
+            print(
+                "Converting the lateral corrections written before Picasso "
+                f"1.0 with the camera pixel size {pixelsize:g} nm."
+            )
+        lateral_transforms = _localize_load_lateral_transforms(
+            paths, pixelsize
+        )
+    return z_params, lateral_transforms
+
+
 def _localize_process_file(
     paths: str | list[str],
     i: int,
@@ -1988,6 +2113,8 @@ def _localize_process_file(
     z_params : tuple or None
         If 3D astigmatism fitting is active, a tuple
         ``(zpath, magnification_factor, z_calibration)``; else ``None``.
+        ``z_calibration`` is None for a calibration written before
+        Picasso 1.0 that is converted with the pixel size of the movie.
     spline_calibration : dict or None
         Cubic-spline PSF calibration when the fit method is a spline method;
         else ``None``. A 3D spline fit recovers z directly (no ``zfit``).
@@ -2000,7 +2127,9 @@ def _localize_process_file(
         carries - so loading one separately gives the same coordinates as
         appending it to the calibration. Corrections the spline or
         astigmatism calibration carries - and therefore applies itself -
-        are skipped rather than applied a second time.
+        are skipped rather than applied a second time. None loads them
+        from ``args.affine_calibration`` with the pixel size of the movie
+        (files written before Picasso 1.0, without ``--pixelsize``).
     region_fit : dict or None
         Set by ``--regions-separately``: fit each ``--roi`` region on its
         own and write one file per region. Holds the per-region fitting
@@ -2042,6 +2171,9 @@ def _localize_process_file(
         args.pixelsize, movie, info, path
     )
     print(f"Camera pixel size: {cam_info['Pixelsize']:g} nm")
+    z_params, lateral_transforms = _localize_legacy_calibrations(
+        args, z_params, lateral_transforms, cam_info["Pixelsize"]
+    )
     if region_fit is not None:
         return _localize_regions(
             movie,
@@ -2558,43 +2690,17 @@ def _localize(args: argparse.Namespace) -> list[str]:  # noqa: C901
         )
 
     # Extra lateral affine corrections, applied after fitting on top of any
-    # the 3D / spline calibration carries.
-    lateral_transforms = []
-    for affine_path in getattr(args, "affine_calibration", []) or []:
-        from . import lib
-        from .io import load_any_calibration
+    # the 3D / spline calibration carries. Files written before Picasso 1.0
+    # (camera pixels) are converted with --pixelsize or, without it, with
+    # the pixel size of each movie (see _localize_legacy_calibrations).
+    from .io import MissingPixelsizeError
 
-        # a file written before Picasso 1.0 (camera pixels) is converted
-        # with --pixelsize; io says so if it is missing
-        found = lib.lateral_transforms(
-            load_any_calibration(affine_path, pixelsize=args.pixelsize)
+    try:
+        lateral_transforms = _localize_load_lateral_transforms(
+            getattr(args, "affine_calibration", []) or [], args.pixelsize
         )
-        if not found:
-            raise Exception(
-                f"No lateral corrections found in {affine_path}. Build one "
-                "with the 'Calibrate lateral transform' dialog in "
-                "'picasso localize'."
-            )
-        # The same correction given twice - the flag repeated, or a
-        # standalone copy of a transform another file already carries -
-        # counts once: applying it twice would correct twice.
-        found, duplicates = lib.drop_duplicate_lateral_transforms(
-            found, lateral_transforms
-        )
-        if duplicates:
-            print(
-                f"Skipping {len(duplicates)} correction(s) from "
-                f"{affine_path} already loaded from an earlier "
-                "--affine-calibration: "
-                + ", ".join(lib.describe_lateral_transforms(duplicates))
-            )
-        if found:
-            lateral_transforms.extend(found)
-            print(
-                f"Loaded {len(found)} lateral correction(s) from "
-                f"{affine_path}: "
-                + ", ".join(lib.describe_lateral_transforms(found))
-            )
+    except MissingPixelsizeError:
+        lateral_transforms = None
 
     camera_calibration = None
     if args.camera_calibration:
@@ -4359,6 +4465,7 @@ def _g5m(
     from os.path import isdir, splitext
     from .io import load_calibration, load_locs, save_locs
     from .g5m import g5m
+    from .lib import get_from_metadata
 
     if isdir(files):
         print("Analyzing folder")
@@ -4381,7 +4488,11 @@ def _g5m(
                     "A calibration file (-c/--calibration) is required "
                     "for astigmatism 3D data."
                 )
-            calib = load_calibration(calibration)
+            # a calibration written before Picasso 1.0 (camera pixels) is
+            # converted with the pixel size of the localizations
+            calib = load_calibration(
+                calibration, pixelsize=get_from_metadata(info, "Pixelsize")
+            )
         mols, _, g5m_info = g5m(
             locs,
             info,
@@ -5408,7 +5519,7 @@ def _build_parser() -> (
         "filter",
         help=(
             "filter localizations (GUI), or keep the localizations of files"
-            " that satisfy conditions, e.g. 'photons > 500 and 0.8 < sx < 1.2'"
+            " that satisfy conditions, e.g. 'photons > 500 and 100 < sx < 160'"
         ),
     )
     filter_parser.add_argument(

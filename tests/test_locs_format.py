@@ -547,7 +547,7 @@ class TestRenderLoader:
         assert len(warned) == 1
         assert "were not loaded" in warned[0]
         # the field of view with the values of the metadata
-        assert "(8,320 x 8,320 nm)" in (warned[0])
+        assert "(8,320 x 8,320 nm) or have" in (warned[0])
 
     def test_format_errors_are_shown(self, qapp, tmp_path):
         path = write_raw(tmp_path / "f.hdf5", make_locs().drop(columns="lpy"))

@@ -3635,7 +3635,7 @@ def link(
 
 def select_binding_event_cores(
     locs: pd.DataFrame,
-    r_max: float = 0.1,
+    r_max: float = 10.0,
     max_dark_time: int = 0,
     min_n_locs: int = 3,
 ) -> pd.DataFrame:

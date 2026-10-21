@@ -126,7 +126,7 @@ The condition is written like a Python expression:
      - Comparisons, also chained: ``100 < sx < 160``.
    * - ``and``, ``or``, ``not``
      - Combine conditions. ``&``, ``|`` and ``~`` work too, but each
-       comparison then needs parentheses: ``(photons > 500) & (sx < 1.2)``.
+       comparison then needs parentheses: ``(photons > 500) & (sx < 160)``.
    * - ``+ - * / // % **``
      - Arithmetic; ``**`` is the power (``^`` is not supported).
    * - ``abs``, ``sqrt``, ``log``, ``log10``, ``exp``, ``floor``, ``ceil``,
@@ -193,7 +193,7 @@ that the current localizations do not have are listed and skipped.
 
 The metadata of each Filter session lists its steps as conditions under
 ``Filter steps``; histogram and numerical filters appear as ranges such as
-``0.8 < sx < 1.2``. Each column's limits are also stored as
+``100 < sx < 160``. Each column's limits are also stored as
 ``column: [min, max]``, which is all that files saved before Picasso 1.0
 contain; such files are replayed from these limits.
 

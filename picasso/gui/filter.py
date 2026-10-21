@@ -606,7 +606,7 @@ EXPRESSION_TOOLTIP = (
     "  photons > 500 and 100 < sx < 160\n"
     "  lpx < 10    (lengths in nm)\n"
     "  photons > median(photons)\n\n"
-    "Comparisons: < <= > >= == != (also chained: 0.8 < sx < 1.2)\n"
+    "Comparisons: < <= > >= == != (also chained: 100 < sx < 160)\n"
     "Logic: and, or, not\n"
     "Arithmetic: + - * / // % **\n"
     "Functions: abs, sqrt, log, log10, exp, floor, ceil, isfinite\n"
@@ -657,7 +657,7 @@ class FilterExpression(lib.Dialog):
         layout.addWidget(label, 0, 1)
 
         self.expression = QtWidgets.QLineEdit()
-        self.expression.setPlaceholderText("photons > 500 and 0.8 < sx < 1.2")
+        self.expression.setPlaceholderText("photons > 500 and 100 < sx < 160")
         self.expression.setToolTip(EXPRESSION_TOOLTIP)
         self.expression.textChanged.connect(self.check)
         self.expression.returnPressed.connect(self.filter)

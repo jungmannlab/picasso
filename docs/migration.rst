@@ -61,8 +61,10 @@ size and makes the files readable as nm by other software. Use
 ``File > Convert files to nm...`` in Render (see
 :ref:`render-convert-files`), ``picasso convert-units`` (see
 :ref:`cmd-convert-units`) or :func:`picasso.legacy.convert_files`. Astigmatism
-(3D) and lateral calibrations do not record the pixel size, so converting them
-once is the simplest way to use them on the command line:
+(3D) and lateral calibrations do not record the pixel size: Picasso converts
+them with the pixel size of the movie or localizations they are used with,
+which assumes they were recorded with the same camera. To convert one with
+another pixel size, convert it once, e.g.:
 
 .. code-block:: bash
 

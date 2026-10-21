@@ -22,11 +22,12 @@ import h5py
 import numpy as np
 import pandas as pd
 import pytest
+import yaml
 from scipy import ndimage
 from scipy.interpolate import CubicSpline
 from PyQt6 import QtCore, QtWidgets
 
-from picasso import io, lib, localize, spline, transforms
+from picasso import io, legacy, lib, localize, spline, transforms
 from picasso import wavelet
 from picasso import transforms as transforms_mod
 from picasso.fitting import (
@@ -1518,6 +1519,60 @@ class TestFit2D:
                 multiprocess=False,
             )
 
+    @pytest.mark.parametrize("pixelsize", [True, 0, -130.0, np.nan, "130"])
+    def test_invalid_pixelsize_raises(
+        self, picasso_movie, real_identifications, pixelsize
+    ):
+        with pytest.raises(ValueError, match="Pixelsize"):
+            localize.fit(
+                picasso_movie,
+                camera_info={**CAMERA_INFO, "Pixelsize": pixelsize},
+                identifications=real_identifications,
+                box=BOX,
+                fitting_method="gausslq",
+                multiprocess=False,
+            )
+
+    @pytest.mark.parametrize(
+        "pixelsize", [np.int64(PIXELSIZE), np.float32(PIXELSIZE)]
+    )
+    def test_numpy_pixelsize_is_accepted(
+        self, picasso_movie, real_identifications, pixelsize
+    ):
+        """A pixel size read from movie metadata may be a NumPy scalar;
+        it gives the same localizations as the Python number."""
+        locs, _ = localize.fit(
+            picasso_movie,
+            camera_info={**CAMERA_INFO, "Pixelsize": pixelsize},
+            identifications=real_identifications,
+            box=BOX,
+            fitting_method="gausslq",
+            multiprocess=False,
+        )
+        reference, _ = localize.fit(
+            picasso_movie,
+            camera_info=CAMERA_INFO_WITH_PIXELSIZE,
+            identifications=real_identifications,
+            box=BOX,
+            fitting_method="gausslq",
+            multiprocess=False,
+        )
+        assert len(locs) > 0
+        np.testing.assert_allclose(locs["x"], reference["x"], rtol=1e-6)
+        np.testing.assert_allclose(locs["lpx"], reference["lpx"], rtol=1e-6)
+
+    @pytest.mark.parametrize(
+        "pixelsize", [np.int64(PIXELSIZE), np.float32(PIXELSIZE)]
+    )
+    def test_numpy_reference_pixelsize_is_accepted(self, pixelsize):
+        """The multichannel fits take the reference channel's pixel
+        size, also as a NumPy scalar."""
+        reference = localize._reference_pixelsize(
+            [{"Pixelsize": pixelsize}, {"Pixelsize": 2 * PIXELSIZE}]
+        )
+        assert reference == PIXELSIZE
+        assert type(reference) is float
+
     def test_localizations_are_in_nm(
         self, picasso_movie, real_identifications, movie_info
     ):
@@ -1785,6 +1840,49 @@ class TestLocalize:
         # caller's copy
         assert info[0]["Frames"] == mm_info[0]["Frames"]
         assert "Micro-Manager Metadata" in mm_info[0]
+
+    @pytest.mark.parametrize("source", ["entries", "file"])
+    def test_affine_calibration_corrects_a_2d_fit(
+        self, picasso_movie, movie_info, tmp_path, source
+    ):
+        """A lateral correction without a 3D calibration (e.g., a
+        chromatic one) moves the localizations of a 2D fit and is
+        recorded in the metadata."""
+        kwargs = dict(
+            camera_info=CAMERA_INFO_WITH_PIXELSIZE,
+            identification_parameters=_params(),
+            movie_info=movie_info,
+            fitting_method="gausslq",
+            threaded=False,
+        )
+        plain, _ = localize.localize(picasso_movie, **kwargs)
+        entries = [
+            {
+                "Type": "chromatic",
+                "Transform": affine(
+                    [[1.0, 0.0, 5.0], [0.0, 1.0, 2.0], [0.0, 0.0, 1.0]]
+                ).to_dict(),
+            }
+        ]
+        if source == "file":
+            path = str(tmp_path / "chromatic.yaml")
+            io.save_any_calibration(
+                path, lib.append_lateral_transform({}, entries[0])
+            )
+            calibration = path
+        else:
+            calibration = entries
+        corrected, info = localize.localize(
+            picasso_movie, affine_calibration=calibration, **kwargs
+        )
+        assert len(corrected) == len(plain) > 0
+        np.testing.assert_allclose(
+            corrected["x"].to_numpy(), plain["x"].to_numpy() + 5.0, atol=1e-3
+        )
+        np.testing.assert_allclose(
+            corrected["y"].to_numpy(), plain["y"].to_numpy() + 2.0, atol=1e-3
+        )
+        assert info[-1]["Lateral corrections applied"] == ["chromatic, affine"]
 
     def test_localize_matches_identify_plus_fit(
         self, picasso_movie, real_identifications, movie_info
@@ -14343,22 +14441,19 @@ class TestLocalizeCliSeparateLateralCorrection:
     def _entry(kind, matrix):
         return {"Type": kind, "Transform": affine(matrix).to_dict()}
 
-    def _movie_path(self, tmp_path):
+    def _movie_path(self, tmp_path, pixelsize=None):
         movie, _ = _independent_movie(spots=[(12.4, 15.6, 900.0)])
         path = str(tmp_path / "movie.raw")
-        io.save_raw(
-            path,
-            movie.astype(np.uint16),
-            [
-                {
-                    "Byte Order": "<",
-                    "Data Type": "uint16",
-                    "Frames": int(movie.shape[0]),
-                    "Height": int(movie.shape[1]),
-                    "Width": int(movie.shape[2]),
-                }
-            ],
-        )
+        info = {
+            "Byte Order": "<",
+            "Data Type": "uint16",
+            "Frames": int(movie.shape[0]),
+            "Height": int(movie.shape[1]),
+            "Width": int(movie.shape[2]),
+        }
+        if pixelsize is not None:
+            info["Pixelsize"] = pixelsize
+        io.save_raw(path, movie.astype(np.uint16), [info])
         return path
 
     def _calibration(self, tmp_path, name, *entries):
@@ -14369,7 +14464,31 @@ class TestLocalizeCliSeparateLateralCorrection:
         io.save_any_calibration(path, calibration)
         return path
 
-    def _run(self, tmp_path, monkeypatch, movie, suffix, method, *extra):
+    @staticmethod
+    def _written_before_1_0(path):
+        """The calibration file ``path`` (nm) rewritten the way Picasso
+        wrote it before 1.0: in camera pixels, without the format
+        marker."""
+        # the conversion to nm, run backwards
+        calibration = legacy.calibration_to_nm(
+            io.load_any_calibration(path), 1 / PIXELSIZE
+        )
+        del calibration[io.FORMAT_VERSION_ATTR]
+        old = path.replace(".yaml", "_old.yaml")
+        with open(old, "w") as f:
+            yaml.safe_dump(calibration, f)
+        return old
+
+    def _run(
+        self,
+        tmp_path,
+        monkeypatch,
+        movie,
+        suffix,
+        method,
+        *extra,
+        pixelsize=PIXELSIZE,
+    ):
         from picasso import __main__ as cli
 
         # "lq-3d" is what turns --zc into an astigmatic z fit; "lq" is the
@@ -14388,12 +14507,12 @@ class TestLocalizeCliSeparateLateralCorrection:
             "0",
             "-mf",
             "0.79",
-            "-px",
-            str(PIXELSIZE),
             "-sf",
             suffix,
             *extra,
         ]
+        if pixelsize is not None:
+            argv += ["-px", str(pixelsize)]
         monkeypatch.setattr(sys, "argv", argv)
         cli.main()
         return io.load_locs(str(tmp_path / f"movie{suffix}_locs.hdf5"))
@@ -14516,6 +14635,79 @@ class TestLocalizeCliSeparateLateralCorrection:
         assert lib.get_from_metadata(info, "Lateral corrections applied") == [
             "chromatic, affine"
         ]
+
+    def _nm_and_old_chromatic(self, tmp_path):
+        chromatic = str(tmp_path / "chromatic.yaml")
+        io.save_any_calibration(
+            chromatic,
+            lib.append_lateral_transform(
+                {}, self._entry("chromatic", self.CHROMATIC)
+            ),
+        )
+        return chromatic, self._written_before_1_0(chromatic)
+
+    def test_files_before_1_0_take_the_pixel_size_of_the_movie(
+        self, tmp_path, monkeypatch
+    ):
+        """Without -px, calibrations written before Picasso 1.0 (camera
+        pixels) are converted with the pixel size in the movie's
+        metadata, which gives what their nm versions give."""
+        movie = self._movie_path(tmp_path, pixelsize=PIXELSIZE)
+        astig = self._calibration(tmp_path, "astig_3d_calib.yaml")
+        chromatic, old_chromatic = self._nm_and_old_chromatic(tmp_path)
+        ref, _ = self._run(
+            tmp_path,
+            monkeypatch,
+            movie,
+            "_nm",
+            "lq-3d",
+            "-zc",
+            astig,
+            "-ac",
+            chromatic,
+        )
+        out, info = self._run(
+            tmp_path,
+            monkeypatch,
+            movie,
+            "_old",
+            "lq-3d",
+            "-zc",
+            self._written_before_1_0(astig),
+            "-ac",
+            old_chromatic,
+            pixelsize=None,
+        )
+        assert len(out) == len(ref) > 0
+        for column in ("x", "y", "z"):
+            np.testing.assert_allclose(
+                out[column].to_numpy(), ref[column].to_numpy(), atol=1e-3
+            )
+        assert lib.get_from_metadata(info, "Lateral corrections applied") == [
+            "chromatic, affine"
+        ]
+
+    def test_files_before_1_0_in_a_2d_fit(self, tmp_path, monkeypatch):
+        movie = self._movie_path(tmp_path, pixelsize=PIXELSIZE)
+        _, old_chromatic = self._nm_and_old_chromatic(tmp_path)
+        plain, _ = self._run(tmp_path, monkeypatch, movie, "_plain", "lq")
+        out, _ = self._run(
+            tmp_path,
+            monkeypatch,
+            movie,
+            "_corrected",
+            "lq",
+            "-ac",
+            old_chromatic,
+            pixelsize=None,
+        )
+        assert len(out) == len(plain) > 0
+        np.testing.assert_allclose(
+            out["x"].to_numpy(), plain["x"].to_numpy() + 5.0, atol=1e-3
+        )
+        np.testing.assert_allclose(
+            out["y"].to_numpy(), plain["y"].to_numpy() + 2.0, atol=1e-3
+        )
 
 
 class TestLocalizeCliRegionsSeparately:

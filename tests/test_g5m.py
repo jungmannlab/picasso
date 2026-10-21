@@ -774,6 +774,56 @@ class TestCLIWiring:
             "group_column",
         ]
 
+    def test_calibration_before_1_0_takes_the_pixel_size_of_the_locs(
+        self, tmp_path, monkeypatch
+    ):
+        """``picasso g5m -c`` converts a 3D calibration written before
+        Picasso 1.0 (spot widths in camera pixels, no format marker) with
+        the pixel size of the localizations."""
+        import pandas as pd
+        import yaml
+
+        from picasso import io
+        from picasso.__main__ import _g5m
+
+        old = {k: v for k, v in CALIB_3D.items() if k != "picasso_format"}
+        for key in ("X Coefficients", "Y Coefficients"):
+            old[key] = [c / PIXELSIZE for c in CALIB_3D[key]]
+        calibration = tmp_path / "astig_3d_calib.yaml"
+        calibration.write_text(yaml.safe_dump(old))
+        n = 20
+        locs = pd.DataFrame(
+            {
+                "frame": np.arange(n, dtype=np.uint32),
+                "x": np.full(n, 1000, dtype=np.float32),
+                "y": np.full(n, 1000, dtype=np.float32),
+                "lpx": np.full(n, 5, dtype=np.float32),
+                "lpy": np.full(n, 5, dtype=np.float32),
+                "z": np.zeros(n, dtype=np.float32),
+                "group": np.zeros(n, dtype=np.int32),
+            }
+        )
+        info = [{"Width": 32, "Height": 32, "Frames": n, "Pixelsize": 130}]
+        path = str(tmp_path / "clustered_locs.hdf5")
+        io.save_locs(path, locs, info)
+
+        class Stop(Exception):
+            pass
+
+        passed = {}
+
+        def record(locs, info, **kwargs):
+            passed.update(kwargs)
+            raise Stop
+
+        monkeypatch.setattr(g5m, "g5m", record)
+        with pytest.raises(Stop):
+            _g5m(path, calibration=str(calibration))
+        for key in ("X Coefficients", "Y Coefficients"):
+            np.testing.assert_allclose(
+                passed["calibration"][key], CALIB_3D[key]
+            )
+
     def test_parser_accepts_covariance_type(self, capsys):
         import sys
 

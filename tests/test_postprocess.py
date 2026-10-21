@@ -1324,36 +1324,68 @@ class TestLinking:
 
 class TestBindingEventCores:
     def test_drops_border_locs_of_each_event(self):
-        # Two binding events at distinct positions: one 4 frames long,
-        # one 2 frames long (too short to have a core).
+        # Two binding events 500 nm apart, their localizations scattered
+        # by a few nm like real ones: one 4 frames long, one 2 frames
+        # long (too short to have a core).
         locs = pd.DataFrame(
             {
                 "frame": np.array([0, 1, 2, 3, 0, 1], dtype=np.int32),
-                "x": np.array([1, 1, 1, 1, 50, 50], dtype=np.float32),
-                "y": np.array([1, 1, 1, 1, 50, 50], dtype=np.float32),
+                "x": np.array(
+                    [1000, 1003, 998, 1004, 1500, 1502], dtype=np.float32
+                ),
+                "y": np.array(
+                    [1000, 997, 1002, 1001, 1500, 1499], dtype=np.float32
+                ),
             }
         )
-        out = postprocess.select_binding_event_cores(locs, r_max=0.05)
+        out = postprocess.select_binding_event_cores(locs)
         # only frames 1 and 2 of the first event survive
         assert out["frame"].tolist() == [1, 2]
+        assert out["x"].tolist() == [1003, 998]
         assert out["group"].tolist() == [0, 0]
+
+    def test_default_r_max_is_10_nm(self):
+        # Localizations 9 nm apart in consecutive frames form one event,
+        # 11 nm apart they do not (the documented default is 10 nm).
+        locs = pd.DataFrame(
+            {
+                "frame": np.array([0, 1, 2, 0, 1, 2], dtype=np.int32),
+                "x": np.array(
+                    [1000, 1009, 1000, 3000, 3011, 3022], dtype=np.float32
+                ),
+                "y": np.full(6, 1000, dtype=np.float32),
+            }
+        )
+        out = postprocess.select_binding_event_cores(locs)
+        assert out["x"].tolist() == [1009]
 
     def test_min_n_locs_discards_short_events(self):
         locs = pd.DataFrame(
             {
                 "frame": np.array([0, 1, 2, 3], dtype=np.int32),
-                "x": np.ones(4, dtype=np.float32),
-                "y": np.ones(4, dtype=np.float32),
+                "x": np.full(4, 1000, dtype=np.float32),
+                "y": np.full(4, 1000, dtype=np.float32),
             }
         )
-        out = postprocess.select_binding_event_cores(
-            locs, r_max=0.05, min_n_locs=5
-        )
+        out = postprocess.select_binding_event_cores(locs, min_n_locs=4)
+        assert out["frame"].tolist() == [1, 2]
+        out = postprocess.select_binding_event_cores(locs, min_n_locs=5)
         assert len(out) == 0
+
+    def test_matches_link_on_test_data(self, locs, info):
+        # The events are those of link with the same distance and dark
+        # time: each event of n >= min_n_locs (3) localizations keeps
+        # its n - 2 inner ones.
+        out = postprocess.select_binding_event_cores(locs.copy())
+        linked = postprocess.link(locs.copy(), info, r_max=10, max_dark_time=0)
+        n = linked["n"].to_numpy()
+        assert (n >= 3).sum() > 0
+        assert len(out) == (n[n >= 3] - 2).sum()
+        assert out["group"].nunique() == (n >= 3).sum()
 
     def test_groups_are_consecutive(self, locs):
         out = postprocess.select_binding_event_cores(locs.copy())
-        assert len(out) < len(locs)
+        assert 0 < len(out) < len(locs)
         groups = np.unique(out["group"].to_numpy())
         assert (groups == np.arange(len(groups))).all()
         assert "group_input" not in out.columns
@@ -1366,7 +1398,7 @@ class TestBindingEventCores:
         )
         out = postprocess.select_binding_event_cores(sub)
         assert "group_input" in out.columns
-        assert set(np.unique(out["group_input"].to_numpy())) <= {0, 1}
+        assert set(np.unique(out["group_input"].to_numpy())) == {0, 1}
         # binding events must not span two input groups
         assert (out.groupby("group")["group_input"].nunique() == 1).all()
 

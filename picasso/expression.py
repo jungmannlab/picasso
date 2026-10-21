@@ -3,7 +3,7 @@ picasso.expression
 ~~~~~~~~~~~~~~~~~~
 
 Conditions on localization columns written as text, e.g.
-``photons > 500 and 0.8 < sx < 1.2``, used to filter localizations.
+``photons > 500 and 100 < sx < 160``, used to filter localizations.
 
 An expression is parsed, not executed: only the syntax listed below is
 accepted, so a typo gives a readable error instead of running code.
@@ -19,11 +19,11 @@ Arithmetic
     ``+ - * / // % **``. Unsigned integer columns (e.g. ``frame``) are
     converted to signed integers, so differences may be negative.
 Comparisons
-    ``< <= > >= == !=``, also chained: ``0.8 < sx < 1.2``.
+    ``< <= > >= == !=``, also chained: ``100 < sx < 160``.
 Logic
     ``and``, ``or``, ``not``. ``&``, ``|`` and ``~`` work on conditions
     too, but bind tighter than comparisons, so each comparison then
-    needs parentheses: ``(photons > 500) & (sx < 1.2)``.
+    needs parentheses: ``(photons > 500) & (sx < 160)``.
 Functions applied to each localization
     ``abs sqrt log log10 exp floor ceil isfinite``.
 Statistics over the localizations being filtered
@@ -230,7 +230,7 @@ class _Evaluator:
                 f"'{symbol}' binds tighter than comparisons, so"
                 f" '{ast.unparse(node)}' combines numbers. Put each"
                 f" comparison in parentheses, e.g., (photons > 500)"
-                f" {symbol} (sx < 1.2), or use"
+                f" {symbol} (sx < 160), or use"
                 f" '{'and' if op is ast.BitAnd else 'or'}'."
             )
         if op is ast.BitXor:
@@ -390,7 +390,7 @@ def condition(
     Parameters
     ----------
     expression : str
-        Condition, e.g. ``"photons > 500 and 0.8 < sx < 1.2"``. See the
+        Condition, e.g. ``"photons > 500 and 100 < sx < 160"``. See the
         module docstring for the syntax.
     columns : Mapping[str, array-like]
         Column name -> values, e.g. a ``pd.DataFrame``. Only the columns
@@ -501,7 +501,7 @@ def range_expression(
     Returns
     -------
     expression : str
-        E.g. ``"0.8 < sx < 1.2"``; :func:`parse_range` reads it back.
+        E.g. ``"100 < sx < 160"``; :func:`parse_range` reads it back.
     """
     op = "<=" if inclusive else "<"
     return f"{float(vmin)!r} {op} {column} {op} {float(vmax)!r}"

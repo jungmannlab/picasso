@@ -5939,20 +5939,6 @@ def validate_locs(
             "size in nm. Pass pixelsize (nm) or add it to the metadata. See "
             f"{docs_url('files.html#files-minimum-requirements')}"
         )
-    if missing_keys == ["Pixelsize"] and not missing_columns:
-        # the one key a user can supply on the spot (GUIs ask for it)
-        raise MissingPixelsizeError(
-            f"{source} lacks the metadata key 'Pixelsize', the camera pixel "
-            "size in nm. Pass pixelsize (nm) or add it to the metadata. See "
-            f"{docs_url('files.html#files-minimum-requirements')}"
-        )
-    if missing_keys == ["Pixelsize"] and not missing_columns:
-        # the one key a user can supply on the spot (GUIs ask for it)
-        raise MissingPixelsizeError(
-            f"{source} lacks the metadata key 'Pixelsize', the camera pixel "
-            "size in nm. Pass pixelsize (nm) or add it to the metadata. See "
-            f"{docs_url('files.html#files-minimum-requirements')}"
-        )
     if problems:
         raise LocsFormatError(
             f"{source} lacks {' and '.join(problems)}. Localization files "
@@ -5988,7 +5974,7 @@ def _report_dropped_locs(
     message = (
         f"{n_dropped:,} of {len(locs):,} localizations in {path} were not "
         "loaded: they have missing or infinite values, lie outside the "
-        f"field of view ({width:,.0f} x {height:,.0f} nm)"
+        f"field of view ({width:,.0f} x {height:,.0f} nm) "
         "or have negative values (e.g., coordinates or precisions)."
     )
     x = locs["x"].to_numpy()
