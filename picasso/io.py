@@ -14,6 +14,7 @@ from __future__ import annotations
 import abc
 import copy
 import datetime
+import functools
 import logging
 import re
 import json
@@ -111,6 +112,7 @@ __all__ = [
     "NoMetadataFileError",
     "LocsFormatError",
     "MissingPixelsizeError",
+    "PathTooLongError",
 ]
 
 
@@ -190,6 +192,90 @@ class MissingPixelsizeError(LocsFormatError):
     pixels) is loaded or converted without the camera pixel size that
     converts it to nm: the file does not record it and none was passed.
     GUIs catch it to ask the user for the pixel size."""
+
+
+class PathTooLongError(OSError):
+    """Raised on Windows when a file is loaded from a path that Windows
+    cannot open because it is too long: a full path longer than 259
+    characters (without long paths enabled) or a folder or file name
+    longer than 255 characters. Without this check, such a file is
+    reported as missing or unreadable."""
+
+
+# Windows' MAX_PATH counts the terminating null character
+_WINDOWS_MAX_PATH = 259
+_MAX_NAME_LENGTH = 255
+_LONG_PATHS_URL = (
+    "https://learn.microsoft.com/en-us/windows/win32/fileio/"
+    "maximum-file-path-limitation"
+)
+
+
+@functools.cache
+def _windows_long_paths_enabled() -> bool:
+    """Whether Windows allows paths longer than ``_WINDOWS_MAX_PATH``
+    (the registry value ``LongPathsEnabled``, which Windows reads once
+    per process, hence the cache)."""
+    import winreg
+
+    try:
+        with winreg.OpenKey(
+            winreg.HKEY_LOCAL_MACHINE,
+            r"SYSTEM\CurrentControlSet\Control\FileSystem",
+        ) as key:
+            value, _ = winreg.QueryValueEx(key, "LongPathsEnabled")
+    except OSError:
+        return False
+    return value == 1
+
+
+def _check_path_length(path: str) -> None:
+    """Raise a readable error if ``path`` is too long to be opened on
+    Windows; does nothing on other systems.
+
+    On Windows, the full path may have at most 259 characters, unless
+    long paths are enabled in Windows (or the path starts with
+    ``\\\\?\\``), and a folder or file name at most 255 characters.
+    Files whose path breaks either limit cannot be opened, which Windows
+    and the file readers report as a missing file or a cryptic error.
+
+    Parameters
+    ----------
+    path : str
+        The path to check.
+
+    Raises
+    ------
+    PathTooLongError
+        If ``path`` is too long to be opened.
+    """
+    if os.name != "nt":
+        return
+    path = os.fspath(path)
+    absolute = os.path.abspath(path)
+    for name in re.split(r"[\\/]", absolute):
+        # Windows counts UTF-16 code units
+        length = len(name.encode("utf-16-le")) // 2
+        if length > _MAX_NAME_LENGTH:
+            raise PathTooLongError(
+                f"The name '{name}' is too long: it has {length} "
+                f"characters, more than the {_MAX_NAME_LENGTH} Windows "
+                f"allows, so {path} cannot be opened. Rename it to a "
+                "shorter name."
+            )
+    if (
+        len(absolute) > _WINDOWS_MAX_PATH
+        and not absolute.startswith("\\\\?\\")
+        and not _windows_long_paths_enabled()
+    ):
+        raise PathTooLongError(
+            f"The path is too long: it has {len(absolute)} characters, "
+            f"more than the {_WINDOWS_MAX_PATH} Windows allows, so "
+            f"{absolute} cannot be opened. Move the file to a folder "
+            "closer to the drive (e.g., C:\\data) or shorten the folder "
+            "and file names. Alternatively, enable long paths in Windows "
+            f"(administrator rights needed): {_LONG_PATHS_URL}"
+        )
 
 
 def _legacy_pixelsize(pixelsize, info, path: str) -> float:
@@ -507,6 +593,7 @@ def load_raw(
     info : list of dicts
         A list containing a dictionary with metadata about the movie.
     """
+    _check_path_length(path)
     try:
         info = load_info(path)
     except FileNotFoundError as error:
@@ -560,6 +647,7 @@ def load_ims(
     ValueError
         If ``prompt_info`` returns a channel the file does not have.
     """
+    _check_path_length(path)
     file = IMSFile(path)
 
     channel = file.channels[0]
@@ -615,6 +703,7 @@ def load_ims_all(path: str) -> tuple[list[np.memmap], list[list[dict]]]:
         A list of lists containing dictionaries with metadata about each
         movie channel.
     """
+    _check_path_length(path)
     file = IMSFile(path)
 
     movies = []
@@ -756,6 +845,7 @@ def load_calibration(path: str, pixelsize: float | None = None) -> dict:
         If the file was written before Picasso 1.0 and ``pixelsize`` is
         None.
     """
+    _check_path_length(path)
     with open(path, "r") as calibration_file:
         try:
             calibration = _parse_yaml(calibration_file)
@@ -856,6 +946,7 @@ def load_spline_calibration(path: str, pixelsize: float | None = None) -> dict:
         the ``"coefficients"`` key (float32 numpy array) and all metadata
         keys alongside it.
     """
+    _check_path_length(path)
     calibration = _read_spline_calibration(path)
     if FORMAT_VERSION_ATTR not in calibration:
         if pixelsize is None:
@@ -916,6 +1007,7 @@ def load_any_calibration(path: str, pixelsize: float | None = None) -> dict:
         If the file was written before Picasso 1.0 and ``pixelsize`` is
         None.
     """
+    _check_path_length(path)
     if _is_hdf5_calibration(path):
         return load_spline_calibration(path, pixelsize)
     with open(path, "r") as calibration_file:
@@ -1014,6 +1106,7 @@ def load_camera_calibration(path: str) -> dict:
         alongside the metadata. ``Path`` is set to ``path``, so a calibration
         that has been moved still reports where it was actually loaded from.
     """
+    _check_path_length(path)
     with h5py.File(path, "r") as f:
         if (
             "offset" not in f
@@ -1199,6 +1292,7 @@ def load_tif(
     Returns None if the metadata could not be read and the user
     canceled the manual-metadata fallback dialog.
     """
+    _check_path_length(path)
     # MicroManager can save an acquisition as one single-page TIFF per
     # frame ("separate image files"). If ``path`` is one such frame,
     # assemble the whole folder into a single movie instead of opening a
@@ -1240,6 +1334,7 @@ def load_nd2(
     Returns None if the metadata could not be read and the user
     canceled the manual-metadata fallback dialog.
     """
+    _check_path_length(path)
     movie = ND2Movie(path)
     info = _movie_info_or_prompt(movie, path, prompt_info)
     if info is None:
@@ -1276,6 +1371,7 @@ def load_nd2_all(
     Returns None if the metadata could not be read and the user canceled
     the manual-metadata fallback dialog.
     """
+    _check_path_length(path)
     probe = ND2Movie(path)
     n_channels = probe.n_channels
     probe.close()
@@ -1321,6 +1417,7 @@ def load_stk(
     Returns None if the metadata could not be read and the user
     canceled the manual-metadata fallback dialog.
     """
+    _check_path_length(path)
     movie = STKMultiMovie(path)
     info = _movie_info_or_prompt(movie, path, prompt_info)
     if info is None:
@@ -1352,6 +1449,7 @@ def load_czi(
     info : list[dict]
         A list containing a dictionary with metadata about the movie.
     """
+    _check_path_length(path)
     if czifile is None:
         raise ImportError(
             "Reading .czi files requires the optional 'czifile' package "
@@ -1382,6 +1480,7 @@ def load_czi_all(path: str) -> tuple[list[CZIMovie], list[list[dict]]]:
     infos : list of lists of dicts
         Per-channel metadata, each carrying a ``"Channel"`` key.
     """
+    _check_path_length(path)
     if czifile is None:
         raise ImportError(
             "Reading .czi files requires the optional 'czifile' package "
@@ -1425,6 +1524,7 @@ def load_lif(
     info : list[dict]
         A list containing a dictionary with metadata about the movie.
     """
+    _check_path_length(path)
     if liffile is None:
         raise ImportError(
             "Reading .lif files requires the optional 'liffile' package "
@@ -1455,6 +1555,7 @@ def load_lif_all(path: str) -> tuple[list[LIFMovie], list[list[dict]]]:
     infos : list of lists of dicts
         Per-channel metadata, each carrying a ``"Channel"`` key.
     """
+    _check_path_length(path)
     if liffile is None:
         raise ImportError(
             "Reading .lif files requires the optional 'liffile' package "
@@ -1511,6 +1612,7 @@ def load_movie(
     ValueError
         If the file extension is not a supported movie format.
     """
+    _check_path_length(path)
     base, ext = os.path.splitext(path)
     ext = ext.lower()
     # validated here, so that a bad argument fails for every format
@@ -1574,6 +1676,7 @@ def load_movie_all(
     Returns None if metadata could not be read and the user canceled the
     manual-metadata fallback dialog.
     """
+    _check_path_length(path)
     ext = os.path.splitext(path)[1].lower()
     lib.normalize_progress(progress)  # fails early on a bad argument
     if ext == ".ims":
@@ -1794,6 +1897,7 @@ def load_yaml(path: str, *, all_documents: bool = False):
         The document (usually a dict), or the list of documents if
         ``all_documents``.
     """
+    _check_path_length(path)
     with open(path, "r") as file:
         return _parse_yaml(file, all_documents=all_documents)
 
@@ -1917,6 +2021,7 @@ def load_info(path: str) -> list[dict]:
     NoMetadataFileError
         If there is neither a .yaml file nor embedded metadata.
     """
+    _check_path_length(path)
     path_base, path_extension = os.path.splitext(path)
     filename = path_base + ".yaml"
     # The sidecar .yaml file comes first: it takes precedence over the
@@ -1955,6 +2060,7 @@ def load_mask(path: str) -> tuple[lib.FloatArray2D, dict]:
     info : dict
         A dictionary containing metadata about the mask.
     """
+    _check_path_length(path)
     mask = np.float64(np.load(path))
     mask = mask / mask.sum()
     new_path = os.path.splitext(path)[0] + ".yaml"
@@ -1989,6 +2095,7 @@ def load_structures(path: str) -> tuple[list[spinna.Structure], list[str]]:
     TypeError
         If the file does not hold structures saved by Picasso SPINNA.
     """
+    _check_path_length(path)
     # imported here as picasso.spinna imports this module
     from .spinna import Structure
 
@@ -2068,6 +2175,7 @@ def load_picks(
     >>> from picasso import io
     >>> picks, shape, diameter = io.load_picks("movie_locs_picks.yaml")
     """
+    _check_path_length(path)
     assert path.endswith(".yaml"), "Picks should be stored in a .yaml file."
 
     # load the file
@@ -2348,6 +2456,7 @@ def load_drift(path: str, pixelsize: float | None = None) -> pd.DataFrame:
         If the file was written before Picasso 1.0 and ``pixelsize`` is
         None.
     """
+    _check_path_length(path)
     if not path.endswith(".txt"):
         raise ValueError("Drift file must end with .txt")
     drift = np.loadtxt(path, ndmin=2)
@@ -5573,6 +5682,8 @@ def load_tif_concatenated(
     Returns None if the metadata could not be read and the user
     canceled the manual-metadata fallback dialog.
     """
+    for path in paths:
+        _check_path_length(path)
     with lib.tracked_progress(progress, "Opening movie", "page") as progress:
         movie = ConcatenatedTiffMovie(paths, progress=progress)
     info = _movie_info_or_prompt(movie, movie.path, prompt_info)
@@ -6188,6 +6299,7 @@ def load_locs(
     >>> locs, info = io.load_locs("movie_locs.hdf5")
     >>> locs, info = io.load_locs("old_locs.hdf5", pixelsize=130)  # 0.x file
     """
+    _check_path_length(path)
     if path.endswith(".csv"):
         raise ValueError(
             "If you wish to load a ThunderSTORM .csv file, use "
@@ -6259,6 +6371,7 @@ def load_identifications(path: str) -> tuple[pd.DataFrame, list[dict]]:
     KeyError
         If the "identifications" dataset is not found in the HDF5 file.
     """
+    _check_path_length(path)
     try:
         identifications = pd.read_hdf(path, key="identifications")
     except KeyError as error:
@@ -6306,6 +6419,7 @@ def load_filter(
         If the file was written before Picasso 1.0 and neither its
         metadata nor ``pixelsize`` give the camera pixel size.
     """
+    _check_path_length(path)
     format_version = _check_format_version(path)
     try:
         locs = pd.read_hdf(path, key="locs")
@@ -6612,6 +6726,7 @@ def import_ts(path: str, pixelsize: float) -> tuple[pd.DataFrame, list[dict]]:
     info : list of dicts
         Minimal metadata information.
     """
+    _check_path_length(path)
     expected_columns = [
         "frame",
         "x [nm]",
@@ -6903,6 +7018,7 @@ def import_smap(
     info : list of dicts
         Minimal metadata information.
     """
+    _check_path_length(path)
     loc = _read_smap_loc(path)
     missing = [c for c in ("xnm", "ynm", "frame") if c not in loc]
     if missing:
@@ -7375,6 +7491,7 @@ def import_pyme(
         If the file contains no localizations or stores no pixel size
         and ``pixelsize`` is not given.
     """
+    _check_path_length(path)
     columns, metadata = _pyme_read(path)
     file_pixelsize = _pyme_pixelsize_from_metadata(metadata)
     if file_pixelsize is not None:

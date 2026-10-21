@@ -1,6 +1,6 @@
 # Changelog
 
-Last change: 20-OCT-2026 CEST
+Last change: 21-OCT-2026 CEST
 
 ## 1.0.0
 
@@ -121,6 +121,7 @@ The [migration guide](https://picassosr.readthedocs.io/en/latest/migration.html)
 - Fixed: Design's plate export with colors gave an empty well the color of the well before it, and failed if the first well of a plate was empty.
 - Picasso's modules report through Python's `logging` (one logger per module, `picasso.io`, `picasso.localize`, ...) instead of printing, so scripts can show, silence or redirect the messages. Warnings appear as before; the command line also shows the information messages. Output asked for with `verbose=True` is still printed. See the [documentation](https://picassosr.readthedocs.io/en/latest/api/index.html).
 - Picasso says when it leaves out metadata it cannot read (e.g., Micro-Manager, CZI or LIF metadata) and when the camera of a movie is missing from the camera configuration, so that gain 1 is used. Before, these happened without a trace.
+- Opening a file whose path is too long gives a warning, see [FAQ](https://picassosr.readthedocs.io/en/latest/faq.html#picasso-says-that-the-path-is-too-long).
 - Fixed: `picasso.postprocess.evaluate_picks` changed the warning filters of the whole program, e.g., showing again the `RuntimeWarning`s a script had silenced or turned into errors.
 - Fixed: `picasso render` on the command line failed without a settings file, e.g., on a new installation, unless a colormap was given with `-c`.
 - Fixed: the GUIs could crash when quitting (seen on macOS): their windows were left to Python's shutdown, which deletes them in no fixed order.

@@ -129,7 +129,8 @@
   "export_3d_visp",
   "NoMetadataFileError",
   "LocsFormatError",
-  "MissingPixelsizeError"
+  "MissingPixelsizeError",
+  "PathTooLongError"
  ],
  "picasso.legacy": [
   "LEGACY_PIXEL_COLUMNS",

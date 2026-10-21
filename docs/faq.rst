@@ -121,6 +121,18 @@ view, and says how many. If most of them lie beyond the field of view, either
   :ref:`files-legacy`;
 - or ``Width``, ``Height`` or ``Pixelsize`` in its metadata are too small.
 
+Picasso says that the path is too long
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+On Windows, a full path, e.g.,
+``C:\Users\me\Documents\experiments\...\movie_locs_render_picked.hdf5``, may
+have at most 259 characters, and each step of Picasso that saves a file adds
+to its name (``_locs``, ``_render``, ``_picked``, ...). Move the files to a
+folder closer to the drive, e.g., ``C:\data``, or shorten the folder and file
+names. Alternatively, an administrator can `enable long paths in Windows
+<https://learn.microsoft.com/en-us/windows/win32/fileio/maximum-file-path-limitation>`__.
+Even then, a single folder or file name may have at most 255 characters.
+
 How do I open localizations from other software?
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 

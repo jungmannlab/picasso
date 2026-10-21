@@ -3042,3 +3042,60 @@ class TestProgress:
         assert captured.out == "" and captured.err == ""
         with pytest.raises(ValueError, match="Invalid progress"):
             io.load_movie(path, progress="bogus")
+
+
+class TestPathTooLong:
+    """On Windows, files whose path is too long to be opened are
+    reported as such, not as missing or unreadable."""
+
+    @pytest.fixture
+    def windows(self, monkeypatch):
+        """Pretend to run on Windows; returns a setter for whether long
+        paths are enabled."""
+        monkeypatch.setattr(io.os, "name", "nt")
+        enabled = [False]
+        monkeypatch.setattr(
+            io, "_windows_long_paths_enabled", lambda: enabled[0]
+        )
+        return lambda value: enabled.__setitem__(0, value)
+
+    def _long_path(self, tmp_path):
+        folder = tmp_path
+        while len(str(folder)) <= io._WINDOWS_MAX_PATH:
+            folder = folder / ("folder_" + "f" * 40)
+        return str(folder / "movie_locs.hdf5")
+
+    def test_is_an_os_error(self):
+        assert issubclass(io.PathTooLongError, OSError)
+
+    def test_full_path_limit(self, tmp_path, windows):
+        path = self._long_path(tmp_path)
+        with pytest.raises(io.PathTooLongError) as error:
+            io.load_locs(path)
+        message = str(error.value)
+        assert f"has {len(path)} characters" in message
+        assert "259 Windows allows" in message
+        assert "enable long paths" in message
+
+    def test_long_paths_enabled(self, tmp_path, windows):
+        windows(True)
+        io._check_path_length(self._long_path(tmp_path))
+
+    def test_too_long_folder_name(self, tmp_path, windows):
+        windows(True)  # the name limit holds even with long paths
+        path = str(tmp_path / ("d" * 256) / "locs.hdf5")
+        with pytest.raises(io.PathTooLongError, match="d{256}"):
+            io.load_info(path)
+
+    def test_every_tif_of_a_concatenated_movie(self, tmp_path, windows):
+        paths = [str(tmp_path / "a.tif"), str(tmp_path / ("b" * 256))]
+        with pytest.raises(io.PathTooLongError):
+            io.load_tif_concatenated(paths)
+
+    def test_short_path_passes(self, tmp_path, windows):
+        io._check_path_length(str(tmp_path / "movie_locs.hdf5"))
+
+    def test_nothing_checked_on_other_systems(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(io.os, "name", "posix")
+        io._check_path_length(self._long_path(tmp_path))
+        io._check_path_length(str(tmp_path / ("x" * 300)))
