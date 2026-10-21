@@ -104,14 +104,15 @@ Many of the functionalities provided by Picasso were published independently, pl
 Credits
 -------
 
--  Design icon based on “Hexagon by Creative Stalls" from the Noun Project
--  Simulate icon based on “Microchip by Futishia" from the Noun Project
--  Localize icon based on “Mountains" by MONTANA RUCOBO from the Noun Project
--  Filter icon based on “Funnel" by José Campos from the Noun Project
--  Render icon based on “Paint Palette" by Vectors Market from the Noun Project
--  Average icon based on “Layers" by Creative Stall from the Noun Project
--  Server icon based on “Database" by Nimal Raj from the Noun Project
+-  Design icon based on "Hexagon" by Creative Stall from the Noun Project
+-  Simulate icon based on "Microchip" by Futishia from the Noun Project
+-  Localize icon based on "Mountains" by MONTANA RUCOBO from the Noun Project
+-  Filter icon based on "Funnel" by José Campos from the Noun Project
+-  Render icon based on "Paint Palette" by Vectors Market from the Noun Project
+-  Average icon based on "Layers" by Creative Stall from the Noun Project
+-  Server icon based on "Database" by Nimal Raj from the Noun Project
 -  SPINNA icon based on "Spinner" by Viktor Ostrovsky from the Noun Project
+-  The Noun Project icons above are used under the CC BY 3.0 (https://creativecommons.org/licenses/by/3.0/) license.
 -  Toolbar and menu icons from Lucide (https://lucide.dev) (ISC license). License can be found here (https://github.com/jungmannlab/picasso/blob/master/LICENSES/Lucide-LICENSE.txt).
 
 .. SYNC-END: credits
