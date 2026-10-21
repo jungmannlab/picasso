@@ -724,6 +724,72 @@ class TestIndexedRenders:
         assert n == 0 and not image.any()
 
 
+class TestRequestValidation:
+    """Every request the GPU cannot honor raises ``SplatBackendError``, the
+    one exception the seam turns into a CPU fallback - anything else would
+    reach the user as a failed render."""
+
+    @staticmethod
+    def _render(gpu, columns, blur, **overrides):
+        kwargs = dict(KWARGS, **overrides)
+        return gpu.render_channels(
+            [columns], [INFO], blur_method=blur, **kwargs
+        )
+
+    def test_unknown_blur_method(self, gpu, locs):
+        columns = render._extract_render_columns(locs.head(100), None, None)
+        with pytest.raises(SplatBackendError, match="unknown blur_method"):
+            self._render(gpu, columns, "bilateral")
+
+    def test_viewport_is_required(self, gpu, locs):
+        columns = render._extract_render_columns(locs.head(100), None, None)
+        with pytest.raises(SplatBackendError, match="explicit viewport"):
+            self._render(gpu, columns, None, viewport=None)
+
+    def test_rotation_needs_z(self, gpu, locs):
+        columns = render._extract_render_columns(locs.head(100), None, None)
+        with pytest.raises(SplatBackendError, match="needs z"):
+            self._render(gpu, columns, None, ang=ANG)
+
+    @pytest.mark.parametrize("blur", ["gaussian", "gaussian_iso"])
+    def test_per_localization_blur_needs_the_precision(self, gpu, locs, blur):
+        # extracted for a histogram, so without lpx and lpy
+        columns = render._extract_render_columns(locs.head(100), None, None)
+        with pytest.raises(SplatBackendError, match="localization precision"):
+            self._render(gpu, columns, blur)
+
+    def test_rotated_gaussian_needs_lpz(self, gpu, locs_3d):
+        # "convolve" extracts lpx/lpy and, rotated, z - but never lpz
+        columns = render._extract_render_columns(
+            locs_3d.head(100), "convolve", ANG
+        )
+        assert columns.lpx is not None and columns.lpz is None
+        with pytest.raises(SplatBackendError, match="needs lpz"):
+            self._render(gpu, columns, "gaussian", ang=ANG)
+
+    def test_channel_over_the_storage_limit(self, gpu, locs, monkeypatch):
+        monkeypatch.setattr(gpu, "_max_channel_locs", 50)
+        columns = render._extract_render_columns(locs.head(100), None, None)
+        with pytest.raises(SplatBackendError, match="storage-binding limit"):
+            self._render(gpu, columns, None)
+
+    def test_empty_viewport(self, gpu, locs):
+        columns = render._extract_render_columns(locs.head(100), None, None)
+        flat = _nm(((3.0, 2.0), (3.0, 62.5)))
+        with pytest.raises(SplatBackendError, match="empty viewport"):
+            self._render(gpu, columns, None, viewport=flat)
+
+    def test_an_unexpected_error_is_wrapped(self, gpu, locs, monkeypatch):
+        def boom(*args, **kwargs):
+            raise MemoryError("device lost")
+
+        monkeypatch.setattr(gpu, "_render", boom)
+        columns = render._extract_render_columns(locs.head(100), None, None)
+        with pytest.raises(SplatBackendError, match="device lost") as info:
+            self._render(gpu, columns, None)
+        assert isinstance(info.value.__cause__, MemoryError)
+
+
 class TestSeamSettings:
     """settings["Render"]["gpu"] selects the GPU; unsupported requests
     still fall back to the CPU through the seam."""

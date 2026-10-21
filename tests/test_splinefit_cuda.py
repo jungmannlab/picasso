@@ -309,6 +309,92 @@ class TestFixedIterationEquivalence:
         np.testing.assert_allclose(gpu[0], cpu[0], rtol=1e-12, atol=1e-12)
 
 
+class TestNoiseModel:
+    """The sCMOS readout variance, uploaded per chunk alongside the spots.
+
+    Five iterations rather than three: from these seeds the axial models
+    reject every step of the first three while the damping ramps up, and a
+    fit that never leaves its seed would agree with an ignored variance too.
+    """
+
+    _SCHEDULE = dict(tolerance=0.0, max_iterations=5)
+
+    @staticmethod
+    def _variance(spots, seed=1):
+        rng = np.random.default_rng(seed)
+        return rng.uniform(1.0, 50.0, spots.shape).astype(np.float32)
+
+    @pytest.mark.parametrize("kind,n_channels", KINDS)
+    @pytest.mark.parametrize("mle", [False, True], ids=["lsq", "mle"])
+    def test_matches_cpu(self, kind, n_channels, mle):
+        args = _args(kind, *_build(kind, n_channels))
+        variance = self._variance(args[1])
+        cpu = splinefit.fit_spots(
+            *args, mle=mle, variance=variance, **self._SCHEDULE
+        )
+        gpu = splinefit_cuda.fit_spots(
+            *args,
+            mle=mle,
+            variance=variance,
+            single_precision=False,
+            **self._SCHEDULE,
+        )
+        np.testing.assert_allclose(gpu[0], cpu[0], **_FP64)
+        np.testing.assert_allclose(gpu[1], cpu[1], **_FP64)
+        np.testing.assert_array_equal(gpu[2], cpu[2])
+        np.testing.assert_array_equal(gpu[3], cpu[3])
+
+    @pytest.mark.parametrize(
+        "kind,n_channels",
+        [p for p in KINDS if p.values[0] != splinefit.KIND_2D],
+    )
+    def test_variance_moves_the_mle_fit(self, kind, n_channels):
+        """Guards the comparison above against a variance dropped on both
+        devices alike. (The noiseless 2D spot has converged by then, so the
+        weighting no longer shows.)"""
+        args = _args(kind, *_build(kind, n_channels))
+        kwargs = dict(mle=True, single_precision=False, **self._SCHEDULE)
+        with_noise = splinefit_cuda.fit_spots(
+            *args, variance=self._variance(args[1]), **kwargs
+        )
+        without = splinefit_cuda.fit_spots(*args, **kwargs)
+        assert np.abs(with_noise[0] - without[0]).max() > 1e-2
+
+    def test_least_squares_ignores_the_variance(self):
+        """The shift cancels in a residual, so least squares never forms it."""
+        args = _args(splinefit.KIND_3D, *_build(splinefit.KIND_3D, 1))
+        with_noise = splinefit_cuda.fit_spots(
+            *args, variance=self._variance(args[1])
+        )
+        without = splinefit_cuda.fit_spots(*args)
+        for a, b in zip(with_noise, without):
+            np.testing.assert_array_equal(a, b)
+
+    def test_chunking_is_transparent(self, monkeypatch):
+        """Each launch must get the variance rows of its own spots."""
+        calibration, spots, initial = TestConvergedFits._noisy_batch(n=64)
+        args = _args(
+            splinefit.KIND_3D,
+            calibration,
+            spots,
+            initial,
+            IDENTITY,
+            np.linspace(-(NZ - 1), 0.0, 5),
+        )
+        variance = self._variance(spots)
+        one = splinefit_cuda.fit_spots(*args, mle=True, variance=variance)
+        monkeypatch.setattr(lmfit_cuda, "chunk_rows", lambda *a, **k: 7)
+        many = splinefit_cuda.fit_spots(*args, mle=True, variance=variance)
+        for a, b in zip(one, many):
+            np.testing.assert_array_equal(a, b)
+
+    def test_rejects_a_mismatched_variance(self):
+        args = _args(splinefit.KIND_3D, *_build(splinefit.KIND_3D, 1))
+        variance = self._variance(args[1])[..., :-1]
+        with pytest.raises(ValueError, match="variance"):
+            splinefit_cuda.fit_spots(*args, mle=True, variance=variance)
+
+
 class TestConvergedFits:
     """Properties, not values - see the module docstring."""
 
@@ -585,6 +671,18 @@ class TestKernelCache:
         assert splinefit_cuda._get_kernel(
             splinefit.KIND_3D, 1, True
         ) is not splinefit_cuda._get_kernel(splinefit.KIND_3D, 1, False)
+
+    def test_compiles_no_kernel_for_an_unknown_kind(self):
+        with pytest.raises(ValueError, match="Unknown spline model kind"):
+            splinefit_cuda._get_kernel(99, 1, True)
+        assert (99, 0, True) not in splinefit_cuda._KERNEL_CACHE
+
+    def test_refuses_without_a_device(self, monkeypatch):
+        """An explicit GPU request never silently runs elsewhere."""
+        monkeypatch.setattr(lmfit_cuda, "CUDA_AVAILABLE", False)
+        args = _args(splinefit.KIND_3D, *_build(splinefit.KIND_3D, 1))
+        with pytest.raises(RuntimeError, match="no CUDA-capable GPU"):
+            splinefit_cuda.fit_spots(*args)
 
     def test_parameter_counts(self):
         assert splinefit_cuda.n_parameters(splinefit.KIND_2D, 1) == 4

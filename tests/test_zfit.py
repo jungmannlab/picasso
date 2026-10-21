@@ -714,18 +714,25 @@ class TestZfitGPU:
     @pytest.mark.skipif(
         not zfit.CUDA_AVAILABLE, reason="requires a CUDA-capable GPU"
     )
-    def test_gpu_matches_serial(self, locs, info):
+    @pytest.mark.parametrize("fitting_method", ["gausslq", "gaussmle"])
+    def test_gpu_matches_serial(self, locs, info, fitting_method):
         """On real GPU hardware, the GPU path reproduces the serial CPU
-        path for z and lpz."""
+        path for z, d_zcalib and lpz."""
         out_serial, _ = zfit.zfit(
             locs,
             info,
             calibration=dict(CALIB_3D),
             multiprocess=False,
             filter=0,
+            fitting_method=fitting_method,
         )
         out_gpu, _ = zfit.zfit(
-            locs, info, calibration=dict(CALIB_3D), gpu=True, filter=0
+            locs,
+            info,
+            calibration=dict(CALIB_3D),
+            gpu=True,
+            filter=0,
+            fitting_method=fitting_method,
         )
         assert len(out_serial) == len(out_gpu)
         keys = ["frame", "x", "y"]
@@ -737,6 +744,34 @@ class TestZfitGPU:
         np.testing.assert_allclose(
             s["lpz"].to_numpy(), g["lpz"].to_numpy(), atol=1e-3
         )
+        np.testing.assert_allclose(
+            s["d_zcalib"].to_numpy(), g["d_zcalib"].to_numpy(), atol=1e-3
+        )
+
+    @pytest.mark.skipif(
+        not zfit.CUDA_AVAILABLE, reason="requires a CUDA-capable GPU"
+    )
+    def test_gpu_empty_locs(self, locs, info):
+        """No localizations launches no kernel but still yields the z
+        columns."""
+        out, _ = zfit.zfit(
+            locs.iloc[:0], info, calibration=dict(CALIB_3D), gpu=True
+        )
+        assert len(out) == 0
+        for column in ("z", "d_zcalib", "lpz"):
+            assert column in out.columns
+
+    @pytest.mark.skipif(
+        not zfit.CUDA_AVAILABLE, reason="requires a CUDA-capable GPU"
+    )
+    def test_gpu_progress(self, locs, info):
+        """The real-device twin of the simulator test's progress check."""
+        tracker = RecordingProgress()
+        zfit.zfit(
+            locs, info, calibration=dict(CALIB_3D), gpu=True, progress=tracker
+        )
+        assert_phases_complete(tracker, ["Fitting z"])
+        assert tracker.phases[0]["maximum"] == len(locs)
 
     @pytest.mark.slow
     def test_gpu_simulator_matches_serial(self):

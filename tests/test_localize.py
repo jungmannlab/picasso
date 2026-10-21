@@ -99,6 +99,18 @@ SPLINE_CRLB_DEVICES = [
     ),
 ]
 
+# The same for the ``use_gpu`` flag of the spline fitting entry points.
+SPLINE_FIT_DEVICES = [
+    pytest.param(False, id="cpu"),
+    pytest.param(
+        True,
+        id="gpu",
+        marks=pytest.mark.skipif(
+            not localize.CUDA_AVAILABLE, reason="no CUDA device"
+        ),
+    ),
+]
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -5521,7 +5533,16 @@ def _crlb(theta, calibration, box, *, gpu, **kwargs):
     ``localize``, whose own ``CUDA_AVAILABLE`` gates the *fitting* backends."""
     with pytest.MonkeyPatch.context() as m:
         m.setattr(precision, "CUDA_AVAILABLE", gpu)
+        if gpu:
+            # A device error falls back to the CPU and warns only once per
+            # process, which would quietly turn every later GPU-vs-CPU
+            # comparison into CPU-vs-CPU.
+            m.setattr(precision, "_warn_crlb_gpu_fallback", _fail_on_fallback)
         return precision._spline_crlb(theta, calibration, box, **kwargs)
+
+
+def _fail_on_fallback(exc):
+    pytest.fail(f"the GPU spline CRLB fell back to the CPU: {exc!r}")
 
 
 def _shared_theta(n, rng, n_params=5, nz=21):
@@ -5831,6 +5852,67 @@ class TestSplineCRLBGPU:
         assert called, "the device driver was never reached"
         np.testing.assert_allclose(got, expected)
 
+    def test_link_xyz_failed_device_rows_are_recomputed(self, monkeypatch):
+        """The link-XYZ twin of the test above, with a noise model so the
+        recomputed rows must also take their own variance patches."""
+        monkeypatch.setattr(precision, "CUDA_AVAILABLE", True)
+        rng = np.random.default_rng(6)
+        calib, theta = _link_xyz_calib_and_theta(2, 9, rng)
+        variance = rng.uniform(1.0, 80.0, (len(theta), BOX, BOX, 2))
+        expected = _crlb(theta, calib, BOX, variance=variance, gpu=False)
+        called = []
+
+        def stub(
+            coeff,
+            jac,
+            res,
+            box,
+            xs,
+            ys,
+            ze,
+            photons,
+            bg,
+            finite,
+            mu_floor,
+            mle,
+            progress=None,
+            variance=None,
+        ):
+            called.append(True)
+            out = precision._spline_link_xyz_crlb_cpu(
+                np.asarray(coeff, dtype=np.float64),
+                jac,
+                res,
+                box,
+                xs,
+                ys,
+                ze,
+                photons,
+                bg,
+                finite,
+                mle,
+                variance=variance,
+            )
+            failed = np.zeros(len(xs), dtype=bool)
+            failed[1::2] = True
+            out[failed] = 12345.0  # device garbage the host must discard
+            return out, failed
+
+        monkeypatch.setattr(precision, "_spline_link_xyz_crlb_cuda", stub)
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            got = _crlb(theta, calib, BOX, variance=variance, gpu=True)
+        assert called, "the device driver was never reached"
+        np.testing.assert_allclose(got, expected)
+
+    def test_device_drivers_refuse_without_cuda(self, monkeypatch):
+        """Reached only through a caller that skipped the dispatch check."""
+        monkeypatch.setattr(precision, "CUDA_AVAILABLE", False)
+        with pytest.raises(RuntimeError, match="no CUDA-capable GPU"):
+            precision._spline_crlb_cuda(*([None] * 12))
+        with pytest.raises(RuntimeError, match="no CUDA-capable GPU"):
+            precision._spline_link_xyz_crlb_cuda(*([None] * 12))
+
     def test_device_error_falls_back_and_warns_once(self, monkeypatch):
         """A present but failing device warns and still returns the numbers.
 
@@ -5930,6 +6012,62 @@ class TestSplineCRLBGPU:
         assert not np.allclose(gpu[:, :2], plain[:, :2], rtol=self.RTOL)
 
     @requires_crlb_gpu
+    @pytest.mark.parametrize("mle", [True, False])
+    @pytest.mark.parametrize(
+        "model, n_channels",
+        [
+            ("spline-2d", 1),
+            ("spline-3d", 1),
+            ("spline-3d-multichannel", 3),
+            ("spline-3d-multichannel-link-xyz", 3),
+        ],
+    )
+    def test_noise_model_matches_cpu(self, model, n_channels, mle):
+        """The sCMOS readout variance, in the layout ``get_spots`` and
+        ``get_spots_multichannel`` deliver it (channel-last), which both
+        paths must reorder alike."""
+        rng = np.random.default_rng(14)
+        if model.endswith("link-xyz"):
+            calib, theta = _link_xyz_calib_and_theta(n_channels, 150, rng)
+        else:
+            calib, _ = _gauss_spline_calibration(
+                model=model, n_channels=n_channels
+            )
+            theta = _shared_theta(
+                150, rng, n_params=4 if model == "spline-2d" else 5
+            )
+        shape = (len(theta), BOX, BOX) + ((n_channels,) * (n_channels > 1))
+        variance = rng.uniform(1.0, 80.0, shape).astype(np.float32)
+        gpu = _crlb(theta, calib, BOX, mle=mle, variance=variance, gpu=True)
+        cpu = _crlb(theta, calib, BOX, mle=mle, variance=variance, gpu=False)
+        np.testing.assert_allclose(gpu, cpu, rtol=self.RTOL)
+        # and the noise model actually moved the answer, so this is a real
+        # test
+        plain = _crlb(theta, calib, BOX, mle=mle, gpu=True)
+        assert (gpu[:, :2] > plain[:, :2]).all()
+
+    @requires_crlb_gpu
+    @pytest.mark.parametrize("link_xyz", [False, True], ids=["shared", "xyz"])
+    def test_chunking_is_transparent(self, link_xyz, monkeypatch):
+        """Each launch must get the rows - variance patches included - of its
+        own localizations."""
+        rng = np.random.default_rng(15)
+        if link_xyz:
+            calib, theta = _link_xyz_calib_and_theta(2, 100, rng)
+        else:
+            calib, _ = _gauss_spline_calibration(
+                model="spline-3d-multichannel", n_channels=2
+            )
+            theta = _shared_theta(100, rng)
+        calib, res = _with_channel_geometry(calib, len(theta), rng)
+        variance = rng.uniform(1.0, 80.0, (len(theta), BOX, BOX, 2))
+        kwargs = dict(residuals=res, variance=variance, gpu=True)
+        one = _crlb(theta, calib, BOX, **kwargs)
+        monkeypatch.setattr(precision, "_crlb_chunk_rows", lambda *a: 7)
+        many = _crlb(theta, calib, BOX, **kwargs)
+        np.testing.assert_array_equal(one, many)
+
+    @requires_crlb_gpu
     @pytest.mark.parametrize("model", ["spline-2d", "spline-3d"])
     def test_em_doubling_matches_cpu(self, model):
         """The EMCCD factor is applied by the caller, after the device hands
@@ -5999,6 +6137,14 @@ class TestSplineCRLBGPU:
         n_params = 4 if model == "spline-2d" else 5
         crlb = _crlb(np.zeros((0, n_params)), calib, BOX, gpu=True)
         assert crlb.shape == (0, n_params)
+
+    @requires_crlb_gpu
+    def test_empty_theta_link_xyz(self):
+        calib, theta = _link_xyz_calib_and_theta(
+            3, 1, np.random.default_rng(0)
+        )
+        crlb = _crlb(theta[:0], calib, BOX, gpu=True)
+        assert crlb.shape == (0, theta.shape[1])
 
     @requires_crlb_gpu
     def test_cropped_box_matches_cpu(self):
@@ -10164,6 +10310,22 @@ def scmos_scene():
     }
 
 
+def _on_both_devices(method):
+    """``method`` and its "-gpu" twin, the latter skipped without CUDA.
+
+    The kernel tests compare the two backends array for array; this checks
+    the camera calibration also reaches the GPU through ``fit``."""
+    return [
+        method,
+        pytest.param(
+            method + "-gpu",
+            marks=pytest.mark.skipif(
+                not localize.CUDA_AVAILABLE, reason="no CUDA device"
+            ),
+        ),
+    ]
+
+
 class TestScmosFit2DIntegration:
     """The whole feature, end to end through ``fit``."""
 
@@ -10181,17 +10343,16 @@ class TestScmosFit2DIntegration:
         ok = np.isfinite(locs["x"]) & np.isfinite(locs["lpx"])
         return locs[ok], info
 
+    @pytest.mark.parametrize("method", _on_both_devices("gaussmle"))
     def test_mle_bias_from_a_hot_pixel_is_removed(
-        self, scmos_scene, picasso_movie_factory
+        self, scmos_scene, picasso_movie_factory, method
     ):
         x0 = scmos_scene["truth"][0] * scmos_scene["camera_info"]["Pixelsize"]
-        plain, _ = self._fit(
-            scmos_scene, picasso_movie_factory, "gaussmle", None
-        )
+        plain, _ = self._fit(scmos_scene, picasso_movie_factory, method, None)
         modeled, _ = self._fit(
             scmos_scene,
             picasso_movie_factory,
-            "gaussmle",
+            method,
             scmos_scene["calibration"],
         )
         bias_plain = abs(plain["x"].mean() - x0)
@@ -10205,18 +10366,17 @@ class TestScmosFit2DIntegration:
         # ... and the precision must not be paid for it.
         assert modeled["x"].std() < plain["x"].std()
 
+    @pytest.mark.parametrize("method", _on_both_devices("gaussmle"))
     def test_mle_precision_estimate_becomes_honest(
-        self, scmos_scene, picasso_movie_factory
+        self, scmos_scene, picasso_movie_factory, method
     ):
         """The conventional CRLB ignores readout noise and is optimistic;
         CRLB_sCMOS is attained. This is Fig. 1c,d of the paper."""
-        plain, _ = self._fit(
-            scmos_scene, picasso_movie_factory, "gaussmle", None
-        )
+        plain, _ = self._fit(scmos_scene, picasso_movie_factory, method, None)
         modeled, _ = self._fit(
             scmos_scene,
             picasso_movie_factory,
-            "gaussmle",
+            method,
             scmos_scene["calibration"],
         )
         ratio_plain = plain["x"].std() / plain["lpx"].mean()
@@ -10224,8 +10384,9 @@ class TestScmosFit2DIntegration:
         assert ratio_plain > 1.3
         assert 0.85 < ratio_model < 1.15
 
+    @pytest.mark.parametrize("method", _on_both_devices("gausslq"))
     def test_lsq_uncertainty_grows_but_the_fit_barely_moves(
-        self, scmos_scene, picasso_movie_factory
+        self, scmos_scene, picasso_movie_factory, method
     ):
         """Least squares does not use the noise model in its objective.
 
@@ -10235,13 +10396,11 @@ class TestScmosFit2DIntegration:
         the variance term cancels out of a least-squares objective exactly
         (asserted at the kernel level in ``test_gaussfit``).
         """
-        plain, _ = self._fit(
-            scmos_scene, picasso_movie_factory, "gausslq", None
-        )
+        plain, _ = self._fit(scmos_scene, picasso_movie_factory, method, None)
         modeled, _ = self._fit(
             scmos_scene,
             picasso_movie_factory,
-            "gausslq",
+            method,
             scmos_scene["calibration"],
         )
         assert modeled["lpx"].mean() > plain["lpx"].mean()
@@ -10362,27 +10521,31 @@ class TestScmosSplineIntegration:
         )
         return locs[np.isfinite(locs["x"]) & np.isfinite(locs["lpx"])]
 
-    def test_mle_crlb_becomes_honest(self, scene, picasso_movie_factory):
-        plain = self._fit(scene, picasso_movie_factory, "spline-mle", None)
+    @pytest.mark.parametrize("method", _on_both_devices("spline-mle"))
+    def test_mle_crlb_becomes_honest(
+        self, scene, picasso_movie_factory, method
+    ):
+        plain = self._fit(scene, picasso_movie_factory, method, None)
         modeled = self._fit(
-            scene, picasso_movie_factory, "spline-mle", scene["calibration"]
+            scene, picasso_movie_factory, method, scene["calibration"]
         )
         assert plain["x"].std() / plain["lpx"].mean() > 1.15
         ratio = modeled["x"].std() / modeled["lpx"].mean()
         assert 0.85 < ratio < 1.15
         assert modeled["x"].std() < plain["x"].std()
 
+    @pytest.mark.parametrize("method", _on_both_devices("spline"))
     def test_lsq_fit_is_stable_but_its_uncertainty_grows(
-        self, scene, picasso_movie_factory
+        self, scene, picasso_movie_factory, method
     ):
         """The Huber-sandwich meat is the true pixel variance, ``mu + var``.
 
         So a least-squares spline fit lands in the same place but stops
         under-reporting its own scatter.
         """
-        plain = self._fit(scene, picasso_movie_factory, "spline", None)
+        plain = self._fit(scene, picasso_movie_factory, method, None)
         modeled = self._fit(
-            scene, picasso_movie_factory, "spline", scene["calibration"]
+            scene, picasso_movie_factory, method, scene["calibration"]
         )
         assert modeled["x"].std() == pytest.approx(plain["x"].std(), rel=0.05)
         assert modeled["lpx"].mean() > plain["lpx"].mean()
@@ -10594,8 +10757,9 @@ class TestScmosMultichannel:
         # collapsed channel axis would give.
         assert crlb(hot_ch0)[0, -1] != widened[0, -1]
 
+    @pytest.mark.parametrize("use_gpu", SPLINE_FIT_DEVICES)
     @pytest.mark.parametrize("mle", [False, True])
-    def test_the_multichannel_fitters_accept_a_calibration(self, mle):
+    def test_the_multichannel_fitters_accept_a_calibration(self, mle, use_gpu):
         """End to end through the public entry points.
 
         The fake calibration cannot recover ground truth, so this asserts that
@@ -10653,7 +10817,7 @@ class TestScmosMultichannel:
             self.BOX,
             calibration,
             mle=mle,
-            use_gpu=False,
+            use_gpu=use_gpu,
         )
         modeled = localize.fit_spline_multichannel(
             movies,
@@ -10662,15 +10826,18 @@ class TestScmosMultichannel:
             self.BOX,
             calibration,
             mle=mle,
-            use_gpu=False,
+            use_gpu=use_gpu,
             camera_calibrations=calibrations,
         )
         assert len(plain) == len(modeled) == n_frames
         assert np.isfinite(modeled["lpx"]).any()
         for locs in (plain, modeled):
             assert np.isfinite(locs["reduced_chi_square"]).all()
+        # the hot pixel of channel 1 reached the precision estimate
+        assert not np.allclose(plain["lpx"], modeled["lpx"], equal_nan=True)
 
-    def test_the_ratiometric_fitter_accepts_a_calibration(self):
+    @pytest.mark.parametrize("use_gpu", SPLINE_FIT_DEVICES)
+    def test_the_ratiometric_fitter_accepts_a_calibration(self, use_gpu):
         calibration = _fake_spline_calibration(
             model="spline-3d-multichannel", box=self.BOX, n_channels=2
         )
@@ -10710,7 +10877,7 @@ class TestScmosMultichannel:
             calibration,
             photon_ratios=np.array([[0.5, 0.5], [0.8, 0.2]]),
             mle=False,
-            use_gpu=False,
+            use_gpu=use_gpu,
             camera_calibrations=calibrations,
         )
         assert len(locs) == n_frames

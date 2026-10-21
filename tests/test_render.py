@@ -6,6 +6,7 @@ picasso.masking.
 """
 
 import logging
+import sys
 
 import numpy as np
 import pandas as pd
@@ -3073,6 +3074,11 @@ class TestSplatBackend:
             return real_import(name, *args, **kwargs)
 
         monkeypatch.setattr(builtins, "__import__", no_wgpu)
+        # Once another test imported the GPU backend, the import above is
+        # served from the module cache and never sees the hook; a None entry
+        # makes a cached module raise ImportError as well.
+        for name in ("picasso.render.gpu", "wgpu"):
+            monkeypatch.setitem(sys.modules, name, None)
         monkeypatch.setattr(render.backend, "_gpu_singleton", None)
         monkeypatch.setattr(render.backend, "_gpu_unavailable", False)
         monkeypatch.setattr(render.backend, "_gpu_adapter", None)
