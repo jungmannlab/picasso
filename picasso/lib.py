@@ -4015,17 +4015,23 @@ def permutation_test(
     # observe the real difference
     obs_d, ks_pval = stats.ks_2samp(arr1, arr2, alternative=alternative)
 
-    # build null distribution by shuffling
+    def statistic(x, y):
+        # only the statistic: the asymptotic method skips the exact p-value,
+        # which ks_2samp would otherwise compute and which makes a one-sided
+        # test about a hundred times slower
+        return stats.ks_2samp(x, y, alternative=alternative, method="asymp")[0]
+
+    # build null distribution by shuffling; the observed statistic it is
+    # compared with is computed the same way, so that ties count as ties
+    observed = statistic(arr1, arr2)
     null_dist = np.empty(iterations)
     for i in range(iterations):
         shuffled = rng.permutation(combined)
-        null_dist[i], _ = stats.ks_2samp(
-            shuffled[:n1], shuffled[n1:], alternative=alternative
-        )
+        null_dist[i] = statistic(shuffled[:n1], shuffled[n1:])
 
     # the observed arrangement is one of the possible ones (Phipson and
     # Smyth, 2010), which also keeps p from being exactly 0
-    p_perm = (np.sum(null_dist >= obs_d) + 1) / (iterations + 1)
+    p_perm = (np.sum(null_dist >= observed) + 1) / (iterations + 1)
     return obs_d, p_perm, ks_pval
 
 

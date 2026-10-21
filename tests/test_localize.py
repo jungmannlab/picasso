@@ -13324,7 +13324,7 @@ class TestMultichannelGaussianWorkerRouting:
         seen, _ = self._run(monkeypatch)
         assert seen["n_movies"] == 2
 
-    def test_a_failed_fit_aborts_rather_than_raising(self, monkeypatch):
+    def test_a_failed_fit_reports_why_rather_than_raising(self, monkeypatch):
         def boom(*args, **kwargs):
             raise RuntimeError("no")
 
@@ -13335,10 +13335,10 @@ class TestMultichannelGaussianWorkerRouting:
         worker = localize_gui.MultichannelGaussianFitWorker(
             [None, None], [{}, {}], ids, BOX, self._registration()
         )
-        aborted = []
-        worker.aborted.connect(lambda: aborted.append(True))
+        failed = []
+        worker.failed.connect(failed.append)
         worker.run()
-        assert aborted == [True]
+        assert failed == ["no"]
 
     def test_an_aborted_fit_emits_aborted(self, monkeypatch):
         monkeypatch.setattr(
@@ -13496,6 +13496,17 @@ class TestMultichannelGaussianFitThroughTheWindow:
 
     def _window(self, tmp_path, registration=True):
         movies, truth_x, truth_y = self._movies()
+        # memory mapped, as io.load_movie hands them out: the single-channel
+        # fit takes no plain arrays
+        for c, movie in enumerate(movies):
+            mapped = np.memmap(
+                tmp_path / f"movie{c}.raw",
+                movie.dtype,
+                "w+",
+                shape=movie.shape,
+            )
+            mapped[:] = movie
+            movies[c] = mapped
         window = localize_gui.Window()
         dialog = window.parameters_dialog
         dialog.baseline.setValue(0)
@@ -13568,6 +13579,7 @@ class TestMultichannelGaussianFitThroughTheWindow:
         try:
             worker = self._finish(window)
             assert isinstance(worker, localize_gui.FitWorker)
+            assert window.locs is not None
         finally:
             window.close()
 

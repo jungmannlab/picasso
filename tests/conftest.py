@@ -121,6 +121,104 @@ def _no_unhandled_exceptions():
 
 
 # ---------------------------------------------------------------------------
+# Modal dialogs
+# ---------------------------------------------------------------------------
+
+# A modal dialog waits for a click, and under the offscreen platform nothing
+# ever clicks: a ``QMessageBox.warning`` on a path the test did not expect (a
+# fit that failed, say) blocked the run forever, with no output and at 0 % CPU
+# - not even pytest-timeout's default signal method gets through, as the wait
+# is in Qt's C++ event loop. Every blocking entry point therefore returns
+# at once, as if the user had canceled, and the test that reached one fails
+# naming the dialog. A test that expects a dialog stubs it with
+# ``monkeypatch`` as before, which replaces the guard for that test only.
+_blocked_dialogs: list[str] = []
+
+
+def _install_dialog_guard() -> None:
+    """Make every modal dialog of Qt return at once and be recorded."""
+    try:
+        from PyQt6 import QtCore, QtGui, QtWidgets
+    except ImportError:  # pragma: no cover - Qt is optional here
+        return
+
+    def blocked(what, result):
+        _blocked_dialogs.append(what)
+        _write_crash_log(f"\n=== modal dialog not stubbed: {what}\n")
+        return result
+
+    def guard_static(cls, name, result):
+        def guard(*args, **kwargs):
+            texts = tuple(a for a in args if isinstance(a, str))
+            return blocked(f"{cls.__name__}.{name}{texts!r}", result())
+
+        setattr(cls, name, staticmethod(guard))
+
+    def guard_exec(self, *args, **kwargs):
+        what = f"{type(self).__name__}.exec()"
+        if isinstance(self, QtWidgets.QWidget):
+            what += f" {self.windowTitle()!r}"
+        if isinstance(self, QtWidgets.QMessageBox):
+            what += f": {self.text()!r}"
+        # QDialog.DialogCode.Rejected; None for a QMenu (no action chosen)
+        return blocked(what, None if isinstance(self, QtWidgets.QMenu) else 0)
+
+    no_button = QtWidgets.QMessageBox.StandardButton.NoButton
+    for name in ("warning", "critical", "information", "question"):
+        guard_static(QtWidgets.QMessageBox, name, lambda: no_button)
+    for name in ("about", "aboutQt"):
+        guard_static(QtWidgets.QMessageBox, name, lambda: None)
+    for name in ("getOpenFileName", "getSaveFileName"):
+        guard_static(QtWidgets.QFileDialog, name, lambda: ("", ""))
+    guard_static(QtWidgets.QFileDialog, "getOpenFileNames", lambda: ([], ""))
+    guard_static(QtWidgets.QFileDialog, "getExistingDirectory", lambda: "")
+    for name in ("getOpenFileUrl", "getSaveFileUrl"):
+        guard_static(QtWidgets.QFileDialog, name, lambda: (QtCore.QUrl(), ""))
+    for name, value in (
+        ("getInt", 0),
+        ("getDouble", 0.0),
+        ("getText", ""),
+        ("getMultiLineText", ""),
+        ("getItem", ""),
+    ):
+        guard_static(
+            QtWidgets.QInputDialog, name, lambda value=value: (value, False)
+        )
+    guard_static(QtWidgets.QColorDialog, "getColor", QtGui.QColor)
+    guard_static(
+        QtWidgets.QFontDialog, "getFont", lambda: (QtGui.QFont(), False)
+    )
+    # ``exec`` of every dialog class Qt ships (QMessageBox and QFileDialog
+    # define their own), and so of Picasso's dialogs, which inherit it
+    for cls in vars(QtWidgets).values():
+        if (
+            isinstance(cls, type)
+            and issubclass(cls, (QtWidgets.QDialog, QtWidgets.QMenu))
+            and "exec" in vars(cls)
+        ):
+            cls.exec = guard_exec
+
+
+_install_dialog_guard()
+
+
+@pytest.fixture(autouse=True)
+def _no_modal_dialogs():
+    """Fail a test that opened a modal dialog it did not stub."""
+    del _blocked_dialogs[:]
+    yield
+    if _blocked_dialogs:
+        report = "\n".join(_blocked_dialogs)
+        del _blocked_dialogs[:]
+        pytest.fail(
+            "a modal dialog was opened that the test did not stub; offscreen, "
+            "nothing would ever close it (stub it with monkeypatch if it is "
+            f"expected):\n{report}",
+            pytrace=False,
+        )
+
+
+# ---------------------------------------------------------------------------
 # Qt
 # ---------------------------------------------------------------------------
 

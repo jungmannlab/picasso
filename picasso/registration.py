@@ -299,14 +299,33 @@ def _ransac_msac_cost(
 
         return msac_cost
 
-    # one tree per field, so a bead can only find partners in its own
-    group_trees = [(ri, KDTree(c_xy[ci])) for ri, ci in groups]
+    # A bead may only find partners in its own field. One tree holds every
+    # field, each lifted to its own height: within a field the height adds an
+    # exact 0 (the distances are those of a tree per field), and a partner
+    # from another field is further than the cap, so it costs the cap either
+    # way. One query per candidate instead of one per field - which, with a
+    # field per frame in signal registration, was most of the calibration.
+    sep = 2.0 * np.sqrt(tol_sq) + 1.0
+    rows = np.concatenate([ri for ri, _ in groups])
+    ref_z = np.repeat(
+        np.arange(len(groups)) * sep, [len(ri) for ri, _ in groups]
+    )
+    c_rows = np.concatenate([ci for _, ci in groups])
+    c_z = np.repeat(
+        np.arange(len(groups)) * sep, [len(ci) for _, ci in groups]
+    )
+    tree = KDTree(np.column_stack([c_xy[c_rows], c_z]))
+    ends = np.cumsum([len(ri) for ri, _ in groups])
+    bounds = list(zip(ends - [len(ri) for ri, _ in groups], ends))
 
     def msac_cost(pred: np.ndarray) -> float:
+        dist, _ = tree.query(np.column_stack([pred[rows], ref_z]), k=1)
+        cost = np.minimum(dist**2, tol_sq)
+        # summed per field, then across the fields, as with a tree per field
+        # (np.add.reduceat would add up differently in the last bits)
         total = 0.0
-        for ri, tree in group_trees:
-            dist, _ = tree.query(pred[ri], k=1)
-            total += float(np.sum(np.minimum(dist**2, tol_sq)))
+        for start, end in bounds:
+            total += float(np.sum(cost[start:end]))
         return total
 
     return msac_cost

@@ -176,6 +176,9 @@ markers = [
     "gui: tests that build Qt widgets (applied automatically to anything using the qapp / qt_offscreen fixtures); deselect with -m \"not gui\"",
     "gpu_backend: tests that exercise the real GPU render backend selection (every other test renders on the CPU reference, whatever the machine has)",
 ]
+# a test still running after 10 minutes is stuck: print where every thread
+# is (the test keeps running; the slowest take about 2.5 minutes)
+faulthandler_timeout = 600
 
 # pytest --cov (pytest-cov) measures which code of Picasso the tests run
 [tool.coverage.run]

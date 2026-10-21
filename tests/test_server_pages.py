@@ -14,6 +14,7 @@ import importlib
 import json
 import os
 import shutil
+import sys
 from datetime import date, datetime
 from types import SimpleNamespace
 
@@ -44,6 +45,10 @@ def home(monkeypatch, tmp_path):
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.setenv("USERPROFILE", str(home))
     monkeypatch.syspath_prepend(os.path.dirname(picasso.server.__file__))
+    # Streamlit installs the page it runs as ``__main__`` and leaves it
+    # there; a process pool started later (spawn: Windows, macOS) re-runs
+    # ``__main__`` in each worker, which then dies on ``import watcher``
+    monkeypatch.setitem(sys.modules, "__main__", sys.modules["__main__"])
     st.cache_data.clear()
     yield home
     st.cache_data.clear()
