@@ -14710,6 +14710,33 @@ class TestLocalizeCliSeparateLateralCorrection:
         )
 
 
+class TestLocalizeCliFolder:
+    """``picasso localize FOLDER`` processes every movie Picasso opens."""
+
+    def test_every_movie_format_is_collected(self, tmp_path):
+        from picasso import __main__ as cli
+
+        names = [
+            "a.ome.tif",
+            "a_1.ome.tif",  # continuation of a.ome.tif, read with it
+            "b.tiff",
+            "c.btf",
+            "d.ims",
+            "e.raw",
+            "e.yaml",  # metadata of e.raw, not a movie
+            "f.nd2",
+            "G.TIFF",
+            "h_locs.hdf5",
+            "notes.txt",
+        ]
+        for name in names:
+            (tmp_path / name).write_bytes(b"")
+        paths = cli._localize_collect_paths(str(tmp_path))
+        found = sorted(os.path.basename(path) for path in paths)
+        movies = ["a.ome.tif", "b.tiff", "c.btf", "d.ims", "e.raw", "f.nd2"]
+        assert found == sorted(movies + ["G.TIFF"])
+
+
 class TestLocalizeCliRegionsSeparately:
     """``picasso localize --regions-separately``: one file per region."""
 

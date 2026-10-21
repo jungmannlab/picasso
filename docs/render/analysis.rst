@@ -248,6 +248,29 @@ Clustering
 The clustering algorithms are found in the ``Postprocess > Clustering``
 submenu.
 
+.. _render-clustering-output:
+
+DBSCAN, HDBSCAN and the SMLM clusterer save the clustered localizations, with
+the cluster of each localization in the ``group`` column, under a name you
+choose (e.g., ``movie_locs_dbscan.hdf5``). Two options in their dialogs save
+more next to this file:
+
+``Save cluster centers``
+   ``<name>_centers.hdf5``, one row per cluster: its center, mean frame and
+   the standard deviations of the positions and frames (``std_x``,
+   ``std_y``, ``std_z``, ``std_frame``), the number of localizations
+   (``n_locs``) and binding events (``n_events``), its ``area`` (2D) or
+   ``volume`` (3D) and ``convexhull``, all lengths in nm (see
+   :ref:`files-molecular-maps`). The file opens in Render and Filter like
+   localizations, e.g., to filter the clusters by ``std_frame``, and
+   ``picasso cluster-filter`` keeps the clustered localizations whose
+   clusters have a property within given limits.
+``Save cluster areas (.csv)``
+   ``<name>_areas.csv``, the area (2D) or volume (3D) of each cluster
+   (``group``), measured on an image of the cluster with Otsu's threshold, in
+   units of the median localization precision (``Area (LP^2)``,
+   ``Volume (LP^3)``).
+
 .. tip::
 
    It is recommended to remove any fiducial markers before clustering

@@ -67,10 +67,13 @@ Example: default camera
 
    Cameras:
      Camera1:
+       Pixelsize: 130
        Baseline: 100
        Sensitivity: 0.5
 
 If there is only one camera entry, Picasso will create a dropdown menu that has always selected this camera.
+
+``Pixelsize`` is the size of a camera pixel in the sample in nm, i.e., after magnification. Localize uses it for the movies of this camera whose metadata do not record the pixel size, and so does ``picasso localize`` without ``-px``.
 
 .. _localize-camera-config-gain:
 

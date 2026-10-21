@@ -120,9 +120,9 @@ into the console):
 
    picasso localize foldername
 
-Picasso will analyze the folder and process all ``.tif``, ``.raw``, ``.nd2``,
-``.stk``, ``.czi`` and ``.lif`` movies in it. If ``.tif`` files have
-consecutive names (e.g., ``File.ome.tif``, ``File_1.ome.tif``,
+Picasso will analyze the folder and process every movie in it, in all the
+formats that Localize opens (see :ref:`localize-file-formats`). If ``.tif``
+files have consecutive names (e.g., ``File.ome.tif``, ``File_1.ome.tif``,
 ``File_2.ome.tif``), they will be treated as one movie.
 
 Drift correction
@@ -791,19 +791,22 @@ PYMEVisualize. The output is named ``<file>.hdf`` (PyME does not recognize the
 
 join
 ----
-Combine two hdf5 localization files. A new joined file will be created.
+Combine two or more hdf5 localization files into one, saved as
+``<first file>_join.hdf5``.
 
 .. code-block:: bash
 
-   picasso join file1 file2
+   picasso join file1 file2 [-k]
+
+By default, the frames of each file are renumbered to follow those of the
+file before it, as if the movies had been recorded one after the other, and
+``Frames`` in the metadata grows accordingly.
 
 .. warning::
 
-   The frame information of consecutive files is reindexed, i.e., frame 1 now
-   can contain localizations from file 1 and file 2. Therefore, do not perform
-   kinetic analysis and drift correction on joined files. Pass
-   ``-k/--keep-index`` to keep the original frame numbers instead of
-   reindexing.
+   With ``-k/--keep-index``, the original frame numbers are kept, so one frame
+   can hold localizations from several files. Do not perform kinetic analysis
+   or drift correction on such a joined file.
 
 Columns that not all files have (e.g., ``z`` when joining 2D and 3D files, or
 ``net_gradient`` when only some were identified by their net gradient) are

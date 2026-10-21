@@ -184,6 +184,18 @@ Picasso fill in these values for your camera, set up the camera configuration,
 ``~/.picasso/config.yaml`` (Localize: ``File > Open camera config file
 location``), see :ref:`localize-camera-config`.
 
+I localized a movie with the wrong pixel size
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Localize it again with the correct ``Pixel size (nm)`` (``-px`` on the command
+line). The pixel size converts the fitted positions, precisions and spot widths
+from camera pixels to nm while the movie is localized, and the ``z`` of
+astigmatic 3D data is fitted from the spot widths, so changing ``Pixelsize`` in
+the metadata afterwards does not correct them; it only changes the size of
+the field of view. Localize takes the pixel size from the movie's metadata or from the
+``Pixelsize`` of the camera in the camera configuration, so set it there once
+(see :ref:`localize-camera-config`).
+
 Localize does not select my camera or calibration automatically
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -281,9 +293,9 @@ Where are the areas and other properties of my clusters?
 Tick ``Save cluster centers`` in the DBSCAN, HDBSCAN or SMLM clusterer dialog:
 a ``_centers.hdf5`` file next to the clustered localizations then holds one
 row per cluster, with its mean frame, size, number of localizations, area and
-more (in nm), see :ref:`files-molecular-maps`. It opens in Render and Filter
-like localizations, and ``picasso cluster-filter`` keeps the clustered
-localizations whose clusters have a property within given limits.
+more (in nm), see :ref:`Clustering <render-clustering-output>`. It opens in
+Render and Filter like localizations, and ``picasso cluster-filter`` keeps the
+clustered localizations whose clusters have a property within given limits.
 
 Command line and scripts
 ------------------------
@@ -302,10 +314,9 @@ The ``picasso`` command is not found
 How do I process many files at once?
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-``picasso localize FOLDER`` localizes every ``.tif`` (the first file of each
-series split over several files), ``.raw``, ``.nd2``, ``.stk``, ``.czi`` and
-``.lif`` movie in the folder. For astigmatic 3D, pass ``-zc`` and ``-mf``, or
-the command asks for them. Most other commands take a file name pattern in
+``picasso localize FOLDER`` localizes every movie in the folder, in all the
+formats Localize opens; a movie split over several ``.tif`` files counts once.
+For astigmatic 3D, pass ``-zc`` and ``-mf``, or the command asks for them. Most other commands take a file name pattern in
 quotes, e.g., ``picasso link "*_locs.hdf5"``. See :doc:`cmd`.
 
 A command says it is deprecated

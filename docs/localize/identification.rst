@@ -42,9 +42,10 @@ Identification and fitting of single-molecule spots
 
 8. **Set the photon conversion** in the ``Photon conversion`` group: adjust ``EM Gain``, ``Baseline`` and ``Sensitivity`` according to your camera specifications and the experimental conditions.
 
-   - Set ``EM Gain`` to 1 for conventional output amplification.
-   - ``Baseline`` is the average dark camera count.
-   - ``Sensitivity`` is the conversion factor (electrons per analog-to-digital (A/D) count).
+   - ``EM Gain`` is the electron-multiplying gain of an EMCCD camera. Set it to 1 for conventional output amplification and for cameras without EM gain, such as sCMOS cameras.
+   - ``Baseline`` is the camera's offset, which the camera adds to every pixel: the average count of a frame recorded without light (e.g., with the shutter closed). It is neither the background of the sample nor zero for most cameras.
+   - ``Sensitivity`` is the conversion factor (electrons per analog-to-digital (A/D) count) of the readout mode the movie was recorded with.
+   - Localize the movie as the camera recorded it: background subtraction or rescaling (e.g., to 8 bit) changes the counts, so they no longer convert to photons.
 
    These parameters convert camera counts to photons. The fitted positions may depend on them, but the reported photon counts, background and localization precisions depend directly on them. The maximum-likelihood fit also assumes Poisson photon noise, so it works best with correct absolute photon counts.
 

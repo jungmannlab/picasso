@@ -1633,21 +1633,25 @@ def _check_consecutive_tif(filepath: str) -> list[str]:
 
 
 def _localize_collect_paths(files: str) -> list[str]:
-    """Resolve ``files`` to a list of movie file paths to process."""
+    """Resolve ``files`` to a list of movie file paths to process: the
+    movies of every format Picasso opens (``io.MOVIE_EXTENSIONS``) in a
+    folder, or the files matching a pattern."""
     from glob import glob
-    from os.path import isdir
+    from os.path import isdir, join, splitext
+    from .io import MOVIE_EXTENSIONS
 
     if isdir(files):
         print("Analyzing folder")
+        # the first file of each movie split over several .tif files
         tif_files = _check_consecutive_tif(files)
-        paths = (
-            tif_files
-            + glob(files + "/*.raw")
-            + glob(files + "/*.nd2")
-            + glob(files + "/*.stk")
-            + glob(files + "/*.czi")
-            + glob(files + "/*.lif")
+        others = sorted(
+            path
+            for path in glob(join(files, "*"))
+            if splitext(path)[1].lower() in MOVIE_EXTENSIONS
+            # .tif files are collected series by series above
+            and splitext(path)[1] != ".tif"
         )
+        paths = tif_files + others
         print("A total of {} files detected".format(len(paths)))
     else:
         paths = glob(files)

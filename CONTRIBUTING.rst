@@ -18,9 +18,11 @@ Report Bugs
 
 Report bugs at https://github.com/jungmannlab/picasso/issues.
 
-If you are reporting a bug, please include:
+Many problems are answered in the `FAQ <https://picassosr.readthedocs.io/en/latest/faq.html>`__. If you are reporting a bug, please include:
 
+* The version of Picasso (shown in the title bar of every window) and how you installed it (one-click installer or pip).
 * Your operating system name and version.
+* The log file ``~/.picasso/logs/picasso.log``, which holds the tracebacks of all errors (see `Reporting problems <https://picassosr.readthedocs.io/en/latest/getting-started/installation.html#error-log>`__).
 * Any details about your local setup that might be helpful in troubleshooting.
 * Detailed steps to reproduce the bug.
 
@@ -63,7 +65,7 @@ Here's how to set up ``picasso`` for local development. If you are new to git an
 
     $ git clone git@github.com:your_name_here/picasso.git
 
-3. Follow the installation instructions for developers here: https://github.com/jungmannlab/picasso?tab=readme-ov-file#for-developers-local-editable-installation.
+3. Follow the instructions in the *Developer installation* tab of the `installation guide <https://picassosr.readthedocs.io/en/latest/getting-started/installation.html>`__.
 
 4. Set up ``pre-commit`` hooks. This ensures your code is automatically formatted with ``black`` before each commit::
 

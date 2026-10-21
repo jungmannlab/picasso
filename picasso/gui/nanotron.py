@@ -1131,6 +1131,12 @@ class Window(QtWidgets.QMainWindow):
         export_action.triggered.connect(self.export)
         file_menu.addAction(export_action)
         file_menu.addSeparator()
+        self.user_settings_dialog = lib.UserSettingsDialog(self)
+        picasso_settings_action = file_menu.addAction("Picasso settings...")
+        picasso_settings_action.setIcon(theme.icon("picasso-settings"))
+        picasso_settings_action.triggered.connect(
+            self.user_settings_dialog.show
+        )
         theme.add_menu_action(file_menu)
 
         tools_menu = menu_bar.addMenu("Tools")
