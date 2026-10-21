@@ -74,6 +74,10 @@ Last change: 21-OCT-2026 CEST
 - Fixed: *Align channels* (RCC) failed for channels with different image sizes.
 - Fixed: Render's `Export ROI for Imaris` ignored the position of the .ims movie that localizations were loaded from with `File > Open movie` (single channel), placing the export at the origin instead of over the movie.
 - Fixed: *Undrift by RCC* suggested a segmentation of 1000 frames for movies of 1000 to 3500 frames, which gives fewer than the 4 segments RCC needs, so it failed. It now suggests at most a quarter of the frames, and a segmentation that leaves fewer than 4 segments (also in `picasso undrift` and `picasso.postprocess.undrift`) is explained instead of failing inside RCC.
+- Fixed: *Test clusterer* failed when no cluster was found, instead of saying so, and when the display options or projections were changed before the first test. `picasso.clusterer.find_cluster_centers` failed in the same way for localizations without clusters, e.g., when DBSCAN, HDBSCAN or the SMLM clusterer found none and the cluster centers were to be saved.
+- Fixed: *Analyze cluster* (k-means in picks) started clustering, and failed, when the number of clusters was canceled, and saved the pick properties (`_properties.hdf5`) in the current folder when saving was canceled. Also, the new group ids of the clusters are integers instead of floats.
+- Fixed: showing the FRC plot failed when the FRC calculation it starts was canceled.
+- Fixed: *Export channels in grayscale* with a suffix of another format raised an error instead of naming the possible formats; *Export view manually* left the contrast changed, and its fields unresponsive, when the DPI of a PDF was canceled; the export of z slices of separate channels showed all channels afterwards.
 
 ### Localize
 - New spot identification method: B-spline wavelet segmentation (Izeddin et al., *Opt. Express* 2012), see the [documentation](https://picassosr.readthedocs.io/en/latest/localize/identification.html#localize-wavelet).

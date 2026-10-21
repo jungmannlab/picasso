@@ -3062,7 +3062,7 @@ class ClsDlg3D(lib.Dialog):
         l_locs = locs.copy()
         l_locs["cluster"] = labels
         l_locs_new_group = l_locs.copy()
-        power = np.round(n_clusters / 10) + 1
+        power = int(np.round(n_clusters / 10)) + 1
         l_locs_new_group["group"] = (
             l_locs_new_group["group"] * 10**power + l_locs_new_group["cluster"]
         )
@@ -3249,7 +3249,7 @@ class ClsDlg2D(lib.Dialog):
         l_locs = locs.copy()
         l_locs["cluster"] = labels
         l_locs_new_group = l_locs.copy()
-        power = np.round(n_clusters / 10) + 1
+        power = int(np.round(n_clusters / 10)) + 1
         l_locs_new_group["group"] = (
             l_locs_new_group["group"] * 10**power + l_locs_new_group["cluster"]
         )
@@ -5234,6 +5234,8 @@ class TestClustererView(QtWidgets.QLabel):
 
     def update_scene(self) -> None:
         """Render localizations."""
+        if self.locs is None:  # nothing tested yet
+            return
         if not len(self.locs):
             self._raw_image = None
             self.setText("No clusters found with the current settings.")
@@ -6329,6 +6331,8 @@ class InfoDialog(lib.Dialog):
         """Show FRC plot window."""
         if not self.frc_result:
             self.calculate_frc_resolution()
+            if not self.frc_result:  # canceled
+                return
         self.frc_window = FRCPlotWindow(self)
         self.frc_window.plot(self.frc_result)
         self.frc_window.show()
@@ -10919,9 +10923,11 @@ class SlicerDialog(lib.Dialog):
         self.window.view.update_scene_slicer()
 
     def _export_stack_individually(self, base: str) -> None:
+        checks = self.window.dataset_dialog.checks
+        shown = [check.isChecked() for check in checks]
         # Uncheck all
-        for checks in self.window.dataset_dialog.checks:
-            checks.setChecked(False)
+        for check in checks:
+            check.setChecked(False)
 
         for j in range(len(self.window.view.locs)):
             # load a single channel
@@ -10952,8 +10958,9 @@ class SlicerDialog(lib.Dialog):
                 progress.set_value(i)
             progress.close()
             self.window.dataset_dialog.checks[j].setChecked(False)
-        for checks in self.window.dataset_dialog.checks:
-            checks.setChecked(True)
+        # show the channels that were shown before
+        for check, was_shown in zip(checks, shown):
+            check.setChecked(was_shown)
 
     def _export_stacks_together(self, base: str) -> None:
         progress = lib.ProgressDialog(
@@ -16659,9 +16666,12 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         n_clusters, ok = QtWidgets.QInputDialog.getInt(
             self,
             "Input Dialog",
-            "Enter inital number of clusters:",
+            "Enter initial number of clusters:",
             10,
+            1,
         )
+        if not ok:
+            return removelist, saved_locs, clustered_locs
         for i, pick in enumerate(self._picks):
             reply = 3
             while reply == 3:
@@ -16705,26 +16715,26 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             filter="*.hdf5",
             check_ext=".yaml",
         )
-        if path:
-            saved_locs = pd.concat(saved_locs, ignore_index=True)
-            if saved_locs is not None:
-                pick_info = {
-                    **lib.step_info("Render"),
-                    "Pick Shape": self._pick_shape,
-                }
-                # writes the size entry the current shape actually has,
-                # in nm; polygons and boxes carry their own extent
-                self._add_shape_specific_info(pick_info)
-                io.save_locs(
-                    path, saved_locs, self.infos[channel] + [pick_info]
-                )
+        if not path:
+            return
+        saved_locs = pd.concat(saved_locs, ignore_index=True)
+        pick_info = {
+            **lib.step_info("Render"),
+            "Pick Shape": self._pick_shape,
+        }
+        # writes the size entry the current shape actually has, in nm;
+        # polygons and boxes carry their own extent
+        self._add_shape_specific_info(pick_info)
+        io.save_locs(path, saved_locs, self.infos[channel] + [pick_info])
         # save pick properties
         base, ext = os.path.splitext(path)
         out_path = base + "_properties.hdf5"
         r_max = 2 * max(lib.field_of_view(self.infos[channel]))  # nm
         max_dark, ok = QtWidgets.QInputDialog.getInt(
-            self, "Input Dialog", "Enter gap size:", 3
+            self, "Input Dialog", "Enter gap size:", 3, 0
         )
+        if not ok:
+            return
         out_locs = []
         progress = lib.ProgressDialog(
             "Calculating kinetics", 0, len(clustered_locs), self
@@ -20244,9 +20254,20 @@ class Window(QtWidgets.QMainWindow):
         new_max = old_max * (kwargs["disp_px_size"] / old_disp_px_size) ** 2
         min_spin.blockSignals(True)
         max_spin.blockSignals(True)
-        min_spin.setValue(new_min)
-        max_spin.setValue(new_max)
+        try:
+            min_spin.setValue(new_min)
+            max_spin.setValue(new_max)
+            self._export_view(path, kwargs)
+        finally:  # restore contrast, also when canceled
+            min_spin.setValue(old_min)
+            max_spin.setValue(old_max)
+            min_spin.blockSignals(False)
+            max_spin.blockSignals(False)
 
+    def _export_view(self, path: str, kwargs: dict) -> None:
+        """Render and save the view described by ``kwargs`` (see
+        ``ExportKwargsDialog``) to ``path``, with its metadata and, if
+        the scale bar is not shown, a copy with a scale bar."""
         qimage = self.view.render_scene(cache=False, **kwargs)
         qimage = self.image_overlay_dialog.draw(qimage, kwargs["viewport"])
         qimage = self.view.draw_grid(qimage, kwargs["viewport"])
@@ -20277,12 +20298,6 @@ class Window(QtWidgets.QMainWindow):
             new_path = new_path + "_scalebar" + ext
             self.save_qimage_to_path(new_path, qimage_scale, dpi=dpi)
 
-        # restore contrast
-        min_spin.setValue(old_min)
-        max_spin.setValue(old_max)
-        min_spin.blockSignals(False)
-        max_spin.blockSignals(False)
-
     def export_grayscale(self) -> None:
         """Export each channel in grayscale."""
         if self.no_locs_warning("Export channels in grayscale"):
@@ -20295,10 +20310,14 @@ class Window(QtWidgets.QMainWindow):
             "_grayscale.png",
         )
         if ok:
-            assert suffix.endswith((".png", ".tif", ".pdf", ".svg")), (
-                "Invalid extension. Only .png, .tif, .pdf and .svg are"
-                " allowed."
-            )
+            if not suffix.endswith((".png", ".tif", ".pdf", ".svg")):
+                QtWidgets.QMessageBox.warning(
+                    self,
+                    "Save each channel in grayscale",
+                    f"The suffix {suffix!r} does not end with .png, .tif,"
+                    " .pdf or .svg.",
+                )
+                return
             if suffix.endswith(".pdf"):
                 dpi, ok = QtWidgets.QInputDialog.getInt(
                     self,
@@ -20341,10 +20360,10 @@ class Window(QtWidgets.QMainWindow):
         ext = item.split()[0]
 
         # get save file name
-        if channel is len(self.view.locs_paths) and item == ".hdf for PyME":
+        if channel == len(self.view.locs_paths) and item == ".hdf for PyME":
             # PyME stores all channels in one file (probe column)
             self.export_pyme_all_channels()
-        elif channel is len(self.view.locs_paths):  # all channels
+        elif channel == len(self.view.locs_paths):  # all channels
             base, _ = os.path.splitext(self.view.locs_paths[0])
             suffix, ok = QtWidgets.QInputDialog.getText(
                 self,

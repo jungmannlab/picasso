@@ -855,7 +855,7 @@ def _count_binding_events(
     group_s = group_arr[order]
     frame_s = frame_arr[order]
     new_event = np.empty(len(frame_s), dtype=bool)
-    new_event[0] = True
+    new_event[:1] = True  # no localizations, no events
     new_event[1:] = (group_s[1:] != group_s[:-1]) | (
         (frame_s[1:] - frame_s[:-1]) > 3
     )

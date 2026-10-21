@@ -453,6 +453,17 @@ def test_find_cluster_centers_2d(synth_locs_2d):
     assert (centers["convexhull"] < centers["area"]).all()
 
 
+@pytest.mark.parametrize("synth", ["synth_locs_2d", "synth_locs_3d"])
+def test_find_cluster_centers_of_no_clusters(synth, request):
+    """No clusters (e.g., parameters too strict) give no centers, with
+    the columns of the centers of clusters."""
+    db_locs = _run_dbscan_2d(request.getfixturevalue(synth))
+    centers = clusterer.find_cluster_centers(db_locs)
+    no_centers = clusterer.find_cluster_centers(db_locs.iloc[:0])
+    assert no_centers.empty
+    assert list(no_centers.columns) == list(centers.columns)
+
+
 def test_find_cluster_centers_3d(synth_locs_3d):
     """3D centers expose volume / std_z / z columns, in nm."""
     db_locs = _run_dbscan_3d(synth_locs_3d)
