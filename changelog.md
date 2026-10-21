@@ -95,6 +95,7 @@ Last change: 21-OCT-2026 CEST
 - Imaris `.ims` movies can now be opened on macOS and Linux, not only Windows. Exporting `.ims` files (Render's `Export ROI for Imaris`) remains Windows only. `hdf5plugin` is now installed on all platforms.
 - Every calibration records how its spots were identified, under `Identification`.
 - Fixed: ratiometric multichannel spline fitting ignored the per-pixel sCMOS variance of the camera calibration.
+- Fixed: with an sCMOS camera calibration and a CUDA GPU, spline fits of movies with more than about 1.5-2 million localizations reported wrong localization precisions (`lpx`, `lpy`, `lpz`, ...) beyond the first ~2 million, which were computed with the readout variance of other localizations.
 - Fixed: `Height` and `Width` were swapped in the metadata of non-square `.ims` movies.
 - Fixed drift estimation when adding to database + database building.
 - Fixed: canceling the channel selection when opening a multi-channel IMARIS .ims movie raised an error instead of loading the first channel, as for .czi and .lif.

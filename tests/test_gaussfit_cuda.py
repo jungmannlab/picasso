@@ -304,6 +304,131 @@ class TestNonPositiveModelIsAbandoned:
         np.testing.assert_allclose(fitted[0, 5], theta[5], atol=0.5)
 
 
+class TestNoiseModel:
+    """The sCMOS readout variance, uploaded per chunk alongside the spots.
+
+    The CPU backend is the specification: under a fixed budget in double
+    precision the two must agree exactly. The budget is kept short, as in
+    ``test_gaussfit.TestCpuGpuEquivalence``: a few more iterations near the
+    optimum amplify rounding differences to ~1e-7 with or without a variance,
+    which would hide the algebra behind luck."""
+
+    @staticmethod
+    def _case(model, n=40):
+        spots = TestNoisyBatch._batch(model, n=n, seed=3)
+        rng = np.random.default_rng(1)
+        variance = rng.uniform(1.0, 50.0, spots.shape).astype(np.float32)
+        return spots, _seed(model, spots), variance
+
+    @pytest.mark.parametrize("model", MODELS)
+    @pytest.mark.parametrize("mle", [False, True], ids=["lsq", "mle"])
+    def test_matches_the_cpu_backend(self, model, mle):
+        spots, seed, variance = self._case(model)
+        kwargs = dict(mle=mle, tolerance=0.0, max_iterations=3)
+        cpu = gaussfit.fit_spots(
+            model, spots, seed, variance=variance, **kwargs
+        )
+        gpu = gaussfit_cuda.fit_spots(
+            model,
+            spots,
+            seed,
+            variance=variance,
+            single_precision=False,
+            **kwargs,
+        )
+        np.testing.assert_allclose(gpu[0], cpu[0], rtol=1e-9, atol=1e-9)
+        np.testing.assert_allclose(gpu[1], cpu[1], rtol=1e-9, atol=1e-9)
+        np.testing.assert_array_equal(gpu[2], cpu[2])
+        np.testing.assert_array_equal(gpu[3], cpu[3])
+
+    @pytest.mark.parametrize("model", MODELS)
+    def test_variance_moves_the_mle_fit(self, model):
+        """Guards the comparison above against a variance dropped on both
+        devices alike - under the same budget it uses."""
+        spots, seed, variance = self._case(model)
+        kwargs = dict(mle=True, tolerance=0.0, max_iterations=3)
+        with_noise = gaussfit_cuda.fit_spots(
+            model, spots, seed, variance=variance, **kwargs
+        )[0]
+        without = gaussfit_cuda.fit_spots(model, spots, seed, **kwargs)[0]
+        finite = np.isfinite(with_noise).all(axis=1)
+        finite &= np.isfinite(without).all(axis=1)
+        assert np.abs(with_noise[finite] - without[finite]).max() > 1e-3
+
+    def test_least_squares_ignores_the_variance(self):
+        """The shift cancels in a residual, so least squares never forms it."""
+        model = gaussfit_cuda.ELLIPTIC
+        spots, seed, variance = self._case(model)
+        with_noise = gaussfit_cuda.fit_spots(
+            model, spots, seed, variance=variance
+        )
+        without = gaussfit_cuda.fit_spots(model, spots, seed)
+        for a, b in zip(with_noise, without):
+            np.testing.assert_array_equal(a, b)
+
+    def test_chunking_is_transparent(self, monkeypatch):
+        """Each launch must get the variance rows of its own spots."""
+        model = gaussfit_cuda.ELLIPTIC
+        spots, seed, variance = self._case(model, n=64)
+        one = gaussfit_cuda.fit_spots(
+            model, spots, seed, mle=True, variance=variance
+        )
+        monkeypatch.setattr(lmfit_cuda, "chunk_rows", lambda *a, **k: 7)
+        many = gaussfit_cuda.fit_spots(
+            model, spots, seed, mle=True, variance=variance
+        )
+        for a, b in zip(one, many):
+            np.testing.assert_array_equal(a, b)
+
+    def test_rejects_a_mismatched_variance(self):
+        model = gaussfit_cuda.ELLIPTIC
+        spots, seed, variance = self._case(model, n=4)
+        with pytest.raises(ValueError, match="variance"):
+            gaussfit_cuda.fit_spots(
+                model, spots, seed, mle=True, variance=variance[:, :-1]
+            )
+
+
+class TestAbort:
+    """``abort_callback`` is polled once per launch; a launch cannot be
+    canceled, so a chunk that started always finishes."""
+
+    @staticmethod
+    def _fit(abort, monkeypatch, chunk=8):
+        monkeypatch.setattr(lmfit_cuda, "chunk_rows", lambda *a, **k: chunk)
+        model = gaussfit_cuda.ELLIPTIC
+        spots = TestNoisyBatch._batch(model, n=40)
+        return gaussfit_cuda.fit_spots(
+            model, spots, _seed(model, spots), abort_callback=abort
+        )
+
+    def test_abort_between_chunks_keeps_the_finished_ones(self, monkeypatch):
+        calls = []
+
+        def abort():
+            calls.append(1)
+            return len(calls) > 2
+
+        thetas, chi_squares, _, _ = self._fit(abort, monkeypatch)
+        assert len(calls) == 3
+        # Two chunks of eight ran; the spots never reached keep their
+        # placeholder values.
+        assert np.isfinite(thetas[:16]).any(axis=1).all()
+        assert np.isnan(thetas[16:]).all()
+        assert np.isinf(chi_squares[16:]).all()
+
+    def test_abort_before_any_work(self, monkeypatch):
+        thetas, chi_squares, _, _ = self._fit(lambda: True, monkeypatch)
+        assert np.isnan(thetas).all()
+        assert np.isinf(chi_squares).all()
+
+    def test_a_callback_that_never_fires_changes_nothing(self, monkeypatch):
+        quiet = self._fit(lambda: False, monkeypatch)
+        none = self._fit(None, monkeypatch)
+        for a, b in zip(quiet, none):
+            np.testing.assert_array_equal(a, b)
+
+
 class TestApi:
     def test_kernel_cache(self):
         first = gaussfit_cuda._get_kernel(gaussfit_cuda.ELLIPTIC, True)
@@ -349,6 +474,26 @@ class TestApi:
             gaussfit_cuda.fit_spots(
                 99, np.zeros((1, BOX, BOX), dtype=np.float32), np.zeros((1, 6))
             )
+
+    def test_compiles_no_kernel_for_an_unknown_model(self):
+        with pytest.raises(ValueError, match="Unknown Gaussian model"):
+            gaussfit_cuda._get_kernel(99, True)
+        assert (99, True) not in gaussfit_cuda._KERNEL_CACHE
+
+    @pytest.mark.parametrize("multichannel", [False, True])
+    def test_refuses_without_a_device(self, monkeypatch, multichannel):
+        """An explicit GPU request never silently runs elsewhere."""
+        monkeypatch.setattr(lmfit_cuda, "CUDA_AVAILABLE", False)
+        with pytest.raises(RuntimeError, match="no CUDA-capable GPU"):
+            if multichannel:
+                gaussfit_cuda.fit_spots_multichannel(
+                    *TestMultichannelDeviceBehavior._args(n=2)
+                )
+            else:
+                spots = np.zeros((1, BOX, BOX), dtype=np.float32)
+                gaussfit_cuda.fit_spots(
+                    gaussfit_cuda.ELLIPTIC, spots, np.zeros((1, 6))
+                )
 
     def test_progress_tracker(self):
         model = gaussfit_cuda.ELLIPTIC
@@ -526,6 +671,70 @@ class TestMultichannelCpuGpuEquivalence:
         )
 
         np.testing.assert_allclose(gpu[0], cpu[0], rtol=1e-8, atol=1e-8)
+
+
+class TestMultichannelDeviceBehavior:
+    @staticmethod
+    def _args(n=40):
+        spots, jac, res = _multi_batch(n, [500.0, 220.0], [12.0, 6.0])
+        seed = _multi_seed(spots, False)
+        return gaussfit_cuda.MULTI_KIND_DECOUPLED, spots, jac, res, seed
+
+    def test_chunking_is_transparent(self, monkeypatch):
+        """Each launch must get the Jacobians and residuals of its own
+        spots - a misaligned slice would still fit, just at the wrong
+        position."""
+        args = self._args()
+        rng = np.random.RandomState(0)
+        variance = rng.uniform(1.0, 50.0, args[1].shape).astype(np.float32)
+        one = gaussfit_cuda.fit_spots_multichannel(
+            *args, mle=True, variance=variance
+        )
+        monkeypatch.setattr(lmfit_cuda, "chunk_rows", lambda *a, **k: 7)
+        many = gaussfit_cuda.fit_spots_multichannel(
+            *args, mle=True, variance=variance
+        )
+        for a, b in zip(one, many):
+            np.testing.assert_array_equal(a, b)
+
+    def test_abort_between_chunks_returns_none(self, monkeypatch):
+        """Unlike the single-channel fit, an aborted multichannel fit
+        returns None rather than partly filled arrays."""
+        monkeypatch.setattr(lmfit_cuda, "chunk_rows", lambda *a, **k: 8)
+        calls = []
+
+        def abort():
+            calls.append(1)
+            return len(calls) > 2
+
+        result = gaussfit_cuda.fit_spots_multichannel(
+            *self._args(), abort_callback=abort
+        )
+        assert result is None
+        assert len(calls) == 3
+
+    def test_a_callback_that_never_fires_returns_the_fit(self, monkeypatch):
+        monkeypatch.setattr(lmfit_cuda, "chunk_rows", lambda *a, **k: 8)
+        args = self._args()
+        quiet = gaussfit_cuda.fit_spots_multichannel(
+            *args, abort_callback=lambda: False
+        )
+        plain = gaussfit_cuda.fit_spots_multichannel(*args)
+        for a, b in zip(quiet, plain):
+            np.testing.assert_array_equal(a, b)
+
+    def test_empty_input(self):
+        kind, spots, jac, res, seed = self._args(n=4)
+        tracker = RecordingProgress()
+        thetas, chi_squares, states, iterations = (
+            gaussfit_cuda.fit_spots_multichannel(
+                kind, spots[:0], jac[:0], res[:0], seed[:0], progress=tracker
+            )
+        )
+        assert thetas.shape == (0, seed.shape[1])
+        assert len(chi_squares) == len(states) == len(iterations) == 0
+        assert_phases_complete(tracker, ["Fitting spots"])
+        assert tracker.phases[0]["maximum"] == 0
 
 
 class TestMultichannelKernelCache:

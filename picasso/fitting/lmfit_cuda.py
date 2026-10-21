@@ -175,33 +175,6 @@ def chunk_rows(bytes_per_row: int, work_per_row: int) -> int:
 _gpu_fallback_warned = False
 
 
-def warn_gpu_fallback(exc: Exception) -> None:
-    """Report the first time a GPU fit falls back to the CPU.
-
-    Having no CUDA device at all is not an error and is never reported - the
-    CPU kernels are simply used. This is for the other case: a device is
-    present but the attempt failed (out of memory, driver error), where the
-    results are still correct but a silent fallback would hide a broken device
-    path indefinitely. Warned once per process so a per-chunk failure cannot
-    spam the log.
-
-    Parameters
-    ----------
-    exc : Exception
-        The exception that triggered the fallback; included in the warning.
-    """
-    global _gpu_fallback_warned
-    if _gpu_fallback_warned:
-        return
-    _gpu_fallback_warned = True
-    warnings.warn(
-        f"Fitting on the GPU failed ({exc!r}); falling back to the CPU. "
-        "Results are unaffected, only slower.",
-        RuntimeWarning,
-        stacklevel=3,
-    )
-
-
 def require_cuda() -> None:
     """Raise unless a CUDA device is usable."""
     if not CUDA_AVAILABLE:

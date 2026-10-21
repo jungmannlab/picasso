@@ -2721,28 +2721,37 @@ def _spline_crlb_cuda(
     res = np.ascontiguousarray(res, dtype=np.float64)
     n_channels = coeff.shape[0]
 
-    # The variance patches are the same for every chunk, so upload once. With
-    # no calibration this is a four-byte dummy that only exists to keep the
-    # kernel's argument types stable.
+    # The variance patches are per localization and the kernel indexes them
+    # by the row within the launch, so they are chunked like every other
+    # per-row input. Without a calibration the variance is a four-byte dummy,
+    # uploaded once, that only exists to keep the kernel's argument types
+    # stable.
     use_variance = variance is not None
-    d_variance = cuda.to_device(
-        np.ascontiguousarray(variance, dtype=np.float32)
-        if use_variance
-        else np.zeros((1, 1, 1, 1), dtype=np.float32)
-    )
+    if use_variance:
+        variance = np.ascontiguousarray(variance, dtype=np.float32)
+        d_dummy_variance = None
+    else:
+        d_dummy_variance = cuda.to_device(
+            np.zeros((1, 1, 1, 1), dtype=np.float32)
+        )
     d_coeff = cuda.to_device(np.ascontiguousarray(coeff))
-    # inputs (amp, x, y, [z], offset, per-channel residual) + outputs (crlb
-    # row, status byte)
+    # inputs (amp, x, y, [z], offset, per-channel residual and Jacobian,
+    # variance patches) + outputs (crlb row, status byte)
     n_inputs = 5 if is_3d else 4
-    chunk = min(
-        n_locs,
-        _crlb_chunk_rows(8 * (n_inputs + 6 * n_channels + n_params) + 1),
-    )
+    bytes_per_row = 8 * (n_inputs + 6 * n_channels + n_params) + 1
+    if use_variance:
+        bytes_per_row += 4 * n_channels * box * box
+    chunk = min(n_locs, _crlb_chunk_rows(bytes_per_row))
 
     progress = lib.normalize_progress(progress)
     for start in range(0, n_locs, chunk):
         stop = min(start + chunk, n_locs)
         n = stop - start
+        d_variance = (
+            cuda.to_device(variance[start:stop])
+            if use_variance
+            else d_dummy_variance
+        )
         d_amp = cuda.to_device(amplitude[start:stop])
         d_x = cuda.to_device(x_shift[start:stop])
         d_y = cuda.to_device(y_shift[start:stop])
@@ -2840,26 +2849,32 @@ def _spline_link_xyz_crlb_cuda(
     jac = np.ascontiguousarray(jac, dtype=np.float64)
     res = np.ascontiguousarray(res, dtype=np.float64)
 
-    # The variance patches are the same for every chunk, so upload once. With
-    # no calibration this is a four-byte dummy that only exists to keep the
-    # kernel's argument types stable.
+    # Chunked like every other per-row input; see _spline_crlb_cuda.
     use_variance = variance is not None
-    d_variance = cuda.to_device(
-        np.ascontiguousarray(variance, dtype=np.float32)
-        if use_variance
-        else np.zeros((1, 1, 1, 1), dtype=np.float32)
-    )
+    if use_variance:
+        variance = np.ascontiguousarray(variance, dtype=np.float32)
+        d_dummy_variance = None
+    else:
+        d_dummy_variance = cuda.to_device(
+            np.zeros((1, 1, 1, 1), dtype=np.float32)
+        )
     d_coeff = cuda.to_device(np.ascontiguousarray(coeff))
-    # inputs (x, y, z, photons, bg, per-channel residual) + outputs (crlb row,
-    # status byte)
-    chunk = min(
-        n_locs, _crlb_chunk_rows(8 * (3 + 8 * n_channels + n_params) + 1)
-    )
+    # inputs (x, y, z, photons, bg, per-channel residual and Jacobian,
+    # variance patches) + outputs (crlb row, status byte)
+    bytes_per_row = 8 * (3 + 8 * n_channels + n_params) + 1
+    if use_variance:
+        bytes_per_row += 4 * n_channels * box * box
+    chunk = min(n_locs, _crlb_chunk_rows(bytes_per_row))
 
     progress = lib.normalize_progress(progress)
     for start in range(0, n_locs, chunk):
         stop = min(start + chunk, n_locs)
         n = stop - start
+        d_variance = (
+            cuda.to_device(variance[start:stop])
+            if use_variance
+            else d_dummy_variance
+        )
         d_x = cuda.to_device(x_shift[start:stop])
         d_y = cuda.to_device(y_shift[start:stop])
         d_z = cuda.to_device(z_eval[start:stop])
