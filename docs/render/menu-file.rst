@@ -400,13 +400,13 @@ following columns, in this order (lengths in nm, as in Picasso):
       locs, info = io.import_ts("thunderstorm.csv", pixelsize=130)
 
 
-.. _render-export-frc:
+.. _render-export-imagej:
 
-Export as .txt for FRC
-~~~~~~~~~~~~~~~~~~~~~~
+Export as .txt for ImageJ
+~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Export as .txt file to be used for the fourier ring correlation plugin in
-ImageJ.
+Exports the localizations as a plain ``.txt`` file without a header, with the
+columns ``frame``, ``x`` and ``y`` (in nm), for ImageJ.
 
 .. dropdown:: Python
    :icon: code
