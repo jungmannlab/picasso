@@ -3099,3 +3099,536 @@ class TestPathTooLong:
         monkeypatch.setattr(io.os, "name", "posix")
         io._check_path_length(self._long_path(tmp_path))
         io._check_path_length(str(tmp_path / ("x" * 300)))
+
+
+# ---------------------------------------------------------------------------
+# All channels of .czi / .lif files (load_czi_all / load_lif_all), with the
+# fake readers above
+# ---------------------------------------------------------------------------
+
+
+def test_load_czi_all(tmp_path, monkeypatch):
+    rng = np.random.default_rng(10)
+    data = rng.integers(0, 60000, size=(3, 2, 4, 5), dtype="<u2")
+    _install_fake_czifile(
+        monkeypatch,
+        data,
+        ("T", "C", "Y", "X"),
+        channels={"DAPI": {}, "GFP": {}},
+    )
+    movies, infos = io.load_czi_all(str(tmp_path / "m.czi"))
+    try:
+        assert [info[0]["Channel"] for info in infos] == ["DAPI", "GFP"]
+        for c, movie in enumerate(movies):
+            np.testing.assert_array_equal(movie[2], data[2, c])
+    finally:
+        for movie in movies:
+            movie.close()
+
+
+def test_load_lif_all(tmp_path, monkeypatch):
+    rng = np.random.default_rng(11)
+    data = rng.integers(0, 60000, size=(3, 2, 4, 5), dtype="<u2")
+    image = _FakeLifImage(data, coords={"C": ["red", "green"]})
+    _install_fake_liffile(monkeypatch, [image])
+    movies, infos = io.load_lif_all(str(tmp_path / "m.lif"))
+    try:
+        assert [info[0]["Channel"] for info in infos] == ["red", "green"]
+        for c, movie in enumerate(movies):
+            np.testing.assert_array_equal(movie[1], data[1, c])
+    finally:
+        for movie in movies:
+            movie.close()
+
+
+@pytest.mark.parametrize("load", ["load_czi_all", "load_lif_all"])
+def test_load_all_without_library_raises(load, tmp_path, monkeypatch):
+    monkeypatch.setattr(io, "czifile", None)
+    monkeypatch.setattr(io, "liffile", None)
+    with pytest.raises(ImportError, match="picassosr"):
+        getattr(io, load)(str(tmp_path / "m.movie"))
+
+
+# ---------------------------------------------------------------------------
+# Nikon .nd2 (ND2Movie)
+#
+# The nd2 package cannot write files, so, as for .czi and .lif above, a fake
+# stands in for the small part of ``nd2.ND2File`` that ND2Movie uses. The
+# metadata parsing (the Nikon description text and the metadata structures)
+# runs for real.
+# ---------------------------------------------------------------------------
+
+
+# The description text of a Nikon acquisition: "Key: value" lines, and
+# section headers ("Key:") that nest the lines after them.
+ND2_DESCRIPTION = "\r\n".join(
+    [
+        "Metadata:",
+        "Camera Name: Zyla 4.2",
+        "Camera Settings:",
+        "Readout Rate: 540 MHz",
+        "Readout Mode: Rolling Shutter at 16-bit",
+        "Conversion Gain: Gain 4",
+        "Microscope Settings:",
+        "Nikon Ti2, FilterChanger(Turret-Lo): 2-G561",
+    ]
+)
+
+
+class _FakeDask:
+    """Indexing returns an object with ``compute``, like a dask array."""
+
+    def __init__(self, data):
+        self._data = data
+
+    def __getitem__(self, index):
+        return types.SimpleNamespace(compute=lambda: self._data[index])
+
+
+class _FakeND2File:
+    def __init__(self, data, dims, channel_names=None, text_info=None):
+        self._data = data
+        self.sizes = dict(zip(dims, data.shape))
+        self.dtype = data.dtype
+        names = channel_names or [""] * self.sizes.get("C", 1)
+        self.metadata = types.SimpleNamespace(
+            contents=types.SimpleNamespace(channelCount=len(names)),
+            channels=[
+                types.SimpleNamespace(
+                    channel=types.SimpleNamespace(name=name, index=i),
+                    loops=types.SimpleNamespace(TimeLoop=0),
+                    microscope=types.SimpleNamespace(
+                        objectiveMagnification=100
+                    ),
+                    volume=types.SimpleNamespace(
+                        axesInterpretation=["distance", "distance"]
+                    ),
+                )
+                for i, name in enumerate(names)
+            ],
+        )
+        if text_info is None:
+            text_info = {
+                "description": ND2_DESCRIPTION,
+                "capturing": "Exposure: 100 ms",
+                "optics": "Objective: Apo TIRF 100x",
+                "date": "1/2/2026 10:00:00 AM",
+            }
+        self.text_info = text_info
+        self.custom_data = {}
+        self.attributes = types.SimpleNamespace(_asdict=lambda: {"bits": 16})
+        self.closed = False
+
+    def to_dask(self):
+        return _FakeDask(self._data)
+
+    def close(self):
+        self.closed = True
+
+
+def _install_fake_nd2(monkeypatch, *args, **kwargs):
+    opened = []
+
+    def nd2file(path):
+        opened.append(_FakeND2File(*args, **kwargs))
+        return opened[-1]
+
+    monkeypatch.setattr(io.nd2, "ND2File", nd2file)
+    return opened
+
+
+# A camera configuration that matches the metadata above.
+ND2_CONFIG = {
+    "Cameras": {
+        "Zyla 4.2": {
+            "Pixelsize": 130,
+            "Sensitivity Categories": ["PixelReadoutRate", "ReadoutMode"],
+            "Sensitivity": {
+                "540 MHz": {"Rolling Shutter at 16-bit": 7.18},
+            },
+            "Filter Wavelengths": {"2-G561": 595},
+        }
+    }
+}
+
+
+class TestND2Movie:
+    def test_frames_and_metadata(self, tmp_path, monkeypatch):
+        rng = np.random.default_rng(12)
+        data = rng.integers(0, 60000, size=(4, 6, 6), dtype="<u2")
+        opened = _install_fake_nd2(monkeypatch, data, ("T", "Y", "X"))
+        movie, info = io.load_nd2(str(tmp_path / "m.nd2"))
+        assert len(movie) == 4
+        assert movie.dtype == np.dtype("uint16")
+        np.testing.assert_array_equal(movie[2], data[2])
+        np.testing.assert_array_equal(np.array(list(movie)), data)
+        assert info[0]["Frames"] == 4
+        assert info[0]["Camera"] == "Zyla 4.2"
+        assert info[0]["Picasso Metadata"] == {
+            "Camera": "Zyla 4.2",
+            "PixelReadoutRate": "540 MHz",
+            "ReadoutMode": "Rolling Shutter at 16-bit",
+            "ConversionGain": "Gain 4",
+            "Filter": "2-G561",
+        }
+        nd2_meta = info[0]["nd2 Metadata"]
+        assert nd2_meta["optics"] == {"Objective": "Apo TIRF 100x"}
+        assert nd2_meta["metadata"]["channels"][0]["microscope"] == {
+            "objectiveMagnification": 100
+        }
+        with movie:
+            pass
+        assert opened[-1].closed
+
+    @pytest.mark.xfail(
+        strict=True,
+        reason="bug: ND2Movie.shape is (frames, X, Y), not (frames, Y, X)",
+    )
+    def test_shape_of_a_non_square_movie(self, tmp_path, monkeypatch):
+        data = np.zeros((4, 6, 9), dtype="<u2")
+        _install_fake_nd2(monkeypatch, data, ("T", "Y", "X"))
+        movie, info = io.load_nd2(str(tmp_path / "m.nd2"))
+        assert movie[0].shape == (6, 9)
+        assert (info[0]["Height"], info[0]["Width"]) == (6, 9)
+        assert movie.shape == (4, 6, 9)
+
+    def test_camera_parameters_from_the_configuration(
+        self, tmp_path, monkeypatch
+    ):
+        data = np.zeros((2, 4, 4), dtype="<u2")
+        _install_fake_nd2(monkeypatch, data, ("T", "Y", "X"))
+        movie, _ = io.load_nd2(str(tmp_path / "m.nd2"))
+        parameters = movie.camera_parameters(ND2_CONFIG)
+        assert parameters["camera"] == "Zyla 4.2"
+        assert parameters["cam_index"] == 0
+        assert parameters["Sensitivity"] == {
+            "PixelReadoutRate": "540 MHz",
+            "ReadoutMode": "Rolling Shutter at 16-bit",
+        }
+        with pytest.raises(KeyError, match="not found in config"):
+            movie.camera_parameters({"Cameras": {"Other": {}}})
+
+    def test_all_channels(self, tmp_path, monkeypatch):
+        rng = np.random.default_rng(13)
+        data = rng.integers(0, 60000, size=(3, 2, 4, 4), dtype="<u2")
+        _install_fake_nd2(
+            monkeypatch,
+            data,
+            ("T", "C", "Y", "X"),
+            channel_names=["640", "561"],
+        )
+        movies, infos = io.load_nd2_all(str(tmp_path / "m.nd2"))
+        assert [info[0]["Channel"] for info in infos] == ["640", "561"]
+        for c, movie in enumerate(movies):
+            np.testing.assert_array_equal(movie[1], data[1, c])
+
+    def test_unnamed_channels_are_numbered(self, tmp_path, monkeypatch):
+        data = np.zeros((2, 2, 4, 4), dtype="<u2")
+        _install_fake_nd2(monkeypatch, data, ("T", "C", "Y", "X"))
+        _, infos = io.load_nd2_all(str(tmp_path / "m.nd2"))
+        assert [info[0]["Channel"] for info in infos] == [
+            "Channel 0",
+            "Channel 1",
+        ]
+
+    def test_a_z_stack_is_read_along_z(self, tmp_path, monkeypatch):
+        rng = np.random.default_rng(14)
+        data = rng.integers(0, 60000, size=(5, 4, 4), dtype="<u2")
+        _install_fake_nd2(monkeypatch, data, ("Z", "Y", "X"))
+        movie, info = io.load_nd2(str(tmp_path / "m.nd2"))
+        assert info[0]["Frames"] == 5
+        np.testing.assert_array_equal(movie[4], data[4])
+
+    @pytest.mark.parametrize(
+        "dims, message",
+        [
+            (("T", "Y"), "Required dimension X"),
+            (("C", "Y", "X"), "Neither dimension T nor Z"),
+            (("T", "Z", "Y", "X"), "unsupported dimensions"),
+        ],
+    )
+    def test_unsupported_dimensions(
+        self, dims, message, tmp_path, monkeypatch
+    ):
+        data = np.zeros((2,) * len(dims), dtype="<u2")
+        _install_fake_nd2(monkeypatch, data, dims)
+        with pytest.raises(KeyError, match=message):
+            io.load_nd2(str(tmp_path / "m.nd2"))
+
+    def test_unreadable_metadata_asks_for_it(self, tmp_path, monkeypatch):
+        data = np.zeros((3, 4, 4), dtype="<u2")
+        _install_fake_nd2(monkeypatch, data, ("T", "Y", "X"), text_info=None)
+        monkeypatch.setattr(
+            io.ND2Movie,
+            "get_metadata",
+            lambda self, nd2file: (_ for _ in ()).throw(KeyError("broken")),
+        )
+        asked = {}
+
+        def prompt(partial):
+            asked.update(partial)
+            return {**partial, "Pixelsize": 130}, False
+
+        movie, info = io.load_nd2(str(tmp_path / "m.nd2"), prompt_info=prompt)
+        assert asked["Frames"] == 3
+        assert info[0]["Pixelsize"] == 130
+        assert io.load_nd2(str(tmp_path / "m.nd2"), lambda p: None) is None
+
+    def test_cannot_be_written(self, tmp_path, monkeypatch):
+        data = np.zeros((2, 4, 4), dtype="<u2")
+        _install_fake_nd2(monkeypatch, data, ("T", "Y", "X"))
+        movie, _ = io.load_nd2(str(tmp_path / "m.nd2"))
+        with pytest.raises(NotImplementedError):
+            movie.tofile(None)
+
+
+def test_nikon_text_nests_under_section_headers():
+    text = "A:\r\nB: 1\r\nC:\r\nD: 2\r\nE: F: 3\r\nG: H: I: 4"
+    assert io.ND2Movie.nikontext_to_dict(text) == {
+        "A": {
+            "B": "1",
+            "C": {
+                "D": "2",
+                "E": {
+                    "F": "3",
+                    "G": {"H": "G: H: I: 4"},
+                },
+            },
+        }
+    }
+
+
+# ---------------------------------------------------------------------------
+# MetaMorph .stk (STKMovie, STKMultiMovie)
+#
+# tifffile reads STK files but cannot write them, so _write_stk writes the
+# few TIFF and MetaMorph (UIC) tags that STKMovie needs by hand.
+# ---------------------------------------------------------------------------
+
+
+def _write_stk(path, movie: np.ndarray, calibration=None) -> str:
+    """Write ``movie`` (``(n, h, w)`` uint16) as a little-endian
+    MetaMorph STK file: one image file directory (IFD) whose strip holds
+    the first plane, the other planes right after it, the UIC1 tag and
+    the UIC2 tag holding the number of planes. ``calibration`` is
+    ``(value, units)`` of the spatial calibration, e.g., ``(0.13, "um")``.
+    """
+    import struct
+
+    n, h, w = movie.shape
+    pixels = movie.astype("<u2").tobytes()
+    data_offset = 8  # after the TIFF header
+    uic2_offset = data_offset + len(pixels)
+    uic2 = np.zeros((n, 6), "<u4")
+    uic2[:, 1] = 1  # denominator of each plane's z distance
+    blocks = pixels + uic2.tobytes()
+    entries = [
+        (256, 4, 1, w),  # ImageWidth
+        (257, 4, 1, h),  # ImageLength
+        (258, 3, 1, 16),  # BitsPerSample
+        (259, 3, 1, 1),  # Compression: none
+        (262, 3, 1, 1),  # PhotometricInterpretation: black is zero
+        (273, 4, 1, data_offset),  # StripOffsets
+        (277, 3, 1, 1),  # SamplesPerPixel
+        (278, 4, 1, h),  # RowsPerStrip
+        (279, 4, 1, h * w * 2),  # StripByteCounts
+        (33629, 5, n, uic2_offset),  # UIC2Tag: one entry per plane
+    ]
+    # UIC1Tag, which tifffile identifies STK files by: (id, value) pairs;
+    # SpatialCalibration (3) and, if on, XCalibration (4), YCalibration (5)
+    # and CalibrationUnits (6), which point to their values
+    if calibration is None:
+        pairs = struct.pack("<2I", 3, 0)
+    else:
+        value, units = calibration
+        position = data_offset + len(blocks)
+        rational = struct.pack("<II", int(round(value * 1e6)), 1_000_000)
+        pascal = struct.pack("<I", len(units) + 1) + units.encode() + b"\0"
+        pairs = struct.pack(
+            "<8I", 3, 1, 4, position, 5, position, 6, position + 8
+        )
+        blocks += rational + pascal
+    entries.append((33628, 4, len(pairs) // 8, data_offset + len(blocks)))
+    blocks += pairs
+    ifd_offset = data_offset + len(blocks)
+    ifd_offset += ifd_offset % 2  # IFDs start on a word boundary
+    ifd = struct.pack("<H", len(entries))
+    for code, dtype, count, value in sorted(entries):
+        if dtype == 3:  # SHORT: left-justified in the 4 value bytes
+            ifd += struct.pack("<HHIHH", code, dtype, count, value, 0)
+        else:
+            ifd += struct.pack("<HHII", code, dtype, count, value)
+    ifd += struct.pack("<I", 0)  # no next IFD
+    with open(path, "wb") as f:
+        f.write(b"II*\0" + struct.pack("<I", ifd_offset))
+        f.write(blocks)
+        f.write(b"\0" * (ifd_offset - data_offset - len(blocks)))
+        f.write(ifd)
+    return str(path)
+
+
+@pytest.fixture
+def stk_movie():
+    rng = np.random.default_rng(15)
+    return rng.integers(0, 60000, size=(5, 6, 7), dtype="<u2")
+
+
+class TestSTKMovie:
+    def test_frames(self, stk_movie, tmp_path):
+        path = _write_stk(tmp_path / "m.stk", stk_movie)
+        with io.STKMovie(path) as movie:
+            assert movie.shape == (5, 6, 7)
+            assert len(movie) == 5
+            assert movie.dtype == np.dtype("uint16")
+            np.testing.assert_array_equal(movie[2], stk_movie[2])
+            np.testing.assert_array_equal(movie[-1], stk_movie[-1])
+            np.testing.assert_array_equal(movie[...], stk_movie)
+            np.testing.assert_array_equal(movie[1:4], stk_movie[1:4])
+            np.testing.assert_array_equal(movie[3, 1], stk_movie[3, 1])
+            np.testing.assert_array_equal(np.array(list(movie)), stk_movie)
+            with pytest.raises(IndexError, match="out of range"):
+                movie[5]
+
+    @pytest.mark.xfail(
+        strict=True,
+        reason="bug: STKMovie[slice, ...] calls np.issubdtype on the slice "
+        "before checking for one and raises TypeError",
+    )
+    def test_slice_of_frames_and_rows(self, stk_movie, tmp_path):
+        path = _write_stk(tmp_path / "m.stk", stk_movie)
+        with io.STKMovie(path) as movie:
+            np.testing.assert_array_equal(movie[1:4, 2:5], stk_movie[1:4, 2:5])
+
+    @pytest.mark.parametrize(
+        "calibration, pixelsize",
+        [(None, None), ((0.13, "um"), 130.0), ((107.0, "nm"), 107.0)],
+    )
+    def test_info(self, calibration, pixelsize, stk_movie, tmp_path):
+        path = _write_stk(tmp_path / "m.stk", stk_movie, calibration)
+        with io.STKMovie(path) as movie:
+            info = movie.info()
+        assert (info["Frames"], info["Height"], info["Width"]) == (5, 6, 7)
+        assert info["Data Type"] == "uint16"
+        assert info.get("Pixelsize") == pytest.approx(pixelsize)
+
+    def test_tofile_writes_the_raw_frames(self, stk_movie, tmp_path):
+        path = _write_stk(tmp_path / "m.stk", stk_movie)
+        out = tmp_path / "m.raw"
+        with io.STKMovie(path) as movie, open(out, "wb") as f:
+            movie.tofile(f, byte_order="<")
+        written = np.fromfile(out, dtype="<u2").reshape(stk_movie.shape)
+        np.testing.assert_array_equal(written, stk_movie)
+
+    def test_a_plain_tiff_is_rejected(self, stk_movie, tmp_path):
+        path = tmp_path / "m.tif"
+        tifffile.imwrite(path, stk_movie)
+        with pytest.raises(ValueError, match="not appear to be a MetaMorph"):
+            io.STKMovie(str(path))
+
+
+class TestSTKMultiMovie:
+    @pytest.fixture
+    def parts(self, stk_movie, tmp_path):
+        """A movie saved in three numbered parts of 5, 5 and 2 frames."""
+        rng = np.random.default_rng(16)
+        movies = [
+            stk_movie,
+            rng.integers(0, 60000, size=(5, 6, 7), dtype="<u2"),
+            rng.integers(0, 60000, size=(2, 6, 7), dtype="<u2"),
+        ]
+        for k, movie in enumerate(movies):
+            _write_stk(tmp_path / f"cell_{k:03d}.stk", movie)
+        (tmp_path / "other_001.stk").write_bytes(b"")  # not one of them
+        return movies
+
+    def test_numbered_parts_from_the_one_opened(self, parts, tmp_path):
+        movie, info = io.load_stk(str(tmp_path / "cell_001.stk"))
+        try:
+            expected = np.concatenate(parts[1:])
+            assert movie.shape == expected.shape
+            assert info[0]["Frames"] == 7
+            # frame 5 is the first frame of the third part
+            np.testing.assert_array_equal(movie[5], expected[5])
+            np.testing.assert_array_equal(movie[-1], expected[-1])
+            np.testing.assert_array_equal(movie[...], expected)
+            np.testing.assert_array_equal(movie[3:6, 1], expected[3:6, 1])
+            with pytest.raises(IndexError):
+                movie[7]
+        finally:
+            movie.close()
+
+    def test_tofile_writes_every_part(self, parts, tmp_path):
+        out = tmp_path / "m.raw"
+        with io.STKMultiMovie(str(tmp_path / "cell_000.stk")) as movie:
+            with open(out, "wb") as f:
+                movie.tofile(f, byte_order="<")
+        written = np.fromfile(out, dtype="<u2").reshape(-1, 6, 7)
+        np.testing.assert_array_equal(written, np.concatenate(parts))
+
+    def test_a_file_without_a_number_is_read_alone(self, stk_movie, tmp_path):
+        _write_stk(tmp_path / "cell.stk", stk_movie)
+        _write_stk(tmp_path / "cell_001.stk", stk_movie)
+        movie, info = io.load_movie(str(tmp_path / "cell.stk"))
+        try:
+            assert info[0]["Frames"] == 5
+        finally:
+            movie.close()
+
+
+# ---------------------------------------------------------------------------
+# Odds and ends
+# ---------------------------------------------------------------------------
+
+
+def test_a_truncated_file_is_reported_as_incomplete(locs, info, tmp_path):
+    path = str(tmp_path / "locs.hdf5")
+    io.save_locs(path, locs, info)
+    size = os.path.getsize(path)
+    with open(path, "r+b") as f:
+        f.truncate(size // 2)  # e.g., still being copied
+    with pytest.raises(OSError, match="is incomplete"):
+        io.load_locs(path)
+
+
+@pytest.mark.parametrize(
+    "byteorder",
+    [
+        "<",
+        pytest.param(
+            ">",
+            marks=pytest.mark.xfail(
+                strict=True,
+                reason="bug: TiffMap.tofile byteswaps frames that get_frame "
+                "already converted to the native byte order",
+            ),
+        ),
+    ],
+)
+def test_tif_tofile_writes_the_raw_frames(byteorder, tmp_path):
+    rng = np.random.default_rng(17)
+    data = rng.integers(0, 60000, size=(4, 5, 6), dtype="<u2")
+    path = tmp_path / "m.tif"
+    _write_tif_stack(path, data, byteorder=byteorder)
+    movie, _ = io.load_tif(str(path))
+    out = tmp_path / "m.raw"
+    try:
+        with open(out, "wb") as f:
+            movie.tofile(f, byte_order="<")
+    finally:
+        movie.close()
+    written = np.fromfile(out, dtype="<u2").reshape(data.shape)
+    np.testing.assert_array_equal(written, data)
+
+
+def test_save_config(tmp_path, monkeypatch):
+    import picasso
+
+    directory = tmp_path / "config"
+    monkeypatch.setattr(picasso, "user_config_dir", lambda: str(directory))
+    monkeypatch.setattr(
+        picasso, "config_filename", lambda: str(directory / "config.yaml")
+    )
+    config = {"Cameras": {"Zyla 4.2": {"Pixelsize": 130, "Baseline": 100}}}
+    io.save_config(config)
+    with open(directory / "config.yaml") as f:
+        assert yaml.safe_load(f) == config

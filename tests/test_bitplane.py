@@ -181,6 +181,15 @@ class TestLoadIMS:
         _, info = io.load_ims(str(path))
         assert info[0]["Channel"] == "Channel 3"
 
+    def test_all_channels(self, two_channels):
+        path, movies = two_channels
+        loaded, infos = io.load_ims_all(path)
+        assert [info[0]["Channel"] for info in infos] == list(movies)
+        for movie, expected in zip(loaded, movies.values()):
+            assert len(movie) == len(expected)
+            for frame in range(len(expected)):
+                np.testing.assert_array_equal(movie[frame], expected[frame])
+
 
 class TestImageExtents:
     def test_defaults_without_ims_metadata(self):
