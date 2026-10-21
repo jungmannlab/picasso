@@ -1,3 +1,4 @@
+import os
 import sqlite3
 from contextlib import closing
 
@@ -76,6 +77,44 @@ def fetch_db():
     if len(df):
         df = df.sort_values("file_created")
     return df
+
+
+def get_file_family(path: str) -> tuple[list[str], str]:
+    """Find the localization files that belong to a movie.
+
+    Picasso names the files it derives from a movie after the movie
+    without its extension, followed by ``_`` (e.g., ``movie_locs.hdf5``
+    and ``movie_locs_undrift.hdf5`` for ``movie.raw``, or
+    ``Pos0.ome_locs.hdf5`` for ``Pos0.ome.tif``). Files of other movies
+    whose names merely start the same (``movie10_locs.hdf5``) are not
+    part of the family.
+
+    Parameters
+    ----------
+    path : str
+        Path to the movie (or to a localization file).
+
+    Returns
+    -------
+    files : list of str
+        Names of the ``.hdf5`` files of the family, sorted.
+    folder : str
+        The folder they are in.
+
+    Raises
+    ------
+    FileNotFoundError
+        If the folder does not exist.
+    """
+    folder = os.path.dirname(path)
+    base = os.path.splitext(os.path.basename(path))[0]
+    files = sorted(
+        name
+        for name in os.listdir(folder or ".")
+        if name.endswith(".hdf5")
+        and (name == base + ".hdf5" or name.startswith(base + "_"))
+    )
+    return files, folder
 
 
 def fetch_watcher():

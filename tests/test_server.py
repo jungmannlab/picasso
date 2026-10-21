@@ -296,3 +296,226 @@ def test_watchers_are_added_and_replaced(database, helper):
     assert df["started"].iloc[1] == datetime(2026, 10, 1, 9, 2)
     helper.write_table(df.iloc[1:], "watcher", if_exists="replace")
     assert helper.fetch_watcher()["process id"].tolist() == [2]
+
+
+# ---------------------------------------------------------------------------
+# The data functions of the pages (no Streamlit app is run)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def page(helper):
+    """Import a page of Picasso Server (``history``, ``compare``,
+    ``status``, ...) as Streamlit runs it."""
+    return importlib.import_module
+
+
+def _touch(folder, *names):
+    for name in names:
+        (folder / name).write_text("")
+
+
+class TestFileFamily:
+    def test_files_derived_from_the_movie(self, helper, tmp_path):
+        _touch(
+            tmp_path,
+            "movie.raw",
+            "movie_locs.hdf5",
+            "movie_locs_undrift.hdf5",
+            "movie_pg_1_locs.hdf5",
+            "movie_locs.yaml",
+            "movie10_locs.hdf5",  # another movie
+            "other_locs.hdf5",
+        )
+        files, folder = helper.get_file_family(str(tmp_path / "movie.raw"))
+        assert files == [
+            "movie_locs.hdf5",
+            "movie_locs_undrift.hdf5",
+            "movie_pg_1_locs.hdf5",
+        ]
+        assert folder == str(tmp_path)
+
+    def test_ome_tif(self, helper, tmp_path):
+        # Picasso names the localizations after the movie without .tif
+        _touch(tmp_path, "Pos0.ome_locs.hdf5", "Pos0_1.ome_locs.hdf5")
+        files, _ = helper.get_file_family(str(tmp_path / "Pos0.ome.tif"))
+        assert files == ["Pos0.ome_locs.hdf5"]
+
+    def test_dots_in_the_name(self, helper, tmp_path):
+        _touch(
+            tmp_path, "2026.01.05_cell_locs.hdf5", "2026.01.05_dish_locs.hdf5"
+        )
+        files, _ = helper.get_file_family(
+            str(tmp_path / "2026.01.05_cell.raw")
+        )
+        assert files == ["2026.01.05_cell_locs.hdf5"]
+
+    def test_a_localization_file_itself(self, helper, tmp_path):
+        _touch(tmp_path, "locs.hdf5", "locs_undrift.hdf5", "locs2.hdf5")
+        files, _ = helper.get_file_family(str(tmp_path / "locs.hdf5"))
+        assert files == ["locs.hdf5", "locs_undrift.hdf5"]
+
+    def test_moved_folder(self, helper, tmp_path):
+        with pytest.raises(FileNotFoundError):
+            helper.get_file_family(str(tmp_path / "gone" / "movie.raw"))
+
+
+class TestTagFilter:
+    @pytest.mark.parametrize(
+        "text, expected",
+        [
+            ("a", (["a"], [])),
+            ("a&b", (["a", "b"], [])),
+            ("a&b|c", (["a", "b"], ["c"])),
+            ("a|b|c", (["a"], ["b", "c"])),
+            ("a|b&c", (["a", "c"], ["b"])),
+            ("|c", ([], ["c"])),
+            ("a|", (["a"], [])),
+            ("&", ([], [])),
+        ],
+    )
+    def test_parse_input(self, page, text, expected):
+        assert page("history").parse_input(text) == expected
+
+    NAMES = ["cell_r1.raw", "cell_r2.raw", "dish_r1.raw", "dish_r2.raw"]
+
+    @pytest.mark.parametrize(
+        "to_add, to_exclude, expected",
+        [
+            (["cell"], [], ["cell_r1.raw", "cell_r2.raw"]),
+            (
+                ["cell", "r1"],
+                [],
+                ["cell_r1.raw", "cell_r2.raw", "dish_r1.raw"],
+            ),
+            (["cell"], ["r2"], ["cell_r1.raw"]),
+            ([], ["cell"], ["dish_r1.raw", "dish_r2.raw"]),
+            ([], [], NAMES),
+        ],
+    )
+    def test_filter_by_tags(self, page, to_add, to_exclude, expected):
+        df = pd.DataFrame({"filename": self.NAMES})
+        filtered = page("history").filter_by_tags(df, to_add, to_exclude)
+        assert filtered["filename"].tolist() == expected
+
+
+class TestFilterEntries:
+    @pytest.fixture
+    def entries(self):
+        return pd.DataFrame(
+            {
+                "filename": ["a_r1.raw", "b_r1.raw", "c_r2.raw", "d_r1.raw"],
+                "file_created": [
+                    datetime(2026, 1, 1, 9),
+                    datetime(2026, 1, 2, 23, 59),
+                    datetime(2026, 1, 3, 0, 0),
+                    datetime(2026, 1, 4, 14),
+                ],
+            }
+        )
+
+    def test_both_days_are_included(self, page, entries):
+        from datetime import date
+
+        filtered = page("history").filter_entries(
+            entries, date(2026, 1, 2), date(2026, 1, 3)
+        )
+        assert filtered["filename"].tolist() == ["b_r1.raw", "c_r2.raw"]
+
+    def test_the_whole_range_keeps_everything(self, page, entries):
+        filtered = page("history").filter_entries(
+            entries,
+            entries["file_created"].min().date(),
+            entries["file_created"].max().date(),
+        )
+        assert len(filtered) == len(entries)
+
+    def test_tags_and_dates(self, page, entries):
+        from datetime import date
+
+        filtered = page("history").filter_entries(
+            entries, date(2026, 1, 2), date(2026, 1, 4), "r1 | b"
+        )
+        assert filtered["filename"].tolist() == ["d_r1.raw"]
+
+
+@pytest.mark.parametrize(
+    "groups, expected",
+    [
+        ([""], "None"),  # nothing entered
+        (["dish"], "None"),
+        (["cell", "r1"], "r1"),  # the last match
+        (["cell", ""], "cell"),
+    ],
+)
+def test_check_group(page, groups, expected):
+    assert page("history").check_group("cell_r1.raw", groups) == expected
+
+
+def test_convert_df(page):
+    df = pd.DataFrame({"filename": ["a.raw"], "n_locs": [3]})
+    csv = page("history").convert_df(df)
+    assert csv.decode("utf-8").splitlines() == [
+        ",filename,n_locs",
+        "0,a.raw,3",
+    ]
+
+
+class TestComparePlotData:
+    def test_locs_per_frame_counts_empty_frames(self, page):
+        locs = pd.DataFrame({"frame": [0, 0, 0, 2, 5, 5]})
+        counts = page("compare").locs_per_frame(locs, smooth=1)
+        assert counts["frame"].tolist() == [0, 1, 2, 3, 4, 5]
+        assert counts["count"].tolist() == [3, 0, 1, 0, 0, 2]
+
+    def test_locs_per_frame_is_smoothed(self, page):
+        locs = pd.DataFrame({"frame": [0, 0, 1, 1, 1, 1, 3, 3]})
+        counts = page("compare").locs_per_frame(locs, smooth=2)
+        assert np.isnan(counts["count"].iloc[0])
+        assert counts["count"].tolist()[1:] == [3.0, 2.0, 1.0]
+
+    def test_locs_per_frame_of_no_localizations(self, page):
+        counts = page("compare").locs_per_frame(
+            pd.DataFrame({"frame": []}), smooth=10
+        )
+        assert counts.empty
+
+    def test_histograms_share_the_bins(self, page):
+        values = {
+            "a.hdf5": np.array([0.5, 1.5, 1.6, 3.9]),
+            "b.hdf5": np.array([2.5, 9.0]),  # 9 is outside the range
+        }
+        table = page("compare").histograms(values, "sx", 0.0, 4.0, 4)
+        a = table[table["file"] == "a.hdf5"]
+        b = table[table["file"] == "b.hdf5"]
+        assert a["sx"].tolist() == [0.5, 1.5, 2.5, 3.5]  # bin centers
+        assert a["count"].tolist() == [1, 2, 0, 1]
+        assert b["count"].tolist() == [0, 0, 1, 0]
+
+    def test_load_file_names_the_file(self, page, locs, info, tmp_path):
+        from picasso import io
+
+        path = tmp_path / "movie_locs.hdf5"
+        io.save_locs(str(path), locs, info)
+        loaded, _ = page("compare").load_file(str(path))
+        assert len(loaded) == len(locs)
+        assert (loaded["file"] == "movie_locs.hdf5").all()
+
+
+class TestStatus:
+    def test_check_file(self, page, tmp_path):
+        status = page("status")
+        _touch(tmp_path, "movie.raw", "movie_locs.hdf5", "other.raw")
+        assert status.check_file(str(tmp_path / "movie.raw"))
+        assert not status.check_file(str(tmp_path / "other.raw"))
+        assert status.check_file(str(tmp_path / "movie.ome.tif")) is False
+
+    def test_check_file_of_an_ome_tif(self, page, tmp_path):
+        _touch(tmp_path, "Pos0.ome_locs.hdf5")
+        assert page("status").check_file(str(tmp_path / "Pos0.ome.tif"))
+
+    def test_escape_markdown(self, page):
+        escape = page("status").escape_markdown
+        assert escape("C:\\Users\\me") == "C:\\\\Users\\\\me"
+        assert escape("a_b*[c](d).e") == "a\\_b\\*\\[c\\]\\(d\\)\\.e"
+        assert escape("plain") == "plain"

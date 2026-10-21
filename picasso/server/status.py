@@ -51,7 +51,7 @@ def status():  # noqa: C901
 
     with st.expander("Getting started"):
         st.write(
-            "Picasso server allows to monitor perfomance of your "
+            "Picasso server allows to monitor performance of your "
             "superresolution runs. By selecting `Estimate and add to database`"
             " in localize, summary statistics of a run will be stored in a "
             "local database in the picasso user folder ("
@@ -99,11 +99,11 @@ def status():  # noqa: C901
             " \n- Enter the path of a image stack (`.raw`, `.ome.tif`) or a "
             "folder with multiple image stacks."
             " \n- All files that were reconstructed (i.e. have a `_locs.hdf5`"
-            "-file) will be considered ."
+            "-file) will be considered."
             " \n- Drift will only be added if a undrifted file `_undrift.hdf5`"
             " is present."
             " \n- Files that are already in the database will be ignored."
-            " \n- Consectuive files (`Pos0.ome.tif`, `Pos0_1.ome.tif`, "
+            " \n- Consecutive files (`Pos0.ome.tif`, `Pos0_1.ome.tif`, "
             "`Pos0_2.ome.tif`) will be treated as one."
         )
         path = st.text_input("Enter file path or folder:")
@@ -111,13 +111,8 @@ def status():  # noqa: C901
         if check_file(path) & path.endswith((".raw", ".ome.tif", ".ims")):
 
             if path not in df["filename"].tolist():
-                base, ext = os.path.splitext(path)
-                target = base + "_locs.hdf5"
-
-                if not os.path.isfile(target):
-                    st.error(f"File {target} does not exist.")
-                else:
-                    file_hdf = target
+                # exists, see check_file
+                file_hdf = os.path.splitext(path)[0] + "_locs.hdf5"
 
                 with st.spinner(f"Fetching summary from {file_hdf}."):
                     summary = localize.get_file_summary(
@@ -166,7 +161,7 @@ def status():  # noqa: C901
                             ).T
                             all_df.append(df_)
                         else:
-                            st.error(f"File {target} does not exist.")
+                            st.error(f"File {file_hdf} does not exist.")
                     pbar.progress(int((idx + 1) / (n_files) * 100))
 
                 if len(all_df) > 0:

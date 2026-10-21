@@ -1,5 +1,5 @@
 import streamlit as st
-from helper import fetch_db
+from helper import fetch_db, get_file_family
 import pandas as pd
 import os
 import numpy as np
@@ -77,16 +77,10 @@ def preview():
             raise ValueError("no files in the database")
 
         file = st.selectbox("Select file", df["filename"].unique())
-        # Find files in familiy
-        base = os.path.split(file)[1].split(".")[0]
         folder = os.path.dirname(file)
 
         if os.path.isdir(folder):
-
-            files = os.listdir(folder)
-            files = [
-                f for f in files if f.startswith(base) and f.endswith(".hdf5")
-            ]
+            files, _ = get_file_family(file)
 
             hdf_file = st.selectbox("Select hdf file", [None] + files)
 

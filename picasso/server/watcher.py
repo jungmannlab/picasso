@@ -347,7 +347,7 @@ def check_new_and_process(  # noqa: C901
             except Exception as e:
                 print_to_file(
                     logfile,
-                    f"{datetime.now()} Exception {e} occured.",
+                    f"{datetime.now()} Exception {e} occurred.",
                 )
 
             processed[file] = True
