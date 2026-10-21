@@ -293,6 +293,9 @@ class PluginStoreDialog(QtWidgets.QDialog):
         self.app_name = app_name
         self.state = load_state()
         self.manifest: list[dict] = []
+        # whether the manifest was fetched; without it, every installed
+        # plugin would look dropped from the registry
+        self.online = False
 
         self.setWindowTitle("Online plugins")
         self.resize(900, 500)
@@ -353,6 +356,7 @@ class PluginStoreDialog(QtWidgets.QDialog):
         )
         try:
             self.manifest = fetch_manifest()
+            self.online = True
             self.status_label.setText(
                 f"Plugins available from {REPO}. Downloads are checked "
                 "against the hash published in the registry, but a plugin "
@@ -361,6 +365,7 @@ class PluginStoreDialog(QtWidgets.QDialog):
             )
         except Exception as exc:  # noqa: BLE001 - surfaced to the user
             self.manifest = []
+            self.online = False
             self.status_label.setText(
                 "Could not reach the online plugin registry "
                 f"({exc}). Check your connection and press Refresh."
@@ -392,6 +397,12 @@ class PluginStoreDialog(QtWidgets.QDialog):
         self.table.setRowCount(len(entries))
         for row, entry in enumerate(entries):
             status = status_for(entry, self.state)
+            description = entry.get("description", "")
+            status_text = _STATUS_TEXT.get(status, status)
+            if status == ORPHAN and not self.online:
+                # not known to be unlisted: the registry was not reached
+                description = "(the online registry could not be reached)"
+                status_text = _STATUS_TEXT[UP_TO_DATE]
 
             name_item = QtWidgets.QTableWidgetItem(
                 str(entry.get("display_name", entry["id"]))
@@ -414,10 +425,9 @@ class PluginStoreDialog(QtWidgets.QDialog):
             self.table.setItem(
                 row,
                 2,
-                QtWidgets.QTableWidgetItem(entry.get("description", "")),
+                QtWidgets.QTableWidgetItem(description),
             )
 
-            status_text = _STATUS_TEXT.get(status, status)
             installed = self.state["plugins"].get(entry["id"])
             if status == UPDATE_AVAILABLE and installed:
                 status_text += f" ({installed.get('version')} → {version})"
@@ -662,7 +672,31 @@ class PluginStoreDialog(QtWidgets.QDialog):
         self._reload_app()
         self._populate()
 
+    def _confirm_uninstall(self, entry: dict) -> bool:
+        """Confirm deleting a plugin's file, saying when it cannot be
+        downloaded again."""
+        name = entry.get("display_name", entry["id"])
+        text = f"Uninstall '{name}'? Its file is deleted from your plugins "
+        if entry.get("_orphan") and self.online:
+            text += (
+                "folder.\n\nThis plugin is no longer in the online registry, "
+                "so it cannot be installed again from here."
+            )
+        else:
+            text += "folder, including any changes you made to it."
+        reply = QtWidgets.QMessageBox.question(
+            self,
+            "Uninstall plugin?",
+            text,
+            QtWidgets.QMessageBox.StandardButton.Yes
+            | QtWidgets.QMessageBox.StandardButton.No,
+            QtWidgets.QMessageBox.StandardButton.No,
+        )
+        return reply == QtWidgets.QMessageBox.StandardButton.Yes
+
     def _uninstall(self, entry: dict) -> None:
+        if not self._confirm_uninstall(entry):
+            return
         uninstall(entry["id"], self.state)
         self._reload_app()
         self._populate()

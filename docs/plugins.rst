@@ -34,8 +34,9 @@ The easiest way to get plugins is the built-in store: open
   `picasso_plugins registry <https://github.com/jungmannlab/picasso_plugins>`_,
   filtered to the app you are using (tick *Show plugins for all Picasso apps*
   to see the rest).
-- It lets you **Install**, **Update** or **Uninstall** each one with a single
-  click. Installed plugins take effect immediately - no restart needed.
+- It lets you **Install**, **Update** or **Uninstall** each one from its row;
+  uninstalling asks first, since it deletes the file. Installed plugins take
+  effect immediately - no restart needed.
 
 Each row also offers **View source** (**View changes** for an update), which
 downloads the file, verifies it against the registry hash and shows it
