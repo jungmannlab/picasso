@@ -2206,6 +2206,14 @@ class TestNnAnalysis:
         with pytest.raises(ValueError):
             postprocess.nn_analysis(X, Y, nn_count=1)
 
+    def test_one_neighbor_in_another_set_is_a_column(self):
+        """``KDTree.query`` with k=1 returns a flat array."""
+        rng = np.random.default_rng(2)
+        X = rng.standard_normal((20, 2))
+        Y = rng.standard_normal((25, 2))
+        out = postprocess.nn_analysis(X, Y, nn_count=1)
+        assert out.shape == (20, 1)
+
 
 # ---------------------------------------------------------------------------
 # Coordinate-based colocalization (CBC)

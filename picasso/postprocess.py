@@ -5432,7 +5432,7 @@ def nn_analysis(
     else:
         distances, indices = tree.query(X1, k=nn_count)
         nn = distances
-    nn.reshape(-1, nn_count)  # ensure the shape is (N, nn_count)
+    nn = nn.reshape(-1, nn_count)  # k=1 gives a flat array
     return nn
 
 

@@ -4283,11 +4283,14 @@ class ParametersDialog(lib.Dialog):
             exp_grid.addWidget(self.camera, 0, 1)
             cameras = sorted(list(CONFIG["Cameras"].keys()))
             if "CameraPriority" in CONFIG:
-                cam_prio_list = CONFIG["CameraPriority"]
+                # only configured cameras: a listed one missing from
+                # "Cameras" has no settings to show
+                cam_prio_list = [
+                    cam for cam in CONFIG["CameraPriority"] if cam in cameras
+                ]
                 # remove the prio cameras from the sorted list
                 for cam in cam_prio_list:
-                    if cam in cameras:
-                        cameras.remove(cam)
+                    cameras.remove(cam)
                 cameras = cam_prio_list + cameras
             self.camera.addItems(cameras)
             self.camera.currentIndexChanged.connect(self.on_camera_changed)
@@ -5081,7 +5084,9 @@ class ParametersDialog(lib.Dialog):
         semicolon-separated ``min,max`` segments (1-indexed, inclusive),
         clamps each to the movie length, and stores them as a list of
         0-indexed ``[lo, hi]`` segments in ``window.frame_range``."""
-        if not self.window.movie or self.frames_edit.text() == "":
+        # not ``not movie``: a .raw movie is a NumPy memory map, whose truth
+        # value is ambiguous
+        if self.window.movie is None or self.frames_edit.text() == "":
             return
         n_frames = len(self.window.movie)
         segments = []
@@ -6329,8 +6334,8 @@ class ParametersDialog(lib.Dialog):
         """Update the sensitivity settings for the current camera."""
         camera = self.camera.currentText()
         cam_config = CONFIG["Cameras"][camera]
-        sensitivity = cam_config["Sensitivity"]
         if "Sensitivity" in cam_config:
+            sensitivity = cam_config["Sensitivity"]
             if not isinstance(sensitivity, dict):
                 self.set_photon_scalar("sensitivity", sensitivity)
             else:
@@ -9426,13 +9431,13 @@ class Window(QtWidgets.QMainWindow):
             return
         # remove all identifications that are oob
         box = self.parameters["Box Size"]
-        m_size = self.movie.shape
+        _, height, width = self.movie.shape
         r = int(box / 2)
         self.identifications = self.identifications[
             (self.identifications.y - r > 0)
             & (self.identifications.x - r > 0)
-            & (self.identifications.x + r < m_size[0])
-            & (self.identifications.y + r < m_size[1])
+            & (self.identifications.x + r < width)
+            & (self.identifications.y + r < height)
         ]
         # assign gui attributes
         self.locs = None
@@ -11414,6 +11419,19 @@ class Window(QtWidgets.QMainWindow):
             return
         self.status_bar.showMessage("Aborted.")
 
+    def on_fit_failed(self, message: str) -> None:
+        """Handle a fit that raised an error: like an abort, but the user
+        is told why.
+
+        Parameters
+        ----------
+        message : str
+            The error, from the worker.
+        """
+        self.on_worker_aborted()
+        self.status_bar.showMessage("Fit failed.")
+        QtWidgets.QMessageBox.warning(self, "Fit failed", message)
+
     def identify(
         self,
         fit_afterwards: bool = False,
@@ -11634,6 +11652,19 @@ class Window(QtWidgets.QMainWindow):
                 f"No beads were identified. Lower the "
                 f"{_threshold_name(self.parameters)} or check the selected "
                 "frame range and try again.",
+            )
+        else:
+            # as for the channel sum: nothing to fit, and the boxes of an
+            # earlier identification would contradict the message
+            self.identifications = None
+            self.ready_for_fit = False
+            # drawn first: a frame with nothing to fit clears the status bar
+            self.draw_frame()
+            self.status_bar.showMessage(
+                f"No spots identified (Box Size: {parameters['Box Size']}; "
+                f"{_format_threshold(parameters)}). Lower the "
+                f"{_threshold_name(parameters)} or check the ROI and the "
+                "frame range."
             )
 
     def _identify_all_channels(
@@ -12173,11 +12204,12 @@ class Window(QtWidgets.QMainWindow):
         if not len(identifications):
             self.sum_identifications = None
             self.ready_for_fit = False
+            # drawn first: a frame with nothing to fit clears the status bar
+            self.draw_frame()
             self.status_bar.showMessage(
                 "No spots found on the channel sum. Re-tune the min. net "
                 "gradient: the sum is in photons."
             )
-            self.draw_frame()
             return
         if not self.view.split_fov_mode and self.current_channel != 0:
             # the sum lives in the reference channel's coordinates
@@ -12443,6 +12475,7 @@ class Window(QtWidgets.QMainWindow):
         worker.phaseStarted.connect(self.on_fit_phase)
         worker.progressMade.connect(self.on_fit_progress)
         worker.aborted.connect(self.on_worker_aborted)
+        worker.failed.connect(self.on_fit_failed)
         self._active_worker = worker
         self.abort_action.setEnabled(True)
         worker.start()
@@ -12829,6 +12862,7 @@ class Window(QtWidgets.QMainWindow):
         self.fit_worker.progressMade.connect(self.on_fit_progress)
         self.fit_worker.finished.connect(self.on_fit_finished)
         self.fit_worker.aborted.connect(self.on_worker_aborted)
+        self.fit_worker.failed.connect(self.on_fit_failed)
         self._active_worker = self.fit_worker
         self.abort_action.setEnabled(True)
         self.fit_worker.start()
@@ -12926,6 +12960,7 @@ class Window(QtWidgets.QMainWindow):
         self.fit_worker.progressMade.connect(self.on_fit_progress)
         self.fit_worker.finished.connect(self.on_fit_finished)
         self.fit_worker.aborted.connect(self.on_worker_aborted)
+        self.fit_worker.failed.connect(self.on_fit_failed)
         self._active_worker = self.fit_worker
         self.abort_action.setEnabled(True)
         self.fit_worker.start()
@@ -13035,6 +13070,7 @@ class Window(QtWidgets.QMainWindow):
         self.fit_worker.progressMade.connect(self.on_fit_progress)
         self.fit_worker.finished.connect(self.on_fit_finished)
         self.fit_worker.aborted.connect(self.on_worker_aborted)
+        self.fit_worker.failed.connect(self.on_fit_failed)
         self._active_worker = self.fit_worker
         self.abort_action.setEnabled(True)
         self.fit_worker.start()
@@ -13121,6 +13157,7 @@ class Window(QtWidgets.QMainWindow):
         self.fit_worker.progressMade.connect(self.on_fit_progress)
         self.fit_worker.finished.connect(self.on_fit_finished)
         self.fit_worker.aborted.connect(self.on_worker_aborted)
+        self.fit_worker.failed.connect(self.on_fit_failed)
         self._active_worker = self.fit_worker
         self.abort_action.setEnabled(True)
         self.fit_worker.start()
@@ -14268,6 +14305,7 @@ class FitWorker(QtCore.QThread):
     progressMade = QtCore.pyqtSignal(int, int)
     finished = QtCore.pyqtSignal(pd.DataFrame, float, bool, bool)
     aborted = QtCore.pyqtSignal()
+    failed = QtCore.pyqtSignal(str)  # why the fit failed
 
     def __init__(
         self,
@@ -14367,8 +14405,7 @@ class FitWorker(QtCore.QThread):
         except Exception as e:
             # letting it escape run() kills the thread without a word - the
             # window would keep waiting for a fit that will never arrive
-            print(f"Fit failed: {e}")
-            self.aborted.emit()
+            self.failed.emit(str(e))
             return
         if locs is None:  # handle aborted process
             self.aborted.emit()
@@ -14398,6 +14435,7 @@ class MultichannelSplineFitWorker(QtCore.QThread):
     linkFinished = QtCore.pyqtSignal(int, int)
     finished = QtCore.pyqtSignal(pd.DataFrame, float, bool, bool)
     aborted = QtCore.pyqtSignal()
+    failed = QtCore.pyqtSignal(str)  # why the fit failed
 
     def __init__(
         self,
@@ -14625,8 +14663,7 @@ class MultichannelSplineFitWorker(QtCore.QThread):
                     camera_calibrations=self.camera_calibrations,
                 )
         except Exception as e:
-            print(f"Multichannel spline fit failed: {e}")
-            self.aborted.emit()
+            self.failed.emit(str(e))
             return
         dt = time.time() - t0
         # fit_z / calibrate_z are always False for the multichannel spline
@@ -14651,6 +14688,7 @@ class MultichannelGaussianFitWorker(QtCore.QThread):
     linkFinished = QtCore.pyqtSignal(int, int)
     finished = QtCore.pyqtSignal(pd.DataFrame, float, bool, bool)
     aborted = QtCore.pyqtSignal()
+    failed = QtCore.pyqtSignal(str)  # why the fit failed
 
     def __init__(
         self,
@@ -14916,8 +14954,7 @@ class MultichannelGaussianFitWorker(QtCore.QThread):
                     camera_calibrations=self.camera_calibrations,
                 )
         except Exception as e:
-            print(f"Multichannel Gaussian fit failed: {e}")
-            self.aborted.emit()
+            self.failed.emit(str(e))
             return
         if locs is None:
             self.aborted.emit()

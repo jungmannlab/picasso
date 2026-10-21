@@ -2530,7 +2530,7 @@ def _localize_finish(
     CHECK_DB = getattr(args, "database", False)
     if CHECK_DB:
         print("\n")
-        print("Assesing quality and adding to DB")
+        print("Assessing quality and adding to DB")
         add_file_to_db(path, out_path)
         print("Done.")
         print("\n")
@@ -2545,7 +2545,9 @@ def _localize_finish(
                 display=False,
                 fromfile=None,
             )
-        except Exception as e:
+        # _undrift_rcc exits for too few frames; the localizations are
+        # saved already and the next movie is still localized
+        except (Exception, SystemExit) as e:
             print(e)
             print("Drift correction failed for {}".format(out_path))
 

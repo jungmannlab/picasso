@@ -1330,6 +1330,7 @@ class Window(QtWidgets.QMainWindow):
         structurexx = structurexx[:-1]
         structureyy = structureyy[:-1]
         structureex = structureex[:-1]
+        structure3d = structure3d[:-1]
 
         self.structurexxEdit.setText(structurexx)
         self.structureyyEdit.setText(structureyy)
@@ -1347,7 +1348,8 @@ class Window(QtWidgets.QMainWindow):
 
         twopi = 2 * 3.1415926535
 
-        circdata = np.arange(0, twopi, twopi / labels)
+        # not np.arange, whose rounding may add a label at 2 pi
+        circdata = np.linspace(0, twopi, labels, endpoint=False)
 
         xxval = np.round(np.cos(circdata) * diameter / 2 * 100) / 100
         yyval = np.round(np.sin(circdata) * diameter / 2 * 100) / 100
@@ -1366,6 +1368,7 @@ class Window(QtWidgets.QMainWindow):
         structurexx = structurexx[:-1]
         structureyy = structureyy[:-1]
         structureex = structureex[:-1]
+        structure3d = structure3d[:-1]
 
         self.structurexxEdit.setText(structurexx)
         self.structureyyEdit.setText(structureyy)
@@ -1607,6 +1610,14 @@ class Window(QtWidgets.QMainWindow):
             movie = simulate.check_type(movie)
             self.statusBar().showMessage("Saving movie ...")
             simulate.save_movie(fileName, movie, info)
+            if self.exportkinetics.isChecked():
+                kinfo_path = (
+                    os.path.splitext(fileName)[0]
+                    + "_"
+                    + str(self.currentround)
+                    + "_kinetics.yaml"
+                )
+                io.save_info(kinfo_path, [timetrace])
             self.statusBar().showMessage("Movie saved to: " + fileName)
             dt = time.time() - t0
             self.statusBar().showMessage(
@@ -1631,7 +1642,6 @@ class Window(QtWidgets.QMainWindow):
                     + "_kinetics.yaml"
                 )
                 io.save_info(kinfo_path, [timetrace])
-            self.statusBar().showMessage("Movie saved to: " + fileName)
 
     def _process_singleround_movie(
         self,
@@ -2224,9 +2234,13 @@ class Window(QtWidgets.QMainWindow):
         self.noexchangecolors = list(set(struct1[2, :]))
         structurexx = struct1[0, :]
         structureyy = struct1[1, :]
+        # none if no docking strand of it was incorporated
+        if struct1.shape[1]:
+            structurexx = structurexx - min(structurexx)
+            structureyy = structureyy - min(structureyy)
         self._structure_preview = (
-            np.multiply(structurexx - min(structurexx), pixelsize),
-            np.multiply(structureyy - min(structureyy), pixelsize),
+            np.multiply(structurexx, pixelsize),
+            np.multiply(structureyy, pixelsize),
             struct1[2, :],
         )
         self._draw_previews()
@@ -2297,7 +2311,9 @@ class Window(QtWidgets.QMainWindow):
     def calibrateNoise(self) -> None:
         """Calibrate noise model coefficients given experimental data.
         Only available when ADVANCED_MODE is set to 1."""
-        bg, bgstd, las, time, conc, ok = CalibrationDialog.setExt()
+        bg, bgstd, las, time, conc, ok = CalibrationDialog.setExt(self)
+        if not ok:
+            return
 
         np.asarray(bg)
         np.asarray(bgstd)
@@ -2374,22 +2390,24 @@ class Window(QtWidgets.QMainWindow):
         integrationtime, ok1 = QtWidgets.QInputDialog.getText(
             self, "Input Dialog", "Enter integration time in ms:"
         )
-        integrationtime = int(integrationtime)
         if ok1:
+            integrationtime = int(integrationtime)
             imagerconcentration, ok2 = QtWidgets.QInputDialog.getText(
                 self, "Input Dialog", "Enter imager concentration in nM:"
             )
-            imagerconcentration = float(imagerconcentration)
 
             if ok2:
+                imagerconcentration = float(imagerconcentration)
                 laserpower, ok3 = QtWidgets.QInputDialog.getText(
                     self, "Input Dialog", "Enter Laserpower in mW:"
                 )
-                laserpower = float(laserpower)
                 if ok3:
+                    laserpower = float(laserpower)
                     cbaseline, ok4 = QtWidgets.QInputDialog.getText(
                         self, "Input Dialog", "Enter camera baseline"
                     )
+                    if not ok4:
+                        return
                     cbaseline = float(cbaseline)
                     # self.le.setText(str(text))
 
@@ -2632,10 +2650,16 @@ class CalibrationDialog(lib.Dialog):
         The progress bar for displaying loading progress.
     table : QtWidgets.QTableWidget
         The table widget for displaying calibration data.
+    tifCounter : int
+        Number of .tif files loaded.
+    tifFiles : list of str
+        Paths of the .tif files loaded.
     """
 
     def __init__(self, parent=None):
         super(CalibrationDialog, self).__init__(parent)
+        self.tifCounter = 0
+        self.tifFiles = []
 
         layout = QtWidgets.QVBoxLayout(self)
 
@@ -2660,8 +2684,7 @@ class CalibrationDialog(lib.Dialog):
         self.evalTifButton.clicked.connect(self.evalTif)
 
         self.buttons = QtWidgets.QDialogButtonBox(
-            QtWidgets.QDialogButtonBox.ActionRole
-            | QtWidgets.QDialogButtonBox.StandardButton.Ok
+            QtWidgets.QDialogButtonBox.StandardButton.Ok
             | QtWidgets.QDialogButtonBox.StandardButton.Cancel,
             self,
         )
@@ -2721,28 +2744,35 @@ class CalibrationDialog(lib.Dialog):
         baseline, ok1 = QtWidgets.QInputDialog.getText(
             self, "Input Dialog", "Enter Camera Baseline:"
         )
-        if ok1:
-            baseline = int(baseline)
-        else:
-            baseline = 200  # default
+        try:
+            if ok1:
+                baseline = int(baseline)
+            else:
+                baseline = 200  # default
 
-        sensitvity, ok2 = QtWidgets.QInputDialog.getText(
-            self, "Input Dialog", "Enter Camera Sensitivity:"
-        )
-        if ok2:
-            sensitvity = float(sensitvity)
-        else:
-            sensitvity = 1.47
+            sensitvity, ok2 = QtWidgets.QInputDialog.getText(
+                self, "Input Dialog", "Enter Camera Sensitivity:"
+            )
+            if ok2:
+                sensitvity = float(sensitvity)
+            else:
+                sensitvity = 1.47
+        except ValueError as error:
+            QtWidgets.QMessageBox.warning(
+                self, "Noise Model Calibration", str(error)
+            )
+            return
 
         counter = 0
         for element in self.tifFiles:
             counter += 1
-            self.pbar.setValue((counter - 1) / self.tifCounter * 100)
+            self.pbar.setValue(int((counter - 1) / self.tifCounter * 100))
             print(f"Current Dataset: {counter} of {self.tifCounter}")
             QtWidgets.QApplication.instance().processEvents()
             movie, info = io.load_movie(element)
 
-            movie = movie[0:100, :, :]
+            # float, so that pixels below the baseline do not wrap around
+            movie = movie[0:100, :, :].astype(float)
 
             movie = (movie - baseline) * sensitvity
             self.table.setItem(
@@ -2756,32 +2786,23 @@ class CalibrationDialog(lib.Dialog):
                 QtWidgets.QTableWidgetItem(str((np.std(movie)))),
             )
 
-            self.table.setItem(
-                counter - 1,
-                1,
-                QtWidgets.QTableWidgetItem(
-                    str((self.ValueFind(element, "nM_")))
-                ),
-            )
-            self.table.setItem(
-                counter - 1,
-                2,
-                QtWidgets.QTableWidgetItem(
-                    str((self.ValueFind(element, "ms_")))
-                ),
-            )
-            self.table.setItem(
-                counter - 1,
-                3,
-                QtWidgets.QTableWidgetItem(
-                    str((self.ValueFind(element, "mW_")))
-                ),
-            )
+            # left blank (to be filled in) if the name does not say
+            for column, unit in ((1, "nM_"), (2, "ms_"), (3, "mW_")):
+                value = self.ValueFind(element, unit)
+                if value is not None:
+                    self.table.setItem(
+                        counter - 1,
+                        column,
+                        QtWidgets.QTableWidgetItem(str(value)),
+                    )
 
         self.pbar.setValue(100)
 
-    def ValueFind(self, filename: str, unit: str) -> int:
-        """Find the value of a specific unit in the filename."""
+    def ValueFind(self, filename: str, unit: str) -> int | None:
+        """Find the value of a specific unit in the filename, None if
+        the filename does not contain the unit."""
+        if unit not in filename:
+            return None
         index = filename.index(unit)
 
         value = 0
@@ -2801,8 +2822,8 @@ class CalibrationDialog(lib.Dialog):
             "Select Directory",
         )
         if self.path:
-            self.tifCounter = len(_glob.glob(self.path, "*.tif"))
             self.tifFiles = _glob.glob(os.path.join(self.path, "*.tif"))
+            self.tifCounter = len(self.tifFiles)
 
             self.table.setRowCount(int(self.tifCounter))
             self.table.setColumnCount(6)
@@ -2881,13 +2902,38 @@ class CalibrationDialog(lib.Dialog):
         # self.exportTable()
         return bg, bgstd, las, time, conc
 
+    def accept(self) -> None:
+        """Accept the dialog if the table has the values of at least
+        three .tif files, the fewest the noise model can be fitted
+        to."""
+        try:
+            values = self.evalTable()
+        except (AttributeError, ValueError):  # a cell empty or no number
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Noise Model Calibration",
+                "Evaluate the .tif files and fill in the empty cells.",
+            )
+            return
+        if len(values[0]) < 3:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Noise Model Calibration",
+                "Load at least three .tif files.",
+            )
+            return
+        super().accept()
+
     @staticmethod
     def setExt(
         parent: QtWidgets.QWidget | None = None,
     ) -> tuple[list, list, list, list, list, bool]:
-        """Create the dialog and return (date, time, accepted)."""
+        """Create the dialog and return the values of its table (empty
+        if it was canceled) and whether it was accepted."""
         dialog = CalibrationDialog(parent)
         result = dialog.exec()
+        if result != QtWidgets.QDialog.DialogCode.Accepted:
+            return [], [], [], [], [], False
         bg, bgstd, las, time, conc = dialog.evalTable()
         return (
             bg,

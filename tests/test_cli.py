@@ -1416,3 +1416,38 @@ def test_spinna_batch_needs_a_csv(monkeypatch):
 def test_spinna_columns_prints_the_reference(monkeypatch, capsys):
     _picasso(monkeypatch, "spinna", "--columns")
     assert '"exp_data_TARGET"' in capsys.readouterr().out
+
+
+# ---------------------------------------------------------------------------
+# Localize
+# ---------------------------------------------------------------------------
+
+
+def test_a_failed_drift_correction_does_not_stop_localize(
+    tmp_path, monkeypatch, capsys
+):
+    """Each movie is saved before it is undrifted, so a movie that cannot
+    be undrifted (e.g., too few frames) keeps its localizations and the
+    next movie is still localized."""
+    import shutil
+
+    data = os.path.join(os.path.dirname(__file__), "data")
+    for name in ("a", "b"):
+        for ext in (".raw", ".yaml"):
+            shutil.copy(
+                os.path.join(data, "testdata" + ext),
+                tmp_path / (name + ext),
+            )
+
+    def undrift(path, *args, **kwargs):
+        raise SystemExit(f"{path}: too few frames to undrift")
+
+    monkeypatch.setattr(cli, "_undrift_rcc", undrift)
+
+    _picasso(
+        monkeypatch, "localize", tmp_path / "*.raw", "-d", 100, "-px", 160
+    )
+
+    assert (tmp_path / "a_locs.hdf5").exists()
+    assert (tmp_path / "b_locs.hdf5").exists()
+    assert capsys.readouterr().out.count("Drift correction failed") == 2

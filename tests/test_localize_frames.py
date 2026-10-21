@@ -252,7 +252,7 @@ def test_recovers_known_positions():
 # ---------------------------------------------------------------------------
 
 
-def test_no_qt_on_call_path():
+def test_no_qt_on_call_path(tmp_path):
     """A fresh interpreter can import and run localize_frames without Qt.
 
     Run in a subprocess with no ``DISPLAY`` and ``QT_QPA_PLATFORM`` cleared so
@@ -288,6 +288,9 @@ def test_no_qt_on_call_path():
         for k, v in __import__("os").environ.items()
         if k not in ("DISPLAY", "QT_QPA_PLATFORM")
     }
+    # the fresh interpreter saves the default settings it reads, so it
+    # must not see the developer's ~/.picasso
+    env["HOME"] = env["USERPROFILE"] = str(tmp_path)
     result = subprocess.run(
         [sys.executable, "-c", script],
         capture_output=True,

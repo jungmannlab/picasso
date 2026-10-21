@@ -1364,11 +1364,12 @@ class DatasetDialog(lib.Dialog):
                 )
                 if ok:
                     if new_title == "Reset" or new_title == "reset":
+                        # the original title, see ``add_entry``
                         path = self.window.view.locs_paths[i]
                         if len(path) > 40:
                             path = os.path.basename(path)
-                            new_title, ext = os.path.splitext(path)
-                        self.checks[i].setText(new_title)
+                            path, ext = os.path.splitext(path)
+                        self.checks[i].setText(path)
                     else:
                         self.checks[i].setText(new_title)
                     self.update_viewport()
@@ -2254,7 +2255,7 @@ class CustomColormapDialog(lib.Dialog):
     def _on_rename(self) -> None:
         if self._current_name is None:
             return
-        name = self._prompt_new_name(default=self._current_name)
+        name = self._prompt_new_name(default=self._current_name, renaming=True)
         if not name or name == self._current_name:
             return
         self._stops[name] = self._stops.pop(self._current_name)
@@ -2288,11 +2289,13 @@ class CustomColormapDialog(lib.Dialog):
             self.stops_table.setRowCount(0)
             self.preview_label.clear()
 
-    def _prompt_new_name(self, default: str = "") -> str | None:
-        # ensure default is unique
+    def _prompt_new_name(
+        self, default: str = "", renaming: bool = False
+    ) -> str | None:
+        # ensure default is unique; a renamed colormap may keep its name
         candidate = default
         i = 1
-        while candidate in self._stops:
+        while candidate in self._stops and not renaming:
             i += 1
             candidate = f"{default}_{i}"
         while True:
@@ -2305,13 +2308,13 @@ class CustomColormapDialog(lib.Dialog):
             if not ok:
                 return None
             name = name.strip()
-            error = self._validate_name(name)
+            error = self._validate_name(name, renaming)
             if error is None:
                 return name
             QtWidgets.QMessageBox.warning(self, "Invalid name", error)
             candidate = name
 
-    def _validate_name(self, name: str) -> str | None:
+    def _validate_name(self, name: str, renaming: bool = False) -> str | None:
         if not name:
             return "Name must not be empty."
         dlg = self.window.dataset_dialog
@@ -2319,7 +2322,11 @@ class CustomColormapDialog(lib.Dialog):
             return f"'{name}' collides with a built-in solid color."
         if name in dlg.builtin_cmap_stops:
             return f"'{name}' collides with a built-in colormap."
-        if name in self._stops and name != self._current_name:
+        # only a rename may keep the name of the current colormap; a
+        # new one would overwrite it
+        if name in self._stops and not (
+            renaming and name == self._current_name
+        ):
             return f"A custom colormap named '{name}' already exists."
         return None
 
@@ -2496,6 +2503,9 @@ class PlotDialog(lib.Dialog):
 
     def __init__(self, window: QtWidgets.QtWidget | None) -> None:
         super().__init__(window)
+        # closed without a button (Escape, the close button): stop, as
+        # with Cancel, instead of rejecting the pick
+        self.result = 2
         self.window = window
         self.setWindowTitle("Structure")
         layout_grid = QtWidgets.QGridLayout(self)
@@ -2603,7 +2613,9 @@ class PlotDialog(lib.Dialog):
             colors = color_sys
             for ll in range(len(all_picked_locs)):
                 locs = all_picked_locs[ll][current]
-                ax.scatter(locs["x"], locs["y"], locs["z"], c=colors[ll], s=2)
+                ax.scatter(
+                    locs["x"], locs["y"], locs["z"], color=colors[ll], s=2
+                )
 
             ax.set_xlim(
                 np.mean(locs["x"]) - 3 * np.std(locs["x"]),
@@ -2641,6 +2653,9 @@ class PlotDialogIso(lib.Dialog):
 
     def __init__(self, window: QtWidgets.QWidget | None) -> None:
         super().__init__(window)
+        # closed without a button (Escape, the close button): stop, as
+        # with Cancel, instead of rejecting the pick
+        self.result = 2
         self.window = window
         self.setWindowTitle("Structure")
         layout_grid = QtWidgets.QGridLayout(self)
@@ -2806,10 +2821,12 @@ class PlotDialogIso(lib.Dialog):
             colors = color_sys
             for ll in range(len(all_picked_locs)):
                 locs = all_picked_locs[ll][current]
-                ax.scatter(locs["x"], locs["y"], locs["z"], c=colors[ll], s=2)
-                ax2.scatter(locs["x"], locs["y"], c=colors[ll], s=2)
-                ax3.scatter(locs["x"], locs["z"], c=colors[ll], s=2)
-                ax4.scatter(locs["y"], locs["z"], c=colors[ll], s=2)
+                ax.scatter(
+                    locs["x"], locs["y"], locs["z"], color=colors[ll], s=2
+                )
+                ax2.scatter(locs["x"], locs["y"], color=colors[ll], s=2)
+                ax3.scatter(locs["x"], locs["z"], color=colors[ll], s=2)
+                ax4.scatter(locs["y"], locs["z"], color=colors[ll], s=2)
 
             ax.set_xlim(
                 locs["x"].mean() - 3 * locs["x"].std(),
@@ -2885,6 +2902,9 @@ class ClsDlg3D(lib.Dialog):
 
     def __init__(self, window: QtWidgets.QWidget | None) -> None:
         super().__init__(window)
+        # closed without a button (Escape, the close button): stop, as
+        # with Cancel, instead of rejecting the pick
+        self.result = 2
         self.window = window
         self.setWindowTitle("Structure")
         self.showMaximized()
@@ -3088,6 +3108,9 @@ class ClsDlg2D(lib.Dialog):
 
     def __init__(self, window: QtWidgets.QWidget | None) -> None:
         super().__init__(window)
+        # closed without a button (Escape, the close button): stop, as
+        # with Cancel, instead of rejecting the pick
+        self.result = 2
         self.window = window
         self.setWindowTitle("Structure")
         self.layout_grid = QtWidgets.QGridLayout(self)
@@ -4179,6 +4202,9 @@ class G5MDialog(lib.Dialog):
         """Get the parameters for G5M."""
         dialog = G5MDialog(parent, channel)
         result = dialog.exec()
+        if result != QtWidgets.QDialog.DialogCode.Accepted:
+            # canceled, possibly before any 3D calibration was loaded
+            return None, False
         if dialog.loc_prec_handling.currentIndex() == 0:  # local sigma
             loc_prec_handle = "local"
         else:  # custom bounds (nm)
@@ -4244,12 +4270,22 @@ class G5MDialog(lib.Dialog):
         )
         if not path:
             return
-        self.load_calibration_(path)
+        try:
+            self.load_calibration_(path)
+        except lib.FILE_LOAD_ERRORS as error:
+            lib.show_load_error(self, path, error)
 
     def load_calibration_(self, path: str) -> None:
         """Load calibration from the given path."""
-        # picasso.io.load_info takes in .hdf5 path
-        calib = io.load_calibration(path)
+        ch = self.channel if self.channel != len(self.window.view.locs) else 0
+        # a calibration from before Picasso 1.0 (spot widths in camera
+        # pixels) is converted with the camera pixel size
+        calib = io.load_calibration(
+            path,
+            pixelsize=lib.get_from_metadata(
+                self.window.view.infos[ch], "Pixelsize"
+            ),
+        )
 
         if "X Coefficients" not in calib.keys():
             message = (
@@ -5130,13 +5166,10 @@ class TestG5MParams(QtWidgets.QWidget):
         )
         if not path:
             return
-        calib = io.load_calibration(path)
-        if "X Coefficients" not in calib.keys():
-            message = (
-                "Please load a 3D calibration .yaml file produced by"
-                " Picasso: Localize."
-            )
-            QtWidgets.QMessageBox.information(self, "Warning", message)
+        try:
+            calib = io.load_calibration(path)
+        except lib.FILE_LOAD_ERRORS as error:
+            lib.show_load_error(self, path, error)
             return
         self.calibration = calib
 
@@ -7062,7 +7095,10 @@ class MaskSettingsDialog(lib.Dialog):
         self.paths = self.window.view.locs_paths
         self.infos = self.window.view.infos
         # which channel to plot
-        self.channel = self.window.view.get_channel("Mask image")
+        channel = self.window.view.get_channel("Mask image")
+        if channel is None:  # canceled
+            return
+        self.channel = channel
         self.cmap = self.window.display_settings_dlg.colormap.currentText()
         # the field of view of the channel, in nm
         self.x_max, self.y_max = lib.field_of_view(self.infos[self.channel])
@@ -7315,14 +7351,25 @@ class MaskSettingsDialog(lib.Dialog):
                     check_ext=".yaml",
                 )
                 if path_out:
-                    self._save_locs(self.channel, path_in, path_out)
+                    # only this channel may have been masked
+                    index = 0 if len(self.index_locs) == 1 else self.channel
+                    self._save_locs(self.channel, path_in, path_out, index)
 
-    def _save_locs(self, channel: int, path_in: str, path_out: str) -> None:
-        """Save masked localizations for a single channel."""
+    def _save_locs(
+        self,
+        channel: int,
+        path_in: str,
+        path_out: str,
+        index: int | None = None,
+    ) -> None:
+        """Save masked localizations for a single channel. ``index`` is
+        the position of the channel in the masked localizations;
+        ``channel`` if None, i.e., when all channels were masked."""
+        index = channel if index is None else index
         info = self.get_info(channel, locs_in=True)
-        io.save_locs(path_in, self.index_locs[channel], info)
+        io.save_locs(path_in, self.index_locs[index], info)
         info = self.get_info(channel, locs_in=False)
-        io.save_locs(path_out, self.index_locs_out[channel], info)
+        io.save_locs(path_out, self.index_locs_out[index], info)
 
     def get_info(self, channel: int, locs_in: bool = True) -> list[dict]:
         """Returns metadata for masked localizations.
@@ -10038,21 +10085,28 @@ class DisplaySettingsDialog(lib.Dialog):
             path, ext = QtWidgets.QFileDialog.getOpenFileName(
                 self, "Load custom colormap", filter="*.npy"
             )
+            error = None
             if path:
-                cmap = np.load(path)
-                if cmap.shape != (256, 4):
-                    raise ValueError(
-                        "Colormap must be of shape (256, 4)\n"
-                        f"The loaded colormap has shape {cmap.shape}"
-                    )
-                elif not np.all((cmap >= 0) & (cmap <= 1)):
-                    raise ValueError(
-                        "All elements of the colormap must be between\n"
-                        "0 and 1"
-                    )
+                try:
+                    cmap = np.load(path)
+                except (OSError, ValueError) as e:
+                    error = f"Could not load {path}:\n{e}"
                 else:
-                    self.window.view.custom_cmap = cmap
-            else:
+                    if cmap.shape != (256, 4):
+                        error = (
+                            "Colormap must be of shape (256, 4)\n"
+                            f"The loaded colormap has shape {cmap.shape}"
+                        )
+                    elif not np.all((cmap >= 0) & (cmap <= 1)):
+                        error = (
+                            "All elements of the colormap must be between\n"
+                            "0 and 1"
+                        )
+                    else:
+                        self.window.view.custom_cmap = cmap
+            if error is not None:
+                QtWidgets.QMessageBox.warning(self, "Custom colormap", error)
+            if not path or error is not None:
                 self.colormap.setCurrentText("magma")
         self.update_scene()
 
@@ -12574,13 +12628,14 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             )
             return
         self.locs[channel] = locs
-        self.infos[channel].append(
+        # new list, the old one may be shared with linked windows
+        self.infos[channel] = self.infos[channel] + [
             {
                 **lib.step_info("Render : Binding event cores"),
                 "Max. distance (nm)": r_max,
                 "Max. transient dark frames": max_dark,
             }
-        )
+        ]
         self.group_color = render.get_group_color(locs, shuffle=True)
         self.update_scene(resample_locs=True)
 
@@ -14350,7 +14405,7 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         """Adjust viewport to show a pick identified by its id."""
         # get pick id
         pick_no, ok = QtWidgets.QInputDialog.getInt(
-            self, "", "Input pick number: ", 0, 0
+            self, "", "Input pick number: ", 0, 0, len(self._picks) - 1
         )
         if ok:
             # raise error when pick id too high
@@ -15765,15 +15820,16 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         localizations in channels 1 and 2. Save as localizations .hdf5
         file of channel 1. Runs on a worker thread, so it only reads the
         view's state."""
-        # extract x, y and z (nm) from both channels
-        if "z" in self.locs[channel1].columns:
-            X1 = self.locs[channel1][["x", "y", "z"]].to_numpy()
-        else:
-            X1 = self.locs[channel1][["x", "y"]].to_numpy()
-        if "z" in self.locs[channel2].columns:
-            X2 = self.locs[channel2][["x", "y", "z"]].to_numpy()
-        else:
-            X2 = self.locs[channel2][["x", "y"]].to_numpy()
+        # extract x, y and z (nm) from both channels; z only if both
+        # channels have it
+        columns = ["x", "y"]
+        if all(
+            "z" in self.locs[channel].columns
+            for channel in (channel1, channel2)
+        ):
+            columns.append("z")
+        X1 = self.locs[channel1][columns].to_numpy()
+        X2 = self.locs[channel2][columns].to_numpy()
 
         # get nnd and append to locs to save
         nn = postprocess.nn_analysis(X1, X2, nn_count)
@@ -16430,10 +16486,10 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
                 removelist, i = self._handle_pick_selection_reply(
                     reply, pick, removelist, i
                 )
+                plt.close(fig)
                 if i is None:  # cancel
                     break
                 i += 1
-                plt.close()
 
         # remove picks
         for pick in removelist:
@@ -16450,7 +16506,9 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             if pick in removelist:
                 removelist.remove(pick)
         elif reply == "Reject":
-            removelist.append(pick)
+            # a pick rejected again after going back is removed once
+            if pick not in removelist:
+                removelist.append(pick)
         elif reply == "Back":
             if i >= 2:
                 i -= 2
@@ -16501,7 +16559,7 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         if is_multi:
             for ll in range(len(self.locs_paths)):
                 locs = all_picked_locs[ll][i]
-                ax.scatter(locs["x"], locs["y"], c=colors[ll], s=2)
+                ax.scatter(locs["x"], locs["y"], color=colors[ll], s=2)
         else:
             locs = all_picked_locs[i]
             ax.scatter(locs["x"], locs["y"], color=colors[channel], s=2)
@@ -16823,6 +16881,8 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             QtGui.QImage.Format.Format_RGBA8888,
         )
         self.setPixmap((QtGui.QPixmap(im)))
+        # shown in the view; pyplot keeps every figure until closed
+        plt.close(fig)
         self.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
 
     def _find_picks_outside_range(
@@ -18721,13 +18781,14 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             )
             return
 
-        # automatically assign the group if picks are present
+        # automatically assign the group if picks are present; the
+        # localizations change only once the user confirmed
         if "group" not in self.locs[0].columns and len(self._picks):
             locs = self.picked_locs(0, add_group=True)
             locs = pd.concat(locs, ignore_index=True)
-            self.locs[0] = locs
             remove_group = True
         elif "group" in self.locs[0].columns:
+            locs = self.locs[0]
             remove_group = False
         else:
             QtWidgets.QMessageBox.information(
@@ -18745,12 +18806,10 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             self,
             "Input Dialog",
             "Set number of elements per column:",
-            int(np.ceil(np.sqrt(len(np.unique(self.locs[0]["group"]))))),
-            max=len(np.unique(self.locs[0]["group"])),
+            int(np.ceil(np.sqrt(len(np.unique(locs["group"]))))),
+            max=len(np.unique(locs["group"])),
         )
         if not ok:
-            if remove_group:
-                self.locs[0].drop(columns="group", inplace=True)
             return
         spacing, ok = QtWidgets.QInputDialog.getInt(
             self,
@@ -18759,12 +18818,10 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             250,
         )
         if not ok:
-            if remove_group:
-                self.locs[0].drop(columns="group", inplace=True)
             return
 
         self.locs[0], self.infos[0][0] = lib.unfold_localizations_square(
-            locs=self.locs[0],
+            locs=locs,
             info=self.infos[0][0],
             n_square=n_square,
             spacing=spacing,
@@ -19180,11 +19237,11 @@ class Window(QtWidgets.QMainWindow):
     window_rot : RotationWindow
         Instance of the class for displaying 3D data with rotation.
     x_spiral : dict[int, np.array]
-        x coordinates before the last spiral action in ``ApplyDialog``,
-        keyed by channel index.
+        x displacement (nm) of the last spiral action in
+        ``ApplyDialog``, keyed by channel index.
     y_spiral : dict[int, np.array]
-        y coordinates before the last spiral action in ``ApplyDialog``,
-        keyed by channel index.
+        y displacement (nm) of the last spiral action in
+        ``ApplyDialog``, keyed by channel index.
     """
 
     DOCS_URL = docs_url("render.html")
@@ -20010,7 +20067,8 @@ class Window(QtWidgets.QMainWindow):
             checked_channels = [
                 _.isChecked() for _ in self.dataset_dialog.checks
             ]
-            idx = checked_channels.index(True)
+            # the first channel if none is shown
+            idx = checked_channels.index(True) if any(checked_channels) else 0
             base, ext = os.path.splitext(self.view.locs_paths[idx])
         except AttributeError:
             return
@@ -20436,6 +20494,31 @@ class Window(QtWidgets.QMainWindow):
         """Export current FOV to .ims."""
         if self.no_locs_warning("Export ROI for Imaris"):
             return
+        n_channels = len(self.view.locs_paths)
+        checked = [
+            self.dataset_dialog.checks[channel].isChecked()
+            for channel in range(n_channels)
+        ]
+        # refuse before the file is asked for (and an old one removed)
+        has_zs = {
+            "z" in self.view.locs[channel].columns
+            for channel in range(n_channels)
+            if checked[channel]
+        }
+        if not has_zs:
+            QtWidgets.QMessageBox.information(
+                self,
+                "Export ROI for Imaris",
+                "Show at least one channel to export.",
+            )
+            return
+        if len(has_zs) > 1:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Export ROI for Imaris",
+                "Cannot export localizations with and without z together.",
+            )
+            return
         base, ext = os.path.splitext(self.view.locs_paths[0])
         out_path = base + ".ims"
 
@@ -20449,16 +20532,10 @@ class Window(QtWidgets.QMainWindow):
             os.remove(path)
 
         if path:
-            n_channels = len(self.view.locs_paths)
             viewport = self.view.viewport  # nm
             disp_px_size = self.display_settings_dlg.disp_px_size.value()
             oversampling = 1 / disp_px_size  # rendered pixels per nm
             maximum = self.display_settings_dlg.maximum.value()
-
-            checked = [
-                self.dataset_dialog.checks[channel].isChecked()
-                for channel in range(n_channels)
-            ]
             colors = self.view.read_colors()
 
             def export():  # noqa: C901
@@ -20510,12 +20587,6 @@ class Window(QtWidgets.QMainWindow):
 
                         to_render.append(channel)
 
-                if not has_z:
-                    if len(z_mins) > 0:
-                        raise NotImplementedError(
-                            "Can't export mixed files with and without z."
-                        )
-
                 if has_z:
                     z_min = min(z_mins)
                     z_max = max(z_maxs)
@@ -20548,7 +20619,9 @@ class Window(QtWidgets.QMainWindow):
                             x_max,
                         )
 
-                    image = image / maximum * 65535
+                    # brighter than the contrast maximum saturates
+                    # instead of wrapping around in 16 bits
+                    image = np.clip(image / maximum * 65535, 0, 65535)
                     data = image.astype("uint16")
                     data = np.rot90(np.fliplr(data))
                     all_img.append(data)
@@ -20720,26 +20793,26 @@ class Window(QtWidgets.QMainWindow):
             turns = int(input[2])
             maxframe = self.view.infos[channel][0]["Frames"]
 
-            self.x_spiral[channel] = self.view.locs[channel]["x"].copy()
-            self.y_spiral[channel] = self.view.locs[channel]["y"].copy()
-
             scale_time = maxframe / (turns * 2 * np.pi)
             scale_x = turns * 2 * np.pi
 
             x = self.view.locs[channel]["frame"] / scale_time
+            dx = (x * np.cos(x) / scale_x * radius).to_numpy()
+            dy = (x * np.sin(x) / scale_x * radius).to_numpy()
+            # the displacement is stored rather than the coordinates,
+            # since a spiral beyond the canvas grows it, which
+            # translates the localizations
+            self.x_spiral[channel] = dx
+            self.y_spiral[channel] = dy
 
-            self.view.locs[channel]["x"] = (
-                x * np.cos(x)
-            ) / scale_x * radius + self.view.locs[channel]["x"]
-
-            self.view.locs[channel]["y"] = (
-                x * np.sin(x)
-            ) / scale_x * radius + self.view.locs[channel]["y"]
+            self.view.locs[channel]["x"] = self.view.locs[channel]["x"] + dx
+            self.view.locs[channel]["y"] = self.view.locs[channel]["y"] + dy
 
         elif input[0] == "uspiral":
             try:
-                self.view.locs[channel]["x"] = self.x_spiral[channel]
-                self.view.locs[channel]["y"] = self.y_spiral[channel]
+                locs = self.view.locs[channel]
+                locs["x"] = locs["x"] - self.x_spiral.pop(channel)
+                locs["y"] = locs["y"] - self.y_spiral.pop(channel)
                 self.display_settings_dlg.render_check.setChecked(False)
             except KeyError:
                 QtWidgets.QMessageBox.information(
@@ -21044,6 +21117,8 @@ class Window(QtWidgets.QMainWindow):
         channels)."""
         if self.no_locs_warning("Save picked localizations"):
             return
+        if self.no_picks_warning():
+            return
         channel = self.view.get_channel_save_locs("Save picked localizations")
         if channel is not None:
             # combine channels to one .hdf5
@@ -21092,6 +21167,8 @@ class Window(QtWidgets.QMainWindow):
     def save_picked_locs_separately(self) -> None:
         """Save picked localizations for each pick separately."""
         if self.no_locs_warning("Save picked localizations separately"):
+            return
+        if self.no_picks_warning():
             return
         channel = self.view.get_channel_save_locs(
             "Save picked localizations separately"
@@ -21436,6 +21513,23 @@ class Window(QtWidgets.QMainWindow):
         if self.view.locs:
             return False
         QtWidgets.QMessageBox.information(self, title, "No files loaded.")
+        return True
+
+    def no_picks_warning(self) -> bool:
+        """Tell the user that there are no picks, if so (see
+        ``check_pick``).
+
+        Returns
+        -------
+        missing : bool
+            True if there are no picks (the action should stop), False
+            otherwise.
+        """
+        if self.view._picks:
+            return False
+        QtWidgets.QMessageBox.information(
+            self, "Pick Error", "No localizations picked. Please pick first."
+        )
         return True
 
     def show_metadata(self) -> None:

@@ -395,6 +395,16 @@ class View(QtWidgets.QLabel):
         path : str
             Path to the localization file.
         """
+        if self.running:
+            # the running averaging uses the pool of the current file,
+            # which opening another one would shut down
+            QtWidgets.QMessageBox.information(
+                self.window,
+                "Average",
+                "Averaging is running. Abort it before opening another"
+                " file.",
+            )
+            return
         try:
             locs, info = io.load_locs(path)
         except lib.FILE_LOAD_ERRORS as error:
@@ -408,15 +418,22 @@ class View(QtWidgets.QLabel):
             )
             QtWidgets.QMessageBox.warning(self, "Warning", message)
             return
+        group_index = average.build_group_index(locs)
+        locs = average.com_align(locs, group_index)
+        # half the side length of the rendered square (nm)
+        r = 2 * np.sqrt((locs["x"] ** 2 + locs["y"] ** 2).mean())
+        if not r > 0:
+            # not kept either: nothing to render or align
+            message = (
+                "The localizations of each group coincide, so the"
+                " particles have no extent to average."
+            )
+            QtWidgets.QMessageBox.warning(self, "Warning", message)
+            return
         self.path = path
         self.locs, self.info = locs, info
         self.avg_history = []
-        group_index = average.build_group_index(self.locs)
-        self.locs = average.com_align(self.locs, group_index)
-        # half the side length of the rendered square (nm)
-        self.r = 2 * np.sqrt(
-            (self.locs["x"] ** 2 + self.locs["y"] ** 2).mean()
-        )
+        self.r = r
         self.window.parameters_dialog.on_disp_px_size_changed()
         self.update_image()
         self.start_pool()

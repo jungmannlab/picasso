@@ -1,3 +1,4 @@
+import argparse
 import streamlit as st
 import os
 import pandas as pd
@@ -11,7 +12,7 @@ import shlex
 import subprocess
 import sys
 from datetime import datetime
-from picasso.__main__ import _localize
+from picasso.__main__ import _build_parser, _localize
 
 DEFAULT_UPDATE_TIME = 1
 #: the placeholders of the custom command
@@ -20,22 +21,31 @@ _PLACEHOLDERS = re.compile(r"\$(FILENAME|LOCS)")
 FILETYPES = (".raw", ".ome.tif", ".ims")
 
 
-class aclass:
-    """Namespace object whose attributes are the keyword arguments given.
+def localize_args(settings: dict) -> argparse.Namespace:
+    """The arguments of ``picasso localize`` for the settings of a
+    parameter group: the command line defaults, overridden by the
+    settings.
 
-    Used to hand the localize settings to code that expects an argparse
-    namespace.
+    Parameters
+    ----------
+    settings : dict
+        Localize settings by argument name, with the movie as ``files``
+        and one fitting method (``fit_method``) and minimum net gradient
+        (``gradient``).
+
+    Returns
+    -------
+    args : argparse.Namespace
+        The arguments, as ``_localize`` takes them.
     """
-
-    def __init__(self, **entries):
-        """Set one attribute per keyword argument.
-
-        Parameters
-        ----------
-        **entries
-            The attributes to set.
-        """
-        self.__dict__.update(entries)
+    parser, _ = _build_parser()
+    args = parser.parse_args(["localize", settings["files"]])
+    vars(args).update(settings)
+    # the options that may be given once per region are lists
+    for name in ("fit_method", "gradient"):
+        if name in settings:
+            setattr(args, name, [settings[name]])
+    return args
 
 
 def check_new(path: str, processed: dict, logfile: str):
@@ -48,7 +58,7 @@ def check_new(path: str, processed: dict, logfile: str):
     path : str
         Folder to check.
     processed : dict
-        Files that are already processed, keyed by normalized path.
+        Files that are already processed, keyed by absolute path.
     logfile : str
         Path to the logfile new findings are reported to.
 
@@ -68,7 +78,7 @@ def check_new(path: str, processed: dict, logfile: str):
         _
         for _ in all_
         if (
-            os.path.normpath(_) not in processed.keys()
+            os.path.abspath(_) not in processed.keys()
             and _.endswith(FILETYPES)
         )
     ]
@@ -81,13 +91,16 @@ def check_new(path: str, processed: dict, logfile: str):
         f"files in {path}.",
     )
 
-    for _ in new:
-        base, ext = os.path.splitext(_)
-        for ref in locs:
-            if base.startswith(ref):
-                processed[_] = True
-                new.remove(_)
-                break
+    # localized already: the localization files are named after the movie
+    # without its extension, followed by "_" (see helper.get_file_family)
+    localized = [
+        _
+        for _ in new
+        if any(ref.startswith(os.path.splitext(_)[0] + "_") for ref in locs)
+    ]
+    for _ in localized:
+        processed[os.path.abspath(_)] = True
+        new.remove(_)
 
     return new, processed
 
@@ -291,7 +304,7 @@ def check_new_and_process(  # noqa: C901
     processed = {}
 
     for _ in existing:
-        processed[_] = True
+        processed[os.path.abspath(_)] = True
 
     while True:
         new, processed = check_new(path, processed, logfile)
@@ -314,8 +327,7 @@ def check_new_and_process(  # noqa: C901
 
                     settings["files"] = file
 
-                    args_ = aclass(**settings)
-                    saved += _localize(args_)
+                    saved += _localize(localize_args(settings))
 
                 if command != "":
                     to_run = custom_commands(command, file, saved)
@@ -344,7 +356,9 @@ def check_new_and_process(  # noqa: C901
 
             except KeyboardInterrupt:
                 raise
-            except Exception as e:
+            # picasso localize exits on some errors, e.g., when undrifting a
+            # movie with too few frames; the watcher goes on
+            except (Exception, SystemExit) as e:
                 print_to_file(
                     logfile,
                     f"{datetime.now()} Exception {e} occurred.",
@@ -402,9 +416,12 @@ def watcher():  # noqa: C901
 
         logfile = st.selectbox("Select logfile", df["logfile"].iloc[::-1])
         with st.expander("Log"):
-            with open(logfile, "r") as f:
-                text = f.readlines()
-                st.text("".join(text))
+            if os.path.isfile(logfile):
+                with open(logfile, "r") as f:
+                    text = f.readlines()
+                    st.text("".join(text))
+            else:
+                st.warning(f"Logfile {logfile} not found.")
 
     else:
         st.write("None")
@@ -428,8 +445,8 @@ def watcher():  # noqa: C901
 
             if n_columns > 1:
                 st.text(
-                    "Parameter groups will be indiciated with a `pg` in the "
-                    "filename, e.g. `filename_pg_1_locs.hdf`"
+                    "Parameter groups will be indicated with a `pg` in the "
+                    "filename, e.g. `filename_pg_1_locs.hdf5`"
                 )
 
             columns = st.columns(n_columns)
@@ -466,11 +483,16 @@ def watcher():  # noqa: C901
                 settings[i]["sensitivity"] = col.number_input(
                     label="Sensitivity:", value=1.00, key=f"sensitivity_{i}"
                 )
+                # empty: like picasso localize, the movie's metadata or
+                # else the camera config give the pixel size
                 settings[i]["pixelsize"] = col.number_input(
                     label="Pixelsize (nm):",
-                    value=130,
+                    value=None,
                     min_value=10,
                     max_value=500,
+                    placeholder="From the movie or camera config",
+                    help="Leave empty to take the camera pixel size from "
+                    "the movie's metadata, else from the camera config.",
                     key=f"pixelsize_{i}",
                 )
 
@@ -492,7 +514,9 @@ def watcher():  # noqa: C901
                     settings[i]["methods"] = "lq-3d"
 
                     settings[i]["calib_file"] = col.text_input(
-                        "Enter path to calibration file.", os.getcwd()
+                        "Enter path to calibration file.",
+                        os.getcwd(),
+                        key=f"calib_file_{i}",
                     )
 
                     if not os.path.isfile(settings[i]["calib_file"]):
@@ -548,7 +572,10 @@ def watcher():  # noqa: C901
                     settings_selected["sensitivity"] = settings[i][
                         "sensitivity"
                     ]
-                    settings_selected["pixelsize"] = settings[i]["pixelsize"]
+                    if settings[i]["pixelsize"] is not None:
+                        settings_selected["pixelsize"] = settings[i][
+                            "pixelsize"
+                        ]
                     settings_selected["fit_method"] = settings[i]["methods"]
                     settings_selected["drift"] = settings[i]["undrift"]
                     if settings[i]["calib_file"]:

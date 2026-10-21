@@ -270,13 +270,16 @@ def prepare_locs_for_save(
     Returns
     -------
     locs : pd.DataFrame
-        Localizations shifted to positive coordinates.
+        Copy of the localizations, shifted to positive coordinates.
     new_info : list of dicts
         Updated metadata with new width and height.
     """
     width, height = lib.field_of_view(info)
     cx = width / 2
     cy = height / 2
+    # shift a copy: the caller's localizations (e.g., the average shown
+    # in Picasso: Average) stay centered at (0, 0)
+    locs = locs.copy()
     locs["x"] += cx
     locs["y"] += cy
     avg_info = lib.step_info("Average")

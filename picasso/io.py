@@ -3483,7 +3483,8 @@ class ND2Movie(AbstractPicassoMovie):
             lists.
         """
         parameters = {}
-        info = self.meta
+        # None if the metadata could not be read (entered by hand)
+        info = self.meta or {}
 
         if "Cameras" not in config or "Camera" not in info:
             raise KeyError("'camera' key not found in metadata or config.")
@@ -5124,7 +5125,10 @@ class TiffMultiMap(AbstractPicassoMovie):
             lists.
         """
         parameters = {}
-        info = self.meta
+        # set by ``info``, which may not have been called yet
+        info = getattr(self, "meta", None)
+        if info is None:
+            info = self.info()
         default = {"gain": [1], "wavelength": [0], "cam_index": 0}
 
         if "Cameras" not in config or "Camera" not in info:
@@ -6353,14 +6357,20 @@ def load_identifications(path: str) -> tuple[pd.DataFrame, list[dict]]:
     ------
     KeyError
         If the "identifications" dataset is not found in the HDF5 file.
+    OSError
+        If the file is not an HDF5 file.
     """
     _check_path_length(path)
+    import tables
+
     try:
         identifications = pd.read_hdf(path, key="identifications")
     except KeyError as error:
         raise KeyError(
             f"File: {path} does not contain an 'identifications' dataset."
         ) from error
+    except tables.HDF5ExtError as error:
+        raise OSError(f"File: {path} is not an HDF5 file.") from error
     info = load_info(path)
     return identifications, info
 

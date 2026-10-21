@@ -437,8 +437,8 @@ def two_picks(window):
 
 def _kmeans_replies(monkeypatch, *replies):
     """Answer the k-means dialogs (``ClsDlg2D``): "yes" keeps the pick,
-    "no" removes it, "cancel" stops, an int asks for that many
-    clusters."""
+    "no" removes it, "cancel" stops, "escape" closes it without a
+    button, an int asks for that many clusters."""
     replies = list(replies)
     shown = []
 
@@ -451,6 +451,8 @@ def _kmeans_replies(monkeypatch, *replies):
             dialog.on_reject()
         elif reply == "cancel":
             dialog.on_cancel()
+        elif reply == "escape":
+            dialog.reject()  # what Escape and the close button do
         else:
             dialog.n_clusters_spin.setValue(reply)  # closes the dialog
         return 0
@@ -512,10 +514,13 @@ def test_analyze_cluster_in_3d(qt_offscreen, answers, monkeypatch, tmp_path):
     window.close()
 
 
+@pytest.mark.parametrize("reply", ["cancel", "escape"])
 def test_analyze_cluster_cancel_stops(
-    two_picks, answers, monkeypatch, tmp_path
+    two_picks, answers, monkeypatch, tmp_path, reply
 ):
-    _kmeans_replies(monkeypatch, "cancel")
+    """Closing the dialog without a button is a Cancel, not a reject
+    that removes the pick."""
+    _kmeans_replies(monkeypatch, reply)
     answers.integer(2)
     two_picks.analyze_cluster()
     assert len(two_picks._picks) == 2

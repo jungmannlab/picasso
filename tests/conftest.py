@@ -18,14 +18,27 @@ Provides:
 
 from __future__ import annotations
 
+import atexit
 import os
+import shutil
 import sys
+import tempfile
 
-import numpy as np
-import pandas as pd
-import pytest
+# The suite runs in a home folder of its own, so that nothing reaches the
+# developer's ~/.picasso (settings, camera config, plugins, database): reading
+# a setting saves its default, and the in-process patches of
+# ``isolated_user_settings`` below do not reach subprocesses or the spawned
+# workers of a multiprocessing pool, which inherit the environment instead.
+# Set before Picasso is imported, which reads the camera config.
+_TEST_HOME = tempfile.mkdtemp(prefix="picasso-test-home-")
+atexit.register(shutil.rmtree, _TEST_HOME, ignore_errors=True)
+os.environ["HOME"] = os.environ["USERPROFILE"] = _TEST_HOME
 
-from picasso import io, transforms
+import numpy as np  # noqa: E402
+import pandas as pd  # noqa: E402
+import pytest  # noqa: E402
+
+from picasso import io, transforms  # noqa: E402
 
 # Qt must be told to run without a display before the first QApplication is
 # built, and the environment is read once at that point - hence a module-level
