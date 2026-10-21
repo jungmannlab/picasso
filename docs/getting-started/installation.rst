@@ -181,9 +181,9 @@ you need to do. See :ref:`files-legacy` for details, including how to convert
 files on disk if you want to.
 
 What has changed is how lengths are entered: dialogs, command line options and
-Python functions now take nm. Scripts that pass camera pixels need updating,
-see the `changelog
-<https://github.com/jungmannlab/picasso/blob/master/changelog.md>`__.
+Python functions now take nm. Scripts that pass camera pixels need updating;
+:doc:`/migration` lists what changes and the replacement of each setting,
+command and function.
 
 .. _error-log:
 

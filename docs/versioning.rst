@@ -78,7 +78,8 @@ Not breaking, so possible in any minor release:
 Deprecations
 ------------
 
-Names deprecated before Picasso 1.0 are removed in 1.0. From then on, a public
+Names deprecated before Picasso 1.0 are removed in 1.0 (see :doc:`migration`
+for their replacements). From then on, a public
 name deprecated in version 1.x keeps working until 1.(x+2) at the earliest, i.e.,
 for at least two minor releases: a name deprecated in 1.1
 still works in 1.1 and 1.2 and may be removed in 1.3. Using it shows a

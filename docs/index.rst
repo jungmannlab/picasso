@@ -51,8 +51,8 @@ updates since then.
 .. tip::
 
    **Updating from an earlier version?** Your files keep working: Picasso 1.0
-   reads every file written by earlier versions, see
-   :ref:`updating-to-1-0`.
+   reads every file written by earlier versions. Scripts and command lines
+   may need changes, see :doc:`migration`.
 
 Modules
 -------
